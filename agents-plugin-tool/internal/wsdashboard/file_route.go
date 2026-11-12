@@ -38,8 +38,16 @@ import (
 //     renderer in its escaped mode (raw HTML is text, every destination goes
 //     through its allow-list; mermaid stays a code block); its relative links
 //     resolve against the file's own directory;
+//   - an HTML file (.html, .htm) that is UTF-8 text without NUL bytes
+//     redirects to the page route (fsViewURL, fs_capability.go), which
+//     serves it and the files next to it under a fresh capability, the
+//     document as a page sandboxed into an opaque origin: its script runs,
+//     but reads nothing of the dashboard, fetches nothing, and sends no
+//     cookie, so the board's write routes refuse its requests. A file the
+//     page route would refuse (a dot-named segment in its path) is served
+//     as text instead;
 //   - any other UTF-8 text without NUL bytes is served as text/plain under
-//     the image route's CSP, so an .html file never runs either;
+//     the image route's CSP, so it never runs in the daemon's origin;
 //   - a binary file, or a text file over fileViewMax, gets a "not viewable"
 //     page that offers the path copies only.
 
@@ -159,6 +167,25 @@ func openContained(root, path string) (*os.File, string, os.FileInfo, bool) {
 	return f, rel, info, true
 }
 
+// viewableText reports file contents the file view shows as text: UTF-8
+// without NUL bytes.
+func viewableText(data []byte) bool {
+	return utf8.Valid(data) && bytes.IndexByte(data, 0) < 0
+}
+
+// readViewable reads the opened file f, with info its stat, when the file
+// view would show it as text: at most fileViewMax and viewableText.
+func readViewable(f io.Reader, info os.FileInfo) ([]byte, bool) {
+	if info.Size() > fileViewMax {
+		return nil, false
+	}
+	data, err := io.ReadAll(io.LimitReader(f, fileViewMax+1))
+	if err != nil || len(data) > fileViewMax || !viewableText(data) {
+		return nil, false
+	}
+	return data, true
+}
+
 // fileViewPage is what the file view's page templates render.
 type fileViewPage struct {
 	Rel, Abs string
@@ -217,12 +244,21 @@ func (d *Daemon) handleFile(w http.ResponseWriter, r *http.Request, replyID stri
 		page.Reason = wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 		d.writeFilePage(w, "file-none", page)
 		return
-	case !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0:
+	case !viewableText(data):
 		page.Reason = wsi18n.T(lang, "file.reason.binary")
 		d.writeFilePage(w, "file-none", page)
 		return
 	}
-	switch strings.ToLower(filepath.Ext(rel)) {
+	ext := strings.ToLower(filepath.Ext(rel))
+	if ext == ".html" || ext == ".htm" {
+		if u := d.fsViewURL(replyID, s.Project, rel); u != "" && !dotDenied(s.Project, rel) {
+			h.Set("Cache-Control", "no-store")
+			h.Set("Content-Security-Policy", imageContentSecurityPolicy)
+			http.Redirect(w, r, u, http.StatusFound)
+			return
+		}
+	}
+	switch ext {
 	case ".md", ".markdown":
 		page.HTML = wswhiteboard.RenderText(string(data), fileViewTargets(s.Project, replyID, filepath.Dir(rel)))
 		d.writeFilePage(w, "file-md", page)

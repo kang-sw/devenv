@@ -1,12 +1,14 @@
 package wsdashboard
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -60,11 +62,49 @@ import (
 // Access-Control-Allow-Origin is "*": a module script or a fetch from the
 // frame's opaque origin is a CORS request, and the capability in the path,
 // not the origin, is what admits a read. Every refusal answers 404.
+//
+// The file view's page route:
+//
+//	GET /s/<reply-id>/fs/view/<capability>/<path>
+//
+// is the same route for an HTML file the file view opens as a page in a tab
+// of its own (handleFile redirects to it), with the same containment and a
+// capability of the same shape, which verifies on its own route only (the
+// MAC covers the route), and five differences:
+//
+//   - its policy allows no fetch at all (connect-src 'none'): a page in a
+//     tab can navigate itself anywhere, so a script that could read the
+//     root's files could carry them off in the URL; it still loads its
+//     style sheets, scripts, images, fonts, media, and frames from the
+//     prefix;
+//   - an image is served under the image route's policy, so an SVG runs no
+//     script even opened on its own;
+//   - an HTML file must be UTF-8 text without NUL bytes and at most
+//     fileViewMax, as the file view requires, and any other file at most
+//     fsViewAssetMax;
+//   - it refuses a dot-named path but serves a file git ignores
+//     (dotDenied): with no fetch, nosniff, and the route's own types, a
+//     page reads a file's bytes only as a script, a style sheet, or media
+//     (an image, a font, audio, video), and a paged document's folder is
+//     often ignored whole;
+//   - a document navigation (Sec-Fetch-Dest: document) with a capability
+//     that no longer verifies, a reload after the expiry or a daemon
+//     restart, is redirected to the file view of the same path, which mints
+//     a fresh one behind the access guard.
+//
+// Neither policy carries frame-ancestors: the board never frames the file
+// view (it opens a tab), the sandboxed document's own requests carry an
+// opaque Origin every write route refuses, and Chromium blocks every
+// frame-ancestors source, even *, for a frame whose parent is opaque, so
+// any value would break a document's frames of its own files.
 
 const (
 	// fsCapabilityTTL is how long a minted capability is served.
 	fsCapabilityTTL = 15 * time.Minute
 	fsCapRoutePart  = "/fs/cap/"
+	fsViewRoutePart = "/fs/view/"
+	// fsViewAssetMax bounds a file other than HTML the page route serves.
+	fsViewAssetMax = 64 << 20
 )
 
 // capTypes are the content types the capability route serves by extension;
@@ -124,10 +164,13 @@ func (d *Daemon) fsCapNow() time.Time {
 	return time.Now()
 }
 
-// fsCapMAC is the MAC of a capability for the session replyID with project
-// root root that expires at the Unix time expiry.
-func fsCapMAC(key []byte, replyID, root string, expiry int64) string {
+// fsCapMAC is the MAC of a capability for the route part (fsCapRoutePart
+// or fsViewRoutePart) and the session replyID with project root root that
+// expires at the Unix time expiry.
+func fsCapMAC(key []byte, part, replyID, root string, expiry int64) string {
 	m := hmac.New(sha256.New, key)
+	m.Write([]byte(part))
+	m.Write([]byte{0})
 	m.Write([]byte(replyID))
 	m.Write([]byte{0})
 	m.Write([]byte(filepath.Clean(root)))
@@ -136,20 +179,28 @@ func fsCapMAC(key []byte, replyID, root string, expiry int64) string {
 	return hex.EncodeToString(m.Sum(nil)[:16])
 }
 
-// mintFSCapability mints a capability for the session replyID and its
-// project root root; empty when the daemon has no key.
+// mintFSCapability mints a capability route capability for the session
+// replyID and its project root root; empty when the daemon has no key.
 func (d *Daemon) mintFSCapability(replyID, root string) string {
+	return d.mintCapability(fsCapRoutePart, replyID, root)
+}
+
+// mintCapability mints a capability for the route part, the session
+// replyID, and its project root root; empty when the daemon has no key. A
+// capability verifies on its own route only, so a page cannot carry its
+// capability to the capability route, whose policy allows fetches.
+func (d *Daemon) mintCapability(part, replyID, root string) string {
 	key := d.fsCapKey()
 	if key == nil {
 		return ""
 	}
 	expiry := d.fsCapNow().Add(fsCapabilityTTL).Unix()
-	return strconv.FormatInt(expiry, 36) + "-" + fsCapMAC(key, replyID, root, expiry)
+	return strconv.FormatInt(expiry, 36) + "-" + fsCapMAC(key, part, replyID, root, expiry)
 }
 
-// validFSCapability reports whether capability is one the daemon minted
-// for the session replyID and root and has not expired.
-func (d *Daemon) validFSCapability(capability, replyID, root string) bool {
+// validCapability reports whether capability is one the daemon minted for
+// the route part, the session replyID, and root and has not expired.
+func (d *Daemon) validCapability(part, capability, replyID, root string) bool {
 	key := d.fsCapKey()
 	exp, mac, ok := strings.Cut(capability, "-")
 	if key == nil || !ok || len(exp) > 13 {
@@ -161,23 +212,41 @@ func (d *Daemon) validFSCapability(capability, replyID, root string) bool {
 	if err != nil || strconv.FormatInt(expiry, 36) != exp || expiry <= d.fsCapNow().Unix() {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(mac), []byte(fsCapMAC(key, replyID, root, expiry))) == 1
+	return subtle.ConstantTimeCompare([]byte(mac), []byte(fsCapMAC(key, part, replyID, root, expiry))) == 1
 }
 
 // fsCapabilityURL is the capability route URL of the file rel under the
 // session replyID's root, with a fresh capability.
 func (d *Daemon) fsCapabilityURL(replyID, root, rel string) string {
+	return d.capabilityURL(fsCapRoutePart, d.mintFSCapability(replyID, root), replyID, rel)
+}
+
+// fsViewURL is the page route URL of the file rel under the session
+// replyID's root, with a fresh capability; empty when the daemon has no
+// capability key.
+func (d *Daemon) fsViewURL(replyID, root, rel string) string {
+	capability := d.mintCapability(fsViewRoutePart, replyID, root)
+	if capability == "" {
+		return ""
+	}
+	return d.capabilityURL(fsViewRoutePart, capability, replyID, rel)
+}
+
+// capabilityURL is the URL under the route part (fsCapRoutePart or
+// fsViewRoutePart) of the file rel in the session replyID with capability.
+func (d *Daemon) capabilityURL(part, capability, replyID, rel string) string {
 	segs := strings.Split(filepath.ToSlash(rel), "/")
 	for i, s := range segs {
 		segs[i] = url.PathEscape(s)
 	}
-	return "/s/" + replyID + fsCapRoutePart + d.mintFSCapability(replyID, root) + "/" + strings.Join(segs, "/")
+	return "/s/" + replyID + part + capability + "/" + strings.Join(segs, "/")
 }
 
-// previewCapability reports a read of the capability route by its shape
-// alone: the one session route LAN mode serves without the token, since
-// the sandboxed frame it serves sends no cookie. The route itself checks
-// the capability (handleFSCapability) and answers 404 without a valid one.
+// previewCapability reports a read of the capability route or the page
+// route by its shape alone: the session routes LAN mode serves without the
+// token, since the sandboxed document they serve sends no cookie. The route
+// itself checks the capability (handleFSCapability) and answers 404 without
+// a valid one.
 func previewCapability(r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
@@ -187,7 +256,8 @@ func previewCapability(r *http.Request) bool {
 		return false
 	}
 	replyID, sub, ok := strings.Cut(rest, "/")
-	return ok && ValidReplyID(replyID) && strings.HasPrefix(sub, strings.TrimPrefix(fsCapRoutePart, "/"))
+	return ok && ValidReplyID(replyID) &&
+		(strings.HasPrefix(sub, strings.TrimPrefix(fsCapRoutePart, "/")) || strings.HasPrefix(sub, strings.TrimPrefix(fsViewRoutePart, "/")))
 }
 
 // capHost admits the Host values the capability route writes into its
@@ -208,16 +278,44 @@ func fsCapabilityCSP(prefix string) string {
 		"; object-src 'none'; base-uri 'none'; form-action 'none'"
 }
 
-// handleFSCapability serves the capability route; rest is the path after
-// /fs/cap/, the capability and the file's path.
-func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, replyID, rest string) {
+// fsViewCSP is the page route's policy for the path prefix prefix: the
+// capability route's, with no fetch at all (see the file comment).
+func fsViewCSP(prefix string) string {
+	return "sandbox allow-scripts; default-src " + prefix +
+		"; script-src " + prefix + " 'unsafe-inline'" +
+		"; style-src " + prefix + " 'unsafe-inline'" +
+		"; img-src " + prefix + " data: blob:" +
+		"; media-src " + prefix + " data: blob:" +
+		"; font-src " + prefix + " data:" +
+		"; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+}
+
+// handleFSCapability serves the capability route, or with view the page
+// route; rest is the path after /fs/cap/ or /fs/view/, the capability and
+// the file's path.
+func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, replyID, rest string, view bool) {
 	capability, path, ok := strings.Cut(rest, "/")
 	if !ok || path == "" || d.index == nil || !ValidReplyID(replyID) || !capHost.MatchString(r.Host) {
 		fsNotFound(w)
 		return
 	}
 	s, found := d.index.Session(replyID)
-	if !found || s.Project == "" || !d.validFSCapability(capability, replyID, s.Project) {
+	if !found || s.Project == "" {
+		fsNotFound(w)
+		return
+	}
+	part := fsCapRoutePart
+	if view {
+		part = fsViewRoutePart
+	}
+	if !d.validCapability(part, capability, replyID, s.Project) {
+		if view && r.Header.Get("Sec-Fetch-Dest") == "document" {
+			// A reload of the page after its capability expired: the file
+			// view, behind the access guard, checks the path and mints anew.
+			w.Header().Set("Cache-Control", "no-store")
+			http.Redirect(w, r, FileSrc(replyID, path), http.StatusFound)
+			return
+		}
 		fsNotFound(w)
 		return
 	}
@@ -234,33 +332,74 @@ func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, repl
 		return
 	}
 	defer f.Close()
-	if capDenied(s.Project, rel) {
+	if (view && dotDenied(s.Project, rel)) || (!view && capDenied(s.Project, rel)) {
 		fsNotFound(w)
 		return
 	}
-	ctype, ok := capTypes[strings.ToLower(filepath.Ext(rel))]
+	ext := strings.ToLower(filepath.Ext(rel))
+	ctype, ok := capTypes[ext]
 	if !ok {
 		ctype = "application/octet-stream"
+	}
+	prefix := "http://" + r.Host + "/s/" + replyID + part + capability + "/"
+	csp := fsCapabilityCSP(prefix)
+	var content io.ReadSeeker = f
+	if view {
+		csp = fsViewCSP(prefix)
+		if _, image := imageType(rel); image {
+			csp = imageContentSecurityPolicy
+		}
+		switch {
+		case ext == ".html" || ext == ".htm":
+			data, ok := readViewable(f, info)
+			if !ok {
+				fsNotFound(w)
+				return
+			}
+			content = bytes.NewReader(data)
+		case info.Size() > fsViewAssetMax:
+			fsNotFound(w)
+			return
+		}
 	}
 	h := w.Header()
 	h.Set("Content-Type", ctype)
 	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Content-Security-Policy", fsCapabilityCSP("http://"+r.Host+"/s/"+replyID+fsCapRoutePart+capability+"/"))
+	h.Set("Content-Security-Policy", csp)
 	h.Set("Access-Control-Allow-Origin", "*")
 	h.Set("Cache-Control", "no-store")
 	h.Set("Referrer-Policy", "no-referrer")
-	http.ServeContent(w, r, "", info.ModTime(), f)
+	http.ServeContent(w, r, "", info.ModTime(), content)
 }
 
 // capDenied reports a file inside root, at rel, that the capability route
-// still refuses: one with a dot-named segment in its path from the root,
-// as written or once resolved through its symlinks, or one git reports
-// ignored. The whole root stays the read scope, so a document's assets in
-// a parent folder load, but a framed document's script cannot fetch a
-// secret from where secrets usually live. It fails closed: when the ignore
-// check fails inside a repository the file is refused; only a root in no
-// repository has no ignored set.
+// still refuses: one dotDenied refuses, or one git reports ignored. The
+// whole root stays the read scope, so a document's assets in a parent
+// folder load, but a framed document's script cannot fetch a secret from
+// where secrets usually live. It fails closed: when the ignore check fails
+// inside a repository the file is refused; only a root in no repository
+// has no ignored set.
 func capDenied(root, rel string) bool {
+	if dotDenied(root, rel) {
+		return true
+	}
+	full := filepath.Join(filepath.Clean(root), rel)
+	dir, name := filepath.Dir(full), filepath.Base(full)
+	if ignored, repo := gitIgnored(dir, []string{name}); repo {
+		return ignored[name]
+	}
+	return !outsideRepo(dir)
+}
+
+// dotDenied reports a file inside root, at rel, with a dot-named segment
+// in its path from the root, as written or once resolved through its
+// symlinks (.env, .git/, .ssh/), or one it cannot resolve: the page
+// route's refusal (see the file comment). It does not refuse a file git
+// ignores, as capDenied does: a page cannot fetch, and with nosniff and
+// the route's own types it can read a file's bytes only as a script, a
+// style sheet, or media, while a paged document's folder is often ignored
+// as a whole.
+func dotDenied(root, rel string) bool {
 	full := filepath.Join(filepath.Clean(root), rel)
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -281,11 +420,7 @@ func capDenied(root, rel string) bool {
 			}
 		}
 	}
-	dir, name := filepath.Dir(full), filepath.Base(full)
-	if ignored, repo := gitIgnored(dir, []string{name}); repo {
-		return ignored[name]
-	}
-	return !outsideRepo(dir)
+	return false
 }
 
 // outsideRepo reports that git places dir in no repository. gitIgnored

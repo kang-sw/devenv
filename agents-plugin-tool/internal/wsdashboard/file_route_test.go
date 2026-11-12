@@ -3,12 +3,16 @@ package wsdashboard
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
@@ -102,8 +106,8 @@ func TestFileViewServesOnlyInsideTheProjectRoot(t *testing.T) {
 
 // TestFileViewKinds pins what the file view shows per kind: an image is
 // served inline under the image route's sandboxing CSP (an SVG included); an
-// .html file is plain text under that CSP, so it never runs in the daemon's
-// origin; a markdown file renders in the escaped mode under a CSP that runs
+// .html file redirects to the page route (TestFileViewRendersHTMLPage), so
+// it never runs in the daemon's origin; a markdown file renders in the escaped mode under a CSP that runs
 // no script, its relative links and images resolved against its own
 // directory and a target outside the root left as path text; a binary file
 // and an oversized one get the "not viewable" page with the path copies and
@@ -127,9 +131,10 @@ func TestFileViewKinds(t *testing.T) {
 	if code != http.StatusOK || h.Get("Content-Type") != "image/svg+xml" || h.Get("Content-Security-Policy") != imageContentSecurityPolicy || h.Get("X-Content-Type-Options") != "nosniff" {
 		t.Errorf("svg = %d %v", code, h)
 	}
-	code, h, body = fileView(t, f, "page.html")
-	if code != http.StatusOK || body != "<script>alert(1)</script><b>x</b>" || h.Get("Content-Type") != "text/plain; charset=utf-8" || h.Get("Content-Security-Policy") != imageContentSecurityPolicy {
-		t.Errorf("html = %d %q %v", code, body, h)
+	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)}
+	if rec := serve(f.d, local, http.MethodGet, "/s/livesession/file?path=page.html", ""); rec.Code != http.StatusFound ||
+		!strings.HasPrefix(rec.Header().Get("Location"), "/s/livesession/fs/view/") || strings.Contains(rec.Body.String(), "<script>") {
+		t.Errorf("html = %d %v %q", rec.Code, rec.Header(), rec.Body.String())
 	}
 
 	code, h, body = fileView(t, f, "docs/guide/a.md")
@@ -223,5 +228,202 @@ func TestFileActionsMapsFileTargets(t *testing.T) {
 	}
 	if got := FileActions("", "rid")("a.md"); got != (wswhiteboard.FileAction{}) {
 		t.Errorf("FileActions without a root = %+v", got)
+	}
+}
+
+// pageRedirect asks the file view for path as v and returns the page route
+// URL it redirects to.
+func pageRedirect(t *testing.T, f *pageFixture, v viewer, path string) string {
+	t.Helper()
+	rec := serve(f.d, v, http.MethodGet, "/s/livesession/file?path="+url.QueryEscape(path), "")
+	loc := rec.Header().Get("Location")
+	if rec.Code != http.StatusFound || !strings.HasPrefix(loc, "/s/livesession/fs/view/") || !strings.HasSuffix(loc, "/"+path) || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("file view of %s as %s = %d %v", path, v.name, rec.Code, rec.Header())
+	}
+	return loc
+}
+
+// TestFileViewRendersHTMLPage pins the file view of an HTML file: it
+// redirects, for a loopback viewer and a LAN token holder alike, to the
+// page route under a fresh capability, which serves the document as a
+// sandboxed page (scripts, an opaque origin, no fetch, no form, no other
+// origin) and its relative assets by their own types to anyone holding the
+// capability, a LAN peer without the token included, since the page's
+// opaque origin sends no cookie. An image keeps the image route's policy;
+// an HTML file over fileViewMax or not text, and any path the file view
+// refuses, answer 404; a file the capability route refuses (a dot-named
+// segment) stays plain text in the file view; a reload after the
+// capability expired goes back through the file view.
+func TestFileViewRendersHTMLPage(t *testing.T) {
+	clock := &capClock{now: time.Unix(1_800_000_000, 0)}
+	f := startPageFixture(t, lanMode)
+	f.d.fsNow = clock.read
+	local, lan := fsViewers(t, f)
+	outside, symlinks := escapeTree(t, f)
+	port := strconv.Itoa(f.d.Endpoint().Port)
+	bare := viewer{name: "LAN peer, no token", peer: "192.168.7.31:50000", host: "192.168.7.20:" + port}
+	const doc = `<link rel="stylesheet" href="style.css"><script src="app.js"></script><img src="img/pic.png"><iframe src="sub.html"></iframe>`
+	writeFile(t, filepath.Join(f.project, "docs", "guide", "page.html"), doc)
+	writeFile(t, filepath.Join(f.project, "docs", "guide", "style.css"), "body{color:red}")
+	writeFile(t, filepath.Join(f.project, "docs", "guide", "app.js"), "document.title='x'")
+	writeFile(t, filepath.Join(f.project, "docs", "guide", "img", "pic.png"), "PNG-PIC")
+	writeFile(t, filepath.Join(f.project, "docs", "guide", "art.svg"), "<svg><script>1</script></svg>")
+	writeFile(t, filepath.Join(f.project, "docs", "guide", "font.woff2"), "WOFF2")
+	writeFile(t, filepath.Join(f.project, "docs", "guide", "sub.htm"), "<p>SUB</p>")
+	writeFile(t, filepath.Join(f.project, "docs", "huge.html"), strings.Repeat("x", fileViewMax+1))
+	writeFile(t, filepath.Join(f.project, "docs", "nul.html"), "<p>\x00</p>")
+	writeFile(t, filepath.Join(f.project, ".site", "page.html"), "<p>DOT-INSIDE</p>")
+
+	page := pageRedirect(t, f, lan, "docs/guide/page.html")
+	if again := pageRedirect(t, f, local, "docs/guide/page.html"); again == "" {
+		t.Fatal("no redirect for a loopback viewer")
+	}
+	prefix := strings.TrimSuffix(page, "docs/guide/page.html")
+	for _, v := range []viewer{bare, local, lan} {
+		rec := serve(f.d, v, http.MethodGet, page, "")
+		h := rec.Header()
+		if rec.Code != http.StatusOK || rec.Body.String() != doc || h.Get("Content-Type") != "text/html; charset=utf-8" {
+			t.Fatalf("%s: page = %d %q %v", v.name, rec.Code, rec.Body.String(), h)
+		}
+		csp := h.Get("Content-Security-Policy")
+		origin := "http://" + v.host + prefix
+		if csp != fsViewCSP(origin) {
+			t.Errorf("%s: page policy = %q", v.name, csp)
+		}
+		for _, want := range []string{
+			"sandbox allow-scripts;", "default-src " + origin + ";", "script-src " + origin + " 'unsafe-inline';",
+			"style-src " + origin + " 'unsafe-inline';", "img-src " + origin + " data: blob:;", "font-src " + origin + " data:;",
+			"connect-src 'none'", "object-src 'none'", "base-uri 'none'", "form-action 'none'",
+		} {
+			if !strings.Contains(csp, want) {
+				t.Errorf("%s: page policy lacks %q: %s", v.name, want, csp)
+			}
+		}
+		for _, bad := range []string{"allow-same-origin", "allow-top-navigation", "allow-forms", "allow-popups", "'self'", "*", "'unsafe-eval'", "frame-ancestors"} {
+			if strings.Contains(csp, bad) {
+				t.Errorf("%s: page policy carries %q: %s", v.name, bad, csp)
+			}
+		}
+		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Cache-Control") != "no-store" || h.Get("Access-Control-Allow-Origin") != "*" || len(rec.Result().Cookies()) != 0 {
+			t.Errorf("%s: page headers = %v", v.name, h)
+		}
+	}
+	// The relative assets resolve under the prefix and load by type.
+	viewPolicy := fsViewCSP("http://" + bare.host + prefix)
+	for path, want := range map[string][3]string{
+		"docs/guide/style.css":   {"text/css; charset=utf-8", "body{color:red}", viewPolicy},
+		"docs/guide/app.js":      {"text/javascript; charset=utf-8", "document.title='x'", viewPolicy},
+		"docs/guide/img/pic.png": {"image/png", "PNG-PIC", imageContentSecurityPolicy},
+		"docs/guide/art.svg":     {"image/svg+xml", "<svg><script>1</script></svg>", imageContentSecurityPolicy},
+		"docs/guide/font.woff2":  {"font/woff2", "WOFF2", viewPolicy},
+		"docs/guide/sub.htm":     {"text/html; charset=utf-8", "<p>SUB</p>", viewPolicy},
+		"notes.txt":              {"text/plain; charset=utf-8", "TEXT-INSIDE", viewPolicy},
+	} {
+		rec := serve(f.d, bare, http.MethodGet, prefix+path, "")
+		h := rec.Header()
+		if rec.Code != http.StatusOK || h.Get("Content-Type") != want[0] || rec.Body.String() != want[1] ||
+			h.Get("Content-Security-Policy") != want[2] || h.Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("asset %s = %d %q %q %q", path, rec.Code, h.Get("Content-Type"), rec.Body.String(), h.Get("Content-Security-Policy"))
+		}
+	}
+	// It reads nothing outside the root, nothing through a symlink, no HTML
+	// the file view would not show as text, and no dot-named path.
+	refused := []string{
+		prefix + "../../../../etc/hosts", prefix + "docs/../../secret.txt", prefix + "docs%2F..%2F..%2Fsecret.txt",
+		prefix + `docs\..\..\secret.txt`, prefix + "notes.txt%00.html", prefix + "docs", prefix + "missing.html", prefix,
+		prefix + "/" + filepath.ToSlash(filepath.Join(outside, "secret.txt")), prefix + "docs/huge.html", prefix + "docs/nul.html",
+		prefix + ".site/page.html",
+	}
+	if symlinks {
+		refused = append(refused, prefix+"escape.txt", prefix+"alias.txt", prefix+"outlink/secret.txt", prefix+"outlink/sub/page.html")
+	}
+	for _, target := range refused {
+		rec := serve(f.d, local, http.MethodGet, target, "")
+		if rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "OUTSIDE") || strings.Contains(rec.Body.String(), "INSIDE") {
+			t.Errorf("page route read of %s = %d %s, want a refusal", target, rec.Code, rec.Body.String())
+		}
+	}
+	if symlinks {
+		if rec := serve(f.d, local, http.MethodGet, "/s/livesession/file?path=outlink/sub/page.html", ""); rec.Code != http.StatusNotFound {
+			t.Errorf("file view of an HTML file through a symlinked folder = %d, want 404", rec.Code)
+		}
+	}
+	if rec := serve(f.d, bare, http.MethodPost, page, ""); !refusedByGuard(rec) {
+		t.Errorf("POST to the page route without the token = %d, want the guard's 401", rec.Code)
+	}
+	// A capability verifies on its own route only: the page cannot carry
+	// its capability to the capability route, whose policy allows fetches,
+	// and a preview's capability opens no page.
+	capability := strings.TrimSuffix(strings.TrimPrefix(prefix, "/s/livesession/fs/view/"), "/")
+	if rec := serve(f.d, bare, http.MethodGet, "/s/livesession/fs/cap/"+capability+"/docs/guide/page.html", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("the page's capability on the capability route = %d, want 404", rec.Code)
+	}
+	if rec := serve(f.d, bare, http.MethodGet, "/s/livesession/fs/view/"+f.d.mintFSCapability("livesession", f.project)+"/docs/guide/page.html", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("a preview capability on the page route = %d, want 404", rec.Code)
+	}
+	// An HTML file the page route refuses stays what the file view showed:
+	// the not-viewable page, or plain text.
+	for path, want := range map[string]string{"docs/huge.html": "text/html; charset=utf-8", "docs/nul.html": "text/html; charset=utf-8", ".site/page.html": "text/plain; charset=utf-8"} {
+		rec := serve(f.d, local, http.MethodGet, "/s/livesession/file?path="+url.QueryEscape(path), "")
+		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != want || rec.Header().Get("Location") != "" {
+			t.Errorf("file view of %s = %d %v", path, rec.Code, rec.Header())
+		}
+	}
+
+	// After the expiry an asset answers 404, and a document navigation goes
+	// back through the file view, which mints a fresh capability.
+	clock.advance(fsCapabilityTTL)
+	nav := func(target, dest string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.RemoteAddr, req.Host = bare.peer, bare.host
+		if dest != "" {
+			req.Header.Set("Sec-Fetch-Dest", dest)
+		}
+		rec := httptest.NewRecorder()
+		f.d.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := nav(prefix+"docs/guide/style.css", "style"); rec.Code != http.StatusNotFound {
+		t.Errorf("an expired asset = %d, want 404", rec.Code)
+	}
+	if rec := nav(page, "iframe"); rec.Code != http.StatusNotFound {
+		t.Errorf("an expired framed document = %d, want 404", rec.Code)
+	}
+	if rec := nav(page, "document"); rec.Code != http.StatusFound || rec.Header().Get("Location") != "/s/livesession/file?path=docs%2Fguide%2Fpage.html" {
+		t.Errorf("an expired document navigation = %d %v", rec.Code, rec.Header())
+	}
+	if fresh := pageRedirect(t, f, lan, "docs/guide/page.html"); fresh == page {
+		t.Error("the file view after the expiry redirects to the expired capability")
+	} else if rec := serve(f.d, bare, http.MethodGet, fresh, ""); rec.Code != http.StatusOK {
+		t.Errorf("a fresh page = %d, want 200", rec.Code)
+	}
+}
+
+// TestFileViewPageServesAnIgnoredFolder pins that the page route serves a
+// document and its assets in a folder git ignores whole, where a paged
+// document's working folder usually lives (its .gitignore holds "*"),
+// while the preview's capability route keeps refusing them: the page
+// cannot fetch, so the ignored set is not the secret store it is for a
+// framed preview. A dot-named path stays refused.
+func TestFileViewPageServesAnIgnoredFolder(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	f := startPageFixture(t)
+	local := viewer{name: "local", peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)}
+	gitRun(t, f.project, "init", "-q")
+	writeFile(t, filepath.Join(f.project, "paged", "doc", ".gitignore"), "*\n")
+	writeFile(t, filepath.Join(f.project, "paged", "doc", "document.html"), `<link rel="stylesheet" href="style.css">IGNORED-DOC`)
+	writeFile(t, filepath.Join(f.project, "paged", "doc", "style.css"), "IGNORED-CSS")
+
+	page := pageRedirect(t, f, local, "paged/doc/document.html")
+	prefix := strings.TrimSuffix(page, "paged/doc/document.html")
+	for path, want := range map[string]int{"paged/doc/document.html": http.StatusOK, "paged/doc/style.css": http.StatusOK, "paged/doc/.gitignore": http.StatusNotFound} {
+		if rec := serve(f.d, local, http.MethodGet, prefix+path, ""); rec.Code != want {
+			t.Errorf("page route read of %s = %d, want %d", path, rec.Code, want)
+		}
+	}
+	if rec := serve(f.d, local, http.MethodGet, f.d.fsCapabilityURL("livesession", f.project, "paged/doc/style.css"), ""); rec.Code != http.StatusNotFound {
+		t.Errorf("capability route read of an ignored file = %d, want 404", rec.Code)
 	}
 }
