@@ -807,3 +807,42 @@ func TestTreeRowsAreDense(t *testing.T) {
 		t.Errorf("thinking agent has a live row: %s", tree)
 	}
 }
+
+// TestPageMarksASessionHandedToATerminal: the page of an ended terminal
+// session carries the handed mark once its directory holds a lead record
+// that was handed off, and not for an agent conversation's record.
+func TestPageMarksASessionHandedToATerminal(t *testing.T) {
+	f := startPageFixture(t)
+	now := time.Now()
+	reg := Registration{ReplyID: "handedsession", Project: f.project, Harness: "claude", RegisteredAt: stampFor(now), HeartbeatAt: stampFor(now), EndedAt: stampFor(now)}
+	if err := WriteRegistration(f.dir, reg); err != nil {
+		t.Fatal(err)
+	}
+	f.src.setPage("handedsession", PageContent{})
+	f.d.Index().Refresh()
+	marked := func() bool {
+		t.Helper()
+		code, page := get(t, f.base+"/s/handedsession")
+		if code != http.StatusOK {
+			t.Fatalf("GET the session page = %d", code)
+		}
+		return strings.Contains(page, ` data-handed="1"`)
+	}
+	record := func(raw string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(SessionDir(f.dir, "handedsession"), AgentRecordFileName), []byte(raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if marked() {
+		t.Error("a session with no agent record carries the handed mark")
+	}
+	record(`{"handed_off_at":"2026-11-01T00:00:00Z"}`)
+	if marked() {
+		t.Error("an agent conversation's record marks the page")
+	}
+	record(`{"lead":true,"handed_off_at":"2026-11-01T00:00:00Z"}`)
+	if !marked() {
+		t.Error("a handed-off lead session's page lacks the handed mark")
+	}
+}

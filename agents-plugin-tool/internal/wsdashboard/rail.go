@@ -38,10 +38,7 @@ func (d *Daemon) railView(r pageReader) RailView {
 			continue
 		}
 		reg := s.Registration
-		if !reg.Live(now) && now.Sub(reg.LastSeen()) > endedSessionWindow {
-			continue
-		}
-		in := railInput{Session: s, Snapshot: r.readSnapshot(reg.ReplyID), Repo: railRepoRoot(reg)}
+		in := railInput{Session: s, Snapshot: r.readSnapshot(reg.ReplyID), Repo: railRepoRoot(reg), CanRevive: d.agents != nil}
 		if in.Repo != "" {
 			in.Linked = worktreeMain(reg.Project) != ""
 		}

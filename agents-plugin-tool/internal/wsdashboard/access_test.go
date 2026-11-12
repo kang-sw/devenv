@@ -153,6 +153,15 @@ func guardedRoutes() []struct{ method, path, body string } {
 		{http.MethodGet, "/tracker/stores/team/wiki/notes/pages", ""},
 		{http.MethodGet, "/tracker/stores/team/wiki/notes/page?path=home", ""},
 		{http.MethodPost, "/tracker/stores/team/wiki/notes/save", `{"newWiki":true,"op":"write","path":"home","content":"x"}`},
+		// The agent runner's routes, served when the fixture has an agent
+		// host; the fixture's host knows no route, so a passing request
+		// moves no session. Which viewer the runner then answers is its
+		// own gate's (internal/wsagent).
+		{http.MethodGet, AgentRoutePrefix, ""},
+		{http.MethodPost, AgentRoutePrefix + "/leads", `{}`},
+		{http.MethodPost, AgentRoutePrefix + "/guardtest/handoff", `{}`},
+		{http.MethodPost, AgentRoutePrefix + "/guardtest/takeover", `{}`},
+		{http.MethodPost, AgentRoutePrefix + "/guardtest/reopen", `{}`},
 		// The holder routes, served when the fixture has a holder host; the
 		// fixture knows no holder, so a passing stop ends nothing.
 		{http.MethodGet, "/holders", ""},
@@ -216,6 +225,7 @@ func TestLANModeGuardsEveryRoute(t *testing.T) {
 		// A real manager over an empty directory: it starts no holder, and
 		// with it the daemon serves the terminal routes.
 		o.Holders = wsholder.New(wsholder.Options{Dir: filepath.Join(t.TempDir(), wsholder.DirName)})
+		o.Agents = &startOrderAgents{}
 	})
 	if err := os.WriteFile(filepath.Join(f.project, "shot.png"), []byte("png"), 0o644); err != nil {
 		t.Fatal(err)

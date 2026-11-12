@@ -27,7 +27,7 @@
 
 import { execFile } from "node:child_process";
 import { readFileSync, unlinkSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { spawnWsMcpClient, type McpStdioClient, type McpContentItem, type McpToolCallResult } from "./mcp-stdio-client.ts";
 import { assertVersionPin, readRuntimeContract } from "./version-check.ts";
@@ -56,6 +56,13 @@ export interface BridgeOptions {
    * recorded or reused.
    */
   sessionId?: string;
+  /**
+   * The Pi session file (`sessionManager.getSessionFile()`): the harness's
+   * own name for the conversation. The lead's own logins report it with
+   * `cwd` as the harness session; absent (an in-memory session), or with a
+   * relative `cwd`, they report neither.
+   */
+  sessionFile?: string;
   forkContext?: ForkContext;
   previousOwnKeys?: readonly string[];
   launcherPath: string;
@@ -816,27 +823,51 @@ export function buildDefaultKeyChangedLine(previous: string | undefined, current
 }
 
 /**
+ * The token ws-mcp's refusal of a re-login carries when the dashboard hosts
+ * that key's session and its process may still run; it must match the token
+ * ws-mcp spells. Such a refusal is no unusable key: the session stays keyless
+ * (no mint over it, or two processes would hold one conversation under two
+ * keys) and its lead key entry stays, so a resume after the session is handed
+ * to the terminal re-logs in with it.
+ */
+export const HOSTED_SESSION_HELD_MARKER = "hosted-session-held";
+
+/**
+ * The hidden `ferrule` arguments a lead login reports its harness session
+ * with: the session file and the harness directory together, or nothing when
+ * there is no session file or the directory is not absolute, since ws-mcp
+ * records the pair only whole.
+ */
+export function harnessSessionArgs(sessionFile: string | undefined, cwd: string): Record<string, string> {
+  return sessionFile && isAbsolute(cwd) ? { harness_session: sessionFile, harness_cwd: cwd } : {};
+}
+
+/**
  * Re-logs in with an existing lead key through ferrule's hidden
  * `relogin_session_key` argument (absent from its advertised schema; ws-mcp
  * accepts only a parent-less lead key bound to `root`, and rebinds the mailbox
  * owner to it without stealing from a live process). Resolves `ok` only when
- * ws-mcp returned that same key; a refusal carries ws-mcp's reason.
+ * ws-mcp returned that same key; a refusal carries ws-mcp's reason, and
+ * `held` when that reason carries HOSTED_SESSION_HELD_MARKER. `report` is
+ * the harness session the login reports (see harnessSessionArgs).
  */
 export async function reloginLeadKey(
   callTool: (name: string, args: Record<string, unknown>) => Promise<McpToolCallResult>,
   root: string,
   key: string,
-): Promise<{ ok: true; result: McpToolCallResult } | { ok: false; reason: string }> {
+  report: Record<string, string> = {},
+): Promise<{ ok: true; result: McpToolCallResult } | { ok: false; reason: string; held: boolean }> {
+  const refused = (reason: string) => ({ ok: false as const, reason, held: reason.includes(HOSTED_SESSION_HELD_MARKER) });
   let result: McpToolCallResult;
   try {
-    result = await callTool("ferrule", { root, format: "json", relogin_session_key: key });
+    result = await callTool("ferrule", { root, format: "json", relogin_session_key: key, ...report });
   } catch (err) {
-    return { ok: false, reason: (err as Error).message };
+    return refused((err as Error).message);
   }
-  if (result.isError) return { ok: false, reason: firstText(result) ?? "ferrule re-login failed with no error text" };
+  if (result.isError) return refused(firstText(result) ?? "ferrule re-login failed with no error text");
   let returned: unknown;
   try { returned = (JSON.parse(firstText(result) ?? "{}") as { session_key?: unknown }).session_key; } catch { returned = undefined; }
-  if (returned !== key) return { ok: false, reason: `ferrule re-login returned ${typeof returned === "string" ? returned : "no key"} instead of ${key}` };
+  if (returned !== key) return { ok: false, reason: `ferrule re-login returned ${typeof returned === "string" ? returned : "no key"} instead of ${key}`, held: false };
   return { ok: true, result };
 }
 
@@ -980,22 +1011,29 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     pi.appendEntry(LEAD_KEY_ENTRY, data);
     recordedLeadKey = key;
   };
+  // The harness session the lead's own logins report; a child reports none.
+  const harnessReport = ownsLeadKey ? harnessSessionArgs(opts.sessionFile, opts.cwd) : {};
   // A hosted session (hosted-session.ts) runs under the daemon-minted key:
   // the owner lead re-logs in with it instead of reusing or minting, and a
   // refusal leaves the session keyless with a warning, never a fresh mint.
   const hostedKey = ownsLeadKey ? await hostedSessionKey() : undefined;
   const reloginHostedKey = async (key: string): Promise<McpToolCallResult> => {
-    const relogin = await reloginLeadKey((name, callArgs) => client.callTool(name, callArgs), opts.cwd, key);
+    const relogin = await reloginLeadKey((name, callArgs) => client.callTool(name, callArgs), opts.cwd, key, harnessReport);
     if (relogin.ok) return relogin.result;
     return { isError: true, content: [{ type: "text", text: `the hosted session key ${key} (${HOSTED_KEY_ENV}) was refused (${relogin.reason}); no key was minted` }] };
   };
   // Re-login with the session's recorded key at bootstrap; a refusal (the
   // key was pruned, or belongs to another root) falls back to a fresh mint
-  // with a UI warning only.
+  // with a UI warning only. A refusal because the dashboard hosts the session
+  // mints nothing: the bootstrap ends keyless with ws-mcp's text as its one
+  // warning, and the entry stays for a resume after the handover.
   const reuseRecordedLeadKey = async (): Promise<McpToolCallResult | undefined> => {
     if (!recordedLeadKey) return undefined;
-    const relogin = await reloginLeadKey((name, callArgs) => client.callTool(name, callArgs), opts.cwd, recordedLeadKey);
+    const relogin = await reloginLeadKey((name, callArgs) => client.callTool(name, callArgs), opts.cwd, recordedLeadKey, harnessReport);
     if (relogin.ok) return relogin.result;
+    if (relogin.held) {
+      return { isError: true, content: [{ type: "text", text: `the session's recorded ws key ${recordedLeadKey} was refused: ${relogin.reason.trim()} No key was minted.` }] };
+    }
     notify(opts.ui, `ws-pi-bridge: the session's recorded ws key ${recordedLeadKey} was refused (${relogin.reason}); minting a fresh key`, "warning");
     return undefined;
   };
@@ -1008,8 +1046,12 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   const adoptRevivedKey = async (rawSessionKey: unknown, content: McpContentItem[]): Promise<McpContentItem[]> => {
     const revived = ownsLeadKey ? revivedKeyToAdopt(rawSessionKey, defaultKeyRef.current, FRESH_BOOTSTRAP_SENTINEL) : undefined;
     if (!revived) return content;
-    const relogin = await reloginLeadKey((name, callArgs) => client.callTool(name, callArgs), opts.cwd, revived);
-    if (!relogin.ok) return content;
+    const relogin = await reloginLeadKey((name, callArgs) => client.callTool(name, callArgs), opts.cwd, revived, harnessReport);
+    if (!relogin.ok) {
+      // A held refusal is the user's to resolve from the dashboard; nothing else says why the revive did not take.
+      if (relogin.held) notify(opts.ui, `ws-pi-bridge: the revived ws key ${revived} was not adopted: ${relogin.reason.trim()}`, "warning");
+      return content;
+    }
     const previous = defaultKeyRef.current;
     defaultKeyRef.current = revived;
     knownKeys.add(revived);
@@ -1193,7 +1235,7 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
         : hostedKey
           ? await reloginHostedKey(hostedKey)
           : (await reuseRecordedLeadKey())
-          ?? await client.callTool("ferrule", { root: opts.cwd, format: "json", ...(policy ? { capability: policy.authority, ...(policy.parentSessionKey ? { parent_session_key: policy.parentSessionKey } : {}) } : {}) });
+          ?? await client.callTool("ferrule", { root: opts.cwd, format: "json", ...(policy ? { capability: policy.authority, ...(policy.parentSessionKey ? { parent_session_key: policy.parentSessionKey } : {}) } : harnessReport) });
       if (ferruleResult.isError) {
         notify(opts.ui, `ws-pi-bridge: ferrule bootstrap failed: ${firstText(ferruleResult)}`, "warning");
       } else {

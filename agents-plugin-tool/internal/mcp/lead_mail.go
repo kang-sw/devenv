@@ -185,6 +185,79 @@ func (m *LeadMailbox) Drain(root, key string) ([]string, error) {
 	return formatMailBatch(leadMailLabel, leadMailRecvTool, key, drained), nil
 }
 
+// Return puts mail a Drain claimed for key, and the session never read,
+// back at the head of the key's own reply-id queue, so the next claim (a
+// terminal session's mailbox wait or mailbox.recv, once the daemon let the
+// session go) delivers it. texts are Drain's texts, in its order. Each
+// goes back as the envelope it was claimed from, as far as its text tells
+// (parseMailText); a text that does not read as one goes back whole, from
+// no sender. The first claim already recorded the mail's history entry and
+// correspondent, so the second claim records each once more.
+func (m *LeadMailbox) Return(root, key string, texts []string) error {
+	if len(texts) == 0 {
+		return nil
+	}
+	if _, found := m.server.sessions.lookup(key); !found {
+		return fmt.Errorf("mailbox: unknown session key")
+	}
+	path, err := m.server.mailboxPaths().ReplyRegistry()
+	if err != nil {
+		return err
+	}
+	returned := make([]wsmailbox.Envelope, 0, len(texts))
+	for _, text := range texts {
+		returned = append(returned, parseMailText(text))
+	}
+	replyID := m.server.mailboxReplyID(key)
+	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+		if store.Queues == nil {
+			store.Queues = map[string][]wsmailbox.Envelope{}
+		}
+		store.Queues[replyID] = append(returned, store.Queues[replyID]...)
+		return nil
+	}); err != nil {
+		return err
+	}
+	m.wake.Wake()
+	return nil
+}
+
+// parseMailText reads one of formatMailBatch's texts back into the envelope
+// it was made from: the batch head, when the text opens with it, is
+// dropped, and the "mail from <handle> (<sent_at>):" line gives the sender
+// and the time. The handle goes back as From: every reader of an envelope
+// takes its From, else its ReplyTo, as the one handle it shows and replies
+// to. A text of another shape (a record written by other code) goes back
+// whole with no sender and the current time.
+func parseMailText(text string) wsmailbox.Envelope {
+	body := text
+	if strings.HasPrefix(body, "["+leadMailLabel+"] ") {
+		if _, rest, ok := strings.Cut(body, "\n\n"); ok {
+			body = rest
+		}
+	}
+	whole := wsmailbox.Envelope{Content: text, SentAt: mailboxNowString()}
+	head, content, ok := strings.Cut(body, ":\n")
+	if !ok || !strings.HasPrefix(head, "mail from ") {
+		return whole
+	}
+	handle := strings.TrimPrefix(head, "mail from ")
+	stamp := ""
+	if open := strings.LastIndex(handle, " ("); open >= 0 && strings.HasSuffix(handle, ")") {
+		handle, stamp = handle[:open], handle[open+2:len(handle)-1]
+	}
+	if handle == "" || strings.ContainsAny(handle, "\n") {
+		return whole
+	}
+	if handle == "unknown" {
+		handle = ""
+	}
+	if stamp == "" {
+		stamp = whole.SentAt
+	}
+	return wsmailbox.Envelope{From: handle, Content: content, SentAt: stamp}
+}
+
 // formatMailEnvelope is one message as a session reads it: a "mail from
 // <handle> (<sent_at>):" line, the handle being the sender's address or
 // else its reply handle, then the body.

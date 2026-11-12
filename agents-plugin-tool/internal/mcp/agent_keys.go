@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
 // AgentKeyStore mints and keeps the ws session keys of the dashboard
@@ -59,6 +61,32 @@ func (a *AgentKeyStore) LeadRoot(root string) (string, error) {
 // root MintLead recorded (LeadRoot).
 func (a *AgentKeyStore) EnsureLead(canonical, key string) error {
 	return a.ensure(canonical, key, roleLead)
+}
+
+// LeadSession finds the parent-less lead key rooted at root whose reply-id
+// is replyID, with the harness conversation its last login recorded
+// (recordHarnessSession). It scans the key store's names, as the
+// dashboard's session source does: no file maps a reply-id to its key.
+func (a *AgentKeyStore) LeadSession(root, replyID string) (wsagent.LeadSession, bool) {
+	d, err := a.store.dirs()
+	if err != nil {
+		return wsagent.LeadSession{}, false
+	}
+	keys, err := a.store.listKeys(d)
+	if err != nil {
+		return wsagent.LeadSession{}, false
+	}
+	for _, key := range keys {
+		if wsmailbox.ReplyID(key) != replyID {
+			continue
+		}
+		record, ok := a.store.readRecord(d, key, partKey)
+		if !ok || record.Root != root || record.Scope != string(roleLead) || record.Parent != "" {
+			continue
+		}
+		return wsagent.LeadSession{Key: key, Root: record.Root, Harness: record.Harness, Session: record.HarnessSession, Cwd: record.HarnessCwd}, true
+	}
+	return wsagent.LeadSession{}, false
 }
 
 func (a *AgentKeyStore) ensure(root, key string, scope toolRole) error {

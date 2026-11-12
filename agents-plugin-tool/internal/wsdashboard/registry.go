@@ -2,13 +2,17 @@ package wsdashboard
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 // The machine session registry: one directory per registered session under
@@ -26,6 +30,11 @@ import (
 const (
 	sessionsDirName      = "sessions"
 	registrationFileName = "registration.json"
+	// registrationLockName is the row lock's file in the session directory
+	// (LockRegistration).
+	registrationLockName = "registration.json.lock"
+	// registrationLockTimeout bounds one wait for the row lock.
+	registrationLockTimeout = 2 * time.Second
 
 	registrationSchemaVersion = 1
 
@@ -57,8 +66,10 @@ func ValidReplyID(id string) bool { return replyIDPattern.MatchString(id) }
 // and treat absent ones as empty, so a newer daemon reads what an older
 // ws-mcp still writes and the reverse.
 //
-// Liveness rests on the heartbeat alone: no process id is recorded, so a
-// reused pid can never make an ended session look live.
+// Liveness rests on the heartbeat alone: a reused pid can never make an
+// ended session look live. The two process ids a row may carry (HostPID,
+// HarnessPID) only ever refuse a change of the session's holder
+// (HostMayRun, HarnessMayRun), so a reused pid can at worst refuse one.
 type Registration struct {
 	SchemaVersion int `json:"schema_version"`
 	// ReplyID is the session's reply-id, never its session key.
@@ -98,6 +109,73 @@ type Registration struct {
 	// and the child's PID right after it, so a harness reading 0 waits
 	// briefly and one reading another PID runs as a plain session.
 	HostPID int `json:"host_pid,omitempty"`
+	// HostStopped is set by the runner on a hosted row written while the
+	// session has no harness process and none is starting. It tells a
+	// stopped session (HostPID 0, HostStopped set) from a spawn under way
+	// (HostPID 0 alone), which HostMayRun reads.
+	HostStopped bool `json:"host_stopped,omitempty"`
+	// HarnessPID is the harness process of the ws-mcp that wrote this row
+	// (a session a terminal harness runs), when its launcher reported one.
+	// It never makes the session live; HarnessMayRun reads it.
+	HarnessPID int `json:"harness_pid,omitempty"`
+}
+
+// HostMayRun reports whether a hosted row's harness process may still run,
+// or be starting: what refuses a terminal harness logging in with the
+// session's key. A recorded process is asked of alive; a row that names
+// none says it is stopped (HostStopped) or ended (EndedAt), and otherwise
+// (a spawn under way, or a row from a runner that wrote no HostStopped)
+// reads as running.
+func (r Registration) HostMayRun(alive func(pid int) bool) bool {
+	if r.HostPID > 0 {
+		return alive(r.HostPID)
+	}
+	return !r.HostStopped && r.EndedAt == ""
+}
+
+// HarnessMayRun reports whether the terminal harness behind a row that is
+// not hosted may still run: what refuses the daemon taking the session
+// over. A recorded process is asked of alive; a row that names none (from
+// a ws-mcp that recorded no harness process) reads as running unless the
+// session ended cleanly (EndedAt), since a heartbeat also stops for a
+// session that only went idle.
+func (r Registration) HarnessMayRun(alive func(pid int) bool) bool {
+	if r.HarnessPID > 0 {
+		return alive(r.HarnessPID)
+	}
+	return r.EndedAt == ""
+}
+
+// LockRegistration takes the row lock of session replyID under dir,
+// creating its directory, and returns its release. The daemon's runner and
+// a ws-mcp both rewrite a hosted session's row when the session changes
+// hands (a terminal login taking a stopped hosted session, the daemon
+// taking a terminal session over), and each decides from the row it reads:
+// the lock makes that read, the decision, and the write one step. A
+// terminal ws-mcp takes it for every row write too, so it never writes
+// back a row the daemon took over meanwhile. A
+// wait past registrationLockTimeout is an error, so a caller never acts on
+// a row it could not lock.
+func LockRegistration(dir, replyID string) (unlock func(), err error) {
+	if !ValidReplyID(replyID) {
+		return nil, fmt.Errorf("invalid reply-id %q", replyID)
+	}
+	sessionDir := SessionDir(dir, replyID)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		return nil, err
+	}
+	lockPath := filepath.Join(sessionDir, registrationLockName)
+	fl := flock.New(lockPath)
+	ctx, cancel := context.WithTimeout(context.Background(), registrationLockTimeout)
+	defer cancel()
+	locked, err := fl.TryLockContext(ctx, 20*time.Millisecond)
+	if errors.Is(err, context.DeadlineExceeded) || (err == nil && !locked) {
+		return nil, fmt.Errorf("timed out after %s waiting for the registration lock %s", registrationLockTimeout, lockPath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("acquire the registration lock: %w", err)
+	}
+	return func() { _ = fl.Unlock() }, nil
 }
 
 // RegistrationPath is the registration file of session replyID under dir:
@@ -233,11 +311,19 @@ func RemoveRegistration(dir, replyID string) error {
 // PruneRegistrations deletes the directory of every session last seen more
 // than retention before now, and of every directory without a readable
 // registration that has not changed for as long. It returns how many it
-// deleted. An agent conversation (registration Agent, or a directory holding
-// AgentRecordFileName) is never pruned: it heartbeats only while the daemon
-// runs, so a daemon down past retention would otherwise lose its record,
-// held sends, and backend session before the runner re-registers it; its
-// lifetime is the runner's.
+// deleted.
+//
+// A conversation the daemon's agent runner hosts (registration Agent, or a
+// directory holding AgentRecordFileName) is not pruned while the runner may
+// serve it: it heartbeats only while the daemon runs, so a daemon down past
+// retention would otherwise lose its record, held sends, and backend
+// session before the runner re-registers it. The exception is a lead
+// session the runner no longer serves (its record is closed, or handed to
+// a terminal): its row is no longer the runner's to refresh, so it ages
+// as any ended session's, measured from the row. A handed-off session
+// whose harness conversation lives in the directory itself is kept all the
+// same (agentRecordEnd.terminalConversation). Every other agent record
+// (the tracker's support agent among them) keeps the runner's lifetime.
 func PruneRegistrations(dir string, now time.Time, retention time.Duration) int {
 	entries, err := os.ReadDir(filepath.Join(dir, sessionsDirName))
 	if err != nil {
@@ -248,7 +334,9 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 		if !entry.IsDir() || !ValidReplyID(entry.Name()) {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(SessionDir(dir, entry.Name()), AgentRecordFileName)); err == nil {
+		sessionDir := SessionDir(dir, entry.Name())
+		record, hosted := readAgentRecordEnd(sessionDir)
+		if hosted && (!record.retired() || record.terminalConversation(sessionDir)) {
 			continue
 		}
 		last := time.Time{}
@@ -257,6 +345,10 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 				continue
 			}
 			last = reg.LastSeen()
+		} else if hosted {
+			// A retired lead with no readable row to age it by is left to
+			// the runner.
+			continue
 		}
 		if last.IsZero() {
 			info, err := entry.Info()
@@ -273,4 +365,50 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 		}
 	}
 	return pruned
+}
+
+// agentRecordEnd is what the registry reads of the agent runner's record
+// (AgentRecordFileName, written by internal/wsagent): whether it is a lead
+// session's, and whether the runner still serves it.
+type agentRecordEnd struct {
+	Lead        bool   `json:"lead"`
+	ClosedAt    string `json:"closed_at"`
+	HandedOffAt string `json:"handed_off_at"`
+	Backend     string `json:"backend"`
+	SessionFile string `json:"session_file"`
+}
+
+// terminalConversation reports a session handed to a terminal whose
+// harness conversation is a file inside sessionDir, the session's
+// directory: a pi session the daemon started, which names no session_file
+// or, once taken over again, names the one in its directory (a session a
+// terminal started names its own file elsewhere). The terminal resumes on
+// that file, so from the hand-off on the directory holds a conversation
+// the user's terminal harness owns, and deleting it would delete that
+// conversation. A claude conversation lives in the harness's own store.
+func (r agentRecordEnd) terminalConversation(sessionDir string) bool {
+	if !r.Lead || r.HandedOffAt == "" || r.Backend != "pi" {
+		return false
+	}
+	return r.SessionFile == "" || strings.HasPrefix(filepath.Clean(r.SessionFile), filepath.Clean(sessionDir)+string(filepath.Separator))
+}
+
+// retired reports a lead session the runner serves no more: closed, or
+// handed to a terminal.
+func (r agentRecordEnd) retired() bool {
+	return r.Lead && (r.ClosedAt != "" || r.HandedOffAt != "")
+}
+
+// readAgentRecordEnd reads sessionDir's agent record; hosted is false when
+// the directory holds none. An unreadable record is hosted and not
+// retired, so it is never pruned.
+func readAgentRecordEnd(sessionDir string) (record agentRecordEnd, hosted bool) {
+	raw, err := os.ReadFile(filepath.Join(sessionDir, AgentRecordFileName))
+	if errors.Is(err, os.ErrNotExist) {
+		return agentRecordEnd{}, false
+	}
+	if err != nil || json.Unmarshal(raw, &record) != nil {
+		return agentRecordEnd{}, true
+	}
+	return record, true
 }

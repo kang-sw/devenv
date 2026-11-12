@@ -79,6 +79,19 @@ type sessionKeyRecord struct {
 	// as an additive field; older records parse with the zero value
 	// (false), the correct "never opened" default.
 	MailboxReplyOpened bool `json:"mailbox_reply_opened,omitempty"`
+	// HarnessSession and HarnessCwd are what the session's harness adapter
+	// reported at its last top-lead login (the bootstrap tool's
+	// harness_session and harness_cwd, recordHarnessSession): the harness's
+	// own name for the conversation (a Claude session id, a Pi session file
+	// path) and the working directory the harness runs in, which need not
+	// be Root (Root is the canonical git root; the harness may run in a
+	// folder below it, and resolves its sessions by that folder). Harness
+	// is the harness that reported them. Together they are what resumes
+	// the conversation in another process. Additive; a record from a login
+	// that reported none has them empty.
+	Harness        string `json:"harness,omitempty"`
+	HarnessSession string `json:"harness_session,omitempty"`
+	HarnessCwd     string `json:"harness_cwd,omitempty"`
 }
 
 // sessionRecord is a session's whole record in memory: key.json plus its

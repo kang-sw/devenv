@@ -1549,5 +1549,17 @@
   "js.lead.restart.confirm.one": "Restart this session? Its {0} running background task ends with the process.",
   "js.lead.restart.confirm.other": "Restart this session? Its {0} running background tasks end with the process.",
   "js.lead.close.confirm.bg.one": "Close this session? Its process and its {0} running background task end, and the conversation cannot be continued.",
-  "js.lead.close.confirm.bg.other": "Close this session? Its process and its {0} running background tasks end, and the conversation cannot be continued."
+  "js.lead.close.confirm.bg.other": "Close this session? Its process and its {0} running background tasks end, and the conversation cannot be continued.",
+  "rail.takeover": "Take over",
+  "rail.takeover.title": "Continue this session in the dashboard",
+  "rail.reopen": "Reopen",
+  "rail.reopen.title": "Open this closed session again in the dashboard",
+  "rail.revive.nosession": "This session's harness reported no conversation to resume (it last ran with an older ws plugin)",
+  "js.lead.handoff": "Hand to terminal",
+  "js.lead.handoff.note": "Ends the process here. The page then gives the command that resumes the conversation in a terminal.",
+  "js.lead.handoff.confirm.one": "Hand this session to a terminal? Its {0} running background task ends with the process.",
+  "js.lead.handoff.confirm.other": "Hand this session to a terminal? Its {0} running background tasks end with the process.",
+  "js.lead.handed": "This session was handed to a terminal.",
+  "js.lead.handed.resume": "Resume it there with",
+  "js.lead.handed.copy": "Copy the command"
 }

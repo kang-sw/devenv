@@ -1549,5 +1549,17 @@
   "js.lead.restart.confirm.one": "重新啟動此工作階段？正在執行的 {0} 個背景工作將隨處理程序一同結束。",
   "js.lead.restart.confirm.other": "重新啟動此工作階段？正在執行的 {0} 個背景工作將隨處理程序一同結束。",
   "js.lead.close.confirm.bg.one": "關閉此工作階段？其處理程序及正在執行的 {0} 個背景工作將結束，對話無法繼續。",
-  "js.lead.close.confirm.bg.other": "關閉此工作階段？其處理程序及正在執行的 {0} 個背景工作將結束，對話無法繼續。"
+  "js.lead.close.confirm.bg.other": "關閉此工作階段？其處理程序及正在執行的 {0} 個背景工作將結束，對話無法繼續。",
+  "rail.takeover": "接管",
+  "rail.takeover.title": "在儀表板中繼續此工作階段",
+  "rail.reopen": "重新開啟",
+  "rail.reopen.title": "在儀表板中重新開啟這個已關閉的工作階段",
+  "rail.revive.nosession": "此工作階段的 harness 沒有回報可繼續的對話（它上次執行時使用的是較舊的 ws 外掛）",
+  "js.lead.handoff": "交給終端機",
+  "js.lead.handoff.note": "在此結束處理程序。隨後頁面會提供在終端機中繼續對話的指令。",
+  "js.lead.handoff.confirm.one": "將此工作階段交給終端機？正在執行的 {0} 個背景工作會隨處理程序結束。",
+  "js.lead.handoff.confirm.other": "將此工作階段交給終端機？正在執行的 {0} 個背景工作會隨處理程序結束。",
+  "js.lead.handed": "此工作階段已交給終端機。",
+  "js.lead.handed.resume": "在終端機中繼續的指令",
+  "js.lead.handed.copy": "複製指令"
 }

@@ -6,6 +6,8 @@ import {
   epochCopyVisible,
   hashText,
   headings,
+  heldLine,
+  HOSTED_SESSION_HELD_MARKER,
   inlinedPointerText,
   KEY_RETENTION_MS,
   KEY_STORE_PREFIX,
@@ -75,6 +77,12 @@ const NOW = 1_800_000_000_000
 const SERVER = 'plugin:ws:ws'
 const WM_TOOL = 'mcp__plugin_ws_ws__workflow_manual'
 const PR_TOOL = 'mcp__plugin_ws_ws__playbook_read'
+/** The harness directory, apart from the root so the two are told apart. */
+const CWD = '/repo/sub/app'
+/** The harness session every login reports, for the session id `session`. */
+const REPORT = (session = 'sess-1') => ({ harness_session: session, harness_cwd: CWD })
+/** ws-mcp's refusal of a re-login to a key whose session the dashboard hosts. */
+const HELD_REFUSAL = `session bootstrap: relogin_session_key "kept-key" is refused (${HOSTED_SESSION_HELD_MARKER}): the dashboard hosts this session. No session key was issued.`
 
 type Call = { server: string; tool: string; args: Record<string, unknown> }
 
@@ -89,6 +97,11 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
     gateHold: undefined as Promise<void> | undefined,
     sessionId: 'sess-1',
     root: '/repo/sub',
+    /** The harness directory; while `cwdFails` is set the read rejects. */
+    cwd: CWD as string,
+    cwdFails: false,
+    /** Key -> the error text its re-login is refused with, ahead of `known`. */
+    refusals: new Map<string, string>(),
     now: NOW,
     minted: 0,
     /** Keys a re-login accepts. */
@@ -138,6 +151,8 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
         const held = h.ferruleHold?.(args)
         if (held) await held
         if (typeof args.relogin_session_key === 'string') {
+          const refusal = h.refusals.get(args.relogin_session_key)
+          if (refusal !== undefined) throw new Error(refusal)
           if (!h.known.has(args.relogin_session_key)) throw new Error('not a known session key')
           return JSON.stringify({ session_key: args.relogin_session_key, root: '/repo' })
         }
@@ -159,6 +174,10 @@ function harness(opts: { store?: Record<string, unknown>; wsProject?: boolean | 
     keyChanged: (current, previous) => void h.keys.push([current, previous]),
     root: async () => h.root,
     sessionId: async () => h.sessionId,
+    cwd: async () => {
+      if (h.cwdFails) throw new Error('no directory')
+      return h.cwd
+    },
     store: {
       get: async (k) => h.store.get(k),
       set: async (k, v) => {
@@ -404,7 +423,7 @@ describe('setup', () => {
   test('a new session mints a key at start and stores it, reading no manual', async () => {
     const { h, m, tools } = await ready()
     expect(tools()).toEqual(['ferrule'])
-    expect(h.calls[0]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json' } })
+    expect(h.calls[0]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', ...REPORT() } })
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
     expect(m.key()).toBe('minted-1')
     expect(h.appended).toEqual([])
@@ -417,7 +436,7 @@ describe('setup', () => {
     m.start(edges)
     await tick()
     expect(tools()).toEqual(['ferrule'])
-    expect(h.calls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'kept-key' })
+    expect(h.calls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'kept-key', ...REPORT() })
     expect(h.minted).toBe(0)
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'kept-key', at: NOW })
     expect(m.key()).toBe('kept-key')
@@ -426,8 +445,46 @@ describe('setup', () => {
   test('a refused re-login mints a new key', async () => {
     const { h, m, tools } = await ready({ store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'pruned-key', at: NOW } } })
     expect(tools()).toEqual(['ferrule', 'ferrule'])
+    expect(h.calls.map((c) => c.args)).toEqual([
+      { root: '/repo/sub', format: 'json', relogin_session_key: 'pruned-key', ...REPORT() },
+      { root: '/repo/sub', format: 'json', ...REPORT() },
+    ])
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
     expect(m.key()).toBe('minted-1')
+    expect(h.logs.filter((l) => l.to === 'transcript')).toEqual([])
+  })
+
+  for (const variant of ['rejects', 'empty'] as const) {
+    test(`a harness directory read that ${variant === 'rejects' ? 'rejects' : 'is empty'} reports no harness session, and the logins still succeed`, async () => {
+      const { h, m, edges } = harness({ store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'pruned-key', at: NOW } } })
+      if (variant === 'rejects') h.cwdFails = true
+      else h.cwd = ''
+      m.start(edges)
+      await tick()
+      expect(h.calls.map((c) => c.args)).toEqual([
+        { root: '/repo/sub', format: 'json', relogin_session_key: 'pruned-key' },
+        { root: '/repo/sub', format: 'json' },
+      ])
+      expect(m.key()).toBe('minted-1')
+    })
+  }
+
+  test('a re-login refused because a hosted session holds the key stays keyless: no mint, no entry write, no listener call, one visible line', async () => {
+    const entry = { sessionKey: 'kept-key', at: NOW - 1000 }
+    const { h, m, edges, tools } = harness({ store: { [`${KEY_STORE_PREFIX}sess-1`]: entry } })
+    h.refusals.set('kept-key', HELD_REFUSAL)
+    m.start(edges)
+    await tick()
+    expect(tools()).toEqual(['ferrule'])
+    expect(h.calls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'kept-key', ...REPORT() })
+    expect(h.minted).toBe(0)
+    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'kept-key', at: NOW - 1000 })
+    expect(h.keys).toEqual([])
+    expect(m.key()).toBeUndefined()
+    const visible = h.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
+    expect(visible).toEqual([heldLine('ws', HELD_REFUSAL)])
+    expect(visible[0].startsWith(`[ws] ${HELD_REFUSAL}`)).toBe(true)
+    expect(visible[0].endsWith('No key was minted, so the workflow manual is not delivered.')).toBe(true)
   })
 
   test('outside a ws project nothing is minted, appended, or rewritten', async () => {
@@ -882,7 +939,7 @@ describe('key listener', () => {
     m.start(edges)
     await tick()
     expect(h.keys.at(-1)).toEqual(['minted-2', undefined])
-    expect(h.calls.filter((c) => c.tool === 'ferrule').at(-1)?.args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'minted-2' })
+    expect(h.calls.filter((c) => c.tool === 'ferrule').at(-1)?.args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'minted-2', ...REPORT('sess-2') })
   })
 
   test('a setup that ran across session.end writes no key entry and tells the listener nothing', async () => {
@@ -908,7 +965,7 @@ describe('revive key adoption', () => {
     h.known.add('revived')
     const before = tools().length
     expect(await revive(m)).toBe(`${response('revived')}\n\n${adoptionNotice('ws', 'minted-1', 'revived')}`)
-    expect(h.calls[before]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived' } })
+    expect(h.calls[before]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived', ...REPORT() } })
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: NOW })
     expect(h.keys).toEqual([
       ['minted-1', undefined],
@@ -945,7 +1002,7 @@ describe('revive key adoption', () => {
     expect(await m.read('workflow_manual', WM_TOOL, { session_key: 'obsidian-latch', root: '/repo' }, minted)).toBe(
       `${minted}\n\n${adoptionNotice('ws', 'minted-1', 'fresh-1')}`,
     )
-    expect(h.calls[before]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'fresh-1' } })
+    expect(h.calls[before]).toEqual({ server: SERVER, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'fresh-1', ...REPORT() } })
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'fresh-1', at: NOW })
     expect(h.keys).toEqual([
       ['minted-1', undefined],
@@ -1034,6 +1091,17 @@ describe('revive key adoption', () => {
     expect(h.keys).toEqual([['revived', undefined]])
   })
 
+  test('a revive refused because a hosted session holds the key adopts nothing and says so once, visibly', async () => {
+    const { h, m } = await ready()
+    h.refusals.set('revived', HELD_REFUSAL)
+    expect(await revive(m)).toBeUndefined()
+    expect(h.keys).toEqual([['minted-1', undefined]])
+    expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'minted-1', at: NOW })
+    expect(m.key()).toBe('minted-1')
+    expect(h.minted).toBe(1)
+    expect(h.logs.filter((l) => l.to === 'transcript').map((l) => l.text)).toEqual([heldLine('ws', HELD_REFUSAL)])
+  })
+
   test('a session end while the re-login runs adopts nothing', async () => {
     const { h, m } = await ready()
     h.known.add('revived')
@@ -1090,7 +1158,7 @@ describe('late open', () => {
     m.opened('held-1')
     await tick()
     expect(h.minted).toBe(0)
-    expect(h.calls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'held-1' })
+    expect(h.calls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'held-1', ...REPORT() })
     expect(h.keys).toEqual([['held-1', undefined]])
     expect(h.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'held-1', at: NOW })
     expect(m.key()).toBe('held-1')

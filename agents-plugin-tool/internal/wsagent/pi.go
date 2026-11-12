@@ -276,12 +276,15 @@ func piArgs(spec StartSpec, bridge string) []string {
 
 // piLeadArgs is the pi command line of a lead conversation: RPC mode on the
 // conversation's own session file, with the user's extensions, skills, and
-// context files as an ordinary pi session loads them.
+// context files as an ordinary pi session loads them. A session taken over
+// from a terminal runs on that session's file instead (spec.SessionFile),
+// in pi's own session directory for it.
 func piLeadArgs(spec StartSpec) []string {
-	args := []string{
-		"--mode", "rpc",
-		"--session", piSessionFile(spec.Dir),
-		"--session-dir", piDir(spec.Dir),
+	args := []string{"--mode", "rpc"}
+	if own := piSessionFile(spec.Dir); spec.SessionFile != "" && spec.SessionFile != own {
+		args = append(args, "--session", spec.SessionFile)
+	} else {
+		args = append(args, "--session", own, "--session-dir", piDir(spec.Dir))
 	}
 	if spec.Model != "" {
 		args = append(args, "--model", spec.Model)
@@ -376,7 +379,7 @@ func (b PiBackend) startLead(spec StartSpec) (Process, error) {
 		return nil, err
 	}
 	cmd := exec.Command(command, piLeadArgs(spec)...)
-	cmd.Dir = spec.Root
+	cmd.Dir = spec.workDir()
 	cmd.Env = piLeadEnv(spec)
 	m := newPiMapper(spec)
 	p, err := startChild(spec, cmd, m, piProtocol{})

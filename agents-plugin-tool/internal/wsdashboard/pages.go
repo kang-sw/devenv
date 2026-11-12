@@ -720,6 +720,10 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 	}
 	reads := &sessionReads{page: page}
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
+	if !s.Registration.Hosted && !s.Live {
+		record, _ := readAgentRecordEnd(SessionDir(r.dir, replyID))
+		in.HandedOff = record.Lead && record.HandedOffAt != ""
+	}
 	looked := map[string]bool{replyID: true}
 	inputs := refreshInputs{watch: slices.Clone(page.Watch), pids: slices.Clone(page.WatchPIDs)}
 	if adapterPresent(in.Snapshot, in.Now) {

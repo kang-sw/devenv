@@ -67,6 +67,11 @@ func leadControlWrites(root, id string) map[string]struct {
 		"restart":         {"/agents/" + id + "/restart", nil},
 		"close":           {"/agents/" + id + "/close", nil},
 		"approval":        {"/agents/" + id + "/approvals/req-1", map[string]any{"behavior": "allow"}},
+		// The moves between the daemon and a terminal; a takeover names a
+		// session that is no conversation of the runner.
+		"handoff":  {"/agents/" + id + "/handoff", nil},
+		"reopen":   {"/agents/" + id + "/reopen", nil},
+		"takeover": {"/agents/terminalsession/takeover", nil},
 	}
 }
 

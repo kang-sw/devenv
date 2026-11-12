@@ -1,7 +1,7 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import { HARNESS_PID_ARGV, HOSTED_FLAG_ENV, HOSTED_KEY_ENV, HOSTED_ROW_ENV, missingKeyWarning } from './hosted'
-import { adoptionNotice, inlinedPointerText, KEY_STORE_PREFIX, KEY_WAIT_MS, MAILBOX_LINE, pointerText, preloadPointerLine, rowText } from './manual'
+import { adoptionNotice, heldLine, HOSTED_SESSION_HELD_MARKER, inlinedPointerText, KEY_STORE_PREFIX, KEY_WAIT_MS, MAILBOX_LINE, pointerText, preloadPointerLine, rowText } from './manual'
 import { KEY_PLACEHOLDER } from './preload'
 import { KNOB } from './register'
 
@@ -29,6 +29,10 @@ type World = ReturnType<typeof world>
 /** The world's harness process, and the registration file of the session the daemon hosts in it. */
 const HARNESS_PID = 4242
 const HOSTED_ROW = '/state/sessions/hosted/registration.json'
+/** The harness directory, apart from the root so the two are told apart. */
+const CWD = '/repo/sub/app'
+/** The harness session every login reports, for the session id `session`. */
+const REPORT = (session = 'sess-1') => ({ harness_session: session, harness_cwd: CWD })
 
 function world(
   on: On,
@@ -68,6 +72,8 @@ function world(
     store: new Map<string, unknown>(Object.entries(opts.store ?? {})),
     plugin: '',
     sessionId: 'sess-1',
+    /** Key -> the error text its re-login is refused with, ahead of `known`. */
+    refusals: new Map<string, string>(),
     mcpCalls: [] as { server: string; tool: string; args: Record<string, unknown> }[],
     minted: 0,
     known: new Set<string>(),
@@ -114,6 +120,7 @@ function world(
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   on('ui.log', ($, e) => (w.logs.push({ text: e.text, to: e.to }), { value: undefined }))
   on('session.id', () => ({ value: w.sessionId }))
+  on('session.cwd', () => ({ value: CWD }))
   on('session.root', () => ({ value: '/repo/sub' }))
   on('session.repo', () => ({ value: opts.repo === 'none' ? null : { root: '/repo', remote: null, internal: false, name: null } }))
   on('fs.exists', ($, e) => (w.existsChecks.push(e.path), { value: opts.workflowFile !== false && e.path === '/repo/ai-docs/WORKFLOW.md' }))
@@ -172,6 +179,8 @@ function world(
     if (e.tool === 'ferrule') {
       const relogin = e.args.relogin_session_key
       if (typeof relogin === 'string') {
+        const refusal = w.refusals.get(relogin)
+        if (refusal !== undefined) return error(refusal)
         return w.known.has(relogin) ? text(JSON.stringify({ session_key: relogin, root: '/repo' })) : error('not a known session key')
       }
       if (opts.failMint) return error('ws-mcp is unhealthy')
@@ -290,7 +299,7 @@ const ROW = (w: World, key: string, state = '(no todos)', push = false) => rowTe
 test('in a ws project: a key is minted at start, and nothing is read or appended before a lead skill expands', async ($, on) => {
   const w = world(on, { knobs: ON })
   await start($, w)
-  expect(w.mcpCalls).toEqual([{ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json' } }])
+  expect(w.mcpCalls).toEqual([{ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', ...REPORT() } }])
   // The knob is read once, keyless: no key exists yet to read it with.
   expect(manualReads(w)).toEqual([{ key: KNOB.manual, format: 'json' }])
   // The project check reads the repository root, not the launch directory.
@@ -468,7 +477,7 @@ test('a stored key (hot reload, resume) re-logs in instead of minting, and the r
   const w = world(on, { knobs: ON, store: { [`${KEY_STORE_PREFIX}sess-1`]: { sessionKey: 'kept-key', at: 1_800_000_000_000 - 60_000 } } })
   w.known.add('kept-key')
   await start($, w)
-  expect(w.mcpCalls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'kept-key' })
+  expect(w.mcpCalls[0].args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'kept-key', ...REPORT() })
   expect(w.minted).toBe(0)
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'kept-key', at: 1_800_000_000_000 })
   await expand($, w, 'lead-discuss', shim('Discuss', 'lead-discuss'))
@@ -640,7 +649,7 @@ test('a late open keeps the key the model bound through mailbox_watch: re-login 
   await reconnect($, w)
   expect(manualReads(w).length).toBe(2)
   expect(w.minted).toBe(0)
-  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').map((c) => c.args)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'k1' }])
+  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').map((c) => c.args)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'k1', ...REPORT() }])
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'k1', at: 1_800_000_000_000 })
   // The automatic bind of the same key leaves the running wait alone.
   expect(boundKeys(w)).toEqual(['k1'])
@@ -669,7 +678,7 @@ test('a late open after a hot reload whose restore found the server down keeps t
   w.failKnobs.delete(KNOB.manual)
   await reconnect($, w)
   expect(w.minted).toBe(0)
-  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').map((c) => c.args)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'k1' }])
+  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').map((c) => c.args)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'k1', ...REPORT() }])
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'k1', at: 1_800_000_000_000 })
   expect(boundKeys(w)).toEqual(['k1', 'k1'])
   expect(bandKeys(w)).toEqual(['k1'])
@@ -704,7 +713,7 @@ test('a manual knob unread at start (server down) is read at a later start, and 
   // The gate is open for every start after it: no bind tool, and the re-logged-in key is bound by the mod.
   await start($, w)
   expect(watchRegistrations()).toBe(2)
-  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').at(-1)?.args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'minted-1' })
+  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').at(-1)?.args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'minted-1', ...REPORT() })
   expect(boundKeys(w)).toEqual(['minted-1', 'minted-1'])
   expect(manualReads(w).length).toBe(1)
 })
@@ -798,7 +807,7 @@ test('adopts a main-thread revive: re-login, entry rewritten, notice verbatim, p
   expect(seen(res)).toBe(
     `${keyedResponse('revived', '(no todos)')}\n\n[${w.plugin}] Lead session key changed: minted-1 -> revived. Keep passing revived as session_key; this conversation resumes with it, after compaction too. Mailbox push is bound to revived: arriving mail starts your next turn even when you are idle, so launch no mailbox wait.`,
   )
-  expect(w.mcpCalls[calls]).toEqual({ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived' } })
+  expect(w.mcpCalls[calls]).toEqual({ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'revived', ...REPORT() } })
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'revived', at: 1_800_000_000_000 })
   expect(boundKeys(w)).toEqual(['minted-1', 'revived'])
   expect(w.killed).toEqual([0])
@@ -822,7 +831,7 @@ test('adopts the key a main-thread sentinel call minted: the lead reads the resu
   const calls = w.mcpCalls.length
   const res = await read($, w, 'workflow_manual', { session_key: 'obsidian-latch', root: '/repo/sub' })
   expect(seen(res)).toBe(`${keyedResponse('fresh-1', '(no todos)')}\n\n${adoptionNotice(w.plugin, 'minted-1', 'fresh-1', true)}`)
-  expect(w.mcpCalls[calls]).toEqual({ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'fresh-1' } })
+  expect(w.mcpCalls[calls]).toEqual({ server: `plugin:${w.plugin}:${w.plugin}`, tool: 'ferrule', args: { root: '/repo/sub', format: 'json', relogin_session_key: 'fresh-1', ...REPORT() } })
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'fresh-1', at: 1_800_000_000_000 })
   expect(boundKeys(w)).toEqual(['minted-1', 'fresh-1'])
   expect(w.killed).toEqual([0])
@@ -864,7 +873,7 @@ test('binds automatically at a re-login on resume or hot reload, and at the lazy
   expect(boundKeys(w)).toEqual(['kept-key', 'minted-1'])
   // A hot reload runs session.start again: the re-login binds the same key anew.
   await start($, w)
-  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').at(-1)?.args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'minted-1' })
+  expect(w.mcpCalls.filter((c) => c.tool === 'ferrule').at(-1)?.args).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'minted-1', ...REPORT('sess-2') })
   expect(boundKeys(w)).toEqual(['kept-key', 'minted-1', 'minted-1'])
 })
 
@@ -1108,7 +1117,7 @@ test('hosted: the daemon key is re-logged in at start and nothing is minted; no 
   const w = world(on, { knobs: ON, processOk: true, env: HOSTED })
   w.known.add('hosted-key')
   await start($, w)
-  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key' }])
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key', ...REPORT() }])
   expect(w.minted).toBe(0)
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'hosted-key', at: 1_800_000_000_000 })
   expect(watchTool(w)).toBe(false)
@@ -1125,20 +1134,46 @@ test('hosted: a stored key from an earlier run loses to the daemon key', async (
   w.known.add('hosted-key')
   w.known.add('kept-key')
   await start($, w)
-  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key' }])
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key', ...REPORT() }])
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual({ sessionKey: 'hosted-key', at: 1_800_000_000_000 })
 })
 
 test('hosted: a refused re-login with the daemon key mints nothing, says so in the transcript, and expansions pass through', async ($, on) => {
   const w = world(on, { knobs: ON, processOk: true, env: HOSTED })
   await start($, w)
-  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key' }])
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key', ...REPORT() }])
   expect(w.minted).toBe(0)
   expect(w.logs.some((l) => l.to === 'transcript' && l.text.includes('hosted-key') && l.text.includes('WS_HOSTED_SESSION_KEY'))).toBe(true)
   const original = shim('Discuss', 'lead-discuss')
   expect(await expand($, w, 'lead-discuss', original)).toBe(original)
   expect(w.minted).toBe(0)
   expect(w.rows).toEqual([])
+})
+
+test('a resume whose key the dashboard hosts stays keyless: no mint, the entry kept, nothing bound, one visible line with the refusal', async ($, on) => {
+  const entry = { sessionKey: 'kept-key', at: 1_700_000_000_000 }
+  const w = world(on, { knobs: ON, processOk: true, store: { [`${KEY_STORE_PREFIX}sess-1`]: entry } })
+  const refusal = `relogin_session_key "kept-key" is refused (${HOSTED_SESSION_HELD_MARKER}): the dashboard hosts this session.`
+  w.refusals.set('kept-key', refusal)
+  await start($, w)
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'kept-key', ...REPORT() }])
+  expect(w.minted).toBe(0)
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toEqual(entry)
+  expect(boundKeys(w)).toEqual([])
+  expect(w.logs.filter((l) => l.to === 'transcript' && l.text.includes(refusal)).map((l) => l.text)).toEqual([heldLine(w.plugin, refusal)])
+})
+
+test('hosted: a daemon key refused as held gives the held line alone, not the refused-key line, and mints nothing', async ($, on) => {
+  const w = world(on, { knobs: ON, processOk: true, env: HOSTED })
+  const refusal = `relogin_session_key "hosted-key" is refused (${HOSTED_SESSION_HELD_MARKER}): the dashboard hosts this session.`
+  w.refusals.set('hosted-key', refusal)
+  await start($, w)
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key', ...REPORT() }])
+  expect(w.minted).toBe(0)
+  expect(w.store.get(`${KEY_STORE_PREFIX}sess-1`)).toBeUndefined()
+  const visible = w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)
+  expect(visible.filter((t) => t.includes(refusal))).toEqual([heldLine(w.plugin, refusal)])
+  expect(visible.filter((t) => t.includes('WS_HOSTED_SESSION_KEY'))).toEqual([])
 })
 
 test('hosted: a revive the server refuses adopts nothing and arms no wait; after /clear the next turn re-logs in with the daemon key', LIVE_CHILD, async ($, on) => {
@@ -1152,7 +1187,7 @@ test('hosted: a revive the server refuses adopts nothing and arms no wait; after
   await clear($, w)
   w.sessionId = 'sess-2'
   await turnStart($, w)
-  expect(ferruleArgs(w).at(-1)).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key' })
+  expect(ferruleArgs(w).at(-1)).toEqual({ root: '/repo/sub', format: 'json', relogin_session_key: 'hosted-key', ...REPORT('sess-2') })
   expect(w.minted).toBe(0)
   expect(w.store.get(`${KEY_STORE_PREFIX}sess-2`)).toEqual({ sessionKey: 'hosted-key', at: 1_800_000_000_000 })
   expect(w.spawns).toEqual([])
@@ -1181,7 +1216,7 @@ test('hosted variables inherited by another harness process gate nothing, with n
   w.known.add('hosted-key')
   await start($, w)
   expect(w.logs.filter((l) => l.to === 'transcript' && l.text.includes(HOSTED_FLAG_ENV))).toEqual([])
-  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json' }])
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', ...REPORT() }])
   expect(boundKeys(w)).toEqual(['minted-1'])
   await turn($, w)
   expect(intakeCalls(w).length).toBeGreaterThan(0)
@@ -1193,7 +1228,7 @@ test('hosted variables where no host command runs: the process id is unknown, so
   w.known.add('hosted-key')
   await start($, w)
   expect(w.logs.filter((l) => l.to === 'transcript' && l.text.includes(HOSTED_FLAG_ENV)).length).toBe(1)
-  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json' }])
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', ...REPORT() }])
   expect(w.minted).toBe(1)
 })
 
@@ -1201,7 +1236,7 @@ test('the flag without a key gates nothing: a transcript warning, a minted key, 
   const w = world(on, { knobs: { ...ON, [KNOB.dashboard]: true }, processOk: true, env: { [HOSTED_FLAG_ENV]: '1', [HOSTED_KEY_ENV]: '  ' } })
   await start($, w)
   expect(w.logs.filter((l) => l.to === 'transcript').map((l) => l.text)).toContain(missingKeyWarning(w.plugin))
-  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json' }])
+  expect(ferruleArgs(w)).toEqual([{ root: '/repo/sub', format: 'json', ...REPORT() }])
   expect(boundKeys(w)).toEqual(['minted-1'])
   await turn($, w)
   expect(intakeCalls(w).length).toBeGreaterThan(0)

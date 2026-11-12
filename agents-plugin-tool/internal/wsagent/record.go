@@ -41,12 +41,26 @@ type Record struct {
 	CreatedAt string `json:"created_at"`
 	ClosedAt  string `json:"closed_at,omitempty"`
 
+	// HandedOffAt is when a lead session was handed to a terminal harness
+	// (conv.release): the daemon serves it no more, as it serves no closed
+	// one, until a takeover clears it.
+	HandedOffAt string `json:"handed_off_at,omitempty"`
+
 	// Lead marks a hosted lead session (Profile.Lead when it was opened):
 	// WSKey is a lead key, Root its canonical git root, and the fields
 	// below apply.
 	Lead bool `json:"lead,omitempty"`
 	// PermissionMode is the permission mode the next process launches in.
 	PermissionMode string `json:"permission_mode,omitempty"`
+	// Cwd is the directory the session's process runs in when that is not
+	// Root: a session taken over from a terminal harness keeps the
+	// directory that harness ran in, since the harness resolves its
+	// sessions by it. SessionFile is the session file of such a session's
+	// harness when it keeps its conversations in files of its own (pi),
+	// used in place of the conversation's own file. Both are empty for a
+	// session the daemon started.
+	Cwd         string `json:"cwd,omitempty"`
+	SessionFile string `json:"session_file,omitempty"`
 	// HolderID is the session holder the conversation's process runs under,
 	// empty when it has none; HostPID is that process. No new process
 	// starts while this holder's child still runs.
@@ -64,6 +78,14 @@ type Record struct {
 	// Mail holds the mailbox messages claimed for the session and not yet
 	// delivered as a turn, each as the text the model reads.
 	Mail []string `json:"mail,omitempty"`
+}
+
+// workDir is the directory the conversation's process runs in.
+func (rec Record) workDir() string {
+	if rec.Cwd != "" {
+		return rec.Cwd
+	}
+	return rec.Root
 }
 
 func recordPath(sessionDir string) string { return filepath.Join(sessionDir, recordFileName) }

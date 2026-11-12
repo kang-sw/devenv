@@ -116,7 +116,8 @@ under `<cache root>/dashboard/`:
   2 minutes (a session the daemon hosts under `WS_HOSTED_SESSION` is
   registered by the daemon, not by the serving ws-mcp: its row carries
   `hosted: true` and `host_pid`, the session's harness process, 0 until the
-  daemon has started it), and one per agent
+  daemon has started it, with `host_stopped: true` while it has no process
+  and starts none), and one per agent
   runner conversation (below), written by the runner with `agent: true`
   (and `unlisted: true` when its profile keeps it off the index page) while
   the daemon runs. A session counts as live while
@@ -318,6 +319,21 @@ for a newly shown repository alone, and on `POST /rail/refresh` (own Origin;
 409 with no streaming page). Change counts come from the newest session
 snapshot in the worktree; the rail never reads a working tree. Drafts,
 stars, and collapsed workspaces are browser-local (`assets/rail.js`).
+Ended sessions fold apart under each worktree and stay listed as long as
+the index holds them (their registry directory and session record exist),
+past the index page's 24-hour window: on a daemon that hosts lead sessions
+an ended row carries how it comes back (`RailRow.Revive`): `reopen` for a
+closed hosted session, `takeover` for a claude or pi session a terminal ran
+in a repository (shown disabled while its key record names no harness
+conversation), nothing for a plain-folder session. Whether a terminal
+harness has exited is asked when the entry is used (the **Moves** bullet
+of the hosted lead sessions below). `PruneRegistrations` spares an agent runner's directory
+while the runner may serve it; a lead whose record is closed or handed off
+ages by its row like any ended session, and every other agent record (the
+tracker's support agent) keeps the runner's lifetime. One retired lead is
+never pruned: a handed-off pi session whose session file is inside its
+session directory (the daemon started it), since the terminal's pi runs on
+that file from the hand-off on.
 
 On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with
@@ -525,6 +541,68 @@ conversation:
   `WS_HOSTED_*`, and `WS_PI_*` variables are not passed on. A ws-mcp that is
   not the hosted harness's never writes, heartbeats, removes, or end-marks a
   row that carries `hosted: true`, whatever key it is given.
+- **One holder.** A conversation is the daemon's or a terminal harness's,
+  never both, and the registration row says which. The adapters report the
+  harness conversation at login (`ferrule`'s unadvertised `harness_session`
+  and `harness_cwd`, stored on the key record as `harness`,
+  `harness_session`, `harness_cwd`; the directory is the harness's own, not
+  the record's root), and a terminal ws-mcp writes its harness process on
+  its row (`harness_pid`). Neither PID makes a session live; each only
+  refuses a change of holder. A terminal re-login (`relogin_session_key`)
+  to a key whose row is hosted is refused with the marker
+  `hosted-session-held` while the row's process may run: `host_pid` alive,
+  or no `host_pid` on a row that is neither `host_stopped` nor ended (a
+  spawn under way). The adapter then stays keyless and shows the refusal
+  instead of minting. The hosted harness's own login (the hosted flag, or a
+  harness PID equal to `host_pid`) is accepted. Any other re-login to a
+  hosted row takes it: the row becomes the terminal's (`hosted` cleared,
+  `harness_pid` set), and the daemon lets the session go when it next reads
+  the row - its record is marked `handed_off_at`, its mail watch and
+  heartbeat end, mail it had claimed and not delivered goes back to the
+  key's reply queue, and no later daemon start serves it. The daemon reads
+  the row under `registration.json.lock` before every row write, mail
+  claim, and spawn, and the login takes the same lock, so the two cannot
+  both decide they hold the session. An accepted re-login to a row that
+  is not hosted marks it at once as the terminal's (`harness_pid`, no
+  `ended_at`, a fresh heartbeat), whatever the session's dashboard key
+  says, so a row left ended (by an earlier run, or by a hand to the
+  terminal) never reads as free for a takeover while that harness runs. A
+  terminal ws-mcp whose dashboard key
+  turns off leaves such a row in place (its directory holds `agent.json`)
+  rather than removing it.
+- **Moves.** Three control routes move a lead between the daemon and a
+  terminal, each one step under the row lock and each behind the trusted
+  gate for every id (`internal/wsagent/handoff.go`):
+  - `POST /agents/<id>/takeover` makes the terminal session `<id>` a hosted
+    one. The daemon finds its lead key by the row's root and reply-id
+    (`AgentKeyStore.LeadSession`), keeps that key (no mint), and resumes
+    the conversation its key record names on the next input or mail:
+    `--resume <harness_session>` for Claude, `--session <file>` on the
+    session's own file (no `--session-dir`) for Pi, in `harness_cwd`, which
+    the record keeps (`cwd`, `session_file`) for every later start. It is
+    refused (409) while the terminal harness may run: `harness_pid` alive,
+    or no `harness_pid` on a row that is not ended. Also refused: a hosted
+    or agent row, a harness other than claude and pi, a session with no
+    lead key (every plain-folder session), one whose key record names no
+    harness conversation, and a directory or Pi session file that is gone.
+    A ws-mcp that outlived the session's harness re-reads the row under
+    the lock before each of its row writes and stops writing once the row
+    is hosted.
+  - `POST /agents/<id>/handoff` hands a hosted session to the terminal:
+    the process ends, the row becomes an ended terminal row (`hosted`,
+    `host_pid`, `harness_pid` cleared, `ended_at` set), the record is
+    marked `handed_off_at` as in an implicit hand-off, and the state
+    carries `resume_command` (`cd <dir> && claude --resume <id>`, or
+    `cd <dir> && pi --session <file>`), which is answered to a viewer with
+    `can_control` only. It is refused (409) for a session with no harness
+    conversation yet, and fails when the process could not be ended. The
+    session's page carries `data-handed` while the row is an ended
+    terminal row and the record is handed off, and then reads the command
+    from `GET /agents/<id>`.
+  - `POST /agents/<id>/reopen` opens a closed hosted session again under
+    its key, conversation, and settings. It is refused (409) once the
+    session's row is a terminal's, and for a handed-off record; such a
+    session comes back through takeover.
 - **Input.** Every input is the daemon's. A composer message is held in the
   inbox and submitted at the turn's end; a steered one is written to the
   running process at once (Claude: a user message mid-turn, Pi: RPC

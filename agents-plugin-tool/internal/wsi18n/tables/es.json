@@ -1549,5 +1549,17 @@
   "js.lead.restart.confirm.one": "¿Reiniciar esta sesión? Su {0} tarea en segundo plano en curso termina con el proceso.",
   "js.lead.restart.confirm.other": "¿Reiniciar esta sesión? Sus {0} tareas en segundo plano en curso terminan con el proceso.",
   "js.lead.close.confirm.bg.one": "¿Cerrar esta sesión? Su proceso y su {0} tarea en segundo plano en curso terminan, y la conversación no se puede continuar.",
-  "js.lead.close.confirm.bg.other": "¿Cerrar esta sesión? Su proceso y sus {0} tareas en segundo plano en curso terminan, y la conversación no se puede continuar."
+  "js.lead.close.confirm.bg.other": "¿Cerrar esta sesión? Su proceso y sus {0} tareas en segundo plano en curso terminan, y la conversación no se puede continuar.",
+  "rail.takeover": "Retomar",
+  "rail.takeover.title": "Continuar esta sesión en el panel",
+  "rail.reopen": "Reabrir",
+  "rail.reopen.title": "Volver a abrir esta sesión cerrada en el panel",
+  "rail.revive.nosession": "El harness de esta sesión no informó ninguna conversación que reanudar (se ejecutó por última vez con un plugin ws anterior)",
+  "js.lead.handoff": "Pasar a la terminal",
+  "js.lead.handoff.note": "Termina el proceso aquí. Después la página da el comando que reanuda la conversación en una terminal.",
+  "js.lead.handoff.confirm.one": "¿Pasar esta sesión a una terminal? Su {0} tarea en segundo plano en ejecución termina con el proceso.",
+  "js.lead.handoff.confirm.other": "¿Pasar esta sesión a una terminal? Sus {0} tareas en segundo plano en ejecución terminan con el proceso.",
+  "js.lead.handed": "Esta sesión se pasó a una terminal.",
+  "js.lead.handed.resume": "Reanúdala allí con",
+  "js.lead.handed.copy": "Copiar el comando"
 }

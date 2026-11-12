@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // KeyStore mints and keeps the ws session key of each conversation. The
@@ -45,6 +46,23 @@ type LeadKeyStore interface {
 	// EnsureLead keeps the lead key usable for its canonical root, as
 	// KeyStore.Ensure does for a conversation key.
 	EnsureLead(canonical, key string) error
+	// LeadSession finds the lead key behind a registered session (the
+	// parent-less lead key rooted at root whose reply-id is replyID) with
+	// the harness conversation its last login reported, so the daemon can
+	// take the session over under the same key. ok is false when no such
+	// key is left.
+	LeadSession(root, replyID string) (session LeadSession, ok bool)
+}
+
+// LeadSession is a terminal lead session as its ws key record describes it.
+type LeadSession struct {
+	// Key is the session's lead key and Root its canonical git root.
+	Key, Root string
+	// Harness is the harness that last logged in with the key, Session its
+	// own name for the conversation (a claude session id, a pi session
+	// file path), and Cwd the directory it ran in. All three are empty for
+	// a key whose logins reported none.
+	Harness, Session, Cwd string
 }
 
 // LeadMail is a hosted lead session's ws mailbox as the runner uses it: the
@@ -57,6 +75,10 @@ type LeadMail interface {
 	// Drain claims every message waiting for key and returns each as the
 	// text the session's model reads for it.
 	Drain(root, key string) ([]string, error)
+	// Return puts texts, mail a Drain claimed and the session never read,
+	// back in key's mailbox for its next claim: the session moved to a
+	// terminal harness, whose own mailbox wait delivers it.
+	Return(root, key string, texts []string) error
 }
 
 // Env names the runner sets on a hosted lead session's harness. The flag
@@ -106,6 +128,10 @@ type Options struct {
 	Holders  HolderHost
 	LeadKeys LeadKeyStore
 	Mail     LeadMail
+	// Alive reports whether a process of this machine runs: what refuses a
+	// takeover of a session whose terminal harness has not exited. nil is
+	// wsstate.ProcessAlive.
+	Alive func(pid int) bool
 	// Trusted is the gate of a lead conversation's control writes (spawn,
 	// settings, stop, close, approval answers); nil is
 	// wsdashboard.TrustedWrite: a browser on this machine that sends the
@@ -150,6 +176,9 @@ func NewRunner(opts Options) *Runner {
 	if opts.Trusted == nil {
 		opts.Trusted = wsdashboard.TrustedWrite
 	}
+	if opts.Alive == nil {
+		opts.Alive = wsstate.ProcessAlive
+	}
 	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), notify: func(string, string) {}}
 	if opts.Holders != nil {
 		// Before the manager's first scan, so a predecessor's holders are
@@ -180,7 +209,9 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			}
 			continue
 		}
-		if rec.ClosedAt != "" {
+		if rec.ClosedAt != "" || rec.HandedOffAt != "" {
+			// A handed-off session is a terminal harness's: nothing here
+			// writes its row, watches its mail, or starts a process for it.
 			r.mu.Lock()
 			r.closed[rec.ReplyID] = rec
 			r.mu.Unlock()
@@ -280,8 +311,14 @@ func (r *Runner) startConv(rec Record) *conv {
 		done:   make(chan struct{}),
 	}
 	c.writeRegistration()
-	c.live.writeSnapshot()
-	if rec.Lead && rec.HolderID != "" {
+	// A row a terminal login took while no daemon ran: the loop lets the
+	// session go before it takes anything else (settle), and nothing below
+	// starts for it.
+	foreign := c.foreignRow
+	if !foreign {
+		c.live.writeSnapshot()
+	}
+	if rec.Lead && rec.HolderID != "" && !foreign {
 		// Rejoined before the loop runs: what the loop takes first (waiting
 		// mail, a message from the page) would otherwise start a second
 		// process, and end this one to do it.
@@ -292,7 +329,7 @@ func (r *Runner) startConv(rec Record) *conv {
 	r.wg.Add(1)
 	go c.loop()
 	r.mu.Unlock()
-	if rec.Lead && r.opts.Mail != nil {
+	if rec.Lead && r.opts.Mail != nil && !foreign {
 		// Mail that waited while no daemon ran is found by the first check.
 		c.stopMail = r.opts.Mail.Watch(rec.Root, rec.WSKey, c.signalMail)
 		c.signalMail()
@@ -314,6 +351,15 @@ func badRequest(format string, args ...any) error {
 
 var errUnknown = &requestError{status: http.StatusNotFound, msg: "unknown agent conversation"}
 var errClosed = &requestError{status: http.StatusConflict, msg: "the conversation is closed"}
+var errHandedOff = &requestError{status: http.StatusConflict, msg: "the session was handed to a terminal: it runs there, not in the dashboard"}
+
+// endedError is the refusal of a write to a conversation no loop serves.
+func endedError(rec Record) error {
+	if rec.ClosedAt == "" && rec.HandedOffAt != "" {
+		return errHandedOff
+	}
+	return errClosed
+}
 
 // LeadOptions are a lead conversation's spawn choices; an empty one takes
 // the profile's value (the harness default when it has none).
@@ -461,7 +507,7 @@ func (r *Runner) Get(id string) (State, error) {
 	case open:
 		return c.state(), nil
 	case closed:
-		return closedState(rec), nil
+		return r.closedState(rec), nil
 	}
 	return State{}, errUnknown
 }
@@ -475,7 +521,7 @@ func (r *Runner) List() []State {
 		convs = append(convs, c)
 	}
 	for _, rec := range r.closed {
-		out = append(out, closedState(rec))
+		out = append(out, r.closedState(rec))
 	}
 	r.mu.Unlock()
 	for _, c := range convs {
@@ -512,8 +558,9 @@ func (r *Runner) Send(id, text string) (State, error) {
 	}
 	c.mu.Lock()
 	if c.closed {
+		err := endedError(c.rec)
 		c.mu.Unlock()
-		return State{}, errClosed
+		return State{}, err
 	}
 	_, _, err = wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{text}}, r.opts.Now())
 	c.mu.Unlock()
@@ -653,13 +700,13 @@ func (r *Runner) SetSettings(id string, model, effort *string) (State, error) {
 func (r *Runner) open(id string) (*conv, error) {
 	r.mu.Lock()
 	c, open := r.convs[id]
-	_, closed := r.closed[id]
+	rec, closed := r.closed[id]
 	r.mu.Unlock()
 	switch {
 	case open:
 		return c, nil
 	case closed:
-		return nil, errClosed
+		return nil, endedError(rec)
 	}
 	return nil, errUnknown
 }
@@ -672,12 +719,12 @@ func (r *Runner) act(id string, fn func(c *conv) error) (State, error) {
 	}
 	if !c.do(func() {
 		if c.closed {
-			err = errClosed
+			err = endedError(c.rec)
 			return
 		}
 		err = fn(c)
 	}) {
-		return State{}, errClosed
+		return State{}, endedError(c.record())
 	}
 	if err != nil {
 		return State{}, err
@@ -690,6 +737,8 @@ const (
 	StatusIdle    = "idle"
 	StatusRunning = "running"
 	StatusClosed  = "closed"
+	// StatusHandedOff is a lead session handed to a terminal harness.
+	StatusHandedOff = "handed_off"
 )
 
 // State is one conversation as the REST routes report it. It never carries
@@ -701,7 +750,9 @@ type State struct {
 	Profile string `json:"profile"`
 	Backend string `json:"backend"`
 	Root    string `json:"root"`
-	// Status is idle (no turn runs), running (a turn runs), or closed.
+	// Status is idle (no turn runs), running (a turn runs), closed, or
+	// handed_off (a lead session a terminal harness holds: no process runs
+	// here, mail no longer resumes it, and its row is the terminal's).
 	Status string `json:"status"`
 	// Process reports a live backend process.
 	Process bool   `json:"process"`
@@ -715,6 +766,9 @@ type State struct {
 	Error     string `json:"error,omitempty"`
 	CreatedAt string `json:"created_at"`
 	ClosedAt  string `json:"closed_at,omitempty"`
+	// HandedOffAt is when the session was handed to a terminal harness;
+	// set with the handed_off status alone.
+	HandedOffAt string `json:"handed_off_at,omitempty"`
 
 	// Lead marks a hosted lead session; the fields below are its own.
 	Lead bool `json:"lead,omitempty"`
@@ -741,10 +795,28 @@ type State struct {
 	// CanControl reports whether the asking viewer may use the lead control
 	// routes (a browser on this machine); the routes set it per request.
 	CanControl bool `json:"can_control,omitempty"`
+	// ResumeCommand is the shell command that resumes a handed-off lead
+	// session's conversation in a terminal. It names paths of this
+	// machine, so the routes answer it to a viewer with CanControl alone.
+	ResumeCommand string `json:"resume_command,omitempty"`
+}
+
+// closedState is the state of a record no loop serves: closed, or handed
+// to a terminal.
+func (r *Runner) closedState(rec Record) State {
+	st := closedState(rec)
+	if st.Status == StatusHandedOff {
+		st.ResumeCommand = resumeCommand(rec, wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
+	}
+	return st
 }
 
 func closedState(rec Record) State {
-	return State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode}
+	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode}
+	if rec.ClosedAt == "" && rec.HandedOffAt != "" {
+		st.Status, st.HandedOffAt = StatusHandedOff, rec.HandedOffAt
+	}
+	return st
 }
 
 // conv is one open conversation. Its loop goroutine owns the process and
@@ -794,6 +866,14 @@ type conv struct {
 	// mailbox may hold mail (signalMail); stopMail ends the watch.
 	mailC    chan struct{}
 	stopMail func()
+	// spawning is set from the row write that precedes a spawn until the
+	// spawn settled: the row then names no process and is not stopped, so
+	// a terminal login is refused meanwhile (Registration.HostMayRun).
+	// foreignRow is set once the session's row was found to be a terminal
+	// harness's (lockRow, checkRow); the loop then lets the session go
+	// (settle).
+	spawning   bool
+	foreignRow bool
 	// replaying is set from a rejoin of the holder's process (reattach)
 	// until its replay ends: no turn is submitted meanwhile, since the
 	// replay is what tells whether one runs.
@@ -868,7 +948,15 @@ func (c *conv) mailChanged() {
 	if c.closed || c.r.opts.Mail == nil {
 		return
 	}
+	// The claim and the check that the session is still the daemon's are
+	// one step: a terminal login that takes the row waits for the lock,
+	// and what was claimed before it goes back to the mailbox (release).
+	unlock, ok := c.lockRow()
+	if !ok {
+		return
+	}
 	texts, err := c.r.opts.Mail.Drain(c.rec.Root, c.rec.WSKey)
+	unlock()
 	if err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: mailbox: %v\n", c.rec.ReplyID, err)
 	}
@@ -930,6 +1018,9 @@ func (c *conv) loop() {
 	defer close(c.done)
 	beat := time.NewTicker(c.r.opts.heartbeat)
 	defer beat.Stop()
+	if c.settle() {
+		return
+	}
 	for {
 		var idleC, actionC <-chan time.Time
 		if c.idle != nil {
@@ -976,6 +1067,8 @@ func (c *conv) loop() {
 			}
 			if c.r.opts.Now().Sub(c.lastReg) >= wsdashboard.HeartbeatInterval {
 				c.writeRegistration()
+			} else {
+				c.checkRow()
 			}
 		case <-c.r.quit:
 			c.letGo()
@@ -986,13 +1079,26 @@ func (c *conv) loop() {
 			}
 			return
 		}
-		if c.closed {
-			if c.stopMail != nil {
-				c.stopMail()
-			}
+		if c.settle() {
 			return
 		}
 	}
+}
+
+// settle follows each step of the loop: a session whose row a terminal
+// harness took is let go (release), and it reports whether the loop ends
+// (the conversation closed, or was let go), having stopped the mail watch.
+func (c *conv) settle() bool {
+	if c.foreignRow && !c.closed {
+		c.release()
+	}
+	if !c.closed {
+		return false
+	}
+	if c.stopMail != nil {
+		c.stopMail()
+	}
+	return true
 }
 
 func (c *conv) state() State {
@@ -1006,6 +1112,10 @@ func (c *conv) state() State {
 	}
 	if c.closed {
 		st.Status, st.ClosedAt = StatusClosed, c.rec.ClosedAt
+		if c.rec.ClosedAt == "" && c.rec.HandedOffAt != "" {
+			st.Status, st.HandedOffAt = StatusHandedOff, c.rec.HandedOffAt
+			st.ResumeCommand = resumeCommand(c.rec, c.dir)
+		}
 	}
 	st.Process = c.proc != nil
 	st.Held = len(held) + len(c.rec.Mail)
@@ -1045,14 +1155,124 @@ func (c *conv) setStatus(fn func()) {
 	c.mu.Unlock()
 }
 
-func (c *conv) writeRegistration() {
+// writeRegistration writes the conversation's row and reports whether it
+// did. A lead's row may have been taken by a terminal login (the session
+// then is that harness's), so its write is one step with the check that
+// the row is still the daemon's (lockRow): a row found taken is left as it
+// is.
+func (c *conv) writeRegistration() bool {
 	rec := c.record()
 	now := c.r.opts.Now()
-	if err := wsdashboard.WriteRegistration(c.r.opts.Dir, registration(rec, now)); err != nil {
+	reg := registration(rec, now)
+	if rec.Lead {
+		unlock, ok := c.lockRow()
+		if !ok {
+			return false
+		}
+		defer unlock()
+		reg.HostStopped = rec.HostPID == 0 && !c.spawning
+	}
+	err := wsdashboard.WriteRegistration(c.r.opts.Dir, reg)
+	if err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: registration write: %v\n", rec.ReplyID, err)
 	}
 	c.lastReg = now
 	c.r.notify(rec.ReplyID, rec.Root)
+	return err == nil
+}
+
+// rowForeign reports whether a session's row, as read, is no longer the
+// daemon's: it exists and is not a hosted row. A terminal harness that
+// logged in with the session's key while no process of the daemon's ran
+// rewrote it (a hand to the terminal). A missing or unreadable row is the
+// daemon's to write.
+func rowForeign(dir, replyID string) bool {
+	row, err := wsdashboard.ReadRegistration(dir, replyID)
+	return err == nil && !row.Hosted
+}
+
+// lockRow takes a lead session's row lock and checks the row is still the
+// daemon's: the step every row write, mail claim, and spawn is guarded by.
+// It returns the lock's release and true to go on. False means nothing may
+// be done now: the row is a terminal harness's (foreignRow is set, and the
+// loop lets the session go), or the lock could not be taken (logged; the
+// caller's next try asks again).
+func (c *conv) lockRow() (unlock func(), ok bool) {
+	if c.foreignRow {
+		return nil, false
+	}
+	unlock, err := wsdashboard.LockRegistration(c.r.opts.Dir, c.rec.ReplyID)
+	if err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, err)
+		return nil, false
+	}
+	if rowForeign(c.r.opts.Dir, c.rec.ReplyID) {
+		unlock()
+		c.foreignRow = true
+		return nil, false
+	}
+	return unlock, true
+}
+
+// checkRow reads a lead session's row between its own writes, without the
+// lock, so a hand to the terminal shows within a heartbeat. Nothing is
+// decided on this read alone: every guarded step checks again under the
+// lock, and the row leaves the daemon only through a terminal login, which
+// never gives it back.
+func (c *conv) checkRow() {
+	if c.rec.Lead && !c.foreignRow && rowForeign(c.r.opts.Dir, c.rec.ReplyID) {
+		c.foreignRow = true
+	}
+}
+
+// release lets a lead session go to the terminal harness that took its
+// row: the process and its holder end (the login was accepted only with no
+// live process), mail claimed and not delivered goes back to the session's
+// mailbox, held dashboard messages are dropped as a close drops them, and
+// the record becomes a handed-off one, which no daemon start serves again.
+// The row is the terminal's: nothing here writes it. The loop ends after
+// (settle), which stops the mail watch.
+func (c *conv) release() {
+	c.stopProcess("")
+	if err := c.retireHolder(); err != nil {
+		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, err)
+	}
+	mail := c.rec.Mail
+	if len(mail) > 0 && c.r.opts.Mail != nil {
+		if err := c.r.opts.Mail.Return(c.rec.Root, c.rec.WSKey, mail); err != nil {
+			// Kept in the record: a later takeover delivers it.
+			fmt.Fprintf(c.r.opts.Log, "agent %s: return claimed mail: %v\n", c.rec.ReplyID, err)
+		} else {
+			mail = nil
+		}
+	}
+	c.update(func(rec *Record) {
+		rec.HandedOffAt = c.r.opts.Now().UTC().Format(time.RFC3339)
+		rec.Mail = mail
+		c.closed = true
+	})
+	c.dropHeld()
+	c.live.setAdapter("")
+	rec := c.record()
+	c.r.mu.Lock()
+	if c.r.convs[rec.ReplyID] == c {
+		delete(c.r.convs, rec.ReplyID)
+	}
+	c.r.closed[rec.ReplyID] = rec
+	c.r.mu.Unlock()
+	fmt.Fprintf(c.r.opts.Log, "agent %s: handed to a terminal session\n", rec.ReplyID)
+	c.r.notify(rec.ReplyID, rec.Root)
+}
+
+// dropHeld drops the dashboard messages held for a conversation that takes
+// no more turns, and its pending interrupt requests.
+func (c *conv) dropHeld() {
+	if held, err := wsinbox.Held(c.inbox); err == nil {
+		for _, rec := range held {
+			_, _ = wsinbox.Cancel(c.inbox, rec.Name)
+		}
+	}
+	_, _ = wsinbox.DrainInterrupt(c.inbox)
 }
 
 // apply applies a wslive event and tells the daemon when it wrote. quiet
@@ -1198,7 +1418,7 @@ func (c *conv) startProcess() error {
 // reads it early waits rather than misreading an older PID.
 func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	host := c.r.opts.Holders
-	holder := &holderChild{host: host, table: &c.r.holders, session: holderSession{Kind: holderKindLead, ReplyID: rec.ReplyID, Cwd: rec.Root, Label: rec.Profile}}
+	holder := &holderChild{host: host, table: &c.r.holders, session: holderSession{Kind: holderKindLead, ReplyID: rec.ReplyID, Cwd: rec.workDir(), Label: rec.Profile}}
 	if attach {
 		holder.id, holder.skipTo = rec.HolderID, rec.HolderSeq
 	} else {
@@ -1210,16 +1430,29 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		if err := c.r.opts.LeadKeys.EnsureLead(rec.Root, rec.WSKey); err != nil {
 			return fmt.Errorf("ws session key: %w", err)
 		}
-		c.writeRegistration()
+		// One step with the check that the session is still the daemon's:
+		// the row written here names no process and is not stopped, so a
+		// terminal login is refused from now until the process it gets has
+		// ended. No row written, no process.
+		c.spawning = true
+		if !c.writeRegistration() {
+			c.spawning = false
+			if c.foreignRow {
+				return errHandedOff
+			}
+			return errors.New("the session's registration could not be written, so no process was started")
+		}
 	}
 	spec := StartSpec{
-		Root:      rec.Root,
-		Dir:       c.dir,
-		Profile:   def,
-		Model:     rec.Model,
-		Effort:    rec.Effort,
-		SessionID: rec.SessionID,
-		Env:       environ(),
+		Root:        rec.Root,
+		Dir:         c.dir,
+		Profile:     def,
+		Model:       rec.Model,
+		Effort:      rec.Effort,
+		SessionID:   rec.SessionID,
+		Cwd:         rec.Cwd,
+		SessionFile: rec.SessionFile,
+		Env:         environ(),
 		Lead: &LeadSpec{
 			PermissionMode: rec.PermissionMode,
 			Holder:         holder,
@@ -1231,6 +1464,16 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		},
 	}
 	proc, err := c.r.opts.Backends[rec.Backend].Start(context.Background(), spec)
+	if c.spawning {
+		c.spawning = false
+		// The spawn settled: its row, written below with the process on
+		// success, says stopped again when there is none.
+		defer func() {
+			if c.proc == nil {
+				c.writeRegistration()
+			}
+		}()
+	}
 	if err != nil {
 		return err
 	}
@@ -1917,12 +2160,7 @@ func (c *conv) close() {
 	if len(c.rec.Mail) > 0 {
 		c.update(func(rec *Record) { rec.Mail = nil })
 	}
-	if held, err := wsinbox.Held(c.inbox); err == nil {
-		for _, rec := range held {
-			_, _ = wsinbox.Cancel(c.inbox, rec.Name)
-		}
-	}
-	_, _ = wsinbox.DrainInterrupt(c.inbox)
+	c.dropHeld()
 	c.live.setAdapter("")
 	c.writeRegistration()
 }

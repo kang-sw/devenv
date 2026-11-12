@@ -1549,5 +1549,17 @@
   "js.lead.restart.confirm.one": "Diese Sitzung neu starten? Ihre {0} laufende Hintergrundaufgabe endet mit dem Prozess.",
   "js.lead.restart.confirm.other": "Diese Sitzung neu starten? Ihre {0} laufenden Hintergrundaufgaben enden mit dem Prozess.",
   "js.lead.close.confirm.bg.one": "Diese Sitzung schließen? Ihr Prozess und ihre {0} laufende Hintergrundaufgabe enden, und die Unterhaltung kann nicht fortgesetzt werden.",
-  "js.lead.close.confirm.bg.other": "Diese Sitzung schließen? Ihr Prozess und ihre {0} laufenden Hintergrundaufgaben enden, und die Unterhaltung kann nicht fortgesetzt werden."
+  "js.lead.close.confirm.bg.other": "Diese Sitzung schließen? Ihr Prozess und ihre {0} laufenden Hintergrundaufgaben enden, und die Unterhaltung kann nicht fortgesetzt werden.",
+  "rail.takeover": "Übernehmen",
+  "rail.takeover.title": "Diese Sitzung im Dashboard fortsetzen",
+  "rail.reopen": "Wieder öffnen",
+  "rail.reopen.title": "Diese geschlossene Sitzung im Dashboard wieder öffnen",
+  "rail.revive.nosession": "Der Harness dieser Sitzung hat keine fortsetzbare Unterhaltung gemeldet (sie lief zuletzt mit einem älteren ws-Plugin)",
+  "js.lead.handoff": "An Terminal übergeben",
+  "js.lead.handoff.note": "Beendet den Prozess hier. Die Seite zeigt dann den Befehl, der die Unterhaltung in einem Terminal fortsetzt.",
+  "js.lead.handoff.confirm.one": "Diese Sitzung an ein Terminal übergeben? Ihre {0} laufende Hintergrundaufgabe endet mit dem Prozess.",
+  "js.lead.handoff.confirm.other": "Diese Sitzung an ein Terminal übergeben? Ihre {0} laufenden Hintergrundaufgaben enden mit dem Prozess.",
+  "js.lead.handed": "Diese Sitzung wurde an ein Terminal übergeben.",
+  "js.lead.handed.resume": "Dort fortsetzen mit",
+  "js.lead.handed.copy": "Befehl kopieren"
 }

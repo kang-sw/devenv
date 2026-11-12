@@ -318,6 +318,23 @@ export function storedKey(value: unknown): string | undefined {
   return typeof key === 'string' && key.trim() ? key.trim() : undefined
 }
 
+/**
+ * The token ws-mcp's refusal of a re-login carries when the dashboard hosts
+ * that key's session and its process may still run; it must match the token
+ * ws-mcp spells. Such a refusal is no unusable key: the conversation stays
+ * keyless (no mint over it) and the key entry stays, so a resume after the
+ * session is handed to the terminal re-logs in with it.
+ */
+export const HOSTED_SESSION_HELD_MARKER = 'hosted-session-held'
+
+/** The visible line for a re-login ws-mcp refused with `refusal`, its text carrying HOSTED_SESSION_HELD_MARKER. */
+export function heldLine(plugin: string, refusal: string): string {
+  return `[${plugin}] ${refusal.trim()} No key was minted, so the workflow manual is not delivered.`
+}
+
+/** What a re-login came to: the key answered, refused as unusable, or refused because a hosted session holds it (`refusal` is ws-mcp's text). */
+export type Relogin = { kind: 'accepted' } | { kind: 'refused' } | { kind: 'held'; refusal: string }
+
 /** The `session_key` of a `ferrule` `format: "json"` answer, or undefined. */
 export function ferruleKey(text: string): string | undefined {
   try {
@@ -355,6 +372,12 @@ export type ManualEdges = {
   /** The root the key binds to; ws-mcp resolves it to its Git worktree. */
   root: () => Promise<string>
   sessionId: () => Promise<string>
+  /**
+   * The directory the harness runs in (not necessarily the repository root).
+   * Every `ferrule` login reports it with the session id as the harness
+   * session; a rejection or an empty answer reports neither.
+   */
+  cwd: () => Promise<string>
   store: {
     get: (key: string) => Promise<unknown>
     set: (key: string, value: unknown) => Promise<void>
@@ -475,15 +498,33 @@ export function createManual(): Manual {
     }
   }
 
-  const relogin = async (e: ManualEdges, server: string, root: string, key: string): Promise<boolean> => {
+  /**
+   * The harness session a `ferrule` login reports: the session id and the
+   * harness directory together, or nothing when either is unavailable, since
+   * ws-mcp records the pair only whole. Never rejects.
+   */
+  const harnessReport = async (e: ManualEdges): Promise<Record<string, string>> => {
     try {
-      const text = await e.call(server, 'ferrule', { root, format: 'json', relogin_session_key: key })
-      if (ferruleKey(text) === key) return true
+      const [session, cwd] = await Promise.all([e.sessionId(), e.cwd()])
+      if (session && cwd) return { harness_session: session, harness_cwd: cwd }
+      debug('no harness session to report (an empty session id or directory)')
+    } catch (err) {
+      debug(`no harness session to report (${String(err)})`)
+    }
+    return {}
+  }
+
+  const relogin = async (e: ManualEdges, server: string, root: string, key: string): Promise<Relogin> => {
+    try {
+      const text = await e.call(server, 'ferrule', { root, format: 'json', relogin_session_key: key, ...(await harnessReport(e)) })
+      if (ferruleKey(text) === key) return { kind: 'accepted' }
       debug(`re-login with ${key} answered another key`)
     } catch (err) {
+      const refusal = err instanceof Error ? err.message : String(err)
+      if (refusal.includes(HOSTED_SESSION_HELD_MARKER)) return { kind: 'held', refusal }
       debug(`re-login with ${key} failed (${String(err)})`)
     }
-    return false
+    return { kind: 'refused' }
   }
 
   /**
@@ -491,7 +532,9 @@ export function createManual(): Manual {
    * the key the model held at a late open) or mint one, write the key entry,
    * and tell the listener. A hosted key or a late open over a held key never
    * mints: a refused re-login there fails the setup, so the conversation
-   * stays on the key the daemon or the lead holds.
+   * stays on the key the daemon or the lead holds. A re-login refused because
+   * a hosted session holds the key never mints either, and leaves the key
+   * entry as it is.
    */
   const setup = async (gen: number) => {
     const e = edges
@@ -512,14 +555,20 @@ export function createManual(): Manual {
     const hosted = await e.hostedKey?.()
     const held = hosted ?? lateBound
     const stored = held ?? storedKey(await e.store.get(entry))
-    let key = stored !== undefined && (await relogin(e, server, root, stored)) ? stored : undefined
+    const outcome: Relogin = stored === undefined ? { kind: 'refused' } : await relogin(e, server, root, stored)
+    if (outcome.kind === 'held') {
+      // Visible: the user hands the session over from the dashboard, and nothing else says why the conversation is keyless.
+      e.log(heldLine(e.plugin, outcome.refusal), 'transcript')
+      throw new Error(`the re-login with ${stored} is held by a hosted session`)
+    }
+    let key = outcome.kind === 'accepted' ? stored : undefined
     if (key === undefined) {
       if (hosted !== undefined) {
         // Visible: a hosted conversation left keyless is the daemon's fault to fix, and nothing else says so.
         e.log(`[${e.plugin}] the hosted session key ${hosted} (WS_HOSTED_SESSION_KEY) was refused; no key was minted, so the workflow manual is not delivered.`, 'transcript')
       }
       if (held !== undefined) throw new Error(`the re-login with the held key ${held} was refused`)
-      key = ferruleKey(await e.call(server, 'ferrule', { root, format: 'json' }))
+      key = ferruleKey(await e.call(server, 'ferrule', { root, format: 'json', ...(await harnessReport(e)) }))
       if (key === undefined) throw new Error('ferrule answered no session key')
     }
     // An adoption, or a session start or end, meanwhile owns the entry and the push: write and tell nothing.
@@ -598,7 +647,9 @@ export function createManual(): Manual {
       const gen = generation
       const server = await e.server()
       if (!server) return undefined
-      if (!(await relogin(e, server, await e.root(), revived))) return undefined
+      const outcome = await relogin(e, server, await e.root(), revived)
+      if (outcome.kind === 'held') e.log(heldLine(e.plugin, outcome.refusal), 'transcript')
+      if (outcome.kind !== 'accepted') return undefined
       // A session start or end, or another adoption, came in meanwhile.
       if (gen !== generation) return undefined
       generation += 1

@@ -49,7 +49,7 @@ func railWT(t *testing.T, ws RailWorkspace, path string) RailWorktree {
 // session in a subfolder sits under its worktree, one in a worktree no list
 // names yet gets a worktree of its own; a plain folder lists its sessions
 // directly; live rows go newest registration first, ended ones fold apart,
-// and a session ended past the window is not listed.
+// newest first, and stay listed past the index page's ended window.
 func TestRailViewGroupsSessionsByWorkspaceAndWorktree(t *testing.T) {
 	now := time.Now()
 	repo := "/w/repo"
@@ -99,8 +99,8 @@ func TestRailViewGroupsSessionsByWorkspaceAndWorktree(t *testing.T) {
 		t.Errorf("root worktree = %+v, want develop with newroot then oldroot", root)
 	}
 	feat := railWT(t, ws, "/w/feature")
-	if feat.Empty() || len(feat.Sessions) != 0 || strings.Join(railIDs(feat.Ended), " ") != "endedfeat" {
-		t.Errorf("feature worktree = %+v, want endedfeat folded as ended only", feat)
+	if feat.Empty() || len(feat.Sessions) != 0 || strings.Join(railIDs(feat.Ended), " ") != "endedfeat oldended" {
+		t.Errorf("feature worktree = %+v, want endedfeat then oldended (ended two days ago) folded as ended only", feat)
 	}
 	if idle := railWT(t, ws, "/w/idle"); !idle.Empty() || !idle.Detached {
 		t.Errorf("idle worktree = %+v, want an empty detached row", idle)
@@ -822,5 +822,89 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 	}
 	if strings.Contains(string(region.HTML), "rnew") {
 		t.Errorf("a daemon that hosts no sessions shows a new-session button:\n%s", region.HTML)
+	}
+}
+
+// TestRailMarkupRevive pins an ended row's revive entry: a button after
+// the row's link (never inside it) carrying its move, worded "Take over" or
+// "Reopen"; a blocked takeover shown but not operable, its reason its
+// tooltip and accessible name; and no entry on a row with no move.
+func TestRailMarkupRevive(t *testing.T) {
+	take := RailRow{ReplyID: "taken", Harness: "claude", Revive: ReviveTakeover}
+	reopen := RailRow{ReplyID: "closed", Harness: "claude", Hosted: true, Revive: ReviveReopen}
+	blocked := RailRow{ReplyID: "stuck", Harness: "claude", Revive: ReviveTakeover, ReviveBlocked: ReviveNoSession}
+	plain := RailRow{ReplyID: "gone", Harness: "codex"}
+	view := RailView{Workspaces: []RailWorkspace{{Name: "repo", Path: "/w/repo", Repo: true, Worktrees: []RailWorktree{
+		{Path: "/w/repo", Root: true, Folder: "repo", Branch: "main", Ended: []RailRow{take, reopen, blocked, plain}},
+	}}}}
+	region, err := renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(region.HTML)
+	rowOf := func(id string) string {
+		_, rest, ok := strings.Cut(html, `<div class="rs ended" data-rid="`+id+`">`)
+		if !ok {
+			t.Fatalf("no ended row for %s:\n%s", id, html)
+		}
+		row, _, _ := strings.Cut(rest, `<div class="rs`)
+		return row
+	}
+	const reason = `This session&#39;s harness reported no conversation to resume (it last ran with an older ws plugin)`
+	for id, want := range map[string]string{
+		"taken":  `</a><button type="button" class="rrev" data-revive="takeover" title="Continue this session in the dashboard">Take over</button></div>`,
+		"closed": `</a><button type="button" class="rrev" data-revive="reopen" title="Open this closed session again in the dashboard">Reopen</button></div>`,
+		"stuck":  `</a><button type="button" class="rrev" data-revive="takeover" aria-disabled="true" title="` + reason + `" aria-label="` + reason + `">Take over</button></div>`,
+	} {
+		if row := rowOf(id); !strings.Contains(row, want) {
+			t.Errorf("row %s lacks %s:\n%s", id, want, row)
+		}
+	}
+	if row := rowOf("gone"); strings.Contains(row, "rrev") || strings.Contains(row, "data-revive") {
+		t.Errorf("a row with no move carries a revive entry:\n%s", row)
+	}
+	if n := strings.Count(html, `class="rrev"`); n != 3 {
+		t.Errorf("revive entries = %d, want 3", n)
+	}
+}
+
+// TestRailRowRevive pins how an ended row comes back: a closed hosted
+// session reopens, a claude or pi session a terminal ran in a repository is
+// taken over (shown blocked while its record names no harness
+// conversation), and a live session, a plain-folder session, an agent
+// conversation, another harness's session, and any row on a daemon that
+// hosts no sessions offer nothing.
+func TestRailRowRevive(t *testing.T) {
+	now := time.Now()
+	ended := now.Add(-72 * time.Hour)
+	row := func(edit func(in *railInput)) RailRow {
+		in := railInput{Session: railSession("sess", "/w/repo", ended.Add(-time.Hour), ended), Repo: "/w/repo", CanRevive: true}
+		in.Session.Resumable = true
+		edit(&in)
+		return railRow(in, in.Session.Registration.Live(now), now)
+	}
+	cases := []struct {
+		name            string
+		edit            func(in *railInput)
+		revive, blocked string
+	}{
+		{"terminal claude session", func(in *railInput) {}, ReviveTakeover, ""},
+		{"terminal pi session", func(in *railInput) { in.Session.Harness = "pi" }, ReviveTakeover, ""},
+		{"no recorded conversation", func(in *railInput) { in.Session.Resumable = false }, ReviveTakeover, ReviveNoSession},
+		{"closed hosted session", func(in *railInput) { in.Session.Hosted = true; in.Session.Resumable = false }, ReviveReopen, ""},
+		{"hosted session not ended", func(in *railInput) { in.Session.Hosted = true; in.Session.EndedAt = "" }, "", ""},
+		{"plain folder", func(in *railInput) { in.Repo = "" }, "", ""},
+		{"codex session", func(in *railInput) { in.Session.Harness = "codex" }, "", ""},
+		{"agent conversation", func(in *railInput) { in.Session.Agent = true }, "", ""},
+		{"daemon hosts no sessions", func(in *railInput) { in.CanRevive = false }, "", ""},
+		{"live session", func(in *railInput) {
+			in.Session = railSession("sess", "/w/repo", now, time.Time{})
+			in.Session.Resumable = true
+		}, "", ""},
+	}
+	for _, c := range cases {
+		if got := row(c.edit); got.Revive != c.revive || got.ReviveBlocked != c.blocked {
+			t.Errorf("%s: revive %q blocked %q, want %q %q", c.name, got.Revive, got.ReviveBlocked, c.revive, c.blocked)
+		}
 	}
 }

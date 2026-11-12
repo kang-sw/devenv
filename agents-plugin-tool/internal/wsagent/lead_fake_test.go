@@ -457,6 +457,19 @@ type fakeLeadKeys struct {
 	n       int
 	ensured []string
 	rootErr error
+	// sessions are the terminal lead sessions LeadSession finds, by
+	// reply-id.
+	sessions map[string]LeadSession
+}
+
+func (k *fakeLeadKeys) LeadSession(root, replyID string) (LeadSession, bool) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	ls, ok := k.sessions[replyID]
+	if !ok || ls.Root != root {
+		return LeadSession{}, false
+	}
+	return ls, true
 }
 
 func (k *fakeLeadKeys) LeadRoot(root string) (string, error) {
@@ -486,6 +499,8 @@ type fakeMail struct {
 	watches map[string]func()
 	queued  map[string][]string
 	stops   int
+	// drains counts Drain calls.
+	drains int
 }
 
 func newFakeMail() *fakeMail {
@@ -507,9 +522,38 @@ func (m *fakeMail) Watch(_, key string, changed func()) func() {
 func (m *fakeMail) Drain(_, key string) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.drains++
 	out := m.queued[key]
 	delete(m.queued, key)
 	return out, nil
+}
+
+// Return puts claimed mail back at the head of key's mailbox.
+func (m *fakeMail) Return(_, key string, texts []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.queued[key] = append(slices.Clone(texts), m.queued[key]...)
+	return nil
+}
+
+// waiting is key's mailbox as a claim would find it; watched whether a
+// watch runs for key; drains how many claims were made.
+func (m *fakeMail) waiting(key string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.queued[key])
+}
+
+func (m *fakeMail) watched(key string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.watches[key] != nil
+}
+
+func (m *fakeMail) drainCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.drains
 }
 
 // deliver puts mail in key's mailbox and tells its watcher, if any.

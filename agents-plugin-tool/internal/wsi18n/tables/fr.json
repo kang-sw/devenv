@@ -1549,5 +1549,17 @@
   "js.lead.restart.confirm.one": "Redémarrer cette session ? Sa {0} tâche en arrière-plan en cours s'arrête avec le processus.",
   "js.lead.restart.confirm.other": "Redémarrer cette session ? Ses {0} tâches en arrière-plan en cours s'arrêtent avec le processus.",
   "js.lead.close.confirm.bg.one": "Fermer cette session ? Son processus et sa {0} tâche en arrière-plan en cours s'arrêtent, et la conversation ne peut pas être poursuivie.",
-  "js.lead.close.confirm.bg.other": "Fermer cette session ? Son processus et ses {0} tâches en arrière-plan en cours s'arrêtent, et la conversation ne peut pas être poursuivie."
+  "js.lead.close.confirm.bg.other": "Fermer cette session ? Son processus et ses {0} tâches en arrière-plan en cours s'arrêtent, et la conversation ne peut pas être poursuivie.",
+  "rail.takeover": "Reprendre",
+  "rail.takeover.title": "Poursuivre cette session dans le tableau de bord",
+  "rail.reopen": "Rouvrir",
+  "rail.reopen.title": "Rouvrir cette session fermée dans le tableau de bord",
+  "rail.revive.nosession": "Le harness de cette session n'a signalé aucune conversation à reprendre (il a tourné pour la dernière fois avec un ancien plugin ws)",
+  "js.lead.handoff": "Passer au terminal",
+  "js.lead.handoff.note": "Termine le processus ici. La page donne ensuite la commande qui reprend la conversation dans un terminal.",
+  "js.lead.handoff.confirm.one": "Passer cette session à un terminal ? Sa {0} tâche de fond en cours se termine avec le processus.",
+  "js.lead.handoff.confirm.other": "Passer cette session à un terminal ? Ses {0} tâches de fond en cours se terminent avec le processus.",
+  "js.lead.handed": "Cette session a été passée à un terminal.",
+  "js.lead.handed.resume": "La reprendre là-bas avec",
+  "js.lead.handed.copy": "Copier la commande"
 }
