@@ -198,6 +198,19 @@ button.closed-more { display: flex; margin: 0 auto 16px; }
 .md img { max-width: 100%; height: auto; border-radius: 6px; vertical-align: middle; }
 .md pre { background: var(--wb-muted); border-radius: 8px; padding: 6px 9px; overflow-x: auto; font-size: 12.5px; }
 .md pre > code { background: none; padding: 0; font-size: inherit; }
+/* code blocks (code.js): the pre sits in div.cb, which carries the copy button; a block of two or more lines also has a number gutter, a flex sibling of the code that stays at the left edge while a wide block scrolls (its shadow covers the pre's left padding, where the scrolled code would show) and is never selected or copied */
+.md .cb { position: relative; margin: 0 0 6px; }
+.md > .cb:last-child { margin-bottom: 0; }
+.cb > pre { margin: 0; }
+.cb-ln > pre { display: flex; }
+.cb-ln > pre > code { flex: 1 0 auto; }
+.cb-ln > pre > .ln { flex: none; position: sticky; left: 0; margin: 0 10px 0 0; padding: 0 8px 0 0; text-align: right; color: var(--wb-muted-fg); background: var(--wb-muted); box-shadow: -10px 0 0 var(--wb-muted); border-right: 1px solid var(--wb-line); user-select: none; -webkit-user-select: none; }
+.cb-copy { position: absolute; top: 5px; right: 7px; display: inline-flex; align-items: center; gap: 4px; height: 22px; min-width: 22px; padding: 0 5px; justify-content: center; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-card); color: var(--wb-muted-fg); font-size: 11px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .12s; }
+.cb-copy .i { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.cb:hover > .cb-copy, .cb-copy:focus-visible, .cb-copy.done { opacity: 1; }
+.cb-copy:hover { color: var(--wb-fg); }
+.cb-copy.done { color: var(--wb-ck-ok); }
+@media (hover: none) { .cb-copy { opacity: 1; } }
 /* a table always spans the full width; cells wrap at spaces, and code spans (paths, URLs) may also break mid-token so a long one does not widen the table */
 .md table { display: table; width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; border: 1px solid var(--wb-line); border-radius: 8px; }
 .md th, .md td { padding: 5px 10px; vertical-align: top; overflow-wrap: break-word; }
