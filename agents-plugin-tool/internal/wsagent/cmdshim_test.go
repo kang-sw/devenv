@@ -126,6 +126,33 @@ func TestHarnessCommandOnWindowsUnwrapsAShim(t *testing.T) {
 	}
 }
 
+// TestHarnessCommandOnWindowsShimEdges: the shim extension matches in any
+// case, and a shim that cannot be read is refused with its path.
+func TestHarnessCommandOnWindowsShimEdges(t *testing.T) {
+	setHostWindows(t, true)
+	dir := t.TempDir()
+	node := filepath.Join(dir, "node.exe")
+	if err := os.WriteFile(node, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	setLookPath(t, func(name string) (string, error) { return name, nil })
+	script := filepath.Join(dir, piShimScript)
+	for _, name := range []string{"PI.CMD", "pi.Bat"} {
+		shim := filepath.Join(dir, name)
+		if err := os.WriteFile(shim, []byte(readPiShim(t)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		prog, pre, err := harnessCommand(shim, "pi")
+		if err != nil || prog != node || !reflect.DeepEqual(pre, []string{script}) {
+			t.Errorf("%s: got %q %q %v, want %q [%q]", name, prog, pre, err, node, script)
+		}
+	}
+	missing := filepath.Join(dir, "gone.cmd")
+	if _, _, err := harnessCommand(missing, "pi"); err == nil || !strings.Contains(err.Error(), "read "+missing) {
+		t.Errorf("an unreadable shim is refused with its path, got %v", err)
+	}
+}
+
 func TestHarnessCommandElsewhereIsUnchanged(t *testing.T) {
 	setHostWindows(t, false)
 	setLookPath(t, func(name string) (string, error) {
