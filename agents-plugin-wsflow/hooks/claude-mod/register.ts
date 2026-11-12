@@ -1252,6 +1252,7 @@ export const register: Register = (on) => {
         call: callText,
         root: () => $.session.root(),
         sessionId: () => $.session.id(),
+        cwd: () => $.session.cwd(),
         store: {
           get: (key) => $.store.get(key),
           set: (key, value) => $.store.set(key, value),
