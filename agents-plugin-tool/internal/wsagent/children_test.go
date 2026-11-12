@@ -642,3 +642,61 @@ func TestHeldReportIsReleasedWhenTheChildCloses(t *testing.T) {
 		t.Fatalf("the released report = %+v", rep.Result)
 	}
 }
+
+// TestWaitTakesATurnThatSettlesRightAfterItsCheck: a turn that settles
+// between a wait's check and its block still answers the wait at once,
+// a parent's token wait (the report's only delivery) and the lead's alike.
+func TestWaitTakesATurnThatSettlesRightAfterItsCheck(t *testing.T) {
+	h, _ := childHarness(t)
+	_, wp, token, gc, gp := workerWithChild(t, h)
+	c := h.runner.conv(gc.ID)
+	settledCount := func() uint64 {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.settled.n
+	}
+	// settleOnce settles the child's running turn with msg the first time
+	// a wait has checked, before that wait blocks.
+	settleOnce := func(msg string) {
+		var once sync.Once
+		waitChecked = func() {
+			once.Do(func() {
+				n := settledCount()
+				gp.reply(msg)
+				eventually(t, "the settle", func() bool { return settledCount() > n })
+			})
+		}
+	}
+	t.Cleanup(func() { waitChecked = nil })
+
+	// A wait that missed the settle would block until its timeout and
+	// find the turn only then.
+	const timeout = 3 * time.Second
+	settleOnce("first")
+	start := time.Now()
+	code, body := h.tokenCall(token, "wait", map[string]any{"id": gc.ID, "timeout_s": timeout.Seconds()})
+	var res TurnResult
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &res) != nil || res.Status != TurnDone || res.Message != "first" {
+		t.Fatalf("the parent's wait = %d %s", code, body)
+	}
+	if took := time.Since(start); took > timeout/2 {
+		t.Fatalf("the parent's wait answered after %v: it missed the settle", took)
+	}
+	time.Sleep(60 * time.Millisecond)
+	if steered, _ := wp.steered(); len(steered) != 0 {
+		t.Fatalf("the waited report is not steered too: %q", steered)
+	}
+
+	if code, body := h.tokenCall(token, "send", map[string]any{"id": gc.ID, "message": "again"}); code != http.StatusOK {
+		t.Fatalf("send = %d %s", code, body)
+	}
+	gp.nextSent(t)
+	settleOnce("second")
+	start = time.Now()
+	if res, err := h.runner.Wait(context.Background(), gc.ID, timeout); err != nil || res.Status != TurnDone || res.Message != "second" {
+		t.Fatalf("the lead's wait = %+v, %v", res, err)
+	}
+	if took := time.Since(start); took > timeout/2 {
+		t.Fatalf("the lead's wait answered after %v: it missed the settle", took)
+	}
+}

@@ -378,6 +378,51 @@ func TestPiMapperPromptAnswersAndDialogs(t *testing.T) {
 	}
 }
 
+// TestPiMapperSteerAnswersAndTakenMessages: a non-lead process's steer
+// response is the steer's answer, a refusal named (a child's report then
+// goes as a turn), and a user message its run took is named with the text
+// pi matches it by; a lead keeps a refusal notice and names no taken
+// message.
+func TestPiMapperSteerAnswersAndTakenMessages(t *testing.T) {
+	m := newPiMapper(piSpec(t, `{"backend":"pi"}`))
+	r := &recordedReplies{}
+	for _, tc := range []struct{ line, refusal string }{
+		{`{"type":"response","command":"steer","success":true,"data":{"disposition":"queued"}}`, ""},
+		{`{"type":"response","command":"steer","success":false,"error":"no"}`, "no"},
+		{`{"type":"response","command":"steer","success":false}`, "refused"},
+	} {
+		evs := m.mapLine([]byte(tc.line), r)
+		if len(evs) != 1 || evs[0].SteerAnswer == nil || evs[0].SteerAnswer.Refusal != tc.refusal || evs[0].Notice != "" {
+			t.Fatalf("%s: events %+v, want one answer refusing %q", tc.line, evs, tc.refusal)
+		}
+	}
+	for _, tc := range []struct{ line, text string }{
+		{`{"type":"message_end","message":{"role":"user","content":"[Pi subagent x] turn done\nresult"}}`, "[Pi subagent x] turn done\nresult"},
+		{`{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"part one, "},{"type":"image","data":"…"},{"type":"text","text":"part two"}]}}`, "part one, part two"},
+	} {
+		evs := m.mapLine([]byte(tc.line), r)
+		if len(evs) != 1 || evs[0].UserTaken != tc.text {
+			t.Fatalf("%s: events %+v, want the taken text %q", tc.line, evs, tc.text)
+		}
+	}
+	if evs := m.mapLine([]byte(`{"type":"message_end","message":{"role":"user","content":[]}}`), r); len(evs) != 0 {
+		t.Fatalf("an empty user message names nothing: %+v", evs)
+	}
+
+	lead := newPiMapper(StartSpec{Root: "/work", Dir: "/sess", Profile: Profile{Backend: BackendPi, Lead: true}, Lead: &LeadSpec{}})
+	if evs := lead.mapLine([]byte(`{"type":"response","command":"steer","success":false,"error":"no"}`), r); len(evs) != 1 || evs[0].SteerAnswer != nil || evs[0].Notice != "pi refused a steered message: no" {
+		t.Fatalf("a lead's refused steer is a notice: %+v", evs)
+	}
+	if evs := lead.mapLine([]byte(`{"type":"response","command":"steer","success":true}`), r); len(evs) != 0 {
+		t.Fatalf("a lead's taken steer maps to nothing: %+v", evs)
+	}
+	for _, ev := range lead.mapLine([]byte(`{"type":"message_end","message":{"role":"user","content":"hi"}}`), r) {
+		if ev.UserTaken != "" {
+			t.Fatalf("a lead names no taken message: %+v", ev)
+		}
+	}
+}
+
 // piWidgetLine is the RPC line a hosted Pi lead's setWidget call writes.
 func piWidgetLine(key string, lines ...string) []byte {
 	raw, _ := json.Marshal(map[string]any{"type": "extension_ui_request", "id": "w", "method": "setWidget", "widgetKey": key, "widgetLines": lines})
@@ -521,6 +566,12 @@ func TestPiProcessCommands(t *testing.T) {
 	if err := p.Send("again"); err != nil || m.aborted.Load() {
 		t.Fatalf("a send clears the interrupt: %v", err)
 	}
+	if err := p.Steer("a report"); err != nil {
+		t.Fatalf("Steer: %v", err)
+	}
+	if err := p.ClearSteered(); err != nil {
+		t.Fatalf("ClearSteered: %v", err)
+	}
 	p.Close()
 	drained.Wait()
 
@@ -545,6 +596,7 @@ func TestPiProcessCommands(t *testing.T) {
 		// set_model resets pi's thinking level, so the set effort follows it.
 		"set_model gpt-b", "set_thinking_level high",
 		"prompt hello", "abort", "prompt again",
+		"steer a report", "clear_queue",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("commands = %q, want %q", got, want)

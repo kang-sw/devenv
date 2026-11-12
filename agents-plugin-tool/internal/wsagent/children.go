@@ -664,6 +664,10 @@ func (r *Runner) descendants(id string) []string {
 	return out
 }
 
+// waitChecked, set by tests alone, runs in a wait after its check found no
+// turn to answer it and before it blocks.
+var waitChecked func()
+
 // wait is Wait. asParent marks the wait as the conversation parent's own
 // (the token route's): a turn that settles while it waits is handed to no
 // other path (publish), and a settled turn it answers with takes that
@@ -690,46 +694,47 @@ func (r *Runner) wait(ctx context.Context, id string, timeout time.Duration, asP
 		c.parentWaits[target]++
 	}
 	c.mu.Unlock()
-	// settled is the turn that answers the wait, if one settled: the
-	// wait's registration leaves it under mu, so a settle that counted
-	// the wait is found here however the wait ended.
-	settled := func() (TurnResult, bool) {
+	// settled is the turn that answers the wait, if one settled, else the
+	// channel the next settle closes and whether the conversation ended.
+	// One mu hold reads them all, so no settle falls between the check
+	// and the channel. The wait's registration leaves in the same hold,
+	// when a turn answers it or the wait is leaving, so a settle that
+	// counted the wait is always the answer.
+	settled := func(leaving bool) (res TurnResult, ok bool, next chan struct{}, ended bool) {
 		c.mu.Lock()
 		last, report := c.settled, c.settledReport
-		if asParent && last.n > 0 && last.mark >= target {
+		next, ended = c.settleC, c.closed
+		ok = last.n > 0 && last.mark >= target
+		if asParent && (ok || leaving) {
 			c.unwait(target)
 		}
 		c.mu.Unlock()
-		if last.n == 0 || last.mark < target {
-			return TurnResult{}, false
+		if !ok {
+			return TurnResult{}, false, next, ended
 		}
 		if asParent && report != "" {
 			c.update(func(rec *Record) {
 				rec.PendingReports = slices.DeleteFunc(rec.PendingReports, func(p PendingReport) bool { return p.ID == report })
 			})
 		}
-		return last, true
+		return last, true, nil, false
 	}
 	end := func(status string) (TurnResult, error) {
-		if res, ok := settled(); ok {
+		if res, ok, _, _ := settled(true); ok {
 			return res, nil
-		}
-		if asParent {
-			c.mu.Lock()
-			c.unwait(target)
-			c.mu.Unlock()
 		}
 		return TurnResult{ID: id, Status: status}, nil
 	}
 	for {
-		if res, ok := settled(); ok {
+		res, ok, ch, ended := settled(false)
+		if ok {
 			return res, nil
 		}
-		c.mu.Lock()
-		ch, ended := c.settleC, c.closed
-		c.mu.Unlock()
 		if ended {
 			return end(TurnClosed)
+		}
+		if waitChecked != nil {
+			waitChecked()
 		}
 		select {
 		case <-ch:
@@ -744,7 +749,8 @@ func (r *Runner) wait(ctx context.Context, id string, timeout time.Duration, asP
 }
 
 // unwait ends a conversation parent's wait for target. Under mu, once per
-// wait: a wait leaves through settled or end, never both.
+// wait: in the settled check that answers it, or in the one it leaves
+// through.
 func (c *conv) unwait(target uint64) {
 	if c.parentWaits[target]--; c.parentWaits[target] <= 0 {
 		delete(c.parentWaits, target)
