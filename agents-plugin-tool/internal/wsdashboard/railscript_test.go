@@ -129,11 +129,11 @@ check("a query filters ignoring case", R.matchBranches(["main", "feat/A", "fix/b
 check("no list matches nothing", R.matchBranches(null, "x"), []);
 
 // worktreeBody: a new branch carries its base; an existing one none; the
-// folder only when custom.
-check("new branch, default folder", R.worktreeBody("/w/r", { mode: "new", name: " feat/x ", base: "main", pick: "free", custom: false, folder: "/x" }),
-  { workspace: "/w/r", branch: "feat/x", "new": true, base: "main", folder: "" });
+// folder is the custom one when custom, else the default the form shows.
+check("new branch, default folder", R.worktreeBody("/w/r", { mode: "new", name: " feat/x ", base: "main", pick: "free", custom: false, folder: "/x", shown: "/w/.wt/r/261112-1333" }),
+  { workspace: "/w/r", branch: "feat/x", "new": true, base: "main", folder: "/w/.wt/r/261112-1333" });
 check("new branch from the detached HEAD", R.worktreeBody("/w/r", { mode: "new", name: "feat/y", base: "" }).base, "");
-check("existing branch, custom folder", R.worktreeBody("/w/r", { mode: "old", name: "ignored", base: "main", pick: "free", custom: true, folder: " /w/wt " }),
+check("existing branch, custom folder", R.worktreeBody("/w/r", { mode: "old", name: "ignored", base: "main", pick: "free", custom: true, folder: " /w/wt ", shown: "/w/.wt/r/261112-1333" }),
   { workspace: "/w/r", branch: "free", "new": false, base: "", folder: "/w/wt" });
 
 // leadBody: only the picked options go out, and a permission mode only to
