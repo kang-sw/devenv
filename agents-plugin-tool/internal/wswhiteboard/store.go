@@ -306,6 +306,28 @@ func FormatID(id int) string {
 	return fmt.Sprintf("(%02d)", id)
 }
 
+// TextRefs writes each {{nn}} item reference in text as the board shows it,
+// (nn), for a plain-text reader such as the session state's recap list; a
+// reference to an ID the store does not hold stays verbatim, as on the page.
+// Unlike the page's markdown it does not skip code spans, so a reference
+// quoted in backticks resolves too.
+func (s *State) TextRefs(text string) string {
+	if s == nil || !strings.Contains(text, "{{") {
+		return text
+	}
+	held := map[int]bool{}
+	for _, item := range s.Items {
+		held[item.ID] = true
+	}
+	return itemRefPattern.ReplaceAllStringFunc(text, func(ref string) string {
+		id, err := strconv.Atoi(ref[2 : len(ref)-2])
+		if err != nil || !held[id] {
+			return ref
+		}
+		return FormatID(id)
+	})
+}
+
 // IsSettled reports whether status is a settled status.
 func IsSettled(status string) bool {
 	return status == StatusAnswered || status == StatusWithdrawn || status == StatusSuperseded

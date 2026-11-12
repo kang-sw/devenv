@@ -157,6 +157,53 @@ func TestMessageCarriesTopicNotesAndAnswersShowAsCapsules(t *testing.T) {
 	}
 }
 
+// TestMessageCarriesMentionsAsCapsules: a send's mentions are held in order,
+// delivered as wb:mention elements after the answer block and before the
+// text, and returned by a cancel; the held bubble and a delivered message
+// show them as capsules after the answer capsules, the text unescaped.
+func TestMessageCarriesMentionsAsCapsules(t *testing.T) {
+	f := startPageFixture(t)
+	id, _ := f.send(t, `{"text":"see these","chips":[{"id":"03","answer":"a"}],"mentions":[{"topic":"ship-gate","id":"03","text":"a < b"},{"topic":"plan","text":"whole topic"}]}`)
+	held := f.held(t)
+	want := "<wb:answers>\n03=a\n</wb:answers>\n\n" + `<wb:mention topic="ship-gate" id="03">a &lt; b</wb:mention>` + "\n" +
+		`<wb:mention topic="plan">whole topic</wb:mention>` + "\n\nsee these"
+	if len(held) != 1 || held[0].Entry.Text() != want {
+		t.Fatalf("held = %+v", held)
+	}
+	delivered := wsinbox.Entry{Parts: []string{"user words"}, Mentions: []wsinbox.Mention{{Topic: "plan", ID: "7", Text: "x & <y>"}}}.Text()
+	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "livesession")), []wslive.RingEntry{
+		{Kind: wslive.RingUser, Origin: wslive.OriginWhiteboard, Text: delivered},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, page := get(t, f.base+"/s/livesession")
+	for _, want := range []string{
+		`<div class="bub"><div class="hchips"><span class="achip"><b>(03)</b> a</span><span class="achip mchip" title="a &lt; b"><b>[ship-gate] (03)</b><span class="anote">a &lt; b</span></span><span class="achip mchip" title="whole topic"><b>[plan]</b><span class="anote">whole topic</span></span></div><div class="hpart">see these</div></div>`,
+		`<div class="bub"><div class="hchips"><span class="achip mchip" title="x &amp; &lt;y&gt;"><b>[plan] (7)</b><span class="anote">x &amp; &lt;y&gt;</span></span></div>user words</div>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("session page lacks %q", want)
+		}
+	}
+	code, _, raw := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+id+`"}`)
+	if code != http.StatusOK {
+		t.Fatalf("cancel = %d: %s", code, raw)
+	}
+	var ans struct {
+		Text     string            `json:"text"`
+		Mentions []wsinbox.Mention `json:"mentions"`
+	}
+	if err := json.Unmarshal([]byte(raw), &ans); err != nil {
+		t.Fatal(err)
+	}
+	if ans.Text != "see these" || len(ans.Mentions) != 2 || ans.Mentions[0] != (wsinbox.Mention{Topic: "ship-gate", ID: "03", Text: "a < b"}) {
+		t.Fatalf("cancel answer = %+v", ans)
+	}
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/message", f.base, `{"mentions":[{"topic":"t","id":"x1","text":"y"}]}`); code != http.StatusBadRequest {
+		t.Errorf("a malformed mention was not refused: %s", raw)
+	}
+}
+
 func TestMessageRouteRefusesEmptyAndMalformed(t *testing.T) {
 	f := startPageFixture(t)
 	for _, body := range []string{`{"text":"  "}`, `{"chips":[{"id":"../x","answer":"a"}]}`, `{"text":`, `{"chips":[{"id":"03","answer":"a b"}]}`} {

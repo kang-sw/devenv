@@ -296,6 +296,40 @@ func TestRecapRendersAtTheTopOfTheTopic(t *testing.T) {
 	wantNone(t, block, "tdoc")
 }
 
+// TestRecapResolvesItemReferences: a recap's {{nn}} references render as an
+// item field's do, on the file page, the embed, and the dashboard's board
+// regions: (nn) linked to an item on the page, plain (nn) for an item the
+// store holds but the page omits, verbatim for an ID the store does not hold,
+// and literal inside a code span. TextRefs, the plain-text form the session
+// state's recap list uses, writes (nn) for every held item.
+func TestRecapResolvesItemReferences(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "t", "target")+recapXML("t", "waiting on {{1}}, see {{40}} and {{99}}; `{{1}}`"))
+	const want = `waiting on <a href="#item-1">(01)</a>, see (40) and {{99}}; <code>{{1}}</code>`
+	for name, layout := range layouts() {
+		view := BuildView(st, ViewInput{Layout: layout, ReplyID: "r"})
+		view.Stored[40] = true // an archived item no topic renders
+		wantAll(t, recapBlock(t, render(t, view), "t"), `<div class="rtext md">`+want+`</div>`)
+		if t.Failed() {
+			t.Fatalf("%s layout", name)
+		}
+	}
+	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	view.Stored[40] = true
+	regions, err := RenderRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, string(regions.Board), `<div class="rtext md">`+want+`</div>`)
+
+	if got := st.TextRefs("on {{1}} and {{01}}, not {{99}} or {{x}}"); got != "on (01) and (01), not {{99}} or {{x}}" {
+		t.Errorf("TextRefs = %q", got)
+	}
+	if got := (*State)(nil).TextRefs("{{1}}"); got != "{{1}}" {
+		t.Errorf("nil TextRefs = %q", got)
+	}
+}
+
 // TestRecapRendersOutsideTheBodyFrame: the served page renders the recap in
 // its own markup, sanitized, never inside a topic body's sandboxed frame.
 func TestRecapRendersOutsideTheBodyFrame(t *testing.T) {

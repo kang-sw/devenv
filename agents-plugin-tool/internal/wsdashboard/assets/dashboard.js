@@ -495,6 +495,9 @@
       mermaid(ins);
       syncChips();
       syncNote();
+      // A mention button over a body frame the swap removed has nothing left
+      // to add.
+      if (mpend && mpend.frame && !doc.contains(mpend.frame)) hideMention();
     }
     if (board || name === "convlive") applySent(board);
     if (name === "panels") drawerSync();
@@ -1032,6 +1035,9 @@
   // chips live here, so a chip outlives its card leaving the board.
   var ctext = $("ctext"), cnote = $("cnote"), cchips = $("cchips");
   var chips = {}, chipOrder = [];
+  // bmentions are the board mentions the composer holds, in the order added
+  // (board mentions, below).
+  var bmentions = [];
   function chipList() { return chipOrder.map(function (id) { return chips[id]; }); }
   function putChip(c) { if (!chips[c.id]) chipOrder.push(c.id); chips[c.id] = c; }
   function dropChip(id) { delete chips[id]; chipOrder = chipOrder.filter(function (x) { return x !== id; }); }
@@ -1113,6 +1119,23 @@
       x.className = "unchip";
       x.setAttribute("data-untchip", n.topic);
       x.title = wsT("js.chip.tnote.remove");
+      x.textContent = "×";
+      el.appendChild(x);
+      cchips.appendChild(el);
+    });
+    // A board mention: "[topic] (id)" and the selected text, clipped.
+    bmentions.forEach(function (m, i) {
+      var el = doc.createElement("span"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
+      el.className = "achip mchip";
+      el.title = m.text;
+      b.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "");
+      el.appendChild(b);
+      t.className = "anote";
+      t.textContent = m.text.replace(/\s+/g, " ");
+      el.appendChild(t);
+      x.className = "unchip";
+      x.setAttribute("data-unmchip", String(i));
+      x.title = wsT("js.wbmention.remove");
       x.textContent = "×";
       el.appendChild(x);
       cchips.appendChild(el);
@@ -1440,6 +1463,125 @@
     ctext.addEventListener("scroll", function () { if (chl) chl.scrollTop = ctext.scrollTop; });
     window.addEventListener("resize", paintMentions);
   }
+  // --- board mentions: selected board text added to the message ------------
+  // On the live board, selecting text inside one topic card shows a floating
+  // mention button by the selection's end; clicking it adds a mention
+  // capsule (renderChips), which a send carries and the delivered message
+  // lists after its answer block (wsinbox mentions). A topic body is a
+  // sandboxed frame whose selection this page cannot read, so the frame
+  // reports it ({wbDoc: "sel"}, doc-frame.js) and the button stands over it.
+  var mbtn = null, mpend = null, mraf = 0;
+  // mentionOf is the mention a selection makes: the topic card's key, the
+  // item ID when both ends of the selection lie in the same item card ("" for
+  // an end outside every item), and the selected text; null for a blank
+  // selection, since a mention points at content.
+  function mentionOf(topic, startId, endId, text) {
+    text = (text || "").trim();
+    if (!topic || !text) return null;
+    var m = { topic: topic, text: text };
+    if (startId && startId === endId) m.id = startId;
+    return m;
+  }
+  function selEl(n) { return n && (n.nodeType === 1 ? n : n.parentNode); }
+  // itemIdAt is the ID of the item card n lies in, "" outside every card; the
+  // card's element id carries it on every kind (a settled row has no data-id).
+  function itemIdAt(n) {
+    var el = selEl(n), item = el && el.closest && el.closest(".card[id], .arow[id], .srow[id]");
+    var m = item && /^item-([0-9]{1,6})$/.exec(item.getAttribute("id") || "");
+    return m ? m[1] : "";
+  }
+  // endRect is where a range ends on screen: its last line box.
+  function endRect(r) {
+    var rs = r.getClientRects();
+    return rs.length ? rs[rs.length - 1] : r.getBoundingClientRect();
+  }
+  // hostMention is the pending mention of this page's own selection, null
+  // unless it lies in one topic card of the board, outside a form field.
+  function hostMention() {
+    var sel = window.getSelection ? window.getSelection() : null, b = region("board");
+    if (!b || !sel || sel.isCollapsed || !sel.rangeCount) return null;
+    var a = selEl(sel.anchorNode), f = selEl(sel.focusNode), act = doc.activeElement;
+    if (!a || !f || !b.contains(a) || !b.contains(f)) return null;
+    if (act && /^(TEXTAREA|INPUT)$/.test(act.tagName) && b.contains(act)) return null;
+    var ta = a.closest("section.topic[data-topic]");
+    if (!ta || ta !== f.closest("section.topic[data-topic]")) return null;
+    var m = mentionOf(ta.getAttribute("data-topic"), itemIdAt(sel.anchorNode), itemIdAt(sel.focusNode), sel.toString());
+    if (!m) return null;
+    var r = endRect(sel.getRangeAt(0));
+    return { m: m, x: r.right, y: r.bottom };
+  }
+  function hideMention() {
+    mpend = null;
+    if (mbtn) mbtn.hidden = true;
+  }
+  // placeMention shows the button for p by its selection's end, kept on
+  // screen; a frame's selection stands where its frame stands now.
+  function placeMention(p) {
+    var x = p.x, y = p.y;
+    if (p.frame) {
+      if (!doc.contains(p.frame)) { hideMention(); return; }
+      var fr = p.frame.getBoundingClientRect();
+      x += fr.left; y += fr.top;
+    }
+    if (!mbtn) {
+      mbtn = doc.createElement("button");
+      mbtn.type = "button";
+      mbtn.className = "wbmention";
+      mbtn.setAttribute("data-wbmention", "");
+      mbtn.textContent = wsT("js.wbmention.add");
+      mbtn.title = wsT("js.wbmention.add.title");
+      // Pressing the button must not move the selection it adds.
+      mbtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      doc.body.appendChild(mbtn);
+    }
+    mpend = p;
+    mbtn.hidden = false;
+    var w = mbtn.offsetWidth, h = mbtn.offsetHeight;
+    mbtn.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x + 4)) + "px";
+    mbtn.style.top = Math.max(4, Math.min(window.innerHeight - h - 4, y + 6)) + "px";
+  }
+  function syncHostMention() {
+    mraf = 0;
+    var p = hostMention();
+    if (p) placeMention(p);
+    else if (mpend && !mpend.frame) hideMention();
+  }
+  function addMention() {
+    var p = mpend;
+    hideMention();
+    if (!p) return;
+    bmentions.push(p.m);
+    if (p.frame) { if (p.frame.contentWindow) p.frame.contentWindow.postMessage({ wbDoc: "unsel" }, "*"); }
+    else if (window.getSelection) window.getSelection().removeAllRanges();
+    renderChips();
+    syncNote();
+  }
+  // frameMention takes a body frame's selection report: its text and where
+  // its end stands inside the frame.
+  function frameMention(f, text, x, y) {
+    var t = f.closest("section.topic[data-topic]"), m = t && mentionOf(t.getAttribute("data-topic"), "", "", text);
+    if (m) placeMention({ m: m, frame: f, x: x, y: y });
+    else if (mpend && mpend.frame === f) hideMention();
+  }
+  if (cchips) {
+    doc.addEventListener("selectionchange", function () {
+      if (!mraf) mraf = requestAnimationFrame(syncHostMention);
+    });
+    // A press anywhere on this page leaves a frame's selection behind.
+    doc.addEventListener("mousedown", function (e) {
+      if (mpend && mpend.frame && !(e.target.closest && e.target.closest("[data-wbmention]"))) hideMention();
+    }, true);
+    // The button follows its selection when the board scrolls or the
+    // window resizes.
+    var follow = function () {
+      if (!mpend) return;
+      if (mpend.frame) { placeMention(mpend); return; }
+      var p = hostMention();
+      if (p) placeMention(p); else hideMention();
+    };
+    window.addEventListener("scroll", follow, true);
+    window.addEventListener("resize", follow);
+  }
   var sending = false;
   // topicNotes are the board's non-empty topic notes. A send carries them
   // as its topics, which the delivered message's answer block lists after
@@ -1453,10 +1595,10 @@
   }
   function sendMessage() {
     if (sending) return;
-    var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes();
-    if (!t && !list.length && !pics.length && !notes.length) { syncNote(wsT("js.send.empty")); return; }
+    var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes(), said = bmentions.slice();
+    if (!t && !list.length && !pics.length && !notes.length && !said.length) { syncNote(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { syncNote(wsT("js.send.reading")); return; }
-    var body = { text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }) };
+    var body = { text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }), mentions: said };
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
     if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data, n: p.n }; });
     if (refs.length) {
@@ -1479,6 +1621,8 @@
       var sent = list.filter(function (c) { var cur = chips[c.id]; return cur && cur.answer === c.answer && cur.note === c.note; });
       sent.forEach(function (c) { dropChip(c.id); });
       sent.forEach(function (c) { setItem(c.id, null); });
+      // A mention added during the send stays for the next one.
+      bmentions = bmentions.filter(function (m) { return said.indexOf(m) < 0; });
       // A topic note edited during the send stays for the next one.
       notes.forEach(function (n) {
         if (n.el.value !== n.value) return;
@@ -1494,11 +1638,18 @@
       syncNote(wsT(res.merged ? "js.send.merged" : "js.send.ok"));
     });
   }
+  // validMentions keeps the well-formed mentions of a list a cancel or a
+  // stored draft returned.
+  function validMentions(list) {
+    return (Array.isArray(list) ? list : []).filter(function (m) {
+      return m && typeof m.topic === "string" && m.topic && typeof m.text === "string" && m.text;
+    }).map(function (m) { return m.id ? { topic: m.topic, id: String(m.id), text: m.text } : { topic: m.topic, text: m.text }; });
+  }
   // restoreHeld puts held messages a cancel or an interrupt took back into
   // the composer, oldest first, ahead of the draft: their texts joined as
-  // paragraphs, their answer chips, their topic notes back on the board's
-  // topics (restoreTopics), and their images as chips that reference the
-  // written files, with their markers in the returned text. Each
+  // paragraphs, their answer chips, their mentions, their topic notes back
+  // on the board's topics (restoreTopics), and their images as chips that
+  // reference the written files, with their markers in the returned text. Each
   // message's numbers move above the highest the draft and the messages
   // before it use, the markers with them, as the server numbers a merge.
   function restoreHeld(list) {
@@ -1538,6 +1689,10 @@
       (res.chips || []).forEach(function (c) { if (!got[c.id]) order.push(c.id); got[c.id] = c; });
     });
     order.forEach(function (id) { if (!chips[id]) { putChip(got[id]); setItem(id, got[id]); } });
+    // Their mentions go back ahead of the draft's, oldest message first.
+    var held = [];
+    list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
+    bmentions = held.concat(bmentions);
     renderChips();
     renderImgs();
   }
@@ -1770,6 +1925,9 @@
     if (u) { var uid = u.getAttribute("data-unchip"); dropChip(uid); setItem(uid, null); renderChips(); syncNote(); return; }
     u = t.closest("[data-untchip]");
     if (u) { clearTopicNote(u.getAttribute("data-untchip")); renderChips(); syncNote(); return; }
+    u = t.closest("[data-unmchip]");
+    if (u) { bmentions.splice(+u.getAttribute("data-unmchip"), 1); renderChips(); syncNote(); return; }
+    if (t.closest("[data-wbmention]")) { addMention(); return; }
     u = t.closest("[data-tchip]");
     if (u) { focusTopicNote(u.getAttribute("data-tchip")); return; }
     u = t.closest("[data-unimg]");
@@ -2546,6 +2704,8 @@
       openLinkMenu(a, r.left + num(m.x), r.top + num(m.y));
     } else if (m.wbDoc === "img") {
       relayImage(f, m);
+    } else if (m.wbDoc === "sel") {
+      if (cchips) frameMention(f, str(m.text), num(m.x), num(m.y));
     }
   });
   // A swap re-creates a changed topic's frame (or loads its next one beside
@@ -5908,6 +6068,7 @@
       mentions: mentions.map(function (m) { return { start: m.start, end: m.end, text: m.text }; }),
       answers: b ? readAnswers(b) : {},
       chips: chipList(),
+      bmentions: bmentions.slice(),
       refs: imgs.filter(function (p) { return !!p.ref; }).map(function (p) { return { ref: p.ref, name: p.name, n: p.n }; }),
       lost: imgs.filter(function (p) { return !p.ref; }).map(function (p) { return p.n; }),
       open: open,
@@ -5949,6 +6110,10 @@
       if (cchips && Array.isArray(d.chips)) {
         d.chips.forEach(function (c) { if (c && c.id && !chips[c.id]) { putChip(c); setItem(c.id, c); } });
         syncChips();
+      }
+      if (cchips && !bmentions.length && validMentions(d.bmentions).length) {
+        bmentions = validMentions(d.bmentions);
+        renderChips();
       }
       var lost = Array.isArray(d.lost) ? d.lost : [];
       if (ctext && typeof d.text === "string" && d.text && !ctext.value) {

@@ -110,12 +110,12 @@ func TestDashboardInboxDrainTextAndJSONOutput(t *testing.T) {
 		t.Fatalf("message = %+v", m)
 	}
 
-	// A chip-only message has empty, never null, parts.
+	// A chip-only message has empty, never null, parts, topics, and mentions.
 	if _, _, err := wsinbox.Send(dir, wsinbox.Entry{Chips: []wsinbox.Chip{{ID: "1", Answer: "a"}}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	out = callToolWithKey(t, f.server, 8, f.keyA, dashboardInboxDrainTool, map[string]any{"format": "json"})
-	if !strings.Contains(out, `"parts":[]`) || !strings.Contains(out, `"topics":[]`) || strings.Contains(out, "null") {
+	if !strings.Contains(out, `"parts":[]`) || !strings.Contains(out, `"topics":[]`) || !strings.Contains(out, `"mentions":[]`) || strings.Contains(out, "null") {
 		t.Fatalf("chip-only json = %q", out)
 	}
 }

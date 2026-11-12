@@ -10,7 +10,9 @@
   // ({wbDoc: "view"}: the image's source, or the diagram flattened by
   // wbFlattenSvg, which svg-view.js defines ahead of this script); and, for
   // an image outside the session root, a request for its bytes
-  // ({wbDoc: "img"}, see relay below).
+  // ({wbDoc: "img"}, see relay below); and a text selection, which the
+  // dashboard's live board offers to add to the message as a mention
+  // ({wbDoc: "sel"}, see below).
   // A plain link needs no help: <base target="_blank"> opens it in a new tab.
   var d = document, body = d.querySelector(".doc-body");
 
@@ -96,6 +98,28 @@
     if (e.data.wbDoc === "size") { last = -1; size(); askRelays(); }
     else if (e.data.wbDoc === "theme") theme(e.data.theme);
     else if (e.data.wbDoc === "img") relayed(e.data);
+    else if (e.data.wbDoc === "unsel" && window.getSelection) window.getSelection().removeAllRanges();
+  });
+
+  // The selection: its text and where its end stands in this frame, "" once
+  // it collapses (each change, but a collapsed one only once). The host
+  // clears it after adding it ({wbDoc: "unsel"}).
+  var selQueued = false, selLast = "";
+  d.addEventListener("selectionchange", function () {
+    if (selQueued || !window.getSelection) return;
+    selQueued = true;
+    requestAnimationFrame(function () {
+      selQueued = false;
+      var s = window.getSelection(), text = s && !s.isCollapsed && s.rangeCount ? s.toString() : "";
+      if (!text && !selLast) return;
+      selLast = text;
+      var r = null;
+      if (text) {
+        var rs = s.getRangeAt(0).getClientRects();
+        r = rs.length ? rs[rs.length - 1] : s.getRangeAt(0).getBoundingClientRect();
+      }
+      post({ wbDoc: "sel", text: text, x: r ? r.right : 0, y: r ? r.bottom : 0 });
+    });
   });
   size();
   askRelays();

@@ -357,6 +357,10 @@ type ConvEntry struct {
 	// Answers are the lines of the answer block a user message starts with,
 	// taken out of its text; the bubble shows them as capsules.
 	Answers []wsinbox.AnswerLine
+	// Mentions are the mention elements after that block (or opening the
+	// message), taken out of its text and shown as capsules after the
+	// answer capsules.
+	Mentions []wsinbox.Mention
 	// Rendered is the entry's whole element, from the entry cache.
 	Rendered template.HTML
 	// Body is a mail line's full message from the mailbox history; HasBody

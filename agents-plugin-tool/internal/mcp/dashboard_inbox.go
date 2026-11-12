@@ -29,6 +29,9 @@ type dashboardInboxMessage struct {
 	Parts  []string            `json:"parts"`
 	Chips  []wsinbox.Chip      `json:"chips"`
 	Topics []wsinbox.TopicNote `json:"topics"`
+	// Mentions are the board text the user pointed at, which Text carries
+	// after the answer block.
+	Mentions []wsinbox.Mention `json:"mentions"`
 	// Interrupt marks an interrupt entry, which carries no text.
 	Interrupt bool `json:"interrupt,omitempty"`
 }
@@ -80,7 +83,7 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 		messages := make([]dashboardInboxMessage, 0, len(records))
 		for _, r := range records {
 			e := r.Entry
-			parts, chips, topics := e.Parts, e.Chips, e.Topics
+			parts, chips, topics, mentions := e.Parts, e.Chips, e.Topics, e.Mentions
 			if parts == nil {
 				parts = []string{}
 			}
@@ -90,7 +93,10 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 			if topics == nil {
 				topics = []wsinbox.TopicNote{}
 			}
-			messages = append(messages, dashboardInboxMessage{ID: r.ID(), SentAt: e.SentAt, Text: e.Text(), Parts: parts, Chips: chips, Topics: topics, Interrupt: e.Interrupt})
+			if mentions == nil {
+				mentions = []wsinbox.Mention{}
+			}
+			messages = append(messages, dashboardInboxMessage{ID: r.ID(), SentAt: e.SentAt, Text: e.Text(), Parts: parts, Chips: chips, Topics: topics, Mentions: mentions, Interrupt: e.Interrupt})
 		}
 		return toolJSONResponse(id, map[string]any{"messages": messages}, nil)
 	}

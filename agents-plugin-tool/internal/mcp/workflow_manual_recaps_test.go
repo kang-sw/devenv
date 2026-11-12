@@ -39,6 +39,21 @@ func TestRenderSessionStateListsOpenWhiteboardRecaps(t *testing.T) {
 	}
 }
 
+// TestRenderSessionStateRecapResolvesItemReferences: a recap's {{nn}}
+// reference reads as the board shows it, (nn), when the store holds the
+// item, and stays verbatim otherwise.
+func TestRenderSessionStateRecapResolvesItemReferences(t *testing.T) {
+	board := &wswhiteboard.State{
+		Seq:    1,
+		Items:  []wswhiteboard.Item{{ID: 313, Topic: "alpha", Class: wswhiteboard.ClassTechnical, Title: "x", Status: wswhiteboard.StatusOpen}},
+		Topics: []wswhiteboard.TopicDoc{{Name: "alpha", Recap: "waiting on {{313}}, not {{9}}"}},
+	}
+	got := renderSessionState(sessionRecord{Whiteboard: board})
+	if !strings.Contains(got, "- alpha: waiting on (313), not {{9}}\n") {
+		t.Fatalf("recap references not resolved:\n%s", got)
+	}
+}
+
 func TestRenderSessionStateNoRecapsNoHeading(t *testing.T) {
 	boards := map[string]*wswhiteboard.State{
 		"nil board": nil,
