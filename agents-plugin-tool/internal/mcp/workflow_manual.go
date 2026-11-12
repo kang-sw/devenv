@@ -171,7 +171,8 @@ func renderWhiteboardRecaps(board *wswhiteboard.State) string {
 		}
 		// Continuation lines are indented (as wswhiteboard.FormatQuery does),
 		// so a multi-line recap never reads as a heading or list item.
-		lines.WriteString("- " + name + ": " + strings.ReplaceAll(t.Recap, "\n", "\n  ") + "\n")
+		// Item references read as the page shows them, (nn).
+		lines.WriteString("- " + name + ": " + strings.ReplaceAll(board.TextRefs(t.Recap), "\n", "\n  ") + "\n")
 	}
 	if lines.Len() == 0 {
 		return ""

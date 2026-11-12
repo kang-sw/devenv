@@ -64,7 +64,7 @@ function q(sel, root) { return root.all().filter(function (e) { return e.has("tn
 function wsT(k) { return k; }
 function tabShown() { return true; }
 function setTab() {}
-var answer = [{ id: "03", answer: "A", note: "" }];
+var answer = [{ id: "03", answer: "A", note: "" }], bmentions = [];
 function chipList() { return answer; }
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 function topic(name, value, hidden) {
@@ -107,6 +107,11 @@ closeTopicNotes();
 check("a send's close hides every open note and keeps its text", board.children.map(function (t) { var n = t.children[1]; return [n.getAttribute("data-topic"), n.hidden, n.value]; }),
   [["Plan \"x\"", true, ""], ["Empty", true, "   "], ["Later", true, "closed text"], ["Empty2", true, "back"], ["Keep", true, "mine\ntheirs"]]);
 check("the focused note is blurred, a closed one untouched", log, ["blur:Keep"]);
+bmentions = [{ topic: "plan", id: "07", text: "line one\n  line two" }, { topic: "Later", text: "body text" }];
+renderChips();
+check("mentions follow the topic notes, the text on one line", row().slice(-2), ["achip mchip|[plan] (07)|line one line two|×", "achip mchip|[Later]|body text|×"]);
+var mc = cchips.children[cchips.children.length - 2];
+check("a mention capsule carries its full text and its index", [mc.title, mc.children[2].getAttribute("data-unmchip"), mc.children[2].title], ["line one\n  line two", "0", "js.wbmention.remove"]);
 process.stdout.write(bad.join("\n"));
 `)
 }
