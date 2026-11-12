@@ -410,7 +410,14 @@
       "registered_at": "2026-11-12T02:03:05Z"
     },
     "261112-feat-ws-dashboard-outside-root-file-card": {
-      "registered_at": "2026-11-12T05:55:12Z"
+      "registered_at": "2026-11-12T05:55:12Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-12T06:58:49Z"
+      }
     },
     "261112-feat-ws-dashboard-pin-column": {
       "registered_at": "2026-11-12T06:51:53Z"
@@ -422,7 +429,10 @@
         "clone_id": "28ef83e379b353cc",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-12T06:58:46Z"
+        "touched_at": "2026-11-12T06:59:29Z",
+        "impl": {
+          "branch": "impl/develop/rebel-zen-sprig"
+        }
       }
     },
     "261112-feat-ws-mixed-version-compat-guards": {
