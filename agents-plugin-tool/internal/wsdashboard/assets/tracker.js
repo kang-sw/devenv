@@ -4497,10 +4497,12 @@
   // nearest, left to right = shallow to deep. A marker at every other level slot from the root to
   // one under a (.hdep, insMarks) shows where the badge can move: a dim tick where a place is, a
   // small x where none is (above b's depth, or under a parent that cannot take the item); the slots
-  // deeper than the badge are drawn too, and the guide line starts past the deepest. A click opens
-  // the input row in the gap.
+  // deeper than the badge are drawn too, and the guide line starts past the deepest. The row that
+  // would parent the badge's place carries an outline (.hpar, insPar). A click opens the input row
+  // in the gap.
   var IND = 16, INS_EDGE = 5; // a level's indent (tracker.css .ir-main, .hins), the gap's half height
   var HV = null; // the shown insert: { list, a, b, y, opts, pick }
+  var HP = null; // the row outlined as the shown insert's parent (.hpar)
   function rowDepth(el) { return el ? Number(el.style.getPropertyValue('--ind')) || 0 : 0; }
   function rowLike(el) { return el && el.matches && el.matches('.irow, .csum, .tmore') ? el : null; }
   // ok(parent id, or null for the top level): may the place's parent take the item; a create's
@@ -4537,6 +4539,24 @@
     }
     return h;
   }
+  // the row that would parent place o in the gap below row a: the nearest row above the gap one
+  // level shallower than the place, when it shows the place's parent; none for a root place
+  function insParRow(a, o) {
+    if (!a || !o.parent) return null;
+    for (var r = a; r; r = r.previousElementSibling) {
+      if (!r.matches('.irow')) continue;
+      var d = rowDepth(r);
+      if (d < o.depth - 1) return null;
+      if (d === o.depth - 1) return r.getAttribute('data-item') === o.parent ? r : null;
+    }
+    return null;
+  }
+  function insPar(el) {
+    if (HP === el) return;
+    if (HP) HP.classList.remove('hpar');
+    if (el) el.classList.add('hpar');
+    HP = el;
+  }
   function insWidth(opts) { return 4 + opts[opts.length - 1].depth * IND + 40; } // the gutter: past the deepest badge by a little
   // pointer at (x, y) over row el in list: the gap it is near, or null
   function insGap(list, el, y) {
@@ -4567,12 +4587,14 @@
     s.querySelector('.hhit').style.width = insWidth(opts) + 'px';
     s.hidden = false;
     list.classList.add('hins-on');
+    insPar(insParRow(g.a, o));
   }
   function insHide() {
     if (!HV) return;
     var s = HV.list.querySelector(':scope > .hins');
     if (s) s.hidden = true;
     HV.list.classList.remove('hins-on');
+    insPar(null);
     HV = null;
   }
   function insMove(e) {
@@ -5054,7 +5076,7 @@
     // it is (the render that opens it draws it), and nothing is measured but the handle row.
     if (!ui.open && !ui.page && !ui.win) {
       hideTip();
-      HV = null;
+      insPar(null); HV = null;
       $('tkwin').hidden = true; setInert(false);
       if (sb.firstChild) sb.innerHTML = '';
       dropEditorState(false);
@@ -5081,7 +5103,7 @@
     focusFk = focusFk && focusFk.getAttribute('data-fk');
     Array.prototype.forEach.call(body.querySelectorAll('.card[id] > .cbody'), function (c) { scrolls[c.parentNode.id] = c.scrollTop; });
     hideTip();
-    HV = null;
+    insPar(null); HV = null;
     body.innerHTML = drawerHtml(name, v);
     placeSub(); placeNew();
     if (!ui.page) fitDrawer();
