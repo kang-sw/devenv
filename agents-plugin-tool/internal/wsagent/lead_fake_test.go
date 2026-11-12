@@ -120,10 +120,21 @@ type fakeHolders struct {
 	// scanHook, when set, runs at the start of each Scan, before it takes
 	// the lock (gateScan).
 	scanHook func()
+	// failInput fails the next n inputs whose first line has a type (a
+	// negative n fails every one), as a write to a gone child does; the
+	// failed input reaches no child.
+	failInput map[string]int
 }
 
 func newFakeHolders() *fakeHolders {
-	return &fakeHolders{holders: map[string]*fakeHolder{}, callTimeout: 5 * time.Second, refuse: map[string]string{}, bodies: map[string]string{}}
+	return &fakeHolders{holders: map[string]*fakeHolder{}, callTimeout: 5 * time.Second, refuse: map[string]string{}, bodies: map[string]string{}, failInput: map[string]int{}}
+}
+
+// failInputs makes the next n inputs of type kind fail (failInput).
+func (f *fakeHolders) failInputs(kind string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failInput[kind] = n
 }
 
 // setControl sets how the children answer control requests of subtype: an
@@ -302,6 +313,16 @@ func (f *fakeHolders) Input(id string, data []byte, eof bool) error {
 	if h == nil || !h.attached {
 		f.mu.Unlock()
 		return wsholder.ErrDetached
+	}
+	var first struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(bytes.SplitN(bytes.TrimSpace(data), []byte("\n"), 2)[0], &first) == nil && f.failInput[first.Type] != 0 {
+		if f.failInput[first.Type] > 0 {
+			f.failInput[first.Type]--
+		}
+		f.mu.Unlock()
+		return errors.New("holder: write to the child: broken pipe")
 	}
 	for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
 		if len(line) == 0 {

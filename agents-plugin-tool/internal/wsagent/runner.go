@@ -1423,6 +1423,38 @@ func (c *conv) kick() {
 	}
 	c.stopIdle()
 	c.setStatus(func() { c.turn, c.lastErr = true, "" })
+	// The turn reaches the page only once its send went through: a failed
+	// send leaves no user entry or turn line of its own (its error shows),
+	// so its retry shows the message once. The process's events for the
+	// turn are handled by this loop after kick returns, so they still
+	// follow the turn's start.
+	if cmd != nil {
+		err = c.runCommand(*cmd)
+	} else {
+		err = c.proc.Send(strings.Join(append(parts, mail...), "\n\n"))
+	}
+	if err != nil {
+		// The turn never began: its process ends with no turn to close.
+		c.setStatus(func() { c.turn, c.lastErr = false, "send turn: "+err.Error() })
+		c.stopProcess("")
+		// The turn stays queued (its mail stays claimed), and nothing else
+		// would submit it before an unrelated signal: it is retried once on
+		// a new process, through the loop's inbox signal rather than on
+		// this stack. A send that fails again leaves it for the next inbox
+		// or mail signal, so a send that always fails does not spin.
+		if (len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0) && !c.sendRetried {
+			c.sendRetried = true
+			c.signalInbox()
+		}
+		return
+	}
+	c.sendRetried = false
+	c.update(func(rec *Record) {
+		rec.Queued = rest
+		if len(mail) > 0 {
+			rec.Mail = nil
+		}
+	})
 	// Mail shows on the page through the session's mail history, so only
 	// the dashboard's own text is a user entry; a turn of mail alone is
 	// marked as mail's.
@@ -1436,32 +1468,6 @@ func (c *conv) kick() {
 		c.apply(wslive.Event{Kind: wslive.KindUser, Origin: origin, Text: text})
 	}
 	c.apply(wslive.Event{Kind: wslive.KindTurnStart, Origin: origin})
-	if cmd != nil {
-		err = c.runCommand(*cmd)
-	} else {
-		err = c.proc.Send(strings.Join(append(parts, mail...), "\n\n"))
-	}
-	if err != nil {
-		c.setStatus(func() { c.lastErr = "send turn: " + err.Error() })
-		c.stopProcess("")
-		// The turn stays queued, and nothing else would submit it before
-		// an unrelated signal: it is retried once on a new process, through
-		// the loop's inbox signal rather than on this stack. A send that
-		// fails again leaves it for the next inbox or mail signal, so a
-		// send that always fails does not spin.
-		if len(c.rec.Queued) > 0 && !c.sendRetried {
-			c.sendRetried = true
-			c.signalInbox()
-		}
-		return
-	}
-	c.sendRetried = false
-	c.update(func(rec *Record) {
-		rec.Queued = rest
-		if len(mail) > 0 {
-			rec.Mail = nil
-		}
-	})
 }
 
 // nextTurn splits queue at its first slash command: a command at the front
