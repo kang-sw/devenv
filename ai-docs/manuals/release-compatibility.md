@@ -89,7 +89,8 @@ recorded in the ticket's `## Decisions`, so the release gate only confirms it.
 
 Rules 1-4 are confirmed (user decisions 2026-11-12); their mechanisms are not
 implemented yet. Until they land, the tier recorded at discussion time and the
-release gate's review are the only checks. Pending mechanisms:
+release gate's review are the only checks. Pending mechanisms, tracked in
+ticket `261112-feat-ws-mixed-version-compat-guards`:
 
 - Rule 1: a tool-surface monotonicity test against the previous release's
   `runtime.json` surface.
