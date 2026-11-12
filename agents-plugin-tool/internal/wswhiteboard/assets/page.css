@@ -133,8 +133,13 @@ a { color: var(--wb-primary); }
 .tbar .tago { font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tbar .tnote-toggle { background: transparent; color: inherit; opacity: .7; flex: none; }
 .tbar .tnote-toggle:hover { opacity: 1; }
-.topic > .tnote { width: calc(100% - 20px); margin: 6px 10px; }
-.topic.quiet > .tnote { width: 100%; margin: 4px 0; }
+/* A topic's note is a floating capsule: rounded, on the card colour, with a
+   soft shadow and inset from the topic's edges, so it reads apart from the
+   body that scrolls under it while it sticks below the bar (the rail rules
+   below). It grows with its text up to about six lines, then scrolls. */
+.topic > .tnote { width: calc(100% - 20px); margin: 6px 10px; border: 1px solid var(--wb-line); border-radius: 10px; box-shadow: var(--wb-shadow-hi); max-height: calc(6 * 1.4em + 14px); overflow-y: auto; }
+.topic > .tnote:focus { border-color: var(--wb-primary); }
+.topic.quiet > .tnote { width: calc(100% - 12px); margin: 4px 6px; }
 .closed-more { display: block; margin: 0 0 16px; font-size: 12.5px; color: var(--wb-muted-fg); }
 button.closed-more { display: flex; margin: 0 auto 16px; }
 .tbar .chip:not(.policy):not(.ok):not(.fresh) { background: rgb(127 127 127 / .28); color: inherit; }
@@ -471,9 +476,19 @@ details.panel .body { container-type: inline-size; }
    each data-rail-bar), and
    styles their .wb-stuck shadow. */
 .wb-rail .topic { overflow: hidden; overflow: clip; }
-.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; }
+.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 2; }
+/* An open note sticks right under its topic's bar (--wb-rail-note, the bar's
+   stick line plus its height, which rail.js sets on each note), so it stays
+   at hand while the topic scrolls and leaves with the topic. It draws above
+   the topic's body and below the bar (z-index 1 < 2): when the card's end
+   pushes both up, the note slides under the bar. It keeps its top margin as
+   a gap under the bar, so it does not move when it starts to stick. The
+   fallback is a one-line bar under no capsules, for the frame before the
+   rail's first run. */
+.wb-rail .topic > .tnote { position: sticky; top: calc(var(--wb-rail-note, 30px) + 6px); z-index: 1; }
+.wb-rail .topic.quiet > .tnote { top: calc(var(--wb-rail-note, 30px) + 4px); }
 .wb-rail .topic:not(.quiet) > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
-/* A stuck bar stays under the top capsule stack (z-index 1 < the wrapper's
+/* A stuck bar stays under the top capsule stack (z-index 2 < the wrapper's
    3): a bar that its card's end pushes up slides under the stack, and the
    morph copy (rail.js motion) draws the turn into a capsule over it. Drawn
    above the stack, a short topic (a quiet one is all bar, so its bar cannot
@@ -481,14 +496,12 @@ details.panel .body { container-type: inline-size; }
    second shadow fills the bar's rounded top corners with the page colour
    (offset up by its spread, so it reaches the corners and not below the
    bar; the topic clips its sides): the card scrolling under a stuck bar
-   showed through them. A quiet bar is rounded below too, so with a note
-   under it it squares its bottom corners while stuck. */
+   showed through them. */
 .wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
-.wb-rail .topic.quiet:has(> .tnote) > .tbar.wb-stuck { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 /* the book button stays at the card's top and scrolls away under a stuck bar, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
 .wb-rail .topic.has-doc:has(> details.tdoc) > .tbar.wb-stuck { padding-right: 12px; }
 .wb-rail .topic > details.tdoc > summary { z-index: 2; }
-.wb-rail-wrap { position: sticky; height: 0; z-index: 1; pointer-events: none; }
+.wb-rail-wrap { position: sticky; height: 0; z-index: 2; pointer-events: none; }
 .wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }
 /* The bottom wrapper ends the board, so its top margin is the board's
    bottom scroll margin: room for the last item to scroll fully clear of

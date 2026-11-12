@@ -60,7 +60,8 @@ function hostWrites() { return writes.filter(function (w) { return w[0] === "hos
 `
 
 // TestRailOffsetsSkipTheHost pins where rail.js puts its offsets: each
-// item's bar carries --wb-rail-top, the open-question pill's wrappers carry
+// item's bar carries --wb-rail-top, each topic's note --wb-rail-note (its
+// bar's stick line plus the bar's height), the open-question pill's wrappers carry
 // --wb-rail-h and --wb-rail-bot, and the host carries none (a custom
 // property on the host is inherited by every board node, so each write
 // restyled the whole board). An unchanged value is not written again, and a
@@ -99,6 +100,15 @@ check("an unchanged draw writes nothing", writes.filter(function (w) { return /^
 var g = topic("g", 3600); g.h = 0; writes = []; ro(); frame();
 check("a new bar gets the current offset", g.children[0].props["--wb-rail-top"], "44px");
 check("only the new bar is written", writes.filter(function (w) { return /^--wb-rail/.test(w[1]); }).map(function (w) { return w[0]; }), ["bar-g"]);
+// A topic's note sticks under its bar: the stick line plus that bar's own
+// height, written whether the note is open or not, and again when the bar
+// grows (a wrapped bar).
+var ta = board.querySelector("section.topic"), na = ta.appendChild(new E("textarea", "note tnote", { "data-topic": "a" })); na.name = "note-a"; na.hidden = true;
+writes = []; ro(); frame();
+check("a closed note gets its offset", na.props["--wb-rail-note"], "74px");
+ta.children[0].h = 52; writes = []; ro(); frame();
+check("a taller bar moves its note", na.props["--wb-rail-note"], "96px");
+check("only the note is written", writes.filter(function (w) { return /^--wb-rail/.test(w[1]); }).map(function (w) { return w[0]; }), ["note-a"]);
 process.stdout.write(bad.join("\n"));`
 	out, err := exec.Command(node, "-e", script).CombinedOutput()
 	if err != nil {

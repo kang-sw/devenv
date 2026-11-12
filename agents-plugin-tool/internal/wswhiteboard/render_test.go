@@ -996,8 +996,9 @@ func TestTopicRailIsOnTheFullPageOnly(t *testing.T) {
 // TestTopicRailBarCapsuleMotion pins the rail's bar-to-capsule motion
 // (rail.js morph): it runs only without reduced motion and never on a
 // run's first draw, reads its starting boxes before a redraw and animates
-// after it, a stuck bar draws below the top capsule stack (z-index 1 under
-// the wrapper's 3) so the card's end pushes it under the stack and a short
+// after it, a stuck bar draws below the top capsule stack (z-index 2 under
+// the wrapper's 3; the bottom wrapper's 2 draws over it by board order, and
+// an open topic note sticks under the bar at 1) so the card's end pushes it under the stack and a short
 // topic straddling the stick line never covers the capsules, a stuck bar's
 // rounded corners are filled with the page colour so the card scrolling
 // under it does not show through them, both edges morph (the bottom stack's near
@@ -1046,8 +1047,9 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 	}
 	for _, want := range []string{
 		`.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }`,
-		`.wb-rail .topic.quiet:has(> .tnote) > .tbar.wb-stuck { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }`,
-		`.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; }`,
+		`.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 2; }`,
+		`.wb-rail .topic > .tnote { position: sticky; top: calc(var(--wb-rail-note, 30px) + 6px); z-index: 1; }`,
+		`.wb-rail-wrap { position: sticky; height: 0; z-index: 2; pointer-events: none; }`,
 		`.wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }`,
 		`.wb-rail-wrap .wb-rail-ghost { position: absolute;`,
 		`.wb-rail-ghost > * { position: absolute; left: 0; top: 50%; width: 100%; margin: 0; transform: translateY(-50%); background: transparent;`,

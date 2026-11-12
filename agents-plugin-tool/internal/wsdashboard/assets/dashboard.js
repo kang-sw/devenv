@@ -410,7 +410,9 @@
     });
     q(".tnote[data-topic]", el).forEach(function (note) {
       var s = saved["t:" + note.getAttribute("data-topic")];
-      if (s) openNote(note, s);
+      // A note a send closed (closeTopicNotes) keeps its text closed.
+      if (s && s.noteOpen) openNote(note, s);
+      else if (s) note.value = s.note || "";
     });
   }
   // A board swap waits while the user is typing in the answer form, and
@@ -1122,6 +1124,17 @@
     n.value = "";
     n.dispatchEvent(new Event("input", { bubbles: true }));
   }
+  // closeTopicNotes closes every open topic note, as its pen does: the text
+  // stays, and the note's chip or pen opens it again. A focused note is
+  // blurred first, so a board swap deferred while it was edited lands.
+  function closeTopicNotes() {
+    var b = region("board");
+    (b ? q(".tnote[data-topic]", b) : []).forEach(function (el) {
+      if (el.hidden) return;
+      if (doc.activeElement === el) el.blur();
+      el.hidden = true;
+    });
+  }
   // focusTopicNote brings a topic's note into view on the board, opening it
   // through the topic's pen when it is closed.
   function focusTopicNote(name) {
@@ -1464,6 +1477,8 @@
         n.el.value = "";
         n.el.dispatchEvent(new Event("input", { bubbles: true }));
       });
+      // A send closes the open notes; one edited during it keeps its text.
+      closeTopicNotes();
       renderChips();
       // The sent draft is gone; what was typed during the send is saved
       // again as the next draft.
