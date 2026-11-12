@@ -15,7 +15,7 @@ func runTrackerNode(t *testing.T, what, script string) {
 	if err != nil {
 		t.Skip("node not installed; " + what + " cases not executed")
 	}
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}

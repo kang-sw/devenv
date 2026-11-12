@@ -356,7 +356,7 @@ check("other topic untouched", [pressed(b1), bk1.checked], [[], false]);
 click(pol);
 check("a second click", [pressed(a1), pressed(a2), pressed(a3)], [["b"], ["c"], []]);
 process.stdout.write(bad.join("\n"));`
-	out, err := exec.Command(node, "-e", script).CombinedOutput()
+	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
 		t.Fatalf("node: %v\n%s", err, out)
 	}

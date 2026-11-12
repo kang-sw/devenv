@@ -285,13 +285,29 @@ func TestAppendDuringHeldFetchSurvivesAndIsPushed(t *testing.T) {
 // check, by this process or another, and the check's apply step, finding
 // the registration gone, applies nothing: the check answers
 // ErrNotRegistered, the handle is dropped, and nothing of the store's
-// directory comes back.
+// directory comes back. Where the rename follows the locks' release and is
+// refused while the fetch holds a file in the directory (Windows; the last
+// case refuses it on every OS), the unregister still succeeds and the
+// check moves the directory away when it ends.
 func TestUnregisterDuringHeldFetchDiscardsTheResult(t *testing.T) {
-	for _, who := range []string{"this process", "another process"} {
+	for _, who := range []string{"this process", "another process", "another process, rename refused"} {
 		t.Run(who, func(t *testing.T) {
 			w := newWorld(t)
 			runner := newHoldRunner(isWikiFetch)
 			runner.after = true
+			if strings.HasSuffix(who, "rename refused") {
+				wasUnder, wasRename := renameUnderLocks, renameDir
+				t.Cleanup(func() { renameUnderLocks, renameDir = wasUnder, wasRename })
+				renameUnderLocks = false
+				renameDir = func(from, to string) error {
+					select {
+					case <-runner.release:
+						return wasRename(from, to)
+					default:
+						return &os.LinkError{Op: "rename", Old: from, New: to, Err: errors.New("access is denied")}
+					}
+				}
+			}
 			a := hostWith(t, w, "a", runner)
 			b := w.machine("b")
 			res := w.register(a, "team", "ada", &wstracker.Profile{Given: "Ada"})
@@ -303,7 +319,7 @@ func TestUnregisterDuringHeldFetchDiscardsTheResult(t *testing.T) {
 			createItem(t, b, "team", "fetched, never applied")
 			syncStore(t, b, "team")
 			remover := a
-			if who == "another process" {
+			if who != "this process" {
 				remover = sameRoot(t, w, "a")
 			}
 

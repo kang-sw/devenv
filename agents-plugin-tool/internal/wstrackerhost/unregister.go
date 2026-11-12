@@ -31,8 +31,15 @@ var unregisterWait = 2 * time.Second
 // directory in between. Windows cannot rename a directory that holds an
 // open file, so there the lock files close first; a call another process
 // already had waiting on the store lock can then run on the directory in
-// the moment before the rename.
+// the moment before the rename. A call on the network (a fetch, in any
+// process) holds the network lock file open in the directory throughout,
+// so there the rename can still fail; the directory is then left to that
+// call, which moves it away when it ends (removeLeftover).
 var renameUnderLocks = runtime.GOOS != "windows"
+
+// renameDir renames a store directory away; a test replaces it to refuse
+// the rename as Windows does while a file in the directory is open.
+var renameDir = os.Rename
 
 // The kinds of an UnregisterRefusal.
 const (
@@ -140,6 +147,12 @@ func tryFlock(ctx context.Context, fl *flock.Flock) bool {
 // let another process's write recreate files inside a half-deleted
 // directory. Nothing recreates the directory afterwards, and every Host
 // re-checks the registration before it reuses an open store (lockStore).
+//
+// Where the rename follows the locks' release (renameUnderLocks false) and
+// a call on the network still holds a file in the directory, the rename is
+// refused; the registration is gone already, so Unregister succeeds and
+// the directory stays until that call ends and moves it away
+// (removeLeftover).
 func (h *Host) Unregister(ctx context.Context, id, confirm string) error {
 	h.sweepRemoved()
 	st, err := h.lockStore(ctx, id, unregisterWait, true)
@@ -176,10 +189,10 @@ func (h *Host) Unregister(ctx context.Context, id, confirm string) error {
 	// this process (MarkSeen) cannot land in between.
 	h.seenMu.Lock()
 	defer h.seenMu.Unlock()
-	aside := filepath.Join(h.root, fmt.Sprintf("%s%s-%d", removedPrefix, id, time.Now().UnixNano()))
+	aside := h.asidePath(id)
 	at := -1
 	moveAside := func() error {
-		if err := os.Rename(e.Dir, aside); err != nil {
+		if err := renameDir(e.Dir, aside); err != nil {
 			// The store stays registered rather than leaving a directory
 			// with no entry, which Register would refuse.
 			_ = h.restoreEntry(e, at)
@@ -211,13 +224,59 @@ func (h *Host) Unregister(ctx context.Context, id, confirm string) error {
 	h.retire(st)
 	wl.Unlock() //nolint:errcheck
 	if !renameUnderLocks {
-		if err := moveAside(); err != nil {
-			return err
+		if err := renameDir(e.Dir, aside); err != nil {
+			// The registration is gone, and every call finds it so before
+			// its next step; the call holding the directory moves it away
+			// when it ends (removeLeftover). Restoring the entry instead
+			// would refuse every unregister during a check on Windows.
+			return nil
 		}
 	}
 	// A failed delete leaves a hidden directory the next sweep removes.
 	_ = os.RemoveAll(aside)
 	return nil
+}
+
+// asidePath is a fresh name to rename store id's directory to before it is
+// deleted.
+func (h *Host) asidePath(id string) string {
+	return filepath.Join(h.root, fmt.Sprintf("%s%s-%d", removedPrefix, id, time.Now().UnixNano()))
+}
+
+// statDir is dir's FileInfo with its identity read now, nil when dir
+// cannot be read. On Windows os.Stat defers reading the file id to the
+// first os.SameFile, which would read whatever directory is at the path by
+// then.
+func statDir(dir string) os.FileInfo {
+	fi, err := os.Stat(dir)
+	if err != nil {
+		return nil
+	}
+	os.SameFile(fi, fi)
+	return fi
+}
+
+// removeLeftover moves st's directory away and deletes it when an
+// Unregister left it in place (renameUnderLocks false: the rename was
+// refused while this call's network lock file was open in it). A call on
+// the network runs it once it ended and found its registration gone,
+// holding st.mu. Only the directory st opened is moved, never one a later
+// registration of the id created.
+func (h *Host) removeLeftover(st *store) {
+	if renameUnderLocks || st.dirInfo == nil {
+		return
+	}
+	if _, err := h.Entry(st.id); !errors.Is(err, ErrNotRegistered) {
+		return
+	}
+	cur, err := os.Stat(st.entry.Dir)
+	if err != nil || !os.SameFile(cur, st.dirInfo) {
+		return
+	}
+	aside := h.asidePath(st.id)
+	if renameDir(st.entry.Dir, aside) == nil {
+		_ = os.RemoveAll(aside)
+	}
 }
 
 // sweepRemoved deletes the directories an Unregister renamed away and then
