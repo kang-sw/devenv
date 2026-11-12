@@ -412,6 +412,9 @@
     },
     "261112-bug-ws-launcher-fingerprint-skips-embedded-assets": {
       "registered_at": "2026-11-12T01:42:39Z"
+    },
+    "261112-feat-ws-mixed-version-compat-guards": {
+      "registered_at": "2026-11-12T01:58:07Z"
     }
   }
 }
