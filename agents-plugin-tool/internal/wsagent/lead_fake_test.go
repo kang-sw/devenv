@@ -706,6 +706,11 @@ var leadDaemonEnv = []string{
 func newLeadHarness(t *testing.T) *leadHarness {
 	t.Helper()
 	h := &leadHarness{t: t, dir: t.TempDir(), root: t.TempDir(), holders: newFakeHolders(), keys: &fakeLeadKeys{}, mail: newFakeMail(), log: &logBuffer{}}
+	// The backends' commands name no real file. On Windows harnessCommand
+	// resolves even a set command through lookPath (to find a .cmd shim to
+	// unwrap), which a missing file fails; the holders are fakes, so
+	// nothing ever runs the command.
+	setLookPath(t, func(file string) (string, error) { return file, nil })
 	restore := environ
 	environ = func() []string { return slices.Clone(leadDaemonEnv) }
 	t.Cleanup(func() { environ = restore })
