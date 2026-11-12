@@ -423,7 +423,14 @@
       "registered_at": "2026-11-12T01:58:07Z"
     },
     "261112-research-ws-lead-revive-context-cost": {
-      "registered_at": "2026-11-12T02:37:45Z"
+      "registered_at": "2026-11-12T02:37:45Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "28ef83e379b353cc",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-12T02:41:12Z"
+      }
     }
   }
 }
