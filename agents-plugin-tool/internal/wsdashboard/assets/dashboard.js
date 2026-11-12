@@ -622,7 +622,9 @@
     // around them. Stale nodes go first, so the kept ones that stay in
     // order are never moved (moving a frame reloads it), and a card is
     // never moved at all. A changed topic whose old section stays in place
-    // keeps that section and its body frame (frameGraft).
+    // keeps that section and its body frame (frameGraft); where the browser
+    // has Element.moveBefore, a kept node moves without reloading its
+    // frames, so every changed topic keeps its old section (frameGrafts).
     var woven = window.WsCards.weave(want);
     frameGrafts(el, woven, grafts).forEach(function (g) {
       frameGraft(g);
@@ -635,8 +637,9 @@
   // --- a changed topic's body frame, double-buffered --------------------------
   // A changed topic's new section would bring a new body frame, blank until
   // its document loads and reports a height. Instead, when the topic stays
-  // open and its old section would stay where it stands (frameGrafts), the
-  // old section is kept: its content becomes the new section's, except the
+  // open and its old section would stay where it stands, or the browser
+  // can move it without reloading its frame (frameGrafts), the old section
+  // is kept: its content becomes the new section's, except the
   // path down to the old body frame, and the new frame loads beside the old
   // one, unseen and out of the layout (.doc-frame-next), at the old one's
   // height. Once the new frame has loaded and drawn, it takes the old one's
@@ -667,9 +670,11 @@
   // (an update moves its topic to the head), or would push kept topics
   // around it, takes its new section as before. When the grafts together
   // move something, each one that alone moves nothing is kept, if those
-  // together still move nothing.
+  // together still move nothing. Where the browser has Element.moveBefore,
+  // settle moves a kept node without reloading its frames (cards.js), so
+  // every graft is kept, whatever moves.
   function frameGrafts(el, want, grafts) {
-    if (!grafts.length) return grafts;
+    if (!grafts.length || el.moveBefore) return grafts;
     var base = settleMoves(el, want);
     function still(gs) {
       var by = new Map(gs.map(function (g) { return [g.n, g.old]; })), ok = true;

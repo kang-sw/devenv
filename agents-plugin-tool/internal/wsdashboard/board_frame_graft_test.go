@@ -10,7 +10,9 @@ import (
 // settling the board with the old section standing for the new one moves
 // nothing the plain settle would not move, since moving a frame reloads it.
 // settleMoves replays cards.js settle, so random boards check that the two
-// agree on what moves. The cases execute under node when it is installed.
+// agree on what moves, with and without Element.moveBefore. Where the
+// browser has moveBefore a moved section keeps its frames, so every graft
+// is kept. The cases execute under node when it is installed.
 func TestBoardFrameGraftStaysPut(t *testing.T) {
 	cards, err := dashboardFS.ReadFile("assets/cards.js")
 	if err != nil {
@@ -58,7 +60,15 @@ function names(set) { return Array.from(set).map(function (n) { return n.name; }
 // nodes, cards among them.
 var seed = 7;
 function rnd(n) { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; }
-for (var round = 0; round < 500; round++) {
+// The rounds run first without El.moveBefore, then with it: a browser
+// that moves kept nodes with moveBefore moves the same nodes.
+function moveBefore(n, ref) {
+  if (n.parentNode !== this) throw new Error("moveBefore: not a child");
+  this.kids.splice(this.kids.indexOf(n), 1); this.moves.push(n.name);
+  this.kids.splice(ref ? this.kids.indexOf(ref) : this.kids.length, 0, n);
+}
+for (var round = 0; round < 1000; round++) {
+  if (round === 500) El.prototype.moveBefore = moveBefore;
   var have = [], want = [];
   for (var i = 0, k = 2 + rnd(7); i < k; i++) have.push(new N((rnd(4) ? "T" : "C") + i));
   have.forEach(function (n) { if (isCard(n) || rnd(5)) want.push(n); });
@@ -68,10 +78,14 @@ for (var round = 0; round < 500; round++) {
     var x = rnd(want.length);
     if (!isCard(want[s]) && !isCard(want[x])) { var tmp = want[s]; want[s] = want[x]; want[x] = tmp; }
   }
+  // settle can move a node twice (past two cards in turn); settleMoves
+  // names the nodes that move, once each.
   var el = boardOf(have), got = names(settleMoves(el, want));
   settle(el, want, isCard);
-  check("settleMoves round " + round + " (" + have.map(function (n) { return n.name; }) + " -> " + want.map(function (n) { return n.name; }) + ")", got, el.moves.slice().sort());
+  check("settleMoves round " + round + " (" + have.map(function (n) { return n.name; }) + " -> " + want.map(function (n) { return n.name; }) + ")", got, Array.from(new Set(el.moves)).sort());
 }
+
+delete El.prototype.moveBefore;
 
 // frameGrafts: g.n is the changed topic's new section, g.old its old one.
 function graft(name) { return { old: new N(name), n: new N(name + "'") }; }
@@ -92,6 +106,15 @@ var card = new N("Cx");
 check("a changed topic beside a card stays when the card does",
   frameGrafts(boardOf([b.old, card, a]), [b.n, card, a], [b]).length, 1);
 check("no grafts, none kept", frameGrafts(boardOf([a, w]), [a, w], []), []);
+// Where the browser has moveBefore, a moved section keeps its frames, so
+// every changed topic keeps its old section, whatever moves.
+El.prototype.moveBefore = moveBefore;
+check("with moveBefore one that rises to the head keeps its old section",
+  frameGrafts(boardOf([a, w, b.old]), [b.n, a, w], [b]).length, 1);
+check("with moveBefore one that sinks keeps it too",
+  frameGrafts(boardOf([b.old, a, w]), [a, w, b.n], [b]).length, 1);
+check("with moveBefore both changed topics keep their old sections",
+  frameGrafts(boardOf([b.old, a, c.old, w]), [b.n, a, w, c.n], [b, c]).map(function (g) { return g.old.name; }), ["B", "C2"]);
 process.stdout.write(bad.join("\n"));
 `)
 }
