@@ -55,6 +55,7 @@
   "file.copyfail": "No se pudo copiar: selecciona la ruta de arriba.",
   "file.copyrel": "Copiar ruta relativa",
   "file.none": "Este archivo no se puede ver aquí: {0}.",
+  "file.outside.gone": "Este archivo ya no está disponible aquí. Vuelve a abrirlo desde el tablero.",
   "file.reason.binary": "no es texto",
   "file.reason.large": "es mayor de {0} MiB",
   "gear.input": "Modo de entrada",

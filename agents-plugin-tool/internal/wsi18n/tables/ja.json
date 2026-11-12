@@ -55,6 +55,7 @@
   "file.copyfail": "コピーに失敗しました: 上のパスを選択してください。",
   "file.copyrel": "相対パスをコピー",
   "file.none": "このファイルはここでは表示できません: {0}。",
+  "file.outside.gone": "このファイルはここではもう利用できません。ボードから開き直してください。",
   "file.reason.binary": "テキストではありません",
   "file.reason.large": "{0} MiB を超えています",
   "gear.input": "入力モード",

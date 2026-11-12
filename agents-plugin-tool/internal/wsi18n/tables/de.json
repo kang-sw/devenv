@@ -55,6 +55,7 @@
   "file.copyfail": "Kopieren fehlgeschlagen: Markiere den Pfad oben.",
   "file.copyrel": "Relativen Pfad kopieren",
   "file.none": "Diese Datei kann hier nicht angezeigt werden: {0}.",
+  "file.outside.gone": "Diese Datei ist hier nicht mehr verfügbar. Öffne sie erneut vom Board aus.",
   "file.reason.binary": "sie ist kein Text",
   "file.reason.large": "sie ist größer als {0} MiB",
   "gear.input": "Eingabemodus",

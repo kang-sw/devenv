@@ -55,6 +55,7 @@
   "file.copyfail": "Copy failed: select the path above.",
   "file.copyrel": "Copy relative path",
   "file.none": "This file is not viewable here: {0}.",
+  "file.outside.gone": "This file is no longer available here. Reopen it from the board.",
   "file.reason.binary": "it is not text",
   "file.reason.large": "it is larger than {0} MiB",
   "gear.input": "Input mode",

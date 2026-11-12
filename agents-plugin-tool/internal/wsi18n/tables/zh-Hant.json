@@ -55,6 +55,7 @@
   "file.copyfail": "複製失敗：請手動選取上方的路徑。",
   "file.copyrel": "複製相對路徑",
   "file.none": "此檔案無法在這裡檢視：{0}。",
+  "file.outside.gone": "此檔案在這裡已無法使用。請從看板重新開啟。",
   "file.reason.binary": "它不是文字檔",
   "file.reason.large": "它大於 {0} MiB",
   "gear.input": "輸入方式",

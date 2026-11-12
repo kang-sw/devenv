@@ -27,6 +27,9 @@ type pageFake struct {
 	boards map[string]*wswhiteboard.State
 	// pageReads counts ReadPage calls per reply-id.
 	pageReads map[string]int
+	// outside are the files outside the root each board links
+	// (ReadOutsideLinks).
+	outside map[string][]string
 }
 
 func newPageFake() *pageFake {

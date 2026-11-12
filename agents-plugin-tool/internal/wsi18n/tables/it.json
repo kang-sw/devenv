@@ -55,6 +55,7 @@
   "file.copyfail": "Copia non riuscita: seleziona il percorso qui sopra.",
   "file.copyrel": "Copia percorso relativo",
   "file.none": "Questo file non può essere visualizzato qui: {0}.",
+  "file.outside.gone": "Questo file non è più disponibile qui. Riaprilo dalla lavagna.",
   "file.reason.binary": "non è testo",
   "file.reason.large": "supera {0} MiB",
   "gear.input": "Modalità di input",
