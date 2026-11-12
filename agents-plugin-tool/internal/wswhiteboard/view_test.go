@@ -230,3 +230,42 @@ func TestEmbedShowsABodyOpenOnlyWhenChanged(t *testing.T) {
 		t.Fatalf("closed topic on the embed = %+v", tv)
 	}
 }
+
+// A body's change marks go stale (dimmed) once an item of its topic changes
+// after the body's latest edit; a recap change does not count, and the next
+// body edit makes them fresh again.
+func TestDocStaleFollowsItemChangesAfterTheBodyEdit(t *testing.T) {
+	stale := func(st *State, name string) bool { return topicView(t, st, LayoutFull, name).DocStale }
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "t", "x")+addXML(ClassTechnical, "other", "y"))
+	mustApply(t, st, topicXML("t", "one\n\ntwo"))
+	mustApply(t, st, topicXML("t", "one\n\ntwo\n\nthree"))
+	if stale(st, "t") {
+		t.Fatal("a body edit with no item change after it is fresh")
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:recap>a recap</wb:recap></wb:topic>`)
+	if stale(st, "t") {
+		t.Fatal("a recap change does not stale the marks")
+	}
+	mustApply(t, st, addXML(ClassTechnical, "other", "z"))
+	if stale(st, "t") {
+		t.Fatal("an item of another topic does not stale the marks")
+	}
+	mustApply(t, st, addXML(ClassTechnical, "t", "added"))
+	if !stale(st, "t") {
+		t.Fatal("an item added after the body edit stales the marks")
+	}
+	mustApply(t, st, `<wb:topic name="t"><wb:edit><wb:old>three</wb:old><wb:new>THREE</wb:new></wb:edit></wb:topic>`)
+	if stale(st, "t") {
+		t.Fatal("a later body edit is fresh again")
+	}
+	mustApply(t, st, `<wb:answer id="1" value="a">A</wb:answer>`)
+	if !stale(st, "t") {
+		t.Fatal("an answer after the body edit stales the marks")
+	}
+	mustApply(t, st, topicXML("t", "one\n\ntwo\n\nfour"))
+	mustApply(t, st, `<wb:patch id="1"><wb:why>p</wb:why></wb:patch>`)
+	if !stale(st, "t") {
+		t.Fatal("a patch after the body edit stales the marks")
+	}
+}
