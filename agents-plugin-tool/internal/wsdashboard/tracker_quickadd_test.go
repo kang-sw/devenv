@@ -153,3 +153,19 @@ func TestTrackerPriorityChipAndLabelPicker(t *testing.T) {
 		t.Error("the store settings' remove does not share labelRemove")
 	}
 }
+
+// TestTrackerInsertDepthMarkers pins the hover insert's depth markers: the
+// indicator carries a tick strip drawn from its --ind alone (one dim tick
+// per shallower level), visual only, beside the badge and the line.
+func TestTrackerInsertDepthMarkers(t *testing.T) {
+	if show := trackerFn(t, `function insShow\(list, g, x\)`, false); !strings.Contains(show, `'<div class="hins" aria-hidden="true"><span class="hdep"></span><span class="hl"></span>`) {
+		t.Errorf("insShow draws no depth markers:\n%s", show)
+	}
+	css, err := dashboardFS.ReadFile("assets/tracker.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), ".tk .hins .hdep { position: absolute; top: 4px; height: 2px; left: 8px; width: calc(var(--ind, 0) * 16px); pointer-events: none;") {
+		t.Error("tracker.css lacks the depth markers' strip (one 16px slot per shallower level, no pointer events)")
+	}
+}

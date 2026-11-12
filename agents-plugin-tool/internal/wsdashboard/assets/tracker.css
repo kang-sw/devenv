@@ -910,11 +910,16 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
 .tk .nadd:hover, .tk .nadd:focus-visible { opacity: 1; background: var(--wb-primary); color: var(--wb-primary-fg); outline: none; }
 .tk .nadd .i { width: 12px; height: 12px; }
 /* the hover insert between list rows: a badge at the depth's indent, a guide line on to the right
-   edge, and a hit strip over the left gutter (width set by the renderer's insWidth) */
+   edge, dim ticks at the shallower levels' indents, and a hit strip over the left gutter (width
+   set by the renderer's insWidth) */
 .tk .plist { position: relative; }
 .tk .hins { position: absolute; left: 0; right: 0; height: 10px; z-index: 4; pointer-events: none; }
 .tk .hins[hidden] { display: none; }
 .tk .hins .hl { position: absolute; top: 4px; height: 2px; left: calc(4px + var(--ind, 0) * 16px + 8px); right: 4px; border-radius: 1px; background: var(--wb-primary); }
+/* the depth markers: an 8px dim tick centred under each shallower level's badge slot (levels
+   0..depth-1), so the insert's level reads against its ancestors; visual only */
+.tk .hins .hdep { position: absolute; top: 4px; height: 2px; left: 8px; width: calc(var(--ind, 0) * 16px); pointer-events: none;
+  background: repeating-linear-gradient(to right, color-mix(in srgb, var(--wb-primary) 40%, transparent) 0 8px, transparent 8px 16px); }
 .tk .hins .hb { position: absolute; top: -3px; left: calc(4px + var(--ind, 0) * 16px); width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--wb-primary); color: var(--wb-primary-fg); box-shadow: 0 0 0 2px var(--wb-card); }
 .tk .hins .hb .i { width: 11px; height: 11px; stroke-width: 2.2; }
 .tk .hins .hhit { position: absolute; top: 0; left: 0; height: 10px; padding: 0; border: 0; background: transparent; cursor: copy; pointer-events: auto; }

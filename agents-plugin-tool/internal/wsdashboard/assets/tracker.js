@@ -4494,7 +4494,8 @@
   // last one) shows a "+" badge at the left edge with a guide line. The places a new item can
   // take there (insOpts) run from b's depth (the row below must stay below) to one level under
   // a (its first child); the pointer's x over the left gutter picks the one whose badge is
-  // nearest, left to right = shallow to deep. A click opens the input row in the gap.
+  // nearest, left to right = shallow to deep. Dim ticks at each shallower level's indent (.hdep,
+  // drawn from --ind alone) show which level the badge lands under. A click opens the input row in the gap.
   var IND = 16, INS_EDGE = 5; // a level's indent (tracker.css .ir-main, .hins), the gap's half height
   var HV = null; // the shown insert: { list, a, b, y, opts, pick }
   function rowDepth(el) { return el ? Number(el.style.getPropertyValue('--ind')) || 0 : 0; }
@@ -4539,7 +4540,7 @@
     HV = { list: list, a: g.a, b: g.b, y: g.y, opts: opts, pick: insPick(opts, rel) };
     var s = list.querySelector(':scope > .hins');
     if (!s) {
-      list.insertAdjacentHTML('beforeend', '<div class="hins" aria-hidden="true"><span class="hl"></span><span class="hb"><svg class="i"><use href="#tki-plus"/></svg></span>' +
+      list.insertAdjacentHTML('beforeend', '<div class="hins" aria-hidden="true"><span class="hdep"></span><span class="hl"></span><span class="hb"><svg class="i"><use href="#tki-plus"/></svg></span>' +
         '<button type="button" class="hhit" tabindex="-1"' + attr('act', 'ins') + ' aria-label="' + wsT("js.tk.ins.aria") + '"></button></div>');
       s = list.querySelector(':scope > .hins');
     }
