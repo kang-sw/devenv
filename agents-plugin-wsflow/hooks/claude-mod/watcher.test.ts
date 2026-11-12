@@ -19,6 +19,7 @@ import {
   batchLine,
   batchPrompt,
   BOARD_FIRST_WAIT_MS,
+  COMPACTION_CONTINUATION_WAIT_MS,
   createWatcher,
   EMPTY_DRAIN_BACKOFF_MS,
   formatBatch,
@@ -1873,6 +1874,171 @@ describe('board messages', () => {
     await tick()
     h.turn.running = false
     w.turnCompleted()
+    await tick()
+    expect(h.board.drains).toEqual([])
+  })
+})
+
+describe('board messages during a compaction', () => {
+  /**
+   * A watcher bound to k1 with board submission on and its first wait armed;
+   * `continuation`, when given, is the compaction continuation edge.
+   */
+  async function boardOn(continuation?: () => Promise<void>) {
+    const h = harness('direct')
+    h.board.on = true
+    if (continuation) h.edges.continuation = continuation
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    return { h, w }
+  }
+
+  test('a wake during an idle compaction submits nothing: the message stays held and the wait re-arms without the flag', async () => {
+    const { h, w } = await boardOn()
+    w.compactStarted()
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    expect(h.board.drains).toEqual([])
+    expect(h.board.submitted).toEqual([])
+    expect(h.board.inbox).toEqual(['pick B'])
+    expect(h.waits.length).toBe(2)
+    expect(h.waits[1]!.board).toBe(false)
+    expect(h.waits[1]!.interrupt).toBe(true)
+  })
+
+  test('the compaction end with no continuation submits the held message and re-arms the wait with the flag', async () => {
+    const { h, w } = await boardOn()
+    w.compactStarted()
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    w.compactEnded()
+    await tick()
+    expect(h.board.drains).toEqual(['k1'])
+    expect(h.board.submitted).toEqual([['pick B']])
+    expect(h.waits[1]!.signal.aborted).toBe(true)
+    expect(h.waits.at(-1)!.board).toBe(true)
+  })
+
+  test('a queued continuation goes first: its turn end takes the held message as that turn\'s leftovers', async () => {
+    const cont = deferred<void>()
+    const { h, w } = await boardOn(() => cont.promise)
+    w.compactStarted()
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    w.compactEnded()
+    await tick()
+    expect(h.board.drains).toEqual([])
+    // The continuation's submit settles as its turn starts.
+    h.turn.running = true
+    cont.resolve()
+    await tick()
+    expect(h.board.drains).toEqual([])
+    expect(h.board.submitted).toEqual([])
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['pick B']])
+    expect(h.waits.at(-1)!.board).toBe(true)
+  })
+
+  test('a continuation that settles with no turn running (cancelled or not submitted) leaves the held message submitted after it', async () => {
+    const cont = deferred<void>()
+    const { h, w } = await boardOn(() => cont.promise)
+    w.compactStarted()
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    w.compactEnded()
+    await tick()
+    expect(h.board.submitted).toEqual([])
+    cont.resolve()
+    await tick()
+    expect(h.board.submitted).toEqual([['pick B']])
+  })
+
+  test('a continuation that never settles holds the message only COMPACTION_CONTINUATION_WAIT_MS', async () => {
+    const { h, w } = await boardOn(() => new Promise<void>(() => {}))
+    w.compactStarted()
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    w.compactEnded()
+    await tick()
+    expect(h.board.submitted).toEqual([])
+    h.sleeps.find((x) => x.ms === COMPACTION_CONTINUATION_WAIT_MS)!.d.resolve()
+    await tick()
+    expect(h.board.submitted).toEqual([['pick B']])
+  })
+
+  test('a turn end during a compaction submits the mail but leaves the board message held for the compaction end', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    w.compactStarted()
+    h.board.inbox.push('pick B')
+    await wake(h, 'both', { kind: 'mail', mail: mailA })
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.order).toEqual(['mail'])
+    expect(h.board.drains).toEqual([])
+    w.compactEnded()
+    await tick()
+    expect(h.order).toEqual(['mail', 'board'])
+    expect(h.board.submitted).toEqual([['pick B']])
+  })
+
+  test('a carried steered message claimed after the turn ended waits for the compaction end too', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.steeredInbox.push('now please')
+    h.board.steerFailures.push(new Error('row refused'))
+    const held = deferred<void>()
+    h.board.heldSteers.push(held)
+    const boundary = w.toolCompleted()
+    await tick()
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    w.compactStarted()
+    held.resolve()
+    await boundary
+    await tick()
+    expect(h.board.submitted).toEqual([])
+    w.compactEnded()
+    await tick()
+    expect(h.board.submitted).toEqual([['now please']])
+  })
+
+  test('a compaction end with nothing held drains nothing; a later compaction supersedes an earlier release still waiting', async () => {
+    const cont = deferred<void>()
+    const { h, w } = await boardOn(() => cont.promise)
+    w.compactStarted()
+    w.compactEnded()
+    await tick()
+    expect(h.board.drains).toEqual([])
+    w.compactStarted()
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    w.compactEnded()
+    await tick()
+    w.compactStarted()
+    cont.resolve()
+    await tick()
+    expect(h.board.drains).toEqual([])
+    w.compactEnded()
+    await tick()
+    expect(h.board.submitted).toEqual([['pick B']])
+  })
+
+  test('a stop during the continuation wait forgets the held message', async () => {
+    const cont = deferred<void>()
+    const { h, w } = await boardOn(() => cont.promise)
+    w.compactStarted()
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    w.compactEnded()
+    await tick()
+    w.stop('session.end clear')
+    cont.resolve()
     await tick()
     expect(h.board.drains).toEqual([])
   })

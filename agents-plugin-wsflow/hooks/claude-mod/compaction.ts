@@ -140,6 +140,14 @@ export type Compaction = {
   turnComplete: (agentId: string | undefined, reason: string) => void
   /** A session.compact as it settled beneath the feature's hook. */
   compacted: (trigger: SessionCompactTrigger, agentId: string | undefined, res: SessionCompactResult) => void
+  /**
+   * Resolves once no resume prompt is pending: none is owed by the lever's
+   * awaited compaction, none is held for its window, and every one submitted
+   * has settled (its submit resolves as its turn starts, or it was not
+   * submitted). At once when none is. The mailbox push waits on it at a
+   * compaction end, so held dashboard messages follow the continuation.
+   */
+  continuation: () => Promise<void>
 }
 
 /** A lever call waiting for its turn to end. */
@@ -184,6 +192,10 @@ export function createCompaction(): Compaction {
   let request: Request | undefined
   /** The lever's resume prompt held for its window; see CONTINUATION_WINDOW_MS. */
   let held: { prompt: OwnPrompt } | undefined
+  /** Resume prompts submitted whose submit has not settled yet. */
+  let resuming = 0
+  /** continuation()'s waiters, resolved by settle() once no resume prompt is pending. */
+  let waiters: (() => void)[] = []
   /**
    * True while the lever's awaited `/compact` command is pending. A
    * main-conversation compaction the feature's hook sees meanwhile is the
@@ -212,6 +224,17 @@ export function createCompaction(): Compaction {
   const debug = (text: string) => edges?.log(`${plugin()} compaction: ${text}`, 'debug')
   const notice = (text: string) => edges?.log(`${plugin()} compaction: ${text}`, 'transcript')
 
+  /** Whether a resume prompt is pending; see Compaction.continuation. */
+  const continuing = () => (leverCompacting && request?.resume === true) || held !== undefined || resuming > 0
+
+  /** Resolve continuation()'s waiters once no resume prompt is pending; called after every change continuing() reads. */
+  const settle = () => {
+    if (waiters.length === 0 || continuing()) return
+    const ready = waiters
+    waiters = []
+    for (const resolve of ready) resolve()
+  }
+
   const reset = () => {
     generation += 1
     cached = undefined
@@ -219,6 +242,7 @@ export function createCompaction(): Compaction {
     crossing = undefined
     request = undefined
     held = undefined
+    settle()
   }
 
   /**
@@ -233,14 +257,23 @@ export function createCompaction(): Compaction {
     const gen = generation
     const failed = (why: string) =>
       record ? notice(`a prompt was not submitted (${why}):\n${prompt.text}`) : debug(`a prompt was not submitted (${why})`)
-    edges.submit(prompt, () => gen === generation).then(
-      (res) => {
-        if (res.stale) debug('the conversation moved on before a prompt went out; it is not submitted')
-        else if (res.busy) busy()
-        else if (res.drop !== undefined) failed(`dropped: ${res.drop}`)
-      },
-      (err) => failed(String(err)),
-    )
+    // A recorded prompt is a resume: pending for continuation() until its submit settles.
+    if (record) resuming += 1
+    const settled = () => {
+      if (!record) return
+      resuming -= 1
+      settle()
+    }
+    edges.submit(prompt, () => gen === generation)
+      .then(
+        (res) => {
+          if (res.stale) debug('the conversation moved on before a prompt went out; it is not submitted')
+          else if (res.busy) busy()
+          else if (res.drop !== undefined) failed(`dropped: ${res.drop}`)
+        },
+        (err) => failed(String(err)),
+      )
+      .finally(settled)
   }
 
   /** A resume prompt that found a main-thread turn started first: that turn carries the work on, as within the window. */
@@ -359,6 +392,15 @@ export function createCompaction(): Compaction {
    * outcome observed, rather than being read as a landing or retried.
    */
   const runLever = async (r: Request) => {
+    try {
+      await compactStep(r)
+    } finally {
+      // The step decided (a held resume prompt, or none): wake continuation()'s waiters if none is pending.
+      settle()
+    }
+  }
+
+  const compactStep = async (r: Request) => {
     if (!edges || request !== r) return
     if (!r.compact) return finish(r)
     let refused: string | undefined
@@ -452,6 +494,7 @@ export function createCompaction(): Compaction {
       if (agentId !== undefined || !held) return
       held = undefined
       debug('a turn started within the resume window; the resume prompt is not submitted')
+      settle()
     },
 
     // The compact step runs SETTLE_MS after the turn end, and only when no
@@ -518,6 +561,11 @@ export function createCompaction(): Compaction {
             (request.resume ? 'its resume prompt follows at the next turn end' : 'no resume was requested, so no prompt follows'),
         )
       }
+    },
+
+    continuation: () => {
+      if (!continuing()) return Promise.resolve()
+      return new Promise<void>((resolve) => waiters.push(resolve))
     },
   }
 }

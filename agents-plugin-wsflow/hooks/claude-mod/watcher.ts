@@ -44,13 +44,19 @@ import type { MailItem, OwnPrompt } from './captions'
  * session's board-answer inbox until the mod drains them. The same wait also
  * wakes on a held one (its board flag), and the drain is an atomic claim, so
  * each message is submitted once. A wake while idle drains and submits at
- * once, as the user's own message. A wake while a main-thread turn runs
- * drains nothing: the message stays held, so the page can still merge into it
- * or cancel it, and the wait re-arms without the flag, since it only peeks
- * and would wake again at once. Every main-thread turn end drains whatever is
- * held, submits it, and re-arms the wait with the flag; a tool boundary never
- * does. The held board message goes ahead of the mail still queued at that
- * turn end: mail is delivered once the board drain and submit settle (or
+ * once, as the user's own message. A wake while a main-thread turn runs, or
+ * while the main conversation compacts, drains nothing: the message stays
+ * held, so the page can still merge into it or cancel it, and the wait
+ * re-arms without the flag, since it only peeks and would wake again at once.
+ * Every main-thread turn end drains whatever is held, submits it, and re-arms
+ * the wait with the flag; a tool boundary never does. What is held when a
+ * compaction ends (a turn end during it leaves its board part held too) is
+ * released only after any compaction continuation the mod queued
+ * (`continuation`, waited on at most COMPACTION_CONTINUATION_WAIT_MS): when a
+ * main-thread turn runs by then (the continuation's, or one the person
+ * started), its turn end takes it; otherwise it is drained and submitted as a
+ * turn end would. The held board message goes ahead of the mail still queued
+ * at that turn end: mail is delivered once the board drain and submit settle (or
  * BOARD_FIRST_WAIT_MS passes), so the user's own message starts the next turn
  * and the mail joins it as the mail path delivers it. A board submit the host
  * drops or rejects is appended as a row instead, and only when that fails too
@@ -213,6 +219,12 @@ export interface WatcherEdges {
   log: (text: string) => void
   /** Board messages; absent, the wait never carries a board flag and nothing is drained. */
   board?: BoardEdges
+  /**
+   * Resolves once no compaction continuation the mod queued is pending (the
+   * compaction lever's resume prompt held, or its submit not yet settled);
+   * absent, none is ever pending.
+   */
+  continuation?: () => Promise<void>
 }
 
 export type BindResult = 'bound' | 'unchanged' | 'rebound'
@@ -224,6 +236,8 @@ export const EMPTY_DRAIN_BACKOFF_MS = 2_000
 export const BOARD_FIRST_WAIT_MS = 5_000
 /** At a tool boundary, the longest the tool result waits on the steered board message drain. */
 export const STEER_DRAIN_WAIT_MS = 2_000
+/** At a compaction end, the longest held board messages wait for a compaction continuation to go first. */
+export const COMPACTION_CONTINUATION_WAIT_MS = 10_000
 
 export function nextBackoff(prev: number): number {
   return prev <= 0 ? BACKOFF_MIN_MS : Math.min(prev * 2, BACKOFF_MAX_MS)
@@ -348,6 +362,14 @@ export interface Watcher {
   turnCompleted: () => void
   /** A main-thread turn started: the interrupted mark, if any, is cleared. */
   turnStarted: () => void
+  /** A main-conversation compaction began: board messages are held until it ends. */
+  compactStarted: () => void
+  /**
+   * That compaction settled (landed, vetoed, or failed): once any compaction
+   * continuation went first, the held board messages are released as a turn
+   * end releases them. Never throws.
+   */
+  compactEnded: () => void
   /** The board switch may have changed: a running wait whose board flags no longer match is re-armed. */
   boardChanged: () => void
 }
@@ -375,11 +397,16 @@ export function createWatcher(edges: WatcherEdges): Watcher {
    */
   let queued: Queued[] = []
   /**
-   * Set when a board message woke the wait while a main-thread turn ran: it
-   * stays held until the turn end, and the wait re-arms without the board
-   * flag meanwhile. Session-wide like the queue: a rebind keeps it.
+   * Set when a board message woke the wait while a main-thread turn ran or
+   * the main conversation compacted: it stays held until the turn end (or
+   * the compaction's release), and the wait re-arms without the board flag
+   * meanwhile. Session-wide like the queue: a rebind keeps it.
    */
   let boardHeld = false
+  /** Whether a main-conversation compaction runs, from compactStarted to compactEnded. */
+  let compacting = false
+  /** Bumped at every compaction start: a release a later compaction superseded does nothing. */
+  let compactions = 0
   /** Board drains run one at a time, so a turn end and an idle wake never interleave their submits. */
   let boardChain: Promise<unknown> = Promise.resolve()
   /**
@@ -415,6 +442,11 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       edges.log(`${edges.label}: reading the board switch failed: ${String(err)}`)
       return false
     }
+  }
+
+  /** Whether board messages are held rather than submitted now: a main-thread turn runs or the main conversation compacts. */
+  function boardBusy(): boolean {
+    return compacting || edges.turnRunning()
   }
 
   /** Whether the next wait carries the board flag: board submission on and nothing held for a turn end. */
@@ -542,6 +574,20 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   }
 
   /**
+   * Flush the board as a turn end does (flushBoard), then clear the held
+   * mark and re-arm the wait with the flag; a failed drain keeps the
+   * messages held, so the flagged wait retries them. Never rejects.
+   */
+  function releaseBoard(myKey: string, drainHeld: boolean, hold: boolean, what: string): Promise<void> {
+    return flushBoard(myKey, drainHeld, hold).then((res) => {
+      if (typeof res === 'object') edges.log(`${edges.label}: ${what} dashboard drain failed (${res.failed}); the messages stay held`)
+      // Cleared only now, so the wait does not wake on what this drain is about to claim.
+      boardHeld = false
+      rearmStaleWait()
+    })
+  }
+
+  /**
    * Carry claimed steered texts no row holds to the next board flush (the
    * turn end), or submit them now when that turn end has passed; a stop since
    * `at` records them instead.
@@ -554,8 +600,9 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     steerCarry.push(...texts)
     // The turn ended while they were pending (an interrupt): its flush has
     // run, so submit the carried messages now, or after a dashboard
-    // interrupt append them as a row.
-    if (!edges.turnRunning()) void flushBoard(myKey, false, interrupted)
+    // interrupt append them as a row. During a compaction its release
+    // submits them instead.
+    if (!boardBusy()) void flushBoard(myKey, false, interrupted)
   }
 
   /**
@@ -635,7 +682,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       return
     }
     steerStranded.push(...texts)
-    void flushBoard(myKey, false)
+    // During a compaction its release submits them instead.
+    if (!compacting) void flushBoard(myKey, false)
   }
 
   /**
@@ -855,10 +903,10 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         outcome = rest
       }
       if (outcome === 'board' || outcome === 'both') {
-        if (edges.turnRunning()) {
-          // Held for the turn end, where the page can still merge or cancel it.
+        if (boardBusy()) {
+          // Held for the turn end (or the compaction's release), where the page can still merge or cancel it.
           boardHeld = true
-          edges.log(`${edges.label}: a dashboard message for ${myKey} is held until the running turn ends`)
+          edges.log(`${edges.label}: a dashboard message for ${myKey} is held until the running ${compacting ? 'compaction' : 'turn'} ends`)
         } else {
           const flushed = await flushBoard(myKey)
           if (signal.aborted) return
@@ -1088,13 +1136,14 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         sendMail()
         return
       }
+      if (compacting) {
+        // The compaction's release takes the board part; the mail does not wait for it.
+        edges.log(`${edges.label}: the turn ended during a compaction; the dashboard messages stay held for its end`)
+        sendMail()
+        return
+      }
       // The held board message goes first; the mail waits for it a bounded time.
-      const flushed = flushBoard(myKey, drainHeld, hold).then((res) => {
-        if (typeof res === 'object') edges.log(`${edges.label}: turn-end dashboard drain failed (${res.failed}); the messages stay held`)
-        // Cleared only now, so the wait does not wake on what this drain is about to claim.
-        boardHeld = false
-        rearmStaleWait()
-      })
+      const flushed = releaseBoard(myKey, drainHeld, hold, 'turn-end')
       if (!taken) return
       const timer = new AbortController()
       void Promise.race([flushed, edges.sleep(BOARD_FIRST_WAIT_MS, timer.signal)])
@@ -1106,6 +1155,34 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     },
     turnStarted() {
       interrupted = false
+    },
+    compactStarted() {
+      compacting = true
+      compactions += 1
+    },
+    compactEnded() {
+      if (!compacting) return
+      compacting = false
+      if (!edges.board || !(boardHeld || steerCarry.length > 0 || steerStranded.length > 0)) return
+      const at = compactions
+      const stopsAt = stops
+      edges.log(`${edges.label}: the compaction ended with dashboard messages held; releasing them once any compaction continuation went first`)
+      const timer = new AbortController()
+      void Promise.resolve()
+        .then(() => Promise.race([Promise.resolve().then(() => edges.continuation?.()), edges.sleep(COMPACTION_CONTINUATION_WAIT_MS, timer.signal)]))
+        .catch((err) => edges.log(`${edges.label}: waiting on the compaction continuation failed: ${String(err)}`))
+        .then(() => {
+          timer.abort()
+          // A later compaction holds them for its own end; a stop already recorded or forgot them.
+          if (at !== compactions || compacting || stops !== stopsAt) return
+          const myKey = key
+          if (myKey === undefined || !(boardHeld || steerCarry.length > 0 || steerStranded.length > 0)) return
+          if (edges.turnRunning()) {
+            edges.log(`${edges.label}: a main-thread turn runs after the compaction; its turn end takes the held dashboard messages`)
+            return
+          }
+          void releaseBoard(myKey, boardHeld, interrupted, 'compaction-end')
+        })
     },
     boardChanged() {
       rearmStaleWait()

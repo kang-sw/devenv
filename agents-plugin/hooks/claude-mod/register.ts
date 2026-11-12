@@ -88,7 +88,9 @@ import {
 //   drain tool and submits as the user's own message under the whiteboard
 //   label: at once while idle; while a main-thread turn runs, held until it
 //   ends, unless the user promoted it to steering, which is appended into
-//   the running turn at the next main-thread tool call's result. The same
+//   the running turn at the next main-thread tool call's result; while the
+//   main conversation compacts, held until it settles and any compaction
+//   continuation the lever queued has gone first. The same
 //   wait wakes on the page's interrupt, which aborts the running
 //   main-thread turn through $.turn.abort when that turn started before the
 //   click, and holds what the cut turn leaves behind as rows rather than
@@ -967,6 +969,8 @@ export const register: Register = (on) => {
             return { startedAt: mainTurnAt, abort: () => $.turn.abort({ turnId }) }
           },
         },
+        // Held board messages follow the compaction lever's resume prompt.
+        continuation: () => compaction.continuation(),
       })
       watcher = created
       // A key the manual feature produced before the watcher existed.
@@ -1623,33 +1627,50 @@ export const register: Register = (on) => {
   // told when the main conversation's compaction begins (a subagent's or
   // fork's, and a precompute, which installs nothing, are not shown), and a
   // landing reads the usage again: no measure follows it, and the page would
-  // keep the pre-compaction context until the next one.
+  // keep the pre-compaction context until the next one. The mailbox push
+  // holds dashboard messages while that compaction runs, and releases them
+  // once it settled, whichever way, after the compaction feature heard of it.
   on('session.compact', async ($, e, next) => {
     const shown = e.agentId === undefined && e.trigger !== 'precompute'
     const trigger = e.trigger === 'auto' || e.trigger === 'manual' ? e.trigger : undefined
     if (shown) dashboard.compactStarted(trigger)
-    let res: Awaited<ReturnType<typeof next>>
+    const push = shown ? watcher : undefined
     try {
-      res = await next(e)
+      push?.compactStarted()
     } catch (err) {
-      if (shown) dashboard.compactEnded(trigger, false)
-      throw err
+      $.ui.log(`${$.plugin.name} mailbox: compaction start handling failed: ${String(err)}`, { to: 'debug' })
     }
-    if (shown) {
-      dashboard.compactEnded(trigger, res.skip === undefined)
-      if (res.skip === undefined) feedStatus()
-    }
+    // Released in every case, a throw beneath among them: a mark left up would hold every later message.
     try {
-      compaction.compacted(e.trigger, e.agentId, res)
-    } catch (err) {
-      $.ui.log(`${$.plugin.name} compaction: compaction observation failed: ${String(err)}`, { to: 'debug' })
+      let res: Awaited<ReturnType<typeof next>>
+      try {
+        res = await next(e)
+      } catch (err) {
+        if (shown) dashboard.compactEnded(trigger, false)
+        throw err
+      }
+      if (shown) {
+        dashboard.compactEnded(trigger, res.skip === undefined)
+        if (res.skip === undefined) feedStatus()
+      }
+      try {
+        compaction.compacted(e.trigger, e.agentId, res)
+      } catch (err) {
+        $.ui.log(`${$.plugin.name} compaction: compaction observation failed: ${String(err)}`, { to: 'debug' })
+      }
+      try {
+        captions.compacted(e.trigger, e.agentId, res)
+      } catch (err) {
+        $.ui.log(`${$.plugin.name} captions: compaction observation failed: ${String(err)}`, { to: 'debug' })
+      }
+      return res
+    } finally {
+      try {
+        push?.compactEnded()
+      } catch (err) {
+        $.ui.log(`${$.plugin.name} mailbox: compaction end handling failed: ${String(err)}`, { to: 'debug' })
+      }
     }
-    try {
-      captions.compacted(e.trigger, e.agentId, res)
-    } catch (err) {
-      $.ui.log(`${$.plugin.name} captions: compaction observation failed: ${String(err)}`, { to: 'debug' })
-    }
-    return res
   }).catch(($, e, next) => next(e))
 
   // Tool-call captions. Fullscreen folds runs of calls into one ToolGroup, so
