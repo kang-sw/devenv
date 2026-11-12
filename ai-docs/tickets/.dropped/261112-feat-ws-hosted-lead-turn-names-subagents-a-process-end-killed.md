@@ -3,6 +3,7 @@ title: "Hosted sessions: a lead turn names the subagents a process end killed"
 related:
   261112-bug-ws-hosted-finished-subagents-lost-on-idle-resume: split from it (user board (13)=a)
   261110-feat-ws-dashboard-headless-lead-sessions: hosted Claude lead sessions
+dropped: 2026-11-12
 ---
 
 # Hosted sessions: a lead turn names the subagents a process end killed
@@ -54,3 +55,8 @@ the model which agents died (user board (11); split confirmed in (13)=a).
 - Manuals: `ai-docs/manuals/shipped-surface-boundary.md`,
   `ai-docs/manuals/release-compatibility.md`.
 - Heavy Go builds and tests run through `~/.local/bin/ws-rgo` on this machine.
+
+
+## Resolution (2026-11-12)
+
+Dropped before implementation (user board (26)=a). A probe on Claude Code 2.1.322 (haiku, background general-purpose subagent, SIGKILL during its run, then `--resume`) showed the harness already emits a `task_notification` with status `stopped` ("Background agent ... didn't finish before the previous session ended") before any model turn, stores it in the transcript as a task-notification user message, and the model quotes it and offers to resume the agent with SendMessage or re-dispatch it. A daemon notice would duplicate it and contradict its wording (progress saved vs result lost). The Pi backend emits no subagent events, so it has no audience there either.
