@@ -1158,7 +1158,7 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 		"The whiteboard is your primary channel for what you ask the user.",
 		// Explanations moved to chat with the Now slot; the mandate and the
 		// playbook's each-turn rule must agree on it.
-		"Progress and explanations stay in the terminal or chat, which never repeats what the board holds.",
+		"While the user is watching the board (the playbook's Each turn rule says when), progress and explanations go on it too; otherwise they stay in the terminal or chat. Either way the chat never repeats what the board holds.",
 		"While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat.",
 		"Otherwise the chat carries the conversation as usual.",
 		"#### Commands",
