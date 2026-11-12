@@ -92,6 +92,7 @@ type pageAssetsData struct {
 	WhiteboardCSS    template.CSS
 	WhiteboardSprite template.HTML
 	FormScript       template.JS
+	AnswersScript    template.JS
 	MermaidInit      template.JS
 	MermaidFile      string
 	ViewerScript     template.JS
@@ -206,6 +207,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,
 		FormScript:       wb.FormScript,
+		AnswersScript:    wb.AnswersScript,
 		MermaidInit:      wb.MermaidInit,
 		MermaidFile:      mermaidName,
 		ViewerScript:     wb.ViewerScript,
@@ -848,7 +850,7 @@ func (r pageReader) history(replyID, before string, n int) (ConversationView, ws
 	reg := s.Registration
 	contacts := resolvedContacts(page.Contacts, reg.ReplyID)
 	cv := conversation(wslive.Lead{}, ring.Records, page.MailBodies, contacts, r.lookup(), replyMarkdown(reg.Project, reg.ReplyID))
-	userEntryImages(cv.Entries, wsinbox.AttachmentsDir(sessionInbox(r.dir, replyID)), reg.ReplyID)
+	splitUserEntries(cv.Entries, wsinbox.AttachmentsDir(sessionInbox(r.dir, replyID)), reg.ReplyID)
 	return cv, ring, true, nil
 }
 

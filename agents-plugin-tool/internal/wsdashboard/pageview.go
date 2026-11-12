@@ -350,6 +350,9 @@ type ConvEntry struct {
 	HTML template.HTML
 	// Images are a user message's attached images, taken out of its text.
 	Images []AttachmentView
+	// Answers are the lines of the answer block a user message starts with,
+	// taken out of its text; the bubble shows them as capsules.
+	Answers []wsinbox.AnswerLine
 	// Rendered is the entry's whole element, from the entry cache.
 	Rendered template.HTML
 	// Body is a mail line's full message from the mailbox history; HasBody
@@ -454,7 +457,7 @@ func buildSessionView(in pageInputs) SessionView {
 	contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 	v.Tree.Peers = peerGroup(contacts, reg.Project, lookup, in.Now)
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID))
-	userEntryImages(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
+	splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked)
 	v.Conversation.Subagents = subagentCounts(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)

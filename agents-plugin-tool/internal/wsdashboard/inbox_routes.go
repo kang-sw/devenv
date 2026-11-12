@@ -63,8 +63,9 @@ var messageBodyLimit = inboxBodyLimit + wsinbox.MaxImages*base64.StdEncoding.Enc
 
 // messageRequest is the message route's body. Unknown fields are ignored.
 type messageRequest struct {
-	Text  string         `json:"text"`
-	Chips []wsinbox.Chip `json:"chips"`
+	Text   string              `json:"text"`
+	Chips  []wsinbox.Chip      `json:"chips"`
+	Topics []wsinbox.TopicNote `json:"topics"`
 	// Images are new images; Refs name files a cancel returned, inside this
 	// session's attachments directory, and RefNums, when present, holds each
 	// ref's image number in order.
@@ -323,7 +324,7 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 		fmt.Fprintf(d.log, "dashboard: write attachments: %v\n", err)
 		return http.StatusInternalServerError, "could not store the images"
 	}
-	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Images: append(paths, written...), ImageNums: nums}
+	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Images: append(paths, written...), ImageNums: nums}
 	name, merged, err := wsinbox.Send(dir, entry, now)
 	if err != nil {
 		removeFiles(written)
@@ -380,8 +381,8 @@ func removeFiles(paths []string) {
 }
 
 // heldAnswer is the page's copy of a held message taken back from the inbox
-// at dir: its text, its chips (never null), and the names and numbers of its
-// images inside the inbox's attachments directory. The images stay on disk:
+// at dir: its text, its chips and topic notes (never null), and the names and
+// numbers of its images inside the inbox's attachments directory. The images stay on disk:
 // the page shows them as chips that reference the files, and a re-send
 // references them.
 func heldAnswer(dir string, entry wsinbox.Entry) map[string]any {
@@ -401,7 +402,8 @@ func heldAnswer(dir string, entry wsinbox.Entry) map[string]any {
 			nums = append(nums, entryNums[i])
 		}
 	}
-	return map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "images": images, "nums": nums}
+	topics := append([]wsinbox.TopicNote{}, entry.Topics...)
+	return map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "topics": topics, "images": images, "nums": nums}
 }
 
 // inboxWrite performs the cancel, steer, and interrupt routes against the

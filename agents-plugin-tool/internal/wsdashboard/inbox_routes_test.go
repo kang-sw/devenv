@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // postJSON posts body to url with the given Origin ("" sends none) and
@@ -74,7 +75,7 @@ func TestMessageRouteWritesThenMergesTheHeldEntry(t *testing.T) {
 	if merged {
 		t.Fatal("first send merged")
 	}
-	if held := f.held(t); len(held) != 1 || held[0].ID() != first || held[0].Entry.Text() != "first send\n\n(03) a; (04) ok" {
+	if held := f.held(t); len(held) != 1 || held[0].ID() != first || held[0].Entry.Text() != "<wb:answers>\n03=a\n04=ok\n</wb:answers>\n\nfirst send" {
 		t.Fatalf("held after one send = %+v", held)
 	}
 	second, merged := f.send(t, `{"text":"second send","chips":[{"id":"03","answer":"b","note":"changed my mind"}]}`)
@@ -85,7 +86,7 @@ func TestMessageRouteWritesThenMergesTheHeldEntry(t *testing.T) {
 	if len(held) != 1 || held[0].ID() != second {
 		t.Fatalf("held after two sends = %+v", held)
 	}
-	if got, want := held[0].Entry.Text(), "first send\n\nsecond send\n\n(03) b, note: changed my mind; (04) ok"; got != want {
+	if got, want := held[0].Entry.Text(), "<wb:answers>\n03=b^changed my mind\n04=ok\n</wb:answers>\n\nfirst send\n\nsecond send"; got != want {
 		t.Fatalf("merged message = %q, want %q", got, want)
 	}
 
@@ -103,6 +104,56 @@ func TestMessageRouteWritesThenMergesTheHeldEntry(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Errorf("session page lacks %q", want)
 		}
+	}
+}
+
+// TestMessageCarriesTopicNotesAndAnswersShowAsCapsules: a send's topic notes
+// are held as topics, delivered in the answer block ahead of the text, and a
+// cancel returns them; the held bubble and a delivered message both lead
+// with the answers as capsules, and a malformed block stays text.
+func TestMessageCarriesTopicNotesAndAnswersShowAsCapsules(t *testing.T) {
+	f := startPageFixture(t)
+	id, _ := f.send(t, `{"text":"hello","chips":[{"id":"03","answer":"a"}],"topics":[{"topic":"ship-gate","note":"why?"}]}`)
+	held := f.held(t)
+	if len(held) != 1 || held[0].Entry.Text() != "<wb:answers>\n03=a\n[ship-gate]^why?\n</wb:answers>\n\nhello" {
+		t.Fatalf("held = %+v", held)
+	}
+	delivered := wsinbox.Entry{Parts: []string{"user <words>"}, Chips: []wsinbox.Chip{
+		{ID: "124", Answer: "ok"}, {ID: "125", Answer: "ok"}, {ID: "126", Answer: "ok"}, {ID: "130", Answer: "b", Note: "line\ntwo"},
+	}, Topics: []wsinbox.TopicNote{{Topic: "plan", Note: "later"}}}.Text()
+	ring := []wslive.RingEntry{
+		{Kind: wslive.RingUser, Origin: wslive.OriginWhiteboard, Text: delivered},
+		{Kind: wslive.RingUser, Origin: wslive.OriginWhiteboard, Text: "<wb:answers>\n1=a b\n</wb:answers>\n\nbroken"},
+	}
+	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "livesession")), ring); err != nil {
+		t.Fatal(err)
+	}
+	_, page := get(t, f.base+"/s/livesession")
+	for _, want := range []string{
+		`<div class="bub"><div class="hchips"><span class="achip"><b>(03)</b> a</span><span class="achip tchip"><b>[ship-gate]</b><span class="anote" title="why?">why?</span></span></div><div class="hpart">hello</div></div>`,
+		`<div class="bub"><div class="hchips"><span class="achip"><b>(124..126)</b> ok</span><span class="achip"><b>(130)</b> b<span class="anote" title="line` + "\n" + `two">line` + "\n" + `two</span></span><span class="achip tchip"><b>[plan]</b><span class="anote" title="later">later</span></span></div>user &lt;words&gt;</div>`,
+		`<div class="bub">&lt;wb:answers&gt;` + "\n" + `1=a b` + "\n" + `&lt;/wb:answers&gt;` + "\n\n" + `broken</div>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("session page lacks %q", want)
+		}
+	}
+	code, _, raw := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+id+`"}`)
+	if code != http.StatusOK {
+		t.Fatalf("cancel = %d: %s", code, raw)
+	}
+	var ans struct {
+		Text   string              `json:"text"`
+		Topics []wsinbox.TopicNote `json:"topics"`
+	}
+	if err := json.Unmarshal([]byte(raw), &ans); err != nil {
+		t.Fatal(err)
+	}
+	if ans.Text != "hello" || len(ans.Topics) != 1 || ans.Topics[0] != (wsinbox.TopicNote{Topic: "ship-gate", Note: "why?"}) {
+		t.Fatalf("cancel answer = %+v", ans)
+	}
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/message", f.base, `{"topics":[{"topic":"a\nb","note":"x"}]}`); code != http.StatusBadRequest {
+		t.Errorf("a malformed topic was not refused: %s", raw)
 	}
 }
 
@@ -163,7 +214,7 @@ func TestCancelRefusedOnAClaimedEntryAndASendAfterADrainStartsANewOne(t *testing
 	if merged || next == id {
 		t.Fatalf("send after drain merged=%v id=%s", merged, next)
 	}
-	if held := f.held(t); len(held) != 1 || held[0].Entry.Text() != "two\n\n(03) b" {
+	if held := f.held(t); len(held) != 1 || held[0].Entry.Text() != "<wb:answers>\n03=b\n</wb:answers>\n\ntwo" {
 		t.Fatalf("held = %+v", held)
 	}
 	// Sent marks: the held answer shows over the delivered one; once drained
@@ -196,7 +247,7 @@ func TestSteerRouteRewritesTheHeldEntryMarkedAndAcceptsNoMerge(t *testing.T) {
 	}
 	// The entry is rewritten under a fresh name with the steer flag.
 	held := f.held(t)
-	if len(held) != 1 || held[0].ID() != ans.ID || !held[0].Entry.Steer || held[0].Entry.Text() != "promote me\n\n(03) a" {
+	if len(held) != 1 || held[0].ID() != ans.ID || !held[0].Entry.Steer || held[0].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\npromote me" {
 		t.Fatalf("held after steer = %+v", held)
 	}
 	// The page shows the steer marker and no steer control for it.
@@ -209,7 +260,7 @@ func TestSteerRouteRewritesTheHeldEntryMarkedAndAcceptsNoMerge(t *testing.T) {
 	if merged || next == ans.ID {
 		t.Fatalf("send after steer merged=%v id=%s", merged, next)
 	}
-	if held := f.held(t); len(held) != 2 || held[0].Entry.Text() != "promote me\n\n(03) a" || held[1].Entry.Steer {
+	if held := f.held(t); len(held) != 2 || held[0].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\npromote me" || held[1].Entry.Steer {
 		t.Fatalf("held = %+v", held)
 	}
 	_, page = get(t, f.base+"/s/livesession")

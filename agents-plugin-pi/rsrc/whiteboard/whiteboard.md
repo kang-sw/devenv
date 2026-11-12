@@ -71,7 +71,7 @@ Markdown up to the closing tag.
 <wb:link>supersedes {{12}}</wb:link>
 </wb:add>
 </wb:topic>
-<wb:answer ids="14 15" value="ok">(14), (15) ok</wb:answer>
+<wb:answer ids="14 15" value="ok">14,15=ok</wb:answer>
 <wb:patch id="16" status="withdrawn"/>
 <wb:topic name="Old scope">
 <wb:close result="Folded into Rollout."/>
@@ -277,16 +277,34 @@ update once it has disappeared; send `wb:embed-dir` again, or with
 
 ## Answers
 
-The user answers by ID, typed or pasted from the page's copy-answers button,
-for example `(62) b; (64) a, note: <text>; (19) no, note: <text>; (44), (45) ok`.
-Record each item through `wb:answer`, its body that item's segment of the
-reply: `(64) a, note: <text>` records the value `a, <text>`, and `(44), (45)
-ok` records `ok` on both with one `ids="44 45"` command (an `assumed` policy
-item records its option letter again), quoting the whole group. A reply that
-names no ID gets your reading with `assumed="true"`. A `[<topic>] <text>`
+A message sent from the dashboard opens with the user's board answers as a
+`<wb:answers>` block, the user's typed text after it; the page's
+copy-answers button builds the same block:
+
+```text
+<wb:answers>
+62=b
+44..46,51=ok
+64=a^<note>
+19=^<note>
+[<topic>]^<note>
+</wb:answers>
+```
+
+An item line is `<ids>=<value>[^<note>]`: comma-separated IDs, `44..46`
+meaning 44 through 46, all taking the same value; the value is the option
+letter, `ok`, `no`, or short text; the note follows the first `^`, with
+`\n` a line break and `\\` a backslash, and `19=^<note>` is a note alone.
+Record each item through `wb:answer`, its body that item's line:
+`64=a^<note>` records the value `a, <note>`, and `44..46,51=ok` records `ok`
+on all four with one `ids="44 45 46 51"` command quoting the whole line (an
+`assumed` policy item records its option letter again). A `[<topic>]^<note>`
 line is the user's comment or question about that topic, from its note pen,
 naming the topic by its stem, or its name when it has none, which a
 `wb:topic name` takes as is; answer it in that topic, with no item ID
-needed.
+needed. A typed reply in the older form, such as
+`(62) b; (64) a, note: <text>; (44), (45) ok` with `[<topic>] <text>`
+lines, reads the same way, each segment that item's body. A reply that
+names no ID gets your reading with `assumed="true"`.
 
 Confirmed decisions reach a ticket only through `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture; the board clears with the session key.

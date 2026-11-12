@@ -390,24 +390,25 @@ elsewhere); a body names exactly one of them. It requires a
 viewer on this machine (404 to any other, token or not) and an `Origin`
 equal to the daemon's own, and the page offers the items only to such a
 viewer. The live layout's
-composer sends: `POST /s/<reply-id>/message {text, chips, images, refs,
-refNums}` holds the message in the session's inbox (merged into a still-held
+composer sends: `POST /s/<reply-id>/message {text, chips, topics, images,
+refs, refNums}` holds the message in the session's inbox (merged into a still-held
 one that is not steered). `images` are new uploads `{name, data, n}` (base64,
 sniffed as PNG/JPEG/GIF/WebP, at most 8 per held message), `refs` name files
 a cancel returned, and `refNums` numbers them; the daemon writes the uploads
 into the inbox's `attachments/` directory. The text names image `n` with an
-`[Image #n]` marker, and the delivered message is the text, one `Image #n:
-<absolute path>` line per image, then the board answers; a send that merges renumbers its
+`[Image #n]` marker, and the delivered message is the `<wb:answers>` block
+of the board answers and topic notes (`wsinbox.AnswerBlock`), then the text,
+then one `Image #n: <absolute path>` line per image; a send that merges renumbers its
 images and markers to continue the held message's, under the daemon's inbox
 lock. The page still reads the older `[image: <path>]` lines. `POST
 /s/<reply-id>/cancel {id}` takes a held one back, answering `{text, chips,
-images, nums}`, and `POST
+topics, images, nums}`, and `POST
 /s/<reply-id>/steer {id}` promotes a held one to steering, answering the
 rewritten entry's new `{id}` (409 once the session has received it). The
 adapter claims a steered message at the session's next tool boundary instead
 of at the turn end. `POST /s/<reply-id>/interrupt` (body ignored) takes back
 every held message, steered or not, and writes an interrupt entry in one step
-under the inbox lock, answering `{held: [{id, text, chips, images, nums}]}`
+under the inbox lock, answering `{held: [{id, text, chips, topics, images, nums}]}`
 oldest first, each shaped as a cancel's answer. All four require an `Origin` equal to the daemon's own,
 and a session without a fresh adapter snapshot gets 409. `whiteboard.update`'s `full:` line names
 `http://127.0.0.1:<port>/s/<reply-id>` once the session's last nudge was
