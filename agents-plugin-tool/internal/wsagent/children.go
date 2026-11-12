@@ -225,8 +225,9 @@ func PiTierRefusal(tool, tier string, tiers map[string]wsconfig.AgentTier) error
 type ChildSpawn struct {
 	Prompt string `json:"prompt"`
 	Tier   string `json:"tier"`
-	// Cwd is absolute, or relative to the holder's root; empty is that
-	// root.
+	// Cwd is absolute, or relative to the holder's own working directory
+	// (Record.workDir: a worker in a worktree spawns into that worktree);
+	// empty is that directory.
 	Cwd   string `json:"cwd,omitempty"`
 	Label string `json:"label,omitempty"`
 }
@@ -267,12 +268,12 @@ func (r *Runner) spawnFor(caller *conv, req ChildSpawn) (State, error) {
 	if !ok {
 		return State{}, badRequest("%v", PiTierRefusal(tool, tier, tiers))
 	}
-	cwd := strings.TrimSpace(req.Cwd)
+	cwd, base := strings.TrimSpace(req.Cwd), rec.workDir()
 	switch {
 	case cwd == "":
-		cwd = rec.Root
+		cwd = base
 	case !filepath.IsAbs(cwd):
-		cwd = filepath.Join(rec.Root, cwd)
+		cwd = filepath.Join(base, cwd)
 	}
 	label := req.Label
 	if strings.TrimSpace(label) == "" {

@@ -115,6 +115,10 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 			if desc, _ := tool["description"].(string); !strings.Contains(desc, "Spawn a Pi subagent of your own") || strings.Contains(desc, "mailbox") {
 				t.Fatalf("pi.spawn reads as a worker's: %q", desc)
 			}
+			props, _ := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
+			if cwd := props["cwd"].(map[string]string)["description"]; !strings.Contains(cwd, "relative to your own working directory") || strings.Contains(cwd, "root") {
+				t.Fatalf("pi.spawn's cwd reads as a worker's: %q", cwd)
+			}
 		}
 	}
 

@@ -242,6 +242,9 @@ func piWorkerTool(tool map[string]any) map[string]any {
 			propsClone[k] = v
 		}
 		propsClone["session_key"] = stringProperty("Your own ws session key, from your instructions.")
+		if _, ok := propsClone["cwd"]; ok {
+			propsClone["cwd"] = stringProperty("Directory the subagent works in: absolute, or relative to your own working directory. Default: your own working directory.")
+		}
 		if _, ok := propsClone["id"]; ok {
 			propsClone["id"] = stringProperty("Your Pi subagent's id, as pi.spawn returned it.")
 		}

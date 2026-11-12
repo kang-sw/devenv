@@ -871,3 +871,29 @@ func TestCancelledMessageLeavesNoChildOpen(t *testing.T) {
 	}
 	noSend(t, gp, "a cancelled message")
 }
+
+// TestTokenSpawnCwdFollowsTheHoldersWorkingDirectory: a worker working in
+// a directory of its own (a worktree) spawns its children there: an empty
+// cwd is that directory and a relative one resolves against it, while the
+// child's root stays the holder's.
+func TestTokenSpawnCwdFollowsTheHoldersWorkingDirectory(t *testing.T) {
+	h, _ := childHarness(t)
+	wt := filepath.Join(h.root, "wt")
+	if err := os.MkdirAll(filepath.Join(wt, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Cwd: wt, Prompt: "work", Tier: "medium", Label: "worker", Parent: &leadParent}); err != nil {
+		t.Fatal(err)
+	}
+	token := h.token(0)
+	for _, tc := range []struct{ cwd, want string }{{"", wt}, {"sub", filepath.Join(wt, "sub")}} {
+		code, body := h.tokenCall(token, "spawn", map[string]any{"prompt": "sub task", "tier": "small", "cwd": tc.cwd})
+		var gc State
+		if code != http.StatusCreated || json.Unmarshal([]byte(body), &gc) != nil {
+			t.Fatalf("spawn with cwd %q = %d %s", tc.cwd, code, body)
+		}
+		if gc.Cwd != tc.want || gc.Root != h.root {
+			t.Fatalf("cwd %q: the child works in %q under root %q, want %q under %q", tc.cwd, gc.Cwd, gc.Root, tc.want, h.root)
+		}
+	}
+}
