@@ -15,8 +15,9 @@ import (
 // topicNotes gives each note's topic and text, which a send carries as its
 // topics; restoreTopics puts a cancelled message's notes back on their
 // topics through the same input path and returns a "[topic] note" line for a
-// topic no longer on the board. The cases execute under node when it is
-// installed.
+// topic no longer on the board. closeTopicNotes (a send's close) hides
+// every open note, blurring a focused one, and keeps each note's text. The
+// cases execute under node when it is installed.
 func TestComposerShowsTopicNoteChips(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/dashboard.js")
 	if err != nil {
@@ -52,6 +53,7 @@ El.prototype.querySelector = function (sel) { return this.all().filter(function 
 El.prototype.dispatchEvent = function (e) { this.events.push(e.type + (e.bubbles ? "/bubbles" : "")); };
 El.prototype.scrollIntoView = function () { log.push("scroll:" + this.getAttribute("data-topic")); };
 El.prototype.focus = function () { log.push("focus:" + this.getAttribute("data-topic")); };
+El.prototype.blur = function () { log.push("blur:" + this.getAttribute("data-topic")); };
 El.prototype.click = function () { var n = this.parentNode.querySelector(".tnote"); n.hidden = false; log.push("pen:" + n.getAttribute("data-topic")); n.focus(); };
 Object.defineProperty(El.prototype, "textContent", { get: function () { return this._t; }, set: function (v) { this._t = v; if (v === "") this.children = []; } });
 function Event(type, o) { this.type = type; this.bubbles = !!(o && o.bubbles); }
@@ -100,6 +102,11 @@ var e = topic("Empty2", "", true), l = topic("Keep", "mine", false);
 var stray = restoreTopics([{ topic: "Empty2", note: "back" }, { topic: "Keep", note: "theirs" }, { topic: "Keep", note: "mine" }, { topic: "Gone", note: "lost?" }, { topic: "Empty2", note: " " }]);
 check("restored notes open on their topics", [e.value, e.hidden, e.events, l.value, l.events], ["back", false, ["input/bubbles"], "mine\ntheirs", ["input/bubbles"]]);
 check("a topic off the board comes back as a line", stray, ["[Gone] lost?"]);
+log = []; doc.activeElement = l;
+closeTopicNotes();
+check("a send's close hides every open note and keeps its text", board.children.map(function (t) { var n = t.children[1]; return [n.getAttribute("data-topic"), n.hidden, n.value]; }),
+  [["Plan \"x\"", true, ""], ["Empty", true, "   "], ["Later", true, "closed text"], ["Empty2", true, "back"], ["Keep", true, "mine\ntheirs"]]);
+check("the focused note is blurred, a closed one untouched", log, ["blur:Keep"]);
 process.stdout.write(bad.join("\n"));
 `)
 }

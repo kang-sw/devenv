@@ -217,11 +217,12 @@
 
   // offsets puts the rail's offsets on the elements that read them: every
   // item's bar gets --wb-rail-top (where it sticks, under the host's own
-  // sticky rule), the open-question pill's top wrapper --wb-rail-h (the
-  // stack and the current bar), and its bottom wrapper --wb-rail-bot (the
-  // bottom capsules). Never on host: a custom property there is inherited
-  // by every node of the board, so each write restyled the whole board.
-  // A value an element already holds is not written again.
+  // sticky rule), each topic's note --wb-rail-note (where it sticks: under
+  // its bar, page.css), the open-question pill's top wrapper --wb-rail-h
+  // (the stack and the current bar), and its bottom wrapper --wb-rail-bot
+  // (the bottom capsules). Never on host: a custom property there is
+  // inherited by every node of the board, so each write restyled the whole
+  // board. A value an element already holds is not written again.
   var vals = { top: "0px", h: "0px", bot: "0px" };
   function put(el, name, v) {
     if (!el) return;
@@ -230,8 +231,19 @@
     had[name] = v;
     el.style.setProperty(name, v);
   }
+  // A note's offset is the bar's stick line plus the bar's own height. Every
+  // note gets it, open or not, so a note opened mid-topic sticks at once.
+  // All bar heights are read before any write, so the reads cost one
+  // layout; a bar that changes height resizes its topic, and the re-query
+  // that follows (fresh) writes the new offset.
   function offsets() {
     fresh = false;
+    var top = parseFloat(vals.top) || 0, notes = [];
+    found.forEach(function (t) {
+      var n = isTopic(t) && t.querySelector(":scope > textarea.tnote"), b = n && barOf(t);
+      if (b) notes.push([n, top + b.offsetHeight + "px"]);
+    });
+    notes.forEach(function (p) { put(p[0], "--wb-rail-note", p[1]); });
     found.forEach(function (t) { put(barOf(t), "--wb-rail-top", vals.top); });
     put(host.querySelector(".oq-wrap.top"), "--wb-rail-h", vals.h);
     put(host.querySelector(".oq-wrap.bot"), "--wb-rail-bot", vals.bot);
