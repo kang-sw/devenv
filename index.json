@@ -409,6 +409,9 @@
     },
     "261112-bug-ws-dashboard-topic-frame-reload-blank": {
       "registered_at": "2026-11-12T01:17:14Z"
+    },
+    "261112-bug-ws-launcher-fingerprint-skips-embedded-assets": {
+      "registered_at": "2026-11-12T01:42:39Z"
     }
   }
 }
