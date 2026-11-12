@@ -67,7 +67,7 @@ Markdown up to the closing tag.
 <wb:option>Parser first</wb:option>
 <wb:option>Both at once</wb:option>
 <wb:recommend>a: smaller review</wb:recommend>
-<wb:why>A body may hold <details>, & and <option> as is.</wb:why>
+<wb:why>Write `<details>` in backticks to show the tag; & and a < b need no escaping.</wb:why>
 <wb:link>supersedes {{12}}</wb:link>
 </wb:add>
 </wb:topic>
