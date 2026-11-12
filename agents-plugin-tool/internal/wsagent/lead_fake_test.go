@@ -79,6 +79,10 @@ type fakeHolder struct {
 	attached bool
 	exited   bool
 	stream   *fakeStream
+	// known is whether the running daemon's manager lists the holder: one
+	// an earlier daemon left is listed from the first scan on, as the real
+	// manager learns its holders by scanning.
+	known bool
 }
 
 // fakeHolders is a HolderHost with no process behind it. Holders outlive
@@ -108,6 +112,9 @@ type fakeHolders struct {
 	// of a subtype carries (raw JSON); setControl changes both while a
 	// runner runs.
 	bodies map[string]string
+	// scanHook, when set, runs at the start of each Scan, before it takes
+	// the lock (gateScan).
+	scanHook func()
 }
 
 func newFakeHolders() *fakeHolders {
@@ -160,10 +167,20 @@ func (f *fakeHolders) appendLocked(h *fakeHolder, ev wsholder.Event) {
 
 func (f *fakeHolders) Scan() {
 	f.mu.Lock()
+	hook := f.scanHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, id := range f.order {
 		h := f.holders[id]
-		if h == nil || h.attached {
+		if h == nil {
+			continue
+		}
+		h.known = true
+		if h.attached {
 			continue
 		}
 		h.attached, h.stream = true, newFakeStream()
@@ -179,7 +196,7 @@ func (f *fakeHolders) List() wsholder.Listing {
 	var out wsholder.Listing
 	for _, id := range f.order {
 		h := f.holders[id]
-		if h == nil {
+		if h == nil || !h.known {
 			continue
 		}
 		info := wsholder.Info{ID: h.id, PID: 9000 + h.pid, Attached: h.attached, Session: h.session}
@@ -204,7 +221,7 @@ func (f *fakeHolders) add(session any) string {
 
 func (f *fakeHolders) newLocked(session json.RawMessage, attached bool) *fakeHolder {
 	f.next++
-	h := &fakeHolder{id: fmt.Sprintf("h%d", f.next), pid: 4000 + f.next, session: session, attached: attached}
+	h := &fakeHolder{id: fmt.Sprintf("h%d", f.next), pid: 4000 + f.next, session: session, attached: attached, known: attached}
 	if attached {
 		h.stream = newFakeStream()
 	}
@@ -370,7 +387,7 @@ func (f *fakeHolders) restart() {
 		if h.stream != nil {
 			h.stream.kill()
 		}
-		h.attached, h.stream = false, nil
+		h.attached, h.stream, h.known = false, nil, false
 	}
 }
 
@@ -646,6 +663,29 @@ func (h *leadHarness) start() *leadHarness {
 	h.runner.Start(func(string, string) { h.notes.Add(1) })
 	h.t.Cleanup(h.runner.Close)
 	return h
+}
+
+// gateScan holds the next runner's first holder scan until release is
+// called; entered is closed once the scan waits. A test defers release, so
+// a failure before it does not leave the runner's Close waiting on the
+// scan.
+func (h *leadHarness) gateScan() (entered <-chan struct{}, release func()) {
+	in, gate := make(chan struct{}), make(chan struct{})
+	var first, released sync.Once
+	h.holders.set(func() {
+		h.holders.scanHook = func() { first.Do(func() { close(in); <-gate }) }
+	})
+	return in, func() { released.Do(func() { close(gate) }) }
+}
+
+// wait fails the test unless ch is closed within a few seconds.
+func wait(t *testing.T, what string, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
 }
 
 // restart ends the daemon (its conversations' processes run on under
