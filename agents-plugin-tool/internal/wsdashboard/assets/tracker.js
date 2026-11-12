@@ -134,7 +134,7 @@
 //                        opens
 //     action(k, el, h)   -> true when it handled a data-act the renderer does not know
 //     rendered(id, view, h)   called after every render, before the drawer is
-//                        measured (view is null while the store is not loaded)
+//                        sized (view is null while the store is not loaded)
 //   h, the helper bag ext functions get: esc, attr, btn, card, fld, fmtTs, fmtSize,
 //     nm, nmo, memberOpts, profileFields, profileText, asciiId, crefHtml,
 //     uiCommand(id, {op, arg, comment}) (a support chat's UI command on store id's view:
@@ -152,6 +152,11 @@
 //                    own conversation column and session drawer
 //   storagePrefix    browser-storage key prefix for display state (view modes, drawer
 //                    height, recently-closed fold, tree folds); default "ws.tracker."
+//   drawerHeight     {get() -> px, set(px)}: the host's own drawer height, so every
+//                    store drawer opens at the height the host's drawers do and a
+//                    store handle's drag sets it for all (get answering 0 or less
+//                    means the default, 320px); without it the renderer keeps one
+//                    height for all its stores under storagePrefix
 //   onRender(u)      called after every render with the rendered store's unread
 //                    notifications, u = api.unread()
 //
@@ -279,7 +284,7 @@
     item: null, win: false, last: null, replyTo: null,
     winReturn: null,      // selector of the element that opened the item window; focus returns there on close
     aopen: null,          // id of the item whose assignee fold is expanded; the fold resets when another item opens
-    drh: {},              // store -> drawer height in px, set by dragging its handle (display state, stored); absent: follows the content
+    drh: 0,               // the one drawer height in px of every store, set by dragging a handle (display state, stored; 0: DR_DEF); unused with opts.drawerHeight
     tab: {},              // store -> { side: tab key of the tab pane, narrow: tab key of the narrow layout }
     tabSeen: {},          // "store|stream" -> { tab key -> signature last shown }: a hidden tab whose signature moved shows a dot
     layout: null,         // 'a' | 'd' | 'narrow', from the window width
@@ -4921,23 +4926,21 @@
     document.documentElement.style.setProperty('--tkhw', (w ? w + 6 : 0) + 'px');
     $('tkdrawer').style.setProperty('--tktop', Math.max(0, Math.round(O.header.getBoundingClientRect().bottom)) + 'px');
   }
-  // The drawer's height is the user's: dragging a store's handle sets it, clamped between
-  // DR_MIN and 60% of the window like the dashboard drawer, kept per store as display state
-  // and restored on reload. Only while a store's drawer was never dragged does it follow
-  // its content, up to the same maximum: the tk-measure rules lift every height cap for
-  // one synchronous layout (so nothing paints), then --tkh is set. Panels scroll inside
-  // whatever the height is.
-  var DR_MIN = 160, DR_SHUT = 80;
+  // The drawer's height is the user's, and one for every store: dragging any store's
+  // handle sets it, clamped between DR_MIN and 60% of the window like the dashboard drawer
+  // when it shows. It is the host's drawer height when the host gives opts.drawerHeight
+  // (so the host's drawers and every store open alike), else this renderer's own, kept as
+  // display state; never set, it is DR_DEF, not the content's height, so a fresh browser
+  // shows one height too. Panels scroll inside whatever the height is.
+  var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
   function drMax() { return Math.round(window.innerHeight * 0.6); }
   function drClamp(h) { var hi = drMax(); return Math.max(Math.min(DR_MIN, hi), Math.min(hi, h)); }
-  function fitDrawer() {
-    var dr = $('tkdrawer'), sheet = $('tkclip').firstElementChild, set = ui.drh[ui.store];
-    if (set > 0) { dr.style.setProperty('--tkh', drClamp(set) + 'px'); return; }
-    dr.classList.add('tk-measure');
-    var nat = Math.ceil(sheet.getBoundingClientRect().height);
-    dr.classList.remove('tk-measure');
-    dr.style.setProperty('--tkh', Math.max(120, Math.min(nat, drMax())) + 'px');
+  function drHeight() { var h = O.drawerHeight ? +O.drawerHeight.get() : ui.drh; return h > 0 ? h : DR_DEF; }
+  function drSetHeight(h) {
+    if (O.drawerHeight) { O.drawerHeight.set(h); return; }
+    ui.drh = h; dsSave('drawer.height', { h: h });
   }
+  function fitDrawer() { $('tkdrawer').style.setProperty('--tkh', drClamp(drHeight()) + 'px'); }
   // The drag: the handle follows the pointer; the clip and the handle track the pointer's
   // extent (--tkext) while the sheet keeps at least DR_MIN, so a short drag reveals the
   // sheet rather than squashing it. The release sets the height, or closes short of
@@ -4968,7 +4971,7 @@
     $('tkdrawer').classList.remove('drag');
     $('tkdrawer').style.removeProperty('--tkext');
     if (d.ext < DR_SHUT) { fitDrawer(); if (ui.open) collapse(); return; }
-    ui.drh[d.name] = drClamp(d.ext); dsSave('drawer.h', ui.drh);
+    drSetHeight(drClamp(d.ext));
     fitDrawer();
   }
 
@@ -5813,10 +5816,6 @@
       var item = e.dataTransfer.getData('text/plain');
       if (item) dropOn(item, col.getAttribute('data-kcol'));
     });
-    document.addEventListener('toggle', function (e) {
-      var t = e.target;
-      if (t.tagName === 'DETAILS' && $('tkbody').contains(t)) fitDrawer(); // an opened details block changes the content height
-    }, true);
     document.addEventListener('error', imgRetry, true); // an image's error does not bubble
     document.addEventListener('pointerdown', function (e) { lastPointer = e.pointerType || 'mouse'; lastInput = 'pointer'; }, true);
     document.addEventListener('mouseover', function (e) {
@@ -5961,7 +5960,7 @@
     if (api) return api;
     AD = adapter; CAPS = adapter.caps || {}; X = adapter.ext || {}; O = opts || {};
     PFX = O.storagePrefix || 'ws.tracker.';
-    ui.drh = dsLoad('drawer.h'); ui.cmodes = dsLoad('card.modes'); ui.pmodes = dsLoad('panel.modes'); ui.closedOpen = dsLoad('closed'); ui.tfold = dsLoad('tree.fold');
+    ui.drh = +dsLoad('drawer.height').h || 0; ui.cmodes = dsLoad('card.modes'); ui.pmodes = dsLoad('panel.modes'); ui.closedOpen = dsLoad('closed'); ui.tfold = dsLoad('tree.fold');
     mergeTabs();
     H = { esc: esc, attr: attr, btn: btn, card: card, fld: fld, fmtTs: fmtTs, fmtSize: fmtSize, nm: nm, nmo: nmo, memberOpts: memberOpts,
       profileFields: profileFields, profileText: profileText, asciiId: asciiId, crefHtml: crefHtml, uiCommand: uiCommand,

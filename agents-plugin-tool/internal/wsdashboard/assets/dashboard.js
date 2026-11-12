@@ -1991,7 +1991,13 @@
   // on the git drawer's sheet (#gbody) instead of the panels: drMode is the
   // sheet the frame shows, "panels" or "git", and only the handle of the
   // shown sheet rides its bottom edge. The git sheet's open state is never
-  // kept, and it shares the panels' height; only the panels handle drags.
+  // kept. Both handles drag (drDragStart, below).
+  //
+  // One height for every drawer: drH is the height the panels, the git
+  // sheet, and each tracker store's drawer open at (the tracker reads and
+  // sets it through its drawerHeight option), so dragging any of their
+  // handles sets it for all. Each drawer clamps it with its own limits when
+  // it shows; the stored value is the drag's result.
   var drawer = $("drawer"), drclip = $("drclip"), drsheet = $("drsheet"), drbody = $("drbody");
   var drhandle = $("drhandle"), drheader = doc.querySelector(".dwrap > .top");
   var gbody = $("gbody"), gitRegion = region("git");
@@ -1999,6 +2005,9 @@
   var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
   var drRoomW = -1, drGhOff = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
   var drMode = "panels", drShown = "";
+  // The stored height is read with or without the frame: a page with no
+  // session drawer still shares it with the tracker's store drawers.
+  (function () { var h = parseFloat(load(DR_H)); if (isFinite(h) && h > 0) drH = h; })();
   // ghandle is the git handle now: a region swap replaces it.
   function ghandle() { return $("ghandle"); }
   var drBadge = false, drSwap = false; // the handle's dot: a section badge, or a panels change while closed
@@ -2175,6 +2184,9 @@
     return Math.max(0, m);
   }
   function drClamp(h) { var hi = drMax(); return Math.max(Math.min(DR_MIN, hi), Math.min(hi, h)); }
+  // drSetH sets the one drawer height (a drag's release, here or on a
+  // tracker store's handle) and keeps it.
+  function drSetH(h) { drH = h; save(DR_H, String(h)); }
   // drApply lays the drawer out for its state; anim animates a click's
   // toggle only.
   function drApply(anim) {
@@ -2238,36 +2250,46 @@
   }
   if (drawer) {
     drWant = load(DR_OPEN) === "1";
-    var savedH = parseFloat(load(DR_H));
-    if (isFinite(savedH) && savedH > 0) drH = savedH;
     drawerSync();
     drawerWait();
-    // drag: the handle follows the pointer; past the header's bottom the
-    // sheet comes with it, and the release sets the height or, short of
-    // DR_SHUT, closes. A press that never moves is a click.
+    // drag: either handle follows the pointer (the git handle with its
+    // region); past the header's bottom the sheet comes with it, and the
+    // release sets the one height or, short of DR_SHUT, closes. A press that
+    // never moves is a click. The git handle is found per press, since a
+    // region swap replaces it, and the moves and the release are heard on
+    // the document.
     var drDrag = null, drDragged = false;
-    drhandle.addEventListener("pointerdown", function (e) {
-      if (e.button !== undefined && e.button !== 0) return;
+    function drDragStart(e) {
+      var h = e.target.closest && e.target.closest("#drhandle, #ghandle");
+      if (!h || (e.button !== undefined && e.button !== 0)) return;
+      var git = h.id === "ghandle", rider = git ? gitRegion : drhandle;
       drMeasure();
-      drDrag = { y0: e.clientY, off: e.clientY - drhandle.getBoundingClientRect().top, moved: false, ext: 0 };
-      try { drhandle.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
-    });
-    drhandle.addEventListener("pointermove", function (e) {
-      if (!drDrag) return;
-      if (!drDrag.moved && Math.abs(e.clientY - drDrag.y0) < 5) return;
-      if (!drDrag.moved && !drOpen) drAnnounce();
-      // Dragging the panels handle over the open git sheet brings the
-      // panels in its place.
-      if (!drDrag.moved && drMode !== "panels") { drMode = "panels"; drApply(false); }
-      drDrag.moved = true;
-      var y = e.clientY - drDrag.off, max = drMax(), ext = Math.max(0, Math.min(max, y - drTop));
-      drDrag.ext = ext;
+      drDrag = { mode: git ? "git" : "panels", rider: rider, id: e.pointerId, y0: e.clientY, off: e.clientY - rider.getBoundingClientRect().top, moved: false, ext: 0 };
+      if (!git) try { h.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the moves still land */ }
+    }
+    function drDragMove(e) {
+      var d = drDrag;
+      if (!d) return;
+      if (!d.moved && Math.abs(e.clientY - d.y0) < 5) return;
+      // The git drag captures on its region once it moves: the region
+      // outlives a swap of the handle, which would drop a capture on the
+      // handle and leave the moves to whatever is under the pointer (a topic
+      // body's frame keeps them). A press that never moves keeps its click
+      // on the handle.
+      if (!d.moved && d.mode === "git") try { d.rider.setPointerCapture(d.id); } catch (x) { /* no capture: the moves still land */ }
+      if (!d.moved && !drOpen) drAnnounce();
+      // Dragging one sheet's handle over the other open sheet brings its
+      // own sheet in that one's place.
+      if (!d.moved && drMode !== d.mode) { drMode = d.mode; drApply(false); }
+      d.moved = true;
+      var y = e.clientY - d.off, max = drMax(), ext = Math.max(0, Math.min(max, y - drTop));
+      d.ext = ext;
       drawer.classList.remove("anim");
       drawer.classList.add("drag");
       drsheet.style.height = Math.max(Math.min(DR_MIN, max), ext) + "px";
       drclip.style.height = ext + "px";
-      drhandle.style.top = (ext > 0 ? drTop + ext : Math.max(0, Math.min(y, drTop))) + "px";
-    });
+      d.rider.style.top = (ext > 0 ? drTop + ext : Math.max(0, Math.min(y, drTop))) + "px";
+    }
     function drEnd() {
       var d = drDrag;
       drDrag = null;
@@ -2276,15 +2298,18 @@
       drDragged = true;
       setTimeout(function () { drDragged = false; }, 0);
       if (d.ext < DR_SHUT) { drSetOpen(false); return; }
-      drH = drClamp(d.ext);
-      save(DR_H, String(drH));
-      drWant = drOpen = true;
-      save(DR_OPEN, "1");
-      drSwap = false; drDot();
+      drSetH(drClamp(d.ext));
+      drMode = d.mode;
+      drOpen = true;
+      drWant = d.mode === "panels";
+      save(DR_OPEN, drWant ? "1" : null);
+      if (drWant) { drSwap = false; drDot(); }
       drApply(false);
     }
-    drhandle.addEventListener("pointerup", drEnd);
-    drhandle.addEventListener("pointercancel", drEnd);
+    doc.addEventListener("pointerdown", drDragStart);
+    doc.addEventListener("pointermove", drDragMove);
+    doc.addEventListener("pointerup", drEnd);
+    doc.addEventListener("pointercancel", drEnd);
     drhandle.addEventListener("click", function () {
       if (drDragged) return;
       drSetOpen(!(drOpen && drMode === "panels"), "panels");
@@ -2292,7 +2317,7 @@
     // The git handle toggles the git sheet, or brings it in place of the
     // panels; it is looked up per click, since a swap replaces it.
     doc.addEventListener("click", function (e) {
-      if (!e.target.closest || !e.target.closest("#ghandle")) return;
+      if (drDragged || !e.target.closest || !e.target.closest("#ghandle")) return;
       drSetOpen(!(drOpen && drMode === "git"), "git");
     });
     // A card's title bar is not a toggle: every card stays open.
@@ -3815,13 +3840,15 @@
   // session drawer's handle; the store page takes the page's place. On a
   // session page it goes into the body beside the rail, where it takes the
   // hidden grid's column; appended to the wrap instead, it would stack below
-  // the rail's column on a wide screen.
+  // the rail's column on a wide screen. The store drawers open at the one
+  // drawer height (drH) and a drag of a store's handle sets it.
   function tkMount() {
     var header = doc.querySelector(".dwrap > .top"), slot = $("qsslot"), wrap = doc.querySelector(".dwrap");
     if (!header || !slot || !wrap) return;
     header.classList.add("tk-room");
     if (tkSupport) tkAdapter.ext = supExt();
-    tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker });
+    tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
+      drawerHeight: { get: function () { return drH; }, set: drSetH } });
   }
   function trackerStart() {
     if (window.WsTracker && window.fetch) tkReload();
