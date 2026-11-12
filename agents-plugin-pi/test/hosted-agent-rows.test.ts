@@ -136,13 +136,13 @@ test("dirty marks coalesce at most once per flush interval; the tree is polled w
   assert.equal(h.widgets.length, 4, "no poll while nothing runs");
 });
 
-test("while any child exists the whole tree is sent again without batches; with none, nothing", () => {
+test("while a child runs the whole tree is sent again without batches; once none runs, one last resend, then nothing", () => {
   const h = harness();
   const batch = { epoch: "e", seq: 1, toolNames: ["read"], callCount: 1, failed: 0, startedAt: 1, endedAt: 2 };
   h.tree.entries = [entry("a", { status: "done", batches: [batch as never] }), entry("b", { permission: { tool: "ws-worker-exec", args: { command: "x" } } })];
   h.rows.start();
   h.advance(0);
-  h.tree.entries = [entry("a", { status: "done", batches: [batch as never] }), entry("b", { status: "done" })];
+  h.tree.entries = [entry("a", { status: "done", batches: [batch as never] }), entry("b")];
   h.rows.agentsChanged();
   h.advance(FLUSH_INTERVAL_MS);
   h.widgets.length = 0;
@@ -151,15 +151,54 @@ test("while any child exists the whole tree is sent again without batches; with 
   assert.deepEqual(h.events(), [
     { kind: "agent", agentId: "a", label: "a", status: "done", caption: "worker" },
     { kind: "permission", agentId: "a", clear: true },
-    { kind: "agent", agentId: "b", label: "b", status: "done", caption: "worker" },
+    { kind: "agent", agentId: "b", label: "b", status: "running", caption: "worker" },
     { kind: "permission", agentId: "b", clear: true },
   ]);
   h.advance(FULL_RESEND_MS);
-  assert.equal(h.widgets.length, 2, "the resend repeats");
-  h.tree.entries = [];
-  h.advance(FULL_RESEND_MS * 3);
-  assert.equal(h.widgets.length, 2, "an empty tree is not resent");
+  assert.equal(h.widgets.length, 2, "the resend repeats while b runs");
+  // b finishes: its done goes out as a change, the resend armed while it ran goes once more, then nothing.
+  h.tree.entries = [entry("a", { status: "done", batches: [batch as never] }), entry("b", { status: "done" })];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  assert.equal(h.widgets.length, 3, "the done is a change");
+  h.advance(FULL_RESEND_MS);
+  assert.equal(h.widgets.length, 4, "one last resend carries the finished tree");
+  assert.deepEqual(h.widgets.at(-1)!.lines.map((line) => JSON.parse(line) as DashboardEvent).filter((event) => event.kind === "agent").map((event) => event.status), ["done", "done"]);
+  h.advance(FULL_RESEND_MS * 4);
+  assert.equal(h.widgets.length, 4, "a tree of finished children is not resent");
   assert.equal(h.timers.size, 0, "and nothing stays armed");
+  h.tree.entries = [];
+  h.rows.agentsChanged();
+  h.advance(FULL_RESEND_MS * 3);
+  assert.equal(h.widgets.length, 4, "an empty tree sends nothing");
+  assert.equal(h.timers.size, 0);
+});
+
+test("a tree of only finished children sends nothing periodic", () => {
+  const h = harness();
+  h.tree.entries = [entry("a", { status: "done" }), entry("b", { status: "failed" })];
+  h.rows.start();
+  h.advance(0);
+  assert.equal(h.widgets.length, 1, "the start sends the tree");
+  h.advance(FULL_RESEND_MS * 10);
+  assert.equal(h.widgets.length, 1);
+  assert.equal(h.timers.size, 0, "nothing is armed");
+  // A change still goes out, and arms nothing periodic.
+  h.tree.entries = [entry("a", { status: "done", label: "renamed" }), entry("b", { status: "failed" })];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  assert.equal(h.widgets.length, 2);
+  h.advance(FULL_RESEND_MS * 10);
+  assert.equal(h.widgets.length, 2);
+  assert.equal(h.timers.size, 0);
+  // A child that starts running brings the resend back.
+  h.tree.entries = [entry("a", { status: "done", label: "renamed" }), entry("b", { status: "failed" }), entry("c")];
+  h.rows.agentsChanged();
+  h.advance(FLUSH_INTERVAL_MS);
+  const sent = h.widgets.length;
+  h.advance(FULL_RESEND_MS);
+  assert.ok(h.widgets.length > sent, "a running child gets the resend");
+  assert.ok(h.events().slice(-6).some((event) => event.kind === "agent" && event.agentId === "c" && event.batches === undefined));
 });
 
 test("a throwing setWidget is swallowed and the next change sends every child; stop sends nothing more", () => {
@@ -297,8 +336,6 @@ test("the full resend and a done for a vanished child still go out while batches
   h.advance(FLUSH_INTERVAL_MS);
   assert.deepEqual(h.widgets.at(-1)!.lines.map((line) => JSON.parse(line) as DashboardEvent), [{ kind: "agent", agentId: "b", status: "done" }]);
   h.widgets.length = 0;
-  h.tree.entries = [entry("a", { status: "done", batches: [finished(3)] })];
-  h.rows.agentsChanged();
   h.advance(FULL_RESEND_MS);
   assert.deepEqual(h.events().at(-1), { kind: "permission", agentId: "a", clear: true });
   assert.ok(h.events().some((event) => event.kind === "agent" && event.agentId === "a" && event.batches === undefined), "the resend still carries no batches");

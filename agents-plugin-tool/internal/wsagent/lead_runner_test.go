@@ -941,6 +941,9 @@ func TestLeadRejoinOfAWrappedRingHoldsInput(t *testing.T) {
 	if strings.Count(h.log.String(), "left its ring") != 1 {
 		t.Fatalf("the loss should be logged once:\n%s", h.log.String())
 	}
+	if strings.Contains(h.log.String(), "whether a turn runs") || len(h.holders.inputs(holder, "get_state")) != 0 {
+		t.Fatalf("a claude lead is not asked whether a turn runs:\n%s", h.log.String())
+	}
 }
 
 // TestLeadRejoinOfARingThatWrappedWhileAttachedHoldsInput: a long turn
@@ -1049,6 +1052,108 @@ func TestLeadRejoinGapHoldsInputAndDropsAPartialLine(t *testing.T) {
 	}
 	h.holders.out(holder, replyLine("u2", "second"), resultLine(), stateLine(HarnessIdle))
 	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+}
+
+// piHeldRejoin runs a pi lead through one turn, restarts the daemon while
+// the idle lead's subagent widget resends push every turn boundary out of
+// the ring, and rejoins: the rejoin takes the turn as running, a message
+// sent then is held, and the rejoin asks pi whether a turn runs. It
+// returns the get_state ask's request id.
+func piHeldRejoin(t *testing.T) (h *leadHarness, id, holder, ask string) {
+	t.Helper()
+	h = newLeadHarness(t).start()
+	id = h.lead(BackendPi, LeadOptions{}).ID
+	h.send(id, "one")
+	holder = h.holder(id)
+	h.holders.out(holder, `{"type":"agent_start"}`,
+		`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"hi"}],"stopReason":"stop"}}`,
+		`{"type":"agent_settled"}`)
+	h.idle(id)
+	h.runner.Close()
+	h.holders.restart()
+	resend := string(piWidgetLine(piAgentsWidgetKey, `{"kind":"agent","agentId":"child-1","label":"audit","status":"done","caption":"worker"}`))
+	h.holders.out(holder, resend, resend, resend)
+	h.holders.trim(holder, h.holders.records(holder)-2)
+	h.start()
+	eventually(t, "the rejoin to take the turn as running", func() bool {
+		st := h.state(id)
+		return st.Process && st.Status == StatusRunning
+	})
+	h.send(id, "two")
+	eventually(t, "the get_state ask", func() bool { return len(h.holders.inputs(holder, "get_state")) == 1 })
+	var d struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(h.holders.inputs(holder, "get_state")[0]), &d); err != nil || d.ID == "" {
+		t.Fatalf("get_state ask = %s", h.holders.inputs(holder, "get_state")[0])
+	}
+	if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 {
+		t.Fatalf("the message waits for the answer: prompts %q, state %+v", got, h.state(id))
+	}
+	return h, id, holder, d.ID
+}
+
+// piPrompts are the messages of the prompt lines written to the holder's
+// child.
+func piPrompts(h *leadHarness, holder string) []string {
+	var out []string
+	for _, line := range h.holders.inputs(holder, "prompt") {
+		var d struct {
+			Message string `json:"message"`
+		}
+		_ = json.Unmarshal([]byte(line), &d)
+		out = append(out, d.Message)
+	}
+	return out
+}
+
+func piStateAnswer(ask string, streaming bool) string {
+	return jsonLine(map[string]any{"type": "response", "id": ask, "command": "get_state", "success": true, "data": map[string]any{"isStreaming": streaming, "isCompacting": false, "messageCount": 2}})
+}
+
+// TestPiLeadRejoinOfAWrappedRingAsksWhetherATurnRuns: a pi lead's rejoin
+// that cannot tell from its replay whether a turn runs asks pi, and an idle
+// answer ends the held turn: the held message goes once.
+func TestPiLeadRejoinOfAWrappedRingAsksWhetherATurnRuns(t *testing.T) {
+	h, id, holder, ask := piHeldRejoin(t)
+	h.holders.out(holder, piStateAnswer(ask, false))
+	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(piPrompts(h, holder), []string{"one", "two"}) })
+	h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
+	h.idle(id)
+	if got := piPrompts(h, holder); len(got) != 2 || h.state(id).Held != 0 || len(h.holders.inputs(holder, "get_state")) != 1 {
+		t.Fatalf("the held message goes once, and pi is asked once: prompts %q, state %+v", got, h.state(id))
+	}
+	if !strings.Contains(h.log.String(), "the harness reports no turn running") {
+		t.Fatalf("the answer should be logged:\n%s", h.log.String())
+	}
+}
+
+// TestPiLeadRejoinProbeThatSaysRunningOrFailsKeepsTheHold: a running answer
+// or a refused ask keeps the message held until pi ends the turn.
+func TestPiLeadRejoinProbeThatSaysRunningOrFailsKeepsTheHold(t *testing.T) {
+	for name, answer := range map[string]func(ask string) string{
+		"running": func(ask string) string { return piStateAnswer(ask, true) },
+		"refused": func(ask string) string {
+			return jsonLine(map[string]any{"type": "response", "id": ask, "command": "get_state", "success": false, "error": "boom"})
+		},
+		"no run state": func(ask string) string {
+			return jsonLine(map[string]any{"type": "response", "id": ask, "command": "get_state", "success": true, "data": map[string]any{"messageCount": 2}})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, id, holder, ask := piHeldRejoin(t)
+			h.holders.out(holder, answer(ask))
+			eventually(t, "the answer to be taken", func() bool {
+				log := h.log.String()
+				return strings.Contains(log, "the harness reports a turn running") || strings.Contains(log, "ask the harness whether a turn runs")
+			})
+			if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning {
+				t.Fatalf("the message stays held: prompts %q, state %+v", got, h.state(id))
+			}
+			h.holders.out(holder, `{"type":"agent_settled"}`)
+			eventually(t, "the held message at the turn's end", func() bool { return slices.Equal(piPrompts(h, holder), []string{"one", "two"}) })
+		})
+	}
 }
 
 // TestLeadAnsweredPromptStaysAnsweredAcrossADaemonRestart: the answer to a
@@ -1520,5 +1625,111 @@ func TestPiLeadMapper(t *testing.T) {
 		if _, ok := piCompactCommand(text); ok {
 			t.Errorf("piCompactCommand(%q) should not match", text)
 		}
+	}
+}
+
+// ringKinds counts the ring's entries of kind.
+func ringKinds(ring []wslive.RingEntry, kind string) int {
+	n := 0
+	for _, e := range ring {
+		if e.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
+// TestLeadFailedSendShowsTheMessageOnce: a send that fails leaves no user
+// entry or turn line of its own, so its retry on a new process shows the
+// message once, in one turn.
+func TestLeadFailedSendShowsTheMessageOnce(t *testing.T) {
+	h := newLeadHarness(t).start()
+	h.holders.failInputs("user", 1)
+	id := h.lead(BackendClaude, LeadOptions{}).ID
+	h.send(id, "one")
+	var second string
+	eventually(t, "the message on the retry's process", func() bool {
+		second = h.record(id).HolderID
+		return second != "" && slices.Equal(h.userInputs(second), []string{"one"})
+	})
+	if n := h.holders.opCount("spawn"); n != 2 {
+		t.Fatalf("one failed start and one retry: %d spawns (%v)", n, h.holders.opList())
+	}
+	h.holders.out(second, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	ring := h.ring(id)
+	if got := ringTexts(ring, wslive.RingUser); !slices.Equal(got, []string{"one"}) || ringKinds(ring, wslive.RingTurn) != 1 {
+		t.Fatalf("one user entry and one turn: users %q, ring %+v", got, ring)
+	}
+	if st := h.state(id); st.Error != "" || st.Held != 0 {
+		t.Fatalf("after the retried turn: %+v", st)
+	}
+}
+
+// TestLeadFailedMailOnlySendRetriesOnce: a turn of mail alone whose send
+// fails keeps its mail and is retried once on a new process; the send that
+// goes through clears it. A send that always fails is retried once, then
+// waits for the next signal.
+func TestLeadFailedMailOnlySendRetriesOnce(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id := h.lead(BackendClaude, LeadOptions{}).ID
+	key := h.record(id).WSKey
+	eventually(t, "the mail watch", func() bool { return h.mail.watched(key) })
+	h.holders.failInputs("user", 1)
+	h.mail.deliver(key, "From a@x: ping")
+	var holder string
+	eventually(t, "the mail on the retry's process", func() bool {
+		holder = h.record(id).HolderID
+		return holder != "" && slices.Equal(h.userInputs(holder), []string{"From a@x: ping"})
+	})
+	if n := h.holders.opCount("spawn"); n != 2 {
+		t.Fatalf("one failed start and one retry: %d spawns (%v)", n, h.holders.opList())
+	}
+	eventually(t, "the mail to be cleared", func() bool { return len(h.record(id).Mail) == 0 })
+	h.holders.out(holder, turnLines("sess-1", "u1", "pong")...)
+	h.idle(id)
+	ring := h.ring(id)
+	if got := ringTexts(ring, wslive.RingUser); len(got) != 0 || ringKinds(ring, wslive.RingTurn) != 1 {
+		t.Fatalf("a mail turn has no user entry and shows once: users %q, ring %+v", got, ring)
+	}
+
+	h.holders.failInputs("user", -1)
+	h.mail.deliver(key, "From a@x: again")
+	spawns := h.holders.opCount("spawn")
+	// The idle process takes the mail, fails, and ends; the retry starts a
+	// new one, which fails too.
+	eventually(t, "the retry to fail", func() bool {
+		st := h.state(id)
+		return h.holders.opCount("spawn") == spawns+1 && !st.Process && strings.Contains(st.Error, "send turn")
+	})
+	// A retry the second failure armed would be signaled before this
+	// request, and handled first.
+	c := h.runner.conv(id)
+	c.do(func() {})
+	if n := h.holders.opCount("spawn"); n != spawns+1 || !slices.Equal(h.record(id).Mail, []string{"From a@x: again"}) {
+		t.Fatalf("a send that always fails is retried once: %d spawns after %d, mail %q", n, spawns, h.record(id).Mail)
+	}
+}
+
+// TestPiLeadFailedCommandRetriesOnce: a dashboard command whose send fails
+// (runCommand) stays queued and runs once on a new process, shown once.
+func TestPiLeadFailedCommandRetriesOnce(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id := h.lead(BackendPi, LeadOptions{}).ID
+	h.holders.failInputs("compact", 1)
+	h.sendCommand(id, "compact", "keep the names")
+	var holder string
+	eventually(t, "the compact command on the retry's process", func() bool {
+		holder = h.record(id).HolderID
+		return holder != "" && len(h.holders.inputs(holder, "compact")) == 1
+	})
+	if n := h.holders.opCount("spawn"); n != 2 {
+		t.Fatalf("one failed start and one retry: %d spawns (%v)", n, h.holders.opList())
+	}
+	h.holders.out(holder, `{"type":"response","command":"compact","success":true}`)
+	h.idle(id)
+	ring := h.ring(id)
+	if got := ringTexts(ring, wslive.RingUser); !slices.Equal(got, []string{"/compact keep the names"}) || ringKinds(ring, wslive.RingTurn) != 1 || h.state(id).Held != 0 {
+		t.Fatalf("the command shows once, in one turn: users %q, state %+v", got, h.state(id))
 	}
 }

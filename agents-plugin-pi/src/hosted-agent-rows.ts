@@ -25,10 +25,14 @@
  * session key, caption), and a permission, still goes out at the next
  * flush, carrying the current progress. A widget update is
  * fire-and-forget; one the host drops is not detected, so while any
- * subagent exists the whole tree is sent again every `FULL_RESEND_MS`,
+ * subagent runs the whole tree is sent again every `FULL_RESEND_MS`,
  * without batches (the next change carries them), and rows a lost update
- * left behind recover. A throwing `setWidget` (a stale context) forgets
- * what was sent, so the next change sends every subagent.
+ * left behind recover. The resend armed while a subagent ran still goes
+ * once after the last one finished (its lost `done` recovers too), then
+ * stops: a tree of only finished subagents sends nothing periodic, since
+ * an idle lead's resends would fill the holder ring with nothing but
+ * widget lines. A throwing `setWidget` (a stale context) forgets what was
+ * sent, so the next change sends every subagent.
  */
 
 import type { BatchView } from "./agent-batches.ts";
@@ -37,7 +41,7 @@ import { AGENT_POLL_MS, FLUSH_INTERVAL_MS, dashboardAgentEvent, dashboardPermiss
 /** The widget key the daemon reads subagent rows from; every other widget is the host's own. */
 export const HOSTED_AGENTS_WIDGET_KEY = "ws-dashboard-agents";
 
-/** Interval of the whole-tree resend while any subagent exists. */
+/** Interval of the whole-tree resend while any subagent runs. */
 export const FULL_RESEND_MS = 30_000;
 
 /** Least interval between two sends that carry a progress-only change. */
@@ -186,8 +190,9 @@ export function createHostedAgentRows(options: HostedAgentRowsOptions): HostedAg
     }, Math.max(0, lastProgressSendAt + PROGRESS_COALESCE_MS - now()));
   }
 
-  function armResend(): void {
-    if (stopped || cancelResend) return;
+  /** The resend is armed only while a subagent runs. */
+  function armResend(tree: DashboardAgentEntry[]): void {
+    if (stopped || cancelResend || !tree.some((entry) => entry.status === "running")) return;
     cancelResend = schedule(() => {
       cancelResend = undefined;
       resend();
@@ -205,7 +210,7 @@ export function createHostedAgentRows(options: HostedAgentRowsOptions): HostedAg
     emit(diff.events);
     if (diff.progressHeld) armProgress();
     armPoll();
-    if (tree.length > 0) armResend();
+    armResend(tree);
   }
 
   function resend(): void {
@@ -213,7 +218,7 @@ export function createHostedAgentRows(options: HostedAgentRowsOptions): HostedAg
     const tree = entries();
     if (tree.length === 0) return;
     emit(tree.flatMap((entry) => [dashboardAgentEvent(entry, { batches: false }), dashboardPermissionEvent(entry)]));
-    armResend();
+    armResend(tree);
   }
 
   function agentsChanged(): void {

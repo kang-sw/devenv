@@ -933,10 +933,13 @@ type conv struct {
 	// end after the last such loss. wrapHold is set from a rejoin that lost
 	// records with no turn boundary after them (replayDone) until the
 	// harness's next turn end: the turn is taken as running, since its
-	// start may be among the lost records, and nothing is submitted.
+	// start may be among the lost records, and nothing is submitted. A
+	// harness that can tell is asked whether a turn runs (probeWrapHold);
+	// wrapTurnSeen marks a turn start seen since the ask.
 	replayGap      bool
 	replayBoundary bool
 	wrapHold       bool
+	wrapTurnSeen   bool
 	// seq is the last holder record sequence applied whole; seqDirty that
 	// the record does not hold it yet, and ringDirty that a ring entry was
 	// written since, which makes the next line end persist it at once.
@@ -1420,6 +1423,38 @@ func (c *conv) kick() {
 	}
 	c.stopIdle()
 	c.setStatus(func() { c.turn, c.lastErr = true, "" })
+	// The turn reaches the page only once its send went through: a failed
+	// send leaves no user entry or turn line of its own (its error shows),
+	// so its retry shows the message once. The process's events for the
+	// turn are handled by this loop after kick returns, so they still
+	// follow the turn's start.
+	if cmd != nil {
+		err = c.runCommand(*cmd)
+	} else {
+		err = c.proc.Send(strings.Join(append(parts, mail...), "\n\n"))
+	}
+	if err != nil {
+		// The turn never began: its process ends with no turn to close.
+		c.setStatus(func() { c.turn, c.lastErr = false, "send turn: "+err.Error() })
+		c.stopProcess("")
+		// The turn stays queued (its mail stays claimed), and nothing else
+		// would submit it before an unrelated signal: it is retried once on
+		// a new process, through the loop's inbox signal rather than on
+		// this stack. A send that fails again leaves it for the next inbox
+		// or mail signal, so a send that always fails does not spin.
+		if (len(c.rec.Queued) > 0 || len(c.rec.Mail) > 0) && !c.sendRetried {
+			c.sendRetried = true
+			c.signalInbox()
+		}
+		return
+	}
+	c.sendRetried = false
+	c.update(func(rec *Record) {
+		rec.Queued = rest
+		if len(mail) > 0 {
+			rec.Mail = nil
+		}
+	})
 	// Mail shows on the page through the session's mail history, so only
 	// the dashboard's own text is a user entry; a turn of mail alone is
 	// marked as mail's.
@@ -1433,32 +1468,6 @@ func (c *conv) kick() {
 		c.apply(wslive.Event{Kind: wslive.KindUser, Origin: origin, Text: text})
 	}
 	c.apply(wslive.Event{Kind: wslive.KindTurnStart, Origin: origin})
-	if cmd != nil {
-		err = c.runCommand(*cmd)
-	} else {
-		err = c.proc.Send(strings.Join(append(parts, mail...), "\n\n"))
-	}
-	if err != nil {
-		c.setStatus(func() { c.lastErr = "send turn: " + err.Error() })
-		c.stopProcess("")
-		// The turn stays queued, and nothing else would submit it before
-		// an unrelated signal: it is retried once on a new process, through
-		// the loop's inbox signal rather than on this stack. A send that
-		// fails again leaves it for the next inbox or mail signal, so a
-		// send that always fails does not spin.
-		if len(c.rec.Queued) > 0 && !c.sendRetried {
-			c.sendRetried = true
-			c.signalInbox()
-		}
-		return
-	}
-	c.sendRetried = false
-	c.update(func(rec *Record) {
-		rec.Queued = rest
-		if len(mail) > 0 {
-			rec.Mail = nil
-		}
-	})
 }
 
 // nextTurn splits queue at its first slash command: a command at the front
@@ -1746,6 +1755,7 @@ func (c *conv) replayDone(lost bool) {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: records of holder %s left its ring before this daemon replayed them, with no turn boundary after them; the turn is taken as running and nothing is submitted until the harness ends one\n", c.rec.ReplyID, c.rec.HolderID)
 			c.wrapHold = true
 			c.beginTurn(false)
+			c.probeWrapHold()
 		}
 	}
 	c.checkAction(false)
@@ -1759,6 +1769,46 @@ func (c *conv) replayDone(lost bool) {
 		if !c.turn {
 			c.armIdle()
 		}
+	}
+}
+
+// probeWrapHold asks a harness that can tell (turnProber) whether a turn
+// runs, so a rejoin's hold does not wait for a turn end an idle harness
+// never sends. The ask runs off the loop, whose events it may wait behind;
+// its answer comes back to the loop (wrapProbed).
+func (c *conv) probeWrapHold() {
+	tp, ok := c.proc.(turnProber)
+	if !ok {
+		return
+	}
+	proc := c.proc
+	c.wrapTurnSeen = false
+	go func() {
+		running, err := tp.TurnRunning()
+		c.do(func() { c.wrapProbed(proc, running, err) })
+	}()
+}
+
+// wrapProbed takes the harness's answer to probeWrapHold. An idle answer
+// ends the held turn as the harness's own turn end would, submitting what
+// waited; unless the hold ended already, the process is another, or a turn
+// started since the ask (its start may follow the answer on the stream,
+// and its end releases the hold). A running answer, or an ask that failed,
+// keeps the hold until the harness ends a turn.
+func (c *conv) wrapProbed(proc Process, running bool, err error) {
+	if c.closed || proc != c.proc || !c.wrapHold {
+		return
+	}
+	switch {
+	case err != nil:
+		fmt.Fprintf(c.r.opts.Log, "agent %s: ask the harness whether a turn runs: %v; the turn stays taken as running until the harness ends one\n", c.rec.ReplyID, err)
+	case running:
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the harness reports a turn running; input waits for its end\n", c.rec.ReplyID)
+	case c.wrapTurnSeen:
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the harness reports no turn running, but one started since; input waits for its end\n", c.rec.ReplyID)
+	default:
+		fmt.Fprintf(c.r.opts.Log, "agent %s: the harness reports no turn running; the held turn ends\n", c.rec.ReplyID)
+		c.endTurn("", false)
 	}
 }
 
@@ -1857,6 +1907,7 @@ func (c *conv) handle(ev Event) {
 		c.stopProcess("")
 	case ev.TurnStart:
 		c.replayBoundary = c.replayBoundary || c.replaying
+		c.wrapTurnSeen = c.wrapTurnSeen || (c.wrapHold && !quiet)
 		c.beginTurn(quiet)
 	case ev.TurnEnd:
 		c.replayBoundary = c.replayBoundary || c.replaying

@@ -149,6 +149,13 @@ type commandRunner interface {
 	RunCommand(cmd wsinbox.Command) error
 }
 
+// turnProber is a Process whose harness answers whether a turn runs (a
+// lead's pi process: its get_state). A rejoin whose replay cannot tell asks
+// it rather than wait for a turn end an idle harness never sends.
+type turnProber interface {
+	TurnRunning() (bool, error)
+}
+
 // ErrUnsupported is a Process's answer to a control it has no in-stream
 // form of.
 var ErrUnsupported = errors.New("not supported in-stream")
