@@ -741,24 +741,34 @@
 
   // --- the pinned column ----------------------------------------------------------
   // The page hands an empty element (opt.column's host); the framework
-  // fills it: a header with the pin count, the width handle on its right
-  // edge (dragged, its width is kept with the pins; double click goes back
-  // to the stylesheet's), and the pin list while the column shows.
+  // fills it: a header with the pin count, a width handle on each edge
+  // (dragged outward, either widens it, so the left one still widens once
+  // the page fills the window; its width is kept with the pins; double
+  // click goes back to the stylesheet's), and the pin list while the
+  // column shows.
   function setWidth(w) {
     pinw = w ? Math.max(PINW_MIN, Math.round(w)) : 0;
     if (pinw) doc.documentElement.style.setProperty("--pinw", pinw + "px");
     else doc.documentElement.style.removeProperty("--pinw");
   }
   function buildCol() {
-    var hd = mk("div", "bp-hd"), edge = mk("div", "bp-edge"), from = null;
+    var hd = mk("div", "bp-hd");
     hd.innerHTML = licon("pin");
     hd.appendChild(mk("span", "", wsT("js.pins.title")));
     count = hd.appendChild(mk("span", "bp-ct", "0"));
+    col.appendChild(hd);
+    edgeHandle("left", -1);
+    edgeHandle("right", 1);
+  }
+  // edgeHandle adds the width handle on side: dir is +1 where a drag to the
+  // right widens the column, -1 where a drag to the left does.
+  function edgeHandle(side, dir) {
+    var edge = mk("div", "bp-edge"), from = null;
+    edge.setAttribute("data-edge", side);
     edge.setAttribute("role", "separator");
     edge.setAttribute("aria-orientation", "vertical");
     edge.title = wsT("js.pins.width");
     edge.setAttribute("aria-label", wsT("js.pins.width"));
-    col.appendChild(hd);
     col.appendChild(edge);
     edge.addEventListener("pointerdown", function (e) {
       if (e.button !== undefined && e.button !== 0) return;
@@ -768,7 +778,7 @@
       e.preventDefault();
     });
     edge.addEventListener("pointermove", function (e) {
-      if (from) setWidth(Math.min(from.w + e.clientX - from.x, window.innerWidth * 0.5));
+      if (from) setWidth(Math.min(from.w + dir * (e.clientX - from.x), window.innerWidth * 0.5));
     });
     function end() { if (!from) return; from = null; edge.classList.remove("drag"); persist(); }
     edge.addEventListener("pointerup", end);
@@ -779,7 +789,10 @@
   // past its cap) through the closed route, page by page from the board's
   // show-more control, until each is found or the route ends: one the
   // route ends without is gone from the store, and its pin with it. A
-  // failed fetch keeps the pins for the next load.
+  // failed fetch keeps the pins for the next load, and so does a board
+  // with no show-more control: an empty or not yet loaded board cannot
+  // tell a topic past its cap from one that is gone, so only the route's
+  // answer drops a pin.
   function fetchMissing() {
     function missing() { return Object.keys(topics).filter(function (k) { return topics[k].pinned && !topics[k].el; }); }
     function gone(list) { list.forEach(function (k) { delete topics[k]; }); persist(); }
@@ -807,8 +820,7 @@
     var miss = missing();
     if (!miss.length) return;
     var from = next(board);
-    if (!from) gone(miss);
-    else if (opt.closed) page(from);
+    if (from && opt.closed) page(from);
   }
 
   // --- the module -----------------------------------------------------------------
