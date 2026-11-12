@@ -367,7 +367,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "28ef83e379b353cc",
         "track": "goal/develop/amber-ladle-orbit",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-12T01:29:25Z",
         "impl": {
           "branch": "impl/goal/develop/amber-ladle-orbit/abide-thee-knee"
@@ -407,9 +407,6 @@
     "261111-research-ws-hosted-session-subagent-output-rate-source": {
       "registered_at": "2026-11-11T11:38:36Z"
     },
-    "261112-bug-ws-dashboard-topic-frame-reload-blank": {
-      "registered_at": "2026-11-12T01:17:14Z"
-    },
     "261112-bug-ws-launcher-fingerprint-skips-embedded-assets": {
       "registered_at": "2026-11-12T01:42:39Z"
     },
@@ -421,16 +418,6 @@
     },
     "261112-feat-ws-mixed-version-compat-guards": {
       "registered_at": "2026-11-12T01:58:07Z"
-    },
-    "261112-research-ws-lead-revive-context-cost": {
-      "registered_at": "2026-11-12T02:37:45Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "28ef83e379b353cc",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-12T02:41:12Z"
-      }
     }
   }
 }
