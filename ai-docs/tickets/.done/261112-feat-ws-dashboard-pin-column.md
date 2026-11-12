@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b5c8db9acb7eea6e
 sage-review-completeness-reviewed: b5c8db9acb7eea6e
+completed: 2026-11-12
 ---
 
 # Dashboard board: whiteboard topics pin like board cards, drag reorder, and a pinned column in the wide view
