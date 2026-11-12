@@ -1402,6 +1402,8 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   .dash:not(.live) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
 }
 @media (min-width: 1600px) and (max-width: 2199.98px) {
+  /* the column takes the rail's place: the page grows by the column and its gap less the rail's 356px */
+  :root[data-pincol] .dwrap:not(.narrow) { max-width: calc(1680px - 340px + var(--pinw, 480px)); }
   :root[data-pincol] .rail { position: fixed; z-index: 45; top: 12px; bottom: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px); max-height: none; box-shadow: var(--wb-shadow-hi); transform: translateX(calc(-100% - 20px)); visibility: hidden; transition: transform .22s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .22s; }
   :root[data-pincol].rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
   :root[data-pincol] .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
@@ -1409,6 +1411,8 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   :root[data-pincol] .top > .back { display: inline-flex; }
 }
 @media (min-width: 2200px) {
+  /* rail and column both show: the page grows by the column and its gap, so the board keeps its no-pin width */
+  :root[data-pincol] .dwrap:not(.narrow) { max-width: calc(1680px + 16px + var(--pinw, 480px)); }
   :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, 1fr) var(--pinw, 480px); }
   :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
