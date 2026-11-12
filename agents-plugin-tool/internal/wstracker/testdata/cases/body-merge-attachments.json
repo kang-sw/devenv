@@ -1,0 +1,287 @@
+{
+ "name": "body-merge-attachments",
+ "comment": "item.edit attachments merge three-way from the base value, by oid: one either side removed is gone, one either side added is kept. Each item starts with the create's list, ada edits line 1 (a plain replace), and maya, offline from her, edits from the create too. Rm (ada.pc-1): maya drops b while changing line 3; ada's edit still carries b, and the merge keeps the removal (a). Neutral (ada.pc-3): maya's edit keeps the create's text and adds c; no line of hers survives, and c is still kept (a, c). Over (ada.pc-5): ada adds d; maya changes the same line, wins the overlap, and did not remove d, so d stays (a, d).",
+ "viewers": [
+  "ada.pc",
+  "maya.pc"
+ ],
+ "now": "2026-11-02T09:00:00Z",
+ "genesis": {
+  "admins": [
+   "ada"
+  ],
+  "members": [
+   {
+    "id": "ada",
+    "name": "Ada",
+    "keys": [
+     "ada-k1"
+    ],
+    "leads": []
+   },
+   {
+    "id": "maya",
+    "name": "Maya",
+    "keys": [
+     "maya-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "raj",
+    "name": "Raj",
+    "keys": [
+     "raj-k1"
+    ],
+    "leads": [
+     "ada"
+    ]
+   },
+   {
+    "id": "lena",
+    "name": "Lena",
+    "keys": [
+     "lena-k1"
+    ],
+    "leads": [
+     "maya"
+    ]
+   }
+  ]
+ },
+ "commits": {
+  "ada.pc": [
+   {
+    "ts": "2026-11-01T09:00:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Rm",
+       "body": "L1\nL2\nL3",
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a.txt",
+         "mime": "text/plain",
+         "size": 1
+        },
+        {
+         "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+         "name": "b.txt",
+         "mime": "text/plain",
+         "size": 1
+        }
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#1",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Neutral",
+       "body": "N1\nN2",
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a.txt",
+         "mime": "text/plain",
+         "size": 1
+        }
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#3",
+       "targets": [
+        "maya"
+       ]
+      }
+     ],
+     [
+      "item.create",
+      {
+       "kind": "task",
+       "title": "Over",
+       "body": "O1\nO2",
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a.txt",
+         "mime": "text/plain",
+         "size": 1
+        }
+       ]
+      }
+     ],
+     [
+      "item.assign",
+      {
+       "item": "ada.pc#5",
+       "targets": [
+        "maya"
+       ]
+      }
+     ]
+    ]
+   },
+   {
+    "ts": "2026-11-01T09:10:00Z",
+    "seen": {},
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#1",
+       "body": "L1 ada\nL2\nL3",
+       "base": [
+        "ada.pc#1"
+       ],
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a.txt",
+         "mime": "text/plain",
+         "size": 1
+        },
+        {
+         "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+         "name": "b.txt",
+         "mime": "text/plain",
+         "size": 1
+        }
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#3",
+       "body": "N1 ada\nN2",
+       "base": [
+        "ada.pc#3"
+       ],
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a.txt",
+         "mime": "text/plain",
+         "size": 1
+        }
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#5",
+       "body": "O1 ada\nO2",
+       "base": [
+        "ada.pc#5"
+       ],
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a.txt",
+         "mime": "text/plain",
+         "size": 1
+        },
+        {
+         "oid": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+         "name": "d.txt",
+         "mime": "text/plain",
+         "size": 1
+        }
+       ]
+      }
+     ]
+    ]
+   }
+  ],
+  "maya.pc": [
+   {
+    "ts": "2026-11-01T09:20:00Z",
+    "seen": {
+     "ada.pc": 6
+    },
+    "events": [
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#1",
+       "body": "L1\nL2\nL3 maya",
+       "base": [
+        "ada.pc#1"
+       ],
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a.txt",
+         "mime": "text/plain",
+         "size": 1
+        }
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#3",
+       "body": "N1\nN2",
+       "base": [
+        "ada.pc#3"
+       ],
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a.txt",
+         "mime": "text/plain",
+         "size": 1
+        },
+        {
+         "oid": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+         "name": "c.txt",
+         "mime": "text/plain",
+         "size": 1
+        }
+       ]
+      }
+     ],
+     [
+      "item.edit",
+      {
+       "item": "ada.pc#5",
+       "body": "O1 maya\nO2",
+       "base": [
+        "ada.pc#5"
+       ],
+       "attachments": [
+        {
+         "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "name": "a.txt",
+         "mime": "text/plain",
+         "size": 1
+        }
+       ]
+      }
+     ]
+    ]
+   }
+  ]
+ }
+}

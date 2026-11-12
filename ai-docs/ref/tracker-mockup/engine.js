@@ -551,6 +551,12 @@
     if (q.state === 'withdrawn') return rq + ' was withdrawn (' + alias(e.id) + ')';
     return rq + ' lapsed: ' + q.holder + '\'s assignment on ' + alias(q.item) + ' ended (' + alias(e.id) + ')';
   }
+  // Why pending q is not approved: the assignment it names is done or dropped (a
+  // wrapped-up record stays live, so its requests never lapse); null when it is not.
+  function takeWrapped(S, q) {
+    var old = has(S.asg, String(q.of)) ? S.asg[q.of] : null;
+    return old && old.state === 'live' && wrapped(old.status) ? q.holder + '\'s assignment on ' + alias(q.item) + ' is ' + old.status + '; nothing to take' : null;
+  }
   // The suffix of a fold-time flag (see foldFlag).
   var CONCURRENTLY = '; written concurrently, the first in fold order wins';
 
@@ -732,6 +738,7 @@
         if (q.state !== 'pending') rej(reqEnded(q));
         if (a !== q.holder && it.author !== a && !creatorGone(S, it, a))
           rej('only ' + q.holder + ' (the assignment\'s holder) or the creator (' + it.author + ') ' + (n.type === 'item.approve' ? 'approves' : 'denies') + ' ' + alias(q.id));
+        if (n.type === 'item.approve' && takeWrapped(S, q)) rej(takeWrapped(S, q));
         break;
 
       case 'item.unrequest':
@@ -1223,12 +1230,13 @@
   // item.approve: the named assignment ends handed and the requester's new record
   // starts live with its assigner, completion, status, and note, as an accepted
   // handoff does (290); a requester holding a record by then gets no second one.
-  // An approval of a request an earlier event answered, withdrew, or let lapse is
-  // flagged.
+  // An approval of a request an earlier event answered, withdrew, or let lapse, or
+  // whose assignment such an event wrapped up, is flagged.
   function applyApprove(S, n, C) {
     var p = n.p, q = has(S.reqs, String(p.request)) ? S.reqs[p.request] : null;
     if (!q || q.item !== p.item) return;
     if (q.state !== 'pending') { foldFlag(n, reqEnded(q) + CONCURRENTLY, C); return; }
+    if (takeWrapped(S, q)) { foldFlag(n, takeWrapped(S, q) + CONCURRENTLY, C); return; }
     q.state = 'approved'; q.ended = n; q.answerNote = p.note || null;
     var old = S.asg[q.of];
     if (!old || old.state !== 'live') return;
@@ -1279,6 +1287,9 @@
     return n.p.body == null ? '' : String(n.p.body);
   }
   function linesFrom(text, src) { return text.split('\n').map(function (t) { return { text: t, src: src }; }); }
+  // A folded body value is { lines, atts }; the value a body write sets by itself is its
+  // text and its attachments.
+  function replaceVal(w) { return { lines: linesFrom(bodyText(w), w), atts: attachmentsOf(w.p) }; }
   function joinLines(l) { return l.map(function (x) { return x.text; }).join('\n'); }
   function textsOf(l) { return l.map(function (x) { return x.text; }); }
 
@@ -1380,27 +1391,28 @@
   // w's own member it lost an overlap to, if any. A base whose closure holds every prior
   // write is a plain replace. A base-less (or unknown-base) write is a whole replace,
   // which overlaps every concurrent write. Otherwise the write merges three-way from its
-  // base text, and each overlapping group names its rivals: the concurrent writes whose
+  // base value, and each overlapping group names its rivals: the concurrent writes whose
   // lines cur holds there, or, when cur only dropped base lines there (no line tells
   // who), every concurrent write. An overlap goes to w, the later in fold order, except
   // that an agent write loses a group to a concurrent human write of its own member
-  // among that group's rivals.
+  // among that group's rivals. A replace sets w's attachments, a merge merges them
+  // three-way (mergeAtts).
   function bodyStep(f, prior, cur, w) {
-    if (w.type === 'item.create') return { out: linesFrom(bodyText(w), w), rivals: [], lostTo: null };
+    if (w.type === 'item.create') return { out: replaceVal(w), rivals: [], lostTo: null };
     var conc = prior.filter(function (x) { return !hb(x, w); }), human = null;
     if (w.origin !== 'human') conc.forEach(function (x) { if (x.author === w.author && x.origin === 'human') human = x; });
     var heads = baseHeads(prior, w);
     if (!heads.length) return {
-      out: human ? cur : linesFrom(bodyText(w), w),
+      out: human ? cur : replaceVal(w),
       rivals: conc.map(function (x) { return { x: x, win: human ? x : w }; }),
       lostTo: human
     };
     var sub = prior.filter(function (x) { return inClosure(x, heads); });
-    if (sub.length === prior.length) return { out: linesFrom(bodyText(w), w), rivals: [], lostTo: null };
+    if (sub.length === prior.length) return { out: replaceVal(w), rivals: [], lostTo: null };
     var base = f.base[w.id];
     if (!base) base = f.base[w.id] = foldBody(f, sub);
     var hit = [], lostTo = null;
-    var out = merge3(base, cur, bodyText(w).split('\n'), w, function (vr) {
+    var lines = merge3(base.lines, cur.lines, bodyText(w).split('\n'), w, function (vr) {
       var srcs = vr.map(function (l) { return l.src; }), wins = true;
       var changed = srcs.some(function (x) { return sub.indexOf(x) < 0; });
       conc.forEach(function (x) {
@@ -1412,10 +1424,18 @@
       return wins;
     });
     return {
-      out: out,
+      out: { lines: lines, atts: mergeAtts(base.atts, cur.atts, attachmentsOf(w.p)) },
       rivals: conc.filter(function (x) { return hit.indexOf(x) >= 0; }).map(function (x) { return { x: x, win: x === human ? x : w }; }),
       lostTo: lostTo
     };
+  }
+  // Attachment lists merged three-way by oid from base: one that either side removed is
+  // gone, one that either side added is kept; cur's order, then mine's additions.
+  function mergeAtts(base, cur, mine) {
+    function hasOid(l, oid) { return l.some(function (a) { return a.oid === oid; }); }
+    var out = cur.filter(function (a) { return !hasOid(base, a.oid) || hasOid(mine, a.oid); });
+    mine.forEach(function (a) { if (!hasOid(base, a.oid) && !hasOid(out, a.oid)) out.push(a); });
+    return out;
   }
   // The value of writes, a causally closed run in fold order.
   function foldBody(f, writes) {
@@ -1424,12 +1444,13 @@
     return cur;
   }
 
-  // Folds item.edit n's body: the merged value, the body revision (the register's
-  // heads), the markers of an overlap, and the lists that follow the body.
+  // Folds item.edit n's body: the merged value (its lines and attachments), the body
+  // revision (the register's heads), the markers of an overlap, and the lists that
+  // follow the body.
   function applyBody(S, it, n, C) {
     var f = S.bodies[it.id], key = 'it:' + it.id + ':body', label = 'body of ' + it.alias;
-    var r = bodyStep(f, f.writes, f.lines, n);
-    f.writes.push(n); f.lines = r.out;
+    var r = bodyStep(f, f.writes, f.val, n);
+    f.writes.push(n); f.val = r.out;
     S.reg[key] = (S.reg[key] || []).filter(function (h) { return !hb(h.n, n); }).concat([{ n: n, v: bodyText(n) }]);
     if (C) {
       r.rivals.forEach(function (v) {
@@ -1443,17 +1464,17 @@
     }
     bodyExtras(it, f);
   }
-  // The item's body and the lists that follow it: attachments and refs are the union
-  // over the writes whose lines survive (fold order, each oid / id once), mentions the
-  // latest such write's.
+  // The item's body and the lists that follow it: the folded value's attachments (each
+  // oid once); refs are the union over the writes whose lines survive (fold order, each
+  // id once), mentions the latest such write's.
   function bodyExtras(it, f) {
-    it.body = joinLines(f.lines);
-    var srcs = f.lines.map(function (l) { return l.src; }), last = null;
+    it.body = joinLines(f.val.lines);
+    var srcs = f.val.lines.map(function (l) { return l.src; }), last = null;
     it.mentions = []; it.attachments = []; it.refs = [];
+    f.val.atts.forEach(function (a) { if (!it.attachments.some(function (x) { return x.oid === a.oid; })) it.attachments.push(a); });
     f.writes.forEach(function (w) {
       if (srcs.indexOf(w) < 0) return;
       last = w;
-      attachmentsOf(w.p).forEach(function (a) { if (!it.attachments.some(function (x) { return x.oid === a.oid; })) it.attachments.push(a); });
       refsOf(w.p).forEach(function (t) { if (it.refs.indexOf(t) < 0) it.refs.push(t); });
     });
     if (last) it.mentions = mentionsOf(last.p);
@@ -1474,7 +1495,7 @@
         S.items[n.id].placedBy = S.items[n.id].parentBy = n;
         // The create is the item's first body write: the register's first head, and
         // every line's source until an edit replaces it.
-        S.bodies[n.id] = { writes: [n], lines: linesFrom(bodyText(n), n), base: {} };
+        S.bodies[n.id] = { writes: [n], val: replaceVal(n), base: {} };
         S.reg['it:' + n.id + ':body'] = [{ n: n, v: bodyText(n) }];
         bodyExtras(S.items[n.id], S.bodies[n.id]);
         S.place.push({ id: n.id, parent: S.items[n.id].parent, after: S.items[n.id].after });
