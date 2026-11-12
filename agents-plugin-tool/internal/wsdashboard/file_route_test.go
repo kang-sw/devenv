@@ -287,7 +287,7 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 		}
 		csp := h.Get("Content-Security-Policy")
 		origin := "http://" + v.host + prefix
-		if csp != fsViewCSP(origin) {
+		if csp != fsCapabilityCSP(origin) {
 			t.Errorf("%s: page policy = %q", v.name, csp)
 		}
 		for _, want := range []string{
@@ -304,12 +304,12 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 				t.Errorf("%s: page policy carries %q: %s", v.name, bad, csp)
 			}
 		}
-		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Cache-Control") != "no-store" || h.Get("Access-Control-Allow-Origin") != "*" || len(rec.Result().Cookies()) != 0 {
+		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Cache-Control") != "no-store" || h.Get("Access-Control-Allow-Origin") != "" || len(rec.Result().Cookies()) != 0 {
 			t.Errorf("%s: page headers = %v", v.name, h)
 		}
 	}
 	// The relative assets resolve under the prefix and load by type.
-	viewPolicy := fsViewCSP("http://" + bare.host + prefix)
+	viewPolicy := fsCapabilityCSP("http://" + bare.host + prefix)
 	for path, want := range map[string][3]string{
 		"docs/guide/style.css":   {"text/css; charset=utf-8", "body{color:red}", viewPolicy},
 		"docs/guide/app.js":      {"text/javascript; charset=utf-8", "document.title='x'", viewPolicy},
@@ -351,9 +351,9 @@ func TestFileViewRendersHTMLPage(t *testing.T) {
 	if rec := serve(f.d, bare, http.MethodPost, page, ""); !refusedByGuard(rec) {
 		t.Errorf("POST to the page route without the token = %d, want the guard's 401", rec.Code)
 	}
-	// A capability verifies on its own route only: the page cannot carry
-	// its capability to the capability route, whose policy allows fetches,
-	// and a preview's capability opens no page.
+	// A capability verifies on its own route only: a preview's capability
+	// opens no page, so it cannot read what only the page route serves
+	// (a file git ignores), and the page's opens no preview.
 	capability := strings.TrimSuffix(strings.TrimPrefix(prefix, "/s/livesession/fs/view/"), "/")
 	if rec := serve(f.d, bare, http.MethodGet, "/s/livesession/fs/cap/"+capability+"/docs/guide/page.html", ""); rec.Code != http.StatusNotFound {
 		t.Errorf("the page's capability on the capability route = %d, want 404", rec.Code)

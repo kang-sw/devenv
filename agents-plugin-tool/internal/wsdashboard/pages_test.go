@@ -427,6 +427,21 @@ func TestPagesRefuseFraming(t *testing.T) {
 	}
 }
 
+// TestSessionPageFramesOnlyItsOwnOrigin pins the session page's frame-src:
+// a frame on it (a preview's sandboxed document) cannot navigate itself to
+// another origin, where it would carry off its capability.
+func TestSessionPageFramesOnlyItsOwnOrigin(t *testing.T) {
+	f := startPageFixture(t)
+	resp, err := testClient().Get(f.base + "/s/livesession")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if csp := resp.Header.Get("Content-Security-Policy"); resp.StatusCode != http.StatusOK || csp != "frame-src 'self'; frame-ancestors 'none'" {
+		t.Errorf("session page = %d, policy %q", resp.StatusCode, csp)
+	}
+}
+
 func TestUnknownPagesAreNotFound(t *testing.T) {
 	f := startPageFixture(t)
 	for _, path := range []string{"/s/nosuchsession", "/s/NOT-VALID", "/s/livesession/more", "/elsewhere", "/s/nosuchsession/events"} {
