@@ -839,7 +839,7 @@ func TestTrackerUpdateRefusesStage(t *testing.T) {
 // relationship to its targets: assigner for a member below the writer (any
 // depth) or a rule rooted at the writer or below them, assignee for the
 // writer, a peer, or a rule rooted at a peer; an explicit one is kept and
-// never split.
+// never split (the store refuses an explicit assignee below the writer).
 func TestTrackerUpdateCompletionDefault(t *testing.T) {
 	for attrs, want := range map[string]string{
 		`people="ada"`:                          "assignee",

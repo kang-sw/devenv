@@ -3986,14 +3986,19 @@
     var id = o.t === 'r' ? o.root : o.id;
     return (o.t === 'r' && id === VS.viewer.member) || VS.viewer.reach[id] ? 'assigner' : 'assignee';
   }
-  // The picked targets as the item.assign events they write: one with compl when the user picked a
-  // completion, else one per default class, the first target's class first, each with its
-  // completion stored explicitly. Within an event, people come first, then rules ({root, levels?};
-  // the whole subtree without levels).
+  // The completion one target is written with: assigner for a target below the viewer whatever the
+  // pick, since the store refuses assignee there (check.go checkWrite: the viewer confirms that
+  // wrap-up); for anyone else the user's pick, else the default class.
+  function asgClass(o, compl) { return complClass(o) === 'assigner' ? 'assigner' : compl || 'assignee'; }
+  // whether a pick is below the viewer: the completion radio then offers no assignee
+  function asgBelow(S) { return S.sel.some(function (o) { return complClass(o) === 'assigner'; }); }
+  // The picked targets as the item.assign events they write, one per completion class (asgClass),
+  // the first target's class first, each with its completion stored explicitly. Within an event,
+  // people come first, then rules ({root, levels?}; the whole subtree without levels).
   function asgEvents(item, sel, compl) {
     var groups = [], by = {};
     sel.forEach(function (o) {
-      var c = compl || complClass(o);
+      var c = asgClass(o, compl);
       if (!by[c]) groups.push(by[c] = { c: c, sel: [] });
       by[c].sel.push(o);
     });
@@ -4003,15 +4008,13 @@
       return ['item.assign', { item: item, targets: people.concat(rules), completion: g.c }];
     });
   }
-  // The completion mode the radio shows: the user's pick once they touched it, else the picks'
-  // default class (complClass); 'mixed' when they fall in both (written as one assign per class),
-  // null while nothing is picked.
+  // The completion mode the radio shows: the picks' classes (asgClass); 'mixed' when they fall in
+  // both (written as one assign per class); the user's pick, or null, while nothing is picked.
   function asgCompl(S) {
-    if (S.compl) return S.compl;
     var cs = {};
-    S.sel.forEach(function (o) { cs[complClass(o)] = true; });
+    S.sel.forEach(function (o) { cs[asgClass(o, S.compl)] = true; });
     var k = Object.keys(cs);
-    return k.length > 1 ? 'mixed' : k[0] || null;
+    return k.length > 1 ? 'mixed' : k[0] || S.compl || null;
   }
   // everyone below root (removed members left out), by depth
   function subtreeOf(root) {
@@ -4106,7 +4109,7 @@
       (any ? ' aria-activedescendant="tkaopt-' + S.idx + '"' : '') + ' placeholder="' + wsT("js.tk.ap.search") + '" aria-label="' + wsT("js.tk.ap.search") + '" value="' + esc(S.q) + '"></label>' +
       '<ul class="ap-list" id="tkalist" role="listbox" aria-multiselectable="' + !topic + '" aria-label="' + esc(wsT("js.tk.act.assign")) + '">' + list + '</ul>' +
       '<div class="ap-foot">' + (topic ? '<span class="muted">' + wsT("js.tk.ap.topic") + '</span>' : '<span class="ap-cm" role="radiogroup" aria-label="' + wsT("js.tk.form.completion") + '">' + ['assignee', 'assigner'].map(function (c) {
-        return '<button type="button" role="radio" aria-checked="' + (asgCompl(S) === c) + '"' + attr('act', 'm-acm') + attr('c', c) + '>' + esc(complText(c)) + '</button>';
+        return '<button type="button" role="radio" aria-checked="' + (asgCompl(S) === c) + '"' + attr('act', 'm-acm') + attr('c', c) + (c === 'assignee' && asgBelow(S) ? ' hidden' : '') + '>' + esc(complText(c)) + '</button>';
       }).join('') + '</span><span class="ap-mix muted" id="tkamix"' + tipAttr(wsT("js.tk.ap.compl.mixed.tip")) + (asgCompl(S) === 'mixed' ? '' : ' hidden') + '>' + wsT("js.tk.ap.compl.mixed") + '</span>') + '<button type="button" class="btn primary" id="tkaapply"' + attr('act', 'm-aapply') + (S.sel.length ? '' : ' disabled') + '>' + wsT("js.tk.dlg.assign.submit") + '</button></div></div>';
   }
   // the list, the chips, and the apply button again; the search field (and an IME composition in it) stays
@@ -4119,7 +4122,10 @@
     $('tkaq').setAttribute('aria-activedescendant', $('tkaopt-' + S.idx) ? 'tkaopt-' + S.idx : '');
     var on = $('tkalist').querySelector('.aopt.on');
     if (on) on.scrollIntoView({ block: 'nearest' });
-    Array.prototype.forEach.call(document.querySelectorAll('#tkmenu .ap-cm [role="radio"]'), function (b) { b.setAttribute('aria-checked', String(b.getAttribute('data-c') === asgCompl(S))); });
+    Array.prototype.forEach.call(document.querySelectorAll('#tkmenu .ap-cm [role="radio"]'), function (b) {
+      b.setAttribute('aria-checked', String(b.getAttribute('data-c') === asgCompl(S)));
+      b.hidden = b.getAttribute('data-c') === 'assignee' && asgBelow(S); // a pick below the viewer: assigner only
+    });
     if ($('tkamix')) $('tkamix').hidden = asgCompl(S) !== 'mixed';
   }
   function asgToggle(i) {
@@ -4151,8 +4157,8 @@
     }
     if ((k === 'ArrowLeft' || k === 'ArrowRight') && t.closest('.ap-cm')) {
       e.preventDefault();
-      var nx = t.parentNode.querySelector('[data-c]:not([data-c="' + t.getAttribute('data-c') + '"])');
-      S.compl = nx.getAttribute('data-c'); asgDraw(); nx.focus();
+      var nx = t.parentNode.querySelector('[data-c]:not([hidden]):not([data-c="' + t.getAttribute('data-c') + '"])');
+      if (nx) { S.compl = nx.getAttribute('data-c'); asgDraw(); nx.focus(); }
       return true;
     }
     return false;

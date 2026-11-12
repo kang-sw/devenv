@@ -317,24 +317,26 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	}
 
 	// A forced assignment an admin hands off; the target accepts, sets a
-	// status, and closes.
+	// status, and closes. bo is below ada, so the assignment takes
+	// completion assigner and the handed record keeps it: the close waits
+	// for review.
 	step(trackerWriteStep{`<tk:store name="team">
 <tk:item.create kind="task" title="T2"/>
-<tk:item.assign item="$1" people="bo" completion="assignee"/>
+<tk:item.assign item="$1" people="bo" completion="assigner"/>
 <tk:item.handoff item="$1" to="ada" assignee="bo">take it</tk:item.handoff>
 <tk:item.accept item="$1">mine now</tk:item.accept>
 <tk:item.status item="$1" status="blocked">waiting</tk:item.status>
 <tk:item.close item="$1">done</tk:item.close>
 </tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemCreate, name: "t2", payload: map[string]any{"kind": "task", "title": "T2"}},
-		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t2}", "mode": "chosen", "people": []any{"bo"}, "completion": "assignee"}},
+		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t2}", "mode": "chosen", "people": []any{"bo"}, "completion": "assigner"}},
 		{typ: wstracker.TypeItemHandoff, payload: map[string]any{"item": "{t2}", "to": "ada", "assignee": "bo", "note": "take it"}},
 		{typ: wstracker.TypeItemAccept, payload: map[string]any{"item": "{t2}", "note": "mine now"}},
 		{typ: wstracker.TypeItemStatus, payload: map[string]any{"item": "{t2}", "status": "blocked", "note": "waiting"}},
 		{typ: wstracker.TypeItemClose, payload: map[string]any{"item": "{t2}", "note": "done"}},
 	}})
 	v = w.view(t)
-	if bo, ada := recStates(v.Assignments, w.ids["t2"], "bo"), recStates(v.Assignments, w.ids["t2"], "ada"); !reflect.DeepEqual(bo, []string{"handed/todo"}) || len(ada) != 1 || !strings.HasSuffix(ada[0], "/done") {
+	if bo, ada := recStates(v.Assignments, w.ids["t2"], "bo"), recStates(v.Assignments, w.ids["t2"], "ada"); !reflect.DeepEqual(bo, []string{"handed/todo"}) || len(ada) != 1 || !strings.HasSuffix(ada[0], "/in-review") {
 		t.Fatalf("T2 after the handoff: bo %v, ada %v", bo, ada)
 	}
 
@@ -351,7 +353,7 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 	// Assign by levels, withdraw it; assign one person, unassign them; hide.
 	step(trackerWriteStep{`<tk:store name="team">
 <tk:item.create kind="task" title="T4"/>
-<tk:item.assign item="$1" levels="1" completion="assignee"/>
+<tk:item.assign item="$1" levels="1" completion="assigner"/>
 <tk:item.unassign item="$1"/>
 <tk:item.create kind="task" title="T5"/>
 <tk:item.assign item="$4" people="bo"/>
@@ -360,7 +362,7 @@ func TestTrackerUpdateWritesEveryEventCommand(t *testing.T) {
 <tk:item.hide item="$7"/>
 </tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeItemCreate, name: "t4", payload: map[string]any{"kind": "task", "title": "T4"}},
-		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t4}", "mode": "all", "levels": 1, "completion": "assignee"}},
+		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t4}", "mode": "all", "levels": 1, "completion": "assigner"}},
 		{typ: wstracker.TypeItemUnassign, payload: map[string]any{"item": "{t4}"}},
 		{typ: wstracker.TypeItemCreate, name: "t5", payload: map[string]any{"kind": "task", "title": "T5"}},
 		{typ: wstracker.TypeItemAssign, payload: map[string]any{"item": "{t5}", "mode": "chosen", "people": []any{"bo"}, "completion": "assigner"}},
@@ -678,9 +680,9 @@ func TestTrackerUpdateWritesStructureAttributes(t *testing.T) {
 // TestTrackerUpdateCompletionDefaultAndSuperiorWrapUp writes through
 // tracker.update against the two-member team store: an assign to a peer
 // defaults to completion assignee (pending until accepted), one to a member
-// below the writer defaults to assigner, and the writer, as that member's
-// org superior, sets done on their assignment with assignee=, final with no
-// review step.
+// below the writer defaults to assigner and refuses an explicit assignee,
+// and the writer, as that member's org superior, sets done on their
+// assignment with assignee=, final with no review step.
 func TestTrackerUpdateCompletionDefaultAndSuperiorWrapUp(t *testing.T) {
 	w := &trackerWalk{trackerSessionFixture: newTrackerSessionFixture(t), ids: map[string]string{}}
 	w.adaSync(t) // ada learns bo's join
@@ -700,6 +702,11 @@ func TestTrackerUpdateCompletionDefaultAndSuperiorWrapUp(t *testing.T) {
 	w.ada(t, trackerWriteStep{`<tk:store name="team"><tk:roles.set_lead member="bo" leads="ada"/></tk:store>`, []trackerWantEvent{
 		{typ: wstracker.TypeSetLead, payload: map[string]any{"member": "bo", "leads": []any{"ada"}}},
 	}})
+	// An explicit completion assignee to a member below the writer is
+	// refused with the store's reason, not rewritten.
+	if text := w.trackerRefused(t, "tracker.update", map[string]any{"commands": `<tk:store name="team"><tk:item.create kind="task" title="X"/><tk:item.assign item="$1" people="bo" completion="assignee"/></tk:store>`}); !strings.Contains(text, "command 2 <tk:item.assign> (line 1): the store would flag this write: completion must be assigner for an assignment below ada (bo): ada confirms its wrap-up") {
+		t.Fatalf("an explicit completion assignee to a member below must be refused:\n%s", text)
+	}
 	w.ada(t, trackerWriteStep{`<tk:store name="team">
 <tk:item.create kind="task" title="Sub"/>
 <tk:item.assign item="$1" people="bo"/>
