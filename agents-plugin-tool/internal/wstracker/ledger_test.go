@@ -89,7 +89,7 @@ func TestRealLedgerTwoWriters(t *testing.T) {
 
 	dispatch(ada, TypeSetLead, map[string]any{"member": "bo", "leads": []string{"ada"}})
 	item := dispatch(ada, TypeItemCreate, map[string]any{"kind": "task", "title": "Ship the tracker"})
-	assign := dispatch(ada, TypeItemAssign, map[string]any{"item": item.String(), "mode": "chosen", "people": []string{"bo"}})
+	assign := dispatch(ada, TypeItemAssign, map[string]any{"item": item.String(), "mode": "chosen", "people": []string{"bo"}, "completion": "assigner"})
 	sync(adaL)
 	sync(boL)
 	dispatch(bo, TypeItemStatus, map[string]any{"item": item.String(), "status": "doing", "note": "on it"})

@@ -21,7 +21,8 @@
 // Public surface (the future backend API shape, see README "View state"):
 //   openStore(def)                  -> store handle (journal, clones, sync)
 //   store.view(stream, now)         -> deriveViewState(...) plus sync info, plain JSON
-//   store.dispatch(stream, events, ts) -> per-event verdicts; the only write path
+//   store.dispatch(stream, events, ts) -> per-event verdicts, or { refusal: { index, type, reason } }
+//                                     when a write-time rule refuses it (writeRefusal); the only write path
 //   store.sync / fetch / setOnline / raw / setRaw / reset / nextEventId
 //   deriveViewState(input, { stream, now }) -> plain JSON, no engine objects
 (function () {
@@ -557,6 +558,25 @@
     var old = has(S.asg, String(q.of)) ? S.asg[q.of] : null;
     return old && old.state === 'live' && wrapped(old.status) ? q.holder + '\'s assignment on ' + alias(q.item) + ' is ' + old.status + '; nothing to take' : null;
   }
+  // The write-time rules: store.dispatch refuses a new event by them, a replay never
+  // flags by them, so an event written before such a rule existed keeps folding as it
+  // did (Go: checkWrite). An item.assign reaching below its writer a (a member below a,
+  // a rule rooted at a or below a, mode all) takes completion assigner: a confirms the
+  // wrap-up, its holder sends it to review. A topic keeps no completion. S is the state
+  // after the dispatched call; null when nothing refuses.
+  function writeRefusal(S, a, type, p) {
+    if (type !== 'item.assign' || (p.completion || 'assignee') !== 'assignee') return null;
+    var it = has(S.items, String(p.item)) ? S.items[p.item] : null;
+    if (!it || it.kind === 'topic') return null;
+    var low = [];
+    function person(t) { if (t !== a && below(S.members, a, t)) low.push(t); }
+    function rule(root) { if (root === a || below(S.members, a, root)) low.push('the rule rooted at ' + root); }
+    if (p.targets != null) (p.targets || []).forEach(function (x) { if (typeof x === 'string') person(x); else if (x && typeof x.root === 'string') rule(x.root); });
+    else if (p.mode === 'all') rule(a);
+    else (p.people || []).forEach(person);
+    return low.length ? 'completion must be assigner for an assignment below ' + a + ' (' + low.join(', ') + '): ' + a + ' confirms its wrap-up' : null;
+  }
+
   // The suffix of a fold-time flag (see foldFlag).
   var CONCURRENTLY = '; written concurrently, the first in fold order wins';
 
@@ -2296,6 +2316,7 @@
       nextEventId: function (s) { need(s); return s + '#' + ((replay(input(s)).heads[s] || 0) + 1); },
       // The only write path: append events to the clone's open batch. events =
       // [{ type, payload, origin? }]; ts = the write time (every event keeps its own).
+      // A write-time refusal appends nothing and returns { refusal }.
       dispatch: function (s, evs, ts) {
         var c = need(s), g = replay(input(s)), seen = seenFor(g, s), seq = g.heads[s] || 0;
         var last = c.local[c.local.length - 1];
@@ -2312,7 +2333,18 @@
           last.events.push(ev);
           return s + '#' + ev.seq;
         });
-        var g2 = replay(input(s));
+        var g2 = replay(input(s)), refusal = null;
+        // the write-time rules (writeRefusal): a refused event takes the whole call back, as the Go store's Dispatch
+        out.some(function (id, i) {
+          var n = g2.byId[id], why = n.status === 'applied' ? writeRefusal(g2.S, n.author, n.type, n.p) : null;
+          if (why) refusal = { index: i, type: n.type, reason: why };
+          return !!why;
+        });
+        if (refusal) {
+          last.events.splice(last.events.length - out.length, out.length);
+          if (!last.events.length) c.local.pop();
+          return { refusal: refusal };
+        }
         return out.map(function (id) { var n = g2.byId[id]; return { id: id, alias: alias(id), type: n.type, status: n.status, reason: n.reason }; });
       },
       // Apply path: close the batch, push, fetch. No remote = close only (same path as a long offline).

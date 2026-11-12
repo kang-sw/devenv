@@ -210,7 +210,9 @@ Body text, markdown, written as is.
     `assigner` for a member the user leads at any depth and for a rule
     rooted at the user or at such a member (`levels` too), `assignee` for
     the user and anyone else. Targets of both kinds are written as two
-    assigns; the update prints the second as split off.
+    assigns; the update prints the second as split off. An explicit
+    `completion="assignee"` for a target of the first kind is refused: the
+    user confirms that work, and its holder sends it to review.
   - `tk:item.status` with `assignee` writes on that member's live
     assignment: their org superior (any depth) sets `blocked`, `done`
     (final, no review), or `dropped`; its assigner, when not their

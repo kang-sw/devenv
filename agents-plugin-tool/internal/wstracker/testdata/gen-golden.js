@@ -194,7 +194,7 @@ fs.readdirSync(casesDir).filter(function (f) { return f.endsWith('.json'); }).so
 // reason, so the Go unit test's strings are the engine's words.
 const RC = JSON.parse(fs.readFileSync(path.join(__dirname, 'reasons.json'), 'utf8'));
 let bad = 0;
-function runCase(steps) {
+function caseCommits(steps) {
   const commits = {}, heads = {};
   let t = Date.parse('2026-11-01T00:00:00Z');
   const ids = steps.map(function (st) {
@@ -208,17 +208,35 @@ function runCase(steps) {
     heads[stream] = seq;
     return stream + '#' + seq;
   });
-  const view = E.deriveViewState({ roles: RC.genesis, commits: commits }, { stream: 'ada.pc', now: '2026-11-02T00:00:00Z' });
+  return { commits: commits, ids: ids, ts: new Date(t + 60000).toISOString().replace('.000Z', 'Z') };
+}
+function runCase(steps) {
+  const cc = caseCommits(steps), ids = cc.ids;
+  const view = E.deriveViewState({ roles: RC.genesis, commits: cc.commits }, { stream: 'ada.pc', now: '2026-11-02T00:00:00Z' });
   const byId = {};
   view.events.forEach(function (e) { byId[e.id] = e; });
   return ids.map(function (id) { return byId[id]; });
 }
+// A write case (a write-time rule, Go checkWrite): its last step dispatched
+// on the history before it is refused with the reason, and replayed it applies.
+function dispatchCase(steps) {
+  const st = steps[steps.length - 1], cc = caseCommits(steps.slice(0, -1));
+  const store = E.openStore({ roles: RC.genesis, commits: cc.commits, sync: { remote: 'case' } });
+  const res = store.dispatch(st[0], [{ type: st[1], payload: st[2], origin: st[3] || 'human' }], cc.ts);
+  return res.refusal ? res.refusal.reason : 'not refused';
+}
 RC.cases.forEach(function (c) {
   if (c.goOnly) return;
-  const evs = runCase(RC.base.concat(c.steps)), last = evs[evs.length - 1];
+  const steps = RC.base.concat(c.steps), evs = runCase(steps), last = evs[evs.length - 1];
   evs.slice(0, -1).forEach(function (e) {
     if (e.status !== 'applied') { bad++; console.error('reasons: ' + c.name + ': setup ' + e.id + ' ' + e.status + ': ' + e.reason); }
   });
+  if (c.write) {
+    const why = dispatchCase(steps);
+    if (why !== c.reason) { bad++; console.error('reasons: ' + c.name + ': engine dispatch says "' + why + '", case expects "' + c.reason + '"'); }
+    if (last.status !== 'applied') { bad++; console.error('reasons: ' + c.name + ': replayed ' + last.status + ' "' + last.reason + '", a write case applies'); }
+    return;
+  }
   if (last.status !== 'flagged' || last.reason !== c.reason) {
     bad++;
     console.error('reasons: ' + c.name + ': engine says ' + last.status + ' "' + last.reason + '", case expects "' + c.reason + '"');

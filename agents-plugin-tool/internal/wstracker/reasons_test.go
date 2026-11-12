@@ -2,6 +2,7 @@ package wstracker
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -66,9 +67,12 @@ type reasonCases struct {
 		Name   string `json:"name"`
 		GoOnly bool   `json:"goOnly"`
 		// EngineOnly cases use the roles.add_member stand-in, which Go does not port.
-		EngineOnly bool   `json:"engineOnly"`
-		Steps      []step `json:"steps"`
-		Reason     string `json:"reason"`
+		EngineOnly bool `json:"engineOnly"`
+		// Write cases are a write-time rule (checkWrite): the last step is
+		// refused when dispatched and applied when replayed.
+		Write  bool   `json:"write"`
+		Steps  []step `json:"steps"`
+		Reason string `json:"reason"`
 	} `json:"cases"`
 }
 
@@ -87,6 +91,8 @@ func loadReasonCases(t *testing.T) reasonCases {
 
 // TestFlaggedReasons covers every flagged reason the domain words, in the
 // reference engine's words (gen-golden.js checks the same cases against it).
+// A write case's reason is the refusal of its last step dispatched on the
+// history before it, and the replay applies that step.
 func TestFlaggedReasons(t *testing.T) {
 	rc := loadReasonCases(t)
 	for _, c := range rc.Cases {
@@ -95,6 +101,15 @@ func TestFlaggedReasons(t *testing.T) {
 		}
 		t.Run(c.Name, func(t *testing.T) {
 			evs := history(append(append([]step(nil), rc.Base...), c.Steps...))
+			if c.Write {
+				last := evs[len(evs)-1]
+				trk := New(newMemSource(rc.Genesis, last.ID.Stream(), evs[:len(evs)-1]), last.ID.Stream())
+				err := trk.validate([]wsledger.NewEvent{{Type: last.Type, Origin: last.Origin, Payload: last.Payload}})
+				var ref *Refusal
+				if !errors.As(err, &ref) || ref.Reason != c.Reason {
+					t.Fatalf("dispatch: got %v, want the refusal %q", err, c.Reason)
+				}
+			}
 			v := Derive(newMemSource(rc.Genesis, "ada.pc", evs), "ada.pc", time.Time{}, 0)
 			byID := map[string]EventView{}
 			for _, e := range v.Events {
@@ -108,10 +123,50 @@ func TestFlaggedReasons(t *testing.T) {
 					}
 					continue
 				}
-				if e.Status != "flagged" || deref(e.Reason) != c.Reason {
+				if c.Write {
+					if e.Status != "applied" {
+						t.Fatalf("replayed: got %s %q, want applied", e.Status, deref(e.Reason))
+					}
+				} else if e.Status != "flagged" || deref(e.Reason) != c.Reason {
 					t.Fatalf("got %s %q, want flagged %q", e.Status, deref(e.Reason), c.Reason)
 				}
 			}
 		})
 	}
+}
+
+// TestAssignBelowTheWriterTakesAssigner pins what the write-time rule
+// (checkWrite) lets through; its refusals are reasons.json write cases. On
+// the reasons.json genesis ada leads maya, raj, and bo; maya leads lena and
+// omar; raj leads sven. The base's maya.pc#2 gave lena, below maya, an
+// assignment with completion absent (assignee) before the rule: it still
+// folds that way, and lena wraps it up herself.
+func TestAssignBelowTheWriterTakesAssigner(t *testing.T) {
+	rc := loadReasonCases(t)
+	evs := history(rc.Base)
+	for _, c := range []struct {
+		what, stream string
+		payload      map[string]any
+	}{
+		{"below with completion assigner", "maya.pc", map[string]any{"item": "maya.pc#1", "targets": []any{"omar"}, "completion": "assigner"}},
+		{"a peer with completion assignee", "maya.pc", map[string]any{"item": "maya.pc#1", "targets": []any{"raj"}, "completion": "assignee"}},
+		{"above without completion", "maya.pc", map[string]any{"item": "maya.pc#1", "mode": "chosen", "people": []any{"ada"}}},
+		{"the writer with completion assignee", "maya.pc", map[string]any{"item": "maya.pc#1", "targets": []any{"maya"}, "completion": "assignee"}},
+		{"a rule rooted at a peer with completion assignee", "maya.pc", map[string]any{"item": "maya.pc#1", "targets": []any{map[string]any{"root": "raj"}}, "completion": "assignee"}},
+		{"a topic to a member below", "ada.pc", map[string]any{"item": "ada.pc#3", "targets": []any{"raj"}, "completion": "assignee"}},
+	} {
+		raw, err := json.Marshal(c.payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trk := New(newMemSource(rc.Genesis, c.stream, evs), c.stream)
+		if err := trk.validate([]wsledger.NewEvent{{Type: TypeItemAssign, Payload: raw}}); err != nil {
+			t.Errorf("%s: %v", c.what, err)
+		}
+	}
+
+	v := stepsView(t, "maya.pc", append(append([]step(nil), rc.Base...), step{"lena.pc", "item.close", map[string]any{"item": "maya.pc#1"}}))
+	wantEq(t, "the close applies", lastVerdict(v), "applied ")
+	old := asg(t, v, "maya.pc#2>lena")
+	wantEq(t, "the older record", old.Completion+" "+old.Status, "assignee done")
 }

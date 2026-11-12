@@ -105,7 +105,7 @@ func TestItemRefsAndBackrefs(t *testing.T) {
 func TestAssignRulesWithinReach(t *testing.T) {
 	tm := newTeam(t)
 	wide := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Wide"})
-	ev := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": wide, "targets": []any{"sven", map[string]any{"root": "maya", "levels": 1}}})
+	ev := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": wide, "targets": []any{"sven", map[string]any{"root": "maya", "levels": 1}}, "completion": "assigner"})
 	rid := ev + "~maya"
 
 	v := tm.view("maya.pc")
@@ -130,7 +130,7 @@ func TestAssignRulesWithinReach(t *testing.T) {
 
 	// The older levels form folds as before: the rule id is the event's.
 	legacy := tm.do("maya.pc", TypeItemCreate, map[string]any{"kind": "task", "title": "Legacy"})
-	old := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": legacy, "mode": "all", "levels": 1})
+	old := tm.do("maya.pc", TypeItemAssign, map[string]any{"item": legacy, "mode": "all", "levels": 1, "completion": "assigner"})
 	a := asg(t, tm.view("maya.pc"), old+">lena")
 	wantEq(t, "old form record", deref(a.Rule)+" "+jsNum(*a.RuleLevels), old+" 1")
 

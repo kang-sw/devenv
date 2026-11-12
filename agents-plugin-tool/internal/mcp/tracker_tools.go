@@ -891,7 +891,10 @@ func planTrackerBatch(p *wsxmlcmd.Problems, commands string, registered []wstrac
 // item.assign without completion gets it stored explicitly, by the
 // writer's relationship to each target (completionClasses); targets of both
 // classes are written as one item.assign per class, the second right after
-// the first. The fold's absent-means-assignee rule stays for old events. A
+// the first. An explicit completion is kept as written: the store refuses
+// assignee for a target below the writer (wstracker checkWrite), and that
+// refusal reaches the caller instead of a silent rewrite. The fold's
+// absent-means-assignee rule stays for old events. A
 // topic created that no item.assign of the batch names by $N is
 // self-assigned (people = the writer) by an item.assign inserted right after
 // its create, so the writer holds it, as on the dashboard. Every event index

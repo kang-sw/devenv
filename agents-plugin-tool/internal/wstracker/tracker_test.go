@@ -75,7 +75,7 @@ func TestDispatchRefusal(t *testing.T) {
 	item := next.String()
 	ids, err := trk.Dispatch(context.Background(), []wsledger.NewEvent{
 		{Type: TypeItemCreate, Payload: raw(map[string]any{"kind": "task", "title": "Write the release notes"})},
-		{Type: TypeItemAssign, Payload: raw(map[string]any{"item": item, "mode": "chosen", "people": []string{"lena"}})},
+		{Type: TypeItemAssign, Payload: raw(map[string]any{"item": item, "mode": "chosen", "people": []string{"lena"}, "completion": "assigner"})},
 	})
 	if err != nil {
 		t.Fatal(err)
