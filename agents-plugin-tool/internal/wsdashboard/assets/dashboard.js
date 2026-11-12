@@ -1568,21 +1568,29 @@
   // The badge on the border between the conversation and the composer shows
   // while the session has a live adapter and its lead works on a turn (the
   // convlive region's data-phase). One click stops the turn and takes every
-  // held message back into the composer. It then stays disabled until the
-  // phase leaves the working set, so a second click cannot cut the next turn.
+  // held message back into the composer. It then stays disabled until that
+  // turn ends, so a second click cannot cut the next turn: until the phase
+  // leaves the working set or the region's data-turn (the server's
+  // turn-start stamp) changes from the one seen at the click. The stamp is
+  // what catches a next turn that starts at once (held input or mail
+  // delivered at turn end), which no page swap ever shows as idle.
   var ibadge = $("ibadge"), ilabel = ibadge && ibadge.querySelector(".ilabel");
   var WORKING = { thinking: 1, replying: 1, tool: 1, permission: 1 };
-  var liveMode = mode === "live", interrupting = false;
+  var liveMode = mode === "live", interrupting = false, interruptedTurn = "";
   function leadWorking() {
     var c = doc.querySelector("#r-convlive .clive");
     return !!c && WORKING[c.getAttribute("data-phase")] === 1;
+  }
+  function leadTurn() {
+    var c = doc.querySelector("#r-convlive .clive");
+    return (c && c.getAttribute("data-turn")) || "";
   }
   function syncBadge() {
     subBadge(sbadge, doc.querySelector("#r-convlive .clive"), liveMode);
     bgBadge(doc.querySelector("#r-convlive .clive"));
     if (!ibadge) return;
     var on = liveMode && leadWorking();
-    if (!on) interrupting = false;
+    if (!on || leadTurn() !== interruptedTurn) interrupting = false;
     ibadge.hidden = !on;
     ibadge.disabled = interrupting;
     ibadge.classList.toggle("busy", interrupting);
@@ -1631,6 +1639,7 @@
   function interruptTurn() {
     if (interrupting) return;
     interrupting = true;
+    interruptedTurn = leadTurn();
     syncBadge();
     post("interrupt", {}, function (ok, res) {
       if (!ok) { interrupting = false; syncBadge(); syncNote(wsT("js.interrupt.fail", res)); return; }
