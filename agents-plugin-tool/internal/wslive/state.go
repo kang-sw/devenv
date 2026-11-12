@@ -83,7 +83,11 @@ type Event struct {
 	// SessionKey is a delegate's ws session key. It is relabelled to the
 	// delegate's reply-id and never stored.
 	SessionKey string `json:"sessionKey,omitempty"`
-	Status     string `json:"status,omitempty"`
+	// AgentKind marks what runs a subagent when it is not the host's own
+	// (AgentKindPi); it is a subagent's alone and, once set, stays. The
+	// event type is Kind, under "kind", so the marker has a key of its own.
+	AgentKind string `json:"agentKind,omitempty"`
+	Status    string `json:"status,omitempty"`
 	// Caption replaces the caption when present; "" clears it.
 	Caption *string `json:"caption,omitempty"`
 	// Batches replaces the agent's batch list when present.
@@ -145,6 +149,7 @@ type activityState struct {
 type agentState struct {
 	activityState
 	id, parentID, label, replyID, status string
+	kind                                 string
 	startedAt, endedAt, touched          int64
 	model, effort                        string
 	contextTokens                        int64
@@ -500,7 +505,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		batches = st.normalizeBatches(ev.Batches)
 	}
 	if ev.AgentID == "" {
-		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || hasTelemetry(ev) {
+		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || hasTelemetry(ev) {
 			return fmt.Errorf("the lead takes only batches and caption; set agentId for a subagent")
 		}
 		st.setActivity(&st.lead, ev, batches)
@@ -511,7 +516,15 @@ func (st *State) applyAgent(ev Event, at int64) error {
 	default:
 		return fmt.Errorf("agent status must be %q, %q, or %q", StatusRunning, StatusDone, StatusFailed)
 	}
+	switch ev.AgentKind {
+	case "", AgentKindPi:
+	default:
+		return fmt.Errorf("agentKind must be %q or absent", AgentKindPi)
+	}
 	a := st.agent(ev.AgentID, at)
+	if ev.AgentKind != "" {
+		a.kind = ev.AgentKind
+	}
 	if ev.ParentID != "" && ev.ParentID != ev.AgentID && agentIDPattern.MatchString(ev.ParentID) {
 		a.parentID = ev.ParentID
 	}
@@ -539,6 +552,21 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		a.outputTps = 0
 	}
 	return nil
+}
+
+// Agent kinds an agent event's AgentKind takes.
+const (
+	// AgentKindPi is a Pi subagent the session spawned through ws (the
+	// pi.* tools), which the daemon's agent runner hosts.
+	AgentKindPi = "pi"
+)
+
+// knownAgentKind is kind when it is a known agent kind, else "".
+func knownAgentKind(kind string) string {
+	if kind == AgentKindPi {
+		return kind
+	}
+	return ""
 }
 
 // hasTelemetry reports an event that carries any subagent telemetry field.
@@ -801,6 +829,7 @@ func (st *State) SeedFinished(prev Snapshot) {
 			id:            p.ID,
 			label:         cleanLine(st.scrub.scrub(p.Label), LabelRunes),
 			replyID:       p.ReplyID,
+			kind:          knownAgentKind(p.AgentKind),
 			status:        p.Status,
 			startedAt:     p.StartedAt,
 			endedAt:       p.EndedAt,
@@ -862,6 +891,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 			Status:    a.status,
 			StartedAt: a.startedAt,
 			EndedAt:   a.endedAt,
+			AgentKind: a.kind,
 
 			Model:         a.model,
 			Effort:        a.effort,

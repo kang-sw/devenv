@@ -56,10 +56,11 @@ type Record struct {
 	// Cwd is the directory the session's process runs in when that is not
 	// Root: a session taken over from a terminal harness keeps the
 	// directory that harness ran in, since the harness resolves its
-	// sessions by it. SessionFile is the session file of such a session's
-	// harness when it keeps its conversations in files of its own (pi),
-	// used in place of the conversation's own file. Both are empty for a
-	// session the daemon started.
+	// sessions by it, and a spawned conversation (Runner.Spawn) the one its
+	// spawner chose. SessionFile is the session file of a taken-over
+	// session's harness when it keeps its conversations in files of its
+	// own (pi), used in place of the conversation's own file. Both are
+	// empty for any other session the daemon started.
 	Cwd         string `json:"cwd,omitempty"`
 	SessionFile string `json:"session_file,omitempty"`
 	// HolderID is the session holder the conversation's process runs under,
@@ -84,6 +85,33 @@ type Record struct {
 	// messages and commands drained after it wait here across turn ends,
 	// although the inbox already shows them received.
 	Queued []QueuedInput `json:"queued,omitempty"`
+
+	// Parent is the session that spawned the conversation (Runner.Spawn),
+	// to which each of its settled turns is reported (Options.Report); nil
+	// for one opened from the dashboard or the REST routes. Label is the
+	// one-line name its spawner gave it.
+	Parent *ParentRef `json:"parent,omitempty"`
+	Label  string     `json:"label,omitempty"`
+	// TurnOpen is set on a conversation with a Parent while one of its
+	// turns runs: a daemon that exits mid-turn leaves it set, and the next
+	// daemon reports that turn as interrupted when it loads the record.
+	TurnOpen bool `json:"turn_open,omitempty"`
+}
+
+// Parent kinds a ParentRef names.
+const (
+	// ParentLead is a lead session, reached through its mailbox reply-id:
+	// its child's turn reports arrive as mail.
+	ParentLead = "lead"
+)
+
+// ParentRef names the session that spawned a conversation. It holds the
+// parent's reply-id, never its ws session key, so no credential of the
+// parent's lands in the child's record; Kind says how the parent is
+// reached (ParentLead).
+type ParentRef struct {
+	Kind    string `json:"kind"`
+	ReplyID string `json:"reply_id"`
 }
 
 // QueuedInput is one drained dashboard input waiting for its turn: a

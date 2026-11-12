@@ -57,6 +57,21 @@ func LeadProfileFor(backend string) string {
 	return ""
 }
 
+// PiWorkerProfile is the builtin profile of a Pi subagent a session spawns
+// (Runner.Spawn): Pi's built-in coding tools and the few ws tools a
+// delegated implementation or review prompt names, with no instruction
+// file, since the spawner's rendered prompt is the first message.
+const PiWorkerProfile = "pi-worker"
+
+// PiWorkerTools are Pi's built-in coding tools the pi-worker profile
+// allows.
+var PiWorkerTools = []string{"read", "bash", "edit", "write", "grep", "find", "ls"}
+
+// PiWorkerWSTools are the ws tools the pi-worker profile allows: the commit
+// an implementation prompt ends with, and the git reads a commit and a
+// diff review need. No pi.* tool: a worker spawns no worker of its own.
+var PiWorkerWSTools = []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit"}
+
 //go:embed instructions/tracker-support.md
 var trackerSupportText string
 
@@ -105,6 +120,16 @@ func BuiltinProfiles() map[string]json.RawMessage {
 		}
 		out[ProfilePrefix+name] = raw
 	}
+	raw, err := json.Marshal(Profile{
+		Description: "Pi subagent (pi): a headless Pi worker a session spawns with a prompt and steers by its id; it reads, edits, and runs commands in its working directory, and commits through ws.",
+		Backend:     BackendPi,
+		Tools:       PiWorkerTools,
+		WSTools:     PiWorkerWSTools,
+	})
+	if err != nil {
+		panic(err)
+	}
+	out[ProfilePrefix+PiWorkerProfile] = raw
 	for name, p := range map[string]Profile{
 		LeadProfileClaude: {Backend: BackendClaude, PermissionMode: DefaultLeadPermissionMode},
 		LeadProfilePi:     {Backend: BackendPi},

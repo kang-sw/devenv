@@ -298,7 +298,10 @@ type Agent struct {
 	ParentID string `json:"parentId,omitempty"`
 	Label    string `json:"label,omitempty"`
 	// ReplyID labels a delegate that holds a ws session key.
-	ReplyID   string `json:"replyId,omitempty"`
+	ReplyID string `json:"replyId,omitempty"`
+	// AgentKind marks a subagent the host does not run itself
+	// (AgentKindPi); absent for the host's own.
+	AgentKind string `json:"agentKind,omitempty"`
 	Status    string `json:"status"`
 	StartedAt int64  `json:"startedAt,omitempty"`
 	EndedAt   int64  `json:"endedAt,omitempty"`

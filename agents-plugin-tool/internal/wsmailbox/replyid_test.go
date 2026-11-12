@@ -34,6 +34,32 @@ func TestReplyStoreRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPostSystemQueuesSenderlessMail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mailbox-replyids.json")
+	replyID := ReplyID("amber-tide-fox")
+	if err := WithReplyLock(path, func(store *ReplyStore) error {
+		store.Queues = AppendQueue(store.Queues, replyID, Envelope{From: "peer@machine", Content: "first"})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 13, 1, 2, 3, 0, time.FixedZone("x", 3600))
+	if err := PostSystem(path, replyID, "report", at); err != nil {
+		t.Fatalf("PostSystem: %v", err)
+	}
+	store, err := LoadReplyStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := store.Queues[replyID]
+	if len(q) != 2 || q[1] != (Envelope{Content: "report", SentAt: "2026-11-13T00:02:03Z"}) {
+		t.Fatalf("queue = %#v, want the system mail after the peer's", q)
+	}
+	if err := PostSystem(path, "", "x", at); err == nil {
+		t.Fatalf("an empty reply-id is refused")
+	}
+}
+
 func TestReplyIDDeterministicWithoutPersistence(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "uncreated")
 	t.Setenv("WS_CACHE_HOME", cache)
