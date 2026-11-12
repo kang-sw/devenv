@@ -27,6 +27,7 @@ import (
 //	GET  /s/<reply-id>/fs/raw?path=<p>[&root=<abs>]       an image's or a video's bytes
 //	GET  /s/<reply-id>/fs/find, /fs/search                name and content search (fs_search.go)
 //	GET  /s/<reply-id>/fs/cap/<capability>/<p>            the sandboxed HTML preview (fs_capability.go)
+//	GET  /s/<reply-id>/fs/view/<capability>/<p>           the file view's sandboxed HTML page (fs_capability.go)
 //	POST /s/<reply-id>/fs/act                             open or reveal on the host (fs_act_route.go)
 //
 // The browsing root is the session's project root, the root the file view,
@@ -427,7 +428,9 @@ func (d *Daemon) handleFSRoutes(w http.ResponseWriter, r *http.Request, replyID,
 	case sub == "search":
 		d.handleFSSearch(w, r, replyID)
 	case strings.HasPrefix(sub, "cap/"):
-		d.handleFSCapability(w, r, replyID, strings.TrimPrefix(sub, "cap/"))
+		d.handleFSCapability(w, r, replyID, strings.TrimPrefix(sub, "cap/"), false)
+	case strings.HasPrefix(sub, "view/"):
+		d.handleFSCapability(w, r, replyID, strings.TrimPrefix(sub, "view/"), true)
 	default:
 		http.NotFound(w, r)
 	}

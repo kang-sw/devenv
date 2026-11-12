@@ -34,10 +34,11 @@ import (
 //     the image route, which a LAN viewer's frame cannot load.
 //   - GET and HEAD of the HTML preview's capability route
 //     (previewCapability, fs_capability.go), which a preview card's
-//     sandboxed frame loads with its relative assets. It is admitted by the
-//     short-lived, root-scoped capability its path carries instead: the
-//     guard passes the route by its shape and the route answers 404 without
-//     a valid capability.
+//     sandboxed frame loads with its relative assets, and of the file
+//     view's page route, the same route for an HTML file opened in a tab.
+//     It is admitted by the short-lived, root-scoped capability its path
+//     carries instead: the guard passes the route by its shape and the
+//     route answers 404 without a valid capability.
 //
 // The LAN token is not the endpoint file's shutdown token and is never
 // written to the endpoint file, so a LAN browser never holds the shutdown
