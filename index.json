@@ -397,6 +397,9 @@
     "261112-bug-ws-dashboard-open-tab-keeps-stale-assets-after-daemon-upgrade": {
       "registered_at": "2026-11-12T04:20:54Z"
     },
+    "261112-bug-ws-hosted-pi-subagents-missing-from-dashboard": {
+      "registered_at": "2026-11-12T06:05:00Z"
+    },
     "261112-bug-ws-hosted-windows-cmd-shim-host-pid-mismatch": {
       "registered_at": "2026-11-12T04:58:18Z"
     },
