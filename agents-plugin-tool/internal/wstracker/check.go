@@ -540,6 +540,15 @@ func (s *state) reqEnded(q *takeReq) rejection {
 	return rejection(rq + " lapsed: " + q.holder + "'s assignment on " + alias(q.item) + " ended (" + e.alias + ")")
 }
 
+// takeWrapped refuses the approval of pending q when the assignment it
+// names is done or dropped.
+func (s *state) takeWrapped(q *takeReq) rejection {
+	if old := s.asg[q.of]; old != nil && old.state == "live" && wrapped(old.status) {
+		return rejection(q.holder + "'s assignment on " + alias(q.item) + " is " + old.status + "; nothing to take")
+	}
+	return ""
+}
+
 func (s *state) needRec(it *item, who string) (*rec, rejection) {
 	if r := s.liveRec(it.id, who); r != nil {
 		return r, ""
@@ -943,6 +952,14 @@ func (s *state) check(n *node) rejection {
 				verb = "denies"
 			}
 			return rejection("only " + q.holder + " (the assignment's holder) or the creator (" + it.author + ") " + verb + " " + alias(q.id))
+		}
+		// A wrapped-up record stays live, so its pending requests never
+		// lapse; approving one would hand over finished work. A denial
+		// stays open.
+		if n.typ == TypeItemApprove {
+			if r := s.takeWrapped(q); r != "" {
+				return r
+			}
 		}
 
 	case TypeItemUnrequest:

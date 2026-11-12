@@ -743,7 +743,8 @@
     });
     if (it.claimable) out.push(['claim', 'accept', wsT("js.tk.act.claim"), { item: id }, 1]);
     reqsOf(it).forEach(function (q) {
-      if (canAnswer(it, q)) out.push(['approve', 'accept', wsT("js.tk.act.approve", nm(q.by)), { item: id, req: q.id }, 1], ['note', 'decline', wsT("js.tk.act.deny", nm(q.by)), { item: id, who: q.by, req: q.id, op: 'item.deny' }]);
+      if (canApprove(it, q)) out.push(['approve', 'accept', wsT("js.tk.act.approve", nm(q.by)), { item: id, req: q.id }, 1]);
+      if (canAnswer(it, q)) out.push(['note', 'decline', wsT("js.tk.act.deny", nm(q.by)), { item: id, who: q.by, req: q.id, op: 'item.deny' }]);
       if (q.state === 'pending' && q.by === v) out.push(['unrequest', 'withdraw', wsT("js.tk.act.unrequest", nm(q.assignee)), { item: id, req: q.id }]);
     });
     return out;
@@ -794,7 +795,8 @@
   // and withdraws an open opening; claiming is items[].claimable, computed per viewer. A take
   // request names one live, explicit, not-done assignment of someone else, and is refused while
   // the viewer holds a live or pending record on the item or already asked for that assignment;
-  // the named assignment's holder or the creator answers it, and its requester withdraws it.
+  // the named assignment's holder or the creator answers it (approves it only while that
+  // assignment is not done or dropped), and its requester withdraws it.
   function fallbackRec(it) { return it.assignments.map(A).filter(function (r) { return r.fallback && r.state === 'live'; })[0] || null; }
   function holdsOn(it, who) { return it.assignments.map(A).some(function (r) { return r.to === who && (r.state === 'live' || r.state === 'pending') && !r.fallback && !r.ruleRequest; }); }
   function canOpen(it) {
@@ -811,6 +813,10 @@
     return it.assignments.map(A).filter(function (r) { return r.state === 'live' && !r.fallback && !r.ruleRequest && !wrapped(r.status) && r.to !== v && !asked[r.id]; });
   }
   function canAnswer(it, q) { return q.state === 'pending' && (q.assignee === VS.viewer.member || isCreator(it)); }
+  // An approval also needs the named assignment not wrapped up: a done or dropped record stays
+  // live, so its requests never lapse, and the store refuses to hand it over (check.go
+  // takeWrapped). A denial stays open.
+  function canApprove(it, q) { var r = A(q.assignment); return canAnswer(it, q) && !(r && r.state === 'live' && wrapped(r.status)); }
   // A subtask's parent is assigned to or created by its author.
   function canSplit(it) { return (!!mineLive(it) || it.author === VS.viewer.member) && !it.hidden; }
   function canStatus(it) { var r = !it.hidden && it.kind !== 'topic' && mineLive(it); return !!r && !wrapped(r.status); }
@@ -2720,7 +2726,8 @@
     }
     h += qs.map(function (q) {
       var b = '';
-      if (canAnswer(it, q)) b += btn('approve', esc(wsT("js.tk.req.approve")), { item: it.id, req: q.id }, 'primary') + btn('note', esc(wsT("js.tk.req.deny")), { item: it.id, who: q.by, req: q.id, op: 'item.deny' });
+      if (canApprove(it, q)) b += btn('approve', esc(wsT("js.tk.req.approve")), { item: it.id, req: q.id }, 'primary');
+      if (canAnswer(it, q)) b += btn('note', esc(wsT("js.tk.req.deny")), { item: it.id, who: q.by, req: q.id, op: 'item.deny' });
       if (q.state === 'pending' && q.by === v) b += btn('unrequest', esc(wsT("js.tk.req.withdraw")), { item: it.id, req: q.id });
       return '<li class="arow' + (q.state === 'pending' ? '' : ' gone') + '"' + attr('req', q.id) + '><div class="ar-main">' + avHtml(q.by, q.state === 'pending') +
         '<span class="ar-name">' + wsT("js.tk.req.line", whoName(q.by), whoName(q.assignee)) + '</span><span class="ar-st"><span class="chip' + (q.state === 'pending' ? ' req' : ' ended') + '">' + esc(wsT(REQ_ST[q.state] || "js.tk.req.st.pending")) + '</span>' +

@@ -1888,8 +1888,8 @@ func (s *state) applyRequest(n *node) {
 // and the requester's new record starts live with its assigner, completion,
 // status, and note, as an accepted handoff does (290). A requester who holds
 // a record on the item by then gets no second one. An approval of a request
-// that an earlier event in fold order answered, withdrew, or let lapse is
-// flagged and takes no effect.
+// that an earlier event in fold order answered, withdrew, or let lapse, or
+// whose assignment such an event wrapped up, is flagged and takes no effect.
 func (s *state) applyApprove(n *node) {
 	p := n.p
 	q := s.reqs[p.str("request")]
@@ -1898,6 +1898,10 @@ func (s *state) applyApprove(n *node) {
 	}
 	if q.state != "pending" {
 		s.foldFlag(n, s.reqEnded(q)+concurrently)
+		return
+	}
+	if r := s.takeWrapped(q); r != "" {
+		s.foldFlag(n, r+concurrently)
 		return
 	}
 	q.state, q.ended, q.answerNote = "approved", n, p.str("note")

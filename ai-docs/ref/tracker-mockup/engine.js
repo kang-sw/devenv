@@ -551,6 +551,12 @@
     if (q.state === 'withdrawn') return rq + ' was withdrawn (' + alias(e.id) + ')';
     return rq + ' lapsed: ' + q.holder + '\'s assignment on ' + alias(q.item) + ' ended (' + alias(e.id) + ')';
   }
+  // Why pending q is not approved: the assignment it names is done or dropped (a
+  // wrapped-up record stays live, so its requests never lapse); null when it is not.
+  function takeWrapped(S, q) {
+    var old = has(S.asg, String(q.of)) ? S.asg[q.of] : null;
+    return old && old.state === 'live' && wrapped(old.status) ? q.holder + '\'s assignment on ' + alias(q.item) + ' is ' + old.status + '; nothing to take' : null;
+  }
   // The suffix of a fold-time flag (see foldFlag).
   var CONCURRENTLY = '; written concurrently, the first in fold order wins';
 
@@ -732,6 +738,7 @@
         if (q.state !== 'pending') rej(reqEnded(q));
         if (a !== q.holder && it.author !== a && !creatorGone(S, it, a))
           rej('only ' + q.holder + ' (the assignment\'s holder) or the creator (' + it.author + ') ' + (n.type === 'item.approve' ? 'approves' : 'denies') + ' ' + alias(q.id));
+        if (n.type === 'item.approve' && takeWrapped(S, q)) rej(takeWrapped(S, q));
         break;
 
       case 'item.unrequest':
@@ -1223,12 +1230,13 @@
   // item.approve: the named assignment ends handed and the requester's new record
   // starts live with its assigner, completion, status, and note, as an accepted
   // handoff does (290); a requester holding a record by then gets no second one.
-  // An approval of a request an earlier event answered, withdrew, or let lapse is
-  // flagged.
+  // An approval of a request an earlier event answered, withdrew, or let lapse, or
+  // whose assignment such an event wrapped up, is flagged.
   function applyApprove(S, n, C) {
     var p = n.p, q = has(S.reqs, String(p.request)) ? S.reqs[p.request] : null;
     if (!q || q.item !== p.item) return;
     if (q.state !== 'pending') { foldFlag(n, reqEnded(q) + CONCURRENTLY, C); return; }
+    if (takeWrapped(S, q)) { foldFlag(n, takeWrapped(S, q) + CONCURRENTLY, C); return; }
     q.state = 'approved'; q.ended = n; q.answerNote = p.note || null;
     var old = S.asg[q.of];
     if (!old || old.state !== 'live') return;

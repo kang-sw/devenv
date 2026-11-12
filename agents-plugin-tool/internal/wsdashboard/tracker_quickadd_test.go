@@ -246,3 +246,40 @@ done();
 		t.Error("tracker.css lacks the parent outline")
 	}
 }
+
+// trackerTakeJS is the take-rule copies of tracker.js with the helpers they
+// read, for node cases over a hand-built VS.
+func trackerTakeJS(t *testing.T) string {
+	return trackerFn(t, `function wrapped\(s\)`, true) + trackerFn(t, `function A\(id\)`, true) + trackerFn(t, `function listOf\(x\)`, true) +
+		trackerFn(t, `function isCreator\(it\)`, false) + trackerFn(t, `function canAnswer\(it, q\)`, true) + trackerFn(t, `function canApprove\(it, q\)`, true)
+}
+
+// TestTrackerTakeRules pins the dashboard's copies of the store's take rules
+// (check.go item.approve / item.deny): the holder of the named assignment
+// or the creator (an admin once the creator was removed) answers a pending
+// request; approving also needs that assignment not done or dropped
+// (check.go takeWrapped), while a denial stays open.
+func TestTrackerTakeRules(t *testing.T) {
+	runTrackerCases(t, "take rules", trackerCheckJS+trackerTakeJS(t)+`
+var VS = { viewer: { member: 'me', admin: false, isMember: true }, members: { ada: {}, me: {}, kim: {}, gone: { removed: true } }, assignments: {} };
+function rec(id, to, status, o) { var r = { id: id, to: to, status: status, state: 'live', fallback: false, ruleRequest: false }; Object.keys(o || {}).forEach(function (k) { r[k] = o[k]; }); VS.assignments[id] = r; return r; }
+var it = { id: 'I', author: 'ada' };
+rec('I>me', 'me', 'doing');
+var q = { id: 'Q', by: 'kim', assignee: 'me', assignment: 'I>me', state: 'pending' };
+check('the holder answers and approves', [canAnswer(it, q), canApprove(it, q)], [true, true]);
+check('another member does not', [canAnswer({ id: 'I', author: 'ada' }, { by: 'kim', assignee: 'ada', assignment: 'I>ada', state: 'pending' })], [false]);
+check('the creator does', canAnswer({ id: 'I', author: 'me' }, { by: 'kim', assignee: 'ada', assignment: 'I>ada', state: 'pending' }), true);
+VS.viewer.admin = true;
+check('an admin once the creator was removed', canAnswer({ id: 'I', author: 'gone' }, { by: 'kim', assignee: 'ada', assignment: 'I>ada', state: 'pending' }), true);
+check('not while the creator stays', canAnswer({ id: 'I', author: 'ada' }, { by: 'kim', assignee: 'ada', assignment: 'I>ada', state: 'pending' }), false);
+VS.viewer.admin = false;
+check('an answered request is not answered again', canAnswer(it, { by: 'kim', assignee: 'me', assignment: 'I>me', state: 'denied' }), false);
+VS.assignments['I>me'].status = 'done';
+check('a done assignment: deny only', [canAnswer(it, q), canApprove(it, q)], [true, false]);
+VS.assignments['I>me'].status = 'dropped';
+check('a dropped assignment: deny only', [canAnswer(it, q), canApprove(it, q)], [true, false]);
+VS.assignments['I>me'].status = 'in-review';
+check('in review is not wrapped up', canApprove(it, q), true);
+done();
+`)
+}
