@@ -30,7 +30,7 @@ N.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 N.prototype.removeAttribute = function (k) { delete this.attrs[k]; };
 N.prototype.hasAttribute = function (k) { return k in this.attrs; };
 function q(s, el) { return el.querySelectorAll(s); }
-var ITEMS = ".card[data-id], .arow[data-id], .crow[data-id], .srow[data-id]", BOX = "label.ack > input, label.ck > input";
+var ITEMS = ".card[data-id], .arow[data-id], .ckrow[data-id], .srow[data-id]", BOX = "label.ack > input, label.ck > input";
 function checkRow(id) {
   var box = new N(), x = new N({ "aria-pressed": "false" }), note = new N(), s = {};
   s[BOX] = [box]; s["button.no-toggle"] = [x]; s["textarea.note"] = [note];

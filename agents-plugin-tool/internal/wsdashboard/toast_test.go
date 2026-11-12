@@ -157,7 +157,7 @@ var window = { WsToast: { show: function (t, o) { toasts.push({ text: t, kind: (
 function wsTn(k, n) { return k + ":" + n; }
 var tkApi = { openNotice: function (x) { opened.push("notice:" + x.key); }, openNotify: function (s) { opened.push("notify:" + s); } };
 var tkOrder = ["s"];
-var PERM = ".phase.permission, .brow.perm", ASK = '.card.policy[id^="item-"], .arow[id^="item-"], .crow[data-id]:not([data-assumed])', SENT = ".sentdata i[data-id]";
+var PERM = ".phase.permission, .brow.perm", ASK = '.card.policy[id^="item-"], .arow[id^="item-"], .ckrow[data-id]:not([data-assumed])', SENT = ".sentdata i[data-id]";
 function item(id, draft) { return new N({ attrs: { "data-id": id }, sel: draft ? { '.opt[data-opt][aria-pressed="true"]': [new N()] } : {} }); }
 function sent(id) { return new N({ attrs: { "data-id": id } }); }
 `
