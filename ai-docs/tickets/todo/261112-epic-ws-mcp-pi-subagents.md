@@ -47,7 +47,7 @@ Evidence read while drafting:
   subagent: `pi.spawn(tier, prompt, cwd?)`, `pi.send`, `pi.list`, `pi.stop`,
   `pi.transcript`, `pi.wait`.
 - Per-tier Pi model and effort, set through a new `tune-pi` playbook.
-- Pi-harness sessions do not see `pi.*`.
+- Pi-harness lead sessions do not see `pi.*` (Decision 8).
 
 ## Non-Scope
 
@@ -60,12 +60,17 @@ Evidence read while drafting:
 
 Planned, in this order (470):
 
-- Planned: Claude-lead path - the `pi.*` tools, tier resolution, mailbox
+- Done: Claude-lead path - the `pi.*` tools, tier resolution, mailbox
   report plus `pi.wait`, dashboard registration, the Pi version gate, and the
-  wsflow knob.
+  wsflow knob (`261112-feat-ws-mcp-pi-spawn-claude-lead-path`).
+- Child 1b: Pi spawn recursion - a runner-spawned Pi worker gets `pi.*`
+  through the daemon on a capability token, with a depth cap of 2, a
+  non-escalating tier, steer-or-prompt report delivery to a Pi parent, held
+  upstream reports, and subtree close
+  (`261112-feat-ws-mcp-pi-spawn-recursion`).
 - Planned: `tune-pi` playbook (ws and wsflow mirrors), with `lead-tune`
   pointing to it.
-- Planned: hide `pi.*` from Pi-harness sessions.
+- Planned: hide `pi.*` from Pi-harness lead sessions.
 
 ## Cross-Child Decisions
 
@@ -90,9 +95,12 @@ Planned, in this order (470):
    in the agents panel. The only UI variant: where an agent row shows the
    blinking blue circle, a Pi child shows a blinking `pi` badge in the same
    colour. Rejected: a separate, invisible registry. (465)
-8. Pi-harness sessions do not see `pi.*`; Pi leads keep the extension's
-   `ws-agent-*` for now. Rejected: Pi leads switching to `pi.*` now (kept as
-   a post-landing nudge); hiding only from Pi subagents. (466)
+8. Pi-harness lead sessions do not see `pi.*`; Pi leads keep the
+   extension's `ws-agent-*` for now. Rejected: Pi leads switching to `pi.*`
+   now (kept as a post-landing nudge); hiding only from Pi subagents. (466)
+   Amended by child 1b (612): Pi workers the runner spawns (`pi-worker`)
+   do see `pi.*`, forwarded to the daemon on a capability token; lead-pi
+   sessions, with their own extension, still do not.
 9. Exposure: on by default in ws; in wsflow off by default behind a config
    knob. In either package the tools run only when a Pi of version 1.0 or
    later is detected. Rejected: on in both packages unconditionally. (468)
@@ -107,7 +115,7 @@ Planned, in this order (470):
 
 - Done: a lead on a non-Pi harness can spawn, steer, and collect a Pi
   subagent through ws MCP tools, with per-tier model and effort set through
-  `tune-pi`, and Pi-harness sessions do not see `pi.*`.
+  `tune-pi`, and Pi-harness lead sessions do not see `pi.*`.
 - Dropped: Pi's RPC mode makes a ws-hosted runner unworkable.
 - Deferred: the Pi extension's move to native MCP (separate epic, (467));
   Pi leads moving to `pi.*` (`## Post-Landing`).
