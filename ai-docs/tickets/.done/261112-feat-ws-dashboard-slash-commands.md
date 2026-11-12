@@ -5,6 +5,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 727e4d4022ad3974
 sage-review-completeness-reviewed: 727e4d4022ad3974
+completed: 2026-11-12
 ---
 
 # Dashboard composer runs the harness's slash commands
