@@ -829,6 +829,24 @@ func (h *leadHarness) holder(id string) string {
 	return holder
 }
 
+// mailSettled waits until no mail check of the conversation is pending.
+// A delivery can cause two: the conversation's first check (startConv) may
+// meet it, and the delivery's own signal then checks again, kicking a
+// start for the claimed, undelivered mail. Both signals are sent before
+// deliver returns, so once none is pending no check, and no start for that
+// mail, comes before the next signal. A test that makes a start fail and
+// then clears the failure waits for this first, or the second check may
+// start a process it did not expect.
+func (h *leadHarness) mailSettled(id string) {
+	h.t.Helper()
+	c := h.runner.conv(id)
+	eventually(h.t, "the mail checks to settle", func() bool {
+		pending := true
+		c.do(func() { pending = len(c.mailC) > 0 })
+		return !pending
+	})
+}
+
 // ring is the conversation's ring file, oldest entry first.
 func (h *leadHarness) ring(id string) []wslive.RingEntry {
 	h.t.Helper()

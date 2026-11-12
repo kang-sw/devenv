@@ -85,17 +85,7 @@ func TestLeadHandedToATerminalIsLetGo(t *testing.T) {
 	eventually(t, "the claimed mail to wait in the record", func() bool {
 		return slices.Equal(h.record(id).Mail, []string{"From a@x: ping"}) && h.row(id).HostStopped
 	})
-	// The delivery can cause two mail checks: the conversation's first
-	// one (startConv) may meet it, and its own signal then checks again,
-	// kicking a start for the claimed, undelivered mail. Once no check is
-	// pending none runs, so no start comes before the next signal; a
-	// later one would go through once the failure is cleared.
-	c := h.runner.conv(id)
-	eventually(t, "the mail checks to settle", func() bool {
-		pending := true
-		c.do(func() { pending = len(c.mailC) > 0 })
-		return !pending
-	})
+	h.mailSettled(id)
 	h.holders.set(func() { h.holders.spawnErr = nil })
 	spawns, launches := h.holders.opCount("spawn"), h.holders.opCount("launch")
 

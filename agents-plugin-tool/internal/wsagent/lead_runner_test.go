@@ -464,6 +464,9 @@ func TestLeadMailIsDeliveredAsATurn(t *testing.T) {
 		t.Fatalf("claimed mail waits in the record: %+v", rec)
 	}
 
+	// The mail is delivered by the next daemon, not by a second check of
+	// this one after the failure is cleared.
+	h.mailSettled(id)
 	h.holders.set(func() { h.holders.spawnErr = nil })
 	h.restart()
 	// A daemon that ends stops its watch, which clears its listening marker.
