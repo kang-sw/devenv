@@ -474,3 +474,68 @@ func TestReloginAfterAHandOffKeepsTheKey(t *testing.T) {
 		t.Fatalf("the row should be the terminal's live one: %+v (%v)", got, ok)
 	}
 }
+
+// TestReloginMarksTheRowAsHeldByTheTerminal: an accepted re-login to a row
+// nothing runs (an earlier run's end mark, or the daemon's hand to the
+// terminal) names this harness on it at once, before any keyed call, so the
+// daemon does not take the session over beside it. With the session's
+// dashboard key off the mark is all the row gets, and a row the daemon's
+// record needs stays; any other row is removed as before.
+func TestReloginMarksTheRowAsHeldByTheTerminal(t *testing.T) {
+	terminalAlive := func(pid int) bool { return pid == terminalHarnessPID }
+	for _, c := range []struct {
+		name            string
+		enabled, record bool
+		// kept reports that the row outlives the first keyed call.
+		kept bool
+	}{
+		{"dashboard key on", true, false, true},
+		{"dashboard key off, a session the daemon hosted", false, true, true},
+		{"dashboard key off", false, false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := dashboardSessionEnv(t)
+			root := dashboardGitRoot(t)
+			_, key, loginRoot := dashboardSessionServer(t, root, c.enabled)
+			stubHostedProcessAlive(t)
+			stamp := dashboardStamp(time.Now().Add(-time.Hour))
+			ended := wsdashboard.Registration{SchemaVersion: 1, ReplyID: wsmailbox.ReplyID(key), Project: loginRoot, Harness: "claude", RegisteredAt: stamp, HeartbeatAt: stamp, EndedAt: stamp}
+			if err := wsdashboard.WriteRegistration(dir, ended); err != nil {
+				t.Fatal(err)
+			}
+			if ended.HarnessMayRun(terminalAlive) {
+				t.Fatal("the seeded row should read as a session nothing runs")
+			}
+			if c.record {
+				record := filepath.Join(wsdashboard.SessionDir(dir, ended.ReplyID), wsdashboard.AgentRecordFileName)
+				if err := os.WriteFile(record, []byte(`{"lead":true,"handed_off_at":"`+stamp+`"}`), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			s := terminalServer(t, root)
+			if resp := relogin(t, s, root, key); toolIsError(t, resp) {
+				t.Fatalf("the re-login was refused: %s", resp)
+			}
+			held := func(when string) {
+				t.Helper()
+				row, ok := readRegistration(t, dir, key)
+				if !ok || row.Hosted || row.EndedAt != "" || row.HarnessPID != terminalHarnessPID || !row.HarnessMayRun(terminalAlive) {
+					t.Fatalf("%s: the row should name the terminal harness and block a takeover: %+v (%v)", when, row, ok)
+				}
+				if row.HarnessMayRun(func(int) bool { return false }) {
+					t.Fatalf("%s: the row should allow a takeover once the harness is gone: %+v", when, row)
+				}
+			}
+			held("after the re-login")
+			dashCall(t, s, "todo.list", map[string]any{"session_key": key})
+			if !c.kept {
+				if row, ok := readRegistration(t, dir, key); ok {
+					t.Fatalf("a session with its dashboard key off keeps a row: %+v", row)
+				}
+				return
+			}
+			held("after the first keyed call")
+		})
+	}
+}

@@ -84,7 +84,13 @@ func hostedLoginRefusal(key, why string) error {
 // The session's registration row decides, read under its row lock so the
 // daemon's own check-and-spawn cannot interleave:
 //
-//   - no row, or a row the daemon does not hold (not hosted): accepted.
+//   - no row: accepted; there is nothing the daemon could take over.
+//   - a row the daemon does not hold (not hosted): accepted, and the row is
+//     marked as held by this server's harness (its process, no end mark, a
+//     fresh heartbeat) whatever the session's dashboard key says. Without
+//     the mark, a row an earlier run ended, or one the daemon handed to the
+//     terminal, would still read as a session nothing runs, and the daemon
+//     would take it over beside this harness.
 //   - this server is the hosted session's own (its hosted key, or its
 //     harness is the process the row names): accepted, and nothing changes.
 //   - the row's harness process may run (Registration.HostMayRun): refused.
@@ -104,34 +110,52 @@ func (s *Server) hostedLoginGuard(key, root string) error {
 		return nil
 	}
 	replyID := wsmailbox.ReplyID(key)
-	// The common case takes no lock and creates nothing.
-	if row, err := wsdashboard.ReadRegistration(dir, replyID); err != nil || !row.Hosted {
+	// A session with no row takes no lock and creates nothing.
+	seen, err := wsdashboard.ReadRegistration(dir, replyID)
+	if err != nil {
 		return nil
 	}
 	unlock, err := wsdashboard.LockRegistration(dir, replyID)
 	if err != nil {
+		if !seen.Hosted {
+			s.debugEvent("dashboard.terminal_row_unmarked", map[string]any{"reply_id": replyID, "error": err.Error()})
+			return nil
+		}
 		return hostedLoginRefusal(key, "its registration could not be locked to check whether its process still runs ("+err.Error()+")")
 	}
 	defer unlock()
 	row, err := wsdashboard.ReadRegistration(dir, replyID)
-	if err != nil || !row.Hosted {
+	if err != nil {
 		return nil
 	}
 	harness := s.harnessPID()
+	now := d.clock()
+	// held marks the row as this server's harness's.
+	held := func() error {
+		row.HarnessPID = harness
+		if name := s.currentHarness(); name != "" {
+			row.Harness = name
+		}
+		row.HeartbeatAt, row.EndedAt = dashboardStamp(now), ""
+		return wsdashboard.WriteRegistration(dir, row)
+	}
+	if !row.Hosted {
+		// The row stays the first keyed call's to register or remove
+		// (dashboardTouch); this only keeps the daemon off it until then,
+		// and for good when the session's dashboard key is off.
+		if err := held(); err != nil {
+			s.debugEvent("dashboard.terminal_row_unmarked", map[string]any{"reply_id": replyID, "error": err.Error()})
+		}
+		return nil
+	}
 	if harness > 0 && harness == row.HostPID {
 		return nil
 	}
 	if row.HostMayRun(hostedProcessAlive) {
 		return hostedLoginRefusal(key, "its process is running or starting there")
 	}
-	now := d.clock()
 	row.Hosted, row.HostPID, row.HostStopped = false, 0, false
-	row.HarnessPID = harness
-	if name := s.currentHarness(); name != "" {
-		row.Harness = name
-	}
-	row.HeartbeatAt, row.EndedAt = dashboardStamp(now), ""
-	if err := wsdashboard.WriteRegistration(dir, row); err != nil {
+	if err := held(); err != nil {
 		return hostedLoginRefusal(key, "its registration could not be rewritten for this terminal ("+err.Error()+")")
 	}
 	// The row is this server's from here on: it heartbeats what it wrote.

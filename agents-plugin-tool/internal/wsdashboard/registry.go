@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -150,8 +151,9 @@ func (r Registration) HarnessMayRun(alive func(pid int) bool) bool {
 // a ws-mcp both rewrite a hosted session's row when the session changes
 // hands (a terminal login taking a stopped hosted session, the daemon
 // taking a terminal session over), and each decides from the row it reads:
-// the lock makes that read, the decision, and the write one step. An
-// ordinary heartbeat write of a row nobody else writes takes no lock. A
+// the lock makes that read, the decision, and the write one step. A
+// terminal ws-mcp takes it for every row write too, so it never writes
+// back a row the daemon took over meanwhile. A
 // wait past registrationLockTimeout is an error, so a caller never acts on
 // a row it could not lock.
 func LockRegistration(dir, replyID string) (unlock func(), err error) {
@@ -318,7 +320,9 @@ func RemoveRegistration(dir, replyID string) error {
 // session before the runner re-registers it. The exception is a lead
 // session the runner no longer serves (its record is closed, or handed to
 // a terminal): its row is no longer the runner's to refresh, so it ages
-// as any ended session's, measured from the row. Every other agent record
+// as any ended session's, measured from the row. A handed-off session
+// whose harness conversation lives in the directory itself is kept all the
+// same (agentRecordEnd.terminalConversation). Every other agent record
 // (the tracker's support agent among them) keeps the runner's lifetime.
 func PruneRegistrations(dir string, now time.Time, retention time.Duration) int {
 	entries, err := os.ReadDir(filepath.Join(dir, sessionsDirName))
@@ -330,8 +334,9 @@ func PruneRegistrations(dir string, now time.Time, retention time.Duration) int 
 		if !entry.IsDir() || !ValidReplyID(entry.Name()) {
 			continue
 		}
-		record, hosted := readAgentRecordEnd(SessionDir(dir, entry.Name()))
-		if hosted && !record.retired() {
+		sessionDir := SessionDir(dir, entry.Name())
+		record, hosted := readAgentRecordEnd(sessionDir)
+		if hosted && (!record.retired() || record.terminalConversation(sessionDir)) {
 			continue
 		}
 		last := time.Time{}
@@ -369,6 +374,23 @@ type agentRecordEnd struct {
 	Lead        bool   `json:"lead"`
 	ClosedAt    string `json:"closed_at"`
 	HandedOffAt string `json:"handed_off_at"`
+	Backend     string `json:"backend"`
+	SessionFile string `json:"session_file"`
+}
+
+// terminalConversation reports a session handed to a terminal whose
+// harness conversation is a file inside sessionDir, the session's
+// directory: a pi session the daemon started, which names no session_file
+// or, once taken over again, names the one in its directory (a session a
+// terminal started names its own file elsewhere). The terminal resumes on
+// that file, so from the hand-off on the directory holds a conversation
+// the user's terminal harness owns, and deleting it would delete that
+// conversation. A claude conversation lives in the harness's own store.
+func (r agentRecordEnd) terminalConversation(sessionDir string) bool {
+	if !r.Lead || r.HandedOffAt == "" || r.Backend != "pi" {
+		return false
+	}
+	return r.SessionFile == "" || strings.HasPrefix(filepath.Clean(r.SessionFile), filepath.Clean(sessionDir)+string(filepath.Separator))
 }
 
 // retired reports a lead session the runner serves no more: closed, or

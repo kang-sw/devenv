@@ -330,7 +330,10 @@ harness has exited is asked when the entry is used (the **Moves** bullet
 of the hosted lead sessions below). `PruneRegistrations` spares an agent runner's directory
 while the runner may serve it; a lead whose record is closed or handed off
 ages by its row like any ended session, and every other agent record (the
-tracker's support agent) keeps the runner's lifetime.
+tracker's support agent) keeps the runner's lifetime. One retired lead is
+never pruned: a handed-off pi session whose session file is inside its
+session directory (the daemon started it), since the terminal's pi runs on
+that file from the hand-off on.
 
 On the served board and in the conversation's lead
 replies, a file link renders as an action link (`data-wl="file"`, titled with
@@ -558,7 +561,12 @@ conversation:
   key's reply queue, and no later daemon start serves it. The daemon reads
   the row under `registration.json.lock` before every row write, mail
   claim, and spawn, and the login takes the same lock, so the two cannot
-  both decide they hold the session. A terminal ws-mcp whose dashboard key
+  both decide they hold the session. An accepted re-login to a row that
+  is not hosted marks it at once as the terminal's (`harness_pid`, no
+  `ended_at`, a fresh heartbeat), whatever the session's dashboard key
+  says, so a row left ended (by an earlier run, or by a hand to the
+  terminal) never reads as free for a takeover while that harness runs. A
+  terminal ws-mcp whose dashboard key
   turns off leaves such a row in place (its directory holds `agent.json`)
   rather than removing it.
 - **Moves.** Three control routes move a lead between the daemon and a

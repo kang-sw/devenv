@@ -221,11 +221,23 @@ func TestPruneRegistrationsAgesRetiredLeadsByTheirRow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n := PruneRegistrations(dir, testNow, RegistryRetention); n != 2 {
-		t.Errorf("pruned %d, want 2", n)
+	// A pi session the daemon started and handed to a terminal: the
+	// terminal's conversation file is in the directory. One taken over from
+	// a terminal runs on a file elsewhere, and a closed one has no terminal.
+	row("handedpi", old, terminal)
+	record("handedpi", `{"lead":true,"backend":"pi","handed_off_at":"2026-10-01T00:00:00Z"}`)
+	row("handedpiback", old, terminal)
+	record("handedpiback", `{"lead":true,"backend":"pi","session_file":"`+filepath.Join(SessionDir(dir, "handedpiback"), "pi", "session.jsonl")+`","handed_off_at":"2026-10-01T00:00:00Z"}`)
+	row("handedpiown", old, terminal)
+	record("handedpiown", `{"lead":true,"backend":"pi","session_file":"/home/u/.pi/s.jsonl","handed_off_at":"2026-10-01T00:00:00Z"}`)
+	row("closedpi", old, closedRow)
+	record("closedpi", `{"lead":true,"backend":"pi","closed_at":"2026-10-01T00:00:00Z"}`)
+
+	if n := PruneRegistrations(dir, testNow, RegistryRetention); n != 4 {
+		t.Errorf("pruned %d, want 4", n)
 	}
 	for id, want := range map[string]bool{
-		"closedold": false, "handedold": false,
+		"closedold": false, "handedold": false, "handedpiown": false, "closedpi": false, "handedpi": true, "handedpiback": true,
 		"closedrecent": true, "handedrecent": true, "openold": true, "supportold": true, "agentnoflag": true, "unreadable": true, "norow": true,
 	} {
 		_, err := os.Stat(SessionDir(dir, id))
