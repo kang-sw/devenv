@@ -473,6 +473,66 @@ Verification:
   keyless with a visible message on a refused login (Claude mod and its
   wsflow mirror).
 
+### Result (29a561a21) - 2026-11-12
+
+Landed in 6a991d903 (ws-mcp records and guard, runner release), 10bfc7915
+(Claude mod and its wsflow mirror), and 29a561a21 (Pi bridge).
+
+- Decision 13: `ferrule` takes two unadvertised arguments on a top-lead
+  login, `harness_session` and `harness_cwd`, and stores them with the
+  harness name on the key record (`harness`, `harness_session`,
+  `harness_cwd`; `internal/mcp/hosted_login.go`). The pair is recorded only
+  whole (a non-empty session and an absolute directory); anything else
+  records nothing and the login still succeeds. The Claude mod reports the
+  session id and `$.session.cwd()` on the mint and on every re-login; the
+  Pi bridge reports the session file path and its cwd.
+- Decision 14: a terminal ws-mcp writes `harness_pid` on its row. Liveness
+  still rests on the heartbeat; `HostMayRun` and `HarnessMayRun`
+  (`internal/wsdashboard/registry.go`) are the only readers of the PIDs.
+- Decision 15: `hostedLoginGuard` refuses a re-login to a hosted row whose
+  process may run, with the marker `hosted-session-held`; both adapters
+  match the marker, mint nothing, keep their stored key entry, and show the
+  refusal. A hosted row with no process is rewritten into the terminal's
+  row, and the runner releases the conversation (`conv.release`): record
+  `handed_off_at`, mail watch and heartbeat ended, claimed mail returned
+  through `LeadMail.Return`, state `handed_off`.
+- Added beyond the plan text, to close a window the plan's `HostPID`-alive
+  test leaves open: a hosted row with `host_pid` 0 is written both while a
+  spawn is under way and while the session is stopped. The runner now
+  marks the second (`host_stopped`), the guard refuses the first, and the
+  runner's check-and-spawn and the guard's check-and-rewrite both run under
+  a row lock (`registration.json.lock`), so neither can decide on a row the
+  other is changing.
+- A terminal ws-mcp whose dashboard key turns off keeps a row whose
+  directory holds the runner's record instead of removing it: with the row
+  gone the daemon would write its own again and resume the conversation.
+
+Verification:
+
+- `go vet ./internal/wsdashboard/ ./internal/mcp/ ./internal/wsagent/ ./cmd/...`: clean.
+- `go test ./... -count=1` at 6a991d903: every package ok. Tests added:
+  `hosted_login_test.go` (key-record fields and the directory apart from
+  the root, the PID on a terminal row, the refusal against a live
+  `host_pid` and against a spawn under way, the hosted session's own login,
+  the row taken when no process runs, mail text round trip and return),
+  `lead_handoff_test.go` (the row's stopped mark, the release with no row
+  write, mail claim, or spawn after it and across a daemon restart, a row
+  taken before a spawn, a row taken while no daemon ran),
+  `registry_holder_test.go`.
+- `TestHostedReconnectAdoptsOnlyLiveSamePIDRecords` failed in two of the
+  full runs of this ticket and passed 25 of 25 when repeated alone. It
+  seeds a mailbox record named `alpha-stem` and expects it first in name
+  order, and fails when a randomly minted name sorts before it
+  (`aloe-banner-flashbulb`); it does not touch this phase's code.
+- Claude mod: `claude plugin test` on both packages, 732 pass, 0 fail
+  (6 new); the two `claude-mod` directories are byte-identical and
+  `go test ./internal/wsrsrc/` (the mirror drift tests) passes.
+- Pi: `npm test -- test/lead-key-hosted.test.ts test/lead-key-resume.test.ts`,
+  27 pass, 0 fail. The full Pi suite has 33 failures in eight files that
+  do not touch the login (`agent-channel*`, `local-devenv`,
+  `persistent-explore`, `spawner`, `web-*`); the same files fail 34 at the
+  commit before the change.
+
 ### Phase 3: takeover, hand to terminal, and revive
 
 Decisions 2, 12, and 14-18. Needs Phase 2.
