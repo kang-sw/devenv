@@ -353,6 +353,32 @@ done();
 `)
 }
 
+// TestTrackerAcceptRule pins the dashboard's copy of the store's accept
+// rule (check.go item.accept / handoffWrapped): the viewer accepts while
+// they hold a pending record on the item and none of their pending records
+// is a handoff of a done or dropped assignment; actList still offers the
+// decline then.
+func TestTrackerAcceptRule(t *testing.T) {
+	if !strings.Contains(trackerFn(t, `function actList\(it\)`, false), "if (canAccept(it)) out.push(['accept', 'accept', wsT(\"js.tk.act.accept\"), { item: id }, 1]);\n      out.push(['note', 'decline'") {
+		t.Error("actList does not gate accept alone on canAccept")
+	}
+	runTrackerCases(t, "accept rule", trackerCheckJS+trackerFn(t, `function wrapped\(s\)`, true)+trackerFn(t, `function A\(id\)`, true)+trackerFn(t, `function canAccept\(it\)`, false)+`
+var VS = { viewer: { member: 'me' }, assignments: {} };
+function rec(id, to, state, status, o) { var r = { id: id, to: to, state: state, status: status }; Object.keys(o || {}).forEach(function (k) { r[k] = o[k]; }); VS.assignments[id] = r; return id; }
+var it = { id: 'I', assignments: [rec('I>kim', 'kim', 'live', 'doing'), rec('H>me', 'me', 'pending', 'todo', { handoffOf: 'I>kim' })] };
+check('a pending handoff of a live assignment is accepted', canAccept(it), true);
+VS.assignments['I>kim'].status = 'done';
+check('not once that assignment is done', canAccept(it), false);
+VS.assignments['I>kim'].status = 'dropped';
+check('nor dropped', canAccept(it), false);
+VS.assignments['I>kim'].status = 'in-review';
+check('in review is not wrapped up', canAccept(it), true);
+check('a plain pending assignment is accepted', canAccept({ id: 'J', assignments: [rec('J>me', 'me', 'pending', 'todo')] }), true);
+check('nothing pending: nothing to accept', canAccept({ id: 'K', assignments: [rec('K>me', 'me', 'live', 'doing')] }), false);
+done();
+`)
+}
+
 // TestTrackerOpenAndRequestRules pins the dashboard's copies of the store's
 // opening and take-request rules. canOpen copies check.go item.open: the
 // creator (an admin once the creator was removed) opens a task, not hidden,

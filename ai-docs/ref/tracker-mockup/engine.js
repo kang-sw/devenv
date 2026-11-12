@@ -577,6 +577,17 @@
     return low.length ? 'completion must be assigner for an assignment below ' + a + ' (' + low.join(', ') + '): ' + a + ' confirms its wrap-up' : null;
   }
 
+  // Why who's accept on item is refused: one of their pending assignments there is a
+  // handoff of an assignment that is done or dropped (a wrapped-up record stays live,
+  // so its pending handoff never lapses); null when none is.
+  function handoffWrapped(S, item, who) {
+    var hs = recsOn(S, item).filter(function (x) { return x.to === who && x.state === 'pending' && x.handoffOf; });
+    for (var i = 0; i < hs.length; i++) {
+      var old = has(S.asg, String(hs[i].handoffOf)) ? S.asg[hs[i].handoffOf] : null;
+      if (old && old.state === 'live' && wrapped(old.status)) return old.to + '\'s assignment on ' + alias(item) + ' is ' + old.status + '; nothing to accept';
+    }
+    return null;
+  }
   // The suffix of a fold-time flag (see foldFlag).
   var CONCURRENTLY = '; written concurrently, the first in fold order wins';
 
@@ -785,6 +796,7 @@
         it = needItem(S, p.item);
         r = pendingRec(S, it.id, a);
         if (!r) rej(liveRec(S, it.id, a) ? a + '\'s assignment on ' + it.alias + ' is already live' : a + ' has no pending assignment on ' + it.alias);
+        if (n.type === 'item.accept' && handoffWrapped(S, it.id, a)) rej(handoffWrapped(S, it.id, a));
         break;
 
       case 'item.return': { // an accepted assignment, and an accepted rule rooted at the assignee
@@ -1586,6 +1598,8 @@
       case 'item.accept': { // answers every pending assignment of the author on the item
         var acc = recsOn(S, p.item).filter(function (x) { return x.to === a && x.state === 'pending'; });
         if (!acc.length) { onEnded(S, p.item, a, n, C); break; }
+        // a handoff whose original an earlier event in fold order wrapped up is flagged
+        if (handoffWrapped(S, p.item, a)) { foldFlag(n, handoffWrapped(S, p.item, a) + CONCURRENTLY, C); break; }
         acc.forEach(function (r) {
           r.accepted = n; r.answerNote = p.note || null; r.last = n;
           r.leadAtAccept = ((S.members[a] || {}).leads || [])[0] || null;

@@ -749,8 +749,10 @@
     var out = [];
     if (!it || it.hidden) return out;
     var v = VS.viewer.member, recs = it.assignments.map(A), id = it.id;
-    if (recs.some(function (r) { return r.to === v && r.state === 'pending'; }))
-      out.push(['accept', 'accept', wsT("js.tk.act.accept"), { item: id }, 1], ['note', 'decline', wsT("js.tk.act.decline"), { item: id, op: 'item.decline' }]);
+    if (recs.some(function (r) { return r.to === v && r.state === 'pending'; })) {
+      if (canAccept(it)) out.push(['accept', 'accept', wsT("js.tk.act.accept"), { item: id }, 1]);
+      out.push(['note', 'decline', wsT("js.tk.act.decline"), { item: id, op: 'item.decline' }]);
+    }
     recs.forEach(function (r) {
       var lead = VS.members[r.to] && VS.members[r.to].leads[0], wr = wrapAuth(it, r);
       if (canReview(r))
@@ -836,6 +838,13 @@
   // live, so its requests never lapse, and the store refuses to hand it over (check.go
   // takeWrapped). A denial stays open.
   function canApprove(it, q) { var r = A(q.assignment); return canAnswer(it, q) && !(r && r.state === 'live' && wrapped(r.status)); }
+  // Accepting answers every pending record of the viewer on the item; it also needs none of them
+  // to be a handoff of a done or dropped assignment: a wrapped-up record stays live, so its handoff
+  // never lapses, and the store refuses to pass it on (check.go handoffWrapped). A decline stays open.
+  function canAccept(it) {
+    var v = VS.viewer.member, mine = it.assignments.map(A).filter(function (r) { return r && r.to === v && r.state === 'pending'; });
+    return mine.length > 0 && !mine.some(function (r) { var o = r.handoffOf && A(r.handoffOf); return !!o && o.state === 'live' && wrapped(o.status); });
+  }
   // A subtask's parent is assigned to or created by its author.
   function canSplit(it) { return (!!mineLive(it) || it.author === VS.viewer.member) && !it.hidden; }
   function canStatus(it) { var r = !it.hidden && it.kind !== 'topic' && mineLive(it); return !!r && !wrapped(r.status); }

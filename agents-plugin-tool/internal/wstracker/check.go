@@ -549,6 +549,20 @@ func (s *state) takeWrapped(q *takeReq) rejection {
 	return ""
 }
 
+// handoffWrapped refuses who's accepting their pending assignments on item
+// when one is a handoff of an assignment that is done or dropped.
+func (s *state) handoffWrapped(item, who string) rejection {
+	for _, r := range s.byItem[item] {
+		if r.to != who || r.state != "pending" || r.handoffOf == "" {
+			continue
+		}
+		if old := s.asg[r.handoffOf]; old != nil && old.state == "live" && wrapped(old.status) {
+			return rejection(old.to + "'s assignment on " + alias(item) + " is " + old.status + "; nothing to accept")
+		}
+	}
+	return ""
+}
+
 func (s *state) needRec(it *item, who string) (*rec, rejection) {
 	if r := s.liveRec(it.id, who); r != nil {
 		return r, ""
@@ -1069,6 +1083,14 @@ func (s *state) check(n *node) rejection {
 				return rejection(a + "'s assignment on " + it.alias + " is already live")
 			}
 			return rejection(a + " has no pending assignment on " + it.alias)
+		}
+		// A wrapped-up record stays live, so a pending handoff of it never
+		// lapses; accepting one would take over finished work. A decline
+		// stays open.
+		if n.typ == TypeItemAccept {
+			if r := s.handoffWrapped(it.id, a); r != "" {
+				return r
+			}
 		}
 
 	case TypeItemReturn:
