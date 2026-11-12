@@ -452,3 +452,58 @@ check('roots: in tree order, not selection order', moveRoots(['C', 'A1a', 'A1'])
 done();
 `)
 }
+
+// TestTrackerAssignCompletionBelowTheViewer pins the assign popover's
+// completion for a target below the viewer (the store's write-time rule,
+// check.go checkWrite): such a target is always written with completion
+// assigner, so the radio hides "assignee" while one is picked; a target not
+// below keeps the user's pick or the default class. The quick-add row's
+// picks go through the same asgEvents.
+func TestTrackerAssignCompletionBelowTheViewer(t *testing.T) {
+	draw := trackerFn(t, `function asgDraw\(\)`, false)
+	if !strings.Contains(draw, `b.hidden = b.getAttribute('data-c') === 'assignee' && asgBelow(S);`) {
+		t.Errorf("asgDraw does not hide the assignee radio for a pick below the viewer:\n%s", draw)
+	}
+	if key := trackerFn(t, `function asgMenuKey\(e\)`, false); !strings.Contains(key, `'[data-c]:not([hidden]):not([data-c="'`) {
+		t.Errorf("the radio's arrow keys can land on the hidden option:\n%s", key)
+	}
+	src := trackerFn(t, `function esc\(s\)`, false) + trackerFn(t, `function attr\(k, v\)`, true) + trackerFn(t, `function tipAttr\(text\)`, true) +
+		trackerFn(t, `function complText\(c\)`, true) + trackerFn(t, `function asgState\(\)`, true) + trackerFn(t, `function complClass\(o\)`, false) +
+		trackerFn(t, `function asgClass\(o, compl\)`, true) + trackerFn(t, `function asgBelow\(S\)`, true) + trackerFn(t, `function asgEvents\(item, sel, compl\)`, false) +
+		trackerFn(t, `function asgCompl\(S\)`, false) + trackerFn(t, `function asgHtml\(it\)`, false)
+	runTrackerCases(t, "assign completion", trackerCheckJS+src+`
+function wsT(k) { return k; }
+function asgListHtml() { return ''; }
+function asgChipsHtml() { return ''; }
+// kim and lee are below me; pat is a peer
+var VS = { viewer: { member: 'me', reach: { kim: 1, lee: 2 } } }, MN = {};
+function pick(sel, compl) { MN.as = { q: '', sel: sel, compl: compl || null, idx: 0, opts: [] }; return MN.as; }
+function offered(S) { var h = asgHtml({ kind: 'task' }); return ['assignee', 'assigner'].filter(function (c) { return h.indexOf('data-c="' + c + '">') >= 0; }); }
+var P = function (id) { return { t: 'p', id: id }; };
+
+var S = pick([P('pat')]);
+check('a peer: both offered', offered(S), ['assignee', 'assigner']);
+check('a peer: assignee by default', [asgCompl(S), asgEvents('I', S.sel, S.compl)], ['assignee', [['item.assign', { item: 'I', targets: ['pat'], completion: 'assignee' }]]]);
+S = pick([P('pat')], 'assigner');
+check('a peer: the pick holds', asgEvents('I', S.sel, S.compl), [['item.assign', { item: 'I', targets: ['pat'], completion: 'assigner' }]]);
+
+S = pick([P('kim')]);
+check('below: assignee not offered', offered(S), ['assigner']);
+check('below: assigner', [asgCompl(S), asgEvents('I', S.sel, S.compl)], ['assigner', [['item.assign', { item: 'I', targets: ['kim'], completion: 'assigner' }]]]);
+S = pick([P('lee')], 'assignee');
+check('below at depth 2, assignee picked earlier: still assigner', [offered(S), asgCompl(S), asgEvents('I', S.sel, S.compl)],
+  [['assigner'], 'assigner', [['item.assign', { item: 'I', targets: ['lee'], completion: 'assigner' }]]]);
+S = pick([P('kim'), P('pat')], 'assignee');
+check('below and a peer, assignee picked: the peer keeps it', [offered(S), asgCompl(S), asgEvents('I', S.sel, S.compl)],
+  [['assigner'], 'mixed', [['item.assign', { item: 'I', targets: ['kim'], completion: 'assigner' }], ['item.assign', { item: 'I', targets: ['pat'], completion: 'assignee' }]]]);
+S = pick([{ t: 'r', root: 'me', levels: 1 }]);
+check('a rule rooted at me: assigner only', [offered(S), asgEvents('I', S.sel, 'assignee')], [['assigner'], [['item.assign', { item: 'I', targets: [{ root: 'me', levels: 1 }], completion: 'assigner' }]]]);
+S = pick([{ t: 'r', root: 'pat' }]);
+check('a rule rooted at a peer: both offered', offered(S), ['assignee', 'assigner']);
+S = pick([P('me')], 'assignee');
+check('the viewer themself: assignee holds', [offered(S), asgEvents('I', S.sel, S.compl)], [['assignee', 'assigner'], [['item.assign', { item: 'I', targets: ['me'], completion: 'assignee' }]]]);
+check('the quick-add row: a pick below goes as assigner', asgEvents('$1', [P('kim')], 'assignee'), [['item.assign', { item: '$1', targets: ['kim'], completion: 'assigner' }]]);
+check('nothing picked: the pick, or none', [asgCompl(pick([])), asgCompl(pick([], 'assignee'))], [null, 'assignee']);
+done();
+`)
+}

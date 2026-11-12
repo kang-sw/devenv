@@ -173,6 +173,9 @@ func (t *Tracker) validate(events []wsledger.NewEvent) error {
 			if rej = S.checkAuthor(n); rej == "" {
 				rej = S.check(n)
 			}
+			if rej == "" {
+				rej = S.checkWrite(n)
+			}
 		}
 		if rej != "" {
 			return &Refusal{Index: i, Type: e.Type, Reason: string(rej)}

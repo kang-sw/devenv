@@ -583,6 +583,65 @@ func (s *state) checkStatusOf(it *item, a, who, st string) rejection {
 	return ""
 }
 
+// checkWrite judges a new write by the rules a replay never applies:
+// validate runs it after check, so an event written before such a rule
+// existed keeps folding as it did (no fold flag, no migration). The
+// reference engine's store.dispatch runs the same rules (writeRefusal).
+func (s *state) checkWrite(n *node) rejection {
+	if n.typ == TypeItemAssign {
+		return s.assignBelowConfirmed(n.member, n.p)
+	}
+	return ""
+}
+
+// assignBelowConfirmed refuses completion assignee on an item.assign that
+// reaches below its writer a: a member below a, a rule rooted at a or below
+// a, or mode all. a confirms the wrap-up of such work (its holder sends it
+// to review). A topic keeps no completion and is left out.
+func (s *state) assignBelowConfirmed(a string, p obj) rejection {
+	if p.truthy("completion") && p["completion"] != "assignee" {
+		return ""
+	}
+	if it := s.items[p.disp("item")]; it == nil || it.kind == "topic" {
+		return ""
+	}
+	var low []string
+	person := func(t string) {
+		if t != a && s.below(a, t) {
+			low = append(low, t)
+		}
+	}
+	rule := func(root string) {
+		if root == a || s.below(a, root) {
+			low = append(low, "the rule rooted at "+root)
+		}
+	}
+	switch {
+	case !p.null("targets"):
+		l, _ := p.list("targets")
+		for _, x := range l {
+			switch t := x.(type) {
+			case string:
+				person(t)
+			case map[string]any:
+				if root, ok := t["root"].(string); ok {
+					rule(root)
+				}
+			}
+		}
+	case p["mode"] == "all":
+		rule(a)
+	default:
+		for _, t := range p.strList("people") {
+			person(t)
+		}
+	}
+	if len(low) == 0 {
+		return ""
+	}
+	return rejection("completion must be assigner for an assignment below " + a + " (" + strings.Join(low, ", ") + "): " + a + " confirms its wrap-up")
+}
+
 // check judges a domain event against the state folded from its causal
 // past. It returns the flagged reason in the reference engine's words, or ""
 // when the event is valid. The envelope, signer, and membership rules are

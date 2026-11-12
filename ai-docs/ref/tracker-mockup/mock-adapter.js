@@ -203,7 +203,9 @@
     dispatch: function (id, events, done) {
       var err = applyRaw(id);
       if (err) return done({ ok: false, error: err, refusal: null });
-      done({ ok: true, results: write(id, viewers[id], events) });
+      var res = write(id, viewers[id], events), r = res.refusal;
+      if (r) return done({ ok: false, error: 'event ' + r.index + ' (' + r.type + ') would be flagged: ' + r.reason, refusal: r });
+      done({ ok: true, results: res });
     },
     check: function (id, done) { stores[id].fetch(viewers[id], clock[id]); if (done) done(); },
     sync: function (id, done) {
