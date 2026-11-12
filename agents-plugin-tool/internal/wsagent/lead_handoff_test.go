@@ -220,3 +220,35 @@ func TestLeadRowTakenWhileNoDaemonRan(t *testing.T) {
 		t.Fatalf("the record: %+v", rec)
 	}
 }
+
+// TestLeadRowOfAnEarlierDaemonIsNotATerminals: a daemon of an earlier
+// release knows no hosted lead; while it ran it served the session as an
+// agent conversation and rewrote its row as one (Agent, no Hosted). The
+// next daemon must take that row back, not read it as a terminal login and
+// let the session go, which ends the process still running under its
+// holder.
+func TestLeadRowOfAnEarlierDaemonIsNotATerminals(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("s1", "u1", "done")...)
+	h.idle(id)
+	h.runner.Close()
+	h.holders.restart()
+	rec := h.record(id)
+	stamp := time.Now().UTC().Format(time.RFC3339)
+	old := wsdashboard.Registration{ReplyID: id, Project: rec.Root, Harness: rec.Backend, RegisteredAt: rec.CreatedAt, HeartbeatAt: stamp, Agent: true, Unlisted: !rec.Listed}
+	if err := wsdashboard.WriteRegistration(h.dir, old); err != nil {
+		t.Fatal(err)
+	}
+
+	h.start()
+	eventually(t, "the row to be the daemon's again", func() bool {
+		row := h.row(id)
+		return row.Hosted && !row.Agent && row.HostPID == rec.HostPID
+	})
+	h.send(id, "two")
+	eventually(t, "the rejoined process to take the message", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	if st, rec := h.state(id), h.record(id); st.Status == StatusHandedOff || rec.HandedOffAt != "" || h.holders.opCount("stop") != 0 {
+		t.Fatalf("the session was let go: %+v, record %+v, holder calls %v", st, rec, h.holders.opList())
+	}
+}

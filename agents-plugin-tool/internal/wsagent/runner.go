@@ -1182,13 +1182,17 @@ func (c *conv) writeRegistration() bool {
 }
 
 // rowForeign reports whether a session's row, as read, is no longer the
-// daemon's: it exists and is not a hosted row. A terminal harness that
-// logged in with the session's key while no process of the daemon's ran
-// rewrote it (a hand to the terminal). A missing or unreadable row is the
-// daemon's to write.
+// daemon's: it exists and is neither a hosted nor an agent row. A terminal
+// harness that logged in with the session's key while no process of the
+// daemon's ran rewrote it (a hand to the terminal). A missing or unreadable
+// row is the daemon's to write.
 func rowForeign(dir, replyID string) bool {
 	row, err := wsdashboard.ReadRegistration(dir, replyID)
-	return err == nil && !row.Hosted
+	// An agent row is no terminal's either, since a terminal login never
+	// writes Agent: a daemon of a release that knew no hosted lead served
+	// the session as an agent conversation while it ran, and its row is
+	// the daemon's to take back.
+	return err == nil && !row.Hosted && !row.Agent
 }
 
 // lockRow takes a lead session's row lock and checks the row is still the
