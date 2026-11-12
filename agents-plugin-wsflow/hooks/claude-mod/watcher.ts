@@ -1,4 +1,5 @@
 import type { MailItem, OwnPrompt } from './captions'
+import type { InboxCommand, InboxItem } from './dashboard'
 
 /**
  * Pure mailbox-push controller for the Claude Code mod in register.ts; the
@@ -62,6 +63,21 @@ import type { MailItem, OwnPrompt } from './captions'
  * drops or rejects is appended as a row instead, and only when that fails too
  * is the message recorded for the user. A crash between the drain and the
  * submit loses the message, the same gap mail has.
+ *
+ * A drain may also claim slash command entries (the page's command picker),
+ * each in its place among the messages. A command splits the batch and is
+ * never joined with text, labelled, or appended as a row: for text A, command
+ * C, text B the flush submits A as above, then runs C (`run`; the host queues
+ * it until the session is idle, so it runs after A's turn), and only once C's
+ * run settled goes on with B. B and everything claimed after it wait in this
+ * controller (the backlog) meanwhile, although the inbox already shows them
+ * drained: a flush while a command runs claims into the backlog and submits
+ * nothing. When the run settles while a main-thread turn runs or the main
+ * conversation compacts, the backlog is held as a held message is (that turn
+ * end, or the compaction's release, takes it); otherwise it goes on at once.
+ * A stop records the backlog's texts and typed lines for the user. Since a
+ * command is only drained where a message would be submitted, one sent while
+ * a turn runs or a compaction holds waits for that turn end or release.
  *
  * A held message the user promoted to steering is the one exception to
  * holding it for the turn end: every main-thread tool boundary (while board
@@ -150,8 +166,14 @@ export type DrainResult =
 export interface BoardEdges {
   /** Whether board submission is on now (the dashboard knob); read at every wait arm and turn end. */
   enabled: () => boolean
-  /** Claim every held message of `key`'s inbox, oldest first: their texts. Rejects when the drain failed. */
-  drain: (key: string) => Promise<string[]>
+  /** Claim every held message of `key`'s inbox, oldest first: their texts, a command entry in its place. Rejects when the drain failed. */
+  drain: (key: string) => Promise<InboxItem[]>
+  /**
+   * Run a claimed slash command entry as if typed (the host queues it until
+   * the session is idle) and report its outcome to the dashboard; resolves
+   * once the run settled, rejects when the host refused it.
+   */
+  run: (command: InboxCommand) => Promise<void>
   /**
    * Submit the drained messages as one prompt, the user's own; rejects when
    * it did not reach the conversation. The first `shown` texts are steered
@@ -425,6 +447,14 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   /** Whether a steered drain that outlasted its boundary's wait is still out. */
   let steerDraining = false
   /**
+   * Claimed board items behind a slash command entry, oldest first: what a
+   * flush could not submit yet because a command goes first. Session-wide
+   * like the queue: a rebind keeps them, a stop records them.
+   */
+  let backlog: InboxItem[] = []
+  /** Whether a claimed slash command's run is out: nothing claimed after it goes until it settles. */
+  let commandRunning = false
+  /**
    * Set just before a dashboard interrupt asks for the running turn's abort,
    * cleared when the next main-thread turn starts: while set, what that turn
    * leaves behind is appended rather than submitted.
@@ -504,32 +534,97 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     }
   }
 
+  /** Whether anything waits for the next board flush: carried or stranded steered texts, or a backlog. */
+  function boardLeft(): boolean {
+    return steerCarry.length > 0 || steerStranded.length > 0 || backlog.length > 0
+  }
+
+  /** Take the backlog's leading text messages, up to its first command entry. */
+  function takeBacklogTexts(): string[] {
+    const end = backlog.findIndex((item) => typeof item !== 'string')
+    return backlog.splice(0, end === -1 ? backlog.length : end) as string[]
+  }
+
+  /** A claimed item as text the user can read: a message's text, a command's typed line. */
+  const itemText = (item: InboxItem) => (typeof item === 'string' ? item : item.text)
+
+  /**
+   * Run the slash command entry at the backlog's head, unless one runs:
+   * the run is not awaited (the host queues it until the session is idle,
+   * past a turn the flush just started), and once it settles the backlog
+   * goes on (afterCommand). A rejected run is logged; its outcome reached the
+   * dashboard through the edge.
+   */
+  function startCommand(board: BoardEdges, myKey: string): void {
+    const head = backlog[0]
+    if (commandRunning || head === undefined || typeof head === 'string') return
+    backlog.shift()
+    commandRunning = true
+    edges.log(`${edges.label}: running the dashboard command ${head.text} for ${myKey}`)
+    void Promise.resolve()
+      .then(() => board.run(head))
+      .then(
+        () => edges.log(`${edges.label}: the dashboard command ${head.text} settled`),
+        (err) => edges.log(`${edges.label}: the dashboard command ${head.text} failed: ${String(err)}`),
+      )
+      .then(() => {
+        commandRunning = false
+        afterCommand()
+      })
+  }
+
+  /**
+   * A dashboard command's run settled: what waited behind it goes on now,
+   * or, while a main-thread turn runs or the main conversation compacts, is
+   * held for that turn end or the compaction's release. A stop since already
+   * recorded the backlog; a rebind's key takes what is left.
+   */
+  function afterCommand(): void {
+    const myKey = key
+    if (myKey === undefined || !edges.board || !boardLeft()) return
+    if (boardBusy()) {
+      boardHeld = true
+      edges.log(`${edges.label}: dashboard messages behind a command are held until the running ${compacting ? 'compaction' : 'turn'} ends`)
+      rearmStaleWait()
+      return
+    }
+    void flushBoard(myKey, false, interrupted)
+  }
+
   /**
    * Drain `myKey`'s held board messages and submit them as one prompt, after
    * any drain already running; the carried steered messages go first. With
-   * `drainHeld` false only the carried ones are submitted. With `hold` (a
-   * dashboard interrupt cut the turn) the carried and stranded ones are held
-   * instead (holdSteered) and only what the drain claims is submitted. Never
-   * rejects: answers `empty` when nothing was held or carried, `failed` when
-   * the drain failed (the held messages stay held; carried ones are still
-   * submitted), and `done` once claimed messages were submitted, appended, or
-   * recorded.
+   * `drainHeld` false only the carried ones (and the backlog) are submitted.
+   * With `hold` (a dashboard interrupt cut the turn) the carried and stranded
+   * ones are held instead (holdSteered) and only what the drain claims is
+   * submitted. What is claimed joins the backlog's end, and the text up to
+   * its first command entry is submitted; that command then runs
+   * (startCommand) and the rest waits for it. While a command runs nothing is
+   * submitted: the claim only joins the backlog. Never rejects: answers
+   * `empty` when nothing was held, carried, or backlogged, `failed` when the
+   * drain failed (the held messages stay held; carried ones are still
+   * submitted), and `done` once claimed messages were submitted, appended,
+   * recorded, or backlogged.
    */
   function flushBoard(myKey: string, drainHeld = true, hold = false): Promise<'done' | 'empty' | { failed: string }> {
     const at = stops
     const run = boardChain.then(async (): Promise<'done' | 'empty' | { failed: string }> => {
       const board = edges.board
       if (!board) return 'empty'
-      let stranded = steerStranded
-      steerStranded = []
-      let carried = steerCarry
-      steerCarry = []
-      if (hold) {
+      // A command still running holds everything behind it, the steered texts among them.
+      const waiting = commandRunning
+      let stranded = waiting ? [] : steerStranded
+      let carried = waiting ? [] : steerCarry
+      if (!waiting) {
+        steerStranded = []
+        steerCarry = []
+      }
+      if (hold && !waiting) {
         await holdSteered(at, stranded, carried)
         stranded = []
         carried = []
       }
-      let drained: string[] = []
+      let drained: InboxItem[] = []
       let failed: string | undefined
       if (drainHeld) {
         try {
@@ -538,39 +633,62 @@ export function createWatcher(edges: WatcherEdges): Watcher {
           failed = String(err)
         }
       }
-      // `fresh` is in no conversation row yet; `stranded` already is.
-      const fresh = [...carried, ...drained]
-      const texts = [...stranded, ...fresh]
-      if (texts.length === 0) return failed === undefined ? 'empty' : { failed }
-      if (failed !== undefined) edges.log(`${edges.label}: dashboard message drain failed (${failed}); submitting the ${stranded.length + carried.length} carried steered message(s) alone`)
       // The drain claimed these: from here this is their only holder. A stop
       // since means the conversation they were for is gone.
       if (stops !== at) {
-        if (fresh.length > 0) keepBoard(`the push loop stopped: ${lastStop}`, fresh)
+        const lost = [...carried, ...drained.map(itemText)]
+        if (stranded.length + lost.length === 0) return failed === undefined ? 'empty' : { failed }
+        if (lost.length > 0) keepBoard(`the push loop stopped: ${lastStop}`, lost)
         return 'done'
       }
-      edges.log(`${edges.label}: drained ${texts.length} dashboard message(s) for ${myKey}; submitting them as the user's`)
-      let submitErr: unknown
-      try {
-        await board.submit(texts, stranded.length)
-        return failed === undefined ? 'done' : { failed }
-      } catch (err) {
-        submitErr = err
+      const outcome = (claimed: boolean): 'done' | 'empty' | { failed: string } => (failed !== undefined ? { failed } : claimed ? 'done' : 'empty')
+      backlog.push(...drained)
+      if (waiting) {
+        if (drained.length > 0) edges.log(`${edges.label}: drained ${drained.length} dashboard message(s) for ${myKey}; held behind the running dashboard command`)
+        return outcome(drained.length > 0)
       }
-      if (fresh.length === 0) {
-        edges.log(`${edges.label}: dashboard message submit failed (${String(submitErr)}); the ${stranded.length} unread steered message(s) stay in their row, which the next prompt carries`)
-        return failed === undefined ? 'done' : { failed }
+      // `fresh` is in no conversation row yet; `stranded` already is.
+      const fresh = [...carried, ...takeBacklogTexts()]
+      const texts = [...stranded, ...fresh]
+      if (texts.length === 0) {
+        const command = backlog.length > 0
+        startCommand(board, myKey)
+        return outcome(command)
       }
-      edges.log(`${edges.label}: dashboard message submit failed (${String(submitErr)}); appending it as a row instead`)
-      try {
-        await board.append(fresh)
-      } catch (err) {
-        keepBoard(`prompt submit failed: ${String(submitErr)}; row append failed: ${String(err)}`, fresh)
-      }
-      return failed === undefined ? 'done' : { failed }
+      if (failed !== undefined) edges.log(`${edges.label}: dashboard message drain failed (${failed}); submitting the ${stranded.length + carried.length} carried steered message(s) alone`)
+      await submitBoard(board, myKey, stranded, fresh)
+      startCommand(board, myKey)
+      return outcome(true)
     })
     boardChain = run.catch(() => {})
     return run.catch((err) => ({ failed: String(err) }))
+  }
+
+  /**
+   * Submit board texts as one prompt, the stranded ones (already in an unread
+   * steer row) first, falling back to a row for the fresh ones; only when
+   * that fails too are they recorded. Never rejects.
+   */
+  async function submitBoard(board: BoardEdges, myKey: string, stranded: readonly string[], fresh: readonly string[]): Promise<void> {
+    const texts = [...stranded, ...fresh]
+    edges.log(`${edges.label}: drained ${texts.length} dashboard message(s) for ${myKey}; submitting them as the user's`)
+    let submitErr: unknown
+    try {
+      await board.submit(texts, stranded.length)
+      return
+    } catch (err) {
+      submitErr = err
+    }
+    if (fresh.length === 0) {
+      edges.log(`${edges.label}: dashboard message submit failed (${String(submitErr)}); the ${stranded.length} unread steered message(s) stay in their row, which the next prompt carries`)
+      return
+    }
+    edges.log(`${edges.label}: dashboard message submit failed (${String(submitErr)}); appending it as a row instead`)
+    try {
+      await board.append(fresh)
+    } catch (err) {
+      keepBoard(`prompt submit failed: ${String(submitErr)}; row append failed: ${String(err)}`, fresh)
+    }
   }
 
   /**
@@ -1059,6 +1177,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       const left = takeQueued()
       if (left) lose(left.items, `the push loop stopped: ${reason}`)
       if (steerCarry.length > 0) keepBoard(`the push loop stopped: ${reason}`, steerCarry.splice(0))
+      // Claimed behind a dashboard command (its typed line among them): only this holds them.
+      if (backlog.length > 0) keepBoard(`the push loop stopped: ${reason}`, backlog.splice(0).map(itemText))
       // Already rows of the conversation the stop ends: nothing to record.
       steerUnread = []
       steerStranded = []
@@ -1131,7 +1251,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       }
       const myKey = key
       const drainHeld = boardHeld || boardWanted()
-      if (myKey === undefined || !edges.board || !(drainHeld || steerCarry.length > 0 || steerStranded.length > 0)) {
+      if (myKey === undefined || !edges.board || !(drainHeld || boardLeft())) {
         boardHeld = false
         sendMail()
         return
@@ -1163,7 +1283,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     compactEnded() {
       if (!compacting) return
       compacting = false
-      if (!edges.board || !(boardHeld || steerCarry.length > 0 || steerStranded.length > 0)) return
+      if (!edges.board || !(boardHeld || boardLeft())) return
       const at = compactions
       const stopsAt = stops
       edges.log(`${edges.label}: the compaction ended with dashboard messages held; releasing them once any compaction continuation went first`)
@@ -1176,7 +1296,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
           // A later compaction holds them for its own end; a stop already recorded or forgot them.
           if (at !== compactions || compacting || stops !== stopsAt) return
           const myKey = key
-          if (myKey === undefined || !(boardHeld || steerCarry.length > 0 || steerStranded.length > 0)) return
+          if (myKey === undefined || !(boardHeld || boardLeft())) return
           if (edges.turnRunning()) {
             edges.log(`${edges.label}: a main-thread turn runs after the compaction; its turn end takes the held dashboard messages`)
             return

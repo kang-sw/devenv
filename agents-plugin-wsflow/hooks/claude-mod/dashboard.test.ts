@@ -9,6 +9,8 @@ import {
   BATCH_RETAIN_CAP,
   CALL_TIMEOUT_MS,
   callArgs,
+  COMMAND_LIST_CAP,
+  commandList,
   createDashboard,
   createOutputRate,
   effortOfType,
@@ -140,6 +142,26 @@ describe('pure helpers', () => {
     expect(parseInboxDrain('{"messages":[{"id":"a"}]}')).toEqual(['{"id":"a"}'])
     expect(parseInboxDrain('drained 1\nmessage x\nhi')).toEqual(['drained 1\nmessage x\nhi'])
     expect(parseInboxDrain('{"other":1}')).toEqual(['{"other":1}'])
+  })
+
+  test('an inbox drain\'s command entry keeps its place among the messages, with its name, args, and typed line', () => {
+    const drained = JSON.stringify({
+      messages: [
+        { id: 'a', text: 'A' },
+        { id: 'c', text: '/compact keep the plan', command: { name: 'compact', args: 'keep the plan' } },
+        { id: 'b', text: 'B' },
+        { id: 'd', command: { name: 'context' } },
+      ],
+    })
+    expect(parseInboxDrain(drained)).toEqual([
+      'A',
+      { command: { name: 'compact', args: 'keep the plan' }, text: '/compact keep the plan' },
+      'B',
+      // No text: the typed line is built from the name.
+      { command: { name: 'context', args: '' }, text: '/context' },
+    ])
+    // A command field with no name is no command: the record is kept as its text.
+    expect(parseInboxDrain('{"messages":[{"id":"x","text":"hi","command":{"args":"y"}}]}')).toEqual(['hi'])
   })
 
   test('an interrupt drain\'s JSON gives each interrupt entry\'s creation time; a record without one, or any other shape, gives nothing', () => {
@@ -1150,6 +1172,123 @@ describe('usage status', () => {
     await advance()
     await advance(1000)
     expect(statuses(h.calls.slice(before).flatMap((c) => c.events)).length).toBe(1)
+  })
+})
+
+describe('slash commands', () => {
+  const ALL: IntakeResult = { ok: true, text: 'ok: 1 of 1 events applied\naccepts: status, compact, commands, command\n' }
+  const OLD: IntakeResult = { ok: true, text: 'ok: 1 of 1 events applied\naccepts: status, compact\n' }
+  const list = [
+    { name: 'compact', description: 'Clear the history but keep a summary', source: 'builtin' },
+    { name: 'tools:review', description: 'Review a branch', source: 'plugin' },
+  ]
+  const lists = (events: DashboardEvent[]) => events.filter((e) => e.kind === 'commands')
+  const ran = (events: DashboardEvent[]) => events.filter((e) => e.kind === 'command')
+
+  test('the command list maps name, description, and source, drops nameless records, and caps the length', () => {
+    expect(commandList([{ name: 'compact', description: 'd', source: 'builtin', plugin: 'x' } as never, { name: '' }, { name: 'bare', description: '' }])).toEqual([
+      { name: 'compact', description: 'd', source: 'builtin' },
+      { name: 'bare' },
+    ])
+    expect(commandList(Array.from({ length: COMMAND_LIST_CAP + 3 }, (_, i) => ({ name: `c${i}` }))).length).toBe(COMMAND_LIST_CAP)
+  })
+
+  test('the held list goes only once a result names commands, again only when it changed, and never to an intake that does not take it', async () => {
+    const { h, dash, advance, sent } = await started()
+    dash.commands(list)
+    await advance(1000)
+    // The opening result named no kinds: the list is held.
+    expect(lists(sent())).toEqual([])
+    h.answers.push(OLD, OLD)
+    dash.turnStarted(undefined)
+    await advance()
+    await advance()
+    expect(lists(sent())).toEqual([])
+    // A result naming commands: the held list follows.
+    h.answers.splice(0, h.answers.length, ALL, ALL, ALL, ALL)
+    dash.turnCompleted(undefined, '', 'answer')
+    await advance()
+    await advance()
+    expect(lists(sent())).toEqual([{ kind: 'commands', commands: list }])
+    // The same list again sends nothing; a changed one goes.
+    const calls = h.calls.length
+    dash.commands(list.map((c) => ({ ...c })))
+    await advance(1000)
+    expect(h.calls.length).toBe(calls)
+    dash.commands(list.slice(0, 1))
+    await advance()
+    expect(lists(sent()).at(-1)).toEqual({ kind: 'commands', commands: list.slice(0, 1) })
+  })
+
+  test('the list goes again after every reset the feed sends: a resync and a restart', async () => {
+    const { h, dash, advance } = await started()
+    h.answers.push(ALL, ALL, ALL, ALL, ALL, ALL, ALL, ALL)
+    dash.commands(list)
+    dash.turnStarted(undefined)
+    await advance()
+    await advance()
+    const before = h.calls.length
+    // An undelivered call resyncs: reset first, then (once a result names commands again) the list.
+    h.answers.unshift(new Error('server gone'))
+    dash.turnCompleted(undefined, '', 'answer')
+    await advance()
+    await advance(RETRY_MS)
+    await advance()
+    const resynced = h.calls.slice(before).flatMap((c) => c.events)
+    const reset = resynced.findIndex((e) => e.kind === 'reset')
+    expect(reset).toBeGreaterThanOrEqual(0)
+    expect(lists(resynced.slice(reset))).toEqual([{ kind: 'commands', commands: list }])
+    const mid = h.calls.length
+    h.answers.push(ALL, ALL, ALL)
+    dash.restart()
+    await advance()
+    await advance()
+    const restarted = h.calls.slice(mid).flatMap((c) => c.events)
+    expect(kinds(restarted)[0]).toBe('reset')
+    expect(lists(restarted)).toEqual([{ kind: 'commands', commands: list }])
+    // A stop drops the held list: a fresh start sends none until the adapter reports one.
+    dash.stop()
+    dash.start()
+    const late = h.calls.length
+    h.answers.push(ALL, ALL, ALL)
+    await advance()
+    dash.turnStarted(undefined)
+    await advance()
+    await advance()
+    expect(lists(h.calls.slice(late).flatMap((c) => c.events))).toEqual([])
+  })
+
+  test('a command\'s outcome goes as a command event only while a result names command; no text leaves the field out', async () => {
+    const { h, dash, advance, sent } = await started()
+    dash.commandRan('/context', 'tokens: 12k')
+    await advance()
+    expect(ran(sent())).toEqual([])
+    expect(h.logs.some((l) => l.includes('/context'))).toBe(true)
+    h.answers.push(OLD, OLD)
+    dash.turnStarted(undefined)
+    await advance()
+    dash.commandRan('/context', 'tokens: 12k')
+    await advance()
+    expect(ran(sent())).toEqual([])
+    h.answers.splice(0, h.answers.length, ALL, ALL, ALL, ALL)
+    dash.turnCompleted(undefined, '', 'answer')
+    await advance()
+    dash.commandRan('/compact keep it', 'Compacted.')
+    dash.commandRan('/config', undefined)
+    dash.commandRan('/model', '')
+    await advance()
+    expect(ran(sent())).toEqual([
+      { kind: 'command', command: '/compact keep it', text: 'Compacted.', at: expect.any(Number) },
+      { kind: 'command', command: '/config', at: expect.any(Number) },
+      { kind: 'command', command: '/model', at: expect.any(Number) },
+    ])
+    // A command line lost with a failed call travels again with the resync.
+    h.answers.push(new Error('server gone'))
+    dash.commandRan('/cost', 'Total: $1')
+    await advance()
+    h.answers.push(ALL, ALL)
+    await advance(RETRY_MS)
+    expect(ran(h.calls.at(-1)!.events)).toEqual([{ kind: 'command', command: '/cost', text: 'Total: $1', at: expect.any(Number) }])
   })
 })
 

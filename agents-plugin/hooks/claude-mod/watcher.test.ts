@@ -36,6 +36,7 @@ import {
   type WatcherEdges,
 } from './watcher'
 import type { OwnPrompt } from './captions'
+import type { InboxCommand, InboxItem } from './dashboard'
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void }
 function deferred<T>(): Deferred<T> {
@@ -83,7 +84,7 @@ function harness(mode: DrainMode) {
    */
   const board = {
     on: false,
-    inbox: [] as string[],
+    inbox: [] as InboxItem[],
     drains: [] as string[],
     drainFailures: [] as Error[],
     /** When set, the next board drain waits on it. */
@@ -119,6 +120,10 @@ function harness(mode: DrainMode) {
     abortFailures: [] as Error[],
     /** Runs inside the abort call, before it settles: how a turn end that beats the abort is staged. */
     onAbort: undefined as (() => void) | undefined,
+    /** Every command run asked for, as its typed line. */
+    runs: [] as string[],
+    /** When set, the next command run waits on it; an Error rejects that run. */
+    heldRuns: [] as Deferred<Error | undefined>[],
   }
   const order: string[] = []
   const edges: WatcherEdges = {
@@ -235,6 +240,14 @@ function harness(mode: DrainMode) {
               },
             }
           : undefined,
+      run: async (item: InboxCommand) => {
+        board.runs.push(item.text)
+        order.push(`run ${item.text}`)
+        const held = board.heldRuns.shift()
+        if (!held) return
+        const failure = await held.promise
+        if (failure) throw failure
+      },
     },
   }
   return {
@@ -2050,6 +2063,170 @@ async function interruptWake(h: ReturnType<typeof harness>, also?: WakeKind, dra
   h.waits[h.waits.length - 1]!.d.resolve(also ? { interrupt: true, also } : { interrupt: true })
   await tick()
 }
+
+describe('dashboard slash commands', () => {
+  const cmd = (name: string, args = ''): InboxCommand => ({ command: { name, args }, text: args === '' ? `/${name}` : `/${name} ${args}` })
+
+  /** A watcher bound to k1 with board submission on and its first wait armed. */
+  async function boardOn(continuation?: () => Promise<void>) {
+    const h = harness('direct')
+    h.board.on = true
+    if (continuation) h.edges.continuation = continuation
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    return { h, w }
+  }
+
+  test('an idle drain splits at a command: the text before it is submitted, the command runs, and the text after it goes only once the run settled', async () => {
+    const { h } = await boardOn()
+    const run = deferred<Error | undefined>()
+    h.board.heldRuns.push(run)
+    h.board.inbox.push('A', cmd('compact', 'keep the plan'), 'B')
+    await wake(h, 'board')
+    expect(h.board.submitted).toEqual([['A']])
+    expect(h.board.runs).toEqual(['/compact keep the plan'])
+    // Never joined with the text, never appended as a row.
+    expect(h.board.appended).toEqual([])
+    // B waits in the mod although the inbox already gave it up.
+    expect(h.board.inbox).toEqual([])
+    run.resolve(undefined)
+    await tick()
+    expect(h.board.submitted).toEqual([['A'], ['B']])
+    expect(h.order).toEqual(['board', 'run /compact keep the plan', 'board'])
+  })
+
+  test('the text after a command waits for the turn the text before it started: a run that settles mid-turn holds it for that turn end', async () => {
+    const { h, w } = await boardOn()
+    const run = deferred<Error | undefined>()
+    h.board.heldRuns.push(run)
+    h.board.inbox.push('A', cmd('context'), 'B')
+    await wake(h, 'board')
+    h.turn.running = true
+    run.resolve(undefined)
+    await tick()
+    expect(h.board.submitted).toEqual([['A']])
+    // Held: the wait re-arms without the board flag, as for any held message.
+    expect(h.waits.at(-1)!.board).toBe(false)
+    await w.toolCompleted()
+    expect(h.board.submitted).toEqual([['A']])
+    expect(h.appended).toEqual([])
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['A'], ['B']])
+    expect(h.waits.at(-1)!.board).toBe(true)
+  })
+
+  test('a command sent while a turn runs waits in the inbox for the turn end, then runs', async () => {
+    const { h, w } = await boardOn()
+    h.turn.running = true
+    h.board.inbox.push(cmd('compact'))
+    await wake(h, 'board')
+    await w.toolCompleted()
+    expect(h.board.runs).toEqual([])
+    expect(h.board.steerDrains).toEqual(['k1'])
+    expect(h.board.inbox).toEqual([cmd('compact')])
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.runs).toEqual(['/compact'])
+    expect(h.board.submitted).toEqual([])
+  })
+
+  test('a command held by a compaction runs only once the compaction settled and its continuation went first', async () => {
+    const cont = deferred<void>()
+    const { h, w } = await boardOn(() => cont.promise)
+    h.turn.running = true
+    h.board.inbox.push(cmd('context'))
+    await wake(h, 'board')
+    w.compactStarted()
+    h.turn.running = false
+    // The turn end during the compaction leaves the command held.
+    w.turnCompleted()
+    await tick()
+    expect(h.board.runs).toEqual([])
+    w.compactEnded()
+    await tick()
+    expect(h.board.runs).toEqual([])
+    cont.resolve()
+    await tick()
+    expect(h.board.runs).toEqual(['/context'])
+  })
+
+  test('text after a command whose run settles during a compaction is held until the compaction ends', async () => {
+    const { h, w } = await boardOn()
+    const run = deferred<Error | undefined>()
+    h.board.heldRuns.push(run)
+    h.board.inbox.push(cmd('compact'), 'B')
+    await wake(h, 'board')
+    expect(h.board.runs).toEqual(['/compact'])
+    w.compactStarted()
+    run.resolve(undefined)
+    await tick()
+    expect(h.board.submitted).toEqual([])
+    w.compactEnded()
+    await tick()
+    expect(h.board.submitted).toEqual([['B']])
+  })
+
+  test('a flush while a command runs claims into the backlog and submits nothing; the backlog goes in order once the run settles', async () => {
+    const { h } = await boardOn()
+    const run = deferred<Error | undefined>()
+    h.board.heldRuns.push(run)
+    h.board.inbox.push(cmd('context'), 'B')
+    await wake(h, 'board')
+    h.board.inbox.push('D')
+    await wake(h, 'board')
+    expect(h.board.drains).toEqual(['k1', 'k1'])
+    expect(h.board.inbox).toEqual([])
+    expect(h.board.submitted).toEqual([])
+    run.resolve(undefined)
+    await tick()
+    expect(h.board.submitted).toEqual([['B', 'D']])
+  })
+
+  test('two commands in one drain run one after the other, the second only once the first settled', async () => {
+    const { h } = await boardOn()
+    const first = deferred<Error | undefined>()
+    h.board.heldRuns.push(first)
+    h.board.inbox.push(cmd('context'), cmd('cost'), 'B')
+    await wake(h, 'board')
+    expect(h.board.runs).toEqual(['/context'])
+    first.resolve(undefined)
+    await tick()
+    expect(h.board.runs).toEqual(['/context', '/cost'])
+    expect(h.board.submitted).toEqual([['B']])
+  })
+
+  test('a refused run is logged and the text after it still goes', async () => {
+    const { h } = await boardOn()
+    const run = deferred<Error | undefined>()
+    h.board.heldRuns.push(run)
+    h.board.inbox.push(cmd('nosuch'), 'B')
+    await wake(h, 'board')
+    run.resolve(new Error('unknown command'))
+    await tick()
+    expect(h.logs.some((l) => l.includes('/nosuch failed') && l.includes('unknown command'))).toBe(true)
+    expect(h.board.submitted).toEqual([['B']])
+  })
+
+  test('a stop records what waited behind a running command, its typed lines among it, and nothing goes after the run settles', async () => {
+    const { h, w } = await boardOn()
+    const run = deferred<Error | undefined>()
+    h.board.heldRuns.push(run)
+    h.board.inbox.push(cmd('context'), 'B', cmd('cost'))
+    await wake(h, 'board')
+    w.stop('session end')
+    expect(h.records.length).toBe(1)
+    expect(h.records[0]).toContain('B')
+    expect(h.records[0]).toContain('/cost')
+    run.resolve(undefined)
+    await tick()
+    expect(h.board.submitted).toEqual([])
+    expect(h.board.runs).toEqual(['/context'])
+  })
+})
 
 describe('dashboard interrupt', () => {
   /** A watcher bound to k1 with board submission on and its first wait armed. */

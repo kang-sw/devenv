@@ -34,7 +34,15 @@
 //   it begins, then `end` when it lands or `failed` when it fails or is
 //   vetoed, with its trigger (`auto` or `manual`; none for a plugin's), gated
 //   on the `accepts:` line like `status`. A compaction still running is held
-//   and its start sent again after a resync.
+//   and its start sent again after a resync;
+// - `commands`, the session's slash command list (`$.command.list()`: name,
+//   description, source), gated on the `accepts:` line like `status`: held,
+//   sent when it changes, and sent again after a resync, since `reset` clears
+//   it on the server; the page offers its command picker only while the
+//   server holds a list;
+// - `command`, a slash command the mod ran from a dashboard command entry:
+//   its typed line and the output it showed as text (none for a command that
+//   drew a terminal panel or prompted the model), gated on the same line.
 //
 // A batch is one model request (a `turn.step`) and the tool calls it made:
 // the step streams as a generating view (thinking, replying, or a tool call
@@ -134,12 +142,25 @@ export function whiteboardBody(plugin: string, text: string): string | undefined
   return text.startsWith(`${label}\n`) ? text.slice(label.length + 1) : undefined
 }
 
+/** A slash command entry an inbox drain claimed: the command to run and its typed line (`/name args`). */
+export type InboxCommand = { command: { name: string; args: string }; text: string }
+
+/** One claimed inbox message: a text message's text, or a command entry, which is never joined with text. */
+export type InboxItem = string | InboxCommand
+
+/** The typed line of a slash command. */
+export function commandLine(name: string, args: string): string {
+  return args === '' ? `/${name}` : `/${name} ${args}`
+}
+
 /**
  * The messages an inbox drain's `format: "json"` text claimed, oldest first:
- * each one's `text`. The drain has already claimed whatever it returned, so
- * text that is not that shape comes back whole as one message, not dropped.
+ * each text message's `text`, and each command entry (a record with a
+ * `command: {name, args}` field) as an InboxCommand in its place. The drain
+ * has already claimed whatever it returned, so text that is not that shape
+ * comes back whole as one message, not dropped.
  */
-export function parseInboxDrain(text: string): string[] {
+export function parseInboxDrain(text: string): InboxItem[] {
   const trimmed = text.trim()
   if (trimmed === '') return []
   let messages: unknown
@@ -149,8 +170,16 @@ export function parseInboxDrain(text: string): string[] {
     return [trimmed]
   }
   if (!Array.isArray(messages)) return [trimmed]
-  return messages.flatMap((m): string[] => {
-    const t = (m as { text?: unknown } | null)?.text
+  return messages.flatMap((m): InboxItem[] => {
+    const r = m as { text?: unknown; command?: { name?: unknown; args?: unknown } | null } | null
+    const t = r?.text
+    const name = r?.command?.name
+    if (typeof name === 'string' && name.trim() !== '') {
+      const rawArgs = r?.command?.args
+      const args = typeof rawArgs === 'string' ? rawArgs : ''
+      const line = typeof t === 'string' && t.trim() !== '' ? t : commandLine(name.trim(), args)
+      return [{ command: { name: name.trim(), args }, text: line }]
+    }
     if (typeof t === 'string') return t.trim() === '' ? [] : [t]
     return [JSON.stringify(m)]
   })
@@ -636,9 +665,46 @@ export const COMPACT_KIND = 'compact'
 /** A compaction's trigger as the intake takes it; a plugin's compaction carries none. */
 export type CompactTrigger = 'auto' | 'manual'
 
+// ---- Slash commands --------------------------------------------------------
+
+/** The optional event kind that carries the session's slash command list, sent only while the intake names it. */
+export const COMMANDS_KIND = 'commands'
+
+/** The optional event kind that records a slash command the mod ran from a dashboard command entry, sent only while the intake names it. */
+export const COMMAND_KIND = 'command'
+
+/** The most commands a list carries, as the server keeps them. */
+export const COMMAND_LIST_CAP = 500
+
+/** One slash command as a `commands` event carries it. */
+export type ListedCommand = { name: string; description?: string; source?: string }
+
+/**
+ * A `$.command.list()` read as a `commands` event's list: each command's
+ * name, description, and source, in the host's order, capped at
+ * COMMAND_LIST_CAP; a record without a name is left out. The listing does not
+ * tell user-only from agent-only commands, so no layer is sent.
+ */
+export function commandList(list: readonly { name?: unknown; description?: unknown; source?: unknown }[]): ListedCommand[] {
+  const out: ListedCommand[] = []
+  for (const c of list) {
+    if (out.length === COMMAND_LIST_CAP) break
+    if (typeof c?.name !== 'string' || c.name.trim() === '') continue
+    out.push({
+      name: c.name,
+      ...(typeof c.description === 'string' && c.description !== '' ? { description: c.description } : {}),
+      ...(typeof c.source === 'string' && c.source !== '' ? { source: c.source } : {}),
+    })
+  }
+  return out
+}
+
 // ---- The feed --------------------------------------------------------------
 
-export type DashboardEvent = { kind: 'reset' | 'turn_start' | 'turn_end' | 'agent' | 'permission' | 'reply' | 'user' | 'status' | 'compact'; [field: string]: unknown }
+export type DashboardEvent = {
+  kind: 'reset' | 'turn_start' | 'turn_end' | 'agent' | 'permission' | 'reply' | 'user' | 'status' | 'compact' | 'commands' | 'command'
+  [field: string]: unknown
+}
 
 /** One intake call's outcome: whether it was delivered (not an error result) and its result text. */
 export type IntakeResult = { ok: boolean; text: string }
@@ -753,6 +819,14 @@ export interface Dashboard {
   compactStarted: (trigger: CompactTrigger | undefined) => void
   /** That compaction settled: `landed`, else it failed or was vetoed. */
   compactEnded: (trigger: CompactTrigger | undefined, landed: boolean) => void
+  /** The session's slash command list: held, and sent while the intake accepts `commands` and the list changed or a resync is due. */
+  commands: (list: readonly ListedCommand[]) => void
+  /**
+   * A slash command from a dashboard command entry ran (or was refused):
+   * its typed line and the output it showed as text, undefined for none;
+   * sent while the intake accepts `command`.
+   */
+  commandRan: (line: string, text: string | undefined) => void
 }
 
 const LEAD = ''
@@ -798,6 +872,13 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   let compactDirty = false
   /** Whether the latest intake result named `compact` among the kinds it accepts. */
   let compactAccepted = false
+  /** The latest slash command list, as JSON; undefined before any. */
+  let commands: string | undefined
+  /** Whether `commands` differs from what ws-mcp holds. */
+  let commandsDirty = false
+  /** Whether the latest intake result named `commands`, and `command`, among the kinds it accepts. */
+  let commandsAccepted = false
+  let commandAccepted = false
 
   const lead = (): AgentRec => rec(LEAD)
 
@@ -907,14 +988,15 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
 
   const statusDue = () => statusDirty && statusAccepted && status !== undefined
   const compactDue = () => compactDirty && compactAccepted && compacting !== undefined
+  const commandsDue = () => commandsDirty && commandsAccepted && commands !== undefined
 
   function hasWork(): boolean {
-    return pending.length > 0 || replyDirty || statusDue() || compactDue() || anyDue()
+    return pending.length > 0 || replyDirty || statusDue() || compactDue() || commandsDue() || anyDue()
   }
 
   /** Whether streamed reply text is the only pending change, so the slow cadence applies. */
   function textOnly(): boolean {
-    return replyDirty && pending.length === 0 && !statusDue() && !compactDue() && !anyDue()
+    return replyDirty && pending.length === 0 && !statusDue() && !compactDue() && !commandsDue() && !anyDue()
   }
 
   function scheduleFlush(): void {
@@ -1015,7 +1097,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     return { kind: 'reply', text }
   }
 
-  /** Every dirty state as events, in a stable order: the lead, the subagents, the streamed reply, a running compaction, the usage status. */
+  /** Every dirty state as events, in a stable order: the lead, the subagents, the streamed reply, a running compaction, the usage status, the command list. */
   function dirtyEvents(): DashboardEvent[] {
     const out: DashboardEvent[] = []
     for (const [id, r] of agents) if (due(r)) out.push(...agentEvents(id, r))
@@ -1028,6 +1110,10 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     if (statusDue()) {
       statusDirty = false
       out.push({ kind: STATUS_KIND, ...(JSON.parse(status!) as StatusFigures) })
+    }
+    if (commandsDue()) {
+      commandsDirty = false
+      out.push({ kind: COMMANDS_KIND, commands: JSON.parse(commands!) as ListedCommand[] })
     }
     return out
   }
@@ -1056,12 +1142,14 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     replyDirty = reply !== undefined
     statusDirty = status !== undefined
     compactDirty = compacting !== undefined
+    commandsDirty = commands !== undefined
   }
 
   /** The conversation events of an undelivered call, which a resync cannot rebuild from current state. */
   function requeue(events: DashboardEvent[]): void {
     const kept = events.filter(
-      (e) => e.kind === 'user' || e.kind === 'turn_start' || e.kind === 'turn_end' || (e.kind === 'reply' && e.final === true) || (e.kind === COMPACT_KIND && e.phase !== 'start'),
+      (e) => e.kind === 'user' || e.kind === 'turn_start' || e.kind === 'turn_end' || (e.kind === 'reply' && e.final === true) || (e.kind === COMPACT_KIND && e.phase !== 'start') ||
+        e.kind === COMMAND_KIND,
     )
     pending = [...kept, ...pending]
     if (pending.length > PENDING_EVENT_CAP) pending.splice(0, pending.length - PENDING_EVENT_CAP)
@@ -1136,6 +1224,10 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       const compactOn = accepts.includes(COMPACT_KIND)
       if (compactOn && !compactAccepted) compactDirty = compacting !== undefined
       compactAccepted = compactOn
+      const commandsOn = accepts.includes(COMMANDS_KIND)
+      if (commandsOn && !commandsAccepted) commandsDirty = commands !== undefined
+      commandsAccepted = commandsOn
+      commandAccepted = accepts.includes(COMMAND_KIND)
       if (!stopped && !delivered) {
         requeue(events)
         markResync()
@@ -1183,6 +1275,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     retryAt = 0
     // The held usage outlives a restart: the restart's `reset` clears it on the server, so it goes again.
     statusDirty = status !== undefined
+    commandsDirty = commands !== undefined
     compacting = undefined
     compactDirty = false
   }
@@ -1226,6 +1319,10 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       statusDirty = false
       statusAccepted = false
       compactAccepted = false
+      commands = undefined
+      commandsDirty = false
+      commandsAccepted = false
+      commandAccepted = false
       stopped = false
       sentKey = undefined
       resyncDue = true
@@ -1239,6 +1336,10 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       statusDirty = false
       statusAccepted = false
       compactAccepted = false
+      commands = undefined
+      commandsDirty = false
+      commandsAccepted = false
+      commandAccepted = false
       stopped = true
     },
     restart: guard('restart', () => {
@@ -1428,6 +1529,20 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       if (compactAccepted) settleBefore({ kind: COMPACT_KIND, phase: landed ? 'end' : 'failed', ...(trigger ? { trigger } : {}), at: edges.now() })
       compacting = undefined
       compactDirty = false
+    }),
+    commands: guard('commands', (list: readonly ListedCommand[]) => {
+      const json = JSON.stringify(list)
+      if (json === commands) return
+      commands = json
+      commandsDirty = true
+      scheduleFlush()
+    }),
+    commandRan: guard('command', (line: string, text: string | undefined) => {
+      if (!commandAccepted) {
+        edges.log(`command ${line} ran; the intake takes no command events, so the page shows no outcome`)
+        return
+      }
+      settleBefore({ kind: COMMAND_KIND, command: line, ...(text !== undefined && text !== '' ? { text: text.slice(0, TEXT_SEND_CAP) } : {}), at: edges.now() })
     }),
   }
 }
