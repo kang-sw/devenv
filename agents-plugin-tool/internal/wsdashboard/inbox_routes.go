@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
@@ -241,7 +242,8 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 // messageWrite performs the message route against the inbox at dir. It
 // parses and checks the body, decoding and sniffing every new image, before
 // it takes d.inboxMu for the writes. local reports a browser on this machine
-// (localViewer), the only viewer a slash command is held from.
+// (localViewer), the only viewer a slash command, or a text starting with /,
+// is held from.
 func (d *Daemon) messageWrite(dir, replyID string, raw []byte, local bool, now time.Time) (int, any) {
 	var req messageRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
@@ -263,6 +265,13 @@ func (d *Daemon) messageWrite(dir, replyID string, raw []byte, local bool, now t
 	}
 	if req.Command != "" {
 		return d.sendCommand(dir, replyID, req, local, now)
+	}
+	// A hosted backend passes a plain message verbatim, and Pi and hosted
+	// Claude run a leading-slash line as a command, so a LAN viewer's text
+	// starting with / would bypass the command gate. Refused, not escaped:
+	// escaping would change the text the user typed.
+	if !local && strings.HasPrefix(strings.TrimLeftFunc(req.Text, unicode.IsSpace), "/") {
+		return http.StatusForbidden, "a message starting with / runs as a slash command; slash commands run only from a browser on this machine"
 	}
 	d.inboxMu.Lock()
 	defer d.inboxMu.Unlock()

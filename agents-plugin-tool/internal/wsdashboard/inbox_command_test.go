@@ -134,6 +134,26 @@ func TestCommandIsHeldOnlyFromThisMachineAndOnlyWhenListed(t *testing.T) {
 	if rec = serve(f.d, lan, http.MethodPost, "/s/livesession/message", `{"text":"from the phone"}`); rec.Code != http.StatusOK {
 		t.Fatalf("LAN message = %d: %s", rec.Code, rec.Body.String())
 	}
+	// A LAN text starting with / would run as a command on a hosted
+	// backend, so it is refused; a slash later in the line is not.
+	for _, body := range []string{`{"text":"/compact"}`, `{"text":"  /x"}`, `{"text":"\n\t/compact now"}`} {
+		rec = serve(f.d, lan, http.MethodPost, "/s/livesession/message", body)
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "starting with /") {
+			t.Fatalf("LAN %s = %d: %s", body, rec.Code, rec.Body.String())
+		}
+	}
+	if held := f.held(t); len(held) != 2 || held[1].Entry.Text() != "from the phone" {
+		t.Fatalf("held after the LAN slash refusals = %+v", held)
+	}
+	if rec = serve(f.d, lan, http.MethodPost, "/s/livesession/message", `{"text":"see a/b or /tmp"}`); rec.Code != http.StatusOK {
+		t.Fatalf("LAN text with a later slash = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec = serve(f.d, local, http.MethodPost, "/s/livesession/message", `{"text":"/compact"}`); rec.Code != http.StatusOK {
+		t.Fatalf("local /compact text = %d: %s", rec.Code, rec.Body.String())
+	}
+	if held := f.held(t); !strings.Contains(held[len(held)-1].Entry.Text(), "/compact") {
+		t.Fatalf("local /compact text not held: %+v", held)
+	}
 
 	if page := serve(f.d, local, http.MethodGet, "/s/livesession", "").Body.String(); !strings.Contains(page, `<i data-name="compact" data-src="builtin"></i>`) {
 		t.Error("the local page does not carry the command list")

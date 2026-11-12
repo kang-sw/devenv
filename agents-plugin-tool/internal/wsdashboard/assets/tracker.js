@@ -4904,7 +4904,7 @@
   // (wrote -> labelStepRedraw). With no labels in the store it says so, and an admin gets the store
   // settings' label dialog. The edit mode's picker keeps its own draft and save.
   function labelStepHtml(it) {
-    var ls = VS.labels || [], cur = LW && LW.item === it.id ? LW.labels : it.labels || [];
+    var ls = VS.labels || [], cur = LW[it.id] ? LW[it.id].labels : it.labels || [];
     if (!ls.length) return '<p class="mempty">' + wsT("js.tk.labels.empty") + '</p>' + (VS.viewer.admin ? msep() + mi('m-ladd', esc(wsT("js.tk.new.labels.add")), {}, { icon: 'plus' }) : '');
     return '<div class="lpick mlpick" role="group" aria-label="' + esc(wsT("js.tk.form.labels")) + '">' + ls.map(function (l, i) {
       var on = cur.indexOf(l.id) >= 0;
@@ -4920,21 +4920,24 @@
   // it.labels, which lags until the write returns: built on it.labels, a second quick toggle would
   // write a list without the first and undo it. While one write is in flight the next toggles only
   // move the pick (the step draws it) and go as one write of the latest pick once it returns, so the
-  // writes stay in order. A refused write drops the pick, and the step draws the item again.
-  var LW = null;
+  // writes stay in order. A refused write drops the pick, and the step draws the item again. LW
+  // keeps a pick per item id: one shared pick, replaced by a toggle on another item, would drop the
+  // first item's toggles still waiting on its write.
+  var LW = {};
   function labelWrite(it, lid) {
-    if (LW && LW.item === it.id) { LW.labels = labelToggled(LW.labels, lid); LW.dirty = true; return labelStepRedraw(); }
-    LW = { item: it.id, labels: labelToggled(it.labels, lid), dirty: false };
-    labelFlush(LW);
+    var w = LW[it.id];
+    if (w) { w.labels = labelToggled(w.labels, lid); w.dirty = true; return labelStepRedraw(); }
+    w = LW[it.id] = { item: it.id, labels: labelToggled(it.labels, lid), dirty: false };
+    labelFlush(w);
   }
   function labelFlush(w) {
     w.dirty = false;
     commit([['item.edit', { item: w.item, labels: w.labels }]], function () {
-      if (LW !== w) return;
-      if (w.dirty) labelFlush(w); else LW = null;
+      if (LW[w.item] !== w) return;
+      if (w.dirty) labelFlush(w); else delete LW[w.item];
     }, null, function () {
-      if (LW !== w) return;
-      LW = null;
+      if (LW[w.item] !== w) return;
+      delete LW[w.item];
       if (MN && MN.kind === 'item' && MN.step === 'labels') labelStepRedraw();
     });
   }
