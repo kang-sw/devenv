@@ -9,8 +9,9 @@ import (
 // conversation entries, folded into one row. The state accumulates them as
 // the batches finish (toolGap), shows the open gap in the snapshot
 // (Lead.ToolGap), and writes it to the ring as one RingTools entry just
-// before the next conversation entry. No argument or result content enters
-// it: only tool names, counts, clocks, and token counts.
+// before the next conversation entry. It holds tool names, counts, clocks,
+// token counts, and each listed call's argument preview as the batch carried
+// it (already capped at ArgsPreviewCap); no result content enters it.
 //
 // A batch that carries its calls (BatchView.Calls) credits each call to its
 // own tool, so the per-tool counts are exact; calls past BatchCallCap count
@@ -49,6 +50,16 @@ type ToolBatch struct {
 	DurationMs int64 `json:"durationMs,omitempty"`
 	// Usage is the request's tokens, when the adapter reported them.
 	Usage *TokenUsage `json:"usage,omitempty"`
+	// CallArgs, when any call the batch carried had an argument preview, is
+	// every carried call's name and preview in call order (up to
+	// BatchCallCap); absent otherwise, as for an adapter that sends none.
+	CallArgs []ToolCallArgs `json:"callArgs,omitempty"`
+}
+
+// ToolCallArgs is one call's argument preview in a ToolBatch.
+type ToolCallArgs struct {
+	Name        string `json:"name"`
+	ArgsPreview string `json:"argsPreview,omitempty"`
 }
 
 // ToolSummary is the lead's finished tool batches over one gap.
@@ -141,6 +152,11 @@ func (g *toolGap) add(b BatchView) {
 		u := *b.Usage
 		tb.Usage = &u
 	}
+	if slices.ContainsFunc(b.Calls, func(c BatchCall) bool { return c.ArgsPreview != "" }) {
+		for _, c := range b.Calls {
+			tb.CallArgs = append(tb.CallArgs, ToolCallArgs{Name: c.Name, ArgsPreview: c.ArgsPreview})
+		}
+	}
 	g.batches = append(g.batches, tb)
 }
 
@@ -192,6 +208,7 @@ func cloneToolBatches(in []ToolBatch) []ToolBatch {
 	for i, b := range in {
 		b.Names = append([]string(nil), b.Names...)
 		b.Tools = append([]ToolTally(nil), b.Tools...)
+		b.CallArgs = append([]ToolCallArgs(nil), b.CallArgs...)
 		if b.Usage != nil {
 			u := *b.Usage
 			b.Usage = &u

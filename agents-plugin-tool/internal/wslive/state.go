@@ -10,8 +10,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wsredact"
 )
 
 // Event kinds an adapter sends.
@@ -281,7 +283,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		if ev.Clear {
 			act.permission = nil
 		} else {
-			act.permission = &Permission{ToolName: cleanToolName(ev.Tool), ArgsPreview: cleanLine(st.scrub.scrub(flattenArgs(ev.Args)), ArgsPreviewCap), StartedAt: at}
+			act.permission = &Permission{ToolName: cleanToolName(ev.Tool), ArgsPreview: st.argsPreview(flattenArgs(ev.Args)), StartedAt: at}
 		}
 		res.Changed = true
 	case KindReply:
@@ -896,10 +898,11 @@ type batchIn struct {
 
 // callIn is one entry of a batch's calls as an adapter sends it.
 type callIn struct {
-	Name      string `json:"name"`
-	StartedAt int64  `json:"startedAt"`
-	EndedAt   int64  `json:"endedAt"`
-	Failed    bool   `json:"failed"`
+	Name        string `json:"name"`
+	StartedAt   int64  `json:"startedAt"`
+	EndedAt     int64  `json:"endedAt"`
+	Failed      bool   `json:"failed"`
+	ArgsPreview string `json:"argsPreview"`
 }
 
 var epochPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
@@ -969,7 +972,7 @@ func (st *State) normalizeBatch(raw json.RawMessage) (BatchView, bool) {
 			return BatchView{}, false
 		}
 		r.ToolName = cleanToolName(r.ToolName)
-		r.ArgsPreview = cleanLine(st.scrub.scrub(r.ArgsPreview), ArgsPreviewCap)
+		r.ArgsPreview = st.argsPreview(r.ArgsPreview)
 		out.Running = &r
 	default:
 		g := *in.Generating
@@ -993,9 +996,10 @@ func (st *State) normalizeBatch(raw json.RawMessage) (BatchView, bool) {
 }
 
 // normalizeCalls is a finished batch's per-call entries: a malformed entry is
-// dropped, names are scrubbed and capped like toolNames, unknown or
-// inconsistent clocks read 0, and at most BatchCallCap (and never more than
-// the batch's callCount) are kept. nil when none is left.
+// dropped, names are scrubbed and capped like toolNames, argument previews
+// are scrubbed and capped like the running call's, unknown or inconsistent
+// clocks read 0, and at most BatchCallCap (and never more than the batch's
+// callCount) are kept. nil when none is left.
 func (st *State) normalizeCalls(raw []json.RawMessage, callCount int) []BatchCall {
 	var out []BatchCall
 	for _, item := range raw {
@@ -1006,13 +1010,37 @@ func (st *State) normalizeCalls(raw []json.RawMessage, callCount int) []BatchCal
 		if json.Unmarshal(item, &in) != nil || strings.TrimSpace(in.Name) == "" {
 			continue
 		}
-		c := BatchCall{Name: cleanToolName(st.scrub.scrub(in.Name)), StartedAt: max(in.StartedAt, 0), Failed: in.Failed}
+		c := BatchCall{Name: cleanToolName(st.scrub.scrub(in.Name)), StartedAt: max(in.StartedAt, 0), Failed: in.Failed, ArgsPreview: st.argsPreview(in.ArgsPreview)}
 		if in.EndedAt >= c.StartedAt {
 			c.EndedAt = in.EndedAt
 		}
 		out = append(out, c)
 	}
 	return out
+}
+
+// argsPreviewScanBytes bounds the text argsPreview scans: an adapter may
+// send a whole raw argument object, and only its head can reach the
+// ArgsPreviewCap-rune display, so the masking rules never run over more.
+const argsPreviewScanBytes = 4096
+
+// argsPreview is every argument preview the state keeps (a permission
+// wait's, a running call's, a finished call's), whatever adapter sent it:
+// session keys scrubbed (before any cut, so none is cut in half), bounded
+// to its head, credentials masked (wsredact.Secrets, best-effort), then one
+// line capped at ArgsPreviewCap. It is the one place an argument preview
+// enters the state, so a preview is never stored, shown, or written to the
+// ring unmasked.
+func (st *State) argsPreview(s string) string {
+	s = st.scrub.scrub(s)
+	if len(s) > argsPreviewScanBytes {
+		cut := argsPreviewScanBytes
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut]
+	}
+	return cleanLine(wsredact.Secrets(s), ArgsPreviewCap)
 }
 
 // normalizeTokens is a batch's usage: negative counts read 0, and nil when

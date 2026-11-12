@@ -42,8 +42,9 @@
 // step's batch at once (calls start while the step still streams), and the
 // batch ends when the step has ended and every call has. A step with no tool
 // call makes no batch, so its tokens are reported nowhere. A finished batch's
-// view also carries its calls (tool name, start, end, failed; never an
-// argument or a result) and the request's token usage.
+// view also carries its calls (tool name, start, end, failed, and the same
+// capped argument preview the running line shows; never a result) and the
+// request's token usage.
 //
 // Each finished batch reaches ws-mcp at least once: beyond the newest
 // BATCH_CAP, a buffer keeps every finished batch no delivered intake call
@@ -272,8 +273,8 @@ export type BatchView = {
   endedAt?: number
   running?: { toolName: string; argsPreview: string; startedAt: number; done: number; othersRunning: number }
   generating?: { kind: GeneratingKind; phaseStartedAt: number; toolName?: string; chars?: number }
-  /** A finished batch's calls, up to BATCH_CALL_CAP: names and clocks only. */
-  calls?: { name: string; startedAt: number; endedAt?: number; failed: boolean }[]
+  /** A finished batch's calls, up to BATCH_CALL_CAP: names, clocks, and the capped argument preview when there is one. */
+  calls?: { name: string; startedAt: number; endedAt?: number; failed: boolean; argsPreview?: string }[]
   /** A finished batch's request tokens, when the step reported any. */
   usage?: TokenUsage
 }
@@ -449,6 +450,7 @@ export function batchViews(buf: Buffer): BatchView[] {
         startedAt: c.startedAt ?? batch.startedAt,
         ...(c.endedAt !== undefined ? { endedAt: c.endedAt } : {}),
         failed: c.isError === true || c.endedAt === undefined,
+        ...(c.argsPreview !== '' ? { argsPreview: c.argsPreview } : {}),
       }))
       if (batch.usage) view.usage = { ...batch.usage }
       return view

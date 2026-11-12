@@ -35,8 +35,10 @@ session page usable as the primary conversation surface for a lead session:
 - Approving or denying permission prompts from the page: the page shows that
   an approval is waiting; the user handles it in the terminal (user decision,
   2026-11-07: auto mode is the default posture, so manual approvals are rare).
-- Slash commands, skill search, login, and usage management: the user drives
-  the lead in natural language and these are not the dashboard's role.
+- Skill search, login, and usage management: the user drives the lead in
+  natural language and these are not the dashboard's role. Slash commands
+  were in this list until the user brought them back into scope on
+  2026-11-12 (`261112-feat-ws-dashboard-slash-commands`).
   Read-only usage display in the status band is in scope (user, 2026-11-07,
   `261107-feat-ws-dashboard-status-band`).
 
@@ -60,6 +62,8 @@ session page usable as the primary conversation surface for a lead session:
 - `261107-feat-ws-dashboard-interrupt-badge` - a red interrupt badge on the
   conversation/composer border stops the lead's running turn; held messages
   return to the composer.
+- `261112-feat-ws-dashboard-slash-commands` - the composer runs the
+  harness's slash commands through a `/` picker.
 - Related, not a child: `261107-feat-ws-whiteboard-now-markdown` - the Now
   slot takes markdown with inline HTML (affects disk boards too).
 - Done as bounded delegates, no ticket (2026-11-07): the composer buttons and
@@ -78,6 +82,9 @@ session page usable as the primary conversation surface for a lead session:
   The interrupt badge is the third: both adapters abort the main turn on an
   interrupt inbox entry and hold that turn's end-of-turn submits (user,
   2026-11-07, board (255), (257), (258), (265)).
+  Slash commands are the fourth: the composer sends a command as its own
+  inbox entry and each adapter runs it natively (user, 2026-11-12, board
+  (430)-(436), `261112-feat-ws-dashboard-slash-commands`).
 - The page keeps showing a waiting approval (conversation and agents tree)
   after any layout change.
 

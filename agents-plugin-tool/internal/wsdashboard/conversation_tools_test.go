@@ -46,7 +46,7 @@ func TestToolsEntryRendersACollapsedSummaryRow(t *testing.T) {
 		`1m 15s`,
 		`<li class="brow done">`,
 		`<li class="brow fail">`,
-		`6 calls · 1 failed`,
+		`<span title="6 calls">×6</span> · <span class="bf" title="1 failed">✗1</span>`,
 		`+3 more batches`,
 	} {
 		// Table text is escaped as text ("+" is &#43;); compare what a reader sees.
@@ -103,11 +103,11 @@ func TestOpenGapShowsALiveToolsRow(t *testing.T) {
 }
 
 // TestExactToolsRowShowsTokensDurationsAndRepeats pins the per-call render:
-// the row head adds the gap's request count and token totals, and each
-// batch line (one request, so no count) shows its
-// tools as chips with xN for repeats, then its duration, failed count, and
-// the request's tokens instead of a bare call count. A batch without
-// per-call data still leads with its call count.
+// the row head adds the gap's request count and token totals (labelled), and
+// each batch line (one request, so no count) shows its tools as chips with
+// xN for repeats, then its duration, failed count, and the request's tokens
+// as bare numbers, each in its own span whose title names it with the exact
+// value. A batch without per-call data still leads with its call count.
 func TestExactToolsRowShowsTokensDurationsAndRepeats(t *testing.T) {
 	summary := &wslive.ToolSummary{
 		Calls: 6, Failed: 1, DurationMs: 4_000,
@@ -129,8 +129,8 @@ func TestExactToolsRowShowsTokensDurationsAndRepeats(t *testing.T) {
 		`<span class="ttok" title="2 model calls · prompt 222,700 (12,300 input · 210,400 cache read · 0 cache write) · output 1,100">2 calls · prompt 223k · output 1.1k</span>`,
 		`Read<b class="x">×3</b></span>`,
 		`<span class="tool" title="Bash">Bash</span>`,
-		`title="prompt 214,612 (12 input · 210,400 cache read · 4,200 cache write) · output 1,100">1.2s · 1 failed · prompt 215k &#43;4.2k · output 1.1k</span>`,
-		`>2 calls · &lt;0.1s</span>`,
+		`<span class="bm"><span title="duration 1,234 ms">1.2s</span> · <span class="bf" title="1 failed">✗1</span> · <span title="prompt 214,612 (12 input · 210,400 cache read · 4,200 cache write)">215k</span> <span title="4,200 cache write">&#43;4.2k</span> · <span title="output 1,100">1.1k</span></span>`,
+		`<span class="bm"><span title="2 calls">×2</span> · <span title="duration 40 ms">&lt;0.1s</span></span>`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("exact tools row lacks %q:\n%s", want, html)
@@ -138,6 +138,44 @@ func TestExactToolsRowShowsTokensDurationsAndRepeats(t *testing.T) {
 	}
 	if strings.Contains(html, `>1 call`) || strings.Contains(html, `4 calls`) {
 		t.Errorf("an exact batch line still shows a bare call count:\n%s", html)
+	}
+}
+
+// TestBatchRowsShowArgs pins the argument previews on batch rows: a one-call
+// batch shows its call's preview right after the tool name, with the full
+// preview as its title; a batch of several calls keeps its chips and lists
+// every call's name and preview in its title instead (the chips drop their
+// own titles so that list shows); a batch without previews (an older entry,
+// or an adapter that sends none) renders exactly as before.
+func TestBatchRowsShowArgs(t *testing.T) {
+	long := strings.Repeat("z", 190)
+	summary := &wslive.ToolSummary{
+		Calls: 6,
+		Batches: []wslive.ToolBatch{
+			{Names: []string{"Read"}, Tools: []wslive.ToolTally{{Name: "Read", Calls: 1}}, Calls: 1, DurationMs: 600,
+				CallArgs: []wslive.ToolCallArgs{{Name: "Read", ArgsPreview: "file_path: /a/" + long}}},
+			{Names: []string{"Bash", "mcp__plugin_ws_ws__note_write"}, Tools: []wslive.ToolTally{{Name: "Bash", Calls: 2}, {Name: "mcp__plugin_ws_ws__note_write", Calls: 1}}, Calls: 3,
+				CallArgs: []wslive.ToolCallArgs{{Name: "Bash", ArgsPreview: "command: ls"}, {Name: "Bash"}, {Name: "mcp__plugin_ws_ws__note_write", ArgsPreview: "layer: repo"}}},
+			{Names: []string{"Grep"}, Tools: []wslive.ToolTally{{Name: "Grep", Calls: 2}}, Calls: 2},
+		},
+	}
+	ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: wslive.RingTools, Tools: summary})}
+	set, err := renderSessionRegions(historyView(ring, "", PageContent{}, sessionLookup{}), newEntryCache())
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(set[regionEntries].HTML)
+	for _, want := range []string{
+		`<span class="bp one"><span class="tool" title="Read">Read</span><span class="ba" title="file_path: /a/` + long + `">file_path: /a/` + long + `</span></span>`,
+		"<span class=\"bp\" title=\"Bash command: ls\nBash\nnote_write layer: repo\">" + `<span class="tool">Bash<b class="x">×2</b></span><span class="tool">note_write</span></span>`,
+		`<span class="bp"><span class="tool" title="Grep">Grep<b class="x">×2</b></span></span>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("args rows lack %q:\n%s", want, html)
+		}
+	}
+	if strings.Count(html, `class="ba"`) != 1 {
+		t.Errorf("only the one-call batch shows args inline:\n%s", html)
 	}
 }
 

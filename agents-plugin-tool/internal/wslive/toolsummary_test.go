@@ -260,6 +260,53 @@ func TestToolsRowIsExactWithPerCallData(t *testing.T) {
 	}
 }
 
+// TestCallArgsReachTheRingEntry pins the argument preview's path: each
+// call's argsPreview travels from the intake's calls entry to its summary
+// batch and the ring entry, in call order and with every carried call
+// listed, scrubbed of session keys and capped at ArgsPreviewCap like the
+// running call's preview; a batch whose calls carry none (an adapter that
+// sends no args) gets no CallArgs, so it renders as before.
+func TestCallArgsReachTheRingEntry(t *testing.T) {
+	st := NewState(ownerKey)
+	withArgs := func(c map[string]any, args string) map[string]any {
+		c["argsPreview"] = args
+		return c
+	}
+	long := strings.Repeat("y", ArgsPreviewCap)
+	b1 := withCalls(finishedAt(1, 100, 200, 3, 0, "Read", "Bash"),
+		withArgs(call("Read", 100, 150, false), "file_path: /a.go"),
+		call("Read", 100, 160, false),
+		withArgs(call("Bash", 100, 200, false), "command: echo "+ownerKey+" \n  "+long))
+	b2 := withCalls(finishedAt(2, 300, 400, 1, 0, "Grep"), call("Grep", 300, 400, false))
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, b1, b2)}, 500)
+	res := mustApply(t, st, Event{Kind: KindReply, Final: true, Text: "done"}, 600)
+	if len(res.Ring) != 2 || res.Ring[0].Kind != RingTools {
+		t.Fatalf("ring = %+v", res.Ring)
+	}
+	batches := res.Ring[0].Tools.Batches
+	args := batches[0].CallArgs
+	if len(args) != 3 || args[0] != (ToolCallArgs{Name: "Read", ArgsPreview: "file_path: /a.go"}) || args[1] != (ToolCallArgs{Name: "Read"}) || args[2].Name != "Bash" {
+		t.Fatalf("call args = %+v", args)
+	}
+	bash := args[2].ArgsPreview
+	if strings.Contains(bash, ownerKey) || strings.Contains(bash, "\n") || strings.Contains(bash, "  ") || len([]rune(bash)) != ArgsPreviewCap || !strings.HasPrefix(bash, "command: echo ") {
+		t.Fatalf("bash preview not scrubbed and capped: %q (%d runes)", bash, len([]rune(bash)))
+	}
+	if batches[1].CallArgs != nil {
+		t.Fatalf("a batch without args carries CallArgs: %+v", batches[1].CallArgs)
+	}
+	if res.Ring[0].Tools.Calls != 4 || res.Ring[0].Tools.Tools[0] != (ToolTally{Name: "Read", Calls: 2}) {
+		t.Fatalf("counts changed: %+v", res.Ring[0].Tools)
+	}
+	dir := t.TempDir()
+	if err := AppendRing(dir, res.Ring[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if recs, err := ReadRing(dir); err != nil || !reflect.DeepEqual(recs[0].Tools, res.Ring[0].Tools) {
+		t.Fatalf("read back %+v err %v", recs, err)
+	}
+}
+
 // TestBatchCallsAndUsageAreBounded pins normalization of the new fields: at
 // most BatchCallCap calls (never more than callCount), a malformed call or
 // usage is dropped without the batch, names are scrubbed of session keys and
@@ -364,5 +411,34 @@ func TestToolsRowTreatsAZeroStartAsUnknown(t *testing.T) {
 	res := mustApply(t, st, Event{Kind: KindUser, Text: "x"}, 40)
 	if got := res.Ring[0].Tools.DurationMs; got != 5_000_000-1000 {
 		t.Fatalf("persisted duration = %d", got)
+	}
+}
+
+// TestEveryArgsPreviewIsMasked pins the one choke point: a permission
+// wait's, a running call's, and a finished call's argument preview all
+// leave the state with their credentials masked (wsredact.Secrets), from a
+// flattened argument object as from a preview string an adapter built, and
+// a credential past the scan bound never reaches the capped preview.
+func TestEveryArgsPreviewIsMasked(t *testing.T) {
+	const secret = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+	st := NewState(ownerKey)
+	mustApply(t, st, Event{Kind: KindTurnStart, At: 1}, 1)
+	mustApply(t, st, Event{Kind: KindPermission, Tool: "Bash", Args: map[string]any{"command": "curl -H 'Authorization: Bearer abc' x", "env": "TOKEN=" + secret}}, 2)
+	if p := st.Snapshot(3).Lead.Permission; p == nil || strings.Contains(p.ArgsPreview, secret) || strings.Contains(p.ArgsPreview, "Bearer abc") || !strings.Contains(p.ArgsPreview, "Bearer ***") {
+		t.Fatalf("permission preview = %+v", p)
+	}
+	mustApply(t, st, Event{Kind: KindPermission, Clear: true}, 4)
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, running(1, 1, 0, "Bash", "command: git push https://u:"+secret+"@host/r"))}, 5)
+	if r := st.Snapshot(6).Lead.Batches[0].Running; r == nil || r.ArgsPreview != "command: git push https://***@host/r" {
+		t.Fatalf("running preview = %+v", r)
+	}
+	head := strings.Repeat("a ", 3000)
+	done := withCalls(finishedAt(1, 10, 20, 2, 0, "Bash"),
+		map[string]any{"name": "Bash", "startedAt": 10, "endedAt": 20, "argsPreview": "password=hunter2 ./deploy"},
+		map[string]any{"name": "Bash", "startedAt": 10, "endedAt": 20, "argsPreview": head + secret})
+	mustApply(t, st, Event{Kind: KindAgent, Batches: batchesJSON(t, done)}, 30)
+	args := st.Snapshot(31).Lead.ToolGap.Batches[0].CallArgs
+	if len(args) != 2 || args[0].ArgsPreview != "password=*** ./deploy" || strings.Contains(args[1].ArgsPreview, "ghp_") {
+		t.Fatalf("finished call args = %+v", args)
 	}
 }
