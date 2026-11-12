@@ -92,8 +92,11 @@ type leadReplay struct {
 	st      *wslive.State
 	clock   int64
 	replies *recordedReplies
-	ring    []wslive.RingEntry
-	events  []Event
+	// asks are the get_context_usage requests the mapper sent, kept out of
+	// replies so those hold its answers alone.
+	asks   []map[string]any
+	ring   []wslive.RingEntry
+	events []Event
 
 	turn bool
 	// opened names what opened each turn: "send", or the type (a system
@@ -144,7 +147,7 @@ func (r *leadReplay) line(l leadLine) []Event {
 	if kind == "system" {
 		kind = l.field("subtype")
 	}
-	evs := r.m.mapLine(l.raw, r.replies)
+	evs := r.m.mapLine(l.raw, askSplitter{r.replies, &r.asks})
 	for _, ev := range evs {
 		r.events = append(r.events, ev)
 		switch {
@@ -189,6 +192,22 @@ func (r *leadReplay) line(l leadLine) []Event {
 		}
 	}
 	return evs
+}
+
+// askSplitter records a mapper's get_context_usage requests apart from
+// everything else it sends.
+type askSplitter struct {
+	*recordedReplies
+	asks *[]map[string]any
+}
+
+func (s askSplitter) send(v any) {
+	s.recordedReplies.send(v)
+	last := s.recordedReplies.sent[len(s.recordedReplies.sent)-1]
+	if id, _ := last["request_id"].(string); strings.HasPrefix(id, claudeContextAsk) {
+		s.recordedReplies.sent = s.recordedReplies.sent[:len(s.recordedReplies.sent)-1]
+		*s.asks = append(*s.asks, last)
+	}
 }
 
 func (r *leadReplay) all(lines []leadLine) {
@@ -377,6 +396,22 @@ func TestClaudeLeadApprovalDenyAndSessionState(t *testing.T) {
 	if len(r.replies.sent) != 0 || len(r.turnErrs) != 0 {
 		t.Fatalf("the mapper sent %v, turn errors %v", r.replies.sent, r.turnErrs)
 	}
+	// The recording answered no get_context_usage, so each turn's init
+	// asked for the compaction window again.
+	if inits := countLines(lines, func(l leadLine) bool { return !l.in && l.field("subtype") == "init" }); inits == 0 || len(r.asks) != inits {
+		t.Fatalf("context asks = %v, want one per init (%d)", r.asks, inits)
+	}
+}
+
+// countLines counts the fixture lines match holds for.
+func countLines(lines []leadLine, match func(leadLine) bool) int {
+	n := 0
+	for _, l := range lines {
+		if match(l) {
+			n++
+		}
+	}
+	return n
 }
 
 // TestClaudeLeadHeldSendFlushesAtIdle: a message sent during a turn is

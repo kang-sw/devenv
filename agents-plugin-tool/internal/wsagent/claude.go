@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -227,6 +228,7 @@ func claudeMCPToolName(server, tool string) string {
 // claudeInit is the part of the system/init message the init check reads.
 type claudeInit struct {
 	SessionID      string   `json:"session_id"`
+	Model          string   `json:"model"`
 	Tools          []string `json:"tools"`
 	PermissionMode string   `json:"permissionMode"`
 	MCPServers     []struct {
@@ -489,7 +491,20 @@ type claudeMapper struct {
 	context *wslive.UsageContext
 	limits  map[string]wslive.UsageLimit
 	cost    *wslive.UsageCost
-	window  int64
+	// window is the largest modelUsage.contextWindow a result reported: the
+	// model's window, the fallback for compactWindow.
+	window int64
+	// model is the model the lead's last init named. compactWindow is the
+	// window the harness compacts against (get_context_usage's
+	// rawMaxTokens, which honours CLAUDE_CODE_AUTO_COMPACT_WINDOW), as
+	// answered for compactModel; it counts only while that is model.
+	// askModel is the model the last ask was sent under, and asks numbers
+	// them.
+	model         string
+	compactWindow int64
+	compactModel  string
+	askModel      string
+	asks          int
 
 	// compacted is set from a compact_boundary to the next result: the
 	// stream re-emits the last assistant message in between, with no replay
@@ -672,6 +687,9 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 	switch l.Type {
 	case "control_response":
 		replies.answer(l.Response.RequestID, controlAnswer{ok: l.Response.Subtype == "success", err: l.Response.Error, body: l.Response.Response})
+		if strings.HasPrefix(l.Response.RequestID, claudeContextAsk) {
+			return m.contextUsage(l)
+		}
 	case "control_request":
 		if m.lead() {
 			return m.approval(l, now, replies)
@@ -710,7 +728,7 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 				return []Event{{Fatal: errors.New("launch refused: unreadable claude init message")}}
 			}
 			if m.lead() {
-				return m.leadInit(init)
+				return m.leadInit(init, replies)
 			}
 			if err := checkClaudeInit(init, m.spec); err != nil {
 				return []Event{{Fatal: err}}
@@ -902,8 +920,12 @@ func (m *claudeMapper) closeTurn(now int64) []Event {
 
 // leadInit maps a lead's init message, which every user turn brings: the
 // session id, the turn's start, the permission mode the harness reports
-// (it may differ from the one asked for), and its MCP servers' status.
-func (m *claudeMapper) leadInit(init claudeInit) []Event {
+// (it may differ from the one asked for), and its MCP servers' status. It
+// also asks for the compaction window when none is known for the init's
+// model (askContextUsage).
+func (m *claudeMapper) leadInit(init claudeInit, replies lineReplies) []Event {
+	m.model = init.Model
+	m.askContextUsage(replies)
 	var out []Event
 	if init.SessionID != "" {
 		out = append(out, Event{SessionID: init.SessionID})
@@ -920,6 +942,45 @@ func (m *claudeMapper) leadInit(init claudeInit) []Event {
 		out = append(out, Event{MCPServers: servers})
 	}
 	return out
+}
+
+// claudeContextAsk prefixes the request id of a get_context_usage ask the
+// mapper sends; its answer is told from other control responses by it, also
+// when replayed under a later mapper whose ask count differs.
+const claudeContextAsk = "ws-context-"
+
+// askContextUsage asks the harness for its context usage (Claude Code's
+// get_context_usage control, answered in print mode without a model turn,
+// seen on 2.1.322) unless a compaction window is known for the current
+// model. A set_model applies from the next turn, whose init names the new
+// model, so a model change asks again; an unanswered or refused ask is
+// repeated at the next init. A compaction does not change the window and
+// asks nothing.
+func (m *claudeMapper) askContextUsage(replies lineReplies) {
+	if m.compactWindow > 0 && m.compactModel == m.model {
+		return
+	}
+	m.asks++
+	m.askModel = m.model
+	replies.send(claudeProtocol{}.requestLine(claudeContextAsk+strconv.Itoa(m.asks), map[string]any{"subtype": "get_context_usage"}))
+}
+
+// contextUsage reads a get_context_usage answer's compaction window
+// (rawMaxTokens, the figure the terminal band shows) and reports the new
+// window when a context figure is already shown.
+func (m *claudeMapper) contextUsage(l claudeLine) []Event {
+	var d struct {
+		RawMaxTokens int64 `json:"rawMaxTokens"`
+	}
+	if l.Response.Subtype != "success" || json.Unmarshal(l.Response.Response, &d) != nil || d.RawMaxTokens <= 0 {
+		return nil
+	}
+	changed := d.RawMaxTokens != m.compactWindow || m.askModel != m.compactModel
+	m.compactWindow, m.compactModel = d.RawMaxTokens, m.askModel
+	if !changed || m.context == nil {
+		return nil
+	}
+	return []Event{m.status()}
 }
 
 // claudeCanUseTool is a can_use_tool control request's body.
@@ -1015,22 +1076,30 @@ func claudeTaskEnd(status string) string {
 }
 
 // assistant maps the lead's assistant message: its text (left out when
-// alerted, since the alert's line carries it) and its tool calls.
+// alerted, since the alert's line carries it) and its tool calls. A lead's
+// message whose usage changes the context figure reports it (a status) at
+// once, so the meter follows each model call rather than the turn's end; a
+// message is often split over several lines carrying the same usage, and
+// those report it once.
 func (m *claudeMapper) assistant(raw json.RawMessage, now int64, alerted bool) []Event {
 	var msg claudeMessage
 	if json.Unmarshal(raw, &msg) != nil {
 		return nil
 	}
+	var out []Event
 	if msg.Usage != nil && !alerted {
 		// An alert's message is the harness's own, with no real usage.
 		tokens := msg.Usage.InputTokens + msg.Usage.CacheReadInputTokens + msg.Usage.CacheCreationInputTokens + msg.Usage.OutputTokens
+		changed := m.context == nil || m.context.Tokens == nil || *m.context.Tokens != tokens
 		m.context = &wslive.UsageContext{Tokens: &tokens}
+		if changed && m.lead() {
+			out = append(out, m.status())
+		}
 	}
 	var blocks []claudeBlock
 	if json.Unmarshal(msg.Content, &blocks) != nil {
-		return nil
+		return out
 	}
-	var out []Event
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
@@ -1086,6 +1155,9 @@ func (m *claudeMapper) status() Event {
 	if m.context != nil {
 		c := *m.context
 		c.Window = m.window
+		if m.compactWindow > 0 && m.compactModel == m.model {
+			c.Window = m.compactWindow
+		}
 		ev.Context = &c
 	}
 	for _, kind := range []string{wslive.LimitFiveHour, wslive.LimitSevenDay} {

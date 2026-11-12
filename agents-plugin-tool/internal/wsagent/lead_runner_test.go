@@ -21,11 +21,15 @@ func specEnv(spec wsholder.SpawnSpec, name string) (string, bool) {
 }
 
 // controls are the request bodies of the control requests written to the
-// holder's child, oldest first.
+// holder's child, oldest first, without the get_context_usage asks the
+// mapper sends at a turn's init on its own.
 func (h *leadHarness) controls(holder string) []any {
 	var out []any
 	for _, line := range h.holders.inputs(holder, "control_request") {
-		_, request := controlRequest(h.t, []byte(line))
+		id, request := controlRequest(h.t, []byte(line))
+		if strings.HasPrefix(id, claudeContextAsk) {
+			continue
+		}
 		out = append(out, request)
 	}
 	return out

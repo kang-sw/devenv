@@ -96,7 +96,7 @@ func (h *leadHarness) untouched(id, holder, after string) {
 	if n := len(h.runner.List()); n != 1 {
 		h.t.Fatalf("%s: %d conversations", after, n)
 	}
-	if h.holders.opCount("stop") != 0 || h.holders.opCount("launch") != 1 || len(h.holders.inputs(holder, "control_response")) != 0 || len(h.holders.inputs(holder, "control_request")) != 0 {
+	if h.holders.opCount("stop") != 0 || h.holders.opCount("launch") != 1 || len(h.holders.inputs(holder, "control_response")) != 0 || len(h.controls(holder)) != 0 {
 		h.t.Fatalf("%s: the process was reached: holder calls %v, input %q", after, h.holders.opList(), h.holders.inputs(holder, ""))
 	}
 }
@@ -156,8 +156,8 @@ func TestLeadControlRoutesTakeTheTrustedGate(t *testing.T) {
 	if r.status != http.StatusOK || !strings.Contains(r.body, "from the other room") {
 		t.Fatalf("interrupt from another device = %d %s", r.status, r.body)
 	}
-	if got := h.holders.inputs(holder, "control_request"); len(got) != 1 || !strings.Contains(got[0], `"interrupt"`) {
-		t.Fatalf("the interrupt should reach the process: %q", got)
+	if got := h.controls(holder); len(got) != 1 || got[0].(map[string]any)["subtype"] != "interrupt" {
+		t.Fatalf("the interrupt should reach the process: %v", got)
 	}
 
 	// A trusted viewer's writes reach the process.
