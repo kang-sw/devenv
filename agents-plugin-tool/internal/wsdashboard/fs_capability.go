@@ -46,9 +46,16 @@ import (
 //     explorer's "change root" picked (the preview route shows such a
 //     file's source instead);
 //   - it never reads a file whose path from the root has a dot-named
-//     segment (.env, .git/, .ssh/) or that git reports ignored, where
-//     secrets usually live (capDenied); the preview route mints none for
-//     such a file and shows its source instead.
+//     segment (.env, .git/, .ssh/), where secrets usually live, and, for a
+//     viewer other than a browser on this machine (localViewer), a file
+//     git reports ignored either (framedDenied); the preview route mints
+//     none for such a file and shows its source instead. A browser on this machine
+//     already reads every file of the root through the explorer, and a
+//     paged document or a build output usually sits in an ignored folder,
+//     so the ignore rule guards only a LAN viewer. The sandboxed frame's
+//     own requests come from the same browser to the same Host (the
+//     capability URL is a path, resolved against the session page's
+//     origin), so they keep the local answer the page got.
 //
 // Every response carries a Content-Security-Policy that:
 //
@@ -209,7 +216,8 @@ func (d *Daemon) mintFSCapability(replyID, root string) string {
 // mintCapability mints a capability for the route part, the session
 // replyID, and its project root root; empty when the daemon has no key. A
 // capability verifies on its own route only, so a preview's capability
-// cannot read a file git ignores, which the page route serves.
+// cannot read, for a LAN viewer, a file git ignores, which the page route
+// serves.
 func (d *Daemon) mintCapability(part, replyID, root string) string {
 	key := d.fsCapKey()
 	if key == nil {
@@ -368,7 +376,7 @@ func (d *Daemon) handleFSCapability(w http.ResponseWriter, r *http.Request, repl
 		return
 	}
 	defer f.Close()
-	if (view && dotDenied(s.Project, rel)) || (!view && capDenied(s.Project, rel)) {
+	if (view && dotDenied(s.Project, rel)) || (!view && framedDenied(r, s.Project, rel)) {
 		fsNotFound(w)
 		return
 	}
@@ -417,8 +425,19 @@ func (d *Daemon) serveCapabilityFile(w http.ResponseWriter, r *http.Request, f i
 	http.ServeContent(w, r, "", info.ModTime(), content)
 }
 
+// framedDenied reports a file inside root, at rel, that the capability
+// route refuses for r: one dotDenied refuses for a browser on this machine
+// (localViewer), and one capDenied refuses for any other viewer (see the
+// file comment).
+func framedDenied(r *http.Request, root, rel string) bool {
+	if localViewer(r) {
+		return dotDenied(root, rel)
+	}
+	return capDenied(root, rel)
+}
+
 // capDenied reports a file inside root, at rel, that the capability route
-// still refuses: one dotDenied refuses, or one git reports ignored. The
+// refuses for a LAN viewer: one dotDenied refuses, or one git reports ignored. The
 // whole root stays the read scope, so a document's assets in a parent
 // folder load, but a framed document cannot load a secret from where
 // secrets usually live, even as a script or a style sheet. It fails closed: when the ignore check fails
