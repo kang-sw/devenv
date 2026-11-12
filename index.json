@@ -440,7 +440,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-12T14:15:41Z"
+        "touched_at": "2026-11-12T14:16:17Z",
+        "impl": {
+          "branch": "impl/develop/prune-plow-bony"
+        }
       }
     },
     "261112-feat-ws-whiteboard-refuse-sibling-open-tag-in-field-body": {
