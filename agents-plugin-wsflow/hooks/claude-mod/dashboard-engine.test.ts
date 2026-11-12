@@ -1,6 +1,6 @@
 import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
-import { acceptedKinds, ADAPTER, INBOX_DRAIN_TOOL, INTAKE_TOOL, labelWhiteboard, statusFigures, type DashboardEvent } from './dashboard'
+import { acceptedKinds, ADAPTER, FLUSH_INTERVAL_MS, INBOX_DRAIN_TOOL, INTAKE_TOOL, labelWhiteboard, statusFigures, type DashboardEvent } from './dashboard'
 import { CONTINUATION_WINDOW_MS, SETTLE_MS } from './compaction'
 import { intakeResult, KNOB } from './register'
 import { resumeText } from './timing'
@@ -245,7 +245,7 @@ async function start($: Engine, w: World) {
 }
 
 /** Lets the feed's flush timer fire and its call settle; the mailbox wait child stays pending. */
-const flush = (w: World) => w.clock.advance(200)
+const flush = (w: World) => w.clock.advance(FLUSH_INTERVAL_MS + 100)
 
 const sent = (w: World) => w.intakes.flatMap((c) => c.events)
 const kinds = (w: World) => sent(w).map((e) => e.kind)

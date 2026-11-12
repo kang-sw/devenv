@@ -93,15 +93,20 @@ export const INTAKE_TOOL = 'dashboard_intake'
 export const INBOX_DRAIN_TOOL = 'dashboard_inbox_drain'
 /** The adapter name the intake records. */
 export const ADAPTER = 'claude'
-/** Minimum gap between two intake calls: at most ten a second. */
-export const FLUSH_INTERVAL_MS = 100
+/**
+ * Minimum gap between two intake calls: at most one a second. Each call is an
+ * MCP call from the mod, which Claude Code's tool hooks can observe, so a
+ * tighter cadence fires them that much more often.
+ */
+export const FLUSH_INTERVAL_MS = 1000
 /**
  * Minimum gap between two intake calls while the only pending change is
- * streamed reply text: at most one a second. Ten calls a second while a reply
- * streams made the terminal flicker; a discrete change keeps FLUSH_INTERVAL_MS
- * and takes the waiting text with it.
+ * streamed reply text: at most one every two seconds. Streamed text made the
+ * terminal flicker at a fast cadence, so it stays slower than discrete
+ * changes; a discrete change keeps FLUSH_INTERVAL_MS and takes the waiting
+ * text with it.
  */
-export const TEXT_FLUSH_INTERVAL_MS = 1000
+export const TEXT_FLUSH_INTERVAL_MS = 2000
 /** A call still unanswered after this is abandoned, so a hung server cannot stop the feed. */
 export const CALL_TIMEOUT_MS = 5000
 /** Wait after a call that was not delivered before the next one. */
