@@ -246,7 +246,7 @@ func (d *Daemon) handleWorkspaceForget(w http.ResponseWriter, r *http.Request) {
 
 // railRepository is the repository workspace path names when the rail shows
 // one there: a stored repository, or the repository of a listed session.
-func (d *Daemon) railRepository(path string, now time.Time) (string, bool) {
+func (d *Daemon) railRepository(path string) (string, bool) {
 	if path == "" || !filepath.IsAbs(path) {
 		return "", false
 	}
@@ -285,7 +285,7 @@ func (d *Daemon) handleWorktreeOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	root, ok := d.railRepository(req.Workspace, now)
+	root, ok := d.railRepository(req.Workspace)
 	if !ok {
 		http.Error(w, "unknown workspace", http.StatusNotFound)
 		return
@@ -349,7 +349,7 @@ func (d *Daemon) handleWorktreeAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	lang, _ := requestLang(r)
 	now := time.Now()
-	root, ok := d.railRepository(req.Workspace, now)
+	root, ok := d.railRepository(req.Workspace)
 	if !ok {
 		http.Error(w, "unknown workspace", http.StatusNotFound)
 		return

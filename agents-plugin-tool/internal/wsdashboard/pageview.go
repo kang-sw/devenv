@@ -54,8 +54,12 @@ type SessionView struct {
 	// Hosted marks a lead session the daemon spawned and feeds
 	// (Registration.Hosted): the page answers its tool approvals and
 	// carries its process controls.
-	Hosted  bool
-	Version string
+	Hosted bool
+	// HandedOff marks a lead session the daemon hosted and handed to a
+	// terminal, while no terminal runs it: the page reads the command that
+	// resumes it there from the session's agent state.
+	HandedOff bool
+	Version   string
 	// Lang is the page language (wsi18n); empty renders the default. LangPref
 	// is the language the browser chose in the gear menu, empty when it
 	// follows the browser. Both are set per request, never by the builders.
@@ -379,6 +383,9 @@ type pageInputs struct {
 	AttachDir string
 	Now       time.Time
 	Version   string
+	// HandedOff reports that the session's agent record is a lead's that
+	// was handed to a terminal.
+	HandedOff bool
 	// Lookup resolves the other sessions this daemon serves that the view
 	// names.
 	Lookup sessionLookup
@@ -424,6 +431,7 @@ func buildSessionView(in pageInputs) SessionView {
 		Live:        reg.Live(in.Now),
 		Adapter:     adapterPresent(in.Snapshot, in.Now),
 		Hosted:      reg.Hosted,
+		HandedOff:   in.HandedOff && !reg.Hosted && !reg.Live(in.Now),
 		Version:     in.Version,
 		HasBoard:    in.Page.HasBoard,
 		Seq:         in.Page.Seq,

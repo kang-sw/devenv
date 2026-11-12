@@ -1102,3 +1102,39 @@ func TestAgentRowStats(t *testing.T) {
 		t.Errorf("dashboard.js lacks the stats hover card")
 	}
 }
+
+// TestHandedOffSessionMark: the page of a lead session the daemon handed to
+// a terminal carries the handed mark on <html> (the page script then reads
+// the resume command), only while no terminal runs the session and the
+// daemon does not host it again.
+func TestHandedOffSessionMark(t *testing.T) {
+	now := testNow
+	ended := liveSession("handed", "/a", now)
+	ended.EndedAt = stampFor(now)
+	ended.Live = false
+	resumed := liveSession("resumed", "/a", now)
+	retaken := ended
+	retaken.ReplyID, retaken.Hosted = "retaken", true
+	mark := func(s Session, handedOff bool) bool {
+		t.Helper()
+		v := buildSessionView(pageInputs{Session: s, Now: now, HandedOff: handedOff, Lookup: lookupOf(nil, nil)})
+		regions, err := renderSessionRegions(v, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		html, err := renderSessionPage(v, regions, true, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(html, ` data-handed="1"`); got != v.HandedOff {
+			t.Errorf("%s: page mark = %v, view = %v", s.ReplyID, got, v.HandedOff)
+		}
+		return v.HandedOff
+	}
+	if !mark(ended, true) {
+		t.Error("a handed-off session no terminal runs lacks the mark")
+	}
+	if mark(ended, false) || mark(resumed, true) || mark(retaken, true) {
+		t.Error("the mark shows without a handed-off record, on a session a terminal runs, or on a hosted one")
+	}
+}

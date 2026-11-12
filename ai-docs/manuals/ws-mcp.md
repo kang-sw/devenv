@@ -586,7 +586,10 @@ conversation:
     carries `resume_command` (`cd <dir> && claude --resume <id>`, or
     `cd <dir> && pi --session <file>`), which is answered to a viewer with
     `can_control` only. It is refused (409) for a session with no harness
-    conversation yet, and fails when the process could not be ended.
+    conversation yet, and fails when the process could not be ended. The
+    session's page carries `data-handed` while the row is an ended
+    terminal row and the record is handed off, and then reads the command
+    from `GET /agents/<id>`.
   - `POST /agents/<id>/reopen` opens a closed hosted session again under
     its key, conversation, and settings. It is refused (409) once the
     session's row is a terminal's, and for a handed-off record; such a
