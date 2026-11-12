@@ -23,6 +23,12 @@ import (
 // id, and collects each finished turn from a completion mail the daemon
 // posts to its reply-id queue (PiTurnReporter), with pi.wait as the
 // fallback. The live feed of the session's agents panel is pi_live.go.
+//
+// A Pi subagent's own attached ws-mcp has no runner: on the capability
+// token and the daemon endpoint the runner put in its environment
+// (wsagent.EnvPiToken, wsagent.EnvPiEndpoint), it forwards each pi.* call
+// to the runner's token route, which spawns and steers that subagent's own
+// children and delivers their reports into it (pi_forward.go).
 
 // PiAgents is the dashboard daemon's agent runner as the pi.* tools use it
 // (*wsagent.Runner).
@@ -61,7 +67,7 @@ const piTranscriptDefault = 40
 
 // piHarness is the agents.tier harness bucket pi.spawn resolves its tier
 // from, alone.
-const piHarness = "pi"
+const piHarness = wsagent.PiTierHarness
 
 // piProbe runs `pi --version` (a test seam); piVersion caches its answer
 // for the process: every server the daemon hosts shares one probe.
@@ -110,20 +116,18 @@ func isPiTool(name string) bool { return strings.HasPrefix(name, "pi.") }
 // piUnavailable is why the pi.* tools cannot run in this server, nil when
 // they can: no daemon runner, the knob off, or no usable Pi.
 func (s *Server) piUnavailable() error {
+	if s.piForwards() {
+		// The knob passed at the spawn tree's root; the daemon checks the
+		// Pi version and its runner on every forwarded call.
+		return nil
+	}
 	if s.pi.agents == nil {
 		return errors.New("Pi subagents run in the dashboard daemon's agent runner, and this MCP server is not hosted by the dashboard daemon (it runs as a ws-mcp process of its own, after the daemon refused its connection); restart the session once the dashboard daemon accepts it")
 	}
 	if !s.piKnobOn() {
 		return fmt.Errorf("%s is off; turn it on with config.tune and reconnect the session", DashboardPiSpawnKey)
 	}
-	version, err := installedPiVersion()
-	if err != nil {
-		return fmt.Errorf("no usable pi: %v", err)
-	}
-	if !wsagent.VersionAtLeast(version, piMinMajor, piMinMinor) {
-		return fmt.Errorf("pi %s is installed; Pi subagents need pi %d.%d or later", version, piMinMajor, piMinMinor)
-	}
-	return nil
+	return PiReady()
 }
 
 // piKnobOn reads dashboard.pi_spawn_enabled without a session, as
@@ -153,6 +157,9 @@ func (s *Server) piParent(sessionKey string) wsagent.ParentRef {
 }
 
 func (s *Server) handlePiTool(ctx context.Context, id json.RawMessage, tool string, args map[string]any) response {
+	if s.piForwards() {
+		return s.handlePiForward(ctx, id, tool, args)
+	}
 	key, err := s.requireLeadSessionKey(tool, args)
 	if err != nil {
 		return toolTextResponse(id, "", err)
@@ -245,7 +252,7 @@ func (s *Server) handlePiTool(ctx context.Context, id json.RawMessage, tool stri
 		if wantsJSON(args) {
 			return toolJSONResponse(id, res, nil)
 		}
-		return toolTextResponse(id, formatPiWait(res), nil)
+		return toolTextResponse(id, formatPiWait(res, "its completion mail arrives when the turn ends"), nil)
 	}
 	return toolTextResponse(id, "", fmt.Errorf("unknown tool: %s", tool))
 }
@@ -282,7 +289,7 @@ func (s *Server) handlePiSpawn(id json.RawMessage, key string, parent wsagent.Pa
 	}
 	mapping, ok := tiers[tier]
 	if !ok {
-		return toolTextResponse(id, "", piTierRefusal(tool, tier, tiers))
+		return toolTextResponse(id, "", wsagent.PiTierRefusal(tool, tier, tiers))
 	}
 	entry, found := s.sessions.lookup(key)
 	if !found {
@@ -306,6 +313,7 @@ func (s *Server) handlePiSpawn(id json.RawMessage, key string, parent wsagent.Pa
 		Cwd:     cwd,
 		Model:   mapping.Model,
 		Effort:  mapping.Effort,
+		Tier:    tier,
 		Prompt:  prompt,
 		Label:   label,
 		Parent:  &parent,
@@ -319,22 +327,6 @@ func (s *Server) handlePiSpawn(id json.RawMessage, key string, parent wsagent.Pa
 		return toolJSONResponse(id, out, nil)
 	}
 	return toolTextResponse(id, fmt.Sprintf("spawned Pi subagent %s (tier %s: %s, effort %s) in %s; its first turn runs now.\nIts completion mail (status and final message) arrives in this session's mailbox when the turn ends: wait for it, or call pi.wait on a host that does not start a turn on mail. Steer it with pi.send; close it with pi.stop.\n", st.ID, tier, orDash(st.Model), orDash(st.Effort), piCwd(st)), nil)
-}
-
-// piTierRefusal names the config.tune key a spawn's unset tier needs and
-// the tiers that are set.
-func piTierRefusal(tool, tier string, tiers map[string]wsconfig.AgentTier) error {
-	set := make([]string, 0, len(tiers))
-	for _, t := range []string{"small", "medium", "large", "xlarge"} {
-		if _, ok := tiers[t]; ok {
-			set = append(set, t)
-		}
-	}
-	tune := fmt.Sprintf(`config.tune key "agents.tier" with harness %q, tier %q, and a model Pi runs`, piHarness, tier)
-	if len(set) == 0 {
-		return fmt.Errorf("%s: no Pi tier is set, so tier %q has no model; set it with %s", tool, tier, tune)
-	}
-	return fmt.Errorf("%s: tier %q is not set for Pi; pick a set tier (%s) or set this one with %s", tool, tier, strings.Join(set, ", "), tune)
 }
 
 // piChildOut is one child as pi.spawn, pi.send, pi.stop, and pi.list
@@ -354,7 +346,7 @@ type piChildOut struct {
 }
 
 func piChild(st wsagent.State) piChildOut {
-	return piChildOut{ID: st.ID, Status: st.Status, Label: st.Label, Model: st.Model, Effort: st.Effort, Cwd: piCwd(st), Held: st.Held, Error: st.Error, Created: st.CreatedAt, Closed: st.ClosedAt}
+	return piChildOut{ID: st.ID, Status: st.Status, Label: st.Label, Tier: st.Tier, Model: st.Model, Effort: st.Effort, Cwd: piCwd(st), Held: st.Held, Error: st.Error, Created: st.CreatedAt, Closed: st.ClosedAt}
 }
 
 // piCwd is the directory a child runs in.
@@ -395,11 +387,13 @@ func formatPiList(children []wsagent.State) string {
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-func formatPiWait(res wsagent.TurnResult) string {
+// formatPiWait is pi.wait's answer; later says how the turn's report
+// arrives when the wait ends first.
+func formatPiWait(res wsagent.TurnResult, later string) string {
 	var b strings.Builder
 	switch res.Status {
 	case wsagent.TurnRunning:
-		fmt.Fprintf(&b, "Pi subagent %s: still running; its completion mail arrives when the turn ends (or call pi.wait again)\n", res.ID)
+		fmt.Fprintf(&b, "Pi subagent %s: still running; %s (or call pi.wait again)\n", res.ID, later)
 		return b.String()
 	case wsagent.TurnClosed:
 		fmt.Fprintf(&b, "Pi subagent %s: closed\n", res.ID)
@@ -475,6 +469,20 @@ func piToolsLine(r wslive.RingRecord) string {
 	return line
 }
 
+// PiReady is the daemon runner's Options.ChildCheck: an installed Pi of at
+// least piMinMajor.piMinMinor, probed once per process as for a lead's
+// pi.* tools.
+func PiReady() error {
+	version, err := installedPiVersion()
+	if err != nil {
+		return fmt.Errorf("no usable pi: %v", err)
+	}
+	if !wsagent.VersionAtLeast(version, piMinMajor, piMinMinor) {
+		return fmt.Errorf("pi %s is installed; Pi subagents need pi %d.%d or later", version, piMinMajor, piMinMinor)
+	}
+	return nil
+}
+
 // PiTurnReporter is the daemon runner's Options.Report: it posts each
 // settled turn of a lead's Pi subagent to the lead's reply-id queue as a
 // system message and wakes the mailbox waits. The registry is the one the
@@ -487,7 +495,7 @@ func PiTurnReporter(log io.Writer) func(wsagent.TurnReport) {
 		}
 		path, err := wsmailbox.Paths{}.ReplyRegistry()
 		if err == nil {
-			err = wsmailbox.PostSystem(path, rep.Parent.ReplyID, formatPiReport(rep), time.Now())
+			err = wsmailbox.PostSystem(path, rep.Parent.ReplyID, wsagent.ReportText(rep), time.Now())
 		}
 		if err != nil {
 			if log != nil {
@@ -497,27 +505,6 @@ func PiTurnReporter(log io.Writer) func(wsagent.TurnReport) {
 		}
 		wswake.Mailbox.Wake()
 	}
-}
-
-// formatPiReport is a completion mail's body: a head naming the child and
-// how its turn ended, then its final assistant message.
-func formatPiReport(rep wsagent.TurnReport) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "[Pi subagent %s", rep.Result.ID)
-	if label := rep.Child.Label; label != "" {
-		fmt.Fprintf(&b, " %q", label)
-	}
-	fmt.Fprintf(&b, "] turn %s", rep.Result.Status)
-	if rep.Result.Error != "" {
-		fmt.Fprintf(&b, ": %s", oneLine(rep.Result.Error))
-	}
-	b.WriteString("\n")
-	if rep.Result.Message != "" {
-		b.WriteString("\n" + rep.Result.Message + "\n")
-	} else if rep.Result.Status == wsagent.TurnDone {
-		b.WriteString("\n(no final message)\n")
-	}
-	return b.String()
 }
 
 // piToolDefinitions are the pi.* tools' definitions.

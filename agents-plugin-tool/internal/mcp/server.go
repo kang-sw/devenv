@@ -722,7 +722,10 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			lookup = s.sessions.intakeLookup
 		}
 		if entry, found := lookup(keyStr); found {
-			if entry.scope != roleLead && (isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name)) {
+			// pi.* on a Pi subagent's server is authorized by the runner's
+			// capability token, not the key (pi_forward.go).
+			piByToken := isPiTool(params.Name) && s.piForwards()
+			if entry.scope != roleLead && !piByToken && (isLeadOnlyTool(params.Name) || !roleAllowsTool(entry.scope, params.Name)) {
 				return errorResponse(req.ID, -32601, fmt.Sprintf("tool not available in current %s MCP profile: %s", s.runtimeNamespace(), params.Name))
 			}
 			if isNoteMutationTool(params.Name) && !entry.isTopLevelLead() {
@@ -5579,6 +5582,9 @@ func (s *Server) filteredTools() []map[string]any {
 			// Listed only where they can run (piUnavailable); a call that
 			// comes anyway refuses with the reason.
 			continue
+		}
+		if isPiTool(name) && s.piForwards() {
+			tool = piWorkerTool(tool)
 		}
 		if s.toolAllowed(name) {
 			filtered = append(filtered, publicToolDefinition(tool, name, namespace))

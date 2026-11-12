@@ -277,6 +277,9 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		TrackerChanged: trackerChanged,
 		// A spawned Pi subagent's settled turns go to its lead's mailbox.
 		Report: mcp.PiTurnReporter(logw),
+		// A Pi subagent's own pi.* calls (the token route) need a usable
+		// Pi, as a lead's do.
+		ChildCheck: mcp.PiReady,
 	})
 }
 
