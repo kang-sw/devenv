@@ -135,7 +135,8 @@ process.stdout.write(bad.join("\n"));
 // tabLabelPrelude stubs what dashboard.js's tab-label block reads: regions
 // as nodes answering fixed selectors, a detached parse (frag) by HTML key,
 // the toast stack, wsTn, the mounted tracker's open calls, and its listed
-// stores (tkOrder, which the tracker term prunes its baselines by).
+// stores (tkOrder, which the tracker term prunes its baselines by). ASK is
+// the block's own TL_ASK, which tlAskSrc puts ahead of the prelude.
 const tabLabelPrelude = `
 var bad = [], toasts = [], opened = [], fragCalls = 0, writes = 0;
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
@@ -157,7 +158,7 @@ var window = { WsToast: { show: function (t, o) { toasts.push({ text: t, kind: (
 function wsTn(k, n) { return k + ":" + n; }
 var tkApi = { openNotice: function (x) { opened.push("notice:" + x.key); }, openNotify: function (s) { opened.push("notify:" + s); } };
 var tkOrder = ["s"];
-var PERM = ".phase.permission, .brow.perm", ASK = '.card.policy[id^="item-"], .arow[id^="item-"], .ckrow[data-id]:not([data-assumed])', SENT = ".sentdata i[data-id]";
+var PERM = ".phase.permission, .brow.perm", ASK = TL_ASK, SENT = ".sentdata i[data-id]";
 function item(id, draft) { return new N({ attrs: { "data-id": id }, sel: draft ? { '.opt[data-opt][aria-pressed="true"]': [new N()] } : {} }); }
 function sent(id) { return new N({ attrs: { "data-id": id } }); }
 `
@@ -182,7 +183,7 @@ func TestTabLabelCount(t *testing.T) {
 		t.Fatal("dashboard.js holds no tab label ... sseOn block")
 	}
 	block = strings.TrimSuffix(block, "var sseOn = true;")
-	runNode(t, "session tab label", tabLabelPrelude+boardBoxSrc(t, string(data))+`
+	runNode(t, "session tab label", tlAskSrc(t, string(data))+tabLabelPrelude+boardBoxSrc(t, string(data))+`
 var mode = "session";
 var R = new N(), A = new N(), B = new N();
 var treeSel = {}; treeSel[PERM] = [new N({ up: A }), new N({ up: A }), new N({ up: B })]; treeSel[".agent.root"] = [R];
@@ -248,7 +249,7 @@ tlShown();
 check("no second summary", toasts.length, 2);
 process.stdout.write(bad.join("\n"));
 `)
-	runNode(t, "index tab label", tabLabelPrelude+boardBoxSrc(t, string(data))+`
+	runNode(t, "index tab label", tlAskSrc(t, string(data))+tabLabelPrelude+boardBoxSrc(t, string(data))+`
 var mode = "index";
 var ss = {}; ss[".sess .chip.policy"] = [new N({ text: "3" }), new N({ text: "1" })]; ss[".sess .phase.permission"] = [new N()];
 REG.sessions = new N({ sel: ss, attrs: { "data-h": "s1" } });
