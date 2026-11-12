@@ -189,8 +189,8 @@ func boardBoxSrc(t *testing.T, js string) string {
 
 // cardsDOM is a minimal DOM for running the whole of cards.js under node:
 // elements with attributes, classes, children, and a selector subset
-// (descendant combinators over tag, .class, [attr], [attr="v"], and
-// comma lists), a document with a body, and boot, which loads cards.js
+// (descendant and child combinators over tag, .class, [attr], [attr="v"],
+// and comma lists), a document with a body, and boot, which loads cards.js
 // into a fresh page over a storage map, as a reload does.
 const cardsDOM = `
 var bad = [];
@@ -229,6 +229,7 @@ El.prototype = {
   appendChild: function (n) { return this.insertBefore(n, null); },
   removeChild: function (n) { this.kids.splice(this.kids.indexOf(n), 1); n.parentNode = null; return n; },
   set innerHTML(v) { this.kids.forEach(function (k) { k.parentNode = null; }); this.kids = []; this.html = v; },
+  get outerHTML() { return "<" + this.tagName + JSON.stringify(this.attrs) + ">" + this.kids.map(function (k) { return k.outerHTML; }).join("") + this.text; },
   get textContent() { return this.text + this.kids.map(function (k) { return k.textContent; }).join(""); },
   set textContent(v) { this.kids = []; this.text = String(v); },
   addEventListener: function (t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
@@ -254,8 +255,10 @@ function one(el, s) {
 function match(el, chain) {
   if (!one(el, chain[chain.length - 1])) return false;
   var rest = chain.slice(0, -1);
-  for (var n = el.parentNode; rest.length && n && n.nodeType === 1; n = n.parentNode) if (one(n, rest[rest.length - 1])) rest = rest.slice(0, -1);
-  return !rest.length;
+  if (!rest.length) return true;
+  if (rest[rest.length - 1] === ">") return !!el.parentNode && el.parentNode.nodeType === 1 && match(el.parentNode, rest.slice(0, -1));
+  for (var n = el.parentNode; n && n.nodeType === 1; n = n.parentNode) if (match(n, rest)) return true;
+  return false;
 }
 function Doc() {
   var d = this;
@@ -308,7 +311,7 @@ function boot(store, served, o) {
     key: "cards", load: function (k) { return store[k] || null; }, save: function (k, v) { if (v === null) delete store[k]; else store[k] = v; },
     column: page.col, shows: function (n) { return !!o.wide && n > 0; },
     layout: function (on) { page.layouts.push(on); },
-    closed: function (from, done) { page.closedCalls.push(from); done(o.closed ? o.closed(from) : null); },
+    closed: function (from, done) { page.closedCalls.push(from); if (!o.pending) done(o.closed ? o.closed(from) : null); },
     adopted: function (n) { page.adopted.push(n.getAttribute("data-topic")); }
   });
   return page;
@@ -336,7 +339,9 @@ function pinsOf() { return names(page.W.pinList()); }
 // update mark is the board's own); a topic updated through the frame graft
 // keeps its pin button pressed; after a reload pins and moves come back
 // from storage, a pinned topic the board lacks is fetched through the
-// closed route page by page, and one the route ends without loses its pin.
+// closed route page by page, and one the route ends without loses its pin;
+// a topic of a fetched closed page gets its pin button; a pin dropped while
+// a pinned topic is still being fetched keeps that topic's order.
 func TestBoardTopicPins(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/cards.js")
 	if err != nil {
@@ -437,6 +442,87 @@ check("a failed fetch keeps the pin", JSON.parse(store.cards).topics.map(functio
 store = { cards: JSON.stringify([{ id: "c1", kind: "k", pinned: 5, at: 1, data: { name: "Old" } }]) };
 boot(store, function () { return [topic("a", 2800), reply()]; });
 check("an old record restores its cards", pinsOf(), ["Old"]);
+// A topic the page adds outside a board update gets its pin button.
+var Q = topic("q", 0, true);
+page.board.insertBefore(mk("div.closed-page", {}, [Q]), page.board.children[page.board.children.length - 1]);
+page.W.decorate();
+check("a topic of a fetched closed page gets its pin button", !!pinBtn(Q), true);
+// A pin dropped while a pinned topic is still being fetched keeps that
+// topic's order among the pins.
+store = { cards: JSON.stringify({ cards: [{ id: "c1", kind: "k", pinned: 2, at: 1, data: { name: "Old" } }], topics: [{ n: "b", p: 1, a: 0, b: 0 }], w: 0 }) };
+boot(store, function () { return [topic("a", 2800), more(31), reply()]; }, { pending: true });
+page.W.move(page.board.querySelector('section.topic[data-topic="a"]'), { pin: true, index: 0 });
+check("a pin dropped first among the shown pins orders after a pending one",
+  [pinsOf(), JSON.parse(store.cards).topics.map(function (r) { return [r.n, r.p]; }).sort(), JSON.parse(store.cards).cards[0].pinned], [["a", "Old"], [["a", 2], ["b", 1]], 3]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+// TestBoardPinnedClosedPagesCount pins the closed pages' show-more index
+// under pins (dashboard.js morphBoard with cards.js, executed under node
+// over the minimal DOM when node is installed): a topic pinned out of a
+// fetched closed page leaves a slot there, and a pinned closed topic that a
+// newly closed one pushes past the cap stays in the pin list with a slot
+// at the pages' head, so the next page starts where the server's index
+// does, neither skipping a topic nor showing one twice.
+func TestBoardPinnedClosedPagesCount(t *testing.T) {
+	cards, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(data)
+	var src string
+	for _, name := range []string{"openKey", "restoreOpenOne", "restoreOpen", "forgetOpen", "topicKey", "morphBoard", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft"} {
+		f := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(js)
+		if f == "" {
+			t.Fatalf("dashboard.js holds no %s", name)
+		}
+		src += f
+	}
+	lit, err := json.Marshal(string(cards))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runNode(t, "pinned closed pages count", "var CARDS = "+string(lit)+";\n"+cardsDOM+`
+var window = {}, doc = null, openState = {}, boardSeen = {};
+function q(sel, el) { try { return el.querySelectorAll(sel); } catch (e) { return []; } }
+function frag(nodes) { return { childNodes: nodes }; }
+function isPeer() { return false; }
+`+src+`
+function served(closed) { return [topic("A", 500)].concat(closed.map(function (n) { return topic(n, 0, true); })).concat([more(1), reply()]); }
+function start() {
+  var first;
+  boot({}, function () { first = served(["X"]); return first; });
+  window.WsCards = page.W; doc = page.doc;
+  first.forEach(function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = n.outerHTML; });
+  // "show more" fetched the page from index 1: Y and Z, then more from 3.
+  var btn = page.board.querySelector("button.closed-more");
+  var p = mk("div.closed-page", {}, [topic("Y", 0, true), topic("Z", 0, true), more(3)]);
+  page.board.insertBefore(p, btn);
+  page.board.removeChild(btn);
+  return p;
+}
+function tail() { var b = page.board.querySelectorAll("button.closed-more"); return b.length ? b[b.length - 1].getAttribute("data-closed-next") : null; }
+
+var p = start();
+morphBoard(page.board, served(["X"]));
+check("with nothing pinned the pages count on from the board's control", tail(), "3");
+clickPin(p.querySelector('section.topic[data-topic="Y"]'));
+check("a topic pinned out of a page leaves a slot there", [pinsOf(), p.querySelectorAll(".closed-slot").map(function (s) { return s.getAttribute("data-slot"); })], [["Y/c"], ["Y"]]);
+morphBoard(page.board, served(["X"]));
+check("the slot counts as the topic did", tail(), "3");
+
+p = start();
+clickPin(page.board.querySelector('section.topic[data-topic="X"]'));
+morphBoard(page.board, served(["W"]));
+check("a pinned closed topic pushed past the cap stays pinned", pinsOf(), ["X/c"]);
+check("and a slot at the pages' head counts it", [p.firstChild.getAttribute("data-slot"), tail()], ["X", "4"]);
+morphBoard(page.board, served(["W"]));
+check("a later swap counts it once", [p.querySelectorAll(".closed-slot").length, tail()], [1, "4"]);
 process.stdout.write(bad.join("\n"));
 `)
 }

@@ -639,7 +639,15 @@
     });
     // The pinned topics (cards.js) stand in the pin list: atop the board or
     // in the pinned column.
-    if (pinBox) Array.prototype.forEach.call(pinBox.children, function (n) { var k = topicKey(n); if (k !== null) live["t:" + k] = n; });
+    // A closed one the last board showed counts as the board's own closed
+    // topic for the pages below (pinShift).
+    var pinShift = [];
+    if (pinBox) Array.prototype.forEach.call(pinBox.children, function (n) {
+      var k = topicKey(n);
+      if (k === null) return;
+      live["t:" + k] = n;
+      if (n.classList.contains("closed") && boardSeen["t:" + k] !== undefined) pinShift.push(n);
+    });
     Array.prototype.slice.call(src.childNodes).forEach(function (n) {
       var k = topicKey(n);
       if (k === null) {
@@ -672,20 +680,31 @@
     // fetched topic the new board shows itself leaves them, and the pages'
     // own control counts on from what is shown. No topic shows twice, and
     // none drops out between the capped section and the pages. A board with
-    // no control holds every closed topic, and the pages go.
+    // no control holds every closed topic, and the pages go. A pinned topic
+    // (cards.js) stays in the pin list: in the pages a slot (closed-slot)
+    // stands in its place and counts as it would.
     if (pages.length && more) {
       var shown = {}, shifted = liveClosed.filter(function (n) { return !seen["t:" + topicKey(n)]; }), count = shifted.length;
+      var slots = pinShift.filter(function (n) { return !seen["t:" + topicKey(n)]; });
+      count += slots.length;
       Object.keys(seen).forEach(function (key) { shown[key] = true; });
-      shifted.forEach(function (n) { shown["t:" + topicKey(n)] = true; });
+      shifted.concat(slots).forEach(function (n) { shown["t:" + topicKey(n)] = true; });
       pages.forEach(function (p) {
-        q(".closed-page > section.topic[data-topic]", p).forEach(function (t) {
-          var key = "t:" + t.getAttribute("data-topic");
+        q(".closed-page > section.topic[data-topic], .closed-page > .closed-slot[data-slot]", p).forEach(function (t) {
+          var key = "t:" + (t.getAttribute("data-topic") || t.getAttribute("data-slot"));
           if (shown[key]) t.parentNode.removeChild(t);
           else { shown[key] = true; count++; }
         });
       });
       var anchor = pages[0].firstChild;
       shifted.forEach(function (n) { pages[0].insertBefore(n, anchor); });
+      slots.forEach(function (n) {
+        var s = doc.createElement("span");
+        s.className = "closed-slot";
+        s.hidden = true;
+        s.setAttribute("data-slot", topicKey(n));
+        pages[0].insertBefore(s, anchor);
+      });
       var tail = q("button.closed-more[data-closed-next]", pages[pages.length - 1]).pop();
       if (tail) tail.setAttribute("data-closed-next", String(+more.getAttribute("data-closed-next") + count));
       want.splice.apply(want, [want.indexOf(more), 1].concat(pages));
@@ -1094,9 +1113,19 @@
       // names (a topic closed or reopened): the page fetched may not follow
       // what shows now, and the control is clicked again.
       if (!btn.parentNode || !page || +btn.getAttribute("data-closed-next") !== from) { btn.disabled = false; return; }
-      // A topic pinned here (cards.js) already stands in the pin list.
-      q("section.topic[data-topic]", page).forEach(function (t) { if (window.WsCards && window.WsCards.pinnedTopic(t.getAttribute("data-topic"))) t.parentNode.removeChild(t); });
+      // A topic pinned here (cards.js) already stands in the pin list; a
+      // slot keeps its place in the pages' count (morphBoard).
+      q("section.topic[data-topic]", page).forEach(function (t) {
+        var name = t.getAttribute("data-topic");
+        if (!window.WsCards || !window.WsCards.pinnedTopic(name)) return;
+        var s = doc.createElement("span");
+        s.className = "closed-slot";
+        s.hidden = true;
+        s.setAttribute("data-slot", name);
+        t.parentNode.replaceChild(s, t);
+      });
       btn.parentNode.replaceChild(page, btn);
+      if (window.WsCards && window.WsCards.decorate) window.WsCards.decorate();
       restoreOpen(page);
       if (window.wbBindBoard) window.wbBindBoard(page);
       if (window.wbAgo) window.wbAgo(page);

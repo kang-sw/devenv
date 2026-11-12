@@ -236,6 +236,7 @@
   function arrange(moved) {
     if (!board) return;
     relayout();
+    if (moved && moved.el && !isCard(moved.el)) leaveSlot(moved.el);
     var base = Array.prototype.filter.call(board.childNodes, function (n) { return !fixedNode(n) && !claimed(n); });
     if (moved && moved.el && !isCard(moved.el) && !claimed(moved.el) && moved.el.parentNode !== board) seat(base, moved.el);
     var p = split(base), box = moved && moved.el ? (p.pins.indexOf(moved.el) >= 0 ? pins : board) : null;
@@ -292,6 +293,19 @@
         if (on) sec.setAttribute("data-pinned", ""); else sec.removeAttribute("data-pinned");
       });
     });
+  }
+  // leaveSlot marks the place of a topic that leaves a fetched closed page
+  // (dashboard.js loadClosed) for the pin list or the board: the page's
+  // show-more index counts it as the server does (dashboard.js
+  // morphBoard), so the next page neither skips a topic nor shows one
+  // twice.
+  function leaveSlot(n) {
+    var p = n.parentNode, name = topicName(n);
+    if (!p || name === null || !p.classList || !p.classList.contains("closed-page")) return;
+    var s = mk("span", "closed-slot");
+    s.hidden = true;
+    s.setAttribute("data-slot", name);
+    p.insertBefore(s, n);
   }
   function child(el, cls) {
     for (var n = el.firstElementChild; n; n = n.nextElementSibling) if (n.classList.contains(cls)) return n;
@@ -552,8 +566,11 @@
     var was = !!u.pinned, topic = !isCard(u.el);
     if (topic && u.loose) { var el = u.el; u = topicRec(u.name); u.el = el; }
     if (to.pin) {
-      var list = pinned().filter(function (x) { return x !== u; });
-      list.splice(Math.min(to.index, list.length), 0, u);
+      // to.index counts the pins that show; a pinned topic still being
+      // fetched (fetchMissing) keeps its order among them.
+      var shown = pinned().filter(function (x) { return x !== u; }), at = shown[to.index];
+      var list = cards.concat(Object.keys(topics).map(function (k) { return topics[k]; })).filter(function (x) { return x.pinned && x !== u; }).sort(function (a, b) { return a.pinned - b.pinned; });
+      list.splice(at ? list.indexOf(at) : list.length, 0, u);
       list.forEach(function (x, i) { x.pinned = i + 1; });
       if (topic) u.at = 0;
     } else {
@@ -884,6 +901,9 @@
     // move places a topic's or card's node as a drop does (to: pin and
     // index, or after and before in the open flow).
     move: function (n, to) { var u = unitOf(n); if (u) drop(u, to); },
+    // decorate gives topics the page added outside a board update (a
+    // fetched closed page) their pin buttons.
+    decorate: function () { if (board) decorate(); },
     is: isCard
   };
 })();
