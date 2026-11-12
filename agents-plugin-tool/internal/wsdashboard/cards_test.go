@@ -85,7 +85,7 @@ func TestBoardCardPlacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(board), "window.WsCards.settle(el, window.WsCards.weave(want));") {
+	if !strings.Contains(string(board), "var woven = window.WsCards.weave(want);") || !strings.Contains(string(board), "window.WsCards.settle(el, woven);") {
 		t.Error("the board morph does not weave the cards in and settle around them")
 	}
 	runNode(t, "board card placement", `
