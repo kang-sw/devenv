@@ -54,9 +54,9 @@
     // A check row answers one way at a time: its x stages "no" and clears
     // the box, opening the note for the reason; ticking the box stages "ok"
     // and releases the x.
-    q(".crow[data-id] button.no-toggle", root).forEach(function (b) {
+    q(".ckrow[data-id] button.no-toggle", root).forEach(function (b) {
       if (once(b)) b.addEventListener("click", function () {
-        var row = b.closest(".crow"), on = b.getAttribute("aria-pressed") !== "true";
+        var row = b.closest(".ckrow"), on = b.getAttribute("aria-pressed") !== "true";
         setNo(row, on);
         if (on) {
           var box = row.querySelector("label.ck > input"), n = row.querySelector("textarea.note");
@@ -66,15 +66,15 @@
         build();
       });
     });
-    q(".crow[data-id] label.ck > input", root).forEach(function (c) {
+    q(".ckrow[data-id] label.ck > input", root).forEach(function (c) {
       if (once(c)) c.addEventListener("change", function () {
-        if (c.checked) setNo(c.closest(".crow"), false);
+        if (c.checked) setNo(c.closest(".ckrow"), false);
         build();
       });
     });
     q("button.note-toggle", root).forEach(function (t) {
       if (once(t)) t.addEventListener("click", function () {
-        var n = t.closest(".card, .arow, .crow, .srow").querySelector("textarea.note");
+        var n = t.closest(".card, .arow, .ckrow, .srow").querySelector("textarea.note");
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
     });
@@ -155,7 +155,7 @@
     });
     // A check is "ok" by its box or "no" by its x, one at a time; an assumed
     // check, locked like a settled row, sends its note alone.
-    q(".crow[data-id]").forEach(function (row) {
+    q(".ckrow[data-id]").forEach(function (row) {
       var box = row.querySelector("label.ck > input"), noteEl = row.querySelector("textarea.note");
       var answer = row.hasAttribute("data-no") ? "no" : box && box.checked ? "ok" : "";
       var note = noteEl ? noteEl.value : "";

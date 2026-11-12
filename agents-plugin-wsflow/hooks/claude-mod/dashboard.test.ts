@@ -1008,8 +1008,10 @@ describe('delivery', () => {
     h.answers.push(new Error('server gone'))
     dash.userMessage('lost?', 'terminal')
     // The flush gap is longer than the retry wait's half, so step to the failed call itself: the wait counts from it.
+    // Bounded at RETRY_MS, past any flush gap, so a call that never comes fails here rather than hanging the run.
     const before = h.calls.length
-    while (h.calls.length === before) await advance(10)
+    for (let t = 0; h.calls.length === before && t < RETRY_MS; t += 10) await advance(10)
+    expect(h.calls.length).toBeGreaterThan(before)
     const failed = h.calls.length
     // Nothing more until the retry wait has passed.
     await advance(RETRY_MS / 2)

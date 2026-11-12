@@ -16,6 +16,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsinbox"
 )
 
 // childHarness is a spawn harness whose fake backend also runs the
@@ -698,5 +699,201 @@ func TestWaitTakesATurnThatSettlesRightAfterItsCheck(t *testing.T) {
 	}
 	if took := time.Since(start); took > timeout/2 {
 		t.Fatalf("the lead's wait answered after %v: it missed the settle", took)
+	}
+}
+
+// TestRestartSettlesTheCutTurnBeforeTheNextStarts: a worker whose turn the
+// daemon's exit cut off, with input waiting for its next turn (a child's
+// kept report, a queued message), reports the cut turn as interrupted
+// before the restart starts that next turn, which then stays open.
+func TestRestartSettlesTheCutTurnBeforeTheNextStarts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(*Record)
+		want string
+	}{
+		{name: "kept report", set: func(rec *Record) { rec.Reports = []string{"[Pi subagent x] turn done\n\nkept report\n"} }, want: "kept report"},
+		{name: "queued message", set: func(rec *Record) { rec.Queued = []QueuedInput{{Text: "queued message"}} }, want: "queued message"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, got := childHarness(t)
+			w := h.spawnWorker("medium")
+			h.backend.waitProc(t, 0).nextSent(t)
+			eventually(t, "the turn open on the record", func() bool { return h.record(w.ID).TurnOpen })
+			h.runner.Close()
+			dir := wsdashboard.SessionDir(h.dir, w.ID)
+			rec, err := readRecord(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.set(&rec)
+			if err := writeRecord(dir, rec); err != nil {
+				t.Fatal(err)
+			}
+
+			h.start()
+			p := h.backend.waitProc(t, 1)
+			if turn := p.nextSent(t); !strings.Contains(turn, tc.want) {
+				t.Fatalf("the restart's turn = %q", turn)
+			}
+			eventually(t, "the interrupted report", func() bool { return len(got.lead()) == 1 })
+			if rep := got.lead()[0]; rep.Result.Status != TurnInterrupted {
+				t.Fatalf("the cut turn's report = %+v", rep.Result)
+			}
+			time.Sleep(60 * time.Millisecond)
+			if !h.record(w.ID).TurnOpen || h.state(w.ID).Status != StatusRunning {
+				t.Fatalf("the new turn is open: %+v", h.record(w.ID))
+			}
+			if n := len(got.lead()); n != 1 {
+				t.Fatalf("the new turn is not settled: %+v", got.lead())
+			}
+			p.reply("next done")
+			eventually(t, "the new turn's report", func() bool { return len(got.lead()) == 2 })
+			if rep := got.lead()[1]; rep.Result.Status != TurnDone || rep.Result.Message != "next done" {
+				t.Fatalf("the new turn's report = %+v", rep.Result)
+			}
+		})
+	}
+}
+
+// TestParentWaitDoesNotRepeatAHandedReport: a parent's wait on a child
+// turn whose report already reached it (steered into its running turn, or
+// sent as its next turn) answers with the status alone, marked delivered.
+func TestParentWaitDoesNotRepeatAHandedReport(t *testing.T) {
+	wait := func(h *harness, token, id string) TurnResult {
+		t.Helper()
+		code, body := h.tokenCall(token, "wait", map[string]any{"id": id, "timeout_s": 2})
+		var res TurnResult
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &res) != nil {
+			t.Fatalf("the wait = %d %s", code, body)
+		}
+		if strings.Contains(body, "child result") {
+			t.Fatalf("the wait repeats the report: %s", body)
+		}
+		return res
+	}
+	t.Run("steered", func(t *testing.T) {
+		h, _ := childHarness(t)
+		_, wp, token, gc, gp := workerWithChild(t, h)
+		gp.reply("child result")
+		eventually(t, "the steered report", func() bool { s, _ := wp.steered(); return len(s) == 1 })
+		if res := wait(h, token, gc.ID); res.ID != gc.ID || res.Status != TurnDone || !res.Delivered || res.Message != "" {
+			t.Fatalf("the wait = %+v", res)
+		}
+	})
+	t.Run("next turn", func(t *testing.T) {
+		h, _ := childHarness(t)
+		w, wp, token, gc, gp := workerWithChild(t, h)
+		wp.reply("interim")
+		eventually(t, "the worker idle", func() bool { return h.state(w.ID).Status == StatusIdle })
+		gp.reply("child result")
+		if turn := wp.nextSent(t); !strings.Contains(turn, "child result") {
+			t.Fatalf("the report's turn = %q", turn)
+		}
+		if res := wait(h, token, gc.ID); res.Status != TurnDone || !res.Delivered || res.Message != "" {
+			t.Fatalf("the wait = %+v", res)
+		}
+	})
+}
+
+// TestWaitAfterARestartAnswersASettledTurnAtOnce: a turn that settled
+// before a daemon restart answers a wait after it at once: the lead's,
+// with the turn, and a parent's on a report it already got, as delivered.
+func TestWaitAfterARestartAnswersASettledTurnAtOnce(t *testing.T) {
+	h, got := childHarness(t)
+	w, wp, _, gc, gp := workerWithChild(t, h)
+	gp.reply("child result")
+	var steered []string
+	eventually(t, "the steered report", func() bool { steered, _ = wp.steered(); return len(steered) == 1 })
+	wp.events <- Event{SteerAnswer: &SteerAnswer{}}
+	wp.events <- Event{UserTaken: steered[0]}
+	wp.reply("worker done")
+	eventually(t, "the worker's report", func() bool { return len(got.lead()) == 1 })
+	h.runner.Close()
+
+	h.start()
+	const timeout = 3 * time.Second
+	start := time.Now()
+	res, err := h.runner.Wait(context.Background(), w.ID, timeout)
+	if err != nil || res.Status != TurnDone || res.Message != "worker done" {
+		t.Fatalf("the lead's wait after the restart = %+v, %v", res, err)
+	}
+	if took := time.Since(start); took > timeout/2 {
+		t.Fatalf("the lead's wait answered after %v", took)
+	}
+
+	// The worker's next process holds a new token; its wait on the child
+	// whose report it got before the restart answers at once.
+	if _, err := h.runner.Send(w.ID, "go on"); err != nil {
+		t.Fatal(err)
+	}
+	wp2 := h.backend.waitProc(t, 2)
+	wp2.nextSent(t)
+	start = time.Now()
+	code, body := h.tokenCall(h.token(2), "wait", map[string]any{"id": gc.ID, "timeout_s": timeout.Seconds()})
+	var child TurnResult
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &child) != nil || child.Status != TurnDone || !child.Delivered {
+		t.Fatalf("the parent's wait after the restart = %d %s", code, body)
+	}
+	if took := time.Since(start); took > timeout/2 {
+		t.Fatalf("the parent's wait answered after %v", took)
+	}
+}
+
+// TestCancelledMessageLeavesNoChildOpen: a message a worker sent its child
+// that the page cancelled before any turn took it does not keep the child
+// open, so the worker's done turn is reported.
+func TestCancelledMessageLeavesNoChildOpen(t *testing.T) {
+	h, got := childHarness(t)
+	w, wp, token, gc, gp := workerWithChild(t, h)
+	if code, body := h.tokenCall(token, "send", map[string]any{"id": gc.ID, "message": "more"}); code != http.StatusOK {
+		t.Fatalf("send = %d %s", code, body)
+	}
+	inbox := wsinbox.Dir(wsdashboard.SessionDir(h.dir, gc.ID))
+	held, err := wsinbox.Held(inbox)
+	if err != nil || len(held) != 1 {
+		t.Fatalf("the held message: %v %v", held, err)
+	}
+	if _, err := wsinbox.Cancel(inbox, held[0].Name); err != nil {
+		t.Fatal(err)
+	}
+	h.runner.InboxChanged(gc.ID)
+	wp.reply("interim")
+	eventually(t, "the worker idle", func() bool { return h.state(w.ID).Status == StatusIdle })
+	gp.reply("child result")
+	if turn := wp.nextSent(t); !strings.Contains(turn, "child result") {
+		t.Fatalf("the report's turn = %q", turn)
+	}
+	wp.reply("final")
+	eventually(t, "the worker's report", func() bool { return len(got.lead()) == 1 })
+	if rep := got.lead()[0]; rep.Result.Message != "final" {
+		t.Fatalf("the worker's report = %+v", rep.Result)
+	}
+	noSend(t, gp, "a cancelled message")
+}
+
+// TestTokenSpawnCwdFollowsTheHoldersWorkingDirectory: a worker working in
+// a directory of its own (a worktree) spawns its children there: an empty
+// cwd is that directory and a relative one resolves against it, while the
+// child's root stays the holder's.
+func TestTokenSpawnCwdFollowsTheHoldersWorkingDirectory(t *testing.T) {
+	h, _ := childHarness(t)
+	wt := filepath.Join(h.root, "wt")
+	if err := os.MkdirAll(filepath.Join(wt, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Cwd: wt, Prompt: "work", Tier: "medium", Label: "worker", Parent: &leadParent}); err != nil {
+		t.Fatal(err)
+	}
+	token := h.token(0)
+	for _, tc := range []struct{ cwd, want string }{{"", wt}, {"sub", filepath.Join(wt, "sub")}} {
+		code, body := h.tokenCall(token, "spawn", map[string]any{"prompt": "sub task", "tier": "small", "cwd": tc.cwd})
+		var gc State
+		if code != http.StatusCreated || json.Unmarshal([]byte(body), &gc) != nil {
+			t.Fatalf("spawn with cwd %q = %d %s", tc.cwd, code, body)
+		}
+		if gc.Cwd != tc.want || gc.Root != h.root {
+			t.Fatalf("cwd %q: the child works in %q under root %q, want %q under %q", tc.cwd, gc.Cwd, gc.Root, tc.want, h.root)
+		}
 	}
 }

@@ -569,7 +569,11 @@ the daemon's exit cut off, which the record's `turn_open` marks, settled
 when the next daemon loads it). A settle of a conversation with a parent
 goes to the runner's `Options.Report`; closing one settles nothing.
 `Runner.Wait` waits for a turn that took every message sent before the
-wait; `Runner.Watch` reports each change of a conversation with a parent.
+wait (a message the page cancelled before a drain counts for no turn, and
+a slash command's turn covers none of the text drained behind it); the
+last reported turn is kept in the record (`last_turn`), so after a daemon
+restart a wait on a conversation that settled before it answers at once.
+`Runner.Watch` reports each change of a conversation with a parent.
 The built-in `pi-worker` profile is Pi's coding tools plus ws's
 `git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`, and the
 six `pi.*` tools, with no instruction file. A spawn records its `tier`
@@ -622,11 +626,16 @@ owns the whole tree:
   lead's `pi.spawn`; the Pi version is the daemon's check on every call
   (`Options.ChildCheck`, the version probed once per daemon process). The
   worker's own server checks neither.
+- **Cwd.** A worker's empty `cwd` is the worker's own working directory
+  (its record's `cwd`, else its root), and a relative one resolves against
+  it, so a worker in a worktree spawns into that worktree; the child's root
+  (its session key's) stays the worker's. A lead's `pi.spawn` keeps
+  resolving against the lead's root.
 - **Caps.** A spawn records the holder as the child's parent (`parent.kind:
   "conversation"`). The lead is depth 0, its Pi worker depth 1, and that
   worker's child depth 2, which is refused a spawn with the cap named. The
   child's tier resolves in the `pi` bucket alone and may not rank above the
-  holder's own (`small` < `medium` < `large`); a holder with no recorded tier
+  holder's own (`small` < `medium` < `large` < `xlarge`); a holder with no recorded tier
   is refused.
 - **Reports.** A child's settled turn waits in its record
   (`pending_reports`) until the runner hands it to the parent. A running
@@ -635,14 +644,18 @@ owns the whole tree:
   once: when the parent is idle or its process stopped, or when the steer
   was refused or the run ended before taking it (`clear_queue` then drops
   it from Pi's queue). A parent blocked in `pi.wait` on that child takes
-  the turn as the wait's answer instead, with nothing steered. A report to
-  a Claude lead still goes by mail.
+  the turn as the wait's answer instead, with nothing steered; a wait on a
+  turn whose report was already handed over answers with its status alone
+  (`delivered: true`, no message). A report to a Claude lead still goes by
+  mail.
 - **Holds.** A worker's done turn is not reported upstream (no report, no
   wait answer) while a child of its own is open: from a message it was sent
   until its report has reached the worker, or it closes. A failed or
   interrupted turn goes up at once. Pending and kept reports are in the
   records, so a daemon restart delivers them; a child the restart
-  interrupted reports that, which resumes its parent.
+  interrupted reports that, which resumes its parent. The interrupted turn
+  settles before the restart sends the input the record kept for the next
+  turn, so that next turn stays open.
 - **Close.** Closing a conversation closes its open descendants first,
   deepest first. A process stop (the stop route, an idle stop, a settings
   change) does not cascade, and a child's report resumes the stopped
@@ -1283,7 +1296,7 @@ Current launcher inputs:
 | `WS_MCP_PI_ENDPOINT` | Set beside `WS_MCP_PI_TOKEN`: the dashboard daemon's loopback base URL, for example `http://127.0.0.1:29417`. |
 | `WS_MCP_NAMESPACE` | User-facing MCP namespace text override; empty or unset defaults to `ws`. |
 | `WS_MCP_SETUP_TOOL` | Advertised setup tool name override; empty or unset defaults to `ws.setup`. |
-| `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
+| `WS_MCP_CONFIG_MANIFESTS` | Adapter config key manifests, separated by the platform path-list separator (`:` POSIX, `;` Windows); `;` is accepted on every platform, which the static launcher configs use. Declared keys become `config.tune`-writable, cataloged by `config.list`, and typed in `config.get`; a rejected manifest is logged to stderr and listed by `config.list`. The ws and wsflow packages each ship their own `config-manifest.json` (namespace `claude.`; the same keys, differing only in `default`, pinned by `TestShippedClaudeManifestsDifferOnlyInDefaults`) and set it in both launch configs: `.mcp.json` (Codex) as `./config-manifest.json`, resolved against `cwd: "."` (the plugin root), and `.claude-plugin/plugin.json` as `${CLAUDE_PLUGIN_ROOT}/config-manifest.json`. Each package (ws, wsflow, Pi) also lists its `dashboard-config-manifest.json` (namespace `dashboard.`: `dashboard.enabled`, default on in every package; `dashboard.port`, default 29417; `dashboard.lan_enabled`, global-only and default off in every package; `dashboard.pi_spawn_enabled`, which lists the `pi.*` tools, default on in ws and off in wsflow and Pi) beside its own manifest; the Pi bridge joins the two with the platform separator. A path that does not resolve fails nothing: the keys stay undeclared, so check `config.list` after changing either. |
 | `WS_MCP_CLI_NAME` | Command name that printed agent-runnable CLI commands (the rendered `mailbox wait` command and its re-arm line) start with; empty or unset uses the invoked binary path (`os.Args[0]`). Set by the `ws-cli`/`wsflow-cli` shims and by the Claude manifests' `mcpServers.<name>.env`, where plugin `bin/` is on the agent's Bash PATH; left unset for Codex, which does not put plugin `bin/` on PATH. |
 
 Launcher diagnostics must go to stderr. Stdout belongs to the MCP JSON-RPC

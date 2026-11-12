@@ -40,15 +40,16 @@ function wbCodeBlocks(root) {
     }
     btn.type = "button";
     btn.className = "cb-copy";
-    btn.setAttribute("title", "복사");
-    btn.setAttribute("aria-label", "복사");
+    var label = window.wsT ? wsT("js.wb.copy") : "Copy";
+    btn.setAttribute("title", label);
+    btn.setAttribute("aria-label", label);
     btn.innerHTML = copyIcon;
     btn.addEventListener("click", function (e) {
       // A block inside an option or a summary copies and does nothing else.
       if (e.stopPropagation) e.stopPropagation();
       if (!copyText(code.textContent)) return;
       btn.className = "cb-copy done";
-      btn.textContent = "복사됨";
+      btn.textContent = window.wsT ? wsT("js.wb.copy.done") : "Copied";
       clearTimeout(timer);
       timer = setTimeout(function () { btn.className = "cb-copy"; btn.innerHTML = copyIcon; }, 1500);
     });

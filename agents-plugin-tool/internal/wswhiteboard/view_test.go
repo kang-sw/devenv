@@ -1,6 +1,9 @@
 package wswhiteboard
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func topicNames(st *State) []string {
 	var names []string
@@ -267,5 +270,47 @@ func TestDocStaleFollowsItemChangesAfterTheBodyEdit(t *testing.T) {
 	mustApply(t, st, `<wb:patch id="1"><wb:why>p</wb:why></wb:patch>`)
 	if !stale(st, "t") {
 		t.Fatal("a patch after the body edit stales the marks")
+	}
+}
+
+// TestDocStaleClassReachesBothRenderPaths pins the class chg.js dims stale
+// change marks from: a stale body carries chg-stale on the disk page's
+// inline body, and on a served page both on the frame's box and on the body
+// inside the frame, where chg.js runs; a fresh body carries it nowhere.
+func TestDocStaleClassReachesBothRenderPaths(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "t", "x"))
+	mustApply(t, st, topicXML("t", "one\n\ntwo"))
+	mustApply(t, st, topicXML("t", "one\n\ntwo\n\nthree"))
+	fresh := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	mustApply(t, st, addXML(ClassTechnical, "t", "added"))
+	stale := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+
+	if page := render(t, stale); !strings.Contains(page, `<div class="doc-body md chg-stale">`) {
+		t.Error("the disk page's stale body lacks chg-stale")
+	}
+	regions, err := RenderRegions(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	board := string(regions.Board)
+	if !strings.Contains(board, `<div class="doc-body framed chg-stale"><iframe`) {
+		t.Error("the served page's stale body frame box lacks chg-stale")
+	}
+	if doc := frameDocs(t, board)["t"]; !strings.Contains(doc, `<body class="doc-frame"><div class="doc-body md chg-stale">`) {
+		t.Errorf("the stale body inside its frame lacks chg-stale:\n%.400s", doc)
+	}
+
+	// The stylesheet and chg.js name the class too, so the checks are on the
+	// body boxes.
+	if page := render(t, fresh); !strings.Contains(page, `<div class="doc-body md">`) || strings.Contains(page, `md chg-stale"`) {
+		t.Error("the disk page marks a fresh body stale")
+	}
+	regions, err = RenderRegions(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if board := string(regions.Board); !strings.Contains(board, `<div class="doc-body framed"><iframe`) || strings.Contains(board, `chg-stale"`) {
+		t.Error("the served page marks a fresh body stale")
 	}
 }

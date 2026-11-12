@@ -300,11 +300,11 @@ details.settled .checks { margin: 0 0 6px; }
 .chead { display: flex; align-items: center; gap: 6px; padding: 6px 10px 3px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--wb-muted-fg); }
 .chead .i { width: 12px; height: 12px; }
 .chead .prog { margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none; font-size: 11.5px; font-weight: 700; }
-.crow { display: flex; flex-wrap: wrap; align-items: flex-start; padding-right: 8px; }
-.crow + .crow { border-top: 1px solid var(--wb-muted); }
-.crow > .btn.mini { margin-top: 6px; flex: none; }
-.crow > .btn.mini + .btn.mini { margin-left: 2px; }
-.crow > .note { flex-basis: 100%; width: auto; margin: 0 10px 8px 34px; }
+.ckrow { display: flex; flex-wrap: wrap; align-items: flex-start; padding-right: 8px; }
+.ckrow + .ckrow { border-top: 1px solid var(--wb-muted); }
+.ckrow > .btn.mini { margin-top: 6px; flex: none; }
+.ckrow > .btn.mini + .btn.mini { margin-left: 2px; }
+.ckrow > .note { flex-basis: 100%; width: auto; margin: 0 10px 8px 34px; }
 .ck { flex: 1; min-width: 0; display: flex; gap: 8px; padding: 7px 10px; align-items: flex-start; line-height: 21px; }
 label.ck { cursor: pointer; }
 .ck > :not(.atext) { flex: none; }
@@ -317,21 +317,21 @@ label.ck { cursor: pointer; }
 .ck .why { font-size: 12px; color: var(--wb-muted-fg); }
 .ck .ans { font-size: 12.5px; color: var(--wb-muted-fg); }
 .ck .amark { font-size: 10.5px; font-weight: 700; line-height: 1.5; padding: 0 7px; border-radius: 999px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-assumed) 18%, transparent); color: color-mix(in srgb, var(--wb-accent-assumed) 75%, var(--wb-muted-fg)); }
-.crow.done .title, .crow.no .title { font-weight: 500; color: var(--wb-muted-fg); }
+.ckrow.done .title, .ckrow.no .title { font-weight: 500; color: var(--wb-muted-fg); }
 .cbox { flex: none; width: 13px; height: 13px; margin: 4px 0 0; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; background: var(--wb-ck-no); color: #fff; }
 .cbox .i { width: 10px; height: 10px; stroke-width: 2.4; }
-.crow .stamp { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; padding: 0 7px; border-radius: 999px; line-height: 16px; align-self: center; }
-.crow.done .stamp { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 16%, transparent); }
-.crow.no .stamp { color: var(--wb-ck-no); background: color-mix(in srgb, var(--wb-ck-no) 14%, transparent); }
+.ckrow .stamp { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; padding: 0 7px; border-radius: 999px; line-height: 16px; align-self: center; }
+.ckrow.done .stamp { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 16%, transparent); }
+.ckrow.no .stamp { color: var(--wb-ck-no); background: color-mix(in srgb, var(--wb-ck-no) 14%, transparent); }
 /* the user's words on a "no", quoted under the row */
-.crow .said { flex-basis: 100%; margin: 1px 0 0; padding: 3px 9px; font-size: 12.5px; color: var(--wb-muted-fg); border-left: 2px solid var(--wb-ck-no); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--wb-ck-no) 6%, transparent); }
+.ckrow .said { flex-basis: 100%; margin: 1px 0 0; padding: 3px 9px; font-size: 12.5px; color: var(--wb-muted-fg); border-left: 2px solid var(--wb-ck-no); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--wb-ck-no) 6%, transparent); }
 /* the no toggle beside the pen: pressed stages "no" */
 .no-toggle { background: transparent; color: var(--wb-muted-fg); opacity: .8; }
 .no-toggle:hover { opacity: 1; }
 .no-toggle[aria-pressed="true"] { background: var(--wb-ck-no); color: #fff; opacity: 1; }
-.crow[data-no] .ck input { accent-color: var(--wb-muted-fg); opacity: .45; }
+.ckrow[data-no] .ck input { accent-color: var(--wb-muted-fg); opacity: .45; }
 /* a row holding a staged answer or note */
-.crow.staged { box-shadow: inset 3px 0 0 var(--wb-primary); }
+.ckrow.staged { box-shadow: inset 3px 0 0 var(--wb-primary); }
 
 /* settled: collapsed tonal chip */
 details.settled { font-size: 13px; }

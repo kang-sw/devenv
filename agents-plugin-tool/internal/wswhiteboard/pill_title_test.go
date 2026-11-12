@@ -76,3 +76,39 @@ process.stdout.write(bad.join("\n"));`,
 		}
 	}
 }
+
+// TestPillCountsAnsweredCheckRows pins the pill's responded() for check
+// rows: a staged "no" (the row's data-no) or a ticked check box answers the
+// row, so the still-open count the pill hands the dashboard leaves it out.
+// The cases execute under node when it is installed.
+func TestPillCountsAnsweredCheckRows(t *testing.T) {
+	data, err := assetFS.ReadFile("assets/pill.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; pill check-row cases not executed")
+	}
+	script := pillPrelude + `
+html.attrs["data-wb-titlehost"] = "";
+var got = [];
+window.wbTitleCount = function (n) { got.push(n); };
+function row(state) {
+  var e = new E(), box = { checked: state === "ticked" };
+  e.querySelector = function (s) { return s === "label.ack > input, label.ck > input" ? box : null; };
+  if (state === "no") e.attrs["data-no"] = "";
+  return e;
+}
+items = [row("no"), row("ticked"), row(""), row("")];
+` + string(data) + `
+check("a staged no and a ticked box answer their rows", got.slice(-1), [2]);
+process.stdout.write(bad.join("\n"));`
+	out, err := nodeScript(node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if s := strings.TrimSpace(string(out)); s != "" {
+		t.Errorf("pill check-row cases failed:\n%s", s)
+	}
+}

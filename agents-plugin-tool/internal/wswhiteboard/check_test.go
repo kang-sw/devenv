@@ -154,18 +154,18 @@ func TestChecksOnlyTopicChipIsAPlainCount(t *testing.T) {
 func TestCheckRowsRenderTheirStates(t *testing.T) {
 	page := render(t, BuildView(checkBoard(t), ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	row := func(id string) string {
-		return regexp.MustCompile(`<div class="crow[^"]*" id="item-` + id + `".*?</div>`).FindString(page)
+		return regexp.MustCompile(`<div class="ckrow[^"]*" id="item-` + id + `".*?</div>`).FindString(page)
 	}
 	open := row("3")
-	for _, want := range []string{`class="crow" id="item-3" data-id="03"`, `<label class="ck"><input type="checkbox" data-id="03">`, `class="btn mini no-toggle" aria-pressed="false"`, `<span class="why">the second section</span>`, "draft.md"} {
+	for _, want := range []string{`class="ckrow" id="item-3" data-id="03"`, `<label class="ck"><input type="checkbox" data-id="03">`, `class="btn mini no-toggle" aria-pressed="false"`, `<span class="why">the second section</span>`, "draft.md"} {
 		if !strings.Contains(open, want) {
 			t.Fatalf("open check row missing %q:\n%s", want, open)
 		}
 	}
-	if ok := row("4"); !strings.Contains(ok, `class="crow done"`) || !strings.Contains(ok, `checked disabled`) || !strings.Contains(ok, `<span class="stamp">ok</span>`) || strings.Contains(ok, "data-id") {
+	if ok := row("4"); !strings.Contains(ok, `class="ckrow done"`) || !strings.Contains(ok, `checked disabled`) || !strings.Contains(ok, `<span class="stamp">ok</span>`) || strings.Contains(ok, "data-id") {
 		t.Fatalf("answered ok row:\n%s", ok)
 	}
-	if no := row("5"); !strings.Contains(no, `class="crow no"`) || !strings.Contains(no, `class="cbox"`) || !strings.Contains(no, `<span class="stamp">no</span>`) || !strings.Contains(no, `B is too dark; go with A</span>`) {
+	if no := row("5"); !strings.Contains(no, `class="ckrow no"`) || !strings.Contains(no, `class="cbox"`) || !strings.Contains(no, `<span class="stamp">no</span>`) || !strings.Contains(no, `B is too dark; go with A</span>`) {
 		t.Fatalf("answered no row:\n%s", no)
 	}
 	if as := row("6"); !strings.Contains(as, `data-id="06" data-assumed`) || !strings.Contains(as, `class="amark"`) || !strings.Contains(as, "note-toggle") {
@@ -204,8 +204,8 @@ func TestCheckStampReadsALoneOkOrNo(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassCheck, "t", "look")+`<wb:answer id="1" value="no problem, ship it">fine</wb:answer>`)
 	page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	row := regexp.MustCompile(`<div class="crow[^"]*" id="item-1".*?</div>`).FindString(page)
-	if !strings.Contains(row, `class="crow done"`) || strings.Contains(row, `class="stamp"`) || !strings.Contains(row, `no problem, ship it</span>`) {
+	row := regexp.MustCompile(`<div class="ckrow[^"]*" id="item-1".*?</div>`).FindString(page)
+	if !strings.Contains(row, `class="ckrow done"`) || strings.Contains(row, `class="stamp"`) || !strings.Contains(row, `no problem, ship it</span>`) {
 		t.Fatalf("free-text answered check row:\n%s", row)
 	}
 }
@@ -230,5 +230,25 @@ func TestOpenCheckRanksAsAnAskNotAnAck(t *testing.T) {
 	rank := bumpRank(st, map[string]int{"ack": st.Items[0].Changed, "chk": st.Items[1].Changed})
 	if rank["chk"] != bumpPolicy || rank["ack"] != bumpAck {
 		t.Fatalf("ranks = %v", rank)
+	}
+}
+
+// TestCheckRowClassIsTheBoardsOwn: the check row's class is not .crow,
+// which the dashboard's composer styles unscoped (a grid) after the board's
+// stylesheet on the dashboard page; the board must not depend on the
+// dashboard scoping its rules.
+func TestCheckRowClassIsTheBoardsOwn(t *testing.T) {
+	crow := regexp.MustCompile(`\bcrow\b`)
+	for _, name := range []string{"assets/page.css", "assets/page.tmpl", "assets/form.js", "assets/pill.js"} {
+		raw, err := assetFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loc := crow.FindIndex(raw); loc != nil {
+			t.Errorf("%s still uses the class crow: %q", name, raw[max(0, loc[0]-40):min(len(raw), loc[1]+40)])
+		}
+		if !strings.Contains(string(raw), "ckrow") {
+			t.Errorf("%s does not name the check row ckrow", name)
+		}
 	}
 }

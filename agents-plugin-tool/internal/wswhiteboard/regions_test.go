@@ -519,3 +519,19 @@ func TestOutsideImageServesItemsAndRelaysFramedBodyImages(t *testing.T) {
 	page := render(t, BuildView(&State{Seq: 2, Topics: st.Topics}, in))
 	wantNone(t, markup(page), "data-out", "/s/r/image", "data-relay")
 }
+
+// TestTopicFrameCarriesTheCopyStrings: a topic-body frame cannot reach the
+// host page's wsT, so it carries its own over the copy button's strings
+// (code.js), in the page's language, and nothing else of the client table.
+func TestTopicFrameCarriesTheCopyStrings(t *testing.T) {
+	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: "```\nx\n```\n", Changed: 2}}}
+	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
+	view.Lang = "ko"
+	regions, err := RenderRegions(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := frameDocs(t, string(regions.Board))["doc"]
+	wantAll(t, doc, `window.wsT = function`, `"js.wb.copy":"복사"`, `"js.wb.copy.done":"복사됨"`)
+	wantNone(t, doc, `"js.wb.ago.now"`, `"js.pill.open"`)
+}

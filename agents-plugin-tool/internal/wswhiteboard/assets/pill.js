@@ -13,7 +13,7 @@
   var st = window.wbPill || (window.wbPill = {});
   if (st.off) st.off();
 
-  var items = Array.prototype.slice.call(d.querySelectorAll('.card.policy[id^="item-"], .arow[id^="item-"], .crow[data-id]:not([data-assumed])'));
+  var items = Array.prototype.slice.call(d.querySelectorAll('.card.policy[id^="item-"], .arow[id^="item-"], .ckrow[data-id]:not([data-assumed])'));
 
   // An item's draft state, read from the same form controls form.js builds
   // the reply from: a pick, a ticked ack, or a non-empty note is a reply

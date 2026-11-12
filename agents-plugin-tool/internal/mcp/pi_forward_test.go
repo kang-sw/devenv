@@ -1,16 +1,21 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wslive"
 )
 
 // fakeTokenRoute is the dashboard daemon's token route as a Pi worker's
@@ -115,6 +120,10 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 			if desc, _ := tool["description"].(string); !strings.Contains(desc, "Spawn a Pi subagent of your own") || strings.Contains(desc, "mailbox") {
 				t.Fatalf("pi.spawn reads as a worker's: %q", desc)
 			}
+			props, _ := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
+			if cwd := props["cwd"].(map[string]string)["description"]; !strings.Contains(cwd, "relative to your own working directory") || strings.Contains(cwd, "root") {
+				t.Fatalf("pi.spawn's cwd reads as a worker's: %q", cwd)
+			}
 		}
 	}
 
@@ -155,5 +164,329 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	daemon.Close()
 	if out := callToolWithKey(t, s, 11, key, "pi.list", nil); !strings.Contains(out, "the dashboard daemon") || !strings.Contains(out, "did not answer") {
 		t.Fatalf("an unreachable daemon = %q", out)
+	}
+}
+
+// routeBackend is a Pi backend for a real wsagent runner: each start hands
+// out a routeProc the test drives.
+type routeBackend struct {
+	mu     sync.Mutex
+	starts []wsagent.StartSpec
+	procs  []*routeProc
+}
+
+func (b *routeBackend) Start(_ context.Context, spec wsagent.StartSpec) (wsagent.Process, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	p := &routeProc{events: make(chan wsagent.Event, 64), sent: make(chan string, 16)}
+	b.starts = append(b.starts, spec)
+	b.procs = append(b.procs, p)
+	return p, nil
+}
+
+// waitStart waits for the i-th process start.
+func (b *routeBackend) waitStart(t *testing.T, i int) (wsagent.StartSpec, *routeProc) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		b.mu.Lock()
+		if len(b.starts) > i {
+			spec, p := b.starts[i], b.procs[i]
+			b.mu.Unlock()
+			return spec, p
+		}
+		b.mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("process %d did not start", i)
+	return wsagent.StartSpec{}, nil
+}
+
+type routeProc struct {
+	events chan wsagent.Event
+	sent   chan string
+	once   sync.Once
+}
+
+func (p *routeProc) Events() <-chan wsagent.Event { return p.events }
+func (p *routeProc) Send(text string) error       { p.sent <- text; return nil }
+func (p *routeProc) Interrupt() error             { return nil }
+func (p *routeProc) SetModel(string) error        { return wsagent.ErrUnsupported }
+func (p *routeProc) SetEffort(string) error       { return wsagent.ErrUnsupported }
+func (p *routeProc) Close() error {
+	p.once.Do(func() { close(p.events) })
+	return nil
+}
+
+// reply sends a final reply and ends the turn.
+func (p *routeProc) reply(text string) {
+	p.events <- wsagent.Event{Live: &wslive.Event{Kind: wslive.KindReply, Text: text, Final: true}}
+	p.events <- wsagent.Event{TurnEnd: true}
+}
+
+func (p *routeProc) nextSent(t *testing.T) string {
+	t.Helper()
+	select {
+	case s := <-p.sent:
+		return s
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no turn was sent")
+		return ""
+	}
+}
+
+type routeKeys struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (k *routeKeys) Mint(string) (string, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.n++
+	return fmt.Sprintf("route-test-key-%d", k.n), nil
+}
+
+func (k *routeKeys) Ensure(string, string) error { return nil }
+
+// routeLog records the token route's answers: each call's op, status, and
+// body, and announces each call as it arrives.
+type routeLog struct {
+	next    http.Handler
+	arrived chan string
+	mu      sync.Mutex
+	calls   []routeAnswer
+}
+
+type routeAnswer struct {
+	op   string
+	code int
+	body string
+}
+
+func (l *routeLog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	op := strings.TrimPrefix(r.URL.Path, wsagent.RoutePrefix+"/by-token/")
+	select {
+	case l.arrived <- op:
+	default:
+	}
+	rec := httptest.NewRecorder()
+	l.next.ServeHTTP(rec, r)
+	l.mu.Lock()
+	l.calls = append(l.calls, routeAnswer{op: op, code: rec.Code, body: rec.Body.String()})
+	l.mu.Unlock()
+	for k, v := range rec.Header() {
+		w.Header()[k] = v
+	}
+	w.WriteHeader(rec.Code)
+	_, _ = w.Write(rec.Body.Bytes())
+}
+
+func (l *routeLog) last(t *testing.T, op string) routeAnswer {
+	t.Helper()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := len(l.calls) - 1; i >= 0; i-- {
+		if l.calls[i].op == op {
+			return l.calls[i]
+		}
+	}
+	t.Fatalf("no %s call reached the route", op)
+	return routeAnswer{}
+}
+
+// TestPiForwardDrivesTheRealTokenRoute: a Pi worker's ws-mcp forwards each
+// pi.* call to the daemon's real token route (a wsagent runner behind
+// httptest) on the token the runner issued that worker: spawn, list, wait,
+// send, transcript, and stop, with the route's status codes and the JSON
+// the forwarder decodes and returns.
+func TestPiForwardDrivesTheRealTokenRoute(t *testing.T) {
+	setPiVersion(t, "", errors.New("no pi here"))
+	setupMailboxTestEnv(t)
+	cfg := piTierOptions()
+	for tier, model := range map[string]string{"small": "prov/small-model", "medium": "prov/medium-model"} {
+		if _, err := wsconfig.SetGlobalAgentsTierForHarness(cfg, tier, "", model, wsagent.PiTierHarness, "low"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := t.TempDir()
+	initGit(t, root)
+	backend := &routeBackend{}
+	dir := t.TempDir()
+	runner := wsagent.NewRunner(wsagent.Options{
+		Dir:      dir,
+		Backends: map[string]wsagent.Backend{wsagent.BackendPi: backend},
+		Keys:     &routeKeys{},
+		Config:   cfg,
+		WSMCP: func(root string) (wsagent.MCPCommand, error) {
+			return wsagent.MCPCommand{Command: "/bin/ws-mcp", Args: []string{"serve", "--stdio", "--root", root}}, nil
+		},
+	})
+	log := &routeLog{next: runner.Handler(), arrived: make(chan string, 1)}
+	daemon := httptest.NewServer(log)
+	defer daemon.Close()
+	runner.SetEndpoint(daemon.URL)
+	runner.Start(nil)
+	defer runner.Close()
+
+	w, err := runner.Spawn(wsagent.SpawnSpec{Profile: wsagent.PiWorkerProfile, Root: root, Prompt: "work", Tier: "medium", Label: "worker", Parent: &wsagent.ParentRef{Kind: wsagent.ParentLead, ReplyID: "leadreplyid"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, wp := backend.waitStart(t, 0)
+	wp.nextSent(t)
+	token, endpoint := spec.WSMCP.Env[wsagent.EnvPiToken], spec.WSMCP.Env[wsagent.EnvPiEndpoint]
+	if token == "" || endpoint != daemon.URL {
+		t.Fatalf("the worker's ws-mcp env = %v", spec.WSMCP.Env)
+	}
+
+	t.Setenv(envAllowedTools, "pi.spawn,pi.send,pi.list,pi.stop,pi.transcript,pi.wait")
+	t.Setenv(wsagent.EnvPiToken, token)
+	t.Setenv(wsagent.EnvPiEndpoint, endpoint)
+	s := NewServer(root, "test")
+	defer s.Close()
+	key, err := s.sessions.mint(root, roleDelegate, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	asJSON := func(id int, tool string, args map[string]any, out any) {
+		t.Helper()
+		if args == nil {
+			args = map[string]any{}
+		}
+		args["format"] = "json"
+		raw := callToolWithKey(t, s, id, key, tool, args)
+		if err := json.Unmarshal([]byte(raw), out); err != nil {
+			t.Fatalf("%s did not answer JSON: %q", tool, raw)
+		}
+	}
+
+	// spawn: 201 with the child's state.
+	var kid piChildOut
+	asJSON(2, "pi.spawn", map[string]any{"prompt": "sub task", "tier": "small", "label": "sub"}, &kid)
+	if a := log.last(t, "spawn"); a.code != http.StatusCreated {
+		t.Fatalf("spawn = %d %s", a.code, a.body)
+	}
+	if kid.ID == "" || kid.Status == wsagent.StatusClosed || kid.Tier != "small" || kid.Model != "prov/small-model" || kid.Effort != "low" || kid.Label != "sub" || kid.Cwd != root {
+		t.Fatalf("pi.spawn = %+v", kid)
+	}
+	_, kp := backend.waitStart(t, 1)
+	if got := kp.nextSent(t); got != "sub task" {
+		t.Fatalf("the child's first turn = %q", got)
+	}
+	if st, err := runner.Get(kid.ID); err != nil || st.Parent == nil || st.Parent.Kind != wsagent.ParentConversation || st.Parent.ReplyID != w.ID {
+		t.Fatalf("the child's parent = %+v, %v", st, err)
+	}
+
+	// A refusal reaches the worker naming the tool once.
+	out := callToolWithKey(t, s, 3, key, "pi.spawn", map[string]any{"prompt": "x", "tier": "large"})
+	if a := log.last(t, "spawn"); a.code != http.StatusForbidden {
+		t.Fatalf("an over-tier spawn = %d %s", a.code, a.body)
+	}
+	if !strings.Contains(out, `pi.spawn: tier "large" is above`) || strings.Contains(out, "pi.spawn: pi.spawn") {
+		t.Fatalf("the refusal = %q", out)
+	}
+
+	// list: 200 with the holder's own children.
+	var listed []piChildOut
+	asJSON(4, "pi.list", nil, &listed)
+	if a := log.last(t, "list"); a.code != http.StatusOK || !strings.Contains(a.body, `"conversations":[`) {
+		t.Fatalf("list = %d %s", a.code, a.body)
+	}
+	if len(listed) != 1 || listed[0].ID != kid.ID {
+		t.Fatalf("pi.list = %+v", listed)
+	}
+
+	// wait on a turn whose report already reached the worker: its status
+	// alone, marked delivered.
+	kp.reply("first result")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		rec, err := wsagent.ReadRecord(dir, w.ID)
+		if err == nil && len(rec.Reports) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the child's report was not kept for the worker: %+v, %v", rec, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	var handed wsagent.TurnResult
+	asJSON(5, "pi.wait", map[string]any{"id": kid.ID, "timeout_s": 2}, &handed)
+	if a := log.last(t, "wait"); a.code != http.StatusOK {
+		t.Fatalf("wait = %d %s", a.code, a.body)
+	}
+	if handed.ID != kid.ID || handed.Status != wsagent.TurnDone || !handed.Delivered || handed.Message != "" {
+		t.Fatalf("a wait on a handed report = %+v", handed)
+	}
+	if out := callToolWithKey(t, s, 6, key, "pi.wait", map[string]any{"id": kid.ID, "timeout_s": 2}); !strings.Contains(out, "already reached you") || strings.Contains(out, "first result") {
+		t.Fatalf("pi.wait text on a handed report = %q", out)
+	}
+
+	// send: 200; the wait for the turn it starts is that turn's report.
+	var sent piChildOut
+	asJSON(7, "pi.send", map[string]any{"id": kid.ID, "message": "more"}, &sent)
+	if a := log.last(t, "send"); a.code != http.StatusOK || sent.ID != kid.ID {
+		t.Fatalf("send = %d %s (%+v)", a.code, a.body, sent)
+	}
+	if got := kp.nextSent(t); got != "more" {
+		t.Fatalf("the sent turn = %q", got)
+	}
+	for len(log.arrived) > 0 {
+		<-log.arrived
+	}
+	waited := make(chan wsagent.TurnResult, 1)
+	go func() {
+		var res wsagent.TurnResult
+		asJSON(8, "pi.wait", map[string]any{"id": kid.ID, "timeout_s": 5}, &res)
+		waited <- res
+	}()
+	if op := <-log.arrived; op != "wait" {
+		t.Fatalf("the route got %q", op)
+	}
+	// The route registers the wait right after the request arrives.
+	time.Sleep(50 * time.Millisecond)
+	kp.reply("second result")
+	if res := <-waited; res.ID != kid.ID || res.Status != wsagent.TurnDone || res.Message != "second result" || res.Delivered {
+		t.Fatalf("the wait = %+v", res)
+	}
+
+	// transcript: 200 with the ring's records.
+	var transcript []map[string]any
+	asJSON(9, "pi.transcript", map[string]any{"id": kid.ID}, &transcript)
+	if a := log.last(t, "transcript"); a.code != http.StatusOK || !strings.Contains(a.body, `"records":[`) {
+		t.Fatalf("transcript = %d %s", a.code, a.body)
+	}
+	if len(transcript) == 0 {
+		t.Fatalf("pi.transcript is empty")
+	}
+
+	// stop: 200 with the closed child; the list shows it closed.
+	var stopped piChildOut
+	asJSON(10, "pi.stop", map[string]any{"id": kid.ID}, &stopped)
+	if a := log.last(t, "stop"); a.code != http.StatusOK || stopped.Status != wsagent.StatusClosed {
+		t.Fatalf("stop = %d %s (%+v)", a.code, a.body, stopped)
+	}
+	asJSON(11, "pi.list", nil, &listed)
+	if len(listed) != 1 || listed[0].Status != wsagent.StatusClosed {
+		t.Fatalf("pi.list after the stop = %+v", listed)
+	}
+
+	// An id that is not the holder's own child: 404.
+	if out := callToolWithKey(t, s, 12, key, "pi.wait", map[string]any{"id": w.ID}); !strings.Contains(out, "is not one of this conversation's Pi subagents") {
+		t.Fatalf("a wait on a foreign id = %q", out)
+	}
+	if a := log.last(t, "wait"); a.code != http.StatusNotFound {
+		t.Fatalf("a foreign id = %d %s", a.code, a.body)
+	}
+
+	// A token the runner did not issue: 401.
+	resp, err := http.Post(daemon.URL+wsagent.RoutePrefix+"/by-token/list", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no token = %d", resp.StatusCode)
 	}
 }

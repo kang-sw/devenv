@@ -287,7 +287,9 @@ class LauncherProxyTest(unittest.TestCase):
         self.launcher = load_launcher()
         self.tmp = tempfile.TemporaryDirectory(prefix="ws-launcher-proxy.")
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        # Resolved: the launcher reports real paths, and macOS's temp dir
+        # is a /var symlink to /private/var.
+        self.root = Path(self.tmp.name).resolve()
         self.cache = self.root / "cache"
         self.cache.mkdir()
         self.daemon_dir = self.cache / "dashboard"

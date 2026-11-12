@@ -225,8 +225,9 @@ func PiTierRefusal(tool, tier string, tiers map[string]wsconfig.AgentTier) error
 type ChildSpawn struct {
 	Prompt string `json:"prompt"`
 	Tier   string `json:"tier"`
-	// Cwd is absolute, or relative to the holder's root; empty is that
-	// root.
+	// Cwd is absolute, or relative to the holder's own working directory
+	// (Record.workDir: a worker in a worktree spawns into that worktree);
+	// empty is that directory.
 	Cwd   string `json:"cwd,omitempty"`
 	Label string `json:"label,omitempty"`
 }
@@ -267,12 +268,12 @@ func (r *Runner) spawnFor(caller *conv, req ChildSpawn) (State, error) {
 	if !ok {
 		return State{}, badRequest("%v", PiTierRefusal(tool, tier, tiers))
 	}
-	cwd := strings.TrimSpace(req.Cwd)
+	cwd, base := strings.TrimSpace(req.Cwd), rec.workDir()
 	switch {
 	case cwd == "":
-		cwd = rec.Root
+		cwd = base
 	case !filepath.IsAbs(cwd):
-		cwd = filepath.Join(rec.Root, cwd)
+		cwd = filepath.Join(base, cwd)
 	}
 	label := req.Label
 	if strings.TrimSpace(label) == "" {
@@ -607,9 +608,9 @@ func (c *conv) holdsReport() bool {
 }
 
 // openChildOf reports whether the conversation is an open child of parent:
-// a message was sent it that no settled turn covered yet (one held for its
-// own children included), a turn of it runs, or a report of it waits to be
-// handed over. A closed child is not open. A settle clears TurnOpen and
+// a message was sent it that no settled turn covered yet and the page did
+// not cancel (voidCancelled), a turn of it runs or is held for its own
+// children, or a report of it waits to be handed over. A closed child is not open. A settle clears TurnOpen and
 // adds the pending report in one record update (publish), so no read
 // falls between them.
 func (c *conv) openChildOf(parent ParentRef) bool {
@@ -618,7 +619,7 @@ func (c *conv) openChildOf(parent ParentRef) bool {
 	if c.closed || c.rec.Parent == nil || *c.rec.Parent != parent {
 		return false
 	}
-	return c.rec.TurnOpen || len(c.rec.PendingReports) > 0 || len(c.rec.Queued) > 0 || c.sends > c.settled.mark
+	return c.rec.TurnOpen || len(c.rec.PendingReports) > 0 || len(c.rec.Queued) > 0 || c.holding || c.sends > max(c.settled.mark, c.voided)
 }
 
 // releaseHeld reports the done turn held for the children (settleTurn)
@@ -629,8 +630,21 @@ func (c *conv) releaseHeld() {
 		return
 	}
 	res := *c.heldRes
-	c.heldRes = nil
+	c.hold(nil)
 	c.publish(res)
+}
+
+// releaseLater releases conversation id's done turn held for its
+// children (releaseHeld) off the caller's goroutine, which may be another
+// conversation's loop: no loop waits on another's.
+func (r *Runner) releaseLater(id string) {
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		if c := r.conv(id); c != nil {
+			c.do(c.releaseHeld)
+		}
+	}()
 }
 
 // descendants are conversation id's open descendants through
@@ -672,6 +686,8 @@ var waitChecked func()
 // (the token route's): a turn that settles while it waits is handed to no
 // other path (publish), and a settled turn it answers with takes that
 // turn's pending report, so the wait's answer is the report's delivery.
+// A turn whose report the runner already handed to the parent answers
+// such a wait with its status alone, marked Delivered.
 func (r *Runner) wait(ctx context.Context, id string, timeout time.Duration, asParent bool) (TurnResult, error) {
 	r.mu.Lock()
 	c, open := r.convs[id]
@@ -713,9 +729,19 @@ func (r *Runner) wait(ctx context.Context, id string, timeout time.Duration, asP
 			return TurnResult{}, false, next, ended
 		}
 		if asParent && report != "" {
+			// The turn's report is this wait's to deliver only while it
+			// still waits in the record: one the runner took meanwhile
+			// already reached the parent, so the answer says so instead
+			// of repeating it.
+			handed := false
 			c.update(func(rec *Record) {
+				n := len(rec.PendingReports)
 				rec.PendingReports = slices.DeleteFunc(rec.PendingReports, func(p PendingReport) bool { return p.ID == report })
+				handed = len(rec.PendingReports) == n
 			})
+			if handed {
+				last.Message, last.Error, last.Delivered = "", "", true
+			}
 		}
 		return last, true, nil, false
 	}

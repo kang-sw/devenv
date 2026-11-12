@@ -399,6 +399,10 @@ func formatPiWait(res wsagent.TurnResult, later string) string {
 		fmt.Fprintf(&b, "Pi subagent %s: closed\n", res.ID)
 		return b.String()
 	}
+	if res.Delivered {
+		fmt.Fprintf(&b, "Pi subagent %s: turn %s; its report already reached you (steered into your turn or sent as your next message), so it is not repeated here\n", res.ID, res.Status)
+		return b.String()
+	}
 	fmt.Fprintf(&b, "Pi subagent %s: turn %s", res.ID, res.Status)
 	if res.Error != "" {
 		fmt.Fprintf(&b, ": %s", res.Error)

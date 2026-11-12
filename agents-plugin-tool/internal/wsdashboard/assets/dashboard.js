@@ -393,7 +393,7 @@
   function pickKey(b) { return (b.getAttribute("data-opt") || "") + "|" + (b.getAttribute("data-v") || ""); }
   function readAnswers(el) {
     var out = {};
-    q(".card[data-id], .arow[data-id], .crow[data-id], .srow[data-id]", el).forEach(function (item) {
+    q(".card[data-id], .arow[data-id], .ckrow[data-id], .srow[data-id]", el).forEach(function (item) {
       var s = {}, note = item.querySelector("textarea.note"), box = item.querySelector("label.ack > input, label.ck > input");
       var pick = item.querySelector('.opt[data-opt][aria-pressed="true"], .btn[data-v][aria-pressed="true"]');
       if (pick) s.pick = pickKey(pick);
@@ -424,7 +424,7 @@
     if (on) item.setAttribute("data-no", ""); else item.removeAttribute("data-no");
   }
   function writeAnswers(el, saved) {
-    q(".card[data-id], .arow[data-id], .crow[data-id], .srow[data-id]", el).forEach(function (item) {
+    q(".card[data-id], .arow[data-id], .ckrow[data-id], .srow[data-id]", el).forEach(function (item) {
       var s = saved[item.getAttribute("data-id")];
       if (!s) return;
       var note = item.querySelector("textarea.note"), box = item.querySelector("label.ack > input, label.ck > input");
@@ -1157,7 +1157,7 @@
   function putChip(c) { if (!chips[c.id]) chipOrder.push(c.id); chips[c.id] = c; }
   function dropChip(id) { delete chips[id]; chipOrder = chipOrder.filter(function (x) { return x !== id; }); }
   function boardItem(id) {
-    return boardQ('.card[data-id="' + id + '"], .arow[data-id="' + id + '"], .crow[data-id="' + id + '"], .srow[data-id="' + id + '"]')[0] || null;
+    return boardQ('.card[data-id="' + id + '"], .arow[data-id="' + id + '"], .ckrow[data-id="' + id + '"], .srow[data-id="' + id + '"]')[0] || null;
   }
   // readItem is a board item's answer as a chip; null when it has none.
   function readItem(item) {
@@ -1191,7 +1191,7 @@
   // syncChips takes the answers of the items on the board into the chips.
   function syncChips() {
     if (!region("board") || !cchips) return;
-    boardQ(".card[data-id], .arow[data-id], .crow[data-id], .srow[data-id]").forEach(function (item) {
+    boardQ(".card[data-id], .arow[data-id], .ckrow[data-id], .srow[data-id]").forEach(function (item) {
       var c = readItem(item), id = item.getAttribute("data-id");
       if (c) putChip(c); else if (chips[id]) dropChip(id);
     });
@@ -1723,7 +1723,7 @@
   // itemIdAt is the ID of the item card n lies in, "" outside every card; the
   // card's element id carries it on every kind (a settled row has no data-id).
   function itemIdAt(n) {
-    var el = selEl(n), item = el && el.closest && el.closest(".card[id], .arow[id], .crow[id], .srow[id]");
+    var el = selEl(n), item = el && el.closest && el.closest(".card[id], .arow[id], .ckrow[id], .srow[id]");
     var m = item && /^item-([0-9]{1,6})$/.exec(item.getAttribute("id") || "");
     return m ? m[1] : "";
   }
@@ -4988,7 +4988,7 @@
   // parsed detached instead, once per new hash (tlHeld), and the counts read
   // it in place of the live region until the tab shows again.
   var TL_REGIONS = mode === "index" ? { sessions: 1 } : { board: 1, convlive: 1, tree: 1 };
-  var TL_ASK = '.card.policy[id^="item-"], .arow[id^="item-"], .crow[data-id]:not([data-assumed])';
+  var TL_ASK = '.card.policy[id^="item-"], .arow[id^="item-"], .ckrow[data-id]:not([data-assumed])';
   var tlHeld = {}, tlPill = 0, tlTk = 0, tlAsks = -1, tlPerm = 0, tlN = -1, tlBase = null;
   function tlRetitle() {
     var n = tlTk + tlPerm + (tlAsks >= 0 ? tlAsks : tlPill);

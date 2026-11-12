@@ -117,6 +117,10 @@ const devAssetDir = "internal/wswhiteboard/assets"
 // client table leaves them out.
 const trackerKeyPrefix = "js.tk."
 
+// codeKeyPrefix marks the copy button's client strings (code.js), the only
+// ones a topic-body frame's script reads.
+const codeKeyPrefix = "js.wb.copy"
+
 // buildAssets reads every asset by file name through read and parses the
 // template set.
 func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
@@ -502,7 +506,9 @@ func (p *pageData) framedDoc(topic string, body template.HTML, stale, mermaid bo
 	doc.WriteString(string(a.css))
 	doc.WriteString("\n" + frameCSS + `</style></head><body class="doc-frame"><div class="doc-body md` + staleClass(stale) + `">`)
 	doc.WriteString(string(body))
-	doc.WriteString(`</div><script>` + a.docFrame + `</script>`)
+	// The frame cannot reach the host page's wsT, so it carries its own over
+	// the copy button's two strings (code.js), in the page's language.
+	doc.WriteString(`</div><script>` + string(wsi18n.SubsetScript(p.Lang, codeKeyPrefix)) + "\n" + a.docFrame + `</script>`)
 	if mermaid {
 		doc.WriteString(`<script src="` + template.HTMLEscapeString(p.MermaidFile()) + `"></script><script>wbDocMermaid(function () {` + string(a.mermaidInit) + `});</script>`)
 	}
