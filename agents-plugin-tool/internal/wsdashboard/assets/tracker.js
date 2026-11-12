@@ -3272,6 +3272,12 @@
 
   // the dialog kinds a data-act opens (a host adds its own through ext.dialogs); every item
   // action is the context menu's or inline, so only the store-wide forms stay modal
+  // one priority-level row; labels count from 1, while the radio value and the field name stay 0-based
+  var PRIO_MAX = 9;
+  function prioRow(pi, name, checked) {
+    return '<div class="fld inline plevel"><input type="radio" name="pdef" value="' + pi + '"' + (checked ? ' checked' : '') + ' aria-label="' + esc(wsT("js.tk.form.pdefault", pi + 1)) + '"' + tipAttr(wsT("js.tk.form.pdefault", pi + 1)) + '>' +
+      '<input type="text" name="pname' + pi + '" value="' + esc(name) + '" placeholder="' + esc(wsT("js.tk.form.plevel", pi + 1)) + '" aria-label="' + esc(wsT("js.tk.form.plevel", pi + 1)) + '"></div>';
+  }
   var DIALOGS = { profile: 1, admin: 1, sprio: 1, satt: 1, slabel: 1 };
   function dialogHtml(kind, d) {
     if (kind === 'register') return formHtml(kind, d, registerT(d)); // these need no store view
@@ -3302,10 +3308,7 @@
         // one row per level, lowest first, plus blank rows up to the 9-level cap; blank rows
         // are dropped on save, and the radio picks the default
         var pn = VS.priority.names, rows = '';
-        for (var pi = 0; pi < Math.min(9, pn.length + 2); pi++) {
-          rows += '<div class="fld inline plevel"><input type="radio" name="pdef" value="' + pi + '"' + (pi === VS.priority.default ? ' checked' : '') + ' aria-label="' + esc(wsT("js.tk.form.pdefault", pi)) + '"' + tipAttr(wsT("js.tk.form.pdefault", pi)) + '>' +
-            '<input type="text" name="pname' + pi + '" value="' + esc(pn[pi] || '') + '" placeholder="' + esc(wsT("js.tk.form.plevel", pi)) + '" aria-label="' + esc(wsT("js.tk.form.plevel", pi)) + '"></div>';
-        }
+        for (var pi = 0; pi < Math.min(PRIO_MAX, pn.length + 2); pi++) rows += prioRow(pi, pn[pi] || '', pi === VS.priority.default);
         T = [wsT("js.tk.dlg.prio.title"), wsT("js.tk.dlg.prio.intro"), rows, wsT("js.tk.dlg.save")];
         break;
       }
@@ -5893,6 +5896,15 @@
         else if (t.name === 'given' && df.elements.nid.hasAttribute('data-auto')) df.elements.nid.value = asciiId(t.value);
       }
       profileView(df);
+    });
+    // typing into the last priority row opens the next blank one, up to PRIO_MAX
+    document.addEventListener('input', function (e) {
+      var pf = e.target.closest && e.target.closest('#tkdlg form[data-kind="sprio"]');
+      if (!pf || !/^pname\d+$/.test(e.target.name) || !e.target.value.trim()) return;
+      var pn = 0;
+      while (pf.elements['pname' + pn]) pn++;
+      if (e.target.name !== 'pname' + (pn - 1) || pn >= PRIO_MAX) return;
+      e.target.parentNode.insertAdjacentHTML('afterend', prioRow(pn, '', false));
     });
     document.addEventListener('input', function (e) {
       var f = e.target.closest && e.target.closest('#tkdlg form[data-kind="unregister"]');
