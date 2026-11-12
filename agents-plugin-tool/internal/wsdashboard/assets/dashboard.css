@@ -754,6 +754,12 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    the page scrolls */
 .dgrid.board { display: block; max-width: 900px; margin: 0 auto; }
 
+/* A changed topic's next body frame loads over the frame it replaces,
+   unseen and out of the layout, until it has loaded and drawn (the page
+   script's board morph, frameGraft). */
+.doc-body.framed { position: relative; }
+iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 0; pointer-events: none; }
+
 /* ===== drawer: the side panels pulled down from the top =====
    Fixed over the page on both session pages, so opening it moves nothing
    under it. .dr-in matches .dwrap's width; the clip reveals the sheet from

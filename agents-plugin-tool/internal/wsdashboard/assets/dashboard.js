@@ -476,7 +476,7 @@
       if (before) {
         var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });
         startMotion(moves.concat(slideBoard(el, before)));
-        ins.forEach(function (n) { q("iframe.doc-frame", n).forEach(function (f) { f.wbGrow = true; }); });
+        ins.forEach(function (n) { q("iframe.doc-frame", n).forEach(function (f) { if (!f.wbOut) f.wbGrow = true; }); });
       }
     } else {
       el.innerHTML = html;
@@ -558,7 +558,7 @@
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {
-    var src = frag(html), seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null;
+    var src = frag(html), seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [];
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n);
       if (k !== null) { live["t:" + k] = n; if (n.classList.contains("closed")) liveClosed.push(n); }
@@ -581,7 +581,11 @@
       // forgotten here, and later toggles are kept again.
       if (live[key] && n.classList.contains("closed") && !live[key].classList.contains("closed")) { forgetOpen(live[key]); forgetOpen(n); }
       if (live[key] && boardSeen[key] === h) { want.push(live[key]); delete live[key]; }
-      else { want.push(n); ins.push(n); }
+      else {
+        var g = live[key] && frameGraftable(live[key], n);
+        if (g) grafts.push(g);
+        want.push(n); ins.push(n);
+      }
     });
     boardSeen = seen;
     // Closed topics fetched past the cap (closed pages, each nested in the
@@ -615,9 +619,134 @@
     // woven into the wanted nodes at their places, and the board settles
     // around them. Stale nodes go first, so the kept ones that stay in
     // order are never moved (moving a frame reloads it), and a card is
-    // never moved at all.
-    window.WsCards.settle(el, window.WsCards.weave(want));
+    // never moved at all. A changed topic whose old section stays in place
+    // keeps that section and its body frame (frameGraft).
+    var woven = window.WsCards.weave(want);
+    frameGrafts(el, woven, grafts).forEach(function (g) {
+      frameGraft(g);
+      woven[woven.indexOf(g.n)] = g.old;
+      ins[ins.indexOf(g.n)] = g.old;
+    });
+    window.WsCards.settle(el, woven);
     return ins;
+  }
+  // --- a changed topic's body frame, double-buffered --------------------------
+  // A changed topic's new section would bring a new body frame, blank until
+  // its document loads and reports a height. Instead, when the topic stays
+  // open and its old section would stay where it stands (frameGrafts), the
+  // old section is kept: its content becomes the new section's, except the
+  // path down to the old body frame, and the new frame loads beside the old
+  // one, unseen and out of the layout (.doc-frame-next), at the old one's
+  // height. Once the new frame has loaded and drawn, it takes the old one's
+  // place in the same frame (frameShow, frameReveal); one that never loads
+  // shows after frameRevealMs anyway.
+  var frameRevealMs = 1500;
+  // frameChain is the path from frame f up to section sec, f first, or null.
+  function frameChain(f, sec) {
+    var c = [];
+    for (var x = f; x && x !== sec; x = x.parentNode) c.push(x);
+    return x === sec ? c.concat(sec) : null;
+  }
+  // frameGraftable returns the graft of new section n into old section old
+  // (both open, each with a body frame of the same topic document on paths
+  // of the same shape), or null.
+  function frameGraftable(old, n) {
+    if (old.classList.contains("closed") || n.classList.contains("closed")) return null;
+    var of = q("iframe.doc-frame:not(.doc-frame-next)", old)[0], nf = q("iframe.doc-frame", n)[0];
+    if (!of || !nf || of.getAttribute("data-doc") !== nf.getAttribute("data-doc")) return null;
+    var oc = frameChain(of, old), nc = frameChain(nf, n);
+    if (!oc || !nc || oc.length !== nc.length) return null;
+    for (var i = 0; i < oc.length; i++) if (oc[i].tagName !== nc[i].tagName) return null;
+    return { old: old, n: n, oc: oc, nc: nc };
+  }
+  // frameGrafts returns the grafts that move nothing settling el into want
+  // would not move anyway, each graft's new section standing for its old
+  // one: moving a frame reloads it, so a topic whose old section would move
+  // (an update moves its topic to the head), or would push kept topics
+  // around it, takes its new section as before. When the grafts together
+  // move something, each one that alone moves nothing is kept, if those
+  // together still move nothing.
+  function frameGrafts(el, want, grafts) {
+    if (!grafts.length) return grafts;
+    var base = settleMoves(el, want);
+    function still(gs) {
+      var by = new Map(gs.map(function (g) { return [g.n, g.old]; })), ok = true;
+      settleMoves(el, want.map(function (n) { return by.get(n) || n; })).forEach(function (n) { if (!base.has(n)) ok = false; });
+      return ok;
+    }
+    if (still(grafts)) return grafts;
+    var each = grafts.filter(function (g) { return still([g]); });
+    return each.length && still(each) ? each : [];
+  }
+  // settleMoves returns the nodes already in el that settling el into want
+  // moves. It replays WsCards.settle (cards.js) on a list: keep the two in
+  // step.
+  function settleMoves(el, want) {
+    var keep = new Set(want), moved = new Set(), i = 0;
+    var cur = Array.prototype.filter.call(el.childNodes, function (n) { return keep.has(n); });
+    want.forEach(function (n) {
+      if (cur[i] === n) { i++; return; }
+      var j = cur.indexOf(n);
+      if (j >= 0 && n.nodeType === 1 && n.hasAttribute("data-card")) {
+        var past = cur.splice(i, j - i);
+        past.forEach(function (p) { moved.add(p); });
+        cur.splice.apply(cur, [i + 1, 0].concat(past));
+      } else {
+        if (j >= 0) { moved.add(n); cur.splice(j, 1); }
+        cur.splice(i, 0, n);
+      }
+      i++;
+    });
+    return moved;
+  }
+  // frameGraft moves g's new section content into its old section, level by
+  // level down the frame's path: each kept element takes the new element's
+  // attributes and children, except its child on the path, which stays.
+  // At the bottom the new frame goes in after the old one, pending.
+  function frameGraft(g) {
+    var of = g.oc[0], nf = g.nc[0];
+    nf.classList.add("doc-frame-next");
+    nf.setAttribute("tabindex", "-1");
+    nf.setAttribute("aria-hidden", "true");
+    nf.wbNext = true;
+    nf.wbOld = of;
+    of.wbOut = true;
+    nf.addEventListener("load", function () { frameShow(nf); });
+    setTimeout(function () { frameReveal(nf); }, frameRevealMs);
+    for (var i = g.oc.length - 1; i > 0; i--) {
+      var oa = g.oc[i], na = g.nc[i], oc = g.oc[i - 1], nc = g.nc[i - 1], before = true;
+      Array.prototype.slice.call(oa.attributes).forEach(function (a) { if (!na.hasAttribute(a.name)) oa.removeAttribute(a.name); });
+      Array.prototype.forEach.call(na.attributes, function (a) { if (oa.getAttribute(a.name) !== a.value) oa.setAttribute(a.name, a.value); });
+      Array.prototype.slice.call(oa.childNodes).forEach(function (c) { if (c !== oc) oa.removeChild(c); });
+      Array.prototype.slice.call(na.childNodes).forEach(function (c) {
+        if (c === nc) { before = false; if (c === nf) oa.appendChild(c); }
+        else if (before) oa.insertBefore(c, oc);
+        else oa.appendChild(c);
+      });
+    }
+  }
+  // frameShow reveals pending frame f once it has loaded and drawn: a
+  // frame revealed in the frame it loads in can still show blank for a
+  // frame, so the reveal waits two frames more.
+  function frameShow(f) {
+    if (f.wbShowing) return;
+    f.wbShowing = true;
+    requestAnimationFrame(function () { requestAnimationFrame(function () { frameReveal(f); }); });
+  }
+  // frameReveal shows pending frame f in its old frame's place, at the old
+  // frame's height, and asks it for its height, which the frame message
+  // handler sets (easing to it in a moving swap, wbGrow). A frame no longer
+  // on the page (a later swap replaced it) is left alone.
+  function frameReveal(f) {
+    if (!f.wbNext || !f.isConnected) return;
+    f.wbNext = false;
+    f.classList.remove("doc-frame-next");
+    f.removeAttribute("tabindex");
+    f.removeAttribute("aria-hidden");
+    var o = f.wbOld;
+    f.wbOld = null;
+    if (o && o.parentNode) o.parentNode.removeChild(o);
+    if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "size" }, "*");
   }
   // Board motion: a board swap's inserted topic sections grow from the
   // height they had before (a topic the board did not hold grows from 0)
@@ -2279,6 +2408,9 @@
     if (!f || !m || typeof m !== "object") return;
     if (m.wbDoc === "height") {
       var h = num(m.height);
+      // A pending frame (frameGraft) keeps the old frame's height: once
+      // shown it is asked for its height again.
+      if (f.wbNext) { postTheme(f); return; }
       if (h >= 0 && h < 100000) {
         var from = f.getBoundingClientRect().height, to = Math.ceil(h);
         f.style.height = to + "px";
@@ -2304,12 +2436,13 @@
       relayImage(f, m);
     }
   });
-  // A swap re-creates a changed topic's frame, which starts at no height
-  // until it posts one; it takes the old frame of the same topic's height
-  // meanwhile.
+  // A swap re-creates a changed topic's frame (or loads its next one beside
+  // the old one, frameGraft), which starts at no height until it posts one;
+  // it takes the old frame of the same topic's height meanwhile. A pending
+  // next frame's height is not the topic's.
   function frameHeights(el) {
     var h = {};
-    q("iframe.doc-frame", el).forEach(function (f) { if (f.style.height) h[f.getAttribute("data-doc")] = f.style.height; });
+    q("iframe.doc-frame:not(.doc-frame-next)", el).forEach(function (f) { if (f.style.height) h[f.getAttribute("data-doc")] = f.style.height; });
     return h;
   }
   function setFrameHeights(el, h) {
