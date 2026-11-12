@@ -1007,7 +1007,9 @@ describe('delivery', () => {
     await advance()
     h.answers.push(new Error('server gone'))
     dash.userMessage('lost?', 'terminal')
-    await advance()
+    // The flush gap is longer than the retry wait's half, so step to the failed call itself: the wait counts from it.
+    const before = h.calls.length
+    while (h.calls.length === before) await advance(10)
     const failed = h.calls.length
     // Nothing more until the retry wait has passed.
     await advance(RETRY_MS / 2)
@@ -1305,7 +1307,7 @@ describe('compaction', () => {
     dash.turnStarted(undefined)
     await advance()
     await advance()
-    expect(sent().filter((e) => e.kind === 'compact')).toEqual([{ kind: 'compact', phase: 'start', trigger: 'auto', at: 1_100 }])
+    expect(sent().filter((e) => e.kind === 'compact')).toEqual([{ kind: 'compact', phase: 'start', trigger: 'auto', at: 1_000 + FLUSH_INTERVAL_MS }])
     h.answers.push(new Error('server gone'))
     dash.compactEnded('auto', true)
     await advance()
