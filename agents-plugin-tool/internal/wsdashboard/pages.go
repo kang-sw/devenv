@@ -278,8 +278,9 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 		"shortID":  shortID,
 		"marked":   func(text string) template.HTML { return markedText(lang, text) },
 		// The tool summary's token and batch lines.
-		"tokenText":  func(u *wslive.TokenUsage) string { return tokenText(lang, u) },
-		"tokenTitle": func(u *wslive.TokenUsage) string { return tokenTitle(lang, u) },
+		"tokenText":  func(requests int, u *wslive.TokenUsage) string { return tokenText(lang, requests, u) },
+		"tokenTitle": func(requests int, u *wslive.TokenUsage) string { return tokenTitle(lang, requests, u) },
+		"requests":   summaryRequests,
 		"batchMeta":  func(b wslive.ToolBatch) string { return batchMeta(lang, b) },
 		"phaseWord":  func(phase string) string { return phaseWord(lang, phase) },
 		"flagText":   func(flag string) string { return flagText(lang, flag) },
@@ -419,28 +420,44 @@ func compactTokens(n int64) string {
 	return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
 }
 
-// tokenText is a token usage in one compact line: input and output, then
-// prompt-cache reads and writes when there were any.
-func tokenText(lang string, u *wslive.TokenUsage) string {
+// tokenText is a token usage in one compact line: the model requests it
+// covers when more than one, the whole prompt the model read (input plus
+// cache reads and writes) with the cache-write part as a trailing +N when
+// there was any, then the output.
+func tokenText(lang string, requests int, u *wslive.TokenUsage) string {
 	if u == nil {
 		return ""
 	}
-	parts := []string{wsi18n.T(lang, "tok.in", compactTokens(u.Input)), wsi18n.T(lang, "tok.out", compactTokens(u.Output))}
-	if u.CacheRead > 0 {
-		parts = append(parts, wsi18n.T(lang, "tok.cache", compactTokens(u.CacheRead)))
+	var parts []string
+	if requests > 1 {
+		parts = append(parts, wsi18n.T(lang, "tok.calls", requests))
 	}
+	prompt := wsi18n.T(lang, "tok.prompt", compactTokens(u.Input+u.CacheRead+u.CacheWrite))
 	if u.CacheWrite > 0 {
-		parts = append(parts, wsi18n.T(lang, "tok.write", compactTokens(u.CacheWrite)))
+		prompt += " +" + compactTokens(u.CacheWrite)
 	}
+	parts = append(parts, prompt, wsi18n.T(lang, "tok.out", compactTokens(u.Output)))
 	return strings.Join(parts, " · ")
 }
 
-// tokenTitle is a token usage's exact counts, for a title attribute.
-func tokenTitle(lang string, u *wslive.TokenUsage) string {
+// tokenTitle is a token usage's exact counts, for a title attribute: every
+// part tokenText folds together, named.
+func tokenTitle(lang string, requests int, u *wslive.TokenUsage) string {
 	if u == nil {
 		return ""
 	}
-	return wsi18n.T(lang, "tok.title", u.Input, u.Output, u.CacheRead, u.CacheWrite)
+	title := wsi18n.T(lang, "tok.title", commafy(u.Input+u.CacheRead+u.CacheWrite),
+		commafy(u.Input), commafy(u.CacheRead), commafy(u.CacheWrite), commafy(u.Output))
+	if requests > 1 {
+		title = wsi18n.T(lang, "tok.title.calls", requests) + " · " + title
+	}
+	return title
+}
+
+// summaryRequests is the model requests a tool summary covers: one per
+// batch, the omitted ones included.
+func summaryRequests(s *wslive.ToolSummary) int {
+	return len(s.Batches) + s.BatchesOmitted
 }
 
 // batchMeta is a tool summary batch line's trailing text: its duration,
@@ -463,7 +480,7 @@ func batchMeta(lang string, b wslive.ToolBatch) string {
 		parts = append(parts, wsi18n.T(lang, "count.failed", b.Failed))
 	}
 	if b.Usage != nil {
-		parts = append(parts, tokenText(lang, b.Usage))
+		parts = append(parts, tokenText(lang, 1, b.Usage))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -937,8 +954,8 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 // stream, its image, file view, files, history, closed-topic, worktree pool,
 // git status, log, and commit, attachment, and file browser routes, its
 // message, cancel, steer, interrupt, system-open, file browser host, git
-// refresh, git push, pull, and fetch, and worktree cleanup routes, and the
-// shared assets a page loads by relative path.
+// refresh, git push, pull, and fetch, worktree cleanup, and display label
+// routes, and the shared assets a page loads by relative path.
 func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/s/")
 	if replyID, sub, _ := strings.Cut(rest, "/"); sub == "message" || sub == "cancel" || sub == "steer" || sub == "interrupt" {
@@ -961,6 +978,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if sub == "worktrees/cleanup" {
 		d.handleWorktreeCleanup(w, r, replyID)
+		return
+	} else if sub == "label" {
+		d.handleSessionLabel(w, r, replyID)
 		return
 	}
 	if !readMethod(w, r) {

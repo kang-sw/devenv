@@ -2,6 +2,7 @@
 title: "Hosted sessions: a wrapped 4 MiB holder ring loses turn state on rejoin"
 related:
   261110-feat-ws-dashboard-headless-lead-sessions: hosted lead sessions, daemon rejoin
+completed: 2026-11-12
 ---
 
 # Hosted sessions: a wrapped 4 MiB holder ring loses turn state on rejoin
@@ -27,16 +28,29 @@ the peer session; traced in code on 2026-11-12.
   hosted context meter's `get_context_usage` answer (~29 KB, once per model)
   is a negligible share.
 
-## Open Decision Queue
+## Decisions
 
-Last ID: (29)
-
-(28) [open] [technical] Lead holders get a larger ring through a per-launch ring size (a `RingBytes` field on the launch call, passed as the existing `--ring-bytes`; 32-64 MiB, filled lazily), over raising `Manager.RingBytes` - that would grow every dashboard terminal's ring too. Internal Go API only, T0.
-
-(29) [open] [technical] When the ring still wraps, the rejoin handles it: `holderChild.event` drops `partial` on `gap`, and when `FirstSeq > HolderSeq+1` or a gap arrives during the replay with no turn boundary in the window, the conversation treats the turn as running and submits nothing until the harness's next idle signal (Claude `session_state_changed idle` / `result`, Pi `agent_end`), logging the loss, over trusting the replayed window - it misreads a running turn as idle.
+- Lead holders get a larger ring through a per-launch ring size (a
+  `RingBytes` field on the launch call, passed as the existing
+  `--ring-bytes`; 32-64 MiB, filled lazily). Internal Go API only, T0.
+  User board (28).
+  Rejected: raising `Manager.RingBytes`; it grows every dashboard terminal's
+  ring too.
+- When the ring still wraps, the rejoin handles it: `holderChild.event` drops
+  `partial` on `gap`, and when `FirstSeq > HolderSeq+1` or a gap arrives
+  during the replay with no turn boundary in the window, the conversation
+  treats the turn as running and submits nothing until the harness's next
+  idle signal (Claude `session_state_changed idle` / `result`, Pi
+  `agent_end`), logging the loss. User board (29).
+  Rejected: trusting the replayed window; it misreads a running turn as idle.
 
 ## Constraints
 
 - Manuals: `ai-docs/manuals/shipped-surface-boundary.md`,
   `ai-docs/manuals/release-compatibility.md`.
 - Heavy Go builds and tests run through `~/.local/bin/ws-rgo` on this machine.
+
+
+## Resolution (2026-11-12)
+
+Fixed in 1482a4b86 (merge 91be5e087): lead holders launch with a 32 MiB ring through wsholder LaunchSpec/LaunchWith (terminals keep the default); holderChild drops a partial line on gap; a rejoin that lost records with no turn boundary after the loss holds queued messages, mail, and steers until the harness's next idle signal, logging the loss once. Known limit: an actually idle harness whose ring kept no boundary shows running until an idle signal or a stop.

@@ -72,13 +72,18 @@ type fakeHolder struct {
 	pid     int
 	session json.RawMessage
 	spec    *wsholder.SpawnSpec
-	// ring is every record the holder holds; a record's sequence is its
-	// index plus one.
-	ring     []wsholder.Event
-	inputs   []string
-	attached bool
-	exited   bool
-	stream   *fakeStream
+	// ring is every record the holder was given; a record's sequence is
+	// its index plus one. first is how many of them have left the ring
+	// (trim): a replay and the status begin after them. lostFrom..lostTo-1
+	// are the records the next replay reports as a gap (gapOnReplay).
+	ring             []wsholder.Event
+	first            int
+	lostFrom, lostTo uint64
+	ringBytes        int
+	inputs           []string
+	attached         bool
+	exited           bool
+	stream           *fakeStream
 	// known is whether the running daemon's manager lists the holder: one
 	// an earlier daemon left is listed from the first scan on, as the real
 	// manager learns its holders by scanning.
@@ -184,9 +189,16 @@ func (f *fakeHolders) Scan() {
 			continue
 		}
 		h.attached, h.stream = true, newFakeStream()
-		for _, ev := range h.ring {
+		for _, ev := range h.ring[h.first:] {
+			if ev.Seq >= h.lostFrom && ev.Seq < h.lostTo {
+				if ev.Seq == h.lostFrom {
+					f.deliverLocked(h, wsholder.Event{Event: "gap", From: h.lostFrom, To: h.lostTo})
+				}
+				continue
+			}
 			f.deliverLocked(h, ev)
 		}
+		h.lostFrom, h.lostTo = 0, 0
 	}
 }
 
@@ -230,10 +242,11 @@ func (f *fakeHolders) newLocked(session json.RawMessage, attached bool) *fakeHol
 	return h
 }
 
-func (f *fakeHolders) Launch(session json.RawMessage) (string, error) {
+func (f *fakeHolders) LaunchWith(spec wsholder.LaunchSpec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	h := f.newLocked(slices.Clone(session), true)
+	h := f.newLocked(slices.Clone(spec.Session), true)
+	h.ringBytes = spec.RingBytes
 	f.ops = append(f.ops, "launch "+h.id)
 	return h.id, nil
 }
@@ -334,7 +347,7 @@ func (f *fakeHolders) Status(id string) (wsholder.AttachInfo, error) {
 	if h == nil {
 		return wsholder.AttachInfo{}, wsholder.ErrDetached
 	}
-	return wsholder.AttachInfo{Protocol: 1, Child: wsholder.ChildStatus{State: "running", PID: h.pid}, FirstSeq: 1, NextSeq: uint64(len(h.ring) + 1)}, nil
+	return wsholder.AttachInfo{Protocol: 1, Child: wsholder.ChildStatus{State: "running", PID: h.pid}, FirstSeq: uint64(h.first + 1), NextSeq: uint64(len(h.ring) + 1)}, nil
 }
 
 func (f *fakeHolders) Stop(id string) error {
@@ -366,6 +379,39 @@ func (f *fakeHolders) out(id string, lines ...string) {
 	for _, line := range lines {
 		f.appendLocked(h, wsholder.Event{Event: "output", Stream: "stdout", Data: []byte(line + "\n")})
 	}
+}
+
+// outRaw is a record of the child's output as the holder read it: data
+// with no line end is a partial record, the rest of its line follows.
+func (f *fakeHolders) outRaw(id, data string, partial bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.appendLocked(f.holders[id], wsholder.Event{Event: "output", Stream: "stdout", Data: []byte(data), Partial: partial})
+}
+
+// trim drops the holder's records up to sequence upto from its ring, as
+// the ring's byte budget does.
+func (f *fakeHolders) trim(id string, upto int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.holders[id].first = upto
+}
+
+// gapOnReplay makes the next replay report the records from..to-1 as a
+// gap, as when they leave the ring while the replay streams.
+func (f *fakeHolders) gapOnReplay(id string, from, to uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	h := f.holders[id]
+	h.lostFrom, h.lostTo = from, to
+}
+
+// launchRing is the ring size the holder was launched with (0: the
+// manager's default).
+func (f *fakeHolders) launchRing(id string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.holders[id].ringBytes
 }
 
 // exit ends the holder's child from its side.

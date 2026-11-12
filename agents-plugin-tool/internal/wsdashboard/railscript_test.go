@@ -59,8 +59,11 @@ var R = window.WsRail;
 var st = memStore(), d = R.drafts(st, 3);
 d.save("a", { text: "hello", mentions: [], sel: [5, 5] });
 check("a saved draft loads", d.load("a"), { text: "hello", mentions: [], sel: [5, 5] });
-d.save("a", { text: "", mentions: [], answers: {}, chips: [], refs: [], lost: [], open: {}, tab: "convo" });
+d.save("a", { text: "", mentions: [], answers: {}, chips: [], bmentions: [], refs: [], lost: [], open: {}, tab: "convo" });
 check("an empty draft clears", [d.load("a"), st.load("ws.dashboard.drafts")], [null, null]);
+d.save("a", { bmentions: [{ topic: "t", text: "x" }] });
+check("board mentions alone are a draft", !!d.load("a"), true);
+d.clear("a");
 d.save("b", { answers: { "topic:1": { note: "n" } } });
 d.save("c", { open: { "rended:/r": true } });
 d.save("e", { tab: "board" });
@@ -190,8 +193,8 @@ func TestRailScript(t *testing.T) {
 
 // railDraftPrelude stubs what dashboard.js's per-session drafts block reads
 // from the rest of the page script: the composer (text, mentions, images),
-// the board answers, the chips, the open details, the tab, the notice, and
-// a virtual clock.
+// the board answers, the chips, the board mentions, the open details, the
+// tab, the notice, and a virtual clock.
 const railDraftPrelude = `
 var now = 0, timers = [], tid = 0;
 function setTimeout(fn, ms) { var id = ++tid; timers.push({ id: id, at: now + (ms || 0), fn: fn }); return id; }
@@ -203,7 +206,9 @@ window.addEventListener = function (t, fn) { winListeners[t] = fn; };
 var WsRail = window.WsRail, rid = "sess1", live = true, railStore = memStore();
 var grid = new El("grid", { "data-tab": "convo" });
 var ctext = { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: function (a, b) { this.selectionStart = a; this.selectionEnd = b; } };
-var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [];
+var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [];
+function validMentions(l) { return Array.isArray(l) ? l.filter(function (m) { return m && m.topic && m.text; }) : []; }
+function renderChips() {}
 var MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
 function markerNums(text) { var out = {}, re = new RegExp(MARKER, "g"), m; while ((m = re.exec(text))) out[+m[1]] = true; return out; }
 function liveMention(m, v) { return v.slice(m.start, m.end) === m.text; }
@@ -225,7 +230,7 @@ function wsT(k, n) { return k + ":" + n; }
 // TestRailDraftRestore runs dashboard.js's per-session drafts block under
 // node: an edit saves the draft after the debounce; a reload restores the
 // composer text, mentions, selection, the reference images, the board
-// answers, the chips, the open details, and the board tab; a pasted image is
+// answers, the chips, the board mentions, the open details, and the board tab; a pasted image is
 // not kept, its marker is stripped, and the restore says so; the leave
 // guard asks only while a pasted image is held; a send clears the draft.
 func TestRailDraftRestore(t *testing.T) {
@@ -254,6 +259,7 @@ mentions = [{ start: 3, end: 7, text: "@bob", extra: 1 }];
 imgs = [{ n: 1, name: "a.png", ref: "00aa-1.png" }, { n: 2, name: "pasted.png", data: "xx" }];
 boardAnswers = { "3": { answer: "yes" }, "topic:2": { note: "keep it" } };
 chips = { "3": { id: "3", answer: "yes" } };
+bmentions = [{ topic: "plan", id: "3", text: "picked text" }];
 openState = { "rended:/w": true, "gone": false };
 grid.setAttribute("data-tab", "board");
 listeners.input();
@@ -262,11 +268,13 @@ advance(400);
 var saved = JSON.parse(railStore.load("ws.dashboard.draft.sess1"));
 check("the saved draft", [saved.text, saved.mentions, saved.sel, saved.refs, saved.lost, saved.open, saved.tab],
   [ctext.value, [{ start: 3, end: 7, text: "@bob" }], [6, 6], [{ ref: "00aa-1.png", name: "a.png", n: 1 }], [2], { "rended:/w": true }, "board"]);
+check("the saved board mentions", saved.bmentions, [{ topic: "plan", id: "3", text: "picked text" }]);
 check("the guard asks while a pasted image is held", (function () { var e = { preventDefault: function () {} }; winListeners.beforeunload(e); return e.returnValue; })(), "");
 
 // a reload of the page: empty composer and state, then the restore
-ctext.value = ""; mentions = []; imgs = []; chips = {}; items = {}; openState = {}; boardAnswers = {}; grid.setAttribute("data-tab", "convo");
+ctext.value = ""; mentions = []; imgs = []; chips = {}; items = {}; openState = {}; boardAnswers = {}; bmentions = []; grid.setAttribute("data-tab", "convo");
 restoreDraft();
+check("the board mentions come back", bmentions, [{ topic: "plan", id: "3", text: "picked text" }]);
 check("text without the pasted image's marker", ctext.value, "hi @bob see [Image #1] and end");
 check("mentions, selection, the reference image", [mentions, [ctext.selectionStart, ctext.selectionEnd], imgs.map(function (p) { return [p.n, p.ref, p.url]; })],
   [[{ start: 3, end: 7, text: "@bob" }], [6, 6], [[1, "00aa-1.png", "/s/sess1/attachment/00aa-1.png"]]]);
@@ -281,7 +289,7 @@ ctext.value = "typed"; restoreDraft();
 check("a non-empty composer keeps its text", ctext.value, "typed");
 
 // a send clears the draft; what is left is saved again as the next draft
-ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; grid.setAttribute("data-tab", "convo");
+ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; grid.setAttribute("data-tab", "convo");
 clearDraft();
 check("cleared at once", railStore.load("ws.dashboard.draft.sess1"), null);
 advance(400);

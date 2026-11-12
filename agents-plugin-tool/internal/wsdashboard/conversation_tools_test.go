@@ -103,7 +103,8 @@ func TestOpenGapShowsALiveToolsRow(t *testing.T) {
 }
 
 // TestExactToolsRowShowsTokensDurationsAndRepeats pins the per-call render:
-// the row head adds the gap's token totals, and each batch line shows its
+// the row head adds the gap's request count and token totals, and each
+// batch line (one request, so no count) shows its
 // tools as chips with xN for repeats, then its duration, failed count, and
 // the request's tokens instead of a bare call count. A batch without
 // per-call data still leads with its call count.
@@ -125,10 +126,10 @@ func TestExactToolsRowShowsTokensDurationsAndRepeats(t *testing.T) {
 	}
 	html := string(set[regionEntries].HTML)
 	for _, want := range []string{
-		`<span class="ttok" title="tokens: 12300 input · 1100 output · 210400 cache read · 0 cache write">in 12.3k · out 1.1k · cache 210k</span>`,
+		`<span class="ttok" title="2 model calls · prompt 222,700 (12,300 input · 210,400 cache read · 0 cache write) · output 1,100">2 calls · prompt 223k · output 1.1k</span>`,
 		`Read<b class="x">×3</b></span>`,
 		`<span class="tool" title="Bash">Bash</span>`,
-		`>1.2s · 1 failed · in 12 · out 1.1k · cache 210k · write 4.2k</span>`,
+		`title="prompt 214,612 (12 input · 210,400 cache read · 4,200 cache write) · output 1,100">1.2s · 1 failed · prompt 215k &#43;4.2k · output 1.1k</span>`,
 		`>2 calls · &lt;0.1s</span>`,
 	} {
 		if !strings.Contains(html, want) {

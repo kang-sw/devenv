@@ -102,6 +102,9 @@ func (w RailWorktree) Empty() bool { return len(w.Sessions) == 0 && len(w.Ended)
 type RailRow struct {
 	ReplyID, Harness string
 	Live             bool
+	// Label is the session's display label, shown in place of ReplyID;
+	// empty when it has none.
+	Label string
 	// Working reports a lead at work: a live adapter and a phase other than
 	// idle and permission (a permission wait is the lead waiting on the
 	// user). The index's working total counts permission waits; the rail
@@ -459,6 +462,7 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 	reg := in.Session.Registration
 	row := RailRow{
 		ReplyID:     reg.ReplyID,
+		Label:       in.Session.Label,
 		Harness:     reg.Harness,
 		Live:        live,
 		CountPolicy: in.Session.CountPolicy,

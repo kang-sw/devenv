@@ -307,4 +307,18 @@ needed. A typed reply in the older form, such as
 lines, reads the same way, each segment that item's body. A reply that
 names no ID gets your reading with `assumed="true"`.
 
+Board text the user selected and attached follows the answer block (or
+opens the message without one), before the typed text, one element per
+line in the order added:
+
+```text
+<wb:mention topic="<topic>" id="62">selected text</wb:mention>
+```
+
+`topic` names the topic as a topic note line does; `id`, present only when
+the whole selection lay in one item, names that item; the content is the
+selected text with `&`, `<`, and `>` written `&amp;`, `&lt;`, and `&gt;`.
+It is what the typed text points at, read as its context; it records no
+answer.
+
 Confirmed decisions reach a ticket only through `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture; the board clears with the session key.

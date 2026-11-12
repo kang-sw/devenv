@@ -96,14 +96,15 @@ const (
 	maxNoteBytes = 4 << 10
 	maxTopics    = 100
 	maxTopicLen  = 200
+	maxMentions  = 50
 	// maxImageNum bounds an image number a send names; a merge may number
 	// past it.
 	maxImageNum = 9999
 )
 
 var (
-	// ErrEmpty reports a send with no text, no chips, no topic notes, and no
-	// images.
+	// ErrEmpty reports a send with no text, no chips, no topic notes, no
+	// mentions, and no images.
 	ErrEmpty = errors.New("empty message: no text and no answers")
 	// ErrGone reports that an entry is no longer held: a drain delivered it,
 	// or a cancel or merge already took it.
@@ -151,6 +152,9 @@ type Entry struct {
 	// written before the field carries its topic notes as "[topic] text"
 	// lines in Parts, delivered as they are.
 	Topics []TopicNote `json:"topics,omitempty"`
+	// Mentions holds the text the user selected on the board and added to
+	// the message (mentions.go), in the order added across merged sends.
+	Mentions []Mention `json:"mentions,omitempty"`
 	// Images holds the absolute paths of the attached image files, in send
 	// order; a path is listed once.
 	Images []string `json:"images,omitempty"`
@@ -267,10 +271,14 @@ func NameForID(id string) (string, bool) {
 }
 
 // Text is the message the session receives: the answer block (AnswerBlock)
-// first, then each part as its own paragraph, then one ImageLine per image.
+// first, then the mentions (MentionBlock), then each part as its own
+// paragraph, then one ImageLine per image.
 func (e Entry) Text() string {
 	var paras []string
 	if block := AnswerBlock(e.Chips, e.Topics); block != "" {
+		paras = append(paras, block)
+	}
+	if block := MentionBlock(e.Mentions); block != "" {
 		paras = append(paras, block)
 	}
 	for _, p := range e.Parts {
@@ -291,7 +299,8 @@ func (e Entry) Text() string {
 
 // Normalize trims and checks one send: empty parts are dropped, chips are
 // validated, a later chip for an item (or note for a topic) replaces an
-// earlier one, an empty topic note is dropped, and a repeated
+// earlier one, an empty topic note is dropped, a mention is trimmed and
+// dropped when blank (its text counts toward the text limit), and a repeated
 // image path is dropped with its number. An image counts as content. Image
 // numbers are optional: ImageNums is empty or parallel to Images, a number is
 // unique and at most maxImageNum, and an image numbered 0 (or every image,
@@ -308,6 +317,25 @@ func Normalize(e Entry) (Entry, error) {
 		}
 		size += len(p)
 		out.Parts = append(out.Parts, p)
+	}
+	if len(e.Mentions) > maxMentions {
+		return Entry{}, fmt.Errorf("%w: more than %d mentions", ErrInvalid, maxMentions)
+	}
+	for _, m := range e.Mentions {
+		m.Topic = strings.TrimSpace(m.Topic)
+		m.ID = strings.TrimSpace(m.ID)
+		m.Text = strings.TrimSpace(m.Text)
+		if m.Topic == "" || len(m.Topic) > maxTopicLen || strings.ContainsAny(m.Topic, "\r\n") {
+			return Entry{}, fmt.Errorf("%w: mention topic %q", ErrInvalid, m.Topic)
+		}
+		if m.ID != "" && !chipIDPattern.MatchString(m.ID) {
+			return Entry{}, fmt.Errorf("%w: mention item id %q", ErrInvalid, m.ID)
+		}
+		if m.Text == "" {
+			continue
+		}
+		size += len(m.Text)
+		out.Mentions = append(out.Mentions, m)
 	}
 	if size > maxTextBytes {
 		return Entry{}, fmt.Errorf("%w: text is longer than %d bytes", ErrInvalid, maxTextBytes)
@@ -392,7 +420,7 @@ func Normalize(e Entry) (Entry, error) {
 		}
 		out.ImageNums = nums
 	}
-	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Images) == 0 {
+	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Mentions) == 0 && len(out.Images) == 0 {
 		return Entry{}, ErrEmpty
 	}
 	return out, nil
@@ -448,9 +476,9 @@ func maxInt(list []int) int {
 	return m
 }
 
-// Merge appends add's parts and images to base's and lays add's chips and
-// topic notes over base's: the later chip for an item, and the later note for
-// a topic, wins. base's first-send time is kept.
+// Merge appends add's parts, mentions, and images to base's and lays add's
+// chips and topic notes over base's: the later chip for an item, and the
+// later note for a topic, wins. base's first-send time is kept.
 // add's images are renumbered to continue base's, each number raised by
 // base's highest, and every marker in add's parts naming one of add's images
 // is rewritten to its new number; an image base already lists takes base's
@@ -474,6 +502,7 @@ func Merge(base, add Entry) Entry {
 	if len(out.Topics) == 0 {
 		out.Topics = nil
 	}
+	out.Mentions = append(append([]Mention(nil), base.Mentions...), add.Mentions...)
 	baseNums := base.Nums()
 	for i, path := range base.Images {
 		if indexOf(out.Images, path) < 0 {

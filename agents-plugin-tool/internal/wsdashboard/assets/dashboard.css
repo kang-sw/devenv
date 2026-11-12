@@ -57,6 +57,16 @@
 /* ===== top bar ===== */
 .top { gap: 10px; margin-bottom: 10px; }
 .r-head { display: contents; }
+/* the session name: the display label or reply-id as a copy button, the
+   rename pencil beside it, and the inline rename input in its place */
+.sname { display: inline-flex; align-items: center; gap: 2px; min-width: 0; white-space: nowrap; }
+.sname .snm { font: inherit; color: inherit; background: none; border: 0; padding: 0 2px; border-radius: 4px; cursor: copy; overflow: hidden; text-overflow: ellipsis; max-width: 40ch; }
+.sname .snm:hover, .sname .snm:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+.sname .sren { display: inline-grid; place-items: center; width: 18px; height: 18px; flex: none; padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; opacity: .55; cursor: pointer; }
+.sname .sren .i { width: 12px; height: 12px; stroke-width: 1.8; }
+.sname .sren:hover, .sname .sren:focus-visible { opacity: 1; color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+.sname .sinp { font: inherit; color: var(--wb-fg); background: var(--wb-card); border: 1px solid var(--wb-primary); border-radius: 4px; padding: 0 4px; width: 26ch; max-width: 60vw; outline: none; }
+.sname [hidden] { display: none; }
 .back { font-size: 12.5px; color: var(--wb-muted-fg); text-decoration: none; display: inline-flex; align-items: center; gap: 3px; }
 .back:hover { color: var(--wb-primary); }
 .host { font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 1px 7px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
@@ -388,6 +398,15 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .achip .anote::before { content: "· "; }
 .achip.tchip { cursor: pointer; background: var(--wb-muted); box-shadow: inset 0 0 0 1px var(--wb-line); }
 .achip.tchip .anote::before { content: none; }
+/* a board mention: "[topic] (id)" and the selected text, quoted */
+.achip.mchip { background: var(--wb-muted); box-shadow: inset 3px 0 0 var(--wb-primary), inset 0 0 0 1px var(--wb-line); }
+.achip.mchip .anote { font-style: italic; }
+.achip.mchip .anote::before { content: none; }
+/* the floating button by a board selection that adds it as a mention */
+.wbmention { position: fixed; z-index: 60; border: 0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--wb-primary-fg); background: var(--wb-primary); box-shadow: var(--wb-shadow-hi); }
+.wbmention:hover { background: color-mix(in srgb, var(--wb-primary) 85%, var(--wb-fg)); }
+.wbmention:focus-visible { outline: 1.5px solid var(--wb-fg); outline-offset: 2px; }
+.wbmention[hidden] { display: none; }
 .unchip { border: 0; background: transparent; color: var(--wb-muted-fg); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 5px; border-radius: 999px; }
 .unchip:hover { background: var(--wb-muted); color: var(--wb-fg); }
 /* composer image chips and message thumbnails */
