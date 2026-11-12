@@ -620,7 +620,15 @@ conversation:
   submits it as a turn whose text is what the mailbox wait hands a session;
   the session arms no wait of its own. A turn no send started (a background
   task's result) and a compaction's replayed assistant line are handled as
-  the stream reports them.
+  the stream reports them. A page command entry splits the drain: the
+  messages before it go as one turn (with the claimed mail), the command
+  runs alone as the next turn (Claude: its bare typed line; Pi: `/compact`
+  as RPC `compact`, any other as a `prompt`, never `steer`), and what was
+  drained after it waits in the record (`queued`) for the turns after,
+  across a daemon restart; a close or hand-off drops it, an interrupt keeps
+  it. The session's command list is Claude's init `slash_commands` (not
+  `terminal_slash_commands`) and Pi's `get_commands` (asked at start and
+  after each turn) with `compact` added.
 - **Turns.** With `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1` the CLI reports
   `session_state_changed`; once one is seen, only `idle` ends a turn and
   releases held sends (a `result` does not: background work may still run).

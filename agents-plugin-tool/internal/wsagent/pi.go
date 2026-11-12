@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -382,9 +383,16 @@ func (b PiBackend) startLead(spec StartSpec) (Process, error) {
 	cmd.Dir = spec.workDir()
 	cmd.Env = piLeadEnv(spec)
 	m := newPiMapper(spec)
+	attach := spec.Lead.Holder != nil && spec.Lead.Holder.id != ""
 	p, err := startChild(spec, cmd, m, piProtocol{})
 	if err != nil {
 		return nil, err
+	}
+	if !attach {
+		// The command list the dashboard's composer offers; each turn's
+		// end asks again (piMapper), so commands an extension registers
+		// later show too. A rejoin's replay rebuilds the list it had.
+		p.send(piGetCommands)
 	}
 	return &piProcess{streamProcess: p, mapper: m, effort: spec.Effort, lead: true}, nil
 }
@@ -419,13 +427,31 @@ func (p *piProcess) Send(text string) error {
 	p.mapper.aborted.Store(false)
 	if rest, ok := piCompactCommand(text); p.lead && ok {
 		// A typed /compact is no RPC built-in: it is the compact command.
-		line := map[string]any{"type": "compact"}
-		if rest != "" {
-			line["customInstructions"] = rest
-		}
-		return p.writeLine(line)
+		return p.compact(rest)
 	}
 	return p.streamProcess.Send(text)
+}
+
+// RunCommand runs a lead's dashboard slash command: /compact is the compact
+// command, with its arguments as the instructions; any other command is a
+// prompt of its typed line, which pi expands (an extension command, a
+// prompt template, a skill). It is sent at a turn's end only, never as a
+// steer or follow-up, which refuse extension commands.
+func (p *piProcess) RunCommand(cmd wsinbox.Command) error {
+	if p.lead && cmd.Name == "compact" {
+		p.mapper.aborted.Store(false)
+		return p.compact(cmd.Args)
+	}
+	return p.Send(cmd.Line())
+}
+
+// compact writes the compact command, with instructions when there are any.
+func (p *piProcess) compact(instructions string) error {
+	line := map[string]any{"type": "compact"}
+	if instructions = strings.TrimSpace(instructions); instructions != "" {
+		line["customInstructions"] = instructions
+	}
+	return p.writeLine(line)
 }
 
 // piCompactCommand reports whether text is a typed /compact, and returns
@@ -586,6 +612,10 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 			if l.Success {
 				return m.stats(l.Data)
 			}
+		case "get_commands":
+			if l.Success {
+				return piCommands(l.Data)
+			}
 		case "compact":
 			// A lead's typed /compact ran as this command: its answer ends
 			// the turn the send began.
@@ -645,6 +675,9 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		return []Event{{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: phase, Trigger: trigger}}}
 	case "agent_settled":
 		replies.send(map[string]any{"type": "get_session_stats"})
+		if m.spec.Lead != nil {
+			replies.send(piGetCommands)
+		}
 		err := m.turnErr
 		if m.aborted.Load() {
 			err = ""
@@ -659,6 +692,42 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		}
 	}
 	return nil
+}
+
+// piGetCommands asks a lead's pi for its slash commands.
+var piGetCommands = map[string]any{"type": "get_commands"}
+
+// piCompact is the compact command as the command list shows it: pi's
+// get_commands leaves its built-in commands out, and compact is the one
+// the runner maps (RunCommand).
+var piCompact = wslive.SlashCommand{Name: "compact", Description: "Manually compact the session context", Source: "builtin"}
+
+// piCommands maps a get_commands answer to a commands event: each command
+// with its description and its source (extension, prompt, skill) as pi
+// names it, which tells where it comes from, not who may invoke it, so no
+// layer is set; compact is added when pi does not list it. An unreadable
+// answer changes nothing.
+func piCommands(raw json.RawMessage) []Event {
+	var d struct {
+		Commands []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Source      string `json:"source"`
+		} `json:"commands"`
+	}
+	if json.Unmarshal(raw, &d) != nil {
+		return nil
+	}
+	list := []wslive.SlashCommand{}
+	compact := false
+	for _, c := range d.Commands {
+		compact = compact || c.Name == piCompact.Name
+		list = append(list, wslive.SlashCommand{Name: c.Name, Description: c.Description, Source: c.Source})
+	}
+	if !compact {
+		list = append([]wslive.SlashCommand{piCompact}, list...)
+	}
+	return []Event{{Live: &wslive.Event{Kind: wslive.KindCommands, Commands: list}}}
 }
 
 func (m *piMapper) endTurn(now int64, turnErr string) []Event {

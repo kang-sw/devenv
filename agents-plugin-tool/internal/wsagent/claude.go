@@ -240,6 +240,11 @@ type claudeInit struct {
 		Path   string `json:"path"`
 		Source string `json:"source"`
 	} `json:"plugins"`
+	// SlashCommands are the names of the commands a message may run
+	// (absent from an older harness's init). The init's
+	// terminal_slash_commands are left out: they need a terminal, and a
+	// headless session has none.
+	SlashCommands *[]string `json:"slash_commands"`
 }
 
 // claudeInitToolNames maps a built-in tool name to the older name Claude's
@@ -920,7 +925,9 @@ func (m *claudeMapper) closeTurn(now int64) []Event {
 
 // leadInit maps a lead's init message, which every user turn brings: the
 // session id, the turn's start, the permission mode the harness reports
-// (it may differ from the one asked for), and its MCP servers' status. It
+// (it may differ from the one asked for), its MCP servers' status, and its
+// slash commands (names only; the state keeps the list unchanged when a
+// later init repeats it). It
 // also asks for the compaction window when none is known for the init's
 // model (askContextUsage).
 func (m *claudeMapper) leadInit(init claudeInit, replies lineReplies) []Event {
@@ -940,6 +947,13 @@ func (m *claudeMapper) leadInit(init claudeInit, replies lineReplies) []Event {
 			servers = append(servers, MCPServer{Name: s.Name, Status: s.Status})
 		}
 		out = append(out, Event{MCPServers: servers})
+	}
+	if init.SlashCommands != nil {
+		list := make([]wslive.SlashCommand, 0, len(*init.SlashCommands))
+		for _, name := range *init.SlashCommands {
+			list = append(list, wslive.SlashCommand{Name: name})
+		}
+		out = append(out, Event{Live: &wslive.Event{Kind: wslive.KindCommands, Commands: list}})
 	}
 	return out
 }
