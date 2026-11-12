@@ -2321,6 +2321,12 @@
     function drDragMove(e) {
       var d = drDrag;
       if (!d) return;
+      // A move with the primary button up is a release this document never
+      // heard: a flick on the git handle, before its drag takes capture, can
+      // send the first move and the release to a topic frame. The drag ends
+      // there and the sheet goes back as it stood, since that release's
+      // position is unknown.
+      if (e.buttons !== undefined && (e.buttons & 1) === 0) { drAbort(); return; }
       if (!d.moved && Math.abs(e.clientY - d.y0) < 5) return;
       // The git drag captures on its region once it moves: the region
       // outlives a swap of the handle, which would drop a capture on the
@@ -2341,6 +2347,15 @@
       drsheet.style.height = Math.max(Math.min(DR_MIN, max), ext) + "px";
       drclip.style.height = ext + "px";
       d.rider.style.top = (ext > 0 ? drTop + ext : Math.max(0, Math.min(y, drTop))) + "px";
+    }
+    // drAbort ends a drag without its release: a moved one restores the
+    // layout drApply draws for the state before the drag.
+    function drAbort() {
+      var d = drDrag;
+      drDrag = null;
+      if (!d || !d.moved) return;
+      drawer.classList.remove("drag");
+      drApply(false);
     }
     function drEnd() {
       var d = drDrag;

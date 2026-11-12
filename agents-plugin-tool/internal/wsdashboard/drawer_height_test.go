@@ -94,6 +94,21 @@ applied = [];
 drDragStart(press(ghandleEl, 10)); drEnd();
 check('a press stays a click', [applied.length, drH], [0, 250]);
 
+// A flick whose release lands elsewhere: the next move carries no primary
+// button, which ends the drag with the sheet back as it stood, its height
+// unset; later buttonless moves drag nothing.
+applied = [];
+drDragStart(press(ghandleEl, 10));
+drDragMove({ clientY: 300, buttons: 1 });
+gitRegion.style.top = 'dragged';
+drDragMove({ clientY: 320, buttons: 0 });
+check('a buttonless move ends the drag', [drDrag, applied, drH, stored['ws.dashboard.drawer.h']], [null, ['git:true:250'], 250, '250']);
+drDragMove({ clientY: 500, buttons: 0 });
+check('a later buttonless move drags nothing', [gitRegion.style.top, applied.length], ['dragged', 1]);
+drDragStart(press(ghandleEl, 10));
+drDragMove({ clientY: 10, buttons: 0 });
+check('an unmoved buttonless press ends quietly', [drDrag, applied.length], [null, 1]);
+
 // The panels handle over the open git sheet brings the panels; a release
 // short of DR_SHUT closes.
 drDragStart(press(drhandle, 0));
