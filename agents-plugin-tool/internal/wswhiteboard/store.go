@@ -142,6 +142,11 @@ type Item struct {
 	// assumed. Empty when it was never re-asked. The dashboard drops sent
 	// marks older than it (ReaskTimes).
 	ReaskedAt string `json:"reasked_at,omitempty"`
+	// Asked is the render sequence of the update that last asked the item:
+	// its add or its latest re-ask (the patches that stamp ReaskedAt). Zero
+	// on an item stored before the field. The view ranks topics that rose in
+	// the same update by it (bumpRank).
+	Asked int `json:"asked,omitempty"`
 }
 
 // reaskLayout is ReaskedAt's format: RFC 3339 with milliseconds, the
@@ -834,7 +839,7 @@ func checkOptions(p *problems, cmd command, options []string) []string {
 }
 
 func applyAdd(p *problems, work *State, cmd command, topicOf topicResolver, mark int) int {
-	item := Item{Status: StatusOpen, Changed: mark}
+	item := Item{Status: StatusOpen, Changed: mark, Asked: mark}
 	before := len(p.List)
 	if _, present := cmd.Attr("id"); present {
 		if id, ok := wsxmlcmd.IntAttr(p, cmd, "id", true); ok {
@@ -1068,6 +1073,7 @@ func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) 
 	retitled := next.Status == StatusOpen && next.Title != prev.Title
 	if reopened || retitled || next.Class != prev.Class || !slices.Equal(next.Options, prev.Options) {
 		next.ReaskedAt = now.UTC().Format(reaskLayout)
+		next.Asked = mark
 	}
 	work.Items[idx] = next
 	return id
