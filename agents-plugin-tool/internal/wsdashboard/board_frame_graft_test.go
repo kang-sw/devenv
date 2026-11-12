@@ -22,7 +22,7 @@ func TestBoardFrameGraftStaysPut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := regexp.MustCompile(`(?s)\n  function settle\(el, want, fixed\) \{.*?\n  \}\n`).FindString(string(cards))
+	src := regexp.MustCompile(`(?s)\n  function settle\(el, want, fixed, skip\) \{.*?\n  \}\n`).FindString(string(cards))
 	if src == "" {
 		t.Fatal("cards.js holds no settle")
 	}

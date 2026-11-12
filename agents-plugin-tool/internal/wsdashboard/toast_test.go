@@ -172,7 +172,7 @@ func TestTabLabelCount(t *testing.T) {
 		t.Fatal("dashboard.js holds no tab label ... sseOn block")
 	}
 	block = strings.TrimSuffix(block, "var sseOn = true;")
-	runNode(t, "session tab label", tabLabelPrelude+`
+	runNode(t, "session tab label", tabLabelPrelude+boardBoxSrc(t, string(data))+`
 var mode = "session";
 var R = new N(), A = new N(), B = new N();
 var treeSel = {}; treeSel[PERM] = [new N({ up: A }), new N({ up: A }), new N({ up: B })]; treeSel[".agent.root"] = [R];
@@ -238,7 +238,7 @@ tlShown();
 check("no second summary", toasts.length, 2);
 process.stdout.write(bad.join("\n"));
 `)
-	runNode(t, "index tab label", tabLabelPrelude+`
+	runNode(t, "index tab label", tabLabelPrelude+boardBoxSrc(t, string(data))+`
 var mode = "index";
 var ss = {}; ss[".sess .chip.policy"] = [new N({ text: "3" }), new N({ text: "1" })]; ss[".sess .phase.permission"] = [new N()];
 REG.sessions = new N({ sel: ss, attrs: { "data-h": "s1" } });

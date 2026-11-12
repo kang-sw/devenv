@@ -325,7 +325,7 @@ func TestRailDraftRestore(t *testing.T) {
 	if !regexp.MustCompile(`(?s)\n  function sendMessage\(\) \{.*?post\("message", body, function \(ok, res\) \{\n[^\n]*\n      if \(!ok\) \{[^\n]*return; \}\n.*?\n      clearDraft\(\);\n    \}\);\n  \}\n`).MatchString(src) {
 		t.Error("a successful send no longer clears the draft")
 	}
-	runNode(t, "draft restore", railJSHarness+string(rail)+railDraftPrelude+block+`
+	runNode(t, "draft restore", railJSHarness+string(rail)+railDraftPrelude+boardBoxSrc(t, src)+block+`
 // type, pick, open, and switch tab; the debounce saves it
 ctext.value = "hi @bob see [Image #1] and [Image #2] end";
 ctext.selectionStart = ctext.selectionEnd = 6;
