@@ -3,6 +3,7 @@ title: "Hosted sessions: finished subagents vanish from the dashboard after an i
 related:
   261110-feat-ws-dashboard-headless-lead-sessions: Phase 2 idle stop and resume
   261110-feat-ws-dashboard-agent-panel-telemetry: agents panel shows retained finished agents
+completed: 2026-11-12
 ---
 
 # Hosted sessions: finished subagents vanish from the dashboard after an idle stop and resume
@@ -57,3 +58,8 @@ file; snapshot and record shapes unchanged).
   panel saying so?
 - Is there a cheaper signal, such as the lead's conversation-view Agent tool
   line, that already leaves enough trace?
+
+
+## Resolution (2026-11-12)
+
+Fixed in 35a09fc1e (merge f1e4b679c): a new live writer seeds the previous snapshot's done and failed agents (wslive.State.SeedFinished). Verified live: three finished rows survived a daemon replacement. The lead-side notice for subagents a process end killed is split to 261112-feat-ws-hosted-lead-turn-names-subagents-a-process-end-killed. User board (25).

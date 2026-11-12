@@ -22,15 +22,21 @@ in `dashboard.js` reload when `holdsDraft()` reports no unsent work (composer
 text, picked board answers, attached images, topic notes) and show a banner
 otherwise.
 
-## Open Decision Queue
+## Decisions
 
-Last ID: (21)
-
-(19) [open] [announced] When the page sees that the daemon serves different page assets than the ones it runs, it reloads when `holdsDraft()` is false and otherwise shows a banner asking for a reload. Citation: the existing `modeChanged` / `setLang` reload-or-banner pattern in `dashboard.js`.
-
-(20) [open] [technical] The asset identity is a content hash of the embedded page assets (script, style, template) over the daemon build time - a daemon upgrade that leaves the page assets unchanged reloads no tab.
-
-(21) [open] [technical] The daemon sends the identity in the SSE stream's first event on every (re)connect, and the page compares it with a value rendered into the page, over polling a version endpoint - the reconnect after a daemon replacement is exactly when a mismatch appears, and it costs no extra request.
+- When the page sees that the daemon serves different page assets than the
+  ones it runs, it reloads when `holdsDraft()` is false and otherwise shows a
+  banner asking for a reload, as `modeChanged` / `setLang` do. User board (19).
+- The asset identity is a content hash of the embedded page assets (script,
+  style, template). User board (20).
+  Rejected: the daemon build time; a daemon upgrade that leaves the page
+  assets unchanged would reload every tab.
+- The daemon sends the identity in the SSE stream's first event on every
+  (re)connect, and the page compares it with a value rendered into the page.
+  User board (21).
+  Rejected: polling a version endpoint; the reconnect after a daemon
+  replacement is exactly when a mismatch appears, and it costs no extra
+  request.
 
 ## Constraints
 

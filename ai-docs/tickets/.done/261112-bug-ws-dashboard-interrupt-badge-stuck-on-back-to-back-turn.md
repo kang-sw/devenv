@@ -2,6 +2,7 @@
 title: "Dashboard interrupt badge stays \"Interrupting…\" when the next turn starts right after an interrupt"
 related:
   261110-feat-ws-dashboard-headless-lead-sessions: source of the hosted interrupt path
+completed: 2026-11-12
 ---
 
 # Dashboard interrupt badge stays "Interrupting…" when the next turn starts right after an interrupt
@@ -37,3 +38,8 @@ from the page, and the label says an interrupt is still in flight.
 Interrupt a hosted session while it has a held message or queued mail, so
 the next turn starts at once. The badge should return to "Interrupt" and
 work for the new turn.
+
+
+## Resolution (2026-11-12)
+
+Fixed in 7eb0e7289 (the page records the lead turn's start stamp at the click and clears the interrupting state when the stamp changes). Verified live after a tab reload; the one stuck case seen after the merge was a tab still running the old inline script, tracked by 261112-bug-ws-dashboard-open-tab-keeps-stale-assets-after-daemon-upgrade. User board (25).

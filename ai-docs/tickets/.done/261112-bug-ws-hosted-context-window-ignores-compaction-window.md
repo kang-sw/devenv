@@ -3,6 +3,7 @@ title: "Hosted sessions: the context meter shows the model window and refreshes 
 related:
   261110-feat-ws-dashboard-headless-lead-sessions: hosted Claude lead sessions
   261110-feat-ws-dashboard-agent-panel-telemetry: dashboard usage figures
+completed: 2026-11-12
 ---
 
 # Hosted sessions: the context meter shows the model window and refreshes only when a turn settles
@@ -51,3 +52,8 @@ reply-id `autisticcavalierharpistdairy`, Claude Code 2.1.322).
   stream-json mode, stop and report the evidence; do not fall back to settings
   parsing without a new decision.
 - Heavy Go builds and tests run through `~/.local/bin/ws-rgo` on this machine.
+
+
+## Resolution (2026-11-12)
+
+Fixed in d6598b446 (merge 39d78eed3): the window comes from the get_context_usage control answer's rawMaxTokens, asked once per model; the meter refreshes on each changed lead usage. Verified live after the daemon replacement: the snapshot reads window 300000 (was 1000000). User board (25).

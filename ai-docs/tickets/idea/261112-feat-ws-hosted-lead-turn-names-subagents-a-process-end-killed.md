@@ -24,19 +24,26 @@ holder, so its subagents keep running.
 The user prefers the Claude Code harness behaviour: at restart, a turn tells
 the model which agents died (user board (11); split confirmed in (13)=a).
 
-## Open Decision Queue
+## Decisions
 
-Last ID: (24)
-
-(22) [open] [announced] When `processEnded` marks at least one running subagent failed and the conversation stays open, the daemon delivers one lead turn at the next process start naming each killed subagent (id, description, subagent type, how long it ran) and saying its result is lost and it may be re-dispatched. Citation: user board (11) and (13)=a.
-
-(23) [open] [technical] The pending notice is a new optional record field (`Notices`), persisted and delivered as a turn like `Record.Mail`, over reusing `Record.Mail` - mail renders on the page as a mailbox message and would misattribute the notice. T0: additive optional field.
-
-(24) [open] [policy] After a crash that starts no new process, the notice waits for the next process start (the next user message or mail), with no extra wake.
-- Context: `Restart` and the settings fallback start the next process at once, so the notice goes out immediately there. A crash leaves the conversation idle.
-- Alternative a: wait for the next start, the notice leading that turn.
-- Alternative b: start a process just to deliver the notice.
-> a: starting a process costs a turn nobody asked for, and a crash loop would repeat it; the dashboard already shows the failed rows meanwhile.
+- When `processEnded` marks at least one running subagent failed and the
+  conversation stays open, the daemon delivers one lead turn at the next
+  process start naming each killed subagent (id, description, subagent type,
+  how long it ran) and saying its result is lost and it may be re-dispatched.
+  User board (11), (13)=a, (22).
+- The pending notice is a new optional record field (`Notices`), persisted
+  and delivered as a turn like `Record.Mail`. T0: additive optional field.
+  User board (23).
+  Rejected: reusing `Record.Mail`; mail renders on the page as a mailbox
+  message and would misattribute the notice.
+- After a crash that starts no new process, the notice waits for the next
+  process start (the next user message or mail) and leads that turn; no
+  process is started just to deliver it. `Restart` and the settings fallback
+  start the next process at once, so the notice goes out immediately there.
+  User board (24)=a.
+  Rejected: starting a process for the notice alone; it costs a turn nobody
+  asked for and would repeat in a crash loop, while the dashboard already
+  shows the failed rows.
 
 ## Constraints
 
