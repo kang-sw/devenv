@@ -360,8 +360,6 @@
   "js.rel.s": "{0} s",
   "js.send.empty": "Nada que enviar: escribe un mensaje, responde en la pizarra o adjunta una imagen.",
   "js.send.fail": "No se envió: {0}",
-  "js.send.merged": "Añadido al mensaje retenido.",
-  "js.send.ok": "Enviado.",
   "js.send.reading": "Aún se está leyendo una imagen: vuelve a enviar en un momento.",
   "js.sent.held.title": "retenido hasta que termine el turno de la sesión",
   "js.sent.sent.title": "enviado a la sesión",

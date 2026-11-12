@@ -360,8 +360,6 @@
   "js.rel.s": "{0}s",
   "js.send.empty": "Nothing to send: write a message, answer the board, or attach an image.",
   "js.send.fail": "Not sent: {0}",
-  "js.send.merged": "Added to the held message.",
-  "js.send.ok": "Sent.",
   "js.send.reading": "Still reading an image: send again in a moment.",
   "js.sent.held.title": "held until the session's turn ends",
   "js.sent.sent.title": "sent to the session",

@@ -322,7 +322,7 @@ func TestRailDraftRestore(t *testing.T) {
 		t.Fatal("dashboard.js holds no per-session drafts block ending before if (live)")
 	}
 	block = strings.TrimSuffix(block, "if (live) {")
-	if !regexp.MustCompile(`clearDraft\(\);\s*\n\s*syncNote\(wsT\(res\.merged \? "js\.send\.merged" : "js\.send\.ok"\)\);`).MatchString(src) {
+	if !regexp.MustCompile(`clearDraft\(\);\s*\n\s*(?://[^\n]*\n\s*)*syncNote\(\);`).MatchString(src) {
 		t.Error("a successful send no longer clears the draft")
 	}
 	runNode(t, "draft restore", railJSHarness+string(rail)+railDraftPrelude+block+`

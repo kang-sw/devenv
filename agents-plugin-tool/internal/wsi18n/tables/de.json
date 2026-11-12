@@ -360,8 +360,6 @@
   "js.rel.s": "{0} s",
   "js.send.empty": "Nichts zu senden: Schreibe eine Nachricht, beantworte das Board oder hänge ein Bild an.",
   "js.send.fail": "Nicht gesendet: {0}",
-  "js.send.merged": "Zur zurückgehaltenen Nachricht hinzugefügt.",
-  "js.send.ok": "Gesendet.",
   "js.send.reading": "Ein Bild wird noch gelesen: Sende gleich noch einmal.",
   "js.sent.held.title": "zurückgehalten, bis der Zug der Sitzung endet",
   "js.sent.sent.title": "an die Sitzung gesendet",

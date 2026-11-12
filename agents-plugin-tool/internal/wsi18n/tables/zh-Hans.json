@@ -360,8 +360,6 @@
   "js.rel.s": "{0}秒",
   "js.send.empty": "没有可发送的内容：请输入消息、回答白板或附加图片。",
   "js.send.fail": "未能发送：{0}",
-  "js.send.merged": "已添加到暂存的消息中。",
-  "js.send.ok": "已发送。",
   "js.send.reading": "仍在读取图片：请稍后再次发送。",
   "js.sent.held.title": "暂存至会话回合结束",
   "js.sent.sent.title": "已发送给会话",

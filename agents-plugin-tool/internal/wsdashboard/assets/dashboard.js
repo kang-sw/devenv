@@ -1192,10 +1192,18 @@
     var b = region("board"), r = b && b.querySelector("#reply-text");
     return r ? r.value.trim() : "";
   }
-  function syncNote(text) {
+  // syncNote shows text in the composer's note line, or clears it. A note
+  // given ttl (ms), a success, clears itself after that long unless another
+  // note replaced it; a failure or warning stays until the next change.
+  var noteTimer = 0;
+  function syncNote(text, ttl) {
     if (!cnote) return;
+    clearTimeout(noteTimer);
+    noteTimer = 0;
     cnote.textContent = text || "";
+    if (text && ttl) noteTimer = setTimeout(function () { noteTimer = 0; cnote.textContent = ""; }, ttl);
   }
+  var NOTE_OK = 3000;
   function grow() { ctext.style.height = "auto"; ctext.style.height = Math.min(160, ctext.scrollHeight) + "px"; }
   // post sends a write route's JSON body; done(ok, answer) gets the parsed
   // answer, or the server's refusal text. A route is the session's own
@@ -1643,7 +1651,9 @@
       // The sent draft is gone; what was typed during the send is saved
       // again as the next draft.
       clearDraft();
-      syncNote(wsT(res.merged ? "js.send.merged" : "js.send.ok"));
+      // No note on success: the held bubble in the conversation is the
+      // confirmation, so a "sent" line only took a composer row.
+      syncNote();
     });
   }
   // validMentions keeps the well-formed mentions of a list a cancel or a
@@ -1726,7 +1736,7 @@
     post("cancel", { id: btn.getAttribute("data-cancel") }, function (ok, res) {
       if (!ok) { btn.disabled = false; syncNote(wsT("js.cancel.fail", res)); return; }
       restoreHeld([res]);
-      syncNote(wsT("js.cancel.ok"));
+      syncNote(wsT("js.cancel.ok"), NOTE_OK);
       ctext.focus();
     });
   }
@@ -1810,9 +1820,9 @@
     post("interrupt", {}, function (ok, res) {
       if (!ok) { interrupting = false; syncBadge(); syncNote(wsT("js.interrupt.fail", res)); return; }
       var list = res.held || [];
-      if (!list.length) { syncNote(wsT("js.interrupt.ok")); return; }
+      if (!list.length) { syncNote(wsT("js.interrupt.ok"), NOTE_OK); return; }
       restoreHeld(list);
-      syncNote(wsT("js.interrupt.restored"));
+      syncNote(wsT("js.interrupt.restored"), 2 * NOTE_OK);
       ctext.focus();
     });
   }
@@ -1823,7 +1833,7 @@
     btn.disabled = true;
     post("steer", { id: btn.getAttribute("data-steer") }, function (ok, res) {
       if (!ok) { btn.disabled = false; syncNote(wsT("js.steer.fail", res)); return; }
-      syncNote(wsT("js.steer.ok"));
+      syncNote(wsT("js.steer.ok"), NOTE_OK);
     });
   }
   // applySent marks each board item the session was sent an answer for, or

@@ -360,8 +360,6 @@
   "js.rel.s": "{0}秒",
   "js.send.empty": "沒有可傳送的內容：請輸入訊息、回答白板或附加圖片。",
   "js.send.fail": "未能傳送：{0}",
-  "js.send.merged": "已加入暫存的訊息。",
-  "js.send.ok": "已傳送。",
   "js.send.reading": "仍在讀取圖片：請稍後再次傳送。",
   "js.sent.held.title": "暫存至工作階段回合結束",
   "js.sent.sent.title": "已傳送給工作階段",

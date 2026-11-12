@@ -360,8 +360,6 @@
   "js.rel.s": "{0} s",
   "js.send.empty": "Rien à envoyer : écrivez un message, répondez au tableau ou joignez une image.",
   "js.send.fail": "Non envoyé : {0}",
-  "js.send.merged": "Ajouté au message en attente.",
-  "js.send.ok": "Envoyé.",
   "js.send.reading": "Lecture d'une image en cours : renvoyez dans un instant.",
   "js.sent.held.title": "en attente jusqu'à la fin du tour de la session",
   "js.sent.sent.title": "envoyé à la session",

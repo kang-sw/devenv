@@ -360,8 +360,6 @@
   "js.rel.s": "{0} s",
   "js.send.empty": "Nada para enviar: escreva uma mensagem, responda no quadro ou anexe uma imagem.",
   "js.send.fail": "Não enviado: {0}",
-  "js.send.merged": "Adicionado à mensagem retida.",
-  "js.send.ok": "Enviado.",
   "js.send.reading": "Ainda lendo uma imagem: envie novamente em instantes.",
   "js.sent.held.title": "retida até o fim do turno da sessão",
   "js.sent.sent.title": "enviada à sessão",
