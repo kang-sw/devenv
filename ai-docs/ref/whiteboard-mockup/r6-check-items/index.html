@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>r6 check items mockup</title>
+<!--
+  r6: whiteboard `check` items as a checklist under the topic recap (decision 570 a).
+  Static mockup, no product code. Sections:
+    1. board stylesheet: a verbatim copy of agents-plugin-tool/internal/wswhiteboard/assets/page.css
+    2. r6 additions: everything new for `check` is in the block marked "r6 additions"
+    3. markup mirrors page.tmpl: topic > tbar, recap, [checks], tdoc, tbody (policy card, ack row), reply bar
+    4. script: the shipped answers.js verbatim, then a small build() modelled on form.js
+-->
+<style>
+/* ===== 1. shipped page.css (verbatim) ===== */
+/* Material-style board: roles are told apart by filled header bars, not outlines.
+   Surfaces follow the host theme; role fills are template-owned so the text on
+   them keeps its contrast whatever the host palette is. */
+:root {
+  --wb-bg: var(--background, #f3f3f0);
+  --wb-fg: var(--foreground, #1b1d21);
+  --wb-card: var(--card, #ffffff);
+  --wb-muted: var(--muted, #e9e8e3);
+  --wb-muted-fg: var(--muted-foreground, #5f646b);
+  --wb-primary: var(--primary, #2b62d9);
+  --wb-primary-fg: var(--primary-foreground, #ffffff);
+  --wb-topic: #2c3038;
+  --wb-on-topic: #ffffff;
+  --wb-now: var(--wb-primary);
+  --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-policy: #b25000;      --wb-on-policy: #ffffff;
+  --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
+  --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
+  --wb-accent-assumed: #b0245a;
+  --wb-accent-policy: #b25000;
+  --wb-on-accent-policy: #ffffff;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 5%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 10%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light dark;
+}
+/* Dark palette. The OS preference applies it unless the page pins light
+   (data-theme="light"); data-theme="dark" applies it whatever the OS says.
+   The two blocks hold the same variables: change them together. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wb-bg: var(--background, #141518);
+    --wb-fg: var(--foreground, #e7e7e4);
+    --wb-card: var(--card, #1e2024);
+    --wb-muted: var(--muted, #2b2d32);
+    --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+    --wb-primary: var(--primary, #7aa2ff);
+    --wb-primary-fg: var(--primary-foreground, #0c1424);
+    --wb-topic: #2a2d33;
+    --wb-on-topic: #e4e5e8;
+    --wb-now: #243457;
+    --wb-on-now: #d3defb;
+    --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+    --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+    --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+    --wb-accent-assumed: #e48aae;
+    --wb-accent-policy: #e0a36c;
+    --wb-on-accent-policy: #1f150b;
+    --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+    --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+    --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+    --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  }
+}
+:root[data-theme="dark"] {
+  --wb-bg: var(--background, #141518);
+  --wb-fg: var(--foreground, #e7e7e4);
+  --wb-card: var(--card, #1e2024);
+  --wb-muted: var(--muted, #2b2d32);
+  --wb-muted-fg: var(--muted-foreground, #a2a6ad);
+  --wb-primary: var(--primary, #7aa2ff);
+  --wb-primary-fg: var(--primary-foreground, #0c1424);
+  --wb-topic: #2a2d33;
+  --wb-on-topic: #e4e5e8;
+  --wb-now: #243457;
+  --wb-on-now: #d3defb;
+  --wb-policy: #5b3a1c;      --wb-on-policy: #f6d9bd;
+  --wb-technical: #26385e;   --wb-on-technical: #d2dcf6;
+  --wb-announced: #1f4433;   --wb-on-announced: #c6ead6;
+  --wb-accent-assumed: #e48aae;
+  --wb-accent-policy: #e0a36c;
+  --wb-on-accent-policy: #1f150b;
+  --wb-opt: color-mix(in srgb, var(--wb-policy) 20%, var(--wb-card));
+  --wb-opt-hover: color-mix(in srgb, var(--wb-policy) 34%, var(--wb-card));
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+/* Scrollbars, for every scroller of the board, its body frames, and the embed: thin,
+   a transparent track, and a thumb of the text colour, a little stronger under the
+   pointer, so the OS's wide opaque bars (Windows) read as part of either theme;
+   overlay bars (macOS) stay overlay. Standard properties only: Chromium 121+ ignores
+   ::-webkit-scrollbar on an element whose scrollbar-color is set, and the engines
+   that still read those rules (Safari, older Chromium) would swap macOS overlay bars
+   for always-shown ones. Set on every element rather than inherited from :root, so
+   :hover strengthens the scrollers under the pointer and not the ones nested inside
+   them; hover changes the colour only, never the width, so nothing reflows. The
+   dashboard declares the same pair for its own page. */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--wb-fg) 24%, transparent) transparent; }
+*:hover { scrollbar-color: color-mix(in srgb, var(--wb-fg) 42%, transparent) transparent; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+.id, code { font-family: var(--wb-mono); }
+button { font: inherit; color: inherit; }
+a { color: var(--wb-primary); }
+.wrap { margin: 0 auto; padding: 16px; }
+.full .wrap { max-width: 1200px; }
+.embed .wrap { max-width: 780px; padding: 12px; }
+
+/* page header */
+.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.top h1 { font-size: 18px; margin: 0; font-weight: 700; }
+.top .meta { color: var(--wb-muted-fg); font-size: 12px; font-family: var(--wb-mono); }
+.top .counts { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+
+/* chips: filled, role-coloured */
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.chip.policy { background: var(--wb-policy); color: var(--wb-on-policy); }
+.chip.ok { background: var(--wb-technical); color: var(--wb-on-technical); }
+.chip.fresh { background: var(--wb-now); color: var(--wb-on-now); }
+.chip.fresh .new { background: currentColor; }
+/* A topic bar's count chip on the dashboard board is a button that answers
+   every item it counts (form.js bulkAnswer). */
+button.chip.bulk { border: 0; cursor: pointer; transition: filter .12s, box-shadow .12s; }
+button.chip.bulk:hover { filter: brightness(1.12); box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 35%, transparent); }
+button.chip.bulk:active { filter: brightness(.95); }
+button.chip.bulk:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+
+/* layout */
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+.grid.solo { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.side { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 12px; }
+.side.flat { position: static; margin-top: 14px; }
+
+/* topic: one elevated surface with a filled title bar */
+.topic { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
+.tbar { display: flex; align-items: center; gap: 6px; padding: 4px 12px; min-height: 30px; background: var(--wb-topic); color: var(--wb-on-topic); }
+.tbar .tlead { margin-right: auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.tbar .tname { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+.tbar .tresult { font-size: 12.5px; opacity: .7; overflow-wrap: anywhere; }
+.tbar .tago { font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tbar .tnote-toggle { background: transparent; color: inherit; opacity: .7; flex: none; }
+.tbar .tnote-toggle:hover { opacity: 1; }
+/* A topic's note is a floating capsule: rounded, on the card colour, with a
+   soft shadow and inset from the topic's edges, so it reads apart from the
+   body that scrolls under it while it sticks below the bar (the rail rules
+   below). It grows with its text up to about six lines, then scrolls. */
+.topic > .tnote { width: calc(100% - 20px); margin: 6px 10px; border: 1px solid var(--wb-line); border-radius: 10px; box-shadow: var(--wb-shadow-hi); max-height: calc(6 * 1.4em + 14px); overflow-y: auto; }
+.topic > .tnote:focus { border-color: var(--wb-primary); }
+.topic.quiet > .tnote { width: calc(100% - 12px); margin: 4px 6px; }
+.closed-more { display: block; margin: 0 0 16px; font-size: 12.5px; color: var(--wb-muted-fg); }
+button.closed-more { display: flex; margin: 0 auto 16px; }
+.tbar .chip:not(.policy):not(.ok):not(.fresh) { background: rgb(127 127 127 / .28); color: inherit; }
+.tbody { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.topic.quiet { box-shadow: none; background: transparent; }
+.topic.quiet .tbar { background: var(--wb-muted); color: var(--wb-muted-fg); border-radius: var(--wb-radius); flex-wrap: wrap; }
+.topic.quiet .tbar .tname { font-size: 13px; }
+.topic.quiet .tbar details.settled[open] { flex-basis: 100%; padding-bottom: 4px; }
+
+/* item card: filled role header + plain body */
+.card { border-radius: 10px; overflow: hidden; background: var(--wb-bg); }
+.cbar { display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 10px; min-height: 28px; }
+.card.policy .cbar { background: var(--wb-policy); color: var(--wb-on-policy); }
+/* head: id and chips lead the title inline, so a wrapped title line returns to the left edge */
+.cbar .head { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cbar .head > :not(.title) { margin-right: 6px; }
+.cbar .id { font-size: 12px; font-weight: 700; opacity: .85; }
+.cbar .cls { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
+.cbar .title { font-weight: 700; }
+.cbar .new, .ack .new, .srow .new { vertical-align: middle; }
+.cbar .btn { background: rgb(255 255 255 / .16); color: inherit; border: 0; flex: none; }
+.cbody { padding: 8px 10px 10px; }
+.new { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; align-self: center; }
+.cbar .new { background: currentColor; }
+.ctx { margin: 0 0 8px; color: var(--wb-muted-fg); font-size: 13px; overflow-wrap: anywhere; }
+/* item block fields hold sanitized HTML whose inline style may still paint
+   outside its box (no position, but margins, transforms, shadows): clip each
+   field container, as the finished reply bubble is */
+.opt, .ctx, .rec-line { contain: paint; }
+
+/* markdown in item fields: inline code everywhere, blocks inside .md */
+:not(pre) > code { font-size: .92em; background: var(--wb-muted); border-radius: 4px; padding: 0 4px; }
+.cbar code { background: rgb(255 255 255 / .18); }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md table, .md blockquote { margin: 0 0 6px; }
+.md ul, .md ol { padding-left: 18px; }
+.md li { margin: 2px 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-size: inherit; margin: 0 0 4px; }
+.md blockquote { padding: 5px 11px; border-left: 3px solid color-mix(in srgb, var(--wb-primary) 70%, transparent); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--wb-primary) 7%, transparent); color: color-mix(in srgb, var(--wb-fg) 78%, var(--wb-muted-fg)); }
+.md blockquote > :first-child { margin-top: 0; }
+.md blockquote > :last-child { margin-bottom: 0; }
+.md img { max-width: 100%; height: auto; border-radius: 6px; vertical-align: middle; }
+.md pre { background: var(--wb-muted); border-radius: 8px; padding: 6px 9px; overflow-x: auto; font-size: 12.5px; }
+.md pre > code { background: none; padding: 0; font-size: inherit; }
+/* a table always spans the full width; cells wrap at spaces, and code spans (paths, URLs) may also break mid-token so a long one does not widen the table */
+.md table { display: table; width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; border: 1px solid var(--wb-line); border-radius: 8px; }
+.md th, .md td { padding: 5px 10px; vertical-align: top; overflow-wrap: break-word; }
+.md td code, .md th code { overflow-wrap: anywhere; }
+.md th + th, .md td + td { border-left: 1px solid color-mix(in srgb, var(--wb-line) 55%, transparent); }
+.md th:not([align]) { text-align: left; }
+.md th { background: var(--wb-wash); font-weight: 700; border-bottom: 1px solid var(--wb-line); }
+.md td { border-top: 1px solid var(--wb-line); }
+.md tbody tr:first-child td { border-top: 0; }
+.md tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--wb-fg) 3%, transparent); }
+/* task lists: goldmark writes a disabled checkbox first in the item */
+.md li:has(> input[type="checkbox"]), .md li:has(> p > input[type="checkbox"]) { list-style: none; margin-left: -16px; }
+.md input[type="checkbox"] { accent-color: var(--wb-primary); margin: 0 6px 0 0; vertical-align: -2px; opacity: 1; }
+/* footnotes */
+.md sup { line-height: 0; }
+.md sup > a, .md .footnote-backref { text-decoration: none; font-weight: 600; }
+.md .footnotes { margin-top: 8px; font-size: 12px; color: var(--wb-muted-fg); }
+.md .footnotes hr { border: 0; border-top: 1px solid var(--wb-line); margin: 0 0 4px; }
+.md .footnotes ol { margin: 0; }
+.md .footnotes li p { margin: 0; }
+.md pre.mermaid { background: transparent; padding: 0; text-align: center; font-family: var(--wb-mono); }
+.md pre.mermaid svg { max-width: 100%; height: auto; }
+
+/* options: tonal buttons, filled when picked */
+.opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt { flex: 1 1 auto; max-width: 100%; display: grid; grid-template-columns: 18px 1fr; gap: 6px; align-items: start; text-align: left; background: var(--wb-opt); border: 0; border-radius: 8px; padding: 7px 11px; cursor: pointer; box-shadow: var(--wb-shadow); overflow-wrap: anywhere; }
+.opt:hover { background: var(--wb-opt-hover); box-shadow: var(--wb-shadow-hi); }
+.opt .k { font-family: var(--wb-mono); font-weight: 800; color: var(--wb-accent-policy); display: inline-flex; align-items: flex-start; }
+.opt .k .i { width: 8px; height: 8px; margin: 1px 0 0 1px; }
+/* selected: neon outline over the same quiet fill, not a fill swap */
+.opt[aria-pressed="true"], .opt[aria-pressed="true"]:hover { box-shadow: 0 0 0 1.5px var(--wb-accent-policy), 0 0 10px 1px color-mix(in srgb, var(--wb-accent-policy) 55%, transparent); font-weight: 600; }
+/* settled-row pick chip: the same choice, quieter; a thin faint ring and no glow, so a finished item reads as done. */
+.pick { box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-accent-policy) 40%, transparent); font-weight: 500; }
+/* stacked: a block option is a full-width card whose text stays selectable */
+.opts.stack { flex-direction: column; }
+.opts.stack .opt { flex: none; width: 100%; grid-template-columns: 18px minmax(0, 1fr); user-select: text; }
+.opts.stack .opt .md { min-width: 0; }
+.opt[role="button"]:focus-visible { outline: 2px solid var(--wb-accent-policy); outline-offset: 2px; }
+.rec-line { margin-top: 8px; font-size: 12.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rec-line b { color: var(--wb-accent-policy); display: inline-flex; align-items: center; gap: 2px; margin-right: 4px; }
+.note { width: 100%; margin-top: 8px; font: inherit; color: inherit; background: var(--wb-card); border: 0; border-bottom: 2px solid var(--wb-muted-fg); border-radius: 6px 6px 0 0; padding: 6px 9px; resize: none; overflow: hidden; display: block; line-height: 1.4; }
+.note[hidden] { display: none; }
+.note:focus { outline: none; border-bottom-color: var(--wb-primary); }
+.quote { color: var(--wb-muted-fg); font-size: 12.5px; }
+.pick { display: inline-flex; gap: 5px; align-items: baseline; background: var(--wb-opt); border-radius: 6px; padding: 0 7px; font-size: 12.5px; margin: 0 2px; }
+/* the chip is a flex row of letter and text: the text is one item, so code spans and links stay inline in it */
+.pick .pt { min-width: 0; }
+.pick .k { font-family: var(--wb-mono); font-weight: 800; color: var(--wb-accent-policy); }
+.links { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0 0 8px; font-size: 12.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.links .i { width: 12px; height: 12px; display: inline-block; vertical-align: -1px; margin-right: 3px; }
+.atext .links, .srow .links { flex-basis: 100%; margin: 0; }
+
+/* buttons */
+.btn { font-size: 13px; background: var(--wb-muted); border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; }
+.btn { display: inline-flex; align-items: center; justify-content: center; }
+.btn.mini { padding: 0; width: 24px; height: 22px; }
+.btn.primary { background: var(--wb-now); color: var(--wb-on-now); padding: 0; width: 40px; height: 32px; }
+.btn.primary .i { width: 17px; height: 17px; }
+.actions { display: inline-flex; gap: 4px; flex: none; }
+
+/* acknowledgement rows: a filled class tag leads each row */
+.acks { border-radius: 10px; overflow: hidden; background: var(--wb-bg); }
+.arow { display: flex; flex-wrap: wrap; align-items: flex-start; padding-right: 8px; }
+.arow > .note-toggle { margin-top: 6px; flex: none; }
+.arow > .note { flex-basis: 100%; width: auto; margin: 0 10px 8px 34px; }
+.ack { flex: 1; min-width: 0; display: flex; gap: 8px; padding: 7px 10px; align-items: flex-start; cursor: pointer; line-height: 21px; }
+.ack > :not(.atext) { flex: none; }
+.ack .tag { display: inline-block; line-height: 15px; vertical-align: 1px; }
+.ack .head > :not(.title) { margin-right: 6px; }
+.arow + .arow { border-top: 1px solid var(--wb-muted); }
+.ack input { margin: 4px 0 0; accent-color: var(--wb-primary); }
+.ack .id { font-size: 12px; font-weight: 700; color: var(--wb-muted-fg); }
+.tag { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; padding: 1px 7px; border-radius: 4px; }
+.tag.technical { background: var(--wb-technical); color: var(--wb-on-technical); }
+.tag.announced { background: var(--wb-announced); color: var(--wb-on-announced); }
+
+.ack .atext { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; line-height: 1.5; padding-top: 1px; overflow-wrap: anywhere; }
+.ack .head .title { font-weight: 600; }
+.ack .why { font-size: 12px; color: var(--wb-muted-fg); }
+
+/* settled: collapsed tonal chip */
+details.settled { font-size: 13px; }
+details.settled > summary, details.more > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; padding: 1px 10px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+details.settled > summary::-webkit-details-marker, details.more > summary::-webkit-details-marker { display: none; }
+details.settled[open] > summary { margin-bottom: 4px; }
+.tbar details.settled > summary { background: rgb(127 127 127 / .28); color: inherit; }
+details.more { margin: 2px 0 0 4px; }
+details.more > summary { padding: 0 8px; background: transparent; box-shadow: inset 0 0 0 1px var(--wb-muted); }
+details.more[open] > summary { margin-bottom: 2px; }
+.srow { padding: 2px 4px; }
+.srow .id { font-size: 12px; color: var(--wb-muted-fg); }
+.srow .stext > .id, .srow .stext > .amark, .srow .stext > .new { margin-right: 6px; }
+/* assumed: the lead's reading, settled like an answer; a small pill so it separates from the ID and text, not a role fill */
+.srow .amark { display: inline-block; vertical-align: baseline; font-size: 10.5px; font-weight: 700; line-height: 1.5; padding: 0 7px; border-radius: 999px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-assumed) 18%, transparent); color: color-mix(in srgb, var(--wb-accent-assumed) 75%, var(--wb-muted-fg)); }
+.srow .stext > b { font-weight: 600; }
+.srow .stext { display: block; overflow-wrap: anywhere; }
+/* an assumed row keeps a pen: the user can still veto or comment through a note */
+.srow[data-id] { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 4px; }
+.srow[data-id] > .stext, .srow[data-id] > details.sx { flex: 1; min-width: 0; }
+.srow .note-toggle { background: transparent; color: var(--wb-muted-fg); opacity: .7; flex: none; }
+.srow .note-toggle:hover { opacity: 1; }
+.srow .note { flex-basis: 100%; margin-top: 4px; }
+.srow .ans { color: var(--wb-muted-fg); }
+/* a settled row with more to show: the compact text is a summary with a small
+   disclosure caret, and the body is the original item, options static */
+details.sx > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 4px; border-radius: 4px; }
+details.sx > summary::-webkit-details-marker { display: none; }
+details.sx > summary:hover { background: var(--wb-wash); }
+details.sx > summary::before { content: ""; flex: none; align-self: center; width: 0; height: 0; border-left: 5px solid var(--wb-muted-fg); border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+details.sx[open] > summary::before { transform: rotate(90deg); }
+details.sx > summary > .stext { flex: 1; min-width: 0; }
+.sbody { margin: 4px 0 6px 13px; padding: 6px 0 2px 10px; border-left: 2px solid var(--wb-muted); }
+.opt.static { cursor: default; }
+.opt.static:hover { background: var(--wb-opt); box-shadow: var(--wb-shadow); }
+.opt.static.picked, .opt.static.picked:hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--wb-accent-policy) 40%, transparent); font-weight: 500; }
+.opt.static:not(.picked) { opacity: .75; }
+.srow.void .stext > b { font-weight: 400; text-decoration: line-through; color: var(--wb-muted-fg); }
+
+/* topic recap: a short status block inset at the top of the topic card, in
+   the item gutter, "recap <time>" on the right; inside a closed topic's fold it
+   sits above the body */
+.trecap { display: flex; align-items: baseline; gap: 10px; margin: 10px 10px 0; padding: 7px 10px; font-size: 13px; background: var(--wb-wash); border-left: 3px solid var(--wb-accent-policy); border-radius: 0 8px 8px 0; }
+/* last in its box (a closed fold's summary takes no room): keep the gutter below */
+.trecap:last-child, .trecap:has(+ details.tdoc:not([open]):last-child) { margin-bottom: 10px; }
+/* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
+.trecap .rtext { flex: 1; min-width: 0; overflow-wrap: anywhere; contain: paint; }
+.trecap .rat { flex: none; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* topic body: block markdown above the topic's items, folded under its own summary */
+/* The summary is the topic bar's button: it is taken out of the details' flow
+   and pinned to the bar's right end (the bar reserves room for it), so the body
+   opens as a full-width block under the bar. */
+.topic { position: relative; }
+.topic.has-doc > .tbar { padding-right: 46px; }
+.topic.has-doc:has(> details.tdoc > summary .new) > .tbar { padding-right: 60px; }
+details.tdoc > summary { position: absolute; top: 5px; right: 12px; cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 9px; border-radius: 999px; background: rgb(127 127 127 / .28); color: var(--wb-on-topic); }
+details.tdoc > summary::-webkit-details-marker { display: none; }
+details.tdoc > summary .new { background: currentColor; }
+.topic.quiet details.tdoc > summary { color: var(--wb-muted-fg); }
+.topic.quiet details.tdoc[open] { background: var(--wb-card); border-radius: var(--wb-radius); margin-top: 4px; overflow: hidden; }
+.doc-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
+.doc-body > :first-child { margin-top: 0; }
+.doc-body > :last-child { margin-bottom: 0; }
+.doc-body > svg { width: 100%; height: auto; display: block; }
+.doc-body img, .doc-body canvas { max-width: 100%; height: auto; }
+.doc-body pre { background: var(--wb-muted); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
+/* change marks of a topic body's latest edit (chg.js): thin bars in the gutter
+   left of the text column, so they never read as a blockquote's border */
+.wb-chg-layer { position: relative; height: 0; }
+.wb-chg-bar { position: absolute; width: 2px; border-radius: 1px; pointer-events: none; --chg: transparent; background: var(--chg); }
+.wb-chg-bar.new { --chg: light-dark(#1a7f37, #3fb950); }
+.wb-chg-bar.mod { --chg: light-dark(#0969da, #58a6ff); }
+.wb-chg-bar.del { --chg: light-dark(#cf222e, #f85149); width: 8px; height: 2px; }
+/* a served page's topic body: a sandboxed frame sized to its content, which pads itself */
+.doc-body.framed { padding: 0; }
+iframe.doc-frame { display: block; width: 100%; height: 0; border: 0; }
+/* drawing kit for topic bodies: theme-aware classes for inline SVG (the
+   selectors key on .doc-body, which a body frame's document holds too) */
+.doc-body .box { fill: var(--wb-muted); }
+.doc-body .box.store { fill: var(--wb-now); }
+.doc-body svg text { fill: var(--wb-fg); font: 12px system-ui, sans-serif; }
+.doc-body svg text.on { fill: var(--wb-on-now); }
+.doc-body svg text.sub { fill: var(--wb-muted-fg); font-size: 10.5px; }
+.doc-body svg text.sub.on { fill: var(--wb-on-now); opacity: .8; }
+.doc-body .edge { stroke: var(--wb-muted-fg); fill: none; stroke-width: 1.4; }
+.doc-body .edge.dash { stroke-dasharray: 4 3; }
+.doc-body .arrow { fill: var(--wb-muted-fg); }
+
+/* side panels: tonal title bar */
+details.panel { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; }
+details.panel > summary { list-style: none; cursor: pointer; padding: 4px 8px 4px 12px; min-height: 30px; display: flex; gap: 8px; align-items: center; font-weight: 700; font-size: 13px; background: var(--wb-muted); }
+details.panel > summary::-webkit-details-marker { display: none; }
+details.panel > summary .chip { margin-left: auto; background: var(--wb-card); }
+details.panel .body { padding: 8px 12px 10px; font-size: 13px; }
+.rows { list-style: none; margin: 0; padding: 0; overflow-wrap: anywhere; }
+.rows li { display: flex; gap: 8px; padding: 3px 0; }
+.rows li.done { color: var(--wb-muted-fg); text-decoration: line-through; }
+.rows li.defer { color: var(--wb-muted-fg); }
+.rows li.wip { font-weight: 700; background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); border-radius: 6px; padding: 3px 6px; margin: 0 -6px; }
+.rows .box { color: var(--wb-muted-fg); flex: none; padding-top: 1px; }
+.rows li.wip .box { color: var(--wb-primary); }
+details.folded { margin-top: 6px; }
+details.folded > summary { cursor: pointer; list-style: none; width: fit-content; }
+details.folded > summary::-webkit-details-marker { display: none; }
+details.folded[open] > summary { margin-bottom: 4px; }
+details.folded .rows li { color: var(--wb-muted-fg); }
+.rows li.keyed { display: block; padding: 4px 0; }
+.rows li.keyed + li.keyed { border-top: 1px solid var(--wb-muted); }
+.rows li.keyed code { font-size: 12px; color: var(--wb-primary); font-weight: 600; }
+.rows li.keyed span { display: block; color: var(--wb-muted-fg); font-size: 12.5px; }
+.rows a { color: inherit; text-decoration: underline; text-decoration-color: var(--wb-muted); }
+.rows a:hover { color: var(--wb-primary); }
+
+/* panel tree (agendas): each root is a tinted block, its fields nest under a
+   guide line; a container's summary shows its folded preview only while
+   folded, and a long string folds to one line and opens in full */
+.rows + .tree { margin-top: 8px; }
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree ul { margin-left: 5px; padding-left: 9px; border-left: 1px solid var(--wb-line); }
+.tree > li + li { margin-top: 6px; }
+.tree > li > details, .tree > li > .tleaf { background: color-mix(in srgb, var(--wb-muted) 45%, var(--wb-card)); border-radius: 8px; padding: 4px 8px; }
+.tree summary, .tree .tleaf { display: flex; gap: 6px; align-items: baseline; min-width: 0; padding: 1px 0; font-size: 12.5px; line-height: 1.45; }
+.tree summary { list-style: none; cursor: pointer; border-radius: 4px; }
+.tree summary::-webkit-details-marker { display: none; }
+.tree summary:hover { background: var(--wb-wash); }
+.tree summary::before { content: ""; flex: none; align-self: center; width: 0; height: 0; margin: 0 2px 0 1px; border-left: 5px solid var(--wb-muted-fg); border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.tree details[open] > summary::before { transform: rotate(90deg); }
+.tree .tleaf::before { content: ""; flex: none; width: 8px; }
+.tkey { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+.tree > li > details > summary > .tkey, .tree > li > .tleaf > .tkey { max-width: none; color: var(--wb-primary); }
+.tsum, .tv { flex: 1 1 auto; min-width: 0; }
+.tsum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+.tree details[open] > summary > .tsum { display: none; }
+.tv { overflow-wrap: anywhere; }
+.tv.num, .tv.bool { font: 12px/1.45 var(--wb-mono); color: var(--wb-primary); }
+.tv.null, .tv.obj, .tv.arr { font: 12px/1.45 var(--wb-mono); color: var(--wb-muted-fg); }
+.tv.null { font-style: italic; }
+.tlong > summary > .tv { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wb-muted-fg); }
+.tree .tlong[open] > summary > .tv { display: none; }
+.tfull { margin: 2px 0 4px 14px; padding: 4px 8px; border-radius: 6px; background: var(--wb-wash); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.45; }
+
+/* kanban lanes (tickets panel): side by side once the panel body is wide
+   enough, stacked otherwise; the container query follows the panel's own
+   width, which differs between the side column, a narrow page, and the embed */
+details.panel .body { container-type: inline-size; }
+.lanes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@container (min-width: 480px) { .lanes { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
+.lanes + .rows { margin-top: 8px; }
+.lane { min-width: 0; background: color-mix(in srgb, var(--wb-muted) 45%, var(--wb-card)); border-radius: 10px; padding: 8px; }
+.lane h4 { margin: 0 0 6px; display: flex; align-items: center; gap: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.lane h4 .chip { height: 18px; font-size: 11px; background: var(--wb-card); }
+.lane h4 .lnote { margin-left: auto; font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; text-align: right; }
+.kcards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.kcards li { min-width: 0; }
+.kcards li.none { color: var(--wb-muted-fg); font-size: 12px; padding: 2px 4px; }
+.kcard { background: var(--wb-card); border-radius: 8px; box-shadow: var(--wb-shadow); padding: 6px 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+/* the chip sits inline at the start of the clamped title, so it counts as part of the title's first line */
+.kcard .cat { height: 16px; font-size: 10.5px; padding: 0 7px; font-weight: 600; vertical-align: middle; margin-right: 6px; }
+.kcard .cat.epic { background: var(--wb-technical); color: var(--wb-on-technical); }
+.ctitle { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-weight: 600; line-height: 1.35; max-width: 100%; }
+.ctitle a { color: inherit; text-decoration: none; }
+.ctitle a:hover { text-decoration: underline; }
+.csub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px/1.3 var(--wb-mono); color: var(--wb-muted-fg); }
+
+/* icons: inline SVG, so alignment does not depend on which font has the glyph */
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.chip .i, details.settled .i { width: 12px; height: 12px; stroke-width: 2; }
+.rec-line .i { width: 12px; height: 12px; }
+
+/* reply bar */
+.reply { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); padding: 10px 12px; display: grid; grid-template-columns: auto 1fr auto auto; gap: 8px; align-items: center; margin: 4px 0 12px; }
+.reply.solo { grid-template-columns: 1fr auto auto; }
+.reply[hidden] { display: none; }
+.full .reply { position: sticky; bottom: 10px; z-index: 2; }
+.reply textarea { font-family: var(--wb-mono); font-size: 12.5px; color: inherit; background: var(--wb-muted); border: 0; border-radius: 8px; padding: 7px 9px; resize: none; height: 34px; width: 100%; }
+.reply .allok { display: inline-flex; align-items: center; gap: 4px; height: 34px; padding: 0 10px; border-radius: 8px; background: var(--wb-muted); font-size: 12px; font-weight: 700; color: var(--wb-muted-fg); cursor: pointer; user-select: none; }
+.reply .allok input { margin: 0; accent-color: var(--wb-primary); }
+.reply .allok:has(input:checked) { color: var(--wb-fg); }
+.reply .hint { font-size: 12px; color: var(--wb-muted-fg); min-width: 14px; }
+
+/* open-question pill: a zero-height sticky wrapper at each end of the board's scroll area carries the pill, so showing it moves nothing; the bottom offset is set by pill.js to clear the reply bar; rail.js sets --wb-rail-h and --wb-rail-bot on the wrappers themselves */
+.oq-wrap { position: sticky; height: 0; z-index: 4; pointer-events: none; text-align: center; }
+.oq-wrap.top { top: calc(10px + var(--wb-rail-h, 0px)); }
+.oq-wrap.bot { bottom: 10px; }
+.oq-pill { position: absolute; left: 50%; transform: translateX(-50%); pointer-events: auto; display: inline-flex; align-items: center; gap: 3px; height: 28px; padding: 0 3px 0 10px; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
+.oq-pill[hidden], .oq-seg[hidden] { display: none; }
+.oq-wrap.top .oq-pill { top: 0; }
+.oq-wrap.bot .oq-pill { bottom: 0; }
+/* one inset capsule per state (pill.js): open, answered, answered with a note */
+.oq-arr { color: var(--wb-muted-fg); margin-right: 3px; }
+.oq-seg { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 9px; border: 0; border-radius: 999px; font: inherit; line-height: 1; cursor: pointer; }
+.oq-seg.open { background: var(--wb-policy); color: var(--wb-on-policy); }
+.oq-seg.ans { background: var(--wb-announced); color: var(--wb-on-announced); }
+.oq-seg.nt { background: var(--wb-muted); color: var(--wb-muted-fg); font-weight: 600; }
+.oq-seg .n { font-variant-numeric: tabular-nums; }
+.oq-seg:hover { filter: brightness(1.1); }
+.oq-seg:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+
+/* topic rail (rail.js): the current topic's bar sticks under the top capsules
+   (--wb-rail-top, which rail.js sets on each bar itself: on the host it
+   would restyle the whole board on every redraw), and zero-height sticky
+   wrappers at each end of the board carry the jump capsules. A host that keeps a sticky row of its own at the
+   top of its scroll area sets --wb-rail-inset to its height: the top
+   capsules and the bar stick below it. The topic clips rather than hides its overflow, so
+   it is no scroll container and its bar sticks to the board's scroller. The
+   capsule height, gap, and paddings are mirrored in rail.js (CAP, GAP, PAD,
+   FADE): change them together. A host that rails its own board nodes
+   (data-rail, rail.js) sticks their bars itself, at --wb-rail-top (set on
+   each data-rail-bar), and
+   styles their .wb-stuck shadow. */
+.wb-rail .topic { overflow: hidden; overflow: clip; }
+.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 2; }
+/* An open note sticks right under its topic's bar (--wb-rail-note, the bar's
+   stick line plus its height, which rail.js sets on each note), so it stays
+   at hand while the topic scrolls and leaves with the topic. It draws above
+   the topic's body and below the bar (z-index 1 < 2): when the card's end
+   pushes both up, the note slides under the bar. It keeps its top margin as
+   a gap under the bar, so it does not move when it starts to stick. The
+   fallback is a one-line bar under no capsules, for the frame before the
+   rail's first run. */
+.wb-rail .topic > .tnote { position: sticky; top: calc(var(--wb-rail-note, 30px) + 6px); z-index: 1; }
+.wb-rail .topic.quiet > .tnote { top: calc(var(--wb-rail-note, 30px) + 4px); }
+.wb-rail .topic:not(.quiet) > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+/* A stuck bar stays under the top capsule stack (z-index 2 < the wrapper's
+   3): a bar that its card's end pushes up slides under the stack, and the
+   morph copy (rail.js motion) draws the turn into a capsule over it. Drawn
+   above the stack, a short topic (a quiet one is all bar, so its bar cannot
+   stick lower) straddling the stick line covered every capsule. The
+   second shadow fills the bar's rounded top corners with the page colour
+   (offset up by its spread, so it reaches the corners and not below the
+   bar; the topic clips its sides): the card scrolling under a stuck bar
+   showed through them. */
+.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
+/* the book button stays at the card's top and scrolls away under a stuck bar, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
+.wb-rail .topic.has-doc:has(> details.tdoc) > .tbar.wb-stuck { padding-right: 12px; }
+.wb-rail .topic > details.tdoc > summary { z-index: 2; }
+.wb-rail-wrap { position: sticky; height: 0; z-index: 2; pointer-events: none; }
+.wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }
+/* The bottom wrapper ends the board, so its top margin is the board's
+   bottom scroll margin: room for the last item to scroll fully clear of
+   the bottom stack (rail.js BOT: FADE + 2 CAP + GAP + PAD) with a 16px gap. */
+.wb-rail-wrap.dn { bottom: 0; margin-top: calc(14px + 2 * 17px + 3px + 4px + 16px); }
+.wb-rail-stack { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; gap: 3px; }
+.wb-rail-stack[hidden] { display: none; }
+/* the solid copy that morphs between a bar and its capsule by height alone
+   (rail.js morph): it clips the bar's and the capsule's content, both
+   centred in it and crossfading; it carries their fill, so theirs drops */
+.wb-rail-wrap .wb-rail-ghost { position: absolute; margin: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+.wb-rail-ghost > * { position: absolute; left: 0; top: 50%; width: 100%; margin: 0; transform: translateY(-50%); background: transparent; box-shadow: none; border-radius: 0; opacity: 1; }
+/* the shadow carries the band's fill over the scroller's top padding, which a sticky inset counts from */
+.wb-rail-wrap.up .wb-rail-stack { top: 0; padding: 4px 0 3px; background: var(--wb-bg); box-shadow: 0 -8px 0 var(--wb-bg); }
+.wb-rail-wrap.dn .wb-rail-stack { bottom: 0; padding: 14px 0 4px; background: linear-gradient(to bottom, transparent, var(--wb-bg) 14px); }
+/* A capsule is as wide as its item's bar (the stack spans the board, as the
+   items do), so it reads as the bar collapsed, and the morph between the
+   two (rail.js) changes only height; the far one stands back by type and
+   opacity alone. */
+.wb-cap { pointer-events: auto; display: flex; align-items: center; gap: 6px; height: 17px; margin: 0; padding: 0 10px; border: 0; border-radius: 999px; background: var(--wb-topic); color: var(--wb-on-topic); font-size: 10.5px; font-weight: 700; line-height: 1; text-align: left; cursor: pointer; }
+.wb-cap.far { font-size: 10px; font-weight: 600; opacity: .6; }
+.wb-cap.quiet { background: var(--wb-muted); color: var(--wb-muted-fg); }
+.wb-cap:hover { opacity: 1; }
+.wb-cap:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 1px; opacity: 1; }
+.wb-cap .ci { flex: none; display: inline-flex; }
+.wb-cap .ci svg { width: 11px; height: 11px; }
+.wb-cap .cn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-cap .cp { flex: none; display: inline-flex; align-items: center; height: 12px; padding: 0 5px; border-radius: 999px; background: var(--wb-policy); color: var(--wb-on-policy); font-size: 9.5px; font-weight: 700; }
+.wb-cap .cx { flex: none; opacity: .75; font-variant-numeric: tabular-nums; }
+.wb-cap[hidden], .wb-cap > [hidden] { display: none; }
+
+/* update banner (full page) and in-page link target highlight */
+.banner { display: none; position: sticky; top: 0; z-index: 5; margin: -16px -16px 12px; padding: 6px 16px; background: var(--wb-now); color: var(--wb-on-now); text-align: center; font-size: 16px; font-weight: 700; cursor: pointer; box-shadow: var(--wb-shadow-hi); }
+.banner.show { display: block; }
+.banner .i { width: 20px; height: 20px; margin: 0 auto; stroke-width: 2; }
+.flash { animation: wb-flash 1.6s ease-out; }
+@keyframes wb-flash {
+  from { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
+  to { outline: 2px solid transparent; outline-offset: -2px; }
+}
+
+/* image viewer (viewer.js): a modal over the whole page. The chrome is dark in
+   both themes; the content sits on the card colour, so a diagram drawn in the
+   theme's ink stays readable. */
+.md img, .doc-body img, .md svg:not(.i), .doc-body svg:not(.i), .md pre.mermaid svg { cursor: zoom-in; }
+.wbv { position: fixed; inset: 0; z-index: 100000; background: rgb(8 9 11 / .88); color: #fff; outline: 0; }
+.wbv[hidden] { display: none; }
+.wbv-stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; overscroll-behavior: contain; }
+.wbv-stage.drag { cursor: grabbing; }
+.wbv-content { position: absolute; left: 0; top: 0; max-width: none; max-height: none; margin: 0; border-radius: 6px; background: var(--wb-card); box-shadow: 0 8px 40px rgb(0 0 0 / .5); -webkit-user-drag: none; }
+.wbv-bar { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 10px; background: rgb(28 30 34 / .9); box-shadow: 0 2px 12px rgb(0 0 0 / .4); }
+.wbv-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #fff; cursor: pointer; text-decoration: none; }
+.wbv-btn:hover { background: rgb(255 255 255 / .16); }
+.wbv-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.wbv-btn[hidden] { display: none; }
+.wbv-btn .i { width: 16px; height: 16px; }
+.wbv-pct { min-width: 46px; text-align: center; font: 600 12px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; opacity: .85; }
+
+
+/* ===== 2. r6 additions ===== */
+:root {
+  /* only new colour: the "no" answer. Same hue family as the live layer's --wb-fail. */
+  --wb-ck-no: #c0262d;
+  --wb-ck-ok: var(--wb-announced);
+}
+:root[data-theme="dark"] { --wb-ck-no: #f0797e; --wb-ck-ok: #6cc39a; }
+.full .wrap { max-width: 880px; }
+
+/* the check list: same recessed surface as .acks, inset in the item gutter right under the recap */
+.checks { margin: 8px 10px 0; border-radius: 10px; overflow: hidden; background: var(--wb-bg); }
+.checks:last-child { margin-bottom: 10px; }
+.chead { display: flex; align-items: center; gap: 6px; padding: 6px 10px 3px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--wb-muted-fg); }
+.chead .i { width: 12px; height: 12px; }
+.chead .prog { margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none; font-size: 11.5px; font-weight: 700; }
+.chead .prog b { color: var(--wb-fg); }
+.crow + .crow { border-top: 1px solid var(--wb-muted); }
+.crow > .btn.mini { margin-top: 6px; }
+.crow > .btn.mini + .btn.mini { margin-left: 2px; }
+.ck .title { font-weight: 600; }
+.ck .atext { flex-wrap: wrap; }
+/* link chip: a quiet pill that trails the title */
+.lchip { display: inline-flex; align-items: center; gap: 4px; height: 19px; padding: 0 8px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 11.5px; text-decoration: none; white-space: nowrap; max-width: 100%; }
+.lchip:hover { color: var(--wb-primary); }
+.lchip .i { width: 11px; height: 11px; }
+.lchip code { background: none; padding: 0; font-size: 11.5px; }
+/* answered rows are locked: the box shows the answer, the title quiets down */
+.crow.done .title, .crow.no .title { font-weight: 500; color: var(--wb-muted-fg); }
+.crow.done .ck, .crow.no .ck { cursor: default; }
+.ck input:disabled { opacity: 1; accent-color: var(--wb-ck-ok); }
+.cbox { flex: none; width: 13px; height: 13px; margin: 4px 0 0; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; background: var(--wb-ck-no); color: #fff; }
+.cbox .i { width: 10px; height: 10px; stroke-width: 2.4; }
+.crow .stamp { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; padding: 0 7px; border-radius: 999px; line-height: 16px; align-self: center; }
+.crow.done .stamp { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 16%, transparent); }
+.crow.no .stamp { color: var(--wb-ck-no); background: color-mix(in srgb, var(--wb-ck-no) 14%, transparent); }
+/* the user's note on a "no" is shown the way a settled row shows an answer quote */
+.crow .said { flex-basis: 100%; margin: 1px 0 0; padding: 3px 9px; font-size: 12.5px; color: var(--wb-muted-fg); border-left: 2px solid var(--wb-ck-no); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--wb-ck-no) 6%, transparent); }
+/* "no" toggle beside the pen: pressed = this check is answered no */
+.no-toggle { background: transparent; color: var(--wb-muted-fg); opacity: .8; }
+.no-toggle:hover { opacity: 1; }
+.no-toggle[aria-pressed="true"] { background: var(--wb-ck-no); color: #fff; opacity: 1; }
+.crow[data-no] .ck input { accent-color: var(--wb-muted-fg); opacity: .45; }
+/* staged: a row that has a pending answer carries a thin primary edge, like nothing else on the board does yet */
+.crow.staged { box-shadow: inset 3px 0 0 var(--wb-primary); }
+
+/* mockup chrome: not part of the board */
+.mock-notes { margin: 18px 0 8px; padding: 12px 16px; border: 1px dashed var(--wb-muted-fg); border-radius: var(--wb-radius); font-size: 12.5px; color: var(--wb-muted-fg); }
+.mock-notes h2 { margin: 0 0 6px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--wb-fg); }
+.mock-notes ol { margin: 0; padding-left: 18px; }
+.mock-notes li { margin: 3px 0; }
+.mock-notes code { background: var(--wb-muted); }
+.themebtn { margin-left: 8px; }
+</style></head>
+<body class="full"><svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.1L13 4.6"/></symbol><symbol id="i-x" viewBox="0 0 16 16"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></symbol><symbol id="i-pen" viewBox="0 0 16 16"><path d="M10.4 2.8l2.8 2.8-7.6 7.6H2.8v-2.8z"/></symbol><symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 3.2V3a.8.8 0 0 0-.8-.8H3a.8.8 0 0 0-.8.8v6.7c0 .4.4.8.8.8h.2"/></symbol><symbol id="i-list" viewBox="0 0 16 16"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></symbol><symbol id="i-arrow" viewBox="0 0 16 16"><path d="M2.5 8h10M9 4.5L12.5 8 9 11.5"/></symbol><symbol id="i-ask" viewBox="0 0 16 16"><path d="M6 6.2a2 2 0 1 1 2.8 1.8c-.5.3-.8.7-.8 1.3v.4"/><circle cx="8" cy="12.3" r=".6" fill="currentColor"/></symbol><symbol id="i-star" viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M8 1.9l1.8 3.8 4.1.5-3 2.9.8 4.1L8 11.2l-3.7 2 .8-4.1-3-2.9 4.1-.5z"/></symbol><symbol id="i-now" viewBox="0 0 16 16"><path fill="currentColor" stroke="none" d="M8 2l6 6-6 6-6-6z"/></symbol><symbol id="i-todo" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.2 8.2l1.9 1.8 3.7-3.8"/></symbol><symbol id="i-agenda" viewBox="0 0 16 16"><path d="M4 13.8V2.4h7.6l-1.7 3 1.7 3H4"/></symbol><symbol id="i-mail" viewBox="0 0 16 16"><rect x="2" y="3.5" width="12" height="9" rx="1.6"/><path d="M2.6 4.6L8 8.8l5.4-4.2"/></symbol><symbol id="i-book" viewBox="0 0 16 16"><path d="M3 3.5a1.5 1.5 0 0 1 1.5-1.5H13v10H4.5A1.5 1.5 0 0 0 3 13.5zM3 13.5A1.5 1.5 0 0 0 4.5 15H13v-3"/></symbol><symbol id="i-board" viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="1.6"/><path d="M6 2.5v11M10 2.5v11"/></symbol>
+<symbol id="i-reload" viewBox="0 0 16 16"><path d="M14.3 2.8v3.9h-3.9"/><path d="M13 10.2a5.4 5.4 0 1 1-1.3-5.6l2.6 2.1"/></symbol><symbol id="i-link" viewBox="0 0 16 16"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.2-2.2a2.6 2.6 0 0 0-3.7-3.7l-.9.9M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.3 9a2.6 2.6 0 0 0 3.7 3.7l.9-.9"/></symbol><symbol id="i-box" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/></symbol><symbol id="i-box-wip" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path fill="currentColor" stroke="none" d="M5 5.2h3v5.6H5z"/></symbol><symbol id="i-box-done" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.2 8.2l1.9 1.8 3.7-3.8"/></symbol><symbol id="i-box-defer" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2"/><path d="M5.6 8h4.6M8.6 5.9L10.7 8l-2.1 2.1"/></symbol><symbol id="i-zoom-in" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4L14 14M5 7h4M7 5v4"/></symbol><symbol id="i-zoom-out" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.6"/><path d="M10.4 10.4L14 14M5 7h4"/></symbol><symbol id="i-fit" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></symbol><symbol id="i-ext" viewBox="0 0 16 16"><path d="M9 2.5h4.5V7M13.5 2.5L7.5 8.5M11.5 9.5v3a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h3"/></symbol></svg>
+<div class="wrap">
+<div class="top"><h1>화이트보드</h1><span class="meta">wb-2252 · #14</span><span class="counts"><span class="chip policy" title="답변 필요"><svg class="i" aria-hidden="true"><use href="#i-ask"/></svg>3</span><span class="chip ok" title="확인 필요"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>1</span><button class="btn mini themebtn" id="theme" title="light / dark">◐</button></span></div>
+
+<section class="topic has-doc" data-topic="whiteboard-check">
+  <div class="tbar"><span class="tlead"><span class="tname">화이트보드 확인 요청(check) 항목</span></span><time class="tago" title="갱신">2분 전</time><button type="button" class="chip policy bulk" data-bulk="policy" title="권장 선택지로 모두 답하기"><svg class="i" aria-hidden="true"><use href="#i-ask"/></svg>3</button><button type="button" class="chip ok bulk" data-bulk="ack" title="모든 확인 항목 체크"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>1</button><button class="btn mini tnote-toggle" title="토픽 메모"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button></div>
+  <textarea class="note tnote" data-topic="whiteboard-check" rows="1" placeholder="✎" title="토픽 메모" hidden></textarea>
+
+  <div class="trecap"><div class="rtext md"><p>체크 항목 도입안을 정리 중입니다. 아래 <b>확인 요청</b> 두 건에 답해 주시면 구현 티켓으로 넘깁니다.</p></div><span class="rat" title="2026-11-12 22:48">요약 <time class="tago">4분 전</time></span></div>
+
+  <!-- r6: the check list sits directly under the recap, above the topic body -->
+  <div class="checks" id="checks">
+    <div class="chead"><svg class="i" aria-hidden="true"><use href="#i-todo"/></svg>확인 요청<span class="prog">답변 <b id="prog-n">2</b> / 4</span></div>
+
+    <div class="arow crow" id="item-571" data-id="571"><label class="ack ck"><input type="checkbox" data-id="571"><span class="atext"><span class="head"><span class="id">(571)</span><span class="title">check 항목 초안(draft)을 읽어 보시고 문구를 확인해 주세요</span></span><a class="lchip" href="#"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg><code>check-items-draft.md</code></a></span></label><button class="btn mini no-toggle" aria-pressed="false" title="아니요(no)로 답하기"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button><button class="btn mini note-toggle" title="메모"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="메모" hidden></textarea></div>
+
+    <div class="arow crow" id="item-572" data-id="572"><label class="ack ck"><input type="checkbox" data-id="572"><span class="atext"><span class="head"><span class="id">(572)</span><span class="title">내 환경에서 <code>go test ./...</code> 가 통과하는지 확인해 주세요</span></span><a class="lchip" href="#"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg>PR #212</a></span></label><button class="btn mini no-toggle" aria-pressed="false" title="아니요(no)로 답하기"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button><button class="btn mini note-toggle" title="메모"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="메모" hidden></textarea></div>
+
+    <div class="arow crow done" id="item-573"><label class="ack ck"><input type="checkbox" checked disabled><span class="atext"><span class="head"><span class="id">(573)</span><span class="title">릴리스 노트 문구를 확인해 주세요</span></span><span class="stamp">ok</span></span></label></div>
+
+    <div class="arow crow no" id="item-574"><label class="ack ck"><span class="cbox"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></span><span class="atext"><span class="head"><span class="id">(574)</span><span class="title">아이콘 시안 B로 진행해도 될까요?</span></span><a class="lchip" href="#"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg>icons-b.png</a><span class="stamp">no</span><span class="said">시안 B는 다크 모드에서 대비가 낮아요. A로 가죠.</span></span></label></div>
+  </div>
+
+  <details class="tdoc" open><summary title="토픽 본문"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg></summary><div class="doc-body md">
+    <p><b>check</b>는 사용자에게 "읽어 보세요", "확인해 주세요", "진행해도 될까요?"를 요청하는 <i>게이트</i>입니다. 선택지를 고르는 결정(policy)도, 알리기만 하는 통보(announced/technical)도 아닙니다.</p>
+    <ul><li>항목 하나에 체크박스 하나, 한 번에 하나씩 체크합니다.</li><li>체크하면 <code>ok</code>, 옆의 ✕ 는 <code>no</code>이며 펜으로 메모를 남길 수 있습니다.</li><li>답은 아래 답변 바에 쌓이고, 복사 버튼으로 보내기 전까지는 보내지 않은 상태입니다.</li></ul>
+  </div></details>
+
+  <div class="tbody">
+    <div class="card policy" id="item-576" data-id="576">
+      <div class="cbar"><span class="head"><span class="id">(576)</span><span class="cls">policy</span><span class="title">체크 항목을 몇 개까지 한 토픽에 허용할까요?</span></span><button class="btn mini note-toggle" title="메모"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button></div>
+      <div class="cbody"><div class="opts"><button class="opt rec" data-opt="a" aria-pressed="false"><span class="k">a<svg class="i" aria-hidden="true"><use href="#i-star"/></svg></span><span>제한 없음</span></button><button class="opt" data-opt="b" aria-pressed="false"><span class="k">b</span><span>토픽당 5개까지</span></button></div>
+      <div class="rec-line md" title="추천"><b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>a</b> 길어지면 토픽을 나누는 편이 자연스럽습니다.</div>
+      <textarea class="note" rows="1" placeholder="✎" title="메모" hidden></textarea></div>
+    </div>
+    <div class="acks"><div class="arow" id="item-575" data-id="575"><label class="ack"><input type="checkbox" data-id="575"><span class="atext"><span class="head"><span class="id">(575)</span><span class="tag announced">announced</span><span class="title">check 목업은 제품 코드를 건드리지 않았습니다</span></span><span class="why">ai-docs/ref/whiteboard-mockup/r6-check-items/ 만 추가됩니다.</span></span></label><button class="btn mini note-toggle" title="메모"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg></button><textarea class="note" rows="1" placeholder="✎" title="메모" hidden></textarea></div></div>
+  </div>
+</section>
+
+<div class="reply"><label class="allok" title="모든 technical/announced 항목을 확인합니다"><input type="checkbox" id="ack-all"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>1</label><textarea id="reply-text" readonly placeholder="(nn) a; (mm) ok"></textarea><button class="btn primary" id="reply-copy" title="복사"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg></button><span class="hint" id="reply-hint"></span></div>
+
+<aside class="mock-notes"><h2>Mockup notes (not part of the board)</h2><ol>
+<li><b>Placement.</b> Template order is recap, check list, topic body, then the existing policy and ack items. The check list uses the recessed <code>.acks</code> surface and the ack row's own checkbox row, so it reads as a sibling of acks, with no class tag and a list header with progress instead.</li>
+<li><b>Staging.</b> Tick a box (<code>ok</code>), press the x (<code>no</code>), or write with the pen: the reply bar's answer block updates exactly like policy and ack answers, and nothing is sent until the existing copy button. Try it; <code>staged.png</code> is that state.</li>
+<li><b>Waiting count.</b> Open checks fold into the existing amber "answer needed" chip in the topic bar and page header: 3 = 2 open checks + 1 policy. Answered rows (573, 574) leave the count. The ack chip stays acks only; the topic bar's bulk buttons never tick checks, since a gate is answered one item at a time (the all-ok box in the reply bar likewise covers acks only).</li>
+<li><b>Answers.</b> <code>ok</code> and <code>no</code> are plain values in the existing answer-block grammar (<code>571=ok</code>, <code>572=no^note</code>); a note on an unanswered row is a note alone (<code>=^note</code>), as for acks.</li>
+</ol></aside>
+</div>
+<script>
+  // The answer block a reply carries ahead of its text, the grammar the
+  // server's delivered message uses (wsinbox.AnswerBlock; a test holds the
+  // two to the same cases):
+  //   <wb:answers>
+  //   123,567,691=b        items sharing a value and no note, ascending
+  //   124..129,181=ok      a run of three or more consecutive IDs as a..b
+  //   130=ok^note          an item with a note: its own line, note after ^
+  //   131=^note            a note alone
+  //   [topic]^note         a topic note, after the item lines
+  //   </wb:answers>
+  // In a note, newline is written \n and backslash \\. Lines follow the order
+  // of the first item each covers. Self-contained: the static page runs it
+  // ahead of form.js, the dashboard page as its own script.
+  window.wbAnswers = (function () {
+    function esc(s) {
+      return s.replace(/\r\n?/g, "\n").replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
+    }
+    function ids(list) {
+      var a = list.map(function (s) { return { s: s, n: parseInt(s, 10) || 0 }; });
+      // A stable sort by number: Array.prototype.sort is stable in every
+      // current engine.
+      a.sort(function (x, y) { return x.n - y.n; });
+      var out = [];
+      for (var i = 0; i < a.length;) {
+        var j = i;
+        while (j + 1 < a.length && a[j + 1].n === a[j].n + 1) j++;
+        if (j - i >= 2) out.push(a[i].s + ".." + a[j].s);
+        else for (var k = i; k <= j; k++) out.push(a[k].s);
+        i = j + 1;
+      }
+      return out.join(",");
+    }
+    // block builds the answer block from items ({id, answer, note}) and topic
+    // notes ({topic, note}); "" when neither carries anything.
+    function block(items, topics) {
+      var lines = [], groups = Object.create(null);
+      (items || []).forEach(function (c) {
+        var note = (c.note || "").trim(), v = c.answer || "";
+        if (note) { lines.push({ text: c.id + "=" + v + "^" + esc(note) }); return; }
+        if (!v) return;
+        if (!groups[v]) { groups[v] = { v: v, ids: [] }; lines.push(groups[v]); }
+        groups[v].ids.push(String(c.id));
+      });
+      var out = lines.map(function (l) { return l.ids ? ids(l.ids) + "=" + l.v : l.text; });
+      (topics || []).forEach(function (t) {
+        var note = (t.note || "").trim();
+        if (note) out.push("[" + t.topic + "]^" + esc(note));
+      });
+      return out.length ? "<wb:answers>\n" + out.join("\n") + "\n</wb:answers>" : "";
+    }
+    return { block: block };
+  })();
+
+</script>
+<script>
+(function () {
+  var doc = document;
+  function q(sel, root) { return Array.prototype.slice.call((root || doc).querySelectorAll(sel)); }
+  var ta = doc.getElementById("reply-text"), hint = doc.getElementById("reply-hint"), all = doc.getElementById("ack-all");
+  function grow(n) { n.style.height = "auto"; if (n.scrollHeight) n.style.height = n.scrollHeight + "px"; }
+  function noteOf(el) { var n = el.querySelector("textarea.note"); return n ? n.value : ""; }
+  // build: modelled on form.js build(); the check rows are the only new part
+  function build() {
+    var items = [];
+    q(".card.policy[data-id]").forEach(function (card) {
+      var pick = card.querySelector('.opt[data-opt][aria-pressed="true"]');
+      items.push({ id: card.getAttribute("data-id"), answer: pick ? pick.getAttribute("data-opt") : "", note: noteOf(card) });
+    });
+    q(".crow[data-id]").forEach(function (row) {
+      var no = row.hasAttribute("data-no"), on = row.querySelector("label.ck > input").checked;
+      var ans = no ? "no" : on ? "ok" : "", note = noteOf(row);
+      row.classList.toggle("staged", !!(ans || note.trim()));
+      items.push({ id: row.getAttribute("data-id"), answer: ans, note: note });
+    });
+    q(".arow[data-id]:not(.crow)").forEach(function (row) {
+      items.push({ id: row.getAttribute("data-id"), answer: row.querySelector("label.ack > input").checked ? "ok" : "", note: noteOf(row) });
+    });
+    var text = window.wbAnswers.block(items, q("textarea.tnote").map(function (n) { return { topic: n.getAttribute("data-topic"), note: n.value }; }));
+    ta.value = text; ta.style.height = ""; if (text.indexOf("\n") >= 0) grow(ta);
+    hint.textContent = "";
+    var acks = q(".arow:not(.crow) label.ack > input"), on = acks.filter(function (c) { return c.checked; }).length;
+    all.checked = acks.length > 0 && on === acks.length; all.indeterminate = on > 0 && on < acks.length;
+  }
+  q(".crow .no-toggle").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var row = b.closest(".crow"), on = b.getAttribute("aria-pressed") !== "true";
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      if (on) { row.setAttribute("data-no", ""); row.querySelector("input").checked = false; var n = row.querySelector("textarea.note"); n.hidden = false; grow(n); n.focus(); }
+      else row.removeAttribute("data-no");
+      build();
+    });
+  });
+  q(".crow:not(.done):not(.no) label.ck > input").forEach(function (c) {
+    c.addEventListener("change", function () {
+      var row = c.closest(".crow");
+      if (c.checked) { row.removeAttribute("data-no"); row.querySelector(".no-toggle").setAttribute("aria-pressed", "false"); }
+      build();
+    });
+  });
+  q("button.note-toggle").forEach(function (t) {
+    t.addEventListener("click", function () { var n = t.closest(".card, .arow").querySelector("textarea.note"); n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); } });
+  });
+  q("button.tnote-toggle").forEach(function (t) {
+    t.addEventListener("click", function () { var n = t.closest(".topic").querySelector("textarea.tnote"); n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); } });
+  });
+  q("textarea.note").forEach(function (n) { n.addEventListener("input", function () { grow(n); build(); }); });
+  q(".card.policy .opt[data-opt]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var on = btn.getAttribute("aria-pressed") === "true";
+      q(".opt[data-opt]", btn.closest(".card")).forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+      btn.setAttribute("aria-pressed", on ? "false" : "true"); build();
+    });
+  });
+  q(".arow:not(.crow) label.ack > input").forEach(function (c) { c.addEventListener("change", build); });
+  all.addEventListener("change", function () { var v = all.checked; q(".arow:not(.crow) label.ack > input").forEach(function (c) { c.checked = v; }); build(); });
+  q("button[data-bulk]").forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      if (chip.getAttribute("data-bulk") === "ack") q(".arow:not(.crow) label.ack > input").forEach(function (c) { c.checked = true; });
+      else q(".card.policy[data-id]").forEach(function (card) {
+        var opts = q(".opt[data-opt]", card);
+        if (opts.some(function (b) { return b.getAttribute("aria-pressed") === "true"; })) return;
+        var rec = opts.filter(function (b) { return b.classList.contains("rec"); })[0];
+        if (rec) rec.setAttribute("aria-pressed", "true");
+      });
+      build();
+    });
+  });
+  doc.getElementById("reply-copy").addEventListener("click", function () {
+    if (!ta.value) { hint.textContent = "∅"; return; }
+    ta.focus(); ta.select();
+    try { doc.execCommand("copy"); hint.innerHTML = '<svg class="i" aria-hidden="true"><use href="#i-check"/></svg>'; } catch (e) { hint.textContent = "Ctrl+C"; }
+  });
+  doc.getElementById("theme").addEventListener("click", function () {
+    var r = doc.documentElement; r.setAttribute("data-theme", r.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  });
+  build();
+})();
+</script>
+</body></html>
