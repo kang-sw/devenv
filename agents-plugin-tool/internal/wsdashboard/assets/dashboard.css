@@ -312,7 +312,11 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .toolsline > summary:hover, .toolsline[open] > summary { color: var(--wb-fg); }
 .toolsline > summary .i { width: 10px; height: 10px; flex: none; transition: transform .15s; }
 .toolsline[open] > summary .i { transform: rotate(180deg); }
-.toolsline .tsum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* two rows: the per-tool counts (.tsl) truncate, the numbers (.tsn) never do; open, the batch list shows the tools, so only the numbers stay */
+.toolsline .tsum { min-width: 0; display: flex; flex-direction: column; }
+.toolsline .tsl, .toolsline .tsn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolsline > summary:has(.tsn) { border-radius: 12px; padding-top: 2px; padding-bottom: 2px; }
+.toolsline[open] .tsum:has(.tsn) .tsl { display: none; }
 .toolsline .tf { color: var(--wb-fail); font-weight: 700; }
 .toolsline .ttok { font-variant-numeric: tabular-nums; }
 .toolsline .tool .x { font-weight: 700; margin-left: 4px; }

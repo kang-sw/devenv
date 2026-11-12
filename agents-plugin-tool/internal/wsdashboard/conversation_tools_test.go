@@ -42,8 +42,7 @@ func TestToolsEntryRendersACollapsedSummaryRow(t *testing.T) {
 		`Bash</span> 5`,
 		`whiteboard.update</span> 2`,
 		` · +4 other`,
-		`1 failed`,
-		`1m 15s`,
+		`<span class="tsn"><b class="tf">1 failed</b> · <span class="t" data-span="75000">1m 15s</span>`,
 		`<li class="brow done">`,
 		`<li class="brow fail">`,
 		`<span title="6 calls">×6</span> · <span class="bf" title="1 failed">✗1</span>`,
@@ -70,7 +69,7 @@ func TestToolsRowWithoutNamedToolsShowsTheCallTotal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if html := string(set[regionEntries].HTML); !strings.Contains(html, `<span class="tsum">2 tool calls</span>`) {
+	if html := string(set[regionEntries].HTML); !strings.Contains(html, `<span class="tsum"><span class="tsl">2 tool calls</span></span>`) {
 		t.Errorf("summary = %s", html)
 	}
 }
@@ -189,5 +188,27 @@ func TestCompactTokensAndBatchSpans(t *testing.T) {
 		if got := batchSpanText(ms); got != want {
 			t.Errorf("batchSpanText(%d) = %q, want %q", ms, got, want)
 		}
+	}
+}
+
+// TestToolsSummarySplitsCountsFromNumbers pins the two rows: the per-tool
+// counts sit in .tsl, the failed count, duration, and usage in .tsn after it,
+// and a summary with no numbers draws no second row.
+func TestToolsSummarySplitsCountsFromNumbers(t *testing.T) {
+	render := func(sum *wslive.ToolSummary) string {
+		ring := []wslive.RingRecord{ringRecord(1, wslive.RingEntry{Kind: wslive.RingTools, Tools: sum})}
+		set, err := renderSessionRegions(historyView(ring, "", PageContent{}, sessionLookup{}), newEntryCache())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return stdhtml.UnescapeString(string(set[regionEntries].HTML))
+	}
+	html := render(toolsSummary())
+	row1, row2 := strings.Index(html, `<span class="tsl">`), strings.Index(html, `<span class="tsn">`)
+	if row1 < 0 || row2 < row1 || strings.Contains(html[row1:row2], "failed") || strings.Contains(html[row2:strings.Index(html, "<ol")], "Bash") {
+		t.Errorf("counts and numbers are not split into two rows:\n%s", html)
+	}
+	if none := render(&wslive.ToolSummary{Calls: 2, OtherCalls: 2}); strings.Contains(none, `class="tsn"`) {
+		t.Errorf("a summary without numbers drew a numbers row:\n%s", none)
 	}
 }
