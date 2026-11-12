@@ -90,11 +90,30 @@ files for plugin or tooling code unless a ticket changes the layout.
   single-module refactors, and documentation updates that preserve existing
   semantics.
 - **Ask first:** new skills/agents, cross-skill interfaces, template changes that
-  affect downstream projects, convention changes, architecture changes, and
-  observable workflow behavior changes.
+  affect downstream projects, convention changes, architecture changes,
+  observable workflow behavior changes, and a T2 compatibility change (see
+  `### Compatibility Tiers`).
 - **Always ask:** deleting skills/agents, changing canonical flows, modifying
   migration checklist semantics, deleting functionality, or changing protocol/API
   semantics.
+
+### Compatibility Tiers
+
+A change that touches a cross-version surface - an MCP tool or argument, the
+`/mcp` hello, a shared store's on-disk shape, a tracker event type, or a
+config/rsrc manifest field - states its compatibility tier when it is
+discussed, and the ticket records it in `## Decisions`. The tier is settled
+before release, not discovered there.
+
+- T0 transparent: additive only (new tool, argument, optional field; playbook
+  or dashboard asset content).
+- T1 reconnect-recoverable: a rename that keeps the old name as an alias for
+  one minor; a tool list that refreshes on reconnect.
+- T2 breaking: a removal without an alias, a non-additive store change, a
+  protocol or tracker event change. T2 lands only in a minor bump, with the
+  store's `schema_version` or the protocol number raised.
+
+Scenario sheet and enforcement: `ai-docs/manuals/release-compatibility.md`.
 
 ### Branch Policy
 
@@ -146,6 +165,7 @@ proceed fact normalizes to `n/a`.
 | `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/` | `ai-docs/manuals/skill-authoring.md` |
 | `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/` | `ai-docs/manuals/wsflow-mirroring.md` |
 | `agents-plugin-tool/internal/mcp/` | `ai-docs/manuals/ws-mcp.md` |
+| `agents-plugin-tool/internal/` | `ai-docs/manuals/release-compatibility.md` |
 
 Each row's manual is read before editing a file its `paths` cover. This is a
 live obligation, not a pointer list: the worker playbook reads every matching
@@ -216,6 +236,7 @@ not stage it unless explicitly requested.
 - Skill/agent authoring: `ai-docs/manuals/skill-authoring.md`
 - Codex behavior notes: `ai-docs/manuals/codex-integration.md`
 - MCP operational runbook: `ai-docs/manuals/ws-mcp.md`
+- Release compatibility tiers: `ai-docs/manuals/release-compatibility.md`
 - Tracked archive of retired material: `ai-docs/.old/`
 
 There is no spec or mental-model layer. Caller-visible behavior is the test
