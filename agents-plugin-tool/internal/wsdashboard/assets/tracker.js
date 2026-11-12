@@ -4977,7 +4977,9 @@
 
   // One handle per store, stacking leftward from the host's handle in stores() order, then
   // (with adapter.register) the "+ store" handle, also with no store at all; the row is
-  // rebuilt when the store list changes.
+  // rebuilt when the store list changes. Each store's handle sits in a slot with its fold
+  // button (tkf-<store>), which fills the slot while that store's drawer is open (the
+  // handle rides the drawer's bottom edge then) and closes it as a click on the handle does.
   var handleSig = null;
   function syncHandles() {
     order = (AD.stores() || []).slice();
@@ -4985,8 +4987,10 @@
     if (sig === handleSig) return;
     handleSig = sig;
     $('tkhandles').innerHTML = order.map(function (n) {
-      return '<button class="tk-handle" id="tkh-' + esc(n) + '"' + attr('handle', n) + ' aria-controls="tkbody"><svg class="i"><use href="#tki-tasks"/></svg><span class="hl">' + esc(n) +
-        '</span><span class="hoff" title="' + wsT("js.tk.handle.off") + '" hidden>&#8856;</span><span class="tk-badge" hidden></span></button>';
+      return '<span class="tk-slot"><button type="button" class="tk-fold" id="tkf-' + esc(n) + '"' + attr('fold', n) + ' aria-controls="tkbody" title="' + esc(wsT("js.tk.handle.fold")) +
+        '" aria-label="' + esc(wsT("js.tk.handle.fold")) + '" hidden><svg class="i"><use href="#tki-up"/></svg></button>' +
+        '<button class="tk-handle" id="tkh-' + esc(n) + '"' + attr('handle', n) + ' aria-controls="tkbody"><svg class="i"><use href="#tki-tasks"/></svg><span class="hl">' + esc(n) +
+        '</span><span class="hoff" title="' + wsT("js.tk.handle.off") + '" hidden>&#8856;</span><span class="tk-badge" hidden></span></button></span>';
     }).join('') + (AD.register ? '<button class="tk-handle tk-add" id="tkadd" data-act="register" aria-haspopup="dialog" title="' + esc(wsT("js.tk.reg.handle.tip")) + '" aria-label="' + esc(wsT("js.tk.reg.handle.tip")) + '"><svg class="i"><use href="#tki-plus"/></svg></button>' : '');
   }
   function renderHandles() {
@@ -4994,6 +4998,7 @@
       var b = $('tkh-' + name), n = newKeys(name).length, badge = b.querySelector('.tk-badge'), vs = vss[name];
       b.className = 'tk-handle' + (ui.store === name ? ' on' : '') + (ui.open === name ? ' open' : '');
       b.setAttribute('aria-expanded', String(ui.open === name));
+      $('tkf-' + name).hidden = !(ui.open === name && !ui.page);
       badge.hidden = !n; badge.textContent = n;
       if (!vs) { b.querySelector('.hoff').hidden = true; b.title = name + ' - ' + (AD.error(name) || wsT("js.tk.loading")); return; }
       b.querySelector('.hoff').hidden = !!(vs.store.remote && vs.sync.online);
@@ -5178,6 +5183,14 @@
   }
   // Collapsing the open drawer pushes (the apply path).
   function collapse() { var n = ui.open; ui.open = null; syncNow(n, true); render(); }
+  // foldStore is a click on store name's fold button: its open drawer closes as a click on
+  // its handle closes it, and keyboard focus goes to that handle, since the button hides.
+  function foldStore(name) {
+    if (ui.open !== name) return;
+    var kb = document.activeElement === $('tkf-' + name);
+    openStore(name);
+    if (kb && $('tkh-' + name)) $('tkh-' + name).focus();
+  }
   function openStore(name) {
     if (ui.open === name) { collapse(); return; }
     if (ui.open) syncNow(ui.open, true); // switching to another store while one is open applies it
@@ -5472,6 +5485,7 @@
   var SPRITE = '<svg width="0" height="0" style="position:absolute" aria-hidden="true">' +
     '<symbol id="tki-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>' +
     '<symbol id="tki-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>' +
+    '<symbol id="tki-up" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></symbol>' +
     '<symbol id="tki-tasks" viewBox="0 0 16 16"><path d="M2.5 4.2l1.4 1.4 2.4-2.6M2.5 10.2l1.4 1.4 2.4-2.6M8.5 4.6h5M8.5 10.6h5"/></symbol>' +
     '<symbol id="tki-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>' +
     '<symbol id="tki-minus" viewBox="0 0 16 16"><path d="M4 8h8"/></symbol>' +
@@ -5605,6 +5619,8 @@
       if (qo) { qPick(Number(qo.getAttribute('data-qi'))); return; }
       var h = t.closest('.tk-handle[data-handle]');
       if (h) { openStore(h.getAttribute('data-handle')); return; }
+      var fb = t.closest('.tk-fold[data-fold]');
+      if (fb) { foldStore(fb.getAttribute('data-fold')); return; }
       // a wiki: link in rendered text (the daemon marks it data-wiki / data-page) opens that page in the panel
       var wl = t.closest('a[data-wiki][data-page]');
       if (wl && AD.wiki) { e.preventDefault(); wkOpenLink(wl.getAttribute('data-wiki'), wl.getAttribute('data-page')); return; }

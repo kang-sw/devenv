@@ -876,6 +876,17 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
 /* an approval is waiting: an open drawer can cover the agents tree's row */
 .dr-handle.wait { background: color-mix(in srgb, var(--wb-ph-perm) 22%, var(--wb-card)); color: var(--wb-fg); }
 .dr-handle.wait .dr-wait { display: inline-flex; }
+/* the fold button (#drfold): while a sheet shows, it fills the slot its
+   riding handle left at the top, in the handles' shape at that handle's
+   width (--drw for the panels handle, --ghw for the git one, set by the page
+   script), quieter than a handle; a click closes the sheet */
+.dr-fold { position: absolute; top: 0; right: var(--dpad); width: var(--drw, 34px); height: 34px; padding: 2px 0 0; border: 0; border-radius: 0 0 8px 8px; pointer-events: auto; cursor: pointer; display: flex; align-items: center; justify-content: center; background: var(--wb-card); color: var(--wb-muted-fg); box-shadow: var(--wb-shadow-hi); animation: dr-fold-in .18s ease-out; }
+.dr-fold[hidden] { display: none; }
+.dr-fold.git { right: calc(var(--dpad) + var(--ghr, 0px)); width: var(--ghw, 34px); }
+.dr-fold:hover { color: var(--wb-fg); }
+.dr-fold:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.dr-fold .li { width: 17px; height: 17px; }
+@keyframes dr-fold-in { from { opacity: 0; } }
 /* the git handle (the git region, gitbadge.go): left of the panels handle
    (--ghr, set by the page script, is that handle's width and the gap), in its
    shape: the branch abbreviated (a hammer for an impl branch, a gold trophy

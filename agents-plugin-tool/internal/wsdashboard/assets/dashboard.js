@@ -10,6 +10,9 @@
   function q(sel, el) { return Array.prototype.slice.call((el || doc).querySelectorAll(sel)); }
   function $(id) { return doc.getElementById(id); }
   var mode = root.getAttribute("data-mode");
+  // svgEl's namespace, set ahead of the drawer, which draws its fold icon at
+  // load (luIcon, below).
+  var SVGNS = "http://www.w3.org/2000/svg";
   var rid = root.getAttribute("data-rid");
 
   // --- browser storage: guarded, since a locked-down browser throws on access
@@ -2007,13 +2010,17 @@
   // sets it through its drawerHeight option), so dragging any of their
   // handles sets it for all. Each drawer clamps it with its own limits when
   // it shows; the stored value is the drag's result.
+  //
+  // While a sheet shows, the fold button (#drfold, built below) sits in the
+  // slot its riding handle left at the top, at that handle's width (--drw,
+  // --ghw), and closes the sheet as a click on the handle does.
   var drawer = $("drawer"), drclip = $("drclip"), drsheet = $("drsheet"), drbody = $("drbody");
   var drhandle = $("drhandle"), drheader = doc.querySelector(".dwrap > .top");
   var gbody = $("gbody"), gitRegion = region("git");
   var DR_OPEN = "ws.dashboard.drawer", DR_H = "ws.dashboard.drawer.h";
   var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;
   var drRoomW = -1, drGhOff = -1, drEntries = [], drWant = false, drOpen = false, drHas = false, drH = DR_DEF, drTop = 0;
-  var drMode = "panels", drShown = "";
+  var drMode = "panels", drShown = "", drfold = null, drFoldW = -1, drFoldGw = -1;
   // The stored height is read with or without the frame: a page with no
   // session drawer still shares it with the tracker's store drawers.
   (function () { var h = parseFloat(load(DR_H)); if (isFinite(h) && h > 0) drH = h; })();
@@ -2159,6 +2166,19 @@
       doc.documentElement.style.setProperty("--ghr", off + "px");
     }
     if (drheader) drheader.classList.toggle("dr-room", all > 0);
+    if (w !== drFoldW || gw !== drFoldGw) {
+      drFoldW = w;
+      drFoldGw = gw;
+      doc.documentElement.style.setProperty("--drw", w + "px");
+      doc.documentElement.style.setProperty("--ghw", gw + "px");
+    }
+  }
+  // drFoldShow shows the fold button in mode's handle slot, or hides it
+  // (mode "").
+  function drFoldShow(mode) {
+    if (!drfold) return;
+    drfold.hidden = !mode;
+    drfold.classList.toggle("git", mode === "git");
   }
   function drTitle() {
     var t = wsT(drOpen && drMode === "panels" ? "js.drawer.close" : "js.drawer.open"), tip = drhandle.getAttribute("data-tip");
@@ -2211,6 +2231,7 @@
     drhandle.style.top = (drOpen && !git ? drTop + h : 0) + "px";
     if (gitRegion) gitRegion.style.top = (drOpen && git ? drTop + h : 0) + "px";
     drhandle.setAttribute("aria-expanded", String(drOpen && !git));
+    drFoldShow(drOpen ? drMode : "");
     ghSync();
     drTitle();
     drFill();
@@ -2257,7 +2278,28 @@
     if (drWant) { drSwap = false; drDot(); }
     drApply(true);
   }
+  // drFold is a click on the fold button: the shown sheet closes as a click
+  // on its handle closes it, and keyboard focus goes to that handle, since
+  // the button hides.
+  function drFold() {
+    if (drDragged || !drOpen) return;
+    var back = drMode === "git" && ghandle() || drhandle, kb = doc.activeElement === drfold;
+    drSetOpen(false);
+    if (kb) back.focus();
+  }
   if (drawer) {
+    // The fold button, ahead of the handles so a riding handle passes over it.
+    drfold = doc.createElement("button");
+    drfold.type = "button";
+    drfold.className = "dr-fold";
+    drfold.id = "drfold";
+    drfold.hidden = true;
+    drfold.title = wsT("js.drawer.fold");
+    drfold.setAttribute("aria-label", drfold.title);
+    drfold.setAttribute("aria-controls", "drsheet");
+    drfold.appendChild(luIcon("chevron-up"));
+    drhandle.parentNode.insertBefore(drfold, drhandle);
+    drfold.addEventListener("click", drFold);
     drWant = load(DR_OPEN) === "1";
     drawerSync();
     drawerWait();
@@ -2290,6 +2332,7 @@
       // Dragging one sheet's handle over the other open sheet brings its
       // own sheet in that one's place.
       if (!d.moved && drMode !== d.mode) { drMode = d.mode; drApply(false); }
+      if (!d.moved) drFoldShow(d.mode);
       d.moved = true;
       var y = e.clientY - d.off, max = drMax(), ext = Math.max(0, Math.min(max, y - drTop));
       d.ext = ext;
@@ -2354,7 +2397,7 @@
     doc.addEventListener("click", function (e) {
       var t = e.target;
       if (!drOpen || drDragged || !t || !t.closest) return;
-      if (t.closest("#drclip, #drhandle, #r-git, .lmenu, .gwin-back")) return;
+      if (t.closest("#drclip, #drhandle, #drfold, #r-git, .lmenu, .gwin-back")) return;
       drSetOpen(false);
     }, true);
     // The header can wrap or change height (a chip appears): the sheet
@@ -2922,7 +2965,6 @@
   var glog = $("glog"), glrows = $("glrows"), glscroll = $("glscroll"), glcount = $("glcount");
   var GL_ROW = 26, GL_DX = 14, GL_X0 = 12, GL_MORE = 34;
   var gl = { commits: [], by: {}, width: 1, more: 0, page: 0, head: "", seq: 0, busy: false, loaded: false, tipRow: null };
-  var SVGNS = "http://www.w3.org/2000/svg";
   function svgEl(tag, attrs) {
     var e = doc.createElementNS(SVGNS, tag);
     for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) e.setAttribute(k, attrs[k]);
