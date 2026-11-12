@@ -778,9 +778,10 @@ func TestBuildViewTopicOrderAndEmbedFreshness(t *testing.T) {
 	for _, topic := range view.Topics {
 		names = append(names, topic.Name)
 	}
-	// One batch gives every topic the same activity, so first-appearance order
-	// holds and an open item does not float its topic.
-	if strings.Join(names, ",") != "settled,acks,assumed,policy" {
+	// One batch gives every topic the same activity, so the topics order by
+	// why they rose: the new policy question, the new ack, then the settled
+	// ones in first-appearance order.
+	if strings.Join(names, ",") != "policy,acks,settled,assumed" {
 		t.Fatalf("topic order = %v", names)
 	}
 	if !view.BulkAck || !view.Answerable || view.StampFile != "r.stamp.js" {

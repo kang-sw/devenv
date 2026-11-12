@@ -78,6 +78,45 @@ func TestOpenPolicyItemDoesNotOutrankRecentTopic(t *testing.T) {
 	wantTopicOrder(t, st, "notes", "waiting")
 }
 
+// Topics that rose in the same update order by why they rose: a new policy
+// question, then a new acknowledgement item, then a body or recap change,
+// then anything else. A topic ranks by its strongest reason, equal ranks keep
+// first-appearance order, and a later update still outranks an earlier one.
+func TestSameUpdateTopicsOrderByBumpReason(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "answered", "a")+addXML(ClassTechnical, "mixed", "m"))
+	// Written in the reverse of the wanted order; the item topics appear
+	// before the body-only ones.
+	mustApply(t, st, `<wb:answer id="1" value="ok">ok</wb:answer><wb:answer id="2" value="ok">ok</wb:answer>`+
+		topicXML("mixed", "mixed body")+
+		addXML(ClassTechnical, "ack", "k")+
+		addXML(ClassPolicy, "policy", "p", "x", "y")+
+		addXML(ClassPolicy, "assumed", "s", "x", "y")+
+		`<wb:answer id="5" value="a" assumed="true">fine</wb:answer>`+
+		topicXML("doc", "a body")+
+		recapXML("recapped", "a recap"))
+	// mixed ranks by its body over its answer; an item asked and settled in
+	// the same update asks nothing, so assumed ranks with the answered one.
+	wantTopicOrder(t, st, "policy", "ack", "mixed", "doc", "recapped", "answered", "assumed")
+
+	// An answer in a later update outranks every reason of an earlier one.
+	mustApply(t, st, `<wb:answer id="3" value="ok">ok</wb:answer>`)
+	wantTopicOrder(t, st, "ack", "policy", "mixed", "doc", "recapped", "answered", "assumed")
+}
+
+// A re-ask counts as its class's add; an edit that asks nothing does not.
+func TestSameUpdateReaskRanksAsItsClassAdd(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "edited", "e")+
+		addXML(ClassTechnical, "reacked", "k")+
+		addXML(ClassPolicy, "reasked", "p", "x", "y"))
+	mustApply(t, st, `<wb:answer id="2" value="ok">ok</wb:answer>`)
+	mustApply(t, st, `<wb:patch id="1"><wb:why>more context</wb:why></wb:patch>`+
+		`<wb:patch id="2" status="open"/>`+
+		`<wb:patch id="3"><wb:title>p reworded</wb:title></wb:patch>`)
+	wantTopicOrder(t, st, "reasked", "reacked", "edited")
+}
+
 // A topic with an open body is not Quiet; topics order by recency alone.
 func TestTopicWithABodyIsNotQuiet(t *testing.T) {
 	st := &State{}

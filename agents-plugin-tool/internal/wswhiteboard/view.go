@@ -475,8 +475,9 @@ func BuildView(state *State, in ViewInput) View {
 			view.Answerable = true
 		}
 	}
-	// The topic touched most recently rises, whatever waits on the user; equal
-	// activity keeps first-appearance order (the stable sort).
+	// The topic touched most recently rises, whatever waits on the user;
+	// topics that rose in the same update order by why they rose (bumpRank),
+	// and equal ranks keep first-appearance order (the stable sort).
 	activity := map[string]int{}
 	for _, item := range state.Items {
 		activity[item.Topic] = max(activity[item.Topic], item.Changed)
@@ -484,8 +485,13 @@ func BuildView(state *State, in ViewInput) View {
 	for _, doc := range state.Topics {
 		activity[doc.Name] = max(activity[doc.Name], doc.Recency())
 	}
+	rank := bumpRank(state, activity)
 	sort.SliceStable(order, func(i, j int) bool {
-		return activity[order[i]] > activity[order[j]]
+		a, b := order[i], order[j]
+		if activity[a] != activity[b] {
+			return activity[a] > activity[b]
+		}
+		return rank[a] < rank[b]
 	})
 	// A closed topic with nothing waiting goes last, the most recently
 	// closed first, and only a window of them renders (ClosedCap).
@@ -516,6 +522,50 @@ func BuildView(state *State, in ViewInput) View {
 		view.Topics = append(view.Topics, *blocks[name])
 	}
 	return view
+}
+
+// Why a topic rose at its latest activity mark, strongest first.
+const (
+	bumpPolicy = iota // a policy item asked (added or re-asked) and still open
+	bumpAck           // a technical or announced item asked and still open
+	bumpDoc           // the topic body or recap changed
+	bumpOther         // anything else: an answer, a close, an edit that asks nothing
+)
+
+// bumpRank maps each topic to the strongest reason it rose at its activity
+// mark (the latest update that touched it). A topic with no reason recorded
+// at that mark ranks bumpOther.
+func bumpRank(state *State, activity map[string]int) map[string]int {
+	rank := map[string]int{}
+	bump := func(topic string, r int) {
+		if cur, ok := rank[topic]; !ok || r < cur {
+			rank[topic] = r
+		}
+	}
+	for _, item := range state.Items {
+		if item.Changed != activity[item.Topic] {
+			continue
+		}
+		switch {
+		case item.Asked == 0 || item.Asked != item.Changed || item.Status != StatusOpen:
+			bump(item.Topic, bumpOther)
+		case item.Class == ClassPolicy:
+			bump(item.Topic, bumpPolicy)
+		default:
+			bump(item.Topic, bumpAck)
+		}
+	}
+	for _, doc := range state.Topics {
+		if at := activity[doc.Name]; at > 0 && (doc.Changed == at || doc.RecapChanged == at) {
+			bump(doc.Name, bumpDoc)
+		}
+	}
+	for topic := range activity {
+		if _, ok := rank[topic]; !ok {
+			rank[topic] = bumpOther
+		}
+	}
+	return rank
 }
 
 // stampUpdated sets each block's latest change from the change times of its
