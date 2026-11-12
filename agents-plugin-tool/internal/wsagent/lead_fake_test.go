@@ -79,6 +79,10 @@ type fakeHolder struct {
 	attached bool
 	exited   bool
 	stream   *fakeStream
+	// known is whether the running daemon's manager lists the holder: one
+	// an earlier daemon left is listed from the first scan on, as the real
+	// manager learns its holders by scanning.
+	known bool
 }
 
 // fakeHolders is a HolderHost with no process behind it. Holders outlive
@@ -172,7 +176,11 @@ func (f *fakeHolders) Scan() {
 	defer f.mu.Unlock()
 	for _, id := range f.order {
 		h := f.holders[id]
-		if h == nil || h.attached {
+		if h == nil {
+			continue
+		}
+		h.known = true
+		if h.attached {
 			continue
 		}
 		h.attached, h.stream = true, newFakeStream()
@@ -188,7 +196,7 @@ func (f *fakeHolders) List() wsholder.Listing {
 	var out wsholder.Listing
 	for _, id := range f.order {
 		h := f.holders[id]
-		if h == nil {
+		if h == nil || !h.known {
 			continue
 		}
 		info := wsholder.Info{ID: h.id, PID: 9000 + h.pid, Attached: h.attached, Session: h.session}
@@ -213,7 +221,7 @@ func (f *fakeHolders) add(session any) string {
 
 func (f *fakeHolders) newLocked(session json.RawMessage, attached bool) *fakeHolder {
 	f.next++
-	h := &fakeHolder{id: fmt.Sprintf("h%d", f.next), pid: 4000 + f.next, session: session, attached: attached}
+	h := &fakeHolder{id: fmt.Sprintf("h%d", f.next), pid: 4000 + f.next, session: session, attached: attached, known: attached}
 	if attached {
 		h.stream = newFakeStream()
 	}
@@ -379,7 +387,7 @@ func (f *fakeHolders) restart() {
 		if h.stream != nil {
 			h.stream.kill()
 		}
-		h.attached, h.stream = false, nil
+		h.attached, h.stream, h.known = false, nil, false
 	}
 }
 

@@ -1124,6 +1124,35 @@ func TestLeadShutdownDuringTheFirstScanEndsNoHolder(t *testing.T) {
 	}
 }
 
+// TestLeadRejoinWaitsForTheFirstScan: until the first holder scan has
+// shown every holder, a rejoined lead's holder is missing from the listing
+// because it is not attached yet, not because it is gone. A heartbeat in
+// that window must not take the process for gone, and a message sent
+// meanwhile must not start a second process beside it.
+func TestLeadRejoinWaitsForTheFirstScan(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, turnLines("sess-1", "u1", "first")...)
+	h.idle(id)
+	h.runner.Close()
+	h.holders.restart()
+	entered, release := h.gateScan()
+	defer release()
+	h.start()
+	wait(t, "the first scan", entered)
+
+	h.send(id, "two")
+	time.Sleep(6 * h.opts.heartbeat)
+	if rec := h.record(id); h.holders.opCount("launch") != 1 || rec.HolderID != holder {
+		t.Fatalf("a process started before the first scan: record holder %q, holder calls %v", rec.HolderID, h.holders.opList())
+	}
+	release()
+	eventually(t, "the rejoin to take the message", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	if h.holders.opCount("launch") != 1 || h.holders.opCount("stop") != 0 {
+		t.Fatalf("the session keeps its one process: %v", h.holders.opList())
+	}
+}
+
 // TestLeadIdleStopWaitsForBackgroundTasks: the idle timer does not stop a
 // process whose harness reports a running background task, whose work the
 // stop would end; it does once the list empties.

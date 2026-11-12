@@ -157,6 +157,9 @@ type Runner struct {
 	quit   chan struct{}
 	wg     sync.WaitGroup
 	once   sync.Once
+	// scanned is closed once the holder manager's first scan returned
+	// (scanDone).
+	scanned chan struct{}
 
 	// holders routes the session holders' events to the lead processes.
 	holders holderTable
@@ -179,7 +182,7 @@ func NewRunner(opts Options) *Runner {
 	if opts.Alive == nil {
 		opts.Alive = wsstate.ProcessAlive
 	}
-	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), notify: func(string, string) {}}
+	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), scanned: make(chan struct{}), notify: func(string, string) {}}
 	if opts.Holders != nil {
 		// Before the manager's first scan, so a predecessor's holders are
 		// seen attaching.
@@ -226,6 +229,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		go func() {
 			defer r.wg.Done()
 			r.opts.Holders.Scan()
+			close(r.scanned)
 			r.holdersScanned()
 		}()
 	}
@@ -252,6 +256,10 @@ func (r *Runner) holdersScanned() {
 	for _, c := range convs {
 		c.do(func() {
 			c.checkReattach()
+			if c.rec.Lead && c.proc == nil && c.rec.HolderID != "" {
+				// A start kick put off until the scan (a rejoin that failed).
+				c.kick()
+			}
 			if id := c.rec.HolderID; id != "" {
 				owned[id] = true
 			}
@@ -275,6 +283,19 @@ func (r *Runner) holdersScanned() {
 		if err := r.opts.Holders.Stop(info.ID); err != nil {
 			fmt.Fprintf(r.opts.Log, "agent: stop holder %s: %v\n", info.ID, err)
 		}
+	}
+}
+
+// scanDone reports whether the holder manager's first scan of this daemon
+// returned. Before it the manager lists only the holders attached so far,
+// so a holder a record names that is missing from the listing may still
+// run: nothing may take it for gone, or start a second process beside it.
+func (r *Runner) scanDone() bool {
+	select {
+	case <-r.scanned:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1315,6 +1336,12 @@ func (c *conv) kick() {
 		return
 	}
 	if c.proc == nil {
+		if c.rec.Lead && c.rec.HolderID != "" && !c.r.scanDone() {
+			// The holder the record names may still run unseen: the start
+			// waits for the first scan (holdersScanned kicks again), since
+			// retireHolder would not find that holder to end it first.
+			return
+		}
 		if err := c.startProcess(); err != nil {
 			c.setStatus(func() { c.lastErr = err.Error() })
 			fmt.Fprintf(c.r.opts.Log, "agent %s: start: %v\n", c.rec.ReplyID, err)
@@ -1556,7 +1583,9 @@ func (c *conv) reattach() {
 // process while no daemon ran. Until one of the two is known the
 // conversation submits nothing (replaying).
 func (c *conv) checkReattach() {
-	if !c.replaying || c.replayAsked || c.proc == nil {
+	// Before the first scan an unlisted holder may be one not attached yet;
+	// holdersScanned asks again after it.
+	if !c.replaying || c.replayAsked || c.proc == nil || !c.r.scanDone() {
 		return
 	}
 	hp, ok := c.proc.(holderProcess)
