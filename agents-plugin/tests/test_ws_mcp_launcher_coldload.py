@@ -336,15 +336,24 @@ class BootstrapRuntimeTempCleanupTest(unittest.TestCase):
             binary = runtime_dir / "ws-mcp.exe"
             source.write_text("source-built", encoding="utf-8")
             binary.write_text("compatible-running", encoding="utf-8")
+            launcher.write_runtime_metadata(source, {"version": "0.18.1"})
+            launcher.write_runtime_metadata(binary, {"version": "0.18.0"})
+            real_replace = os.replace
+
+            def locked_binary(source, destination):
+                if destination == binary:
+                    raise PermissionError("Windows sharing violation")
+                return real_replace(source, destination)
 
             with mock.patch.object(launcher.time, "sleep", return_value=None), \
                  mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": str(source), "WS_MCP_BOOTSTRAP_URL": ""}), \
-                 mock.patch("os.replace", side_effect=PermissionError("Windows sharing violation")), \
+                 mock.patch("os.replace", side_effect=locked_binary), \
                  mock.patch.object(launcher, "runtime_fully_compatible", return_value=True):
                 for _ in range(3):
                     launcher.install_runtime(plugin_dir, runtime_dir, binary, "asset", {}, "windows", "windows-amd64")
-                    self.assertEqual(list(runtime_dir.glob("*.bootstrap.*.tmp")), [])
+                    self.assertEqual(list(runtime_dir.glob("*.bootstrap.*.tmp*")), [])
             self.assertEqual(binary.read_text(encoding="utf-8"), "compatible-running")
+            self.assertEqual(launcher.read_runtime_metadata(binary)["version"], "0.18.0")
 
     def test_failed_bootstrap_replacement_cleans_temp_before_raising(self):
         launcher = load_launcher()
@@ -355,13 +364,21 @@ class BootstrapRuntimeTempCleanupTest(unittest.TestCase):
             source = plugin_dir / "source-built.exe"
             binary = runtime_dir / "ws-mcp.exe"
             source.write_text("source-built", encoding="utf-8")
+            launcher.write_runtime_metadata(source, {"version": "0.18.1"})
+            real_replace = os.replace
+
+            def locked_binary(source, destination):
+                if destination == binary:
+                    raise PermissionError("Windows sharing violation")
+                return real_replace(source, destination)
+
             with mock.patch.object(launcher.time, "sleep", return_value=None), \
                  mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": str(source), "WS_MCP_BOOTSTRAP_URL": ""}), \
-                 mock.patch("os.replace", side_effect=PermissionError("Windows sharing violation")), \
+                 mock.patch("os.replace", side_effect=locked_binary), \
                  mock.patch.object(launcher, "runtime_fully_compatible", return_value=False):
                 with self.assertRaises(SystemExit):
                     launcher.install_runtime(plugin_dir, runtime_dir, binary, "asset", {}, "windows", "windows-amd64")
-            self.assertEqual(list(runtime_dir.glob("*.bootstrap.*.tmp")), [])
+            self.assertEqual(list(runtime_dir.glob("*.bootstrap.*.tmp*")), [])
 
 
 if __name__ == "__main__":

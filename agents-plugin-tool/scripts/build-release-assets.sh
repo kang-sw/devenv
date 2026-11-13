@@ -33,6 +33,8 @@ build_one() {
       -o "$dist_dir/$asset" \
       ./cmd/ws-mcp
   )
+  python3 "$script_dir/write-runtime-metadata.py" "$dist_dir/$asset" \
+    --version "$version" --source-commit "$source_commit"
 }
 
 build_one darwin arm64 ""

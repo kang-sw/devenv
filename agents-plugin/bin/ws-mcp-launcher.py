@@ -3,11 +3,11 @@ import hashlib
 import json
 import os
 import platform as platform_module
+import re
 import shutil
 import stat as stat_module
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -207,78 +207,55 @@ def runtime_commands(contract: dict) -> list[str]:
     return sorted(str(key) for key in contract.get("commands", {}))
 
 
-def run_binary(binary: Path, args: list[str], *, input_text: str | None = None, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [str(binary), *args],
-        input=input_text,
-        text=True,
-        capture_output=True,
-        timeout=timeout,
-        check=False,
-    )
+def runtime_metadata_path(binary: Path) -> Path:
+    return binary.with_name(binary.name + ".metadata.json")
 
 
-def tools_compatible(binary: Path, contract: dict, runtime_dir: Path) -> bool:
-    with tempfile.TemporaryDirectory(prefix="ws-mcp-compat.", dir=str(runtime_dir)) as temp_dir:
-        root = Path(temp_dir) / "root"
-        root.mkdir()
-        git = shutil.which("git")
-        if git:
-            subprocess.run([git, "-C", str(root), "init"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        payload = "\n".join(
-            [
-                '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}',
-                '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}',
-                "",
-            ]
-        )
-        env = os.environ.copy()
-        env["WS_CACHE_HOME"] = temp_dir
-        env["WS_MCP_TOOL_PROFILE"] = "lead"
-        env["WS_MCP_ALLOWED_TOOLS"] = ""
-        try:
-            proc = subprocess.run(
-                [str(binary), "serve", "--stdio", "--root", str(root)],
-                input=payload,
-                text=True,
-                capture_output=True,
-                timeout=30,
-                check=False,
-                env=env,
-            )
-        except Exception as exc:
-            note(f"runtime tool compatibility check failed: {exc}")
-            return False
-    if not proc.stdout:
-        return False
-    for tool in runtime_tools(contract):
-        if f'"name":"{tool}"' not in proc.stdout:
-            note(f"runtime missing required MCP tool: {tool}")
-            return False
-    return True
+def read_runtime_metadata(binary: Path) -> dict | None:
+    """Read identity only when its hash still identifies these exact bytes."""
+    try:
+        payload = json.loads(runtime_metadata_path(binary).read_text(encoding="utf-8"))
+        if (not isinstance(payload, dict) or payload.get("schema_version") != 1
+                or not isinstance(payload.get("version"), str)
+                or version_tuple(payload["version"]) is None
+                or payload.get("binary_sha256") != sha256_file(binary)):
+            return None
+        return payload
+    except (OSError, ValueError):
+        return None
 
 
-def commands_compatible(binary: Path, contract: dict) -> bool:
-    for command in runtime_commands(contract):
-        parts = command.split(".")
-        if len(parts) >= 3:
-            args = [parts[0], parts[1]]
-            expected = parts[2]
-        elif len(parts) == 2:
-            args = [parts[0]]
-            expected = parts[1]
-        else:
-            args = []
-            expected = parts[0]
-        try:
-            proc = run_binary(binary, args)
-        except Exception:
-            return False
-        output = proc.stdout + proc.stderr
-        if expected not in output:
-            note(f"runtime missing required CLI command: {command}")
-            return False
-    return True
+def write_runtime_metadata(binary: Path, identity: dict) -> None:
+    """Bind build/source or checksum-verified release identity to a binary.
+
+    Callers must supply the actual identity, never the desired runtime contract.
+    Optional capability fields, when supplied by a producer, are checked too.
+    """
+    if version_tuple(str(identity.get("version", ""))) is None:
+        raise ValueError("runtime metadata requires an actual build/release version")
+    digest = sha256_file(binary)
+    if "binary_sha256" in identity and identity["binary_sha256"] != digest:
+        raise ValueError("runtime metadata does not identify the copied binary")
+    payload = dict(identity, schema_version=1, binary_sha256=digest)
+    path = runtime_metadata_path(binary)
+    tmp = unique_runtime_temp_path(path.parent, path.name)
+    try:
+        tmp.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def source_runtime_metadata(tool_dir: Path) -> dict:
+    """Identity for a default (no version ldflags) source build, without running it."""
+    main = (tool_dir / "cmd" / "ws-mcp" / "main.go").read_text(encoding="utf-8")
+    server = (tool_dir / "internal" / "mcp" / "server.go").read_text(encoding="utf-8")
+    version = re.search(r'^var version = "([^"]+)"', main, re.MULTILINE)
+    commit = re.search(r'^var sourceCommit = "([^"]+)"', main, re.MULTILINE)
+    protocol = re.search(r'^const ProtocolVersion = "([^"]+)"', server, re.MULTILINE)
+    if version is None or commit is None or protocol is None:
+        raise ValueError("cannot read runtime identity from build source")
+    return {"version": version[1], "source_commit": commit[1], "mcp_protocol": protocol[1]}
 
 
 def _capabilities_string_list(payload: dict, key: str) -> list[str] | None:
@@ -327,16 +304,20 @@ def unique_runtime_temp_path(runtime_dir: Path, label: str) -> Path:
 
 
 def compatibility_stamp_payload(binary: Path, contract: dict, contract_path: Path, source_fingerprint: str | None = None) -> dict | None:
+    metadata = read_runtime_metadata(binary)
+    if metadata is None or not runtime_capabilities_compatible(binary, contract, allow_same_minor=source_fingerprint is not None):
+        return None
     try:
         stat = binary.stat()
     except OSError:
         return None
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "binary_sha256": metadata["binary_sha256"],
         "contract_sha256": sha256_file(contract_path),
         "plugin_version": str(contract.get("plugin_version", "")),
         "required_mcp": str(contract.get("required_mcp", "")),
-        "accepted_runtime_version": str(contract.get("plugin_version", "")),
+        "accepted_runtime_version": metadata["version"],
         "binary_path": str(binary.resolve()),
         "binary_size": stat.st_size,
         "binary_mtime_ns": stat.st_mtime_ns,
@@ -399,6 +380,12 @@ def install_downloaded_runtime(binary: Path, runtime_dir: Path, asset: str, cont
         actual = sha256_file(tmp)
         if actual != expected:
             fail(f"checksum mismatch for downloaded {asset}")
+        # A versioned release plus its checksum identifies legacy releases too;
+        # no new mandatory release asset and no executable probe is needed.
+        release_version = str(tag or "").removeprefix("v")
+        if version_tuple(release_version) is None:
+            fail("release tag must identify a version for runtime metadata")
+        write_runtime_metadata(tmp, {"version": release_version, "release_tag": tag, "asset": asset})
         try:
             tmp.chmod(0o755)
         except OSError:
@@ -406,6 +393,7 @@ def install_downloaded_runtime(binary: Path, runtime_dir: Path, asset: str, cont
         installed = install_tmp_runtime(tmp, binary, contract, runtime_dir, f"downloaded runtime binary into {binary}")
     finally:
         tmp.unlink(missing_ok=True)
+        runtime_metadata_path(tmp).unlink(missing_ok=True)
         sums_tmp.unlink(missing_ok=True)
     if installed:
         try:
@@ -416,7 +404,12 @@ def install_downloaded_runtime(binary: Path, runtime_dir: Path, asset: str, cont
 
 def copy_runtime(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
+    metadata = read_runtime_metadata(source)
     shutil.copy2(source, destination)
+    if metadata is not None:
+        write_runtime_metadata(destination, metadata)
+    else:
+        runtime_metadata_path(destination).unlink(missing_ok=True)
     try:
         destination.chmod(0o755)
     except OSError:
@@ -429,24 +422,36 @@ def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Pa
     # Mirrors the Phase A Go-side MoveFileEx bounded retry (~5 attempts, ~10ms
     # exponential backoff).  On POSIX, os.replace is atomic and never raises this
     # error, so the retry loop never triggers and there is zero added latency.
+    metadata = read_runtime_metadata(tmp)
+    if metadata is not None and binary.is_file() and sha256_file(binary) == metadata["binary_sha256"]:
+        # Repair an unstamped legacy release in place, even when Windows holds
+        # its executable open. The verified candidate identifies the same bytes.
+        write_runtime_metadata(binary, metadata)
+        note(f"using identical runtime already installed at {binary}")
+        return False
     _replace_attempts = 5
     _replace_backoff = 0.01  # seconds; doubles per attempt
     last_exc: OSError | None = None
     for attempt in range(_replace_attempts):
         try:
             os.replace(tmp, binary)
-            note(message)
-            return True
+            break
         except OSError as exc:
             last_exc = exc
             if attempt < _replace_attempts - 1:
                 time.sleep(_replace_backoff * (2 ** attempt))
-    # Replace budget exhausted; fall through to the existing compatible-binary
-    # fallback before failing hard.
-    if runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=allow_same_minor):
-        note(f"using compatible runtime already installed at {binary} after replace failed: {last_exc}")
-        return False
-    fail(f"failed to install runtime at {binary}: {last_exc}")
+    else:
+        if runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=allow_same_minor):
+            note(f"using compatible runtime already installed at {binary} after replace failed: {last_exc}")
+            return False
+        fail(f"failed to install runtime at {binary}: {last_exc}")
+    if metadata is not None:
+        write_runtime_metadata(binary, metadata)
+    else:
+        runtime_metadata_path(binary).unlink(missing_ok=True)
+    runtime_metadata_path(tmp).unlink(missing_ok=True)
+    note(message)
+    return True
 
 
 def local_devenv_cache_package(plugin_dir: Path) -> str | None:
@@ -623,19 +628,26 @@ def local_devenv_build_env(os_name: str) -> dict:
 def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, local_contract: dict, os_name: str) -> bool:
     tool_dir = local_contract["tool_dir"]
     go_binary = local_contract["go"]
+    runtime_dir.mkdir(parents=True, exist_ok=True)
     tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.local")
-    proc = subprocess.run(
-        [str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"],
-        cwd=str(tool_dir),
-        env=local_devenv_build_env(os_name),
-        check=False,
-    )
-    if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir, allow_same_minor=True):
-        install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}", allow_same_minor=True)
-        return True
-    tmp.unlink(missing_ok=True)
-    note(f"local devenv build failed or produced incompatible runtime: exit={proc.returncode}")
-    return False
+    identity = source_runtime_metadata(tool_dir)
+    try:
+        proc = subprocess.run(
+            [str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"],
+            cwd=str(tool_dir),
+            env=local_devenv_build_env(os_name),
+            check=False,
+        )
+        if proc.returncode == 0:
+            write_runtime_metadata(tmp, identity)
+        if proc.returncode == 0 and runtime_fully_compatible(tmp, contract, runtime_dir, allow_same_minor=True):
+            install_tmp_runtime(tmp, binary, contract, runtime_dir, f"built local devenv runtime from {tool_dir}", allow_same_minor=True)
+            return True
+        note(f"local devenv build failed or produced incompatible runtime: exit={proc.returncode}")
+        return False
+    finally:
+        tmp.unlink(missing_ok=True)
+        runtime_metadata_path(tmp).unlink(missing_ok=True)
 
 
 def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: str, contract: dict, os_name: str, platform_name: str, *, prefer_build: bool = False) -> bool:
@@ -655,12 +667,15 @@ def install_local_devenv_runtime(plugin_dir: Path, runtime_dir: Path, binary: Pa
     ]
     for candidate in candidates:
         if candidate.is_file():
-            copy_runtime(candidate, tmp)
-            if runtime_fully_compatible(tmp, contract, runtime_dir, allow_same_minor=True):
-                install_tmp_runtime(tmp, binary, contract, runtime_dir, f"installed local devenv runtime from {candidate}", allow_same_minor=True)
-                return True
-            tmp.unlink(missing_ok=True)
-            note(f"local devenv runtime candidate is incompatible: {candidate}")
+            try:
+                copy_runtime(candidate, tmp)
+                if runtime_fully_compatible(tmp, contract, runtime_dir, allow_same_minor=True):
+                    install_tmp_runtime(tmp, binary, contract, runtime_dir, f"installed local devenv runtime from {candidate}", allow_same_minor=True)
+                    return True
+                note(f"local devenv runtime candidate is incompatible: {candidate}")
+            finally:
+                tmp.unlink(missing_ok=True)
+                runtime_metadata_path(tmp).unlink(missing_ok=True)
 
     return build_local_devenv_runtime(runtime_dir, binary, contract, local_contract, os_name)
 
@@ -675,16 +690,22 @@ def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: st
         tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.bootstrap")
         try:
             copy_runtime(source, tmp)
+            if read_runtime_metadata(tmp) is None:
+                fail("bootstrap binary needs hash-bound build/release metadata")
             install_tmp_runtime(tmp, binary, contract, runtime_dir, f"installed bootstrap binary into {binary}")
         finally:
             # A compatible running binary may survive a failed Windows replace;
             # do not retain one full bootstrap copy per mailbox wait re-arm.
             tmp.unlink(missing_ok=True)
+            runtime_metadata_path(tmp).unlink(missing_ok=True)
     elif bootstrap_url:
         runtime_dir.mkdir(parents=True, exist_ok=True)
         tmp = unique_runtime_temp_path(runtime_dir, f"{binary.name}.download")
         try:
             download_file(bootstrap_url, tmp)
+            download_file(bootstrap_url + ".metadata.json", runtime_metadata_path(tmp))
+            if read_runtime_metadata(tmp) is None:
+                fail("bootstrap URL needs hash-bound build/release metadata")
             expected = os.environ.get("WS_MCP_BOOTSTRAP_SHA256")
             if expected and sha256_file(tmp) != expected:
                 fail("checksum mismatch for downloaded ws-mcp")
@@ -695,6 +716,7 @@ def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: st
             installed = install_tmp_runtime(tmp, binary, contract, runtime_dir, f"downloaded runtime binary into {binary}")
         finally:
             tmp.unlink(missing_ok=True)
+            runtime_metadata_path(tmp).unlink(missing_ok=True)
         if installed:
             try:
                 binary.chmod(0o755)
@@ -709,20 +731,9 @@ def install_runtime(plugin_dir: Path, runtime_dir: Path, binary: Path, asset: st
 
 
 def runtime_capabilities_compatible(binary: Path, contract: dict, *, allow_same_minor: bool = False) -> bool:
-    try:
-        proc = run_binary(binary, ["runtime", "capabilities"])
-    except Exception as exc:
-        note(f"runtime capabilities probe failed: {exc}")
-        return False
-    if proc.returncode != 0 or not proc.stdout:
-        note("runtime capabilities probe unavailable")
-        return False
-    try:
-        payload = json.loads(proc.stdout)
-    except Exception:
-        note("runtime capabilities probe returned invalid JSON")
-        return False
-    if not isinstance(payload, dict):
+    payload = read_runtime_metadata(binary)
+    if payload is None:
+        note("runtime metadata missing or content hash mismatch; repair required")
         return False
 
     if not version_compatible(str(payload.get("version", "")), contract, allow_same_minor=allow_same_minor):
@@ -730,31 +741,21 @@ def runtime_capabilities_compatible(binary: Path, contract: dict, *, allow_same_
         return False
 
     expected_protocol = str(contract.get("mcp_protocol", ""))
-    if not expected_protocol or payload.get("mcp_protocol") != expected_protocol:
+    if "mcp_protocol" in payload and payload["mcp_protocol"] != expected_protocol:
         note("runtime capabilities MCP protocol mismatch")
         return False
 
     exact = _capabilities_match_exact(contract)
-    if not _capabilities_match_contract(payload, "tools", runtime_tools(contract), exact=exact):
+    # Versioned build/release identity is sufficient for older producers that
+    # predate optional surface inventories. Live capabilities belong to the daemon.
+    if "tools" in payload and not _capabilities_match_contract(payload, "tools", runtime_tools(contract), exact=exact):
         return False
-    if not _capabilities_match_contract(payload, "commands", runtime_commands(contract), exact=exact):
+    if "commands" in payload and not _capabilities_match_contract(payload, "commands", runtime_commands(contract), exact=exact):
         return False
     return True
 
 def runtime_fully_compatible(binary: Path, contract: dict, runtime_dir: Path, *, allow_same_minor: bool = False) -> bool:
-    if not binary.is_file():
-        return False
-    if runtime_capabilities_compatible(binary, contract, allow_same_minor=allow_same_minor):
-        return True
-    if _capabilities_match_exact(contract):
-        return False
-    try:
-        proc = run_binary(binary, ["version"])
-    except Exception:
-        return False
-    if proc.returncode != 0 or not version_compatible(proc.stdout.strip(), contract, allow_same_minor=allow_same_minor):
-        return False
-    return tools_compatible(binary, contract, runtime_dir) and commands_compatible(binary, contract)
+    return runtime_capabilities_compatible(binary, contract, allow_same_minor=allow_same_minor)
 
 
 def parent_env_value(key: str) -> str:
