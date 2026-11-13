@@ -1,5 +1,6 @@
 ---
 title: "Local-devenv launcher fingerprint ignores embedded assets, so asset-only changes never rebuild"
+completed: 2026-11-13
 ---
 
 # Local-devenv launcher fingerprint ignores embedded assets, so asset-only changes never rebuild
@@ -31,3 +32,8 @@ in the function comment). Mirror the launcher copy in wsflow per
 Related: the deployment-compatibility discussion (board topic
 `deploy-compat`) — a stale binary under a newer checkout is one of its
 mixed-version cases.
+
+
+## Resolution (2026-11-13)
+
+Fixed in f2ea25fd5: local_devenv_source_fingerprint stats every regular file under tool_dir (skipping *_test.go, testdata/, dist*, dot-dirs), so an embedded-asset-only change rebuilds. Stat-only walk ~0.03 s on the real tree.
