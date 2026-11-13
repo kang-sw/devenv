@@ -180,6 +180,30 @@ func TestClaudeLeadLocalSettingsCanonicalWorktree(t *testing.T) {
 	}
 }
 
+func TestClaudeLeadLocalSettingsSymlinkedRootAndHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Claude does not canonicalize the local store on Windows")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range []string{root, alias} {
+		for _, home := range []string{root, alias} {
+			if got := claudeLeadLocalSettingsRoot(filepath.Join(repo, "nested"), home); got != "" {
+				t.Fatalf("home repository %q with home %q must not become the local store: %s", repo, home, got)
+			}
+		}
+	}
+}
+
 func TestClaudeLeadPluginSettingsDoNotWalkNonGitAncestors(t *testing.T) {
 	leadBundledFixture(t, "ws")
 	spec := claudePluginLeadSpec(t)
