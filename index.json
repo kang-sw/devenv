@@ -537,6 +537,9 @@
     "261114-bug-ws-dashboard-oq-wrap-top-class-collision": {
       "registered_at": "2026-11-13T16:00:22Z"
     },
+    "261114-bug-ws-dashboard-panel-frames-reload-on-topic-update": {
+      "registered_at": "2026-11-13T16:07:55Z"
+    },
     "261114-bug-ws-shared-daemon-restarts-without-a-swap": {
       "registered_at": "2026-11-13T15:28:36Z"
     },
