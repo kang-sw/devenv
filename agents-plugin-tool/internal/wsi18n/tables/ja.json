@@ -1385,6 +1385,8 @@
   "rail.waiting": "リード待機中",
   "rail.working": "リード作業中",
   "rail.you": "あなた",
+  "session.finding": "セッションを探しています…",
+  "session.notfound": "不明なセッション",
   "splitter.label": "エージェントと会話の領域の大きさを変更",
   "splitter.title": "ドラッグでサイズ変更、ダブルクリックでリセット",
   "srow.agents": "サブエージェント {0} 件を実行中",

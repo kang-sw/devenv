@@ -1385,6 +1385,8 @@
   "rail.waiting": "lead waiting",
   "rail.working": "lead working",
   "rail.you": "you",
+  "session.finding": "Finding session…",
+  "session.notfound": "Unknown session",
   "splitter.label": "resize agents and conversation",
   "splitter.title": "drag to resize, double-click to reset",
   "srow.agents": "{0} subagents running",
