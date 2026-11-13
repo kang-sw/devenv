@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"errors"
+	"html"
 	"io/fs"
 	"net/http"
 	"os"
@@ -46,7 +47,7 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 	for _, want := range []string{
 		`<title>livesession - ws dashboard</title>`,
 		`data-label="" data-max="64" data-title="livesession - ws dashboard"`,
-		`data-copy="(mailbox) id:livesession" title="livesession&#10;click to copy">livesession</button>`,
+		`data-copy="` + html.EscapeString((SessionView{ReplyID: "livesession", Project: f.project, Harness: "claude"}).MailboxRef()) + `"`,
 		`class="sren" title="Rename (shown on this dashboard only)"`,
 		`<span class="rid">livesession</span>`,
 	} {
@@ -73,7 +74,7 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 	for _, want := range []string{
 		`<title>Build bot - ws dashboard</title>`,
 		`data-label="Build bot" data-max="64" data-title="Build bot - ws dashboard"`,
-		`data-copy="(mailbox, label &#34;Build bot&#34;) id:livesession" title="livesession&#10;click to copy">Build bot</button>`,
+		`data-copy="` + html.EscapeString((SessionView{ReplyID: "livesession", Project: f.project, Harness: "claude", Label: "Build bot"}).MailboxRef()) + `"`,
 		`<span class="rid lbl" title="livesession">Build bot</span>`,
 	} {
 		if !strings.Contains(page, want) {
@@ -235,7 +236,7 @@ var doc = { createElement: function (t) { return new El(t); } };
 var root = new El("html", "", { "data-rid": "sess" });
 var H = new El("span", "r-head");
 var sn = H.appendChild(new El("span", "meta sname", { "data-label": "", "data-max": "64", "data-title": "sess - ws dashboard" }));
-var nm = sn.appendChild(new El("button", "snm", { "data-copy": "(mailbox) id:sess" }));
+var nm = sn.appendChild(new El("button", "snm", { "data-copy": '<mailbox id="id:sess" dir="/p"/>', "data-mailbox-open": '<mailbox id="id:sess" dir="/p"' }));
 nm.textContent = "sess";
 var pen = sn.appendChild(new El("button", "sren", { "aria-label": "Rename" }));
 var penIcon = pen.appendChild(new El("svg", "i"));
@@ -255,7 +256,7 @@ function key(k) { return inp().fire("keydown", { key: k }); }
 const labelJSCases = `
 // The name copies the mailbox address the server built.
 labelClick(nm);
-check("a click on the name copies the address", copied, ["(mailbox) id:sess"]);
+check("a click on the name copies the address", copied, ['<mailbox id="id:sess" dir="/p"/>']);
 check("and opens no input", inp(), null);
 
 // The pencil (or its icon) opens the input in place of the name.
@@ -278,7 +279,7 @@ check("a second Enter while saving posts nothing", posts.length, 1);
 answer(true, { label: "Build bot" });
 check("saved: the name shows the label", [nm.textContent, sn.getAttribute("data-label"), inp(), nm.hidden, pen.hidden, labelEditing()], ["Build bot", "Build bot", null, false, false, false]);
 check("saved: the name takes the label's body face", nm.has("lbl"), true);
-check("saved: the name copies the address naming the label", nm.getAttribute("data-copy"), "(mailbox, label \"Build bot\") id:sess");
+check("saved: the name copies the address naming the label", nm.getAttribute("data-copy"), '<mailbox id="id:sess" dir="/p">Build bot</mailbox>');
 
 // Escape cancels: nothing posted, the name kept.
 labelClick(pen);
@@ -316,7 +317,13 @@ check("empty posts an empty label", posts[posts.length - 1], ["label", { label: 
 answer(true, { label: "" });
 check("reset: the name shows the reply-id", [nm.textContent, sn.getAttribute("data-label"), inp()], ["sess", "", null]);
 check("reset: the reply-id keeps the mono face", nm.has("lbl"), false);
-check("reset: the name copies the bare address", nm.getAttribute("data-copy"), "(mailbox) id:sess");
+check("reset: the name copies the bare address", nm.getAttribute("data-copy"), '<mailbox id="id:sess" dir="/p"/>');
+
+labelClick(pen);
+inp().value = 'a" & <b>';
+key("Enter");
+answer(true, { label: 'a" & <b>' });
+check("saved: label body is escaped", nm.getAttribute("data-copy"), '<mailbox id="id:sess" dir="/p">a" &amp; &lt;b&gt;</mailbox>');
 
 // A head swap held while the input was open lands when it closes.
 labelClick(pen);
@@ -325,13 +332,8 @@ key("Escape");
 check("the held head swap lands on close", [swaps, headHeld], [[["head", "h2"]], null]);
 labelClick(pen);
 inp().fire("keydown", { key: "Enter", isComposing: true });
-check("an IME Enter neither saves nor closes", [posts.length, !!inp()], [3, true]);
+check("an IME Enter neither saves nor closes", [posts.length, !!inp()], [4, true]);
 key("Escape");
-
-// The copy text, as pageview.go mailboxRef builds it.
-check("no label: the bare address", mailboxRef("sess", ""), "(mailbox) id:sess");
-check("a label is quoted", mailboxRef("sess", "메인 세션"), "(mailbox, label \"메인 세션\") id:sess");
-check("a quote or backslash in it is escaped", mailboxRef("sess", "a\"b\\c"), "(mailbox, label \"a\\\"b\\\\c\") id:sess");
 
 // The value the route stores: one line, trimmed, at most max characters.
 check("control characters become spaces", labelClean("a\nb\tc\u2028d", 64), "a b c d");
@@ -347,8 +349,8 @@ process.stdout.write(bad.join("\n"));
 
 // TestHeadRenameScript pins the head's rename (dashboard.js labelClick,
 // labelStart, labelKey, labelSave, labelEnd): the name copies the mailbox
-// address, which a save or reset rebuilds (mailboxRef) to name the label or
-// not; the pencil opens a one-line input; Enter saves the trimmed value
+// tag, which a save or reset completes from the server's opening attributes;
+// the pencil opens a one-line input; Enter saves the trimmed value
 // through the label route, Escape and a blur cancel, an empty value resets
 // to the reply-id, the name carries lbl (the label's body face) exactly
 // while it shows a label, a refusal keeps the input open, and a head swap held
@@ -357,7 +359,7 @@ process.stdout.write(bad.join("\n"));
 func TestHeadRenameScript(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	var src string
-	for _, name := range []string{"labelEditing", "labelClean", "mailboxRef", "labelClick", "labelStart", "labelKey", "labelSave", "labelEnd", "labelSwapped"} {
+	for _, name := range []string{"labelEditing", "labelClean", "labelClick", "labelStart", "labelKey", "labelSave", "labelEnd", "labelSwapped"} {
 		f := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(js)
 		if f == "" {
 			t.Fatalf("dashboard.js holds no %s", name)
@@ -405,18 +407,33 @@ func TestSessionLabelBodyFace(t *testing.T) {
 	}
 }
 
-// TestMailboxRef pins the head name's copy text: the bare mailbox address
-// without a label, and with one the label quoted, a quote or backslash in it
-// backslash-escaped.
+// TestMailboxRef pins attributes, omission rules, and XML escaping.
 func TestMailboxRef(t *testing.T) {
-	for _, c := range []struct{ label, want string }{
-		{"", `(mailbox) id:sess`},
-		{"메인 세션", `(mailbox, label "메인 세션") id:sess`},
-		{`a"b\c`, `(mailbox, label "a\"b\\c") id:sess`},
+	for _, c := range []struct {
+		view SessionView
+		want string
+	}{
+		{SessionView{ReplyID: "sess", Project: "/repo/sub", Harness: "pi", Label: `a" & <b>`, Git: &GitBadge{TopLevel: "/repo", Repo: wslive.Repo{Branch: "main"}}}, `<mailbox id="id:sess" dir="/repo/sub" root="/repo" branch="main" harness="pi">a" &amp; &lt;b&gt;</mailbox>`},
+		{SessionView{ReplyID: "sess", Project: `/a"&<b>`, Git: &GitBadge{TopLevel: `/a"&<b>`, Repo: wslive.Repo{Branch: "abc", Detached: true}}}, `<mailbox id="id:sess" dir="/a&quot;&amp;&lt;b&gt;"/>`},
+		{SessionView{ReplyID: "sess", Project: "/repo/.", Git: &GitBadge{TopLevel: "/repo"}}, `<mailbox id="id:sess" dir="/repo/."/>`},
 	} {
-		if got := (SessionView{ReplyID: "sess", Label: c.label}).MailboxRef(); got != c.want {
-			t.Errorf("MailboxRef(label %q) = %q, want %q", c.label, got, c.want)
+		if got := c.view.MailboxRef(); got != c.want {
+			t.Errorf("MailboxRef() = %q, want %q", got, c.want)
 		}
+	}
+}
+
+func TestMailboxBadgeTopLevel(t *testing.T) {
+	root := t.TempDir()
+	gitRun(t, root, "init", "-q")
+	gitRun(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "initial")
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	badge := readGitBadge(sub)
+	if filepath.Clean(badge.TopLevel) != filepath.Clean(root) {
+		t.Fatalf("badge toplevel = %q, want %q", badge.TopLevel, root)
 	}
 }
 

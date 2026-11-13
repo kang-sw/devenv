@@ -39,6 +39,8 @@ function world(
   opts: {
     store?: Record<string, unknown>
     processOk?: boolean
+    /** A current daemon emits arrival lines and keeps the child attached. */
+    stream?: boolean
     env?: Record<string, string>
     /** The claude.mailbox_drain value config_get answers; unset reads as null. */
     drain?: unknown
@@ -166,12 +168,17 @@ function world(
     return text(JSON.stringify({ key: e.args.key, value, scope: value === null ? 'unset' : 'project' }))
   })
   on('process.spawn', async function* ($, e, next) {
+    // Legacy wait-loop cases exercise an older daemon's fallback; stream
+    // cases pass real chunk boundaries through the engine's HookStream.
+    if (e.argv.includes('--stream') && !opts.stream) return { value: { code: 2, signal: null } }
     const index = w.spawns.length
     w.spawns.push([...e.argv])
     next.signal.addEventListener('abort', () => w.killed.push(index), { once: true })
-    const code = await new Promise<number>((resolve) => w.exits.push(resolve))
-    yield* []
-    return { value: { code, signal: null } }
+    for (;;) {
+      const code = await new Promise<number>((resolve) => w.exits.push(resolve))
+      if (e.argv.includes('--stream') && code === 0) yield { stream: 'stdout', text: '{"kinds":["mail"]}\n' }
+      else return { value: { code, signal: null } }
+    }
   })
   on('tool.call', { tool: /__mailbox_recv$/ }, async ($, e, next) => {
     w.recvCalls.push({ key: (e as { session_key?: unknown }).session_key, origin: next.origin.plugin })
@@ -286,6 +293,21 @@ async function modelRecv($: Engine, w: ReturnType<typeof world>, key: string, an
   await w.clock.settle()
   return res
 }
+
+test('streaming delivery drains two wakes through one engine child and stops it at session end', { timeout: 30_000 }, async ($, on) => {
+  const w = world(on, { drain: 'direct', stream: true })
+  await start($, w)
+  await bind($, w, 'k1')
+  expect(w.spawns[0]).toContain('--stream')
+  await arrive(w)
+  await arrive(w)
+  expect(w.spawns.length).toBe(1)
+  expect(w.recvCalls.length).toBe(2)
+  expect(w.prompts.length).toBe(2)
+  await $.session.end({ sessionId: 'sess-1' })
+  await w.clock.settle()
+  expect(w.killed).toEqual([0])
+})
 
 test('bind spawns one finite wait from the plugin root; the same key is a no-op', async ($, on) => {
   const w = world(on)

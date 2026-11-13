@@ -1048,8 +1048,8 @@ describe("createSubprocessWait", () => {
       "print(json.dumps({'timed_out':False,'unread':0,'board':1,'kinds':kinds}),flush=True)",
       "",
     ].join("\n"));
+    const wait = createSubprocessWait({ launcherPath, pluginDir: fixtureDir, sessionKey: "k" });
     try {
-      const wait = createSubprocessWait({ launcherPath, pluginDir: fixtureDir, sessionKey: "k" });
       assert.equal(await wait(new AbortController().signal, { boardInbox: true }), "board");
       assert.equal(await wait(new AbortController().signal, { boardInbox: false }), "mail", "a mail-only wait reads the exit code alone");
       await writeFile(launcherPath, [
@@ -1067,6 +1067,7 @@ describe("createSubprocessWait", () => {
       ].join("\n"));
       assert.deepEqual(await wait(new AbortController().signal, { boardInbox: false, boardInterrupt: true }), { interrupt: true }, "an interrupt-only wait passes its flag and reads the kinds too");
     } finally {
+      await wait.dispose?.();
       await rm(fixtureDir, { recursive: true, force: true });
     }
   });
@@ -1077,6 +1078,7 @@ describe("createSubprocessWait", () => {
     const pidPath = join(fixtureDir, "grandchild-pid");
     await writeFile(launcherPath, [
       "import subprocess,sys",
+      "if '--stream' in sys.argv: raise SystemExit(2)",
       "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(15)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=sys.stderr)",
       `open(${JSON.stringify(pidPath)}, 'w').write(str(child.pid))`,
       "raise SystemExit(3)",

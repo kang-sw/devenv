@@ -78,8 +78,8 @@ func TestShippedDashboardManifestsLoadBesideEachPackageManifest(t *testing.T) {
 				t.Fatalf("rejected: %v", declared.rejected)
 			}
 			own := loadDeclaredConfig(pkg.own)
-			if len(declared.keys) != len(own.keys)+4 {
-				t.Fatalf("%d keys loaded, want the package's %d plus 4 dashboard keys", len(declared.keys), len(own.keys))
+			if len(declared.keys) != len(own.keys)+5 {
+				t.Fatalf("%d keys loaded, want the package's %d plus 5 dashboard keys", len(declared.keys), len(own.keys))
 			}
 			enabled, ok := declared.lookup(DashboardEnabledKey)
 			if !ok || enabled.DefaultValue != pkg.enabled {
@@ -99,6 +99,13 @@ func TestShippedDashboardManifestsLoadBesideEachPackageManifest(t *testing.T) {
 			}
 			if !strings.Contains(lan.Description, "Only the global value applies") {
 				t.Fatalf("%s description must state that only the global value applies: %q", DashboardLANKey, lan.Description)
+			}
+			undelivered, ok := declared.lookup(DashboardMailboxUndeliveredKey)
+			if !ok || undelivered.DefaultValue != int64(3) || undelivered.DefaultScope != wsconfig.ScopeGlobal {
+				t.Fatalf("%s = %+v (declared %v), want default 3 at global scope", DashboardMailboxUndeliveredKey, undelivered, ok)
+			}
+			if _, err := undelivered.parse("0"); err == nil {
+				t.Fatal("undelivered threshold accepted 0")
 			}
 			got := dashboardServer(t, list).DashboardSettings()
 			if want := (DashboardSettings{Enabled: pkg.enabled, Port: wsdashboard.DefaultPort}); got != want {

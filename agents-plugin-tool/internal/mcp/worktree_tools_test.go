@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -247,6 +248,29 @@ func TestProvisionWorktreeSkipDirty(t *testing.T) {
 	}
 	if res2.Reused || res2.Path == res1.Path {
 		t.Fatalf("dirty worktree must be skipped: reused=%v path=%q", res2.Reused, res2.Path)
+	}
+}
+
+type worktreeRecordingRunner struct {
+	calls [][]string
+}
+
+func (r *worktreeRecordingRunner) RunGit(_ context.Context, _ string, args ...string) ([]byte, error) {
+	r.calls = append(r.calls, append([]string(nil), args...))
+	return nil, nil
+}
+
+func TestWorktreeHygieneLongPaths(t *testing.T) {
+	runner := &worktreeRecordingRunner{}
+	if err := worktreeHygiene(context.Background(), runner, t.TempDir(), []string{"kept/"}); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"-c", "submodule.recurse=false", "-c", "core.longPaths=true", "reset", "--hard"},
+		{"-c", "submodule.recurse=false", "-c", "core.longPaths=true", "clean", "-ffdx", "-e", "kept/"},
+	}
+	if !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("hygiene git calls = %v, want %v", runner.calls, want)
 	}
 }
 

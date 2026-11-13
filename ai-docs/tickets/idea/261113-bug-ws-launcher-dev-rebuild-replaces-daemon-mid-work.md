@@ -30,10 +30,17 @@ The launcher does not check running Pi turns or connected sessions; its own
 docstring says a replacement drains every session on the machine. Go-side
 drain behavior in `wsdashboard.Ensure` is unverified.
 
+Dogfood data point (2026-11-13, during the 3badee1b6 rebuild window, ~08:13Z):
+a peer lead's two consecutive `tickets.sage_gate` calls failed fast with
+"dashboard daemon not reachable; request was not sent", and its turn stalled
+until the user said the daemon was back. Owner comment (verbatim): "데몬 리로딩되는 동안 작업이 멈춰버리는 게 문제네요"
+
 ## Idea
 
 In dev mode, do not replace a daemon mid-work automatically.
 
+- MCP tool calls should wait (bounded, e.g. tens of seconds) for a daemon that
+  is mid-reload/replacement instead of failing fast.
 - Compatibility: launcher-local behavior, T0; a config knob would also be T0.
   Changing replacement semantics is an observable workflow behavior change:
   ask before ready.

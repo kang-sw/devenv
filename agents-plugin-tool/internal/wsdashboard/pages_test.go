@@ -326,8 +326,8 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 
 // TestPagesCarryTheTracker pins the tracker renderer on every page: its
 // stylesheet after the dashboard's, its script after the string table and
-// before the page script that mounts it, and the header slot its quick
-// switcher goes into.
+// before the page script that mounts it, and the header slot for the search
+// palette's button (the modal itself mounts in the body).
 func TestPagesCarryTheTracker(t *testing.T) {
 	f := startPageFixture(t)
 	for name, path := range map[string]string{"live": "/s/livesession", "board-first": "/s/boardsession", "index": "/"} {
@@ -349,7 +349,10 @@ func TestPagesCarryTheTracker(t *testing.T) {
 			t.Errorf("%s page: the string table lacks the tracker strings (js.tk.*)", name)
 		}
 		if strings.Count(page, `<span class="qsslot" id="qsslot"></span>`) != 1 {
-			t.Errorf("%s page lacks the quick-switcher slot", name)
+			t.Errorf("%s page lacks the search-palette button slot", name)
+		}
+		if !strings.Contains(page, "class: 'tk tk-palette'") || strings.Contains(page, `class="tk-qpop"`) {
+			t.Errorf("%s page: centered search modal missing or old popover remains", name)
 		}
 		// The wiki in the Items panel: its stylesheet block, the renderer's
 		// switch and card, the adapter's wiki methods, and the wiki strings.
@@ -369,7 +372,7 @@ func TestPagesCarryTheTracker(t *testing.T) {
 			tail = `id="qsslot"></span><span class="gearwrap">`
 		}
 		if i, j := strings.Index(page, `<div class="top">`), strings.Index(page, tail); i < 0 || j < i {
-			t.Errorf("%s page: the quick-switcher slot is not at the header's end", name)
+			t.Errorf("%s page: the search-palette button slot is not at the header's end", name)
 		}
 	}
 }

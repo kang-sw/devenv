@@ -81,11 +81,12 @@ type Presence struct {
 // sender published a slug, ReplyTo (an "id:<reply-id>" handle) otherwise.
 // System messages set neither; Label is display-only, never a reply address.
 type Envelope struct {
-	From    string `json:"from,omitempty"`
-	ReplyTo string `json:"reply_to,omitempty"`
-	Label   string `json:"label,omitempty"`
-	Content string `json:"content"`
-	SentAt  string `json:"sent_at"`
+	From                string `json:"from,omitempty"`
+	ReplyTo             string `json:"reply_to,omitempty"`
+	Label               string `json:"label,omitempty"`
+	Content             string `json:"content"`
+	SentAt              string `json:"sent_at"`
+	UndeliveredNotified bool   `json:"undelivered_notified,omitempty"`
 }
 
 // StoreFile is one scope tier's on-disk mailbox store: presence records and

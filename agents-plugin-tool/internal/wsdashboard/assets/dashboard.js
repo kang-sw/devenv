@@ -1122,7 +1122,7 @@
     if (!window.fetch || btn.disabled) return;
     btn.disabled = true;
     var from = +btn.getAttribute("data-closed-next");
-    fetch("/s/" + rid + "/closed?from=" + from, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+    return fetch("/s/" + rid + "/closed?from=" + from, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     }).then(function (res) {
@@ -1148,7 +1148,8 @@
       if (window.wbBindBoard) window.wbBindBoard(page);
       if (window.wbAgo) window.wbAgo(page);
       mermaid(page);
-    }, function () { btn.disabled = false; });
+      return true;
+    }, function () { btn.disabled = false; return false; });
   }
 
   // --- composer: never inside a region, so a swap never touches it ---------
@@ -2289,14 +2290,6 @@
     var v = String(s).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").trim();
     return Array.from(v).slice(0, max).join("").trim();
   }
-  // mailboxRef is the name's copy text, as the server builds it (pageview.go
-  // mailboxRef): "(mailbox) id:<rid>", or with a label
-  // "(mailbox, label \"<label>\") id:<rid>", a quote or backslash in the
-  // label backslash-escaped. A rename rebuilds it before the head re-renders.
-  function mailboxRef(rid, label) {
-    if (!label) return "(mailbox) id:" + rid;
-    return "(mailbox, label \"" + String(label).replace(/[\\"]/g, "\\$&") + "\") id:" + rid;
-  }
   // labelClick handles a click inside the head: the name copies, the pencil
   // starts the rename.
   function labelClick(t) {
@@ -2346,7 +2339,8 @@
       sn.setAttribute("data-label", label);
       var nm = sn.querySelector(".snm");
       nm.textContent = label || root.getAttribute("data-rid") || "";
-      nm.setAttribute("data-copy", mailboxRef(root.getAttribute("data-rid") || "", label));
+      var open = nm.getAttribute("data-mailbox-open");
+      nm.setAttribute("data-copy", open + (label ? ">" + label.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</mailbox>" : "/>"));
       nm.classList.toggle("lbl", !!label);
       labelEnd(sn);
     });
@@ -4282,7 +4276,7 @@
     var thens = tkNext;
     tkNext = [];
     tkReadAll(function (status) {
-      if (!tkApi && (status === 200 || status === 503)) tkMount();
+      if (!tkApi) tkMount(); // the palette still works when no tracker route is available
     }, function () {
       tkBusy = false;
       if (tkNudgedRev !== null) {
@@ -4438,13 +4432,95 @@
   // hidden grid's column; appended to the wrap instead, it would stack below
   // the rail's column on a wide screen. The store drawers open at the one
   // drawer height (drH) and a drag of a store's handle sets it.
+  // --- search palette: the rendered rail and this session's board only -----
+  function paletteText(el) {
+    if (!el) return "";
+    var copy = el.cloneNode(true);
+    q("script, style, template, noscript", copy).forEach(function (n) { n.remove(); });
+    return copy.textContent.replace(/\s+/g, " ").trim();
+  }
+  function paletteRows(update) {
+    // The board caps its initially rendered closed topics. Reuse its existing
+    // show-more path so older hits are searchable and already mounted to jump to.
+    if (update) paletteClosed(update);
+    var rows = [];
+    q("#rail .rs[data-rid]").forEach(function (el) {
+      var label = el.querySelector(".rid"), link = el.querySelector("a.rl");
+      if (label && link) rows.push({ group: 0, kind: "session", title: label.textContent.trim(), href: link.getAttribute("href") });
+    });
+    boardQ("section.topic[data-topic]").forEach(function (topic) {
+      var name = topic.getAttribute("data-topic"), label = paletteText(topic.querySelector(".tname")) || name;
+      var time = topic.querySelector(".tbar time"), at = time ? Number(time.getAttribute("data-at")) || Date.parse(time.getAttribute("datetime")) || 0 : 0;
+      rows.push({ group: 1, kind: "board-topic", topic: name, title: label, at: at });
+      var body = topic.querySelector(".doc-body"), frame = body && body.querySelector("iframe.doc-frame"), text;
+      if (frame) {
+        // srcdoc is available even for an opaque-origin sandbox. A template
+        // parses it inertly: never execute a body's scripts or fetch its images.
+        var parsed = doc.createElement("template");
+        parsed.innerHTML = frame.getAttribute("srcdoc") || "";
+        text = paletteText(parsed.content.querySelector(".doc-body"));
+      } else text = paletteText(body);
+      var recap = paletteText(topic.querySelector(".rtext"));
+      text = (recap + " " + text).trim();
+      if (text) rows.push({ group: 2, kind: "board-body", topic: name, title: text, hint: label });
+      q('[id^="item-"]', topic).forEach(function (item) {
+        var id = /^item-(\d+)$/.exec(item.id);
+        if (!id) return;
+        var title = paletteText(item.querySelector(".title, .stext > b"));
+        rows.push({ group: 3, kind: "board-item", topic: name, id: id[1], title: title, hint: label, at: at });
+        var answer = q(".pick, .ans, .quote, .stamp, .said", item).map(paletteText).join(" ");
+        if (item.hasAttribute("data-id")) {
+          var draft = readItem(item);
+          if (draft) answer += " " + draft.answer + " " + draft.note;
+        }
+        if (answer.trim()) rows.push({ group: 4, kind: "board-answer", topic: name, id: id[1], title: answer.trim(), hint: label + " · " + title });
+      });
+    });
+    return rows;
+  }
+  function paletteClosed(update) {
+    var more = boardQ("button.closed-more[data-closed-next]")[0];
+    if (!more || more.disabled) return;
+    loadClosed(more).then(function (loaded) {
+      if (!loaded) return;
+      update(paletteRows());
+      paletteClosed(update);
+    });
+  }
+  function palettePick(row) {
+    if (row.kind === "session") { location.href = row.href; return; }
+    // Look the target up again: an SSE board swap may have replaced its node
+    // while the palette was open. Open every enclosing fold before scrolling.
+    var topic = boardQ("section.topic[data-topic]").filter(function (n) { return n.getAttribute("data-topic") === row.topic; })[0];
+    var target = row.id ? $("item-" + row.id) : topic;
+    if (!target || !topic) return;
+    if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
+    if (live && !tabShown("board")) setTab("board");
+    if (row.kind === "board-body") target = topic.querySelector(".tdoc") || topic;
+    for (var p = target.parentElement; p && p !== topic.parentElement; p = p.parentElement) {
+      if (p.tagName === "DETAILS") p.open = true;
+    }
+    if (target.tagName === "DETAILS") target.open = true;
+    if (target.matches(".ckrow.done, .ckrow.no") && doc.documentElement.getAttribute("data-ck-hide") === "1") {
+      var toggle = topic.querySelector("button.ckhide[aria-pressed=true]");
+      if (toggle) toggle.click();
+    }
+    target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ block: "center" });
+    target.classList.remove("palette-flash");
+    void target.offsetWidth;
+    target.classList.add("palette-flash");
+    setTimeout(function () { target.classList.remove("palette-flash"); }, 1600);
+  }
+
   function tkMount() {
     var header = doc.querySelector(".dwrap > .top"), slot = $("qsslot"), wrap = doc.querySelector(".dwrap");
     if (!header || !slot || !wrap) return;
     header.classList.add("tk-room");
     if (tkSupport) tkAdapter.ext = supExt();
     tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
-      drawerHeight: { get: function () { return drH; }, set: drSetH } });
+      drawerHeight: { get: function () { return drH; }, set: drSetH }, searchRows: paletteRows, searchPick: palettePick });
   }
   function trackerStart() {
     if (window.WsTracker && window.fetch) tkReload();

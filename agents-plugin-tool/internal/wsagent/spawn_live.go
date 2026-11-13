@@ -1,6 +1,10 @@
 package wsagent
 
-import "github.com/kang-sw/devenv/internal/wslive"
+import (
+	"encoding/json"
+
+	"github.com/kang-sw/devenv/internal/wslive"
+)
 
 // SpawnAgentEvent projects a daemon conversation onto the ordinary subagent
 // feed. The prefix separates daemon ids from the harness's own ids.
@@ -24,6 +28,12 @@ func SpawnAgentEvent(st State, key string) wslive.Event {
 		AgentKind: wslive.AgentKindPi, Label: label, Status: status,
 		Model: st.Model, Effort: st.Effort, SessionKey: key,
 		ContextTokens: st.ContextTokens, OutputTps: st.OutputTps}
+	// An explicit empty list clears the previous activity on the row.
+	ev.Batches = make([]json.RawMessage, 0, len(st.Batches))
+	for _, batch := range st.Batches {
+		raw, _ := json.Marshal(batch)
+		ev.Batches = append(ev.Batches, raw)
+	}
 	if st.Parent != nil && st.Parent.Kind == ParentConversation {
 		ev.ParentID = "pi:" + st.Parent.ReplyID
 	}

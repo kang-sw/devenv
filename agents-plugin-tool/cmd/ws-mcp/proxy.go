@@ -281,7 +281,8 @@ func (s *proxyCLISession) Serve(ctx context.Context, stream io.ReadWriteCloser) 
 	}
 	var stdout bytes.Buffer
 	stderr := &frameWriter{emit: func(data string) { writeFrame(wsdashboard.ProxyCLIFrame{Stream: "stderr", Data: data}) }}
-	command := hostedCLI{hello: s.hello, host: s.host, ctx: ctx, stdout: &stdout, stderr: stderr, env: mcp.EnvFromMap(s.hello.Env), serverReady: func(server *mcp.Server) {
+	streamout := &frameWriter{emit: func(data string) { writeFrame(wsdashboard.ProxyCLIFrame{Stream: "stdout", Data: data}) }}
+	command := hostedCLI{hello: s.hello, host: s.host, ctx: ctx, stdout: &stdout, stderr: stderr, streamout: streamout, env: mcp.EnvFromMap(s.hello.Env), serverReady: func(server *mcp.Server) {
 		s.server.Store(server)
 		if s.draining.Load() {
 			server.Drain(context.Background())

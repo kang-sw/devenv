@@ -645,6 +645,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // after bootstrap once this session's own key exists, stopped on
   // `session_shutdown`. `undefined` in every other role/process.
   let mailboxWaiterHandle: MailboxWaiterHandle | undefined;
+  // A revive/key rebind recreates the waiter, not the session's skew decision.
+  const mailboxStreamSupport: { unsupported?: boolean } = {};
   // The owner lead's own turn, from Pi `agent_start` to `agent_settled`: a
   // dashboard message that arrives inside it stays held in the inbox until
   // the settle, so the page can still merge into or cancel it, unless the
@@ -1034,6 +1036,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
               sessionKey: key,
               slug,
               cwd: ctx.cwd,
+              streamSupport: mailboxStreamSupport,
               // Every re-spawned wait repeats a persistent warning; show each
               // line once per armed waiter.
               onStderr: reportDistinctLinesOnce(reportMailboxWaiterDiagnostic),

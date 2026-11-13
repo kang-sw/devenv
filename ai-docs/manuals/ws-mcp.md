@@ -1280,7 +1280,10 @@ subprocess environment and owner identity belong to that hello, never another
 package's daemon-wide values. The daemon answers in frames, one
 JSON object per line: `{"stream": "stderr", "data": "..."}` for each stderr
 write as it happens, then one `{"final": true, "exit_code": <n>, "data":
-"<the whole stdout>"}`, `exit_code` always present (0 included). The
+"<the whole stdout>"}`, `exit_code` always present (0 included). An explicitly
+streaming command (`mailbox wait --stream`) instead sends live stdout in
+`{"stream": "stdout", "data": "..."}` frames before its final frame; ordinary
+one-shot stdout remains buffered. The
 launcher writes them as UTF-8 bytes to its own stderr and stdout and exits
 with `exit_code`, so the mod and the Pi waiter see the same output and codes
 as before; closing the connection (the launcher exits, or the
@@ -1288,6 +1291,15 @@ daemon drains) cancels the wait at once and clears its listening marker
 (`exit_code` 130, "interrupted"). A hosted wait rechecks on an in-process
 signal (a mailbox send by a server the daemon hosts, a board-answer inbox
 write, or a nudge) with a 10 s backstop poll.
+
+`mailbox wait --stream` emits one JSON line per arrival without draining and
+keeps its listening marker until interruption, client disconnect, or parent
+death. `--timeout` becomes the unchanged-pending-arrival reminder interval
+(default 10 minutes), not a process deadline; an empty timeout emits nothing.
+The Claude mod and Pi reuse that child across wakes and restart it when board
+flags change. A rejected stream flag (usage/unknown-flag diagnostics, or a
+nonzero exit before any arrival) selects their existing one-shot loop for the
+remaining session. Model-armed waits keep the one-shot contract.
 
 ## Launcher Environment
 
