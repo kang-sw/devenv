@@ -494,9 +494,18 @@ func endedError(rec Record) error {
 // LeadOptions are a lead conversation's spawn choices; an empty one takes
 // the profile's value (the harness default when it has none).
 type LeadOptions struct {
-	Model          string
-	Effort         string
-	PermissionMode string
+	Model           string
+	Effort          string
+	PermissionMode  string
+	PluginIsolation string
+}
+
+// leadPluginIsolation supplies the additive field's legacy default.
+func leadPluginIsolation(value string) string {
+	if value == "" {
+		return "default"
+	}
+	return value
 }
 
 // Create opens a conversation of profile bound to root. It resolves and
@@ -524,6 +533,10 @@ func (r *Runner) CreateLead(backend, root string, opts LeadOptions) (State, erro
 	}
 	if opts.PermissionMode != "" && !ValidLeadPermissionMode(opts.PermissionMode) {
 		return State{}, badRequest("permission_mode %q must be one of %s", opts.PermissionMode, strings.Join(LeadPermissionModes, ", "))
+	}
+	opts.PluginIsolation = leadPluginIsolation(opts.PluginIsolation)
+	if opts.PluginIsolation != "default" && opts.PluginIsolation != "isolated" {
+		return State{}, badRequest("plugin_isolation must be default or isolated; got %q", opts.PluginIsolation)
 	}
 	return r.create(profile, root, &opts, nil)
 }
@@ -590,6 +603,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	}
 	if lead != nil {
 		rec.Lead = true
+		rec.PluginIsolation = leadPluginIsolation(lead.PluginIsolation)
 		rec.PermissionMode = rp.Definition.PermissionMode
 		if lead.Model != "" {
 			rec.Model = lead.Model
@@ -1018,8 +1032,10 @@ type State struct {
 	// PermissionMode is the mode the next process launches in, and
 	// ActiveMode the one the running harness last reported (it may fall
 	// back from the one asked for).
-	PermissionMode string `json:"permission_mode,omitempty"`
-	ActiveMode     string `json:"active_mode,omitempty"`
+	PermissionMode  string `json:"permission_mode,omitempty"`
+	ActiveMode      string `json:"active_mode,omitempty"`
+	PluginIsolation string `json:"plugin_isolation,omitempty"`
+	PluginWarning   string `json:"plugin_warning,omitempty"`
 	// Approvals are the tool permission prompts waiting for an answer,
 	// oldest first.
 	Approvals []ApprovalRequest `json:"approvals,omitempty"`
@@ -1077,6 +1093,10 @@ func (r *Runner) closedState(rec Record) State {
 
 func closedState(rec Record) State {
 	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label, Tier: rec.Tier, ActiveMs: rec.ActiveMs}
+	if rec.Lead {
+		st.PluginIsolation = leadPluginIsolation(rec.PluginIsolation)
+		st.PluginWarning = rec.PluginWarning
+	}
 	if rec.Parent != nil {
 		parent := *rec.Parent
 		st.Parent = &parent
@@ -2086,7 +2106,35 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		Env:         environ(),
 		Holder:      holder,
 		Lead: &LeadSpec{
-			PermissionMode: rec.PermissionMode,
+			PermissionMode:  rec.PermissionMode,
+			PluginIsolation: leadPluginIsolation(rec.PluginIsolation),
+			PluginWarning: func(warning string) {
+				c.update(func(rec *Record) { rec.PluginWarning = warning })
+				if warning != "" {
+					fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", rec.ReplyID, warning)
+				}
+			},
+			WSMCP: func() (MCPCommand, error) {
+				if c.r.opts.WSMCP == nil {
+					return MCPCommand{}, errors.New("bundled ws-mcp launcher unavailable")
+				}
+				cmd, err := c.r.opts.WSMCP(rec.workDir())
+				if err != nil {
+					return MCPCommand{}, err
+				}
+				env := map[string]string{}
+				for name, value := range cmd.Env {
+					env[name] = value
+				}
+				env[EnvAllowedTools], env[EnvPiToken], env[EnvPiEndpoint] = "", "", ""
+				for _, name := range mailboxIdentityEnv {
+					env[name] = ""
+				}
+				env[EnvHostedSession], env[EnvHostedSessionKey] = "1", rec.WSKey
+				env[EnvHostedSessionRow] = wsdashboard.RegistrationPath(c.r.opts.Dir, rec.ReplyID)
+				cmd.Env = env
+				return cmd, nil
+			},
 			Env: map[string]string{
 				EnvHostedSession:    "1",
 				EnvHostedSessionKey: rec.WSKey,

@@ -1,5 +1,6 @@
 ---
 title: "Dashboard-hosted leads use only the daemon-bundled ws/wsflow plugin"
+completed: 2026-11-13
 related:
   - 261110-feat-ws-hosted-session-mode-flag
 sage-review-design: completed
@@ -207,3 +208,48 @@ Verification:
   the session records a warning.
 - One live check: a hosted Claude lead's init event shows only one wsflow, from
   the bundled path.
+
+### Result (52dc582b4) - 2026-11-13
+
+Implemented in `52dc582b4`, with independent-review fixes in `f7b2d3af7`.
+
+- Added HTTP `plugin_isolation` (`default|isolated`, omission means `default`),
+  propagated through LeadOptions, persisted Record and response State, and
+  LeadSpec. Legacy records and resumed/relaunched sessions retain the correct
+  mode. Spawn-modal UI remains owned by the separate UI track; no optional
+  configuration policy was added.
+- Claude disables effective installed ws/wsflow IDs in default mode, or all
+  enabled IDs including builtins in isolated mode, then loads the daemon's
+  bundled package. Settings sources, hooks, permissions, memory and user MCP
+  remain active. Its POSIX canonical local-settings store is included.
+- Pi loads the sibling package's manifest entries. Default mode re-adds enabled
+  non-ws resources through Pi's native in-process resolver rather than a
+  preflight enumeration: this preserves trust hooks, package filtering,
+  ordering, deduplication and reload without initializing extensions twice.
+  The adapter uses the SDK graph adjacent to the actual CLI. Default mode
+  therefore requires that JavaScript SDK; standalone binaries can use isolated
+  mode. Missing bundled entries use the native MCP bridge, with hosted key
+  context and a persisted/exposed `plugin_warning`.
+- Child launch paths are unchanged. Existing Claude/Pi lead holders reattach
+  without re-resolving launch-time plugin resources.
+- Independent R1 found the Pi bundled/unbundled module-graph mismatch and the
+  Claude reattachment dependency on launch-time plugin resources. Both were
+  fixed with regressions; fixes-only R2 confirmed both resolved, no Forwards.
+
+Verification:
+
+- Final w5090 full `go test ./... -count=1`: every package passed except the
+  owner-excluded `TestHostedConnectionSeeingALANChangeReplacesTheDaemon`
+  predecessor-exit timeout. `internal/wsagent` and `internal/wsholder` passed.
+  No new failures; the known exclusion was not changed or suppressed in code.
+- Local Node-only adapter/bridge checks: 11 passed, zero failed or skipped,
+  against installed Pi 1.5.0. Actual npm-bin startup restored user, explicit,
+  package and trusted project extensions while excluding installed ws. An
+  old-SDK-graph negative control reproduced the R1 failure.
+- `git diff --check`: clean. Temporary local fixtures/logs were removed.
+- Forward: the live hosted Claude init-event check remains unrun because the
+  permitted remote verification host has no Claude/Pi executable. Per lead
+  steering, the full check with its known exclusion closes this phase.
+- Workflow routing/acquire/close APIs were not exposed in this session; the
+  supplied branch/ticket were retained, and closure used the documented Git
+  move fallback. No merge or push was performed.

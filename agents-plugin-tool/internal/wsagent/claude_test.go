@@ -154,6 +154,41 @@ func TestHarnessEnvDropsParentSession(t *testing.T) {
 	}
 }
 
+// A failed lead plugin plan must reach Start's caller before any process is
+// spawned; it must never retry with the user's installed ws/wsflow copy.
+func TestClaudeLeadStartRefusesPluginResolutionErrors(t *testing.T) {
+	leadBundledFixture(t, "wsflow")
+	restore := lookPath
+	lookPath = func(string) (string, error) { return "/never-start-claude.exe", nil }
+	t.Cleanup(func() { lookPath = restore })
+	for _, failure := range []string{"bundle", "settings", "isolation"} {
+		t.Run(failure, func(t *testing.T) {
+			spec := claudePluginLeadSpec(t)
+			want := ""
+			switch failure {
+			case "bundle":
+				t.Setenv("WS_RSRC_ROOT", filepath.Join(t.TempDir(), "missing", "rsrc"))
+				want = "bundled plugin"
+			case "settings":
+				path := filepath.Join(spec.Root, ".claude", "settings.local.json")
+				writeLeadPluginFixture(t, path, `{`)
+				want = path
+			case "isolation":
+				spec.Lead.PluginIsolation = "unknown"
+				want = "invalid plugin isolation"
+			}
+			proc, err := (ClaudeBackend{Command: "/never-start-claude.exe"}).Start(context.Background(), spec)
+			if proc != nil {
+				proc.Close()
+				t.Fatal("failed plugin resolution must not return a process")
+			}
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Start should refuse with %q, got %v", want, err)
+			}
+		})
+	}
+}
+
 func TestCheckClaudeInit(t *testing.T) {
 	spec := claudeSpec(t, `{"backend":"claude","tools":["Read","Bash(git status)"],"ws_tools":["tickets.query"],"mcp_servers":{"docs":{"command":"d"}},"plugins":["plug"]}`)
 	spec.WSMCP = &MCPCommand{Command: "ws-mcp"}

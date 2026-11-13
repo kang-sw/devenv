@@ -287,11 +287,10 @@ func piArgs(spec StartSpec, bridge string) []string {
 	return args
 }
 
-// piLeadArgs is the pi command line of a lead conversation: RPC mode on the
-// conversation's own session file, with the user's extensions, skills, and
-// context files as an ordinary pi session loads them. A session taken over
-// from a terminal runs on that session's file instead (spec.SessionFile),
-// in pi's own session directory for it.
+// piLeadArgs is the base command line of a lead conversation. Plugin
+// isolation is added by preparePiLeadLaunch; skills, settings and context
+// files keep Pi's ordinary behavior. A terminal takeover keeps its session
+// file (spec.SessionFile), in Pi's own session directory for it.
 func piLeadArgs(spec StartSpec) []string {
 	args := []string{"--mode", "rpc"}
 	if own := piSessionFile(spec.Dir); spec.SessionFile != "" && spec.SessionFile != own {
@@ -393,11 +392,18 @@ func (b PiBackend) startLead(spec StartSpec) (Process, error) {
 	if err := os.MkdirAll(piDir(spec.Dir), 0o700); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(command, append(pre, piLeadArgs(spec)...)...)
+	attach := spec.Holder != nil && spec.Holder.id != ""
+	args := append(pre, piLeadArgs(spec)...)
+	if !attach {
+		command, args, err = preparePiLeadLaunch(command, pre, spec)
+		if err != nil {
+			return nil, fmt.Errorf("pi lead launch: %w", err)
+		}
+	}
+	cmd := exec.Command(command, args...)
 	cmd.Dir = spec.workDir()
 	cmd.Env = piLeadEnv(spec)
 	m := newPiMapper(spec)
-	attach := spec.Holder != nil && spec.Holder.id != ""
 	p, err := startChild(spec, cmd, m, piProtocol{})
 	if err != nil {
 		return nil, err

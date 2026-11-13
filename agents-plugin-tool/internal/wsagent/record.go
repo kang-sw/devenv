@@ -60,6 +60,10 @@ type Record struct {
 	Lead bool `json:"lead,omitempty"`
 	// PermissionMode is the permission mode the next process launches in.
 	PermissionMode string `json:"permission_mode,omitempty"`
+	// PluginIsolation selects the lead's plugin loadout across restarts.
+	PluginIsolation string `json:"plugin_isolation,omitempty"`
+	// PluginWarning records a bundled-plugin fallback warning, if any.
+	PluginWarning string `json:"plugin_warning,omitempty"`
 	// Cwd is the directory the session's process runs in when that is not
 	// Root: a session taken over from a terminal harness keeps the
 	// directory that harness ran in, since the harness resolves its

@@ -1030,7 +1030,10 @@ func TestClaudeLeadResultSettlesOpenPrompts(t *testing.T) {
 }
 
 func TestClaudeLeadArgs(t *testing.T) {
+	bundle := leadBundledFixture(t, "wsflow")
 	spec := leadSpec()
+	spec.Root = t.TempDir()
+	spec.Env = []string{"CLAUDE_CONFIG_DIR=" + t.TempDir()}
 	spec.Lead.PermissionMode = "plan"
 	spec.Model, spec.Effort, spec.SessionID = "opus", "high", "sess-1"
 	// What a profile conversation holds back must not reach a lead's
@@ -1041,8 +1044,8 @@ func TestClaudeLeadArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, banned := range []string{"--setting-sources", "--settings", "--strict-mcp-config", "--mcp-config", "--tools", "--allowedTools", "--disable-slash-commands",
-		"--plugin-dir", "--append-system-prompt-file", "--bare", "--system-prompt", "--dangerously-skip-permissions", "--no-session-persistence"} {
+	for _, banned := range []string{"--setting-sources", "--strict-mcp-config", "--mcp-config", "--tools", "--allowedTools", "--disable-slash-commands",
+		"--append-system-prompt-file", "--bare", "--system-prompt", "--dangerously-skip-permissions", "--no-session-persistence"} {
 		if slices.Contains(args, banned) {
 			t.Fatalf("a lead's args must not carry %s: %v", banned, args)
 		}
@@ -1056,13 +1059,16 @@ func TestClaudeLeadArgs(t *testing.T) {
 		"--input-format": "stream-json", "--output-format": "stream-json",
 		"--permission-prompt-tool": "stdio", "--permission-mode": "plan",
 		"--model": "opus", "--effort": "high", "--resume": "sess-1",
+		"--plugin-dir": bundle, "--settings": `{"enabledPlugins":{}}`,
 	} {
 		if got, ok := flagValue(args, flag); !ok || got != want {
 			t.Fatalf("%s = %q (present %v), want %q", flag, got, ok, want)
 		}
 	}
 
-	plain, err := claudeArgs(leadSpec())
+	plainSpec := leadSpec()
+	plainSpec.Root, plainSpec.Env = spec.Root, spec.Env
+	plain, err := claudeArgs(plainSpec)
 	if err != nil {
 		t.Fatal(err)
 	}
