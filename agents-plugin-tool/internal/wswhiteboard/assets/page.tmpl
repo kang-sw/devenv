@@ -102,7 +102,7 @@ stuck it lifts the list into the head as a popover. */}}
 {{/* tickets are the topic's linked ticket badges, before the bar's time:
 the stem without its date (cut short by the stylesheet), the full stem and
 status as the title; the status reads by colour and by its mark's shape. */}}
-{{define "tickets"}}{{with .Tickets}}<span class="ttix">{{range .}}<span class="tk {{.Status}}" title="{{.Stem}} · {{.Status}}">{{if eq .Status "done"}}{{icon "check"}}{{else if eq .Status "dropped"}}{{icon "x"}}{{else}}<span class="st"></span>{{end}}<span class="nm">{{.Name}}</span></span>{{end}}</span>{{end}}{{end}}
+{{define "tickets"}}{{with .Tickets}}<span class="ttix">{{range .}}<span class="wbtk {{.Status}}" title="{{.Stem}} · {{.Status}}">{{if eq .Status "done"}}{{icon "check"}}{{else if eq .Status "dropped"}}{{icon "x"}}{{else}}<span class="st"></span>{{end}}<span class="nm">{{.Name}}</span></span>{{end}}</span>{{end}}{{end}}
 
 {{/* check is one check row. An open row's box answers ok and its x button
 no (form.js); an answered or assumed row is locked and stamped, a "no" row

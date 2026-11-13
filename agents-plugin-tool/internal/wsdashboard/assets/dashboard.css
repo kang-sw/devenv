@@ -1,3 +1,4 @@
+/* class prefix: d (new classes; legacy classes keep their names) */
 /* Dashboard pages. The whiteboard stylesheet is inlined before this one and
    owns the shared variables, the board, panels, chips, and buttons; this
    sheet adds the live layer (agent tree, conversation, composer),

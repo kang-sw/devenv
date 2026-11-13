@@ -162,10 +162,10 @@ func TestTopicTicketBadgesAndGlow(t *testing.T) {
 	for name, layout := range layouts() {
 		page := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Tickets: resolve}))
 		for _, frag := range []string{
-			`<span class="tk todo" title="261112-feat-live · todo"><span class="st"></span><span class="nm">feat-live</span></span>`,
-			`<span class="tk done" title="261112-bug-shipped · done"><svg`,
-			`<span class="tk dropped" title="261112-refactor-gone · dropped"><svg`,
-			`<span class="tk unknown" title="261112-feat-missing · unknown"><span class="st"></span><span class="nm">feat-missing</span>`,
+			`<span class="wbtk todo" title="261112-feat-live · todo"><span class="st"></span><span class="nm">feat-live</span></span>`,
+			`<span class="wbtk done" title="261112-bug-shipped · done"><svg`,
+			`<span class="wbtk dropped" title="261112-refactor-gone · dropped"><svg`,
+			`<span class="wbtk unknown" title="261112-feat-missing · unknown"><span class="st"></span><span class="nm">feat-missing</span>`,
 		} {
 			if !strings.Contains(page, frag) {
 				t.Errorf("%s: page lacks %q", name, frag)
@@ -177,7 +177,7 @@ func TestTopicTicketBadgesAndGlow(t *testing.T) {
 			t.Errorf("%s: badges not in the bar before its time: %s", name, bar)
 		}
 	}
-	if page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})); strings.Count(page, `class="tk unknown"`) != 4 {
+	if page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})); strings.Count(page, `class="wbtk unknown"`) != 4 {
 		t.Error("a view with no resolver does not show every ticket as unknown")
 	}
 }
@@ -263,5 +263,22 @@ func TestTopicTicketsSurviveTheFolderStore(t *testing.T) {
 	}
 	if tree := folderTree(t, dir); !strings.Contains(tree["t1/meta.json"], `"tickets":["261112-feat-a","261112-bug-b"]`) {
 		t.Fatalf("t1/meta.json lacks the tickets: %s", tree["t1/meta.json"])
+	}
+}
+
+// TestPageCSSLeavesTrackerTkAlone pins the badge class name: page.css is
+// inlined into the dashboard page, so a bare .tk selector there also matches
+// the tracker's own .tk root and dialogs (the Ctrl+K palette squashed into a
+// 17px pill once).
+func TestPageCSSLeavesTrackerTkAlone(t *testing.T) {
+	css, err := embeddedAsset("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := regexp.MustCompile(`\.tk(?:[^\w-]|$)`).FindString(string(css)); m != "" {
+		t.Fatalf("page.css has a bare .tk selector that matches the tracker: %q", m)
+	}
+	if !strings.Contains(string(css), ".wbtk ") {
+		t.Fatal("page.css lost the .wbtk badge rule")
 	}
 }

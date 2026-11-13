@@ -1,3 +1,4 @@
+/* class prefix: wb (new classes use wb; the sticky-head ticket badge is .wbtk) */
 /* Material-style board: roles are told apart by filled header bars, not outlines.
    Surfaces follow the host theme; role fills are template-owned so the text on
    them keeps its contrast whatever the host palette is. */
@@ -419,18 +420,18 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
    check, dropped a cross and struck through). The bar is dark in both
    themes, so the hues are fixed; a quiet topic's muted bar keeps the shapes. */
 .ttix { flex: 0 1 auto; min-width: 0; max-width: min(52%, 360px); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px 4px; }
-.tk { --c: #c9a7ff; display: inline-flex; align-items: center; gap: 5px; height: 17px; max-width: 100%; padding: 0 8px 0 6px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1; color: var(--c); background: color-mix(in srgb, var(--c) 20%, transparent); }
-.tk .st { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; }
-.tk .i { flex: none; width: 9px; height: 9px; margin: 0 -1px; stroke-width: 2.4; }
-.tk .nm { min-width: 0; max-width: 17ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tk.todo { --c: #8db8ff; }
-.tk.todo .st { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
-.tk.ready { --c: #7fd6a8; }
-.tk.ready .st { background: currentColor; }
-.tk.done, .tk.dropped, .tk.unknown { --c: var(--wb-on-topic); opacity: .6; background: rgb(127 127 127 / .22); }
-.tk.dropped .nm { text-decoration: line-through; }
-.tk.unknown .st { border-style: dashed; }
-.topic.quiet .tk { color: var(--wb-muted-fg); background: rgb(127 127 127 / .18); }
+.wbtk { --c: #c9a7ff; display: inline-flex; align-items: center; gap: 5px; height: 17px; max-width: 100%; padding: 0 8px 0 6px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1; color: var(--c); background: color-mix(in srgb, var(--c) 20%, transparent); }
+.wbtk .st { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; }
+.wbtk .i { flex: none; width: 9px; height: 9px; margin: 0 -1px; stroke-width: 2.4; }
+.wbtk .nm { min-width: 0; max-width: 17ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbtk.todo { --c: #8db8ff; }
+.wbtk.todo .st { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.wbtk.ready { --c: #7fd6a8; }
+.wbtk.ready .st { background: currentColor; }
+.wbtk.done, .wbtk.dropped, .wbtk.unknown { --c: var(--wb-on-topic); opacity: .6; background: rgb(127 127 127 / .22); }
+.wbtk.dropped .nm { text-decoration: line-through; }
+.wbtk.unknown .st { border-style: dashed; }
+.topic.quiet .wbtk { color: var(--wb-muted-fg); background: rgb(127 127 127 / .18); }
 /* a topic with live work (a linked open ticket to carry out) glows in the
    board's primary: a 1px ring and a soft halo */
 .topic.live { box-shadow: var(--wb-shadow), 0 0 0 1px color-mix(in srgb, var(--wb-primary) 38%, transparent), 0 0 18px 2px color-mix(in srgb, var(--wb-primary) 22%, transparent); }
