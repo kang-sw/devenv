@@ -121,6 +121,17 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   card.acts[0].run(card);
   check("open in the default app", posts, [{ route: "fs/act", body: { path: "page.html", action: "open", root: "/away/site/" } }]);
 
+  // The reload action is the last header button: a click asks the route
+  // again and redraws the frame with the new capability.
+  var rl = card.acts[card.acts.length - 1];
+  check("the reload action", [rl.icon, rl.title, card.acts.length], ["refresh-cw", "js.preview.reload", 2]);
+  calls = [];
+  answers.push({ kind: "frame", frame: "/s/rid1/fs/ocap/CAP5/page.html" });
+  rl.run(card);
+  await settle();
+  check("a reload asks again", calls, [mint]);
+  check("a reload redraws the frame", find(card.body, "IFRAME").src, "/s/rid1/fs/ocap/CAP5/page.html");
+
   // An image and markdown draw from the same answer shape.
   calls = [];
   answers.push({ kind: "image", src: "/s/rid1/fs/ocap/CAP4/shot.png" });

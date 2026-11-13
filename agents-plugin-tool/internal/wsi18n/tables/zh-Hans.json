@@ -358,6 +358,7 @@
   "js.preview.missing": "根目录下没有此文件",
   "js.preview.none": "此文件无法在此显示：{0}",
   "js.preview.openext": "用默认应用打开",
+  "js.preview.reload": "重新加载",
   "js.preview.sandbox": "在与仪表板隔离的沙箱中运行",
   "js.preview.source.note": "以源码显示：HTML 和 SVG 仅在会话根目录内渲染",
   "js.rel.d": "{0}天",

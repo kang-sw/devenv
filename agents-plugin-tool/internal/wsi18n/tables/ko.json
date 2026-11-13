@@ -358,6 +358,7 @@
   "js.preview.missing": "루트 안에 그런 파일이 없습니다",
   "js.preview.none": "이 파일은 여기서 볼 수 없습니다: {0}",
   "js.preview.openext": "기본 앱에서 열기",
+  "js.preview.reload": "새로고침",
   "js.preview.sandbox": "대시보드와 격리된 샌드박스에서 실행됩니다",
   "js.preview.source.note": "소스로 표시합니다. HTML과 SVG는 세션 루트 안에서만 렌더링됩니다",
   "js.rel.d": "{0}일",

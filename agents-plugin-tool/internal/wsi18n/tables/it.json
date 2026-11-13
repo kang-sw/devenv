@@ -358,6 +358,7 @@
   "js.preview.missing": "Nessun file con questo nome sotto la radice",
   "js.preview.none": "Questo file non può essere mostrato qui: {0}",
   "js.preview.openext": "Apri nell'app predefinita",
+  "js.preview.reload": "Ricarica",
   "js.preview.sandbox": "Viene eseguito in una sandbox, isolato dalla dashboard",
   "js.preview.source.note": "Mostrato come sorgente: HTML e SVG vengono resi solo sotto la radice della sessione",
   "js.rel.d": "{0} g",

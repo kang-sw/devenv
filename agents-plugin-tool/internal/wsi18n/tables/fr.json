@@ -358,6 +358,7 @@
   "js.preview.missing": "Aucun fichier de ce nom sous la racine",
   "js.preview.none": "Ce fichier ne peut pas être affiché ici : {0}",
   "js.preview.openext": "Ouvrir dans l'application par défaut",
+  "js.preview.reload": "Recharger",
   "js.preview.sandbox": "S'exécute dans un bac à sable, isolé du tableau de bord",
   "js.preview.source.note": "Affiché comme source : HTML et SVG ne sont rendus que sous la racine de la session",
   "js.rel.d": "{0} j",
