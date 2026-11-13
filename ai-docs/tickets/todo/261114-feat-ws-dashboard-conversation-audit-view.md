@@ -2,7 +2,7 @@
 title: "Dashboard: a conversation audit view - per-call rows, hidden harness events, an audit window, and conversation-wide search"
 blocked-by: 261114-feat-ws-conversation-audit-event-store#phase2
 related:
-  261114-feat-ws-conversation-audit-event-store: "prerequisite (blocked-by #phase2): the daemon's audit store and its read API, queue item (f) = board (599). Every byte this view shows comes from that API. Its ring BatchCall call_id (requested 2026-11-14, see Decision 4) is the join key from a history row to an audit event"
+  261114-feat-ws-conversation-audit-event-store: "prerequisite (blocked-by #phase2): the daemon's audit store and its read API, queue item (f) = board (599). Every byte this view shows comes from that API. Its item (g), ToolCallArgs.id in the ring (Phase 1), is the join key from a history row to an audit event (Decision 4)"
   261114-feat-ws-dashboard-board-toolbar-overview: "sibling darkroom: overview dims the page through the iframe shell's layout.dim field; this ticket's wide-view darkroom uses the same field for the shell's rail and header"
   261113-feat-ws-dashboard-iframe-shell: "landed (0586a4289): session pages are shell frames; layout.dim and the shell's Esc and Ctrl+K forwarding shape the key rules here"
   261114-refactor-ws-split-oversized-source-files: "dashboard.js is on its list; the audit view goes to new assets/audit.js and audit.css (Open Decision Queue item (b))"
@@ -134,10 +134,11 @@ What exists today (Pi exploration, 2026-11-14, paths under
      follow-up, and `meta.signature_only`.
    - On a search hit: `call_id`.
 4. **The history-to-audit join key is the call id carried by the ring.** The
-   backend adds an optional `call_id` to each call of a folded tools entry, an
-   additive ring field (T0); EXEC was asked on 2026-11-14 and this is pending
-   their ticket edit. This ticket's template emits it as `data-call` on each
-   call row.
+   backend's item (g) = board (601) (1313c11e5, its Phase 1) gives `ToolCallArgs` an
+   optional `id` equal to the audit store's `call_id`, an additive ring field
+   (T0). Calls past `BatchCallCap` in a huge batch get no id. This ticket's
+   template emits the id as `data-call` on each call row; a call without one
+   follows queue item (a).
    - Rejected: joining by time window between ring stamps (ambiguous with
      parallel calls and subagents).
 5. **Compatibility tier: T0.** Dashboard asset content, a template change that
@@ -151,7 +152,9 @@ they go to the owner.
 
 - (a) [open] [technical] Ring entries without call ids keep today's folded pill
   over turning into rows. Those are entries written before the backend change,
-  or by a harness the mapper does not cover. Only rows with a `data-call` are
+  or by a harness the mapper does not cover. In a batch where only the calls
+  past `BatchCallCap` lack ids, those calls fold into the "+n" row and are not
+  clickable. Only rows with a `data-call` are
   clickable, and hidden-event rows still interleave by `at`. This is chosen
   over a time-window guess, which Decision 4 rejects.
 - (b) [open] [technical] New assets over growing dashboard.js. The new files
