@@ -664,6 +664,53 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(daemon.hellos[0]["argv"], ["mailbox", "wait", "--session-key", "k", "--format", "json"])
         self.assertEqual(self.runtime_log(), [])
 
+    def test_mailbox_stream_flushes_each_arrival_before_the_next_frame(self):
+        stdout, stderr = io.BytesIO(), io.BytesIO()
+        arrivals = ['{"kinds":["mail"],"unread":1}\n', '{"kinds":["board"],"board":1}\n']
+        stream = mock.Mock()
+
+        def frames():
+            yield json.dumps({"stream": "stdout", "data": arrivals[0]}).encode() + b"\n"
+            self.assertEqual(stdout.getvalue(), arrivals[0].encode())
+            yield json.dumps({"stream": "stderr", "data": "diagnostic\n"}).encode() + b"\n"
+            yield json.dumps({"stream": "stdout", "data": arrivals[1]}).encode() + b"\n"
+            self.assertEqual(stdout.getvalue(), "".join(arrivals).encode())
+            yield json.dumps({"final": True, "exit_code": 130, "data": ""}).encode() + b"\n"
+
+        stream.read_line.side_effect = frames()
+        link = mock.Mock(env=self.env, runtime_version="0.48.16")
+        link.connect.return_value = stream
+        argv = ["mailbox", "wait", "--session-key", "k", "--stream", "--timeout", "10m"]
+        with mock.patch.object(self.launcher, "watch_parent_exit") as watch:
+            code = self.launcher.proxy_cli(link, argv, stdout, stderr)
+        self.assertEqual(code, 130)
+        self.assertEqual(stderr.getvalue(), b"diagnostic\n")
+        self.assertEqual(link.connect.call_count, 1, "a stream must not relaunch per arrival")
+        self.assertEqual(link.connect.call_args.args[0]["argv"], argv)
+        watch.assert_called_once_with(stream.close, os.getppid())
+        stream.close.assert_called_once()
+
+    def test_parent_watch_closes_an_already_exited_windows_parent(self):
+        api = mock.Mock(WAIT_OBJECT_0=0, INFINITE=0xFFFFFFFF, SYNCHRONIZE=0x00100000)
+        api.WaitForSingleObject.return_value = 0
+        ended = threading.Event()
+        with mock.patch.object(self.launcher.os, "name", "nt"), \
+             mock.patch.dict(sys.modules, {"_winapi": api}):
+            self.launcher.watch_parent_exit(ended.set)
+            self.assertTrue(ended.wait(2), "already-dead parent left the wait attached")
+        api.WaitForSingleObject.assert_called_once_with(api.OpenProcess.return_value, api.INFINITE)
+
+    def test_parent_watch_closes_when_parent_disappeared_before_open(self):
+        api = mock.Mock()
+        gone = OSError("parent gone")
+        gone.winerror = 87
+        api.OpenProcess.side_effect = gone
+        ended = threading.Event()
+        with mock.patch.object(self.launcher.os, "name", "nt"), \
+             mock.patch.dict(sys.modules, {"_winapi": api}):
+            self.launcher.watch_parent_exit(ended.set)
+            self.assertTrue(ended.wait(2))
+
     def test_mailbox_wait_success_reaches_the_caller_as_exit_zero(self):
         # A wait that a mail wakes exits 0; the mod and the Pi waiter treat
         # any code but 0 and 3 as an error and never push the mail. A final
