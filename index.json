@@ -563,7 +563,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T15:48:15Z"
+        "touched_at": "2026-11-13T15:48:49Z",
+        "impl": {
+          "branch": "impl/develop/rabid-rink-stomp"
+        }
       }
     },
     "261114-refactor-ws-split-oversized-source-files": {
