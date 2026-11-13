@@ -196,7 +196,10 @@ const (
 // Usage is what a status event reports. Each part is absent when the host
 // has no figure for it, and a status event replaces the whole value.
 type Usage struct {
-	Context *UsageContext `json:"context,omitempty"`
+	// Optional harness-owned task counts; nil means unknown, zero means none.
+	Background *int          `json:"background,omitempty"`
+	Monitors   *int          `json:"monitors,omitempty"`
+	Context    *UsageContext `json:"context,omitempty"`
 	// Limits holds at most one limit per kind, the 5-hour limit first.
 	Limits []UsageLimit `json:"limits,omitempty"`
 	Cost   *UsageCost   `json:"cost,omitempty"`
@@ -305,6 +308,10 @@ type Agent struct {
 	Status    string `json:"status"`
 	StartedAt int64  `json:"startedAt,omitempty"`
 	EndedAt   int64  `json:"endedAt,omitempty"`
+	// ActiveMs is accumulated closed-turn work; TurnStartedAt is the
+	// current working turn's start, absent between turns.
+	ActiveMs      int64 `json:"activeMs,omitempty"`
+	TurnStartedAt int64 `json:"turnStartedAt,omitempty"`
 	// Model and Effort are what the subagent runs on and its reasoning
 	// effort, ContextTokens its current context size (the latest model
 	// request's whole input), and OutputTps its output tokens per second,

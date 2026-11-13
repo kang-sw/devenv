@@ -273,6 +273,7 @@ export function backgroundTaskReportFields(result: BackgroundTaskResult, capByte
     : undefined;
   return {
     task_id: result.id,
+    task_kind: result.timeoutS === undefined ? "monitor" : "timed",
     why: result.why,
     exit_code: clean ? String(code) : `${code} (killed — not a clean exit)`,
     ...(note !== undefined ? { note } : {}),

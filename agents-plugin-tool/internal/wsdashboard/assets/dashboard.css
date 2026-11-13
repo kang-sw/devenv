@@ -317,6 +317,18 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .src.wb { background: var(--wb-now); color: var(--wb-on-now); }
 .src.mail { background: var(--wb-technical); color: var(--wb-on-technical); }
 .turnline { align-self: center; display: inline-flex; gap: 6px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); box-shadow: inset 0 0 0 1px var(--wb-muted); border-radius: 999px; padding: 0 10px; }
+/* Wake notifications: quiet completion chips, expandable content cards. */
+.wake-divider { display: flex; align-items: center; gap: 10px; color: var(--wb-muted-fg); font-size: 11px; }
+.wake-divider::before, .wake-divider::after { content: ""; flex: 1; height: 1px; background: var(--wb-muted); }
+.wake-divider > span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.wake-divider.fail { color: var(--wb-fail); }
+.wake-card { align-self: stretch; border-left: 3px solid var(--wb-technical); border-radius: 4px; background: var(--wb-card); padding: 8px 12px; min-width: 0; }
+.wake-card > summary { list-style: none; cursor: pointer; }
+.wake-card > summary::-webkit-details-marker { display: none; }
+.wake-head { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); }
+.wake-caption { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.wake-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; margin: 8px 0 0; }
+.wake-turn { align-self: flex-start; box-shadow: none; padding-left: 12px; }
 /* the lead's finished tool calls between two conversation entries: one muted line like the turn line, its batch list below when open */
 .toolsline { align-self: flex-start; max-width: 100%; font-size: 11px; color: var(--wb-muted-fg); }
 .toolsline > summary { list-style: none; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; max-width: 100%; box-sizing: border-box; box-shadow: inset 0 0 0 1px var(--wb-muted); border-radius: 999px; padding: 0 10px; }
@@ -1580,25 +1592,33 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .when { font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 .rail .s2 { display: block; margin-top: 1px; font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .rail .s2 .who { font-weight: 700; margin-right: 4px; }
-/* status: a light orbits the harness badge while the lead works; the robot
-   blinks while level-1 subagents run, its count beside it, and takes no
-   space when none does. The badge has a fixed width so reply ids line up. */
-.rail .hb { position: relative; width: 54px; padding: 0; text-align: center; box-sizing: border-box; text-transform: uppercase; overflow: visible; }
-.rail .hb .ring { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); overflow: visible; pointer-events: none; }
-.rail .hb .ring rect { x: 1px; y: 1px; width: calc(100% - 2px); height: calc(100% - 2px); rx: 5px; fill: none; stroke-width: 1.5; }
-.rail .hb .rtrk { stroke: color-mix(in srgb, var(--wb-primary) 22%, transparent); }
-/* The working ring's arc: a wedge of a conic fill turning (transform only,
-   so it runs on the compositor) behind a mask that keeps only the band
-   where the track's stroke draws. Animating the stroke's dash offset
-   instead restyled and repainted the page on every frame. */
-.rail .hb .orb { position: absolute; inset: -1.75px; padding: 1.5px; border-radius: 5.75px; overflow: hidden; pointer-events: none;
+/* status: the harness icon (a 16px letter square) stays still while the lead
+   works and a blue line travels around its border; it wobbles and hops while
+   it waits on an approval (a static ring stays) and wears a static ring when
+   it has failed; the robot blinks while level-1 subagents run, its count
+   beside it, and takes no space when none does. */
+.rail .hi { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; cursor: default; }
+.rail .hi.claude { background: #D97757; }
+.rail .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
+.rail .hi.codex { background: #10A37F; }
+/* a stopped (sleeping) session: a moon after the icon, the title muted, one line */
+.rail .zz { flex: none; display: inline-grid; place-items: center; width: 12px; color: var(--wb-muted-fg); }
+.rail .zz svg { width: 12px; height: 12px; fill: currentColor; }
+.rail .rs.stopped .rid { color: var(--wb-muted-fg); }
+.rail .rs.stopped .s2 { display: none; }
+/* The travelling line: a wedge of a conic fill turning (transform only, so it
+   runs on the compositor) behind a mask that keeps just a thin band around
+   the icon's border. */
+.rail .hi .orb { position: absolute; inset: -2px; padding: 1.5px; border-radius: 5px; overflow: hidden; pointer-events: none;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
-.rail .hb .rrun { position: absolute; left: 50%; top: 50%; width: 72px; height: 72px; margin: -36px 0 0 -36px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s linear infinite; }
-.rail .hb.run { color: var(--wb-fg); }
+.rail .hi .rrun { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s linear infinite; }
+.rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s ease-in-out infinite; }
+.rail .hi.err { box-shadow: 0 0 0 2px var(--wb-fail); }
 .rail .bots { display: inline-flex; align-items: center; gap: 2px; flex: none; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--wb-fg); }
 .rail .bots .i { width: 12px; height: 12px; stroke-width: 1.4; color: var(--wb-primary); animation: rail-blink 1.4s ease-in-out infinite; }
 @keyframes rail-orbit { to { transform: rotate(360deg); } }
+@keyframes rail-nudge { 0%, 56%, 100% { transform: none; } 10% { transform: translateY(-3px) rotate(-10deg); } 22% { transform: translateY(0) rotate(10deg); } 34% { transform: translateY(-2px) rotate(-8deg); } 46% { transform: translateY(0) rotate(6deg); } }
 @keyframes rail-blink { 50% { opacity: .25; } }
 .rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; }
 .rail .rfoot a { color: var(--wb-muted-fg); text-decoration: none; }
@@ -1660,8 +1680,6 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .hosted .i { width: 12px; height: 12px; stroke-width: 1.5; }
 .sess .hostc { display: inline-flex; align-items: center; gap: 4px; justify-self: start; min-width: 0; }
 .chip.perm { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
-.rail .hb.perm { color: var(--wb-perm-ink); }
-.rail .hb.perm .rtrk { stroke: var(--wb-perm-ink); }
 .rail .s2.ap .who { color: var(--wb-perm-ink); }
 .rail .wsbar .chip.perm + .ct { margin-left: 0; }
 .rail .wsbar .chip.perm { margin-left: auto; }
@@ -1730,8 +1748,6 @@ html:not([data-sysopen]) .rail .rnew { display: none; }
    conversation (a failed compaction's error shares the notice text); the
    background-task count in the agents panel head and beside the composer's
    subagent badge; and the session menu's restart, shown only while broken */
-.rail .hb.err { color: var(--wb-fail); }
-.rail .hb.err .rtrk { stroke: var(--wb-fail); }
 .host.sse.err { color: var(--wb-fail); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-fail) 70%, transparent); }
 .chip.fail { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); cursor: help; }
 .chip.mcpbad { background: color-mix(in srgb, var(--wb-warn) 16%, var(--wb-card)); color: var(--wb-warn-ink); cursor: help; }
@@ -1751,5 +1767,5 @@ html:not([data-sysopen]) .rail .rnew { display: none; }
   .rail, .rail-open .rail, .rscrim { transition: none; }
   .bgbadge { animation: none; }
   .rail .bots .i { animation: none; }
-  .rail .hb .rrun { animation: none; background: var(--wb-primary); }
+  .rail .hi .rrun, .rail .hi.perm { animation: none; }
 }

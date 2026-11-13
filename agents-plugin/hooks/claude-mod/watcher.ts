@@ -5,9 +5,10 @@ import type { InboxCommand, InboxItem } from './dashboard'
  * Pure mailbox-push controller for the Claude Code mod in register.ts; the
  * Claude counterpart of the pi adapter's mailbox waiter.
  *
- * `mailbox wait` only PEEKS (exit 0 = mail present, 3 = timed out, 130 =
- * interrupted, other = error) and serves purely as the block-until-mail
- * signal. Draining is mailbox recv's job, in one of two modes:
+ * `mailbox wait` only PEEKS: streaming emits JSONL arrivals; the one-shot
+ * fallback exits 0 for mail, 3 for timeout, 130 for interruption, or another
+ * code for error. It is purely the block-until-mail signal. Draining is
+ * mailbox recv's job, in one of two modes:
  *
  * - `direct`: the controller drains through recv itself and submits exactly
  *   what recv removed as ONE prompt, so a re-arm never re-delivers the same
@@ -149,6 +150,7 @@ export type DrainMode = 'direct' | 'notice'
 export interface MailboxEnvelope {
   from?: string
   reply_to?: string
+  label?: string
   content: string
   sent_at?: string
 }
@@ -205,11 +207,12 @@ export interface WatcherEdges {
   /** Prefix for notice and prompt lines (`<plugin> mailbox`). */
   label: string
   /**
-   * Run one `mailbox wait` for `key`, adding the binding's named inbox `slug`,
-   * and with `flags` also waking on a held board message or an interrupt
-   * entry; must resolve `stopped` soon after `signal` aborts.
+   * Await one arrival for `key`, adding the binding's named inbox `slug`,
+   * and with `flags` also waking on a held board message or interrupt entry.
+   * `signal` aborts this arm; `bindingSignal` also closes a cached stream
+   * between arms (while a drain or notice is pending).
    */
-  wait: (key: string, slug: string | undefined, flags: WaitFlags, signal: AbortSignal) => Promise<WaitOutcome>
+  wait: (key: string, slug: string | undefined, flags: WaitFlags, signal: AbortSignal, bindingSignal: AbortSignal) => Promise<WaitOutcome>
   /** Drain via mailbox recv (direct mode only). */
   drain: (key: string) => Promise<DrainResult>
   /**
@@ -277,6 +280,7 @@ export function mapWaitExit(code: number | null, aborted: boolean): WaitOutcome 
 
 function isEnvelope(c: unknown): c is MailboxEnvelope {
   return !!c && typeof c === 'object' && typeof (c as { content?: unknown }).content === 'string'
+    && ((c as { label?: unknown }).label === undefined || typeof (c as { label?: unknown }).label === 'string')
 }
 
 /**
@@ -303,7 +307,7 @@ const field = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
 /** One envelope as the pi adapter frames it: `mail from <handle> (<sent_at>):` then the body. */
 export function formatEnvelope(m: DrainedMail): string {
   if (!('content' in m)) return `unparsed mailbox recv output:\n${m.raw}`
-  const handle = field(m.from) || field(m.reply_to) || 'unknown'
+  const handle = field(m.from) || field(m.reply_to) || field(m.label) || 'unknown'
   const stamp = field(m.sent_at)
   return `${stamp ? `mail from ${handle} (${stamp})` : `mail from ${handle}`}:\n${m.content}`
 }
@@ -324,7 +328,7 @@ export function formatNotice(label: string, recvTool: string, key: string): stri
 /** A drained item as a caption unit reads it: its sender's handle (as formatEnvelope names it) and its body. */
 export function mailItems(mail: readonly DrainedMail[]): MailItem[] {
   return mail.map((m) =>
-    'content' in m ? { from: field(m.from) || field(m.reply_to) || 'unknown', body: m.content } : { from: 'unparsed recv output', body: m.raw },
+    'content' in m ? { from: field(m.from) || field(m.reply_to) || field(m.label) || 'unknown', body: m.content } : { from: 'unparsed recv output', body: m.raw },
   )
 }
 
@@ -980,7 +984,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       signal.addEventListener('abort', relay, { once: true })
       waiting = own
       try {
-        outcome = await edges.wait(myKey, mySlug, flags, own.ctrl.signal)
+        outcome = await edges.wait(myKey, mySlug, flags, own.ctrl.signal, signal)
       } catch (err) {
         edges.log(`${edges.label}: wait failed to start: ${String(err)}`)
         outcome = 'error'

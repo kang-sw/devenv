@@ -223,7 +223,7 @@ func TestConvLiveCarriesSubagentCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if html := string(set[regionConvLive].HTML); !strings.Contains(html, `<div class="conv clive" data-phase="" data-sub="1" data-subdeep="2">`) {
+	if html := string(set[regionConvLive].HTML); !strings.Contains(html, `<div class="conv clive" data-phase="" data-sub="1" data-subdeep="2" data-bg="0" data-monitors="0">`) {
 		t.Errorf("convlive lacks the subagent counts:\n%s", html)
 	}
 }
@@ -243,7 +243,7 @@ func TestConvLiveCarriesTurnStamp(t *testing.T) {
 	}
 	started := testNow.Add(-2 * time.Second).UnixMilli()
 	working := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseThinking, PhaseStartedAt: started}, TurnStartedAt: started}
-	if html, want := render(working), fmt.Sprintf(`data-subdeep="0" data-turn="%d">`, started); !strings.Contains(html, want) {
+	if html, want := render(working), fmt.Sprintf(`data-subdeep="0" data-turn="%d"`, started); !strings.Contains(html, want) {
 		t.Errorf("a working lead's convlive lacks %s:\n%s", want, html)
 	}
 	if html := render(wslive.Lead{}); strings.Contains(html, "data-turn") {
@@ -777,7 +777,7 @@ func TestHostedRecoveryAndFailures(t *testing.T) {
 		t.Errorf("agents panel head lacks %s:\n%s", want, tree)
 	}
 	for _, want := range []string{
-		` data-bg="2">`,
+		` data-bg="2" data-monitors="0">`,
 		`<div class="sysline retry running"><span class="mk"><span class="spin"></span></span><span class="nt">retrying, attempt 2/10: overloaded</span></div>`,
 	} {
 		if !strings.Contains(live, want) {
@@ -799,14 +799,14 @@ func TestHostedRecoveryAndFailures(t *testing.T) {
 	host.BackgroundTasks = 0
 	host.Retry = &wslive.Retry{Attempt: 3}
 	regions = render(host)
-	if live := string(regions[regionConvLive].HTML); !strings.Contains(live, `<span class="nt">retrying, attempt 3</span>`) || !strings.Contains(live, ` data-bg="0">`) {
+	if live := string(regions[regionConvLive].HTML); !strings.Contains(live, `<span class="nt">retrying, attempt 3</span>`) || !strings.Contains(live, ` data-bg="0" data-monitors="0">`) {
 		t.Errorf("a retry with no maximum or error, and no background task:\n%s", live)
 	}
 
 	regions = render(nil)
 	head, tree, live = string(regions[regionHead].HTML), string(regions[regionTree].HTML), string(regions[regionConvLive].HTML)
 	for name, html := range map[string]string{"head": head, "tree": tree, "live": live} {
-		for _, not := range []string{"sse err", "chip fail", "mcpbad", "chip bgt", "data-bg", "sysline retry"} {
+		for _, not := range []string{"sse err", "chip fail", "mcpbad", "chip bgt", "sysline retry"} {
 			if strings.Contains(html, not) {
 				t.Errorf("%s without host state shows %q:\n%s", name, not, html)
 			}
@@ -1250,6 +1250,46 @@ func TestAgentRowStats(t *testing.T) {
 	}
 	if js := mustAsset(t, "dashboard.js"); strings.Contains(js, "agentTip") {
 		t.Errorf("dashboard.js still carries the stats hover card")
+	}
+}
+
+// TestAgentActiveTime keeps elapsed working time separate from the time since
+// completion, including a held Pi row that is marked running but is idle.
+func TestAgentActiveTime(t *testing.T) {
+	start := testNow.UnixMilli()
+	running := AgentNode{Agent: wslive.Agent{ID: "pi:1", Status: wslive.StatusRunning, ActiveMs: 12_000, TurnStartedAt: start, EndedAt: start - 60_000}}
+	html := renderNamed(t, "agent", running)
+	want := fmt.Sprintf(`data-ms="%d" data-f="since"`, start-12_000)
+	if !strings.Contains(html, want) || strings.Contains(html, `data-f="ago"`) {
+		t.Errorf("running active time = %s; want %s and no ago", html, want)
+	}
+
+	running.TurnStartedAt = 0 // held but no turn is working
+	html = renderNamed(t, "agent", running)
+	if !strings.Contains(html, `data-span="12000">12s`) || strings.Contains(html, `data-f="since"`) {
+		t.Errorf("held idle active time = %s", html)
+	}
+
+	ended := AgentNode{Agent: wslive.Agent{ID: "done", Status: wslive.StatusDone, ActiveMs: 72_000, EndedAt: start, ContextTokens: 1000}}
+	html = renderNamed(t, "agent", ended)
+	stats := strings.Index(html, `<span class="astat">`)
+	ctx := strings.Index(html, `class="actx"`)
+	ago := strings.Index(html, `data-f="ago"`)
+	am := strings.Index(html, `<span class="am">`)
+	if stats < 0 || ctx < stats || ago < ctx || am < ago || !strings.Contains(html, `data-span="72000">1m 12s`) || strings.Contains(html, `data-f="since"`) {
+		t.Errorf("finished active time and stats = %s", html)
+	}
+
+	ended.ActiveMs = 0 // older snapshots have no accumulated timing
+	html = renderNamed(t, "agent", ended)
+	if strings.Contains(html, `data-span="0"`) {
+		t.Errorf("finished row with unknown active time has a duration: %s", html)
+	}
+
+	ended.ContextTokens = 0
+	html = renderNamed(t, "agent", ended)
+	if !strings.Contains(html, `<span class="astat"><span><time class="t"`) || !strings.Contains(html, `data-f="ago"`) {
+		t.Errorf("ago-only stats missing: %s", html)
 	}
 }
 

@@ -72,6 +72,8 @@ type GitBadge struct {
 	State string
 	// Root is the session root the badge reads.
 	Root string
+	// TopLevel is the git worktree root, when known.
+	TopLevel string
 	// Repo holds the branch fields of an ok read; Folder stays empty.
 	wslive.Repo
 	// Ticket is the title of the ticket an impl or goal branch's stem
@@ -103,6 +105,9 @@ func readGitBadge(root string) GitBadge {
 			badge.Err = gitErrText(run.err)
 		}
 		return badge
+	}
+	if top, err := run.RunGit(ctx, root, "rev-parse", "--show-toplevel"); err == nil {
+		badge.TopLevel = strings.TrimSuffix(string(top), "\n")
 	}
 	badge.Branch, badge.Upstream, badge.Ahead, badge.Behind = st.Head, st.Upstream, st.Ahead, st.Behind
 	if st.Head == "" {

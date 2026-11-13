@@ -977,6 +977,17 @@ describe("createBridgeInterruptDrain", () => {
 });
 
 describe("buildMailboxPushMessage", () => {
+  test("system labels survive the drain and show without becoming reply addresses", async () => {
+    const envelope = { label: "pi:childone", content: "Reply with pi.send(id: childone), not mailbox.send.\nall green", sent_at: "2026-01-02T03:04:05Z" };
+    const drain = createBridgeDrain(async () => ({ content: [{ type: "text", text: JSON.stringify([envelope]) }] }), "k");
+    assert.deepEqual(await drain(), [envelope]);
+    const message = buildMailboxPushMessage(envelope);
+    // Same literal as the Go and Claude watcher suites.
+    assert.equal(message.content, "mail from pi:childone (2026-01-02T03:04:05Z):\nReply with pi.send(id: childone), not mailbox.send.\nall green");
+    assert.deepEqual(message.details, envelope);
+    assert.ok(buildMailboxPushMessage({ ...envelope, from: "peer@repo" }).content.startsWith("mail from peer@repo "));
+    assert.ok(buildMailboxPushMessage({ ...envelope, reply_to: "id:abc123" }).content.startsWith("mail from id:abc123 "));
+  });
   test("a shared-layer sender uses its slug handle and carries the full envelope in details", () => {
     const message = buildMailboxPushMessage({ from: "scout@worktree", content: "run the ready ticket", sent_at: "2026-09-15T12:00:00Z" });
     assert.equal(message.customType, WS_MAILBOX_CUSTOM_TYPE);
@@ -1037,8 +1048,8 @@ describe("createSubprocessWait", () => {
       "print(json.dumps({'timed_out':False,'unread':0,'board':1,'kinds':kinds}),flush=True)",
       "",
     ].join("\n"));
+    const wait = createSubprocessWait({ launcherPath, pluginDir: fixtureDir, sessionKey: "k" });
     try {
-      const wait = createSubprocessWait({ launcherPath, pluginDir: fixtureDir, sessionKey: "k" });
       assert.equal(await wait(new AbortController().signal, { boardInbox: true }), "board");
       assert.equal(await wait(new AbortController().signal, { boardInbox: false }), "mail", "a mail-only wait reads the exit code alone");
       await writeFile(launcherPath, [
@@ -1056,6 +1067,7 @@ describe("createSubprocessWait", () => {
       ].join("\n"));
       assert.deepEqual(await wait(new AbortController().signal, { boardInbox: false, boardInterrupt: true }), { interrupt: true }, "an interrupt-only wait passes its flag and reads the kinds too");
     } finally {
+      await wait.dispose?.();
       await rm(fixtureDir, { recursive: true, force: true });
     }
   });
@@ -1066,6 +1078,7 @@ describe("createSubprocessWait", () => {
     const pidPath = join(fixtureDir, "grandchild-pid");
     await writeFile(launcherPath, [
       "import subprocess,sys",
+      "if '--stream' in sys.argv: raise SystemExit(2)",
       "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(15)'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=sys.stderr)",
       `open(${JSON.stringify(pidPath)}, 'w').write(str(child.pid))`,
       "raise SystemExit(3)",

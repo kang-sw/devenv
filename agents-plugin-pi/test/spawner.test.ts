@@ -2425,7 +2425,7 @@ describe("pushSpawnFailed (spawnAgent's launch-failure branch)", () => {
     assert.equal(pi.sent[0].message.customType, "ws-agent-settled");
     assert.deepEqual(
       stripSummaryId(pi.sent[0].message.details),
-      { agent_id: "a", reason: "spawn-failed", error: "spawn ENOENT", status: "0 delegated agents still running" },
+      { agent_id: "a", failed: true, reason: "spawn-failed", error: "spawn ENOENT", status: "0 delegated agents still running" },
       "260905 (alias/park/cap): the failed record stays registered (dormant), so presence — keyed on registry membership, not a live client — keeps the status line at zero",
     );
     assert.equal(record.client, undefined, "a failed spawn leaves no live client behind");

@@ -5,28 +5,36 @@ import (
 	"testing"
 )
 
-// TestWorkingRingRunsOnTheCompositor pins the rail's working ring: its arc
-// is a conic wedge turned by a transform behind a band mask, not a stroke
-// dash offset (which restyled and repainted the page on every frame while
-// any session worked), and reduced motion stops it and lights the whole
-// band.
-func TestWorkingRingRunsOnTheCompositor(t *testing.T) {
+// TestRailHarnessIcon pins the rail's harness icon: the icon itself stays
+// still while working and a masked orbit line travels around its border,
+// approval wobbles and hops it (and wins over working), failure shows as a
+// static ring, and reduced motion stops both animations.
+func TestRailHarnessIcon(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
 		"@keyframes rail-orbit { to { transform: rotate(360deg); } }",
-		"background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s linear infinite; }",
-		"mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }",
-		".rail .hb .rrun { animation: none; background: var(--wb-primary); }",
+		".rail .hi .rrun { position: absolute;",
+		"animation: rail-orbit 1.3s linear infinite; }",
+		"@keyframes rail-nudge {",
+		".rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s ease-in-out infinite; }",
+		".rail .hi.claude { background: #D97757; }",
+		".rail .hi.codex { background: #10A37F; }",
+		".rail .hi.err { box-shadow: 0 0 0 2px var(--wb-fail); }",
+		".rail .hi .rrun, .rail .hi.perm { animation: none; }",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
 		}
 	}
+	if strings.Contains(css, ".rail .hi.run {") {
+		t.Error("the running icon itself must not animate; the orbit line does")
+	}
 	if strings.Contains(css, "stroke-dashoffset") {
-		t.Error("dashboard.css still animates a stroke dash offset")
+		t.Error("dashboard.css still carries the retired dash-offset ring")
 	}
 	tmpl := mustAsset(t, "dashboard.tmpl")
-	if !strings.Contains(tmpl, `<svg class="ring" aria-hidden="true"><rect class="rtrk"/></svg><span class="orb" aria-hidden="true"><i class="rrun"></i></span>`) {
-		t.Error("the working row's host badge lacks the ring track and its orbit")
+	if !strings.Contains(tmpl, `{{if .Approval}} perm{{else if .Working}} run`) ||
+		!strings.Contains(tmpl, `{{if and .Working (not .Approval)}}<span class="orb"><span class="rrun"></span></span>{{end}}`) {
+		t.Error("the rail row lacks the orbit line element or the approval-over-working order")
 	}
 }

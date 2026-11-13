@@ -23,7 +23,7 @@ func (c *conv) syncHost(quiet bool) {
 	if !c.rec.Lead {
 		return
 	}
-	h := &wslive.Host{BackgroundTasks: c.bgTasks, Failure: c.failure, MCPBroken: c.mcpBroken, Retry: c.retry}
+	h := &wslive.Host{BackgroundTasks: c.bgTasks, Background: copyCount(c.background), Monitors: copyCount(c.monitors), Failure: c.failure, MCPBroken: c.mcpBroken, Retry: c.retry}
 	if c.live.setHost(h, quiet) && !quiet {
 		c.r.notify(c.rec.ReplyID, c.rec.Root)
 	}

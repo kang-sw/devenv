@@ -53,7 +53,7 @@ function harness(opts: { key?: string | undefined } = {}) {
     calls: [] as { session_key: string; adapter: string; events: DashboardEvent[] }[],
     answers: [] as Answer[],
     /** Whether a delivered answer's text names `status` on its accepts line. */
-    accepts: false,
+    accepts: false as boolean | string,
     logs: [] as string[],
     epochs: 0,
     /** What the agent list answers: its agents, or the error it rejects with. */
@@ -69,7 +69,7 @@ function harness(opts: { key?: string | undefined } = {}) {
       if (answer === 'hang') return new Promise<IntakeResult>(() => {})
       if (answer instanceof Error) throw answer
       if (typeof answer !== 'boolean') return answer
-      return { ok: answer, text: answer ? `ok: 1 of 1 events applied\n${h.accepts ? 'accepts: status\n' : ''}` : 'unknown session_key' }
+      return { ok: answer, text: answer ? `ok: 1 of 1 events applied\n${h.accepts ? `accepts: ${typeof h.accepts === 'string' ? h.accepts : 'status'}\n` : ''}` : 'unknown session_key' }
     },
     ownTool: (tool) => tool.startsWith(OWN),
     agents: async () => {
@@ -994,6 +994,124 @@ describe('origins', () => {
       dash.userMessage('also this', 'terminal')
     })
     expect(kinds(events)).toEqual(['user'])
+  })
+})
+
+describe('wake events and task count capabilities', () => {
+  const note = (id = 'b1', status = 'completed') => ({ text: `<task-notification><task-id>${id}</task-id><tool-use-id>u1</tool-use-id><task-type>local_bash</task-type><status>${status}</status><summary>Background command exited</summary></task-notification>`, origin: { kind: 'task-notification' } })
+  const status = (events: DashboardEvent[]) => events.filter((e) => e.kind === 'status').at(-1)
+
+  test('wake requires its own token, precedes the following turn, and does not change its origin', async () => {
+    const { h, dash, advance, after, sent } = await started()
+    dash.wakeSubmitted(note(), PLUGIN)
+    await advance()
+    expect(sent().some((e) => e.kind === 'wake')).toBe(false)
+    h.accepts = 'status, task_counts, wake'
+    dash.userMessage('negotiate', 'terminal')
+    await advance()
+    const events = await after(() => {
+      dash.wakeSubmitted(note(), PLUGIN)
+      dash.turnStarted(undefined)
+    })
+    const wake = events.findIndex((e) => e.kind === 'wake')
+    const start = events.findIndex((e) => e.kind === 'turn_start')
+    expect(wake).toBeGreaterThanOrEqual(0)
+    expect(start).toBeGreaterThan(wake)
+    expect(events[wake]).toEqual({ kind: 'wake', cause: 'background_exit', source: 'b1', caption: 'Background command exited', text: note().text })
+    expect(events[start]?.origin).toBeUndefined()
+    expect(events.filter((e) => e.kind === 'user')).toEqual([])
+  })
+
+  test('old status support never receives new count fields; task_counts alone sends no status', async () => {
+    const { h, dash, advance, sent } = await started()
+    h.accepts = 'status'
+    dash.status({ context: { tokens: 10, window: 100 } })
+    dash.toolBegan(undefined, 'u1', 'Bash', { run_in_background: true })
+    dash.toolEnded(undefined, 'u1', false, { result: { backgroundTaskId: 'b1' } })
+    await advance()
+    await advance()
+    expect(status(sent())).toEqual({ kind: 'status', context: { tokens: 10, window: 100 } })
+    h.accepts = 'task_counts'
+    dash.userMessage('negotiate', 'terminal')
+    await advance()
+    const before = sent().length
+    dash.toolBegan(undefined, 'm1', 'Monitor', {})
+    dash.status({})
+    await advance()
+    expect(sent().slice(before).some((e) => e.kind === 'status')).toBe(false)
+    expect(sent().filter((e) => e.kind === 'status').every((e) => !('background' in e) && !('monitors' in e))).toBe(true)
+  })
+
+  test('count state follows start, finish, abort, task stop, capability return and reset', async () => {
+    const { h, dash, advance, after, sent } = await started()
+    h.accepts = 'status, task_counts' // No wake token: notifications must still settle counts.
+    dash.userMessage('negotiate', 'terminal')
+    await advance()
+    await advance()
+    expect(status(sent())).toEqual({ kind: 'status', background: 0, monitors: 0 })
+    let events = await after(() => {
+      dash.toolBegan(undefined, 'u1', 'Bash', { run_in_background: true })
+      dash.toolEnded(undefined, 'u1', false, { result: { backgroundTaskId: 'b1' } })
+      dash.toolBegan(undefined, 'mcall', 'Monitor', {})
+      dash.toolEnded(undefined, 'mcall', false, { result: { taskId: 'm1' } })
+    })
+    expect(status(events)).toMatchObject({ background: 1, monitors: 1 })
+    events = await after(() => {
+      // A person's pasted notification neither wakes nor settles the real shell.
+      dash.wakeSubmitted({ ...note(), origin: { kind: 'composer' } }, PLUGIN)
+      dash.userMessage(note().text, 'terminal')
+    })
+    expect(events.some((e) => e.kind === 'wake')).toBe(false)
+    expect(events.filter((e) => e.kind === 'user').length).toBe(1)
+    events = await after(() => dash.wakeSubmitted(note(), PLUGIN))
+    expect(status(events)).toMatchObject({ background: 0, monitors: 1 })
+    events = await after(() => {
+      dash.toolBegan(undefined, 'stop', 'TaskStop', { task_id: 'm1' })
+      dash.toolEnded(undefined, 'stop', false)
+      dash.toolBegan(undefined, 'u2', 'Bash', { run_in_background: true })
+      dash.turnCompleted(undefined, '', 'aborted')
+    })
+    expect(status(events)).toMatchObject({ background: 0, monitors: 0 })
+    h.accepts = 'status'
+    dash.userMessage('legacy daemon', 'terminal')
+    await advance()
+    dash.toolBegan(undefined, 'u3', 'Bash', { run_in_background: true })
+    dash.toolEnded(undefined, 'u3', false, { result: { backgroundTaskId: 'b3' } })
+    await advance()
+    h.accepts = 'status, task_counts'
+    dash.userMessage('new daemon', 'terminal')
+    await advance()
+    await advance()
+    expect(status(sent())).toMatchObject({ background: 1, monitors: 0 })
+    dash.restart()
+    await advance()
+    expect(status(sent())).toMatchObject({ background: 0, monitors: 0 })
+    expect(sent().some((e) => e.kind === 'wake')).toBe(false)
+  })
+
+  test('failed intake retries never send wake or count fields until capabilities are accepted again', async () => {
+    const { h, dash, advance, sent } = await started()
+    h.accepts = 'status, task_counts, wake'
+    dash.userMessage('negotiate', 'terminal')
+    await advance()
+    await advance()
+    h.answers.push(new Error('server gone'))
+    dash.wakeSubmitted(note(), PLUGIN)
+    dash.turnStarted(undefined)
+    dash.toolBegan(undefined, 'u1', 'Bash', { run_in_background: true })
+    await advance()
+    await advance(RETRY_MS)
+    const retry = h.calls.findLast((c) => c.events[0]?.kind === 'reset')!.events
+    expect(retry[0]?.kind).toBe('reset')
+    expect(retry.some((e) => e.kind === 'wake' || e.kind === 'status' || e.kind === 'turn_start')).toBe(false)
+    await advance()
+    expect(status(sent())).toMatchObject({ background: 1, monitors: 0 })
+    // The failed occurrence waits behind negotiation, rather than vanishing
+    // or being sent to an older daemon that does not take wake events.
+    expect(sent().filter((e) => e.kind === 'wake').length).toBe(2)
+    const replay = h.calls.at(-1)!.events
+    expect(replay.findIndex((e) => e.kind === 'wake')).toBeLessThan(replay.findIndex((e) => e.kind === 'turn_start'))
+    expect(replay.filter((e) => e.kind === 'turn_start').length).toBe(1)
   })
 })
 

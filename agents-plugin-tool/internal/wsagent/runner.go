@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -548,6 +549,14 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		}
 		return State{}, badRequest("agent profile %q is not a lead profile (lead: true)", rp.Name)
 	}
+	if spawn != nil {
+		if spawn.Tier != "" && rp.Definition.Backend != BackendPi {
+			return State{}, badRequest("pi.spawn: profile %q must be a non-lead Pi profile", rp.Name)
+		}
+		if err := r.checkChildProfile(spawn.Parent, rp.Name, rp.Definition); err != nil {
+			return State{}, err
+		}
+	}
 	var key string
 	if lead != nil {
 		// A lead key lives at the canonical git root, which is then the
@@ -989,8 +998,9 @@ type State struct {
 	Effort  string `json:"effort,omitempty"`
 	// ContextTokens and OutputTps are the child's own latest usage; the
 	// approximate streaming rate is absent when no turn runs.
-	ContextTokens *float64 `json:"contextTokens,omitempty"`
-	OutputTps     *float64 `json:"outputTps,omitempty"`
+	ContextTokens *float64           `json:"contextTokens,omitempty"`
+	OutputTps     *float64           `json:"outputTps,omitempty"`
+	Batches       []wslive.BatchView `json:"batches,omitempty"`
 	// Held counts the messages waiting for the next turn.
 	Held int `json:"held"`
 	// Page is the conversation's dashboard page path.
@@ -1016,6 +1026,10 @@ type State struct {
 	// BackgroundTasks counts the harness's running background tasks, as its
 	// stream last reported them.
 	BackgroundTasks int `json:"background_tasks,omitempty"`
+	// Background and Monitors are known shell/monitor counts, absent when
+	// the harness only exposes an aggregate.
+	Background *int `json:"background,omitempty"`
+	Monitors   *int `json:"monitors,omitempty"`
 	// ActionNeeded is set while the harness reports that it waits on the
 	// user with no prompt in Approvals to answer; it says what to do.
 	ActionNeeded string `json:"action_needed,omitempty"`
@@ -1042,6 +1056,9 @@ type State struct {
 	// Tier is a spawned conversation's capability tier, when its spawner
 	// chose the model by one.
 	Tier string `json:"tier,omitempty"`
+	// ActiveMs excludes the current turn; TurnStartedAt is set only while it runs.
+	ActiveMs      int64 `json:"active_ms,omitempty"`
+	TurnStartedAt int64 `json:"turn_started_at,omitempty"`
 }
 
 // closedState is the state of a record no loop serves: closed, or handed
@@ -1059,7 +1076,7 @@ func (r *Runner) closedState(rec Record) State {
 }
 
 func closedState(rec Record) State {
-	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label, Tier: rec.Tier}
+	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label, Tier: rec.Tier, ActiveMs: rec.ActiveMs}
 	if rec.Parent != nil {
 		parent := *rec.Parent
 		st.Parent = &parent
@@ -1099,11 +1116,14 @@ type conv struct {
 	closed        bool
 	contextTokens *float64
 	outputTps     *float64
+	batches       []wslive.BatchView
 	// approvals are a lead's waiting tool permission prompts, oldest first;
 	// activeMode and bgTasks are what its harness last reported.
 	approvals  []ApprovalRequest
 	activeMode string
 	bgTasks    int
+	background *int
+	monitors   *int
 	// actionNeeded is State.ActionNeeded.
 	actionNeeded string
 	// failure and mcpBroken are State.Failure and State.MCPBroken.
@@ -1441,6 +1461,9 @@ func (c *conv) state() State {
 	st.Status, st.ClosedAt = StatusIdle, ""
 	if c.turn {
 		st.Status = StatusRunning
+		if !c.closed && c.rec.Parent != nil && c.rec.TurnOpen {
+			st.TurnStartedAt = c.rec.TurnStartedAt
+		}
 	}
 	if c.closed {
 		st.Status, st.ClosedAt = StatusClosed, c.rec.ClosedAt
@@ -1453,11 +1476,13 @@ func (c *conv) state() State {
 	st.Held = len(held) + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
 	st.Error = c.lastErr
 	st.ContextTokens = c.contextTokens
+	st.Batches = c.batches
 	if c.turn && !c.closed {
 		st.OutputTps = c.outputTps
 	}
 	if c.rec.Lead {
 		st.ActiveMode, st.BackgroundTasks, st.ActionNeeded = c.activeMode, c.bgTasks, c.actionNeeded
+		st.Background, st.Monitors = copyCount(c.background), copyCount(c.monitors)
 		st.Approvals = append([]ApprovalRequest(nil), c.approvals...)
 		if c.failure != nil {
 			f := *c.failure
@@ -1662,7 +1687,16 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 		c.ringDirty = true
 		c.r.notify(c.rec.ReplyID, c.rec.Root)
 	}
-	if usageChanged {
+	activityChanged := false
+	if (ev.Kind == wslive.KindAgent && ev.AgentID == "" && ev.Batches != nil) || ev.Kind == wslive.KindReset || ev.Kind == wslive.KindTurnEnd || ev.Kind == wslive.KindReply {
+		batches := c.live.st.Snapshot(c.r.opts.Now().UnixMilli()).Lead.Batches
+		c.setStatus(func() {
+			if !reflect.DeepEqual(c.batches, batches) {
+				c.batches, activityChanged = batches, true
+			}
+		})
+	}
+	if usageChanged || activityChanged {
 		c.watched()
 	}
 }
@@ -1808,6 +1842,9 @@ func (c *conv) kick() {
 		origin = wslive.OriginWhiteboard
 		c.apply(wslive.Event{Kind: wslive.KindUser, Origin: origin, Text: text})
 	}
+	for _, text := range mail {
+		c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
+	}
 	c.apply(wslive.Event{Kind: wslive.KindTurnStart, Origin: origin})
 	c.watched()
 }
@@ -1873,6 +1910,9 @@ func (c *conv) startProcess() error {
 	if rp.Definition.Backend != rec.Backend {
 		return fmt.Errorf("agent profile %q now selects backend %q; this conversation runs on %q", rec.Profile, rp.Definition.Backend, rec.Backend)
 	}
+	if rp.Definition.Lead != rec.Lead {
+		return fmt.Errorf("agent profile %q changed its lead setting; refusing to start", rec.Profile)
+	}
 	if rec.Lead {
 		return c.startLead(rec, rp.Definition, false)
 	}
@@ -1880,6 +1920,11 @@ func (c *conv) startProcess() error {
 }
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
+	if rec.Backend == BackendPi && !attach {
+		if err := c.r.checkChildProfile(rec.Parent, rec.Profile, def); err != nil {
+			return err
+		}
+	}
 	if rec.Backend == BackendPi && c.r.opts.Holders != nil && !attach {
 		if !c.r.scanDone() {
 			return errors.New("holder scan is not complete")
@@ -1956,6 +2001,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		if attach {
 			spec.Holder.id, spec.Holder.skipTo = rec.HolderID, rec.HolderSeq
 		}
+	}
+	if rec.Backend == BackendPi && !attach {
+		// Persist exactly the definition checked above and passed to Start,
+		// after retiring the previous process. Reattachment keeps this copy.
+		c.update(func(rec *Record) { rec.ResolvedDefinition = &def })
 	}
 	proc, err := c.r.opts.Backends[rec.Backend].Start(context.Background(), spec)
 	if err != nil {
@@ -2109,7 +2159,12 @@ func (c *conv) retireHolder() error {
 func (c *conv) reattach() {
 	rec := c.record()
 	def := Profile{Backend: rec.Backend, Lead: rec.Lead}
-	if rp, err := c.r.resolve(rec.Profile, rec.Root); err == nil && rp.Definition.Backend == rec.Backend {
+	if rec.Backend == BackendPi && rec.ResolvedDefinition != nil {
+		def = *rec.ResolvedDefinition
+	} else if rp, err := c.r.resolve(rec.Profile, rec.Root); err == nil && rp.Definition.Backend == rec.Backend {
+		// Best-effort mapping for a legacy held process is not evidence of
+		// what it launched with. Keep its child ceiling unavailable until
+		// an actual startWorker launch records the checked definition.
 		def = rp.Definition
 	}
 	var err error
@@ -2475,8 +2530,11 @@ func (c *conv) handle(ev Event) {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, ev.Notice)
 		}
 	case ev.BackgroundTasks != nil:
-		if n := *ev.BackgroundTasks; n != c.bgTasks {
-			c.setStatus(func() { c.bgTasks = n })
+		if n := *ev.BackgroundTasks; n != c.bgTasks || !sameCount(c.background, ev.Background) || !sameCount(c.monitors, ev.Monitors) {
+			c.setStatus(func() {
+				c.bgTasks = n
+				c.background, c.monitors = copyCount(ev.Background), copyCount(ev.Monitors)
+			})
 			c.syncHost(quiet)
 			c.changed(quiet)
 			if n == 0 && !c.turn && !quiet {
@@ -2817,7 +2875,10 @@ func (c *conv) processEnded() {
 	c.clearApprovals()
 	c.harnessState = ""
 	c.checkAction(false)
-	c.setStatus(func() { c.activeMode, c.bgTasks, c.mcpBroken = "", 0, nil })
+	c.setStatus(func() {
+		c.activeMode, c.bgTasks, c.mcpBroken = "", 0, nil
+		c.background, c.monitors = nil, nil
+	})
 	c.mcpSeen, c.mcpChecking, c.mcpAgain, c.mcpAgainNames = nil, false, false, nil
 	c.retry, c.alerted = nil, false
 	c.syncHost(true)
@@ -2995,7 +3056,10 @@ func (c *conv) close() {
 	c.live.setAdapter("")
 	c.writeRegistration()
 	if c.rec.TurnOpen {
-		c.update(func(rec *Record) { rec.TurnOpen = false })
+		c.update(func(rec *Record) {
+			finishActiveTurn(rec, c.r.opts.Now().UnixMilli())
+			rec.TurnOpen = false
+		})
 	}
 	c.signalSettled()
 	c.watched()

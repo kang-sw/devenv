@@ -1,5 +1,6 @@
 ---
 title: "Claude mod band tests fail under Claude Code 2.1.323: the band root's props.width reads undefined"
+completed: 2026-11-13
 ---
 
 # Band tests fail under Claude Code 2.1.323
@@ -31,3 +32,23 @@ harness view changed.
   helper or the band code to match. Keep 2.1.322 working if the harness
   version range still includes it.
 - Check whether the wsflow mirror needs the same fix (the mod is mirrored).
+
+## Resolution
+
+### Result (38cbb4d94) - 2026-11-13
+
+- Claude Code 2.1.323 composes the band's correctly sized element and the
+  engine's own contribution under a wrapper; 2.1.322 returns the band element
+  directly. The test now selects the plugin's contribution on either shape,
+  retaining the frame and width assertions. No production mod change was
+  indicated by the engine tree; a live terminal rendering was not checked.
+- Normalized the mocked project path for Windows and mirrored the test in
+  wsflow. The original report was 759/773 passing. After the change, isolated
+  band runs passed 29/33 on 2.1.323 and 27/33 on 2.1.322; all remaining
+  failures were timeouts, not frame assertions.
+- The one full 2.1.323 suite run, before the Windows mock path adjustment,
+  reported 482 pass and 58 fail across 15 files; three engine test files timed
+  out after 600 seconds, and other failures included Windows path mocks and
+  timeouts. It did not verify the final adjustment.
+- Forward: rerun the band tests and full mod suite under conditions without
+  engine timeouts; investigate the other Windows engine-test path mocks.

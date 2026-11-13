@@ -42,8 +42,8 @@ independent track, including another track in the same worktree.
 
 <!-- ws:override:UserPreferenceSection desc="user standing preferences for communication, terminology, and workflow behavior" -->
 Use the project's terminology and communication style.
-{{.WorkflowLang}}
 <!-- ws:/override:UserPreferenceSection -->
+{{.WorkflowLang}}
 
 ### Asking the user
 

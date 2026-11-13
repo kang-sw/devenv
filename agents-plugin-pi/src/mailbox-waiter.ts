@@ -10,9 +10,9 @@
  * Mechanism (see the ws mailbox CLI/tools). `mailbox wait` BLOCKS until mail is
  * present but only PEEKS — it never dequeues — whereas the mailbox recv tool
  * DRAINS. This waiter therefore uses `mailbox wait` purely as the
- * block-until-mail SIGNAL: the only thing it reads is the CLI exit code (0 =
- * mail present, 3 = timed out, 130 = interrupted, other = error). The recv tool
- * is the authoritative source: on a wake the waiter drains, then admits the
+ * block-until-mail SIGNAL: a long-lived `--stream` child emits one JSON line
+ * per arrival; older runtimes fall back to exit-code-based one-shot waits.
+ * The recv tool is the authoritative source: on a wake the waiter drains, then admits the
  * whole drain through the shared push FIFO (spawner's `sendBatchToLead`) as one
  * unit of informational `ws-mailbox` items, so it rides one `ws-push-batch`
  * alongside every other system message. One unit matters while the lead is
@@ -61,17 +61,19 @@
  */
 
 import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
 import type { SpawnRole } from "./process-role.ts";
 
 /**
  * One queued mailbox message, mirroring the ws `Envelope` JSON shape
- * (`{from?, reply_to?, content, sent_at}`). Exactly one of `from`/`reply_to`
- * is set on delivery; `content` is free text and always present.
+ * (`{from?, reply_to?, label?, content, sent_at}`). Peer delivery sets one
+ * of `from`/`reply_to`; system mail may use a display-only `label` instead.
  */
 export interface MailboxEnvelope {
   from?: string;
   reply_to?: string;
+  label?: string;
   content: string;
   sent_at?: string;
 }
@@ -119,7 +121,7 @@ export interface MailboxPushMessage {
   customType: typeof WS_MAILBOX_CUSTOM_TYPE;
   content: string;
   display: true;
-  details: { from?: string; reply_to?: string; content: string; sent_at?: string };
+  details: MailboxEnvelope;
 }
 
 /**
@@ -127,10 +129,10 @@ export interface MailboxPushMessage {
  * reads only `content`, so it opens with a human `mail from <handle>` head and
  * the free-text body; `details` carries the same fields structurally. `handle`
  * is the sender's shared-layer slug (`from`) when present, otherwise the
- * reply-id handle (`reply_to`).
+ * reply-id handle (`reply_to`), then a display-only system label (`label`).
  */
 export function buildMailboxPushMessage(envelope: MailboxEnvelope): MailboxPushMessage {
-  const handle = envelope.from?.trim() || envelope.reply_to?.trim() || "unknown";
+  const handle = envelope.from?.trim() || envelope.reply_to?.trim() || envelope.label?.trim() || "unknown";
   const stamp = envelope.sent_at?.trim();
   const head = stamp ? `mail from ${handle} (${stamp})` : `mail from ${handle}`;
   return {
@@ -140,6 +142,7 @@ export function buildMailboxPushMessage(envelope: MailboxEnvelope): MailboxPushM
     details: {
       ...(envelope.from ? { from: envelope.from } : {}),
       ...(envelope.reply_to ? { reply_to: envelope.reply_to } : {}),
+      ...(envelope.label ? { label: envelope.label } : {}),
       content: envelope.content,
       ...(stamp ? { sent_at: stamp } : {}),
     },
@@ -252,9 +255,14 @@ export function boardSteerDeps(wiring: BoardSteerWiring): BoardSteerDeps {
   };
 }
 
+/** The per-wake seam; subprocess implementations may also own a cached child. */
+export type MailboxRunWait = ((signal: AbortSignal, arm: MailboxWaitArm) => Promise<MailboxWaitOutcome>) & {
+  dispose?: () => Promise<void>;
+};
+
 export interface MailboxWaiterDeps {
   /** Block until mail is present (or the wait times out); resolve with the outcome. */
-  runWait: (signal: AbortSignal, arm: MailboxWaitArm) => Promise<MailboxWaitOutcome>;
+  runWait: MailboxRunWait;
   /** Authoritatively drain (dequeue) the session's mailbox; resolve with what was removed. */
   drainMail: () => Promise<MailboxEnvelope[]>;
   /** Admit one non-empty drain into the live conversation as one unit (through the push FIFO). */
@@ -535,7 +543,8 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
         outcome = "error";
         report(`wait failed: ${describe(error)}`);
       } finally {
-        waitController = undefined;
+        // Keep the last arm abortable while draining/backing off: a stream
+        // still lives after runWait resolves. The next arm transfers ownership.
         controller.signal.removeEventListener("abort", onStop);
       }
       if (controller.signal.aborted) break;
@@ -587,10 +596,10 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
       }
       if (failed && !controller.signal.aborted) await sleep(backoffMs);
     }
-  })();
+  })().finally(() => deps.runWait.dispose?.());
 
   return {
-    stop: () => controller.abort(),
+    stop: () => { controller.abort(); waitController?.abort(); },
     leadSettled: () => {
       if (held || carry.length > 0) waitController?.abort();
     },
@@ -732,7 +741,7 @@ export interface SubprocessWaitOptions {
    * rather than the launcher process's own working directory.
    */
   root?: string;
-  /** `--timeout` value; a finite window self-heals a wedged wait and bounds the listening marker. */
+  /** `--timeout` value; stream mode rechecks without exiting on the deadline. */
   timeoutArg?: string;
   /** Adds `--board-inbox`, so a held dashboard message also wakes the wait. Set per wait by the loop. */
   boardInbox?: boolean;
@@ -740,6 +749,8 @@ export interface SubprocessWaitOptions {
   boardSteer?: boolean;
   /** Adds `--board-interrupt`, so an interrupt entry also wakes the wait, beside either flag above or alone. Set per wait by the loop. */
   boardInterrupt?: boolean;
+  /** Shared by this Pi session's factories so a key rebind cannot retry a rejected flag. */
+  streamSupport?: { unsupported?: boolean };
   /** Diagnostic sink for the child's stderr and spawn failures; omitted diagnostics are discarded. */
   onStderr?: (line: string) => void;
 }
@@ -805,17 +816,192 @@ export function sessionMailboxWaitOptions(
     sessionKey: session.sessionKey,
     slug: session.slug,
     root: session.cwd,
+    ...(session.streamSupport ? { streamSupport: session.streamSupport } : {}),
     onStderr: session.onStderr,
   };
 }
 
+type StreamOutcome = MailboxWaitOutcome | "unsupported";
+const WAIT_USAGE_ERROR = /flag provided but not defined|unknown (?:flag|option)|unrecognized (?:arguments?|option)|(?:^|\n)\s*usage(?::|\s+of\b)/i;
+
+/** One child, with arrivals queued while the caller is busy draining. */
+function startMailboxStream(options: SubprocessWaitOptions, arm: MailboxWaitArm, spawnChild: typeof spawn) {
+  const child = spawnChild("python3", [...buildMailboxWaitArgv({ ...options, ...arm }), "--stream"], {
+    cwd: options.pluginDir,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const lines = createInterface({ input: child.stdout!, crlfDelay: Infinity });
+  const queue: MailboxWaitOutcome[] = [];
+  let pending: ((outcome: StreamOutcome) => void) | undefined;
+  let terminal: StreamOutcome | undefined;
+  let seenArrival = false;
+  let rejectedFlag = false;
+  let stopped = false;
+  let detachAbort = (): void => {};
+  let grace: ReturnType<typeof setTimeout> | undefined;
+  let recheck: ReturnType<typeof setTimeout> | undefined;
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
+  let stderrTail = "";
+  const closed = new Promise<void>((resolve) => child.once("close", () => {
+    clearTimeout(grace);
+    clearTimeout(recheck);
+    clearTimeout(killTimer);
+    detachAbort();
+    resolve();
+  }));
+  const deliver = (outcome: MailboxWaitOutcome): void => {
+    if (pending) {
+      clearTimeout(recheck);
+      const resolve = pending;
+      pending = undefined;
+      resolve(outcome);
+    } else queue.push(outcome);
+  };
+  const report = (text: string): void => {
+    if (stopped) return;
+    try { options.onStderr?.(text); } catch { /* A stale sink must not escape a child callback. */ }
+  };
+  lines.on("line", (line) => {
+    if (stopped || terminal !== undefined || !line.trim()) return;
+    // Only non-arrival diagnostics can reject the flag: an envelope's
+    // arbitrary content may itself contain "unknown flag" or usage text.
+    let record: { timed_out?: boolean; kinds?: unknown } | null = null;
+    try { record = JSON.parse(line); } catch { /* Check non-JSON diagnostics below. */ }
+    if (record && typeof record === "object" && record.timed_out !== true
+      && Array.isArray(record.kinds) && record.kinds.some((kind) => ["mail", "board", "interrupt"].includes(kind))) {
+      seenArrival = true;
+      deliver(boardWakeOutcome(line, arm.boardInterrupt));
+    } else rejectedFlag ||= WAIT_USAGE_ERROR.test(line);
+  });
+  child.stderr!.setEncoding("utf8");
+  child.stderr!.on("data", (text: string) => {
+    // Keep a bounded tail so diagnostics split across pipe chunks still match.
+    stderrTail = (stderrTail + text).slice(-4096);
+    rejectedFlag ||= WAIT_USAGE_ERROR.test(stderrTail);
+    if (text.trimEnd()) report(text.trimEnd());
+  });
+  const finish = (code: number | null): void => {
+    if (terminal !== undefined) return;
+    terminal = stopped ? "stopped"
+      : rejectedFlag || (!seenArrival && code !== null && code !== 0) ? "unsupported" : "error";
+    if (pending) {
+      clearTimeout(recheck);
+      const resolve = pending;
+      pending = undefined;
+      resolve(terminal);
+    }
+    // Do not let inherited pipes in a grandchild hold session disposal open.
+    lines.close();
+    child.stdout!.destroy();
+    child.stderr!.destroy();
+  };
+  child.on("error", (error) => report(`wait spawn failed: ${error.message}`));
+  child.on("exit", (code) => {
+    // Exit may precede the last stdout data. Preserve complete arrival lines,
+    // but bound the grace when a descendant inherited a pipe.
+    if (child.stdout!.readableEnded) finish(code);
+    else {
+      grace = setTimeout(() => finish(code), 250);
+      child.stdout!.once("end", () => { clearTimeout(grace); finish(code); });
+    }
+  });
+  child.on("close", (code) => finish(code));
+  const stop = (): Promise<void> => {
+    if (!stopped) {
+      stopped = true;
+      queue.length = 0;
+      detachAbort();
+      if (child.exitCode === null && child.signalCode === null) {
+        try { child.kill("SIGTERM"); } catch { /* Best effort. */ }
+        killTimer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* Best effort. */ } }, 1_000);
+        killTimer.unref();
+      }
+    }
+    return closed;
+  };
+  return {
+    arm,
+    stop,
+    get stopped() { return stopped; },
+    next: (signal: AbortSignal): Promise<StreamOutcome> => {
+      // A successful wake does not end the child. Retain this listener until
+      // the next arm, so an abort during the drain also stops the stream.
+      detachAbort();
+      const onAbort = (): void => { void stop(); };
+      detachAbort = () => signal.removeEventListener("abort", onAbort);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) { void stop(); return closed.then(() => "stopped"); }
+      if (queue.length > 0) return Promise.resolve(queue.shift()!);
+      if (terminal !== undefined) return Promise.resolve(terminal);
+      return new Promise((resolve) => {
+        pending = resolve;
+        // Preserve the old idle config-check cadence even though CLI stream
+        // deadlines are silent. This re-arms the seam, not the child process.
+        recheck = setTimeout(() => deliver("timeout"), 10 * 60 * 1_000);
+        recheck.unref();
+      });
+    },
+  };
+}
+
 /**
- * The real `runWait` uses the Python launcher for every session.
- * Stdout — the peeked mail — is ignored (`stdio` drops it) except for a
- * wait armed with a board flag, whose `kinds` alone are read: the drain, not
- * the peek, is the source of truth.
+ * Cache one stream across per-wake runWait calls. Only a board-mode change,
+ * abort, or crash replaces it. Shared streamSupport keeps the fallback latched
+ * across session-key rebinds; crashes after arrivals remain error/backoff/retry.
  */
-export function createSubprocessWait(options: SubprocessWaitOptions): (signal: AbortSignal, arm?: MailboxWaitArm) => Promise<MailboxWaitOutcome> {
+export function createSubprocessWait(options: SubprocessWaitOptions, spawnChild: typeof spawn = spawn):
+  ((signal: AbortSignal, arm?: MailboxWaitArm) => Promise<MailboxWaitOutcome>) & Pick<MailboxRunWait, "dispose"> {
+  const oneShot = createOneShotSubprocessWait(options, spawnChild);
+  const lifetime = new AbortController();
+  let legacyWait: Promise<MailboxWaitOutcome> | undefined;
+  const runLegacy = async (signal: AbortSignal, arm: MailboxWaitArm): Promise<MailboxWaitOutcome> => {
+    legacyWait = oneShot(AbortSignal.any([signal, lifetime.signal]), arm);
+    try { return await legacyWait; } finally { legacyWait = undefined; }
+  };
+  let stream: ReturnType<typeof startMailboxStream> | undefined;
+  const streamSupport = options.streamSupport ?? {};
+  let disposed = false;
+  const runWait: ReturnType<typeof createSubprocessWait> = async (signal, requested) => {
+    if (disposed || signal.aborted) {
+      await stream?.stop();
+      stream = undefined;
+      return "stopped";
+    }
+    const arm = {
+      boardInbox: requested?.boardInbox === true,
+      boardSteer: requested?.boardInbox !== true && requested?.boardSteer === true,
+      boardInterrupt: requested?.boardInterrupt === true,
+    };
+    if (streamSupport.unsupported) {
+      if (stream) { await stream.stop(); stream = undefined; }
+      return runLegacy(signal, arm);
+    }
+    if (stream && (stream.stopped || stream.arm.boardInbox !== arm.boardInbox || stream.arm.boardSteer !== arm.boardSteer || stream.arm.boardInterrupt !== arm.boardInterrupt)) {
+      await stream.stop();
+      stream = undefined;
+    }
+    if (disposed || signal.aborted) return "stopped";
+    stream ??= startMailboxStream(options, arm, spawnChild);
+    const outcome = await stream.next(signal);
+    if (outcome === "unsupported") streamSupport.unsupported = true;
+    if (outcome === "error" || outcome === "stopped" || outcome === "unsupported") {
+      await stream.stop();
+      stream = undefined;
+    }
+    if (disposed || signal.aborted) return "stopped";
+    if (outcome === "unsupported") return runLegacy(signal, arm);
+    return outcome;
+  };
+  runWait.dispose = async () => {
+    disposed = true;
+    lifetime.abort();
+    await Promise.all([stream?.stop(), legacyWait]);
+  };
+  return runWait;
+}
+
+/** The compatibility path preserves the one-shot CLI contract. */
+function createOneShotSubprocessWait(options: SubprocessWaitOptions, spawnChild: typeof spawn): ReturnType<typeof createSubprocessWait> {
   const stderr = options.onStderr ?? (() => {});
   return (signal, arm) =>
     new Promise<MailboxWaitOutcome>((resolve) => {
@@ -839,7 +1025,7 @@ export function createSubprocessWait(options: SubprocessWaitOptions): (signal: A
         return;
       }
       const argv = buildMailboxWaitArgv({ ...options, boardInbox, boardSteer, boardInterrupt });
-      const child = spawn("python3", argv, {
+      const child = spawnChild("python3", argv, {
         cwd: options.pluginDir,
         stdio: ["ignore", readsKinds ? "pipe" : "ignore", "pipe"],
       });

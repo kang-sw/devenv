@@ -497,6 +497,9 @@ type claudeMapper struct {
 	batches batchTracker
 	// tasks are the subagent task ids started and not yet ended.
 	tasks map[string]bool
+	// wakeTasks retains task identity past task_updated's terminal state:
+	// task_notification follows it and carries the delivered summary.
+	wakeTasks map[string]claudeWakeTask
 
 	context *wslive.UsageContext
 	limits  map[string]wslive.UsageLimit
@@ -571,7 +574,7 @@ type claudeSpawn struct {
 
 func newClaudeMapper(spec StartSpec) *claudeMapper {
 	return &claudeMapper{spec: spec, now: time.Now, batches: newBatchTracker("c"), limits: map[string]wslive.UsageLimit{}, tasks: map[string]bool{}, approvals: map[string]string{},
-		rejected: map[string]int64{}, spawns: map[string]claudeSpawn{}, subs: map[string]*claudeSub{}}
+		rejected: map[string]int64{}, spawns: map[string]claudeSpawn{}, subs: map[string]*claudeSub{}, wakeTasks: map[string]claudeWakeTask{}}
 }
 
 // lead reports a lead conversation's mapper.
@@ -618,11 +621,14 @@ type claudeLine struct {
 	// TaskID, TaskType, Description, Status, and Patch describe a
 	// background task's system lines (task_started, task_updated,
 	// task_notification).
-	TaskID      string `json:"task_id"`
-	TaskType    string `json:"task_type"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
-	Patch       struct {
+	TaskID          string `json:"task_id"`
+	TaskType        string `json:"task_type"`
+	Description     string `json:"description"`
+	Summary         string `json:"summary"`
+	IsBackgrounded  *bool  `json:"is_backgrounded"`
+	OwnedBySubagent bool   `json:"owned_by_subagent"`
+	Status          string `json:"status"`
+	Patch           struct {
 		Status string `json:"status"`
 	} `json:"patch"`
 	Response struct {
@@ -814,9 +820,7 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 			return out
 		case "background_tasks_changed":
 			if m.lead() && l.Tasks != nil {
-				n := len(*l.Tasks)
-				m.background = n
-				return []Event{{BackgroundTasks: &n}}
+				return []Event{m.backgroundCounts(*l.Tasks)}
 			}
 		case "compact_boundary":
 			m.compacted = true
@@ -826,6 +830,9 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 			}
 			return []Event{{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: wslive.CompactEnd, Trigger: trigger}}}
 		case "task_started":
+			if m.lead() && l.TaskID != "" {
+				m.rememberWakeTask(l, false)
+			}
 			if l.TaskType == claudeAgentTask && l.TaskID != "" {
 				m.tasks[l.TaskID] = true
 				ev := wslive.Event{Kind: wslive.KindAgent, AgentID: l.TaskID, Status: wslive.StatusRunning, Label: l.Description}
@@ -842,6 +849,10 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 				return []Event{{Live: &ev}}
 			}
 		case "task_updated", "task_notification":
+			var out []Event
+			if m.lead() && l.Subtype == "task_notification" {
+				out = m.taskWake(l)
+			}
 			status := l.Status
 			if l.Subtype == "task_updated" {
 				status = l.Patch.Status
@@ -853,8 +864,9 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 						delete(m.subs, toolUse)
 					}
 				}
-				return []Event{{Live: &wslive.Event{Kind: wslive.KindAgent, AgentID: l.TaskID, Status: end}}}
+				out = append(out, Event{Live: &wslive.Event{Kind: wslive.KindAgent, AgentID: l.TaskID, Status: end}})
 			}
+			return out
 		}
 	case "assistant":
 		if l.ParentToolUseID != "" {

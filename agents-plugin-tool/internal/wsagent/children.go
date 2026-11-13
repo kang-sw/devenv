@@ -75,7 +75,7 @@ const tokenRoute = "by-token"
 // The token route's wait: its default and its cap.
 const (
 	tokenWaitDefault = 300 * time.Second
-	tokenWaitMax     = 1800 * time.Second
+	tokenWaitMax     = PiWaitMax
 )
 
 var errDaemonDetached = &requestError{status: http.StatusServiceUnavailable, msg: "the dashboard daemon detached; reissue the wait"}
@@ -252,6 +252,9 @@ func PiTierRefusal(tool, tier string, tiers map[string]wsconfig.AgentTier) error
 type ChildSpawn struct {
 	Prompt string `json:"prompt"`
 	Tier   string `json:"tier"`
+	// Profile defaults to pi-worker; any resolved non-lead Pi profile is allowed
+	// when its tools are within the holder's launched definition.
+	Profile string `json:"profile,omitempty"`
 	// Cwd is absolute, or relative to the holder's own working directory
 	// (Record.workDir: a worker in a worktree spawns into that worktree);
 	// empty is that directory.
@@ -307,7 +310,7 @@ func (r *Runner) spawnFor(caller *conv, req ChildSpawn) (State, error) {
 		label = req.Prompt
 	}
 	st, err := r.Spawn(SpawnSpec{
-		Profile: PiWorkerProfile,
+		Profile: req.Profile,
 		Root:    rec.Root,
 		Cwd:     cwd,
 		Model:   mapping.Model,

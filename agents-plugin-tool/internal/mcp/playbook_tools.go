@@ -706,7 +706,14 @@ func buildOverrideLookup(s *Server, sessionKey string) (overrideLookupFn, error)
 	if err := resolver.Check(); err != nil {
 		return nil, err
 	}
+	preferences, haveSlots, err := preferenceOverride(&resolver, capturedKey, s.currentHarness())
+	if err != nil {
+		return nil, err
+	}
 	return func(pointId, harness string) (string, bool) {
+		if pointId == "UserPreferenceSection" && haveSlots {
+			return preferences, true
+		}
 		rv, _ := resolver.Get(capturedKey, harnessBucketKey("prompt."+pointId, harness))
 		return rv.Value, rv.Value != ""
 	}, nil

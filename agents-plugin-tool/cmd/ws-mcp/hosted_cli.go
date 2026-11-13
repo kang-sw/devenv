@@ -31,6 +31,7 @@ type hostedCLI struct {
 	host           *proxyHost
 	ctx            context.Context
 	stdout, stderr io.Writer
+	streamout      io.Writer // live stdout frames, only for an explicitly streaming command
 	stdin          io.Reader
 	env            []string
 	serverReady    func(*mcp.Server)
@@ -137,7 +138,7 @@ func (c *hostedCLI) run() int {
 				}
 				return c.getenv(key)
 			}
-			return runMailboxWait(c.ctx, args[2:], c.stdout, c.stderr, c.hello.Cwd, c.hello.OwnerPID, c.env, getenv, wswake.Mailbox)
+			return runMailboxWait(c.ctx, args[2:], c.stdout, c.stderr, c.hello.Cwd, c.hello.OwnerPID, c.env, getenv, wswake.Mailbox, c.streamout)
 		case "codex-stop-hook":
 			getenv := func(key string) string {
 				if key == "WS_MCP_PROJECT_ROOT" {
