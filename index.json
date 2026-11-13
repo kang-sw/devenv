@@ -470,7 +470,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T14:23:05Z"
+        "touched_at": "2026-11-13T14:23:48Z",
+        "impl": {
+          "branch": "impl/develop/goal-nail-bash"
+        }
       }
     },
     "261113-feat-ws-git-merge-large-source-file-warning": {
