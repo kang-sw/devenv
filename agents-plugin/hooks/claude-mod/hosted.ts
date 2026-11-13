@@ -106,15 +106,81 @@ export async function resolveHostedMode(vars: { flag?: string; key?: string; row
   }
 }
 
-/** The argv that prints the id of the process that ran it: the harness, for a host command. */
-export const HARNESS_PID_ARGV = ['python3', '-c', 'import os; print(os.getppid())'] as const
+/**
+ * What the harness-id probe runs. It prints its parent's id and, on Windows
+ * when the process table can be read, that parent's own parent and image name
+ * after it (`<pid> <parent> <image>`); where it cannot, just `<pid>`.
+ */
+const HARNESS_PID_SCRIPT = [
+  'import os, sys',
+  'pid = os.getppid()',
+  'out = str(pid)',
+  'try:',
+  "    if sys.platform == 'win32':",
+  '        import ctypes',
+  '        from ctypes import wintypes as w',
+  '        class E(ctypes.Structure):',
+  "            _fields_ = [('dwSize', w.DWORD), ('cntUsage', w.DWORD), ('pid', w.DWORD), ('heap', ctypes.c_size_t), ('module', w.DWORD), ('threads', w.DWORD), ('parent', w.DWORD), ('pri', w.LONG), ('flags', w.DWORD), ('image', w.WCHAR * 260)]",
+  "        k = ctypes.WinDLL('kernel32')",
+  '        k.CreateToolhelp32Snapshot.argtypes = [w.DWORD, w.DWORD]',
+  '        k.CreateToolhelp32Snapshot.restype = w.HANDLE',
+  '        for f in (k.Process32FirstW, k.Process32NextW):',
+  '            f.argtypes = [w.HANDLE, ctypes.POINTER(E)]',
+  '            f.restype = w.BOOL',
+  '        k.CloseHandle.argtypes = [w.HANDLE]',
+  '        snap = k.CreateToolhelp32Snapshot(2, 0)',
+  '        if snap is not None and snap != ctypes.c_void_p(-1).value:',
+  '            e = E()',
+  '            e.dwSize = ctypes.sizeof(E)',
+  '            ok = k.Process32FirstW(snap, ctypes.byref(e))',
+  '            while ok and e.pid != pid:',
+  '                ok = k.Process32NextW(snap, ctypes.byref(e))',
+  '            k.CloseHandle(snap)',
+  '            if ok:',
+  "                out = '%d %d %s' % (pid, e.parent, e.image)",
+  'except Exception:',
+  '    pass',
+  'print(out)',
+].join('\n')
 
-/** The process id a HARNESS_PID_ARGV run printed, or undefined for anything else. */
+/**
+ * The argv that prints the id of the process that ran it (the harness, for a
+ * host command), plus on Windows that process's parent and image name.
+ *
+ * Claude Code on Windows runs a host command through `cmd.exe`, which cuts the
+ * command line at its first newline, so the script travels as one line: its
+ * hex, which also needs no quoting, decoded and run by a one-line `-c`. The
+ * wrapper that is the printed id's image is gone by the time anything else
+ * could ask about it, so the same process reads the table it came from.
+ */
+export const HARNESS_PID_ARGV = [
+  'python3',
+  '-c',
+  `exec(bytes.fromhex('${Array.from(HARNESS_PID_SCRIPT, (c) => c.charCodeAt(0).toString(16).padStart(2, '0')).join('')}').decode())`,
+] as const
+
+/** The process id a HARNESS_PID_ARGV run printed alone, or undefined for anything else. */
 export function parsePid(stdout: string): number | undefined {
   const text = stdout.trim()
   if (!/^[0-9]+$/.test(text)) return undefined
   const pid = Number(text)
   return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined
+}
+
+/**
+ * The harness's id from what a HARNESS_PID_ARGV run printed, or undefined for
+ * anything else: the printed id, or its parent when the printed id is a
+ * Windows `cmd.exe` (the shell Claude Code runs a host command through).
+ * Exactly one level is skipped, so a second harness the session starts from
+ * its shell still tells itself from the hosted one, and a bare id (not
+ * Windows, or a failed lookup) is the id. The same rule as ws-mcp's
+ * `wrappedHarnessPID`.
+ */
+export function parseHarnessPid(stdout: string): number | undefined {
+  const match = /^([0-9]+)(?: ([0-9]+) (.+))?$/.exec(stdout.trim())
+  const own = parsePid(match?.[1] ?? '')
+  if (own === undefined || match?.[2] === undefined) return own
+  return match[3]?.toLowerCase() === 'cmd.exe' ? parsePid(match[2]) ?? own : own
 }
 
 /** The transcript warning for a flag set without a key; `plugin` is the engine-reported name. */

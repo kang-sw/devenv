@@ -17,7 +17,7 @@ import {
   type DashboardEvent,
   type IntakeResult,
 } from './dashboard'
-import { HARNESS_PID_ARGV, missingKeyWarning, parsePid, resolveHostedMode, unconfirmedWarning, type HostedMode } from './hosted'
+import { HARNESS_PID_ARGV, missingKeyWarning, parseHarnessPid, resolveHostedMode, unconfirmedWarning, type HostedMode } from './hosted'
 import { createManual, type ReadFamily } from './manual'
 import { expandPreload } from './preload'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
@@ -807,10 +807,10 @@ export const register: Register = (on) => {
         resolveHostedMode(
           { flag, key, row },
           {
-            // A host command's parent is this harness process.
+            // A host command's parent is this harness process, or on Windows the cmd.exe wrapper between them.
             pid: async () => {
               const ran = await $.process.run(HARNESS_PID_ARGV, { timeoutMs: 10_000 })
-              return ran.exitCode === 0 ? parsePid(ran.stdout) : undefined
+              return ran.exitCode === 0 ? parseHarnessPid(ran.stdout) : undefined
             },
             readRow: (path) => $.fs.read(path),
             sleep: (ms) => $.clock.sleep(ms),
