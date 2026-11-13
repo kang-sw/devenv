@@ -317,7 +317,7 @@
     inputMode = v === "mod" ? "mod" : "enter";
     q(".gmenu [data-input]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-input") === inputMode)); });
     var t = $("ctext");
-    if (t) t.placeholder = HINT[inputMode];
+    if (t) { t.placeholder = HINT[inputMode]; growCtext(); }
   }
   function setTab(t) {
     grid.setAttribute("data-tab", t);
@@ -1327,7 +1327,48 @@
   // for them: noteWarn for a failure or warning, noteOk for a success.
   function noteWarn(text) { if (window.WsToast) window.WsToast.show(text, { kind: "warn" }); }
   function noteOk(text) { if (window.WsToast) window.WsToast.show(text); }
-  function grow() { ctext.style.height = "auto"; ctext.style.height = Math.min(160, ctext.scrollHeight) + "px"; }
+  // grow sizes the message box to its text; an empty box is sized to its
+  // wrapped placeholder instead, because an empty textarea's scrollHeight
+  // need not count it. The placeholder is measured in a hidden copy of the
+  // mention layer (.chl, same font, padding and wrapping), so the two
+  // cannot drift. A width change or a placeholder swap grows it again
+  // (see growCtext below).
+  var cmeasure = null;
+  function placeholderHeight() {
+    var ph = ctext.getAttribute("placeholder");
+    if (!ph || !ctext.parentNode) return 0;
+    if (!cmeasure) {
+      cmeasure = doc.createElement("div");
+      cmeasure.className = "chl chm";
+      cmeasure.setAttribute("aria-hidden", "true");
+      ctext.parentNode.appendChild(cmeasure);
+    }
+    cmeasure.style.paddingRight = chl ? chl.style.paddingRight : "";
+    cmeasure.textContent = ph;
+    return cmeasure.offsetHeight;
+  }
+  function grow() {
+    ctext.style.height = "auto";
+    var h = ctext.scrollHeight;
+    if (!ctext.value) h = Math.max(h, placeholderHeight());
+    ctext.style.height = Math.min(160, h) + "px";
+  }
+  // growCtext keeps an empty box fitted to its placeholder: at first render
+  // and once the fonts load, after each placeholder swap (setInput,
+  // renderCmd call it), and when only the width changes (the observer skips
+  // height-only changes, so setting the height cannot loop).
+  function growCtext() { if (ctext) grow(); }
+  if (ctext) {
+    var ctextW = -1;
+    if (window.ResizeObserver) new ResizeObserver(function () {
+      var w = ctext.offsetWidth;
+      if (w === ctextW) return;
+      ctextW = w;
+      grow();
+    }).observe(ctext);
+    if (doc.fonts && doc.fonts.ready) doc.fonts.ready.then(growCtext);
+    growCtext();
+  }
   // post sends a write route's JSON body; done(ok, answer) gets the parsed
   // answer, or the server's refusal text. A route is the session's own
   // unless it starts with "/", a daemon-wide route.
@@ -1676,6 +1717,7 @@
     if (name) name.textContent = cmdSel ? "/" + cmdSel.name : "";
     if (args) { args.textContent = fixed ? cmdSel.args : ""; args.hidden = !fixed || !cmdSel.args; }
     ctext.setAttribute("placeholder", cmdSel && !fixed ? wsT("js.cmd.args", cmdSel.name) : ctextHint);
+    grow();
   }
   // setCommand selects command name; args, when a string, stays on the
   // capsule, and otherwise the message box holds the arguments.
