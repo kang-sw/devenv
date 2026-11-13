@@ -60,7 +60,7 @@ func TestAssetIDFollowsAssetContent(t *testing.T) {
 	if a, _ := loadDashboardAssets(); a.data.ID != base {
 		t.Errorf("the embedded assets' identity %q differs from a rebuild's %q", a.data.ID, base)
 	}
-	for _, name := range []string{"dashboard.js", "dashboard.css", "dashboard.tmpl", "rail.js", "tracker.css"} {
+	for _, name := range []string{"dashboard.js", "dashboard.css", "dashboard.tmpl", "rail.js", "tracker.css", "memo.js", "memo.css"} {
 		if build(name) == base {
 			t.Errorf("an edit to %s keeps the identity", name)
 		}

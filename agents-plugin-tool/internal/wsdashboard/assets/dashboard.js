@@ -5338,6 +5338,7 @@
   // page, and Esc, the scrim, or picking a session closes it. The arrow
   // stays a link to the sessions index for a modified click.
   var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
+  var memoPad = railEl && $("memo-pad") && window.WsMemo ? window.WsMemo.mount(doc, railEl, $("memo-pad"), function (open) { railOpen(open === true); }) : null;
   var railStore = { load: load, save: save };
   var starSet = WsRail ? WsRail.stars(railStore) : null, colSet = WsRail ? WsRail.collapsed(railStore) : null;
   var sessOrder = WsRail ? WsRail.sessionOrder(railStore) : null, wsOrd = WsRail ? WsRail.wsOrder(railStore) : null;
@@ -5353,15 +5354,15 @@
   var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpIds = 0;
   function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches) && (!root.hasAttribute("data-pincol") || !!(RAIL_XWIDE && RAIL_XWIDE.matches)); }
   function railShown() { return root.classList.contains("rail-open"); }
-  // railKey is Ctrl+`: from the page or a topic body frame, it toggles the
-  // overlay rail, and only while the rail overlays (railWide).
+  // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column.
   function railKey() {
-    if (!railEl || !WsRail || railWide()) return;
+    if (!railEl || !WsRail) return;
     railOpen(!railShown());
   }
   function railOpen(open) {
     if (!railEl) return;
     root.classList.toggle("rail-open", !!open);
+    if (memoPad) memoPad.open(!!open, railWide());
     if (railBtn) railBtn.setAttribute("aria-expanded", String(!!open || railWide()));
   }
   function railScrollTop() { var l = $("rlist"); return l ? l.scrollTop : null; }
@@ -5376,6 +5377,7 @@
     q(".rsessions", r).forEach(function (box) { WsRail.pin(box, starSet, box.parentNode.closest(".rended") ? null : order); });
     if (list) WsRail.arrange(list, wsOrd.list());
     WsRail.markCurrent(q(".rs", r), rid);
+    if (memoPad) memoPad.sync(rid);
     WsRail.markRevive(q(".rs", r), revBusy);
     q(".rws", r).forEach(function (ws) {
       var col = colSet.has(ws.getAttribute("data-ws") || ""), tog = ws.querySelector(".wstog");
@@ -5392,12 +5394,12 @@
     });
     if (rscrim) rscrim.addEventListener("click", function () { railOpen(false); });
     doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && railShown()) railOpen(false); });
-    // Ctrl+` (the physical key, so any layout) toggles the overlay rail;
-    // while the rail is a permanent column the key is left alone.
+    // Ctrl+` (the physical key, so any layout) also opens memos beside
+    // the permanent rail column.
     // A topic body frame holding the focus hands the key over ({wbDoc:
     // "rail"}, the frame listener above).
     doc.addEventListener("keydown", function (e) {
-      if (e.code !== "Backquote" || !e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing || railWide()) return;
+      if (e.code !== "Backquote" || !e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
       e.preventDefault();
       railKey();
     });
@@ -5454,14 +5456,14 @@
       }
       // Picking a session navigates; the draft is saved first and the
       // overlay closes, so a back navigation finds the page as it was.
-      if (t.closest && t.closest("a[href]")) { saveDraft(); railOpen(false); }
+      if (t.closest && t.closest("a[href]")) { saveDraft(); if (memoPad) memoPad.remember(); railOpen(false); }
     });
     // The rail list keeps its scroll across navigations.
     var savedRailTop = parseInt(load(RAIL_SCROLL_KEY), 10);
     window.addEventListener("pagehide", function () { var top = railScrollTop(); if (top !== null) save(RAIL_SCROLL_KEY, String(Math.round(top))); });
     railMarks();
     if (isFinite(savedRailTop)) railScrollTo(savedRailTop);
-    railOpen(false);
+    railOpen(!!(memoPad && memoPad.resume()));
   }
 
   // --- rail drag: sessions within their group, workspaces among themselves ---

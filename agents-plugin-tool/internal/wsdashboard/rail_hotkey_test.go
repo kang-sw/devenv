@@ -10,13 +10,13 @@ import (
 // the frame hands the key to the host as {wbDoc: "rail"} (wswhiteboard
 // TestDocFrameHandsRailKey), and the host's frame listener, which answers
 // only its own body frames (docFrame), runs railKey, the page keydown's own
-// path: it toggles the overlay rail below 1600px, and below 2200px while
+// path: it toggles rail + memos below 1600px, and below 2200px while
 // the pinned column takes the rail's place (data-pincol on the root), and
-// leaves the permanent column alone. The cases execute under node when it
+// memos alone beside a permanent column. The cases execute under node when it
 // is installed.
 func TestRailKeyFromDocFrame(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
-	if !strings.Contains(js, "e.shiftKey || e.isComposing || railWide()) return;\n      e.preventDefault();\n      railKey();") {
+	if !strings.Contains(js, "e.shiftKey || e.isComposing) return;\n      e.preventDefault();\n      railKey();") {
 		t.Error("the page's Ctrl+` keydown does not run railKey")
 	}
 	listener := regexp.MustCompile(`window\.addEventListener\("message", function \(e\) \{\n    var f = docFrame\(e\.source\), m = e\.data;\n    if \(!f \|\| !m \|\| typeof m !== "object"\) return;\n[\s\S]*?\n  \}\);\n`).FindString(js)
@@ -39,6 +39,7 @@ var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 var cls = {}, attrs = {};
 var root = { classList: { contains: function (c) { return !!cls[c]; }, toggle: function (c, on) { cls[c] = !!on; } }, hasAttribute: function (a) { return !!attrs[a]; } };
+var memoCalls = [], memoPad = { open: function (on, wide) { memoCalls.push([on, wide]); } };
 var railEl = {}, railBtn = { setAttribute: function () {} }, WsRail = {};
 var RAIL_WIDE = { matches: false }, RAIL_XWIDE = { matches: false };
 var frameWin = {}, otherWin = {}, frameEl = { tag: "iframe.doc-frame" };
@@ -55,14 +56,15 @@ send(otherWin, { wbDoc: "rail" });
 check("a window that is no doc frame is ignored", !!cls["rail-open"], false);
 RAIL_WIDE.matches = true;
 send(frameWin, { wbDoc: "rail" });
-check("at 1600px and up the key is left alone", !!cls["rail-open"], false);
+check("at 1600px and up the key opens memos", memoCalls[memoCalls.length - 1], [true, true]);
+send(frameWin, { wbDoc: "rail" });
 attrs["data-pincol"] = true;
 send(frameWin, { wbDoc: "rail" });
 check("at 1800px with a pin the key opens the overlay", !!cls["rail-open"], true);
 send(frameWin, { wbDoc: "rail" });
 RAIL_XWIDE.matches = true;
 send(frameWin, { wbDoc: "rail" });
-check("from 2200px the rail is a column again, pin or not", !!cls["rail-open"], false);
+check("from 2200px memos open beside the column, pin or not", memoCalls[memoCalls.length - 1], [true, true]);
 process.stdout.write(bad.join("\n"));
 `)
 }

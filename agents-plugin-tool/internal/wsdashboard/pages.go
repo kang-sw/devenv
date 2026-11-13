@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/cards.js assets/preview.js assets/files.js assets/terminal.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -113,6 +113,7 @@ type pageAssetsData struct {
 	// window.WsRail): per-session drafts, stars, and the rail's own
 	// toggles, which the session page's script uses.
 	RailScript template.JS
+	MemoScript template.JS
 	// CardsScript is the board card framework (cards.js, window.WsCards),
 	// PreviewScript its file preview kind (preview.js, window.WsPreview),
 	// and FilesScript the conversation column's file explorer (files.js,
@@ -197,7 +198,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		return nil, lerr
 	}
 	a := &dashboardAssets{data: pageAssetsData{
-		CSS:              template.CSS(get("dashboard.css")),
+		CSS:              template.CSS(get("dashboard.css") + "\n" + get("memo.css")),
 		Script:           template.JS(get("dashboard.js")),
 		Sprite:           template.HTML(strings.TrimSpace(get("sprite.svg"))),
 		TrackerCSS:       template.CSS(get("tracker.css")),
@@ -205,6 +206,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		MentionScript:    template.JS(get("mention.js")),
 		ToastScript:      template.JS(get("toast.js")),
 		RailScript:       template.JS(get("rail.js")),
+		MemoScript:       template.JS(get("memo.js")),
 		CardsScript:      template.JS(get("cards.js")),
 		PreviewScript:    template.JS(get("preview.js")),
 		FilesScript:      template.JS(get("files.js")),
