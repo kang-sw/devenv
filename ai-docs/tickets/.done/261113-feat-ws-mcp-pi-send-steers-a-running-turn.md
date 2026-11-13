@@ -2,6 +2,7 @@
 title: "pi.send can steer a running Pi subagent turn instead of waiting for it to end"
 related:
   261112-feat-pi-subagent-long-shell-auto-background: complementary - a steer still waits behind one long blocking tool call; that ticket frees the turn from it
+completed: 2026-11-13
 ---
 
 # pi.send can steer a running Pi subagent turn instead of waiting for it to end
@@ -37,3 +38,8 @@ Pi side; the daemon `pi.send` path does not use it.
 - Whether the daemon's Pi RPC channel exposes a steer command for a running
   turn or the runner must add one.
 - Default mode, and whether the lead's playbooks should steer by default.
+
+
+## Resolution (2026-11-13)
+
+Delivered as an owner-approved delegated hotfix: 7723acc96, merged into develop at 6ccbbbbf1. A pi.send during a running daemon Pi turn now steers that turn at the next tool boundary (steer is the behaviour, not an opt-in); idle delivery is unchanged and no extra turn follows. Live installed-Pi delivery awaits the next daemon rerun.
