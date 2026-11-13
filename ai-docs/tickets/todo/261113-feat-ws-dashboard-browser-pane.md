@@ -98,6 +98,46 @@ Current state (research, 2026-11-13):
   `ai-docs/manuals/release-compatibility.md`.
 - Never restart or replace the user's running dashboard daemon for checks; use
   a separate dev instance or a rendered fixture.
+- Mirrors: the whiteboard playbook line lands in
+  `agents-plugin/rsrc/whiteboard/whiteboard.md` (Answers section, after the
+  `wb:mention` example at `:340`) and needs its wsflow mirror
+  (`agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md`) and its pi mirror
+  (`agents-plugin-pi/rsrc/whiteboard/whiteboard.md`), with manifests
+  synchronized. Overlap: `261113-feat-ws-ticket-visual-reference-and-ask-classes`
+  Phase 2 edits the same playbook (its `class` bullet at `:85-91`); the two
+  edits are in different sections but land in the same file and mirrors, so
+  whichever lands second rebases onto the other's manifest hashes.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin-wsflow/rsrc/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+
+## Prior Decisions
+
+- 445e0769 (2026-11-12, commit): "frame-src 'self' verified headless: the preview frame's self-navigation to another origin is blocked" - adding the proxy origin to `frame-src` relaxes that block for every frame on the page — bearing: constrains
+- 72c8e9d2 (2026-11-07, commit): "A framed session page's own script posts carry the daemon Origin, so the same-origin/loopback guards ... all pass a clickjacked click. Refusing the frame is the only guard that works there." — bearing: constrains
+- 261110-feat-ws-dashboard-file-preview (2026-11-11, Result): "A previewed HTML file can read any file under the session root through its capability, and CSP does not govern a frame navigating itself, so such a page could carry what it read to another origin." — bearing: constrains
+- 261110-feat-ws-dashboard-file-preview (2026-11-10, Decisions): "HTML and SVG load in an iframe with `sandbox="allow-scripts"` and no `allow-same-origin`, from a preview route whose path carries a short-lived, root-scoped read capability" — bearing: constrains
+- 69d028fe (2026-11-12, commit): "A sandboxed frame satisfies localViewer: capabilityURL returns a bare path, so the frame and its sub-resources resolve against the session page's origin" — bearing: constrains
+- 94fd6845 (2026-11-12, commit): "cards.js settle moves existing nodes with moveBefore (iframe state kept), new nodes and refused/missing moveBefore use insertBefore" — bearing: constrains
+- 06195171 (2026-11-13, commit): "Reload calls the card's own load(): asks the preview/outside route again, mints a fresh capability and redraws." — bearing: supports
+- 260514-feat-ws-web-daemon-foundation (2026-05-14, Decisions): "Treat loopback binding as a reachability limit, not an authorization boundary. Localhost access still requires owner authentication." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsdashboard/assets/cards.js, assets/dashboard.js, pages.go, a new proxy listener, agents-plugin/rsrc/whiteboard/whiteboard.md with wsflow and pi mirrors |
+| scope.surface | cross-module | new daemon listener and proxy, dashboard assets, session page CSP, shipped whiteboard playbook; no exported Go symbol is named |
+| scope.new_public_symbol | yes | wb:pick and wb:console message elements (agent-visible grammar); the proxy listener port |
+| scope.new_type_contract | yes | injected-script to host postMessage protocol; wb:pick url/selector and wb:console url element grammar |
+| scope.test_surface | new-files | existing pages_test.go and access guards cover CSP and localViewer; the proxy needs new Go test files (ReverseProxy search over agents-plugin-tool returned nothing) |
+| complexity.reuse_points | confirmed | cards.js kind registry (register/open at cards.js#L839-L896), hostMention/addMention/bmentions chip path (dashboard.js#L1179-L1275), localViewer (access.go#L146-L148) |
+| complexity.side_effect_risk | high | a new loopback listener that proxies to arbitrary localhost targets and changes the session page CSP |
+| risk.correctness | high | proxy rewriting and script injection across HMR/websocket dev servers, plus postMessage pick and console capture |
+| risk.fit | moderate | follows the card framework, but CSP becomes per-request and the iframe-shell ticket also reframes the page (pending 261113-feat-ws-dashboard-iframe-shell) |
+| risk.test | high | the pick highlight, injection and proxied page need a browser LOOK capture on a dev daemon; Go tests cover only allow-list, guard, injection, and CSP |
+| risk.security_or_contract | high | SSRF and execution surface, unsandboxed dev page on a sibling port, and a new shipped message grammar |
 
 ## Phases
 
@@ -112,7 +152,12 @@ Current state (research, 2026-11-13):
   click -> selector + text), console error collection and count.
 - Host: attach `wb:pick` and console errors to the composed message with the
   existing mention-chip UX; error-count badge on the card.
-- Session page CSP: `frame-src` adds the proxy origin only.
+- Session page CSP: `frame-src` adds the proxy origin only (today
+  `sessionPageCSP` is a constant, `agents-plugin-tool/internal/wsdashboard/pages.go#L1276-L1276`,
+  pinned verbatim by `TestSessionPageFramesOnlyItsOwnOrigin`,
+  `agents-plugin-tool/internal/wsdashboard/pages_test.go#L441-L451`; a proxy
+  origin known only at run time makes the policy per-request and that test
+  must change with it).
 - Whiteboard playbook Answers section: describe the new element(s).
 
 Verification: Go tests for the proxy (target allow-list, same-machine guard,

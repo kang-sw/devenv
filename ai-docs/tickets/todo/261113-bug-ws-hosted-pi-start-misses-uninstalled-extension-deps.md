@@ -40,6 +40,34 @@ Estimate (not a decision): Phase 1 is small, Phase 2 is medium.
 - Repo gotcha (note `gotcha.pi-tui-dual-package`): pi-tui must be resolved through the host Pi at runtime. The bundle must keep the host-provided Pi packages external, never inlined: `@earendil-works/pi-tui`, `@earendil-works/pi-coding-agent` and `@earendil-works/pi-ai` (the three names in `agents-plugin-pi/package.json` peer/dev dependencies; imported in `src/pi-tui.ts` and across `src/`).
 - Plain `pi` with a `pi install git:` package must keep working unchanged.
 - Manuals: `ai-docs/manuals/release-compatibility.md` and `ai-docs/manuals/shipped-surface-boundary.md` (Implementation Conventions rows for `agents-plugin-tool/`).
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
+
+## Prior Decisions
+
+- 7a2dd026 (2026-11-13, commit): "Owner picked c on the board; b rejected for start-time npm/network fragility on Windows. pi-tui stays external per the dual-package gotcha." — bearing: supports
+- bfbac7b4 (2026-11-13, commit): "Owner acknowledged the lead's technical picks on the whiteboard 2026-11-13: commit the bundle with a Go hash-staleness test; esbuild." — bearing: supports
+- 52dc582b (2026-11-13, commit): "Resolve the daemon package via its resource root (source checkout fallback for dev); missing sibling Pi entry uses the native MCP bridge with hosted identity context and a persisted warning." — bearing: constrains
+- 261113-feat-ws-hosted-lead-bundled-plugin-only (2026-11-13, Decisions): "Pi isolated mode: --no-extensions --extension <bundled Pi extension entry>." — bearing: constrains
+- 260914-chore-ws-pi-root-manifest-runtime-deps (2026-09-14, Decisions): "Single source of truth = agents-plugin-pi/package.json dependencies; the root block is a tooling-maintained mirror." — bearing: constrains
+- 260912-feat-ws-pi-bounded-web-access-for-explore (2026-09-12, Decisions): "Bundle search. Pin and bundle pi-web-access@0.29.0 with agents-plugin-pi. Do not discover or depend on a separately configured user copy." — bearing: contradiction-candidate
+- 260914-chore-ws-pi-join-release-train (2026-09-14, 6baafed9): "Owner-gate acceptance of v0.46.4 on a fresh Windows clone found the git-install consumption path fails at extension load (Cannot find module 'yaml')" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsagent/pi_lead.go, agents-plugin-tool/scripts/build-release-assets.sh, agents-plugin-pi/package.json, new bundle plus build script, new Go staleness test |
+| scope.surface | cross-module | Go launcher (wsagent), Pi package layout (agents-plugin-pi), build scripts; no exported symbol (piBundledEntries and piLeadLaunch are unexported) |
+| scope.new_public_symbol | no | none |
+| scope.new_type_contract | no | none; T0, no MCP, protocol or store change |
+| scope.test_surface | new-files | existing agents-plugin-tool/internal/wsagent/pi_lead_test.go covers piBundledEntries; the Go hash-staleness test is a new file |
+| complexity.reuse_points | confirmed | piBundledEntries and the existing MCP-bridge fallback in piLeadLaunch (pi_lead.go#L27-L50) |
+| complexity.side_effect_risk | moderate | changes which entry hosted Pi loads in both Isolated and Default mode; a wrong fallback silently degrades to the MCP bridge |
+| risk.correctness | high | the extension resolves files by import.meta.url (src/web-search.ts#L71-L76 spawns src/web-search-helper.mjs from node_modules/pi-web-access; src/word-chain-id.ts reads a wordlist), which a single inlined bundle does not preserve; pi-tui must stay external |
+| risk.fit | moderate | Phase 2 build placement text conflicts with Decision 3 (commit the bundle, no release-build step) |
+| risk.test | moderate | build host has no Node, so bundle behavior is verified only by the committed hash test and a release-shaped live run |
+| risk.security_or_contract | moderate | inlined third-party code becomes committed generated output; T0 tier recorded, but the bundle must not inline the host-provided Pi packages |
 
 ## Phases
 
@@ -51,6 +79,6 @@ Verification: a hosted Pi lead on a checkout whose `agents-plugin-pi` has no nod
 
 ### Phase 2: Single-JS bundle
 
-Add the build step to the release asset build (`agents-plugin-tool` build-release-assets.sh or the matching script) and to the dev rebuild path. Hosted Pi prefers the bundle over `src/index.ts`. Depends on (410) and (411).
+Add the build step to the release asset build (`agents-plugin-tool` build-release-assets.sh or the matching script) and to the dev rebuild path (`agents-plugin-tool/scripts/build-release-assets.sh` builds only the six `ws-mcp-*` Go binaries and `SHA256SUMS`, no Pi package, and per Decision 3 the bundle is generated on a Node developer machine and committed, not built there; the exact placement is unsettled). Hosted Pi prefers the bundle over `src/index.ts`. Depends on (410) and (411).
 
-Verification: the release assets contain the bundle; a hosted Pi lead started from release-shaped assets with no node_modules anywhere loads the full extension (not the bridge); the existing `agents-plugin-pi` tests pass.
+Verification: the release assets contain the bundle (the committed bundle ships with the repo checkout beside the bundled plugin, not as a release asset; see the build-script note above); a hosted Pi lead started from release-shaped assets with no node_modules anywhere loads the full extension (not the bridge); the existing `agents-plugin-pi` tests pass.

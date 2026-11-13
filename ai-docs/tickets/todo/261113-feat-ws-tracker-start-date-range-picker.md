@@ -9,7 +9,7 @@ title: "Tracker items get an optional start date, picked with a date-range picke
 Owner feedback 2026-11-13 on the dashboard tracker: the due-date picker is a
 small popover with a native `YYYY-MM-DD` input and a set button (item menu
 `'due'` step, `agents-plugin-tool/internal/wsdashboard/assets/tracker.js`
-~3861; new-item composer due chip ~4409 and step ~4467). The owner wants a
+3939, menu entry 4008; new-item composer due chip 4492 and step 4553). The owner wants a
 calendar-based picker, and on seeing mockups asked for a date *range*: an item
 has a start and a due date, both picked on one calendar.
 
@@ -19,9 +19,9 @@ Tracker items have no user-set start date today. The only date field is
 viewed at `view.go:120`, filtered at `query.go:192` / `310`, MCP arguments at
 `internal/mcp/tracker_tools.go:141-142`, `293`, `326-349`, hook event
 `internal/wstrackerhook/event.go:68`). `ItemView.Started`
-(`view.go:134`, computed at `view.go:746-793`) is a read-only value derived
+(`view.go:134`, computed at `view.go:744-793`) is a read-only value derived
 from the first `doing` transition; tracker.js uses it only as the gantt bar
-start (`tracker.js` 2364-2397, `it.started || it.ts`).
+start (`tracker.js` 2449-2454 and 2473, `it.started || it.ts`; the calendar view places an item on its due day only, `calendarBody` at `tracker.js:2485-2490`, with no bar).
 
 Owner decision (whiteboard (13), option a): add an optional start-date field
 and build the range picker; captured as this ticket.
@@ -41,9 +41,9 @@ The picker the owner described (mockups rendered 2026-11-13, not tracked):
 - A due-only item shows only the right half-circle on its due day plus a
   dashed ghost left half-circle; dragging the ghost out creates a start.
 
-The row's pencil edit (in flight 2026-11-13, plan
-`ai-docs/.plans/2026-11/13-1025-tracker-row-edit-uses-composer.md`) reuses the
-composer's chips; it keeps today's due step until this ticket lands.
+The row's pencil edit (landed 2026-11-13 in `8acecdba1`, `startRowEdit` in
+`tracker.js`) reuses the composer's chips (`nrowChips`, `newMenu`); it keeps
+today's due step until this ticket lands.
 
 ## Decisions
 
@@ -81,17 +81,64 @@ composer's chips; it keeps today's due step until this ticket lands.
 - The hook event gains an optional `Start` beside `Due`; a `start` query
   filter is out of scope. Rejected: adding the filter now (no requested view
   filters by start).
-- Standalone `todo/` feat with no parent: no tracker epic exists, and the
-  pencil edit row is a plan in flight, not a ticket.
+- Compatibility (475, announced default, verified at fact population
+  2026-11-13): T0. Older readers decode payloads leniently
+  (`wstracker/payload.go` `parsePayload`), `checkFields` never enumerates
+  keys, and the fold reads named keys only, so `start` is ignored on create
+  and on edits that also set a known field. Caveat: an older reader flags a
+  start-only `item.edit` as "nothing to edit" (`check.go`, the `itemFields`
+  check) and does not apply it; the flag is non-fatal and matches how
+  `labels` shipped (`bd3517fc9`, v0.49.0). Rejected: bundling an unchanged
+  `due` into start-only edits to dodge the flag (it would overwrite a
+  concurrent `due` write).
+- Reasons parity is in scope (announced default, fact population): every
+  new flagged reason (invalid `start`, start after due, the edit-key list
+  message gaining `start`) is added to `wstracker/testdata/reasons.json` and
+  to the reference engine `ai-docs/ref/tracker-mockup/engine.js`, because
+  `TestFlaggedReasons` pins each reason against both.
+- Standalone `todo/` feat with no parent: no tracker epic fits (the only tracker
+  epic, `261110-epic-ws-tracker-team-feedback`, scopes the first team-introduction
+  feedback, not owner picker feedback), and the pencil edit row is a plan in
+  flight, not a ticket.
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin-tool/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
 - Manuals: `ai-docs/manuals/release-compatibility.md` (the tier is settled
   before release), `ai-docs/manuals/shipped-surface-boundary.md` (MCP tool
   argument text), `ai-docs/manuals/ws-mcp.md`.
 - Every new user-facing string goes into all `internal/wsi18n/tables/*.json`.
 - Dashboard theme: dark; the picker fits a ~280 px pane in its one-month
   state.
+
+## Prior Decisions
+
+- 3634ebdf (2026-11-13, commit): "Compatibility recorded as T0 conditional on readers tolerating an unknown optional event field; fact population verifies at promotion." — bearing: supports
+- 8acecdba (2026-11-13, commit): "Rejected: leaving the due step as a date input only is unchanged (range picker is out of scope)." — bearing: supports
+- 13cb3f0a (2026-11-13, commit): "Removed the LW per-item in-flight write queue (labelWrite/labelFlush): a single write on close makes it unnecessary." — bearing: supports
+- 1b1d0a9d (2026-11-13, commit): "One save = one commit batch; item.edit carries only changed fields, status/assign events reuse the item menu's events and are sent only when changed and permitted." — bearing: constrains
+- 261110-feat-ws-dashboard-tracker-quick-add-fields (2026-11-10, Decisions): "A due date set at quick-add travels in item.create's existing due field (ItemCreate.Due, internal/wstracker/payload.go), not as a separate item.edit." — bearing: constrains
+- 261110-feat-ws-tracker-daemon-event-hook (2026-11-10, Decisions): "Event JSON fields (user, (281)). v; id; kind; ts; store; item {id, alias, title, kind}; actor; target (optional); detail {status, comment, due...}" — bearing: constrains
+- 261108-feat-ws-tracker-caller (2026-11-08, Result): "tk:item.edit clears with clear=\"body due\". A due cleared this way is written as null." — bearing: constrains
+- 4449ed91 (2026-11-08, commit): "Every flagged reason has a reasons.json case checked against the engine by the generator and against Go by TestFlaggedReasons, so the strings cannot drift between the two." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | wstracker (payload.go, check.go, state.go, view.go, query.go), mcp/tracker_tools.go, wstrackerhook/event.go, wsdashboard/assets/tracker.js and tracker.css, wsi18n/tables/*.json, wstracker/testdata/reasons.json and ai-docs/ref/tracker-mockup/engine.js (parity) |
+| scope.surface | cross-module | new item.create and item.edit payload field start, MCP tracker_update start attribute and clear value, ItemView.start, hook Detail |
+| scope.new_public_symbol | yes | ItemCreate.Start, ItemView.Start, wstrackerhook Detail.Start, start argument on tk item.create and item.edit |
+| scope.new_type_contract | yes | ItemCreate.Start string, ItemView.Start *string, start-after-due refusal reason, clear accepts start |
+| scope.test_surface | existing | wstracker/tracker_test.go, wstracker/testdata/reasons.json, mcp/tracker_tools_test.go, wsdashboard/tracker_quickadd_test.go, wsdashboard/tracker_draft.test.js |
+| complexity.reuse_points | confirmed | due field path (validDue, checkFields, itemFields fold, buildItemCreate and buildItemEdit, clear handling) read for reuse |
+| complexity.side_effect_risk | moderate | item.edit with only start is flagged nothing to edit by older readers (check.go:738-743); picker replaces three due entry points |
+| risk.correctness | moderate | cross-field start-after-due rule on edits that set one side, with concurrent due writes and clear semantics |
+| risk.fit | moderate | two-panel pointer-drag range picker is new UI shared by menu, composer and pencil edit row (plan in flight) |
+| risk.test | moderate | drag and paging behaviour has no existing asset-test harness beyond tracker_draft.test.js; headless render only |
+| risk.security_or_contract | moderate | tracker event field and MCP argument change; tier T0 holds for readers but not for a start-only edit on older readers, and the golden reasons parity must be extended |
 
 ## Phases
 
@@ -105,8 +152,9 @@ composer's chips; it keeps today's due step until this ticket lands.
   is set (exact format is the worker's call, matching the existing D-N / D-day
   / D+N badge); gantt and calendar use the start date.
 - Tests: `wstracker` store and validation tests (including start after due
-  refused, clear, replay), MCP argument tests, tracker asset tests for the
-  picker's one-write-on-close behaviour.
+  refused, clear, replay), reasons parity (`reasons.json`, reference
+  `engine.js`, `TestFlaggedReasons`), MCP argument tests, tracker asset tests
+  for the picker's one-write-on-close behaviour.
 - Verification: `go test` for the touched packages on the remote build host;
   a headless render of the picker's three states (one month with a range, two
   panels (non-adjacent months) with a range across them, due-only with the ghost handle); state
