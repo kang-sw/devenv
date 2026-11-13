@@ -327,7 +327,7 @@ cached 2 minutes); an answer with a size still unmeasured says `sizing`, and
 rules below and holds one message: a line in the page's language asking the
 session to clean up unused worktrees, then the pool as text, cut at 48 KiB
 with a `... N more worktrees` line (singular for one). The dashboard never
-removes or releases a worktree itself.
+removes or releases a pooled worktree itself.
 
 Every session page carries the session rail (`internal/wsdashboard/rail.go`,
 `pageview_rail.go`): the listed sessions grouped by repository (or plain
@@ -345,6 +345,17 @@ for a newly shown repository alone, and on `POST /rail/refresh` (own Origin;
 409 with no streaming page). Change counts come from the newest session
 snapshot in the worktree; the rail never reads a working tree. Drafts,
 stars, and collapsed workspaces are browser-local (`assets/rail.js`).
+A linked worktree row that no pool root holds (the source's pools, the
+default `<root>/../.ws-worktrees/<name>`, the legacy `<root>/.ws-worktrees`)
+offers a delete to a browser on this machine (`railworktreedelete.go`):
+`POST /rail/worktrees/delete/preview` answers the check (changes, a detached
+HEAD's unreached commits, initialized submodules, lock, the sessions and
+terminals in it, whether force is needed, and a token of that state); `POST
+/rail/worktrees/delete` checks again and answers 409 with the fresh check
+when it is refused (primary, pooled, missing, locked, a live session or
+terminal), needs force the submit did not carry, or was forced on a stale
+token; else it runs `git worktree remove [--force]` from the primary and
+keeps the branch. A viewer elsewhere gets 404.
 Ended sessions fold apart under each worktree and stay listed as long as
 the index holds them (their registry directory and session record exist),
 past the index page's 24-hour window: on a daemon that hosts lead sessions
