@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -39,18 +41,109 @@ func TestPlanUsageWindowClassification(t *testing.T) {
 	}
 }
 
+// A copied test executable is the fake app-server on every platform. It
+// validates the protocol before answering; no shell or owner login is used.
+func init() {
+	if os.Getenv("WS_TEST_USAGE_CODEX") != "1" || len(os.Args) != 2 || os.Args[1] != "app-server" {
+		return
+	}
+	dec := json.NewDecoder(os.Stdin)
+	read := func(method string, id int) {
+		var request struct {
+			JSONRPC string `json:"jsonrpc"`
+			Method  string `json:"method"`
+			ID      *int   `json:"id"`
+			Params  struct {
+				Client struct {
+					Name    string `json:"name"`
+					Version string `json:"version"`
+				} `json:"clientInfo"`
+			} `json:"params"`
+		}
+		if dec.Decode(&request) != nil || request.JSONRPC != "2.0" || request.Method != method ||
+			(id == 0 && request.ID != nil) || (id != 0 && (request.ID == nil || *request.ID != id)) {
+			os.Exit(23)
+		}
+		if method == "initialize" && (request.Params.Client.Name != "ws-dashboard" || request.Params.Client.Version != "1") {
+			os.Exit(23)
+		}
+	}
+	read("initialize", 1)
+	fmt.Println(`{"id":1,"result":{}}`)
+	read("initialized", 0)
+	read("account/rateLimits/read", 2)
+	fmt.Println(os.Getenv("WS_TEST_USAGE_CODEX_REPLY"))
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	os.Exit(0)
+}
+
 func fakeUsageCodex(t *testing.T, s *planUsageStore, reply string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("fake codex shell contract runs on the remote Linux test host")
+	t.Setenv("WS_TEST_USAGE_CODEX", "1")
+	t.Setenv("WS_TEST_USAGE_CODEX_REPLY", reply)
+	original, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "codex")
-	// Fake process contains no owner's login, endpoint, or executable.
-	script := "#!/bin/sh\nread init\nprintf '%s\\n' '{\"id\":1,\"result\":{}}'\nread ready\nread query\nprintf '%s\\n' '" + reply + "'\nread end\n"
-	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+	binary, err := os.ReadFile(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "fake codex with spaces")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "codex")
+	if runtime.GOOS == "windows" {
+		path += ".exe"
+	}
+	if err := os.WriteFile(path, binary, 0700); err != nil {
 		t.Fatal(err)
 	}
 	s.codexBinary = path
+	if runtime.GOOS == "windows" {
+		shim := filepath.Join(dir, "codex.cmd")
+		if err := os.WriteFile(shim, []byte("@echo off\r\n\""+path+"\" %*\r\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		s.codexBinary = shim
+	}
+}
+
+func TestPlanUsageFakeRejectsInvalidProtocol(t *testing.T) {
+	for _, input := range []string{
+		`{"jsonrpc":"2.0","id":9,"method":"initialize"}`,
+		`{"jsonrpc":"2.0","id":1,"method":"account/rateLimits/read"}`,
+		"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{\"name\":\"ws-dashboard\",\"version\":\"1\"}}}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"account/rateLimits/read\"}",
+	} {
+		s := usageTestStore(t)
+		fakeUsageCodex(t, s, `{"id":2,"result":{}}`)
+		path := s.codexBinary
+		if runtime.GOOS == "windows" {
+			path = strings.TrimSuffix(path, ".cmd") + ".exe"
+		}
+		cmd := exec.Command(path, "app-server")
+		cmd.Stdin = strings.NewReader(input)
+		if err := cmd.Run(); err == nil || cmd.ProcessState.ExitCode() != 23 {
+			t.Fatal("fake accepted invalid request sequence")
+		}
+	}
+}
+
+func TestPlanUsageCodexBatchShim(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows batch invocation")
+	}
+	s := usageTestStore(t)
+	fakeUsageCodex(t, s, `{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":7,"windowDurationMins":10080}}}}`)
+	batch := strings.TrimSuffix(s.codexBinary, ".cmd") + ".bat"
+	if err := os.Rename(s.codexBinary, batch); err != nil {
+		t.Fatal(err)
+	}
+	s.codexBinary = batch
+	if _, err := s.queryCodex(context.Background()); err != nil {
+		t.Fatal("batch app-server query failed")
+	}
 }
 
 func setPiUsageAuth(t *testing.T, s *planUsageStore, expires int64) {

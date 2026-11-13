@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/execjob"
@@ -100,10 +98,7 @@ func (s *planUsageStore) queryCodex(ctx context.Context) (planUsageEntry, error)
 			return planUsageEntry{}, errPlanUsage
 		}
 	}
-	cmd := exec.CommandContext(ctx, binary, "app-server")
-	if runtime.GOOS == "windows" && (strings.EqualFold(filepath.Ext(binary), ".cmd") || strings.EqualFold(filepath.Ext(binary), ".bat")) {
-		cmd = exec.CommandContext(ctx, "cmd.exe", "/d", "/s", "/c", `"`+binary+`" app-server`)
-	}
+	cmd := planUsageCommand(ctx, binary)
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
