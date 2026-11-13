@@ -1,9 +1,9 @@
 // Loaded before Pi's CLI, in the same process and module graph. Do not resolve
 // settings in Go or a probe process: Pi's two-pass loader owns project trust,
 // package filters, discovery, ordering, initialization caching and /reload.
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const wsNames = new Set(["ws", "wsflow", "ws-pi-bridge", "wsflow-pi-bridge"]);
 function manifest(dir) {
@@ -73,7 +73,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const [sdk, cli, ...args] = process.argv.slice(2);
   const sdkURL = pathToFileURL(sdk);
   const { DefaultPackageManager } = await import(sdkURL.href);
-  const { getResourcePathKey } = await import(new URL("./core/source-info.js", sdkURL).href);
+  // Bundled SDK/CLI share resolver classes in chunks. The pure path-key
+  // helper is only published in the unbundled tree; it owns no class state.
+  const localKey = new URL("./core/source-info.js", sdkURL);
+  const keyURL = existsSync(fileURLToPath(localKey)) ? localKey : new URL("../core/source-info.js", sdkURL);
+  const { getResourcePathKey } = await import(keyURL.href);
   installResolver(DefaultPackageManager, getResourcePathKey);
   process.argv = [process.execPath, cli, ...args];
   await import(pathToFileURL(cli).href);

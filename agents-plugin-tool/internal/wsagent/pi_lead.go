@@ -151,7 +151,10 @@ func piSDKPaths(command string, pre []string) (cli, sdk string, err error) {
 			Name string `json:"name"`
 		}
 		if readErr == nil && json.Unmarshal(raw, &pkg) == nil && (pkg.Name == "@earendil-works/pi-coding-agent" || pkg.Name == "@mariozechner/pi-coding-agent") {
-			sdk = filepath.Join(dir, "dist", "index.js")
+			// npm releases use dist/bundle/cli.js; its resolver classes
+			// are distinct from dist/index.js. Patch the SDK adjacent to
+			// the actual CLI, never a different build's module graph.
+			sdk = filepath.Join(filepath.Dir(cli), "index.js")
 			if fileExists(sdk) {
 				return cli, sdk, nil
 			}

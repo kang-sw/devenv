@@ -154,6 +154,35 @@ func TestPiLeadMissingBundleFallback(t *testing.T) {
 	}
 }
 
+func TestPiLeadSDKMatchesCLIBuild(t *testing.T) {
+	for _, build := range []string{"dist", "dist/bundle"} {
+		t.Run(build, func(t *testing.T) {
+			root := t.TempDir()
+			piLeadFile(t, filepath.Join(root, "package.json"), `{"name":"@earendil-works/pi-coding-agent"}`)
+			// Both builds may be installed. The package main (dist/index.js)
+			// must not be selected for npm's dist/bundle/cli.js entry.
+			piLeadFile(t, filepath.Join(root, "dist", "index.js"), "")
+			cli := filepath.Join(root, filepath.FromSlash(build), "cli.js")
+			sdk := filepath.Join(filepath.Dir(cli), "index.js")
+			piLeadFile(t, cli, "")
+			piLeadFile(t, sdk, "")
+			realCLI, _ := filepath.EvalSymlinks(cli)
+			gotCLI, gotSDK, err := piSDKPaths("node", []string{cli})
+			if err != nil || gotCLI != realCLI || gotSDK != filepath.Join(filepath.Dir(realCLI), "index.js") {
+				t.Fatalf("CLI %q SDK %q, error %v", gotCLI, gotSDK, err)
+			}
+			if build == "dist/bundle" {
+				if err := os.Remove(sdk); err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err := piSDKPaths("node", []string{cli}); err == nil {
+					t.Fatal("missing bundled SDK must not fall back to unbundled classes")
+				}
+			}
+		})
+	}
+}
+
 func TestPiLeadUnixNPMSymlink(t *testing.T) {
 	spec, root := piLeadFixture(t)
 	piLeadBundle(t, root)

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -98,17 +98,73 @@ test("fallback bridge preserves effective prompt and supplies hosted session ide
   assert(result.systemPrompt.includes("Pass it as session_key"));
 });
 
+test("real npm-bin startup restores ambient extensions using the CLI's own SDK graph", { skip: !process.env.WS_PI_TEST_SDK }, (t) => {
+  let packageRoot = dirname(process.env.WS_PI_TEST_SDK);
+  let pkg;
+  for (;;) {
+    try { pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")); } catch { pkg = undefined; }
+    if (pkg?.name === "@earendil-works/pi-coding-agent" || pkg?.name === "@mariozechner/pi-coding-agent") break;
+    assert.notEqual(dirname(packageRoot), packageRoot, "Pi package manifest not found");
+    packageRoot = dirname(packageRoot);
+  }
+  // Follow the published npm executable, not package.main or a synthetic CLI.
+  const cli = realpathSync(join(packageRoot, typeof pkg.bin === "string" ? pkg.bin : pkg.bin.pi));
+  const sdk = join(dirname(cli), "index.js");
+  const root = fixture(t);
+  const cwd = join(root, "project");
+  const agentDir = join(root, "agent");
+  const marker = file(join(root, "initialized.jsonl"), "");
+  const extension = (path, name, trust = false) => file(path, `import {appendFileSync} from 'node:fs';
+    export default function(pi) {
+      appendFileSync(${JSON.stringify(marker)}, ${JSON.stringify(JSON.stringify(name) + "\n")});
+      ${trust ? "pi.on('project_trust', () => ({trusted:'yes'}));" : ""}
+    }`);
+  extension(join(agentDir, "extensions/user.ts"), "user", true);
+  extension(join(cwd, ".pi/extensions/project.ts"), "project");
+  const explicit = extension(join(root, "explicit.ts"), "explicit");
+  const other = join(root, "other-package");
+  json(join(other, "package.json"), { name: "other", pi: { extensions: ["index.ts"] } });
+  extension(join(other, "index.ts"), "package");
+  const installed = join(root, "installed-ws");
+  json(join(installed, "package.json"), { name: "ws-pi-bridge", pi: { extensions: ["index.ts"] } });
+  extension(join(installed, "index.ts"), "installed-ws");
+  const bundled = extension(join(root, "bundle.ts"), "bundled");
+  json(join(agentDir, "settings.json"), { packages: [installed, other], extensions: [explicit], defaultProjectTrust: "ask" });
+  const adapter = fileURLToPath(new URL("../pi_lead.mjs", import.meta.url));
+  const run = (sdkPath) => {
+    file(marker, "");
+    const child = spawnSync(process.execPath, [adapter, sdkPath, cli,
+      "--offline", "--mode", "rpc", "--no-session", "--list-models", "--no-extensions", "--extension", bundled], {
+      cwd, env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_SKIP_VERSION_CHECK: "1" }, encoding: "utf8", timeout: 30000,
+    });
+    assert.equal(child.status, 0, child.stderr + child.stdout + String(child.error ?? ""));
+    return readFileSync(marker, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  };
+  const initialized = run(sdk);
+  assert.deepEqual([...initialized].sort(), ["bundled", "explicit", "package", "project", "user"]);
+  t.diagnostic(JSON.stringify({ npmBin: cli, sdk, initialized }));
+  const unbundledSDK = join(packageRoot, "dist/index.js");
+  if (sdk !== unbundledSDK) {
+    // Reproduce R1: patching package.main must *not* satisfy this test's
+    // ambient assertions when npm's executable belongs to another graph.
+    assert.deepEqual(run(unbundledSDK), ["bundled"]);
+    t.diagnostic("R1 negative control: unbundled SDK + real bundled npm-bin initialized only bundled (ambient missing)");
+  }
+});
+
 test("incompatible SDK fails closed", () => {
   assert.throws(() => installResolver(class {}, (p) => p), /compatible extension resolver/);
 });
 
-// Set this to the actual installed Pi package's dist/index.js on the remote
+// Set this to the installed Pi CLI's adjacent index.js on the remote
 // verification host. These tests invoke only resource loading, never a model.
 test("native Pi discovery, trust hooks, package filtering, builtins and reload", { skip: !process.env.WS_PI_TEST_SDK }, async (t) => {
   const sdkURL = pathToFileURL(process.env.WS_PI_TEST_SDK);
   const { DefaultPackageManager, DefaultResourceLoader, SettingsManager, ProjectTrustStore } = await import(sdkURL.href);
-  const { getResourcePathKey } = await import(new URL("./core/source-info.js", sdkURL).href);
-  const { resolveProjectTrusted } = await import(new URL("./core/project-trust.js", sdkURL).href);
+  const localCore = new URL("./core/", sdkURL);
+  const core = existsSync(fileURLToPath(localCore)) ? localCore : new URL("../core/", sdkURL);
+  const { getResourcePathKey } = await import(new URL("source-info.js", core).href);
+  const { resolveProjectTrusted } = await import(new URL("project-trust.js", core).href);
   installResolver(DefaultPackageManager, getResourcePathKey);
   for (const trust of ["saved", "never", "ask", "extension"]) {
     await t.test(trust, async (t) => {
