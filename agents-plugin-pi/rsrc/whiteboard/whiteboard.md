@@ -34,7 +34,7 @@ batch may hold several `wb:topic` groups.
 
 | command | attributes | content |
 |---|---|---|
-| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:close`; none with `label` |
+| `wb:topic` | `name`, `label?`, `tickets?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:close`; none with `label` or `tickets` |
 | `wb:body` | none | current content, replaced whole; empty clears it |
 | `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new`, editing current content only |
 | `wb:panel` | `recap`, `id?` | optional payload; `recap` must be nonempty |
@@ -82,6 +82,13 @@ Markdown up to the closing tag.
   first, then a stemless topic's name, then a stemmed topic's label, so an
   old title still reaches an adopted topic. Stems and labels are one
   namespace: a stem or label another topic already uses is refused.
+- Linked tickets: `tickets="<stem> <stem>"` on `wb:topic` links the ticket
+  stems the topic tracks, replacing its whole list; `tickets=""` clears it.
+  The topic bar shows each ticket's current status, and a linked feat, bug,
+  refactor, or chore ticket still in idea, todo, or ready marks the topic as
+  live work. Linking changes no recency, reopens no closed topic, and logs
+  nothing, so send it alone as `<wb:topic name="..." tickets="..."/>`
+  whenever the tickets a topic tracks change.
 - `class`: `policy`, `technical`, `announced`, or `check`, the kinds of ask
   in the workflow manual's `### Asking the user`. A `check` is a gate, not a
   decision class: a request that the user look at, verify, or approve
