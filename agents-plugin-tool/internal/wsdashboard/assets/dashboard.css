@@ -1623,10 +1623,10 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
 .rail .hi.codex { background: #10A37F; }
 /* a stopped (sleeping) session, one with no harness process: the title muted
-   and the harness icon dimmed; a user-stopped one also drops its second line */
+   and the harness icon dimmed, and no second line */
 .rail .rs.stopped .rid { color: var(--wb-muted-fg); }
 .rail .rs.stopped .hi { opacity: .55; }
-.rail .rs.userstop .s2 { display: none; }
+.rail .rs.stopped .s2 { display: none; }
 /* The travelling line: a wedge of a conic fill turning (transform only, so it
    runs on the compositor) behind a mask that keeps just a thin band around
    the icon's border. */

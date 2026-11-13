@@ -526,8 +526,7 @@ func (r RailRow) Stopped() bool {
 }
 
 // UserStopped reports a session the user stopped (the holder's "stop"
-// reason, or the kill a stop falls back to): its row drops the reason line.
-// Any other host exit (a crash, a child that exited) keeps it.
+// reason, or the kill a stop falls back to); an ended row sleeps only then.
 func (r RailRow) UserStopped() bool {
 	return r.Exit != nil && (r.Exit.Reason == "stop" || r.Exit.Reason == "killed")
 }
