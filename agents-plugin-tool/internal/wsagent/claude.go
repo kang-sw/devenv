@@ -333,6 +333,13 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 	if err != nil {
 		return nil, err
 	}
+	if spec.Lead != nil && !(spec.Lead.Holder != nil && spec.Lead.Holder.id != "") {
+		// The command list the dashboard's composer offers: an init, which
+		// brings it, comes only with a turn, so a session nobody has
+		// written to would offer no commands. A rejoin's replay rebuilds
+		// the list it had.
+		p.send(claudeProtocol{}.requestLine(claudeCommandsAsk, map[string]any{"subtype": "initialize"}))
+	}
 	return claudeProcess{streamProcess: p, lead: spec.Lead != nil}, nil
 }
 
@@ -506,6 +513,10 @@ type claudeMapper struct {
 	compactModel  string
 	askModel      string
 	asks          int
+	// described are the descriptions the initialize answer gave the
+	// commands, by name: a turn's init lists names only, and its list
+	// replaces the answer's.
+	described map[string]string
 
 	// compacted is set from a compact_boundary to the next result: the
 	// stream re-emits the last assistant message in between, with no replay
@@ -690,6 +701,9 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 		replies.answer(l.Response.RequestID, controlAnswer{ok: l.Response.Subtype == "success", err: l.Response.Error, body: l.Response.Response})
 		if strings.HasPrefix(l.Response.RequestID, claudeContextAsk) {
 			return m.contextUsage(l)
+		}
+		if l.Response.RequestID == claudeCommandsAsk && m.lead() {
+			return m.initialized(l)
 		}
 	case "control_request":
 		if m.lead() {
@@ -947,11 +961,41 @@ func (m *claudeMapper) leadInit(init claudeInit, replies lineReplies) []Event {
 	if init.SlashCommands != nil {
 		list := make([]wslive.SlashCommand, 0, len(*init.SlashCommands))
 		for _, name := range *init.SlashCommands {
-			list = append(list, wslive.SlashCommand{Name: name})
+			list = append(list, wslive.SlashCommand{Name: name, Description: m.described[name]})
 		}
 		out = append(out, Event{Live: &wslive.Event{Kind: wslive.KindCommands, Commands: list}})
 	}
 	return out
+}
+
+// claudeCommandsAsk is the request id of the initialize control a lead's
+// launch sends for its slash commands (the control answers in print mode
+// without a model turn, seen on 2.1.323).
+const claudeCommandsAsk = "ws-commands"
+
+// initialized reads the initialize answer's commands: the page's list until
+// the first turn's init, which names the commands a message may run and
+// replaces it. A name the harness hides (a leading "__") stays out.
+func (m *claudeMapper) initialized(l claudeLine) []Event {
+	var d struct {
+		Commands []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"commands"`
+	}
+	if l.Response.Subtype != "success" || json.Unmarshal(l.Response.Response, &d) != nil || len(d.Commands) == 0 {
+		return nil
+	}
+	m.described = map[string]string{}
+	list := make([]wslive.SlashCommand, 0, len(d.Commands))
+	for _, c := range d.Commands {
+		if c.Name == "" || strings.HasPrefix(c.Name, "__") {
+			continue
+		}
+		m.described[c.Name] = c.Description
+		list = append(list, wslive.SlashCommand{Name: c.Name, Description: c.Description})
+	}
+	return []Event{{Live: &wslive.Event{Kind: wslive.KindCommands, Commands: list}}}
 }
 
 // claudeContextAsk prefixes the request id of a get_context_usage ask the

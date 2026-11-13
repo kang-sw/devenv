@@ -96,3 +96,21 @@ func TestSupportChatCarriesTheSubagentBadge(t *testing.T) {
 		}
 	}
 }
+
+// TestSubagentBadgeShowsIconAndCount: the badge reads the count only, like
+// the background-task badge beside it, and the word is its title and
+// accessible name.
+func TestSubagentBadgeShowsIconAndCount(t *testing.T) {
+	d, err := dashboardFS.ReadFile("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`if (el && el.textContent !== count) el.textContent = count;`,
+		`badge.setAttribute("aria-label", label);`,
+	} {
+		if !strings.Contains(string(d), want) {
+			t.Errorf("subBadge lacks %q", want)
+		}
+	}
+}

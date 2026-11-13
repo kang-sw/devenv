@@ -75,6 +75,47 @@ func TestClaudeLeadInitReportsSlashCommands(t *testing.T) {
 	}
 }
 
+// TestClaudeLeadInitializeOffersCommandsBeforeAnyTurn: a lead's launch asks
+// the harness to initialize, and its answer is the command list the page
+// offers before the first turn (whose init brings none); a hidden "__" name
+// stays out, a later init keeps the answer's descriptions, and a profile
+// conversation takes no such answer.
+func TestClaudeLeadInitializeOffersCommandsBeforeAnyTurn(t *testing.T) {
+	answer := []byte(`{"type":"control_response","response":{"subtype":"success","request_id":"` + claudeCommandsAsk + `","response":{"commands":[` +
+		`{"name":"compact","description":"Free up context","builtin":true},{"name":"review","description":"Review a branch"},{"name":"__remote-workflow","builtin":true}]}}}`)
+	m := newClaudeMapper(leadSpec())
+	var list *wslive.Event
+	for _, ev := range m.mapLine(answer, nopReplies{}) {
+		if ev.Live != nil && ev.Live.Kind == wslive.KindCommands {
+			list = ev.Live
+		}
+	}
+	if list == nil {
+		t.Fatal("the initialize answer reports no command list")
+	}
+	want := []wslive.SlashCommand{{Name: "compact", Description: "Free up context"}, {Name: "review", Description: "Review a branch"}}
+	if !slices.Equal(list.Commands, want) {
+		t.Fatalf("commands = %+v, want %+v", list.Commands, want)
+	}
+	init := []byte(`{"type":"system","subtype":"init","session_id":"s","tools":[],"slash_commands":["compact","review","ws:lead-run"]}`)
+	var after *wslive.Event
+	for _, ev := range m.mapLine(init, nopReplies{}) {
+		if ev.Live != nil && ev.Live.Kind == wslive.KindCommands {
+			after = ev.Live
+		}
+	}
+	if after == nil || len(after.Commands) != 3 || after.Commands[0].Description != "Free up context" || after.Commands[2].Name != "ws:lead-run" {
+		t.Fatalf("a turn's init keeps the described names: %+v", after)
+	}
+
+	p := newClaudeMapper(claudeSpec(t, `{"backend":"claude"}`))
+	for _, ev := range p.mapLine(answer, nopReplies{}) {
+		if ev.Live != nil {
+			t.Fatalf("a profile conversation takes no command list: %+v", ev)
+		}
+	}
+}
+
 // TestClaudeLeadCommandSplitsTheDrain: messages and commands held during a
 // turn reach the harness in order: the text before a command joined with
 // the claimed mail as one turn, the command alone as its bare typed line
