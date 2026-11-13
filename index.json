@@ -395,7 +395,14 @@
       "registered_at": "2026-11-13T10:25:03Z"
     },
     "261113-bug-ws-release-gate-sweep-fixes": {
-      "registered_at": "2026-11-13T14:00:39Z"
+      "registered_at": "2026-11-13T14:00:39Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T14:32:21Z"
+      }
     },
     "261113-feat-werkschaft-thin-tauri-shell": {
       "registered_at": "2026-11-13T14:07:32Z"
@@ -460,19 +467,6 @@
         "touched_at": "2026-11-13T14:23:48Z",
         "impl": {
           "branch": "impl/develop/goal-nail-bash"
-        }
-      }
-    },
-    "261113-feat-ws-git-merge-large-source-file-warning": {
-      "registered_at": "2026-11-13T13:37:56Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T13:47:18Z",
-        "impl": {
-          "branch": "impl/develop/rake-lanky-liver"
         }
       }
     },
