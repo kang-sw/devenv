@@ -145,8 +145,12 @@
 //
 // opts:
 //   header           the page header element; the drawer hangs from its bottom edge
-//   qsSlot           an element in the header the quick-switcher button and popup
-//                    go into
+//   qsSlot           an element in the header for the search-palette button
+//   searchRows(update) optional host rows: {group (0..4), kind, title, text?,
+//                    hint?, id?, topic?, href?, at?}; session labels, topics,
+//                    bodies, items, answers in that order. Read on open;
+//                    update(rows) may replace them as older board pages load.
+//   searchPick(row)  opens a selected host row; tracker rows keep their actions
 //   pageParent       where the store page node goes; while a store page shows, the
 //                    body carries the class tk-paged and the host's CSS hides its
 //                    own conversation column and session drawer
@@ -5292,7 +5296,7 @@
   function setInert(on) {
     if (!on) { inerted.forEach(function (el) { el.inert = false; }); inerted = []; return; }
     if (inerted.length) return;
-    var keep = [$('tkwin'), $('tkdlg'), $('tktoast'), $('wstoasts'), $('tktip'), $('tkmenu')];
+    var keep = [$('tkwin'), $('tkdlg'), $('tkqpop'), $('tktoast'), $('wstoasts'), $('tktip'), $('tkmenu')];
     Array.prototype.forEach.call(document.body.children, function (el) {
       if (keep.indexOf(el) < 0 && !el.inert) { el.inert = true; inerted.push(el); }
     });
@@ -5625,39 +5629,81 @@
   }
   function leavePage() { history.pushState(null, '', location.pathname + location.search); applyRoute(); }
 
-  // The quick switcher: the magnifier in the header opens one search over the stores (by
-  // name and label) and the items of every store (by title; items hidden by a tombstone
-  // are left out, everything else is visible to every member), read from each store's
-  // current view state. A store opens its page; an item opens its window; a host action
-  // (ext.qsActions) opens its dialog. Arrow keys move, Enter picks, Esc closes, and focus
-  // returns to where it was.
-  var qs = { open: false, items: [], idx: 0, back: null };
+  // One palette: host session/board rows first, tracker rows last. The host
+  // supplies plain text and a picker; the tracker keeps its existing actions.
+  var qs = { open: false, items: [], idx: 0, back: null, rows: [] };
+  // Fuzzy subsequence score. Try each first match so a scattered early match
+  // cannot hide a compact later one. Long prose needs a reasonably dense span.
+  function qScore(text, query, prose) {
+    var s = String(text || '').toLowerCase(), q = query.toLowerCase(), best = null;
+    if (!q) return { score: 0, start: 0, end: 0 };
+    for (var start = s.indexOf(q[0]); start >= 0; start = s.indexOf(q[0], start + 1)) {
+      var pos = start, score = 10 - start * 0.05, run = 1, ok = true;
+      for (var i = 1; i < q.length; i++) {
+        var next = s.indexOf(q[i], pos + 1);
+        if (next < 0) { ok = false; break; }
+        if (next === pos + 1) { run++; score += 10 + run * 4; }
+        else { run = 1; score += 10 - (next - pos - 1) * 2; }
+        pos = next;
+      }
+      if (ok && (!prose || pos - start + 1 <= Math.max(24, q.length * 6)) && (!best || score > best.score)) best = { score: score, start: start, end: pos + 1 };
+    }
+    return best;
+  }
+  function qRank(rows, query) {
+    var q = query.trim().toLowerCase(), jump = /^\.(\d+)$/.exec(q);
+    if (jump) {
+      var ids = rows.filter(function (x) { return x.kind === 'board-item' && x.id.indexOf(jump[1]) === 0; });
+      var exact = ids.filter(function (x) { return x.id === jump[1]; });
+      return (exact.length ? exact : ids).sort(function (a, b) { return Number(a.id) - Number(b.id); });
+    }
+    var hits = [];
+    rows.forEach(function (x, i) {
+      if (!q && x.group !== 1 && x.group !== 3) return;
+      var m = qScore(x.text || x.title, q, x.group === 2 || x.group === 4);
+      if (m) hits.push({ row: x, score: m.score, order: i });
+    });
+    hits.sort(function (a, b) { return a.row.group - b.row.group || (q ? b.score - a.score : (b.row.at || 0) - (a.row.at || 0)) || a.order - b.order; });
+    return hits.map(function (x) { return x.row; });
+  }
+  function qShortcut(e) {
+    if (e.isComposing || e.keyCode === 229 || e.altKey || e.metaKey) return false;
+    if (e.ctrlKey) return !e.shiftKey && (e.code === 'Space' || e.key === ' ' || e.key.toLowerCase() === 'k');
+    return e.key === '/' && !(e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'));
+  }
   function qResults(q0) {
-    var q = q0.trim().toLowerCase();
-    var out = [];
+    var q = q0.trim().toLowerCase(), out = qs.rows.slice();
     order.forEach(function (n) {
       var st = vss[n] ? vss[n].store : { label: '' };
-      if (!q || n.toLowerCase().indexOf(q) >= 0 || String(st.label).toLowerCase().indexOf(q) >= 0) out.push({ kind: 'store', store: n, label: st.label });
+      out.push({ group: 5, kind: 'store', store: n, label: st.label, title: n, text: n + ' ' + (st.label || '') });
     });
-    if (X.qsActions && VS) (X.qsActions(ui.store, VS, q) || []).forEach(function (x) { out.push({ kind: 'action', key: x.key, icon: x.icon, title: x.title, hint: x.hint, tag: x.tag }); });
-    if (q) order.forEach(function (n) {
+    if (X.qsActions && VS) (X.qsActions(ui.store, VS, q) || []).forEach(function (x) { out.push({ group: 5, kind: 'action', key: x.key, icon: x.icon, title: x.title, hint: x.hint, tag: x.tag }); });
+    order.forEach(function (n) {
       var V = vss[n];
       if (!V) return;
       V.itemOrder.forEach(function (id) {
         var it = V.items[id];
-        if (!it.hidden && it.title.toLowerCase().indexOf(q) >= 0) out.push({ kind: 'item', store: n, item: id, title: it.title, alias: it.alias, st: it.kind === 'topic' ? 'topic' : it.status });
+        if (!it.hidden) out.push({ group: 5, kind: 'item', store: n, item: id, title: it.title, alias: it.alias, st: it.kind === 'topic' ? 'topic' : it.status });
       });
     });
-    return out.slice(0, 30);
+    return qRank(out, q);
+  }
+  function qGroup(g) {
+    return [wsT("js.tk.qs.sessions"), wsT("js.tk.qs.topics"), wsT("js.tk.qs.bodies"), wsT("js.tk.qs.questions"), wsT("js.tk.qs.answers"), wsT("js.tk.qs.tracker")][g];
+  }
+  function qExcerpt(text, query) {
+    var m = qScore(text, query.trim(), true), start = m ? Math.max(0, m.start - 35) : 0;
+    return (start ? '…' : '') + text.slice(start, start + 150) + (text.length > start + 150 ? '…' : '');
   }
   function qRender() {
     var list = qs.items = qResults($('tkqin').value), last = null, h = '';
     if (qs.idx >= list.length) qs.idx = Math.max(0, list.length - 1);
     list.forEach(function (x, i) {
-      if (x.kind !== last) { last = x.kind; h += '<li class="qgrp" role="presentation">' + (x.kind === 'store' ? wsT("js.tk.qs.stores") : x.kind === 'action' ? wsT("js.tk.qs.actions") : wsT("js.tk.tab.items")) + '</li>'; }
+      if (x.group !== last) { last = x.group; h += '<li class="qgrp" role="presentation">' + qGroup(x.group) + '</li>'; }
       h += '<li class="qopt' + (i === qs.idx ? ' on' : '') + '" role="option" id="tkqopt-' + i + '" aria-selected="' + (i === qs.idx) + '"' + attr('qi', i) + '>' +
-        (x.kind === 'action' ? '<svg class="i"><use href="' + esc(x.icon || '#tki-plus') + '"/></svg><b>' + esc(x.title) + '</b><span class="muted">' + esc(x.hint || '') + '</span><span class="grow"></span><span class="qk">' + esc(x.tag || '') + '</span>' :
-          x.kind === 'store' ? '<svg class="i"><use href="#tki-tasks"/></svg><b>' + esc(x.store) + '</b><span class="muted">' + esc(x.label) + '</span><span class="grow"></span><span class="qk">' + wsT("js.tk.qs.openpage") + '</span>' :
+        (x.group < 5 ? '<span class="qboard"><b>' + esc(x.group === 2 || x.group === 4 ? qExcerpt(x.title, $('tkqin').value) : x.title) + '</b><span class="muted">' + esc(x.hint || '') + '</span></span><span class="grow"></span><span class="qk">' + esc(x.id ? '(' + x.id + ')' : '') + '</span>' :
+          x.kind === 'action' ? '<svg class="i"><use href="' + esc(x.icon || '#tki-plus') + '"/></svg><b>' + esc(x.title) + '</b><span class="muted">' + esc(x.hint || '') + '</span><span class="grow"></span><span class="qk">' + esc(x.tag || wsT("js.tk.qs.actions")) + '</span>' :
+          x.kind === 'store' ? '<svg class="i"><use href="#tki-tasks"/></svg><b>' + esc(x.store) + '</b><span class="muted">' + esc(x.label) + '</span><span class="grow"></span><span class="qk" title="' + wsT("js.tk.qs.stores") + '">' + wsT("js.tk.qs.openpage") + '</span>' :
           '<span class="sti">' + SI.svg(x.st) + '</span><span class="qt">' + esc(x.title) + '</span><span class="grow"></span><code class="al">' + esc(x.alias) + '</code><span class="qk">' + esc(x.store) + '</span>') + '</li>';
     });
     $('tkqlist').innerHTML = h || '<li class="qnone" role="presentation">' + wsT("js.tk.qs.none") + '</li>';
@@ -5668,19 +5714,21 @@
   function qOpen() {
     if (qs.open) return;
     qs.open = true; qs.idx = 0; qs.back = document.activeElement;
-    $('tkqpop').hidden = false; $('tkqs').setAttribute('aria-expanded', 'true');
+    qs.rows = O.searchRows ? O.searchRows(function (rows) { if (qs.open) { qs.rows = rows; qRender(); } }) : [];
+    $('tkqpop').hidden = false; $('tkqpop').showModal(); $('tkqs').setAttribute('aria-expanded', 'true');
     $('tkqin').value = ''; qRender(); $('tkqin').focus();
   }
-  function qClose(keepFocus) {
+  function qClose() {
     if (!qs.open) return;
-    qs.open = false; $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
+    qs.open = false; $('tkqpop').close(); $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
     var b = qs.back; qs.back = null;
-    if (!keepFocus && b && b.isConnected) b.focus(); else if (!keepFocus) $('tkqs').focus();
+    if (b && b.isConnected) b.focus(); else $('tkqs').focus();
   }
   function qPick(i) {
     var x = qs.items[i];
     if (!x) return;
-    qClose(true);
+    qClose();
+    if (x.group < 5) { if (ui.win) closeItemWindow(); if (O.searchPick) O.searchPick(x); return; }
     if (x.kind === 'action') { if (X.dialogs && X.dialogs[x.key]) openDialog(x.key, {}); else if (X.action) X.action(x.key, null, H); return; }
     if (x.kind === 'store') { if (ui.page !== x.store) location.hash = '#/' + encodeURIComponent(x.store); else $('tkqs').focus(); }
     else if (!openItemWindow(x.store, x.item, { opener: $('tkqs') })) toast(wsT("js.tk.toast.hiddenitem"));
@@ -5828,11 +5876,12 @@
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-menu', id: 'tkmenu', role: 'menu', hidden: '' }));
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
-      '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + '" aria-haspopup="dialog" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>' +
-      '<span class="tk-qpop" id="tkqpop" role="dialog" aria-label="' + wsT("js.tk.qs.tip") + '" hidden>' +
+      '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-haspopup="dialog" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
+    b.appendChild(el('dialog', { class: 'tk tk-palette', id: 'tkqpop', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
+      '<label class="tk-qlabel" for="tkqin">' + wsT("js.tk.qs.tip") + '<kbd>Ctrl+K</kbd></label>' +
       '<input id="tkqin" type="text" role="combobox" aria-controls="tkqlist" aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.qs.placeholder") + '">' +
       '<ul id="tkqlist" role="listbox" aria-label="' + wsT("js.tk.qs.results") + '"></ul>' +
-      '<span class="tk-qhint">' + wsT("js.tk.qs.hint") + '</span></span>'));
+      '<span class="tk-qhint">' + wsT("js.tk.qs.hint") + '</span>'));
   }
   // Delegated handlers act only on the renderer's own nodes, so the host page's clicks,
   // changes, and keys stay the host's.
@@ -5881,7 +5930,7 @@
 
     document.addEventListener('click', function (e) {
       var t = e.target;
-      if (qs.open && !(t.closest && t.closest('#tkqpop, #tkqs'))) qClose(true);
+      if (qs.open && (t === $('tkqpop') || !(t.closest && t.closest('#tkqpop, #tkqs')))) qClose();
       if (mentionBox(t)) mentionSync(); // a click into an @token opens it, elsewhere in the box closes it
       else if (MP && !(t.closest && t.closest('#tkmpop, #cmention'))) mentionClose();
       // a click outside the menu closes it; a click on its own opener toggles it shut
@@ -6158,8 +6207,14 @@
       itemMenu(m.getAttribute('data-mitem') || m.getAttribute('data-item'), m, { x: e.clientX, y: e.clientY });
     });
     document.addEventListener('mouseout', function (e) { if (!e.relatedTarget && tipFor) hideTip(); });
-    $('tkqin').addEventListener('input', function () { qs.idx = 0; qRender(); });
+    document.addEventListener('keydown', function (e) {
+      if (!e.defaultPrevented && qShortcut(e)) { e.preventDefault(); e.stopImmediatePropagation(); qOpen(); }
+    }, true);
+    $('tkqpop').addEventListener('cancel', function (e) { e.preventDefault(); qClose(); });
+    $('tkqin').addEventListener('input', function (e) { if (!e.isComposing) { qs.idx = 0; qRender(); } });
+    $('tkqin').addEventListener('compositionend', function () { qs.idx = 0; qRender(); });
     $('tkqin').addEventListener('keydown', function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); var n = qs.items.length; if (n) { qs.idx = (qs.idx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; qRender(); } }
       else if (e.key === 'Enter') { e.preventDefault(); qPick(qs.idx); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); qClose(); }
@@ -6289,6 +6344,7 @@
       openStore: openStore,
       closeStore: function () { if (ui.open) collapse(); },
       openItemWindow: openItemWindow,
+      leavePage: leavePage,
       viewerChanged: function (id) {
         ui.last = null;
         if (id === ui.store && viewing()) bringUp(id);
