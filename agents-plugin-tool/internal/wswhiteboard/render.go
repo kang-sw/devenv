@@ -62,11 +62,6 @@ type pageAssets struct {
 	chg string
 	// docFrame runs inside a served page's topic-body frame (framedDoc).
 	docFrame string
-	// frameCSSFile and frameJSFile are what every topic-body frame loads
-	// beside the page instead of inlining (framedDoc, FrameAsset): the page
-	// stylesheet plus frameCSS, and docFrame, each under a name that carries
-	// a hash of its bytes.
-	frameCSSFile, frameJSFile frameFile
 	// viewer is the image viewer, a self-contained script.
 	viewer string
 	sprite template.HTML
@@ -162,8 +157,6 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 		sprite:      template.HTML(strings.TrimSpace(get("sprite.svg"))),
 		icons:       map[string]bool{},
 	}
-	a.frameCSSFile = newFrameFile("css", string(a.css)+"\n"+frameCSS)
-	a.frameJSFile = newFrameFile("js", a.docFrame)
 	source := get("page.tmpl")
 	if err != nil {
 		return nil, err
@@ -530,39 +523,6 @@ func (p *pageData) panelHTML(topic, entry, content string, framed bool, a *pageA
 // sizes the frame to its content.
 const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 
-// frameFile is one shared topic-body frame asset: its name, which carries a
-// hash of its bytes, so a new build never changes the bytes under a name a
-// cached frame still loads, and its bytes.
-type frameFile struct {
-	name string
-	data []byte
-}
-
-func newFrameFile(ext, data string) frameFile {
-	sum := sha256.Sum256([]byte(data))
-	return frameFile{name: "wb-frame-" + hex.EncodeToString(sum[:])[:12] + "." + ext, data: []byte(data)}
-}
-
-// FrameAsset returns the bytes and content type of the shared topic-body
-// frame asset called name (framedDoc), or ok false when no current asset has
-// that name. A frame's document loads both by a relative name, so the
-// daemon serves them beside the page that hosts the frames. Neither depends
-// on any session: each is the page stylesheet or the frame script, the same
-// for every viewer.
-func FrameAsset(name string) (data []byte, contentType string, ok bool) {
-	a, err := loadAssets()
-	if err != nil {
-		return nil, "", false
-	}
-	switch name {
-	case a.frameCSSFile.name:
-		return a.frameCSSFile.data, "text/css; charset=utf-8", true
-	case a.frameJSFile.name:
-		return a.frameJSFile.data, "text/javascript; charset=utf-8", true
-	}
-	return nil, "", false
-}
-
 // framedDoc wraps a rendered topic body in the sandboxed frame a served page
 // shows it in, one frame per body. The page lives in the dashboard daemon's
 // origin, whose routes post messages and steers to sessions, so a body's raw
@@ -574,12 +534,10 @@ func FrameAsset(name string) (data []byte, contentType string, ok bool) {
 // a plain link open its new tab (<base target="_blank">) as an ordinary
 // page; there is no allow-forms, allow-top-navigation, or allow-modals.
 //
-// The document loads the page stylesheet, so a body keeps the page's theme
+// The document carries the page stylesheet, so a body keeps the page's theme
 // variables and light/dark switch, and doc-frame.js, which posts the
 // content height and hands the host its marked-link and item-reference
-// clicks (the host's half lives in the dashboard script), both as shared
-// files beside the page (FrameAsset) rather than inline, so a board's
-// frames parse them once and every document stays small. mermaid tells the
+// clicks (the host's half lives in the dashboard script). mermaid tells the
 // frame to load the shared mermaid script beside the page for its own
 // blocks. An image reaches the frame as whatever src ImageSrc (or
 // DocImageSrc) gave it: the frame's requests carry no cookie, so a served
@@ -608,13 +566,13 @@ func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mer
 		entryAttr = ` data-entry="` + template.HTMLEscapeString(entry) + `"`
 	}
 	var doc strings.Builder
-	doc.WriteString(frameDocStart + `<head><meta charset="utf-8"><meta name="wb-doc-key" content="` + template.HTMLEscapeString(key) + `"><base target="_blank"><link rel="stylesheet" href="` + a.frameCSSFile.name + `">`)
-	doc.WriteString(`</head><body class="doc-frame"><div class="doc-body md` + staleClass(stale) + `">`)
+	doc.WriteString(frameDocStart + `<head><meta charset="utf-8"><meta name="wb-doc-key" content="` + template.HTMLEscapeString(key) + `"><base target="_blank"><style>`)
+	doc.WriteString(string(a.css))
+	doc.WriteString("\n" + frameCSS + `</style></head><body class="doc-frame"><div class="doc-body md` + staleClass(stale) + `">`)
 	doc.WriteString(string(body))
 	// The frame cannot reach the host page's wsT, so it carries its own over
-	// the copy button's two strings (code.js), in the page's language, ahead
-	// of the shared frame script that reads it.
-	doc.WriteString(`</div><script>` + string(wsi18n.SubsetScript(p.Lang, codeKeyPrefix)) + `</script><script src="` + a.frameJSFile.name + `"></script>`)
+	// the copy button's two strings (code.js), in the page's language.
+	doc.WriteString(`</div><script>` + string(wsi18n.SubsetScript(p.Lang, codeKeyPrefix)) + "\n" + a.docFrame + `</script>`)
 	if mermaid {
 		doc.WriteString(`<script src="` + template.HTMLEscapeString(p.MermaidFile()) + `"></script><script>wbDocMermaid(function () {` + string(a.mermaidInit) + `});</script>`)
 	}
