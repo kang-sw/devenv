@@ -483,6 +483,10 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .achip.mchip { background: var(--wb-muted); box-shadow: inset 3px 0 0 var(--wb-primary), inset 0 0 0 1px var(--wb-line); }
 .achip.mchip .anote { font-style: italic; }
 .achip.mchip .anote::before { content: none; }
+/* a picked page element and a console block: mention capsules whose bold
+   part is a selector (clipped, monospace) or the error count */
+.achip.pchip b { font-family: var(--wb-mono); font-weight: 600; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.achip.cchip { box-shadow: inset 3px 0 0 var(--wb-warn), inset 0 0 0 1px var(--wb-line); }
 /* the floating button by a board selection that adds it as a mention */
 .wbmention { position: fixed; z-index: 60; border: 0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--wb-primary-fg); background: var(--wb-primary); box-shadow: var(--wb-shadow-hi); }
 .wbmention:hover { background: color-mix(in srgb, var(--wb-primary) 85%, var(--wb-fg)); }
