@@ -722,6 +722,31 @@
     if (!canEdit(it) || !((VS.labels || []).length || VS.viewer.admin)) return '';
     return partHtml('rlab rpe', wsT("js.tk.prop.labels.edit"), partIcon('tag'), it, 'labels');
   }
+  // A list row's title pencil: an editor's way to rename in place (startTitleEdit); it takes no
+  // room until the row is hovered or focused, like the label icon.
+  function titleEdHtml(it) {
+    if (!canEdit(it)) return '';
+    var tip = wsT("js.tk.act.edit");
+    return '<button type="button" class="rp rpe rtit" tabindex="-1"' + attr('act', 'tedit') + attr('item', it.id) + ' aria-label="' + esc(tip) + '"' + tipAttr(tip) + '>' + partIcon('pen') + '</button>';
+  }
+  // The in-place title edit (ui.tedit): Enter and blur save, Esc cancels. One item.edit of the
+  // title, as the edit form's save (saveEdit) sends it; unchanged or blank after trim writes nothing.
+  function startTitleEdit(id, rk) {
+    var it = VS.items[id];
+    if (!it || !canEdit(it)) return;
+    ui.tedit = { item: id, rk: rk, val: it.title };
+    render();
+    var el = $('tktedit');
+    if (el) { el.focus(); el.select(); }
+  }
+  function endTitleEdit(save) {
+    var e = ui.tedit, el = $('tktedit');
+    if (!e) return;
+    ui.tedit = null;
+    var v = el ? el.value.trim() : e.val.trim(), it = VS.items[e.item];
+    render();
+    if (save && it && v && v !== it.title) commit([['item.edit', { item: e.item, title: v }]]);
+  }
   var FLAGGED = {}, UNREAD = {}; // per render: item -> flagged writes in its own thread; item -> unread notification entries
   function warnHtml(it) {
     var f = FLAGGED[it.id] || 0, c = it.concurrent;
@@ -960,6 +985,7 @@
   // open it), anywhere else only focuses the row, where Enter opens it.
   function rowClick(row, t) {
     if (t.closest('a.title')) return true;
+    if (t.closest('input')) return false; // the title's in-place input keeps focus
     row.focus({ preventScroll: true });
     return false;
   }
@@ -1006,11 +1032,13 @@
   // when it is selected: then the selection moves.
   function irow(o) {
     var it = VS.items[o.item], r = o.rec, st = stKey(it, r), ms = mselHas(it.id), ed = canEdit(it) && it.kind !== 'topic';
+    var te = ui.tedit && ui.tedit.item === it.id && ui.tedit.rk === o.rk; // the title is being renamed in place
     if (MSEEN) MSEEN[it.id] = true;
-    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (ms ? ' msel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + (ms || canMove(it) ? ' draggable="true"' : '') +
+    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (ms ? ' msel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + (!te && (ms || canMove(it)) ? ' draggable="true"' : '') +
       attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
       (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + mcbHtml(it, ms) + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stBtn(st, it, r) +
-      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + labelEdHtml(it) + '<span class="grow"></span>' +
+      (te ? '<input type="text" class="tedit" id="tktedit" data-keep autocomplete="off" value="' + esc(ui.tedit.val) + '" aria-label="' + esc(wsT("js.tk.form.title")) + '">' :
+        '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + titleEdHtml(it)) + (o.tsub || '') + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + labelEdHtml(it) + '<span class="grow"></span>' +
       '<span class="ir-acts">' + moreBtn(it.id, '', true) + '</span>' + whoHtml(it, canAssign(it, VS.viewer.member)) + priHtml(it, ed) + dueHtml(it, st, ed) + '</div>' +
       '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
   }
@@ -3764,6 +3792,7 @@
   function closeMenu(refocus) {
     if (!MN) return;
     var m = MN, el = m.backEl && m.backEl.isConnected ? m.backEl : m.back && document.querySelector(m.back);
+    var lw = labelPending(m); // the labels step's pick, written once as the menu closes
     MN = null;
     $('tkmenu').hidden = true; $('tkmenu').innerHTML = '';
     document.body.classList.remove('tk-menuon');
@@ -3772,6 +3801,7 @@
       if (!el.matches('a[href], button, input, [tabindex]')) el = el.querySelector('a[href], button, [tabindex]');
       if (el) el.focus({ preventScroll: true });
     }
+    if (lw) commit(lw);
   }
   function menuBack() {
     if (!MN.from) { closeMenu(true); return; }
@@ -4220,8 +4250,10 @@
         return commit([['item.edit', { item: id, due: dv }]]);
       }
       case 'm-due-clear': return commit([['item.edit', { item: id, due: null }]]);
-      case 'm-label': MN.lab = a.getAttribute('data-label'); return labelWrite(it, MN.lab);
-      case 'm-ladd': closeMenu(false); return openDialog('slabel', {});
+      case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lsel = labelToggled(MN.lsel || it.labels, MN.lab); return labelStepRedraw();
+      case 'm-ledit': return labelDialog({ label: a.getAttribute('data-label') });
+      case 'm-lrm': return labelRemove(a.getAttribute('data-label'), function () { if (MN) MN.lab = null; });
+      case 'm-ladd': return labelDialog({});
       case 'm-cc': return commit([['item.cc', { item: id, member: a.getAttribute('data-to') }]]);
       case 'm-handoff': {
         var hp = { item: id, to: a.getAttribute('data-to') }, note = menuNote();
@@ -4443,10 +4475,13 @@
   // The label chip's picker: the store's labels as toggles (the menu stays open across picks).
   // An admin also adds, renames, and removes labels here, through the store settings' own label
   // dialog and remove path (labelRemove), which change the list for every item.
-  function newLabelsHtml(n) {
+  function newLabelsHtml(n) { return labelChecklist(n.labels || []); }
+  // The checklist both pickers share (the quick-add row's and the item menu's labels step): a
+  // checkbox, colour dot, and name per label, cur the picked ids; m-ltog toggles.
+  function labelChecklist(cur) {
     var ls = VS.labels || [], admin = !!VS.viewer.admin;
     var rows = ls.map(function (l) {
-      var on = (n.labels || []).indexOf(l.id) >= 0;
+      var on = cur.indexOf(l.id) >= 0;
       return '<div class="mlrow"><button type="button" class="mi mr" role="menuitemcheckbox" aria-checked="' + on + '" data-mi' + attr('act', 'm-ltog') + attr('label', l.id) + '><span class="cbx"></span>' +
         '<span class="ldot" style="background:' + esc(l.color) + '"></span><span class="ml">' + esc(l.name) + '</span></button>' +
         (admin ? '<button type="button" class="ia" data-mi' + attr('act', 'm-ledit') + attr('label', l.id) + ' aria-label="' + esc(wsT("js.tk.new.labels.edit", l.name)) + '"' + tipAttr(wsT("js.tk.new.labels.edit", l.name)) + '><svg class="i"><use href="#tki-pen"/></svg></button>' +
@@ -4899,47 +4934,38 @@
   function labelToggle(l, on, act, aria) {
     return '<button type="button" class="chip lbl' + (on ? ' on' : '') + '"' + attr('act', act) + attr('label', l.id) + aria + '><span class="ldot" style="background:' + esc(l.color) + '"></span>' + esc(l.name) + '</button>';
   }
-  // The item menu's labels step (the property card's labels button): the store's labels as the
-  // edit mode's chips, each a toggle that writes the item's labels at once and keeps the step open
-  // (wrote -> labelStepRedraw). With no labels in the store it says so, and an admin gets the store
-  // settings' label dialog. The edit mode's picker keeps its own draft and save.
+  // The item menu's labels step (a list row's label icon, the property card's labels button): the
+  // quick-add picker's checklist (labelChecklist) over MN.lsel, a local pick. A toggle only moves
+  // the pick (m-ltog -> labelStepRedraw); the net change is one write when the menu closes
+  // (labelPending, called by closeMenu), none when the pick equals the item's labels. A refused
+  // write leaves the item as the server holds it, the row never drew the pick. With no labels in
+  // the store it says so, and an admin gets the store settings' label dialog.
   function labelStepHtml(it) {
-    var ls = VS.labels || [], cur = LW[it.id] ? LW[it.id].labels : it.labels || [];
-    if (!ls.length) return '<p class="mempty">' + wsT("js.tk.labels.empty") + '</p>' + (VS.viewer.admin ? msep() + mi('m-ladd', esc(wsT("js.tk.new.labels.add")), {}, { icon: 'plus' }) : '');
-    return '<div class="lpick mlpick" role="group" aria-label="' + esc(wsT("js.tk.form.labels")) + '">' + ls.map(function (l, i) {
-      var on = cur.indexOf(l.id) >= 0;
-      return labelToggle(l, on, 'm-label', ' role="menuitemcheckbox" aria-checked="' + on + '" data-mi' + (i ? '' : ' data-autofocus'));
-    }).join('') + '</div>';
+    if (!(VS.labels || []).length) return '<p class="mempty">' + wsT("js.tk.labels.empty") + '</p>' + (VS.viewer.admin ? msep() + mi('m-ladd', esc(wsT("js.tk.new.labels.add")), {}, { icon: 'plus' }) : '');
+    if (!MN.lsel) MN.lsel = (it.labels || []).slice();
+    return labelChecklist(MN.lsel);
   }
   // An item's labels with lid toggled, in the store's list order (labels no longer listed drop).
   function labelToggled(cur, lid) {
     var has = (cur || []).indexOf(lid) >= 0;
     return (VS.labels || []).map(function (l) { return l.id; }).filter(function (x) { return x === lid ? !has : (cur || []).indexOf(x) >= 0; });
   }
-  // The labels step's writes. A toggle builds on the pick still being written (LW), not on
-  // it.labels, which lags until the write returns: built on it.labels, a second quick toggle would
-  // write a list without the first and undo it. While one write is in flight the next toggles only
-  // move the pick (the step draws it) and go as one write of the latest pick once it returns, so the
-  // writes stay in order. A refused write drops the pick, and the step draws the item again. LW
-  // keeps a pick per item id: one shared pick, replaced by a toggle on another item, would drop the
-  // first item's toggles still waiting on its write.
-  var LW = {};
-  function labelWrite(it, lid) {
-    var w = LW[it.id];
-    if (w) { w.labels = labelToggled(w.labels, lid); w.dirty = true; return labelStepRedraw(); }
-    w = LW[it.id] = { item: it.id, labels: labelToggled(it.labels, lid), dirty: false };
-    labelFlush(w);
+  // The write closing menu m owes: its labels pick against the item's labels (labels no longer
+  // listed drop from the pick), null when nothing changed or the item or the edit right is gone.
+  function labelPending(m) {
+    var it = m.kind === 'item' && m.step === 'labels' && m.lsel && VS && VS.items[m.item];
+    if (!it || !canEdit(it)) return null;
+    var picked = m.lsel.filter(function (x) { return !!labelOf(x); });
+    if (picked.slice().sort().join(' ') === (it.labels || []).filter(function (x) { return !!labelOf(x); }).sort().join(' ')) return null;
+    return [['item.edit', { item: it.id, labels: picked }]];
   }
-  function labelFlush(w) {
-    w.dirty = false;
-    commit([['item.edit', { item: w.item, labels: w.labels }]], function () {
-      if (LW[w.item] !== w) return;
-      if (w.dirty) labelFlush(w); else delete LW[w.item];
-    }, null, function () {
-      if (LW[w.item] !== w) return;
-      delete LW[w.item];
-      if (MN && MN.kind === 'item' && MN.step === 'labels') labelStepRedraw();
-    });
+  // The store label dialog from the labels step: the pick is written first, the dialog opens once
+  // that write returns (a written batch closes any open dialog).
+  function labelDialog(arg) {
+    var ev = labelPending(MN);
+    MN.lsel = null;
+    closeMenu(false);
+    if (ev) commit(ev, function () { openDialog('slabel', arg); }); else openDialog('slabel', arg);
   }
   // The labels step after a write: the property card drew again, so the step re-anchors on its new
   // button, redraws over the written item, and keeps focus on the toggled chip. It closes when the
@@ -4954,7 +4980,7 @@
     MN.backEl = bk; MN.rect = bk.getBoundingClientRect();
     $('tkmenu').innerHTML = menuHtml();
     placeMenu();
-    var f = (MN.lab && $('tkmenu').querySelector('[data-act="m-label"][data-label="' + CSS.escape(MN.lab) + '"]')) || $('tkmenu').querySelector('[data-mi]');
+    var f = (MN.lab && $('tkmenu').querySelector('[data-act="m-ltog"][data-label="' + CSS.escape(MN.lab) + '"]')) || $('tkmenu').querySelector('[data-mi]');
     if (f) f.focus({ preventScroll: true });
   }
   // The item window's edit mode and a comment's edit in place.
@@ -5784,6 +5810,7 @@
         else if (k === 'iedit-save') saveEdit();
         else if (k === 'ilabel' && ui.iedit) { var il = ui.iedit.labels, ix = il.indexOf(d.label); if (ix >= 0) il.splice(ix, 1); else il.push(d.label); render(); }
         else if (k === 'lsearch') labelSearch(d.label);
+        else if (k === 'tedit') startTitleEdit(d.item, (a.closest('.irow') || a).getAttribute('data-rk'));
         else if (k === 'claimf') claimableFilter();
         else if (k === 'slabel-rm') labelRemove(d.label);
         else if (k === 'iedit-x') endEdit();
@@ -5914,6 +5941,7 @@
       if (t.id === 'tknew' && ui.nrow[ui.store]) ui.nrow[ui.store].val = t.value;
       else if (t.id === 'tkknew' && ui.knew[ui.store]) ui.knew[ui.store].val = t.value;
       else if (t.id === 'tksub' && ui.sub) ui.sub.val = t.value;
+      else if (t.id === 'tktedit' && ui.tedit) ui.tedit.val = t.value;
       else if (t.id === 'tkaq' && MN && MN.step === 'assign') { var as = asgState(); as.q = t.value; as.idx = 0; asgDraw(); }
       else if (t.id === 'tkmq' && MN) { MN.q = t.value; var ml = $('tkmenu').querySelector('.mlist'); if (ml) ml.innerHTML = mqList(VS.items[MN.item]); }
       else if (t.id === 'tkmvq' && MN && MN.mv) { MN.q = t.value; var mvl = $('tkmenu').querySelector('.mlist'); if (mvl) mvl.innerHTML = moveList(MN.mv); }
@@ -5992,6 +6020,12 @@
       if (row && !row.contains(e.relatedTarget)) placeMore(row);
       linkHi(own(e.target) && e.target.closest('.kcard, .citem'));
     });
+    // focus leaving the title's input saves it (Enter and Esc end it first, so this sees no edit).
+    // Deferred: a re-render replaces the input and puts focus back on its new one, which is no leaving.
+    document.addEventListener('focusout', function (e) {
+      if (e.target.id !== 'tktedit' || !own(e.target)) return;
+      setTimeout(function () { if (ui.tedit && document.activeElement !== $('tktedit')) endTitleEdit(true); }, 0);
+    });
     document.addEventListener('focusin', function (e) {
       if (MP && e.target.id !== MP.box) mentionClose();
       var row = own(e.target) && e.target.closest('.irow'), card = own(e.target) && e.target.closest('.kcard, .citem');
@@ -6027,6 +6061,11 @@
     });
     // the assign popover's rows and chip buttons act on click without taking focus from its search field
     $('tkmenu').addEventListener('mousedown', function (e) { if (e.target.closest('.ap-list .aopt, .ap-chips .ax')) e.preventDefault(); });
+    // focus leaving the labels step (not into its opener, whose click toggles it shut) applies the pick
+    $('tkmenu').addEventListener('focusout', function (e) {
+      var to = e.relatedTarget;
+      if (MN && MN.kind === 'item' && MN.step === 'labels' && to && !$('tkmenu').contains(to) && !(MN.backEl && MN.backEl.contains(to))) closeMenu(false);
+    });
     $('tkmenu').addEventListener('mousemove', function (e) {
       var o = e.target.closest('.aopt[data-ai]'), i = o && Number(o.getAttribute('data-ai'));
       if (!o || !MN || !MN.as || i === MN.as.idx) return;
@@ -6075,6 +6114,7 @@
         var esc1 = e.key === 'Escape';
         if (id === 'tknew') { if (plain) { e.preventDefault(); createNew(); } else if (esc1) { e.preventDefault(); closeNewRow(); } return; }
         if (id === 'tkknew') { if (plain) { e.preventDefault(); createKnew(); } else if (esc1) { e.preventDefault(); closeKnew(); } return; }
+        if (id === 'tktedit') { if (plain) { e.preventDefault(); endTitleEdit(true); } else if (esc1) { e.preventDefault(); endTitleEdit(false); } return; }
         if (id === 'tksub') { if (plain) { e.preventDefault(); createSub(); } else if (esc1) { e.preventDefault(); closeSub(); } return; }
         if (id === 'iw-etitle' || id === 'iw-eproj') { if (plain || chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
         if (t.hasAttribute('data-mention')) {
