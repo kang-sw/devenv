@@ -269,8 +269,13 @@ func TestPiMapperToolTurn(t *testing.T) {
 	if len(batches) != 3 {
 		t.Fatalf("each assistant message's calls are one batch: %v", batches)
 	}
-	if len(replies.sent) != 1 || replies.sent[0]["type"] != "get_session_stats" {
-		t.Fatalf("the settled turn asks for session statistics: %v", replies.sent)
+	if len(replies.sent) < 2 {
+		t.Fatalf("running and settled turns ask for session statistics: %v", replies.sent)
+	}
+	for _, sent := range replies.sent {
+		if sent["type"] != "get_session_stats" {
+			t.Fatalf("unexpected mapper request: %v", sent)
+		}
 	}
 }
 

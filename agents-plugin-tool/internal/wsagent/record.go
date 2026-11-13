@@ -344,6 +344,9 @@ func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer
 	st.SetAdapter(adapter)
 	if prev, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
 		st.SeedFinished(prev)
+		if u := prev.Usage; u != nil {
+			_, _ = st.Apply(wslive.Event{Kind: wslive.KindStatus, Context: u.Context, Cost: u.Cost, Limits: u.Limits}, now().UnixMilli())
+		}
 		// The command list too: a session whose process is not running
 		// reports it again only at its next turn (claude) or start (pi),
 		// and the page offers commands only while the list is there.

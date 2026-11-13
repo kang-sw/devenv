@@ -569,7 +569,7 @@ func (p *piProcess) TurnRunning() (bool, error) {
 // system message to the tool check, assistant text to final replies, tool
 // calls to the lead's batch (one per assistant message), compaction to
 // compact events, agent_settled to the turn's end, session statistics
-// (asked for after each turn) to usage and the session id, and the hosted
+// (asked for during and after each turn) to usage and the session id, and the hosted
 // lead's subagent widget (piAgentsWidgetKey) to subagent rows.
 type piMapper struct {
 	spec    StartSpec
@@ -580,8 +580,13 @@ type piMapper struct {
 	// asked for, not a failure.
 	aborted atomic.Bool
 
-	messages int
-	turnErr  string
+	messages    int
+	turnErr     string
+	lastStatsAt int64
+	// Receipt-time streaming span, excluding request and tool latency. A
+	// missing/burst-flushed stream has no usable rate.
+	outputStartedAt int64
+	outputTps       *float64
 }
 
 func newPiMapper(spec StartSpec) *piMapper {
@@ -616,9 +621,10 @@ type piMessage struct {
 	ToolsAdded []struct {
 		Name string `json:"name"`
 	} `json:"toolsAdded"`
-	StopReason   string `json:"stopReason"`
-	ErrorMessage string `json:"errorMessage"`
-	Timestamp    int64  `json:"timestamp"`
+	StopReason   string             `json:"stopReason"`
+	ErrorMessage string             `json:"errorMessage"`
+	Timestamp    int64              `json:"timestamp"`
+	Usage        *wslive.TokenUsage `json:"usage"`
 }
 
 type piBlock struct {
@@ -703,8 +709,24 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 	case "agent_start":
 		// Workers need the same boundary when rebuilding a held RPC stream.
 		return []Event{{TurnStart: true}}
+	case "message_start":
+		var msg piMessage
+		if json.Unmarshal(l.Message, &msg) == nil && msg.Role == "assistant" {
+			m.outputStartedAt = 0
+		}
+	case "message_update":
+		if m.outputStartedAt == 0 {
+			m.outputStartedAt = now
+		}
 	case "message_end":
-		return m.message(l.Message, now)
+		out := m.message(l.Message, now)
+		var msg piMessage
+		if json.Unmarshal(l.Message, &msg) == nil && msg.Role == "assistant" {
+			m.askStats(replies, now, false)
+		}
+		return out
+	case "turn_end":
+		m.askStats(replies, now, false)
 	case "tool_execution_end":
 		out := m.batches.endCall(l.ToolCallID, l.IsError, now)
 		var result struct {
@@ -739,7 +761,7 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		}
 		return []Event{{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: phase, Trigger: trigger}}}
 	case "agent_settled":
-		replies.send(map[string]any{"type": "get_session_stats"})
+		m.askStats(replies, now, true)
 		if m.spec.Lead != nil {
 			replies.send(piGetCommands)
 		}
@@ -761,6 +783,16 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		}
 	}
 	return nil
+}
+
+// askStats coalesces busy message/turn boundaries. Settlement always gets a
+// final refresh, even when the last mid-turn request was recent.
+func (m *piMapper) askStats(replies lineReplies, now int64, settled bool) {
+	if !settled && m.lastStatsAt != 0 && now-m.lastStatsAt < 1000 {
+		return
+	}
+	m.lastStatsAt = now
+	replies.send(map[string]any{"type": "get_session_stats"})
 }
 
 // recoveryReply reads Pi's saved RPC messages only after get_state says idle.
@@ -898,6 +930,11 @@ func (m *piMapper) message(raw json.RawMessage, now int64) []Event {
 			}
 		}
 	case "assistant":
+		if u := msg.Usage; u != nil && msg.StopReason != "error" && msg.StopReason != "aborted" && m.outputStartedAt != 0 && now-m.outputStartedAt >= 250 && u.Output >= 8 {
+			rate := float64(u.Output) * 1000 / float64(now-m.outputStartedAt)
+			m.outputTps = &rate
+		}
+		m.outputStartedAt = 0
 		m.messages++
 		group := strconv.Itoa(m.messages)
 		m.turnErr = ""
@@ -922,6 +959,7 @@ func (m *piMapper) message(raw json.RawMessage, now int64) []Event {
 				out = append(out, m.batches.addCall(group, b.ID, b.Name, argsPreview(b.Arguments), now)...)
 			}
 		}
+		out = append(out, m.batches.setUsage(group, msg.Usage)...)
 		return out
 	}
 	return nil
@@ -936,7 +974,7 @@ func (m *piMapper) stats(raw json.RawMessage) []Event {
 	if s.SessionID != "" {
 		out = append(out, Event{SessionID: s.SessionID})
 	}
-	ev := wslive.Event{Kind: wslive.KindStatus}
+	ev := wslive.Event{Kind: wslive.KindStatus, OutputTps: m.outputTps}
 	if s.Cost != nil {
 		ev.Cost = &wslive.UsageCost{USD: *s.Cost, Estimate: true}
 	}
