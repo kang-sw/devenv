@@ -253,6 +253,35 @@ func TestTrackerRangeDrawFollowsDrag(t *testing.T) {
 	if !strings.Contains(trackerFn(t, `function rangeInput\(t\)`, false), "rangeFit(r); rangeDraw(t);") {
 		t.Error("rangeInput no longer passes its own input as the redraw source")
 	}
+	if !strings.Contains(trackerFn(t, `function closeMenu\(refocus, quiet\)`, false), "if (m.rg && m.rg.drag) clearInterval(m.rg.drag.tm);") {
+		t.Error("a menu closed mid-drag no longer stops the drag's edge timer")
+	}
+}
+
+// TestTrackerPickerPressKeepsFocus pins that a press on a non-control part
+// of a capsule picker (a day cell, a header) keeps focus where it was
+// (tracker.js rangeDown), so Esc and Tab still reach menuKey; a press on a
+// control, or on another menu, takes focus as usual.
+func TestTrackerPickerPressKeepsFocus(t *testing.T) {
+	runTrackerCases(t, "picker press focus", trackerCheckJS+`
+var MN = null, draws = 0;
+function rangeDraw() { draws++; }
+function rangeFit() {}
+function rangeTick() {}
+var RG_EDGE_MS = 450;
+function $() { return { setPointerCapture: function () {} }; }
+`+trackerFn(t, `function capOn\(\)`, true)+trackerFn(t, `function rangeDown\(e\)`, false)+`
+function press(target) { var e = { button: 0, prevented: 0, target: target, preventDefault: function () { this.prevented++; } }; rangeDown(e); return e.prevented; }
+function el(ctl, day) { return { closest: function (q) { if (/data-rh/.test(q)) return null; if (/data-day/.test(q)) return day ? this : null; return ctl ? this : null; }, getAttribute: function () { return '2026-11-12'; } }; }
+MN = { kind: 'item', step: 'due', rg: { s: '2026-11-10', d: '2026-11-19' } };
+check('a day cell press keeps focus', press(el(false, true)), 1);
+check('a press on an input or button takes focus', press(el(true, false)), 0);
+MN = { kind: 'item', step: 'labels' };
+check('the label picker keeps focus on its text too', press(el(false, false)), 1);
+MN = { kind: 'item', step: 'main' };
+check('other menus are left alone', press(el(false, false)), 0);
+done();
+`)
 }
 
 // TestTrackerLabelPickerDiscard pins the discard capsule and Esc on the label

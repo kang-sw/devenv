@@ -3891,6 +3891,7 @@
     var m = MN, el = m.backEl && m.backEl.isConnected ? m.backEl : m.back && document.querySelector(m.back);
     var lw = labelPending(m), rw = rangePending(m); // the picks, written once as the menu closes
     if (rw && rw.bad) rw = null;
+    if (m.rg && m.rg.drag) clearInterval(m.rg.drag.tm); // a drag cut short: its edge timer stops too
     MN = null;
     $('tkmenu').hidden = true; $('tkmenu').innerHTML = '';
     $('tkcap').hidden = true;
@@ -4584,6 +4585,9 @@
   // (rangeEdge, then every RG_EDGE_MS while it stays out). A tap on a day with neither end set sets the due.
   var RG_EDGE_MS = 450;
   function rangeDown(e) {
+    // On a picker with the capsule, a press on anything but a control (a day, a header, the panel)
+    // keeps focus where it was: focus left on the body would take Esc and Tab away from menuKey.
+    if (capOn() && !e.target.closest('input, button, select, textarea, label, [tabindex]')) e.preventDefault();
     var r = MN && MN.step === 'due' && MN.rg, k = r && e.target.closest('[data-rh]');
     if (!r || e.button > 0) return;
     if (!k) {
