@@ -329,7 +329,14 @@
       "registered_at": "2026-11-09T00:46:52Z"
     },
     "261110-bug-ws-dashboard-conversation-switch-stale-page": {
-      "registered_at": "2026-11-10T14:09:28Z"
+      "registered_at": "2026-11-10T14:09:28Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-13T05:56:38Z"
+      }
     },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
       "registered_at": "2026-11-10T01:04:17Z"
