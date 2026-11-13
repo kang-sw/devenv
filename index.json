@@ -410,6 +410,9 @@
     "261113-bug-ws-release-gate-sweep-fixes": {
       "registered_at": "2026-11-13T14:00:39Z"
     },
+    "261113-feat-werkschaft-thin-tauri-shell": {
+      "registered_at": "2026-11-13T14:07:32Z"
+    },
     "261113-feat-ws-compaction-before-queued-followup": {
       "registered_at": "2026-11-13T14:03:06Z"
     },
