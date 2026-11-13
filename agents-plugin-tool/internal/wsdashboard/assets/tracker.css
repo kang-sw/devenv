@@ -341,7 +341,6 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .irow:is(:hover, :focus-within, .sel) .rpe, .tk .rpe[aria-expanded="true"] { visibility: visible; }
 .tk .rlab, .tk .rtit { display: none; flex: none; width: 18px; justify-content: center; }
 .tk .irow:is(:hover, :focus-within, .sel) :is(.rlab, .rtit), .tk .rlab[aria-expanded="true"] { display: inline-flex; }
-.tk .ir-main .tedit { flex: 1 1 auto; min-width: 8em; height: 24px; padding: 0 6px; border: 0; border-radius: 5px; outline: 1.5px solid var(--wb-primary); background: var(--wb-card); color: var(--wb-fg); font: inherit; font-weight: 600; }
 .tk .wicon { display: inline-flex; flex: none; color: var(--tk-conc); }
 .tk .wicon.flag { color: var(--tk-fail); }
 .tk .udot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); }
@@ -934,6 +933,7 @@ body.tk-menuon .tk .ir-more { visibility: hidden !important; }
    a topic's bubble); a click switches the kind */
 .tk .nrow .nkind { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: -3px; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
 .tk .nrow .nkind .sti-svg { width: 15px; height: 15px; }
+.tk .nrow span.nkind { cursor: default; }
 .tk .nrow .nkind:hover, .tk .nrow .nkind:focus-visible { background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-primary); outline: none; }
 .tk .srows > .subrow { margin: 4px 0; }
 .tk .grow-row + .subrow { margin-left: 0; }
