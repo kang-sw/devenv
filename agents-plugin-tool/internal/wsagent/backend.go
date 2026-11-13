@@ -59,8 +59,10 @@ type StartSpec struct {
 	// harness variables an inherited parent session leaves behind.
 	Env []string
 	// Lead is set for a lead conversation (Profile.Lead): the process starts
-	// as the user's own session does, under a session holder.
+	// as the user's own session does, with unrestricted harness setup.
 	Lead *LeadSpec
+	// Holder selects durable transport independently of lead privileges.
+	Holder *holderChild
 }
 
 // LeadSpec is what a lead conversation's process starts with.
@@ -70,9 +72,6 @@ type LeadSpec struct {
 	// Env is set on the child over the backend's own scrub: the
 	// hosted-session variables.
 	Env map[string]string
-	// Holder runs the child under a session holder; a backend passes the
-	// spec to startChild, which uses it.
-	Holder *holderChild
 }
 
 // MCPCommand is a stdio MCP server's launch command.

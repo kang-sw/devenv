@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
@@ -93,8 +95,8 @@ type Record struct {
 	Parent *ParentRef `json:"parent,omitempty"`
 	Label  string     `json:"label,omitempty"`
 	// TurnOpen is set on a conversation with a Parent while one of its
-	// turns runs: a daemon that exits mid-turn leaves it set, and the next
-	// daemon reports that turn as interrupted when it loads the record.
+	// turns runs: a successor rejoins a held process, or reports interruption
+	// when that process is gone.
 	TurnOpen bool `json:"turn_open,omitempty"`
 	// Tier is the capability tier its spawner chose (small, medium, large,
 	// or xlarge); a conversation it spawns may ask for no higher one.
@@ -115,6 +117,82 @@ type Record struct {
 	// once, since the settles a wait reads are not persisted. Nil before
 	// the first report and while a done turn is held for the children.
 	LastTurn *PendingReport `json:"last_turn,omitempty"`
+	// Worker recovery fields are additive; old writers fall back to interruption.
+	ReportID         string          `json:"report_id,omitempty"`
+	LastReportedTurn string          `json:"last_reported_turn,omitempty"`
+	Capability       string          `json:"capability_secret,omitempty"`
+	Sends            uint64          `json:"sends,omitempty"`
+	Drained          uint64          `json:"drained,omitempty"`
+	TurnMark         uint64          `json:"turn_mark,omitempty"`
+	TurnStartedAt    int64           `json:"turn_started_at,omitempty"`
+	TurnStartSeq     uint64          `json:"turn_start_seq,omitempty"`
+	Voided           uint64          `json:"voided,omitempty"`
+	HeldTurn         *TurnResult     `json:"held_turn,omitempty"`
+	Steered          []steeredReport `json:"steered_reports,omitempty"`
+	SteerSeq         int             `json:"steer_seq,omitempty"`
+	SteerAnswers     int             `json:"steer_answers,omitempty"`
+	SteerAnswerSeq   uint64          `json:"steer_answer_seq,omitempty"`
+
+	// unknown holds newer writers' top-level members across read-modify-write.
+	// It is immutable after decoding, so value copies of Record can share it.
+	unknown map[string]json.RawMessage
+}
+
+// UnmarshalJSON keeps fields this daemon does not know without treating known
+// optional fields as unknown when their next value is omitted.
+func (rec *Record) UnmarshalJSON(data []byte) error {
+	type plain Record
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	fields := reflect.TypeOf(decoded)
+	for i := 0; i < fields.NumField(); i++ {
+		field := fields.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = field.Name
+		}
+		// encoding/json accepts case-insensitive spellings of known names.
+		for key := range members {
+			if strings.EqualFold(key, name) {
+				delete(members, key)
+			}
+		}
+	}
+	*rec = Record(decoded)
+	rec.unknown = members
+	return nil
+}
+
+// MarshalJSON overlays the current known fields without changing the retained
+// unknown members (other copies of this Record may still use them).
+func (rec Record) MarshalJSON() ([]byte, error) {
+	type plain Record
+	raw, err := json.Marshal(plain(rec))
+	if err != nil || len(rec.unknown) == 0 {
+		return raw, err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return nil, err
+	}
+	for key, value := range rec.unknown {
+		if _, known := members[key]; !known {
+			members[key] = value
+		}
+	}
+	return json.Marshal(members)
 }
 
 // PendingReport is a settled turn's report waiting for its conversation
@@ -123,6 +201,7 @@ type Record struct {
 type PendingReport struct {
 	ID     string     `json:"id"`
 	Result TurnResult `json:"result"`
+	Mark   uint64     `json:"mark,omitempty"`
 }
 
 // Parent kinds a ParentRef names.
@@ -150,9 +229,8 @@ type ParentRef struct {
 type QueuedInput struct {
 	Text    string           `json:"text,omitempty"`
 	Command *wsinbox.Command `json:"command,omitempty"`
-	// after is the Runner.Send count the drains before the one that took
-	// it covered (conv.drained); not persisted, as that count is not.
-	after uint64
+	// After is the send coverage before this input's drain.
+	After uint64 `json:"after,omitempty"`
 }
 
 // workDir is the directory the conversation's process runs in.

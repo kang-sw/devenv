@@ -1649,8 +1649,8 @@ func TestPiLeadMapper(t *testing.T) {
 	}
 
 	plain := newPiMapper(piSpec(t, `{"backend":"pi"}`))
-	if evs := plain.mapLine([]byte(`{"type":"agent_start"}`), nopReplies{}); len(evs) != 0 {
-		t.Fatalf("a profile conversation's turns start at its sends: %+v", evs)
+	if evs := plain.mapLine([]byte(`{"type":"agent_start"}`), nopReplies{}); len(evs) != 1 || !evs[0].TurnStart {
+		t.Fatalf("a worker's agent_start rebuilds its held turn: %+v", evs)
 	}
 	if evs := plain.mapLine([]byte(`{"type":"response","command":"compact","success":true}`), nopReplies{}); len(evs) != 0 {
 		t.Fatalf("a profile conversation sends no compact command: %+v", evs)

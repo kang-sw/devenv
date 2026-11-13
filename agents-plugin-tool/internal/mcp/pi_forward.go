@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -28,11 +29,19 @@ const piForwardSlack = 30 * time.Second
 // piForwardTimeout bounds every other forwarded call.
 const piForwardTimeout = 60 * time.Second
 
-// piForward is the token and the daemon's base URL; ok is false when
-// either is missing.
+// piForward finds the current daemon in this server's cache, since the
+// process's inherited endpoint can name a daemon replaced while it ran.
+// The inherited endpoint remains a fallback for older setups and tests.
 func (s *Server) piForward() (token, endpoint string, ok bool) {
 	token = strings.TrimSpace(s.getenv(wsagent.EnvPiToken))
 	endpoint = strings.TrimRight(strings.TrimSpace(s.getenv(wsagent.EnvPiEndpoint)), "/")
+	if token != "" {
+		if dir, err := s.dashboard.stateDir(); err == nil {
+			if ep, err := wsdashboard.ReadEndpoint(dir); err == nil && ep.Port > 0 && ep.Port <= 65535 {
+				endpoint = fmt.Sprintf("http://127.0.0.1:%d", ep.Port)
+			}
+		}
+	}
 	return token, endpoint, token != "" && endpoint != ""
 }
 
@@ -49,36 +58,73 @@ func (s *Server) piForwards() bool {
 // piCall posts one forwarded call to the token route and decodes its
 // answer into out.
 func (s *Server) piCall(ctx context.Context, tool string, body map[string]any, timeout time.Duration, out any) error {
-	token, endpoint, _ := s.piForward()
 	op := strings.TrimPrefix(tool, "pi.")
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+wsagent.RoutePrefix+"/by-token/"+op, bytes.NewReader(raw))
-	if err != nil {
-		return err
+	var waitDeadline time.Time
+	if op == "wait" {
+		waitDeadline = time.Now().Add(durationFromSeconds(body["timeout_s"]))
+		// A retry changes only its remaining wait, not the caller's arguments.
+		copyBody := make(map[string]any, len(body))
+		for key, value := range body {
+			copyBody[key] = value
+		}
+		body = copyBody
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("the dashboard daemon, which runs this subagent's Pi subagents, did not answer at %s: %v", endpoint, err)
+	for {
+		token, endpoint, _ := s.piForward()
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+wsagent.RoutePrefix+"/by-token/"+op, bytes.NewReader(raw))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			err = fmt.Errorf("the dashboard daemon, which runs this subagent's Pi subagents, did not answer at %s: %w", endpoint, err)
+		} else {
+			var answer []byte
+			answer, err = io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+			resp.Body.Close()
+			if err != nil {
+				err = fmt.Errorf("read the dashboard daemon's answer: %w", err)
+			} else {
+				if resp.StatusCode == http.StatusServiceUnavailable && op == "wait" {
+					// A graceful daemon detach has no settlement to return.
+					err = fmt.Errorf("%s", strings.TrimSpace(string(answer)))
+				} else {
+					if resp.StatusCode/100 != 2 {
+						return fmt.Errorf("%s", strings.TrimSpace(string(answer)))
+					}
+					if err := json.Unmarshal(answer, out); err != nil {
+						return fmt.Errorf("the dashboard daemon's answer is not JSON: %v", err)
+					}
+					return nil
+				}
+			}
+		}
+		// Only a disconnected wait is safe to reissue. A spawn/send/stop may
+		// have taken effect before the connection broke; never repeat it.
+		if op != "wait" || ctx.Err() != nil || time.Until(waitDeadline) <= 0 {
+			return err
+		}
+		timer := time.NewTimer(min(100*time.Millisecond, time.Until(waitDeadline)))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		remaining := time.Until(waitDeadline)
+		if remaining <= 0 {
+			return err
+		}
+		body["timeout_s"] = remaining.Seconds()
 	}
-	defer resp.Body.Close()
-	answer, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return fmt.Errorf("read the dashboard daemon's answer: %v", err)
-	}
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("%s", strings.TrimSpace(string(answer)))
-	}
-	if err := json.Unmarshal(answer, out); err != nil {
-		return fmt.Errorf("the dashboard daemon's answer is not JSON: %v", err)
-	}
-	return nil
 }
 
 // handlePiForward runs a pi.* call of a Pi subagent through the daemon.

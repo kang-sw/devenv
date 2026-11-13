@@ -330,7 +330,7 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 		cmd.Env = claudeLeadEnv(spec)
 	}
 	// Read before the start, which fills the holder id for a spawn too.
-	attach := spec.Lead != nil && spec.Lead.Holder != nil && spec.Lead.Holder.id != ""
+	attach := spec.Holder != nil && spec.Holder.id != ""
 	p, err := startChild(spec, cmd, newClaudeMapper(spec), claudeProtocol{})
 	if err != nil {
 		return nil, err

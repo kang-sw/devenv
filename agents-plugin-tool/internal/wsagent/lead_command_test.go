@@ -234,7 +234,7 @@ func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 	eventually(t, "the text before the command", func() bool {
 		return slices.Equal(h.userInputs(holder), []string{"one", "before\n\nFrom a@x: ping"})
 	})
-	wantQueue := []QueuedInput{{Command: &wsinbox.Command{Name: "compact", Args: "keep the names"}}, {Text: "after"}}
+	wantQueue := []QueuedInput{{Command: &wsinbox.Command{Name: "compact", Args: "keep the names"}, After: 1}, {Text: "after", After: 1}}
 	eventually(t, "the rest to be queued", func() bool {
 		rec := h.record(id)
 		return len(rec.Mail) == 0 && sameJSON(t, rec.Queued, mustJSON(t, wantQueue))

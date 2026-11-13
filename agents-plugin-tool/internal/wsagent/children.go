@@ -3,6 +3,7 @@ package wsagent
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -22,8 +23,8 @@ import (
 //     parent and tier, whose profile allows a pi.* tool, gets a capability
 //     token in its attached ws-mcp's environment (EnvPiToken, beside the
 //     daemon's loopback base URL in EnvPiEndpoint). The token is drawn at
-//     every process start, never persisted, and void once the process ends
-//     or the conversation closes. Its key stays a parentless delegate key:
+//     every process start, persisted privately for held workers, and void
+//     once the process ends or the conversation closes. Its key stays a parentless delegate key:
 //     the token, not the key, authorizes the token route below, and only
 //     for the holder's own children.
 //   - Route. POST /agents/by-token/<op> (spawn, list, send, stop,
@@ -73,6 +74,8 @@ const (
 	tokenWaitDefault = 300 * time.Second
 	tokenWaitMax     = 1800 * time.Second
 )
+
+var errDaemonDetached = &requestError{status: http.StatusServiceUnavailable, msg: "the dashboard daemon detached; reissue the wait"}
 
 var errBadToken = &requestError{status: http.StatusUnauthorized, msg: "the capability token is not valid: only a running Pi subagent the dashboard daemon spawned holds one, and it ends with that subagent's process"}
 
@@ -126,6 +129,27 @@ func (r *Runner) issueToken(id string) (token, endpoint string) {
 
 // revokeToken voids conversation id's token: its process ended, or it
 // closed.
+func capabilityHash(token string) string {
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// restoreToken is called only after the holder's recorded association matches.
+func (r *Runner) restoreToken(rec Record) {
+	if rec.Capability == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.tokens == nil {
+		r.tokens, r.tokenOf = map[string]string{}, map[string]string{}
+	}
+	r.tokens[rec.Capability], r.tokenOf[rec.ReplyID] = rec.ReplyID, rec.Capability
+}
+
 func (r *Runner) revokeToken(id string) {
 	r.mu.Lock()
 	if old, ok := r.tokenOf[id]; ok {
@@ -330,6 +354,14 @@ func (r *Runner) serveToken(w http.ResponseWriter, req *http.Request, op string)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	select {
+	case <-r.rejoined:
+	case <-req.Context().Done():
+		return
+	case <-r.quit:
+		writeAnswer(w, 0, nil, errDaemonDetached)
+		return
+	}
 	token, _ := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer ")
 	caller, err := r.tokenHolder(strings.TrimSpace(token))
 	if err != nil {
@@ -484,8 +516,8 @@ func (r *Runner) deliverPending() {
 // steeredReport is a child's report steered into the running turn: seq is
 // its steer command's place among the process's (steerSeq).
 type steeredReport struct {
-	text string
-	seq  int
+	Text string `json:"text"`
+	Seq  int    `json:"seq"`
 }
 
 // takeReport takes a child's report into the conversation: steered into
@@ -497,7 +529,8 @@ func (c *conv) takeReport(text string) {
 		err := st.Steer(text)
 		if err == nil {
 			c.steerSeq++
-			c.steered = append(c.steered, steeredReport{text: text, seq: c.steerSeq})
+			c.steered = append(c.steered, steeredReport{Text: text, Seq: c.steerSeq})
+			c.saveSteered()
 			c.apply(wslive.Event{Kind: wslive.KindUser, Origin: wslive.OriginWhiteboard, Text: text})
 			c.changed(false)
 			return
@@ -517,15 +550,16 @@ func (c *conv) steerAnswered(refusal string) {
 	c.steerAnswers++
 	if refusal != "" {
 		for i, s := range c.steered {
-			if s.seq == c.steerAnswers {
+			if s.Seq == c.steerAnswers {
 				fmt.Fprintf(c.r.opts.Log, "agent %s: the harness refused a steered report (%s); it goes as a turn\n", c.rec.ReplyID, refusal)
 				c.steered = slices.Delete(c.steered, i, i+1)
-				c.update(func(rec *Record) { rec.Reports = append(rec.Reports, s.text) })
+				c.saveSteered()
+				c.update(func(rec *Record) { rec.Reports = append(rec.Reports, s.Text) })
 				break
 			}
 		}
 	}
-	if !c.turn {
+	if !c.turn && !c.replaying {
 		c.unsteer()
 		c.kick()
 	}
@@ -535,8 +569,9 @@ func (c *conv) steerAnswered(refusal string) {
 // loop.
 func (c *conv) steerTaken(text string) {
 	for i, s := range c.steered {
-		if s.text == text {
+		if s.Text == text {
 			c.steered = slices.Delete(c.steered, i, i+1)
+			c.saveSteered()
 			return
 		}
 	}
@@ -553,7 +588,7 @@ func (c *conv) unsteer() {
 		return
 	}
 	for _, s := range c.steered {
-		if s.seq > c.steerAnswers {
+		if s.Seq > c.steerAnswers {
 			return
 		}
 	}
@@ -575,11 +610,19 @@ func (c *conv) requeueSteered() bool {
 	}
 	texts := make([]string, 0, len(c.steered))
 	for _, s := range c.steered {
-		texts = append(texts, s.text)
+		texts = append(texts, s.Text)
 	}
 	c.steered = nil
+	c.saveSteered()
 	c.update(func(rec *Record) { rec.Reports = append(rec.Reports, texts...) })
 	return true
+}
+
+func (c *conv) saveSteered() {
+	if c.rec.HolderID == "" && len(c.rec.Steered) == 0 {
+		return
+	}
+	c.update(func(rec *Record) { rec.Steered = slices.Clone(c.steered); rec.SteerSeq = c.steerSeq })
 }
 
 // holdsReport reports whether a done turn of the conversation waits for
@@ -765,6 +808,9 @@ func (r *Runner) wait(ctx context.Context, id string, timeout time.Duration, asP
 		select {
 		case <-ch:
 		case <-c.done:
+			if !c.isClosed() {
+				return TurnResult{}, errDaemonDetached
+			}
 			return end(TurnClosed)
 		case <-timer.C:
 			return end(TurnRunning)
