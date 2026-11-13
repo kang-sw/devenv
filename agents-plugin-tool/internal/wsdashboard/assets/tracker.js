@@ -302,6 +302,7 @@
     knew: {},             // store -> { val } while the "all" kanban's idea column shows its "+" input row
     sub: null,            // { item: parent, rk: the row it sits under, val } while an "add subtask" input row shows
     iedit: null,          // { item, title, body, project, mpick } while the item window edits the item in place
+    itemDrafts: Object.create(null), // store -> item -> cached draft, or null after discard
     cedit: null,          // { cid, body, mpick } while an own comment is edited in place; mpick: member ids picked with @ meanwhile
     edpv: {},             // editor textarea id -> { text, html, err, busy } while that editor shows its preview (editorHtml)
     eatt: {},             // editor textarea id -> [{oid, name, size, mime}] images uploaded into that editor since it opened (edImages)
@@ -2931,6 +2932,7 @@
     h += '<div class="iw-grid"><div class="iw-main">';
     if (ed) h += '<div class="iw-body iw-edit">' + editorHtml('iw-ebody', { value: ed.body, rows: 5, label: wsT("js.tk.form.body"), pv: 'sh-body' }) +
       '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' + labelPickHtml(ed) +
+      (ed.restored ? '<div class="muted" role="status">Draft restored ' + btn('iedit-discard', 'Discard draft', {}) + '</div>' : '') +
       '<div class="tb">' + btn('iedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('iedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.edit.hint") + '</span></div></div>';
     else if (it.body || it.mentions.length || it.attachments.length)
       h += '<div class="iw-body">' + (it.body ? textBlock('sh-body', 'items', it.id, it.body, attr('focus', 'body')) : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
@@ -3154,7 +3156,7 @@
   // its own draft across a render instead).
   function edKeep(t) {
     if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
-    else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value;
+    else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) { ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value; keepItemDraft(); }
     else if (t.id === 'wk-ebody' && wk().edit) wk().edit.text = t.value;
     else if (t.id === 'wk-epath' && wk().edit) wk().edit.newPath = t.value;
   }
@@ -3632,6 +3634,7 @@
     function gone(n) { return !!n && order.indexOf(n) < 0; }
     var lost = gone(ui.store);
     if (lost) {
+      keepItemDraft();
       ui.store = order[0] || null;
       ui.item = null; ui.win = false; ui.last = null; ui.sel = null; ui.sub = null; ui.iedit = null; ui.cedit = null; ui.replyTo = null; ui.itemChanged = true;
     } else if (!ui.store) ui.store = order[0] || null;
@@ -5095,18 +5098,56 @@
     var f = (MN.lab && $('tkmenu').querySelector('[data-act="m-ltog"][data-label="' + CSS.escape(MN.lab) + '"]')) || $('tkmenu').querySelector('[data-mi]');
     if (f) f.focus({ preventScroll: true });
   }
+  // Each draft has its own key so other items and stores cannot overwrite it. Storage may
+  // be disabled or full; the cached copy still works for the lifetime of this page.
+  function draftBucket(store) { return ui.itemDrafts[store] || (ui.itemDrafts[store] = Object.create(null)); }
+  function draftKey(store, item) { return PFX + 'itemDraft.' + encodeURIComponent(JSON.stringify([store, item])); }
+  function removeItemDraft(store, item) {
+    draftBucket(store)[item] = null;
+    try { localStorage.removeItem(draftKey(store, item)); } catch (err) { /* storage unavailable */ }
+  }
+  function validItemDraft(d, item) {
+    return d && d.item === item && typeof d.title === 'string' && typeof d.origTitle === 'string' &&
+      typeof d.body === 'string' && typeof d.seen === 'string' && typeof d.project === 'string' &&
+      typeof d.origProject === 'string' && Array.isArray(d.base) && Array.isArray(d.labels) &&
+      Array.isArray(d.lorig) && Array.isArray(d.mpick) && (!d.attachments || Array.isArray(d.attachments));
+  }
+  function keepItemDraft() {
+    var e = ui.iedit;
+    if (!e || !ui.store) return;
+    var bucket = draftBucket(ui.store);
+    if (e.title !== e.origTitle || e.body !== e.seen || e.project !== e.origProject || !sameLabels(e.labels, e.lorig)) {
+      e.attachments = (ui.eatt['iw-ebody'] || []).slice();
+      bucket[e.item] = JSON.parse(JSON.stringify(e));
+      try { localStorage.setItem(draftKey(ui.store, e.item), JSON.stringify(bucket[e.item])); } catch (err) { /* storage unavailable */ }
+    } else removeItemDraft(ui.store, e.item);
+  }
+  function restoreItemDraft(store, item) {
+    var bucket = draftBucket(store);
+    if (!Object.prototype.hasOwnProperty.call(bucket, item)) {
+      var saved = null;
+      try { saved = JSON.parse(localStorage.getItem(draftKey(store, item))); } catch (err) { /* storage unavailable or corrupt */ }
+      bucket[item] = validItemDraft(saved, item) ? saved : null;
+    }
+    var d = bucket[item];
+    if (!d) return null;
+    var e = JSON.parse(JSON.stringify(d));
+    e.restored = true;
+    ui.eatt['iw-ebody'] = (e.attachments || []).slice();
+    return e;
+  }
   // The item window's edit mode and a comment's edit in place.
   function startEdit(id) {
     var it = VS.items[id];
     if (!it) return;
     if (!(ui.win && ui.item === id)) showItem(id);
     // seen and base pin the body revision the editor started from; body follows the textarea
-    ui.iedit = { item: id, title: it.title, body: it.body || '', seen: it.body || '', base: (it.bodyRev || []).slice(), project: it.project || '', labels: (it.labels || []).slice(), lorig: (it.labels || []).slice(), mpick: [] };
+    ui.iedit = { item: id, title: it.title, origTitle: it.title, body: it.body || '', seen: it.body || '', base: (it.bodyRev || []).slice(), project: it.project || '', origProject: it.project || '', labels: (it.labels || []).slice(), lorig: (it.labels || []).slice(), mpick: [] };
     delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody'];
     render();
     if ($('iw-etitle')) $('iw-etitle').focus();
   }
-  function endEdit() { ui.iedit = null; render(); var b = $('tkwinbody').querySelector('.iw-more'); if (b) b.focus(); }
+  function endEdit() { if (ui.iedit) removeItemDraft(ui.store, ui.iedit.item); ui.iedit = null; render(); var b = $('tkwinbody').querySelector('.iw-more'); if (b) b.focus(); }
   function saveEdit() {
     var e = ui.iedit, it = e && VS.items[e.item];
     if (!it) return;
@@ -5128,7 +5169,14 @@
       var eas = savedAtts('iw-ebody', ep.body);
       if (eas.length) ep.attachments = eas;
     }
-    commit([['item.edit', ep]], null, function () { ui.iedit = null; });
+    keepItemDraft();
+    var store = ui.store, submitted = JSON.stringify(e);
+    commit([['item.edit', ep]], null, function (results) {
+      if (!results.length || results.some(function (r) { return r.status !== 'applied'; })) return;
+      var bucket = draftBucket(store), d = bucket[e.item];
+      if (d && JSON.stringify(d) === submitted) removeItemDraft(store, e.item);
+      if (ui.iedit === e && JSON.stringify(e) === submitted) { removeItemDraft(store, e.item); ui.iedit = null; }
+    });
   }
   function startCedit(cid) {
     var c = VS.comments[cid];
@@ -5472,7 +5520,7 @@
   function openStore(name) {
     if (ui.open === name) { collapse(); return; }
     if (ui.open) syncNow(ui.open, true); // switching to another store while one is open applies it
-    if (ui.store !== name) { ui.item = null; ui.win = false; ui.last = null; ui.itemChanged = true; $('tkbody').scrollTop = 0; }
+    if (ui.store !== name) { keepItemDraft(); ui.iedit = null; ui.item = null; ui.win = false; ui.last = null; ui.itemChanged = true; $('tkbody').scrollTop = 0; }
     ui.store = name; ui.open = name;
     bringUp(name);
     render();
@@ -5491,6 +5539,8 @@
     if ((AD.stores() || []).indexOf(storeId) < 0) return false;
     var sv = AD.view(storeId);
     if (!sv || !sv.items[itemId]) return false;
+    var switching = !ui.win || ui.store !== storeId || ui.item !== itemId;
+    if (switching) { keepItemDraft(); ui.iedit = null; }
     if (ui.page && ui.page !== storeId) { history.pushState(null, '', '#/' + encodeURIComponent(storeId)); applyRoute(); } // on a store page: go to the item's store page
     if (ui.store !== storeId) {
       if (ui.open) { syncNow(ui.open, true); ui.open = null; }
@@ -5500,6 +5550,7 @@
     if (ui.item !== itemId) { ui.iedit = null; ui.cedit = null; if (ui.sub && ui.sub.rk.indexOf('iw:') === 0) ui.sub = null; }
     if (MN) closeMenu(false);
     ui.item = itemId; ui.win = true; ui.itemChanged = true; ui.aopen = null; ui.replyTo = null; ui.mdraft = []; ui.adraft = [];
+    if (switching) ui.iedit = restoreItemDraft(storeId, itemId);
     ui.focus = focus ? { ev: focus, flash: true } : null;
     render();
     $('tkwin').firstElementChild.focus({ preventScroll: true });
@@ -5566,6 +5617,7 @@
   }
   function closeItemWindow() {
     var back = ui.winReturn;
+    keepItemDraft();
     ui.win = false; ui.winReturn = null; ui.focus = null; ui.replyTo = null; ui.mdraft = []; ui.adraft = []; ui.iedit = null; ui.cedit = null;
     if (ui.sub && ui.sub.rk.indexOf('iw:') === 0) ui.sub = null;
     if (MN) closeMenu(false);
@@ -5614,7 +5666,7 @@
       if (ui.page) syncNow(ui.page, true);
       if (s) {
         if (ui.open) { syncNow(ui.open, true); ui.open = null; }
-        if (ui.store !== s) { ui.item = null; ui.win = false; ui.last = null; ui.sel = null; ui.itemChanged = true; }
+        if (ui.store !== s) { keepItemDraft(); ui.iedit = null; ui.item = null; ui.win = false; ui.last = null; ui.sel = null; ui.itemChanged = true; }
         ui.store = s;
         bringUp(s);
       }
@@ -5922,12 +5974,12 @@
         else if (STEPS[k]) itemMenu(d.item, a, null, { step: k, op: d.op, who: d.who, req: d.req });
         else if (k === 'edit') { closeMenu(false); startEdit(d.item); }
         else if (k === 'iedit-save') saveEdit();
-        else if (k === 'ilabel' && ui.iedit) { var il = ui.iedit.labels, ix = il.indexOf(d.label); if (ix >= 0) il.splice(ix, 1); else il.push(d.label); render(); }
+        else if (k === 'ilabel' && ui.iedit) { var il = ui.iedit.labels, ix = il.indexOf(d.label); if (ix >= 0) il.splice(ix, 1); else il.push(d.label); keepItemDraft(); render(); }
         else if (k === 'lsearch') labelSearch(d.label);
         else if (k === 'tedit') startRowEdit(d.item, (a.closest('.irow') || a).getAttribute('data-rk'));
         else if (k === 'claimf') claimableFilter();
         else if (k === 'slabel-rm') labelRemove(d.label);
-        else if (k === 'iedit-x') endEdit();
+        else if (k === 'iedit-x' || k === 'iedit-discard') endEdit();
         else if (k === 'cedit') startCedit(d.cid);
         else if (k === 'cedit-save') saveCedit();
         else if (k === 'cedit-x') endCedit();
@@ -6266,6 +6318,7 @@
     // the layout follows the width: re-render when it crosses a breakpoint, else refit
     window.addEventListener('resize', function () { if (MN) closeMenu(false); if (MP) mentionSync(); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
     // the store page route: reload on #/<storeId> restores the page; back and forward follow the hash
+    window.addEventListener('pagehide', keepItemDraft);
     window.addEventListener('hashchange', applyRoute);
     window.addEventListener('popstate', function () { if (routeStore() !== ui.page) applyRoute(); });
     // the host opened its own drawer: an open store collapses (and so syncs)
