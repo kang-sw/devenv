@@ -25,3 +25,13 @@ time, which may have added to the load.
   TTL, a clock, a subprocess deadline), or contention on a shared resource?
 - Should the suite be split or sped up, or should the documented verification
   command carry an explicit `-timeout`?
+
+## Investigation (2026-11-13)
+
+The guard's ownership read uses the index's 1.5-second default read timeout;
+a timed-out first read can produce an absent or unknown view. This is a
+possible load-sensitive precondition, not a confirmed cause of the reported
+failure. On w5090 three separate `TestMoveCloseGuard` runs with `-count=3`
+passed; the full suite also passed with `-timeout 900s` and four known tests
+excluded, with `internal/mcp` taking 114 seconds. Neither symptom reproduced,
+and no clear cause was established, so no fix or suite-timeout change was made.

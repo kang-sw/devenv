@@ -53,19 +53,42 @@ func truncateFile(t *testing.T, path string) {
 
 // hostedServerEnv is a hosted server's environment: this process's, with
 // the ws keys dropped, its own config and cache homes, and set applied.
+// Agent-backed tools are enabled by default; set envNoAgent to opt out.
 func hostedServerEnv(t *testing.T, name string, set map[string]string) []string {
 	t.Helper()
 	base := map[string]string{
 		wsconfig.EnvConfigHome: filepath.Join(t.TempDir(), name+"-config"),
 		wsstate.EnvCacheHome:   filepath.Join(t.TempDir(), name+"-cache"),
 		wsrsrc.EnvRsrcRoot:     absRsrcRoot(t),
-		envNoAgent:             "1",
 		"PATH":                 os.Getenv("PATH"),
 	}
 	for k, v := range set {
 		base[k] = v
 	}
 	return hostedEnv(base)
+}
+
+// TestHostedServerEnvAgentMode permits agent-backed tools by default,
+// while permitting tests to explicitly exercise agentless mode.
+func TestHostedServerEnvAgentMode(t *testing.T) {
+	processEnvFixture(t)
+	for _, tc := range []struct {
+		name string
+		set  map[string]string
+		want bool
+	}{
+		{"default", nil, true},
+		{"agentless", map[string]string{envNoAgent: "1"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := hostedServerEnv(t, tc.name, tc.set)
+			s := NewServerWithOptions(ServerOptions{Root: t.TempDir(), Version: "test", Env: env, OwnerPID: os.Getppid()})
+			// exec.spawn is hidden from tools/list even when calls are allowed.
+			if got := s.toolAllowed("exec.spawn"); got != tc.want {
+				t.Fatalf("exec.spawn allowed = %t, want %t", got, tc.want)
+			}
+		})
+	}
 }
 
 // TestHostedServerCanonicalizesRootsThroughItsOwnGit pins canonicalGitRoot
@@ -178,8 +201,7 @@ func TestHostedToolsRunGitOnTheConnectionPATH(t *testing.T) {
 	runGit(t, root, "commit", "-q", "-m", "init")
 	// A sparse checkout makes every ticket read consult git for the scope.
 	runGit(t, root, "sparse-checkout", "set", "ai-docs")
-	// Not agentless: the exec tools are agent-backed.
-	env := hostedServerEnv(t, "hosted", map[string]string{"PATH": gitDir, "WS_TEST_GIT_LOG": logPath, envNoAgent: ""})
+	env := hostedServerEnv(t, "hosted", map[string]string{"PATH": gitDir, "WS_TEST_GIT_LOG": logPath})
 	s := NewServerWithOptions(ServerOptions{Root: root, Version: "test", Env: env, OwnerPID: os.Getppid()})
 	key, _ := parseLoginResponse(t, callLogin(t, s, 1, root, nil))
 
