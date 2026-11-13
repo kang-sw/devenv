@@ -3,7 +3,7 @@ title: "Dashboard rail: delete a linked worktree with a preview-and-confirm moda
 sage-review-design: required
 sage-review-completeness: required
 related:
-  261020-feat-worktree-profiles: "worktree.remove stays pool-only; profile pre_remove hooks (see (512))"
+  261020-feat-worktree-profiles: "worktree.remove stays pool-only; profile pre_remove hooks (see (519))"
   260525-feat-ws-dashboard-workroot-polishing-backlog: "dropped follow-up of the archived Rust deletion policy"
   261113-feat-ws-dashboard-iframe-shell: "moves the rail, and this ticket's row action and modal, into the shell document"
 ---
@@ -116,9 +116,9 @@ Research (2026-11-13):
 
 ## Open Decision Queue
 
-Last ID: (512)
+Last ID: (519)
 
-(512) [open] [policy] What dashboard deletion does with a pool worktree's profile `pre_remove` hooks
+(519) [open] [policy] What dashboard deletion does with a pool worktree's profile `pre_remove` hooks
 - `worktree.remove` (`mcp/worktree_remove.go:100-127`) reads the worktree marker and runs the profile's `pre_remove` hooks before removing; a failing hook refuses the removal and a quarantine marker is cleared. Decision 6 runs a plain `git worktree remove`, so followed literally the dashboard skips them and leaks what they release (ports, containers, databases). The archived Rust policy predates profiles (like leases, decision 8).
 - a: run the hooks through the shared helper (decision 11) exactly as `worktree.remove` does; a failing hook refuses deletion, shown in the modal, and force does not override it; the preview lists the hooks that will run.
 - b: skip the hooks and show a notice in the modal that cleanup will not run.

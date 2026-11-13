@@ -3,8 +3,8 @@ title: "Playbook text: legacy ws-agent-spawn idiom and delegate-refused config.r
 related:
   261112-research-ws-hosted-pi-missing-workflow-tools: finding source (decision 390)
   261113-feat-ws-pi-mini-lead-profile: neighbour (Pi mini-lead profile)
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: blocked
+sage-review-completeness: blocked
 ---
 
 # Playbook spawn idiom and delegate resolve_agent
@@ -30,7 +30,7 @@ Two shipped playbook text issues, independent of the Pi allowlist:
 
 ## Decisions
 
-- Tier: T0 (playbook content only).
+- Tier: T0 (playbook content plus one additive delegate-role tool permission, (511)).
 - (478)=b (owner, 2026-11-13): the Pi spawn idiom switches at render time.
   An MCP-only Pi session (a `pi.spawn` child, or a hosted Pi lead running on
   the MCP bridge without the `agents-plugin-pi` extension) gets
@@ -41,10 +41,16 @@ Two shipped playbook text issues, independent of the Pi allowlist:
   Rejected: (a) repointing the `pi` row for everyone (native Pi leads would
   be told a tool they lack, reversing e4cf74ad); (c) leaving the idiom
   unchanged (hosted Pi workers keep the wrong tool name).
-- The `config.resolve_agent` fix covers `ticket-worker-elevated` (ws and
-  wsflow copies), the only delegate-rendered playbook found calling it; the
-  worker greps the rsrc trees for any other delegate-rendered site
-  (technical, (482)-(488) acknowledged 2026-11-13).
+- (511)=b (owner, 2026-11-13: "이게 리드쪽 플레이북이랑 일관된다고
+  봅니다."): the delegate role is allowed `config.resolve_agent`, read-only
+  like `config.get` (`server.go` `roleAllowsTool`), so the
+  `ticket-worker-elevated` step that resolves the child tier through it
+  stays, for every harness, consistent with the lead playbooks. Tier stays
+  T0 (an additive tool permission). Rejected: (a) rendering with
+  `playbook.render(tier_override)` and spawning at the returned model
+  (rewrites the playbook step, diverges from the lead-side flow); (c) no
+  tier choice for delegate-key workers (narrows the 260911 D1 "tier
+  resolution is mandatory").
 - **Switch signal and full MCP-only row** (design review 2026-11-13,
   autonomous): MCP-only Pi sessions probably do not render as harness `pi`:
   the server returns `pi` only for clientInfo `ws-pi-bridge` (sent by the
@@ -74,15 +80,6 @@ Two shipped playbook text issues, independent of the Pi allowlist:
 - Separate ticket from the mini-lead profile because this changes shipped
   playbook text. Rejected: fixing it inside the profile ticket.
 
-## Open Decision Queue
-
-Last ID: (511)
-
-(511) [open] [policy] How a non-Pi delegate worker picks its child tier once `config.resolve_agent` is gone from `ticket-worker-elevated` (completeness review: missing)
-- `roleDelegate` refuses every `config.*` tool except `config.get` (`server.go` `roleAllowsTool`), so Claude and Codex workers rendering `ticket-worker-elevated` hit the same refusal as Pi; the ticket named only the Pi replacement (`pi.spawn` tier). The `claudeSpawnIdiom` comment (`playbook_tools.go` ~L113) also says workers spawn from `config.resolve_agent` output.
-- On MAIN's board as (511); options and recommendation as posted there (rec a: the worker gets its child tier through `playbook.render` `tier_override` / the implicit fixed-tier variables, `wsrsrc.ImplicitVariableNames`).
-> a, per the board.
-
 ## Constraints
 
 - Shipped text must not depend on anything repo-specific
@@ -109,7 +106,7 @@ Last ID: (511)
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | playbook_tools.go, playbook_tools_test.go, ticket-worker-elevated.md in agents-plugin/rsrc, agents-plugin-wsflow/rsrc and agents-plugin-pi/rsrc, both rsrc manifests |
+| scope.span | multi-file | server.go roleAllowsTool and its role test, playbook_tools.go, playbook_tools_test.go, ticket-worker-elevated.md in agents-plugin/rsrc, agents-plugin-wsflow/rsrc and agents-plugin-pi/rsrc, both rsrc manifests |
 | scope.surface | internal | no exported symbol changes; SpawnIdiom value and playbook prose only (T0) |
 | scope.new_public_symbol | no | none |
 | scope.new_type_contract | no | none |
@@ -119,7 +116,7 @@ Last ID: (511)
 | risk.correctness | moderate | the pi harness row also serves native Pi where ws-agent-spawn is live, so the right idiom is unsettled |
 | risk.fit | moderate | native-Pi versus hosted-Pi distinction is not modelled by the single pi terminology key |
 | risk.test | moderate | the pinned test and Pi delegation-flow tests change; wsflow mirror drift tests must pass |
-| risk.security_or_contract | low | playbook text only, T0, no tool or argument surface change |
+| risk.security_or_contract | low | T0: playbook text plus an additive read-only config.resolve_agent permission for the delegate role ((511)=b); no tool or argument shape change |
 
 ## Phases
 
@@ -133,9 +130,10 @@ Last ID: (511)
   fallback), not from a new caller-supplied argument; name the signal in the
   Result. Update the pinned row test (`playbook_tools_test.go`) and add a
   test per branch.
-- Rework the `config.resolve_agent` step in `ticket-worker-elevated` (and any
-  other playbook a delegate renders) so a delegate-key worker does not call
-  it; use the `pi.spawn` tier argument for Pi.
+- Allow `config.resolve_agent` for the delegate role in `roleAllowsTool`
+  ((511)=b) and add a role test; the `ticket-worker-elevated` resolve step
+  stays. In the MCP-only Pi row, the spawn idiom passes the resolved tier to
+  `pi.spawn`.
 - Mirror the changes into `agents-plugin-wsflow/` per the mirroring manual
   and into `agents-plugin-pi/rsrc/`; re-hash both rsrc manifests.
 - Overlap: ready `261113-feat-ws-ticket-visual-reference-and-ask-classes`
@@ -146,6 +144,28 @@ Last ID: (511)
   `ExploreAgent`), at least one test through the real detection path (from
   the caller's session key or initialize to the rendered idiom, not a
   synthetic harness value), `TestPiMirrorUpToDate`, and the wsflow
-  runtime-contract and skill-shim drift tests pass; a rendered
-  `ticket-worker-elevated` shows no `config.resolve_agent` step for a
-  delegate key and tells a Pi worker to pick the tier through `pi.spawn`.
+  runtime-contract and skill-shim drift tests pass; a
+  delegate-key session's `config.resolve_agent` call succeeds (role test)
+  while other `config.*` writes stay refused; a rendered
+  `ticket-worker-elevated` for an MCP-only Pi caller names `pi.spawn` with the
+  resolved tier.
+
+## Blocked (2026-11-13)
+
+### Design Reviewer — concern
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | MCP-only Pi sessions are probably not detected as harness pi | important | autonomous |
+| 2 | ExploreAgent also names a tool MCP-only sessions lack | important | autonomous |
+| 3 | The resolve_agent refusal hits every harness, but only the Pi replacement is named | minor | autonomous |
+| 4 | Third mirror not named | minor | autonomous |
+| 5 | No launch-mode field exists, and adding one changes the tier note | minor | autonomous |
+| 6 | Same file as a ready ticket | minor | autonomous |
+| 7 | Cross-ticket [261113-fix-ws-playbook-spawn-idiom-and-delegate-resolve-agent, 261113-bug-ws-hosted-pi-start-misses-uninstalled-extension-deps]: single bridge-fallback signal; bundle-loaded counts as native | minor | autonomous |
+
+### Completeness Reviewer — block
+
+| # | Title | Severity |
+|---|-------|----------|
+| 1 | Non-Pi delegate worker child-tier selection unspecified (settled by owner (511)=b) | important |

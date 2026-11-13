@@ -26,7 +26,11 @@ start (`tracker.js` 2449-2454 and 2473, `it.started || it.ts`; the calendar view
 Owner decision (whiteboard (13), option a): add an optional start-date field
 and build the range picker; captured as this ticket.
 
-The picker the owner described (mockups rendered 2026-11-13, not tracked):
+The picker the owner described and approved ((497)=ok, owner 2026-11-13).
+Approved visual reference: `ai-docs/tickets/assets/261113-feat-ws-tracker-start-date-range-picker/range-picker-mockup.html`
+(MAIN board panel p4, latest version e104, "목업 v1 (스크립트 오류 수정본):
+한 달 · 두 패널 · due만 있는 경우"; the HTML fragment is wrapped in a minimal
+standalone shell):
 
 - One highlighted span on the month grid from start to due. Its left end is a
   left half-circle handle (start), its right end a right half-circle handle
@@ -161,5 +165,8 @@ today's due step until this ticket lands.
   for the picker's one-write-on-close behaviour.
 - Verification: `go test` for the touched packages on the remote build host;
   a headless render of the picker's three states (one month with a range, two
-  panels (non-adjacent months) with a range across them, due-only with the ghost handle); state
-  what was not checked interactively.
+  panels (non-adjacent months) with a range across them, due-only with the ghost handle), each
+  compared side by side against the matching state of the approved reference
+  `ai-docs/tickets/assets/261113-feat-ws-tracker-start-date-range-picker/range-picker-mockup.html`
+  (list both paths and the result per state); state what was not checked
+  interactively.
