@@ -19,14 +19,19 @@ const (
 	// global layer and the manifest default for it, and refuses a write at any
 	// other scope.
 	DashboardLANKey = "dashboard.lan_enabled"
+	// The machine-wide mailbox sweep likewise reads only the global value.
+	DashboardMailboxUndeliveredKey = "dashboard.mailbox_undelivered_minutes"
 )
 
 // manifestGlobalOnlyKeys are manifest-declared keys that pin themselves
 // global-only through wsconfig. The manifest namespace check treats a
 // registered key as ws-mcp's own, so it skips these.
-var manifestGlobalOnlyKeys = map[string]struct{}{DashboardLANKey: {}}
+var manifestGlobalOnlyKeys = map[string]struct{}{DashboardLANKey: {}, DashboardMailboxUndeliveredKey: {}}
 
-func init() { wsconfig.RegisterGlobalOnly(DashboardLANKey) }
+func init() {
+	wsconfig.RegisterGlobalOnly(DashboardLANKey)
+	wsconfig.RegisterGlobalOnly(DashboardMailboxUndeliveredKey)
+}
 
 // DashboardSettings is the dashboard configuration a stdio server reads once
 // at startup.
