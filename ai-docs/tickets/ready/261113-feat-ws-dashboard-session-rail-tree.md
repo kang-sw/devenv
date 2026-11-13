@@ -636,6 +636,73 @@ Verification:
   waits on approval (the roll-up badge is visible on 메인 only while
   collapsed). Screenshots at the default rail width and the overlay rail.
 
+### Result (764f4c60c) - 2026-11-14
+
+Landed in 6c7678eab, d0f1f5bb7, 5f3c6bb09, 1970aafeb, 92e2f5d35 and
+764f4c60c.
+
+What landed:
+- `WsRail.dropZone(d, t, frac)` in rail.js is the pure zone and validity
+  function.
+  - `d` and `t` come from `WsRail.rowFacts(row)`: `{rid, ws, group, live,
+    parent, kids, star, first}`.
+  - It returns `{zone, ref, op}`, `{refusal: <code>}` or `null`.
+  - The refusal codes are the same as the route's, and each refusal follows the
+    route's check order for the op the drop would post.
+  - `dropNoop` and `moveRow` sit beside it. Phase 4's keyboard path reuses
+    them.
+- The Go view nests children under their parent, inside a sibling
+  `<div class="rkids" data-parent>`.
+  - A child row is one line, carries its message as its `title`, shows no star,
+    and shows a branch tag when its worktree group differs from its parent's.
+  - The parent's roll-up marks are always rendered: the `.kap` approval badge
+    with the child count, and the working orb. CSS shows them only while the
+    parent is collapsed.
+  - Orphans follow Decision 7: the parent's slot in the same worktree, else the
+    head of their own group.
+- The client drag uses three zones per row: a quarter line before, a quarter
+  line after, and a middle child zone with an outline, a tint and "↳".
+  - A drop line sits at the indent of the level it lands on.
+  - A parent drags with its whole unit.
+  - A drop posts `attach`, `detach` or `move`. A refusal toasts the mapped
+    reason.
+- Collapse:
+  - The set is kept per browser in localStorage under `ws.dashboard.railkids`,
+    and the parent shows a chevron with the child count.
+  - Left and Right on a focused parent row collapse and expand it, only with no
+    modifier key.
+  - Children step in 16 px, or 12 px in the overlay rail.
+
+Verification:
+- `gofmt`, `go build ./...`, `go vet` and
+  `go test ./internal/wsdashboard/ ./internal/wsi18n/...` pass. These include
+  the node zone tests and the Go view tests listed above.
+- `node scripts/rail-headless.mjs` passes all 17 scenarios, among them the
+  new `tree` scenario:
+  - attach EXEC and UI under 메인;
+  - reorder the children;
+  - detach one by a top-level line;
+  - collapse 메인 while UI waits on approval (seeded through the snapshot's
+    permission phase): the roll-up badge shows only while collapsed.
+  - Screenshots were taken at the column and overlay widths.
+
+Decisions:
+- A session leaves the rail only by leaving the index, because the dashboard has
+  no session-forget route. Its link is then dropped by the Phase 2 read filter
+  and prune, so no forget hook was added.
+- "After" an expanded parent lands before its first child, at the child indent.
+- A parent dragged over another parent's child is refused as `depth`.
+- The refused-hint scenario now reads the cross-worktree and cross-star
+  refusals on a row's top edge, because the middle of the row is now a valid
+  attach target.
+- The non-English entries of the `rail.kids.*` keys are unchecked worker
+  translations.
+
+Known limits:
+- A child whose own worktree group has no top-level row has no drop line for a
+  detach. Phase 4's Alt+← and the context menu cover that case.
+- The collapse set never prunes ids.
+
 ### Phase 4: context menu and keyboard path
 
 Decisions 11, 12.
