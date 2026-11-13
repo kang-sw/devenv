@@ -707,6 +707,8 @@ details.panel .body { container-type: inline-size; }
    bar; the topic clips its sides): the card scrolling under a stuck bar
    showed through them. */
 .wb-rail .topic > .tophead.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
+/* A stuck head keeps its recap to two lines: the full recap would take most of a short viewport. */
+.wb-rail .topic > .tophead.wb-stuck .tsub > .trecap .rtext { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 /* the book button stays at the card's top and scrolls away under a stuck head, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
 .wb-rail .topic.has-doc:has(> details.tdoc) > .tophead.wb-stuck > .tbar { padding-right: 12px; }
 /* The check pill of a stuck head lifts the topic's check list into the head
