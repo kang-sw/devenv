@@ -48,6 +48,15 @@ established causes.
   especially whiteboard NOTE typing latency. Owner answer 2026-11-13, recorded
   as the lead's reading (assumed): the board note pen editor feels much slower
   than typing in the main left composer. Rejected: measuring only one scenario.
+- Owner input 2026-11-13: the whiteboard page gets extremely long; the owner
+  asks for rendering/caching logic for long content (e.g. not rendering
+  hidden/collapsed boxes, caching long content efficiently). The dashboard is
+  not React: it is server-rendered HTML plus vanilla JS assets with no build
+  step, regions replaced via `innerHTML` (see Observations). Keep the
+  measure-first decision: techniques are picked by measured effect. The
+  in-flight wb-stream mockup-G work (latest 3 panels expanded, height-limited
+  stream with "load older") already reduces the initial DOM; measure after it
+  lands.
 
 ## Constraints
 
@@ -82,9 +91,24 @@ Result and rank hotspots. Priority per (417): (b) idle CPU first.
   per navigation) and is addressed by
   `261113-feat-ws-dashboard-iframe-shell`; this ticket measures (d) but does
   not restructure navigation.
+- Long-whiteboard case: on a very long board, record DOM node count,
+  layout/style recalculation time, and per-keystroke cost while typing a board
+  note. Take it both before and after the wb-stream mockup-G work.
 
 ### Phase 2: Optimize measured hotspots
 
 Optimize only the top measured hotspots from Phase 1, using the simplest fix
 for each. Re-measure with the same scenarios and record before/after numbers.
 No intended visual change; LOOK before/after captures confirm no regression.
+
+Candidate techniques for long whiteboard content, to evaluate against the
+Phase 1 long-whiteboard measurements, cheapest first; pick by measured effect,
+not all by default:
+
+1. CSS `content-visibility: auto` with `contain-intrinsic-size` on panels and
+   topic sections, so off-screen boxes skip layout and paint.
+2. Lazy DOM: collapsed panels, hidden `<details>`, and settled-item bodies are
+   not built until opened.
+3. Keyed incremental updates instead of whole-region `innerHTML` replacement
+   for the board.
+4. A per-topic rendered-HTML cache keyed by content hash.
