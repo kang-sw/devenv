@@ -882,7 +882,9 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
 
 /* ===== drawer: the side panels pulled down from the top =====
    Fixed over the page on both session pages, so opening it moves nothing
-   under it. .dr-in matches .dwrap's width; the clip reveals the sheet from
+   under it. .dr-in matches .dwrap's width below 1600px and spans the
+   window from it, so the handles (the drawer's, the git chips, the
+   tracker's row) sit at the window's right edge; the clip reveals the sheet from
    the header's bottom (--drtop) and the handle rides its bottom edge, or
    hangs from the page's top edge while closed. The page script sets the
    clip height, the sheet height, the handle's top, and --drhw (the handle's
@@ -892,6 +894,7 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
 :root { --drhw: 0px; --dpad: 16px; }
 .drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: 40; pointer-events: none; }
 .dr-in { position: relative; max-width: 1680px; margin: 0; }
+@media (min-width: 1600px) { .dr-in { max-width: none; } .dash:not(.index) { --tkmaxw: none; } }
 .dr-clip { position: absolute; top: var(--drtop, 48px); left: var(--dpad); right: var(--dpad); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
 .drawer.open .dr-clip, .drawer.drag .dr-clip { visibility: visible; }
 .drawer.anim .dr-clip { transition: height .18s ease-out, visibility 0s linear .18s; }
@@ -1451,10 +1454,11 @@ a[data-wl="file"]:not([href]) { color: inherit; }
    store page (.tk-spage) takes the hidden grid's cell in every one of
    these grids. The board keeps its no-pin width (--pbw: the 1680px page
    less its paddings, the rail and its gap; the board-first page's 900px
-   column) and the column fills the window's remaining width to its right,
-   so the page fills the window. The column scrolls on its own; a handle on
-   each edge drags its least width (--pinw, kept by cards.js): past the
-   remaining width it narrows the board. */
+   column), narrowed to leave the column 480px, and the column fills the
+   window's remaining width to its right, so the page fills the window. The
+   handle on the column's left edge, in the gap toward the board, drags the
+   board's width (--boardw, kept by cards.js; the column keeps 280px at
+   least). The column scrolls on its own. */
 :root { --pbw: calc(1680px - 32px - 356px); }
 .dash.board { --pbw: 900px; }
 .bpcol { display: none; }
@@ -1465,18 +1469,15 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .bp-hd .li { width: 13px; height: 13px; }
 .bp-ct { font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); }
 .bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 2px 4px 40px 2px; }
-.bp-edge { position: absolute; top: 0; bottom: 0; right: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
-.bp-edge[data-edge="left"] { right: auto; left: -12px; }
+.bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
 .bp-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .bp-edge:hover::after, .bp-edge.drag::after { background: var(--wb-primary); }
 @media (min-width: 1600px) {
   :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
-  :root[data-pincol] .dbody { grid-template-columns: minmax(0, var(--pbw)) minmax(var(--pinw, 480px), 1fr); }
+  :root[data-pincol] .dbody { grid-template-columns: minmax(0, var(--boardw, min(var(--pbw), 100% - 496px))) minmax(280px, 1fr); }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
   .dash:not(.live) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
-  /* the page fills the window; the drawers follow it, so their handles stay at its right edge */
-  :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dr-in { max-width: none; }
-  :root[data-pincol] .tk-drawer { --tkmaxw: none; }
+  :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }
 }
 @media (min-width: 1600px) and (max-width: 2199.98px) {
   /* the column takes the rail's place, and the rail overlays */
@@ -1488,7 +1489,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 }
 @media (min-width: 2200px) {
   /* rail and column both show */
-  :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, var(--pbw)) minmax(var(--pinw, 480px), 1fr); }
+  :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, var(--boardw, min(var(--pbw), 100% - 852px))) minmax(280px, 1fr); }
   :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
   :root[data-pincol] .bpcol { grid-column: 3; }
@@ -1500,7 +1501,10 @@ a[data-wl="file"]:not([href]) { color: inherit; }
    where a first pin opens the pinned column ("edge"). The zone fills the
    strip right of the left-aligned page (1680px wide at most while nothing
    is pinned), and at least 48px, so it leaves the board column to its own
-   reorder drops; where the strip is narrow its label runs vertically. */
+   reorder drops; where the strip is narrow its label runs vertically.
+   From 1780px, where the strip is wide, the zone stands there idle while
+   nothing is pinned and the column could show (not the "tabs" layout, not
+   a store page): a quiet placeholder for the column, lit when a drag runs. */
 .tbar .tpin { color: inherit; opacity: .45; }
 .tbar:hover .tpin, .tbar .tpin:focus-visible { opacity: .9; }
 .tbar .tpin[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); }
@@ -1512,10 +1516,13 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .bdrop[hidden] { display: none; }
 :root[data-bdrag="group"] .r-board > .bpins:empty { display: block; position: sticky; top: var(--wb-rail-inset, 0px); z-index: 5; min-height: 54px; padding: 0; border: 1.5px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-bg)); }
 :root[data-bdrag="group"] .r-board > .bpins:empty::before { content: attr(data-drop); padding: 18px 12px; text-align: center; color: var(--wb-primary); }
-.bpzone { position: fixed; z-index: 40; top: 64px; bottom: 16px; right: 12px; width: clamp(48px, calc(100vw - 1676px), 380px); display: none; place-items: center; padding: 12px; border: 2px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; font-size: 13px; text-align: center; pointer-events: none; }
+.bpzone { position: fixed; z-index: 40; top: 50px; bottom: 12px; right: 16px; width: max(48px, calc(100vw - 1696px)); display: none; place-items: center; padding: 12px; border: 2px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; font-size: 13px; text-align: center; pointer-events: none; }
 :root[data-bdrag="edge"] .bpzone { display: grid; }
 .bpzone.over { background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
 @media (max-width: 1779.98px) { .bpzone { writing-mode: vertical-rl; padding: 12px 4px; } }
+@media (min-width: 1780px) {
+  :root:not([data-pincol]):not([data-bdrag]) body:not(.tk-paged):not(:has(#grid[data-layout="tabs"])) .bpzone { display: grid; z-index: 1; border-color: color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); background: transparent; color: var(--wb-muted-fg); font-weight: 700; }
+}
 .rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
 .rail .rsp { flex: 1; }
 .rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }
