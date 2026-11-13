@@ -1,84 +1,58 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/kang-sw/devenv/internal/mcp"
-	"github.com/kang-sw/devenv/internal/wsconfig"
-	"github.com/kang-sw/devenv/internal/wsdoc"
-	"github.com/kang-sw/devenv/internal/wsgit"
-	"github.com/kang-sw/devenv/internal/wsstate"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 )
 
 var version = "0.49.0-dev"
 var sourceCommit = "dev"
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+	// Only process entry points own lifecycle, signals and process exit. All
+	// one-shot product commands share the same core as daemon-hosted CLI.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "serve":
+			serve(os.Args[2:])
+			return
+		case "dashboard":
+			dashboardCommand(os.Args[2:])
+			return
+		case "daemon-start":
+			daemonStart(os.Args[2:])
+			return
+		case "mailbox":
+			if len(os.Args) > 2 && os.Args[2] == "wait" {
+				mailboxWait(os.Args[3:])
+				return
+			}
+		}
 	}
-
-	switch os.Args[1] {
-	case "version":
-		fmt.Println(version)
-	case "doctor":
-		doctor(os.Args[2:])
-	case "runtime":
-		runtime(os.Args[2:])
-	case "serve":
-		serve(os.Args[2:])
-	case "smoke":
-		smoke(os.Args[2:])
-	case "config":
-		configCommand(os.Args[2:])
-	case "path":
-		path(os.Args[2:])
-	case "git":
-		gitCommand(os.Args[2:])
-	case "tickets":
-		ticketsCommand(os.Args[2:])
-	case "mailbox":
-		mailboxCommand(os.Args[2:])
-	case "tools":
-		toolsCommand(os.Args[2:])
-	case "call":
-		callCommand(os.Args[2:])
-	case "dashboard":
-		dashboardCommand(os.Args[2:])
-	case "daemon-start":
-		daemonStart(os.Args[2:])
-	default:
-		usage()
-		os.Exit(2)
+	cwd, err := os.Getwd()
+	if err != nil {
+		fatal("cwd", err)
 	}
-}
-
-func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp <version|doctor|runtime|serve|smoke|config|path|git|tickets|mailbox|dashboard|daemon-start>")
-}
-
-func doctor(args []string) {
-	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	_ = fs.Parse(args)
-
-	report := wsdoc.Doctor(defaultRoot(*root))
-	for _, line := range report.Lines {
-		fmt.Println(line)
+	env := map[string]string{}
+	for _, entry := range os.Environ() {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			env[key] = value
+		}
 	}
-	if !report.OK {
-		os.Exit(1)
+	command := hostedCLI{
+		hello: wsdashboard.ProxyHello{Argv: os.Args[1:], Cwd: cwd, Env: env, OwnerPID: os.Getpid()},
+		ctx:   context.Background(), stdout: os.Stdout, stderr: os.Stderr, env: os.Environ(),
+		stdin: os.Stdin,
 	}
+	os.Exit(command.run())
 }
 
 func serve(args []string) {
@@ -86,100 +60,21 @@ func serve(args []string) {
 	stdio := fs.Bool("stdio", false, "serve MCP over stdin/stdout")
 	root := fs.String("root", ".", "repository root")
 	_ = fs.Parse(args)
-
 	if !*stdio {
 		fmt.Fprintln(os.Stderr, "ws-mcp serve: only --stdio is supported")
 		os.Exit(2)
 	}
-
 	server := mcp.NewServer(defaultRoot(*root), version, sourceCommit)
-	// An orphaned serve self-terminates: it holds no state that needs a
-	// graceful unwind, and lingering would keep the state.sqlite lock.
 	startParentDeathWatch(func(ppid int) {
-		mcp.RecordLifecycleEvent("process.parent_exited", map[string]any{
-			"ppid":   ppid,
-			"action": "self_terminate",
-		})
+		mcp.RecordLifecycleEvent("process.parent_exited", map[string]any{"ppid": ppid, "action": "self_terminate"})
 		server.DashboardEnd()
 		os.Exit(0)
 	})
-	// The dashboard daemon is optional: the check runs beside the MCP loop and
-	// never delays or fails it.
 	go serveDashboard(server)
 	if err := server.ServeStdio(context.Background(), os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "ws-mcp serve: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-func smoke(args []string) {
-	fs := flag.NewFlagSet("smoke", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	_ = fs.Parse(args)
-
-	if err := runSmoke(defaultRoot(*root), os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "ws-mcp smoke: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func runSmoke(root string, out io.Writer) error {
-	fmt.Fprintf(out, "version: %s\n", version)
-
-	report := wsdoc.Doctor(root)
-	for _, line := range report.Lines {
-		fmt.Fprintln(out, line)
-	}
-	if !report.OK {
-		return fmt.Errorf("doctor failed")
-	}
-
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"runtime.read","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"project_tree","arguments":{}}}`,
-	}, "\n") + "\n"
-	var responses bytes.Buffer
-	server := mcp.NewServer(root, version, sourceCommit)
-	if err := server.ServeStdio(context.Background(), strings.NewReader(input), &responses); err != nil {
-		return fmt.Errorf("stdio smoke failed: %w", err)
-	}
-	text := responses.String()
-	for _, want := range []string{"runtime.read", "project_tree", "ai-docs/"} {
-		if !strings.Contains(text, want) {
-			return fmt.Errorf("stdio smoke response missing %q", want)
-		}
-	}
-	fmt.Fprintf(out, "ok stdio smoke: %d bytes\n", responses.Len())
-	return nil
-}
-
-func runtime(args []string) {
-	if len(args) < 1 {
-		runtimeUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "info":
-		runtimeInfo(args[1:])
-	case "capabilities":
-		runtimeCapabilities(args[1:])
-	default:
-		runtimeUsage()
-		os.Exit(2)
-	}
-}
-
-func runtimeUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp runtime <info|capabilities>")
-}
-
-func runtimeInfo(args []string) {
-	fs := flag.NewFlagSet("runtime info", flag.ExitOnError)
-	_ = fs.Parse(args)
-
-	fmt.Printf("{\"version\":%q,\"source_commit\":%q}\n", version, sourceCommit)
 }
 
 type runtimeCapabilitiesPayload struct {
@@ -190,660 +85,27 @@ type runtimeCapabilitiesPayload struct {
 	Commands     []string `json:"commands"`
 }
 
-func runtimeCapabilities(args []string) {
-	fs := flag.NewFlagSet("runtime capabilities", flag.ExitOnError)
-	_ = fs.Parse(args)
-
-	payload := runtimeCapabilitiesPayload{
-		Version:      version,
-		SourceCommit: sourceCommit,
-		MCPProtocol:  mcp.ProtocolVersion,
-		Tools:        mcp.LeadToolNames(),
-		Commands:     runtimeCapabilityCommandNames(),
-	}
-	printJSONOrFatal("runtime capabilities", payload, nil)
-}
-
 func runtimeCapabilityCommandNames() []string {
 	commands := []string{
-		"config.list",
-		"config.tune",
-		"git.commit",
-		"git.diff",
-		"git.log",
-		"git.merge-base",
-		"git.status",
-		"path.generate",
-		"runtime.capabilities",
-		"runtime.info",
-		"smoke",
-		"tickets.close",
-		"tickets.create-empty",
-		"tickets.find",
-		"tickets.list",
-		"tickets.move",
-		"tickets.status",
-		"tickets.verify",
+		"config.list", "config.tune", "git.commit", "git.diff", "git.log", "git.merge-base", "git.status",
+		"path.generate", "runtime.capabilities", "runtime.info", "smoke", "tickets.close", "tickets.create-empty",
+		"tickets.find", "tickets.list", "tickets.move", "tickets.status", "tickets.verify",
 	}
 	sort.Strings(commands)
 	return commands
 }
 
-func configCommand(args []string) {
-	if len(args) < 1 {
-		configUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "list":
-		configList(args[1:])
-	case "tune":
-		configTune(args[1:])
-	default:
-		configUsage()
-		os.Exit(2)
-	}
-}
-
-func configUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp config <list|tune>")
-}
-
-func configList(args []string) {
-	fs := flag.NewFlagSet("config list", flag.ExitOnError)
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-
-	// ShowResolved (not Show) so CLI `config list` surfaces a global-scope
-	// agents.tier override the same way the MCP config.list surface does via
-	// LoadAgentTierConfig/currentAgentTierMappings; Show alone is project-only
-	// Load and silently drops global overrides from this display.
-	view, err := wsconfig.ShowResolved(wsconfig.Options{})
-	if outputJSON(*format) {
-		printJSONOrFatal("config list", view, err)
-		return
-	}
-	printTextOrFatal("config list", mcp.FormatConfigView(view), err)
-}
-
-func configTune(args []string) {
-	fs := flag.NewFlagSet("config tune", flag.ExitOnError)
-	tier := fs.String("tier", "", "capability tier: small, medium, large, or xlarge")
-	backend := fs.String("backend", "", "backend name; inferred from model when omitted")
-	model := fs.String("model", "", "concrete model for this alias")
-	effort := fs.String("effort", "", "reasoning effort label for this alias (none or empty leaves backend effort unset)")
-	harness := fs.String("harness", "", "harness alias key to configure: codex, claude, pi, or default")
-	_ = fs.Parse(args)
-
-	var effortProvided bool
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "effort" {
-			effortProvided = true
-		}
-	})
-	var cfg wsconfig.Config
-	var err error
-	if effortProvided {
-		cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, *tier, *backend, *model, *harness, *effort)
-	} else {
-		cfg, err = wsconfig.SetAgentsTierForHarness(wsconfig.Options{}, *tier, *backend, *model, *harness)
-	}
-	printJSONOrFatal("config tune", cfg, err)
-}
-
-func path(args []string) {
-	if len(args) < 1 {
-		pathUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "generate":
-		pathGenerate(args[1:])
-	default:
-		pathUsage()
-		os.Exit(2)
-	}
-}
-
-func pathUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp path <generate>")
-}
-
-func pathGenerate(args []string) {
-	fs := flag.NewFlagSet("path generate", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	kind := fs.String("kind", "review", "generated path kind")
-	_ = fs.Parse(args)
-
-	paths, err := wsstate.NewManager(wsstate.Options{}).GeneratePaths(defaultRoot(*root), *kind, fs.Args())
-	if err != nil {
-		fatal("path generate", err)
-	}
-	for _, path := range paths {
-		fmt.Println(path.Path)
-	}
-}
-
-func gitCommand(args []string) {
-	if len(args) < 1 {
-		gitUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "status":
-		gitStatus(args[1:])
-	case "diff":
-		gitDiff(args[1:])
-	case "log":
-		gitLog(args[1:])
-	case "merge-base":
-		gitMergeBase(args[1:])
-	case "commit":
-		gitCommit(args[1:])
-	default:
-		gitUsage()
-		os.Exit(2)
-	}
-}
-
-func gitUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp git <status|diff|log|merge-base|commit>")
-}
-
-func gitStatus(args []string) {
-	fs := flag.NewFlagSet("git status", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-
-	result, err := wsgit.NewClient().Status(context.Background(), defaultRoot(*root))
-	if outputJSON(*format) {
-		printJSONOrFatal("git status", result, err)
-		return
-	}
-	text, err := runNativeGitText(defaultRoot(*root), "status", "--short", "--branch")
-	printTextOrFatal("git status", text, err)
-}
-
-func gitDiff(args []string) {
-	fs := flag.NewFlagSet("git diff", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	rangeValue := fs.String("range", "", "revision range")
-	mode := fs.String("mode", wsgit.DiffModeStat, "diff mode: full, stat, or name_only; defaults to stat")
-	format := fs.String("format", "", `output format: text or json`)
-	var paths multiFlag
-	fs.Var(&paths, "path", "path filter; may be repeated")
-	_ = fs.Parse(args)
-	paths = append(paths, fs.Args()...)
-
-	result, err := wsgit.NewClient().Diff(context.Background(), defaultRoot(*root), wsgit.DiffOptions{Range: *rangeValue, Mode: *mode, Paths: paths})
-	if outputJSON(*format) {
-		printJSONOrFatal("git diff", result, err)
-		return
-	}
-	printTextOrFatal("git diff", result.Output, err)
-}
-
-func gitLog(args []string) {
-	fs := flag.NewFlagSet("git log", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	rangeValue := fs.String("range", "", "revision range")
-	limit := fs.Int("limit", 20, "maximum commits to return, capped at 100")
-	includeBody := fs.Bool("include-body", false, "include commit body")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-
-	result, err := wsgit.NewClient().Log(context.Background(), defaultRoot(*root), wsgit.LogOptions{Range: *rangeValue, Limit: *limit, IncludeBody: *includeBody})
-	if outputJSON(*format) {
-		printJSONOrFatal("git log", result, err)
-		return
-	}
-	text, err := runNativeGitLogText(defaultRoot(*root), *rangeValue, *limit)
-	printTextOrFatal("git log", text, err)
-}
-
-func gitMergeBase(args []string) {
-	fs := flag.NewFlagSet("git merge-base", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	base := fs.String("base", "", "base revision")
-	head := fs.String("head", "", "head revision")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-	remaining := fs.Args()
-	if *base == "" && len(remaining) > 0 {
-		*base = remaining[0]
-	}
-	if *head == "" && len(remaining) > 1 {
-		*head = remaining[1]
-	}
-
-	result, err := wsgit.NewClient().MergeBase(context.Background(), defaultRoot(*root), *base, *head)
-	if outputJSON(*format) {
-		printJSONOrFatal("git merge-base", result, err)
-		return
-	}
-	text, err := runNativeGitText(defaultRoot(*root), "merge-base", *base, *head)
-	printTextOrFatal("git merge-base", text, err)
-}
-
-func gitCommit(args []string) {
-	fs := flag.NewFlagSet("git commit", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	title := fs.String("title", "", "single-line commit title")
-	description := fs.String("description", "", "commit description body")
-	descriptionFile := fs.String("description-file", "", "commit description file; use - for stdin")
-	expectedBranch := fs.String("expected-branch", "", "branch you believe you are on; the commit is refused if the actual checkout differs or HEAD is detached")
-	format := fs.String("format", "", `output format: text or json`)
-	var paths multiFlag
-	var aiContext multiFlag
-	var updatedTickets multiFlag
-	fs.Var(&paths, "path", "path to stage and commit; may be repeated")
-	fs.Var(&aiContext, "ai-context", "AI Context bullet; may be repeated")
-	fs.Var(&updatedTickets, "updated-ticket", "ticket update summary; may be repeated")
-	_ = fs.Parse(args)
-	paths = append(paths, fs.Args()...)
-
-	body := *description
-	if *descriptionFile != "" {
-		text, err := readInputFile(*descriptionFile, "description")
-		if err != nil {
-			fatal("git commit", err)
-		}
-		body = text
-	}
-	result, err := wsgit.Client{Runner: wsgit.ExecRunner{}, Verifier: mcp.VerifyAdapter}.Commit(context.Background(), defaultRoot(*root), wsgit.CommitOptions{
-		Paths:          paths,
-		Title:          *title,
-		Description:    body,
-		AIContext:      aiContext,
-		UpdatedTickets: updatedTickets,
-		ExpectedBranch: *expectedBranch,
-	})
-	if outputJSON(*format) {
-		printJSONOrFatal("git commit", result, err)
-		return
-	}
-	printTextOrFatal("git commit", mcp.FormatGitCommit(result), err)
-}
-
-func ticketsCommand(args []string) {
-	if len(args) < 1 {
-		ticketsUsage()
-		os.Exit(2)
-	}
-	switch args[0] {
-	case "list":
-		ticketsList(args[1:])
-	case "find":
-		ticketsFind(args[1:])
-	case "status":
-		ticketsStatus(args[1:])
-	case "close":
-		ticketsClose(args[1:])
-	case "move":
-		ticketsMove(args[1:])
-	case "create-empty":
-		ticketsCreateEmpty(args[1:])
-	case "verify":
-		ticketsVerify(args[1:])
-	default:
-		ticketsUsage()
-		os.Exit(2)
-	}
-}
-
-func ticketsUsage() {
-	fmt.Fprintln(os.Stderr, "usage: ws-mcp tickets <list|find|status|close|move|create-empty|verify>")
-}
-
-func ticketsList(args []string) {
-	fs := flag.NewFlagSet("tickets list", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	includeDone := fs.Bool("include-done", false, "include ai-docs/tickets/.done")
-	includeDropped := fs.Bool("include-dropped", false, "include ai-docs/tickets/.dropped")
-	format := fs.String("format", "", `output format: text or json`)
-	var statuses multiFlag
-	fs.Var(&statuses, "status", "ticket status to scan (ready, todo, idea; archives require include flags); may be repeated")
-	_ = fs.Parse(args)
-
-	result, err := wsdoc.TicketsList(defaultRoot(*root), wsdoc.TicketListOptions{
-		Statuses:       statuses,
-		IncludeDone:    *includeDone,
-		IncludeDropped: *includeDropped,
-	})
-	if outputJSON(*format) {
-		printJSONOrFatal("tickets list", result, err)
-		return
-	}
-	printTextOrFatal("tickets list", mcp.FormatTickets(result), err)
-}
-
-func ticketsFind(args []string) {
-	fs := flag.NewFlagSet("tickets find", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	query := fs.String("query", "", "case-insensitive text query")
-	ticketStem := fs.String("ticket-stem", "", "exact ticket stem")
-	mentionsTicketStem := fs.String("mentions-ticket-stem", "", "ticket stem that result tickets must mention")
-	includeDone := fs.Bool("include-done", false, "include ai-docs/tickets/.done")
-	includeDropped := fs.Bool("include-dropped", false, "include ai-docs/tickets/.dropped")
-	format := fs.String("format", "", `output format: text or json`)
-	var statuses multiFlag
-	fs.Var(&statuses, "status", "ticket status to scan (ready, todo, idea; archives require include flags); may be repeated")
-	_ = fs.Parse(args)
-
-	result, err := wsdoc.TicketsFind(defaultRoot(*root), wsdoc.TicketFindOptions{
-		Statuses:           statuses,
-		IncludeDone:        *includeDone,
-		IncludeDropped:     *includeDropped,
-		Query:              *query,
-		TicketStem:         *ticketStem,
-		MentionsTicketStem: *mentionsTicketStem,
-		// Mirrors the MCP surface: the explicit-stem form resolves through the
-		// index, the query form stays discovery.
-		Resolve: strings.TrimSpace(*ticketStem) != "",
-	})
-	if outputJSON(*format) {
-		printJSONOrFatal("tickets find", result, err)
-		return
-	}
-	printTextOrFatal("tickets find", mcp.FormatTickets(result), err)
-}
-
-func ticketsStatus(args []string) {
-	fs := flag.NewFlagSet("tickets status", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	ticketStem := fs.String("ticket-stem", "", "ticket stem to inspect")
-	includeDone := fs.Bool("include-done", false, "allow lookup under ai-docs/tickets/.done")
-	includeDropped := fs.Bool("include-dropped", false, "allow lookup under ai-docs/tickets/.dropped")
-	format := fs.String("format", "", `output format: text or json`)
-	_ = fs.Parse(args)
-	if *ticketStem == "" && len(fs.Args()) > 0 {
-		*ticketStem = fs.Args()[0]
-	}
-
-	result, err := wsdoc.TicketsStatus(defaultRoot(*root), wsdoc.TicketStatusOptions{
-		TicketStem:     *ticketStem,
-		IncludeDone:    *includeDone,
-		IncludeDropped: *includeDropped,
-		Resolve:        true,
-	})
-	if outputJSON(*format) {
-		printJSONOrFatal("tickets status", result, err)
-		return
-	}
-	var tickets []wsdoc.TicketInfo
-	if result != nil {
-		tickets = append(tickets, *result)
-	}
-	printTextOrFatal("tickets status", mcp.FormatTickets(tickets), err)
-}
-
-func ticketsClose(args []string) {
-	fs := flag.NewFlagSet("tickets close", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	stem := fs.String("stem", "", "ticket stem to close")
-	status := fs.String("status", "", "close target: done or dropped")
-	resolution := fs.String("resolution", "", "optional resolution text appended as a ## Resolution section")
-	_ = fs.Parse(args)
-	if *stem == "" && len(fs.Args()) > 0 {
-		*stem = fs.Args()[0]
-	}
-
-	result, err := wsdoc.TicketsClose(defaultRoot(*root), wsgit.ExecRunner{}, wsdoc.TicketCloseOptions{
-		TicketStem: *stem,
-		Status:     *status,
-		Resolution: *resolution,
-		Today:      time.Now().Format("2006-01-02"),
-	})
-	printTextOrFatal("tickets close", mcp.FormatTicketMutate("closed", result), withPartialMutationNotice(err, result.PartialMutationNotice))
-}
-
-func ticketsMove(args []string) {
-	fs := flag.NewFlagSet("tickets move", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	stem := fs.String("stem", "", "ticket stem to move")
-	to := fs.String("to", "", "target status: idea, todo, or ready")
-	_ = fs.Parse(args)
-	if *stem == "" && len(fs.Args()) > 0 {
-		*stem = fs.Args()[0]
-	}
-
-	resolver := wsconfig.NewResolver(wsconfig.Options{}, nil, nil, nil)
-	design, _ := resolver.Get("", wsconfig.ItemSageReviewDesign)
-	completeness, _ := resolver.Get("", wsconfig.ItemSageReview)
-	result, err := wsdoc.TicketsMove(defaultRoot(*root), wsgit.ExecRunner{}, wsdoc.TicketMoveOptions{
-		TicketStem: *stem,
-		To:         *to,
-		SageReview: wsdoc.SageReviewConfig{Design: design.Value, Completeness: completeness.Value},
-	})
-	printTextOrFatal("tickets move", mcp.FormatTicketMutate("moved", result), withPartialMutationNotice(err, result.PartialMutationNotice))
-}
-
-func ticketsCreateEmpty(args []string) {
-	fs := flag.NewFlagSet("tickets create-empty", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	stem := fs.String("stem", "", "semantic ticket stem without date prefix")
-	initialState := fs.String("initial-state", "", "ticket status: idea, todo, or ready")
-	_ = fs.Parse(args)
-	rest := fs.Args()
-	if *stem == "" && len(rest) > 0 {
-		*stem = rest[0]
-		rest = rest[1:]
-	}
-	if *initialState == "" && len(rest) > 0 {
-		*initialState = rest[0]
-	}
-
-	result, err := wsdoc.TicketCreate(defaultRoot(*root), wsdoc.TicketCreateOptions{
-		Stem:         *stem,
-		InitialState: *initialState,
-	})
-	printTextOrFatal("tickets create-empty", mcp.FormatTicketCreate(result), err)
-}
-
-func ticketsVerify(args []string) {
-	fs := flag.NewFlagSet("tickets verify", flag.ExitOnError)
-	root := fs.String("root", ".", "repository root")
-	format := fs.String("format", "", `output format: text or json`)
-	var paths multiFlag
-	fs.Var(&paths, "path", "ticket path to verify; may be repeated")
-	_ = fs.Parse(args)
-	paths = append(paths, fs.Args()...)
-
-	result, err := wsdoc.TicketVerify(defaultRoot(*root), paths)
-	if outputJSON(*format) {
-		printJSONOrFatal("tickets verify", result, err)
-		return
-	}
-	printTextOrFatal("tickets verify", mcp.FormatTicketVerify(result), err)
-}
-
-// --- Generic MCP tool passthrough (tools / call) ---
-//
-// These subcommands are the canonical fallback surface: they route through
-// Server.ServeStdio with a synthetic single-line JSON-RPC request, the same
-// mechanism serve() and runSmoke() already use, so all profile filtering
-// (filteredTools) and gating (callTool's NoAgentMode/toolAllowed/keyed
-// session-scope checks) apply unchanged with zero internal/mcp export
-// changes. Root does not gate tools/list or tools/call dispatch — only a
-// session_key argument resolves a root, inside individual tool handlers — so
-// defaultRoot(".") is used unconditionally here.
-
-// toolsMappingRule documents the informal `ws/x.y(a: b)` invocation shorthand
-// used in skill prose alongside its literal CLI equivalent, so a caller
-// without a live MCP connection can still discover and drive tools.
 const toolsMappingRule = `mapping: ws/x.y(a: b) -> ws-cli call x.y '{"a":"b"}'`
 
-// mcpLineResponse is the CLI-local decode shape for the single JSON-RPC
-// response line ServeStdio writes for one synthetic request. internal/mcp's
-// own response/rpcError types are unexported, so this package needs its own
-// mirror of the wire shape.
 type mcpLineResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
 	Result  json.RawMessage `json:"result"`
 	Error   *mcpLineError   `json:"error"`
 }
-
 type mcpLineError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
-}
-
-// runMCPLine feeds a single synthetic JSON-RPC request line through a fresh
-// Server's ServeStdio and decodes the single response line it writes back.
-func runMCPLine(line string) (mcpLineResponse, error) {
-	var out bytes.Buffer
-	server := mcp.NewServer(defaultRoot("."), version, sourceCommit)
-	if err := server.ServeStdio(context.Background(), strings.NewReader(line+"\n"), &out); err != nil {
-		return mcpLineResponse{}, err
-	}
-	trimmed := bytes.TrimSpace(out.Bytes())
-	if len(trimmed) == 0 {
-		return mcpLineResponse{}, fmt.Errorf("no response from MCP dispatch")
-	}
-	var resp mcpLineResponse
-	if err := json.Unmarshal(trimmed, &resp); err != nil {
-		return mcpLineResponse{}, fmt.Errorf("decode MCP response: %w", err)
-	}
-	return resp, nil
-}
-
-// listMCPTools performs a tools/list round-trip and returns the raw
-// (already profile/namespace-filtered) tool entries from filteredTools, one
-// map per tool with at least name/description/inputSchema keys.
-func listMCPTools() []map[string]any {
-	resp, err := runMCPLine(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
-	if err != nil {
-		fatal("tools", err)
-	}
-	if resp.Error != nil {
-		fatal("tools", fmt.Errorf("%s", resp.Error.Message))
-	}
-	var result struct {
-		Tools []map[string]any `json:"tools"`
-	}
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		fatal("tools", err)
-	}
-	return result.Tools
-}
-
-func toolsCommand(args []string) {
-	switch len(args) {
-	case 0:
-		toolsList()
-	case 1:
-		toolsShow(args[0])
-	default:
-		fmt.Fprintln(os.Stderr, "usage: ws-mcp tools [<name>]")
-		os.Exit(2)
-	}
-}
-
-// toolsList prints the mapping rule followed by name + description for every
-// tool visible in the current profile — deliberately no inputSchema, so the
-// bare listing stays short enough to be a recovery entry point.
-func toolsList() {
-	fmt.Println(toolsMappingRule)
-	for _, tool := range listMCPTools() {
-		name, _ := tool["name"].(string)
-		description, _ := tool["description"].(string)
-		fmt.Printf("%s: %s\n", name, description)
-	}
-}
-
-// toolsShow prints the inputSchema for a single named tool. Looking the name
-// up through the same filtered tools/list result means an agentless-hidden
-// or otherwise unavailable tool name reports "not found" rather than leaking
-// its schema.
-func toolsShow(name string) {
-	for _, tool := range listMCPTools() {
-		toolName, _ := tool["name"].(string)
-		if toolName != name {
-			continue
-		}
-		schema, err := json.Marshal(tool["inputSchema"])
-		if err != nil {
-			fatal("tools", err)
-		}
-		fmt.Println(string(schema))
-		return
-	}
-	fatal("tools", fmt.Errorf("tool not found: %s", name))
-}
-
-// callCommand dispatches a single tools/call request built from the same
-// {name, arguments} shape callTool consumes, writing the tool's text content
-// to stdout on success. It exits non-zero with a readable message on
-// malformed JSON, unknown tool, JSON-RPC-level error, or tool-level
-// (isError) error.
-func callCommand(args []string) {
-	if len(args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: ws-mcp call <name> '<json>'")
-		os.Exit(2)
-	}
-	name := args[0]
-	rawArguments := args[1]
-
-	var probe any
-	if err := json.Unmarshal([]byte(rawArguments), &probe); err != nil {
-		fatal("call", fmt.Errorf("malformed JSON arguments: %w", err))
-	}
-
-	request := struct {
-		JSONRPC string `json:"jsonrpc"`
-		ID      int    `json:"id"`
-		Method  string `json:"method"`
-		Params  struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		} `json:"params"`
-	}{JSONRPC: "2.0", ID: 1, Method: "tools/call"}
-	request.Params.Name = name
-	request.Params.Arguments = json.RawMessage(rawArguments)
-
-	line, err := json.Marshal(request)
-	if err != nil {
-		fatal("call", err)
-	}
-
-	resp, err := runMCPLine(string(line))
-	if err != nil {
-		fatal("call", err)
-	}
-	// Unknown tool names and other JSON-RPC-level failures (invalid params,
-	// method not found) surface via resp.Error, not Result["isError"] — see
-	// callTool's `default:` case in internal/mcp/server.go, which returns
-	// errorResponse(..., -32602, "unknown tool: ...") for an unrecognised
-	// tool name. Both shapes are checked here so neither is silently dropped.
-	if resp.Error != nil {
-		fmt.Fprintf(os.Stderr, "ws-mcp call %s: %s\n", name, resp.Error.Message)
-		os.Exit(1)
-	}
-
-	var result struct {
-		IsError bool `json:"isError"`
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		fatal("call", err)
-	}
-	var text string
-	if len(result.Content) > 0 {
-		text = result.Content[0].Text
-	}
-	if result.IsError {
-		fmt.Fprint(os.Stderr, text)
-		if !strings.HasSuffix(text, "\n") {
-			fmt.Fprintln(os.Stderr)
-		}
-		os.Exit(1)
-	}
-	fmt.Print(text)
 }
 
 func printJSONOrFatal(prefix string, value any, err error) {
@@ -857,11 +119,7 @@ func printJSONOrFatal(prefix string, value any, err error) {
 	fmt.Println(string(encoded))
 }
 
-// withPartialMutationNotice folds a ticket mutation's write-then-reject notice
-// into the error text. printTextOrFatal only ever sees the error, so without
-// this the notice — the one thing telling the caller its file already changed —
-// is discarded on exactly the path that needs it, and the error's own
-// widen-then-retry remedy corrupts the ticket on the retry.
+// Ticket mutation errors must retain the notice that the file already changed.
 func withPartialMutationNotice(err error, notice string) error {
 	if err == nil || notice == "" {
 		return err
@@ -869,64 +127,12 @@ func withPartialMutationNotice(err error, notice string) error {
 	return fmt.Errorf("%w\npartial-mutation: %s A retry will not find an unchanged file.", err, notice)
 }
 
-func printTextOrFatal(prefix, text string, err error) {
-	if err != nil {
-		fatal(prefix, err)
-	}
-	fmt.Print(text)
-}
-
-func outputJSON(format string) bool {
-	return strings.EqualFold(strings.TrimSpace(format), "json")
-}
-
-func runNativeGitText(root string, args ...string) (string, error) {
-	out, err := wsgit.ExecRunner{}.RunGit(context.Background(), root, args...)
-	return string(out), err
-}
-
-func runNativeGitLogText(root, rangeValue string, limit int) (string, error) {
-	if strings.HasPrefix(rangeValue, "-") {
-		return "", fmt.Errorf("range must be a revision or range, not a git option")
-	}
-	if limit <= 0 {
-		limit = 20
-	}
-	if limit > 100 {
-		limit = 100
-	}
-	args := []string{"log", "-n", fmt.Sprint(limit), "--date=iso-strict"}
-	if rangeValue != "" {
-		args = append(args, rangeValue)
-	}
-	return runNativeGitText(root, args...)
-}
+func outputJSON(format string) bool { return strings.EqualFold(strings.TrimSpace(format), "json") }
 
 type multiFlag []string
 
-func (m *multiFlag) String() string {
-	return strings.Join(*m, ",")
-}
-
-func (m *multiFlag) Set(value string) error {
-	*m = append(*m, value)
-	return nil
-}
-
-func readInputFile(path, label string) (string, error) {
-	if path == "-" {
-		raw, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", fmt.Errorf("read stdin %s: %w", label, err)
-		}
-		return string(raw), nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read %s file: %w", label, err)
-	}
-	return string(raw), nil
-}
+func (m *multiFlag) String() string         { return strings.Join(*m, ",") }
+func (m *multiFlag) Set(value string) error { *m = append(*m, value); return nil }
 
 func fatal(prefix string, err error) {
 	fmt.Fprintf(os.Stderr, "ws-mcp %s: %v\n", prefix, err)
@@ -934,8 +140,6 @@ func fatal(prefix string, err error) {
 }
 
 func defaultRoot(root string) string { return defaultRootFrom(root, os.Getenv) }
-
-// defaultRootFrom is defaultRoot under the environment getenv reads.
 func defaultRootFrom(root string, getenv func(string) string) string {
 	if root != "" && root != "." {
 		return root

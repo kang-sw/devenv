@@ -32,11 +32,10 @@ const (
 	ProxyPath    = "/mcp"
 	ProxyUpgrade = "ws-mcp"
 	// ProxyProtocol is the hello line's protocol version. A hello with
-	// another version is refused, and the launcher falls back to running
-	// ws-mcp directly.
+	// another version is refused; the launcher must diagnose or reconnect.
 	ProxyProtocol = 1
 	// ProxyModeMCP serves an MCP session; ProxyModeCLI runs a one-shot CLI
-	// command (mailbox wait) and answers with its output and exit code.
+	// command and answers with its output and exit code.
 	ProxyModeMCP = "mcp"
 	ProxyModeCLI = "cli"
 	// proxyHelloTimeout bounds the wait for the hello line after the 101.
@@ -59,6 +58,9 @@ type ProxyHello struct {
 	Mode     string `json:"mode"`
 	// Argv is the CLI command in ProxyModeCLI ("mailbox", "wait", ...).
 	Argv []string `json:"argv,omitempty"`
+	// Stdin optionally carries a one-shot CLI command's input. Absent on
+	// older hellos and commands that do not read stdin; never MCP traffic.
+	Stdin string `json:"stdin,omitempty"`
 	// Cwd is the launcher's working directory; ProjectRoot the project root
 	// it detected, when any.
 	Cwd         string `json:"cwd"`
@@ -105,8 +107,7 @@ type ProxyCLIFrame struct {
 // the command that runs the daemon supplies it.
 type ProxyHandler interface {
 	// Accept validates hello and returns its session, or the reason the
-	// daemon refuses it; the reason goes to the launcher, which then runs
-	// ws-mcp directly.
+	// daemon refuses it; the reason goes to the launcher for diagnosis.
 	Accept(hello ProxyHello) (ProxySession, error)
 }
 

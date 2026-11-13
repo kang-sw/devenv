@@ -111,11 +111,17 @@ var hookNotifyNameSafe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 // mail, and clears the watermark once the queue empties so a later refill at
 // any count notifies again.
 func ShouldNotifyNamedInboxUnread(slug, root string) (bool, int, error) {
+	return (Paths{}).ShouldNotifyNamedInboxUnread(slug, root)
+}
+
+// ShouldNotifyNamedInboxUnread uses the caller's stores, including for a
+// Stop hook hosted by a daemon with a different config/cache environment.
+func (p Paths) ShouldNotifyNamedInboxUnread(slug, root string) (bool, int, error) {
 	name, scope, err := ParseSlugScope(slug)
 	if err != nil {
 		return false, 0, err
 	}
-	path, err := PathForScope(scope, root)
+	path, err := p.ForScope(scope, root)
 	if err != nil {
 		return false, 0, err
 	}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/mcp"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
@@ -31,11 +32,15 @@ func launcherTestPlugin(t *testing.T, bin string) (launcher string, env []string
 	if err != nil {
 		t.Skip("python3 is not on PATH")
 	}
-	versionOut, err := exec.Command(bin, "version").Output()
-	if err != nil {
+	// The fixture knows the build identity; bootstrap reads a hash-bound
+	// sidecar, never an executable version/capabilities probe.
+	metadata := map[string]any{"schema_version": 1, "version": version,
+		"binary_sha256": wsdashboard.ExecutableContentHash(bin),
+		"tools":         mcp.LeadToolNames(), "commands": runtimeCapabilityCommandNames()}
+	metadataJSON, _ := json.Marshal(metadata)
+	if err := os.WriteFile(bin+".metadata.json", metadataJSON, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	version := strings.TrimSpace(string(versionOut))
 
 	repo := filepath.Join("..", "..", "..", "agents-plugin")
 	raw, err := os.ReadFile(filepath.Join(repo, "runtime.json"))
@@ -207,9 +212,6 @@ func (c *launcherClient) notify(method string) {
 func TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy(t *testing.T) {
 	bin := buildDashboardTestBin(t, "")
 	launcher, env, cache, cwd := launcherTestPlugin(t, bin)
-	versionOut, _ := exec.Command(bin, "version").Output()
-	version := strings.TrimSpace(string(versionOut))
-
 	client := startLauncher(t, launcher, cwd, env, "serve", "--stdio")
 	init := client.call("initialize", map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}, "clientInfo": map[string]any{"name": "smoke", "version": "0"}})
 	result, _ := init["result"].(map[string]any)
@@ -268,7 +270,7 @@ func TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy(t *testing.T) {
 	}
 	runtimeName := ""
 	for _, e := range runtimeEntries {
-		if strings.HasPrefix(e.Name(), "ws-mcp-") {
+		if strings.HasPrefix(e.Name(), "ws-mcp-") && !strings.HasSuffix(e.Name(), ".json") {
 			runtimeName = e.Name()
 		}
 	}
