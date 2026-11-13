@@ -55,6 +55,15 @@ for (const selector of ['input', 'textarea', 'select', '[contenteditable]']) {
 assert.equal(ctx.qShortcut(key('k', {ctrlKey: true})), true);
 assert.equal(ctx.qShortcut(key(' ', {ctrlKey: true, code: 'Space'})), true);
 assert.equal(ctx.qShortcut(key('k', {ctrlKey: true, isComposing: true})), false);
+// Terminal cards (the .xterm helper textarea) and the composer (a textarea)
+// keep Ctrl+K / Ctrl+Space; the page body still opens the palette.
+function inside(selector) { return { closest: s => s.split(',').map(x => x.trim().split(':')[0]).includes(selector) ? {} : null }; }
+for (const target of [inside('.xterm'), inside('textarea'), inside('[contenteditable]')]) {
+  assert.equal(ctx.qShortcut(key('k', {ctrlKey: true, target})), false, 'Ctrl+K from an editor');
+  assert.equal(ctx.qShortcut(key(' ', {ctrlKey: true, code: 'Space', target})), false, 'Ctrl+Space from an editor');
+}
+assert.equal(ctx.qShortcut(key('k', {ctrlKey: true, target: inside('body')})), true, 'Ctrl+K from the page body');
+assert.equal(ctx.qShortcut(key(' ', {ctrlKey: true, code: 'Space', target: inside('body')})), true, 'Ctrl+Space from the page body');
 assert.equal(ctx.qShortcut(key('/', {keyCode: 229})), false);
 assert.equal(ctx.qShortcut(key('/', {altKey: true})), false);
 ctx.O.searchRows = () => rows;
