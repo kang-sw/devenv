@@ -3,8 +3,10 @@ package wsinbox
 import (
 	"errors"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMentionBlockGrammar(t *testing.T) {
@@ -97,8 +99,9 @@ func TestMergeAppendsMentions(t *testing.T) {
 // unescaped, after its answer block is taken out, and the typed text stays.
 func TestParseMentionsRoundTrips(t *testing.T) {
 	mentions := []Mention{
-		{Topic: "ship-gate", ID: "316", Text: "a < b &amp; c > d"},
-		{Topic: `Plain "name" &`, Text: "multi\nline"},
+		{Topic: "ship-gate", ID: "316", Entry: "e17", Text: "a < b &amp; c > d"},
+		{Topic: `Plain "name" &`, Entry: "e18", Text: "multi\nline"},
+		{Topic: "legacy", ID: "7", Text: "old-shaped mention"},
 	}
 	text := Entry{Parts: []string{"user text"}, Chips: []Chip{{ID: "1", Answer: "ok"}}, Mentions: mentions}.Text()
 	_, rest, ok := ParseAnswerBlock(text)
@@ -115,6 +118,82 @@ func TestParseMentionsRoundTrips(t *testing.T) {
 	}
 }
 
+func TestEntryMentionGrammarAndValidation(t *testing.T) {
+	mentions := []Mention{
+		{Topic: "topic", Entry: "e7", Text: "panel version"},
+		{Topic: "topic", ID: "3", Entry: "e8", Text: "system provenance"},
+	}
+	want := `<wb:mention topic="topic" entry="e7">panel version</wb:mention>` + "\n" +
+		`<wb:mention topic="topic" id="3" entry="e8">system provenance</wb:mention>`
+	if got := MentionBlock(mentions); got != want {
+		t.Fatalf("entry mention grammar = %q", got)
+	}
+	got, rest := ParseMentions(want)
+	if !reflect.DeepEqual(got, mentions) || rest != "" {
+		t.Fatalf("parse = %+v, %q", got, rest)
+	}
+	out, err := Normalize(Entry{Mentions: []Mention{{Topic: " t ", ID: " 3 ", Entry: " e8 ", Text: " selected "}}})
+	if err != nil || !reflect.DeepEqual(out.Mentions, []Mention{{Topic: "t", ID: "3", Entry: "e8", Text: "selected"}}) {
+		t.Fatalf("normalize = %+v, %v", out.Mentions, err)
+	}
+	for _, id := range []string{"p7", "e0", "e01", "e-1", "7", "e7x", "e1\nentry", `e7" id="9`} {
+		if _, err := Normalize(Entry{Mentions: []Mention{{Topic: "t", Entry: id, Text: "x"}}}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("entry %q: %v", id, err)
+		}
+	}
+	// T2 emission intentionally does not parse with the old strict grammar,
+	// while old topic/item-only elements still parse with either reader.
+	legacyHead := regexp.MustCompile(`^<wb:mention topic="([^"]*)"(?: id="([0-9]{1,6})")?>`)
+	if legacyHead.MatchString(want) || !legacyHead.MatchString(MentionBlock([]Mention{{Topic: "t", ID: "7", Text: "legacy"}})) {
+		t.Fatal("legacy strict-parser compatibility assumption changed")
+	}
+}
+
+func TestEntryMentionsSurviveInboxLifecycle(t *testing.T) {
+	dir := Dir(t.TempDir())
+	first := Mention{Topic: "t", Entry: "e7", Text: "same selected text"}
+	second := Mention{Topic: "t", ID: "3", Entry: "e8", Text: "same selected text"}
+	now := time.Now()
+	if _, _, err := Send(dir, Entry{Mentions: []Mention{first}}, now); err != nil {
+		t.Fatal(err)
+	}
+	name, merged, err := Send(dir, Entry{Mentions: []Mention{second}}, now.Add(time.Millisecond))
+	if err != nil || !merged {
+		t.Fatalf("merge = %v, %v", merged, err)
+	}
+	want := []Mention{first, second}
+	held, err := Held(dir)
+	if err != nil || len(held) != 1 || !reflect.DeepEqual(held[0].Entry.Mentions, want) {
+		t.Fatalf("held = %+v, %v", held, err)
+	}
+	cancelled, err := Cancel(dir, name)
+	if err != nil || !reflect.DeepEqual(cancelled.Mentions, want) {
+		t.Fatalf("cancel = %+v, %v", cancelled.Mentions, err)
+	}
+	name, _, err = Send(dir, cancelled, now.Add(2*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Steer(dir, name); err != nil {
+		t.Fatal(err)
+	}
+	taken, _, err := Interrupt(dir, now.Add(3*time.Millisecond))
+	if err != nil || len(taken) != 1 || !reflect.DeepEqual(taken[0].Entry.Mentions, want) {
+		t.Fatalf("interrupt = %+v, %v", taken, err)
+	}
+	if _, _, err := Send(dir, taken[0].Entry, now.Add(4*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	drained, err := DrainSteer(dir)
+	if err != nil || len(drained) != 1 || !reflect.DeepEqual(drained[0].Entry.Mentions, want) {
+		t.Fatalf("steer drain = %+v, %v", drained, err)
+	}
+	got, rest := ParseMentions(drained[0].Entry.Text())
+	if rest != "" || !reflect.DeepEqual(got, want) {
+		t.Fatalf("delivered locators = %+v, %q", got, rest)
+	}
+}
+
 func TestParseMentionsLeavesOtherTextWhole(t *testing.T) {
 	for _, text := range []string{
 		"plain text",
@@ -122,6 +201,14 @@ func TestParseMentionsLeavesOtherTextWhole(t *testing.T) {
 		"<wb:mention topic=\"t\">no close",
 		"<wb:mention topic=\"t\">raw <b>tag</b></wb:mention>",
 		"<wb:mention topic=\"t\" id=\"x\">bad id</wb:mention>",
+		`<wb:mention topic="t" entry="p7">panel target is not a version</wb:mention>`,
+		`<wb:mention topic="t" entry="e0">zero</wb:mention>`,
+		`<wb:mention topic="t" entry="e01">noncanonical</wb:mention>`,
+		`<wb:mention topic="t" entry="e-1">negative</wb:mention>`,
+		`<wb:mention topic="t" entry="e7x">suffix</wb:mention>`,
+		`<wb:mention topic="t" entry="e7" id="3">wrong attribute order</wb:mention>`,
+		`<wb:mention topic="t" entry="e7" entry="e8">duplicate</wb:mention>`,
+		`<wb:mention topic="t" entry="e7" other="x">unknown attribute</wb:mention>`,
 		"<wb:mention topic=\"t\">x</wb:mention>glued",
 	} {
 		if got, rest := ParseMentions(text); got != nil || rest != text {

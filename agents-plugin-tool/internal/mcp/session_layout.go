@@ -25,7 +25,7 @@ import (
 //	sessions/<key>/key.json         identity and small fields (sessionKeyRecord)
 //	sessions/<key>/agenda.json      agenda blobs
 //	sessions/<key>/todos.json       todo list
-//	sessions/<key>/whiteboard.json  whiteboard store
+//	sessions/<key>/whiteboard.json  immutable legacy whiteboard snapshot
 //
 // key.json is the key's existence claim and its activity mark: touch and
 // prune read its mtime. A part file that does not exist is that part empty. A
@@ -35,8 +35,9 @@ import (
 //
 // The pre-split layout, one <cache-root>/keys/<key>.json holding every field,
 // is still read: a key with no key.json falls back to it, served whole. The
-// first mutation of such a key moves it into the split layout
-// (migrateRecord). Reads never move it: a reader may be a process that
+// first mutation of such a key moves its session metadata into the split
+// layout (migrateRecord), retaining any board-bearing legacy file for rollback.
+// Board reads separately convert into topic folders. A reader may be a process that
 // outlives an update (the dashboard daemon) while the session's older ws-mcp,
 // which knows only keys/, still serves the key.
 //
@@ -239,8 +240,16 @@ func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, 
 			return sessionRecord{}, false, recordNotFound(err)
 		}
 		record = *v.(*sessionRecord)
+		if record.SchemaVersion > sessionRecordSchemaVersion {
+			return sessionRecord{}, true, fmt.Errorf("session schema_version %d is newer than supported %d", record.SchemaVersion, sessionRecordSchemaVersion)
+		}
 		if raw != nil {
 			raw.Write(data)
+		}
+		if parts&partWhiteboard != 0 {
+			if err := openWhiteboard(&record, key, raw); err != nil {
+				return sessionRecord{}, true, err
+			}
 		}
 		return record, true, nil
 	}
@@ -248,6 +257,9 @@ func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, 
 		return sessionRecord{}, false, recordNotFound(err)
 	}
 	record.sessionKeyRecord = *v.(*sessionKeyRecord)
+	if record.SchemaVersion > sessionRecordSchemaVersion {
+		return sessionRecord{}, false, fmt.Errorf("session schema_version %d is newer than supported %d", record.SchemaVersion, sessionRecordSchemaVersion)
+	}
 	writeRawPart(raw, partKey, data)
 	for _, part := range recordParts {
 		if part == partKey || parts&part == 0 {
@@ -262,6 +274,11 @@ func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, 
 		}
 		reflect.ValueOf(record.partValue(part)).Elem().Set(reflect.ValueOf(v).Elem())
 		writeRawPart(raw, part, data)
+	}
+	if parts&partWhiteboard != 0 {
+		if err := openWhiteboard(&record, key, raw); err != nil {
+			return sessionRecord{}, false, err
+		}
 	}
 	return record, false, nil
 }
@@ -310,27 +327,51 @@ func (s *sessionStore) writeParts(d sessionDirs, key string, record *sessionReco
 	return nil
 }
 
-// migrateRecord moves a legacy record into the split layout: the part files,
-// then key.json, then the legacy file's removal. A crash between steps leaves
-// both layouts: before key.json lands the legacy file still serves, after it
-// the split record wins on read, and the next write removes the legacy file.
-// The caller holds s.mu and the key's record lock.
+// migrateRecord moves session metadata into the split layout, copying the
+// original board snapshot before key.json publishes the split record. Original
+// board-bearing files survive unchanged for rollback. The caller holds s.mu
+// and the key's record lock.
 func (s *sessionStore) migrateRecord(d sessionDirs, key string, record *sessionRecord) error {
 	if err := os.MkdirAll(d.keyDir(key), 0o755); err != nil {
 		return fmt.Errorf("create session dir: %w", err)
 	}
+	// Copy the original board bytes, never the authoritative converted board.
+	// Preserve the inline representation too, so rollback keeps its snapshot.
+	data, err := os.ReadFile(d.legacyPath(key))
+	if err != nil {
+		return err
+	}
+	var original map[string]json.RawMessage
+	if err := json.Unmarshal(data, &original); err != nil {
+		return err
+	}
+	if board := original["whiteboard"]; len(board) > 0 && string(board) != "null" {
+		if err := s.writeFileAtomic(d.partPath(key, partWhiteboard), board); err != nil {
+			return err
+		}
+	}
 	record.SchemaVersion = sessionRecordSchemaVersion
-	if err := s.writeParts(d, key, record, partAll); err != nil {
+	if err := s.writeParts(d, key, record, partAll&^partWhiteboard); err != nil {
 		return err
 	}
 	removeLegacyRecord(d, key)
 	return nil
 }
 
-// removeLegacyRecord deletes key's legacy record file once its split record is
-// in place. Best effort: a leftover file is shadowed by key.json and the next
-// write retries.
+// removeLegacyRecord deletes a boardless legacy record once the split record
+// is in place; board-bearing representations are preserved for rollback.
 func removeLegacyRecord(d sessionDirs, key string) {
+	data, err := os.ReadFile(d.legacyPath(key))
+	if err != nil {
+		return
+	}
+	var original map[string]json.RawMessage
+	if json.Unmarshal(data, &original) != nil {
+		return
+	}
+	if board := original["whiteboard"]; len(board) > 0 && string(board) != "null" {
+		return // board-bearing legacy files are immutable rollback snapshots
+	}
 	_ = os.Remove(d.legacyPath(key))
 }
 

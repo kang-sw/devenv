@@ -207,7 +207,7 @@ func TestAttributeValuesAreQuotedAndDecoded(t *testing.T) {
 }
 
 // An escaped item field is decoded, since an item field is plain text; a
-// topic body (raw HTML), a recap (written as a body is), wb:edit's operands
+// topic body (raw HTML), log text, wb:edit's operands
 // (matched against a stored body), and an answer (the user's verbatim words)
 // keep their entities.
 func TestItemFieldsDecodeEntitiesOtherBodiesDoNot(t *testing.T) {
@@ -220,9 +220,9 @@ func TestItemFieldsDecodeEntitiesOtherBodiesDoNot(t *testing.T) {
 <wb:why>x &lt; y</wb:why>
 <wb:link>see &apos;notes&apos;</wb:link>
 </wb:add></wb:topic>
-<wb:topic name="t"><wb:body>raw &lt;b&gt; in HTML</wb:body><wb:recap>a &amp; b</wb:recap></wb:topic>`)
-	if st.TopicRecap("t") != "a &amp; b" {
-		t.Fatalf("recap = %q", st.TopicRecap("t"))
+<wb:topic name="t"><wb:body>raw &lt;b&gt; in HTML</wb:body><wb:log>a &amp; b</wb:log></wb:topic>`)
+	if latest, ok := st.LatestAgent("t"); !ok || latest.Text != "a &amp; b" {
+		t.Fatalf("latest log = %+v, %v", latest, ok)
 	}
 	got := item(t, st, 1)
 	if got.Title != "Key & value" || got.Options[0] != "<code><key></code>" || got.Options[1] != "a <b> &lt;kept&gt;" ||
@@ -271,7 +271,7 @@ func TestSelfClosingAndEmptyForms(t *testing.T) {
 func TestCommandPositionsAndLinesInProblems(t *testing.T) {
 	_, problems := parse("<wb:topic name=\"a\"><wb:close/></wb:topic>\n\n<wb:floor id=\"1\"/>\n<wb:mystery>\nbody\n</wb:mystery>\n<wb:topic name=\"t\"><wb:add class=\"x\"\n  color=\"red\"><wb:title>t</wb:title><wb:size>1</wb:size></wb:add></wb:topic>")
 	wantProblems(t, problems,
-		"command 3 <wb:mystery> (line 4): unknown command (commands: wb:add, wb:answer, wb:body, wb:close, wb:edit, wb:embed-dir, wb:floor, wb:patch, wb:recap, wb:topic)",
+		"command 3 <wb:mystery> (line 4): unknown command (commands: wb:add, wb:answer, wb:body, wb:close, wb:edit, wb:embed-dir, wb:floor, wb:log, wb:panel, wb:patch, wb:topic)",
 		"command 4 <wb:add> (line 7): unknown attribute color (known: id, class)",
 		"command 4 <wb:add> (line 7): unknown field <wb:size> (fields: wb:title, wb:option, wb:recommend, wb:why, wb:link)",
 	)
@@ -386,12 +386,12 @@ func TestRefusalListsEveryProblemSoFar(t *testing.T) {
 		"command 1 <wb:nope> (line 1): unknown command",
 		`line 2: text outside a command: "stray"`,
 		"line 3: </wb:add> closes nothing open",
-		`command 2 <wb:close> (line 4): no item, topic body, or recap has topic "missing"`,
+		`command 2 <wb:close> (line 4): no items, content, or entries for topic "missing"`,
 		"command 3 <wb:add> (line 5) class: must be one of",
 	)
 	problems = refused(t, st, "<wb:topic name=\"missing\"><wb:close result=\"done\"/></wb:topic>\n<wb:topic name=\"t\"><wb:body>never closed")
 	wantProblems(t, problems,
-		`command 1 <wb:close> (line 1): no item, topic body, or recap has topic "missing"`,
+		`command 1 <wb:close> (line 1): no items, content, or entries for topic "missing"`,
 		"line 2: <wb:body> has no closing </wb:body>",
 	)
 	// A well-formed command ahead of the broken text is not applied.

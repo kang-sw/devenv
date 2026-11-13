@@ -25,10 +25,10 @@ import (
 )
 
 // The session whiteboard: whiteboard.update applies a command string to the
-// item store in the session state record (wswhiteboard.Apply) and renders, in one
-// call, the full page, its change stamp, and a new embed snapshot. The pure
-// store, view, and templates live in internal/wswhiteboard; this file owns
-// the files on disk and their lifecycle.
+// authoritative topic-folder store (wswhiteboard.Apply) and renders, in one
+// call, the full page, its change stamp, and a new embed snapshot. The model,
+// folder transactions, view, and templates live in internal/wswhiteboard;
+// this file owns derived page publication and artifact lifetime.
 
 const (
 	whiteboardPlaybookName = "whiteboard"
@@ -52,10 +52,11 @@ var (
 	whiteboardFilePattern = regexp.MustCompile(`^([a-z0-9]+)(?:\.html|\.stamp\.js|-[0-9a-f]+\.html)$`)
 )
 
-// Test seams for the rename retry (technical decision 119): a browser polling
-// the stamp holds a brief read handle, and on Windows a rename over a file
-// that is open fails with a sharing violation.
+// Test seams for output publication and the rename retry (technical decision
+// 119): a browser polling the stamp holds a brief read handle, and on Windows
+// a rename over a file that is open fails with a sharing violation.
 var (
+	whiteboardMkdirAll        = os.MkdirAll
 	whiteboardRename          = os.Rename
 	whiteboardRenameRetryable = renameSharingViolation
 	whiteboardRenameAttempts  = 5
@@ -271,7 +272,6 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		render, renderErr = s.renderWhiteboard(rec, key, true)
 		return renderErr
 	})
-	render.settle(err == nil)
 	if errors.Is(err, errWhiteboardRefused) {
 		return toolErrorTextResponse(id, s.whiteboardRefusal(tool, problems))
 	}
@@ -307,9 +307,9 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	rec, ok := s.sessions.readState(key, partWhiteboard)
-	if !ok {
-		return toolTextResponse(id, "", fmt.Errorf("%s: session key not found: %s", tool, key))
+	rec, err := s.sessions.readWhiteboard(key)
+	if err != nil {
+		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	result, problems := wswhiteboard.Query(rec.Whiteboard, args["payload"])
 	if len(problems) > 0 {
@@ -396,10 +396,10 @@ func (s *Server) refreshWhiteboardAfter(args map[string]any, resp response) {
 	if key == "" {
 		return
 	}
+	if rec, ok := s.sessions.readState(key, partWhiteboard); !ok || rec.Whiteboard == nil {
+		return
+	}
 	err := s.sessions.mutateRecordParts(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
-		if rec.Whiteboard == nil {
-			return errNoWhiteboard
-		}
 		rec.Whiteboard.BeginRender()
 		_, err := s.renderWhiteboard(rec, key, false)
 		return err
@@ -421,26 +421,18 @@ func responseIsError(resp response) bool {
 	return isError
 }
 
-// renderWhiteboard writes the session's pages for the current state: the
-// embed snapshot when withEmbed, then the full page, then the stamp, so a
-// reload triggered by the stamp never reads an older page. It returns the
-// full page path relative to the session root and the embed path (relative,
-// or the bare file name inside a host embed folder).
+// renderWhiteboard prepares derived pages and embed bookkeeping. The folder
+// transaction publishes them only after its durable commit, with the stamp
+// last. The returned paths are relative to the root (a host embed is bare).
 func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmbed bool) (whiteboardRender, error) {
 	var out whiteboardRender
 	st := rec.Whiteboard
 	replyID := wsmailbox.ReplyID(sessionKey)
 	dir := filepath.Join(rec.Root, filepath.FromSlash(whiteboardDirRel))
-	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-		// Exclude first: a failed registration leaves no folder behind, so
-		// the next render retries it instead of skipping it forever.
-		if err := registerWhiteboardExclude(s.gitRunner(), rec.Root, dir); err != nil {
-			return out, fmt.Errorf("register %s in the git exclude file: %w", whiteboardDirRel, err)
-		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return out, fmt.Errorf("create %s: %w", whiteboardDirRel, err)
-		}
+	if err := registerWhiteboardExclude(s.gitRunner(), rec.Root, dir); err != nil {
+		return out, fmt.Errorf("register %s in the git exclude file: %w", whiteboardDirRel, err)
 	}
+	pageDir := filepath.Join(dir, replyID)
 	panelInput := whiteboardPanelInput{
 		rec:        *rec,
 		root:       rec.Root,
@@ -455,10 +447,11 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 		in := panelInput
 		in.layout = layout
 		return wswhiteboard.ViewInput{
-			Layout:   layout,
-			ReplyID:  replyID,
-			Panels:   whiteboardPanels(in),
-			FileLink: whiteboardItemFileLink(rec.Root, whiteboardPageDir(in)),
+			Layout:        layout,
+			ReplyID:       replyID,
+			Panels:        whiteboardPanels(in),
+			FileLink:      whiteboardItemFileLink(rec.Root, whiteboardPageDir(in)),
+			FullBoardLink: whiteboardFileLink(rec.Root, whiteboardPageDir(in), filepath.Join(pageDir, "index.html")),
 		}
 	}
 
@@ -472,13 +465,7 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 		if st.EmbedDir != "" {
 			target = st.EmbedDir
 		}
-		if err := ensureWhiteboardMermaid(target, html); err != nil {
-			return out, err
-		}
-		if err := writeWhiteboardFile(filepath.Join(target, name), []byte(html)); err != nil {
-			return out, fmt.Errorf("write embed: %w", err)
-		}
-		out.written = filepath.Join(target, name)
+		out.files = append(out.files, whiteboardOutput{filepath.Join(target, name), html, "embed"})
 		if st.EmbedDir != "" {
 			// The host owns its folder's lifetime: the server never evicts
 			// there, since the host re-reads a visual's file when it redraws
@@ -492,21 +479,17 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 		st.LastEmbedSeq = st.Seq
 	}
 
-	html, err := wswhiteboard.RenderPage(wswhiteboard.BuildView(st, viewInput(wswhiteboard.LayoutFull)))
+	view := wswhiteboard.BuildView(st, viewInput(wswhiteboard.LayoutFull))
+	view.StampFile = "index.stamp.js"
+	html, err := wswhiteboard.RenderPage(view)
 	if err != nil {
 		return out, fmt.Errorf("render full page: %w", err)
 	}
-	if err := ensureWhiteboardMermaid(dir, html); err != nil {
-		return out, err
-	}
-	if err := writeWhiteboardFile(filepath.Join(dir, replyID+".html"), []byte(html)); err != nil {
-		return out, fmt.Errorf("write full page: %w", err)
-	}
+	out.files = append(out.files, whiteboardOutput{filepath.Join(pageDir, "index.html"), html, "full page"})
 	stamp := fmt.Sprintf("wbStamp(%q);\n", fmt.Sprint(st.Seq))
-	if err := writeWhiteboardFile(filepath.Join(dir, replyID+".stamp.js"), []byte(stamp)); err != nil {
-		return out, fmt.Errorf("write stamp: %w", err)
-	}
-	out.full = whiteboardDirRel + "/" + replyID + ".html"
+	out.files = append(out.files, whiteboardOutput{filepath.Join(pageDir, "index.stamp.js"), stamp, "stamp"})
+	out.full = whiteboardDirRel + "/" + replyID + "/index.html"
+	rec.boardOutput = &out
 	return out, nil
 }
 
@@ -531,26 +514,44 @@ func ensureWhiteboardMermaid(dir, html string) error {
 	return nil
 }
 
-// whiteboardRender is one render's outcome. Its file side effects settle
-// only after the record persists: evicted embeds are deleted on success, and
-// the embed this render wrote is deleted on failure, so a rolled-back record
-// never lists a deleted embed nor misses one left on disk.
+// whiteboardRender is derived output prepared during a store mutation.
+// Publication and retention run under the folder lock after commit.
 type whiteboardRender struct {
 	full, embed string
-	written     string
+	files       []whiteboardOutput
 	evicted     []string
 }
 
-func (r whiteboardRender) settle(persisted bool) {
-	if !persisted {
-		if r.written != "" {
-			_ = os.Remove(r.written)
+type whiteboardOutput struct {
+	path, text, label string
+}
+
+// Publication follows the durable store commit; a failed output write never
+// rolls back accepted history or publishes a stamp ahead of its page.
+func (r whiteboardRender) publish() (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("board committed; %w; fix the output problem, then retry whiteboard.update with commands: \"\" (render-only); do not resend accepted commands", err)
 		}
-		return
+	}()
+	for _, file := range r.files {
+		dir := filepath.Dir(file.path)
+		if err := whiteboardMkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create output directory %s: %w", dir, err)
+		}
+		if strings.HasSuffix(file.path, ".html") {
+			if err := ensureWhiteboardMermaid(dir, file.text); err != nil {
+				return err
+			}
+		}
+		if err := writeWhiteboardFile(file.path, []byte(file.text)); err != nil {
+			return fmt.Errorf("write %s: %w", file.label, err)
+		}
 	}
 	for _, path := range r.evicted {
 		_ = os.Remove(path)
 	}
+	return nil
 }
 
 // whiteboardEmbedHash derives an embed's short hash from the render sequence

@@ -28,7 +28,7 @@ import (
 // full page's stamp script and, when it holds a mermaid block, the shared
 // mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/chg.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/stream.js assets/chg.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
 var assetFS embed.FS
 
 type pageAssets struct {
@@ -44,8 +44,9 @@ type pageAssets struct {
 	// code adds line numbers and a copy button to code blocks, on every
 	// page that runs form (it follows form, which defines wbBindBoard) and
 	// inside a topic-body frame.
-	code string
-	live string
+	code   string
+	live   string
+	stream string
 	// pill is the open-question pill, shared by the full page and the dashboard.
 	pill string
 	// rail sticks the current topic's bar and shows the jump capsules, on the
@@ -74,7 +75,8 @@ var (
 	// itemRefPattern finds the {{nn}} item references inside lead-authored
 	// text. Only digits between the braces make a reference; any other
 	// {{...}} text renders verbatim.
-	itemRefPattern = regexp.MustCompile(`\{\{([0-9]+)\}\}`)
+	itemRefPattern     = regexp.MustCompile(`\{\{([0-9]+)\}\}`)
+	authoredRefPattern = regexp.MustCompile(`\{\{(p[1-9][0-9]*|[0-9]+)\}\}`)
 )
 
 // fallbackIcon is the sprite symbol a panel gets when it names an unknown one.
@@ -142,6 +144,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 		form:        get("form.js"),
 		code:        code,
 		live:        get("live.js"),
+		stream:      get("stream.js"),
 		pill:        get("pill.js"),
 		rail:        get("rail.js"),
 		ago:         get("ago.js"),
@@ -318,7 +321,7 @@ func PageAssets() (SharedAssets, error) {
 	if err != nil {
 		return SharedAssets{}, fmt.Errorf("whiteboard page assets: %w", err)
 	}
-	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago), AnswersScript: template.JS(a.answers), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
+	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago + "\n" + a.stream), AnswersScript: template.JS(a.answers), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
 }
 
 // pageData is what the page template executes on: the view plus the inlined
@@ -332,7 +335,8 @@ type pageData struct {
 	// docs holds each topic body rendered by renderDoc on every page render,
 	// or, with DocFramed, the sandboxed frame that holds that rendering,
 	// keyed by topic name.
-	docs map[string]template.HTML
+	docs    map[string]template.HTML
+	entries map[string]template.HTML
 	// DocFramed renders each topic body inside a sandboxed frame (framedDoc).
 	DocFramed bool
 	// framing is set while a framed body renders, so its file images take
@@ -370,8 +374,9 @@ type pageData struct {
 	icons map[string]bool
 	// onPage holds every item ID the page renders, the targets an in-page
 	// link may point at.
-	onPage map[int]bool
-	md     *markdown
+	onPage      map[int]bool
+	panelOnPage map[string]bool
+	md          *markdown
 	// trusted, set only while a finished reply renders, records the opening
 	// attributes of each link and image the markdown renderer resolved
 	// (writeTrustRef) for the sanitizer.
@@ -407,7 +412,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	if full {
 		// The viewer is for the standalone page; the embed is a chat
 		// snapshot with a size budget and runs only the answer form.
-		script = a.viewer + script + a.pill + a.rail + a.ago + a.live + a.chg + chgWire
+		script = a.viewer + script + a.pill + a.rail + a.ago + a.stream + a.live + a.chg + chgWire
 	}
 	p := &pageData{
 		View:        view,
@@ -419,7 +424,9 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		MermaidInit: a.mermaidInit,
 		icons:       a.icons,
 		onPage:      map[int]bool{},
+		panelOnPage: map[string]bool{},
 		docs:        map[string]template.HTML{},
+		entries:     map[string]template.HTML{},
 		DocFramed:   framed,
 	}
 	if !full {
@@ -427,6 +434,9 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		p.StampFile = ""
 	}
 	for _, t := range view.Topics {
+		for _, panel := range t.PanelRecaps {
+			p.panelOnPage[panel.PanelID] = true
+		}
 		p.CountPolicy += t.AskCount()
 		p.CountAcks += len(t.Acks)
 		p.CountFresh += t.Fresh
@@ -436,12 +446,29 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 			}
 		}
 	}
+	for _, t := range view.DeferredTopics {
+		for _, panel := range t.PanelRecaps {
+			p.panelOnPage[panel.PanelID] = true
+		}
+	}
 	p.CountBulk = p.CountAcks
 	// After onPage is complete, so a reference in a body links like one in
 	// an item; a mermaid block in an unframed body sets Mermaid before the
 	// template runs.
-	for _, t := range view.Topics {
-		if t.Doc == "" {
+	topics := append(append([]TopicView(nil), view.Topics...), view.DeferredTopics...)
+	for _, t := range topics {
+		if full {
+			pages := append([]EntryPage{t.Stream}, t.Older...)
+			for _, page := range pages {
+				for _, run := range page.Runs {
+					e := run.Entry
+					if e.Kind == EntryPanel && e.Text != "" {
+						p.entries[e.ID] = p.panelHTML(t.Name, e.ID, e.Text, framed, a)
+					}
+				}
+			}
+		}
+		if t.Doc == "" || !full {
 			continue
 		}
 		page := p.Mermaid
@@ -456,7 +483,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		if framed {
 			// The frame loads mermaid for its own blocks; the page loads it
 			// only for a block outside every frame.
-			html = p.framedDoc(t.Name, html, t.DocStale, p.Mermaid, p.relays, a)
+			html = p.framedDoc(t.Name, "", html, t.DocStale, p.Mermaid, p.relays, a)
 			p.Mermaid = false
 		}
 		p.Mermaid = p.Mermaid || page
@@ -467,6 +494,23 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 
 // DocHTML is topic's rendered body (see docs).
 func (p *pageData) DocHTML(topic string) template.HTML { return p.docs[topic] }
+
+// EntryHTML is a panel's content, isolated just like the topic body.
+func (p *pageData) EntryHTML(id string) template.HTML { return p.entries[id] }
+
+func (p *pageData) panelHTML(topic, entry, content string, framed bool, a *pageAssets) template.HTML {
+	pageMermaid := p.Mermaid
+	p.Mermaid = false
+	p.framing, p.inDoc, p.relays = framed, true, nil
+	out := p.convertWith(p.rawMarkdown(), content, "entry/"+entry, nil)
+	p.framing, p.inDoc = false, false
+	if framed {
+		out = p.framedDoc(topic, entry, out, false, p.Mermaid, p.relays, a)
+		p.Mermaid = false
+	}
+	p.Mermaid = p.Mermaid || pageMermaid
+	return out
+}
 
 // frameCSS is what a topic-body frame adds to the page stylesheet: a
 // transparent page, so the topic card shows through, that never scrolls, since the host
@@ -500,9 +544,14 @@ const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 // hands the frame the image (doc-frame.js and the dashboard script).
 // The frame carries its topic name as data-doc, so the host can keep each
 // frame's height across a board swap.
-func (p *pageData) framedDoc(topic string, body template.HTML, stale, mermaid bool, relays []string, a *pageAssets) template.HTML {
+func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mermaid bool, relays []string, a *pageAssets) template.HTML {
+	title, key, entryAttr := topic, "topic:"+topic, ""
+	if entry != "" {
+		title, key = topic+"/"+entry, "entry:"+entry
+		entryAttr = ` data-entry="` + template.HTMLEscapeString(entry) + `"`
+	}
 	var doc strings.Builder
-	doc.WriteString(frameDocStart + `<head><meta charset="utf-8"><base target="_blank"><style>`)
+	doc.WriteString(frameDocStart + `<head><meta charset="utf-8"><meta name="wb-doc-key" content="` + template.HTMLEscapeString(key) + `"><base target="_blank"><style>`)
 	doc.WriteString(string(a.css))
 	doc.WriteString("\n" + frameCSS + `</style></head><body class="doc-frame"><div class="doc-body md` + staleClass(stale) + `">`)
 	doc.WriteString(string(body))
@@ -517,7 +566,7 @@ func (p *pageData) framedDoc(topic string, body template.HTML, stale, mermaid bo
 	if len(relays) > 0 {
 		relay = ` data-relay="` + template.HTMLEscapeString(strings.Join(relays, " ")) + `"`
 	}
-	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(topic) + `" data-doc="` + template.HTMLEscapeString(topic) + `"` + relay + ` sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
+	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(title) + `" data-doc="` + template.HTMLEscapeString(key) + `" data-doc-key="` + template.HTMLEscapeString(key) + `" data-topic="` + template.HTMLEscapeString(topic) + `"` + entryAttr + relay + ` sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
 		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
 }
 
@@ -574,6 +623,9 @@ func (p *pageData) TopicOf(t TopicView) topicData { return topicData{TopicView: 
 // RecapHTML renders the topic's recap through itemField, as an item's block
 // fields render, salted with the topic's key.
 func (p *pageData) RecapHTML(t TopicView) template.HTML {
+	if t.LatestAgent != nil {
+		return p.Inline(t.LatestAgent.Text)
+	}
 	return p.itemField(t.Recap, "topic/"+t.Name+"/recap")
 }
 
@@ -720,8 +772,9 @@ func (d itemData) Reading() string {
 // textPart is a run of lead-authored text; Ref is the item it anchors to,
 // zero for plain text.
 type textPart struct {
-	Text string
-	Ref  int
+	Text   string
+	Ref    int
+	Target string
 }
 
 // Parts splits lead-authored text at its {{nn}} item references. A reference
@@ -732,16 +785,23 @@ type textPart struct {
 func (p *pageData) Parts(s string) []textPart {
 	var parts []textPart
 	last := 0
-	for _, m := range itemRefPattern.FindAllStringSubmatchIndex(s, -1) {
-		id, err := strconv.Atoi(s[m[2]:m[3]])
-		if err != nil || !p.Stored[id] {
+	for _, m := range authoredRefPattern.FindAllStringSubmatchIndex(s, -1) {
+		ref := s[m[2]:m[3]]
+		id, err := strconv.Atoi(ref)
+		panel := strings.HasPrefix(ref, "p") && p.StoredPanels[ref]
+		if !panel && (err != nil || !p.Stored[id]) {
 			continue
 		}
 		if m[0] > last {
 			parts = append(parts, textPart{Text: s[last:m[0]]})
 		}
 		part := textPart{Text: FormatID(id)}
-		if p.onPage[id] {
+		if panel {
+			part.Text = ref
+			if p.panelOnPage[ref] {
+				part.Target = ref
+			}
+		} else if p.onPage[id] {
 			part.Ref = id
 		}
 		parts = append(parts, part)

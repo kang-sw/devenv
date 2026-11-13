@@ -1,5 +1,6 @@
 ---
 title: "Whiteboard topics carry panels and a log; per-topic folder storage"
+completed: 2026-11-13
 related:
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "follower; lands after this ticket and uses the latest agent log line instead of recap"
   261113-feat-ws-whiteboard-update-refusal-cost: "related; its wb:append proposal is superseded, not its remaining refusal/answer work"
@@ -439,6 +440,25 @@ item IDs.
   ticket. Reconcile its recap references and sequencing before that ticket
   is dispatched; leave its frozen results, if any, intact.
 
+## Implementation Parameters
+
+- The panel payload cap is **2 MiB of UTF-8 bytes**. Representative fixtures
+  measured 144,150 bytes for mockup HTML and 614,025 / 606,029 bytes for
+  embedded-image Markdown; larger material links an external file.
+- Durable entry locators are `eN`, board-wide across both logs and panel
+  versions; stable latest-panel targets remain `pN`. A panel mention's `eN`
+  therefore selects its immutable version, not whichever version is latest.
+- The schema-2 folder transaction atomically installs `pending.json` as its
+  commit decision, containing exact panel/topic/session bytes and log append
+  offsets. Locked replay completes partial appends idempotently, publishes
+  session metadata last, then writes a `committed.json` receipt before removing
+  the intent. The receipt prevents stale legacy fallback after publication.
+  Derived output publishes only after commit, under the same lock.
+- History starts with **50 entries per topic**, loads older pages of 50 into
+  a bounded-height scroll area, and preserves the visible entry/offset through
+  older loading and SSE updates. A viewer at the bottom follows new entries;
+  one reading history keeps that anchor. Embeds omit the stream payloads.
+
 ## Phases
 
 The three-phase split is Decision 16. Intermediate phases are not independently shipped
@@ -483,6 +503,22 @@ Verification expectations:
 - Expose durable entry locators for mention resolution; after restart each
   locator still addresses the same topic entry, including log entries with
   equal timestamps. Panel mentions identify a version by its sequence ID (see 15).
+
+### Result (972766abc) - 2026-11-13
+
+Implemented schema-2 topic folders, one-shot locked conversion, immutable panel
+versions, append-only entries, scoped panel/log commands, transition events,
+and removal of recap without an alias. All board readers now share the folder
+authority; original inline/split board snapshots survive new writes and normal
+session metadata migration. Derived index/stamp publication follows the durable
+commit under the same lock. Package/runtime versions target 0.50.0.
+
+Remote focused model/folder/MCP tests passed, including boundary fault replay,
+concurrent writers, exact legacy bytes, restart/no duplicate import, newer-schema
+refusal, stable equal-time locators, and rollback fixtures. The full remote Go
+suite passed with the owner-known LAN daemon replacement test excluded; the
+unfiltered run reproduced that known failure. Self-review found no remaining
+substantive Phase 1 issue. Rendering and final discovery remain in Phases 2/3.
 
 ### Phase 2: Interleaved topic rendering and live refresh
 
@@ -532,6 +568,36 @@ Verification expectations:
   **44% of 512 KiB**, not the follower ticket's stale 42% citation
   (`agents-plugin-tool/internal/wswhiteboard/render_test.go:891-903`).
 
+### Result (5695371fb) - 2026-11-13
+
+Implemented the mixed chronological stream, immutable-version folds, latest-three
+panel expansion, 50-entry paging, folded system runs, compact embeds, and full-width
+file layout. History and closed-topic targets materialize from inert templates;
+viewport/disclosure state survives region swaps. Panel frames retain opaque origins
+and distinct namespaced identities, with source/key validation on the shared bridge.
+Entry mentions survive selection splitting, drafts, cancellation, steering,
+interrupts, inbox persistence, and old/new serialization. Authored item/panel
+references remain distinct from selected-text attribution.
+
+Full remote Go suite passed (the previously recorded owner-known exclusion only).
+Initial static-browser checks passed file light/dark at both widths, keyboard
+folds, older history/anchor preservation, sandbox panel jumps, cross-entry drafts,
+and long-image/frame identity gates with no page errors. Self-review fixed run
+merging across page boundaries, deferred closed targets, and external embed links.
+**Forward to Phase 3 verification:** rerun the final local Node/browser bundle;
+the served narrow fixture must select the dashboard's board tab before asserting
+visibility. Shared local-lock queueing delayed that harness-only correction.
+
+#### Edition (5b8d58710) - 2026-11-13
+
+Historical versions now use a distinct disclosure key after re-posting, so
+refresh cannot restore a formerly latest version's automatic open state beside
+the new version. Later manual historical disclosures still persist. The final
+local history/bridge/relay/mention harnesses and all 15 static-browser gates
+passed, including served narrow Board-tab selection, SSE/history restoration,
+and deferred closed targets, with zero page errors. This clears the verification
+Forward above; 14 retained screenshots are listed in Resolution.
+
 ### Phase 3: Query contract and synchronized playbook guidance
 
 Depends on Phases 1 and 2. Implement the confirmed query selectors and
@@ -579,3 +645,118 @@ Verification expectations:
   answer an item, query metadata and one panel, render/refresh both page
   surfaces, revive, restart, and verify no new writes touched legacy board
   fields. Confirm the complete breaking contract is scheduled for 0.50.
+
+### Result (5b8d58710) - 2026-11-13
+
+Implemented metadata-only discovery, filter-before-limit chronological entry
+windows, exclusive time/ID boundaries, omission counts, full-text search without
+payload dumping, and explicit legacy item/current-content queries. `panel:pN`
+retrieves the latest payload, `panel:eN` an immutable version, and `entry:eN` one
+log record; metadata headers precede untouched text without an added trailing
+newline. Missing/wrong-kind locators and incompatible selectors fail explicitly.
+Session/revive summaries use the latest agent line, never a system event or an
+unconverted recap fallback. Imported provenance remains in stored/query metadata.
+
+Canonical guidance, its manifest, wsflow, and Pi copies are synchronized. One
+fresh-reader pass fixed existing-ask lookup, update-only terminal output, and the
+distinction between agent interpretation and duplicated system events. The
+note-only-answer finding is explicitly out of scope and already owned by the
+refusal-cost ticket; inherited language-precedence wording is a minor Forward.
+The sticky-head follower now depends on this ticket and consumes `LatestAgent`;
+the refusal-cost handoff explicitly retires its append proposal without claiming
+its remaining mutation/answer work is implemented.
+
+Verification: full remote Go suite passed with the previously recorded known
+exclusion; focused store/MCP/dashboard tests and fresh-session inline/split
+conversion/query/render/revive/restart smoke tests passed without legacy writes.
+Manifest/mirror/product-mode guards passed; wsflow Python ran 24 tests (one
+skipped). Local locked validation passed the history harness, ten exported
+Go-generated dashboard JS harnesses, production JS syntax, Pi version/mirror
+9/9, and all 15 browser gates with zero page errors. Self-review left no substantive
+issue in this ticket's scope.
+
+#### Edition (e30578dd4) - 2026-11-13 — R1 important fixes
+
+Independent R1 returned concern with five important findings. Develop
+`afb5959a4` was merged first in `c316ae2bf`; this fixes-only pass addresses
+all five findings, with independent fixes-only R2 still pending:
+
+1. Folder mapping resolves retained topic identity before a stale exact-key
+   close-only mapping. Conversion, adoption, and restart preserve directory,
+   log/panel bytes, imported entry IDs, and the source close state.
+   Test: `TestFolderConversionAdoptionIgnoresStaleCloseMapping`.
+2. Workflow manual/state use an error-returning loader. Missing-key notices
+   remain for absent keys; newer schemas, missing panels, and lock timeouts
+   return the real board error instead of claiming agenda/todos are absent.
+   Test: `TestWorkflowManualAndStateReportWhiteboardReadErrors` covers both
+   handlers and confirms agenda/todos remain unchanged and independently readable.
+3. Stale-topic age includes stream timestamps, including imported recap times.
+   Tests: `TestStaleNudgeUsesLogAndPanelActivity` and
+   `TestStaleNudgeUsesConvertedRecapActivity`. The existing MCP
+   `TestWhiteboardUpdateResultCarriesStaleTopicNudge` now seeds an actually aged
+   board at creation rather than aging only content or rewriting immutable events.
+4. Older-page clicks delegate from the retained history container, so frame
+   grafts can replace the button without losing its listener.
+   `TestHistoryScriptPagingRevealAndSwapAnchorsUnderNode` now includes the
+   160-to-161 entry/e140 retained-frame graft, history restoration, replacement
+   button/descendant clicks, fifty-entry loading, and viewport-anchor preservation.
+5. Every publication failure identifies committed state and gives empty-command
+   render-only repair guidance. Directory and Mermaid-asset failures are injected
+   by `TestWhiteboardPublicationDirectoryAndMermaidFailuresRepairWithoutDuplicateEvents`;
+   `TestWhiteboardRenameRetriesSharingViolation` also verifies the repair wording.
+   Repair preserves item IDs, entry IDs, and log bytes without replaying the add.
+
+Verification: full remote w5090 `go test ./...` passed with only
+`TestHostedConnectionSeeingALANChangeReplacesTheDaemon` excluded, and the local
+locked stream.js Node harness passed. The initial full run exposed the old MCP
+stale-age fixture's content-only aging; its setup was corrected and the full
+suite rerun green. No production changes beyond these five fixes were made.
+Store `schema_version: 2`, the T2/0.50 target, and the no-dual-write contract
+are unchanged. The ticket remains closed; R2 is not claimed complete.
+
+##### Forward — R1 minor items (not implemented)
+
+The coordinates below are the R1 report's references:
+
+- `folders.go:320`: RecapChanged ordering when imported recap timestamps tie.
+- `recap_test.go:62-68`: summary clock/hover assertions.
+- `topics_test.go:124-139`: archive-eviction legacy fixture.
+- `folders_test.go:539`: competing first-open and high-floor conversion cases.
+- The browser fixture is gated by `WS_WHITEBOARD_BROWSER_FIXTURE` and has no CI
+  caller; CI wiring remains deferred.
+
+## Resolution
+
+All three dependency-ordered phases are implemented in `972766abc`, `5695371fb`,
+and `5b8d58710`. The complete T2 contract targets **0.50.0**, with folder
+`schema_version: 2`, one-shot conversion, immutable old rollback snapshots, and
+no dual-write. No sticky-head implementation or refusal-cost mutation/status
+change is included. Temporary files were removed except the gate screenshots.
+
+### Forward
+
+- Minor: clarify the inherited authored-text language-precedence sentence in a
+  later documentation pass; no language-policy change was made here.
+- Note-only answer mapping/status remains owned by
+  `261113-feat-ws-whiteboard-update-refusal-cost`, not this ticket.
+- Dogfood tool transport: `261113-bug-ws-pi-wait-times-out-before-requested-bound`
+  records a 300-second `pi.wait` returning the transport's 60-second timeout.
+
+### Retained gate screenshots
+
+All files are under `D:/Temp/wb-messages/gate-screenshots/`:
+
+- `file-light-wide.png`
+- `file-light-narrow.png`
+- `file-dark-wide.png`
+- `file-dark-narrow.png`
+- `served-light-wide.png`
+- `served-light-narrow.png`
+- `served-dark-wide.png`
+- `served-dark-narrow.png`
+- `served-history-older.png`
+- `served-SSE-history-restoration.png`
+- `served-sandbox-panel-jump.png`
+- `served-beyond-closed-cap-jump.png`
+- `served-cross-entry-mentions.png`
+- `served-long-panel-image.png`

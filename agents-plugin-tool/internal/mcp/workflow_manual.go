@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -104,7 +105,7 @@ func agendaSizeNote(agenda map[string]json.RawMessage) string {
 
 // renderSessionState builds the ## Session State section from a session record.
 // It renders agenda blobs (keyed alphabetically), open whiteboard topics'
-// recaps, then the todo summary.
+// latest-agent topic summaries, then the todo summary.
 // Only scaffolding strings are handler-owned here; no manual prose.
 func renderSessionState(rec sessionRecord) string {
 	var sb strings.Builder
@@ -142,7 +143,7 @@ func renderSessionState(rec sessionRecord) string {
 		}
 	}
 
-	sb.WriteString(renderWhiteboardRecaps(rec.Whiteboard))
+	sb.WriteString(renderWhiteboardSummaries(rec.Whiteboard))
 
 	// Todo summary.
 	sb.WriteString("\n### Todos\n")
@@ -152,34 +153,31 @@ func renderSessionState(rec sessionRecord) string {
 	return sb.String()
 }
 
-// renderWhiteboardRecaps lists each open whiteboard topic's recap, one line
-// per topic in the board's topic order, so a revived lead sees where each
-// topic stands without a separate whiteboard.query. Closed topics and topics
-// without a recap are skipped; with none left it renders nothing.
-func renderWhiteboardRecaps(board *wswhiteboard.State) string {
-	// Depth topics with no target lists only open topics (closed ones fold).
-	res, problems := wswhiteboard.Query(board, map[string]any{"depth": wswhiteboard.DepthTopics})
+// renderWhiteboardSummaries lists each open topic's latest agent log line.
+// Panels and system events never replace the current-state summary. Legacy
+// recaps reach this path only through first-open conversion into agent entries.
+func renderWhiteboardSummaries(board *wswhiteboard.State) string {
+	res, problems := wswhiteboard.Query(board, nil)
 	if len(problems) > 0 {
 		return ""
 	}
 	var lines strings.Builder
 	for _, t := range res.Topics {
-		if t.Closed || t.Recap == "" {
+		if t.Closed || t.LatestAgent == nil {
 			continue
 		}
 		name := t.Stem
 		if name == "" {
 			name = t.Name
 		}
-		// Continuation lines are indented (as wswhiteboard.FormatQuery does),
-		// so a multi-line recap never reads as a heading or list item.
+		// Imported lines may be multi-line; keep continuations indented.
 		// Item references read as the page shows them, (nn).
-		lines.WriteString("- " + name + ": " + strings.ReplaceAll(board.TextRefs(t.Recap), "\n", "\n  ") + "\n")
+		lines.WriteString("- " + name + ": " + strings.ReplaceAll(board.TextRefs(t.LatestAgent.Text), "\n", "\n  ") + "\n")
 	}
 	if lines.Len() == 0 {
 		return ""
 	}
-	return "\n### Whiteboard recaps\n" + lines.String()
+	return "\n### Whiteboard topics\n" + lines.String()
 }
 
 // injectSessionKeyLine finds the first blockquote line containing
@@ -282,10 +280,13 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 		return toolTextResponse(id, "", fmt.Errorf("workflow_state: a valid session_key is required"))
 	}
 
-	// 2. Reuse workflow_manual's fail-loud notice verbatim for any unresolvable
-	//    key (including the sentinel, which is never a stored record). NEVER mint.
-	rec, recOK := s.sessions.readState(key, partAgenda|partTodos|partWhiteboard)
-	if !recOK {
+	// 2. Only a missing key gets workflow_manual's no-record notice (including
+	//    the sentinel). Part/board load failures report their real error. NEVER mint.
+	rec, err := s.sessions.readStateWithError(key, partAgenda|partTodos|partWhiteboard)
+	if err != nil && (!errors.Is(err, errSessionNotFound) || errors.Is(err, errSessionUnreadable)) {
+		return toolTextResponse(id, "", fmt.Errorf("workflow_state: %w", err))
+	}
+	if err != nil {
 		notice := fmt.Sprintf("## Session State\n(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)", key)
 		return toolTextResponse(id, notice+"\n", nil)
 	}
@@ -337,8 +338,11 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	//    gate via lookup-miss, so a non-lead caller reaching this path could read
 	//    that mention to discover the escalation. Return only a no-restore notice
 	//    naming lead-revive (a skill, not the ferrule/sentinel surface). NEVER mint.
-	rec, recOK := s.sessions.readState(key, partAgenda|partTodos|partWhiteboard)
-	if key != freshBootstrapKey && !recOK {
+	rec, err := s.sessions.readStateWithError(key, partAgenda|partTodos|partWhiteboard)
+	if key != freshBootstrapKey && err != nil {
+		if !errors.Is(err, errSessionNotFound) || errors.Is(err, errSessionUnreadable) {
+			return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
+		}
 		notice := fmt.Sprintf("## Session State\n(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)", key)
 		return toolTextResponse(id, notice+"\n", nil)
 	}
@@ -407,8 +411,8 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
 	}
 
-	// Only FRESH (sentinel) and CONTINUE (recOK) remain; the sentinel branch is
-	// checked first so it never depends on a (non-existent) sentinel record.
+	// Only FRESH (sentinel) and CONTINUE (resolved record) remain. Check the
+	// sentinel first so it never depends on a (non-existent) sentinel record.
 	if key == freshBootstrapKey {
 		if root != "" {
 			// 3a. FRESH with root (canonicalized above): mint a lead key, strip
@@ -472,7 +476,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			body = injectSkepticalPosture(body)
 		}
 	} else {
-		// 4. CONTINUE (recOK): strip both markers and inner content; append state.
+		// 4. CONTINUE: strip both markers and inner content; append state.
 		body = stripModeGatedRegion(body, false)
 		if rec.Root != "" {
 			profilesBlock, err := worktreeProfilesForManual(s.sessionConfigOptions(key))

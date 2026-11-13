@@ -160,14 +160,14 @@ func TestSplitLayoutMintLookupChildrenAndMtime(t *testing.T) {
 	}
 }
 
-// TestLegacyRecordServesWithoutMigrating pins the read path: a legacy record
-// authenticates and serves every part, and no read creates anything under
-// sessions/ or removes the legacy file.
+// Reading a legacy record leaves its session layout alone. Opening its board
+// converts the board authority, without changing the inline rollback bytes.
 func TestLegacyRecordServesWithoutMigrating(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	s := newSessionStore()
-	writeSessionRecordForTest(t, s, "split-lead-00", "/work", roleLead, "")
-	want := fullLegacyRecord("/work", "split-lead-00")
+	root := t.TempDir()
+	writeSessionRecordForTest(t, s, "split-lead-00", root, roleLead, "")
+	want := fullLegacyRecord(root, "split-lead-00")
 	legacyPath := writeLegacyRecordForTest(t, s, "legacy-child-00", want)
 	old := time.Now().Add(-2 * touchGuardWindow).Truncate(time.Second)
 	if err := os.Chtimes(legacyPath, old, old); err != nil {
@@ -178,7 +178,7 @@ func TestLegacyRecordServesWithoutMigrating(t *testing.T) {
 		t.Fatalf("recordMtime(legacy) = %v, %v; want %v", got, ok, old)
 	}
 	entry, ok := s.lookup("legacy-child-00")
-	if !ok || entry.root != "/work" || entry.scope != roleLead || entry.parent != "split-lead-00" {
+	if !ok || entry.root != root || entry.scope != roleLead || entry.parent != "split-lead-00" {
 		t.Fatalf("lookup(legacy) = %+v, %v", entry, ok)
 	}
 	if !mtimeOf(t, legacyPath).After(old) {
@@ -216,9 +216,8 @@ func TestLegacyRecordServesWithoutMigrating(t *testing.T) {
 	}
 }
 
-// TestLegacyRecordMigratesOnFirstWrite pins the lazy migration: the first
-// write of any part moves every part into the split layout, keeps each
-// field, and removes the legacy file.
+// The first metadata write splits a legacy session, but both old board-bearing
+// representations remain immutable rollback snapshots.
 func TestLegacyRecordMigratesOnFirstWrite(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -252,18 +251,26 @@ func TestLegacyRecordMigratesOnFirstWrite(t *testing.T) {
 			t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 			s := newSessionStore()
 			const key = "legacy-lead-00"
-			want := fullLegacyRecord("/work", "")
+			want := fullLegacyRecord(t.TempDir(), "")
 			legacyPath := writeLegacyRecordForTest(t, s, key, want)
+			inlineBefore := readFileForTest(t, legacyPath)
+			var original map[string]json.RawMessage
+			if err := json.Unmarshal(inlineBefore, &original); err != nil {
+				t.Fatal(err)
+			}
 
 			if err := tc.write(s, key); err != nil {
 				t.Fatalf("write: %v", err)
 			}
 			tc.apply(&want)
 
-			if exists(legacyPath) {
-				t.Fatal("the first write must remove the legacy record file")
+			if got := readFileForTest(t, legacyPath); !bytes.Equal(got, inlineBefore) {
+				t.Fatal("the first write changed the inline rollback snapshot")
 			}
 			d, _ := s.dirs()
+			if got := readFileForTest(t, d.partPath(key, partWhiteboard)); !bytes.Equal(got, original["whiteboard"]) {
+				t.Fatal("migration must copy the original board JSON, not converted state")
+			}
 			for _, part := range recordParts {
 				if !exists(d.partPath(key, part)) {
 					t.Fatalf("%s missing after migration", part.fileName())
@@ -285,22 +292,22 @@ func TestLegacyRecordMigratesOnFirstWrite(t *testing.T) {
 	}
 }
 
-// TestCrashShapedLayouts pins the two states a migration cut short leaves:
-// both layouts complete (the split record wins and the next write removes the
-// legacy file), and part files without key.json (the legacy record still
-// serves and the next write migrates over the stale parts).
+// Crash-shaped session migrations keep split-key precedence and repair stale
+// parts while preserving board-bearing inline rollback snapshots.
 func TestCrashShapedLayouts(t *testing.T) {
 	t.Run("both layouts", func(t *testing.T) {
 		t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 		s := newSessionStore()
 		const key = "both-layouts-00"
-		legacyPath := writeLegacyRecordForTest(t, s, key, fullLegacyRecord("/old", ""))
-		writeSessionRecordForTest(t, s, key, "/new", roleLead, "")
+		legacyPath := writeLegacyRecordForTest(t, s, key, fullLegacyRecord(t.TempDir(), ""))
+		original := readFileForTest(t, legacyPath)
+		root := t.TempDir()
+		writeSessionRecordForTest(t, s, key, root, roleLead, "")
 
-		if entry, ok := s.lookup(key); !ok || entry.root != "/new" {
+		if entry, ok := s.lookup(key); !ok || entry.root != root {
 			t.Fatalf("lookup = %+v, %v; want the split record", entry, ok)
 		}
-		if rec, ok := s.readState(key, partAll); !ok || rec.Root != "/new" || rec.Agenda != nil {
+		if rec, ok := s.readState(key, partAll); !ok || rec.Root != root || rec.Agenda != nil {
 			t.Fatalf("readState = %+v, %v; want the split record alone", rec, ok)
 		}
 		if !exists(legacyPath) {
@@ -309,10 +316,10 @@ func TestCrashShapedLayouts(t *testing.T) {
 		if err := s.setAgenda(key, "k", json.RawMessage(`{}`)); err != nil {
 			t.Fatal(err)
 		}
-		if exists(legacyPath) {
-			t.Fatal("the next write must remove the leftover legacy record file")
+		if got := readFileForTest(t, legacyPath); !bytes.Equal(got, original) {
+			t.Fatal("the next write changed the inline rollback snapshot")
 		}
-		if rec, ok := s.readState(key, partAll); !ok || rec.Root != "/new" || len(rec.Agenda) != 1 || rec.Todos != nil {
+		if rec, ok := s.readState(key, partAll); !ok || rec.Root != root || len(rec.Agenda) != 1 || rec.Todos != nil {
 			t.Fatalf("readState after write = %+v, %v", rec, ok)
 		}
 	})
@@ -320,9 +327,10 @@ func TestCrashShapedLayouts(t *testing.T) {
 		t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 		s := newSessionStore()
 		const key = "half-moved-00"
-		want := fullLegacyRecord("/work", "")
+		want := fullLegacyRecord(t.TempDir(), "")
 		want.Todos = nil
 		legacyPath := writeLegacyRecordForTest(t, s, key, want)
+		original := readFileForTest(t, legacyPath)
 		d, _ := s.dirs()
 		if err := os.MkdirAll(d.keyDir(key), 0o755); err != nil {
 			t.Fatal(err)
@@ -339,8 +347,8 @@ func TestCrashShapedLayouts(t *testing.T) {
 			t.Fatal(err)
 		}
 		want.Overrides["x"] = "y"
-		if exists(legacyPath) || exists(stale) {
-			t.Fatalf("migration must remove the legacy file (%v) and the stale empty part (%v)", exists(legacyPath), exists(stale))
+		if got := readFileForTest(t, legacyPath); !bytes.Equal(got, original) || exists(stale) {
+			t.Fatalf("migration must preserve the inline board and remove the stale empty part (%v)", exists(stale))
 		}
 		got, ok := s.readState(key, partAll)
 		if !ok {
@@ -355,7 +363,8 @@ func TestCrashShapedLayouts(t *testing.T) {
 func TestPartWritesAreIndependent(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
 	s := newSessionStore()
-	key, err := s.mint("/work", roleLead, "")
+	root := t.TempDir()
+	key, err := s.mint(root, roleLead, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,6 +383,12 @@ func TestPartWritesAreIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, _ := s.dirs()
+	partPath := func(part recordPart) string {
+		if part == partWhiteboard {
+			return filepath.Join(whiteboardFolder(root, key).Dir, "meta.json")
+		}
+		return d.partPath(key, part)
+	}
 	old := time.Now().Add(-time.Hour).Truncate(time.Second)
 	type snapshot struct {
 		data  []byte
@@ -382,14 +397,14 @@ func TestPartWritesAreIndependent(t *testing.T) {
 	snap := func() map[recordPart]snapshot {
 		out := map[recordPart]snapshot{}
 		for _, part := range recordParts {
-			path := d.partPath(key, part)
+			path := partPath(part)
 			out[part] = snapshot{readFileForTest(t, path), mtimeOf(t, path)}
 		}
 		return out
 	}
 	backdate := func() {
 		for _, part := range recordParts {
-			if err := os.Chtimes(d.partPath(key, part), old, old); err != nil {
+			if err := os.Chtimes(partPath(part), old, old); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -428,6 +443,10 @@ func TestPartWritesAreIndependent(t *testing.T) {
 				t.Fatalf("%s write rewrote %s", tc.name, part.fileName())
 			}
 		}
+	}
+
+	if exists(d.partPath(key, partWhiteboard)) {
+		t.Fatal("new board writes must never create a legacy whiteboard.json")
 	}
 
 	// Emptying a part removes its file; the record still reads.

@@ -13,7 +13,6 @@ func checkBoard(t *testing.T) *State {
 	t.Helper()
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="t">
-<wb:recap>status only</wb:recap>
 <wb:add class="policy"><wb:title>pick</wb:title><wb:option>x</wb:option><wb:option>y</wb:option><wb:recommend>a</wb:recommend></wb:add>
 <wb:add class="announced"><wb:title>told</wb:title></wb:add>
 <wb:add class="check"><wb:title>look at the draft</wb:title><wb:why>the second section</wb:why><wb:link>draft.md</wb:link></wb:add>
@@ -26,6 +25,7 @@ func checkBoard(t *testing.T) *State {
 <wb:answer id="5" value="no">B is too dark; go with A</wb:answer>
 <wb:answer id="6" value="ok" assumed="true">sounds fine</wb:answer>
 <wb:patch id="7" status="withdrawn"/>`)
+	legacyRecap(st, "t", "status only") // Legacy read/layout fixture, not wb:recap grammar.
 	return st
 }
 
@@ -59,7 +59,7 @@ func TestCheckClassTakesAckAnswersAndWarnsOnOptions(t *testing.T) {
 
 func TestQueryListsACheckLikeAnyItem(t *testing.T) {
 	st := checkBoard(t)
-	text := queryText(t, st, `{"topic":"t"}`)
+	text := queryText(t, st, `{"topic":"t","depth":"summary"}`)
 	wantText(t, "check items", text, []string{
 		"(03) [open] [check] look at the draft",
 		"(04) [answered] [check] release notes",

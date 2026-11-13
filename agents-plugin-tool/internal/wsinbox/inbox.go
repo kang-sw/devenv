@@ -372,12 +372,16 @@ func Normalize(e Entry) (Entry, error) {
 	for _, m := range e.Mentions {
 		m.Topic = strings.TrimSpace(m.Topic)
 		m.ID = strings.TrimSpace(m.ID)
+		m.Entry = strings.TrimSpace(m.Entry)
 		m.Text = strings.TrimSpace(m.Text)
 		if m.Topic == "" || len(m.Topic) > maxTopicLen || strings.ContainsAny(m.Topic, "\r\n") {
 			return Entry{}, fmt.Errorf("%w: mention topic %q", ErrInvalid, m.Topic)
 		}
 		if m.ID != "" && !chipIDPattern.MatchString(m.ID) {
 			return Entry{}, fmt.Errorf("%w: mention item id %q", ErrInvalid, m.ID)
+		}
+		if m.Entry != "" && !mentionEntryPattern.MatchString(m.Entry) {
+			return Entry{}, fmt.Errorf("%w: mention entry %q (expected eN)", ErrInvalid, m.Entry)
 		}
 		if m.Text == "" {
 			continue

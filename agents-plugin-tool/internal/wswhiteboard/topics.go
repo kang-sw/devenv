@@ -7,7 +7,7 @@ import (
 )
 
 // A topic is keyed by one string: items carry it (Item.Topic), and so do
-// its body and recap (TopicDoc.Name), its close state, and its close result. A
+// its content and entries (TopicDoc.Name), its close state, and its close result. A
 // stemmed topic's key is a short stem the lead chose, and its label, the
 // name the page shows, lives in State.Labels; a stemless topic, such as
 // every topic of a store written before stems, is keyed by its label.
@@ -129,8 +129,8 @@ func applyLabel(p *problems, work *State, cmd command) string {
 	return name
 }
 
-// renameTopic moves everything keyed by from to the key to: items, body and
-// recap, close state, and close result. A close mark or result already under to is
+// renameTopic moves everything keyed by from to the key to: items, content,
+// entries, legacy recap, close state, and close result. A close mark or result already under to is
 // stale (archive eviction drops a topic's items but not its close state), so
 // it goes first rather than closing or doubling the moved topic.
 func (s *State) renameTopic(from, to string) {
@@ -156,7 +156,7 @@ func (s *State) renameTopic(from, to string) {
 }
 
 // pruneLabels drops the label of every stem whose topic is gone (no item,
-// body, or recap left), so a stale stem never blocks a new topic.
+// content, entries, or legacy recap left), so a stale stem never blocks a new topic.
 func (s *State) pruneLabels() {
 	for stem := range s.Labels {
 		if !s.topicKnown(stem) {

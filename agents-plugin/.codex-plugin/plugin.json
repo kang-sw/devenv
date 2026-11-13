@@ -1,6 +1,6 @@
 {
   "name": "ws",
-  "version": "0.49.1",
+  "version": "0.50.0",
   "description": "Workflow plugin for host-neutral skills, project context, tickets, and Git tools.",
   "author": {
     "name": "kang-sw"

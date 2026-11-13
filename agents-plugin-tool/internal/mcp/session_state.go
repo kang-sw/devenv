@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kang-sw/devenv/internal/wsreview"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // session_state.go implements the session state machine layered onto the
@@ -605,11 +606,10 @@ func (s *sessionStore) mutateRecord(sessionKey string, write recordPart, fn func
 // not write (the whiteboard render reads the agenda and todos for its
 // panels): read and write are both loaded, only write is persisted.
 //
-// A legacy record (session_layout.go) is loaded whole and its first mutation
-// migrates it: every part and key.json land in the split layout and the
-// legacy file goes. A write to a split record also removes a legacy file a
-// crash left behind mid-migration. fn returning errRecordUnchanged writes
-// nothing, migration included.
+// A legacy record's first mutation migrates its session metadata, preserving
+// its original board-bearing representations. Whiteboard writes use the
+// folder transaction, never the legacy cache part. fn returning
+// errRecordUnchanged writes nothing, migration included.
 func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPart, fn func(*sessionRecord) error) error {
 	d, err := s.dirs()
 	if err != nil {
@@ -632,7 +632,26 @@ func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPa
 	if err != nil {
 		return err
 	}
-	if err := fn(&record); err != nil {
+	if write&partWhiteboard != 0 {
+		err = whiteboardFolder(record.Root, sessionKey).UpdateAndPublish(record.Whiteboard, func(board *wswhiteboard.State) error {
+			record.Whiteboard = board
+			if err := fn(&record); err != nil {
+				return err
+			}
+			if record.Whiteboard != board && record.Whiteboard != nil {
+				*board = *record.Whiteboard
+			}
+			return nil
+		}, func() error {
+			if record.boardOutput != nil {
+				return record.boardOutput.publish()
+			}
+			return nil
+		})
+	} else {
+		err = fn(&record)
+	}
+	if err != nil {
 		if errors.Is(err, errRecordUnchanged) {
 			return nil
 		}
@@ -641,7 +660,7 @@ func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPa
 	if legacy {
 		return s.migrateRecord(d, sessionKey, &record)
 	}
-	if err := s.writeParts(d, sessionKey, &record, write); err != nil {
+	if err := s.writeParts(d, sessionKey, &record, write&^partWhiteboard); err != nil {
 		return err
 	}
 	removeLegacyRecord(d, sessionKey)
@@ -653,18 +672,25 @@ func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPa
 // whole. It holds s.mu to avoid racing a concurrent write, touches the
 // record, and never migrates it.
 func (s *sessionStore) readState(sessionKey string, parts recordPart) (sessionRecord, bool) {
+	record, err := s.readStateWithError(sessionKey, parts)
+	return record, err == nil
+}
+
+// readStateWithError preserves load failures for callers that distinguish a
+// missing session key from an unreadable part or authoritative whiteboard.
+func (s *sessionStore) readStateWithError(sessionKey string, parts recordPart) (sessionRecord, error) {
 	d, err := s.dirs()
 	if err != nil {
-		return sessionRecord{}, false
+		return sessionRecord{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, ok := s.readRecord(d, sessionKey, parts)
-	if !ok {
-		return sessionRecord{}, false
+	record, _, err := s.loadRecord(d, sessionKey, parts, nil)
+	if err != nil {
+		return sessionRecord{}, err
 	}
 	s.touch(d, sessionKey)
-	return record, true
+	return record, nil
 }
 
 // setAgenda upserts an agenda blob under key.

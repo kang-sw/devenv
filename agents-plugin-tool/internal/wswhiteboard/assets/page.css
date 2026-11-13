@@ -131,10 +131,9 @@ button.chip.bulk:active { filter: brightness(.95); }
 button.chip.bulk:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 
 /* layout */
-.grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
-.grid.solo { grid-template-columns: minmax(0, 1fr); }
-@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
-.side { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 12px; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+.grid > main { min-width: 0; }
+.side { display: flex; flex-direction: column; gap: 10px; }
 .side.flat { position: static; margin-top: 14px; }
 
 /* topic: one elevated surface with a filled title bar */
@@ -398,6 +397,41 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 /* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
 .trecap .rtext { flex: 1; min-width: 0; overflow-wrap: anywhere; contain: paint; }
 .trecap .rat { flex: none; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* Interleaved topic stream: bounded scrolling, no topic side rail. The JS
+   owns entry/offset anchoring rather than the browser's implicit anchoring. */
+.topic-stream { margin: 10px; }
+.topic-stream > summary { cursor: pointer; color: var(--wb-muted-fg); font-size: 12px; }
+.wb-history { max-height: min(65vh, 720px); overflow-y: auto; overflow-x: hidden; overflow-anchor: none; padding: 8px 2px 2px; scrollbar-gutter: stable; }
+.wb-history:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; border-radius: 6px; }
+.history-older { display: block; margin: 0 auto 8px; }
+.history-older[hidden] { display: none; }
+.wb-entry { min-width: 0; overflow-wrap: anywhere; margin: 0 0 8px; }
+.entry-panel { background: var(--wb-bg); border: 1px solid var(--wb-line); border-radius: 8px; overflow: hidden; }
+.entry-panel > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 7px 10px; list-style: none; }
+.entry-panel > summary::-webkit-details-marker { display: none; }
+.entry-panel > summary::before { content: "▸"; color: var(--wb-muted-fg); }
+.entry-panel[open] > summary::before { content: "▾"; }
+.entry-panel > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
+.entry-label { font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
+.entry-recap { flex: 1; min-width: 0; font-weight: 600; }
+.entry-at, .entry-imported { color: var(--wb-muted-fg); font-size: 11px; white-space: nowrap; }
+.entry-at { font-variant-numeric: tabular-nums; }
+.historical .entry-panel { border-style: dashed; background: transparent; }
+.historical .entry-recap { font-weight: 400; }
+.latest-version { font-size: 11px; }
+.entry-line { display: flex; align-items: baseline; gap: 8px; padding: 3px 8px; font-size: 13px; }
+.entry-text { flex: 1; min-width: 0; }
+.wb-entry.agent .entry-line { border-left: 2px solid var(--wb-primary); }
+.system-run { margin-bottom: 8px; color: var(--wb-muted-fg); }
+.system-run > summary { cursor: pointer; width: fit-content; border-radius: 999px; padding: 1px 9px; background: var(--wb-muted); font-size: 11px; }
+.system-run[open] > summary { margin-bottom: 4px; }
+.system-run .wb-entry { margin-bottom: 1px; }
+.system-run .entry-line { font-size: 12px; }
+.panel-recaps { list-style: none; margin: 8px 10px 10px; padding: 0; font-size: 13px; }
+.panel-recaps li { padding: 3px 0; overflow-wrap: anywhere; }
+.panel-recaps li > a { font: 11px var(--wb-mono); margin-right: 6px; }
+.full-board-link { font-size: 12px; margin: 10px 0; }
 
 /* topic body: block markdown above the topic's items, folded under its own summary */
 /* The summary is the topic bar's button: it is taken out of the details' flow
