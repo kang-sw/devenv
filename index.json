@@ -405,7 +405,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T13:46:00Z"
+        "touched_at": "2026-11-13T13:46:41Z",
+        "impl": {
+          "branch": "impl/develop/acorn-shape-rumor"
+        }
       }
     },
     "261113-bug-ws-hosted-pi-start-misses-uninstalled-extension-deps": {
