@@ -463,6 +463,9 @@ const IN_PAGE = () => {
       const time = sec.querySelector(".tbar time.tago[data-at]");
       if (time) { time.setAttribute("data-at", String(at)); time.setAttribute("datetime", new Date(at).toISOString().replace(/\.\d+Z$/, "Z")); }
       else sec.setAttribute("data-bh-at", String(at));
+      // The morph compares a topic's server hash (data-th) when it has one,
+      // so a changed section needs a new hash, as the server would give it.
+      if (sec.hasAttribute("data-th")) sec.setAttribute("data-th", "bh" + at.toString(16));
     };
     let now = Date.now();
     for (const name of names || []) {
