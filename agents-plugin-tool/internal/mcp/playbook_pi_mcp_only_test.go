@@ -188,3 +188,15 @@ func TestPlaybookRenderUnrecordedCallerKeepsHarnessRow(t *testing.T) {
 		t.Errorf("unrecorded caller body missing the host-neutral SpawnIdiom")
 	}
 }
+
+// TestPlaybookReadPiSpawnedCallerUsesMCPOnlyIdioms: playbook.read carries the
+// caller key to the terminology switch as playbook.render does.
+func TestPlaybookReadPiSpawnedCallerUsesMCPOnlyIdioms(t *testing.T) {
+	f := newPiRecordFixture(t)
+	key := f.spawnedKey(t, &wsagent.Profile{Backend: wsagent.BackendPi})
+	resp := callToolOnce(t, f.s, 2, "playbook.read", map[string]any{"name": "ticket-worker-elevated", "session_key": key})
+	if toolIsError(t, resp) {
+		t.Fatalf("playbook.read returned error: %s", resp)
+	}
+	assertPiMCPOnlyBody(t, toolText(t, resp))
+}
