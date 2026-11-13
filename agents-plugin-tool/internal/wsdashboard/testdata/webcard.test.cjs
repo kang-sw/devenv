@@ -56,7 +56,7 @@ function boot({ sysopen = true, port = '4242', composer = true } = {}) {
   }
   const ctx = {
     document, WsCards, URL, JSON, Math, String, Array,
-    location: { origin: HOST, port, protocol: 'http:', href: HOST + '/s/rid1' },
+    location: { origin: HOST, hostname: 'localhost', port, protocol: 'http:', href: HOST + '/s/rid1' },
     wsT: (k, ...a) => k + (a.length ? ':' + a.join(',') : ''),
     setTimeout: fn => timers.push(fn),
     addEventListener: (type, fn) => winListeners.push({ type, fn }),
@@ -133,6 +133,19 @@ test('the host drops a message from another origin, another frame, or the inner 
   assert.equal(o.c.w.proxy, '');
   b.message(o.win, HOST, { wsWeb: 'ready', path: '/' });
   assert.equal(o.c.w.ready, true);
+});
+
+test('a frame message naming a proxy off this host name is ignored', () => {
+  const b = boot();
+  const o = openCard(b, { path: 'docs/site/index.html' }, STATIC);
+  for (const proxy of ['http://evil.example', 'http://evil.example:5555', 'https://localhost:5555', 'http://localhost:5555/x',
+    'http://localhost.evil.example:5555', 'http://127.0.0.1:5555', 'http://localhost:', 'http://localhost:5555 ', 7, null]) {
+    b.message(o.win, HOST, { wsWeb: 'frame', proxy });
+  }
+  assert.equal(o.c.w.proxy, '');
+  assert.equal(o.c.w.framed, false);
+  b.message(o.win, HOST, { wsWeb: 'frame', proxy: PROXY });
+  assert.equal(o.c.w.proxy, PROXY);
 });
 
 test('host posts name this page origin, never "*"', () => {

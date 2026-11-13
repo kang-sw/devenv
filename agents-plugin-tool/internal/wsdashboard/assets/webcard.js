@@ -281,7 +281,11 @@
   function take(card, m) {
     var w = card.w, type = m.wsWeb;
     if (type === "frame") {
-      if (!/^https?:\/\/[^\/?#\s]+$/.test(str(m.proxy))) return;
+      // The proxy origin is always this page's own host name on another
+      // port: anything else is not the wrapper's word, and "open in tab"
+      // must never lead off this machine.
+      var px = str(m.proxy), pre = "http://" + location.hostname + ":";
+      if (px.indexOf(pre) !== 0 || !/^\d{1,5}$/.test(px.slice(pre.length))) return;
       w.proxy = m.proxy;
       w.framed = true;
       w.retried = false;

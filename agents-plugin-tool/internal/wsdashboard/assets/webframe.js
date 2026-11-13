@@ -9,9 +9,15 @@
   var inner = doc.getElementById("f"), host = location.origin;
   if (!proxy || !inner || window.parent === window) return;
   function msg(m) { return !!m && typeof m === "object" && typeof m.wsWeb === "string"; }
+  // The page's own types: frame and gone are this wrapper's word alone,
+  // and the card cannot tell a relayed message from one of the wrapper's,
+  // so a page posting them (a forged proxy origin behind "open in tab")
+  // is never relayed.
+  var up = { ready: 1, pick: 1, picking: 1, errors: 1, console: 1 };
   window.addEventListener("message", function (e) {
     if (!msg(e.data)) return;
     if (e.source === inner.contentWindow && e.origin === proxy) {
+      if (!up.hasOwnProperty(e.data.wsWeb)) return;
       window.parent.postMessage(e.data, host);
     } else if (e.source === window.parent && e.origin === host && inner.contentWindow) {
       inner.contentWindow.postMessage(e.data, proxy);

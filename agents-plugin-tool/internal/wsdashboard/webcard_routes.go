@@ -53,8 +53,10 @@ import (
 //
 //   - inner -> wrapper: posted to the dashboard origin only (http, the
 //     page's own host name, the daemon's port), never "*". The wrapper
-//     relays a message whose source is its inner frame and whose origin is
-//     the proxy origin up to its parent, with targetOrigin its own origin.
+//     relays a message whose source is its inner frame, whose origin is
+//     the proxy origin, and whose type is an inner -> host one (never
+//     frame or gone: the card cannot tell a relayed message from the
+//     wrapper's own) up to its parent, with targetOrigin its own origin.
 //   - host -> wrapper -> inner: the card posts to its iframe's window with
 //     targetOrigin its own origin; the wrapper relays a message whose source
 //     is its parent and whose origin is its own down to the inner frame with

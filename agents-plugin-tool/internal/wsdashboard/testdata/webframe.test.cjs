@@ -50,6 +50,17 @@ test('only an inner-frame message from the proxy origin is relayed up, to the wr
   assert.deepEqual(w.down, []);
 });
 
+test('the page cannot post the wrapper\'s own types through the relay', () => {
+  const w = boot();
+  w.up.length = 0;
+  for (const type of ['frame', 'gone', 'hasOwnProperty', '__proto__', 'other']) {
+    w.message(w.innerWin, PROXY, { wsWeb: type, proxy: 'http://evil.example' });
+  }
+  assert.deepEqual(w.up, []);
+  for (const type of ['ready', 'pick', 'picking', 'errors', 'console']) w.message(w.innerWin, PROXY, { wsWeb: type });
+  assert.deepEqual(w.up.map(u => u.m.wsWeb), ['ready', 'pick', 'picking', 'errors', 'console']);
+});
+
 test('only a parent message from the wrapper origin is relayed down, to the proxy origin', () => {
   const w = boot();
   w.up.length = 0;
