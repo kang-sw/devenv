@@ -4,6 +4,8 @@ title: "Route Facts with an invalid enum value pass the ready gate and fail only
 
 # Route Facts invalid value passes the ready gate
 
+Duplicate of 261007-bug-ready-gate-accepts-invalid-route-fact-values.
+
 ## Observation
 
 2026-11-11 dogfood: `261110-feat-ws-tracker-daemon-event-hook` reached
