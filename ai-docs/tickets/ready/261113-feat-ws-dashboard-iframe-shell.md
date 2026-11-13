@@ -186,6 +186,108 @@ click on an in-frame `/s/<id>` link switches frames through the shell (URL
 updated by `pushState`, no plain-page load in the frame); browser back and
 forward switch frames.
 
+#### Result (ffca4d075) - 2026-11-14
+
+Landed (review fixes in bff1dcdb1):
+
+- `/s/<id>` serves the shell (`{{define "shell"}}`): the session rail, the top
+  header, and `#frames`. `/s/<id>?frame=1` serves the session page as before,
+  with `data-frame`, an invisible rail placeholder (`railph`), and invisible
+  header items.
+- Overlay model. Frames fill the window under the shell. The shell's rail and
+  header items take pointer events above them, so each framed page keeps its
+  own media queries, the wide-view left-aligned layout, and the pinned column
+  unchanged.
+- Streams. The shell streams the rail alone on the new `GET /rail/events`.
+  `/s/<id>/events?frame=1` omits the rail. The plain session stream still
+  carries it, which keeps older open pages working (T0).
+- Frames. `WsShell.LIMIT` = 5, recency ordered (`WsShell.touch`). The shown
+  frame is never evicted, and pages opened and left before they showed go
+  first. A frame holding unsent work stays past the limit until it holds none.
+  The address bar uses `pushState`; `popstate` shows the kept frame.
+- Hidden frames are told on every load and switch (`shown`). While hidden they
+  hold region swaps (newest per region), skip the clock, defer the tracker
+  reload, and skip tracker toasts. On show they apply the held work once.
+- Framing headers per (503). `?frame=1` session and finding responses send
+  `frame-ancestors 'self'` and `SAMEORIGIN`. Every other response keeps
+  `'none'` and `DENY`. The session page keeps `frame-src 'self'` with no
+  proxy origins (coordinator directive superseding the Composed CSP proxy
+  text). `TestPagesRefuseFraming` keeps a `sameOrigin` list a later route
+  joins.
+
+Flicker fix (501): rail.js moved into the shell's `<head>`. An inline script
+placed right after the rail calls `WsRail.marks(r-rail, WsRail.state(store),
+rid)` before the parser yields, then restores the rail scroll.
+`data-premark` keeps the rail rows unseen until that script ran. Ended folds
+are now persisted too (`ws.dashboard.railended`, browser storage, T0). No
+cookie or server state is involved.
+
+postMessage shapes (UI control only; `WsShell.message` type-checks each kind,
+and a receiver takes a message only from its own origin, the shell only from
+one of its frames and a frame only from its parent):
+
+- frame to shell:
+  - `head {html|null, qs, pad, top}`
+  - `title {title}`
+  - `nav {href}`
+  - `key {key: "rail"|"esc"}`
+  - `layout {pincol, dim}`
+  - `scroll {y}`
+  - `hash {hash}`
+  - `theme {theme}`
+- shell to frame:
+  - `shown {shown}`
+  - `search {}`
+  - `menu {}`
+  - `sync {}`
+  - `theme {theme}`
+
+Decisions taken (for veto):
+
+- The search palette stays in the frame. The shell's mirrored search button
+  and Ctrl+K / Ctrl+Space / "/" send `search`, and the palette reads its
+  session rows from the shell's rail.
+- The hosted session menu chip in the shell sends `menu`.
+- The shell dims its rail and header by the frame's modal backdrop alpha
+  (`layout.dim`), so overlays read window-wide.
+- Pages that scroll as a whole (board-first) send `scroll`, and the shell's
+  header and rail move like the sticky originals.
+- Non-session links in a frame navigate the top level (Phase 1 rule). The
+  shell's own non-framed links do too.
+
+Verification (local; the sys_lock remote w5090 was unavailable):
+
+- `go test ./internal/wsdashboard/` passes except five tests that fail
+  identically on the base commit: `TestMailboxBadgeTopLevel`,
+  `TestRailScript`, and three tracker UI node tests.
+- New tests:
+  - `TestPagesRefuseFraming`, `TestSessionPageFramesOnlyItsOwnOrigin`
+  - `TestSessionURLServesTheShellAroundItsFramedPage`
+  - `TestShellStreamsTheRailAndItsFramesTheirRegions`
+  - `TestShellScript`, `TestRailMarks`
+  - `TestShellSwitchesFramesThroughItsGlue`: message trust, load/hidden
+    state, pushState/popstate, the LRU, click interception
+- LOOK: the wide (1800) shell is pixel-identical to the pre-change page.
+  The narrow (1200) shell keeps the overlay rail with the memo pad and
+  scrim, matching the pre-change page.
+- Flicker, headless at 8x CPU throttle: at the first animation frame with
+  rail rows, the shell already shows the stored star, order, current row,
+  and a collapsed workspace. The pre-change page shows the server's order
+  in both cases.
+- Headless interaction, no page errors:
+  - with focus in a frame, Ctrl+` toggles the shell rail and Esc closes it
+  - Ctrl+K in a frame opens the palette with focus in its input
+  - the shell's search button opens the frame's palette, and a palette
+    session pick switches frames
+  - an in-frame `/s/<id>` link switches frames via pushState, with no load
+    in the frame
+  - back and forward switch frames
+  - a URL with a query still registers its frame
+- Switch times on the test fixture:
+  - warm (kept frame): 25-33 ms click-to-painted (9-13 ms in-page)
+  - cold: 81-132 ms
+  - the pre-change full reload, same method: 74-123 ms
+
 ### Phase 2: Remaining pages as frames, throttling, render fan-out
 
 All remaining dashboard pages open as frames inside the shell: every
