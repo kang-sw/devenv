@@ -358,8 +358,8 @@ func TestPiSpawnResolvesThePiTierAndCwd(t *testing.T) {
 		t.Fatalf("spawn spec = %+v", spec)
 	}
 	abs := t.TempDir()
-	callToolWithKey(t, f.server, 5, f.key, "pi.spawn", map[string]any{"prompt": "y", "tier": "medium", "cwd": abs, "label": "second"})
-	if spec := agents.specs[1]; spec.Cwd != abs || spec.Label != "second" || spec.Model != "sol" {
+	callToolWithKey(t, f.server, 5, f.key, "pi.spawn", map[string]any{"prompt": "y", "tier": "medium", "cwd": abs, "label": "second", "profile": "pi-mini-lead"})
+	if spec := agents.specs[1]; spec.Cwd != abs || spec.Label != "second" || spec.Model != "sol" || spec.Profile != wsagent.PiMiniLeadProfile {
 		t.Fatalf("an absolute cwd and a label pass through: %+v", spec)
 	}
 	callToolWithKey(t, f.server, 6, f.key, "pi.spawn", map[string]any{"prompt": "z", "tier": "light"})

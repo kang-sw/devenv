@@ -262,8 +262,19 @@ func (s *Server) piOwned(tool, child string, parent wsagent.ParentRef) error {
 	return fmt.Errorf("%s: %s is not one of this session's Pi subagents (pi.list lists them)", tool, child)
 }
 
+func piSpawnProfile(args map[string]any) (string, error) {
+	if _, present := args["profile"]; !present {
+		return wsagent.PiWorkerProfile, nil
+	}
+	return stringArg("pi.spawn", "profile", args)
+}
+
 func (s *Server) handlePiSpawn(id json.RawMessage, key string, parent wsagent.ParentRef, args map[string]any) response {
 	const tool = "pi.spawn"
+	profile, err := piSpawnProfile(args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
 	prompt, err := rawStringArg(tool, "prompt", args)
 	if err == nil && strings.TrimSpace(prompt) == "" {
 		err = fmt.Errorf("%s: prompt is required", tool)
@@ -304,7 +315,7 @@ func (s *Server) handlePiSpawn(id json.RawMessage, key string, parent wsagent.Pa
 		label = prompt
 	}
 	st, err := s.pi.agents.Spawn(wsagent.SpawnSpec{
-		Profile: wsagent.PiWorkerProfile,
+		Profile: profile,
 		Root:    entry.root,
 		Cwd:     cwd,
 		Model:   mapping.Model,
@@ -515,12 +526,13 @@ func piToolDefinitions() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "pi.spawn",
-			"description": "Spawn a Pi subagent: a headless Pi coding agent the dashboard daemon runs for this session, with Pi's coding tools (read, bash, edit, write, grep, find, ls) and the ws git tools, working in cwd. prompt is its first message; a rendered playbook prompt works as it does for a native subagent. tier picks the model from the pi bucket of agents.tier alone; an unset tier refuses and names the tiers that are set. Returns the subagent's id at once while its turn runs. Each time a turn ends or fails, a completion mail (the id, the status, and the final assistant message) arrives in this session's mailbox: that is the primary signal, and on a host with mailbox push it starts this session's next turn. pi.wait is the fallback for a host without push. Steer it with pi.send, read it with pi.transcript, list this session's subagents with pi.list, and close one with pi.stop.",
+			"description": "Spawn a Pi subagent: a headless Pi coding agent the dashboard daemon runs for this session, working in cwd. profile names any resolvable non-lead Pi agent profile; omitted means pi-worker (coding and ws git tools), while pi-mini-lead adds bounded ticket workflow tools. prompt is its first message; a rendered playbook prompt works as it does for a native subagent. tier picks the model from the pi bucket of agents.tier alone; an unset tier refuses and names the tiers that are set. Returns the subagent's id at once while its turn runs. Each time a turn ends or fails, a completion mail (the id, the status, and the final assistant message) arrives in this session's mailbox: that is the primary signal, and on a host with mailbox push it starts this session's next turn. pi.wait is the fallback for a host without push. Steer it with pi.send, read it with pi.transcript, list this session's subagents with pi.list, and close one with pi.stop.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": key,
 					"prompt":      stringProperty("The subagent's first message."),
+					"profile":     stringProperty("Optional agent.profile name: a non-lead Pi profile. Default: pi-worker. pi-mini-lead adds bounded ticket workflow tools."),
 					"tier":        stringProperty(`Capability tier: "small", "medium", "large", or "xlarge", resolved from agents.tier's pi bucket.`),
 					"cwd":         stringProperty("Directory the subagent works in: absolute, or relative to the session's root. Default: the session's root."),
 					"label":       stringProperty("Optional one-line name for the subagent's agents-panel row and its completion mail; default: the prompt's first line."),

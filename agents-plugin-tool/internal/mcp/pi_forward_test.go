@@ -138,8 +138,12 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 		t.Fatalf("pi.spawn = %q", out)
 	}
 	call := route.last()
-	if call.path != "/agents/by-token/spawn" || call.auth != "Bearer tok123" || call.body["prompt"] != "sub task" || call.body["tier"] != "small" || call.body["cwd"] != "sub" || call.body["label"] != "sub" {
+	if call.path != "/agents/by-token/spawn" || call.auth != "Bearer tok123" || call.body["prompt"] != "sub task" || call.body["tier"] != "small" || call.body["cwd"] != "sub" || call.body["label"] != "sub" || call.body["profile"] != wsagent.PiWorkerProfile {
 		t.Fatalf("forwarded spawn = %+v", call)
+	}
+	callToolWithKey(t, s, 30, key, "pi.spawn", map[string]any{"prompt": "mini", "tier": "small", "profile": "custom-pi"})
+	if call := route.last(); call.body["profile"] != "custom-pi" {
+		t.Fatalf("explicit profile must reach the daemon: %+v", call)
 	}
 	if out := callToolWithKey(t, s, 4, key, "pi.spawn", map[string]any{"prompt": "x", "tier": "large"}); !strings.Contains(out, `tier "large" is above this conversation's own tier "medium"`) {
 		t.Fatalf("a daemon refusal reaches the worker: %q", out)

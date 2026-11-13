@@ -578,14 +578,19 @@ restart a wait on a conversation that settled before it answers at once.
 `Runner.Watch` reports each change of a conversation with a parent.
 The built-in `pi-worker` profile is Pi's coding tools plus ws's
 `git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`, and the
-six `pi.*` tools, with no instruction file. A spawn records its `tier`
+six `pi.*` tools, with no instruction file. The built-in `pi-mini-lead`
+adds `tickets.query/acquire/release/close/move/verify/checklist`, read-only
+`note.query`, `playbook.read`, `playbook.render`, `path.generate`, and
+`route.resolve_implement`. It keeps a delegate key, not lead authority, and
+adds no note, whiteboard, or tracker writes. A spawn records its `tier`
 (`SpawnSpec.Tier`, `Record.tier`; an unknown name is refused).
 
 The `pi.*` tools (`internal/mcp/pi_tools.go`, lead-only) put this on a
-session: `pi.spawn {prompt, tier, cwd?, label?}` (model and effort from the
+session: `pi.spawn {prompt, tier, profile?, cwd?, label?}` (model and effort from the
 tier's entry in the `pi` harness bucket of `agents.tier`, which only the
 user's `config.tune` sets; an unset tier is refused with that key named;
-`cwd` relative to the session's root), `pi.send` (a running child's native
+`cwd` relative to the session's root; `profile` names any resolvable non-lead
+Pi `agent.profile.<name>`, default `pi-worker`), `pi.send` (a running child's native
 Pi steer at the next tool boundary; with no turn running, a new turn at once;
 a closed child resumes on the same session file, keeping its id, cwd, model,
 effort, and label; a missing session file is refused), `pi.list` (the caller's
@@ -658,6 +663,17 @@ owns the whole tree:
   child's tier resolves in the `pi` bucket alone and may not rank above the
   holder's own (`small` < `medium` < `large` < `xlarge`); a holder with no recorded tier
   is refused.
+- **Profiles.** An omitted `profile` always means `pi-worker`, even for a
+  mini-lead parent. A non-lead parent's child must be a subset of its launched
+  resolved `ws_tools`, `tools`, and `mcp_servers` (including each server's
+  definition); an excess is refused naming both profiles and the tools.
+  Overrides are honored, not ranked by profile name. Each Pi process launch
+  persists the exact checked definition on its record, uses that same copy
+  to launch, and checks again on restart against its parent's launched copy.
+  Widening a parent's config does not widen an already-running parent's
+  ceiling. A still-running process reattaches with its saved definition;
+  older records without one resolve and snapshot once. Lead parents have no
+  subset ceiling.
 - **Reports.** A child's settled turn waits in its record
   (`pending_reports`) until the runner hands it to the parent. A running
   parent turn gets it as a Pi `steer`. Otherwise it is kept in the parent's
