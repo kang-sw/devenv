@@ -178,6 +178,16 @@ focusKeep.opt.onEnd();
 check('focus keep end clears navigation target',next._wbHistoryTarget,null);
 next.querySelector('.history-live')._liveHeight=4000; keepCount=keeps.length; resize(next);
 check('post-session resize neither reveals nor resurrects keep',[next._wbHistorySteps,next._wbHistoryTarget,keeps.length],[4,null,keepCount]);
+// Navigation offsets clear the actual sticky topic/rail stack, not just
+// the scroller edge. Hosts without a sticky head retain the 12px offset.
+next=board(50,1); window.wbHistory.init(document);
+var stickyHead=new E('div',{'class':'tophead'}); stickyHead.offsetHeight=50;
+next.closest('.topic').insertBefore(stickyHead,next.closest('.topic').firstChild);
+window.getComputedStyle=function(){return {position:'sticky',top:'44px'};};
+fire(next.querySelector('.entry-panel').querySelector('summary'),'focusin');
+check('keyboard navigation clears sticky stack',keeps.slice(-1)[0].opt.offset,106);
+window.wbHistory.loadTarget(document,'p1');
+check('deep-link navigation clears same sticky stack',keeps.slice(-1)[0].opt.offset,106);
 // Control states distinguish clipped materialized content from inert pages.
 next = board(50); window.wbHistory.init(document);
 check('clipped live rows show control without templates', next.querySelector('.history-older').hidden, false);
@@ -304,7 +314,9 @@ frame(); ro.deliver();
 check('each later frame/report advances once',h.querySelectorAll('.wb-entry').length,200);
 frame(); ro.deliver();
 check('neutral chain reaches oldest page and preserves closed fold',[h.querySelectorAll('.wb-entry').length,h.querySelectorAll('template[data-history-page]').length,h.querySelector('.run-fold')===closedRun,closedRun.open],[203,0,true,false]);
+check('observer exhaustion defers control layout even through reentrant binding',[h.querySelector('.history-older').hidden,h._wbHistoryControlFrame,h._wbHistoryResizing],[false,true,false]);
 var observeCount=ro.observes; frame();
+check('next frame hides exhausted control',[h.querySelector('.history-older').hidden,h.classList.contains('history-more'),h._wbHistoryControlFrame],[true,false,false]);
 check('exhaustion cancels final re-observation',[ro.observes,ro.deliver()],[observeCount,0]);
 ['collapsed','filled','disconnected'].forEach(function(reason){
   var h=neutralBoard(), ro=h._wbHistoryObserver, live=h.querySelector('.history-live');

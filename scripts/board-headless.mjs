@@ -695,7 +695,11 @@ async function scenarioKeep(ctx) {
   // first swap brought for the topic updated above: a swap's frames report
   // their heights late (load, reveal), which is what the compensation has
   // to hold through after the swap's own motion.
-  const upAbove = above[1].name, lateGrow = upAbove, upBelow = below[below.length - 1].name;
+  // History seeds also contain log-only topics. Late body-height probes
+  // require a real frame, not simply the second topic in board order.
+  const framedAbove = await page.evaluate((names) => names.filter((n) => window.__bh.section(n).querySelector('.tdoc iframe.doc-frame')), above.map((t) => t.name));
+  assert(framedAbove.length >= 2, 'need two framed topics above for the late-height probe');
+  const upAbove = framedAbove[1], lateGrow = upAbove, upBelow = below[below.length - 1].name;
   const tracked = inView.map((t) => t.name);
   log(`in view: ${tracked.join(", ")}; update above: ${upAbove}; update below: ${upBelow}; late frame: ${lateGrow}`);
 
@@ -730,7 +734,9 @@ async function scenarioKeep(ctx) {
   const lay2 = await page.evaluate(() => window.__bh.layout());
   const above2 = lay2.filter((t) => t.where === "above");
   assert(above2.length >= 3, "too few topics above the viewport for the user-scroll part");
-  const up2 = above2[1].name, grow2 = above2[above2.length - 1].name;
+  const framedAbove2 = await page.evaluate((names) => names.filter((n) => window.__bh.section(n).querySelector('.tdoc iframe.doc-frame')), above2.map((t) => t.name));
+  assert(framedAbove2.length >= 1, 'need a framed topic above for the post-user-scroll height probe');
+  const up2 = above2[1].name, grow2 = framedAbove2.at(-1);
   assertChanged(await page.evaluate((n) => window.__bh.update([n]), up2), [up2]);
   const running = await page.evaluate(() => !!window.__bh.keeping());
   assert(running, "no keep session runs right after a board swap");
@@ -1024,8 +1030,8 @@ async function scenarioHistory(ctx) {
     assert(prior, 'need a topic before HISTORY for the below-collapse probe');
     if (kind !== 'standalone') await growFrame(page, prior, 1000);
     else await page.evaluate((name) => {
-      const body = window.__bh.section(name).querySelector('.tdoc > .doc-body');
-      if (!body) throw new Error('preceding topic has no inline payload');
+      const body = window.__bh.section(name).querySelector('.tdoc > .doc-body, .history-live');
+      if (!body) throw new Error('preceding topic has no inline body or log payload');
       body.style.paddingBottom = (parseFloat(getComputedStyle(body).paddingBottom) + 1000) + 'px';
     }, prior);
     await waitQuiet(page);
@@ -1234,12 +1240,16 @@ async function scenarioHistory(ctx) {
       rowsAdded: arrival.rows - arrivalBefore.rows, newestAtBottom: arrival.newestAtBottom, clipScrollTop: arrival.scrollTop });
     assert(arrival.steps === arrivalBefore.steps && arrival.rows === arrivalBefore.rows + 1 && arrival.newestAtBottom && arrival.scrollTop === 0,
       'live arrival did not stay at the bottom of an unchanged clip');
+    const observerErrors = await page.evaluate(() => window.__bh.observerErrors);
+    assert(observerErrors.length === 0, `native ResizeObserver loop errors: ${observerErrors.join(' | ')}`);
   } catch (e) {
     report.failure = e.message;
     report.omissions.push('Stopped at the recorded failure; subsequent checks in the scenario were not run.');
     throw e;
   } finally {
     report.errors = ctx.errors; report.failures = ctx.failures;
+    report.native = await page.evaluate(() => ({ observerErrors: window.__bh.observerErrors,
+      observerErrorDetails: window.__bh.observerErrorDetails })).catch(() => null);
     fs.writeFileSync(path.join(dir, 'measurements.json'), JSON.stringify(report, null, 2));
     log(`history artifacts: ${dir}`);
   }
@@ -1283,7 +1293,10 @@ async function scenarioHistoryRegressions(ctx) {
     const keyboardAfter = await page.evaluate(() => {
       const bh = window.__bh, h = bh.history(), node = document.activeElement, r = node.getBoundingClientRect();
       const clip = h.querySelector('.history-clip').getBoundingClientRect(), s = bh.scroller();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return { expected: node === bh.expectedTab, summary: node.matches('.entry-panel > summary'),
+        centerExposed: !!hit && (hit === node || node.contains(hit)),
+        centerHit: hit && { tag: hit.tagName, id: hit.id, classes: hit.className },
         panel: node.closest('.entry-panel')?.id, top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
         viewTop: bh.viewTop(s), viewBottom: bh.viewBottom(s), clipScrollTop: h.querySelector('.history-clip').scrollTop,
         steps: h._wbHistorySteps };
@@ -1292,8 +1305,8 @@ async function scenarioHistoryRegressions(ctx) {
     await capture('after-tab');
     assert(keyboardAfter.expected && keyboardAfter.summary && keyboardAfter.top >= keyboardAfter.clipTop - 1 &&
       keyboardAfter.bottom <= keyboardAfter.clipBottom + 1 && keyboardAfter.top >= keyboardAfter.viewTop - 1 &&
-      keyboardAfter.bottom <= keyboardAfter.viewBottom + 1 && keyboardAfter.clipScrollTop === 0,
-      'actual Tab focused a summary outside the clip/page or scrolled the clip');
+      keyboardAfter.bottom <= keyboardAfter.viewBottom + 1 && keyboardAfter.clipScrollTop === 0 && keyboardAfter.centerExposed,
+      'actual Tab focused a summary outside the clip/page, under a sticky overlay, or scrolled the clip');
     await page.evaluate(() => document.activeElement.blur());
 
     async function settledLog(name) {

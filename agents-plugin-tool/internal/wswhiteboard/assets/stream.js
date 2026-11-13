@@ -37,6 +37,20 @@
     var live = h.querySelector('.history-live');
     var more = !!h.querySelector('template[data-history-page]') || live.scrollHeight > (h._wbHistorySteps || 1) * STEP;
     var button = h.querySelector('.history-older');
+    if ((!button || button.hidden === !more) && h.classList.contains('history-more') === more) return;
+    // Hiding the exhausted control resizes shallower ancestors watched by
+    // keep/rail. Do that outside this history's resize delivery, including
+    // reentrant init calls from loadOne -> wbBindBoard.
+    if (h._wbHistoryResizing) {
+      if (!h._wbHistoryControlFrame) {
+        h._wbHistoryControlFrame = true;
+        window.requestAnimationFrame(function () {
+          h._wbHistoryControlFrame = false;
+          if (h.isConnected) updateControl(h);
+        });
+      }
+      return;
+    }
     if (button) button.hidden = !more;
     h.classList.toggle('history-more', more);
   }
@@ -105,7 +119,13 @@
     reveal(h, node);
     arm(h);
     h._wbHistoryTarget = node;
-    kit.keep(node, { offset: 12, observe: [h.querySelector('.history-live')], onEnd: function () {
+    // Page navigation must clear the topic's sticky head AND the rail/host
+    // stack above it. A fixed page-top offset can leave keyboard focus
+    // inside the clip but hidden behind those capsules on either surface.
+    var head = h.closest('.topic').querySelector('.tophead'), offset = 12;
+    var style = head && window.getComputedStyle(head);
+    if (style && style.position === 'sticky') offset += (parseFloat(style.top) || 0) + head.offsetHeight;
+    kit.keep(node, { offset: offset, observe: [h.querySelector('.history-live')], onEnd: function () {
       if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
     } });
   }
@@ -291,11 +311,14 @@
       if (typeof ResizeObserver !== 'undefined') {
         var observer = new ResizeObserver(function () {
           if (h.isConnected === false) { observer.disconnect(); return; }
-          if (h._wbHistoryTarget) reveal(h, h._wbHistoryTarget);
-          // Initial layout alone does not load older pages; a user has to
-          // expand first. A collapse cancels the bounded resize chain.
-          if (h._wbHistorySteps > 1 && h.querySelector('.history-live').scrollHeight < h._wbHistorySteps * STEP) loadOne(h);
-          updateControl(h);
+          h._wbHistoryResizing = true;
+          try {
+            if (h._wbHistoryTarget) reveal(h, h._wbHistoryTarget);
+            // Initial layout alone does not load older pages; a user has to
+            // expand first. A collapse cancels the bounded resize chain.
+            if (h._wbHistorySteps > 1 && h.querySelector('.history-live').scrollHeight < h._wbHistorySteps * STEP) loadOne(h);
+            updateControl(h);
+          } finally { h._wbHistoryResizing = false; }
         });
         observer.observe(h.querySelector('.history-live'));
         h._wbHistoryObserver = observer;
