@@ -1,5 +1,5 @@
 ---
-title: ""
+title: "Dashboard session list: four-state session lifecycle"
 related:
   261113-bug-ws-dashboard-sidebar-shows-processless-session-as-live: the "active, off (asleep)" state is what that bug's sessions should display
 ---
