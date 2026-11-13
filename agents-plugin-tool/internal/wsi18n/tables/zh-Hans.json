@@ -370,6 +370,8 @@
   "js.send.reading": "仍在读取图片：请稍后再次发送。",
   "js.sent.held.title": "暂存至会话回合结束",
   "js.sent.sent.title": "已发送给会话",
+  "head.process.running": "运行环境进程正在运行",
+  "head.process.stopped": "运行环境进程已停止",
   "js.sse.title.off": "未连接，正在重试",
   "js.sse.title.on": "实时更新",
   "js.steer.fail": "未能提升：{0}",

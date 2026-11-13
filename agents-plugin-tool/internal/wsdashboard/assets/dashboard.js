@@ -5116,7 +5116,7 @@
   var sseOn = true;
   function connected(on) {
     sseOn = on;
-    q(".dwrap > .top .sse").forEach(function (el) {
+    q(".dwrap > .top #sse").forEach(function (el) {
       el.classList.toggle("off", !on);
       el.title = wsT(on ? "js.sse.title.on" : "js.sse.title.off");
     });

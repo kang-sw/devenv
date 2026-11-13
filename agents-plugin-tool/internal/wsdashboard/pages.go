@@ -817,6 +817,9 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 	}
 	looked := map[string]bool{replyID: true}
 	inputs := refreshInputs{watch: slices.Clone(page.Watch), pids: slices.Clone(page.WatchPIDs)}
+	if s.Registration.Hosted && s.Registration.HostPID > 0 {
+		inputs.pids = append(inputs.pids, s.Registration.HostPID)
+	}
 	if adapterPresent(in.Snapshot, in.Now) {
 		inbox := sessionInbox(r.dir, replyID)
 		reads.conversation = true

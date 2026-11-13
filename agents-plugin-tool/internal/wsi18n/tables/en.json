@@ -370,6 +370,8 @@
   "js.send.reading": "Still reading an image: send again in a moment.",
   "js.sent.held.title": "held until the session's turn ends",
   "js.sent.sent.title": "sent to the session",
+  "head.process.running": "harness process running",
+  "head.process.stopped": "harness process stopped",
   "js.sse.title.off": "not connected, retrying",
   "js.sse.title.on": "live updates",
   "js.steer.fail": "Not promoted: {0}",
