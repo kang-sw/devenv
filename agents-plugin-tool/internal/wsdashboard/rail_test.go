@@ -791,7 +791,7 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 	waits := rowOf("waits")
 	for _, want := range []string{
 		` data-ap="1" data-ap-tool="mcp__ws__tracker_update" data-ap-args="git push origin develop">`,
-		`<span class="hi claude perm" title="claude · awaiting approval">C</span>`,
+		`<span class="hi claude perm" role="img" aria-label="claude · awaiting approval" title="claude · awaiting approval">C</span>`,
 		`<span class="hosted" title="session the dashboard runs">`,
 		`<span class="chip perm" title="awaiting approval: tracker_update">`,
 		`<span class="s2 ap"><b class="who">tracker_update</b>git push origin develop</span>`,
@@ -812,10 +812,10 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 			t.Errorf("a session the daemon does not host shows %q:\n%s", not, other)
 		}
 	}
-	if !strings.Contains(other, `<span class="hi pi run" title="pi · lead working">P</span>`) || !strings.Contains(other, `<span class="s2">hi</span>`) {
+	if !strings.Contains(other, `<span class="hi pi run" role="img" aria-label="pi · lead working" title="pi · lead working">P</span>`) || !strings.Contains(other, `<span class="s2">hi</span>`) {
 		t.Errorf("the working row lost its turning icon or message:\n%s", other)
 	}
-	if f := rowOf("failed"); !strings.Contains(f, `<span class="hi claude err" title="claude · usage limit reached">C</span>`) || strings.Contains(f, "hi claude run") {
+	if f := rowOf("failed"); !strings.Contains(f, `<span class="hi claude err" role="img" aria-label="claude · usage limit reached" title="claude · usage limit reached">C</span>`) || strings.Contains(f, "hi claude run") {
 		t.Errorf("the failed row lacks its error ring:\n%s", f)
 	}
 	if strings.Contains(waits, "hi claude err\"") || strings.Contains(other, "hi claude err\"") {
@@ -915,24 +915,32 @@ func TestRailRowRevive(t *testing.T) {
 	}
 }
 
-// TestRailStoppedRowSleeps pins a stopped hosted session's row: a moon
-// before its harness icon, a muted title, and no second line by style.
+// TestRailStoppedRowSleeps pins a user-stopped hosted session's row: a moon
+// before its harness icon, a muted title, and no second line by style. Any
+// other host exit keeps its reason line, and an unknown harness shows "?".
 func TestRailStoppedRowSleeps(t *testing.T) {
 	stopped := RailRow{ReplyID: "stopped", Harness: "claude", Live: true, Hosted: true, Exit: &HostExit{Reason: "stop"}, Message: "last reply"}
-	live := RailRow{ReplyID: "live", Harness: "claude", Live: true, Message: "hi"}
-	view := RailView{Workspaces: []RailWorkspace{{Name: "repo", Path: "/w/folder", Repo: true, Worktrees: []RailWorktree{{Path: "/w/folder", Sessions: []RailRow{stopped, live}}}}}}
+	crashed := RailRow{ReplyID: "crashed", Harness: "claude", Live: true, Hosted: true, Exit: &HostExit{HasCode: true, Code: 1, Reason: "child_exited"}}
+	live := RailRow{ReplyID: "live", Live: true, Message: "hi"}
+	view := RailView{Workspaces: []RailWorkspace{{Name: "repo", Path: "/w/folder", Repo: true, Worktrees: []RailWorktree{{Path: "/w/folder", Sessions: []RailRow{stopped, crashed, live}}}}}}
 	region, err := renderRailRegion(view, "en")
 	if err != nil {
 		t.Fatal(err)
 	}
 	html := string(region.HTML)
-	_, rest, _ := strings.Cut(html, `data-rid="stopped"`)
-	row, rest, _ := strings.Cut(rest, `</a></div>`)
-	if !strings.Contains(html, `class="rs stopped" data-rid="stopped"`) || !strings.Contains(row, `<span class="s1"><span class="zz" title="`) {
+	rowOf := func(id string) string {
+		_, rest, _ := strings.Cut(html, `data-rid="`+id+`"`)
+		row, _, _ := strings.Cut(rest, `</a></div>`)
+		return row
+	}
+	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped" data-rid="stopped"`) || !strings.Contains(row, `<span class="s1"><span class="zz" title="`) {
 		t.Errorf("the stopped row lacks its stopped class or moon:\n%s", row)
 	}
-	if liveRow, _, _ := strings.Cut(rest, `</a></div>`); strings.Contains(liveRow, `class="zz"`) {
-		t.Error("a running session shows the moon")
+	if row := rowOf("crashed"); strings.Contains(html, `class="rs stopped" data-rid="crashed"`) || strings.Contains(row, `class="zz"`) || !strings.Contains(row, `<span class="s2"><span class="host-exit">`) || !strings.Contains(row, "exit code 1") {
+		t.Errorf("a crashed row must not sleep and must keep its reason line:\n%s", row)
+	}
+	if row := rowOf("live"); strings.Contains(row, `class="zz"`) || !strings.Contains(row, `<span class="hi unk" role="img" aria-label="? · lead waiting" title="? · lead waiting">?</span>`) {
+		t.Errorf("the plain row = %s, want no moon and the unknown-harness icon", row)
 	}
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{".rail .rs.stopped .rid { color: var(--wb-muted-fg); }", ".rail .rs.stopped .s2 { display: none; }"} {
