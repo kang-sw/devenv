@@ -750,9 +750,12 @@
     var el = $('tkned');
     if (el) { el.focus(); el.select(); }
   }
+  // The kind icon is plain: the store does not change an item's kind after creation (item.edit
+  // has no kind field), so it names the kind rather than offering the new row's toggle. A click
+  // anywhere in the row opens no item window (clickItem).
   function editRowHtml(o) {
-    var n = ui.ned, kl = wsT(n.kind === 'topic' ? "js.tk.new.kind.topic" : "js.tk.new.kind.task");
-    return '<div class="nrow"' + (o.depth ? ' style="--ind:' + o.depth + '"' : '') + attr('item', n.item) + attr('rk', n.rk) + '><span class="nkind"' + tipAttr(kl) + '>' + SI.svg(n.kind === 'topic' ? 'topic' : 'todo') + '</span>' +
+    var n = ui.ned;
+    return '<div class="nrow ned"' + (o.depth ? ' style="--ind:' + o.depth + '"' : '') + attr('item', n.item) + attr('rk', n.rk) + '><span class="nkind"' + tipAttr(kindName(n.kind)) + '>' + SI.svg(n.kind === 'topic' ? 'topic' : 'todo') + '</span>' +
       '<input type="text" id="tkned" data-keep autocomplete="off" value="' + esc(n.val) + '" aria-label="' + esc(wsT("js.tk.form.title")) + '">' +
       nrowChips(n) +
       '<button type="button" class="ia"' + attr('act', 'ned-x') + ' aria-label="' + wsT("js.tk.dlg.cancel") + '"' + tipAttr(wsT("js.tk.new.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>';
@@ -1030,6 +1033,12 @@
     if (t.closest('input')) return false; // the title's in-place input keeps focus
     row.focus({ preventScroll: true });
     return false;
+  }
+  // The element whose item window a click no control took opens, or null: none from a form field
+  // or the dialog, nor from a row's in-place edit (editRowHtml, .ned), which stays open until saved
+  // or dropped, though it carries the row's data-item.
+  function clickItem(t) {
+    return t.closest('select, textarea, input, #tkdlg, .ned') ? null : t.closest('[data-item]');
   }
   // The "⋯" button every menu-capable row, card, entry, and the item window header carries.
   function moreBtn(id, cls, tab) {
@@ -5942,8 +5951,8 @@
       if (row && !rowClick(row, t)) { e.preventDefault(); return; }
       var nk = t.closest('[data-nkey]');
       if (nk) markRead([nk.getAttribute('data-nkey')]); // a feed entry is read once clicked
-      var it = t.closest('[data-item]');
-      if (it && !t.closest('select, textarea, input, #tkdlg')) { e.preventDefault(); showItem(it.getAttribute('data-item'), t, nk && nk.getAttribute('data-nev')); return; }
+      var it = clickItem(t);
+      if (it) { e.preventDefault(); showItem(it.getAttribute('data-item'), t, nk && nk.getAttribute('data-nev')); return; }
       if (t.closest('a[href="#"]')) e.preventDefault();
       // a footnote link in rendered text scrolls to its note; following it would set the
       // hash, which is the store-page route (applyRoute)

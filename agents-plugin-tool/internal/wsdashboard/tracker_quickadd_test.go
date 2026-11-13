@@ -332,6 +332,55 @@ done();
 `)
 }
 
+// TestTrackerEditRowClickOpensNothing pins the row edit's click rule (tracker.js
+// clickItem, editRowHtml): the edit row keeps the row's data-item, yet a click
+// anywhere in it (the kind icon, the room between its chips, the title input)
+// opens no item window, while a list row's title and a feed entry still do and
+// the dialog never does. The kind icon is plain and names the kind: the store
+// cannot change an item's kind (item.edit has no kind field), so it carries
+// neither the new row's toggle act nor its "click to make it a ..." tooltip.
+func TestTrackerEditRowClickOpensNothing(t *testing.T) {
+	click := trackerBlock(t, `document\.addEventListener\('click', function \(e\) \{`, `\n    document\.addEventListener\('submit'`)
+	if !strings.Contains(click, "var it = clickItem(t);\n      if (it) { e.preventDefault(); showItem(") {
+		t.Error("the click handler's item-window fallback does not go through clickItem")
+	}
+	runTrackerCases(t, "edit row click", trackerCheckJS+`
+var ui = { ned: { item: 'i1', rk: 'r:i1', kind: 'task', val: 'Old' } }, SI = { svg: function (k) { return '<svg>' + k + '</svg>'; } };
+function wsT(k) { return k; }
+function esc(s) { return s; }
+function attr(k, v) { return ' data-' + k + '="' + v + '"'; }
+function tipAttr(x) { return ' data-tip="' + x + '"'; }
+function kindName(k) { return 'kind:' + k; }
+function nrowChips() { return '<chips>'; }
+`+trackerFn(t, `function editRowHtml\(o\)`, false)+trackerFn(t, `function clickItem\(t\)`, false)+`
+// a fake element tree whose closest() takes the simple selectors clickItem uses (tag, #id, .class, [attr], comma lists)
+function matches(e, sel) {
+  var m = /^([a-z]*)(#[\w-]+)?((?:\.[\w-]+)*)(?:\[([\w-]+)\])?$/.exec(sel.trim());
+  if (!m) throw new Error('unsupported selector ' + sel);
+  return (!m[1] || e.tag === m[1]) && (!m[2] || e.id === m[2].slice(1)) &&
+    m[3].split('.').filter(Boolean).every(function (c) { return e.cls.indexOf(c) >= 0; }) && (!m[4] || m[4] in e.attrs);
+}
+function el(tag, o, parent) {
+  return { tag: tag, id: o.id || '', cls: (o.cls || '').split(' ').filter(Boolean), attrs: o.attrs || {}, parent: parent || null,
+    closest: function (sel) { for (var e = this; e; e = e.parent) if (sel.split(',').some(function (s) { return matches(e, s); })) return e; return null; } };
+}
+var h = editRowHtml({});
+check('the edit row is marked as the edit and keeps the row ids', [h.indexOf('<div class="nrow ned" data-item="i1" data-rk="r:i1">') === 0], [true]);
+check('its kind icon is a plain span naming the kind, no toggle', [h.indexOf('<span class="nkind" data-tip="kind:task"><svg>todo</svg></span>') > 0, h.indexOf('nkind"' + ' data-act') < 0, h.indexOf('js.tk.new.kind') < 0], [true, true, true]);
+ui.ned.kind = 'topic';
+check('a topic names the topic kind', editRowHtml({}).indexOf('<span class="nkind" data-tip="kind:topic"><svg>topic</svg></span>') > 0, true);
+var row = el('div', { cls: 'nrow ned', attrs: { 'data-item': 'i1' } }), kind = el('span', { cls: 'nkind' }, row), icon = el('svg', {}, kind), inp = el('input', { id: 'tkned' }, row);
+check('a click on the edit row\'s kind icon, its gaps, or its input opens nothing', [clickItem(kind), clickItem(icon), clickItem(row), clickItem(inp)], [null, null, null, null]);
+var irow = el('div', { cls: 'irow', attrs: { 'data-item': 'i2' } }), title = el('a', { cls: 'title', attrs: { 'data-item': 'i2' } }, el('div', { cls: 'ir-main' }, irow));
+check('a list row\'s title still opens its item', clickItem(title) === title, true);
+var entry = el('div', { cls: 'row click', attrs: { 'data-item': 'i3' } }), snip = el('span', {}, entry);
+check('a feed entry still opens its item', clickItem(snip) === entry, true);
+var dlg = el('div', { id: 'tkdlg' }), inDlg = el('span', { attrs: { 'data-item': 'i4' } }, dlg);
+check('nothing in the dialog opens an item', clickItem(inDlg), null);
+done();
+`)
+}
+
 // TestTrackerInsertDepthMarkers pins the hover insert's depth markers: every
 // level slot from the root to one under the row above, but the badge's own,
 // carries a marker; a tick where a place is (insOpts), an x where none is.
@@ -629,7 +678,7 @@ func TestTrackerRowPartsOpenTheirPickers(t *testing.T) {
 			t.Errorf("the click handler lacks %q", want)
 		}
 	}
-	if i, j := strings.Index(click, "rowClick(row, t)"), strings.Index(click, "var it = t.closest('[data-item]');"); i < 0 || j < 0 || i > j {
+	if i, j := strings.Index(click, "rowClick(row, t)"), strings.Index(click, "var it = clickItem(t);"); i < 0 || j < 0 || i > j {
 		t.Error("a row click does not stop before the [data-item] fallback that opens the item window")
 	}
 	if !strings.Contains(trackerBlock(t, `// keyboard: a focused row shows`, `\n`+"      // ArrowRight"), "if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('irow') && own(e.target)) { e.preventDefault(); showItem(e.target.getAttribute('data-item')); return; }") {
