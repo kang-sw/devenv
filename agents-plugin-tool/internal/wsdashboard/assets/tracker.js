@@ -497,11 +497,11 @@
   function wrapped(s) { return s === 'done' || s === 'dropped'; }
   function A(id) { return VS.assignments[id]; }
 
-  var EDIT_FIELDS = ['title', 'body', 'project', 'labels', 'due', 'priority'];
+  var EDIT_FIELDS = ['title', 'body', 'project', 'labels', 'due', 'start', 'priority'];
   function listOf(x) { return Array.isArray(x) ? x : []; }
   // Mentions and attachments a write carries, for one-line descriptions.
   // A field name the event sentences print: the table's, else the field itself.
-  var FIELD_KEY = { title: "js.tk.field.title", body: "js.tk.field.body", project: "js.tk.field.project", labels: "js.tk.field.labels", due: "js.tk.field.due", priority: "js.tk.field.priority",
+  var FIELD_KEY = { title: "js.tk.field.title", body: "js.tk.field.body", project: "js.tk.field.project", labels: "js.tk.field.labels", due: "js.tk.field.due", start: "js.tk.field.start", priority: "js.tk.field.priority",
     org: "js.tk.field.org", family: "js.tk.field.family", given: "js.tk.field.given" };
   function fieldName(f) { return FIELD_KEY[f] ? wsT(FIELD_KEY[f]) : f; }
   function extrasTxt(p) {
@@ -709,9 +709,12 @@
   }
   // Due: D-N within 7 days, D-day today, D+N past due (danger colour), else a short date.
   var ENDED = { done: 1, dropped: 1, declined: 1, returned: 1, handed: 1, withdrawn: 1 };
-  // ed: the viewer may edit the task (canEdit); the date then opens the due step, an empty one as the dim icon
+  // ed: the viewer may edit the task (canEdit); the date then opens the due step, an empty one as the dim icon.
+  // A start date alone shows "from MM-DD" in the neutral badge; with a due as well the due's form
+  // stays, marked as a range (rng), the start leading its tooltip.
   function dueHtml(it, st, ed) {
     if (!it || it.kind === 'topic') return '<span class="due2"></span>';
+    if (!it.due && it.start) return partHtml('due2 from', wsT("js.tk.due.tip.from", it.start), esc(wsT("js.tk.due.from", it.start.slice(5))), it, ed ? 'due' : null);
     if (!it.due) return ed ? partHtml('due2 rpe', wsT("js.tk.menu.due"), partIcon('calendar'), it, 'due') : '<span class="due2"></span>';
     var n = dayNum(it.due) - dayNum(today()), t, c, tip;
     if (ENDED[st]) { t = it.due.slice(5); c = 'ended'; tip = wsT("js.tk.due.tip.ended", it.due, SI.info(st).label); }
@@ -719,8 +722,11 @@
     else if (n === 0) { t = wsT("js.tk.due.dday"); c = 'now'; tip = wsT("js.tk.due.tip.today", it.due); }
     else if (n <= 7) { t = wsT("js.tk.due.dminus", n); c = 'soon'; tip = wsTn("js.tk.due.tip.in", n, it.due); }
     else { t = it.due.slice(5); c = ''; tip = wsT("js.tk.due.on", it.due); }
+    if (it.start) { c += (c ? ' ' : '') + 'rng'; tip = wsT("js.tk.due.tip.from", it.start) + ' · ' + tip; }
     return partHtml('due2' + (c ? ' ' + c : ''), tip, esc(t), it, ed ? 'due' : null);
   }
+  // a short start..due text for a menu value or a chip: "11-10–11-19", the due alone, or "from 11-10"
+  function rangeText(s, d) { return s && d ? s.slice(5) + '–' + d.slice(5) : d ? d : s ? wsT("js.tk.due.from", s.slice(5)) : ''; }
   // A list row's label icon: an editor's way to the labels step (the chips themselves search,
   // lsearch); with the store's list empty only an admin, who can add a label there, gets it.
   function labelEdHtml(it) {
@@ -756,9 +762,9 @@
     var it = VS.items[id];
     if (!it || !canEdit(it)) return;
     var r = mineLive(it), who = editWho(it), n = ui.ned = { item: id, rk: rk, ed: id, val: it.title, kind: it.kind, st: r ? r.status : it.status, who: who, compl: null,
-      due: it.due || '', pri: it.priority != null ? it.priority : null, labels: (it.labels || []).slice(), canAsg: canAssign(it, VS.viewer.member) };
+      start: it.start || '', due: it.due || '', pri: it.priority != null ? it.priority : null, labels: (it.labels || []).slice(), canAsg: canAssign(it, VS.viewer.member) };
     // what the editor opened on: a save sends only the fields the user moved off these (editRowEvents)
-    n.orig = { title: n.val, st: n.st, due: n.due, pri: n.pri, who: who.slice(), held: editHeld(it), labels: n.labels.slice() };
+    n.orig = { title: n.val, st: n.st, start: n.start, due: n.due, pri: n.pri, who: who.slice(), held: editHeld(it), labels: n.labels.slice() };
     render();
     var el = $('tkned');
     if (el) { el.focus(); el.select(); }
@@ -780,8 +786,9 @@
     var ev = [], ep = { item: it.id }, topic = it.kind === 'topic', r = mineLive(it), st = nrowSt(n), o = n.orig;
     if (title && title !== o.title.trim() && title !== it.title) ep.title = title;
     if (!topic) {
-      var pri = nrowPri(n), due = n.due || null;
+      var pri = nrowPri(n), due = n.due || null, start = n.start || null;
       if (n.pri !== o.pri && pri !== (it.priority != null ? it.priority : VS.priority.default)) ep.priority = pri;
+      if (start !== (o.start || null) && start !== (it.start || null)) ep.start = start;
       if (due !== (o.due || null) && due !== (it.due || null)) ep.due = due;
     }
     // the draft's label picks (what it added and dropped since the prefill) over the item's labels
@@ -2436,9 +2443,16 @@
     });
   }
   function whoTag(x) { return x.who ? '<span class="muted">' + esc(x.who) + '</span>' : ''; }
+  // [first day, day after the last] of an item's own gantt bar, or null without a due date: from
+  // its start date, else its first doing, else its creation, to its due day. A start after the due
+  // (concurrent edits can fold one) gives a one-day bar at the due.
+  function ganttSpan(it) {
+    if (!it.due || it.kind === 'topic') return null;
+    var e = dayNum(it.due) + 1;
+    return [Math.min(dayNum(it.start || it.started || it.ts), e - 1), e];
+  }
   // Due-date timeline: the scope's dated rows as the same context tree the list draws (the
-  // fold state is shared with it). A row's bar runs from the item's start (first doing, else
-  // creation) to its due day. A node with children also draws a thin summary bar spanning the
+  // fold state is shared with it). A row's bar runs from the item's start (ganttSpan) to its due day. A node with children also draws a thin summary bar spanning the
   // range of every dated item below it, whether they show or are folded away; a parent without
   // a due date of its own (a context row, say) is placed by that summary bar alone.
   function ganttBody(key, rows) {
@@ -2446,12 +2460,7 @@
     if (!rows.length) return '<div class="toolbar">' + bar + '</div><div class="empty">' + wsT("js.tk.gantt.empty") + '</div>';
     var ents = ctxTree(rows, key === 'all' ? { keep: keepKind } : null), below = {};
     // [first day, day after the last] of an item's own bar, or null without a due date
-    function own(id) {
-      var it = VS.items[id];
-      if (!it.due || it.kind === 'topic') return null;
-      var e = dayNum(it.due) + 1;
-      return [Math.min(dayNum(it.started || it.ts), e - 1), e];
-    }
+    function own(id) { return ganttSpan(VS.items[id]); }
     function join(a, b) { return !a ? b : !b ? a : [Math.min(a[0], b[0]), Math.max(a[1], b[1])]; }
     function sub(id) { // the range of every dated item below id
       if (!(id in below)) below[id] = kidsShown(id).reduce(function (r, k) { return join(join(r, own(k)), sub(k)); }, null);
@@ -2470,7 +2479,7 @@
       return '<div class="grow-row click' + (ENDED[st] ? ' ended' : '') + (x ? '' : ' ctx') + '"' + attr('item', it.id) + attr('rk', 'g:' + it.id) + '><div class="glabel" style="--ind:' + e.depth + '">' + c.tw + stBtn(st, it, x && x.rec) + titleRef(it.id) + c.sub + (x ? whoTag(x) : '') + priHtml(it) + moreBtn(it.id, 'gmore', true) + '</div>' +
         '<div class="gtrack"><span class="gnow" style="left:' + pct(t0) + '"></span>' +
         (r ? '<span class="gbar st-' + esc(st) + (over ? ' over' : '') + '" style="left:' + pct(r[0]) + ';width:' + wid(r) + '" title="' +
-          esc(wsT(it.started ? "js.tk.gantt.bar.started" : "js.tk.gantt.bar.created", String(it.started || it.ts).slice(0, 10), it.due)) + '">' + esc(it.due.slice(5)) + '</span>' : '') +
+          esc(it.start ? wsT("js.tk.gantt.bar.start", it.start, it.due) : wsT(it.started ? "js.tk.gantt.bar.started" : "js.tk.gantt.bar.created", String(it.started || it.ts).slice(0, 10), it.due)) + '">' + esc(it.due.slice(5)) + '</span>' : '') +
         (s ? '<span class="gsum" style="left:' + pct(s[0]) + ';width:' + wid(s) + '" title="' + esc(wsT("js.tk.gantt.sum", dayStr(s[0]), dayStr(s[1] - 1))) + '"></span>' : '') + '</div></div>';
     }
     h += ents.map(function (e) {
@@ -2482,8 +2491,12 @@
     return h + '</div>';
   }
 
+  // the weekday heads, Sunday first: the calendar view and the range picker share them
+  function calDow() {
+    return [wsT("js.tk.cal.sun"), wsT("js.tk.cal.mon"), wsT("js.tk.cal.tue"), wsT("js.tk.cal.wed"), wsT("js.tk.cal.thu"), wsT("js.tk.cal.fri"), wsT("js.tk.cal.sat")];
+  }
   function calendarBody(key, rows) {
-    var m = ui.calMonth[key] || today().slice(0, 7), first = dayNum(m + '-01'), dow = (new Date(first * 86400000).getUTCDay() + 6) % 7;
+    var m = ui.calMonth[key] || today().slice(0, 7), first = dayNum(m + '-01'), dow = new Date(first * 86400000).getUTCDay();
     var y = Number(m.slice(0, 4)), mo = Number(m.slice(5, 7)), days = new Date(Date.UTC(y, mo, 0)).getUTCDate();
     var byDay = {};
     rows.forEach(function (x) { var due = VS.items[x.item].due; (byDay[due] = byDay[due] || []).push(x); });
@@ -2491,7 +2504,7 @@
     var n = Object.keys(byDay).filter(function (k) { return k.slice(0, 7) === m; }).reduce(function (s, k) { return s + byDay[k].length; }, 0);
     var h = '<div class="toolbar">' + btn('cal', '&lsaquo;', { month: prev, card: key }) + '<b>' + esc(m) + '</b>' + btn('cal', '&rsaquo;', { month: next, card: key }) +
       btn('cal', wsT("js.tk.cal.today"), { month: today().slice(0, 7), card: key }) + (key === 'all' ? itemFilterBar() : '') + '<span class="muted">' + wsT("js.tk.cal.count", n, esc(m)) + '</span></div>' +
-      '<div class="cal">' + [wsT("js.tk.cal.mon"), wsT("js.tk.cal.tue"), wsT("js.tk.cal.wed"), wsT("js.tk.cal.thu"), wsT("js.tk.cal.fri"), wsT("js.tk.cal.sat"), wsT("js.tk.cal.sun")].map(function (d) { return '<div class="cdow">' + d + '</div>'; }).join('');
+      '<div class="cal">' + calDow().map(function (d) { return '<div class="cdow">' + d + '</div>'; }).join('');
     for (var i = 0; i < dow; i++) h += '<div class="cday off"></div>';
     for (var d = 1; d <= days; d++) {
       var ds = m + '-' + (d < 10 ? '0' : '') + d, list = byDay[ds] || [];
@@ -2765,7 +2778,7 @@
       (topic ? '<dt>' + wsT("js.tk.prop.holder") + '</dt><dd' + attr('focus', 'holders') + '>' + (holderNames(it) || '<span class="muted">' + wsT("js.tk.row.unassigned") + '</span>') + '</dd>' :
         '<dt>' + wsT("js.tk.prop.holders") + '</dt><dd' + attr('focus', 'holders') + '>' + holdersSummary(it) + '</dd>') +
       (it.chain.length > 1 ? '<dt>' + wsT("js.tk.prop.path") + '</dt><dd>' + esc(it.chain.join(' > ')) + '</dd>' : '') +
-      (topic ? '' : '<dt>' + wsT("js.tk.prop.due") + '</dt><dd>' + (it.due ? esc(it.due) : '<span class="muted">-</span>') + '</dd>') +
+      (topic ? '' : '<dt>' + wsT("js.tk.prop.due") + '</dt><dd>' + (it.due || it.start ? esc(it.start && it.due ? it.start + ' – ' + it.due : it.due || wsT("js.tk.due.from", it.start)) : '<span class="muted">-</span>') + '</dd>') +
       '<dt>' + wsT("js.tk.prop.creator") + '</dt><dd>' + whoName(it.author) + (VS.members[it.author] && VS.members[it.author].admin ? ' <span class="chip admin">' + wsT("js.tk.team.admin") + '</span>' : '') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.project") + '</dt><dd>' + (it.project ? esc(it.project) : '<span class="muted">-</span>') + '</dd>' +
       '<dt>' + wsT("js.tk.prop.labels") + '</dt><dd>' + labelsProp(it) + '</dd>' +
@@ -3647,7 +3660,7 @@
       ui.page = null;
       if (/^#\/./.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
     }
-    if (MN && (MN.kind === 'store' ? gone(MN.store) : lost)) closeMenu(false);
+    if (MN && (MN.kind === 'store' ? gone(MN.store) : lost)) closeMenu(false, true);
     var dl = $('tkdlg'), f = dl && dl.open && dl.querySelector('form');
     if (f) {
       var fs = f.getAttribute('data-fstore');
@@ -3709,12 +3722,13 @@
   function wrote(results) {
     ui.last = results;
     closeDialog();
-    // the labels step stays open across toggles: it draws again over the written item
-    var keep = !!(MN && MN.kind === 'item' && MN.step === 'labels');
+    // the labels step stays open across toggles: it draws again over the written item; the range
+    // picker stays open across a late write (an earlier close's), unless the write is its own back row's
+    var keep = !!(MN && MN.kind === 'item' && (MN.step === 'labels' || (MN.step === 'due' && !MN.rsent)));
     var mb = MN && MN.kind === 'item' && !keep ? MN.back : null; // an item menu closes; focus goes back to its row once redrawn
     if (MN && MN.kind === 'item' && !keep) closeMenu(false);
     render();
-    if (keep && MN) labelStepRedraw();
+    if (keep && MN && MN.step === 'labels') labelStepRedraw();
     var me = mb && document.querySelector(mb);
     if (me && !me.matches('a[href], button, input, [tabindex]')) me = me.querySelector('button, a[href], [tabindex]');
     if (me && !(document.activeElement && document.activeElement.hasAttribute('data-keep'))) me.focus({ preventScroll: true });
@@ -3840,6 +3854,7 @@
   // closes it, and focus returns to the opener; Tab cycles inside it.
   var MN = null;
   function openMenu(o, anchor, pt) {
+    if (MN && !menuApplyClose(false)) return; // a menu opened over another closes it first, applying its pick
     MN = o; MN.step = MN.step || 'main';
     MN.backEl = anchor || null; MN.back = anchor ? returnSel(anchor) : null;
     var rk = anchor && anchor.closest('[data-rk]');
@@ -3867,30 +3882,49 @@
     var el = MN.backEl, r = el && el.isConnected ? el.getBoundingClientRect() : null;
     return !r || !MN.rect || Math.abs(r.top - MN.rect.top) > 1 || Math.abs(r.left - MN.rect.left) > 1;
   }
-  function closeMenu(refocus) {
+  // Every close applies the open picker's pick once: the labels step's toggles, the range picker's
+  // ends (an item's as one item.edit, a row's into its draft, which then draws again unless quiet:
+  // a close from inside a render). This close cannot stay open, so an inverted range drops unwritten
+  // (menuApplyClose refuses it where the menu can stay).
+  function closeMenu(refocus, quiet) {
     if (!MN) return;
     var m = MN, el = m.backEl && m.backEl.isConnected ? m.backEl : m.back && document.querySelector(m.back);
-    var lw = labelPending(m); // the labels step's pick, written once as the menu closes
+    var lw = labelPending(m), rw = rangePending(m); // the picks, written once as the menu closes
+    if (rw && rw.bad) rw = null;
     MN = null;
     $('tkmenu').hidden = true; $('tkmenu').innerHTML = '';
+    $('tkcap').hidden = true;
     document.body.classList.remove('tk-menuon');
     if (m.backEl && m.backEl.hasAttribute('aria-haspopup')) m.backEl.setAttribute('aria-expanded', 'false');
+    if (rw && rw.draft) {
+      rw.draft.start = m.rg.s; rw.draft.due = m.rg.d;
+      if (!quiet) { render(); el = m.back && document.querySelector(m.back); }
+    }
     if (refocus && el) {
       if (!el.matches('a[href], button, input, [tabindex]')) el = el.querySelector('a[href], button, [tabindex]');
       if (el) el.focus({ preventScroll: true });
     }
     if (lw) labelWrite(lw);
+    if (rw && rw.ev) commit(rw.ev);
   }
+  // The back row (and ArrowLeft) of a step opened from the main menu. On the range picker it applies
+  // the pick: an inverted one is refused, a changed one written (the written batch closes the item
+  // menu), and with nothing changed it steps back.
   function menuBack() {
     if (!MN.from) { closeMenu(true); return; }
-    MN.step = MN.from; MN.from = null; MN.op = null; MN.who = null; MN.req = null; MN.q = ''; MN.as = null; MN.mv = null;
+    if (MN.step === 'due' && MN.rg) {
+      var p = rangePending(MN);
+      if (p && p.bad) { rangeRefused(); return; }
+      if (p && p.ev) { var m = MN; m.rsent = true; commit(p.ev, null, null, function () { m.rsent = false; }); return; }
+    }
+    MN.step = MN.from; MN.from = null; MN.op = null; MN.who = null; MN.req = null; MN.q = ''; MN.as = null; MN.mv = null; MN.rg = null;
     drawMenu();
   }
   function drawMenu() {
     var m = $('tkmenu');
     m.innerHTML = MN.kind === 'sync' ? syncPopHtml() : MN.kind === 'new' ? newMenuHtml() : MN.kind === 'store' ? storeMenuHtml() : menuHtml();
-    m.className = 'tk tk-menu' + (MN.kind === 'sync' ? ' spopw' : MN.step === 'assign' ? ' wide' : '');
-    m.setAttribute('role', MN.kind === 'sync' || MN.step === 'assign' ? 'dialog' : 'menu');
+    m.className = 'tk tk-menu' + (MN.kind === 'sync' ? ' spopw' : MN.step === 'assign' ? ' wide' : MN.step === 'due' && MN.rg && MN.rg.rm ? ' rwide' : '');
+    m.setAttribute('role', MN.kind === 'sync' || MN.step === 'assign' || MN.step === 'due' ? 'dialog' : 'menu');
     m.setAttribute('aria-label', MN.kind === 'sync' ? wsT("js.tk.rib.tip") : MN.kind === 'store' ? wsT("js.tk.store.menu") : wsT("js.tk.menu.aria", mnItem() ? mnItem().title : ''));
     m.hidden = false;
     placeMenu();
@@ -3909,6 +3943,7 @@
     } else { x = (W - w) / 2; y = (Hh - h) / 2; }
     x = Math.max(6, Math.min(x, W - w - 6));
     m.style.left = Math.round(x) + 'px'; m.style.top = Math.round(Math.max(6, y)) + 'px';
+    placeCap();
   }
   function mi(act, label, data, o) {
     o = o || {};
@@ -3936,10 +3971,7 @@
     var mineR = mineLive(it), step = MN.step;
     if (step === 'pri') return h + back + priGroup(it.priority);
     if (step === 'labels') return h + back + labelStepHtml(it);
-    if (step === 'due') {
-      return h + back + '<div class="mrow"><input type="date" id="tkmdue" data-mi data-autofocus value="' + esc(it.due || '') + '" aria-label="' + wsT("js.tk.menu.due") + '">' +
-        btn('m-due-set', wsT("js.tk.menu.due.set"), {}, 'primary') + '</div>' + (it.due ? mi('m-due-clear', wsT("js.tk.menu.due.clear"), {}, { icon: 'x' }) : '');
-    }
+    if (step === 'due') return h + back + rangeHtml(rangeOf(MN));
     if (step === 'handoff') {
       var hfrom = MN.who || v, hrec = it.assignments.map(A).filter(function (r) { return r.to === hfrom && r.state === 'live'; })[0] || {};
       return h + back + '<div class="mtitle">' + (hfrom === v ? wsT("js.tk.dlg.handoff.title", esc(it.alias)) : wsT("js.tk.dlg.handoff.title.admin", esc(nm(hfrom)), esc(it.alias))) + '</div>' +
@@ -4005,7 +4037,7 @@
     if (canSplit(it) && !inWin) more.push(mi('m-sub', wsT("js.tk.menu.sub"), { item: it.id }, { icon: 'plus' }));
     if (edit && task) {
       more.push(mi('pri', wsT("js.tk.menu.pri"), { item: it.id }, { icon: 'flag', sub: 1, val: esc(it.priorityName) }));
-      more.push(mi('due', wsT("js.tk.menu.due"), { item: it.id }, { icon: 'calendar', sub: 1, val: it.due ? esc(it.due) : '' }));
+      more.push(mi('due', wsT("js.tk.menu.due"), { item: it.id }, { icon: 'calendar', sub: 1, val: esc(rangeText(it.start, it.due)) }));
     }
     if (mineR && !wrapped(mineR.status) && !mineR.fallback && !it.hidden && !inWin) more.push(mi('handoff', esc(wsT("js.tk.act.handoff")), { item: it.id }, { icon: 'handoff', sub: 1 }));
     // a topic's holder releases it: item.unassign of their own record
@@ -4306,6 +4338,7 @@
     var id = MN.item, it = mnItem();
     if (k === 'm-back') return menuBack();
     if (!it) return closeMenu(true);
+    if (k === 'm-rpage' || k === 'm-rclr') return rangeAct(k, a);
     if (MN.kind === 'new' && !/^m-(atog|ax|acm|aapply)$/.test(k)) return newAct(k, a);
     switch (k) {
       case 'm-atog': asgToggle(Number(a.getAttribute('data-ai'))); return $('tkaq').focus();
@@ -4322,12 +4355,6 @@
         if (pv === it.priority) return menuBack();
         return commit([['item.edit', { item: id, priority: pv }]]);
       }
-      case 'm-due-set': {
-        var dv = $('tkmdue').value || null;
-        if (dv === it.due) return menuBack();
-        return commit([['item.edit', { item: id, due: dv }]]);
-      }
-      case 'm-due-clear': return commit([['item.edit', { item: id, due: null }]]);
       case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lset = labelFlip(MN.lset, labelBase(it), MN.lab); return labelStepRedraw();
       case 'm-ledit': return labelDialog({ label: a.getAttribute('data-label') });
       case 'm-lrm': return labelRemove(a.getAttribute('data-label'), function () { if (MN) MN.lab = null; });
@@ -4383,9 +4410,10 @@
   function menuKey(e) {
     var m = $('tkmenu'), t = e.target, k = e.key, field = t.matches('input[type="text"], input[type="date"], input:not([type]), textarea, select');
     if (MN.step === 'assign' && asgMenuKey(e)) return;
-    if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); if (MN.from) menuBack(); else closeMenu(true); return; }
+    if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); menuDiscard(); return; }
     if (k === 'Tab') {
       var fs = Array.prototype.filter.call(m.querySelectorAll('button:not([disabled]), input:not([disabled]), select'), function (x) { return x.offsetParent !== null; });
+      if (!$('tkcap').hidden) fs.push($('tkcap')); // the discard capsule, a fixed element beside the menu, comes last
       if (!fs.length) return;
       var i = fs.indexOf(t);
       e.preventDefault();
@@ -4396,7 +4424,7 @@
       if (t.id === 'tkmnote' && MN.step === 'main') { e.preventDefault(); applyStatus(MN.pick || (VS.items[MN.item] && (function (r) { return r ? r.status : ''; })(mineLive(VS.items[MN.item])))); return; }
       if (t.id === 'tkmnote' && MN.step === 'note') { e.preventDefault(); menuAct('m-note-send', t); return; }
       if (t.id === 'tkmnote' && MN.step === 'request') { e.preventDefault(); var p0 = m.querySelector('[data-act="m-request"]'); if (p0) p0.click(); return; }
-      if (t.id === 'tkmdue') { e.preventDefault(); menuAct('m-due-set', t); return; }
+      if (t.hasAttribute('data-rin')) { e.preventDefault(); menuApplyClose(true); return; }
       if (t.id === 'tkmq') { e.preventDefault(); var p1 = m.querySelector('[data-act="m-handoff"], [data-act="m-cc"]'); if (p1) p1.click(); return; }
       if (t.id === 'tkmvq') { e.preventDefault(); var p2 = m.querySelector('[data-act="m-move"]'); if (p2) p2.click(); return; }
       return; // a button: its click; a form field: the form's submit
@@ -4425,6 +4453,258 @@
     if (k === 'Home' || k === 'End') { e.preventDefault(); if (items.length) items[k === 'Home' ? 0 : items.length - 1].focus(); }
   }
 
+  // ------------------------------------------------------- the date range picker
+
+  // The item menu's 'due' step and the due chip of the new row and the edit row: one picker over
+  // an item's start and due dates (MN.rg = { s, d: the picked ends, '' for none; s0, d0: what it
+  // opened on; lm, rm: the left and right panel months, rm null with one panel; err: the inline
+  // error shows; last: the end last changed, 's' or 'd'; drag: a handle drag in progress }).
+  // The span runs from the start's left half-circle handle to the due's right one; dragging a
+  // handle moves that end, clamped at the other end. One end alone shows its handle and a dashed
+  // ghost for the other, which a drag pulls out into that end. Two panels show when the ends fall
+  // in different months, each paged on its own; the panels refit only on an open, a typed date, a
+  // clear, or a drag end. Under the grid, a date input and a clear button per end.
+  // Any close applies the pick once (closeMenu): an item's changed ends as one item.edit, a row's
+  // draft fields; Esc and the discard capsule drop it (menuDiscard). An inverted pair is refused
+  // by every close that can stay open (menuApplyClose).
+  function monAdd(m, n) { var y = Number(m.slice(0, 4)), mo = Number(m.slice(5, 7)) - 1 + n; return new Date(Date.UTC(y, mo, 1)).toISOString().slice(0, 7); }
+  function rangeBad(r) { return !!(r.s && r.d && r.s > r.d); }
+  // the picker's state for menu m, set up on first use from what it edits: the item, or the row's draft
+  function rangeOf(m) {
+    if (m.rg) return m.rg;
+    var src = m.kind === 'new' ? nd() : VS.items[m.item], s = (src && src.start) || '', d = (src && src.due) || '';
+    var r = m.rg = { s: s, d: d, s0: s, d0: d, lm: null, rm: null, err: false, last: 's', drag: null };
+    rangeFit(r);
+    r.err = rangeBad(r);
+    return r;
+  }
+  // the panels for the ends as they are: the earlier end's month left and the later one's right
+  // when they differ, else one panel on the month of an end that is set (else as it was, else today's)
+  function rangeFit(r) {
+    var ms = r.s && r.s.slice(0, 7), md = r.d && r.d.slice(0, 7);
+    if (ms && md && ms !== md) { r.lm = ms < md ? ms : md; r.rm = ms < md ? md : ms; return; }
+    r.lm = ms || md || r.lm || today().slice(0, 7); r.rm = null;
+  }
+  function rangeHtml(r) {
+    return '<div class="rgp' + (r.rm ? ' two' : '') + (r.err ? ' bad' : '') + '"><div class="rgcal" id="tkrcal">' + rangeCal(r) + '</div>' +
+      '<div class="rgin">' + rangeField(r, 's') + rangeField(r, 'd') + '</div>' +
+      '<p class="rgerr" id="tkrerr" role="alert"' + (r.err ? '' : ' hidden') + '>' + wsT("js.tk.range.err") + '</p></div>';
+  }
+  function rangeField(r, side) {
+    var lab = wsT(side === 's' ? "js.tk.range.start" : "js.tk.range.due"), clr = wsT(side === 's' ? "js.tk.range.clear.start" : "js.tk.menu.due.clear");
+    return '<div class="rgf"><label for="tkr' + side + '">' + lab + '</label><input type="date" id="tkr' + side + '"' + attr('rin', side) + (side === 'd' ? ' data-autofocus' : '') +
+      ' value="' + esc(side === 's' ? r.s : r.d) + '"' + (r.err ? ' aria-invalid="true" aria-describedby="tkrerr"' : '') + '>' +
+      '<button type="button" class="ia rgx"' + attr('act', 'm-rclr') + attr('side', side) + ' aria-label="' + esc(clr) + '"' + tipAttr(clr) + '><svg class="i"><use href="#tki-x"/></svg></button></div>';
+  }
+  function rangeCal(r) { return rangeMonth(r, r.lm, 'l') + (r.rm ? rangeMonth(r, r.rm, 'r') : ''); }
+  // One month panel (side 'l' or 'r'): its arrows page it alone. Day cells are not buttons, so
+  // they stay out of the menu's Tab ring; the keyboard path is the inputs.
+  function rangeMonth(r, m, side) {
+    var first = dayNum(m + '-01'), dow = new Date(first * 86400000).getUTCDay(), y = Number(m.slice(0, 4)), mo = Number(m.slice(5, 7));
+    var days = new Date(Date.UTC(y, mo, 0)).getUTCDate(), lo = r.s && r.d && r.s <= r.d ? r.s : '', t = today();
+    function nav(dir) {
+      var l = wsT(dir < 0 ? "js.tk.range.prev" : "js.tk.range.next");
+      return '<button type="button" class="ia rgnav"' + attr('act', 'm-rpage') + attr('side', side) + attr('dir', dir) + ' aria-label="' + esc(l) + '"' + tipAttr(l) + '>' + (dir < 0 ? '&lsaquo;' : '&rsaquo;') + '</button>';
+    }
+    var h = '<div class="rgm"><div class="rghd">' + nav(-1) + '<b>' + esc(m) + '</b>' + nav(1) + '</div><div class="rgg"' + attr('rgg', side) + '>' +
+      calDow().map(function (d) { return '<div class="rgw">' + d + '</div>'; }).join('');
+    for (var i = 0; i < dow; i++) h += '<div class="rgd off"></div>';
+    for (var d = 1; d <= days; d++) {
+      var ds = m + '-' + (d < 10 ? '0' : '') + d, k = '';
+      if (ds === r.s) k += '<span class="rgk ks" data-rh="s"></span>';
+      if (ds === r.d) k += '<span class="rgk kd" data-rh="d"></span>';
+      if (ds === r.d && !r.s) k += '<span class="rgk ks ghost" data-rh="s"></span>';
+      if (ds === r.s && !r.d) k += '<span class="rgk kd ghost" data-rh="d"></span>';
+      h += '<div class="rgd' + (lo && ds >= lo && ds <= r.d ? ' in' : '') + (ds === r.s ? ' s' : '') + (ds === r.d ? ' d' : '') + (ds === t ? ' now' : '') + '"' + attr('day', ds) + '>' + k + '<span class="rgn">' + d + '</span></div>';
+    }
+    return h + '</div></div>';
+  }
+  // The open picker after a change: the grid draws again (a focused arrow keeps its focus), the
+  // inputs other than the focused one take the ends, and the error, the panel count, and the
+  // menu's width follow.
+  function rangeDraw() {
+    var r = MN && MN.rg, c = $('tkrcal');
+    if (!r || !c) return;
+    var f = document.activeElement, fa = f && c.contains(f) && f.getAttribute('data-act') === 'm-rpage' ? [f.getAttribute('data-side'), f.getAttribute('data-dir')] : null;
+    c.innerHTML = rangeCal(r);
+    c.parentNode.classList.toggle('two', !!r.rm);
+    c.parentNode.classList.toggle('bad', !!r.err);
+    $('tkmenu').classList.toggle('rwide', !!r.rm);
+    ['s', 'd'].forEach(function (side) {
+      var i = $('tkr' + side);
+      if (!i) return;
+      if (i !== f && i.value !== r[side]) i.value = r[side];
+      if (r.err) { i.setAttribute('aria-invalid', 'true'); i.setAttribute('aria-describedby', 'tkrerr'); } else { i.removeAttribute('aria-invalid'); i.removeAttribute('aria-describedby'); }
+    });
+    $('tkrerr').hidden = !r.err;
+    placeMenu();
+    if (fa) { var b = c.querySelector('[data-act="m-rpage"][data-side="' + fa[0] + '"][data-dir="' + fa[1] + '"]'); if (b) b.focus({ preventScroll: true }); }
+  }
+  // a typed date or an emptied input: that end in the pick
+  function rangeInput(t) {
+    var r = MN && MN.step === 'due' && MN.rg, side = t.getAttribute('data-rin');
+    if (!r) return;
+    r[side] = t.value || ''; r.last = side; r.err = rangeBad(r);
+    rangeFit(r); rangeDraw();
+  }
+  // the month arrows (view only) and the clear buttons (that end in the pick; the picker stays open)
+  function rangeAct(k, a) {
+    var r = rangeOf(MN), side = a.getAttribute('data-side');
+    if (k === 'm-rclr') { r[side] = ''; r.last = side; r.err = rangeBad(r); rangeFit(r); }
+    else {
+      var dir = Number(a.getAttribute('data-dir'));
+      if (side === 'r' && r.rm) r.rm = monAdd(r.rm, dir); else r.lm = monAdd(r.lm, dir);
+    }
+    rangeDraw();
+  }
+  // an end moved by a drag, clamped at the other end (the ends never swap or push each other)
+  function rangeSet(r, side, day) {
+    if (side === 's' && r.d && day > r.d) day = r.d;
+    if (side === 'd' && r.s && day < r.s) day = r.s;
+    if (r[side] === day) return;
+    r[side] = day; r.last = side; r.err = rangeBad(r);
+    rangeDraw();
+  }
+  // A drag past the dragged end's panel edge: with one panel, the neighbouring month of that end
+  // opens beside it (start: before, due: after) while the other end is set, else the panel pages;
+  // with two panels, that end's own panel pages, never past the other panel.
+  function rangeEdge(r, side, dir) {
+    if (!r.rm) {
+      if (!(side === 's' ? r.d : r.s)) r.lm = monAdd(r.lm, dir);
+      else if (side === 's' && dir < 0) { r.rm = r.lm; r.lm = monAdd(r.lm, -1); }
+      else if (side === 'd' && dir > 0) r.rm = monAdd(r.lm, 1);
+      else return;
+    } else if (side === 's') { var l = monAdd(r.lm, dir); if (l > r.rm) return; r.lm = l; }
+    else { var m = monAdd(r.rm, dir); if (m < r.lm) return; r.rm = m; }
+    rangeDraw();
+  }
+  // Pointer drags (mouse and touch) on a handle, captured by the menu so a redrawn grid keeps the
+  // drag. A day under the pointer moves the end there; outside the end's panel the edge pages
+  // (rangeEdge, then every RG_EDGE_MS while it stays out). A tap on a day with neither end set sets the due.
+  var RG_EDGE_MS = 450;
+  function rangeDown(e) {
+    var r = MN && MN.step === 'due' && MN.rg, k = r && e.target.closest('[data-rh]');
+    if (!r || e.button > 0) return;
+    if (!k) {
+      var cell = e.target.closest('[data-day]');
+      if (cell && !r.s && !r.d) { r.d = cell.getAttribute('data-day'); r.last = 'd'; rangeFit(r); rangeDraw(); }
+      return;
+    }
+    e.preventDefault();
+    r.drag = { side: k.getAttribute('data-rh'), id: e.pointerId, x: e.clientX, y: e.clientY, at: 0, tm: setInterval(rangeTick, RG_EDGE_MS) };
+    $('tkmenu').setPointerCapture(e.pointerId);
+  }
+  function rangeMove(e) {
+    var r = MN && MN.rg, g = r && r.drag;
+    if (!g || e.pointerId !== g.id) return;
+    g.x = e.clientX; g.y = e.clientY;
+    rangeTick();
+  }
+  function rangeTick() {
+    var r = MN && MN.rg, g = r && r.drag;
+    if (!g) return;
+    var at = document.elementFromPoint(g.x, g.y), cell = at && at.closest && at.closest('#tkmenu [data-day]');
+    if (cell) { rangeSet(r, g.side, cell.getAttribute('data-day')); return; }
+    var grid = $('tkmenu').querySelector('[data-rgg="' + (r.rm && g.side === 'd' ? 'r' : 'l') + '"]'), b = grid && grid.getBoundingClientRect();
+    if (!b) return;
+    var dir = g.x < b.left || g.y < b.top ? -1 : g.x > b.right || g.y > b.bottom ? 1 : 0, now = Date.now();
+    if (!dir || now - g.at < RG_EDGE_MS) return;
+    g.at = now;
+    rangeEdge(r, g.side, dir);
+  }
+  function rangeUp(e) {
+    var r = MN && MN.rg, g = r && r.drag;
+    if (!g || (e.pointerId != null && e.pointerId !== g.id)) return;
+    clearInterval(g.tm); r.drag = null;
+    if ($('tkmenu').hasPointerCapture && $('tkmenu').hasPointerCapture(g.id)) $('tkmenu').releasePointerCapture(g.id);
+    rangeFit(r); r.err = rangeBad(r); rangeDraw();
+  }
+  // What closing menu m owes from its range picker: { bad } for an inverted pair; for an item,
+  // { ev } with one item.edit of the ends the user moved off what the picker opened on that still
+  // differ from the item (so an end another viewer wrote meanwhile and the user left alone is kept,
+  // and a changed start never carries an unchanged due); for a row's draft, { draft } when an end
+  // moved; null for nothing owed, or when the item or the viewer's edit right is gone.
+  function rangePending(m) {
+    var r = m && m.step === 'due' && m.rg;
+    // a back-row write in flight (rsent) already carries this pick: its own close must not resend it
+    if (!r || m.rsent) return null;
+    if (m.kind === 'new') {
+      var n = nd();
+      if (!n) return null;
+      if (rangeBad(r)) return { bad: true };
+      return r.s === r.s0 && r.d === r.d0 ? null : { draft: n };
+    }
+    var it = m.kind === 'item' && VS && VS.items[m.item];
+    if (!it || !canEdit(it)) return null;
+    if (rangeBad(r)) return { bad: true };
+    var ep = { item: it.id };
+    if (r.s !== r.s0 && (r.s || null) !== (it.start || null)) ep.start = r.s || null;
+    if (r.d !== r.d0 && (r.d || null) !== (it.due || null)) ep.due = r.d || null;
+    return Object.keys(ep).length > 1 ? { ev: [['item.edit', ep]] } : null;
+  }
+  // An inverted pick refuses a close that can stay open: the error shows and focus goes to the
+  // input of the end last changed. Returns whether it refused.
+  function rangeRefused() {
+    var p = MN && rangePending(MN);
+    if (!p || !p.bad) return false;
+    MN.rg.err = true;
+    rangeDraw();
+    var f = $('tkr' + MN.rg.last);
+    if (f) f.focus({ preventScroll: true });
+    return true;
+  }
+  // A close that applies and could keep the menu open (an outside click, focus loss, Enter in a
+  // range input, a menu opened over this one): refused while the range picker holds an inverted
+  // pair. Returns whether the menu closed.
+  function menuApplyClose(refocus) {
+    if (rangeRefused()) return false;
+    closeMenu(refocus);
+    return true;
+  }
+  // Esc and the discard capsule: the range or label pick drops and nothing is written (a row's
+  // label toggles, which edit the draft live, go back to what the picker opened on); a step opened
+  // from the main menu goes back to it, a picker without one closes and focus goes to its opener.
+  function menuDiscard() {
+    if (!MN) return;
+    MN.rg = null; MN.lset = null;
+    if (MN.lsnap) { var n = nd(); if (n) n.labels = MN.lsnap; MN.lsnap = null; render(); }
+    menuBack();
+  }
+  // the menu and its discard capsule, one place for every "inside the menu" test
+  function menuHas(t) { return !!t && ($('tkmenu').contains(t) || $('tkcap').contains(t)); }
+  // the pickers that show the discard capsule
+  function capOn() { return !!MN && (MN.kind === 'item' || MN.kind === 'new') && (MN.step === 'due' || MN.step === 'labels'); }
+  // The capsule floats just below the menu, above it when below has no room, else over the menu's
+  // bottom edge, kept inside the window.
+  function placeCap() {
+    var c = $('tkcap');
+    c.hidden = !capOn();
+    if (c.hidden) return;
+    var mr = $('tkmenu').getBoundingClientRect(), cw = c.offsetWidth, ch = c.offsetHeight, W = window.innerWidth, Hh = window.innerHeight, y = mr.bottom + 6;
+    if (y + ch > Hh - 6) y = mr.top - ch - 6 >= 6 ? mr.top - ch - 6 : Math.max(6, Math.min(Hh - ch - 6, mr.bottom - ch / 2));
+    c.style.left = Math.round(Math.max(6, Math.min(mr.left + (mr.width - cw) / 2, W - cw - 6))) + 'px';
+    c.style.top = Math.round(y) + 'px';
+  }
+  // A click outside the menu and its capsule closes the menu, applying its pick; a click on its
+  // opener or the item window's backdrop is spent on that. A refused close keeps the menu and
+  // spends the click, so another item's chip cannot open over the kept pick. Returns whether the
+  // click is spent.
+  function menuOutside(e, t) {
+    if (!MN || (t.closest && t.closest('#tkmenu, #tkcap'))) return false;
+    var spent = !!(MN.backEl && MN.backEl.contains(t)) || t === $('tkwin');
+    if (!menuApplyClose(spent)) spent = true;
+    if (spent) e.preventDefault();
+    return spent;
+  }
+  // Focus leaving the labels step or the range picker for somewhere outside the menu, its capsule,
+  // and its opener (whose click toggles it shut) applies the pick. Focus a redraw dropped (a month
+  // arrow, a panel opening) has no new target and is not a focus loss.
+  function menuFocusOut(e) {
+    var to = e.relatedTarget;
+    if (!MN || !to || menuHas(to) || (MN.backEl && MN.backEl.contains(to))) return;
+    if ((MN.kind === 'item' && MN.step === 'labels') || ((MN.kind === 'item' || MN.kind === 'new') && MN.step === 'due')) menuApplyClose(false);
+  }
+
   // ------------------------------------------------------------ inline writes
 
   // A new item: an input row in the Items list (ui.nrow[store] = { val, kind, st, who, compl, due,
@@ -4440,13 +4720,13 @@
   // their values across creates while the row stays open; closing it restores the defaults.
   // n.pri is a level index (null: the store's default, sent as no priority); n.labels label ids.
   function nrowFill(n) {
-    if (!n.who) { n.st = 'idea'; n.who = [VS.viewer.member]; n.compl = null; n.due = ''; n.pri = null; n.labels = []; }
+    if (!n.who) { n.st = 'idea'; n.who = [VS.viewer.member]; n.compl = null; n.start = ''; n.due = ''; n.pri = null; n.labels = []; }
     return n;
   }
   // a row opened from another (the hover insert moving it) keeps its text, kind, and chips
   function nrowNew(o, place) {
     var n = { val: o ? o.val : '', kind: o ? o.kind : 'task' };
-    if (o && o.who) { n.st = o.st; n.who = o.who; n.compl = o.compl; n.due = o.due; n.pri = o.pri; n.labels = o.labels; }
+    if (o && o.who) { n.st = o.st; n.who = o.who; n.compl = o.compl; n.start = o.start; n.due = o.due; n.pri = o.pri; n.labels = o.labels; }
     Object.keys(place || {}).forEach(function (k) { n[k] = place[k]; });
     return nrowFill(n);
   }
@@ -4489,7 +4769,8 @@
     if (!topic) {
       var pv = nrowPri(n), pn = VS.priority.names[pv];
       h += chip('tknpri', 'pri', wsT("js.tk.new.pri", pn), '<svg class="i"><use href="#tki-flag"/></svg><span>' + esc(pn) + '</span>', pv === VS.priority.default);
-      h += chip('tkndue', 'due', wsT("js.tk.new.due", n.due || wsT("js.tk.new.due.none")), '<svg class="i"><use href="#tki-calendar"/></svg>' + (n.due ? '<span>' + esc(n.due) + '</span>' : ''), !n.due);
+      var rt = rangeText(n.start, n.due);
+      h += chip('tkndue', 'due', wsT("js.tk.new.due", rt || wsT("js.tk.new.due.none")), '<svg class="i"><use href="#tki-calendar"/></svg>' + (rt ? '<span>' + esc(rt) + '</span>' : ''), !rt);
     }
     // labels (any kind: a label is orthogonal to the kind); with an empty list only an admin, who can add one, sees the chip
     var ls = nrowLabels(n);
@@ -4527,7 +4808,8 @@
     if (!n) return;
     nrowFill(n);
     var as = step === 'assign' ? { q: '', sel: n.who.map(function (id) { return { t: 'p', id: id }; }), compl: n.compl, idx: 0, opts: [] } : null;
-    openMenu({ kind: 'new', ed: !!ed, step: step, from: null, q: '', as: as }, anchor);
+    // the label picker edits the draft live: a discard goes back to this snapshot
+    openMenu({ kind: 'new', ed: !!ed, step: step, from: null, q: '', as: as, lsnap: step === 'labels' ? (n.labels || []).slice() : null }, anchor);
   }
   // the draft the open chip picker works on: the edit row's, else the new row's
   function nd() { return MN && MN.kind === 'new' && MN.ed ? ui.ned : ui.nrow[ui.store]; }
@@ -4550,10 +4832,7 @@
         return '<button type="button" class="mr" role="menuitemradio" aria-checked="' + on + '" data-mi' + attr('act', 'm-status') + attr('status', s) + (on ? ' data-autofocus' : '') + '>' + SI.svg(s) + '<span>' + esc(stLabel(s)) + '</span></button>';
       }).join('') + '</div>';
     }
-    if (MN.step === 'due') {
-      return h + '<div class="mrow"><input type="date" id="tkmdue" data-mi data-autofocus value="' + esc(n.due) + '" aria-label="' + wsT("js.tk.menu.due") + '">' +
-        btn('m-due-set', wsT("js.tk.menu.due.set"), {}, 'primary') + '</div>' + (n.due ? mi('m-due-clear', wsT("js.tk.menu.due.clear"), {}, { icon: 'x' }) : '');
-    }
+    if (MN.step === 'due') return h + rangeHtml(rangeOf(MN));
     if (MN.step === 'pri') return h + priGroup(nrowPri(n));
     if (MN.step === 'labels') return h + newLabelsHtml(n);
     return h + asgHtml(d);
@@ -4581,8 +4860,6 @@
     if (!n) return closeMenu(false);
     if (k === 'm-status') n.st = a.getAttribute('data-status');
     else if (k === 'm-pri') n.pri = Number(a.getAttribute('data-p'));
-    else if (k === 'm-due-set') n.due = $('tkmdue').value || '';
-    else if (k === 'm-due-clear') n.due = '';
     else if (k === 'm-ltog') {
       var lid = a.getAttribute('data-label'), ls = n.labels = (n.labels || []).slice(), li = ls.indexOf(lid);
       if (li >= 0) ls.splice(li, 1); else ls.push(lid);
@@ -4645,6 +4922,7 @@
     if (cp.kind === 'topic') b = heldTopic(cp, n.who.length === 1 ? n.who[0] : v);
     else {
       if (n.due) cp.due = n.due;
+      if (n.start) cp.start = n.start;
       if (nrowPri(n) !== VS.priority.default) cp.priority = nrowPri(n);
       // anyone but the viewer alone: the assign (one per completion class unless the picker set
       // one, asgEvents), then for a superior's wrap-up pick one status per assignee
@@ -5419,7 +5697,7 @@
       if (sb.firstChild) sb.innerHTML = '';
       dropEditorState(false);
       if (MN && MN.kind === 'sync') { $('tkmenu').innerHTML = syncPopHtml(); placeMenu(); }
-      else if (MN && mnStale()) closeMenu(false);
+      else if (MN && mnStale()) closeMenu(false, true);
       ui.itemChanged = false; ui.clearDraft = false;
       afterRender(name);
       measure();
@@ -5487,7 +5765,7 @@
       var mIn = $('tkmenu').contains(document.activeElement);
       $('tkmenu').innerHTML = syncPopHtml(); placeMenu();
       if (mIn) { var mf = $('tkmenu').querySelector('button'); if (mf) mf.focus({ preventScroll: true }); }
-    } else if (MN && mnStale()) closeMenu(false);
+    } else if (MN && mnStale()) closeMenu(false, true);
     ui.itemChanged = false; ui.clearDraft = false;
     afterRender(name);
     measure();
@@ -5862,6 +6140,7 @@
   // The icons the renderer draws, under its own ids (tki-*) so a host sprite never collides.
   var SPRITE = '<svg width="0" height="0" style="position:absolute" aria-hidden="true">' +
     '<symbol id="tki-back" viewBox="0 0 16 16"><path d="M10 3.5L5.5 8l4.5 4.5"/></symbol>' +
+    '<symbol id="tki-trash" viewBox="0 0 16 16"><path d="M2.5 4.5h11M6.5 4.5V2.8h3v1.7M4 4.5l.7 8.7h6.6l.7-8.7M6.6 7v4M9.4 7v4"/></symbol>' +
     '<symbol id="tki-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>' +
     '<symbol id="tki-up" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"/></symbol>' +
     '<symbol id="tki-tasks" viewBox="0 0 16 16"><path d="M2.5 4.2l1.4 1.4 2.4-2.6M2.5 10.2l1.4 1.4 2.4-2.6M8.5 4.6h5M8.5 10.6h5"/></symbol>' +
@@ -5927,6 +6206,8 @@
     if (!window.WsToast) b.appendChild(el('div', { class: 'tk tk-toast', id: 'tktoast', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-menu', id: 'tkmenu', role: 'menu', hidden: '' }));
+    // the range and label pickers' discard capsule: outside the menu, which clips its children
+    b.appendChild(el('button', { type: 'button', class: 'tk tk-mcap', id: 'tkcap', hidden: '' }, '<svg class="i"><use href="#tki-trash"/></svg><span>' + wsT("js.tk.menu.discard") + '</span>'));
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
       '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-haspopup="dialog" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
     b.appendChild(el('dialog', { class: 'tk tk-palette', id: 'tkqpop', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
@@ -5985,12 +6266,8 @@
       if (qs.open && (t === $('tkqpop') || !(t.closest && t.closest('#tkqpop, #tkqs')))) qClose();
       if (mentionBox(t)) mentionSync(); // a click into an @token opens it, elsewhere in the box closes it
       else if (MP && !(t.closest && t.closest('#tkmpop, #cmention'))) mentionClose();
-      // a click outside the menu closes it; a click on its own opener toggles it shut
-      if (MN && !(t.closest && t.closest('#tkmenu'))) {
-        var mOpener = MN.backEl && MN.backEl.contains(t);
-        closeMenu(mOpener || t === $('tkwin'));
-        if (mOpener || t === $('tkwin')) { e.preventDefault(); return; }
-      }
+      // a click outside the menu closes it; a click on its own opener toggles it shut (menuOutside)
+      if (menuOutside(e, t)) return;
       if (!own(t)) return;
       if (t === $('tkwin')) { closeItemWindow(); return; } // the backdrop
       if (t.closest('#tkqs')) { if (qs.open) qClose(); else qOpen(); return; }
@@ -6277,11 +6554,19 @@
     });
     // the assign popover's rows and chip buttons act on click without taking focus from its search field
     $('tkmenu').addEventListener('mousedown', function (e) { if (e.target.closest('.ap-list .aopt, .ap-chips .ax')) e.preventDefault(); });
-    // focus leaving the labels step (not into its opener, whose click toggles it shut) applies the pick
-    $('tkmenu').addEventListener('focusout', function (e) {
-      var to = e.relatedTarget;
-      if (MN && MN.kind === 'item' && MN.step === 'labels' && to && !$('tkmenu').contains(to) && !(MN.backEl && MN.backEl.contains(to))) closeMenu(false);
-    });
+    // focus leaving the labels step or the range picker applies the pick (menuFocusOut); focus going
+    // to the capsule stays inside, and focus leaving the capsule counts as leaving the menu
+    $('tkmenu').addEventListener('focusout', menuFocusOut);
+    $('tkcap').addEventListener('focusout', menuFocusOut);
+    // the capsule discards on its own click (the [data-act] dispatch would apply first) and keeps focus where it is
+    $('tkcap').addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); menuDiscard(); });
+    $('tkcap').addEventListener('mousedown', function (e) { e.preventDefault(); });
+    // the range picker: handle drags, a tap on an empty grid, typed dates
+    $('tkmenu').addEventListener('pointerdown', rangeDown);
+    $('tkmenu').addEventListener('pointermove', rangeMove);
+    $('tkmenu').addEventListener('pointerup', rangeUp);
+    $('tkmenu').addEventListener('pointercancel', rangeUp);
+    $('tkmenu').addEventListener('input', function (e) { if (e.target.hasAttribute && e.target.hasAttribute('data-rin')) rangeInput(e.target); });
     $('tkmenu').addEventListener('mousemove', function (e) {
       var o = e.target.closest('.aopt[data-ai]'), i = o && Number(o.getAttribute('data-ai'));
       if (!o || !MN || !MN.as || i === MN.as.idx) return;
@@ -6306,7 +6591,7 @@
     document.addEventListener('keydown', function (e) {
       lastInput = 'key';
       var t = e.target, id = t.id, chord = e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing, plain = e.key === 'Enter' && !e.isComposing && !e.shiftKey && !e.metaKey && !e.ctrlKey;
-      if (MN && $('tkmenu').contains(t)) { menuKey(e); return; }
+      if (MN && menuHas(t)) { menuKey(e); return; }
       // Shift+F10 or the menu key opens the focused row's menu under it
       if ((e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) && own(t) && !t.closest('#tkdlg, input, textarea, select')) {
         var mk = t.closest('[data-mitem], [data-item]');
