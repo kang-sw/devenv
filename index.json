@@ -412,7 +412,14 @@
       }
     },
     "261113-bug-ws-hosted-pi-start-misses-uninstalled-extension-deps": {
-      "registered_at": "2026-11-13T10:24:58Z"
+      "registered_at": "2026-11-13T10:24:58Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T13:52:39Z"
+      }
     },
     "261113-bug-ws-launcher-falls-to-direct-path-during-daemon-replacement": {
       "registered_at": "2026-11-13T04:57:48Z"
