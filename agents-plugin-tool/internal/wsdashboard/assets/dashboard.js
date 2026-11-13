@@ -1430,20 +1430,21 @@
   }
   // deleteMarkers deletes each marker naming n, with the space after it,
   // wherever the draft holds one: the composer, a note, or a stray chip's
-  // note.
+  // note. The stray chips go first: each field edit re-syncs the images,
+  // which a marker left in a stray chip would bring back.
   function deleteMarkers(n) {
     var src = "\\[Image #" + n + "\\] ?";
-    [ctext].concat(boardNotes()).forEach(function (el) {
-      var re = new RegExp(src, "g"), v = el.value, spans = [], m;
-      while ((m = re.exec(v))) spans.push([m.index, m.index + m[0].length]);
-      spans.reverse().forEach(function (sp) { editField(el, sp[0], sp[1], ""); });
-    });
     var stray = strayChips().filter(function (c) { return new RegExp(src).test(c.note); });
     stray.forEach(function (c) {
       c.note = c.note.replace(new RegExp(src, "g"), "").trim();
       if (!c.answer && !c.note) dropChip(c.id);
     });
     if (stray.length) renderChips();
+    [ctext].concat(boardNotes()).forEach(function (el) {
+      var re = new RegExp(src, "g"), v = el.value, spans = [], m;
+      while ((m = re.exec(v))) spans.push([m.index, m.index + m[0].length]);
+      spans.reverse().forEach(function (sp) { editField(el, sp[0], sp[1], ""); });
+    });
   }
   // addFiles attaches image files, their markers going in at el's cursor
   // (the composer's by default).
