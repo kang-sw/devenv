@@ -173,7 +173,7 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	if strings.Contains(html, `id="wb-now"`) || strings.Contains(html, `class="now`) {
 		t.Errorf("the served board carries a Now slot:\n%.600s", html)
 	}
-	frames := regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="([^"]*)" data-topic="([^"]*)"(?: data-relay="[^"]*")? sandbox="([^"]*)" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(html, -1)
+	frames := regexp.MustCompile(`<div class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="([^"]*)" data-topic="([^"]*)"(?: data-relay="[^"]*")? data-sandbox="([^"]*)" data-srcdoc="([^"]*)"></div>`).FindAllStringSubmatch(html, -1)
 	if len(frames) != 2 {
 		t.Fatalf("doc-frame iframes = %d, want one per topic body:\n%.600s", len(frames), html)
 	}
@@ -203,7 +203,7 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	if strings.Contains(rollout, base64.StdEncoding.EncodeToString([]byte("outside-bytes"))) || strings.Count(rollout, "data:image/png") != 1 {
 		t.Errorf("an image outside the root must never be inlined into the frame")
 	}
-	if want := `data-topic="Rollout" data-relay="` + stdhtml.EscapeString(relay) + `" sandbox=`; !strings.Contains(html, want) {
+	if want := `data-topic="Rollout" data-relay="` + stdhtml.EscapeString(relay) + `" data-sandbox=`; !strings.Contains(html, want) {
 		t.Errorf("the Rollout frame lacks its relay list %q", want)
 	}
 	if strings.Contains(html, `data-topic="Body only" data-relay`) {
@@ -223,7 +223,7 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 		t.Errorf("a topic with a body and no items must render its frame: %v", docs)
 	}
 	if strings.Contains(html, "<details><summary>more") {
-		t.Errorf("a body's raw HTML must reach the served page only inside its frame's srcdoc")
+		t.Errorf("a body's raw HTML must reach the served page only inside its frame's document")
 	}
 }
 
@@ -718,6 +718,36 @@ func TestDashboardReadPageCarriesReaskTimes(t *testing.T) {
 	}
 }
 
+// TestDashboardBoardItemsReadsOpenItemsAndReaskTimes pins the daemon answer
+// check's board source: the open items by ID (not the answered, assumed, or
+// withdrawn ones) and each re-asked item's re-ask time, read from the stored
+// board; a session with no board is empty, and an unknown session is false.
+func TestDashboardBoardItemsReadsOpenItemsAndReaskTimes(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	if items, ok := src.BoardItems(reg); !ok || len(items.Open) != 0 || len(items.Reasked) != 0 {
+		t.Fatalf("no board: BoardItems = %+v, %v; want empty and true", items, ok)
+	}
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>one</wb:title></wb:add><wb:add class="technical"><wb:title>two</wb:title></wb:add><wb:add class="technical"><wb:title>three</wb:title></wb:add><wb:add class="technical"><wb:title>four</wb:title></wb:add><wb:add class="technical"><wb:title>five</wb:title></wb:add></wb:topic>`)
+	f.update(t, `<wb:answer id="2" value="ok">fine</wb:answer><wb:answer id="3" value="ok" assumed="true">assume</wb:answer><wb:patch id="4" status="withdrawn"/>`)
+	before := time.Now().UnixMilli()
+	f.update(t, `<wb:patch id="1" class="policy"><wb:option>x</wb:option><wb:option>y</wb:option></wb:patch>`)
+	items, ok := src.BoardItems(reg)
+	if !ok {
+		t.Fatal("BoardItems found no session")
+	}
+	if len(items.Open) != 2 || !items.Open[1] || !items.Open[5] {
+		t.Errorf("Open = %v, want items 1 and 5 only", items.Open)
+	}
+	if len(items.Reasked) != 1 || items.Reasked[1] < before || items.Reasked[1] > time.Now().UnixMilli() {
+		t.Errorf("Reasked = %v, want item 1 at or after %d", items.Reasked, before)
+	}
+	if _, ok := src.BoardItems(wsdashboard.Registration{ReplyID: "nope", Project: f.root}); ok {
+		t.Error("BoardItems read an unknown session")
+	}
+}
+
 // TestDashboardReadClosedTopicsPastTheCap pins the served board's closed-topic
 // cap end to end: the board ends with the show-more control, and
 // ReadClosedTopics renders the topics past the cap under the served link
@@ -750,7 +780,7 @@ func TestDashboardReadClosedTopicsPastTheCap(t *testing.T) {
 	if first, last := strings.Index(rest, `>c2</span>`), strings.Index(rest, `>c1</span>`); first < 0 || last < first || strings.Count(rest, `<section class="topic`) != 2 {
 		t.Errorf("the closed topics past the cap:\n%.800s", rest)
 	}
-	for _, want := range []string{`Ending 2.`, `<iframe class="doc-frame" title="c1"`, `/s/` + reg.ReplyID + `/file?path=ai-docs%2Fplan.md`} {
+	for _, want := range []string{`Ending 2.`, `<div class="doc-frame" title="c1"`, `/s/` + reg.ReplyID + `/file?path=ai-docs%2Fplan.md`} {
 		if !strings.Contains(rest, want) {
 			t.Errorf("the closed topics past the cap lack %q", want)
 		}

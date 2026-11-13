@@ -32,7 +32,6 @@ func TestBoardKeepWiring(t *testing.T) {
 		`q("iframe.doc-frame", n).forEach(function (f) { f.wbKeep = true; });`,
 		"if (kept) kept.h.apply();\n        startMotion(",
 		"restoreScroll(scroll);",
-		"window.wbHistory.restore(b, history); });",
 		"if (kept) kept.h.apply();",
 	}
 	at := 0
@@ -45,7 +44,10 @@ func TestBoardKeepWiring(t *testing.T) {
 	}
 	// A frame the swap brought keeps the board in place on its first
 	// height change, which may land after the swap's session ended.
-	if !strings.Contains(js, "var kept = f.wbKeep && Math.abs(to - from) >= 1 && b && b.contains(f) ? boardKept() || boardKeep(b) : null;\n        if (kept) f.wbKeep = false;\n        f.style.height = to + \"px\";\n        if (kept) kept.h.apply();") {
+	// The height batch (applyFrameHeights) starts one session for every such
+	// frame before any height lands and applies it after (behaviour:
+	// TestBoardFrameHeightsBatch).
+	if !strings.Contains(js, "if (!kept) kept = boardKept() || boardKeep(b);\n      if (kept) f.wbKeep = false;") || !strings.Contains(js, "      postTheme(f);\n    });\n    if (kept) kept.h.apply();\n  }") {
 		t.Error("a swapped-in frame's late height is not compensated")
 	}
 	if !strings.Contains(js, "\n  boardBoxes().forEach(watchBoard);\n") {

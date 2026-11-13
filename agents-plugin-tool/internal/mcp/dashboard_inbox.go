@@ -32,6 +32,11 @@ type dashboardInboxMessage struct {
 	// Mentions are the board text the user pointed at, which Text carries
 	// after the answer block.
 	Mentions []wsinbox.Mention `json:"mentions"`
+	// Picks and Consoles are the page elements the user picked and the
+	// console errors attached from a web card, which Text carries after the
+	// mentions.
+	Picks    []wsinbox.Pick    `json:"picks"`
+	Consoles []wsinbox.Console `json:"consoles"`
 	// Interrupt marks an interrupt entry, which carries no text.
 	Interrupt bool `json:"interrupt,omitempty"`
 	// Command is a command entry's slash command ({name, args}), which the
@@ -88,7 +93,7 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 		messages := make([]dashboardInboxMessage, 0, len(records))
 		for _, r := range records {
 			e := r.Entry
-			parts, chips, topics, mentions := e.Parts, e.Chips, e.Topics, e.Mentions
+			parts, chips, topics, mentions, picks, consoles := e.Parts, e.Chips, e.Topics, e.Mentions, e.Picks, e.Consoles
 			if parts == nil {
 				parts = []string{}
 			}
@@ -101,7 +106,13 @@ func (s *Server) handleDashboardInboxDrain(id json.RawMessage, args map[string]a
 			if mentions == nil {
 				mentions = []wsinbox.Mention{}
 			}
-			messages = append(messages, dashboardInboxMessage{ID: r.ID(), SentAt: e.SentAt, Text: e.Text(), Parts: parts, Chips: chips, Topics: topics, Mentions: mentions, Interrupt: e.Interrupt, Command: e.Command})
+			if picks == nil {
+				picks = []wsinbox.Pick{}
+			}
+			if consoles == nil {
+				consoles = []wsinbox.Console{}
+			}
+			messages = append(messages, dashboardInboxMessage{ID: r.ID(), SentAt: e.SentAt, Text: e.Text(), Parts: parts, Chips: chips, Topics: topics, Mentions: mentions, Picks: picks, Consoles: consoles, Interrupt: e.Interrupt, Command: e.Command})
 		}
 		return toolJSONResponse(id, map[string]any{"messages": messages}, nil)
 	}

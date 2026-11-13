@@ -3,7 +3,9 @@ package wswhiteboard
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"net/url"
@@ -339,6 +341,9 @@ type pageData struct {
 	entries map[string]template.HTML
 	// DocFramed renders each topic body inside a sandboxed frame (framedDoc).
 	DocFramed bool
+	// tmpl is the template set the page renders with (templateFor), which
+	// TopicHTML executes the topic template from.
+	tmpl *template.Template
 	// framing is set while a framed body renders, so its file images take
 	// DocImageSrc.
 	framing bool
@@ -428,6 +433,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		docs:        map[string]template.HTML{},
 		entries:     map[string]template.HTML{},
 		DocFramed:   framed,
+		tmpl:        a.templateFor(view.Lang),
 	}
 	if !full {
 		// The embed has no change-signal loader, so it carries no stamp.
@@ -544,6 +550,15 @@ const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 // hands the frame the image (doc-frame.js and the dashboard script).
 // The frame carries its topic name as data-doc, so the host can keep each
 // frame's height across a board swap.
+//
+// The server never mounts a frame: it writes an inert placeholder, a div
+// carrying the frame's class and attributes, its document as data-srcdoc,
+// and its sandbox token set as data-sandbox (frameSandbox). The host page
+// replaces the placeholder with the iframe (dashboard.js mountFrame), sandbox
+// and srcdoc set before it is connected, only once every <details> around it
+// is open (mountFrames), so a frame under a closed fold costs no document
+// until it is opened. An <iframe> left without srcdoc would not be inert: it
+// commits an about:blank document synchronously as the page parses.
 func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mermaid bool, relays []string, a *pageAssets) template.HTML {
 	title, key, entryAttr := topic, "topic:"+topic, ""
 	if entry != "" {
@@ -566,12 +581,13 @@ func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mer
 	if len(relays) > 0 {
 		relay = ` data-relay="` + template.HTMLEscapeString(strings.Join(relays, " ")) + `"`
 	}
-	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(title) + `" data-doc="` + template.HTMLEscapeString(key) + `" data-doc-key="` + template.HTMLEscapeString(key) + `" data-topic="` + template.HTMLEscapeString(topic) + `"` + entryAttr + relay + ` sandbox="` + frameSandbox + `" srcdoc="` +
-		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
+	return template.HTML(`<div class="doc-frame" title="` + template.HTMLEscapeString(title) + `" data-doc="` + template.HTMLEscapeString(key) + `" data-doc-key="` + template.HTMLEscapeString(key) + `" data-topic="` + template.HTMLEscapeString(topic) + `"` + entryAttr + relay + ` data-sandbox="` + frameSandbox + `" data-srcdoc="` +
+		template.HTMLEscapeString(doc.String()) + `"></div>`)
 }
 
 // frameSandbox is the sandbox token set of every srcdoc frame the daemon
-// builds (framedDoc, SandboxedPage): allow-scripts, so the document's own
+// builds (SandboxedPage, and framedDoc's placeholder, whose data-sandbox the
+// page copies onto the frame it mounts): allow-scripts, so the document's own
 // scripts run, but no allow-same-origin, so they run in an opaque origin
 // that can neither read the host page nor reach the daemon's routes with
 // the viewer's credentials; popups open as ordinary pages. Adding a token
@@ -618,7 +634,9 @@ const frameDocStart = `<!DOCTYPE html><html>`
 // returns board unchanged (the frames follow the OS, as the page does). The
 // daemon applies it per request, from the request's theme cookie, so the
 // board itself renders theme-free; the page script carries a later switch
-// to the frames (doc-frame.js).
+// to the frames (doc-frame.js). The match is a plain substring, so it pins
+// a placeholder's data-srcdoc document (framedDoc) just as a frame's srcdoc
+// one: the document must open with frameDocStart, nothing before it.
 func ThemeFrames(board template.HTML, theme string) template.HTML {
 	if theme != "light" && theme != "dark" {
 		return board
@@ -647,6 +665,31 @@ func (d topicData) DocClass() string {
 
 // TopicOf pairs a topic with the page for the topic template.
 func (p *pageData) TopicOf(t TopicView) topicData { return topicData{TopicView: t, Page: p} }
+
+// TopicHTML renders t's topic section. On the dashboard's board (DocFramed)
+// the section carries data-th, a hash of its own rendered bytes (data-th
+// excluded): the board swap (dashboard.js morphBoard) compares it in place of
+// the section's whole HTML to keep an unchanged topic's node. Hashing the
+// bytes covers everything the HTML compare covered (classes, frame
+// documents, language); the theme is pinned after render (ThemeFrames), so
+// the hash is theme-free. The section's opening tag holds no raw ">" (its
+// attribute values are escaped), so data-th goes before the first one.
+func (p *pageData) TopicHTML(t TopicView) (template.HTML, error) {
+	var buf bytes.Buffer
+	if err := p.tmpl.ExecuteTemplate(&buf, "topic", p.TopicOf(t)); err != nil {
+		return "", err
+	}
+	html := buf.String()
+	if !p.DocFramed {
+		return template.HTML(html), nil
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	at := strings.IndexByte(html, '>')
+	if !strings.HasPrefix(html, "<section ") || at < 0 {
+		return "", fmt.Errorf("topic %s: the section's opening tag is not first", t.Name)
+	}
+	return template.HTML(html[:at] + ` data-th="` + hex.EncodeToString(sum[:8]) + `"` + html[at:]), nil
+}
 
 // RecapHTML renders the topic's recap through itemField, as an item's block
 // fields render, salted with the topic's key.

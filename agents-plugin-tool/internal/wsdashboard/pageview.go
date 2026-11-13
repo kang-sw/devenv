@@ -110,31 +110,45 @@ type SessionView struct {
 
 // MailboxOpen is the copy tag's opening attributes, also used after a rename.
 func (v SessionView) MailboxOpen() string {
-	attr := func(s string) string { return mailboxAttrEscaper.Replace(s) }
-	open := `<mailbox id="` + attr(wsmailbox.ReplyIDPrefix+v.ReplyID) + `" dir="` + attr(v.Project) + `"`
+	var root, branch string
 	if v.Git != nil {
-		root := v.Git.TopLevel
-		a, b := filepath.Clean(root), filepath.Clean(v.Project)
-		if root != "" && !(a == b || runtime.GOOS == "windows" && strings.EqualFold(a, b)) {
-			open += ` root="` + attr(root) + `"`
-		}
-		if !v.Git.Detached && v.Git.Branch != "" {
-			open += ` branch="` + attr(v.Git.Branch) + `"`
+		root = v.Git.TopLevel
+		if !v.Git.Detached {
+			branch = v.Git.Branch
 		}
 	}
-	if v.Harness != "" {
-		open += ` harness="` + attr(v.Harness) + `"`
+	return mailboxOpen(v.ReplyID, v.Project, root, branch, v.Harness)
+}
+
+// MailboxRef is the tag copied by the head's name.
+func (v SessionView) MailboxRef() string { return mailboxRef(v.MailboxOpen(), v.Label) }
+
+// mailboxOpen is a session's copy tag up to its closing: the head's name and
+// a rail row's copy button both build it here, so the two copy one string.
+// root is the worktree's top level, written only when it is not project;
+// branch is empty for a detached HEAD or no repository.
+func mailboxOpen(replyID, project, root, branch, harness string) string {
+	attr := func(s string) string { return mailboxAttrEscaper.Replace(s) }
+	open := `<mailbox id="` + attr(wsmailbox.ReplyIDPrefix+replyID) + `" dir="` + attr(project) + `"`
+	a, b := filepath.Clean(root), filepath.Clean(project)
+	if root != "" && !(a == b || runtime.GOOS == "windows" && strings.EqualFold(a, b)) {
+		open += ` root="` + attr(root) + `"`
+	}
+	if branch != "" {
+		open += ` branch="` + attr(branch) + `"`
+	}
+	if harness != "" {
+		open += ` harness="` + attr(harness) + `"`
 	}
 	return open
 }
 
-// MailboxRef is the tag copied by the head's name.
-func (v SessionView) MailboxRef() string {
-	open := v.MailboxOpen()
-	if v.Label == "" {
+// mailboxRef closes a copy tag around label, or self-closes it without one.
+func mailboxRef(open, label string) string {
+	if label == "" {
 		return open + `/>`
 	}
-	return open + `>` + mailboxTextEscaper.Replace(v.Label) + `</mailbox>`
+	return open + `>` + mailboxTextEscaper.Replace(label) + `</mailbox>`
 }
 
 var mailboxAttrEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
@@ -423,6 +437,10 @@ type ConvEntry struct {
 	// message), taken out of its text and shown as capsules after the
 	// answer capsules.
 	Mentions []wsinbox.Mention
+	// Picks and Consoles are the web card's pick and console elements after
+	// the mentions, taken out of its text and shown as capsules after them.
+	Picks    []wsinbox.Pick
+	Consoles []wsinbox.Console
 	// Rendered is the entry's whole element, from the entry cache.
 	Rendered template.HTML
 	// Body is a mail line's full message from the mailbox history; HasBody
@@ -550,7 +568,7 @@ func buildSessionView(in pageInputs) SessionView {
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID))
 	splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
-	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked)
+	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked, settledTurnStart(in.Ring))
 	v.Conversation.Subagents = subagentCounts(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
 	return v
 }

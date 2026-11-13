@@ -91,7 +91,7 @@ func TestLegacyRecapReferencesAndSandbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	board := string(regions.Board)
-	recap, frame := strings.Index(board, `<div class="trecap">`), strings.Index(board, `<iframe class="doc-frame"`)
+	recap, frame := strings.Index(board, `<div class="trecap">`), strings.Index(board, `<div class="doc-frame"`)
 	if recap < 0 || frame < 0 || recap > frame {
 		t.Fatalf("legacy recap %d, frame %d", recap, frame)
 	}

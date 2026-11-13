@@ -359,7 +359,7 @@ process.stdout.write(bad.join("\n"));
 func TestHeadRenameScript(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	var src string
-	for _, name := range []string{"labelEditing", "labelClean", "labelClick", "labelStart", "labelKey", "labelSave", "labelEnd", "labelSwapped"} {
+	for _, name := range []string{"labelEditing", "labelClean", "labelClick", "labelHead", "labelShow", "labelCopy", "labelStart", "labelKey", "labelSave", "labelEnd", "labelSwapped"} {
 		f := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(js)
 		if f == "" {
 			t.Fatalf("dashboard.js holds no %s", name)

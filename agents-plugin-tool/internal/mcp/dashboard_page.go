@@ -30,9 +30,10 @@ import (
 // session key.
 
 var (
-	_ wsdashboard.LangPageSource  = (*DashboardSessionSource)(nil)
-	_ wsdashboard.ContactSource   = (*DashboardSessionSource)(nil)
-	_ wsdashboard.MailPrintSource = (*DashboardSessionSource)(nil)
+	_ wsdashboard.LangPageSource   = (*DashboardSessionSource)(nil)
+	_ wsdashboard.ContactSource    = (*DashboardSessionSource)(nil)
+	_ wsdashboard.MailPrintSource  = (*DashboardSessionSource)(nil)
+	_ wsdashboard.BoardItemsSource = (*DashboardSessionSource)(nil)
 )
 
 // ReadPage reads the page parts of the session reg names, in English. It
@@ -245,6 +246,28 @@ func (src *DashboardSessionSource) renderBoardNow(key string, record sessionReco
 	}
 	out.regions = regions
 	return out, true
+}
+
+// BoardItems reads the session reg names' board status for the daemon's
+// answer check (wsdashboard.BoardItemsSource): the IDs of the open items and
+// each re-asked item's latest re-ask time. It reads the stored state and
+// renders nothing. A session without a board answers an empty value and
+// true; false when the session is gone.
+func (src *DashboardSessionSource) BoardItems(reg wsdashboard.Registration) (wsdashboard.BoardItems, bool) {
+	_, _, record, ok := src.lookupRecord(reg)
+	if !ok {
+		return wsdashboard.BoardItems{}, false
+	}
+	if record.Whiteboard == nil {
+		return wsdashboard.BoardItems{}, true
+	}
+	items := wsdashboard.BoardItems{Open: map[int]bool{}, Reasked: record.Whiteboard.ReaskTimes()}
+	for _, item := range record.Whiteboard.Items {
+		if item.Status == wswhiteboard.StatusOpen {
+			items.Open[item.ID] = true
+		}
+	}
+	return items, true
 }
 
 var _ wsdashboard.ClosedTopicsSource = (*DashboardSessionSource)(nil)

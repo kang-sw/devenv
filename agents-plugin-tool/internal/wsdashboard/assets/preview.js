@@ -90,15 +90,27 @@
   // The reload action loads the card again, whatever it shows: the route is
   // asked afresh (a new capability for a frame, so it works for a sandboxed
   // frame, whose window is opaque to the page), and the content is redrawn.
-  function actions() {
+  // An HTML file also opens in a web card (webcard.js, which a page offers
+  // a browser on the daemon's machine only), where its scripts run on a
+  // proxy origin of its own; the registration route decides whether the
+  // file is under the session root.
+  function actions(card) {
     var a = local() ? [{ icon: "external-link", title: wsT("js.preview.openext"), run: openExternal }] : [];
+    if (window.WsWeb && /^html?$/.test(ext(card.data.path))) a.push({ icon: "globe", title: wsT("js.web.menu.open"), run: openWeb });
     a.push({ icon: "refresh-cw", title: wsT("js.preview.reload"), run: load });
     return a;
+  }
+  // openWeb opens the card's file in a web card, by the path the
+  // registration route takes: relative to the session root, or absolute.
+  function openWeb(card) {
+    var d = card.data, p = d.path;
+    if (!d.out && d.root) p = d.root.replace(/[\\/]+$/, "") + "/" + d.path;
+    window.WsWeb.open({ path: p });
   }
   function head(card, icon, text) {
     var d = card.data;
     card.title({ icon: icon, name: baseName(d.path), sub: d.path, badge: text });
-    card.actions(actions());
+    card.actions(actions(card));
   }
   function fill(card, node) {
     card.body.textContent = "";

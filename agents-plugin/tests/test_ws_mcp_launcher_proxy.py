@@ -927,6 +927,46 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(stdout)["served_by"], "daemon")
 
+    def test_forced_local_install_is_skipped_for_wait_and_hook_with_a_usable_daemon(self):
+        # The local binary is newer than the daemon's build: even daemon-start's
+        # repair path must not run for these short-lived CLI consumers.
+        daemon = self.daemon(cli_exit_code=0, build_time=1)
+        daemon.write_endpoint(self.daemon_dir)
+        with mock.patch.object(self.launcher, "runtime_install_forced", return_value=True), \
+             mock.patch.object(self.launcher, "local_devenv_runtime_enabled", return_value=True), \
+             mock.patch.object(self.launcher, "local_devenv_source_fingerprint", return_value="changed-source"), \
+             mock.patch.object(self.launcher, "compatibility_stamp_current", return_value=False), \
+             mock.patch.object(self.launcher, "runtime_fully_compatible", return_value=False) as compatible, \
+             mock.patch.object(self.launcher, "clear_compatibility_stamp") as clear_stamp:
+            for argv, payload in ((["mailbox", "wait", "--session-key", "test-key"], ""),
+                                  (["mailbox", "codex-stop-hook"], '{"stop_hook_active":true}')):
+                with self.subTest(argv=argv):
+                    code, stdout, _ = self.run_main(argv, input_text=payload, forbid_install=True)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(json.loads(stdout)["served_by"], "daemon")
+                    self.assertEqual(daemon.hellos[-1]["argv"], argv)
+            compatible.assert_not_called()
+            clear_stamp.assert_not_called()
+        self.assertEqual(self.runtime_log(), [])
+        self.assertFalse((self.daemon_dir / "bin").exists())
+
+    def test_forced_local_install_still_repairs_interactive_stdio_with_a_usable_daemon(self):
+        daemon = self.daemon()
+        daemon.write_endpoint(self.daemon_dir)
+        with mock.patch.object(self.launcher, "runtime_install_forced", return_value=True), \
+             mock.patch.object(self.launcher, "local_devenv_runtime_enabled", return_value=True), \
+             mock.patch.object(self.launcher, "local_devenv_source_fingerprint", return_value="changed-source"), \
+             mock.patch.object(self.launcher, "compatibility_stamp_current", return_value=False), \
+             mock.patch.object(self.launcher, "runtime_fully_compatible", return_value=True), \
+             mock.patch.object(self.launcher, "write_compatibility_stamp"), \
+             mock.patch.object(self.launcher, "install_runtime") as install, \
+             mock.patch.object(self.launcher, "proxy_serve", return_value=0) as serve:
+            code, _, _ = self.run_main(["serve", "--stdio"])
+            self.assertEqual(code, 0)
+            install.assert_called_once()
+            self.assertTrue(install.call_args.kwargs["force_local"])
+            self.assertTrue(serve.call_args.args[0].allow_start)
+
     def test_version_inspection_never_starts_or_probes_a_ws_process(self):
         code, stdout, _ = self.run_main(["version"], forbid_install=True)
         self.assertEqual((code, stdout.strip()), (0, b"0.48.16"))

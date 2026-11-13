@@ -7,8 +7,8 @@ import (
 )
 
 // railJSHarness is a minimal DOM (children, attributes, classes, one-class
-// querySelector, insertBefore, nextSibling) and an in-memory store for
-// running rail.js under node.
+// querySelector, insertBefore, removeChild, nextSibling) and an in-memory
+// store for running rail.js under node.
 const railJSHarness = `
 var window = {};
 var bad = [];
@@ -26,6 +26,7 @@ El.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k
 El.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 El.prototype.removeAttribute = function (k) { delete this.attrs[k]; };
 El.prototype.appendChild = function (c) { return this.insertBefore(c, null); };
+El.prototype.removeChild = function (c) { this.children.splice(this.children.indexOf(c), 1); c.parentNode = null; return c; };
 El.prototype.insertBefore = function (c, ref) {
   if (c.parentNode) { var p = c.parentNode.children; p.splice(p.indexOf(c), 1); }
   var i = ref ? this.children.indexOf(ref) : -1;
@@ -90,32 +91,20 @@ check("no guard without held images", ev.prevented, false);
 held = true; guard(ev);
 check("the guard asks while images are held", [ev.prevented, ev.returnValue], [true, ""]);
 
-// stars and pin: starred rows first, each part in server order; unstarring
-// returns a row to its place; the ended fold stays last.
-var ss = memStore(), stars = R.stars(ss), box = new El("rsessions");
+// The collapsed workspaces persist; the stars and the order are the
+// daemon's, and a row's star is the one it rendered.
+var ss = memStore(), box = new El("rsessions");
 ["r1", "r2", "r3"].forEach(function (id) { box.appendChild(row(id)); });
-var fold = new El("rended"); box.appendChild(fold);
-function order() { return box.children.map(function (c) { return c.getAttribute("data-rid") || "fold"; }); }
-check("toggle stars", stars.toggle("r3"), true);
-R.pin(box, stars);
-check("a starred row is pinned first", order(), ["r3", "r1", "r2", "fold"]);
-check("its star is pressed", [box.children[0].querySelector(".star").getAttribute("aria-pressed"), box.children[1].querySelector(".star").getAttribute("aria-pressed")], ["true", "false"]);
-stars.toggle("r2"); R.pin(box, stars);
-check("two starred rows keep server order", order(), ["r2", "r3", "r1", "fold"]);
-stars.toggle("r3"); stars.toggle("r2"); R.pin(box, stars);
-check("unstarred rows return to their places", order(), ["r1", "r2", "r3", "fold"]);
-check("no star left stores nothing", ss.load("ws.dashboard.stars"), null);
-stars.toggle("r1");
-check("stars persist", R.stars(ss).has("r1"), true);
 check("collapsed workspaces persist", [R.collapsed(ss).toggle("/w/repo"), R.collapsed(ss).has("/w/repo")], [true, true]);
+function star(r, on) { r.querySelector(".star").setAttribute("aria-pressed", on ? "true" : "false"); return r; }
+check("a row's star is the rendered one", [R.starred(star(row("a"), true)), R.starred(row("b")), R.starred(new El("rs")), R.starred(null)], [true, false, false, false]);
 
-// drag order: a group's live rows follow the stored order, a session new
-// since the last drag on top, stars still first with the order inside each
-// part; the ended fold's rows keep the server's order; stale ids are pruned
-// on the next save; a drop never leaves its group or its side of the stars.
-function group(ids, ended) {
+// drop: a live row moves within its group on its side of the stars, a
+// workspace among the workspaces; never into another group, onto an ended
+// row, onto itself, or across the stars.
+function group(ids, ended, starred) {
   var b = new El("rsessions");
-  ids.forEach(function (id) { b.appendChild(row(id)); });
+  ids.forEach(function (id) { b.appendChild(star(row(id), (starred || []).indexOf(id) >= 0)); });
   if (ended) {
     var f = new El("rended"), inner = new El("rsessions");
     ended.forEach(function (id) { var r = row(id); r.classList.add("ended"); inner.appendChild(r); });
@@ -125,61 +114,224 @@ function group(ids, ended) {
   return b;
 }
 function ids(b) { return b.children.map(function (c) { return c.getAttribute("data-rid") || c.getAttribute("data-ws") || c.className; }); }
-var os = memStore(), so = R.sessionOrder(os), none = R.stars(memStore());
 var ga = group(["a1", "a2", "a3"], ["e1", "e2"]), gb = group(["b1", "b2"]);
-R.pin(ga, none, so.list());
-check("no stored order keeps the server's", ids(ga), ["a1", "a2", "a3", "rended"]);
 check("drop moves a row within its group", R.drop(ga.children[2], ga.children[0], false), true);
 check("the row moved", ids(ga), ["a3", "a1", "a2", "rended"]);
 check("a drop into another group is refused", [R.drop(ga.children[0], gb.children[0], false), ids(ga), ids(gb)], [false, ["a3", "a1", "a2", "rended"], ["b1", "b2"]]);
 check("an ended row neither drags nor takes a drop", [R.drop(ga.inner.children[0], ga.inner.children[1], true), R.drop(ga.children[0], ga.inner.children[0], false)], [false, false]);
 check("a drop on itself is refused", R.drop(ga.children[0], ga.children[0], true), false);
-so.place(["a3", "a1", "a2"], ["a1", "a2", "a3", "b1", "b2", "e1", "e2"]);
-check("the group's order is stored", JSON.parse(os.load("ws.dashboard.railorder")), ["a3", "a1", "a2"]);
-so.place(["b2", "b1"], ["a1", "a2", "a3", "b1", "b2"]);
-check("another group's order joins it", JSON.parse(os.load("ws.dashboard.railorder")), ["a3", "a1", "a2", "b2", "b1"]);
-// A swap renders the server's order again; the stored order comes back.
-var ga2 = group(["a4", "a1", "a2", "a3"], ["e2", "e1"]);
-R.pin(ga2, none, so.list());
-R.pin(ga2.inner, none, null);
-check("after a swap: the new session on top, then the stored order", ids(ga2), ["a4", "a3", "a1", "a2", "rended"]);
-check("the ended rows keep the server's order", ids(ga2.inner), ["e2", "e1"]);
-var st2 = memStore(), sr = R.stars(st2);
-sr.toggle("a2"); sr.toggle("a1");
-var ga3 = group(["a4", "a1", "a2", "a3"]);
-R.pin(ga3, sr, so.list());
-check("stars first, the order inside each part", ids(ga3), ["a1", "a2", "a4", "a3"]);
+var ga3 = group(["a1", "a2", "a4", "a3"], null, ["a1", "a2"]);
 check("a drop across the stars is refused", [R.drop(ga3.children[3], ga3.children[0], false), ids(ga3)], [false, ["a1", "a2", "a4", "a3"]]);
 check("a drop inside the starred part", [R.drop(ga3.children[1], ga3.children[0], false), ids(ga3)], [true, ["a2", "a1", "a4", "a3"]]);
-so.place(["a4", "a1"], ["a1", "a4", "b1"]);
-check("stale ids are pruned on the next save", JSON.parse(os.load("ws.dashboard.railorder")), ["b1", "a4", "a1"]);
-check("a stale id in the stored order is ignored", (function () { var g = group(["a1", "a4"]); R.pin(g, none, ["gone", "a4", "a1"]); return ids(g); })(), ["a4", "a1"]);
-// Storage that throws: no order, nothing kept, the server's order.
-var boom = { load: function () { throw new Error("denied"); }, save: function () { throw new Error("denied"); } }, bo = R.sessionOrder(boom);
-check("a throwing store reads as no order", bo.list(), []);
-check("a throwing store keeps nothing and does not throw", bo.place(["a2", "a1"], ["a1", "a2"]), ["a2", "a1"]);
-var gt = group(["a1", "a2"]);
-R.pin(gt, none, bo.list());
-check("a throwing store leaves the server's order", ids(gt), ["a1", "a2"]);
-// Workspaces: the stored ones first in their order, the rest after in the
-// server's order; a section and a row never trade places.
 function wsList(paths) { var l = new El("rlist"); paths.forEach(function (p) { l.appendChild(new El("rws", { "data-ws": p })); }); return l; }
-var wo = R.wsOrder(os), wl = wsList(["/a", "/b", "/c"]);
-R.arrange(wl, wo.list());
-check("no workspace order keeps the server's", ids(wl), ["/a", "/b", "/c"]);
-check("a workspace drops among the workspaces", [R.drop(wl.children[2], wl.children[0], false), ids(wl)], [true, ["/c", "/a", "/b"]]);
+var wl = wsList(["/a", "/b", "/c"]);
+wl.children[0].appendChild(group(["w1"], null, ["w1"]));
+check("a workspace drops among the workspaces, stars inside or not", [R.drop(wl.children[2], wl.children[0], false), ids(wl)], [true, ["/c", "/a", "/b"]]);
 check("a workspace does not drop on a row", R.drop(wl.children[0], (function () { var r = row("x"); wl.appendChild(r); return r; })(), false), false);
-wl.children.pop().parentNode = null;
-wo.place(ids(wl), ids(wl));
-var wl2 = wsList(["/a", "/b", "/c", "/d", "/0"]);
-R.arrange(wl2, wo.list());
-check("unknown workspaces go after the ordered ones, in server order", ids(wl2), ["/c", "/a", "/b", "/d", "/0"]);
-check("the workspace order is its own", [JSON.parse(os.load("ws.dashboard.wsorder")), JSON.parse(os.load("ws.dashboard.railorder"))[0]], [["/c", "/a", "/b"], "b1"]);
-// settle leaves rows already in order where they stand.
-var gs = group(["s1", "s2"]), moved = 0, ib = gs.insertBefore;
-gs.insertBefore = function (c, r) { moved++; return ib.call(this, c, r); };
-R.pin(gs, none, null);
-check("rows already in order are not moved", moved, 0);
+
+// The retired local layout: imported once into an empty server layout,
+// cleared by an answer that applied it or found the layout taken, kept for
+// a retry; a non-empty server layout clears it without an import.
+var ls = memStore();
+check("nothing kept, nothing to import", [R.legacyImport(ls, true), R.legacyImport(ls, false)], [null, null]);
+ls.save("ws.dashboard.railorder", JSON.stringify(["a2", "a1", 3]));
+ls.save("ws.dashboard.stars", JSON.stringify(["a1"]));
+check("an empty layout imports every kept key", R.legacyImport(ls, true), { op: "import", order: ["a2", "a1"], stars: ["a1"], wsorder: [] });
+check("the keys stay until the answer", [ls.load("ws.dashboard.railorder") !== null, ls.load("ws.dashboard.stars") !== null], [true, true]);
+R.legacyDone(ls, { applied: false, reason: "retry" });
+R.legacyDone(ls, {});
+check("a retry or no answer keeps the keys", ls.load("ws.dashboard.stars"), JSON.stringify(["a1"]));
+R.legacyDone(ls, { applied: true, gen: 3 });
+check("an applied import clears the keys", [ls.load("ws.dashboard.railorder"), ls.load("ws.dashboard.stars")], [null, null]);
+ls.save("ws.dashboard.wsorder", "{junk");
+check("a junk key imports as nothing", R.legacyImport(ls, true), { op: "import", order: [], stars: [], wsorder: [] });
+R.legacyDone(ls, { applied: false, reason: "not_applied" });
+check("an import not applied clears the keys", ls.load("ws.dashboard.wsorder"), null);
+ls.save("ws.dashboard.wsorder", JSON.stringify(["/a"]));
+check("a non-empty layout clears the keys without an import", [R.legacyImport(ls, false), ls.load("ws.dashboard.wsorder")], [null, null]);
+
+// layoutRefusal: every layout reason has its string; anything else the
+// generic one.
+check("each reason's string", ["unknown", "ended", "self", "depth", "workspace", "group", "level", "stars", "child", "toplevel", "invalid", "retry", "store"].map(R.layoutRefusal),
+  ["unknown", "ended", "self", "depth", "workspace", "group", "level", "stars", "child", "toplevel", "invalid", "retry", "store"].map(function (c) { return "js.rail.layout." + c; }));
+check("an unknown reason's string", [R.layoutRefusal("shuffle"), R.layoutRefusal(undefined), R.layoutRefusal("toString")], ["js.rail.layout.invalid", "js.rail.layout.invalid", "js.rail.layout.invalid"]);
+// staleRail: a render below the generation a change answered is stale.
+var rhtml = '<div class="rlist" id="rlist" data-max="64" data-lgen="1731500000000005">';
+check("stale renders", [R.staleRail(rhtml, 1731500000000006), R.staleRail(rhtml, 1731500000000005), R.staleRail(rhtml, 0), R.staleRail("<div></div>", 9)], [true, false, false, false]);
+// The press and its swaps: a rail swap offered during a press is held (the
+// latest replaces an earlier one) and handed back only once the press ends;
+// one whose hash turned current is forgotten; with no press none is held.
+var pressing = false, gate = R.swapGate(function () { return pressing; });
+check("no press: a swap lands at once", [gate.offer({ hash: "h0" }), gate.release()], [false, null]);
+pressing = true;
+check("a swap during the press is held", [gate.offer({ hash: "h1" }), gate.offer({ hash: "h2" })], [true, true]);
+check("nothing is released while the press lasts", gate.release(), null);
+pressing = false;
+check("the press's end releases the latest held swap, once", [gate.release(), gate.release()], [{ hash: "h2" }, null]);
+pressing = true;
+gate.offer({ hash: "h3" });
+gate.forget();
+pressing = false;
+check("a held swap whose hash turned current is forgotten", gate.release(), null);
+// A node a swap replaced anyway is found again in the new render: a row by
+// its reply-id, a workspace section by its path; one the render lacks is
+// gone.
+var oldL = wsList(["/a", "/b"]), oldG = group(["r1", "r2"]);
+oldL.children[1].appendChild(oldG);
+var rkey = R.itemKey(oldG.children[1]), wkey = R.itemKey(oldL.children[0]);
+check("a row's key is its reply-id, a section's its path", [rkey, wkey], [{ cls: "rs", attr: "data-rid", val: "r2" }, { cls: "rws", attr: "data-ws", val: "/a" }]);
+var newL = wsList(["/a", "/b"]), newG = group(["r2", "r1"]);
+newL.children[1].appendChild(newG);
+check("the replaced row is found again", R.refind(newL, rkey) === newG.children[0], true);
+check("the replaced section is found again", R.refind(newL, wkey) === newL.children[0], true);
+check("a row the new render lacks is gone", R.refind(newL, R.itemKey(row("r9"))), null);
+// A refused drop says why: over another workspace, another worktree of its
+// own, or its own list's other side of the stars; over its own group, a
+// header, its ended fold, itself, or outside the list the drop takes the
+// nearest place instead. A workspace section is never refused.
+function worktree(rids, ended) {
+  var w = new El("rwt"), hd = new El("wthd"), g = group(rids, ended);
+  w.appendChild(hd); w.appendChild(g);
+  w.g = g; w.hd = hd;
+  return w;
+}
+function inside(el) { return el.appendChild(new El("s1")); }
+var RL = new El("rlist"), W1 = new El("rws", { "data-ws": "/r" }), W2 = new El("rws", { "data-ws": "/f" });
+var bar1 = W1.appendChild(new El("wsbar")), body1 = W1.appendChild(new El("wsbody"));
+var T1 = body1.appendChild(worktree(["p1", "p2", "p3"], ["px"])), T2 = body1.appendChild(worktree(["q1"]));
+W2.appendChild(new El("wsbar"));
+var F = W2.appendChild(new El("wsbody")).appendChild(group(["f1"]));
+RL.appendChild(W1); RL.appendChild(W2);
+star(T1.g.children[0], true);
+var p2 = T1.g.children[1];
+check("over its own group", [R.dropRefusal(p2, T1.g.children[2]), R.dropRefusal(p2, inside(T1.g.children[2])), R.dropRefusal(p2, T1.g)], ["", "", ""]);
+check("over its own header, bar, ended fold, or itself", [R.dropRefusal(p2, T1.hd), R.dropRefusal(p2, bar1), R.dropRefusal(p2, T1.g.inner.children[0]), R.dropRefusal(p2, inside(p2))], ["", "", "", ""]);
+check("over another worktree", [R.dropRefusal(p2, T2.g.children[0]), R.dropRefusal(p2, T2.hd)], ["group", "group"]);
+check("over another workspace", [R.dropRefusal(p2, F.children[0]), R.dropRefusal(p2, W2), R.dropRefusal(F.children[0], p2)], ["workspace", "workspace", "workspace"]);
+check("over the other side of the stars", [R.dropRefusal(p2, T1.g.children[0]), R.dropRefusal(T1.g.children[0], inside(T1.g.children[2]))], ["stars", "stars"]);
+check("outside the list", [R.dropRefusal(p2, RL), R.dropRefusal(p2, null)], ["", ""]);
+check("a workspace section is never refused", R.dropRefusal(W1, F.children[0]), "");
+
+// The tree. Workspace /r: worktree /r lists s (starred), m (a parent:
+// k1 of /r and k2 of /r/wt under it), o (an orphan: it shows top-level),
+// a, and the ended e; worktree /r/wt lists w1. Folder workspace /f lists
+// f1.
+function kid(rid, g) { var r = new El("rs", { "data-rid": rid, "data-g": g }); r.appendChild(new El("rl")); return r; }
+function kidsBox(parent) { return new El("rkids", { "data-parent": parent }); }
+var TL = new El("rlist"), TW = TL.appendChild(new El("rws", { "data-ws": "/r" })), TB = TW.appendChild(new El("wsbody"));
+var TT = TB.appendChild(new El("rwt", { "data-g": "/r" })), TG = TT.appendChild(new El("rsessions"));
+var TU = TB.appendChild(new El("rwt", { "data-g": "/r/wt" })), TH = TU.appendChild(new El("rsessions"));
+var ts = TG.appendChild(star(row("s"), true)), tm = TG.appendChild(row("m")), tkids = TG.appendChild(kidsBox("m"));
+var tk1 = tkids.appendChild(kid("k1", "/r")), tk2 = tkids.appendChild(kid("k2", "/r/wt"));
+var to = TG.appendChild(row("o")), ta = TG.appendChild(row("a")), tfold = TG.appendChild(new El("rended")), te = tfold.appendChild(new El("rsessions")).appendChild(row("e"));
+te.classList.add("ended"); tm.setAttribute("data-kids", "1");
+var tw1 = TH.appendChild(row("w1"));
+var TF = TL.appendChild(new El("rws", { "data-ws": "/f" })), tf1 = TF.appendChild(new El("wsbody")).appendChild(new El("rsessions")).appendChild(row("f1"));
+var F = R.rowFacts;
+check("a parent's facts", F(tm), { rid: "m", ws: "/r", group: "/r", live: true, parent: "", kids: true, star: false, first: "k1" });
+check("a child's facts: its own group", F(tk2), { rid: "k2", ws: "/r", group: "/r/wt", live: true, parent: "m", kids: false, star: false, first: "" });
+check("a starred row, an ended row, a folder workspace's row", [F(ts).star, F(te).live, F(tf1).group], [true, false, "/f"]);
+tm.classList.add("kcol");
+check("a collapsed parent shows no first child", F(tm).first, "");
+check("the line after a collapsed parent is after its unit", R.dropZone(F(ta), F(tm), 0.9), { zone: "after", ref: "m", op: { op: "move", rid: "a", after: "m" } });
+tm.classList.remove("kcol");
+// a valid parent: its middle half attaches, its quarters reorder; the line
+// after a parent whose children show is before its first child
+check("a valid parent's middle attaches", R.dropZone(F(ta), F(tm), 0.5), { zone: "child", ref: "m", op: { op: "attach", rid: "a", parent: "m" } });
+check("a valid parent's top quarter is before it", R.dropZone(F(ta), F(tm), 0.2), { zone: "before", ref: "m", op: { op: "move", rid: "a", before: "m" } });
+check("a valid parent's bottom quarter is before its first child", R.dropZone(F(ta), F(tm), 0.8), { zone: "before", ref: "k1", op: { op: "attach", rid: "a", parent: "m", before: "k1" } });
+check("an orphan is a valid parent", R.dropZone(F(ta), F(to), 0.5), { zone: "child", ref: "o", op: { op: "attach", rid: "a", parent: "o" } });
+check("an attach crosses the stars, a reorder does not", [R.dropZone(F(ta), F(ts), 0.5).zone, R.dropZone(F(ta), F(ts), 0.1)], ["child", { refusal: "stars" }]);
+check("an attach crosses the worktrees, a reorder does not", [R.dropZone(F(ta), F(tw1), 0.5).op, R.dropZone(F(ta), F(tw1), 0.9)], [{ op: "attach", rid: "a", parent: "w1" }, { refusal: "group" }]);
+// a parent with children dragged: no middle zone, never onto its own children
+check("a dragged parent finds no child zone", [R.dropZone(F(tm), F(ta), 0.4), R.dropZone(F(tm), F(ta), 0.6).zone], [{ zone: "before", ref: "a", op: { op: "move", rid: "m", before: "a" } }, "after"]);
+check("a dragged parent's children are no target, nor itself", [R.dropZone(F(tm), F(tk1), 0.5), R.dropZone(F(tm), F(tm), 0.5)], [null, null]);
+check("a dragged parent among another's children is too deep", R.dropZone(F(tm), { rid: "x", ws: "/r", group: "/r", live: true, parent: "o", kids: false, star: false, first: "" }, 0.5), { refusal: "depth" });
+// cross-workspace, ended targets
+check("another workspace's row refuses", [R.dropZone(F(ta), F(tf1), 0.5), R.dropZone(F(tf1), F(ta), 0.1)], [{ refusal: "workspace" }, { refusal: "workspace" }]);
+check("an ended row refuses", [R.dropZone(F(ta), F(te), 0.5), R.dropZone(F(tk1), F(te), 0.1)], [{ refusal: "ended" }, { refusal: "ended" }]);
+// a child row has no middle zone: its halves are lines among its siblings
+check("a child row's halves attach next to it", [R.dropZone(F(ta), F(tk1), 0.5), R.dropZone(F(ta), F(tk2), 0.3)],
+  [{ zone: "after", ref: "k1", op: { op: "attach", rid: "a", parent: "m", after: "k1" } }, { zone: "before", ref: "k2", op: { op: "attach", rid: "a", parent: "m", before: "k2" } }]);
+check("a child among its siblings moves", R.dropZone(F(tk2), F(tk1), 0.2), { zone: "before", ref: "k1", op: { op: "move", rid: "k2", before: "k1" } });
+check("a dragged parent over another group's row refuses", R.dropZone(F(tm), F(tw1), 0.5), { refusal: "group" });
+// the top-level line detaches a child only in its own group
+check("a detach line in another group refuses", [R.dropZone(F(tk2), F(ta), 0.1), R.dropZone(F(tk2), F(ts), 0.9)], [{ refusal: "group" }, { refusal: "group" }]);
+check("a detach line in its own group", [R.dropZone(F(tk2), F(tw1), 0.9), R.dropZone(F(tk1), F(ts), 0.1)],
+  [{ zone: "after", ref: "w1", op: { op: "detach", rid: "k2", after: "w1" } }, { zone: "before", ref: "s", op: { op: "detach", rid: "k1", before: "s" } }]);
+// dropNoop: a line beside the row, or an attach to its own parent while last
+check("noop drops", [R.dropNoop(to, R.dropZone(F(to), F(ta), 0.1)), R.dropNoop(ta, R.dropZone(F(ta), F(to), 0.9)), R.dropNoop(tk2, R.dropZone(F(tk2), F(tm), 0.5)), R.dropNoop(tk2, R.dropZone(F(tk2), F(tk1), 0.9))], [true, true, true, true]);
+check("drops that move", [R.dropNoop(ta, R.dropZone(F(ta), F(ts), 0.5)), R.dropNoop(tk1, R.dropZone(F(tk1), F(tm), 0.5)), R.dropNoop(tk1, R.dropZone(F(tk1), F(tk2), 0.9)), R.dropNoop(ta, null)], [false, false, false, true]);
+// homeRows: where a drop over no row puts a row's top-level peers;
+// dropRefusal reads a child's own group, not its parent's
+check("home lists", [R.homeRows(ta) === TG, R.homeRows(tk1) === TG, R.homeRows(tk2) === TH, R.homeRows(tf1) === tf1.parentNode], [true, true, true, true]);
+check("a child's own group", [R.dropRefusal(tk2, TH), R.dropRefusal(tk2, TG), R.dropRefusal(tk1, TG), R.dropRefusal(tk1, TH)], ["", "group", "", "group"]);
+// moveRow: the drop shown at once, and its undo
+var make = function () { return new El("rkids"); };
+var u1 = R.moveRow(ta, to, "child", make);
+check("an attach makes the children's box", [ids(TG), ids(TG.children[4]), TG.children[4].getAttribute("data-parent"), ta.getAttribute("data-g")], [["s", "m", "rkids", "o", "rkids", "rended"], ["a"], "o", "/r"]);
+u1();
+check("its undo", [ids(TG), ta.getAttribute("data-g")], [["s", "m", "rkids", "o", "a", "rended"], null]);
+var u2 = R.moveRow(tk2, tw1, "after", make);
+check("a detach to its own group", [ids(TH), ids(tkids), tk2.getAttribute("data-g")], [["w1", "k2"], ["k1"], "/r/wt"]);
+var u3 = R.moveRow(tk1, ta, "before", make);
+check("the last child's leave drops the box", [ids(TG), tkids.parentNode], [["s", "m", "o", "k1", "a", "rended"], null]);
+u3(); u2();
+check("undone in turn", [ids(TG), ids(tkids), ids(TH)], [["s", "m", "rkids", "o", "a", "rended"], ["k1", "k2"], ["w1"]]);
+var u4 = R.moveRow(tm, ta, "after", make);
+check("a parent moves with its children", ids(TG), ["s", "o", "a", "m", "rkids", "rended"]);
+u4();
+R.moveRow(ta, tm, "after", make);
+R.moveRow(tk2, tk1, "before", make);
+check("after a parent is after its children; a child among its siblings", [ids(TG), ids(tkids)], [["s", "m", "rkids", "a", "o", "rended"], ["k2", "k1"]]);
+check("collapsed parents persist", [R.kidsCollapsed(ss).toggle("m"), R.kidsCollapsed(ss).has("m"), ss.load("ws.dashboard.railkids")], [true, true, '["m"]']);
+
+// The keyboard path (keyMove) and the context menu's "move under"
+// (underRows). Workspace /k: worktree /k lists s (starred), m (a parent:
+// c1 of /k, c2 of /k/wt, and c3 of /k/v under it), b, and the ended e;
+// worktree /k/wt lists x (starred) and y; worktree /k/v lists no row.
+// Folder workspace /g lists g1.
+var KL = new El("rlist"), KW = KL.appendChild(new El("rws", { "data-ws": "/k" })), KB = KW.appendChild(new El("wsbody"));
+var KG = KB.appendChild(new El("rwt", { "data-g": "/k" })).appendChild(new El("rsessions"));
+var KH = KB.appendChild(new El("rwt", { "data-g": "/k/wt" })).appendChild(new El("rsessions"));
+KB.appendChild(new El("rwt", { "data-g": "/k/v" }));
+var ks = KG.appendChild(star(row("s"), true)), km = KG.appendChild(row("m")), kbox = KG.appendChild(kidsBox("m"));
+var kc1 = kbox.appendChild(kid("c1", "/k")), kc2 = kbox.appendChild(kid("c2", "/k/wt")), kc3 = kbox.appendChild(kid("c3", "/k/v"));
+var kb = KG.appendChild(row("b")), ke = KG.appendChild(new El("rended")).appendChild(new El("rsessions")).appendChild(row("e"));
+ke.classList.add("ended"); km.setAttribute("data-kids", "1");
+var kx = KH.appendChild(star(row("x"), true)), ky = KH.appendChild(row("y"));
+var KF = KL.appendChild(new El("rws", { "data-ws": "/g" })), kg1 = KF.appendChild(new El("wsbody")).appendChild(new El("rsessions")).appendChild(row("g1"));
+var K = R.keyMove;
+// up and down: past the next live row of its level, by dropZone's rules
+check("up before a parent, not into it", K(kb, "up"), { zone: "before", ref: "m", op: { op: "move", rid: "b", before: "m" } });
+check("down past a row, after its unit", K(km, "down"), { zone: "after", ref: "b", op: { op: "move", rid: "m", after: "b" } });
+check("up across the stars refuses", K(km, "up"), { refusal: "stars" });
+check("nothing past the ends (the ended fold is no row to pass)", [K(ks, "up"), K(kb, "down"), K(kg1, "up"), K(kc1, "up"), K(kc3, "down")], [null, null, null, null, null]);
+check("among the children", [K(kc2, "up"), K(kc1, "down")],
+  [{ zone: "before", ref: "c1", op: { op: "move", rid: "c2", before: "c1" } }, { zone: "after", ref: "c2", op: { op: "move", rid: "c1", after: "c2" } }]);
+check("an ended row moves no way", ["up", "down", "in", "out"].map(function (k) { return K(ke, k); }), [{ refusal: "ended" }, { refusal: "ended" }, { refusal: "ended" }, { refusal: "ended" }]);
+// in: the previous top-level row takes it as its last child
+check("in attaches to the previous row", K(kb, "in"), { zone: "child", ref: "m", op: { op: "attach", rid: "b", parent: "m" } });
+check("in crosses the stars", K(ky, "in"), { zone: "child", ref: "x", op: { op: "attach", rid: "y", parent: "x" } });
+check("in: a parent or a child goes no deeper", [K(km, "in"), K(kc2, "in")], [{ refusal: "depth" }, { refusal: "depth" }]);
+check("in: no previous row", [K(ks, "in"), K(kx, "in")], [null, null]);
+// out: next to its old parent in the parent's group, else the head of its
+// own group's unstarred rows, else after its last, else unshown
+check("out next to the parent", K(kc1, "out"), { zone: "after", ref: "m", op: { op: "detach", rid: "c1" } });
+check("out to its own group's head, past the stars", K(kc2, "out"), { zone: "before", ref: "y", op: { op: "detach", rid: "c2" } });
+star(ky, true);
+check("out after an all-starred group", K(kc2, "out"), { zone: "after", ref: "y", op: { op: "detach", rid: "c2" } });
+star(ky, false);
+check("out to a group with no row is not shown", K(kc3, "out"), { zone: "", ref: "", op: { op: "detach", rid: "c3" } });
+check("out: a top-level row has no parent", [K(kb, "out"), K(km, "out")], [{ refusal: "toplevel" }, { refusal: "toplevel" }]);
+check("an unknown key", K(kb, "home"), null);
+// underRows: every valid parent of the workspace in the rail's order, its
+// own parent aside; none for an ended row or a parent
+function under(r) { var u = R.underRows(r); return { rows: u.rows.map(function (x) { return x.getAttribute("data-rid"); }), refusal: u.refusal }; }
+check("a top-level row's parents", under(kb), { rows: ["s", "m", "x", "y"], refusal: "" });
+check("a child's parents, its own aside", under(kc2), { rows: ["s", "b", "x", "y"], refusal: "" });
+check("no parent for a parent or an ended row", [under(km), under(ke)], [{ rows: [], refusal: "depth" }, { rows: [], refusal: "ended" }]);
+check("another workspace's rows are never parents", under(kg1), { rows: [], refusal: "" });
 
 // markCurrent marks only the viewed row.
 var rows = box.children.slice(0, 3);
@@ -273,10 +425,13 @@ if (bad.length) console.log(bad.join("\n"));
 `
 
 // TestRailScript runs rail.js under node: per-session drafts with their
-// cap, the stripping of lost image markers, the leave guard, starred-row
-// pinning and its undo, the persisted stars and collapsed workspaces, the
-// drag order of the sessions and workspaces (its drops, storage, and
-// pruning), the viewed row's mark, the add popovers' placement, branch
+// cap, the stripping of lost image markers, the leave guard, the persisted
+// collapsed workspaces, a row's rendered star, the drag's drops, the
+// retired local layout's import and clearing, the layout refusals' strings
+// and the stale-render check, the press's swap hold, re-find, and drop
+// refusals, the tree's drop zones, no-op drops, shown drops and their undo,
+// and collapsed parents, the keyboard path's moves and the context menu's
+// "move under" parents, the viewed row's mark, the add popovers' placement, branch
 // filter, and add-worktree request, the worktree delete modal's Delete gate
 // and submit, the spawn request, the revive route
 // and entry mark, the hand-off notice, and an approval card's input
@@ -305,10 +460,12 @@ var WsRail = window.WsRail, rid = "sess1", live = true, railStore = memStore();
 var shell = false, framed = false;
 var grid = new El("grid", { "data-tab": "convo" });
 var ctext = { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: function (a, b) { this.selectionStart = a; this.selectionEnd = b; } };
-var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [];
+var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [], wpicks = [], wconsoles = [];
 var ccmd = {}, cmdSel = null;
 function setCommand(name, args) { cmdSel = { name: name, args: typeof args === "string" ? args : null }; }
 function validMentions(l) { return Array.isArray(l) ? l.filter(function (m) { return m && m.topic && m.text; }) : []; }
+function validPicks(l) { return Array.isArray(l) ? l.filter(function (p) { return p && p.url && p.selector; }) : []; }
+function validConsoles(l) { return Array.isArray(l) ? l.filter(function (c) { return c && c.url && c.lines && c.lines.length; }) : []; }
 function renderChips() {}
 var MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
 function markerNums(text) { var out = {}, re = new RegExp(MARKER, "g"), m; while ((m = re.exec(text))) out[+m[1]] = true; return out; }
@@ -361,6 +518,7 @@ imgs = [{ n: 1, name: "a.png", ref: "00aa-1.png" }, { n: 2, name: "pasted.png", 
 boardAnswers = { "3": { answer: "yes" }, "topic:2": { note: "keep it" } };
 chips = { "3": { id: "3", answer: "yes" } };
 bmentions = [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }];
+wpicks = [{ url: "http://localhost:5173/", selector: "#a", text: "A" }]; wconsoles = [{ url: "http://localhost:5173/", lines: ["e1"] }];
 openState = { "rended:/w": true, "gone": false };
 grid.setAttribute("data-tab", "board");
 listeners.input();
@@ -370,12 +528,14 @@ var saved = JSON.parse(railStore.load("ws.dashboard.draft.sess1"));
 check("the saved draft", [saved.text, saved.mentions, saved.sel, saved.refs, saved.lost, saved.open, saved.tab],
   [ctext.value, [{ start: 3, end: 7, text: "@bob" }], [6, 6], [{ ref: "00aa-1.png", name: "a.png", n: 1 }], [2], { "rended:/w": true }, "board"]);
 check("the saved board mentions", saved.bmentions, [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }]);
+check("the saved web picks", [saved.wpicks, saved.wconsoles], [[{ url: "http://localhost:5173/", selector: "#a", text: "A" }], [{ url: "http://localhost:5173/", lines: ["e1"] }]]);
 check("the guard asks while a pasted image is held", (function () { var e = { preventDefault: function () {} }; winListeners.beforeunload(e); return e.returnValue; })(), "");
 
 // a reload of the page: empty composer and state, then the restore
-ctext.value = ""; mentions = []; imgs = []; chips = {}; items = {}; openState = {}; boardAnswers = {}; bmentions = []; grid.setAttribute("data-tab", "convo");
+ctext.value = ""; mentions = []; imgs = []; chips = {}; items = {}; openState = {}; boardAnswers = {}; bmentions = []; wpicks = []; wconsoles = []; grid.setAttribute("data-tab", "convo");
 restoreDraft();
 check("the board mentions come back", bmentions, [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }]);
+check("the web picks come back", [wpicks, wconsoles], [[{ url: "http://localhost:5173/", selector: "#a", text: "A" }], [{ url: "http://localhost:5173/", lines: ["e1"] }]]);
 check("text without the pasted image's marker", ctext.value, "hi @bob see [Image #1] and end");
 check("mentions, selection, the reference image", [mentions, [ctext.selectionStart, ctext.selectionEnd], imgs.map(function (p) { return [p.n, p.ref, p.url]; })],
   [[{ start: 3, end: 7, text: "@bob" }], [6, 6], [[1, "00aa-1.png", "/s/sess1/attachment/00aa-1.png"]]]);
@@ -390,7 +550,7 @@ ctext.value = "typed"; restoreDraft();
 check("a non-empty composer keeps its text", ctext.value, "typed");
 
 // a slash command selection alone is a draft, kept with its arguments
-ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; grid.setAttribute("data-tab", "convo");
+ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; wpicks = []; wconsoles = []; grid.setAttribute("data-tab", "convo");
 cmdSel = { name: "compact", args: "keep the plan" };
 listeners.input(); advance(400);
 check("the saved command", JSON.parse(railStore.load("ws.dashboard.draft.sess1")).cmd, { name: "compact", args: "keep the plan" });
@@ -413,7 +573,7 @@ check("the restore counts every lost image", notes, ["js.draft.imgslost:2"]);
 ctext.value = ""; imgs = []; chips = {}; items = {}; boardAnswers = {};
 
 // a send clears the draft; what is left is saved again as the next draft
-ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; grid.setAttribute("data-tab", "convo");
+ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; wpicks = []; wconsoles = []; grid.setAttribute("data-tab", "convo");
 clearDraft();
 check("cleared at once", railStore.load("ws.dashboard.draft.sess1"), null);
 advance(400);

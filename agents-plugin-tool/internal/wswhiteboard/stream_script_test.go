@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestHistoryScriptPagingRevealAndSwapAnchorsUnderNode(t *testing.T) {
+func TestHistoryScriptHeightRevealAndSwapUnderNode(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not installed")
@@ -15,8 +15,13 @@ func TestHistoryScriptPagingRevealAndSwapAnchorsUnderNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Exercise stream policy with deterministic layout and a recording shared kit.
+	// The real kit's geometry, visibility transitions, and timers have their own tests.
+	asset = []byte(strings.Replace(string(asset), "var kit = viewKit(window);", "var kit = window.historyKit;", 1))
 	// Keep the history DOM and bubbling model local to this stream test.
 	script := `var BOARD = '', BODY_CLASS = '';` + formPrelude + `
+var originalOne=one;
+one=function(e,s){ return originalOne(e,s.replace(/#([\w-]+)/g,'[id="$1"]')); };
 Object.defineProperty(E.prototype, 'id', { get: function () { return this.attrs.id || ''; } });
 Object.defineProperty(E.prototype, 'tagName', { get: function () { return this.tag.toUpperCase(); } });
 Object.defineProperty(E.prototype, 'parentElement', { get: function () { return this.parent; } });
@@ -25,19 +30,44 @@ Object.defineProperty(E.prototype, 'nextElementSibling', { get: function () { re
 Object.defineProperty(E.prototype, 'open', { get: function () { return 'open' in this.attrs; }, set: function (v) { if (v) this.attrs.open = ''; else delete this.attrs.open; } });
 E.prototype.matches = function (s) { return one(this, s); };
 E.prototype.remove = function () { this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; };
-E.prototype.cloneNode = function () { var n = new E(this.tag, Object.assign({}, this.attrs)); this.children.forEach(function (c) { var child = c.cloneNode(true); child.parent = n; n.children.push(child); }); if (this.content) n.content = this.content.cloneNode(true); return n; };
+E.prototype.cloneNode = function () { var n = new E(this.tag, Object.assign({}, this.attrs)); layout(n); this.children.forEach(function (c) { var child = c.cloneNode(true); child.parent = n; n.children.push(child); }); if (this.content) n.content = this.content.cloneNode(true); return n; };
 E.prototype.insertBefore = function (node, before) { var list = node.tag === '#fragment' ? node.children.slice() : [node], self = this; list.forEach(function(c) { if(c.parent) c.remove(); }); var i = before ? this.children.indexOf(before) : this.children.length; this.children.splice.apply(this.children, [i, 0].concat(list)); list.forEach(function (c) { c.parent = self; }); };
-Object.defineProperty(E.prototype, 'scrollHeight', { get: function () { var live = this.querySelector('.history-live'); return this.cls().includes('wb-history') && live ? live.children.length * 20 : (this._height || 20); }, set: function (n) { this._height = n; } });
+Object.defineProperty(E.prototype, 'isConnected', { get: function () { for(var p=this;p;p=p.parent) if(p===root) return true; return false; } });
+E.prototype.contains = function (n) { for (;n;n=n.parent) if(n===this) return true; return false; };
+E.prototype.matches = function (s) { var self=this; return s.split(',').some(function(p) { return one(self,p.trim()); }); };
+function foldedHeight(node) { return node.tag === 'article' || (node.tag === 'details' && !node.open) ? 20 : node.children.reduce(function(n,c){return n+foldedHeight(c);},0); }
+Object.defineProperty(E.prototype, 'scrollHeight', { get: function () { return this.cls().includes('history-live') ? (this._foldLayout ? foldedHeight(this) : this._liveHeight === undefined ? this.querySelectorAll('.wb-entry').length * 20 : this._liveHeight) : (this._height || 20); }, set: function (n) { this._height = n; } });
 Object.defineProperty(E.prototype, 'scrollTop', { get: function () { return this._top || 0; }, set: function (n) { this._top = Math.max(0, Math.min(n, Math.max(0, this.scrollHeight - (this.clientHeight || 0)))); } });
 E.prototype.getBoundingClientRect = function () {
-  if (this.cls().includes('wb-history')) return { top: 0, bottom: 100, height: 100 };
   var h = this.closest('.wb-history');
-  if (!h) return { top: 0, bottom: 0, height: 0 };
-  var article = this.closest('.wb-entry'), live = h.querySelector('.history-live'), index = live.children.indexOf(article);
-  var top = index * 20 - h.scrollTop;
+  if (!h) return { top: 0, bottom: 100, height: 100 };
+  var live = h.querySelector('.history-live'), height = Math.min(live.scrollHeight, (h._wbHistorySteps || 1)*640);
+  if (this === h || this.cls().includes('history-clip')) return { top: 0, bottom: height, height: height };
+  if (this === live) return { top: height-live.scrollHeight, bottom: height, height: live.scrollHeight };
+  var article = this.closest('.wb-entry'), index = live.querySelectorAll('.wb-entry').indexOf(article);
+  var top = height-live.scrollHeight + index * 20;
   return { top: top, bottom: top + 20, height: index >= 0 ? 20 : 0 };
 };
-var loads = 0;
+var loads = 0, keeps = [], timers = [], motions = [], frames = [];
+window.requestAnimationFrame = function (fn) { frames.push(fn); };
+function frame() { var batch=frames.splice(0); batch.forEach(function(fn){fn();}); }
+E.prototype.getAnimations = function () { return motions; };
+document.getAnimations = function () { return motions; };
+window.setTimeout = function (fn) { timers.push(fn); };
+document.addEventListener = function (type, fn) { (document.on[type] || (document.on[type]=[])).push(fn); };
+document.on = {};
+window.historyKit = {
+  watch: function (node, opt) { return {node:node, opt:opt, ratio:undefined}; },
+  unwatch: function (w) { if(w) w.gone=true; },
+  keep: function (node, opt) { var k={node:node,opt:opt,applied:0,apply:function(){this.applied++;}}; keeps.push(k); return k; }
+};
+function visible(h, ratio) { var w=h._wbHistoryWatch, was=w.ratio; w.ratio=ratio; w.opt.onChange({visible:ratio>0}); if(was>0 && ratio===0) w.opt.onOut(); }
+function resize(h) { h._wbHistoryObserver.fn(); }
+function layout(h) { h.style.setProperty=function(k,v){this[k]=v;}; }
+function prepare() {
+  root.querySelectorAll('template').reverse().forEach(function(t) { t.content=new E('#fragment'); t.content.children=t.children; t.content.children.forEach(function(c){c.parent=t.content;}); t.children=[]; });
+  root.querySelectorAll('.wb-history').forEach(function(h) { var live=h.querySelector('.history-live'), clip=new E('div',{'class':'history-clip'}); h.insertBefore(clip,live); clip.insertBefore(live,null); layout(h); });
+}
 function CustomEvent(type, init) { init = init || {}; this.type = type; this.detail = init.detail; this.bubbles = !!init.bubbles; this.cancelBubble = false; }
 CustomEvent.prototype.stopPropagation = function () { this.cancelBubble = true; };
 E.prototype.dispatchEvent = function (event) {
@@ -53,10 +83,20 @@ E.prototype.dispatchEvent = function (event) {
   event.currentTarget = null;
   return true;
 };
-fire = function (element, type) { element.dispatchEvent(new CustomEvent(type, { bubbles: type === 'click' })); };
+fire = function (element, type) { element.dispatchEvent(new CustomEvent(type, { bubbles: type === 'click' || type === 'focusin' })); };
 var observers = [];
-function ResizeObserver(fn) { this.fn = fn; observers.push(this); }
-ResizeObserver.prototype.observe = function () {}; ResizeObserver.prototype.disconnect = function () {};
+function ResizeObserver(fn) { this.fn = fn; this.nodes=new Map(); this.observes=0; this.unobserves=0; observers.push(this); }
+ResizeObserver.prototype.observe = function (node) { this.observes++; if(!this.nodes.has(node)) this.nodes.set(node,null); };
+ResizeObserver.prototype.unobserve = function (node) { this.unobserves++; this.nodes.delete(node); };
+ResizeObserver.prototype.disconnect = function () { this.nodes.clear(); };
+// Unlike resize(), deliver only initial/re-observed or size-changed content.
+// Closed-run merges therefore cannot conjure a browser resize notification.
+ResizeObserver.prototype.deliver = function () {
+  var entries=[], self=this;
+  this.nodes.forEach(function(height,node){ if(node.isConnected && height!==node.scrollHeight) { self.nodes.set(node,node.scrollHeight); entries.push({target:node}); } });
+  if(entries.length) this.fn(entries);
+  return entries.length;
+};
 function board(n, panelAt) {
   panelAt = panelAt || 1;
   function row(i) {
@@ -64,55 +104,142 @@ function board(n, panelAt) {
     return '<article class="wb-entry '+(panel ? 'panel' : 'agent')+'" id="e'+i+'" data-entry="e'+i+'" data-history-anchor="e'+i+'"'+(panel ? ' data-panel="p1"' : '')+'>'+
       (panel ? '<details class="entry-panel" id="p1" data-key="entry:e'+i+'"><summary>panel</summary><iframe class="doc-frame" data-doc="t:panel:e'+i+'"></iframe></details>' : 'line '+i)+'</article>';
   }
-  var start = Math.max(1, n-49), out = '<details class="topic-stream" open><summary>history</summary><div class="wb-history" data-history="t"><button class="history-older">older</button><div class="history-live">';
+  var start = Math.max(1, n-49), out = '<section class="topic" data-topic="t"><details class="topic-stream" open><summary>history</summary><div class="wb-history" data-history="t"><button class="history-older">older</button><div class="history-live">';
   for (var i = start; i <= n; i++) out += row(i);
   out += '</div>';
   for (var end = start-1; end > 0;) { var from = Math.max(1, end-49); out += '<template data-history-page>'; for (var j = from; j <= end; j++) out += row(j); out += '</template>'; end = from-1; }
-  out += '</div></details>';
+  out += '</div></details></section>';
   root = parse(out);
-  root.querySelectorAll('template').forEach(function (t) { t.content = new E('#fragment'); t.content.children = t.children; t.content.children.forEach(function(c) { c.parent = t.content; }); t.children = []; });
-  var h = root.querySelector('.wb-history'); h.clientHeight = 100; return h;
+  prepare();
+  return root.querySelector('.wb-history');
 }
 var bound = 0; window.wbBindBoard = function () { bound++; };
 var h = board(123);
 ` + string(asset) + `
 check('initial window is 50', h.querySelectorAll('.wb-entry').length, 50);
-check('initial reader follows bottom', h.scrollTop, 900);
+check('initial one-step height', [h._wbHistorySteps,h.style['--wb-history-height']], [1,'640px']);
+resize(h);
+check('initial resize never loads', h.querySelectorAll('.wb-entry').length, 50);
 window.wbHistory.init(document);
 check('init wires container once', (h.on.click || []).length, 1);
-h.scrollTop = 220; fire(h, 'scroll');
-var anchor = window.wbHistory.capture(document)[0].position.anchor;
+check('templates keep control visible', [h.querySelector('.history-older').hidden,h.classList.contains('history-more')], [false,true]);
+var priorWatch=h._wbHistoryWatch;
 click(h.querySelector('.history-older'));
 check('one older page adds fifty', h.querySelectorAll('.wb-entry').length, 100);
-check('older prepend preserves entry offset', window.wbHistory.capture(document)[0].position.anchor, anchor);
-check('older prepend shifts internal scroll only', h.scrollTop, 1220);
-var snapshot = window.wbHistory.capture(document), oldTop = h.scrollTop;
+check('expansion increments height and rearms', [h._wbHistorySteps,priorWatch.gone,h._wbHistoryWatch!==priorWatch], [2,true,true]);
+check('expansion uses shared keep then apply', [keeps.slice(-1)[0].opt.observe[0]===h.querySelector('.history-live'),keeps.slice(-1)[0].applied], [true,1]);
+var snapshot = window.wbHistory.capture(document);
 var next = board(133);
 window.wbHistory.restore(document, snapshot);
-check('swap preserves reading anchor', window.wbHistory.capture(document)[0].position.anchor, anchor);
+check('swap preserves expansion steps', next._wbHistorySteps, 2);
 check('swap rematerializes loaded history boundary', next.querySelector('.wb-entry').id, 'e1');
 var before = next.querySelectorAll('.wb-entry').length;
 check('unknown target stays absent', window.wbHistory.loadTarget(document, 'p999'), null);
 check('forged selector refused', window.wbHistory.loadTarget(document, 'p1"] script'), null);
 check('bad targets load nothing', next.querySelectorAll('.wb-entry').length, before);
+var impostor=new E('div',{id:'p999'}); next.insertBefore(impostor,null);
+check('valid ID on non-panel is refused',window.wbHistory.loadTarget(document,'p999'),null);
+impostor.attrs={id:'e999','class':'wb-entry','data-entry':'e998'};
+check('entry identity mismatch is refused',window.wbHistory.loadTarget(document,'e999'),null);
+impostor.remove();
 next = board(123); window.wbHistory.init(document);
 var target = window.wbHistory.loadTarget(document, 'p1');
 check('panel target loaded from oldest template', [target.id, target.open, next.querySelectorAll('.wb-entry').length], ['p1', true, 123]);
 check('chronological first/last after reveal', [next.querySelector('.wb-entry').id, next.querySelectorAll('.wb-entry').slice(-1)[0].id], ['e1', 'e123']);
 root.querySelector('.topic-stream').open = false;
+var targetWatch=next._wbHistoryWatch;
 window.wbHistory.loadTarget(document, 'e1');
+check('repeated deep-link rearms visibility', [targetWatch.gone,next._wbHistoryWatch!==targetWatch], [true,true]);
 check('historical entry reveal opens containing fold', root.querySelector('.topic-stream').open, true);
 check('entry reveal opens its panel', next.querySelector('.entry-panel').open, true);
-next.scrollTop = next.scrollHeight; fire(next, 'scroll');
-var bottom = window.wbHistory.capture(document);
-next = board(133); window.wbHistory.restore(document, bottom);
-check('bottom reader follows new entries after swap', next.scrollTop, next.scrollHeight-next.clientHeight);
-// Simulated asynchronous frame growth: a bottom reader follows, while a
-// history reader retains the visible entry and offset.
-next.scrollTop = 400; fire(next, 'scroll');
-var reading = window.wbHistory.capture(document)[0].position.anchor;
-observers[observers.length-1].fn();
-check('asynchronous resize preserves reading anchor', window.wbHistory.capture(document)[0].position.anchor, reading);
+check('target reveals sufficient height', next._wbHistorySteps >= Math.ceil(123*20/640), true);
+check('target keep has navigation offset', [keeps.slice(-1)[0].opt.offset,keeps.slice(-1)[0].node.id], [12,'e1']);
+keeps.slice(-1)[0].opt.onEnd();
+check('deep-link keep end clears navigation target',next._wbHistoryTarget,null);
+var expanded = next._wbHistorySteps;
+next.querySelector('.history-live').insertBefore(new E('article',{'class':'wb-entry agent',id:'e124','data-entry':'e124'}),null);
+resize(next);
+check('live append leaves expansion stable', next._wbHistorySteps, expanded);
+// Keyboard focus uses the same navigation lifetime as a deep link, without
+// synthesizing a click or letting an overflow-hidden box scroll itself.
+next=board(50,1); window.wbHistory.init(document);
+var focused=next.querySelector('.entry-panel').querySelector('summary'), focusWatch=next._wbHistoryWatch, keepCount=keeps.length;
+check('keyboard fixture starts clipped',focused.getBoundingClientRect().top<0,true);
+fire(focused,'focusin');
+var focusKeep=keeps.slice(-1)[0];
+check('clipped focus reveals and anchors exact control', [next._wbHistorySteps,keeps.length-keepCount,focusKeep.node===focused,focusKeep.opt.offset,focusKeep.opt.observe[0]===next.querySelector('.history-live')], [2,1,true,12,true]);
+check('focus navigation rearms visibility', [focusWatch.gone,next._wbHistoryWatch!==focusWatch,next._wbHistoryTarget===focused], [true,true,true]);
+check('focused control is now within clip',focused.getBoundingClientRect().top>=0,true);
+keepCount=keeps.length; fire(focused,'focusin'); fire(next.querySelector('.history-older'),'focusin');
+check('visible and outside-live controls do not navigate',keeps.length,keepCount);
+next.querySelector('.history-live')._liveHeight=2000; resize(next);
+check('focus target is re-revealed during keep lifetime',next._wbHistorySteps,4);
+focusKeep.opt.onEnd();
+check('focus keep end clears navigation target',next._wbHistoryTarget,null);
+next.querySelector('.history-live')._liveHeight=4000; keepCount=keeps.length; resize(next);
+check('post-session resize neither reveals nor resurrects keep',[next._wbHistorySteps,next._wbHistoryTarget,keeps.length],[4,null,keepCount]);
+// Navigation offsets clear the actual sticky topic/rail stack, not just
+// the scroller edge. Hosts without a sticky head retain the 12px offset.
+next=board(50,1); window.wbHistory.init(document);
+var stickyHead=new E('div',{'class':'tophead'}); stickyHead.offsetHeight=50;
+next.closest('.topic').insertBefore(stickyHead,next.closest('.topic').firstChild);
+window.getComputedStyle=function(){return {position:'sticky',top:'44px'};};
+fire(next.querySelector('.entry-panel').querySelector('summary'),'focusin');
+check('keyboard navigation clears sticky stack',keeps.slice(-1)[0].opt.offset,106);
+window.wbHistory.loadTarget(document,'p1');
+check('deep-link navigation clears same sticky stack',keeps.slice(-1)[0].opt.offset,106);
+// Control states distinguish clipped materialized content from inert pages.
+next = board(50); window.wbHistory.init(document);
+check('clipped live rows show control without templates', next.querySelector('.history-older').hidden, false);
+click(next.querySelector('.history-older'));
+check('fully revealed rows hide control', [next.querySelector('.history-older').hidden,next.classList.contains('history-more')], [true,false]);
+next = board(123); next.querySelector('.history-live')._liveHeight=3000; window.wbHistory.init(document);
+click(next.querySelector('.history-older')); resize(next);
+check('tall live content expands without materialization', [next._wbHistorySteps,next.querySelectorAll('.wb-entry').length], [2,50]);
+next = board(10); next.scrollHeight=9999; window.wbHistory.init(document);
+check('short initial live rows hide control', next.querySelector('.history-older').hidden, true);
+next = board(223); next.querySelector('.history-live')._liveHeight=0; window.wbHistory.init(document);
+resize(next);
+check('zero initial height still does not load', next.querySelectorAll('.wb-entry').length, 50);
+click(next.querySelector('.history-older'));
+check('short click materializes at most one page', next.querySelectorAll('.wb-entry').length, 100);
+resize(next);
+check('short resize materializes at most one further page', next.querySelectorAll('.wb-entry').length, 150);
+var fold=next.closest('.topic-stream'); fold.open=false;
+var shortSnapshot=window.wbHistory.capture(document);
+var shortRoot=root, restored=board(223); window.wbHistory.restore(document,shortSnapshot);
+check('capture restores expansion and containing disclosure', [restored._wbHistorySteps,restored.closest('.topic-stream').open], [2,false]);
+root=shortRoot;
+// Visibility is delivered by the independently tested kit: initial zero is
+// not onOut, and every expansion establishes a fresh subscription.
+visible(next,0);
+check('initial zero does not collapse', next._wbHistorySteps,2);
+visible(next,1); visible(next,0);
+check('positive to zero collapses height only', [next._wbHistorySteps,next.querySelectorAll('.wb-entry').length,fold.open], [1,150,false]);
+resize(next);
+check('collapse stops resize loading', next.querySelectorAll('.wb-entry').length,150);
+next=board(123); window.wbHistory.init(document); click(next.querySelector('.history-older'));
+var input=new E('textarea'); next.closest('.topic').insertBefore(input,null); document.activeElement=input;
+visible(next,1); visible(next,0);
+check('editing in topic defers collapse',next._wbHistorySteps,2);
+document.activeElement=null; document.on.focusout[0](); timers.splice(0).forEach(function(fn){fn();});
+check('focusout retries deferred collapse',next._wbHistorySteps,1);
+click(next.querySelector('.history-older')); document.activeElement=next.querySelector('.wb-entry');
+visible(next,1); visible(next,0);
+check('focus inside history defers collapse',next._wbHistorySteps,2);
+document.activeElement=null; visible(next,1); next.closest('.topic').setAttribute('data-max',''); visible(next,0);
+check('maximized topic defers collapse',next._wbHistorySteps,2);
+next.closest('.topic').removeAttribute('data-max');
+var finishMotion; motions=[{playState:'running',effect:{target:next.closest('.topic')},finished:new Promise(function(resolve){finishMotion=resolve;})}];
+visible(next,1); visible(next,0);
+check('running board motion defers collapse', [next._wbHistorySteps,next._wbHistoryWaiting], [2,true]);
+var motionHistory=next, motionRoot=root; motions=[];
+// Resolve after the synchronous regression fixtures below complete.
+Promise.resolve().then(function(){ root=motionRoot; finishMotion(); });
+Promise.resolve().then(function(){return Promise.resolve();}).then(function(){
+  check('motion completion retries collapse',motionHistory._wbHistorySteps,1);
+  if(bad.length) throw new Error(bad.join('\n'));
+});
 var beforeBound = bound;
 window.wbBindBoard(root);
 check('board binding wrapper preserves existing host hook', bound, beforeBound + 1);
@@ -136,7 +263,7 @@ check('manual historical disclosure survives later swaps', historicalPanel.open,
 // existing disclosure and chronological child entries when the chips merge.
 function systems(from, end, open) { var out = '<details class="system-run" data-key="system:e'+from+'" data-history-anchor="e'+from+'"'+(open ? ' open' : '')+'><summary>system events '+(end-from+1)+'</summary>'; for(var i=from;i<=end;i++) out += '<article class="wb-entry system" id="e'+i+'" data-entry="e'+i+'" data-history-anchor="e'+i+'">event</article>'; return out+'</details>'; }
 root = parse('<div class="wb-history" data-history="t"><button class="history-older">older</button><div class="history-live">'+systems(51,80,true)+'<article class="wb-entry agent" id="e81" data-entry="e81">boundary</article></div><template data-history-page>'+systems(1,50,false)+'</template></div>');
-var template = root.querySelector('template'); template.content = new E('#fragment'); template.content.children = template.children; template.content.children.forEach(function(c) { c.parent = template.content; }); template.children=[];
+prepare();
 h = root.querySelector('.wb-history'); h.clientHeight=100;
 window.wbHistory.init(document);
 var disclosure = h.querySelector('.system-run');
@@ -152,7 +279,7 @@ check('merge does not swallow following agent', h.querySelector('.history-live')
 function agents(from, end) { var out = ''; for (var i=from;i<=end;i++) out += '<article class="wb-entry agent" id="e'+i+'" data-entry="e'+i+'" data-history-anchor="e'+i+'">line</article>'; return out; }
 function run(from, inner, open) { return '<details class="run-fold" data-key="run:e'+from+'" data-history-anchor="e'+from+'"'+(open ? ' open' : '')+'><summary><span class="rl"></span><span class="lbl">log</span></summary>'+inner+'</details>'; }
 root = parse('<div class="wb-history" data-history="t"><button class="history-older">older</button><div class="history-live">'+run(60, systems(60,61,false)+agents(62,96), true)+agents(97,99)+'</div><template data-history-page><article class="wb-entry panel" id="e30" data-entry="e30" data-panel="p1"><details class="entry-panel" id="p1"><summary>p1</summary></details></article>'+run(31, agents(31,57)+systems(58,59,false), false)+'</template></div>');
-template = root.querySelector('template'); template.content = new E('#fragment'); template.content.children = template.children; template.content.children.forEach(function(c) { c.parent = template.content; }); template.children=[];
+prepare();
 h = root.querySelector('.wb-history'); h.clientHeight=100;
 window.wbHistory.init(document);
 var runFold = h.querySelector('.run-fold'), newerChip = runFold.querySelector('.system-run');
@@ -161,12 +288,56 @@ check('boundary run folds join into the newer fold', [h.querySelectorAll('.run-f
 check('joined fold keeps the stream order', h.querySelector('.history-live').children.map(function(c) { return c.id || c.getAttribute('data-key'); }), ['e30', 'run:e31', 'e97', 'e98', 'e99']);
 check('joined fold relabels', [runFold.getAttribute('data-history-anchor'), runFold.querySelector('.lbl').textContent], ['e31', 'log 66']);
 check('boundary system chips merge inside the fold', [runFold.querySelectorAll('.system-run').length, runFold.querySelector('.system-run') === newerChip, newerChip.querySelectorAll('.wb-entry').length], [1, true, 4]);
+// A renderer-shaped closed run stays one summary high across page merges.
+// Drive observer delivery, not its callback, so a size-neutral prepend can
+// continue only by re-observing on a later animation frame.
+function neutralBoard() {
+  frame(); // discard callbacks belonging to earlier, now disconnected fixtures
+  var html='<section class="topic"><div class="wb-history" data-history="neutral"><button class="history-older">older</button><div class="history-live">'+run(154,agents(154,200),false)+agents(201,203)+'</div>';
+  for(var end=153;end>0;) { var from=Math.max(1,end-49); html+='<template data-history-page>'+run(from,agents(from,end),false)+'</template>'; end=from-1; }
+  root=parse(html+'</div></section>'); prepare();
+  var h=root.querySelector('.wb-history'); h.querySelector('.history-live')._foldLayout=true;
+  window.wbHistory.init(document); h._wbHistoryObserver.deliver(); return h;
+}
+h=neutralBoard();
+var neutralLive=h.querySelector('.history-live'), ro=h._wbHistoryObserver, closedRun=h.querySelector('.run-fold');
+check('neutral fixture starts settled and short',[neutralLive.scrollHeight,h.querySelectorAll('.wb-entry').length,ro.deliver()],[80,50,0]);
+click(h.querySelector('.history-older'));
+check('closed-run click loads just one page synchronously',[h.querySelectorAll('.wb-entry').length,neutralLive.scrollHeight,ro.observes,ro.unobserves],[100,80,1,0]);
+check('unchanged size alone delivers nothing',ro.deliver(),0);
+frame();
+check('next frame re-observes same live node without loading',[ro.observes,ro.unobserves,ro.nodes.has(neutralLive),h.querySelectorAll('.wb-entry').length],[2,1,true,100]);
+check('re-observe yields one later report',ro.deliver(),1);
+check('later report loads only next page',h.querySelectorAll('.wb-entry').length,150);
+check('no synchronous delivery loop',ro.deliver(),0);
+frame(); ro.deliver();
+check('each later frame/report advances once',h.querySelectorAll('.wb-entry').length,200);
+frame(); ro.deliver();
+check('neutral chain reaches oldest page and preserves closed fold',[h.querySelectorAll('.wb-entry').length,h.querySelectorAll('template[data-history-page]').length,h.querySelector('.run-fold')===closedRun,closedRun.open],[203,0,true,false]);
+check('observer exhaustion defers control layout even through reentrant binding',[h.querySelector('.history-older').hidden,h._wbHistoryControlFrame,h._wbHistoryResizing],[false,true,false]);
+var observeCount=ro.observes; frame();
+check('next frame hides exhausted control',[h.querySelector('.history-older').hidden,h.classList.contains('history-more'),h._wbHistoryControlFrame],[true,false,false]);
+check('exhaustion cancels final re-observation',[ro.observes,ro.deliver()],[observeCount,0]);
+['collapsed','filled','disconnected'].forEach(function(reason){
+  var h=neutralBoard(), ro=h._wbHistoryObserver, live=h.querySelector('.history-live');
+  click(h.querySelector('.history-older'));
+  if(reason==='collapsed') { visible(h,1); visible(h,0); }
+  if(reason==='filled') { live._foldLayout=false; live._liveHeight=1280; }
+  if(reason==='disconnected') h.remove();
+  frame();
+  check(reason+' cancels queued re-observation',[ro.observes,ro.unobserves,h.querySelectorAll('.wb-entry').length,h._wbHistoryReobserve],[1,0,100,false]);
+});
+// A size-changing prepend relies on the ordinary resize path, not rAF.
+frame(); h=board(223); window.wbHistory.init(document); ro=h._wbHistoryObserver; ro.deliver();
+click(h.querySelector('.history-older'));
+check('size-changing load schedules no re-observe', [frames.length,ro.observes,ro.unobserves],[0,1,0]);
+check('size-changing prepend has ordinary observer delivery',ro.deliver(),1);
 // A closed topic beyond the initial cap is itself inert, with an older
 // panel page inside. A direct target loads only that topic, then its page.
 root = parse('<template data-history-topic="old"><section class="topic" data-topic="old"><details class="topic-stream"><summary>history</summary><div class="wb-history" data-history="old"><button class="history-older">older</button><div class="history-live"><article class="wb-entry agent" id="e2" data-entry="e2">new</article></div><template data-history-page><article class="wb-entry panel" id="e1" data-entry="e1" data-panel="p1"><details class="entry-panel" id="p1"><summary>old</summary></details></article></template></div></details></section></template>');
 // Detach inner templates before their outer owner, as native template
 // contents are separate document fragments at both nesting levels.
-root.querySelectorAll('template').reverse().forEach(function(t) { t.content=new E('#fragment'); t.content.children=t.children; t.content.children.forEach(function(c) { c.parent=t.content; }); t.children=[]; });
+prepare();
 check('deferred topic is not initially live', document.querySelectorAll('.topic').length, 0);
 target = window.wbHistory.loadTarget(document, 'p1');
 check('navigation loads deferred topic and panel page', [document.querySelectorAll('.topic').length, target && target.id, target && target.open], [1,'p1',true]);
@@ -206,10 +377,9 @@ var retainedRoot = root, topic = h.closest('.topic'), live = h.querySelector('.h
 var frame = h.querySelector('iframe.doc-frame'), oldButton = h.querySelector('.history-older'), oldLine = h.querySelector('[id="e150"]');
 check('first live frame is a late panel', frame.closest('.wb-entry').id, 'e140');
 h.querySelector('.entry-panel').open = true;
-h.scrollTop = 587; fire(h, 'scroll');
-var snapshot = window.wbHistory.capture(document), anchor = snapshot[0].position.anchor;
-check('reader is anchored inside retained panel', anchor, { id: 'e140', run: false, offset: -7 });
-check('reader is not following bottom', snapshot[0].position.bottom, false);
+click(h.querySelector('.history-older'));
+var snapshot = window.wbHistory.capture(document);
+check('reader expansion captured', snapshot[0].steps, 2);
 // An agent-log append shifts the fifty-entry tail by one. Unlike a whole
 // board replacement, the graft leaves _wbHistoryBound on the live container.
 var fresh = framedBoard(161), replacementButton = fresh.querySelector('.history-older');
@@ -220,12 +390,12 @@ check('graft replaces older button and ordinary live entries', [h.querySelector(
 check('graft retains old frame beside pending incoming frame', [h.querySelector('iframe.doc-frame') === frame, h.querySelectorAll('iframe.doc-frame').length], [true, 2]);
 window.wbHistory.init(topic);
 window.wbHistory.restore(topic, snapshot);
-window.wbHistory.restore(document, snapshot);
 check('graft restoration keeps one delegated listener', (h.on.click || []).length, 1);
-check('graft restoration preserves viewport anchor', window.wbHistory.capture(document)[0].position.anchor, anchor);
-check('restoration materializes just the saved boundary page', [h.querySelectorAll('.wb-entry').length, h.querySelector('.wb-entry').id], [100, 'e62']);
+check('graft restoration preserves expansion', window.wbHistory.capture(document)[0].steps, 2);
+check('restoration rematerializes saved boundary', [h.querySelectorAll('.wb-entry').length, h.querySelector('.wb-entry').id], [150, 'e12']);
 check('restoration keeps panel disclosure open', h.querySelector('.entry-panel').open, true);
-var count = h.querySelectorAll('.wb-entry').length, top = h.scrollTop, beforeLoads = loads;
+var count = h.querySelectorAll('.wb-entry').length, beforeLoads = loads;
+h.querySelector('.history-live')._liveHeight=0;
 click(h.querySelector('[id="e150"]'));
 check('unrelated live clicks do not load history', h.querySelectorAll('.wb-entry').length, count);
 var label = new E('span'); replacementButton.insertBefore(label, null);
@@ -237,10 +407,9 @@ fire(h, 'scroll');
 check('scroll events do not bubble in history harness', scrolls, 0);
 click(label);
 check('replacement button descendant click bubbles with original target', clickSeen, [true, true, true]);
-check('older click after graft loads exactly fifty', h.querySelectorAll('.wb-entry').length, count + 50);
-check('older click after graft preserves chronological bounds', [h.querySelector('.wb-entry').id, h.querySelectorAll('.wb-entry').slice(-1)[0].id], ['e12', 'e161']);
-check('older click after graft preserves viewport anchor', window.wbHistory.capture(document)[0].position.anchor, anchor);
-check('older click after graft shifts only internal scroll', h.scrollTop, top + 1000);
+check('older click after graft loads remaining page', h.querySelectorAll('.wb-entry').length, count + 11);
+check('older click after graft preserves chronological bounds', [h.querySelector('.wb-entry').id, h.querySelectorAll('.wb-entry').slice(-1)[0].id], ['e1', 'e161']);
+check('older click after graft expands height', h._wbHistorySteps, 3);
 check('older click after graft emits one bubbling load', [loads - beforeLoads, loadSeen], [1, [true, true, true]]);
 if (bad.length) throw new Error(bad.join('\n'));
 `
@@ -265,8 +434,8 @@ func TestHistoryScriptWiredOnlyIntoFullPagesAndSharedAssets(t *testing.T) {
 			t.Errorf("layout %d history wiring = %v", layout, got)
 		}
 	}
-	if !strings.Contains(string(a.css), "max-height: min(65vh, 720px)") {
-		t.Fatal("history must have a bounded-height scroll area")
+	if !strings.Contains(string(a.css), "--wb-history-height") || !strings.Contains(string(a.css), ".history-clip") || !strings.Contains(string(a.css), "flex-end") {
+		t.Fatal("history must use a bottom-aligned height clip")
 	}
 	if strings.Contains(string(a.css), "grid-template-columns: minmax(0, 1fr) 320px") {
 		t.Fatal("full page still reserves a side rail")

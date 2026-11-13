@@ -263,19 +263,19 @@ func markup(page string) string {
 
 var scriptElement = regexp.MustCompile(`(?s)<script>.*?</script>`)
 
-// frameDocs returns the srcdoc document of every topic-body frame in board,
+// frameDocs returns the document (data-srcdoc) of every topic-body frame in board,
 // keyed by topic name, unescaped as a browser reads the attribute.
 func frameDocs(t *testing.T, board string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, m := range regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="[^"]*" data-topic="[^"]*"(?: data-entry="[^"]*")?(?: data-relay="[^"]*")? sandbox="[^"]*" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(board, -1) {
+	for _, m := range regexp.MustCompile(`<div class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="[^"]*" data-topic="[^"]*"(?: data-entry="[^"]*")?(?: data-relay="[^"]*")? data-sandbox="[^"]*" data-srcdoc="([^"]*)"></div>`).FindAllStringSubmatch(board, -1) {
 		name := strings.TrimPrefix(html.UnescapeString(m[2]), "topic:")
 		if !strings.HasPrefix(name, "entry:") && html.UnescapeString(m[1]) != name {
 			t.Errorf("frame title %q differs from its data-doc %q", m[1], m[2])
 		}
 		out[name] = html.UnescapeString(m[3])
 	}
-	if got := strings.Count(board, "<iframe"); got != len(out) {
+	if got := strings.Count(board, `<div class="doc-frame"`); got != len(out) {
 		t.Fatalf("board holds %d frames, %d parsed:\n%.600s", got, len(out), board)
 	}
 	return out
@@ -296,10 +296,14 @@ func TestServedTopicBodyRendersInASandboxedFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	board := string(regions.Board)
-	if !strings.Contains(board, `<div class="doc-body framed"><iframe class="doc-frame" title="doc" data-doc="topic:doc" data-doc-key="topic:doc" data-topic="doc" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="`) {
-		t.Fatalf("body frame missing or its sandbox changed:\n%.600s", board)
+	if !strings.Contains(board, `<div class="doc-body framed"><div class="doc-frame" title="doc" data-doc="topic:doc" data-doc-key="topic:doc" data-topic="doc" data-sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" data-srcdoc="`) {
+		t.Fatalf("body frame placeholder missing or its sandbox changed:\n%.600s", board)
 	}
-	wantNone(t, board, "allow-same-origin", "<script", "<canvas")
+	// The frame is served as an inert placeholder: no <iframe> (which would
+	// commit about:blank as the page parses), its document as data-srcdoc and
+	// its sandbox as data-sandbox, which the page turns into the frame once
+	// its folds are open (dashboard.js mountFrame).
+	wantNone(t, board, "allow-same-origin", "<script", "<canvas", " srcdoc=", "<iframe", " sandbox=")
 	assets, _ := loadAssets()
 	doc1 := frameDocs(t, board)["doc"]
 	wantAll(t, doc1, `<base target="_blank">`, "--wb-bg:", "<strong>plan</strong>", `<canvas id="c"`, "fetch('/s/r/message'", assets.docFrame, `<body class="doc-frame"><div class="doc-body md">`,
@@ -344,6 +348,36 @@ func TestServedBoardFramesEveryBodySeparately(t *testing.T) {
 	wantAll(t, string(regions.Board), `data-doc="topic:say &#34;hi&#34; &amp; &lt;go&gt;"`)
 	// A closed topic's body sits in a closed fold, framed all the same.
 	wantAll(t, string(regions.Board), `<details class="tdoc" data-key="doc:closed"><summary`)
+}
+
+// TestServedBoardFramesArePlaceholders pins the lazy mount's served form
+// (framedDoc): every board frame, topic body or panel entry, open or closed,
+// is an inert div placeholder carrying the exact sandbox token set
+// (frameSandbox) as data-sandbox; the board holds no <iframe>, which would
+// commit an about:blank document while the page parses.
+func TestServedBoardFramesArePlaceholders(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, topicXML("one", "first body")+`<wb:topic name="one"><wb:panel recap="a panel">panel body</wb:panel></wb:topic>`+
+		topicXML("closed", "closed body")+`<wb:topic name="closed"><wb:close result="done"/></wb:topic>`)
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	board := string(regions.Board)
+	if strings.Contains(board, "<iframe") {
+		t.Fatalf("the served board holds an <iframe>:\n%.600s", board)
+	}
+	holders := regexp.MustCompile(`<div class="doc-frame" [^>]*data-doc-key="(topic|entry):[^"]*"[^>]* data-sandbox="([^"]*)" data-srcdoc="`).FindAllStringSubmatch(board, -1)
+	kinds := map[string]int{}
+	for _, m := range holders {
+		kinds[m[1]]++
+		if m[2] != frameSandbox {
+			t.Errorf("placeholder sandbox = %q, want %q", m[2], frameSandbox)
+		}
+	}
+	if kinds["topic"] != 2 || kinds["entry"] < 1 || len(holders) != strings.Count(board, `<div class="doc-frame"`) {
+		t.Errorf("placeholders = %v of %d, want both topic bodies and the panel entry", kinds, strings.Count(board, `<div class="doc-frame"`))
+	}
 }
 
 // TestFramedBodyImagesTakeDocImageSrc pins where DocImageSrc applies: a file
@@ -503,7 +537,7 @@ func TestOutsideImageServesItemsAndRelaysFramedBodyImages(t *testing.T) {
 		`<span class="img-text">bad <a tabindex="0" data-wl="file" data-abs="/x/bad.png" title="/x/bad.png"><code class="fpath">/x/bad.png</code></a></span>`,
 	)
 	wantNone(t, doc, "data-out", `src="/s/r/image`, "data:image", "javascript:")
-	wantAll(t, board, `<iframe class="doc-frame" title="doc" data-doc="topic:doc" data-doc-key="topic:doc" data-topic="doc" data-relay="/s/r/image?path=/x/out.png" sandbox=`)
+	wantAll(t, board, `<div class="doc-frame" title="doc" data-doc="topic:doc" data-doc-key="topic:doc" data-topic="doc" data-relay="/s/r/image?path=/x/out.png" data-sandbox=`)
 
 	// The same image twice is listed once; a body with no relayed image
 	// lists none.
@@ -512,7 +546,7 @@ func TestOutsideImageServesItemsAndRelaysFramedBodyImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantAll(t, string(regions.Board), `data-doc="topic:doc" data-doc-key="topic:doc" data-topic="doc" data-relay="/s/r/image?path=/x/out.png" sandbox=`, `data-doc="topic:plain" data-doc-key="topic:plain" data-topic="plain" sandbox=`)
+	wantAll(t, string(regions.Board), `data-doc="topic:doc" data-doc-key="topic:doc" data-topic="doc" data-relay="/s/r/image?path=/x/out.png" data-sandbox=`, `data-doc="topic:plain" data-doc-key="topic:plain" data-topic="plain" data-sandbox=`)
 
 	// An unframed body (the page written to disk's renderer) takes neither
 	// the image nor a relay.

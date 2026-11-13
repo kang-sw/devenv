@@ -308,18 +308,23 @@ st.save("ws.dashboard.railorder", JSON.stringify(["a2", "a1", "a3", "a8", "a9"])
 st.save("ws.dashboard.wsorder", JSON.stringify(["/b", "/a"]));
 st.save("ws.dashboard.railcol", JSON.stringify(["/b"]));
 st.save("ws.dashboard.railended", JSON.stringify(["rended:/a"]));
+st.save("ws.dashboard.railkids", JSON.stringify(["a2"]));
+var abox = a.children[1], ended = abox.children[abox.children.length - 1];
+var a2 = abox.children[1], kt = tagged("button", "kidtog", {});
+a2.appendChild(kt);
 var s = R.state(st);
 R.marks(r, s, "a1");
-var abox = a.children[1], ended = abox.children[abox.children.length - 1];
-check("the starred row first, then the drag order; the viewed row marked", rids(abox), ["a3", "a2", "a1*"]);
+check("the rows and workspaces keep the server's order (the retired local stars and orders move nothing); the viewed row marked", rids(abox), ["a1*", "a2", "a3"]);
 check("an ended fold keeps the server's order and stays last", [rids(ended.children[0]), ended.tag], [["a9", "a8"], "details"]);
-check("the workspaces in their order", list.children.map(function (w) { return w.getAttribute("data-ws"); }), ["/b", "/a"]);
+check("the workspaces in the server's order", list.children.map(function (w) { return w.getAttribute("data-ws"); }), ["/a", "/b"]);
+check("the collapsed parent", [a2.classList.contains("kcol"), kt.getAttribute("aria-expanded")], [true, "false"]);
 check("the collapsed workspace", [b.classList.contains("col"), b.children[0].getAttribute("aria-expanded"), a.classList.contains("col"), a.children[0].getAttribute("aria-expanded")], [true, "false", false, "true"]);
 check("the ended fold left open", ended.open, true);
 s.ended.put("rended:/a", false);
 s.collapsed.toggle("/b");
+s.kids.toggle("a2");
 R.marks(r, R.state(st), "b1");
-check("a closed fold and an expanded workspace", [ended.open, b.classList.contains("col"), rids(b.children[1]), rids(abox)], [false, false, ["b1*"], ["a3", "a2", "a1"]]);
+check("a closed fold, an expanded workspace and parent", [ended.open, b.classList.contains("col"), rids(b.children[1]), rids(abox), a2.classList.contains("kcol"), kt.getAttribute("aria-expanded")], [false, false, ["b1*"], ["a1", "a2", "a3"], false, "true"]);
 check("the folds are kept by key", [st.load("ws.dashboard.railended"), R.endedOpen(st).has("rended:/a")], [null, false]);
 s.ended.put("rended:/a", true);
 s.ended.put("rended:/a", true);
@@ -328,9 +333,10 @@ if (bad.length) console.log(bad.join("\n"));
 `
 
 // TestRailMarks runs rail.js's marks, which the page script runs after
-// every rail swap and the shell before its rail first shows: stars, drag
-// orders, the viewed row, collapsed workspaces, and the ended folds left
-// open (kept by their key).
+// every rail swap and the shell before its rail first shows: the viewed
+// row, collapsed workspaces and parents, and the ended folds left open
+// (kept by their key). The order and stars come rendered from the daemon's
+// rail layout, so the retired local keys move nothing.
 func TestRailMarks(t *testing.T) {
 	runNode(t, "rail marks", railJSHarness+railMarksHarness+mustAsset(t, "rail.js")+railMarksCases)
 }

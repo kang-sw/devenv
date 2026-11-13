@@ -177,6 +177,44 @@ describe("lead feed", () => {
     assert.equal(calls.length <= 3, true, "the whole turn coalesced into a few calls");
   });
 
+  test("a user abort sends the same turn_end reason on pinned and newer Pi hosts", async () => {
+    for (const settled of [{ type: "agent_settled" }, { type: "agent_settled", aborted: true }]) {
+      const { feed, events, advance } = harness();
+      feed.start();
+      feed.leadEvent({ type: "agent_start" });
+      if (!("aborted" in settled)) {
+        feed.leadEvent({ type: "turn_end", message: { role: "assistant", stopReason: "aborted" } });
+      }
+      feed.leadEvent(settled);
+      await advance(FLUSH_INTERVAL_MS);
+      const ends = events().filter((event) => event.kind === "turn_end");
+      assert.deepEqual(ends, [{ kind: "turn_end", at: 10_000, reason: "aborted" }]);
+      feed.stop();
+    }
+  });
+
+  test("a normal end stays bare, including after an aborted run or a recovered stop reason", async () => {
+    const { feed, events, advance } = harness();
+    feed.start();
+    feed.leadEvent({ type: "agent_start" });
+    feed.leadEvent({ type: "turn_end", message: { role: "assistant", stopReason: "aborted" } });
+    feed.leadEvent({ type: "agent_settled" });
+    for (const settled of [{ type: "agent_settled" }, { type: "agent_settled", aborted: false }]) {
+      feed.leadEvent({ type: "agent_start" });
+      feed.leadEvent(settled);
+      feed.leadEvent({ type: "agent_start" });
+      feed.leadEvent({ type: "turn_end", message: { role: "assistant", stopReason: "aborted" } });
+      feed.leadEvent({ type: "turn_end", message: { role: "assistant", stopReason: "stop" } });
+      feed.leadEvent(settled);
+    }
+    await advance(FLUSH_INTERVAL_MS);
+    assert.deepEqual(events().filter((event) => event.kind === "turn_end"), [
+      { kind: "turn_end", at: 10_000, reason: "aborted" },
+      ...Array.from({ length: 4 }, () => ({ kind: "turn_end", at: 10_000 })),
+    ]);
+    feed.stop();
+  });
+
   test("a finished lead batch carries its calls and the message's tokens; finished batches past five stay listed until a call carrying them is delivered", async () => {
     let fail = false;
     const { feed, calls, events, advance } = harness({ answer: async () => (fail ? { isError: true, content: [{ type: "text", text: "nope" }] } : { content: [{ type: "text", text: "ok" }] }) });

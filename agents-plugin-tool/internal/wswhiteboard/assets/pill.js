@@ -160,9 +160,14 @@
 
   // A pick, a ticked ack, or a typed note changes an item's draft state; the
   // host-level listeners run after form.js's own control handlers.
+  // Typing redraws once a frame at most (redrawSoon): read right after
+  // form.js grew the note, every item's rect forced a second layout per
+  // keystroke.
   function redraw() { update(); }
+  var typed = 0;
+  function redrawSoon() { if (!typed) typed = requestAnimationFrame(function () { typed = 0; update(); }); }
   host.addEventListener("click", redraw);
-  host.addEventListener("input", redraw);
+  host.addEventListener("input", redrawSoon);
   host.addEventListener("change", redraw);
   // The dashboard's sent marks land after its region swaps, including a
   // conversation-only swap that does not re-run this script, so watch the
@@ -186,10 +191,11 @@
     if (ro) ro.disconnect();
     if (mo) mo.disconnect();
     clearTimeout(timer);
+    if (typed) cancelAnimationFrame(typed);
     scroller.removeEventListener("scroll", later);
     window.removeEventListener("resize", later);
     host.removeEventListener("click", redraw);
-    host.removeEventListener("input", redraw);
+    host.removeEventListener("input", redrawSoon);
     host.removeEventListener("change", redraw);
   };
 })();

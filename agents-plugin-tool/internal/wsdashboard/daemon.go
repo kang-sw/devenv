@@ -128,6 +128,9 @@ type DaemonOptions struct {
 	// keepAlive replaces sseKeepAlive, so a test drives the streams' idle
 	// frame and the WebSocket read window; zero is sseKeepAlive.
 	keepAlive time.Duration
+	// ackDelay replaces ackCheckDelay, so a test drives the answer check;
+	// zero is ackCheckDelay.
+	ackDelay time.Duration
 }
 
 // MailWaker receives the daemon's mailbox wake signals (DaemonOptions.MailWake).
@@ -186,8 +189,12 @@ type Daemon struct {
 	snapshots *SnapshotCache
 	// live is the hosted sessions' snapshot slots (live_hosted.go).
 	live hostedSlots
-	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
+	// inboxMu serializes the daemon's own inbox writes (sends and cancels,
+	// and the answer check's record and nudge).
 	inboxMu sync.Mutex
+	// acks runs the answer checks (ack_check.go), nil without a session
+	// index.
+	acks *ackChecker
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
 	lan       bool
 	tokenMu   sync.Mutex
@@ -230,6 +237,9 @@ type Daemon struct {
 	// folder path (workspacepath.go).
 	workspaces *workspaceStore
 	pathHost   pathHost
+	// layout holds the rail's shared row order, tree, and stars
+	// (rail_layout.go).
+	layout *railLayoutStore
 	// files caches each session root's file list for the files route
 	// (files_route.go).
 	files *fileListCache
@@ -251,6 +261,9 @@ type Daemon struct {
 	proxyConns    map[*proxyConn]struct{}
 	proxyWG       sync.WaitGroup
 	proxyDraining bool
+	// web is the web card targets and their proxy listeners
+	// (webcard_proxy.go).
+	web *webRegistry
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -368,6 +381,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	home, _ := os.UserHomeDir()
 	d.planUsage = newPlanUsageStore(opts.Dir, home, os.Getenv)
 	d.cache = newPageCache(d.broker, stats)
+	d.web = newWebRegistry(d.endpoint.Port, d.endpoint.Token, logw)
 	if d.refreshInterval <= 0 {
 		d.refreshInterval = sseRefreshInterval
 	}
@@ -406,6 +420,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	d.railMsgs = newRailMessages()
 	d.rail = newRailLister(railRead, func() { d.broker.wake(railListRepoKey) }, d.stop)
 	d.workspaces = openWorkspaceStore(opts.WorkspacesFile)
+	d.layout = openRailLayoutStore(opts.Dir)
 	d.pathHost = daemonPathHost()
 	if d.workspaces != nil {
 		d.rail.sweep = d.workspaces.sweep
@@ -419,6 +434,11 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}
 	if opts.Sessions != nil {
 		d.source = agentSessions{inner: opts.Sessions, dir: opts.Dir, now: time.Now, snaps: d.snapshots}
+		delay := opts.ackDelay
+		if delay <= 0 {
+			delay = ackCheckDelay
+		}
+		d.acks = &ackChecker{delay: delay, run: d.checkAnswers}
 		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: d.source, Log: logw, OnChange: d.sessionChanged})
 	}
 	d.server = &http.Server{Handler: d.Handler(), ReadHeaderTimeout: 10 * time.Second}
@@ -447,6 +467,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	if d.index != nil {
 		go d.poll(opts.PollInterval)
 	}
+	go d.web.run(webSweepEvery)
 	// The holder scans start only now, under the single-instance lock: a
 	// predecessor has let go of its holders before this daemon attaches.
 	if d.holders != nil {
@@ -531,6 +552,7 @@ func (d *Daemon) sessionChanged(replyID string) {
 	}
 	d.stats.WakeSession.Add(1)
 	d.broker.wake(replyID)
+	d.acks.poke(replyID)
 }
 
 // agentChanged is the agent runner's write hook, called from the
@@ -545,6 +567,7 @@ func (d *Daemon) agentChanged(replyID, _ string) {
 	}
 	d.stats.WakeAgent.Add(1)
 	d.broker.wake(replyID)
+	d.acks.poke(replyID)
 }
 
 // poll fills the session index at once and then re-reads every registered
@@ -585,6 +608,7 @@ func (d *Daemon) Done() <-chan struct{} { return d.done }
 func (d *Daemon) Close() {
 	d.closeOnce.Do(func() {
 		close(d.stop)
+		d.acks.close()
 		// Shutdown closes the listener at once, so no new session or page
 		// connects, and the hosted sessions drain meanwhile (proxy.go):
 		// the whole stop stays under the successor's lock wait.
@@ -602,6 +626,9 @@ func (d *Daemon) Close() {
 		// scheduled would leave the port bound past Close, so a restart could
 		// not rebind it. Closing it here makes Close release the port.
 		_ = d.listener.Close()
+		// The web card listeners are servers of their own; closed here,
+		// before the lock goes, a successor never races a leftover port.
+		d.web.close()
 		if d.agents != nil {
 			d.agents.Close()
 		}
@@ -628,8 +655,9 @@ func (d *Daemon) Close() {
 // (a tracker store's support conversation: send, new, select) are the only
 // browser writes besides the git drawer's push, pull, and fetch routes
 // (gitpush.go) and, with stored workspaces, the rail's workspace routes
-// (workspace_routes.go: the stored list, and git worktree add), and its
-// system-open route (sysopen_route.go) the only route
+// (workspace_routes.go: the stored list, and git worktree add), its layout
+// route (rail_layout_route.go: the rows' shared order, tree, and stars), and
+// its system-open route (sysopen_route.go) the only route
 // that runs a host command beside git and the agent runner's harnesses (with
 // a holder manager, the holder stop route, holders.go, ends a holder, and
 // the terminal routes, terminal_routes.go, run shells for a browser on this
@@ -651,6 +679,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc(pwaPrefix, handlePWA)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
+	mux.HandleFunc(railLayoutRoute, d.handleRailLayout)
 	mux.HandleFunc(railEventsRoute, d.handleRailEvents)
 	mux.HandleFunc("/rail/memos", d.handleMemos)
 	mux.HandleFunc("/rail/usage", d.handlePlanUsage)

@@ -8,7 +8,7 @@ import (
 )
 
 // cardScripts are the page scripts that draw vendored Lucide icons.
-var cardScripts = []string{"assets/cards.js", "assets/preview.js", "assets/files.js", "assets/terminal.js", "assets/dashboard.js"}
+var cardScripts = []string{"assets/cards.js", "assets/preview.js", "assets/files.js", "assets/terminal.js", "assets/webcard.js", "assets/dashboard.js"}
 
 // TestLucideIconsAreVendoredWithTheirLicense pins the vendored icon set:
 // the package's license file ships beside the icons, the sprite holds a
@@ -555,7 +555,7 @@ func TestBoardPinnedClosedPagesCount(t *testing.T) {
 	}
 	js := string(data)
 	var src string
-	for _, name := range []string{"openKey", "restoreOpenOne", "restoreOpen", "forgetOpen", "topicKey", "morphBoard", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft"} {
+	for _, name := range []string{"openKey", "restoreOpenOne", "restoreOpen", "forgetOpen", "topicKey", "topicSeen", "morphBoard", "frameKeep", "frameKept", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft"} {
 		f := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(js)
 		if f == "" {
 			t.Fatalf("dashboard.js holds no %s", name)

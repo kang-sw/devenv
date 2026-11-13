@@ -134,7 +134,15 @@ type Event struct {
 	// typed line ("/name args"), its output in Text.
 	Commands []SlashCommand `json:"commands,omitempty"`
 	Command  string         `json:"command,omitempty"`
+	// Reason is a turn_end's end reason, as the adapter names it (the Claude
+	// mod: answer, aborted, or error); the turn's ring entry keeps it.
+	// Absent when the adapter names none (an older adapter, the hosted
+	// runner).
+	Reason string `json:"reason,omitempty"`
 }
+
+// TurnAborted is the turn_end reason of a turn the user stopped.
+const TurnAborted = "aborted"
 
 // Result is what one event changed.
 type Result struct {
@@ -299,7 +307,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		if st.turnStartedAt > 0 {
 			duration := max(at-st.turnStartedAt, 0)
 			done, failed := st.lead.totals()
-			res.Ring = append(res.Ring, RingEntry{Kind: RingTurn, Origin: st.turnOrigin, WakeTurn: st.turnWake, Done: done, Failed: failed, DurationMs: duration})
+			res.Ring = append(res.Ring, RingEntry{Kind: RingTurn, Origin: st.turnOrigin, WakeTurn: st.turnWake, Done: done, Failed: failed, DurationMs: duration, Reason: ev.Reason})
 			st.previousTurnMs = duration
 		}
 		st.turnStartedAt, st.turnOrigin = 0, ""

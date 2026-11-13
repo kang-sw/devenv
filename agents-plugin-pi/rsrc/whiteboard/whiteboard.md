@@ -362,4 +362,16 @@ Resolve a panel locator with `panel: "eN"` and a log locator with
 the latest panel version. Mentions supply context for the user's typed
 message, not answers or authored `{{12}}`/`{{p3}}` references.
 
+A web card on the dashboard shows a localhost dev server's page or a
+workspace HTML file; a localhost link you write opens one for the user.
+What the user takes from it follows the mentions, one element per line:
+`<wb:pick url="..." selector="...">text</wb:pick>` for a page element the
+user picked, and `<wb:console url="...">errors</wb:console>` for the
+page's console errors the user attached, one error per line. `url` is the
+page the element or the errors came from: the dev server URL, or the
+workspace path of a static file. `selector` is a CSS selector for the
+element, unique on the page unless the page nests it too deep; the
+content is the element's visible text, cut short and escaped like a
+mention's. Like mentions, they supply context for the typed message.
+
 Confirmed decisions reach a ticket only through `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture. Authoritative topic folders remain after the session key expires; do not treat key expiry as board deletion.

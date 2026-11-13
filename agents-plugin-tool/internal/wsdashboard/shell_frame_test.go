@@ -65,7 +65,7 @@ function frag() {}
 function railKey() {}
 function railPopOpen() {}
 function setTheme() {}
-var times = 0;
+var times = 0, tickSets = null;
 function fmtTime() { times++; }
 function pace() {}
 Date.now = function () { return 0; };

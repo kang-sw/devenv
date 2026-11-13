@@ -167,8 +167,12 @@ func claudeLeadLocalSettingsRoot(cwd, home string) string {
 	if root == cwd {
 		return ""
 	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return ""
+	}
 	realHome, err := filepath.EvalSymlinks(home)
-	if err != nil || root == filepath.Clean(realHome) {
+	if err != nil || filepath.Clean(realRoot) == filepath.Clean(realHome) {
 		return ""
 	}
 	if !claudeSettingsOwnedByUser(root, false) || !claudeSettingsOwnedByUser(filepath.Join(root, ".git"), true) {

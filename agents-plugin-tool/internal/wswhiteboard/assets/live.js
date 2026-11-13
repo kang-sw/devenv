@@ -21,6 +21,7 @@
   var pending = false;
   var banner = doc.getElementById("wb-banner");
   function formBusy() {
+    flushBuild(); // dirty and copied follow the reply build (form.js)
     var a = doc.activeElement;
     return (dirty && !copied) || (a && (a.matches("textarea.note") || a.id === "reply-text")) || !!doc.querySelector("body > .wbv:not([hidden])");
   }

@@ -474,6 +474,19 @@ describe('the feed', () => {
     expect(kinds(events).at(-1)).toBe('turn_end')
   })
 
+  test('the main-thread turn_end carries the host\'s end reason; an empty reason sends none', async () => {
+    for (const reason of ['answer', 'aborted', 'error']) {
+      const { dash, after } = await started()
+      dash.turnStarted(undefined)
+      const events = await after(() => dash.turnCompleted(undefined, '', reason))
+      expect(events.filter((e) => e.kind === 'turn_end')).toEqual([{ kind: 'turn_end', at: expect.any(Number), reason }])
+    }
+    const { dash, after } = await started()
+    dash.turnStarted(undefined)
+    const events = await after(() => dash.turnCompleted(undefined, '', ''))
+    expect(events.filter((e) => e.kind === 'turn_end')).toEqual([{ kind: 'turn_end', at: expect.any(Number) }])
+  })
+
   const grepSteps = (dash: ReturnType<typeof harness>['dash'], from: number, count: number) => {
     for (let i = from; i < from + count; i++) {
       dash.stepBegan(undefined, `t/${i}`)

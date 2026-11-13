@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -102,6 +103,9 @@ type Index struct {
 
 	mu       sync.Mutex
 	sessions map[string]*indexEntry
+
+	// loaded is set once a Refresh has read the whole registry (Loaded).
+	loaded atomic.Bool
 }
 
 // lane is one session's re-read state. Re-reads are serialized per session,
@@ -177,7 +181,13 @@ func (x *Index) Refresh() {
 		// The listing skips an unreadable registration, which drops it.
 		x.reread(id, true)
 	}
+	x.loaded.Store(true)
 }
+
+// Loaded reports whether a Refresh has read the whole registry at least
+// once: until then a session the index lacks may only be unread yet, so a
+// store keyed by reply-id (the rail layout) must not drop it as forgotten.
+func (x *Index) Loaded() bool { return x.loaded.Load() }
 
 // endedApplied reports whether reg is an ended registration the index
 // already applied unchanged and whose project root still exists, so a

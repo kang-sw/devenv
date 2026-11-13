@@ -29,7 +29,7 @@ func TestBoardEntryFrameBridgeStaysNarrow(t *testing.T) {
 		t.Fatal(err)
 	}
 	js := string(data)
-	src := whiteboardBridgeFunctions(t, js, "boardJump", "docFrame", "postDoc", "str", "num", "mentionOf", "selEl", "entryAt", "frameMention")
+	src := whiteboardBridgeFunctions(t, js, "boardJump", "indexFrames", "docFrame", "postDoc", "str", "num", "mentionOf", "selEl", "entryAt", "frameMention")
 	listener := regexp.MustCompile(`window\.addEventListener\("message", function \(e\) \{\n    var f = docFrame\(e\.source\), m = e\.data;\n    if \(!f \|\| !m \|\| typeof m !== "object"\) return;[\s\S]*?\n  \}\);\n`).FindString(js)
 	if listener == "" {
 		t.Fatal("no source-gated frame listener")
@@ -39,7 +39,7 @@ var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 var calls = [], jumps = [], pending = null, mpend = null, cchips = {}, handler;
 var board = { name: "board" }, pins = { name: "pins" }, targets = {};
-function target(id, owned) { return targets[id] = { id: id, owned: owned, tagName: "DIV", parentNode: null, scrollIntoView: function () { jumps.push(id); } }; }
+function target(id, owned) { return targets[id] = { id: id, owned: owned, tagName: "DIV", parentNode: null, closest: function () { return this.history ? board : null; }, scrollIntoView: function () { jumps.push(id); } }; }
 var fold = { tagName: "DETAILS", owned: true, open: false, parentNode: null };
 target("item-3", true).parentNode = fold;
 target("p1", true).parentNode = fold;
@@ -49,7 +49,7 @@ function inBoard(n) { return !!n && n.owned === true; }
 function $(id) { return targets[id] || null; }
 var window = { wbHistory: { loadTarget: function (root, id) {
   calls.push(root.name + ":" + id);
-  if (id === "p9" && root === pins) return target("p9", true);
+  if (id === "p9" && root === pins) return targets.p9 || target("p9", true);
   return root === board && targets[id] || null;
 } }, addEventListener: function (kind, fn) { if (kind === "message") handler = fn; } };
 var topic = { getAttribute: function (k) { return k === "data-topic" ? "trusted-topic" : null; } };
@@ -61,11 +61,15 @@ function frame(owned, entry) {
 }
 var own = frame(true, "e7"), foreign = frame(false, "e999"), frames = [own, foreign];
 function q() { return frames; }
+function boardQ() { return frames; }
+var frameWins = new Map();
 function placeMention(p) { pending = p; mpend = p; }
 function hideMention() { pending = null; mpend = null; }
 `+src+listener+`
 boardJump("p1"); boardJump("p9"); boardJump("item-3");
 check("existing panel/item targets scroll, including deferred pinned history", jumps, ["p1", "p9", "item-3"]);
+targets.p9.history = true; boardJump("p9");
+check("history navigation delegates positioning to shared keep", jumps, ["p1", "p9", "item-3"]);
 check("containing disclosures open before navigation", fold.open, true);
 var count = calls.length;
 ["#p1", "e7", "p0", "p01", "p1 div", "item-3,body", "item-3[x]", "https://evil/p1", "../p1", "__proto__", null, 7].forEach(boardJump);
@@ -188,8 +192,8 @@ func TestBoardHistoryHooksSurroundSSESwap(t *testing.T) {
 	js := whiteboardBridgeFunctions(t, string(data), "swap")
 	capture, morph := strings.Index(js, "captureBoardHistory()"), strings.Index(js, "morphBoard(el, html)")
 	materialize, disclosure := strings.Index(js, "window.wbHistory.restore(n, history)"), strings.Index(js, "restoreOpen(n)")
-	lastRestore, outerScroll := strings.LastIndex(js, "window.wbHistory.restore(b, history)"), strings.Index(js, "restoreScroll(scroll)")
-	if capture < 0 || capture >= morph || materialize < morph || materialize >= disclosure || lastRestore <= outerScroll {
-		t.Fatal("SSE swaps must capture before morph, load history before disclosure restoration, and restore anchors after outer scrolling")
+	outerScroll := strings.Index(js, "restoreScroll(scroll)")
+	if capture < 0 || capture >= morph || materialize < morph || materialize >= disclosure || outerScroll <= disclosure || strings.Count(js, "window.wbHistory.restore(") != 1 {
+		t.Fatal("SSE swaps must capture before morph and restore history once before disclosures and outer scrolling")
 	}
 }

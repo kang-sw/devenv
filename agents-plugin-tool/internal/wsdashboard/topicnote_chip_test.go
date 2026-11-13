@@ -65,7 +65,7 @@ function q(sel, root) { return root.all().filter(function (e) { return e.has("tn
 function wsT(k) { return k; }
 function tabShown() { return true; }
 function setTab() {}
-var answer = [{ id: "03", answer: "A", note: "" }], bmentions = [];
+var answer = [{ id: "03", answer: "A", note: "" }], bmentions = [], wpicks = [], wconsoles = [];
 function chipList() { return answer; }
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 function topic(name, value, hidden) {

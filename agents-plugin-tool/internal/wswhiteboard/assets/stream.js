@@ -25,39 +25,153 @@
     if (id[0] === 'e') return node.matches('.wb-entry[data-entry="' + id + '"]') ? node : null;
     return node.matches('.entry-panel') && node.closest('.wb-entry[data-panel="' + id + '"]') ? node : null;
   }
-  function nearBottom(h) { return h.scrollHeight - h.clientHeight - h.scrollTop < 12; }
+  var STEP = 640;
   // A fold (a long log run, or a system-event chip) anchors by its first
   // entry while closed; once open, its entries anchor themselves.
   function isFold(node) { return node.classList.contains('system-run') || node.classList.contains('run-fold'); }
-  function position(h) {
-    var rect = h.getBoundingClientRect(), anchor = null;
-    Array.from(h.querySelectorAll('[data-history-anchor]')).some(function (node) {
+  // _wbHistoryBase is the pixel target before snap (cumulative: each
+  // "load more" adds STEP from the previous snapped height).
+  // _wbHistorySteps tracks how many times the user expanded, for
+  // capture/restore and the "has expanded" check.
+  function steps(h, n) {
+    h._wbHistorySteps = Math.max(1, n);
+    var base = h._wbHistoryBase || STEP;
+    h.style.setProperty('--wb-history-height', base + 'px');
+  }
+  function setBase(h, px) {
+    h._wbHistoryBase = Math.max(STEP, px);
+    h.style.setProperty('--wb-history-height', h._wbHistoryBase + 'px');
+  }
+  // Extend --wb-history-height so no entry is half-clipped at the top of the
+  // visible region. With flex-end the newest entries sit at the bottom and
+  // older entries overflow upward; the clip line is .history-clip's top edge.
+  // After layout, if an entry straddles that edge, grow the height to include
+  // it fully. history-live is flex:none so the resize does not loop.
+  // Each "load more" measures from the snapped height, not a fixed step
+  // multiple, so each reveal is consistently ~640px of new entries.
+  function snap(h) {
+    var clip = h.querySelector('.history-clip'), live = h.querySelector('.history-live');
+    if (!clip || !live) return;
+    var cr = clip.getBoundingClientRect(), lr = live.getBoundingClientRect();
+    if (lr.height <= cr.height + 1) { h._wbHistorySnapped = h._wbHistoryBase || STEP; return; }
+    var clipTop = cr.top, children = live.children;
+    for (var i = 0; i < children.length; i++) {
+      var c = children[i];
+      if (c.tagName === 'TEMPLATE') continue;
+      var r = c.getBoundingClientRect();
+      if (!r.height) continue;
+      if (r.top < clipTop - 1 && r.bottom > clipTop + 1) {
+        var extra = Math.ceil(clipTop - r.top);
+        var snapped = (h._wbHistoryBase || STEP) + extra;
+        h._wbHistorySnapped = snapped;
+        h.style.setProperty('--wb-history-height', snapped + 'px');
+        return;
+      }
+      if (r.top >= clipTop - 1) break;
+    }
+    h._wbHistorySnapped = h._wbHistoryBase || STEP;
+  }
+  function updateControl(h) {
+    var live = h.querySelector('.history-live');
+    var more = !!h.querySelector('template[data-history-page]') || live.scrollHeight > (h._wbHistorySnapped || h._wbHistoryBase || STEP);
+    var button = h.querySelector('.history-older');
+    if ((!button || button.hidden === !more) && h.classList.contains('history-more') === more) return;
+    // Hiding the exhausted control resizes shallower ancestors watched by
+    // keep/rail. Do that outside this history's resize delivery, including
+    // reentrant init calls from loadOne -> wbBindBoard.
+    if (h._wbHistoryResizing) {
+      if (!h._wbHistoryControlFrame) {
+        h._wbHistoryControlFrame = true;
+        window.requestAnimationFrame(function () {
+          h._wbHistoryControlFrame = false;
+          if (h.isConnected) updateControl(h);
+        });
+      }
+      return;
+    }
+    if (button) button.hidden = !more;
+    h.classList.toggle('history-more', more);
+  }
+  function oldest(h) {
+    var clip = h.querySelector('.history-clip').getBoundingClientRect();
+    return Array.from(h.querySelectorAll('[data-history-anchor]')).find(function (node) {
       if (isFold(node) && node.open) return false;
       var r = node.getBoundingClientRect();
-      if (r.height && r.bottom > rect.top && r.top < rect.bottom) {
-        anchor = { id: node.getAttribute('data-history-anchor'), run: isFold(node), offset: r.top - rect.top };
-        return true;
-      }
-      return false;
+      return r.height && r.bottom > clip.top && r.top < clip.bottom;
     });
-    return { bottom: nearBottom(h), anchor: anchor, top: h.scrollTop };
   }
-  function applyPosition(h, state) {
-    if (!state) return;
-    if (state.bottom) h.scrollTop = h.scrollHeight;
-    else {
-      var a = state.anchor;
-      var node = a && (a.run ? h.querySelector('details.system-run[data-key="system:' + a.id + '"]') || h.querySelector('details.run-fold[data-key="run:' + a.id + '"]') : find(h, a.id));
-      if (!node && a && a.run) {
-        // A merged fold is keyed by its new first entry; find the old one inside.
-        var event = find(h, a.id);
-        node = event && (event.closest('details.run-fold') || event.closest('details.system-run'));
+  // A fully out card has no internal anchor. Keep the topmost visible
+  // content below it in the same column (or the standalone document).
+  function below(topic) {
+    var box = topic.closest('#bpins') || topic.closest('#bcol'), root = box || document;
+    var r = box ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+    var top = Math.max(0, r.top), bottom = Math.min(window.innerHeight, r.bottom);
+    if (topic.getBoundingClientRect().bottom > top) return null;
+    return Array.from(root.querySelectorAll('.topic, [data-card], .reply')).filter(function (node) {
+      if (node === topic || topic.contains(node) || !(topic.compareDocumentPosition(node) & 4)) return false;
+      var n = node.getBoundingClientRect();
+      return n.height && n.bottom > top && n.top < bottom;
+    }).sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; })[0];
+  }
+  function collapse(h) {
+    if (!h._wbHistoryOut || (h._wbHistorySteps || 1) === 1) return;
+    var topic = h.closest('.topic'), a = document.activeElement;
+    if (!topic || !topic.isConnected || topic.hasAttribute('data-max')) return;
+    if (a && (h.contains(a) || ((a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.closest('.topic')))) return;
+    var root = topic.closest('#bcol') || topic.closest('.wrap') || document;
+    var motion = root.getAnimations ? root.getAnimations({ subtree: true }).filter(function (m) {
+      var n = m.effect && m.effect.target;
+      return m.playState === 'running' && n && n.matches('.topic, [data-card], iframe.doc-frame');
+    }) : [];
+    if (motion.length) {
+      if (!h._wbHistoryWaiting) {
+        h._wbHistoryWaiting = true;
+        Promise.all(motion.map(function (m) { return m.finished.catch(function () {}); })).then(function () {
+          h._wbHistoryWaiting = false; collapse(h);
+        });
       }
-      if (node && node.getBoundingClientRect().height) {
-        h.scrollTop += node.getBoundingClientRect().top - h.getBoundingClientRect().top - a.offset;
-      } else h.scrollTop = state.top;
+      return;
     }
-    h._wbPosition = position(h);
+    var anchor = below(topic), kept = anchor && kit.keep(anchor, { observe: [h.querySelector('.history-live')] });
+    h._wbHistoryOut = false;
+    h._wbHistoryTarget = null;
+    setBase(h, STEP);
+    steps(h, 1);
+    snap(h);
+    updateControl(h);
+    if (kept) kept.apply();
+  }
+  function arm(h) {
+    var topic = h.closest('.topic');
+    h._wbHistoryOut = false;
+    kit.unwatch(h._wbHistoryWatch);
+    if (topic) h._wbHistoryWatch = kit.watch(topic, {
+      onChange: function (r) { if (r.visible) h._wbHistoryOut = false; },
+      onOut: function () { h._wbHistoryOut = true; collapse(h); }
+    });
+  }
+  function reveal(h, node) {
+    var live = h.querySelector('.history-live');
+    var needed = live.getBoundingClientRect().bottom - node.getBoundingClientRect().top;
+    var base = Math.max(h._wbHistoryBase || STEP, Math.ceil(needed / STEP) * STEP);
+    setBase(h, base);
+    steps(h, Math.max(h._wbHistorySteps || 1, Math.ceil(needed / STEP)));
+    snap(h);
+    updateControl(h);
+  }
+  function navigate(h, node) {
+    reveal(h, node);
+    arm(h);
+    h._wbHistoryTarget = node;
+    // Page navigation must clear the topic's sticky head AND the rail/host
+    // stack above it. A fixed page-top offset can leave keyboard focus
+    // inside the clip but hidden behind those capsules on either surface.
+    var head = h.closest('.topic').querySelector('.tophead'), offset = 12;
+    var style = head && window.getComputedStyle(head);
+    if (style && style.position === 'sticky') offset += (parseFloat(style.top) || 0) + head.offsetHeight;
+    kit.keep(node, { offset: offset, observe: [h.querySelector('.history-live')], onEnd: function () {
+      if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
+    } });
   }
   // relabel rewrites a fold's key, anchor, and "n entries · from-to" label
   // after a merge, as the server writes them (EntryPage.Segments).
@@ -109,14 +223,25 @@
   function loadOne(h) {
     var page = h.querySelector('template[data-history-page]');
     if (!page) return false;
-    var live = h.querySelector('.history-live'), boundary = live.children[0];
+    var live = h.querySelector('.history-live'), boundary = live.children[0], height = live.scrollHeight;
     live.insertBefore(page.content.cloneNode(true), live.firstChild);
     page.remove();
     if (boundary) joinBoundary(live, boundary);
-    var button = h.querySelector('.history-older');
-    if (button) button.hidden = !h.querySelector('template[data-history-page]');
     if (window.wbBindBoard) window.wbBindBoard(h);
     h.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: h } }));
+    // Joining closed runs can add a page without changing content size.
+    // Re-arm this content observer on the next frame so it delivers that
+    // page's layout even then. Never run a synchronous multi-page loop or
+    // re-observe inside a resize delivery (which would cause a loop error).
+    if (h._wbHistoryObserver && height === live.scrollHeight && !h._wbHistoryReobserve) {
+      h._wbHistoryReobserve = true;
+      window.requestAnimationFrame(function () {
+        h._wbHistoryReobserve = false;
+        if (!h.isConnected || h._wbHistorySteps <= 1 || live.scrollHeight >= (h._wbHistoryBase || STEP) || !h.querySelector('template[data-history-page]')) return;
+        h._wbHistoryObserver.unobserve(live);
+        h._wbHistoryObserver.observe(live);
+      });
+    }
     return true;
   }
   // Materialize only known targets. Loading all intervening pages preserves
@@ -159,13 +284,15 @@
     }
     // Highlight the reached target once, restarting a running flash.
     mark.classList.toggle('flash', false); void mark.offsetWidth; mark.classList.toggle('flash', true);
+    var h = node.closest('.wb-history');
+    if (h) navigate(h, node);
     return node;
   }
   function capture(root) {
     return histories(root).map(function (h) {
       var first = h.querySelector('.wb-entry');
       var fold = h.closest('.topic-stream');
-      return { key: h.getAttribute('data-history'), first: first && first.id, open: !fold || fold.open, position: position(h),
+      return { key: h.getAttribute('data-history'), first: first && first.id, open: !fold || fold.open, steps: h._wbHistorySteps || 1,
         folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }),
         systems: Array.from(h.querySelectorAll('.system-run .wb-entry')).map(function (e) { return [e.id, e.closest('.system-run').open]; }) };
     });
@@ -189,28 +316,62 @@
         var entry = Array.from(run.querySelectorAll('.wb-entry')).find(function (e) { return systems.has(e.id); });
         if (entry) run.open = systems.get(entry.id);
       });
-      applyPosition(h, saved.position);
+      setBase(h, (saved.steps || 1) * STEP);
+      steps(h, saved.steps || 1);
+      snap(h);
+      updateControl(h);
+      arm(h);
     });
   }
   function init(root) {
     histories(root).forEach(function (h) {
-      if (h._wbHistoryBound) return;
+      if (h._wbHistoryBound) { updateControl(h); return; }
       h._wbHistoryBound = true;
-      h.scrollTop = h.scrollHeight;
-      h._wbPosition = position(h);
-      h.addEventListener('scroll', function () { h._wbPosition = position(h); }, { passive: true });
+      setBase(h, STEP);
+      steps(h, 1);
+      snap(h);
+      updateControl(h);
+      arm(h);
+      // Hidden overflow is not keyboard navigation: a clipped summary is
+      // still tabbable. Reveal focused controls through the same page keep
+      // path as deep links, never by scrolling the clipped box.
+      h.addEventListener('focusin', function (e) {
+        var live = h.querySelector('.history-live'), node = e.target;
+        if (!live.contains(node)) return;
+        var r = node.getBoundingClientRect(), clip = h.querySelector('.history-clip').getBoundingClientRect();
+        if (r.top < clip.top || r.bottom > clip.bottom) navigate(h, node);
+      });
       // Frame grafts keep this container but replace its older-page button.
       h.addEventListener('click', function (e) {
         var button = e.target.closest && e.target.closest('.history-older');
         if (!button || button.closest('.wb-history') !== h) return;
-        var saved = position(h);
-        loadOne(h);
-        applyPosition(h, saved);
+        var anchor = oldest(h), live = h.querySelector('.history-live');
+        var kept = anchor && kit.keep(anchor, { observe: [live] });
+        h._wbHistoryTarget = null;
+        // Each "load more" extends 640px from the previous snapped height,
+        // then snap() includes the straddling entry.
+        setBase(h, (h._wbHistorySnapped || h._wbHistoryBase || STEP) + STEP);
+        steps(h, (h._wbHistorySteps || 1) + 1);
+        arm(h);
+        // At most one page here. Only a later content resize may load the
+        // next: iframe heights have not arrived at materialization time.
+        if (live.scrollHeight < (h._wbHistoryBase || STEP)) loadOne(h);
+        snap(h);
+        updateControl(h);
+        if (kept) kept.apply();
       });
       if (typeof ResizeObserver !== 'undefined') {
         var observer = new ResizeObserver(function () {
           if (h.isConnected === false) { observer.disconnect(); return; }
-          applyPosition(h, h._wbPosition);
+          h._wbHistoryResizing = true;
+          try {
+            if (h._wbHistoryTarget) reveal(h, h._wbHistoryTarget);
+            // Initial layout alone does not load older pages; a user has to
+            // expand first. A collapse cancels the bounded resize chain.
+            if (h._wbHistorySteps > 1 && h.querySelector('.history-live').scrollHeight < (h._wbHistoryBase || STEP)) loadOne(h);
+            snap(h);
+            updateControl(h);
+          } finally { h._wbHistoryResizing = false; }
         });
         observer.observe(h.querySelector('.history-live'));
         h._wbHistoryObserver = observer;
@@ -405,13 +566,16 @@
     window.wbBindBoard.wbHistoryBound = true;
   }
   init(document);
+  document.addEventListener('focusout', function () {
+    window.setTimeout(function () { histories(document).forEach(collapse); }, 0);
+  });
 
   // The standalone file page navigates its own fragments. The dashboard has
   // its own allowlisted bridge, scroll policy, and region-swap lifecycle.
   if (document.body && document.body.classList.contains('full')) {
     function jump(id) {
       var node = loadTarget(document, id);
-      if (node) node.scrollIntoView({ block: 'nearest' });
+      if (node && !node.closest('.wb-history')) node.scrollIntoView({ block: 'nearest' });
       return node;
     }
     document.addEventListener('click', function (e) {

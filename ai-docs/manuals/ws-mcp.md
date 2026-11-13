@@ -191,6 +191,45 @@ under `<cache root>/dashboard/`:
   leading-slash line as a command, so a message from any viewer not on this
   machine whose text, trimmed of leading whitespace, starts with `/` is
   refused too (403); a slash later in the text is held as usual.
+  A board item's sent mark comes from these records (newest chip per item,
+  held over drained; a chip sent before the item's latest re-ask marks
+  nothing). A drained note-only chip (a note, no value) sent before the
+  start of the session's newest settled turn clears its item's mark, so the
+  item counts as waiting on the owner again; the note stays in the
+  delivered message and the drained record. The settled turn is the ring's
+  newest `turn` entry, which starts at its time minus `durationMs`. A
+  `turn` entry without a duration settles nothing.
+- `sessions/<reply-id>/ack-check.json` - the daemon's answer check
+  (`internal/wsdashboard/ack_check.go`) record, a sibling of `label.json`:
+  `{"through": <epoch ms>, "interruptedAt": <epoch ms>}`. When a session's
+  turn settles, the daemon checks the batch of answers that turn received
+  and holds one plain inbox message (no chips) naming the batch items still
+  `open` on the board, asking the agent to record them with `wb:answer`.
+  The batch is every drained value chip (an answer, with or without a note;
+  never a note-only chip or a topic note) sent in `[through, settled turn
+  start)`, minus the chips sent before the item's re-ask. The check runs
+  about 1 s after a session change, an agent runner write, a hosted
+  snapshot change, or a hosted ring append (a daemon start re-checks every
+  session through the index's first refresh), and only when all of these
+  hold:
+  - the session source reads board items;
+  - the session is indexed, has a board, and is not an agent conversation;
+  - its host adapter is live;
+  - the lead is idle (no turn, phase idle, no permission wait);
+  - the ring's newest `turn` entry has a duration and an end `reason` other
+    than `aborted` (the Claude mod's terminal stop);
+  - that turn started after `interruptedAt`, which the dashboard interrupt
+    route records;
+  - the inbox holds no message (held input means another turn is coming).
+
+  A skip leaves `through` as it was. A non-empty batch moves `through` to
+  the turn's start, whether a nudge goes out or not, so each answer is
+  checked once and a nudge (no chips) never triggers another. The
+  session's first check (no `through`) only seeds it and sends nothing.
+  The record is written, under the daemon's inbox lock, before the nudge,
+  and only when it is unchanged since the check read it. A crash can
+  therefore lose a nudge but never double one, and two checks never both
+  send.
 - `sessions/<reply-id>/agent.json`, `instructions.md`, and `pi/` - an agent
   runner conversation's own files (`internal/wsagent`): the owner-only
   record a process start needs after a daemon restart (profile, backend,
