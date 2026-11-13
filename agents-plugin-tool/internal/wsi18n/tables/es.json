@@ -148,6 +148,7 @@
   "js.card.grip": "Arrastra para cambiar la altura; doble clic para restablecer",
   "js.card.max": "Maximizar",
   "js.card.min": "Volver a la tarjeta (Esc)",
+  "js.card.back": "Volver al tablero (Esc)",
   "js.card.pin": "Fijar",
   "js.chip.remove": "quitar esta respuesta",
   "js.chip.tnote.open": "mostrar esta nota del tema en el tablero",

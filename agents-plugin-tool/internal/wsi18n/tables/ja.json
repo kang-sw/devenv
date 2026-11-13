@@ -148,6 +148,7 @@
   "js.card.grip": "ドラッグで高さを変更、ダブルクリックでリセット",
   "js.card.max": "最大化",
   "js.card.min": "カードに戻る (Esc)",
+  "js.card.back": "ボードに戻る (Esc)",
   "js.card.pin": "ピン留め",
   "js.chip.remove": "この回答を削除",
   "js.chip.tnote.open": "このトピックメモをボードで表示",

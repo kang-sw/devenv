@@ -148,6 +148,7 @@
   "js.card.grip": "拖曳調整高度，按兩下重設",
   "js.card.max": "最大化",
   "js.card.min": "返回卡片 (Esc)",
+  "js.card.back": "返回看板 (Esc)",
   "js.card.pin": "釘選",
   "js.chip.remove": "移除此回答",
   "js.chip.tnote.open": "在看板上顯示此主題備註",

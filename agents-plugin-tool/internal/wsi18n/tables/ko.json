@@ -148,6 +148,7 @@
   "js.card.grip": "드래그해서 높이 조절, 더블 클릭으로 초기화",
   "js.card.max": "크게 보기",
   "js.card.min": "카드로 돌아가기 (Esc)",
+  "js.card.back": "보드로 돌아가기 (Esc)",
   "js.card.pin": "고정",
   "js.chip.remove": "이 답변 제거",
   "js.chip.tnote.open": "보드에서 이 주제 메모 보기",

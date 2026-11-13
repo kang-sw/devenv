@@ -148,6 +148,7 @@
   "js.card.grip": "Arraste para redimensionar; clique duas vezes para redefinir",
   "js.card.max": "Maximizar",
   "js.card.min": "Voltar ao cartão (Esc)",
+  "js.card.back": "Voltar ao quadro (Esc)",
   "js.card.pin": "Fixar",
   "js.chip.remove": "remover esta resposta",
   "js.chip.tnote.open": "mostrar esta nota do tópico no quadro",

@@ -915,12 +915,13 @@
     return h;
   }
   // topicMotion returns, in order, the inserted topic sections that animate
-  // and the height each starts from.
+  // and the height each starts from. A large topic (cards.js) does not
+  // grow: its height is the sheet's.
   function topicMotion(before, ins) {
     var out = [];
     ins.forEach(function (n) {
       var k = topicKey(n);
-      if (k === null) return;
+      if (k === null || n.hasAttribute("data-max")) return;
       var b = before["t:" + k];
       if (b && b.paged) return;
       out.push({ n: n, from: b ? b.h : 0 });
@@ -950,14 +951,15 @@
   // none. It runs after the growth started, so the places it reads are the
   // growth's first frame and slide and growth add up to one movement.
   // Nothing moves in the DOM (moving a frame reloads it), and the
-  // animation fills nothing, so no transform stays behind. A maximized card
-  // stays put: a transform would anchor its fixed inner box to the card.
+  // animation fills nothing, so no transform stays behind. A maximized card,
+  // a large topic, and a topic holding a large panel stay put: a transform
+  // would anchor the fixed box to the moving node.
   function slideBoard(el, before) {
     var top = el.getBoundingClientRect().top, out = [];
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n), card = k === null && n.hasAttribute("data-card");
       var b = k !== null ? before["t:" + k] : card ? before["c:" + n.getAttribute("data-card")] : null;
-      if (!b || b.paged || !n.animate || (card && n.hasAttribute("data-max"))) return;
+      if (!b || b.paged || !n.animate || n.hasAttribute("data-max") || (k !== null && n.querySelector("details[data-max]"))) return;
       var dy = b.y - (n.getBoundingClientRect().top - top);
       if (Math.abs(dy) < 1) return;
       out.push(n.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }));
