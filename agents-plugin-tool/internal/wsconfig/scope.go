@@ -163,6 +163,15 @@ const (
 	// refusal.
 	ItemWorktreeNudgeStaleDays   = "worktree.nudge_stale_days"
 	ItemWorktreeNudgePreservedGB = "worktree.nudge_preserved_gb"
+
+	// ItemGitMergeSizeSoftLines, ItemGitMergeSizeHardLines, and
+	// ItemGitMergeSizeExtensions drive git.merge's advisory source-file size
+	// warnings: the soft line limit a merge must not push a file past, the
+	// hard line limit at which any edit warns (0 disables either), and the
+	// space-separated file extensions (without dots) the check covers.
+	ItemGitMergeSizeSoftLines  = "git.merge_size_soft_lines"
+	ItemGitMergeSizeHardLines  = "git.merge_size_hard_lines"
+	ItemGitMergeSizeExtensions = "git.merge_size_extensions"
 )
 
 func init() {
@@ -205,6 +214,9 @@ func init() {
 	RegisterDefaultScope(ItemWorktreePool, ScopeProject)
 	RegisterDefaultScope(ItemWorktreeNudgeStaleDays, ScopeProject)
 	RegisterDefaultScope(ItemWorktreeNudgePreservedGB, ScopeProject)
+	RegisterDefaultScope(ItemGitMergeSizeSoftLines, ScopeProject)
+	RegisterDefaultScope(ItemGitMergeSizeHardLines, ScopeProject)
+	RegisterDefaultScope(ItemGitMergeSizeExtensions, ScopeProject)
 	// ticket-assignee-aware is a committed team decision with no config.tune
 	// writer; declaring it makes config.list's scoped view always list it with
 	// its repo-scope flag, so a team sees the key before it commits one.
