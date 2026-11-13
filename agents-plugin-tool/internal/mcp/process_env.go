@@ -15,6 +15,7 @@ import (
 	"github.com/kang-sw/devenv/internal/execjob"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
@@ -121,7 +122,7 @@ func NewServerWithOptions(opts ServerOptions) *Server {
 	if diag == nil {
 		diag = os.Stderr
 	}
-	s := &Server{root: filepath.Clean(opts.Root), version: opts.Version, sourceCommit: commit, ownerPID: opts.OwnerPID, diag: diag}
+	s := &Server{root: filepath.Clean(opts.Root), version: opts.Version, sourceCommit: commit, ownerPID: opts.OwnerPID, diag: diag, dispatchBlock: wsdoc.DispatchBlockForEnv}
 	s.live.host = opts.Live
 	if opts.Env != nil {
 		s.env = newProcEnv(opts.Env)

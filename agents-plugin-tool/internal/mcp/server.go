@@ -40,6 +40,8 @@ type Server struct {
 	// indexOpts configures the ticket ownership index client; zero values
 	// take the library defaults. Tests inject clocks and timeouts here.
 	indexOpts wsindex.Options
+	// dispatchBlock permits a test to inject a failure between the two scans.
+	dispatchBlock func(string, wsdoc.TicketInfo, []string) (*wsdoc.DispatchBlock, error)
 	// declared holds the adapter-declared config keys loaded from the
 	// envConfigManifests manifests at construction.
 	declared declaredConfig
@@ -1766,7 +1768,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			// this stem" resolve into an error — since the promotion closure is
 			// the other half of the same gate.
 			if err == nil && result != nil {
-				if block, blockErr := wsdoc.DispatchBlockForEnv(root, *result, s.environ()); blockErr == nil {
+				if block, blockErr := s.dispatchBlock(root, *result, s.environ()); blockErr == nil {
 					result.DispatchBlocked = block
 				}
 				// The warning token rides both projections whenever the feature is

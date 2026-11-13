@@ -1,12 +1,16 @@
 package mcp
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsdoc"
 )
 
 // TestTicketsQueryPointResolveDispatchBlocked pins the dispatch-time hard gate's
@@ -206,6 +210,36 @@ func TestTicketsQueryBlockedMarkerAndDispatchGateAreDistinctLines(t *testing.T) 
 	// The two facts must be on separate lines, not fused into one.
 	if !strings.Contains(resolve, "dispatch_blocked:") || !strings.Contains(resolve, "\n  blocked_marker:") {
 		t.Fatalf("gate and marker must render as distinct lines:\n%s", resolve)
+	}
+}
+
+func TestTicketsQueryPointResolveDispatchGateFailsOpen(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/ready/260101-feat-consumer.md",
+		"---\ntitle: Consumer\nblocked-by: 260101-feat-prereq\n---\n# Consumer\n")
+	initGit(t, root)
+	server := NewServer(root, "test")
+	called := false
+	server.dispatchBlock = func(_ string, info wsdoc.TicketInfo, _ []string) (*wsdoc.DispatchBlock, error) {
+		called = true
+		if info.Stem != "260101-feat-consumer" || len(info.BlockedBy) != 1 {
+			t.Fatalf("gate received wrong resolved ticket: %+v", info)
+		}
+		return nil, errors.New("injected dispatch scan failure")
+	}
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.query","arguments":{"ticket_stem":"260101-feat-consumer"}}}` + "\n"
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	raw := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"]
+	resp := toolText(t, raw)
+	if !called || strings.Contains(raw, `"isError":true`) || strings.Contains(resp, "injected dispatch scan failure") {
+		t.Fatalf("dispatch scan failure was not swallowed: %s", raw)
+	}
+	if !strings.Contains(resp, "260101-feat-consumer") || strings.Contains(resp, "dispatch_blocked") {
+		t.Fatalf("point resolve did not return the ticket without dispatch_blocked: %s", resp)
 	}
 }
 
