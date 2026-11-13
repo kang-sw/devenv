@@ -427,23 +427,24 @@ func TestIndexShowsTheLANTokenToALocalViewerOnly(t *testing.T) {
 	f := startPageFixture(t, lanMode)
 	token := readLANToken(t, f.dir)
 	port := strconv.Itoa(f.d.Endpoint().Port)
-	local := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "localhost:" + port}, http.MethodGet, "/", "")
+	local := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "localhost:" + port}, http.MethodGet, "/?frame=1", "")
 	if local.Code != http.StatusOK || !strings.Contains(local.Body.String(), `class="lanbox"`) || !strings.Contains(local.Body.String(), ":"+port+"/?token="+token) {
 		t.Fatalf("local viewer's index (%d) lacks the token address:\n%.2000s", local.Code, local.Body.String())
 	}
-	remote := serve(f.d, viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: token}, http.MethodGet, "/", "")
+	remote := serve(f.d, viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: token}, http.MethodGet, "/?frame=1", "")
 	if remote.Code != http.StatusOK || strings.Contains(remote.Body.String(), token) || strings.Contains(remote.Body.String(), `class="lanbox"`) {
 		t.Fatalf("LAN viewer's index (%d) shows the token", remote.Code)
 	}
-	// The session page and the index stream show no token either.
-	for _, path := range []string{"/s/livesession", "/events"} {
+	// The shell, the session page, and the index stream show no token
+	// either.
+	for _, path := range []string{"/", "/s/livesession", "/events"} {
 		if rec := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "localhost:" + port}, http.MethodGet, path, ""); strings.Contains(rec.Body.String(), token) {
 			t.Errorf("%s carries the token", path)
 		}
 	}
 
 	off := startPageFixture(t)
-	if _, page := get(t, off.base+"/"); strings.Contains(page, `class="lanbox"`) {
+	if _, page := get(t, off.base+"/?frame=1"); strings.Contains(page, `class="lanbox"`) {
 		t.Fatal("localhost mode shows a LAN block")
 	}
 	if _, err := os.Stat(filepath.Join(off.dir, LANTokenFileName)); !os.IsNotExist(err) {

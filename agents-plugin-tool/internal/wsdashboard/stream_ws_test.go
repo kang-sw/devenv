@@ -133,11 +133,11 @@ func handshake(t *testing.T, base, path, host string, headers map[string]string)
 func TestWebSocketStreamsSendWhatSSESends(t *testing.T) {
 	f := startPageFixture(t, withTracker(newFakeTracker()))
 	origin := f.base
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	paths := []string{
 		"/s/livesession/events",
 		"/s/livesession/events?regions=entries,convlive",
-		"/s/livesession/events?h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash,
+		"/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash,
 		"/events",
 	}
 	type pair struct {

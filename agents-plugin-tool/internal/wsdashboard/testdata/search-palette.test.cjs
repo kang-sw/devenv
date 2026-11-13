@@ -94,7 +94,7 @@ assert(!tracker.includes('class="tk-qpop"'), 'old anchored popover removed');
 const textNode = text => ({cloneNode: () => ({textContent: text})});
 const unanswered = {id: 'item-42', hasAttribute: () => true, querySelector: () => textNode('Unanswered question')};
 const boardTopic = {getAttribute: () => 'example', querySelector: s => s === '.tname' ? textNode('Example') : null};
-const rowsCtx = vm.createContext({boardQ: () => [boardTopic], readItem: () => null,
+const rowsCtx = vm.createContext({framed: false, doc: {}, boardQ: () => [boardTopic], readItem: () => null,
   q: (s, root) => s === '[id^="item-"]' && root === boardTopic ? [unanswered] : []});
 vm.runInContext(block(dashboard, '  function paletteText(', '  function paletteClosed('), rowsCtx);
 assert.deepEqual(plain(rowsCtx.paletteRows().map(x => x.group)), [1, 3]);
@@ -108,7 +108,9 @@ const target = { parentElement: fold, tagName: 'DIV', classList: {remove() {}, a
 fold.parentElement = topic;
 const pickCtx = vm.createContext({ doc: { body: {classList: {contains: () => false}}, documentElement: {} },
   boardQ: () => [topic], $: () => target, live: true, tabShown: () => false,
-  setTab: tab => events.push(['tab', tab]), setTimeout: fn => fn(), location: {} });
+  setTab: tab => events.push(['tab', tab]), setTimeout: fn => fn(), location: {},
+  // The page stands alone: going to a page loads it at the top level.
+  go: href => { pickCtx.location.href = href; } });
 vm.runInContext(block(dashboard, '  function palettePick(', '\n  function tkMount('), pickCtx);
 pickCtx.palettePick({kind: 'board-item', topic: 'closed', id: '153'});
 assert(events.some(x => x[0] === 'scroll' && x[1] === true), 'enclosing closed fold opened before scroll');
