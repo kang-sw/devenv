@@ -498,7 +498,14 @@
       "registered_at": "2026-11-13T04:24:45Z"
     },
     "261113-fix-ws-playbook-spawn-idiom-and-delegate-resolve-agent": {
-      "registered_at": "2026-11-13T14:00:10Z"
+      "registered_at": "2026-11-13T14:00:10Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T14:22:50Z"
+      }
     },
     "261113-refactor-ws-dashboard-drop-lan-serving": {
       "registered_at": "2026-11-13T14:07:27Z"
