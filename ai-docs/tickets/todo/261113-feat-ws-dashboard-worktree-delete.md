@@ -1,5 +1,11 @@
 ---
 title: "Dashboard rail: delete a linked worktree with a preview-and-confirm modal"
+sage-review-design: required
+sage-review-completeness: required
+related:
+  261020-feat-worktree-profiles: "worktree.remove stays pool-only; profile pre_remove hooks (see (512))"
+  260525-feat-ws-dashboard-workroot-polishing-backlog: "dropped follow-up of the archived Rust deletion policy"
+  261113-feat-ws-dashboard-iframe-shell: "moves the rail, and this ticket's row action and modal, into the shell document"
 ---
 
 # Dashboard rail: delete a linked worktree with a preview-and-confirm modal
@@ -50,8 +56,9 @@ Research (2026-11-13):
    Rejected: the old spec's opt-in "also delete branch" checkbox.
 3. **Deletion conditions follow the archived Rust dashboard policy as is**
    ((125), owner: "just the old dashboard behaviour"): the worker reads the old
-   spec above and implements its deletion conditions, force flag, re-validation
-   and session cleanup, except where decision 2 overrides branch handling.
+   spec above and implements its deletion conditions, force flag and
+   re-validation, except where decision 2 overrides branch handling and
+   decisions 9-10 fill its gaps (decision 10 replaces its session cleanup).
    Rejected: the stricter clean-only proposal with no force path (lead's
    (125) draft).
 4. **Confirmation UX: a small modal cycle** ((126), owner: "ok, a small modal
@@ -59,7 +66,10 @@ Research (2026-11-13):
    that shows a fresh server-side check result (dirty files, unreached
    commits, sessions in the worktree, lock state), requires typing the
    worktree folder name to enable the delete button, and the server
-   re-validates at submit.
+   re-validates at submit. Every delete has exactly one typed-name step; the
+   submit carries `force` only when the preview showed a risk that needs it
+   (dirty or untracked files, a detached HEAD's unreached commits,
+   initialized submodules), and the modal says force will be used.
    Rejected: a popover; `window.confirm`.
 5. **Access**: same-machine viewer and same-origin only (`localViewer` +
    `sameOrigin`, the terminal card's rule); a LAN token alone cannot delete.
@@ -73,6 +83,47 @@ Research (2026-11-13):
    dashboard predates the worktree pool, so its policy has no lease rule, and
    deleting a leased worktree breaks a running worker.
    Rejected: letting force override a live lease.
+9. **Gaps the archived policy does not cover** ((499)=a, owner 2026-11-13):
+   commits a detached HEAD would lose (decision 2 keeps no branch for it) join
+   dirty and untracked changes behind the same typed force confirmation, and
+   the modal shows their count (only a detached HEAD is gated this way: a
+   branch worktree's commits stay on the kept branch, so they are neither
+   refused nor gated); a locked worktree is refused (unlock it
+   first); a worktree with initialized submodules gets `--force` only when the
+   user forced. Rejected: (b) refusing unreached commits even with force;
+   (c) showing them with no gate.
+10. **Live sessions in the worktree block deletion** ((500)=a, owner
+    2026-11-13): the archived policy's "session cleanup" has no counterpart
+    today, so instead deletion is refused while any live ws session, hosted
+    lead, or dashboard terminal has its cwd inside the worktree; the modal
+    lists them, and ended sessions are listed only. A terminal is judged by
+    the cwd it was spawned with (its current cwd is not tracked). Path
+    containment compares cleaned absolute paths, case-insensitively on
+    Windows. Rejected: (b) stopping
+    and closing them from the modal; (c) listing only and deleting anyway.
+11. **Shared check helpers and path validation** ((505), technical,
+    owner-acknowledged 2026-11-13): the `worktree.remove` checks
+    (unreached commits, porcelain status, lease) move from package `mcp`
+    into a shared internal package, because `mcp` imports `wsdashboard` and
+    not the reverse; the dashboard uses the same lease staleness window as
+    `worktree.remove`; the delete route also verifies the target path is in
+    that repository's `git worktree list`. That window is
+    `worktree.nudge_stale_days`, read today through a session-keyed resolver
+    (`worktreeNudgeThresholds`, `mcp/worktree_nudge.go:54`); the extracted
+    helper takes the duration as a parameter, and the dashboard route, which
+    has no session key, resolves it per project with the same default. Rejected: duplicating the checks
+    in `wsdashboard` (two copies drift).
+
+## Open Decision Queue
+
+Last ID: (512)
+
+(512) [open] [policy] What dashboard deletion does with a pool worktree's profile `pre_remove` hooks
+- `worktree.remove` (`mcp/worktree_remove.go:100-127`) reads the worktree marker and runs the profile's `pre_remove` hooks before removing; a failing hook refuses the removal and a quarantine marker is cleared. Decision 6 runs a plain `git worktree remove`, so followed literally the dashboard skips them and leaks what they release (ports, containers, databases). The archived Rust policy predates profiles (like leases, decision 8).
+- a: run the hooks through the shared helper (decision 11) exactly as `worktree.remove` does; a failing hook refuses deletion, shown in the modal, and force does not override it; the preview lists the hooks that will run.
+- b: skip the hooks and show a notice in the modal that cleanup will not run.
+- c: refuse pool worktrees that carry a profile marker; they go through `worktree.remove`.
+> a: same cleanup as the MCP path, no leaks, and the hook-failure refusal mirrors decision 8's lease rule (a force flag never overrides a safety refusal).
 
 ## Constraints
 
@@ -103,10 +154,10 @@ Research (2026-11-13):
 |---|---|---|
 | scope.span | multi-file | agents-plugin-tool/internal/wsdashboard/workspace_routes.go (route registration), a new delete route file, pageview_rail.go (RailWorktree), assets/dashboard.js, dashboard.css, dashboard.tmpl, i18n tables, tests |
 | scope.surface | cross-module | new daemon POST route plus rail row action; reusing mcp/worktree_remove.go checks crosses packages, and internal/mcp imports internal/wsdashboard (mcp/dashboard_config.go), so wsdashboard cannot import mcp |
-| scope.new_public_symbol | unknown | route constant and handlers are unexported like worktreeAddRoute; an extraction of the check logic into a shared package (for example wsgit) is unsettled and would export symbols |
+| scope.new_public_symbol | yes | decision 11 extracts the worktree.remove checks into a shared internal package, exporting its helpers; route constant and handlers stay unexported like worktreeAddRoute |
 | scope.new_type_contract | yes | preview and submit request and answer JSON, a RailWorktree field for delete eligibility |
 | scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/workspace_routes_test.go, rail_test.go, railscript_test.go; mcp/worktree_remove_test.go for the reused checks; new test files possible |
-| complexity.reuse_points | unconfirmed | checks live in unexported mcp functions (removeWorktree, countUnreachedCommits, porcelainPaths, readWorktreeLease) that wsdashboard cannot import |
+| complexity.reuse_points | confirmed | decision 11: countUnreachedCommits, porcelainPaths, readWorktreeLease move from package mcp into a shared package both callers import |
 | complexity.side_effect_risk | high | runs git worktree remove on arbitrary linked worktrees including ones outside the ws pool, deleting the directory and any uncommitted files |
 | risk.correctness | high | force semantics, locked and submodule worktrees, unreached detached-HEAD commits, live sessions and leases, and submit-time re-validation must all hold on a destructive path |
 | risk.fit | moderate | follows the add-worktree route pattern but the dashboard has no typed-confirm modal yet (confirm UI is window.confirm) |
@@ -123,8 +174,19 @@ Research (2026-11-13):
 - Rail: a delete action on non-primary worktree rows; the modal per
   decision 4.
 
+- Shared check helpers per decision 11.
+- The preview also reports initialized submodules (decision 9 needs force for
+  them).
+
 Verification: Go tests over temp repos - preview reports dirty / unreached /
-session / lock state; submit refuses the primary worktree and anything the
-old policy refuses without force; force behaves as the old policy defines;
-branch survives; access guard refuses a non-local viewer. A LOOK capture of
-the modal with a dirty and a clean worktree.
+session / lock / submodule state; submit refuses the primary worktree, a path
+not in `git worktree list`, a locked worktree, a worktree with a live session,
+a live-leased pool worktree, and anything the old policy refuses without
+force; a detached HEAD's unreached commits need force while a branch
+worktree with commits no other branch reaches deletes without force and the
+branch survives; a worktree with initialized submodules is removed only with
+force; submit re-validates (state changed between preview and submit, for
+example a file dirtied, is refused or needs force again); force behaves as
+the old policy defines; access guard refuses a non-local viewer. A node test
+that the delete button stays disabled until the typed name matches. A LOOK
+capture of the modal with a dirty and a clean worktree.

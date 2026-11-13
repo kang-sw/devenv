@@ -3,6 +3,13 @@ title: ws dashboard iframe shell
 related:
   261113-feat-ws-dashboard-session-four-state-lifecycle: sidebar contents
   261113-feat-ws-dashboard-frontend-performance-profile-and-optimize: perf ticket; session-switch baseline
+  261113-feat-ws-dashboard-browser-pane: also turns sessionPageCSP into a per-request policy (frame-src for the proxy origin)
+  261113-feat-ws-dashboard-worktree-delete: its rail row action and modal live in the rail this ticket moves into the shell
+  261113-bug-ws-dashboard-pinned-panel-sticky-header: blocked by this ticket
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 1ad6563f62410a0a
+sage-review-completeness-reviewed: 1ad6563f62410a0a
 ---
 
 # ws dashboard iframe shell
@@ -64,8 +71,51 @@ now open.
 - (422) Address bar keeps `/s/<id>`; frames load the same path with
   `?frame=1`; the shell updates the URL with `history.pushState`. Owner ok
   2026-11-13. Rejected: a new URL scheme (breaks links, bookmarks, embeds).
-- (423) Sidebar flicker fix (collapse/pin/order state in the server render)
-  ships in shell Phase 1. Owner ok 2026-11-13.
+- (423) Sidebar flicker fix ships in shell Phase 1. Owner ok 2026-11-13.
+- (501) How the flicker fix applies the sidebar state before first paint is
+  the implementer's call (owner, 2026-11-13: the question was dropped and left
+  to the shell implementation). Fact: the collapse/pin/order state lives only
+  in browser localStorage today (`rail.js`: "nothing reaches the server"), so
+  (423)'s original wording "in the server render" is not binding; candidates
+  are an inline pre-paint script in the shell head, a cookie the server render
+  reads (watch cookie size for order lists), or another mechanism. Any new
+  store shape or protocol surface stays out (T0 constraint). Name the chosen
+  mechanism in the Result.
+- (503) Framing headers (technical, owner-acknowledged 2026-11-13): responses
+  to `?frame=1` requests send `Content-Security-Policy: frame-ancestors
+  'self'` and `X-Frame-Options: SAMEORIGIN`; every other response keeps
+  `frame-ancestors 'none'` / `DENY` (today every page sends DENY,
+  `agents-plugin-tool/internal/wsdashboard/pages.go:1265-1291`, which blocks
+  the shell outright). Foreign origins still cannot frame any page.
+  Rejected: relaxing framing on every response (widens clickjacking surface).
+- **Cross-document input and links** (design review 2026-11-13, autonomous):
+  the postMessage set also carries key forwarding from a focused frame to the
+  shell for the shell-owned hotkeys (rail hotkey Ctrl+` on `#railbtn`, global
+  search focus), preserving the fd4fc2be rail hotkey handover; a click inside
+  a frame on a link to another dashboard page that the shell frames is
+  intercepted and sent as a navigate message, never loaded as a plain page
+  in the frame (which (503) refuses). The message shapes are the
+  implementer's, recorded in the Result. Rejected: leaving hotkeys
+  frame-local (focus inside a frame would swallow the rail hotkey).
+- **Phase 1 non-session links** (design review 2026-11-13, autonomous): until
+  Phase 2, links to non-session pages (tracker, wiki, ...) navigate the top
+  level, leaving the shell. Rejected: framing them before they get
+  `?frame=1` headers (the frame would be refused).
+- **Composed session-page CSP** (coherence review 2026-11-13, autonomous):
+  this ticket and `261113-feat-ws-dashboard-browser-pane` both turn the
+  constant `sessionPageCSP` (`pages.go:1276`) into a per-request policy in
+  one function and both touch `TestSessionPageFramesOnlyItsOwnOrigin`. After
+  this ticket, `/s/<id>` without `?frame=1` serves the shell; the `?frame=1`
+  response is the document that will host browser-pane cards. Whichever
+  ticket lands second carries the other's directive into that function: the
+  `?frame=1` response ends as `frame-src 'self' <proxy origin(s)>;
+  frame-ancestors 'self'` plus `X-Frame-Options: SAMEORIGIN`; the shell and
+  plain responses keep `frame-ancestors 'none'` and `DENY`.
+- **Rail-mounted features relocate** (coherence review 2026-11-13,
+  autonomous): rail UI that lands before this ticket (the worktree-delete
+  row action and modal, the rail-usage gutter footer) moves into the shell
+  document with the rail; the shell is same-origin, so their route gates are
+  unaffected.
 - Wide-view layout rule (owner, 2026-11-13, from the dash-nav note): in wide
   view all panels are left-aligned and the pinned panel always fills the
   remaining width to the right. This landed first as a separate quick change:
@@ -120,15 +170,34 @@ pinned panel fills the remaining right width) throughout.
 ### Phase 1: Shell, sidebar, header, flicker fix, session frames
 
 Shell holding the sidebar and top header (global search, notifications,
-session title/badges); flicker fix (collapse/pin/order state reflected in the
-server render); session frames (agent panel stays in the frame) with a 5-frame
+session title/badges); flicker fix (collapse/pin/order state applied before
+first paint, mechanism per (501)); framing headers per (503); session frames (agent panel stays in the frame) with a 5-frame
 LRU and `pushState` URLs (`/s/<id>`, frames load `?frame=1`). Narrow/mobile
-keeps the overlay sidebar.
+keeps the overlay sidebar. Hotkey forwarding and in-frame link interception
+per `## Decisions`; non-session links navigate the top level until Phase 2.
+
+Verification: Go tests that `?frame=1` responses carry `frame-ancestors
+'self'` / `SAMEORIGIN` and other responses still carry `'none'` / `DENY`; LOOK
+captures of the shell wide and narrow, and a reload with a collapsed and
+reordered sidebar showing no flicker (state correct on the first captured
+frame); a headless check that with focus inside a session frame the rail
+hotkey toggles the shell rail and global search takes focus, and that a
+click on an in-frame `/s/<id>` link switches frames through the shell (URL
+updated by `pushState`, no plain-page load in the frame); browser back and
+forward switch frames.
 
 ### Phase 2: Remaining pages as frames, throttling, render fan-out
 
-All remaining dashboard pages (tracker, wiki, ...) open as frames inside the
-shell, plus hidden-frame throttling and the render fan-out cache.
+All remaining dashboard pages open as frames inside the shell: every
+dashboard route except session pages (already framed in Phase 1); popout
+and embed routes that are opened outside the dashboard stay unframed, and
+the worker lists any other exception in the Result. Plus hidden-frame
+throttling and the render fan-out cache.
 
-Verification: LOOK captures wide and narrow; measured session-switch time
-before/after.
+Verification: LOOK captures wide and narrow; a test that a hidden frame is
+told it is hidden and lowers its update rate, and resumes when shown; a test
+that two frames of the same session cause one region render per update
+(fan-out by hash cache); measured session-switch time before/after, baseline
+today's full reload (owner-observed 500-1000 ms), pass when switching to a
+session still in the LRU completes under 100 ms and a cold switch is no
+slower than the baseline.
