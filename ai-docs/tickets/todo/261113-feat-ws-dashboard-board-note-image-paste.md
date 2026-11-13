@@ -18,12 +18,7 @@ Owner request (2026-11-13): allow pasting images into the whiteboard note pen (i
 ## Decisions
 
 - Decision 1 (owner, 2026-11-13): the note pen accepts pasted images; each image becomes an attachment delivered with the outgoing dashboard message, and the note text carries `[Image #N]` at the caret, like the composer.
-
-## Open Decision Queue
-
-Last ID: (412)
-
-(412) [open] [technical] Reuse the composer's attachment pipeline with one image counter shared across composer text and all board notes in the same outgoing message, over a separate per-note counter, so every [Image #N] in one message is unique.
+- Decision 2 (owner, 2026-11-13; was 412): One image counter is shared across the composer text and every board note in the same outgoing message, so each [Image #N] in one message is unique. Rejected: a separate per-note counter, which repeats [Image #1] within one message.
 
 ## Constraints
 
@@ -35,6 +30,6 @@ Last ID: (412)
 
 ### Phase 1: Paste images into board notes
 
-Let item notes and topic notes accept pasted images, reusing the composer's attachment pipeline, with `[Image #N]` inserted at the caret and each image sent as an attachment of the outgoing message. Settle the Open Decision Queue before promoting to ready.
+Let item notes and topic notes accept pasted images, reusing the composer's attachment pipeline, with `[Image #N]` inserted at the caret and each image sent as an attachment of the outgoing message.
 
 Verification: paste two images into an item note and one into a topic note, plus one in the composer; send; check the lead receives four attachments with unique `[Image #N]` references matching the note text. Dark and light LOOK capture of the note pen with an image chip.
