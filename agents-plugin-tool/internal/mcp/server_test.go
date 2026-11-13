@@ -812,6 +812,32 @@ func TestServeStdioTicketsQueryPointResolveMatchesRemovedStatusShape(t *testing.
 	}
 }
 
+func TestTicketsQueryPointResolveIncludesTerminalStatuses(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	for _, status := range []string{".done", ".dropped"} {
+		mustWrite(t, root, "ai-docs/tickets/"+status+"/260504-"+status[1:]+".md", "---\ntitle: Terminal\n---\n# Terminal\n")
+	}
+	initGit(t, root)
+	t.Setenv("WS_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	for _, status := range []string{".done", ".dropped"} {
+		stem := "260504-" + status[1:]
+		for _, format := range []string{"", "json"} {
+			args := map[string]any{"ticket_stem": stem, "format": format, "include_done": false, "include_dropped": false}
+			got := callScopedTool(t, root, 1, "tickets.query", args)
+			if !strings.Contains(got, stem) || !strings.Contains(got, status) {
+				t.Fatalf("point resolve %s (%s): %s", status, format, got)
+			}
+		}
+	}
+	for _, args := range []map[string]any{{}, {"query": "Terminal"}, {"statuses": []string{"todo"}, "ticket_stem": "260504-done"}} {
+		got := callScopedTool(t, root, 1, "tickets.query", args)
+		if strings.Contains(got, "260504-done") || strings.Contains(got, "260504-dropped") {
+			t.Fatalf("discovery included terminal ticket by default: %s", got)
+		}
+	}
+}
+
 // callToolsList issues a single tools/list request and returns the raw response
 // line. Used by capability-scope tests to assert advertised schema visibility.
 func callToolsList(t *testing.T, server *Server) string {
