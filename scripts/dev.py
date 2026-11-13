@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Repository-local developer commands. Not shipped with any plugin package.
 
-    python scripts/dev.py rerun daemon [--local]
+    python scripts/dev.py rerun daemon [--local] [--no-seed]
 
 `rerun daemon` builds agents-plugin-tool/cmd/ws-mcp from the working tree
 (cross-built on the sys_lock remote w5090 by default, `go build` here with
@@ -9,6 +9,11 @@
 does, and runs `daemon-start --build-time <now>` so the daemon's own
 newer-build-wins rule drains and replaces the running daemon. Session
 launchers reconnect on their own.
+
+It then seeds the same build into each local-devenv package dir of this checkout
+(a valid .local-devenv-runtime marker) with the launcher's own runtime name and
+compatibility stamp, so the next session start does not rebuild the same source
+locally. --no-seed skips that.
 """
 import argparse
 import importlib.util
@@ -34,6 +39,9 @@ REMOTE_BUILD_MINUTES = 15
 # Repo-relative directory the remote build writes into; remote only, never
 # fetched wholesale.
 REMOTE_DIST = "agents-plugin-tool/dist-x"
+
+# Package dirs of this checkout whose launcher runtime gets seeded.
+SEED_PACKAGES = ("agents-plugin", "agents-plugin-wsflow")
 
 # How long to wait for a daemon to leave, and for daemon-start to finish. The
 # launcher gives a replacement DefaultStartWait plus a margin; a drain adds up
@@ -223,7 +231,45 @@ def run_daemon_start(launcher, staged: Path, build_time: int) -> dict:
         raise RuntimeError(f"daemon-start printed no report line: {proc.stdout!r}") from exc
 
 
-def rerun_daemon(local: bool) -> int:
+def seed_package(launcher, plugin_dir: Path, built: Path) -> str:
+    """Seed the built exe as plugin_dir's launcher runtime; return the report line."""
+    os_name = launcher.host_os()
+    if launcher.read_local_devenv_contract(plugin_dir, os_name) is None:
+        return "not local-devenv"
+    contract_path = plugin_dir / "runtime.json"
+    contract = launcher.read_runtime_contract(contract_path)
+    platform_name = f"{os_name}-{launcher.host_arch()}"
+    runtime_dir = Path(os.environ.get("WS_MCP_RUNTIME_DIR", str(plugin_dir / ".runtime" / platform_name)))
+    binary = runtime_dir / launcher.runtime_binary_name(contract, contract_path, os_name)
+    fingerprint = launcher.local_devenv_source_fingerprint(plugin_dir, os_name)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    if not (binary.is_file() and launcher.sha256_file(binary) == launcher.sha256_file(built)):
+        tmp = launcher.unique_runtime_temp_path(runtime_dir, f"{binary.name}.seed")
+        try:
+            shutil.copyfile(built, tmp)
+            # A running launcher's exe is locked on Windows and the launcher has
+            # no way around that either (it retries, then keeps the old one), so
+            # a locked target is skipped rather than worked around.
+            os.replace(tmp, binary)
+        except OSError as exc:
+            tmp.unlink(missing_ok=True)
+            return f"skipped ({binary.name} not replaceable, likely in use: {exc})"
+    launcher.write_compatibility_stamp(binary, contract, contract_path, runtime_dir, fingerprint)
+    if not launcher.compatibility_stamp_current(binary, contract, contract_path, runtime_dir, fingerprint):
+        return "skipped (compatibility stamp not written)"
+    return f"seeded {binary}"
+
+
+def seed_packages(launcher, built: Path) -> None:
+    for name in SEED_PACKAGES:
+        try:
+            result = seed_package(launcher, REPO / name, built)
+        except (OSError, RuntimeError, SystemExit) as exc:
+            result = f"skipped ({exc})"
+        print(f"seed {name}: {result}")
+
+
+def rerun_daemon(local: bool, seed: bool = True) -> int:
     launcher = load_launcher()
     env = dict(os.environ)
     daemon_dir = launcher.proxy_daemon_dir(env)
@@ -232,6 +278,8 @@ def rerun_daemon(local: bool) -> int:
     with tempfile.TemporaryDirectory(prefix="ws-mcp-dev-") as scratch:
         built = build(launcher, Path(scratch), local)
         check_built(launcher, built)
+        if seed:
+            seed_packages(launcher, built)
         # The build output is only the staging source: the daemon runs from
         # the content-hash-named copy, so the scratch file is never held open.
         digest = launcher.sha256_file(built)
@@ -269,10 +317,11 @@ def main(argv: list[str]) -> int:
     rerun_sub = rerun.add_subparsers(dest="target", required=True)
     daemon = rerun_sub.add_parser("daemon", help="replace the dashboard daemon")
     daemon.add_argument("--local", action="store_true", help=f"build with the local go instead of on the {REMOTE} sys_lock remote")
+    daemon.add_argument("--no-seed", action="store_true", help="do not seed the build into the local-devenv plugin runtime dirs")
     args = parser.parse_args(argv)
     try:
         if args.command == "rerun" and args.target == "daemon":
-            return rerun_daemon(args.local)
+            return rerun_daemon(args.local, not args.no_seed)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
