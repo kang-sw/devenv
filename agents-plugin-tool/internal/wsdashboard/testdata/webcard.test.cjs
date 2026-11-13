@@ -244,6 +244,21 @@ test('a load with no frame message registers again once', () => {
   assert.equal(b.posts.length, 1);
 });
 
+test('a load soon after the last one does not register again', () => {
+  const b = boot();
+  const o = openCard(b, { url: 'http://localhost:5173/' }, DEV);
+  ready(b, o, '/');
+  o.frame.fire('load');
+  // Within the settle time the address bar moves the wrapper, which comes up.
+  o.c.w.bar.value = 'http://localhost:5173/next';
+  o.c.w.bar.fire('keydown', { key: 'Enter', preventDefault() {} });
+  ready(b, o, '/next');
+  o.frame.fire('load');
+  b.tick();
+  assert.equal(b.posts.length, 0, 'the first load\'s check took the second load\'s frame message');
+  assert.equal(o.frame.src, '/s/rid1/web/abc?p=%2Fnext');
+});
+
 test('the record follows the page the card shows', () => {
   const b = boot();
   const o = openCard(b, { url: 'http://localhost:5173/' }, DEV);

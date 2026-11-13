@@ -207,6 +207,7 @@
     w.errors = 0;
     w.proxy = "";
     w.want = true;
+    w.loads++;
     w.frame.hidden = false;
     paint(card);
     w.frame.src = "/s/" + encodeURIComponent(rid()) + "/web/" + encodeURIComponent(w.reg.id) + "?p=" + encodeURIComponent(p);
@@ -223,11 +224,15 @@
     w.retried = true;
     register(card, null, true);
   }
+  // loaded checks, SETTLE after the frame's load, that the wrapper came up.
+  // A load since then owns the frame flag, so this check stands down: it
+  // would take that load's flag and leave its check none, which registers
+  // again and reloads the page.
   function loaded(card) {
-    var w = card.w;
+    var w = card.w, n = w.loads;
     if (!w.want) return;
     setTimeout(function () {
-      if (w.dead) return;
+      if (w.dead || w.loads !== n) return;
       var framed = w.framed;
       w.framed = false;
       if (!framed && w.want) retry(card);
@@ -331,7 +336,7 @@
   });
 
   function build(card) {
-    var w = card.w = { turn: 0, reg: null, cur: "", proxy: "", errors: 0 };
+    var w = card.w = { turn: 0, loads: 0, reg: null, cur: "", proxy: "", errors: 0 };
     card.body.textContent = "";
     var bar = mk("div", "wc-bar");
     w.bar = mk("input", "fpin wc-url");
