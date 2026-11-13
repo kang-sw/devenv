@@ -398,15 +398,8 @@
     "261112-research-ws-single-lead-skill-playbook-routing": {
       "registered_at": "2026-11-12T07:50:32Z"
     },
-    "261113-bug-ws-dashboard-sidebar-shows-processless-session-as-live": {
-      "registered_at": "2026-11-13T11:39:21Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T11:39:21Z"
-      }
+    "261113-bug-ws-dashboard-composer-placeholder-clipped": {
+      "registered_at": "2026-11-13T13:18:17Z"
     },
     "261113-bug-ws-hosted-pi-start-misses-uninstalled-extension-deps": {
       "registered_at": "2026-11-13T10:24:58Z"
