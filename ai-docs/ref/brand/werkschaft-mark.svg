@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><title>Werkschaft</title><rect width="512" height="512" rx="96" fill="#1E2235"/><g transform="translate(8 0)" fill="none" stroke-width="46" stroke-linejoin="miter" stroke-miterlimit="2">
+<path d="M120 362 L176 200" stroke="#F2EBDD" stroke-linecap="butt"/><path d="M232 362 L288 150" stroke="#F2EBDD" stroke-linecap="butt"/>
+<path d="M64 150 L112.3 333" stroke="#E4572E" stroke-linecap="butt"/><path d="M185.1 226.5 L222.9 335.5" stroke="#E4572E" stroke-linecap="butt"/>
+<path d="M428.3 180 A50 50 0 1 0 339.7 226.1" stroke="#F2EBDD" stroke-linecap="butt"/><path d="M360 238.9 L408 269.2" stroke="#E4572E" stroke-linecap="butt"/><path d="M428.3 282 A50 50 0 1 1 339.7 328.1" stroke="#F2EBDD" stroke-linecap="butt"/>
+</g></svg>
