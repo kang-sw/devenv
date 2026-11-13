@@ -760,3 +760,8 @@ All files are under `D:/Temp/wb-messages/gate-screenshots/`:
 - `served-beyond-closed-cap-jump.png`
 - `served-cross-entry-mentions.png`
 - `served-long-panel-image.png`
+
+## Visual Reference (added 2026-11-13)
+- Approved mockup: `ai-docs/tickets/assets/261113-feat-ws-whiteboard-topic-panels-and-log/index.html`, variant G (interleave), selected with `[data-view=G]`. Board decisions (202)=a (50-entry paging with a load-older button) and (57)=b (system events fold into a count row) override the mockup where they differ.
+- The original implementation shipped without this reference; the stream was reworked to match it in merge 54335ef52.
+- Edited after closure under a one-time owner exception.
