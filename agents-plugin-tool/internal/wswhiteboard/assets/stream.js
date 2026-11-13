@@ -152,10 +152,13 @@
     var node = materialize(root || document, id);
     if (!node) return null;
     for (var p = node; p; p = p.parentElement) if (p.tagName === 'DETAILS') p.open = true;
+    var mark = node;
     if (node.matches('.wb-entry.panel')) {
       var panel = node.querySelector('.entry-panel');
-      if (panel) panel.open = true;
+      if (panel) { panel.open = true; mark = panel; }
     }
+    // Highlight the reached target once, restarting a running flash.
+    mark.classList.toggle('flash', false); void mark.offsetWidth; mark.classList.toggle('flash', true);
     return node;
   }
   function capture(root) {
