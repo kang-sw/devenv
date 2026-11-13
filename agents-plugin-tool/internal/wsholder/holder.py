@@ -19,8 +19,11 @@ State directory (one per holder, mode 0700): <dir>/descriptor.json (0600)
      "script_hash": "<sha256 of this script>", "restart_safe": true,
      "session": {...}}
 
-The holder rewrites the descriptor when it goes missing (checked every 60 s)
-and removes the directory when it exits on its own.
+The holder rewrites the descriptor when it goes missing (checked every 60 s).
+On a graceful exit it leaves exit.json for the manager to consume and remove
+with the state directory: {"exit_code": <int|null>, "signal": <int|null>,
+"reason": "child_exited" | "stop" | "idle" | "fatal",
+"stopped_at": <RFC3339 UTC timestamp>}.
 
 Attach protocol, version 1. Newline-delimited JSON objects, UTF-8, both ways.
 
@@ -83,6 +86,7 @@ STARTED_AT = time.time()
 
 import argparse
 import base64
+import datetime
 import hashlib
 import hmac
 import json
@@ -99,6 +103,7 @@ PROTOCOL_VERSION = 1
 SCHEMA_VERSION = 1
 DESCRIPTOR_NAME = "descriptor.json"
 LOG_NAME = "holder.log"
+EXIT_NAME = "exit.json"
 
 
 def _start_ticks():
@@ -812,11 +817,11 @@ class Holder:
         self.idle_since = time.monotonic()
         self.stopping = False
         self.exit_event = threading.Event()
-        # Guards the log against the removal of the state directory: a line
-        # written while shutdown() removes the directory would leave it behind.
+        # Prevents late log writes after shutdown has completed.
         self.log_lock = threading.Lock()
         self.log_closed = False
         self.exit_code = 0
+        self.exit_reason = "stop"
         self.listener: socket.socket | None = None
         self.port = 0
 
@@ -842,18 +847,20 @@ class Holder:
                 self.ensure_descriptor()
             with self.cond:
                 idle = (
-                    self.attachment is None
+                    not self.stopping
+                    and self.attachment is None
                     and self.child_status["state"] != "running"
                     and now - self.idle_since >= self.idle_exit
                 )
             if idle:
                 self.log("idle exit: no child running and nobody attached for the idle period")
+                self.exit_reason = "idle"
                 break
         self.shutdown()
         return self.exit_code
 
     def shutdown(self) -> None:
-        """Close the port and the attachment, and remove the state directory."""
+        """Close the port and attachment, leaving the exit record for the manager."""
         self.exit_event.set()
         if self.listener is not None:
             try:
@@ -869,9 +876,30 @@ class Holder:
         child = self.child
         if child is not None and self.child_status["state"] == "exited":
             child.close()
+        try:
+            self.write_exit_record()
+        except OSError as exc:
+            self.log(f"exit record write failed: {exc}")
         with self.log_lock:
             self.log_closed = True
-            shutil.rmtree(self.dir, ignore_errors=True)
+
+    def write_exit_record(self) -> None:
+        with self.cond:
+            code = self.child_status.get("exit_code")
+            child_signal = self.child_status.get("signal")
+        record = {
+            "exit_code": code,
+            "signal": child_signal,
+            "reason": self.exit_reason,
+            "stopped_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        path = os.path.join(self.dir, EXIT_NAME)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(record, f)
+            f.write("\n")
+        os.replace(tmp, path)
 
     # -- descriptor --
 
@@ -1213,6 +1241,8 @@ class Holder:
             if self.stopping:
                 return
             self.stopping = True
+            if self.child_status["state"] == "exited":
+                self.exit_reason = "child_exited"
         threading.Thread(target=self._stop, daemon=True).start()
 
     def _stop(self) -> None:
@@ -1279,6 +1309,8 @@ def main(argv: list[str] | None = None) -> int:
         code = holder.run()
     except Exception as exc:
         holder.log(f"fatal: {type(exc).__name__}: {exc}")
+        holder.exit_reason = "fatal"
+        holder.shutdown()
         raise
     if holder.stopping and not WINDOWS and os.getpgrp() == os.getpid():
         # Started detached, the holder leads its own process group, which a

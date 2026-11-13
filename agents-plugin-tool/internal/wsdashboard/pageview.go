@@ -921,6 +921,7 @@ type IndexRow struct {
 	LastSeen int64
 	// Hosted and Approval are the rail row's (RailRow).
 	Hosted   bool
+	Exit     *HostExit
 	Approval *ApprovalWait
 }
 
@@ -953,8 +954,9 @@ func buildIndexView(sessions []indexInput, now time.Time, version string) IndexV
 			CountPolicy: in.Session.CountPolicy,
 			LastSeen:    reg.LastSeen().UnixMilli(),
 			Hosted:      reg.Hosted,
+			Exit:        hostExit(reg),
 		}
-		if adapterPresent(in.Snapshot, now) {
+		if row.Exit == nil && adapterPresent(in.Snapshot, now) {
 			row.Adapter = true
 			if row.Live {
 				row.Approval = approvalWait(reg, in.Snapshot)

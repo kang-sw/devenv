@@ -1477,6 +1477,14 @@ func (c *conv) writeRegistration() bool {
 		}
 		defer unlock()
 		reg.HostStopped = rec.HostPID == 0 && !c.spawning
+		// The holder manager writes the last exit independently of the
+		// runner's heartbeat; a regenerated row must not discard it.
+		if previous, err := wsdashboard.ReadRegistration(c.r.opts.Dir, rec.ReplyID); err == nil {
+			reg.HostExitCode = previous.HostExitCode
+			reg.HostExitSignal = previous.HostExitSignal
+			reg.HostExitReason = previous.HostExitReason
+			reg.HostStoppedAt = previous.HostStoppedAt
+		}
 	}
 	err := wsdashboard.WriteRegistration(c.r.opts.Dir, reg)
 	if err != nil {

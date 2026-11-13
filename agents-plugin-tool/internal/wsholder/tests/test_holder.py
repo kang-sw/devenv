@@ -6,6 +6,7 @@ the tests run on POSIX and on Windows alike.
 """
 
 import base64
+import datetime
 import importlib.util
 import json
 import os
@@ -357,13 +358,16 @@ class IdleExitTest(HolderTestCase):
         holder.thread.join(timeout=TIMEOUT)
         self.assertFalse(holder.thread.is_alive())
         self.assertEqual(holder.result.get("code"), 0)
-        self.assertFalse(os.path.exists(holder.dir))
+        record = read_json(os.path.join(holder.dir, holder_mod.EXIT_NAME))
+        self.assertEqual((record["exit_code"], record["reason"]), (0, "idle"))
+        datetime.datetime.fromisoformat(record["stopped_at"].replace("Z", "+00:00"))
 
     def test_idles_out_when_no_child_was_ever_spawned(self):
         holder = self.start_holder(idle_exit=0.3)
         holder.thread.join(timeout=TIMEOUT)
         self.assertFalse(holder.thread.is_alive())
-        self.assertFalse(os.path.exists(holder.dir))
+        record = read_json(os.path.join(holder.dir, holder_mod.EXIT_NAME))
+        self.assertEqual((record["exit_code"], record["reason"]), (None, "idle"))
 
     def test_an_attachment_keeps_a_childless_holder_up(self):
         holder = self.start_holder(idle_exit=0.3)
@@ -455,6 +459,13 @@ class ChildTest(HolderTestCase):
             self.assertEqual((exit_rec["exit_code"], exit_rec["signal"]), (None, 15))
             self.assertEqual(status["signal"], 15)
         self.assertEqual(status["state"], "exited")
+        self.assertTrue(client.request("stop")["ok"])
+        holder.thread.join(timeout=TIMEOUT)
+        self.assertFalse(holder.thread.is_alive())
+        record = read_json(os.path.join(holder.dir, holder_mod.EXIT_NAME))
+        self.assertEqual(record["reason"], "child_exited")
+        self.assertEqual(record["exit_code"], exit_rec["exit_code"])
+        self.assertEqual(record["signal"], exit_rec["signal"])
 
     def test_stop_ends_the_child_and_the_holder(self):
         holder = self.start_holder(stop_grace=1.0)
@@ -466,7 +477,10 @@ class ChildTest(HolderTestCase):
         holder.thread.join(timeout=TIMEOUT)
         self.assertFalse(holder.thread.is_alive())
         self.assertIsNotNone(holder.child.proc.poll())
-        self.assertFalse(os.path.exists(holder.dir))
+        record = read_json(os.path.join(holder.dir, holder_mod.EXIT_NAME))
+        self.assertEqual(record["reason"], "stop")
+        self.assertEqual(record["exit_code"], holder.child_status.get("exit_code"))
+        self.assertEqual(record["signal"], holder.child_status.get("signal"))
         # The connection drains the remaining records, then closes.
         events = client.events_until(lambda m: m.get("event") == "exit")
         self.assertEqual(events[-1]["event"], "exit")
@@ -533,33 +547,22 @@ class DescriptorTest(HolderTestCase):
         # Field 22 of the stat line, counted past the parenthesized name.
         self.assertEqual(desc["start_ticks"], int(stat[stat.rindex(")") + 1 :].split()[19]))
 
-    def test_log_line_racing_the_exit_does_not_leave_the_directory_behind(self):
+    def test_exit_record_keeps_nonzero_child_code(self):
         holder = self.start_holder()
-        late = []
-
-        def slow_rmtree(path, ignore_errors=False):
-            # The window a real removal has: the files are gone, the
-            # directory is not yet. A thread logs right inside it.
-            for name in os.listdir(path):
-                retry_sharing(lambda: os.unlink(os.path.join(path, name)))
-            writer = threading.Thread(target=holder.log, args=("a line written during the exit",), daemon=True)
-            writer.start()
-            late.append(writer)
-            writer.join(timeout=0.5)
-            try:
-                os.rmdir(path)
-            except OSError:
-                if not ignore_errors:
-                    raise
-
-        with mock.patch.object(holder_mod.shutil, "rmtree", slow_rmtree):
-            holder.request_stop()
-            holder.thread.join(timeout=TIMEOUT)
+        client = self.attached(holder)
+        self.spawn(client, py_child("import sys; sys.exit(7)"))
+        self.wait_exit_record(client)
+        self.assertTrue(client.request("stop")["ok"])
+        holder.thread.join(timeout=TIMEOUT)
         self.assertFalse(holder.thread.is_alive())
-        self.assertEqual(len(late), 1)
-        late[0].join(timeout=TIMEOUT)
-        self.assertFalse(late[0].is_alive())
-        self.assertFalse(os.path.exists(holder.dir), "the state directory outlived the holder")
+        record = read_json(os.path.join(holder.dir, holder_mod.EXIT_NAME))
+        self.assertEqual((record["exit_code"], record["signal"], record["reason"]), (7, None, "child_exited"))
+        timestamp = datetime.datetime.fromisoformat(record["stopped_at"].replace("Z", "+00:00"))
+        self.assertIsNotNone(timestamp.utcoffset())
+        retry_sharing(lambda: os.unlink(self.descriptor_path(holder)))
+        self.assertEqual(read_json(os.path.join(holder.dir, holder_mod.EXIT_NAME)), record)
+        if not WINDOWS:
+            self.assertEqual(os.stat(os.path.join(holder.dir, holder_mod.EXIT_NAME)).st_mode & 0o777, 0o600)
 
 
 if __name__ == "__main__":
