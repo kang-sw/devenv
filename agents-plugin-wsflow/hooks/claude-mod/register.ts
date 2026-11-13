@@ -1018,13 +1018,17 @@ export const register: Register = (on) => {
             const res = await submitOwn(own, prompts, live)
             if (res.drop !== undefined) throw new Error(`prompt dropped: ${res.drop}`)
             entered = !res.busy && !res.stale
+            if (entered) dashboard.mailDelivered(prompts.map((p) => p.text).join('\n\n'))
             return res.busy ? 'busy' : res.stale ? 'stale' : undefined
           } finally {
             if (!entered) dashboard.mailSubmitFailed()
           }
         },
         turnRunning: () => mainTurn,
-        append: (prompts) => appendOwn(own, prompts),
+        append: async (prompts) => {
+          await appendOwn(own, prompts)
+          dashboard.mailDelivered(prompts.map((p) => p.text).join('\n\n'))
+        },
         recvTool: () => recvTool ?? 'mailbox recv',
         sleep: (ms, signal) => abortableSleep((d, fn) => $.clock.after(d, fn), ms, signal),
         notice: (text) => $.ui.log(text),
@@ -1514,7 +1518,7 @@ export const register: Register = (on) => {
       if (modelCall) dashboard.toolEnded(e.agentId, callId, true)
       throw err
     }
-    if (modelCall) dashboard.toolEnded(e.agentId, callId, res.deny !== undefined || res.isError === true)
+    if (modelCall) dashboard.toolEnded(e.agentId, callId, res.deny !== undefined || res.isError === true, res)
     if (e.agentId === undefined && modelCall) {
       try {
         await watcher?.toolCompleted()
@@ -1666,7 +1670,10 @@ export const register: Register = (on) => {
       user = undefined
     }
     const res = await next(e)
-    if (user && res.drop === undefined) dashboard.userMessage(user.text, user.origin)
+    if (res.drop === undefined) {
+      if (user) dashboard.userMessage(user.text, user.origin)
+      else dashboard.wakeSubmitted(e, $.plugin.name)
+    }
     return res
   })
 

@@ -92,6 +92,19 @@ interface LiveTask {
 }
 
 const liveTasks = new Map<string, LiveTask>();
+const changeListeners = new Set<() => void>();
+
+/** Advisory observers of registry membership; callers read counts later, not in this callback. */
+export function onBackgroundTasksChanged(listener: () => void): () => void {
+  changeListeners.add(listener);
+  return () => { changeListeners.delete(listener); };
+}
+
+function tasksChanged(): void {
+  for (const listener of changeListeners) {
+    try { listener(); } catch { /* advisory */ }
+  }
+}
 
 export interface StartBackgroundTaskOptions {
   shell: string;
@@ -172,6 +185,7 @@ export function startBackgroundTask(options: StartBackgroundTaskOptions): Backgr
     arm(Math.min(timeoutMs, MAX_TIMER_DELAY_MS));
   }
   liveTasks.set(id, task);
+  tasksChanged();
   return info;
 }
 
@@ -180,7 +194,10 @@ function claim(task: LiveTask, by: NonNullable<LiveTask["claim"]>): boolean {
   if (task.claim) return false;
   task.claim = by;
   if (task.timer) clearTimeout(task.timer);
-  if (liveTasks.get(task.info.id) === task) liveTasks.delete(task.info.id);
+  if (liveTasks.get(task.info.id) === task) {
+    liveTasks.delete(task.info.id);
+    tasksChanged();
+  }
   return true;
 }
 

@@ -87,6 +87,8 @@
 
 import type { SessionUsage } from 'claude-code'
 
+import { createTasks, notification, PERSON_ORIGINS, wakePrompt, type Wake, type WakePrompt } from './wake'
+
 /** The intake tool, as the MCP server names it. */
 export const INTAKE_TOOL = 'dashboard_intake'
 /** The board-answer inbox's drain tool, as the MCP server names it: an atomic claim of every held message. */
@@ -212,9 +214,6 @@ export function parseInterruptDrain(text: string): number[] {
 }
 
 export type Origin = 'terminal' | 'whiteboard' | 'mail'
-
-/** Prompt origins that are the person's own message: typed, from a remote client, or an SDK host's turn. */
-const PERSON_ORIGINS = new Set(['composer', 'bridge', 'sdk', 'unclassified', 'slack-ping'])
 
 /**
  * A submitted prompt as the feed records it: the person's own prompt is a
@@ -707,7 +706,7 @@ export function commandList(list: readonly { name?: unknown; description?: unkno
 // ---- The feed --------------------------------------------------------------
 
 export type DashboardEvent = {
-  kind: 'reset' | 'turn_start' | 'turn_end' | 'agent' | 'permission' | 'reply' | 'user' | 'status' | 'compact' | 'commands' | 'command'
+  kind: 'reset' | 'turn_start' | 'turn_end' | 'agent' | 'permission' | 'reply' | 'user' | 'status' | 'compact' | 'commands' | 'command' | 'wake'
   [field: string]: unknown
 }
 
@@ -802,6 +801,10 @@ export interface Dashboard {
   promptSubmitting: (origin: Origin | undefined, startsTurn: boolean) => void
   /** A submitted prompt entered: a user message with its origin. */
   userMessage: (text: string, origin: 'terminal' | 'whiteboard') => void
+  /** A non-person prompt that entered; task notifications also settle observable background tasks. */
+  wakeSubmitted: (prompt: WakePrompt, plugin: string) => void
+  /** Mail delivered by this mod bypasses its own prompt.submit hook. */
+  mailDelivered: (text: string) => void
   turnStarted: (agentId: string | undefined) => void
   turnCompleted: (agentId: string | undefined, answer: string, reason: string) => void
   /** A model request begins; `request` is the model and effort it names, which a subagent's record takes. */
@@ -813,7 +816,7 @@ export interface Dashboard {
     result: { answer?: string; toolUses?: readonly { name: string; input: unknown }[]; usage?: StepUsage },
   ) => void
   toolBegan: (agentId: string | undefined, id: string | undefined, tool: string, args: Record<string, unknown>) => void
-  toolEnded: (agentId: string | undefined, id: string | undefined, isError: boolean) => void
+  toolEnded: (agentId: string | undefined, id: string | undefined, isError: boolean, result?: unknown) => void
   toolChecked: (check: { agentId?: string; id?: string; tool: string; input: unknown; approver?: string }, decision: string) => void
   notified: (type: string) => void
   /** A subagent started; `model` is what its spawn resolved it to run on. */
@@ -884,6 +887,10 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   /** Whether the latest intake result named `commands`, and `command`, among the kinds it accepts. */
   let commandsAccepted = false
   let commandAccepted = false
+  let wakeAccepted = false
+  let countsAccepted = false
+  let countsDirty = true
+  const tasks = createTasks()
 
   const lead = (): AgentRec => rec(LEAD)
 
@@ -991,7 +998,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
 
   const idOf = (agentId: string | undefined) => agentId ?? LEAD
 
-  const statusDue = () => statusDirty && statusAccepted && status !== undefined
+  const statusDue = () => statusAccepted && ((statusDirty && status !== undefined) || (countsAccepted && countsDirty))
   const compactDue = () => compactDirty && compactAccepted && compacting !== undefined
   const commandsDue = () => commandsDirty && commandsAccepted && commands !== undefined
 
@@ -1114,7 +1121,8 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     }
     if (statusDue()) {
       statusDirty = false
-      out.push({ kind: STATUS_KIND, ...(JSON.parse(status!) as StatusFigures) })
+      countsDirty = false
+      out.push({ kind: STATUS_KIND, ...(status === undefined ? {} : JSON.parse(status) as StatusFigures), ...(countsAccepted ? tasks.counts() : {}) })
     }
     if (commandsDue()) {
       commandsDirty = false
@@ -1146,6 +1154,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     lastReplySent = undefined
     replyDirty = reply !== undefined
     statusDirty = status !== undefined
+    countsDirty = true
     compactDirty = compacting !== undefined
     commandsDirty = commands !== undefined
   }
@@ -1154,7 +1163,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
   function requeue(events: DashboardEvent[]): void {
     const kept = events.filter(
       (e) => e.kind === 'user' || e.kind === 'turn_start' || e.kind === 'turn_end' || (e.kind === 'reply' && e.final === true) || (e.kind === COMPACT_KIND && e.phase !== 'start') ||
-        e.kind === COMMAND_KIND,
+        e.kind === COMMAND_KIND || e.kind === 'wake',
     )
     pending = [...kept, ...pending]
     if (pending.length > PENDING_EVENT_CAP) pending.splice(0, pending.length - PENDING_EVENT_CAP)
@@ -1162,8 +1171,9 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
 
   /** `reset` and, when the turn it belongs to is not already among `events`, that turn's `turn_start`. */
   function resyncPrefix(events: DashboardEvent[]): DashboardEvent[] {
-    const firstStart = events.findIndex((e) => e.kind === 'turn_start')
-    const firstEnd = events.findIndex((e) => e.kind === 'turn_end')
+    const boundaries = [...events, ...pending]
+    const firstStart = boundaries.findIndex((e) => e.kind === 'turn_start')
+    const firstEnd = boundaries.findIndex((e) => e.kind === 'turn_end')
     const needStart = lastTurnStart !== undefined && (firstStart === -1 ? turnOpen || firstEnd !== -1 : firstEnd !== -1 && firstEnd < firstStart)
     return needStart ? [{ kind: 'reset' }, lastTurnStart!] : [{ kind: 'reset' }]
   }
@@ -1191,8 +1201,20 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     if (key !== sentKey) {
       if (sentKey !== undefined || key !== undefined) markResync()
     }
-    let events = [...pending, ...dirtyEvents()]
-    pending = []
+    // Re-check at send time too: a queued event may predate the latest
+    // answer (or a replacement daemon). Old status readers reject new fields.
+    // Retain the entire discrete prefix during recovery negotiation so a
+    // turn cannot overtake the wake that started it.
+    const hold = !wakeAccepted && pending.some((event) => event.kind === 'wake')
+    const discrete = hold ? [] : pending
+    if (!hold) pending = []
+    let events = [...discrete, ...dirtyEvents()].flatMap((event): DashboardEvent[] => {
+      if (event.kind !== STATUS_KIND) return [event]
+      if (!statusAccepted) return []
+      if (countsAccepted) return [event]
+      const { background, monitors, ...legacy } = event
+      return [legacy as DashboardEvent]
+    })
     if (events.length === 0) return
     if (!key) {
       // Nobody to send to yet: keep the conversation, resend state once a key arrives.
@@ -1226,6 +1248,11 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       const accepted = accepts.includes(STATUS_KIND)
       if (accepted && !statusAccepted) statusDirty = status !== undefined
       statusAccepted = accepted
+      wakeAccepted = accepts.includes('wake')
+      if (delivered && !wakeAccepted) pending = pending.filter((event) => event.kind !== 'wake')
+      const countsOn = accepted && accepts.includes('task_counts')
+      if (countsOn && !countsAccepted) countsDirty = true
+      countsAccepted = countsOn
       const compactOn = accepts.includes(COMPACT_KIND)
       if (compactOn && !compactAccepted) compactDirty = compacting !== undefined
       compactAccepted = compactOn
@@ -1269,6 +1296,8 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     pending = []
     agents = new Map()
     asks = new Map()
+    tasks.clear()
+    countsDirty = true
     reply = undefined
     replyDirty = false
     lastReplySent = undefined
@@ -1316,6 +1345,16 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     for (const [id, ask] of asks) if (ask.agentId === agentId) asks.delete(id)
   }
 
+  function taskChanged(before: string): void {
+    if (JSON.stringify(tasks.counts()) === before) return
+    countsDirty = true
+    scheduleFlush()
+  }
+
+  function wake(event: Wake): void {
+    if (wakeAccepted) settleBefore({ kind: 'wake', ...event, text: event.text.slice(0, TEXT_SEND_CAP) })
+  }
+
   return {
     active: () => !stopped,
     start() {
@@ -1328,6 +1367,8 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       commandsDirty = false
       commandsAccepted = false
       commandAccepted = false
+      wakeAccepted = false
+      countsAccepted = false
       stopped = false
       sentKey = undefined
       resyncDue = true
@@ -1345,6 +1386,8 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       commandsDirty = false
       commandsAccepted = false
       commandAccepted = false
+      wakeAccepted = false
+      countsAccepted = false
       stopped = true
     },
     restart: guard('restart', () => {
@@ -1388,6 +1431,20 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
       if (origin === 'whiteboard' && ownWhiteboard) ownWhiteboard.recorded = true
       settleBefore({ kind: 'user', text: text.slice(0, TEXT_SEND_CAP), origin, at: edges.now() })
     }),
+    wakeSubmitted: guard('wake prompt', (prompt: WakePrompt, plugin: string) => {
+      // A person's pasted notification must neither produce a wake nor end a task.
+      if (PERSON_ORIGINS.has(prompt.origin?.kind ?? '') || userPrompt(prompt, plugin)) return
+      const n = notification(prompt.text)
+      const event = wakePrompt(prompt, plugin, tasks.kind(n.id, n.callId), n.id !== undefined && agents.get(n.id)?.announced === true)
+      if (!event) return
+      const before = JSON.stringify(tasks.counts())
+      tasks.notified(prompt.text)
+      taskChanged(before)
+      wake(event)
+    }),
+    mailDelivered: guard('mail delivered', (text: string) => {
+      wake({ cause: 'mail', source: 'mailbox', caption: 'Mail arrived', text })
+    }),
     turnStarted: guard('turn start', (agentId: string | undefined) => {
       if (agentId !== undefined) {
         const r = rec(agentId)
@@ -1407,6 +1464,9 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     }),
     turnCompleted: guard('turn end', (agentId: string | undefined, answer: string, reason: string) => {
       const now = edges.now()
+      const before = JSON.stringify(tasks.counts())
+      tasks.abort(agentId)
+      taskChanged(before)
       if (agentId !== undefined) {
         const r = rec(agentId)
         closeBuffer(r.buf, now)
@@ -1489,12 +1549,18 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
     toolBegan: guard('tool start', (agentId: string | undefined, id: string | undefined, tool: string, args: Record<string, unknown>) => {
       const aid = idOf(agentId)
       const r = rec(aid)
+      const before = JSON.stringify(tasks.counts())
+      tasks.began(agentId, id, tool, args)
+      taskChanged(before)
       toolBegan(r.buf, id ?? '', tool, args, edges.now())
       const key = args.session_key
       if (aid !== LEAD && r.sessionKey === undefined && typeof key === 'string' && key.trim() !== '' && edges.ownTool(tool)) r.sessionKey = key.trim()
       markDirty(aid)
     }),
-    toolEnded: guard('tool end', (agentId: string | undefined, id: string | undefined, isError: boolean) => {
+    toolEnded: guard('tool end', (agentId: string | undefined, id: string | undefined, isError: boolean, result?: unknown) => {
+      const before = JSON.stringify(tasks.counts())
+      tasks.ended(agentId, id, isError, result)
+      taskChanged(before)
       const aid = idOf(agentId)
       if (toolEnded(rec(aid).buf, id ?? '', isError, edges.now())) markDirty(aid)
       clearAsk(id)

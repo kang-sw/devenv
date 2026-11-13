@@ -2,6 +2,10 @@
 title: "Dashboard-hosted leads use only the daemon-bundled ws/wsflow plugin"
 related:
   - 261110-feat-ws-hosted-session-mode-flag
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 0d14d9ba63b16c6d
+sage-review-completeness-reviewed: 0d14d9ba63b16c6d
 ---
 
 # Dashboard-hosted leads use only the daemon-bundled ws/wsflow plugin
@@ -20,8 +24,8 @@ ws/wsflow) is acceptable.
   `--setting-sources ""` (:157), `--settings` disabling builtin plugins
   (:141,:158), `--strict-mcp-config --mcp-config` (:159),
   `--disable-slash-commands` unless profile.Skills (:163), `--plugin-dir` only
-  for profile.Plugins (:166); `verifyInit` (:300-310) refuses launch if any
-  plugin outside the profile loads. Pi child (wsagent/pi.go:241-276):
+  for profile plugins (:166); `checkClaudeInit` refuses plugins outside the
+  profile except builtins (agents-plugin-tool/internal/wsagent/claude.go#L255-L260, agents-plugin-tool/internal/wsagent/claude.go#L298-L309). Pi child (wsagent/pi.go:241-276):
   `--no-extensions` then `--extension builtin:mcp`, the generated MCP bridge
   (piMCPServers :198-220), profile plugins.
 - Hosted leads are not isolated. `claudeLeadArgs` (claude.go:97-125)
@@ -29,8 +33,8 @@ ws/wsflow) is acceptable.
   scrub keeps CLAUDE_CONFIG_DIR (:59-95). The lead therefore loads the
   installed `wsflow@kang-sw-devenv` copy, not the daemon's bundled package (on
   the owner machine the local marketplace already resolves to the repo path,
-  0.49.1; see Probe Results). Pi lead (pi.go:283-297) passes only `--mode rpc`
-  and session flags, so `~/.pi/agent/settings.json` packages (the devenv git
+  0.49.1; see Probe Results). Pi lead (pi.go:283-297) passes `--mode rpc`,
+  session flags, and optional model and thinking flags, so `~/.pi/agent/settings.json` packages (the devenv git
   package) and local extensions (orca-*) load.
 - No duplicate load observed; no guard exists on the lead path.
 
@@ -107,11 +111,25 @@ launch args only; lead-observable behavior change noted). Owner answers
   Rejected: `--strict-mcp-config` in isolated mode (owner scoped isolation to
   extensions/plugins).
 - Pi isolated mode: `--no-extensions --extension <bundled Pi extension entry>`.
-- Pi default mode: `--no-extensions --extension <bundled>` plus each non-ws user
-  extension re-added explicitly (enumerate `~/.pi/agent/extensions` entries and
-  settings `packages` extension entries, skipping the package/extension that is
-  the ws Pi package). Rejected: plain launch (loads the installed ws package);
-  relying on a Pi per-package filter (none known).
+- Pi default mode: `--no-extensions --extension <bundled>` plus each non-ws
+  extension re-added explicitly (scope per the Pi default-mode scope decision
+  below). Rejected: plain launch (loads the installed ws package); relying on a
+  Pi per-package filter (none known).
+- Pi default-mode scope (auto-confirmed, raised by fact population): restore
+  every non-ws extension the plain launch would load: user
+  `~/.pi/agent/extensions` entries, settings `packages` extension entries, and
+  project `.pi/extensions` entries of the session cwd. Skip only the ws/wsflow
+  Pi package. Rejected: restoring user-level extensions only (would silently
+  drop project extensions in default mode).
+- Bundled Pi extension entry (auto-confirmed, raised by fact population): the
+  `agents-plugin-pi` package beside the daemon's own plugin package root (same
+  checkout/release; repo sibling `agents-plugin-pi/` in dev builds). Resolve it
+  relative to the bundled package root and use the extension entry declared in
+  its manifest (e.g. `src/index.ts`). If it is not found, launch the Pi lead
+  with the child-style ws MCP bridge (`--extension builtin:mcp` plus the
+  generated bridge, as `piMCPServers` does in wsagent/pi.go) and record a
+  warning on the session. Rejected: requiring a separately installed Pi package
+  (defeats the bundled-only goal).
 - Per-session field: the session spawn request carries an isolation level
   `default|isolated` set by the dashboard session-spawn modal (UI owned by the
   UI-track session); an optional config key may supply the modal's default.
@@ -121,11 +139,33 @@ launch args only; lead-observable behavior change noted). Owner answers
 - Read before editing: `ai-docs/manuals/shipped-surface-boundary.md`,
   `ai-docs/manuals/release-compatibility.md` (T0), and
   `ai-docs/manuals/ws-mcp.md` if `agents-plugin-tool/internal/mcp/` is touched.
-- Child launch path (`claudeArgs`, `verifyInit`, Pi child) unchanged.
+- Child launch path (`claudeArgs`, `checkClaudeInit`, Pi child) unchanged (agents-plugin-tool/internal/wsagent/claude.go#L128-L130, agents-plugin-tool/internal/wsagent/claude.go#L255-L260).
 - Spawn-modal UI is out of scope (UI track); this ticket adds the backend
   plumbing and the per-session field.
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
 - Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for agents-plugin/rsrc/, agents-plugin/skills/, agents-plugin/hooks/, agents-plugin-wsflow/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+
+## Prior Decisions
+
+- unavailable: wsflow/rationale.query is not exposed in this session; prior-decision search must be completed before routing.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsagent/claude.go, pi.go, http.go, runner.go, record.go, backend.go |
+| scope.surface | public-interface | lead spawn request and persisted session field change; backend launch behavior is observable |
+| scope.new_public_symbol | no | no new exported symbol specified; request adds an isolation field |
+| scope.new_type_contract | yes | lead spawn request and persisted record gain default or isolated isolation level |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsagent/claude_test.go, pi_test.go, lead_http_test.go, lead_recovery_test.go |
+| complexity.reuse_points | confirmed | wsrsrc.ResolveRoot and agentMCPCommand derive package resource and launcher paths; the bundled Pi extension entry is resolved beside the same package root (agents-plugin-pi, fallback to builtin:mcp bridge) |
+| complexity.side_effect_risk | high | changes plugin loading and persistence for hosted Claude and Pi leads |
+| risk.correctness | high | installed-plugin enumeration and Pi extension restoration must preserve other extensions and resume behavior |
+| risk.fit | high | Pi distribution and discovery must match daemon packaging and existing hosted-session contracts |
+| risk.test | high | two harnesses and live plugin loading require coverage beyond argv tests |
+| risk.security_or_contract | high | user plugin isolation and a persisted spawn request field affect trust and compatibility |
 
 ## Phases
 
@@ -135,7 +175,14 @@ Code sites (agents-plugin-tool/internal/wsagent/):
 - `claude.go` `claudeLeadArgs` (:97-125): add `--settings` disabling installed
   ws/wsflow (all IDs in isolated mode) and `--plugin-dir <bundled>`.
 - `pi.go` `piLeadArgs` (:283-297): add `--no-extensions --extension <bundled>`
-  and, in default mode, the re-added non-ws user extensions.
+  where `<bundled>` is the `agents-plugin-pi` manifest entry resolved beside the
+  bundled package root; if missing, switch to the `--extension builtin:mcp` +
+  `piMCPServers` bridge and record a session warning. In default mode, also
+  re-add Pi's full resolved, enabled extension loadout minus ws: user
+  `~/.pi/agent/extensions`, settings `packages` and explicit `extensions`
+  entries, enabled builtins, and the session cwd `.pi/extensions` (per Pi's
+  package-manager.js and resource-loader.js), preserving Pi's trust handling,
+  ordering, and deduplication.
 - Field: `leadRequest` (`http.go:87`; the leads route at `http.go:157-162` calls
   `CreateLead`) -> `LeadOptions` (`runner.go:496`) -> `CreateLead`
   (`runner.go:514`) -> `Record` (`record.go:27`, next to `PermissionMode` :57,
@@ -150,5 +197,13 @@ Verification:
 - Unit tests for argv in both modes and both backends: installed ws/wsflow IDs
   disabled, bundled plugin-dir present, non-ws user Pi extensions re-added in
   default mode; field default `default`.
+- The isolation level persists on the session record; a resumed or relaunched
+  session starts in the same isolation mode (default or isolated) it was
+  created with.
+- Unit test: Pi default-mode argv includes a project `.pi/extensions` entry of
+  the session cwd.
+- Unit test: when the bundled `agents-plugin-pi` entry is missing, the Pi lead
+  argv falls back to `--extension builtin:mcp` with the generated bridge, and
+  the session records a warning.
 - One live check: a hosted Claude lead's init event shows only one wsflow, from
   the bundled path.

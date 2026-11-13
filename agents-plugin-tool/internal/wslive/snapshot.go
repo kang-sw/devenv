@@ -196,7 +196,10 @@ const (
 // Usage is what a status event reports. Each part is absent when the host
 // has no figure for it, and a status event replaces the whole value.
 type Usage struct {
-	Context *UsageContext `json:"context,omitempty"`
+	// Optional harness-owned task counts; nil means unknown, zero means none.
+	Background *int          `json:"background,omitempty"`
+	Monitors   *int          `json:"monitors,omitempty"`
+	Context    *UsageContext `json:"context,omitempty"`
 	// Limits holds at most one limit per kind, the 5-hour limit first.
 	Limits []UsageLimit `json:"limits,omitempty"`
 	Cost   *UsageCost   `json:"cost,omitempty"`

@@ -401,6 +401,12 @@ describe("bounded capture", posixOnly, () => {
   });
 });
 
+test("completion metadata preserves the task kind for wake classification", () => {
+  const result: BackgroundTaskResult = { id: "task", why: "watch", command: "echo done", startedAt: 0, code: 0, signal: null, output: "done", ending: "exited" };
+  assert.equal(backgroundTaskReportFields(result).task_kind, "monitor");
+  assert.equal(backgroundTaskReportFields({ ...result, timeoutS: 60 }).task_kind, "timed");
+});
+
 describe("fan-in status line with background tasks", () => {
   const registryWith = (running: boolean) => new Map([["a", { threadBound: false, running, streaming: false }]]) as unknown as RpcAgentRegistry;
   const cases: Array<[RpcAgentRegistry | undefined, { timed: number; monitors: number }, string | undefined]> = [
