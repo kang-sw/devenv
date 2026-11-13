@@ -109,6 +109,17 @@ class SeedPackageTest(unittest.TestCase):
             self.assertEqual(dev.run_daemon_start(self.launcher, self.built, 123), {"outcome": "started"})
         self.assertEqual(run.call_args.args[0], [str(self.built), "daemon-start", "--build-time", "123"])
 
+    def test_daemon_start_points_rsrc_root_at_checkout_package(self):
+        # The daemon resolves the Pi worker launcher as <dir(WS_RSRC_ROOT)>/bin/ws-mcp-launcher.py.
+        stale = {"WS_RSRC_ROOT": "/stale/cache/rsrc", "WS_SKILLS_ROOT": "/stale/cache/skills"}
+        with mock.patch.dict(dev.os.environ, stale),                 mock.patch.object(dev.subprocess, "run", return_value=mock.Mock(returncode=0, stdout='{"outcome":"started"}', stderr="")) as run:
+            dev.run_daemon_start(self.launcher, self.built, 123)
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["WS_RSRC_ROOT"], str(dev.DAEMON_PACKAGE / "rsrc"))
+        self.assertEqual(env["WS_SKILLS_ROOT"], str(dev.DAEMON_PACKAGE / "skills"))
+        self.assertTrue((Path(env["WS_RSRC_ROOT"]).parent / "bin" / "ws-mcp-launcher.py").is_file())
+        self.assertTrue(Path(env["WS_SKILLS_ROOT"]).is_dir())
+
     def test_no_marker_untouched(self):
         result = dev.seed_package(self.launcher, self.plugin, self.built)
         self.assertEqual(result, "not local-devenv")
