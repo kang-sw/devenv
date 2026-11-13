@@ -189,9 +189,10 @@ type Daemon struct {
 	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
 	inboxMu sync.Mutex
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
-	lan     bool
-	tokenMu sync.Mutex
-	memoMu  sync.Mutex // serializes daemon-local memo read/modify/write
+	lan       bool
+	tokenMu   sync.Mutex
+	memoMu    sync.Mutex      // serializes daemon-local memo read/modify/write
+	planUsage *planUsageStore // daemon-private account usage, never credentials
 	// pprof serves the pprof routes (pprofHandler).
 	pprof bool
 	// buildTime is the build time /health reports; zero is unknown.
@@ -364,6 +365,8 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 			StartedAt:     time.Now().UTC().Format(time.RFC3339),
 		},
 	}
+	home, _ := os.UserHomeDir()
+	d.planUsage = newPlanUsageStore(opts.Dir, home, os.Getenv)
 	d.cache = newPageCache(d.broker, stats)
 	if d.refreshInterval <= 0 {
 		d.refreshInterval = sseRefreshInterval
@@ -511,7 +514,11 @@ func newToken() (string, error) {
 // (SessionForgetter), once it left the index.
 func (d *Daemon) sessionChanged(replyID string) {
 	if d.index != nil {
-		if _, ok := d.index.Session(replyID); !ok {
+		if session, ok := d.index.Session(replyID); ok {
+			if session.Harness == "claude" {
+				d.planUsage.pushClaude(d.snapshots.Snapshot(d.dir, replyID))
+			}
+		} else {
 			d.entries.drop(replyID)
 			d.entryFiles.drop(replyID)
 			d.railMsgs.drop(replyID)
@@ -643,6 +650,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
 	mux.HandleFunc("/rail/memos", d.handleMemos)
+	mux.HandleFunc("/rail/usage", d.handlePlanUsage)
 	if d.workspaces != nil {
 		d.workspaceRoutes(mux)
 	}

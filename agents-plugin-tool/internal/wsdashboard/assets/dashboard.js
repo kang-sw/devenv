@@ -5344,7 +5344,8 @@
   // rp is the open rail popover (the next blocks): its controller P, kind,
   // what it concerns (ws: a workspace, the folder a new session starts in,
   // or the viewed session), and the button it hangs from.
-  var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpIds = 0;
+  var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpUsage = null, rpIds = 0;
+  var usageGutter = railEl && window.WsUsage ? window.WsUsage.mount(doc, railEl) : null;
   function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches) && (!root.hasAttribute("data-pincol") || !!(RAIL_XWIDE && RAIL_XWIDE.matches)); }
   function railShown() { return root.classList.contains("rail-open"); }
   // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column.
@@ -5377,6 +5378,7 @@
       ws.classList.toggle("col", col);
       if (tog) tog.setAttribute("aria-expanded", String(!col));
     });
+    if (usageGutter) usageGutter.sync();
     railPopSync();
   }
   if (railEl && WsRail) {
@@ -5407,6 +5409,8 @@
         railMarks();
         return;
       }
+      var usage = t.closest && t.closest(".usage-toggle");
+      if (usage && usageGutter) { e.preventDefault(); railPopOpen("usage", usage); return; }
       var add = t.closest && t.closest(".radd");
       if (add) {
         e.preventDefault();
@@ -5930,7 +5934,8 @@
     if (!rp.P) return null;
     if (rp.btn && rp.btn.isConnected) return rp.btn;
     var r = region("rail"), h = region("head"), found = null;
-    if (rp.kind === "sess") found = h && h.querySelector(".host.hbtn");
+    if (rp.kind === "usage") found = r && r.querySelector(".usage-toggle");
+    else if (rp.kind === "sess") found = h && h.querySelector(".host.hbtn");
     else if (r) q(rp.kind === "lead" ? ".rnew" : '.radd[data-add="' + rp.kind + '"]', r).forEach(function (b) {
       if (rpKey(rp.kind, b) === rp.ws) found = b;
     });
@@ -5971,7 +5976,7 @@
     var bar = btn.closest(".rws"), ws = rpKey(kind, btn);
     if (rp.P && rp.kind === kind && rp.ws === ws) { railPopClose(true); return; }
     railPopClose(false);
-    var P = kind === "wt" ? rpWt || (rpWt = rpWtMake()) : kind === "lead" ? rpLead || (rpLead = rpLeadMake()) : kind === "sess" ? rpSess || (rpSess = rpSessMake()) : rpWs || (rpWs = rpWsMake());
+    var P = kind === "usage" ? rpUsage || (rpUsage = usageGutter.makePopover(railPopPlace, function () { railPopClose(true); })) : kind === "wt" ? rpWt || (rpWt = rpWtMake()) : kind === "lead" ? rpLead || (rpLead = rpLeadMake()) : kind === "sess" ? rpSess || (rpSess = rpSessMake()) : rpWs || (rpWs = rpWsMake());
     if (!P.el.parentNode) doc.body.appendChild(P.el);
     rp = { P: P, kind: kind, ws: ws, btn: btn };
     btn.setAttribute("aria-expanded", "true");
@@ -6027,7 +6032,7 @@
     doc.addEventListener("click", function (e) {
       var t = e.target;
       if (!rp.P || !t || !t.closest) return;
-      if (rp.P.el.contains(t) || t.closest(".radd, .rnew, .hbtn")) return;
+      if (rp.P.el.contains(t) || t.closest(".radd, .rnew, .hbtn, .usage-toggle")) return;
       railPopClose(false);
     }, true);
     window.addEventListener("resize", railPopPlace);
