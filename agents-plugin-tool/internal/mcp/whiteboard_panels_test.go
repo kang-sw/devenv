@@ -446,3 +446,19 @@ func TestWhiteboardMailboxPanel(t *testing.T) {
 		t.Fatalf("recv rows do not show the ring's titles: %q", got)
 	}
 }
+
+// TestWhiteboardFilePageResolvesTopicTickets pins the file page's ticket
+// resolver: each linked stem's badge carries the status of the directory
+// holding it, at render time, and unknown for a stem no directory holds.
+func TestWhiteboardFilePageResolvesTopicTickets(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	writeTicket(t, f.root, "ready", "261101-feat-go", "Go")
+	writeTicket(t, f.root, ".dropped", "261101-bug-gone", "Gone")
+	f.update(t, `<wb:topic name="t" tickets="261101-feat-go 261101-bug-gone 261101-chore-nowhere"><wb:log>working</wb:log></wb:topic>`)
+	page := f.fullPage(t)
+	for _, want := range []string{`class="tk ready" title="261101-feat-go · ready"`, `class="tk dropped" title="261101-bug-gone · dropped"`, `class="tk unknown" title="261101-chore-nowhere · unknown"`, `<section class="topic live"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the file page lacks %q", want)
+		}
+	}
+}
