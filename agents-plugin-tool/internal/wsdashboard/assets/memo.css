@@ -1,0 +1,35 @@
+/* The memo pad slides from behind the rail, after its entrance. The same
+   rail-open state lifts a permanent column above the scrim on wide screens. */
+.memo-pad { position: fixed; z-index: 44; left: var(--memo-left, 352px); top: var(--memo-top, 12px); bottom: 12px; width: 320px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; gap: 10px; padding: 16px; box-sizing: border-box; border-radius: 0 12px 12px 0; color: var(--wb-fg); background: color-mix(in srgb, #f6da75 24%, var(--wb-card)); box-shadow: var(--wb-shadow-hi); visibility: hidden; opacity: 0; transform: translateX(-100%); pointer-events: none; transition: transform .22s ease, opacity .16s, visibility 0s linear .22s; }
+.rail-open .memo-pad { visibility: visible; opacity: 1; transform: none; pointer-events: auto; transition: transform .24s ease .18s, opacity .18s .18s; }
+.rail-open .rail { z-index: 45; }
+.rail-open .rscrim { display: block; position: fixed; inset: 0; z-index: 43; background: var(--scrim); opacity: 1; pointer-events: auto; }
+.memo-pad header { display: flex; align-items: start; gap: 10px; }
+.memo-pad header b { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.memo-pad button { cursor: pointer; color: inherit; background: transparent; border: 0; border-radius: 4px; padding: 3px 6px; }
+.memo-pad button:hover { background: rgb(127 127 127 / .2); }
+.memo-pad textarea { box-sizing: border-box; width: 100%; min-height: 64px; padding: 10px; resize: vertical; font: inherit; color: inherit; background: var(--wb-card); border: 1px solid var(--wb-line); border-radius: 6px; }
+.memo-pad [hidden] { display: none; }
+#memo-status { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+#memo-status:empty { display: none; }
+.memo-list { flex: 1; min-height: 0; overflow: auto; }
+.memo-note { position: relative; margin-bottom: 12px; padding: 14px 28px 14px 12px; background: color-mix(in srgb, #f6da75 40%, var(--wb-card)); border-radius: 3px 3px 12px 3px; box-shadow: 0 2px 4px rgb(0 0 0 / .12); }
+.memo-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.memo-text[role="button"] { cursor: text; }
+.memo-note .memo-delete { position: absolute; right: 3px; top: 3px; opacity: 0; }
+.memo-note:hover .memo-delete, .memo-note:focus-within .memo-delete { opacity: 1; }
+.rail .memo-count { flex: none; white-space: nowrap; border: 0; border-radius: 999px; background: rgb(127 127 127 / .18); color: inherit; font-size: 11px; padding: 2px 6px; cursor: pointer; }
+@media (hover: none) { .memo-note .memo-delete { opacity: 1; } }
+@media (min-width: 1600px) {
+  :root:not([data-pincol]).rail-open .rail { position: relative; transform: translateY(-3px); box-shadow: var(--wb-shadow-hi); transition: transform .18s ease; }
+}
+@media (min-width: 2200px) {
+  :root[data-pincol].rail-open .rail { position: relative; transform: translateY(-3px); box-shadow: var(--wb-shadow-hi); transition: transform .18s ease; }
+}
+@media (max-width: 699.98px) {
+  .rail-open .rail { bottom: auto; height: 42dvh; }
+  .memo-pad { left: 12px; right: 12px; top: calc(42dvh + 12px); width: auto; border-radius: 0 0 12px 12px; transform: translateY(-100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .memo-pad, .rail-open .memo-pad, .rail-open .rail { transition: none !important; transform: none !important; }
+}

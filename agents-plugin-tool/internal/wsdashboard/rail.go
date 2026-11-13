@@ -57,6 +57,13 @@ func (d *Daemon) railView(r pageReader) RailView {
 		}
 	}
 	view := buildRailView(inputs, d.rail.lists(wanted), stored, now)
+	for i := range view.Workspaces {
+		// Optional memo state must never prevent the rail from rendering.
+		doc, err := readMemoDoc(memoFile(d.dir, view.Workspaces[i].Path))
+		if err == nil {
+			view.Workspaces[i].MemoCount = len(doc.memos())
+		}
+	}
 	view.CanAdd = d.workspaces != nil
 	view.CanSpawn = d.agents != nil
 	return view
