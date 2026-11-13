@@ -20,7 +20,7 @@
 
 {{define "closedpage"}}<div class="closed-page">{{range .Topics}}{{template "topic" ($.TopicOf .)}}{{end}}{{template "closedmore" .}}</div>{{end}}
 
-{{define "closedmore"}}{{with .ClosedMore}}{{if $.DocFramed}}<button class="btn closed-more" data-closed-next="{{$.ClosedNext}}">{{t "wb.closed.showmore" .}}</button>{{else}}<div class="closed-more">{{t "wb.closed.more" .}}</div>{{end}}{{end}}{{end}}
+{{define "closedmore"}}{{with .ClosedMore}}{{if $.DocFramed}}<button class="btn closed-more" data-closed-next="{{$.ClosedNext}}" data-closed-more="{{.}}">{{t "wb.closed.showmore" .}}</button>{{else}}<div class="closed-more">{{t "wb.closed.more" .}}</div>{{end}}{{end}}{{end}}
 
 {{define "tago"}}{{with .UpdatedAt}}<time class="tago" datetime="{{.}}" title="{{t "wb.updated"}}"{{if $.Page.Full}} data-at="{{$.UpdatedMs}}"{{end}}>{{$.UpdatedClock}}</time>{{end}}{{end}}
 

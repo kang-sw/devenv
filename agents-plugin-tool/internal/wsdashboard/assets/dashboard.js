@@ -687,6 +687,15 @@
     }
     window.WsCards.mount(cardBoard, {
       key: "ws.dashboard.cards." + rid, load: load, save: save,
+      toolbar: {
+        search: function () { var b = $("tkqs"); if (b) b.click(); },
+        files: fpane && window.WsFiles ? function () {
+          if (!tabShown("convo")) setTab("convo");
+          setCtab("files");
+          var filter = fpane.querySelector("input");
+          if (filter) filter.focus();
+        } : null
+      },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
       layout: function (on) {
@@ -806,7 +815,10 @@
         pages[0].insertBefore(s, anchor);
       });
       var tail = q("button.closed-more[data-closed-next]", pages[pages.length - 1]).pop();
-      if (tail) tail.setAttribute("data-closed-next", String(+more.getAttribute("data-closed-next") + count));
+      if (tail) {
+        tail.setAttribute("data-closed-next", String(+more.getAttribute("data-closed-next") + count));
+        tail.setAttribute("data-closed-more", String(Math.max(0, (+more.getAttribute("data-closed-more") || 0) - count)));
+      }
       want.splice.apply(want, [want.indexOf(more), 1].concat(pages));
       ins.splice(ins.indexOf(more), 1);
     }
