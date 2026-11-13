@@ -407,6 +407,9 @@
     "261113-bug-ws-only-the-dashboard-daemon-runs-an-exe": {
       "registered_at": "2026-11-13T02:44:42Z"
     },
+    "261113-bug-ws-pi-explore-local-query-fails-on-web-search-provider": {
+      "registered_at": "2026-11-13T10:25:03Z"
+    },
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
     },
