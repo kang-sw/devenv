@@ -1,7 +1,9 @@
 package wswhiteboard
 
 import (
+	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -208,7 +210,96 @@ type TopicView struct {
 	UpdatedClock string
 	// Fresh counts the items new since the previous embed (embed only).
 	Fresh int
+	// Tickets are the topic's linked tickets, in the order the lead wrote
+	// them, each with the status ViewInput.Tickets resolved at render time.
+	Tickets []TicketBadge
+	// Live marks a topic with live work: at least one linked ticket still
+	// idea, todo, or ready whose category is actionable (liveCategories).
+	// The page gives it a glow.
+	Live bool
 }
+
+// Linked ticket statuses: a ticket's status directory, or TicketUnknown for
+// a stem the resolver does not find.
+const (
+	TicketIdea    = "idea"
+	TicketTodo    = "todo"
+	TicketReady   = "ready"
+	TicketDone    = "done"
+	TicketDropped = "dropped"
+	TicketUnknown = "unknown"
+)
+
+// liveCategories are the ticket categories (a stem's second segment) whose
+// open tickets light a topic's glow: work to carry out. A linked research or
+// epic ticket still shows as a badge, but never makes a topic live.
+var liveCategories = []string{"feat", "bug", "refactor", "chore"}
+
+// TicketResolver resolves a linked ticket stem to its status: the status
+// directory that holds it (TicketIdea, TicketTodo, TicketReady, TicketDone,
+// or TicketDropped), false when none does. The host supplies it; this
+// package never reads a ticket tree.
+type TicketResolver interface {
+	TicketStatus(stem string) (status string, ok bool)
+}
+
+// TicketBadge is one linked ticket as a topic bar shows it.
+type TicketBadge struct {
+	// Stem is the full stem; Name is the stem without its date prefix, the
+	// badge's text.
+	Stem, Name string
+	// Status is the resolved status, TicketUnknown when the resolver does
+	// not find the stem (or the view has no resolver).
+	Status string
+}
+
+// live reports whether the badge's ticket is open work of an actionable
+// category.
+func (b TicketBadge) live() bool {
+	switch b.Status {
+	case TicketIdea, TicketTodo, TicketReady:
+	default:
+		return false
+	}
+	parts := strings.SplitN(b.Name, "-", 2)
+	return slices.Contains(liveCategories, parts[0])
+}
+
+// ticketBadges resolves stems through resolve (nil resolves none), caching
+// each stem's status in seen across the view's topics.
+func ticketBadges(stems []string, resolve TicketResolver, seen map[string]string) []TicketBadge {
+	var out []TicketBadge
+	for _, stem := range stems {
+		status, ok := seen[stem]
+		if !ok {
+			status = TicketUnknown
+			if resolve != nil {
+				if s, found := resolve.TicketStatus(stem); found && slices.Contains([]string{TicketIdea, TicketTodo, TicketReady, TicketDone, TicketDropped}, s) {
+					status = s
+				}
+			}
+			seen[stem] = status
+		}
+		name := stem
+		if _, rest, cut := strings.Cut(stem, "-"); cut {
+			name = rest
+		}
+		out = append(out, TicketBadge{Stem: stem, Name: name, Status: status})
+	}
+	return out
+}
+
+// HeadSummary reports whether the topic's head carries its summary line: an
+// open topic with a latest agent line or a check list. The line holds the
+// agent line (never a legacy recap or a system event) and the check pill.
+func (t TopicView) HeadSummary() bool {
+	return !t.Closed && (t.LatestAgent != nil || t.ChecksShown())
+}
+
+// LegacyRecapOpen reports whether an open topic shows an unconverted legacy
+// recap, as a card under the head: it has no agent line to stand in the
+// head.
+func (t TopicView) LegacyRecapOpen() bool { return t.RecapOpen() && t.LatestAgent == nil }
 
 // DocOpen reports whether the topic's body renders open.
 func (t TopicView) DocOpen(embed bool) bool {
@@ -434,6 +525,9 @@ type ViewInput struct {
 	DocImageSrc  func(path string) string
 	FileActions  func(path string) FileAction
 	OutsideImage func(path string) FileAction
+	// Tickets resolves each topic's linked ticket stems to their status;
+	// nil shows every linked ticket as unknown.
+	Tickets TicketResolver
 	// Closed, when set, builds the view of the capped closed topics alone,
 	// the served page's show-more fetch; nil builds the whole board with the
 	// first ClosedCap of them.
@@ -532,8 +626,11 @@ func BuildView(state *State, in ViewInput) View {
 		}
 	}
 
+	ticketStatus := map[string]string{}
 	for _, doc := range state.Topics {
 		block := blockOf(doc.Name)
+		block.Tickets = ticketBadges(doc.Tickets, in.Tickets, ticketStatus)
+		block.Live = slices.ContainsFunc(block.Tickets, TicketBadge.live)
 		block.Doc = doc.Body
 		block.DocMarks = doc.Marks
 		block.DocStale = itemsChanged[doc.Name] > doc.Changed

@@ -264,9 +264,9 @@ func TestStemmedTopicPageNamesItsKey(t *testing.T) {
 	for _, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		wantAll(t, out,
-			`<section class="topic" data-topic="ship-gate"><div class="tbar"><span class="tlead"><span class="tname">출시 게이트</span>`,
+			`<section class="topic" data-topic="ship-gate"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">출시 게이트</span>`,
 			`<textarea class="note tnote" data-topic="ship-gate"`,
-			`<section class="topic" data-topic="Plain title"><div class="tbar"><span class="tlead"><span class="tname">Plain title</span>`)
+			`<section class="topic" data-topic="Plain title"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">Plain title</span>`)
 	}
 	// The note line takes the topic from data-topic, not the visible name.
 	formJS, err := embeddedAsset("form.js")

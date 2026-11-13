@@ -1520,7 +1520,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .tbar:hover .tpin, .tbar .tpin:focus-visible { opacity: .9; }
 .tbar .tpin[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); }
 .tbar .tpin[aria-pressed="true"] .li, .bc-pin[aria-pressed="true"] .li { fill: color-mix(in srgb, var(--wb-primary) 25%, transparent); }
-.r-board section.topic > .tbar, .bpins section.topic > .tbar, .bc-hd { cursor: grab; }
+.r-board section.topic > .tophead > .tbar, .bpins section.topic > .tophead > .tbar, .bc-hd { cursor: grab; }
 :root[data-bdrag], :root[data-bdrag] * { cursor: grabbing !important; -webkit-user-select: none; user-select: none; }
 .bdrag { opacity: .4; }
 .bdrop { position: fixed; z-index: 46; height: 3px; border-radius: 2px; background: var(--wb-primary); pointer-events: none; }

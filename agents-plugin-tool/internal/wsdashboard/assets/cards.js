@@ -282,7 +282,7 @@
     [board, colOn ? pins : null].forEach(function (box) {
       if (!box) return;
       Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (sec) {
-        var bar = child(sec, "tbar");
+        var head = child(sec, "tophead"), bar = head && child(head, "tbar");
         if (!bar) return;
         var r = topics[sec.getAttribute("data-topic")], on = !!(r && r.pinned && r.el === sec);
         var b = child(bar, "tpin");
@@ -684,7 +684,7 @@
     if (!t.closest || t.closest("button, a, input, textarea, select, summary, label")) return;
     var head = t.closest(".tbar, .bc-hd");
     if (!head) return;
-    var el = head.classList.contains("bc-hd") ? head.closest(".bcard") : head.parentNode;
+    var el = head.classList.contains("bc-hd") ? head.closest(".bcard") : head.closest("section.topic");
     if (!el || el.hasAttribute("data-max") || !(isCard(el) || topicName(el) !== null)) return;
     var u = unitOf(el);
     if (!u) return;
@@ -875,7 +875,7 @@
         box.addEventListener("pointerdown", dragStart);
         box.addEventListener("click", function (e) {
           var b = e.target.closest && e.target.closest(".tpin");
-          if (b && b.parentNode.classList.contains("tbar")) pinTopic(b.parentNode.parentNode, b.getAttribute("aria-pressed") !== "true");
+          if (b && b.parentNode.classList.contains("tbar")) pinTopic(b.parentNode.closest("section.topic"), b.getAttribute("aria-pressed") !== "true");
         });
         box.addEventListener("contextmenu", function (e) { if (dg && dg.touch) e.preventDefault(); });
       });
