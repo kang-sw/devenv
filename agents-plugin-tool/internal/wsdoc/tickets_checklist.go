@@ -13,7 +13,8 @@ var ticketChecklistAcceptedTypes = map[string]bool{
 // ticketChecklistContent is the phase:"content" capture checklist. This
 // constant is the checklist's single source; no playbook restates it.
 const ticketChecklistContent = `1. Capture every settled decision, contract, agreed API/type/event/UI sketch (literal, not prose-flattened), rejected alternative, constraint, forward-compatibility guardrail, and verification expectation; include suggested implementation strategy only when it was agreed, constrains implementation, or is needed to recover the intended contract.
-2. Exclude anything unconfirmed — return it to the Open Decision Queue instead of writing it; exclude source-local edit notes unless they are settled constraints.`
+2. Exclude anything unconfirmed — return it to the Open Decision Queue instead of writing it; exclude source-local edit notes unless they are settled constraints.
+3. When the user approved a visual reference, check that it is stored in the ticket's tracked assets folder, linked by path, and that the verification requires a side-by-side comparison of a result capture against it.`
 
 // ticketChecklistIntent is the phase:"intent" conversation-fidelity check: the
 // one question the promotion-time sage review cannot answer, because the sage

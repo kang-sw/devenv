@@ -84,9 +84,12 @@ Markdown up to the closing tag.
   namespace: a stem or label another topic already uses is refused.
 - `class`: `policy`, `technical`, `announced`, or `check`, the kinds of ask
   in the workflow manual's `### Asking the user`. A `check` is a gate, not a
-  decision class: a request that the user look at, verify, or approve
-  something ("OK this draft and I'll proceed", "verify on your machine"). It
-  renders as a checklist in the topic, and the user answers each
+  decision class: a request that the user look at, verify, or confirm a
+  finished artifact, or an action whose choice is already settled ("OK this
+  draft and I'll proceed", "verify on your machine"). A "should we do X?" or
+  "which one?" ask, a yes/no one included, is a `policy` item with options,
+  never a check. Write one verifiable thing per check, never several bundled.
+  It renders as a checklist in the topic, and the user answers each
   one individually: `ok`, `no`, or a note. An item belongs to its group's
   topic, which groups items on the page; `wb:title` is one line.
 - `id` on `wb:add`: omitted, the server mints one past the highest ID it has
