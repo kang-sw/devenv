@@ -205,10 +205,10 @@ process.stdout.write(bad.join("\n"));
 // line with a warning.
 func TestSlashCommandRestoresAsSelection(t *testing.T) {
 	mention, dash := pageScripts(t)
-	restore := composerFunc(t, dash, "restoreHeld") + composerFunc(t, dash, "restoreHeldNow")
+	restore := composerFunc(t, dash, "restoreHeld") + composerFunc(t, dash, "restoreHeldNow") + composerFunc(t, dash, "validPicks") + composerFunc(t, dash, "validConsoles")
 	send := composerFunc(t, dash, "sendMessage")
 	runNode(t, "slash restore", slashDOM+mention+slashPrelude+`
-var imgSeq = 0, chips = {}, bmentions = [], holdSync = false, MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
+var imgSeq = 0, chips = {}, bmentions = [], wpicks = [], wconsoles = [], holdSync = false, MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
 function allNums() { return markerNums(ctext.value); } function syncMarkers() {}
 function markerNums(text) { var out = {}, re = new RegExp(MARKER, "g"), m; while ((m = re.exec(text))) out[+m[1]] = true; return out; }
 function marker(n) { return "[Image #" + n + "]"; }
@@ -235,6 +235,15 @@ ctext.value = "";
 setCommand("compact", "focus");
 uncommand();
 check("Backspace on a capsule with arguments puts them in the box", [cmdSel, ctext.value], [{ name: "compact", args: null }, "focus"]);
+
+// A cancel's picked elements and console blocks go back ahead of the
+// draft's; a malformed one is dropped.
+cmdSel = null; ctext.value = ""; toasts = [];
+wpicks = [{ url: "http://localhost:5173/", selector: "#d", text: "draft" }];
+restoreHeld([{ text: "", picks: [{ url: "http://localhost:5173/a", selector: "#a", text: "A" }, { url: "", selector: "#bad", text: "" }],
+  consoles: [{ url: "http://localhost:5173/a", lines: ["e1", 7, " "] }, { url: "http://localhost:5173/a", lines: [] }] }]);
+check("returned picks go ahead of the draft's", wpicks, [{ url: "http://localhost:5173/a", selector: "#a", text: "A" }, { url: "http://localhost:5173/", selector: "#d", text: "draft" }]);
+check("returned console blocks keep their lines", wconsoles, [{ url: "http://localhost:5173/a", lines: ["e1"] }]);
 process.stdout.write(bad.join("\n"));
 `)
 }

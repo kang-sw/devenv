@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/webframe.js assets/webinject.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/webcard.js assets/webframe.js assets/webinject.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -127,6 +127,10 @@ type pageAssetsData struct {
 	// window.WsTerm), which only a page that offers terminals carries
 	// (sessionPageData.Terminal).
 	TerminalScript template.JS
+	// WebScript is the web card kind (webcard.js, window.WsWeb), which
+	// only a page asked for by a browser on this machine carries
+	// (sessionPageData.SysOpen).
+	WebScript template.JS
 	// XtermCSS is the vendored terminal emulator's stylesheet, which a
 	// page that offers terminals inlines (sessionPageData.Terminal).
 	XtermCSS     template.CSS
@@ -211,6 +215,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		PreviewScript:    template.JS(get("preview.js")),
 		FilesScript:      template.JS(get("files.js")),
 		TerminalScript:   template.JS(get("terminal.js")),
+		WebScript:        template.JS(get("webcard.js")),
 		XtermCSS:         xtermStyle(),
 		LucideSprite:     lucide,
 		WhiteboardCSS:    wb.CSS,

@@ -598,6 +598,9 @@
   // Terminal cards (terminal.js) exist only on a page the server marked
   // data-term; their module adds the "+ Terminal" button at the end of
   // the composer's status line (or fixed at the page's corner without one).
+  // Web cards (webcard.js) exist only on a data-sysopen page; their "+ Web"
+  // button stands beside it, and their picks and console errors go to the
+  // composer's chips (web picks, below).
   // The pinned column (bpcol) is the page body's last column: from 1600px,
   // while anything is pinned, unless the layout menu says "tabs" (one
   // column at a time, where the pins stand atop the board). The root's
@@ -613,6 +616,9 @@
   if (cardBoard) {
     if (window.WsPreview) window.WsPreview.setup({ renderDiff: gwRender, post: post, toast: toast });
     if (window.WsTerm) window.WsTerm.setup({ post: post, toast: toast });
+    // The composer's chips come later in this script: the hooks are hoisted
+    // functions, and cchips is not yet assigned here.
+    if (window.WsWeb) window.WsWeb.setup($("cchips") ? { post: post, toast: toast, rid: rid, addPick: addWebPick, addConsole: addWebConsole } : { post: post, toast: toast, rid: rid });
     var bpcol = null, dbody = cardBoard.closest(".dbody");
     if (dbody) {
       bpcol = doc.createElement("aside");
@@ -651,6 +657,7 @@
       }
     });
     if (window.WsTerm) window.WsTerm.mount($("bcol"));
+    if (window.WsWeb) window.WsWeb.mount($("bcol"));
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
   // --- the Files pane (files.js): mounted once, loaded when first shown -------
@@ -1182,6 +1189,9 @@
   // bmentions are the board mentions the composer holds, in the order added
   // (board mentions, below).
   var bmentions = [];
+  // wpicks and wconsoles are the web card's picked elements and console
+  // blocks the composer holds, in the order added (web picks, below).
+  var wpicks = [], wconsoles = [];
   function chipList() { return chipOrder.map(function (id) { return chips[id]; }); }
   function putChip(c) { if (!chips[c.id]) chipOrder.push(c.id); chips[c.id] = c; }
   function dropChip(id) { delete chips[id]; chipOrder = chipOrder.filter(function (x) { return x !== id; }); }
@@ -1284,6 +1294,80 @@
       el.appendChild(x);
       cchips.appendChild(el);
     });
+    // A web card's picked element: its selector and text; a console block:
+    // its error count and page. The held message shows the same capsules
+    // (dashboard.tmpl achips).
+    wpicks.forEach(function (p, i) {
+      var el = doc.createElement("span"), b = doc.createElement("b"), x = doc.createElement("button");
+      el.className = "achip mchip pchip";
+      el.title = p.url + "\n" + p.selector + (p.text ? "\n" + p.text : "");
+      b.textContent = p.selector;
+      el.appendChild(b);
+      if (p.text) {
+        var t = doc.createElement("span");
+        t.className = "anote";
+        t.textContent = p.text;
+        el.appendChild(t);
+      }
+      x.className = "unchip";
+      x.setAttribute("data-unwpick", String(i));
+      x.title = wsT("js.web.chip.pick.remove");
+      x.textContent = "×";
+      el.appendChild(x);
+      cchips.appendChild(el);
+    });
+    wconsoles.forEach(function (c, i) {
+      var el = doc.createElement("span"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
+      el.className = "achip mchip cchip";
+      el.title = c.url + "\n" + c.lines.join("\n");
+      b.textContent = wsT("js.web.chip.console", c.lines.length);
+      el.appendChild(b);
+      t.className = "anote";
+      t.textContent = c.url;
+      el.appendChild(t);
+      x.className = "unchip";
+      x.setAttribute("data-unwcon", String(i));
+      x.title = wsT("js.web.chip.console.remove");
+      x.textContent = "×";
+      el.appendChild(x);
+      cchips.appendChild(el);
+    });
+  }
+  // --- web picks: what a web card (webcard.js) attaches -------------------------
+  // A picked element and a console block are chips beside the mentions,
+  // sent as the message's picks and consoles. The inbox refuses a send over
+  // its caps whole (WEB_PICKS picks, WEB_CONSOLES console blocks), so the
+  // composer takes no more than that and says so. A cancel or a stored
+  // draft brings them back as they were, even past a cap: the send then
+  // says why, and nothing is lost.
+  var WEB_PICKS = 50, WEB_CONSOLES = 10;
+  function addWebPick(p) {
+    if (wpicks.length >= WEB_PICKS) { noteWarn(wsT("js.web.cap.picks", WEB_PICKS)); return false; }
+    wpicks = wpicks.concat([p]);
+    renderChips();
+    queueDraft();
+    return true;
+  }
+  function addWebConsole(c) {
+    if (wconsoles.length >= WEB_CONSOLES) { noteWarn(wsT("js.web.cap.consoles", WEB_CONSOLES)); return false; }
+    wconsoles = wconsoles.concat([c]);
+    renderChips();
+    queueDraft();
+    return true;
+  }
+  // validPicks and validConsoles keep the well-formed entries of a list a
+  // cancel or a stored draft returned.
+  function validPicks(list) {
+    return (Array.isArray(list) ? list : []).filter(function (p) {
+      return p && typeof p.url === "string" && p.url && typeof p.selector === "string" && p.selector && (p.text == null || typeof p.text === "string");
+    }).map(function (p) { return { url: p.url, selector: p.selector, text: p.text || "" }; });
+  }
+  function validConsoles(list) {
+    return (Array.isArray(list) ? list : []).filter(function (c) {
+      return c && typeof c.url === "string" && c.url && Array.isArray(c.lines);
+    }).map(function (c) {
+      return { url: c.url, lines: c.lines.filter(function (l) { return typeof l === "string" && l.trim(); }) };
+    }).filter(function (c) { return c.lines.length; });
   }
   // topicNote is the board's note for a topic, matched by attribute value so
   // a topic name needs no selector escaping.
@@ -2035,9 +2119,12 @@
     if (sending) return;
     if (cmdSel) { sendCommand(); return; }
     var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes(), said = bmentions.slice();
-    if (!t && !list.length && !pics.length && !notes.length && !said.length) { noteWarn(wsT("js.send.empty")); return; }
+    var wp = wpicks.slice(), wc = wconsoles.slice();
+    if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length) { noteWarn(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
     var body = { text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }), mentions: said };
+    if (wp.length) body.picks = wp;
+    if (wc.length) body.consoles = wc;
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
     if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data, n: p.n }; });
     if (refs.length) {
@@ -2059,6 +2146,8 @@
       sent.forEach(function (c) { setItem(c.id, null); });
       // A mention added during the send stays for the next one.
       bmentions = bmentions.filter(function (m) { return said.indexOf(m) < 0; });
+      wpicks = wpicks.filter(function (p) { return wp.indexOf(p) < 0; });
+      wconsoles = wconsoles.filter(function (c) { return wc.indexOf(c) < 0; });
       // A topic note edited during the send stays for the next one.
       notes.forEach(function (n) {
         if (n.el.value !== n.value) return;
@@ -2094,7 +2183,7 @@
   }
   // restoreHeld puts held messages a cancel or an interrupt took back into
   // the composer, oldest first, ahead of the draft: their texts joined as
-  // paragraphs, their answer chips, their mentions, their topic notes back
+  // paragraphs, their answer chips, their mentions and web picks, their topic notes back
   // on the board's topics (restoreTopics), and their images as chips that
   // reference the written files, with their markers in the returned text
   // and notes. Each message's numbers move above the highest the draft and
@@ -2165,6 +2254,11 @@
     var held = [];
     list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
     bmentions = held.concat(bmentions);
+    // So do their picked elements and console blocks.
+    var hp = [], hc = [];
+    list.forEach(function (res) { hp = hp.concat(validPicks(res.picks)); hc = hc.concat(validConsoles(res.consoles)); });
+    wpicks = hp.concat(wpicks);
+    wconsoles = hc.concat(wconsoles);
     renderChips();
     if (cmd) {
       if (ctext.value.trim()) setCommand(cmd.name, cmd.args || "");
@@ -2414,6 +2508,10 @@
     if (u) { clearTopicNote(u.getAttribute("data-untchip")); renderChips(); return; }
     u = t.closest("[data-unmchip]");
     if (u) { bmentions.splice(+u.getAttribute("data-unmchip"), 1); renderChips(); return; }
+    u = t.closest("[data-unwpick]");
+    if (u) { wpicks.splice(+u.getAttribute("data-unwpick"), 1); renderChips(); return; }
+    u = t.closest("[data-unwcon]");
+    if (u) { wconsoles.splice(+u.getAttribute("data-unwcon"), 1); renderChips(); return; }
     if (t.closest("[data-wbmention]")) { addMention(); return; }
     u = t.closest("[data-tchip]");
     if (u) { focusTopicNote(u.getAttribute("data-tchip")); return; }
@@ -6948,7 +7046,7 @@
   // and the page's view state around it, is kept per session in storage
   // (rail.js drafts), so switching sessions in the rail and coming back
   // finds it: the composer's text, mentions, and selection, its slash
-  // command selection, the board answers and topic notes, the answer chips, the images that reference
+  // command selection, the board answers and topic notes, the answer chips, the web picks, the images that reference
   // written attachments, the open details, and the tab. Pasted images are
   // not kept: their markers leave the composer text and the notes, a
   // restored draft says so, and while the page holds one, leaving it asks
@@ -6964,6 +7062,8 @@
       answers: b ? boardRead(readAnswers) : {},
       chips: chipList(),
       bmentions: bmentions.slice(),
+      wpicks: wpicks.slice(),
+      wconsoles: wconsoles.slice(),
       refs: imgs.filter(function (p) { return !!p.ref; }).map(function (p) { return { ref: p.ref, name: p.name, n: p.n }; }),
       lost: imgs.filter(function (p) { return !p.ref; }).map(function (p) { return p.n; }),
       open: open,
@@ -7017,6 +7117,11 @@
       }
       if (cchips && !bmentions.length && validMentions(d.bmentions).length) {
         bmentions = validMentions(d.bmentions);
+        renderChips();
+      }
+      if (cchips && !wpicks.length && !wconsoles.length && (validPicks(d.wpicks).length || validConsoles(d.wconsoles).length)) {
+        wpicks = validPicks(d.wpicks);
+        wconsoles = validConsoles(d.wconsoles);
         renderChips();
       }
       if (ccmd && !cmdSel && d.cmd && typeof d.cmd.name === "string" && d.cmd.name) setCommand(d.cmd.name, d.cmd.args);

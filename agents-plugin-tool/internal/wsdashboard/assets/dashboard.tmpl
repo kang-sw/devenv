@@ -38,7 +38,8 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.CardsScript}}</script>
 <script>{{.Assets.PreviewScript}}</script>
 <script>{{.Assets.FilesScript}}</script>{{if .Terminal}}
-<script>{{.Assets.TerminalScript}}</script>{{end}}
+<script>{{.Assets.TerminalScript}}</script>{{end}}{{if .SysOpen}}
+<script>{{.Assets.WebScript}}</script>{{end}}
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
