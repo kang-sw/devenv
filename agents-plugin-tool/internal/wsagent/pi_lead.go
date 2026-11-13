@@ -3,6 +3,7 @@ package wsagent
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,9 +23,21 @@ var piBundledPluginRoot = bundledPluginRoot
 // preflight enumeration would execute extensions twice and lose trust hooks.
 var preparePiLeadLaunch = piLeadLaunch
 
+// errPiNoSDK marks the one piSDKPaths refusal that makes default isolation
+// impossible (no JavaScript SDK beside the CLI); piLeadLaunch then starts the
+// lead isolated instead of failing. Every other resolution error still fails.
+var errPiNoSDK = errors.New("pi default plugin isolation requires the Pi JavaScript SDK beside its CLI; install Pi with npm or select isolated mode")
+
+// piNoSDKWarning names the isolated start, so it stays distinguishable from
+// the bridge fallback warning it may be combined with.
+const piNoSDKWarning = "Pi has no JavaScript SDK beside its CLI, so default plugin isolation cannot keep its other extensions; started in isolated mode (bundled ws extension only). Install Pi with npm to restore default mode."
+
 func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []string, error) {
 	args := append(piLeadArgs(spec), "--no-extensions")
 	entries, bundleErr := piBundledEntries()
+	// PluginWarning holds one value: every warning of this launch is joined
+	// into it, and an empty one clears a stale warning.
+	var warnings []string
 	if bundleErr != nil {
 		if spec.Lead.WSMCP == nil {
 			return "", nil, fmt.Errorf("pi bundled extension unavailable (%v); no ws MCP fallback configured", bundleErr)
@@ -42,21 +55,31 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 			return "", nil, err
 		}
 		entries = []string{"builtin:mcp", bridge}
-		if spec.Lead.PluginWarning != nil {
-			spec.Lead.PluginWarning(fmt.Sprintf("Bundled Pi extension unavailable (%v); using the ws MCP bridge instead.", bundleErr))
-		}
-	} else if spec.Lead.PluginWarning != nil {
-		spec.Lead.PluginWarning("")
+		warnings = append(warnings, fmt.Sprintf("Bundled Pi extension unavailable (%v); using the ws MCP bridge instead.", bundleErr))
 	}
 	for _, entry := range entries {
 		args = append(args, "--extension", entry)
 	}
-	if spec.Lead.PluginIsolation == "isolated" {
-		return command, append(pre, args...), nil
+	isolated := spec.Lead.PluginIsolation == "isolated"
+	var cli, sdk string
+	var sdkErr error
+	if !isolated {
+		cli, sdk, sdkErr = piSDKPaths(command, pre)
+		if errors.Is(sdkErr, errPiNoSDK) {
+			// Default mode is impossible on this Pi; start isolated for this
+			// launch only. The session record keeps its isolation value.
+			isolated, sdkErr = true, nil
+			warnings = append(warnings, piNoSDKWarning)
+		}
 	}
-	cli, sdk, err := piSDKPaths(command, pre)
-	if err != nil {
-		return "", nil, err
+	if spec.Lead.PluginWarning != nil {
+		spec.Lead.PluginWarning(strings.Join(warnings, " "))
+	}
+	if sdkErr != nil {
+		return "", nil, sdkErr
+	}
+	if isolated {
+		return command, append(pre, args...), nil
 	}
 	// Keep the original CLI entry point (setup, RPC lifecycle, session and
 	// model selection), but install the resolver adapter before it starts.
@@ -65,6 +88,7 @@ func piLeadLaunch(command string, pre []string, spec StartSpec) (string, []strin
 		return "", nil, err
 	}
 	if len(pre) == 0 {
+		var err error
 		command, err = lookPath("node")
 		if err != nil {
 			return "", nil, fmt.Errorf("pi lead resolver needs node: %w", err)
@@ -181,5 +205,5 @@ func piSDKPaths(command string, pre []string) (cli, sdk string, err error) {
 			break
 		}
 	}
-	return "", "", fmt.Errorf("pi default plugin isolation requires the Pi JavaScript SDK beside its CLI; install Pi with npm or select isolated mode")
+	return "", "", errPiNoSDK
 }
