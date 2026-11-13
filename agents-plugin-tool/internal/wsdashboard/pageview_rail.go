@@ -53,6 +53,12 @@ type RailView struct {
 	// every viewer, so the page itself hides the button from a viewer the
 	// spawn route would refuse.
 	CanSpawn bool
+	// LayoutEmpty reports a rail layout (rail_layout.go) that holds no
+	// entry at all: a browser with a retired local order then imports it. LayoutGen is the layout's generation, which rises with
+	// every change, so a browser that saw a change applied can tell a
+	// render from before it.
+	LayoutEmpty bool
+	LayoutGen   uint64
 }
 
 // RailWorkspace is one repository or plain folder.
@@ -144,6 +150,9 @@ type RailRow struct {
 	// usage limit) that keeps a hosted session from working until a turn
 	// succeeds, as its runner reports it (wslive.Host); nil when none.
 	Failure *wslive.Notice
+	// Starred marks a starred session whose star counts (the rail layout's
+	// stars; a child's is inert while it is a child).
+	Starred bool
 	// Revive is how the dashboard brings an ended session back, on a daemon
 	// that hosts lead sessions: ReviveReopen for a closed hosted session,
 	// ReviveTakeover for a session a terminal harness ran, empty when it
@@ -491,7 +500,8 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 
 // sortRailRows orders live sessions by registration, newest first: the
 // order does not move with heartbeats or activity, so a row stays where the
-// user last saw it (starred rows are pinned on the client).
+// user last saw it (the rail layout orders the rows after it,
+// orderRailView).
 func sortRailRows(rows []RailRow, regs map[string]Registration) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		a, b := regs[rows[i].ReplyID].RegisteredAt, regs[rows[j].ReplyID].RegisteredAt

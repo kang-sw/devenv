@@ -423,7 +423,7 @@ func TestRailRowMailboxRef(t *testing.T) {
 	if want := `class="drcopy" data-copy="` + template.HTMLEscapeString(rows["feat"].MailboxRef()) + `" data-mailbox-open="` + template.HTMLEscapeString(rows["feat"].MailboxOpen) + `"`; !strings.Contains(string(html.HTML), want) {
 		t.Errorf("the rail lacks the labeled row's copy button %s:\n%s", want, html.HTML)
 	}
-	if !strings.Contains(string(html.HTML), `<div class="rlist" id="rlist" data-max="64">`) {
+	if !strings.Contains(string(html.HTML), `<div class="rlist" id="rlist" data-max="64" `) {
 		t.Errorf("the rail list lacks the rename limit:\n%s", html.HTML)
 	}
 }

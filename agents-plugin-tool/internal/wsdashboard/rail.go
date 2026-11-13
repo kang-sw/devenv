@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -21,12 +22,30 @@ const regionRail = "rail"
 // worktree lists.
 const railRoute = "/rail/refresh"
 
-// railView reads what the rail shows: every listed session of the index,
-// its snapshot (stale or not), its repository, and its last message, with
-// the stored workspaces and the worktree lists read so far. A session's
-// repository and a stored one join the lister's wanted set, so a render is
-// what tells the lister which repositories to read.
+// railView reads what the rail shows: railBaseView, ordered by the rail
+// layout (orderRailView), with each workspace's memo count.
 func (d *Daemon) railView(r pageReader) RailView {
+	view := d.railBaseView(r)
+	layout, gen := d.layout.current()
+	orderRailView(&view, layout, railFactsOf(view))
+	view.LayoutGen = gen
+	for i := range view.Workspaces {
+		// Optional memo state must never prevent the rail from rendering.
+		doc, err := readMemoDoc(memoFile(d.dir, view.Workspaces[i].Path))
+		if err == nil {
+			view.Workspaces[i].MemoCount = len(doc.memos())
+		}
+	}
+	return view
+}
+
+// railBaseView reads the rail before its layout orders it: every listed
+// session of the index, its snapshot (stale or not), its repository, and
+// its last message, with the stored workspaces and the worktree lists read
+// so far. A session's repository and a stored one join the lister's wanted
+// set, so a render is what tells the lister which repositories to read.
+// The layout route validates its ops against it (railFactsOf).
+func (d *Daemon) railBaseView(r pageReader) RailView {
 	if d.index == nil {
 		return RailView{}
 	}
@@ -57,13 +76,6 @@ func (d *Daemon) railView(r pageReader) RailView {
 		}
 	}
 	view := buildRailView(inputs, d.rail.lists(wanted), stored, now)
-	for i := range view.Workspaces {
-		// Optional memo state must never prevent the rail from rendering.
-		doc, err := readMemoDoc(memoFile(d.dir, view.Workspaces[i].Path))
-		if err == nil {
-			view.Workspaces[i].MemoCount = len(doc.memos())
-		}
-	}
 	view.CanAdd = d.workspaces != nil
 	view.CanSpawn = d.agents != nil
 	return view
@@ -84,8 +96,9 @@ func renderRailRegion(view RailView, lang string) (renderedRegion, error) {
 
 // railPageSource is the rail's shared render in lang and theme: one for
 // every session page's stream, keyed without a reply-id. Like the index it
-// depends on every wake (a session's change, and the worktree lister's),
-// and its refresh stamp covers what follows the clock.
+// depends on every wake (a session's change, the worktree lister's, and a
+// layout write's), and its refresh stamp covers what follows the clock and
+// the layout's generation.
 func (d *Daemon) railPageSource(lang, theme string) pageSource {
 	pages := d.pagesIn(lang)
 	return pageSource{
@@ -101,8 +114,14 @@ func (d *Daemon) railPageSource(lang, theme string) pageSource {
 		},
 		// The index's stamp covers every listed session's revision (its
 		// snapshot and ring among what raises it), liveness, adapter
-		// presence, and window; the lister's changes come by wake.
-		stamp: func(refreshInputs) (string, bool) { return pages.indexStamp() },
+		// presence, and window; the lister's changes come by wake. The
+		// layout's generation joins it, so a layout change (another
+		// process's write among them) is never skipped as unchanged.
+		stamp: func(refreshInputs) (string, bool) {
+			stamp, ok := pages.indexStamp()
+			_, gen := d.layout.current()
+			return stamp + "/" + strconv.FormatUint(gen, 10), ok
+		},
 	}
 }
 
