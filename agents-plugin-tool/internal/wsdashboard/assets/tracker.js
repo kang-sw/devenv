@@ -80,13 +80,17 @@
 //                          err with status 409 and conflict = {path, kind, reason,
 //                          base, theirs, oursText, theirsText}
 //                        err is {ok: false, error, status} (status 0: not reached)
-//   search(id, q, done)  optional, for the Items panel's search box: the ids of the
+//   search(id, q, done, o)  optional, for the Items panel's search box: the ids of the
 //                        store's items that pass q, parsed by the tracker's search
 //                        grammar (the daemon parses it, so the box and the agents'
-//                        tracker.query q agree). done({ok: true, ids} | {ok: false,
-//                        error}); an error is a malformed query, shown under the box
-//                        with the list left unfiltered. Without it the box matches a
-//                        plain substring of the title, body, project, and id (the mockup)
+//                        tracker.query q agree). done({ok: true, ids, hits} | {ok: false,
+//                        error, status}); an error is a malformed query (status 400),
+//                        shown under the box with the list left unfiltered. o.excerpts
+//                        also asks for hits, [{id, title, alias, kind, status, hidden,
+//                        field (body, comment, or item), comment, text}] (the palette's
+//                        tracker content slot); o.signal aborts the request. Without it
+//                        the box matches a plain substring of the title, body, project,
+//                        and id (the mockup)
 //   hidden()          -> optional: the ids of the stores hidden on this machine, which
 //                        stores() leaves out; the "+ store" dialog lists them
 //   info(id)          -> optional: {id, label, remote, hidden}, the registry entry of
@@ -147,10 +151,24 @@
 //   header           the page header element; the drawer hangs from its bottom edge
 //   qsSlot           an element in the header for the search-palette button
 //   searchRows(update) optional host rows: {group (0..4), kind, title, text?,
-//                    hint?, id?, topic?, href?, at?}; session labels, topics,
-//                    bodies, items, answers in that order. Read on open;
-//                    update(rows) may replace them as older board pages load.
-//   searchPick(row)  opens a selected host row; tracker rows keep their actions
+//                    hint?, id?, topic?, href?, at?}; session labels (the palette's
+//                    strip), then topics, bodies, items, answers (its board slot).
+//                    Read on open; update(rows) may replace them as older board
+//                    pages load.
+//   searchPick(row, o) opens a selected host row; o.keep (Ctrl+Enter) leaves the
+//                    focus in the open palette. Tracker rows keep their actions
+//   The palette's file slots, each optional (without them a slot stays idle):
+//   fileFind(q, signal)   -> Promise of {items: [{path, dir}]}, a name search
+//   fileSearch(q, signal) -> Promise of {files: [{path, matches: [{line, pre, hit,
+//                    post}]}], more}, a literal content search
+//   fileList(dir, signal) -> Promise of {entries: [{name, dir}]}, the absolute
+//                    directory dir's entries; rejects with {status, text}
+//   filePreview(path, {root?, line?})  shows a file (relative to root, else to the
+//                    session root) at an optional line
+//   fileOpen(name, dir)   opens file name of absolute directory dir in the host's
+//                    default app
+//   fileLocal()      -> whether the browser is on the host's machine (path mode)
+//   fileScope()      -> the name of the folder the file slots search, for its label
 //   pageParent       where the store page node goes; while a store page shows, the
 //                    body carries the class tk-paged and the host's CSS hides its
 //                    own conversation column and session drawer
@@ -6086,9 +6104,27 @@
   }
   function leavePage() { history.pushState(null, '', location.pathname + location.search); applyRoute(); }
 
-  // One palette: host session/board rows first, tracker rows last. The host
-  // supplies plain text and a picker; the tracker keeps its existing actions.
-  var qs = { open: false, items: [], idx: 0, back: null, rows: [] };
+  // One palette: five result slots (board, files, content, tracker, tracker
+  // content) and a jump/command strip (sessions, stores, actions). The host
+  // supplies the board rows and their picker (O.searchRows, O.searchPick) and
+  // the file hooks (O.fileFind, O.fileSearch, O.fileList, O.filePreview,
+  // O.fileOpen), so the renderer never reaches a page's file routes itself.
+  // Every query is a generation: a keystroke aborts every request in flight,
+  // and a batch from an older generation is dropped. Local slots answer at
+  // once; files, content, and tracker content wait out QDEBOUNCE, and their
+  // previous rows stay, dimmed, until the new generation's first batch.
+  var QSLOTS = ['board', 'files', 'content', 'tracker', 'tnote'], QASYNC = ['files', 'content', 'tnote'];
+  // the Tab order of each layout step: medium runs the name column, then the text column
+  var QORDER = { narrow: ['all'].concat(QSLOTS), medium: ['board', 'files', 'tracker', 'content', 'tnote'], wide: QSLOTS };
+  // QMAX caps the rows a slot draws and navigates; QTNOTE_CAP the tracker content hits per store
+  var QDEBOUNCE = 80, QMAX = 100, QTNOTE_CAP = 8;
+  function qSlot0() { return { rows: [], state: 'idle', stale: false, more: false, err: '', ms: 0, t0: 0, wait: 0 }; }
+  // cur is the view the keys move in: a slot, 'all' (the narrow layout's first tab), or
+  // 'jump' (the strip; prev is the view it was entered from). sel maps a view to the key of
+  // its selected row, so a late batch never moves the cursor. q is the last query, kept for
+  // the page's lifetime so a reopen restores it.
+  var qs = { open: false, back: null, rows: [], q: '', gen: 0, timer: 0, ctl: [], step: 'narrow', cur: 'all', prev: null, sel: {}, jump: [], path: null, S: {} };
+  QSLOTS.forEach(function (k) { qs.S[k] = qSlot0(); });
   // Fuzzy subsequence score. Try each first match so a scattered early match
   // cannot hide a compact later one. Long prose needs a reasonably dense span.
   function qScore(text, query, prose) {
@@ -6107,21 +6143,439 @@
     }
     return best;
   }
-  function qRank(rows, query) {
-    var q = query.trim().toLowerCase(), jump = /^\.(\d+)$/.exec(q);
-    if (jump) {
-      var ids = rows.filter(function (x) { return x.kind === 'board-item' && x.id.indexOf(jump[1]) === 0; });
-      var exact = ids.filter(function (x) { return x.id === jump[1]; });
-      return (exact.length ? exact : ids).sort(function (a, b) { return Number(a.id) - Number(b.id); });
+  // The layout step follows the palette's own width, not the viewport's.
+  function qStepOf(w) { return w < 600 ? 'narrow' : w < 1000 ? 'medium' : 'wide'; }
+  // The board slot: (n) is exactly item n, one hit; a bare number matches item ids, prefix
+  // matches first; other text matches topics, bodies, items, and answers. With no query it
+  // lists topics, then items, newest first.
+  function qBoard(rows, t) {
+    var ex = /^\((\d+)\)$/.exec(t), hits = [];
+    var items = rows.filter(function (x) { return x.kind === 'board-item'; });
+    if (ex) return items.filter(function (x) { return x.id === ex[1]; }).slice(0, 1);
+    if (/^\d+$/.test(t)) {
+      items.forEach(function (x) { var m = qScore(x.id, t); if (m) hits.push({ row: x, pre: x.id.indexOf(t) === 0, score: m.score }); });
+      hits.sort(function (a, b) { return (b.pre - a.pre) || b.score - a.score || Number(a.row.id) - Number(b.row.id); });
+      return hits.map(function (x) { return x.row; });
     }
-    var hits = [];
     rows.forEach(function (x, i) {
-      if (!q && x.group !== 1 && x.group !== 3) return;
-      var m = qScore(x.text || x.title, q, x.group === 2 || x.group === 4);
+      if (!x.group || (!t && x.group !== 1 && x.group !== 3)) return;
+      var m = qScore(x.text || x.title, t, x.group === 2 || x.group === 4);
       if (m) hits.push({ row: x, score: m.score, order: i });
     });
-    hits.sort(function (a, b) { return a.row.group - b.row.group || (q ? b.score - a.score : (b.row.at || 0) - (a.row.at || 0)) || a.order - b.order; });
+    hits.sort(function (a, b) {
+      return (t ? b.score - a.score || a.row.group - b.row.group : a.row.group - b.row.group || (b.row.at || 0) - (a.row.at || 0)) || a.order - b.order;
+    });
     return hits.map(function (x) { return x.row; });
+  }
+  // The tracker slot: a fuzzy title or alias match over the loaded store views, with no
+  // search grammar (the tracker content slot sends that); with no query, the items in
+  // progress.
+  function qTracker(t) {
+    var hits = [];
+    order.forEach(function (n) {
+      var V = vss[n];
+      if (!V) return;
+      V.itemOrder.forEach(function (id) {
+        var it = V.items[id];
+        if (!it || it.hidden) return;
+        var m = t ? qScore(it.title, t) : it.status === 'doing' ? { score: 0 } : null, a = t && it.alias ? qScore(it.alias, t) : null;
+        if (a && (!m || a.score > m.score)) m = a;
+        if (m) hits.push({ row: { store: n, item: id, title: it.title, alias: it.alias, st: it.kind === 'topic' ? 'topic' : it.status, key: n + '/' + id }, score: m.score, order: hits.length });
+      });
+    });
+    hits.sort(function (a, b) { return b.score - a.score || a.order - b.order; });
+    return hits.map(function (x) { return x.row; });
+  }
+  // The strip: the host's session rows (group 0), the stores, and the store's actions, in
+  // that order with no query, else the fuzzy matches best first.
+  function qStrip(t) {
+    var out = [];
+    qs.rows.forEach(function (x) { if (x.group === 0) out.push({ kind: 'session', title: x.title, href: x.href, row: x }); });
+    order.forEach(function (n) {
+      var st = vss[n] ? vss[n].store : { label: '' };
+      out.push({ kind: 'store', store: n, title: n, label: st.label || '', text: n + ' ' + (st.label || '') });
+    });
+    if (X.qsActions && VS) (X.qsActions(ui.store, VS, t.toLowerCase()) || []).forEach(function (x) { out.push({ kind: 'action', key: x.key, icon: x.icon, title: x.title, hint: x.hint, tag: x.tag }); });
+    if (!t) return out;
+    var hits = [];
+    out.forEach(function (x, i) { var m = qScore(x.text || x.title, t); if (m) hits.push({ row: x, score: m.score, order: i }); });
+    hits.sort(function (a, b) { return b.score - a.score || a.order - b.order; });
+    return hits.map(function (x) { return x.row; });
+  }
+  function qKeyOf(k, r) {
+    if (k === 'board') return r.kind + ':' + (r.id || r.topic || r.title);
+    if (k === 'jump') return r.kind + ':' + (r.href || r.store || r.key || r.title);
+    return r.key;
+  }
+  // qView lists what a view navigates, as {slot, row, key}: one slot's rows, the narrow
+  // layout's "all" tab (each slot's top 3), or the strip's chips.
+  function qView(v) {
+    if (v === 'jump') return qs.jump.map(function (r) { return { slot: 'jump', row: r, key: qKeyOf('jump', r) }; });
+    var out = [];
+    (v === 'all' ? QSLOTS : [v]).forEach(function (k) {
+      qs.S[k].rows.slice(0, v === 'all' ? 3 : QMAX).forEach(function (r) { out.push({ slot: k, row: r, key: k + '|' + qKeyOf(k, r) }); });
+    });
+    return out;
+  }
+  // qIdx is the selected row of view v: the row whose key it last selected while that row
+  // remains, else the first.
+  function qIdx(v) {
+    var list = qView(v), i = 0;
+    for (var j = 0; j < list.length; j++) if (list[j].key === qs.sel[v]) { i = j; break; }
+    if (list[i]) qs.sel[v] = list[i].key;
+    return i;
+  }
+  function qFixCur() {
+    var ord = QORDER[qs.step];
+    if (ord.indexOf(qs.prev) < 0) qs.prev = ord[0];
+    if (qs.cur === 'jump' && !qs.jump.length) qs.cur = qs.prev;
+    if (qs.cur !== 'jump' && ord.indexOf(qs.cur) < 0) qs.cur = ord[0];
+  }
+  // qAbsPath mirrors the daemon's root check (fs_routes.go browseRootParam): an absolute
+  // POSIX path or a Windows drive path. A network path (//host, \\host), a device
+  // namespace (\\?\, \\.\), a Windows device name, ~/, and a relative path are not. The
+  // daemon's refusal stays the authority.
+  function qAbsPath(t) {
+    if (!t || t.indexOf('\u0000') >= 0 || /^[\\/]{2}/.test(t)) return false;
+    if (t.charAt(0) === '/') return true;
+    if (!/^[A-Za-z]:[\\/]/.test(t)) return false;
+    return !t.slice(3).split(/[\\/]/).some(function (e) { return /^(con|prn|aux|nul|com[0-9]|lpt[0-9])\s*([.:].*)?$/i.test(e); });
+  }
+  // qPathOf: an absolute path typed by a browser on the daemon's machine switches the files
+  // slot to path mode, one directory deep: a trailing separator lists that directory, else
+  // its parent filtered by the last segment.
+  function qPathOf(t) {
+    if (!O.fileList || !O.fileLocal || !O.fileLocal() || !qAbsPath(t)) return null;
+    var i = Math.max(t.lastIndexOf('/'), t.lastIndexOf('\\'));
+    return { dir: t.slice(0, i + 1), leaf: t.slice(i + 1), sep: t.charAt(i) };
+  }
+  function qPathRows(a, p) {
+    var leaf = p.leaf.toLowerCase(), pre = [], fz = [];
+    ((a && a.entries) || []).forEach(function (x, i) {
+      // a deleted file (gone) has nothing to open; a link is never opened or descended
+      if (x.gone || x.link) return;
+      var r = { name: x.name, dir: !!x.dir, key: x.name };
+      if (x.name.toLowerCase().indexOf(leaf) === 0) pre.push(r);
+      else { var m = qScore(x.name, leaf); if (m) fz.push({ row: r, score: m.score, order: i }); }
+    });
+    fz.sort(function (a, b) { return b.score - a.score || a.order - b.order; });
+    return pre.concat(fz.map(function (x) { return x.row; }));
+  }
+  // qHitRows turns a store search's excerpt hits into tracker content rows: hidden items
+  // dropped unless the query asks for them (as the Items panel does), at most QTNOTE_CAP.
+  function qHitRows(n, hits, wantHidden) {
+    var V = vss[n], rows = [];
+    hits.forEach(function (h) {
+      var hidden = h.hidden || (V && V.items[h.id] && V.items[h.id].hidden);
+      if (hidden && !wantHidden) return;
+      rows.push({ store: n, item: h.id, title: h.title, alias: h.alias, st: h.kind === 'topic' ? 'topic' : h.status, field: h.field, comment: h.comment || '', text: h.text || '',
+        key: n + '/' + h.id + '/' + (h.comment || h.field) });
+    });
+    return { rows: rows.slice(0, QTNOTE_CAP), more: rows.length > QTNOTE_CAP };
+  }
+  function qErrText(err) {
+    if (err && (err.text || err.message)) return String(err.text || err.message);
+    return err && err.status ? 'HTTP ' + err.status : wsT("js.tk.qs.st.error");
+  }
+  function qAbort() {
+    qs.ctl.forEach(function (c) { c.abort(); });
+    qs.ctl = [];
+    clearTimeout(qs.timer); qs.timer = 0;
+  }
+  function qDone(rows) { var s = qSlot0(); s.rows = rows; s.state = 'done'; return s; }
+  // qRun starts a generation for the input's text: the local slots and the strip answer at
+  // once, the async slots after QDEBOUNCE.
+  function qRun() {
+    var q = $('tkqin').value, t = q.trim(), gen = ++qs.gen, now = Date.now();
+    qAbort();
+    var wasPath = !!qs.path;
+    qs.q = q; qs.sel = {}; qs.path = qPathOf(t);
+    // path rows ({name, dir}) and found files ({path}) draw differently: never keep one as the other's stale rows
+    if (!!qs.path !== wasPath) qs.S.files = qSlot0();
+    qs.jump = qStrip(t);
+    qs.S.board = qDone(qBoard(qs.rows, t));
+    qs.S.tracker = qDone(qTracker(t));
+    var on = { files: !!t && !!(qs.path ? O.fileList : O.fileFind), content: !!t && !qs.path && !!O.fileSearch, tnote: !!t && !!AD.search && order.length > 0 };
+    QASYNC.forEach(function (k) {
+      var s = qs.S[k];
+      if (!on[k]) { qs.S[k] = qSlot0(); return; }
+      s.stale = s.rows.length > 0; s.state = 'run'; s.more = false; s.err = ''; s.t0 = now; s.wait = 0;
+    });
+    if (/^\(\d+\)$/.test(t) && qs.S.board.rows.length) qs.cur = qs.step === 'narrow' ? 'all' : 'board';
+    qRender();
+    if (on.files || on.content || on.tnote) qs.timer = setTimeout(function () { qs.timer = 0; if (gen === qs.gen) qFetch(gen, t, on); }, QDEBOUNCE);
+  }
+  // qLocal re-ranks the local slots and the strip for the same query, after the host's rows
+  // changed (an older board page loaded); the async slots are left as they are.
+  function qLocal() {
+    var t = $('tkqin').value.trim();
+    qs.jump = qStrip(t);
+    qs.S.board = qDone(qBoard(qs.rows, t));
+    qs.S.tracker = qDone(qTracker(t));
+    qRender();
+  }
+  function qFetch(gen, t, on) {
+    function signal() {
+      if (typeof AbortController !== 'function') return undefined;
+      var c = new AbortController();
+      qs.ctl.push(c);
+      return c.signal;
+    }
+    if (on.files && qs.path) {
+      var p = qs.path;
+      O.fileList(p.dir, signal()).then(function (a) { qBatch(gen, 'files', qPathRows(a, p), true); }, function (err) { qFail(gen, 'files', qErrText(err)); });
+    } else if (on.files) O.fileFind(t, signal()).then(function (a) {
+      qBatch(gen, 'files', ((a && a.items) || []).filter(function (x) { return !x.dir; }).map(function (x) { return { path: x.path, key: x.path }; }), true);
+    }, function (err) { qFail(gen, 'files', qErrText(err)); });
+    if (on.content) O.fileSearch(t, signal()).then(function (a) {
+      var rows = [];
+      ((a && a.files) || []).forEach(function (f) {
+        (f.matches || []).forEach(function (m) { rows.push({ path: f.path, line: m.line, pre: m.pre || '', hit: m.hit || '', post: m.post || '', key: f.path + ':' + m.line }); });
+      });
+      qBatch(gen, 'content', rows, true, !!(a && a.more));
+    }, function (err) { qFail(gen, 'content', qErrText(err)); });
+    if (on.tnote) {
+      // every registered store, loaded or not, one request each; a 400 is the grammar's
+      // refusal, the same for every store, and puts only this slot in its error state
+      var wantHidden = /(^|\s)status:hidden(\s|$)/i.test(t), ids = order.slice();
+      qs.S.tnote.wait = ids.length;
+      ids.forEach(function (n) {
+        AD.search(n, t, function (res) {
+          var s = qs.S.tnote;
+          if (gen !== qs.gen || !qs.open || s.state === 'err') return;
+          if (!res.ok && res.status === 400) { qFail(gen, 'tnote', res.error); return; }
+          s.wait--;
+          var hr = res.ok ? qHitRows(n, res.hits || [], wantHidden) : { rows: [], more: false };
+          qBatch(gen, 'tnote', hr.rows, s.wait <= 0, hr.more);
+        }, { excerpts: true, signal: signal() });
+      });
+    }
+  }
+  function qBatch(gen, k, rows, done, more) {
+    if (gen !== qs.gen || !qs.open) return;
+    var s = qs.S[k];
+    if (s.stale) { s.rows = []; s.stale = false; }
+    s.rows = s.rows.concat(rows);
+    if (more) s.more = true;
+    if (done) { s.state = 'done'; s.ms = Date.now() - s.t0; }
+    qRender();
+  }
+  function qFail(gen, k, msg) {
+    if (gen !== qs.gen || !qs.open) return;
+    var s = qs.S[k];
+    s.rows = []; s.stale = false; s.state = 'err'; s.err = msg;
+    qRender();
+  }
+
+  function qLabel(k) {
+    return k === 'board' ? wsT("js.tk.qs.slot.board") : k === 'files' ? wsT("js.tk.qs.slot.files") : k === 'content' ? wsT("js.tk.qs.slot.content") :
+      k === 'tracker' ? wsT("js.tk.qs.tracker") : k === 'tnote' ? wsT("js.tk.qs.slot.tnote") : wsT("js.tk.qs.all");
+  }
+  function qState(k) {
+    var s = qs.S[k];
+    if (k === 'content' && qs.path) return wsT("js.tk.qs.st.path");
+    if (s.state === 'idle') return wsT("js.tk.qs.st.idle");
+    if (s.state === 'run') return wsT("js.tk.qs.st.run", s.stale ? '…' : String(s.rows.length));
+    if (s.state === 'err') return wsT("js.tk.qs.st.error");
+    if (!s.rows.length) return wsT("js.tk.qs.st.none");
+    return s.more ? wsT("js.tk.qs.st.cap", String(s.rows.length)) : wsT("js.tk.qs.st.done", String(s.rows.length), (s.ms / 1000).toFixed(1));
+  }
+  function qExcerpt(text, query) {
+    var m = qScore(text, query.trim(), true), start = m ? Math.max(0, m.start - 35) : 0;
+    return (start ? '…' : '') + text.slice(start, start + 150) + (text.length > start + 150 ? '…' : '');
+  }
+  function qSplit(p) { var i = p.lastIndexOf('/'); return { dir: p.slice(0, i + 1), name: p.slice(i + 1) }; }
+  function qRowHtml(k, r) {
+    var q = qs.q.trim();
+    if (k === 'board') return '<span class="tk-qid">' + esc(r.id ? '(' + r.id + ')' : '#') + '</span><span class="qboard"><b>' + esc(r.group === 2 || r.group === 4 ? qExcerpt(r.title, q) : r.title) + '</b><span class="muted">' + esc(r.hint || '') + '</span></span><span class="grow"></span>' +
+      (/^\(\d+\)$/.test(q) ? '<span class="qk tk-qexact">' + wsT("js.tk.qs.exact") + '</span>' : '');
+    if (k === 'tracker') return '<span class="sti">' + SI.svg(r.st) + '</span><span class="qt">' + esc(r.title) + '</span><span class="grow"></span><code class="al">' + esc(r.alias) + '</code><span class="qk">' + esc(r.store) + '</span>';
+    if (k === 'files' && qs.path) return '<svg class="i"><use href="#tki-' + (r.dir ? 'folder' : 'doc') + '"/></svg><span class="qt">' + esc(r.name + (r.dir ? qs.path.sep : '')) + '</span>';
+    if (k === 'files') { var p = qSplit(r.path); return '<svg class="i"><use href="#tki-doc"/></svg><span class="qt">' + esc(p.name) + '</span><span class="muted">' + esc(p.dir) + '</span>'; }
+    if (k === 'content') return '<span class="muted">' + esc(r.path + ':' + r.line) + '</span><code class="tk-qcode">' + esc(r.pre) + '<mark>' + esc(r.hit) + '</mark>' + esc(r.post) + '</code>';
+    var f = r.field === 'comment' ? wsT("js.tk.qs.comment") : r.field === 'body' ? wsT("js.tk.qs.body") : '';
+    return '<span class="tk-qline"><span class="sti">' + SI.svg(r.st) + '</span><span class="qt">' + esc(r.title) + '</span><span class="muted">' + esc((f ? f + ' · ' : '') + r.alias + ' · ' + r.store) + '</span></span>' +
+      (r.text ? '<span class="muted tk-qx">' + esc(r.text) + '</span>' : '');
+  }
+  function qOpt(k, r, i, on) {
+    return '<li class="qopt' + (k === 'content' || k === 'tnote' ? ' tk-qtall' : '') + (on ? ' on' : '') + '" role="option" id="tkqopt-' + k + '-' + i + '" aria-selected="' + on + '"' + attr('qs', k) + attr('qi', i) + '>' + qRowHtml(k, r) + '</li>';
+  }
+  // qList draws slot k's rows, at most max; sel is the index of the selected row, or -1.
+  function qList(k, max, sel) {
+    var s = qs.S[k], h = '';
+    if (s.state === 'err') h = '<li class="qnone tk-qerr" role="presentation">' + esc(k === 'files' ? wsT("js.tk.qs.listfail", s.err) : s.err) + '</li>';
+    else if (!s.rows.length) h = s.state === 'run' ? '<li class="tk-qskel" role="presentation"></li>' : s.state === 'done' ? '<li class="qnone" role="presentation">' + wsT("js.tk.qs.none") + '</li>' : '';
+    else {
+      s.rows.slice(0, max).forEach(function (r, i) { h += qOpt(k, r, i, i === sel); });
+      if (s.rows.length > max) h += '<li class="tk-qmore" role="presentation">' + wsT("js.tk.qs.more", String(s.rows.length - max)) + '</li>';
+    }
+    return '<ul role="group" aria-label="' + esc(qLabel(k)) + '"' + (s.stale ? ' class="tk-qstale"' : '') + '>' + h + '</ul>';
+  }
+  function qHead(k, focus) {
+    var s = qs.S[k];
+    return '<div class="tk-qsh' + (focus ? ' tk-qcur' : '') + '"' + attr('qslot', k) + '><span>' + esc(qLabel(k)) + '</span><kbd>Alt+' + (QSLOTS.indexOf(k) + 1) + '</kbd><span class="tk-qst">' +
+      (s.state === 'run' ? '<span class="tk-qspin"></span>' : '') + esc(qState(k)) + '</span></div>';
+  }
+  function qEmpty(k) { var s = qs.S[k]; return !s.rows.length && s.state !== 'run' && s.state !== 'err'; }
+  function qRender() {
+    if (!qs.open) return;
+    qFixCur();
+    var d = $('tkqpop'), list = $('tkqlist'), st = qs.step, v = qs.cur === 'jump' ? qs.prev : qs.cur, ji = qs.cur === 'jump' ? qIdx('jump') : -1, h = '', keep = {};
+    var si = qs.cur === 'jump' ? -1 : qIdx(qs.cur), selE = qs.cur === 'jump' ? null : qView(qs.cur)[si];
+    function on(k, i) { return !!selE && selE.slot === k && selE.row === qs.S[k].rows[i]; }
+    function rows(k, max) { var i = -1; for (var j = 0; j < Math.min(max, qs.S[k].rows.length); j++) if (on(k, j)) i = j; return qList(k, max, i); }
+    d.setAttribute('data-step', st);
+    var sc = qs.path ? wsT("js.tk.qs.scopepath", qs.path.dir) : O.fileScope && O.fileScope() ? wsT("js.tk.qs.scope", O.fileScope()) : '';
+    $('tkqscope').textContent = sc ? '\uD83D\uDCC1 ' + sc : '';
+    $('tkqscope').hidden = !sc;
+    $('tkqjump').innerHTML = qs.jump.length ? '<span class="tk-qjl">' + wsT("js.tk.qs.strip") + '</span>' + qs.jump.map(function (r, i) {
+      var badge = r.kind === 'session' ? wsT("js.tk.qs.sessions") : r.kind === 'store' ? wsT("js.tk.qs.stores") : esc(r.tag || wsT("js.tk.qs.actions")), sub = r.kind === 'store' ? r.label : r.kind === 'action' ? r.hint : '';
+      return '<span class="tk-qchip' + (i === ji ? ' on' : '') + '" role="option" id="tkqopt-jump-' + i + '" aria-selected="' + (i === ji) + '"' + attr('qs', 'jump') + attr('qi', i) + '><span class="qk">' + badge + '</span><b>' + esc(r.title) + '</b>' +
+        (sub ? '<span class="muted">' + esc(sub) + '</span>' : '') + '</span>';
+    }).join('') + '<kbd>Alt+0</kbd>' : '';
+    $('tkqjump').hidden = !qs.jump.length;
+    $('tkqtabs').hidden = st !== 'narrow';
+    if (st === 'narrow') $('tkqtabs').innerHTML = QORDER.narrow.map(function (k) {
+      var s = qs.S[k], a = k === v, n = k === 'all' || s.state === 'idle' || s.state === 'err' ? '' : s.stale ? '…' : s.rows.length + (s.more ? '+' : '');
+      return '<span class="tk-qtab' + (a ? ' on' : '') + (k !== 'all' && qEmpty(k) && s.state === 'done' ? ' tk-qzero' : '') + '" role="tab" aria-selected="' + a + '"' + attr('qslot', k) + '>' + esc(qLabel(k)) +
+        (s && s.state === 'run' ? '<span class="tk-qspin"></span>' : '') + (n !== '' ? '<span class="tk-qcnt">' + n + '</span>' : '') + '</span>';
+    }).join('');
+    if (st === 'narrow' && v === 'all') {
+      var shown = 0, busy = false;
+      QSLOTS.forEach(function (k) {
+        var s = qs.S[k];
+        if (s.state === 'run') busy = true;
+        if (qEmpty(k)) return;
+        shown++;
+        h += '<div class="tk-qsec">' + qHead(k, false) + rows(k, 3) + '</div>';
+      });
+      if (!shown && !busy) h = '<p class="qnone">' + wsT("js.tk.qs.none") + '</p>';
+      h = '<div class="tk-qpane tk-qsingle" data-pane="all"><div class="tk-qscroll">' + h + '</div></div>';
+    } else if (st === 'narrow') h = '<div class="tk-qpane tk-qsingle" data-pane="' + v + '">' + qHead(v, true) + '<div class="tk-qscroll">' + rows(v, QMAX) + '</div></div>';
+    else if (st === 'medium') h = [['names', ['board', 'files', 'tracker']], ['texts', ['content', 'tnote']]].map(function (p) {
+      return '<div class="tk-qpane' + (p[1].indexOf(v) >= 0 ? ' tk-qfocus' : '') + '" data-pane="' + p[0] + '"><div class="tk-qscroll">' + p[1].map(function (k) {
+        return '<div class="tk-qsec' + (k === v ? ' tk-qopen' : '') + '">' + qHead(k, k === v) + (qEmpty(k) && k !== v ? '' : rows(k, k === v ? QMAX : 3)) + '</div>';
+      }).join('') + '</div></div>';
+    }).join('');
+    else h = QSLOTS.map(function (k) {
+      return '<div class="tk-qpane' + (k === v ? ' tk-qfocus' : '') + '" data-pane="' + k + '">' + qHead(k, k === v) + '<div class="tk-qscroll">' + rows(k, QMAX) + '</div></div>';
+    }).join('');
+    // a redraw keeps each pane where it was scrolled; the selection then comes into view
+    Array.prototype.forEach.call(list.querySelectorAll('.tk-qpane[data-pane]'), function (p) { var sx = p.querySelector('.tk-qscroll'); if (sx) keep[p.getAttribute('data-pane')] = sx.scrollTop; });
+    list.innerHTML = h;
+    Array.prototype.forEach.call(list.querySelectorAll('.tk-qpane[data-pane]'), function (p) { var sx = p.querySelector('.tk-qscroll'), y = keep[p.getAttribute('data-pane')]; if (sx && y) sx.scrollTop = y; });
+    var cur = qs.cur === 'jump' ? 'tkqopt-jump-' + ji : selE ? 'tkqopt-' + selE.slot + '-' + qs.S[selE.slot].rows.indexOf(selE.row) : '';
+    $('tkqin').setAttribute('aria-activedescendant', cur && $(cur) ? cur : '');
+    var o = cur && $(cur);
+    if (o && o.scrollIntoView) o.scrollIntoView({ block: 'nearest' });
+  }
+  // a pointer over a row of the view the keys move in selects it, without a redraw
+  function qHover(o) {
+    var k = o.getAttribute('data-qs'), i = Number(o.getAttribute('data-qi')), v = qs.cur, r = k === 'jump' ? qs.jump[i] : qs.S[k] && qs.S[k].rows[i];
+    if (!r || (k === 'jump' ? v !== 'jump' : v !== 'all' && v !== k)) return;
+    var key = k === 'jump' ? qKeyOf('jump', r) : k + '|' + qKeyOf(k, r);
+    if (qs.sel[v] === key) return;
+    qs.sel[v] = key;
+    Array.prototype.forEach.call($('tkqpop').querySelectorAll('.qopt.on, .tk-qchip.on'), function (x) { x.classList.remove('on'); x.setAttribute('aria-selected', 'false'); });
+    o.classList.add('on'); o.setAttribute('aria-selected', 'true');
+    $('tkqin').setAttribute('aria-activedescendant', o.id);
+  }
+  function qOpen() {
+    if (qs.open) return;
+    qs.open = true; qs.back = document.activeElement;
+    qs.rows = O.searchRows ? O.searchRows(function (rows) { if (qs.open) { qs.rows = rows; qLocal(); } }) : [];
+    var d = $('tkqpop');
+    d.hidden = false; d.showModal(); $('tkqs').setAttribute('aria-expanded', 'true');
+    qs.step = qStepOf(d.getBoundingClientRect ? d.getBoundingClientRect().width : 0);
+    // each opening starts on the step's first view; only the query is restored
+    qs.cur = QORDER[qs.step][0]; qs.prev = null;
+    $('tkqin').value = qs.q; qRun(); $('tkqin').focus();
+    if ($('tkqin').select) $('tkqin').select();
+  }
+  function qClose() {
+    if (!qs.open) return;
+    qs.open = false; qAbort(); qs.gen++;
+    $('tkqpop').close(); $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
+    var b = qs.back; qs.back = null;
+    if (b && b.isConnected) b.focus(); else $('tkqs').focus();
+  }
+  // Esc clears a query first and closes the palette on an empty one.
+  function qEsc() { if ($('tkqin').value) { $('tkqin').value = ''; qRun(); } else qClose(); }
+  function qTab(dir) {
+    var ord = QORDER[qs.step], i = ord.indexOf(qs.cur === 'jump' ? qs.prev : qs.cur);
+    for (var n = 0; n < ord.length; n++) {
+      i = (i + dir + ord.length) % ord.length;
+      if (ord[i] === 'all' || qs.S[ord[i]].rows.length) { qs.cur = ord[i]; qRender(); return; }
+    }
+  }
+  function qEnterJump() {
+    if (!qs.jump.length) return;
+    if (qs.cur !== 'jump') qs.prev = qs.cur;
+    qs.cur = 'jump'; qRender();
+  }
+  // a tracker content hit opens its item window at the comment; a store with no loaded view
+  // takes the item link's route (#/<store>/<item>), which loads it and opens the item
+  function qOpenHit(r) {
+    var V = AD.view(r.store);
+    if (V && V.items && V.items[r.item]) {
+      if (!openItemWindow(r.store, r.item, r.comment ? { focus: r.comment, opener: $('tkqs') } : { opener: $('tkqs') })) toast(wsT("js.tk.toast.hiddenitem"));
+    } else location.hash = '#/' + encodeURIComponent(r.store) + '/' + encodeURIComponent(r.item);
+  }
+  // qPick opens row i of view v. keep (Ctrl+Enter) opens it under the palette, which stays
+  // open with the focus in its input.
+  function qPick(v, i, keep) { qPickEntry(qView(v)[i], keep); }
+  function qPickEntry(e, keep) {
+    if (!e || !e.row) return;
+    var k = e.slot, r = e.row, p = qs.path;
+    if (k === 'files' && p) {
+      if (r.dir) { $('tkqin').value = p.dir + r.name + p.sep; qRun(); return; }
+      if (keep) { if (O.fileOpen) O.fileOpen(r.name, p.dir); $('tkqin').focus(); return; }
+      qClose();
+      if (O.filePreview) O.filePreview(r.name, { root: p.dir });
+      return;
+    }
+    if (k === 'jump' && keep && r.kind === 'session') { window.open(r.href, '_blank', 'noopener'); $('tkqin').focus(); return; }
+    if (k === 'jump') keep = false;
+    if (!keep) qClose();
+    if (k === 'jump') {
+      if (r.kind === 'session') { if (O.searchPick) O.searchPick(r.row); }
+      else if (r.kind === 'action') { if (X.dialogs && X.dialogs[r.key]) openDialog(r.key, {}); else if (X.action) X.action(r.key, null, H); }
+      else if (ui.page !== r.store) location.hash = '#/' + encodeURIComponent(r.store);
+      else $('tkqs').focus();
+      return;
+    }
+    if (k === 'board') { if (ui.win) closeItemWindow(); if (O.searchPick) O.searchPick(r, { keep: !!keep }); }
+    else if (k === 'tracker') { if (!openItemWindow(r.store, r.item, { opener: $('tkqs') })) toast(wsT("js.tk.toast.hiddenitem")); }
+    else if (k === 'tnote') qOpenHit(r);
+    else if (O.filePreview) O.filePreview(r.path, k === 'content' ? { line: r.line } : {});
+    if (keep) $('tkqin').focus();
+  }
+  // qKey: the input's keys. The focus stays in the input; Alt+digit is matched on e.code,
+  // since macOS Option changes e.key.
+  function qKey(e) {
+    var k = e.key, v = qs.cur, d = /^Digit([0-5])$/.exec(e.code || '');
+    // AltGr (Ctrl+Alt on Windows) types characters on some layouts; it stays typing
+    if (e.altKey && !e.ctrlKey && d) { e.preventDefault(); if (d[1] === '0') qEnterJump(); else { qs.cur = QSLOTS[d[1] - 1]; qRender(); } return; }
+    if (k === 'Tab') { e.preventDefault(); qTab(e.shiftKey ? -1 : 1); return; }
+    if (v === 'jump' && (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown')) {
+      e.preventDefault();
+      if (k === 'ArrowDown') { qs.cur = qs.prev; qRender(); return; }
+      var j = qIdx('jump') + (k === 'ArrowRight' ? 1 : k === 'ArrowLeft' ? -1 : 0);
+      j = Math.max(0, Math.min(qs.jump.length - 1, j));
+      qs.sel.jump = qKeyOf('jump', qs.jump[j]); qRender();
+      return;
+    }
+    if (k === 'ArrowDown' || k === 'ArrowUp') {
+      e.preventDefault();
+      var list = qView(v), i = qIdx(v);
+      if (k === 'ArrowUp' && i === 0) { qEnterJump(); return; }
+      if (!list.length) return;
+      i = Math.max(0, Math.min(list.length - 1, i + (k === 'ArrowDown' ? 1 : -1)));
+      qs.sel[v] = list[i].key; qRender();
+      return;
+    }
+    if (k === 'Enter') { e.preventDefault(); qPick(v, qIdx(v), e.ctrlKey || e.metaKey); return; }
+    if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); qEsc(); }
   }
   // Editors keep their own keys: a terminal card (its .xterm helper textarea),
   // the composer, and any textarea or contenteditable never lose Ctrl+K or
@@ -6132,68 +6586,6 @@
     if (e.ctrlKey) return !e.shiftKey && (e.code === 'Space' || e.key === ' ' || e.key.toLowerCase() === 'k') &&
       !(t && t.closest('.xterm, textarea, [contenteditable]:not([contenteditable="false"])'));
     return e.key === '/' && !(t && t.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'));
-  }
-  function qResults(q0) {
-    var q = q0.trim().toLowerCase(), out = qs.rows.slice();
-    order.forEach(function (n) {
-      var st = vss[n] ? vss[n].store : { label: '' };
-      out.push({ group: 5, kind: 'store', store: n, label: st.label, title: n, text: n + ' ' + (st.label || '') });
-    });
-    if (X.qsActions && VS) (X.qsActions(ui.store, VS, q) || []).forEach(function (x) { out.push({ group: 5, kind: 'action', key: x.key, icon: x.icon, title: x.title, hint: x.hint, tag: x.tag }); });
-    order.forEach(function (n) {
-      var V = vss[n];
-      if (!V) return;
-      V.itemOrder.forEach(function (id) {
-        var it = V.items[id];
-        if (!it.hidden) out.push({ group: 5, kind: 'item', store: n, item: id, title: it.title, alias: it.alias, st: it.kind === 'topic' ? 'topic' : it.status });
-      });
-    });
-    return qRank(out, q);
-  }
-  function qGroup(g) {
-    return [wsT("js.tk.qs.sessions"), wsT("js.tk.qs.topics"), wsT("js.tk.qs.bodies"), wsT("js.tk.qs.questions"), wsT("js.tk.qs.answers"), wsT("js.tk.qs.tracker")][g];
-  }
-  function qExcerpt(text, query) {
-    var m = qScore(text, query.trim(), true), start = m ? Math.max(0, m.start - 35) : 0;
-    return (start ? '…' : '') + text.slice(start, start + 150) + (text.length > start + 150 ? '…' : '');
-  }
-  function qRender() {
-    var list = qs.items = qResults($('tkqin').value), last = null, h = '';
-    if (qs.idx >= list.length) qs.idx = Math.max(0, list.length - 1);
-    list.forEach(function (x, i) {
-      if (x.group !== last) { last = x.group; h += '<li class="qgrp" role="presentation">' + qGroup(x.group) + '</li>'; }
-      h += '<li class="qopt' + (i === qs.idx ? ' on' : '') + '" role="option" id="tkqopt-' + i + '" aria-selected="' + (i === qs.idx) + '"' + attr('qi', i) + '>' +
-        (x.group < 5 ? '<span class="qboard"><b>' + esc(x.group === 2 || x.group === 4 ? qExcerpt(x.title, $('tkqin').value) : x.title) + '</b><span class="muted">' + esc(x.hint || '') + '</span></span><span class="grow"></span><span class="qk">' + esc(x.id ? '(' + x.id + ')' : '') + '</span>' :
-          x.kind === 'action' ? '<svg class="i"><use href="' + esc(x.icon || '#tki-plus') + '"/></svg><b>' + esc(x.title) + '</b><span class="muted">' + esc(x.hint || '') + '</span><span class="grow"></span><span class="qk">' + esc(x.tag || wsT("js.tk.qs.actions")) + '</span>' :
-          x.kind === 'store' ? '<svg class="i"><use href="#tki-tasks"/></svg><b>' + esc(x.store) + '</b><span class="muted">' + esc(x.label) + '</span><span class="grow"></span><span class="qk" title="' + wsT("js.tk.qs.stores") + '">' + wsT("js.tk.qs.openpage") + '</span>' :
-          '<span class="sti">' + SI.svg(x.st) + '</span><span class="qt">' + esc(x.title) + '</span><span class="grow"></span><code class="al">' + esc(x.alias) + '</code><span class="qk">' + esc(x.store) + '</span>') + '</li>';
-    });
-    $('tkqlist').innerHTML = h || '<li class="qnone" role="presentation">' + wsT("js.tk.qs.none") + '</li>';
-    $('tkqin').setAttribute('aria-activedescendant', list.length ? 'tkqopt-' + qs.idx : '');
-    var on = $('tkqlist').querySelector('.qopt.on');
-    if (on) on.scrollIntoView({ block: 'nearest' });
-  }
-  function qOpen() {
-    if (qs.open) return;
-    qs.open = true; qs.idx = 0; qs.back = document.activeElement;
-    qs.rows = O.searchRows ? O.searchRows(function (rows) { if (qs.open) { qs.rows = rows; qRender(); } }) : [];
-    $('tkqpop').hidden = false; $('tkqpop').showModal(); $('tkqs').setAttribute('aria-expanded', 'true');
-    $('tkqin').value = ''; qRender(); $('tkqin').focus();
-  }
-  function qClose() {
-    if (!qs.open) return;
-    qs.open = false; $('tkqpop').close(); $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
-    var b = qs.back; qs.back = null;
-    if (b && b.isConnected) b.focus(); else $('tkqs').focus();
-  }
-  function qPick(i) {
-    var x = qs.items[i];
-    if (!x) return;
-    qClose();
-    if (x.group < 5) { if (ui.win) closeItemWindow(); if (O.searchPick) O.searchPick(x); return; }
-    if (x.kind === 'action') { if (X.dialogs && X.dialogs[x.key]) openDialog(x.key, {}); else if (X.action) X.action(x.key, null, H); return; }
-    if (x.kind === 'store') { if (ui.page !== x.store) location.hash = '#/' + encodeURIComponent(x.store); else $('tkqs').focus(); }
-    else if (!openItemWindow(x.store, x.item, { opener: $('tkqs') })) toast(wsT("js.tk.toast.hiddenitem"));
   }
 
   // The immediate custom tooltip: one fixed element shown at once for whatever [data-tip]
@@ -6344,9 +6736,12 @@
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
       '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-haspopup="dialog" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
     b.appendChild(el('dialog', { class: 'tk tk-palette', id: 'tkqpop', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
-      '<label class="tk-qlabel" for="tkqin">' + wsT("js.tk.qs.tip") + '<kbd>Ctrl+K</kbd></label>' +
-      '<input id="tkqin" type="text" role="combobox" aria-controls="tkqlist" aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.qs.placeholder") + '">' +
-      '<ul id="tkqlist" role="listbox" aria-label="' + wsT("js.tk.qs.results") + '"></ul>' +
+      '<label class="tk-qlabel" for="tkqin">' + wsT("js.tk.qs.tip") + '</label>' +
+      '<div class="tk-qrow"><input id="tkqin" type="text" role="combobox" aria-controls="tkqlist" aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.qs.placeholder") + '">' +
+      '<span class="tk-qscope" id="tkqscope" hidden></span></div>' +
+      '<div class="tk-qjump" id="tkqjump" role="listbox" aria-label="' + wsT("js.tk.qs.strip") + '" hidden></div>' +
+      '<div class="tk-qtabs" id="tkqtabs" role="tablist" hidden></div>' +
+      '<div class="tk-qgrid" id="tkqlist" role="listbox" aria-label="' + wsT("js.tk.qs.results") + '"></div>' +
       '<span class="tk-qhint">' + wsT("js.tk.qs.hint") + '</span>'));
   }
   // Delegated handlers act only on the renderer's own nodes, so the host page's clicks,
@@ -6404,8 +6799,13 @@
       if (!own(t)) return;
       if (t === $('tkwin')) { closeItemWindow(); return; } // the backdrop
       if (t.closest('#tkqs')) { if (qs.open) qClose(); else qOpen(); return; }
-      var qo = t.closest('[data-qi]');
-      if (qo) { qPick(Number(qo.getAttribute('data-qi'))); return; }
+      var qo = t.closest('[data-qi]'), qh = t.closest('#tkqpop [data-qslot]');
+      if (qo) {
+        var qk = qo.getAttribute('data-qs'), qi = Number(qo.getAttribute('data-qi'));
+        qPickEntry({ slot: qk, row: qk === 'jump' ? qs.jump[qi] : qs.S[qk] && qs.S[qk].rows[qi] }, e.ctrlKey || e.metaKey);
+        return;
+      }
+      if (qh) { qs.cur = qh.getAttribute('data-qslot'); qRender(); $('tkqin').focus(); return; }
       var h = t.closest('.tk-handle[data-handle]');
       if (h) { openStore(h.getAttribute('data-handle')); return; }
       var fb = t.closest('.tk-fold[data-fold]');
@@ -6672,14 +7072,17 @@
     document.addEventListener('keydown', function (e) {
       if (!e.defaultPrevented && qShortcut(e)) { e.preventDefault(); e.stopImmediatePropagation(); qOpen(); }
     }, true);
-    $('tkqpop').addEventListener('cancel', function (e) { e.preventDefault(); qClose(); });
-    $('tkqin').addEventListener('input', function (e) { if (!e.isComposing) { qs.idx = 0; qRender(); } });
-    $('tkqin').addEventListener('compositionend', function () { qs.idx = 0; qRender(); });
+    // Esc from the input is its keydown's (qKey); a close request from elsewhere in the
+    // dialog clears then closes the same way, and one the browser forced closes it
+    $('tkqpop').addEventListener('cancel', function (e) { e.preventDefault(); qEsc(); });
+    $('tkqpop').addEventListener('close', function () { if (qs.open) qClose(); });
+    // the list keeps the focus in the input: a click picks or switches without taking it
+    $('tkqpop').addEventListener('mousedown', function (e) { if (e.target !== $('tkqin') && e.target.closest('[data-qi], [data-qslot]')) e.preventDefault(); });
+    $('tkqin').addEventListener('input', function (e) { if (!e.isComposing) qRun(); });
+    $('tkqin').addEventListener('compositionend', function () { qRun(); });
     $('tkqin').addEventListener('keydown', function (e) {
       if (e.isComposing || e.keyCode === 229) return;
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); var n = qs.items.length; if (n) { qs.idx = (qs.idx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; qRender(); } }
-      else if (e.key === 'Enter') { e.preventDefault(); qPick(qs.idx); }
-      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); qClose(); }
+      qKey(e);
     });
     // the caret moved without an edit (arrow keys, Home/End): the popup follows the token under it
     document.addEventListener('keyup', function (e) {
@@ -6718,8 +7121,8 @@
       if (o && MP && i !== MP.idx) { MP.idx = i; mentionDraw($(MP.box)); }
     });
     $('tkqpop').addEventListener('mousemove', function (e) {
-      var o = e.target.closest('[data-qi]'), i = o && Number(o.getAttribute('data-qi'));
-      if (o && i !== qs.idx) { qs.idx = i; Array.prototype.forEach.call($('tkqlist').querySelectorAll('.qopt'), function (x) { var on = Number(x.getAttribute('data-qi')) === i; x.classList.toggle('on', on); x.setAttribute('aria-selected', String(on)); }); $('tkqin').setAttribute('aria-activedescendant', 'tkqopt-' + i); }
+      var o = e.target.closest('[data-qi]');
+      if (o) qHover(o);
     });
     document.addEventListener('keydown', function (e) {
       lastInput = 'key';
@@ -6789,7 +7192,7 @@
       else if (ui.open) collapse();
     });
     // the layout follows the width: re-render when it crosses a breakpoint, else refit
-    window.addEventListener('resize', function () { if (MN) closeMenu(false); if (MP) mentionSync(); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); wkFramePlace(); } });
+    window.addEventListener('resize', function () { if (qs.open) { var qw = qStepOf($('tkqpop').getBoundingClientRect().width); if (qw !== qs.step) { qs.step = qw; qRender(); } } if (MN) closeMenu(false); if (MP) mentionSync(); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); wkFramePlace(); } });
     window.addEventListener('scroll', wkFramePlace, true); // any scroller moving the wiki frame's slot (capture: scroll does not bubble)
     // the store page route: reload on #/<storeId> restores the page; back and forward follow the hash
     window.addEventListener('pagehide', keepItemDraft);

@@ -4590,10 +4590,12 @@
   // tkFetch calls a tracker route, a POST when body is given; done(status,
   // answer) gets the HTTP status (0: the daemon was not reached) and the
   // parsed JSON answer ({} when there is none).
-  function tkFetch(path, body, done, keepalive) {
+  // signal, when given, aborts the request (done then gets status 0).
+  function tkFetch(path, body, done, keepalive, signal) {
     var o = { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store" };
     if (body !== undefined) { o.headers = { "Content-Type": "application/json" }; o.body = JSON.stringify(body); }
     if (keepalive) o.keepalive = true;
+    if (signal) o.signal = signal;
     fetch(path, o).then(function (r) {
       return r.text().then(function (s) {
         var v = null;
@@ -4765,11 +4767,13 @@
     },
     // The Items search box: the daemon parses the query by the tracker's search grammar
     // (tracker_routes.go: the search route); a malformed query answers 400 with its message.
-    search: function (id, q, done) {
-      tkFetch(tkUrl(id, "search?q=" + encodeURIComponent(q)), undefined, function (status, v) {
-        if (status === 200 && Array.isArray(v.ids)) done({ ok: true, ids: v.ids });
-        else done({ ok: false, error: tkErrText(status, v) });
-      });
+    // The search palette asks for excerpts (o.excerpts) and aborts through o.signal.
+    search: function (id, q, done, o) {
+      o = o || {};
+      tkFetch(tkUrl(id, "search?q=" + encodeURIComponent(q) + (o.excerpts ? "&excerpts=1" : "")), undefined, function (status, v) {
+        if (status === 200 && Array.isArray(v.ids)) done({ ok: true, ids: v.ids, hits: Array.isArray(v.hits) ? v.hits : [] });
+        else done({ ok: false, error: tkErrText(status, v), status: status });
+      }, false, o.signal);
     },
     // The store's wiki branches (tracker_routes.go: the wiki routes). A save that
     // cannot merge answers 409 with both texts, passed on as res.conflict.
@@ -4849,12 +4853,14 @@
       var name = topic.getAttribute("data-topic"), label = paletteText(topic.querySelector(".tname")) || name;
       var time = topic.querySelector(".tbar time"), at = time ? Number(time.getAttribute("data-at")) || Date.parse(time.getAttribute("datetime")) || 0 : 0;
       rows.push({ group: 1, kind: "board-topic", topic: name, title: label, at: at });
-      var body = topic.querySelector(".doc-body"), frame = body && body.querySelector("iframe.doc-frame"), text;
+      // A board frame is an iframe or, before it mounts, an inert div.doc-frame placeholder.
+      var body = topic.querySelector(".doc-body"), frame = body && body.querySelector(".doc-frame"), text;
       if (frame) {
         // srcdoc is available even for an opaque-origin sandbox. A template
         // parses it inertly: never execute a body's scripts or fetch its images.
         var parsed = doc.createElement("template");
-        parsed.innerHTML = frame.getAttribute("srcdoc") || "";
+        // An unmounted frame holds its document in data-srcdoc until it mounts.
+        parsed.innerHTML = frame.getAttribute("data-srcdoc") || frame.getAttribute("srcdoc") || "";
         text = paletteText(parsed.content.querySelector(".doc-body"));
       } else text = paletteText(body);
       var recap = paletteText(topic.querySelector(".rtext"));
@@ -4884,7 +4890,9 @@
       paletteClosed(update);
     });
   }
-  function palettePick(row) {
+  // o.keep (the palette's Ctrl+Enter) scrolls and flashes the target behind
+  // the open palette, which keeps the focus.
+  function palettePick(row, o) {
     if (row.kind === "session") { go(row.href); return; }
     // Look the target up again: an SSE board swap may have replaced its node
     // while the palette was open. Open every enclosing fold before scrolling.
@@ -4902,13 +4910,39 @@
       var toggle = topic.querySelector("button.ckhide[aria-pressed=true]");
       if (toggle) toggle.click();
     }
-    target.setAttribute("tabindex", "-1");
-    target.focus({ preventScroll: true });
+    if (!(o && o.keep)) {
+      target.setAttribute("tabindex", "-1");
+      target.focus({ preventScroll: true });
+    }
     target.scrollIntoView({ block: "center" });
     target.classList.remove("palette-flash");
     void target.offsetWidth;
     target.classList.add("palette-flash");
     setTimeout(function () { target.classList.remove("palette-flash"); }, 1600);
+  }
+  // The palette's file hooks (tracker.js keeps no page knowledge): the
+  // session's file routes (fs_search.go, fs_routes.go), the preview card
+  // (preview.js), and fs/act's open. A page without a session has none.
+  function paletteFs(route, params, signal) {
+    var qs = Object.keys(params).map(function (k) { return k + "=" + encodeURIComponent(params[k]); }).join("&");
+    return fetch("/s/" + rid + "/fs/" + route + "?" + qs, { credentials: "same-origin", cache: "no-store", signal: signal }).then(function (r) {
+      if (r.ok) return r.json();
+      return r.text().then(function (t) { throw { status: r.status, text: (t || "").trim() }; });
+    });
+  }
+  function paletteFiles(o) {
+    if (!rid || !window.fetch) return o;
+    o.fileLocal = function () { return root.hasAttribute("data-sysopen"); };
+    o.fileScope = function () { var h = region("head"), m = h && h.querySelector(".meta"); return m ? m.textContent.trim() : ""; };
+    o.fileFind = function (q, signal) { return paletteFs("find", { q: q }, signal); };
+    o.fileSearch = function (q, signal) { return paletteFs("search", { q: q }, signal); };
+    // the directory is the browsing root itself; dir equal to an absolute root is refused
+    o.fileList = function (dir, signal) { return paletteFs("list", { root: dir }, signal); };
+    o.filePreview = function (path, opt) { if (window.WsPreview) window.WsPreview.open(path, opt); };
+    o.fileOpen = function (name, dir) {
+      post("fs/act", { path: name, action: "open", root: dir }, function (ok, v) { toast(ok ? wsT("js.toast.openednative") : wsT("js.toast.openfail", v)); });
+    };
+    return o;
   }
 
   function tkMount() {
@@ -4916,8 +4950,8 @@
     if (!header || !slot || !wrap) return;
     header.classList.add("tk-room");
     if (tkSupport) tkAdapter.ext = supExt();
-    tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
-      drawerHeight: { get: function () { return drH; }, set: drSetH }, searchRows: paletteRows, searchPick: palettePick });
+    tkApi = window.WsTracker.mount(tkAdapter, paletteFiles({ header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
+      drawerHeight: { get: function () { return drH; }, set: drSetH }, searchRows: paletteRows, searchPick: palettePick }));
   }
   function trackerStart() {
     if (window.WsTracker && window.fetch) tkReload();

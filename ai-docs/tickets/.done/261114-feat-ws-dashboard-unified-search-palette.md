@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b5535814cfc27023
 sage-review-completeness-reviewed: b5535814cfc27023
+completed: 2026-11-14
 ---
 
 # Dashboard unified search palette: board, file, content, and tracker slots, a jump strip, streamed async search, and absolute-path mode
@@ -561,6 +562,68 @@ Verification:
     state.
   - Record any deviation, and say whether a Decision justifies it.
 
+### Result (ee2d95201) - 2026-11-14
+
+Implemented in `ee2d95201`. The headless harness and its two fixes are in
+`63c1d70fd`; the review and lead-note fixes are in `a593864d6`.
+
+- Slot model: `QSLOTS` = board, files, content, tracker, tnote. `qBoard`,
+  `qTracker`, and `qStrip` fill the local slots and the strip. `qView`,
+  `qIdx`, and `qs.sel` keep the selection on a row's key across re-ranks
+  and late batches. `qRank` and the grouped list are removed.
+- IDs: `(n)` returns exactly item n, one hit, preselected (the board slot,
+  or "all" at narrow). A bare number matches board item ids only, prefix
+  first, with no text match. `.123` is gone.
+- Ordering: the board slot ranks by score, then group. An empty query sorts
+  topics, then items, newest first. With an empty query the tracker slot
+  shows items in progress (`doing`). The strip lists sessions, stores, and
+  actions in that order and is filtered by the query. It is hidden when
+  nothing matches.
+- Steps: `qStepOf` gives narrow <600, medium <1000, wide otherwise, from the
+  palette's own width, and recomputes on resize. Keys: Tab and Shift+Tab
+  skip empty slots. Alt+0-5 match on `e.code` and are ignored with Ctrl
+  held (AltGr). Up from the first row or Alt+0 enters the strip, Left/Right
+  move along it, Down leaves it. Enter opens and closes. Ctrl/Cmd+Enter
+  opens behind the open palette (board: `searchPick(row, {keep: true})`,
+  which skips the focus move; a session chip opens a new tab). Esc clears
+  the query, then closes.
+- Reopen restores the last query, selected. Each opening starts on the
+  step's first view.
+- The board-slot body text reads a frame as either `iframe.doc-frame` or
+  the unmounted `div.doc-frame` placeholder (`data-srcdoc`, then `srcdoc`).
+  Lead call; see Deviations.
+- i18n: added `js.tk.qs.all`, `slot.board|files|content|tnote`, `strip`,
+  `st.idle|run|done|cap|none|error|path`, `scope`, `scopepath`, `more`,
+  `listfail`, `exact`, `comment`, and `body` to all 11 tables. Removed
+  `topics`, `bodies`, `questions`, `answers`, and `openpage`. Rewrote
+  `placeholder` (no `.153`) and `hint`. Regenerated the tracker mockup's
+  `i18n-en.js`.
+- Verification:
+  - `go test ./internal/wsdashboard/ ./internal/wsi18n/ ./internal/wstracker/`
+    passes, including `css_collision_test.go`, `keys_test.go`, and
+    `TestSearchPaletteAssets`.
+  - The node harness `testdata/search-palette.test.cjs` has been rewritten
+    for the slot model.
+  - `scripts/palette-headless.mjs` layout and keys pass: 396, 796, 1216,
+    and 1240 px at 420, 820, 1240, and 1400 px viewports; Tab, Alt, Esc
+    twice, reopen, the Ctrl+Enter flash, Ctrl+K from the shell, and `/`
+    with the Files pane shown.
+- Deviations:
+  - The width is 1216 px, not 1240 px, at a 1240 px viewport. Decision 7's
+    formula gives 1216 px there. The 1240 px cap is checked at 1400 px.
+  - The mockup's fuzzy/literal mode chip is not built. Decision 12 makes
+    every source take the literal text, so the chip would switch nothing.
+  - The scope chip is prefixed with a folder glyph, as in the mockup.
+  - Placeholder `div.doc-frame` tolerance: a lead note asked for it, because
+    the frontend-performance ticket's revised Decision 2 makes board frames
+    inert placeholders. Both DOM states have node fixtures. The perf
+    worker's own change to this read is reconciled by whichever branch
+    lands second.
+- LOOK: captures at 420/820/1240, light and dark, compared with the mockup
+  at narrow, medium, and wide. Layout, panes, the header state line, and
+  highlights match. At narrow, the English tab labels overflow the tab row,
+  which scrolls ("Tracker content" is cut off).
+
 ### Phase 2: Async sources and streaming
 
 Implements Decision 4, the async half of 6, 9, and 11-13. Depends on
@@ -664,6 +727,71 @@ Verification:
     state, the cap state, and a tracker content slot error state.
   - Compare each capture side by side with the mockup.
 
+### Result (ee2d95201) - 2026-11-14
+
+The Go leaf is `32e2ac2cb`. The client is in `ee2d95201`.
+
+- Excerpt parameter: `excerpts=1` on `GET /tracker/stores/<id>/search`
+  answers `{"hits": [...], "ids": [...]}`. Without the parameter the answer
+  stays `{"ids": [...]}` byte for byte. A grammar error is a 400 carrying
+  the parser message. Compatibility tier: T0, additive.
+- Hit fields: `TrackerSearchHit{id, title, alias, kind, status,
+  hidden(omitempty), field ("body"|"comment"|"item"), comment(omitempty),
+  text(omitempty)}`.
+- The search signature `TrackerHost.Search` is unchanged. A new method,
+  `TrackerHost.SearchHits(ctx, id, query string) ([]TrackerSearchHit,
+  error)`, is implemented by `dashboardTracker.SearchHits` over
+  `wstracker.(*View).SearchHits(q Query) []SearchHit` (`query_hits.go`).
+  It returns at most 3 comment hits per item. Excerpts are about 160 runes,
+  starting about 40 runes before the match.
+- Client: `tkFetch(path, body, done, keepalive, signal)`. The adapter
+  `search(id, q, done, o)` takes `o.excerpts` and `o.signal` and answers
+  `{ok, ids, hits}` or `{ok: false, error, status}`. The Items panel call is
+  unchanged.
+- Mount-option hooks (Decision 13), from dashboard.js `paletteFiles`, absent
+  on a page without a session:
+  - `fileFind(q, signal)`, `fileSearch(q, signal)`, and
+    `fileList(dir, signal)` return promises. A refusal rejects with
+    `{status, text}`.
+  - `filePreview(path, opt)` calls `WsPreview.open`.
+  - `fileOpen(name, dir)` posts `fs/act open`.
+  - `fileLocal()` returns `data-sysopen`.
+  - `fileScope()` returns the head's `.meta` text.
+  - tracker.js references no `WsPreview` and no `/fs/` route. Both are
+    pinned in `TestSearchPaletteAssets`.
+- Streaming:
+  - A query starts a generation.
+  - Each keystroke aborts every request in flight: one AbortController per
+    file request and per store.
+  - The async slots wait 80 ms.
+  - Previous rows stay dimmed (`tk-qstale`) until the generation's first
+    batch.
+  - A batch from an older generation is dropped.
+  - The slot state runs idle, searching (n), then done (n · s), limit (n+),
+    no results, or error.
+- Tracker content:
+  - Every registered store gets one request, loaded or not.
+  - At most 8 hits per store are shown, with "N+" when capped.
+  - Hidden hits, by the hit's flag or the loaded view, are dropped unless
+    the query contains `status:hidden`.
+  - A 400 from any store puts only this slot in its error state with the
+    parser message.
+  - A hit in a loaded store opens the item window at the comment. A hit in
+    a store with no loaded view takes the `#/<store>/<item>` route.
+- Files: directory items from `fs/find` are dropped. Ctrl+Enter on a file or
+  content hit previews it under the open palette, and the input keeps focus.
+- Verification:
+  - The node harness covers abort per keystroke and per store, the stale
+    drop, selection held across a late batch, the 210-hit cap, hidden hits,
+    the 400 error, the unloaded-store route, literal-query hook calls, and
+    the adapter's `excerpts=1`, signal, and status.
+  - `palette-headless` async passes: file and content previews with the
+    palette open, a hit from a store whose view did not load (simulated by
+    aborting its view route), and the error state.
+- LOOK: streaming (dimmed), done, cap, and error at 820 and 1240, compared
+  with the mockup. They match apart from the mockup's per-row "+N more" tab
+  hint wording.
+
 ### Phase 3: Absolute-path mode
 
 Implements Decision 5. Depends on Phase 2.
@@ -718,6 +846,39 @@ Verification:
 - LAN viewer: a node-harness case with `data-sysopen` absent. An absolute
   path query gets the ordinary literal-text search and no path mode
   appears.
+
+### Result (ee2d95201) - 2026-11-14
+
+- `qAbsPath` mirrors `browseRootParam`.
+  - Accepted: an absolute POSIX path or a drive path.
+  - Refused: a network path (`//host`, `\\host`), a device namespace
+    (`\\?\`, `\\.\`), a Windows device name segment, `~/`, a relative
+    path, and NUL.
+- `qPathOf` gates on `fileLocal()`. The query splits at its last separator:
+  a trailing separator lists that directory, otherwise the parent is listed
+  and filtered by the last segment, prefix first, then fuzzy.
+- Listing goes through `fs/list?root=<dir>` with `dir` omitted.
+  - Entries marked `gone` or `link` are skipped.
+  - A refusal shows an inline "Cannot list this folder" error row.
+  - Content shows "Typing a path", and the scope chip names the typed
+    directory.
+- Enter on a folder completes the query. Enter on a file closes the palette
+  and calls `filePreview(name, {root: dir})`. Ctrl+Enter on a file calls
+  `fileOpen(name, dir)` (`fs/act open`) and keeps the palette open.
+- Switching the query into or out of path mode drops the files slot's rows,
+  so neither row shape is drawn as the other. This was the review's
+  Critical finding, fixed in `a593864d6`.
+- Verification:
+  - The node harness covers the accept and refuse cases, the separator
+    split, the local gate, a LAN viewer (ordinary literal search), the 404
+    error row, Ctrl+Enter open, and the path/ordinary switch.
+  - `palette-headless` path passes on a temp listing directory standing in
+    for `/tmp/`: `<dir>/` lists depth 1, `<dir>/fo` filters, Enter on a
+    folder completes, and Enter on a file previews it with the open button.
+- LOOK: path mode at 820 and 1240, compared with the mockup. They match.
+- Open (minor, not fixed):
+  - The `fs/act open` result toast may sit behind the modal palette.
+  - A truncated `fs/list` (`more`) is not marked.
 
 ## Sage Review Round 1 (2026-11-14)
 

@@ -228,13 +228,16 @@ done();
 	if !strings.Contains(keys, "if (MN && menuHas(t)) { menuKey(e); return; }") {
 		t.Error("keys on the capsule are not routed to menuKey")
 	}
+	resize := trackerBlock(t, `window\.addEventListener\('resize', function \(\) \{`, `\n`)
+	if !strings.Contains(resize, "if (MN) closeMenu(false);") {
+		t.Error("a resize no longer closes the capsule menu")
+	}
 	listen := trackerFn(t, `function listen\(\)`, false)
 	for _, want := range []string{
 		"$('tkmenu').addEventListener('focusout', menuFocusOut);",
 		"$('tkcap').addEventListener('focusout', menuFocusOut);",
 		"$('tkcap').addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); menuDiscard(); });",
 		"$('tkcap').addEventListener('mousedown', function (e) { e.preventDefault(); });",
-		"window.addEventListener('resize', function () { if (MN) closeMenu(false);",
 	} {
 		if !strings.Contains(listen, want) {
 			t.Errorf("listen lacks %q", want)
