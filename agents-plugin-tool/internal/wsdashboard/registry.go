@@ -114,6 +114,11 @@ type Registration struct {
 	// stopped session (HostPID 0, HostStopped set) from a spawn under way
 	// (HostPID 0 alone), which HostMayRun reads.
 	HostStopped bool `json:"host_stopped,omitempty"`
+	// Exit details are optional; a nil code means the runner did not record one.
+	HostExitCode   *int   `json:"host_exit_code,omitempty"`
+	HostExitSignal *int   `json:"host_exit_signal,omitempty"`
+	HostExitReason string `json:"host_exit_reason,omitempty"`
+	HostStoppedAt  string `json:"host_stopped_at,omitempty"`
 	// HarnessPID is the harness process of the ws-mcp that wrote this row
 	// (a session a terminal harness runs), when its launcher reported one.
 	// It never makes the session live; HarnessMayRun reads it.

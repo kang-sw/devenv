@@ -87,6 +87,7 @@ func dashboardCommand(args []string) {
 		Dir:    filepath.Join(dir, wsholder.DirName),
 		Python: os.Getenv(wsholder.PythonEnv),
 		Log:    logw,
+		OnExit: persistHolderExit(dir),
 	})
 	agents := newAgentRunner(dir, logw, trackerChanged.call, holders)
 	host := &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath), agents: agents}

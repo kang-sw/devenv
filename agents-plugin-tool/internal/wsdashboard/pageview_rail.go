@@ -125,6 +125,7 @@ type RailRow struct {
 	// Hosted marks a lead session the daemon spawned and feeds
 	// (Registration.Hosted).
 	Hosted bool
+	Exit   *HostExit
 	// Approval is the tool approval a live hosted session waits on, which
 	// the dashboard answers; nil when it waits on none.
 	Approval *ApprovalWait
@@ -150,6 +151,29 @@ const (
 	// harness conversation: its harness never reported one.
 	ReviveNoSession = "nosession"
 )
+
+// HostExit is the recorded outcome of a stopped hosted harness.
+type HostExit struct {
+	HasCode, HasSignal bool
+	Code, Signal       int
+	Reason, StoppedAt  string
+}
+
+func hostExit(reg Registration) *HostExit {
+	if !reg.Hosted || !reg.HostStopped {
+		return nil
+	}
+	exit := &HostExit{Reason: reg.HostExitReason, StoppedAt: reg.HostStoppedAt}
+	if reg.HostExitCode != nil {
+		exit.HasCode = true
+		exit.Code = *reg.HostExitCode
+	}
+	if reg.HostExitSignal != nil {
+		exit.HasSignal = true
+		exit.Signal = *reg.HostExitSignal
+	}
+	return exit
+}
 
 // railRevive is how an ended session comes back (RailRow.Revive). Whether
 // a terminal session's harness has exited is asked when the entry is used:
@@ -469,6 +493,7 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 		Message:     in.Message.Text,
 		User:        in.Message.User,
 		Hosted:      reg.Hosted,
+		Exit:        hostExit(reg),
 	}
 	if !live {
 		row.Revive, row.ReviveBlocked = railRevive(in)
@@ -478,7 +503,7 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 		return row
 	}
 	row.LastTool = lastToolAt(snap.Lead)
-	if adapterPresent(snap, now) {
+	if row.Exit == nil && adapterPresent(snap, now) {
 		row.Working = leadWorking(snap.Lead.Phase)
 		row.Subagents = levelOneRunning(snap.Agents)
 		if live {

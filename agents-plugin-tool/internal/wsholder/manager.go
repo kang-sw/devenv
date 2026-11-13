@@ -45,6 +45,9 @@ type Options struct {
 	// RingBytes is the size of the output ring a new holder keeps; zero is
 	// the holder's own default.
 	RingBytes int
+	// OnExit persists a stopped holder's exit before its directory is removed.
+	// An error retains the directory for a later scan to retry.
+	OnExit func(Descriptor, Exit) error
 
 	// holderArgs are extra holder arguments, so a test shortens its
 	// periods. startTimeout bounds the wait for a started holder's
@@ -103,6 +106,14 @@ type Info struct {
 	Child *ChildStatus `json:"child,omitempty"`
 	// Lost counts the records a replay reported gone from the ring.
 	Lost uint64 `json:"lost,omitempty"`
+}
+
+// Exit is the optional exit.json written by a holder before it ends.
+type Exit struct {
+	ExitCode  *int   `json:"exit_code"`
+	Signal    *int   `json:"signal"`
+	Reason    string `json:"reason"`
+	StoppedAt string `json:"stopped_at"`
 }
 
 // StartFailure is a holder that could not be started.
@@ -285,9 +296,9 @@ func (m *Manager) scan() {
 		}
 		if !m.opts.alive(desc.PID) {
 			m.logf("holder %s (pid %d) is gone; removing its descriptor", id, desc.PID)
-			_ = os.RemoveAll(dir)
-			m.forget(id)
-			seen[id] = false
+			if m.cleanup(desc, "unknown") == nil {
+				seen[id] = false
+			}
 			continue
 		}
 		// A holder that died without removing its directory (a reboot, a
@@ -299,9 +310,9 @@ func (m *Manager) scan() {
 		if err := m.attach(desc); err != nil && attachCause(err) == CauseNoAnswer && !errors.Is(err, ErrDetached) &&
 			errors.Is(m.sameProcess(desc), ErrStartTimeMismatch) {
 			m.logf("holder %s is gone and pid %d belongs to another process; removing its descriptor", id, desc.PID)
-			_ = os.RemoveAll(dir)
-			m.forget(id)
-			seen[id] = false
+			if m.cleanup(desc, "unknown") == nil {
+				seen[id] = false
+			}
 		}
 	}
 	// A holder whose directory vanished stays while attached (it rewrites
@@ -313,6 +324,44 @@ func (m *Manager) scan() {
 		}
 	}
 	m.mu.Unlock()
+}
+
+// cleanup persists an available exit before removing the holder directory.
+// Old or abruptly killed holders may have no exit file.
+func (m *Manager) cleanup(desc Descriptor, fallback string) error {
+	dir := filepath.Join(m.opts.Dir, desc.ID)
+	raw, err := os.ReadFile(filepath.Join(dir, "exit.json"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		m.logf("holder %s: read exit: %v", desc.ID, err)
+		return err
+	}
+	exit := Exit{Reason: fallback, StoppedAt: time.Now().UTC().Format(time.RFC3339)}
+	if err == nil {
+		if err := json.Unmarshal(raw, &exit); err != nil {
+			m.logf("holder %s: invalid exit: %v", desc.ID, err)
+			return err
+		}
+	}
+	if m.opts.OnExit != nil {
+		if err := m.opts.OnExit(desc, exit); err != nil {
+			m.logf("holder %s: persist exit: %v", desc.ID, err)
+			return err
+		}
+	}
+	code, signal := "unknown", "none"
+	if exit.ExitCode != nil {
+		code = strconv.Itoa(*exit.ExitCode)
+	}
+	if exit.Signal != nil {
+		signal = strconv.Itoa(*exit.Signal)
+	}
+	m.logf("stopped holder %s (pid %d) at %s: exit %s, signal %s, reason %s", desc.ID, desc.PID, exit.StoppedAt, code, signal, exit.Reason)
+	if err := os.RemoveAll(dir); err != nil {
+		m.logf("holder %s: remove directory: %v", desc.ID, err)
+		return err
+	}
+	m.forget(desc.ID)
+	return nil
 }
 
 func (m *Manager) isClosed() bool {
@@ -656,7 +705,6 @@ func (m *Manager) Stop(id string) error {
 	if e == nil {
 		return ErrUnknownHolder
 	}
-	dir := filepath.Join(m.opts.Dir, id)
 	if client != nil {
 		if err := client.Stop(); err == nil {
 			select {
@@ -665,18 +713,16 @@ func (m *Manager) Stop(id string) error {
 				client.Close()
 			}
 			if m.waitGone(desc.PID) {
-				m.forget(id)
-				_ = os.RemoveAll(dir)
-				m.logf("stopped holder %s (pid %d)", id, desc.PID)
+				if err := m.cleanup(desc, "stop"); err != nil {
+					return err
+				}
 				return nil
 			}
 		}
 		// The holder did not stop through the protocol; fall through.
 	}
 	if !m.opts.alive(desc.PID) {
-		m.forget(id)
-		_ = os.RemoveAll(dir)
-		return nil
+		return m.cleanup(desc, "unknown")
 	}
 	if err := m.sameProcess(desc); err != nil {
 		return err
@@ -687,8 +733,9 @@ func (m *Manager) Stop(id string) error {
 	if !m.waitGone(desc.PID) {
 		return fmt.Errorf("holder process %d did not end", desc.PID)
 	}
-	m.forget(id)
-	_ = os.RemoveAll(dir)
+	if err := m.cleanup(desc, "killed"); err != nil {
+		return err
+	}
 	m.logf("killed holder %s (pid %d) and its child", id, desc.PID)
 	return nil
 }
