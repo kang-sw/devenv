@@ -120,8 +120,12 @@ function startServer(bin, shape) {
 // PAGE_PROBE runs in every document before its scripts: it counts long
 // tasks, keystroke Event Timing entries, and topic frames built (a doc frame
 // loading its srcdoc document), and times each keydown to the next frame.
+// Since the dashboard's iframe shell, the session page is the shell's frame
+// (?frame=1), whose window outlives its initial about:blank document, where
+// this script runs: the observers live on the window, and the document
+// listeners are hooked again on the document the frame navigates to.
 const PAGE_PROBE = `(() => {
-  if (window.top !== window) return;
+  if (location.href === "about:srcdoc") return;
   const P = window.__bp = { long: [], events: [], keys: [], built: 0 };
   try {
     new PerformanceObserver((l) => l.getEntries().forEach((e) => P.long.push([e.startTime, e.duration]))).observe({ type: "longtask", buffered: true });
@@ -129,13 +133,24 @@ const PAGE_PROBE = `(() => {
   try {
     new PerformanceObserver((l) => l.getEntries().forEach((e) => { if (/^key|^input|^beforeinput/.test(e.name)) P.events.push([e.startTime, e.duration, e.name]); })).observe({ type: "event", durationThreshold: 16, buffered: true });
   } catch (e) {}
-  document.addEventListener("keydown", (e) => {
-    const t0 = e.timeStamp;
-    requestAnimationFrame(() => { const ch = new MessageChannel(); ch.port1.onmessage = () => P.keys.push(performance.now() - t0); ch.port2.postMessage(0); });
-  }, true);
-  // A topic frame's document is built when the frame loads its srcdoc; an
-  // unmounted frame's about:blank load does not count.
-  document.addEventListener("load", (e) => { const f = e.target; if (f && f.matches && f.matches("iframe.doc-frame") && f.hasAttribute("srcdoc")) P.built++; }, true);
+  function hook(d) {
+    d.addEventListener("keydown", (e) => {
+      const t0 = e.timeStamp;
+      requestAnimationFrame(() => { const ch = new MessageChannel(); ch.port1.onmessage = () => P.keys.push(performance.now() - t0); ch.port2.postMessage(0); });
+    }, true);
+    // A topic frame's document is built when the frame loads its srcdoc; an
+    // unmounted frame's about:blank load does not count.
+    d.addEventListener("load", (e) => { const f = e.target; if (f && f.matches && f.matches("iframe.doc-frame") && f.hasAttribute("srcdoc")) P.built++; }, true);
+  }
+  let hooked = document;
+  hook(document);
+  if (location.href !== "about:blank") return;
+  const iv = setInterval(() => {
+    if (document === hooked) return;
+    hooked = document;
+    hook(document);
+    if (location.href !== "about:blank") clearInterval(iv);
+  }, 5);
 })();`;
 
 async function metrics(cdp) {
@@ -145,8 +160,16 @@ async function metrics(cdp) {
   return out;
 }
 
+// sess is the frame that holds the session page: the iframe shell's
+// session frame (?frame=1), else (a tree from before the shell) the page.
+// Performance metrics are the page's whole renderer, the shell included,
+// the same on both sides of an A/B.
+function sess(page) {
+  return page.frames().find((f) => /[?&]frame=1/.test(f.url())) || page.mainFrame();
+}
+
 async function probe(page) {
-  return page.evaluate(() => {
+  return sess(page).evaluate(() => {
     const P = window.__bp;
     return { now: performance.now(), long: P.long.slice(), events: P.events.slice(), keys: P.keys.slice(), built: P.built, mounted: document.querySelectorAll("iframe.doc-frame[srcdoc]").length };
   });
@@ -218,7 +241,7 @@ async function coldLoad(browser, url, rate, opts) {
   return { context, page, cdp, a };
 }
 
-async function boardHash(page) { return page.evaluate(() => { const b = document.getElementById("r-board"); return b ? b.getAttribute("data-h") : ""; }); }
+async function boardHash(page) { return sess(page).evaluate(() => { const b = document.getElementById("r-board"); return b ? b.getAttribute("data-h") : ""; }); }
 
 async function scenario(name, page, cdp, server, opts) {
   if (name === "b") {
@@ -227,21 +250,21 @@ async function scenario(name, page, cdp, server, opts) {
     for (let i = 0; i < 20; i++) {
       const h = await boardHash(page);
       await server.log(1);
-      await page.waitForFunction((was) => { const b = document.getElementById("r-board"); return b && b.getAttribute("data-h") !== was; }, h, { timeout: 60000 });
+      await sess(page).waitForFunction((was) => { const b = document.getElementById("r-board"); return b && b.getAttribute("data-h") !== was; }, h, { timeout: 60000 });
       await page.waitForTimeout(300);
     }
     await quiet(page, cdp);
   } else if (name === "d") {
-    await page.evaluate(() => {
+    await sess(page).evaluate(() => {
       const t = document.querySelector('#r-board section.topic[data-topic="T00"] .tnote-toggle');
       t.scrollIntoView({ block: "center" });
     });
-    await page.click('#r-board section.topic[data-topic="T00"] .tnote-toggle');
+    await sess(page).click('#r-board section.topic[data-topic="T00"] .tnote-toggle');
     await page.waitForTimeout(300);
     await page.keyboard.type("The quick brown fox jumps over the lazy dog 012345", { delay: 40 });
     await page.waitForTimeout(500);
   } else if (name === "e") {
-    await page.evaluate(() => new Promise((done) => {
+    await sess(page).evaluate(() => new Promise((done) => {
       const col = document.getElementById("bcol");
       col.scrollTop = 0;
       function step() {
@@ -375,13 +398,13 @@ async function shot(args) {
       const { context, page, cdp } = await coldLoad(browser, server.url, 1, { scheme });
       // Open every closed topic stream and versions fold, so the frames a
       // lazy mount defers draw as well.
-      await page.evaluate(() => document.querySelectorAll("#bcol details.panel-versions").forEach((d) => { d.open = true; }));
+      await sess(page).evaluate(() => document.querySelectorAll("#bcol details.panel-versions").forEach((d) => { d.open = true; }));
       await page.waitForTimeout(1500);
       await quiet(page, cdp);
-      const col = await page.$("#bcol");
-      const stops = await page.evaluate(() => { const c = document.getElementById("bcol"); c.scrollTop = 0; return Math.ceil(c.scrollHeight / c.clientHeight); });
+      const col = await sess(page).$("#bcol");
+      const stops = await sess(page).evaluate(() => { const c = document.getElementById("bcol"); c.scrollTop = 0; return Math.ceil(c.scrollHeight / c.clientHeight); });
       for (let i = 0; i < stops; i++) {
-        await page.evaluate((i) => { const c = document.getElementById("bcol"); c.scrollTop = i * c.clientHeight; }, i);
+        await sess(page).evaluate((i) => { const c = document.getElementById("bcol"); c.scrollTop = i * c.clientHeight; }, i);
         await page.waitForTimeout(700);
         await col.screenshot({ path: path.join(out, `${scheme}-${String(i).padStart(2, "0")}.png`), animations: "disabled", caret: "hide" });
       }
