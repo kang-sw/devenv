@@ -9,8 +9,9 @@ import (
 // session page stands at the window's left edge (the index page stays
 // centred), and while the pinned column shows, the board keeps its no-pin
 // width (--pbw, narrowed to leave the column 480px; --boardw once the user
-// drags it) and the column fills the remaining width to the window's right
-// edge, 280px at least. From 1600px both drawers (the session drawer's
+// drags it, clamped to what the window leaves so a width saved on a wider
+// window cannot push the column below its floor) and the column fills the
+// remaining width to the window's right edge, 280px at least. From 1600px both drawers (the session drawer's
 // .dr-in, the tracker's through --tkmaxw and --tkml) span the window, so
 // their handles stand at its right edge whether or not anything is pinned.
 func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
@@ -25,8 +26,8 @@ func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
 		".dash.index { --tkmaxw: 1080px; --tkml: auto; }",
 		":root { --pbw: calc(1680px - 32px - 356px); }",
 		".dash.board { --pbw: 900px; }",
-		":root[data-pincol] .dbody { grid-template-columns: minmax(0, var(--boardw, min(var(--pbw), 100% - 496px))) minmax(280px, 1fr); }",
-		":root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, var(--boardw, min(var(--pbw), 100% - 852px))) minmax(280px, 1fr); }",
+		":root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }",
+		":root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }",
 		":root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }",
 	} {
 		if !strings.Contains(css, want) {

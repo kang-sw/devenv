@@ -1458,7 +1458,8 @@ a[data-wl="file"]:not([href]) { color: inherit; }
    window's remaining width to its right, so the page fills the window. The
    handle on the column's left edge, in the gap toward the board, drags the
    board's width (--boardw, kept by cards.js; the column keeps 280px at
-   least). The column scrolls on its own. */
+   least: a width saved on a wider window is clamped to what this window
+   leaves, the column's 280px and the gaps). The column scrolls on its own. */
 :root { --pbw: calc(1680px - 32px - 356px); }
 .dash.board { --pbw: 900px; }
 .bpcol { display: none; }
@@ -1474,7 +1475,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .bp-edge:hover::after, .bp-edge.drag::after { background: var(--wb-primary); }
 @media (min-width: 1600px) {
   :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
-  :root[data-pincol] .dbody { grid-template-columns: minmax(0, var(--boardw, min(var(--pbw), 100% - 496px))) minmax(280px, 1fr); }
+  :root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
   .dash:not(.live) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
   :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }
@@ -1489,7 +1490,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 }
 @media (min-width: 2200px) {
   /* rail and column both show */
-  :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, var(--boardw, min(var(--pbw), 100% - 852px))) minmax(280px, 1fr); }
+  :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }
   :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
   :root[data-pincol] .bpcol { grid-column: 3; }
