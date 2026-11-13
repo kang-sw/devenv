@@ -22,7 +22,8 @@ func SpawnAgentEvent(st State, key string) wslive.Event {
 	}
 	ev := wslive.Event{Kind: wslive.KindAgent, AgentID: "pi:" + st.ID,
 		AgentKind: wslive.AgentKindPi, Label: label, Status: status,
-		Model: st.Model, Effort: st.Effort, SessionKey: key}
+		Model: st.Model, Effort: st.Effort, SessionKey: key,
+		ContextTokens: st.ContextTokens, OutputTps: st.OutputTps}
 	if st.Parent != nil && st.Parent.Kind == ParentConversation {
 		ev.ParentID = "pi:" + st.Parent.ReplyID
 	}

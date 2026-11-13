@@ -39,6 +39,31 @@ never implemented either.
   needs its own usage source.
 - Compatibility: optional snapshot/event fields, T0.
 
+## Decisions
+
+- 2026-11-13 owner decision, board item (53) = a: request Pi session stats
+  mid-turn too (assistant `message_end` / `turn_end`), throttled to at most
+  about once per second, so running rows show their child's usage.
+- Rejected: stats only at turn end.
+- T0: all added wire/event/snapshot fields are optional; no protocol bump.
+- Keep the existing row and batch rendering; populate their existing figures.
+
+## Constraints
+
+- Follow `ai-docs/manuals/shipped-surface-boundary.md` and
+  `ai-docs/manuals/release-compatibility.md` for tooling internals.
+- Run Go builds/tests only on remote w5090.
+
+## Phases
+
+### Phase 1: Populate hosted child rows and batch usage
+
+Project each child's own context and available output rate onto hosted Pi
+rows, request throttled mid-turn stats, and attach assistant-message usage to
+hosted batches. Use Pi message usage too if directly available. Leave the
+composer context bar outside this change. Verify mapper counts, throttling,
+row projection/recovery, and existing token-chip rendering with remote Go tests.
+
 ## Open
 
 - Whether the owner also saw the composer context bar missing (the screenshot
