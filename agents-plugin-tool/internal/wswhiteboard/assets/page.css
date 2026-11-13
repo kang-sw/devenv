@@ -1,3 +1,4 @@
+/* class prefix: wb (new classes use wb; the sticky-head ticket badge is .wbtk) */
 /* Material-style board: roles are told apart by filled header bars, not outlines.
    Surfaces follow the host theme; role fills are template-owned so the text on
    them keeps its contrast whatever the host palette is. */

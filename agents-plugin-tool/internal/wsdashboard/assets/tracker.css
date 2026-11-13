@@ -1,3 +1,4 @@
+/* class prefix: tk (new classes use tk-) */
 /* Tracker renderer styles (tracker.js). Every rule is scoped to the renderer's
    own nodes: each node it creates carries the class tk, and every selector
    starts at one, so nothing here reaches the host page.

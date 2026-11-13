@@ -1,3 +1,4 @@
+/* class prefix: memo (new classes use memo-) */
 /* The memo pad slides from behind the rail, after its entrance. The same
    rail-open state lifts a permanent column above the scrim on wide screens. */
 .memo-pad { position: fixed; z-index: 44; left: var(--memo-left, 352px); top: var(--memo-top, 12px); bottom: 12px; width: 320px; max-width: calc(100vw - 24px); display: flex; flex-direction: column; gap: 10px; padding: 16px; box-sizing: border-box; border-radius: 0 12px 12px 0; color: var(--wb-fg); background: color-mix(in srgb, #f6da75 24%, var(--wb-card)); box-shadow: var(--wb-shadow-hi); visibility: hidden; opacity: 0; transform: translateX(-100%); pointer-events: none; transition: transform .22s ease, opacity .16s, visibility 0s linear .22s; }
