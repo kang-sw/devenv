@@ -24,18 +24,15 @@ Separately, the lead routed several policy decisions to the board as `check` ite
 - Decision 1 (owner, 2026-11-13; was 413=b): the root cause is the lead dropping the mockup path from the ticket, not the worker, so the rule binds the lead first. In lead-ticket: when the owner approved a visual reference (mockup, screenshot, design file) for the work, the lead stores it at a durable location, links it by path in the ticket, and writes a verification expectation requiring a LOOK capture compared side by side against it. Promotion to `ready/` is refused while an approved visual reference exists but is not linked, or while that comparison is not in the verification. Secondary, in the worker playbook: when a ticket links a visual reference, the worker captures the result and compares it against the reference before closing the phase, and reports both paths.
 - Decision 2 (owner, 2026-11-13; was 414=b): `check` narrows to looking at, verifying, or confirming a finished artifact, or an action whose choice is already settled. Any "should we do X?" or "which one?" ask is a policy question with options, including a yes/no one. Closing a policy item as `assumed` remains legitimate; the `assumed` rule is unchanged. Edits land in the workflow manual `### Asking the user` and the whiteboard playbook `class` bullet.
 
+- Decision 3 (owner, 2026-11-13; was 416): an approved visual reference lives in a tracked folder beside the ticket board (path rule like `ai-docs/tickets/assets/<stem>/`, to be stated in the shipped convention). There is no hard format constraint; text assets (HTML, SVG, Markdown) are preferred over raster images. Rejected: an untracked durable directory, because it does not survive cleanup or travel with the ticket.
+- Decision 4 (owner, 2026-11-13; from board item 391): check items are granular, one verifiable thing per item, so the owner answers each separately. Trigger: one check item bundled five things (search palette, memo pad, tracker draft restore, token usage, mailbox label copy). The guidance lands in the Phase 2 workflow-manual / whiteboard-playbook edit.
+
 ## Constraints
 
 - Compatibility: T0 (playbook, manual, and checklist content only). No version bump.
 - Shipped text is downstream-first: no reference to this repository's own paths (no temp-directory or `ai-docs/` specifics) in shipped text; the durable-location wording is generic.
 - Manuals read before editing: `ai-docs/manuals/skill-authoring.md` (apply its invariant checklist to every changed Invariants/Constraints line), `ai-docs/manuals/wsflow-mirroring.md` (apply the ws and wsflow mirrors; carry the pi copies if the mirroring manual requires them), `ai-docs/manuals/shipped-surface-boundary.md`.
 - The ready refusal should be text and checklist first (lead-ticket promote step plus a checklist item). Code in `tickets.sage_gate` is added only if text cannot carry it; if so, say so in the Phase 1 result.
-
-## Open Decision Queue
-
-Last ID: (416)
-
-- (416) [open] [technical] Durable home for an approved visual reference: a tracked folder beside the ticket board (e.g. `ai-docs/tickets/assets/<stem>/`), over an untracked durable dir - it survives temp cleanup, travels with the ticket into worktrees, and reviewers can open it; large binaries are the cost, so the rule caps it at the reference files actually approved.
 
 ## Phases
 
@@ -47,6 +44,6 @@ Verification: the playbook/manual drift and mirror tests pass. A rendered lead-t
 
 ### Phase 2: Worker-side comparison and check narrowing
 
-Worker playbook: when a ticket links a visual reference, capture the result and compare it against the reference before closing the phase, and report both paths. Narrow the `check` definition in the workflow manual `### Asking the user` and the whiteboard playbook `class` bullet per Decision 2, leaving the `assumed` rule unchanged. Apply the mirrors.
+Worker playbook: when a ticket links a visual reference, capture the result and compare it against the reference before closing the phase, and report both paths. Narrow the `check` definition in the workflow manual `### Asking the user` and the whiteboard playbook `class` bullet per Decision 2, leaving the `assumed` rule unchanged. Also add the granularity guidance per Decision 4: check items are written granular, one verifiable thing per item, never bundled. Apply the mirrors.
 
 Verification: the playbook/manual drift and mirror tests pass. The rendered workflow manual and whiteboard playbook show the narrowed `check` text, and the rendered worker playbook shows the comparison step.
