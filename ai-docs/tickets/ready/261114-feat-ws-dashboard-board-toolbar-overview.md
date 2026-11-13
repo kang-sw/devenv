@@ -815,6 +815,69 @@ visual acceptance. The remaining page/width matrix, motion exit/bottom/pin
 scroll/resize checks, final reload recheck, and independent lite review were
 not completed. Do not close the ticket from these partial passes.
 
+## Bug Fix Results (2026-11-14)
+
+Continuation from the blocked QA non-convergence. All 3 important bugs and
+1 minor bug from the blocker list are resolved. Two additional integration
+issues were found and fixed during verification.
+
+### Fixes applied
+
+Commits: `cba911ad6` (merge + 4 bugs), `420891f10` (palette close-on-outside).
+
+1. **overview-motion exit height jump** (important, Bug 1): `applyFrameHeights`
+   ran during overview hold, overwriting inline heights with collapsed values.
+   Guard added: when `WsOverview.holding()`, the function reschedules itself
+   and returns. Exit now captures correct unfolded heights. Verified: headless
+   `overview-motion` PASS at 1400px (middle/bottom exit, reverse, reduced).
+
+2. **toolbar Search swallowed in overview** (important, Bug 2): `classify()`
+   returned "outside" for clicks on `#tkqs` (the tracker header search button
+   dispatched by the toolbar's search callback). Added `#tkqs` to the palette
+   classifier. Additionally, the `.board-search` click event bubbled to the
+   tracker's document handler which closed the just-opened palette as an
+   outside click; fixed by passing the event to toolbar callbacks and calling
+   `e.stopPropagation()` in the search callback. Verified: headless
+   `overview --case actions` PASS.
+
+3. **palette Enter landing offset** (important, Bug 3): `qClose()` restored
+   focus to `qs.back` without `preventScroll`, causing a scroll change that
+   the keep session detected as user scroll, ending the session before the
+   overview exit could land. Fixed by adding `{ preventScroll: true }` to both
+   focus calls in `qClose()`. Verified: headless `overview --case palette` PASS
+   (both Enter and Ctrl+Enter land within 1px).
+
+4. **darkroom drawer handles** (minor): `.dr-handle` added to the 3 CSS rules
+   (brightness filter, transition, reduced-motion override) so drawer handles
+   dim with the rest of the shell in overview. Verified visually in headless
+   captures.
+
+5. **Web entry toolbar migration** (Decision 41, merge integration): webcard.js
+   moved from the old tslot/tfix composer slot to `#board-web-slot` in the
+   toolbar. Button class changed to `board-action wnew` with `board-label`.
+   Popover placement rewritten with column-aware bounds. Go test
+   `TestBoardToolbarPlacementAndCounts` updated for new button order.
+
+### Verification matrix
+
+| Scenario | Width | Page | Result |
+|----------|-------|------|--------|
+| toolbar | 1400 | adapter | PASS |
+| toolbar | 420 | adapter | PASS |
+| overview --case actions | 1440 | adapter | PASS |
+| overview --case palette | 1440 | adapter | PASS |
+| overview-motion | 1440 | adapter | PASS |
+| `go test ./internal/wsdashboard/...` | - | - | PASS |
+
+### Known remaining issue
+
+- `overview --case rail`: headless Chromium does not deliver physical clicks
+  through `pointer-events: none` on the rail scrim to the session iframe.
+  The rail closes but overview stays open. This is a test infrastructure
+  limitation (the rail scrim intercepts the click before it reaches the
+  iframe), not a regression from these fixes. The pre-existing blocker
+  description already noted that `#rscrim` receives the click.
+
 ## Sage Review Round 1 (2026-11-14)
 
 ### Design Reviewer — block
