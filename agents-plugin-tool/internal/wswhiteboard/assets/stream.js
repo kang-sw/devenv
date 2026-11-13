@@ -101,6 +101,14 @@
     steps(h, Math.max(h._wbHistorySteps || 1, Math.ceil((live.getBoundingClientRect().bottom - node.getBoundingClientRect().top) / STEP)));
     updateControl(h);
   }
+  function navigate(h, node) {
+    reveal(h, node);
+    arm(h);
+    h._wbHistoryTarget = node;
+    kit.keep(node, { offset: 12, observe: [h.querySelector('.history-live')], onEnd: function () {
+      if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
+    } });
+  }
   // relabel rewrites a fold's key, anchor, and "n entries · from-to" label
   // after a merge, as the server writes them (EntryPage.Segments).
   function relabel(fold) {
@@ -151,12 +159,25 @@
   function loadOne(h) {
     var page = h.querySelector('template[data-history-page]');
     if (!page) return false;
-    var live = h.querySelector('.history-live'), boundary = live.children[0];
+    var live = h.querySelector('.history-live'), boundary = live.children[0], height = live.scrollHeight;
     live.insertBefore(page.content.cloneNode(true), live.firstChild);
     page.remove();
     if (boundary) joinBoundary(live, boundary);
     if (window.wbBindBoard) window.wbBindBoard(h);
     h.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: h } }));
+    // Joining closed runs can add a page without changing content size.
+    // Re-arm this content observer on the next frame so it delivers that
+    // page's layout even then. Never run a synchronous multi-page loop or
+    // re-observe inside a resize delivery (which would cause a loop error).
+    if (h._wbHistoryObserver && height === live.scrollHeight && !h._wbHistoryReobserve) {
+      h._wbHistoryReobserve = true;
+      window.requestAnimationFrame(function () {
+        h._wbHistoryReobserve = false;
+        if (!h.isConnected || h._wbHistorySteps <= 1 || live.scrollHeight >= h._wbHistorySteps * STEP || !h.querySelector('template[data-history-page]')) return;
+        h._wbHistoryObserver.unobserve(live);
+        h._wbHistoryObserver.observe(live);
+      });
+    }
     return true;
   }
   // Materialize only known targets. Loading all intervening pages preserves
@@ -200,14 +221,7 @@
     // Highlight the reached target once, restarting a running flash.
     mark.classList.toggle('flash', false); void mark.offsetWidth; mark.classList.toggle('flash', true);
     var h = node.closest('.wb-history');
-    if (h) {
-      reveal(h, node);
-      arm(h);
-      h._wbHistoryTarget = node;
-      kit.keep(node, { offset: 12, observe: [h.querySelector('.history-live')], onEnd: function () {
-        if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
-      } });
-    }
+    if (h) navigate(h, node);
     return node;
   }
   function capture(root) {
@@ -250,6 +264,15 @@
       steps(h, 1);
       updateControl(h);
       arm(h);
+      // Hidden overflow is not keyboard navigation: a clipped summary is
+      // still tabbable. Reveal focused controls through the same page keep
+      // path as deep links, never by scrolling the clipped box.
+      h.addEventListener('focusin', function (e) {
+        var live = h.querySelector('.history-live'), node = e.target;
+        if (!live.contains(node)) return;
+        var r = node.getBoundingClientRect(), clip = h.querySelector('.history-clip').getBoundingClientRect();
+        if (r.top < clip.top || r.bottom > clip.bottom) navigate(h, node);
+      });
       // Frame grafts keep this container but replace its older-page button.
       h.addEventListener('click', function (e) {
         var button = e.target.closest && e.target.closest('.history-older');

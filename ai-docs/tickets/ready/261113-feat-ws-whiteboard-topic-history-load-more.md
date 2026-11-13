@@ -148,8 +148,20 @@ Today a topic's record view scrolls inside `.wb-history`
      materializes the target's page and raises the step count until the
      target lies inside the clip. The target is then brought into view by
      the page's scroller through `wbHistory.keep(target, { offset })`, so it
-     stays put while late frame heights settle. The clipped box is never
-     scrolled: `scrollIntoView` (`dashboard.js#L3254`, `stream.js:239`) also
+     stays put while late frame heights settle **during that shared keep
+     session** (EXEC technical decision, 2026-11-14, under the owner's
+     overnight self-settle rule). Navigation is armed only until the existing
+     session ends: quiet after 500ms, cap after 5000ms, or a user scroll. A
+     report after the session ends is a new layout event and is not
+     compensated or re-revealed, matching board swaps under reorder-hold
+     Decision 8. Rejected: arming navigation until cap or user scroll past
+     quiet, changing shared keep options/timeouts, or adding a history-local
+     session. Headless stability assertions sample after paint (rAF then a
+     MessageChannel or zero-delay task), because rAF geometry can precede
+     ResizeObserver's pre-paint correction. Reports spaced within quiet
+     (for example 300ms apart) must stay within 1px; a separate post-session
+     report documents permitted movement without re-arming navigation.
+     The clipped box is never scrolled: `scrollIntoView` (`dashboard.js#L3254`, `stream.js:239`) also
      scrolls `overflow: hidden` ancestors and would break the bottom
      anchoring, so it is not called on a target inside the clip.
    - **"Unworkable clip"**, for the 3-entry fallback: bottom anchoring
@@ -244,49 +256,52 @@ dashboard board region and on the standalone whiteboard page:
 
 LOOK captures of a long topic before and after "load more" on both surfaces.
 
-## Blocked - deep-link late-height lifetime (2026-11-14)
+## Blocked - review remediation non-convergence (2026-11-14)
 
-Partial implementation is retained on `impl/develop/life-dole-panda`; no
-phase Result or closure is claimed. The shared `viewKit` helpers were reused
-without modification. Test contracts: `50df0d6f`; Chromium harness: `7434da648`.
+No phase Result or closure is claimed. EXEC settled the previous lifetime
+stop; the dated clarification is now in Decision 8's Deep links bullet.
+Shared `viewKit` remains byte-identical to the starting revision (SHA256
+`7ec85535314edf6c811d145b56d6f50d91af7380c75086f21427be065f2cefcb`).
 
-- VERIFIED: `cd agents-plugin-tool && go test -count=1
-  ./internal/wswhiteboard/... ./internal/wsdashboard/...` passed (26.035s /
-  137.201s). A preceding invocation from the repository root failed at module
-  discovery; that was a working-directory error, not a test failure.
-- VERIFIED: isolated Chromium probes measured 640 -> 1280px clips and 0px
-  expansion, latest-entry late-height, and above-viewport collapse drift on
-  the dashboard and the true standalone file page. Loaded rows/folds survived
-  collapse. Dashboard swap + load-more reused the same keep handle.
-- VERIFIED: strict deep-link probes did not pass. Dashboard target p1 moved
-  transiently by 214.4375px in rAF geometry samples while keep remained active
-  (14.7ms excursion, recovered by 28.4ms). No compositor filmstrip was taken;
-  a painted flash is not established. Standalone target drift reached
-  18.0625px after the second payload growth, following the helper's 500ms
-  quiet timeout. The probe spaces growth reports by 750ms.
-- VERIFIED: `stream.js:312` fixes the prerequisite helper's quiet/cap at
-  500/5000ms; this implementation clears the navigation target in its
-  keep-end callback (`stream.js:207-208`). Subsequent content resize therefore
-  cannot re-reveal that target (`stream.js:271`).
-- INFERRED: the standalone failure exposes an unsettled lifetime boundary:
-  should navigation stay armed through a later height report after the shared
-  helper declares quiet, and if so how is user scrolling after quiet allowed
-  to cancel it? Decision 8 requires late-height stability but does not settle
-  behavior after this existing helper timeout. Do not add a history-local
-  session or change the shared helper contract without the lead's decision.
+- VERIFIED: corrected post-paint probes and the existing full history, pin,
+  observer and keep checks passed before review (`43c5cc07d`). The old
+  214.4375px dashboard rAF excursion was 0px after paint; both surfaces had
+  0px post-paint deep-link and latest-entry drift. Reports inside quiet
+  stayed anchored; post-session reports did not re-arm navigation.
+  Evidence: `/tmp/board-history-resume-DOOjWv/VERIFIED.md` and its raw samples
+  and inspected before/after LOOK captures.
+- VERIFIED: one fresh independent lite review found a Critical size-neutral
+  folded-log paging stall and an Important clipped keyboard-focus target.
+  Report: `/tmp/history-lite-review-keg-reverb-giblet.md`. No re-review was
+  requested (one-pass lite allocation).
+- VERIFIED: remediation re-observes the existing content on a later frame
+  after a size-neutral merge, and shares navigation with clipped focusin.
+  Node contracts (`efc79e6a2`) passed both packages uncached (21.622s /
+  126.772s), as reported by the test leaf. Native browser delivery tests
+  (`d67ecb997`) showed 50 -> 100 -> 150 -> 200 rows at an unchanged 80px
+  height, one page synchronously and each subsequent page in a distinct
+  real observer delivery. Standalone collapse stopped continuation with
+  seven older pages remaining.
+- VERIFIED: both isolated browser runs emitted the same native ErrorEvent:
+  `ResizeObserver loop completed with undelivered notifications.` The
+  strict standalone no-loop assertion failed. Stop (f): do not rerun this
+  warning at the same tier. No shared daemon was touched; the isolated
+  daemon was stopped. Evidence and inspected keyboard/chain LOOK captures:
+  `/tmp/board-history-remediation-Gcg652/VERIFIED.md` and per-surface
+  `measurements.json`.
+- INFERRED: hiding the exhausted button during an observer callback may
+  resize shallower observed ancestors, but the first error records lack
+  phase timestamps, so this cause is unproven. Final harness diagnostics
+  add timestamps/phases; they have not been rerun.
+- VERIFIED: real Tab focuses p156 inside the clip/page rectangles on both
+  surfaces with clip.scrollTop = 0. INFERRED: sticky headers may still
+  occlude it (after-Tab LOOK); a rectangle check alone does not settle the
+  review finding. Add hit-testing/occlusion evidence before claiming fixed.
 
-Evidence and inspected LOOK captures remain under
-`/tmp/board-harness-run-agY8VO/` (`VERIFIED.md`, per-surface `measurements.json`,
-`deep-link-late-heights.json`, dashboard and standalone before/after PNGs).
-Only the isolated dev daemon was used and it has been stopped; no shared daemon
-was restarted or replaced. Reproduction: `node scripts/board-headless.mjs
-serve --history-entries 180 --keep-tmp`, then `history --url <adapter URL or
-standalone file URL> --width 1800 --artifacts <directory>`.
-
-Pending: resolve the late-height lifetime question; diagnose dashboard
-observer/reveal ordering with painted-frame evidence; rerun final pin and
-observer fixture corrections, remaining headless checks, and independent lite
-review. The long-panel browser fixture does not exercise the underfilled
-resize load chain, exhausted controls, or live arrival (Node policy tests
-cover these). No full green browser run is claimed. The 3-entry fallback was
-not selected: its latest-entry stability failure criterion did not occur.
+Pending: diagnose the native observer warning; finish keyboard visibility
+and prove the review fixes; run the corrected dashboard load-event recorder
+and cancellation, full history/keep/observer baselines on the final assets,
+and record a Result only after green verification. Existing green browser
+artifacts predate these remediation assets. The final dashboard recorder
+correction is syntax-checked, not browser-verified. No full final green run,
+fixed-review verdict, 3-entry fallback, or ticket completion is claimed.
