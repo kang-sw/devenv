@@ -54,7 +54,7 @@ func removeWorktree(ctx context.Context, runner wsgit.Runner, env []string, wtPa
 		res.Branch = strings.TrimPrefix(entry.Branch, "refs/heads/")
 	}
 
-	dirty, err := porcelainPaths(ctx, runner, target)
+	dirty, err := wsgit.PorcelainPaths(ctx, runner, target)
 	if err != nil {
 		return res, fmt.Errorf("worktree.remove: read the status of %s: %w", target, err)
 	}
@@ -66,7 +66,7 @@ func removeWorktree(ctx context.Context, runner wsgit.Runner, env []string, wtPa
 	}
 
 	if res.Branch != "" {
-		n, err := countUnreachedCommits(ctx, runner, target, "refs/heads/"+res.Branch, "--exclude="+res.Branch, "--branches", "--remotes")
+		n, err := wsgit.CountUnreachedCommits(ctx, runner, target, "refs/heads/"+res.Branch, "--exclude="+res.Branch, "--branches", "--remotes")
 		if err != nil {
 			return res, fmt.Errorf("worktree.remove: %w", err)
 		}
@@ -74,7 +74,7 @@ func removeWorktree(ctx context.Context, runner wsgit.Runner, env []string, wtPa
 			return res, fmt.Errorf("worktree.remove refuses %s: its branch %q holds %d commit(s) no other branch reaches; merge them first (remove keeps the branch, but the unmerged work loses its checkout)", target, res.Branch, n)
 		}
 	} else {
-		n, err := countUnreachedCommits(ctx, runner, target, "HEAD", "--branches", "--tags", "--remotes")
+		n, err := wsgit.CountUnreachedCommits(ctx, runner, target, "HEAD", "--branches", "--tags", "--remotes")
 		if err != nil {
 			return res, fmt.Errorf("worktree.remove: %w", err)
 		}
@@ -132,21 +132,6 @@ func removeWorktree(ctx context.Context, runner wsgit.Runner, env []string, wtPa
 	}
 	res.Removed = true
 	return res, nil
-}
-
-// countUnreachedCommits counts commits reachable from tip but from none of
-// the refs the exclusion arguments select.
-func countUnreachedCommits(ctx context.Context, runner wsgit.Runner, wtPath, tip string, not ...string) (int, error) {
-	args := append([]string{"rev-list", "--count", tip, "--not"}, not...)
-	out, err := wtRun(ctx, runner, wtPath, args...)
-	if err != nil {
-		return 0, err
-	}
-	n, err := strconv.Atoi(out)
-	if err != nil {
-		return 0, fmt.Errorf("parse rev-list count %q: %v", out, err)
-	}
-	return n, nil
 }
 
 // worktreeActivity is a worktree's last activity: the later of its lease's

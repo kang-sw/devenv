@@ -165,7 +165,7 @@ func describePoolWorktree(ctx context.Context, runner wsgit.Runner, e worktreeEn
 		out.Quarantine = marker.Quarantine
 	}
 
-	if dirtyPaths, err := porcelainPaths(ctx, runner, e.Path); err != nil {
+	if dirtyPaths, err := wsgit.PorcelainPaths(ctx, runner, e.Path); err != nil {
 		out.Warnings = append(out.Warnings, "cannot read git status: "+err.Error())
 	} else {
 		dirty := len(dirtyPaths) > 0
@@ -207,35 +207,6 @@ func describePoolWorktree(ctx context.Context, runner wsgit.Runner, e worktreeEn
 		out.Release = worktreeReleaseNudge(e.Path)
 	}
 	return out
-}
-
-// porcelainPaths returns the working-tree-relative paths `git status
-// --porcelain` reports, taking a rename's new path. Untracked directories stay
-// collapsed (`dir/`): -uall would reopen a full-tree walk over content such as
-// node_modules. -z keeps paths unquoted; the raw (untrimmed) output is parsed
-// because trimming would eat the first record's leading status space.
-// --no-optional-locks keeps status from taking index.lock to refresh the index,
-// so listing never makes a live worker's concurrent git add/commit fail.
-func porcelainPaths(ctx context.Context, runner wsgit.Runner, wtPath string) ([]string, error) {
-	raw, err := runner.RunGit(ctx, wtPath, "--no-optional-locks", "status", "--porcelain", "-z")
-	if err != nil {
-		return nil, err
-	}
-	var paths []string
-	fields := strings.Split(string(raw), "\x00")
-	for i := 0; i < len(fields); i++ {
-		rec := fields[i]
-		if len(rec) < 4 {
-			continue
-		}
-		paths = append(paths, rec[3:])
-		// In -z form a rename or copy record is followed by its original path
-		// as a separate field; skip it so only the new path is kept.
-		if rec[0] == 'R' || rec[0] == 'C' || rec[1] == 'R' || rec[1] == 'C' {
-			i++
-		}
-	}
-	return paths, nil
 }
 
 // newestMtime returns the newest mtime over the given worktree-relative paths,
