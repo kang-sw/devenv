@@ -5608,10 +5608,11 @@
 
   // --- session rail ------------------------------------------------------------
   // The rail (r-rail) is one render shared by every session page, in the
-  // order and with the stars of the daemon's rail layout (a drag or a star
-  // posts a layout op, and the rail swap shows it): the page marks its own
-  // row, collapses the workspaces the user collapsed (rail.js keeps those
-  // in storage), and opens the add popovers (the blocks after the drag's).
+  // order, tree, and with the stars of the daemon's rail layout (a drag or
+  // a star posts a layout op, and the rail swap shows it): the page marks
+  // its own row, collapses the workspaces and parent rows the user
+  // collapsed (rail.js keeps those in storage), and opens the add popovers
+  // (the blocks after the drag's).
   // From 1600px the rail is a column, except below 2200px while the pinned
   // column shows (data-pincol on the root, the board cards block): the
   // pinned column takes its place. Otherwise the top-left arrow slides it
@@ -5620,7 +5621,7 @@
   var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
   var memoPad = railEl && $("memo-pad") && window.WsMemo ? window.WsMemo.mount(doc, railEl, $("memo-pad"), function (open) { railOpen(open === true); }) : null;
   var railStore = { load: load, save: save };
-  var colSet = WsRail ? WsRail.collapsed(railStore) : null;
+  var colSet = WsRail ? WsRail.collapsed(railStore) : null, kidSet = WsRail ? WsRail.kidsCollapsed(railStore) : null;
   // rdrag is the press or drag in the rail (the drag block below);
   // railSaving counts the layout ops in flight, and railMinGen is the
   // layout generation the last one applied answered (a rail render below
@@ -5663,7 +5664,19 @@
       ws.classList.toggle("col", col);
       if (tog) tog.setAttribute("aria-expanded", String(!col));
     });
+    q(".kidtog", r).forEach(function (tog) {
+      var row = tog.closest(".rs"), col = !!row && kidSet.has(row.getAttribute("data-rid") || "");
+      if (row) row.classList.toggle("kcol", col);
+      tog.setAttribute("aria-expanded", String(!col));
+    });
     railPopSync();
+  }
+  // kidFold collapses (fold) or expands the parent row's children, a view
+  // preference kept per browser.
+  function kidFold(row, fold) {
+    var id = row.getAttribute("data-rid") || "";
+    if (id && kidSet.has(id) !== fold) kidSet.toggle(id);
+    railMarks();
   }
   // railRelease lands the rail swap held while a press, a rename, or a
   // layout op lasted, once none does.
@@ -5715,16 +5728,19 @@
     if (body) layoutPost(body, function (status, v) { WsRail.legacyDone(railStore, v); });
   }
   // railRename runs the head's rename (labelStart) on a rail row: the name,
-  // its hosted mark, and the star give way to the input, which posts to
+  // its hosted mark and branch tag, the star, and a parent's toggle give
+  // way to the input (before the star, or the row's tail on a child, which
+  // has none), which posts to
   // that session's label route; a save shows the label in the row and, for
   // the viewed session, in the head. The rail swap waits while it is open.
   function railRename(row) {
     if (!row || railEditing()) return;
     var id = row.getAttribute("data-rid") || "", s1 = row.querySelector(".s1"), nm = row.querySelector(".rid");
     var pen = row.querySelector(".drren"), cp = row.querySelector(".drcopy"), star = row.querySelector(".star"), list = $("rlist");
-    if (!id || !s1 || !nm || !pen || !star) return;
+    var at = star || row.querySelector(".drtail");
+    if (!id || !s1 || !nm || !pen || !at) return;
     labelStart({
-      box: s1, at: star, cls: "drinp", hide: [nm, row.querySelector(".hosted"), star], route: "/s/" + encodeURIComponent(id) + "/label",
+      box: s1, at: at, cls: "drinp", hide: [nm, row.querySelector(".hosted"), row.querySelector(".rbt"), star, row.querySelector(".kidtog")], route: "/s/" + encodeURIComponent(id) + "/label",
       label: pen.getAttribute("data-label") || "", max: +(list && list.getAttribute("data-max")) || 64,
       ph: id, aria: pen.getAttribute("aria-label") || "",
       saved: function (label) {
@@ -5770,6 +5786,13 @@
         layoutSave({ op: on ? "star" : "unstar", rid: row.getAttribute("data-rid") || "" }, function () {
           star.setAttribute("aria-pressed", String(!on));
         });
+        return;
+      }
+      var kt = t.closest && t.closest(".kidtog");
+      if (kt) {
+        e.preventDefault();
+        var kr = kt.closest(".rs");
+        if (kr) kidFold(kr, !kr.classList.contains("kcol"));
         return;
       }
       var add = t.closest && t.closest(".radd");
@@ -5834,6 +5857,15 @@
       // overlay closes, so a back navigation finds the page as it was.
       if (t.closest && t.closest("a[href]")) { saveDraft(); if (memoPad) memoPad.remember(); railOpen(false); }
     });
+    // Left and Right on a focused parent row collapse and expand it (with
+    // Alt they are the keyboard path's, not this).
+    railEl.addEventListener("keydown", function (e) {
+      if ((e.key !== "ArrowLeft" && e.key !== "ArrowRight") || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
+      var t = e.target, row = t.closest && !t.closest("input, textarea") ? t.closest(".rs") : null;
+      if (!row || !row.querySelector(".kidtog")) return;
+      e.preventDefault();
+      kidFold(row, e.key === "ArrowLeft");
+    });
     // The rail list keeps its scroll across navigations.
     var savedRailTop = parseInt(load(RAIL_SCROLL_KEY), 10);
     window.addEventListener("pagehide", function () { var top = railScrollTop(); if (top !== null) save(RAIL_SCROLL_KEY, String(Math.round(top))); });
@@ -5843,17 +5875,23 @@
     layoutImport();
   }
 
-  // --- rail drag: sessions within their group, workspaces among themselves ---
+  // --- rail drag: sessions in their tree, workspaces among themselves ---
   // A live session row drags by its grip (the gutter left of its harness
-  // icon) among the live rows of its own group (its worktree or folder
-  // workspace) on its side of the stars; a workspace section drags by its
-  // bar among the sections. A line shows where it lands, clamped to the
+  // icon), a parent with its children; a workspace section drags by its
+  // bar among the sections. Over a live row the row's zones decide
+  // (WsRail.dropZone): the middle half of a valid parent attaches the row
+  // as its last child (the parent outlined, no line), its quarters and
+  // any other row's halves are a line before or after it at its level,
+  // which reorders, attaches among a parent's children, or detaches a
+  // child to the top level of its own group. Anywhere else in its own
+  // group the drop takes the nearest place among its top-level peers on
+  // its side of the stars. A line shows where it lands, clamped to the
   // list's edge when that place is scrolled out of view, and the drop
-  // moves it at once and posts the move to the rail layout (layoutSave),
-  // which the next rail swap shows; a refused move goes back to where it
-  // stood, with the reason in a toast. Over a place it cannot
-  // land (another workspace or worktree, the other side of the stars) the
-  // cursor says no and a hint says why. A press that never moves past
+  // shows at once and posts its op to the rail layout (layoutSave), which
+  // the next rail swap shows; a refused op goes back to where it stood,
+  // with the reason in a toast. Over a place it cannot land (another
+  // workspace or worktree, the other side of the stars, an ended row, too
+  // deep) the cursor says no and a hint says why. A press that never moves past
   // RD_SLOP stays a click. The rest of a row is its link and never drags; a
   // touch on a grip drags with no hold, while a touch on a bar drags only
   // after holding still for RD_HOLD, so a swipe still scrolls the list. No
@@ -5863,7 +5901,7 @@
   // (railGate), and a node replaced anyway is found again by its reply-id
   // or path.
   var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 48;
-  var rdragged = false, rdLineEl = null, rdHintEl = null, rdRaf = 0;
+  var rdragged = false, rdLineEl = null, rdHintEl = null, rdKidEl = null, rdRaf = 0;
   function rdPeers(item) {
     var ws = item.classList.contains("rws");
     return Array.prototype.filter.call(item.parentNode.children, function (c) {
@@ -5897,6 +5935,65 @@
     rdHintEl.style.top = Math.round(y + 16) + "px";
     rdHintEl.hidden = false;
   }
+  // rdKid outlines row, the parent a drop would attach to (the child
+  // zone); none clears it.
+  function rdKid(row) {
+    if (rdKidEl === row) return;
+    if (rdKidEl) rdKidEl.classList.remove("rdkid");
+    rdKidEl = row || null;
+    if (rdKidEl) rdKidEl.classList.add("rdkid");
+  }
+  // rdBottom is the bottom of row's unit: its children's box while it shows.
+  function rdBottom(row) {
+    var k = row.nextElementSibling, b = row.getBoundingClientRect().bottom;
+    return k && k.classList.contains("rkids") && !row.classList.contains("kcol") ? Math.max(b, k.getBoundingClientRect().bottom) : b;
+  }
+  // rdHomePeers are a dragged row's top-level peers for a drop over no
+  // row: the live rows of its own group's list (WsRail.homeRows), those on
+  // its side of the stars for a top-level row.
+  function rdHomePeers(item) {
+    var box = WsRail.homeRows(item), kid = item.parentNode.classList.contains("rkids");
+    return box ? Array.prototype.filter.call(box.children, function (c) {
+      return c.classList.contains("rs") && !c.classList.contains("ended") && (kid || WsRail.starred(c) === WsRail.starred(item));
+    }) : [];
+  }
+  // rdRow places a session row's drop (rdOver): d.z the zone and op, or
+  // none with no line (no drop there, or one that changes nothing) or the
+  // hint (refused).
+  function rdRow(d, over, x, y, lr) {
+    var row = over && over.closest ? over.closest(".rs") : null, z = null, ref = null;
+    if (row && (!railEl.contains(row) || row.classList.contains("ended"))) row = null;
+    if (row) {
+      var rr = row.getBoundingClientRect();
+      z = WsRail.dropZone(WsRail.rowFacts(d.item), WsRail.rowFacts(row), rr.height ? (y - rr.top) / rr.height : 0.5);
+      ref = row;
+      if (z && z.ref !== row.getAttribute("data-rid")) ref = row.nextElementSibling && row.nextElementSibling.firstElementChild;
+    } else {
+      var why = WsRail.dropRefusal(d.item, over);
+      if (why) z = { refusal: why };
+      else {
+        var peers = rdHomePeers(d.item), at = peers.length, i;
+        for (i = 0; i < peers.length; i++) {
+          var pr = peers[i].getBoundingClientRect();
+          if (y < pr.top + pr.height / 2) { at = i; break; }
+        }
+        if (peers.length) {
+          ref = peers[Math.min(at, peers.length - 1)];
+          var tf = WsRail.rowFacts(ref);
+          tf.first = "";
+          z = WsRail.dropZone(WsRail.rowFacts(d.item), tf, at < peers.length ? 0 : 1);
+        }
+      }
+    }
+    rdHint(z && z.refusal ? z.refusal : "", x, y);
+    if (!z || z.refusal || !ref || WsRail.dropNoop(d.item, z)) { rdLine(null); return; }
+    d.z = z;
+    d.noop = false;
+    if (z.zone === "child") { rdKid(ref); rdLine(null); return; }
+    var box = ref.getBoundingClientRect(), top = Math.round((z.zone === "after" ? rdBottom(ref) : box.top) - 1);
+    if (lr) top = Math.max(Math.round(lr.top), Math.min(Math.round(lr.bottom) - 2, top));
+    rdLine({ left: box.left, width: box.width, top: top });
+  }
   // rdItem keeps the press on its item: a node a swap replaced anyway is
   // found again (WsRail.refind) and takes the drag's marks. False when it is
   // gone.
@@ -5911,11 +6008,12 @@
     }
     return true;
   }
-  // rdOver places the drop at the pointer (x, y): before the first peer
-  // whose middle is below y, else after the last. A drop that would leave
-  // the item where it stands shows no line, and one the pointer's place
-  // refuses shows the hint instead. Near the list's top or bottom edge the
-  // list scrolls, and keeps scrolling while the pointer stays there.
+  // rdOver places the drop at the pointer (x, y): a session row's by
+  // rdRow, a workspace's before the first section whose middle is below y,
+  // else after the last. A drop that would leave the item where it stands
+  // shows no line, and one the pointer's place refuses shows the hint
+  // instead. Near the list's top or bottom edge the list scrolls, and
+  // keeps scrolling while the pointer stays there.
   function rdOver(x, y) {
     var d = rdrag, list = $("rlist");
     if (!d || !d.on) return;
@@ -5925,10 +6023,11 @@
     d.edge = lr ? (y < lr.top + RD_EDGE ? -1 : y > lr.bottom - RD_EDGE ? 1 : 0) : 0;
     if (d.edge && !rdRaf) rdRaf = requestAnimationFrame(rdScroll);
     d.noop = true;
+    d.z = null;
+    rdKid(null);
     if (!rdItem(d)) { rdHint(""); rdLine(null); return; }
-    var why = WsRail.dropRefusal(d.item, doc.elementFromPoint(x, y));
-    rdHint(why, x, y);
-    if (why) { rdLine(null); return; }
+    if (d.item.classList.contains("rs")) { rdRow(d, doc.elementFromPoint(x, y), x, y, lr); return; }
+    rdHint("");
     var peers = rdPeers(d.item), at = peers.length, i;
     for (i = 0; i < peers.length; i++) {
       var r = peers[i].getBoundingClientRect();
@@ -5968,7 +6067,7 @@
       if (!item || rdPeers(item).length < 2) return;
     }
     var touch = e.pointerType === "touch";
-    rdrag = { item: item, key: WsRail.itemKey(item), id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, touch: touch, hold: touch && !grip, timer: 0, ref: null, after: false, noop: true, edge: 0 };
+    rdrag = { item: item, key: WsRail.itemKey(item), id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, touch: touch, hold: touch && !grip, timer: 0, ref: null, after: false, z: null, noop: true, edge: 0 };
     if (rdrag.hold) rdrag.timer = setTimeout(function () { if (rdrag && !rdrag.on) rdBegin(); }, RD_HOLD);
   }
   function rdBegin() {
@@ -6001,7 +6100,8 @@
   }
   // rdEnd ends the press or drag; only a release drops (a cancel, or a
   // release this page never heard, leaves the rail as it stood). A drop
-  // moves the item at once and posts the move (rdSave). A drag's click is
+  // moves the item at once and posts its op (rdDrop for a session row,
+  // rdSave for a workspace). A drag's click is
   // swallowed (the capture listener below), and the rail swap held since
   // the press lands after it, or after the move's answer.
   function rdEnd(e) {
@@ -6015,17 +6115,31 @@
       root.classList.remove("rdragging");
       rdLine(null);
       rdHint("");
+      rdKid(null);
       rdragged = true;
       setTimeout(function () { rdragged = false; }, 0);
-      if (e && e.type === "pointerup" && !d.noop && d.item.isConnected) rdSave(d.item, d.ref, d.after);
+      if (e && e.type === "pointerup" && !d.noop && d.item.isConnected) {
+        if (d.z) rdDrop(d.item, d.z); else rdSave(d.item, d.ref, d.after);
+      }
       railMarks();
     }
     // The press's click lands first, on the nodes it pressed.
     setTimeout(railRelease, 0);
   }
-  // rdSave drops item next to ref (WsRail.drop) and posts the move, a
-  // session's (move) or a workspace's (wsmove), with an undo that puts
-  // the item back where it stood.
+  // rdDrop shows a session row's drop (z, from WsRail.dropZone) at once
+  // (WsRail.moveRow) and posts its op, with an undo that puts the rows back.
+  function rdDrop(item, z) {
+    var ref = WsRail.refind(railEl, { cls: "rs", attr: "data-rid", val: z.ref });
+    if (!ref) return;
+    var undo = WsRail.moveRow(item, ref, z.zone, function () {
+      var b = doc.createElement("div");
+      b.className = "rkids";
+      return b;
+    });
+    layoutSave(z.op, function () { undo(); railMarks(); });
+  }
+  // rdSave drops a workspace item next to ref (WsRail.drop) and posts the
+  // move (wsmove), with an undo that puts the item back where it stood.
   function rdSave(item, ref, after) {
     var box = item.parentNode, next = item.nextSibling;
     if (!WsRail.drop(item, ref, after)) return;
