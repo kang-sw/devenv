@@ -35,7 +35,8 @@ E.prototype.insertBefore = function (node, before) { var list = node.tag === '#f
 Object.defineProperty(E.prototype, 'isConnected', { get: function () { for(var p=this;p;p=p.parent) if(p===root) return true; return false; } });
 E.prototype.contains = function (n) { for (;n;n=n.parent) if(n===this) return true; return false; };
 E.prototype.matches = function (s) { var self=this; return s.split(',').some(function(p) { return one(self,p.trim()); }); };
-Object.defineProperty(E.prototype, 'scrollHeight', { get: function () { return this.cls().includes('history-live') ? (this._liveHeight === undefined ? this.querySelectorAll('.wb-entry').length * 20 : this._liveHeight) : (this._height || 20); }, set: function (n) { this._height = n; } });
+function foldedHeight(node) { return node.tag === 'article' || (node.tag === 'details' && !node.open) ? 20 : node.children.reduce(function(n,c){return n+foldedHeight(c);},0); }
+Object.defineProperty(E.prototype, 'scrollHeight', { get: function () { return this.cls().includes('history-live') ? (this._foldLayout ? foldedHeight(this) : this._liveHeight === undefined ? this.querySelectorAll('.wb-entry').length * 20 : this._liveHeight) : (this._height || 20); }, set: function (n) { this._height = n; } });
 Object.defineProperty(E.prototype, 'scrollTop', { get: function () { return this._top || 0; }, set: function (n) { this._top = Math.max(0, Math.min(n, Math.max(0, this.scrollHeight - (this.clientHeight || 0)))); } });
 E.prototype.getBoundingClientRect = function () {
   var h = this.closest('.wb-history');
@@ -47,7 +48,9 @@ E.prototype.getBoundingClientRect = function () {
   var top = height-live.scrollHeight + index * 20;
   return { top: top, bottom: top + 20, height: index >= 0 ? 20 : 0 };
 };
-var loads = 0, keeps = [], timers = [], motions = [];
+var loads = 0, keeps = [], timers = [], motions = [], frames = [];
+window.requestAnimationFrame = function (fn) { frames.push(fn); };
+function frame() { var batch=frames.splice(0); batch.forEach(function(fn){fn();}); }
 E.prototype.getAnimations = function () { return motions; };
 document.getAnimations = function () { return motions; };
 window.setTimeout = function (fn) { timers.push(fn); };
@@ -80,10 +83,20 @@ E.prototype.dispatchEvent = function (event) {
   event.currentTarget = null;
   return true;
 };
-fire = function (element, type) { element.dispatchEvent(new CustomEvent(type, { bubbles: type === 'click' })); };
+fire = function (element, type) { element.dispatchEvent(new CustomEvent(type, { bubbles: type === 'click' || type === 'focusin' })); };
 var observers = [];
-function ResizeObserver(fn) { this.fn = fn; observers.push(this); }
-ResizeObserver.prototype.observe = function () {}; ResizeObserver.prototype.disconnect = function () {};
+function ResizeObserver(fn) { this.fn = fn; this.nodes=new Map(); this.observes=0; this.unobserves=0; observers.push(this); }
+ResizeObserver.prototype.observe = function (node) { this.observes++; if(!this.nodes.has(node)) this.nodes.set(node,null); };
+ResizeObserver.prototype.unobserve = function (node) { this.unobserves++; this.nodes.delete(node); };
+ResizeObserver.prototype.disconnect = function () { this.nodes.clear(); };
+// Unlike resize(), deliver only initial/re-observed or size-changed content.
+// Closed-run merges therefore cannot conjure a browser resize notification.
+ResizeObserver.prototype.deliver = function () {
+  var entries=[], self=this;
+  this.nodes.forEach(function(height,node){ if(node.isConnected && height!==node.scrollHeight) { self.nodes.set(node,node.scrollHeight); entries.push({target:node}); } });
+  if(entries.length) this.fn(entries);
+  return entries.length;
+};
 function board(n, panelAt) {
   panelAt = panelAt || 1;
   function row(i) {
@@ -142,10 +155,29 @@ check('entry reveal opens its panel', next.querySelector('.entry-panel').open, t
 check('target reveals sufficient height', next._wbHistorySteps >= Math.ceil(123*20/640), true);
 check('target keep has navigation offset', [keeps.slice(-1)[0].opt.offset,keeps.slice(-1)[0].node.id], [12,'e1']);
 keeps.slice(-1)[0].opt.onEnd();
+check('deep-link keep end clears navigation target',next._wbHistoryTarget,null);
 var expanded = next._wbHistorySteps;
 next.querySelector('.history-live').insertBefore(new E('article',{'class':'wb-entry agent',id:'e124','data-entry':'e124'}),null);
 resize(next);
 check('live append leaves expansion stable', next._wbHistorySteps, expanded);
+// Keyboard focus uses the same navigation lifetime as a deep link, without
+// synthesizing a click or letting an overflow-hidden box scroll itself.
+next=board(50,1); window.wbHistory.init(document);
+var focused=next.querySelector('.entry-panel').querySelector('summary'), focusWatch=next._wbHistoryWatch, keepCount=keeps.length;
+check('keyboard fixture starts clipped',focused.getBoundingClientRect().top<0,true);
+fire(focused,'focusin');
+var focusKeep=keeps.slice(-1)[0];
+check('clipped focus reveals and anchors exact control', [next._wbHistorySteps,keeps.length-keepCount,focusKeep.node===focused,focusKeep.opt.offset,focusKeep.opt.observe[0]===next.querySelector('.history-live')], [2,1,true,12,true]);
+check('focus navigation rearms visibility', [focusWatch.gone,next._wbHistoryWatch!==focusWatch,next._wbHistoryTarget===focused], [true,true,true]);
+check('focused control is now within clip',focused.getBoundingClientRect().top>=0,true);
+keepCount=keeps.length; fire(focused,'focusin'); fire(next.querySelector('.history-older'),'focusin');
+check('visible and outside-live controls do not navigate',keeps.length,keepCount);
+next.querySelector('.history-live')._liveHeight=2000; resize(next);
+check('focus target is re-revealed during keep lifetime',next._wbHistorySteps,4);
+focusKeep.opt.onEnd();
+check('focus keep end clears navigation target',next._wbHistoryTarget,null);
+next.querySelector('.history-live')._liveHeight=4000; keepCount=keeps.length; resize(next);
+check('post-session resize neither reveals nor resurrects keep',[next._wbHistorySteps,next._wbHistoryTarget,keeps.length],[4,null,keepCount]);
 // Control states distinguish clipped materialized content from inert pages.
 next = board(50); window.wbHistory.init(document);
 check('clipped live rows show control without templates', next.querySelector('.history-older').hidden, false);
@@ -246,6 +278,48 @@ check('boundary run folds join into the newer fold', [h.querySelectorAll('.run-f
 check('joined fold keeps the stream order', h.querySelector('.history-live').children.map(function(c) { return c.id || c.getAttribute('data-key'); }), ['e30', 'run:e31', 'e97', 'e98', 'e99']);
 check('joined fold relabels', [runFold.getAttribute('data-history-anchor'), runFold.querySelector('.lbl').textContent], ['e31', 'log 66']);
 check('boundary system chips merge inside the fold', [runFold.querySelectorAll('.system-run').length, runFold.querySelector('.system-run') === newerChip, newerChip.querySelectorAll('.wb-entry').length], [1, true, 4]);
+// A renderer-shaped closed run stays one summary high across page merges.
+// Drive observer delivery, not its callback, so a size-neutral prepend can
+// continue only by re-observing on a later animation frame.
+function neutralBoard() {
+  frame(); // discard callbacks belonging to earlier, now disconnected fixtures
+  var html='<section class="topic"><div class="wb-history" data-history="neutral"><button class="history-older">older</button><div class="history-live">'+run(154,agents(154,200),false)+agents(201,203)+'</div>';
+  for(var end=153;end>0;) { var from=Math.max(1,end-49); html+='<template data-history-page>'+run(from,agents(from,end),false)+'</template>'; end=from-1; }
+  root=parse(html+'</div></section>'); prepare();
+  var h=root.querySelector('.wb-history'); h.querySelector('.history-live')._foldLayout=true;
+  window.wbHistory.init(document); h._wbHistoryObserver.deliver(); return h;
+}
+h=neutralBoard();
+var neutralLive=h.querySelector('.history-live'), ro=h._wbHistoryObserver, closedRun=h.querySelector('.run-fold');
+check('neutral fixture starts settled and short',[neutralLive.scrollHeight,h.querySelectorAll('.wb-entry').length,ro.deliver()],[80,50,0]);
+click(h.querySelector('.history-older'));
+check('closed-run click loads just one page synchronously',[h.querySelectorAll('.wb-entry').length,neutralLive.scrollHeight,ro.observes,ro.unobserves],[100,80,1,0]);
+check('unchanged size alone delivers nothing',ro.deliver(),0);
+frame();
+check('next frame re-observes same live node without loading',[ro.observes,ro.unobserves,ro.nodes.has(neutralLive),h.querySelectorAll('.wb-entry').length],[2,1,true,100]);
+check('re-observe yields one later report',ro.deliver(),1);
+check('later report loads only next page',h.querySelectorAll('.wb-entry').length,150);
+check('no synchronous delivery loop',ro.deliver(),0);
+frame(); ro.deliver();
+check('each later frame/report advances once',h.querySelectorAll('.wb-entry').length,200);
+frame(); ro.deliver();
+check('neutral chain reaches oldest page and preserves closed fold',[h.querySelectorAll('.wb-entry').length,h.querySelectorAll('template[data-history-page]').length,h.querySelector('.run-fold')===closedRun,closedRun.open],[203,0,true,false]);
+var observeCount=ro.observes; frame();
+check('exhaustion cancels final re-observation',[ro.observes,ro.deliver()],[observeCount,0]);
+['collapsed','filled','disconnected'].forEach(function(reason){
+  var h=neutralBoard(), ro=h._wbHistoryObserver, live=h.querySelector('.history-live');
+  click(h.querySelector('.history-older'));
+  if(reason==='collapsed') { visible(h,1); visible(h,0); }
+  if(reason==='filled') { live._foldLayout=false; live._liveHeight=1280; }
+  if(reason==='disconnected') h.remove();
+  frame();
+  check(reason+' cancels queued re-observation',[ro.observes,ro.unobserves,h.querySelectorAll('.wb-entry').length,h._wbHistoryReobserve],[1,0,100,false]);
+});
+// A size-changing prepend relies on the ordinary resize path, not rAF.
+frame(); h=board(223); window.wbHistory.init(document); ro=h._wbHistoryObserver; ro.deliver();
+click(h.querySelector('.history-older'));
+check('size-changing load schedules no re-observe', [frames.length,ro.observes,ro.unobserves],[0,1,0]);
+check('size-changing prepend has ordinary observer delivery',ro.deliver(),1);
 // A closed topic beyond the initial cap is itself inert, with an older
 // panel page inside. A direct target loads only that topic, then its page.
 root = parse('<template data-history-topic="old"><section class="topic" data-topic="old"><details class="topic-stream"><summary>history</summary><div class="wb-history" data-history="old"><button class="history-older">older</button><div class="history-live"><article class="wb-entry agent" id="e2" data-entry="e2">new</article></div><template data-history-page><article class="wb-entry panel" id="e1" data-entry="e1" data-panel="p1"><details class="entry-panel" id="p1"><summary>old</summary></details></article></template></div></details></section></template>');
