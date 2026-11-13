@@ -355,9 +355,6 @@
     "261111-feat-ws-dashboard-hosted-usage-limit-continue": {
       "registered_at": "2026-11-11T04:19:25Z"
     },
-    "261111-feat-ws-mailbox-wait-without-process-relaunch": {
-      "registered_at": "2026-11-11T07:52:19Z"
-    },
     "261111-research-ws-hosted-session-subagent-output-rate-source": {
       "registered_at": "2026-11-11T11:38:36Z"
     },
@@ -429,7 +426,10 @@
         "clone_id": "9091c57d68d03c76",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T08:23:36Z"
+        "touched_at": "2026-11-13T08:29:44Z",
+        "impl": {
+          "branch": "impl/develop/lunar-coil-phony"
+        }
       }
     },
     "261113-feat-ws-dashboard-worktree-delete": {
