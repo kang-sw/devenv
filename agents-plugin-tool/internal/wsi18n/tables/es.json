@@ -1385,6 +1385,8 @@
   "rail.waiting": "líder esperando",
   "rail.working": "líder trabajando",
   "rail.you": "tú",
+  "session.finding": "Buscando la sesión…",
+  "session.notfound": "Sesión desconocida",
   "splitter.label": "cambiar el tamaño de agentes y conversación",
   "splitter.title": "arrastra para cambiar el tamaño, doble clic para restablecer",
   "srow.agents": "{0} subagentes en ejecución",

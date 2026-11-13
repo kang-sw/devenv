@@ -1385,6 +1385,8 @@
   "rail.waiting": "리드 대기",
   "rail.working": "리드 작업 중",
   "rail.you": "나",
+  "session.finding": "세션을 찾는 중…",
+  "session.notfound": "알 수 없는 세션",
   "splitter.label": "에이전트와 대화 영역 크기 조절",
   "splitter.title": "드래그하여 크기 조절, 더블클릭하면 초기화",
   "srow.agents": "서브에이전트 {0}개 실행 중",

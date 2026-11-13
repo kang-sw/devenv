@@ -1385,6 +1385,8 @@
   "rail.waiting": "主代理等待中",
   "rail.working": "主代理工作中",
   "rail.you": "你",
+  "session.finding": "正在查找会话…",
+  "session.notfound": "未知会话",
   "splitter.label": "调整智能体与对话区域的大小",
   "splitter.title": "拖动以调整大小，双击以重置",
   "srow.agents": "{0} 个子智能体正在运行",

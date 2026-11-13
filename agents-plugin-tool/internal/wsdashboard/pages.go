@@ -1095,6 +1095,10 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 	lang, pref := requestLang(r)
 	view, ok := d.pagesIn(lang).session(replyID)
 	if !ok {
+		if ValidReplyID(replyID) {
+			d.serveFindingSession(w, r, replyID, lang)
+			return
+		}
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
@@ -1267,7 +1271,10 @@ const sessionPageCSP = "frame-src 'self'; " + frameAncestorsNone
 // writeHTML writes a daemon HTML page. A caller that sets its own
 // Content-Security-Policy includes frameAncestorsNone in it; without one the
 // page gets frameAncestorsNone alone.
-func writeHTML(w http.ResponseWriter, html string) {
+func writeHTML(w http.ResponseWriter, html string) { writeHTMLStatus(w, http.StatusOK, html) }
+
+// writeHTMLStatus is writeHTML with the status the page answers.
+func writeHTMLStatus(w http.ResponseWriter, status int, html string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if w.Header().Get("Content-Security-Policy") == "" {
 		w.Header().Set("Content-Security-Policy", frameAncestorsNone)
@@ -1276,5 +1283,6 @@ func writeHTML(w http.ResponseWriter, html string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.WriteHeader(status)
 	_, _ = w.Write([]byte(html))
 }

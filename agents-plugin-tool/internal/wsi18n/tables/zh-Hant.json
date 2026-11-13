@@ -1385,6 +1385,8 @@
   "rail.waiting": "主代理等待中",
   "rail.working": "主代理工作中",
   "rail.you": "你",
+  "session.finding": "正在尋找工作階段…",
+  "session.notfound": "未知的工作階段",
   "splitter.label": "調整代理程式與對話區域的大小",
   "splitter.title": "拖曳以調整大小，按兩下以重設",
   "srow.agents": "{0} 個子代理程式正在執行",
