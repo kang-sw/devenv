@@ -467,6 +467,9 @@
     "261113-bug-ws-playbook-render-root-override-key-bound-to-lead-root": {
       "registered_at": "2026-11-13T03:59:10Z"
     },
+    "261113-feat-ws-configurable-per-turn-lead-reminder": {
+      "registered_at": "2026-11-13T04:59:31Z"
+    },
     "261113-feat-ws-pi-worker-marker-env-guard": {
       "registered_at": "2026-11-13T01:46:15Z"
     },
