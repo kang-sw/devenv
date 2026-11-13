@@ -48,6 +48,7 @@ El.prototype.querySelectorAll = function (sel) {
 function q(sel, el) { return Array.prototype.slice.call(el.querySelectorAll(sel)); }
 function frag(nodes) { return { childNodes: nodes }; }
 function isPeer() { return false; }
+function isPanel() { return false; }
 var window = { WsCards: { weave: function (w) { return { pins: [], board: w }; }, settle: function (el, p) { el.children = p.board; }, pinList: function () { return null; } } };
 var openState = {}, boardSeen = {};
 `+src+`

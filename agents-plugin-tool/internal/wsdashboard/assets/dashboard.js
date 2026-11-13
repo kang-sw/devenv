@@ -125,6 +125,35 @@
   // re-applies it to the new elements.
   var openState = {};
   var PEER_KEY = "ws.dashboard.peer.";
+  // A board panel the user folds by hand stays folded across a reload, a
+  // session switch and a frame the shell evicted, none of which keep
+  // openState. The folded panels are one capped LRU list in storage
+  // (SHUT_KEY), each "<session>/<data-key>": the key names the entry, so an
+  // overwrite (a new entry under the same panel id) is not matched and
+  // opens by the server's default again. Opening the panel by hand removes
+  // it; beyond SHUT_CAP the least recently folded is dropped.
+  var SHUT_KEY = "ws.dashboard.panelshut", SHUT_CAP = 200, shutSet = null;
+  function isPanel(d) { return d.classList.contains("entry-panel") && d.hasAttribute("data-key"); }
+  function shutId(d) { return rid + "/" + d.getAttribute("data-key"); }
+  function shutList() {
+    try {
+      var v = JSON.parse(load(SHUT_KEY) || "[]");
+      return Array.isArray(v) ? v.filter(function (x) { return typeof x === "string"; }) : [];
+    } catch (e) { return []; }
+  }
+  function shutHas(id) {
+    if (!shutSet) { shutSet = {}; shutList().forEach(function (x) { shutSet[x] = true; }); }
+    return !!shutSet[id];
+  }
+  function shutPut(id, on) {
+    if (shutHas(id) === on && !on) return;
+    var l = shutList().filter(function (x) { return x !== id; });
+    if (on) l.push(id);
+    save(SHUT_KEY, l.length ? JSON.stringify(l.slice(-SHUT_CAP)) : null);
+    shutSet = null;
+  }
+  // Another tab or frame wrote the list; read it again.
+  window.addEventListener("storage", function (e) { if (e.key === SHUT_KEY || e.key === null) shutSet = null; });
   function isPeer(d) { return d.classList.contains("peer") && d.hasAttribute("data-peer"); }
   function openKey(d) {
     // The rail's ended folds keep their state in storage (rail.js marks).
@@ -140,11 +169,13 @@
     if (d.classList.contains("rended") && d.hasAttribute("data-key") && railSets) { railSets.ended.put(d.getAttribute("data-key"), d.open); return; }
     var k = openKey(d);
     if (k) openState[k] = d.open;
+    if (isPanel(d)) shutPut(shutId(d), !d.open);
   }, true);
   function restoreOpenOne(d) {
     if (isPeer(d)) { d.open = load(PEER_KEY + d.getAttribute("data-peer")) === "1"; return; }
     var k = openKey(d);
     if (k && Object.prototype.hasOwnProperty.call(openState, k)) d.open = openState[k];
+    else if (isPanel(d) && shutHas(shutId(d))) d.open = false;
   }
   function restoreOpen(el) {
     if (el.tagName === "DETAILS") restoreOpenOne(el);
@@ -7243,7 +7274,10 @@
       });
       if (Array.isArray(d.chips)) d.chips.forEach(function (c) { if (c && c.note) { c.note = unlost(c.note); named += "\n" + c.note; } });
       if (d.open && typeof d.open === "object") {
-        Object.keys(d.open).forEach(function (k) { if (!Object.prototype.hasOwnProperty.call(openState, k)) openState[k] = true; });
+        Object.keys(d.open).forEach(function (k) {
+          // A panel folded by hand outranks a draft saved while it was open.
+          if (!Object.prototype.hasOwnProperty.call(openState, k) && !(k.indexOf("k:entry:") === 0 && shutHas(rid + "/" + k.slice(2)))) openState[k] = true;
+        });
         restoreOpen(doc);
       }
       var b = region("board");
