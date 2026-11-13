@@ -16,7 +16,7 @@ func rangeHarness(t *testing.T) string {
 		one  bool
 	}{
 		{`function monAdd\(m, n\)`, true}, {`function rangeBad\(r\)`, true}, {`function rangeOf\(m\)`, false}, {`function rangeFit\(r\)`, false},
-		{`function rangeAct\(k, a\)`, false}, {`function rangeInput\(t\)`, false}, {`function rangeSet\(r, side, day\)`, false}, {`function rangeEdge\(r, side, dir\)`, false},
+		{`function rangeAct\(k, a\)`, false}, {`function rangeInput\(t\)`, false}, {`function rangeClamp\(r, side, day\)`, false}, {`function rangeSet\(r, side, day\)`, false}, {`function rangeEdge\(r, side, dir\)`, false},
 		{`function rangePending\(m\)`, false}, {`function rangeRefused\(\)`, false}, {`function menuApplyClose\(refocus\)`, false},
 		{`function menuDiscard\(\)`, false}, {`function menuHas\(t\)`, true}, {`function capOn\(\)`, true}, {`function menuOutside\(e, t\)`, false},
 		{`function menuFocusOut\(e\)`, false}, {`function closeMenu\(refocus, quiet\)`, false}, {`function menuBack\(\)`, false}, {`function openMenu\(o, anchor, pt\)`, false},
@@ -270,7 +270,8 @@ function rangeFit() {}
 function rangeTick() {}
 var RG_EDGE_MS = 450;
 function $() { return { setPointerCapture: function () {} }; }
-`+trackerFn(t, `function capOn\(\)`, true)+trackerFn(t, `function rangeDown\(e\)`, false)+`
+`+trackerFn(t, `function capOn\(\)`, true)+trackerFn(t, `function dayNum\(d\)`, true)+trackerFn(t, `function rangeBad\(r\)`, true)+
+		trackerFn(t, `function rangeClamp\(r, side, day\)`, false)+trackerFn(t, `function rangeClickEnd\(r, day, pane\)`, false)+trackerFn(t, `function rangeClick\(r, day, pane\)`, false)+trackerFn(t, `function rangeDown\(e\)`, false)+`
 function press(target) { var e = { button: 0, prevented: 0, target: target, preventDefault: function () { this.prevented++; } }; rangeDown(e); return e.prevented; }
 function el(ctl, day) { return { closest: function (q) { if (/data-rh/.test(q)) return null; if (/data-day/.test(q)) return day ? this : null; return ctl ? this : null; }, getAttribute: function () { return '2026-11-12'; } }; }
 MN = { kind: 'item', step: 'due', rg: { s: '2026-11-10', d: '2026-11-19' } };
@@ -280,6 +281,122 @@ MN = { kind: 'item', step: 'labels' };
 check('the label picker keeps focus on its text too', press(el(false, false)), 1);
 MN = { kind: 'item', step: 'main' };
 check('other menus are left alone', press(el(false, false)), 0);
+done();
+`)
+}
+
+// TestTrackerRangePickerClick pins a plain click on a day (tracker.js
+// rangeDown, rangeClick, rangeClickEnd): two panels on different months, the
+// left sets the start and the right the due, clamped at the other end like a
+// drag; one panel or both on one month, the nearer end moves (the due on a
+// tie, an end's own day a no-op), and with one end set a day on or after the
+// start sets the due, a day before it moves the start, mirrored for a lone
+// due; neither end set, the due; every click refits the panels and
+// recomputes the error and never inverts the pair; a press on a handle
+// still starts a drag.
+func TestTrackerRangePickerClick(t *testing.T) {
+	runTrackerCases(t, "range picker click", trackerCheckJS+`
+var MN = null, draws = 0;
+function rangeDraw() { draws++; }
+function rangeTick() {}
+function today() { return '2026-11-13'; }
+var RG_EDGE_MS = 450;
+function $() { return { setPointerCapture: function () {} }; }
+`+trackerFn(t, `function capOn\(\)`, true)+trackerFn(t, `function dayNum\(d\)`, true)+trackerFn(t, `function monAdd\(m, n\)`, true)+trackerFn(t, `function rangeBad\(r\)`, true)+trackerFn(t, `function rangeFit\(r\)`, false)+
+		trackerFn(t, `function rangeClamp\(r, side, day\)`, false)+trackerFn(t, `function rangeClickEnd\(r, day, pane\)`, false)+trackerFn(t, `function rangeClick\(r, day, pane\)`, false)+trackerFn(t, `function rangeDown\(e\)`, false)+`
+// a day cell in pane 'l' or 'r' (null: a cell with no pane); h: a press on a handle instead
+function cell(day, pane, h) { var pn = pane ? { getAttribute: function () { return pane; } } : null;
+  return { closest: function (q) { if (/data-rh/.test(q)) return h ? { getAttribute: function () { return h; } } : null; if (/data-day/.test(q)) return this; if (/data-rgg/.test(q)) return pn; return null; }, getAttribute: function () { return day; } }; }
+// open a picker on ends s, d (panels as rangeFit places them) and click day in pane; panes: [lm, rm] to page them first
+function click(s, d, day, pane, panes) {
+  var r = { s: s, d: d, s0: s, d0: d, lm: null, rm: null, err: false, last: 's', drag: null };
+  rangeFit(r); if (panes) { r.lm = panes[0]; r.rm = panes[1]; }
+  MN = { kind: 'item', step: 'due', rg: r }; draws = 0;
+  rangeDown({ button: 0, target: cell(day, pane), preventDefault: function () {} });
+  return r;
+}
+function ends(r) { return [r.s, r.d]; }
+// rule 1: two panels on different months, the left sets the start, the right the due
+var r = click('2026-11-10', '2027-03-05', '2026-11-02', 'l');
+check('left panel: the start, the panels refit, redrawn', [ends(r), r.last, r.lm, r.rm, draws], [['2026-11-02', '2027-03-05'], 's', '2026-11', '2027-03', 1]);
+r = click('2026-11-10', '2027-03-05', '2027-03-20', 'r');
+check('right panel: the due', [ends(r), r.last], [['2026-11-10', '2027-03-20'], 'd']);
+r = click('2026-11-10', '2027-03-05', '2027-05-09', 'r', ['2026-11', '2027-05']);
+check('the right panel paged away from the due still sets it, the panels refit onto it', [ends(r), r.lm, r.rm], [['2026-11-10', '2027-05-09'], '2026-11', '2027-05']);
+r = click('2026-11-10', '2027-03-05', '2026-09-14', 'l', ['2026-09', '2027-03']);
+check('the left panel paged away from the start sets it', [ends(r), r.lm], [['2026-09-14', '2027-03-05'], '2026-09']);
+r = click('2026-11-10', '2027-03-05', '2027-03-05', 'r');
+check('a click on the due\'s own day in the right panel: no change', [ends(r), draws], [['2026-11-10', '2027-03-05'], 0]);
+r = click('2026-11-10', '2027-03-05', '2027-01-04', 'l', ['2027-01', '2027-03']);
+check('left click past the due clamps the start at it, never inverted', [ends(r), r.err], [['2027-01-04', '2027-03-05'], false]);
+r = click('2026-11-10', '2027-03-05', '2027-06-01', 'l', ['2027-06', '2027-03']);
+check('a left click past the due (panels crossed) clamps at the due', [ends(r), r.err], [['2027-03-05', '2027-03-05'], false]);
+r = click('2026-11-10', '2027-03-05', '2026-10-01', 'r', ['2026-11', '2026-10']);
+check('a right click before the start clamps the due at it', [ends(r), r.err], [['2026-11-10', '2026-11-10'], false]);
+
+// rule 2: one panel, both set: the nearer end; a month showing an end moves one too
+r = click('2026-11-10', '2026-11-19', '2026-11-12', null);
+check('one panel: nearer the start moves the start', [ends(r), r.last], [['2026-11-12', '2026-11-19'], 's']);
+r = click('2026-11-10', '2026-11-19', '2026-11-17', null);
+check('nearer the due moves the due', [ends(r), r.last], [['2026-11-10', '2026-11-17'], 'd']);
+r = click('2026-11-10', '2026-11-20', '2026-11-15', null);
+check('a tie moves the due', [ends(r), r.last], [['2026-11-10', '2026-11-15'], 'd']);
+r = click('2026-11-10', '2026-11-19', '2026-11-03', null);
+check('before both: the start', ends(r), ['2026-11-03', '2026-11-19']);
+r = click('2026-11-10', '2026-11-19', '2026-11-28', null);
+check('after both: the due', ends(r), ['2026-11-10', '2026-11-28']);
+r = click('2026-11-10', '2026-11-19', '2026-11-10', null);
+check('an end\'s own day: no change', [ends(r), draws], [['2026-11-10', '2026-11-19'], 0]);
+r = click('2026-11-10', '2026-11-19', '2026-11-19', null);
+check('the due\'s own day: no change', [ends(r), draws], [['2026-11-10', '2026-11-19'], 0]);
+r = click('2026-11-10', '2026-11-19', '2026-11-12', 'l');
+check('a click in the one panel (pane l) takes the nearer rule, not the left rule', ends(r), ['2026-11-12', '2026-11-19']);
+r = click('2026-11-10', '2026-11-19', '2027-02-03', null, ['2027-02', null]);
+check('a month showing neither end: the nearer one (the due)', [ends(r), r.lm, r.rm], [['2026-11-10', '2027-02-03'], '2026-11', '2027-02']);
+r = click('2026-11-10', '2026-11-19', '2026-08-03', null, ['2026-08', null]);
+check('a month before both: the start', [ends(r), r.lm, r.rm], [['2026-08-03', '2026-11-19'], '2026-08', '2026-11']);
+// the same month in both panels is as ambiguous as one panel
+r = click('2026-10-10', '2026-11-19', '2026-11-02', 'l', ['2026-11', '2026-11']);
+check('both panels on one month, left: the nearer end', ends(r), ['2026-10-10', '2026-11-02']);
+r = click('2026-10-10', '2026-11-19', '2026-11-02', 'r', ['2026-11', '2026-11']);
+check('both panels on one month, right: the same', ends(r), ['2026-10-10', '2026-11-02']);
+r = click('2026-10-10', '2027-03-19', '2027-01-20', 'l', ['2027-01', '2027-01']);
+check('both panels on a month with neither end: the nearer (the due)', ends(r), ['2026-10-10', '2027-01-20']);
+r = click('2026-10-10', '2027-03-19', '2026-12-20', 'r', ['2026-12', '2026-12']);
+check('both panels on a month nearer the start: the start', ends(r), ['2026-12-20', '2027-03-19']);
+
+// rule 2 with one end set: never inverts
+r = click('2026-11-10', '', '2026-11-15', null);
+check('start only, a day after: the due', [ends(r), r.last], [['2026-11-10', '2026-11-15'], 'd']);
+r = click('2026-11-10', '', '2026-11-03', null);
+check('start only, a day before: moves the start', ends(r), ['2026-11-03', '']);
+r = click('2026-11-10', '', '2027-01-03', null, ['2027-01', null]);
+check('start only, paged to a later month: the due, the panels refit', [ends(r), r.lm, r.rm], [['2026-11-10', '2027-01-03'], '2026-11', '2027-01']);
+r = click('', '2026-11-19', '2026-11-12', null);
+check('due only, a day before: the start', [ends(r), r.last], [['2026-11-12', '2026-11-19'], 's']);
+r = click('', '2026-11-19', '2026-11-25', null);
+check('due only, a day after: moves the due', ends(r), ['', '2026-11-25']);
+r = click('', '2026-11-19', '2026-11-19', null);
+check('due only, its own day: the start (on or before the due)', ends(r), ['2026-11-19', '2026-11-19']);
+
+// neither end set: the due
+r = click('', '', '2026-11-12', null);
+check('neither set: the due, one panel on its month', [ends(r), r.last, r.lm, r.rm, r.err], [['', '2026-11-12'], 'd', '2026-11', null, false]);
+
+// the error state recomputes from the pair
+r = click('2026-11-10', '2026-11-19', '2026-11-12', null); r.err = true; MN.rg = r;
+check('a valid pair after a click', rangeBad(r), false);
+
+// drag unchanged: a press on a handle starts a drag, sets no end
+MN = { kind: 'item', step: 'due', rg: { s: '2026-11-10', d: '2026-11-19', lm: '2026-11', rm: null, drag: null } };
+rangeDown({ button: 0, target: cell('2026-11-10', 'l', 's'), preventDefault: function () {}, pointerId: 7, clientX: 1, clientY: 2 });
+var g = MN.rg.drag;
+check('a handle press starts that end\'s drag and moves nothing', [g && g.side, g && g.id, MN.rg.s, MN.rg.d], ['s', 7, '2026-11-10', '2026-11-19']);
+if (g) clearInterval(g.tm);
+// the primary button only
+r = { s: '', d: '', lm: '2026-11', rm: null, drag: null }; MN = { kind: 'item', step: 'due', rg: r };
+rangeDown({ button: 2, target: cell('2026-11-12', null), preventDefault: function () {} });
+check('a secondary-button press sets nothing', ends(r), ['', '']);
 done();
 `)
 }
@@ -344,7 +461,7 @@ function rangeDraw() {}
 `+trackerFn(t, `function esc\(s\)`, false)+trackerFn(t, `function attr\(k, v\)`, true)+trackerFn(t, `function tipAttr\(text\)`, true)+trackerFn(t, `function dayNum\(d\)`, true)+
 		trackerFn(t, `function monAdd\(m, n\)`, true)+trackerFn(t, `function rangeBad\(r\)`, true)+trackerFn(t, `function rangeFit\(r\)`, false)+trackerFn(t, `function calDow\(\)`, false)+
 		trackerFn(t, `function rangeHtml\(r\)`, false)+trackerFn(t, `function rangeField\(r, side\)`, false)+trackerFn(t, `function rangeCal\(r\)`, true)+trackerFn(t, `function rangeMonth\(r, m, side\)`, false)+
-		trackerFn(t, `function rangeSet\(r, side, day\)`, false)+trackerFn(t, `function rangeEdge\(r, side, dir\)`, false)+`
+		trackerFn(t, `function rangeClamp\(r, side, day\)`, false)+trackerFn(t, `function rangeSet\(r, side, day\)`, false)+trackerFn(t, `function rangeEdge\(r, side, dir\)`, false)+`
 function has(s, x) { return s.indexOf(x) >= 0; }
 function cells(h) { return h.match(/class="rgd[^"]*"( data-day="[^"]*")?/g); }
 function rg(s, d) { var r = { s: s, d: d, lm: null, rm: null }; rangeFit(r); r.err = rangeBad(r); return r; }
