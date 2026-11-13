@@ -116,6 +116,42 @@ func TestClaudeLeadInitializeOffersCommandsBeforeAnyTurn(t *testing.T) {
 	}
 }
 
+// TestClaudeLeadLaunchAsksForCommands: a hosted claude lead's process,
+// spawned under a new holder, asks the harness to initialize, and the
+// answer is the session's command list before any init; a daemon restart's
+// rejoin asks nothing. The holder id a spawn fills must not read as a
+// rejoin's.
+func TestClaudeLeadLaunchAsksForCommands(t *testing.T) {
+	h := newLeadHarness(t).start()
+	h.holders.setControl("initialize", "", `{"commands":[{"name":"compact","description":"Free up context"},{"name":"review"}]}`)
+	id, holder := h.runLead("hello")
+	initialize := func() int {
+		n := 0
+		for _, line := range h.holders.inputs(holder, "control_request") {
+			var d struct {
+				Request struct {
+					Subtype string `json:"subtype"`
+				} `json:"request"`
+			}
+			if json.Unmarshal([]byte(line), &d) == nil && d.Request.Subtype == "initialize" {
+				n++
+			}
+		}
+		return n
+	}
+	eventually(t, "the initialize ask", func() bool { return initialize() == 1 })
+	want := []wslive.SlashCommand{{Name: "compact", Description: "Free up context"}, {Name: "review"}}
+	eventually(t, "the command list", func() bool { return slices.Equal(h.snapshot(id).Commands, want) })
+
+	h.sync(id, holder)
+	h.restart()
+	eventually(t, "the rejoined process", func() bool { return h.state(id).Process })
+	h.sync(id, holder)
+	if n := initialize(); n != 1 {
+		t.Fatalf("a rejoin asks no initialize: %d asks", n)
+	}
+}
+
 // TestClaudeLeadCommandSplitsTheDrain: messages and commands held during a
 // turn reach the harness in order: the text before a command joined with
 // the claimed mail as one turn, the command alone as its bare typed line

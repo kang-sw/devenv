@@ -329,11 +329,13 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 	if spec.Lead != nil {
 		cmd.Env = claudeLeadEnv(spec)
 	}
+	// Read before the start, which fills the holder id for a spawn too.
+	attach := spec.Lead != nil && spec.Lead.Holder != nil && spec.Lead.Holder.id != ""
 	p, err := startChild(spec, cmd, newClaudeMapper(spec), claudeProtocol{})
 	if err != nil {
 		return nil, err
 	}
-	if spec.Lead != nil && !(spec.Lead.Holder != nil && spec.Lead.Holder.id != "") {
+	if spec.Lead != nil && !attach {
 		// The command list the dashboard's composer offers: an init, which
 		// brings it, comes only with a turn, so a session nobody has
 		// written to would offer no commands. A rejoin's replay rebuilds
