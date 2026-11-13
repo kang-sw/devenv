@@ -2513,69 +2513,97 @@
     var sn = t && t.closest ? t.closest(".sname") : null;
     if (!sn) return;
     if (t.closest(".snm")) copyText(t.closest(".snm").getAttribute("data-copy"));
-    else if (t.closest(".sren")) labelStart(sn);
+    else if (t.closest(".sren")) labelStart(labelHead(sn));
   }
-  function labelStart(sn) {
-    if (sn.querySelector(".sinp")) return;
-    var nm = sn.querySelector(".snm"), pen = sn.querySelector(".sren"), inp = doc.createElement("input");
+  // labelHead is the head name's edit. An edit says where its input goes
+  // (in box before at, with class cls) and what gives way to it (hide), the
+  // label it starts from and the input's limit, placeholder, and name; route
+  // is the label route it posts to, saved(label) shows a stored label, and
+  // ended() runs once the input is gone.
+  function labelHead(sn) {
+    var nm = sn.querySelector(".snm"), pen = sn.querySelector(".sren");
+    return {
+      box: sn, at: nm, cls: "sinp", hide: [nm, pen], route: "label",
+      label: sn.getAttribute("data-label") || "", max: +sn.getAttribute("data-max") || 64,
+      ph: root.getAttribute("data-rid") || "", aria: pen.getAttribute("aria-label") || "",
+      saved: function (label) { labelShow(sn, label); },
+      ended: function () {
+        if (!headHeld) return;
+        var d = headHeld;
+        headHeld = null;
+        swap("head", d.hash, d.html);
+      }
+    };
+  }
+  // labelShow shows label in the head's name (the reply-id when empty), in
+  // the label's body face, and points the address the name copies at it.
+  function labelShow(sn, label) {
+    var nm = sn.querySelector(".snm");
+    sn.setAttribute("data-label", label);
+    nm.textContent = label || root.getAttribute("data-rid") || "";
+    labelCopy(nm, label);
+    nm.classList.toggle("lbl", !!label);
+  }
+  // labelCopy points el's copied address (data-copy) at label: the opening
+  // tag the server built (data-mailbox-open) with the label as its body, or
+  // closed bare without one.
+  function labelCopy(el, label) {
+    var open = el.getAttribute("data-mailbox-open");
+    el.setAttribute("data-copy", open + (label ? ">" + label.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</mailbox>" : "/>"));
+  }
+  function labelStart(ed) {
+    if (ed.box.querySelector("." + ed.cls)) return;
+    var inp = doc.createElement("input");
     inp.type = "text";
-    inp.className = "sinp";
-    inp.value = sn.getAttribute("data-label") || "";
-    inp.placeholder = root.getAttribute("data-rid") || "";
-    inp.maxLength = +sn.getAttribute("data-max") || 64;
+    inp.className = ed.cls;
+    inp.value = ed.label;
+    inp.placeholder = ed.ph;
+    inp.maxLength = ed.max;
     inp.spellcheck = false;
     inp.setAttribute("autocomplete", "off");
-    inp.setAttribute("aria-label", pen.getAttribute("aria-label") || "");
-    nm.hidden = pen.hidden = true;
-    sn.insertBefore(inp, nm);
-    inp.addEventListener("keydown", function (e) { labelKey(sn, inp, e); });
-    inp.addEventListener("blur", function () { if (!inp.saving) labelEnd(sn); });
+    inp.setAttribute("aria-label", ed.aria);
+    ed.hide.forEach(function (n) { if (n) n.hidden = true; });
+    ed.box.insertBefore(inp, ed.at);
+    ed.inp = inp;
+    inp.addEventListener("keydown", function (e) { labelKey(ed, inp, e); });
+    inp.addEventListener("blur", function () { if (!inp.saving) labelEnd(ed); });
     inp.focus();
     inp.select();
   }
-  function labelKey(sn, inp, e) {
+  function labelKey(ed, inp, e) {
     if (e.isComposing || e.keyCode === 229) return;
-    if (e.key === "Enter") { e.preventDefault(); labelSave(sn, inp); }
-    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); labelEnd(sn); }
+    if (e.key === "Enter") { e.preventDefault(); labelSave(ed, inp); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); labelEnd(ed); }
   }
   // labelSave posts the input's value; a refusal toasts why and keeps the
   // input open. An unchanged value just closes it.
-  function labelSave(sn, inp) {
+  function labelSave(ed, inp) {
     if (inp.saving) return;
     var v = labelClean(inp.value, inp.maxLength);
-    if (v === (sn.getAttribute("data-label") || "")) { labelEnd(sn); return; }
+    if (v === ed.label) { labelEnd(ed); return; }
     inp.saving = true;
-    post("label", { label: v }, function (ok, ans) {
+    post(ed.route, { label: v }, function (ok, ans) {
       inp.saving = false;
       if (!ok) {
         toast(wsT("js.label.fail", ans));
         if (inp.isConnected) inp.focus();
         return;
       }
-      var label = typeof ans.label === "string" ? ans.label : v;
-      sn.setAttribute("data-label", label);
-      var nm = sn.querySelector(".snm");
-      nm.textContent = label || root.getAttribute("data-rid") || "";
-      var open = nm.getAttribute("data-mailbox-open");
-      nm.setAttribute("data-copy", open + (label ? ">" + label.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</mailbox>" : "/>"));
-      nm.classList.toggle("lbl", !!label);
-      labelEnd(sn);
+      ed.saved(typeof ans.label === "string" ? ans.label : v);
+      labelEnd(ed);
     });
   }
-  // labelEnd closes the input and lands a head swap it held. Removing the
-  // focused input fires its blur, which comes back here: ending marks the
-  // input already on its way out.
-  function labelEnd(sn) {
-    var inp = sn.querySelector(".sinp");
+  // labelEnd closes the input and lands a swap it held (ended). Removing
+  // the focused input fires its blur, which comes back here: ending marks
+  // the input already on its way out.
+  function labelEnd(ed) {
+    var inp = ed.inp;
     if (!inp || inp.ending) return;
     inp.ending = true;
-    sn.removeChild(inp);
-    sn.querySelector(".snm").hidden = sn.querySelector(".sren").hidden = false;
-    if (headHeld) {
-      var d = headHeld;
-      headHeld = null;
-      swap("head", d.hash, d.html);
-    }
+    ed.inp = null;
+    if (inp.parentNode) inp.parentNode.removeChild(inp);
+    ed.hide.forEach(function (n) { if (n) n.hidden = false; });
+    ed.ended();
   }
   // labelSwapped retitles the tab after a head swap, from the title the
   // head's name carries.
