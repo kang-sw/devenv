@@ -471,19 +471,6 @@
     "261113-feat-ws-dashboard-hosted-claude-stream-agent-messages": {
       "registered_at": "2026-11-13T10:22:34Z"
     },
-    "261113-feat-ws-dashboard-iframe-shell": {
-      "registered_at": "2026-11-13T10:54:06Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T13:58:09Z",
-        "impl": {
-          "branch": "impl/develop/perky-bring-tweet"
-        }
-      }
-    },
     "261113-feat-ws-dashboard-rail-usage-gutter": {
       "registered_at": "2026-11-13T08:05:08Z",
       "lease": {
