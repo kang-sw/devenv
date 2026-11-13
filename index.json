@@ -494,6 +494,9 @@
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
     },
+    "261113-feat-ws-dashboard-browser-pane": {
+      "registered_at": "2026-11-13T07:16:08Z"
+    },
     "261113-feat-ws-pi-worker-marker-env-guard": {
       "registered_at": "2026-11-13T01:46:15Z"
     },
