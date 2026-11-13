@@ -24,6 +24,14 @@
       "description": "When true, the dashboard daemon listens on this machine's network interfaces as well, so another device on the network can open its pages with an access token, while a browser on this machine still opens them at localhost with no token. Only the global value applies: a project, repo, or session value is refused on write and ignored, since one daemon serves every session on the machine. The daemon re-reads the value whenever a session connects to it and, when the value differs from its own mode, replaces itself with one in the new mode, letting the calls in flight finish and reconnecting its sessions, so a change applies at the next session start. The access token is shown only on the dashboard's index page viewed on this machine and persists across daemon restarts in the daemon's state directory; deleting its file issues a new one."
     },
     {
+      "key": "dashboard.mailbox_undelivered_minutes",
+      "type": "integer",
+      "minimum": 1,
+      "default": 3,
+      "default_scope": "global",
+      "description": "Minutes a message may remain unread in its recipient's mailbox queue before the daemon sends its sender one system notice. The message stays queued and may still be read; a late read sends no follow-up notice. System mail never triggers notices. Only the global value applies, since the daemon serves every project on the machine. Read again every sweep (30 seconds), so a tune applies without a restart."
+    },
+    {
       "key": "dashboard.pi_spawn_enabled",
       "type": "boolean",
       "default": true,
