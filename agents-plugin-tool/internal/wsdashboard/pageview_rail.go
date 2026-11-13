@@ -59,6 +59,7 @@ type RailView struct {
 type RailWorkspace struct {
 	// Name is Path's last element; Path the repository root or folder.
 	Name, Path string
+	MemoCount  int
 	// Repo marks a repository: its sessions sit under Worktrees. A plain
 	// folder lists them directly in Sessions and Ended.
 	Repo bool
