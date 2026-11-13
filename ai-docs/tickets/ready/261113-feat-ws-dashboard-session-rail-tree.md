@@ -554,6 +554,68 @@ Verification:
   order; two browsers that both try to import leave exactly one import
   applied and both clear their keys.
 
+### Result (09d894cc0) - 2026-11-14
+
+Landed in 51429395e, 845578455, and 09d894cc0.
+
+- **Store.** `rail_layout.go` adds the `rail-layout.json` store in the daemon
+  directory, at `schema_version` 1:
+  `{schema_version, workspace_order, workspaces: {path: {order, children, stars}}}`.
+  - Every op re-reads the file under a mutex before it writes.
+  - A malformed file, or one with a newer schema, refuses the write.
+  - Unknown fields are kept, both at the top level and per workspace.
+  - Unknown rids are filtered on read. A write prunes them only after
+    `index.Loaded()`, which is new.
+- **Route.** `rail_layout_route.go` serves `POST /rail/layout` with all seven
+  ops and Decision 4's validation, orphans included.
+  - Validation uses the rail's own grouping: `railBaseView`.
+  - Answers: 200 `{applied}`; 200 `not_applied` (import); 409 for a refusal; 400
+    `invalid`; 503 `retry`; 500 `store`.
+  - The reason codes are a stable set shared with the client: `unknown`,
+    `ended`, `self`, `depth`, `workspace`, `group`, `level`, `stars`, `child`,
+    `toplevel`, `invalid`, `retry`, `store`. Each maps to the i18n key
+    `js.rail.layout.<code>`.
+  - Phase 1's drag-hint keys were renamed onto `workspace`, `group`, and
+    `stars`.
+- **Ordering.** The server orders rows: starred units first, then the layout
+  order (rows it does not hold go on top), then registration order. It orders
+  workspaces by `workspace_order`.
+  - The star state is rendered by the server.
+  - A layout generation is added to the rail stamp (`data-lgen`), and every
+    write wakes `railListRepoKey`.
+  - In this phase a stored child renders flat, right after its parent.
+- **Client.**
+  - A drop moves the row at once, posts `move` or `wsmove`, and undoes the move
+    on a refusal.
+  - A star click posts `star` or `unstar`.
+  - A swap is held while an op is in flight. A render whose `data-lgen` is
+    older than the last applied one is dropped.
+  - The one-time `import` follows Decision 3's edge rules. Local keys are kept
+    on `retry`.
+  - The only client layout state left is the `railcol` collapse set. No order or
+    star pre-paint code remains, so the iframe shell rebases onto collapse
+    only.
+
+Verification:
+- `gofmt`, `go build ./...`, `go vet`, and
+  `go test ./internal/wsdashboard/ ./internal/wsi18n/...`: ok.
+- `node scripts/rail-headless.mjs`: all 16 scenarios passed, in two runs. They
+  include `layout-shared` (two browsers: reorder, star, and workspace order),
+  `layout-import`, `layout-stale-keys`, and `layout-import-race` (exactly one
+  import applied).
+- The non-English entries for the ten new `js.rail.layout.*` keys are unchecked
+  worker translations.
+
+Decisions:
+- **Write gate.** The route takes same-origin only, like the workspace routes.
+  The Constraints line names "local viewer + same-origin", but the existing rail
+  write routes (workspace add, forget, and worktree add) check same-origin
+  only. `TrustedWrite`'s local-viewer check is kept for writes that carry
+  execution authority, such as worktree delete. A layout edit carries none.
+- **Empty layout.** The layout counts as empty only when it holds no entry at
+  all, whether or not the rail still lists the stored rids.
+- **`not_applied`.** It is answered with 200 and is never toasted.
+
 ### Phase 3: the tree
 
 Decisions 5-9. Rendering, the three-zone drop, attach/detach, the collapse
