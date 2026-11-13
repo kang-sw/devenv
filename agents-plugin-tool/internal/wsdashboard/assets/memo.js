@@ -64,7 +64,10 @@
             area.setAttribute("aria-label", "Edit memo"); text.hidden = true; row.appendChild(area); area.focus();
             area.addEventListener("keydown", function (e) {
               if (e.isComposing) return;
-              if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); render(); }
+              if (e.key === "Escape") {
+                // The cancelled edit's over-limit refusal no longer applies; recheck the add draft instead.
+                e.preventDefault(); e.stopPropagation(); fits(input.value); render();
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 if (area.value.trim()) change("edit", m.id, area.value);

@@ -200,6 +200,21 @@ test('a new stream child forgets earlier drains', async () => {
   p.binding.abort()
 })
 
+test('the line that woke a drain is not recorded, so an identical later message still wakes', () => {
+  const ledger = createDrainLedger()
+  const again = { ...M1, from: 'bob' } // same second, same text, sent after the drain
+  expect(ledger.filter(arrival([M1]))).toBe(arrival([M1])) // wakes the drain
+  ledger.record([M1])
+  expect(ledger.filter(arrival([again]))).toBe(arrival([again]))
+})
+
+test('an arrival the drain did not get clears the ledger', () => {
+  const ledger = createDrainLedger()
+  ledger.record([M1]) // received without a line, e.g. before this child started
+  expect(ledger.filter(arrival([M3]))).toBe(arrival([M3]))
+  expect(ledger.filter(arrival([M1]))).toBe(arrival([M1]))
+})
+
 test('recv results give their envelopes in both forms', () => {
   expect(recvResultMail(JSON.stringify([M1, M2]))).toEqual([M1, M2])
   expect(recvResultMail(`[${M1.sent_at}] alice: one\n[${M2.sent_at}] bob: two\nlines\n`)).toEqual([

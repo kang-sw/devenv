@@ -308,7 +308,11 @@ export function parseRecvText(text: string | undefined): DrainedMail[] {
  * received. A line is matched by its envelopes (`sent_at` and `content`,
  * the fields recv's text and JSON forms both carry), with multiplicity; each
  * match is consumed. Only a line whose every mail envelope was received loses
- * its `mail` kind: mail that arrived after the drain still wakes at once.
+ * its `mail` kind: mail that arrived after the drain still wakes at once, and
+ * such a line clears the ledger, since nothing after it predates the drain.
+ * Envelopes of lines already passed through (the line that woke the drain)
+ * are not recorded: no later line reports them, and a stale record could
+ * match an identical later message (same second, same text) and swallow it.
  */
 export interface DrainLedger {
   /** Record what a drain received; items that are not envelopes are ignored. */
@@ -323,19 +327,30 @@ const DRAIN_LEDGER_MAX = 1_000
 
 export function createDrainLedger(): DrainLedger {
   const counts = new Map<string, number>()
+  // Envelopes of lines passed through since the last record.
+  const delivered = new Map<string, number>()
   const keyOf = (m: { sent_at?: unknown; content: string }) => `${typeof m.sent_at === 'string' ? m.sent_at : ''}\u0000${m.content}`
+  const take = (map: Map<string, number>, key: string) => {
+    const n = map.get(key) ?? 0
+    if (n === 1) map.delete(key)
+    else if (n > 1) map.set(key, n - 1)
+    return n > 0
+  }
+  const add = (map: Map<string, number>, key: string) => {
+    // Bounded: an entry no line ever matched only lingers until the next child.
+    if (map.size >= DRAIN_LEDGER_MAX) map.clear()
+    map.set(key, (map.get(key) ?? 0) + 1)
+  }
   return {
     record(mail) {
       for (const m of mail) {
         if (!('content' in m) || typeof m.content !== 'string') continue
-        // Bounded: an entry no line ever matched only lingers until the next child.
-        if (counts.size >= DRAIN_LEDGER_MAX) counts.clear()
         const key = keyOf(m)
-        counts.set(key, (counts.get(key) ?? 0) + 1)
+        if (!take(delivered, key)) add(counts, key)
       }
+      delivered.clear()
     },
     filter(line) {
-      if (counts.size === 0) return line
       let parsed: { kinds?: unknown; named?: unknown; reply?: unknown }
       try {
         parsed = JSON.parse(line) as typeof parsed
@@ -353,17 +368,23 @@ export function createDrainLedger(): DrainLedger {
           continue
         }
         const key = keyOf(e)
-        const n = counts.get(key) ?? 0
-        if (n === 0) covered = false
-        else if (n === 1) counts.delete(key)
-        else counts.set(key, n - 1)
+        if (take(counts, key)) continue
+        covered = false
+        add(delivered, key)
       }
-      if (!covered) return line
+      if (!covered) {
+        // Mail the drain did not get arrived after it, so every later line is
+        // newer than the drain too: forget its records, or one could match
+        // an identical later message and swallow its wake.
+        counts.clear()
+        return line
+      }
       const rest = kinds.filter((k) => k !== 'mail')
       return rest.some((k) => ['board', 'interrupt'].includes(k)) ? JSON.stringify({ ...parsed, kinds: rest }) : undefined
     },
     clear() {
       counts.clear()
+      delivered.clear()
     },
   }
 }

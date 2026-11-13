@@ -174,7 +174,8 @@ func piBundledEntries() ([]string, error) {
 // piSDKPaths resolves the SDK belonging to the actual CLI (including npm
 // symlinks and Windows' already-unwrapped cmd shim), never a project dependency.
 // A standalone executable without its SDK cannot safely enumerate extensions;
-// refuse default mode rather than silently drop them or bypass project trust.
+// that case returns errPiNoSDK, and piLeadLaunch starts the lead isolated with
+// a warning rather than silently dropping them or bypassing project trust.
 func piSDKPaths(command string, pre []string) (cli, sdk string, err error) {
 	cli = command
 	if len(pre) > 0 {

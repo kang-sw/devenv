@@ -107,6 +107,7 @@ function advance(ms) { now += ms; for (const t of timers.filter(t => t.at <= now
   area.value = '😀'.repeat(2000) + 'a'; area.fire('input');
   assert.equal(ids['memo-status'].textContent, 'js.memo.toolong|8001|8000');
   area.fire('keydown', { key: 'Escape' });
+  assert.equal(ids['memo-status'].textContent, '', 'cancelling an over-limit edit clears its refusal');
   memo.remember(); assert.equal(memo.resume(), true); assert.equal(memo.resume(), false);
   memo.open(false, false); remote = [{ id: 'other', text: 'from another tab' }];
   memo.open(true, true); await flush(); assert.equal(ids['memo-list'].textContent.includes('from another tab'), true);

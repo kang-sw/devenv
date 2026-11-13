@@ -4,6 +4,7 @@ import { EventEmitter, getEventListeners } from "node:events";
 import { PassThrough } from "node:stream";
 import { spawn } from "node:child_process";
 import {
+  createDrainLedger,
   createMailboxWaiterSlot,
   createSubprocessWait,
   sessionMailboxWaitOptions,
@@ -383,4 +384,19 @@ describe("streaming mailbox subprocess", () => {
       await waiter.done;
     }
   });
+});
+
+test("the drain ledger skips the line that woke the drain and clears on mail the drain did not get", () => {
+  const m1 = { from: "alice", content: "one", sent_at: "2026-11-13T10:00:00Z" };
+  const again = { ...m1, from: "bob" }; // same second, same text, sent after the drain
+  const m3 = { from: "carol", content: "three", sent_at: "2026-11-13T10:00:05Z" };
+  const line = (named: object[]): string => JSON.stringify({ timed_out: false, kinds: ["mail"], named, reply: [] }) + "\n";
+  let ledger = createDrainLedger();
+  assert.equal(ledger.filter(line([m1])), line([m1]), "wakes the drain");
+  ledger.record([m1]);
+  assert.equal(ledger.filter(line([again])), line([again]), "an identical later message must still wake");
+  ledger = createDrainLedger();
+  ledger.record([m1]); // received without a line, e.g. before this child started
+  assert.equal(ledger.filter(line([m3])), line([m3]));
+  assert.equal(ledger.filter(line([m1])), line([m1]), "mail the drain did not get clears the ledger");
 });

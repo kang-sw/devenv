@@ -832,7 +832,10 @@ type StreamOutcome = MailboxWaitOutcome | "unsupported";
  * removed. A line is matched by its named/reply envelopes (`sent_at` and
  * `content`), with multiplicity, and each match is consumed. Only a line whose
  * every mail envelope was received loses its `mail` kind; mail that arrived
- * after the drain still wakes at once.
+ * after the drain still wakes at once, and such a line clears the ledger.
+ * Envelopes of lines already passed through (the line that woke the drain)
+ * are not recorded: no later line reports them, and a stale record could
+ * match an identical later message (same second, same text) and swallow it.
  */
 export interface DrainLedger {
   record: (envelopes: readonly MailboxEnvelope[]) => void;
@@ -845,19 +848,30 @@ const DRAIN_LEDGER_MAX = 1_000;
 
 export function createDrainLedger(): DrainLedger {
   const counts = new Map<string, number>();
+  // Envelopes of lines passed through since the last record.
+  const delivered = new Map<string, number>();
   const keyOf = (e: { sent_at?: unknown; content: string }): string => `${typeof e.sent_at === "string" ? e.sent_at : ""}\u0000${e.content}`;
+  const take = (map: Map<string, number>, key: string): boolean => {
+    const n = map.get(key) ?? 0;
+    if (n === 1) map.delete(key);
+    else if (n > 1) map.set(key, n - 1);
+    return n > 0;
+  };
+  const add = (map: Map<string, number>, key: string): void => {
+    // Bounded: an entry no line ever matched only lingers until the next child.
+    if (map.size >= DRAIN_LEDGER_MAX) map.clear();
+    map.set(key, (map.get(key) ?? 0) + 1);
+  };
   return {
     record(envelopes) {
       for (const e of envelopes) {
         if (!e || typeof e.content !== "string") continue;
-        // Bounded: an entry no line ever matched only lingers until the next child.
-        if (counts.size >= DRAIN_LEDGER_MAX) counts.clear();
         const key = keyOf(e);
-        counts.set(key, (counts.get(key) ?? 0) + 1);
+        if (!take(delivered, key)) add(counts, key);
       }
+      delivered.clear();
     },
     filter(line) {
-      if (counts.size === 0) return line;
       let parsed: { kinds?: unknown; named?: unknown; reply?: unknown } | null;
       try { parsed = JSON.parse(line); } catch { return line; }
       const kinds = parsed?.kinds;
@@ -868,16 +882,21 @@ export function createDrainLedger(): DrainLedger {
       for (const e of envelopes) {
         if (!e || typeof e !== "object" || typeof (e as { content?: unknown }).content !== "string") { covered = false; continue; }
         const key = keyOf(e as { sent_at?: unknown; content: string });
-        const n = counts.get(key) ?? 0;
-        if (n === 0) covered = false;
-        else if (n === 1) counts.delete(key);
-        else counts.set(key, n - 1);
+        if (take(counts, key)) continue;
+        covered = false;
+        add(delivered, key);
       }
-      if (!covered) return line;
+      if (!covered) {
+        // Mail the drain did not get arrived after it, so every later line is
+        // newer than the drain too: forget its records, or one could match
+        // an identical later message and swallow its wake.
+        counts.clear();
+        return line;
+      }
       const rest = kinds.filter((kind) => kind !== "mail");
       return rest.some((kind) => kind === "board" || kind === "interrupt") ? JSON.stringify({ ...parsed, kinds: rest }) : undefined;
     },
-    clear() { counts.clear(); },
+    clear() { counts.clear(); delivered.clear(); },
   };
 }
 const WAIT_USAGE_ERROR = /flag provided but not defined|unknown (?:flag|option)|unrecognized (?:arguments?|option)|(?:^|\n)\s*usage(?::|\s+of\b)/i;
