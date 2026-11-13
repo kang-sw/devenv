@@ -55,11 +55,17 @@ class SeedPackageTest(unittest.TestCase):
         self.assertTrue(self.launcher.compatibility_stamp_current(binary, contract, contract_path, runtime_dir, fingerprint))
 
     def test_dev_check_built_reads_metadata_without_ws_process_spawn(self):
+        # Every process API, not only subprocess: the identity comes from metadata alone.
+        os_spawns = {name: mock.DEFAULT for name in (
+            "system", "popen", "posix_spawn", "posix_spawnp", "execv", "execve", "execvp", "execvpe",
+            "spawnv", "spawnve", "spawnvp", "spawnvpe", "startfile") if hasattr(dev.os, name)}
         with mock.patch.object(dev, "RUNTIME_CONTRACT", self.plugin / "runtime.json"), \
-             mock.patch.multiple(dev.subprocess, run=mock.DEFAULT, Popen=mock.DEFAULT, call=mock.DEFAULT) as processes, \
+             mock.patch.multiple(dev.subprocess, run=mock.DEFAULT, Popen=mock.DEFAULT, call=mock.DEFAULT,
+                                 check_call=mock.DEFAULT, check_output=mock.DEFAULT) as processes, \
+             mock.patch.multiple(dev.os, **os_spawns) as os_processes, \
              mock.patch("builtins.print") as output:
             dev.check_built(self.launcher, self.built)
-        for spy in processes.values():
+        for spy in [*processes.values(), *os_processes.values()]:
             spy.assert_not_called()
         output.assert_any_call("built version: 1.2.9-dev")
         output.assert_any_call("launcher compatibility gate: accepted")
