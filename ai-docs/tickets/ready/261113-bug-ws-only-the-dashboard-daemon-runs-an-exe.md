@@ -207,6 +207,52 @@ Use the named symbols/searches to find edit sites after parallel work lands.
 | risk.test | high | Cross-version peers, process-spawn assertions and Windows antivirus acceptance require distinct coverage |
 | risk.security_or_contract | high | Authenticated daemon routing and independently updated clients must preserve isolation and T0 compatibility |
 
+## Implementation Checkpoint (1866275ec) - 2026-11-13
+
+No phase is complete; this ticket remains in `ready/` without Results.
+
+- `8ac8230ff`: hash-bound build/release/bootstrap/copy/seed identity replaces
+  executable compatibility probes; `dev.check_built` reads metadata.
+- `eaf75a31c`: existing product CLI handlers run in-process in the daemon,
+  with per-connection environment/root/owner and optional hello `stdin`.
+- `1866275ec`: daemon-only launcher dispatch, no ProcessStream/DIRECT/exec
+  escape, immediate disconnected MCP errors and initialize-only replay,
+  health/legacy hello discovery, Python mailbox re-arm commands, metadata
+  staging, synchronized launcher mirrors, and updated operational manuals.
+- Remote verification: metadata leaf passed 38 capabilities + 15 coldload +
+  9 dev tests and metadata-only Linux/Windows cross-build checks. Go CLI leaf
+  passed affected packages excluding launcher integration and the base LAN
+  timeout. Latest launcher run passed all 87 launcher Python tests.
+- Latest command: `bash D:/sys_lock.sh remote w5090 run
+  single-exe-launcher 15 --sync <worktree> -- 'export
+  PATH=$HOME/sdk/go/bin:$PATH; export PYTHONDONTWRITEBYTECODE=1;
+  python3 -m unittest discover -s agents-plugin/tests -p
+  "test_ws_mcp_launcher_*.py" -b && cd agents-plugin-tool && go test
+  ./cmd/ws-mcp -count=1 -run "TestLauncher"'` was not green:
+  `TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy` at
+  `launcher_proxy_test.go:283` expects exactly one staged file, but staging
+  now correctly carries `<binary>.metadata.json` too. The analogous Python
+  directory assertion was fixed in the preceding run: worker stop (f), a
+  second failure with the same stale-test root cause. The Go assertion is
+  intentionally left for the lead's resumed/higher-tier run.
+- Still required: finish Phase 1 integration/full gate and independent R1,
+  fixes-only R2; Phase 2 Pi waiter/bootstrap metadata producer and cleanup,
+  Pi tests and full gate. The daemon-created worker MCP bridge and holder
+  spawning remain untouched, owned by their separate branches.
+- No live daemon restart, image-name process kill, push, or Windows/AhnLab
+  live acceptance was performed. Combined worker MCP acceptance and the
+  Windows/AhnLab check remain lead/owner work.
+
+## Forward
+
+- Pre-existing remote Linux test: at base `91ca854f2`, locked w5090 command
+  `go test ./cmd/ws-mcp -count=1 -run
+  "^TestHostedConnectionSeeingALANChangeReplacesTheDaemon$"` reproduced
+  `daemon_proxy_test.go:505: not within 10s: the predecessor to exit`
+  (19.058 s). The CLI leaf diagnosed an exited zombie counted alive. Exclude
+  this one test from the phase gate and track its process-liveness test
+  separately; do not broaden this urgent ticket into lifecycle repair.
+
 ## Phases
 
 ### Phase 1: Make the launcher daemon-only and inspect versions without execution
