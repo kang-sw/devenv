@@ -370,16 +370,6 @@
     "261112-feat-ws-dashboard-agent-panel-autocollapse": {
       "registered_at": "2026-11-12T02:03:10Z"
     },
-    "261112-feat-ws-dashboard-lead-wake-events": {
-      "registered_at": "2026-11-12T02:03:05Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T08:35:42Z"
-      }
-    },
     "261112-feat-ws-dashboard-session-rewind": {
       "registered_at": "2026-11-12T08:40:41Z"
     },
@@ -441,6 +431,9 @@
     },
     "261113-feat-ws-dashboard-worktree-delete": {
       "registered_at": "2026-11-13T07:16:15Z"
+    },
+    "261113-feat-ws-hosted-lead-bundled-plugin-only": {
+      "registered_at": "2026-11-13T08:44:13Z"
     },
     "261113-feat-ws-pi-mini-lead-profile": {
       "registered_at": "2026-11-13T08:35:43Z"
