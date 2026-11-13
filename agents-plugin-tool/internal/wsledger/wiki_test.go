@@ -1122,7 +1122,7 @@ func TestWikiPathKinds(t *testing.T) {
 			t.Errorf("CanonicalWikiPath(%q) = %q, %v (kind %s), want %q (%s)", tc.path, got, ok, WikiPageKind(got), tc.canon, tc.kind)
 		}
 	}
-	for _, bad := range []string{"a.html.md", "a.md.md", "a.HTML", "a.MD", "a.Md", ".html", ".md", "a.html/b", "a.md/b", "a.HTML/b", "a.Md/b", "a .md", "..md"} {
+	for _, bad := range []string{"a.html.md", "a.md.md", "a.HTML", "a.MD", "a.Md", ".html", ".md", "a.html/b", "a.md/b", "a.HTML/b", "a.Md/b", "a .md", "..md", "..html", "a .html"} {
 		if got, ok := CanonicalWikiPath(bad); ok {
 			t.Errorf("CanonicalWikiPath(%q) = %q, want refused", bad, got)
 		}
@@ -1213,6 +1213,17 @@ func TestWikiHTMLPages(t *testing.T) {
 	}
 	if _, _, err := ada.WikiRead(ctx, "w", "x.html", ""); !errors.Is(err, ErrWikiPageNotFound) {
 		t.Fatalf("read x.html = %v, want ErrWikiPageNotFound (x.html.md is no page)", err)
+	}
+	// The legacy folder f.html/ is no page: a write, restore, or delete of
+	// f.html must not replace or remove it.
+	if _, err := ada.WikiSave(ctx, wikiWrite("w", tip, "f.html", "<p>x</p>")); !errors.Is(err, ErrWikiBadEdit) {
+		t.Fatalf("write over the folder f.html/ = %v, want ErrWikiBadEdit", err)
+	}
+	if _, err := ada.WikiSave(ctx, WikiEdit{Wiki: "w", Base: tip, Op: WikiOpDelete, Path: "f.html"}); !errors.Is(err, ErrWikiPageNotFound) {
+		t.Fatalf("delete of the folder f.html/ = %v, want ErrWikiPageNotFound", err)
+	}
+	if _, err := ada.WikiSave(ctx, WikiEdit{Wiki: "w", Base: tip, Op: WikiOpRestore, Path: "guide.html", Commit: r2.Commit}); !errors.Is(err, ErrWikiNoChange) {
+		t.Fatalf("restore of an unchanged page = %v, want ErrWikiNoChange", err)
 	}
 	r3 := saveOK(t, ada, wikiWrite("w", tip, "guide.html", strings.Replace(html1, "Hello frame", "Hello again", 1)))
 	hist, err := ada.WikiHistory(ctx, "w", "guide.html", 0)

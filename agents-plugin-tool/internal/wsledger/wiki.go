@@ -167,12 +167,14 @@ func CanonicalWikiPath(s string) (string, bool) {
 		}
 	}
 	name := segs[last]
+	// stemOK holds a page name's stem to the segment rules.
+	stemOK := func(stem string) bool { return stem != "." && stem != ".." && strings.TrimSpace(stem) == stem }
 	switch {
 	case len(name) > len(htmlExt) && strings.HasSuffix(name, htmlExt):
-		return s, true
+		return s, stemOK(strings.TrimSuffix(name, htmlExt))
 	case len(name) > len(pageExt) && strings.HasSuffix(name, pageExt):
 		name = strings.TrimSuffix(name, pageExt)
-		if name == "." || name == ".." || strings.TrimSpace(name) != name {
+		if !stemOK(name) {
 			return "", false
 		}
 	}
@@ -1083,6 +1085,20 @@ func checkWikiEdit(e *WikiEdit) error {
 func (l *Ledger) wikiApply(ctx context.Context, base string, e WikiEdit) (string, error) {
 	g := l.git
 	tree := base
+	// A folder an older daemon wrote under a name that is now a page file
+	// (x.html/) is not that page: a write or restore would replace the whole
+	// folder with the page's blob, and a delete would remove it.
+	switch e.Op {
+	case WikiOpWrite, WikiOpDelete, WikiOpRestore:
+		if cur, ok, err := g.entryAt(ctx, tree, pageFile(e.Path)); err != nil {
+			return "", err
+		} else if ok && cur.isTree() {
+			if e.Op == WikiOpDelete {
+				return "", ErrWikiPageNotFound
+			}
+			return "", fmt.Errorf("%w: %s is a folder in the wiki, not a page", ErrWikiBadEdit, pageFile(e.Path))
+		}
+	}
 	switch e.Op {
 	case WikiOpWrite:
 		blob, err := g.hashObject(ctx, "blob", []byte(e.Content))
