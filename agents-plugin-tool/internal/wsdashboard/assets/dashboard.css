@@ -442,6 +442,9 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .cfield { position: relative; min-width: 0; background: var(--wb-muted); border-radius: 10px; }
 .composer .cfield textarea { position: relative; background: transparent; white-space: pre-wrap; overflow-wrap: break-word; }
 .chl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; padding: 8px 10px; border-radius: 10px; font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif; white-space: pre-wrap; overflow-wrap: break-word; color: transparent; }
+/* the hidden copy grow() measures an empty box's placeholder in: the layer's
+   geometry, but in flow height and out of sight */
+.chl.chm { bottom: auto; height: auto; overflow: visible; visibility: hidden; }
 .wsm-pill { border-radius: 4px; background: color-mix(in srgb, var(--wb-primary) 20%, transparent); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 20%, transparent); }
 /* the @ file-mention popup (mention.js), fixed at the @ it completes */
 .wsm-pop { position: fixed; z-index: 80; width: min(440px, calc(100vw - 16px)); max-height: 260px; overflow: auto; list-style: none; margin: 0; padding: 4px; background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); }
