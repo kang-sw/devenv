@@ -2010,8 +2010,8 @@
     if (ilabel && ilabel.textContent !== label) ilabel.textContent = label;
   }
   // --- subagent badge --------------------------------------------------------
-  // Beside the interrupt badge: a spinner, the robot icon, and "N(+M)
-  // subagents" while the session runs subagents, whether or not its lead
+  // Beside the interrupt badge: a spinner, the robot icon, and "N(+M)"
+  // (the word "subagents" is the title and accessible name) while the session runs subagents, whether or not its lead
   // works. N is a convlive region's data-sub (its running direct children),
   // M its data-subdeep (every running agent below them), counted by the
   // server; "(+M)" shows only when M is above zero. on gates it: the
@@ -2023,9 +2023,16 @@
     var m = clive ? Number(clive.getAttribute("data-subdeep")) || 0 : 0;
     badge.hidden = !(on && n + m > 0);
     if (badge.hidden) return;
-    var label = wsTn("js.subagents", n + m, m > 0 ? n + "(+" + m + ")" : String(n));
+    var count = m > 0 ? n + "(+" + m + ")" : String(n);
+    var label = wsTn("js.subagents", n + m, count);
     var el = badge.querySelector(".slabel");
-    if (el && el.textContent !== label) el.textContent = label;
+    if (el && el.textContent !== count) el.textContent = count;
+    // The word moves to the accessible name and tooltip, like the clock badge.
+    if (badge.getAttribute("aria-label") !== label) {
+      if (badge.dataset.tip === undefined) badge.dataset.tip = badge.title;
+      badge.setAttribute("aria-label", label);
+      badge.title = label + (badge.dataset.tip ? " · " + badge.dataset.tip : "");
+    }
   }
   // --- background-task badge ---------------------------------------------------
   // Beside the subagent badge: the clock and the count while the harness of
