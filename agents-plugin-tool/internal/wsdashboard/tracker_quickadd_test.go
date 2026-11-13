@@ -133,10 +133,10 @@ func TestTrackerPriorityChipAndLabelPicker(t *testing.T) {
 	if !strings.Contains(trackerFn(t, `function windowHtml\(v, it\)`, false), "(canEdit(it) ? '' : prChip(it))") {
 		t.Error("the chip row still shows the read-only priority chip beside the header's")
 	}
-	labels := trackerFn(t, `function newLabelsHtml\(n\)`, false)
+	labels := trackerFn(t, `function labelChecklist\(cur\)`, false)
 	for _, want := range []string{"attr('act', 'm-ltog')", "admin = !!VS.viewer.admin", "attr('act', 'm-ledit')", "attr('act', 'm-lrm')", "mi('m-ladd'"} {
 		if !strings.Contains(labels, want) {
-			t.Errorf("newLabelsHtml lacks %q", want)
+			t.Errorf("labelChecklist lacks %q", want)
 		}
 	}
 	act := trackerFn(t, `function newAct\(k, a\)`, false)
@@ -174,8 +174,8 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 	}
 	act := trackerFn(t, `function menuAct\(k, a\)`, false)
 	for _, want := range []string{
-		"case 'm-label': MN.lab = a.getAttribute('data-label'); return labelWrite(it, MN.lab);",
-		"case 'm-ladd': closeMenu(false); return openDialog('slabel', {});",
+		"case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lsel = labelToggled(MN.lsel || it.labels, MN.lab); return labelStepRedraw();",
+		"case 'm-ladd': return labelDialog({});",
 	} {
 		if !strings.Contains(act, want) {
 			t.Errorf("menuAct lacks %q", want)
@@ -193,10 +193,10 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 	src := trackerFn(t, `function esc\(s\)`, false) + trackerFn(t, `function attr\(k, v\)`, true) + trackerFn(t, `function tipAttr\(text\)`, true) +
 		trackerFn(t, `function dataAttrs\(data\)`, false) + trackerFn(t, `function mi\(act, label, data, o\)`, false) + trackerFn(t, `function msep\(\)`, true) +
 		trackerFn(t, `function labelOf\(id\)`, true) + trackerFn(t, `function labelChip\(l, act, extra\)`, false) + trackerFn(t, `function labelChips\(it, act\)`, false) +
-		trackerFn(t, `function labelsProp\(it\)`, false) + trackerFn(t, `function labelToggle\(l, on, act, aria\)`, false) +
-		trackerFn(t, `var LW = `, true) + trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelToggled\(cur, lid\)`, false)
+		trackerFn(t, `function labelsProp\(it\)`, false) + trackerFn(t, `function newLabelsHtml\(n\)`, true) +
+		trackerFn(t, `function labelChecklist\(cur\)`, false) + trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelToggled\(cur, lid\)`, false)
 	runTrackerCases(t, "property card labels", trackerCheckJS+`
-var VS = { viewer: { member: 'me', admin: false }, labels: [{ id: 'L1', name: 'docs', color: '#111111' }, { id: 'L2', name: 'dev', color: '#222222' }] }, editor = true;
+var VS = { viewer: { member: 'me', admin: false }, labels: [{ id: 'L1', name: 'docs', color: '#111111' }, { id: 'L2', name: 'dev', color: '#222222' }] }, editor = true, MN = { kind: 'item', step: 'labels' };
 function wsT(k) { return k; }
 function canEdit(it) { return editor; }
 `+src+`
@@ -209,14 +209,13 @@ editor = false;
 check('a viewer without the edit right sees the chips only', labelsProp(it), '<span class="chip lbl"><span class="ldot" style="background:#222222"></span>dev</span>');
 check('a viewer without the edit right sees "-" for no labels', labelsProp({ id: 'i2', labels: [] }), '<span class="muted">-</span>');
 var st = labelStepHtml(it);
-check('the step lists every label as a toggle chip, the picked one on, focus on the first', [has(st, 'class="chip lbl" data-act="m-label" data-label="L1" role="menuitemcheckbox" aria-checked="false" data-mi data-autofocus'), has(st, 'class="chip lbl on" data-act="m-label" data-label="L2" role="menuitemcheckbox" aria-checked="true" data-mi')], [true, true]);
+check('the step is the quick-add checklist over the item's labels, the picked one checked', [has(st, 'role="menuitemcheckbox" aria-checked="false" data-mi data-act="m-ltog" data-label="L1"') || has(st, 'data-act="m-ltog" data-label="L1"'), has(st, 'aria-checked="true" data-mi'), has(st, 'class="cbx"'), has(st, 'class="mlrow"')], [true, true, true, true]);
+check('the pick starts as the item's labels', MN.lsel, ['L2']);
 check('a toggle adds in list order', labelToggled(['L2'], 'L1'), ['L1', 'L2']);
 check('a toggle removes', labelToggled(['L1', 'L2'], 'L1'), ['L2']);
 check('a toggle drops labels the list no longer holds', labelToggled(['gone', 'L1'], 'L2'), ['L1', 'L2']);
-LW = { i1: { item: 'i1', labels: ['L1', 'L2'], dirty: false } };
-check('the step draws the pick still being written', has(labelStepHtml(it), 'class="chip lbl on" data-act="m-label" data-label="L1"'), true);
-check('another item\'s pick leaves this item drawn from its labels', has(labelStepHtml({ id: 'i3', labels: ['L2'] }), 'class="chip lbl" data-act="m-label" data-label="L1"'), true);
-LW = {};
+MN.lsel = ['L1', 'L2'];
+check('the step draws the local pick', has(labelStepHtml(it), 'aria-checked="true" data-mi data-act="m-ltog" data-label="L1"') || has(labelStepHtml(it), 'data-act="m-ltog" data-label="L1"'), true);
 VS.labels = [];
 check('an empty store says so, no add for a non-admin', labelStepHtml(it), '<p class="mempty">js.tk.labels.empty</p>');
 VS.viewer.admin = true;
@@ -225,64 +224,34 @@ done();
 `)
 }
 
-// TestTrackerLabelStepQuickToggles pins the labels step's writes
-// (tracker.js labelWrite, labelFlush): a toggle while an earlier write is
-// in flight builds on that write's pick, not on the item's lagging labels,
-// and goes as one write of the latest pick once the earlier one returns, so
-// quick toggles accumulate in order; a refused write drops the pick and the
-// next toggle builds on the item again. Picks are kept per item, so a toggle
-// on another item never drops toggles still queued on the first.
-func TestTrackerLabelStepQuickToggles(t *testing.T) {
-	runTrackerCases(t, "label step quick toggles", trackerCheckJS+`
-var VS = { labels: [{ id: 'L1' }, { id: 'L2' }, { id: 'L3' }] }, MN = { kind: 'item', step: 'labels' }, sent = [], redraws = 0;
-function commit(events, then, prep, fail) { sent.push({ labels: events[0][1].labels, then: then, fail: fail }); }
-function labelStepRedraw() { redraws++; }
-`+trackerFn(t, `function labelToggled\(cur, lid\)`, false)+trackerFn(t, `var LW = `, true)+trackerFn(t, `function labelWrite\(it, lid\)`, false)+trackerFn(t, `function labelFlush\(w\)`, false)+`
-function labels() { return sent.map(function (x) { return x.labels; }); }
-var it = { id: 'i1', labels: [] };
-labelWrite(it, 'L1');
-check('the first toggle writes at once', labels(), [['L1']]);
-labelWrite(it, 'L2');
-labelWrite(it, 'L3');
-check('toggles while it is in flight wait, each drawn', [labels().length, redraws, LW.i1.labels], [1, 2, ['L1', 'L2', 'L3']]);
-it.labels = ['L1'];
-sent[0].then();
-check('then they go as one write of the latest pick', labels(), [['L1'], ['L1', 'L2', 'L3']]);
-labelWrite(it, 'L1');
-check('a toggle during that write builds on its pick', LW.i1.labels, ['L2', 'L3']);
-it.labels = ['L1', 'L2', 'L3'];
-sent[1].then();
-it.labels = ['L2', 'L3'];
-sent[2].then();
-check('every pick written in order, nothing pending after', [labels(), LW], [[['L1'], ['L1', 'L2', 'L3'], ['L2', 'L3']], {}]);
-labelWrite(it, 'L1');
-labelWrite(it, 'L2');
-redraws = 0;
-sent[3].fail();
-check('a refused write drops the pick and draws the item again', [labels().length, LW, redraws], [4, {}, 1]);
-labelWrite(it, 'L3');
-check('the next toggle builds on the item', sent[4].labels, ['L2']);
-var it2 = { id: 'i2', labels: ['L1'] };
-labelWrite(it2, 'L2');
-check('another item writes at once on its own labels', sent[5].labels, ['L1', 'L2']);
-check('both picks are kept, one per item', Object.keys(LW).sort(), ['i1', 'i2']);
-it.labels = ['L2'];
-sent[4].then();
-check('the earlier item\'s return leaves the other item\'s pick alone', Object.keys(LW), ['i2']);
-labelWrite(it, 'L1');
-labelWrite(it2, 'L3');
-labelWrite(it, 'L2');
-check('toggles on two items while both are in flight wait per item', [labels().length, LW.i1.labels, LW.i2.labels], [7, ['L1'], ['L1', 'L2', 'L3']]);
-it.labels = ['L1', 'L2'];
-sent[6].then();
-check('the first item\'s queued toggle is still written after a toggle on another item', sent[7].labels, ['L1']);
-labelWrite(it2, 'L1');
-it2.labels = ['L1', 'L2'];
-sent[5].then();
-check('the second item\'s queued toggles go as its latest pick', sent[8].labels, ['L2', 'L3']);
-sent[7].then();
-sent[8].then();
-check('nothing pending once both return', LW, {});
+// TestTrackerLabelStepAppliesOnClose pins the labels step's batching
+// (tracker.js labelPending, called by closeMenu): toggles only move the local
+// pick, and closing the menu owes one item.edit of the net pick, none when the
+// pick equals the item's labels (a toggle and its undo), labels the list no
+// longer holds dropped, nothing when the item or the edit right is gone.
+func TestTrackerLabelStepAppliesOnClose(t *testing.T) {
+	cm := trackerFn(t, `function closeMenu\(refocus\)`, false)
+	for _, want := range []string{"var lw = labelPending(m);", "if (lw) commit(lw);"} {
+		if !strings.Contains(cm, want) {
+			t.Errorf("closeMenu lacks %q", want)
+		}
+	}
+	runTrackerCases(t, "label step applies on close", trackerCheckJS+`
+var editor = true, VS = { items: { i1: { id: 'i1', labels: ['L1'] } }, labels: [{ id: 'L1' }, { id: 'L2' }, { id: 'L3' }] };
+function canEdit() { return editor; }
+`+trackerFn(t, `function labelOf\(id\)`, true)+trackerFn(t, `function labelToggled\(cur, lid\)`, false)+trackerFn(t, `function labelPending\(m\)`, false)+`
+function m(sel) { return { kind: 'item', step: 'labels', item: 'i1', lsel: sel }; }
+check('a net change is one write of the pick', labelPending(m(['L1', 'L2'])), [['item.edit', { item: 'i1', labels: ['L1', 'L2'] }]]);
+check('a toggle and its undo write nothing', labelPending(m(labelToggled(labelToggled(['L1'], 'L2'), 'L2'))), null);
+check('removing the only label writes the empty list', labelPending(m([])), [['item.edit', { item: 'i1', labels: [] }]]);
+check('labels the list no longer holds are dropped from the write', labelPending(m(['L1', 'gone', 'L3'])), [['item.edit', { item: 'i1', labels: ['L1', 'L3'] }]]);
+check('a pick naming only a gone label beside the item's is no change', labelPending(m(['L1', 'gone'])), null);
+check('no pick drawn, nothing owed', labelPending(m(null)), null);
+check('another step owes nothing', labelPending({ kind: 'item', step: 'pri', item: 'i1', lsel: ['L2'] }), null);
+editor = false;
+check('without the edit right nothing is written', labelPending(m(['L2'])), null);
+editor = true;
+check('a gone item owes nothing', labelPending({ kind: 'item', step: 'labels', item: 'zz', lsel: ['L2'] }), null);
 done();
 `)
 }
