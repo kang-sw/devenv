@@ -302,3 +302,67 @@ check("a stranger's message changes nothing", raf.length === 0 && frames[6].styl
 if (bad.length) console.log(bad.join("\n"));
 `)
 }
+
+// TestTickTimesKeepsItsSetsUntilThePageChanges pins the per-second tick
+// (dashboard.js tickTimes, tickDirty): it collects the relative times and
+// paces once and keeps them across ticks while the page is unchanged, and a
+// time inserted anywhere (here, outside any board swap) is collected and
+// formatted on the next tick, since any insertion, removal, or change to a
+// selected attribute drops the sets; the tick's own text writes inside a
+// time or a pace do not. The observer watches the whole document. The cases
+// execute under node when it is installed.
+func TestTickTimesKeepsItsSetsUntilThePageChanges(t *testing.T) {
+	src := dashboardFuncs(t, "tickDirty", "tickTimes")
+	raw, err := dashboardFS.ReadFile("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `new MutationObserver(tickDirty).observe(doc, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-ms", "data-f", "data-reset"] });`) {
+		t.Error("tickDirty does not observe the whole document for insertions, removals, and the selected attributes")
+	}
+	runNode(t, "tick sets", `
+var bad = [];
+function check(what, ok) { if (!ok) bad.push(what); }
+var queries = 0, times = [{ id: "t1" }], paces = [{ id: "p1" }], formatted = [];
+var doc = { hidden: false };
+var window = { MutationObserver: function () {} };
+function q(sel) { queries++; return sel.indexOf("time") === 0 ? times.slice() : paces.slice(); }
+function fmtTime(t) { formatted.push(t.id); }
+function pace(e) { formatted.push(e.id); }
+function el(tag, cls) { return { tagName: tag, classList: { contains: function (c) { return c === cls; } } }; }
+var tickSets = null;
+`+src+`
+tickTimes(); tickTimes(); tickTimes();
+check("three ticks collect once, got " + queries + " queries", queries === 2);
+check("each tick formats every kept node", formatted.join() === "t1,p1,t1,p1,t1,p1");
+// The tick's own text writes inside a time and a pace keep the sets.
+tickDirty([{ type: "childList", target: el("TIME") }, { type: "childList", target: el("EM", "u-pace") }]);
+tickTimes();
+check("own text writes keep the sets", queries === 2);
+// A conversation entry carrying a relative time lands outside the board.
+times.push({ id: "t2" });
+tickDirty([{ type: "childList", target: el("DIV") }]);
+formatted = [];
+tickTimes();
+check("an insertion anywhere is collected on the next tick", queries === 4 && formatted.join() === "t1,t2,p1");
+// A time whose format attribute changes is collected again too.
+tickDirty([{ type: "attributes", target: el("TIME") }]);
+tickTimes();
+check("a selected attribute change drops the sets", queries === 6);
+doc.hidden = true; formatted = [];
+tickTimes();
+check("a hidden tab skips the tick", formatted.length === 0);
+if (bad.length) console.log(bad.join("\n"));
+`)
+}
+
+// TestBoardAnswersFlushTheTypedReply pins that the dashboard's reader of
+// the board's reply text flushes a reply build still waiting for its frame
+// (form.js buildSoon), so a keystroke typed just before a send is in it.
+func TestBoardAnswersFlushTheTypedReply(t *testing.T) {
+	src := dashboardFuncs(t, "boardAnswers")
+	flush, read := strings.Index(src, "window.wbFlushReply()"), strings.Index(src, `querySelector("#reply-text")`)
+	if flush < 0 || read < 0 || flush > read {
+		t.Errorf("boardAnswers reads #reply-text without flushing the waiting build first:\n%s", src)
+	}
+}

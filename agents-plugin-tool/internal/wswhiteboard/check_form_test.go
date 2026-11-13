@@ -14,7 +14,7 @@ import (
 // closest(), listeners, and a fire() that runs them, under a root element and
 // a body whose class is BODY_CLASS ("full" unless the script sets it first).
 // It is enough for the answer form, not a browser: no layout, no default
-// actions.
+// actions; requestAnimationFrame callbacks run on frame().
 const formPrelude = `
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
@@ -29,6 +29,11 @@ E.prototype.removeAttribute = function (k) { delete this.attrs[k]; };
 E.prototype.hasAttribute = function (k) { return k in this.attrs; };
 E.prototype.addEventListener = function (type, fn) { (this.on[type] = this.on[type] || []).push(fn); };
 E.prototype.focus = function () {}; E.prototype.blur = function () {}; E.prototype.select = function () {};
+E.prototype.contains = function (n) { for (; n; n = n.parent) if (n === this) return true; return false; };
+var rafs = {}, rafSeq = 0;
+function requestAnimationFrame(fn) { rafs[++rafSeq] = fn; return rafSeq; }
+function cancelAnimationFrame(id) { delete rafs[id]; }
+function frame() { var f = rafs; rafs = {}; Object.keys(f).forEach(function (k) { f[k](); }); }
 function fire(e, type) { (e.on[type] || []).forEach(function (fn) { fn.call(e, { target: e, key: "" }); }); }
 function one(e, p) { var not = /^(.*):not\((.*)\)$/.exec(p); if (not) return one(e, not[1]) && !one(e, not[2]);
   var m = /^([a-z]*)((?:\.[\w-]+|\[[\w-]+(?:\^?="[^"]*")?\])*)$/.exec(p); if (!m) throw new Error("selector " + p);
@@ -69,6 +74,7 @@ function reply() { return byId("reply-text").value.replace(/^<wb:answers>\n|\n<\
 function click(e) { fire(e, "click"); }
 function tick(box, on) { box.checked = on; fire(box, "input"); fire(box, "change"); }
 function type(note, text) { note.value = text; fire(note, "input"); fire(note, "change"); }
+function key(note, text) { note.value = text; fire(note, "input"); }
 `
 
 // TestCheckRowsStageAnswersInTheReplyBar runs answers.js and form.js over a
@@ -208,6 +214,90 @@ check("the embed toggles for the page alone", [state(), pressed(), stored["ws.wb
 		}
 		if s := strings.TrimSpace(string(out)); s != "" {
 			t.Errorf("%s: check hide toggle cases failed:\n%s", name, s)
+		}
+	}
+}
+
+// TestTypingBuildsTheReplyOnceAFrame pins the typing path of form.js: an
+// input event (a keystroke) builds the reply in the next frame, once however
+// many keystrokes land before it, and re-marks only the edited control's
+// topic's check rows; a click or change builds the whole board at once and
+// covers a waiting build; and a reader of the reply sees a keystroke typed
+// just before it, since the copy button and window.wbFlushReply (the
+// dashboard's boardAnswers) flush the waiting build first. The cases execute
+// under node when it is installed.
+func TestTypingBuildsTheReplyOnceAFrame(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; typing cases not executed")
+	}
+	st := &State{}
+	mustApply(t, st, `<wb:topic name="a"><wb:add class="check"><wb:title>first</wb:title></wb:add></wb:topic>
+<wb:topic name="b"><wb:add class="check"><wb:title>second</wb:title></wb:add></wb:topic>`)
+	regions, err := RenderRegions(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	board, _ := json.Marshal(string(regions.Board))
+	answers, err := embeddedAsset("answers.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	form, err := embeddedAsset("form.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "var BOARD = " + string(board) + ";\n" + formPrelude + "(function () {\n" + string(answers) + string(form) + "})();\n" + `
+var builds = 0, block = window.wbAnswers.block;
+window.wbAnswers.block = function (a, b) { builds++; return block(a, b); };
+var ra = byId("item-1"), rb = byId("item-2"), na = ra.querySelector("textarea.note"), boxA = ra.querySelector("label.ck > input");
+var tb = document.querySelector('section.topic[data-topic="b"] textarea.tnote');
+key(na, "h"); key(na, "hi");
+check("a keystroke waits for its frame", [reply(), builds], ["", 0]);
+frame();
+check("the frame builds once for both keystrokes", [reply(), builds, ra.classList.contains("staged")], ["01=^hi", 1, true]);
+// A typed build re-marks the edited topic's rows only: topic b's stale mark
+// stays until a whole-board build.
+rb.classList.toggle("staged", true);
+key(na, "hi!"); frame();
+check("a typed build leaves other topics' rows", [reply(), rb.classList.contains("staged")], ["01=^hi!", true]);
+tick(boxA, true);
+check("a change builds the whole board at once", [reply(), rb.classList.contains("staged")], ["01=ok^hi!", false]);
+// A change covers a waiting build: the frame then builds nothing more.
+key(na, "x"); var n = builds; tick(boxA, false); frame();
+check("a change covers the waiting build", [reply(), builds - n], ["01=^x", 1]);
+// Readers flush a keystroke typed just before them.
+key(tb, "note on b");
+click(byId("reply-copy"));
+check("the copy button sees the keystroke", reply().indexOf("note on b") >= 0, true);
+key(tb, "note on b, more");
+check("wbFlushReply is the page's flush", typeof window.wbFlushReply, "function");
+window.wbFlushReply();
+check("boardAnswers' flush sees the keystroke", reply().indexOf("note on b, more") >= 0, true);
+n = builds; frame();
+check("a flushed build does not run again", builds, n);
+process.stdout.write(bad.join("\n"));`
+	out, err := nodeScript(node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if s := strings.TrimSpace(string(out)); s != "" {
+		t.Errorf("typing cases failed:\n%s", s)
+	}
+}
+
+// TestPillRedrawsTypingOnceAFrame pins that pill.js redraws on typing in
+// the next frame, not inside the input event right after form.js grew the
+// note, and drops a waiting redraw when torn down.
+func TestPillRedrawsTypingOnceAFrame(t *testing.T) {
+	data, err := assetFS.ReadFile("assets/pill.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(data)
+	for _, want := range []string{`host.addEventListener("input", redrawSoon);`, `host.removeEventListener("input", redrawSoon);`, `requestAnimationFrame(function () { typed = 0; update(); })`, `if (typed) cancelAnimationFrame(typed);`} {
+		if !strings.Contains(js, want) {
+			t.Errorf("pill.js lacks %q", want)
 		}
 	}
 }

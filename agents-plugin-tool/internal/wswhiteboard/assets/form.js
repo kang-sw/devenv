@@ -96,7 +96,7 @@
     q("textarea.note, label.ack > input", root).forEach(function (el) {
       if (!once(el)) return;
       if (el.classList.contains("note")) el.addEventListener("input", function () { grow(el); });
-      el.addEventListener("input", build);
+      el.addEventListener("input", function () { buildSoon(el); });
       el.addEventListener("change", build);
     });
     inPageLinks(root);
@@ -146,9 +146,42 @@
     all.indeterminate = on > 0 && on < total;
   }
 
+  // Typing builds the reply once a frame (buildSoon), not once a keystroke,
+  // and re-marks the staged rows of the edited control's topic alone; a
+  // click or change builds at once, for the whole board, and covers a build
+  // still waiting. The waiting build lives on window, as this script runs
+  // again on every dashboard board swap while the controls it bound keep
+  // their run's functions. Anything that reads the reply (the copy button,
+  // the dashboard's boardAnswers, live.js's formBusy) flushes it first
+  // (flushBuild, window.wbFlushReply).
+  function buildSoon(el) {
+    var p = window.wbBuildPending, topic = el.closest(".topic");
+    if (p) {
+      if (p.scope !== topic) p.all = true;
+      return;
+    }
+    window.wbBuildPending = { scope: topic, all: !topic, frame: requestAnimationFrame(flushBuild), run: buildReply };
+  }
+  function flushBuild() {
+    var p = window.wbBuildPending;
+    if (!p) return;
+    window.wbBuildPending = null;
+    cancelAnimationFrame(p.frame);
+    p.run(p.all ? null : p.scope);
+  }
+  window.wbFlushReply = flushBuild;
+  function build() { buildReply(null); }
+
   // The reply is the answer block (answers.js) of the answered items, in
-  // board order, and the topic notes.
-  function build() {
+  // board order, and the topic notes. scope, when set, is the one topic
+  // whose check rows' staged marks can have changed.
+  function buildReply(scope) {
+    var p = window.wbBuildPending;
+    if (p) {
+      window.wbBuildPending = null;
+      cancelAnimationFrame(p.frame);
+      scope = null;
+    }
     replyEls();
     if (!ta) return;
     var items = [];
@@ -163,7 +196,7 @@
       var box = row.querySelector("label.ck > input"), noteEl = row.querySelector("textarea.note");
       var answer = row.hasAttribute("data-no") ? "no" : box && box.checked ? "ok" : "";
       var note = noteEl ? noteEl.value : "";
-      row.classList.toggle("staged", !!(answer || note.trim()));
+      if (!scope || scope.contains(row)) row.classList.toggle("staged", !!(answer || note.trim()));
       items.push({ id: row.getAttribute("data-id"), answer: answer, note: note });
     });
     // An acknowledgement is "ok"; with a note it leaves the ok group.
@@ -199,6 +232,7 @@
   // When the command fails the reply stays selected for a manual copy.
   var copy = doc.getElementById("reply-copy");
   if (copy && once(copy)) copy.addEventListener("click", function () {
+    flushBuild();
     replyEls();
     if (!ta.value) { hint.textContent = "∅"; return; }
     ta.focus(); ta.select();

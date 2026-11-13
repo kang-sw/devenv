@@ -87,12 +87,29 @@
   }
   // The per-second tick visits only what follows the clock: the relative
   // times and the usage paces. A hidden tab skips it, and showing the tab
-  // again catches up at once rather than on the next tick.
+  // again catches up at once rather than on the next tick. The two sets are
+  // kept (tickSets) and collected again only once the page changed: one
+  // observer on the document drops them on any insertion or removal, and on
+  // a change to an attribute they select on, wherever it happens (a board
+  // swap, a conversation entry, a history load, a node this script builds),
+  // except the tick's own text writes inside a time or a pace.
+  var tickSets = null;
+  function tickDirty(records) {
+    if (records.some(function (r) {
+      var n = r.target;
+      return !(r.type === "childList" && (n.tagName === "TIME" || (n.tagName === "EM" && n.classList.contains("u-pace"))));
+    })) tickSets = null;
+  }
+  if (window.MutationObserver) new MutationObserver(tickDirty).observe(doc, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-ms", "data-f", "data-reset"] });
   function tickTimes() {
     if (doc.hidden) return;
     var now = Date.now();
-    q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"]').forEach(function (t) { fmtTime(t, now); });
-    q("em.u-pace[data-reset]").forEach(function (e) { pace(e, now); });
+    if (!tickSets || !window.MutationObserver) tickSets = {
+      times: q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"]'),
+      paces: q("em.u-pace[data-reset]")
+    };
+    tickSets.times.forEach(function (t) { fmtTime(t, now); });
+    tickSets.paces.forEach(function (e) { pace(e, now); });
   }
   setInterval(tickTimes, 1000);
   doc.addEventListener("visibilitychange", tickTimes);
@@ -1334,6 +1351,8 @@
   // grammar the board's copy-answers and the server's delivered message use).
   function boardAnswers() {
     if (cchips) return window.wbAnswers.block(chipList(), []);
+    // A keystroke's reply build may still wait for its frame (form.js).
+    if (window.wbFlushReply) window.wbFlushReply();
     var b = region("board"), r = b && b.querySelector("#reply-text");
     return r ? r.value.trim() : "";
   }
