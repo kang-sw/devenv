@@ -54,30 +54,30 @@ RETIRED_SKILL_NAMES = (
 
 class SkillDispatchContractsTest(unittest.TestCase):
     def test_document_audit_preserves_approved_prose_and_dispatch_boundary(self):
-        contract = json.loads((Path(__file__).parent / "fixtures" / "lead_audit_doc_contract.json").read_text())
+        contract = json.loads((Path(__file__).parent / "fixtures" / "lead_audit_doc_contract.json").read_text(encoding="utf-8"))
         for package in (SKILLS_DIR.parent, SKILLS_DIR.parent.parent / "agents-plugin-wsflow"):
-            shim = (package / "skills" / "lead-audit-doc" / "SKILL.md").read_text()
+            shim = (package / "skills" / "lead-audit-doc" / "SKILL.md").read_text(encoding="utf-8")
             self.assertEqual(re.search(r"^description: (.*)$", shim, re.M).group(1), contract["description"])
             self.assertNotIn("allow_implicit_invocation: false", shim)
             for name, key in (("lead-audit-doc", "lead"), ("fresh-read-doc-auditor", "auditor")):
-                body = (package / "rsrc" / name / f"{name}.md").read_text().split("---", 2)[2].strip()
+                body = (package / "rsrc" / name / f"{name}.md").read_text(encoding="utf-8").split("---", 2)[2].strip()
                 self.assertEqual(body, contract[key])
             for root in (package / "skills", package / "rsrc"):
                 self.assertFalse((root / "lead-add-rule").exists())
                 for path in root.rglob("*.md"):
-                    self.assertNotIn("lead-add-rule", path.read_text(), str(path))
+                    self.assertNotIn("lead-add-rule", path.read_text(encoding="utf-8"), str(path))
             self.assertFalse((package / "skills" / "fresh-read-doc-auditor").exists())
 
     def test_delegate_and_sibling_exact_prose(self):
-        contract = json.loads((Path(__file__).parent / "fixtures" / "lead_delegate_contract.json").read_text())
+        contract = json.loads((Path(__file__).parent / "fixtures" / "lead_delegate_contract.json").read_text(encoding="utf-8"))
         for package in (SKILLS_DIR.parent, SKILLS_DIR.parent.parent / "agents-plugin-wsflow"):
             for name, expected in contract["descriptions"].items():
-                shim = (package / "skills" / name / "SKILL.md").read_text()
+                shim = (package / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
                 self.assertEqual(re.search(r"^description: (.*)$", shim, re.M).group(1), expected)
-        delegate = (RSRC_DIR / "lead-delegate" / "lead-delegate.md").read_text().split("---", 2)[2].strip()
+        delegate = (RSRC_DIR / "lead-delegate" / "lead-delegate.md").read_text(encoding="utf-8").split("---", 2)[2].strip()
         self.assertEqual(delegate, contract["delegate"])
-        discuss = (RSRC_DIR / "lead-discuss" / "lead-discuss.md").read_text()
-        run = (RSRC_DIR / "lead-run" / "lead-run.md").read_text()
+        discuss = (RSRC_DIR / "lead-discuss" / "lead-discuss.md").read_text(encoding="utf-8")
+        run = (RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8")
         self.assertIn(contract["discuss_opening"], discuss)
         self.assertIn(contract["run_opening"], run)
         self.assertIn("Do not read the file", run)
@@ -87,13 +87,13 @@ class SkillDispatchContractsTest(unittest.TestCase):
         # gone from the shipped body (retired 260911).
         self.assertNotIn("Contract:", run)
         self.assertNotIn("ad-hoc", run)
-        shim = (SKILLS_DIR / "lead-delegate" / "SKILL.md").read_text()
+        shim = (SKILLS_DIR / "lead-delegate" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn('ws/playbook.read(name: "lead-delegate", session_key:', shim)
         self.assertIn("ws/workflow_manual", shim)
 
     def test_review_local_fix_uses_delegate_gate_and_returns_to_review(self):
         for package in (RSRC_DIR, SKILLS_DIR.parent.parent / "agents-plugin-wsflow" / "rsrc"):
-            review = (package / "lead-review" / "lead-review.md").read_text()
+            review = (package / "lead-review" / "lead-review.md").read_text(encoding="utf-8")
             handoff = review.split("- **NEEDS FIX**:")[1].split("- **OPEN**:")[0]
             self.assertIn("{{.SkillNamespace}}:lead-delegate` with the findings path", handoff)
             self.assertIn("If its routing gate requires a ticket", handoff)
@@ -104,7 +104,7 @@ class SkillDispatchContractsTest(unittest.TestCase):
             self.assertIn("retain the original base and include the\n  repair commits", handoff)
             self.assertIn("Contributor → the config's Comment Method, else hand over the path", handoff)
             self.assertNotIn("with that path as the contract", handoff)
-            delegate = (package / "lead-delegate" / "lead-delegate.md").read_text()
+            delegate = (package / "lead-delegate" / "lead-delegate.md").read_text(encoding="utf-8")
             gate = delegate.split("## Routing")[1].split("## Assignment")[0]
             # The gate states the cheap default and the escalations; a NEEDS FIX
             # repair takes the same gate (and so gets a plan) with no exception.
