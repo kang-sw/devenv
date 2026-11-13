@@ -29,7 +29,9 @@
 // Each scenario asserts and throws on failure; the run exits non-zero when
 // any scenario failed. To add one, append { name, about, run } to SCENARIOS:
 // run(t) gets the scenario context (makeContext below: a fresh browser
-// context and page, the fixture, and the page helpers).
+// context and page, the fixture, and the page helpers). The rail's order and
+// stars are the daemon's (its rail layout), so each scenario starts from an
+// empty layout (resetLayout).
 
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -204,6 +206,25 @@ async function startDaemon(root, fx) {
   await until("the daemon's health", async () => { try { return (await fetch(base + "/health")).ok; } catch { return false; } }, 20000);
   return base;
 }
+// layoutOp posts one rail layout op as a dashboard page would (with the
+// daemon's own Origin) and answers the HTTP status and the reply.
+async function layoutOp(base, body) {
+  const r = await fetch(base + "/rail/layout", { method: "POST", headers: { "Content-Type": "application/json", Origin: base }, body: JSON.stringify(body) });
+  return { status: r.status, reply: await r.json().catch(() => ({})) };
+}
+// resetLayout empties the daemon's rail layout: its file goes, then a star
+// and an unstar through the route (each one a wake) make the daemon render
+// the rail again, so no page is sent a cached rail with the last scenario's
+// order or stars. With no file there is nothing to reset.
+async function resetLayout(base, fx) {
+  const file = path.join(fx.cache, "dashboard", "rail-layout.json");
+  if (!fs.existsSync(file)) return;
+  fs.rmSync(file);
+  for (const op of ["star", "unstar"]) {
+    const a = await layoutOp(base, { op, rid: fx.rid[fx.live[0]] });
+    assert(a.status === 200 && a.reply.applied === true, `resetting the layout (${op}): HTTP ${a.status} ${JSON.stringify(a.reply)}`);
+  }
+}
 let stopping = false;
 async function stopDaemon() {
   stopping = true;
@@ -232,8 +253,13 @@ async function launchBrowser() {
 }
 
 // --------------------------------------------------------------- helpers --
-// makeContext opens a fresh browser context (its own storage, so no stars or
-// order leak between scenarios) and gives the scenario its helpers.
+// LEGACY are the localStorage keys a browser kept the rail's order and stars
+// under before the daemon kept them; a page imports them once.
+const LEGACY = { order: "ws.dashboard.railorder", stars: "ws.dashboard.stars", wsorder: "ws.dashboard.wsorder" };
+
+// makeContext opens a fresh browser context (its own storage, so no draft or
+// collapsed workspace leaks between scenarios) and gives the scenario its
+// helpers.
 async function makeContext(browser, base, fx, o = {}) {
   const context = await browser.newContext({
     viewport: o.viewport || { width: 1700, height: 820 },
@@ -274,6 +300,46 @@ async function makeContext(browser, base, fx, o = {}) {
       return [...r.parentNode.children].filter((c) => c.classList.contains("rs") && !c.classList.contains("ended")).map((c) => c.getAttribute("data-rid"));
     }, fx.rid[key]),
     keyOf: (rid) => Object.keys(fx.rid).find((k) => fx.rid[k] === rid),
+    // wsOrder is the workspace sections' paths, as shown.
+    wsOrder: () => page.evaluate(() => [...document.querySelectorAll("#rlist .rws")].map((w) => w.getAttribute("data-ws"))),
+    // starred reports the session key's star shown pressed.
+    starred: (key) => page.evaluate((rid) => {
+      const b = document.querySelector(`#rlist .rs[data-rid="${rid}"] .star`);
+      return !!b && b.getAttribute("aria-pressed") === "true";
+    }, fx.rid[key]),
+    // legacy is the retired local layout keys' values (null: not set).
+    legacy: () => page.evaluate((keys) => keys.map((k) => localStorage.getItem(k)), Object.values(LEGACY)),
+    // seedLegacy has the context's first page load find the retired local
+    // layout (v: { order, stars, wsorder }, id lists) in localStorage, as a
+    // browser that used the rail before the daemon kept its layout would.
+    async seedLegacy(v) {
+      const items = Object.entries(LEGACY).map(([name, k]) => [k, JSON.stringify(v[name] || [])]);
+      await context.addInitScript((items) => {
+        try {
+          if (location.protocol !== "http:" || sessionStorage.getItem("rail-headless-seeded")) return;
+          sessionStorage.setItem("rail-headless-seeded", "1");
+          for (const [k, v] of items) localStorage.setItem(k, v);
+        } catch { /* no storage here */ }
+      }, items);
+    },
+    // barAt scrolls the rail list so the workspace's bar stands 100px below
+    // the list's top (clear of the drag's edge scroll) and answers the bar's
+    // box.
+    async barAt(ws) {
+      await page.evaluate((ws) => {
+        const l = document.getElementById("rlist"), w = [...l.querySelectorAll(".rws")].find((s) => s.getAttribute("data-ws") === ws);
+        l.scrollTop += w.querySelector(".wsbar").getBoundingClientRect().top - l.getBoundingClientRect().top - 100;
+      }, ws);
+      return t.box(`#rlist .rws[data-ws="${ws}"] > .wsbar`);
+    },
+    // pressBar puts the mouse down on the workspace's bar, on its name.
+    async pressBar(ws) {
+      const b = await t.box(`#rlist .rws[data-ws="${ws}"] > .wsbar .nm`);
+      const at = { x: b.x + Math.min(10, b.width / 2), y: b.y + b.height / 2 };
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      return at;
+    },
     box: async (selector) => {
       const b = await page.locator(selector).first().boundingBox();
       assert(b, `${selector} has no box`);
@@ -346,7 +412,7 @@ const SCENARIOS = [
   },
   {
     name: "star",
-    about: "the star follows the name, hidden until hover or focus, always on when starred; a click stars without navigating; a long name ellipsizes before it",
+    about: "the star follows the name, hidden until hover or focus, always on when starred; a click stars without navigating, and the daemon's render pins the row; a long name ellipsizes before it",
     async run(t) {
       const { page } = t;
       await t.open("rail-f-1");
@@ -374,7 +440,10 @@ const SCENARIOS = [
       await page.mouse.move(1695, 5);
       await sleep(250);
       assert(await t.style(`${row} .star`, "opacity") === "1", "a starred row hides its star");
-      assert((await t.group("rail-a-03"))[0] === t.rid("rail-a-03"), "the starred row is not pinned first");
+      // The star shows pressed at once; the row moves with the daemon's
+      // render after the op.
+      await until("the starred row pinned first", async () => (await t.group("rail-a-03"))[0] === t.rid("rail-a-03"));
+      assert(await t.starred("rail-a-03"), "the daemon's render does not show the star");
       const long = await page.evaluate((s) => {
         const r = document.querySelector(s), name = r.querySelector(".rid"), star = r.querySelector(".star");
         const n = name.getBoundingClientRect(), st = star.getBoundingClientRect(), rr = r.getBoundingClientRect();
@@ -429,7 +498,7 @@ const SCENARIOS = [
   },
   {
     name: "grip-reorder",
-    about: "a grip drag reorders, with a rail swap injected mid-press held until the press ends",
+    about: "a grip drag reorders, with a rail swap injected mid-press held until the press ends; the order is the daemon's",
     async run(t) {
       const { page } = t;
       await t.open("rail-f-1");
@@ -452,8 +521,12 @@ const SCENARIOS = [
       assert(after[0] === g[3] && after.length === g.length, `the drop did not put the row first: ${after.join(" ")}`);
       await until("the held swap to land", async () => (await t.railNames()).includes("swap during press"));
       assert((await t.group(x))[0] === g[3], "the held swap undid the drop");
-      const stored = JSON.parse(await page.evaluate(() => localStorage.getItem("ws.dashboard.railorder")) || "[]");
-      assert(stored.indexOf(g[3]) >= 0 && stored.indexOf(g[3]) < stored.indexOf(g[0]), "the new order was not stored");
+      // The daemon keeps the order: nothing is stored locally, and a fresh
+      // load shows it.
+      assert((await t.legacy()).every((v) => v === null), "the drop stored a local order");
+      await t.open("rail-f-1");
+      const loaded = await t.group(x);
+      assert(JSON.stringify(loaded) === JSON.stringify([g[3], ...g.filter((r) => r !== g[3])]), `a fresh load shows ${loaded.join(" ")}`);
     },
   },
   {
@@ -499,9 +572,10 @@ const SCENARIOS = [
       for (const [k, want] of [["rail-a-04", g], ["rail-f-1", feat], ["rail-b-1", beta]]) {
         assert(JSON.stringify(await t.group(k)) === JSON.stringify(want), `a refused drop moved rows in ${k}'s group`);
       }
-      // Across the stars: the starred row is pinned first, so both rows are
-      // in view from the top.
+      // Across the stars: the starred row is pinned first (once the
+      // daemon's render lands), so both rows are in view from the top.
       await page.click(`${t.sel("rail-a-10")} .star`);
+      await until("the starred row pinned first", async () => (await t.group("rail-a-10"))[0] === t.rid("rail-a-10"));
       await t.setScroll(0);
       const at2 = await t.press("rail-a-03");
       await page.mouse.move(at2.x, at2.y + 8, { steps: 2 });
@@ -517,6 +591,153 @@ const SCENARIOS = [
       await page.mouse.move(b.x + 20, b.y + b.height / 2, { steps: 10 });
       assert(await t.hint() === "Can't move to another workspace", `the lone row over another workspace: "${await t.hint()}"`);
       await page.mouse.up();
+    },
+  },
+  {
+    name: "layout-shared",
+    about: "the layout is the daemon's: a reorder, a star, and a workspace reorder in one browser show in another, and a fresh load keeps them",
+    async run(t, browser) {
+      const { page } = t;
+      const o = await makeContext(browser, t.base, t.fx);
+      try {
+        await t.open("rail-f-1");
+        await o.open("rail-b-1");
+        // A reorder: the fourth row to the top.
+        const g = await t.group("rail-a-04"), x = t.keyOf(g[3]);
+        const moved = [g[3], ...g.filter((r) => r !== g[3])];
+        const at = await t.press(x);
+        await page.mouse.move(at.x, at.y + 8, { steps: 2 });
+        const fb = await t.box(t.sel(t.keyOf(g[0])));
+        await page.mouse.move(at.x, fb.y + 3, { steps: 10 });
+        await page.mouse.up();
+        await until("the reorder in the other browser", async () => JSON.stringify(await o.group(x)) === JSON.stringify(moved));
+        // A star: pinned first in both.
+        const star = "rail-a-07";
+        const pinned = [t.rid(star), ...moved.filter((r) => r !== t.rid(star))];
+        await page.click(`${t.sel(star)} .star`);
+        await until("the star in the other browser", async () => (await o.starred(star)) && JSON.stringify(await o.group(star)) === JSON.stringify(pinned));
+        await until("the star in this browser", async () => JSON.stringify(await t.group(star)) === JSON.stringify(pinned));
+        // A workspace reorder: a section before the small one above it (not
+        // alpha's, whose bar would scroll out of view).
+        const ws = await t.wsOrder();
+        const i = ws.findIndex((p, j) => p !== t.fx.dirs.alpha && j + 1 < ws.length);
+        assert(i >= 0, `no small workspace with one after it: ${ws.join(" ")}`);
+        const above = ws[i], mover = ws[i + 1];
+        const wantWS = [...ws.slice(0, i), mover, above, ...ws.slice(i + 2)];
+        const ab = await t.barAt(above);
+        const bat = await t.pressBar(mover);
+        await page.mouse.move(bat.x, bat.y - 8, { steps: 2 });
+        assert(await t.dragging(), "the workspace bar press did not start a drag");
+        await page.mouse.move(bat.x, ab.y + 3, { steps: 10 });
+        assert(await t.line(), "no drop line over the workspace above");
+        await page.mouse.up();
+        await until("the workspace order in the other browser", async () => JSON.stringify(await o.wsOrder()) === JSON.stringify(wantWS));
+        await until("the workspace order in this browser", async () => JSON.stringify(await t.wsOrder()) === JSON.stringify(wantWS));
+        // A fresh load keeps all three, and the layout is on disk.
+        await o.open("rail-n-1");
+        assert(JSON.stringify(await o.group(star)) === JSON.stringify(pinned), `a fresh load shows ${(await o.group(star)).join(" ")}`);
+        assert(await o.starred(star), "a fresh load lost the star");
+        assert(JSON.stringify(await o.wsOrder()) === JSON.stringify(wantWS), `a fresh load shows the workspaces ${(await o.wsOrder()).join(" ")}`);
+        const file = fs.readFileSync(path.join(t.fx.cache, "dashboard", "rail-layout.json"), "utf8");
+        assert(file.includes(t.rid(star)) && file.includes(mover), "the layout file does not hold the star and the workspace order");
+        assert((await t.legacy()).every((v) => v === null) && (await o.legacy()).every((v) => v === null), "a layout change was stored locally");
+      } finally {
+        await o.context.close();
+      }
+    },
+  },
+  {
+    name: "layout-import",
+    about: "an empty layout imports a browser's retired local order, stars, and workspace order once, and the browser drops them",
+    async run(t, browser) {
+      await t.open("rail-f-1");
+      const g = await t.group("rail-a-04"), ws = await t.wsOrder();
+      const order = [...g].reverse(), stars = [t.rid("rail-a-05")], wsorder = [...ws].reverse();
+      const a = await makeContext(browser, t.base, t.fx);
+      try {
+        const posts = [];
+        a.page.on("request", (r) => { if (r.method() === "POST" && r.url().endsWith("/rail/layout")) posts.push(r.postDataJSON()); });
+        await a.seedLegacy({ order, stars, wsorder });
+        await a.open("rail-f-1");
+        await until("the import to drop the local keys", async () => (await a.legacy()).every((v) => v === null));
+        const want = [stars[0], ...order.filter((r) => r !== stars[0])];
+        await until("the imported layout", async () => JSON.stringify(await a.group("rail-a-04")) === JSON.stringify(want) && JSON.stringify(await a.wsOrder()) === JSON.stringify(wsorder));
+        assert(await a.starred("rail-a-05"), "the imported star does not show");
+        assert(posts.length === 1 && posts[0].op === "import", `the page posted ${JSON.stringify(posts)}`);
+        // The other browser, with no keys, shows the imported layout too.
+        await until("the import in the other browser", async () => JSON.stringify(await t.group("rail-a-04")) === JSON.stringify(want) && JSON.stringify(await t.wsOrder()) === JSON.stringify(wsorder));
+        // A reload imports nothing more.
+        await a.open("rail-f-1");
+        await sleep(await a.swapWait());
+        assert(posts.length === 1, `a reload posted ${JSON.stringify(posts.slice(1))}`);
+      } finally {
+        await a.context.close();
+      }
+    },
+  },
+  {
+    name: "layout-stale-keys",
+    about: "a later browser with retired local keys over a layout the daemon already holds drops them unimported and shows the daemon's order",
+    async run(t, browser) {
+      await t.open("rail-f-1");
+      const g = await t.group("rail-a-04"), ws = await t.wsOrder();
+      // The daemon's layout: a star and a workspace order.
+      for (const body of [{ op: "star", rid: t.rid("rail-a-06") }, { op: "wsmove", path: ws[ws.length - 1], before: ws[0] }]) {
+        const a = await layoutOp(t.base, body);
+        assert(a.status === 200 && a.reply.applied === true, `${body.op}: HTTP ${a.status} ${JSON.stringify(a.reply)}`);
+      }
+      const want = [t.rid("rail-a-06"), ...g.filter((r) => r !== t.rid("rail-a-06"))];
+      const wantWS = [ws[ws.length - 1], ...ws.slice(0, -1)];
+      const b = await makeContext(browser, t.base, t.fx);
+      try {
+        const posts = [];
+        b.page.on("request", (r) => { if (r.method() === "POST" && r.url().endsWith("/rail/layout")) posts.push(r.postDataJSON()); });
+        await b.seedLegacy({ order: [...g].reverse(), stars: [t.rid("rail-a-09")], wsorder: [...ws].reverse() });
+        await b.open("rail-f-1");
+        await until("the stale keys dropped", async () => (await b.legacy()).every((v) => v === null));
+        assert(JSON.stringify(await b.group("rail-a-04")) === JSON.stringify(want), `the rail shows ${(await b.group("rail-a-04")).join(" ")}`);
+        assert(JSON.stringify(await b.wsOrder()) === JSON.stringify(wantWS), `the rail shows the workspaces ${(await b.wsOrder()).join(" ")}`);
+        assert(await b.starred("rail-a-06") && !(await b.starred("rail-a-09")), "the stars are not the daemon's");
+        await sleep(await b.swapWait());
+        assert(posts.length === 0, `the page posted ${JSON.stringify(posts)}`);
+      } finally {
+        await b.context.close();
+      }
+    },
+  },
+  {
+    name: "layout-import-race",
+    about: "two browsers importing into one empty layout at once: exactly one import applies, and both drop their keys",
+    async run(t, browser) {
+      await t.open("rail-f-1");
+      const g = await t.group("rail-a-04"), ws = await t.wsOrder();
+      const b = await makeContext(browser, t.base, t.fx);
+      try {
+        // Both imports are held until both have posted.
+        const held = [];
+        for (const c of [t, b]) await c.context.route("**/rail/layout", (route) => { held.push(route); });
+        const mine = { order: [...g].reverse(), stars: [t.rid("rail-a-05")], wsorder: [...ws].reverse() };
+        const theirs = { order: g, stars: [t.rid("rail-a-09")], wsorder: ws };
+        await t.seedLegacy(mine);
+        await b.seedLegacy(theirs);
+        await t.open("rail-f-1");
+        await b.open("rail-b-1");
+        await until("both imports to post", () => held.length === 2);
+        const answers = [t.page, b.page].map((p) => p.waitForResponse((r) => r.url().endsWith("/rail/layout")).then((r) => r.json()));
+        await Promise.all(held.map((r) => r.continue()));
+        const got = await Promise.all(answers);
+        const applied = got.filter((v) => v.applied === true), other = got.filter((v) => v.applied === false && v.reason === "not_applied");
+        assert(applied.length === 1 && other.length === 1, `the imports answered ${JSON.stringify(got)}`);
+        for (const c of [t, b]) await until("the local keys dropped", async () => (await c.legacy()).every((v) => v === null));
+        // Both show the one import that applied.
+        const won = got[0].applied ? mine : theirs;
+        const want = [won.stars[0], ...won.order.filter((r) => r !== won.stars[0])];
+        for (const c of [t, b]) {
+          await until("the applied import's layout", async () => JSON.stringify(await c.group("rail-a-04")) === JSON.stringify(want) && JSON.stringify(await c.wsOrder()) === JSON.stringify(won.wsorder));
+        }
+      } finally {
+        await b.context.close();
+      }
     },
   },
   {
@@ -705,7 +926,7 @@ const SCENARIOS = [
 // ------------------------------------------------------------------- main --
 async function main() {
   if (opt.list) {
-    for (const s of SCENARIOS) console.log(`${s.name.padEnd(16)} ${s.about}`);
+    for (const s of SCENARIOS) console.log(`${s.name.padEnd(19)} ${s.about}`);
     return 0;
   }
   const picked = opt.names.length ? opt.names.map((n) => SCENARIOS.find((s) => s.name === n) || die(`no scenario ${n} (see --list)`)) : SCENARIOS;
@@ -717,6 +938,7 @@ async function main() {
     console.log(`isolated daemon ${base} (pid ${daemon.pid}), fixture ${root}`);
     browser = await launchBrowser();
     for (const s of picked) {
+      await resetLayout(base, fx);
       const t = await makeContext(browser, base, fx, (s.contexts && s.contexts[0]) || {});
       const start = Date.now();
       try {
