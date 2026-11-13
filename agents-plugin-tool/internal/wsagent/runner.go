@@ -405,12 +405,9 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	r.wg.Add(1)
 	go c.loop()
 	r.mu.Unlock()
-	if rec.Parent != nil && rec.TurnOpen {
-		// The last daemon exited while this turn ran. It settles as
-		// interrupted before the inbox signal below can start the next
-		// turn: settled after it, it would settle that new turn instead.
-		c.do(c.interrupted)
-	}
+	// Do not expose a previous LastTurn while startup still reconciles the
+	// later TurnOpen. The loop reconciles before it accepts this request.
+	c.do(func() {})
 	if rec.Lead && r.opts.Mail != nil && !foreign {
 		// Mail that waited while no daemon ran is found by the first check.
 		c.stopMail = r.opts.Mail.Watch(rec.Root, rec.WSKey, c.signalMail)
@@ -1258,6 +1255,11 @@ func (c *conv) loop() {
 	defer close(c.done)
 	beat := time.NewTicker(c.r.opts.heartbeat)
 	defer beat.Stop()
+	// Settle the predecessor before inbox signals (including nested reports)
+	// can start a genuinely new turn.
+	if c.rec.Parent != nil {
+		c.interrupted()
+	}
 	if c.settle() {
 		return
 	}
