@@ -393,6 +393,268 @@ after with no visual difference; the dashboard and whiteboard Go and JS test
 suites pass. A Windows harness run is not part of Phase 1 verification
 (Decision 8).
 
+### Result (e04c7ea1b) - 2026-11-14
+
+Fixes 1-5 kept, fix 1 in a paced form. Fix 6 reverted under the A/B keep
+rule; see its block, and the report proposes the owner re-judge it.
+
+Commits:
+
+- harness: 90bc7c5b1, adbb8639a (measures inside the iframe shell's
+  session frame), 4b9bac4f2 (several trees alternate run by run; spread),
+  0cd759136 (`--gc`), c48a0fa69 (LOOK diff box)
+- fix 1 lazy mount: bcb2f06c3, 589e65e1f (placeholder per the Decision 2
+  Revision), e55ae0796 (paced first pass)
+- fix 2 heights: e79e174de
+- fix 3 typing and idle: 75d9e51a8
+- fix 4 per-topic hash: 27d8535a9
+- fix 5 keyed frame reuse: 277615827
+- fix 6 hashed frame assets: 143eedccb, reverted by e04c7ea1b
+
+Method.
+
+- **Harness.** `scripts/board-perf.mjs run` builds the `internal/mcp` test
+  binary from each tree and starts a fresh in-process daemon per run
+  (TestBoardPerfServe). It never touches the shared daemon.
+  - It runs headless Chromium 148 with CDP CPU throttling at 4x and 6x, on
+    the synthetic board shape 8,6,4,2,60.
+  - It measures inside the iframe shell's session frame (`?frame=1`).
+  - Performance.getMetrics covers the whole renderer, shell included.
+- **Stack.** Each fix was judged on a stack built on the merged base
+  (develop 3ee1d448b plus the harness). Revert commits peel the fixes off
+  one at a time:
+  - S4 = 4b9bac4f2, fixes 1-4
+  - S3 = without fix 4
+  - S2 = without fixes 3-4
+  - S1 = fix 1 only
+  - S0 = no fix
+
+  Fix 5 and fix 6 were each judged against the commit below them
+  (S4 -> 277615827 -> 143eedccb).
+- **Runs.** Every A/B pair alternates A and B run by run, so host drift
+  lands on both sides. The host ran parallel workers (load 6-30).
+- **Keep rule.**
+  - Medians at 4x; 6x is recorded only.
+  - A regression counts past 10% and past a one-unit absolute floor.
+  - Each cell below is `before -> after (spread)`. Spread is max minus min
+    over a side's runs as a share of its median, the larger side.
+- **Noise amendment.** Where a judged change fell within its spread, the
+  metric's scenario was re-run with at least 5 alternating runs per side,
+  and only the new medians were judged.
+- **`--gc` and scenario (c).** Scenario (c) Nodes and Frames turned out
+  bimodal per run, depending on whether a garbage collection ran before the
+  closing read (19.7k / 35.6k / 51.4k nodes). So:
+  - every re-run, and the fix 5 and fix 6 runs, read those counts after a
+    forced collection (`--gc`, durations read before it);
+  - the fix 1-4 first runs did not.
+- **Scenario (a).** Every b-e run starts from a cold load, so (a) gets 4x
+  the run count in samples, except in a-only runs.
+
+**Fix 1, lazy mount.** S0 -> S1, 3 runs per side.
+
+- Targets: a@4 Frames -67.3% and LayoutDuration -22.7%, e@4 Frames -67.3%.
+- Regression: a@4 longTaskMs +17.7%, within its 21% spread.
+- The noise re-run (a only, 6 alternating runs) still showed longTaskMs
+  +17.1% at a 17% spread, with TaskDuration -39%: FAIL. Mounting every open
+  frame in one synchronous pass lengthened the load's long task.
+- The paced first pass (`mountFramesPaced`, 8 ms slices) was then judged
+  against S0 (a only, 6 alternating runs): KEEP.
+  - Targets: a@4 Frames -67.3%, LayoutDuration -17.8% (13% spread).
+  - longTaskMs -12.3%; no regression.
+- The swap, adopted-page and history-load mounts stay synchronous.
+
+First run, unpaced:
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | key med ms | key p95 ms | key max ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| a@4 | 104 → 34.0 (0%) | 379 → 190 (3%) | 238 → 184 (18%) | 475 → 420 (15%) | 5.0 → 4.5 (22%) | 479 → 563 (21%) | - | - | - | 102 → 32.0 (0%) | 25803 → 20156 (1%) |
+| a@6 | 104 → 34.0 (0%) | 381 → 192 (1%) | 363 → 295 (20%) | 751 → 650 (19%) | 8.0 → 7.5 (27%) | 852 → 996 (19%) | - | - | - | 102 → 32.0 (0%) | 25720 → 20156 (0%) |
+| b@4 | 104 → 34.0 (0%) | 1.0 → 1.0 (0%) | 1.5 → 1.9 (27%) | 67.4 → 56.9 (6%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 25656 → 19453 (0%) |
+| b@6 | 104 → 34.0 (0%) | 1.0 → 1.0 (0%) | 2.5 → 1.9 (89%) | 96.2 → 83.4 (11%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 25656 → 19453 (0%) |
+| c@4 | 113 → 38.0 (11%) | 806 → 406 (0%) | 529 → 340 (10%) | 11891 → 11587 (12%) | 20.0 → 20.0 (5%) | 20761 → 20979 (8%) | - | - | - | 180 → 80.0 (0%) | 296449 → 35426 (45%) |
+| c@6 | 122 → 38.0 (65%) | 810 → 406 (0%) | 815 → 508 (5%) | 18171 → 17359 (4%) | 20.0 → 20.0 (0%) | 32365 → 31883 (4%) | - | - | - | 180 → 80.0 (0%) | 297150 → 35426 (168%) |
+| d@4 | 104 → 34.0 (0%) | 321 → 255 (0%) | 167 → 82.2 (6%) | 338 → 271 (7%) | 1.0 → 0.0 (0%) | 138 → 0.0 (12%) | 19.0 → 14.2 (6%) | 22.7 → 16.4 (6%) | 32.0 → 24.0 (0%) | 0.0 → 0.0 (0%) | 27245 → 21583 (1%) |
+| d@6 | 104 → 34.0 (0%) | 321 → 255 (0%) | 272 → 147 (18%) | 517 → 446 (16%) | 1.0 → 0.0 (100%) | 209 → 0.0 (50%) | 29.8 → 23.0 (13%) | 34.4 → 27.0 (15%) | 40.0 → 32.0 (20%) | 0.0 → 0.0 (0%) | 27162 → 21583 (0%) |
+| e@4 | 104 → 34.0 (0%) | 154 → 154 (0%) | 49.3 → 48.7 (36%) | 256 → 204 (13%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 26623 → 20986 (0%) |
+| e@6 | 104 → 34.0 (0%) | 151 → 153 (2%) | 90.9 → 83.7 (23%) | 475 → 329 (16%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 26503 → 20986 (0%) |
+
+Re-run, unpaced:
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|
+| a@4 | 104 → 34.0 (0%) | 392 → 190 (4%) | 208 → 157 (18%) | 410 → 378 (13%) | 3.5 → 3.0 (33%) | 392 → 459 (17%) | 102 → 32.0 (0%) | 25634 → 19425 (0%) |
+| a@6 | 104 → 34.0 (0%) | 383 → 192 (1%) | 319 → 262 (15%) | 616 → 568 (9%) | 6.0 → 5.0 (50%) | 704 → 745 (33%) | 102 → 32.0 (0%) | 25628 → 19425 (0%) |
+
+Paced (kept form):
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|
+| a@4 | 104 → 34.0 (0%) | 379 → 196 (4%) | 212 → 175 (13%) | 408 → 372 (10%) | 4.0 → 3.5 (50%) | 414 → 363 (31%) | 102 → 32.0 (0%) | 25628 → 19425 (0%) |
+| a@6 | 104 → 34.0 (0%) | 381 → 201 (1%) | 322 → 288 (15%) | 621 → 614 (13%) | 6.5 → 4.0 (46%) | 733 → 607 (28%) | 102 → 32.0 (0%) | 25628 → 19425 (0%) |
+
+**Fix 2, batched heights.** S1 -> S2, 5 alternating runs per side: KEEP.
+
+- Target: a@4 LayoutCount -16.3% (1% spread).
+- The c@4 Nodes (+79.9%) and Frames (+11.4%) rises were within their
+  spreads. The c-only re-run with `--gc` (5 alternating) showed Nodes
+  +0.4% and Frames +2.9% (34 -> 35), so there was no regression.
+- mountedFrames and framesBuilt are identical on both sides throughout.
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | key med ms | key p95 ms | key max ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| a@4 | 34.0 → 34.0 (0%) | 190 → 159 (1%) | 172 → 171 (25%) | 397 → 385 (19%) | 4.0 → 4.0 (50%) | 513 → 513 (32%) | - | - | - | 32.0 → 32.0 (0%) | 20156 → 20156 (0%) |
+| a@6 | 34.0 → 34.0 (0%) | 192 → 161 (1%) | 280 → 267 (25%) | 608 → 599 (18%) | 7.0 → 7.0 (57%) | 944 → 940 (36%) | - | - | - | 32.0 → 32.0 (0%) | 20156 → 20156 (0%) |
+| b@4 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 1.2 → 1.6 (105%) | 55.4 → 54.7 (10%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19453 → 19453 (0%) |
+| b@6 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 2.6 → 2.4 (54%) | 77.1 → 78.9 (20%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19453 → 19453 (0%) |
+| c@4 | 35.0 → 39.0 (21%) | 406 → 406 (0%) | 320 → 325 (13%) | 11177 → 11347 (8%) | 20.0 → 20.0 (0%) | 20504 → 20549 (5%) | - | - | - | 80.0 → 80.0 (0%) | 19742 → 35512 (89%) |
+| c@6 | 38.0 → 39.0 (11%) | 406 → 406 (0%) | 492 → 518 (11%) | 17023 → 17341 (7%) | 20.0 → 20.0 (0%) | 31484 → 31809 (5%) | - | - | - | 80.0 → 80.0 (0%) | 35427 → 35511 (82%) |
+| d@4 | 34.0 → 34.0 (0%) | 255 → 255 (0%) | 83.1 → 75.3 (30%) | 250 → 260 (20%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 12.4 → 12.8 (19%) | 16.1 → 15.5 (13%) | 24.0 → 16.0 (50%) | 0.0 → 0.0 (0%) | 21583 → 21583 (0%) |
+| d@6 | 34.0 → 34.0 (0%) | 255 → 255 (0%) | 119 → 110 (38%) | 377 → 376 (17%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 19.0 → 18.3 (19%) | 23.5 → 25.2 (31%) | 24.0 → 24.0 (33%) | 0.0 → 0.0 (0%) | 21583 → 21584 (0%) |
+| e@4 | 34.0 → 34.0 (0%) | 154 → 154 (0%) | 47.4 → 44.7 (30%) | 177 → 182 (20%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 20986 → 20986 (0%) |
+| e@6 | 34.0 → 34.0 (0%) | 154 → 154 (2%) | 72.0 → 69.8 (42%) | 301 → 319 (28%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 20986 → 20986 (0%) |
+
+c re-run with `--gc`:
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|
+| c@4 | 34.0 → 35.0 (0%) | 406 → 406 (0%) | 296 → 302 (2%) | 10859 → 10974 (3%) | 20.0 → 20.0 (0%) | 20182 → 20563 (3%) | 80.0 → 80.0 (0%) | 19638 → 19723 (0%) |
+| c@6 | 34.0 → 35.0 (0%) | 406 → 406 (0%) | 458 → 461 (9%) | 15885 → 16021 (4%) | 20.0 → 20.0 (0%) | 29587 → 29822 (3%) | 80.0 → 80.0 (0%) | 19638 → 19723 (0%) |
+
+**Fix 3, typing and idle paths.** S2 -> S3, 3 runs per side: KEEP.
+
+- Target: d@4 LayoutCount -19.6% (0% spread).
+- b@4 ScriptDuration -94.3% was within its 147% spread, and c@4 Nodes
+  +37.7% was within spread too. The re-run (b and c, 5 alternating, `--gc`)
+  showed:
+  - b@4 ScriptDuration -93.6% (43% spread);
+  - c with no change past 1%.
+- d@4 keystroke Event Timing is unchanged at about 11.5 ms median and
+  16 ms max. The typing win is the layouts.
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | key med ms | key p95 ms | key max ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| a@4 | 34.0 → 34.0 (0%) | 159 → 159 (1%) | 158 → 163 (32%) | 371 → 368 (19%) | 3.5 → 3.5 (86%) | 486 → 474 (45%) | - | - | - | 32.0 → 32.0 (0%) | 20156 → 20156 (0%) |
+| a@6 | 34.0 → 34.0 (0%) | 160 → 161 (1%) | 254 → 247 (17%) | 564 → 557 (17%) | 6.0 → 6.0 (67%) | 841 → 860 (35%) | - | - | - | 32.0 → 32.0 (0%) | 20156 → 20156 (0%) |
+| b@4 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 1.7 → 1.6 (34%) | 50.7 → 2.9 (147%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19453 → 19453 (0%) |
+| b@6 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 2.2 → 2.4 (58%) | 71.7 → 4.1 (47%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19453 → 19453 (0%) |
+| c@4 | 39.0 → 39.0 (31%) | 406 → 406 (0%) | 304 → 289 (3%) | 10762 → 10939 (2%) | 20.0 → 20.0 (0%) | 20033 → 20057 (2%) | - | - | - | 80.0 → 80.0 (0%) | 35617 → 49043 (129%) |
+| c@6 | 39.0 → 39.0 (21%) | 406 → 406 (0%) | 457 → 451 (5%) | 16086 → 16090 (2%) | 20.0 → 20.0 (0%) | 29965 → 29880 (2%) | - | - | - | 80.0 → 80.0 (0%) | 35617 → 35511 (89%) |
+| d@4 | 34.0 → 34.0 (0%) | 255 → 205 (0%) | 70.9 → 64.4 (8%) | 224 → 240 (6%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 11.5 → 11.7 (7%) | 14.6 → 15.1 (15%) | 16.0 → 16.0 (50%) | 0.0 → 0.0 (0%) | 21583 → 21583 (0%) |
+| d@6 | 34.0 → 34.0 (0%) | 255 → 205 (0%) | 113 → 104 (37%) | 420 → 364 (21%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 19.8 → 17.3 (28%) | 24.8 → 25.6 (8%) | 32.0 → 32.0 (0%) | 0.0 → 0.0 (0%) | 21583 → 21583 (0%) |
+| e@4 | 34.0 → 34.0 (0%) | 154 → 154 (0%) | 33.5 → 34.7 (51%) | 180 → 146 (19%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 20986 → 20986 (0%) |
+| e@6 | 34.0 → 34.0 (0%) | 153 → 154 (1%) | 81.2 → 66.7 (29%) | 310 → 249 (32%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 20986 → 20986 (0%) |
+
+b/c re-run with `--gc`:
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|
+| b@4 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 1.5 → 1.3 (67%) | 51.7 → 3.3 (43%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 19425 → 19425 (0%) |
+| b@6 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 2.2 → 2.7 (50%) | 76.9 → 4.2 (42%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 19425 → 19425 (0%) |
+| c@4 | 35.0 → 35.0 (0%) | 406 → 406 (0%) | 300 → 300 (6%) | 10802 → 10759 (6%) | 20.0 → 20.0 (0%) | 20224 → 20071 (4%) | 80.0 → 80.0 (0%) | 19723 → 19723 (0%) |
+| c@6 | 35.0 → 35.0 (0%) | 406 → 406 (0%) | 474 → 449 (10%) | 16016 → 16049 (5%) | 20.0 → 20.0 (0%) | 29646 → 29727 (4%) | 80.0 → 80.0 (0%) | 19723 → 19723 (0%) |
+
+**Fix 4, per-topic hash.** S3 -> S4, 3 runs per side: KEEP.
+
+- Target: c@4 ScriptDuration -10.4% (6% spread).
+- No regression at 4x. The c@6 Nodes and Frames jump is the same pre-`--gc`
+  collection artifact; 6x is recorded only.
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | key med ms | key p95 ms | key max ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| a@4 | 34.0 → 34.0 (0%) | 159 → 159 (1%) | 163 → 164 (16%) | 376 → 294 (14%) | 4.0 → 3.0 (67%) | 512 → 388 (37%) | - | - | - | 32.0 → 32.0 (0%) | 20156 → 20156 (0%) |
+| a@6 | 34.0 → 34.0 (0%) | 161 → 160 (1%) | 253 → 262 (22%) | 569 → 471 (19%) | 6.0 → 6.0 (50%) | 856 → 782 (31%) | - | - | - | 32.0 → 32.0 (0%) | 20156 → 20156 (0%) |
+| b@4 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 1.8 → 1.6 (30%) | 3.2 → 3.7 (7%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19453 → 19453 (0%) |
+| b@6 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 1.9 → 1.9 (60%) | 4.6 → 4.1 (50%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19453 → 19453 (0%) |
+| c@4 | 39.0 → 39.0 (10%) | 406 → 406 (0%) | 297 → 295 (8%) | 10639 → 9532 (6%) | 20.0 → 20.0 (0%) | 19839 → 19017 (5%) | - | - | - | 80.0 → 80.0 (0%) | 35511 → 35512 (45%) |
+| c@6 | 35.0 → 43.0 (11%) | 406 → 406 (0%) | 477 → 478 (11%) | 16622 → 14204 (5%) | 20.0 → 20.0 (0%) | 30645 → 28283 (4%) | - | - | - | 80.0 → 80.0 (0%) | 19742 → 51371 (83%) |
+| d@4 | 34.0 → 34.0 (0%) | 205 → 205 (0%) | 61.8 → 64.3 (39%) | 241 → 233 (13%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 11.6 → 11.5 (14%) | 15.3 → 15.2 (12%) | 16.0 → 16.0 (50%) | 0.0 → 0.0 (0%) | 21583 → 21583 (0%) |
+| d@6 | 34.0 → 34.0 (0%) | 205 → 205 (0%) | 116 → 127 (27%) | 409 → 444 (21%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 21.2 → 22.5 (21%) | 26.3 → 26.7 (7%) | 32.0 → 32.0 (0%) | 0.0 → 0.0 (0%) | 21583 → 21583 (0%) |
+| e@4 | 34.0 → 34.0 (0%) | 154 → 154 (0%) | 39.7 → 36.8 (23%) | 157 → 161 (40%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 20987 → 20986 (0%) |
+| e@6 | 34.0 → 34.0 (0%) | 153 → 154 (1%) | 73.4 → 62.6 (27%) | 296 → 249 (18%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 20986 → 20986 (0%) |
+
+**Fix 5, keyed frame reuse.** S4 -> 277615827, 3 runs per side, `--gc`:
+KEEP.
+
+- Target: c@4 framesBuilt -75.0% (80 -> 20: only the topic-body frames
+  rebuild).
+- Also: c@4 LayoutCount -24.6% and LayoutDuration -32.9%.
+- No regression.
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | key med ms | key p95 ms | key max ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| a@4 | 34.0 → 34.0 (0%) | 159 → 159 (1%) | 158 → 162 (25%) | 292 → 288 (23%) | 4.0 → 3.0 (67%) | 416 → 384 (37%) | - | - | - | 32.0 → 32.0 (0%) | 19425 → 19425 (0%) |
+| a@6 | 34.0 → 34.0 (0%) | 160 → 160 (1%) | 255 → 254 (22%) | 447 → 443 (14%) | 6.0 → 6.0 (33%) | 726 → 718 (22%) | - | - | - | 32.0 → 32.0 (0%) | 19425 → 19425 (0%) |
+| b@4 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 1.6 → 1.7 (52%) | 2.8 → 3.1 (61%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19425 → 19425 (0%) |
+| b@6 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 2.0 → 2.6 (43%) | 4.0 → 3.3 (46%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19425 → 19425 (0%) |
+| c@4 | 35.0 → 35.0 (0%) | 406 → 306 (0%) | 303 → 203 (8%) | 9514 → 8887 (9%) | 20.0 → 20.0 (0%) | 18738 → 18156 (4%) | - | - | - | 80.0 → 20.0 (0%) | 19724 → 19724 (0%) |
+| c@6 | 35.0 → 35.0 (0%) | 406 → 306 (0%) | 474 → 325 (10%) | 14243 → 13449 (4%) | 20.0 → 20.0 (0%) | 28560 → 27808 (4%) | - | - | - | 80.0 → 20.0 (0%) | 19724 → 19724 (0%) |
+| d@4 | 34.0 → 34.0 (0%) | 205 → 205 (0%) | 58.3 → 56.3 (39%) | 235 → 242 (7%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 11.8 → 11.9 (6%) | 15.0 → 14.8 (5%) | 24.0 → 16.0 (50%) | 0.0 → 0.0 (0%) | 19443 → 19443 (0%) |
+| d@6 | 34.0 → 34.0 (0%) | 205 → 205 (0%) | 106 → 96.5 (25%) | 366 → 374 (7%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 17.6 → 17.6 (3%) | 23.8 → 25.0 (9%) | 24.0 → 32.0 (33%) | 0.0 → 0.0 (0%) | 19443 → 19443 (0%) |
+| e@4 | 34.0 → 34.0 (0%) | 154 → 154 (0%) | 43.8 → 36.2 (24%) | 168 → 167 (33%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19427 → 19427 (0%) |
+| e@6 | 34.0 → 34.0 (0%) | 154 → 154 (1%) | 57.9 → 68.0 (47%) | 270 → 318 (20%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19427 → 19427 (0%) |
+
+**Fix 6, hashed shared frame assets.** 277615827 -> 143eedccb, 3 runs per
+side, `--gc`: FAIL, reverted.
+
+- Target: c@4 ScriptDuration -77.7% (8987 -> 2007 ms over 20 updates, 5%
+  spread), and longTaskMs -84%.
+- e@4 LayoutDuration, RecalcStyleDuration, ScriptDuration and TaskDuration
+  rose 11-16%, each within its spread.
+- The e re-run (5 alternating) still showed LayoutDuration +26.3%
+  (38.2 -> 48.2 ms, 48% spread) and TaskDuration +12.5% (32% spread). At
+  6x the same metrics fell about 9%.
+- The rule applies to the re-run medians, so the fix was reverted. No
+  mechanism links stylesheet and script loading to scroll-time layout after
+  load.
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | key med ms | key p95 ms | key max ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| a@4 | 34.0 → 34.0 (0%) | 159 → 156 (2%) | 157 → 155 (12%) | 281 → 294 (12%) | 3.5 → 4.0 (29%) | 402 → 413 (25%) | - | - | - | 32.0 → 32.0 (0%) | 19425 → 19425 (0%) |
+| a@6 | 34.0 → 34.0 (0%) | 160 → 158 (1%) | 255 → 248 (19%) | 441 → 439 (16%) | 6.0 → 6.0 (33%) | 740 → 705 (25%) | - | - | - | 32.0 → 32.0 (0%) | 19425 → 19425 (0%) |
+| b@4 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 1.5 → 1.6 (24%) | 4.4 → 3.6 (54%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19425 → 19425 (0%) |
+| b@6 | 34.0 → 34.0 (0%) | 1.0 → 1.0 (0%) | 1.7 → 2.4 (128%) | 4.2 → 5.0 (84%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19425 → 19425 (0%) |
+| c@4 | 35.0 → 35.0 (0%) | 306 → 306 (0%) | 203 → 216 (9%) | 8987 → 2007 (5%) | 20.0 → 20.0 (0%) | 18227 → 2914 (4%) | - | - | - | 20.0 → 20.0 (0%) | 19724 → 19724 (0%) |
+| c@6 | 35.0 → 35.0 (0%) | 306 → 306 (0%) | 327 → 322 (4%) | 13395 → 3037 (2%) | 20.0 → 20.0 (0%) | 27222 → 4454 (2%) | - | - | - | 20.0 → 20.0 (0%) | 19724 → 19724 (0%) |
+| d@4 | 34.0 → 34.0 (0%) | 205 → 205 (0%) | 60.0 → 59.9 (19%) | 238 → 228 (8%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 11.5 → 11.0 (4%) | 15.3 → 14.9 (12%) | 24.0 → 24.0 (33%) | 0.0 → 0.0 (0%) | 19443 → 19443 (0%) |
+| d@6 | 34.0 → 34.0 (0%) | 205 → 205 (0%) | 91.4 → 87.8 (27%) | 362 → 363 (10%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 17.5 → 17.6 (4%) | 25.0 → 24.1 (8%) | 32.0 → 32.0 (25%) | 0.0 → 0.0 (0%) | 19443 → 19443 (0%) |
+| e@4 | 34.0 → 34.0 (0%) | 154 → 154 (0%) | 38.5 → 43.0 (16%) | 165 → 184 (20%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19427 → 19427 (0%) |
+| e@6 | 34.0 → 34.0 (0%) | 153 → 154 (1%) | 81.3 → 64.8 (40%) | 282 → 290 (12%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | - | - | - | 0.0 → 0.0 (0%) | 19427 → 19427 (0%) |
+
+e re-run:
+
+| run | Frames | LayoutCount | LayoutDur ms | ScriptDur ms | long tasks | long ms | built | Nodes |
+|---|---|---|---|---|---|---|---|---|
+| e@4 | 34.0 → 34.0 (0%) | 154 → 154 (0%) | 38.2 → 48.2 (48%) | 173 → 175 (35%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 19427 → 19427 (0%) |
+| e@6 | 34.0 → 34.0 (0%) | 153 → 153 (2%) | 73.8 → 66.9 (32%) | 283 → 283 (24%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 0.0 → 0.0 (0%) | 19427 → 19427 (0%) |
+
+**LOOK.**
+
+- `board-perf.mjs shot` captured the long board in light and dark at 12
+  scroll stops on S0 and on e04c7ea1b.
+- `diff` found 0.016-0.118% of pixels differing per capture. Every box
+  falls on the clock-time labels (the topic bars' `HH:MM` and the
+  "System events · HH:MM" rows): the captures were taken at different
+  minutes.
+- On inspection there is no layout or style difference.
+
+**Tests.**
+
+- Phase 1's asset and Go tests were added or retargeted:
+  - mount on load, toggle, restoreOpen, boardJump, insert and history
+    load, plus the paced pass;
+  - sandbox and srcdoc set before connect;
+  - no board `<iframe` in the served markup;
+  - the heights batch;
+  - `data-th`;
+  - keyed reuse;
+  - the tick;
+  - typing flushes;
+  - themed placeholders carry `data-theme`.
+- `go test ./internal/wswhiteboard ./internal/wsdashboard` passes. So does
+  the `internal/mcp` dashboard, whiteboard, board, panel, theme, closed,
+  topic and wiki subset.
+- The hashed-asset route test left with the fix 6 revert.
+
 ### Phase 2: Viewport mount/unmount and content-visibility
 
 Requires `261113-feat-ws-dashboard-board-reorder-hold` Phase 1 (the shared
