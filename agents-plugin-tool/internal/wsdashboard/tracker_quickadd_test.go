@@ -183,13 +183,13 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 		}
 	}
 	wr := trackerFn(t, `function wrote\(results\)`, false)
-	for _, want := range []string{"var keep = !!(MN && MN.kind === 'item' && MN.step === 'labels');", "if (MN && MN.kind === 'item' && !keep) closeMenu(false);", "if (keep && MN) labelStepRedraw();"} {
+	for _, want := range []string{"var keep = !!(MN && MN.kind === 'item' && (MN.step === 'labels' || (MN.step === 'due' && !MN.rsent)));", "if (MN && MN.kind === 'item' && !keep) closeMenu(false);", "if (keep && MN && MN.step === 'labels') labelStepRedraw();"} {
 		if !strings.Contains(wr, want) {
 			t.Errorf("wrote lacks %q", want)
 		}
 	}
-	if !strings.Contains(trackerFn(t, `function menuKey\(e\)`, false), "if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); if (MN.from) menuBack(); else closeMenu(true); return; }") {
-		t.Error("Escape on a first menu step no longer closes it with focus back")
+	if !strings.Contains(trackerFn(t, `function menuKey\(e\)`, false), "if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); menuDiscard(); return; }") {
+		t.Error("Escape no longer discards the step's pick and goes back (menuDiscard)")
 	}
 	src := trackerFn(t, `function esc\(s\)`, false) + trackerFn(t, `function attr\(k, v\)`, true) + trackerFn(t, `function tipAttr\(text\)`, true) +
 		trackerFn(t, `function dataAttrs\(data\)`, false) + trackerFn(t, `function mi\(act, label, data, o\)`, false) + trackerFn(t, `function msep\(\)`, true) +
@@ -242,8 +242,8 @@ done();
 // while that write is in flight (labelWrite) draws and applies its picks over
 // live labels with each pending write's own picks, until it lands or is refused.
 func TestTrackerLabelStepAppliesOnClose(t *testing.T) {
-	cm := trackerFn(t, `function closeMenu\(refocus\)`, false)
-	for _, want := range []string{"var lw = labelPending(m);", "if (lw) labelWrite(lw);"} {
+	cm := trackerFn(t, `function closeMenu\(refocus, quiet\)`, false)
+	for _, want := range []string{"var lw = labelPending(m), rw = rangePending(m);", "if (lw) labelWrite(lw);"} {
 		if !strings.Contains(cm, want) {
 			t.Errorf("closeMenu lacks %q", want)
 		}

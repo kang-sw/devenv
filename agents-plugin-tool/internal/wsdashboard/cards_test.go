@@ -356,9 +356,9 @@ func TestBoardTopicPins(t *testing.T) {
 var store = {}, A, B, C, R;
 function served1() { A = topic("a", 300); B = topic("b", 200); C = topic("c", 100); var X = topic("x", 0, true); R = reply(); return [A, B, C, X, more(31), R]; }
 boot(store, served1);
-check("every topic bar has a pin button before its note pen, unpressed",
-  [A, B, C].map(function (t) { var b = pinBtn(t); return [!!b, b && b.nextSibling && b.nextSibling.classList.contains("tnote-toggle"), b && b.getAttribute("aria-pressed")]; }),
-  [[true, true, "false"], [true, true, "false"], [true, true, "false"]]);
+check("every topic bar has a pin button, then the maximize and back buttons, before its note pen, unpressed",
+  [A, B, C].map(function (t) { var b = pinBtn(t); return [!!b, b && b.parentNode.children.slice(b.parentNode.children.indexOf(b)).map(function (x) { return x.className; }), b && b.getAttribute("aria-pressed")]; }),
+  [A, B, C].map(function () { return [true, ["ibtn tpin", "ibtn d-max", "ibtn d-min", "btn mini tnote-toggle"], "false"]; }));
 check("an empty pin list heads the board", names(page.board), ["PINS", "a", "b", "c", "x/c", "more31", "reply"]);
 
 // A pinned topic stands among pinned cards in pin order.
@@ -569,6 +569,7 @@ var window = {}, doc = null, openState = {}, boardSeen = {};
 function q(sel, el) { try { return el.querySelectorAll(sel); } catch (e) { return []; } }
 function frag(nodes) { return { childNodes: nodes }; }
 function isPeer() { return false; }
+function isPanel() { return false; }
 `+src+`
 function served(closed) { return [topic("A", 500)].concat(closed.map(function (n) { return topic(n, 0, true); })).concat([more(1), reply()]); }
 function start() {
@@ -600,6 +601,81 @@ check("a pinned closed topic pushed past the cap stays pinned", pinsOf(), ["X/c"
 check("and a slot at the pages' head counts it", [p.firstChild.getAttribute("data-slot"), tail()], ["X", "4"]);
 morphBoard(page.board, served(["W"]));
 check("a later swap counts it once", [p.querySelectorAll(".closed-slot").length, tail()], [1, "4"]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+// TestBoardSheet draws a topic and a topic's panel large through the card
+// framework's maximize sheet (cards.js), executed under node when it is
+// installed: a topic's maximize button marks the topic large over the
+// shared scrim; a board update that brings the topic as a new section, or
+// grafts the new bar into the old one, draws it large there; one thing is
+// large at a time, a card, a topic, or a panel; the back button, Escape,
+// and the scrim restore it; a panel's buttons never fold its details, a
+// closed panel opens as it grows, its entry keeps its place meanwhile, and a
+// large panel's head does not fold it; a large node the board stops serving
+// takes the scrim with it.
+func TestBoardSheet(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := json.Marshal(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runNode(t, "board sheet", "var CARDS = "+string(src)+";\n"+cardsDOM+`
+var store = {}, A, B;
+function panel(key) {
+  var sum = mk("summary", {}, [mk("span.pmeta"), mk("button.ibtn.d-max"), mk("button.ibtn.d-min")]);
+  return mk("article.wb-entry", {}, [mk("details.entry-panel", { "data-key": key }, [sum, mk("div.doc-body")])]);
+}
+function served() { A = topic("a", 300); B = topic("b", 200); B.appendChild(panel("entry:p1")); return [A, B, reply()]; }
+boot(store, served);
+function btn(t, cls) { return t.querySelector(".tbar ." + cls); }
+function pbtn(t, cls) { return t.querySelector("details.entry-panel summary ." + cls); }
+function ev(target) { return { target: target, prevented: false, preventDefault: function () { this.prevented = true; } }; }
+function click(b) { var e = ev(b); (b.closest("aside") || page.board).fire("click", e); return e; }
+function scrims() { return page.doc.body.children.filter(function (n) { return n.classList.contains("bc-scrim") && !n.hidden; }).length; }
+function esc() { var e = { key: "Escape", defaultPrevented: false, preventDefault: function () { this.defaultPrevented = true; } }; page.doc.listeners.keydown.forEach(function (fn) { fn(e); }); }
+function large() { return page.board.querySelectorAll("[data-max]").map(function (n) { return n.getAttribute("data-topic") || n.getAttribute("data-key") || "card"; }); }
+
+click(btn(A, "d-max"));
+check("a topic's maximize button draws it large over the scrim", [large(), scrims()], [["a"], 1]);
+var A2 = topic("a", 400);
+swap([A2, B, reply()]);
+check("a board update that brings the topic anew draws the new section large", [large(), scrims(), A.hasAttribute("data-max")], [["a"], 1, false]);
+var A3 = topic("a", 500), oldHead = A2.querySelector(".tophead");
+swap([A3, B, reply()], function (p) {
+  // The frame graft keeps the old section, taking the new one's attributes and head.
+  A2.removeAttribute("data-max"); A2.removeChild(oldHead); A2.insertBefore(A3.querySelector(".tophead"), A2.firstChild);
+  p.board[p.board.indexOf(A3)] = A2;
+});
+check("a grafted update keeps the old section large, with its buttons", [large(), !!btn(A2, "d-min"), scrims()], [["a"], true, 1]);
+click(btn(A2, "d-min"));
+check("the back button restores it and hides the scrim", [large(), scrims()], [[], 0]);
+
+var d = B.querySelector("details.entry-panel"), e = click(pbtn(B, "d-max"));
+check("a panel's maximize button opens and draws it large without folding it", [large(), d.open, e.prevented, scrims()], [["entry:p1"], true, true, 1]);
+check("its entry keeps its place", d.parentNode.style.height, "0px");
+check("its head does not fold it while large", click(d.querySelector("summary")).prevented, true);
+click(btn(A2, "d-max"));
+check("maximizing a topic restores the panel: one is large at a time", [large(), d.parentNode.style.height, scrims()], [["a"], "", 1]);
+var c = page.W.open("k", { name: "K" });
+c.maxBtn.fire("click");
+check("maximizing a card restores the topic", [large(), scrims()], [["card"], 1]);
+click(pbtn(B, "d-max"));
+check("maximizing a panel restores the card", [large(), c.el.hasAttribute("data-max")], [["entry:p1"], false]);
+esc();
+check("Escape restores the panel", [large(), scrims()], [[], 0]);
+check("a closed panel's head click folds it as before", click(d.querySelector("summary")).prevented, false);
+
+click(btn(A2, "d-max"));
+page.doc.body.children.filter(function (n) { return n.classList.contains("bc-scrim"); })[0].fire("click", ev(null));
+check("the scrim restores the topic", [large(), scrims()], [[], 0]);
+click(btn(A2, "d-max"));
+swap([B, reply()]);
+check("a large topic the board no longer serves takes the scrim with it", [large(), scrims()], [[], 0]);
 process.stdout.write(bad.join("\n"));
 `)
 }

@@ -24,6 +24,9 @@ Added on 2026-11-14 under the same policy (flagged by the
 - `agents-plugin/hooks/claude-mod/watcher.test.ts` (2881 lines)
 - `agents-plugin-wsflow/hooks/claude-mod/watcher.test.ts` (2881 lines, the
   wsflow mirror)
+- `agents-plugin-tool/internal/wsdashboard/assets/tracker.js` (6733 lines,
+  flagged by the `261113-feat-ws-tracker-start-date-range-picker` merge)
+- `ai-docs/ref/tracker-mockup/engine.js` (2442 lines, same merge)
 
 Until this ticket is populated, the advisories for these files are ignored;
 the per-path guards in `.gitattributes` are deliberately not raised, so the

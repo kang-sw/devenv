@@ -168,6 +168,9 @@ func (s *state) checkFields(p obj) rejection {
 	if !p.null("due") && !validDue(p["due"]) {
 		return "due is an optional YYYY-MM-DD date"
 	}
+	if !p.null("start") && !validDue(p["start"]) {
+		return "start is an optional YYYY-MM-DD date"
+	}
 	if !p.null("priority") {
 		if v, ok := p.intOf("priority"); !ok || v < 0 || v >= len(s.prio.names) {
 			return rejection("priority must be a level 0.." + itoa(len(s.prio.names)-1) + " (" + strings.Join(s.prio.names, " / ") + ")")
@@ -602,10 +605,50 @@ func (s *state) checkStatusOf(it *item, a, who, st string) rejection {
 // existed keeps folding as it did (no fold flag, no migration). The
 // reference engine's store.dispatch runs the same rules (writeRefusal).
 func (s *state) checkWrite(n *node) rejection {
-	if n.typ == TypeItemAssign {
+	switch n.typ {
+	case TypeItemAssign:
 		return s.assignBelowConfirmed(n.member, n.p)
+	case TypeItemCreate, TypeItemEdit:
+		return s.startAfterDue(n.typ, n.p)
 	}
 	return ""
+}
+
+// startAfterDue refuses an item whose start would fall after its due: an
+// item.create carrying both, or an item.edit setting either (the side it
+// leaves out is the folded item's; a side set to null is cleared). A clear
+// never refuses. Concurrent edits can still fold to such a pair, and every
+// reader shows it as written, so this is a write-time rule only.
+func (s *state) startAfterDue(typ string, p obj) rejection {
+	val := func(f string, cur *string) string {
+		if !p.has(f) {
+			if cur == nil {
+				return ""
+			}
+			return *cur
+		}
+		if p.null(f) {
+			return ""
+		}
+		return jsString(p[f])
+	}
+	var start, due string
+	if typ == TypeItemCreate {
+		start, due = val("start", nil), val("due", nil)
+	} else {
+		if (!p.has("start") || p.null("start")) && (!p.has("due") || p.null("due")) {
+			return ""
+		}
+		it := s.items[p.disp("item")]
+		if it == nil {
+			return ""
+		}
+		start, due = val("start", it.start), val("due", it.due)
+	}
+	if start == "" || due == "" || start <= due {
+		return ""
+	}
+	return rejection("start " + start + " is after due " + due)
 }
 
 // assignBelowConfirmed refuses completion assignee on an item.assign that

@@ -652,6 +652,21 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .bcard[data-max] .bc-folded, .bcard[data-max] .bc-grip, .bcard[data-max] .bc-pin, .bcard[data-max] .bc-fold, .bcard[data-max] .bc-max, .bcard[data-max] .bc-close { display: none; }
 .bcard[data-max] .bc-min { display: inline-grid; }
 @media (max-width: 640px) { .bcard[data-max] .bc-in { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
+/* A large topic or topic panel (cards.js sheet): the board's own node, drawn
+   fixed where a maximized card's box stands, over the same scrim, its
+   content scrolling under its head. The maximize button (right of a topic's
+   pin, at the end of a panel's head) gives way to the back button, and a
+   large topic's pin hides as a maximized card's does. */
+.tbar .d-max, .tbar .d-min { color: inherit; opacity: .45; }
+.tbar:hover .d-max, .tbar:hover .d-min, .tbar .d-max:focus-visible, .tbar .d-min:focus-visible { opacity: .9; }
+.tbar > .d-min, summary > .d-min { display: none; }
+section.topic[data-max], details.entry-panel[data-max] { position: fixed; z-index: 48; top: 52px; left: 16px; right: 16px; bottom: 12px; margin: 0; overflow: auto; overscroll-behavior: contain; box-shadow: var(--wb-shadow-hi); }
+section.topic[data-max] { background: var(--wb-card); }
+section.topic[data-max] > .tophead, details.entry-panel[data-max] > summary { position: sticky; top: 0; z-index: 2; }
+details.entry-panel[data-max] > summary { background: var(--wb-bg); cursor: default; }
+section.topic[data-max] > .tophead > .tbar > .d-max, section.topic[data-max] > .tophead > .tbar > .tpin, details.entry-panel[data-max] > summary > .d-max { display: none; }
+section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-max] > summary > .d-min { display: inline-grid; }
+@media (max-width: 640px) { section.topic[data-max], details.entry-panel[data-max] { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
 @media (prefers-reduced-motion: reduce) { .bcard.flash .bc-in { animation: none; } .bc-grip::after { transition: none; } }
 
 /* ===== preview cards (preview.js) =====
@@ -692,7 +707,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .tm-host { flex: 1 1 0; min-height: 0; overflow: hidden; background: var(--wb-card); }
 .tm-host .xterm { height: 100%; padding: 4px 0 4px 10px; }
 .tm-host .xterm-viewport { background: transparent !important; }
-.tm-gap { flex: none; display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 12px; font-size: 12px; color: var(--wb-warn-ink); background: color-mix(in srgb, var(--wb-warn) 12%, var(--wb-card)); }
+.tm-gap { flex: none; display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 12px; font-size: 12px; color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); background: color-mix(in srgb, var(--wb-warn) 12%, var(--wb-card)); }
 .tm-gap[hidden] { display: none; }
 .tm-gap > span { flex: 1 1 auto; min-width: 0; }
 .tm-note { padding: 14px 16px; font-size: 13px; color: var(--wb-muted-fg); }
@@ -760,7 +775,8 @@ body:has(> .tfix) .r-board .reply { margin-right: 44px; }
 .dgrid.live > .splitter { grid-area: split; }
 .dgrid.live > .convo { grid-area: convo; overflow: auto; }
 .dgrid.live > .composer { grid-area: composer; margin-top: 10px; }
-.dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; padding: 2px 4px 0 2px; }
+/* A scrolling board column and the pinned column (.bpins) take no native scroll anchoring: a board swap compensates them itself (wbHistory.keep). */
+.dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
 .dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
 /* The conversation panel's header (chead) carries its own tabs (ctabs):
    "Conversation | Files". Under the Files tab the Files pane takes the
@@ -984,7 +1000,7 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
 .hdrow.lost { background: color-mix(in srgb, var(--wb-warn) 10%, var(--wb-card)); }
 .hdrow.lost .wtdot { background: var(--wb-warn); opacity: 1; }
 .hdmeta { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
-.hdcause { color: var(--wb-warn-ink); }
+.hdcause { color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); }
 .hdunsafe { color: var(--wb-fail); font-weight: 700; cursor: help; }
 .hdstop { height: 26px; padding: 0 10px; font-size: 12px; }
 .hdstop:disabled { opacity: .5; cursor: not-allowed; }
@@ -1485,13 +1501,15 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 :root { --pbw: calc(1680px - 32px - 356px); }
 .dash.board { --pbw: 900px; }
 .bpcol { display: none; }
-/* An empty board fills its column's height, as the idle pin zone (.bpzone) fills its strip: a quiet full-bleed dashed placeholder, not a short strip. */
-.r-board:has(> .empty:only-child), .r-board:has(> .bpins:empty:first-child + .empty:last-child) { height: 100%; }
-.r-board > .empty:only-child, .r-board > .bpins:empty:first-child + .empty:last-child { height: 100%; min-height: 54px; box-sizing: border-box; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
+/* An empty board (no topic or card in it; the placeholder may follow an empty #bpins or a future toolbar card) is a quiet dashed placeholder, as the idle pin zone (.bpzone) is. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
+.r-board:not(:has(> .topic, > .bcard)) > .empty { box-sizing: border-box; min-height: 54px; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
+.dgrid.live > .bcol:has(> .r-board > .empty) { position: relative; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)):has(> .empty) { position: absolute; inset: 0 4px 0 2px; display: flex; flex-direction: column; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)) > .empty { flex: 1 1 0; }
 .bpins:empty { display: none; }
 .r-board > .bpins { margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px dashed var(--wb-line); }
 .r-board > .bpins::before { content: attr(data-label); display: block; padding: 0 2px 6px; font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); }
-.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 10px 4px 40px 2px; }
+.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; overflow-anchor: none; padding: 10px 4px 40px 2px; }
 /* The pinned column has no rail (cards.js), so its topics' bars and cards' headers stick to the top of this scroller by CSS alone, as the board's do. The pin list above the board sits in the rail's host (.wb-rail) and is railed with the board. */
 .bpcol > .bpins .topic { overflow: hidden; overflow: clip; }
 .bpcol > .bpins .topic > .tophead { position: sticky; top: 0; z-index: 2; }
@@ -1744,7 +1762,7 @@ dialog.rdeldlg [hidden] { display: none !important; }
 .rdeldlg .rdholders li.live .rdst { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
 .rdeldlg .rdnote, .rdeldlg .rdforce { margin: 0; padding: 7px 10px; border-radius: 8px; overflow-wrap: anywhere; }
 .rdeldlg .rdnote.bad { background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); color: var(--wb-fail); }
-.rdeldlg .rdnote.warn, .rdeldlg .rdforce { background: color-mix(in srgb, var(--wb-warn) 14%, var(--wb-card)); color: var(--wb-warn-ink); }
+.rdeldlg .rdnote.warn, .rdeldlg .rdforce { background: color-mix(in srgb, var(--wb-warn) 14%, var(--wb-card)); color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); /* the shared ink alone is 4.29:1 on this tint in the light theme; the text colour deepens it there and lifts it in the dark theme */ }
 .rdeldlg .rdforcehd { font-weight: 800; }
 .rdeldlg .rdforce ul { margin: 3px 0 0; padding-left: 18px; }
 .rdeldlg .rdconf { display: grid; gap: 5px; }
@@ -1841,7 +1859,7 @@ html:not([data-sysopen]) .rail .rdel { display: none; }
    subagent badge; and the session menu's restart, shown only while broken */
 .host.sse.err { color: var(--wb-fail); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-fail) 70%, transparent); }
 .chip.fail { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); cursor: help; }
-.chip.mcpbad { background: color-mix(in srgb, var(--wb-warn) 16%, var(--wb-card)); color: var(--wb-warn-ink); cursor: help; }
+.chip.mcpbad { background: color-mix(in srgb, var(--wb-warn) 16%, var(--wb-card)); color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); cursor: help; }
 .sysline.fail, .sysline.retry { max-width: 92%; }
 .sysline .nt { min-width: 0; overflow-wrap: anywhere; }
 .sysline .nt .t { font-size: inherit; font-weight: inherit; }

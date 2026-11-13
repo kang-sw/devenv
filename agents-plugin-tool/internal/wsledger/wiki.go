@@ -12,8 +12,10 @@ import (
 )
 
 // Wiki branches. A wiki is a plain git branch of the store repository,
-// refs/heads/wiki/<name>, whose tree holds markdown pages (<path>.md at
-// any depth) and the images they paste (_attachments/<sha256>.<ext>). It
+// refs/heads/wiki/<name>, whose tree holds pages at any depth - Markdown
+// pages (<path>.md, addressed as <path>) and HTML pages (<path>.html,
+// addressed as is) - and the images Markdown pages paste
+// (_attachments/<sha256>.<ext>). It
 // uses none of the event protocol: history, rename, delete, diff, and
 // search are git's own. What the ledger lends it is the repository, the
 // remote, the clone's signing key, and the identity state its commits are
@@ -57,6 +59,13 @@ const (
 	// wikiPushTries bounds the fetch-merge-push loop of one save.
 	wikiPushTries = 5
 	pageExt       = ".md"
+	htmlExt       = ".html"
+)
+
+// Wiki page kinds: the page path's extension decides (WikiPageKind).
+const (
+	WikiKindMarkdown = "markdown"
+	WikiKindHTML     = "html"
 )
 
 // Wiki edit operations.
@@ -88,7 +97,7 @@ const (
 
 var (
 	ErrWikiBadName       = errors.New("ledger: a wiki name is [a-z0-9][a-z0-9-]*, at most 64 characters")
-	ErrWikiBadPath       = errors.New("ledger: a page path is folder segments and a name, without ., .., a leading _attachments, a .md suffix, or the characters : \\ * ? \" < > |")
+	ErrWikiBadPath       = errors.New("ledger: a page path is folder segments and a page name joined by /: a Markdown page is name or name.md (the same page), an HTML page is name.html; no folder ends in .md or .html, no name ends in .md or .html otherwise (a.html.md, a.HTML), and there is no ., .., leading _attachments, or any of the characters : \\ * ? \" < > |")
 	ErrWikiNotFound      = errors.New("ledger: no such wiki")
 	ErrWikiExists        = errors.New("ledger: the wiki already exists; save with its base instead of new_wiki")
 	ErrWikiNoBase        = errors.New("ledger: a save needs the base commit the edit started from (new_wiki creates a wiki without one)")
@@ -112,40 +121,127 @@ var (
 // ValidWikiName reports whether s is a wiki name.
 func ValidWikiName(s string) bool { return len(s) <= WikiNameMax && wikiNameRe.MatchString(s) }
 
-// ValidWikiPath reports whether s is a page path: one or more non-empty
-// segments joined by "/", none "." or "..", none ending in ".md" (the
-// file of page "a" is a.md, so a folder a.md would collide with it), the
-// first not the attachments folder, with no control characters and none
-// of the characters a Windows checkout refuses.
+// ValidWikiPath reports whether s is a page path (CanonicalWikiPath).
 func ValidWikiPath(s string) bool {
+	_, ok := CanonicalWikiPath(s)
+	return ok
+}
+
+// CanonicalWikiPath returns the canonical form of page path s and whether
+// s is a page path at all: one or more non-empty segments joined by "/",
+// none "." or "..", the first not the attachments folder, with no control
+// characters and none of the characters a Windows checkout refuses. The
+// last segment names the page and its extension the kind:
+//
+//   - name.html (exactly lowercase, non-empty name) is an HTML page, stored
+//     at that path as is;
+//   - name.md (exactly lowercase, non-empty name) is the Markdown page name,
+//     canonicalized by dropping .md, so a.md and a address one file, a.md;
+//   - any other name is a Markdown page, refused when it ends in .md or
+//     .html in any case (a.html.md, a.md.md, a.HTML, a.MD).
+//
+// A folder segment ending in .md or .html in any case is refused, so a
+// folder never shares a tree name with a page file. The exact-lowercase
+// extensions keep a.HTML beside a.html from colliding on a
+// case-insensitive checkout.
+func CanonicalWikiPath(s string) (string, bool) {
 	if s == "" || len(s) > wikiPathMax || strings.ContainsAny(s, ":\\*?\"<>|") {
-		return false
+		return "", false
 	}
 	for _, r := range s {
 		if r < 0x20 || r == 0x7f {
-			return false
+			return "", false
 		}
 	}
 	segs := strings.Split(s, "/")
 	if segs[0] == WikiAttachDir {
-		return false
+		return "", false
 	}
-	for _, seg := range segs {
-		if seg == "" || seg == "." || seg == ".." || strings.HasSuffix(strings.ToLower(seg), pageExt) || strings.TrimSpace(seg) != seg {
-			return false
+	last := len(segs) - 1
+	for i, seg := range segs {
+		if seg == "" || seg == "." || seg == ".." || strings.TrimSpace(seg) != seg {
+			return "", false
+		}
+		if i < last && pageLikeName(seg) {
+			return "", false
 		}
 	}
-	return true
+	name := segs[last]
+	// stemOK holds a page name's stem to the segment rules.
+	stemOK := func(stem string) bool { return stem != "." && stem != ".." && strings.TrimSpace(stem) == stem }
+	switch {
+	case len(name) > len(htmlExt) && strings.HasSuffix(name, htmlExt):
+		return s, stemOK(strings.TrimSuffix(name, htmlExt))
+	case len(name) > len(pageExt) && strings.HasSuffix(name, pageExt):
+		name = strings.TrimSuffix(name, pageExt)
+		if !stemOK(name) {
+			return "", false
+		}
+	}
+	if pageLikeName(name) {
+		return "", false
+	}
+	segs[last] = name
+	return strings.Join(segs, "/"), true
+}
+
+// pageLikeName reports whether seg ends in a page file extension, in any
+// case.
+func pageLikeName(seg string) bool {
+	low := strings.ToLower(seg)
+	return strings.HasSuffix(low, pageExt) || strings.HasSuffix(low, htmlExt)
+}
+
+// WikiPageKind is the kind of canonical page path path: WikiKindHTML for
+// a .html page, WikiKindMarkdown otherwise.
+func WikiPageKind(path string) string {
+	if strings.HasSuffix(path, htmlExt) {
+		return WikiKindHTML
+	}
+	return WikiKindMarkdown
 }
 
 func wikiRef(name string) string              { return wikiPrefix + name }
 func wikiRecoveryRef(name, oid string) string { return wikiRecoveryPrefix + name + "/" + oid }
-func pageFile(path string) string             { return path + pageExt }
 func pageParts(path string) []string          { return strings.Split(pageFile(path), "/") }
 func wikiImageParts(oid, ext string) []string { return []string{WikiAttachDir, oid + "." + ext} }
 func wikiNameOf(ref string) (string, bool) {
 	n, ok := strings.CutPrefix(ref, wikiPrefix)
 	return n, ok && ValidWikiName(n)
+}
+
+// pageFile is the tree file of canonical page path path: an HTML page's
+// own path, a Markdown page's path with .md. Every operation addresses a
+// page through it, and maps a tree file back through pageOf.
+func pageFile(path string) string {
+	if WikiPageKind(path) == WikiKindHTML {
+		return path
+	}
+	return path + pageExt
+}
+
+// pageOf is the page path tree file file holds, false when file is no
+// page: an attachment, a file of another extension, or a blob no valid
+// path maps to (x.html.md, a.md.md, anything under an a.html/ folder),
+// which listing and search skip and no read or save can address.
+func pageOf(file string) (string, bool) {
+	if strings.HasPrefix(file, WikiAttachDir+"/") {
+		return "", false
+	}
+	var p string
+	switch {
+	case strings.HasSuffix(file, htmlExt):
+		p = file
+	case strings.HasSuffix(file, pageExt):
+		p = strings.TrimSuffix(file, pageExt)
+	default:
+		return "", false
+	}
+	c, ok := CanonicalWikiPath(p)
+	if !ok || c != p || pageFile(c) != file {
+		return "", false
+	}
+	return c, true
 }
 
 // WikiImage is one image a write commits beside its page, at
@@ -539,7 +635,8 @@ func (l *Ledger) WikiList(ctx context.Context) ([]WikiInfo, error) {
 }
 
 // WikiPages lists the pages of wiki name at commit (the tip when ""),
-// sorted, and returns the commit read.
+// Markdown and HTML pages sorted together by page path, and returns the
+// commit read.
 func (l *Ledger) WikiPages(ctx context.Context, name, commit string) ([]string, string, error) {
 	var pages []string
 	var at string
@@ -553,10 +650,7 @@ func (l *Ledger) WikiPages(ctx context.Context, name, commit string) ([]string, 
 			return err
 		}
 		return l.git.walkTree(ctx, tree, "", func(path string, e treeEntry) error {
-			if strings.HasPrefix(path, WikiAttachDir+"/") {
-				return nil
-			}
-			if p, ok := strings.CutSuffix(path, pageExt); ok && e.mode == "100644" {
+			if p, ok := pageOf(path); ok && e.mode == "100644" {
 				pages = append(pages, p)
 			}
 			return nil
@@ -572,7 +666,8 @@ func (l *Ledger) WikiPages(ctx context.Context, name, commit string) ([]string, 
 func (l *Ledger) WikiRead(ctx context.Context, name, path, commit string) (string, string, error) {
 	var content, at string
 	err := l.withLock(ctx, func() error {
-		if !ValidWikiPath(path) {
+		var ok bool
+		if path, ok = CanonicalWikiPath(path); !ok {
 			return ErrWikiBadPath
 		}
 		var err error
@@ -593,7 +688,8 @@ func (l *Ledger) WikiRead(ctx context.Context, name, path, commit string) (strin
 }
 
 // WikiSearch finds the lines of wiki name's pages at the tip that contain
-// query (fixed string, case-insensitive) and returns the tip searched.
+// query (fixed string, case-insensitive) and returns the tip searched. An
+// HTML page is searched as its raw source, tags included.
 func (l *Ledger) WikiSearch(ctx context.Context, name, query string) ([]WikiMatch, string, error) {
 	var matches []WikiMatch
 	var at string
@@ -606,7 +702,7 @@ func (l *Ledger) WikiSearch(ctx context.Context, name, query string) ([]WikiMatc
 			return err
 		}
 		out, err := l.git.run(ctx, "-c", "core.quotePath=false", "grep", "-n", "-i", "-I", "--no-color",
-			"--fixed-strings", "-e", query, at, "--", "*"+pageExt, ":(exclude)"+WikiAttachDir+"/*")
+			"--fixed-strings", "-e", query, at, "--", "*"+pageExt, "*"+htmlExt, ":(exclude)"+WikiAttachDir+"/*")
 		if err != nil {
 			// Exit status 1 is no match.
 			if strings.Contains(err.Error(), "exit status 1") {
@@ -629,7 +725,7 @@ func (l *Ledger) WikiSearch(ctx context.Context, name, query string) ([]WikiMatc
 				continue
 			}
 			n, err := strconv.Atoi(ln)
-			p, isPage := strings.CutSuffix(file, pageExt)
+			p, isPage := pageOf(file)
 			if err != nil || !isPage {
 				continue
 			}
@@ -646,8 +742,11 @@ func (l *Ledger) WikiSearch(ctx context.Context, name, query string) ([]WikiMatc
 func (l *Ledger) WikiHistory(ctx context.Context, name, path string, limit int) ([]WikiCommit, error) {
 	var commits []WikiCommit
 	err := l.withLock(ctx, func() error {
-		if path != "" && !ValidWikiPath(path) {
-			return ErrWikiBadPath
+		if path != "" {
+			var ok bool
+			if path, ok = CanonicalWikiPath(path); !ok {
+				return ErrWikiBadPath
+			}
 		}
 		tip, err := l.wikiCommitArg(ctx, name, "")
 		if err != nil {
@@ -738,7 +837,8 @@ func (l *Ledger) wikiVerify(ctx context.Context, commits []WikiCommit, oids []st
 func (l *Ledger) WikiDiff(ctx context.Context, name, path, from, to string) (string, error) {
 	var patch string
 	err := l.withLock(ctx, func() error {
-		if !ValidWikiPath(path) {
+		var ok bool
+		if path, ok = CanonicalWikiPath(path); !ok {
 			return ErrWikiBadPath
 		}
 		if to == "" {
@@ -942,11 +1042,16 @@ func checkWikiEdit(e *WikiEdit) error {
 	default:
 		return ErrWikiBadOp
 	}
-	if !ValidWikiPath(e.Path) {
+	// Paths are canonical from here on: the tree file, the commit subject,
+	// and a conflict's path all derive from them.
+	var ok bool
+	if e.Path, ok = CanonicalWikiPath(e.Path); !ok {
 		return ErrWikiBadPath
 	}
-	if e.Op == WikiOpRename && !ValidWikiPath(e.To) {
-		return fmt.Errorf("to: %w", ErrWikiBadPath)
+	if e.Op == WikiOpRename {
+		if e.To, ok = CanonicalWikiPath(e.To); !ok {
+			return fmt.Errorf("to: %w", ErrWikiBadPath)
+		}
 	}
 	if e.Op == WikiOpRestore && !oidRe.MatchString(e.Commit) {
 		return fmt.Errorf("%w: restore needs the commit to restore the page from", ErrWikiBadEdit)
@@ -961,6 +1066,9 @@ func checkWikiEdit(e *WikiEdit) error {
 	}
 	if e.Op != WikiOpWrite && len(e.Images) > 0 {
 		return fmt.Errorf("%w: images go with a write", ErrWikiBadEdit)
+	}
+	if WikiPageKind(e.Path) == WikiKindHTML && len(e.Images) > 0 {
+		return fmt.Errorf("%w: an HTML page cannot show images; write it without them", ErrWikiBadEdit)
 	}
 	for _, img := range e.Images {
 		if !ValidAttachmentOID(img.OID) || !wikiExtRe.MatchString(img.Ext) {
@@ -977,6 +1085,20 @@ func checkWikiEdit(e *WikiEdit) error {
 func (l *Ledger) wikiApply(ctx context.Context, base string, e WikiEdit) (string, error) {
 	g := l.git
 	tree := base
+	// A folder an older daemon wrote under a name that is now a page file
+	// (x.html/) is not that page: a write or restore would replace the whole
+	// folder with the page's blob, and a delete would remove it.
+	switch e.Op {
+	case WikiOpWrite, WikiOpDelete, WikiOpRestore:
+		if cur, ok, err := g.entryAt(ctx, tree, pageFile(e.Path)); err != nil {
+			return "", err
+		} else if ok && cur.isTree() {
+			if e.Op == WikiOpDelete {
+				return "", ErrWikiPageNotFound
+			}
+			return "", fmt.Errorf("%w: %s is a folder in the wiki, not a page", ErrWikiBadEdit, pageFile(e.Path))
+		}
+	}
 	switch e.Op {
 	case WikiOpWrite:
 		blob, err := g.hashObject(ctx, "blob", []byte(e.Content))
@@ -1388,7 +1510,10 @@ func (l *Ledger) renameGuard(ctx context.Context, e WikiEdit, baseTree, theirsTr
 	// one went.
 	renamed := false
 	err = l.git.walkTree(ctx, theirsTree, "", func(path string, entry treeEntry) error {
-		if renamed || entry.oid != base.oid || !strings.HasSuffix(path, pageExt) {
+		if renamed || entry.oid != base.oid {
+			return nil
+		}
+		if _, isPage := pageOf(path); !isPage {
 			return nil
 		}
 		_, inBase, err := l.git.entryAt(ctx, baseTree, path)
@@ -1405,13 +1530,17 @@ func (l *Ledger) renameGuard(ctx context.Context, e WikiEdit, baseTree, theirsTr
 // (the conflicting path as the edit's tree holds it, when the edit was
 // applied) and the text at tip of the conflicting path.
 func (l *Ledger) wikiConflict(ctx context.Context, e WikiEdit, tip, oursTree string, c *treeConflict) error {
-	out := &WikiConflict{Wiki: e.Wiki, Path: strings.TrimSuffix(c.Path, pageExt), Kind: c.Kind, Base: e.Base, Theirs: tip}
+	path := c.Path
+	if p, isPage := pageOf(c.Path); isPage {
+		path = p
+	}
+	out := &WikiConflict{Wiki: e.Wiki, Path: path, Kind: c.Kind, Base: e.Base, Theirs: tip}
 	switch {
 	case oursTree != "":
 		if data, ok, err := l.git.readBlob(ctx, oursTree+":"+c.Path); err == nil && ok {
 			out.OursText = string(data)
 		}
-	case e.Op == WikiOpWrite && strings.TrimSuffix(c.Path, pageExt) == e.Path:
+	case e.Op == WikiOpWrite && c.Path == pageFile(e.Path):
 		out.OursText = e.Content
 	}
 	if tip != "" {

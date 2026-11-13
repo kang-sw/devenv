@@ -8,6 +8,7 @@ related:
   261113-feat-ws-dashboard-iframe-shell: "the tracker page becomes a frame inside the shell, so the wiki HTML frame nests one level deeper"
 sage-review-design-reviewed: 60521c76fe7ba918
 sage-review-completeness-reviewed: 60521c76fe7ba918
+completed: 2026-11-14
 ---
 
 # Tracker wiki renders HTML pages in a sandboxed frame
@@ -100,6 +101,18 @@ Acceptance criteria:
 
 `go test ./...` in `agents-plugin-tool`, with new cases in `internal/wsledger/wiki_test.go`, `cmd/ws-mcp/tracker_host_test.go`, `internal/mcp/wiki_tools_test.go`, and `internal/wswhiteboard` builder tests covering each criterion above.
 
+### Result (b698db898) - 2026-11-14
+
+- `wsledger`: `CanonicalWikiPath` (exported; `ValidWikiPath` wraps it), `WikiPageKind`, `WikiKindMarkdown`/`WikiKindHTML`, and the `pageFile`/`pageOf` pair drive listing, search (`*.md` and `*.html`), read, history, diff, write, rename (cross-kind allowed), delete, restore, the rename guard, and conflict paths. `checkWikiEdit` canonicalizes `Path`/`To`, so subjects and conflicts carry `guide`, not `guide.md`. An HTML write with images is `ErrWikiBadEdit`. `ErrWikiBadPath` states the new rule.
+- Review fix (e20ae1cef): a legacy folder `x.html/` is not the page `x.html`: write and restore refuse (`ErrWikiBadEdit`), delete answers page-not-found, instead of replacing or removing the whole folder; the `.html` stem follows the `.md` stem's `.`/`..`/whitespace rules.
+- `wswhiteboard`: shared `frameSandbox` constant read by `framedDoc`; new `SandboxedPage(title, doc)` escapes the document into `srcdoc` with nothing injected; its comment states the CSP-inheritance trap.
+- Page read: `TrackerWikiPage.Kind` (always set); for an HTML page `html` is the `SandboxedPage` frame and the image lookup is skipped. `wiki.query op=read` adds `kind` (JSON) and `(<kind>)` in its text header; `op=read`/`op=write` results echo the canonical path. Tool descriptions describe HTML pages, the images refusal, and the unresolved `attachment:` text.
+- Deviation: the session page (one of the two tracker hosts) sends `frame-src 'self'; frame-ancestors 'none'`, not `frame-ancestors` alone. `srcdoc` frames are not governed by `frame-src`, so author pages still load CDN scripts; they cannot frame another origin. Both hosts' policies are pinned exactly in `TestTrackerPagesPolicyLeavesWikiHTMLFramesFree`.
+- Verification: `go test ./internal/wsledger ./internal/wswhiteboard ./internal/wsdashboard` pass, and every wiki test in `./internal/mcp` and `./cmd/ws-mcp` passes (new: `TestWikiPathKinds`, `TestWikiHTMLPages`, `TestWikiRemoteHTMLMergesAndConflicts`, `TestSandboxedPageFrame`, `TestDashboardTrackerWikiHTMLPage`, `TestWikiToolsHTMLPages`, the CSP pin; `TestTrackerWikiRoutes` pins `kind`). The other failures (`internal/wsagent` Pi/Claude settings; `internal/mcp` render root `/private/var` vs `/var` cases; `cmd/ws-mcp` `TestHostedConnectionSeeingALANChangeReplacesTheDaemon`) reproduce on base commit 0b6180fbf and are unrelated; `TestIntakeStopsWithinRecheckOfARemovedKey` failed once under load and passes alone.
+- Limitation (Decisions: attachments): an HTML page's `attachment:<sha256>` text stays literal and an HTML page cannot show pasted images.
+
+> Forward: wiki HTML pages could show wiki images through host-side `data:` inlining of referenced `attachment:` images into the `srcdoc`, bounded like `ImageDataURL`'s 2 MiB; a follow-up ticket decides it.
+
 ### Phase 2: Dashboard rendering and editing
 
 Render an HTML page's `html` in the persistent frame layer (Decisions: frame sizing and lifetime); keep Markdown pages on the current path. Allow `.html` page paths in the new-page path field; edit an HTML page as source without Preview tab or image paste/upload (Decisions: HTML editing).
@@ -117,6 +130,12 @@ Acceptance criteria:
 #### Verification
 
 `go test ./internal/wsdashboard/...` with `runTrackerNode` cases for kind dispatch, frame-layer reuse across draws, layer hiding, and editor options. Manual browser check on a local viewer: a page script runs; inside the frame `document.cookie` is empty, `parent.document` throws, and a `fetch` POST to a tracker write route is refused (403); the frame survives an unrelated store update without reloading.
+
+### Result (5ad779513) - 2026-11-14
+
+- `tracker.js`: `wkLoadDoc` keeps `kind` (absent counts as markdown, for an older daemon); an HTML page's read view draws an empty slot (`.wk-fslot`, keyed) in place of the article and never passes the markup through `refLinksHtml`. A persistent body-level layer `#tkframe` (beside `tkwin`) holds the host-built frame keyed by (store, wiki, path, commit); `wkFrameSync` after every draw keeps the same iframe element for the same key, hides the layer and keeps the frame while the slot is absent (item window, edit/conflict view, drawer closed, other panel, the page's own menus), and empties it on a key change. It sits `position: fixed` over the slot, clipped to the slot's clipping ancestors, repositioned by ResizeObserver, window resize, and capture-phase scroll; z-index 41 sits above the drawer and below the item window, menus, toasts, and tooltips.
+- No `message` listener and no sandbox tokens in `tracker.js` (static test). `wkCanon` drops a `.md` suffix for page-list membership, navigation, and save paths. A new `.html` page seeds a minimal HTML skeleton; the editor for an HTML page has no Write/Preview tabs, no mention popup (`@`/`#` are common in HTML/CSS source), refuses image paste/drop with the existing "images cannot be attached here" notice, and saves with no attachments.
+- Verification: `go test ./internal/wsdashboard/...` pass (new `TestTrackerWikiHTMLPageFrame`, `TestTrackerWikiHTMLPageEditor`, `TestTrackerNoFrameMessages`). Browser check in headless Chromium on a harness page loading `tracker.css` and the real frame-layer block from `tracker.js`: the page script ran; `document.cookie` and `parent.document` both throw `SecurityError` (origin `null`); same-key redraws and an editor round trip kept the frame without reload; the layer followed a container resize; a new commit replaced the frame; a POST from the frame carried `Origin: null` and no cookie. Not run: the mounted dashboard against a real daemon (the 403 from `sameOrigin` on `Origin: null` was not exercised live), the drawer's real transition and drag, page mode, the narrow layout, and live z-order against the item window.
 
 ## Constraints
 

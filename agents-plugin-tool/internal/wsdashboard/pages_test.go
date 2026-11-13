@@ -415,6 +415,32 @@ func TestIndexPageListsSessions(t *testing.T) {
 	}
 }
 
+// TestTrackerPagesPolicyLeavesWikiHTMLFramesFree pins the policy of the
+// pages that host the tracker (the index and the session page as the iframe
+// shell frames them, and the shell documents at / and /s/<id> that frame
+// them): a wiki HTML page's srcdoc
+// frame inherits it, so a script-src, connect-src, style-src, or
+// default-src here would silently break author pages that load a library
+// from another origin (wswhiteboard.SandboxedPage). The framed pages admit
+// only the shell's own origin (frame-ancestors 'self'); see
+// TestPagesRefuseFraming.
+func TestTrackerPagesPolicyLeavesWikiHTMLFramesFree(t *testing.T) {
+	f := startPageFixture(t)
+	for path, want := range map[string]string{
+		"/": "frame-src 'self'; frame-ancestors 'none'", "/s/livesession": "frame-src 'self'; frame-ancestors 'none'",
+		"/?frame=1": "frame-ancestors 'self'", "/s/livesession?frame=1": "frame-src 'self'; frame-ancestors 'self'",
+	} {
+		resp, err := testClient().Get(f.base + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if csp := resp.Header.Get("Content-Security-Policy"); resp.StatusCode != http.StatusOK || csp != want {
+			t.Errorf("GET %s = %d, policy %q, want %q", path, resp.StatusCode, csp, want)
+		}
+	}
+}
+
 func TestUnknownPagesAreNotFound(t *testing.T) {
 	f := startPageFixture(t)
 	for _, path := range []string{"/s/nosuchsession", "/s/NOT-VALID", "/s/livesession/more", "/elsewhere", "/s/nosuchsession/events"} {

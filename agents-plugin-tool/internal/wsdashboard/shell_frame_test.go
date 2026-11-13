@@ -8,7 +8,7 @@ import (
 
 // TestHiddenFrameHoldsItsUpdatesUntilShown pins a framed page's side of the
 // shell's visibility message (dashboard.js shFrameInit, connect,
-// showRegions, tickTimes): a frame the shell hides gets no visibilitychange,
+// pageHidden, showRegions, tickTimes): a frame the shell hides gets no visibilitychange,
 // so the shell tells it (shown); hidden, it keeps only each region's newest
 // update and applies none, skips the clock, and defers the tracker reload,
 // as a hidden tab does; shown, it applies the held updates once each, reads
@@ -27,6 +27,7 @@ func TestHiddenFrameHoldsItsUpdatesUntilShown(t *testing.T) {
 	open := block("openStream", `(?s)\n  function openStream\(path, on\) \{.*?\n  \}\n`)
 	connect := block("connected ... connect", `(?s)\n  var sseOn = true;\n.*?\n  // showRegions applies`)
 	show := block("showRegions", `(?s)\n  function showRegions\(\) \{.*?\n  \}\n`)
+	hidden := block("pageHidden", `\n  function pageHidden\(\) \{[^\n]*\}\n`)
 	tick := block("tickTimes", `(?s)\n  function tickTimes\(\) \{.*?\n  \}\n`)
 	frame := block("shFrameInit", `(?s)\n  function shFrameInit\(\) \{.*?\n  \}\n  // shShellInit`)
 	post := block("shPost", `(?s)\n  function shPost\(kind, m\) \{.*?\n  \}\n`)
@@ -69,7 +70,7 @@ function fmtTime() { times++; }
 function pace() {}
 Date.now = function () { return 0; };
 q = function (sel) { return /time\[data-ms\]/.test(sel) ? [{}] : sel === "#sse" ? [indicator] : []; };
-`+mustAsset(t, "shell.js")+open+connect+show+tick+post+frame+`
+`+mustAsset(t, "shell.js")+hidden+open+connect+show+tick+post+frame+`
 connect();
 shFrameInit();
 var s = sockets[0];
@@ -264,6 +265,38 @@ check("the shown frame stays and a frame holding a draft stays past the limit; t
 d.draft = false;
 click("/s/i");
 check("the draft frame goes once it holds none; a frame never shown goes before the shown one", live(), ["/s/a", "/s/f", "/s/g", "/s/h", "/s/i"]);
+process.stdout.write(bad.join("\n"));
+})();
+`)
+}
+
+// TestShellHotkeyForwarderLeavesCtrlKeysToEditors pins the shell document's
+// keydown forwarder (dashboard.js shShellInit): Ctrl+K and Ctrl+Space open
+// the shown frame's palette except from an editor target (tracker.js
+// qShortcut's rule), and `/` skips any typing target. Runs under node when
+// it is installed.
+func TestShellHotkeyForwarderLeavesCtrlKeysToEditors(t *testing.T) {
+	js := mustAsset(t, "dashboard.js")
+	fwd := regexp.MustCompile(`(?s)stay with editors by qShortcut's target rule\.\n(    doc\.addEventListener\("keydown", function \(e\) \{.*?\n    \}\);\n)`).FindStringSubmatch(js)
+	if fwd == nil {
+		t.Fatal("dashboard.js holds no shell keydown forwarder")
+	}
+	runNode(t, "shell hotkey forwarder", "(function () {\nvar bad = [], searched = 0, handler;\n"+`
+function shSearch() { searched++; }
+var doc = { addEventListener: function (t, fn) { handler = fn; } };
+`+fwd[1]+`
+function target(sel) { return { closest: function (s) { return s.split(", ").some(function (p) { return sel.indexOf(p) >= 0 || (p.indexOf("[contenteditable") === 0 && sel === "ce"); }) ? this : null; } }; }
+function fire(e, sel) { searched = 0; e.preventDefault = function () {}; e.target = target(sel); handler(e); return searched; }
+function check(what, got, want) { if (got !== want) bad.push(what + ": got " + got + ", want " + want); }
+check("Ctrl+K on the body opens", fire({ ctrlKey: true, key: "k" }, "body"), 1);
+check("Ctrl+Space on the body opens", fire({ ctrlKey: true, key: " ", code: "Space" }, "body"), 1);
+check("Ctrl+K in a textarea is left to it", fire({ ctrlKey: true, key: "k" }, "textarea"), 0);
+check("Ctrl+Space in a textarea is left to it", fire({ ctrlKey: true, key: " ", code: "Space" }, "textarea"), 0);
+check("Ctrl+K in a contenteditable is left to it", fire({ ctrlKey: true, key: "k" }, "ce"), 0);
+check("Ctrl+K in the terminal is left to it", fire({ ctrlKey: true, key: "k" }, ".xterm"), 0);
+check("/ on the body opens", fire({ key: "/" }, "body"), 1);
+check("/ in a textarea types", fire({ key: "/" }, "textarea"), 0);
+check("/ in an input types", fire({ key: "/" }, "input"), 0);
 process.stdout.write(bad.join("\n"));
 })();
 `)

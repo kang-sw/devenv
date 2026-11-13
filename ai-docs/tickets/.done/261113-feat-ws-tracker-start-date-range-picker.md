@@ -6,6 +6,7 @@ related:
   261113-feat-ws-tracker-calendar-multi-day-spans: "calendar multi-day spans split out by (480)=a; this ticket keeps the calendar due-day only"
 sage-review-design-reviewed: 66b4af1df77dccd5
 sage-review-completeness-reviewed: 66b4af1df77dccd5
+completed: 2026-11-14
 ---
 
 # Tracker items get an optional start date, picked with a date-range picker
@@ -457,3 +458,65 @@ a worker or reviewer call, open to the lead.
   capsule is visible in the narrow stacked state, describe
   them, and say they were not compared against it. State what was not checked
   interactively.
+
+### Result (1c363c749) - 2026-11-14
+
+Implemented in five commits on `impl/develop/boozy-thee-easel`:
+`8e8856d3b` (store, validation, view, engine parity), `6da4cc468` (MCP
+`start` / `clear="start"`, hook `detail.start`), `4ca55a18b` (dashboard range
+picker, discard capsule, start badge, gantt start, Sunday-first calendar,
+i18n in all 11 tables), `e9ecb52b8` and `1c363c749` (fixes from the headless
+pass and the lite review).
+
+- Store: `start` is an optional `YYYY-MM-DD`; the start <= due refusal
+  (`start <S> is after due <D>`) is write-time only (Go `checkWrite`, engine
+  `writeRefusal`); a one-sided edit reads the other end from the folded item,
+  a clear never refuses, and an inverted pair folded from concurrent edits is
+  accepted unflagged. `ItemView.Start` is `omitempty`.
+- Dashboard: the due step of the item menu and the new-row chip is the range
+  picker. Row badge: start-only shows `from MM-DD` in the neutral badge; with
+  both ends the due's D-N form gets a range mark and the start in its
+  tooltip. A back-row write marks the menu in flight so the batch's own close
+  does not resend it. A press on a non-control part of a capsule picker keeps
+  focus where it was, so Esc and Tab keep reaching the menu.
+- Tests: `wstracker` (`TestItemStartDate`,
+  `TestConcurrentStartAndDueFoldInverted`, reasons parity), `mcp`
+  (`TestTrackerUpdateStart`), `wstrackerhook`, and the dashboard harness
+  (`tracker_range_test.go`: close/apply/discard semantics, label discard,
+  grid and edges, Sunday-first calendar, gantt start, start badge, row edit
+  start, focus-keeping press).
+- `go test`: the touched packages pass. In the full `./...` run, failures
+  outside the touched packages were checked: `wstrackerhost`, `wsledger`,
+  and `wswhiteboard` pass when run alone (load timeouts in the parallel run);
+  `wsagent` (Pi SDK resolver, local settings) and `cmd/ws-mcp`
+  (LAN daemon replace) fail identically at the base commit; `internal/mcp`'s
+  three session-root tests fail identically at base (macOS `/private/var`
+  symlink), and its full run exceeds the 600 s default timeout under load.
+- Headless renders (Playwright on `ai-docs/ref/tracker-mockup/index.html`,
+  which loads the worktree's `tracker.js` / `tracker.css`), compared against
+  `ai-docs/tickets/assets/261113-feat-ws-tracker-start-date-range-picker/range-picker-mockup.html`:
+  - A, one month 11-10..11-19: matches (Sunday-first grid, span with both
+    half-circle handles, inputs below).
+  - B, Sep 21 | Dec 4: matches (two panels with own arrows, each panel's
+    share of the span, inputs side by side); the reference's skipped-months
+    note is absent as decided.
+  - C, due-only 11-19: matches (due handle plus dashed ghost start).
+  - Calendar view, 2026-11: header Sun..Sat, the 1st in the Sunday column
+    with no blanks, the same grid as the picker's November.
+  - Not in the reference, rendered and described only: the discard capsule
+    (red, below the menu) on the range picker and on the label picker; the
+    start-only row badge (`from 11-10`); the narrow 600 px state (panels
+    stacked, the capsule visible, flipped above the menu); adjacent months
+    (10-28..11-05, two panels); an inverted pair (red handles, both inputs
+    marked, `Start is after the due date` below).
+  - Driven interactively in the mockup: outside click and Enter refused on an
+    inverted pick, Esc and the capsule discard, outside click and Enter apply
+    once, clear button, handle drag with clamp, Esc after a cell press.
+  - Dev daemon: a `ws-mcp dashboard` built from the worktree, run isolated
+    (scratch `WS_CACHE_HOME` / `WS_CONFIG_HOME`, own port), served the new
+    assets and mounted the tracker with no page errors; it had no tracker
+    store, so the picker was not exercised against the live backend.
+  - Not checked interactively: drag past a panel edge (edge paging is
+    covered by node tests only), touch input, keyboard-only use of the month
+    arrows, and a store-refused write in a live daemon (covered by the
+    harness toast test).

@@ -312,7 +312,7 @@ func (f *fakeTracker) WikiRead(_ context.Context, id, wiki, path string) (Tracke
 	if !ok {
 		return TrackerWikiPage{}, ErrTrackerWikiNotFound
 	}
-	return TrackerWikiPage{Path: path, Content: content, Commit: f.wikiCommit(), HTML: "<p>{wiki " + wiki + "} " + content + "</p>"}, nil
+	return TrackerWikiPage{Path: path, Kind: "markdown", Content: content, Commit: f.wikiCommit(), HTML: "<p>{wiki " + wiki + "} " + content + "</p>"}, nil
 }
 
 func (f *fakeTracker) WikiSave(_ context.Context, id, wiki string, req TrackerWikiSave) (TrackerWikiSaveResult, error) {
@@ -1048,7 +1048,7 @@ func TestTrackerWikiRoutes(t *testing.T) {
 		t.Fatalf("pages = %d %s", code, body)
 	}
 	code, body = call(d, http.MethodGet, "/tracker/stores/team/wiki/notes/page?path=guide%2Fhome", "")
-	if code != http.StatusOK || body != `{"path":"guide/home","content":"# Home\n","commit":"c1","html":"\u003cp\u003e{wiki notes} # Home\n\u003c/p\u003e"}`+"\n" {
+	if code != http.StatusOK || body != `{"path":"guide/home","kind":"markdown","content":"# Home\n","commit":"c1","html":"\u003cp\u003e{wiki notes} # Home\n\u003c/p\u003e"}`+"\n" {
 		t.Fatalf("page = %d %s", code, body)
 	}
 	if code, body := call(d, http.MethodGet, "/tracker/stores/team/wiki/notes/page?path=nope", ""); code != http.StatusNotFound {

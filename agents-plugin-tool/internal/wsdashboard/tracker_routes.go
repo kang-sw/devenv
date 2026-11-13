@@ -300,11 +300,15 @@ type TrackerWikiPages struct {
 }
 
 // TrackerWikiPage is one page as read at Commit, the base a save of this
-// edit sends. HTML is the content rendered as the render route renders it
-// in that wiki's mode (the tree's images show), so a page read draws at
-// once.
+// edit sends. Path is the canonical page path and Kind the page's kind,
+// "markdown" or "html". For a Markdown page HTML is the content rendered
+// as the render route renders it in that wiki's mode (the tree's images
+// show), so a page read draws at once; for an HTML page it is the
+// sandboxed frame showing the content, built by the host so the browser
+// never renders a page itself.
 type TrackerWikiPage struct {
 	Path    string `json:"path"`
+	Kind    string `json:"kind"`
 	Content string `json:"content"`
 	Commit  string `json:"commit"`
 	HTML    string `json:"html"`

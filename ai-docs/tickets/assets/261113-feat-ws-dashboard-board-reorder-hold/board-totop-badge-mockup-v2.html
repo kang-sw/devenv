@@ -1,0 +1,116 @@
+<div class="tt1" id="ttRoot">
+<style>
+.tt1{--bg:#141518;--card:#1e2024;--card2:#24272c;--fg:#e7e7e4;--mu:#a2a6ad;--pri:#7aa2ff;--line:#2c2f35;--topic:#262a31;--ok:#5fbf7f;--warn:#e0a84a;--acc:#f2b632;--ez:cubic-bezier(.2,.8,.2,1);font:13px/1.4 system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;color:var(--fg);background:#0f1012;padding:14px}
+.tt1 *{box-sizing:border-box}
+.tt1 svg{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tt1 .chrome{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
+.tt1 .chrome h1{font-size:14px;margin:0 8px 0 0}
+.tt1 .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.tt1 .seg button,.tt1 .act{font:inherit;font-size:12px;padding:3px 11px;border:0;background:var(--card);color:var(--mu);cursor:pointer}
+.tt1 .seg button[aria-pressed="true"]{background:color-mix(in srgb,var(--pri) 22%,var(--card));color:var(--pri)}
+.tt1 .act{border:1px solid var(--line);border-radius:999px;color:var(--fg)}
+.tt1 .act.go{border-color:color-mix(in srgb,var(--acc) 50%,transparent);color:var(--acc)}
+.tt1 .hint{color:var(--mu);font-size:12px;margin:0 0 10px}
+.tt1 .hint b{color:var(--fg);font-weight:600}
+.tt1 .page{position:relative;display:flex;gap:12px;margin:0 auto;height:640px;padding:10px;border-radius:12px;background:var(--bg)}
+.tt1 .page.w{width:1240px}
+.tt1 .page.n{width:420px;padding:8px}
+.tt1 .rail{flex:0 0 200px;border-right:1px solid var(--line);padding:4px 6px 4px 0;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--mu)}
+.tt1 .page.n .rail{display:none}
+.tt1 .rail .ws{font-weight:700;color:var(--fg);padding:4px 6px}
+.tt1 .rail .rs{padding:4px 8px 4px 22px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tt1 .rail .rs.cur{background:var(--topic);color:var(--fg)}
+.tt1 .main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:8px}
+.tt1 .bwrap{position:relative;flex:1 1 auto;min-height:0;display:flex}
+.tt1 .bcol{flex:1 1 auto;min-height:0;overflow:auto;overflow-anchor:none;display:flex;flex-direction:column;gap:10px;padding:2px 4px 30px 2px}
+.tt1 .comp{flex:none;display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:12px;background:var(--card);padding:9px 10px;color:var(--mu);font-size:12.5px}
+.tt1 .comp .ci{flex:1}
+.tt1 .comp .send{width:28px;height:28px;border-radius:8px;background:var(--pri);display:grid;place-items:center;color:#0d1020}
+.tt1 .tb{flex:none;display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:7px 8px;border:1px solid var(--line);border-radius:12px;background:var(--card);transition:box-shadow .5s}
+.tt1 .tb.flash{box-shadow:0 0 0 2px color-mix(in srgb,var(--pri) 55%,transparent)}
+.tt1 .tb .b{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:8px;background:var(--card2);color:var(--fg);font-size:12.5px;font-weight:600;white-space:nowrap}
+.tt1 .tb .b kbd{font:600 10.5px ui-monospace,Menlo,monospace;color:var(--mu);border:1px solid #3a3e46;border-radius:4px;padding:0 4px}
+.tt1 .tb .sp{flex:1}
+.tt1 .tb .ct{font-size:11.5px;color:var(--mu);white-space:nowrap}
+.tt1 .page.n .tb .b .lb,.tt1 .page.n .tb .b kbd,.tt1 .page.n .tb .ct{display:none}
+.tt1 .topic{position:relative;flex:none;border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden;transition:box-shadow .6s}
+.tt1 .topic.fresh{box-shadow:inset 3px 0 0 var(--acc),0 0 0 1px color-mix(in srgb,var(--acc) 40%,transparent)}
+.tt1 .topic.held{box-shadow:inset 3px 0 0 var(--acc)}
+.tt1 .tophead{background:var(--topic);padding:8px 12px}
+.tt1 .tbar{display:flex;align-items:center;gap:7px;min-width:0}
+.tt1 .tname{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.tt1 .wbtk{font-size:10.5px;font-weight:700;padding:0 7px;height:17px;display:inline-flex;align-items:center;border-radius:999px;background:color-mix(in srgb,var(--pri) 20%,var(--card));color:var(--pri);white-space:nowrap}
+.tt1 .mv{font-size:10.5px;font-weight:700;color:var(--acc);white-space:nowrap;display:none}
+.tt1 .held .mv{display:inline}
+.tt1 .tsp{flex:1}
+.tt1 .tm{font-size:11.5px;color:var(--mu);white-space:nowrap}
+.tt1 .live{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.tt1 .tbody{padding:8px 12px 10px;display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--mu)}
+.tt1 .tbody .ln{display:flex;gap:10px}
+.tt1 .tbody .ln i{font-style:normal;flex:none;width:34px;color:#767a82}
+.tt1 .totop{position:absolute;z-index:6;top:8px;left:0;right:0;margin:0 auto;width:fit-content;min-width:32px;display:flex;justify-content:center;align-items:center;gap:0;height:32px;padding:0 8px;border-radius:999px;border:1px solid #3a3e46;background:color-mix(in srgb,var(--card2) 92%,transparent);color:var(--mu);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:0 6px 18px rgb(0 0 0/.45);backdrop-filter:blur(6px);translate:0 -10px;opacity:0;pointer-events:none;transition:translate .2s var(--ez),padding .26s var(--ez),opacity .16s,background-color .24s,color .24s,border-color .24s}
+.tt1 .totop.on{translate:0 0;opacity:.88;pointer-events:auto}
+.tt1 .totop.on:hover{opacity:1;color:var(--fg)}
+.tt1 .totop .lbl{display:inline-block;max-width:0;margin-left:0;overflow:hidden;white-space:nowrap;opacity:0;transition:max-width .26s var(--ez),margin-left .26s var(--ez),opacity .2s}
+.tt1 .totop .dot{width:7px;height:7px;border-radius:50%;background:var(--acc);display:none;margin-left:7px}
+.tt1 .totop.up{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 55%,transparent);background:color-mix(in srgb,var(--acc) 16%,var(--card2));opacity:1;padding:0 12px 0 10px}
+.tt1 .totop.up .lbl{max-width:180px;margin-left:7px;opacity:1}
+.tt1 .totop.up .dot{display:inline-block}
+.tt1 .totop.up{animation:ttShake 2.6s ease-in-out .3s infinite}
+@keyframes ttShake{0%,34%,100%{transform:translateX(0)}5%{transform:translateX(-4px)}11%{transform:translateX(4px)}17%{transform:translateX(-3px)}23%{transform:translateX(2px)}29%{transform:translateX(-1px)}}
+@media (prefers-reduced-motion:reduce){.tt1 .totop.up{animation:none!important}}
+.tt1 .legend{margin:10px auto 0;max-width:1240px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px;font-size:12px;color:var(--mu)}
+.tt1 .legend div{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--card)}
+.tt1 .legend b{color:var(--fg)}
+</style>
+<div class="chrome">
+<h1>맨 위로 배지 · 보드 업데이트 알림 v2</h1>
+<span class="seg" id="ttW"><button data-w="n">좁게 420</button><button data-w="w" aria-pressed="true">넓게 1240</button></span>
+<button class="act go" id="ttUp">업데이트 보내기</button>
+<button class="act" id="ttReset">처음부터</button>
+</div>
+<p class="hint">보드를 <b>조금이라도</b> 내리면 위쪽 가운데에 조용한 <b>↑</b> 배지가 뜹니다 · 그 상태에서 <b>업데이트 보내기</b> → 캡슐째 좌우로 <b>흔들 · 멈춤 · 흔들</b>, <b>보드 업데이트됨</b>(2개 이상이면 · N)이 붙음 · 배지 클릭 = 맨 위(툴바 카드)로, 갱신된 토픽이 툴바 바로 아래에 강조됨 · 맨 위에서는 배지 없음</p>
+<div class="page w" id="ttPage">
+<div class="rail"><div class="ws">devenv</div><div class="rs">메인</div><div class="rs cur">UX 리드</div><div class="rs">실행</div><div class="rs">perf 워커</div></div>
+<div class="main">
+<div class="bwrap">
+<button class="totop" id="ttPill" type="button" title="맨 위로" aria-label="맨 위로"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg><span class="dot"></span><span class="lbl" id="ttLbl">보드 업데이트됨</span></button>
+<div class="bcol" id="ttCol">
+<div class="tb" id="ttTb"><span class="b"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span class="lb">한 눈에 보기</span></span><span class="b"><svg viewBox="0 0 24 24"><path d="M4 17l6-5-6-5M12 19h8"/></svg><span class="lb">새 터미널</span></span><span class="b"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span class="lb">검색</span><kbd>Ctrl K</kbd></span><span class="b"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="lb">파일</span></span><span class="sp"></span><span class="ct" id="ttCt">토픽 <b>10</b></span></div>
+</div>
+</div>
+<div class="comp"><span class="ci">메시지 입력…</span><span class="send"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></div>
+</div>
+</div>
+<div class="legend">
+<div><b>맨 위</b> · 배지 없음. 업데이트는 보이는 그대로 툴바 아래로 올라옴</div>
+<div><b>조금 내림 · 조용</b> · 회색 ↑ 원형 배지만. 살짝 투명, 호버 시 또렷</div>
+<div><b>조금 내림 · 업데이트 있음</b> · 강조색으로 바뀌고 "보드 업데이트됨"(2개 이상이면 "· N")이 펼쳐지며, 캡슐째 회전 없이 좌우로 흔들·멈춤을 반복. 보이는 토픽은 제자리에 "↑ 올라감" 표시로 붙잡힘(reorder-hold)</div>
+<div><b>클릭</b> · 붙잡힌 토픽을 풀고 맨 위로 부드럽게 스크롤 → 툴바 카드와 갱신된 토픽이 잠깐 강조, 배지는 사라짐</div>
+</div>
+<script>
+(function(){
+var R=document.getElementById("ttRoot"),page=R.querySelector("#ttPage"),col=R.querySelector("#ttCol"),tb=R.querySelector("#ttTb"),pill=R.querySelector("#ttPill"),lbl=R.querySelector("#ttLbl");
+var ups=[],returning=false;
+var T=[["board-toolbar","doing","3분",["리드: 툴바 카드 확정","UX: 한 눈에 보기 v3 목업","리드: 오너 확인 질문"]],["session-rail","todo","8분",["(554)=a 브랜치 줄 28px 들여쓰기","레일 티켓에 반영됨"]],["unified-search","todo","12분",["(570)=a 트래커 제목은 로컬 검색","스펙 갱신, EXEC 전달"]],["empty-board-render","doing","15분",["빈 보드 박스 20px 어긋남","워크트리 브랜치에서 수정 중"]],["panel-float","doing","18분",["패널 크게 보기 버튼","토픽 카드에도 핀 왼쪽에"]],["delete-modal","doing","22분",["경고 문구 대비 4.29:1","툴팁 추가"]],["perf-board","doing","30분",["lazy srcdoc","프레임 높이 캐시"]],["browser-pane","todo","41분",["쿠키 주의사항 (530)"]],["topic-history","done","1시간",["640px 단위로 펼치기 (531)"]],["release-gate","done","2시간",["Ctrl+K 가드 유지"]]];
+function mk(t){var d=document.createElement("div");d.className="topic";d.setAttribute("data-t",t[0]);var h='<div class="tophead"><div class="tbar"><span class="live"></span><span class="tname">'+t[0]+'</span><span class="wbtk">'+t[1]+'</span><span class="mv">↑ 올라감</span><span class="tsp"></span><span class="tm">'+t[2]+'</span></div></div><div class="tbody">';t[3].forEach(function(l,i){h+='<div class="ln"><i>'+(i*3+2)+'분</i><span>'+l+'</span></div>';});d.innerHTML=h+'<div class="ln"><i>…</i><span>최근 기록 몇 줄</span></div></div>';return d;}
+function build(){Array.prototype.slice.call(col.querySelectorAll(".topic")).forEach(function(n){n.remove();});T.forEach(function(t){col.appendChild(mk(t));});ups=[];returning=false;col.scrollTop=0;paint();}
+function atTop(){return col.scrollTop<=4;}
+function inView(n){var a=n.getBoundingClientRect(),c=col.getBoundingClientRect();return a.bottom>c.top+44&&a.top<c.bottom;}
+function paint(){var on=!atTop()&&!returning;pill.classList.toggle("on",on);var up=on&&ups.length>0;pill.classList.toggle("up",up);lbl.textContent="보드 업데이트됨"+(ups.length>1?" · "+ups.length:"");pill.title=up?"업데이트된 토픽을 맨 위에서 보기":"맨 위로";pill.setAttribute("aria-label",pill.title);}
+function moveTop(n){var before=n.getBoundingClientRect().top<col.getBoundingClientRect().top,h=n.offsetHeight+10,wasBelow=!before;tb.after(n);if(wasBelow&&!atTop())col.scrollTop+=h;}
+function send(){var all=Array.prototype.slice.call(col.querySelectorAll(".topic"));var cand=all.filter(function(n){return n.previousElementSibling!==tb&&ups.indexOf(n)<0;});if(!cand.length)return;var n=cand[Math.floor(Math.random()*cand.length)];n.querySelector(".tm").textContent="방금";if(atTop()){tb.after(n);flash([n]);return;}if(inView(n)){n.classList.add("held");}else{moveTop(n);}ups.push(n);paint();}
+function release(list){list.forEach(function(n){n.classList.remove("held");tb.after(n);});}
+function flash(list){list.forEach(function(n){n.classList.add("fresh");setTimeout(function(){n.classList.remove("fresh");},1600);});}
+function back(){var list=ups.slice();returning=true;paint();release(list);col.scrollTo({top:0,behavior:"smooth"});var t0=performance.now();(function wait(){if(atTop()||performance.now()-t0>1500){col.scrollTop=0;returning=false;ups=[];paint();tb.classList.add("flash");setTimeout(function(){tb.classList.remove("flash");},700);flash(list);return;}requestAnimationFrame(wait);})();}
+col.addEventListener("scroll",function(){if(atTop()&&!returning&&ups.length){release(ups);flash(ups);ups=[];}paint();},{passive:true});
+pill.addEventListener("click",back);
+function seg(id,attr,fn){var s=R.querySelector(id);s.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;s.querySelectorAll("button").forEach(function(x){x.setAttribute("aria-pressed",String(x===b));});fn(b.getAttribute(attr));});}
+seg("#ttW","data-w",function(v){page.className="page "+v;paint();});
+R.querySelector("#ttUp").addEventListener("click",send);
+R.querySelector("#ttReset").addEventListener("click",build);
+window.ttDbg={send:send,back:back,col:col,pill:pill,state:function(){return{top:col.scrollTop,on:pill.classList.contains("on"),up:pill.classList.contains("up"),n:ups.length,lbl:lbl.textContent,first:tb.nextElementSibling.getAttribute("data-t")};}};
+build();
+})();
+</script>
+</div>
