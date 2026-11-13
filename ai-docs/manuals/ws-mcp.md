@@ -578,14 +578,19 @@ restart a wait on a conversation that settled before it answers at once.
 `Runner.Watch` reports each change of a conversation with a parent.
 The built-in `pi-worker` profile is Pi's coding tools plus ws's
 `git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`, and the
-six `pi.*` tools, with no instruction file. A spawn records its `tier`
+six `pi.*` tools, with no instruction file. The built-in `pi-mini-lead`
+adds `tickets.query/acquire/release/close/move/verify/checklist`, read-only
+`note.query`, `playbook.read`, `playbook.render`, `path.generate`, and
+`route.resolve_implement`. It keeps a delegate key, not lead authority, and
+adds no note, whiteboard, or tracker writes. A spawn records its `tier`
 (`SpawnSpec.Tier`, `Record.tier`; an unknown name is refused).
 
 The `pi.*` tools (`internal/mcp/pi_tools.go`, lead-only) put this on a
-session: `pi.spawn {prompt, tier, cwd?, label?}` (model and effort from the
+session: `pi.spawn {prompt, tier, profile?, cwd?, label?}` (model and effort from the
 tier's entry in the `pi` harness bucket of `agents.tier`, which only the
 user's `config.tune` sets; an unset tier is refused with that key named;
-`cwd` relative to the session's root), `pi.send` (a running child's native
+`cwd` relative to the session's root; `profile` names any resolvable non-lead
+Pi `agent.profile.<name>`, default `pi-worker`), `pi.send` (a running child's native
 Pi steer at the next tool boundary; with no turn running, a new turn at once;
 a closed child resumes on the same session file, keeping its id, cwd, model,
 effort, and label; a missing session file is refused), `pi.list` (the caller's
@@ -593,8 +598,10 @@ own children), `pi.stop` (ends the process and closes its descendants; the
 record stays resumable by `pi.send`), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
 send). The daemon mails each settled turn to the parent lead's reply-id
-queue with no sender (`mailbox.recv` shows `system`) and wakes the mailbox
-waits; a steered message belongs to the turn that takes it, whose completion
+queue with the display-only label `pi:<subagent id>` (no reply address) and
+wakes the mailbox waits; the first body line directs replies through `pi.send`,
+not `mailbox.send`. For other senderless system mail without a label,
+`mailbox.recv` still shows `system`. For Pi completion reports, a steered message belongs to the turn that takes it, whose completion
 mail covers it without an extra turn. A steer refused or not taken before
 the turn ends is cleared from Pi's queue and sent as the next turn instead.
 The stop itself mails nothing; a turn started by a later `pi.send` reports
@@ -658,6 +665,18 @@ owns the whole tree:
   child's tier resolves in the `pi` bucket alone and may not rank above the
   holder's own (`small` < `medium` < `large` < `xlarge`); a holder with no recorded tier
   is refused.
+- **Profiles.** An omitted `profile` always means `pi-worker`, even for a
+  mini-lead parent. A non-lead parent's child must be a subset of its launched
+  resolved `ws_tools`, `tools`, and `mcp_servers` (including each server's
+  definition); an excess is refused naming both profiles and the tools.
+  Overrides are honored, not ranked by profile name. Each Pi process launch
+  persists the exact checked definition on its record, uses that same copy
+  to launch, and checks again on restart against its parent's launched copy.
+  Widening a parent's config does not widen an already-running parent's
+  ceiling. A still-running process reattaches with its saved definition;
+  older records without one cannot spawn children while reattached, until an
+  actual process launch resolves and snapshots their definition. Lead parents
+  have no subset ceiling.
 - **Reports.** A child's settled turn waits in its record
   (`pending_reports`) until the runner hands it to the parent. A running
   parent turn gets it as a Pi `steer`. Otherwise it is kept in the parent's
@@ -1202,9 +1221,13 @@ starts a daemon.
 
 Unavailability is explicit: stderr includes "dashboard daemon not reachable"
 and the underlying cause. MCP requests receive `-32000` with their original
-IDs while recovery retries with bounded attempts/backoff; no tool side effect
-is replayed. One-shot CLI commands return nonzero without replaying a command
-whose outcome may be unknown. Codex Stop retains its fail-open exit 0.
+IDs when a sent request's outcome is unknown; no tool side effect is replayed.
+Requests not yet sent wait up to 75 s for the daemon, re-reading its endpoint
+about every 3 s; exhaustion adds `(waited 75s for the dashboard daemon)` to
+the existing error. This includes MCP `initialize`, `tools/list`, and
+`tools/call`, and one-shot CLI forwarding before its command-carrying hello
+is sent. A failure after sending that hello or an MCP request is not retried.
+Codex Stop retains its fail-open exit 0.
 
 Reconnect: when the connection ends while the client is still attached (the
 daemon was replaced or died), the proxy connects again (giving a successor
@@ -1215,12 +1238,17 @@ answer, re-sends `notifications/initialized`, and answers every request that
 was in flight with a JSON-RPC error (`-32000`, "ws-mcp daemon connection was
 replaced"); the client never sees the server go away. Reconnecting is
 paced: a connection the daemon closes within 2 s counts as a quick close;
-retries back off by 0.5 s × the count, capped at 5 s. Three quick closes,
-failed starts, refused hellos, and reconnect failures never switch to a
-child server. In-flight calls fail before waiting for recovery, and calls
-arriving during the gap fail immediately. A hosted server for a reconnected session re-registers that
-session's mailbox presence on its first keyed call and keeps the owner
-pointer and the `WS_MAILBOX_AUTO` stem its predecessor published, provided
+retries wait at least 3 s, rising by 0.5 s × the count to a 5 s cap. Three
+quick closes, failed starts, refused hellos, and reconnect failures never
+switch to a child server. In-flight calls fail before waiting for recovery;
+calls not yet sent wait within the 75 s budget instead. The stdio proxy stays
+alive even after a `tools/list` wait expires, so later requests can use the
+successor. Pi's runner-generated ws MCP registration allows 1860 s per request
+to cover a maximum forwarded Pi wait with transport margin; it also exceeds
+the launcher's 75 s recovery budget, which Pi's default 60 s timeout would
+cut off. A hosted server for a reconnected session re-registers that session's
+mailbox presence on its first keyed call and keeps the owner pointer and the
+`WS_MAILBOX_AUTO` stem its predecessor published, provided
 that record is still live (its PID alive and `last_seen` within the ten-minute
 liveness threshold); a stale record under a reused PID is replaced whole, and
 among several live auto records the first name in order is the one kept.

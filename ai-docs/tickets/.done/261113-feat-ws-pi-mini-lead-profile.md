@@ -1,5 +1,6 @@
 ---
 title: "Pi mini-lead profile: pi.spawn profile argument and subset no-escalation"
+completed: 2026-11-13
 related:
   261112-research-ws-hosted-pi-missing-workflow-tools: research and evidence behind these decisions
 sage-review-design: completed
@@ -144,3 +145,51 @@ Verification (Go tests run on remote w5090 per the repo note):
   beyond its launched tool set (the comparison uses the parent's snapshot).
 - A child whose profile is widened between spawn and (re)start is refused at
   start when the re-resolved definition exceeds the parent's snapshot.
+
+### Result (4e1e5d9ca) - 2026-11-13
+
+Implemented in `4e1e5d9ca`; R1 correction in `fb91d163c`.
+
+- Added `pi-mini-lead` with the exact bounded workflow tool set, preserving
+  `pi-worker` unchanged. Optional `pi.spawn.profile` reaches both lead and
+  token-forwarded routes; omission stays `pi-worker`. User-defined non-lead
+  Pi profiles and whole-profile overrides are honored.
+- Added the optional `resolved_definition` record snapshot. Creation and
+  each Pi process launch compare resolved tools and MCP server definitions
+  against the parent's launched snapshot, then launch that same checked
+  definition. Lead parents remain unrestricted; delegate keys and depth cap
+  remain unchanged.
+- Saved snapshots survive daemon reattachment. R1 found that legacy holder
+  reattachment must not invent a launched ceiling from current config; fixed
+  by refusing nested spawns without a snapshot until an actual checked
+  process launch establishes it. Holder-backed tests cover both modern and
+  legacy records and subsequent true restart.
+- Updated builtin enumeration, direct/forwarded profile arguments, launch
+  allowlists, override/subset checks, parent-config widening, child widening
+  before first start and restart, custom profile selection, and legacy
+  launch/recovery regression coverage. Updated the MCP operations manual.
+
+Verification:
+- Completed remote w5090 `go test ./... -count=1`: all packages passed except
+  the caller-excluded `TestHostedConnectionSeeingALANChangeReplacesTheDaemon`.
+  `internal/wsagent`, `internal/mcp`, and `internal/wsholder` passed. No
+  wsholder exclusions were needed in this completed run.
+- Initial full check diagnosed two test-side mismatches (new builtin count
+  and an overwritten global tier fixture); both fixed. An intermediate run
+  was interrupted by the local tool's 240-second timeout; the final run
+  completed with a longer tool timeout.
+- Independent R1: one Critical, fixed. Fixes-only R2: clean, no remaining
+  findings. `git diff --check` passed.
+
+Decisions / process adaptations:
+- MCP server subsets require matching server definitions, not merely names,
+  because a same-named replacement can expose different tools.
+- No retry-forwarder implementation changes; only its spawn argument/body
+  and description changed, preserving the concurrent worker's boundary.
+- This worker's installed profile refused `workflow_manual`,
+  `route.resolve_implement`, and `tickets.acquire`. Used the assigned branch
+  and ticket, read the bundled reviewer contracts directly, and used the
+  documented native Git fallback for closure when `tickets.close` was also
+  unavailable. No credential or profile bypass was attempted.
+
+Forward: none.

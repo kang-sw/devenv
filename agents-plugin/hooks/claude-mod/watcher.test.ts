@@ -23,6 +23,7 @@ import {
   createWatcher,
   EMPTY_DRAIN_BACKOFF_MS,
   formatBatch,
+  formatEnvelope,
   formatNotice,
   mailItems,
   mapWaitExit,
@@ -2589,6 +2590,19 @@ describe('pure helpers', () => {
       { raw: 'null' },
     ])
     expect(classifyRecv({ result: undefined, text: 'garbled' } as never)).toEqual({ kind: 'mail', mail: [{ raw: 'garbled' }] })
+  })
+
+  test('system labels render consistently without becoming reply addresses', () => {
+    const mail = { label: 'pi:childone', content: 'Reply with pi.send(id: childone), not mailbox.send.\nall green', sent_at: '2026-01-02T03:04:05Z' }
+    expect(parseRecvText(JSON.stringify([mail]))).toEqual([mail])
+    // Same literal as the Go and Pi adapter suites.
+    expect(formatEnvelope(mail)).toBe('mail from pi:childone (2026-01-02T03:04:05Z):\nReply with pi.send(id: childone), not mailbox.send.\nall green')
+    expect(mailItems([mail])).toEqual([{ from: 'pi:childone', body: mail.content }])
+    expect(batchLine('ws mailbox', [mail])).toBe('[ws mailbox] 1 message from pi:childone')
+    expect(formatEnvelope({ ...mail, from: 'peer@repo' })).toContain('mail from peer@repo (')
+    expect(formatEnvelope({ ...mail, reply_to: 'id:abc123' })).toContain('mail from id:abc123 (')
+    expect(formatEnvelope({ content: 'old shape' })).toBe('mail from unknown:\nold shape')
+    expect(parseRecvText('[{"content":"bad label","label":5}]')).toEqual([{ raw: '{"content":"bad label","label":5}' }])
   })
 
   test('raw items and odd envelope fields format without throwing', () => {

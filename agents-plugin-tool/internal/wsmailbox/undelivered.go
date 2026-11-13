@@ -94,7 +94,7 @@ func (p Paths) SweepUndelivered(now time.Time, threshold time.Duration) (posted 
 		record(WithLock(target.path, func(store *StoreFile) error {
 			return sweepQueues(store.Queues, now, threshold, func(name string) string { return name + "@" + string(target.scope) }, func(sender Address, content string) error {
 				if sender.Kind == AddressReplyID {
-					if e := PostSystem(replyPath, sender.ReplyID, content, now); e != nil {
+					if e := PostSystem(replyPath, sender.ReplyID, "", content, now); e != nil {
 						return e
 					}
 				} else if sender.Scope == target.scope {

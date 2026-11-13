@@ -115,6 +115,9 @@ const labelRunes = 120
 // message held or is not opened at all. The process starts as for any
 // first send; a launch failure settles the turn as failed.
 func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
+	if strings.TrimSpace(spec.Profile) == "" {
+		spec.Profile = PiWorkerProfile
+	}
 	if strings.TrimSpace(spec.Prompt) == "" {
 		return State{}, badRequest("prompt is empty")
 	}
@@ -149,6 +152,28 @@ func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
 	spec.Cwd = cwd
 	spec.Label = cleanLabel(spec.Label)
 	return r.create(spec.Profile, spec.Root, nil, &spec)
+}
+
+// checkChildProfile enforces the parent's launched capability ceiling at
+// creation and every Pi process start. Lead parents are unrestricted.
+func (r *Runner) checkChildProfile(parent *ParentRef, name string, def Profile) error {
+	if def.Backend != BackendPi || parent == nil || parent.Kind != ParentConversation {
+		return nil
+	}
+	rec, ok := r.recordOf(parent.ReplyID)
+	if !ok {
+		return badRequest("pi.spawn: parent %s has no launched profile snapshot", parent.ReplyID)
+	}
+	if rec.Lead {
+		return nil
+	}
+	if rec.ResolvedDefinition == nil {
+		return badRequest("pi.spawn: child profile %q cannot be checked against parent profile %q: no launched definition snapshot; restart the parent first", name, rec.Profile)
+	}
+	if excess := excessProfileTools(def, *rec.ResolvedDefinition); len(excess) > 0 {
+		return badRequest("pi.spawn: child profile %q exceeds parent profile %q's launched tools: %s", name, rec.Profile, strings.Join(excess, ", "))
+	}
+	return nil
 }
 
 // cleanLabel is label's first non-blank line, at most labelRunes runes.
@@ -212,6 +237,16 @@ func (c *conv) settleTurn(status, errText string, mark uint64) {
 	c.publish(res)
 }
 
+// finishActiveTurn closes a child turn once, including on interruption. Clearing
+// its start in the same record update prevents a replay from counting it twice.
+func finishActiveTurn(rec *Record, now int64) {
+	if rec.Parent == nil || !rec.TurnOpen || rec.TurnStartedAt == 0 {
+		return
+	}
+	rec.ActiveMs += max(now-rec.TurnStartedAt, 0)
+	rec.TurnStartedAt = 0
+}
+
 // hold sets the done turn held for the children (heldRes), nil for none,
 // and mirrors whether one is held under mu for openChildOf. It runs in the
 // loop.
@@ -219,7 +254,10 @@ func (c *conv) hold(res *TurnResult) {
 	c.heldRes = res
 	if res != nil {
 		// A wait after a restart waits for this held turn, not its predecessor.
-		c.update(func(rec *Record) { rec.HeldTurn, rec.TurnOpen, rec.LastTurn = res, false, nil })
+		c.update(func(rec *Record) {
+			finishActiveTurn(rec, c.r.opts.Now().UnixMilli())
+			rec.HeldTurn, rec.TurnOpen, rec.LastTurn = res, false, nil
+		})
 	}
 	c.mu.Lock()
 	c.holding = res != nil
@@ -247,6 +285,7 @@ func (c *conv) publish(res TurnResult) {
 	} else {
 		c.update(func(rec *Record) {
 			settle()
+			finishActiveTurn(rec, c.r.opts.Now().UnixMilli())
 			rec.TurnOpen, rec.HeldTurn = false, nil
 			if toConv {
 				if waited = c.parentWaitTakes(res.mark); !waited {

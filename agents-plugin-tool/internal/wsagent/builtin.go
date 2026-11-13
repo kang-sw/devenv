@@ -63,6 +63,9 @@ func LeadProfileFor(backend string) string {
 // file, since the spawner's rendered prompt is the first message.
 const PiWorkerProfile = "pi-worker"
 
+// PiMiniLeadProfile adds bounded ticket workflow tools to the coding worker.
+const PiMiniLeadProfile = "pi-mini-lead"
+
 // PiWorkerTools are Pi's built-in coding tools the pi-worker profile
 // allows.
 var PiWorkerTools = []string{"read", "bash", "edit", "write", "grep", "find", "ls"}
@@ -71,8 +74,17 @@ var PiWorkerTools = []string{"read", "bash", "edit", "write", "grep", "find", "l
 // an implementation prompt ends with, the git reads a commit and a diff
 // review need, and the pi.* tools a spawning playbook needs. A worker's
 // pi.* calls go to the daemon on its capability token (children.go), which
-// caps the spawn tree's depth and tier.
+// caps the spawn tree's depth and tier. Ticket workflow tools belong to
+// pi-mini-lead instead; pi-worker's tool set stays unchanged.
 var PiWorkerWSTools = []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}
+
+// PiMiniLeadWSTools adds ticket workflow reads and lifecycle operations, but
+// no lead-only tools or note, whiteboard, or tracker writes.
+var PiMiniLeadWSTools = append(append([]string{}, PiWorkerWSTools...),
+	"tickets.query", "tickets.acquire", "tickets.release", "tickets.close",
+	"tickets.move", "tickets.verify", "tickets.checklist", "note.query",
+	"playbook.read", "playbook.render", "path.generate", "route.resolve_implement",
+)
 
 //go:embed instructions/tracker-support.md
 var trackerSupportText string
@@ -132,6 +144,16 @@ func BuiltinProfiles() map[string]json.RawMessage {
 		panic(err)
 	}
 	out[ProfilePrefix+PiWorkerProfile] = raw
+	raw, err = json.Marshal(Profile{
+		Description: "Pi mini-lead: a non-lead coding worker with bounded ticket workflow tools; may spawn only profiles within its launched tool set.",
+		Backend:     BackendPi,
+		Tools:       PiWorkerTools,
+		WSTools:     PiMiniLeadWSTools,
+	})
+	if err != nil {
+		panic(err)
+	}
+	out[ProfilePrefix+PiMiniLeadProfile] = raw
 	for name, p := range map[string]Profile{
 		LeadProfileClaude: {Backend: BackendClaude, PermissionMode: DefaultLeadPermissionMode},
 		LeadProfilePi:     {Backend: BackendPi},

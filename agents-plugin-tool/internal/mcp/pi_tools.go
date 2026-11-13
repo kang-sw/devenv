@@ -58,7 +58,7 @@ const (
 // pi.wait's timeout_s: its default and its cap.
 const (
 	piWaitDefault = 300 * time.Second
-	piWaitMax     = 1800 * time.Second
+	piWaitMax     = wsagent.PiWaitMax
 )
 
 // piTranscriptDefault is how many of the newest transcript entries
@@ -262,8 +262,19 @@ func (s *Server) piOwned(tool, child string, parent wsagent.ParentRef) error {
 	return fmt.Errorf("%s: %s is not one of this session's Pi subagents (pi.list lists them)", tool, child)
 }
 
+func piSpawnProfile(args map[string]any) (string, error) {
+	if _, present := args["profile"]; !present {
+		return wsagent.PiWorkerProfile, nil
+	}
+	return stringArg("pi.spawn", "profile", args)
+}
+
 func (s *Server) handlePiSpawn(id json.RawMessage, key string, parent wsagent.ParentRef, args map[string]any) response {
 	const tool = "pi.spawn"
+	profile, err := piSpawnProfile(args)
+	if err != nil {
+		return toolTextResponse(id, "", err)
+	}
 	prompt, err := rawStringArg(tool, "prompt", args)
 	if err == nil && strings.TrimSpace(prompt) == "" {
 		err = fmt.Errorf("%s: prompt is required", tool)
@@ -304,7 +315,7 @@ func (s *Server) handlePiSpawn(id json.RawMessage, key string, parent wsagent.Pa
 		label = prompt
 	}
 	st, err := s.pi.agents.Spawn(wsagent.SpawnSpec{
-		Profile: wsagent.PiWorkerProfile,
+		Profile: profile,
 		Root:    entry.root,
 		Cwd:     cwd,
 		Model:   mapping.Model,
@@ -322,7 +333,7 @@ func (s *Server) handlePiSpawn(id json.RawMessage, key string, parent wsagent.Pa
 	if wantsJSON(args) {
 		return toolJSONResponse(id, out, nil)
 	}
-	return toolTextResponse(id, fmt.Sprintf("spawned Pi subagent %s (tier %s: %s, effort %s) in %s; its first turn runs now.\nIts completion mail (status and final message) arrives in this session's mailbox when the turn ends: wait for it, or call pi.wait on a host that does not start a turn on mail. Steer it with pi.send; close it with pi.stop.\n", st.ID, tier, orDash(st.Model), orDash(st.Effort), piCwd(st)), nil)
+	return toolTextResponse(id, fmt.Sprintf("spawned Pi subagent %s (tier %s: %s, effort %s) in %s; its first turn runs now.\nIts completion mail (status and final message) arrives in this session's mailbox when the turn ends: end your turn and let it arrive. Use pi.wait only on a host that does not wake on mailbox push. Steer it with pi.send; close it with pi.stop.\n", st.ID, tier, orDash(st.Model), orDash(st.Effort), piCwd(st)), nil)
 }
 
 // piChildOut is one child as pi.spawn, pi.send, pi.stop, and pi.list
@@ -495,7 +506,8 @@ func PiTurnReporter(log io.Writer) func(wsagent.TurnReport) {
 		}
 		path, err := wsmailbox.Paths{}.ReplyRegistry()
 		if err == nil {
-			err = wsmailbox.PostSystem(path, rep.Parent.ReplyID, wsagent.ReportText(rep), time.Now())
+			content := fmt.Sprintf("Reply with pi.send(id: %s), not mailbox.send.\n%s", rep.Result.ID, wsagent.ReportText(rep))
+			err = wsmailbox.PostSystem(path, rep.Parent.ReplyID, "pi:"+rep.Result.ID, content, time.Now())
 		}
 		if err != nil {
 			if log != nil {
@@ -515,12 +527,13 @@ func piToolDefinitions() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "pi.spawn",
-			"description": "Spawn a Pi subagent: a headless Pi coding agent the dashboard daemon runs for this session, with Pi's coding tools (read, bash, edit, write, grep, find, ls) and the ws git tools, working in cwd. prompt is its first message; a rendered playbook prompt works as it does for a native subagent. tier picks the model from the pi bucket of agents.tier alone; an unset tier refuses and names the tiers that are set. Returns the subagent's id at once while its turn runs. Each time a turn ends or fails, a completion mail (the id, the status, and the final assistant message) arrives in this session's mailbox: that is the primary signal, and on a host with mailbox push it starts this session's next turn. pi.wait is the fallback for a host without push. Steer it with pi.send, read it with pi.transcript, list this session's subagents with pi.list, and close one with pi.stop.",
+			"description": "Spawn a Pi subagent: a headless Pi coding agent the dashboard daemon runs for this session, working in cwd. profile names any resolvable non-lead Pi agent profile; omitted means pi-worker (coding and ws git tools), while pi-mini-lead adds bounded ticket workflow tools. prompt is its first message; a rendered playbook prompt works as it does for a native subagent. tier picks the model from the pi bucket of agents.tier alone; an unset tier refuses and names the tiers that are set. Returns the subagent's id at once while its turn runs. Each time a turn ends or fails, a completion mail (the id, the status, and the final assistant message) arrives in this session's mailbox: that is the primary signal, and on a host with mailbox push it starts this session's next turn. End your turn and let the completion mail arrive; use pi.wait only on a host that does not wake on mailbox push. Steer it with pi.send, read it with pi.transcript, list this session's subagents with pi.list, and close one with pi.stop.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": key,
 					"prompt":      stringProperty("The subagent's first message."),
+					"profile":     stringProperty("Optional agent.profile name: a non-lead Pi profile. Default: pi-worker. pi-mini-lead adds bounded ticket workflow tools."),
 					"tier":        stringProperty(`Capability tier: "small", "medium", "large", or "xlarge", resolved from agents.tier's pi bucket.`),
 					"cwd":         stringProperty("Directory the subagent works in: absolute, or relative to the session's root. Default: the session's root."),
 					"label":       stringProperty("Optional one-line name for the subagent's agents-panel row and its completion mail; default: the prompt's first line."),
@@ -531,7 +544,7 @@ func piToolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "pi.send",
-			"description": "Send one of this session's Pi subagents a follow-up message. A closed subagent resumes on its existing session file with the same id and settings; a missing file is refused. With no turn running it starts the next turn now; during a turn it steers that running turn at the next tool boundary, without cancelling in-flight tool calls. The running turn's completion mail covers the steered message; no extra turn is queued after it is taken. pi.wait is the fallback.",
+			"description": "Send one of this session's Pi subagents a follow-up message. A closed subagent resumes on its existing session file with the same id and settings; a missing file is refused. With no turn running it starts the next turn now; during a turn it steers that running turn at the next tool boundary, without cancelling in-flight tool calls. The running turn's completion mail covers the steered message; no extra turn is queued after it is taken. End your turn and let the completion mail arrive; use pi.wait only on a host that does not wake on mailbox push.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -584,7 +597,7 @@ func piToolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "pi.wait",
-			"description": fmt.Sprintf("Fallback for a host without mailbox push; the completion mail is the primary signal. Block until the turn of one of this session's Pi subagents that took your last pi.send (or pi.spawn's prompt) ends or fails, and return its status and final assistant message; it never returns an earlier turn's message, and a turn that already ended returns at once. timeout_s defaults to %d and is capped at %d; when it passes first the status is running. The host may cut a long call off sooner (a tool-call timeout), so prefer a timeout below the host's. The completion mail still arrives after a wait collected the result.", int(piWaitDefault/time.Second), int(piWaitMax/time.Second)),
+			"description": fmt.Sprintf("For a host that does not wake on mailbox push; otherwise end your turn and let the completion mail arrive. Block until the turn of one of this session's Pi subagents that took your last pi.send (or pi.spawn's prompt) ends or fails, and return its status and final assistant message; it never returns an earlier turn's message, and a turn that already ended returns at once. timeout_s defaults to %d and is capped at %d; when it passes first the status is running. The host may cut a long call off sooner (a tool-call timeout), so prefer a timeout below the host's. The completion mail still arrives after a wait collected the result.", int(piWaitDefault/time.Second), int(piWaitMax/time.Second)),
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

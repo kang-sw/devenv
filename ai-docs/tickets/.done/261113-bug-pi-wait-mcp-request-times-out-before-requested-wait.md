@@ -1,5 +1,6 @@
 ---
 title: "Pi worker's pi.wait MCP request times out before its requested wait budget"
+completed: 2026-11-13
 ---
 
 # Pi worker's pi.wait MCP request times out before its requested wait budget
@@ -85,3 +86,33 @@ narrow its description.
    repo-only things.
 4. Run `go test ./internal/mcp/... ./internal/wsagent/...` from
    `agents-plugin-tool/`.
+
+### Result (3eb38e6ad) - 2026-11-13
+
+- Confirmed against the installed npm-global Pi 1.5.0 at
+  `C:/Users/user/AppData/Roaming/npm/node_modules/@earendil-works/pi-coding-agent/`:
+  `dist/extensions/mcp/runtime.js:17` sets `DEFAULT_TIMEOUT_SECONDS = 60`;
+  `:142-143` maps `(entry.config.timeout ?? DEFAULT_TIMEOUT_SECONDS) * 1000`;
+  `:282` passes it as `requestTimeoutMs` to the MCP client, and
+  `dist/extensions/mcp/index.js:317` passes it for tool calls. The nested
+  `node_modules/@earendil-works/pi-mcp/dist/client.js:263,392-396` selects
+  that deadline and arms its timer; `dist/protocol/jsonrpc.js:27` emits
+  `MCP request timed out after ${timeoutMs}ms`. The supported config key is
+  `timeout`, in seconds (also documented in `docs/mcp.md`).
+- Registered worker ws-mcp with 1860 seconds, derived from the shared 1800 s
+  cap, 30 s forwarding slack, and 30 s margin. The token route shares the cap.
+  No clamp, child restart, or change to asynchronous delivery.
+- Narrowed session and worker descriptions to synchronous necessity; push
+  hosts end their turn. Bridge-source and forwarded-1000-second-deadline
+  regressions pass.
+- Verification: locked remote w5090 `go test ./...`; all packages passed
+  except the user-declared known
+  `cmd/ws-mcp TestHostedConnectionSeeingALANChangeReplacesTheDaemon`
+  predecessor-exit timeout. Required mcp/wsagent packages passed.
+- Self-review: no substantive or minor findings.
+
+## Resolution
+
+Phase 1 completed with the primary per-server timeout fix. T0; no tool or
+argument change. No new Forward; the known remote-only test exception above
+was explicitly excluded by the implementation instructions.
