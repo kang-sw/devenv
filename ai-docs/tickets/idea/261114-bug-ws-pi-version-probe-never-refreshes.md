@@ -1,5 +1,7 @@
 ---
 title: "pi.spawn refuses with a stale Pi version: the daemon inherits a launcher's PATH and probes Pi once per process"
+related:
+  261114-bug-ws-shared-daemon-restarts-without-a-swap: "the unannounced daemon replacement that carried the npm PATH in; its Evidence section has the process chain"
 ---
 
 # pi.spawn refuses with a stale Pi version
@@ -25,6 +27,9 @@ Evidence (ps, VERIFIED):
   therefore never reaches a running daemon.
 - `python3 scripts/dev.py rerun daemon` from a clean shell (new pid 12261,
   clean PATH) fixed it.
+- UI/UX EXEC saw the same refusal on `pi.stop` for a subagent that
+  `pi.spawn` had started minutes earlier. The spawn had run on the previous
+  daemon and the stop ran on 5776, which matches a per-daemon probe (INFERRED).
 
 ## Notes
 

@@ -42,3 +42,31 @@ The answer decides whether this is a bug (an unannounced replacement, or a
 test touching shared state) or intended behaviour that needs a notice. The
 project's rule is that only the EXEC lead swaps the shared daemon, with mail
 to the peer leads before and after.
+
+## Evidence (2026-11-14, EXEC lead)
+
+One unannounced replacement was traced end to end with `ps`. It supports
+hypothesis 1.
+
+- 01:22:41 KST: holder 4809 starts a hosted `pi` (4846), and its
+  `ws-mcp-launcher.py serve --stdio` (5051) starts at 01:22:42.
+- 01:22:43: a new shared daemon, 5776, appears (parent 1). It runs
+  `ws-mcp-dashboard-f493f998ed0c90bd... dashboard --port 29417 --build-time
+  1794586962277`. That build time is a fresh local-devenv build, made at
+  that moment (VERIFIED: `dev.py rerun daemon` later reported "daemon before:
+  ... build_time=1794586962277 content_hash=f493f998ed0c").
+- The previous daemon (93316) is gone.
+- The EXEC lead had just merged three branches into the root checkout's
+  `develop` between about 01:21 and 01:22 (ef7940b8a, c49ae5a11,
+  3ee1d448b), so the root's source changed seconds before (INFERRED link:
+  the launcher saw newer source identity and rebuilt and replaced the
+  daemon).
+- Side effect: 5776's environment had PATH starting with
+  `/Users/kang-sw/devenv/agents-plugin-pi/node_modules/.bin` plus npm
+  run-script entries, inherited through the hosted Pi's launcher. So the
+  daemon resolved the repo's dev Pi 0.84.4, and `pi.spawn` and `pi.stop`
+  refused for every session ("pi 0.84.4 is installed; Pi subagents need pi
+  1.0 or later"; UI/UX EXEC saw it on `pi.stop`). Sibling ticket:
+  `261114-bug-ws-pi-version-probe-never-refreshes`.
+- Fixed by `python3 scripts/dev.py rerun daemon` from a clean shell (pid
+  12261).
