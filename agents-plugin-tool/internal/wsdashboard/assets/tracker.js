@@ -4487,7 +4487,7 @@
     r.lm = ms || md || r.lm || today().slice(0, 7); r.rm = null;
   }
   function rangeHtml(r) {
-    return '<div class="rgp' + (r.rm ? ' two' : '') + (r.err ? ' bad' : '') + '"><div class="rgcal" id="tkrcal">' + rangeCal(r) + '</div>' +
+    return '<div class="rgp' + (r.rm ? ' two' : '') + (r.err ? ' tk-rbad' : '') + '"><div class="rgcal" id="tkrcal">' + rangeCal(r) + '</div>' +
       '<div class="rgin">' + rangeField(r, 's') + rangeField(r, 'd') + '</div>' +
       '<p class="rgerr" id="tkrerr" role="alert"' + (r.err ? '' : ' hidden') + '>' + wsT("js.tk.range.err") + '</p></div>';
   }
@@ -4530,7 +4530,7 @@
     var f = document.activeElement, fa = f && c.contains(f) && f.getAttribute('data-act') === 'm-rpage' ? [f.getAttribute('data-side'), f.getAttribute('data-dir')] : null;
     c.innerHTML = rangeCal(r);
     c.parentNode.classList.toggle('two', !!r.rm);
-    c.parentNode.classList.toggle('bad', !!r.err);
+    c.parentNode.classList.toggle('tk-rbad', !!r.err);
     $('tkmenu').classList.toggle('rwide', !!r.rm);
     ['s', 'd'].forEach(function (side) {
       var i = $('tkr' + side);

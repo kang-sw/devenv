@@ -366,7 +366,7 @@ var bh = rangeHtml(B);
 check('each panel highlights its share of the span', [has(bh, 'data-day="2026-09-30"'), has(bh, 'class="rgd in" data-day="2026-09-30"'), has(bh, 'class="rgd in" data-day="2026-12-01"'), has(bh, 'class="rgd" data-day="2026-12-05"'), has(bh, 'class="rgp two"')], [true, true, true, true, true]);
 check('each panel has its own arrows', [has(bh, 'data-act="m-rpage" data-side="l" data-dir="-1"'), has(bh, 'data-act="m-rpage" data-side="r" data-dir="1"')], [true, true]);
 var bad = rg('2026-11-25', '2026-11-19'), xh = rangeHtml(bad);
-check('an inverted pair: no span, the error shown and set on the inputs', [has(xh, ' in"'), has(xh, 'class="rgp bad"'), has(xh, '<p class="rgerr" id="tkrerr" role="alert">js.tk.range.err</p>'), (xh.match(/aria-invalid="true" aria-describedby="tkrerr"/g) || []).length], [false, true, true, 2]);
+check('an inverted pair: no span, the error shown and set on the inputs', [has(xh, ' in"'), has(xh, 'class="rgp tk-rbad"'), has(xh, '<p class="rgerr" id="tkrerr" role="alert">js.tk.range.err</p>'), (xh.match(/aria-invalid="true" aria-describedby="tkrerr"/g) || []).length], [false, true, true, 2]);
 check('the inputs carry the ends with a clear button each', [has(bh, 'id="tkrs" data-rin="s" value="2026-09-21"'), has(bh, 'id="tkrd" data-rin="d" data-autofocus value="2026-12-04"'), has(bh, 'data-act="m-rclr" data-side="s"'), has(bh, 'data-act="m-rclr" data-side="d"')], [true, true, true, true]);
 check('day cells are not buttons (out of the Tab ring)', /<button[^>]*data-day/.test(bh), false);
 check('the same month collapses to one panel', [rg('2026-11-02', '2026-11-28').rm, rg('2026-11-02', '').rm, rg('', '').lm], [null, null, '2026-11']);

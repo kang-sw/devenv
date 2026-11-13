@@ -862,7 +862,7 @@ dialog.tk-dlg .btn:disabled { opacity: .45; cursor: default; }
 .tk-menu .rgk.ghost::before { top: 1px; height: 28px; background: transparent; border: 1px dashed var(--wb-primary); }
 .tk-menu .rgk.ks.ghost::before { border-right: 0; }
 .tk-menu .rgk.kd.ghost::before { border-left: 0; }
-.tk-menu .rgp.bad .rgk::before { background: var(--tk-fail); }
+.tk-menu .rgp.tk-rbad .rgk::before { background: var(--tk-fail); }
 .tk-menu .rgin { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding: 0 4px; }
 .tk-menu .rgp.two .rgin { flex-direction: row; gap: 14px; }
 .tk-menu .rgf { display: flex; align-items: center; gap: 8px; flex: 1 1 0; min-width: 0; }
