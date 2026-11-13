@@ -380,7 +380,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		}
 	}
 
-	body, _, err := printPlaybook(s, rsrcRoot, "lead-workflow-manual", nil, s.configOptions(), workflowLang, overrideLookup)
+	body, _, err := printPlaybookForCaller(s, key, rsrcRoot, "lead-workflow-manual", nil, s.configOptions(), workflowLang, overrideLookup)
 	if err != nil {
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: render playbook: %w", err))
 	}

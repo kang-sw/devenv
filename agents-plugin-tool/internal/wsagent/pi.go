@@ -287,6 +287,59 @@ func piArgs(spec StartSpec, bridge string) []string {
 	return args
 }
 
+// piExtensionPackage is the package.json name of the native ws Pi extension,
+// the extension that registers the explore, ws-agent-spawn, and
+// ws-agent-send tools.
+const piExtensionPackage = "ws-pi-bridge"
+
+// PiMCPOnly reports whether rec is a Pi conversation that reaches ws only
+// through Pi's builtin MCP client, without the native ws Pi extension and so
+// without the tools that extension registers. A spawned conversation is
+// MCP-only unless def's plugins load the extension, because piArgs starts it
+// with --no-extensions; a hosted lead is MCP-only when piLeadLaunch fell back
+// to the MCP bridge, which it records as PluginWarning (a successful bundled
+// launch clears it). def is the conversation's launched profile; a nil def
+// loads no plugin. Records of other backends are never MCP-only.
+func PiMCPOnly(rec Record, def *Profile) bool {
+	if rec.Backend != BackendPi {
+		return false
+	}
+	if rec.Lead {
+		return rec.PluginWarning != ""
+	}
+	if def == nil {
+		return true
+	}
+	for _, path := range def.PluginPaths(rec.Root) {
+		if isPiExtensionPath(path) {
+			return false
+		}
+	}
+	return true
+}
+
+// isPiExtensionPath reports whether the nearest package.json at or above path
+// names the native ws Pi extension package; an extension path may name the
+// package directory or any entry file inside it.
+func isPiExtensionPath(path string) bool {
+	if path == "" {
+		return false
+	}
+	for dir := filepath.Clean(path); ; {
+		if raw, err := os.ReadFile(filepath.Join(dir, "package.json")); err == nil {
+			var manifest struct {
+				Name string `json:"name"`
+			}
+			return json.Unmarshal(raw, &manifest) == nil && manifest.Name == piExtensionPackage
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
 // piLeadArgs is the base command line of a lead conversation. Plugin
 // isolation is added by preparePiLeadLaunch; skills, settings and context
 // files keep Pi's ordinary behavior. A terminal takeover keeps its session

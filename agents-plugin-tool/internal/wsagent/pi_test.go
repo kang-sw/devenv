@@ -720,3 +720,48 @@ func TestPiBackendStart(t *testing.T) {
 		t.Fatalf("a missing pi names the backend, got %v", err)
 	}
 }
+
+// TestPiMCPOnly pins which Pi conversations run without the native ws Pi
+// extension: a spawned conversation unless its launched profile loads the
+// extension package (by directory or entry file), and a hosted lead only
+// after its bridge fallback recorded a plugin warning.
+func TestPiMCPOnly(t *testing.T) {
+	root := t.TempDir()
+	ext := filepath.Join(root, "ext")
+	if err := os.MkdirAll(filepath.Join(ext, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ext, "package.json"), []byte(`{"name":"`+piExtensionPackage+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(root, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "package.json"), []byte(`{"name":"another-extension"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spawned := Record{Backend: BackendPi, Root: root}
+	cases := []struct {
+		name string
+		rec  Record
+		def  *Profile
+		want bool
+	}{
+		{"spawned without a profile", spawned, nil, true},
+		{"spawned with no plugins", spawned, &Profile{Backend: BackendPi}, true},
+		{"spawned with another extension", spawned, &Profile{Backend: BackendPi, Plugins: []string{"other/index.ts"}}, true},
+		{"spawned with the extension entry", spawned, &Profile{Backend: BackendPi, Plugins: []string{"ext/src/index.ts"}}, false},
+		{"spawned with the extension directory", spawned, &Profile{Backend: BackendPi, Plugins: []string{ext}}, false},
+		{"hosted lead on the bundled extension", Record{Backend: BackendPi, Lead: true}, nil, false},
+		{"hosted lead on the bridge fallback", Record{Backend: BackendPi, Lead: true, PluginWarning: "Bundled Pi extension unavailable"}, nil, true},
+		{"claude conversation", Record{Backend: BackendClaude, Root: root}, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PiMCPOnly(tc.rec, tc.def); got != tc.want {
+				t.Fatalf("PiMCPOnly = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

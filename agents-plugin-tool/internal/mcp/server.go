@@ -2166,7 +2166,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
+		body, recommendedTier, err := printPlaybookForCaller(s, strings.TrimSpace(keyStr), rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -2275,7 +2275,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, rsrcRoot, worktreeRoot, name, callerContext, s.configOptions(), mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
+		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, strings.TrimSpace(renderSessionKey), rsrcRoot, worktreeRoot, name, callerContext, s.configOptions(), mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
 		text := withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, s.configOptions())
 		if planPath != "" {
 			text += "\n" + planPathLinePrefix + planPath
@@ -5705,8 +5705,9 @@ func roleAllowsTool(role toolRole, name string) bool {
 			return false
 		}
 		// config.get is a read-only single-key read; a child must reach it to
-		// inherit its lead's session-scope values.
-		return name == "config.get" || !strings.HasPrefix(name, "config.")
+		// inherit its lead's session-scope values. config.resolve_agent is a
+		// read-only tier resolution a worker playbook runs before each spawn.
+		return name == "config.get" || name == "config.resolve_agent" || !strings.HasPrefix(name, "config.")
 	case roleLeaf:
 		if name == "config.get" {
 			return true
