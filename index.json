@@ -555,6 +555,9 @@
     },
     "261114-feat-ws-dashboard-unified-search-palette": {
       "registered_at": "2026-11-13T15:14:01Z"
+    },
+    "261114-refactor-ws-split-oversized-source-files": {
+      "registered_at": "2026-11-13T15:16:33Z"
     }
   }
 }
