@@ -407,19 +407,44 @@ func TestRailLayoutOrphans(t *testing.T) {
 	dropped(t, doc)
 	wantRendered(t, doc, "/w/repo", "a4 a1 a3 a2")
 
+	// A placement drops a nested child's entry, so it cannot outrank its
+	// parent's slot should the parent end.
+	doc = emptyLayout()
+	doc.Workspaces["/w/repo"] = &railLayoutWS{Order: []string{"a1", "a3", "a2"}, Children: map[string][]string{"a1": {"a3"}}}
+	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a2", Before: "a1"})
+	if got := doc.Workspaces["/w/repo"].Order; slices.Contains(got, "a3") {
+		t.Errorf("the nested child kept its entry: %v", got)
+	}
+
+	// A row placed after or before an orphan lands on that side of it, and
+	// the orphan keeps its link.
+	doc = orphaned()
+	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a4", After: "a3"})
+	wantRendered(t, doc, "/w/repo", "a1 a3 a4 a2")
+	if got := doc.Workspaces["/w/repo"].Children["ae"]; !slices.Equal(got, []string{"a3"}) {
+		t.Errorf("a move after an orphan dropped its link: %v", doc.Workspaces["/w/repo"].Children)
+	}
+	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a2", Before: "a3"})
+	wantRendered(t, doc, "/w/repo", "a1 a2 a3 a4")
+
 	// An orphan in another group than its ended parent shows at the head
 	// of its own group, and a move on it keeps that place as the order's.
 	doc = emptyLayout()
-	doc.Workspaces["/w/repo"] = &railLayoutWS{Order: []string{"a1", "a2", "a3"}, Children: map[string][]string{"be": {"a3"}}}
+	doc.Workspaces["/w/repo"] = &railLayoutWS{Order: []string{"a1", "a2"}, Children: map[string][]string{"be": {"a3"}}}
 	wantRendered(t, doc, "/w/repo", "a3 a4 a1 a2")
 	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a1", Before: "a4"})
 	wantRendered(t, doc, "/w/repo", "a3 a1 a4 a2")
-	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a3", After: "a2"})
+	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a2", Before: "a3"})
+	wantRendered(t, doc, "/w/repo", "a2 a3 a1 a4")
+	if got := doc.Workspaces["/w/repo"].Children["be"]; !slices.Equal(got, []string{"a3"}) {
+		t.Errorf("a move before the other group's orphan dropped its link: %v", doc.Workspaces["/w/repo"].Children)
+	}
+	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a3", After: "a4"})
 	dropped(t, doc)
 	if _, ok := doc.Workspaces["/w/repo"].Children["be"]; ok {
 		t.Error("the other group's orphan kept its link")
 	}
-	wantRendered(t, doc, "/w/repo", "a1 a4 a2 a3")
+	wantRendered(t, doc, "/w/repo", "a2 a1 a4 a3")
 }
 
 // TestRailViewOrder pins the server's order: starred units first, then the

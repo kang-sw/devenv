@@ -5718,18 +5718,30 @@
   // done(status, answer) gets the HTTP status (0: the daemon was not
   // reached) and the parsed answer, {} when it is not JSON. The route
   // answers JSON ({applied, reason, gen}) for a refusal as for a success.
+  // A post that has not answered in LAYOUT_WAIT ms is given up (as
+  // unreachable): while one is in flight every rail swap waits, so a hung
+  // request must not hold the rail.
+  var LAYOUT_WAIT = 15000;
   function layoutPost(body, done) {
     if (!window.fetch) { done(0, {}); return; }
+    var ac = window.AbortController ? new AbortController() : null;
+    var timer = setTimeout(function () { finish(0, {}); if (ac) ac.abort(); }, LAYOUT_WAIT);
+    function finish(status, v) {
+      if (!timer) return;
+      clearTimeout(timer);
+      timer = 0;
+      done(status, v);
+    }
     fetch("/rail/layout", {
-      method: "POST", credentials: "same-origin", cache: "no-store",
+      method: "POST", credentials: "same-origin", cache: "no-store", signal: ac ? ac.signal : undefined,
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     }).then(function (r) {
       return r.text().then(function (s) {
         var v = {};
         try { v = s ? JSON.parse(s) : {}; } catch (e) { v = {}; }
-        done(r.status, v && typeof v === "object" ? v : {});
+        finish(r.status, v && typeof v === "object" ? v : {});
       });
-    }, function () { done(0, {}); });
+    }).catch(function () { finish(0, {}); });
   }
   // layoutSave posts a layout op the page already shows: the rail swaps
   // wait meanwhile, an applied op's generation marks every older render

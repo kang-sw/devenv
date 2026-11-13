@@ -580,19 +580,24 @@ func (s layoutScope) starOn(id string) bool {
 
 // rank is a top-level row's place in the order: its own entry, -1 for none
 // (a row the order does not hold goes first: a new session on top). An
-// orphan takes its ended parent's place when they share a group, else -2,
-// the head of its own group.
+// orphan without an entry of its own takes its ended parent's place when
+// they share a group, else -2, the head of its own group. Once a placement
+// in its group stored the orphan where it shows (place), that entry ranks
+// it, so a row placed before or after the orphan stays on that side of it;
+// a nested child holds no entry (place drops it), so an orphan's entry is
+// never older than its last time top-level.
 func (s layoutScope) rank(id string) int {
 	if s.w == nil {
 		return -1
 	}
-	if p := s.parent(id); p != "" && !s.f.rows[p].Live {
+	own := slices.Index(s.w.Order, id)
+	if p := s.parent(id); p != "" && !s.f.rows[p].Live && own < 0 {
 		if s.f.rows[p].Group != s.f.rows[id].Group {
 			return -2
 		}
 		return slices.Index(s.w.Order, p)
 	}
-	return slices.Index(s.w.Order, id)
+	return own
 }
 
 // seq is group's top-level rows, live and ended, in the order's order
@@ -612,9 +617,11 @@ func (s layoutScope) seq(group string) []string {
 
 // place stores seq (one group's top-level rows, in their new order) in the
 // order: the group's ids give way to seq at the first of them, every other
-// id (another group's, an id not listed now) keeps its place.
+// id (another group's, an id not listed now) keeps its place. An entry of a
+// child nested under a live parent is dropped: it would outrank the
+// parent's slot if the parent ended again (rank).
 func (s layoutScope) place(seq []string) {
-	s.w.Order = placeIDs(s.w.Order, seq)
+	s.w.Order = slices.DeleteFunc(placeIDs(s.w.Order, seq), s.child)
 }
 
 func placeIDs(order, seq []string) []string {
