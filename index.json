@@ -540,7 +540,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T16:14:06Z"
+        "touched_at": "2026-11-13T16:14:35Z",
+        "impl": {
+          "branch": "impl/develop/basin-smell-lent"
+        }
       }
     },
     "261114-feat-ws-dashboard-board-toolbar-overview": {
