@@ -714,8 +714,9 @@
   }
   boardBoxes().forEach(watchBoard);
   // The served board's frames mount once the cards have moved the pinned
-  // topics into the pin list, so no frame loads and then moves.
-  mountFrames(doc);
+  // topics into the pin list, so no frame loads and then moves, paced so the
+  // whole board's mounting never lengthens one long task.
+  mountFramesPaced(doc);
   // --- the Files pane (files.js): mounted once, loaded when first shown -------
   if (live && fpane && window.WsFiles) {
     window.WsFiles.mount(fpane, {
@@ -3472,6 +3473,23 @@
     q("div.doc-frame[data-srcdoc]", el).forEach(function (p) {
       if (frameShown(p)) mountFrame(p);
     });
+  }
+  // mountFramesPaced is mountFrames over the page load's whole board, in
+  // slices of about 8 ms: the first slice runs now, each later one in its
+  // own task, so mounting every open frame at once never lengthens the
+  // load's longest task (measured: Phase 1 of the board performance
+  // ticket). A placeholder a swap or a toggle open took meanwhile is
+  // skipped (frameShown checks it is still connected).
+  function mountFramesPaced(el) {
+    var list = q("div.doc-frame[data-srcdoc]", el);
+    (function slice() {
+      var t = performance.now();
+      while (list.length && performance.now() - t < 8) {
+        var p = list.shift();
+        if (frameShown(p)) mountFrame(p);
+      }
+      if (list.length) setTimeout(slice, 0);
+    })();
   }
   function frameToggle(e) {
     var d = e.target;

@@ -232,7 +232,7 @@ func TestBoardFramesMountAtEveryInsert(t *testing.T) {
 		t.Fatal(err)
 	}
 	board := string(raw)
-	mount, first := strings.Index(board, "window.WsCards.mount(cardBoard"), strings.Index(board, "\n  mountFrames(doc);\n")
+	mount, first := strings.Index(board, "window.WsCards.mount(cardBoard"), strings.Index(board, "\n  mountFramesPaced(doc);\n")
 	if mount < 0 || first < 0 || first < mount {
 		t.Errorf("the first mount pass must follow WsCards.mount (cards %d, pass %d)", mount, first)
 	}
@@ -400,4 +400,38 @@ func TestBoardAnswersFlushTheTypedReply(t *testing.T) {
 	if flush < 0 || read < 0 || flush > read {
 		t.Errorf("boardAnswers reads #reply-text without flushing the waiting build first:\n%s", src)
 	}
+}
+
+// TestBoardFramesMountPaced pins the page load's paced mount
+// (mountFramesPaced): the first slice mounts now and stops once about 8 ms
+// have passed, each later slice runs in its own task (setTimeout) until every
+// open placeholder is mounted; a placeholder under a closed fold stays one,
+// and one a swap removed between slices is skipped. The cases execute under
+// node when it is installed.
+func TestBoardFramesMountPaced(t *testing.T) {
+	src := dashboardFuncs(t, "frameShown", "mountFrame", "mountFrames", "mountFramesPaced")
+	runNode(t, "paced frame mount", frameDOM+src+`
+var clock = 0, timers = [];
+var performance = { now: function () { return clock; } };
+setTimeout = function (fn) { timers.push(fn); };
+// Each mount costs 3 ms of the slice.
+var rawMount = mountFrame;
+mountFrame = function (p) { clock += 3; return rawMount(p); };
+var open = [], closed = frame("entry:c"), gone = frame("entry:g");
+for (var i = 0; i < 7; i++) open.push(frame("entry:o" + i));
+var stream = new El("details", { open: "" }, open.slice(0, 4).concat([gone]).concat(open.slice(4)));
+var board = new El("div", { id: "r-board" }, [stream, new El("details", {}, [closed])]);
+doc.appendChild(board);
+mountFramesPaced(doc);
+check("the first slice mounts until about 8 ms have passed: " + open.map(mounted), mounted(open[0]) && mounted(open[1]) && mounted(open[2]) && placeholder(open[3]));
+check("the rest waits for its own task", timers.length === 1);
+stream.removeChild(gone);
+var n = 0;
+while (timers.length && n++ < 10) timers.shift()();
+check("every open placeholder mounts in later slices", open.every(mounted));
+check("a placeholder under a closed fold stays one", placeholder(closed));
+check("one removed between slices is skipped", placeholder(gone) && !gone.parentNode);
+check("the pacing ends", timers.length === 0 && n === 2);
+if (bad.length) console.log(bad.join("\n"));
+`)
 }
