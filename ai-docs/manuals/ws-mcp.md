@@ -593,8 +593,10 @@ own children), `pi.stop` (ends the process and closes its descendants; the
 record stays resumable by `pi.send`), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
 send). The daemon mails each settled turn to the parent lead's reply-id
-queue with no sender (`mailbox.recv` shows `system`) and wakes the mailbox
-waits; a steered message belongs to the turn that takes it, whose completion
+queue with the display-only label `pi:<subagent id>` (no reply address) and
+wakes the mailbox waits; the first body line directs replies through `pi.send`,
+not `mailbox.send`. For other senderless system mail without a label,
+`mailbox.recv` still shows `system`. For Pi completion reports, a steered message belongs to the turn that takes it, whose completion
 mail covers it without an extra turn. A steer refused or not taken before
 the turn ends is cleared from Pi's queue and sent as the next turn instead.
 The stop itself mails nothing; a turn started by a later `pi.send` reports

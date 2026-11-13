@@ -139,6 +139,10 @@ func TestPiBridgeRegistersOnlyTheProfileServers(t *testing.T) {
 	if len(got) != 3 || got["ws"]["command"] != "/bin/ws-mcp" || got["ws"]["cwd"] != "/work" || got["ws"]["exposure"] != "direct" {
 		t.Fatalf("ws-mcp should register direct at the root: %v", got)
 	}
+	timeout, _ := got["ws"]["timeout"].(float64)
+	if timeout != piMCPTimeout.Seconds() || timeout <= (PiWaitMax+PiForwardSlack).Seconds() {
+		t.Fatalf("ws-mcp timeout must outlast a maximum forwarded wait: %v", got["ws"])
+	}
 	if env, _ := got["ws"]["env"].(map[string]any); env[EnvAllowedTools] != "tickets.query" {
 		t.Fatalf("ws-mcp's allowlist travels in its env: %v", got["ws"])
 	}

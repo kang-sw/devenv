@@ -168,7 +168,7 @@ func (h *piRecoveryHarness) start() {
 		Report: func(rep TurnReport) {
 			if rep.Parent.Kind == ParentLead {
 				// The same append used by PiTurnReporter, without importing mcp.
-				if err := wsmailbox.PostSystem(filepath.Join(h.base, "mailbox.json"), rep.Parent.ReplyID, ReportText(rep), time.Now()); err != nil {
+				if err := wsmailbox.PostSystem(filepath.Join(h.base, "mailbox.json"), rep.Parent.ReplyID, "pi:"+rep.Result.ID, ReportText(rep), time.Now()); err != nil {
 					h.t.Errorf("completion mail: %v", err)
 				}
 			}

@@ -75,7 +75,7 @@ const tokenRoute = "by-token"
 // The token route's wait: its default and its cap.
 const (
 	tokenWaitDefault = 300 * time.Second
-	tokenWaitMax     = 1800 * time.Second
+	tokenWaitMax     = PiWaitMax
 )
 
 var errDaemonDetached = &requestError{status: http.StatusServiceUnavailable, msg: "the dashboard daemon detached; reissue the wait"}

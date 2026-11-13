@@ -624,13 +624,15 @@ func (s *Server) mailboxPiggybackBadge(sessionKey string) string {
 const mailboxSystemSender = "system"
 
 // mailboxSender is the handle a message is shown under: its sender's
-// address, else its reply handle, else mailboxSystemSender.
+// address, else its reply handle, else its display label or mailboxSystemSender.
 func mailboxSender(m wsmailbox.Envelope) string {
 	switch {
 	case m.From != "":
 		return m.From
 	case m.ReplyTo != "":
 		return m.ReplyTo
+	case m.Label != "":
+		return m.Label
 	}
 	return mailboxSystemSender
 }
