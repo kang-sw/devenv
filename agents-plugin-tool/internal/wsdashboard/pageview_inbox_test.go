@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,5 +126,53 @@ func TestSettledTurnStartReadsTheNewestTurn(t *testing.T) {
 		if got := settledTurnStart(c.ring); got != c.want {
 			t.Errorf("%s: settledTurnStart = %d, want %d", c.name, got, c.want)
 		}
+	}
+}
+
+// TestSessionPageDropsANoteOnlySentMarkOnceItsTurnSettles pins the page end
+// of the note-only rule: the convlive sent data carries a drained note-only
+// chip's mark until a settled turn started after the chip, and keeps it
+// while the newest turn started before it; a value chip keeps its mark.
+func TestSessionPageDropsANoteOnlySentMarkOnceItsTurnSettles(t *testing.T) {
+	f := startPageFixture(t)
+	inbox := f.inbox("livesession")
+	if _, _, err := wsinbox.Send(inbox, wsinbox.Entry{Parts: []string{"answers"}, Chips: []wsinbox.Chip{{ID: "05", Note: "why"}, {ID: "06", Answer: "a"}}}, time.Now().Add(-10*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wsinbox.Drain(inbox); err != nil {
+		t.Fatal(err)
+	}
+	const noteMark = `<i data-id="05" data-answer="" data-note="why" data-state="sent"></i>`
+	const valueMark = `<i data-id="06" data-answer="a" data-note="" data-state="sent"></i>`
+	sentdata := func() string {
+		t.Helper()
+		_, page := get(t, f.base+"/s/livesession?frame=1")
+		_, rest, ok := strings.Cut(page, `<div class="sentdata" hidden>`)
+		if !ok {
+			t.Fatal("session page lacks the sent data")
+		}
+		data, _, _ := strings.Cut(rest, `</div>`)
+		return data
+	}
+	ring := wslive.RingDir(SessionDir(f.dir, "livesession"))
+	turn := func(durMs int64) {
+		t.Helper()
+		if err := wslive.AppendRing(ring, []wslive.RingEntry{{Kind: wslive.RingTurn, DurationMs: durMs}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := sentdata(); got != noteMark+valueMark {
+		t.Fatalf("sent data before any turn = %q, want both marks", got)
+	}
+	// A turn that started a minute back, before the note was sent.
+	turn(60_000)
+	if got := sentdata(); got != noteMark+valueMark {
+		t.Fatalf("sent data after a turn that started before the note = %q, want both marks", got)
+	}
+	// A turn that started a second back, after the note.
+	turn(1_000)
+	if got := sentdata(); got != valueMark {
+		t.Fatalf("sent data after a turn that started after the note = %q, want the value mark alone", got)
 	}
 }
