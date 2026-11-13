@@ -1600,30 +1600,36 @@ class McpProxy:
             self.error(request_id, "dashboard daemon not reachable; the request did not complete")
 
 
-def watch_parent_exit(on_exit) -> None:
-    """Call on_exit when the parent process ends (Windows; POSIX relies on signals).
+def watch_parent_exit(on_exit, parent_pid: int | None = None) -> None:
+    """Close the daemon connection when the launcher's parent ends.
 
-    Mirrors the runtime's parent-death watch for `mailbox wait`: without it a
-    wait whose caller is gone would hold its daemon session until its timeout.
+    POSIX does not forward a parent's signals to this process. Reparenting
+    therefore needs a watch too, especially for waits with ignored stdin.
     """
+    ppid = os.getppid() if parent_pid is None else parent_pid
+    if ppid <= 0:
+        return
     if os.name != "nt":
+        def run_posix() -> None:
+            while os.getppid() == ppid:
+                time.sleep(1.0)
+            on_exit()
+
+        threading.Thread(target=run_posix, name="ws-mcp-launcher-parent-watch", daemon=True).start()
         return
     try:
         import _winapi
     except ImportError:
         return
-    ppid = os.getppid()
-    if ppid <= 0:
-        return
 
     def run() -> None:
         try:
             handle = _winapi.OpenProcess(getattr(_winapi, "SYNCHRONIZE", 0x00100000), False, ppid)
-        except OSError:
+        except OSError as exc:
+            if exc.winerror == 87:  # ERROR_INVALID_PARAMETER: parent already gone.
+                on_exit()
             return
         try:
-            if _winapi.WaitForSingleObject(handle, 0) == _winapi.WAIT_OBJECT_0:
-                return
             if _winapi.WaitForSingleObject(handle, _winapi.INFINITE) == _winapi.WAIT_OBJECT_0:
                 on_exit()
         except OSError:
@@ -1695,6 +1701,7 @@ def write_bytes(stream, text: str) -> None:
 
 def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr, input_text: str | None = None) -> int:
     """Run once through authenticated CLI frames. Never replay a command."""
+    parent_pid = os.getppid()
     hello = proxy_hello("cli", argv, link.env, link.runtime_version)
     if input_text is not None:
         hello["stdin"] = input_text
@@ -1704,7 +1711,7 @@ def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr, input_text: str
     except (DaemonUnavailable, DaemonHung) as exc:
         write_bytes(stderr, f"ws-mcp-launcher: dashboard daemon not reachable: {exc}\n")
         return failure_code
-    watch_parent_exit(stream.close)
+    watch_parent_exit(stream.close, parent_pid)
     while True:
         line = stream.read_line()
         if not line:
@@ -1719,6 +1726,8 @@ def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr, input_text: str
             data = ""
         if frame.get("stream") == "stderr" and data:
             write_bytes(stderr, data)
+        elif frame.get("stream") == "stdout" and data:
+            write_bytes(stdout, data)
         if frame.get("final"):
             write_bytes(stdout, data)
             stream.close()

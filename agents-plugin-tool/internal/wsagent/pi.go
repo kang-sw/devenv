@@ -777,6 +777,9 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		case "select", "confirm", "input", "editor":
 			replies.send(map[string]any{"type": "extension_ui_response", "id": l.ID, "cancelled": true})
 		case "setWidget":
+			if l.WidgetKey == piEventsWidgetKey && m.spec.Lead != nil {
+				return piHostedEvents(l.WidgetLines)
+			}
 			if l.WidgetKey == piAgentsWidgetKey {
 				return piAgentEvents(l.WidgetLines)
 			}

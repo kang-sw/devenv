@@ -524,14 +524,14 @@ func applyDeclaredSparse(ctx context.Context, runner wsgit.Runner, env []string,
 // -e patterns as ignore rules, so a preserved path survives while every other
 // ignored build product is removed.
 func worktreeHygiene(ctx context.Context, runner wsgit.Runner, wtPath string, preserve []string) error {
-	if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("reset", "--hard")...); err != nil {
+	if _, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse("-c", "core.longPaths=true", "reset", "--hard")...); err != nil {
 		return err
 	}
 	clean := []string{"clean", "-ffdx"}
 	for _, pattern := range preserve {
 		clean = append(clean, "-e", pattern)
 	}
-	_, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse(clean...)...)
+	_, err := wtRun(ctx, runner, wtPath, noSubmoduleRecurse(append([]string{"-c", "core.longPaths=true"}, clean...)...)...)
 	return err
 }
 

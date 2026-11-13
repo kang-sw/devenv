@@ -37,6 +37,9 @@ import { agentDisplayDetail } from "../src/agent-display.ts";
 import { createOutputRateTracker } from "../src/output-rate.ts";
 import { ADAPTER_ONLY_RAW_TOOLS, filterOutAdapterOnlyTools, filterOutMercenaryTools } from "../src/bridge.ts";
 import { markAgentExited, type RpcAgentRecord, type RpcAgentRegistry } from "../src/spawner.ts";
+import { dashboardWakeMessages } from "../src/dashboard-wake.ts";
+import { buildMailboxPushMessage } from "../src/mailbox-waiter.ts";
+import { abortBackgroundTask, countBackgroundTasks, killAllBackgroundTasks, startBackgroundTask } from "../src/background-tasks.ts";
 
 interface Call { name: string; args: { session_key: string; adapter: string; events: DashboardEvent[] } }
 
@@ -855,6 +858,177 @@ describe("dashboardStatus", () => {
   test("with no known-price call yet the cost is left out", () => {
     assert.equal(dashboardStatus(undefined, undefined, usage(cost(0, 0, 1), cost(0, 0, 2))), undefined);
     assert.deepEqual(dashboardStatus(undefined, 200_000, usage(cost(0, 0, 0), cost(0, 0, 0))), { context: { tokens: null, window: 200_000 } });
+  });
+});
+
+describe("wake events", () => {
+  const custom = (customType: string, details: Record<string, unknown> = {}, content = "notification\nfull text") => ({ role: "custom", customType, details, content });
+  const accepted = async () => ({ content: [{ type: "text", text: "ok\naccepts: status, compact, wake, task_counts" }] });
+
+  test("classifies structured push causes without inspecting a person's prose", () => {
+    const cases = [
+      [custom("ws-agent-report", { agent_id: "worker", report: "finding" }), "subagent_report", "worker"],
+      [custom("ws-agent-settled", { agent_id: "worker", reason: "idle" }), "subagent_done", "worker"],
+      [custom("ws-agent-settled", { reason: "spawn-failed" }), "subagent_failed", "ws-agent-settled"],
+      [custom("ws-agent-settled", { reason: "idle", failed: true }), "subagent_failed", "ws-agent-settled"],
+      [custom("ws-agent-settled", { reason: "exited", failed: false }), "subagent_done", "ws-agent-settled"],
+      [custom("ws-background-task", { task_id: "shell", task_kind: "timed" }), "background_exit", "shell"],
+      [custom("ws-background-task", { task_id: "watch", task_kind: "monitor" }), "monitor", "watch"],
+      [custom("ws-monitor"), "monitor", "ws-monitor"],
+      [{ role: "custom", ...buildMailboxPushMessage({ from: "peer", content: "mail body" }) }, "mail", "peer"],
+      [custom("other-extension"), "message", "other-extension"],
+      [custom("ws-scheduled"), "scheduled", "ws-scheduled"],
+    ] as const;
+    for (const [message, cause, source] of cases) {
+      const [wake] = dashboardWakeMessages(message);
+      assert.equal(wake?.cause, cause);
+      assert.equal(wake?.source, source);
+      assert.ok(wake?.text);
+      assert.ok(!wake?.caption.includes("\n"));
+    }
+    assert.deepEqual(dashboardWakeMessages(userEnd("ws-agent-settled failed monitor scheduled").message), []);
+    assert.deepEqual(dashboardWakeMessages(custom("ws-whiteboard", {}, labelWhiteboardText("person"))), []);
+  });
+
+  test("observes direct and batched messages once at consumption; person messages stay user", async () => {
+    const { feed, events, advance } = harness({ answer: accepted });
+    feed.start();
+    await advance(0);
+    const batch = custom("ws-push-batch", { items: [
+      { ...custom("ws-agent-report", { agent_id: "a", report: "finding" }), state: "informational" },
+      { ...buildMailboxPushMessage({ from: "peer", content: "mail body" }), state: "informational" },
+    ] });
+    feed.leadEvent({ type: "message_start", message: batch });
+    feed.leadEvent({ type: "message_end", message: batch });
+    feed.leadEvent({ type: "message_start", message: batch });
+    feed.leadEvent({ type: "agent_start" });
+    feed.leadEvent({ type: "message_start", message: custom("ws-background-task", { task_kind: "monitor" }) });
+    feed.leadEvent(userEnd("task notification failed"));
+    feed.leadEvent(userEnd(labelWhiteboardText("person from page")));
+    feed.leadEvent({ type: "message_end", message: custom("ws-whiteboard", {}, labelWhiteboardText("held person")) });
+    await advance(FLUSH_INTERVAL_MS);
+    assert.deepEqual(events().filter((e) => e.kind === "wake").map((e) => e.cause), ["subagent_report", "mail", "monitor"]);
+    assert.deepEqual(events().filter((e) => e.kind === "user").map((e) => [e.text, e.origin]), [["task notification failed", "terminal"], ["person from page", "whiteboard"], ["held person", "whiteboard"]]);
+    const kinds = events().map((e) => e.kind);
+    assert.ok(kinds.indexOf("wake") < kinds.indexOf("turn_start"));
+    feed.stop();
+  });
+
+  test("wake requires the latest successful accepts line; an older or disabled daemon sees none", async () => {
+    for (const answer of [async () => ({ content: [{ type: "text", text: "ok\naccepts: status, compact" }] }), async () => ({ content: [{ type: "text", text: "dashboard off" }] })]) {
+      const { feed, events, advance } = harness({ answer });
+      feed.start();
+      await advance(0);
+      feed.leadEvent({ type: "message_start", message: custom("ws-agent-report") });
+      await advance(FLUSH_INTERVAL_MS);
+      assert.ok(!events().some((e) => e.kind === "wake"));
+      feed.stop();
+    }
+  });
+
+  for (const open of [true, false]) test(`failed-send recovery preserves total wire order with a ${open ? "running" : "finished"} turn`, async () => {
+    let fail = false;
+    const { feed, calls, advance } = harness({ answer: async () => fail ? { isError: true } : accepted() });
+    feed.start();
+    await advance(0);
+    fail = true;
+    const failedCall = calls.length;
+    feed.leadEvent({ type: "message_start", message: custom("ws-agent-report") });
+    feed.leadEvent({ type: "agent_start" });
+    if (!open) feed.leadEvent({ type: "agent_settled" });
+    await advance(FLUSH_INTERVAL_MS);
+    fail = false;
+    const firstRecovery = calls.length;
+    await advance(RETRY_MS + FLUSH_INTERVAL_MS);
+    assert.ok(!calls[firstRecovery]!.args.events.some((e) => e.kind === "wake" || e.kind === "turn_start"), "recovery negotiates without starting the held wake's turn prematurely");
+    const wire = (from: number) => calls.slice(from).flatMap((c) => c.args.events).filter((e) => ["reset", "wake", "turn_start", "turn_end"].includes(e.kind)).map((e) => e.kind);
+    const turn = ["wake", "turn_start", ...(!open ? ["turn_end"] : [])];
+    assert.deepEqual(wire(firstRecovery), ["reset", ...turn], "the whole recovery wire, including the handshake, has exactly one correctly ordered start");
+    assert.deepEqual(wire(failedCall), [...turn, "reset", ...turn], "the failed call's complete sequence is retried, with no extra synthetic start");
+    if (open) {
+      feed.leadEvent({ type: "agent_settled" });
+      await advance(FLUSH_INTERVAL_MS);
+      assert.deepEqual(wire(firstRecovery), ["reset", ...turn, "turn_end"]);
+    }
+    feed.stop();
+  });
+});
+
+describe("task counts", () => {
+  test("count fields require both status and task_counts, and readers run at flush", async () => {
+    for (const accepts of ["", "status", "task_counts", "status, task_counts"]) {
+      let reads = 0;
+      const { feed, events, advance } = harness({
+        answer: async () => ({ content: [{ type: "text", text: `ok\naccepts: ${accepts}` }] }),
+        status: () => ({ context: { tokens: 1, window: 10 }, background: 99, monitors: 99 }),
+        taskCounts: () => { reads++; return { timed: 2, monitors: 3 }; },
+      });
+      feed.start();
+      assert.equal(reads, 0);
+      await advance(FLUSH_INTERVAL_MS);
+      const status = events().findLast((e) => e.kind === "status");
+      if (accepts === "status, task_counts") {
+        assert.equal(reads, 1);
+        assert.equal(status?.background, 2);
+        assert.equal(status?.monitors, 3);
+      } else {
+        assert.equal(reads, 0);
+        assert.equal(status?.background, undefined);
+        assert.equal(status?.monitors, undefined);
+      }
+      feed.stop();
+    }
+  });
+
+  test("registry starts, natural finishes, aborts and shutdown dirty counts even while idle", async () => {
+    const { feed, events, advance } = harness({
+      answer: async () => ({ content: [{ type: "text", text: "ok\naccepts: status, task_counts" }] }),
+      taskCounts: countBackgroundTasks,
+    });
+    const last = () => {
+      const event = events().findLast((e) => e.kind === "status");
+      return [event?.background, event?.monitors];
+    };
+    const start = (timeoutS?: number, code = "setTimeout(() => {}, 30000)", onComplete = () => {}) => startBackgroundTask({ shell: process.execPath, args: ["-e", code], cwd: process.cwd(), command: code, why: "test counts", timeoutS, capBytes: 100, onComplete });
+    try {
+      feed.start();
+      await advance(FLUSH_INTERVAL_MS);
+      assert.deepEqual(last(), [0, 0]);
+      const shell = start(60);
+      const monitor = start();
+      await advance(FLUSH_INTERVAL_MS);
+      assert.deepEqual(last(), [1, 1]);
+      const shellDone = abortBackgroundTask(shell.id);
+      const monitorDone = abortBackgroundTask(monitor.id);
+      await advance(FLUSH_INTERVAL_MS);
+      assert.deepEqual(last(), [0, 0], "abort removes both kinds immediately");
+      await Promise.all([shellDone, monitorDone]);
+      for (const timeoutS of [undefined, 60]) {
+        let finish!: () => void;
+        const finished = new Promise<void>((resolve) => { finish = resolve; });
+        start(timeoutS, "setTimeout(() => {}, 200)", finish);
+        await advance(FLUSH_INTERVAL_MS);
+        assert.deepEqual(last(), timeoutS === undefined ? [0, 1] : [1, 0]);
+        await finished;
+        await advance(FLUSH_INTERVAL_MS);
+        assert.deepEqual(last(), [0, 0]);
+      }
+      start(60);
+      await advance(FLUSH_INTERVAL_MS);
+      assert.deepEqual(last(), [1, 0]);
+      killAllBackgroundTasks();
+      await advance(FLUSH_INTERVAL_MS);
+      assert.deepEqual(last(), [0, 0]);
+      feed.stop();
+      const sent = events().length;
+      start();
+      killAllBackgroundTasks();
+      await advance(FLUSH_INTERVAL_MS);
+      assert.equal(events().length, sent, "stopped feed unsubscribes");
+    } finally {
+      feed.stop();
+      killAllBackgroundTasks();
+    }
   });
 });
 

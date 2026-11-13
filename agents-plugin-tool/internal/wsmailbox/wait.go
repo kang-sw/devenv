@@ -80,6 +80,9 @@ type WaitResult struct {
 	// Interrupt is how many interrupt entries the watched inbox had; zero
 	// unless InboxInterrupt or InboxInterruptOnly is set.
 	Interrupt int
+	// Entry names are stable identities for stream deduplication, including
+	// same-count replacements after a board merge or promotion.
+	boardNames, interruptNames []string
 }
 
 // Total returns the combined unread mail count across both queues; held
@@ -395,6 +398,7 @@ func (r resolvedWaitTarget) peek() (WaitResult, error) {
 			return WaitResult{}, err
 		}
 		result.Board = len(names)
+		result.boardNames = names
 	}
 	if r.inboxDir != "" && r.interrupt {
 		names, err := wsinbox.InterruptNames(r.inboxDir)
@@ -402,6 +406,7 @@ func (r resolvedWaitTarget) peek() (WaitResult, error) {
 			return WaitResult{}, err
 		}
 		result.Interrupt = len(names)
+		result.interruptNames = names
 	}
 	return result, nil
 }
