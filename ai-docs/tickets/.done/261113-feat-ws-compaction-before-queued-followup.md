@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 08521715e5e0c995
 sage-review-completeness-reviewed: 08521715e5e0c995
+completed: 2026-11-14
 ---
 
 # A requested compaction runs before the user's queued follow-up
@@ -238,3 +239,53 @@ Verification:
   the held follow-up delivered at the compaction turn's end.
 - The claude-mod suites and the `agents-plugin-wsflow/` mirror suites pass,
   and the mirrored files stay byte-identical.
+
+### Result (02baa619f) - 2026-11-14
+
+Landed in 5fdf8d007 (mod) and 02baa619f (hosted).
+
+- Hosted: `claudeMapper` keeps a lead's `*__request_compaction` tool_use ids
+  and marks the turn when the paired tool_result is not an error; the
+  ending `TurnEnd` (at the result, or at the idle state on a states harness)
+  carries the new `Event.CompactRequested` unless the result had an
+  `aborted*` terminal reason. The runner gates all of `kick()` while
+  `leverC` is armed; the hold lifts at `CompactStart`, at the cap
+  (`leverHoldCap = 5 * time.Second`, from the new injectable
+  `Options.Timer`), at the next non-replay turn end, or at process exit. An
+  interrupt the runner issued itself (`interruptAsked`) also keeps a lever
+  turn from arming.
+- Mod: `compaction.leverPending(reason)` (true for the turn that carried the
+  call while the compact step is owed; false for an aborted turn, after
+  that turn end, after a landing), wired in `register.ts` as the watcher's
+  `leverPending` edge over `mainTurnEndReason`. `watcher.ts` adds
+  `LEVER_HOLD_MS = 5_000` and a `leverHold` that `boardBusy()` reads; a
+  holding turn end sets `boardHeld`, mail still submits, and the cap sleep
+  is raced outside `boardChain` and re-checks `compacting`,
+  `turnRunning()`, and the stop generation. Mirrored byte-identically to
+  `agents-plugin-wsflow/`.
+
+Verification:
+
+- `go test -run 'TestClaudeLeadCompaction|TestLeverHold' ./internal/wsagent`:
+  pass. The full `go test ./internal/wsagent/` fails only the known env-only
+  TestClaudeLeadLocalSettingsCanonicalWorktree and TestPiLeadResolverAdapter.
+  Disabling the `kick()` gate or the `interruptAsked` check makes the new
+  runner tests fail.
+- `claude plugin test agents-plugin`: 812 pass, 1 fail (engine.test.ts
+  streaming delivery timed out under load; it passes run alone, 72/72).
+  `claude plugin test agents-plugin-wsflow`: 813 pass. `claude plugin
+  validate` passes on both. The mirrored directories are identical
+  (`diff -r`).
+
+Decisions:
+
+- A repeat lever call clears the request's `ended` flag, so the turn
+  carrying it holds again: "the turn that carried the call" applies per call.
+- Every main-thread turn end lifts an earlier hold before deciding again, on
+  both sides. This is the "non-arming outcome" release path, and it keeps a
+  hold from outliving the turn after the lever turn.
+- The lever is paired by a mapper map of tool_use ids, not
+  `batchTracker.callName`, which sees only the current batch.
+- The hosted runner tests drive the real mapper through the lead harness,
+  using lines from `claude-lead-compaction.jsonl`, instead of the plain fake
+  process.
