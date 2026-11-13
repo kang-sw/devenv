@@ -86,30 +86,32 @@ func TestPagesRefuseFraming(t *testing.T) {
 	f := startPageFixture(t)
 	writeFile(t, filepath.Join(f.project, "a.md"), "# A\n")
 	writeFile(t, filepath.Join(f.project, "blob.bin"), "BIN\x00")
-	refused := []string{
-		"/", "/s/livesession", "/s/boardsession",
-		"/s/livesession/file?path=a.md", "/s/livesession/file?path=blob.bin",
-		"/s/livesession/file?path=a.md&frame=1", "/s/newlead",
+	// Each path answers its status: a session page, or the finding page
+	// (404) of a session not registered yet.
+	refused := map[string]int{
+		"/": http.StatusOK, "/s/livesession": http.StatusOK, "/s/boardsession": http.StatusOK,
+		"/s/livesession/file?path=a.md": http.StatusOK, "/s/livesession/file?path=blob.bin": http.StatusOK,
+		"/s/livesession/file?path=a.md&frame=1": http.StatusOK, "/s/newlead": http.StatusNotFound,
 	}
-	sameOrigin := []string{
+	sameOrigin := map[string]int{
 		// The iframe shell's frames: a session page and the finding page a
 		// frame shows before its session registers.
-		"/s/livesession?frame=1", "/s/boardsession?frame=1", "/s/newlead?frame=1",
+		"/s/livesession?frame=1": http.StatusOK, "/s/boardsession?frame=1": http.StatusOK, "/s/newlead?frame=1": http.StatusNotFound,
 	}
-	for _, path := range refused {
+	for path, want := range refused {
 		status, xfo, csp := pageFraming(t, f.base+path)
-		if status != http.StatusOK && status != http.StatusNotFound {
-			t.Errorf("GET %s = %d", path, status)
+		if status != want {
+			t.Errorf("GET %s = %d, want %d", path, status, want)
 			continue
 		}
 		if xfo != "DENY" || !strings.Contains(csp, "frame-ancestors 'none'") {
 			t.Errorf("GET %s is frameable: X-Frame-Options %q, CSP %q", path, xfo, csp)
 		}
 	}
-	for _, path := range sameOrigin {
+	for path, want := range sameOrigin {
 		status, xfo, csp := pageFraming(t, f.base+path)
-		if status != http.StatusOK && status != http.StatusNotFound {
-			t.Errorf("GET %s = %d", path, status)
+		if status != want {
+			t.Errorf("GET %s = %d, want %d", path, status, want)
 			continue
 		}
 		if xfo != "SAMEORIGIN" || !strings.Contains(csp, "frame-ancestors 'self'") || strings.Contains(csp, "'none'") {

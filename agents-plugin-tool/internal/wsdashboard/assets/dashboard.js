@@ -6980,13 +6980,12 @@
     go(u.href);
   });
 
-  // shDrafts reports a frame holding unsent work, which an assets reload of
-  // the shell would drop.
-  function shDrafts() {
-    return shFrames.some(function (x) {
-      try { return !!(x.el.contentWindow.wsHoldsDraft && x.el.contentWindow.wsHoldsDraft()); } catch (e) { return false; }
-    });
+  // shHolds reports a frame holding unsent work; shDrafts any frame, which
+  // an assets reload of the shell would drop.
+  function shHolds(x) {
+    try { return !!(x.el.contentWindow.wsHoldsDraft && x.el.contentWindow.wsHoldsDraft()); } catch (e) { return false; }
   }
+  function shDrafts() { return shFrames.some(shHolds); }
   function shSend(ent, kind, m) {
     m = m || {};
     m.wsShell = kind;
@@ -6994,11 +6993,15 @@
   }
   function shFind(path) { return shFrames.filter(function (x) { return x.f.path === path; })[0] || null; }
   function shEnt(win) { return shFrames.filter(function (x) { return x.el.contentWindow === win; })[0] || null; }
+  // Each load (a first one, a reload) tells the frame whether it shows: a
+  // page loads believing it shows, and a hidden frame's reload, or a frame
+  // superseded before it ever showed, must hold its updates.
   function shAdd(el, f) {
     var ent = { el: el, f: f, head: null, title: "", pincol: false, dim: 0, y: 0, loaded: false };
     el.addEventListener("load", function () {
       ent.loaded = true;
       if (shWant === ent) shShow(ent);
+      else shSend(ent, "shown", { shown: ent === shOn });
     });
     shFrames.push(ent);
     return ent;
@@ -7021,11 +7024,16 @@
       try { ent.el.contentWindow.location.hash = f.hash; } catch (x) { /* unloading */ }
     }
     ent.f = f;
-    var t = window.WsShell.touch(shOrder, f.path);
+    // The page opened is the most recent, the one shown until it loads the
+    // next: pages opened and left before they ever showed go first. A frame
+    // holding unsent work stays loaded past the limit (removing it would
+    // drop its pasted images unasked) and is dropped once it holds none.
+    var a = shOn ? window.WsShell.touch(shOrder, shOn.f.path) : { order: shOrder, evict: [] }, t = window.WsShell.touch(a.order, f.path);
     shOrder = t.order;
-    t.evict.forEach(function (p) {
+    a.evict.concat(t.evict).forEach(function (p) {
       var x = shFind(p);
-      if (!x || x === shOn) return;
+      if (!x) return;
+      if (x === shOn || shHolds(x)) { shOrder.push(p); return; }
       shFrames.splice(shFrames.indexOf(x), 1);
       x.el.remove();
     });
@@ -7129,7 +7137,7 @@
           break;
       }
     });
-    window.addEventListener("popstate", function () { shOpen(location.href, false); });
+    window.addEventListener("popstate", function () { shOpen(location.pathname + location.hash, false); });
     // The shell's hotkeys besides the rail's: the search palette's keys
     // (tracker.js qShortcut) open the shown frame's palette.
     doc.addEventListener("keydown", function (e) {
@@ -7245,16 +7253,19 @@
     if (window.scrollY) send("scroll", { y: Math.round(window.scrollY) });
   }
   // shShellInit takes the frame the shell page loaded with: the page its
-  // address names (with the hash, which never reached the daemon) and asks
-  // it for its header, in case it posted before this script listened.
+  // address names (its path and hash, which never reached the daemon; a
+  // query, such as a LAN token, is not the page's) and asks it for its
+  // header, in case it posted before this script listened. A frame already
+  // loaded fires no load for shAdd to see.
   function shShellInit() {
-    var el = doc.querySelector("#frames > iframe"), f = window.WsShell.framed(new URL(location.href), location.origin);
+    var el = doc.querySelector("#frames > iframe"), f = window.WsShell.framed(new URL(location.pathname + location.hash, location.origin), location.origin);
     if (!el || !f) return;
     var ent = shAdd(el, f);
     shOn = ent;
     shOrder = [f.path];
-    if (f.hash) el.src = window.WsShell.src(f);
-    else shSend(ent, "sync");
+    if (f.hash) { el.src = window.WsShell.src(f); return; }
+    try { ent.loaded = el.contentDocument.readyState === "complete"; } catch (x) { /* not yet */ }
+    shSend(ent, "sync");
   }
 
   if (live) {
