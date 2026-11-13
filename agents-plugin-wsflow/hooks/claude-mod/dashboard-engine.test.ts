@@ -209,6 +209,8 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
   on('classic.Notification', () => ({}) as never)
   on('process.run', () => ({ value: { exitCode: 0, stdout: 'Python 3.12.0\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('process.spawn', async function* ($, e) {
+    // Exercise dashboard delivery through the older-daemon one-shot fallback.
+    if (e.argv.includes('--stream')) return { value: { code: 2, signal: null } }
     w.spawns += 1
     w.argvs.push([...e.argv])
     const [code, kinds] = await new Promise<[number, string[] | undefined]>((resolve) => w.exits.push((c, k) => resolve([c, k])))

@@ -5,9 +5,10 @@ import type { InboxCommand, InboxItem } from './dashboard'
  * Pure mailbox-push controller for the Claude Code mod in register.ts; the
  * Claude counterpart of the pi adapter's mailbox waiter.
  *
- * `mailbox wait` only PEEKS (exit 0 = mail present, 3 = timed out, 130 =
- * interrupted, other = error) and serves purely as the block-until-mail
- * signal. Draining is mailbox recv's job, in one of two modes:
+ * `mailbox wait` only PEEKS: streaming emits JSONL arrivals; the one-shot
+ * fallback exits 0 for mail, 3 for timeout, 130 for interruption, or another
+ * code for error. It is purely the block-until-mail signal. Draining is
+ * mailbox recv's job, in one of two modes:
  *
  * - `direct`: the controller drains through recv itself and submits exactly
  *   what recv removed as ONE prompt, so a re-arm never re-delivers the same
@@ -205,11 +206,12 @@ export interface WatcherEdges {
   /** Prefix for notice and prompt lines (`<plugin> mailbox`). */
   label: string
   /**
-   * Run one `mailbox wait` for `key`, adding the binding's named inbox `slug`,
-   * and with `flags` also waking on a held board message or an interrupt
-   * entry; must resolve `stopped` soon after `signal` aborts.
+   * Await one arrival for `key`, adding the binding's named inbox `slug`,
+   * and with `flags` also waking on a held board message or interrupt entry.
+   * `signal` aborts this arm; `bindingSignal` also closes a cached stream
+   * between arms (while a drain or notice is pending).
    */
-  wait: (key: string, slug: string | undefined, flags: WaitFlags, signal: AbortSignal) => Promise<WaitOutcome>
+  wait: (key: string, slug: string | undefined, flags: WaitFlags, signal: AbortSignal, bindingSignal: AbortSignal) => Promise<WaitOutcome>
   /** Drain via mailbox recv (direct mode only). */
   drain: (key: string) => Promise<DrainResult>
   /**
@@ -980,7 +982,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       signal.addEventListener('abort', relay, { once: true })
       waiting = own
       try {
-        outcome = await edges.wait(myKey, mySlug, flags, own.ctrl.signal)
+        outcome = await edges.wait(myKey, mySlug, flags, own.ctrl.signal, signal)
       } catch (err) {
         edges.log(`${edges.label}: wait failed to start: ${String(err)}`)
         outcome = 'error'
