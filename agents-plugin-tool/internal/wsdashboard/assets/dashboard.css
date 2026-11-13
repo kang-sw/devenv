@@ -496,6 +496,14 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .unimg:hover { background: var(--wb-card); }
 .inum, .thumbs .tnum { position: absolute; left: 2px; bottom: 2px; font-size: 10px; font-weight: 800; line-height: 1; padding: 2px 4px; border-radius: 4px; font-variant-numeric: tabular-nums; background: color-mix(in srgb, var(--wb-card) 85%, transparent); color: var(--wb-fg); pointer-events: none; }
 .composer.drop { outline: 2px dashed var(--wb-primary); outline-offset: -4px; }
+/* A board note's image chips: a row right after its note, aligned with it,
+   hidden while the note is closed. */
+.nimgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.note[hidden] + .nimgs { display: none; }
+.arow > .nimgs, .ckrow > .nimgs { flex-basis: 100%; margin: 0 10px 8px 34px; }
+.srow > .nimgs { flex-basis: 100%; margin-top: 4px; }
+.topic > .nimgs { margin: 0 10px 6px; }
+.topic.quiet > .nimgs { margin: 0 6px 4px; }
 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; white-space: normal; }
 .thumbs .thumb { position: relative; display: block; }
 .thumbs .thumb img { display: block; max-width: 160px; max-height: 120px; border-radius: 6px; object-fit: contain; background: var(--wb-muted); }
