@@ -101,7 +101,8 @@ function replyID(key) {
 // repositories, alpha-feat alpha's linked worktree on feat/x, notes a plain
 // folder); sub roots the session in a folder of it; ended folds the row;
 // approval makes the row a hosted session whose present adapter reports
-// its lead waiting on that tool approval (the tree scenario's roll-up).
+// its lead waiting on that tool approval (the tree scenario's roll-up), and
+// hosted a hosted session with no wait (the row menu's viewed one).
 const LONG = "A very long session label that keeps going well past the edge";
 const SESSIONS = [
   ...Array.from({ length: 18 }, (_, i) => ({ key: `rail-a-${String(i + 1).padStart(2, "0")}`, ws: "alpha" })),
@@ -113,6 +114,7 @@ const SESSIONS = [
   { key: "rail-f-e1", ws: "alpha-feat", ended: true },
   { key: "rail-b-1", ws: "beta" },
   { key: "rail-b-2", ws: "beta" },
+  { key: "rail-b-host", ws: "beta", hosted: true },
   { key: "rail-n-1", ws: "notes" },
   { key: "rail-g-main", ws: "gamma" },
   { key: "rail-g-exec", ws: "gamma", harness: "codex" },
@@ -160,7 +162,7 @@ function seed(root) {
     // it so.
     if (s.ended) reg.heartbeat_at = reg.ended_at = stamp(now - (40 + i) * 60_000);
     else reg.heartbeat_at = stamp(now + 60 * 60_000);
-    if (s.approval) reg.hosted = true;
+    if (s.approval || s.hosted) reg.hosted = true;
     writeJSON(path.join(dir, "registration.json"), reg);
     // A finished tool batch gives the row its last-tool time.
     const t = now - (i + 1) * 97_000;
@@ -272,7 +274,7 @@ const LEGACY = { order: "ws.dashboard.railorder", stars: "ws.dashboard.stars", w
 
 // makeContext opens a fresh browser context (its own storage, so no draft or
 // collapsed workspace leaks between scenarios) and gives the scenario its
-// helpers.
+// helpers; o.hasTouch emulates a touch screen.
 async function makeContext(browser, base, fx, o = {}) {
   const context = await browser.newContext({
     viewport: o.viewport || { width: 1700, height: 820 },
@@ -280,6 +282,7 @@ async function makeContext(browser, base, fx, o = {}) {
     colorScheme: o.colorScheme || "light",
     reducedMotion: "reduce",
     permissions: ["clipboard-read", "clipboard-write"],
+    hasTouch: !!o.hasTouch,
   });
   const page = await context.newPage();
   const t = {
@@ -385,6 +388,34 @@ async function makeContext(browser, base, fx, o = {}) {
     setScroll: (top) => page.evaluate((top) => { document.getElementById("rlist").scrollTop = top; }, top),
     style: (selector, prop) => page.evaluate(([s, p]) => getComputedStyle(document.querySelector(s))[p], [selector, prop]),
     clip: () => page.evaluate(() => navigator.clipboard.readText()),
+    // menu is the open row menu (null: none): its items' and its "move
+    // under" list's texts, the list shown, the focused item's text, its box.
+    menu: () => page.evaluate(() => {
+      const m = document.querySelector(".rpop.rmenu");
+      if (!m || m.hidden) return null;
+      const r = m.getBoundingClientRect(), a = document.activeElement, sub = m.querySelector(".rmsub");
+      const texts = (box) => (box ? [...box.children].filter((b) => b.getAttribute("role") === "menuitem").map((b) => b.textContent) : []);
+      return { items: texts(m.querySelector(".rmlist")), sub: texts(sub), subShown: !!sub && !sub.hidden, focus: a && m.contains(a) ? a.textContent : null, left: r.left, top: r.top, bottom: r.bottom };
+    }),
+    // item clicks the open row menu's item named text (force: a disabled
+    // one, which says why it does nothing).
+    item: (text, force) => page.locator(".rpop.rmenu [role=menuitem]", { hasText: text }).first().click({ force: !!force }),
+    // said is the rail's live line; toasts the toasts shown.
+    said: () => page.evaluate(() => { const l = document.querySelector(".rlive"); return l ? l.textContent : null; }),
+    toasts: () => page.evaluate(() => [...document.querySelectorAll(".wstoast")].map((e) => e.textContent)),
+    // focused is the reply-id of the row whose link holds the focus ("" none).
+    focused: () => page.evaluate(() => {
+      const a = document.activeElement;
+      return a && a.classList.contains("rl") && a.closest("#rlist .rs") ? a.closest(".rs").getAttribute("data-rid") : "";
+    }),
+    // rightClick right-clicks the session key's name, answering the point.
+    async rightClick(key) {
+      await page.locator(t.sel(key)).scrollIntoViewIfNeeded();
+      const b = await t.box(`${t.sel(key)} .rid`);
+      const at = { x: Math.round(b.x + Math.min(12, b.width / 2)), y: Math.round(b.y + b.height / 2) };
+      await page.mouse.click(at.x, at.y, { button: "right" });
+      return at;
+    },
   };
   // swapWait is how long a scenario waits to be sure a swap the daemon sent
   // would have landed by now: a few times the measured round trip.
@@ -402,6 +433,24 @@ async function makeContext(browser, base, fx, o = {}) {
 }
 
 // ------------------------------------------------------------- scenarios --
+// gammaLabels labels gamma's rows as the tree scenario does (메인, EXEC, UI;
+// rail-g-other keeps its reply-id), so a scenario that reads them runs on
+// its own too.
+async function gammaLabels(t) {
+  for (const [k, l] of [["rail-g-main", "메인"], ["rail-g-exec", "EXEC"], ["rail-g-ui", "UI"]]) await t.relabel(k, l);
+  await until("the labels in the rail", async () => { const n = await t.railNames(); return ["메인", "EXEC", "UI"].every((l) => n.includes(l)); });
+}
+// kidsOf is the reply-ids shown under the session key's row.
+function kidsOf(t, key) {
+  return t.page.evaluate((p) => [...document.querySelectorAll(`#rlist .rkids[data-parent="${p}"] > .rs`)].map((r) => r.getAttribute("data-rid")), t.rid(key));
+}
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// toasted waits for a toast holding text.
+function toasted(t, text) {
+  return until(`a toast saying "${text}"`, async () => (await t.toasts()).some((s) => s.includes(text)));
+}
+const RENAME = "Rename (shown on this dashboard only)", COPY = "Copy mailbox address";
+
 const SCENARIOS = [
   {
     name: "offsets",
@@ -1087,6 +1136,271 @@ const SCENARIOS = [
       }
       for (const f of tree) assert(fs.statSync(f).size > 1000, `${f} is empty`);
       console.log(tree.map((f) => `  ${f}`).join("\n"));
+    },
+  },
+  {
+    name: "menu",
+    about: "a right click on a non-hosted row opens its menu at the pointer: rename, copy, move under (a list in place), detach, an ended row's revive; Escape gives the focus back to the row; a parent's move under says why it cannot",
+    async run(t) {
+      const { page } = t;
+      await t.open("rail-g-main");
+      await gammaLabels(t);
+      const exec = t.rid("rail-g-exec");
+      await t.barAt(t.fx.dirs.gamma);
+      // At the pointer, named for its row, the focus on its first item.
+      const at = await t.rightClick("rail-g-exec");
+      let m = await until("the row menu", () => t.menu());
+      assert(same(m.items, [RENAME, COPY, "Move under"]), `a top-level row's menu: ${JSON.stringify(m.items)}`);
+      assert(m.focus === RENAME, `the focus is on "${m.focus}", not the first item`);
+      near(m.left, at.x, "the menu's left against the pointer", 1);
+      near(m.top, at.y + 4, "the menu's top against the pointer", 1);
+      assert(await page.getAttribute(".rpop.rmenu .rmlist", "role") === "menu" && await page.getAttribute(".rpop.rmenu .rmlist", "aria-label") === "EXEC", "the menu is not a menu named for its row");
+      await page.keyboard.press("Escape");
+      assert(!(await t.menu()), "Escape did not close the menu");
+      assert(await t.focused() === exec, "Escape did not give the focus back to the row");
+      // Copy: the row's own address.
+      await page.evaluate(() => navigator.clipboard.writeText(""));
+      await t.rightClick("rail-g-exec");
+      await t.item(COPY);
+      const tag = await until("the menu's copy", async () => (await t.clip()) || null);
+      assert(tag === await page.getAttribute(`${t.sel("rail-g-exec")} .drcopy`, "data-copy"), `the menu copied ${tag}`);
+      assert(!(await t.menu()), "the copy left the menu open");
+      // Rename: the row's own input, posting to its label route.
+      const posts = [];
+      page.on("request", (r) => { if (r.method() === "POST" && r.url().endsWith("/label")) posts.push(new URL(r.url()).pathname); });
+      await t.rightClick("rail-g-exec");
+      await t.item(RENAME);
+      assert(await page.evaluate((s) => !!document.activeElement && document.activeElement.classList.contains("drinp") && !!document.activeElement.closest(s), t.sel("rail-g-exec")), "the menu's rename did not open the row's input");
+      const hRen = await t.railHash();
+      await page.keyboard.type("EXEC 2");
+      await page.keyboard.press("Enter");
+      await until("the menu's rename to show", async () => (await page.textContent(`${t.sel("rail-g-exec")} .rid`)) === "EXEC 2");
+      assert(same(posts, [`/s/${exec}/label`]), `the menu's rename posted to ${posts.join(", ")}`);
+      // The daemon's render of the new label lands before the old one goes
+      // back: the page shows a saved label without a render of its own, so
+      // a render back to the old label, if the daemon sent none between,
+      // matches the hash the page holds and is skipped.
+      await until("the daemon's render of the rename", async () => (await t.railHash()) !== hRen);
+      await t.relabel("rail-g-exec", "EXEC");
+      await until("EXEC's label back", async () => (await page.textContent(`${t.sel("rail-g-exec")} .rid`)) === "EXEC");
+      // Move under: the list opens in place, without the row itself.
+      await t.rightClick("rail-g-exec");
+      await t.item("Move under");
+      m = await t.menu();
+      assert(m.subShown && m.sub.includes("메인") && m.sub.includes("UI") && !m.sub.includes("EXEC"), `the move-under list: ${JSON.stringify(m.sub)}`);
+      assert(m.focus === m.sub[0], `opening the list focused "${m.focus}"`);
+      let h0 = await t.railHash();
+      await page.locator(".rpop.rmenu .rmsub [role=menuitem]", { hasText: "메인" }).click();
+      assert(!(await t.menu()), "the move left the menu open");
+      assert(same(await kidsOf(t, "rail-g-main"), [exec]), "EXEC is not under 메인 at once");
+      assert(await t.focused() === exec, "the move took the focus off the row");
+      await until("the live line", async () => (await t.said()) === "EXEC → under 메인");
+      await until("the daemon's render", async () => (await t.railHash()) !== h0 && same(await kidsOf(t, "rail-g-main"), [exec]));
+      // A parent never goes under another: the item says why.
+      await t.rightClick("rail-g-main");
+      m = await until("메인's menu", () => t.menu());
+      assert(!m.items.includes("Detach from parent"), "a top-level row offers a detach");
+      assert(await page.getAttribute(".rpop.rmenu .rmlist > [aria-haspopup]", "aria-disabled") === "true", "a parent's move under is not disabled");
+      await t.item("Move under", true);
+      await toasted(t, "Sessions nest only one level deep");
+      await page.keyboard.press("Escape");
+      // Detach: a child's, back to the top level after its parent.
+      await t.rightClick("rail-g-exec");
+      m = await until("EXEC's menu", () => t.menu());
+      assert(same(m.items, [RENAME, COPY, "Move under", "Detach from parent"]), `a child's menu: ${JSON.stringify(m.items)}`);
+      h0 = await t.railHash();
+      await t.item("Detach from parent");
+      const back = async () => (await kidsOf(t, "rail-g-main")).length === 0 && (await t.group("rail-g-main")).indexOf(exec) === (await t.group("rail-g-main")).indexOf(t.rid("rail-g-main")) + 1;
+      assert(await back(), "EXEC is not back at the top level after 메인 at once");
+      await until("the live line", async () => (await t.said()) === "EXEC → top level");
+      await until("the daemon's render", async () => (await t.railHash()) !== h0 && (await back()));
+      // An ended row: rename, copy, and its revive when it has one.
+      const ended = t.sel("rail-a-e1");
+      await page.locator(ended).evaluate((r) => r.closest("details").querySelector("summary").click());
+      await until("the ended row shown", () => page.locator(ended).isVisible());
+      await t.rightClick("rail-a-e1");
+      m = await until("the ended row's menu", () => t.menu());
+      const rev = await page.evaluate((s) => { const b = document.querySelector(`${s} .rrev`); return b ? b.textContent : null; }, ended);
+      assert(same(m.items, rev ? [RENAME, COPY, rev] : [RENAME, COPY]), `an ended row's menu: ${JSON.stringify(m.items)} (its revive: ${rev})`);
+      await page.keyboard.press("Escape");
+    },
+  },
+  {
+    name: "menu-hosted",
+    about: "a hosted row's menu (not the viewed session) reads that session's state and posts its effort to /agents/<that rid>/settings; the viewed session's head menu still posts to its own (both answered by Playwright routes)",
+    async run(t) {
+      const { page, context } = t;
+      const view = t.rid("rail-b-host"), ui = t.rid("rail-g-ui");
+      // The fixture's daemon runs no hosted harness, so the browser answers
+      // its /agents routes here (no request reaches the daemon): a GET is a
+      // controllable idle Claude session, a settings post echoes the pick.
+      const gets = [], posts = [];
+      const state = (rid, v = {}) => ({ id: rid, status: "idle", backend: "claude", model: "", effort: "", permission_mode: "default", can_control: true, process: true, approvals: [], ...v });
+      const ridOf = (route) => decodeURIComponent(new URL(route.request().url()).pathname.split("/")[2]);
+      const answer = (route, v) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(v) });
+      await context.route(/\/agents\/[^/?]+$/, (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        gets.push(ridOf(route));
+        return answer(route, state(ridOf(route)));
+      });
+      await context.route(/\/agents\/[^/?]+\/settings$/, (route) => {
+        const body = route.request().postDataJSON() || {};
+        posts.push(`${ridOf(route)} ${JSON.stringify(body)}`);
+        return answer(route, state(ridOf(route), body));
+      });
+      await t.open("rail-b-host");
+      await until("the head's session menu button", async () => (await page.locator(".host.hbtn").count()) === 1);
+      await gammaLabels(t);
+      await t.barAt(t.fx.dirs.gamma);
+      await t.rightClick("rail-g-ui");
+      await until("UI's session section", async () => (await page.locator(".rpop.rmenu .rmsess:not([hidden])").count()) === 1);
+      assert(gets.includes(ui), `the row menu did not read UI's state (read: ${gets.join(", ")})`);
+      const m = await t.menu();
+      assert(same(m.items, [RENAME, COPY, "Move under"]), `a hosted row's own items: ${JSON.stringify(m.items)}`);
+      // pick sets the effort select of the session menu in box to an effort
+      // other than its own, answering it.
+      async function pick(box) {
+        const sel = box.locator("select.spsm").nth(2);
+        const opts = (await sel.locator("option").evaluateAll((os) => os.map((o) => o.value))).filter(Boolean);
+        const cur = await sel.inputValue(), v = opts.filter((o) => o !== cur).pop();
+        assert(v, `no effort to pick among ${JSON.stringify(opts)}`);
+        await sel.selectOption(v);
+        return v;
+      }
+      let v = await pick(page.locator(".rpop.rmenu .rmsess"));
+      await until("UI's settings post", () => posts.length > 0);
+      assert(same(posts, [`${ui} {"effort":"${v}"}`]), `the row menu posted ${JSON.stringify(posts)}`);
+      await page.keyboard.press("Escape");
+      assert(!(await t.menu()), "Escape did not close the row menu");
+      // The viewed session's own menu, on the head's chip, posts to its own.
+      posts.length = 0;
+      await page.click(".host.hbtn");
+      const head = page.locator(".rpop:not(.rmenu):not([hidden])");
+      await until("the head's session menu", async () => (await head.count()) === 1);
+      v = await pick(head);
+      await until("the viewed session's settings post", () => posts.length > 0);
+      assert(same(posts, [`${view} {"effort":"${v}"}`]), `the head menu posted ${JSON.stringify(posts)}`);
+    },
+  },
+  {
+    name: "menu-touch",
+    about: "on a touch screen a long touch on a row opens its menu there and follows no link, and a touch on the grip drags at once, opening no menu",
+    contexts: [{ hasTouch: true }],
+    async run(t) {
+      const { page, context } = t;
+      await t.open("rail-g-main");
+      await gammaLabels(t);
+      await t.barAt(t.fx.dirs.gamma);
+      const cdp = await context.newCDPSession(page);
+      const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y }] });
+      const url = page.url(), hist = await page.evaluate(() => history.length);
+      const b = await t.box(`${t.sel("rail-g-exec")} .rid`);
+      const at = { x: Math.round(b.x + 10), y: Math.round(b.y + b.height / 2) };
+      await touch("touchStart", at.x, at.y);
+      await sleep(800);
+      const m = await t.menu();
+      await touch("touchEnd");
+      await sleep(400);
+      assert(m && same(m.items, [RENAME, COPY, "Move under"]), `a long touch on a row: ${JSON.stringify(m)}`);
+      near(m.left, at.x, "the menu's left against the touch", 1);
+      assert(await t.menu(), "lifting the long touch closed the menu");
+      assert(page.url() === url && (await page.evaluate(() => history.length)) === hist, `the long touch followed the link to ${page.url()}`);
+      await page.keyboard.press("Escape");
+      // The grip drags with no hold: gamma's last row before its first.
+      const g0 = await t.group("rail-g-main"), first = g0[0], last = g0[g0.length - 1];
+      const grip = await t.box(`${t.sel(t.keyOf(last))} .drgrip`), fb = await t.box(t.sel(t.keyOf(first)));
+      const gx = Math.round(grip.x + grip.width / 2), gy = Math.round(grip.y + 11), ty = Math.round(fb.y + 3);
+      await touch("touchStart", gx, gy);
+      for (let i = 1; i <= 10; i++) await touch("touchMove", gx, Math.round(gy + ((ty - gy) * i) / 10));
+      await touch("touchEnd");
+      const g1 = await t.group("rail-g-main");
+      assert(g1[0] === last && g1[1] === first, `the grip's touch drag did not put the last row first: ${g1.join(" ")} (was ${g0.join(" ")})`);
+      assert(!(await t.menu()), "the grip's touch opened the menu");
+    },
+  },
+  {
+    name: "menu-keys",
+    about: "Shift+F10 and the ContextMenu key open a focused row's menu under the row; the arrows, Home, and End move among its items, Right and Left open and close the move-under list, Escape closes the list and then the menu",
+    async run(t) {
+      const { page } = t;
+      await t.open("rail-g-main");
+      await gammaLabels(t);
+      await t.barAt(t.fx.dirs.gamma);
+      const exec = t.rid("rail-g-exec");
+      await page.focus(`${t.sel("rail-g-exec")} .rl`);
+      await page.keyboard.press("Shift+F10");
+      let m = await until("the menu from Shift+F10", () => t.menu());
+      // Under the row, or above it when it does not fit below (popPlace).
+      const rb = await t.box(t.sel("rail-g-exec")), below = rb.y + rb.height + 4 + (m.bottom - m.top) <= 820 - 8;
+      if (below) near(m.top, rb.y + rb.height + 4, "the menu's top under the row", 1);
+      else near(m.bottom, rb.y - 4, "the menu's bottom above the row", 1);
+      assert(m.focus === RENAME, `Shift+F10 focused "${m.focus}"`);
+      for (const [k, want] of [["End", "Move under"], ["ArrowDown", RENAME], ["ArrowUp", "Move under"], ["Home", RENAME], ["ArrowDown", COPY]]) {
+        await page.keyboard.press(k);
+        const f = (await t.menu()).focus;
+        assert(f === want, `${k} focused "${f}", not "${want}"`);
+      }
+      await page.keyboard.press("End");
+      await page.keyboard.press("ArrowRight");
+      m = await t.menu();
+      assert(m.subShown && m.focus === m.sub[0], `ArrowRight: list shown ${m.subShown}, focus "${m.focus}"`);
+      assert(await page.getAttribute(".rpop.rmenu [aria-haspopup=menu]", "aria-expanded") === "true", "the open list's item is not expanded");
+      await page.keyboard.press("ArrowLeft");
+      m = await t.menu();
+      assert(!m.subShown && m.focus === "Move under", "ArrowLeft did not close the list back to its item");
+      await page.keyboard.press("ArrowRight");
+      await page.keyboard.press("Escape");
+      m = await t.menu();
+      assert(m && !m.subShown && m.focus === "Move under", "Escape did not close the list first");
+      await page.keyboard.press("Escape");
+      assert(!(await t.menu()) && (await t.focused()) === exec, "Escape did not close the menu with the focus back on the row");
+      await page.keyboard.press("ContextMenu");
+      m = await until("the menu from the ContextMenu key", () => t.menu());
+      assert(m.focus === RENAME, `the ContextMenu key focused "${m.focus}"`);
+      await page.keyboard.press("Escape");
+    },
+  },
+  {
+    name: "keys",
+    about: "Alt+Up/Down reorder a focused row, Alt+Right puts it under the row above, Alt+Left takes it out, each said in the live line with the focus kept through the daemon's render; a refused key toasts the route's reason; Alt+Left/Right leave the URL and history alone",
+    async run(t) {
+      const { page } = t;
+      await t.open("rail-g-main");
+      await gammaLabels(t);
+      await t.barAt(t.fx.dirs.gamma);
+      const names = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#rlist .rs")].map((r) => [r.getAttribute("data-rid"), r.querySelector(".rid").textContent])));
+      const g0 = await t.group("rail-g-main"), [a, b] = g0, A = names[a], B = names[b], keyA = t.keyOf(a), keyB = t.keyOf(b);
+      // Records whether each Alt+Left/Right was kept from the browser.
+      await page.evaluate(() => {
+        window.altKept = [];
+        window.addEventListener("keydown", (e) => { if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) window.altKept.push(e.defaultPrevented); });
+      });
+      const url = page.url(), hist = await page.evaluate(() => history.length);
+      // key presses k on B's focused link: shown() holds at once and the
+      // live line says want once the op applied, then the daemon's render
+      // lands with shown() still true and the focus still on B.
+      async function key(k, want, shown) {
+        const h0 = await t.railHash();
+        await page.keyboard.press(k);
+        assert(await shown(), `${k} does not show at once`);
+        assert(await t.focused() === b, `${k} took the focus off ${B}`);
+        await until(`the live line to say "${want}"`, async () => (await t.said()) === want);
+        await until(`the daemon's render after ${k}`, async () => (await t.railHash()) !== h0 && (await shown()));
+        assert(await t.focused() === b, `the render after ${k} took the focus off ${B}`);
+      }
+      await page.focus(`${t.sel(keyB)} .rl`);
+      await key("Alt+ArrowUp", `${B} → before ${A}`, async () => same((await t.group(keyA)).slice(0, 2), [b, a]));
+      await key("Alt+ArrowDown", `${B} → after ${A}`, async () => same((await t.group(keyA)).slice(0, 2), [a, b]));
+      await key("Alt+ArrowRight", `${B} → under ${A}`, async () => same(await kidsOf(t, keyA), [b]));
+      await page.keyboard.press("Alt+ArrowRight");
+      await toasted(t, "Sessions nest only one level deep");
+      assert(same(await kidsOf(t, keyA), [b]), "a refused Alt+Right moved the row");
+      await key("Alt+ArrowLeft", `${B} → top level`, async () => (await kidsOf(t, keyA)).length === 0 && same((await t.group(keyA)).slice(0, 2), [a, b]));
+      await page.keyboard.press("Alt+ArrowLeft");
+      await toasted(t, "That session is not under another");
+      const kept = await page.evaluate(() => window.altKept);
+      assert(kept.length === 4 && kept.every(Boolean), `an Alt+Left/Right reached the browser: ${JSON.stringify(kept)}`);
+      assert(page.url() === url && (await page.evaluate(() => history.length)) === hist, "Alt+Left/Right changed the URL or the history");
     },
   },
 ];
