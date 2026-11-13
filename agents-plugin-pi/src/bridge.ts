@@ -93,7 +93,6 @@ export interface BridgeHandle {
    */
   client: McpStdioClient;
   /** Unique local bootstrap that launched this connected bridge; copy it once for the mailbox before releasing it. */
-  localRuntimeBinary?: string;
   /** Release the bootstrap after the mailbox owns its copy; also called on shutdown/failure. */
   releaseLocalBootstrap(): void;
   /**
@@ -962,13 +961,12 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   let bootstrapReleased = false;
   const releaseLocalBootstrap = () => {
     if (bootstrapReleased || !localDevenvContext) return;
-    try {
-      unlinkSync(localDevenvContext.builtPath);
-      bootstrapReleased = true;
-    } catch (error) {
-      // A transient Windows lock may clear by shutdown; retry there. Missing
-      // output is already released. Neither case may break the bridge.
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") bootstrapReleased = true;
+    bootstrapReleased = true;
+    for (const path of [localDevenvContext.builtPath, `${localDevenvContext.builtPath}.metadata.json`]) {
+      try { unlinkSync(path); } catch (error) {
+        // Retry transient locks at shutdown; missing artifacts are already released.
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") bootstrapReleased = false;
+      }
     }
   };
   const shutdown = () => {
@@ -1302,7 +1300,6 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
   return {
     shutdown,
     client,
-    localRuntimeBinary: localDevenvContext?.builtPath,
     releaseLocalBootstrap,
     ensureChildRuntime,
     renderRegistry,

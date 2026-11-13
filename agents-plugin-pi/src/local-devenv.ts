@@ -26,7 +26,7 @@
  * path — can be exercised by `npm test` with no `go` binary installed.
  */
 
-import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
@@ -196,8 +196,11 @@ export async function buildLocalDevenvBootstrap(
   }
   try {
     renameSync(tmpPath, finalPath);
+    writeFileSync(`${finalPath}.metadata.json`, JSON.stringify({ schema_version: 1, binary_sha256: createHash("sha256").update(readFileSync(finalPath)).digest("hex"), version: pluginVersion, source_commit: shortCommit }));
   } catch (error) {
-    try { unlinkSync(tmpPath); } catch { /* Preserve the rename failure. */ }
+    for (const path of [tmpPath, finalPath, `${finalPath}.metadata.json`]) {
+      try { unlinkSync(path); } catch { /* Preserve the original failure. */ }
+    }
     throw error;
   }
   notify(`ws-mcp build finished in ${now() - startedAt}ms`);
@@ -222,7 +225,7 @@ export interface ChildRuntimeEnsureDeps {
   baselineHash: string;
   runBuild: LocalDevenvBuildDeps["runBuild"];
   /**
-   * One-shot launcher run: `args` forwarded to the installed binary, `env`
+   * One-shot launcher run: `args` handled by the Python launcher, `env`
    * overlaid on the caller's environment. Resolves with its stdout; rejects
    * on a non-zero exit.
    */
@@ -275,7 +278,9 @@ export function createChildRuntimeEnsurer(deps: ChildRuntimeEnsureDeps): (() => 
     } finally {
       // The launcher copied the build into the contract path (or failed);
       // either way this unique artifact has no further reader.
-      try { unlinkSync(bootstrap.context.builtPath); } catch { /* best effort */ }
+      for (const path of [bootstrap.context.builtPath, `${bootstrap.context.builtPath}.metadata.json`]) {
+        try { unlinkSync(path); } catch { /* best effort */ }
+      }
     }
   };
 

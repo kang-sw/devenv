@@ -223,7 +223,7 @@ import { ChildApprovalGate } from "./approval-protocol.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_FORK_CONTEXT_ENV, WS_PI_PARENT_SESSION_KEY_ENV, type SpawnRole } from "./process-role.ts";
 import { createApprovalRelay, registerExecuteGateway } from "./execute-gateway.ts";
 import { registerBackgroundTaskShutdown } from "./background-tasks.ts";
-import { afterCompactionHold, attachMailboxRuntimeCleanup, boardSteerDeps, buildMailboxPushMessage, buildWhiteboardHeldMessage, createBridgeDrain, createBridgeInboxDrain, createBridgeInterruptDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, stageMailboxRuntime, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle, type StagedMailboxRuntime } from "./mailbox-waiter.ts";
+import { afterCompactionHold, boardSteerDeps, buildMailboxPushMessage, buildWhiteboardHeldMessage, createBridgeDrain, createBridgeInboxDrain, createBridgeInterruptDrain, createMailboxWaiterSlot, createSubprocessWait, reportDistinctLinesOnce, resolveMailboxSelfSlug, sessionMailboxWaitOptions, shouldArmMailboxWaiter, startMailboxWaiter, type MailboxToolCall, type MailboxWaiterHandle } from "./mailbox-waiter.ts";
 import { armForkRoleWiring, registerFork } from "./fork.ts";
 import {
   createThreadRegistryHandle,
@@ -1018,31 +1018,19 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     if (mailboxRole === undefined && hosted.mode !== "hosted") {
       const mailboxHandle = handle;
       const mailboxCallTool: MailboxToolCall = (name, args) => mailboxHandle.client.callTool(name, args);
-      let staged: StagedMailboxRuntime | undefined;
       let runtimeReady = false;
       const slot = createMailboxWaiterSlot({
         resolveSlug: (key) => resolveMailboxSelfSlug(mailboxCallTool, key),
         start: (key, slug) => {
           if (!runtimeReady) {
-            // Stage once, on the first arm that survives its lookup, from this
-            // bridge's unique bootstrap; every later re-arm reuses the copy,
-            // so overlapping reloads can neither cross-copy outputs nor
-            // replace an executable held open by an old waiter on Windows.
-            // The copy outlives every waiter the slot starts (`slot.done`).
-            if (mailboxHandle.localRuntimeBinary) {
-              staged = stageMailboxRuntime(mailboxHandle.localRuntimeBinary);
-              attachMailboxRuntimeCleanup(slot, staged);
-            }
             runtimeReady = true;
-            // The bridge runs the launcher's installed runtime; after staging,
-            // neither process needs this unique bootstrap build output.
+            // The bridge launcher has installed its bootstrap before this arm.
             mailboxHandle.releaseLocalBootstrap();
           }
           return startMailboxWaiter({
             runWait: createSubprocessWait(sessionMailboxWaitOptions({
               launcherPath,
               pluginDir,
-              runtimeBinary: staged?.binaryPath,
               sessionKey: key,
               slug,
               cwd: ctx.cwd,
@@ -1405,8 +1393,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       agentWidgetRefreshRef.current = undefined;
       agentCostRefreshRef.current = undefined;
     }
-    // The waiter owns its staged executable until close. Its captured bridge
-    // is torn down only after the claimed registry is durably snapshotted.
+    // Tear down the captured bridge after the waiter and registry settle.
     try { await claimedWaiter?.done; } finally { claimed?.handle.shutdown(); }
   });
 }

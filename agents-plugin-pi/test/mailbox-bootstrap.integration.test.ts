@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -17,7 +16,7 @@ async function waitForFile(path: string): Promise<void> {
   throw new Error(`mailbox waiter never started: ${path}`);
 }
 
-test("Pi session generations reuse immutable mailbox binaries and preserve recovery across footer/shutdown races", async () => {
+test("Pi session generations use Python mailbox waits and preserve recovery across footer/shutdown races", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ws-pi-mailbox-handoff-"));
   const plugin = join(directory, "plugin");
   mkdirSync(plugin);
@@ -26,7 +25,6 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
   }
   symlinkSync(join(PLUGIN_DIR, "node_modules"), join(plugin, "node_modules"), process.platform === "win32" ? "junction" : "dir");
   const observed = join(directory, "observed-waits");
-  const launcherUsed = join(directory, "unexpected-launcher-wait");
   const lookupDelay = join(directory, "delay-next-lookup");
   const lookupStarted = join(directory, "lookup-in-flight");
   const bridgePids = join(directory, "bridge-pids");
@@ -40,35 +38,7 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
   const sourceScript = join(directory, process.platform === "win32" ? "fake-source-cli.exe" : "fake-source-cli");
   const runtimeJsonPath = join(plugin, "runtime.json");
   const runtimeVersion = JSON.parse(readFileSync(runtimeJsonPath, "utf8")).plugin_version;
-  // Windows cannot execute a copied shebang script. Compile the same small
-  // CLI probe to a real PE executable, then let the production staging path
-  // copy/run it exactly as it does the locally built ws-mcp.
-  if (process.platform === "win32") {
-    const probe = join(directory, "mailbox-probe.go");
-    writeFileSync(probe, [
-      "package main",
-      `import ("encoding/json";"os";"time")`,
-      "func main() {",
-      ` b,_:=os.ReadFile(${JSON.stringify(runtimeJsonPath)})`,
-      " var runtime map[string]any; _=json.Unmarshal(b,&runtime)",
-      ` f,_:=os.OpenFile(${JSON.stringify(observed)},os.O_CREATE|os.O_APPEND|os.O_WRONLY,0600)`,
-      ` if f!=nil { _=json.NewEncoder(f).Encode(map[string]any{"binary":os.Args[0],"version":runtime["plugin_version"],"args":os.Args[1:]}); _=f.Close() }`,
-      " time.Sleep(500*time.Millisecond); os.Exit(3)",
-      "}",
-    ].join("\n"));
-    execFileSync(process.env.WS_PI_TEST_GO ?? "go", ["build", "-o", sourceScript, probe], { cwd: directory, timeout: 120_000 });
-  } else {
-    writeFileSync(sourceScript, [
-      "#!/usr/bin/env python3",
-      "import json,os,sys,time",
-      `runtime=json.load(open(${JSON.stringify(runtimeJsonPath)}))`,
-      `with open(${JSON.stringify(observed)}, 'a') as output:`,
-      ` output.write(json.dumps({'binary':sys.argv[0],'version':runtime['plugin_version'],'args':sys.argv[1:]})+'\\n')`,
-      "time.sleep(0.5)",
-      "raise SystemExit(3)",
-      "",
-    ].join("\n"));
-  }
+  writeFileSync(sourceScript, "fake source build, never executable");
   // Stub only the Go build seam; session_start, bridge and wait subprocesses
   // remain production code. A later build can overwrite the fixed source.
   const bridgePath = join(plugin, "src", "bridge.ts");
@@ -103,16 +73,15 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
   const bin = join(plugin, "bin");
   mkdirSync(bin);
   const launcher = join(bin, "ws-mcp-launcher.py");
-  // Deliberately no runtime cache: the bridge transport requires a source
-  // bootstrap and refuses every mailbox wait, so a primed cache or fallback
-  // launcher cannot mask a missing direct-binary handoff.
+  // Fake Python transport: record waits without ever executing the bootstrap.
   writeFileSync(launcher, [
     "import json,os,sys,time",
+    "if sys.argv[1:3]==['mailbox','wait']:",
+    ` with open(${JSON.stringify(observed)}, 'a') as output: output.write(json.dumps({'binary':sys.argv[0],'args':sys.argv[1:]})+'\\n')`,
+    " time.sleep(0.5)",
+    " raise SystemExit(3)",
     "binary=os.environ.get('WS_MCP_BOOTSTRAP_BINARY', '')",
     "if not binary or not os.path.isfile(binary): raise SystemExit('source-built binary missing')",
-    "if sys.argv[1:3]==['mailbox','wait']:",
-    ` open(${JSON.stringify(launcherUsed)}, 'w').write(binary)`,
-    " raise SystemExit('mailbox must bypass launcher')",
     `with open(${JSON.stringify(bridgePids)}, 'a') as output: output.write(json.dumps({'binary':binary,'pid':os.getpid()})+'\\n')`,
     "for line in sys.stdin:",
     " q=json.loads(line); m=q['method']; p=q.get('params',{}); r={}",
@@ -139,7 +108,6 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
   mkdirSync(runtimeCache);
   const prior = { ...process.env };
   let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
-  let stagedBinary: string | undefined;
   const diagnostics: string[] = [];
   try {
     delete process.env.WS_PI_SPAWN_ROLE;
@@ -160,11 +128,8 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
     await session.bindExtensions({ mode: "tui", uiContext: ui as never, onError: (error) => { throw error; } });
     await waitForFile(observed).catch((error) => { throw new Error(`${error.message}\n${diagnostics.join("\n")}`); });
     const waitsSoFar = () => readFileSync(observed, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-    const firstBinary = waitsSoFar()[0].binary;
-    stagedBinary = firstBinary;
-    assert.match(firstBinary, /[/\\]local-devenv[/\\]\.mailbox-[^/\\]+[/\\]ws-mcp(?:\.exe)?$/);
-    assert.deepEqual(readdirSync(join(plugin, ".runtime", "local-devenv")).filter((name) => name.startsWith("ws-mcp.")), [], "the validated unique bootstrap is released after staging");
-    assert.ok(existsSync(firstBinary));
+    assert.equal(waitsSoFar()[0].binary, launcher);
+    assert.deepEqual(readdirSync(join(plugin, ".runtime", "local-devenv")), [], "bootstrap and metadata released after bridge startup");
     const originalRuntime = readFileSync(runtimeJsonPath, "utf8");
     const updatedRuntime = JSON.parse(originalRuntime);
     updatedRuntime.plugin_version = "99.99.99";
@@ -173,7 +138,7 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
     for (let i = 0; i < 800 && waitsSoFar().length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     const firstTwo = waitsSoFar();
     assert.equal(firstTwo.length, 2, `the mailbox waiter must re-arm after runtime.json changes: ${diagnostics.join(" | ")}`);
-    assert.deepEqual(firstTwo.map((wait) => [wait.binary, wait.version]), [[firstBinary, runtimeVersion], [firstBinary, "99.99.99"]]);
+    assert.deepEqual(firstTwo.map((wait) => wait.binary), [launcher, launcher]);
 
     // Restore the bridge's pinned version before a new connection; changing
     // runtime.json was only the in-flight re-arm test, not a valid new launch.
@@ -182,9 +147,7 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
     // The next start supersedes it; the stale bridge's subprocess and unique
     // bootstrap must disappear rather than being lost when globals advance.
     const stopping = session.extensionRunner!.emit({ type: "session_shutdown", reason: "reload" });
-    assert.equal(existsSync(firstBinary), true, "shutdown cannot delete the running child before it closes");
     await stopping;
-    assert.equal(existsSync(firstBinary), false, "shutdown awaits the child and removes only its generation");
     writeFileSync(lookupDelay, "");
     const reloadOne = session.extensionRunner!.emit({ type: "session_start" });
     await waitForFile(lookupStarted).catch((error) => { throw new Error(`${error.message}\n${diagnostics.join("\n")}`); });
@@ -195,11 +158,10 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
     await Promise.all([reloadOne, reloadTwo]);
     for (let i = 0; i < 800 && waitsSoFar().length < 3; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(waitsSoFar().length >= 3, true, `new generation must arm: ${diagnostics.join(" | ")}`);
-    stagedBinary = waitsSoFar()[2].binary;
-    assert.notEqual(stagedBinary, firstBinary);
+    assert.equal(waitsSoFar()[2].binary, launcher);
     for (let i = 0; i < 800 && waitsSoFar().length < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.equal(waitsSoFar()[3]?.binary, stagedBinary, "a new generation also re-arms from its one staged copy");
-    assert.deepEqual(buildOutputs(), [], "both stale and active bootstraps are released after staging/disposal");
+    assert.equal(waitsSoFar()[3]?.binary, launcher, "the new generation also re-arms through Python");
+    assert.deepEqual(buildOutputs(), [], "both stale and active bootstraps are released after startup/disposal");
     const stalePath = join(plugin, ".runtime", "local-devenv", staleOutput);
     const pidRecord = readFileSync(bridgePids, "utf8").trim().split("\n").map((line) => JSON.parse(line)).find((record) => record.binary === stalePath);
     assert.ok(pidRecord, "the stale bridge must have launched its own subprocess");
@@ -238,9 +200,8 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
     const newerStart = session.extensionRunner!.emit({ type: "session_start" });
     await newerStart;
     for (let i = 0; i < 800 && waitsSoFar().length <= waitsBeforeNew; i += 1) await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.ok(waitsSoFar().length > waitsBeforeNew, "newer generation must arm its own direct child");
-    stagedBinary = waitsSoFar().at(-1)!.binary;
-    assert.equal(existsSync(stagedBinary), true);
+    assert.ok(waitsSoFar().length > waitsBeforeNew, "newer generation must arm its Python waiter");
+    assert.equal(waitsSoFar().at(-1)!.binary, launcher);
     const newerPid = JSON.parse(readFileSync(bridgePids, "utf8").trim().split("\n").at(-1)!).pid;
     assert.notEqual(newerPid, firstClaimPid);
     writeFileSync(shutdownRelease, "");
@@ -252,12 +213,10 @@ test("Pi session generations reuse immutable mailbox binaries and preserve recov
     assert.equal(isAlive(firstClaimPid), false, "claimed bridge must close once after persistence");
     assert.equal(isAlive(newerPid), true, "older shutdown cannot close the newer generation");
     assert.equal(stopCount(), stopsBeforeClaim + 1, "newer generation's tools must remain running");
-    assert.equal(existsSync(launcherUsed), false, "no re-arm may re-enter the release-backed launcher");
     assert.deepEqual(readdirSync(runtimeCache), [], "a primed launcher cache cannot mask the missing handoff");
   } finally {
     if (session) {
       await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
-      if (stagedBinary) assert.equal(existsSync(stagedBinary), false, "normal shutdown awaits child close and staged cleanup");
       session.dispose();
     }
     for (const key of Object.keys(process.env)) if (!(key in prior)) delete process.env[key];

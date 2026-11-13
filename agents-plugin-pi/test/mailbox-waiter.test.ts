@@ -17,7 +17,6 @@ import { tmpdir } from "node:os";
 import { dashboardUserMessage } from "../src/dashboard-feed.ts";
 import {
   afterCompactionHold,
-  attachMailboxRuntimeCleanup,
   boardSteerDeps,
   boardWakeOutcome,
   buildMailboxPushMessage,
@@ -34,7 +33,6 @@ import {
   resolveMailboxSelfSlug,
   sessionMailboxWaitOptions,
   shouldArmMailboxWaiter,
-  stageMailboxRuntime,
   startMailboxWaiter,
   WS_MAILBOX_CUSTOM_TYPE,
   WS_WHITEBOARD_CUSTOM_TYPE,
@@ -1006,87 +1004,8 @@ describe("buildMailboxPushMessage", () => {
   });
 });
 
-describe("stageMailboxRuntime", () => {
-  test("overlapping generations keep distinct executables across source replacement, including simulated Windows locks", async () => {
-    const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-generation-"));
-    const sourceDir = join(fixtureDir, "runtime");
-    await mkdir(sourceDir);
-    const source = join(sourceDir, "ws-mcp");
-    await writeFile(source, "first");
-    await chmod(source, 0o751);
-    const first = stageMailboxRuntime(source);
-    const locked = stageMailboxRuntime(source, () => { throw Object.assign(new Error("sharing violation"), { code: "EPERM" }); });
-    try {
-      await writeFile(source, "second");
-      const second = stageMailboxRuntime(source);
-      try {
-        assert.notEqual(first.binaryPath, second.binaryPath);
-        assert.notEqual(locked.binaryPath, second.binaryPath);
-        assert.equal(await readFile(first.binaryPath, "utf8"), "first");
-        assert.equal(await readFile(second.binaryPath, "utf8"), "second");
-        if (process.platform !== "win32") assert.equal((await stat(second.binaryPath)).mode & 0o777, 0o751);
-        assert.doesNotThrow(locked.cleanup, "Windows locked-file cleanup must not break shutdown");
-        first.cleanup();
-        assert.equal(existsSync(first.binaryPath), false);
-        assert.equal(existsSync(second.binaryPath), true, "a delayed old-generation cleanup cannot delete the new generation");
-      } finally {
-        second.cleanup();
-      }
-    } finally {
-      first.cleanup();
-      await rm(fixtureDir, { recursive: true, force: true });
-    }
-  });
-
-  test("stop waits for actual child close before removing its staged executable", async () => {
-    const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-close-"));
-    const sourceDir = join(fixtureDir, "runtime");
-    await mkdir(sourceDir);
-    const source = join(sourceDir, process.platform === "win32" ? "ws-mcp.exe" : "ws-mcp");
-    const ready = join(fixtureDir, "ready");
-    if (process.platform === "win32") {
-      const goFile = join(fixtureDir, "wait-probe.go");
-      await writeFile(goFile, [
-        "package main",
-        `import ("os";"time")`,
-        `func main() { _=os.WriteFile(${JSON.stringify(ready)},[]byte("ready"),0600); time.Sleep(30*time.Second) }`,
-      ].join("\n"));
-      execFileSync(process.env.WS_PI_TEST_GO ?? "go", ["build", "-o", source, goFile], { cwd: fixtureDir, timeout: 120_000 });
-    } else {
-      await writeFile(source, [
-        "#!/usr/bin/env python3",
-        "import signal,time,sys",
-        "def stop(_signal, _frame):",
-        " time.sleep(0.25)",
-        " sys.exit(130)",
-        "signal.signal(signal.SIGTERM, stop)",
-        `open(${JSON.stringify(ready)}, 'w').close()`,
-        "time.sleep(30)",
-        "",
-      ].join("\n"));
-      await chmod(source, 0o755);
-    }
-    const staged = stageMailboxRuntime(source);
-    const waiter = attachMailboxRuntimeCleanup(startMailboxWaiter({
-      runWait: createSubprocessWait({ launcherPath: "unused", pluginDir: fixtureDir, runtimeBinary: staged.binaryPath, sessionKey: "key" }),
-      drainMail: async () => [], admit: () => {},
-    }), staged);
-    try {
-      await waitForFile(ready);
-      waiter.stop();
-      assert.equal(existsSync(staged.binaryPath), true, "abort alone cannot unlink a still-running executable");
-      await waiter.done;
-      assert.equal(existsSync(staged.binaryPath), false);
-    } finally {
-      waiter.stop();
-      await waiter.done;
-      await rm(fixtureDir, { recursive: true, force: true });
-    }
-  });
-});
-
 describe("createSubprocessWait", () => {
-  test("a release-backed session retains the Python launcher invocation without an override", async () => {
+  test("source and release sessions invoke Python with the same launcher command", async () => {
     const fixtureDir = await mkdtemp(join(tmpdir(), "ws-mailbox-release-"));
     const launcherPath = join(fixtureDir, "inspect-argv.py");
     const observedPath = join(fixtureDir, "observed");
@@ -1098,10 +1017,12 @@ describe("createSubprocessWait", () => {
       "",
     ].join("\n"));
     try {
-      const options = sessionMailboxWaitOptions({ launcherPath, pluginDir: fixtureDir, sessionKey: "my-key", cwd: fixtureDir });
-      assert.equal(options.runtimeBinary, undefined);
-      assert.equal(await createSubprocessWait(options)(new AbortController().signal), "timeout");
-      assert.deepEqual(JSON.parse(await readFile(observedPath, "utf8")), buildMailboxWaitArgv(options).slice(1));
+      for (const source of [false, true]) {
+        if (source) await writeFile(join(fixtureDir, ".local-devenv-runtime"), "{}");
+        const options = sessionMailboxWaitOptions({ launcherPath, pluginDir: fixtureDir, sessionKey: "my-key", cwd: fixtureDir });
+        assert.equal(await createSubprocessWait(options)(new AbortController().signal), "timeout");
+        assert.deepEqual(JSON.parse(await readFile(observedPath, "utf8")), buildMailboxWaitArgv(options).slice(1));
+      }
     } finally {
       await rm(fixtureDir, { recursive: true, force: true });
     }
@@ -1163,7 +1084,7 @@ describe("createSubprocessWait", () => {
       if (existsSync(pidPath)) {
         try { process.kill(Number(await readFile(pidPath, "utf8"))); } catch { /* The child may already have exited. */ }
       }
-      await rm(fixtureDir, { recursive: true, force: true });
+      await rm(fixtureDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   });
 
@@ -1411,14 +1332,13 @@ describe("buildMailboxWaitArgv", () => {
 describe("sessionMailboxWaitOptions", () => {
   test("the session cwd becomes the wait's --root, not the launcher dir", () => {
     const onStderr = (): void => {};
-    const options = sessionMailboxWaitOptions({ launcherPath: "/plug/bin/l.py", pluginDir: "/plug", runtimeBinary: "/local/ws-mcp", sessionKey: "k", slug: "scout@worktree", cwd: "/work/tree", onStderr });
-    assert.deepEqual(options, { launcherPath: "/plug/bin/l.py", pluginDir: "/plug", runtimeBinary: "/local/ws-mcp", sessionKey: "k", slug: "scout@worktree", root: "/work/tree", onStderr });
+    const options = sessionMailboxWaitOptions({ launcherPath: "/plug/bin/l.py", pluginDir: "/plug", sessionKey: "k", slug: "scout@worktree", cwd: "/work/tree", onStderr });
+    assert.deepEqual(options, { launcherPath: "/plug/bin/l.py", pluginDir: "/plug", sessionKey: "k", slug: "scout@worktree", root: "/work/tree", onStderr });
     assert.deepEqual(buildMailboxWaitArgv(options).slice(-4), ["--root", "/work/tree", "--slug", "scout@worktree"]);
   });
 
   test("a reply-id-only session wait still carries the session root", () => {
     const options = sessionMailboxWaitOptions({ launcherPath: "/l", pluginDir: "/p", sessionKey: "k", slug: undefined, cwd: "/work/tree" });
-    assert.equal(options.runtimeBinary, undefined, "release-backed sessions use the launcher");
     assert.deepEqual(buildMailboxWaitArgv(options), ["/l", "mailbox", "wait", "--session-key", "k", "--timeout", "10m", "--format", "json", "--root", "/work/tree"]);
   });
 });
@@ -1542,19 +1462,9 @@ describe("createMailboxWaiterSlot", () => {
     let lingeringDone = false;
     void lingering.done.then(() => { lingeringDone = true; });
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(lingeringDone, false, "a replaced waiter still closing keeps the slot (and its staged runtime) alive");
+    assert.equal(lingeringDone, false, "a replaced waiter still closing keeps the slot alive");
     replaced[0]!.close();
     await lingering.done;
-  });
-
-  test("a slot that never armed is done once stopped, so a staged runtime is still cleaned up", async () => {
-    const slot = createMailboxWaiterSlot({ resolveSlug: async () => undefined, start: () => { throw new Error("must not start"); } });
-    let cleaned = 0;
-    attachMailboxRuntimeCleanup(slot, { binaryPath: "unused", cleanup: () => { cleaned += 1; } });
-    slot.stop();
-    await slot.done;
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(cleaned, 1);
   });
 
   test("leadSettled reaches only the live waiter", async () => {
