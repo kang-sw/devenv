@@ -1,5 +1,6 @@
 ---
 title: "pi.spawn children show in the dashboard agents pane as ordinary subagents"
+completed: 2026-11-13
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 052b2eb101e5027d
@@ -134,3 +135,59 @@ Read-only investigation (2026-11-13):
   ownership isolation, and reset replay for the intake-fed path.
 - Verification: `go test` for the touched packages on the remote build host;
   a live check (lead runs `pi.spawn`, pane shows the row) is the owner's.
+
+### Result (a24900b7c) - 2026-11-13
+
+Implemented in `a24900b7c`; independent-review repairs in `bbc5bf150`.
+
+- Shared daemon projection supplies direct children and recursive descendants as
+  ordinary `wslive` agent events. Hosted leads use their runner-owned writer;
+  intake-fed leads use their existing per-connection live state. Hosted intake
+  remains disabled, and `agentTree`, counts and row rendering need no Pi branch.
+- Hosted writers refresh on coalesced ancestor wakes, reset and startup after
+  all records load. One listing builds adjacency per invalidation; ordinary
+  stream writes and heartbeats reuse cached rows. A lead harness exit does not
+  fail independently held daemon workers.
+- Snapshot merging preserves daemon identity, nesting and lifecycle while
+  retaining native activity/telemetry. Native and daemon producer rows share one
+  retention lifecycle/history slot; alias/delegate-identity tombstones prevent
+  stale native revival within the existing bounded eviction window. Each
+  producer keeps its mutable event target.
+- Failed open workers recover their diagnostic from existing durable turn state;
+  mapped failures publish that diagnostic before settlement reaches watchers.
+  A genuine next turn clears it. Closed rows deliberately project done both
+  before and after their loop leaves memory.
+- **Compatibility confirmed T0:** no tool/protocol or JSON/store-shape change,
+  no new user-facing string, and no new optional store field was needed.
+- Tests cover hosted Claude direct/nested rows, ownership isolation, duplicate
+  activity preservation, lead-process exit, holder replacement, failed-worker
+  replacement, new-turn/close transitions, real mapped Pi failure/watch delivery,
+  recursive intake reconnect/reset replay, ordinary page nesting/counts,
+  either-arrival-order deduplication, retention-cap crossings and discovery cost.
+- **Verification:** w5090 sys_lock job
+  `785d5a60937c4f41ba7a47d8cb8824bd` exited 0 after focused regressions,
+  `go test ./internal/wsagent ./internal/mcp ./internal/wslive ./internal/wsdashboard
+  -count=1 -timeout=8m`, focused `-race` coverage across those four packages, and
+  `go build -o /dev/null ./cmd/ws-mcp`. No tests in those package runs were
+  excluded. `git diff --check` passed. Earlier fixture checks were corrected
+  for existing report auto-resume/closed-record semantics; a late-first-alias
+  regression exposed and drove the delegate-identity tombstone repair.
+- **Independent review:** full-scope round 1 found C1 (failure recovery/emission),
+  C2 (alias retention), and I1 (repeated global discovery). All were repaired;
+  fixes-only round 2 read `a24900b7c..bbc5bf150` and returned clean, with none of
+  the original findings unresolved. Review used the bundled reviewer wrapper
+  and contract directly because Pi exposes no render tool.
+- **Workflow adaptation:** the lead supplied the route on
+  `impl/develop/chaps-lung-lego` and waived unavailable manual/route calls.
+  Native Git in the assigned worktree was used because the mandatory ws tool
+  session was bound to the lead root; ticket acquisition/close tools were not
+  exposed, so closure uses the documented native `git mv` fallback. No merge or
+  push was performed.
+- **Deferred verification:** the owner retains the live pane check. No shared
+  dashboard daemon restart/replacement was performed; replacement coverage uses
+  isolated fake holders. Node/Claude-mod tests were not run because adapter
+  code was unchanged.
+- **Dogfood follow-up:** `8d0810de4` records
+  `261113-bug-pi-wait-mcp-request-times-out-before-requested-wait`: a requested
+  1000-second review wait received a 60-second MCP request timeout. The reviewer
+  kept running and completed normally; no timeout implementation was changed.
