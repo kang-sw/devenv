@@ -1,5 +1,6 @@
 ---
 title: "Pi completion mail has an unknown sender"
+completed: 2026-11-13
 ---
 
 # Pi completion mail has an unknown sender
@@ -78,3 +79,41 @@ body's first line tells the reader to reply with `pi.send(id: <id>)`.
    `ai-docs/manuals/release-compatibility.md` before editing `internal/mcp/`;
    run `go test ./internal/mcp/... ./internal/wsmailbox/... ./internal/wsagent/...`
    and the Pi/Claude-mod node tests.
+
+### Result (ca701289d) - 2026-11-13
+
+- Added optional, display-only `Envelope.Label` and a label parameter to
+  `PostSystem`. Pi completion mail uses `pi:<child id>` and starts its body
+  with `Reply with pi.send(id: <id>), not mailbox.send.` `ReportText` is
+  unchanged for worker steering; `From` and `ReplyTo` remain empty.
+- Go push/recv/history, Pi push details, and Claude push/captions show the
+  label after real reply handles. Returned push text restores non-address
+  handles as `Label`, never as a contact. Existing unknown/system fallbacks
+  remain; tests pin the same labelled push literal in Go and both adapters,
+  address rejection, no contact pollution, and old-shape rendering.
+- Canonical Claude mod and wsflow mirror remain byte-identical. Updated the
+  MCP operations manual on contact.
+- Merged develop through `3f882b14f` in `569c7817a` at the lead's request.
+  Preserved streamed mailbox waits and both optional envelope fields
+  (`label`, `undelivered_notified`); undelivered notices pass an empty label.
+- Post-merge verification: locked w5090 full `go test ./...` passes with
+  only the explicitly known
+  `TestHostedConnectionSeeingALANChangeReplacesTheDaemon` excluded. Local
+  locked Pi mailbox + stream suites: 111 passed; isolated Claude watcher
+  suite: 130 passed. Go formatting and `git diff --check` were clean.
+- Self-review and merge review: no remaining substantive findings.
+- **Forward:** the broader local Pi package run (`npm test --
+  --test-concurrency=2`, Windows Node 25.7.0) completed with 2411 passed,
+  205 failed, 28 skipped. Representative `web-search.test.ts` failures at
+  lines 146 and 244 reproduce unchanged on pre-ticket base `69481b31c`:
+  Windows `d:` ESM URLs and unavailable symlink privilege (`EPERM`). Other
+  full-package failures include unrelated fixture/runtime/skill assumptions
+  and were not individually investigated; they are not claimed all to be
+  baseline-proven. The required changed-surface suites pass. An earlier
+  load-dependent readiness failure passes in isolation on both base and tip.
+
+## Resolution
+
+Phase 1 completed, including develop integration and affected-check reruns.
+T0 additive optional field; no schema or mailbox-address semantic change.
+Broader Windows Pi-suite limitations are recorded once in Forward above.
