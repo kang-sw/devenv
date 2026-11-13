@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0d82df5c03233044
 sage-review-completeness-reviewed: 0d82df5c03233044
+completed: 2026-11-14
 ---
 
 # Playbook spawn idiom and delegate resolve_agent
@@ -153,6 +154,53 @@ Two shipped playbook text issues, independent of the Pi allowlist:
   while other `config.*` writes stay refused; a rendered
   `ticket-worker-elevated` for an MCP-only Pi caller names `pi.spawn` with the
   resolved tier.
+
+### Result (4f057f53b) - 2026-11-14
+
+- Switch signal: the render caller's daemon conversation record, found
+  through `wsmailbox.ReplyID(session_key)` and naming that exact key
+  (`Server.callerPiMCPOnly`), judged by the new `wsagent.PiMCPOnly(rec, def)`:
+  a spawned Pi record is MCP-only unless a plugin path of its launched profile
+  (`ResolvedDefinition`, else the profile its name resolves to) sits under a
+  `package.json` named `ws-pi-bridge`; a hosted Pi lead is MCP-only when
+  `PluginWarning` is non-empty (the bridge fallback). The detected harness is
+  not consulted, so a `builtin:mcp` session detected as `""` still switches.
+  No Record field was added; tier stays T0.
+- MCP-only row (`piMCPOnlyTerminology`, namespace-assembled):
+  `SpawnIdiom` = `` `ws/pi.spawn` (tier: the resolved capability tier, not a
+  model name) ``, `ExploreAgent` = a `ws/pi.spawn` subagent at tier small,
+  briefed for read-only work, `ContinueIdiom` = `ws/pi.send to the same
+  subagent id`. The native `pi` row is unchanged.
+- The caller key reaches `playbook.render`, `playbook.read`, and
+  `workflow_manual` through `renderPlaybookBodyForCaller` /
+  `printPlaybookForCaller`; the old signatures delegate with an empty key.
+- `roleAllowsTool` allows `config.resolve_agent` for the delegate role; leaf
+  stays refused, `config.tune`/`config.list` stay refused for delegates.
+- No playbook text changed: the `ticket-worker-elevated` resolve step stays
+  ((511)=b) and the MCP-only `SpawnIdiom` carries the tier, so the three rsrc
+  copies and both manifests needed no edit (the Mirrors decision anticipated
+  one).
+- Verification: new `TestPiMCPOnly` (wsagent); `TestPlaybookTerminologyPiMCPOnlyRow`,
+  `TestPlaybookRenderPiSpawnedCallerUsesMCPOnlyIdioms`,
+  `...WithoutSnapshotResolvesProfile`, `TestPlaybookRenderHostedPiLeadSwitchesOnBridgeFallback`
+  (bridge fallback vs native via `initialize` clientInfo `ws-pi-bridge`),
+  `TestPlaybookRenderUnrecordedCallerKeepsHarnessRow`,
+  `TestPlaybookReadPiSpawnedCallerUsesMCPOnlyIdioms` (b65b3afeb), and the
+  delegate/leaf `config.resolve_agent` cases in
+  `TestCapabilityScopedKeyGatesTools` all pass (mutation-checked: removing the
+  switch or the allowlist entry fails them). `go test ./...`: every package
+  passes except pre-existing base failures in `internal/mcp`
+  (`TestRenderDispatchSeparatesResourceAndWorktreeRoots`,
+  `TestRenderFromWorktreeSessionCommitsInThatWorktree`,
+  `TestRenderPathMintedChildRecordsLeadParent`: `/var` vs `/private/var`) and
+  `internal/wsagent` (`TestPiLeadResolverAdapter`: installed Pi SDK lacks the
+  extension resolver), both reproduced on 0b6180fbf. `internal/wsrsrc`
+  (`TestPiMirrorUpToDate`) and `python3 -m unittest discover
+  agents-plugin-wsflow/tests` (24 tests) pass.
+- Lite review: clean; minor follow-up — the builtin `pi-worker` /
+  `pi-mini-lead` ws-tool allowlists do not include `config.resolve_agent`, so
+  a default Pi child still cannot reach it (allowlist scope belongs to
+  `261113-feat-ws-pi-mini-lead-profile`).
 
 ## Sage Review Round 1 (2026-11-13)
 
