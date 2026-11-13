@@ -465,15 +465,16 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
-// TestPinnedColumnWidth pins the pinned column's width handles (cards.js
-// buildCol, edgeHandle), the whole script executed under node over the
-// minimal DOM when node is installed: the column has a handle on each
-// edge, and dragging either outward (right on the right edge, left on the
-// left edge, where it meets the board) widens the column live through
-// --pinw; the width stops at PINW_MIN and at half the window, is saved
-// with the pins on release, and comes back after a reload; a double click
-// goes back to the stylesheet's width; a press of another button drags
-// nothing.
+// TestPinnedColumnWidth pins the board-width handle on the pinned column
+// (cards.js buildCol, edgeHandle), the whole script executed under node
+// over the minimal DOM when node is installed: the column fills the window
+// right of the board, so it has one handle, on its left edge where it
+// meets the board, and dragging it resizes the board's .dgrid cell live
+// through --boardw; the width stops at BOARDW_MIN and where the column
+// would drop below PINW_MIN, is saved with the pins (bw) on release, and
+// comes back after a reload; a double click goes back to the stylesheet's
+// width; a press of another button drags nothing; a stored w (the
+// column's own width from before) is dropped.
 func TestPinnedColumnWidth(t *testing.T) {
 	data, err := dashboardFS.ReadFile("assets/cards.js")
 	if err != nil {
@@ -484,52 +485,52 @@ func TestPinnedColumnWidth(t *testing.T) {
 		t.Fatal(err)
 	}
 	runNode(t, "pinned column width", "var CARDS = "+string(src)+";\n"+cardsDOM+`
-var store = {}, colW = 480;
+var store = {}, colW = 600, cellW = 1000;
 function served() { return [topic("a", 300), reply()]; }
 function start() {
   boot(store, served, { wide: true });
+  page.board.classList.add("dgrid");
+  page.board.getBoundingClientRect = function () { return { top: 0, bottom: 0, left: 0, right: cellW, width: cellW, height: 0 }; };
   page.col.getBoundingClientRect = function () { return { top: 0, bottom: 0, left: 0, right: colW, width: colW, height: 0 }; };
 }
 start();
-// The window is 2000px wide (boot), so half of it is 1000px.
-function pinw() { return page.doc.documentElement.style.props["--pinw"] || null; }
-function savedW() { return store.cards ? JSON.parse(store.cards).w : 0; }
-function edge(side) { return page.col.querySelector('.bp-edge[data-edge="' + side + '"]'); }
+function boardw() { return page.doc.documentElement.style.props["--boardw"] || null; }
+function savedW() { return store.cards ? JSON.parse(store.cards).bw : 0; }
 function ev(x, button) { return { button: button === undefined ? 0 : button, clientX: x, pointerId: 1, preventDefault: function () {} }; }
 function drag(e, by) { e.fire("pointerdown", ev(1000)); e.fire("pointermove", ev(1000 + by)); }
 function release(e) { e.fire("pointerup", ev(1000)); }
-check("the column has a handle on each edge", page.col.querySelectorAll(".bp-edge").map(function (e) { return e.getAttribute("data-edge"); }).sort(), ["left", "right"]);
-// out is the pointer's direction that widens the column at that edge.
-[["right", 1], ["left", -1]].forEach(function (h) {
-  var side = h[0], out = h[1], e = edge(side);
-  colW = 480;
-  drag(e, out * 100);
-  check(side + ": dragging outward widens the column live", [pinw(), e.classList.contains("drag"), savedW()], ["580px", true, 0]);
-  release(e);
-  check(side + ": the release saves the width with the pins", [savedW(), e.classList.contains("drag")], [580, false]);
-  colW = 580;
-  drag(e, -out * 60);
-  release(e);
-  check(side + ": dragging inward narrows it", [pinw(), savedW()], ["520px", 520]);
-  colW = 520;
-  drag(e, -out * 1000);
-  release(e);
-  check(side + ": it stops at PINW_MIN", [pinw(), savedW()], ["280px", 280]);
-  colW = 280;
-  drag(e, out * 5000);
-  release(e);
-  check(side + ": it stops at half the window", [pinw(), savedW()], ["1000px", 1000]);
-  e.fire("dblclick", {});
-  check(side + ": a double click goes back to the stylesheet's width", [pinw(), savedW()], [null, 0]);
-  e.fire("pointerdown", ev(1000, 2));
-  e.fire("pointermove", ev(1000 + out * 100));
-  check(side + ": another button drags nothing", pinw(), null);
-});
-colW = 480;
-drag(edge("left"), -160);
-release(edge("left"));
+var hs = page.col.querySelectorAll(".bp-edge");
+check("the column has one handle, on its left edge", hs.map(function (e) { return e.getAttribute("data-edge"); }), ["left"]);
+var e = hs[0];
+drag(e, 100);
+check("dragging right widens the board live", [boardw(), e.classList.contains("drag"), savedW()], ["1100px", true, 0]);
+release(e);
+check("the release saves the board's width with the pins", [savedW(), e.classList.contains("drag")], [1100, false]);
+cellW = 1100; colW = 500;
+drag(e, -60);
+release(e);
+check("dragging left narrows it", [boardw(), savedW()], ["1040px", 1040]);
+cellW = 1040; colW = 560;
+drag(e, -5000);
+release(e);
+check("it stops at BOARDW_MIN", [boardw(), savedW()], ["400px", 400]);
+cellW = 400; colW = 1200;
+drag(e, 5000);
+release(e);
+check("it stops where the column keeps PINW_MIN", [boardw(), savedW()], ["1320px", 1320]);
+e.fire("dblclick", {});
+check("a double click goes back to the stylesheet's width", [boardw(), savedW()], [null, 0]);
+e.fire("pointerdown", ev(1000, 2));
+e.fire("pointermove", ev(1100));
+check("another button drags nothing", boardw(), null);
+cellW = 1000; colW = 600;
+drag(e, -160);
+release(e);
 start();
-check("a reload brings the width back", pinw(), "640px");
+check("a reload brings the width back", boardw(), "840px");
+store.cards = JSON.stringify({ cards: [], topics: [], w: 640 });
+start();
+check("a stored column width is dropped", [boardw(), JSON.parse(store.cards || "{}").w], [null, undefined]);
 process.stdout.write(bad.join("\n"));
 `)
 }
