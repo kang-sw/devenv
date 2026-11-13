@@ -692,7 +692,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .tm-host { flex: 1 1 0; min-height: 0; overflow: hidden; background: var(--wb-card); }
 .tm-host .xterm { height: 100%; padding: 4px 0 4px 10px; }
 .tm-host .xterm-viewport { background: transparent !important; }
-.tm-gap { flex: none; display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 12px; font-size: 12px; color: var(--wb-warn-ink); background: color-mix(in srgb, var(--wb-warn) 12%, var(--wb-card)); }
+.tm-gap { flex: none; display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 12px; font-size: 12px; color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); background: color-mix(in srgb, var(--wb-warn) 12%, var(--wb-card)); }
 .tm-gap[hidden] { display: none; }
 .tm-gap > span { flex: 1 1 auto; min-width: 0; }
 .tm-note { padding: 14px 16px; font-size: 13px; color: var(--wb-muted-fg); }
@@ -985,7 +985,7 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
 .hdrow.lost { background: color-mix(in srgb, var(--wb-warn) 10%, var(--wb-card)); }
 .hdrow.lost .wtdot { background: var(--wb-warn); opacity: 1; }
 .hdmeta { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
-.hdcause { color: var(--wb-warn-ink); }
+.hdcause { color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); }
 .hdunsafe { color: var(--wb-fail); font-weight: 700; cursor: help; }
 .hdstop { height: 26px; padding: 0 10px; font-size: 12px; }
 .hdstop:disabled { opacity: .5; cursor: not-allowed; }
@@ -1844,7 +1844,7 @@ html:not([data-sysopen]) .rail .rdel { display: none; }
    subagent badge; and the session menu's restart, shown only while broken */
 .host.sse.err { color: var(--wb-fail); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-fail) 70%, transparent); }
 .chip.fail { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); cursor: help; }
-.chip.mcpbad { background: color-mix(in srgb, var(--wb-warn) 16%, var(--wb-card)); color: var(--wb-warn-ink); cursor: help; }
+.chip.mcpbad { background: color-mix(in srgb, var(--wb-warn) 16%, var(--wb-card)); color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); cursor: help; }
 .sysline.fail, .sysline.retry { max-width: 92%; }
 .sysline .nt { min-width: 0; overflow-wrap: anywhere; }
 .sysline .nt .t { font-size: inherit; font-weight: inherit; }
