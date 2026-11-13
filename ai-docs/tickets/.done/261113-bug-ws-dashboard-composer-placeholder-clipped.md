@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 9074a7e2178b834a
 sage-review-completeness-reviewed: 9074a7e2178b834a
+completed: 2026-11-13
 ---
 
 # Dashboard composer placeholder is clipped on first render
