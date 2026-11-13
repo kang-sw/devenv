@@ -305,15 +305,16 @@ func TestPlanUsageCancelledViewerStoresSuccess(t *testing.T) {
 
 func TestPlanUsageRefreshSameOrigin(t *testing.T) {
 	for _, tc := range []struct {
-		name, site, origin string
-		wantCalls          int32
+		name, site, origin, refreshHeader string
+		wantCalls                         int32
 	}{
-		{"foreign", "cross-site", "http://foreign.example", 0},
-		{"same-site", "same-site", "http://other.example", 0},
-		{"missing", "", "", 0},
-		{"opaque", "", "null", 0},
-		{"fetch-same-origin", "same-origin", "", 1},
-		{"matching-origin", "", "http://dashboard.example", 1},
+		{"foreign", "cross-site", "http://foreign.example", "", 0},
+		{"same-site", "same-site", "http://other.example", "", 0},
+		{"missing", "", "", "", 0},
+		{"opaque", "", "null", "", 0},
+		{"fetch-same-origin", "same-origin", "", "", 1},
+		{"matching-origin", "", "http://dashboard.example", "", 1},
+		{"refresh-header", "", "", "1", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := usageTestStore(t)
@@ -333,6 +334,7 @@ func TestPlanUsageRefreshSameOrigin(t *testing.T) {
 			r := httptest.NewRequest("GET", "http://dashboard.example/rail/usage?refresh=1", nil)
 			r.Header.Set("Sec-Fetch-Site", tc.site)
 			r.Header.Set("Origin", tc.origin)
+			r.Header.Set("X-WS-Usage-Refresh", tc.refreshHeader)
 			w := httptest.NewRecorder()
 			d.handlePlanUsage(w, r)
 			if w.Code != http.StatusOK || calls.Load() != tc.wantCalls {

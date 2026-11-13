@@ -17,7 +17,7 @@ func TestPanelShutPersistence(t *testing.T) {
 	if constants == "" || listener == "" {
 		t.Fatal("dashboard.js holds no panel shut constants or toggle listener")
 	}
-	src := dashboardFuncs(t, "isPanel", "shutId", "shutList", "shutHas", "shutPut", "isPeer", "openKey", "restoreOpenOne", "restoreOpen")
+	src := dashboardFuncs(t, "isPanel", "shutId", "shutList", "shutHas", "shutPut", "isPeer", "openKey", "restoreOpenOne", "restoreOpen", "restoreDraft")
 	runNode(t, "panel shut persistence", frameDOM+constants+src+`
 var rid = "session-a", openState = {}, PEER_KEY = "p.", railSets = null;
 var storage = {};
@@ -62,13 +62,29 @@ var reopened = panel("entry:e1", true);
 restoreOpenOne(reopened);
 check("reopening survives another reload", reopened.open);
 
-// Draft/in-memory open state takes precedence over an old stored collapse.
+// In-memory open state takes precedence over an old stored collapse.
 shutPut(shutId(p), true);
 openState[openKey(p)] = true;
 var preferred = panel("entry:e1", false); doc.appendChild(preferred);
 check("the conflicting collapse is present before restore", shutHas(shutId(preferred)));
 restoreOpenOne(preferred);
 check("stored openState entry wins over the shut list", preferred.open);
+tick();
+
+// Restore a stored draft through the production guard, not just restoreOpenOne.
+openState = {}; shutSet = null;
+var draftFolded = panel("entry:draft-folded", false); doc.appendChild(draftFolded);
+shutPut(shutId(draftFolded), true);
+var ctext = null, cchips = null, ccmd = null, live = false, restoring = false;
+function region() { return null; }
+var draftStore = { load: function (id) {
+  check("the draft is loaded for this session", id === rid);
+  return { open: { "k:entry:draft-folded": true, "k:entry:draft-control": true } };
+} };
+var draftControl = panel("entry:draft-control", false); doc.appendChild(draftControl);
+restoreDraft();
+check("a stored draft cannot reopen a hand-folded entry panel", !draftFolded.open && !openState["k:entry:draft-folded"]);
+check("a stored draft opens an entry panel not in the shut list", draftControl.open && openState["k:entry:draft-control"]);
 tick();
 
 // LRU: touching an existing id moves it to the newest end without duplicates.

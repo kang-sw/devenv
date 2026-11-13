@@ -68,7 +68,7 @@
     }
     function refresh(force) {
       if (pending) return pending;
-      pending = window.fetch("/rail/usage" + (force ? "?refresh=1" : ""), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      pending = window.fetch("/rail/usage" + (force ? "?refresh=1" : ""), { credentials: "same-origin", cache: "no-store", headers: force ? { "X-WS-Usage-Refresh": "1" } : {} }).then(function (r) {
         if (!r.ok) throw new Error("usage unavailable");
         return r.json();
       }).then(function (next) {

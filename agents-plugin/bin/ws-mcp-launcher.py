@@ -1879,7 +1879,8 @@ def main() -> int:
     cli_uses_daemon = mode == "cli" and not inspection and usable_daemon
     need_install = False
     if cli_uses_daemon:
-        # Waits and hooks consume the running daemon, even with a forced local install.
+        # Every CLI-mode non-inspection command reuses a usable daemon,
+        # taking priority over bootstrap_forced and forced local installs.
         pass
     elif bootstrap_forced:
         note("forcing runtime install from bootstrap binary or url")

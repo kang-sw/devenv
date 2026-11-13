@@ -269,6 +269,7 @@ func (r *Runner) Reopen(id string) (State, error) {
 		return State{}, conflict("the session is open")
 	}
 	delete(r.closed, id)
+	delete(r.closedRows, id)
 	r.mu.Unlock()
 	rec.ClosedAt = ""
 	err = writeRecord(wsdashboard.SessionDir(r.opts.Dir, id), rec)
