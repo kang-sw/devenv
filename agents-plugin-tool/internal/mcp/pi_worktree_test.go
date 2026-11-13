@@ -69,7 +69,7 @@ func TestPiSpawnBindsKeysToCwdWorktree(t *testing.T) {
 	leadKey := mailboxLogin(t, s, 1, root)
 
 	start := 0
-	check := func(child piChildOut, wantRoot, wantCwd, branch string, parent wsagent.ParentRef) wsagent.StartSpec {
+	check := func(child piChildOut, wantCwd, branch string, parent wsagent.ParentRef) wsagent.StartSpec {
 		t.Helper()
 		spec, proc := backend.waitStart(t, start)
 		start++
@@ -79,43 +79,45 @@ func TestPiSpawnBindsKeysToCwdWorktree(t *testing.T) {
 			t.Fatal(err)
 		}
 		entry, ok := s.sessions.lookup(rec.WSKey)
-		if !ok || entry.root != wantRoot || entry.scope != roleDelegate || entry.parent != "" {
-			t.Fatalf("child key = %+v, found=%v; want parentless delegate at %s", entry, ok, wantRoot)
+		if !ok || entry.root != wantCwd || entry.scope != roleDelegate || entry.parent != "" {
+			t.Fatalf("child key = %+v, found=%v; want parentless delegate at %s", entry, ok, wantCwd)
 		}
 		cwd := spec.Cwd
 		if cwd == "" {
 			cwd = spec.Root
 		}
-		if rec.Root != wantRoot || rec.Parent == nil || *rec.Parent != parent || spec.Root != wantRoot || cwd != wantCwd || child.Cwd != wantCwd {
+		if rec.Root != root || rec.Parent == nil || *rec.Parent != parent || spec.Root != root || cwd != wantCwd || child.Cwd != wantCwd {
 			t.Fatalf("root/cwd/ownership mismatch: record=%+v start=%+v child=%+v", rec, spec, child)
 		}
-		if spec.WSMCP == nil || spec.WSMCP.Args[len(spec.WSMCP.Args)-1] != wantRoot || spec.WSMCP.Env[wsagent.EnvPiToken] == "" {
+		if spec.WSMCP == nil || spec.WSMCP.Args[len(spec.WSMCP.Args)-1] != root || spec.WSMCP.Env[wsagent.EnvPiToken] == "" {
 			t.Fatalf("attached MCP root or capability token = %+v", spec.WSMCP)
 		}
 		instructions, err := os.ReadFile(spec.Instructions)
 		if err != nil || !strings.Contains(string(instructions), rec.WSKey) {
 			t.Fatalf("the harness must receive its worktree-bound key: %s, %v", instructions, err)
 		}
-		if err := keys.Ensure(wantRoot, rec.WSKey); err != nil {
+		if err := keys.Ensure(wantCwd, rec.WSKey); err != nil {
 			t.Fatalf("Ensure must agree with Mint: %v", err)
 		}
-		var status wsgit.StatusResult
-		raw := callToolWithKey(t, s, 2, rec.WSKey, "git.status", map[string]any{"format": "json"})
-		if err := json.Unmarshal([]byte(raw), &status); err != nil || status.Branch.Head != branch {
-			t.Fatalf("child's git.status = %s, %v; want branch %s", raw, err, branch)
+		if branch != "" {
+			var status wsgit.StatusResult
+			raw := callToolWithKey(t, s, 2, rec.WSKey, "git.status", map[string]any{"format": "json"})
+			if err := json.Unmarshal([]byte(raw), &status); err != nil || status.Branch.Head != branch {
+				t.Fatalf("child's git.status = %s, %v; want branch %s", raw, err, branch)
+			}
 		}
 		return spec
 	}
 	parent := wsagent.ParentRef{Kind: wsagent.ParentLead, ReplyID: s.mailboxReplyID(leadKey)}
 	var worker piChildOut
 	var workerSpec wsagent.StartSpec
-	for _, tc := range []struct{ name, cwd, root, branch string }{
-		{"default", "", root, "lead"},
-		{"lead root", root, root, "lead"},
-		{"lead subdir", "sub", root, "lead"},
-		{"worktree root", workerRoot, workerRoot, "worker"},
-		{"worktree subdir", filepath.Join(workerRoot, "sub"), workerRoot, "worker"},
-		{"plain folder", t.TempDir(), root, "lead"},
+	for _, tc := range []struct{ name, cwd, branch string }{
+		{"default", "", "lead"},
+		{"lead root", root, "lead"},
+		{"lead subdir", "sub", "lead"},
+		{"worktree root", workerRoot, "worker"},
+		{"worktree subdir", filepath.Join(workerRoot, "sub"), "worker"},
+		{"plain folder", t.TempDir(), ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := callToolWithKey(t, s, 3, leadKey, "pi.spawn", map[string]any{"prompt": "work", "tier": "medium", "cwd": tc.cwd, "format": "json"})
@@ -127,7 +129,7 @@ func TestPiSpawnBindsKeysToCwdWorktree(t *testing.T) {
 			if !filepath.IsAbs(cwd) {
 				cwd = filepath.Join(root, cwd)
 			}
-			spec := check(child, tc.root, cwd, tc.branch, parent)
+			spec := check(child, cwd, tc.branch, parent)
 			if tc.name == "worktree subdir" {
 				worker, workerSpec = child, spec
 			}
@@ -150,10 +152,10 @@ func TestPiSpawnBindsKeysToCwdWorktree(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &child); err != nil {
 			t.Fatalf("nested pi.spawn = %s: %v", raw, err)
 		}
-		wantRoot, branch := nestedRoot, "nested"
+		branch := "nested"
 		if cwd == "" {
-			wantRoot, branch, cwd = workerRoot, "worker", filepath.Join(workerRoot, "sub")
+			branch, cwd = "worker", filepath.Join(workerRoot, "sub")
 		}
-		check(child, wantRoot, cwd, branch, wsagent.ParentRef{Kind: wsagent.ParentConversation, ReplyID: worker.ID})
+		check(child, cwd, branch, wsagent.ParentRef{Kind: wsagent.ParentConversation, ReplyID: worker.ID})
 	}
 }

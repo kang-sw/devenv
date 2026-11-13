@@ -192,13 +192,36 @@ func TestRenderDispatchSeparatesResourceAndWorktreeRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, override := range []string{"", worktree} {
-		t.Run(map[bool]string{true: "override", false: "no-override"}[override != ""], func(t *testing.T) {
+	subdir := filepath.Join(worktree, "sub")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(cwd, subdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "linked-symlink")
+	for _, tc := range []struct{ name, override string }{
+		{"no-override", ""},
+		{"override", worktree},
+		{"relative-subdir", relative},
+		{"symlink", link},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "symlink" {
+				if err := os.Symlink(subdir, link); err != nil {
+					t.Skipf("symlink unavailable: %v", err)
+				}
+			}
 			wantRoot := repo
 			args := map[string]any{"name": "impl-pb", "session_key": leadKey}
-			if override != "" {
-				args["root_override"] = override
-				wantRoot = override
+			if tc.override != "" {
+				args["root_override"] = tc.override
+				wantRoot = worktree
 			}
 			resp := callToolOnce(t, s, 1, "playbook.render", args)
 			if toolIsError(t, resp) {

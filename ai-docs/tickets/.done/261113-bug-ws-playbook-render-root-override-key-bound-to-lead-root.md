@@ -1,5 +1,6 @@
 ---
 title: "playbook.render with root_override splices a child key bound to the lead root"
+completed: 2026-11-13
 ---
 
 # playbook.render with root_override splices a child key bound to the lead root
@@ -99,3 +100,32 @@ root). Record it in `## Decisions` when the queue settles.
 - Tests: a Pi spawn with a linked-worktree cwd yields a child key whose root
   and `git.status` resolve the worktree branch; render with a non-canonical
   `root_override` binds the canonical root.
+
+### Result (8d14fee74) - 2026-11-13
+
+- Pi worker keys are minted at the resolved cwd and ensured against
+  `rec.workDir()`; their ws MCP starts in that directory. Same-root spawn
+  retains its original key root.
+- Removed the existing whole-conversation worktree rebinding from spawn:
+  `rec.Root` and the MCP command/config anchor stay on the spawning root,
+  preserving mail and config anchoring for both lead and nested spawns.
+- `playbook.render` canonicalizes `root_override` with `canonicalGitRoot`
+  before artifact creation and child-key minting; its binding rule is unchanged.
+- Regression coverage uses real keys and linked worktrees for both spawn
+  paths, checks `git.status` branches and unchanged conversation anchors,
+  pins MCP cwd fallback/override, and covers relative-subdirectory and symlink
+  render overrides.
+- Verification ran only on w5090 through the FIFO remote lock:
+  `go test ./internal/wsagent/... ./internal/mcp/...` passed (20.094s / 147.427s).
+  One `go test ./...` run failed only on the known
+  `cmd/ws-mcp TestHostedConnectionSeeingALANChangeReplacesTheDaemon`
+  predecessor-exit timeout. Every other package passed, including `wsholder`.
+- Forward: none for this fix. Pi tool-list gaps remain owned by
+  `261112-research-ws-hosted-pi-missing-workflow-tools`.
+
+## Resolution
+
+Implemented the settled T0 Pi child key/MCP cwd separation and canonical render
+root overrides in `8d14fee74`. No tool, argument, store shape, or event changes.
+Targeted verification passed; the full suite has only the explicitly accepted
+w5090 daemon-replacement timeout. Tool exposure remains out of scope.

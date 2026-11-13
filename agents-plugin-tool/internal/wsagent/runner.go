@@ -558,8 +558,14 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		if key, err = r.opts.LeadKeys.MintLead(root); err != nil {
 			return State{}, fmt.Errorf("mint the lead session key: %w", err)
 		}
-	} else if key, err = r.opts.Keys.Mint(root); err != nil {
-		return State{}, fmt.Errorf("mint ws session key: %w", err)
+	} else {
+		keyRoot := root
+		if spawn != nil && rp.Definition.Backend == BackendPi && spawn.Cwd != "" {
+			keyRoot = spawn.Cwd
+		}
+		if key, err = r.opts.Keys.Mint(keyRoot); err != nil {
+			return State{}, fmt.Errorf("mint ws session key: %w", err)
+		}
 	}
 	now := r.opts.Now()
 	rec := Record{
@@ -1884,7 +1890,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 	}
 	instructions := ""
 	if !attach {
-		if err := c.r.opts.Keys.Ensure(rec.Root, rec.WSKey); err != nil {
+		keyRoot := rec.Root
+		if rec.Backend == BackendPi {
+			keyRoot = rec.workDir()
+		}
+		if err := c.r.opts.Keys.Ensure(keyRoot, rec.WSKey); err != nil {
 			return fmt.Errorf("ws session key: %w", err)
 		}
 		var err error

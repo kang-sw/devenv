@@ -2205,6 +2205,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// Determine worktree root: root_override (when set) or session-bound root.
 		var worktreeRoot string
 		if rootOverride != "" {
+			var err error
+			rootOverride, err = canonicalGitRoot(s.gitRunner(), rootOverride)
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
 			worktreeRoot = rootOverride
 		} else {
 			var err error

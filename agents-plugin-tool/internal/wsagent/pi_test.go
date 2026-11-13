@@ -150,6 +150,27 @@ func TestPiBridgeRegistersOnlyTheProfileServers(t *testing.T) {
 	}
 }
 
+func TestPiMCPServersUseWorkingDirectory(t *testing.T) {
+	for _, cwd := range []string{"", "/work", "/other-worktree"} {
+		t.Run(cwd, func(t *testing.T) {
+			spec := piSpec(t, `{"backend":"pi"}`)
+			spec.Root, spec.Cwd = "/work", cwd
+			spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
+			servers, err := piMCPServers(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := cwd
+			if want == "" {
+				want = spec.Root
+			}
+			if got := servers[ReservedMCPServer].(map[string]any)["cwd"]; got != want {
+				t.Fatalf("ws-mcp cwd = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestPiEnv(t *testing.T) {
 	got := piEnv([]string{"PATH=/bin", "WS_PI_ROLE=lead", "WS_MAILBOX=lead@m", "WS_MAILBOX_AUTO=1", "PI_SKIP_VERSION_CHECK=0", "HOME=/h"})
 	slices.Sort(got)
