@@ -712,8 +712,9 @@ func TestRenderPathMintedChildRecordsLeadParent(t *testing.T) {
 	if childEntry.scope != roleLeaf {
 		t.Fatalf("rendered child scope = %q, want %q", childEntry.scope, roleLeaf)
 	}
-	if childEntry.root != rsrcRoot {
-		t.Fatalf("rendered child root = %q, want root_override %q", childEntry.root, rsrcRoot)
+	// A root_override binds to its resolved path.
+	if want := canonicalTestPath(t, rsrcRoot); childEntry.root != want {
+		t.Fatalf("rendered child root = %q, want resolved root_override %q", childEntry.root, want)
 	}
 }
 
