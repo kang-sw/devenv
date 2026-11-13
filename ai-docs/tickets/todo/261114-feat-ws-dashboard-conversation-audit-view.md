@@ -2,10 +2,10 @@
 title: "Dashboard: a conversation audit view - per-call rows, hidden harness events, an audit window, and conversation-wide search"
 blocked-by: 261114-feat-ws-conversation-audit-event-store#phase2
 related:
-  261114-feat-ws-conversation-audit-event-store: "prerequisite (blocked-by #phase2): the daemon's audit store and its read API, queue item (f) = board (599). Every byte this view shows comes from that API. Its item (g), ToolCallArgs.id in the ring (Phase 1), is the join key from a history row to an audit event (Decision 4)"
+  261114-feat-ws-conversation-audit-event-store: "prerequisite (blocked-by #phase2): the daemon's audit store and its read API, queue item (f) = board (599). Every byte this view shows comes from that API. Its item (g) = (601), ToolCallArgs.id in the ring (Phase 1), is the join key from a history row to an audit event (Decision 4)"
   261114-feat-ws-dashboard-board-toolbar-overview: "sibling darkroom: overview dims the page through the iframe shell's layout.dim field; this ticket's wide-view darkroom uses the same field for the shell's rail and header"
   261113-feat-ws-dashboard-iframe-shell: "landed (0586a4289): session pages are shell frames; layout.dim and the shell's Esc and Ctrl+K forwarding shape the key rules here"
-  261114-refactor-ws-split-oversized-source-files: "dashboard.js is on its list; the audit view goes to new assets/audit.js and audit.css (Open Decision Queue item (b))"
+  261114-refactor-ws-split-oversized-source-files: "dashboard.js is on its list; the audit view goes to new assets/audit.js and audit.css (Open Decision Queue item (603))"
 ---
 
 # Dashboard: a conversation audit view - per-call rows, hidden harness events, an audit window, and conversation-wide search
@@ -138,7 +138,7 @@ What exists today (Pi exploration, 2026-11-14, paths under
    optional `id` equal to the audit store's `call_id`, an additive ring field
    (T0). Calls past `BatchCallCap` in a huge batch get no id. This ticket's
    template emits the id as `data-call` on each call row; a call without one
-   follows queue item (a).
+   follows queue item (602).
    - Rejected: joining by time window between ring stamps (ambiguous with
      parallel calls and subagents).
 5. **Compatibility tier: T0.** Dashboard asset content, a template change that
@@ -147,21 +147,20 @@ What exists today (Pi exploration, 2026-11-14, paths under
 
 ## Open Decision Queue
 
-Last ID: lead-local letters. MAIN mints board IDs, so these get numbered when
-they go to the owner.
+Last ID: (610). MAIN minted (602)-(610); (611) is the owner group-ack.
 
-- (a) [open] [technical] Ring entries without call ids keep today's folded pill
+- (602) [open] [technical] Ring entries without call ids keep today's folded pill
   over turning into rows. Those are entries written before the backend change,
   or by a harness the mapper does not cover. In a batch where only the calls
   past `BatchCallCap` lack ids, those calls fold into the "+n" row and are not
   clickable. Only rows with a `data-call` are
   clickable, and hidden-event rows still interleave by `at`. This is chosen
   over a time-window guess, which Decision 4 rejects.
-- (b) [open] [technical] New assets over growing dashboard.js. The new files
+- (603) [open] [technical] New assets over growing dashboard.js. The new files
   are `assets/audit.js` (a `WsAudit` module mounted from the session page, as
   `WsFiles.mount` is) and `assets/audit.css`, with classes prefixed `au-` so
   the collision guard passes. dashboard.js is on the split-oversized list.
-- (c) [open] [technical] Window and sheet are built new.
+- (604) [open] [technical] Window and sheet are built new.
   - The wide window is a non-modal floating window with header drag and corner
     resize, clamped to the viewport. Its first placement is right of
     `#convo`, not covering the source row.
@@ -170,7 +169,7 @@ they go to the owner.
   - This is chosen over reusing `maximize()` (full-screen, and its scrim covers
     the conversation) or `gwBuild` (modal), and over reusing the drawer (a nav
     surface with its own open state).
-- (d) [open] [technical] Key scope.
+- (605) [open] [technical] Key scope.
   - J/K/Enter act only while focus is inside `#convo` and not in an editable
     element.
   - ←/→, Esc and Ctrl+F act only while focus is inside an audit window. Ctrl+F
@@ -180,14 +179,14 @@ they go to the owner.
     forwarding.
   - This is chosen over page-global keys, which collide with the composer,
     the link menu and the Files pane.
-- (e) [open] [technical] Darkroom mechanics. The darkroom starts with the first
+- (606) [open] [technical] Darkroom mechanics. The darkroom starts with the first
   window opened by a click in the wide view and ends when the last unpinned
   window closes. A click on the dimmed area ends it and closes unpinned
   windows, like Esc; pinned windows stay open and stay lit. The narrow sheet
   has no darkroom, since the sheet already covers the page. The alternative,
   keeping the darkroom while any window is open, makes the board unreachable
   while a pinned comparison is up.
-- (f) [open] [technical] Fetching.
+- (607) [open] [technical] Fetching.
   - Opening a call row calls `GET .../audit/events?call=<id>`. Opening any tab
     calls `GET .../audit/event/<id>` once per event and caches it for the
     window's life.
@@ -198,14 +197,14 @@ they go to the owner.
     stamps.
   - This is chosen over loading the whole audit log up front, which can reach
     the 256 MiB per-session cap.
-- (g) [open] [technical] Pin limit: at most 4 pinned windows. A fifth pin
+- (608) [open] [technical] Pin limit: at most 4 pinned windows. A fifth pin
   replaces the oldest pinned window and shows a toast. Each new pinned window
   is offset 24px from the last. Unbounded windows can bury the page.
-- (h) [open] [technical] Kind chips default to all on, as the mockup shows.
+- (609) [open] [technical] Kind chips default to all on, as the mockup shows.
   Their state persists per browser in localStorage
   (`ws.dashboard.auditkinds`), not per session. This matches the panel-fold
   precedent (`ws.dashboard.panelshut`).
-- (i) [open] [technical] Token growth shows as the delta of `ctx_after`
+- (610) [open] [technical] Token growth shows as the delta of `ctx_after`
   against the previous request's `ctx_after` in the same conversation.
   Parallel calls answered in one request show the delta on the first call and
   "·" on the others, so a shared growth is not counted several times. The
