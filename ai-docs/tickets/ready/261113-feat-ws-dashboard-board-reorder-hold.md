@@ -5,6 +5,7 @@ related:
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "co-edits topic markup and board motion assets"
   261113-feat-ws-dashboard-iframe-shell: "moves session pages into a shell document; the board scroller stays in the session page; its hidden-frame message feeds pageHidden() (decision 9)"
   261113-feat-ws-whiteboard-board-frontend-performance: "its Phase 2 consumes the decision 8 helper contract (watch with wider margins, seen)"
+  261114-feat-ws-dashboard-board-toolbar-overview: "its overview mode defers hold releases (its Decision 13); the badge's (c) triggers honour that gate, and the badge is hidden in overview"
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 705b92d96f93c00a
@@ -33,6 +34,9 @@ slide. Then `restoreScroll()` writes back the old absolute `scrollTop`. So:
 
 Approved visual reference: mockup v2, archived at
 `ai-docs/tickets/assets/261113-feat-ws-dashboard-board-reorder-hold/reorder-hold-mockup-v2.html`.
+Approved badge reference (owner (572)=ok, (590)=ok, 2026-11-14): back-to-top
+badge mockup v2, archived at
+`ai-docs/tickets/assets/261113-feat-ws-dashboard-board-reorder-hold/board-totop-badge-mockup-v2.html`.
 
 ## Decisions
 
@@ -78,8 +82,9 @@ Approved visual reference: mockup v2, archived at
    move lapses on the topic's own update today (`claim`). A hand-moved topic
    that updates while in view becomes a hold candidate, with its hand place
    as its old place.
-4. **Scroll compensation on every board swap and every hold release,
-   continuous until layout settles ((516)=ok).**
+4. **Scroll compensation on every board swap and every observer-driven hold
+   release ((a), (b)), continuous until layout settles ((516)=ok).** Release
+   (c) is the exception (decision 5).
    - Anchor: the topmost visible held topic, else the topmost visible topic
      or card the swap does not move. Never a moving node. Its offset from
      the scroller's top is measured before the swap, in layout terms (rect
@@ -122,7 +127,7 @@ Approved visual reference: mockup v2, archived at
      and fight the session.
    - **One session per scroller.** A keep call on a scroller that already
      has a running session does not start a second session. That covers a
-     swap, a hold release, a pill click, and a topic-history load-more or
+     swap, a hold release, and a topic-history load-more or
      collapse. It re-anchors the running session instead: the call's node
      and offset, measured at call time in layout terms, replace the anchor.
      The call's observed nodes join the session's ResizeObserver. The
@@ -140,30 +145,42 @@ Approved visual reference: mockup v2, archived at
      move happens out of sight, so a frame reload there is unseen.
    - (b) The destination coming into view releases nothing while T is in
      view. It only counts once T is off-screen, so it is (a).
-   - (c) The pill is clicked: every hold releases now in one settle with
-     the slide, and the board scrolls to the topmost destination. On
-     browsers without `Element.moveBefore`, a released T's body frame
-     reloads; this is accepted for an explicit click. T's frame height is
-     restored through the `setFrameHeights` path so the reload does not
-     collapse it.
-   - The scroll to the destination is written by the keep session, not by
-     a separate `scrollTop` or `scrollIntoView` call. The click calls
-     `wbHistory.keep(topmost released T, { offset: <just below the pill> })`.
-     That call re-anchors the running session (decision 4) onto T at the
-     target offset, so the session writes the scroll and keeps T there
-     while its frame reloads and its height settles. The programmatic
-     scroll therefore does not count as a user scroll. Rejected: a plain
-     `scrollIntoView`, which the session would read as a user scroll and
-     end on, leaving T's late height growth uncompensated.
+   - (c) The back-to-top badge is clicked, or the user scrolls the board
+     back to its top by hand (decision 7): every hold releases now in one
+     settle with the slide. Both triggers start no compensation session:
+     at the top nothing above the viewport can grow. Both are gated by the
+     same release-deferral predicate as (a) and (b) under `pageHidden()`
+     and by the one that `261114-feat-ws-dashboard-board-toolbar-overview`
+     Decision 13 hooks in for overview, so neither releases while overview
+     is shown. On browsers without `Element.moveBefore`, a
+     released T's body frame reloads; this is accepted for an explicit
+     click. T's frame height is restored through the `setFrameHeights` path
+     so the reload does not collapse it.
+   - The click's scroll target is the board top (revised with decision 7).
+     The click ends any running keep session first, then releases, then
+     scrolls the scroller to `top: 0` (smooth; instant under reduced
+     motion). At `top: 0` nothing above the viewport can grow, so a released
+     frame's late height change needs no compensation and no keep session
+     is started. Until the to-top scroll lands, board keep sessions are
+     suppressed: a late frame height on a `wbKeep` frame
+     (`boardKept() || boardKeep(b)`, `dashboard.js:3454`) and a swap
+     arriving mid-scroll (`boardKeep(el)`, `dashboard.js:534`) start none,
+     since a compensating `scrollTop` write cancels a running smooth scroll.
+     When the scroll ends (or after a guard of about 1.5 s, as the mockup's
+     `back()` does), `scrollTop` is set to 0 if it is not there. Rejected: the pre-revision
+     `wbHistory.keep(topmost T, { offset: <just below the pill> })` target,
+     which the v2 badge replaced with "go to the top".
    - (a) and (b) need observer reports from a rendered page. While the page
      counts as hidden (decision 9), observer reports do not release. On
      show, the first fresh report decides.
    - Every hold that meets a condition at the same moment releases in ONE
-     settle with ONE compensation session.
+     settle with ONE compensation session; release (c) starts none
+     (below).
    - Releases (a) and (b) are deferred while T holds a non-collapsed text
      selection, has `:focus-within`, or is under the pointer (`:hover`).
      They fire when that ends (`selectionchange`, `focusout`,
-     `pointerleave`). A pill click (c) does not wait for these.
+     `pointerleave`). A badge click or a hand scroll to the top (c) does not
+     wait for these.
    - A closing hold releases into the closed section on the same rules.
 6. **Closing hold (515=b).** A visible topic that the server closes takes its
    folded closed rendering (the server's fold, `forgetOpen` as today) and
@@ -175,33 +192,70 @@ Approved visual reference: mockup v2, archived at
      hold is applied later, in weave, and only re-places a node among the
      board's own wanted nodes. It never touches `.closed-page` contents or
      counts.
-   - A closing hold does not count toward the pill and carries a "closed"
-     tag instead of "moved ↑".
-7. **Indicator (525=b).**
+   - A closing hold counts toward the badge's N like any held or moved
+     topic (decision 7, revised) and carries a "closed" tag instead of
+     "moved ↑".
+7. **Indicator (525=b; revised 2026-11-14 by owner (572)=ok, (590)=ok,
+   (573)=a, (574)=b on the v2 badge mockup).**
    - A held rising topic gets a static accent: a left border in the accent
      colour and a small "moved ↑" tag in its `.tbar`.
    - One 3 px upward nudge, 300 ms, plays when the hold starts and on each
      re-update of a held topic. Nothing periodic. Under
      `prefers-reduced-motion`: no nudge, the accent only.
-   - A single sticky pill "N개 업데이트됨 ↑" (i18n key, all locales) sits
-     at the top edge of the board scroller while N >= 1 rising holds exist.
-     Clicking it does release (c).
-   - Strings (all rendered by dashboard.js, so `js.` keys through
-     `wsT`/`wsTn`, in every `internal/wsi18n/tables/*.json`):
-     - `js.board.hold.pill` is a plural key with `.one` and `.other` forms
-       (`wsi18n/i18n.go#L11-L16`; `wsTn` passes N as `{0}`). en:
-       `js.board.hold.pill.one` = "{0} topic updated ↑",
-       `js.board.hold.pill.other` = "{0} topics updated ↑". ko gives both
-       forms the owner's text "{0}개 업데이트됨 ↑", as a language without
-       plural forms does.
+   - **Back-to-top badge** (supersedes the "N개 업데이트됨 ↑" pill; approved
+     reference
+     `ai-docs/tickets/assets/261113-feat-ws-dashboard-board-reorder-hold/board-totop-badge-mockup-v2.html`):
+     - One badge, centered at the top edge of the board scroller, shown
+       whenever the board scroller is scrolled down at all and hidden at the
+       top ("at the top" below).
+     - Idle form: a symmetric 32x32 round ↑ button, no label; `title` and
+       `aria-label` "Back to top" (ko "맨 위로").
+     - Pending form, while N >= 1 updates are pending: the accent colours, a
+       dot, and the label "Board updated" (ko "보드 업데이트됨"), plus
+       " · N" when N >= 2. N counts the distinct topics that a board swap
+       changed since the user scrolled down from the top: rising holds,
+       closing holds, topics moved at once (in or out of view), newly
+       created topics, and in-place updates (the mockup's `send()` counts
+       every update while not at the top).
+     - Motion while pending: the whole capsule moves with `translateX` only,
+       no rotation, decaying -4/+4/-3/+2/-1 px over about 0.9 s, then about
+       1.7 s still, looping (the mockup's `ttShake`, 2.6 s). None under
+       `prefers-reduced-motion`.
+     - Click: release (c) of every hold in one settle (decision 5), then the
+       board smooth-scrolls to its top (the toolbar), newest update first;
+       every counted topic flashes once (the mockup's `.fresh` ring, about
+       0.6 s). Instant scroll and no flash animation under reduced motion.
+     - Scrolling back to the top by hand also releases every hold (as (c)),
+       flashes the counted topics, and clears N.
+     - "At the top" is `scrollTop <= 4` (the mockup's threshold), so
+       sub-pixel or clamp residue from a keep session does not show the
+       badge. The badge sits at the top edge of the board's scroller (the
+       nearest scroller, decision 4); on a document-scrolled board page that
+       is the document, and fixed vs sticky placement is the implementer's
+       call.
+     - The badge is hidden while overview
+       (`261114-feat-ws-dashboard-board-toolbar-overview`) is shown.
+   - The board scroller keeps `overflow-anchor: none` (already on `.bcol`
+     at `dashboard.css:764` since Phase 1's merge): Chrome's scroll
+     anchoring double-compensates against decision 4's keep session (UX
+     measured a 105 px drift). Phase 4 verifies it is still there.
+   - Strings (all rendered by dashboard.js, so `js.` keys through `wsT`, in
+     every `internal/wsi18n/tables/*.json`):
+     - `js.board.hold.pill` = "Board updated" (ko "보드 업데이트됨"). The
+       " · N" suffix is composed in JS from the number, so no plural key is
+       needed.
+     - `js.board.hold.pill.title` = "Back to top" (ko "맨 위로"): the
+       badge's `title` and `aria-label` in both forms.
      - `js.board.hold.moved` = "moved ↑" (the rising tag).
      - `js.board.hold.closed` = "closed" (the closing-hold tag). It gets its
        own key, not a reused server-side "closed" string, so the tag can be
        worded as a transient state.
-     - `js.board.hold.pill.title` = "Show the updated topics at the top"
-       (the pill's `title` and `aria-label`).
      The `js.board.` prefix is new. No existing prefix covers the board
      motion, and `js.pins.` is the pinned column's.
+   - Rejected (the pre-revision text): a pill shown only while rising holds
+     exist with "{0}개 업데이트됨 ↑" plural keys, and a click that scrolls to
+     the topmost destination just below the pill. The owner chose the v2
+     badge.
 8. **One visibility source and one keep-in-place helper, shared.**
    - The visibility source is IntersectionObserver with `root: null`.
      It clips by ancestor scrollers, so it works whether `#bcol`, `#bpins`
@@ -244,7 +298,8 @@ Approved visual reference: mockup v2, archived at
        nearest scroller (decision 4). Call it BEFORE the DOM change it
        compensates. `offset` (px from the scroller's top) overrides the
        measured offset: the session then writes the scroll that puts
-       `node` there, as the pill click does (decision 5). `observe` lists
+       `node` there (Phase 1's `boardKeepSettle`, `dashboard.js:1078`, uses
+       it; decision 5's badge click scrolls to the top without a session). `observe` lists
        extra elements for the session's ResizeObserver; by default the
        session observes the scroller's content. `apply()` corrects
        synchronously; the caller calls it right after its DOM change.
@@ -350,6 +405,26 @@ Approved visual reference: mockup v2, archived at
 | risk.fit | moderate | overlaps in-flight iframe-shell and board performance tickets on dashboard.js and stream.js; sticky-head already landed in the same markup |
 | risk.test | moderate | layout-dependent behavior needs a headless browser harness that does not exist yet; WebKit unverified |
 | risk.security_or_contract | low | T0 frontend assets and i18n keys only, no route, MCP tool, store, or tracker event change (decision 10) |
+
+## Blocked (2026-11-14): Phase 4 waits on an owner decision
+
+Phases 2 and 3 are not blocked. Phase 4 waits on one owner question (routed
+through MAIN as POLICY, since it touches the owner-approved decision 4,
+(516)=ok): what a board swap does while the board sits at the top
+(`scrollTop <= 4`).
+
+- (i) The board stays pinned to the top: no keep session at the top, and the
+  update lands at the head, in view, with the flash. This is what the
+  approved badge mockup v2 shows ("맨 위에서는 배지 없음"; its `send()` with
+  `atTop()`).
+- (ii) Decision 4 applies at the top too, as Phase 1 does today
+  (`boardKeep`, `dashboard.js:1059`, anchors the topmost in-view non-moving
+  entry): a topic rising to the head goes in above the viewport, the view
+  scrolls down by its height, and the badge appears in its pending form.
+
+Lead recommendation: (i). The owner approved the mockup after (516), and
+under (ii) "back to top" is undone by the next update. Remove this section
+when the answer is written into decisions 4 and 7.
 
 ## Phases
 
@@ -554,23 +629,38 @@ Verification:
 
 ### Phase 4: indicator
 
-Decision 7: accent + "moved ↑"/"closed" tags, one nudge, the sticky pill
-with release (c) and the session-written scroll to the destination
-(decision 5), reduced motion, and the i18n keys decision 7 names
-(`js.board.hold.pill` .one/.other, `js.board.hold.pill.title`,
-`js.board.hold.moved`, `js.board.hold.closed`) in all 11 tables.
+Decision 7 (revised): accent + "moved ↑"/"closed" tags, one nudge, the
+back-to-top badge (idle ↑ and pending "Board updated · N" forms, the
+capsule sway, reduced motion), the badge click and the hand scroll to the
+top as release (c) with the scroll to the board top and the landed-topic
+flash (decision 5), the board scroller's `overflow-anchor: none` kept, and the
+i18n keys decision 7 names (`js.board.hold.pill`,
+`js.board.hold.pill.title`, `js.board.hold.moved`, `js.board.hold.closed`)
+in all 11 tables.
 
 Verification:
 - `go test ./internal/wsi18n/...` passes. `keys_test.go` checks that every
-  table holds every English key, both plural forms included.
-- `scripts/board-headless.mjs`: a pill click with two holds releases both
-  in one settle. The topmost destination ends just below the pill and
-  stays there through the released frame's reload. The session that wrote
-  that scroll does not end as a user scroll.
-- Side-by-side LOOK check against the approved mockup
-  `ai-docs/tickets/assets/261113-feat-ws-dashboard-board-reorder-hold/reorder-hold-mockup-v2.html`
-  (accent, tags, nudge, pill); where the mockup differs from the Decisions
-  (hover deferral, quiescence-ended compensation, slide on pill release,
-  no reopen / maximize / hidden-column cases), the Decisions win.
-- `scripts/board-headless.mjs` screenshots at 1440 px and 700 px widths, light and dark,
-  with one and two holds and with reduced motion emulated.
+  table holds every English key.
+- `scripts/board-headless.mjs`:
+  - The badge is hidden at `scrollTop` 0 and shows its idle form after any
+    scroll down.
+  - An update arriving while scrolled down switches it to the pending form;
+    N counts distinct moved or held topics ("Board updated" alone at N = 1,
+    " · 2" at N = 2).
+  - A badge click with two holds releases both in one settle, ends at
+    `scrollTop` 0 with the newest update first, flashes the landed topics,
+    and clears N; a hand scroll to the top does the same release and clears
+    N.
+  - With reduced motion emulated, the pending badge has no animation and
+    the click scroll is instant.
+- Side-by-side LOOK check of result captures against both approved
+  references: the badge against
+  `ai-docs/tickets/assets/261113-feat-ws-dashboard-board-reorder-hold/board-totop-badge-mockup-v2.html`
+  (idle, pending N = 1, pending N >= 2, the sway, the click result), and
+  the accent, tags and nudge against
+  `ai-docs/tickets/assets/261113-feat-ws-dashboard-board-reorder-hold/reorder-hold-mockup-v2.html`.
+  Where a mockup differs from the Decisions (hover deferral,
+  quiescence-ended compensation, slide on release, no reopen / maximize /
+  hidden-column cases), the Decisions win.
+- `scripts/board-headless.mjs` screenshots at 1440 px and 700 px widths,
+  light and dark, with one and two holds and with reduced motion emulated.
