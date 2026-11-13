@@ -848,6 +848,11 @@ func TestWaitAfterARestartAnswersASettledTurnAtOnce(t *testing.T) {
 func TestCancelledMessageLeavesNoChildOpen(t *testing.T) {
 	h, got := childHarness(t)
 	w, wp, token, gc, gp := workerWithChild(t, h)
+	// pi.send now steers a running child immediately. Hold its loop so
+	// this test really cancels before the drain, rather than racing it.
+	g := newGate(t, func() {})
+	go h.runner.conv(gc.ID).do(g.wait)
+	g.awaitEntered(t)
 	if code, body := h.tokenCall(token, "send", map[string]any{"id": gc.ID, "message": "more"}); code != http.StatusOK {
 		t.Fatalf("send = %d %s", code, body)
 	}
@@ -860,6 +865,7 @@ func TestCancelledMessageLeavesNoChildOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.runner.InboxChanged(gc.ID)
+	g.release()
 	wp.reply("interim")
 	eventually(t, "the worker idle", func() bool { return h.state(w.ID).Status == StatusIdle })
 	gp.reply("child result")

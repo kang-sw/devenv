@@ -7,12 +7,14 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -334,6 +336,52 @@ func (r *Runner) ownChild(tool, id string, parent ParentRef) error {
 		return nil
 	}
 	return &requestError{status: http.StatusNotFound, msg: fmt.Sprintf("%s: %s is not one of this conversation's Pi subagents (pi.list lists them)", tool, id)}
+}
+
+// resumePiChild returns an open conversation for Send. Only a closed,
+// spawned Pi child is revivable: its identity and launch settings stay in
+// the same record, and the ordinary lazy-start path resumes its Pi file.
+// Open children whose process died already use that same lazy-start path.
+func (r *Runner) resumePiChild(id string) (*conv, error) {
+	if c, err := r.open(id); err == nil {
+		return c, nil
+	}
+	r.resumeMu.Lock()
+	defer r.resumeMu.Unlock()
+	// A concurrent send may have reopened it while this one waited.
+	c, err := r.open(id)
+	if err == nil {
+		return c, nil
+	}
+	r.mu.Lock()
+	rec, closed := r.closed[id]
+	r.mu.Unlock()
+	if !closed || rec.ClosedAt == "" || rec.Lead || rec.Parent == nil || rec.Backend != BackendPi {
+		return nil, err
+	}
+	// A send authorized before its caller closed may have waited behind
+	// that close's cascade. It must not resurrect a descendant afterward.
+	if rec.Parent.Kind == ParentConversation {
+		parent := r.conv(rec.Parent.ReplyID)
+		if parent == nil || parent.isClosed() {
+			return nil, conflict("cannot resume Pi subagent %s: its parent conversation is closed", id)
+		}
+	}
+	dir := wsdashboard.SessionDir(r.opts.Dir, id)
+	file := piSessionFile(dir)
+	if info, statErr := os.Stat(file); statErr != nil || !info.Mode().IsRegular() {
+		return nil, conflict("cannot resume Pi subagent %s: its session file is missing, inaccessible, or not a regular file: %s", id, file)
+	}
+	rec.ClosedAt = ""
+	// A done turn held for descendants was abandoned by the close, not
+	// left waiting for this new turn to publish it.
+	rec.HeldTurn = nil
+	if err := writeRecord(dir, rec); err != nil {
+		return nil, err
+	}
+	c = r.startConv(rec, nil)
+	c.watched()
+	return c, nil
 }
 
 // tokenRequest is the token route's body: the fields each op reads.

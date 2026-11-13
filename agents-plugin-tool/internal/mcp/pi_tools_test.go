@@ -192,7 +192,7 @@ func TestPiSendDescribesNativeSteeringWithoutChangingArguments(t *testing.T) {
 		}
 		for _, tool := range []map[string]any{def, piWorkerTool(def)} {
 			desc := tool["description"].(string)
-			for _, want := range []string{"With no turn running it starts the next turn now", "steers that running turn at the next tool boundary", "without cancelling in-flight tool calls", "no extra turn"} {
+			for _, want := range []string{"With no turn running it starts the next turn now", "steers that running turn at the next tool boundary", "without cancelling in-flight tool calls", "no extra turn", "closed subagent resumes on its existing session file with the same id and settings", "missing file is refused"} {
 				if !strings.Contains(desc, want) {
 					t.Errorf("pi.send description lacks %q: %s", want, desc)
 				}

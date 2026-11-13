@@ -214,7 +214,7 @@ func (s *Server) handlePiTool(ctx context.Context, id json.RawMessage, tool stri
 		if wantsJSON(args) {
 			return toolJSONResponse(id, piChild(st), nil)
 		}
-		return toolTextResponse(id, fmt.Sprintf("closed Pi subagent %s: its process stopped and it takes no more messages; pi.transcript still reads it.\n", child), nil)
+		return toolTextResponse(id, fmt.Sprintf("closed Pi subagent %s: its process stopped; pi.send resumes the same conversation if its session file still exists, and pi.transcript still reads it.\n", child), nil)
 	case "pi.transcript":
 		records, err := s.pi.agents.Transcript(child)
 		if err != nil {
@@ -531,7 +531,7 @@ func piToolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "pi.send",
-			"description": "Send one of this session's Pi subagents a follow-up message. With no turn running it starts the next turn now; during a turn it steers that running turn at the next tool boundary, without cancelling in-flight tool calls. The running turn's completion mail covers the steered message; no extra turn is queued after it is taken. pi.wait is the fallback.",
+			"description": "Send one of this session's Pi subagents a follow-up message. A closed subagent resumes on its existing session file with the same id and settings; a missing file is refused. With no turn running it starts the next turn now; during a turn it steers that running turn at the next tool boundary, without cancelling in-flight tool calls. The running turn's completion mail covers the steered message; no extra turn is queued after it is taken. pi.wait is the fallback.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -557,7 +557,7 @@ func piToolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "pi.stop",
-			"description": "Close one of this session's Pi subagents: its process stops, a running turn ends with it, and it takes no more messages. No completion mail follows. Its record stays: pi.list shows it closed and pi.transcript still reads it.",
+			"description": "Close one of this session's Pi subagents and its descendants: its process stops and a running turn ends with it. No completion mail follows. Its record stays: pi.list shows it closed, pi.transcript still reads it, and pi.send resumes it if its session file still exists.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
