@@ -31,7 +31,9 @@
 //     node scripts/board-headless.mjs keep --url <board page>
 //
 // Pages. A scenario needs only --url: any dashboard session page served with
-// this tree's assets. Two ways to get one:
+// this tree's assets. /s/<rid> is the iframe shell; the scenario then runs in
+// the session page it frames (/s/<rid>?frame=1), as a user sees it. Two ways
+// to get one:
 //
 //   - `serve` (this file): builds ws-mcp from agents-plugin-tool into a temp
 //     directory and runs an isolated dashboard daemon there (its own
@@ -272,7 +274,8 @@ async function serve(args) {
     beat = setInterval(write, 60000);
     // Each page must be the kind it is seeded as.
     for (const [s, wantBar] of [[adapter, true], [board, false]]) {
-      const html = await waitFor(async () => { const r = await fetch(`${base}/s/${s.rid}`); return r.ok ? r.text() : null; }, 10000, `/s/${s.rid}`);
+      // /s/<rid> is the iframe shell; the session page is its frame.
+      const html = await waitFor(async () => { const r = await fetch(`${base}/s/${s.rid}?frame=1`); return r.ok ? r.text() : null; }, 10000, `/s/${s.rid}?frame=1`);
       const hasBar = /id="tabbar"/.test(html);
       if (hasBar !== wantBar) throw new Error(`/s/${s.rid}: #tabbar ${hasBar ? "present" : "absent"}, expected ${wantBar ? "present" : "absent"}`);
     }
@@ -288,12 +291,17 @@ async function serve(args) {
 
 // --- page helpers --------------------------------------------------------------
 
-// INIT runs in every document before its scripts. In the top page it wraps
+// INIT runs in every document before its scripts. In the page document (the
+// top page, or the session page the iframe shell frames, ?frame=1) it wraps
 // WebSocket so the harness reaches the page's stream socket, records the
 // board region events the server sends, and spies on scrollTop writes from
 // script (a keep session, restoreScroll) per element.
 const INIT = () => {
-  if (window.top !== window) return;
+  // The shell's session frame is a child of the top page. Chromium may run
+  // this only in the frame's initial about:blank, whose window the
+  // same-origin page then reuses, so the frame's URL is not checked here.
+  // The body frames are grandchildren and are skipped.
+  if (window.top !== window && window.parent !== window.top) return;
   const bh = (window.__bh = { sockets: [], board: null, writes: [] });
   const Native = window.WebSocket;
   class Captured extends Native {
@@ -448,7 +456,10 @@ const BROWSERS = [];
 
 // openBoard opens url in a fresh headless Chromium, waits for the board, its
 // stream socket and its body frames' first heights, shows the board column
-// on an adapter page, and returns { browser, page, kind }.
+// on an adapter page, and returns { browser, page, tab, kind }. url may be the
+// iframe shell (/s/<rid>): page is then the session page it frames (a
+// Playwright Frame, which fills the window, so its coordinates are the
+// tab's), and tab is the browser tab, which owns the mouse.
 async function openBoard(ctx) {
   const { chromium } = await loadPlaywright();
   let browser;
@@ -460,10 +471,15 @@ async function openBoard(ctx) {
     process.exit(2);
   }
   BROWSERS.push(browser);
-  const page = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height } });
-  page.on("pageerror", (e) => ctx.errors.push(String(e)));
-  await page.addInitScript(INIT);
-  await page.goto(ctx.args.url, { waitUntil: "load" });
+  const tab = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height } });
+  tab.on("pageerror", (e) => ctx.errors.push(String(e)));
+  await tab.addInitScript(INIT);
+  await tab.goto(ctx.args.url, { waitUntil: "load" });
+  let page = tab;
+  if (await tab.evaluate(() => document.documentElement.hasAttribute("data-shell"))) {
+    page = await waitFor(async () => tab.frames().find((f) => f.parentFrame() === tab.mainFrame() && /[?&]frame=1(&|$)/.test(f.url())) || null, 10000, "the shell's session frame");
+    await page.waitForLoadState("load");
+  }
   await page.evaluate(IN_PAGE);
   await page.waitForFunction(() => document.querySelectorAll("#r-board section.topic[data-topic]").length > 0, null, { timeout: 10000 });
   await page.waitForFunction(() => window.__bh.sockets.some((s) => s.readyState === 1 && typeof s.onmessage === "function"), null, { timeout: 10000 });
@@ -475,7 +491,7 @@ async function openBoard(ctx) {
   // Body frames size themselves once loaded; wait until each reported.
   await page.waitForFunction(() => window.__bh.frames().every((f) => f.style.height), null, { timeout: 15000 }).catch(() => {});
   await waitQuiet(page);
-  return { browser, page, kind };
+  return { browser, page, tab, kind };
 }
 
 // waitQuiet waits until no keep session runs and the layout has stood still
@@ -575,7 +591,7 @@ function trace(samples, name) {
 // --- scenarios -----------------------------------------------------------------
 
 async function scenarioKeep(ctx) {
-  const { page, kind } = await openBoard(ctx);
+  const { page, tab, kind } = await openBoard(ctx);
   log(`page kind: ${kind} (scroller: ${kind === "adapter" ? "#bcol" : "document"})`);
   const scrollerName = await page.evaluate(() => { const s = window.__bh.scroller(); return s === document.scrollingElement ? "document" : "#" + s.id; });
   assert(scrollerName === (kind === "adapter" ? "#bcol" : "document"), `the board scrolls in ${scrollerName} on a ${kind} page`);
@@ -628,8 +644,8 @@ async function scenarioKeep(ctx) {
   const running = await page.evaluate(() => !!window.__bh.keeping());
   assert(running, "no keep session runs right after a board swap");
   const box = await page.evaluate(() => { const s = window.__bh.scroller(), t = window.__bh.viewTop(s), b = window.__bh.viewBottom(s); return { x: s === document.scrollingElement ? innerWidth / 2 : s.getBoundingClientRect().left + s.clientWidth / 2, y: (t + b) / 2 }; });
-  await page.mouse.move(box.x, box.y);
-  await page.mouse.wheel(0, 240);
+  await tab.mouse.move(box.x, box.y);
+  await tab.mouse.wheel(0, 240);
   const ended = await page.waitForFunction(() => !window.__bh.keeping(), null, { timeout: 2000 }).then(() => true, () => false);
   ctx.check(ended, "the keep session still runs 2s after a user wheel scroll");
   // Let the wheel's own scroll finish before measuring.
