@@ -1124,6 +1124,10 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		serveMermaid(w)
 		return
 	}
+	if data, ctype, ok := wswhiteboard.FrameAsset(rest); ok {
+		serveFrameAsset(w, data, ctype)
+		return
+	}
 	if name, _ := XtermAsset(); rest == name {
 		serveXterm(w)
 		return
@@ -1359,6 +1363,16 @@ func serveMermaid(w http.ResponseWriter) {
 	_, data := wswhiteboard.MermaidAsset()
 	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	_, _ = w.Write(data)
+}
+
+// serveFrameAsset serves a shared topic-body frame asset
+// (wswhiteboard.FrameAsset). Its name carries its hash, so, like the mermaid
+// script, the browser may cache it for good.
+func serveFrameAsset(w http.ResponseWriter, data []byte, ctype string) {
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = w.Write(data)
 }
 
