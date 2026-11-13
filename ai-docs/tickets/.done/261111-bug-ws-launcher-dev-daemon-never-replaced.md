@@ -1,5 +1,6 @@
 ---
 title: "Launcher never replaces a running -dev daemon after a reinstall of the same release version"
+completed: 2026-11-13
 ---
 
 # Launcher never replaces a running -dev daemon after a reinstall of the same release version
@@ -54,3 +55,8 @@ server; the next launcher start launches the new binary.
 - `agents-plugin/bin/ws-mcp-launcher.py` and its wsflow copy per
   `ai-docs/manuals/wsflow-mirroring.md`; launcher tests run locally with
   `nice -n 19`.
+
+
+## Resolution (2026-11-13)
+
+Fixed by commit 40da39aed.
