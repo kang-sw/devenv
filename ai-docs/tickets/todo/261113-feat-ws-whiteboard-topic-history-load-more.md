@@ -64,11 +64,17 @@ Today a topic's record view scrolls inside `.wb-history`
    `.wb-history` loses its `tabindex` (`page.tmpl:47`), which existed for
    the inner scroll.
 
-## Open Decision Queue
-
-Last ID: (528)
-
-(528) [open] [policy] Size of the latest window a topic card shows before "load more" (today `HistoryWindow` = 50 entries, `stream_view.go:11`, and with the inner scroll gone every card would show all 50) - on MAIN's board, awaiting the owner; options 10-15 vs 50.
+8. **Height-based window** ((528) withdrawn by the owner and replaced by
+   (531), announced by MAIN 2026-11-13; owner: "rather base it on height,
+   for example past 640px vertical, in 640px units; if that is not possible,
+   load 3 more entries at a time"): the card renders entries from the latest
+   down and cuts where cumulative height passes 640px; each "load more"
+   reveals the next ~640px. Where heights cannot be measured reliably (panel
+   iframes not sized yet), a step falls back to 3 entries. When the
+   server's `HistoryWindow` (50 entries, `stream_view.go:11`) is used up,
+   "load more" fetches the next server page as paging does today. The
+   viewport collapse (Decision 2) returns to the first 640px window.
+   Rejected: a fixed 10-15 entry window, and keeping all 50 entries visible.
 
 ## Constraints
 
@@ -91,7 +97,9 @@ Last ID: (528)
   (Decision 3).
 - Same behavior on the served board page and the dashboard board region.
 
-Verification: asset tests for load-more expansion and the out-of-viewport
+Verification: asset tests for the 640px first window and each ~640px step,
+the 3-entry fallback when heights are unmeasured, the next server page once
+the 50-entry window is used up, load-more expansion and the out-of-viewport
 collapse (fold state in the latest window survives it); a board swap keeps an
 expanded topic expanded; a topic in the pinned column; a deep link into an
 older page; the inner-scroll stubs in `stream_script_test.go` rewritten; a headless check that expanding or collapsing a card above the
