@@ -3,7 +3,7 @@ title: "Dashboard rail: delete a linked worktree with a preview-and-confirm moda
 sage-review-design: required
 sage-review-completeness: required
 related:
-  261020-feat-worktree-profiles: "worktree.remove stays pool-only; profile pre_remove hooks (see (519))"
+  261020-feat-worktree-profiles: "worktree.remove stays pool-only; profile pre_remove hooks do not apply: pooled worktrees are refused (decision 12, (519))"
   260525-feat-ws-dashboard-workroot-polishing-backlog: "dropped follow-up of the archived Rust deletion policy"
   261113-feat-ws-dashboard-iframe-shell: "moves the rail, and this ticket's row action and modal, into the shell document"
 ---
@@ -48,7 +48,8 @@ Research (2026-11-13):
 ## Decisions
 
 1. **Scope: every linked worktree except the primary** ((123)=a), including
-   worktrees outside the ws pool such as `single-exe-pi-base`.
+   worktrees outside the ws pool such as `single-exe-pi-base`; pooled
+   worktrees are refused (decision 12).
    Rejected: ws pool worktrees only - the owner's example is a foreign
    worktree.
 2. **The branch is always kept** ((124)=a); only the worktree is removed. A
@@ -78,7 +79,8 @@ Research (2026-11-13):
    route.
 7. **Compatibility tier: T0** - a new dashboard route and asset content; no
    MCP tool or store change.
-8. **A ws pool worktree with a live lease is refused, even under the old
+8. **(Superseded by decision 12: pooled worktrees are refused outright.)**
+   **A ws pool worktree with a live lease is refused, even under the old
    policy's force flag** ((127), technical, acknowledged): the archived
    dashboard predates the worktree pool, so its policy has no lease rule, and
    deleting a leased worktree breaks a running worker.
@@ -113,17 +115,6 @@ Research (2026-11-13):
     helper takes the duration as a parameter, and the dashboard route, which
     has no session key, resolves it per project with the same default. Rejected: duplicating the checks
     in `wsdashboard` (two copies drift).
-
-## Open Decision Queue
-
-Last ID: (519)
-
-(519) [open] [policy] What dashboard deletion does with a pool worktree's profile `pre_remove` hooks
-- `worktree.remove` (`mcp/worktree_remove.go:100-127`) reads the worktree marker and runs the profile's `pre_remove` hooks before removing; a failing hook refuses the removal and a quarantine marker is cleared. Decision 6 runs a plain `git worktree remove`, so followed literally the dashboard skips them and leaks what they release (ports, containers, databases). The archived Rust policy predates profiles (like leases, decision 8).
-- a: run the hooks through the shared helper (decision 11) exactly as `worktree.remove` does; a failing hook refuses deletion, shown in the modal, and force does not override it; the preview lists the hooks that will run.
-- b: skip the hooks and show a notice in the modal that cleanup will not run.
-- c: refuse pool worktrees that carry a profile marker; they go through `worktree.remove`.
-> a: same cleanup as the MCP path, no leaks, and the hook-failure refusal mirrors decision 8's lease rule (a force flag never overrides a safety refusal).
 
 ## Constraints
 
@@ -181,7 +172,7 @@ Last ID: (519)
 Verification: Go tests over temp repos - preview reports dirty / unreached /
 session / lock / submodule state; submit refuses the primary worktree, a path
 not in `git worktree list`, a locked worktree, a worktree with a live session,
-a live-leased pool worktree, and anything the old policy refuses without
+a pooled worktree (under a pool root, decision 12), and anything the old policy refuses without
 force; a detached HEAD's unreached commits need force while a branch
 worktree with commits no other branch reaches deletes without force and the
 branch survives; a worktree with initialized submodules is removed only with

@@ -25,8 +25,8 @@ Two shipped playbook text issues, independent of the Pi allowlist:
   which a delegate key refuses (`roleAllowsTool`,
   `agents-plugin-tool/internal/mcp/server.go#L5678-L5698`; the call is
   `agents-plugin/rsrc/ticket-worker-elevated/ticket-worker-elevated.md#L92`,
-  byte-identical in `agents-plugin-wsflow/rsrc/`); a Pi worker picks its tier
-  through `pi.spawn`'s `tier` instead.
+  byte-identical in `agents-plugin-wsflow/rsrc/`); (511)=b keeps that step and
+  allows the call for the delegate role.
 
 ## Decisions
 
@@ -113,7 +113,7 @@ Two shipped playbook text issues, independent of the Pi allowlist:
 | scope.test_surface | existing | agents-plugin-tool/internal/mcp/playbook_tools_test.go#L288-L313 pins the Pi SpawnIdiom and must change |
 | complexity.reuse_points | confirmed | pi.spawn tier argument (pi_tools.go#L285-L299) and existing SpawnIdiom table |
 | complexity.side_effect_risk | moderate | Pi SpawnIdiom renders into every playbook with a SpawnIdiom site; rsrc edits touch wsflow mirror and manifest |
-| risk.correctness | moderate | the pi harness row also serves native Pi where ws-agent-spawn is live, so the right idiom is unsettled |
+| risk.correctness | moderate | (478) switches the pi row at render time; the switch signal must come from the real detection path, or MCP-only sessions keep the native idiom |
 | risk.fit | moderate | native-Pi versus hosted-Pi distinction is not modelled by the single pi terminology key |
 | risk.test | moderate | the pinned test and Pi delegation-flow tests change; wsflow mirror drift tests must pass |
 | risk.security_or_contract | low | T0: playbook text plus an additive read-only config.resolve_agent permission for the delegate role ((511)=b); no tool or argument shape change |

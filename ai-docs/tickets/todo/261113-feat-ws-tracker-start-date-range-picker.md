@@ -1,5 +1,9 @@
 ---
 title: "Tracker items get an optional start date, picked with a date-range picker"
+sage-review-design: required
+sage-review-completeness: required
+related:
+  261113-feat-ws-tracker-calendar-multi-day-spans: "calendar multi-day spans split out by (480)=a; this ticket keeps the calendar due-day only"
 ---
 
 # Tracker items get an optional start date, picked with a date-range picker
@@ -51,12 +55,9 @@ today's due step until this ticket lands.
 
 ## Decisions
 
-- Compatibility is T0 provided every reader of a tracker event tolerates an
-  unknown optional payload field; the item event payload gains `start`. If an
-  older ws version's replay or `check.go` validation rejects unknown fields,
-  the change is a tracker event change (T2) and returns to the owner before
-  implementation; fact population verifies this at promotion. Rejected:
-  assuming T0 unverified.
+- Compatibility: T0, verified (see the (475) decision below): the item event
+  payload gains an optional `start`, and older readers ignore the unknown
+  field. Rejected: assuming T0 unverified.
 - Field name `start` (`YYYY-MM-DD`, same format and validation as `due`); the
   derived read-only view field `started` keeps its name and meaning, and the
   item view gains `start` beside it. Rejected: `start_date`, `begin` (do not
@@ -77,6 +78,14 @@ today's due step until this ticket lands.
   checklist).
 - Picks apply in one write when the picker closes, no write when nothing
   changed. Rejected: a write per drag (writes on every day crossed).
+- Close, cancel and clear (completeness review 2026-11-13, autonomous): the
+  picker follows the existing due step: an outside click or the close action
+  applies the pick, Escape discards it. Emptying the start or due input row
+  clears that field (clearing due leaves start as the store rules say). If the
+  store rules allow a start without a due, such an item shows the left handle
+  on its start day and a dashed ghost right handle that creates a due when
+  dragged out, mirroring the due-only case. Rejected: Escape applying the
+  pick (no way to back out of a drag).
 - The picker has at most two month panels: one panel normally; when
   extended, a left panel for the start side and a right panel for the due
   side, each paged independently with its own month arrows, so they need not
@@ -114,9 +123,6 @@ today's due step until this ticket lands.
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin-tool/)
 - Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
 - Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
-- Manuals: `ai-docs/manuals/release-compatibility.md` (the tier is settled
-  before release), `ai-docs/manuals/shipped-surface-boundary.md` (MCP tool
-  argument text), `ai-docs/manuals/ws-mcp.md`.
 - Every new user-facing string goes into all `internal/wsi18n/tables/*.json`.
 - Dashboard theme: dark; the picker fits a ~280 px pane in its one-month
   state.
@@ -163,7 +169,7 @@ today's due step until this ticket lands.
   refused, clear, replay), reasons parity (`reasons.json`, reference
   `engine.js`, `TestFlaggedReasons`), MCP argument tests, tracker asset tests
   for the picker's one-write-on-close behaviour.
-- Verification: `go test` for the touched packages on the remote build host;
+- Verification: `go test` for the touched packages (on the project's remote build host where the local machine context names one);
   a headless render of the picker's three states (one month with a range, two
   panels (non-adjacent months) with a range across them, due-only with the ghost handle), each
   compared side by side against the matching state of the approved reference

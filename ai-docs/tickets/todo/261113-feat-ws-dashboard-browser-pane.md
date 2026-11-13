@@ -100,15 +100,10 @@ Current state (research, 2026-11-13):
     documents both elements together.
     Rejected: an untyped text paste.
 13. **Proxy wiring and hardening** ((504), technical, owner-acknowledged
-    2026-11-13): the proxy port is announced to the session page and the
-    session CSP becomes per-request (`frame-src` adds that origin;
-    `TestSessionPageFramesOnlyItsOwnOrigin` is updated). The loopback
-    allow-list refuses the daemon's own ports. The proxy strips incoming
-    `Cookie` and `Authorization` headers before forwarding, because cookies
-    are not port-isolated and the dashboard's would otherwise reach the dev
-    server. Rejected: a fixed CSP constant (the port is known only at run
-    time); forwarding headers unchanged. (The Cookie part is reopened as
-    (520); the CSP wiring as (522).)
+    2026-11-13; header and CSP parts revised by (520) and (522)): the
+    loopback allow-list refuses the daemon's own ports. Header stripping per
+    decision 17; CSP wiring per decision 19. Rejected: forwarding headers
+    unchanged.
 14. **Proxy response hardening** (design review 2026-11-13, autonomous): the
     proxy strips the target's `X-Frame-Options` and CSP `frame-ancestors` and
     sets its own `frame-ancestors` to the dashboard origin, so a dev page
@@ -132,30 +127,36 @@ Current state (research, 2026-11-13):
     for picks and console lines, message-route parsing, Merge, restore, and
     an updated drain description, with console lines capped like mentions.
     Still T0 (additive optional fields and description text).
-
-## Open Decision Queue
-
-Last ID: (522)
-
-(520) [open] [policy] Which request headers the proxy strips before forwarding to the dev server (reopens decision 13's Cookie/Authorization strip)
-- Decision 4 picked a separate origin so the dev page's own cookies work; decision 13 strips every incoming `Cookie`, so cookies the dev server set through the proxy never come back to it and any cookie-login dev app loops or fails. The rationale (dashboard cookies are not port-isolated) is met by stripping only the dashboard's named cookies (theme, lang, LAN token: `theme.go`, `lang.go`, `access.go:109`; the LAN token goes away with (490)).
-- a: strip only the dashboard's named cookies and forward the rest; strip `Authorization` only when it carries the dashboard's bearer, otherwise forward it.
-- b: keep decision 13: strip all `Cookie` and `Authorization` (safer, breaks cookie- and header-auth dev apps).
-> a: keeps decision 4's promise and still keeps every dashboard credential away from the dev server.
-
-(521) [open] [policy] How a workspace static file opens in a web card, and how the proxy learns the allowed directory
-- Decision 5 allows static files confined to the opened file's directory subtree with no ws capability on the proxy origin, but decision 9's entry points (URL input, localhost link click) have no path for a workspace file, and nothing binds the proxy to a directory. A directory encoded in the URL with nothing binding it would let any local page read any directory.
-- a: two entry points, an "Open as web card" action on an HTML file card (and on HTML file links) and a workspace path typed into the "+ Web" input; both go through a dashboard route (same guards as decision 6) that registers the directory with the daemon, and the proxy serves only registered directories (a daemon-side binding, not a ws capability: it grants read-only access to that subtree and nothing else).
-- b: the file-card action only.
-- c: drop static files from scope; web cards target dev servers only.
-> a: matches file-link -> file-card from decision 9 and keeps decision 5's confinement on the daemon side.
-
-(522) [open] [policy] How the proxy routes requests per card, and where the proxy origin is allowed in CSP (reopens decision 13's per-request session-page CSP)
-- Dev servers (Vite, Next) load root-absolute paths (`/@vite/client`) and open HMR WebSockets to `location.host`, so a path-prefix scheme on one proxy port loses the target, and two cards on different dev servers cannot share one origin's routing. A per-target listener fixes routing, but its port exists only after the session page was served, so a `frame-src` computed when the page was served cannot list it.
-- a: one ephemeral loopback listener per target (dev-server port, or a registered static directory per (521)); each web card's iframe loads a small same-origin wrapper route whose own CSP sets `frame-src` to that card's proxy origin, so the session page CSP stays `frame-src 'self'` and the cross-ticket CSP composition with iframe-shell becomes moot for this ticket.
-- b: one listener per target, and the session page CSP allows `frame-src http://127.0.0.1:*` (any loopback port, including unproxied dev servers).
-- c: one proxy port with `<port>.localhost` Host routing (`loopbackHost`, `daemon.go:690`, accepts only exact localhost names today; browser support varies).
-> a: works with mainstream dev servers, keeps the 445e0769 frame-src block on the session page, and confines the relaxation to each card's own wrapper.
+17. **Header stripping** ((520)=a, owner 2026-11-13): the proxy strips only
+    the dashboard's named cookies (theme, lang, and the LAN token while it
+    exists: `theme.go`, `lang.go`, `access.go:109`) and forwards the dev
+    app's own cookies; it strips `Authorization` only when it carries the
+    dashboard's bearer, otherwise forwards it. Rejected: (b) stripping all
+    `Cookie` and `Authorization` (breaks cookie- and header-auth dev apps,
+    contradicting decision 4).
+18. **Static-file entry and directory binding** ((521)=a, owner
+    2026-11-13): two entry points open a workspace static file in a web
+    card: an "Open as web card" action on HTML file cards and HTML file
+    links, and a workspace path typed into the "+ Web" input. Both go
+    through a dashboard route guarded like decision 6 (`localViewer` +
+    `sameOrigin`) that registers the file's directory with the daemon; the
+    proxy serves only registered directories, read-only, confined to that
+    subtree. The registration is a daemon-side binding, not a ws capability:
+    it grants read access to that subtree and nothing else. Rejected: (b)
+    the file-card action only; (c) dropping static files.
+19. **Per-target listeners and a wrapper frame** ((522)=a, owner
+    2026-11-13): one ephemeral loopback listener per target (a dev-server
+    port, or a registered static directory). Each web card's iframe loads a
+    small same-origin wrapper route whose own CSP sets `frame-src` to that
+    card's proxy origin; the session page CSP stays `frame-src 'self'`, so
+    `sessionPageCSP` and `TestSessionPageFramesOnlyItsOwnOrigin` do not
+    change for this ticket and the CSP composition noted in
+    `261113-feat-ws-dashboard-iframe-shell` does not apply to it. The
+    wrapper relays postMessage between the card host and the proxied page
+    (decision 14's origin checks apply at both hops). Rejected: (b) the
+    session page allowing `frame-src http://127.0.0.1:*`; (c) one port with
+    `<port>.localhost` Host routing (`loopbackHost`, `daemon.go:690`, accepts
+    only exact names).
 
 ## Constraints
 
@@ -213,8 +214,8 @@ Last ID: (522)
 
 ### Phase 1: Web card with proxy, element pick, and console-error attach
 
-- Daemon: a loopback-only reverse proxy listener on its own port for
-  localhost targets and workspace static files, injecting the pick /
+- Daemon: loopback-only reverse proxy listeners, one per target (decision
+  19), for localhost targets and registered workspace static directories, injecting the pick /
   console script; guarded by the same-machine rule.
 - `cards.js`: third card kind `web` (iframe on the proxy origin, URL bar,
   reload), "+ Web" button, localhost link click opens it, localStorage `{url}`.
@@ -222,21 +223,20 @@ Last ID: (522)
   click -> selector + text), console error collection and count.
 - Host: attach `wb:pick` and console errors to the composed message with the
   existing mention-chip UX; error-count badge on the card.
-- Session page CSP: `frame-src` adds the proxy origin only (today
-  `sessionPageCSP` is a constant, `agents-plugin-tool/internal/wsdashboard/pages.go#L1276-L1276`,
-  pinned verbatim by `TestSessionPageFramesOnlyItsOwnOrigin`,
-  `agents-plugin-tool/internal/wsdashboard/pages_test.go#L441-L451`; a proxy
-  origin known only at run time makes the policy per-request and that test
-  must change with it).
+- Wrapper route per decision 19 (the session page CSP stays `frame-src
+  'self'`, `pages.go#L1276`, pinned by `TestSessionPageFramesOnlyItsOwnOrigin`).
+- Static entry points and directory registration per decision 18.
 - Whiteboard playbook Answers section: describe the new element(s).
-- Proxy response hardening, mechanics, and inbox fields per decisions 14-16.
+- Proxy response hardening, mechanics, and inbox fields per decisions 14-19.
 
 Verification: Go tests for the proxy (target allow-list including refusal of
 the daemon's own ports, same-machine guard, static serving confined to the
-opened file's directory, header stripping per (520), script injected only into
+opened file's directory, header stripping per decision 17 (dashboard cookies and bearer stripped, dev-app cookies forwarded), script injected only into
 HTML responses, WebSocket upgrade passthrough, off-allow-list redirect
 refused, target framing headers replaced by `frame-ancestors` for the
-dashboard origin) and for the CSP header; Go tests that `wsinbox` persists,
+dashboard origin, only registered directories served) and for the wrapper
+route's CSP (`frame-src` is exactly that card's proxy origin) with the
+session page CSP unchanged; Go tests that `wsinbox` persists,
 merges, restores, and caps pick and console entries; a node test of the
 postMessage protocol (posts go only to the dashboard origin; the host drops
 messages from another origin or another frame); a LOOK capture, on a dev
