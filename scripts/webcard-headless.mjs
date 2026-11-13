@@ -379,7 +379,7 @@ async function makeContext(browser, fx, o = {}) {
     // The session page's own view: each card frame load and each card
     // message, with the time since the page started.
     await page.addInitScript(() => {
-      if (window.top !== window) return;
+      if (new URL(location.href).searchParams.get("frame") !== "1") return;
       const t0 = Date.now(), log = (s) => console.log(`[trace] ${(Date.now() - t0)} ${s}`);
       new MutationObserver(() => {
         for (const f of document.querySelectorAll("iframe.wc-frame:not([data-traced])")) {
@@ -398,37 +398,54 @@ async function makeContext(browser, fx, o = {}) {
     if (r.method() === "POST") posts.push(new URL(r.url()).pathname);
     if (process.env.WEBCARD_TRACE && /\/web/.test(r.url())) console.log(`    ${Date.now() % 100000} ${r.method()} ${r.url().replace(/^http:\/\/[^/]+/, "")} [${r.frame() === page.mainFrame() ? "page" : r.frame().url().replace(/^http:\/\/[^/]+/, "")}]`);
   });
+  // Keep page as the shell for browser input, top-level navigation checks,
+  // and screenshots. Session DOM and its card/topic frames live one level
+  // below it; reacquire that frame whenever the shell reloads.
+  let session;
   const t = {
     page, context, fx, dialogs, posts,
+    get session() { return session; },
+    async sessionFrame() {
+      session = await until("the shell's session frame", () => page.frames().find((f) => {
+        if (f.isDetached() || f.parentFrame() !== page.mainFrame()) return false;
+        const u = new URL(f.url());
+        return u.pathname === `/s/${fx.rid}` && u.searchParams.get("frame") === "1";
+      }), 15000);
+      await until("the session page's web button", () => session.locator(".wnew").count(), 15000);
+    },
+    async reload() {
+      await page.reload();
+      await t.sessionFrame();
+    },
     note: (s) => console.log(`  (${s})`),
     url: (host = "127.0.0.1") => `http://${host}:${fx.dport()}/s/${fx.rid}`,
     async open(host) {
       await page.goto(t.url(host));
-      await until("the session page's web button", () => page.locator(".wnew").count(), 15000);
+      await t.sessionFrame();
       await until("the board's topic", () => t.boardFrame(), 15000);
     },
-    cards: () => page.locator(WEB),
-    count: () => page.locator(WEB).count(),
+    cards: () => session.locator(WEB),
+    count: () => session.locator(WEB).count(),
     // card is the web card at index i in page order (-1: the last); a
     // scenario with one card uses it, otherwise opened() names the card.
-    card: (i = -1) => (i < 0 ? page.locator(WEB).last() : page.locator(WEB).nth(i)),
+    card: (i = -1) => (i < 0 ? session.locator(WEB).last() : session.locator(WEB).nth(i)),
     // opened runs fn and returns the web card it opened (a new card stands
     // at the head of the flow, so it is found by its id, not its place), or
     // the one card on the page when fn reopened an existing one.
     async opened(fn) {
-      const ids = () => page.locator(WEB).evaluateAll((l) => l.map((e) => e.getAttribute("data-card")));
+      const ids = () => session.locator(WEB).evaluateAll((l) => l.map((e) => e.getAttribute("data-card")));
       const before = await ids();
       await fn();
       const id = await until("a new web card", async () => (await ids()).find((x) => !before.includes(x)), 6000);
-      return page.locator(`${WEB}[data-card="${id}"]`);
+      return session.locator(`${WEB}[data-card="${id}"]`);
     },
     // plusWeb opens a web card through the "+ Web" popover and returns it.
     async plusWeb(text) {
       return t.opened(async () => {
-        await page.click(".wnew");
-        await page.waitForSelector(".wpop:not([hidden]) .fpin");
-        await page.fill(".wpop .fpin", text);
-        await page.click(".wpop .btn.pr");
+        await session.click(".wnew");
+        await session.waitForSelector(".wpop:not([hidden]) .fpin");
+        await session.fill(".wpop .fpin", text);
+        await session.click(".wpop .btn.pr");
       });
     },
     // wrapper and inner are the card's wrapper frame and the proxied page.
@@ -436,7 +453,7 @@ async function makeContext(browser, fx, o = {}) {
       return until("the card's wrapper frame", async () => {
         const h = await card.locator("iframe.wc-frame").elementHandle();
         const f = h && (await h.contentFrame());
-        return f && /\/web\//.test(f.url()) ? f : null;
+        return f && f.parentFrame() === session && /\/web\//.test(f.url()) ? f : null;
       });
     },
     async inner(card, want) {
@@ -467,7 +484,7 @@ async function makeContext(browser, fx, o = {}) {
       }, 12000);
     },
     async stored() {
-      const raw = await page.evaluate((k) => localStorage.getItem(k), "ws.dashboard.cards." + fx.rid);
+      const raw = await session.evaluate((k) => localStorage.getItem(k), "ws.dashboard.cards." + fx.rid);
       const v = JSON.parse(raw || "null");
       const list = Array.isArray(v) ? v : (v && (v.cards || v.list)) || [];
       return list.filter((c) => c && c.kind === "web").map((c) => c.data);
@@ -479,10 +496,10 @@ async function makeContext(browser, fx, o = {}) {
       }
     },
     // boardFrame is the topic body frame holding the fixture links.
-    boardFrame: () => page.frames().find((f) => !f.isDetached() && f !== page.mainFrame() && !/\/web\//.test(f.url()) && f.url().indexOf("127.0.0.1:" + fx.up.port) < 0 && f.parentFrame() === page.mainFrame() && f.childFrames().length === 0 && f.url() !== "about:blank") || null,
+    boardFrame: () => session.childFrames().find((f) => !f.isDetached() && !/\/web\//.test(f.url()) && f.url().indexOf("127.0.0.1:" + fx.up.port) < 0 && f.parentFrame() === session && f.childFrames().length === 0 && f.url() !== "about:blank") || null,
     async boardLink(text) {
       return until(`the board link "${text}"`, async () => {
-        for (const f of page.frames()) {
+        for (const f of session.childFrames()) {
           if (f.isDetached()) continue;
           const a = f.locator("a", { hasText: text });
           if (await a.count()) return a.first();
@@ -492,12 +509,12 @@ async function makeContext(browser, fx, o = {}) {
     },
     async menu() {
       return until("the link menu", async () => {
-        const m = page.locator(".lmenu");
+        const m = session.locator(".lmenu");
         return (await m.count()) ? (await m.locator("button").allTextContents()) : null;
       }, 4000);
     },
     async menuPick(text) {
-      await page.locator(".lmenu button", { hasText: text }).click();
+      await session.locator(".lmenu button", { hasText: text }).click();
     },
     // newTab runs fn and returns the tab it opened.
     async newTab(fn) {
@@ -582,7 +599,7 @@ const SCENARIOS = [
       const b = await f.locator("#headline").boundingBox();
       await t.page.mouse.move(b.x + 5, b.y + 5);
       await t.page.mouse.click(b.x + 5, b.y + 5);
-      await until("the pick chip", async () => (await t.page.locator("#cchips .pchip").count()) === 1);
+      await until("the pick chip", async () => (await t.session.locator("#cchips .pchip").count()) === 1);
     },
   },
   {
@@ -599,8 +616,8 @@ const SCENARIOS = [
       const b = await f.locator("#headline").boundingBox();
       await t.page.mouse.move(b.x + 5, b.y + 5);
       await t.page.mouse.click(b.x + 5, b.y + 5);
-      await until("the pick chip", async () => (await t.page.locator("#cchips .pchip").count()) === 1);
-      const comp = await t.page.locator("#composer").boundingBox();
+      await until("the pick chip", async () => (await t.session.locator("#cchips .pchip").count()) === 1);
+      const comp = await t.session.locator("#composer").boundingBox();
       t.note(`at 900px the composer is ${comp && comp.height > 0 ? "shown" : "hidden"} beside the card`);
       if (opt.shots) { fs.mkdirSync(opt.shots, { recursive: true }); await t.page.screenshot({ path: path.join(opt.shots, "narrow-900.png") }); }
     },
@@ -647,7 +664,7 @@ const SCENARIOS = [
       t.note(`Escape with the focus on the pick toggle leaves pick mode ${(await pick.getAttribute("aria-pressed")) === "true" ? "on" : "off"}`);
       if ((await pick.getAttribute("aria-pressed")) === "true") await pick.click();
       await until("pick off", async () => (await pick.getAttribute("aria-pressed")) === "false");
-      const chips0 = await t.page.locator("#cchips .achip.pchip").count();
+      const chips0 = await t.session.locator("#cchips .achip.pchip").count();
       await pick.click();
       await until("pick on again", async () => (await pick.getAttribute("aria-pressed")) === "true");
       const li = f.locator('[data-testid="beta-row"]');
@@ -655,10 +672,10 @@ const SCENARIOS = [
       await t.page.mouse.move(lb.x + 5, lb.y + lb.height / 2);
       await sleep(100);
       await t.page.mouse.click(lb.x + 5, lb.y + lb.height / 2);
-      await until("the pick chip", async () => (await t.page.locator("#cchips .achip.pchip").count()) === chips0 + 1);
+      await until("the pick chip", async () => (await t.session.locator("#cchips .achip.pchip").count()) === chips0 + 1);
       await sleep(400);
-      assert((await t.page.locator("#cchips .achip.pchip").count()) === chips0 + 1, "a click posted more than one pick");
-      const chip = t.page.locator("#cchips .achip.pchip").last();
+      assert((await t.session.locator("#cchips .achip.pchip").count()) === chips0 + 1, "a click posted more than one pick");
+      const chip = t.session.locator("#cchips .achip.pchip").last();
       const sel = await chip.locator("b").textContent(), title = await chip.getAttribute("title");
       assert(sel === '[data-testid="beta-row"]', `the chip's selector is ${sel}`);
       assert(title.startsWith(`http://127.0.0.1:${t.fx.up.port}/\n`) && title.endsWith("\nBeta"), `the chip's title is ${JSON.stringify(title)}`);
@@ -667,10 +684,10 @@ const SCENARIOS = [
       // The picked click never reached the page: a second plain click lands.
       const cta = f.locator(".cta");
       await cta.click();
-      assert((await t.page.locator("#cchips .achip.pchip").count()) === chips0 + 1, "a click outside pick mode posted a pick");
+      assert((await t.session.locator("#cchips .achip.pchip").count()) === chips0 + 1, "a click outside pick mode posted a pick");
       // Removing the chip.
       await chip.locator("[data-unwpick]").click();
-      assert((await t.page.locator("#cchips .achip.pchip").count()) === chips0, "the chip's remove did not remove it");
+      assert((await t.session.locator("#cchips .achip.pchip").count()) === chips0, "the chip's remove did not remove it");
     },
   },
   {
@@ -682,7 +699,7 @@ const SCENARIOS = [
       const badge = card.locator(".bc-acts .wc-att .wc-badge");
       await until("the badge to count three errors", async () => !(await badge.isHidden()) && (await badge.textContent()) === "3", 6000);
       await card.locator(".bc-acts .wc-att").click();
-      const chip = t.page.locator("#cchips .achip.cchip");
+      const chip = t.session.locator("#cchips .achip.cchip");
       await until("the console chip", async () => (await chip.count()) === 1);
       const label = await chip.locator("b").textContent(), title = await chip.getAttribute("title");
       const lines = title.split("\n");
@@ -758,7 +775,7 @@ const SCENARIOS = [
       const stored = await t.stored();
       assert(stored.length === 1 && stored[0].url === `http://127.0.0.1:${up.port}/`, `stored ${JSON.stringify(stored)}`);
       const h1 = up.hit("GET /");
-      await t.page.reload();
+      await t.reload();
       await until("the restored card", async () => (await t.count()) === 1, 15000);
       await t.ready(t.card());
       assert(up.hit("GET /") > h1, "the restored card did not load its page");
@@ -779,7 +796,7 @@ const SCENARIOS = [
       await sleep(600);
       assert(!t.posts.includes(`/s/${t.fx.rid}/web`), `quick moves on the same server registered again: ${t.posts.join(", ")}`);
       await until("the record to follow", async () => (await t.stored())[0].url === `http://127.0.0.1:${up.port}/errors`);
-      await t.page.reload();
+      await t.reload();
       await until("the restored card", async () => (await t.count()) === 1, 15000);
       await t.ready(t.card());
       await t.inner(t.card(), "/errors");
@@ -812,7 +829,7 @@ const SCENARIOS = [
       await (await t.boardLink("site/app.html")).click();
       items = await t.menu();
       await t.menuPick("Preview");
-      const fc = t.page.locator('.bcard:not([data-kind="web"])', { hasText: "app.html" }).last();
+      const fc = t.session.locator('.bcard:not([data-kind="web"])', { hasText: "app.html" }).last();
       await until("the file card", () => fc.count());
       const act = fc.locator('.bc-acts button[title="Open as web card"]');
       await until("the file card's web action", () => act.count());
@@ -839,7 +856,7 @@ const SCENARIOS = [
       const badge = card.locator(".wc-badge");
       await until("the static page's error badge", async () => (await badge.textContent()) === "1", 4000);
       await card.locator(".bc-acts .wc-att").click();
-      const cc = t.page.locator("#cchips .cchip");
+      const cc = t.session.locator("#cchips .cchip");
       await until("the static console chip", async () => (await cc.count()) === 1);
       const ct = (await cc.getAttribute("title")).split("\n");
       assert(ct[0] === "site/app.html" && ct[1] === "static: a logged error", `the static console chip holds ${JSON.stringify(ct)}`);
@@ -847,7 +864,7 @@ const SCENARIOS = [
       const sb = await h.locator("#static-title").boundingBox();
       await t.page.mouse.move(sb.x + 5, sb.y + 5);
       await t.page.mouse.click(sb.x + 5, sb.y + 5);
-      const pc = t.page.locator("#cchips .pchip");
+      const pc = t.session.locator("#cchips .pchip");
       await until("the static pick chip", async () => (await pc.count()) === 1);
       const pt = (await pc.getAttribute("title")).split("\n");
       assert(pt[0] === "site/app.html" && pt[1] === "#static-title", `the static pick chip holds ${JSON.stringify(pt)}`);
@@ -921,7 +938,7 @@ const SCENARIOS = [
       // A full registry: register targets until the route answers 503, then
       // "+ Web" one more. Each is a dev target on an unused port; its
       // listener starts at registration.
-      const answers = await t.page.evaluate(async (rid) => {
+      const answers = await t.session.evaluate(async (rid) => {
         const out = [];
         for (let i = 0; i < 20; i++) {
           const r = await fetch(`/s/${rid}/web`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: `http://127.0.0.1:${41000 + i}/` }) });
@@ -950,7 +967,7 @@ const SCENARIOS = [
       await t.inner(t.card(), "/app.html");
       await t.fx.restart();
       t.posts.length = 0;
-      await t.page.reload();
+      await t.reload();
       await until("the restored card", async () => (await t.count()) === 1, 15000);
       await t.ready(t.card());
       const f = await t.inner(t.card(), "/app.html");
@@ -1003,20 +1020,20 @@ const SCENARIOS = [
       const f = await t.inner(card, "/errors");
       await until("the badge", async () => (await card.locator(".wc-badge").textContent()) === "3", 6000);
       await card.locator(".bc-acts .wc-att").click();
-      await until("the console chip", async () => (await t.page.locator("#cchips .cchip").count()) === 1);
+      await until("the console chip", async () => (await t.session.locator("#cchips .cchip").count()) === 1);
       await card.locator(".bc-acts .wc-pick").click();
       const tb = await f.locator("#err-title").boundingBox();
       await t.page.mouse.move(tb.x + 5, tb.y + 5);
       await t.page.mouse.click(tb.x + 5, tb.y + 5);
-      await until("the pick chip", async () => (await t.page.locator("#cchips .pchip").count()) === 1);
+      await until("the pick chip", async () => (await t.session.locator("#cchips .pchip").count()) === 1);
       // The draft keeps the chips across a session-page reload.
       await sleep(1200);
-      await t.page.reload();
-      await until("the restored draft's chips", async () => (await t.page.locator("#cchips .pchip").count()) === 1 && (await t.page.locator("#cchips .cchip").count()) === 1, 10000);
-      await t.page.fill("#ctext", "Please look at the picked heading and the errors");
-      await t.page.click("#csend");
-      await until("the composer to clear", async () => (await t.page.locator("#cchips .achip").count()) === 0, 8000);
-      const held = t.page.locator(".hchips");
+      await t.reload();
+      await until("the restored draft's chips", async () => (await t.session.locator("#cchips .pchip").count()) === 1 && (await t.session.locator("#cchips .cchip").count()) === 1, 10000);
+      await t.session.fill("#ctext", "Please look at the picked heading and the errors");
+      await t.session.click("#csend");
+      await until("the composer to clear", async () => (await t.session.locator("#cchips .achip").count()) === 0, 8000);
+      const held = t.session.locator(".hchips");
       await until("the held message's chips", async () => (await held.locator(".pchip").count()) >= 1 && (await held.locator(".cchip").count()) >= 1, 8000);
       assert((await held.locator(".pchip b").last().textContent()) === "#err-title", "the held pick chip names another selector");
       // The daemon's own store of the held entry, in this instance's cache.
@@ -1029,9 +1046,9 @@ const SCENARIOS = [
       assert(Array.isArray(entry.consoles) && entry.consoles.length === 1 && entry.consoles[0].lines.length === 3, `the stored consoles ${JSON.stringify(entry.consoles)}`);
       console.log(`  (stored entry: ${JSON.stringify({ picks: entry.picks, consoles: entry.consoles.map((c) => ({ url: c.url, lines: c.lines.length })) })})`);
       // A cancel gives the held message back to the composer, chips included.
-      await t.page.locator(".msg.held .hcancel").last().click();
-      await until("the cancelled message's chips back in the composer", async () => (await t.page.locator("#cchips .pchip").count()) === 1 && (await t.page.locator("#cchips .cchip").count()) === 1, 8000);
-      const back = await t.page.locator("#cchips .cchip").getAttribute("title");
+      await t.session.locator(".msg.held .hcancel").last().click();
+      await until("the cancelled message's chips back in the composer", async () => (await t.session.locator("#cchips .pchip").count()) === 1 && (await t.session.locator("#cchips .cchip").count()) === 1, 8000);
+      const back = await t.session.locator("#cchips .cchip").getAttribute("title");
       assert(back.split("\n").length === 4, `the returned console chip holds ${JSON.stringify(back)}`);
     },
   },
@@ -1066,7 +1083,7 @@ const SCENARIOS = [
           await sleep(250);
           await snap(card, `web-card-pick-${theme}.png`);
           await t.page.mouse.click(hb.x + 20, hb.y + hb.height / 2);
-          await until("the pick chip", async () => (await t.page.locator("#cchips .pchip").count()) >= 1);
+          await until("the pick chip", async () => (await t.session.locator("#cchips .pchip").count()) >= 1);
           // The errors page: attach, then two more errors so the badge shows
           // beside the chips.
           await card.locator(".wc-url").fill(`http://127.0.0.1:${t.fx.up.port}/errors`);
@@ -1074,15 +1091,15 @@ const SCENARIOS = [
           const badge = card.locator(".wc-badge");
           await until("the badge", async () => (await badge.textContent()) === "3", 6000);
           await card.locator(".bc-acts .wc-att").click();
-          await until("the console chip", async () => (await t.page.locator("#cchips .cchip").count()) >= 1);
+          await until("the console chip", async () => (await t.session.locator("#cchips .cchip").count()) >= 1);
           const g = await t.inner(card, "/errors");
           await g.locator("#more").click();
           await g.locator("#more").click();
           await until("the badge again", async () => !(await badge.isHidden()) && (await badge.textContent()) === "2", 4000);
           await t.page.mouse.move(2, 2);
-          await t.page.locator("#ctext").fill("Why does this heading log errors?");
+          await t.session.locator("#ctext").fill("Why does this heading log errors?");
           await sleep(200);
-          await snap(t.page.locator("#composer"), `composer-chips-${theme}.png`);
+          await snap(t.session.locator("#composer"), `composer-chips-${theme}.png`);
           await snap(t.page, `page-card-and-composer-${theme}.png`);
         } finally {
           await t.context.close();
