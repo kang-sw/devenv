@@ -1493,8 +1493,8 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 2px 4px 40px 2px; }
 /* The pinned column has no rail (cards.js), so its topics' bars and cards' headers stick to the top of this scroller by CSS alone, as the board's do. The pin list above the board sits in the rail's host (.wb-rail) and is railed with the board. */
 .bpcol > .bpins .topic { overflow: hidden; overflow: clip; }
-.bpcol > .bpins .topic > .tbar { position: sticky; top: 0; z-index: 2; }
-.bpcol > .bpins .topic:not(.quiet) > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+.bpcol > .bpins .topic > .tophead { position: sticky; top: 0; z-index: 2; }
+.bpcol > .bpins .topic:not(.quiet) > .tophead > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
 .bpcol > .bpins .bcard:not([data-max]) .bc-hd { position: sticky; top: 0; z-index: 1; background: var(--wb-card); border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
 .bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
 .bp-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
