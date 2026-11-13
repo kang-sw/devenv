@@ -85,5 +85,9 @@ func (d *Daemon) serveFindingSession(w http.ResponseWriter, r *http.Request, rep
 		"RetryMs":  findingRetryMs,
 		"GiveUpMs": findingGiveUpMs,
 	})
+	// A shell's frame finds the session in place (admitShellFrame).
+	if framedRequest(r) {
+		admitShellFrame(w, frameAncestorsSelf)
+	}
 	writeHTMLStatus(w, http.StatusNotFound, b.String())
 }

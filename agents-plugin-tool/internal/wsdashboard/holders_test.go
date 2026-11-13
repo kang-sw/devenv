@@ -260,7 +260,7 @@ func TestDaemonRunsAndReleasesItsHolderHost(t *testing.T) {
 // daemon without a holder host has no card.
 func TestHoldersCardInTheDrawer(t *testing.T) {
 	f := startPageFixture(t, func(o *DaemonOptions) { o.Worktrees = &fakeWorktrees{} }, withHolders(newFakeHolders()))
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	worktrees, card, settings := strings.Index(page, `id="p-worktrees"`), strings.Index(page, `id="p-holders"`), strings.Index(page, `id="p-settings"`)
 	if worktrees < 0 || card < worktrees || settings < card {
 		t.Fatalf("drawer order: worktrees %d, holders %d, settings %d", worktrees, card, settings)
@@ -272,7 +272,7 @@ func TestHoldersCardInTheDrawer(t *testing.T) {
 	}
 
 	bare := startPageFixture(t)
-	if _, page := get(t, bare.base+"/s/livesession"); strings.Contains(page, `id="p-holders"`) || !strings.Contains(page, `id="p-settings"`) {
+	if _, page := get(t, bare.base+"/s/livesession?frame=1"); strings.Contains(page, `id="p-holders"`) || !strings.Contains(page, `id="p-settings"`) {
 		t.Errorf("a daemon without a holder host: holders card present or settings card missing")
 	}
 }

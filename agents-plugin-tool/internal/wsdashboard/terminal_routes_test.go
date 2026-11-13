@@ -155,10 +155,10 @@ func TestTerminalsAreOfferedToALocalViewerOnly(t *testing.T) {
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	attr := ` data-term="` + name + `"`
 	const style = ".xterm .xterm-viewport"
-	if page := serve(f.d, local, http.MethodGet, "/s/livesession", "").Body.String(); !strings.Contains(page, attr) || !strings.Contains(page, style) {
+	if page := serve(f.d, local, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); !strings.Contains(page, attr) || !strings.Contains(page, style) {
 		t.Errorf("a local viewer's page lacks the terminal offer (%s) or the emulator's stylesheet", attr)
 	}
-	if page := serve(f.d, lan, http.MethodGet, "/s/livesession", "").Body.String(); strings.Contains(page, "data-term=") || strings.Contains(page, style) || !strings.Contains(page, `data-rid="livesession"`) {
+	if page := serve(f.d, lan, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, "data-term=") || strings.Contains(page, style) || !strings.Contains(page, `data-rid="livesession"`) {
 		t.Error("a LAN viewer's page offers terminals")
 	}
 	rec := serve(f.d, local, http.MethodGet, "/s/"+name, "")
@@ -168,7 +168,7 @@ func TestTerminalsAreOfferedToALocalViewerOnly(t *testing.T) {
 
 	plain := startPageFixture(t, withHolders(newFakeHolders()))
 	plainLocal := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + strconv.Itoa(plain.d.Endpoint().Port)}
-	if page := serve(plain.d, plainLocal, http.MethodGet, "/s/livesession", "").Body.String(); strings.Contains(page, "data-term=") {
+	if page := serve(plain.d, plainLocal, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, "data-term=") {
 		t.Error("a daemon whose holder host cannot run terminals offers them")
 	}
 	if rec := serve(plain.d, plainLocal, http.MethodGet, "/s/livesession/terminals", ""); rec.Code != http.StatusNotFound {
@@ -200,10 +200,10 @@ func TestTerminalSymbolsFont(t *testing.T) {
 	local := viewer{peer: "127.0.0.1:50000", host: "127.0.0.1:" + port}
 	lan := viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: readLANToken(t, f.dir)}
 	face := `@font-face { font-family: "` + termSymbolsFamily + `"; src: url("/s/` + name + `") format("woff2"); font-display: swap; }`
-	if page := serve(f.d, local, http.MethodGet, "/s/livesession", "").Body.String(); !strings.Contains(page, face) {
+	if page := serve(f.d, local, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); !strings.Contains(page, face) {
 		t.Errorf("a local viewer's page lacks the symbols font face %s", face)
 	}
-	if page := serve(f.d, lan, http.MethodGet, "/s/livesession", "").Body.String(); strings.Contains(page, termSymbolsFamily) {
+	if page := serve(f.d, lan, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, termSymbolsFamily) {
 		t.Error("a LAN viewer's page declares the terminal's symbols font")
 	}
 	rec := serve(f.d, local, http.MethodGet, "/s/"+name, "")

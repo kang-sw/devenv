@@ -36,6 +36,9 @@ function wsT(k) { return k; }
 var indicator = { title: "", off: false, classList: { toggle: function (c, on) { indicator.off = on; } } };
 function q() { return [indicator]; }
 var doc = { hidden: false };
+// The page stands alone: no shell around it, no shell above it.
+var shell = false, framed = false, shHidden = false, shTrackerRev = null;
+function shDrafts() { return false; }
 `
 
 // TestPageStreamsRideWebSocket pins the page side of the stream transport

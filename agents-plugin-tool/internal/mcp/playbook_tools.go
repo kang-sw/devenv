@@ -10,7 +10,10 @@ import (
 	"unicode"
 
 	"github.com/kang-sw/devenv/internal/claudeagents"
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 	"github.com/kang-sw/devenv/internal/wsstate"
 )
@@ -103,6 +106,69 @@ func terminologyForHarness(harness, namespace string) map[string]string {
 		return resolved
 	}
 	return table
+}
+
+// playbookTerminology is the terminology a render substitutes for its caller:
+// terminologyForHarness, except that a caller running Pi without the native
+// ws Pi extension (piMCPOnly, see Server.callerPiMCPOnly) gets
+// piMCPOnlyTerminology whatever harness its connection was detected as.
+func playbookTerminology(harness string, piMCPOnly bool, namespace string) map[string]string {
+	if piMCPOnly {
+		return piMCPOnlyTerminology(namespace)
+	}
+	return terminologyForHarness(harness, namespace)
+}
+
+// callerPiMCPOnly reports whether key belongs to a Pi conversation the
+// daemon runs without the native ws Pi extension (wsagent.PiMCPOnly). The
+// proof is the daemon's own conversation record, found through the key's
+// reply-id and naming this exact key, read as tracker support reads it.
+// Such a session connects through Pi's builtin MCP client, whose clientInfo
+// is not the extension's "ws-pi-bridge", so harness detection does not see
+// it as pi. A key with no such record (a terminal harness, a keyless render,
+// a native-subagent child) is not.
+func (s *Server) callerPiMCPOnly(key string) bool {
+	if key == "" {
+		return false
+	}
+	replyID := wsmailbox.ReplyID(key)
+	if !wsdashboard.ValidReplyID(replyID) {
+		return false
+	}
+	dir, err := s.dashboard.stateDir()
+	if err != nil {
+		return false
+	}
+	rec, err := wsagent.ReadRecord(dir, replyID)
+	if err != nil || rec.WSKey != key || rec.Backend != wsagent.BackendPi {
+		return false
+	}
+	def := rec.ResolvedDefinition
+	if def == nil && !rec.Lead {
+		// Records written before the launched-profile snapshot fall back to
+		// the profile their name resolves to now.
+		if rp, err := wsagent.ResolveProfile(s.configOptions(), rec.Root, rec.Profile); err == nil {
+			def = &rp.Definition
+		}
+	}
+	return wsagent.PiMCPOnly(rec, def)
+}
+
+// piMCPOnlyTerminology is the terminology row of a Pi session that reaches ws
+// only through Pi's builtin MCP client: the native extension's explore,
+// ws-agent-spawn, and ws-agent-send tools (the "pi" row) are absent there, so
+// every idiom names the ws MCP Pi tools instead. pi.spawn takes a capability
+// tier, not a model, and has no read-only profile, so the explorer is a
+// small-tier spawn whose brief asks for read-only work without promising
+// enforcement. The namespace is assembled here for the same reason as in
+// claudeSpawnIdiom. ContinueIdiom carries no backticks because delegationTip
+// wraps it in a code span.
+func piMCPOnlyTerminology(namespace string) map[string]string {
+	return map[string]string{
+		"ExploreAgent":  "a `" + namespace + "/pi.spawn` subagent at tier small, briefed for read-only work",
+		"SpawnIdiom":    "`" + namespace + "/pi.spawn` (tier: the resolved capability tier, not a model name)",
+		"ContinueIdiom": namespace + "/pi.send to the same subagent id",
+	}
 }
 
 // claudeSpawnIdiom is the Claude SpawnIdiom value. Claude's Agent tool takes a
@@ -359,11 +425,13 @@ func isReservedNamespaceVar(name string) bool {
 // ErrUndeclaredVar so the contract "undeclared caller context → loud error" is
 // preserved while common namespace vars do not require frontmatter declarations.
 //
+// terminology is the caller's idiom row (playbookTerminology); harness still
+// drives model resolution.
 // tier is the playbook's declared capability tier (from pb.Meta.Tier); it drives
 // RoleModel resolution. configOpts is forwarded unchanged to both
 // resolveRoleModelVar (RoleModel) and resolveTierModelVars (the fixed-tier vars).
 // workflowLang is the resolved workflow.lang value; it drives WorkflowLang injection.
-func buildPlaybookVars(declared []string, callerContext map[string]string, harness, tier string, configOpts wsconfig.Options, workflowLang, namespace string) (map[string]string, error) {
+func buildPlaybookVars(declared []string, callerContext map[string]string, harness string, terminology map[string]string, tier string, configOpts wsconfig.Options, workflowLang, namespace string) (map[string]string, error) {
 	declaredSet := make(map[string]bool, len(declared))
 	for _, v := range declared {
 		declaredSet[v] = true
@@ -384,7 +452,7 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 	}
 
 	// Layer 2: terminology vars overwrite caller context for reserved names.
-	for k, v := range terminologyForHarness(harness, namespace) {
+	for k, v := range terminology {
 		if declaredSet[k] {
 			merged[k] = v
 		}
@@ -424,10 +492,9 @@ func buildPlaybookVars(declared []string, callerContext map[string]string, harne
 // delegationTip returns the harness-aware continuity tip fragment appended to the
 // rendered body of delegates:true playbooks. The text is product-neutral: both
 // product modes delegate to host-native subagents, so the fragment differs only
-// by the harness continuation idiom.
-func delegationTip(harness, namespace string) string {
-	term := terminologyForHarness(harness, namespace)
-	continueIdiom := term["ContinueIdiom"]
+// by the caller's continuation idiom (terminology, see playbookTerminology).
+func delegationTip(terminology map[string]string) string {
+	continueIdiom := terminology["ContinueIdiom"]
 	var sb strings.Builder
 	sb.WriteString("\n\n---\n")
 	sb.WriteString("**Continuity tip:** This playbook delegates to a subagent. ")
@@ -901,7 +968,16 @@ func (s *Server) resolveRsrcRoot(rsrcRootOverride string) (string, error) {
 // declared in the playbook frontmatter, or tierOverride when supplied, surfaced
 // so the caller can pick the delegate's model from one render call.
 func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
+	return renderPlaybookBodyForCaller(s, "", rsrcRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
+}
+
+// renderPlaybookBodyForCaller is renderPlaybookBody for the caller holding
+// callerKey (empty for a keyless render): the caller's own launch record, not
+// only the connection's detected harness, selects its terminology row (see
+// playbookTerminology).
+func renderPlaybookBodyForCaller(s *Server, callerKey, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
 	harness := s.currentHarness()
+	terminology := playbookTerminology(harness, s.callerPiMCPOnly(callerKey), s.runtimeNamespace())
 
 	// Load once with nil vars so the MCP playbook layer can add reserved
 	// namespace variables without teaching product-mode semantics to wsrsrc.
@@ -918,7 +994,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 		return "", "", err
 	}
 
-	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, recommendedTier, configOpts, workflowLang, s.runtimeNamespace())
+	vars, err := buildPlaybookVars(pb.Meta.Variables, callerContext, harness, terminology, recommendedTier, configOpts, workflowLang, s.runtimeNamespace())
 	if err != nil {
 		return "", "", err
 	}
@@ -927,7 +1003,7 @@ func renderPlaybookBody(s *Server, rsrcRoot, name string, callerContext map[stri
 		return "", "", err
 	}
 	if pb.Meta.Delegates {
-		body += delegationTip(harness, s.runtimeNamespace())
+		body += delegationTip(terminology)
 	}
 
 	// Unit 1: render-minted child key — only when caller is lead (mintRoot != "").
@@ -1041,8 +1117,14 @@ func workflowPreferSubagentEnabled(configOpts wsconfig.Options) (bool, error) {
 // overrideLookup: when non-nil, the session-keyed closure for resolving prompt
 // override-point values; pass nil to render every override-point with its seed.
 func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
+	return printPlaybookForCaller(s, "", rsrcRoot, name, callerContext, configOpts, workflowLang, overrideLookup)
+}
+
+// printPlaybookForCaller is printPlaybook for the caller holding callerKey
+// (see renderPlaybookBodyForCaller).
+func printPlaybookForCaller(s *Server, callerKey, rsrcRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, workflowLang string, overrideLookup overrideLookupFn) (string, string, error) {
 	// playbook.read exposes no tier_override arg — always "" (frontmatter tier).
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, callerContext, configOpts, "", "", workflowLang, overrideLookup, "")
+	body, recommendedTier, err := renderPlaybookBodyForCaller(s, callerKey, rsrcRoot, name, callerContext, configOpts, "", "", workflowLang, overrideLookup, "")
 	if err != nil {
 		return "", "", err
 	}
@@ -1071,7 +1153,7 @@ func printPlaybook(s *Server, rsrcRoot, name string, callerContext map[string]st
 // this render only — see renderPlaybookBody and resolveEffectiveTier. Pass ""
 // to leave frontmatter-tier behavior unchanged.
 func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string) (string, string, error) {
-	path, _, recommendedTier, err := renderPlaybookWithPlan(s, rsrcRoot, worktreeRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride, "")
+	path, _, recommendedTier, err := renderPlaybookWithPlan(s, "", rsrcRoot, worktreeRoot, name, callerContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride, "")
 	return path, recommendedTier, err
 }
 
@@ -1081,8 +1163,9 @@ func renderPlaybook(s *Server, rsrcRoot, worktreeRoot, name string, callerContex
 // a plan-path line naming it, returning that path as planPath. The plan is
 // reserved only after the body rendered, and removed again when the prompt
 // cannot be written, so a failed render never leaves an orphan plan that a
-// later commit could pick up as a false contract.
-func renderPlaybookWithPlan(s *Server, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string, planStem string) (promptPath string, planPath string, recommendedTier string, err error) {
+// later commit could pick up as a false contract. callerKey is the render
+// caller's session key (see renderPlaybookBodyForCaller).
+func renderPlaybookWithPlan(s *Server, callerKey, rsrcRoot, worktreeRoot, name string, callerContext map[string]string, configOpts wsconfig.Options, mintRoot string, parentKey string, workflowLang string, overrideLookup overrideLookupFn, tierOverride string, planStem string) (promptPath string, planPath string, recommendedTier string, err error) {
 	templateContext := callerContext
 	var renderContext map[string]string
 	if s.noAgentMode() && wsflowRenderEligibleStems[name] && len(callerContext) > 0 {
@@ -1095,7 +1178,7 @@ func renderPlaybookWithPlan(s *Server, rsrcRoot, worktreeRoot, name string, call
 		}
 		templateContext, renderContext = splitDeclaredRenderContext(callerContext, declared)
 	}
-	body, recommendedTier, err := renderPlaybookBody(s, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
+	body, recommendedTier, err := renderPlaybookBodyForCaller(s, callerKey, rsrcRoot, name, templateContext, configOpts, mintRoot, parentKey, workflowLang, overrideLookup, tierOverride)
 	if err != nil {
 		return "", "", "", err
 	}

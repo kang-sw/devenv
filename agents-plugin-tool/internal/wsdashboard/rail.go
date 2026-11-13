@@ -21,6 +21,10 @@ const regionRail = "rail"
 // worktree lists.
 const railRoute = "/rail/refresh"
 
+// railEventsRoute is the iframe shell's stream: the rail alone
+// (handleRailEvents).
+const railEventsRoute = "/rail/events"
+
 // railView reads what the rail shows: every listed session of the index,
 // its snapshot (stale or not), its repository, and its last message, with
 // the stored workspaces and the worktree lists read so far. A session's

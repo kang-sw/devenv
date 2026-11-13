@@ -16,8 +16,9 @@ import (
 // the rail shows, on a new branch (from a local branch of the repository)
 // or on an existing local branch no worktree has checked out. The folder is
 // the default one beside the root or one the user names, which must be
-// absent or empty. The daemon adds and nothing else: it never removes or
-// prunes a worktree, and never deletes or renames a branch. Every name a
+// absent or empty. An add only adds: it never removes or prunes a worktree
+// (the rail's delete is railworktreedelete.go), and never deletes or
+// renames a branch. Every name a
 // request carries is checked before it reaches git's command line, and none
 // can read as an option: a branch is a valid branch name that does not
 // start with "-", a base goes in as refs/heads/<base>, and the folder

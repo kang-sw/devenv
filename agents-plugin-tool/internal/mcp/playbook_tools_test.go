@@ -282,9 +282,11 @@ func TestPlaybookPrintPiHarnessSelectsOverlay(t *testing.T) {
 	}
 }
 
-// TestPlaybookPrintPiHarnessUsesPiTerminology pins the exact Pi idioms that
-// delegate playbooks receive. Structural overlays remain independently tested;
-// terminology substitution must not rely on one.
+// TestPlaybookPrintPiHarnessUsesPiTerminology pins the exact native Pi idioms
+// (the ws Pi extension's tools) that delegate playbooks receive; a Pi session
+// without that extension gets the MCP-only row instead
+// (playbook_pi_mcp_only_test.go). Structural overlays remain independently
+// tested; terminology substitution must not rely on one.
 func TestPlaybookPrintPiHarnessUsesPiTerminology(t *testing.T) {
 	rsrcRoot := buildTestRsrcTree(t, map[string]string{
 		"delegate-pb/delegate-pb.md": delegatePlaybookContent,

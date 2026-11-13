@@ -55,7 +55,7 @@ func TestBoardKeepWiring(t *testing.T) {
 		t.Error("a fetched closed page's sections are not watched")
 	}
 	for _, re := range []string{
-		`(?s)\n  var modeHash = "", hiddenRegions = \{\};\n.*?\n  function pageHidden\(\) \{ return doc\.hidden; \}\n`,
+		`(?s)\n  var modeHash = "", hiddenRegions = \{\};\n.*?\n  function pageHidden\(\) \{ return doc\.hidden \|\| shHidden; \}\n`,
 		`(?s)function onRegion\(ev\) \{.*?if \(pageHidden\(\)\) \{\n        delete hiddenRegions\[ev\.name\];`,
 		`function showRegions\(\) \{\n    if \(pageHidden\(\)\) return;`,
 	} {

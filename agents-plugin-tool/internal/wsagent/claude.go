@@ -559,6 +559,16 @@ type claudeMapper struct {
 	turnErr    string
 	background int
 	ended      bool
+	// levers are the lead's compaction lever calls (*__request_compaction)
+	// waiting for their result, by tool call id. lever marks a lead turn
+	// one of whose lever calls returned a result that is not an error,
+	// from that result to the turn's result; leverEnd carries it,
+	// unless that result was an interrupt, to the idle state that then
+	// ends the turn (states). The ending TurnEnd reports it
+	// (Event.CompactRequested).
+	levers   map[string]bool
+	lever    bool
+	leverEnd bool
 	// approvals are the can_use_tool requests not seen settled, request id
 	// by tool call id.
 	approvals map[string]string
@@ -584,7 +594,7 @@ type claudeSpawn struct {
 
 func newClaudeMapper(spec StartSpec) *claudeMapper {
 	return &claudeMapper{spec: spec, now: time.Now, batches: newBatchTracker("c"), limits: map[string]wslive.UsageLimit{}, tasks: map[string]bool{}, approvals: map[string]string{},
-		rejected: map[string]int64{}, spawns: map[string]claudeSpawn{}, subs: map[string]*claudeSub{}, wakeTasks: map[string]claudeWakeTask{}}
+		rejected: map[string]int64{}, spawns: map[string]claudeSpawn{}, subs: map[string]*claudeSub{}, wakeTasks: map[string]claudeWakeTask{}, levers: map[string]bool{}}
 }
 
 // lead reports a lead conversation's mapper.
@@ -811,8 +821,8 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 					return []Event{{HarnessState: l.State}}
 				}
 				out := append([]Event{{HarnessState: l.State}}, m.closeTurn(now)...)
-				out = append(out, m.status(), Event{TurnEnd: true, TurnError: m.turnErr})
-				m.turnErr = ""
+				out = append(out, m.status(), Event{TurnEnd: true, TurnError: m.turnErr, CompactRequested: m.leverEnd})
+				m.turnErr, m.leverEnd = "", false
 				return out
 			}
 		case "status":
@@ -939,13 +949,18 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 			m.cost = &wslive.UsageCost{USD: *l.TotalCostUSD, Estimate: true}
 		}
 		out = append(out, m.status())
+		// An interrupted turn's lever call does not hold: the person is
+		// taking over, and the mod parks the request without compacting.
+		lever := m.lever && !strings.HasPrefix(l.TerminalState, "aborted")
+		m.lever = false
+		clear(m.levers)
 		if m.states && m.background == 0 {
 			// The idle state that follows ends the turn.
-			m.turnErr = claudeResultError(l)
+			m.turnErr, m.leverEnd = claudeResultError(l), lever
 			return out
 		}
-		m.ended, m.turnErr = m.states, ""
-		return append(out, Event{TurnEnd: true, TurnError: claudeResultError(l)})
+		m.ended, m.turnErr, m.leverEnd = m.states, "", false
+		return append(out, Event{TurnEnd: true, TurnError: claudeResultError(l), CompactRequested: lever})
 	}
 	return nil
 }
@@ -1218,6 +1233,9 @@ func (m *claudeMapper) assistant(raw json.RawMessage, now int64, alerted bool) [
 			if b.Name == "Agent" || b.Name == "Task" {
 				m.spawns[b.ID] = claudeSpawnOf(b.Input)
 			}
+			if strings.HasSuffix(b.Name, claudeCompactionLever) {
+				m.levers[b.ID] = true
+			}
 			if strings.HasSuffix(b.Name, claudeReconnectLever) {
 				// The lead asks for an MCP reconnect: a server it needs is
 				// gone, whatever the harness last reported.
@@ -1251,6 +1269,10 @@ func (m *claudeMapper) toolResults(raw json.RawMessage, now int64) []Event {
 			if m.lead() && b.IsError && strings.HasPrefix(name, "mcp__") {
 				// A failed MCP tool call may be a server that went away.
 				out = append(out, Event{MCPCheck: true})
+			}
+			if m.levers[b.ToolUseID] {
+				delete(m.levers, b.ToolUseID)
+				m.lever = m.lever || !b.IsError
 			}
 			if tool := resultTool(name, claudeMCPToolName); !b.IsError && tool != "" {
 				out = append(out, resultEvents(tool, claudeResultText(b.Content))...)

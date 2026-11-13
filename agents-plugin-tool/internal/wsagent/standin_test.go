@@ -34,6 +34,14 @@ func TestMain(m *testing.M) {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		os.Exit(0)
 	}
+	// The daemon resolves its bundled plugin only through the resource root;
+	// a test binary has no bundle beside it, so tests that start a lead use
+	// this checkout's ws package unless the environment names one.
+	if os.Getenv("WS_RSRC_ROOT") == "" {
+		if rsrc, err := filepath.Abs(filepath.Join("..", "..", "..", "agents-plugin", "rsrc")); err == nil {
+			_ = os.Setenv("WS_RSRC_ROOT", rsrc)
+		}
+	}
 	os.Exit(m.Run())
 }
 

@@ -82,9 +82,9 @@ func TestStoresRouteReportsTheSupportChats(t *testing.T) {
 // session page's id) and fills it from the convlive region its log streams.
 func TestSupportChatCarriesTheSubagentBadge(t *testing.T) {
 	f := startPageFixture(t)
-	code, index := get(t, f.base+"/")
+	code, index := get(t, f.base+"/?frame=1")
 	if code != http.StatusOK {
-		t.Fatalf("GET / = %d", code)
+		t.Fatalf("GET /?frame=1 = %d", code)
 	}
 	for _, want := range []string{
 		`'<div class="composer supcomp"><div class="cbadges"><span class="sbadge" title="' + supEsc(wsT("js.subagents.title")) + '" hidden>'`,
