@@ -215,6 +215,56 @@ func TestTicketsMoveReadyStaysSilentWhenFactsAreNotOwed(t *testing.T) {
 	}
 }
 
+func TestReadyRejectsInvalidRouteFactValuesWithoutWrites(t *testing.T) {
+	for _, tc := range []struct{ key, value, allowed string }{
+		{"scope.test_surface", "new", "none, existing, new-files, unknown"},
+		{"scope.new_public_symbol", "likely", "yes, no, unknown"},
+		{"complexity.reuse_points", "existing", "confirmed, unconfirmed, not-applicable, unknown"},
+		{"risk.fit", "extreme", "low, moderate, high, unknown"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			root := t.TempDir()
+			stem := "260101-feat-sample"
+			rel := filepath.Join("ai-docs", "tickets", "todo", stem+".md")
+			body := "---\ntitle: Sample\nsage-review-design: required\n---\n\n# Sample\n\n## Route Facts\n\n| fact | value |\n|---|---|\n| " + tc.key + " | " + tc.value + " |\n"
+			mustWrite(t, root, rel, body)
+			_, err := SageGate(root, SageGateOptions{TicketStem: stem, Landing: "ready"}, bothStages("auto"))
+			if err == nil || !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), tc.allowed) {
+				t.Fatalf("SageGate error = %v", err)
+			}
+			_, err = TicketsMove(root, &mockGitRunner{}, TicketMoveOptions{TicketStem: stem, To: "ready"})
+			if err == nil || !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), tc.allowed) {
+				t.Fatalf("TicketsMove error = %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(root, rel))
+			if err != nil || string(got) != body {
+				t.Fatalf("source changed: %v, %q", err, got)
+			}
+		})
+	}
+}
+
+func TestRouteFactValueValidationValidAndExempt(t *testing.T) {
+	facts := map[string]string{
+		"scope.span": "multi-file", "scope.surface": "internal",
+		"scope.new_public_symbol": "no", "scope.new_type_contract": "yes",
+		"scope.test_surface": " NEW-FILES ", "complexity.reuse_points": "confirmed",
+		"complexity.side_effect_risk": "moderate", "risk.correctness": "high",
+		"risk.fit": "low", "risk.test": "unknown", "risk.security_or_contract": "moderate",
+	}
+	if err := ValidateRouteFactValues(facts); err != nil {
+		t.Fatalf("valid facts: %v", err)
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "epic.md")
+	if err := os.WriteFile(path, []byte("## Route Facts\n\n| scope.test_surface | new |\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := invalidRouteFactValues(path, "260101-epic-sample"); err != nil {
+		t.Fatalf("epic should be exempt: %v", err)
+	}
+}
+
 // TestTicketAtRefusesPathsOutsideTheBoard pins the confinement: the ticket path
 // reaching TicketAt is caller-supplied, and nothing outside the board is a
 // ticket. Each case asserts the guard's own refusal rather than any error, so a

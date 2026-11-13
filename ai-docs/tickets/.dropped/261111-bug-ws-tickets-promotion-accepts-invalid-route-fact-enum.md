@@ -4,6 +4,8 @@ title: "Ticket promotion to ready accepts a Route Facts value the route parser r
 
 # Promotion accepts an invalid route-fact enum
 
+Duplicate of 261007-bug-ready-gate-accepts-invalid-route-fact-values.
+
 ## Background
 
 Dogfood, 2026-11-11. `261110-bug-ws-tracker-store-lock-network-split` reached

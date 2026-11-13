@@ -236,6 +236,11 @@ func TicketsMove(root string, runner GitRunner, opts TicketMoveOptions) (TicketM
 	}
 
 	absOld := filepath.Join(root, filepath.FromSlash(oldPath))
+	if to == "ready" {
+		if err := invalidRouteFactValues(absOld, stem); err != nil {
+			return TicketMutateResult{}, err
+		}
+	}
 	// See TicketsClose: scope-gated capture, so the filter-off path pays nothing
 	// and its git-move failure returns exactly today's empty result.
 	before := captureTicketBytes(scope, absOld)
@@ -344,12 +349,28 @@ var nonImplementationCategories = map[string]bool{
 	"workset":  true,
 }
 
+// invalidRouteFactValues validates present enum values while preserving the
+// existing missing-section advisory and non-implementation category exemptions.
+func invalidRouteFactValues(path, stem string) error {
+	match := ticketCategoryRE.FindStringSubmatch(stem)
+	if len(match) == 2 && nonImplementationCategories[match[1]] {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	_, facts := ticketRouteFacts(string(raw))
+	if err := ValidateRouteFactValues(facts); err != nil {
+		return fmt.Errorf("invalid %s: %w", RouteFactsHeading, err)
+	}
+	return nil
+}
+
 // missingRouteFacts reports whether a ticket landing in ready/ owes a
-// `## Route Facts` section and does not have one. It is presence-only by
-// design: the section's values are the completeness reviewer's subject, and a
-// mechanical value check here would duplicate the resolver's own enum
-// validation in a place that cannot report it usefully. A ticket with no
-// implementation phases is never routed, so it has no facts to carry.
+// `## Route Facts` section and does not have one. Value validation is a
+// separate check. A ticket with no implementation phases is never routed, so
+// it has no facts to carry.
 func missingRouteFacts(ticketAbsPath, stem string) bool {
 	match := ticketCategoryRE.FindStringSubmatch(stem)
 	if len(match) == 2 && nonImplementationCategories[match[1]] {
