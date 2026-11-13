@@ -480,7 +480,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T13:46:36Z"
+        "touched_at": "2026-11-13T13:47:18Z",
+        "impl": {
+          "branch": "impl/develop/rake-lanky-liver"
+        }
       }
     },
     "261113-feat-ws-pi-worker-marker-env-guard": {
