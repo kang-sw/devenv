@@ -4,6 +4,10 @@ related:
   261110-feat-ws-mcp-daemon-hosted-proxy-launcher: reverses its direct-fallback decisions and completes the Python-only adapter architecture
   261112-feat-ws-mixed-version-compat-guards: owns skew notices, schema guards, and tool-list refresh; its direct-fallback assumptions are superseded here
   261113-bug-ws-pi-subagent-turn-dies-on-daemon-restart: holder recovery remains separately owned
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 2295162df900666f
+sage-review-completeness-reviewed: 2295162df900666f
 ---
 
 # ws: only the dashboard daemon runs a ws executable
@@ -13,8 +17,8 @@ related:
 **Owner priority: high.** AhnLab V3 prompts when a new executable runs. A
 content-hash staging path does not solve that if adapters still execute it
 for probes, mailbox waits, hooks, or fallback MCP servers. The intended
-machine-wide process model is one dashboard daemon hosting all ws servers,
-with Python launchers/holders as adapters. A direct `serve --stdio` is a full
+process model is the one dashboard daemon of its cache root hosting ws servers
+for that cache root, with Python launchers/holders as adapters. A direct `serve --stdio` is a full
 MCP server, not a harmless transport helper, and still opens shared stores.
 
 ### Verified evidence
@@ -40,16 +44,20 @@ Use the named symbols/searches to find edit sites after parallel work lands.
 
 ## Decisions
 
-1. **One ws daemon process machine-wide (owner, 2026-11-13).**
+1. **Only the dashboard daemon of its cache root runs a ws executable (owner, 2026-11-13; scope clarified by lead).**
    > "exe는 전체 통틀어서 대시보드 하나만 뜨고, 나머지는 전부 python 어댑터인 컨셉입니다."
 
-   Exactly one running ws executable is the dashboard daemon. Everything else
-   in the ws process topology is a Python adapter (`bin/ws-mcp-launcher.py`,
-   holder). This is about ws runtime processes, not banning the user harness,
-   Git, or other tools from running. The only permitted ws exe execution is
-   starting the daemon itself (`daemon-start` or equivalent) when none runs
-   or replacement is required; a short-lived lifecycle starter is not a
-   second MCP server. Preserve the singleton lock and orderly handoff.
+   The dashboard daemon is the only long-lived ws executable in its cache
+   root. Everything else in the ws process topology is a Python adapter
+   (`bin/ws-mcp-launcher.py`, holder). This concerns which processes execute
+   a ws exe, not the number of daemons across cache roots. Keep the one-daemon-
+   per-cache-root decision of `261110-feat-ws-mcp-daemon-hosted-proxy-launcher`
+   (in practice one per machine for one install). This does not ban the user
+   harness, Git, or other tools from running. The only permitted ws exe
+   execution is starting the daemon itself (`daemon-start` or equivalent)
+   when none runs for that cache root or replacement is required; a short-lived
+   lifecycle starter is not a second MCP server. Preserve the per-cache-root
+   singleton lock and orderly handoff.
 
 2. **Remove direct fallback entirely (owner, 2026-11-13).**
    > "fallback으로 직접 실행이 결정사항에 있었을텐데, 이 경로를 아예 버리는 방향으로 갑니다."
@@ -148,6 +156,12 @@ Use the named symbols/searches to find edit sites after parallel work lands.
   | `agents-plugin-tool/internal/mcp/` | `ai-docs/manuals/ws-mcp.md` |
   | `agents-plugin-tool/internal/` | `ai-docs/manuals/release-compatibility.md` |
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+
 - Keep all three `bin/ws-mcp-launcher.py` mirrors byte-identical:
   `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-pi/`. Python
   adapters remain standard-library-only. Preserve per-connection root,
@@ -169,6 +183,29 @@ Use the named symbols/searches to find edit sites after parallel work lands.
   docs must be downstream-neutral; repo-only citations stay in this ticket.
 - This is accepted `todo/` backlog; the lead populates route facts and runs
   the configured design/completeness reviews before `ready/` promotion.
+
+## Prior Decisions
+
+- 261110-feat-ws-mcp-daemon-hosted-proxy-launcher (2026-11-10, Decisions): "One daemon per cache root, as today" — bearing: constrains
+- 09b041ed6 (2026-11-10, commit): "the direct path runs with one stderr line when the daemon cannot be used (or on WS_MCP_LAUNCHER_DIRECT=1)" — bearing: supports
+- 96b270265 (2026-11-10, commit): "after PROXY_MAX_QUICK_CLOSES hands over to direct serve" — bearing: supports
+- Rationale query unavailable; these verified history pointers are not a complete prior-decision search.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | Launcher mirrors, agents-plugin-pi/src/, scripts/dev.py, agents-plugin-tool/ and manuals |
+| scope.surface | cross-module | Python launchers, Go daemon command routing, Pi and dev tooling share a cross-version contract |
+| scope.new_public_symbol | unknown | Additive daemon command support or endpoint may be needed; no new symbol is specified |
+| scope.new_type_contract | unknown | Additive metadata or command framing may be needed; exact signature is unspecified |
+| scope.test_surface | existing | agents-plugin/tests/test_ws_mcp_launcher_proxy.py, agents-plugin-tool/cmd/ws-mcp/launcher_proxy_test.go, scripts/test_dev.py |
+| complexity.reuse_points | confirmed | DaemonLink, McpProxy, proxy_cli and handleHealth exist in launcher and daemon |
+| complexity.side_effect_risk | high | Daemon lifecycle, reconnect and mailbox routing affect shared sessions and processes |
+| risk.correctness | high | Retry, in-flight request handling and metadata identity must prevent lost or replayed side effects |
+| risk.fit | high | Changes cross Python, Go and Pi boundaries while preserving separate ownership and compatibility |
+| risk.test | high | Cross-version peers, process-spawn assertions and Windows antivirus acceptance require distinct coverage |
+| risk.security_or_contract | high | Authenticated daemon routing and independently updated clients must preserve isolation and T0 compatibility |
 
 ## Phases
 
@@ -212,8 +249,10 @@ and `agents-plugin-tool/cmd/ws-mcp/launcher_proxy_test.go` as applicable:
   HTTP 404/missing version field, existing hello succeeds, tools remain
   callable, zero exe probe. Also test old hello against the new daemon.
 - `test_codex_stop_hook_runs_via_python_launcher_and_daemon`: real manifest
-  command shape for ws/wsflow, no non-proxied exec, same stdout/exit codes;
-  daemon unavailable is diagnostic, never direct execution.
+  command shape for ws; wsflow has no Codex hooks manifest in the current tree
+  (agents-plugin-wsflow/.codex-plugin/plugin.json; search for hooks.json under
+  agents-plugin-wsflow). Assert no non-proxied exec and the same stdout/exit
+  codes; daemon unavailable is diagnostic, never direct execution.
 - `test_launcher_mirrors_are_byte_identical`; retain healthy reconnect,
   initialize replay IDs, EOF/drain, CLI UTF-8 framing, and owner-isolation
   regression cases. Run focused Python suites and remote Go proxy tests.
@@ -245,8 +284,8 @@ that the outer process was Python.
 Lead/owner Windows live acceptance, after coordination with
 `fix/pi-spawn-key-bound-to-cwd-worktree`: with an already running compatible
 daemon, exercise launcher startup, version checks, Pi mailbox wait, Codex Stop,
-and daemon-spawned Pi worker MCP. Observe exactly one steady-state ws exe
-(the daemon), Python adapters/holders elsewhere, and no exe probes. Confirm
+and daemon-spawned Pi worker MCP. Observe the one steady-state ws exe for
+its cache root (the daemon), Python adapters/holders elsewhere, and no exe probes. Confirm
 only a genuinely needed daemon start/replacement executes a ws binary. Do not
 claim remote Linux tests prove the Windows/AhnLab behavior; record any live
 check not yet performed explicitly. No UI changes, holder recovery redesign,
