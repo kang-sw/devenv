@@ -1876,8 +1876,12 @@ def main() -> int:
         return inspect_runtime(link, argv, health)
     usable_daemon = health is not None and same_minor(str(health.get("version", "")), link.runtime_version) and (
         compare_daemon_versions(str(health["version"]), link.runtime_version) >= 0 or same_core(str(health["version"]), link.runtime_version))
+    cli_uses_daemon = mode == "cli" and not inspection and usable_daemon
     need_install = False
-    if bootstrap_forced:
+    if cli_uses_daemon:
+        # Waits and hooks consume the running daemon, even with a forced local install.
+        pass
+    elif bootstrap_forced:
         note("forcing runtime install from bootstrap binary or url")
         clear_compatibility_stamp(runtime_dir)
         need_install = True
@@ -1913,8 +1917,9 @@ def main() -> int:
 
     if need_install:
         repair_runtime(force=True)
+    # A CLI consumer must not replace a usable daemon just because its local binary is newer.
     link = DaemonLink(binary, str(contract.get("plugin_version", "")), os_name, os.environ,
-                      allow_start=not inspection, repair_runtime=repair_runtime)
+                      allow_start=not inspection and not cli_uses_daemon, repair_runtime=repair_runtime)
     if inspection:
         # An explicit bootstrap+version repairs a child runtime but never starts it.
         return inspect_runtime(link, argv, None)
