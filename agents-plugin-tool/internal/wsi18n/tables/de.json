@@ -1320,6 +1320,7 @@
   "js.wb.ago.now": "gerade eben",
   "js.wb.copy": "Kopieren",
   "js.wb.copy.done": "Kopiert",
+  "js.wb.copy.wrap": "Lange Zeilen umbrechen",
   "js.wb.tag.announced": "Angekündigter Standard — hat genau eine Antwort, die aus bestehenden Vorgaben, früheren Entscheidungen oder Projektkonventionen folgt; bitte nur bestätigen.",
   "js.wb.tag.policy": "Grundsatzfrage — hängt von Ihren Vorlieben, Prioritäten oder der Produktrichtung ab; wählen Sie eine Option.",
   "js.wb.tag.technical": "Technische Entscheidung — vom Agenten aus technischen Gründen getroffen, unabhängig von Ihren Vorlieben; die Begründung steht beim Eintrag; antworten Sie mit ok, sofern Sie nicht widersprechen.",

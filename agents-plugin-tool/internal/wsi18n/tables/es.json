@@ -1320,6 +1320,7 @@
   "js.wb.ago.now": "ahora mismo",
   "js.wb.copy": "Copiar",
   "js.wb.copy.done": "Copiado",
+  "js.wb.copy.wrap": "Ajustar líneas largas",
   "js.wb.tag.announced": "Valor por defecto anunciado — tiene una única respuesta que se deriva de restricciones existentes, decisiones anteriores o convenciones del proyecto; basta con confirmarlo.",
   "js.wb.tag.policy": "Pregunta de criterio — depende de tus preferencias, prioridades o dirección del producto; elige una opción.",
   "js.wb.tag.technical": "Decisión técnica — el agente la tomó por motivos técnicos, independientes de tus preferencias; el razonamiento está en el elemento; responde ok salvo que te opongas.",
