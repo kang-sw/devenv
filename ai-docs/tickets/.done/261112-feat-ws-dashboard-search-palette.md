@@ -1,5 +1,6 @@
 ---
 title: "Dashboard search palette: one centered box for sessions, topics, items, answers, and the tracker, with .<id> jumps"
+completed: 2026-11-13
 ---
 
 # Dashboard search palette: one centered box for sessions, topics, items, answers, and the tracker, with .<id> jumps
@@ -78,3 +79,37 @@ Verification: the wsdashboard package tests through
 `~/.local/bin/ws-rgo -C agents-plugin-tool -m 8 -- test ./internal/wsdashboard/ -count=1`
 (never run heavy Go builds or tests locally), plus a headless Chromium
 screenshot of the open palette with results in each group.
+
+### Result (c2a35b2da) - 2026-11-13
+
+- Replaced the anchored quick-switcher popover with one centered native modal.
+  Its fixed groups are session labels, topic names, topic bodies, item titles,
+  answers, and tracker results. Fuzzy subsequences prefer compact runs and early
+  starts; scattered prose matches are rejected. Empty queries show recent
+  topics and items. Exact numeric IDs win; otherwise `.<digits>` lists ID
+  prefixes. Board picks open enclosing folds, reveal hidden answered checks,
+  scroll, focus, and flash the target with reduced-motion support.
+- Kept the current-session scope and all tracker actions. Sandboxed topic-body
+  text is read inertly from srcdoc. Older closed topics load through the
+  existing show-more route, so their hits can also be found and jumped to.
+  Ctrl+Space, Ctrl+K, and editor-guarded `/` open the palette; arrows, Enter,
+  Escape, focus restoration, and IME guards are covered. Compatibility remains
+  T0; no daemon API, store, protocol, or configuration changes.
+- Updated page assertions, added local Node behavior cases and Go asset checks,
+  and refreshed all eleven language tables and the tracker mockup string file.
+  Local locked Node syntax/behavior checks passed. One headless Chrome attempt
+  produced `D:/Temp/search-palette/palette.png`, with all six groups and passing
+  browser checks for slash guards, both Ctrl shortcuts, IME, Escape focus, and
+  a closed-topic `.153` jump.
+- Remote w5090 `go test ./internal/wsdashboard/...` passed (86.397s). The single
+  final `go test ./...` run passed every package except the predeclared
+  `cmd/ws-mcp` `TestHostedConnectionSeeingALANChangeReplacesTheDaemon` predecessor
+  exit timeout, excluded from acceptance without investigation. `wsholder`
+  passed. Evidence: `D:/Temp/search-palette/local-check.log` and
+  `D:/Temp/search-palette/go-final2.log`.
+- One self-review pass fixed null unanswered chips and the tracker item window's
+  inert/focus interaction with palette picks. Status closure uses the
+  convention-approved Git move fallback because `tickets.close` is not exposed
+  by this worker's tool surface.
+- Forward: Polish the shortcut tooltip's slash separator typography and move
+  the tkMount comment below the new palette helper block (cosmetic only).

@@ -43,8 +43,8 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 </body></html>
 {{end}}
 
-{{/* The tracker's quick-switcher slot: the tracker renderer puts its
-search button and popup here when the page mounts it (dashboard.js). */}}
+{{/* The search-palette button slot. Its modal mounts in the body, outside
+header stacking contexts (dashboard.js mounts the tracker renderer). */}}
 {{define "qsslot"}}<span class="qsslot" id="qsslot"></span>{{end}}
 
 {{/* The stream indicator: a bare dot the page script turns off while the
