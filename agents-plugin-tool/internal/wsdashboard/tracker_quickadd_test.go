@@ -74,7 +74,7 @@ func TestTrackerQuickAddRow(t *testing.T) {
 	}
 	src := trackerFn(t, `function nrowFill\(n\)`, false) + trackerFn(t, `function nrowMine\(n\)`, true) +
 		trackerFn(t, `var NROW_ST = `, true) + trackerFn(t, `function nrowStMode\(n\)`, false) + trackerFn(t, `function nrowSt\(n\)`, true) +
-		trackerFn(t, `function nrowPri\(n\)`, true) + trackerFn(t, `function nrowLabels\(n\)`, true) + trackerFn(t, `function nrowKind\(kind\)`, false) +
+		trackerFn(t, `function nrowStOpts\(n\)`, true) + trackerFn(t, `function nrowPri\(n\)`, true) + trackerFn(t, `function nrowLabels\(n\)`, true) + trackerFn(t, `function nrowKind\(kind\)`, false) +
 		trackerFn(t, `function createNew\(\)`, false) + trackerFn(t, `function asIdea\(cp, s\)`, false) + trackerFn(t, `function heldTopic\(cp, holder\)`, false)
 	runTrackerCases(t, "quick-add", trackerCheckJS+`
 var VS = { viewer: { member: 'me', reach: { kim: true } }, priority: { names: ['low', 'mid', 'high'], default: 1 },
@@ -209,8 +209,8 @@ editor = false;
 check('a viewer without the edit right sees the chips only', labelsProp(it), '<span class="chip lbl"><span class="ldot" style="background:#222222"></span>dev</span>');
 check('a viewer without the edit right sees "-" for no labels', labelsProp({ id: 'i2', labels: [] }), '<span class="muted">-</span>');
 var st = labelStepHtml(it);
-check('the step is the quick-add checklist over the item's labels, the picked one checked', [has(st, 'role="menuitemcheckbox" aria-checked="false" data-mi data-act="m-ltog" data-label="L1"') || has(st, 'data-act="m-ltog" data-label="L1"'), has(st, 'aria-checked="true" data-mi'), has(st, 'class="cbx"'), has(st, 'class="mlrow"')], [true, true, true, true]);
-check('the pick starts as the item's labels', MN.lsel, ['L2']);
+check('the step is the quick-add checklist over the item\'s labels, the picked one checked', [has(st, 'role="menuitemcheckbox" aria-checked="false" data-mi data-act="m-ltog" data-label="L1"') || has(st, 'data-act="m-ltog" data-label="L1"'), has(st, 'aria-checked="true" data-mi'), has(st, 'class="cbx"'), has(st, 'class="mlrow"')], [true, true, true, true]);
+check('the pick starts as the item\'s labels', MN.lsel, ['L2']);
 check('a toggle adds in list order', labelToggled(['L2'], 'L1'), ['L1', 'L2']);
 check('a toggle removes', labelToggled(['L1', 'L2'], 'L1'), ['L2']);
 check('a toggle drops labels the list no longer holds', labelToggled(['gone', 'L1'], 'L2'), ['L1', 'L2']);
@@ -245,7 +245,7 @@ check('a net change is one write of the pick', labelPending(m(['L1', 'L2'])), [[
 check('a toggle and its undo write nothing', labelPending(m(labelToggled(labelToggled(['L1'], 'L2'), 'L2'))), null);
 check('removing the only label writes the empty list', labelPending(m([])), [['item.edit', { item: 'i1', labels: [] }]]);
 check('labels the list no longer holds are dropped from the write', labelPending(m(['L1', 'gone', 'L3'])), [['item.edit', { item: 'i1', labels: ['L1', 'L3'] }]]);
-check('a pick naming only a gone label beside the item's is no change', labelPending(m(['L1', 'gone'])), null);
+check('a pick naming only a gone label beside the item\'s is no change', labelPending(m(['L1', 'gone'])), null);
 check('no pick drawn, nothing owed', labelPending(m(null)), null);
 check('another step owes nothing', labelPending({ kind: 'item', step: 'pri', item: 'i1', lsel: ['L2'] }), null);
 editor = false;
@@ -279,7 +279,7 @@ func TestTrackerRowTitleEdit(t *testing.T) {
 		t.Error("the edit row saves on blur; the new row's convention is none")
 	}
 	runTrackerCases(t, "row edit", trackerCheckJS+`
-var editor = true, sent = [], rec = null, canAsg = true, ui = {}, renders = 0, toasts = 0, elv = { value: '' };
+var editor = true, sent = [], rec = null, canAsg = true, ui = {}, renders = 0, toasts = 0, elv = { value: '', focus: function () {}, select: function () {} };
 var VS = { viewer: { member: 'me' }, priority: { default: 1, names: ['low', 'mid', 'high'] }, labels: [{ id: 'L1' }, { id: 'L2' }],
   items: { i1: { id: 'i1', kind: 'task', title: 'Old', status: 'idea', due: '2026-12-01', priority: 2, labels: ['L1'], author: 'me', assignments: [] } } };
 function canEdit() { return editor; }
@@ -310,7 +310,7 @@ check('and cannot start the edit', (startRowEdit('i1', 'r'), ui.ned), undefined)
 editor = true;
 var n = draft();
 check('the draft is prefilled from the item', [n.val, n.st, n.who, n.due, n.pri, n.labels, n.canAsg], ['Old', 'idea', ['me'], '2026-12-01', 2, ['L1'], true]);
-check('an untouched draft writes nothing', [save(), ui.ned === null, toasts], [[], false, 1]);
+check('an untouched draft writes nothing, says so, and closes the row', [save(), ui.ned === null, toasts], [[], true, 1]);
 ui.ned = null;
 check('title, priority, due, and labels go in one item.edit', save(function (n) { n.pri = 0; n.due = ''; n.labels = ['L2']; }, '  New  '),
   [[['item.edit', { item: 'i1', title: 'New', priority: 0, due: null, labels: ['L2'] }]]]);
@@ -641,7 +641,7 @@ func TestTrackerRowPartsOpenTheirPickers(t *testing.T) {
 		trackerFn(t, `function partHtml\(cls, tip, inner, it, step\)`, false) + trackerFn(t, `function partIcon\(icon\)`, true) +
 		trackerFn(t, `function whoHtml\(it, ed\)`, false) + trackerFn(t, `function priHtml\(it, ed\)`, false) + trackerFn(t, `var ENDED = `, true) +
 		trackerFn(t, `function dueHtml\(it, st, ed\)`, false) + trackerFn(t, `function labelEdHtml\(it\)`, false) + trackerFn(t, `function dayNum\(d\)`, true) +
-		trackerFn(t, `function today\(\)`, true) + irow + trackerFn(t, `function rowClick\(row, t\)`, false) + trackerFn(t, `function labelStepRedraw\(\)`, false) +
+		trackerFn(t, `function today\(\)`, true) + trackerFn(t, `function titleEdHtml\(it\)`, false) + irow + trackerFn(t, `function rowClick\(row, t\)`, false) + trackerFn(t, `function labelStepRedraw\(\)`, false) +
 		trackerFn(t, `function openerMoved\(\)`, false)
 	if !strings.Contains(trackerBlock(t, `document\.addEventListener\('scroll', function \(e\) \{`, `\n    \}, true\);`), "&& openerMoved()) closeMenu(false);") {
 		t.Error("a scroll closes the item menu whether or not its opener moved")
@@ -753,7 +753,7 @@ done();
 	for _, want := range []string{
 		".tk :where(button.rp) { font: inherit; color: inherit; border: 0; background: none; margin: 0; padding: 0; }",
 		".tk .irow:is(:hover, :focus-within, .sel) .rpe, .tk .rpe[aria-expanded=\"true\"] { visibility: visible; }",
-		".tk .irow:is(:hover, :focus-within, .sel) .rlab, .tk .rlab[aria-expanded=\"true\"] { display: inline-flex; }",
+		".tk .irow:is(:hover, :focus-within, .sel) :is(.rlab, .rtit), .tk .rlab[aria-expanded=\"true\"] { display: inline-flex; }",
 		".tk .irow:is(:hover, :focus-visible, :has(:focus-visible)) > .ir-more { visibility: visible; }",
 	} {
 		if !strings.Contains(string(css), want) {
