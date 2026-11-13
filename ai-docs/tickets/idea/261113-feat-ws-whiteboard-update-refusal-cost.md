@@ -31,6 +31,37 @@ lead's context. In one session three refusals came from three patterns:
 - `wb:answer` accepts a note-only value for a policy item (answered with a
   note, no option chosen), matching the answer block's `^<note>` form.
 
+## Owner Direction (2026-11-13)
+
+- The full syntax/command reprint on refusal goes: delegated as a hotfix
+  (branch `impl/develop/wb-refusal-no-syntax-dump`), not part of this
+  ticket's remaining scope.
+- Incremental model: apply what validates; return the failed parts as an
+  XML tree of the failed commands, so only those are resent.
+- Heuristics for patterns 1 and 2, and a direction for pattern 3, to be
+  discussed.
+
+## Candidate Design (lead, for discussion)
+
+- Atomic unit: a `wb:topic` group (top-level commands each on their own),
+  so an answer-then-close or edit-then-recap sequence inside one topic never
+  half-applies; one change stamp per call stays.
+- Failure echo: a skeleton tree with the failed command's tag, attributes,
+  line, and error, without echoing large content the caller already holds:
+  `<wb:failed><wb:topic name="x"><wb:edit line="7" error="..."/></wb:topic></wb:failed>`.
+- Pattern 1: on several matches, refuse that command only and return each
+  candidate's line number and a one-line context; add heading-scoped edits
+  (e.g. `wb:section heading="..." op="replace|append|before|after"`) so the
+  common "add or replace a section" needs no substring anchor.
+- Pattern 2: `wb:append` (creates the body when there is none); a
+  `wb:edit` against an empty body applies `wb:new` as the body, since there
+  is nothing to lose.
+- Pattern 3 options: (a) a note-only answer is recorded as answered with no
+  option chosen; (b) a new status meaning "user commented, lead's move"
+  that leaves the item off the user's waiting list until the lead re-asks,
+  records a letter, or withdraws it.
+
 ## Open
 
 - Whether partial apply breaks the "one batch, one change stamp" model.
+- Pattern 3 choice.
