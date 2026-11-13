@@ -499,7 +499,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T14:46:36Z"
+        "touched_at": "2026-11-13T14:47:25Z",
+        "impl": {
+          "branch": "impl/develop/boozy-thee-easel"
+        }
       }
     },
     "261113-feat-ws-tracker-wiki-html-pages": {
