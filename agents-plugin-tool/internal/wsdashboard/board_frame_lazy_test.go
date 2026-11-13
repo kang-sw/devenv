@@ -82,16 +82,24 @@ El.prototype = {
   replaceChild: function (c, old) { this.insertBefore(c, old); return this.removeChild(old); },
   appendChild: function (c) { return this.insertBefore(c, null); },
   scrollIntoView: function () {},
-  // closest models only a single class selector (boardJump's ".wb-history").
+  // closest models a single class selector (boardJump's ".wb-history")
+  // and the selectors of SEL.
   closest: function (sel) {
-    if (!/^\.[\w-]+$/.test(sel)) throw new Error("closest selector not modelled: " + sel);
-    for (var n = this; n && n.nodeType === 1; n = n.parentNode) if (n.classList.contains(sel.slice(1))) return n;
+    for (var n = this; n && n.nodeType === 1; n = n.parentNode) if (n.matches(sel)) return n;
     return null;
-  }
+  },
+  matches: function (sel) {
+    if (SEL[sel]) return SEL[sel](this);
+    if (!/^\.[\w-]+$/.test(sel)) throw new Error("selector not modelled: " + sel);
+    return this.classList.contains(sel.slice(1));
+  },
+  dispatchEvent: function (e) { (this.listeners[e.type] || []).forEach(function (fn) { fn(e); }); }
 };
 function walk(root, out) { root.childNodes.forEach(function (c) { out.push(c); walk(c, out); }); return out; }
 var SEL = {
   "div.doc-frame[data-srcdoc]": function (n) { return n.tagName === "DIV" && n.classList.contains("doc-frame") && n.hasAttribute("data-srcdoc"); },
+  "iframe.doc-frame[data-srcdoc]": function (n) { return n.tagName === "IFRAME" && n.classList.contains("doc-frame") && n.hasAttribute("data-srcdoc"); },
+  "section.topic[data-topic]": function (n) { return n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic"); },
   "details": function (n) { return n.tagName === "DETAILS"; },
   "details[data-key]": function (n) { return n.tagName === "DETAILS" && n.hasAttribute("data-key"); }
 };
@@ -139,10 +147,13 @@ function requestAnimationFrame() {}
 // srcdoc before it is connected (it never commits about:blank), and keeps
 // data-srcdoc for comparisons. A changed topic's next body frame (frameGraft)
 // is mounted before it goes in when the old frame was mounted, so it never
-// shows blank; the next of an unmounted one takes its place as a
-// placeholder. The cases execute under node when it is installed.
+// shows blank; the next of an unmounted one, or of one in a topic skipping
+// its rendering (content-visibility), takes its place as a placeholder;
+// the kept section keeps its content-visibility mark (data-wbcv).
+// Under the viewport bands a jump keeps its target in place (wbHistory.keep).
+// The cases execute under node when it is installed.
 func TestBoardFramesMountLazily(t *testing.T) {
-	src := dashboardFuncs(t, "frameShown", "mountFrame", "mountFrames", "frameToggle", "isPeer", "isPanel", "openKey", "restoreOpenOne", "restoreOpen", "boardJump", "frameGraft", "frameNext")
+	src := dashboardFuncs(t, "boardBands", "frameNear", "frameShown", "mountFrame", "mountFrames", "frameToggle", "isPeer", "isPanel", "openKey", "restoreOpenOne", "restoreOpen", "boardJump", "frameGraft", "frameNext")
 	runNode(t, "lazy frame mount", frameDOM+src+`
 var openState = {}, PEER_KEY = "p.";
 function load() { return null; }
@@ -196,6 +207,16 @@ check("boardJump refuses an id it cannot find", hit === undefined && placeholder
 $ = function (id) { return id === "p2" ? Object.assign(versions.childNodes[0], { id: "p2" }) : null; };
 boardJump("p2"); tick();
 check("boardJump's opens mount", mounted(C));
+// Under the viewport bands a jump keeps its target where it landed while
+// the frames around it mount; without them (no bands) it starts no session.
+var kept = [];
+window.wbHistory = { loadTarget: function () { return null; }, keep: function (n) { kept.push(n); } };
+boardJump("p2");
+check("a jump without bands keeps nothing", kept.length === 0);
+window.wbHistory.bands = true;
+boardJump("p2");
+check("a jump under the bands keeps its target", kept.length === 1 && kept[0] === versions.childNodes[0]);
+window.wbHistory = null;
 
 // A swap's inserted section mounts what it shows.
 var N1 = frame("entry:e5"), N2 = frame("entry:e6");
@@ -207,23 +228,29 @@ check("an inserted section mounts its open frames", mounted(N1) && placeholder(N
 
 // frameGraft: the next body frame of a mounted frame is mounted before it
 // goes in; the next frame of an unmounted one takes its place unmounted.
-function graft(oldMounted) {
+function graft(oldMounted, skipped) {
   var of = frame("topic:g", "<!DOCTYPE html><html>old"), nf = frame("topic:g", "<!DOCTYPE html><html>new");
   if (oldMounted) of = mountFrame(of);
   var od = new El("div", { "class": "doc-body framed" }, [of]), nd = new El("div", { "class": "doc-body framed" }, [nf]);
-  var old = new El("section", { "class": "topic", "data-topic": "g" }, [od]), nsec = new El("section", { "class": "topic", "data-topic": "g" }, [nd]);
+  var old = new El("section", { "class": "topic", "data-topic": "g", "data-wbcv": "", "data-old": "" }, [od]), nsec = new El("section", { "class": "topic", "data-topic": "g" }, [nd]);
+  old.wbSkipped = !!skipped;
   board.appendChild(old);
   var g = { old: old, n: nsec, oc: [of, od, old], nc: [nf, nd, nsec] };
   frameGraft(g);
-  return { nf: nf, f: g.nc[0], od: od, of: of };
+  return { nf: nf, f: g.nc[0], od: od, of: of, old: old };
 }
 var frameShow = function () {}, frameRevealMs = 1500;
 function frameReveal() {}
 var g1 = graft(true);
 check("the next frame of a mounted frame goes in mounted, beside the old", mounted(g1.nf) && g1.od.childNodes[0] === g1.of && g1.od.childNodes[1] === g1.f);
 check("the next frame is pending, and the graft holds the frame, not the placeholder", g1.f.wbNext === true && g1.f.wbOld === g1.of && g1.of.wbOut === true && (g1.f.listeners.load || []).length === 1 && g1.nf.wbNext === undefined);
+check("the kept section keeps its content-visibility mark and drops other old attributes", g1.old.hasAttribute("data-wbcv") && !g1.old.hasAttribute("data-old"));
 var g2 = graft(false);
 check("the next frame of an unmounted frame takes its place as a placeholder", placeholder(g2.nf) && g2.od.childNodes.length === 1 && g2.od.childNodes[0] === g2.nf && !g2.nf.wbNext);
+// In a topic skipping its rendering a new frame would load at no size: the
+// next frame of a mounted one there takes its place as a placeholder too.
+var g3 = graft(true, true);
+check("the next frame in a skipped topic takes the mounted frame's place as a placeholder", placeholder(g3.nf) && g3.od.childNodes.length === 1 && g3.od.childNodes[0] === g3.nf && !g3.nf.wbNext && !g3.of.parentNode);
 
 if (bad.length) console.log(bad.join("\n"));
 `)
@@ -231,9 +258,12 @@ if (bad.length) console.log(bad.join("\n"));
 
 // TestBoardFramesMountAtEveryInsert pins where the page runs the mount
 // pass: once after the cards have moved the pinned topics (so no frame
-// loads and then moves), for every node a board swap inserts after its
+// loads and then moves) and the board's script set up wbHistory (wbForm,
+// whose visibility source the bands use), for every node a board swap inserts after its
 // frame heights are restored, for an adopted closed page, and for a
-// history load; the toggle listener is a capture listener.
+// history load; the toggle listener is a capture listener. Every place that
+// puts topics under the shared visibility source puts them under the
+// viewport bands too (bandBoard).
 func TestBoardFramesMountAtEveryInsert(t *testing.T) {
 	raw, err := dashboardFS.ReadFile("assets/dashboard.js")
 	if err != nil {
@@ -249,6 +279,10 @@ func TestBoardFramesMountAtEveryInsert(t *testing.T) {
 		"adopted page":   `adopted: function \(n\) \{\n[^}]*restoreOpen\(n\);\n\s+mountFrames\(n\);`,
 		"history load":   `"wbhistoryload", function \(e\) \{\n[^}]*restoreOpen\(el\);\n\s+mountFrames\(el\);`,
 		"toggle capture": `doc\.addEventListener\("toggle", frameToggle, true\);`,
+		"bands at load":  `if \(window\.wbForm\) window\.wbForm\(\);\n(\s+//[^\n]*\n)*\s+boardBoxes\(\)\.forEach\(bandBoard\);\n\s+mountFramesPaced\(doc\);`,
+		"bands at swap":  `ins\.forEach\(watchBoard\); \}\n\s+ins\.forEach\(bandBoard\);`,
+		"bands adopted":  `adopted: function \(n\) \{\n[^}]*watchBoard\(n\);\n\s+bandBoard\(n\);`,
+		"bands closed":   `watchBoard\(page\);\n\s+bandBoard\(page\);`,
 	} {
 		if !regexp.MustCompile(pattern).MatchString(board) {
 			t.Errorf("dashboard.js: no mount pass at the %s (%s)", what, pattern)
@@ -262,8 +296,10 @@ func TestBoardFramesMountAtEveryInsert(t *testing.T) {
 // query each, and land in one frame callback that never reads layout
 // (getBoundingClientRect); a frame with no set height eases from 0, as the
 // stylesheet starts it, and one with a height eases from that height; a
-// pending next frame (frameGraft) keeps its height. The cases execute
-// under node when it is installed.
+// pending next frame (frameGraft) keeps its height; a frame the viewport
+// bands mounted (wbFirst) marks its first height as landed (wbLanded,
+// topicResized) only when that height changes it. The cases execute under
+// node when it is installed.
 func TestBoardFrameHeightsBatch(t *testing.T) {
 	src := dashboardFuncs(t, "indexFrames", "docFrame", "queueFrameHeight", "applyFrameHeights")
 	raw, err := dashboardFS.ReadFile("assets/dashboard.js")
@@ -342,6 +378,12 @@ raf.shift()();
 check("one keep session for the batch, started before the heights landed: " + keeps, keeps.length === 1 && keeps[0] === "108px,109px,110px");
 check("the session applies once, after the heights: " + applied, applied === 1 && frames[7].style.height === "500px");
 check("only the frames that changed drop the mark", !frames[7].wbKeep && !frames[8].wbKeep && frames[9].wbKeep);
+frames[10].wbFirst = frames[11].wbFirst = true;
+frameMessage({ source: frames[10].contentWindow, data: { wbDoc: "height", docKey: "entry:e10", height: 400 } });
+frameMessage({ source: frames[11].contentWindow, data: { wbDoc: "height", docKey: "entry:e11", height: 111.5 } });
+raf.shift()();
+check("a bands-mounted frame's first height that changes it lands once", frames[10].wbLanded === true && !frames[10].wbFirst);
+check("one landing at the height it stood at marks nothing", frames[11].style.height === "112px" && !frames[11].wbLanded && !frames[11].wbFirst);
 if (bad.length) console.log(bad.join("\n"));
 `)
 }
@@ -417,8 +459,9 @@ func TestBoardAnswersFlushTheTypedReply(t *testing.T) {
 // and one a swap removed between slices is skipped. The cases execute under
 // node when it is installed.
 func TestBoardFramesMountPaced(t *testing.T) {
-	src := dashboardFuncs(t, "frameShown", "mountFrame", "mountFrames", "mountFramesPaced")
+	src := dashboardFuncs(t, "boardBands", "frameNear", "frameShown", "mountFrame", "mountFrames", "mountFramesPaced", "mountSlice")
 	runNode(t, "paced frame mount", frameDOM+src+`
+var mountList = [], mountTask = false;
 var clock = 0, timers = [];
 var performance = { now: function () { return clock; } };
 setTimeout = function (fn) { timers.push(fn); };

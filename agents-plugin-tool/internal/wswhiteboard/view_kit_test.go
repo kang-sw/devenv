@@ -82,7 +82,8 @@ function topic(parent, name, sc, y) { var n = parent.add(new El(name)); n.sc = s
 // quiet, 5 s cap, a scroll it did not write), one session per scroller
 // with re-anchoring, overflow-anchor during a session, and the watch
 // bookkeeping (subscriptions per node, onOut on a ratio > 0 to 0 change
-// only, sweep of removed nodes, one observer per margin, seen). The cases
+// only, sweep of removed nodes, one observer per margin, seen), and the
+// scroll margin each observer takes where the browser has one (bands). The cases
 // execute under node when it is installed.
 func TestViewKitUnderNode(t *testing.T) {
 	data, err := embeddedAsset("stream.js")
@@ -219,6 +220,21 @@ k.watch(x, { onChange: function () { heard.push("first"); wy.unwatch(); } });
 wy = k.watch(x, { onChange: function () { heard.push("second"); } });
 io.report(x, 1);
 check("a subscription dropped mid-report is not called", heard, ["first"]);
+
+// --- scroll margins ---
+// A browser without scroll margins gets no bands; one with them gets each
+// margin as both the root and the scroll margin, so a margin past the view
+// reaches through an inner scroller's clip.
+check("no scroll margin, no bands", [k.bands, "scrollMargin" in io.opt], [false, false]);
+function SIO(cb, opt) { IO.call(this, cb, opt); }
+SIO.prototype = Object.create(IO.prototype); SIO.prototype.scrollMargin = "";
+win.IntersectionObserver = SIO;
+var kb = viewKit(win), y = topic(board, "y", bcol, 0);
+kb.watch(y, { margin: "100% 0px" });
+var sio = ios[ios.length - 1];
+check("scroll margins give bands", kb.bands, true);
+check("the margin is both root and scroll margin", [sio.opt.root, sio.opt.rootMargin, sio.opt.scrollMargin], [null, "100% 0px", "100% 0px"]);
+win.IntersectionObserver = IO;
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {

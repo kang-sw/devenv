@@ -85,3 +85,55 @@ process.stdout.write(bad.join("\n"));`
 		t.Errorf("pill segment cases failed:\n%s", s)
 	}
 }
+
+// TestPillReadsFarItemsByTheirTopic pins that the pill never reads the rect
+// of an item in a topic wholly above or below the view (where a dashboard
+// topic skips its rendering, the read would lay it out): such an item takes
+// its side from its topic's rect, read once per update, and one under a
+// closed fold, or in a topic with no box, counts nowhere; an item in a
+// topic crossing the view, or in no topic, reads its own. The cases
+// execute under node when it is installed.
+func TestPillReadsFarItemsByTheirTopic(t *testing.T) {
+	data, err := assetFS.ReadFile("assets/pill.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; pill topic cases not executed")
+	}
+	script := pillSegPrelude + `
+Object.defineProperty(E.prototype, "parentElement", { get: function () { return this.parent; } });
+E.prototype.closest = function (sel) { var tag = sel === "section.topic" ? "section" : null, c = tag ? "topic" : sel.slice(1);
+  for (var e = this; e; e = e.parent) if (e.cls[c] && (!tag || e.tag === tag)) return e; return null; };
+var reads = { item: [], topic: 0 };
+function topic(top, h, kids) { var t = new E("section"); t.className = "topic"; t.top = top; t.h = h;
+  t.getBoundingClientRect = function () { reads.topic++; return { top: this.top, bottom: this.top + this.h, width: this.h ? 100 : 0, height: this.h }; };
+  kids.forEach(function (k) { t.appendChild(k); }); return t; }
+var rawRect = E.prototype.getBoundingClientRect;
+E.prototype.getBoundingClientRect = function () { if (this.attrs.id) reads.item.push(this.attrs.id); return rawRect.call(this); };
+// Above: u1, u2 in one topic and u3 under a closed fold of it; v1 in a topic
+// crossing the view's top; w1 in no topic; d1, d2 in a topic below; h1 in a
+// topic with no box (not rendered).
+var fold = new E("details"); fold.tagName = "DETAILS"; fold.open = false;
+var u1 = item("u1", -900, ""), u2 = item("u2", -800, "pick"), u3 = item("u3", -700, ""); fold.appendChild(u3);
+var v1 = item("v1", -50, ""), w1 = item("w1", -20, ""), d1 = item("d1", 1200, ""), d2 = item("d2", 1300, ""), h1 = item("h1", 2000, "");
+topic(-1000, 600, [u1, u2, fold]); topic(-100, 400, [v1]); topic(1100, 500, [d1, d2]); topic(2000, 0, [h1]);
+items.length = 0; items.push(u1, u2, u3, v1, w1, d1, d2, h1);
+` + string(data) + `
+reads = { item: [], topic: 0 };
+fire([]);
+var top = pill(0), bot = pill(1);
+check("top segments", shown(top), [["open", "js.pill.open", "3"], ["ans", "js.pill.answered", "1"]]);
+check("bottom segments", shown(bot), [["open", "js.pill.open", "2"]]);
+check("only items in no topic or a topic crossing the view read their own rect", reads.item, ["v1", "w1"]);
+check("each topic is read once per update", reads.topic, 4);
+process.stdout.write(bad.join("\n"));`
+	out, err := nodeScript(node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if s := strings.TrimSpace(string(out)); s != "" {
+		t.Errorf("pill topic cases failed:\n%s", s)
+	}
+}

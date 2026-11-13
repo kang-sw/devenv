@@ -386,11 +386,15 @@
   // watch(node, {onChange, onOut, margin}) subscribes to node's viewport
   // visibility: one IntersectionObserver per rootMargin, all with root null,
   // so whichever ancestor scrolls (a column, the pinned column, the
-  // document) clips it. Each call is its own subscription. onChange gets
-  // every report {node, ratio, visible, rect}; onOut runs once per change
-  // from ratio > 0 to 0 (a first report of 0 has not left view). seen(node)
-  // reads the node's last report without a layout. sweep() drops the
-  // subscriptions of nodes no longer on the page.
+  // document) clips it. A margin reaches past an inner scroller's clip
+  // only as a scroll margin (a root margin widens the viewport alone), so
+  // each observer takes it as both where the browser has scroll margins;
+  // bands tells whether it has, that is whether a margin means the same
+  // distance from the view whichever ancestor scrolls. Each call is its own
+  // subscription. onChange gets every report {node, ratio, visible, rect};
+  // onOut runs once per change from ratio > 0 to 0 (a first report of 0
+  // has not left view). seen(node) reads the node's last report without a
+  // layout. sweep() drops the subscriptions of nodes no longer on the page.
   //
   // keep(node, {offset, observe, onEnd}) keeps node at its offset from its
   // nearest scroller's top until layout settles: measured now, in layout
@@ -408,7 +412,7 @@
   // browser's own anchoring does not compensate a second time.
   function viewKit(win) {
     var doc = win.document, observers = {}, reports = new WeakMap(), sessions = new Map();
-    var QUIET = 500, CAP = 5000;
+    var QUIET = 500, CAP = 5000, IO = win.IntersectionObserver, bands = !!(IO && IO.prototype && "scrollMargin" in IO.prototype);
     function observer(margin) {
       if (observers[margin]) return observers[margin];
       var o = observers[margin] = { subs: new Map(), io: null };
@@ -429,7 +433,7 @@
             if (sub.onOut && was > 0 && r.ratio === 0) sub.onOut(r);
           });
         });
-      }, { root: null, rootMargin: margin, threshold: [0] });
+      }, bands ? { root: null, rootMargin: margin, scrollMargin: margin, threshold: [0] } : { root: null, rootMargin: margin, threshold: [0] });
       return o;
     }
     function drop(sub) {
@@ -549,11 +553,11 @@
       return s;
     }
     function keeping(scroller) { var s = sessions.get(scroller); return s ? s.handle : null; }
-    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping };
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping, bands: bands };
   }
   var kit = viewKit(window);
   window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget,
-    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping };
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping, bands: kit.bands };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {
