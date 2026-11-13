@@ -203,8 +203,8 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 
 // TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge pins the top
 // bar's head: the project's folder name first, then the reply-id, then the
-// harness badge, which carries the stream indicator's dot and tooltip with
-// no text label; a page without a harness keeps the bare dot alone.
+// harness badge, which carries the process indicator; a page without a
+// harness keeps the bare stream dot alone.
 func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
 	f := startPageFixture(t)
 	_, page := get(t, f.base+"/s/livesession")
@@ -212,7 +212,7 @@ func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
 	for _, head := range []string{
 		`<span class="meta">` + name + `</span><span class="meta sname"`,
 		`>livesession</button>`,
-		`<span class="sseq"> · #3</span></span><span class="host sse" title="live updates"><span class="dot"></span>claude</span>`,
+		`<span class="sseq"> · #3</span></span><span class="host sse" title="harness process running"><span class="dot"></span>claude</span>`,
 	} {
 		if !strings.Contains(page, head) {
 			t.Errorf("session head lacks %q", head)

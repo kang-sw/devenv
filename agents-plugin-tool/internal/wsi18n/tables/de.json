@@ -370,6 +370,8 @@
   "js.send.reading": "Ein Bild wird noch gelesen: Sende gleich noch einmal.",
   "js.sent.held.title": "zurückgehalten, bis der Zug der Sitzung endet",
   "js.sent.sent.title": "an die Sitzung gesendet",
+  "head.process.running": "Harness-Prozess läuft",
+  "head.process.stopped": "Harness-Prozess gestoppt",
   "js.sse.title.off": "nicht verbunden, neuer Versuch läuft",
   "js.sse.title.on": "Live-Updates",
   "js.steer.fail": "Nicht vorgezogen: {0}",

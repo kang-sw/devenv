@@ -50,6 +50,8 @@ type SessionView struct {
 	Harness              string
 	// Live is the served-session liveness rule (Registration.Live).
 	Live bool
+	// ProcessRunning is the harness process state shown in the header.
+	ProcessRunning bool
 	// Adapter reports a live host adapter (a fresh snapshot naming one):
 	// the page shows the lead bar, the subagent tree, the conversation, the
 	// composer, and the layout control. Without one the page is board-first.
@@ -467,26 +469,36 @@ func adapterPresent(snap *wslive.Snapshot, now time.Time) bool {
 	return snap != nil && snap.Adapter != "" && !snap.Stale(now)
 }
 
+// harnessRunning uses the hosted harness PID, not the holder heartbeat. A
+// terminal session has only its registration heartbeat as a liveness signal.
+func harnessRunning(reg Registration, now time.Time) bool {
+	if reg.Hosted {
+		return !reg.HostStopped && reg.HostPID > 0 && processAlive(reg.HostPID)
+	}
+	return reg.Live(now)
+}
+
 func buildSessionView(in pageInputs) SessionView {
 	reg := in.Session.Registration
 	v := SessionView{
-		ReplyID:     reg.ReplyID,
-		Label:       in.Session.Label,
-		Project:     reg.Project,
-		ProjectName: filepath.Base(reg.Project),
-		Harness:     reg.Harness,
-		Live:        reg.Live(in.Now),
-		Adapter:     adapterPresent(in.Snapshot, in.Now),
-		Hosted:      reg.Hosted,
-		HandedOff:   in.HandedOff && !reg.Hosted && !reg.Live(in.Now),
-		Version:     in.Version,
-		HasBoard:    in.Page.HasBoard,
-		Seq:         in.Page.Seq,
-		CountPolicy: in.Page.Board.CountPolicy,
-		CountAcks:   in.Page.Board.CountAcks,
-		Board:       in.Page.Board.Board,
-		Panels:      in.Page.Board.Panels,
-		Mermaid:     in.Page.Board.Mermaid,
+		ReplyID:        reg.ReplyID,
+		Label:          in.Session.Label,
+		Project:        reg.Project,
+		ProjectName:    filepath.Base(reg.Project),
+		Harness:        reg.Harness,
+		Live:           reg.Live(in.Now),
+		ProcessRunning: harnessRunning(reg, in.Now),
+		Adapter:        adapterPresent(in.Snapshot, in.Now),
+		Hosted:         reg.Hosted,
+		HandedOff:      in.HandedOff && !reg.Hosted && !reg.Live(in.Now),
+		Version:        in.Version,
+		HasBoard:       in.Page.HasBoard,
+		Seq:            in.Page.Seq,
+		CountPolicy:    in.Page.Board.CountPolicy,
+		CountAcks:      in.Page.Board.CountAcks,
+		Board:          in.Page.Board.Board,
+		Panels:         in.Page.Board.Panels,
+		Mermaid:        in.Page.Board.Mermaid,
 	}
 	if !v.Adapter {
 		return v

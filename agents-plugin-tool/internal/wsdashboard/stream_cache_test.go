@@ -455,6 +455,33 @@ func TestRefreshTickFollowsAWatchedProcess(t *testing.T) {
 	waitRegionHolding(t, events, regionBoard, "wait ended")
 }
 
+// A hosted PID exit updates the head even if its registration never changes.
+func TestHostedProcessExitRefreshesHead(t *testing.T) {
+	var mu sync.Mutex
+	alive := true
+	prev := processAlive
+	processAlive = func(pid int) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return pid == 4242 && alive
+	}
+	t.Cleanup(func() { processAlive = prev })
+	f := startPageFixture(t, withRefresh)
+	reg := register(t, f.dir, "hostprocess", f.project, time.Now())
+	reg.Hosted, reg.HostPID = true, 4242
+	if err := WriteRegistration(f.dir, reg); err != nil {
+		t.Fatal(err)
+	}
+	f.src.setPage("hostprocess", PageContent{HasBoard: true, Seq: 1, Board: boardRegions(t, "host")})
+	f.d.Index().Refresh()
+	events := openStream(t, f.base+"/s/hostprocess/events")
+	waitRegionHolding(t, events, regionHead, `title="harness process running"`)
+	mu.Lock()
+	alive = false
+	mu.Unlock()
+	waitRegionHolding(t, events, regionHead, `class="host sse stopped"`)
+}
+
 // TestWokenPageSkipsTheNextTick: a page a wake re-rendered takes its
 // refresh stamp before that render, so the next tick over unchanged state
 // skips it rather than rendering it again.

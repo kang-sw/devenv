@@ -370,6 +370,8 @@
   "js.send.reading": "画像をまだ読み込み中です: しばらくしてからもう一度送信してください。",
   "js.sent.held.title": "セッションのターンが終わるまで保留中",
   "js.sent.sent.title": "セッションに送信済み",
+  "head.process.running": "ハーネスプロセス実行中",
+  "head.process.stopped": "ハーネスプロセス停止中",
   "js.sse.title.off": "未接続、再試行中",
   "js.sse.title.on": "ライブ更新",
   "js.steer.fail": "切り替えできませんでした: {0}",

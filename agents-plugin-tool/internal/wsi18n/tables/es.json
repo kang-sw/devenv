@@ -370,6 +370,8 @@
   "js.send.reading": "Aún se está leyendo una imagen: vuelve a enviar en un momento.",
   "js.sent.held.title": "retenido hasta que termine el turno de la sesión",
   "js.sent.sent.title": "enviado a la sesión",
+  "head.process.running": "proceso del entorno en ejecución",
+  "head.process.stopped": "proceso del entorno detenido",
   "js.sse.title.off": "sin conexión, reintentando",
   "js.sse.title.on": "actualizaciones en vivo",
   "js.steer.fail": "No se promovió: {0}",
