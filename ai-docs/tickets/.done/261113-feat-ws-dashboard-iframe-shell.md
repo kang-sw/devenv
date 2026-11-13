@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1ad6563f62410a0a
 sage-review-completeness-reviewed: 1ad6563f62410a0a
+completed: 2026-11-14
 ---
 
 # ws dashboard iframe shell
@@ -186,7 +187,7 @@ click on an in-frame `/s/<id>` link switches frames through the shell (URL
 updated by `pushState`, no plain-page load in the frame); browser back and
 forward switch frames.
 
-#### Result (ffca4d075) - 2026-11-14
+### Result (ffca4d075) - 2026-11-14
 
 Landed (review fixes in bff1dcdb1):
 
@@ -303,3 +304,99 @@ that two frames of the same session cause one region render per update
 today's full reload (owner-observed 500-1000 ms), pass when switching to a
 session still in the LRU completes under 100 ms and a cold switch is no
 slower than the baseline.
+
+### Result (3310356af) - 2026-11-14
+
+Landed (review fixes in b8936093d):
+
+- `/` serves the shell, and its first frame is the index with `?frame=1`.
+  `/?frame=1` serves the framed index: `data-frame`, the rail placeholder,
+  and its list (`ixmain`) left-aligned at max 1080px beside the rail. It
+  answers `frame-ancestors 'self'` and `SAMEORIGIN`, and it joins the
+  `sameOrigin` list in `TestPagesRefuseFraming`. The shell at `/` keeps
+  `'none'` and `DENY`.
+- `WsShell.framed` takes `/`, so index and session pages switch frames
+  through the shell in both directions: a row in the index, the rail's
+  "all sessions" link, palette picks, and back and forward.
+- The index keeps its own header (`head` with `html: null`). The shell's top
+  shows only its rail button (`sh-own`), and the framed index shows its own
+  title, search slot, and gear.
+- Hash sync: a frame posts `hash` on `hashchange`, on `popstate`, and after
+  its own `history.pushState` and `replaceState`. The tracker's store pages
+  move the hash by history calls and fire no `hashchange`.
+- postMessage shapes: unchanged from Phase 1. The index sends the same
+  kinds, with `head.html` null.
+
+Decisions taken (for veto):
+
+- The index keeps its own header rather than mirroring it into the shell.
+  It has no session head, and its title, search slot, and gear already sit
+  in its own top bar.
+- Framed, the index drops its centered narrow layout. It follows the
+  wide-view rule (left-aligned panels) beside the rail.
+- The hash sync wraps the frame's history calls rather than changing the
+  tracker's code, so any page code that moves the hash that way is covered.
+- On the index the shell has no current session, so the rail's memo pad
+  follows the first workspace.
+
+Exceptions (not framed; each still refuses framing or is not an HTML page):
+
+- File views (`/s/<id>/file?path=`), opened in a tab of their own
+- The outside-file view and its re-mint page (`/s/<id>/fs/...`), opened in
+  a tab of their own
+- Capability-served preview documents, which keep their own sandboxed
+  framing by the session page
+- PWA assets, and the API, support, agent, holder, and debug routes, which
+  are not dashboard pages
+
+The tracker and its wiki are hash routes and views inside the index and
+session pages, so they are framed with those pages.
+
+Hidden-frame throttling and render fan-out landed with Phase 1's frames
+(bff1dcdb1). Their Phase 2 tests:
+
+- `TestHiddenFrameHoldsItsUpdatesUntilShown`: a hidden frame holds region
+  swaps (newest per region), skips the clock, defers the tracker reload, and
+  applies all of it once when shown.
+- `TestFramesOfOneSessionShareOneRender`: two framed streams of one session
+  and two rail streams cost one session render and one rail render per
+  update.
+
+The index frame streams `/events` under the same hold. Wait notifications
+come from the shell's rail only, since a framed page scans none.
+
+Verification (local; the sys_lock remote w5090 was unavailable):
+
+- `go test ./internal/wsdashboard/`: only the five base-commit failures
+  remain (see Phase 1). New or changed tests:
+  - `TestIndexServesTheShellAroundItsFramedPage`
+  - the index cases in `TestShellScript`
+  - `TestPagesRefuseFraming` with `/?frame=1`
+  - in `TestHiddenFrameHoldsItsUpdatesUntilShown`, the hash a frame posts
+    on pushState, replaceState, popstate, and hashchange
+  - the LAN test, which now also pins that the shell at `/` carries no token
+  - index-content tests (pages, i18n, theme, toast, cards, files, label,
+    support chat, dev assets), which now read `/?frame=1`
+- Lite review: one Important finding, fixed. Two negative index
+  assertions could no longer fail against the shell. The three Minor
+  findings were taken or recorded above.
+- LOOK, wide (1800): the rail at left, and the index header and list
+  left-aligned beside it. The pre-change index is a centered narrow list
+  with no rail.
+- LOOK, narrow (1200): the rail button opens the overlay rail with its memo
+  pad, as on a session page. Scrolled, the index header and the shell's
+  rail button move away together.
+- Headless, no page errors (only the fixture's existing `/tracker/stores`
+  404):
+  - a row click shows the session frame via pushState
+  - "all sessions" shows the kept index frame
+  - back and forward switch frames
+  - Ctrl+K in the index frame opens its palette
+- Switch times, click-to-painted on the test fixture:
+  - index to session: cold 131 ms, warm 30-32 ms
+  - session to index: warm 30-32 ms
+  - pre-change full reload: index to session 74-148 ms, session to index
+    56-67 ms
+  - session to session (Phase 1): warm 25-33 ms, cold 81-132 ms
+  - Every warm switch is under 100 ms. Cold switches fall within the
+    pre-change reload range.
