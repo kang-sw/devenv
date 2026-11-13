@@ -175,7 +175,7 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 	}
 	act := trackerFn(t, `function menuAct\(k, a\)`, false)
 	for _, want := range []string{
-		"case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lset = labelFlip(MN.lset, it.labels, MN.lab); return labelStepRedraw();",
+		"case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lset = labelFlip(MN.lset, labelBase(it), MN.lab); return labelStepRedraw();",
 		"case 'm-ladd': return labelDialog({});",
 	} {
 		if !strings.Contains(act, want) {
@@ -195,9 +195,10 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 		trackerFn(t, `function dataAttrs\(data\)`, false) + trackerFn(t, `function mi\(act, label, data, o\)`, false) + trackerFn(t, `function msep\(\)`, true) +
 		trackerFn(t, `function labelOf\(id\)`, true) + trackerFn(t, `function labelChip\(l, act, extra\)`, false) + trackerFn(t, `function labelChips\(it, act\)`, false) +
 		trackerFn(t, `function labelsProp\(it\)`, false) + trackerFn(t, `function newLabelsHtml\(n\)`, true) +
-		trackerFn(t, `function labelChecklist\(cur\)`, false) + trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelsOver\(cur, set\)`, false)
+		trackerFn(t, `function labelChecklist\(cur\)`, false) + trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelsOver\(cur, set\)`, false) +
+		trackerFn(t, `var LPEND = \{\};`, true) + trackerFn(t, `function labelBase\(it\)`, true)
 	runTrackerCases(t, "property card labels", trackerCheckJS+`
-var VS = { viewer: { member: 'me', admin: false }, labels: [{ id: 'L1', name: 'docs', color: '#111111' }, { id: 'L2', name: 'dev', color: '#222222' }] }, editor = true, MN = { kind: 'item', step: 'labels' };
+var VS = { viewer: { member: 'me', admin: false }, labels: [{ id: 'L1', name: 'docs', color: '#111111' }, { id: 'L2', name: 'dev', color: '#222222' }] }, editor = true, MN = { kind: 'item', step: 'labels' }, ui = { store: 's1' };
 function wsT(k) { return k; }
 function canEdit(it) { return editor; }
 `+src+`
@@ -237,21 +238,31 @@ done();
 // or when the picks change nothing (a toggle and its undo), labels the list no
 // longer holds dropped, nothing when the item or the edit right is gone. A
 // label another viewer adds while the step is open, or one a previous close
-// is still writing, is never written away by a stale copy.
+// is still writing, is never written away by a stale copy: a step reopened
+// while that write is in flight (labelWrite) draws and applies its picks over
+// live labels with each pending write's own picks, until it lands or is refused.
 func TestTrackerLabelStepAppliesOnClose(t *testing.T) {
 	cm := trackerFn(t, `function closeMenu\(refocus\)`, false)
-	for _, want := range []string{"var lw = labelPending(m);", "if (lw) commit(lw);"} {
+	for _, want := range []string{"var lw = labelPending(m);", "if (lw) labelWrite(lw);"} {
 		if !strings.Contains(cm, want) {
 			t.Errorf("closeMenu lacks %q", want)
 		}
 	}
 	runTrackerCases(t, "label step applies on close", trackerCheckJS+`
-var editor = true, VS = { items: { i1: { id: 'i1', labels: ['L1'] } }, labels: [{ id: 'L1' }, { id: 'L2' }, { id: 'L3' }] };
+var editor = true, VS = { items: { i1: { id: 'i1', labels: ['L1'] } }, labels: [{ id: 'L1' }, { id: 'L2' }, { id: 'L3' }] }, pend = [], ui = { store: 's1' };
 function canEdit() { return editor; }
+function toast() {}
+function esc(s) { return s; }
+function wsT(k) { return k; }
+function wrote() {}
+// the real commit dispatches; the adapter holds each callback until the case settles it
+var AD = { dispatch: function (store, ev, cb) { pend.push({ store: store, ev: ev, ok: function () { cb({ ok: true }); }, no: function () { cb({ ok: false }); } }); } };
 `+trackerFn(t, `function labelOf\(id\)`, true)+trackerFn(t, `function labelsOver\(cur, set\)`, false)+trackerFn(t, `function labelFlip\(set, cur, lid\)`, false)+
-		trackerFn(t, `function sameLabels\(a, b\)`, false)+trackerFn(t, `function labelPending\(m\)`, false)+`
-// a labels step on i1: the toggles flip each label from how the step draws it over the item's labels then
-function step() { var s = { kind: 'item', step: 'labels', item: 'i1', lset: null }; s.tog = function (lid) { s.lset = labelFlip(s.lset, VS.items.i1.labels, lid); return s; }; return s; }
+		trackerFn(t, `function sameLabels\(a, b\)`, false)+trackerFn(t, `function labelPending\(m\)`, false)+
+		trackerFn(t, `var LPEND = \{\};`, true)+trackerFn(t, `function labelBase\(it\)`, true)+trackerFn(t, `function labelWrite\(ev, then\)`, false)+
+		trackerFn(t, `function labelPicks\(from, to\)`, false)+trackerFn(t, `function commit\(events, then, prep, fail\)`, false)+`
+// a labels step on i1: the toggles flip each label from how the step draws it (labelBase) then
+function step() { var s = { kind: 'item', step: 'labels', item: 'i1', lset: null }; s.tog = function (lid) { s.lset = labelFlip(s.lset, labelBase(VS.items.i1), lid); return s; }; return s; }
 function held(ls) { VS.items.i1.labels = ls; }
 check('a pick on is one write over the labels', labelPending(step().tog('L2')), [['item.edit', { item: 'i1', labels: ['L1', 'L2'] }]]);
 check('a toggle and its undo write nothing', labelPending(step().tog('L2').tog('L2')), null);
@@ -278,15 +289,90 @@ editor = false;
 check('without the edit right nothing is written', labelPending(step().tog('L2')), null);
 editor = true;
 check('a gone item owes nothing', labelPending({ kind: 'item', step: 'labels', item: 'zz', lset: { L2: true } }), null);
+// scenario C: pick L2 and close (written, in flight), reopen, pick L3, close before the first write lands
+held(['L1']);
+labelWrite(labelPending(step().tog('L2')));
+var c2 = step();
+check('the reopened step draws the in-flight pick', labelBase(VS.items.i1), ['L1', 'L2']);
+check('untoggled, it owes nothing', labelPending(c2), null);
+check('a second pick applies over the first, keeping L2', labelPending(c2.tog('L3')), [['item.edit', { item: 'i1', labels: ['L1', 'L2', 'L3'] }]]);
+labelWrite(labelPending(c2));
+held(['L1', 'L2']); pend[0].ok();
+check('the first write landing leaves the second pending', labelBase(VS.items.i1), ['L1', 'L2', 'L3']);
+held(['L1', 'L2', 'L3']); pend[1].ok();
+check('the second landing clears the pending labels', [labelBase(VS.items.i1), Object.keys(LPEND)], [['L1', 'L2', 'L3'], []]);
+labelWrite(labelPending(step().tog('L1')));
+pend[2].no();
+check('a refused write clears its pending labels', [labelBase(VS.items.i1), Object.keys(LPEND)], [['L1', 'L2', 'L3'], []]);
+// a pending pick must not hide a label that arrives live before the next pick
+VS.labels.push({ id: 'L4' }); held(['L1']); pend = [];
+labelWrite(labelPending(step().tog('L2')));
+held(['L1', 'L4']);
+labelWrite(labelPending(step().tog('L3')));
+check('the next dispatch keeps newer live labels beside both picks', pend[1].ev, [{ type: 'item.edit', payload: { item: 'i1', labels: ['L1', 'L2', 'L3', 'L4'] }, origin: 'human' }]);
+held(['L1', 'L2', 'L4']); pend[0].ok();
+held(['L1', 'L2', 'L3', 'L4']); pend[1].ok();
+// a later failure must not forget an earlier write still in flight
+held(['L1']); pend = [];
+labelWrite(labelPending(step().tog('L2')));
+labelWrite(labelPending(step().tog('L3')));
+pend[1].no();
+check('a failed second write leaves the first pick pending', labelBase(VS.items.i1), ['L1', 'L2']);
+held(['L1', 'L4']);
+check('the surviving pending pick still overlays live labels', labelBase(VS.items.i1), ['L1', 'L2', 'L4']);
+held(['L1', 'L2', 'L4']); pend[0].ok();
+check('the first write then clears only its own entry', Object.keys(LPEND), []);
+// identical item ids in different stores have independent pending picks and settlement
+held(['L1']); pend = [];
+labelWrite(labelPending(step().tog('L2')));
+ui.store = 's2'; held(['L4']);
+check('another store does not inherit the pending pick', labelBase(VS.items.i1), ['L4']);
+labelWrite(labelPending(step().tog('L3')));
+check('the other store dispatches only its own labels', [pend[1].store, pend[1].ev[0].payload.labels], ['s2', ['L3', 'L4']]);
+pend[0].no();
+check('settling the first store keeps the second pending', labelBase(VS.items.i1), ['L3', 'L4']);
+ui.store = 's1'; held(['L1']);
+check('the first store is clear while the other is pending', labelBase(VS.items.i1), ['L1']);
+pend[1].no();
+check('settlement uses the captured store even after switching', Object.keys(LPEND), []);
+done();
+`)
+}
+
+// TestTrackerItemEditLabelPicks pins the item window edit form's label save
+// (tracker.js saveEdit): like the row edit, it writes the picks made since
+// startEdit over the item's labels as they are at save, so a label another
+// viewer wrote meanwhile is kept, and an untouched label row writes none.
+func TestTrackerItemEditLabelPicks(t *testing.T) {
+	runTrackerCases(t, "item edit label picks", trackerCheckJS+`
+var VS = { items: { i1: { id: 'i1', title: 'T', body: '', project: '', labels: ['L1'] } }, labels: [{ id: 'L1' }, { id: 'L2' }, { id: 'L3' }] };
+var ui = { win: true, item: 'i1', edpv: {}, eatt: {} }, sent = [];
+function wsT(k) { return k; }
+function showItem() {}
+function render() {}
+function toast() {}
+function endEdit() { ui.iedit = null; }
+function $(id) { return id === 'iw-etitle' ? { value: VS.items.i1.title, focus: function () {} } : id === 'iw-ebody' ? { value: '' } : id === 'iw-eproj' ? { value: '' } : null; }
+function commit(ev) { sent.push(ev); }
+`+trackerFn(t, `function labelOf\(id\)`, true)+trackerFn(t, `function labelsOver\(cur, set\)`, false)+trackerFn(t, `function labelPicks\(from, to\)`, false)+
+		trackerFn(t, `function sameLabels\(a, b\)`, false)+trackerFn(t, `function startEdit\(id\)`, false)+trackerFn(t, `function saveEdit\(\)`, false)+`
+function save(mut) { startEdit('i1'); mut(ui.iedit); sent = []; saveEdit(); return sent; }
+check('a pick writes the labels', save(function (e) { e.labels.push('L2'); }), [[['item.edit', { item: 'i1', labels: ['L1', 'L2'] }]]]);
+check('a label added meanwhile, labels untouched: no write', save(function (e) { VS.items.i1.labels = ['L1', 'L3']; }), []);
+VS.items.i1.labels = ['L1'];
+check('a label added meanwhile is kept beside the pick', save(function (e) { VS.items.i1.labels = ['L1', 'L3']; e.labels = []; }), [[['item.edit', { item: 'i1', labels: ['L3'] }]]]);
 done();
 `)
 }
 
 // TestTrackerRowTitleEdit pins the list row's hover pencil: only an editor
 // gets it, it turns the row into the new row's edit row (same chips) prefilled
-// from the item, and its save sends only what changed - one item.edit, the
-// viewer's own status, the assign - while Escape, the x, and an unchanged
-// draft write nothing. There is no blur rule, as in the new row.
+// from the item, and its save sends only what the user changed since the
+// editor opened - one item.edit, the viewer's own status, the assignee delta
+// (item.assign for added people, item.unassign for dropped ones) - so a field
+// another viewer wrote meanwhile is kept, while Escape, the x, and an
+// unchanged draft write nothing. An unheld topic prefills no holder. A save
+// closes only its own draft. There is no blur rule, as in the new row.
 func TestTrackerRowTitleEdit(t *testing.T) {
 	if !strings.Contains(trackerFn(t, `function irow\(o\)`, false), "return editRowHtml(o);") {
 		t.Error("the list row does not give way to the edit row")
@@ -316,17 +402,19 @@ function wsT(k) { return k; }
 function render() { renders++; }
 function toast() { toasts++; }
 function $() { return ui.ned ? elv : null; }
-function commit(ev, then, prep) { sent.push(ev); if (prep) prep([]); }
+var held = null; // while an array, a save stays in flight: its prep waits there
+var AD = { dispatch: function (store, ev, cb) { sent.push(ev.map(function (e) { return [e.type, e.payload]; })); if (held) held.push(function () { cb({ ok: true }); }); else cb({ ok: true }); } };
+function wrote() {}
 function labelOf(id) { return VS.labels.filter(function (l) { return l.id === id; })[0]; }
 function nrowSt(n) { return n.ed && rec ? n.st : ''; }
-function nrowPri(n) { return n.pri != null ? n.pri : VS.priority.default; }
 function asgEvents(item, sel, compl) { return [['item.assign', { item: item, who: sel.map(function (o) { return o.id; }), compl: compl }]]; }
 function esc(s) { return s; }
 function attr(k, v) { return ' data-' + k + '="' + v + '"'; }
 function tipAttr(x) { return ''; }
 function partIcon(i) { return i; }
-`+trackerFn(t, `function titleEdHtml\(it\)`, false)+trackerFn(t, `function editWho\(it\)`, false)+trackerFn(t, `function startRowEdit\(id, rk\)`, false)+trackerFn(t, `function editRowEvents\(n, it, title\)`, false)+trackerFn(t, `function endRowEdit\(\)`, false)+trackerFn(t, `function saveRowEdit\(\)`, false)+
-		trackerFn(t, `function labelsOver\(cur, set\)`, false)+trackerFn(t, `function labelPicks\(from, to\)`, false)+trackerFn(t, `function sameLabels\(a, b\)`, false)+`
+`+trackerFn(t, `function titleEdHtml\(it\)`, false)+trackerFn(t, `function editHeld\(it\)`, false)+trackerFn(t, `function editWho\(it\)`, false)+trackerFn(t, `function startRowEdit\(id, rk\)`, false)+trackerFn(t, `function editRowEvents\(n, it, title\)`, false)+trackerFn(t, `function endRowEdit\(\)`, false)+trackerFn(t, `function saveRowEdit\(\)`, false)+
+		trackerFn(t, `function labelsOver\(cur, set\)`, false)+trackerFn(t, `function labelPicks\(from, to\)`, false)+trackerFn(t, `function sameLabels\(a, b\)`, false)+
+		trackerFn(t, `function nrowPri\(n\)`, true)+trackerFn(t, `function commit\(events, then, prep, fail\)`, false)+`
 var document = { querySelector: function () { return null; } }, CSS = { escape: function (x) { return x; } };
 function draft() { startRowEdit('i1', 'r'); return ui.ned; }
 function save(mut, title) { var n = draft(); if (mut) mut(n); elv.value = title == null ? n.val : title; sent = []; saveRowEdit(); return sent; }
@@ -354,13 +442,130 @@ rec = { status: 'idea' };
 check('a changed own status is its own item.status', save(function (n) { n.st = 'doing'; }), [[['item.status', { item: 'i1', status: 'doing' }]]]);
 check('done closes the item', save(function (n) { n.st = 'done'; }), [[['item.close', { item: 'i1' }]]]);
 check('a changed assignee list is the assign', save(function (n) { n.who = ['you']; }), [[['item.assign', { item: 'i1', who: ['you'], compl: null }]]]);
+check('a status written meanwhile, status untouched: no status write', save(function (n) { rec.status = 'blocked'; }), []);
+rec.status = 'idea';
 check('edit, status, and assign are one batch in that order', save(function (n) { n.st = 'todo'; n.pri = 0; n.who = ['you']; }),
   [[['item.edit', { item: 'i1', priority: 0 }], ['item.status', { item: 'i1', status: 'todo' }], ['item.assign', { item: 'i1', who: ['you'], compl: null }]]]);
+// another viewer moves due and priority after the open
+var it1 = VS.items.i1;
+it1.title = 'Old ';
+check('an untouched padded title does not overwrite a concurrent rename', save(function () { it1.title = 'Theirs'; }), []);
+it1.title = 'Old';
+check('an untouched priority stays clean when available levels shrink', save(function () { VS.priority.names = ['low', 'mid']; }), []);
+VS.priority.names = ['low', 'mid', 'high'];
+it1.priority = null;
+check('an untouched default priority stays clean when the default changes', save(function () { VS.priority.default = 0; }), []);
+it1.priority = 2; VS.priority.default = 1;
+check('fields written meanwhile and left alone are kept: only the title goes', save(function (n) { it1.due = '2027-01-01'; it1.priority = 0; }, 'Mine'),
+  [[['item.edit', { item: 'i1', title: 'Mine' }]]]);
+it1.due = '2026-12-01'; it1.priority = 2;
+check('a field the user changed to what another viewer wrote meanwhile is no write', save(function (n) { it1.due = '2027-01-01'; n.due = '2027-01-01'; }), []);
+it1.due = '2026-12-01';
+// the assignees are a delta over who holds the item now
+it1.assignments = [{ to: 'A', state: 'live' }];
+check('the prefill is the real assignee', draft().who, ['A']);
+check('a swap assigns the new person and unassigns the dropped one', save(function (n) { n.who = ['B']; }),
+  [[['item.assign', { item: 'i1', who: ['B'], compl: null }], ['item.unassign', { item: 'i1', assignee: 'A' }]]]);
+check('removing an assignee is the unassign alone', save(function (n) { n.who = []; }), [[['item.unassign', { item: 'i1', assignee: 'A' }]]]);
+check('a completion pick alone writes nothing', save(function (n) { n.compl = 'assigner'; }), []);
+check('a completion pick rides on the added people only', save(function (n) { n.who = ['A', 'B']; n.compl = 'assigner'; }),
+  [[['item.assign', { item: 'i1', who: ['B'], compl: 'assigner' }]]]);
+check('a person another viewer assigned meanwhile is not assigned again', save(function (n) { it1.assignments.push({ to: 'B', state: 'live' }); n.who = ['A', 'B']; }), []);
+it1.assignments = [{ to: 'A', state: 'live' }];
+check('adding B does not resurrect A unassigned meanwhile', save(function (n) { it1.assignments = []; n.who = ['A', 'B']; }),
+  [[['item.assign', { item: 'i1', who: ['B'], compl: null }]]]);
+it1.assignments = [{ to: 'A', state: 'live' }];
+check('a person unassigned meanwhile is not unassigned again', save(function (n) { it1.assignments = []; n.who = []; }), []);
+it1.assignments = [{ to: 'me', state: 'live', fallback: true }];
+check('a task held by its fallback prefills the creator', draft().who, ['me']);
+check('and a swap from it is the assign alone (the fallback is not unassigned)', save(function (n) { n.who = ['B']; }), [[['item.assign', { item: 'i1', who: ['B'], compl: null }]]]);
+it1.assignments = [];
+// an unheld topic once prefilled its creator as holder, so picking the creator wrote nothing
+VS.items.t1 = { id: 't1', kind: 'topic', title: 'Topic', labels: [], author: 'me', assignments: [] };
+startRowEdit('t1', 'r');
+check('an unheld topic prefills no holder', ui.ned.who, []);
+ui.ned.who = ['me']; elv.value = 'Topic'; sent = []; saveRowEdit();
+check('picking the creator assigns them', sent, [[['item.assign', { item: 't1', who: ['me'], compl: null }]]]);
+// a save's success once cleared whichever draft was open, a newer row's included
+held = [];
+save(function (n) { n.pri = 0; });
+var a = ui.ned;
+startRowEdit('t1', 'r'); ui.ned.val = 'typing';
+held[0]([]); held = null;
+check('an earlier save landing keeps the newer draft', [ui.ned !== a, ui.ned.item, ui.ned.val], [true, 't1', 'typing']);
+held = [];
+save(function (n) { n.pri = 0; });
+held[0]([]); held = null;
+check('a save landing closes its own draft', ui.ned, null);
 canAsg = false;
 check('without the assign right the assignees are not written', save(function (n) { n.who = ['you']; }), []);
 ui.ned = null; renders = 0;
 draft(); sent = []; endRowEdit();
 check('cancel closes the row and writes nothing', [sent, ui.ned, renders], [[], null, 2]);
+done();
+`)
+}
+
+// TestTrackerEditRowRetainsFallbackCreator checks that keeping the fallback
+// creator beside a new assignee explicitly assigns both before fallback displacement.
+func TestTrackerEditRowRetainsFallbackCreator(t *testing.T) {
+	runTrackerCases(t, "row edit retains fallback creator", trackerCheckJS+`
+var VS = { viewer: { member: 'me', reach: {} }, priority: { default: 1, names: ['low', 'mid'] }, labels: [],
+  items: { i1: { id: 'i1', kind: 'task', title: 'Task', status: 'todo', priority: 1, labels: [], author: 'me', assignments: ['fb'] } },
+  assignments: { fb: { to: 'me', state: 'live', status: 'todo', fallback: true } } };
+var ui = { store: 's1' }, sent = [], el = { value: 'Task', focus: function () {}, select: function () {} };
+function canEdit() { return true; }
+function render() {}
+function toast() {}
+function wsT(k) { return k; }
+function esc(s) { return s; }
+function $(id) { return el; }
+function nrowSt(n) { return n.st; }
+function wrote() {}
+function endRowEdit() { ui.ned = null; }
+var AD = { dispatch: function (store, ev, cb) { sent.push(ev); cb({ ok: true }); } };
+`+trackerFn(t, `function A\(id\)`, true)+trackerFn(t, `function holders\(it\)`, true)+trackerFn(t, `function mineLive\(it\)`, true)+
+		trackerFn(t, `function canAssign\(it, v\)`, true)+trackerFn(t, `function editHeld\(it\)`, false)+trackerFn(t, `function editWho\(it\)`, false)+
+		trackerFn(t, `function startRowEdit\(id, rk\)`, false)+trackerFn(t, `function editRowEvents\(n, it, title\)`, false)+trackerFn(t, `function saveRowEdit\(\)`, false)+
+		trackerFn(t, `function nrowPri\(n\)`, true)+trackerFn(t, `function labelOf\(id\)`, true)+trackerFn(t, `function labelsOver\(cur, set\)`, false)+
+		trackerFn(t, `function labelPicks\(from, to\)`, false)+trackerFn(t, `function sameLabels\(a, b\)`, false)+
+		trackerFn(t, `function complClass\(o\)`, false)+trackerFn(t, `function asgClass\(o, compl\)`, true)+trackerFn(t, `function asgEvents\(item, sel, compl\)`, false)+
+		trackerFn(t, `function commit\(events, then, prep, fail\)`, false)+`
+startRowEdit('i1', 'r');
+check('fallback prefills the creator without a real assignment', [ui.ned.who, editHeld(VS.items.i1)], [['me'], []]);
+saveRowEdit();
+check('an untouched fallback selection writes nothing', sent, []);
+startRowEdit('i1', 'r');
+ui.ned.who.push('B');
+saveRowEdit();
+check('keeping the fallback creator with B explicitly assigns both', sent, [[{ type: 'item.assign', payload: { item: 'i1', targets: ['me', 'B'], completion: 'assignee' }, origin: 'human' }]]);
+done();
+`)
+}
+
+// TestTrackerEditRowWrappedStatus pins the row edit's status chip on the
+// viewer's done or dropped holding (tracker.js nrowStMode): the store takes no
+// item.status there ("reopen it first"), so, as the item menu (canStatus), the
+// chip offers no status and a save writes none; a live holding still offers
+// the viewer's own statuses.
+func TestTrackerEditRowWrappedStatus(t *testing.T) {
+	runTrackerCases(t, "row edit wrapped status", trackerCheckJS+`
+var rec = null, VS = { viewer: { member: 'me', reach: {} }, priority: { default: 1, names: ['low', 'mid', 'high'] }, labels: [],
+  items: { i1: { id: 'i1', kind: 'task', title: 'T', priority: 1, labels: [], author: 'me', assignments: [] } } };
+function mineLive() { return rec; }
+`+trackerFn(t, `function wrapped\(s\)`, true)+trackerFn(t, `function nrowMine\(n\)`, true)+trackerFn(t, `var NROW_ST = `, true)+trackerFn(t, `function nrowStMode\(n\)`, false)+
+		trackerFn(t, `function nrowSt\(n\)`, true)+trackerFn(t, `function nrowStOpts\(n\)`, true)+`
+function draft(st) { rec = { status: st }; return { ed: 'i1', kind: 'task', st: st, who: ['me'], canAsg: true }; }
+['done', 'dropped'].forEach(function (s) {
+  var n = draft(s);
+  check('a ' + s + ' holding offers no status chip', [nrowStMode(n), nrowSt(n)], ['', '']);
+  n.st = 'todo';
+  check('nor writes a picked one (' + s + ')', nrowSt(n), '');
+});
+var n = draft('doing');
+check('a live holding offers the own statuses', [nrowStMode(n), nrowSt(n)], ['own', 'doing']);
+n = draft('in-review');
+check('an in-review holding offers them plus its own status', [nrowStOpts(n), nrowSt(n)], [['idea', 'todo', 'doing', 'blocked', 'in-review'], 'in-review']);
 done();
 `)
 }
