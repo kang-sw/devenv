@@ -54,12 +54,13 @@ func TestCloseResultRendersBesideTheName(t *testing.T) {
 
 	mustApply(t, st, addXML(ClassTechnical, "t", "reopened"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantNone(t, out, result, "plan b")
+	wantNone(t, out, result)
+	wantAll(t, out, "plan b") // The old close event remains immutable history.
 
 	mustApply(t, st, `<wb:answer id="2" value="ok">ok</wb:answer><wb:topic name="t"><wb:close result="Second ending."/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantAll(t, out, result+`Second ending.</span>`)
-	wantNone(t, out, "plan b")
+	wantAll(t, out, "plan b") // A new result does not erase the earlier event.
 
 	// A store from before close results: closed, with no result to show.
 	old := &State{Seq: 2, Items: []Item{{ID: 1, Class: ClassTechnical, Topic: "legacy", Title: "x", Status: StatusAnswered, Answer: "ok", Settled: 1}}, ClosedTopics: []string{"legacy"}}
@@ -216,8 +217,12 @@ func TestClosedTopicCapRenders(t *testing.T) {
 	for name, layout := range layouts() {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		wantAll(t, out, `<div class="closed-more">5 more closed topics not shown</div>`, `<span class="tname" title="closed">c6</span>`)
-		wantNone(t, out, `<span class="tname" title="closed">c5</span>`, `data-closed-next`)
-		if c := strings.Count(out, `<section class="topic`); c != 3+ClosedCap {
+		active := strings.SplitN(out, `<template data-history-topic`, 2)[0]
+		wantNone(t, active, `<span class="tname" title="closed">c5</span>`, `data-closed-next`)
+		if layout == LayoutFull {
+			wantAll(t, out, `<template data-history-topic="c5">`)
+		}
+		if c := strings.Count(active, `<section class="topic`); c != 3+ClosedCap {
 			t.Errorf("%s: %d topics rendered, want %d", name, c, 3+ClosedCap)
 		}
 	}
@@ -228,7 +233,8 @@ func TestClosedTopicCapRenders(t *testing.T) {
 	}
 	board := string(regions.Board)
 	wantAll(t, board, `<button class="btn closed-more" data-closed-next="30">show more closed topics (5)</button>`)
-	wantNone(t, board, `<div class="closed-more">`, `>c5</span>`)
+	wantNone(t, strings.SplitN(board, `<template data-history-topic`, 2)[0], `<div class="closed-more">`, `>c5</span>`)
+	wantAll(t, board, `<template data-history-topic="c5">`)
 
 	html, err := RenderClosedTopics(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Closed: &ClosedWindow{From: 30, N: 30}}))
 	if err != nil {

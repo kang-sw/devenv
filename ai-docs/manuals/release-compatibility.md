@@ -34,9 +34,11 @@ recorded in the ticket's `## Decisions`, so the release gate only confirms it.
   `version.go:52-54` states that the wire surface changes only in a minor;
   nothing checks it yet.
 - **Stores mostly read tolerantly.** Go struct round-trips can drop fields an
-  older writer does not know (suspected; no per-writer audit yet). Only the
-  config manifest and the rsrc manifest check `schema_version` on read. sqlite
-  has no guard against an older binary opening a newer schema. The tracker
+  older writer does not know (suspected; no per-writer audit yet). The config
+  and rsrc manifests, and the schema-2 whiteboard folder store, check
+  `schema_version` on read. Whiteboard conversion preserves old snapshots and
+  never dual-writes them. sqlite has no guard against an older binary opening
+  a newer schema. The tracker
   flags unknown event types.
 - **Existing mechanisms.** Intake `accepts:` negotiation for optional event
   kinds; the holder v / v-1 window; Pi's version pin (daemon `serverInfo` >=
@@ -97,7 +99,9 @@ ticket `261112-feat-ws-mixed-version-compat-guards`:
 
 - Rule 1: a tool-surface monotonicity test against the previous release's
   `runtime.json` surface.
-- Rule 2: newer-`schema_version` write refusal in every shared store writer.
+- Rule 2: newer-`schema_version` write refusal in every remaining shared store
+  writer; whiteboard topic folders and session metadata already refuse newer
+  schemas.
 - Rule 3: per-session hello version recording, the skew notice, and the
   dashboard badge.
 - Rule 4: `tools/list_changed` emission and the widened reconnect triggers.

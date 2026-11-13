@@ -387,8 +387,14 @@
     q("iframe.doc-frame").forEach(postTheme);
     if (window.mermaid && q("pre.mermaid[data-processed]").length) window.wbMermaid();
   }
+  function postDoc(f, message) {
+    var key = f.getAttribute("data-doc-key");
+    if (!key || key !== f.getAttribute("data-doc") || !f.contentWindow) return;
+    message.docKey = key;
+    f.contentWindow.postMessage(message, "*");
+  }
   function postTheme(f) {
-    if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "theme", theme: root.getAttribute("data-theme") || "" }, "*");
+    postDoc(f, { wbDoc: "theme", theme: root.getAttribute("data-theme") || "" });
   }
   markTheme();
 
@@ -498,6 +504,7 @@
     var answers = board ? boardRead(readAnswers) : null;
     var railTop = name === "rail" ? railScrollTop() : null;
     var frameH = board ? boardRead(frameHeights) : null;
+    var history = board ? captureBoardHistory() : null;
     var before = board && !still && !reducedMotion() ? boardSpots(el) : null;
     // The entries merge and the board morph prepare only the nodes they
     // insert; any other region is replaced whole. A finished reply's mermaid
@@ -508,6 +515,9 @@
     else if (board) {
       ins = morphBoard(el, html);
       ins.forEach(function (n) {
+        // Materialize the reader's older pages before restoring disclosures
+        // and frame heights, including immutable panel versions off the tail.
+        if (window.wbHistory) { window.wbHistory.init(n); window.wbHistory.restore(n, history); }
         restoreOpen(n);
         fmtTimes(n);
         sweepOutImgs(n);
@@ -538,6 +548,8 @@
     if (name === "panels") drawerSync();
     if (name === "git") gitSwapped();
     restoreScroll(scroll);
+    // Disclosure and frame-height restoration can move the history viewport.
+    if (board && window.wbHistory) boardBoxes().forEach(function (b) { window.wbHistory.restore(b, history); });
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
       var dot = tabDot(TAB[name]);
@@ -622,6 +634,7 @@
         }).then(function (res) { done(frag(res.html || "").firstElementChild); }, function () { done(null); });
       },
       adopted: function (n) {
+        if (window.wbHistory) window.wbHistory.init(n);
         restoreOpen(n);
         if (window.wbBindBoard) window.wbBindBoard(n);
         if (window.wbAgo) window.wbAgo(n);
@@ -869,7 +882,7 @@
     var o = f.wbOld;
     f.wbOld = null;
     if (o && o.parentNode) o.parentNode.removeChild(o);
-    if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "size" }, "*");
+    postDoc(f, { wbDoc: "size" });
   }
   // Board motion: a board swap's inserted topic sections grow from the
   // height they had before (a topic the board did not hold grows from 0)
@@ -1118,6 +1131,10 @@
   // fetches the next page from the closed route into the control's place,
   // ending with the next control when more remain. The fetched pages stay
   // across board swaps (morphBoard).
+  function boardTopicPresent(name) {
+    return boardQ("section.topic[data-topic]").some(function (shown) { return shown.getAttribute("data-topic") === name; }) ||
+      !!(window.WsCards && window.WsCards.pinnedTopic(name));
+  }
   function loadClosed(btn) {
     if (!window.fetch || btn.disabled) return;
     btn.disabled = true;
@@ -1131,11 +1148,11 @@
       // names (a topic closed or reopened): the page fetched may not follow
       // what shows now, and the control is clicked again.
       if (!btn.parentNode || !page || +btn.getAttribute("data-closed-next") !== from) { btn.disabled = false; return; }
-      // A topic pinned here (cards.js) already stands in the pin list; a
-      // slot keeps its place in the pages' count (morphBoard).
+      // Pinned topics and closed topics materialized by a panel jump already
+      // stand on the board; slots retain their place in the page count.
       q("section.topic[data-topic]", page).forEach(function (t) {
         var name = t.getAttribute("data-topic");
-        if (!window.WsCards || !window.WsCards.pinnedTopic(name)) return;
+        if (!boardTopicPresent(name)) return;
         var s = doc.createElement("span");
         s.className = "closed-slot";
         s.hidden = true;
@@ -1251,7 +1268,7 @@
       var el = doc.createElement("span"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
       el.className = "achip mchip";
       el.title = m.text;
-      b.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "");
+      b.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "");
       el.appendChild(b);
       t.className = "anote";
       t.textContent = m.text.replace(/\s+/g, " ");
@@ -1717,21 +1734,27 @@
   // reports it ({wbDoc: "sel"}, doc-frame.js) and the button stands over it.
   var mbtn = null, mpend = null, mraf = 0;
   // mentionOf is the mention a selection makes: the topic card's key, the
-  // item ID when both ends of the selection lie in the same item card ("" for
-  // an end outside every item), and the selected text; null for a blank
-  // selection, since a mention points at content.
-  function mentionOf(topic, startId, endId, text) {
+  // item ID when both ends lie in one item (or trusted system-event
+  // provenance), the optional immutable entry locator, and selected text.
+  function mentionOf(topic, startId, endId, text, entry) {
     text = (text || "").trim();
     if (!topic || !text) return null;
     var m = { topic: topic, text: text };
     if (startId && startId === endId) m.id = startId;
+    if (entry && /^e[1-9][0-9]*$/.test(entry)) m.entry = entry;
     return m;
+  }
+  function entryAt(n) {
+    var el = selEl(n), entry = el && el.closest && el.closest("[data-entry]");
+    return entry && /^e[1-9][0-9]*$/.test(entry.getAttribute("data-entry") || "") ? entry : null;
   }
   function selEl(n) { return n && (n.nodeType === 1 ? n : n.parentNode); }
   // itemIdAt is the ID of the item card n lies in, "" outside every card; the
   // card's element id carries it on every kind (a settled row has no data-id).
   function itemIdAt(n) {
-    var el = selEl(n), item = el && el.closest && el.closest(".card[id], .arow[id], .ckrow[id], .srow[id]");
+    var el = selEl(n), entry = entryAt(n), provenance = entry && entry.getAttribute("data-entry-item");
+    if (entry) return /^[0-9]{1,6}$/.test(provenance || "") ? provenance : "";
+    var item = el && el.closest && el.closest(".card[id], .arow[id], .ckrow[id], .srow[id]");
     var m = item && /^item-([0-9]{1,6})$/.exec(item.getAttribute("id") || "");
     return m ? m[1] : "";
   }
@@ -1740,20 +1763,57 @@
     var rs = r.getClientRects();
     return rs.length ? rs[rs.length - 1] : r.getBoundingClientRect();
   }
-  // hostMention is the pending mention of this page's own selection, null
-  // unless it lies in one topic card of the board, outside a form field.
+  // Split a cross-entry selection in document order, clipping each part to
+  // its selected text nodes. Locator and item provenance come only from
+  // host-owned entry wrappers, never authored references or frame messages.
+  // A selection outside entries retains the old topic/item-only behavior.
+  function selectionMentions(range, ta, tf, text) {
+    var entries = boardQ("[data-entry]").filter(function (el) { return range.intersectsNode(el); });
+    if (!entries.length) {
+      var plain = ta === tf && mentionOf(ta.getAttribute("data-topic"), itemIdAt(range.startContainer), itemIdAt(range.endContainer), text);
+      return plain ? [plain] : [];
+    }
+    var base = range.commonAncestorContainer, parts = [], part = null;
+    if (base.nodeType === 3) base = base.parentNode;
+    var walk = doc.createTreeWalker(base, 4), node;
+    while ((node = walk.nextNode())) {
+      var el = selEl(node), topic = el && el.closest("section.topic[data-topic]");
+      if (!topic || !inBoard(el) || !range.intersectsNode(node) || el.closest("script, style, template, [hidden]")) continue;
+      if (el.getClientRects && !el.getClientRects().length) continue;
+      var start = node === range.startContainer ? range.startOffset : 0;
+      var end = node === range.endContainer ? range.endOffset : node.nodeValue.length;
+      if (end <= start) continue;
+      var entry = entryAt(node), id = entry ? entry.getAttribute("data-entry") : "", key = topic.getAttribute("data-topic");
+      if (!part || part.topic !== key || part.entry !== id) {
+        part = { topic: key, entry: id, text: "", block: null, startId: itemIdAt(node), endId: "" };
+        parts.push(part);
+      }
+      // Accumulate only clipped visible nodes. An enclosing Range.toString()
+      // would reintroduce skipped collapsed entries, scripts, or templates.
+      var chunk = node.nodeValue.slice(start, end), block = el.closest("p, li, div, summary, article, section, pre, blockquote, h1, h2, h3, h4, h5, h6");
+      if (part.text && block !== part.block && !/\s$/.test(part.text) && !/^\s/.test(chunk)) part.text += "\n";
+      part.text += chunk;
+      part.block = block;
+      part.endId = itemIdAt(node);
+    }
+    return parts.map(function (p) {
+      return mentionOf(p.topic, p.startId, p.endId, p.text, p.entry);
+    }).filter(Boolean);
+  }
+  // hostMention is the pending mention(s) of this page's own selection,
+  // outside a form field. Entry-spanning selections become ordered parts.
   function hostMention() {
     var sel = window.getSelection ? window.getSelection() : null;
     if (!region("board") || !sel || sel.isCollapsed || !sel.rangeCount) return null;
     var a = selEl(sel.anchorNode), f = selEl(sel.focusNode), act = doc.activeElement;
     if (!a || !f || !inBoard(a) || !inBoard(f)) return null;
     if (act && /^(TEXTAREA|INPUT)$/.test(act.tagName) && inBoard(act)) return null;
-    var ta = a.closest("section.topic[data-topic]");
-    if (!ta || ta !== f.closest("section.topic[data-topic]")) return null;
-    var m = mentionOf(ta.getAttribute("data-topic"), itemIdAt(sel.anchorNode), itemIdAt(sel.focusNode), sel.toString());
-    if (!m) return null;
-    var r = endRect(sel.getRangeAt(0));
-    return { m: m, x: r.right, y: r.bottom };
+    var ta = a.closest("section.topic[data-topic]"), tf = f.closest("section.topic[data-topic]");
+    if (!ta || !tf) return null;
+    var range = sel.getRangeAt(0), mentions = selectionMentions(range, ta, tf, sel.toString());
+    if (!mentions.length) return null;
+    var r = endRect(range);
+    return mentions.length === 1 ? { m: mentions[0], x: r.right, y: r.bottom } : { ms: mentions, x: r.right, y: r.bottom };
   }
   function hideMention() {
     mpend = null;
@@ -1795,15 +1855,22 @@
     var p = mpend;
     hideMention();
     if (!p) return;
-    bmentions.push(p.m);
-    if (p.frame) { if (p.frame.contentWindow) p.frame.contentWindow.postMessage({ wbDoc: "unsel" }, "*"); }
+    bmentions = bmentions.concat(p.ms || [p.m]);
+    if (p.frame) postDoc(p.frame, { wbDoc: "unsel" });
     else if (window.getSelection) window.getSelection().removeAllRanges();
     renderChips();
   }
   // frameMention takes a body frame's selection report: its text and where
   // its end stands inside the frame.
   function frameMention(f, text, x, y) {
-    var t = f.closest("section.topic[data-topic]"), m = t && mentionOf(t.getAttribute("data-topic"), "", "", text);
+    var t = f.closest("section.topic[data-topic]"), entry = f.getAttribute("data-entry") || "";
+    var item = f.getAttribute("data-entry-item") || "", parentEntry = entryAt(f.parentNode);
+    if (!item && parentEntry) item = parentEntry.getAttribute("data-entry-item") || "";
+    if (!/^[0-9]{1,6}$/.test(item)) item = "";
+    // Entry identity is the host's iframe attribute, not a claimed eN in
+    // the message or inside its sandboxed document.
+    var topic = f.getAttribute("data-topic") || (t && t.getAttribute("data-topic"));
+    var m = t && topic === t.getAttribute("data-topic") && mentionOf(topic, item, item, text, entry);
     if (m) placeMention({ m: m, frame: f, x: x, y: y });
     else if (mpend && mpend.frame === f) hideMention();
   }
@@ -1887,8 +1954,14 @@
   // stored draft returned.
   function validMentions(list) {
     return (Array.isArray(list) ? list : []).filter(function (m) {
-      return m && typeof m.topic === "string" && m.topic && typeof m.text === "string" && m.text;
-    }).map(function (m) { return m.id ? { topic: m.topic, id: String(m.id), text: m.text } : { topic: m.topic, text: m.text }; });
+      return m && typeof m.topic === "string" && m.topic && typeof m.text === "string" && m.text &&
+        (!m.id || /^[0-9]{1,6}$/.test(String(m.id))) &&
+        (m.entry == null || m.entry === "" || typeof m.entry === "string" && /^e[1-9][0-9]*$/.test(m.entry));
+    }).map(function (m) {
+      var out = m.id ? { topic: m.topic, id: String(m.id), text: m.text } : { topic: m.topic, text: m.text };
+      if (m.entry) out.entry = m.entry;
+      return out;
+    });
   }
   // restoreHeld puts held messages a cancel or an interrupt took back into
   // the composer, oldest first, ahead of the draft: their texts joined as
@@ -3029,8 +3102,43 @@
   // link), so a forged message can at most offer a menu the user must pick
   // from.
   function docFrame(win) {
-    return q("iframe.doc-frame").filter(function (f) { return f.contentWindow === win; })[0];
+    return q("iframe.doc-frame").filter(function (f) { return inBoard(f) && f.contentWindow === win; })[0];
   }
+  // Only an existing board item or latest stable panel target may be
+  // navigated. The history loader accepts bare IDs, never selectors/URLs.
+  function boardJump(id) {
+    if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|p[1-9][0-9]*)$/.test(id)) return;
+    var target = null;
+    if (window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id); return !!target; });
+    if (!target) target = $(id);
+    if (!target || target.id !== id || !inBoard(target)) return;
+    for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
+    target.scrollIntoView({ block: "start" });
+    return target;
+  }
+  function captureBoardHistory() {
+    return window.wbHistory ? boardBoxes().reduce(function (all, b) { return all.concat(window.wbHistory.capture(b)); }, []) : null;
+  }
+  // Native fragments also need to materialize paged panels and open folds.
+  doc.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest("a[href]");
+    if (!a || !inBoard(a) || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var href = a.getAttribute("href") || "";
+    if (href.charAt(0) !== "#" || !boardJump(href.slice(1))) return;
+    e.preventDefault();
+    try { window.history.replaceState(null, "", href); } catch (x) {}
+  });
+  doc.addEventListener("wbhistoryload", function (e) {
+    var el = e.detail && e.detail.root;
+    if (!el || !inBoard(el)) return;
+    restoreOpen(el);
+    fmtTimes(el);
+    sweepOutImgs(el);
+    if (window.wbBindBoard) window.wbBindBoard(el);
+    mermaid([el]);
+  });
+  window.addEventListener("hashchange", function () { boardJump(location.hash.slice(1)); });
+  if (location.hash) boardJump(location.hash.slice(1));
   function str(v) { return typeof v === "string" ? v : ""; }
   function num(v) { return typeof v === "number" && isFinite(v) ? v : 0; }
   function frameLink(m) {
@@ -3082,12 +3190,14 @@
       var type = (r.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
       return r.ok && /^image\/[a-z0-9.+-]+$/.test(type) ? r.blob() : null;
     }).then(function (b) {
-      if (b && f.contentWindow) f.contentWindow.postMessage({ wbDoc: "img", id: id, blob: b }, "*");
+      if (b) postDoc(f, { wbDoc: "img", id: id, blob: b });
     }, function () {});
   }
   window.addEventListener("message", function (e) {
     var f = docFrame(e.source), m = e.data;
     if (!f || !m || typeof m !== "object") return;
+    var key = f.getAttribute("data-doc-key");
+    if (!key || m.docKey !== key || f.getAttribute("data-doc") !== key) return;
     if (m.wbDoc === "height") {
       var h = num(m.height);
       // A pending frame (frameGraft) keeps the old frame's height: once
@@ -3107,8 +3217,7 @@
       // opened earlier) takes the current theme when it first reports.
       postTheme(f);
     } else if (m.wbDoc === "jump") {
-      var item = /^item-\d+$/.test(str(m.id)) && $(m.id);
-      if (item) item.scrollIntoView({ block: "start" });
+      boardJump(str(m.id));
     } else if (m.wbDoc === "link") {
       var a = frameLink(m);
       if (!a) return;
@@ -6707,7 +6816,7 @@
   restoreOpen(doc);
   // A body frame that posted its height before the listener above existed
   // posts it again.
-  q("iframe.doc-frame").forEach(function (f) { if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "size" }, "*"); });
+  q("iframe.doc-frame").forEach(function (f) { postDoc(f, { wbDoc: "size" }); });
   if (window.wbForm) window.wbForm();
   applySent();
   restoreDraft();

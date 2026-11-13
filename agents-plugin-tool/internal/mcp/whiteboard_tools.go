@@ -446,10 +446,11 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 		in := panelInput
 		in.layout = layout
 		return wswhiteboard.ViewInput{
-			Layout:   layout,
-			ReplyID:  replyID,
-			Panels:   whiteboardPanels(in),
-			FileLink: whiteboardItemFileLink(rec.Root, whiteboardPageDir(in)),
+			Layout:        layout,
+			ReplyID:       replyID,
+			Panels:        whiteboardPanels(in),
+			FileLink:      whiteboardItemFileLink(rec.Root, whiteboardPageDir(in)),
+			FullBoardLink: whiteboardFileLink(rec.Root, whiteboardPageDir(in), filepath.Join(pageDir, "index.html")),
 		}
 	}
 

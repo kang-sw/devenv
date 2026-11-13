@@ -68,6 +68,38 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 	}
 }
 
+func TestWhiteboardEmbedSnapshotsOmitPayloadsAndResolveFullLinks(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	text := f.update(t, `<wb:topic name="snapshot"><wb:body>current-content-secret</wb:body><wb:panel recap="panel-recap-marker">panel-payload-secret</wb:panel><wb:log>old-agent-line-secret</wb:log><wb:log>latest-agent-line-marker</wb:log></wb:topic>`)
+	repositoryEmbed := readWhiteboardPage(t, filepath.Join(f.root, resultLine(t, text, "embed: ")))
+	if !strings.Contains(repositoryEmbed, `<a href="`+f.replyID()+`/index.html">Open full board</a>`) {
+		t.Fatal("repository snapshot must link relative to the nested session index")
+	}
+	host := t.TempDir()
+	external := resultLine(t, f.update(t, embedDirCommand(host)), "embed: ")
+	hostEmbed := readWhiteboardPage(t, filepath.Join(host, external))
+	pagePath := filepath.ToSlash(f.pagePath())
+	if !strings.HasPrefix(pagePath, "/") {
+		pagePath = "/" + pagePath
+	}
+	fullURL := (&url.URL{Scheme: "file", Path: pagePath}).String()
+	if !strings.Contains(hostEmbed, `<a href="`+fullURL+`">Open full board</a>`) {
+		t.Fatalf("host snapshot must link to the full index by absolute file URL %q", fullURL)
+	}
+	for name, page := range map[string]string{"repository": repositoryEmbed, "host": hostEmbed} {
+		for _, marker := range []string{"panel-recap-marker", "latest-agent-line-marker"} {
+			if !strings.Contains(page, marker) {
+				t.Errorf("%s snapshot omitted compact metadata %q", name, marker)
+			}
+		}
+		for _, secret := range []string{"panel-payload-secret", "current-content-secret", "old-agent-line-secret", `class="wb-history"`, `<iframe`} {
+			if strings.Contains(page, secret) {
+				t.Errorf("%s snapshot duplicated accumulated payload %q", name, secret)
+			}
+		}
+	}
+}
+
 // TestWhiteboardMarkdownFileLinkNeverYieldsAScheme pins the real link rule
 // against a file named like a URL beside the page: relative to the page it
 // is a bare "javascript:..." name, which must not reach an href as a scheme,

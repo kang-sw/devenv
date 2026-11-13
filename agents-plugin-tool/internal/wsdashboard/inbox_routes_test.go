@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -201,6 +202,51 @@ func TestMessageCarriesMentionsAsCapsules(t *testing.T) {
 	}
 	if code, _, raw := postJSON(t, f.base+"/s/livesession/message", f.base, `{"mentions":[{"topic":"t","id":"x1","text":"y"}]}`); code != http.StatusBadRequest {
 		t.Errorf("a malformed mention was not refused: %s", raw)
+	}
+}
+
+func TestMessageEntryMentionsSurviveRouteLifecycle(t *testing.T) {
+	f := startPageFixture(t)
+	f.send(t, `{"mentions":[{"topic":"topic","entry":"e7","text":"same selected text"}]}`)
+	id, merged := f.send(t, `{"mentions":[{"topic":"topic","id":"3","entry":"e8","text":"same selected text"}]}`)
+	if !merged {
+		t.Fatal("entry mentions did not merge")
+	}
+	want := []wsinbox.Mention{{Topic: "topic", Entry: "e7", Text: "same selected text"}, {Topic: "topic", ID: "3", Entry: "e8", Text: "same selected text"}}
+	if held := f.held(t); len(held) != 1 || !reflect.DeepEqual(held[0].Entry.Mentions, want) {
+		t.Fatalf("held mentions = %+v", held)
+	}
+	code, _, raw := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+id+`"}`)
+	var cancelled struct {
+		Mentions []wsinbox.Mention `json:"mentions"`
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(raw), &cancelled) != nil || !reflect.DeepEqual(cancelled.Mentions, want) {
+		t.Fatalf("cancel = %d %s", code, raw)
+	}
+	body, err := json.Marshal(cancelled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ = f.send(t, string(body))
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+id+`"}`); code != http.StatusOK {
+		t.Fatalf("steer = %d %s", code, raw)
+	}
+	if held := f.held(t); len(held) != 1 || !held[0].Entry.Steer || !reflect.DeepEqual(held[0].Entry.Mentions, want) {
+		t.Fatalf("steered mentions = %+v", held)
+	}
+	code, _, raw = postJSON(t, f.base+"/s/livesession/interrupt", f.base, ``)
+	var interrupted struct {
+		Held []struct {
+			Mentions []wsinbox.Mention `json:"mentions"`
+		} `json:"held"`
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(raw), &interrupted) != nil || len(interrupted.Held) != 1 || !reflect.DeepEqual(interrupted.Held[0].Mentions, want) {
+		t.Fatalf("interrupt = %d %s", code, raw)
+	}
+	for _, entry := range []string{"p7", "e0", "e01", "e-1", "e7x"} {
+		if code, _, raw := postJSON(t, f.base+"/s/livesession/message", f.base, `{"mentions":[{"topic":"t","entry":"`+entry+`","text":"x"}]}`); code != http.StatusBadRequest {
+			t.Errorf("entry %q accepted: %d %s", entry, code, raw)
+		}
 	}
 }
 

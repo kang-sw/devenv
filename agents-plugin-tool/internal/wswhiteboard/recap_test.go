@@ -62,7 +62,7 @@ func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		block := recapBlock(t, out, "open")
 		recap, doc, items := strings.Index(block, `<div class="trecap">`), strings.Index(block, `<details class="tdoc"`), strings.Index(block, `class="tbody"`)
-		if recap < 0 || recap > doc || doc > items {
+		if recap < 0 || (layout == LayoutFull && (recap > doc || doc > items)) || (layout == LayoutEmbed && recap > items) {
 			t.Fatalf("%s: recap %d, doc %d, items %d", name, recap, doc, items)
 		}
 		wantAll(t, block, `<div class="rtext md"><strong>READY</strong> · see <img`, `shot.png`, `<u>kept</u>`, `datetime="2026-11-04T09:00:00Z"`)

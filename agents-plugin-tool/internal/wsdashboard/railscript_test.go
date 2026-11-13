@@ -335,7 +335,7 @@ mentions = [{ start: 3, end: 7, text: "@bob", extra: 1 }];
 imgs = [{ n: 1, name: "a.png", ref: "00aa-1.png" }, { n: 2, name: "pasted.png", data: "xx" }];
 boardAnswers = { "3": { answer: "yes" }, "topic:2": { note: "keep it" } };
 chips = { "3": { id: "3", answer: "yes" } };
-bmentions = [{ topic: "plan", id: "3", text: "picked text" }];
+bmentions = [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }];
 openState = { "rended:/w": true, "gone": false };
 grid.setAttribute("data-tab", "board");
 listeners.input();
@@ -344,13 +344,13 @@ advance(400);
 var saved = JSON.parse(railStore.load("ws.dashboard.draft.sess1"));
 check("the saved draft", [saved.text, saved.mentions, saved.sel, saved.refs, saved.lost, saved.open, saved.tab],
   [ctext.value, [{ start: 3, end: 7, text: "@bob" }], [6, 6], [{ ref: "00aa-1.png", name: "a.png", n: 1 }], [2], { "rended:/w": true }, "board"]);
-check("the saved board mentions", saved.bmentions, [{ topic: "plan", id: "3", text: "picked text" }]);
+check("the saved board mentions", saved.bmentions, [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }]);
 check("the guard asks while a pasted image is held", (function () { var e = { preventDefault: function () {} }; winListeners.beforeunload(e); return e.returnValue; })(), "");
 
 // a reload of the page: empty composer and state, then the restore
 ctext.value = ""; mentions = []; imgs = []; chips = {}; items = {}; openState = {}; boardAnswers = {}; bmentions = []; grid.setAttribute("data-tab", "convo");
 restoreDraft();
-check("the board mentions come back", bmentions, [{ topic: "plan", id: "3", text: "picked text" }]);
+check("the board mentions come back", bmentions, [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }]);
 check("text without the pasted image's marker", ctext.value, "hi @bob see [Image #1] and end");
 check("mentions, selection, the reference image", [mentions, [ctext.selectionStart, ctext.selectionEnd], imgs.map(function (p) { return [p.n, p.ref, p.url]; })],
   [[{ start: 3, end: 7, text: "@bob" }], [6, 6], [[1, "00aa-1.png", "/s/sess1/attachment/00aa-1.png"]]]);

@@ -173,19 +173,19 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	if strings.Contains(html, `id="wb-now"`) || strings.Contains(html, `class="now`) {
 		t.Errorf("the served board carries a Now slot:\n%.600s", html)
 	}
-	frames := regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)"(?: data-relay="[^"]*")? sandbox="([^"]*)" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(html, -1)
+	frames := regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="([^"]*)" data-topic="([^"]*)"(?: data-relay="[^"]*")? sandbox="([^"]*)" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(html, -1)
 	if len(frames) != 2 {
 		t.Fatalf("doc-frame iframes = %d, want one per topic body:\n%.600s", len(frames), html)
 	}
 	docs := map[string]string{}
 	for _, m := range frames {
-		if m[1] != m[2] {
-			t.Errorf("frame title %q and data-doc %q differ", m[1], m[2])
+		if m[2] != "topic:"+m[1] || m[3] != m[2] || m[4] != m[1] {
+			t.Errorf("body frame identity/provenance differs: %v", m[1:5])
 		}
-		if m[3] != "allow-scripts allow-popups allow-popups-to-escape-sandbox" || strings.Contains(m[3], "allow-same-origin") {
-			t.Errorf("frame sandbox = %q", m[3])
+		if m[5] != "allow-scripts allow-popups allow-popups-to-escape-sandbox" || strings.Contains(m[5], "allow-same-origin") {
+			t.Errorf("frame sandbox = %q", m[5])
 		}
-		docs[m[2]] = stdhtml.UnescapeString(m[4])
+		docs[m[4]] = stdhtml.UnescapeString(m[6])
 	}
 	rollout := docs["Rollout"]
 	for _, want := range []string{"본문 body-marker", "<details><summary>more</summary>raw</details>", `<img src="data:image/png;base64,`} {
@@ -203,10 +203,10 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	if strings.Contains(rollout, base64.StdEncoding.EncodeToString([]byte("outside-bytes"))) || strings.Count(rollout, "data:image/png") != 1 {
 		t.Errorf("an image outside the root must never be inlined into the frame")
 	}
-	if want := `data-doc="Rollout" data-relay="` + stdhtml.EscapeString(relay) + `" sandbox=`; !strings.Contains(html, want) {
+	if want := `data-topic="Rollout" data-relay="` + stdhtml.EscapeString(relay) + `" sandbox=`; !strings.Contains(html, want) {
 		t.Errorf("the Rollout frame lacks its relay list %q", want)
 	}
-	if strings.Contains(html, `data-doc="Body only" data-relay`) {
+	if strings.Contains(html, `data-topic="Body only" data-relay`) {
 		t.Errorf("a body without an outside image must list no relay")
 	}
 	// The page written to disk and the embed take no relay.
@@ -737,8 +737,10 @@ func TestDashboardReadClosedTopicsPastTheCap(t *testing.T) {
 	f.update(t, cmds.String())
 
 	page := readPageOK(t, src, reg)
-	if board := string(page.Board.Board); !strings.Contains(board, `<button class="btn closed-more" data-closed-next="30">`) || strings.Contains(board, `title="c2"`) {
-		t.Errorf("the served board does not stop at the cap with a show-more control")
+	board := string(page.Board.Board)
+	live := strings.SplitN(board, `<template data-history-topic=`, 2)[0]
+	if !strings.Contains(live, `<button class="btn closed-more" data-closed-next="30">`) || strings.Contains(live, `title="c2"`) || !strings.Contains(board, `<template data-history-topic="c2">`) {
+		t.Errorf("the served board must cap live topics and retain inert navigation targets")
 	}
 	html, ok := src.ReadClosedTopics(reg, "", 30, 30)
 	if !ok {

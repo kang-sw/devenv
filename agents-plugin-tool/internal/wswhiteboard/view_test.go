@@ -194,43 +194,24 @@ func TestBodyOpenOnTheFullPageUnlessClosed(t *testing.T) {
 	}
 }
 
-// The embed shows a body open only when it changed since the previous embed.
-func TestEmbedShowsABodyOpenOnlyWhenChanged(t *testing.T) {
+// Snapshot embeds omit current-content payloads regardless of freshness.
+// Full pages still carry them, independent of the previous embed mark.
+func TestEmbedOmitsCurrentContent(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "a", "x")+topicXML("a", "body a")+topicXML("b", "body b"))
-	// The first embed: both bodies are new.
+	mustApply(t, st, topicXML("a", "body a")+topicXML("b", "body b"))
 	for _, name := range []string{"a", "b"} {
-		if tv := topicView(t, st, LayoutEmbed, name); !tv.DocNew || !tv.DocOpen(true) || tv.Quiet {
-			t.Fatalf("%s before any embed = %+v", name, tv)
+		tv := topicView(t, st, LayoutEmbed, name)
+		if tv.Doc != "" || tv.DocNew || tv.DocOpen(true) {
+			t.Fatalf("embed carries current content: %+v", tv)
 		}
 	}
 	st.LastEmbedSeq = st.Seq
-	// Change only b's body.
-	mustApply(t, st, `<wb:topic name="b"><wb:edit><wb:old>body b</wb:old><wb:new>body b2</wb:new></wb:edit></wb:topic>`)
-	a, b := topicView(t, st, LayoutEmbed, "a"), topicView(t, st, LayoutEmbed, "b")
-	if a.DocNew || a.DocOpen(true) || !b.DocNew || !b.DocOpen(true) {
-		t.Fatalf("embed a = %+v b = %+v", a, b)
-	}
-	// The full page is unaffected by the embed's freshness.
-	if a.Doc != "body a" || b.Doc != "body b2" {
-		t.Fatalf("bodies = %q %q", a.Doc, b.Doc)
-	}
-	if full := topicView(t, st, LayoutFull, "a"); full.DocNew || !full.DocOpen(false) {
-		t.Fatalf("full page a = %+v", full)
-	}
-	if bq := topicView(t, st, LayoutEmbed, "b"); bq.Quiet {
-		t.Fatalf("a topic whose body changed is not quiet in the embed: %+v", bq)
-	}
-	// The same body again is no change, so it stays closed on the embed.
-	st.LastEmbedSeq = st.Seq
 	mustApply(t, st, topicXML("b", "body b2"))
-	if tv := topicView(t, st, LayoutEmbed, "b"); tv.DocNew || tv.DocOpen(true) || !tv.Quiet {
-		t.Fatalf("an unchanged body on the embed = %+v", tv)
+	if full := topicView(t, st, LayoutFull, "b"); full.Doc != "body b2" || !full.DocOpen(false) {
+		t.Fatalf("full page current content lost: %+v", full)
 	}
-	// A closed topic never opens its body, changed or not.
-	mustApply(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic>`)
-	if tv := topicView(t, st, LayoutEmbed, "a"); tv.DocOpen(true) || !tv.Closed {
-		t.Fatalf("closed topic on the embed = %+v", tv)
+	if embed := topicView(t, st, LayoutEmbed, "b"); embed.Doc != "" || embed.DocNew {
+		t.Fatalf("fresh current content leaked into embed: %+v", embed)
 	}
 }
 

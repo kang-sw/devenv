@@ -503,6 +503,22 @@ Verification expectations:
   locator still addresses the same topic entry, including log entries with
   equal timestamps. Panel mentions identify a version by its sequence ID (see 15).
 
+### Result (972766abc) - 2026-11-13
+
+Implemented schema-2 topic folders, one-shot locked conversion, immutable panel
+versions, append-only entries, scoped panel/log commands, transition events,
+and removal of recap without an alias. All board readers now share the folder
+authority; original inline/split board snapshots survive new writes and normal
+session metadata migration. Derived index/stamp publication follows the durable
+commit under the same lock. Package/runtime versions target 0.50.0.
+
+Remote focused model/folder/MCP tests passed, including boundary fault replay,
+concurrent writers, exact legacy bytes, restart/no duplicate import, newer-schema
+refusal, stable equal-time locators, and rollback fixtures. The full remote Go
+suite passed with the owner-known LAN daemon replacement test excluded; the
+unfiltered run reproduced that known failure. Self-review found no remaining
+substantive Phase 1 issue. Rendering and final discovery remain in Phases 2/3.
+
 ### Phase 2: Interleaved topic rendering and live refresh
 
 Depends on Phase 1. Build a shared entry view for the file page and dashboard

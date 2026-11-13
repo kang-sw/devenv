@@ -191,7 +191,7 @@ var docTag = regexp.MustCompile(`<details class="tdoc"[^>]*>`)
 // unless the topic is closed, and open on the embed only when it changed
 // since the previous embed.
 func TestRenderPageTopicBodyPlacement(t *testing.T) {
-	for name, layout := range layouts() {
+	for name, layout := range map[string]Layout{"full": LayoutFull} {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout **notes**", Changed: 12}, {Name: "초기 범위", Body: "closed notes", Changed: 3}, {Name: "tool surface", Body: "old notes", Changed: 4}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
@@ -266,7 +266,7 @@ func TestRenderPageTopicKeyAttribute(t *testing.T) {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: `say "hi" & <go>`, Body: "notes", Changed: 12}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		if !strings.Contains(out, `<section class="topic has-doc" data-topic="say &#34;hi&#34; &amp; &lt;go&gt;"><div class="tbar">`) {
+		if !regexp.MustCompile(`<section class="topic[^"]*" data-topic="say &#34;hi&#34; &amp; &lt;go&gt;"><div class="tbar">`).MatchString(out) {
 			t.Errorf("%s: topic key attribute missing or unescaped", name)
 		}
 		if strings.Count(out, `<section class="topic`) != len(regexp.MustCompile(`<section class="topic[^"]*" data-topic="`).FindAllString(out, -1)) {
@@ -280,7 +280,7 @@ func TestRenderPageTopicKeyAttribute(t *testing.T) {
 // stylesheet pins the summary onto the bar instead of giving it a row; a
 // topic without a body carries neither the mark nor a details.
 func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
-	for name, layout := range layouts() {
+	for name, layout := range map[string]Layout{"full": LayoutFull} {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout notes", Changed: 12}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
@@ -296,14 +296,13 @@ func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
 	}
 }
 
-// TestRenderPageEmbedMarksANewBody: the embed's body summary carries the new
-// dot only when the body changed since the previous embed.
-func TestRenderPageEmbedMarksANewBody(t *testing.T) {
+// Embeds no longer carry current content, even when it changed. Panel recaps
+// and the latest agent line replace the old body/freshness presentation.
+func TestRenderPageEmbedOmitsCurrentBody(t *testing.T) {
 	st := &State{Seq: 12, LastEmbedSeq: 10, Topics: []TopicDoc{{Name: "fresh", Body: "f", Changed: 12}, {Name: "stale", Body: "s", Changed: 5}}}
 	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	wantAll(t, embed,
-		`data-key="doc:fresh" open><summary title="topic notes"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg><span class="new" title="new since the previous embed"></span></summary>`,
-		`data-key="doc:stale"><summary title="topic notes"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg></summary>`)
+	wantNone(t, markup(embed), `data-key="doc:fresh"`, `data-key="doc:stale"`, `class="doc-body`)
+	wantAll(t, embed, `href="r/index.html">Open full board</a>`)
 	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantNone(t, full, `class="new"`)
 	wantAll(t, full, `data-key="doc:fresh" open>`, `data-key="doc:stale" open>`)
@@ -339,7 +338,7 @@ func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
 		if !strings.Contains(out, `<div class="rec-line md" title="recommendation"><b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>a</b> <u>why</u></div>`) {
 			t.Errorf("%s: a kept tag in the recommendation is not kept", name)
 		}
-		if !strings.Contains(out, `<b id="doc-raw">raw <i>doc</i></b>`) {
+		if layout == LayoutFull && !strings.Contains(out, `<b id="doc-raw">raw <i>doc</i></b>`) {
 			t.Errorf("%s: topic body is not written unescaped", name)
 		}
 		if !strings.Contains(out, `<use href="#i-list"/>`) {
@@ -375,7 +374,6 @@ func TestTopicBodyRendersMarkdownWithInlineHTML(t *testing.T) {
 	body := "# Plan\n\n- one\n- **two**\n\n```mermaid\ngraph TD; A-->B\n```\n\n" + sampleDoc
 	for name, in := range map[string]ViewInput{
 		"disk":   {Layout: LayoutFull},
-		"embed":  {Layout: LayoutEmbed},
 		"served": {Layout: LayoutFull, FileText: func(p string) string { return p }, ImageSrc: func(string) string { return "" }},
 	} {
 		inner, page := docBody(t, body, in)
@@ -716,13 +714,13 @@ func TestRenderPageReplyBar(t *testing.T) {
 
 func TestRenderPagePanels(t *testing.T) {
 	full := render(t, sampleView(LayoutFull))
-	for _, want := range []string{`<details class="panel" id="p-todo" open>`, `<details class="panel" id="p-agenda" open>`, `<aside class="side">`, `<li class="done" title="mockup"><span class="box"><svg class="i" aria-hidden="true"><use href="#i-box-done"/></svg></span>`, `<li class="keyed"><code>whiteboard.render</code>`} {
+	for _, want := range []string{`<details class="panel" id="p-todo" open>`, `<details class="panel" id="p-agenda" open>`, `<aside class="side flat">`, `<li class="done" title="mockup"><span class="box"><svg class="i" aria-hidden="true"><use href="#i-box-done"/></svg></span>`, `<li class="keyed"><code>whiteboard.render</code>`} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full page lacks %q", want)
 		}
 	}
-	if strings.Index(full, `<aside class="side">`) < strings.Index(full, `<main>`) {
-		t.Errorf("sidebar precedes the main column")
+	if strings.Index(full, `<aside class="side flat">`) < strings.Index(full, `</main>`) {
+		t.Errorf("auxiliary sections must follow the full-width board")
 	}
 	embed := render(t, sampleView(LayoutEmbed))
 	for _, want := range []string{`<details class="panel" id="p-todo">`, `<details class="panel" id="p-agenda">`, `<div class="side flat">`} {

@@ -32,6 +32,9 @@ type View struct {
 	// file name beside the page. Empty for the embed.
 	StampFile string
 	Topics    []TopicView
+	// DeferredTopics are capped closed topics, carried inert for explicit
+	// panel/entry navigation without another stream protocol.
+	DeferredTopics []TopicView
 	// ClosedMore counts the closed topics past the ones Topics holds, in close
 	// order; ClosedNext is the index (ClosedWindow.From) of the first of them.
 	ClosedMore, ClosedNext int
@@ -45,6 +48,10 @@ type View struct {
 	// Stored holds every item ID the store holds, so a {{nn}} reference to
 	// an item the page omits still resolves as a known item.
 	Stored map[int]bool
+	// StoredPanels holds board-wide stable pN targets, including older pages.
+	StoredPanels map[string]bool
+	// FullBoardLink is the embed's link to the full board, relative by default.
+	FullBoardLink string
 	// FileLink turns a file path a markdown link or image names (relative
 	// to the session root, or absolute) into the href the page uses from
 	// the folder it is written to. Nil keeps the path as written.
@@ -157,6 +164,14 @@ type TopicView struct {
 	RecapMs    int64
 	RecapClock string
 	RecapStamp string
+	// LatestAgent supplies the current-state summary, never a system event.
+	// Recap remains a read-only fallback for unconverted legacy views.
+	LatestAgent *Entry
+	// Stream is the newest HistoryWindow entries; Older holds inert pages,
+	// nearest first. PanelRecaps lists latest distinct panels for the embed.
+	Stream      EntryPage
+	Older       []EntryPage
+	PanelRecaps []EntryView
 	// Policy and Acks are the topic's items waiting on the user; they never
 	// collapse.
 	Policy []ItemView
@@ -205,11 +220,19 @@ func (t TopicView) DocOpen(embed bool) bool {
 
 // RecapOpen reports whether the recap shows at the top of the topic: it has
 // one and is open.
-func (t TopicView) RecapOpen() bool { return t.Recap != "" && !t.Closed }
+func (t TopicView) RecapOpen() bool { return t.Summary() != "" && !t.Closed }
+
+// Summary is the latest agent line, or a legacy recap when not converted.
+func (t TopicView) Summary() string {
+	if t.LatestAgent != nil {
+		return t.LatestAgent.Text
+	}
+	return t.Recap
+}
 
 // RecapFolded reports whether the recap folds with the body: it has one and
 // is closed.
-func (t TopicView) RecapFolded() bool { return t.Recap != "" && t.Closed }
+func (t TopicView) RecapFolded() bool { return t.Summary() != "" && t.Closed }
 
 // HasFold reports whether the topic renders the body's fold: it has a body,
 // or a recap folded into it.
@@ -399,9 +422,10 @@ func withActions(panels []Panel, fileActions func(string) FileAction) []Panel {
 
 // ViewInput is what BuildView needs beyond the State.
 type ViewInput struct {
-	Layout  Layout
-	ReplyID string
-	Panels  []Panel
+	Layout        Layout
+	ReplyID       string
+	Panels        []Panel
+	FullBoardLink string
 	// FileLink, FileText, ImageSrc, DocImageSrc, FileActions, and
 	// OutsideImage are copied to the View.
 	FileLink     func(path string) string
@@ -427,17 +451,29 @@ type ClosedWindow struct {
 // BuildView derives a page view from state.
 func BuildView(state *State, in ViewInput) View {
 	view := View{
-		Layout:       in.Layout,
-		ReplyID:      in.ReplyID,
-		Seq:          state.Seq,
-		Panels:       in.Panels,
-		Stored:       map[int]bool{},
-		FileLink:     in.FileLink,
-		FileText:     in.FileText,
-		ImageSrc:     in.ImageSrc,
-		DocImageSrc:  in.DocImageSrc,
-		FileActions:  in.FileActions,
-		OutsideImage: in.OutsideImage,
+		Layout:        in.Layout,
+		ReplyID:       in.ReplyID,
+		Seq:           state.Seq,
+		Panels:        in.Panels,
+		Stored:        map[int]bool{},
+		StoredPanels:  map[string]bool{},
+		FullBoardLink: in.FullBoardLink,
+		FileLink:      in.FileLink,
+		FileText:      in.FileText,
+		ImageSrc:      in.ImageSrc,
+		DocImageSrc:   in.DocImageSrc,
+		FileActions:   in.FileActions,
+		OutsideImage:  in.OutsideImage,
+	}
+	if view.FullBoardLink == "" {
+		view.FullBoardLink = in.ReplyID + "/index.html"
+	}
+	for _, doc := range state.Topics {
+		for _, entry := range doc.Entries {
+			if entry.Kind == EntryPanel {
+				view.StoredPanels[entry.PanelID] = true
+			}
+		}
 	}
 	if in.FileActions != nil && in.FileText != nil {
 		view.Panels = withActions(in.Panels, in.FileActions)
@@ -503,6 +539,14 @@ func BuildView(state *State, in ViewInput) View {
 		block.DocStale = itemsChanged[doc.Name] > doc.Changed
 		block.DocNew = in.Layout == LayoutEmbed && doc.Body != "" && doc.Changed > state.LastEmbedSeq
 		block.Recap = doc.Recap
+		if latest, ok := doc.LatestAgent(); ok {
+			block.LatestAgent = &latest
+		}
+		block.PanelRecaps, block.Stream, block.Older = streamView(doc, block.Closed, in.Location)
+		if in.Layout == LayoutEmbed {
+			block.Doc, block.DocMarks, block.DocNew = "", nil, false
+			block.Stream, block.Older = EntryPage{}, nil
+		}
 	}
 	stampUpdated(state, blocks, in.Location)
 	for _, block := range blocks {
@@ -521,7 +565,7 @@ func BuildView(state *State, in ViewInput) View {
 	// Quiet follows what the page shows, so an unread body that stays folded
 	// (the embed, an unchanged body) does not make a topic look active.
 	quiet := func(t *TopicView) bool {
-		return !t.waiting() && len(t.Expanded) == 0 && !t.ChecksShown() && !t.DocOpen(in.Layout == LayoutEmbed) && !t.RecapOpen()
+		return !t.waiting() && len(t.Expanded) == 0 && !t.ChecksShown() && !t.DocOpen(in.Layout == LayoutEmbed) && !t.RecapOpen() && (t.Closed || len(t.PanelRecaps) == 0)
 	}
 	for _, name := range order {
 		block := blocks[name]
@@ -548,6 +592,9 @@ func BuildView(state *State, in ViewInput) View {
 	rank := bumpRank(state, activity)
 	sort.SliceStable(order, func(i, j int) bool {
 		a, b := order[i], order[j]
+		if blocks[a].UpdatedMs != blocks[b].UpdatedMs {
+			return blocks[a].UpdatedMs > blocks[b].UpdatedMs
+		}
 		if activity[a] != activity[b] {
 			return activity[a] > activity[b]
 		}
@@ -579,6 +626,11 @@ func BuildView(state *State, in ViewInput) View {
 	view.ClosedNext, view.ClosedMore = end, len(capped)-end
 	for _, name := range shown {
 		view.Topics = append(view.Topics, *blocks[name])
+	}
+	if in.Closed == nil && in.Layout == LayoutFull {
+		for _, name := range capped[end:] {
+			view.DeferredTopics = append(view.DeferredTopics, *blocks[name])
+		}
 	}
 	return view
 }
@@ -646,7 +698,14 @@ func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location
 	for _, doc := range state.Topics {
 		touch(doc.Name, doc.ChangedAt)
 		touch(doc.Name, doc.RecapAt)
-		if t, err := time.Parse(time.RFC3339, doc.RecapAt); err == nil && doc.Recap != "" {
+		for _, entry := range doc.Entries {
+			touch(doc.Name, entry.At)
+		}
+		at, summary := doc.RecapAt, doc.Recap
+		if agent, ok := doc.LatestAgent(); ok {
+			at, summary = agent.At, agent.Text
+		}
+		if t, err := time.Parse(time.RFC3339Nano, at); err == nil && summary != "" {
 			block := blocks[doc.Name]
 			block.RecapAt = t.UTC().Format(time.RFC3339)
 			block.RecapMs = t.UnixMilli()

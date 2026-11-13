@@ -14,7 +14,10 @@ import (
 //
 // topic is the topic's key (its stem, or its name when it has none, as a
 // topic note names it); id is present only when the whole selection lay in
-// one item card. In the attribute "&", "<", ">", and the quote are escaped;
+// one item card, or a system entry's trusted item provenance. Optional entry
+// is the durable eN locator of the selected log entry or immutable panel version,
+// never the latest-panel pN target. In attributes "&", "<", ">", and the quote
+// are escaped;
 // in the content "&", "<", and ">", so the first "</wb:mention>" ends it.
 // Elements are separated by one newline.
 const (
@@ -22,13 +25,18 @@ const (
 	mentionClose = "</wb:mention>"
 )
 
-var mentionHead = regexp.MustCompile(`^<wb:mention topic="([^"]*)"(?: id="([0-9]{1,6})")?>`)
+var (
+	mentionHead         = regexp.MustCompile(`^<wb:mention topic="([^"]*)"(?: id="([0-9]{1,6})")?(?: entry="(e[1-9][0-9]*)")?>`)
+	mentionEntryPattern = regexp.MustCompile(`^e[1-9][0-9]*$`)
+)
 
 // Mention is one mention: the topic's key, the item ID when the selection
-// lay in one item card ("" otherwise), and the selected text.
+// lay in one item card ("" otherwise), the optional durable entry locator,
+// and the selected text. Entry is independent of the numeric item ID.
 type Mention struct {
 	Topic string `json:"topic"`
 	ID    string `json:"id,omitempty"`
+	Entry string `json:"entry,omitempty"`
 	Text  string `json:"text"`
 }
 
@@ -43,11 +51,14 @@ var (
 func MentionBlock(mentions []Mention) string {
 	var lines []string
 	for _, m := range mentions {
-		id := ""
+		attrs := ""
 		if m.ID != "" {
-			id = ` id="` + m.ID + `"`
+			attrs += ` id="` + mentionAttrEscaper.Replace(m.ID) + `"`
 		}
-		lines = append(lines, mentionOpen+mentionAttrEscaper.Replace(m.Topic)+`"`+id+">"+mentionTextEscaper.Replace(m.Text)+mentionClose)
+		if m.Entry != "" {
+			attrs += ` entry="` + mentionAttrEscaper.Replace(m.Entry) + `"`
+		}
+		lines = append(lines, mentionOpen+mentionAttrEscaper.Replace(m.Topic)+`"`+attrs+">"+mentionTextEscaper.Replace(m.Text)+mentionClose)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -72,7 +83,7 @@ func ParseMentions(text string) (mentions []Mention, rest string) {
 		if tail != "" && tail[0] != '\n' && !strings.HasPrefix(tail, "\r\n") {
 			break
 		}
-		mentions = append(mentions, Mention{Topic: mentionUnescaper.Replace(m[1]), ID: m[2], Text: mentionUnescaper.Replace(after[:end])})
+		mentions = append(mentions, Mention{Topic: mentionUnescaper.Replace(m[1]), ID: m[2], Entry: m[3], Text: mentionUnescaper.Replace(after[:end])})
 		body = strings.TrimLeft(tail, "\r\n")
 	}
 	if len(mentions) == 0 {

@@ -5,7 +5,8 @@
   // through postMessage: the content height, so the host sizes the frame
   // (again whenever the host asks with {wbDoc: "size"}); a
   // marked link (data-wl) click, so the host opens its link menu; and an
-  // item-reference click (href="#item-nn"), so the host scrolls to the item; and an
+  // item/panel-reference click (href="#item-nn" or "#pN"), so the host
+  // reveals and scrolls to the existing board target; and an
   // image or diagram click, so the host opens its viewer over the whole page
   // ({wbDoc: "view"}: the image's source, or the diagram flattened by
   // wbFlattenSvg, which svg-view.js defines ahead of this script); and, for
@@ -35,7 +36,12 @@
 
   if (body) wbWatchChanges(body);
   if (!body || window.parent === window) return;
-  function post(m) { window.parent.postMessage(m, "*"); }
+  var keyMeta = d.querySelector('meta[name="wb-doc-key"]');
+  var docKey = keyMeta && keyMeta.getAttribute("content");
+  if (!docKey) return;
+  // The host compares this key with the source iframe's own identity. It
+  // never uses a claimed entry/topic locator to attribute a selection.
+  function post(m) { m.docKey = docKey; window.parent.postMessage(m, "*"); }
 
   var last = -1;
   function size() {
@@ -95,7 +101,7 @@
     r.readAsDataURL(b);
   }
   window.addEventListener("message", function (e) {
-    if (e.source !== window.parent || !e.data) return;
+    if (e.source !== window.parent || !e.data || e.data.docKey !== docKey) return;
     if (e.data.wbDoc === "size") { last = -1; size(); askRelays(); }
     else if (e.data.wbDoc === "theme") theme(e.data.theme);
     else if (e.data.wbDoc === "img") relayed(e.data);
@@ -111,7 +117,8 @@
     selQueued = true;
     requestAnimationFrame(function () {
       selQueued = false;
-      var s = window.getSelection(), text = s && !s.isCollapsed && s.rangeCount ? s.toString() : "";
+      var s = window.getSelection(), inside = s && body.contains(s.anchorNode) && body.contains(s.focusNode);
+      var text = inside && !s.isCollapsed && s.rangeCount ? s.toString() : "";
       if (!text && !selLast) return;
       selLast = text;
       var r = null;
@@ -165,8 +172,9 @@
       // on the host's board; a footnote's anchor names an element of this
       // frame and has nowhere to go.
       e.preventDefault();
-      if (d.getElementById(href.slice(1))) return;
-      post({ wbDoc: "jump", id: href.slice(1) });
+      var id = href.slice(1);
+      if (!/^(?:item-[0-9]{1,6}|p[1-9][0-9]*)$/.test(id)) return;
+      post({ wbDoc: "jump", id: id });
       return;
     }
     if (!a.hasAttribute("data-wl")) return;
