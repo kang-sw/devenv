@@ -601,13 +601,18 @@
   // sent marks, answers, frame themes and heights). Everything else the
   // board holds (the closed-topic control, the reply bar) is replaced. The
   // initial record is the board as served, read before anything changes it.
+  // The server stamps each section with data-th, a hash of its rendered
+  // bytes (TopicHTML, render.go), compared in place of the HTML (topicSeen).
   var boardSeen = {};
   function topicKey(n) {
     return n.nodeType === 1 && n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic") ? n.getAttribute("data-topic") : null;
   }
+  function topicSeen(n) {
+    return n.getAttribute("data-th") || n.outerHTML;
+  }
   (function () {
     var b = region("board");
-    if (b) Array.prototype.forEach.call(b.children, function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = n.outerHTML; });
+    if (b) Array.prototype.forEach.call(b.children, function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = topicSeen(n); });
   })();
   // --- board cards (cards.js): the page's own cards among the topics --------
   // The framework mounts on the board region once, before any board swap,
@@ -714,7 +719,7 @@
         if (n.matches("button.closed-more[data-closed-next]")) more = n;
         return;
       }
-      var h = n.outerHTML, key = "t:" + k;
+      var h = topicSeen(n), key = "t:" + k;
       seen[key] = h;
       // A topic that closes while the page shows it folds once: the
       // server folds a closed topic's body and settled rows under the same

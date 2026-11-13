@@ -3,7 +3,9 @@ package wswhiteboard
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"net/url"
@@ -339,6 +341,9 @@ type pageData struct {
 	entries map[string]template.HTML
 	// DocFramed renders each topic body inside a sandboxed frame (framedDoc).
 	DocFramed bool
+	// tmpl is the template set the page renders with (templateFor), which
+	// TopicHTML executes the topic template from.
+	tmpl *template.Template
 	// framing is set while a framed body renders, so its file images take
 	// DocImageSrc.
 	framing bool
@@ -428,6 +433,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		docs:        map[string]template.HTML{},
 		entries:     map[string]template.HTML{},
 		DocFramed:   framed,
+		tmpl:        a.templateFor(view.Lang),
 	}
 	if !full {
 		// The embed has no change-signal loader, so it carries no stamp.
@@ -627,6 +633,31 @@ func (d topicData) DocClass() string {
 
 // TopicOf pairs a topic with the page for the topic template.
 func (p *pageData) TopicOf(t TopicView) topicData { return topicData{TopicView: t, Page: p} }
+
+// TopicHTML renders t's topic section. On the dashboard's board (DocFramed)
+// the section carries data-th, a hash of its own rendered bytes (data-th
+// excluded): the board swap (dashboard.js morphBoard) compares it in place of
+// the section's whole HTML to keep an unchanged topic's node. Hashing the
+// bytes covers everything the HTML compare covered (classes, frame
+// documents, language); the theme is pinned after render (ThemeFrames), so
+// the hash is theme-free. The section's opening tag holds no raw ">" (its
+// attribute values are escaped), so data-th goes before the first one.
+func (p *pageData) TopicHTML(t TopicView) (template.HTML, error) {
+	var buf bytes.Buffer
+	if err := p.tmpl.ExecuteTemplate(&buf, "topic", p.TopicOf(t)); err != nil {
+		return "", err
+	}
+	html := buf.String()
+	if !p.DocFramed {
+		return template.HTML(html), nil
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	at := strings.IndexByte(html, '>')
+	if !strings.HasPrefix(html, "<section ") || at < 0 {
+		return "", fmt.Errorf("topic %s: the section's opening tag is not first", t.Name)
+	}
+	return template.HTML(html[:at] + ` data-th="` + hex.EncodeToString(sum[:8]) + `"` + html[at:]), nil
+}
 
 // RecapHTML renders the topic's recap through itemField, as an item's block
 // fields render, salted with the topic's key.

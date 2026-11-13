@@ -138,7 +138,7 @@ func TestChecksOnlyTopicChipIsAPlainCount(t *testing.T) {
 	}
 	board := string(regions.Board)
 	topic := func(name string) string {
-		return regexp.MustCompile(`(?s)<section class="topic[^"]*" data-topic="` + name + `">.*?</section>`).FindString(board)
+		return regexp.MustCompile(`(?s)<section class="topic[^"]*" data-topic="` + name + `"[^>]*>.*?</section>`).FindString(board)
 	}
 	if c := topic("c"); strings.Contains(c, "data-bulk") || !strings.Contains(c, `<span class="chip policy"`) {
 		t.Fatalf("a checks-only topic's amber chip is a plain count:\n%s", c)

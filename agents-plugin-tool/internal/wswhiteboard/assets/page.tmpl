@@ -16,9 +16,9 @@
 {{end}}</body></html>
 {{end}}
 
-{{define "board"}}{{range .Topics}}{{template "topic" ($.TopicOf .)}}{{end}}{{template "closedmore" .}}{{range .DeferredTopics}}<template data-history-topic="{{.Name}}">{{template "topic" ($.TopicOf .)}}</template>{{end}}{{template "reply" .}}{{end}}
+{{define "board"}}{{range .Topics}}{{$.TopicHTML .}}{{end}}{{template "closedmore" .}}{{range .DeferredTopics}}<template data-history-topic="{{.Name}}">{{$.TopicHTML .}}</template>{{end}}{{template "reply" .}}{{end}}
 
-{{define "closedpage"}}<div class="closed-page">{{range .Topics}}{{template "topic" ($.TopicOf .)}}{{end}}{{template "closedmore" .}}</div>{{end}}
+{{define "closedpage"}}<div class="closed-page">{{range .Topics}}{{$.TopicHTML .}}{{end}}{{template "closedmore" .}}</div>{{end}}
 
 {{define "closedmore"}}{{with .ClosedMore}}{{if $.DocFramed}}<button class="btn closed-more" data-closed-next="{{$.ClosedNext}}">{{t "wb.closed.showmore" .}}</button>{{else}}<div class="closed-more">{{t "wb.closed.more" .}}</div>{{end}}{{end}}{{end}}
 
