@@ -786,6 +786,120 @@ func TestClaudeLeadBackgroundTasks(t *testing.T) {
 	}
 }
 
+// TestClaudeLeadResultEndsTheTurnWhileBackgroundTasksRun replays a
+// recording with session states on (Claude 2.1.323): a turn that leaves a
+// background Agent task running gets its result but no idle state, and a
+// prompt sent while the task runs gets a result with no running or idle
+// state around it; the one idle comes after the task's completion turn.
+// Each of those results ends its turn, so the lead shows idle between
+// them and every turn writes its own turn entry.
+func TestClaudeLeadResultEndsTheTurnWhileBackgroundTasksRun(t *testing.T) {
+	lines := readLeadFixture(t, "claude-lead-background-agent-states.jsonl")
+	first := findLine(t, lines, 0, "result", isResult)
+	second := findLine(t, lines, first+1, "second result", isResult)
+	third := findLine(t, lines, second+1, "third result", isResult)
+	idle := findLine(t, lines, 0, "idle", isState(HarnessIdle))
+	if idle != third+1 || countLines(lines, isState(HarnessRunning)) != 1 {
+		t.Fatalf("the recording should hold one running state and one idle state, right after the third result (idle at %d, third result at %d)", idle, third)
+	}
+
+	r := newLeadReplay(t)
+	r.all(lines[:first+1])
+	lead := r.st.Snapshot(r.clock).Lead
+	if r.turn || r.ends != 1 || lead.TurnStartedAt != 0 || lead.Phase != wslive.PhaseIdle {
+		t.Fatalf("a result while a background task runs ends the turn: turn %v, ended %d, lead %+v", r.turn, r.ends, lead)
+	}
+	r.all(lines[first+1 : second+1])
+	if r.turn || r.ends != 2 || !slices.Equal(r.opened, []string{"send", "send"}) {
+		t.Fatalf("the second message's result ends its turn: turn %v, ended %d, opened %v", r.turn, r.ends, r.opened)
+	}
+	r.all(lines[second+1 : idle])
+	if !r.turn || r.ends != 2 || !slices.Equal(r.opened, []string{"send", "send", "init"}) {
+		t.Fatalf("the completion turn's result, with no task left, defers to the idle state: turn %v, ended %d, opened %v", r.turn, r.ends, r.opened)
+	}
+	evs := r.line(lines[idle])
+	if r.turn || r.ends != 3 || countEvents(r.events, isTurnEnd) != 3 || len(evs) == 0 || !evs[len(evs)-1].TurnEnd {
+		t.Fatalf("the idle state ends the completion turn, whose result came with no task left: ended %d, TurnEnd events %d, %+v", r.ends, countEvents(r.events, isTurnEnd), evs)
+	}
+	if got := ringKinds(r.ring, wslive.RingTurn); got != 3 {
+		t.Fatalf("one turn entry per turn, got %d", got)
+	}
+	if got := ringTexts(r.ring, wslive.RingReply); len(got) != 3 || got[0] != "STARTED" || got[1] != "ok2" {
+		t.Fatalf("ring replies = %q", got)
+	}
+	if !slices.Equal(r.tasks, []int{1, 0}) || !slices.Equal(r.states, []string{HarnessRunning, HarnessIdle}) {
+		t.Fatalf("background task counts %v, harness states %v", r.tasks, r.states)
+	}
+
+	// The second message held from the first turn instead: the first
+	// result submits it, and its turn ends at its own result.
+	var held []leadLine
+	sends := 0
+	for _, l := range lines {
+		if l.in && l.field("type") == "user" {
+			if sends++; sends == 2 {
+				continue
+			}
+		}
+		held = append(held, l)
+	}
+	r = newLeadReplay(t)
+	r.all(held[:first])
+	r.held = 1
+	r.line(held[first])
+	if r.held != 0 || !r.turn || r.ends != 1 || !slices.Equal(r.opened, []string{"send", "flush"}) {
+		t.Fatalf("the result submits the held message: held %d, turn %v, ended %d, opened %v", r.held, r.turn, r.ends, r.opened)
+	}
+	r.all(held[first+1:])
+	if r.turn || r.ends != 3 || !slices.Equal(r.opened, []string{"send", "flush", "init"}) {
+		t.Fatalf("turn %v, ended %d, opened %v", r.turn, r.ends, r.opened)
+	}
+}
+
+// TestClaudeLeadIdleAfterAnEndedTurnEndsNothing: an idle state that
+// follows a result which ended the turn (a background task ran) belongs to
+// that turn: it ends nothing, not the turn a held message began at the
+// result. A failed result carries its error itself, and output after the
+// result with no running state still opens a turn.
+func TestClaudeLeadIdleAfterAnEndedTurnEndsNothing(t *testing.T) {
+	line := func(s string) leadLine { return leadLine{raw: []byte(s)} }
+	running, idle, result := line(stateLine(HarnessRunning)), line(stateLine(HarnessIdle)), line(resultLine())
+
+	r := newLeadReplay(t)
+	r.line(leadLine{in: true, raw: []byte(`{"type":"user","message":{"role":"user","content":"one"}}`)})
+	r.all([]leadLine{running, line(tasksLine(1))})
+	r.held = 1
+	r.line(result)
+	if !r.turn || r.ends != 1 || !slices.Equal(r.opened, []string{"send", "flush"}) {
+		t.Fatalf("the result ends the turn and submits the held message: turn %v, ended %d, opened %v", r.turn, r.ends, r.opened)
+	}
+	if evs := r.line(idle); len(evs) != 1 || evs[0].HarnessState != HarnessIdle || !r.turn || r.ends != 1 {
+		t.Fatalf("the idle after the ended turn ends nothing: %+v, turn %v, ended %d", evs, r.turn, r.ends)
+	}
+	r.all([]leadLine{running, line(replyLine("u2", "two"))})
+	if evs := r.line(line(`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom"}`)); len(evs) == 0 || !evs[len(evs)-1].TurnEnd || evs[len(evs)-1].TurnError != "boom" || r.turn {
+		t.Fatalf("a failed result while the task runs ends the turn with its error: %+v", evs)
+	}
+	r.line(line(replyLine("u3", "more")))
+	if !r.turn || !slices.Equal(r.opened, []string{"send", "flush", "assistant"}) {
+		t.Fatalf("output after the result opens a turn: turn %v, opened %v", r.turn, r.opened)
+	}
+	r.line(result)
+	r.line(idle)
+	if r.turn || r.ends != 3 || !slices.Equal(r.turnErrs, []string{"boom"}) {
+		t.Fatalf("turn %v, ended %d, errors %v", r.turn, r.ends, r.turnErrs)
+	}
+
+	// With the task list empty again, the result defers to the idle state.
+	r.all([]leadLine{line(tasksLine(0)), running, line(replyLine("u4", "four"))})
+	if evs := r.line(result); countEvents(evs, isTurnEnd) != 0 || !r.turn {
+		t.Fatalf("with no task running the result ends no turn: %+v", evs)
+	}
+	if evs := r.line(idle); len(evs) == 0 || !evs[len(evs)-1].TurnEnd || r.turn || r.ends != 4 {
+		t.Fatalf("the idle state ends it: %+v, ended %d", evs, r.ends)
+	}
+}
+
 // TestClaudeLeadSettingsStream: the harness's answers to apply_flag_settings
 // and set_permission_mode release their requests, the status line after a
 // mode change reports the mode, and neither opens a turn.
