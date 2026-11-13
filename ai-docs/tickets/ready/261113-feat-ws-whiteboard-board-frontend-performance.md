@@ -71,6 +71,75 @@ Main findings (static, unmeasured in a browser):
 
    Heights stay keyed by `data-doc` (`frameHeights` / `setFrameHeights`). The
    static full page (`framed=false`) is unchanged.
+
+   **Revision (Phase 1 stop, 2026-11-14, EXEC lead, technical): an unmounted
+   frame is an inert placeholder, not an `<iframe>`.** Measured at 4x, an
+   `<iframe>` carrying only `data-srcdoc` still commits an `about:blank`
+   document synchronously while the page parses (a devtools trace of one cold
+   load: 65 `CommitLoad about:blank`, a 507 ms parse task; scenario (a) long
+   tasks 3 -> 5 and long-task time 435 -> 1201 ms, all 12 samples 1071-1368
+   ms against 389-561 ms), while a `srcdoc` frame commits asynchronously. So:
+   - The server never mounts, so it emits every board frame as a non-frame
+     placeholder `div` carrying `data-srcdoc`, `data-doc` (and
+     `data-doc-key` where the frame has one), the frame's class, the
+     sandbox token set as a data attribute rendered from Go's `frameSandbox`
+     (so mount copies it and the one-constant design holds), and any other
+     element attribute the frame carries today, sized as the frame would be
+     (a restored `style.height` applies to it as to the frame). A `div` needs
+     no display rule; a `<template>` holder is rejected because it is
+     `display: none`. `data-theme` is not on the list: `ThemeFrames` writes it
+     inside the `data-srcdoc` document's `<html>`, not on the element.
+   - Mount replaces the placeholder with an `<iframe>` built from those
+     attributes, setting `sandbox` and `srcdoc` BEFORE the iframe is
+     connected (a sandbox set after navigation applies only to the next
+     navigation, and an iframe connected without `srcdoc` commits
+     `about:blank` synchronously, the cost this revision removes), and keeps
+     `data-srcdoc` on the frame for Decision 6's compare. The mount points
+     above are unchanged.
+   - Element identity: expandos (`wbGrow`, `wbNext`, `wbOld`, `wbOut`,
+     `wbShowing`, `wbRelayAsked`), `frameGraft`'s `load` listener and the
+     graft chain's `g.nc[0]` refer to the element, so a placeholder is
+     replaced before any of them is set: an incoming placeholder is mounted
+     before `frameGraftable` builds the chain, and keyed reuse runs before the
+     swap's `mountFrames(n)` (`dashboard.js:522`), so a placeholder about to
+     be replaced by a kept old frame is never mounted first.
+   - Every reader that finds a board frame by element (all use
+     `iframe.doc-frame` today, so an untouched reader silently skips
+     placeholders) takes one of three modes:
+     - Reads the placeholder's attributes: the palette body-text read
+       (`dashboard.js:4796`) reads `data-srcdoc` (as ready ticket
+       `261114-feat-ws-dashboard-unified-search-palette` plans); keyed reuse
+       matches an incoming placeholder by `data-doc-key` plus `data-srcdoc`
+       and moves the old frame in; `frameHeights` / `setFrameHeights`
+       (`:3466`, `:3471`) read and write the placeholder's `style.height`.
+     - Matches then mounts: `frameGraftable` (`dashboard.js:820`) matches
+       the incoming placeholder, and `frameGraft` mounts it first only when
+       the old frame is mounted, so a changed open topic keeps its
+       double-buffer.
+     - Skips (needs a live window): `docFrame` / `frameWins`, `postTheme`
+       (`:404`), the initial size request (`:7154`), the `viewer.js` message
+       lookup (`:262`), `wbGrow` marking (`:548`), and `mpend.frame`.
+   - wiki-html (merged c49ae5a11): `SandboxedPage` builds its own eager
+     `srcdoc` iframe outside the board mount pass; it is NOT a placeholder
+     and stays an iframe. The interaction is `framedDoc`'s return line, where
+     wiki-html introduced `sandbox="` + frameSandbox + `"`: the placeholder
+     carries that same constant, as above.
+   - Phase 2's unmount turns a mounted frame back into this placeholder,
+     keeping the last `style.height`.
+   - Verification adds: a JS asset test that a mounted frame carries the
+     exact sandbox token set and `srcdoc` before it is connected; a Go test
+     that the served board has no board `<iframe` (placeholders only);
+     `regions_test.go:299-300` ("body frame missing or its sandbox changed")
+     pins the placeholder's sandbox data attribute instead.
+   - Measurement baseline: fixes 2-4 (e79e174de, 75d9e51a8, 27d8535a9) sit
+     on top of the iframe form and are unmeasured. Measure in Phase 1 order
+     on a stack where the revised lazy mount is fix 1 (each fix's A side is
+     the stack below it); the Result records the method.
+   - Rejected: (b) keeping the `<iframe>` element and accepting the long-task
+     regression (total task time and layout fall, but the cold-load long
+     tasks are what the owner feels as jank, and Decision 12 puts paint and
+     CPU first); (c) reverting lazy mount (Phase 2 builds on it, Decision 8's
+     exception).
 3. **Batched frame heights** ((532)=a): height messages are queued in a Map
    and applied in one `requestAnimationFrame`; the "from" height is read from
    `style.height`, not `getBoundingClientRect` (`dashboard.js:3345`);
@@ -188,6 +257,17 @@ Main findings (static, unmeasured in a browser):
    revert. Exception: lazy frame mount (Decision 2) is the mechanism Phase 2
    builds on, so if it misses the rule the worker stops and reports instead
    of reverting.
+
+   **Noise amendment (Phase 1 stop, 2026-11-14, EXEC lead, technical):** the
+   host runs parallel workers, and scenario (c)'s within-side spread reached
+   10-15%. When a metric's regression, or a target metric's improvement, is
+   within that metric's within-side spread (max minus min over a side's runs
+   as a share of its median, taking the larger of the two sides), both sides
+   are re-run with at least 5 runs each, alternating A and B run by run so
+   host drift lands on both sides, and the rule is applied to the medians of
+   those new runs only. The Result records the spread next to each judged
+   metric. Rejected: raising the threshold (it would also
+   hide real regressions on a quiet host).
 9. **Viewport mount/unmount** ((532)=a, Phase 2): open frames mount within
    about 1-2 viewports and unmount beyond about 4-5, keeping the last
    `style.height` as the placeholder, through the visibility observer that
