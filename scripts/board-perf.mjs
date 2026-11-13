@@ -447,7 +447,8 @@ async function shot(args) {
 }
 
 // diff compares same-named captures in two directories in the browser
-// (canvas pixels), printing the differing pixel share per capture.
+// (canvas pixels), printing the differing pixel share per capture and the
+// box the differing pixels fall in.
 async function diff(args) {
   const [da, db] = args._.slice(1).map((d) => path.resolve(d));
   const { chromium } = loadPlaywright();
@@ -465,13 +466,19 @@ async function diff(args) {
         if (ia.width !== ib.width || ia.height !== ib.height) return { size: `${ia.width}x${ia.height} vs ${ib.width}x${ib.height}` };
         const px = (img) => { const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; const x = c.getContext("2d"); x.drawImage(img, 0, 0); return x.getImageData(0, 0, c.width, c.height).data; };
         const xa = px(ia), xb = px(ib);
-        let n = 0;
-        for (let i = 0; i < xa.length; i += 4) if (Math.abs(xa[i] - xb[i]) + Math.abs(xa[i + 1] - xb[i + 1]) + Math.abs(xa[i + 2] - xb[i + 2]) > 24) n++;
-        return { share: n / (xa.length / 4) };
+        let n = 0, box = null;
+        for (let i = 0; i < xa.length; i += 4) {
+          if (Math.abs(xa[i] - xb[i]) + Math.abs(xa[i + 1] - xb[i + 1]) + Math.abs(xa[i + 2] - xb[i + 2]) <= 24) continue;
+          n++;
+          const x = (i / 4) % ia.width, y = Math.floor(i / 4 / ia.width);
+          if (!box) box = [x, y, x, y];
+          else box = [Math.min(box[0], x), Math.min(box[1], y), Math.max(box[2], x), Math.max(box[3], y)];
+        }
+        return { share: n / (xa.length / 4), box };
       }, [enc(path.join(da, name)), enc(pb)]);
       if (r.size) { process.stdout.write(`${name}: size differs (${r.size})\n`); worst = 1; continue; }
       worst = Math.max(worst, r.share);
-      process.stdout.write(`${name}: ${(r.share * 100).toFixed(3)}% pixels differ\n`);
+      process.stdout.write(`${name}: ${(r.share * 100).toFixed(3)}% pixels differ${r.box ? ` in x ${r.box[0]}-${r.box[2]}, y ${r.box[1]}-${r.box[3]}` : ""}\n`);
     }
   } finally {
     await browser.close();
