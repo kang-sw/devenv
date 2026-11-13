@@ -120,6 +120,15 @@ checks passed (24 tests, 2 skips). After the self-review fix and fresh-reader
 wording fixes, targeted mailbox, config, daemon wake, and resource-mirror checks
 passed remotely. No changed Invariants/Constraints directives.
 
+#### Edition (ddbb3f278) - 2026-11-13
+
+Final verification after `95f335508` and ticket closure: the full remote
+`w5090` Go suite passed with the same known LAN timeout test excluded, and
+wsflow package checks passed (24 tests, 2 skips). This run includes the
+self-review dedupe fix and final playbook mirrors. Node checks were not run:
+no JavaScript, TypeScript, Node dependencies, or harness implementation changed.
+No implementation changes were needed after this passing full check.
+
 ## Decisions
 
 Compatibility tier: T0 (one optional `Envelope` field and one new optional
