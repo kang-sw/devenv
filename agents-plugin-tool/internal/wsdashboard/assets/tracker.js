@@ -745,7 +745,7 @@
     if (!it || !canEdit(it)) return;
     var r = mineLive(it), who = editWho(it), n = ui.ned = { item: id, rk: rk, ed: id, val: it.title, kind: it.kind, st: r ? r.status : it.status, who: who, compl: null,
       due: it.due || '', pri: it.priority != null ? it.priority : null, labels: (it.labels || []).slice(), canAsg: canAssign(it, VS.viewer.member) };
-    n.orig = { who: who.slice() };
+    n.orig = { who: who.slice(), labels: n.labels.slice() };
     render();
     var el = $('tkned');
     if (el) { el.focus(); el.select(); }
@@ -768,9 +768,11 @@
       if (nrowPri(n) !== (it.priority != null ? it.priority : VS.priority.default)) ep.priority = nrowPri(n);
       if ((n.due || null) !== (it.due || null)) ep.due = n.due || null;
     }
-    // labels the list no longer holds are dropped from the pick, as the edit form's save does
-    var picked = (n.labels || []).filter(function (x) { return !!labelOf(x); });
-    if (picked.slice().sort().join(' ') !== (it.labels || []).slice().sort().join(' ')) ep.labels = picked;
+    // the draft's label picks (what it added and dropped since the prefill) over the item's labels
+    // as they are now, so a label another viewer wrote meanwhile is kept; labels the list no longer
+    // holds drop, as the edit form's save does
+    var picked = labelsOver(it.labels, labelPicks(n.orig.labels, n.labels));
+    if (!sameLabels(picked, it.labels)) ep.labels = picked;
     if (Object.keys(ep).length > 1) ev.push(['item.edit', ep]);
     if (st && r && st !== r.status) ev.push(st === 'done' ? ['item.close', { item: it.id }] : ['item.status', { item: it.id, status: st }]);
     if (n.canAsg && (n.compl || n.who.slice().sort().join(' ') !== n.orig.who.slice().sort().join(' '))) {
@@ -4300,7 +4302,7 @@
         return commit([['item.edit', { item: id, due: dv }]]);
       }
       case 'm-due-clear': return commit([['item.edit', { item: id, due: null }]]);
-      case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lsel = labelToggled(MN.lsel || it.labels, MN.lab); return labelStepRedraw();
+      case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lset = labelFlip(MN.lset, it.labels, MN.lab); return labelStepRedraw();
       case 'm-ledit': return labelDialog({ label: a.getAttribute('data-label') });
       case 'm-lrm': return labelRemove(a.getAttribute('data-label'), function () { if (MN) MN.lab = null; });
       case 'm-ladd': return labelDialog({});
@@ -4991,35 +4993,56 @@
     return '<button type="button" class="chip lbl' + (on ? ' on' : '') + '"' + attr('act', act) + attr('label', l.id) + aria + '><span class="ldot" style="background:' + esc(l.color) + '"></span>' + esc(l.name) + '</button>';
   }
   // The item menu's labels step (a list row's label icon, the property card's labels button): the
-  // quick-add picker's checklist (labelChecklist) over MN.lsel, a local pick. A toggle only moves
-  // the pick (m-ltog -> labelStepRedraw); the net change is one write when the menu closes
-  // (labelPending, called by closeMenu), none when the pick equals the item's labels. A refused
-  // write leaves the item as the server holds it, the row never drew the pick. With no labels in
-  // the store it says so, and an admin gets the store settings' label dialog.
+  // quick-add picker's checklist (labelChecklist) over the item's current labels with the step's
+  // toggles laid over (MN.lset: label id -> wanted on, labelsOver). A toggle only records the
+  // user's pick (m-ltog -> labelStepRedraw); the toggles are one write when the menu closes
+  // (labelPending, called by closeMenu), applied to the item's labels as they are then, none
+  // without a toggle or when they change nothing. So a label another viewer adds while the step is
+  // open, or a write still in flight from the last close, is kept: only the picked labels move. A
+  // refused write leaves the item as the server holds it, the row never drew the pick. With no
+  // labels in the store it says so, and an admin gets the store settings' label dialog.
   function labelStepHtml(it) {
     if (!(VS.labels || []).length) return '<p class="mempty">' + wsT("js.tk.labels.empty") + '</p>' + (VS.viewer.admin ? msep() + mi('m-ladd', esc(wsT("js.tk.new.labels.add")), {}, { icon: 'plus' }) : '');
-    if (!MN.lsel) MN.lsel = (it.labels || []).slice();
-    return labelChecklist(MN.lsel);
+    return labelChecklist(labelsOver(it.labels, MN.lset));
   }
-  // An item's labels with lid toggled, in the store's list order (labels no longer listed drop).
-  function labelToggled(cur, lid) {
-    var has = (cur || []).indexOf(lid) >= 0;
-    return (VS.labels || []).map(function (l) { return l.id; }).filter(function (x) { return x === lid ? !has : (cur || []).indexOf(x) >= 0; });
+  // Labels cur with the picks set (label id -> wanted on) laid over, in the store's list order
+  // (labels no longer listed drop).
+  function labelsOver(cur, set) {
+    return (VS.labels || []).map(function (l) { return l.id; }).filter(function (x) {
+      return set && Object.prototype.hasOwnProperty.call(set, x) ? !!set[x] : (cur || []).indexOf(x) >= 0;
+    });
   }
-  // The write closing menu m owes: its labels pick against the item's labels (labels no longer
-  // listed drop from the pick), null when nothing changed or the item or the edit right is gone.
+  // Picks set with lid flipped from how the step draws it over labels cur (labelsOver).
+  function labelFlip(set, cur, lid) {
+    set = set || {};
+    set[lid] = labelsOver(cur, set).indexOf(lid) < 0;
+    return set;
+  }
+  // The picks (labelsOver's set) that turn labels from into labels to: the ones added and dropped.
+  function labelPicks(from, to) {
+    var set = {};
+    (from || []).forEach(function (x) { if ((to || []).indexOf(x) < 0) set[x] = false; });
+    (to || []).forEach(function (x) { if ((from || []).indexOf(x) < 0) set[x] = true; });
+    return set;
+  }
+  // Whether labels a and b hold the same listed labels.
+  function sameLabels(a, b) {
+    function key(l) { return (l || []).filter(function (x) { return !!labelOf(x); }).sort().join(' '); }
+    return key(a) === key(b);
+  }
+  // The write closing menu m owes: its toggles over the item's current labels, null when it has
+  // none, they change nothing, or the item or the edit right is gone.
   function labelPending(m) {
-    var it = m.kind === 'item' && m.step === 'labels' && m.lsel && VS && VS.items[m.item];
+    var it = m.kind === 'item' && m.step === 'labels' && m.lset && VS && VS.items[m.item];
     if (!it || !canEdit(it)) return null;
-    var picked = m.lsel.filter(function (x) { return !!labelOf(x); });
-    if (picked.slice().sort().join(' ') === (it.labels || []).filter(function (x) { return !!labelOf(x); }).sort().join(' ')) return null;
-    return [['item.edit', { item: it.id, labels: picked }]];
+    var picked = labelsOver(it.labels, m.lset);
+    return sameLabels(picked, it.labels) ? null : [['item.edit', { item: it.id, labels: picked }]];
   }
   // The store label dialog from the labels step: the pick is written first, the dialog opens once
   // that write returns (a written batch closes any open dialog).
   function labelDialog(arg) {
     var ev = labelPending(MN);
-    MN.lsel = null;
+    MN.lset = null;
     closeMenu(false);
     if (ev) commit(ev, function () { openDialog('slabel', arg); }); else openDialog('slabel', arg);
   }

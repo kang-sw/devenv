@@ -157,9 +157,10 @@ func TestTrackerPriorityChipAndLabelPicker(t *testing.T) {
 // TestTrackerPropertyCardLabelPicker pins the property card's label row: an
 // editor's row is a button that opens the item menu's labels step (anyone
 // else's only shows the chips, an empty set as "-"; an editor's empty set a
-// muted "add a label"); the step lists the store's labels as toggle chips
-// and a toggle writes the item's labels at once (in the store's list order)
-// with the step kept open; an empty store says so and, for an admin only,
+// muted "add a label"); the step lists the store's labels as a checklist
+// drawing the user's picks over the item's current labels (in the store's
+// list order) with the step kept open, the write owed at close
+// (TestTrackerLabelStepAppliesOnClose); an empty store says so and, for an admin only,
 // offers the store settings' label dialog. Escape on the step closes it,
 // focus back on the row.
 func TestTrackerPropertyCardLabelPicker(t *testing.T) {
@@ -174,7 +175,7 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 	}
 	act := trackerFn(t, `function menuAct\(k, a\)`, false)
 	for _, want := range []string{
-		"case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lsel = labelToggled(MN.lsel || it.labels, MN.lab); return labelStepRedraw();",
+		"case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lset = labelFlip(MN.lset, it.labels, MN.lab); return labelStepRedraw();",
 		"case 'm-ladd': return labelDialog({});",
 	} {
 		if !strings.Contains(act, want) {
@@ -194,7 +195,7 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 		trackerFn(t, `function dataAttrs\(data\)`, false) + trackerFn(t, `function mi\(act, label, data, o\)`, false) + trackerFn(t, `function msep\(\)`, true) +
 		trackerFn(t, `function labelOf\(id\)`, true) + trackerFn(t, `function labelChip\(l, act, extra\)`, false) + trackerFn(t, `function labelChips\(it, act\)`, false) +
 		trackerFn(t, `function labelsProp\(it\)`, false) + trackerFn(t, `function newLabelsHtml\(n\)`, true) +
-		trackerFn(t, `function labelChecklist\(cur\)`, false) + trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelToggled\(cur, lid\)`, false)
+		trackerFn(t, `function labelChecklist\(cur\)`, false) + trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelsOver\(cur, set\)`, false)
 	runTrackerCases(t, "property card labels", trackerCheckJS+`
 var VS = { viewer: { member: 'me', admin: false }, labels: [{ id: 'L1', name: 'docs', color: '#111111' }, { id: 'L2', name: 'dev', color: '#222222' }] }, editor = true, MN = { kind: 'item', step: 'labels' };
 function wsT(k) { return k; }
@@ -210,12 +211,17 @@ check('a viewer without the edit right sees the chips only', labelsProp(it), '<s
 check('a viewer without the edit right sees "-" for no labels', labelsProp({ id: 'i2', labels: [] }), '<span class="muted">-</span>');
 var st = labelStepHtml(it);
 check('the step is the quick-add checklist over the item\'s labels, the picked one checked', [has(st, 'role="menuitemcheckbox" aria-checked="false" data-mi data-act="m-ltog" data-label="L1"') || has(st, 'data-act="m-ltog" data-label="L1"'), has(st, 'aria-checked="true" data-mi'), has(st, 'class="cbx"'), has(st, 'class="mlrow"')], [true, true, true, true]);
-check('the pick starts as the item\'s labels', MN.lsel, ['L2']);
-check('a toggle adds in list order', labelToggled(['L2'], 'L1'), ['L1', 'L2']);
-check('a toggle removes', labelToggled(['L1', 'L2'], 'L1'), ['L2']);
-check('a toggle drops labels the list no longer holds', labelToggled(['gone', 'L1'], 'L2'), ['L1', 'L2']);
-MN.lsel = ['L1', 'L2'];
-check('the step draws the local pick', has(labelStepHtml(it), 'aria-checked="true" data-mi data-act="m-ltog" data-label="L1"') || has(labelStepHtml(it), 'data-act="m-ltog" data-label="L1"'), true);
+check('drawing the step records no pick', MN.lset, undefined);
+check('a pick on adds in list order', labelsOver(['L2'], { L1: true }), ['L1', 'L2']);
+check('a pick off removes', labelsOver(['L1', 'L2'], { L1: false }), ['L2']);
+check('labels the list no longer holds drop', labelsOver(['gone', 'L1'], { L2: true }), ['L1', 'L2']);
+check('no picks: the labels as they are, in list order', labelsOver(['L2', 'L1'], null), ['L1', 'L2']);
+MN.lset = { L1: true };
+st = labelStepHtml(it);
+check('the step draws the picks over the item\'s labels', [has(st, 'aria-checked="true" data-mi data-act="m-ltog" data-label="L1"'), has(st, 'aria-checked="true" data-mi data-act="m-ltog" data-label="L2"')], [true, true]);
+it.labels = ['L2', 'L1'];
+MN.lset = { L1: false };
+check('the picks lay over the labels the item holds now: L1 picked off, L2 as held', [has(labelStepHtml(it), 'aria-checked="false" data-mi data-act="m-ltog" data-label="L1"'), has(labelStepHtml(it), 'aria-checked="true" data-mi data-act="m-ltog" data-label="L2"')], [true, true]);
 VS.labels = [];
 check('an empty store says so, no add for a non-admin', labelStepHtml(it), '<p class="mempty">js.tk.labels.empty</p>');
 VS.viewer.admin = true;
@@ -225,10 +231,13 @@ done();
 }
 
 // TestTrackerLabelStepAppliesOnClose pins the labels step's batching
-// (tracker.js labelPending, called by closeMenu): toggles only move the local
-// pick, and closing the menu owes one item.edit of the net pick, none when the
-// pick equals the item's labels (a toggle and its undo), labels the list no
-// longer holds dropped, nothing when the item or the edit right is gone.
+// (tracker.js labelPending, called by closeMenu): a toggle only records the
+// user's pick (labelFlip), and closing the menu owes one item.edit of the
+// picks laid over the item's labels as they are at close, none without a pick
+// or when the picks change nothing (a toggle and its undo), labels the list no
+// longer holds dropped, nothing when the item or the edit right is gone. A
+// label another viewer adds while the step is open, or one a previous close
+// is still writing, is never written away by a stale copy.
 func TestTrackerLabelStepAppliesOnClose(t *testing.T) {
 	cm := trackerFn(t, `function closeMenu\(refocus\)`, false)
 	for _, want := range []string{"var lw = labelPending(m);", "if (lw) commit(lw);"} {
@@ -239,19 +248,36 @@ func TestTrackerLabelStepAppliesOnClose(t *testing.T) {
 	runTrackerCases(t, "label step applies on close", trackerCheckJS+`
 var editor = true, VS = { items: { i1: { id: 'i1', labels: ['L1'] } }, labels: [{ id: 'L1' }, { id: 'L2' }, { id: 'L3' }] };
 function canEdit() { return editor; }
-`+trackerFn(t, `function labelOf\(id\)`, true)+trackerFn(t, `function labelToggled\(cur, lid\)`, false)+trackerFn(t, `function labelPending\(m\)`, false)+`
-function m(sel) { return { kind: 'item', step: 'labels', item: 'i1', lsel: sel }; }
-check('a net change is one write of the pick', labelPending(m(['L1', 'L2'])), [['item.edit', { item: 'i1', labels: ['L1', 'L2'] }]]);
-check('a toggle and its undo write nothing', labelPending(m(labelToggled(labelToggled(['L1'], 'L2'), 'L2'))), null);
-check('removing the only label writes the empty list', labelPending(m([])), [['item.edit', { item: 'i1', labels: [] }]]);
-check('labels the list no longer holds are dropped from the write', labelPending(m(['L1', 'gone', 'L3'])), [['item.edit', { item: 'i1', labels: ['L1', 'L3'] }]]);
-check('a pick naming only a gone label beside the item\'s is no change', labelPending(m(['L1', 'gone'])), null);
-check('no pick drawn, nothing owed', labelPending(m(null)), null);
-check('another step owes nothing', labelPending({ kind: 'item', step: 'pri', item: 'i1', lsel: ['L2'] }), null);
+`+trackerFn(t, `function labelOf\(id\)`, true)+trackerFn(t, `function labelsOver\(cur, set\)`, false)+trackerFn(t, `function labelFlip\(set, cur, lid\)`, false)+
+		trackerFn(t, `function sameLabels\(a, b\)`, false)+trackerFn(t, `function labelPending\(m\)`, false)+`
+// a labels step on i1: the toggles flip each label from how the step draws it over the item's labels then
+function step() { var s = { kind: 'item', step: 'labels', item: 'i1', lset: null }; s.tog = function (lid) { s.lset = labelFlip(s.lset, VS.items.i1.labels, lid); return s; }; return s; }
+function held(ls) { VS.items.i1.labels = ls; }
+check('a pick on is one write over the labels', labelPending(step().tog('L2')), [['item.edit', { item: 'i1', labels: ['L1', 'L2'] }]]);
+check('a toggle and its undo write nothing', labelPending(step().tog('L2').tog('L2')), null);
+check('picking the only label off writes the empty list', labelPending(step().tog('L1')), [['item.edit', { item: 'i1', labels: [] }]]);
+check('no toggle, nothing owed', labelPending(step()), null);
+// scenario A: another viewer adds L3 while the step is open; closing without a toggle must not write it away
+var a = step();
+held(['L1', 'L3']);
+check('a label added meanwhile, no toggle: no write', labelPending(a), null);
+check('a label added meanwhile is kept beside the pick', labelPending(a.tog('L2')), [['item.edit', { item: 'i1', labels: ['L1', 'L2', 'L3'] }]]);
+held(['L1']);
+// scenario B: L2 picked and the step closed (its write in flight), reopened before the write lands, closed again
+var b1 = step().tog('L2'), w1 = labelPending(b1), b2 = step();
+check('the reopened step with no toggle owes nothing', labelPending(b2), null);
+held(['L1', 'L2']); // w1 lands
+check('nor after the first write lands', [w1, labelPending(b2)], [[['item.edit', { item: 'i1', labels: ['L1', 'L2'] }]], null]);
+check('a toggle after it lands applies over the landed labels', labelPending(b2.tog('L3')), [['item.edit', { item: 'i1', labels: ['L1', 'L2', 'L3'] }]]);
+held(['L1', 'gone']);
+check('labels the list no longer holds are dropped from the write', labelPending(step().tog('L3')), [['item.edit', { item: 'i1', labels: ['L1', 'L3'] }]]);
+check('a pick changing nothing listed is no change', labelPending({ kind: 'item', step: 'labels', item: 'i1', lset: { L1: true, gone: false } }), null);
+held(['L1']);
+check('another step owes nothing', labelPending({ kind: 'item', step: 'pri', item: 'i1', lset: { L2: true } }), null);
 editor = false;
-check('without the edit right nothing is written', labelPending(m(['L2'])), null);
+check('without the edit right nothing is written', labelPending(step().tog('L2')), null);
 editor = true;
-check('a gone item owes nothing', labelPending({ kind: 'item', step: 'labels', item: 'zz', lsel: ['L2'] }), null);
+check('a gone item owes nothing', labelPending({ kind: 'item', step: 'labels', item: 'zz', lset: { L2: true } }), null);
 done();
 `)
 }
@@ -299,7 +325,8 @@ function esc(s) { return s; }
 function attr(k, v) { return ' data-' + k + '="' + v + '"'; }
 function tipAttr(x) { return ''; }
 function partIcon(i) { return i; }
-`+trackerFn(t, `function titleEdHtml\(it\)`, false)+trackerFn(t, `function editWho\(it\)`, false)+trackerFn(t, `function startRowEdit\(id, rk\)`, false)+trackerFn(t, `function editRowEvents\(n, it, title\)`, false)+trackerFn(t, `function endRowEdit\(\)`, false)+trackerFn(t, `function saveRowEdit\(\)`, false)+`
+`+trackerFn(t, `function titleEdHtml\(it\)`, false)+trackerFn(t, `function editWho\(it\)`, false)+trackerFn(t, `function startRowEdit\(id, rk\)`, false)+trackerFn(t, `function editRowEvents\(n, it, title\)`, false)+trackerFn(t, `function endRowEdit\(\)`, false)+trackerFn(t, `function saveRowEdit\(\)`, false)+
+		trackerFn(t, `function labelsOver\(cur, set\)`, false)+trackerFn(t, `function labelPicks\(from, to\)`, false)+trackerFn(t, `function sameLabels\(a, b\)`, false)+`
 var document = { querySelector: function () { return null; } }, CSS = { escape: function (x) { return x; } };
 function draft() { startRowEdit('i1', 'r'); return ui.ned; }
 function save(mut, title) { var n = draft(); if (mut) mut(n); elv.value = title == null ? n.val : title; sent = []; saveRowEdit(); return sent; }
@@ -317,6 +344,12 @@ check('title, priority, due, and labels go in one item.edit', save(function (n) 
 check('a successful save closes the row', ui.ned, null);
 check('a blank title keeps the old one', save(function (n) { n.pri = 0; }, '   '), [[['item.edit', { item: 'i1', priority: 0 }]]]);
 check('labels the list no longer holds are dropped', save(function (n) { n.labels = ['L1', 'gone']; }), []);
+// another viewer adds L2 after the draft was prefilled: an untouched labels chip writes nothing, a pick applies over L2
+check('a label added meanwhile, labels untouched: no labels write', save(function (n) { VS.items.i1.labels = ['L1', 'L2']; }), []);
+VS.items.i1.labels = ['L1'];
+check('a label added meanwhile is kept beside the draft\'s pick', save(function (n) { VS.items.i1.labels = ['L1', 'L2']; n.labels = []; }),
+  [[['item.edit', { item: 'i1', labels: ['L2'] }]]]);
+VS.items.i1.labels = ['L1'];
 rec = { status: 'idea' };
 check('a changed own status is its own item.status', save(function (n) { n.st = 'doing'; }), [[['item.status', { item: 'i1', status: 'doing' }]]]);
 check('done closes the item', save(function (n) { n.st = 'done'; }), [[['item.close', { item: 'i1' }]]]);
