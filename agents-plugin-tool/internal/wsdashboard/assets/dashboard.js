@@ -2290,14 +2290,6 @@
     var v = String(s).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").trim();
     return Array.from(v).slice(0, max).join("").trim();
   }
-  // mailboxRef is the name's copy text, as the server builds it (pageview.go
-  // mailboxRef): "(mailbox) id:<rid>", or with a label
-  // "(mailbox, label \"<label>\") id:<rid>", a quote or backslash in the
-  // label backslash-escaped. A rename rebuilds it before the head re-renders.
-  function mailboxRef(rid, label) {
-    if (!label) return "(mailbox) id:" + rid;
-    return "(mailbox, label \"" + String(label).replace(/[\\"]/g, "\\$&") + "\") id:" + rid;
-  }
   // labelClick handles a click inside the head: the name copies, the pencil
   // starts the rename.
   function labelClick(t) {
@@ -2347,7 +2339,8 @@
       sn.setAttribute("data-label", label);
       var nm = sn.querySelector(".snm");
       nm.textContent = label || root.getAttribute("data-rid") || "";
-      nm.setAttribute("data-copy", mailboxRef(root.getAttribute("data-rid") || "", label));
+      var open = nm.getAttribute("data-mailbox-open");
+      nm.setAttribute("data-copy", open + (label ? ">" + label.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</mailbox>" : "/>"));
       nm.classList.toggle("lbl", !!label);
       labelEnd(sn);
     });
