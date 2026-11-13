@@ -244,7 +244,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			// A lead whose process may still run under its holder rejoins
 			// it there, before the scan below replays the holder's records.
 			// A turn the last daemon's exit cut off settles there too.
-			r.startConv(rec)
+			r.startConv(rec, nil)
 		}
 	}
 	// A child loaded before its parent found no parent to report to.
@@ -360,8 +360,10 @@ func (r *Runner) conv(replyID string) *conv {
 // startConv starts serving rec. It writes the registration and the
 // snapshot, and tells the daemon, before it takes r.mu to list the
 // conversation, so no other conversation's Get, List, or act waits on
-// those writes; r.mu is not held.
-func (r *Runner) startConv(rec Record) *conv {
+// those writes; r.mu is not held. seed, when not empty, is the command
+// list the first snapshot shows (lastCommands); a process's own list
+// replaces it.
+func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	c := &conv{
 		r:       r,
@@ -374,6 +376,9 @@ func (r *Runner) startConv(rec Record) *conv {
 		mailC:   make(chan struct{}, 1),
 		done:    make(chan struct{}),
 		settleC: make(chan struct{}),
+	}
+	if len(seed) > 0 {
+		c.live.applyQuiet(wslive.Event{Kind: wslive.KindCommands, Commands: seed})
 	}
 	if last := rec.LastTurn; last != nil {
 		// The send count starts again at 0, so a wait now takes the last
@@ -556,11 +561,52 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	if err := writeRecord(dir, rec); err != nil {
 		return State{}, err
 	}
-	c := r.startConv(rec)
+	var seed []wslive.SlashCommand
+	if rec.Lead {
+		seed = r.lastCommands(rec)
+	}
+	c := r.startConv(rec, seed)
 	if spawn != nil {
 		return r.spawned(c, spawn.Prompt)
 	}
 	return c.state(), nil
+}
+
+// lastCommands is the command list in the persisted snapshot of the
+// newest other hosted lead session of rec's root and profile that has
+// one; nil when none has. A new lead's process starts only at its first
+// send, and the composer offers commands only from the snapshot's list,
+// so without this an empty session would offer none until then.
+func (r *Runner) lastCommands(rec Record) []wslive.SlashCommand {
+	r.mu.Lock()
+	recs := make([]Record, 0, len(r.convs)+len(r.closed))
+	convs := make([]*conv, 0, len(r.convs))
+	for _, c := range r.convs {
+		convs = append(convs, c)
+	}
+	for _, prev := range r.closed {
+		recs = append(recs, prev)
+	}
+	r.mu.Unlock()
+	for _, c := range convs {
+		recs = append(recs, c.record())
+	}
+	recs = slices.DeleteFunc(recs, func(prev Record) bool {
+		return !prev.Lead || prev.ReplyID == rec.ReplyID || prev.Root != rec.Root || prev.Profile != rec.Profile || prev.Backend != rec.Backend
+	})
+	sort.Slice(recs, func(i, j int) bool {
+		if recs[i].CreatedAt != recs[j].CreatedAt {
+			return recs[i].CreatedAt > recs[j].CreatedAt
+		}
+		return recs[i].ReplyID > recs[j].ReplyID
+	})
+	for _, prev := range recs {
+		snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(wsdashboard.SessionDir(r.opts.Dir, prev.ReplyID)))
+		if err == nil && len(snap.Commands) > 0 {
+			return snap.Commands
+		}
+	}
+	return nil
 }
 
 // resolve resolves profile through root and checks everything a launch

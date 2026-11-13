@@ -179,7 +179,7 @@ func (r *Runner) TakeOver(id string) (State, error) {
 	delete(r.closed, id)
 	r.mu.Unlock()
 	fmt.Fprintf(r.opts.Log, "agent %s: taken over from a terminal session\n", id)
-	return r.startConv(rec).state(), nil
+	return r.startConv(rec, nil).state(), nil
 }
 
 // HandOff hands the hosted lead session id to the terminal: its process
@@ -280,7 +280,7 @@ func (r *Runner) Reopen(id string) (State, error) {
 		r.mu.Unlock()
 		return State{}, err
 	}
-	return r.startConv(rec).state(), nil
+	return r.startConv(rec, nil).state(), nil
 }
 
 // resumeCommand is the shell command that resumes a lead session's harness
