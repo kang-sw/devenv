@@ -141,7 +141,7 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 		parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
 	}
 	if rawHTML {
-		blocks = append(blocks, util.Prioritized(parser.NewHTMLBlockParser(), 900))
+		blocks = append(blocks, util.Prioritized(newRawTextHTMLBlockParser(), 900))
 		options = append(options, html.WithUnsafe())
 	}
 	if inlineTags {
