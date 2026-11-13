@@ -917,10 +917,9 @@ func TestRailRowRevive(t *testing.T) {
 
 // TestRailStoppedRowSleeps pins a hosted session with no harness process:
 // its row sleeps (the stopped class mutes its title and dims its harness
-// icon) whatever ended the process, with no moon. A user-stopped row also
-// drops its second line by style; any other host exit (a crash, a child that
-// exited) keeps its reason line. An ended row sleeps only when the user
-// stopped it, and an unknown harness shows "?".
+// icon) whatever ended the process, with no moon, and the stopped class drops
+// its second line by style. An ended row sleeps only when the user stopped
+// it, and an unknown harness shows "?".
 func TestRailStoppedRowSleeps(t *testing.T) {
 	stopped := RailRow{ReplyID: "stopped", Harness: "claude", Live: true, Hosted: true, Exit: &HostExit{Reason: "stop"}, Message: "last reply"}
 	crashed := RailRow{ReplyID: "crashed", Harness: "claude", Live: true, Hosted: true, Exit: &HostExit{HasCode: true, Code: 1, Reason: "child_exited"}}
@@ -940,11 +939,11 @@ func TestRailStoppedRowSleeps(t *testing.T) {
 		row, _, _ := strings.Cut(rest, `</a></div>`)
 		return row
 	}
-	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped userstop" data-rid="stopped"`) || !strings.Contains(row, `">C</span><span class="rid">stopped</span>`) {
+	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped" data-rid="stopped"`) || !strings.Contains(row, `">C</span><span class="rid">stopped</span>`) {
 		t.Errorf("the stopped row lacks its stopped class, or something sits between its icon and title:\n%s", row)
 	}
-	if row := rowOf("crashed"); !strings.Contains(html, `class="rs stopped" data-rid="crashed"`) || !strings.Contains(row, `<span class="s2"><span class="host-exit">`) || !strings.Contains(row, "exit code 1") {
-		t.Errorf("a processless row whose child exited must sleep and keep its reason line:\n%s", row)
+	if row := rowOf("crashed"); !strings.Contains(html, `class="rs stopped" data-rid="crashed"`) || !strings.Contains(row, "exit code 1") {
+		t.Errorf("a processless row whose child exited must sleep (the stopped rule hides its reason line):\n%s", row)
 	}
 	if row := rowOf("live"); !strings.Contains(html, `class="rs" data-rid="live"`) || !strings.Contains(row, `<span class="hi unk" role="img" aria-label="? · lead waiting" title="? · lead waiting">?</span>`) {
 		t.Errorf("the plain row = %s, want no stopped class and the unknown-harness icon", row)
@@ -953,7 +952,7 @@ func TestRailStoppedRowSleeps(t *testing.T) {
 		t.Errorf("an ended row whose child exited must stay a plain ended row:\n%s", rowOf("ended"))
 	}
 	css := mustAsset(t, "dashboard.css")
-	for _, want := range []string{".rail .rs.stopped .rid { color: var(--wb-muted-fg); }", ".rail .rs.stopped .hi { opacity: .55; }", ".rail .rs.userstop .s2 { display: none; }"} {
+	for _, want := range []string{".rail .rs.stopped .rid { color: var(--wb-muted-fg); }", ".rail .rs.stopped .hi { opacity: .55; }", ".rail .rs.stopped .s2 { display: none; }"} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
 		}
