@@ -14,8 +14,8 @@ import (
 // remaining width to the window's right edge, 280px at least. From 1600px both drawers (the session drawer's
 // .dr-in, the tracker's through --tkmaxw and --tkml) span the window, so
 // their handles stand at its right edge whether or not anything is pinned,
-// while the session drawer's sheet stays 960px at most, anchored right
-// under them, clear of the session rail.
+// while the session drawer's sheet stays 960px at most (its git sheet
+// 1280px), anchored right under them, clear of the session rail.
 func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
@@ -26,6 +26,7 @@ func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
   .dr-in { max-width: none; }
   .dash:not(.index) { --tkmaxw: none; }
   .dr-clip { left: auto; width: min(960px, calc(100% - 2 * var(--dpad))); }
+  .dr-clip:has(> .dr-sheet > .gbody:not([hidden])) { width: min(1280px, calc(100% - 2 * var(--dpad))); }
 }`,
 		"@media (min-width: 1600px) { .dgrid.board { margin: 0; } }",
 		".dash { --tkml: 0px; }",
@@ -70,5 +71,22 @@ func TestEdgePinZoneFitsTheStripRightOfThePage(t *testing.T) {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
 		}
+	}
+}
+
+// TestTrackerStopsAtItsWidestLayout pins the tracker's wide cap: from 1600px,
+// where it lays out layout D (Items at two shares, Notifications, the tab
+// pane: four panels' worth), its drawer sheet is 1600px at most, anchored
+// right under the handle row like the session drawer's, and the store page is
+// 1600px at most, left in its cell.
+func TestTrackerStopsAtItsWidestLayout(t *testing.T) {
+	if want := `@media (min-width: 1600px) {
+  .tk .tk-dr-clip { left: auto; width: min(1600px, calc(100% - 2 * var(--dpad, 16px))); }
+  .tk.tk-spage { max-width: 1600px; }
+}`; !strings.Contains(mustAsset(t, "tracker.css"), want) {
+		t.Errorf("tracker.css lacks %q", want)
+	}
+	if want := "function layoutOf() { var w = window.innerWidth; return w >= 1600 ? 'd'"; !strings.Contains(mustAsset(t, "tracker.js"), want) {
+		t.Errorf("tracker.js lacks %q: the cap's 1600px threshold follows layout D's", want)
 	}
 }

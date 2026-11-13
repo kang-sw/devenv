@@ -198,6 +198,14 @@
 .tk.tk-spage > * { flex: none; }
 body.tk-paged .tk-drawer { display: none; }
 .tk.tk-spage .tk-title { margin-top: 2px; }
+/* from 1600px (layout D, the widest: Items at two shares, Notifications, the tab pane; four
+   panels' worth) the tracker grows no wider than 1600px: the drawer's sheet anchors right
+   under the handle row, as the host's session drawer does, and the store page stands at its
+   cell's left edge */
+@media (min-width: 1600px) {
+  .tk .tk-dr-clip { left: auto; width: min(1600px, calc(100% - 2 * var(--dpad, 16px))); }
+  .tk.tk-spage { max-width: 1600px; }
+}
 
 /* drawer content: layout A is the Items panel (about two thirds) and one tab pane;
    D (wide) is Items | Notifications | the tab pane; narrow is one tab pane. the renderer picks
