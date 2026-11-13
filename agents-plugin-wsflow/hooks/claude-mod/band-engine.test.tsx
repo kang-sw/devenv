@@ -154,7 +154,7 @@ function world(on: On, opts: { config?: Record<string, unknown>; wsProject?: boo
   on('session.cwd', () => ({ value: '/repo/sub' }))
   on('session.root', () => ({ value: '/repo' }))
   on('session.repo', () => ({ value: { root: '/repo', remote: null, internal: false, name: null } }))
-  on('fs.exists', ($, e) => ({ value: opts.wsProject === true && e.path === '/repo/ai-docs/WORKFLOW.md' }))
+  on('fs.exists', ($, e) => ({ value: opts.wsProject === true && e.path.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '') === '/repo/ai-docs/WORKFLOW.md' }))
   on('fs.ancestors', () => ({ value: [] }))
   on('session.usage', () => {
     w.usageCalls += 1
@@ -229,7 +229,7 @@ async function turnEnd($: Engine, w: World) {
   await w.clock.settle()
 }
 
-type El = { type: string; props?: Record<string, unknown>; children?: unknown[] }
+type El = { type: string; props?: Record<string, unknown>; children?: unknown[]; part?: { plugin?: string } }
 
 /** What an element shows: its strings, its children's in document order. */
 const shown = (n: unknown): string =>
@@ -256,8 +256,11 @@ async function draw($: Engine, w: World, W: number, props: { hasSurvey?: boolean
     component: 'AbovePrompt',
     props: { hasSurvey: props.hasSurvey ?? false, isWorking: false, maxRows: 20, bodyColumns: W, scroll: { offset: 0, bodyRows: 19 }, view: {} },
   })
-  const root = (await ui.drawn()) as unknown as El
+  const drawn = (await ui.drawn()) as unknown as El
   await ui.unmount()
+  // Newer engines compose AbovePrompt contributions in a wrapper; older ones
+  // return the winning part directly. Inspect this plugin's contribution only.
+  const root = drawn.part ? drawn : kids(drawn).find((child) => child.part?.plugin === w.plugin) ?? drawn
   const raw = root.type === 'Text' && shown(root) === 'raw'
   const [top, body, bottom] = kids(root)
   const [lbar, rows, rbar] = kids(body)
