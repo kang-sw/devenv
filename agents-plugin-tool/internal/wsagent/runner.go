@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -989,8 +990,9 @@ type State struct {
 	Effort  string `json:"effort,omitempty"`
 	// ContextTokens and OutputTps are the child's own latest usage; the
 	// approximate streaming rate is absent when no turn runs.
-	ContextTokens *float64 `json:"contextTokens,omitempty"`
-	OutputTps     *float64 `json:"outputTps,omitempty"`
+	ContextTokens *float64           `json:"contextTokens,omitempty"`
+	OutputTps     *float64           `json:"outputTps,omitempty"`
+	Batches       []wslive.BatchView `json:"batches,omitempty"`
 	// Held counts the messages waiting for the next turn.
 	Held int `json:"held"`
 	// Page is the conversation's dashboard page path.
@@ -1099,6 +1101,7 @@ type conv struct {
 	closed        bool
 	contextTokens *float64
 	outputTps     *float64
+	batches       []wslive.BatchView
 	// approvals are a lead's waiting tool permission prompts, oldest first;
 	// activeMode and bgTasks are what its harness last reported.
 	approvals  []ApprovalRequest
@@ -1453,6 +1456,7 @@ func (c *conv) state() State {
 	st.Held = len(held) + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
 	st.Error = c.lastErr
 	st.ContextTokens = c.contextTokens
+	st.Batches = c.batches
 	if c.turn && !c.closed {
 		st.OutputTps = c.outputTps
 	}
@@ -1662,7 +1666,16 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 		c.ringDirty = true
 		c.r.notify(c.rec.ReplyID, c.rec.Root)
 	}
-	if usageChanged {
+	activityChanged := false
+	if (ev.Kind == wslive.KindAgent && ev.AgentID == "" && ev.Batches != nil) || ev.Kind == wslive.KindReset || ev.Kind == wslive.KindTurnEnd || ev.Kind == wslive.KindReply {
+		batches := c.live.st.Snapshot(c.r.opts.Now().UnixMilli()).Lead.Batches
+		c.setStatus(func() {
+			if !reflect.DeepEqual(c.batches, batches) {
+				c.batches, activityChanged = batches, true
+			}
+		})
+	}
+	if usageChanged || activityChanged {
 		c.watched()
 	}
 }

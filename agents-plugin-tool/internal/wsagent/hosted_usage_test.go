@@ -103,6 +103,42 @@ func TestPiMidTurnStatsThrottleAndOwnOutputRate(t *testing.T) {
 	}
 }
 
+func TestHostedPiRowShowsRunningTool(t *testing.T) {
+	h, _ := newFakePiRecoveryHarness(t)
+	lead := h.lead(BackendClaude, LeadOptions{})
+	child, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Parent: &ParentRef{Kind: ParentLead, ReplyID: lead.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := h.holder(child.ID)
+	h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"message_end","message":{"role":"assistant","stopReason":"toolUse","content":[{"type":"toolCall","id":"c1","name":"read","arguments":{"path":"example"}}]}}`)
+	waitRunning := func(want bool) {
+		t.Helper()
+		eventually(t, "child tool activity in hosted row", func() bool {
+			for _, a := range h.snapshot(lead.ID).Agents {
+				if a.ID != "pi:"+child.ID {
+					continue
+				}
+				for _, b := range a.Batches {
+					if b.Running != nil && b.Running.ToolName == "read" {
+						return want
+					}
+				}
+				return !want
+			}
+			return false
+		})
+	}
+	waitRunning(true)
+	// An activity-only native alias must not mask the child's batches.
+	h.runner.conv(lead.ID).do(func() {
+		h.runner.conv(lead.ID).apply(wslive.Event{Kind: wslive.KindAgent, AgentID: "native-worker", SessionKey: h.record(child.ID).WSKey, Caption: strPtr("working")})
+	})
+	waitRunning(true)
+	h.holders.out(holder, `{"type":"tool_execution_end","toolCallId":"c1","isError":false}`)
+	waitRunning(false)
+}
+
 func TestHostedPiRowUsesOwnUsageWhileRunningAndAfterRecovery(t *testing.T) {
 	h, _ := newFakePiRecoveryHarness(t)
 	lead := h.lead(BackendClaude, LeadOptions{})
