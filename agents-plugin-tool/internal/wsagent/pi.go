@@ -212,7 +212,7 @@ func piMCPServers(spec StartSpec) (map[string]any, error) {
 			"command":  spec.WSMCP.Command,
 			"args":     spec.WSMCP.Args,
 			"env":      spec.WSMCP.Env,
-			"cwd":      spec.Root,
+			"cwd":      spec.workDir(),
 			"exposure": "direct",
 		}
 	}
