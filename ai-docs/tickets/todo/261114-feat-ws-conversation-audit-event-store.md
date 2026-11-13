@@ -63,8 +63,9 @@ What exists today (Explore evidence, 2026-11-14, paths under
 
 ## Open Decision Queue
 
-Last ID: lead-local, unnumbered. MAIN mints board IDs, so these are numbered
-when they go to the owner.
+Last ID: (600). MAIN's board IDs are (a) = (594), (b) = (595), (c) = (596),
+(d) = (597), (e) = (598), (f) = (599), and (600) is the owner's group-ack
+check.
 
 - (a) [open] [technical] The audit store is a separate append-only
   per-session log, `sessions/<replyID>/audit/`: JSONL segment files with a
@@ -121,6 +122,26 @@ when they go to the owner.
     the stored `in` and `out` of the whole conversation, newest first. It
     returns `{hits: [{event_id, kind, field, line_no, line}], next}`. The
     search is a streaming scan of the segment files, so no index is built.
+  - `GET /s/<id>/audit/events?call=<call_id>` returns that call's summary
+    plus its attached events, so a click on a ring history row (which holds
+    the ring's tool id) finds the audit events.
+  - Fields the audit mockup v2 needs (UI/UX EXEC, 2026-11-14, all additive):
+    - A `tool_call` summary carries `duration_ms`, which is null while the
+      call is running.
+    - A `tool_call` summary carries `ctx_after`: the context size of the
+      request that follows the call (input + cache_read + cache_creation,
+      from the next assistant message's usage). Parallel calls answered in
+      one request each get the same shared value.
+    - The full envelope carries `seen: {in?: <bytes>, out?: <bytes>}` when
+      the harness delivered less to the model than was stored (for example,
+      Claude's tool_result content vs the full `tool_use_result`). An absent
+      `seen` means fully seen or unknown. This is per body, separate from
+      the compaction-level `model_seen`.
+    - Each search hit also carries `call_id` and `parent_id`.
+    - A thinking event whose content was not delivered, only its signature,
+      has `meta.signature_only: true` and an empty `out`.
+    - `at` uses the same clock and precision as ring entry stamps (UTC,
+      nanoseconds), so the UI can place hidden events between ring rows.
   - This is chosen over an MCP tool surface, which can come later as an
     additive T0 tool, because the UI is the consumer.
 
