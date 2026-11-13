@@ -41,6 +41,20 @@ lead's context. In one session three refusals came from three patterns:
 - Heuristics for patterns 1 and 2, and a direction for pattern 3, to be
   discussed.
 
+## Decisions
+
+- Owner 2026-11-13 (board 43=b): the atomic unit is one command, not a
+  topic group. A wrong answer must not discard large bodies; the lead sees
+  the failed-command tree and resends only those next turn. Lead technical
+  guard: a `wb:close` is skipped (reported as failed) when an earlier
+  command in the same batch for the same topic failed, so a close never
+  withdraws an item whose answer just failed.
+- Owner 2026-11-13 (board 44=b): a note-only answer to a policy item gets a
+  new status meaning "user commented, lead's move": it leaves the user's
+  waiting list until the lead re-asks, records an option letter, or
+  withdraws it. Compatibility: a new item status in the whiteboard store is
+  a store change; settle its tier at promotion.
+
 ## Candidate Design (lead, for discussion)
 
 - Atomic unit: a `wb:topic` group (top-level commands each on their own),
