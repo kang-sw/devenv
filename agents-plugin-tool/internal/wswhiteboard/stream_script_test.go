@@ -146,6 +146,21 @@ check('existing system disclosure preserved', [h.querySelector('.system-run') ==
 check('merged count', disclosure.children[0].textContent, 'system events 80');
 check('merged chronological range', [disclosure.querySelectorAll('.wb-entry')[0].id, disclosure.querySelectorAll('.wb-entry').slice(-1)[0].id], ['e1','e80']);
 check('merge does not swallow following agent', h.querySelector('.history-live').children.slice(-1)[0].id, 'e81');
+// A log run crosses the boundary too: the older page's folded rows join the
+// newer page's run fold, which keeps its node, open state, and visible tail,
+// and the system chips that meet at the boundary merge inside it.
+function agents(from, end) { var out = ''; for (var i=from;i<=end;i++) out += '<article class="wb-entry agent" id="e'+i+'" data-entry="e'+i+'" data-history-anchor="e'+i+'">line</article>'; return out; }
+function run(from, inner, open) { return '<details class="run-fold" data-key="run:e'+from+'" data-history-anchor="e'+from+'"'+(open ? ' open' : '')+'><summary><span class="rl"></span><span class="lbl">log</span></summary>'+inner+'</details>'; }
+root = parse('<div class="wb-history" data-history="t"><button class="history-older">older</button><div class="history-live">'+run(60, systems(60,61,false)+agents(62,96), true)+agents(97,99)+'</div><template data-history-page><article class="wb-entry panel" id="e30" data-entry="e30" data-panel="p1"><details class="entry-panel" id="p1"><summary>p1</summary></details></article>'+run(31, agents(31,57)+systems(58,59,false), false)+'</template></div>');
+template = root.querySelector('template'); template.content = new E('#fragment'); template.content.children = template.children; template.content.children.forEach(function(c) { c.parent = template.content; }); template.children=[];
+h = root.querySelector('.wb-history'); h.clientHeight=100;
+window.wbHistory.init(document);
+var runFold = h.querySelector('.run-fold'), newerChip = runFold.querySelector('.system-run');
+click(h.querySelector('.history-older'));
+check('boundary run folds join into the newer fold', [h.querySelectorAll('.run-fold').length, h.querySelector('.run-fold') === runFold, runFold.open], [1, true, true]);
+check('joined fold keeps the stream order', h.querySelector('.history-live').children.map(function(c) { return c.id || c.getAttribute('data-key'); }), ['e30', 'run:e31', 'e97', 'e98', 'e99']);
+check('joined fold relabels', [runFold.getAttribute('data-history-anchor'), runFold.querySelector('.lbl').textContent], ['e31', 'log 66']);
+check('boundary system chips merge inside the fold', [runFold.querySelectorAll('.system-run').length, runFold.querySelector('.system-run') === newerChip, newerChip.querySelectorAll('.wb-entry').length], [1, true, 4]);
 // A closed topic beyond the initial cap is itself inert, with an older
 // panel page inside. A direct target loads only that topic, then its page.
 root = parse('<template data-history-topic="old"><section class="topic" data-topic="old"><details class="topic-stream"><summary>history</summary><div class="wb-history" data-history="old"><button class="history-older">older</button><div class="history-live"><article class="wb-entry agent" id="e2" data-entry="e2">new</article></div><template data-history-page><article class="wb-entry panel" id="e1" data-entry="e1" data-panel="p1"><details class="entry-panel" id="p1"><summary>old</summary></details></article></template></div></details></section></template>');
@@ -229,7 +244,7 @@ check('older click after graft shifts only internal scroll', h.scrollTop, top + 
 check('older click after graft emits one bubbling load', [loads - beforeLoads, loadSeen], [1, [true, true, true]]);
 if (bad.length) throw new Error(bad.join('\n'));
 `
-	cmd := exec.Command(node, "-e", script)
+	cmd := nodeScript(node, script)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("history script: %v\n%s", err, out)
 	}

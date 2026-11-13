@@ -895,8 +895,10 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	// rationale and options ride in the snapshot so it unfolds without script);
 	// 42% adds the check list's styles and answer staging; 43% its hide
 	// toggle (styles, icon, and script, about 2.7 KB a page); 44% the code
-	// blocks' wrap toggle (button, wrapped-line styles, and script, about 1.7 KB).
-	if len(out) > budget*44/100 {
+	// blocks' wrap toggle (button, wrapped-line styles, and script, about 1.7 KB);
+	// 45% the topic stream's interleave styles (log rows with a clock column,
+	// folds, panel cards, the embed's panel titles; about 6 KB).
+	if len(out) > budget*45/100 {
 		t.Errorf("populated embed is %d bytes, not well under 512 KiB", len(out))
 	}
 }

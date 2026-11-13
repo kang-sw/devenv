@@ -26,13 +26,16 @@
     return node.matches('.entry-panel') && node.closest('.wb-entry[data-panel="' + id + '"]') ? node : null;
   }
   function nearBottom(h) { return h.scrollHeight - h.clientHeight - h.scrollTop < 12; }
+  // A fold (a long log run, or a system-event chip) anchors by its first
+  // entry while closed; once open, its entries anchor themselves.
+  function isFold(node) { return node.classList.contains('system-run') || node.classList.contains('run-fold'); }
   function position(h) {
     var rect = h.getBoundingClientRect(), anchor = null;
     Array.from(h.querySelectorAll('[data-history-anchor]')).some(function (node) {
-      if (node.classList.contains('system-run') && node.open) return false;
+      if (isFold(node) && node.open) return false;
       var r = node.getBoundingClientRect();
       if (r.height && r.bottom > rect.top && r.top < rect.bottom) {
-        anchor = { id: node.getAttribute('data-history-anchor'), run: node.classList.contains('system-run'), offset: r.top - rect.top };
+        anchor = { id: node.getAttribute('data-history-anchor'), run: isFold(node), offset: r.top - rect.top };
         return true;
       }
       return false;
@@ -44,10 +47,11 @@
     if (state.bottom) h.scrollTop = h.scrollHeight;
     else {
       var a = state.anchor;
-      var node = a && (a.run ? h.querySelector('[data-key="system:' + a.id + '"]') : find(h, a.id));
+      var node = a && (a.run ? h.querySelector('details.system-run[data-key="system:' + a.id + '"]') || h.querySelector('details.run-fold[data-key="run:' + a.id + '"]') : find(h, a.id));
       if (!node && a && a.run) {
+        // A merged fold is keyed by its new first entry; find the old one inside.
         var event = find(h, a.id);
-        node = event && event.closest('.system-run');
+        node = event && (event.closest('details.run-fold') || event.closest('details.system-run'));
       }
       if (node && node.getBoundingClientRect().height) {
         h.scrollTop += node.getBoundingClientRect().top - h.getBoundingClientRect().top - a.offset;
@@ -55,24 +59,60 @@
     }
     h._wbPosition = position(h);
   }
+  // relabel rewrites a fold's key, anchor, and "n entries · from-to" label
+  // after a merge, as the server writes them (EntryPage.Segments).
+  function relabel(fold) {
+    var events = Array.from(fold.querySelectorAll('.wb-entry')), run = fold.classList.contains('run-fold');
+    var clock = function (e) { var t = e.querySelector('time.entry-at'); return t ? t.textContent : ''; };
+    var from = clock(events[0]), to = clock(events[events.length - 1]), range = from === to ? from : from + '–' + to;
+    fold.setAttribute('data-key', (run ? 'run:' : 'system:') + events[0].id);
+    fold.setAttribute('data-history-anchor', events[0].id);
+    var summary = fold.children[0], label = summary.querySelector('.lbl') || summary;
+    label.textContent = window.wsT ? window.wsT(run ? 'js.wb.stream.run' : 'js.wb.stream.system', events.length, range) : (run ? 'log ' : 'system events ') + events.length;
+  }
+  function logNode(n) { return !!n && (n.matches('details.run-fold') || n.matches('details.system-run') || n.matches('.wb-entry.agent') || n.matches('.wb-entry.system')); }
+  // mergeSystems moves an older chip's events to the front of the adjacent,
+  // newer chip, which keeps its disclosure node and open state.
+  function mergeSystems(older, newer) {
+    Array.from(older.children).slice(1).reverse().forEach(function (entry) { newer.insertBefore(entry, newer.children[1] || null); });
+    older.remove();
+    relabel(newer);
+  }
+  // A page boundary is not a semantic boundary: a log run, and a system chip
+  // inside it, may continue across it. When the newer side opens with a
+  // run's fold, the older side's rows join that fold, which keeps its open
+  // state; otherwise only a system chip split by the boundary merges.
+  function joinBoundary(live, boundary) {
+    var kids = Array.from(live.children), i = kids.indexOf(boundary);
+    if (i < 1 || !logNode(boundary) || !logNode(kids[i - 1])) return;
+    var older = [];
+    for (var j = i - 1; j >= 0 && logNode(kids[j]); j--) older.unshift(kids[j]);
+    if (boundary.matches('details.run-fold')) {
+      var first = boundary.children[1] || null;
+      older.forEach(function (n) {
+        var fold = n.matches('details.run-fold');
+        (fold ? Array.from(n.children).slice(1) : [n]).forEach(function (r) { boundary.insertBefore(r, first); });
+        if (fold) n.remove();
+      });
+      var rows = Array.from(boundary.children), prev = first && rows[rows.indexOf(first) - 1];
+      if (prev && prev.matches('details.system-run') && first.matches('details.system-run')) mergeSystems(prev, first);
+      relabel(boundary);
+      return;
+    }
+    var last = older[older.length - 1], lastFold = last.matches('details.run-fold') ? last : null;
+    var end = lastFold ? lastFold.children[lastFold.children.length - 1] : last;
+    if (end.matches('details.system-run') && boundary.matches('details.system-run')) {
+      mergeSystems(end, boundary);
+      if (lastFold) relabel(lastFold);
+    }
+  }
   function loadOne(h) {
     var page = h.querySelector('template[data-history-page]');
     if (!page) return false;
-    var live = h.querySelector('.history-live');
+    var live = h.querySelector('.history-live'), boundary = live.children[0];
     live.insertBefore(page.content.cloneNode(true), live.firstChild);
     page.remove();
-    // A page boundary is not a semantic boundary. Keep the existing run's
-    // disclosure node (and open state), moving older events into it in order.
-    Array.from(live.children).forEach(function (run) {
-      var next = run.nextElementSibling;
-      if (!run.classList.contains('system-run') || !next || !next.classList.contains('system-run')) return;
-      Array.from(run.children).slice(1).reverse().forEach(function (entry) { next.insertBefore(entry, next.children[1] || null); });
-      run.remove();
-      var events = next.querySelectorAll('.wb-entry');
-      next.setAttribute('data-key', 'system:' + events[0].id);
-      next.setAttribute('data-history-anchor', events[0].id);
-      next.children[0].textContent = 'system events ' + events.length;
-    });
+    if (boundary) joinBoundary(live, boundary);
     var button = h.querySelector('.history-older');
     if (button) button.hidden = !h.querySelector('template[data-history-page]');
     if (window.wbBindBoard) window.wbBindBoard(h);
@@ -175,6 +215,12 @@
     });
   }
   window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget };
+  // An entry's clock shows its relative time on hover, computed when shown
+  // so it never goes stale (ago.js's wording), then the local date and time.
+  document.addEventListener('mouseover', function (e) {
+    var t = e.target && e.target.closest && e.target.closest('time.entry-at[data-at]');
+    if (t && window.wbAgoText) t.title = window.wbAgoText(+t.getAttribute('data-at')) + ' · ' + (t.getAttribute('data-stamp') || '');
+  });
   var bind = window.wbBindBoard;
   if (bind) {
     window.wbBindBoard = function (root) { bind(root); init(root); };
