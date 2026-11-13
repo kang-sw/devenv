@@ -1747,7 +1747,7 @@ dialog.rdeldlg [hidden] { display: none !important; }
 .rdeldlg .rdholders li.live .rdst { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
 .rdeldlg .rdnote, .rdeldlg .rdforce { margin: 0; padding: 7px 10px; border-radius: 8px; overflow-wrap: anywhere; }
 .rdeldlg .rdnote.bad { background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); color: var(--wb-fail); }
-.rdeldlg .rdnote.warn, .rdeldlg .rdforce { background: color-mix(in srgb, var(--wb-warn) 14%, var(--wb-card)); color: var(--wb-warn-ink); }
+.rdeldlg .rdnote.warn, .rdeldlg .rdforce { background: color-mix(in srgb, var(--wb-warn) 14%, var(--wb-card)); color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); /* the shared ink alone is 4.29:1 on this tint in the light theme; the text colour deepens it there and lifts it in the dark theme */ }
 .rdeldlg .rdforcehd { font-weight: 800; }
 .rdeldlg .rdforce ul { margin: 3px 0 0; padding-left: 18px; }
 .rdeldlg .rdconf { display: grid; gap: 5px; }

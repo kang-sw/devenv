@@ -6462,7 +6462,7 @@
         if (dirty > 0) {
           fact("pencil", wsTn("js.rail.wt.del.dirty", dirty), "warn");
           var ul = facts.appendChild(mk("ul", "rdpaths"));
-          paths.forEach(function (p) { ul.appendChild(mk("li", null, String(p))); });
+          paths.forEach(function (p) { var li = ul.appendChild(mk("li", null, String(p))); li.title = li.textContent; });
           if (dirty > paths.length) ul.appendChild(mk("li", "more", wsT("js.rail.wt.del.more", dirty - paths.length)));
         } else fact("check", wsT("js.rail.wt.del.clean"));
         if (c.detached && +c.unreached > 0) fact("branch", wsTn("js.rail.wt.del.unreached", +c.unreached), "warn");
@@ -6477,7 +6477,8 @@
             var name = String(h.label || h.id || "");
             if (h.kind === "terminal") name = h.label ? wsT("js.rail.wt.del.terminalfrom", String(h.id || ""), String(h.label)) : wsT("js.rail.wt.del.terminal", String(h.id || ""));
             else if (h.harness) name += " (" + h.harness + ")";
-            li.appendChild(mk("span", "nm", name));
+            var nm = li.appendChild(mk("span", "nm", name));
+            nm.title = nm.textContent;
             var state = h.live ? "js.rail.wt.del.live" : h.kind === "terminal" ? "js.rail.wt.del.exited" : "js.rail.wt.del.ended";
             li.appendChild(mk("span", "rdst", wsT(state)));
           });
