@@ -673,6 +673,229 @@ the viewport, unmounts far ones with their height kept (no scroll jump), and
 remounts with mermaid redrawn; `boardJump` to an unmounted entry works;
 LOOK captures unchanged.
 
+### Result (232f25ded) - 2026-11-14
+
+Decisions 9 and 10 are implemented. The before/after numbers move work
+from load to scroll (details below), so the owner may want to re-judge
+scenario (e). The fix 6 e-only A/B recommends keeping it; fix 6 was not
+re-applied.
+
+Commits:
+
+- fd1941cb1: the view kit observers take their margin as a scroll margin
+  as well, and `wbHistory.bands` reports support for it.
+- 48807e4c7: the viewport bands, content-visibility, above-view
+  compensation, `boardJump` keep, graft, and pill.
+- 6fb477c87: the headless `bands` scenario, `serve --mermaid`, and
+  placeholder-aware fixtures.
+- 235163d57 (lite review fix): a frame graft keeps `data-wbcv`.
+- 232f25ded: `board-perf shot` re-reads its stop count at every stop.
+
+Implementation.
+
+- **Bands, one per topic.** Each board topic gets two
+  `wbHistory.watch` subscriptions: NEAR (`100% 0px`) and FAR
+  (`400% 0px`).
+  - There is no second observer.
+  - A topic's shown frames mount, paced, once it reports NEAR. They turn
+    back into placeholders once it leaves FAR.
+  - The placeholder keeps the frame's attributes and `style.height`. It
+    also keeps a pending height that has not landed yet, and the swap's
+    first-height marks (`wbKeep`, `wbGrow`).
+  - Held frames stay mounted: a graft's pair (`wbNext`, `wbOut`), the
+    focused frame, `mpend.frame`, and `wbHoldSelection`. Today the product
+    sets `wbHoldSelection` only on reorder-hold's unmerged branch.
+- **Scroll margins.** The kit passes `scrollMargin` where Chromium supports
+  it, because `rootMargin` does not reach past `#bcol`'s clip. Without
+  support, `bands` is false and every shown frame mounts as in Phase 1.
+- **Content-visibility.** `content-visibility: auto` with
+  `contain-intrinsic-size: auto 600px` applies only to a topic marked
+  `data-wbcv`.
+  - The mark is set on the topic's first band report, so
+    `contain-intrinsic-size: auto` has already recorded the real size.
+  - A freshly inserted CV topic reads 600px synchronously.
+  - Maximized topics and topics holding a maximized panel are excluded.
+  - A topic that is skipping its rendering mounts nothing. It mounts once
+    it renders again; an iframe created inside a skipped subtree gets 0
+    width.
+- **Above-view compensation.** Since reorder-hold, `.bcol` and `.bpins`
+  have `overflow-anchor: none`.
+  - `topicResized`, a ResizeObserver on each topic, scrolls the topic's
+    scroller only for a size change the bands themselves cause, and only
+    for a topic wholly above the view.
+  - Band-caused changes are a mounted or remounted frame's first height
+    that changes it (`wbFirst` -> `wbLanded` in `applyFrameHeights`), and
+    skip/unskip.
+  - A running keep session compensates by itself. Any other above-view
+    growth stays uncompensated, as before; the keep scenario pins that.
+- **`boardJump`.** For a non-history target under the bands,
+  `scrollIntoView` is followed by `wbHistory.keep(target)`. The target
+  therefore holds while the topics it passed mount and settle.
+- **`frameGraft`.** A frame in a skipped topic takes the placeholder path.
+- **Swap marks.** The swap marks every `.doc-frame` `wbKeep`, so
+  placeholders get the mark too.
+- **Mermaid on remount.** A remount loads srcdoc fresh, so mermaid redraws
+  by itself.
+- **Load order.** The load band and mount pass moved after
+  `window.wbForm()`, because `wbHistory` is defined there.
+  - The pre-existing load-time `boardBoxes().forEach(watchBoard)` (about
+    line 760) still runs before `wbForm` and is a no-op. It was left as it
+    was, for reorder-hold to judge.
+- **Fewer frames at load.** Placeholders with no height yet collapse the
+  board at load, so about 16 frames mount at first (Phase 1: 32). Far ones
+  then get heights only as the view approaches.
+- **Rect readers (Decision 10).**
+  - `pill.js` reads each topic's rect once per update, and a far item takes
+    its topic's side.
+  - `captureBoardHistory` / `wbHistory.capture` read no layout any more.
+  - The old `stream.js` `position()` became the shared kit; its anchors
+    are entries in view.
+  - `below()`, `collapse`, `boardSpots` and the reorder-hold hold view read
+    topic boxes only, which content-visibility leaves laid out.
+- **Reorder-hold compatibility.** 8e74c185d wraps `watchBoard` with an
+  `onChange` and reads topic rects. The bands use separate watches and
+  never read inside skipped topics. Expect a textual merge conflict near
+  the swap block's `ins` lines; there is no semantic conflict.
+
+Harness numbers.
+
+- Run: `run --tree before,after --scenarios a,c,e --runs 5 --gc --rates
+  4,6`, alternating run by run.
+- Before is c55f9f3f1 and after is 6fb477c87. Medians are shown with the
+  spread for the larger side.
+
+| run | Frames | built | LayoutCount | LayoutDur ms | RecalcDur ms | ScriptDur ms | TaskDur ms | long ms | Nodes |
+|---|---|---|---|---|---|---|---|---|---|
+| a@4 | 34 → 18 (0%) | 32 → 16 | 157 → 103 (12%) | 161 → 136 (23%) | 240 → 212 (22%) | 265 → 209 (27%) | 1480 → 1212 (17%) | 346 → 340 (16%) | 21379 → 19975 |
+| a@6 | 34 → 17.5 | 32 → 15.5 | 164 → 104 | 267 → 220 | 394 → 350 | 429 → 340 | 2416 → 1971 | 569 → 526 | 21379 → 19931 |
+| c@4 | 35 → 19 (0%) | 20 → 20 | 240 → 240 | 156 → 150 (10%) | 384 → 333 (9%) | 9423 → 9264 (5%) | 20849 → 20376 (4%) | 18955 → 18674 | 47924 → 46538 |
+| c@6 | 35 → 18 | 20 → 20 | 240 → 240 | 237 → 230 | 588 → 510 | 14179 → 14077 | 31305 → 30979 | 28555 → 28522 | 47924 → 46450 |
+| e@4 | 34 → 26 (15%) | 0 → 16 | 154 → 224 (4%) | 41.9 → 73.0 (16%) | 93.2 → 125 (18%) | 220 → 278 (23%) | 793 → 1078 (18%) | 0 → 0 | 21382 → 20760 |
+| e@6 | 34 → 22 | 0 → 16 | 153 → 232 | 72.0 → 133 | 146 → 243 | 331 → 513 | 1198 → 1913 | 0 → 0 | 21382 → 20369 |
+
+- **(a) improves.** At 4x: Frames -47%, LayoutCount -35%, TaskDuration
+  -18% and ScriptDuration -21%. Quiet time drops 2094 → 1422 ms. The long
+  task count is unchanged.
+- **(c) is flat.** Frames -46%; everything else is within ±3%, except
+  RecalcStyle at -13%.
+- **(e) regresses.** At 4x: LayoutDuration +74%, TaskDuration +36%,
+  ScriptDuration +26%. There are still no long tasks.
+  - The cause is the 16 frames the scroll now builds as topics come near:
+    work Phase 1 did at load moved into the scroll.
+  - Summed over (a) and (e), TaskDuration at 4x is 2273 → 2290 ms.
+  - The ticket's keep rule is a Phase 1 rule and the harness's `compare`
+    prints FAIL for (e); this is recorded, not reverted.
+- **Content-visibility split for (e).** e only, at 4x, 6 alternating runs
+  per side, after vs after without the CV rule:
+  - LayoutCount 227 vs 205 (5% spread)
+  - LayoutDuration 76.5 vs 69.7 (17%)
+  - RecalcStyle 141 vs 165 (20%)
+  - TaskDuration 1125 vs 1141 (14%)
+
+  On this synthetic board CV is neutral during scrolling. The (e) cost is
+  the frame builds.
+
+Headless checks (`scripts/board-headless.mjs`), all PASS on the final
+tree, adapter and board page:
+
+- **`bands`** (`serve --mermaid --topics 30`):
+  - The mermaid topic is a placeholder at load, and topics in view are
+    mounted.
+  - A hash jump to the mermaid topic's panel (an unmounted entry) lands
+    with ≤1px drift over 2 s, with mermaid drawn.
+  - Up and down steps of 0.6 viewport move the reference topic exactly by
+    the step (±1px), with no placeholder in view.
+  - At the top, topics beyond 4 viewports are placeholders that keep their
+    height, mermaid included.
+  - Scrolling back down remounts the mermaid frame in a new frame, with
+    the diagram drawn.
+  - Without compensation the same scenario fails with an offset of
+    1892px.
+- **Other scenarios:**
+  - `keep` and `observer`
+  - `history` and `history-cards` at `--width 1800`
+  - `history-regressions`
+  - `history-paint`: its known ResizeObserver flake did not occur
+- **The `history` adapter run.** It first failed:
+  - Its `growFrame` fixture adds height inside a live frame document, and
+    that height is lost when the frame unmounts.
+  - The remounted frame then landed 1006px shorter above the view.
+  - That is what made remounts count as band-caused height changes (see
+    above).
+
+LOOK.
+
+- **Method.** `board-perf shot` on before and after, light and dark, 13
+  stops each. The shot now re-reads its stop count at every stop, because
+  the after-side column grows as frames mount.
+- **Layout.** A per-stop layout dump of topic, frame, clip and fold
+  positions and heights relative to `#bcol` is identical at every stop
+  over everything up to the view. It differs only in topics below the
+  view that have not been visited yet, which are unmeasured placeholders.
+- **With CV, pixels differ 0.2-5.9% per capture.** The cause is a 1px
+  shift of content inside topics.
+  - Topic heights are fractional (for example 1301.75).
+  - Content-visibility's paint containment snaps a topic's content to the
+    topic's own pixel origin.
+- **Without the CV rule, 0.007-0.88%.** Most of it is the clock labels.
+  Stops 08, 11 and 12 show 1px text snapping on closed rows, with the
+  layout identical; this appears to come from the far frames now being
+  placeholders.
+- **Verdict.** No layout or style change, but CV's 1px snapping is a real
+  pixel change.
+
+Fix 6 e-only A/B (lead note).
+
+- Method: 143eedccb against its parent 277615827, scenario (e) only, 8
+  alternating runs per side, `--gc`.
+- Counts are identical on both sides: Nodes 19427, Frames 34, mounted 32,
+  LayoutCount 154.
+
+| metric | 4x before → after (spread) | 6x before → after (spread) |
+|---|---|---|
+| LayoutDuration | 34.2 → 38.9, +13.6% (33%) | 58.8 → 57.2, -2.7% (42%) |
+| RecalcStyleDuration | 79.3 → 83.7, +5.5% (35%) | 124 → 122, -2.0% (44%) |
+| ScriptDuration | 150 → 180, +20.2% (39%) | 269 → 262, -2.5% (72%) |
+| TaskDuration | 618 → 724, +17.2% (27%) | 1042 → 1007, -3.4% (34%) |
+
+- Every 4x change is within its spread, and 6x shows the opposite sign.
+- No frame is built during (e) on that stack, so fix 6 has no mechanism to
+  act there. The original (e) "regression" was noise.
+- Recommendation: **keep (re-apply) fix 6**, for the owner to decide.
+  - Its target, c@4 ScriptDuration, fell 77.7%.
+  - Phase 2 now builds frames while scrolling (16 per (e) pass), where
+    shared hashed frame assets save parse work.
+
+Tests.
+
+- New or changed tests:
+  - `view_kit_test.go`: scroll margins
+  - `board_frame_bands_test.go`: bands, compensation, and the CSS rule
+  - `board_frame_lazy_test.go`: jump keep, skipped graft,
+    `data-wbcv` kept, the first-height landing in the heights batch, and
+    call sites after `wbForm`
+  - `board_keep_test.go`
+  - `pill_segments_test.go`: far items read by their topic
+- Mutation checks confirm that the new cases catch their breakage.
+- `go test ./internal/wsdashboard ./internal/wswhiteboard` passes, as does
+  the `internal/mcp` dashboard, whiteboard, board, panel, theme, closed,
+  topic and wiki subset. One earlier full run hit a
+  `TestDevAssetsShowEditsWithoutARestart` client timeout under load; it
+  passed 5/5 in isolation and in the final full run.
+
+Lite review: no Critical or Important findings. It raised four Minor
+findings:
+
+- Graft dropped `data-wbcv`: fixed in 235163d57.
+- The `wbHoldSelection` guard looked dead: kept, because reorder-hold's
+  branch sets it.
+- Mounting waits for the browser's own CV margin inside NEAR when a topic
+  is skipped: accepted. The `bands` step check shows no placeholder in
+  view at 0.6-viewport steps.
+- The keep scenario was narrowed to topics that stay mounted: accepted.
+  Late heights from a far topic's update now arrive as a placeholder,
+  which is the design.
+
 ### Phase 3: Incremental board events
 
 Requires `261113-feat-ws-dashboard-iframe-shell` Phase 2 (the render
