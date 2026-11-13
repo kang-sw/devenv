@@ -243,3 +243,50 @@ dashboard board region and on the standalone whiteboard page:
   Decision 8).
 
 LOOK captures of a long topic before and after "load more" on both surfaces.
+
+## Blocked - deep-link late-height lifetime (2026-11-14)
+
+Partial implementation is retained on `impl/develop/life-dole-panda`; no
+phase Result or closure is claimed. The shared `viewKit` helpers were reused
+without modification. Test contracts: `50df0d6f`; Chromium harness: `7434da648`.
+
+- VERIFIED: `cd agents-plugin-tool && go test -count=1
+  ./internal/wswhiteboard/... ./internal/wsdashboard/...` passed (26.035s /
+  137.201s). A preceding invocation from the repository root failed at module
+  discovery; that was a working-directory error, not a test failure.
+- VERIFIED: isolated Chromium probes measured 640 -> 1280px clips and 0px
+  expansion, latest-entry late-height, and above-viewport collapse drift on
+  the dashboard and the true standalone file page. Loaded rows/folds survived
+  collapse. Dashboard swap + load-more reused the same keep handle.
+- VERIFIED: strict deep-link probes did not pass. Dashboard target p1 moved
+  transiently by 214.4375px in rAF geometry samples while keep remained active
+  (14.7ms excursion, recovered by 28.4ms). No compositor filmstrip was taken;
+  a painted flash is not established. Standalone target drift reached
+  18.0625px after the second payload growth, following the helper's 500ms
+  quiet timeout. The probe spaces growth reports by 750ms.
+- VERIFIED: `stream.js:312` fixes the prerequisite helper's quiet/cap at
+  500/5000ms; this implementation clears the navigation target in its
+  keep-end callback (`stream.js:207-208`). Subsequent content resize therefore
+  cannot re-reveal that target (`stream.js:271`).
+- INFERRED: the standalone failure exposes an unsettled lifetime boundary:
+  should navigation stay armed through a later height report after the shared
+  helper declares quiet, and if so how is user scrolling after quiet allowed
+  to cancel it? Decision 8 requires late-height stability but does not settle
+  behavior after this existing helper timeout. Do not add a history-local
+  session or change the shared helper contract without the lead's decision.
+
+Evidence and inspected LOOK captures remain under
+`/tmp/board-harness-run-agY8VO/` (`VERIFIED.md`, per-surface `measurements.json`,
+`deep-link-late-heights.json`, dashboard and standalone before/after PNGs).
+Only the isolated dev daemon was used and it has been stopped; no shared daemon
+was restarted or replaced. Reproduction: `node scripts/board-headless.mjs
+serve --history-entries 180 --keep-tmp`, then `history --url <adapter URL or
+standalone file URL> --width 1800 --artifacts <directory>`.
+
+Pending: resolve the late-height lifetime question; diagnose dashboard
+observer/reveal ordering with painted-frame evidence; rerun final pin and
+observer fixture corrections, remaining headless checks, and independent lite
+review. The long-panel browser fixture does not exercise the underfilled
+resize load chain, exhausted controls, or live arrival (Node policy tests
+cover these). No full green browser run is claimed. The 3-entry fallback was
+not selected: its latest-entry stability failure criterion did not occur.

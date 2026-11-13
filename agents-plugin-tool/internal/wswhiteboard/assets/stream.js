@@ -25,39 +25,81 @@
     if (id[0] === 'e') return node.matches('.wb-entry[data-entry="' + id + '"]') ? node : null;
     return node.matches('.entry-panel') && node.closest('.wb-entry[data-panel="' + id + '"]') ? node : null;
   }
-  function nearBottom(h) { return h.scrollHeight - h.clientHeight - h.scrollTop < 12; }
+  var STEP = 640;
   // A fold (a long log run, or a system-event chip) anchors by its first
   // entry while closed; once open, its entries anchor themselves.
   function isFold(node) { return node.classList.contains('system-run') || node.classList.contains('run-fold'); }
-  function position(h) {
-    var rect = h.getBoundingClientRect(), anchor = null;
-    Array.from(h.querySelectorAll('[data-history-anchor]')).some(function (node) {
+  function steps(h, n) {
+    h._wbHistorySteps = Math.max(1, n);
+    h.style.setProperty('--wb-history-height', (h._wbHistorySteps * STEP) + 'px');
+  }
+  function updateControl(h) {
+    var live = h.querySelector('.history-live');
+    var more = !!h.querySelector('template[data-history-page]') || live.scrollHeight > (h._wbHistorySteps || 1) * STEP;
+    var button = h.querySelector('.history-older');
+    if (button) button.hidden = !more;
+    h.classList.toggle('history-more', more);
+  }
+  function oldest(h) {
+    var clip = h.querySelector('.history-clip').getBoundingClientRect();
+    return Array.from(h.querySelectorAll('[data-history-anchor]')).find(function (node) {
       if (isFold(node) && node.open) return false;
       var r = node.getBoundingClientRect();
-      if (r.height && r.bottom > rect.top && r.top < rect.bottom) {
-        anchor = { id: node.getAttribute('data-history-anchor'), run: isFold(node), offset: r.top - rect.top };
-        return true;
-      }
-      return false;
+      return r.height && r.bottom > clip.top && r.top < clip.bottom;
     });
-    return { bottom: nearBottom(h), anchor: anchor, top: h.scrollTop };
   }
-  function applyPosition(h, state) {
-    if (!state) return;
-    if (state.bottom) h.scrollTop = h.scrollHeight;
-    else {
-      var a = state.anchor;
-      var node = a && (a.run ? h.querySelector('details.system-run[data-key="system:' + a.id + '"]') || h.querySelector('details.run-fold[data-key="run:' + a.id + '"]') : find(h, a.id));
-      if (!node && a && a.run) {
-        // A merged fold is keyed by its new first entry; find the old one inside.
-        var event = find(h, a.id);
-        node = event && (event.closest('details.run-fold') || event.closest('details.system-run'));
+  // A fully out card has no internal anchor. Keep the topmost visible
+  // content below it in the same column (or the standalone document).
+  function below(topic) {
+    var box = topic.closest('#bpins') || topic.closest('#bcol'), root = box || document;
+    var r = box ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+    var top = Math.max(0, r.top), bottom = Math.min(window.innerHeight, r.bottom);
+    if (topic.getBoundingClientRect().bottom > top) return null;
+    return Array.from(root.querySelectorAll('.topic, [data-card], .reply')).filter(function (node) {
+      if (node === topic || topic.contains(node) || !(topic.compareDocumentPosition(node) & 4)) return false;
+      var n = node.getBoundingClientRect();
+      return n.height && n.bottom > top && n.top < bottom;
+    }).sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; })[0];
+  }
+  function collapse(h) {
+    if (!h._wbHistoryOut || (h._wbHistorySteps || 1) === 1) return;
+    var topic = h.closest('.topic'), a = document.activeElement;
+    if (!topic || !topic.isConnected || topic.hasAttribute('data-max')) return;
+    if (a && (h.contains(a) || ((a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.closest('.topic')))) return;
+    var root = topic.closest('#bcol') || topic.closest('.wrap') || document;
+    var motion = root.getAnimations ? root.getAnimations({ subtree: true }).filter(function (m) {
+      var n = m.effect && m.effect.target;
+      return m.playState === 'running' && n && n.matches('.topic, [data-card], iframe.doc-frame');
+    }) : [];
+    if (motion.length) {
+      if (!h._wbHistoryWaiting) {
+        h._wbHistoryWaiting = true;
+        Promise.all(motion.map(function (m) { return m.finished.catch(function () {}); })).then(function () {
+          h._wbHistoryWaiting = false; collapse(h);
+        });
       }
-      if (node && node.getBoundingClientRect().height) {
-        h.scrollTop += node.getBoundingClientRect().top - h.getBoundingClientRect().top - a.offset;
-      } else h.scrollTop = state.top;
+      return;
     }
-    h._wbPosition = position(h);
+    var anchor = below(topic), kept = anchor && kit.keep(anchor, { observe: [h.querySelector('.history-live')] });
+    h._wbHistoryOut = false;
+    h._wbHistoryTarget = null;
+    steps(h, 1);
+    updateControl(h);
+    if (kept) kept.apply();
+  }
+  function arm(h) {
+    var topic = h.closest('.topic');
+    h._wbHistoryOut = false;
+    kit.unwatch(h._wbHistoryWatch);
+    if (topic) h._wbHistoryWatch = kit.watch(topic, {
+      onChange: function (r) { if (r.visible) h._wbHistoryOut = false; },
+      onOut: function () { h._wbHistoryOut = true; collapse(h); }
+    });
+  }
+  function reveal(h, node) {
+    var live = h.querySelector('.history-live');
+    steps(h, Math.max(h._wbHistorySteps || 1, Math.ceil((live.getBoundingClientRect().bottom - node.getBoundingClientRect().top) / STEP)));
+    updateControl(h);
   }
   // relabel rewrites a fold's key, anchor, and "n entries · from-to" label
   // after a merge, as the server writes them (EntryPage.Segments).
@@ -113,8 +155,6 @@
     live.insertBefore(page.content.cloneNode(true), live.firstChild);
     page.remove();
     if (boundary) joinBoundary(live, boundary);
-    var button = h.querySelector('.history-older');
-    if (button) button.hidden = !h.querySelector('template[data-history-page]');
     if (window.wbBindBoard) window.wbBindBoard(h);
     h.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: h } }));
     return true;
@@ -159,13 +199,22 @@
     }
     // Highlight the reached target once, restarting a running flash.
     mark.classList.toggle('flash', false); void mark.offsetWidth; mark.classList.toggle('flash', true);
+    var h = node.closest('.wb-history');
+    if (h) {
+      reveal(h, node);
+      arm(h);
+      h._wbHistoryTarget = node;
+      kit.keep(node, { offset: 12, observe: [h.querySelector('.history-live')], onEnd: function () {
+        if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
+      } });
+    }
     return node;
   }
   function capture(root) {
     return histories(root).map(function (h) {
       var first = h.querySelector('.wb-entry');
       var fold = h.closest('.topic-stream');
-      return { key: h.getAttribute('data-history'), first: first && first.id, open: !fold || fold.open, position: position(h),
+      return { key: h.getAttribute('data-history'), first: first && first.id, open: !fold || fold.open, steps: h._wbHistorySteps || 1,
         folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }),
         systems: Array.from(h.querySelectorAll('.system-run .wb-entry')).map(function (e) { return [e.id, e.closest('.system-run').open]; }) };
     });
@@ -189,28 +238,41 @@
         var entry = Array.from(run.querySelectorAll('.wb-entry')).find(function (e) { return systems.has(e.id); });
         if (entry) run.open = systems.get(entry.id);
       });
-      applyPosition(h, saved.position);
+      steps(h, saved.steps || 1);
+      updateControl(h);
+      arm(h);
     });
   }
   function init(root) {
     histories(root).forEach(function (h) {
-      if (h._wbHistoryBound) return;
+      if (h._wbHistoryBound) { updateControl(h); return; }
       h._wbHistoryBound = true;
-      h.scrollTop = h.scrollHeight;
-      h._wbPosition = position(h);
-      h.addEventListener('scroll', function () { h._wbPosition = position(h); }, { passive: true });
+      steps(h, 1);
+      updateControl(h);
+      arm(h);
       // Frame grafts keep this container but replace its older-page button.
       h.addEventListener('click', function (e) {
         var button = e.target.closest && e.target.closest('.history-older');
         if (!button || button.closest('.wb-history') !== h) return;
-        var saved = position(h);
-        loadOne(h);
-        applyPosition(h, saved);
+        var anchor = oldest(h), live = h.querySelector('.history-live');
+        var kept = anchor && kit.keep(anchor, { observe: [live] });
+        h._wbHistoryTarget = null;
+        steps(h, (h._wbHistorySteps || 1) + 1);
+        arm(h);
+        // At most one page here. Only a later content resize may load the
+        // next: iframe heights have not arrived at materialization time.
+        if (live.scrollHeight < h._wbHistorySteps * STEP) loadOne(h);
+        updateControl(h);
+        if (kept) kept.apply();
       });
       if (typeof ResizeObserver !== 'undefined') {
         var observer = new ResizeObserver(function () {
           if (h.isConnected === false) { observer.disconnect(); return; }
-          applyPosition(h, h._wbPosition);
+          if (h._wbHistoryTarget) reveal(h, h._wbHistoryTarget);
+          // Initial layout alone does not load older pages; a user has to
+          // expand first. A collapse cancels the bounded resize chain.
+          if (h._wbHistorySteps > 1 && h.querySelector('.history-live').scrollHeight < h._wbHistorySteps * STEP) loadOne(h);
+          updateControl(h);
         });
         observer.observe(h.querySelector('.history-live'));
         h._wbHistoryObserver = observer;
@@ -405,13 +467,16 @@
     window.wbBindBoard.wbHistoryBound = true;
   }
   init(document);
+  document.addEventListener('focusout', function () {
+    window.setTimeout(function () { histories(document).forEach(collapse); }, 0);
+  });
 
   // The standalone file page navigates its own fragments. The dashboard has
   // its own allowlisted bridge, scroll policy, and region-swap lifecycle.
   if (document.body && document.body.classList.contains('full')) {
     function jump(id) {
       var node = loadTarget(document, id);
-      if (node) node.scrollIntoView({ block: 'nearest' });
+      if (node && !node.closest('.wb-history')) node.scrollIntoView({ block: 'nearest' });
       return node;
     }
     document.addEventListener('click', function (e) {
