@@ -36,6 +36,8 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
     acceptsStatus: false,
     /** Whether an applied intake's result names `compact` on its accepts line. */
     acceptsCompact: false,
+    acceptsWake: false,
+    acceptsTaskCounts: false,
     /** Whether an applied intake's result names `commands` and `command` on its accepts line. */
     acceptsCommands: false,
     /** What `$.command.list` answers. */
@@ -119,7 +121,7 @@ function world(on: On, opts: { dashboard?: unknown; intake?: Intake } = {}) {
       if (w.intake === 'throw') throw new Error('server gone')
       if (w.intake === 'error') return text('unknown session_key', true)
       if (w.intake === 'off') return text('dashboard off: nothing recorded\n')
-      const accepts = [...(w.acceptsStatus ? ['status'] : []), ...(w.acceptsCompact ? ['compact'] : []), ...(w.acceptsCommands ? ['commands', 'command'] : [])]
+      const accepts = [...(w.acceptsStatus ? ['status'] : []), ...(w.acceptsCompact ? ['compact'] : []), ...(w.acceptsWake ? ['wake'] : []), ...(w.acceptsTaskCounts ? ['task_counts'] : []), ...(w.acceptsCommands ? ['commands', 'command'] : [])]
       return text(`ok: 1 of 1 events applied\n${accepts.length > 0 ? `accepts: ${accepts.join(', ')}\n` : ''}`)
     }
     if (e.tool === INBOX_DRAIN_TOOL && e.args.interrupt_only === true) {
@@ -711,6 +713,64 @@ for (const knob of [false, 'unreadable'] as const) {
     expect(w.inboxDrains).toEqual([])
   })
 }
+
+// ---- Wake and task-count hook wiring --------------------------------------
+
+test('non-person prompts become wakes; person messages and dropped prompts do not', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsWake = true
+  await start($, w)
+  await flush(w)
+  const note = '<task-notification><task-id>a77</task-id><task-type>local_agent</task-type><status>completed</status><summary>Agent finished</summary>Full report</task-notification>'
+  await $.prompt.submit({ text: note, origin: { kind: 'task-notification' } } as never)
+  await $.prompt.submit({ text: note, origin: { kind: 'composer' } } as never)
+  w.dropPrompts = 1
+  await $.prompt.submit({ text: 'later', origin: { kind: 'scheduled-trigger' } } as never)
+  await $.prompt.submit({ text: 'check now', origin: { kind: 'scheduled-trigger' } } as never)
+  await $.turn.start({ text: 'check now', turnId: 't' })
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'wake').map((e) => [e.cause, e.text])).toEqual([['subagent_report', note], ['scheduled', 'check now']])
+  expect(sent(w).filter((e) => e.kind === 'user').map((e) => e.text)).toEqual([note])
+})
+
+test('tool results expose shell and monitor identities, terminal prompts finish counts, failed calls clear them', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsStatus = true
+  w.acceptsTaskCounts = true
+  w.acceptsWake = true
+  await start($, w)
+  await flush(w)
+  w.toolResult = { result: { backgroundTaskId: 'b1' }, text: 'running' }
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', run_in_background: true, command: 'build' } as never)
+  w.toolResult = { result: { taskId: 'm1', timeoutMs: 1000 }, text: 'monitoring' }
+  await $.tool.call({ tool: 'Monitor', tool_use_id: 'u2', command: 'watch' } as never)
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'status').at(-1)).toMatchObject({ background: 1, monitors: 1 })
+  await $.prompt.submit({ text: '<task-notification><task-id>b1</task-id><status>completed</status><summary>Background command exited</summary></task-notification>', origin: { kind: 'task-notification' } } as never)
+  w.toolResult = { result: 'stopped', text: 'stopped' }
+  await $.tool.call({ tool: 'TaskStop', tool_use_id: 'stop', task_id: 'm1' } as never)
+  w.toolResult = { result: 'launch failed', isError: true, text: 'launch failed' }
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'failed', run_in_background: true, command: 'bad' } as never)
+  await flush(w)
+  expect(sent(w).filter((e) => e.kind === 'status').at(-1)).toMatchObject({ background: 0, monitors: 0 })
+  expect(sent(w).filter((e) => e.kind === 'wake').at(-1)?.cause).toBe('background_exit')
+})
+
+test('the mod\'s own mailbox delivery bypasses prompt.submit but still sends a mail wake', async ($, on) => {
+  const w = world(on, { dashboard: true })
+  w.acceptsWake = true
+  await start($, w)
+  await flush(w)
+  w.recvAnswers.push(mailAnswer('mail body'))
+  w.exits.at(-1)!(0, ['mail'])
+  await w.clock.settle()
+  await flush(w)
+  const wakes = sent(w).filter((e) => e.kind === 'wake')
+  expect(wakes.length).toBe(1)
+  expect(wakes[0]?.cause).toBe('mail')
+  expect(wakes[0]?.text).toContain('mail body')
+  expect(sent(w).filter((e) => e.kind === 'user')).toEqual([])
+})
 
 // ---- Usage status ---------------------------------------------------------
 

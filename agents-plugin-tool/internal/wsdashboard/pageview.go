@@ -93,6 +93,8 @@ type SessionView struct {
 	// adapter's events (background tasks, a typed failure, broken MCP
 	// servers, an API retry); nil for an adapter-fed session.
 	Host *wslive.Host
+	// Background and Monitors are the separately reported badge counts.
+	Background, Monitors int
 	// Git is the drawer's git handle for Project; nil shows none. Set per
 	// request from the daemon's own read (gitbadge.go), never by the
 	// builders.
@@ -508,6 +510,7 @@ func buildSessionView(in pageInputs) SessionView {
 	v.Band = bandView(in.Snapshot)
 	v.Commands = in.Snapshot.Commands
 	v.Host = in.Snapshot.Host
+	v.Background, v.Monitors = taskBadgeCounts(in.Snapshot)
 	v.Tree.Agents = agentTree(in.Snapshot.Agents, lookup)
 	for _, a := range in.Snapshot.Agents {
 		switch a.Status {

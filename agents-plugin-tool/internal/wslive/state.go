@@ -50,6 +50,8 @@ const (
 	// entry: Command its typed line, Text the output it showed as text
 	// (empty when it showed none). It writes a command ring entry.
 	KindCommand = "command"
+	// KindWake names an observable notification delivered to the lead.
+	KindWake = "wake"
 )
 
 // Compaction phases a compact event carries.
@@ -69,7 +71,7 @@ const (
 // OptionalKinds are the event kinds an older ws-mcp refuses: the intake
 // result names them in an "accepts:" line, and an adapter sends one only
 // while the latest result it received names it.
-var OptionalKinds = []string{KindStatus, KindCompact, KindCommands, KindCommand}
+var OptionalKinds = []string{KindStatus, KindCompact, KindCommands, KindCommand, KindWake}
 
 // Event is one adapter event. Clocks are epoch milliseconds; an absent At
 // is the intake time.
@@ -98,6 +100,9 @@ type Event struct {
 	Text    string            `json:"text,omitempty"`
 	Final   bool              `json:"final,omitempty"`
 	Origin  string            `json:"origin,omitempty"`
+	// Cause and Source describe a wake; Caption and Text carry its preview and body.
+	Cause  string `json:"cause,omitempty"`
+	Source string `json:"source,omitempty"`
 	// Phase and Trigger are a compact event's: CompactStart, CompactEnd, or
 	// CompactFailed, and TriggerAuto, TriggerManual, or empty when the host
 	// names neither.
@@ -108,6 +113,9 @@ type Event struct {
 	Context *UsageContext `json:"context,omitempty"`
 	Limits  []UsageLimit  `json:"limits,omitempty"`
 	Cost    *UsageCost    `json:"cost,omitempty"`
+	// Task counts are sent only when intake advertises task_counts as well as status.
+	Background *int `json:"background,omitempty"`
+	Monitors   *int `json:"monitors,omitempty"`
 	// Model, Effort, ContextTokens, and OutputTps are a subagent's
 	// telemetry on an agent event: each replaces the held value when
 	// present and keeps it when absent. A blank text or a negative or
@@ -166,6 +174,8 @@ type State struct {
 	lead           activityState
 	turnStartedAt  int64
 	turnOrigin     string
+	pendingWake    bool
+	turnWake       bool
 	previousTurnMs int64
 	reply          *Reply
 	// compactStartedAt is the running compaction's start, 0 when none runs;
@@ -261,6 +271,8 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 			st.flushTools(&res)
 			res.Ring = append(res.Ring, st.finishReply(""))
 		}
+		st.turnWake = st.pendingWake && (origin == "" || origin == OriginMail)
+		st.pendingWake = false
 		st.turnStartedAt, st.turnOrigin = at, origin
 		st.lead.done, st.lead.failed, st.lead.permission = 0, 0, nil
 		// No adapter starts a turn while a compaction runs, so one still
@@ -281,7 +293,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		if st.turnStartedAt > 0 {
 			duration := max(at-st.turnStartedAt, 0)
 			done, failed := st.lead.totals()
-			res.Ring = append(res.Ring, RingEntry{Kind: RingTurn, Origin: st.turnOrigin, Done: done, Failed: failed, DurationMs: duration})
+			res.Ring = append(res.Ring, RingEntry{Kind: RingTurn, Origin: st.turnOrigin, WakeTurn: st.turnWake, Done: done, Failed: failed, DurationMs: duration})
 			st.previousTurnMs = duration
 		}
 		st.turnStartedAt, st.turnOrigin = 0, ""
@@ -341,6 +353,20 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		text, truncated := capText(st.scrub.scrub(ev.Text))
 		st.flushTools(&res)
 		res.Ring = append(res.Ring, RingEntry{Kind: RingUser, Origin: origin, Text: text, Truncated: truncated})
+	case KindWake:
+		entry, err := st.wakeEntry(ev)
+		if err != nil {
+			return Result{}, err
+		}
+		st.flushTools(&res)
+		res.Ring = append(res.Ring, entry)
+		if st.turnStartedAt == 0 {
+			st.pendingWake = true
+		} else if (st.turnOrigin == "" || st.turnOrigin == OriginMail) && st.reply == nil && len(st.lead.batches) == 0 && st.lead.done == 0 && st.lead.failed == 0 {
+			// Pi announces agent_start before consuming its custom input.
+			// A cause delivered before any work still belongs to that turn.
+			st.turnWake = true
+		}
 	case KindStatus:
 		if ev.AgentID != "" {
 			return Result{}, fmt.Errorf("status is the session's only; omit agentId")
@@ -1186,7 +1212,7 @@ func normalizeTokens(raw json.RawMessage) *TokenUsage {
 // is dropped (the last of a kind wins, the 5-hour limit first), and nil when
 // nothing is left.
 func normalizeUsage(ev Event) *Usage {
-	u := &Usage{}
+	u := &Usage{Background: taskCount(ev.Background), Monitors: taskCount(ev.Monitors)}
 	if c := ev.Context; c != nil {
 		ctx := &UsageContext{Window: max(c.Window, 0)}
 		if c.Tokens != nil && *c.Tokens >= 0 {
@@ -1227,7 +1253,7 @@ func normalizeUsage(ev Event) *Usage {
 		cost.Incomplete = cost.Incomplete && cost.Estimate
 		u.Cost = &cost
 	}
-	if u.Context == nil && u.Limits == nil && u.Cost == nil {
+	if u.Context == nil && u.Limits == nil && u.Cost == nil && u.Background == nil && u.Monitors == nil {
 		return nil
 	}
 	return u
@@ -1238,7 +1264,7 @@ func (u *Usage) clone() *Usage {
 	if u == nil {
 		return nil
 	}
-	out := &Usage{Limits: append([]UsageLimit(nil), u.Limits...)}
+	out := &Usage{Limits: append([]UsageLimit(nil), u.Limits...), Background: taskCount(u.Background), Monitors: taskCount(u.Monitors)}
 	if u.Context != nil {
 		c := *u.Context
 		if c.Tokens != nil {

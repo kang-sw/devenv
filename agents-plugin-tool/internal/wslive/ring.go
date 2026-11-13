@@ -32,6 +32,7 @@ const (
 	RingReply = "reply"
 	RingTurn  = "turn"
 	RingMail  = "mail"
+	RingWake  = "wake"
 	// RingTools is the lead's finished tool calls between two conversation
 	// entries, folded into one row (ToolSummary).
 	RingTools = "tools"
@@ -66,6 +67,11 @@ type RingEntry struct {
 	// Origin tags a user message (terminal, whiteboard) or a turn summary
 	// (terminal, whiteboard, mail; empty when unknown).
 	Origin string `json:"origin,omitempty"`
+	// Wake fields are optional; WakeTurn marks the turn a preceding wake started.
+	Cause    string `json:"cause,omitempty"`
+	Source   string `json:"source,omitempty"`
+	Caption  string `json:"caption,omitempty"`
+	WakeTurn bool   `json:"wakeTurn,omitempty"`
 	// Text is a user message, a lead reply, or a failed compaction's error.
 	Text      string `json:"text,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`

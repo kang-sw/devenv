@@ -22,12 +22,17 @@
  * - the lead's streamed reply text (the full text so far) and each finished
  *   reply with `final: true`;
  * - each finished user message with its origin;
+ * - `wake` for consumed custom pushes (including each item of the shared
+ *   push batch), only while intake advertises `wake`; failed sends retain
+ *   these discrete events for ordered replay after recovery negotiation;
  * - `status`, the session's usage figures (context, cache hit, cost
  *   estimate), only while the latest intake result names it on its
  *   `accepts:` line: an older ws-mcp skips the kind, and a "dashboard off" or
  *   error result names nothing. Figures are read when a flush drains after a
  *   dirty mark, sent only when they changed, and sent again after a resync,
- *   since `reset` clears them on the server;
+ *   since `reset` clears them on the server. Background shells and monitors
+ *   are sampled with these figures only when `task_counts` is also accepted;
+ *   registry membership changes dirty status even while the lead is idle;
  * - `compact` around each compaction of the lead's conversation (Pi
  *   `session_before_compact`, then `session_compact` or
  *   `session_compact_failed`): `start`, then `end` when it lands or `failed`
@@ -69,6 +74,8 @@ import type { LeadUsageSummary } from "./agent-cost.ts";
 import type { CumulativeCost } from "./agent-telemetry.ts";
 import { buildAgentViewModel } from "./agent-view.ts";
 import type { GoalLoopConfig } from "./goal-loop.ts";
+import { onBackgroundTasksChanged } from "./background-tasks.ts";
+import { dashboardWakeMessages } from "./dashboard-wake.ts";
 import { GATED_EXEC_TOOL_NAME, type RpcAgentRegistry } from "./spawner.ts";
 import { selectSubtreeDescendants, type SubtreeDescendant, type SubtreeDescendantRole } from "./subtree-lifecycle.ts";
 
@@ -110,7 +117,7 @@ export function resolveDashboardEnabled(config: GoalLoopConfig | undefined): boo
 export type DashboardOrigin = "terminal" | "whiteboard" | "mail";
 
 export interface DashboardEvent {
-  kind: "reset" | "turn_start" | "turn_end" | "agent" | "permission" | "reply" | "user" | "status" | "compact";
+  kind: "reset" | "turn_start" | "turn_end" | "agent" | "permission" | "reply" | "user" | "status" | "compact" | "wake";
   [field: string]: unknown;
 }
 
@@ -151,6 +158,8 @@ export interface DashboardFeedOptions {
   agents?: () => DashboardAgentEntry[];
   /** The usage figures, read when a flush drains after a status dirty mark while the intake accepts `status`. */
   status?: () => DashboardStatus | undefined;
+  /** Running shells and monitors, sampled at flush only while both count and status tokens are accepted. */
+  taskCounts?: () => { timed: number; monitors: number };
   now?: () => number;
   /** Arms a timer and returns its cancel. Defaults to an unref'd `setTimeout`. */
   schedule?: (fn: () => void, ms: number) => () => void;
@@ -176,6 +185,9 @@ export const STATUS_KIND = "status";
 
 /** The optional event kind that marks a lead compaction, sent only while the intake names it. */
 export const COMPACT_KIND = "compact";
+export const WAKE_KIND = "wake";
+/** A field capability, not an event kind: counts also require `status`. */
+export const TASK_COUNTS_CAPABILITY = "task_counts";
 
 /** A compaction's trigger as the intake takes it, from Pi's compaction reason. */
 export function compactTrigger(reason: unknown): "auto" | "manual" | undefined {
@@ -187,6 +199,8 @@ export function compactTrigger(reason: unknown): "auto" | "manual" | undefined {
 export interface DashboardStatus {
   context?: { tokens: number | null; window: number; percent?: number; cacheHit?: number };
   cost?: { usd: number; estimate: true; incomplete: boolean };
+  background?: number;
+  monitors?: number;
 }
 
 /** The lead's own usage and its direct delegates' cost, as the footer's estimate holds them. */
@@ -269,8 +283,8 @@ export function assistantReplyText(message: unknown): string {
  * not the user's, and is `undefined`, as is an empty one.
  */
 export function dashboardUserMessage(message: unknown): { text: string; origin: "terminal" | "whiteboard" } | undefined {
-  const m = message as { role?: unknown; content?: unknown } | undefined;
-  if (m?.role !== "user") return undefined;
+  const m = message as { role?: unknown; customType?: unknown; content?: unknown } | undefined;
+  if (m?.role !== "user" && !(m?.role === "custom" && m.customType === "ws-whiteboard")) return undefined;
   const text = contentText(m.content);
   if (text.trim() === "" || text === ADAPTER_MESSAGE_LABEL || text.startsWith(`${ADAPTER_MESSAGE_LABEL}\n`)) return undefined;
   const body = whiteboardLabeledBody(text);
@@ -466,6 +480,10 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   let statusDirty = false;
   /** Whether the latest intake result named `status` among the kinds it accepts. */
   let statusAccepted = false;
+  let taskCountsAccepted = false;
+  let wakeAccepted = false;
+  let stopWatchingTasks: (() => void) | undefined;
+  let seenWakeMessages = new WeakSet<object>();
   /** The last sent usage figures, as JSON; undefined when ws-mcp holds none of ours. */
   let lastStatusSent: string | undefined;
   /** The lead's compaction while it runs: its trigger and start. */
@@ -480,7 +498,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   let cancelPoll: (() => void) | undefined;
 
   function statusDue(): boolean {
-    return statusDirty && statusAccepted && options.status !== undefined;
+    return statusDirty && statusAccepted && (options.status !== undefined || (taskCountsAccepted && options.taskCounts !== undefined));
   }
 
   function compactDue(): boolean {
@@ -488,7 +506,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   }
 
   function hasWork(): boolean {
-    return pending.length > 0 || leadDirty || agentsDirty || streamMessage !== undefined || statusDue() || compactDue();
+    return pending.some((event) => event.kind !== WAKE_KIND || wakeAccepted) || leadDirty || agentsDirty || streamMessage !== undefined || statusDue() || compactDue();
   }
 
   function scheduleFlush(): void {
@@ -562,7 +580,16 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     statusDirty = false;
     let figures: DashboardStatus | undefined;
     try {
-      figures = options.status!();
+      figures = options.status?.();
+      // Counts are independently negotiated, even if a status reader supplied them.
+      if (figures) {
+        const { background: _background, monitors: _monitors, ...usage } = figures;
+        figures = usage;
+      }
+      if (taskCountsAccepted && options.taskCounts) {
+        const counts = options.taskCounts();
+        figures = { ...figures, background: counts.timed, monitors: counts.monitors };
+      }
     } catch {
       return undefined;
     }
@@ -574,8 +601,11 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   }
 
   function drain(): DashboardEvent[] {
-    const events = pending;
-    pending = [];
+    // Keep the whole discrete prefix ordered behind a failed wake while the
+    // recovery call negotiates support again; snapshots can resync without it.
+    const hold = !wakeAccepted && pending.some((event) => event.kind === WAKE_KIND);
+    const events = hold ? [] : pending;
+    if (!hold) pending = [];
     if (leadDirty) {
       leadDirty = false;
       events.push(leadEventNow());
@@ -598,21 +628,25 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     leadDirty = true;
     agentsDirty = options.agents !== undefined;
     lastStatusSent = undefined;
-    statusDirty = options.status !== undefined;
+    statusDirty = options.status !== undefined || options.taskCounts !== undefined;
     compactDirty = compacting !== undefined;
   }
 
   /** The conversation events of an undelivered call, which a resync cannot rebuild from current state. */
   function requeue(events: DashboardEvent[]): void {
-    const kept = events.filter((event) => event.kind === "user" || event.kind === "turn_start" || event.kind === "turn_end" || (event.kind === "reply" && event.final === true) || (event.kind === COMPACT_KIND && event.phase !== "start"));
+    const kept = events.filter((event) => event.kind === WAKE_KIND || event.kind === "user" || event.kind === "turn_start" || event.kind === "turn_end" || (event.kind === "reply" && event.final === true) || (event.kind === COMPACT_KIND && event.phase !== "start"));
     pending = [...kept, ...pending];
     if (pending.length > PENDING_EVENT_CAP) pending.splice(0, pending.length - PENDING_EVENT_CAP);
   }
 
-  /** `reset` and, when the turn it belongs to is not already in `events`, the turn's `turn_start`. */
+  /** `reset` and, only if neither this call nor the held replay starts its turn, `turn_start`. */
   function resyncPrefix(events: DashboardEvent[]): DashboardEvent[] {
-    const firstStart = events.findIndex((event) => event.kind === "turn_start");
-    const firstEnd = events.findIndex((event) => event.kind === "turn_end");
+    // A recovery handshake can drain snapshots while a wake and its turn
+    // boundaries remain pending. Starting that turn here would put its wake
+    // inside an open turn and the later replay would start it a second time.
+    const ordered = [...events, ...pending];
+    const firstStart = ordered.findIndex((event) => event.kind === "turn_start");
+    const firstEnd = ordered.findIndex((event) => event.kind === "turn_end");
     const needStart = lastTurnStart !== undefined && (firstStart === -1 ? turnOpen || firstEnd !== -1 : firstEnd !== -1 && firstEnd < firstStart);
     return needStart ? [{ kind: "reset" }, lastTurnStart!] : [{ kind: "reset" }];
   }
@@ -658,9 +692,17 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
       const accepted = outcome === "delivered" && accepts.includes(STATUS_KIND);
       if (accepted && !statusAccepted) {
         lastStatusSent = undefined;
-        statusDirty = options.status !== undefined;
+        statusDirty = options.status !== undefined || options.taskCounts !== undefined;
       }
       statusAccepted = accepted;
+      const countsOn = accepted && accepts.includes(TASK_COUNTS_CAPABILITY);
+      if (countsOn !== taskCountsAccepted) {
+        lastStatusSent = undefined;
+        statusDirty = options.status !== undefined || options.taskCounts !== undefined;
+      }
+      taskCountsAccepted = countsOn;
+      wakeAccepted = outcome === "delivered" && accepts.includes(WAKE_KIND);
+      if (outcome === "delivered" && !wakeAccepted) pending = pending.filter((event) => event.kind !== WAKE_KIND);
       const compactOn = outcome === "delivered" && accepts.includes(COMPACT_KIND);
       if (compactOn && !compactAccepted) compactDirty = compacting !== undefined;
       compactAccepted = compactOn;
@@ -780,7 +822,16 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
         compactDirty = false;
         return;
       }
-      case "message_start":
+      case "message_start": {
+        const message = e.message;
+        if (wakeAccepted && message && typeof message === "object" && !seenWakeMessages.has(message)) {
+          seenWakeMessages.add(message);
+          for (const wake of dashboardWakeMessages(message)) settleBefore({ ...wake, at: now() });
+        }
+        if (observeBatchEvent(lead, e as Parameters<typeof observeBatchEvent>[1], now())) leadDirty = true;
+        scheduleFlush();
+        return;
+      }
       case "tool_execution_start":
       case "tool_execution_end":
       case "turn_end":
@@ -794,6 +845,11 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   }
 
   function reset(): void {
+    stopWatchingTasks?.();
+    stopWatchingTasks = undefined;
+    seenWakeMessages = new WeakSet();
+    taskCountsAccepted = false;
+    wakeAccepted = false;
     cancelFlush?.();
     cancelFlush = undefined;
     cancelPoll?.();
@@ -826,7 +882,11 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
       stopped = false;
       push({ kind: "reset" });
       agentsDirty = options.agents !== undefined;
-      statusDirty = options.status !== undefined;
+      statusDirty = options.status !== undefined || options.taskCounts !== undefined;
+      if (options.taskCounts) stopWatchingTasks = onBackgroundTasksChanged(() => {
+        statusDirty = true;
+        scheduleFlush();
+      });
       scheduleFlush();
     },
     stop() {
@@ -874,7 +934,7 @@ export const DASHBOARD_LEAD_EVENTS = [
  * (a `session_before_compact` handler that returns nothing neither cancels
  * nor replaces the compaction).
  */
-export function registerDashboardLeadEvents(pi: { on(event: string, handler: (event: unknown) => void): void }, feed: () => DashboardFeed | undefined): void {
+export function registerDashboardLeadEvents(pi: { on(event: string, handler: (event: unknown) => void): void }, feed: () => Pick<DashboardFeed, "leadEvent"> | undefined): void {
   for (const name of DASHBOARD_LEAD_EVENTS) {
     pi.on(name, (event) => {
       try {

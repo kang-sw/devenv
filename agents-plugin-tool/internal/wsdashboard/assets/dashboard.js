@@ -2043,25 +2043,27 @@
     }
   }
   // --- background-task badge ---------------------------------------------------
-  // Beside the subagent badge: the clock and the count while the harness of
-  // a session the daemon runs reports running background tasks (its shells,
-  // monitors, and background subagents), from the convlive region's
-  // data-bg; zero, or a session with no such report, hides it. The column
-  // it shares with the subagent badge is too narrow for both full labels,
-  // so "N background tasks" is its title and accessible name (the agents
-  // panel head shows it in full).
+  // Separate harness-owned background and monitor pills follow subagents.
+  // The live region carries counts for terminal and hosted sessions alike;
+  // a missing count or a zero leaves its pill hidden.
   var bgbadge = $("bgbadge"), bgTitle = bgbadge ? bgbadge.title : "";
-  function bgBadge(clive) {
-    if (!bgbadge) return;
-    var n = clive ? Number(clive.getAttribute("data-bg")) || 0 : 0;
-    bgbadge.hidden = !(liveMode && n > 0);
-    if (bgbadge.hidden) return;
-    var label = wsTn("js.bgtasks", n), el = bgbadge.querySelector(".blabel");
-    if (el && el.textContent !== String(n)) el.textContent = String(n);
-    if (bgbadge.getAttribute("aria-label") !== label) {
-      bgbadge.setAttribute("aria-label", label);
-      bgbadge.title = label + (bgTitle ? " \u00b7 " + bgTitle : "");
+  var monbadge = $("monbadge"), monTitle = monbadge ? monbadge.title : "";
+  function taskBadge(badge, clive, attr, title) {
+    if (!badge) return;
+    var n = clive ? Number(clive.getAttribute(attr)) || 0 : 0;
+    badge.hidden = !(liveMode && n > 0);
+    if (badge.hidden) return;
+    var label = attr === "data-bg" ? wsTn("js.bgtasks", n) : wsTn("js.monitors", n);
+    var el = badge.querySelector(".blabel");
+    if (el && el.textContent !== label) el.textContent = label;
+    if (badge.getAttribute("aria-label") !== label) {
+      badge.setAttribute("aria-label", label);
+      badge.title = label + (title ? " \u00b7 " + title : "");
     }
+  }
+  function bgBadge(clive) {
+    taskBadge(bgbadge, clive, "data-bg", bgTitle);
+    taskBadge(monbadge, clive, "data-monitors", monTitle);
   }
   function interruptTurn() {
     if (interrupting) return;

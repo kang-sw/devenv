@@ -223,7 +223,7 @@ func TestConvLiveCarriesSubagentCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if html := string(set[regionConvLive].HTML); !strings.Contains(html, `<div class="conv clive" data-phase="" data-sub="1" data-subdeep="2">`) {
+	if html := string(set[regionConvLive].HTML); !strings.Contains(html, `<div class="conv clive" data-phase="" data-sub="1" data-subdeep="2" data-bg="0" data-monitors="0">`) {
 		t.Errorf("convlive lacks the subagent counts:\n%s", html)
 	}
 }
@@ -243,7 +243,7 @@ func TestConvLiveCarriesTurnStamp(t *testing.T) {
 	}
 	started := testNow.Add(-2 * time.Second).UnixMilli()
 	working := wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseThinking, PhaseStartedAt: started}, TurnStartedAt: started}
-	if html, want := render(working), fmt.Sprintf(`data-subdeep="0" data-turn="%d">`, started); !strings.Contains(html, want) {
+	if html, want := render(working), fmt.Sprintf(`data-subdeep="0" data-turn="%d"`, started); !strings.Contains(html, want) {
 		t.Errorf("a working lead's convlive lacks %s:\n%s", want, html)
 	}
 	if html := render(wslive.Lead{}); strings.Contains(html, "data-turn") {
@@ -777,7 +777,7 @@ func TestHostedRecoveryAndFailures(t *testing.T) {
 		t.Errorf("agents panel head lacks %s:\n%s", want, tree)
 	}
 	for _, want := range []string{
-		` data-bg="2">`,
+		` data-bg="2" data-monitors="0">`,
 		`<div class="sysline retry running"><span class="mk"><span class="spin"></span></span><span class="nt">retrying, attempt 2/10: overloaded</span></div>`,
 	} {
 		if !strings.Contains(live, want) {
@@ -799,14 +799,14 @@ func TestHostedRecoveryAndFailures(t *testing.T) {
 	host.BackgroundTasks = 0
 	host.Retry = &wslive.Retry{Attempt: 3}
 	regions = render(host)
-	if live := string(regions[regionConvLive].HTML); !strings.Contains(live, `<span class="nt">retrying, attempt 3</span>`) || !strings.Contains(live, ` data-bg="0">`) {
+	if live := string(regions[regionConvLive].HTML); !strings.Contains(live, `<span class="nt">retrying, attempt 3</span>`) || !strings.Contains(live, ` data-bg="0" data-monitors="0">`) {
 		t.Errorf("a retry with no maximum or error, and no background task:\n%s", live)
 	}
 
 	regions = render(nil)
 	head, tree, live = string(regions[regionHead].HTML), string(regions[regionTree].HTML), string(regions[regionConvLive].HTML)
 	for name, html := range map[string]string{"head": head, "tree": tree, "live": live} {
-		for _, not := range []string{"sse err", "chip fail", "mcpbad", "chip bgt", "data-bg", "sysline retry"} {
+		for _, not := range []string{"sse err", "chip fail", "mcpbad", "chip bgt", "sysline retry"} {
 			if strings.Contains(html, not) {
 				t.Errorf("%s without host state shows %q:\n%s", name, not, html)
 			}

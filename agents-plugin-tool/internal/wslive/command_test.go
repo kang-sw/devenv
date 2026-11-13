@@ -81,7 +81,7 @@ func TestCommandEventWritesACommandLine(t *testing.T) {
 // TestOptionalKindsNameTheCommandKinds pins that the intake announces both
 // command kinds, so an adapter sends them only to a ws-mcp that takes them.
 func TestOptionalKindsNameTheCommandKinds(t *testing.T) {
-	want := []string{KindStatus, KindCompact, KindCommands, KindCommand}
+	want := []string{KindStatus, KindCompact, KindCommands, KindCommand, KindWake}
 	if !reflect.DeepEqual(OptionalKinds, want) {
 		t.Fatalf("OptionalKinds = %v, want %v", OptionalKinds, want)
 	}
