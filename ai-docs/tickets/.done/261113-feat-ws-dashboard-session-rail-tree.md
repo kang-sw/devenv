@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d027b49160890a53
 sage-review-completeness-reviewed: d027b49160890a53
+completed: 2026-11-14
 ---
 
 # Dashboard session rail: reliable reorder, hover rename/copy, depth-1 session tree, context menu
@@ -475,6 +476,55 @@ Verification:
   (`ai-docs/tickets/assets/261113-feat-ws-dashboard-session-rail-tree/session-rail-branch-indent-mockup.html`);
   the hierarchy, star position and grip column match it.
 
+### Result (898b56491) - 2026-11-14
+
+Landed in 7ce5df3bb, f4122e7d4, 9c694d73b and 898b56491.
+
+- **rail.js:** `dropRefusal`, `itemKey`/`refind` and `swapGate`, the pure parts of
+  the press/swap rules, with node tests in `railscript_test.go`.
+- **Head rename:** the head's rename runs from an edit object, so rail rows
+  reuse `labelStart`/`labelKey`/`labelSave`.
+- **Rows:**
+  - A grip in the 14 px column. The star sits after the name, outside the link.
+  - The link is split into `.rl` (the name, the only tab stop) and the tail and
+    message links (`tabindex -1`), so the whole row still navigates.
+  - The pencil and clipboard sit over a fixed 44 px time slot.
+  - The workspace / worktree / session indent is 12 / 28 / 49 px.
+- **Copy tag:** the head and each rail row build it with one Go builder. Its
+  inputs come from the rail view (Decision 10).
+- **Drag:** a rail swap is held from the press on a grip or a bar. A refused drop
+  shows a hint and the not-allowed cursor. The drop line is clamped to the list
+  edge, `RD_EDGE` is 48 px, and the order is applied once after the drop.
+- **New i18n keys:** `rail.copy`, `js.rail.drag.ws`, `js.rail.drag.wt` and
+  `js.rail.drag.stars` in every table. The non-English entries are unchecked
+  worker translations, listed in 9c694d73b.
+- **Headless harness:** `scripts/rail-headless.mjs`.
+  - Overriding the Constraints text by the lead's instruction, it never runs
+    `dev.py rerun daemon`.
+  - It builds `ws-mcp` and starts its own `ws-mcp dashboard --port 0` with a temp
+    `WS_CACHE_HOME`, `WS_CONFIG_HOME` and `HOME`, and seeds fake registrations.
+  - Later phases append to its `SCENARIOS`.
+
+Verification:
+- `go build ./... && go vet && go test ./internal/wsdashboard/ ./internal/wsi18n/...`:
+  ok.
+- `node scripts/rail-headless.mjs`: all 12 scenarios passed (offsets, star, grip,
+  body-press, grip-reorder with a swap mid-press, swap-after-drop, refused-hint,
+  clamp, edge-scroll at 40 px, rename with a swap mid-edit, copy equal to the
+  head's, look).
+- LOOK: captures at the column and overlay widths match the mockup's "안 A" for
+  the hierarchy, star position and grip column.
+
+Decisions:
+- A row's hover and current background starts at the guide line and includes the
+  grip; the mockup starts it at 49 px.
+- A group's only row still drags, so that the refusal hint explains why it
+  cannot move.
+- A window blur ends a press, so that a lost release cannot hold swaps forever.
+- A plain-folder row copies a tag without `root` or `branch`, as the head does
+  outside git.
+- The pencil reuses the `head.rename` string.
+
 ### Phase 2: server-side layout store and route
 
 Decisions 3, 4, 13. The server orders rows from the store, there is a
@@ -505,6 +555,68 @@ Verification:
   order; two browsers that both try to import leave exactly one import
   applied and both clear their keys.
 
+### Result (09d894cc0) - 2026-11-14
+
+Landed in 51429395e, 845578455, and 09d894cc0.
+
+- **Store.** `rail_layout.go` adds the `rail-layout.json` store in the daemon
+  directory, at `schema_version` 1:
+  `{schema_version, workspace_order, workspaces: {path: {order, children, stars}}}`.
+  - Every op re-reads the file under a mutex before it writes.
+  - A malformed file, or one with a newer schema, refuses the write.
+  - Unknown fields are kept, both at the top level and per workspace.
+  - Unknown rids are filtered on read. A write prunes them only after
+    `index.Loaded()`, which is new.
+- **Route.** `rail_layout_route.go` serves `POST /rail/layout` with all seven
+  ops and Decision 4's validation, orphans included.
+  - Validation uses the rail's own grouping: `railBaseView`.
+  - Answers: 200 `{applied}`; 200 `not_applied` (import); 409 for a refusal; 400
+    `invalid`; 503 `retry`; 500 `store`.
+  - The reason codes are a stable set shared with the client: `unknown`,
+    `ended`, `self`, `depth`, `workspace`, `group`, `level`, `stars`, `child`,
+    `toplevel`, `invalid`, `retry`, `store`. Each maps to the i18n key
+    `js.rail.layout.<code>`.
+  - Phase 1's drag-hint keys were renamed onto `workspace`, `group`, and
+    `stars`.
+- **Ordering.** The server orders rows: starred units first, then the layout
+  order (rows it does not hold go on top), then registration order. It orders
+  workspaces by `workspace_order`.
+  - The star state is rendered by the server.
+  - A layout generation is added to the rail stamp (`data-lgen`), and every
+    write wakes `railListRepoKey`.
+  - In this phase a stored child renders flat, right after its parent.
+- **Client.**
+  - A drop moves the row at once, posts `move` or `wsmove`, and undoes the move
+    on a refusal.
+  - A star click posts `star` or `unstar`.
+  - A swap is held while an op is in flight. A render whose `data-lgen` is
+    older than the last applied one is dropped.
+  - The one-time `import` follows Decision 3's edge rules. Local keys are kept
+    on `retry`.
+  - The only client layout state left is the `railcol` collapse set. No order or
+    star pre-paint code remains, so the iframe shell rebases onto collapse
+    only.
+
+Verification:
+- `gofmt`, `go build ./...`, `go vet`, and
+  `go test ./internal/wsdashboard/ ./internal/wsi18n/...`: ok.
+- `node scripts/rail-headless.mjs`: all 16 scenarios passed, in two runs. They
+  include `layout-shared` (two browsers: reorder, star, and workspace order),
+  `layout-import`, `layout-stale-keys`, and `layout-import-race` (exactly one
+  import applied).
+- The non-English entries for the ten new `js.rail.layout.*` keys are unchecked
+  worker translations.
+
+Decisions:
+- **Write gate.** The route takes same-origin only, like the workspace routes.
+  The Constraints line names "local viewer + same-origin", but the existing rail
+  write routes (workspace add, forget, and worktree add) check same-origin
+  only. `TrustedWrite`'s local-viewer check is kept for writes that carry
+  execution authority, such as worktree delete. A layout edit carries none.
+- **Empty layout.** The layout counts as empty only when it holds no entry at
+  all, whether or not the rail still lists the stored rids.
+- **`not_applied`.** It is answered with 200 and is never toasted.
+
 ### Phase 3: the tree
 
 Decisions 5-9. Rendering, the three-zone drop, attach/detach, the collapse
@@ -525,6 +637,73 @@ Verification:
   waits on approval (the roll-up badge is visible on 메인 only while
   collapsed). Screenshots at the default rail width and the overlay rail.
 
+### Result (764f4c60c) - 2026-11-14
+
+Landed in 6c7678eab, d0f1f5bb7, 5f3c6bb09, 1970aafeb, 92e2f5d35 and
+764f4c60c.
+
+What landed:
+- `WsRail.dropZone(d, t, frac)` in rail.js is the pure zone and validity
+  function.
+  - `d` and `t` come from `WsRail.rowFacts(row)`: `{rid, ws, group, live,
+    parent, kids, star, first}`.
+  - It returns `{zone, ref, op}`, `{refusal: <code>}` or `null`.
+  - The refusal codes are the same as the route's, and each refusal follows the
+    route's check order for the op the drop would post.
+  - `dropNoop` and `moveRow` sit beside it. Phase 4's keyboard path reuses
+    them.
+- The Go view nests children under their parent, inside a sibling
+  `<div class="rkids" data-parent>`.
+  - A child row is one line, carries its message as its `title`, shows no star,
+    and shows a branch tag when its worktree group differs from its parent's.
+  - The parent's roll-up marks are always rendered: the `.kap` approval badge
+    with the child count, and the working orb. CSS shows them only while the
+    parent is collapsed.
+  - Orphans follow Decision 7: the parent's slot in the same worktree, else the
+    head of their own group.
+- The client drag uses three zones per row: a quarter line before, a quarter
+  line after, and a middle child zone with an outline, a tint and "↳".
+  - A drop line sits at the indent of the level it lands on.
+  - A parent drags with its whole unit.
+  - A drop posts `attach`, `detach` or `move`. A refusal toasts the mapped
+    reason.
+- Collapse:
+  - The set is kept per browser in localStorage under `ws.dashboard.railkids`,
+    and the parent shows a chevron with the child count.
+  - Left and Right on a focused parent row collapse and expand it, only with no
+    modifier key.
+  - Children step in 16 px, or 12 px in the overlay rail.
+
+Verification:
+- `gofmt`, `go build ./...`, `go vet` and
+  `go test ./internal/wsdashboard/ ./internal/wsi18n/...` pass. These include
+  the node zone tests and the Go view tests listed above.
+- `node scripts/rail-headless.mjs` passes all 17 scenarios, among them the
+  new `tree` scenario:
+  - attach EXEC and UI under 메인;
+  - reorder the children;
+  - detach one by a top-level line;
+  - collapse 메인 while UI waits on approval (seeded through the snapshot's
+    permission phase): the roll-up badge shows only while collapsed.
+  - Screenshots were taken at the column and overlay widths.
+
+Decisions:
+- A session leaves the rail only by leaving the index, because the dashboard has
+  no session-forget route. Its link is then dropped by the Phase 2 read filter
+  and prune, so no forget hook was added.
+- "After" an expanded parent lands before its first child, at the child indent.
+- A parent dragged over another parent's child is refused as `depth`.
+- The refused-hint scenario now reads the cross-worktree and cross-star
+  refusals on a row's top edge, because the middle of the row is now a valid
+  attach target.
+- The non-English entries of the `rail.kids.*` keys are unchecked worker
+  translations.
+
+Known limits:
+- A child whose own worktree group has no top-level row has no drop line for a
+  detach. Phase 4's Alt+← and the context menu cover that case.
+- The collapse set never prunes ids.
+
 ### Phase 4: context menu and keyboard path
 
 Decisions 11, 12.
@@ -537,3 +716,61 @@ Verification:
   drags. Shift+F10 opens it from the keyboard; Alt+arrows reorder, attach
   and detach with an aria-live announcement, and Alt+← / Alt+→ leave the
   page URL and history length unchanged.
+
+### Result (b710d81ce) - 2026-11-14
+
+Landed in 066d31ea6, a5ae6f511, 4d760277c, and the lite-review fix b710d81ce.
+
+- **Pure helpers in rail.js:** `WsRail.keyMove` (the Alt+arrow op for a row,
+  or the route's refusal code) and `WsRail.underRows` (the eligible parents
+  for "move under"). Both have node tests.
+- **Row menu** (a new rail popover kind, `rp` kind "row"):
+  - It opens on right click, on a 500 ms long-press of a row under touch (the
+    grip still drags with no hold), and on Shift+F10 or the ContextMenu key.
+  - Entries: rename, copy address, move under ▸, detach (children only), and
+    reopen/take over (ended rows with a revive).
+  - Hosted rows add the session menu for that rid. `rpSessMake` now takes the
+    row's rid, reads `/agents/<rid>`, and posts to it. The head menu keeps the
+    viewed rid.
+  - Placement uses `popPlace`. Escape returns focus to the row. Arrow, Home
+    and End navigate the menu.
+- **Keyboard:** Alt+↑/↓ reorder, Alt+→ attaches to the previous top-level
+  sibling, and Alt+← detaches.
+  - Every Alt+arrow press is `preventDefault`ed.
+  - An applied op is announced in an aria-live line. A refusal toasts the
+    route's reason string.
+  - One keyboard op is in flight at a time.
+- **Translations:** the seven new `js.rail.menu.*` and `js.rail.moved.*` keys
+  are unchecked worker translations in their non-English entries.
+
+Verification:
+- `gofmt`, `go build ./...`, `go vet`, and
+  `go test ./internal/wsdashboard/ ./internal/wsi18n/...`: ok after
+  b710d81ce.
+- `node scripts/rail-headless.mjs`: all 22 scenarios passed after b710d81ce.
+  - `menu`: rename, copy, move under, and detach on a non-hosted row.
+  - `menu-hosted`: an effort change from another hosted row's menu hit only
+    `/agents/<that rid>/settings`. The page routed both requests, so no harness
+    ran.
+  - `menu-touch`: the long-press opens the menu, and the grip drags.
+  - `menu-keys`: Shift+F10 and the ContextMenu key.
+  - `keys`: Alt+arrows reorder, attach, and detach with an announcement. URL
+    and `history.length` are unchanged.
+- Lite review (one pass): no Critical findings. The Important finding was
+  fixed in b710d81ce: a row placed after an orphan landed on the wrong side
+  because the orphan ranked by its ended parent's slot. Now the orphan's own
+  order entry ranks it once a placement has stored one. The Minor finding was
+  also fixed: layout posts time out after 15 s.
+
+Decisions:
+- "Move under" expands in place below its item. With no candidate it is
+  disabled, and its tooltip gives the reason.
+- Ended rows get no "move under" or "detach" entry.
+- A hand-off from another row's menu shows its resume command on that
+  session's page.
+
+Forward:
+- A label saved on this page shows before its render arrives. If a second
+  writer sets it back first, the page stays stale until the next rail change,
+  because the daemon dedupes each stream against the render it last sent. A
+  client-only fix was tried and reverted (b710d81ce).

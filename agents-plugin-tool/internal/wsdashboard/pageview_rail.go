@@ -53,6 +53,12 @@ type RailView struct {
 	// every viewer, so the page itself hides the button from a viewer the
 	// spawn route would refuse.
 	CanSpawn bool
+	// LayoutEmpty reports a rail layout (rail_layout.go) that holds no
+	// entry at all: a browser with a retired local order then imports it. LayoutGen is the layout's generation, which rises with
+	// every change, so a browser that saw a change applied can tell a
+	// render from before it.
+	LayoutEmpty bool
+	LayoutGen   uint64
 }
 
 // RailWorkspace is one repository or plain folder.
@@ -111,6 +117,11 @@ type RailRow struct {
 	// Label is the session's display label, shown in place of ReplyID;
 	// empty when it has none.
 	Label string
+	// Project is the registration's project folder. MailboxOpen is the
+	// row's copy tag up to its closing (mailboxOpen), from the worktree the
+	// row sits under, never a per-row git read: set by buildRailView once
+	// that worktree's branch is known.
+	Project, MailboxOpen string
 	// Working reports a lead at work: a live adapter and a phase other than
 	// idle and permission (a permission wait is the lead waiting on the
 	// user). The index's working total counts permission waits; the rail
@@ -139,6 +150,28 @@ type RailRow struct {
 	// usage limit) that keeps a hosted session from working until a turn
 	// succeeds, as its runner reports it (wslive.Host); nil when none.
 	Failure *wslive.Notice
+	// Starred marks a starred session whose star counts (the rail layout's
+	// stars; a child's is inert while it is a child).
+	Starred bool
+	// The tree, as the rail layout sets it (orderRailView). Group is the
+	// path of the worktree group the session belongs to (its worktree, or
+	// a plain-folder workspace). Children are a live top-level row's live
+	// children in their order, rendered under it; Child marks such a row,
+	// and BranchTag names its worktree (its branch, else its folder) when
+	// that differs from its parent's. StarHidden marks a stored child of a
+	// live parent (an ended one too, in the ended fold): its star is inert,
+	// so the row shows none. HasChildren marks a stored parent of a live or
+	// an ended child, which can never become a child. KidApprovals and
+	// KidWorking roll the children's approval waits and work up onto the
+	// parent, shown while the page collapses it.
+	Group        string
+	Children     []RailRow
+	Child        bool
+	BranchTag    string
+	StarHidden   bool
+	HasChildren  bool
+	KidApprovals int
+	KidWorking   bool
 	// Revive is how the dashboard brings an ended session back, on a daemon
 	// that hosts lead sessions: ReviveReopen for a closed hosted session,
 	// ReviveTakeover for a session a terminal harness ran, empty when it
@@ -362,6 +395,8 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			}
 			sortRailRows(ws.Sessions, regs)
 			sortRailEnded(ws.Ended, regs)
+			railMailbox(ws.Sessions, "", "")
+			railMailbox(ws.Ended, "", "")
 			view.Workspaces = append(view.Workspaces, ws)
 			continue
 		}
@@ -462,6 +497,12 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			}
 			sortRailRows(a.wt.Sessions, a.regs)
 			sortRailEnded(a.wt.Ended, a.regs)
+			branch := a.wt.Branch
+			if a.wt.Detached {
+				branch = ""
+			}
+			railMailbox(a.wt.Sessions, a.wt.Path, branch)
+			railMailbox(a.wt.Ended, a.wt.Path, branch)
 			ws.Worktrees = append(ws.Worktrees, a.wt)
 		}
 		sort.SliceStable(ws.Worktrees, func(i, j int) bool {
@@ -478,7 +519,8 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 
 // sortRailRows orders live sessions by registration, newest first: the
 // order does not move with heartbeats or activity, so a row stays where the
-// user last saw it (starred rows are pinned on the client).
+// user last saw it (the rail layout orders the rows after it,
+// orderRailView).
 func sortRailRows(rows []RailRow, regs map[string]Registration) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		a, b := regs[rows[i].ReplyID].RegisteredAt, regs[rows[j].ReplyID].RegisteredAt
@@ -506,6 +548,7 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 	row := RailRow{
 		ReplyID:     reg.ReplyID,
 		Label:       in.Session.Label,
+		Project:     reg.Project,
 		Harness:     reg.Harness,
 		Live:        live,
 		CountPolicy: in.Session.CountPolicy,
@@ -533,6 +576,24 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 		}
 	}
 	return row
+}
+
+// MailboxRef is the tag the row's copy button copies: for a session in a
+// listed worktree, the very tag the head's name copies.
+func (r RailRow) MailboxRef() string { return mailboxRef(r.MailboxOpen, r.Label) }
+
+// LabelMax bounds a rename typed into a rail row, as SessionView.LabelMax.
+func (RailView) LabelMax() int { return maxLabelRunes }
+
+// railMailbox sets each row's copy tag from the worktree it sits under:
+// root is that worktree's top level, branch its branch unless detached. A
+// plain folder passes neither, as the head's name copies no root or branch
+// outside a repository.
+func railMailbox(rows []RailRow, root, branch string) {
+	for i := range rows {
+		r := &rows[i]
+		r.MailboxOpen = mailboxOpen(r.ReplyID, r.Project, root, branch, r.Harness)
+	}
 }
 
 // Stopped reports a hosted session with no harness process: the rail shows

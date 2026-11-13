@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -359,6 +360,71 @@ func TestRailRowApproval(t *testing.T) {
 		if ws.Approvals != 1 {
 			t.Errorf("workspace %s approvals = %d, want 1", ws.Path, ws.Approvals)
 		}
+	}
+}
+
+// TestRailRowMailboxRef pins a rail row's copy tag: the head's builder fed
+// from the rail view, never a per-row git read. A session in a listed
+// worktree copies the very tag its head's name copies (root only when it is
+// not the project, no branch on a detached worktree, the label escaped as
+// the body); a plain folder's row names no root or branch, as the head's
+// name outside a repository.
+func TestRailRowMailboxRef(t *testing.T) {
+	now := time.Now()
+	repo, feat := filepath.FromSlash("/w/repo"), filepath.FromSlash("/w/feature")
+	sub := filepath.Join(repo, "sub")
+	labeled := railSession("feat", feat, now, time.Time{})
+	labeled.Label = `a" & <b>`
+	view := buildRailView([]railInput{
+		{Session: railSession("rootsub", sub, now, time.Time{}), Repo: repo},
+		{Session: labeled, Repo: repo},
+		{Session: railSession("idle", filepath.FromSlash("/w/idle"), now.Add(-time.Hour), now.Add(-time.Minute)), Repo: repo},
+		{Session: railSession("plain", filepath.FromSlash("/w/plain/sub"), now, time.Time{})},
+	}, map[string]railRepo{repo: {Read: true, Entries: []railWorktreeEntry{
+		{Path: repo, Branch: "develop"},
+		{Path: feat, Branch: "feat/x"},
+		{Path: "/w/idle", Detached: true},
+	}}}, []storedWorkspace{{Path: filepath.FromSlash("/w/plain")}}, now)
+	rows := map[string]RailRow{}
+	for _, ws := range view.Workspaces {
+		for _, r := range append(ws.Sessions, ws.Ended...) {
+			rows[r.ReplyID] = r
+		}
+		for _, wt := range ws.Worktrees {
+			for _, r := range append(wt.Sessions, wt.Ended...) {
+				rows[r.ReplyID] = r
+			}
+		}
+	}
+	head := func(id, project, label, top, branch string, detached bool) string {
+		return SessionView{ReplyID: id, Project: project, Harness: "claude", Label: label,
+			Git: &GitBadge{TopLevel: top, Repo: wslive.Repo{Branch: branch, Detached: detached}}}.MailboxRef()
+	}
+	for _, c := range []struct{ id, want string }{
+		{"rootsub", head("rootsub", sub, "", repo, "develop", false)},
+		{"feat", head("feat", feat, `a" & <b>`, feat, "feat/x", false)},
+		{"idle", head("idle", filepath.FromSlash("/w/idle"), "", filepath.FromSlash("/w/idle"), "", true)},
+		{"plain", SessionView{ReplyID: "plain", Project: filepath.FromSlash("/w/plain/sub"), Harness: "claude"}.MailboxRef()},
+	} {
+		if got := rows[c.id].MailboxRef(); got != c.want {
+			t.Errorf("row %s copies %q, want the head's %q", c.id, got, c.want)
+		}
+	}
+	if got := rows["rootsub"].MailboxRef(); !strings.Contains(got, ` root="`+repo+`" branch="develop"`) {
+		t.Errorf("a session in a folder of its worktree copies %q, want the worktree as root", got)
+	}
+	if got := rows["plain"].MailboxRef(); strings.Contains(got, "root=") || strings.Contains(got, "branch=") {
+		t.Errorf("a plain folder's row copies %q, want no root or branch", got)
+	}
+	html, err := renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `class="drcopy" data-copy="` + template.HTMLEscapeString(rows["feat"].MailboxRef()) + `" data-mailbox-open="` + template.HTMLEscapeString(rows["feat"].MailboxOpen) + `"`; !strings.Contains(string(html.HTML), want) {
+		t.Errorf("the rail lacks the labeled row's copy button %s:\n%s", want, html.HTML)
+	}
+	if !strings.Contains(string(html.HTML), `<div class="rlist" id="rlist" data-max="64" `) {
+		t.Errorf("the rail list lacks the rename limit:\n%s", html.HTML)
 	}
 }
 
@@ -858,9 +924,9 @@ func TestRailMarkupRevive(t *testing.T) {
 	}
 	const reason = `This session&#39;s harness reported no conversation to resume (it last ran with an older ws plugin)`
 	for id, want := range map[string]string{
-		"taken":  `</a><button type="button" class="rrev" data-revive="takeover" title="Continue this session in the dashboard">Take over</button></div>`,
-		"closed": `</a><button type="button" class="rrev" data-revive="reopen" title="Open this closed session again in the dashboard">Reopen</button></div>`,
-		"stuck":  `</a><button type="button" class="rrev" data-revive="takeover" aria-disabled="true" title="` + reason + `" aria-label="` + reason + `">Take over</button></div>`,
+		"taken":  `</div><button type="button" class="rrev" data-revive="takeover" title="Continue this session in the dashboard">Take over</button></div>`,
+		"closed": `</div><button type="button" class="rrev" data-revive="reopen" title="Open this closed session again in the dashboard">Reopen</button></div>`,
+		"stuck":  `</div><button type="button" class="rrev" data-revive="takeover" aria-disabled="true" title="` + reason + `" aria-label="` + reason + `">Take over</button></div>`,
 	} {
 		if row := rowOf(id); !strings.Contains(row, want) {
 			t.Errorf("row %s lacks %s:\n%s", id, want, row)
@@ -959,5 +1025,75 @@ func TestRailStoppedRowSleeps(t *testing.T) {
 	}
 	if strings.Contains(css, ".zz") {
 		t.Error("dashboard.css keeps the moon's rules")
+	}
+}
+
+// TestRailMarkupTree pins a tree's markup: a parent's children follow its
+// row in its children box; a child row is one line (no message line, the
+// message in its title), starless, carries its own group, and its branch
+// tag when its worktree is not its parent's; a parent carries its toggle,
+// data-kids, and its children's roll-ups (the "?" badge, the working orb)
+// whatever the page's collapse state, which only the page sets (kcol), and
+// the stylesheet shows the roll-ups only while the page collapses it.
+func TestRailMarkupTree(t *testing.T) {
+	region, err := renderRailRegion(railTreeView(), "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(region.HTML)
+	rowOf := func(id string) string {
+		_, rest, ok := strings.Cut(html, `data-rid="`+id+`"`)
+		if !ok {
+			t.Fatalf("no row %s:\n%s", id, html)
+		}
+		end := len(rest)
+		for _, m := range []string{`<div class="rs`, `<div class="rkids"`, `<details`, `</details>`} {
+			if i := strings.Index(rest, m); i >= 0 && i < end {
+				end = i
+			}
+		}
+		return rest[:end]
+	}
+	if !strings.Contains(html, `</div></div><div class="rkids" data-parent="a1"><div class="rs" data-rid="b1"`) {
+		t.Errorf("a1's children do not follow its row in its box:\n%s", html)
+	}
+	a1 := rowOf("a1")
+	for _, want := range []string{` data-kids="1"`, `class="kidtog" aria-expanded="true" title="2 sessions under this one: show or hide"`, `<span class="kn">2</span>`,
+		`<span class="chip perm kap" title="1 session under this one awaits approval">?</span>`, `<span class="orb kidorb">`, `class="star"`} {
+		if !strings.Contains(a1, want) {
+			t.Errorf("the parent a1 lacks %s:\n%s", want, a1)
+		}
+	}
+	if strings.Contains(html, "kcol") {
+		t.Errorf("the render carries a collapse state:\n%s", html)
+	}
+	a2 := rowOf("a2")
+	if !strings.Contains(a2, ` data-g="/w/repo" title="the whole last message">`) || strings.Contains(a2, `class="drmsg"`) || strings.Contains(a2, `class="star"`) || strings.Contains(a2, `class="rbt"`) {
+		t.Errorf("the child a2 is not one starless untagged line titled with its message:\n%s", a2)
+	}
+	if !strings.Contains(a2, `<span class="chip perm" title=`) {
+		t.Errorf("the child a2 lost its approval badge:\n%s", a2)
+	}
+	b1 := rowOf("b1")
+	if !strings.Contains(b1, ` data-g="/w/feat"`) || !strings.Contains(b1, `<span class="rbt" title="/w/feat"><svg class="i" aria-hidden="true"><use href="#i-branch"/></svg><span>feat/x</span></span>`) {
+		t.Errorf("the child b1 of another worktree lacks its group or branch tag:\n%s", b1)
+	}
+	if a3 := rowOf("a3"); !strings.Contains(a3, ` data-kids="1"`) || strings.Contains(a3, "kidtog") || strings.Contains(a3, "kap") {
+		t.Errorf("a3, a parent of an ended child only, is marked wrong:\n%s", a3)
+	}
+	if ae := rowOf("ae"); strings.Contains(ae, `class="star"`) || strings.Contains(ae, "data-g=") {
+		t.Errorf("the ended child ae shows a star or sits as a child:\n%s", ae)
+	}
+	if a4 := rowOf("a4"); strings.Contains(a4, "data-kids") || !strings.Contains(a4, `class="star"`) {
+		t.Errorf("a4 is marked as a parent or lost its star:\n%s", a4)
+	}
+	css, err := dashboardFS.ReadFile("assets/dashboard.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{".rail .rs.kcol + .rkids { display: none; }", ".rail .rs:not(.kcol) .kap, .rail .rs:not(.kcol) .kidorb { display: none; }"} {
+		if !strings.Contains(string(css), rule) {
+			t.Errorf("dashboard.css lacks %q", rule)
+		}
 	}
 }

@@ -237,6 +237,9 @@ type Daemon struct {
 	// folder path (workspacepath.go).
 	workspaces *workspaceStore
 	pathHost   pathHost
+	// layout holds the rail's shared row order, tree, and stars
+	// (rail_layout.go).
+	layout *railLayoutStore
 	// files caches each session root's file list for the files route
 	// (files_route.go).
 	files *fileListCache
@@ -417,6 +420,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	d.railMsgs = newRailMessages()
 	d.rail = newRailLister(railRead, func() { d.broker.wake(railListRepoKey) }, d.stop)
 	d.workspaces = openWorkspaceStore(opts.WorkspacesFile)
+	d.layout = openRailLayoutStore(opts.Dir)
 	d.pathHost = daemonPathHost()
 	if d.workspaces != nil {
 		d.rail.sweep = d.workspaces.sweep
@@ -651,8 +655,9 @@ func (d *Daemon) Close() {
 // (a tracker store's support conversation: send, new, select) are the only
 // browser writes besides the git drawer's push, pull, and fetch routes
 // (gitpush.go) and, with stored workspaces, the rail's workspace routes
-// (workspace_routes.go: the stored list, and git worktree add), and its
-// system-open route (sysopen_route.go) the only route
+// (workspace_routes.go: the stored list, and git worktree add), its layout
+// route (rail_layout_route.go: the rows' shared order, tree, and stars), and
+// its system-open route (sysopen_route.go) the only route
 // that runs a host command beside git and the agent runner's harnesses (with
 // a holder manager, the holder stop route, holders.go, ends a holder, and
 // the terminal routes, terminal_routes.go, run shells for a browser on this
@@ -674,6 +679,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc(pwaPrefix, handlePWA)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
+	mux.HandleFunc(railLayoutRoute, d.handleRailLayout)
 	mux.HandleFunc(railEventsRoute, d.handleRailEvents)
 	mux.HandleFunc("/rail/memos", d.handleMemos)
 	mux.HandleFunc("/rail/usage", d.handlePlanUsage)

@@ -1558,6 +1558,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   :root[data-pincol].rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
   :root[data-pincol] .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
   :root[data-pincol].rail-open .rscrim { opacity: 1; pointer-events: auto; }
+  :root[data-pincol] .rail .rkids { margin-left: 10px; }
   :root[data-pincol] .top > .back { display: inline-flex; }
 }
 @media (min-width: 2200px) {
@@ -1629,32 +1630,51 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .wsbody { padding-top: 2px; }
 .rail .rwt { padding: 4px 0 2px; }
 .rail .rwt.empty .wthd { opacity: .6; }
-.rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
+.rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
 .rail .wthd .i { width: 12px; height: 12px; }
 .rail .wthd .br { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .rail .wthd .wf { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .rail .wthd .gs { margin-left: auto; font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rail .wsbody > .rsessions { margin-top: 4px; }
-.rail .rsessions { margin: 0 8px 0 18px; padding-left: 4px; border-left: 2px solid var(--wb-muted); }
+/* the hierarchy reads in three columns: the workspace icon at 12px, the
+   branch icon at 28px with the worktree's guide line under it, and the
+   harness icon at 49px; a row's grip takes the 14px between the guide line
+   and its harness icon */
+.rail .rsessions { margin: 0 8px 0 33px; padding-left: 0; border-left: 2px solid var(--wb-muted); }
 .rail .rended .rsessions { margin: 0; padding: 0; border: 0; }
 .rail .rended > summary { list-style: none; font-size: 11.5px; color: var(--wb-muted-fg); padding: 4px 8px 2px 14px; cursor: pointer; }
 .rail .rended > summary::-webkit-details-marker { display: none; }
 .rail .rended > summary::after { content: " \25b8"; }
 .rail .rended[open] > summary::after { content: " \25be"; }
 .rail .rended > summary:hover { color: var(--wb-primary); }
-.rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; border-radius: 6px; }
+.rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; padding-left: 14px; border-radius: 6px; }
 .rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
 .rail .rs.ended { opacity: .75; }
 /* drag to reorder (dashboard.js, rail drag): a row or a workspace bar
-   selects no text and opens no long-press menu, so a held press drags;
-   the dragged one dims and a line shows where it lands */
+   selects no text and opens no browser long-press menu, so a held press
+   drags a bar and opens a row's own menu (the rail row menu); the dragged
+   one dims and a line shows where it lands */
 .rail .rs { -webkit-user-select: none; user-select: none; }
 .rail .rs, .rail .wsbar { -webkit-touch-callout: none; }
 .rail .rs.rdrag, .rail .rws.rdrag { opacity: .45; }
 .rdragging, .rdragging * { cursor: grabbing !important; }
 .rdrop { position: fixed; z-index: 46; height: 2px; border-radius: 1px; background: var(--wb-primary); opacity: .7; pointer-events: none; }
-.rail .star { width: 16px; height: 16px; margin: 6px 5px 0 4px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; transition: opacity .12s; }
+/* a live row's grip, the only part of a row that drags (the rest is its
+   link): shown while the row is hovered or focused, always on a touch
+   screen, where it takes the touch from scrolling; over a place the drop is
+   refused the cursor says no and a hint beside the pointer says why */
+.rail .drgrip { position: absolute; left: 0; top: 0; bottom: 0; width: 14px; display: flex; justify-content: center; padding-top: 6px; box-sizing: border-box; color: var(--wb-muted-fg); cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; opacity: 0; transition: opacity .12s; }
+.rail .drgrip .i { width: 10px; height: 14px; stroke-width: 2.4; }
+.rail .rs:hover .drgrip, .rail .rs:focus-within .drgrip { opacity: .7; }
+.rail .drgrip:hover { opacity: 1; color: var(--wb-fg); }
+@media (pointer: coarse) { .rail .drgrip { opacity: .55; } }
+.rdragging.drno, .rdragging.drno * { cursor: not-allowed !important; }
+.drhint { position: fixed; z-index: 47; padding: 4px 8px; border-radius: 6px; background: var(--wb-fg); color: var(--wb-bg); font-size: 12px; font-weight: 600; white-space: nowrap; box-shadow: var(--wb-shadow-hi); pointer-events: none; }
+/* the star follows the name: hidden until the row is hovered or focused
+   (a starred row always shows it), keeping its width meanwhile so the name
+   never moves, and the name ellipsizes before it */
+.rail .star { width: 16px; height: 16px; margin: 0; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; transition: opacity .12s; }
 .rail .star .i { width: 13px; height: 13px; stroke-width: 1.4; }
 .rail .star:hover { background: var(--wb-muted); }
 .rail .star[aria-pressed="true"] { opacity: 1; color: var(--star); }
@@ -1663,6 +1683,34 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rs:hover .star[aria-pressed="false"], .rail .rs:focus-within .star[aria-pressed="false"] { opacity: .6; }
 .rail .rs .star[aria-pressed="false"]:hover, .rail .star[aria-pressed="false"]:focus-visible { opacity: 1; }
 @media (hover: none) { .rail .star[aria-pressed="false"] { opacity: .35; } }
+/* the tree: a parent's children box (.rkids) indents its rows one step
+   from the harness column (16px; 12px in the overlay rail) under a guide
+   line. The parent's toggle (chevron and child count) turns while the
+   page collapses it (kcol), which hides the box and shows the children's
+   roll-ups on the parent: the "?" approval badge and the working orb on
+   its harness icon. A child shows no star and no message line, and its
+   branch tag names its worktree when that is not its parent's. During a
+   drag the valid parent under the pointer's middle is the child zone
+   (rdkid): an accent outline and tint and a trailing arrow, no line. */
+.rail .rkids { margin-left: 14px; border-left: 2px solid var(--wb-muted); }
+/* the overlay rail's step, after the rule it overrides (the pinned
+   column's overlay, with its higher specificity, sits in its own block) */
+@media (max-width: 1599.98px) { .rail .rkids { margin-left: 10px; } }
+.rail .rs.kcol + .rkids { display: none; }
+.rail .rs:not(.kcol) .kap, .rail .rs:not(.kcol) .kidorb { display: none; }
+.rail .rkids .star, .rail .rkids .drmsg { display: none; }
+.rail .kidtog { flex: none; display: inline-flex; align-items: center; gap: 1px; height: 16px; padding: 0 4px 0 1px; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
+.rail .kidtog .i { width: 12px; height: 12px; stroke-width: 1.8; transition: transform .15s; }
+.rail .kidtog:hover, .rail .kidtog:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+.rail .rs.kcol .kidtog .i { transform: rotate(-90deg); }
+.rail .rbt { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 45%; font-family: var(--wb-mono); font-size: 10.5px; font-weight: 600; color: var(--wb-muted-fg); white-space: nowrap; }
+.rail .rbt .i { width: 10px; height: 10px; flex: none; }
+.rail .rbt span { overflow: hidden; text-overflow: ellipsis; }
+.rail .rs.rdkid { outline: 1.5px solid var(--wb-primary); outline-offset: -1.5px; background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.rail .rs.rdkid::after { content: "\21b3"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; font-weight: 800; color: var(--wb-primary); pointer-events: none; }
+.rdragging .rail .rs .dracts { display: none; }
+.rdragging .rail .rs .drslot { visibility: visible; }
+.rail .rs.rdkid .drslot { visibility: hidden; }
 /* the revive entry of an ended row: always shown, so a touch screen reaches
    it; a blocked one stays readable and says why on hover and to a reader */
 .rail .rrev { flex: none; align-self: center; margin: 0 6px 0 0; padding: 2px 7px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--wb-card); color: var(--wb-primary); font: inherit; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer; }
@@ -1671,9 +1719,35 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rrev[aria-disabled="true"] { color: var(--wb-muted-fg); border-style: dashed; cursor: not-allowed; }
 .rail .rrev[aria-disabled="true"]:hover { background: var(--wb-card); }
 .rail .rrev.busy { opacity: .55; cursor: progress; }
-.rail .rl { display: block; flex: 1 1 auto; min-width: 0; padding: 5px 8px 5px 0; color: inherit; text-decoration: none; border-radius: 6px; }
+/* a row's link is split around the star (no button inside a link): the
+   name part (.rl, the one tab stop), the rest of the first line (.drtail),
+   and the message line (.drmsg) all open the session */
+.rail .drbody { flex: 1 1 auto; min-width: 0; }
+.rail .rl { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; padding: 5px 0; color: inherit; text-decoration: none; border-radius: 6px; }
 .rail .rl:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; }
-.rail .s1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .s1 { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .s1 [hidden] { display: none; }
+.rail .drtail { flex: 1 1 0; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 5px 8px 5px 0; color: inherit; text-decoration: none; }
+.rail .drmsg { display: block; margin-top: -4px; padding: 0 8px 5px 0; color: inherit; text-decoration: none; }
+/* the time slot on the first line's right edge, wide enough for the hover
+   pencil and clipboard that take it (the time hides), so neither the name
+   nor the badges move */
+.rail .drslot { flex: none; min-width: 44px; text-align: right; }
+.rail .dracts { position: absolute; top: 0; bottom: 0; right: 8px; display: none; align-items: center; gap: 2px; }
+.rail .dracts button { display: inline-grid; place-items: center; width: 20px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .dracts .i { width: 13px; height: 13px; stroke-width: 1.6; }
+.rail .dracts button:hover, .rail .dracts button:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+@media (hover: hover) {
+  .rail .rs:hover .dracts { display: flex; }
+  .rail .rs:hover .drslot { visibility: hidden; }
+}
+.rail .rs:focus-within .dracts { display: flex; }
+.rail .rs:focus-within .drslot { visibility: hidden; }
+/* a row's rename: the input stands where the name was */
+.rail .drinp { flex: 1 1 0; min-width: 60px; margin: 3px 0; padding: 1px 4px; font: inherit; font-size: 12.5px; color: var(--wb-fg); background: var(--wb-card); border: 1px solid var(--wb-primary); border-radius: 4px; outline: none; -webkit-user-select: text; user-select: text; }
+.rail .rs .s1:has(.drinp) .drtail { flex: none; }
+.rail .rs .s1:has(.drinp) .dracts { display: none; }
+.rail .rs .s1:has(.drinp) .drslot { visibility: visible; }
 .rail .rid { font-family: var(--wb-mono); font-size: 12.5px; font-weight: 700; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .rail .rid.lbl { font-family: var(--wb-sans); font-weight: 600; }
 .rail .rs.cur .rid { color: var(--wb-fg); }
@@ -1844,6 +1918,22 @@ html:not([data-sysopen]) .rail .rdel { display: none; }
 .rpop .spact .i { width: 14px; height: 14px; flex: none; margin-top: 2px; }
 .rpop .spact .gs { display: block; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; }
 .rpop .spact.danger { color: var(--wb-fail); }
+/* a rail row's menu (dashboard.js, rail row menu): items as the link menu's,
+   the "move under" list opening in place below its item, indented, and a
+   hosted row's session menu below them; the live line its moves (and the
+   keyboard path's) are said in is read aloud, never shown */
+.rpop.rmenu { width: auto; min-width: 220px; max-width: min(330px, calc(100vw - 16px)); gap: 4px; padding: 5px; }
+.rpop .rmlist, .rpop .rmsub { display: grid; gap: 2px; min-width: 0; }
+.rpop .rmsub { max-height: 184px; overflow-y: auto; overscroll-behavior: contain; margin: 0 0 2px 20px; padding-left: 4px; border-left: 1px solid var(--wb-muted); }
+.rpop .rmi { display: flex; align-items: center; gap: 8px; min-width: 0; border: 0; background: transparent; border-radius: 7px; padding: 6px 9px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
+.rpop .rmi:hover, .rpop .rmi:focus-visible { background: var(--wb-muted); outline: none; }
+.rpop .rmi[aria-disabled="true"] { opacity: .45; cursor: default; }
+.rpop .rmi .i { width: 14px; height: 14px; flex: none; }
+.rpop .rmi .rmt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpop .rmi .rmgo { transform: rotate(-90deg); transition: transform .12s; }
+.rpop .rmi[aria-expanded="true"] .rmgo { transform: none; }
+.rpop .rmsess { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; padding: 8px 7px 4px; border-top: 1px solid var(--wb-muted); }
+.rlive { position: fixed; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
 .host.hbtn { cursor: pointer; }
 .host.hbtn .i { width: 11px; height: 11px; stroke-width: 2; }
 .host.hbtn:hover, .host.hbtn[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-muted)); color: var(--wb-fg); }
@@ -1904,6 +1994,7 @@ html:not([data-sysopen]) .rail .rdel { display: none; }
   .bgbadge { animation: none; }
   .rail .bots .i { animation: none; }
   .rail .hi .rrun, .rail .hi.perm { animation: none; }
+  .rail .kidtog .i { transition: none; }
 }
 
 /* ===== iframe shell (the "shell" template, shell.js) =====

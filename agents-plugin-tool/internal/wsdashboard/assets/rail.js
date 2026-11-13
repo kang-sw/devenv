@@ -1,14 +1,20 @@
 (function () {
   // The session rail's browser-side state, window.WsRail, for the session
   // page's script (dashboard.js) and the iframe shell's first paint:
-  // per-session drafts, the starred sessions, the collapsed workspaces and
-  // the ended folds left open, and the rail's client-side marks (the viewed
-  // session's row, the starred rows pinned first, the drag order of the
-  // sessions and workspaces, the revive entry in flight). The stored state is in localStorage under ws.dashboard.,
-  // through the store the caller passes ({ load(key), save(key, value or
-  // null) }, which must not throw), so the page works the same with storage
-  // absent; nothing reaches the server. The DOM helpers touch only the
-  // elements they are given; the revive route and hand-off notice, the
+  // per-session drafts, the collapsed workspaces, parents, and ended folds
+  // left open, and the rail's client-side marks (the viewed session's row,
+  // the revive entry in flight), with the drag's refusal, re-find, and
+  // swap-hold rules, the tree's drop zones (which the keyboard path's moves
+  // and the context menu's "move under" read too), and the rail layout
+  // route's answers. The daemon keeps the rows' order and tree, the stars,
+  // and the workspace order (its rail layout, POST /rail/layout) and renders
+  // the rail in that order; the page only reads a row's star and place from
+  // it. The drafts and the collapsed and open sets are in localStorage
+  // under ws.dashboard., through the store the caller passes ({ load(key),
+  // save(key, value or null) }, which must not throw), so the page works
+  // the same with storage absent; the retired local order and stars are
+  // read there once, for the layout's import. The DOM helpers touch only
+  // the elements they are given; the revive route and hand-off notice, the
   // popover and delete modal helpers at the end, and the approval card's
   // input preview after them, are pure.
   var DRAFT = "ws.dashboard.draft.", DRAFTS = "ws.dashboard.drafts";
@@ -116,95 +122,68 @@
       put: put
     };
   }
-  // stars are the starred sessions' reply-ids; collapsed the collapsed
-  // workspaces' paths; endedOpen the ended folds (details.rended) left
-  // open, by their data-key.
-  function stars(store) { return stringSet(store, STARS); }
+  // collapsed is the collapsed workspaces' paths; endedOpen the ended
+  // folds (details.rended) left open, by their data-key.
   function collapsed(store) { return stringSet(store, COLLAPSED); }
   function endedOpen(store) { return stringSet(store, ENDED); }
 
-  // orderList is a drag order: ids kept as one JSON array. list() reads it;
-  // place(group, present) stores group (the ids of one group, in their new
-  // order) in place of that group's ids and drops each stored id present
-  // (every id the rail shows) does not hold, returning what it stored. The
-  // groups' ids never overlap, so one array holds every group's order. A
-  // store that throws reads as no order and keeps nothing: the rail shows
-  // the server's order.
-  function orderList(store, key) {
-    function list() { try { return strings(parse(store.load(key), [])); } catch (e) { return []; } }
-    return {
-      list: list,
-      place: function (group, present) {
-        var g = strings(group), keep = Object.create(null);
-        strings(present).forEach(function (x) { keep[x] = true; });
-        var l = list().filter(function (x) { return keep[x] && g.indexOf(x) < 0; }).concat(g);
-        try { store.save(key, l.length ? JSON.stringify(l) : null); } catch (e) { /* not kept: the server's order stands */ }
-        return l;
-      }
-    };
+  // LEGACY are the retired local layout's keys (the starred sessions, the
+  // sessions' drag order by reply-id, the workspaces' by path), and what
+  // the import op calls each.
+  var LEGACY = [[ORDER, "order"], [STARS, "stars"], [WSORDER, "wsorder"]];
+  function legacyClear(store) { LEGACY.forEach(function (k) { store.save(k[0], null); }); }
+  // legacyImport is the rail layout's import of the retired local layout
+  // held in store, for a page whose rail reports the server layout empty
+  // (empty); null when there is nothing to import. A server layout that
+  // holds an entry wins: the local keys are cleared, never imported.
+  function legacyImport(store, empty) {
+    var body = { op: "import" }, any = false;
+    LEGACY.forEach(function (k) {
+      var v = strings(parse(store.load(k[0]), []));
+      body[k[1]] = v;
+      if (store.load(k[0]) !== null) any = true;
+    });
+    if (!any) return null;
+    if (!empty) { legacyClear(store); return null; }
+    return body;
   }
-  // sessionOrder is the sessions' drag order by reply-id, wsOrder the
-  // workspaces' by path.
-  function sessionOrder(store) { return orderList(store, ORDER); }
-  function wsOrder(store) { return orderList(store, WSORDER); }
+  // legacyDone takes the import's answer: an import applied, or one the
+  // server did not apply (another browser's came first), clears the local
+  // keys; any other answer (retry: the daemon has not read its registry
+  // yet; an unreachable daemon) keeps them for a later load.
+  function legacyDone(store, answer) {
+    var a = answer || {};
+    if (a.applied === true || a.reason === "not_applied") legacyClear(store);
+  }
+
+  // LAYOUT_REFUSALS maps the rail layout route's refusal reasons (the
+  // layout* codes in rail_layout.go) to their strings; the drag's own
+  // refusals (dropRefusal) and later the tree's and the keyboard's name
+  // the same codes. layoutRefusal is a reason's string key, an unknown or
+  // missing reason's the generic one.
+  var LAYOUT_REFUSALS = {
+    unknown: "js.rail.layout.unknown", ended: "js.rail.layout.ended", self: "js.rail.layout.self",
+    depth: "js.rail.layout.depth", workspace: "js.rail.layout.workspace", group: "js.rail.layout.group",
+    level: "js.rail.layout.level", stars: "js.rail.layout.stars", child: "js.rail.layout.child",
+    toplevel: "js.rail.layout.toplevel", invalid: "js.rail.layout.invalid", retry: "js.rail.layout.retry",
+    store: "js.rail.layout.store"
+  };
+  function layoutRefusal(reason) {
+    return LAYOUT_REFUSALS.hasOwnProperty(reason) ? LAYOUT_REFUSALS[reason] : LAYOUT_REFUSALS.invalid;
+  }
+  // staleRail reports a rail render (its HTML) older than the layout
+  // generation min: its list's data-lgen is below it. A render without one
+  // is never stale.
+  function staleRail(html, min) {
+    var m = /\bdata-lgen="([0-9]+)"/.exec(String(html || ""));
+    return !!m && +m[1] < min;
+  }
 
   function hasClass(el, c) { return (" " + (el.className || "") + " ").indexOf(" " + c + " ") >= 0; }
-  function kids(box, c) {
-    return Array.prototype.slice.call(box.children).filter(function (el) { return hasClass(el, c); });
-  }
-  // settle puts els (box's children, sorted) in their order before after,
-  // touching nothing when they already stand in it: a moved node loses the
-  // focus, and the rail re-sorts on every click that marks it.
-  function settle(box, els, after) {
-    var same = true;
-    for (var i = 1; i < els.length && same; i++) same = els[i - 1].nextSibling === els[i];
-    if (same && (els[els.length - 1].nextSibling || null) === after) return;
-    els.forEach(function (el) { box.insertBefore(el, after); });
-  }
-  function ord(el, i) {
-    if (el.getAttribute("data-ord") === null) el.setAttribute("data-ord", String(i));
-    return +el.getAttribute("data-ord");
-  }
-
-  // pin marks each row of box (a rail sessions list) starred or not from
-  // starred (a stars set) and orders the starred rows first. Within each
-  // part the rows follow order (the drag order's ids, for a list of live
-  // rows): a row it does not hold (a session new since the last drag)
-  // first, then the rest as it lists them; without order, and among the
-  // new rows, in the order the server sent (data-ord, set on first sight).
-  // Unstarring a row returns it to its place. Anything after the rows (the
-  // ended fold) stays after them.
-  function pin(box, starred, order) {
-    var rows = kids(box, "rs");
-    if (!rows.length) return;
-    var after = rows[rows.length - 1].nextSibling || null;
-    rows.forEach(function (r, i) {
-      var id = r.getAttribute("data-rid") || "", s = starred.has(id);
-      r.wsOrd = ord(r, i);
-      r.wsRank = order ? order.indexOf(id) : -1;
-      r.wsStar = s;
-      var b = r.querySelector(".star");
-      if (b) b.setAttribute("aria-pressed", String(s));
-    });
-    rows.sort(function (a, b) { return (b.wsStar - a.wsStar) || (a.wsRank - b.wsRank) || (a.wsOrd - b.wsOrd); });
-    settle(box, rows, after);
-  }
-
-  // arrange orders the workspace sections of list (the rail's list) by
-  // order (the drag order's paths); a section it does not hold goes after
-  // the ordered ones, in the order the server sent (data-ord). Anything
-  // after the sections stays after them.
-  function arrange(list, order) {
-    var ws = kids(list, "rws");
-    if (!ws.length) return;
-    var after = ws[ws.length - 1].nextSibling || null;
-    ws.forEach(function (w, i) {
-      var k = (order || []).indexOf(w.getAttribute("data-ws") || "");
-      w.wsOrd = ord(w, i);
-      w.wsRank = k < 0 ? Infinity : k;
-    });
-    ws.sort(function (a, b) { return (a.wsRank - b.wsRank) || (a.wsOrd - b.wsOrd); });
-    settle(list, ws, after);
+  // starred reports a session row whose star the daemon rendered pressed.
+  function starred(el) {
+    var b = el && el.querySelector ? el.querySelector(".star") : null;
+    return !!b && b.getAttribute("aria-pressed") === "true";
   }
 
   // drop moves item (a live session row or a workspace section) next to
@@ -215,9 +194,293 @@
   function drop(item, ref, after) {
     if (!item || !ref || item === ref || !item.parentNode || ref.parentNode !== item.parentNode) return false;
     var kind = hasClass(item, "rws") ? "rws" : "rs";
-    if (!hasClass(ref, kind) || hasClass(item, "ended") || hasClass(ref, "ended") || !!item.wsStar !== !!ref.wsStar) return false;
+    if (!hasClass(ref, kind) || hasClass(item, "ended") || hasClass(ref, "ended") || (kind === "rs" && starred(item) !== starred(ref))) return false;
     item.parentNode.insertBefore(item, after ? ref.nextSibling : ref);
     return true;
+  }
+
+  // up is el or its nearest ancestor of class c, or null.
+  function up(el, c) {
+    for (var n = el; n; n = n.parentNode) if (hasClass(n, c)) return n;
+    return null;
+  }
+  // dropRefusal names why a dragged session row cannot land where the
+  // pointer is (over, the element under it), as a layout refusal reason
+  // (LAYOUT_REFUSALS): "workspace" over another workspace, "group" over
+  // another worktree than its own group's (a child's own is where it would
+  // go top-level, not its parent's), "stars" over a live row of its own
+  // list on the other side of the stars; "" anywhere else (its own group,
+  // a header, the ended fold, or outside the list, where the drop takes the
+  // nearest place). A workspace section is never refused.
+  function dropRefusal(item, over) {
+    if (!item || !over || hasClass(item, "rws")) return "";
+    var ws = up(over, "rws");
+    if (!ws) return "";
+    if (ws !== up(item, "rws")) return "workspace";
+    var wt = up(over, "rwt");
+    if (wt && wt !== homeWt(item)) return "group";
+    var row = up(over, "rs");
+    if (row && row !== item && row.parentNode === item.parentNode && !hasClass(row, "ended") && starred(row) !== starred(item)) return "stars";
+    return "";
+  }
+
+  // The tree: a child row sits in its parent's children box (.rkids, the
+  // parent row's next sibling, data-parent the parent's reply-id) and
+  // carries data-g, the path of its own worktree group; a top-level row's
+  // group is its worktree's (.rwt data-g), or its plain-folder workspace's
+  // path. data-kids marks a stored parent (of a live or an ended child),
+  // which never becomes a child; kcol marks a parent the page shows
+  // collapsed (kidsCollapsed, the parents' reply-ids, per browser).
+  var KIDS_COLLAPSED = "ws.dashboard.railkids";
+  function kidsCollapsed(store) { return stringSet(store, KIDS_COLLAPSED); }
+  function attr(el, k) { return el && el.getAttribute ? el.getAttribute(k) : null; }
+  function kidsOf(row) {
+    var k = row && row.nextSibling;
+    return k && hasClass(k, "rkids") ? k : null;
+  }
+  function rowGroup(row) {
+    var g = attr(row, "data-g");
+    if (g !== null) return g;
+    var wt = up(row, "rwt"), ws = up(row, "rws");
+    return wt ? attr(wt, "data-g") || "" : attr(ws, "data-ws") || "";
+  }
+  // rowFacts is what a drop reads of a session row: its reply-id, its
+  // workspace and group, live, its parent (a child's), kids (a stored
+  // parent), star (its rendered star), and first, its first child while
+  // its children show.
+  function rowFacts(row) {
+    var box = row.parentNode, kids = kidsOf(row), ws = up(row, "rws");
+    return {
+      rid: attr(row, "data-rid") || "", ws: attr(ws, "data-ws") || "", group: rowGroup(row),
+      live: !hasClass(row, "ended"), parent: box && hasClass(box, "rkids") ? attr(box, "data-parent") || "" : "",
+      kids: attr(row, "data-kids") === "1", star: starred(row),
+      first: kids && !hasClass(row, "kcol") && kids.children.length ? attr(kids.children[0], "data-rid") || "" : ""
+    };
+  }
+  // dropZone is where the dragged session row d lands over the row t (both
+  // rowFacts) with the pointer at frac of t's height (0 its top, 1 its
+  // bottom): { zone, ref, op }, op the layout op the drop posts and ref the
+  // reply-id the zone is drawn against: the line before or after that row,
+  // or (zone "child") the parent outlined. A place the route would refuse
+  // is { refusal }, the route's reason code (LAYOUT_REFUSALS); d itself
+  // and its own children are no target (null). The middle half of a valid
+  // parent (top-level, live, d's workspace, d no parent itself) attaches d
+  // as its last child, its quarters are before and after; any other row
+  // splits in halves. A line among a parent's children attaches d there
+  // (among its own siblings it moves); a line at the top level moves a
+  // top-level row (its own group, its side of the stars) or detaches a
+  // child (its own group only; the route checks no stars for a detach).
+  // The line after a parent whose children show is the line before its
+  // first child. An orphan shows top-level, so it is a target as one.
+  function dropZone(d, t, frac) {
+    if (!d || !t || !d.rid || t.rid === d.rid || t.parent === d.rid) return null;
+    var parentOK = !t.parent && t.live && t.ws === d.ws && !d.kids;
+    var zone = parentOK ? (frac < 0.25 ? "before" : frac > 0.75 ? "after" : "child") : (frac < 0.5 ? "before" : "after");
+    if (zone === "child") return { zone: zone, ref: t.rid, op: { op: "attach", rid: d.rid, parent: t.rid } };
+    if (zone === "after" && t.first) {
+      return dropZone(d, { rid: t.first, ws: t.ws, group: "", live: true, parent: t.rid, kids: false, star: false, first: "" }, 0);
+    }
+    if (!t.live) return { refusal: "ended" };
+    if (t.ws !== d.ws) return { refusal: "workspace" };
+    var op;
+    if (t.parent) {
+      if (d.kids) return { refusal: "depth" };
+      op = d.parent === t.parent ? { op: "move", rid: d.rid } : { op: "attach", rid: d.rid, parent: t.parent };
+    } else {
+      if (t.group !== d.group) return { refusal: "group" };
+      if (!d.parent && t.star !== d.star) return { refusal: "stars" };
+      op = { op: d.parent ? "detach" : "move", rid: d.rid };
+    }
+    op[zone] = t.rid;
+    return { zone: zone, ref: t.rid, op: op };
+  }
+  function rowsIn(box) {
+    return box ? Array.prototype.filter.call(box.children, function (c) { return hasClass(c, "rs"); }) : [];
+  }
+  // dropNoop reports a drop (z, from dropZone) that leaves the dragged row
+  // item where it stands: a move right next to it, on the side it is on, or
+  // an attach to its own parent while it is already the last child.
+  function dropNoop(item, z) {
+    var o = z && z.op;
+    if (!o) return true;
+    var rows = rowsIn(item.parentNode), i = rows.indexOf(item);
+    if (o.op === "attach" && !o.before && !o.after) {
+      return hasClass(item.parentNode, "rkids") && attr(item.parentNode, "data-parent") === o.parent && i === rows.length - 1;
+    }
+    if (o.op !== "move") return false;
+    var j = -1;
+    rows.forEach(function (r, k) { if (attr(r, "data-rid") === (o.before || o.after)) j = k; });
+    return j >= 0 && (o.before ? j === i + 1 : j === i - 1);
+  }
+  // moveRow shows a tree drop at once: item (with its children's box) goes
+  // before ref, after ref and its children (zone "after"), or last into
+  // ref's children's box (zone "child"), which make() makes when ref has
+  // none; a child keeps its own group (data-g), and a children's box it
+  // leaves empty goes. It returns the undo, which puts every node back.
+  function moveRow(item, ref, zone, make) {
+    var undo = [], from = item.parentNode, kids = kidsOf(item), group = rowGroup(item), had = attr(item, "data-g");
+    function put(n, box, next) {
+      var p = n.parentNode, s = n.nextSibling;
+      undo.push(function () { if (p) p.insertBefore(n, s); else if (n.parentNode) n.parentNode.removeChild(n); });
+      box.insertBefore(n, next);
+    }
+    var box = ref.parentNode, next = ref;
+    if (zone === "after") next = (kidsOf(ref) || ref).nextSibling;
+    else if (zone === "child") {
+      box = kidsOf(ref);
+      if (!box) {
+        box = make();
+        box.setAttribute("data-parent", attr(ref, "data-rid") || "");
+        put(box, ref.parentNode, ref.nextSibling);
+      }
+      next = null;
+    }
+    if (next === item) next = (kids || item).nextSibling;
+    put(item, box, next);
+    if (kids) put(kids, box, next);
+    if (hasClass(box, "rkids")) {
+      undo.push(function () { if (had === null) item.removeAttribute("data-g"); else item.setAttribute("data-g", had); });
+      item.setAttribute("data-g", group);
+    }
+    if (from && from !== box && hasClass(from, "rkids") && !from.children.length) {
+      var fp = from.parentNode, fs = from.nextSibling;
+      undo.push(function () { fp.insertBefore(from, fs); });
+      fp.removeChild(from);
+    }
+    return function () { for (var i = undo.length - 1; i >= 0; i--) undo[i](); };
+  }
+  // homeWt is the worktree a session row's own group renders in: a
+  // top-level row's own, a child's by its data-g; null in a plain-folder
+  // workspace.
+  function homeWt(item) {
+    var box = item.parentNode;
+    if (!box || !hasClass(box, "rkids")) return up(item, "rwt");
+    var g = attr(item, "data-g") || "";
+    return find(up(item, "rws"), function (n) { return hasClass(n, "rwt") && attr(n, "data-g") === g; });
+  }
+  // homeRows is the list a dragged row's top-level peers stand in, for a
+  // drop over no row: a top-level row's own, a child's own group's (null
+  // when that group lists no row).
+  function homeRows(item) {
+    var box = item.parentNode;
+    if (!box || !hasClass(box, "rkids")) return box;
+    var home = homeWt(item) || find(up(item, "rws"), function (n) { return hasClass(n, "wsbody"); });
+    return home ? find(home, function (n) { return hasClass(n, "rsessions"); }, true) : null;
+  }
+  // find is the first node under root that test passes, depth first; with
+  // top, only root's own children are tried.
+  function find(root, test, top) {
+    var kids = (root && root.children) || [];
+    for (var i = 0; i < kids.length; i++) {
+      if (test(kids[i])) return kids[i];
+      var deep = top ? null : find(kids[i], test);
+      if (deep) return deep;
+    }
+    return null;
+  }
+  function liveRows(box) { return rowsIn(box).filter(function (r) { return !hasClass(r, "ended"); }); }
+  function rowOf(root, rid) { return root && rid ? refind(root, { cls: "rs", attr: "data-rid", val: rid }) : null; }
+
+  // keyMove is the keyboard path's op for the session row item (Alt and an
+  // arrow): "up" and "down" reorder it past the next live row of its level
+  // (its group's top-level rows, or its parent's children), "in" attaches
+  // it to the previous top-level row as its last child, and "out" detaches
+  // a child, which the route lands right after its old parent when that is
+  // in the child's own group, else at the head of its own group (the page
+  // shows it before that group's first unstarred row). It answers
+  // dropZone's { zone, ref, op }, read by dropZone's rules where a place is
+  // involved (zone and ref empty when the page has no row to show the
+  // detach against: the route still places it), or { refusal } with the
+  // route's reason for an op it would refuse (an ended row moves no way,
+  // a child or a parent never goes one level deeper, a top-level row has
+  // no parent to leave); null when there is no row to move past.
+  function keyMove(item, dir) {
+    var d = rowFacts(item);
+    if (!d.rid) return null;
+    if (!d.live) return { refusal: "ended" };
+    var rows = liveRows(item.parentNode), i = rows.indexOf(item), t;
+    if (dir === "up" || dir === "down") {
+      t = rows[dir === "up" ? i - 1 : i + 1];
+      if (!t) return null;
+      var tf = rowFacts(t);
+      tf.first = "";
+      return dropZone(d, tf, dir === "up" ? 0 : 1);
+    }
+    if (dir === "in") {
+      if (d.parent || d.kids) return { refusal: "depth" };
+      t = rows[i - 1];
+      return t ? dropZone(d, rowFacts(t), 0.5) : null;
+    }
+    if (dir !== "out") return null;
+    if (!d.parent) return { refusal: "toplevel" };
+    var op = { op: "detach", rid: d.rid }, p = rowOf(up(item, "rws"), d.parent);
+    if (p && rowGroup(p) === d.group) return { zone: "after", ref: d.parent, op: op };
+    var home = liveRows(homeRows(item)), first = home.filter(function (r) { return !starred(r); })[0];
+    if (first) return { zone: "before", ref: attr(first, "data-rid") || "", op: op };
+    if (home.length) return { zone: "after", ref: attr(home[home.length - 1], "data-rid") || "", op: op };
+    return { zone: "", ref: "", op: op };
+  }
+  // underRows is where the context menu's "move under" can put the session
+  // row item: { rows, refusal }, rows every row of its workspace whose
+  // middle would take it as a child (dropZone; its own parent aside) in
+  // the rail's order, refusal the route's reason when none can (an ended
+  // row, or a parent, which never becomes a child), else "".
+  function underRows(item) {
+    var d = rowFacts(item), out = [];
+    if (!d.live) return { rows: out, refusal: "ended" };
+    if (d.kids) return { rows: out, refusal: "depth" };
+    (function walk(n) {
+      var kids = (n && n.children) || [];
+      for (var i = 0; i < kids.length; i++) {
+        var k = kids[i];
+        if (hasClass(k, "rs")) {
+          var z = k !== item ? dropZone(d, rowFacts(k), 0.5) : null;
+          if (z && z.zone === "child" && z.ref !== d.parent) out.push(k);
+        } else walk(k);
+      }
+    })(up(item, "rws"));
+    return { rows: out, refusal: "" };
+  }
+
+  // itemKey names a dragged item, a session row by reply-id or a workspace
+  // section by path, so refind can find the node a swap put in its place.
+  function itemKey(el) {
+    var ws = hasClass(el, "rws"), attr = ws ? "data-ws" : "data-rid";
+    return { cls: ws ? "rws" : "rs", attr: attr, val: el.getAttribute(attr) || "" };
+  }
+  // refind is the element under box that key names, or null.
+  function refind(box, key) {
+    var kids = box.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i];
+      if (hasClass(k, key.cls) && k.getAttribute(key.attr) === key.val) return k;
+      var deep = refind(k, key);
+      if (deep) return deep;
+    }
+    return null;
+  }
+
+  // swapGate holds the rail's swaps while busy() reports a press, a drag,
+  // or an open rename on it, since a swap replaces every row node: offer(s)
+  // reports whether it held s (the latest offer replaces an earlier one),
+  // release() hands the held swap back once busy() clears (null while busy
+  // or with none held), and forget() drops it (its hash turned current).
+  function swapGate(busy) {
+    var held = null;
+    return {
+      offer: function (s) {
+        if (!busy()) return false;
+        held = s;
+        return true;
+      },
+      release: function () {
+        if (busy() || !held) return null;
+        var s = held;
+        held = null;
+        return s;
+      },
+      forget: function () { held = null; }
+    };
   }
 
   // markCurrent marks the row of the viewed session rid among rows: the
@@ -230,27 +493,30 @@
     });
   }
 
-  // state is the rail's stored sets over store, as marks reads them.
+  // state is the rail's stored sets over store, as marks reads them: the
+  // collapsed workspaces and parents and the ended folds left open. The
+  // rows' order and stars come rendered from the daemon's layout.
   function state(store) {
-    return { stars: stars(store), collapsed: collapsed(store), order: sessionOrder(store), wsOrder: wsOrder(store), ended: endedOpen(store) };
+    return { collapsed: collapsed(store), kids: kidsCollapsed(store), ended: endedOpen(store) };
   }
   // marks applies the stored marks (s, state) to the rendered rail region
-  // r: pins the starred rows and puts the live ones in their drag order (an
-  // ended fold's keep the server's), puts the workspaces in theirs, marks
-  // the viewed session's row (rid), collapses the collapsed workspaces, and
-  // opens the ended folds left open. The page script runs it after every
-  // rail swap; the iframe shell also runs it as soon as the rail is parsed,
-  // before the first paint, so a reload never shows the server's rail.
+  // r: marks the viewed session's row (rid), collapses the collapsed
+  // workspaces and parents, and opens the ended folds left open. The page
+  // script runs it after every rail swap; the iframe shell also runs it as
+  // soon as the rail is parsed, before the first paint, so a reload never
+  // shows a fold the browser keeps closed open.
   function marks(r, s, rid) {
-    var order = s.order.list(), list = r.querySelector(".rlist");
     function all(sel) { return Array.prototype.slice.call(r.querySelectorAll(sel)); }
-    all(".rsessions").forEach(function (box) { pin(box, s.stars, box.parentNode.closest(".rended") ? null : order); });
-    if (list) arrange(list, s.wsOrder.list());
     markCurrent(all(".rs"), rid);
     all(".rws").forEach(function (ws) {
       var col = s.collapsed.has(ws.getAttribute("data-ws") || ""), tog = ws.querySelector(".wstog");
       if (col) ws.classList.add("col"); else ws.classList.remove("col");
       if (tog) tog.setAttribute("aria-expanded", String(!col));
+    });
+    all(".kidtog").forEach(function (tog) {
+      var row = tog.closest(".rs"), col = !!row && s.kids.has(row.getAttribute("data-rid") || "");
+      if (row) { if (col) row.classList.add("kcol"); else row.classList.remove("kcol"); }
+      tog.setAttribute("aria-expanded", String(!col));
     });
     all("details.rended[data-key]").forEach(function (d) {
       var open = s.ended.has(d.getAttribute("data-key"));
@@ -401,16 +667,28 @@
     drafts: drafts,
     emptyDraft: emptyDraft,
     stripMarkers: stripMarkers,
-    stars: stars,
     collapsed: collapsed,
+    legacyImport: legacyImport,
+    legacyDone: legacyDone,
+    layoutRefusal: layoutRefusal,
+    staleRail: staleRail,
+    starred: starred,
     endedOpen: endedOpen,
     state: state,
     marks: marks,
-    sessionOrder: sessionOrder,
-    wsOrder: wsOrder,
-    pin: pin,
-    arrange: arrange,
     drop: drop,
+    dropRefusal: dropRefusal,
+    kidsCollapsed: kidsCollapsed,
+    rowFacts: rowFacts,
+    dropZone: dropZone,
+    dropNoop: dropNoop,
+    moveRow: moveRow,
+    homeRows: homeRows,
+    keyMove: keyMove,
+    underRows: underRows,
+    itemKey: itemKey,
+    refind: refind,
+    swapGate: swapGate,
     markCurrent: markCurrent,
     reviveRoute: reviveRoute,
     markRevive: markRevive,
