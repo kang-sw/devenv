@@ -1,5 +1,6 @@
 ---
 title: "Pi spawn session key is bound to the lead root, not its worktree cwd"
+completed: 2026-11-13
 ---
 
 # Pi spawn session key is bound to the lead root, not its worktree cwd
@@ -24,3 +25,8 @@ the harness honor the rendered prompt's key.
 ## Open
 
 - What compatibility tier applies at promotion?
+
+
+## Resolution (2026-11-13)
+
+Fixed by merge dbb98b78b (ea625b763): pi.spawn resolves cwd's Git worktree and binds the child key there; nested spawns follow the same rule. Compatibility tier T0. Not yet checked live on Windows (needs the next daemon rerun).
