@@ -1,5 +1,7 @@
 ---
 title: ws dashboard frontend performance - profile and optimize
+related:
+  261113-feat-ws-dashboard-iframe-shell: session-switch cost is structural (full document reload per navigation) and is addressed there; this ticket measures (d) but does not restructure navigation
 ---
 
 # ws dashboard frontend performance - profile and optimize
@@ -42,6 +44,10 @@ established causes.
   judgment. Rejected: Pi worker.
 - Builds and tests run on the sys_lock remote w5090; live measurement runs on
   the owner's Windows machine dashboard.
+- (417) Measure all four scenarios (a-d), with priority on (b) idle CPU and
+  especially whiteboard NOTE typing latency. Owner answer 2026-11-13, recorded
+  as the lead's reading (assumed): the board note pen editor feels much slower
+  than typing in the main left composer. Rejected: measuring only one scenario.
 
 ## Constraints
 
@@ -67,20 +73,18 @@ Reproducible scenarios on the live dashboard:
 
 Tools: browser Performance trace, Performance API, long-task counts, plus
 network request counts and payload sizes. Record numbers per scenario in the
-Result and rank hotspots. Scenario priority is set by (417) in the queue
-below.
+Result and rank hotspots. Priority per (417): (b) idle CPU first.
+
+- Compare the two input paths: typing latency in the whiteboard note pen editor
+  versus the main left composer; find why the note editor is slower.
+- Scenario (d) baseline: session switching currently takes about 500-1000 ms
+  (owner observation). Session-switch cost is structural (full document reload
+  per navigation) and is addressed by
+  `261113-feat-ws-dashboard-iframe-shell`; this ticket measures (d) but does
+  not restructure navigation.
 
 ### Phase 2: Optimize measured hotspots
 
 Optimize only the top measured hotspots from Phase 1, using the simplest fix
 for each. Re-measure with the same scenarios and record before/after numbers.
 No intended visual change; LOOK before/after captures confirm no regression.
-
-## Open Decision Queue
-
-Last ID: (417)
-
-(417) [open] [policy] Which scenario feels heaviest, setting Phase 1
-measurement priority: a initial load, b idle CPU with sessions/streaming,
-c whiteboard/long conversation scroll and typing, d session/tab switching,
-e all - measure every scenario. Recommendation: e.
