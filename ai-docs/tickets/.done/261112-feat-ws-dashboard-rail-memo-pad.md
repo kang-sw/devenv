@@ -1,5 +1,6 @@
 ---
 title: "Dashboard memo pad: a post-it panel beside the session rail, stored per workspace in the daemon"
+completed: 2026-11-13
 ---
 
 # Dashboard memo pad: a post-it panel beside the session rail, stored per workspace in the daemon
@@ -19,6 +20,9 @@ behaviour is restated below so the ticket does not depend on the scratch file.
 
 ## Decisions
 
+- **Compatibility: T0** — additive dashboard assets, a new route, and optional
+  daemon-local workspace files with `schema_version: 1`; unknown fields are
+  preserved and a newer schema refuses writes without preventing reads.
 - **Scope is the rail workspace** (whiteboard (477) a): memos belong to a rail
   workspace entry (the `Workspaces` the rail template renders, keyed by its
   `Path`): one memo list per repository, shared by every worktree session of
@@ -80,3 +84,36 @@ Verification: the wsdashboard package tests through
 `~/.local/bin/ws-rgo -C agents-plugin-tool -m 8 -- test ./internal/wsdashboard/ -count=1`
 (never run heavy Go builds or tests locally), plus headless Chromium
 screenshots of the open panel at a narrow and a wide width.
+
+### Result (fd4fc2be7) - 2026-11-13
+
+- Added optional, atomic per-workspace JSON files under the daemon state
+  directory and GET/POST `/rail/memos`. Writes require both `localViewer`
+  and the daemon's own Origin; LAN readers receive read-only controls.
+  Missing files are empty; broken optional state cannot break the rail;
+  unknown document/memo fields survive writes and newer schemas refuse writes.
+- Added the post-it panel, add/edit/delete with five-second undo, plain text
+  with URL links, workspace count buttons, session-to-workspace selection,
+  and reopening across session navigation. Ctrl+` opens rail plus memos at
+  overlay widths or memos alone beside the permanent column. Escape/scrim
+  dismissal, phone stacking, staged motion, and reduced motion are covered.
+- Self-review fixed loss of failed edits and unsent input during undo, and
+  prevented loading/error states from replacing a real badge count with zero.
+- Verification: the prescribed `sys_lock.sh remote w5090 run memopad 40`
+  package command passed (`go test ./internal/wsdashboard/...`, 85.332s).
+  The single final `go test ./...` passed every package except the explicitly
+  excluded known `cmd/ws-mcp` test
+  `TestHostedConnectionSeeingALANChangeReplacesTheDaemon`; `wsholder` passed.
+  No Go builds/tests ran locally.
+- Local verification ran through `sys_lock.sh run memopad 20`: JavaScript
+  syntax checks, the memo DOM/virtual-clock harness (add/edit/delete/undo,
+  failed saves, draft preservation, LAN, workspace navigation, stale reads),
+  and extracted page/frame rail-key cases at narrow, wide, and pinned widths
+  all passed. The Go harness runs the same memo cases when Node is present.
+- Headless Chrome captured the real panel markup/controller/styles in a
+  static fixture (not the rebuilt daemon), at 1000×850 and 1800×1000:
+  `D:/Temp/rail-memo-pad/narrow.png` and
+  `D:/Temp/rail-memo-pad/wide.png`. Both were visually inspected; the owner
+  still checks the live daemon after rebuilding it.
+- Forward: Localize the new English memo UI strings through the existing
+  i18n catalogs.
