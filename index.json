@@ -413,6 +413,9 @@
     "261113-feat-ws-dashboard-harness-auth-slots": {
       "registered_at": "2026-11-13T08:05:31Z"
     },
+    "261113-feat-ws-dashboard-hosted-claude-stream-agent-messages": {
+      "registered_at": "2026-11-13T10:22:34Z"
+    },
     "261113-feat-ws-dashboard-rail-usage-gutter": {
       "registered_at": "2026-11-13T08:05:08Z",
       "lease": {
