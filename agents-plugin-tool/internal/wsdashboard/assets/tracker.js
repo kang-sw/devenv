@@ -1762,7 +1762,7 @@
       list: null, listErr: null, listBusy: false, // the store's wikis [{name, tip, unpushed}], or why they could not be read
       pages: null, pagesErr: null, pagesBusy: false, // {paths, commit} of the wiki shown
       page: null,           // the page path shown
-      doc: null, docErr: null, docBusy: false, // {path, content, commit, html} of the page shown
+      doc: null, docErr: null, docBusy: false, // {path, kind, content, commit, html} of the page shown; kind 'html' is an HTML page (wkFrameSync)
       edit: null,           // { path, isNew, newWiki, base, text, orig, newPath, note } while the editor is open; orig is the text the edit started from
       conflict: null,       // { c: the adapter's conflict, mine: the refused text } while the refused-save view shows
       saving: false,
@@ -1782,7 +1782,16 @@
   }
   // the wiki an editor's preview renders in: the one shown, once it exists
   function wkRenderName() { var st = wk(); return st.edit && !st.edit.newWiki && st.name ? st.name : undefined; }
-  function wkHas(st, path) { return !!(st.pages && st.pages.paths.indexOf(path) >= 0); }
+  function wkHas(st, path) { return !!(st.pages && st.pages.paths.indexOf(wkCanon(path)) >= 0); }
+  // A page path as the daemon answers it (CanonicalWikiPath): name.md is the Markdown page
+  // name, so a wiki:<name>/x.md link and a typed x.md find page x; any other path is left as
+  // it is, the daemon refusing what it does not accept (a.html.md).
+  function wkCanon(path) {
+    var p = String(path || ''), m = /^(.*?)([^/]+)\.md$/.exec(p);
+    return m && !/\.(md|html)$/i.test(m[2]) ? m[1] + m[2] : p;
+  }
+  // An HTML page's path ends in exactly .html after a non-empty name; the extension decides the kind.
+  function wkIsHtml(path) { return /[^/]\.html$/.test(String(path || '')); }
   // Reads land on the state object they started from, for the wiki (and page) still shown; a
   // read for one no longer shown clears its busy flag and reads what is shown now instead.
   // wkDone wraps a read's answer: it clears the busy flag of read k ('list' | 'pages' |
@@ -1853,7 +1862,7 @@
         if (res.status === 404 && !st.edit && !soft) { st.doc = null; st.docErr = null; if (ui.store === store) wkStartEdit(path, true, false); return; }
         st.docErr = res.error; render(); return;
       }
-      st.doc = { path: res.path, content: res.content, commit: res.commit, html: res.html }; st.docErr = null;
+      st.doc = { path: res.path, kind: res.kind === 'html' ? 'html' : 'markdown', content: res.content, commit: res.commit, html: res.html }; st.docErr = null;
       render();
     }));
   }
@@ -1972,6 +1981,8 @@
     head += '</div>';
     if (st.docErr) return head + '<div class="wk-empty"><p class="err">' + esc(wsT("js.tk.wk.fail", st.docErr)) + '</p></div>';
     if (!d) return head + '<div class="wk-empty"><p class="muted">' + esc(wsT("js.tk.loading")) + '</p></div>';
+    // an HTML page's frame is not drawn here: the slot marks where the frame layer shows it
+    if (d.kind === 'html') return head + '<div class="wk-fslot"' + attr('fkey', wkFrameKey()) + '></div>';
     return head + '<article class="wk-doc md">' + refLinksHtml(d.html) + '</article>';
   }
   function wkPageEdit() {
@@ -1983,7 +1994,27 @@
     var bar = '<div class="tb">' + btn('wk-save', wsT("js.tk.dlg.save"), {}, 'primary' + (st.saving ? ' busy' : '')) + btn('wk-cancel', wsT("js.tk.dlg.cancel"), {}) +
       '<span class="muted">' + esc(wsT("js.tk.wk.hint", chord)) + '</span><span class="wk-base"' + tipAttr(wsT("js.tk.wk.base.tip", wkSha(ed.base))) + '>' + esc(base) + '</span></div>';
     return head + '<div class="wk-edit">' + (ed.note ? '<div class="wk-note">' + wsT("js.tk.wk.note", '<code>' + esc(wkSha(ed.base)) + '</code>') + '</div>' : '') +
-      (path ? '<div class="wk-etop">' + path + '</div>' : '') + editorHtml('wk-ebody', { value: ed.text, rows: 14, label: esc(wsT("js.tk.wk.ed.aria")), pv: 'wk-doc' }) + bar + '</div>';
+      (path ? '<div class="wk-etop">' + path + '</div>' : '') + editorHtml('wk-ebody', { value: ed.text, rows: 14, label: esc(wsT("js.tk.wk.ed.aria")), pv: 'wk-doc', src: wkEditHtml(ed) }) + bar + '</div>';
+  }
+  // An edit of an HTML page (its path, or a new page's typed path, ends in .html) is source
+  // only: no preview (the saved page is its preview) and no images, which it cannot show.
+  function wkEditHtml(ed) { return !!ed && wkIsHtml(ed.isNew ? wkNewPath(ed.newPath) : ed.path); }
+  function wkNewPath(raw) { return wkCanon(String(raw || '').trim().replace(/^\/+|\/+$/g, '').replace(/\/{2,}/g, '/')); }
+  // A new page's seed: a Markdown heading, or an HTML page's document skeleton (the caret goes into its body).
+  function wkSeed(path) {
+    var name = String(path).split('/').pop();
+    if (!wkIsHtml(path)) return '# ' + name.replace(/-/g, ' ') + '\n\n';
+    return '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="utf-8">\n<title>' + esc(name.slice(0, -5).replace(/-/g, ' ')) + '</title>\n</head>\n<body>\n\n</body>\n</html>\n';
+  }
+  // A new page's path typed into another kind changes the editor: an untouched seed becomes the
+  // other kind's, and the draw adds or drops the preview.
+  function wkPathKind(ed, raw) {
+    var was = wkEditHtml(ed);
+    ed.newPath = raw;
+    if (wkEditHtml(ed) === was) return;
+    if (!wkDirty(ed) && ed.seed !== undefined) ed.seed = ed.text = wkSeed(wkNewPath(raw));
+    delete ui.edpv['wk-ebody'];
+    render();
   }
   // Line regions of side that differ from base (an LCS alignment), as [{b0, b1: the base lines
   // they replace, lines: side's line indexes}]; wkMarks classes each side's lines 'conf' when
@@ -2097,6 +2128,56 @@
       a.setAttribute('title', 'wiki:' + name + '/' + path + (miss ? ' (' + wsT("js.tk.wk.missing") + ')' : ''));
     });
   }
+  // An HTML page (kind html) shows in the daemon's sandboxed iframe markup (doc.html, inserted
+  // as given: the sandbox attribute is the host's), kept in the layer #tkframe outside the
+  // subtree render() replaces. An iframe reloads whenever it is detached, so a frame drawn into
+  // the page would restart the page's scripts on every draw. The read view leaves an empty
+  // slot (.wk-fslot) in the page area instead, and after every draw wkFrameSync puts the layer
+  // over it. The frame belongs to one key (store, wiki, path, commit): a draw that keeps the
+  // key keeps the same iframe element; a draw without the slot (the item window, the editor or
+  // refused-save view, the drawer closed, another panel, or the page's own menus open over it)
+  // hides the layer and keeps the frame, so coming back does not reload it; a key change
+  // empties the layer, and the new frame goes in once a slot for it shows. Nothing listens for
+  // the frame's messages: the host takes none from a wiki page.
+  var WKF = { key: '', slot: null, ro: null };
+  function wkFrameKey() {
+    var st = ui.store && ui.wiki[ui.store], d = st && st.doc;
+    return d && d.kind === 'html' && d.html ? JSON.stringify([ui.store, st.name, d.path, d.commit]) : '';
+  }
+  // root: the subtree the draw filled, or null when nothing of the store shows
+  function wkFrameSync(root) {
+    var L = $('tkframe'), key = wkFrameKey(), st = key ? wk() : null, slot = null;
+    if (key && root && !ui.win && !st.more && !st.pick) slot = root.querySelector('.wk-fslot');
+    if (slot && slot.getAttribute('data-fkey') !== key) slot = null;
+    if (WKF.key !== key && WKF.key) { L.innerHTML = ''; WKF.key = ''; }
+    if (slot && !WKF.key) { L.innerHTML = st.doc.html; WKF.key = key; }
+    WKF.slot = slot;
+    L.hidden = !slot;
+    // the slot moves and resizes with the drawer's drag and opening, the layout, and the window
+    // (an outer frame resizing this page fires its resize), not only with a draw
+    if (WKF.ro) WKF.ro.disconnect();
+    if (slot && window.ResizeObserver) {
+      WKF.ro = WKF.ro || new ResizeObserver(wkFramePlace);
+      for (var n = slot; n && n !== document.body; n = n.parentElement) if (n === slot || wkClips(n)) WKF.ro.observe(n);
+    }
+    wkFramePlace();
+  }
+  function wkClips(n) { var cs = getComputedStyle(n); return cs.overflowX !== 'visible' || cs.overflowY !== 'visible'; }
+  // The layer covers the slot's box, clipped to what its scrolling and clipping ancestors show
+  // (the drawer's clip while it opens).
+  function wkFramePlace() {
+    var L = $('tkframe'), s = WKF.slot;
+    if (!s || L.hidden) return;
+    var r = s.getBoundingClientRect(), t = r.top, l = r.left, b = r.bottom, rt = r.right;
+    for (var n = s.parentElement; n && n !== document.body; n = n.parentElement) {
+      if (!wkClips(n)) continue;
+      var q = n.getBoundingClientRect();
+      t = Math.max(t, q.top); l = Math.max(l, q.left); b = Math.min(b, q.bottom); rt = Math.min(rt, q.right);
+    }
+    var S = L.style;
+    S.left = r.left + 'px'; S.top = r.top + 'px'; S.width = r.width + 'px'; S.height = r.height + 'px';
+    S.clipPath = b > t && rt > l ? 'inset(' + (t - r.top) + 'px ' + (r.right - rt) + 'px ' + (r.bottom - b) + 'px ' + (l - r.left) + 'px)' : 'inset(50%)';
+  }
   // The panel shows the wiki: the Items | Wiki switch in the wide layouts, the Wiki tab when narrow.
   function wkShow() { if (ui.layout === 'narrow') { tabState().narrow = 'wiki'; } else wk().mode = 'wiki'; }
   // An edit is dirty when its text left where it started: the page's text, the seeded heading of
@@ -2111,6 +2192,7 @@
   }
   function wkGoPage(name, path) {
     var st = wk();
+    path = wkCanon(path); // the page list and the read answer the canonical path
     st.creating = false; st.edit = null; st.conflict = null; st.more = false; st.pick = false; st.ntree = false;
     if (st.name !== name) { st.name = name; st.pages = null; st.q = ''; }
     st.page = path; st.doc = null; st.docErr = null; st.flash = true; st.top = true;
@@ -2129,13 +2211,18 @@
     var st = wk();
     st.creating = false; st.conflict = null; st.more = false; st.pick = false; st.ntree = false;
     delete ui.edpv['wk-ebody']; delete ui.eatt['wk-ebody'];
-    var seed = '# ' + String(path).split('/').pop().replace(/-/g, ' ') + '\n\n';
+    var seed = wkSeed(path);
     if (isNew) st.edit = { path: path, isNew: true, newWiki: !!newWiki, base: st.pages ? st.pages.commit : '', text: seed, orig: '', seed: seed, newPath: path, note: false };
     else st.edit = { path: path, isNew: false, newWiki: false, base: st.doc.commit, text: st.doc.content, orig: st.doc.content, newPath: '', note: false };
     wkShow();
     render();
     var f = $(isNew && (!path || path.slice(-1) === '/') ? 'wk-epath' : 'wk-ebody');
-    if (f) { f.focus({ preventScroll: true }); if (f.id === 'wk-ebody') { try { f.setSelectionRange(f.value.length, f.value.length); } catch (x) { /* not a text field */ } } }
+    if (f) {
+      f.focus({ preventScroll: true });
+      var at = f.value.length, body = isNew && wkIsHtml(path) ? f.value.indexOf('\n</body>') : -1;
+      if (body >= 0) at = body;
+      if (f.id === 'wk-ebody') { try { f.setSelectionRange(at, at); } catch (x) { /* not a text field */ } }
+    }
   }
   function wkCancel() {
     var st = wk();
@@ -2159,11 +2246,11 @@
     if (!ed || st.saving || !name) return;
     var box = $('wk-ebody');
     if (box) ed.text = box.value;
-    var path = ed.isNew ? ($('wk-epath') ? $('wk-epath').value : ed.newPath).trim().replace(/^\/+|\/+$/g, '').replace(/\/{2,}/g, '/') : ed.path;
+    var path = ed.isNew ? wkNewPath($('wk-epath') ? $('wk-epath').value : ed.newPath) : ed.path;
     if (!path) return toast(esc(wsT("js.tk.wk.toast.path")));
     if (ed.isNew && wkHas(st, path)) return toast(esc(wsT("js.tk.wk.toast.exists", path)));
     st.saving = true; render();
-    AD.wiki.save(store, name, { base: ed.newWiki ? '' : ed.base, newWiki: !!ed.newWiki, op: 'write', path: path, content: ed.text, attachments: savedAtts('wk-ebody', ed.text) }, function (res) {
+    AD.wiki.save(store, name, { base: ed.newWiki ? '' : ed.base, newWiki: !!ed.newWiki, op: 'write', path: path, content: ed.text, attachments: wkIsHtml(path) ? [] : savedAtts('wk-ebody', ed.text) }, function (res) {
       st.saving = false;
       var live = ui.wiki[store] === st && st.edit === ed; // the editor this save left from still shows
       if (res.ok) {
@@ -3103,9 +3190,15 @@
   // like the saved block (o.pv: its class); without render, the plain text. The textarea stays
   // in the page while hidden, so a save reads it as before.
   // o: { value, rows, label, placeholder, cls (the wrapper's extra class), pv, foot (HTML after
-  // the text, inside the wrapper) }
+  // the text, inside the wrapper), src (source only: no Write / Preview toggle, no preview pane,
+  // no @/# suggestions; edImages refuses images for it) }
   function editorHtml(id, o) {
-    var on = !!ui.edpv[id];
+    var on = !o.src && !!ui.edpv[id];
+    if (o.src) {
+      return '<div class="tked' + (o.cls ? ' ' + o.cls : '') + '"' + attr('ed', id) + ' data-src>' +
+        '<textarea id="' + id + '" data-keep rows="' + (o.rows || 3) + '" spellcheck="false"' + (o.label ? ' aria-label="' + o.label + '"' : '') + (o.placeholder ? ' placeholder="' + o.placeholder + '"' : '') + '>' + esc(o.value || '') + '</textarea>' +
+        (o.foot || '') + '</div>';
+    }
     return '<div class="tked' + (o.cls ? ' ' + o.cls : '') + '"' + attr('ed', id) + '>' +
       '<div class="tked-tabs" role="group" aria-label="' + wsT("js.tk.ed.mode") + '">' +
       ['write', 'preview'].map(function (m) {
@@ -3162,7 +3255,7 @@
     if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
     else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) { ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value; keepItemDraft(); }
     else if (t.id === 'wk-ebody' && wk().edit) wk().edit.text = t.value;
-    else if (t.id === 'wk-epath' && wk().edit) wk().edit.newPath = t.value;
+    else if (t.id === 'wk-epath' && wk().edit) wkPathKind(wk().edit, t.value);
   }
 
   // An image pasted or dropped into an editor (png, jpeg, gif, or webp, within the view's
@@ -3176,6 +3269,7 @@
   var IMG_TYPES = { 'image/png': 1, 'image/jpeg': 1, 'image/gif': 1, 'image/webp': 1 };
   function edImages(id, files, named) {
     var max = VS && VS.attachments ? VS.attachments.max_bytes : 0, store = ui.store;
+    if (id === 'wk-ebody' && wkEditHtml(wk().edit)) return toast(wsT("js.tk.ed.img.off")); // an HTML page cannot show images
     files.forEach(function (f) {
       var label = esc((named && f.name) || wsT("js.tk.ed.img.this"));
       if (!AD.upload) return toast(wsT("js.tk.ed.img.off"));
@@ -5393,6 +5487,7 @@
       if (!ui.page) fitDrawer();
       afterRender(name);
       measure();
+      wkFrameSync(null);
       return;
     }
     var s = viewerOf(name), v = memberOf(s);
@@ -5423,6 +5518,7 @@
       ui.itemChanged = false; ui.clearDraft = false;
       afterRender(name);
       measure();
+      wkFrameSync(null);
       return;
     }
 
@@ -5491,6 +5587,7 @@
     ui.itemChanged = false; ui.clearDraft = false;
     afterRender(name);
     measure();
+    wkFrameSync(body); // after measure: the drawer hangs where the header ends
   }
 
   // A store comes on screen: the immediate check, then what is new is shown once. What
@@ -5920,6 +6017,7 @@
       '<div class="tk-dr-in"><div class="tk-dr-clip" id="tkclip"><div class="tk-dr-sheet" role="region" aria-label="' + wsT("js.tk.aria.store") + '"><div class="tk-dr-body" id="tkbody"></div></div></div>' +
       '<div class="tk-handles" id="tkhandles"></div></div>'));
     O.pageParent.appendChild(el('main', { class: 'tk tk-spage', id: 'tkpage', role: 'region', 'aria-label': wsT("js.tk.aria.page"), hidden: '' }));
+    b.appendChild(el('div', { class: 'tk tk-wkframe', id: 'tkframe', hidden: '' })); // an HTML wiki page's frame (wkFrameSync)
     b.appendChild(el('div', { class: 'tk tk-iwin-back', id: 'tkwin', hidden: '' }, '<div class="iwin" role="dialog" aria-modal="true" tabindex="-1"><div class="iwin-in" id="tkwinbody"></div></div>' +
       '<ul class="tk-mpop" id="tkmpop" role="listbox" aria-label="' + wsT("js.tk.composer.mention.tip") + '" hidden></ul>'));
     b.appendChild(el('dialog', { class: 'tk tk-dlg', id: 'tkdlg' }));
@@ -6371,7 +6469,8 @@
       else if (ui.open) collapse();
     });
     // the layout follows the width: re-render when it crosses a breakpoint, else refit
-    window.addEventListener('resize', function () { if (MN) closeMenu(false); if (MP) mentionSync(); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
+    window.addEventListener('resize', function () { if (MN) closeMenu(false); if (MP) mentionSync(); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); wkFramePlace(); } });
+    window.addEventListener('scroll', wkFramePlace, true); // any scroller moving the wiki frame's slot (capture: scroll does not bubble)
     // the store page route: reload on #/<storeId> restores the page; back and forward follow the hash
     window.addEventListener('pagehide', keepItemDraft);
     window.addEventListener('hashchange', applyRoute);
