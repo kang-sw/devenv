@@ -394,12 +394,6 @@
     "261111-research-ws-hosted-session-subagent-output-rate-source": {
       "registered_at": "2026-11-11T11:38:36Z"
     },
-    "261112-bug-ws-hosted-windows-cmd-shim-host-pid-mismatch": {
-      "registered_at": "2026-11-12T04:58:18Z"
-    },
-    "261112-bug-ws-launcher-fingerprint-skips-embedded-assets": {
-      "registered_at": "2026-11-12T01:42:39Z"
-    },
     "261112-epic-ws-mcp-pi-subagents": {
       "registered_at": "2026-11-12T07:22:22Z"
     },
@@ -437,7 +431,17 @@
       "registered_at": "2026-11-12T06:04:00Z"
     },
     "261112-feat-ws-whiteboard-topic-tickets-sticky-head": {
-      "registered_at": "2026-11-12T14:40:21Z"
+      "registered_at": "2026-11-12T14:40:21Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T01:51:20Z",
+        "impl": {
+          "branch": "impl/develop/frown-grunt-giant"
+        }
+      }
     },
     "261112-research-ws-ade-desktop-shell-and-rename": {
       "registered_at": "2026-11-12T14:01:03Z"
@@ -450,6 +454,30 @@
     },
     "261113-bug-ws-claude-mod-band-tests-cc-2-1-323": {
       "registered_at": "2026-11-12T23:13:45Z"
+    },
+    "261113-bug-ws-hosted-session-exit-cause-lost-with-holder-dir": {
+      "registered_at": "2026-11-13T03:48:53Z"
+    },
+    "261113-bug-ws-launcher-falls-to-direct-path-during-daemon-replacement": {
+      "registered_at": "2026-11-13T04:57:48Z"
+    },
+    "261113-bug-ws-only-the-dashboard-daemon-runs-an-exe": {
+      "registered_at": "2026-11-13T02:44:42Z"
+    },
+    "261113-bug-ws-playbook-render-root-override-key-bound-to-lead-root": {
+      "registered_at": "2026-11-13T03:59:10Z"
+    },
+    "261113-feat-ws-pi-worker-marker-env-guard": {
+      "registered_at": "2026-11-13T01:46:15Z"
+    },
+    "261113-feat-ws-tracker-start-date-range-picker": {
+      "registered_at": "2026-11-13T01:26:48Z"
+    },
+    "261113-feat-ws-whiteboard-update-refusal-cost": {
+      "registered_at": "2026-11-13T04:24:45Z"
+    },
+    "261113-research-hosted-detection-by-session-identity": {
+      "registered_at": "2026-11-13T01:12:42Z"
     }
   }
 }
