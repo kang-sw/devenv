@@ -509,7 +509,14 @@
       }
     },
     "261113-feat-ws-whiteboard-board-frontend-performance": {
-      "registered_at": "2026-11-13T14:34:14Z"
+      "registered_at": "2026-11-13T14:34:14Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T14:46:28Z"
+      }
     },
     "261113-feat-ws-whiteboard-topic-history-load-more": {
       "registered_at": "2026-11-13T14:03:12Z"
