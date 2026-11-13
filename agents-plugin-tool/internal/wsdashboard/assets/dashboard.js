@@ -7221,7 +7221,21 @@
     }
     window.addEventListener("resize", queue);
     window.addEventListener("scroll", function () { send("scroll", { y: Math.round(window.scrollY) }); });
-    window.addEventListener("hashchange", function () { send("hash", { hash: location.hash }); });
+    // A hash route moves by hashchange or by the page's own history calls
+    // (tracker.js's store pages), which fire none: either way the shell's
+    // address takes the hash.
+    function hash() { send("hash", { hash: location.hash }); }
+    window.addEventListener("hashchange", hash);
+    window.addEventListener("popstate", hash);
+    ["pushState", "replaceState"].forEach(function (k) {
+      var orig = history[k];
+      if (typeof orig !== "function") return;
+      history[k] = function () {
+        var r = orig.apply(history, arguments);
+        hash();
+        return r;
+      };
+    });
     // Escape and the rail hotkey reach the shell from inside the page (the
     // rail's own handler is the shell's).
     doc.addEventListener("keydown", function (e) {

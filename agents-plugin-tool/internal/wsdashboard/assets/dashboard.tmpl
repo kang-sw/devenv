@@ -7,7 +7,7 @@
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
 <body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}{{.Assets.LucideSprite}}<div class="dwrap">
-<div class="top"><a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}} (Ctrl+`)" aria-label="{{t "nav.sessions"}} (Ctrl+`)" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
+<div class="top">{{template "railbtn"}}{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
 {{template "drawer" .}}
 <div class="banner" id="dash-banner" hidden></div>
 <div class="dbody">{{if .Frame}}{{template "railph"}}{{else}}<aside id="rail" class="rail" aria-label="{{t "rail.title"}}">{{region . "rail"}}</aside><div class="rscrim" id="rscrim"></div>
@@ -63,7 +63,7 @@ until then. */}}
 <script>{{.Assets.RailScript}}</script></head>
 <body class="dash live shell">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}{{.Assets.LucideSprite}}<div class="frames" id="frames"><iframe class="sframe on" src="{{.Src}}" title="{{.Title}}"></iframe></div>
 <div class="dwrap">
-<div class="top"><a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}} (Ctrl+`)" aria-label="{{t "nav.sessions"}} (Ctrl+`)" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
+<div class="top{{if .OwnHead}} sh-own{{end}}">{{template "railbtn"}}{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
 <div class="dbody"><aside id="rail" class="rail" aria-label="{{t "rail.title"}}" data-premark>{{region . "rail"}}</aside><script>(function () {
   var R = window.WsRail, r = document.getElementById("r-rail"), s = null;
   try {
@@ -83,6 +83,11 @@ until then. */}}
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
+
+{{/* The rail button: it opens the session rail where the rail overlays
+the page (narrow windows, beside the pinned column), and on a page the
+iframe shell frames holds the place of the shell's own (data-frame). */}}
+{{define "railbtn"}}<a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}} (Ctrl+`)" aria-label="{{t "nav.sessions"}} (Ctrl+`)" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{end}}
 
 {{/* The rail's placeholder on a page the iframe shell frames: an empty,
 invisible rail that takes the rail's place in every layout, under the
@@ -293,20 +298,23 @@ line, the head's failure chip, and a rail row's error ring title. */}}
 {{define "mailhead"}}<span class="arr">{{if eq .Direction "sent"}}→{{else}}←{{end}}</span>{{if .PeerLinked}}<a class="mpeer" href="/s/{{.PeerReplyID}}"{{if .PeerLabel}} title="{{.Peer}}"{{end}}>{{or .PeerLabel .Peer}}</a>{{else}}<span class="mpeer">{{.Peer}}</span>{{end}}<span class="mfirst">: {{.Title}}</span>{{template "clock" .At}}{{end}}
 
 {{define "index"}}<!DOCTYPE html>
-<html data-mode="index" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .Local}} data-sysopen="1"{{end}}>
+<html data-mode="index" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .Local}} data-sysopen="1"{{end}}{{if .Frame}} data-frame="1"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
 <title>ws dashboard</title>
 <style>{{.Assets.WhiteboardCSS}}</style>
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
-<body class="dash index">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap narrow">
-<div class="top"><h1>ws dashboard</h1><span class="meta">v{{.Version}}</span>{{template "sse"}}{{template "qsslot"}}{{template "gear" false}}</div>
+<body class="dash index">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap{{if not .Frame}} narrow{{end}}">
+<div class="top">{{if .Frame}}{{template "railbtn"}}{{end}}<h1>ws dashboard</h1><span class="meta">v{{.Version}}</span>{{template "sse"}}{{template "qsslot"}}{{template "gear" false}}</div>
+{{if .Frame}}<div class="dbody">{{template "railph"}}<main class="ixmain">{{end}}
 {{with .LAN}}<div class="lanbox"><b>{{t "lan.on"}}</b> {{t "lan.open"}}{{range .URLs}}<code class="lanurl">{{.}}</code>{{end}}<span class="lannote">{{tcode "lan.note" .TokenFile}}</span></div>{{end}}
 {{region . "sessions"}}
+{{if .Frame}}</main></div>{{end}}
 </div>
 <script>{{i18n}}</script>
 <script>{{.Assets.ToastScript}}</script>
 <script>{{.Assets.TrackerScript}}</script>
+<script>{{.Assets.ShellScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}

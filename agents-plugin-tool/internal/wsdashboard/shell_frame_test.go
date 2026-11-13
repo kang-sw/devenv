@@ -40,6 +40,8 @@ window.parent = parentWin;
 window.scrollY = 0;
 window.innerWidth = 1200;
 location.origin = "http://localhost:1234";
+location.hash = "";
+var history = { pushState: function (s, t, u) { location.hash = u; }, replaceState: function () {} };
 doc.querySelector = function () { return null; };
 doc.addEventListener = function () {};
 doc.title = "sess - ws dashboard";
@@ -100,7 +102,8 @@ log = [];
 s.msg("region", { name: "board", hash: "6", html: "" });
 s.msg("tracker", { rev: 9 });
 check("and then acts on updates as they come", log, ["swap:board.6", "nudge:9"]);
-check("the frame posted its layout and title to its parent only", parentWin.got.map(function (x) { return x.join(" "); }), ["layout http://localhost:1234", "title http://localhost:1234"]);
+history.pushState(null, "", "#/store");
+check("the frame posted its layout, title, and a hash route its own history call moved to its parent only", parentWin.got.map(function (x) { return x.join(" "); }), ["layout http://localhost:1234", "title http://localhost:1234", "hash http://localhost:1234"]);
 process.stdout.write(bad.join("\n"));
 })();
 `)

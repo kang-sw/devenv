@@ -595,11 +595,12 @@ func (p sessionPageData) regionByName(name string) renderedRegion { return p.reg
 // session it opens on, empty on the index; Src is the first frame's path,
 // Title the tab's title until that frame names one. Its regions are the
 // rail and, on a session, the opening session's head; later heads come
-// from the frames.
+// from the frames. OwnHead marks a first page that keeps its own header
+// (the index), beside which the shell shows only its rail button.
 type shellPageData struct {
 	Lang, LangPref, Theme string
 	Assets                pageAssetsData
-	SysOpen               bool
+	SysOpen, OwnHead      bool
 	RID, Src, Title       string
 	regions               regionSet
 }
@@ -614,7 +615,10 @@ type indexPageData struct {
 	LAN *LANAccess
 	// Local marks a page asked for by a browser on this machine, like
 	// sessionPageData.SysOpen.
-	Local   bool
+	Local bool
+	// Frame marks the index as the iframe shell frames it (?frame=1): laid
+	// out beside a placeholder for the shell's rail, under its own header.
+	Frame   bool
 	regions regionSet
 }
 
@@ -736,13 +740,15 @@ func renderIndexRegions(view IndexView) (regionSet, error) {
 	return regionSet{regionSessions: newRegion(buf.String())}, nil
 }
 
-func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess, local bool) (string, error) {
+// renderIndexPage renders the index; frame renders it as the iframe shell
+// frames it.
+func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess, local, frame bool) (string, error) {
 	a, err := loadDashboardAssets()
 	if err != nil {
 		return "", err
 	}
 	var buf bytes.Buffer
-	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "index", indexPageData{IndexView: view, Assets: a.data, LAN: lan, Local: local, regions: regions})
+	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "index", indexPageData{IndexView: view, Assets: a.data, LAN: lan, Local: local, Frame: frame, regions: regions})
 	return buf.String(), err
 }
 
@@ -1044,7 +1050,8 @@ func (d *Daemon) pagesIn(lang string) pageReader {
 	return r
 }
 
-// handleIndex serves /.
+// handleIndex serves /: the iframe shell, which loads the index in a frame
+// of its own, or with ?frame=1 the index as the shell frames it.
 func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -1053,13 +1060,18 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if !readMethod(w, r) {
 		return
 	}
+	if !framedRequest(r) {
+		d.serveShell(w, r, nil, "/?frame=1")
+		return
+	}
 	lang, pref := requestLang(r)
 	view := d.pagesIn(lang).indexView()
 	view.Lang, view.LangPref, view.Theme = lang, pref, requestTheme(r)
 	regions, err := renderIndexRegions(view)
 	if err == nil {
 		var html string
-		if html, err = renderIndexPage(view, regions, d.lanAccessFor(r), localViewer(r)); err == nil {
+		if html, err = renderIndexPage(view, regions, d.lanAccessFor(r), localViewer(r), true); err == nil {
+			admitShellFrame(w, frameAncestorsSelf)
 			writeHTML(w, html)
 			return
 		}
@@ -1204,10 +1216,11 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 
 // serveShell serves the iframe shell whose first frame loads src: the
 // session rail, rendered as its stream renders it (railPageSource), and the
-// top header, holding view's head when the shell opens on a session.
+// top header, holding view's head when the shell opens on a session; with
+// no view (the index) the first page keeps its own header.
 func (d *Daemon) serveShell(w http.ResponseWriter, r *http.Request, view *SessionView, src string) {
 	lang, pref := requestLang(r)
-	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), Src: src, Title: "ws dashboard"}
+	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), OwnHead: view == nil, Src: src, Title: "ws dashboard"}
 	if view != nil {
 		page.RID = view.ReplyID
 		page.Title = view.Label

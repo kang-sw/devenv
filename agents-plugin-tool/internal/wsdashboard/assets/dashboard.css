@@ -1806,9 +1806,16 @@ html:not([data-sysopen]) .rail .rnew { display: none; }
    (data-frame) keeps an empty rail placeholder (railph) and its header's
    items invisible under the shell's, which mirror them (the head message).
    A frame whose page scrolls as a whole moves the shell's header and rail
-   with it (dashboard.js shellScroll), as that page's own would move. While
+   with it (dashboard.js shScroll), as that page's own would move. While
    a frame shows a backdrop over the whole window, the shell's rail and
-   header dim by the same amount (--fdim) and let clicks through to it. */
+   header dim by the same amount (--fdim) and let clicks through to it.
+   The shell's rail rows stay unseen until its stored marks apply
+   (data-premark, the shell template).
+   The index keeps its own header (a null head): the shell's header shows
+   only its rail button (sh-own), and the framed index shows its own items
+   but its placeholder rail button. Framed, the index lays out as a session
+   page does: its list (ixmain) beside the rail's placeholder, left-aligned
+   at its own width, and the tracker's drawer as a session page's. */
 :root[data-shell], :root[data-shell] body { overflow: hidden; }
 .frames { position: fixed; inset: 0; z-index: 0; }
 .frames > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; visibility: hidden; background: var(--wb-bg); }
@@ -1818,5 +1825,10 @@ html:not([data-sysopen]) .rail .rnew { display: none; }
 :root[data-shell][data-fdim] .dwrap > .top, :root[data-shell][data-fdim] #rail { filter: brightness(var(--fdim, 1)); }
 :root[data-shell][data-fdim] .dwrap > .top > *, :root[data-shell][data-fdim] #rail { pointer-events: none; }
 .rail[data-premark] > .r-rail { visibility: hidden; }
-:root[data-frame] .dwrap > .top > * { visibility: hidden; }
+:root[data-shell] .dwrap > .top.sh-own > :not(.back) { display: none; }
+:root[data-frame]:not([data-mode="index"]) .dwrap > .top > *, :root[data-frame] .dwrap > .top > .back { visibility: hidden; }
+.ixmain { min-width: 0; max-width: 1080px; }
+body.tk-paged .ixmain { display: none; }
+:root[data-frame] .dash.index { --tkml: 0px; --tkmaxw: initial; }
+@media (min-width: 1600px) { :root[data-frame] .dash.index { --tkmaxw: none; } }
 :root[data-frame] .rail-ph { visibility: hidden; box-shadow: none; background: none; }

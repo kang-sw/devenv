@@ -88,12 +88,12 @@ func TestEveryPageHasSettingsWithTheLanguageItem(t *testing.T) {
 		name, path string
 		layout     bool
 	}{
-		{"session list", "/", false},
+		{"session list", "/?frame=1", false},
 		{"board-first session", "/s/boardsession?frame=1", false},
 		{"adapter session", "/s/livesession?frame=1", true},
 	} {
 		_, body := getLang(t, f.base+c.path, "ko", "")
-		if c.path == "/" {
+		if c.path == "/?frame=1" {
 			if !strings.Contains(body, `id="gear"`) || !strings.Contains(body, `id="gmenu"`) {
 				t.Errorf("%s: no gear", c.name)
 			}

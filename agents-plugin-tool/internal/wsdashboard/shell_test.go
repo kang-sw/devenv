@@ -66,6 +66,54 @@ func TestSessionURLServesTheShellAroundItsFramedPage(t *testing.T) {
 	}
 }
 
+// The index's URL serves the shell too, its first frame the index with
+// ?frame=1. The index keeps its own header, so the shell's top shows only
+// its rail button (sh-own) and its head slot stays empty; the framed index lays
+// its sessions out beside a placeholder for the rail.
+func TestIndexServesTheShellAroundItsFramedPage(t *testing.T) {
+	f := startPageFixture(t)
+	code, shell := get(t, f.base+"/")
+	if code != http.StatusOK {
+		t.Fatalf("GET / = %d", code)
+	}
+	for _, want := range []string{
+		`data-mode="shell" data-shell="1" data-rid=""`, `class="top sh-own"`,
+		`<aside id="rail" class="rail"`, `data-region="rail"`, `id="railbtn"`,
+		`<iframe class="sframe on" src="/?frame=1"`, "window.WsShell", "window.WsRail",
+	} {
+		if !strings.Contains(shell, want) {
+			t.Errorf("the index shell lacks %q", want)
+		}
+	}
+	for _, not := range []string{`data-region="sessions"`, `data-frame="1"`} {
+		if strings.Contains(shell, not) {
+			t.Errorf("the index shell holds %q", not)
+		}
+	}
+	// The head slot a session frame fills stays empty.
+	if !strings.Contains(shell, `data-region="head" data-h=""></div>`) {
+		t.Error("the index shell's head slot is not empty")
+	}
+
+	code, page := get(t, f.base+"/?frame=1")
+	if code != http.StatusOK {
+		t.Fatalf("GET /?frame=1 = %d", code)
+	}
+	for _, want := range []string{
+		`data-mode="index"`, `data-frame="1"`, `class="dwrap"`, `id="railbtn"`,
+		`class="rail rail-ph"`, `<main class="ixmain">`, `data-region="sessions"`, "window.WsShell",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the framed index lacks %q", want)
+		}
+	}
+	for _, not := range []string{`data-region="rail"`, `<aside id="rail"`, `data-shell="1"`, `dwrap narrow`} {
+		if strings.Contains(page, not) {
+			t.Errorf("the framed index holds %q", not)
+		}
+	}
+}
+
 // pageFraming reads a page's framing headers.
 func pageFraming(t *testing.T, url string) (status int, xfo, csp string) {
 	t.Helper()
@@ -94,9 +142,9 @@ func TestPagesRefuseFraming(t *testing.T) {
 		"/s/livesession/file?path=a.md&frame=1": http.StatusOK, "/s/newlead": http.StatusNotFound,
 	}
 	sameOrigin := map[string]int{
-		// The iframe shell's frames: a session page and the finding page a
-		// frame shows before its session registers.
-		"/s/livesession?frame=1": http.StatusOK, "/s/boardsession?frame=1": http.StatusOK, "/s/newlead?frame=1": http.StatusNotFound,
+		// The iframe shell's frames: the index, a session page, and the
+		// finding page a frame shows before its session registers.
+		"/?frame=1": http.StatusOK, "/s/livesession?frame=1": http.StatusOK, "/s/boardsession?frame=1": http.StatusOK, "/s/newlead?frame=1": http.StatusNotFound,
 	}
 	for path, want := range refused {
 		status, xfo, csp := pageFraming(t, f.base+path)
@@ -176,7 +224,8 @@ func TestShellStreamsTheRailAndItsFramesTheirRegions(t *testing.T) {
 }
 
 // shellJSCases runs shell.js under node: its message check, the URLs the
-// shell frames, the frames' recency order, and the backdrop alpha.
+// shell frames (the index and the session pages), the frames' recency
+// order, and the backdrop alpha.
 const shellJSCases = `
 var S = window.WsShell, O = "http://h:1";
 function U(s) { return new URL(s, O); }
@@ -193,6 +242,7 @@ check("another origin", S.framed(new URL("http://evil:1/s/abc123"), O), null);
 check("a query the shell does not pass on", S.framed(U("/s/abc123?x=1"), O), null);
 check("a session's sub-route", S.framed(U("/s/abc123/file?path=a"), O), null);
 check("a malformed reply-id", S.framed(U("/s/ABC"), O), null);
+check("the index", [S.framed(U("/#/team"), O), S.framed(U("/?frame=1"), O)], [{ path: "/", hash: "#/team", rid: "" }, { path: "/", hash: "", rid: "" }]);
 check("a route the shell does not frame", S.framed(U("/tracker/stores/x/view"), O), null);
 check("src", S.src({ path: "/s/abc123", hash: "#files" }), "/s/abc123?frame=1#files");
 var t = S.touch([], "a");

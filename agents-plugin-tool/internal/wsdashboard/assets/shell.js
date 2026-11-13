@@ -2,10 +2,11 @@
   // window.WsShell: the iframe shell's pure parts, loaded by the shell page
   // and by every page it frames (dashboard.js drives them).
   //
-  // The shell (the "shell" template, /s/<reply-id>) keeps the
-  // session rail and the top header across navigations and loads each
-  // dashboard page it frames in a same-origin frame of its own: the page's
-  // path with ?frame=1, which the daemon lets only its own origin frame.
+  // The shell (the "shell" template, served at / and /s/<reply-id>) keeps
+  // the session rail and the top header across navigations and loads each
+  // dashboard page it frames (the index and the session pages) in a
+  // same-origin frame of its own: the page's path with ?frame=1, which the
+  // daemon lets only its own origin frame.
   // The LIMIT most recently shown frames stay loaded, hidden but for the
   // shown one, so going back to one shows it at once; the address bar keeps
   // the page's own path (history.pushState). Each frame streams its own
@@ -82,13 +83,15 @@
   var SESSION = /^\/s\/([a-z0-9]{1,64})$/;
 
   // framed reads a URL (u, a URL) the shell may frame: {path, hash, rid}
-  // for a dashboard page the shell frames on origin, null for any other
-  // (another origin, another route, a query the shell does not pass on).
-  // rid is the session's reply-id.
+  // for a dashboard page the shell frames on origin (the index, a session
+  // page), null for any other (another origin, another route, a query the
+  // shell does not pass on). rid is the session's reply-id, empty on the
+  // index.
   function framed(u, origin) {
     if (!u || u.origin !== origin) return null;
     var search = u.search || "";
     if (search && search !== "?" && search !== "?frame=1") return null;
+    if (u.pathname === "/") return { path: "/", hash: u.hash || "", rid: "" };
     var m = SESSION.exec(u.pathname);
     if (m) return { path: u.pathname, hash: u.hash || "", rid: m[1] };
     return null;

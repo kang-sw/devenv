@@ -332,7 +332,7 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 // body).
 func TestPagesCarryTheTracker(t *testing.T) {
 	f := startPageFixture(t)
-	for name, path := range map[string]string{"live": "/s/livesession?frame=1", "board-first": "/s/boardsession?frame=1", "index": "/"} {
+	for name, path := range map[string]string{"live": "/s/livesession?frame=1", "board-first": "/s/boardsession?frame=1", "index": "/?frame=1"} {
 		code, page := get(t, f.base+path)
 		if code != http.StatusOK {
 			t.Fatalf("GET %s = %d", path, code)
@@ -404,9 +404,9 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 
 func TestIndexPageListsSessions(t *testing.T) {
 	f := startPageFixture(t)
-	code, body := get(t, f.base+"/")
+	code, body := get(t, f.base+"/?frame=1")
 	if code != http.StatusOK {
-		t.Fatalf("GET / = %d", code)
+		t.Fatalf("GET /?frame=1 = %d", code)
 	}
 	for _, want := range []string{`href="/s/livesession"`, `href="/s/boardsession"`, filepath.Base(f.project), `class="phase replying"`, "no live state"} {
 		if !strings.Contains(body, want) {

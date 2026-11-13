@@ -276,7 +276,7 @@ process.stdout.write(bad.join("\n"));
 // page.
 func TestPagesCarryTheToastStackAndTitleHost(t *testing.T) {
 	f := startPageFixture(t)
-	for name, path := range map[string]string{"live": "/s/livesession?frame=1", "board-first": "/s/boardsession?frame=1", "index": "/"} {
+	for name, path := range map[string]string{"live": "/s/livesession?frame=1", "board-first": "/s/boardsession?frame=1", "index": "/?frame=1"} {
 		code, page := get(t, f.base+path)
 		if code != http.StatusOK {
 			t.Fatalf("GET %s = %d", path, code)
