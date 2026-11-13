@@ -53,3 +53,22 @@ In dev mode, do not replace a daemon mid-work automatically.
 - An opt-in auto-replace knob.
 - Making completion mail durable across a replacement.
 - Verify drain behavior in `wsdashboard.Ensure`.
+
+## Result (partial)
+
+Landed only the bounded wait (T0; no tool/argument/protocol change): all three
+Python launchers hold unsent MCP calls (including initialize/tools/list) for
+75 s with independent budgets, endpoint rediscovery about every 3 s, and the
+waited-time error suffix. Stdio survives exhaustion. CLI forwarding waits
+before its command-carrying hello; sent requests are never retried. Pi runner
+ws registrations use the shared `piMCPTimeout` (1860 s after merging develop),
+which also covers recovery instead of Pi's 60 s default.
+The forwarding implementation is Python, not Go. Replacement policy and mail
+durability remain open; this ticket stays in `idea/`.
+
+Verification: all 101 launcher tests (51 proxy tests) pass remotely. Go full
+suite has only the known w5090
+`TestHostedConnectionSeeingALANChangeReplacesTheDaemon` failure;
+subsequent wsagent/wsrsrc tests pass. Earlier local 8-test run passed; final
+local rerun was lock-blocked. Broader remote Python discovery: 136 tests,
+2 skips, one infrastructure error (neutrality test requires excluded `.git`).

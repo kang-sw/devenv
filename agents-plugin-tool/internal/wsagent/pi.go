@@ -126,6 +126,8 @@ const PiWaitMax = 1800 * time.Second
 const PiForwardSlack = 30 * time.Second
 
 // piMCPTimeout exceeds even a maximum forwarded wait, with transport margin.
+// It also covers the launcher's 75s unsent-request wait, including initialize
+// and tools/list, which Pi's default 60s request timeout would cut off.
 const piMCPTimeout = PiWaitMax + PiForwardSlack + 30*time.Second
 
 // piDir is where a conversation's Pi session lives.
