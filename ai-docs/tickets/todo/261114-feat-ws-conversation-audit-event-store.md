@@ -63,7 +63,7 @@ What exists today (Explore evidence, 2026-11-14, paths under
 
 ## Open Decision Queue
 
-Last ID: (600). MAIN's board IDs are (a) = (594), (b) = (595), (c) = (596),
+Last ID: (600). (g) awaits a board ID from MAIN. MAIN's board IDs are (a) = (594), (b) = (595), (c) = (596),
 (d) = (597), (e) = (598), (f) = (599), and (600) is the owner's group-ack
 check.
 
@@ -144,6 +144,24 @@ check.
       nanoseconds), so the UI can place hidden events between ring rows.
   - This is chosen over an MCP tool surface, which can come later as an
     additive T0 tool, because the UI is the consumer.
+- (g) [open] [technical] The ring's per-call record gains an optional call
+  id, so a ring history row can open its audit events. Today no ring type
+  carries one (`wslive/toolsummary.go` `ToolBatch`, `ToolCallArgs`;
+  `wslive/ring.go` `RingEntry`), and the history DOM only has `data-entry`.
+  - `ToolCallArgs` gains `id` (omitempty), the same harness tool-call id the
+    audit store records as `call_id`. A batch whose calls carry ids writes
+    `CallArgs` even when no call had an argument preview; the
+    `BatchCallCap` cap is unchanged.
+  - The Claude mapping fills it in Phase 1; Pi fills it where its events
+    carry a call id. Ring entries written before the change have no id, and
+    the UI keeps today's pill for those, with no time-window matching.
+  - Decision 3 still holds: this is an additive optional field (T0), and
+    ring readers ignore unknown fields. The constraint that the ring's caps
+    and `/history` behaviour do not change still holds; emitting the id as
+    `data-call` in the template belongs to the UI ticket.
+  - This is chosen over a time-window join between ring rows and audit
+    events, which is ambiguous for parallel calls and for calls that start
+    in the same millisecond.
 
 ## Constraints
 
@@ -163,11 +181,15 @@ check.
 The store and writer (queue items (a), (c), (d)), the envelope (b), Claude
 stream-json mapping of every line kind including thinking, hooks,
 reminders, the compaction summary and subagent lines, and the model-seen
-cut (e). Pi mapping too, if it fits the same pass.
+cut (e), and the ring call id (g). Pi mapping too, if it fits the same
+pass.
 
 Verification: unit tests over recorded stream-json fixtures, one per kind;
 redaction tests (rule name and length kept, original absent); GC tests (the
-byte cap drops whole oldest segments; the session prune removes the dir).
+byte cap drops whole oldest segments; the session prune removes the dir); a
+ring test that a Claude tools row's calls carry the same ids as the audit
+store's `tool_call` events, and that an older ring entry without ids still
+reads.
 
 ### Phase 2: Read API
 
