@@ -1,6 +1,6 @@
 {{define "session"}}<!DOCTYPE html>
 <html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}{{if .Hosted}} data-hosted="1"{{end}}{{if .HandedOff}} data-handed="1"{{end}}{{with .Terminal}} data-term="{{.}}"{{end}}>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
 <title>{{template "stitle" .}}</title>
 <style>{{.Assets.WhiteboardCSS}}</style>{{if .Terminal}}
 <style>{{.Assets.XtermCSS}}</style>{{end}}
@@ -241,7 +241,7 @@ line, the head's failure chip, and a rail row's error ring title. */}}
 
 {{define "index"}}<!DOCTYPE html>
 <html data-mode="index" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .Local}} data-sysopen="1"{{end}}>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
 <title>ws dashboard</title>
 <style>{{.Assets.WhiteboardCSS}}</style>
 <style>{{.Assets.CSS}}</style>

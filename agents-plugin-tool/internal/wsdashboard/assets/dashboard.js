@@ -378,6 +378,12 @@
     if (v) root.setAttribute("data-theme", v);
     else root.removeAttribute("data-theme");
     markTheme();
+    // The installed app's title bar: each theme-color meta takes the pinned
+    // theme's colour, or its own scheme's under auto (pwa.go pwaHead).
+    q('meta[name="theme-color"]').forEach(function (m) {
+      var c = v ? doc.querySelector('meta[name="theme-color"][data-scheme="' + v + '"]') : m;
+      if (c) m.setAttribute("content", c.getAttribute("data-c"));
+    });
     q("iframe.doc-frame").forEach(postTheme);
     if (window.mermaid && q("pre.mermaid[data-processed]").length) window.wbMermaid();
   }
