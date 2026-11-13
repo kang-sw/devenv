@@ -489,19 +489,6 @@
     "261113-feat-ws-pi-worker-marker-env-guard": {
       "registered_at": "2026-11-13T01:46:15Z"
     },
-    "261113-feat-ws-ticket-visual-reference-and-ask-classes": {
-      "registered_at": "2026-11-13T13:37:50Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T13:40:10Z",
-        "impl": {
-          "branch": "impl/develop/dress-map-hunk"
-        }
-      }
-    },
     "261113-feat-ws-tracker-calendar-multi-day-spans": {
       "registered_at": "2026-11-13T13:42:45Z"
     },
@@ -519,6 +506,9 @@
     },
     "261113-fix-ws-playbook-spawn-idiom-and-delegate-resolve-agent": {
       "registered_at": "2026-11-13T14:00:10Z"
+    },
+    "261113-refactor-ws-dashboard-drop-lan-serving": {
+      "registered_at": "2026-11-13T14:07:27Z"
     },
     "261113-research-hosted-detection-by-session-identity": {
       "registered_at": "2026-11-13T01:12:42Z"
