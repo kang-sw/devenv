@@ -55,8 +55,8 @@ func TestBuiltinSupportProfilesResolve(t *testing.T) {
 	}
 	resolver := wsconfig.NewResolver(opts, nil, nil, nil)
 	all, err := ResolveProfiles(&resolver)
-	if err != nil || len(all) != 5 {
-		t.Fatalf("ResolveProfiles with no config should list the builtin support, lead, and pi-worker profiles: %+v, %v", all, err)
+	if err != nil || len(all) != 6 {
+		t.Fatalf("ResolveProfiles with no config should list the builtin support, lead, pi-worker, and pi-mini-lead profiles: %+v, %v", all, err)
 	}
 }
 
@@ -78,8 +78,8 @@ func TestBuiltinPiWorkerProfileResolves(t *testing.T) {
 	if want := []string{"read", "bash", "edit", "write", "grep", "find", "ls"}; !slices.Equal(p.Tools, want) {
 		t.Errorf("pi-worker tools = %v, want %v", p.Tools, want)
 	}
-	if !slices.Contains(p.WSTools, "git.commit") || !slices.Contains(p.WSTools, "git.diff") {
-		t.Errorf("pi-worker ws_tools %v lack the commit or the diff read", p.WSTools)
+	if want := []string{"git.status", "git.diff", "git.log", "git.merge_base", "git.commit", "pi.spawn", "pi.send", "pi.list", "pi.stop", "pi.transcript", "pi.wait"}; !slices.Equal(p.WSTools, want) {
+		t.Errorf("pi-worker ws_tools = %v, want unchanged set %v", p.WSTools, want)
 	}
 	var pi []string
 	for _, tool := range p.WSTools {
@@ -96,6 +96,21 @@ func TestBuiltinPiWorkerProfileResolves(t *testing.T) {
 	}
 	if err := checkPiToolEntries(p); err != nil {
 		t.Errorf("pi-worker tools should be whole pi tools: %v", err)
+	}
+}
+
+func TestBuiltinPiMiniLeadProfileResolves(t *testing.T) {
+	rp, err := ResolveProfile(testConfig(t), t.TempDir(), PiMiniLeadProfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := rp.Definition
+	if p.Backend != BackendPi || p.Lead || !slices.Equal(p.Tools, PiWorkerTools) || p.Instructions != "" || p.Skills || p.ListInIndex || len(p.MCPServers)+len(p.Plugins) != 0 {
+		t.Fatalf("mini-lead must be an ordinary non-lead coding profile: %+v", p)
+	}
+	want := append(append([]string{}, PiWorkerWSTools...), "tickets.query", "tickets.acquire", "tickets.release", "tickets.close", "tickets.move", "tickets.verify", "tickets.checklist", "note.query", "playbook.read", "playbook.render", "path.generate", "route.resolve_implement")
+	if !slices.Equal(p.WSTools, want) {
+		t.Fatalf("mini-lead ws_tools = %v, want %v", p.WSTools, want)
 	}
 }
 

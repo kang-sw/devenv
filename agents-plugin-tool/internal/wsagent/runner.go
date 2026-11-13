@@ -549,6 +549,14 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		}
 		return State{}, badRequest("agent profile %q is not a lead profile (lead: true)", rp.Name)
 	}
+	if spawn != nil {
+		if spawn.Tier != "" && rp.Definition.Backend != BackendPi {
+			return State{}, badRequest("pi.spawn: profile %q must be a non-lead Pi profile", rp.Name)
+		}
+		if err := r.checkChildProfile(spawn.Parent, rp.Name, rp.Definition); err != nil {
+			return State{}, err
+		}
+	}
 	var key string
 	if lead != nil {
 		// A lead key lives at the canonical git root, which is then the
@@ -1896,6 +1904,9 @@ func (c *conv) startProcess() error {
 	if rp.Definition.Backend != rec.Backend {
 		return fmt.Errorf("agent profile %q now selects backend %q; this conversation runs on %q", rec.Profile, rp.Definition.Backend, rec.Backend)
 	}
+	if rp.Definition.Lead != rec.Lead {
+		return fmt.Errorf("agent profile %q changed its lead setting; refusing to start", rec.Profile)
+	}
 	if rec.Lead {
 		return c.startLead(rec, rp.Definition, false)
 	}
@@ -1903,6 +1914,11 @@ func (c *conv) startProcess() error {
 }
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
+	if rec.Backend == BackendPi && !attach {
+		if err := c.r.checkChildProfile(rec.Parent, rec.Profile, def); err != nil {
+			return err
+		}
+	}
 	if rec.Backend == BackendPi && c.r.opts.Holders != nil && !attach {
 		if !c.r.scanDone() {
 			return errors.New("holder scan is not complete")
@@ -1979,6 +1995,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		if attach {
 			spec.Holder.id, spec.Holder.skipTo = rec.HolderID, rec.HolderSeq
 		}
+	}
+	if rec.Backend == BackendPi && !attach {
+		// Persist exactly the definition checked above and passed to Start,
+		// after retiring the previous process. Reattachment keeps this copy.
+		c.update(func(rec *Record) { rec.ResolvedDefinition = &def })
 	}
 	proc, err := c.r.opts.Backends[rec.Backend].Start(context.Background(), spec)
 	if err != nil {
@@ -2132,7 +2153,12 @@ func (c *conv) retireHolder() error {
 func (c *conv) reattach() {
 	rec := c.record()
 	def := Profile{Backend: rec.Backend, Lead: rec.Lead}
-	if rp, err := c.r.resolve(rec.Profile, rec.Root); err == nil && rp.Definition.Backend == rec.Backend {
+	if rec.Backend == BackendPi && rec.ResolvedDefinition != nil {
+		def = *rec.ResolvedDefinition
+	} else if rp, err := c.r.resolve(rec.Profile, rec.Root); err == nil && rp.Definition.Backend == rec.Backend {
+		// Best-effort mapping for a legacy held process is not evidence of
+		// what it launched with. Keep its child ceiling unavailable until
+		// an actual startWorker launch records the checked definition.
 		def = rp.Definition
 	}
 	var err error

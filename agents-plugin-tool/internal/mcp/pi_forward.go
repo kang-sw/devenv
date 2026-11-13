@@ -145,6 +145,10 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 	}
 	switch tool {
 	case "pi.spawn":
+		profile, err := piSpawnProfile(args)
+		if err != nil {
+			return toolTextResponse(id, "", err)
+		}
 		prompt, err := rawStringArg(tool, "prompt", args)
 		if err == nil && strings.TrimSpace(prompt) == "" {
 			err = fmt.Errorf("%s: prompt is required", tool)
@@ -159,7 +163,7 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 		cwd, _ := args["cwd"].(string)
 		label, _ := args["label"].(string)
 		var st wsagent.State
-		if err := s.piCall(ctx, tool, map[string]any{"prompt": prompt, "tier": tier, "cwd": cwd, "label": label}, piForwardTimeout, &st); err != nil {
+		if err := s.piCall(ctx, tool, map[string]any{"prompt": prompt, "tier": tier, "profile": profile, "cwd": cwd, "label": label}, piForwardTimeout, &st); err != nil {
 			return fail(err)
 		}
 		if wantsJSON(args) {
@@ -256,7 +260,7 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 // reads them (piForwards), by name.
 func piWorkerDescriptions() map[string]string {
 	return map[string]string{
-		"pi.spawn":      "Spawn a Pi subagent of your own: a headless Pi coding agent the dashboard daemon runs for you, with Pi's coding tools (read, bash, edit, write, grep, find, ls) and the ws git tools, working in cwd. prompt is its first message; a rendered playbook prompt works as it does for a native subagent. tier picks the model from the pi bucket of agents.tier alone and may not be above your own tier. The spawn tree is at most two levels below the lead, so a subagent of yours gets a refusal naming the cap when it tries to spawn. Returns the subagent's id at once while its turn runs. Each time a turn ends or fails, its report (the id, the status, and the final assistant message) comes to you: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open subagent's report has reached you, so you may end your turn while they work. Steer it with pi.send, read it with pi.transcript, list yours with pi.list, and close one with pi.stop.",
+		"pi.spawn":      "Spawn a Pi subagent of your own: a headless Pi coding agent the dashboard daemon runs for you, working in cwd. profile names any resolvable non-lead Pi agent profile; omitted means pi-worker (coding and ws git tools), while pi-mini-lead adds bounded ticket workflow tools. The child's resolved ws_tools, tools, and mcp_servers must be within your launched profile's tools; escalation is refused naming both profiles and the excess tools. prompt is its first message; a rendered playbook prompt works as it does for a native subagent. tier picks the model from the pi bucket of agents.tier alone and may not be above your own tier. The spawn tree is at most two levels below the lead, so a subagent of yours gets a refusal naming the cap when it tries to spawn. Returns the subagent's id at once while its turn runs. Each time a turn ends or fails, its report (the id, the status, and the final assistant message) comes to you: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open subagent's report has reached you, so you may end your turn while they work. Steer it with pi.send, read it with pi.transcript, list yours with pi.list, and close one with pi.stop.",
 		"pi.send":       "Send one of your Pi subagents a follow-up message. A closed subagent resumes on its existing session file with the same id and settings; a missing file is refused. With no turn running it starts the next turn now; during a turn it steers that running turn at the next tool boundary, without cancelling in-flight tool calls. That turn's report covers the steered message; no extra turn is queued after it is taken.",
 		"pi.list":       "List the Pi subagents you spawned, open and closed: id, status (idle, running, or closed), model and effort, working directory, label, held messages, and the last error.",
 		"pi.stop":       "Close one of your Pi subagents and, first, its own subagents: its process stops and a running turn ends with it. No report follows. Its record stays: pi.list shows it closed, pi.transcript still reads it, and pi.send resumes it if its session file still exists.",

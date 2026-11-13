@@ -28,8 +28,13 @@ type Record struct {
 	SchemaVersion int    `json:"schema_version"`
 	ReplyID       string `json:"reply_id"`
 	Profile       string `json:"profile"`
-	Backend       string `json:"backend"`
-	Root          string `json:"root"`
+	// ResolvedDefinition is the Pi worker's last launched profile, not a
+	// re-resolution of its name. It is the capability ceiling for children
+	// and the definition used when reattaching its still-running process.
+	// Older records snapshot on their next launch.
+	ResolvedDefinition *Profile `json:"resolved_definition,omitempty"`
+	Backend            string   `json:"backend"`
+	Root               string   `json:"root"`
 	// SessionID is the backend session the next process resumes; empty
 	// until the first process reported one.
 	SessionID string `json:"backend_session_id,omitempty"`

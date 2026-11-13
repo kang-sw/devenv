@@ -115,6 +115,9 @@ const labelRunes = 120
 // message held or is not opened at all. The process starts as for any
 // first send; a launch failure settles the turn as failed.
 func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
+	if strings.TrimSpace(spec.Profile) == "" {
+		spec.Profile = PiWorkerProfile
+	}
 	if strings.TrimSpace(spec.Prompt) == "" {
 		return State{}, badRequest("prompt is empty")
 	}
@@ -149,6 +152,28 @@ func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
 	spec.Cwd = cwd
 	spec.Label = cleanLabel(spec.Label)
 	return r.create(spec.Profile, spec.Root, nil, &spec)
+}
+
+// checkChildProfile enforces the parent's launched capability ceiling at
+// creation and every Pi process start. Lead parents are unrestricted.
+func (r *Runner) checkChildProfile(parent *ParentRef, name string, def Profile) error {
+	if def.Backend != BackendPi || parent == nil || parent.Kind != ParentConversation {
+		return nil
+	}
+	rec, ok := r.recordOf(parent.ReplyID)
+	if !ok {
+		return badRequest("pi.spawn: parent %s has no launched profile snapshot", parent.ReplyID)
+	}
+	if rec.Lead {
+		return nil
+	}
+	if rec.ResolvedDefinition == nil {
+		return badRequest("pi.spawn: child profile %q cannot be checked against parent profile %q: no launched definition snapshot; restart the parent first", name, rec.Profile)
+	}
+	if excess := excessProfileTools(def, *rec.ResolvedDefinition); len(excess) > 0 {
+		return badRequest("pi.spawn: child profile %q exceeds parent profile %q's launched tools: %s", name, rec.Profile, strings.Join(excess, ", "))
+	}
+	return nil
 }
 
 // cleanLabel is label's first non-blank line, at most labelRunes runes.
