@@ -672,8 +672,9 @@ owns the whole tree:
   to launch, and checks again on restart against its parent's launched copy.
   Widening a parent's config does not widen an already-running parent's
   ceiling. A still-running process reattaches with its saved definition;
-  older records without one resolve and snapshot once. Lead parents have no
-  subset ceiling.
+  older records without one cannot spawn children while reattached, until an
+  actual process launch resolves and snapshots their definition. Lead parents
+  have no subset ceiling.
 - **Reports.** A child's settled turn waits in its record
   (`pending_reports`) until the runner hands it to the parent. A running
   parent turn gets it as a Pi `steer`. Otherwise it is kept in the parent's

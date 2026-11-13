@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
 	"strings"
@@ -195,6 +196,74 @@ func TestPiLeadCanSelectCustomProfileAndRefusesOtherBackends(t *testing.T) {
 		if _, err := h.runner.Spawn(SpawnSpec{Profile: profile, Root: h.root, Prompt: "x", Tier: "small", Parent: &leadParent}); err == nil {
 			t.Errorf("must refuse %s", profile)
 		}
+	}
+}
+
+func TestPiHeldParentSnapshotNeverInventedOnReattach(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		name := "saved-snapshot"
+		if legacy {
+			name = "legacy-no-snapshot"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, _ := newFakePiRecoveryHarness(t)
+			worker, holder := spawnRecoveryWorker(t, h)
+			original := h.record(worker.ID)
+			if legacy {
+				c := h.runner.conv(worker.ID)
+				c.do(func() { c.update(func(rec *Record) { rec.ResolvedDefinition = nil }) })
+			}
+			opts := h.opts.Config
+			opts.RepoRoot = h.root
+			resolver := wsconfig.NewResolver(opts, nil, nil, nil)
+			if err := resolver.SetStructured(ProfilePrefix+PiWorkerProfile, BuiltinProfiles()[ProfilePrefix+PiMiniLeadProfile], wsconfig.ScopeGlobal); err != nil {
+				t.Fatal(err)
+			}
+			h.restart() // Same process and MCP bridge, not a new launch.
+			h.runner.SetEndpoint("http://127.0.0.1:1")
+			eventually(t, "the original token restored after holder reattachment", func() bool {
+				_, err := h.runner.tokenHolder(original.Capability)
+				return err == nil
+			})
+			h.quiesce(worker.ID)
+			rec := h.record(worker.ID)
+			if rec.HolderID != holder || h.holders.opCount("launch") != 1 {
+				t.Fatal("daemon restart must rejoin the same process")
+			}
+			if legacy && rec.ResolvedDefinition != nil {
+				t.Fatal("reattachment cannot invent a legacy parent's launched ceiling")
+			}
+			if !legacy && !reflect.DeepEqual(rec.ResolvedDefinition, original.ResolvedDefinition) {
+				t.Fatal("reattachment must preserve the original launched ceiling")
+			}
+			server := httptest.NewServer(h.runner.Handler())
+			defer server.Close()
+			request := ChildSpawn{Prompt: "review", Tier: "small", Profile: PiMiniLeadProfile}
+			code, body := recoveryTokenCall(t, server.URL, original.Capability, "spawn", request)
+			want := "ws_tools.tickets.close"
+			if legacy {
+				want = "no launched definition snapshot"
+			}
+			if code != http.StatusBadRequest || !strings.Contains(body, want) || h.holders.opCount("launch") != 1 {
+				t.Fatalf("held parent cannot gain a wider child from current config: %d %s", code, body)
+			}
+			// An actual process restart may establish the new definition.
+			if _, err := h.runner.Stop(worker.ID); err != nil {
+				t.Fatal(err)
+			}
+			h.send(worker.ID, "restart with current profile")
+			if next := h.holder(worker.ID); next == holder {
+				t.Fatal("expected an actual new process")
+			}
+			rec = h.record(worker.ID)
+			if rec.ResolvedDefinition == nil || !slices.Contains(rec.ResolvedDefinition.WSTools, "tickets.close") {
+				t.Fatal("an actual launch must snapshot its checked definition")
+			}
+			code, body = recoveryTokenCall(t, server.URL, rec.Capability, "spawn", request)
+			if code != http.StatusCreated {
+				t.Fatalf("restarted parent can spawn within its new ceiling: %d %s", code, body)
+			}
+		})
 	}
 }
 
