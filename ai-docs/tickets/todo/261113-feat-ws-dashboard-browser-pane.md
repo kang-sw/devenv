@@ -3,7 +3,7 @@ title: "Dashboard web card: proxied localhost page with element pick and console
 sage-review-design: required
 sage-review-completeness: required
 related:
-  261113-feat-ws-dashboard-iframe-shell: "also changes the session-page CSP and framing; see the Composed session-page CSP decision there"
+  261113-feat-ws-dashboard-iframe-shell: "frames session pages under ?frame=1; its composed session-page CSP does not apply here, because decision 19 keeps the session page at frame-src 'self'"
   261113-feat-ws-ticket-visual-reference-and-ask-classes: "co-edits the whiteboard playbook and mirrors"
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "co-edits the whiteboard playbook and mirrors"
 ---
@@ -57,12 +57,14 @@ Current state (research, 2026-11-13):
    injected script that does element pick and console-error collection.
    Headless Chromium / CDP screenshots are out of scope until exact
    screenshots are needed.
-4. **The proxy runs on a separate daemon port (a different origin from the
-   dashboard)** ((111)=a, revising the same-origin part of (101)). The dev
+4. **The proxy runs on a different origin from the dashboard** ((111)=a,
+   revising the same-origin part of (101); the listener layout and framing
+   are settled by (522), decision 19). The dev
    page runs unrestricted (its own cookies / localStorage work) while the
    origin boundary keeps it away from dashboard routes (terminal, message
-   send). The injected script talks to the dashboard only by postMessage. The
-   session page CSP `frame-src` adds only that proxy origin.
+   send). The injected script talks to the dashboard only by postMessage.
+   Each target gets its own loopback listener and the card frames it
+   through a wrapper route; the session page CSP is unchanged (decision 19).
    Rejected: same origin + `sandbox` (breaks dev apps' localStorage and
    cookies); same origin without sandbox (a dev page script could call daemon
    routes with the dashboard's credentials).
@@ -89,8 +91,13 @@ Current state (research, 2026-11-13):
    "+ Terminal" (URL input), and a click on a localhost link in the
    conversation or board opens a web card, matching file-link -> file-card.
    The agent asks the user to look at a page by writing a localhost link.
-10. **Card persistence** ((116), announced): `{url}` stored per session in
-    browser localStorage like the existing cards.
+10. **Card persistence** ((116), announced; detailed by the completeness
+    review 2026-11-13, autonomous): stored per session in browser
+    localStorage like the existing cards. A dev-server card stores the
+    target `{url}` (never the ephemeral proxy URL); a static-file card stores
+    the workspace `{path}` and re-registers it on restore. A static
+    registration lasts for the daemon's lifetime; its listener is recreated
+    on demand, so a restored card works after a daemon restart.
 11. **Compatibility tier: T0** - dashboard asset content, an additional daemon
     listener, one additive whiteboard playbook line, and additive optional
     `wsinbox.Entry` fields plus drain description text (decision 16).
@@ -157,6 +164,9 @@ Current state (research, 2026-11-13):
     session page allowing `frame-src http://127.0.0.1:*`; (c) one port with
     `<port>.localhost` Host routing (`loopbackHost`, `daemon.go:690`, accepts
     only exact names).
+    The wrapper route and the decision 18 registration route are both
+    guarded like decision 6 (`localViewer` + `sameOrigin`; completeness
+    review 2026-11-13, autonomous).
 
 ## Constraints
 
@@ -185,7 +195,7 @@ Current state (research, 2026-11-13):
 
 ## Prior Decisions
 
-- 445e0769 (2026-11-12, commit): "frame-src 'self' verified headless: the preview frame's self-navigation to another origin is blocked" - adding the proxy origin to `frame-src` relaxes that block for every frame on the page — bearing: constrains
+- 445e0769 (2026-11-12, commit): "frame-src 'self' verified headless: the preview frame's self-navigation to another origin is blocked" - decision 19 keeps the session page at `frame-src 'self'`, and each wrapper route's `frame-src` names only its own card's proxy origin — bearing: constrains
 - 72c8e9d2 (2026-11-07, commit): "A framed session page's own script posts carry the daemon Origin, so the same-origin/loopback guards ... all pass a clickjacked click. Refusing the frame is the only guard that works there." — bearing: constrains
 - 261110-feat-ws-dashboard-file-preview (2026-11-11, Result): "A previewed HTML file can read any file under the session root through its capability, and CSP does not govern a frame navigating itself, so such a page could carry what it read to another origin." — bearing: constrains
 - 261110-feat-ws-dashboard-file-preview (2026-11-10, Decisions): "HTML and SVG load in an iframe with `sandbox="allow-scripts"` and no `allow-same-origin`, from a preview route whose path carries a short-lived, root-scoped read capability" — bearing: constrains
@@ -199,14 +209,14 @@ Current state (research, 2026-11-13):
 | fact | value | evidence |
 |---|---|---|
 | scope.span | multi-file | agents-plugin-tool/internal/wsdashboard/assets/cards.js, assets/dashboard.js, pages.go, a new proxy listener, agents-plugin-tool/internal/wsinbox (Entry fields, Merge, restore), the dashboard.inbox_drain description in internal/mcp/server.go, agents-plugin/rsrc/whiteboard/whiteboard.md with wsflow and pi mirrors |
-| scope.surface | cross-module | new daemon listener and proxy, dashboard assets, session page CSP, shipped whiteboard playbook; no exported Go symbol is named |
+| scope.surface | cross-module | new per-target daemon listeners and proxy, wrapper and registration routes, dashboard assets, shipped whiteboard playbook (the session page CSP is unchanged, decision 19); no exported Go symbol is named |
 | scope.new_public_symbol | yes | wb:pick and wb:console message elements (agent-visible grammar); the proxy listener port |
 | scope.new_type_contract | yes | injected-script to host postMessage protocol; wb:pick url/selector and wb:console url element grammar |
 | scope.test_surface | new-files | existing pages_test.go and access guards cover CSP and localViewer; the proxy needs new Go test files (ReverseProxy search over agents-plugin-tool returned nothing) |
 | complexity.reuse_points | confirmed | cards.js kind registry (register/open at cards.js#L839-L896), hostMention/addMention/bmentions chip path (dashboard.js#L1179-L1275), localViewer (access.go#L146-L148) |
-| complexity.side_effect_risk | high | a new loopback listener that proxies to arbitrary localhost targets and changes the session page CSP |
+| complexity.side_effect_risk | high | new loopback listeners that proxy to arbitrary localhost targets and serve registered workspace directories |
 | risk.correctness | high | proxy rewriting and script injection across HMR/websocket dev servers, plus postMessage pick and console capture |
-| risk.fit | moderate | follows the card framework, but CSP becomes per-request and the iframe-shell ticket also reframes the page (pending 261113-feat-ws-dashboard-iframe-shell) |
+| risk.fit | moderate | follows the card framework, but adds a per-card wrapper route with its own CSP and the iframe-shell ticket also reframes the page (pending 261113-feat-ws-dashboard-iframe-shell) |
 | risk.test | high | the pick highlight, injection and proxied page need a browser LOOK capture on a dev daemon; Go tests cover only allow-list, guard, injection, and CSP |
 | risk.security_or_contract | high | SSRF and execution surface, unsandboxed dev page on a sibling port, and a new shipped message grammar |
 
@@ -218,7 +228,8 @@ Current state (research, 2026-11-13):
   19), for localhost targets and registered workspace static directories, injecting the pick /
   console script; guarded by the same-machine rule.
 - `cards.js`: third card kind `web` (iframe on the proxy origin, URL bar,
-  reload), "+ Web" button, localhost link click opens it, localStorage `{url}`.
+  reload), "+ Web" button, localhost link click opens it, localStorage
+  `{url}` or `{path}` per decision 10.
 - Injected script <-> host postMessage protocol: pick mode (hover highlight,
   click -> selector + text), console error collection and count.
 - Host: attach `wb:pick` and console errors to the composed message with the
@@ -244,5 +255,9 @@ daemon instance, of a web card showing a proxied local page with HMR active,
 an active pick highlight, and the composed message carrying a `wb:pick` chip,
 a `wb:console` chip and the error badge; headless checks that a localhost link
 click and "+ Web" open a card, reload re-requests the page, a reload of the
-session page restores the card from localStorage, and a listener bind failure
-shows in the card.
+session page restores the card from localStorage (a static card also after a
+daemon restart, re-registering its path), "Open as web card" on an HTML file
+card and on an HTML file link opens a static web card, a workspace path typed
+into "+ Web" does the same, and a listener bind failure shows in the card; Go
+tests that the registration route and the wrapper route refuse a non-local
+viewer and a cross-origin caller.

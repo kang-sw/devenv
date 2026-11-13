@@ -104,17 +104,30 @@ Research (2026-11-13):
     Windows. Rejected: (b) stopping
     and closing them from the modal; (c) listing only and deleting anyway.
 11. **Shared check helpers and path validation** ((505), technical,
-    owner-acknowledged 2026-11-13): the `worktree.remove` checks
-    (unreached commits, porcelain status, lease) move from package `mcp`
-    into a shared internal package, because `mcp` imports `wsdashboard` and
-    not the reverse; the dashboard uses the same lease staleness window as
-    `worktree.remove`; the delete route also verifies the target path is in
-    that repository's `git worktree list`. That window is
-    `worktree.nudge_stale_days`, read today through a session-keyed resolver
-    (`worktreeNudgeThresholds`, `mcp/worktree_nudge.go:54`); the extracted
-    helper takes the duration as a parameter, and the dashboard route, which
-    has no session key, resolves it per project with the same default. Rejected: duplicating the checks
-    in `wsdashboard` (two copies drift).
+    owner-acknowledged 2026-11-13; narrowed by decision 12): the
+    `worktree.remove` checks the dashboard still needs (unreached commits,
+    porcelain status: `countUnreachedCommits`, `porcelainPaths`) move from
+    package `mcp` into a shared internal package, because `mcp` imports
+    `wsdashboard` and not the reverse; the delete route also verifies the
+    target path is in that repository's `git worktree list`. The lease check
+    and the `worktree.nudge_stale_days` window stay in `mcp`: decision 12
+    refuses every pooled worktree before any lease could matter, and a
+    foreign worktree has no ws lease. Rejected: duplicating the checks in
+    `wsdashboard` (two copies drift).
+12. **Pooled worktrees are refused** ((519), owner 2026-11-13: dashboard
+    deletion never touches ws pool worktrees; those stay with
+    `worktree.remove`). A target is pooled when its cleaned absolute path is
+    under the repository's resolved `worktree_pool` root or under the default
+    pool root (`<git root>/../.ws-worktrees/<git root dir name>`), so a
+    changed config never exposes the old pool; the route resolves the knob
+    per repository without a session key. The rail row carries a deletable
+    flag and shows no delete action on pooled rows (the rail hides pooled
+    rows except while one holds a listed session, `pageview_rail.go`); the
+    preview and the submit both refuse a pooled target, and the modal says the
+    worktree belongs to the ws pool and is removed with `worktree.remove`.
+    Profile `pre_remove` hooks therefore never apply. Rejected: running the
+    profile's `pre_remove` hooks from the dashboard (the lead's (519) premise,
+    rejected by the owner).
 
 ## Constraints
 
@@ -135,6 +148,7 @@ Research (2026-11-13):
 - 6c5fe1f2 (2026-11-10, commit): "The preview is a POST because the same-origin gate needs an Origin header, which a GET does not carry." — bearing: constrains
 - 6c5fe1f2 (2026-11-10, commit): "Refusals git should never see (option-like or invalid branch names, a taken or checked-out branch, a non-empty folder) are checked by the daemon first" — bearing: constrains
 - eaa6a798 (2026-10-20, commit): "worktree.remove lacked the primary/non-pool guards release already has (worktree_tools.go:425-429) and could delete a live worker's clean, commit-less worktree" — bearing: supports
+- (519) (2026-11-13, owner on MAIN's board): "the worktrees the dashboard shows are not pooled, so they are outside the helper's reach" — the lead's pre_remove-hook premise was rejected; recorded as decision 12 — bearing: constrains
 - 261020-feat-worktree-profiles (2026-10-20, Decisions): "### `worktree.remove` and the nudge" (worktree.remove is pool-only; this ticket leaves it unchanged) — bearing: constrains
 - d1021d42 (2026-05-24, commit): "Preview state is keyed by the current modal request and submit is disabled unless the displayed preview matches that request." — bearing: supports
 - 1ab62ba2 (2026-05-24, commit): "Inputs remain editable during submit, so blocked submit previews now check the current request key before mutating modal preview/error state." — bearing: supports
@@ -146,9 +160,9 @@ Research (2026-11-13):
 | scope.span | multi-file | agents-plugin-tool/internal/wsdashboard/workspace_routes.go (route registration), a new delete route file, pageview_rail.go (RailWorktree), assets/dashboard.js, dashboard.css, dashboard.tmpl, i18n tables, tests |
 | scope.surface | cross-module | new daemon POST route plus rail row action; reusing mcp/worktree_remove.go checks crosses packages, and internal/mcp imports internal/wsdashboard (mcp/dashboard_config.go), so wsdashboard cannot import mcp |
 | scope.new_public_symbol | yes | decision 11 extracts the worktree.remove checks into a shared internal package, exporting its helpers; route constant and handlers stay unexported like worktreeAddRoute |
-| scope.new_type_contract | yes | preview and submit request and answer JSON, a RailWorktree field for delete eligibility |
+| scope.new_type_contract | yes | preview and submit request and answer JSON, a RailWorktree deletable flag (false for the primary and pooled rows, decision 12) |
 | scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/workspace_routes_test.go, rail_test.go, railscript_test.go; mcp/worktree_remove_test.go for the reused checks; new test files possible |
-| complexity.reuse_points | confirmed | decision 11: countUnreachedCommits, porcelainPaths, readWorktreeLease move from package mcp into a shared package both callers import |
+| complexity.reuse_points | confirmed | decision 11: countUnreachedCommits and porcelainPaths move from package mcp into a shared package both callers import; the lease check stays in mcp (decision 12) |
 | complexity.side_effect_risk | high | runs git worktree remove on arbitrary linked worktrees including ones outside the ws pool, deleting the directory and any uncommitted files |
 | risk.correctness | high | force semantics, locked and submodule worktrees, unreached detached-HEAD commits, live sessions and leases, and submit-time re-validation must all hold on a destructive path |
 | risk.fit | moderate | follows the add-worktree route pattern but the dashboard has no typed-confirm modal yet (confirm UI is window.confirm) |
@@ -162,9 +176,8 @@ Research (2026-11-13):
 - Daemon route (POST, guarded per decision 5): a preview call returning the
   fresh check result and a submit call that re-validates and runs the
   removal per decisions 3 and 6.
-- Rail: a delete action on non-primary worktree rows; the modal per
-  decision 4.
-
+- Rail: a delete action on non-primary, non-pooled worktree rows (decision
+  12); the modal per decision 4.
 - Shared check helpers per decision 11.
 - The preview also reports initialized submodules (decision 9 needs force for
   them).
@@ -172,7 +185,8 @@ Research (2026-11-13):
 Verification: Go tests over temp repos - preview reports dirty / unreached /
 session / lock / submodule state; submit refuses the primary worktree, a path
 not in `git worktree list`, a locked worktree, a worktree with a live session,
-a pooled worktree (under a pool root, decision 12), and anything the old policy refuses without
+a pooled worktree (under the resolved or the default pool root, decision
+12; the preview refuses it too and the rail row has no delete action), and anything the old policy refuses without
 force; a detached HEAD's unreached commits need force while a branch
 worktree with commits no other branch reaches deletes without force and the
 branch survives; a worktree with initialized submodules is removed only with
