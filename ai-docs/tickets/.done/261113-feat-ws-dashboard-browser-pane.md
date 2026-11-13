@@ -659,3 +659,35 @@ Decisions taken in implementation:
 - Escape on the pick toggle ends pick mode as Escape inside the page does.
 - Live checks ran on the harness's own isolated daemon rather than
   `scripts/dev.py rerun daemon`, which replaces the running daemon.
+
+#### Edition (4354df8f0) - 2026-11-14
+
+Lead pre-merge security review: the static scope is narrowed to keep
+decision 5 (the opened file's directory subtree, never the whole root).
+
+- A file at the session root's top now registers a file-only scope: that
+  file serves and every other path on its listener answers 404. A file in
+  a subdirectory keeps its directory subtree. The root itself (also through
+  a symlink) is refused. This withdraws the Result's "a file at the session
+  root's top registers the root itself".
+- Registration refuses a dot-named or git-ignored path (`capDenied` on the
+  registered path: `.git/`, `.cache/`, an ignored `build/`), and every
+  static request applies `capDenied`, so an ignored file inside a registered
+  subtree answers 404. The page runs scripts on its own origin and can
+  fetch anything its listener serves, so unlike the file routes this
+  applies to a local viewer too; a report in an ignored folder opens in the
+  preview card, not a web card. (9a6618750)
+- A static card's record takes the page's posted path only when its decoded
+  name is still one file name, and picks keep a decoded `..` step encoded,
+  so a forged `..%2F` path cannot point a restored card elsewhere.
+  (4354df8f0)
+- Verification: `go test ./internal/wsdashboard/ ./internal/wsinbox/
+  ./internal/wsi18n/ ./internal/wsrsrc/... -count=1` ok; node webinject 20,
+  webframe 6, webcard 21 pass; `node scripts/webcard-headless.mjs` all 16
+  scenarios pass on its isolated daemon. New tests
+  `TestWebCardRootFileServesOnlyItself` and
+  `TestWebCardRefusesGitIgnoredPaths`, and the dot-directory refusal case,
+  fail with the old scope (mutation-checked).
+- Left as is, per the lead: popups escaping the sandbox, the remembered-port
+  rebind on macOS with SO_REUSEADDR, registry entries never removed, the
+  HTML buffering cap, and a dashboard viewed at `[::1]`.
