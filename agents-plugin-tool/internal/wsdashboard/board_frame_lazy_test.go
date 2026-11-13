@@ -81,7 +81,13 @@ El.prototype = {
   },
   replaceChild: function (c, old) { this.insertBefore(c, old); return this.removeChild(old); },
   appendChild: function (c) { return this.insertBefore(c, null); },
-  scrollIntoView: function () {}
+  scrollIntoView: function () {},
+  // closest models only a single class selector (boardJump's ".wb-history").
+  closest: function (sel) {
+    if (!/^\.[\w-]+$/.test(sel)) throw new Error("closest selector not modelled: " + sel);
+    for (var n = this; n && n.nodeType === 1; n = n.parentNode) if (n.classList.contains(sel.slice(1))) return n;
+    return null;
+  }
 };
 function walk(root, out) { root.childNodes.forEach(function (c) { out.push(c); walk(c, out); }); return out; }
 var SEL = {
@@ -136,10 +142,12 @@ function requestAnimationFrame() {}
 // shows blank; the next of an unmounted one takes its place as a
 // placeholder. The cases execute under node when it is installed.
 func TestBoardFramesMountLazily(t *testing.T) {
-	src := dashboardFuncs(t, "frameShown", "mountFrame", "mountFrames", "frameToggle", "isPeer", "openKey", "restoreOpenOne", "restoreOpen", "boardJump", "frameGraft", "frameNext")
+	src := dashboardFuncs(t, "frameShown", "mountFrame", "mountFrames", "frameToggle", "isPeer", "isPanel", "openKey", "restoreOpenOne", "restoreOpen", "boardJump", "frameGraft", "frameNext")
 	runNode(t, "lazy frame mount", frameDOM+src+`
 var openState = {}, PEER_KEY = "p.";
 function load() { return null; }
+function shutId() { return ""; }
+function shutHas() { return false; }
 doc.addEventListener("toggle", frameToggle, true);
 
 var A = frame("topic:x"), B = frame("entry:e1"), C = frame("entry:e2"), D = frame("entry:e3"), P = frame("topic:pinned");
