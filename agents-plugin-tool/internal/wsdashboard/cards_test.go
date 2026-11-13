@@ -569,6 +569,7 @@ var window = {}, doc = null, openState = {}, boardSeen = {};
 function q(sel, el) { try { return el.querySelectorAll(sel); } catch (e) { return []; } }
 function frag(nodes) { return { childNodes: nodes }; }
 function isPeer() { return false; }
+function isPanel() { return false; }
 `+src+`
 function served(closed) { return [topic("A", 500)].concat(closed.map(function (n) { return topic(n, 0, true); })).concat([more(1), reply()]); }
 function start() {
