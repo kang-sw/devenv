@@ -10,9 +10,8 @@ import (
 // The command language (package wsxmlcmd) is stated once, in the workflow
 // manual playbook's command-syntax part, and every tool whose input is that
 // language points at it instead of carrying its own copy: the workflow manual
-// renders it once ahead of the tools' sections, a refusal repeats it ahead of
-// the tool's command section, and playbook.read of such a tool's playbook
-// appends it.
+// renders it once ahead of the tools' sections, a refusal points to the
+// tool's playbook, and playbook.read of such a tool's playbook appends it.
 
 const commandSyntaxPart = "command-syntax"
 
@@ -64,22 +63,11 @@ func appendCommandSyntax(rsrcRoot, body string) (string, error) {
 	return strings.TrimRight(body, "\n") + "\n\n" + section, nil
 }
 
-// commandRefusal is a command-language tool's refusal: every problem, then
-// the shared command syntax and the tool's own command section, so one retry
-// can fix the call. commands is that section's text; when it or the shared
-// section cannot be read, a pointer to playbook stands in for both.
-func (s *Server) commandRefusal(tool string, problems []string, commands, playbook string) string {
+// commandRefusal lists every problem and points to the tool's playbook.
+func (s *Server) commandRefusal(tool string, problems []string, playbook string) string {
 	var sb strings.Builder
 	writeRefusalProblems(&sb, tool, problems)
-	syntax := ""
-	if rsrcRoot, err := s.resolveRsrcRoot(""); err == nil {
-		syntax, _ = commandSyntaxSection(rsrcRoot)
-	}
-	if syntax == "" || commands == "" {
-		fmt.Fprintf(&sb, "\nRead the %s playbook with %s/playbook.read for the input format.\n", playbook, s.runtimeNamespace())
-		return sb.String()
-	}
-	sb.WriteString("\n" + syntax + "\n\n" + commands + "\n")
+	fmt.Fprintf(&sb, "\nSyntax and commands: the `%s` playbook (%s/playbook.read).\n", playbook, s.runtimeNamespace())
 	return sb.String()
 }
 

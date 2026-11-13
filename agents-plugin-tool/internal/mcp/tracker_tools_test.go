@@ -547,8 +547,8 @@ func TestTrackerUpdateIsAllOrNothing(t *testing.T) {
 	}
 }
 
-// Every problem the batch has is listed at once, before any write, with the
-// syntax and the command table so one retry can fix the call.
+// Every problem the batch has is listed at once, before any write, with a
+// pointer to the playbook.
 func TestTrackerUpdateListsEveryProblem(t *testing.T) {
 	f := newTrackerLeadFixture(t)
 	f.trackerUpdate(t, trackerPersonal)
@@ -575,14 +575,14 @@ func TestTrackerUpdateListsEveryProblem(t *testing.T) {
 		"<tk:store> (line 9): a second <tk:store> group; one batch writes to one store, so it holds one group",
 		"command 7 <tk:item.hide> (line 9): unknown attribute store (known: origin, item)",
 		`command 8 <tk:item.hide> (line 10): goes inside a <tk:store name="..."> group`,
-		"## Commands", "`tk:item.create`",
+		"Syntax and commands: the `tracker` playbook (ws/playbook.read).",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("refusal missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Count(text, "## Command syntax") != 1 || strings.Index(text, "## Command syntax") > strings.Index(text, "## Commands") {
-		t.Fatalf("the refusal must carry the syntax once, ahead of the command table:\n%s", text)
+	if strings.Contains(text, "## Command syntax") || strings.Contains(text, "## Commands") {
+		t.Fatalf("the refusal must not repeat playbook sections:\n%s", text)
 	}
 	// The group names a registered store, once for all its commands; the
 	// network commands stay at the root.

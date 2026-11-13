@@ -326,7 +326,7 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 // this: it sees only the advertised argument names.
 func (s *Server) whiteboardRefusal(tool string, problems []string) string {
 	if tool != "whiteboard.query" {
-		return s.commandRefusal(tool, problems, s.whiteboardPlaybookSection("## Commands"), whiteboardPlaybookName)
+		return s.commandRefusal(tool, problems, whiteboardPlaybookName)
 	}
 	var sb strings.Builder
 	writeRefusalProblems(&sb, tool, problems)
