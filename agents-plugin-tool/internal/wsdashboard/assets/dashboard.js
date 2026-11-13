@@ -2710,6 +2710,19 @@
     return !!window.WsPreview && !!cardBoard && root.hasAttribute("data-sysopen") && a.getAttribute("data-wl") === "file" &&
       !a.getAttribute("data-rel") && !!abs && window.WsPreview.takes(abs);
   }
+  // webLink reports a link a plain click opens in a web card (webcard.js,
+  // only on a data-sysopen page): an http(s) link to a localhost page
+  // other than this daemon's own port. webFile reports an HTML file under
+  // the session root, which the link menu offers to open in a web card.
+  function webLink(a) {
+    return !!window.WsWeb && !!cardBoard && root.hasAttribute("data-sysopen") && a.getAttribute("data-wl") === "url" &&
+      !!a.getAttribute("href") && window.WsWeb.localLink(a.href);
+  }
+  function webFile(a) {
+    var rel = a.getAttribute("data-rel");
+    return !!window.WsWeb && !!cardBoard && root.hasAttribute("data-sysopen") && a.getAttribute("data-wl") === "file" &&
+      !a.hasAttribute("data-out") && !!rel && /\.html?$/i.test(rel);
+  }
   // openOutsideTab opens an outside HTML file as a page in a tab of its own.
   // The tab opens blank inside the click, since the URL comes from a POST
   // (the outside-link route mints its capability) and a tab opened after
@@ -2734,11 +2747,13 @@
     var rel = a.getAttribute("data-rel"), abs = a.getAttribute("data-abs"), url = a.href;
     var sys = root.hasAttribute("data-sysopen"), out = a.hasAttribute("data-out");
     var items = [];
+    if (webLink(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ url: url }); }]);
     if (previews(a)) items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(rel); }]);
     else if (outsideOpens(a)) {
       items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(abs, { out: true }); }]);
       if (/\.html?$/i.test(abs)) items.push([wsT("js.menu.newtab"), function () { openOutsideTab(abs); }]);
     }
+    if (webFile(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ path: rel }); }]);
     if (linkOpens(a)) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
     if (href && sys && !out) {
       items.push([wsT("js.menu.sysopen"), function () {
@@ -2793,15 +2808,17 @@
     if (linkOpens(a) && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
     e.preventDefault();
     // A pointer click on a link the preview can show opens the preview
-    // slot; its menu is on the right click and on the keyboard activation
-    // (a click event with no detail).
+    // slot, and one on a localhost page a web card; their menu is on the
+    // right click and on the keyboard activation (a click event with no
+    // detail).
+    if (e.detail !== 0 && webLink(a)) { window.WsWeb.open({ url: a.href }); return; }
     if (e.detail !== 0 && previews(a)) { window.WsPreview.open(a.getAttribute("data-rel")); return; }
     if (e.detail !== 0 && outsideOpens(a)) { window.WsPreview.open(a.getAttribute("data-abs"), { out: true }); return; }
     linkAt(a, e);
   }, true);
   doc.addEventListener("contextmenu", function (e) {
     var a = e.target && e.target.closest && e.target.closest("a[data-wl]");
-    if (!a || !(previews(a) || outsideOpens(a))) return;
+    if (!a || !(previews(a) || outsideOpens(a) || webLink(a))) return;
     e.preventDefault();
     openLinkMenu(a, e.clientX, e.clientY);
   });
@@ -3457,6 +3474,13 @@
     } else if (m.wbDoc === "link") {
       var a = frameLink(m);
       if (!a) return;
+      // A body frame reports a plain click and a keyboard activation alike:
+      // a localhost page opens its web card on either, but only while the
+      // user is acting (a click in a frame activates this page too), so a
+      // body's script cannot open one by posting alone; otherwise its menu
+      // offers the card.
+      var act = navigator.userActivation;
+      if (webLink(a) && act && act.isActive) { window.WsWeb.open({ url: a.href }); return; }
       var r = f.getBoundingClientRect();
       openLinkMenu(a, r.left + num(m.x), r.top + num(m.y));
     } else if (m.wbDoc === "img") {

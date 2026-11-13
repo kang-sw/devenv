@@ -377,6 +377,7 @@
   "js.web.failed": "ページを開けませんでした: {0}",
   "js.web.lost": "ページが開きませんでした。再読み込みしてやり直してください。",
   "js.web.noerrors": "このページはエラーを記録していません",
+  "js.web.menu.open": "Web カードとして開く",
   "js.web.cap.picks": "1 件のメッセージに添付できる要素は {0} 個までです",
   "js.web.cap.consoles": "1 件のメッセージに添付できるコンソールエラーのまとまりは {0} 個までです",
   "js.web.chip.pick.remove": "この選択した要素を削除",

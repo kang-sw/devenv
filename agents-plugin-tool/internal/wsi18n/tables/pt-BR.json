@@ -377,6 +377,7 @@
   "js.web.failed": "Não foi possível abrir a página: {0}",
   "js.web.lost": "A página não abriu. Recarregue para tentar de novo.",
   "js.web.noerrors": "Esta página não registrou erros",
+  "js.web.menu.open": "Abrir como cartão web",
   "js.web.cap.picks": "Uma mensagem comporta no máximo {0} elementos escolhidos",
   "js.web.cap.consoles": "Uma mensagem comporta no máximo {0} blocos de erros de console",
   "js.web.chip.pick.remove": "remover este elemento escolhido",
