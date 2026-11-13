@@ -127,4 +127,4 @@ install `wsflow` into Claude.
 
 ## License
 
-Personal configuration. Use freely, no warranty implied.
+Licensed under the [Apache License 2.0](LICENSE).
