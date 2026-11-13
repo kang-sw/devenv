@@ -17,6 +17,14 @@ The `git.merge` size advisory flagged these files on 2026-11-13 merges:
 - `agents-plugin-tool/internal/mcp/playbook_tools_test.go` (2949 lines)
 - `agents-plugin-tool/internal/wsdashboard/assets/dashboard.js` (7290 lines)
 
+Added on 2026-11-14 under the same policy (flagged by the
+`261113-feat-ws-compaction-before-queued-followup` merge):
+
+- `agents-plugin-tool/internal/wsagent/runner.go` (3169 lines)
+- `agents-plugin/hooks/claude-mod/watcher.test.ts` (2881 lines)
+- `agents-plugin-wsflow/hooks/claude-mod/watcher.test.ts` (2881 lines, the
+  wsflow mirror)
+
 Until this ticket is populated, the advisories for these files are ignored;
 the per-path guards in `.gitattributes` are deliberately not raised, so the
 warning stays visible. This is a placeholder: no plan, decisions, or fact
