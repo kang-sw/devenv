@@ -417,7 +417,14 @@
       "registered_at": "2026-11-13T04:59:31Z"
     },
     "261113-feat-ws-dashboard-board-reorder-hold": {
-      "registered_at": "2026-11-13T14:16:02Z"
+      "registered_at": "2026-11-13T14:16:02Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T15:02:44Z"
+      }
     },
     "261113-feat-ws-dashboard-browser-pane": {
       "registered_at": "2026-11-13T07:16:08Z",
