@@ -5684,6 +5684,12 @@
         railPopOpen("lead", fresh);
         return;
       }
+      var del = t.closest && t.closest(".rdel");
+      if (del) {
+        e.preventDefault();
+        railDelete(del);
+        return;
+      }
       // The whole bar toggles the workspace's collapse; its toggle button
       // (.wstog) is the keyboard's way to it.
       var bar = t.closest && t.closest(".wsbar");
@@ -6268,6 +6274,210 @@
       btn.disabled = false;
       toast(status >= 200 && status < 300 ? wsT("js.rail.forgot", nm ? nm.textContent : path) : railErr(status, s));
     });
+  }
+
+  // --- rail worktree delete ----------------------------------------------------
+  // A linked worktree row's trash button (.rdel) opens the delete modal: a
+  // <dialog> shown modal, made once outside the rail region (which every
+  // update replaces). It reads the daemon's check (the preview route) and
+  // shows it: the folder, the branch the delete keeps, the changed files, a
+  // detached HEAD's unreached commits, submodules, the lock, and the
+  // sessions and terminals in the worktree (a live one blocks, an ended one
+  // is listed only); the refusal's note when there is one; and, when the
+  // check needs force, that force will be used and why. Delete turns on
+  // once the folder name is typed exactly against the current open's check
+  // (WsRail.deleteReady): an answer to an earlier open is dropped. The
+  // submit carries force and the check's token only when the check needs
+  // force (WsRail.deleteBody). A 409 with a check (refused, or force needed
+  // or moved since the check) shows that check in place and clears the
+  // typed name, so the next confirmation is made against what is shown now;
+  // a failure's text shows inline. A success closes the modal and toasts its
+  // message; the stream redraws the rail. Escape and Cancel close it.
+  var rdel = null;
+  function rdelMake() {
+    var D = { seq: 0, ws: "", path: "", shown: null, busy: false, btn: null };
+    var dl = D.el = mk("dialog", "rdeldlg");
+    var hd = dl.appendChild(mk("h2", "rdhd"));
+    hd.id = rpId();
+    dl.setAttribute("aria-labelledby", hd.id);
+    hd.appendChild(gIcon("trash"));
+    hd.appendChild(mk("span", null, wsT("js.rail.wt.del.title")));
+    var where = dl.appendChild(mk("code", "rdpath"));
+    var facts = dl.appendChild(mk("div", "rdfacts"));
+    facts.setAttribute("aria-live", "polite");
+    var note = dl.appendChild(mk("p", "rdnote"));
+    var force = dl.appendChild(mk("div", "rdforce"));
+    var conf = dl.appendChild(mk("label", "rdconf"));
+    var confText = conf.appendChild(mk("span", "rdconft"));
+    var inp = conf.appendChild(rpInput("rdq"));
+    var msg = dl.appendChild(mk("p", "rdmsg"));
+    msg.setAttribute("aria-live", "polite");
+    var row = dl.appendChild(mk("div", "rdrow"));
+    var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
+    var go = row.appendChild(rpBtn("pbtn danger", wsT("js.rail.wt.del.submit")));
+    function setMsg(text, err) { msg.textContent = text || ""; msg.className = "rdmsg" + (err ? " err" : ""); msg.hidden = !text; }
+    function sync() { go.disabled = D.busy || !WsRail.deleteReady(D.shown, inp.value, D.seq); }
+    // fact is one line of the check: an icon, its text, and an optional tone.
+    function fact(icon, text, tone) {
+      var f = facts.appendChild(mk("div", "rdfact" + (tone ? " " + tone : "")));
+      f.appendChild(gIcon(icon));
+      f.appendChild(mk("span", null, text));
+      return f;
+    }
+    // draw shows the check c. The worktree's state (changes, commits,
+    // submodules, lock, holders) shows only once the daemon read it (the
+    // token marks that): a refusal before the read (unknown, primary,
+    // pooled, missing) has none to show.
+    function draw(c) {
+      var r = c.refusal ? String(c.refusal) : "", blocked = !!r && r !== "force" && r !== "changed", read = !!c.token;
+      var folder = String(c.folder || "");
+      where.textContent = String(c.path || D.path);
+      where.title = where.textContent;
+      facts.textContent = "";
+      if (c.detached) fact("branch", wsT("js.rail.wt.del.detached"));
+      else if (c.branch) fact("branch", wsT("js.rail.wt.del.branch", String(c.branch)));
+      if (read) {
+        var paths = Array.isArray(c.dirty_paths) ? c.dirty_paths : [], dirty = +c.dirty || 0;
+        if (dirty > 0) {
+          fact("pencil", wsTn("js.rail.wt.del.dirty", dirty), "warn");
+          var ul = facts.appendChild(mk("ul", "rdpaths"));
+          paths.forEach(function (p) { ul.appendChild(mk("li", null, String(p))); });
+          if (dirty > paths.length) ul.appendChild(mk("li", "more", wsT("js.rail.wt.del.more", dirty - paths.length)));
+        } else fact("check", wsT("js.rail.wt.del.clean"));
+        if (c.detached && +c.unreached > 0) fact("branch", wsTn("js.rail.wt.del.unreached", +c.unreached), "warn");
+        if (c.submodules) fact("repo", wsT("js.rail.wt.del.submodules"), "warn");
+        if (c.locked) fact("lock", c.lock_reason ? wsT("js.rail.wt.del.lockedwhy", String(c.lock_reason)) : wsT("js.rail.wt.del.locked"), "bad");
+        var holders = Array.isArray(c.holders) ? c.holders : [];
+        if (holders.length) {
+          facts.appendChild(mk("div", "rdsub", wsT("js.rail.wt.del.holders")));
+          var hl = facts.appendChild(mk("ul", "rdholders"));
+          holders.forEach(function (h) {
+            var li = hl.appendChild(mk("li", h.live ? "live" : null));
+            var name = String(h.label || h.id || "");
+            if (h.kind === "terminal") name = h.label ? wsT("js.rail.wt.del.terminalfrom", String(h.id || ""), String(h.label)) : wsT("js.rail.wt.del.terminal", String(h.id || ""));
+            else if (h.harness) name += " (" + h.harness + ")";
+            li.appendChild(mk("span", "nm", name));
+            var state = h.live ? "js.rail.wt.del.live" : h.kind === "terminal" ? "js.rail.wt.del.exited" : "js.rail.wt.del.ended";
+            li.appendChild(mk("span", "st", wsT(state)));
+          });
+        }
+      }
+      note.textContent = String(c.note || "");
+      note.className = "rdnote" + (blocked ? " bad" : " warn");
+      note.hidden = !c.note;
+      force.textContent = "";
+      force.hidden = blocked || !c.force;
+      if (c.force && !blocked) {
+        force.appendChild(mk("div", "rdforcehd", wsT("js.rail.wt.del.force")));
+        var why = force.appendChild(mk("ul"));
+        if (+c.dirty > 0) why.appendChild(mk("li", null, wsT("js.rail.wt.del.why.dirty")));
+        if (+c.unreached > 0) why.appendChild(mk("li", null, wsT("js.rail.wt.del.why.unreached")));
+        if (c.submodules) why.appendChild(mk("li", null, wsT("js.rail.wt.del.why.submodules")));
+      }
+      conf.hidden = blocked || !folder;
+      confText.textContent = "";
+      wsT("js.rail.wt.del.confirm", "\u0001").split("\u0001").forEach(function (part, i) {
+        if (i) confText.appendChild(mk("code", null, folder));
+        if (part) confText.appendChild(doc.createTextNode(part));
+      });
+      go.textContent = wsT(c.force ? "js.rail.wt.del.forcesubmit" : "js.rail.wt.del.submit");
+    }
+    // show displays the check c as request n's answer; again clears the
+    // typed name, so a check that changed is confirmed afresh.
+    function show(c, n, again) {
+      D.shown = { key: n, check: c };
+      draw(c);
+      if (again) {
+        inp.value = "";
+        if (!conf.hidden) setMsg(wsT("js.rail.wt.del.again"), false);
+      }
+      sync();
+      if (!conf.hidden) inp.focus();
+    }
+    function submit() {
+      sync();
+      if (go.disabled) return;
+      var n = D.seq, c = D.shown.check;
+      D.busy = true;
+      setMsg("", false);
+      go.textContent = wsT("js.rail.wt.del.busy");
+      sync();
+      railPost("/rail/worktrees/delete", WsRail.deleteBody(D.ws, D.path, c), function (st, v, s) {
+        if (st === 200) {
+          if (n === D.seq) D.close();
+          toast(String(v.message || ""));
+          return;
+        }
+        // A 409 answers with the fresh check, or with text while another
+        // git action of the repository runs.
+        var fresh = null;
+        if (st === 409) { try { fresh = JSON.parse(s); } catch (e) { fresh = null; } }
+        if (!fresh || typeof fresh !== "object" || Array.isArray(fresh)) fresh = null;
+        if (n !== D.seq) { toast(fresh && fresh.note ? String(fresh.note) : railErr(st, fresh ? "" : s)); return; }
+        D.busy = false;
+        if (fresh) { show(fresh, n, true); return; }
+        draw(c);
+        setMsg(railErr(st, s), true);
+        sync();
+      });
+    }
+    inp.addEventListener("input", function () { if (!D.busy) setMsg("", false); sync(); });
+    rpEnter(inp, submit);
+    go.addEventListener("click", submit);
+    cancel.addEventListener("click", function () { D.close(); });
+    // The native Escape (cancel) closes through close too.
+    dl.addEventListener("cancel", function (e) { e.preventDefault(); D.close(); });
+    dl.addEventListener("close", function () {
+      D.seq++;
+      D.busy = false;
+      var b = D.btn;
+      if (!b || !b.isConnected) {
+        b = null;
+        q(".rdel", region("rail") || railEl).forEach(function (x) { if (x.getAttribute("data-path") === D.path) b = x; });
+      }
+      if (b) b.focus();
+    });
+    D.open = function (btn) {
+      var n = ++D.seq;
+      D.btn = btn;
+      D.ws = btn.getAttribute("data-ws") || "";
+      D.path = btn.getAttribute("data-path") || "";
+      D.shown = null;
+      D.busy = false;
+      inp.value = "";
+      setMsg("", false);
+      draw({ path: D.path, folder: btn.getAttribute("data-folder") || "" });
+      conf.hidden = true;
+      facts.appendChild(mk("div", "rdfact", wsT("js.rail.wt.del.loading")));
+      sync();
+      if (!dl.parentNode) doc.body.appendChild(dl);
+      if (!dl.open) dl.showModal();
+      cancel.focus();
+      railPost("/rail/worktrees/delete/preview", { workspace: D.ws, path: D.path }, function (st, v, s) {
+        if (n !== D.seq) return;
+        if (st !== 200) {
+          facts.textContent = "";
+          setMsg(railErr(st, s), true);
+          sync();
+          return;
+        }
+        show(v, n, false);
+      });
+    };
+    D.close = function () { if (dl.open) dl.close(); };
+    return D;
+  }
+  function railDelete(btn) {
+    if (!btn.getAttribute("data-path")) return;
+    rdel = rdel || rdelMake();
+    rdel.open(btn);
+  }
+  if (railEl && WsRail) {
+    // Escape closes the delete modal before anything else hears it (the
+    // rail overlay would close on it too).
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && rdel && rdel.el.open) { e.preventDefault(); e.stopPropagation(); rdel.close(); }
+    }, true);
   }
   if (railEl && WsRail) {
     // Escape closes the popover before anything else hears it (the rail

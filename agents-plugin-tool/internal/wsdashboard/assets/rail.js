@@ -8,8 +8,8 @@
   // null) }, which must not throw), so the page works the same with storage
   // absent; nothing reaches the server. The DOM helpers touch only the
   // elements they are given; the revive route and hand-off notice, the
-  // popover helpers at the end, and the approval card's input preview after
-  // them, are pure.
+  // popover and delete modal helpers at the end, and the approval card's
+  // input preview after them, are pure.
   var DRAFT = "ws.dashboard.draft.", DRAFTS = "ws.dashboard.drafts";
   var STARS = "ws.dashboard.stars", COLLAPSED = "ws.dashboard.railcol";
   var ORDER = "ws.dashboard.railorder", WSORDER = "ws.dashboard.wsorder";
@@ -307,6 +307,32 @@
     return body;
   }
 
+  // deleteReady reports whether the worktree delete modal's Delete is on:
+  // shown is the check the modal displays ({key, check}: key the request it
+  // answered), key the modal's current request, typed its input. Only the
+  // current request's check counts (an answer to an earlier open is stale),
+  // the typed text must be the check's folder name exactly, and the check
+  // must hold no refusal, except the submit's own two (force: the delete
+  // needs force the submit did not carry; changed: what force covers moved
+  // since the check): their check is fresh, with a fresh token, and asks
+  // only for the name to be typed again. A forced delete needs the token.
+  function deleteReady(shown, typed, key) {
+    var c = shown && shown.check;
+    if (!c || typeof c !== "object" || shown.key !== key) return false;
+    var r = c.refusal ? String(c.refusal) : "";
+    if (r && r !== "force" && r !== "changed") return false;
+    var folder = typeof c.folder === "string" ? c.folder : "";
+    if (!folder || typed !== folder) return false;
+    return !c.force || !!c.token;
+  }
+  // deleteBody is the delete submit for the worktree at path of the
+  // repository workspace ws, confirmed against check: force and the check's
+  // token only when the check needs force.
+  function deleteBody(ws, path, check) {
+    var force = !!(check && check.force);
+    return { workspace: ws, path: path, force: force, token: force ? String(check.token || "") : "" };
+  }
+
   // APPROVAL_CAP bounds an approval card's input preview.
   var APPROVAL_CAP = 4000;
   // approvalText is a tool call's input as an approval card shows it: a
@@ -349,6 +375,8 @@
     popPlace: popPlace,
     matchBranches: matchBranches,
     worktreeBody: worktreeBody,
+    deleteReady: deleteReady,
+    deleteBody: deleteBody,
     leadBody: leadBody,
     approvalText: approvalText
   };
