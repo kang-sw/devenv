@@ -10,7 +10,7 @@ func processAlive(pid int) bool {
 		return false
 	}
 	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
+	return (err == nil || err == syscall.EPERM) && !processZombie(pid)
 }
 
 // killHolder kills the holder pid with its process group. A holder leads
