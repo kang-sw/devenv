@@ -88,7 +88,7 @@ func mailboxWait(args []string) {
 		})
 		cancelOnParentExit()
 	})
-	os.Exit(runMailboxWait(ctx, args, os.Stdout, os.Stderr, "", os.Getpid(), nil, os.Getenv, nil))
+	os.Exit(runMailboxWait(ctx, args, os.Stdout, os.Stderr, "", os.Getpid(), nil, os.Getenv, nil, nil))
 }
 
 // runMailboxWait is `mailbox wait` as a function: the flags in args, the
@@ -103,13 +103,14 @@ func mailboxWait(args []string) {
 // whose mailbox and inbox writes and nudges signal it, so the wait rechecks
 // on those and polls only as a backstop; nil (a standalone process, which
 // receives no such signal) keeps the short poll.
-func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string, ownerPID int, environ []string, getenv func(string) string, wake *wswake.Hub) int {
+func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer, cwd string, ownerPID int, environ []string, getenv func(string) string, wake *wswake.Hub, streamout io.Writer) int {
 	fs := flag.NewFlagSet("mailbox wait", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", ".", "caller's own worktree/clone root; only needed to resolve a worktree/clone-scope --slug")
 	sessionKey := fs.String("session-key", "", "caller's own session_key (required): computes the reply-id queue and the named-inbox owner check")
 	slug := fs.String("slug", "", `optional explicit "name@scope" to also check the named inbox for (owner-gated); omit for reply-id-only (env-less) wait`)
-	timeout := fs.Duration("timeout", 0, "maximum time to block (e.g. 5m); 0 blocks until mail arrives")
+	timeout := fs.Duration("timeout", 0, "maximum time to block (e.g. 5m); 0 blocks until mail arrives. With --stream, the pending-arrival reminder interval (0 uses 10m), never a process deadline")
+	stream := fs.Bool("stream", false, "stay attached and emit JSONL arrivals; retry unchanged pending arrivals at --timeout intervals, until interrupted")
 	format := fs.String("format", "", `output format: text or json`)
 	boardInbox := fs.Bool("board-inbox", false, "also wake on a message the user sent from the dashboard page (held in the session's board-answer inbox); the adapter collects it with the adapter-only dashboard.inbox_drain tool, and this wait only peeks. The result says which kind arrived: mail, board, or both")
 	boardSteer := fs.Bool("board-steer", false, "also wake on a dashboard message the user promoted to steering, but not on a held one that was not promoted: the wait an adapter arms during a running turn, when held messages wait for the turn end. Peek only, like --board-inbox, which it cannot be combined with; a steered message reports as board")
@@ -173,7 +174,7 @@ func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer
 
 	nowStr := time.Now().UTC().Format(time.RFC3339)
 	marker := wsmailbox.ListeningMarker{SessionKey: *sessionKey, Slug: target.Slug, PID: ownerPID, StartedAt: nowStr}
-	if *timeout > 0 {
+	if *timeout > 0 && !*stream {
 		marker.TimeoutAt = time.Now().UTC().Add(*timeout).Format(time.RFC3339)
 	}
 	if err := paths.WriteListeningMarker(marker); err != nil {
@@ -191,7 +192,20 @@ func runMailboxWait(ctx context.Context, args []string, stdout, stderr io.Writer
 	// name (a wait launched through the shim re-arms through it).
 	rearmCmd := buildMailboxWaitRearmCommand(mcp.CLICommandNameFrom(getenv), *sessionKey, target.Slug, *timeout, boardFlags(*boardInbox, *boardSteer, *boardInterrupt))
 
-	result, err := wsmailbox.Wait(target, wsmailbox.WaitOptions{Timeout: *timeout, Done: ctx.Done(), Wake: wake})
+	opts := wsmailbox.WaitOptions{Timeout: *timeout, Done: ctx.Done(), Wake: wake}
+	var result wsmailbox.WaitResult
+	var err error
+	if *stream {
+		if streamout == nil {
+			streamout = stdout
+		}
+		encoder := json.NewEncoder(streamout)
+		err = wsmailbox.Stream(target, opts, func(arrival wsmailbox.WaitResult) error {
+			return encoder.Encode(mailboxWaitArrivalJSON(arrival))
+		})
+	} else {
+		result, err = wsmailbox.Wait(target, opts)
+	}
 	if errors.Is(err, wsmailbox.ErrWaitCancelled) {
 		fmt.Fprintln(stderr, "ws-mcp mailbox wait: interrupted")
 		return mailboxWaitExitInterrupted
@@ -237,42 +251,10 @@ func emitMailboxWaitResult(stdout, stderr io.Writer, result wsmailbox.WaitResult
 	}
 
 	total := result.Total()
-	// kinds says which kind of arrival woke the wait; a board entry is only
-	// peeked here, the adapter drains it.
-	kinds := []string{}
-	if total > 0 {
-		kinds = append(kinds, "mail")
-	}
-	if result.Board > 0 {
-		kinds = append(kinds, "board")
-	}
-	// An interrupt entry is its own kind, so it is never read as a held
-	// board message.
-	if result.Interrupt > 0 {
-		kinds = append(kinds, "interrupt")
-	}
 	if outputJSON(format) {
-		// Normalize a nil (empty) slice to "[]" rather than "null": this
-		// JSON shape is a declared new type contract for future adapters,
-		// so every consumer gets one array shape per field, never a null
-		// case to special-case.
-		named, reply := result.Named, result.Reply
-		if named == nil {
-			named = []wsmailbox.Envelope{}
-		}
-		if reply == nil {
-			reply = []wsmailbox.Envelope{}
-		}
-		if code := writeJSON(map[string]any{
-			"timed_out": false,
-			"unread":    total,
-			"board":     result.Board,
-			"interrupt": result.Interrupt,
-			"kinds":     kinds,
-			"named":     named,
-			"reply":     reply,
-			"rearm":     rearm,
-		}); code >= 0 {
+		value := mailboxWaitArrivalJSON(result)
+		value["rearm"] = rearm
+		if code := writeJSON(value); code >= 0 {
 			return code
 		}
 		return 0
@@ -292,6 +274,33 @@ func emitMailboxWaitResult(stdout, stderr io.Writer, result wsmailbox.WaitResult
 	}
 	printMailboxWaitRearm(stdout, rearmCmd)
 	return 0
+}
+
+// mailboxWaitArrivalJSON is shared by one-shot JSON and stream JSONL. A
+// stream has no re-arm instruction: it is still listening after each line.
+func mailboxWaitArrivalJSON(result wsmailbox.WaitResult) map[string]any {
+	kinds := []string{}
+	if result.Total() > 0 {
+		kinds = append(kinds, "mail")
+	}
+	if result.Board > 0 {
+		kinds = append(kinds, "board")
+	}
+	if result.Interrupt > 0 {
+		kinds = append(kinds, "interrupt")
+	}
+	// Keep empty arrays, not null, for machine consumers.
+	named, reply := result.Named, result.Reply
+	if named == nil {
+		named = []wsmailbox.Envelope{}
+	}
+	if reply == nil {
+		reply = []wsmailbox.Envelope{}
+	}
+	return map[string]any{
+		"timed_out": false, "unread": result.Total(), "board": result.Board,
+		"interrupt": result.Interrupt, "kinds": kinds, "named": named, "reply": reply,
+	}
 }
 
 // mailboxRearmNudge is the plain-language reminder printed (text) or carried

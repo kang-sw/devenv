@@ -142,6 +142,8 @@ function world(
   })
   on('fs.read', ($, e, next) => (e.path === HOSTED_ROW ? { value: JSON.stringify({ reply_id: 'hosted', hosted: true, host_pid: opts.hostPid ?? HARNESS_PID }) } : next(e)))
   on('process.spawn', async function* ($, e, next) {
+    // Exercise key ownership with the older-daemon one-shot fallback.
+    if (e.argv.includes('--stream')) return { value: { code: 2, signal: null } }
     const index = w.spawns.length
     w.spawns.push([...e.argv])
     next.signal.addEventListener('abort', () => w.killed.push(index), { once: true })

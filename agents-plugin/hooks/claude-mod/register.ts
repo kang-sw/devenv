@@ -31,6 +31,7 @@ import {
   type DrainMode,
   type DrainResult,
   type Watcher,
+  type WatcherEdges,
   type WaitOutcome,
   type WakeKind,
 } from './watcher'
@@ -38,8 +39,8 @@ import {
 // The Claude Code mod: the one hooks module a package's hooks.json names,
 // carrying eight features.
 //
-// - Mailbox push: the mod loops the one-shot `mailbox wait` as a peek-only
-//   signal for one bound session key, and arriving mail starts a turn through
+// - Mailbox push: the mod keeps a streaming `mailbox wait` as a peek-only
+//   signal for one bound session key (one-shot on older daemons), and mail starts a turn through
 //   $.prompt.submit, or, while a main-thread turn runs, joins it through
 //   $.session.append at its next tool boundary (see watcher.ts for the loop).
 //   The drain mode is the claude.mailbox_drain knob's. Where the manual
@@ -161,7 +162,7 @@ import {
 // lever without the handler that answers it.
 
 export const TOOL_NAME = 'mailbox_watch'
-/** A finite window, as the pi adapter uses, so an orphaned wait cannot outlive its session. */
+/** The one-shot fallback's timeout; streaming waits stay attached until stopped. */
 export const WAIT_TIMEOUT = '10m'
 /**
  * $.store key prefix for the bound key, suffixed with the session id. $.store
@@ -481,6 +482,96 @@ export async function consumeWait(
     return outcome === 'mail' && board ? wakeKinds(raced.stdout) : outcome
   } finally {
     signal.removeEventListener('abort', onAbort)
+  }
+}
+
+/**
+ * Keep one streaming child across wakes. The per-arm signal restarts changed
+ * board flags; the binding signal also closes it while a drain or notice is
+ * pending. An older CLI/daemon rejection selects one-shot for this session.
+ */
+export function createMailboxWait(
+  spawn: (argv: string[]) => Pick<HookStream<ProcessSpawnChunk, ProcessSpawnResult>, 'next' | 'return'>,
+  launcher: string,
+  debug: (text: string) => void,
+): WatcherEdges['wait'] {
+  type Running = {
+    argv: string
+    stream: ReturnType<typeof spawn>
+    text: string
+    stderr: string
+    seen: boolean
+    rejected: boolean
+    close: () => void
+  }
+  let running: Running | undefined
+  let oneShot = false
+  return async (key, slug, flags, signal, bindingSignal) => {
+    if (signal.aborted || bindingSignal.aborted) return 'stopped'
+    const argv = waitArgv(launcher, key, slug, flags.board, flags.interrupt)
+    if (oneShot) return consumeWait(spawn(argv), signal, debug, flags.board || flags.interrupt)
+    const identity = JSON.stringify(argv)
+    if (running && running.argv !== identity) running.close()
+    if (!running) {
+      const stream = spawn([...argv, '--stream'])
+      const mine: Running = {
+        argv: identity, stream, text: '', stderr: '', seen: false, rejected: false,
+        close: () => {
+          if (running === mine) running = undefined
+          bindingSignal.removeEventListener('abort', mine.close)
+          void stream.return(undefined as never).catch(() => {})
+        },
+      }
+      running = mine
+      bindingSignal.addEventListener('abort', mine.close, { once: true })
+    }
+    const mine = running
+    let stop!: (value: WaitOutcome) => void
+    const stopped = new Promise<WaitOutcome>((resolve) => (stop = resolve))
+    const abort = () => { mine.close(); stop('stopped') }
+    signal.addEventListener('abort', abort, { once: true })
+    const read = async (): Promise<WaitOutcome | 'fallback'> => {
+      for (;;) {
+        const newline = mine.text.indexOf('\n')
+        if (newline !== -1) {
+          const line = mine.text.slice(0, newline)
+          mine.text = mine.text.slice(newline + 1)
+          try {
+            const parsed = JSON.parse(line) as { kinds?: unknown }
+            if (Array.isArray(parsed?.kinds) && parsed.kinds.some((k) => ['mail', 'board', 'interrupt'].includes(k))) {
+              mine.seen = true
+              return wakeKinds(line)
+            }
+          } catch { /* Non-JSON usage diagnostics are not arrivals. */ }
+          mine.rejected ||= /unknown (?:flag|option)|flag provided but not defined|unrecognized (?:arguments?|option)|usage:/i.test(line)
+          continue
+        }
+        const step = await mine.stream.next()
+        if (signal.aborted || bindingSignal.aborted) return 'stopped'
+        if (step.done) {
+          mine.close()
+          const code = step.value?.code ?? null
+          debug(`mailbox stream exited code=${code} ${mine.stderr.trim().slice(0, 300)}`)
+          if ((!mine.seen && code !== null && code !== 0) || mine.rejected || /unknown (?:flag|option)|flag provided but not defined|unrecognized (?:arguments?|option)|usage:/i.test(mine.stderr + mine.text)) {
+            oneShot = true
+            return 'fallback'
+          }
+          return 'error'
+        }
+        if (step.value.stream === 'stderr') mine.stderr = (mine.stderr + step.value.text).slice(-2000)
+        else mine.text += step.value.text
+      }
+    }
+    try {
+      const outcome = await Promise.race([read(), stopped])
+      if (signal.aborted || bindingSignal.aborted) return 'stopped'
+      return outcome === 'fallback' ? consumeWait(spawn(argv), signal, debug, flags.board || flags.interrupt) : outcome
+    } catch (err) {
+      mine.close()
+      throw err
+    } finally {
+      signal.removeEventListener('abort', abort)
+    }
   }
 }
 
@@ -911,11 +1002,11 @@ export const register: Register = (on) => {
       const created = createWatcher({
         mode,
         label,
-        wait: async (key, slug, flags, signal) => {
-          if (signal.aborted) return 'stopped'
-          const stream = $.process.spawn({ argv: waitArgv(launcher, key, slug, flags.board, flags.interrupt) })
-          return consumeWait(stream, signal, (text) => $.ui.log(`${label}: ${text}`, { to: 'debug' }), flags.board || flags.interrupt)
-        },
+        wait: createMailboxWait(
+          (argv) => $.process.spawn({ argv }),
+          launcher,
+          (text) => $.ui.log(`${label}: ${text}`, { to: 'debug' }),
+        ),
         drain: async (key) => {
           if (!recvTool) return { kind: 'failed', reason: 'MCP server not resolved' }
           return classifyRecv(await $.tool.call({ tool: recvTool as `mcp__${string}__${string}`, session_key: key, format: 'json' }))
