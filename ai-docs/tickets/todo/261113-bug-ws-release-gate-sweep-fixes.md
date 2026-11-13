@@ -236,6 +236,14 @@ Verification:
 - #8: run `go test ./internal/mcp/` locally on darwin (CI has no macOS
   runner); the Result names the four tests that failed before and pass
   after.
+- Known darwin failures on develop (sticky-head worker, 2026-11-13), likely
+  #5 / #8: `internal/mcp` `TestRenderDispatchSeparatesResourceAndWorktreeRoots`,
+  `TestRenderFromWorktreeSessionCommitsInThatWorktree`,
+  `TestRenderPathMintedChildRecordsLeadParent`; `internal/wsagent`
+  `TestClaudeLeadLocalSettingsCanonicalWorktree`, `TestPiLeadResolverAdapter`.
+  The worker confirms each cause, fixes those that belong to #5 / #8, and
+  reports any other cause in its Result. `internal/mcp` needs
+  `-timeout 40m` (the default 10m panics).
 - `go test ./...` for the touched packages, the claude-mod / wsflow / Pi test
   suites, and the wsflow mirror drift tests pass.
 
