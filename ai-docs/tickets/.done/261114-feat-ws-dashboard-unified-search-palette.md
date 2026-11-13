@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b5535814cfc27023
 sage-review-completeness-reviewed: b5535814cfc27023
+completed: 2026-11-14
 ---
 
 # Dashboard unified search palette: board, file, content, and tracker slots, a jump strip, streamed async search, and absolute-path mode
