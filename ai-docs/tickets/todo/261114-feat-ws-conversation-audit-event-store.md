@@ -63,9 +63,9 @@ What exists today (Explore evidence, 2026-11-14, paths under
 
 ## Open Decision Queue
 
-Last ID: (600). (g) awaits a board ID from MAIN. MAIN's board IDs are (a) = (594), (b) = (595), (c) = (596),
-(d) = (597), (e) = (598), (f) = (599), and (600) is the owner's group-ack
-check.
+Last ID: (601). MAIN's board IDs are (a) = (594), (b) = (595), (c) = (596),
+(d) = (597), (e) = (598), (f) = (599), (g) = (601), and (600) is the
+owner's group-ack check, covering (594)-(599) and (601).
 
 - (a) [open] [technical] The audit store is a separate append-only
   per-session log, `sessions/<replyID>/audit/`: JSONL segment files with a
