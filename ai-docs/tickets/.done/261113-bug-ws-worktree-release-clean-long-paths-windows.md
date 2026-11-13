@@ -1,5 +1,6 @@
 ---
 title: "worktree.release clean fails on Windows long paths and leaves the worktree leased"
+completed: 2026-11-13
 ---
 
 # worktree.release clean fails on Windows long paths and leaves the worktree leased
@@ -24,3 +25,7 @@ agents-plugin-tool/internal/mcp/worktree_tools.go:526-536 (`reset --hard` at
   (or always).
 - Consider retrying the clean once on failure.
 - Compatibility: T0 (internal git invocation).
+
+## Result
+
+Hygiene reset and clean now enable Git long paths on all platforms. Acquire and release share this hygiene helper; a unit test checks both command lines.
