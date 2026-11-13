@@ -46,7 +46,7 @@ const window = { addEventListener() {}, sessionStorage: { setItem: (k,v) => stor
   return { ok: true, json: async () => ({ memos: remote.map(m => ({ ...m })), writable: local }) };
 } };
 const root = fs.existsSync('assets/memo.js') ? '.' : 'agents-plugin-tool/internal/wsdashboard';
-vm.runInNewContext(fs.readFileSync(path.join(root, 'assets/memo.js'), 'utf8'), { window, Promise, setTimeout(fn, ms) { const id = ++timerID; timers.push({ id, at: now + ms, fn }); return id; }, clearTimeout(id) { timers = timers.filter(t => t.id !== id); } });
+vm.runInNewContext(fs.readFileSync(path.join(root, 'assets/memo.js'), 'utf8'), { window, Promise, wsT: (k, ...a) => k + '|' + a.join('|'), setTimeout(fn, ms) { const id = ++timerID; timers.push({ id, at: now + ms, fn }); return id; }, clearTimeout(id) { timers = timers.filter(t => t.id !== id); } });
 async function flush() { for (let i = 0; i < 15; i++) await Promise.resolve(); }
 function advance(ms) { now += ms; for (const t of timers.filter(t => t.at <= now)) t.fn(); timers = timers.filter(t => t.at > now); }
 (async () => {
@@ -84,6 +84,29 @@ function advance(ms) { now += ms; for (const t of timers.filter(t => t.at <= now
   assert.equal(remote.length, 2); assert.equal(remote[0].text, 'edited'); assert.equal(ids['memo-undo'].hidden, true);
   ids['memo-list'].querySelector('.memo-delete').fire('click'); await flush(); advance(5000);
   assert.equal(ids['memo-undo'].hidden, true, 'undo expires after five seconds');
+  // The server caps trimmed text at 8000 UTF-8 bytes; a CJK char is 3 bytes but 1 UTF-16 unit.
+  const posts = () => calls.filter(c => c[1] && c[1].method === 'POST').length;
+  let before = posts();
+  ids['memo-input'].value = '  ' + '가'.repeat(2667) + '  '; // 8001 bytes, 2667 units
+  ids['memo-input'].fire('input');
+  assert.equal(ids['memo-status'].textContent, 'js.memo.toolong|8001|8000', 'input over the byte cap says so');
+  ids['memo-input'].fire('keydown', { key: 'Enter' }); await flush();
+  assert.equal(posts(), before, 'over-limit add is not POSTed');
+  assert.equal(ids['memo-input'].value.includes('가'), true, 'refused draft is kept');
+  ids['memo-input'].value = '가'.repeat(2666) + 'ab'; ids['memo-input'].fire('input');
+  assert.equal(ids['memo-status'].textContent, '', 'refusal clears once the text fits');
+  ids['memo-input'].fire('keydown', { key: 'Enter' }); await flush();
+  assert.equal(posts(), before + 1, 'exactly 8000 bytes is POSTed'); assert.equal(remote[0].text.length, 2668);
+  ids['memo-list'].querySelector('.memo-text').fire('click');
+  area = ids['memo-list'].querySelector('textarea'); area.value = '가'.repeat(2667) + 'a'; before = posts();
+  area.fire('input'); assert.equal(ids['memo-status'].textContent, 'js.memo.toolong|8002|8000', 'edit input over the byte cap says so');
+  area.fire('keydown', { key: 'Enter' }); await flush();
+  assert.equal(posts(), before, 'over-limit edit is not POSTed'); assert.equal(ids['memo-list'].querySelector('textarea').value.length, 2668);
+  area.value = '😀'.repeat(2000); area.fire('input'); // 4 bytes, 2 units each: 8000 bytes
+  assert.equal(ids['memo-status'].textContent, '', 'a surrogate pair counts as 4 bytes');
+  area.value = '😀'.repeat(2000) + 'a'; area.fire('input');
+  assert.equal(ids['memo-status'].textContent, 'js.memo.toolong|8001|8000');
+  area.fire('keydown', { key: 'Escape' });
   memo.remember(); assert.equal(memo.resume(), true); assert.equal(memo.resume(), false);
   memo.open(false, false); remote = [{ id: 'other', text: 'from another tab' }];
   memo.open(true, true); await flush(); assert.equal(ids['memo-list'].textContent.includes('from another tab'), true);

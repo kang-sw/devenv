@@ -325,6 +325,7 @@
   "js.interrupt.ok": "已发送中断。",
   "js.interrupt.restored": "已发送中断：暂存的消息已回到输入框。",
   "js.interrupt.title": "停止 lead 正在进行的回合；暂存的消息会回到输入框",
+  "js.memo.toolong": "备忘过长:{0} 字节(上限 {1})",
   "js.mention.label": "文件建议：上/下键移动，Tab 或 Enter 插入，Escape 关闭",
   "js.menu.copyabs": "复制绝对路径",
   "js.menu.copyrel": "复制相对路径",

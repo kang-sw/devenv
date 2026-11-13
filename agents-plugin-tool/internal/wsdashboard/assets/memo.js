@@ -7,6 +7,28 @@
     var undo = doc.getElementById("memo-undo"), workspace = "", session = "", items = [];
     var shown = false, writable = false, busy = false, loaded = false, generation = 0, deleted = null, timer = 0, wide = false;
     function say(text) { status.textContent = text; }
+    // The server refuses trimmed text over 8000 UTF-8 bytes (a lone surrogate
+    // is stored as U+FFFD, 3 bytes); maxLength counts UTF-16 units and cannot.
+    function byteLength(text) {
+      var n = 0;
+      for (var i = 0; i < text.length; i++) {
+        var c = text.charCodeAt(i);
+        if (c < 0x80) n += 1;
+        else if (c < 0x800) n += 2;
+        else if (c >= 0xd800 && c < 0xdc00 && i + 1 < text.length && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) { n += 4; i++; }
+        else n += 3;
+      }
+      return n;
+    }
+    var overMsg = "";
+    function fits(text) {
+      var n = byteLength(text.trim());
+      if (n <= 8000) {
+        if (overMsg && status.textContent === overMsg) say("");
+        overMsg = ""; return true;
+      }
+      overMsg = wsT("js.memo.toolong", n, 8000); say(overMsg); return false;
+    }
     function badge() {
       if (!loaded) return;
       Array.prototype.forEach.call(rail.querySelectorAll(".rws"), function (ws) {
@@ -38,6 +60,7 @@
           function edit() {
             if (busy || row.querySelector("textarea")) return;
             var area = doc.createElement("textarea"); area.value = m.text; area.maxLength = 8000;
+            area.addEventListener("input", function () { fits(area.value); });
             area.setAttribute("aria-label", "Edit memo"); text.hidden = true; row.appendChild(area); area.focus();
             area.addEventListener("keydown", function (e) {
               if (e.isComposing) return;
@@ -83,6 +106,7 @@
     }
     function change(action, id, text) {
       if (busy || !writable) return Promise.resolve(false);
+      if (action !== "delete" && !fits(text)) return Promise.resolve(false);
       var gen = generation;
       busy = true; input.disabled = true; say("");
       return request("/rail/memos", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
@@ -126,6 +150,7 @@
       position();
       if (on) reload(); else { ++generation; input.blur(); }
     }
+    input.addEventListener("input", function () { fits(input.value); });
     input.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault(); if (input.value.trim()) change("add", "", input.value);
