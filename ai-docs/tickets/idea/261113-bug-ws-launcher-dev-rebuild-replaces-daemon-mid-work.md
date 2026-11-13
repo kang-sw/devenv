@@ -61,7 +61,8 @@ Python launchers hold unsent MCP calls (including initialize/tools/list) for
 75 s with independent budgets, endpoint rediscovery about every 3 s, and the
 waited-time error suffix. Stdio survives exhaustion. CLI forwarding waits
 before its command-carrying hello; sent requests are never retried. Pi runner
-ws registrations allow 120 s so its 60 s default cannot cut off recovery.
+ws registrations use the shared `piMCPTimeout` (1860 s after merging develop),
+which also covers recovery instead of Pi's 60 s default.
 The forwarding implementation is Python, not Go. Replacement policy and mail
 durability remain open; this ticket stays in `idea/`.
 

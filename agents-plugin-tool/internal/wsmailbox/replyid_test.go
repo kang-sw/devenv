@@ -44,7 +44,7 @@ func TestPostSystemQueuesSenderlessMail(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 11, 13, 1, 2, 3, 0, time.FixedZone("x", 3600))
-	if err := PostSystem(path, replyID, "report", at); err != nil {
+	if err := PostSystem(path, replyID, "pi:childone", "report", at); err != nil {
 		t.Fatalf("PostSystem: %v", err)
 	}
 	store, err := LoadReplyStore(path)
@@ -52,11 +52,17 @@ func TestPostSystemQueuesSenderlessMail(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := store.Queues[replyID]
-	if len(q) != 2 || q[1] != (Envelope{Content: "report", SentAt: "2026-11-13T00:02:03Z"}) {
+	if len(q) != 2 || q[1] != (Envelope{Label: "pi:childone", Content: "report", SentAt: "2026-11-13T00:02:03Z"}) {
 		t.Fatalf("queue = %#v, want the system mail after the peer's", q)
 	}
-	if err := PostSystem(path, "", "x", at); err == nil {
+	if err := PostSystem(path, "", "", "x", at); err == nil {
 		t.Fatalf("an empty reply-id is refused")
+	}
+}
+
+func TestPiDisplayLabelIsNotAnAddress(t *testing.T) {
+	if _, err := ParseAddress("pi:childone"); err == nil {
+		t.Fatal("a Pi display label must not resolve as a mailbox address")
 	}
 }
 

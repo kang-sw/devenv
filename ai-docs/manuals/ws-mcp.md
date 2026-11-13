@@ -593,8 +593,10 @@ own children), `pi.stop` (ends the process and closes its descendants; the
 record stays resumable by `pi.send`), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
 send). The daemon mails each settled turn to the parent lead's reply-id
-queue with no sender (`mailbox.recv` shows `system`) and wakes the mailbox
-waits; a steered message belongs to the turn that takes it, whose completion
+queue with the display-only label `pi:<subagent id>` (no reply address) and
+wakes the mailbox waits; the first body line directs replies through `pi.send`,
+not `mailbox.send`. For other senderless system mail without a label,
+`mailbox.recv` still shows `system`. For Pi completion reports, a steered message belongs to the turn that takes it, whose completion
 mail covers it without an extra turn. A steer refused or not taken before
 the turn ends is cleared from Pi's queue and sent as the next turn instead.
 The stop itself mails nothing; a turn started by a later `pi.send` reports
@@ -1219,15 +1221,17 @@ answer, re-sends `notifications/initialized`, and answers every request that
 was in flight with a JSON-RPC error (`-32000`, "ws-mcp daemon connection was
 replaced"); the client never sees the server go away. Reconnecting is
 paced: a connection the daemon closes within 2 s counts as a quick close;
-retries wait at least 3 s, rising by 0.5 s × the count to a 5 s cap. Three quick closes,
-failed starts, refused hellos, and reconnect failures never switch to a
-child server. In-flight calls fail before waiting for recovery; calls not yet
-sent wait within the 75 s budget instead. The stdio proxy stays alive even after a
-`tools/list` wait expires, so later requests can use the successor. Pi's
-runner-generated ws MCP registration allows 120 s per request so its default
-60 s timeout does not cut off that wait. A hosted server for a reconnected
-session re-registers that session's mailbox presence on its first keyed call and keeps the owner
-pointer and the `WS_MAILBOX_AUTO` stem its predecessor published, provided
+retries wait at least 3 s, rising by 0.5 s × the count to a 5 s cap. Three
+quick closes, failed starts, refused hellos, and reconnect failures never
+switch to a child server. In-flight calls fail before waiting for recovery;
+calls not yet sent wait within the 75 s budget instead. The stdio proxy stays
+alive even after a `tools/list` wait expires, so later requests can use the
+successor. Pi's runner-generated ws MCP registration allows 1860 s per request
+to cover a maximum forwarded Pi wait with transport margin; it also exceeds
+the launcher's 75 s recovery budget, which Pi's default 60 s timeout would
+cut off. A hosted server for a reconnected session re-registers that session's
+mailbox presence on its first keyed call and keeps the owner pointer and the
+`WS_MAILBOX_AUTO` stem its predecessor published, provided
 that record is still live (its PID alive and `last_seen` within the ten-minute
 liveness threshold); a stale record under a reused PID is replaced whole, and
 among several live auto records the first name in order is the one kept.

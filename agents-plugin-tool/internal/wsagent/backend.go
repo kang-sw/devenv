@@ -198,7 +198,8 @@ const (
 )
 
 // Event is one item of a process's output. Exactly one of its parts is set,
-// except that a TurnEnd may carry TurnError and that Seq and Replay mark
+// except that a TurnEnd may carry TurnError, a BackgroundTasks update may
+// carry known Background and Monitors splits, and Seq and Replay mark
 // any event of a process under a session holder.
 type Event struct {
 	// Seq is the holder record sequence of the line the event came from;
@@ -235,9 +236,13 @@ type Event struct {
 	// Notice is a line for the daemon's log: something the harness did
 	// that the conversation does not show.
 	Notice string
-	// BackgroundTasks is the harness's current background task count, when
-	// the line reported the whole list.
+	// BackgroundTasks is the harness's aggregate background task count. A
+	// whole-list update also replaces the optional split counts: nil means
+	// the stream could not classify every task. The aggregate still includes
+	// background subagents and gates idle stop and recovery.
 	BackgroundTasks *int
+	Background      *int
+	Monitors        *int
 	// Alert is a typed failure the harness reported for the lead's request
 	// (a login needed, a model unavailable, a usage limit): a conversation
 	// line, and the session's failure state until a turn succeeds.

@@ -251,6 +251,8 @@ import { registerWebTools } from "./web-tools.ts";
 import { publishSubtree, SubtreeUpstream } from "./subtree-lifecycle.ts";
 import { MISSING_HOSTED_KEY_WARNING, hostedMode, unconfirmedHostedWarning, type HostedMode } from "./hosted-session.ts";
 import { createDashboardFeed, dashboardAgentEntries, dashboardStatus, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
+import { countBackgroundTasks } from "./background-tasks.ts";
+import { createHostedDashboardEvents } from "./hosted-dashboard-events.ts";
 import { createHostedAgentRows, type HostedAgentRows } from "./hosted-agent-rows.ts";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
 
@@ -638,7 +640,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // A hosted owner lead's stand-in for the feed's subagent part
   // (hosted-agent-rows.ts), with the feed's lifetime.
   let hostedAgentRows: HostedAgentRows | undefined;
-  registerDashboardLeadEvents(pi as unknown as Parameters<typeof registerDashboardLeadEvents>[0], () => dashboardFeed);
+  let hostedDashboardEvents: ReturnType<typeof createHostedDashboardEvents> | undefined;
+  registerDashboardLeadEvents(pi as unknown as Parameters<typeof registerDashboardLeadEvents>[0], () => dashboardFeed ?? hostedDashboardEvents);
   // 260914 (pi native mailbox push): the session-bound background waiter that
   // drives `ws-mcp mailbox wait` and actively steers arriving mail into the
   // live conversation. Owner-lead only (`readSpawnRole` === undefined), started
@@ -932,10 +935,12 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     dashboardFeed = undefined;
     hostedAgentRows?.stop();
     hostedAgentRows = undefined;
+    hostedDashboardEvents?.stop();
+    hostedDashboardEvents = undefined;
     agentDashboardRefreshRef.current = undefined;
     // Hosted session (hosted-session.ts): the daemon feeds the lead and reads
-    // its output, so neither the feed nor the mailbox waiter below runs; only
-    // the subagent rows reach the daemon, through a widget it reads.
+    // its output, so neither the feed nor the mailbox waiter below runs.
+    // Extension-only subagent rows, wakes and counts use reserved widgets.
     if (hosted.mode === "missing-key") ctx.ui.notify(MISSING_HOSTED_KEY_WARNING, "warning");
     if (hosted.mode === "unconfirmed" && !unconfirmedHostedWarned) {
       unconfirmedHostedWarned = true;
@@ -953,6 +958,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
         agents: () => dashboardAgentEntries(feedRegistry),
         // Cost and cache rate come from the TUI footer's estimate; without a footer only context is sent.
         status: () => dashboardStatus(ctx.getContextUsage(), ctx.model?.contextWindow, agentFooterLifecycle.usage()),
+        taskCounts: countBackgroundTasks,
       });
       dashboardFeed = feed;
       agentDashboardRefreshRef.current = () => { feed.agentsChanged(); };
@@ -969,6 +975,11 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       hostedAgentRows = rows;
       agentDashboardRefreshRef.current = () => { rows.agentsChanged(); };
       rows.start();
+      hostedDashboardEvents = createHostedDashboardEvents({
+        setWidget: (key, lines) => { ctx.ui.setWidget(key, lines); },
+        taskCounts: countBackgroundTasks,
+      });
+      hostedDashboardEvents.start();
     }
     registerExecuteGateway(pi, handle, agentTools.rpcRegistry, {
       cwd: ctx.cwd,
@@ -1391,6 +1402,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       dashboardFeed = undefined;
       hostedAgentRows?.stop();
       hostedAgentRows = undefined;
+      hostedDashboardEvents?.stop();
+      hostedDashboardEvents = undefined;
       agentDashboardRefreshRef.current = undefined;
       applySessionShutdownAgentFooter(agentFooterLifecycle);
       agentWidgetRefreshRef.current = undefined;

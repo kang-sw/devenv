@@ -173,6 +173,43 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	}
 }
 
+type piDeadlineTransport struct{ t *testing.T }
+
+func (p piDeadlineTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var body struct {
+		Timeout float64 `json:"timeout_s"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		p.t.Fatal(err)
+	}
+	deadline, ok := req.Context().Deadline()
+	remaining := time.Until(deadline)
+	want := 1000*time.Second + piForwardSlack
+	if body.Timeout != 1000 || !ok || remaining > want || remaining < want-time.Second {
+		p.t.Fatalf("forwarded wait: timeout=%v deadline remaining=%v, want %v", body.Timeout, remaining, want)
+	}
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"kid1","status":"running"}`)), Header: http.Header{}}, nil
+}
+
+func TestPiForwardWaitDeadlineIncludesRequestedBudget(t *testing.T) {
+	setupMailboxTestEnv(t)
+	t.Setenv(wsagent.EnvPiToken, "tok123")
+	t.Setenv(wsagent.EnvPiEndpoint, "http://127.0.0.1:1")
+	s := NewServer(t.TempDir(), "test")
+	defer s.Close()
+	key, err := s.sessions.mint(s.root, roleDelegate, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: piDeadlineTransport{t}}
+	t.Cleanup(func() { http.DefaultClient = old })
+	out := callToolWithKey(t, s, 1, key, "pi.wait", map[string]any{"id": "kid1", "timeout_s": 1000})
+	if !strings.Contains(out, "still running") {
+		t.Fatalf("pi.wait = %q", out)
+	}
+}
+
 // setPiForwardEndpoint publishes a fake daemon in the server's own cache.
 func setPiForwardEndpoint(t *testing.T, s *Server, endpoint string) {
 	t.Helper()
