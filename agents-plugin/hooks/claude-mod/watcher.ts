@@ -302,6 +302,87 @@ export function parseRecvText(text: string | undefined): DrainedMail[] {
   return parsed.map((c): DrainedMail => (isEnvelope(c) ? c : { raw: JSON.stringify(c) }))
 }
 
+/**
+ * The envelopes a recv drain returned, so a `--stream` arrival line buffered
+ * before that drain does not wake the session again for mail it already
+ * received. A line is matched by its envelopes (`sent_at` and `content`,
+ * the fields recv's text and JSON forms both carry), with multiplicity; each
+ * match is consumed. Only a line whose every mail envelope was received loses
+ * its `mail` kind: mail that arrived after the drain still wakes at once.
+ */
+export interface DrainLedger {
+  /** Record what a drain received; items that are not envelopes are ignored. */
+  record: (mail: readonly DrainedMail[]) => void
+  /** The arrival line with an already-received `mail` kind removed; undefined when nothing is left to wake for. */
+  filter: (line: string) => string | undefined
+  /** Forget every record: a new stream child reports only mail still queued. */
+  clear: () => void
+}
+
+const DRAIN_LEDGER_MAX = 1_000
+
+export function createDrainLedger(): DrainLedger {
+  const counts = new Map<string, number>()
+  const keyOf = (m: { sent_at?: unknown; content: string }) => `${typeof m.sent_at === 'string' ? m.sent_at : ''}\u0000${m.content}`
+  return {
+    record(mail) {
+      for (const m of mail) {
+        if (!('content' in m) || typeof m.content !== 'string') continue
+        // Bounded: an entry no line ever matched only lingers until the next child.
+        if (counts.size >= DRAIN_LEDGER_MAX) counts.clear()
+        const key = keyOf(m)
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+      }
+    },
+    filter(line) {
+      if (counts.size === 0) return line
+      let parsed: { kinds?: unknown; named?: unknown; reply?: unknown }
+      try {
+        parsed = JSON.parse(line) as typeof parsed
+      } catch {
+        return line
+      }
+      const kinds = parsed?.kinds
+      if (!Array.isArray(kinds) || !kinds.includes('mail')) return line
+      const envelopes = [parsed.named, parsed.reply].flatMap((list) => (Array.isArray(list) ? list : []))
+      if (envelopes.length === 0) return line
+      let covered = true
+      for (const e of envelopes) {
+        if (!isEnvelope(e)) {
+          covered = false
+          continue
+        }
+        const key = keyOf(e)
+        const n = counts.get(key) ?? 0
+        if (n === 0) covered = false
+        else if (n === 1) counts.delete(key)
+        else counts.set(key, n - 1)
+      }
+      if (!covered) return line
+      const rest = kinds.filter((k) => k !== 'mail')
+      return rest.some((k) => ['board', 'interrupt'].includes(k)) ? JSON.stringify({ ...parsed, kinds: rest }) : undefined
+    },
+    clear() {
+      counts.clear()
+    },
+  }
+}
+
+/**
+ * The envelopes in a recv result as the model reads it: the `format: "json"`
+ * array, or the text form's `[<sent_at>] <sender>: <content>` entries (only
+ * `sent_at` and `content` are kept). Anything else yields none.
+ */
+export function recvResultMail(text: string | undefined): DrainedMail[] {
+  const parsed = parseRecvText(text)
+  if (parsed.length !== 1 || 'content' in parsed[0]!) return parsed
+  const raw = parsed[0]!.raw
+  const head = /^\[([^\]\n]+)\] [^\n]*?: /gm
+  const found: { sent_at: string; start: number; end: number }[] = []
+  for (let m = head.exec(raw); m !== null; m = head.exec(raw)) found.push({ sent_at: m[1]!, start: m.index, end: m.index + m[0].length })
+  return found.map((h, i) => ({ sent_at: h.sent_at, content: raw.slice(h.end, i + 1 < found.length ? found[i + 1]!.start - 1 : raw.length) }))
+}
+
 const field = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
 
 /** One envelope as the pi adapter frames it: `mail from <handle> (<sent_at>):` then the body. */

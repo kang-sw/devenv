@@ -23,11 +23,14 @@ import { expandPreload } from './preload'
 import { createReconnect, reconnectDescription, TOOL_NAME as RECONNECT_TOOL } from './reconnect'
 import { ADVISORY_KEY, LEVER_DESCRIPTION, TOOL_NAME as LEVER_TOOL } from './timing'
 import {
+  createDrainLedger,
   createWatcher,
   mailboxLabel,
   mapWaitExit,
   parseRecvText,
+  recvResultMail,
   type BindResult,
+  type DrainLedger,
   type DrainMode,
   type DrainResult,
   type Watcher,
@@ -408,10 +411,15 @@ export function observeRecv(
   res: ToolCallResult,
   recvTool: string | undefined,
   log: (text: string) => void,
+  ledger?: Pick<DrainLedger, 'record'>,
 ): void {
   try {
     const boundKey = watcher?.current()
-    if (isModelRecvCompletion(call, res, recvTool, boundKey)) watcher?.recvCompleted(boundKey as string)
+    if (isModelRecvCompletion(call, res, recvTool, boundKey)) {
+      // What the model received, before the re-arm reads a buffered arrival line.
+      ledger?.record(recvResultMail(resultText(res)))
+      watcher?.recvCompleted(boundKey as string)
+    }
   } catch (err) {
     log(`recv observer failed: ${String(err)}`)
   }
@@ -489,11 +497,15 @@ export async function consumeWait(
  * Keep one streaming child across wakes. The per-arm signal restarts changed
  * board flags; the binding signal also closes it while a drain or notice is
  * pending. An older CLI/daemon rejection selects one-shot for this session.
+ * An arrival line buffered across a drain is checked against `ledger`, which
+ * the drains record into, so it never wakes the session for mail already
+ * received.
  */
 export function createMailboxWait(
   spawn: (argv: string[]) => Pick<HookStream<ProcessSpawnChunk, ProcessSpawnResult>, 'next' | 'return'>,
   launcher: string,
   debug: (text: string) => void,
+  ledger: DrainLedger = createDrainLedger(),
 ): WatcherEdges['wait'] {
   type Running = {
     argv: string
@@ -513,6 +525,8 @@ export function createMailboxWait(
     const identity = JSON.stringify(argv)
     if (running && running.argv !== identity) running.close()
     if (!running) {
+      // A new child reports only mail still queued, never what a drain took.
+      ledger.clear()
       const stream = spawn([...argv, '--stream'])
       const mine: Running = {
         argv: identity, stream, text: '', stderr: '', seen: false, rejected: false,
@@ -540,7 +554,12 @@ export function createMailboxWait(
             const parsed = JSON.parse(line) as { kinds?: unknown }
             if (Array.isArray(parsed?.kinds) && parsed.kinds.some((k) => ['mail', 'board', 'interrupt'].includes(k))) {
               mine.seen = true
-              return wakeKinds(line)
+              const fresh = ledger.filter(line)
+              if (fresh === undefined) {
+                debug('mailbox stream: skipped an arrival a drain already received')
+                continue
+              }
+              return wakeKinds(fresh)
             }
           } catch { /* Non-JSON usage diagnostics are not arrivals. */ }
           mine.rejected ||= /unknown (?:flag|option)|flag provided but not defined|unrecognized (?:arguments?|option)|usage:/i.test(line)
@@ -600,6 +619,8 @@ export const register: Register = (on) => {
   // Set at session.start; module variables, so a hot reload starts them over
   // and session.start restores the binding from $.store.
   let watcher: Watcher | undefined
+  /** The watcher's drain ledger: its own direct drains and the model's recv record into it. */
+  let drainLedger: DrainLedger | undefined
   let toolName: string | undefined
   let recvTool: string | undefined
   let lookupTool: string | undefined
@@ -999,6 +1020,7 @@ export const register: Register = (on) => {
           return envSlug
         }
       }
+      const ledger = createDrainLedger()
       const created = createWatcher({
         mode,
         label,
@@ -1006,10 +1028,13 @@ export const register: Register = (on) => {
           (argv) => $.process.spawn({ argv }),
           launcher,
           (text) => $.ui.log(`${label}: ${text}`, { to: 'debug' }),
+          ledger,
         ),
         drain: async (key) => {
           if (!recvTool) return { kind: 'failed', reason: 'MCP server not resolved' }
-          return classifyRecv(await $.tool.call({ tool: recvTool as `mcp__${string}__${string}`, session_key: key, format: 'json' }))
+          const drained = classifyRecv(await $.tool.call({ tool: recvTool as `mcp__${string}__${string}`, session_key: key, format: 'json' }))
+          if (drained.kind === 'mail') ledger.record(drained.mail)
+          return drained
         },
         submit: async (prompts, live) => {
           dashboard.mailSubmitting()
@@ -1125,6 +1150,7 @@ export const register: Register = (on) => {
         continuation: () => compaction.continuation(),
       })
       watcher = created
+      drainLedger = ledger
       // A key the manual feature produced before the watcher existed.
       bindAuto(created, mailboxLog)
       // Where the manual feature owns the key, the mod binds it (bindAuto) and
@@ -1589,6 +1615,7 @@ export const register: Register = (on) => {
       res,
       recvTool,
       (text) => $.ui.log(`${$.plugin.name} mailbox: ${text}`, { to: 'debug' }),
+      drainLedger,
     )
     return res
   }).catch(($, e, next) =>
