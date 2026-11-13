@@ -226,3 +226,79 @@ func TestBoardFramesMountAtEveryInsert(t *testing.T) {
 		}
 	}
 }
+
+// TestBoardFrameHeightsBatch pins the frame height path (dashboard.js's
+// frame message listener, applyFrameHeights, docFrame): N height messages from the
+// board's frames resolve their frames through one index, not a document
+// query each, and land in one frame callback that never reads layout
+// (getBoundingClientRect); a frame with no set height eases from 0, as the
+// stylesheet starts it, and one with a height eases from that height; a
+// pending next frame (frameGraft) keeps its height. The cases execute
+// under node when it is installed.
+func TestBoardFrameHeightsBatch(t *testing.T) {
+	src := dashboardFuncs(t, "indexFrames", "docFrame", "queueFrameHeight", "applyFrameHeights")
+	raw, err := dashboardFS.ReadFile("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := regexp.MustCompile(`window\.addEventListener\("message", function \(e\) \{\n    var f = docFrame\(e\.source\), m = e\.data;\n[\s\S]*?\n  \}\);\n`).FindString(string(raw))
+	if listener == "" {
+		t.Fatal("dashboard.js holds no frame message listener")
+	}
+	runNode(t, "frame height batch", `
+var bad = [];
+function check(what, ok) { if (!ok) bad.push(what); }
+var raf = [], queries = 0, themes = 0;
+function requestAnimationFrame(fn) { raf.push(fn); return raf.length; }
+function num(v) { return typeof v === "number" && isFinite(v) ? v : 0; }
+function str(v) { return typeof v === "string" ? v : ""; }
+function postTheme() { themes++; }
+var frames = [];
+function Frame(key) {
+  this.contentWindow = { id: key };
+  this.attrs = { "data-doc": key, "data-doc-key": key };
+  this.style = { height: "" };
+  this.anims = [];
+}
+Frame.prototype.getAttribute = function (k) { return this.attrs[k] || null; };
+Frame.prototype.getBoundingClientRect = function () { bad.push("a height message read layout"); return { height: 0 }; };
+Frame.prototype.animate = function (keys) { this.anims.push(keys.map(function (k) { return k.height; }).join(">")); };
+function boardQ(sel) { if (sel === "iframe.doc-frame") queries++; return frames.slice(); }
+function inBoard(f) { return frames.indexOf(f) >= 0; }
+var frameWins = new Map(), frameSizes = new Map(), frameSizeFrame = 0, frameMessage;
+var window = { addEventListener: function (t, fn) { if (t === "message") frameMessage = fn; } };
+`+src+listener+`
+for (var i = 0; i < 20; i++) frames.push(new Frame("entry:e" + i));
+frames[0].wbGrow = true;
+frames[1].wbGrow = true; frames[1].style.height = "40px";
+for (var i = 0; i < 20; i++) frameMessage({ source: frames[i].contentWindow, data: { wbDoc: "height", docKey: "entry:e" + i, height: 100 + i + 0.5 } });
+// A second report from a frame before the batch lands: the last one wins.
+frameMessage({ source: frames[2].contentWindow, data: { wbDoc: "height", docKey: "entry:e2", height: 300 } });
+check("20 frames resolve through one index, got " + queries + " queries", queries === 1);
+check("21 messages schedule one frame callback, got " + raf.length, raf.length === 1);
+check("no height lands before the frame callback", frames.every(function (f) { return f.style.height === "" || f === frames[1]; }));
+raf.shift()();
+check("every height lands in the one callback", frames.every(function (f, i) { return f.style.height === (i === 2 ? "300px" : Math.ceil(100 + i + 0.5) + "px"); }));
+check("a frame with no set height eases from 0: " + frames[0].anims, frames[0].anims.join() === "0px>101px");
+check("a frame with a set height eases from it: " + frames[1].anims, frames[1].anims.join() === "40px>102px");
+check("only a moving swap's frames ease", frames.slice(2).every(function (f) { return !f.anims.length; }) && !frames[0].wbGrow);
+check("every frame takes the theme with its height", themes === 20);
+// A later message schedules a new callback.
+frameMessage({ source: frames[3].contentWindow, data: { wbDoc: "height", docKey: "entry:e3", height: 50 } });
+check("a later message schedules its own callback", raf.length === 1);
+// A pending next frame keeps the old frame's height.
+frames[4].wbNext = true;
+frameMessage({ source: frames[4].contentWindow, data: { wbDoc: "height", docKey: "entry:e4", height: 999 } });
+raf.shift()();
+check("a pending frame keeps its height", frames[4].style.height === "105px" && frames[3].style.height === "50px");
+// A frame that took a new window (moved without moveBefore) is found again.
+frames[5].contentWindow = { id: "moved" };
+frameMessage({ source: frames[5].contentWindow, data: { wbDoc: "height", docKey: "entry:e5", height: 77 } });
+raf.shift()();
+check("a moved frame is indexed again on a miss", frames[5].style.height === "77px" && queries === 2);
+// A window that is no board frame finds nothing.
+frameMessage({ source: { id: "stranger" }, data: { wbDoc: "height", docKey: "entry:e6", height: 1 } });
+check("a stranger's message changes nothing", raf.length === 0 && frames[6].style.height === "107px");
+if (bad.length) console.log(bad.join("\n"));
+`)
+}

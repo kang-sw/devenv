@@ -538,6 +538,7 @@
     }
     el.setAttribute("data-h", hash);
     if (board) {
+      indexFrames();
       if (window.wbForm) window.wbForm();
       mermaid(ins);
       syncChips();
@@ -3271,8 +3272,21 @@
     if (d && d.tagName === "DETAILS" && d.open) mountFrames(d);
   }
   doc.addEventListener("toggle", frameToggle, true);
+  // docFrame resolves through frameWins (contentWindow -> board frame),
+  // indexed again by every board swap and on any miss: a frame that moved
+  // without Element.moveBefore (a pin, a reorder) took a new window, and a
+  // message from a window that is no board frame finds none either way.
+  var frameWins = new Map();
+  function indexFrames() {
+    frameWins = new Map();
+    boardQ("iframe.doc-frame").forEach(function (f) { if (f.contentWindow) frameWins.set(f.contentWindow, f); });
+  }
   function docFrame(win) {
-    return q("iframe.doc-frame").filter(function (f) { return inBoard(f) && f.contentWindow === win; })[0];
+    var f = frameWins.get(win);
+    if (f && f.contentWindow === win && inBoard(f)) return f;
+    indexFrames();
+    f = frameWins.get(win);
+    return f && inBoard(f) ? f : undefined;
   }
   // Only an existing board item or latest stable panel target may be
   // navigated. The history loader accepts bare IDs, never selectors/URLs.
@@ -3364,6 +3378,34 @@
       if (b) postDoc(f, { wbDoc: "img", id: id, blob: b });
     }, function () {});
   }
+  // A frame's height lands in the next frame callback, with every other
+  // height reported meanwhile (applyFrameHeights): one host layout for a
+  // board's worth of frames rather than one per message. The height it
+  // eases from is its set height (style.height), 0 when it has none, as the
+  // stylesheet's iframe.doc-frame starts it, so nothing reads layout.
+  var frameSizes = new Map(), frameSizeFrame = 0;
+  function queueFrameHeight(f, h) {
+    frameSizes.set(f, h);
+    if (!frameSizeFrame) frameSizeFrame = requestAnimationFrame(applyFrameHeights);
+  }
+  function applyFrameHeights() {
+    var batch = frameSizes;
+    frameSizes = new Map();
+    frameSizeFrame = 0;
+    batch.forEach(function (h, f) {
+      var from = parseFloat(f.style.height) || 0, to = Math.ceil(h);
+      f.style.height = to + "px";
+      // The first height a frame of a moving board swap reports eases
+      // from the height the frame stood at (board motion, slideBoard).
+      if (f.wbGrow) {
+        f.wbGrow = false;
+        if (f.animate && Math.abs(to - from) >= 1) f.animate([{ height: from + "px" }, { height: to + "px" }], { duration: 200, easing: "ease-out" });
+      }
+      // A frame rendered before a theme switch (a board swap on a stream
+      // opened earlier) takes the current theme when it first reports.
+      postTheme(f);
+    });
+  }
   window.addEventListener("message", function (e) {
     var f = docFrame(e.source), m = e.data;
     if (!f || !m || typeof m !== "object") return;
@@ -3374,19 +3416,8 @@
       // A pending frame (frameGraft) keeps the old frame's height: once
       // shown it is asked for its height again.
       if (f.wbNext) { postTheme(f); return; }
-      if (h >= 0 && h < 100000) {
-        var from = f.getBoundingClientRect().height, to = Math.ceil(h);
-        f.style.height = to + "px";
-        // The first height a frame of a moving board swap reports eases
-        // from the height the frame stood at (board motion, slideBoard).
-        if (f.wbGrow) {
-          f.wbGrow = false;
-          if (f.animate && Math.abs(to - from) >= 1) f.animate([{ height: from + "px" }, { height: to + "px" }], { duration: 200, easing: "ease-out" });
-        }
-      }
-      // A frame rendered before a theme switch (a board swap on a stream
-      // opened earlier) takes the current theme when it first reports.
-      postTheme(f);
+      if (h >= 0 && h < 100000) queueFrameHeight(f, h);
+      else postTheme(f);
     } else if (m.wbDoc === "jump") {
       boardJump(str(m.id));
     } else if (m.wbDoc === "link") {
