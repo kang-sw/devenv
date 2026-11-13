@@ -1484,12 +1484,12 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 :root { --pbw: calc(1680px - 32px - 356px); }
 .dash.board { --pbw: 900px; }
 .bpcol { display: none; }
+/* An empty board fills its column's height, as the idle pin zone (.bpzone) fills its strip: a quiet full-bleed dashed placeholder, not a short strip. */
+.r-board:has(> .empty:only-child) { height: 100%; }
+.r-board > .empty:only-child { height: 100%; min-height: 54px; box-sizing: border-box; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
 .bpins:empty { display: none; }
 .r-board > .bpins { margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px dashed var(--wb-line); }
 .r-board > .bpins::before { content: attr(data-label); display: block; padding: 0 2px 6px; font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); }
-.bp-hd { flex: none; display: flex; align-items: center; gap: 6px; padding: 4px 6px 8px 4px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
-.bp-hd .li { width: 13px; height: 13px; }
-.bp-ct { font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); }
 .bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 2px 4px 40px 2px; }
 .bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
 .bp-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
