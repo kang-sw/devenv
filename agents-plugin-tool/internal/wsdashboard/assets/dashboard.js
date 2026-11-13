@@ -5962,6 +5962,12 @@
   // hint (refused).
   function rdRow(d, over, x, y, lr) {
     var row = over && over.closest ? over.closest(".rs") : null, z = null, ref = null;
+    // Left of a child row (a grip held at the top-level indent) the
+    // pointer is over its indent: the row is the one at its height.
+    if (!row && lr) {
+      var mid = doc.elementFromPoint(lr.left + lr.width / 2, y);
+      row = mid && mid.closest ? mid.closest(".rs") : null;
+    }
     if (row && (!railEl.contains(row) || row.classList.contains("ended"))) row = null;
     if (row) {
       var rr = row.getBoundingClientRect();
