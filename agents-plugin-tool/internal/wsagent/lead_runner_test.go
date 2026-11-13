@@ -1649,8 +1649,8 @@ func TestPiLeadMapper(t *testing.T) {
 	}
 
 	plain := newPiMapper(piSpec(t, `{"backend":"pi"}`))
-	if evs := plain.mapLine([]byte(`{"type":"agent_start"}`), nopReplies{}); len(evs) != 0 {
-		t.Fatalf("a profile conversation's turns start at its sends: %+v", evs)
+	if evs := plain.mapLine([]byte(`{"type":"agent_start"}`), nopReplies{}); len(evs) != 1 || !evs[0].TurnStart {
+		t.Fatalf("a worker's agent_start rebuilds its held turn: %+v", evs)
 	}
 	if evs := plain.mapLine([]byte(`{"type":"response","command":"compact","success":true}`), nopReplies{}); len(evs) != 0 {
 		t.Fatalf("a profile conversation sends no compact command: %+v", evs)
@@ -1790,5 +1790,50 @@ func TestPiLeadFailedCommandRetriesOnce(t *testing.T) {
 	ring := h.ring(id)
 	if got := ringTexts(ring, wslive.RingUser); !slices.Equal(got, []string{"/compact keep the names"}) || ringKinds(ring, wslive.RingTurn) != 1 || h.state(id).Held != 0 {
 		t.Fatalf("the command shows once, in one turn: users %q, state %+v", got, h.state(id))
+	}
+}
+
+// TestLeadTurnEndsAtResultWhileABackgroundTaskRuns: a claude lead whose
+// turn leaves a background task running gets no idle state until the task
+// ends (Claude 2.1.323), so the result ends the turn: the lead is idle
+// with the task still counted, the next message goes at once as a turn of
+// its own, each turn writes one turn entry, and the idle state the task's
+// completion turn ends with adds none.
+func TestLeadTurnEndsAtResultWhileABackgroundTaskRuns(t *testing.T) {
+	h := newLeadHarness(t).start()
+	id, holder := h.runLead("one")
+	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"), tasksLine(1), replyLine("u1", "started"), resultLine())
+	h.idle(id)
+	snap := h.snapshot(id)
+	if snap.Lead.TurnStartedAt != 0 || snap.Lead.Phase != wslive.PhaseIdle || snap.Host == nil || snap.Host.BackgroundTasks != 1 {
+		t.Fatalf("the lead is idle beside its running task: lead %+v, host %+v", snap.Lead, snap.Host)
+	}
+
+	h.send(id, "two")
+	eventually(t, "the second message as a turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	h.holders.out(holder, initLine("sess-1", "auto"), replyLine("u2", "ok2"), resultLine())
+	h.idle(id)
+	if got := ringKinds(h.ring(id), wslive.RingTurn); got != 2 {
+		t.Fatalf("one turn entry per message, got %d", got)
+	}
+
+	// The task's completion turn: its result comes with no task left, and
+	// the idle state after it ends it.
+	h.holders.out(holder, tasksLine(0), initLine("sess-1", "auto"), replyLine("u3", "the task finished"), resultLine())
+	eventually(t, "the completion turn", func() bool { return ringKinds(h.ring(id), wslive.RingReply) == 3 })
+	if st := h.state(id); st.Status != StatusRunning {
+		t.Fatalf("with no task left the result defers to the idle state: %+v", st)
+	}
+	h.holders.out(holder, stateLine(HarnessIdle))
+	h.idle(id)
+	ring := h.ring(id)
+	if got := ringKinds(ring, wslive.RingTurn); got != 3 {
+		t.Fatalf("three turns, three turn entries, got %d: %+v", got, ring)
+	}
+	if got := ringTexts(ring, wslive.RingUser); !slices.Equal(got, []string{"one", "two"}) {
+		t.Fatalf("user entries = %q", got)
+	}
+	if st := h.state(id); st.Error != "" || st.Held != 0 || st.BackgroundTasks != 0 {
+		t.Fatalf("after the completion turn: %+v", st)
 	}
 }

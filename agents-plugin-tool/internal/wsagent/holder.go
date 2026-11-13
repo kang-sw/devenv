@@ -69,6 +69,7 @@ func (h ManagerHost) Status(id string) (wsholder.AttachInfo, error) {
 // holderKindLead is the kind a lead conversation's holder records in its
 // descriptor.
 const holderKindLead = "lead"
+const holderKindPiWorker = "pi-worker"
 
 // leadRingBytes is the output ring of a lead conversation's holder. A
 // rejoin rebuilds the turn state from the ring, so it holds a long turn's
@@ -83,6 +84,8 @@ type holderSession struct {
 	ReplyID string `json:"reply_id"`
 	Cwd     string `json:"cwd,omitempty"`
 	Label   string `json:"label,omitempty"`
+	// Capability binds a persisted worker token to this held process.
+	Capability string `json:"capability,omitempty"`
 }
 
 // holderTable routes the holders' events to the processes they belong to.

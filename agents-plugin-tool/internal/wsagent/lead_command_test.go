@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"encoding/json"
+	"os"
 	"slices"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsmailbox"
 )
 
 // sendCommand holds a slash command the page sent for the conversation, as
@@ -152,6 +154,60 @@ func TestClaudeLeadLaunchAsksForCommands(t *testing.T) {
 	}
 }
 
+// TestLeadSeedsCommandsFromLastSession: a new hosted lead, whose process
+// starts only at its first send, shows the command list of the newest
+// other lead of its root and profile that has one, a closed session an
+// earlier daemon left included; its launch's own list replaces it. No such
+// session, another root, or another harness seeds nothing.
+func TestLeadSeedsCommandsFromLastSession(t *testing.T) {
+	h := newLeadHarness(t).start()
+	if got := h.snapshot(h.lead(BackendClaude, LeadOptions{}).ID).Commands; len(got) != 0 {
+		t.Fatalf("no earlier session, no commands: %+v", got)
+	}
+
+	oldList := []wslive.SlashCommand{{Name: "old", Description: "From the last session"}}
+	oldKey := "lead-key-old"
+	old := Record{
+		ReplyID: wsmailbox.ReplyID(oldKey), Profile: LeadProfileFor(BackendClaude), Backend: BackendClaude, Root: h.root,
+		WSKey: oldKey, Lead: true, CreatedAt: "2026-01-01T00:00:00Z", ClosedAt: "2026-01-02T00:00:00Z",
+	}
+	if err := WriteRecordForTest(h.dir, old); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(wslive.Snapshot{Commands: oldList})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wslive.SnapshotPath(wsdashboard.SessionDir(h.dir, old.ReplyID)), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.restart()
+
+	id := h.lead(BackendClaude, LeadOptions{}).ID
+	if got := h.snapshot(id).Commands; !slices.Equal(got, oldList) {
+		t.Fatalf("seeded from the closed session before any send: %+v", got)
+	}
+	h.holders.setControl("initialize", "", `{"commands":[{"name":"compact","description":"Free up context"},{"name":"review"}]}`)
+	launched := []wslive.SlashCommand{{Name: "compact", Description: "Free up context"}, {Name: "review"}}
+	h.send(id, "hello")
+	h.holder(id)
+	eventually(t, "the launch's list to replace the seed", func() bool { return slices.Equal(h.snapshot(id).Commands, launched) })
+
+	if got := h.snapshot(h.lead(BackendClaude, LeadOptions{}).ID).Commands; !slices.Equal(got, launched) {
+		t.Fatalf("seeded from the newest session with a list: %+v", got)
+	}
+	if got := h.snapshot(h.lead(BackendPi, LeadOptions{}).ID).Commands; len(got) != 0 {
+		t.Fatalf("another harness seeds nothing: %+v", got)
+	}
+	other, err := h.runner.CreateLead(BackendClaude, t.TempDir(), LeadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h.snapshot(other.ID).Commands; len(got) != 0 {
+		t.Fatalf("another root seeds nothing: %+v", got)
+	}
+}
+
 // TestClaudeLeadCommandSplitsTheDrain: messages and commands held during a
 // turn reach the harness in order: the text before a command joined with
 // the claimed mail as one turn, the command alone as its bare typed line
@@ -178,7 +234,7 @@ func TestClaudeLeadCommandSplitsTheDrain(t *testing.T) {
 	eventually(t, "the text before the command", func() bool {
 		return slices.Equal(h.userInputs(holder), []string{"one", "before\n\nFrom a@x: ping"})
 	})
-	wantQueue := []QueuedInput{{Command: &wsinbox.Command{Name: "compact", Args: "keep the names"}}, {Text: "after"}}
+	wantQueue := []QueuedInput{{Command: &wsinbox.Command{Name: "compact", Args: "keep the names"}, After: 1}, {Text: "after", After: 1}}
 	eventually(t, "the rest to be queued", func() bool {
 		rec := h.record(id)
 		return len(rec.Mail) == 0 && sameJSON(t, rec.Queued, mustJSON(t, wantQueue))

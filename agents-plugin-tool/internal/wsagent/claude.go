@@ -330,7 +330,7 @@ func (b ClaudeBackend) Start(ctx context.Context, spec StartSpec) (Process, erro
 		cmd.Env = claudeLeadEnv(spec)
 	}
 	// Read before the start, which fills the holder id for a spawn too.
-	attach := spec.Lead != nil && spec.Lead.Holder != nil && spec.Lead.Holder.id != ""
+	attach := spec.Holder != nil && spec.Holder.id != ""
 	p, err := startChild(spec, cmd, newClaudeMapper(spec), claudeProtocol{})
 	if err != nil {
 		return nil, err
@@ -529,12 +529,23 @@ type claudeMapper struct {
 	uuids     []string
 	// states is set once the stream carried a session_state_changed line
 	// (a harness that emits them): from then on the idle state ends a
-	// lead's turn, not the result, which an idle always follows and whose
-	// error turnErr holds until then. Ending the turn at the result too
-	// would let that trailing idle end the next turn, which a held message
+	// lead's turn, not the result, which an idle follows and whose error
+	// turnErr holds until then. Ending the turn at the result too would
+	// let that trailing idle end the next turn, which a held message
 	// submitted at the result had already begun.
-	states  bool
-	turnErr string
+	//
+	// The exception is a result while background tasks run (background,
+	// the last background_tasks_changed count): the harness then stays
+	// running and sends no idle until every task ended and the turn their
+	// completion starts is done, also across later prompts (seen on
+	// 2.1.323, claude-lead-background-agent-states.jsonl), so that result
+	// ends the turn. ended marks such a result until the next turn start
+	// is mapped: an idle in between belongs to the turn already ended and
+	// ends nothing.
+	states     bool
+	turnErr    string
+	background int
+	ended      bool
 	// approvals are the can_use_tool requests not seen settled, request id
 	// by tool call id.
 	approvals map[string]string
@@ -693,6 +704,14 @@ func claudeResultText(raw json.RawMessage) string {
 }
 
 func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
+	evs := m.mapEvents(line, replies)
+	if slices.ContainsFunc(evs, func(ev Event) bool { return ev.TurnStart }) {
+		m.ended = false
+	}
+	return evs
+}
+
+func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 	var l claudeLine
 	if json.Unmarshal(line, &l) != nil {
 		return nil
@@ -770,6 +789,11 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 				return []Event{{HarnessState: l.State}}
 			case HarnessIdle:
 				m.states = true
+				if m.ended {
+					// The result before it ended the turn (states).
+					m.ended = false
+					return []Event{{HarnessState: l.State}}
+				}
 				out := append([]Event{{HarnessState: l.State}}, m.closeTurn(now)...)
 				out = append(out, m.status(), Event{TurnEnd: true, TurnError: m.turnErr})
 				m.turnErr = ""
@@ -791,6 +815,7 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 		case "background_tasks_changed":
 			if m.lead() && l.Tasks != nil {
 				n := len(*l.Tasks)
+				m.background = n
 				return []Event{{BackgroundTasks: &n}}
 			}
 		case "compact_boundary":
@@ -892,11 +917,12 @@ func (m *claudeMapper) mapLine(line []byte, replies lineReplies) []Event {
 			m.cost = &wslive.UsageCost{USD: *l.TotalCostUSD, Estimate: true}
 		}
 		out = append(out, m.status())
-		if m.states {
+		if m.states && m.background == 0 {
 			// The idle state that follows ends the turn.
 			m.turnErr = claudeResultError(l)
 			return out
 		}
+		m.ended, m.turnErr = m.states, ""
 		return append(out, Event{TurnEnd: true, TurnError: claudeResultError(l)})
 	}
 	return nil

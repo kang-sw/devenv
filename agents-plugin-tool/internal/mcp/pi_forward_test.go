@@ -6,15 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -141,7 +147,7 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	if out := callToolWithKey(t, s, 5, key, "pi.list", nil); !strings.Contains(out, "kid1  running  prov/small/low") {
 		t.Fatalf("pi.list = %q", out)
 	}
-	if out := callToolWithKey(t, s, 6, key, "pi.send", map[string]any{"id": "kid1", "message": "more"}); !strings.Contains(out, "sent to Pi subagent kid1") || route.last().body["message"] != "more" {
+	if out := callToolWithKey(t, s, 6, key, "pi.send", map[string]any{"id": "kid1", "message": "more"}); !strings.Contains(out, "steers its running turn at the next tool boundary") || !strings.Contains(out, "report covers the message") || route.last().body["message"] != "more" {
 		t.Fatalf("pi.send = %q", out)
 	}
 	if out := callToolWithKey(t, s, 7, key, "pi.transcript", map[string]any{"id": "kid1"}); !strings.Contains(out, "kid says hi") {
@@ -164,6 +170,265 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	daemon.Close()
 	if out := callToolWithKey(t, s, 11, key, "pi.list", nil); !strings.Contains(out, "the dashboard daemon") || !strings.Contains(out, "did not answer") {
 		t.Fatalf("an unreachable daemon = %q", out)
+	}
+}
+
+// setPiForwardEndpoint publishes a fake daemon in the server's own cache.
+func setPiForwardEndpoint(t *testing.T, s *Server, endpoint string) {
+	t.Helper()
+	_, portText, err := net.SplitHostPort(strings.TrimPrefix(endpoint, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := s.dashboard.stateDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(wsdashboard.Endpoint{SchemaVersion: 1, Port: port})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "endpoint.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPiForwardRediscoversEndpointOnEachCall(t *testing.T) {
+	setupMailboxTestEnv(t)
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"endpoint":"first"}`)
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok123" {
+			http.Error(w, "wrong capability", http.StatusUnauthorized)
+			return
+		}
+		io.WriteString(w, `{"endpoint":"second"}`)
+	}))
+	defer second.Close()
+	t.Setenv(wsagent.EnvPiToken, "tok123")
+	t.Setenv(wsagent.EnvPiEndpoint, first.URL)
+	s := NewServer(t.TempDir(), "test")
+	defer s.Close()
+	call := func(want string) {
+		t.Helper()
+		var answer struct{ Endpoint string }
+		if err := s.piCall(context.Background(), "pi.list", map[string]any{}, time.Second, &answer); err != nil {
+			t.Fatal(err)
+		}
+		if answer.Endpoint != want {
+			t.Fatalf("forwarded to %q, want %q", answer.Endpoint, want)
+		}
+	}
+	call("first") // No discovery file: retain the inherited endpoint fallback.
+	setPiForwardEndpoint(t, s, second.URL)
+	call("second")
+	setPiForwardEndpoint(t, s, first.URL)
+	call("first")
+}
+
+func TestPiForwardDisconnectedWaitReissuesOnNewEndpoint(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("partial_body=%v", partial), func(t *testing.T) {
+			setupMailboxTestEnv(t)
+			arrived := make(chan float64, 1)
+			disconnect := make(chan struct{})
+			old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Timeout float64 `json:"timeout_s"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if partial {
+					w.Header().Set("Content-Length", "1000")
+					io.WriteString(w, `{"id":`)
+					w.(http.Flusher).Flush()
+				}
+				arrived <- body.Timeout
+				<-disconnect
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err == nil {
+					conn.Close()
+				}
+			}))
+			defer old.Close()
+			var release sync.Once
+			releaseOld := func() { release.Do(func() { close(disconnect) }) }
+			defer releaseOld()
+			retried := make(chan fakeTokenCall, 1)
+			next := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				retried <- fakeTokenCall{path: r.URL.Path, auth: r.Header.Get("Authorization"), body: body}
+				json.NewEncoder(w).Encode(wsagent.TurnResult{ID: "kid1", Status: wsagent.TurnDone, Message: "survived"})
+			}))
+			defer next.Close()
+			t.Setenv(wsagent.EnvPiToken, "tok123")
+			t.Setenv(wsagent.EnvPiEndpoint, old.URL)
+			s := NewServer(t.TempDir(), "test")
+			defer s.Close()
+			setPiForwardEndpoint(t, s, old.URL)
+			body := map[string]any{"id": "kid1", "timeout_s": float64(2)}
+			var answer wsagent.TurnResult
+			done := make(chan error, 1)
+			go func() {
+				done <- s.piCall(context.Background(), "pi.wait", body, 2*time.Second+piForwardSlack, &answer)
+			}()
+			select {
+			case timeout := <-arrived:
+				if timeout != 2 {
+					t.Fatalf("initial wait = %v", timeout)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("initial wait never arrived")
+			}
+			setPiForwardEndpoint(t, s, next.URL)
+			releaseOld()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("disconnected wait was not reissued")
+			}
+			call := <-retried
+			remaining, _ := call.body["timeout_s"].(float64)
+			if call.path != "/agents/by-token/wait" || call.auth != "Bearer tok123" || call.body["id"] != "kid1" || remaining <= 0 || remaining >= 2 {
+				t.Fatalf("reissued wait did not retain identity/budget: %+v", call)
+			}
+			if answer.Status != wsagent.TurnDone || answer.Message != "survived" || body["timeout_s"] != float64(2) {
+				t.Fatalf("wait result or caller's arguments changed: %+v, %+v", answer, body)
+			}
+		})
+	}
+}
+
+func TestPiForwardDisconnectedWaitHonorsContext(t *testing.T) {
+	setupMailboxTestEnv(t)
+	var calls atomic.Int32
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		io.Copy(io.Discard, r.Body)
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			conn.Close()
+		}
+	}))
+	defer old.Close()
+	t.Setenv(wsagent.EnvPiToken, "tok123")
+	t.Setenv(wsagent.EnvPiEndpoint, old.URL)
+	s := NewServer(t.TempDir(), "test")
+	defer s.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	var answer wsagent.TurnResult
+	err := s.piCall(ctx, "pi.wait", map[string]any{"id": "kid1", "timeout_s": float64(5)}, 5*time.Second+piForwardSlack, &answer)
+	if !errors.Is(err, context.DeadlineExceeded) || calls.Load() == 0 {
+		t.Fatalf("wait did not stop on its original context: calls=%d, err=%v", calls.Load(), err)
+	}
+}
+
+func TestPiForwardDisconnectedSideEffectsAreNotRetried(t *testing.T) {
+	for _, op := range []string{"spawn", "send", "stop"} {
+		t.Run(op, func(t *testing.T) {
+			setupMailboxTestEnv(t)
+			var originalCalls, replacementCalls atomic.Int32
+			next := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				replacementCalls.Add(1)
+				io.WriteString(w, `{}`)
+			}))
+			defer next.Close()
+			arrived := make(chan struct{}, 1)
+			disconnect := make(chan struct{})
+			old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				originalCalls.Add(1)
+				io.Copy(io.Discard, r.Body)
+				arrived <- struct{}{}
+				<-disconnect
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err == nil {
+					conn.Close()
+				}
+			}))
+			defer old.Close()
+			var release sync.Once
+			releaseOld := func() { release.Do(func() { close(disconnect) }) }
+			defer releaseOld()
+			t.Setenv(wsagent.EnvPiToken, "tok123")
+			t.Setenv(wsagent.EnvPiEndpoint, old.URL)
+			s := NewServer(t.TempDir(), "test")
+			defer s.Close()
+			done := make(chan error, 1)
+			go func() {
+				var answer wsagent.State
+				done <- s.piCall(context.Background(), "pi."+op, map[string]any{"id": "kid1", "message": "once"}, time.Second, &answer)
+			}()
+			select {
+			case <-arrived:
+			case <-time.After(5 * time.Second):
+				t.Fatal("side effect never arrived")
+			}
+			// The daemon took the side effect, then its answer was lost.
+			setPiForwardEndpoint(t, s, next.URL)
+			releaseOld()
+			select {
+			case err := <-done:
+				if err == nil || originalCalls.Load() != 1 || replacementCalls.Load() != 0 {
+					t.Fatalf("ambiguous %s was retried: original=%d replacement=%d err=%v", op, originalCalls.Load(), replacementCalls.Load(), err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("disconnected side effect did not return")
+			}
+		})
+	}
+}
+
+func TestPiForwardDaemonDetachRetriesOnlyWait(t *testing.T) {
+	for _, tool := range []string{"pi.wait", "pi.send"} {
+		t.Run(tool, func(t *testing.T) {
+			setupMailboxTestEnv(t)
+			var calls atomic.Int32
+			retried := make(chan float64, 1)
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Timeout float64 `json:"timeout_s"`
+				}
+				json.NewDecoder(r.Body).Decode(&body)
+				if calls.Add(1) == 1 {
+					http.Error(w, "the dashboard daemon detached; reissue the wait", http.StatusServiceUnavailable)
+					return
+				}
+				retried <- body.Timeout
+				json.NewEncoder(w).Encode(wsagent.TurnResult{ID: "kid1", Status: wsagent.TurnDone, Message: "resumed"})
+			}))
+			defer daemon.Close()
+			t.Setenv(wsagent.EnvPiToken, "tok123")
+			t.Setenv(wsagent.EnvPiEndpoint, daemon.URL)
+			s := NewServer(t.TempDir(), "test")
+			defer s.Close()
+			var answer wsagent.TurnResult
+			err := s.piCall(context.Background(), tool, map[string]any{"id": "kid1", "message": "once", "timeout_s": float64(2)}, 2*time.Second+piForwardSlack, &answer)
+			if tool == "pi.wait" {
+				var remaining float64
+				select {
+				case remaining = <-retried:
+				default:
+				}
+				if err != nil || calls.Load() != 2 || answer.Status != wsagent.TurnDone || answer.Message != "resumed" || remaining <= 0 || remaining >= 2 {
+					t.Fatalf("503 wait retry: calls=%d remaining=%v answer=%+v err=%v", calls.Load(), remaining, answer, err)
+				}
+			} else if err == nil || calls.Load() != 1 {
+				t.Fatalf("503 must not retry send: calls=%d err=%v", calls.Load(), err)
+			}
+		})
 	}
 }
 

@@ -325,7 +325,7 @@ var tb = new E(["topic"], {}, { ".card.policy[data-id]": [b1], ".arow[data-id] l
 var pol = new E(["chip"], { "data-bulk": "policy" }, {}, { ".topic": ta }), ack = new E(["chip"], { "data-bulk": "ack" }, {}, { ".topic": ta });
 var document = { getElementById: function () { return null; },
   querySelectorAll: function (s) { return s === "button[data-bulk]" ? [pol, ack] : []; },
-  addEventListener: function () {} };
+  addEventListener: function () {}, documentElement: new E() };
 var window = {};
 `
 

@@ -556,7 +556,15 @@ machine) or the daemon's own, so no other web page can drive an agent. After
 a daemon restart the runner re-registers each conversation with no process
 and starts one at its next send. An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
-and no mailbox identity.
+and no mailbox identity. Its command is Python plus the starting plugin's
+`bin/ws-mcp-launcher.py serve --stdio`, never the daemon's staged executable.
+The plugin is resolved beside `WS_RSRC_ROOT`; a missing launcher refuses the
+start. The launcher's interpreter (`WS_MCP_HOLDER_PYTHON`) is reused when
+known, else `python3` on PATH (Windows: `py -3` fallback). The conversation's
+root overrides `WS_MCP_PROJECT_ROOT` in that command's environment, keeping
+proxy mode's exact arguments and preventing the daemon's lead root leaking
+into the worker. A proxy-hosted worker still uses its capability token for
+nested `pi.*` calls, not the daemon's lead runner handle.
 
 A spawned conversation (`internal/wsagent/spawn.go`) is a non-lead
 conversation another session opens with its first message (`Runner.Spawn`:
@@ -583,23 +591,32 @@ The `pi.*` tools (`internal/mcp/pi_tools.go`, lead-only) put this on a
 session: `pi.spawn {prompt, tier, cwd?, label?}` (model and effort from the
 tier's entry in the `pi` harness bucket of `agents.tier`, which only the
 user's `config.tune` sets; an unset tier is refused with that key named;
-`cwd` relative to the session's root), `pi.send`, `pi.list` (the caller's
+`cwd` relative to the session's root), `pi.send` (a running child's native
+Pi steer at the next tool boundary; with no turn running, a new turn at once), `pi.list` (the caller's
 own children), `pi.stop` (closes; the record stays), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
 send). The daemon mails each settled turn to the parent lead's reply-id
 queue with no sender (`mailbox.recv` shows `system`) and wakes the mailbox
-waits; nothing is mailed after `pi.stop`. `tools/list` shows the tools only
+waits; a steered message belongs to the turn that takes it, whose completion
+mail covers it without an extra turn. A steer refused or not taken before
+the turn ends is cleared from Pi's queue and sent as the next turn instead.
+Nothing is mailed after `pi.stop`. `tools/list` shows the tools only
 when `dashboard.pi_spawn_enabled` is on (ws on, wsflow and Pi off; read
 once per server, so a change applies at the next reconnect), the server is
 hosted by the daemon (`ServerOptions.Agents` is the daemon's runner; a
 direct-path ws-mcp has none and a call is refused naming the daemon), and
-`pi --version`, probed once per process, is 1.0 or later. Each hosted
-server watches the runner and feeds a child's row (`pi:<id>`, `agentKind:
-"pi"`, linked to the child's page) into its parent's live state; a live
-session the server creates, or one an adapter resets, gets its open
-children's rows again, so they come back after a reconnect. A session whose
-dashboard feed is off gets no row. The agents panel shows a running Pi row
-with a blinking `pi` badge in place of the pulse.
+`pi --version`, probed once per process, is 1.0 or later. Each intake-fed
+server watches the runner and feeds the owning lead's recursive spawn tree
+(`pi:<id>`, `agentKind: "pi"`, linked to the child's page) into its live state;
+a live session the server creates, or one an adapter resets, gets its open
+descendants' rows again, so they come back after a reconnect. A dashboard-hosted
+lead instead gets those rows from its runner-owned snapshot writer, including
+after daemon replacement; hosted intake remains off. Descendants nest under
+their spawner through ordinary `parentId` links. When a harness also reports the
+same conversation (its reply-id or native conversation id), the snapshot keeps
+one daemon-owned lifecycle row with the harness's activity and telemetry. An
+intake-only session whose dashboard feed is off gets no row. The agents panel
+shows a running Pi row with a blinking `pi` badge in place of the pulse.
 
 A spawned Pi worker spawns Pi subagents of its own through the daemon
 (`internal/wsagent/children.go`, `internal/mcp/pi_forward.go`); the daemon
@@ -628,9 +645,11 @@ owns the whole tree:
   worker's own server checks neither.
 - **Cwd.** A worker's empty `cwd` is the worker's own working directory
   (its record's `cwd`, else its root), and a relative one resolves against
-  it, so a worker in a worktree spawns into that worktree; the child's root
-  (its session key's) stays the worker's. A lead's `pi.spawn` keeps
-  resolving against the lead's root.
+  it, so a worker in a worktree spawns into that worktree. Both a lead's
+  and a worker's spawn bind the child's root (and its delegate key) to the
+  Git worktree containing the resolved cwd; a cwd outside Git keeps the
+  caller's root. A lead's `pi.spawn` keeps resolving cwd against the lead's
+  root.
 - **Caps.** A spawn records the holder as the child's parent (`parent.kind:
   "conversation"`). The lead is depth 0, its Pi worker depth 1, and that
   worker's child depth 2, which is refused a spawn with the cap named. The

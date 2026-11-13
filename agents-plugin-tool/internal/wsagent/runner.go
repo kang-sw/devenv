@@ -154,6 +154,8 @@ type Options struct {
 	ChildCheck func() error
 	// heartbeat overrides wslive.HeartbeatInterval for tests.
 	heartbeat time.Duration
+	// spawnListed observes global spawn-projection listings in tests.
+	spawnListed func(string)
 }
 
 // Runner hosts the agent conversations of one dashboard daemon.
@@ -171,6 +173,9 @@ type Runner struct {
 	// at Start when there is no manager (scanDone); scanOnce closes it.
 	scanned  chan struct{}
 	scanOnce sync.Once
+	// rejoined gates nested calls until held-process capabilities are validated.
+	rejoined   chan struct{}
+	rejoinOnce sync.Once
 
 	// holders routes the session holders' events to the lead processes.
 	holders holderTable
@@ -204,7 +209,7 @@ func NewRunner(opts Options) *Runner {
 	if opts.Alive == nil {
 		opts.Alive = wsstate.ProcessAlive
 	}
-	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), scanned: make(chan struct{}), notify: func(string, string) {}}
+	r := &Runner{opts: opts, convs: map[string]*conv{}, closed: map[string]Record{}, quit: make(chan struct{}), scanned: make(chan struct{}), rejoined: make(chan struct{}), notify: func(string, string) {}}
 	if opts.Holders != nil {
 		// Before the manager's first scan, so a predecessor's holders are
 		// seen attaching.
@@ -244,7 +249,16 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			// A lead whose process may still run under its holder rejoins
 			// it there, before the scan below replays the holder's records.
 			// A turn the last daemon's exit cut off settles there too.
-			r.startConv(rec)
+			r.startConv(rec, nil)
+		}
+	}
+	// All records are loaded now, including children sorted after their lead.
+	for _, st := range r.List() {
+		if c := r.conv(st.ID); c != nil {
+			c.do(func() {
+				c.spawnDirty = true
+				c.live.writeSnapshot()
+			})
 		}
 	}
 	// A child loaded before its parent found no parent to report to.
@@ -252,6 +266,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	if r.opts.Holders == nil {
 		// No holder to wait for.
 		r.markScanned()
+		r.rejoinOnce.Do(func() { close(r.rejoined) })
 		return
 	}
 	r.wg.Add(1)
@@ -260,6 +275,7 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 		r.opts.Holders.Scan()
 		r.markScanned()
 		r.holdersScanned()
+		r.rejoinOnce.Do(func() { close(r.rejoined) })
 	}()
 }
 
@@ -289,7 +305,7 @@ func (r *Runner) holdersScanned() {
 	for _, c := range convs {
 		c.do(func() {
 			c.checkReattach()
-			if c.rec.Lead && c.proc == nil && c.rec.HolderID != "" {
+			if c.proc == nil {
 				// A start kick put off until the scan (a rejoin that failed).
 				c.kick()
 			}
@@ -309,10 +325,10 @@ func (r *Runner) holdersScanned() {
 	}
 	for _, info := range listed {
 		var meta holderSession
-		if json.Unmarshal(info.Session, &meta) != nil || meta.Kind != holderKindLead || owned[info.ID] {
+		if json.Unmarshal(info.Session, &meta) != nil || (meta.Kind != holderKindLead && meta.Kind != holderKindPiWorker) || owned[info.ID] {
 			continue
 		}
-		fmt.Fprintf(r.opts.Log, "agent: ending lead holder %s of %s: no open conversation runs under it\n", info.ID, meta.ReplyID)
+		fmt.Fprintf(r.opts.Log, "agent: ending conversation holder %s of %s: no open conversation runs under it\n", info.ID, meta.ReplyID)
 		if err := r.opts.Holders.Stop(info.ID); err != nil {
 			fmt.Fprintf(r.opts.Log, "agent: stop holder %s: %v\n", info.ID, err)
 		}
@@ -360,26 +376,47 @@ func (r *Runner) conv(replyID string) *conv {
 // startConv starts serving rec. It writes the registration and the
 // snapshot, and tells the daemon, before it takes r.mu to list the
 // conversation, so no other conversation's Get, List, or act waits on
-// those writes; r.mu is not held.
-func (r *Runner) startConv(rec Record) *conv {
+// those writes; r.mu is not held. seed, when not empty, is the command
+// list the first snapshot shows (lastCommands); a process's own list
+// replaces it.
+func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	c := &conv{
-		r:       r,
-		dir:     dir,
-		inbox:   wsinbox.Dir(dir),
-		rec:     rec,
-		live:    newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
-		reqs:    make(chan func()),
-		inboxC:  make(chan struct{}, 1),
-		mailC:   make(chan struct{}, 1),
-		done:    make(chan struct{}),
-		settleC: make(chan struct{}),
+		r:          r,
+		dir:        dir,
+		inbox:      wsinbox.Dir(dir),
+		rec:        rec,
+		live:       newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
+		reqs:       make(chan func()),
+		inboxC:     make(chan struct{}, 1),
+		spawnC:     make(chan struct{}, 1),
+		spawnDirty: true,
+		mailC:      make(chan struct{}, 1),
+		done:       make(chan struct{}),
+		settleC:    make(chan struct{}),
 	}
+	c.live.beforeSnapshot = c.seedSpawnRows
+	if len(seed) > 0 {
+		c.live.applyQuiet(wslive.Event{Kind: wslive.KindCommands, Commands: seed})
+	}
+	c.sends, c.drained, c.turnMark, c.voided = rec.Sends, rec.Drained, rec.TurnMark, rec.Voided
+	c.heldRes, c.holding = rec.HeldTurn, rec.HeldTurn != nil
+	if c.heldRes != nil {
+		c.heldRes.mark = rec.TurnMark
+	}
+	c.steered = slices.Clone(rec.Steered)
+	for i := range c.steered {
+		c.steered[i].Mark = rec.SteerMarks[c.steered[i].Seq]
+	}
+	c.steerSeq, c.steerAnswers = rec.SteerSeq, rec.SteerAnswers
 	if last := rec.LastTurn; last != nil {
-		// The send count starts again at 0, so a wait now takes the last
-		// reported turn at once, as it did before the restart.
+		// Persisted coverage keeps a wait for queued input from taking a
+		// prior settlement. Legacy records retain their zero-count behavior.
 		c.settled, c.settledReport = last.Result, last.ID
-		c.settled.n, c.settled.mark = 1, 0
+		c.settled.n, c.settled.mark = 1, last.Mark
+		if !rec.TurnOpen && (last.Result.Status == TurnFailed || last.Result.Status == TurnInterrupted) {
+			c.lastErr = last.Result.Error
+		}
 	}
 	c.writeRegistration()
 	// A row a terminal login took while no daemon ran: the loop lets the
@@ -389,7 +426,11 @@ func (r *Runner) startConv(rec Record) *conv {
 	if !foreign {
 		c.live.writeSnapshot()
 	}
-	if rec.Lead && rec.HolderID != "" && !foreign {
+	if rec.HolderID != "" && !foreign && (rec.Lead || rec.Backend == BackendPi) {
+		if rec.Parent != nil && rec.TurnOpen {
+			c.turn = true
+			c.live.applyQuiet(wslive.Event{Kind: wslive.KindTurnStart})
+		}
 		// Rejoined before the loop runs: what the loop takes first (waiting
 		// mail, a message from the page) would otherwise start a second
 		// process, and end this one to do it.
@@ -400,12 +441,9 @@ func (r *Runner) startConv(rec Record) *conv {
 	r.wg.Add(1)
 	go c.loop()
 	r.mu.Unlock()
-	if rec.Parent != nil && rec.TurnOpen {
-		// The last daemon exited while this turn ran. It settles as
-		// interrupted before the inbox signal below can start the next
-		// turn: settled after it, it would settle that new turn instead.
-		c.do(c.interrupted)
-	}
+	// Do not expose a previous LastTurn while startup still reconciles the
+	// later TurnOpen. The loop reconciles before it accepts this request.
+	c.do(func() {})
 	if rec.Lead && r.opts.Mail != nil && !foreign {
 		// Mail that waited while no daemon ran is found by the first check.
 		c.stopMail = r.opts.Mail.Watch(rec.Root, rec.WSKey, c.signalMail)
@@ -556,11 +594,52 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	if err := writeRecord(dir, rec); err != nil {
 		return State{}, err
 	}
-	c := r.startConv(rec)
+	var seed []wslive.SlashCommand
+	if rec.Lead {
+		seed = r.lastCommands(rec)
+	}
+	c := r.startConv(rec, seed)
 	if spawn != nil {
 		return r.spawned(c, spawn.Prompt)
 	}
 	return c.state(), nil
+}
+
+// lastCommands is the command list in the persisted snapshot of the
+// newest other hosted lead session of rec's root and profile that has
+// one; nil when none has. A new lead's process starts only at its first
+// send, and the composer offers commands only from the snapshot's list,
+// so without this an empty session would offer none until then.
+func (r *Runner) lastCommands(rec Record) []wslive.SlashCommand {
+	r.mu.Lock()
+	recs := make([]Record, 0, len(r.convs)+len(r.closed))
+	convs := make([]*conv, 0, len(r.convs))
+	for _, c := range r.convs {
+		convs = append(convs, c)
+	}
+	for _, prev := range r.closed {
+		recs = append(recs, prev)
+	}
+	r.mu.Unlock()
+	for _, c := range convs {
+		recs = append(recs, c.record())
+	}
+	recs = slices.DeleteFunc(recs, func(prev Record) bool {
+		return !prev.Lead || prev.ReplyID == rec.ReplyID || prev.Root != rec.Root || prev.Profile != rec.Profile || prev.Backend != rec.Backend
+	})
+	sort.Slice(recs, func(i, j int) bool {
+		if recs[i].CreatedAt != recs[j].CreatedAt {
+			return recs[i].CreatedAt > recs[j].CreatedAt
+		}
+		return recs[i].ReplyID > recs[j].ReplyID
+	})
+	for _, prev := range recs {
+		snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(wsdashboard.SessionDir(r.opts.Dir, prev.ReplyID)))
+		if err == nil && len(snap.Commands) > 0 {
+			return snap.Commands
+		}
+	}
+	return nil
 }
 
 // resolve resolves profile through root and checks everything a launch
@@ -629,8 +708,9 @@ func (r *Runner) List() []State {
 }
 
 // Send holds text as the conversation's next user message. It is submitted
-// now when no turn runs, else when the running turn ends; held sends merge
-// into one message. It reports whether the message is still held.
+// now when no turn runs. A spawned Pi worker takes it as a native steer
+// during a running turn; other conversations hold it until that turn ends.
+// It reports whether the message is still held.
 //
 // Send returns once the message is in the conversation's inbox: it neither
 // waits for the loop nor starts the process, which the loop does on its
@@ -648,19 +728,27 @@ func (r *Runner) Send(id, text string) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
 	c.mu.Lock()
 	if c.closed {
 		err := endedError(c.rec)
 		c.mu.Unlock()
 		return State{}, err
 	}
-	_, _, err = wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{text}}, r.opts.Now())
+	steer := c.rec.Parent != nil && c.rec.Backend == BackendPi && !c.rec.Lead
+	_, _, err = wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{text}, Steer: steer}, r.opts.Now())
 	if err == nil {
 		// After the write, under the lock kick drains with: a turn whose
 		// drain counted this send holds its message (Wait).
 		c.sends++
+		c.rec.Sends = c.sends
 	}
+	rec := c.rec
 	c.mu.Unlock()
+	if err == nil {
+		err = writeRecord(c.dir, rec)
+	}
 	if err != nil {
 		return State{}, err
 	}
@@ -1006,6 +1094,9 @@ type conv struct {
 	// mailbox may hold mail (signalMail); stopMail ends the watch.
 	mailC    chan struct{}
 	stopMail func()
+	// spawnC coalesces daemon-owned descendant changes for this writer.
+	spawnC     chan struct{}
+	spawnDirty bool
 	// spawning is set from the row write that precedes a spawn until the
 	// spawn settled: the row then names no process and is not stopped, so
 	// a terminal login is refused meanwhile (Registration.HostMayRun).
@@ -1017,8 +1108,9 @@ type conv struct {
 	// replaying is set from a rejoin of the holder's process (reattach)
 	// until its replay ends: no turn is submitted meanwhile, since the
 	// replay is what tells whether one runs.
-	replaying   bool
-	replayAsked bool
+	replaying       bool
+	replayAsked     bool
+	replayTurnError string
 	// replayGap is set when records left the holder's ring during the
 	// replay, and replayBoundary when the replay showed a turn begin or
 	// end after the last such loss. wrapHold is set from a rejoin that lost
@@ -1092,7 +1184,7 @@ type conv struct {
 	// parent's waits by target, and holding mirrors heldRes != nil; all
 	// three under mu. Loop-owned: heldRes is a
 	// done turn held for its children's reports; steered are the
-	// children's reports steered into the running turn and not yet taken
+	// reports and user messages steered into the running turn and not yet taken
 	// by it, steerSeq the steer commands the process was written and
 	// steerAnswers how many it answered.
 	settledReport string
@@ -1175,14 +1267,18 @@ func (c *conv) inboxChanged() {
 	c.kick()
 }
 
-// steer writes a lead's steered messages to its process while a turn runs:
+// steer writes steered messages to the process while a turn runs:
 // the user marked them to reach the harness now, not at the turn's end.
 // They join the running turn, so no turn starts. Messages not marked stay
 // held, with no turn running a marked one is an ordinary send (kick), and
 // a backend that takes no message mid-turn, or a rejoin that cannot tell
 // whether the turn runs (wrapHold), keeps it held.
 func (c *conv) steer() {
-	if !c.rec.Lead || !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed {
+	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed {
+		return
+	}
+	if !c.rec.Lead {
+		c.steerWorker()
 		return
 	}
 	st, ok := c.proc.(steerer)
@@ -1212,6 +1308,15 @@ func (c *conv) loop() {
 	defer close(c.done)
 	beat := time.NewTicker(c.r.opts.heartbeat)
 	defer beat.Stop()
+	// Settle the predecessor before inbox signals (including nested reports)
+	// can start a genuinely new turn.
+	if c.rec.Parent != nil && c.rec.HolderID == "" {
+		c.interrupted()
+		if c.requeueSteered() {
+			c.signalInbox()
+		}
+	}
+	c.reportLast()
 	if c.settle() {
 		return
 	}
@@ -1238,6 +1343,10 @@ func (c *conv) loop() {
 			c.inboxChanged()
 		case <-c.mailC:
 			c.mailChanged()
+		case <-c.spawnC:
+			c.spawnDirty = true
+			c.live.writeSnapshot()
+			c.changed(false)
 		case ev, ok := <-c.events:
 			if !ok {
 				c.processExited()
@@ -1483,6 +1592,9 @@ func (c *conv) dropHeld() {
 // apply applies a wslive event and tells the daemon when it wrote. quiet
 // (a replayed holder record) applies it to the state alone.
 func (c *conv) apply(ev wslive.Event, quiet ...bool) {
+	if ev.Kind == wslive.KindReset {
+		c.spawnDirty = true
+	}
 	if len(quiet) > 0 && quiet[0] {
 		c.live.applyQuiet(ev)
 		return
@@ -1504,7 +1616,7 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 // it, which each turn end submits; mail waits for the next message turn, or
 // goes alone once nothing is queued.
 func (c *conv) kick() {
-	if c.closed || c.turn || c.replaying {
+	if c.closed || c.turn || c.replaying || len(c.steered) > 0 || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
 		return
 	}
 	held, err := wsinbox.Held(c.inbox)
@@ -1544,9 +1656,9 @@ func (c *conv) kick() {
 	for _, rec := range recs {
 		if cmd := rec.Entry.Command; cmd != nil {
 			cmd := *cmd
-			queue = append(queue, QueuedInput{Command: &cmd, after: from})
+			queue = append(queue, QueuedInput{Command: &cmd, After: from})
 		} else if text := strings.TrimSpace(rec.Entry.Text()); text != "" {
-			queue = append(queue, QueuedInput{Text: text, after: from})
+			queue = append(queue, QueuedInput{Text: text, After: from})
 		}
 	}
 	if len(queue) == 0 && len(mail) == 0 && len(reports) == 0 {
@@ -1571,9 +1683,10 @@ func (c *conv) kick() {
 	// leaves the text drained with it for the next turn).
 	mark := covered
 	if len(rest) > 0 {
-		mark = rest[0].after
+		mark = rest[0].After
 	}
 	c.stopIdle()
+	startedAt := c.r.opts.Now().UnixMilli()
 	c.setStatus(func() { c.turn, c.lastErr = true, "" })
 	// The turn reaches the page only once its send went through: a failed
 	// send leaves no user entry or turn line of its own (its error shows),
@@ -1608,6 +1721,9 @@ func (c *conv) kick() {
 	c.hold(nil)
 	c.update(func(rec *Record) {
 		rec.Queued = rest
+		rec.Drained, rec.TurnMark, rec.Voided = c.drained, mark, c.voided
+		rec.TurnStartedAt = startedAt
+		rec.TurnStartSeq = max(c.seq, c.lineOpen)
 		if len(mail) > 0 {
 			rec.Mail = nil
 		}
@@ -1615,7 +1731,7 @@ func (c *conv) kick() {
 			rec.Reports = nil
 		}
 		if rec.Parent != nil {
-			rec.TurnOpen = true
+			rec.TurnOpen, rec.HeldTurn = true, nil
 		}
 	})
 	// Mail shows on the page through the session's mail history, so only
@@ -1698,17 +1814,33 @@ func (c *conv) startProcess() error {
 	if rec.Lead {
 		return c.startLead(rec, rp.Definition, false)
 	}
-	if err := c.r.opts.Keys.Ensure(rec.Root, rec.WSKey); err != nil {
-		return fmt.Errorf("ws session key: %w", err)
+	return c.startWorker(rec, rp.Definition, false)
+}
+
+func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
+	if rec.Backend == BackendPi && c.r.opts.Holders != nil && !attach {
+		if !c.r.scanDone() {
+			return errors.New("holder scan is not complete")
+		}
+		if err := c.retireHolder(); err != nil {
+			return err
+		}
 	}
-	instructions, err := composeInstructions(c.dir, rec, rp.Definition)
-	if err != nil {
-		return err
+	instructions := ""
+	if !attach {
+		if err := c.r.opts.Keys.Ensure(rec.Root, rec.WSKey); err != nil {
+			return fmt.Errorf("ws session key: %w", err)
+		}
+		var err error
+		instructions, err = composeInstructions(c.dir, rec, def)
+		if err != nil {
+			return err
+		}
 	}
 	spec := StartSpec{
 		Root:         rec.Root,
 		Dir:          c.dir,
-		Profile:      rp.Definition,
+		Profile:      def,
 		Model:        rec.Model,
 		Effort:       rec.Effort,
 		SessionID:    rec.SessionID,
@@ -1716,7 +1848,10 @@ func (c *conv) startProcess() error {
 		Instructions: instructions,
 		Env:          environ(),
 	}
-	if len(rp.Definition.WSTools) > 0 {
+	if attach && len(def.WSTools) > 0 {
+		// The mapper needs the original ws tool surface, not a new bridge.
+		spec.WSMCP = &MCPCommand{}
+	} else if len(def.WSTools) > 0 {
 		cmd, err := c.r.opts.WSMCP(rec.Root)
 		if err != nil {
 			return fmt.Errorf("ws-mcp command: %w", err)
@@ -1725,7 +1860,7 @@ func (c *conv) startProcess() error {
 		for k, v := range cmd.Env {
 			env[k] = v
 		}
-		env[EnvAllowedTools] = strings.Join(rp.Definition.WSTools, ",")
+		env[EnvAllowedTools] = strings.Join(def.WSTools, ",")
 		env[EnvNoDashboard] = "1"
 		// The daemon may inherit a lead's mailbox identity; the agent's
 		// ws-mcp must never claim that inbox's presence. Blank is inert.
@@ -1736,11 +1871,25 @@ func (c *conv) startProcess() error {
 		// capability token (children.go); any other gets both blank, so
 		// none is inherited.
 		env[EnvPiToken], env[EnvPiEndpoint] = "", ""
-		if mayHoldToken(rec, rp.Definition) {
-			env[EnvPiToken], env[EnvPiEndpoint] = c.r.issueToken(rec.ReplyID)
+		if mayHoldToken(rec, def) {
+			if !attach {
+				token, endpoint := c.r.issueToken(rec.ReplyID)
+				env[EnvPiToken], env[EnvPiEndpoint] = token, endpoint
+				if rec.Backend == BackendPi && c.r.opts.Holders != nil {
+					c.update(func(rec *Record) { rec.Capability = token })
+				}
+				rec.Capability = token
+			}
 		}
 		cmd.Env = env
 		spec.WSMCP = &cmd
+	}
+	if rec.Backend == BackendPi && c.r.opts.Holders != nil {
+		spec.Holder = &holderChild{host: c.r.opts.Holders, table: &c.r.holders,
+			session: holderSession{Kind: holderKindPiWorker, ReplyID: rec.ReplyID, Cwd: rec.workDir(), Capability: capabilityHash(rec.Capability)}}
+		if attach {
+			spec.Holder.id, spec.Holder.skipTo = rec.HolderID, rec.HolderSeq
+		}
 	}
 	proc, err := c.r.opts.Backends[rec.Backend].Start(context.Background(), spec)
 	if err != nil {
@@ -1749,11 +1898,27 @@ func (c *conv) startProcess() error {
 	}
 	c.setStatus(func() { c.proc = proc })
 	c.events = proc.Events()
-	c.steerSeq, c.steerAnswers = 0, 0
-	c.idleAfter = rp.Definition.IdleTimeout()
+	if !attach {
+		c.steerSeq, c.steerAnswers = 0, 0
+	}
+	c.idleAfter = def.IdleTimeout()
+	if hp, ok := proc.(holderProcess); ok {
+		id, pid, held := hp.HolderInfo()
+		if held {
+			if attach {
+				c.replaying, c.seq = true, rec.HolderSeq
+				return nil
+			}
+			c.seq, c.seqDirty, c.ringDirty = 0, false, false
+			c.update(func(rec *Record) {
+				rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0
+				rec.SteerSeq, rec.SteerAnswers, rec.SteerAnswerSeq = 0, 0, 0
+			})
+		}
+	}
 	c.dirtyModel, c.dirtyEffort = false, false
-	if rp.Definition.ListInIndex != rec.Listed {
-		c.update(func(rec *Record) { rec.Listed = rp.Definition.ListInIndex })
+	if def.ListInIndex != rec.Listed {
+		c.update(func(rec *Record) { rec.Listed = def.ListInIndex })
 		c.writeRegistration()
 	}
 	return nil
@@ -1803,9 +1968,9 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		Cwd:         rec.Cwd,
 		SessionFile: rec.SessionFile,
 		Env:         environ(),
+		Holder:      holder,
 		Lead: &LeadSpec{
 			PermissionMode: rec.PermissionMode,
-			Holder:         holder,
 			Env: map[string]string{
 				EnvHostedSession:    "1",
 				EnvHostedSessionKey: rec.WSKey,
@@ -1877,11 +2042,18 @@ func (c *conv) retireHolder() error {
 // scan.
 func (c *conv) reattach() {
 	rec := c.record()
-	def := Profile{Backend: rec.Backend, Lead: true}
+	def := Profile{Backend: rec.Backend, Lead: rec.Lead}
 	if rp, err := c.r.resolve(rec.Profile, rec.Root); err == nil && rp.Definition.Backend == rec.Backend {
 		def = rp.Definition
 	}
-	if err := c.startLead(rec, def, true); err != nil {
+	var err error
+	if rec.Lead {
+		err = c.startLead(rec, def, true)
+	} else {
+		c.replaying = true
+		err = c.startWorker(rec, def, true)
+	}
+	if err != nil {
 		// The holder stays in the record: the next start ends it first.
 		fmt.Fprintf(c.r.opts.Log, "agent %s: rejoin holder %s: %v\n", rec.ReplyID, rec.HolderID, err)
 	}
@@ -1906,6 +2078,19 @@ func (c *conv) checkReattach() {
 	for _, info := range c.r.opts.Holders.List().Holders {
 		if info.ID == id {
 			listed, attached = true, info.Attached
+			if !c.rec.Lead {
+				var meta holderSession
+				if json.Unmarshal(info.Session, &meta) != nil || meta.Kind != holderKindPiWorker || meta.ReplyID != c.rec.ReplyID || meta.Capability != capabilityHash(c.rec.Capability) || (info.Child != nil && c.rec.HostPID != 0 && info.Child.PID != c.rec.HostPID) {
+					// Never stop a holder that failed the ownership check.
+					hp.Detach()
+					c.setStatus(func() { c.proc = nil })
+					c.events = nil
+					c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
+					c.recoveryFailed("held process association does not match the worker record")
+					return
+				}
+				c.r.restoreToken(c.rec)
+			}
 		}
 	}
 	if !listed {
@@ -1941,6 +2126,23 @@ func (c *conv) replayDone(lost bool) {
 	lost = lost || c.replayGap
 	boundary := c.replayBoundary
 	c.replaying, c.replayAsked, c.replayGap, c.replayBoundary = false, false, false, false
+	if !c.rec.Lead && c.rec.Parent != nil {
+		if lost && c.rec.TurnOpen {
+			c.wrapHold = true
+			c.setStatus(func() { c.turn = true })
+			c.probeWorkerRecovery()
+			return
+		}
+		if c.rec.TurnOpen && !c.turn {
+			status := TurnDone
+			if c.replayTurnError != "" {
+				status = TurnFailed
+			}
+			c.settleTurn(status, c.replayTurnError, c.turnMark)
+		}
+		c.unsteer()
+		c.releaseHeld()
+	}
 	if lost {
 		if boundary {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: records of holder %s left its ring before this daemon replayed them; the turn state is the one the records after them show\n", c.rec.ReplyID, c.rec.HolderID)
@@ -1963,6 +2165,62 @@ func (c *conv) replayDone(lost bool) {
 			c.armIdle()
 		}
 	}
+}
+
+// recoveryFailed settles once, ends the unrecoverable transport, and never
+// launches another process on the strength of a failed probe.
+func (c *conv) recoveryFailed(reason string) {
+	text := "Pi worker recovery failed: " + reason
+	c.setStatus(func() { c.turn = false; c.lastErr = text })
+	if c.rec.TurnOpen {
+		c.settleTurn(TurnFailed, text, c.turnMark)
+	}
+	c.stopProcess("")
+	c.r.revokeToken(c.rec.ReplyID)
+	if c.rec.Capability != "" {
+		c.update(func(rec *Record) { rec.Capability = "" })
+	}
+	c.replaying, c.wrapHold = false, false
+}
+
+func (c *conv) probeWorkerRecovery() {
+	p, ok := c.proc.(*piProcess)
+	if !ok {
+		c.recoveryFailed("the held process cannot reconcile RPC messages")
+		return
+	}
+	proc, startedAt := c.proc, c.rec.TurnStartedAt
+	c.wrapTurnSeen = false
+	go func() {
+		running, err := p.TurnRunning()
+		message, turnErr := "", ""
+		var taken []string
+		if err == nil && !running {
+			message, turnErr, taken, err = p.recoveryReply(startedAt)
+		}
+		c.do(func() {
+			if c.proc != proc || !c.wrapHold || c.wrapTurnSeen {
+				return
+			}
+			if err != nil {
+				c.recoveryFailed(err.Error())
+				return
+			}
+			if running {
+				return
+			}
+			for _, text := range taken {
+				c.steerTaken(text)
+			}
+			// The idle RPC state and saved messages replace acknowledgements
+			// lost from the bounded ring; unsteer clears any untaken queue.
+			c.steerAnswers = c.steerSeq
+			c.update(func(rec *Record) { rec.SteerAnswers = c.steerAnswers })
+			c.reply = message
+			c.wrapHold = false
+			c.endTurn(turnErr, false)
+		})
+	}()
 }
 
 // probeWrapHold asks a harness that can tell (turnProber) whether a turn
@@ -2076,7 +2334,7 @@ func (c *conv) handle(ev Event) {
 			c.update(func(rec *Record) { rec.SessionID = ev.SessionID })
 		}
 	case ev.Live != nil:
-		if !quiet && ev.Live.Kind == wslive.KindReply && ev.Live.Final {
+		if ev.Live.Kind == wslive.KindReply && ev.Live.Final && !(quiet && c.rec.Parent != nil && ev.Seq <= c.rec.TurnStartSeq) {
 			c.reply = ev.Live.Text
 		}
 		c.apply(*ev.Live, quiet)
@@ -2098,14 +2356,24 @@ func (c *conv) handle(ev Event) {
 		if quiet {
 			return
 		}
+		if c.replaying && c.rec.Parent != nil {
+			c.processExited()
+			return
+		}
 		c.setStatus(func() { c.lastErr = ev.Fatal.Error() })
 		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, ev.Fatal)
 		c.stopProcess("")
 	case ev.TurnStart:
+		if quiet && c.rec.Parent != nil && ev.Seq <= c.rec.TurnStartSeq {
+			return
+		}
 		c.replayBoundary = c.replayBoundary || c.replaying
 		c.wrapTurnSeen = c.wrapTurnSeen || (c.wrapHold && !quiet)
 		c.beginTurn(quiet)
 	case ev.TurnEnd:
+		if quiet && c.rec.Parent != nil && ev.Seq <= c.rec.TurnStartSeq {
+			return
+		}
 		c.replayBoundary = c.replayBoundary || c.replaying
 		c.endTurn(ev.TurnError, quiet)
 	case ev.Approval != nil:
@@ -2129,13 +2397,13 @@ func (c *conv) handle(ev Event) {
 		c.harnessState = ev.HarnessState
 		c.checkAction(quiet)
 	case ev.SteerAnswer != nil:
-		if !quiet {
-			c.steerAnswered(ev.SteerAnswer.Refusal)
+		if ev.Seq > 0 && ev.Seq <= c.rec.SteerAnswerSeq {
+			return
 		}
+		c.steerAnswered(ev.SteerAnswer.Refusal)
+		c.update(func(rec *Record) { rec.SteerAnswers, rec.SteerAnswerSeq = c.steerAnswers, ev.Seq })
 	case ev.UserTaken != "":
-		if !quiet {
-			c.steerTaken(ev.UserTaken)
-		}
+		c.steerTaken(ev.UserTaken)
 	case ev.Notice != "":
 		if !quiet {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, ev.Notice)
@@ -2187,13 +2455,17 @@ func (c *conv) beginTurn(quiet bool) {
 		}
 	})
 	c.apply(wslive.Event{Kind: wslive.KindTurnStart}, quiet)
+	c.reply, c.replayTurnError = "", ""
 	if !quiet {
 		// Not the runner's send: the turn holds no new message, so it
 		// keeps the last turn's mark.
 		c.reply = ""
 		c.hold(nil)
 		if c.rec.Parent != nil {
-			c.update(func(rec *Record) { rec.TurnOpen = true })
+			c.update(func(rec *Record) {
+				rec.TurnOpen, rec.HeldTurn = true, nil
+				rec.TurnStartSeq = c.seq
+			})
 		}
 		c.watched()
 	}
@@ -2202,6 +2474,12 @@ func (c *conv) beginTurn(quiet bool) {
 // endTurn closes the running turn, applies settings changed during it, and
 // submits the messages held meanwhile.
 func (c *conv) endTurn(turnErr string, quiet bool) {
+	if c.wrapHold && !c.rec.Lead && c.rec.Parent != nil && !quiet {
+		// A gap while streaming is reconciled at agent_settled, not left
+		// dependent on acknowledgements that may have left the ring.
+		c.probeWorkerRecovery()
+		return
+	}
 	if !c.turn && !c.rec.Lead {
 		return
 	}
@@ -2211,18 +2489,23 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 		c.apply(wslive.Event{Kind: wslive.KindTurnEnd}, quiet)
 	}
 	c.turnSettled(turnErr, quiet)
+	if c.replaying && c.rec.Parent != nil {
+		c.replayTurnError = turnErr
+	}
 	if quiet {
 		return
 	}
-	if ran {
+	// Observers must see the terminal diagnostic in the same emission as
+	// the settled lifecycle, including mapped Pi agent_settled failures.
+	if turnErr != "" {
+		c.setStatus(func() { c.lastErr = turnErr })
+	}
+	if ran && !c.replaying {
 		status := TurnDone
 		if turnErr != "" {
 			status = TurnFailed
 		}
 		c.settleTurn(status, turnErr, c.turnMark)
-	}
-	if turnErr != "" {
-		c.setStatus(func() { c.lastErr = turnErr })
 	}
 	if c.replaying {
 		return
@@ -2391,10 +2674,23 @@ func (c *conv) answerApproval(id string, allow bool, message string) error {
 // processExited handles a process whose output ended without the runner
 // stopping it.
 func (c *conv) processExited() {
+	rejoining, proc := c.replaying, c.proc
 	c.events = nil
-	if c.proc != nil {
-		_ = c.proc.Close()
-		c.releaseHolder(c.proc)
+	if c.replaying && c.rec.Parent != nil {
+		// Apply any completed replayed turn before handling an exited child.
+		if c.rec.TurnOpen && !c.turn && c.replayBoundary {
+			status := TurnDone
+			if c.replayTurnError != "" {
+				status = TurnFailed
+			}
+			c.settleTurn(status, c.replayTurnError, c.turnMark)
+		} else {
+			c.interrupted()
+		}
+	}
+	if proc != nil {
+		_ = proc.Close()
+		c.releaseHolder(proc)
 	}
 	c.setStatus(func() {
 		c.proc = nil
@@ -2403,7 +2699,7 @@ func (c *conv) processExited() {
 		}
 	})
 	c.processEnded()
-	if rejoining := c.replaying; rejoining {
+	if rejoining {
 		// The process ended while no daemon ran: what waited goes to a new
 		// one.
 		c.replaying, c.replayAsked = false, false
@@ -2423,6 +2719,7 @@ func (c *conv) processGone() {
 	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = "", 0, 0 })
 	c.writeRegistration()
 	c.replaying, c.replayAsked = false, false
+	c.interrupted()
 	c.processEnded()
 	c.kick()
 }
@@ -2443,6 +2740,9 @@ func (c *conv) processEnded() {
 		}
 	}
 	c.r.revokeToken(c.rec.ReplyID)
+	if c.rec.Capability != "" {
+		c.update(func(rec *Record) { rec.Capability = "" })
+	}
 	if c.requeueSteered() && !c.closed && !c.quitting {
 		// The steered reports the process took with it go as the next
 		// turn; nothing else would send them.
@@ -2499,7 +2799,7 @@ func (c *conv) stopProcess(string) {
 func (c *conv) letGo() {
 	c.quitting = true
 	c.finishLine()
-	if hp, ok := c.proc.(holderProcess); ok && c.rec.Lead {
+	if hp, ok := c.proc.(holderProcess); ok {
 		c.persistSeq()
 		if hp.Detach() {
 			c.live.writeSnapshot()

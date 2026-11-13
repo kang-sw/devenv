@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsagent"
+	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -28,11 +29,19 @@ const piForwardSlack = 30 * time.Second
 // piForwardTimeout bounds every other forwarded call.
 const piForwardTimeout = 60 * time.Second
 
-// piForward is the token and the daemon's base URL; ok is false when
-// either is missing.
+// piForward finds the current daemon in this server's cache, since the
+// process's inherited endpoint can name a daemon replaced while it ran.
+// The inherited endpoint remains a fallback for older setups and tests.
 func (s *Server) piForward() (token, endpoint string, ok bool) {
 	token = strings.TrimSpace(s.getenv(wsagent.EnvPiToken))
 	endpoint = strings.TrimRight(strings.TrimSpace(s.getenv(wsagent.EnvPiEndpoint)), "/")
+	if token != "" {
+		if dir, err := s.dashboard.stateDir(); err == nil {
+			if ep, err := wsdashboard.ReadEndpoint(dir); err == nil && ep.Port > 0 && ep.Port <= 65535 {
+				endpoint = fmt.Sprintf("http://127.0.0.1:%d", ep.Port)
+			}
+		}
+	}
 	return token, endpoint, token != "" && endpoint != ""
 }
 
@@ -49,36 +58,73 @@ func (s *Server) piForwards() bool {
 // piCall posts one forwarded call to the token route and decodes its
 // answer into out.
 func (s *Server) piCall(ctx context.Context, tool string, body map[string]any, timeout time.Duration, out any) error {
-	token, endpoint, _ := s.piForward()
 	op := strings.TrimPrefix(tool, "pi.")
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+wsagent.RoutePrefix+"/by-token/"+op, bytes.NewReader(raw))
-	if err != nil {
-		return err
+	var waitDeadline time.Time
+	if op == "wait" {
+		waitDeadline = time.Now().Add(durationFromSeconds(body["timeout_s"]))
+		// A retry changes only its remaining wait, not the caller's arguments.
+		copyBody := make(map[string]any, len(body))
+		for key, value := range body {
+			copyBody[key] = value
+		}
+		body = copyBody
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("the dashboard daemon, which runs this subagent's Pi subagents, did not answer at %s: %v", endpoint, err)
+	for {
+		token, endpoint, _ := s.piForward()
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+wsagent.RoutePrefix+"/by-token/"+op, bytes.NewReader(raw))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			err = fmt.Errorf("the dashboard daemon, which runs this subagent's Pi subagents, did not answer at %s: %w", endpoint, err)
+		} else {
+			var answer []byte
+			answer, err = io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+			resp.Body.Close()
+			if err != nil {
+				err = fmt.Errorf("read the dashboard daemon's answer: %w", err)
+			} else {
+				if resp.StatusCode == http.StatusServiceUnavailable && op == "wait" {
+					// A graceful daemon detach has no settlement to return.
+					err = fmt.Errorf("%s", strings.TrimSpace(string(answer)))
+				} else {
+					if resp.StatusCode/100 != 2 {
+						return fmt.Errorf("%s", strings.TrimSpace(string(answer)))
+					}
+					if err := json.Unmarshal(answer, out); err != nil {
+						return fmt.Errorf("the dashboard daemon's answer is not JSON: %v", err)
+					}
+					return nil
+				}
+			}
+		}
+		// Only a disconnected wait is safe to reissue. A spawn/send/stop may
+		// have taken effect before the connection broke; never repeat it.
+		if op != "wait" || ctx.Err() != nil || time.Until(waitDeadline) <= 0 {
+			return err
+		}
+		timer := time.NewTimer(min(100*time.Millisecond, time.Until(waitDeadline)))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		remaining := time.Until(waitDeadline)
+		if remaining <= 0 {
+			return err
+		}
+		body["timeout_s"] = remaining.Seconds()
 	}
-	defer resp.Body.Close()
-	answer, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	if err != nil {
-		return fmt.Errorf("read the dashboard daemon's answer: %v", err)
-	}
-	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("%s", strings.TrimSpace(string(answer)))
-	}
-	if err := json.Unmarshal(answer, out); err != nil {
-		return fmt.Errorf("the dashboard daemon's answer is not JSON: %v", err)
-	}
-	return nil
 }
 
 // handlePiForward runs a pi.* call of a Pi subagent through the daemon.
@@ -156,11 +202,7 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 		if wantsJSON(args) {
 			return toolJSONResponse(id, piChild(st), nil)
 		}
-		how := "starts its next turn now"
-		if st.Status == wsagent.StatusRunning {
-			how = "waits for its running turn to end, then goes as its next turn (with any other message sent meanwhile)"
-		}
-		return toolTextResponse(id, fmt.Sprintf("sent to Pi subagent %s: the message %s. Its report comes to you when that turn ends.\n", child, how), nil)
+		return toolTextResponse(id, fmt.Sprintf("sent to Pi subagent %s: starts a turn if idle, otherwise steers its running turn at the next tool boundary. That turn's report covers the message.\n", child), nil)
 	case "pi.stop":
 		var st wsagent.State
 		if err := s.piCall(ctx, tool, map[string]any{"id": child}, piForwardTimeout, &st); err != nil {
@@ -215,7 +257,7 @@ func (s *Server) handlePiForward(ctx context.Context, id json.RawMessage, tool s
 func piWorkerDescriptions() map[string]string {
 	return map[string]string{
 		"pi.spawn":      "Spawn a Pi subagent of your own: a headless Pi coding agent the dashboard daemon runs for you, with Pi's coding tools (read, bash, edit, write, grep, find, ls) and the ws git tools, working in cwd. prompt is its first message; a rendered playbook prompt works as it does for a native subagent. tier picks the model from the pi bucket of agents.tier alone and may not be above your own tier. The spawn tree is at most two levels below the lead, so a subagent of yours gets a refusal naming the cap when it tries to spawn. Returns the subagent's id at once while its turn runs. Each time a turn ends or fails, its report (the id, the status, and the final assistant message) comes to you: steered into your running turn, or as your next message when you are idle. Your own report to your parent waits until every open subagent's report has reached you, so you may end your turn while they work. Steer it with pi.send, read it with pi.transcript, list yours with pi.list, and close one with pi.stop.",
-		"pi.send":       "Send one of your Pi subagents a follow-up message. With no turn running it starts the next turn now; during a turn it waits for that turn to end and then goes as the next turn, merged with any other message sent meanwhile. Its report comes to you when the turn ends, as after pi.spawn.",
+		"pi.send":       "Send one of your Pi subagents a follow-up message. With no turn running it starts the next turn now; during a turn it steers that running turn at the next tool boundary, without cancelling in-flight tool calls. That turn's report covers the steered message; no extra turn is queued after it is taken.",
 		"pi.list":       "List the Pi subagents you spawned, open and closed: id, status (idle, running, or closed), model and effort, working directory, label, held messages, and the last error.",
 		"pi.stop":       "Close one of your Pi subagents and, first, its own subagents: its process stops, a running turn ends with it, and it takes no more messages. No report follows. Its record stays: pi.list shows it closed and pi.transcript still reads it.",
 		"pi.transcript": "Read one of your Pi subagents' conversation, oldest first: the messages it was sent, its replies, its tool calls by tool, and its turn ends. Works for a closed subagent too.",

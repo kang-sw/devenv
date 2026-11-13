@@ -29,6 +29,37 @@ func endedSession(id, project string, now time.Time) Session {
 	return s
 }
 
+func TestHarnessProcessHead(t *testing.T) {
+	now := time.Now()
+	prev := processAlive
+	processAlive = func(pid int) bool { return pid == 123 }
+	t.Cleanup(func() { processAlive = prev })
+	for _, tc := range []struct {
+		name string
+		reg  Registration
+		want string
+	}{
+		{"host running", Registration{Hosted: true, HostPID: 123}, `class="host sse" title="harness process running"`},
+		{"host exited", Registration{Hosted: true, HostPID: 456}, `class="host sse stopped" title="harness process stopped"`},
+		{"host stopped", Registration{Hosted: true, HostStopped: true}, `class="host sse stopped" title="harness process stopped"`},
+		{"host starting", Registration{Hosted: true}, `class="host sse stopped" title="harness process stopped"`},
+		{"terminal live", Registration{HeartbeatAt: stampFor(now)}, `class="host sse" title="harness process running"`},
+		{"terminal stale", Registration{HeartbeatAt: stampFor(now.Add(-time.Hour))}, `class="host sse stopped" title="harness process stopped"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.reg.Harness = "claude"
+			view := buildSessionView(pageInputs{Session: Session{Registration: tc.reg}, Now: now})
+			regions, err := renderSessionRegions(view, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if head := string(regions[regionHead].HTML); !strings.Contains(head, tc.want) {
+				t.Errorf("head %q lacks %q", head, tc.want)
+			}
+		})
+	}
+}
+
 // lookupOf serves sessions and snapshots from maps.
 func lookupOf(sessions map[string]Session, snaps map[string]*wslive.Snapshot) sessionLookup {
 	return sessionLookup{
@@ -734,7 +765,7 @@ func TestHostedRecoveryAndFailures(t *testing.T) {
 	regions := render(host)
 	head, tree, live, entries := string(regions[regionHead].HTML), string(regions[regionTree].HTML), string(regions[regionConvLive].HTML), string(regions[regionEntries].HTML)
 	for _, want := range []string{
-		`<span class="host sse err" title=`,
+		`<span class="host sse stopped err" title=`,
 		`<span class="chip fail" title="Limit reached">usage limit reached</span>`,
 		`<span class="chip mcpbad" title="MCP servers that did not reconnect: github, plugin:ws:ws">MCP broken</span>`,
 	} {
@@ -1067,6 +1098,33 @@ func TestPiAgentRowBlinksAPiBadgeAndLinks(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	if !strings.Contains(css, ".pibadge {") || !strings.Contains(css, "animation: dash-pulse") {
 		t.Fatalf("the pi badge should blink as the pulse does")
+	}
+}
+
+func TestSpawnTreeUsesOrdinaryNestingAndCountsWithoutDuplicateRows(t *testing.T) {
+	now := testNow
+	st := wslive.NewState("lead-key")
+	st.SetAdapter("claude")
+	for _, ev := range []wslive.Event{
+		{Kind: wslive.KindAgent, AgentID: "pi:child", AgentKind: wslive.AgentKindPi, SessionKey: "child-key", Label: "worker", Status: wslive.StatusRunning},
+		{Kind: wslive.KindAgent, AgentID: "pi:leaf", AgentKind: wslive.AgentKindPi, ParentID: "pi:child", Label: "leaf", Status: wslive.StatusDone},
+		{Kind: wslive.KindAgent, AgentID: "harness-child", SessionKey: "child-key", Label: "duplicate", Status: wslive.StatusRunning},
+	} {
+		if _, err := st.Apply(ev, now.UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snap := st.Snapshot(now.UnixMilli())
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: &snap, Now: now})
+	if len(v.Tree.Agents) != 1 || v.Tree.Agents[0].ID != "pi:child" || len(v.Tree.Agents[0].Children) != 1 || v.Tree.Agents[0].Children[0].ID != "pi:leaf" {
+		t.Fatalf("spawn tree = %+v", v.Tree.Agents)
+	}
+	if v.Tree.Running != 1 || v.Tree.Finished != 1 || v.Tree.Failed != 0 {
+		t.Fatalf("counts = %d/%d/%d", v.Tree.Running, v.Tree.Finished, v.Tree.Failed)
+	}
+	html := renderTree(t, v)
+	if !strings.Contains(html, "worker") || !strings.Contains(html, "leaf") || strings.Contains(html, "duplicate") {
+		t.Fatalf("ordinary agents pane lost/duplicated a row: %s", html)
 	}
 }
 

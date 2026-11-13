@@ -11,8 +11,10 @@ import (
 // built by parsing rendered board HTML, whose elements answer the selectors
 // the form uses (tag, classes, attributes with = or ^=, :not() of one such
 // selector, descendant and child combinators, selector lists), with
-// closest(), listeners, and a fire() that runs them. It is enough for the
-// answer form, not a browser: no layout, no default actions.
+// closest(), listeners, and a fire() that runs them, under a root element and
+// a body whose class is BODY_CLASS ("full" unless the script sets it first).
+// It is enough for the answer form, not a browser: no layout, no default
+// actions.
 const formPrelude = `
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
@@ -55,10 +57,12 @@ function parse(html) { var root = new E("#root"), cur = root;
     var el = new E(tag, attrs); el.parent = cur; cur.children.push(el);
     if (!self && !VOID[tag]) cur = el; return ""; });
   return root; }
+if (typeof BODY_CLASS === "undefined") var BODY_CLASS = "full";
 var root = parse(BOARD);
 var document = { getElementById: function (id) { return sel(root, "[id]").filter(function (e) { return e.attrs.id === id; })[0] || null; },
   querySelectorAll: function (s) { return sel(root, s); }, querySelector: function (s) { return sel(root, s)[0] || null; },
-  addEventListener: function () {}, execCommand: function () { return true; } };
+  addEventListener: function () {}, execCommand: function () { return true; },
+  documentElement: new E("html"), body: new E("body", BODY_CLASS ? { "class": BODY_CLASS } : {}) };
 var window = {};
 function byId(id) { return document.getElementById(id); }
 function reply() { return byId("reply-text").value.replace(/^<wb:answers>\n|\n<\/wb:answers>$/g, ""); }
@@ -127,5 +131,83 @@ process.stdout.write(bad.join("\n"));`
 	}
 	if s := strings.TrimSpace(string(out)); s != "" {
 		t.Errorf("check staging cases failed:\n%s", s)
+	}
+}
+
+// TestCheckHideToggleKeepsItsStateOnTheRoot runs answers.js and form.js over
+// the check board and pins the hide toggle: on by default (data-ck-hide="1"
+// on <html>, the button pressed), which the stylesheet turns into hiding the
+// rows without data-id, the answered 04 and 05 and never the open 03 or the
+// assumed 06; a press turns it off and stores "0" in localStorage; a rerun of
+// the script (a dashboard board swap) keeps the stored state, syncs a freshly
+// rendered button, and leaves a button an earlier run wired toggling the
+// shared state; and the embed never touches storage. The cases execute under
+// node when it is installed.
+func TestCheckHideToggleKeepsItsStateOnTheRoot(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; check hide toggle cases not executed")
+	}
+	regions, err := RenderRegions(BuildView(checkBoard(t), ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	board, _ := json.Marshal(string(regions.Board))
+	answers, err := embeddedAsset("answers.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	form, err := embeddedAsset("form.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := func(bodyClass, body string) string {
+		return "var BOARD = " + string(board) + ";\nvar BODY_CLASS = " + bodyClass + ";\n" + formPrelude + `
+var stored = {}, touched = 0;
+window.localStorage = { getItem: function (k) { touched++; return k in stored ? stored[k] : null; }, setItem: function (k, v) { touched++; stored[k] = String(v); } };
+function run() {
+` + string(answers) + string(form) + `
+}
+function state() { return document.documentElement.getAttribute("data-ck-hide"); }
+function pressed() { return document.querySelectorAll("button.ckhide").map(function (b) { return b.getAttribute("aria-pressed"); }); }
+function ids(sel) { return document.querySelectorAll(sel).map(function (e) { return e.attrs.id; }); }
+` + body + `
+process.stdout.write(bad.join("\n"));`
+	}
+	full := cases(`"full"`, `
+check("before the script runs nothing is set", state(), null);
+run();
+check("on by default", [state(), pressed(), stored], ["1", ["true"], {}]);
+check("the rows the stylesheet hides are the answered ones", ids(".topic .checks .ckrow:not([data-id])"), ["item-4", "item-5"]);
+check("open and assumed rows stay", ids(".topic .checks .ckrow[data-id]"), ["item-3", "item-6"]);
+var first = document.querySelector("button.ckhide");
+click(first);
+check("a press turns it off and stores it", [state(), pressed(), stored["ws.wb.checks.hideAnswered"]], ["0", ["false"], "0"]);
+run();
+check("a rerun over the kept board keeps the stored state", [state(), pressed()], ["0", ["false"]]);
+click(first);
+check("the button an earlier run wired toggles the shared state once", [state(), pressed(), stored["ws.wb.checks.hideAnswered"]], ["1", ["true"], "1"]);
+click(first);
+root = parse(BOARD);
+check("a swapped-in button renders pressed", pressed(), ["true"]);
+run();
+check("a rerun syncs the swapped-in button to the stored state", [state(), pressed()], ["0", ["false"]]);
+document.documentElement.removeAttribute("data-ck-hide");
+run();
+check("a fresh page reads the stored state", state(), "0");`)
+	embed := cases(`"embed"`, `
+stored["ws.wb.checks.hideAnswered"] = "0";
+run();
+check("the embed starts on whatever another page stored", [state(), pressed()], ["1", ["true"]]);
+click(document.querySelector("button.ckhide"));
+check("the embed toggles for the page alone", [state(), pressed(), stored["ws.wb.checks.hideAnswered"], touched], ["0", ["false"], "0", 0]);`)
+	for name, script := range map[string]string{"full": full, "embed": embed} {
+		out, err := nodeScript(node, script).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: node: %v\n%s", name, err, out)
+		}
+		if s := strings.TrimSpace(string(out)); s != "" {
+			t.Errorf("%s: check hide toggle cases failed:\n%s", name, s)
+		}
 	}
 }

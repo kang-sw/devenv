@@ -543,6 +543,8 @@ func TestHeldReportSurvivesARestart(t *testing.T) {
 		}
 		rec.TurnOpen = false
 		rec.PendingReports = []PendingReport{{ID: "p1", Result: TurnResult{ID: gc.ID, Status: TurnDone, Message: "persisted result"}}}
+		// publish persists the settlement's send coverage with its pending report.
+		rec.LastTurn = &PendingReport{ID: "p1", Result: rec.PendingReports[0].Result, Mark: rec.TurnMark}
 		if err := writeRecord(dir, rec); err != nil {
 			t.Fatal(err)
 		}

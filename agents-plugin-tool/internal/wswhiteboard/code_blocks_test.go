@@ -84,6 +84,8 @@ document.createElement = function (tag) { return new E(tag); };
 document.body = new E("body");
 var copied = [], copyOK = true;
 document.execCommand = function (cmd) { if (cmd !== "copy") return false; var ta = document.body.children[document.body.children.length - 1]; copied.push(ta && ta.value); return copyOK; };
+var store = {};
+var localStorage = { getItem: function (k) { return k in store ? store[k] : null; }, setItem: function (k, v) { store[k] = v; } };
 var timers = [];
 function setTimeout(fn) { timers.push(fn); return timers.length; }
 function clearTimeout() {}
@@ -106,7 +108,26 @@ check("a one-line block has its button", single.querySelectorAll("button.cb-copy
 
 // A second pass over the same nodes wires nothing again.
 wbCodeBlocks(document);
-check("wired once", [document.querySelectorAll(".cb").length, multi.querySelectorAll("button").length, multi.querySelectorAll("span.ln").length], [2, 1, 1]);
+check("wired once", [document.querySelectorAll(".cb").length, multi.querySelectorAll("button").length, multi.querySelectorAll("span.ln").length], [2, 2, 1]);
+
+// Wrap toggle: off by default; on drops the gutter for a numbered span per
+// logical line (data-n, the number CSS draws at the line's top), off restores
+// the plain text; a one-line block only flips the class; the choice is kept in
+// localStorage and read by a block wired later.
+var wb = multi.querySelector("button.cb-wrapbtn"), wb1 = single.querySelector("button.cb-wrapbtn");
+check("the wrap button is labelled in the page's language", [wb.getAttribute("title"), wb.getAttribute("aria-label")], ["줄 바꿈", "줄 바꿈"]);
+check("wrap is off by default", [multi.classList.contains("cb-wrap"), wb.getAttribute("aria-pressed"), multi.querySelectorAll("span.cl").length], [false, "false", 0]);
+click(wb);
+check("wrap on flips the class and pressed state", [multi.classList.contains("cb-wrap"), multi.classList.contains("cb-ln"), wb.getAttribute("aria-pressed"), wb.className], [true, true, "true", "cb-wrapbtn on"]);
+var cls = multi.querySelectorAll("span.cl");
+check("each logical line is its own numbered span", [cls.map(function (c) { return c.getAttribute("data-n"); }), cls.map(function (c) { return c.textContent; }), multi.getAttribute("style")], [["1", "2", "3"], ["x := 1\n", "y := 2\n", "z := 3\n"], "--nd:1"]);
+check("the choice is stored", store, { "ws.wb.codeWrap": "1" });
+click(wb);
+check("wrap off restores the plain text", [multi.classList.contains("cb-wrap"), multi.querySelectorAll("span.cl").length, multi.querySelector("code").textContent, wb.getAttribute("aria-pressed")], [false, 0, "x := 1\ny := 2\nz := 3\n", "false"]);
+check("the stored choice follows", store, { "ws.wb.codeWrap": "0" });
+click(wb1);
+check("a one-line block flips the class alone", [single.classList.contains("cb-wrap"), single.querySelectorAll("span.cl").length], [true, 0]);
+click(wb1);
 
 // Copy: the code text, never the numbers.
 click(btn);
@@ -127,6 +148,7 @@ check("no scratch textarea is left behind", document.body.children.length, 0);
 // This run has no wsT (a page without the client table), so the button takes
 // the English fallback.
 delete window.wsT;
+store["ws.wb.codeWrap"] = "1";
 var later = new E("div", { "class": "md" }), lp = new E("pre"), lc = new E("code");
 lc.textContent = "a\nb\n"; lp.appendChild(lc); later.appendChild(lp); root.appendChild(later);
 var bound = [];
@@ -136,6 +158,7 @@ window.wbBindBoard(later);
 check("the form binding still runs", [bound.length, bound[0] === later], [1, true]);
 check("the later board is wired", [later.querySelectorAll(".cb-ln").length, later.querySelector("span.ln").textContent], [1, "1\n2"]);
 check("without wsT the button reads the fallback", later.querySelector("button.cb-copy").getAttribute("title"), "Copy");
+check("a later block starts in the stored wrap state", [later.querySelectorAll(".cb-wrap").length, later.querySelectorAll("span.cl").length, later.querySelector("button.cb-wrapbtn").getAttribute("title")], [1, 2, "Wrap long lines"]);
 })();
 if (bad.length) { console.log(bad.join("\n")); process.exit(1); }
 console.log("ok");

@@ -300,6 +300,8 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 		"lang":  func() string { return effectiveLang(lang) },
 		"langs": wsi18n.Languages,
 		"i18n":  func() template.JS { return wsi18n.Script(lang) },
+		// pwa is a page head's manifest link and theme-color metas (pwa.go).
+		"pwa": pwaHead,
 	}
 }
 
@@ -815,6 +817,9 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 	}
 	looked := map[string]bool{replyID: true}
 	inputs := refreshInputs{watch: slices.Clone(page.Watch), pids: slices.Clone(page.WatchPIDs)}
+	if s.Registration.Hosted && s.Registration.HostPID > 0 {
+		inputs.pids = append(inputs.pids, s.Registration.HostPID)
+	}
 	if adapterPresent(in.Snapshot, in.Now) {
 		inbox := sessionInbox(r.dir, replyID)
 		reads.conversation = true

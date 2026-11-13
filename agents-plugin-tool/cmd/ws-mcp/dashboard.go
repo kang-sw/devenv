@@ -250,8 +250,8 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 }
 
 // newAgentRunner is the daemon's agent runner: the claude and pi backends,
-// ws-mcp's key store for conversation keys, and this executable as the
-// ws-mcp it attaches to a conversation whose profile allows ws tools.
+// ws-mcp's key store for conversation keys, and the plugin's Python launcher
+// for the ws-mcp it attaches to a conversation whose profile allows ws tools.
 // trackerChanged runs after a conversation's successful tracker write.
 func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
 	keys := mcp.NewAgentKeyStore()
@@ -265,14 +265,8 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 		LeadKeys: keys,
 		// The daemon, not the session's own mailbox wait, delivers a lead
 		// session's mail.
-		Mail: mcp.NewLeadMailbox(dir),
-		WSMCP: func(root string) (wsagent.MCPCommand, error) {
-			exe, err := os.Executable()
-			if err != nil {
-				return wsagent.MCPCommand{}, err
-			}
-			return wsagent.MCPCommand{Command: exe, Args: []string{"serve", "--stdio", "--root", root}}, nil
-		},
+		Mail:           mcp.NewLeadMailbox(dir),
+		WSMCP:          agentMCPCommand,
 		Log:            logw,
 		TrackerChanged: trackerChanged,
 		// A spawned Pi subagent's settled turns go to its lead's mailbox.

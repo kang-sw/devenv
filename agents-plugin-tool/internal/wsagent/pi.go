@@ -330,6 +330,16 @@ func (b PiBackend) Start(ctx context.Context, spec StartSpec) (Process, error) {
 	if spec.Lead != nil {
 		return b.startLead(spec)
 	}
+	if spec.Holder != nil && spec.Holder.id != "" {
+		// Rejoin transports the already-running child. Do not resolve an
+		// executable or rewrite its MCP bridge/instructions on a new daemon.
+		m := newPiMapper(spec)
+		p := newStreamProcess(m, piProtocol{})
+		if err := spec.Holder.start(p, &exec.Cmd{Path: "pi"}); err != nil {
+			return nil, err
+		}
+		return &piProcess{streamProcess: p, mapper: m, effort: spec.Effort}, nil
+	}
 	if err := checkPiToolEntries(spec.Profile); err != nil {
 		return nil, err
 	}
@@ -375,7 +385,7 @@ func (b PiBackend) startLead(spec StartSpec) (Process, error) {
 	cmd.Dir = spec.workDir()
 	cmd.Env = piLeadEnv(spec)
 	m := newPiMapper(spec)
-	attach := spec.Lead.Holder != nil && spec.Lead.Holder.id != ""
+	attach := spec.Holder != nil && spec.Holder.id != ""
 	p, err := startChild(spec, cmd, m, piProtocol{})
 	if err != nil {
 		return nil, err
@@ -608,6 +618,7 @@ type piMessage struct {
 	} `json:"toolsAdded"`
 	StopReason   string `json:"stopReason"`
 	ErrorMessage string `json:"errorMessage"`
+	Timestamp    int64  `json:"timestamp"`
 }
 
 type piBlock struct {
@@ -690,10 +701,8 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 			}
 		}
 	case "agent_start":
-		// A lead's run may start with no send (a pushed batch).
-		if m.spec.Lead != nil {
-			return []Event{{TurnStart: true}}
-		}
+		// Workers need the same boundary when rebuilding a held RPC stream.
+		return []Event{{TurnStart: true}}
 	case "message_end":
 		return m.message(l.Message, now)
 	case "tool_execution_end":
@@ -752,6 +761,42 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		}
 	}
 	return nil
+}
+
+// recoveryReply reads Pi's saved RPC messages only after get_state says idle.
+// The final message must be an assistant result, not an unfinished tool call.
+func (p *piProcess) recoveryReply(startedAt int64) (string, string, []string, error) {
+	body, err := p.requestBody("get_messages", map[string]any{"type": "get_messages"}, controlTimeout)
+	if err != nil {
+		return "", "", nil, err
+	}
+	var data struct {
+		Messages []piMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return "", "", nil, err
+	}
+	if len(data.Messages) == 0 {
+		return "", "", nil, fmt.Errorf("no saved final assistant message after a replay gap")
+	}
+	last := data.Messages[len(data.Messages)-1]
+	if startedAt == 0 || last.Timestamp < startedAt || last.Role != "assistant" || (last.StopReason != "stop" && last.StopReason != "error" && last.StopReason != "aborted") {
+		return "", "", nil, fmt.Errorf("saved messages do not identify a final assistant result after a replay gap")
+	}
+	var taken []string
+	for _, message := range data.Messages {
+		if message.Role == "user" && message.Timestamp >= startedAt {
+			taken = append(taken, piUserText(message.Content))
+		}
+	}
+	turnErr := ""
+	if last.StopReason == "error" {
+		turnErr = strings.TrimSpace(last.ErrorMessage)
+		if turnErr == "" {
+			turnErr = "turn failed"
+		}
+	}
+	return piUserText(last.Content), turnErr, taken, nil
 }
 
 // piGetCommands asks a lead's pi for its slash commands.
