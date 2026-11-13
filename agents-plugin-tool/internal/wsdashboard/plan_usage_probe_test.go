@@ -276,6 +276,79 @@ func TestPlanUsageCodexMalformedAndTimeout(t *testing.T) {
 	}
 }
 
+func TestPlanUsageCancelledViewerStoresSuccess(t *testing.T) {
+	s := usageTestStore(t)
+	setPiUsageAuth(t, s, time.Now().Add(time.Hour).UnixMilli())
+	finished := make(chan time.Time, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		finished <- time.Now()
+		_, _ = fmt.Fprint(w, `{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":23,"limit_window_seconds":604800,"reset_at":2100000000}}}`)
+	}))
+	defer server.Close()
+	s.usageURL = server.URL
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	d := &Daemon{planUsage: s}
+	w := httptest.NewRecorder()
+	d.handlePlanUsage(w, httptest.NewRequest("GET", "/rail/usage", nil).WithContext(ctx))
+	if w.Code != http.StatusOK || s.gpt.Status != "" || len(s.gpt.Windows) != 1 || s.gpt.Windows[0].Percent != 23 {
+		t.Fatalf("cancelled viewer poisoned usage: %+v, response %s", s.gpt, w.Body.String())
+	}
+	if s.lastQuery.Before(<-finished) {
+		t.Fatal("query cadence starts before the query finishes")
+	}
+	restored := newPlanUsageStore(s.dir, s.home, s.getenv)
+	if restored.gpt.Status != "" || len(restored.gpt.Windows) != 1 || restored.gpt.Windows[0].Percent != 23 {
+		t.Fatalf("successful result was not persisted: %+v", restored.gpt)
+	}
+}
+
+func TestPlanUsageRefreshSameOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name, site, origin string
+		wantCalls          int32
+	}{
+		{"foreign", "cross-site", "http://foreign.example", 0},
+		{"same-site", "same-site", "http://other.example", 0},
+		{"missing", "", "", 0},
+		{"opaque", "", "null", 0},
+		{"fetch-same-origin", "same-origin", "", 1},
+		{"matching-origin", "", "http://dashboard.example", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := usageTestStore(t)
+			setPiUsageAuth(t, s, time.Now().Add(time.Hour).UnixMilli())
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				_, _ = fmt.Fprint(w, `{"rate_limit":{"primary_window":{"used_percent":23,"limit_window_seconds":604800,"reset_at":2100000000}}}`)
+			}))
+			defer server.Close()
+			s.usageURL = server.URL
+			s.gpt = planUsageEntry{Harness: "codex", Source: "via Pi", Windows: []planUsageWindow{{Kind: "seven_day", Percent: 37}}}
+			// Eligible for a forced refresh, but not an ordinary cached poll.
+			s.lastQuery = time.Now().Add(-time.Minute)
+			previous := s.lastQuery
+			d := &Daemon{planUsage: s}
+			r := httptest.NewRequest("GET", "http://dashboard.example/rail/usage?refresh=1", nil)
+			r.Header.Set("Sec-Fetch-Site", tc.site)
+			r.Header.Set("Origin", tc.origin)
+			w := httptest.NewRecorder()
+			d.handlePlanUsage(w, r)
+			if w.Code != http.StatusOK || calls.Load() != tc.wantCalls {
+				t.Fatalf("refresh calls = %d, want %d; status %d", calls.Load(), tc.wantCalls, w.Code)
+			}
+			if tc.wantCalls == 0 {
+				if !s.lastQuery.Equal(previous) || !strings.Contains(w.Body.String(), `"percent":37`) {
+					t.Fatal("untrusted refresh did not serve the cached result")
+				}
+			} else if !strings.Contains(w.Body.String(), `"percent":23`) {
+				t.Fatal("same-origin refresh did not serve the new result")
+			}
+		})
+	}
+}
+
 func TestPlanUsageViewerRouteAndMethods(t *testing.T) {
 	s := usageTestStore(t)
 	d := &Daemon{planUsage: s}

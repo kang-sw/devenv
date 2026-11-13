@@ -217,6 +217,7 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	d.planUsage.query(r.Context(), r.URL.Query().Get("refresh") == "1")
+	refresh := r.URL.Query().Get("refresh") == "1" && (r.Header.Get("Sec-Fetch-Site") == "same-origin" || sameOrigin(r))
+	d.planUsage.query(r.Context(), refresh)
 	_ = json.NewEncoder(w).Encode(map[string]any{"entries": d.planUsage.entries(), "warnPercent": bandWarnPercent, "critPercent": bandCritPercent})
 }

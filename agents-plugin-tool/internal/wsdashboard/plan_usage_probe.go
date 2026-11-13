@@ -27,11 +27,13 @@ func (s *planUsageStore) query(ctx context.Context, force bool) {
 	if time.Since(s.lastQuery) < interval {
 		return
 	}
-	s.lastQuery = time.Now()
 	_, codex, pi := s.detect()
 	if !codex && !pi {
 		return
 	}
+	// A viewer disconnect must not cache a failed query for every viewer.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	var entry planUsageEntry
 	var err error
 	if codex {
@@ -58,6 +60,7 @@ func (s *planUsageStore) query(ctx context.Context, force bool) {
 		s.gpt = entry
 	}
 	s.saveLocked()
+	s.lastQuery = time.Now()
 }
 
 type codexUsageWindow struct {
