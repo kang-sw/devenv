@@ -629,6 +629,8 @@ export const register: Register = (on) => {
    */
   let mainTurnId: string | undefined
   let mainTurnAt = 0
+  /** The reason of the main-thread turn.complete being handled; the push's leverPending edge reads it. */
+  let mainTurnEndReason = ''
   /** Whether the latest session.start's mailbox probe passed; the manual row says the push is bound only then. */
   let pushAvailable: Promise<boolean> = Promise.resolve(false)
   /**
@@ -1123,6 +1125,8 @@ export const register: Register = (on) => {
         },
         // Held board messages follow the compaction lever's resume prompt.
         continuation: () => compaction.continuation(),
+        // Read by the turn end below before compaction.turnComplete schedules the step; the reason carries an abort.
+        leverPending: () => compaction.leverPending(mainTurnEndReason),
       })
       watcher = created
       // A key the manual feature produced before the watcher existed.
@@ -1750,6 +1754,7 @@ export const register: Register = (on) => {
       if (e.agentId === undefined) {
         mainTurn = false
         mainTurnId = undefined
+        mainTurnEndReason = e.reason
         try {
           watcher?.turnCompleted()
         } catch (err) {
