@@ -459,7 +459,7 @@ func TestWhiteboardExcludeFailureLeavesNoFolder(t *testing.T) {
 	}
 }
 
-func TestWhiteboardRefusalsCarryProblemsAndGrammar(t *testing.T) {
+func TestWhiteboardRefusalsCarryProblemsAndPlaybookPointer(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:answer id="9" value="a">a</wb:answer>
 <wb:topic name="t"><wb:add class="policy" color="red"><wb:title>x</wb:title></wb:add></wb:topic>
@@ -473,27 +473,14 @@ func TestWhiteboardRefusalsCarryProblemsAndGrammar(t *testing.T) {
 		"command 1 <wb:answer> (line 1) (09): not in the store",
 		"command 2 <wb:add> (line 2): unknown attribute color",
 		"command 3 <wb:mystery> (line 3): unknown command",
-		"## Commands",
-		"`commands` is one string of commands.",
-		// The rsrc renderer substitutes only {{.Name}} placeholders, so the
-		// item-reference example survives rendering.
-		"`supersedes {{12}}`",
-		// The shared syntax rules ride along, so one retry can fix quoting,
-		// CDATA, and stray text too.
-		"## Command syntax",
-		"`<![CDATA[...]]>`",
-		"so a value holding `\"` is quoted with `'`",
-		"Text between commands or between a command's fields, an unknown tag, and an unknown attribute are refused.",
+		"Syntax and commands: the `whiteboard` playbook (ws/playbook.read).",
 	} {
 		if !strings.Contains(collapseSpace(text), want) {
 			t.Fatalf("update refusal missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Index(text, "## Command syntax") > strings.Index(text, "## Commands") || strings.Count(text, "## Command syntax") != 1 {
-		t.Fatalf("the update refusal must carry the syntax section once, ahead of the Commands section:\n%s", text)
-	}
-	if strings.Contains(text, "## Query") {
-		t.Fatalf("the update refusal must repeat the Commands section only:\n%s", text)
+	if strings.Contains(text, "## Command syntax") || strings.Contains(text, "## Commands") || strings.Contains(text, "## Query") {
+		t.Fatalf("the update refusal must not repeat playbook sections:\n%s", text)
 	}
 	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a refused first update must write nothing")
@@ -536,8 +523,7 @@ func TestWhiteboardUpdateRefusesTheRetiredPayloadArgument(t *testing.T) {
 			for _, want := range []string{
 				"payload: no longer accepted; whiteboard.update takes commands",
 				"nothing was applied",
-				"## Commands",
-				"`commands` is one string of commands.",
+				"Syntax and commands: the `whiteboard` playbook (ws/playbook.read).",
 			} {
 				if !strings.Contains(text, want) {
 					t.Fatalf("payload refusal missing %q:\n%s", want, text)
@@ -573,8 +559,8 @@ func TestWhiteboardUpdateRefusesNonStringCommands(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			resp := f.call(t, "whiteboard.update", map[string]any{"commands": commands})
 			text := toolText(t, resp)
-			if !isToolError(resp) || !strings.Contains(text, "commands: must be a string of wb: commands") || !strings.Contains(text, "## Commands") {
-				t.Fatalf("a non-string commands must be refused with the grammar: %s", text)
+			if !isToolError(resp) || !strings.Contains(text, "commands: must be a string of wb: commands") || !strings.Contains(text, "Syntax and commands: the `whiteboard` playbook (ws/playbook.read).") {
+				t.Fatalf("a non-string commands must be refused with the playbook pointer: %s", text)
 			}
 		})
 	}

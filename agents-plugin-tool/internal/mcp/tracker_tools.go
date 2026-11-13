@@ -1565,7 +1565,7 @@ func (s *Server) handleTrackerQuery(ctx context.Context, id json.RawMessage, arg
 // for tracker.query the "## Query" section.
 func (s *Server) trackerRefusal(tool string, problems []string) string {
 	if tool != "tracker.query" {
-		return s.commandRefusal(tool, problems, s.trackerPlaybookSection("## Commands"), trackerPlaybookName)
+		return s.commandRefusal(tool, problems, trackerPlaybookName)
 	}
 	var sb strings.Builder
 	writeRefusalProblems(&sb, tool, problems)
