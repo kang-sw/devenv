@@ -125,7 +125,7 @@ function makeDocument(body) {
 
 // A framed page: the parent records every post; listeners and timers are
 // driven by hand.
-function boot({ body = h('body'), hostname = 'localhost', loc = {}, framed = true, consoleError } = {}) {
+function boot({ body = h('body'), hostname = 'localhost', loc = {}, framed = true, consoleError, history } = {}) {
   const posts = [], listeners = [], timers = [], errored = [];
   const parent = { postMessage(m, origin) { posts.push({ m: JSON.parse(JSON.stringify(m)), origin }); } };
   const document = makeDocument(body);
@@ -138,6 +138,7 @@ function boot({ body = h('body'), hostname = 'localhost', loc = {}, framed = tru
       const i = listeners.findIndex(l => l.type === type && l.fn === fn && l.capture === !!capture);
       if (i >= 0) listeners.splice(i, 1);
     } };
+  if (history) ctx.history = history;
   ctx.window = ctx;
   ctx.parent = framed ? parent : ctx;
   vm.createContext(ctx);
@@ -220,6 +221,32 @@ test('a same-document move ends pick mode and posts the count the page still hol
   assert.equal(page.listeners.filter(l => l.capture).length, 0);
   page.fromHost({ wsWeb: 'attach' });
   assert.deepEqual(page.take()[0].lines, ['one', 'two']);
+});
+
+test('pushState and replaceState count as a move once the address changed', () => {
+  const calls = [];
+  // A history whose methods move location as the browser does, and check
+  // they are called on the history object.
+  const history = {
+    pushState(state, title, url) { assert.equal(this, history); calls.push(['push', url]); go(url); return 'pushed'; },
+    replaceState(state, title, url) { assert.equal(this, history); calls.push(['replace', url]); if (url) go(url); },
+  };
+  const page = boot({ history });
+  function go(url) {
+    const u = new URL(url, 'http://localhost' + page.ctx.location.pathname);
+    Object.assign(page.ctx.location, { pathname: u.pathname, search: u.search, hash: u.hash });
+  }
+  page.ctx.console.error('kept');
+  page.flush();
+  page.take();
+  assert.equal(page.ctx.history.pushState({}, '', '/route?tab=2'), 'pushed');
+  assert.deepEqual(page.take(), [{ wsWeb: 'ready', path: '/route?tab=2' }, { wsWeb: 'errors', count: 1 }]);
+  page.ctx.history.replaceState({ scroll: 1 }, '');
+  page.ctx.history.replaceState({}, '', '/route?tab=2');
+  assert.deepEqual(page.take(), []);
+  page.ctx.history.replaceState({}, '', '/route?tab=3');
+  assert.deepEqual(page.take().map(m => m.path || m.count), ['/route?tab=3', 1]);
+  assert.deepEqual(calls.map(c => c[0]), ['push', 'replace', 'replace', 'replace']);
 });
 
 test('messages from another origin, another source, or without a wsWeb type are ignored', () => {

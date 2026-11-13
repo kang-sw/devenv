@@ -221,13 +221,28 @@
   // A same-document move announces the new address with ready, which the
   // host takes as a new page: it ends pick mode and clears the badge. The
   // page keeps its ring, so pick mode ends here too and the count it still
-  // holds is posted again.
+  // holds is posted again. A client router moves with pushState and
+  // replaceState, which fire no event, so the page's own calls count as
+  // moves too; one that leaves the address as it was is none.
+  var at = here();
   function moved() {
+    if (here() === at) return;
+    at = here();
     if (picking) stopPick();
     ready();
     if (errors) post({ wsWeb: "errors", count: errors });
   }
   window.addEventListener("popstate", moved);
   window.addEventListener("hashchange", moved);
+  var hist = window.history;
+  ["pushState", "replaceState"].forEach(function (k) {
+    var orig = hist && hist[k];
+    if (typeof orig !== "function") return;
+    hist[k] = function () {
+      var r = orig.apply(this, arguments);
+      try { moved(); } catch (_) {}
+      return r;
+    };
+  });
   ready();
 })();
