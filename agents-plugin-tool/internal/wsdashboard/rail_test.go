@@ -791,7 +791,7 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 	waits := rowOf("waits")
 	for _, want := range []string{
 		` data-ap="1" data-ap-tool="mcp__ws__tracker_update" data-ap-args="git push origin develop">`,
-		`<span class="host sm hb perm" title="awaiting approval">claude<svg class="ring" aria-hidden="true"><rect class="rtrk"/></svg></span>`,
+		`<span class="hi claude perm" title="claude · awaiting approval">C</span>`,
 		`<span class="hosted" title="session the dashboard runs">`,
 		`<span class="chip perm" title="awaiting approval: tracker_update">`,
 		`<span class="s2 ap"><b class="who">tracker_update</b>git push origin develop</span>`,
@@ -800,22 +800,25 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 			t.Errorf("the waiting row lacks %s:\n%s", want, waits)
 		}
 	}
-	if strings.Contains(waits, "rrun") || strings.Contains(waits, "last reply") {
+	if strings.Contains(waits, "hi claude run") || strings.Contains(waits, "last reply") {
 		t.Errorf("the waiting row shows a working ring or its last message:\n%s", waits)
 	}
+	if i, j := strings.Index(waits, `class="rid`), strings.Index(waits, `class="hosted"`); i < 0 || j < i {
+		t.Errorf("the hosted mark must follow the title:\n%s", waits)
+	}
 	other := rowOf("plain")
-	for _, not := range []string{"data-ap", `class="hosted"`, "chip perm", "hb perm"} {
+	for _, not := range []string{"data-ap", `class="hosted"`, "chip perm", "hi pi perm"} {
 		if strings.Contains(other, not) {
 			t.Errorf("a session the daemon does not host shows %q:\n%s", not, other)
 		}
 	}
-	if !strings.Contains(other, "rrun") || !strings.Contains(other, `<span class="s2">hi</span>`) {
-		t.Errorf("the working row lost its ring or message:\n%s", other)
+	if !strings.Contains(other, `<span class="hi pi run" title="pi · lead working">P</span>`) || !strings.Contains(other, `<span class="s2">hi</span>`) {
+		t.Errorf("the working row lost its turning icon or message:\n%s", other)
 	}
-	if f := rowOf("failed"); !strings.Contains(f, `<span class="host sm hb err" title="usage limit reached">claude<svg class="ring" aria-hidden="true"><rect class="rtrk"/></svg></span>`) || strings.Contains(f, "rrun") {
+	if f := rowOf("failed"); !strings.Contains(f, `<span class="hi claude err" title="claude · usage limit reached">C</span>`) || strings.Contains(f, "hi claude run") {
 		t.Errorf("the failed row lacks its error ring:\n%s", f)
 	}
-	if strings.Contains(waits, "hb err") || strings.Contains(other, "hb err") {
+	if strings.Contains(waits, "hi claude err\"") || strings.Contains(other, "hi claude err\"") {
 		t.Error("a row with no failure shows the error ring")
 	}
 
@@ -908,6 +911,33 @@ func TestRailRowRevive(t *testing.T) {
 	for _, c := range cases {
 		if got := row(c.edit); got.Revive != c.revive || got.ReviveBlocked != c.blocked {
 			t.Errorf("%s: revive %q blocked %q, want %q %q", c.name, got.Revive, got.ReviveBlocked, c.revive, c.blocked)
+		}
+	}
+}
+
+// TestRailStoppedRowSleeps pins a stopped hosted session's row: a moon
+// before its harness icon, a muted title, and no second line by style.
+func TestRailStoppedRowSleeps(t *testing.T) {
+	stopped := RailRow{ReplyID: "stopped", Harness: "claude", Live: true, Hosted: true, Exit: &HostExit{Reason: "stop"}, Message: "last reply"}
+	live := RailRow{ReplyID: "live", Harness: "claude", Live: true, Message: "hi"}
+	view := RailView{Workspaces: []RailWorkspace{{Name: "repo", Path: "/w/folder", Repo: true, Worktrees: []RailWorktree{{Path: "/w/folder", Sessions: []RailRow{stopped, live}}}}}}
+	region, err := renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(region.HTML)
+	_, rest, _ := strings.Cut(html, `data-rid="stopped"`)
+	row, rest, _ := strings.Cut(rest, `</a></div>`)
+	if !strings.Contains(html, `class="rs stopped" data-rid="stopped"`) || !strings.Contains(row, `<span class="s1"><span class="zz" title="`) {
+		t.Errorf("the stopped row lacks its stopped class or moon:\n%s", row)
+	}
+	if liveRow, _, _ := strings.Cut(rest, `</a></div>`); strings.Contains(liveRow, `class="zz"`) {
+		t.Error("a running session shows the moon")
+	}
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{".rail .rs.stopped .rid { color: var(--wb-muted-fg); }", ".rail .rs.stopped .s2 { display: none; }"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("dashboard.css lacks %q", want)
 		}
 	}
 }
