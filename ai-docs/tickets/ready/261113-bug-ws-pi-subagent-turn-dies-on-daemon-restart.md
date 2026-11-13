@@ -1,5 +1,9 @@
 ---
 title: "pi.spawn subagents outlive a daemon restart under a holder"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 4c674ce7b8197ff6
+sage-review-completeness-reviewed: 4c674ce7b8197ff6
 ---
 
 # pi.spawn subagents outlive a daemon restart under a holder
@@ -153,12 +157,21 @@ regression without assuming the multiple builds caused it.
   round-trips drop them (`agents-plugin-tool/internal/wsagent/record.go:195-226`).
   Optional fields plus an accepted fallback do not meet that written condition.
   No schema/protocol bump or compatibility-guard work is assigned to this
-  worker slice; the manual's T2 minor/version requirement (`:73-75`) conflicts
-  with the requested no-bump release. Resolve the policy exception below at
-  the design/release gate rather than silently relaxing the manual.
+  worker slice.
+- **Owner release-policy exception, 2026-11-13 (whiteboard (37)=a): ship as
+  T0, no `schema_version` bump, patch release allowed.** Reason: the shipped
+  0.49 daemon has no newer-schema guard, so a bump would protect nothing on a
+  downgrade, and the downgrade outcome (in-flight turn interrupted) equals
+  today's behaviour. Condition: this change also makes the agent record's
+  read-modify-write preserve fields the writer does not know (round-trip the
+  unknown JSON members in `record.go`), so later additive fields meet the
+  manual's T0 condition. Rejected: T2 with a schema bump and a 0.50 minor.
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
 - Non-UI implementation runs through `ws/pi.*` workers. No UI/restart guard;
   use isolated daemon state for tests, not a restart of the shared daemon.
 - Applicable `AGENTS.md` Implementation Conventions rows; read each manual
@@ -184,6 +197,26 @@ regression without assuming the multiple builds caused it.
 - Preserve transcript/session identity, delegate restrictions, explicit
   stop/interrupt and existing Claude/Pi hosted-lead recovery. The lead runs
   the design gate and promotes todo -> ready before implementation.
+
+## Prior Decisions
+
+- unavailable: wsflow/rationale.query was not available to this session; prior decisions require a separate query.
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | `agents-plugin-tool/internal/wsagent/`, `internal/mcp/`, `internal/wsholder/`, and daemon wiring and tests |
+| scope.surface | cross-module | Worker recovery spans wsagent, holder transport, MCP forwarding, and dashboard wiring |
+| scope.new_public_symbol | unknown | The phases do not specify whether implementation needs exported Go symbols |
+| scope.new_type_contract | yes | Optional agent record fields and unknown JSON member preservation change the persisted record contract |
+| scope.test_surface | existing | `agents-plugin-tool/internal/wsagent/spawn_test.go` and `children_test.go`; new named scenarios are planned |
+| complexity.reuse_points | confirmed | `agents-plugin-tool/internal/wsagent/stream.go` uses `startChild` and holder replay; `spawn.go` implements `publish` |
+| complexity.side_effect_risk | high | Restart recovery affects live processes, input, nested calls, and completion delivery |
+| risk.correctness | high | Replay and settlement must not lose turns, restart live processes, or strand queued input |
+| risk.fit | high | Recovery must fit existing holder, nested capability, and delivery lifecycles without a redesign |
+| risk.test | high | Cross-restart, nested process, downgrade and Windows behavior need distinct evidence |
+| risk.security_or_contract | high | Persisted capability secrets, endpoint changes and cross-version records affect security and compatibility |
 
 ## Phases
 
@@ -231,6 +264,8 @@ claim that running Pi work survives a restart.
     by the old record shape that drops optional recovery fields; verify Phase
     1 behavior with unchanged schema. Confirm the newer `pi-worker` sweep
     cleans the orphan left by the documented downgrade.
+  - Record round-trip keeps unknown members: load a record carrying a field
+    this code does not know, save it, and the field is still there.
 - **Verification:** under the w5090 lock, run those focused cases,
   `go test ./internal/wsagent ./internal/wsholder ./internal/mcp` and
   `go build ./cmd/ws-mcp` from `agents-plugin-tool/`; record revision/commands/
@@ -238,12 +273,3 @@ claim that running Pi work survives a restart.
   separately performs the local Windows live replacement check (process
   identity, completion mail, nested reconnect and breakaway/fallback); that
   check is not a worker landing gate.
-
-## Open Decision Queue
-
-- **Release-policy exception:** authorize T0/no schema bump for this explicitly
-  accepted lossy-downgrade fallback despite the manual's unknown-field
-  preservation condition, or retain the manual's T2 minor/version requirement?
-  All technical scope cuts above are settled; this is only authority to waive
-  the current release rule, not a request to revisit the accepted downgrade
-  or duplicate-mail trade-offs.
