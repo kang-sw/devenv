@@ -460,6 +460,9 @@
     "261113-feat-ws-dashboard-session-four-state-lifecycle": {
       "registered_at": "2026-11-13T10:12:43Z"
     },
+    "261113-feat-ws-dashboard-session-rail-tree": {
+      "registered_at": "2026-11-13T14:37:02Z"
+    },
     "261113-feat-ws-dashboard-worktree-delete": {
       "registered_at": "2026-11-13T07:16:15Z",
       "lease": {
