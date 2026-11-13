@@ -155,6 +155,40 @@ func TestMergeRenumbersTheLaterSendsImagesAndMarkers(t *testing.T) {
 	}
 }
 
+// TestMergeRenumbersMarkersInNotes: the later send's markers in its chip
+// notes and topic notes follow its images' new numbers, as its text's do,
+// so one merged message never names a number twice; the earlier send's
+// notes are untouched.
+func TestMergeRenumbersMarkersInNotes(t *testing.T) {
+	base := Entry{
+		Parts:     []string{"base [Image #1]"},
+		Chips:     []Chip{{ID: "03", Answer: "a", Note: "see [Image #2]"}},
+		Topics:    []TopicNote{{Topic: "plan", Note: "old [Image #1]"}},
+		Images:    []string{"/a.png", "/b.png"},
+		ImageNums: []int{1, 2},
+	}
+	add := Entry{
+		Parts:     []string{"text [Image #3]"},
+		Chips:     []Chip{{ID: "04", Note: "item [Image #1] [Image #2]"}},
+		Topics:    []TopicNote{{Topic: "risk", Note: "topic [Image #2], stray [Image #9]"}},
+		Images:    []string{"/c.png", "/d.png", "/e.png"},
+		ImageNums: []int{1, 2, 3},
+	}
+	got := Merge(base, add)
+	if want := []string{"base [Image #1]", "text [Image #5]"}; len(got.Parts) != 2 || got.Parts[0] != want[0] || got.Parts[1] != want[1] {
+		t.Fatalf("merged parts = %q, want %q", got.Parts, want)
+	}
+	if len(got.Chips) != 2 || got.Chips[0].Note != "see [Image #2]" || got.Chips[1].Note != "item [Image #3] [Image #4]" {
+		t.Fatalf("merged chips = %+v", got.Chips)
+	}
+	if len(got.Topics) != 2 || got.Topics[0].Note != "old [Image #1]" || got.Topics[1].Note != "topic [Image #4], stray [Image #9]" {
+		t.Fatalf("merged topics = %+v", got.Topics)
+	}
+	if want := []int{1, 2, 3, 4, 5}; len(got.ImageNums) != 5 || got.ImageNums[2] != want[2] || got.ImageNums[4] != want[4] {
+		t.Fatalf("merged numbers = %v, want %v", got.ImageNums, want)
+	}
+}
+
 // TestSendMergesWithRenumberingAndSteerKeepsIt: the second send into a held
 // entry delivers its image as the next number, marker included, and a steer
 // keeps the numbering.

@@ -540,6 +540,9 @@
       if (window.wbForm) window.wbForm();
       mermaid(ins);
       syncChips();
+      // The notes came back with their markers (writeAnswers); their image
+      // rows go back after them, and a note the swap took drops its images.
+      if (ctext) { syncMarkers(); renderImgs(); }
       // A mention button over a body frame the swap removed has nothing left
       // to add.
       if (mpend && mpend.frame && !doc.contains(mpend.frame)) hideMention();
@@ -1400,7 +1403,14 @@
   // (rewriting text the user is editing shakes it); the server renumbers a
   // send that merges into a held message, so the page never numbers across
   // sends.
-  var cimgs = $("cimgs"), imgs = [], imgSeq = 0, imgTrash = {};
+  //
+  // The board's note pens (item notes and topic notes) take pasted images
+  // too: one image list and one number sequence span the composer text and
+  // every note, since one send carries them all. An image's chip sits with
+  // the field whose text names it: the composer's row, or a row right after
+  // that note; a note whose item left the board lives on in its answer chip,
+  // and its images show in the composer's row.
+  var cimgs = $("cimgs"), imgs = [], imgSeq = 0, imgTrash = {}, holdSync = false, imgLayout = "";
   var IMG_TYPES = { "image/png": 1, "image/jpeg": 1, "image/gif": 1, "image/webp": 1 };
   var IMG_MAX = 8, IMG_BYTES = 10 * 1024 * 1024;
   var MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
@@ -1412,41 +1422,74 @@
     while ((m = re.exec(text))) out[+m[1]] = true;
     return out;
   }
+  // boardNotes are the board's note pens: every item note and topic note
+  // (a topic note is a textarea.note too).
+  function boardNotes() { return boardQ("textarea.note"); }
+  // strayChips are the answer chips whose item left the board: their notes
+  // still go with the send, so their markers still name images.
+  function strayChips() { return chipList().filter(function (c) { return c.note && !boardItem(c.id); }); }
+  // allNums is the set of image numbers the markers of the whole draft name:
+  // the composer text, every note on the board, and the stray chips' notes.
+  function allNums() {
+    var text = [ctext.value].concat(boardNotes().map(function (n) { return n.value; }), strayChips().map(function (c) { return c.note; }));
+    return markerNums(text.join("\n"));
+  }
   // nextNum is a number no image, dropped image, or marker of this draft
   // has used.
   function nextNum() {
-    Object.keys(markerNums(ctext.value)).forEach(function (k) { imgSeq = Math.max(imgSeq, +k); });
+    Object.keys(allNums()).forEach(function (k) { imgSeq = Math.max(imgSeq, +k); });
     return ++imgSeq;
   }
-  // editText replaces [start, end) of the composer's text with s through the
-  // browser's editing command, so the undo stack keeps the edit, else
-  // through setRangeText; either way an input event follows.
-  function editText(start, end, s) {
-    if (doc.activeElement !== ctext) ctext.focus();
-    ctext.setSelectionRange(start, end);
+  // editField replaces [start, end) of a text field's value with s through
+  // the browser's editing command, so the undo stack keeps the edit, else
+  // through setRangeText; either way an input event follows. A field that
+  // cannot take the focus (a closed note) takes setRangeText, so the
+  // command never edits whatever else holds the focus.
+  function editField(el, start, end, s) {
+    if (doc.activeElement !== el) el.focus();
+    el.setSelectionRange(start, end);
     var done = false;
-    try { done = s ? doc.execCommand("insertText", false, s) : start === end || doc.execCommand("delete"); } catch (e) { done = false; }
+    if (doc.activeElement === el) {
+      try { done = s ? doc.execCommand("insertText", false, s) : start === end || doc.execCommand("delete"); } catch (e) { done = false; }
+    }
     if (!done) {
-      ctext.setRangeText(s, start, end, "end");
-      ctext.dispatchEvent(new Event("input", { bubbles: true }));
+      el.setRangeText(s, start, end, "end");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
-  // insertMarkers puts the markers for nums at the cursor, spaced from the
-  // text around them.
-  function insertMarkers(nums) {
+  // editText is editField on the composer's text.
+  function editText(start, end, s) { editField(ctext, start, end, s); }
+  // insertMarkers puts the markers for nums at el's cursor (the composer's
+  // by default), spaced from the text around them.
+  function insertMarkers(nums, el) {
+    el = el || ctext;
     if (!nums.length) return;
-    var v = ctext.value, a = ctext.selectionStart, b = ctext.selectionEnd, s = nums.map(marker).join(" ");
+    var v = el.value, a = el.selectionStart, b = el.selectionEnd, s = nums.map(marker).join(" ");
     if (a > 0 && !/\s/.test(v.charAt(a - 1))) s = " " + s;
     if (b >= v.length || !/\s/.test(v.charAt(b))) s += " ";
-    editText(a, b, s);
+    editField(el, a, b, s);
   }
-  // deleteMarkers deletes each marker naming n, with the space after it.
+  // deleteMarkers deletes each marker naming n, with the space after it,
+  // wherever the draft holds one: the composer, a note, or a stray chip's
+  // note. The stray chips go first: each field edit re-syncs the images,
+  // which a marker left in a stray chip would bring back.
   function deleteMarkers(n) {
-    var re = new RegExp("\\[Image #" + n + "\\] ?", "g"), v = ctext.value, spans = [], m;
-    while ((m = re.exec(v))) spans.push([m.index, m.index + m[0].length]);
-    spans.reverse().forEach(function (sp) { editText(sp[0], sp[1], ""); });
+    var src = "\\[Image #" + n + "\\] ?";
+    var stray = strayChips().filter(function (c) { return new RegExp(src).test(c.note); });
+    stray.forEach(function (c) {
+      c.note = c.note.replace(new RegExp(src, "g"), "").trim();
+      if (!c.answer && !c.note) dropChip(c.id);
+    });
+    if (stray.length) renderChips();
+    [ctext].concat(boardNotes()).forEach(function (el) {
+      var re = new RegExp(src, "g"), v = el.value, spans = [], m;
+      while ((m = re.exec(v))) spans.push([m.index, m.index + m[0].length]);
+      spans.reverse().forEach(function (sp) { editField(el, sp[0], sp[1], ""); });
+    });
   }
-  function addFiles(files) {
+  // addFiles attaches image files, their markers going in at el's cursor
+  // (the composer's by default).
+  function addFiles(files, el) {
     var refused = "", added = [];
     files.forEach(function (f) {
       if (!IMG_TYPES[f.type]) { refused = wsT("js.img.type", f.name || wsT("js.img.thefile")); return; }
@@ -1461,7 +1504,7 @@
       rd.readAsDataURL(f);
     });
     renderImgs();
-    insertMarkers(added);
+    insertMarkers(added, el);
     if (refused) noteWarn(wsT("js.img.refused", refused));
   }
   function dropImg(it) {
@@ -1483,11 +1526,13 @@
     Object.keys(imgTrash).forEach(function (k) { release(imgTrash[k]); });
     imgTrash = {};
   }
-  // syncMarkers follows the text: an image whose marker is gone is dropped
-  // (into imgTrash), and a dropped one whose marker is back returns.
+  // syncMarkers follows the draft's text (allNums): an image whose marker is
+  // gone is dropped (into imgTrash), and a dropped one whose marker is back
+  // returns. A restore that moves markers between fields (restoreHeld)
+  // holds it off until every marker has landed.
   function syncMarkers() {
-    if (!imgs.length && !Object.keys(imgTrash).length) return;
-    var have = markerNums(ctext.value), changed = false;
+    if (holdSync || (!imgs.length && !Object.keys(imgTrash).length)) return;
+    var have = allNums(), changed = false;
     imgs.slice().forEach(function (it) {
       if (!have[it.n]) { dropImg(it); imgTrash[it.n] = it; changed = true; }
     });
@@ -1499,9 +1544,23 @@
     imgs.sort(function (a, b) { return a.n - b.n; });
     renderImgs();
   }
+  // imgHomes is each image's field: -1 for the composer, else its index in
+  // notes. The composer's text wins a marker both name, and an image no
+  // field names (a stray chip's) shows in the composer's row.
+  function imgHomes(notes) {
+    var own = markerNums(ctext.value), names = notes.map(function (n) { return markerNums(n.value); });
+    return imgs.map(function (it) {
+      if (own[it.n]) return -1;
+      for (var i = 0; i < names.length; i++) if (names[i][it.n]) return i;
+      return -1;
+    });
+  }
   function renderImgs() {
     if (!cimgs) return;
+    var notes = boardNotes(), homes = imgHomes(notes), rows = {};
+    imgLayout = JSON.stringify(homes);
     cimgs.textContent = "";
+    boardQ(".nimgs").forEach(function (r) { r.parentNode.removeChild(r); });
     imgs.forEach(function (it, i) {
       var el = doc.createElement("span"), im = doc.createElement("img"), x = doc.createElement("button"), num = doc.createElement("span");
       el.className = "ichip";
@@ -1517,8 +1576,26 @@
       x.title = wsT("js.img.remove");
       x.textContent = "×";
       el.appendChild(x);
-      cimgs.appendChild(el);
+      var h = homes[i];
+      if (h < 0) { cimgs.appendChild(el); return; }
+      // A note's row follows the note, so it hides with it (CSS) and
+      // leaves with it when a board swap replaces its topic.
+      if (!rows[h]) {
+        rows[h] = doc.createElement("span");
+        rows[h].className = "nimgs";
+        notes[h].parentNode.insertBefore(rows[h], notes[h].nextSibling);
+      }
+      rows[h].appendChild(el);
     });
+  }
+  // followImgs moves the chips after an edit in a note that changed which
+  // field names an image, and puts back the rows a board swap took.
+  function followImgs() {
+    if (!imgs.length && !boardQ(".nimgs").length) return;
+    var homes = imgHomes(boardNotes()), rows = boardQ(".nimgs").length;
+    var want = {};
+    homes.forEach(function (h) { if (h >= 0) want[h] = true; });
+    if (JSON.stringify(homes) !== imgLayout || rows !== Object.keys(want).length) renderImgs();
   }
   // imageFiles is the image files a clipboard or drop carries.
   function imageFiles(dt) {
@@ -1535,17 +1612,25 @@
     }
     return out;
   }
+  // pasteImages attaches the images a paste into el carries.
+  function pasteImages(e, el) {
+    var files = imageFiles(e.clipboardData).filter(function (f) { return f.type.indexOf("image/") === 0; });
+    if (!files.length) return;
+    // A paste that carries text as well (a copied web page) still pastes
+    // its text; a screenshot carries only the image. The markers go in
+    // once the paste is done, after any pasted text.
+    var types = Array.prototype.slice.call(e.clipboardData.types || []);
+    if (types.indexOf("text/plain") < 0) e.preventDefault();
+    setTimeout(function () { addFiles(files, el); }, 0);
+  }
   var composer = $("composer");
   if (ctext && cimgs && composer) {
-    ctext.addEventListener("paste", function (e) {
-      var files = imageFiles(e.clipboardData).filter(function (f) { return f.type.indexOf("image/") === 0; });
-      if (!files.length) return;
-      // A paste that carries text as well (a copied web page) still pastes
-      // its text; a screenshot carries only the image. The markers go in
-      // once the paste is done, after any pasted text.
-      var types = Array.prototype.slice.call(e.clipboardData.types || []);
-      if (types.indexOf("text/plain") < 0) e.preventDefault();
-      setTimeout(function () { addFiles(files); }, 0);
+    ctext.addEventListener("paste", function (e) { pasteImages(e, ctext); });
+    // A board note pen pastes into the same draft; one listener on the
+    // document covers the notes every board swap brings.
+    doc.addEventListener("paste", function (e) {
+      var el = e.target;
+      if (el && el.tagName === "TEXTAREA" && el.classList.contains("note") && inBoard(el)) pasteImages(e, el);
     });
     var hasFiles = function (e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0; };
     composer.addEventListener("dragover", function (e) {
@@ -1966,9 +2051,6 @@
       if (ctext.value.trim() === raw) { ctext.value = ""; grow(); clearMentions(); }
       pics.forEach(function (p) { dropImg(p); release(p); });
       clearTrash();
-      // A fresh draft numbers its images from 1 again.
-      if (!imgs.length && !ctext.value) imgSeq = 0;
-      renderImgs();
       // Compare by value: a board event during the send, or clearing one
       // card, re-reads the chips into new objects. Drop every sent chip
       // before clearing any card, since clearing one re-syncs the rest.
@@ -1986,6 +2068,10 @@
       // A send closes the open notes; one edited during it keeps its text.
       closeTopicNotes();
       renderChips();
+      // A fresh draft numbers its images from 1 again: nothing is left that
+      // a marker or an image could name.
+      if (!imgs.length && !ctext.value && !chipList().length && !topicNotes().length) imgSeq = 0;
+      renderImgs();
       // The sent draft is gone; what was typed during the send is saved
       // again as the next draft.
       // No toast on success: the held bubble in the conversation is the
@@ -2010,14 +2096,24 @@
   // the composer, oldest first, ahead of the draft: their texts joined as
   // paragraphs, their answer chips, their mentions, their topic notes back
   // on the board's topics (restoreTopics), and their images as chips that
-  // reference the written files, with their markers in the returned text. Each
-  // message's numbers move above the highest the draft and the messages
-  // before it use, the markers with them, as the server numbers a merge.
+  // reference the written files, with their markers in the returned text
+  // and notes. Each message's numbers move above the highest the draft and
+  // the messages before it use, the markers in its text, chip notes, and
+  // topic notes with them, as the server numbers a merge. An image no
+  // restored text names (a message held before images were numbered, or a
+  // note a newer one replaced) gets a marker in the composer, so the next
+  // edit does not drop it.
   //
   // A returned command becomes the composer's selection (see the slash
   // commands section). Only one fits: a second, or one returned while
   // another is selected, comes back as its typed line, with a warning.
   function restoreHeld(list) {
+    holdSync = true;
+    try { restoreHeldNow(list); } finally { holdSync = false; }
+    syncMarkers();
+    renderImgs();
+  }
+  function restoreHeldNow(list) {
     var cmd = null, astext = 0;
     list = list.map(function (res) {
       var c = res.command;
@@ -2029,45 +2125,47 @@
     var cur = ctext.value.trim(), top = imgSeq, backs = [], back;
     // The draft's mentions move with it, past its leading whitespace's trim.
     var lead = ctext.value.length - ctext.value.replace(/^\s+/, "").length;
-    Object.keys(markerNums(cur)).forEach(function (k) { top = Math.max(top, +k); });
+    Object.keys(allNums()).forEach(function (k) { top = Math.max(top, +k); });
     imgs.forEach(function (p) { top = Math.max(top, p.n); });
+    // A later message's answer replaces an earlier one's, and a chip
+    // attached since keeps its newer answer.
+    var got = {}, order = [];
     list.forEach(function (res) {
-      var text = res.text || "", names = res.images || [], nums = res.nums || [], renum = {}, offset = top;
+      var names = res.images || [], nums = res.nums || [], renum = {}, offset = top;
       names.forEach(function (name, i) {
         var n = nums[i] || i + 1, have = imgs.filter(function (p) { return p.ref === name; })[0];
         renum[n] = have ? have.n : n + offset;
         if (!have) imgs.push({ name: name, url: attachSrc(name), data: null, ref: name, n: renum[n] });
         top = Math.max(top, renum[n]);
       });
-      text = text.replace(new RegExp(MARKER, "g"), function (m, k) { return renum[+k] ? marker(renum[+k]) : m; });
-      // A message held before images were numbered has no markers: give
-      // each image one, or the next edit would drop it.
-      var marked = markerNums(text), missing = [];
-      names.forEach(function (name, i) { var n = renum[nums[i] || i + 1]; if (!marked[n]) missing.push(marker(n)); });
-      if (missing.length) text += (text ? "\n" : "") + missing.join(" ");
-      var stray = restoreTopics(res.topics || []);
+      var rn = function (s) { return (s || "").replace(new RegExp(MARKER, "g"), function (m, k) { return renum[+k] ? marker(renum[+k]) : m; }); };
+      var text = rn(res.text);
+      (res.chips || []).forEach(function (c) {
+        var o = {};
+        Object.keys(c).forEach(function (k) { o[k] = c[k]; });
+        if (c.note) o.note = rn(c.note);
+        if (!got[c.id]) order.push(c.id);
+        got[c.id] = o;
+      });
+      var stray = restoreTopics((res.topics || []).map(function (tn) { return { topic: tn.topic, note: rn(tn.note) }; }));
       if (stray.length) text += (text ? "\n\n" : "") + stray.join("\n");
       if (text) backs.push(text);
     });
     imgSeq = top;
+    order.forEach(function (id) { if (!chips[id]) { putChip(got[id]); setItem(id, got[id]); } });
     back = backs.join("\n\n");
+    var named = allNums(), inBack = markerNums(back), missing = [];
+    imgs.forEach(function (p) { if (!named[p.n] && !inBack[p.n]) missing.push(marker(p.n)); });
+    if (missing.length) back += (back ? "\n" : "") + missing.join(" ");
     ctext.value = back + (back && cur ? "\n\n" : "") + cur;
     grow();
     shiftMentions(back.length + (back && cur ? 2 : 0) - lead);
     imgs.sort(function (a, b) { return a.n - b.n; });
-    // A later message's answer replaces an earlier one's, and a chip
-    // attached since keeps its newer answer.
-    var got = {}, order = [];
-    list.forEach(function (res) {
-      (res.chips || []).forEach(function (c) { if (!got[c.id]) order.push(c.id); got[c.id] = c; });
-    });
-    order.forEach(function (id) { if (!chips[id]) { putChip(got[id]); setItem(id, got[id]); } });
     // Their mentions go back ahead of the draft's, oldest message first.
     var held = [];
     list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
     bmentions = held.concat(bmentions);
     renderChips();
-    renderImgs();
     if (cmd) {
       if (ctext.value.trim()) setCommand(cmd.name, cmd.args || "");
       else { ctext.value = cmd.args || ""; grow(); clearMentions(); setCommand(cmd.name); }
@@ -2299,6 +2397,8 @@
       doc.addEventListener(type, function (e) {
         if (!inBoard(e.target)) return;
         syncChips();
+        syncMarkers();
+        followImgs();
       });
     });
   }
@@ -6850,8 +6950,9 @@
   // finds it: the composer's text, mentions, and selection, its slash
   // command selection, the board answers and topic notes, the answer chips, the images that reference
   // written attachments, the open details, and the tab. Pasted images are
-  // not kept: a restored draft says so, and while the page holds one,
-  // leaving it asks first (the browser's leave-page confirmation).
+  // not kept: their markers leave the composer text and the notes, a
+  // restored draft says so, and while the page holds one, leaving it asks
+  // first (the browser's leave-page confirmation).
   var draftStore = WsRail && rid ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
   function readDraft() {
     var b = region("board"), open = {};
@@ -6892,6 +6993,15 @@
     if (!d) return;
     restoring = true;
     try {
+      var lost = Array.isArray(d.lost) ? d.lost : [], named = "";
+      // A lost image's marker leaves the notes as it leaves the text; what
+      // the restored notes still name may bring a reference image back.
+      var unlost = function (note) { return typeof note === "string" && note ? WsRail.stripMarkers(note, [], lost).text : note; };
+      if (d.answers && typeof d.answers === "object") Object.keys(d.answers).forEach(function (k) {
+        var a = d.answers[k];
+        if (a && a.note) { a.note = unlost(a.note); named += "\n" + a.note; }
+      });
+      if (Array.isArray(d.chips)) d.chips.forEach(function (c) { if (c && c.note) { c.note = unlost(c.note); named += "\n" + c.note; } });
       if (d.open && typeof d.open === "object") {
         Object.keys(d.open).forEach(function (k) { if (!Object.prototype.hasOwnProperty.call(openState, k)) openState[k] = true; });
         restoreOpen(doc);
@@ -6910,22 +7020,24 @@
         renderChips();
       }
       if (ccmd && !cmdSel && d.cmd && typeof d.cmd.name === "string" && d.cmd.name) setCommand(d.cmd.name, d.cmd.args);
-      var lost = Array.isArray(d.lost) ? d.lost : [];
       if (ctext && typeof d.text === "string" && d.text && !ctext.value) {
         var s = WsRail.stripMarkers(d.text, Array.isArray(d.mentions) ? d.mentions : [], lost);
         ctext.value = s.text;
         mentions = s.mentions.filter(function (m) { return liveMention(m, s.text); });
         mentionWas = ctext.value;
+        named += "\n" + s.text;
+        grow();
+        paintMentions();
+        if (Array.isArray(d.sel)) { try { ctext.setSelectionRange(d.sel[0], d.sel[1]); } catch (e) { /* out of range */ } }
+      }
+      if (ctext) {
         (Array.isArray(d.refs) ? d.refs : []).forEach(function (p) {
-          if (!p || !p.ref || !markerNums(s.text)[p.n]) return;
+          if (!p || !p.ref || !markerNums(named)[p.n] || imgs.some(function (q) { return q.n === p.n; })) return;
           imgs.push({ name: p.name || p.ref, url: attachSrc(p.ref), data: null, ref: p.ref, n: p.n });
           imgSeq = Math.max(imgSeq, p.n);
         });
         imgs.sort(function (a, b) { return a.n - b.n; });
-        grow();
-        paintMentions();
         renderImgs();
-        if (Array.isArray(d.sel)) { try { ctext.setSelectionRange(d.sel[0], d.sel[1]); } catch (e) { /* out of range */ } }
       }
       if (live && d.tab === "board") setTab("board");
       if (lost.length) noteWarn(wsT("js.draft.imgslost", lost.length));

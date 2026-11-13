@@ -205,10 +205,11 @@ process.stdout.write(bad.join("\n"));
 // line with a warning.
 func TestSlashCommandRestoresAsSelection(t *testing.T) {
 	mention, dash := pageScripts(t)
-	restore := composerFunc(t, dash, "restoreHeld")
+	restore := composerFunc(t, dash, "restoreHeld") + composerFunc(t, dash, "restoreHeldNow")
 	send := composerFunc(t, dash, "sendMessage")
 	runNode(t, "slash restore", slashDOM+mention+slashPrelude+`
-var imgSeq = 0, chips = {}, bmentions = [], MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
+var imgSeq = 0, chips = {}, bmentions = [], holdSync = false, MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
+function allNums() { return markerNums(ctext.value); } function syncMarkers() {}
 function markerNums(text) { var out = {}, re = new RegExp(MARKER, "g"), m; while ((m = re.exec(text))) out[+m[1]] = true; return out; }
 function marker(n) { return "[Image #" + n + "]"; }
 function attachSrc(n) { return n; } function restoreTopics() { return []; } function shiftMentions() {}
