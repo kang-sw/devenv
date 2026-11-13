@@ -573,6 +573,9 @@
     "261113-research-werkschaft-identity": {
       "registered_at": "2026-11-13T11:38:03Z"
     },
+    "261114-bug-ws-shared-daemon-restarts-without-a-swap": {
+      "registered_at": "2026-11-13T15:28:36Z"
+    },
     "261114-feat-ws-dashboard-answer-ack-nudge": {
       "registered_at": "2026-11-13T15:27:39Z"
     },
