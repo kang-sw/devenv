@@ -475,6 +475,55 @@ Verification:
   (`ai-docs/tickets/assets/261113-feat-ws-dashboard-session-rail-tree/session-rail-branch-indent-mockup.html`);
   the hierarchy, star position and grip column match it.
 
+### Result (898b56491) - 2026-11-14
+
+Landed in 7ce5df3bb, f4122e7d4, 9c694d73b and 898b56491.
+
+- **rail.js:** `dropRefusal`, `itemKey`/`refind` and `swapGate`, the pure parts of
+  the press/swap rules, with node tests in `railscript_test.go`.
+- **Head rename:** the head's rename runs from an edit object, so rail rows
+  reuse `labelStart`/`labelKey`/`labelSave`.
+- **Rows:**
+  - A grip in the 14 px column. The star sits after the name, outside the link.
+  - The link is split into `.rl` (the name, the only tab stop) and the tail and
+    message links (`tabindex -1`), so the whole row still navigates.
+  - The pencil and clipboard sit over a fixed 44 px time slot.
+  - The workspace / worktree / session indent is 12 / 28 / 49 px.
+- **Copy tag:** the head and each rail row build it with one Go builder. Its
+  inputs come from the rail view (Decision 10).
+- **Drag:** a rail swap is held from the press on a grip or a bar. A refused drop
+  shows a hint and the not-allowed cursor. The drop line is clamped to the list
+  edge, `RD_EDGE` is 48 px, and the order is applied once after the drop.
+- **New i18n keys:** `rail.copy`, `js.rail.drag.ws`, `js.rail.drag.wt` and
+  `js.rail.drag.stars` in every table. The non-English entries are unchecked
+  worker translations, listed in 9c694d73b.
+- **Headless harness:** `scripts/rail-headless.mjs`.
+  - Overriding the Constraints text by the lead's instruction, it never runs
+    `dev.py rerun daemon`.
+  - It builds `ws-mcp` and starts its own `ws-mcp dashboard --port 0` with a temp
+    `WS_CACHE_HOME`, `WS_CONFIG_HOME` and `HOME`, and seeds fake registrations.
+  - Later phases append to its `SCENARIOS`.
+
+Verification:
+- `go build ./... && go vet && go test ./internal/wsdashboard/ ./internal/wsi18n/...`:
+  ok.
+- `node scripts/rail-headless.mjs`: all 12 scenarios passed (offsets, star, grip,
+  body-press, grip-reorder with a swap mid-press, swap-after-drop, refused-hint,
+  clamp, edge-scroll at 40 px, rename with a swap mid-edit, copy equal to the
+  head's, look).
+- LOOK: captures at the column and overlay widths match the mockup's "안 A" for
+  the hierarchy, star position and grip column.
+
+Decisions:
+- A row's hover and current background starts at the guide line and includes the
+  grip; the mockup starts it at 49 px.
+- A group's only row still drags, so that the refusal hint explains why it
+  cannot move.
+- A window blur ends a press, so that a lost release cannot hold swaps forever.
+- A plain-folder row copies a tag without `root` or `branch`, as the head does
+  outside git.
+- The pencil reuses the `head.rename` string.
+
 ### Phase 2: server-side layout store and route
 
 Decisions 3, 4, 13. The server orders rows from the store, there is a
