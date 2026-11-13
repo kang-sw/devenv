@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -132,6 +132,10 @@ type pageAssetsData struct {
 	// window.WsTerm), which only a page that offers terminals carries
 	// (sessionPageData.Terminal).
 	TerminalScript template.JS
+	// WebScript is the web card kind (webcard.js, window.WsWeb), which
+	// only a page asked for by a browser on this machine carries
+	// (sessionPageData.SysOpen).
+	WebScript template.JS
 	// XtermCSS is the vendored terminal emulator's stylesheet, which a
 	// page that offers terminals inlines (sessionPageData.Terminal).
 	XtermCSS     template.CSS
@@ -218,6 +222,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		PreviewScript:    template.JS(get("preview.js")),
 		FilesScript:      template.JS(get("files.js")),
 		TerminalScript:   template.JS(get("terminal.js")),
+		WebScript:        template.JS(get("webcard.js")),
 		XtermCSS:         xtermStyle(),
 		LucideSprite:     lucide,
 		WhiteboardCSS:    wb.CSS,
@@ -1118,6 +1123,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	} else if sub == "label" {
 		d.handleSessionLabel(w, r, replyID)
 		return
+	} else if sub == "web" || strings.HasPrefix(sub, "web/") {
+		d.handleWeb(w, r, replyID, strings.TrimPrefix(sub, "web"))
+		return
 	}
 	if !readMethod(w, r) {
 		return
@@ -1411,7 +1419,10 @@ func admitShellFrame(w http.ResponseWriter, csp string) {
 // Content-Security-Policy includes frameAncestorsNone in it (or, for a page
 // the shell frames, frameAncestorsSelf: admitShellFrame); without one the
 // page gets frameAncestorsNone alone, and X-Frame-Options DENY unless the
-// caller set SAMEORIGIN.
+// caller set SAMEORIGIN. The one daemon page that does not go through it is
+// the web card's wrapper frame (writeWebFrame, webcard_routes.go), which the
+// session page frames: it sends frame-ancestors 'self' and X-Frame-Options
+// SAMEORIGIN instead.
 func writeHTML(w http.ResponseWriter, html string) { writeHTMLStatus(w, http.StatusOK, html) }
 
 // writeHTMLStatus is writeHTML with the status the page answers.

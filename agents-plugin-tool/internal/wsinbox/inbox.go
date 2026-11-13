@@ -111,6 +111,15 @@ const (
 	maxTopics    = 100
 	maxTopicLen  = 200
 	maxMentions  = 50
+	// Limits on the web card's attachments (webpicks.go). They bound the
+	// elements themselves and do not count toward maxTextBytes.
+	maxPicks            = 50
+	maxConsoleBlocks    = 10
+	maxConsoleLines     = 50 // per block
+	maxConsoleLineBytes = 1024
+	maxSelectorBytes    = 512
+	maxPickTextBytes    = 1024
+	maxWebURLBytes      = 2048
 	// maxImageNum bounds an image number a send names; a merge may number
 	// past it.
 	maxImageNum = 9999
@@ -118,7 +127,7 @@ const (
 
 var (
 	// ErrEmpty reports a send with no text, no chips, no topic notes, no
-	// mentions, and no images.
+	// mentions, no picks, no console blocks, and no images.
 	ErrEmpty = errors.New("empty message: no text and no answers")
 	// ErrGone reports that an entry is no longer held: a drain delivered it,
 	// or a cancel or merge already took it.
@@ -176,6 +185,11 @@ type Entry struct {
 	// Mentions holds the text the user selected on the board and added to
 	// the message (mentions.go), in the order added across merged sends.
 	Mentions []Mention `json:"mentions,omitempty"`
+	// Picks and Consoles hold the page elements the user picked in a web
+	// card and the console errors it attached (webpicks.go), in the order
+	// added across merged sends.
+	Picks    []Pick    `json:"picks,omitempty"`
+	Consoles []Console `json:"consoles,omitempty"`
 	// Images holds the absolute paths of the attached image files, in send
 	// order; a path is listed once.
 	Images []string `json:"images,omitempty"`
@@ -310,8 +324,9 @@ func NameForID(id string) (string, bool) {
 }
 
 // Text is the message the session receives: the answer block (AnswerBlock)
-// first, then the mentions (MentionBlock), then each part as its own
-// paragraph, then one ImageLine per image. A command entry's text is its
+// first, then the mentions (MentionBlock), then the picks (PickBlock) and the
+// console blocks (ConsoleBlock) as one paragraph each, then each part as its
+// own paragraph, then one ImageLine per image. A command entry's text is its
 // typed line (Command.Line), which a host that runs a bare "/name args"
 // message as the command takes as it is.
 func (e Entry) Text() string {
@@ -323,6 +338,12 @@ func (e Entry) Text() string {
 		paras = append(paras, block)
 	}
 	if block := MentionBlock(e.Mentions); block != "" {
+		paras = append(paras, block)
+	}
+	if block := PickBlock(e.Picks); block != "" {
+		paras = append(paras, block)
+	}
+	if block := ConsoleBlock(e.Consoles); block != "" {
 		paras = append(paras, block)
 	}
 	for _, p := range e.Parts {
@@ -344,8 +365,10 @@ func (e Entry) Text() string {
 // Normalize trims and checks one send: empty parts are dropped, chips are
 // validated, a later chip for an item (or note for a topic) replaces an
 // earlier one, an empty topic note is dropped, a mention is trimmed and
-// dropped when blank (its text counts toward the text limit), and a repeated
-// image path is dropped with its number. An image counts as content. Image
+// dropped when blank (its text counts toward the text limit), a pick and a
+// console block are validated and capped (normalizeWeb; they do not count
+// toward the text limit), and a repeated image path is dropped with its
+// number. An image, a pick, and a console block count as content. Image
 // numbers are optional: ImageNums is empty or parallel to Images, a number is
 // unique and at most maxImageNum, and an image numbered 0 (or every image,
 // when ImageNums is empty) gets the next number above the highest. The
@@ -391,6 +414,10 @@ func Normalize(e Entry) (Entry, error) {
 	}
 	if size > maxTextBytes {
 		return Entry{}, fmt.Errorf("%w: text is longer than %d bytes", ErrInvalid, maxTextBytes)
+	}
+	var err error
+	if out.Picks, out.Consoles, err = normalizeWeb(e.Picks, e.Consoles); err != nil {
+		return Entry{}, err
 	}
 	if len(e.Chips) > maxChips {
 		return Entry{}, fmt.Errorf("%w: more than %d answers", ErrInvalid, maxChips)
@@ -472,7 +499,7 @@ func Normalize(e Entry) (Entry, error) {
 		}
 		out.ImageNums = nums
 	}
-	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Mentions) == 0 && len(out.Images) == 0 {
+	if len(out.Parts) == 0 && len(out.Chips) == 0 && len(out.Topics) == 0 && len(out.Mentions) == 0 && len(out.Picks) == 0 && len(out.Consoles) == 0 && len(out.Images) == 0 {
 		return Entry{}, ErrEmpty
 	}
 	return out, nil
@@ -495,8 +522,8 @@ func normalizeCommand(e Entry) (Entry, error) {
 			return Entry{}, fmt.Errorf("%w: a command carries no text", ErrInvalid)
 		}
 	}
-	if len(e.Chips) > 0 || len(e.Topics) > 0 || len(e.Mentions) > 0 || len(e.Images) > 0 || e.Steer || e.Interrupt {
-		return Entry{}, fmt.Errorf("%w: a command carries no answers, mentions, or images", ErrInvalid)
+	if len(e.Chips) > 0 || len(e.Topics) > 0 || len(e.Mentions) > 0 || len(e.Picks) > 0 || len(e.Consoles) > 0 || len(e.Images) > 0 || e.Steer || e.Interrupt {
+		return Entry{}, fmt.Errorf("%w: a command carries no answers, mentions, picks, console blocks, or images", ErrInvalid)
 	}
 	return Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Command: &c}, nil
 }
@@ -551,7 +578,7 @@ func maxInt(list []int) int {
 	return m
 }
 
-// Merge appends add's parts, mentions, and images to base's and lays add's
+// Merge appends add's parts, mentions, picks, console blocks, and images to base's and lays add's
 // chips and topic notes over base's: the later chip for an item, and the
 // later note for a topic, wins. base's first-send time is kept.
 // add's images are renumbered to continue base's, each number raised by
@@ -566,6 +593,8 @@ func Merge(base, add Entry) Entry {
 		out.SentAt = add.SentAt
 	}
 	out.Mentions = append(append([]Mention(nil), base.Mentions...), add.Mentions...)
+	out.Picks = append(append([]Pick(nil), base.Picks...), add.Picks...)
+	out.Consoles = append(append([]Console(nil), base.Consoles...), add.Consoles...)
 	baseNums := base.Nums()
 	for i, path := range base.Images {
 		if indexOf(out.Images, path) < 0 {

@@ -484,6 +484,10 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .achip.mchip { background: var(--wb-muted); box-shadow: inset 3px 0 0 var(--wb-primary), inset 0 0 0 1px var(--wb-line); }
 .achip.mchip .anote { font-style: italic; }
 .achip.mchip .anote::before { content: none; }
+/* a picked page element and a console block: mention capsules whose bold
+   part is a selector (clipped, monospace) or the error count */
+.achip.pchip b { font-family: var(--wb-mono); font-weight: 600; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.achip.cchip { box-shadow: inset 3px 0 0 var(--wb-warn), inset 0 0 0 1px var(--wb-line); }
 /* the floating button by a board selection that adds it as a mention */
 .wbmention { position: fixed; z-index: 60; border: 0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--wb-primary-fg); background: var(--wb-primary); box-shadow: var(--wb-shadow-hi); }
 .wbmention:hover { background: color-mix(in srgb, var(--wb-primary) 85%, var(--wb-fg)); }
@@ -748,6 +752,29 @@ body:has(> .tfix) .r-board .reply { margin-right: 44px; }
 .tprow .btn.pr { background: var(--wb-primary); color: var(--wb-primary-fg); }
 .tpop.busy { cursor: progress; }
 .tpop button:disabled, .tpop input:disabled { opacity: .6; }
+
+/* ===== web cards (webcard.js) =====
+   The body holds the address bar, a note (a refusal, or a page that did
+   not come up), and the frame of the card's wrapper, which fills the rest.
+   The header's pick toggle shows pressed while the page is in pick mode;
+   the attach button carries the page's error count. "+ Web" stands in the
+   status-line slot beside "+ Terminal" and shares its popover's look. */
+.bcard[data-kind="web"] .bc-body, .bcard[data-kind="web"][data-max] .bc-body { display: flex; flex-direction: column; overflow: hidden; }
+.bcard[data-kind="web"][data-size="fold"] .bc-body { display: none; }
+.wc-bar { flex: none; display: flex; padding: 5px 8px; border-bottom: 1px solid var(--wb-muted); }
+.wc-bar .fpin { flex: 1 1 auto; min-width: 0; }
+.wc-note { flex: none; padding: 6px 12px; font-size: 12.5px; color: var(--wb-fail); background: color-mix(in srgb, var(--wb-fail) 8%, var(--wb-card)); overflow-wrap: anywhere; }
+.wc-note[hidden] { display: none; }
+.wc-frame { flex: 1 1 0; min-height: 0; width: 100%; border: 0; display: block; background: #fff; }
+.wc-frame[hidden] { display: none; }
+.bc-acts .ibtn:disabled { opacity: .3; cursor: default; background: transparent; }
+.ibtn.wc-pick[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 18%, transparent); }
+.ibtn.wc-att { position: relative; }
+.wc-badge { position: absolute; top: -1px; right: -3px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 999px; font-size: 9.5px; font-weight: 800; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; background: var(--wb-fail); color: var(--wb-card); pointer-events: none; }
+.wc-badge[hidden] { display: none; }
+.ibtn.wc-att:has(.wc-badge:not([hidden])) { opacity: 1; color: var(--wb-fail); }
+.tnew + .tnew { margin-left: 2px; }
+.tfix .tnew + .tnew { margin-left: 8px; }
 /* the holder card's terminals whose session is gone */
 .hdterms { display: grid; gap: 2px; }
 .hdsub { font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 2px; }

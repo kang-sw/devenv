@@ -433,14 +433,17 @@
     this.badge.textContent = p.badge || "";
     this.badge.hidden = !p.badge;
   };
-  // actions sets the kind's own header buttons: [{icon, title, run}].
+  // actions sets the kind's own header buttons: [{icon, title, run, cls}]
+  // (cls: an optional class of the kind's own), and returns them in order,
+  // for a kind that updates a button's state.
   Card.prototype.actions = function (list) {
     var c = this;
     c.acts.textContent = "";
-    (list || []).forEach(function (a) {
-      var b = ibtn("", a.icon, a.title);
+    return (list || []).map(function (a) {
+      var b = ibtn(a.cls || "", a.icon, a.title);
       b.addEventListener("click", function () { a.run(c); });
       c.acts.appendChild(b);
+      return b;
     });
   };
   Card.prototype.save = function () { persist(); };

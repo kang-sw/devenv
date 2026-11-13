@@ -30,6 +30,10 @@ type HeldView struct {
 	// Mentions are the board text the message points at, shown as capsules
 	// after the answer capsules.
 	Mentions []wsinbox.Mention
+	// Picks and Consoles are the picked page elements and attached console
+	// errors, shown as capsules after the mentions.
+	Picks    []wsinbox.Pick
+	Consoles []wsinbox.Console
 	// Images are the entry's attached images.
 	Images []AttachmentView
 	// Command is a command entry's slash command; the bubble shows its
@@ -93,8 +97,9 @@ func regularFile(path string) bool {
 
 // splitUserEntries takes each user entry's answer block
 // (wsinbox.ParseAnswerBlock), the mentions after it (wsinbox.ParseMentions),
-// and attached images (userImages) out of its text; a malformed block or
-// mention stays in the text.
+// the picks and console blocks after those (wsinbox.ParseWebElements), and
+// attached images (userImages) out of its text; a malformed block or element
+// stays in the text.
 func splitUserEntries(entries []ConvEntry, attachDir, replyID string) {
 	for i, e := range entries {
 		if e.Kind == wslive.RingUser {
@@ -103,6 +108,7 @@ func splitUserEntries(entries []ConvEntry, attachDir, replyID string) {
 				entries[i].Answers, text = lines, rest
 			}
 			entries[i].Mentions, text = wsinbox.ParseMentions(text)
+			entries[i].Picks, entries[i].Consoles, text = wsinbox.ParseWebElements(text)
 			entries[i].Text, entries[i].Images = userImages(text, attachDir, replyID)
 		}
 	}
@@ -150,7 +156,7 @@ type SentMark struct {
 func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 	out := make([]HeldView, 0, len(held))
 	for _, r := range held {
-		v := HeldView{ID: r.ID(), Steer: r.Entry.Steer, At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips, Topics: r.Entry.Topics, Mentions: r.Entry.Mentions, Command: r.Entry.Command}
+		v := HeldView{ID: r.ID(), Steer: r.Entry.Steer, At: r.Entry.SentAt, Parts: r.Entry.Parts, Chips: r.Entry.Chips, Topics: r.Entry.Topics, Mentions: r.Entry.Mentions, Picks: r.Entry.Picks, Consoles: r.Entry.Consoles, Command: r.Entry.Command}
 		nums := r.Entry.Nums()
 		for i, path := range r.Entry.Images {
 			v.Images = append(v.Images, attachmentView(attachDir, replyID, nums[i], path))

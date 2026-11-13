@@ -258,6 +258,9 @@ type Daemon struct {
 	proxyConns    map[*proxyConn]struct{}
 	proxyWG       sync.WaitGroup
 	proxyDraining bool
+	// web is the web card targets and their proxy listeners
+	// (webcard_proxy.go).
+	web *webRegistry
 
 	closeOnce sync.Once
 	stop      chan struct{}
@@ -375,6 +378,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	home, _ := os.UserHomeDir()
 	d.planUsage = newPlanUsageStore(opts.Dir, home, os.Getenv)
 	d.cache = newPageCache(d.broker, stats)
+	d.web = newWebRegistry(d.endpoint.Port, d.endpoint.Token, logw)
 	if d.refreshInterval <= 0 {
 		d.refreshInterval = sseRefreshInterval
 	}
@@ -459,6 +463,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	if d.index != nil {
 		go d.poll(opts.PollInterval)
 	}
+	go d.web.run(webSweepEvery)
 	// The holder scans start only now, under the single-instance lock: a
 	// predecessor has let go of its holders before this daemon attaches.
 	if d.holders != nil {
@@ -617,6 +622,9 @@ func (d *Daemon) Close() {
 		// scheduled would leave the port bound past Close, so a restart could
 		// not rebind it. Closing it here makes Close release the port.
 		_ = d.listener.Close()
+		// The web card listeners are servers of their own; closed here,
+		// before the lock goes, a successor never races a leftover port.
+		d.web.close()
 		if d.agents != nil {
 			d.agents.Close()
 		}

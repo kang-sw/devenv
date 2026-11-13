@@ -8,6 +8,7 @@ related:
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "co-edits the whiteboard playbook and mirrors"
 sage-review-design-reviewed: 802beb765812f714
 sage-review-completeness-reviewed: 802beb765812f714
+completed: 2026-11-14
 ---
 
 # Dashboard web card: proxied localhost page with element pick and console-error attach
@@ -578,3 +579,115 @@ fixture, an HTML page plus a WebSocket endpoint that records the headers and
 - LOOK, on a dev daemon instance: a web card showing a proxied local page with
   HMR active, an active pick highlight, and the composed message carrying a
   `wb:pick` chip, a `wb:console` chip and the error badge.
+
+### Result (eee367e08) - 2026-11-14
+
+Landed on impl/develop/pox-veal-stoke (b0408fc7a..eee367e08):
+
+- Daemon: per-target loopback proxy listeners with a registry (cap 16, idle
+  close, heartbeat live window, port stability, teardown in `Daemon.Close`),
+  the wrapper route, and the registration and heartbeat routes
+  (`webcard_proxy.go`, `webcard_routes.go`; the route and postMessage
+  protocol is that file's comment). Pages: `assets/webframe.js` (wrapper
+  relay and heartbeat), `assets/webinject.js` (pick mode, selector, console
+  ring, error count), `assets/webcard.js` (the `web` card kind,
+  `window.WsWeb`).
+- Entry points: "+ Web" (URL or workspace path), a localhost link click on
+  the page and from board frames, "Open as web card" in the link menu and on
+  HTML file cards.
+- Inbox: `wsinbox.Pick`/`Console` with the decision 30 caps, carried by the
+  message route, the held view, cancel/restore, the draft, and
+  `dashboard.inbox_drain` (`<wb:pick>` / `<wb:console>` after the mentions).
+- Whiteboard playbook Answers paragraph for `wb:pick` and `wb:console`, with
+  wsflow and pi mirrors and manifests.
+- `scripts/webcard-headless.mjs`: a headless harness against its own
+  isolated daemon (temp WS_CACHE_HOME/WS_CONFIG_HOME/HOME, `--port 0`) and a
+  Node fixture upstream with an HMR-like WebSocket.
+
+Verification:
+
+- `go test ./internal/wsdashboard/ ./internal/wsinbox/ ./internal/wsi18n/ ./internal/wsrsrc/... -count=1`: ok.
+- Node: `testdata/webinject.test.cjs` 20 pass, `testdata/webframe.test.cjs`
+  6 pass, `testdata/webcard.test.cjs` 21 pass (run in Go by
+  `TestWebCardScripts`).
+- `node scripts/webcard-headless.mjs`: all 16 scenarios pass on the final
+  state (its own daemon, stopped by PID; the shared daemon untouched).
+- LOOK (isolated daemon, light and dark): the card on the proxied fixture
+  page with HMR connected, the pick highlight on an element, and the
+  composer with a `wb:pick` and a `wb:console` chip beside the card's error
+  badge.
+- `go test ./internal/mcp/ -count=1 -timeout 40m`: only
+  `TestRenderDispatchSeparatesResourceAndWorktreeRoots`,
+  `TestRenderFromWorktreeSessionCommitsInThatWorktree`, and
+  `TestRenderPathMintedChildRecordsLeadParent` fail, and they fail on the
+  base b0408fc7a too (macOS `/private/var` vs `/var`).
+- Lite review: one Important (a proxied page could post the wrapper-only
+  `frame`/`gone` types through the relay and point "open in tab" at another
+  origin) fixed in 64ed5181a; two minors (nested session roots sharing a
+  directory entry's base; a malformed gzip page passed truncated) fixed in
+  eee367e08.
+
+Decisions taken in implementation:
+
+- Registration starts the listener at once, so a full registry or a bind
+  failure reaches the card as the route's answer.
+- https targets skip certificate verification (loopback only); a redirect
+  to another origin answers 502, as does a gzip HTML page that does not
+  decode.
+- The wrapper's `p` must be a single-slash path, else `/`; a file at the
+  session root's top registers the root itself (dotfiles stay refused).
+- Directory entries are keyed by session root and directory, so nested
+  roots each get their own base.
+- `maxWebURLBytes = 2048` joins the decision 30 constants; the message
+  body limit grows by 2 MiB only when picks or consoles are present.
+- The pick text collapses whitespace runs before the trim and cut. When no
+  selector fits 512 bytes the script sends the bare tag name (else `*`).
+  The path is unique by construction unless cut at 8 steps, so only the
+  `#id`, `data-testid`, and anchor candidates are checked with
+  `querySelectorAll`.
+- The injected script also wraps `history.pushState`/`replaceState`, so a
+  client router's route change is announced; a same-document move ends pick
+  mode and re-posts the error count.
+- Attach sends the ring, then clears it and resets the count.
+- The relay passes only the page's types; the card accepts a `frame` proxy
+  only as `http://<its own host name>:<port>`, and takes a pick or a console
+  block only after the user's own toggle or attach.
+- The web card script is inlined only on a local viewer's page; "+ Web"
+  uses the terminal's fixed slot fallback; a board frame's link report opens
+  a card only under user activation; a static card's record follows only
+  top-level files of its registered directory.
+- Escape on the pick toggle ends pick mode as Escape inside the page does.
+- Live checks ran on the harness's own isolated daemon rather than
+  `scripts/dev.py rerun daemon`, which replaces the running daemon.
+
+#### Edition (4354df8f0) - 2026-11-14
+
+Lead pre-merge security review: the static scope is narrowed to keep
+decision 5 (the opened file's directory subtree, never the whole root).
+
+- A file at the session root's top now registers a file-only scope: that
+  file serves and every other path on its listener answers 404. A file in
+  a subdirectory keeps its directory subtree. The root itself (also through
+  a symlink) is refused. This withdraws the Result's "a file at the session
+  root's top registers the root itself".
+- Registration refuses a dot-named or git-ignored path (`capDenied` on the
+  registered path: `.git/`, `.cache/`, an ignored `build/`), and every
+  static request applies `capDenied`, so an ignored file inside a registered
+  subtree answers 404. The page runs scripts on its own origin and can
+  fetch anything its listener serves, so unlike the file routes this
+  applies to a local viewer too; a report in an ignored folder opens in the
+  preview card, not a web card. (9a6618750)
+- A static card's record takes the page's posted path only when its decoded
+  name is still one file name, and picks keep a decoded `..` step encoded,
+  so a forged `..%2F` path cannot point a restored card elsewhere.
+  (4354df8f0)
+- Verification: `go test ./internal/wsdashboard/ ./internal/wsinbox/
+  ./internal/wsi18n/ ./internal/wsrsrc/... -count=1` ok; node webinject 20,
+  webframe 6, webcard 21 pass; `node scripts/webcard-headless.mjs` all 16
+  scenarios pass on its isolated daemon. New tests
+  `TestWebCardRootFileServesOnlyItself` and
+  `TestWebCardRefusesGitIgnoredPaths`, and the dot-directory refusal case,
+  fail with the old scope (mutation-checked).
+- Left as is, per the lead: popups escaping the sandbox, the remembered-port
+  rebind on macOS with SO_REUSEADDR, registry entries never removed, the
+  HTML buffering cap, and a dashboard viewed at `[::1]`.

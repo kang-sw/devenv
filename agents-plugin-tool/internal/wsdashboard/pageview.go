@@ -423,6 +423,10 @@ type ConvEntry struct {
 	// message), taken out of its text and shown as capsules after the
 	// answer capsules.
 	Mentions []wsinbox.Mention
+	// Picks and Consoles are the web card's pick and console elements after
+	// the mentions, taken out of its text and shown as capsules after them.
+	Picks    []wsinbox.Pick
+	Consoles []wsinbox.Console
 	// Rendered is the entry's whole element, from the entry cache.
 	Rendered template.HTML
 	// Body is a mail line's full message from the mailbox history; HasBody

@@ -66,11 +66,18 @@ const (
 	// attachmentSweepAge is how old an attachment no entry lists must be
 	// before a message write sweeps it (wsinbox.SweepAttachments).
 	attachmentSweepAge = 24 * time.Hour
+	// webBodyAllowance is what a message with picks or console errors may
+	// add to inboxBodyLimit. Those elements are capped by wsinbox, not by the
+	// text limit: at every cap they hold about 720 KB (50 picks of 2 KiB url
+	// + 512 B selector + 1 KiB text, 10 console blocks of 2 KiB url + 50
+	// lines of 1 KiB), and JSON escaping at most doubles quote-heavy text.
+	webBodyAllowance = 2 << 20
 )
 
 // messageBodyLimit bounds a message's body when it attaches images: every
-// image at its cap as base64, plus the text-only limit.
-var messageBodyLimit = inboxBodyLimit + wsinbox.MaxImages*base64.StdEncoding.EncodedLen(maxImageBytes)
+// image at its cap as base64, plus the text-only limit and the web
+// allowance.
+var messageBodyLimit = inboxBodyLimit + webBodyAllowance + wsinbox.MaxImages*base64.StdEncoding.EncodedLen(maxImageBytes)
 
 // messageRequest is the message route's body. Unknown fields are ignored.
 type messageRequest struct {
@@ -79,6 +86,10 @@ type messageRequest struct {
 	Topics []wsinbox.TopicNote `json:"topics"`
 	// Mentions are the board text the user selected and added, in order.
 	Mentions []wsinbox.Mention `json:"mentions"`
+	// Picks are the page elements picked in a web card, and Consoles the
+	// console errors attached from one, in order.
+	Picks    []wsinbox.Pick    `json:"picks"`
+	Consoles []wsinbox.Console `json:"consoles"`
 	// Images are new images; Refs name files a cancel returned, inside this
 	// session's attachments directory, and RefNums, when present, holds each
 	// ref's image number in order.
@@ -256,8 +267,14 @@ func (d *Daemon) messageWrite(dir, replyID string, raw []byte, local bool, now t
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return http.StatusBadRequest, "malformed message"
 	}
-	if len(req.Images) == 0 && len(req.Refs) == 0 && len(raw) > inboxBodyLimit {
-		return http.StatusBadRequest, "request body too large"
+	if len(req.Images) == 0 && len(req.Refs) == 0 {
+		limit := inboxBodyLimit
+		if len(req.Picks) > 0 || len(req.Consoles) > 0 {
+			limit += webBodyAllowance
+		}
+		if len(raw) > limit {
+			return http.StatusBadRequest, "request body too large"
+		}
 	}
 	if n := len(req.Images) + len(req.Refs); n > wsinbox.MaxImages {
 		return http.StatusRequestEntityTooLarge, fmt.Sprintf("%d images attached: a message holds at most %d", n, wsinbox.MaxImages)
@@ -304,7 +321,7 @@ func (d *Daemon) sendCommand(dir, replyID string, req messageRequest, local bool
 	if !slices.ContainsFunc(snap.Commands, func(c wslive.SlashCommand) bool { return c.Name == req.Command }) {
 		return http.StatusBadRequest, fmt.Sprintf("/%s is not a command this session runs", req.Command)
 	}
-	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, Command: &wsinbox.Command{Name: req.Command, Args: req.Args}}
+	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, Picks: req.Picks, Consoles: req.Consoles, Command: &wsinbox.Command{Name: req.Command, Args: req.Args}}
 	d.inboxMu.Lock()
 	name, _, err := wsinbox.Send(dir, entry, now)
 	d.inboxMu.Unlock()
@@ -394,7 +411,7 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 		fmt.Fprintf(d.log, "dashboard: write attachments: %v\n", err)
 		return http.StatusInternalServerError, "could not store the images"
 	}
-	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, Images: append(paths, written...), ImageNums: nums}
+	entry := wsinbox.Entry{Parts: []string{req.Text}, Chips: req.Chips, Topics: req.Topics, Mentions: req.Mentions, Picks: req.Picks, Consoles: req.Consoles, Images: append(paths, written...), ImageNums: nums}
 	name, merged, err := wsinbox.Send(dir, entry, now)
 	if err != nil {
 		removeFiles(written)
@@ -451,7 +468,8 @@ func removeFiles(paths []string) {
 }
 
 // heldAnswer is the page's copy of a held message taken back from the inbox
-// at dir: its text, its chips, topic notes, and mentions (never null), and
+// at dir: its text, its chips, topic notes, mentions, picks, and console
+// blocks (never null), and
 // the names and numbers of its images inside the inbox's attachments
 // directory. The images stay on disk:
 // the page shows them as chips that reference the files, and a re-send
@@ -476,7 +494,9 @@ func heldAnswer(dir string, entry wsinbox.Entry) map[string]any {
 	}
 	topics := append([]wsinbox.TopicNote{}, entry.Topics...)
 	mentions := append([]wsinbox.Mention{}, entry.Mentions...)
-	out := map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "topics": topics, "mentions": mentions, "images": images, "nums": nums}
+	picks := append([]wsinbox.Pick{}, entry.Picks...)
+	consoles := append([]wsinbox.Console{}, entry.Consoles...)
+	out := map[string]any{"text": strings.Join(entry.Parts, "\n\n"), "chips": chips, "topics": topics, "mentions": mentions, "picks": picks, "consoles": consoles, "images": images, "nums": nums}
 	if entry.Command != nil {
 		out["command"] = *entry.Command
 	}

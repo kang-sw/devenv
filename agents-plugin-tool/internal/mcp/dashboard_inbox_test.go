@@ -110,13 +110,73 @@ func TestDashboardInboxDrainTextAndJSONOutput(t *testing.T) {
 		t.Fatalf("message = %+v", m)
 	}
 
-	// A chip-only message has empty, never null, parts, topics, and mentions.
+	// A chip-only message has empty, never null, parts, topics, mentions,
+	// picks, and consoles.
 	if _, _, err := wsinbox.Send(dir, wsinbox.Entry{Chips: []wsinbox.Chip{{ID: "1", Answer: "a"}}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	out = callToolWithKey(t, f.server, 8, f.keyA, dashboardInboxDrainTool, map[string]any{"format": "json"})
-	if !strings.Contains(out, `"parts":[]`) || !strings.Contains(out, `"topics":[]`) || !strings.Contains(out, `"mentions":[]`) || strings.Contains(out, "null") {
+	if !strings.Contains(out, `"parts":[]`) || !strings.Contains(out, `"topics":[]`) || !strings.Contains(out, `"mentions":[]`) || !strings.Contains(out, `"picks":[]`) || !strings.Contains(out, `"consoles":[]`) || strings.Contains(out, "null") {
 		t.Fatalf("chip-only json = %q", out)
+	}
+}
+
+// TestDashboardInboxDrainDescriptionNamesWebElements: the drain description
+// lists the pick and console elements and their JSON fields.
+func TestDashboardInboxDrainDescriptionNamesWebElements(t *testing.T) {
+	var desc string
+	for _, tool := range tools() {
+		if tool["name"] == dashboardInboxDrainTool {
+			desc, _ = tool["description"].(string)
+		}
+	}
+	for _, want := range []string{
+		`<wb:pick url="..." selector="...">text</wb:pick>`,
+		`<wb:console url="...">one error per line</wb:console>`,
+		"picks: [{url, selector, text}]",
+		"consoles: [{url, lines}]",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("description lacks %q", want)
+		}
+	}
+}
+
+// TestDashboardInboxDrainCarriesPicksAndConsoles: a drained message's text
+// carries the pick and console elements after the mentions and before the
+// typed text, and its JSON carries them as picks and consoles.
+func TestDashboardInboxDrainCarriesPicksAndConsoles(t *testing.T) {
+	f := newLiveFixture(t, true)
+	dir := f.inboxDir(f.replyA)
+	entry := wsinbox.Entry{
+		Parts:    []string{"look at this"},
+		Mentions: []wsinbox.Mention{{Topic: "t", Text: "m"}},
+		Picks:    []wsinbox.Pick{{URL: "http://localhost:5173/settings", Selector: "#save", Text: "Save"}},
+		Consoles: []wsinbox.Console{{URL: "http://localhost:5173/settings", Lines: []string{"first error", "second error"}}},
+	}
+	if _, _, err := wsinbox.Send(dir, entry, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	out := callToolWithKey(t, f.server, 3, f.keyA, dashboardInboxDrainTool, map[string]any{"format": "json"})
+	var got struct {
+		Messages []struct {
+			Text     string            `json:"text"`
+			Picks    []wsinbox.Pick    `json:"picks"`
+			Consoles []wsinbox.Console `json:"consoles"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil || len(got.Messages) != 1 {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	m := got.Messages[0]
+	wantText := `<wb:mention topic="t">m</wb:mention>` + "\n\n" +
+		`<wb:pick url="http://localhost:5173/settings" selector="#save">Save</wb:pick>` + "\n\n" +
+		`<wb:console url="http://localhost:5173/settings">first error` + "\nsecond error</wb:console>\n\nlook at this"
+	if m.Text != wantText {
+		t.Fatalf("text = %q, want %q", m.Text, wantText)
+	}
+	if len(m.Picks) != 1 || m.Picks[0] != entry.Picks[0] || len(m.Consoles) != 1 || m.Consoles[0].URL != entry.Consoles[0].URL || strings.Join(m.Consoles[0].Lines, "|") != "first error|second error" {
+		t.Fatalf("picks = %+v, consoles = %+v", m.Picks, m.Consoles)
 	}
 }
 

@@ -40,7 +40,8 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.CardsScript}}</script>
 <script>{{.Assets.PreviewScript}}</script>
 <script>{{.Assets.FilesScript}}</script>{{if .Terminal}}
-<script>{{.Assets.TerminalScript}}</script>{{end}}
+<script>{{.Assets.TerminalScript}}</script>{{end}}{{if .SysOpen}}
+<script>{{.Assets.WebScript}}</script>{{end}}
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
@@ -279,8 +280,10 @@ the turn end. */}}
 composer's chips: "(ids) value" with the note beside it, a topic note as
 "[topic]" and its note. A held bubble lists one per chip, a delivered one
 one per line of the answer block its text started with. The message's
-mentions follow as "[topic] (id)" and an excerpt of the selected text. */}}
-{{define "achips"}}{{if or .Answers .Mentions}}<div class="hchips">{{range .Answers}}{{if .Topic}}<span class="achip tchip"><b>[{{.Topic}}]</b><span class="anote" title="{{.Note}}">{{.Note}}</span></span>{{else}}<span class="achip"><b>({{.IDs}})</b> {{or .Value "note"}}{{with .Note}}<span class="anote" title="{{.}}">{{.}}</span>{{end}}</span>{{end}}{{end}}{{range .Mentions}}<span class="achip mchip" title="{{.Text}}"><b>[{{.Topic}}]{{with .ID}} ({{.}}){{end}}</b><span class="anote">{{.Text}}</span></span>{{end}}</div>{{end}}{{end}}
+mentions follow as "[topic] (id)" and an excerpt of the selected text, then
+a picked page element as its selector and text, and attached console errors
+as "console xN" and the page's URL. */}}
+{{define "achips"}}{{if or .Answers .Mentions .Picks .Consoles}}<div class="hchips">{{range .Answers}}{{if .Topic}}<span class="achip tchip"><b>[{{.Topic}}]</b><span class="anote" title="{{.Note}}">{{.Note}}</span></span>{{else}}<span class="achip"><b>({{.IDs}})</b> {{or .Value "note"}}{{with .Note}}<span class="anote" title="{{.}}">{{.}}</span>{{end}}</span>{{end}}{{end}}{{range .Mentions}}<span class="achip mchip" title="{{.Text}}"><b>[{{.Topic}}]{{with .ID}} ({{.}}){{end}}</b><span class="anote">{{.Text}}</span></span>{{end}}{{range .Picks}}<span class="achip mchip pchip" title="{{.URL}}&#10;{{.Selector}}{{with .Text}}&#10;{{.}}{{end}}"><b>{{.Selector}}</b>{{with .Text}}<span class="anote">{{.}}</span>{{end}}</span>{{end}}{{range .Consoles}}<span class="achip mchip cchip" title="{{.URL}}{{range .Lines}}&#10;{{.}}{{end}}"><b>console &times;{{len .Lines}}</b><span class="anote">{{.URL}}</span></span>{{end}}</div>{{end}}{{end}}
 
 {{define "thumbs"}}<div class="thumbs">{{range .}}{{if .Src}}<a class="thumb" href="{{.Src}}" target="_blank" rel="noopener noreferrer" title="{{.Path}}"><img src="{{.Src}}" alt="{{.Name}}" loading="lazy">{{with .Num}}<span class="tnum">#{{.}}</span>{{end}}</a>{{else}}<span class="ipath">{{if .Num}}Image #{{.Num}}: {{.Path}}{{else}}[image: {{.Path}}]{{end}}</span>{{end}}{{end}}</div>{{end}}
 

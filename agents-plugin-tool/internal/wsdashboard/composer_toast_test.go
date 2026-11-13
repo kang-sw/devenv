@@ -28,7 +28,7 @@ var window = { WsToast: { show: function (t, o) { toasts.push([t, (o && o.kind) 
 function wsT(k, a) { return a === undefined ? k : k + ":" + a; }
 var answer = [true, {}];
 function post(route, body, done) { done(answer[0], answer[1]); }
-var ctext = { value: "", focus: function () {} }, imgs = [], imgSeq = 0, bmentions = [], chips = {}, interrupting = false, interruptedTurn = null, cmdSel = null;
+var ctext = { value: "", focus: function () {} }, imgs = [], imgSeq = 0, bmentions = [], wpicks = [], wconsoles = [], chips = {}, interrupting = false, interruptedTurn = null, cmdSel = null;
 function sendText() { return ctext.value; }
 function chipList() { return []; }
 function topicNotes() { return []; }
