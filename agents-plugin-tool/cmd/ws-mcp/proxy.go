@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,7 +21,6 @@ import (
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
-	"github.com/kang-sw/devenv/internal/wswake"
 )
 
 // hostedCallLinger bounds how long the daemon process stays, after it has
@@ -35,8 +35,8 @@ const hostedCallLinger = 2 * time.Minute
 // Each accepted hello becomes one mcp.Server built from the launcher's
 // process context — its environment, project root, and PID — never from
 // the daemon's own, so two sessions on one daemon are as separate as two
-// ws-mcp processes were. A CLI-mode hello runs `mailbox wait` in the daemon
-// and answers with its output and exit code.
+// ws-mcp processes were. A CLI-mode hello runs the shared CLI core in the
+// daemon and answers with its output and exit code.
 
 // proxyHost is the daemon's ProxyHandler.
 type proxyHost struct {
@@ -70,9 +70,9 @@ type proxyHost struct {
 // wait blocks until the replacement goroutine, if any, has ended.
 func (h *proxyHost) wait() { h.background.Wait() }
 
-// Accept builds the session for hello: an MCP server over the stream, or a
-// `mailbox wait` run.
+// Accept builds the session for hello: an MCP server or a one-shot CLI run.
 func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySession, error) {
+	hello = callerHello(hello)
 	env := mcp.EnvFromMap(hello.Env)
 	switch hello.Mode {
 	case wsdashboard.ProxyModeMCP:
@@ -107,12 +107,53 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		h.applyLANChange(server)
 		return &proxyMCPSession{server: server}, nil
 	case wsdashboard.ProxyModeCLI:
-		if len(hello.Argv) < 2 || hello.Argv[0] != "mailbox" || hello.Argv[1] != "wait" {
-			return nil, fmt.Errorf("the daemon runs only `mailbox wait` for a launcher, not %q", strings.Join(hello.Argv, " "))
-		}
-		return &proxyCLISession{args: hello.Argv[2:], cwd: hello.Cwd, ownerPID: hello.OwnerPID, environ: mcp.EnvFromMap(hello.Env), getenv: func(key string) string { return hello.Env[key] }}, nil
+		return &proxyCLISession{hello: hello, host: h}, nil
 	}
 	return nil, fmt.Errorf("unsupported mode %q", hello.Mode)
+}
+
+// callerHello resolves filesystem inputs against the caller, including defaults
+// when an older launcher omitted cache/config overrides. Passing empty options
+// to a store would otherwise fall back to the daemon's WS_* environment.
+func callerHello(hello wsdashboard.ProxyHello) wsdashboard.ProxyHello {
+	env := make(map[string]string, len(hello.Env)+2)
+	for key, value := range hello.Env {
+		env[key] = value
+	}
+	hello.Env = env
+	home := env["HOME"]
+	if runtime.GOOS == "windows" {
+		home = env["USERPROFILE"]
+	}
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if env["WS_CACHE_HOME"] == "" {
+		env["WS_CACHE_HOME"] = filepath.Join(home, ".cache", "ws@kang-sw-devenv")
+	}
+	if env["WS_CONFIG_HOME"] == "" {
+		env["WS_CONFIG_HOME"] = filepath.Join(home, ".ws")
+	}
+	absolute := func(path string) string {
+		if path != "" && !filepath.IsAbs(path) {
+			return filepath.Join(hello.Cwd, path)
+		}
+		return path
+	}
+	for _, key := range []string{"WS_CACHE_HOME", "WS_CONFIG_HOME", "WS_RSRC_ROOT", "WS_SKILLS_ROOT", "WS_MCP_PROJECT_ROOT", "WS_WORKTREE_DIR", "WS_MCP_DEBUG_LOG", "WS_MCP_RUNTIME_BINARY", "WS_MCP_RUNTIME_DIR"} {
+		if path, ok := env[key]; ok {
+			env[key] = absolute(path)
+		}
+	}
+	if manifests := env["WS_MCP_CONFIG_MANIFESTS"]; manifests != "" {
+		paths := strings.FieldsFunc(manifests, func(r rune) bool { return r == ';' || r == rune(os.PathListSeparator) })
+		for i, path := range paths {
+			paths[i] = absolute(path)
+		}
+		env["WS_MCP_CONFIG_MANIFESTS"] = strings.Join(paths, ";")
+	}
+	hello.ProjectRoot = absolute(hello.ProjectRoot)
+	return hello
 }
 
 // applyLANChange re-reads the global dashboard.lan_enabled through the
@@ -200,20 +241,14 @@ func (s *proxyMCPSession) Serve(ctx context.Context, stream io.ReadWriteCloser) 
 
 func (s *proxyMCPSession) Drain(ctx context.Context) bool { return s.server.Drain(ctx) }
 
-// proxyCLISession runs `mailbox wait` for a launcher: stderr lines go out
-// as they are written, and the final frame carries the exit code with the
-// whole stdout. The stream's end (the launcher closed, or the daemon
-// drains) cancels the wait at once, which clears its listening marker. cwd
-// is the launcher's working directory, against which a relative --root
-// resolves (the daemon's own is meaningless to the caller).
+// proxyCLISession frames a CLI invocation's output. Disconnect cancels the
+// invocation. Drain cancels long waits, but lets mutations finish, just like
+// hosted MCP calls, rather than interrupting a commit or ticket move halfway.
 type proxyCLISession struct {
-	args     []string
-	cwd      string
-	ownerPID int
-	// environ is the launcher's environment, which the wait's stores and
-	// their git run under; getenv reads it.
-	environ []string
-	getenv  func(string) string
+	hello    wsdashboard.ProxyHello
+	host     *proxyHost
+	server   atomic.Pointer[mcp.Server]
+	draining atomic.Bool
 
 	cancel func()
 	done   chan struct{}
@@ -246,18 +281,30 @@ func (s *proxyCLISession) Serve(ctx context.Context, stream io.ReadWriteCloser) 
 	}
 	var stdout bytes.Buffer
 	stderr := &frameWriter{emit: func(data string) { writeFrame(wsdashboard.ProxyCLIFrame{Stream: "stderr", Data: data}) }}
-	code := runMailboxWait(ctx, s.args, &stdout, stderr, s.cwd, s.ownerPID, s.environ, s.getenv, wswake.Mailbox)
+	command := hostedCLI{hello: s.hello, host: s.host, ctx: ctx, stdout: &stdout, stderr: stderr, env: mcp.EnvFromMap(s.hello.Env), serverReady: func(server *mcp.Server) {
+		s.server.Store(server)
+		if s.draining.Load() {
+			server.Drain(context.Background())
+		}
+	}}
+	code := command.run()
 	writeFrame(wsdashboard.ProxyCLIFrame{Final: true, ExitCode: code, Data: stdout.String()})
 }
 
 func (s *proxyCLISession) Drain(ctx context.Context) bool {
+	s.draining.Store(true)
 	s.mu.Lock()
 	cancel, done := s.cancel, s.done
 	s.mu.Unlock()
 	if cancel == nil {
 		return true
 	}
-	cancel()
+	if len(s.hello.Argv) >= 2 && s.hello.Argv[0] == "mailbox" && s.hello.Argv[1] == "wait" {
+		cancel()
+	}
+	if server := s.server.Load(); server != nil {
+		server.Drain(ctx)
+	}
 	select {
 	case <-done:
 		return true

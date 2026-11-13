@@ -1,5 +1,6 @@
 import importlib.util
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -91,129 +92,197 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
         # Unparseable versions still fail closed.
         self.assertFalse(launcher.version_compatible("garbage", contract, allow_same_minor=True))
 
-    def test_capabilities_probe_validates_full_contract_from_one_response(self):
+    def test_version_and_compatibility_checks_spawn_zero_ws_processes(self):
         launcher = load_launcher()
-        binary = Path("/tmp/ws-mcp")
-        calls = []
-        contract = self.capability_contract()
-
-        def fake_run_binary(got_binary, args, **kwargs):
-            calls.append((got_binary, tuple(args)))
-            return subprocess.CompletedProcess(
-                [str(got_binary), *args], 0, stdout=json.dumps(self.capability_payload()), stderr=""
-            )
-
-        launcher.run_binary = fake_run_binary
-
-        self.assertTrue(launcher.runtime_capabilities_compatible(binary, contract))
-        self.assertEqual(calls, [(binary, ("runtime", "capabilities"))])
-
-    def test_invalid_or_incomplete_capabilities_probe_is_not_compatible(self):
-        launcher = load_launcher()
-        binary = Path("/tmp/ws-mcp")
-        contract = self.capability_contract()
-
-        cases = {
-            "version": lambda payload: payload.update({"version": "0.17.9"}),
-            "patch_version": lambda payload: payload.update({"version": "0.18.0"}),
-            "protocol": lambda payload: payload.update({"mcp_protocol": "2024-11-05"}),
-            "tools": lambda payload: payload.update({"tools": []}),
-            "commands": lambda payload: payload.update({"commands": []}),
-        }
-        for name, mutate in cases.items():
-            with self.subTest(name=name):
-                payload = self.capability_payload()
-                mutate(payload)
-                launcher.run_binary = lambda got_binary, args, **kwargs: subprocess.CompletedProcess(
-                    [str(got_binary), *args], 0, stdout=json.dumps(payload), stderr=""
-                )
-
-                self.assertFalse(launcher.runtime_capabilities_compatible(binary, contract))
-
-    def test_exact_capabilities_contract_rejects_extra_surface(self):
-        launcher = load_launcher()
-        binary = Path("/tmp/ws-mcp")
-        contract = self.capability_contract()
-        contract["runtime_capabilities"] = {"match": "exact"}
-
-        payload = self.capability_payload()
-        payload["tools"] = ["runtime.info", "ws.not.in.contract"]
-        payload["commands"] = ["runtime.info"]
-        launcher.run_binary = lambda got_binary, args, **kwargs: subprocess.CompletedProcess(
-            [str(got_binary), *args], 0, stdout=json.dumps(payload), stderr=""
-        )
-
-        self.assertFalse(launcher.runtime_capabilities_compatible(binary, contract))
-
-        payload["tools"] = ["runtime.info"]
-        self.assertTrue(launcher.runtime_capabilities_compatible(binary, contract))
-
-    def test_exact_capabilities_contract_disables_weaker_fallback(self):
-        launcher = load_launcher()
-        import tempfile
-
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            binary = temp / "ws-mcp"
-            binary.write_text("stub", encoding="utf-8")
+            root = Path(temp_dir)
+            binary = root / "ws-mcp"
+            binary.write_bytes(b"not executable")
             contract = self.capability_contract()
-            contract["runtime_capabilities"] = {"match": "exact"}
+            contract_path = root / "runtime.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            with mock.patch.multiple(launcher.subprocess, run=mock.DEFAULT, Popen=mock.DEFAULT, call=mock.DEFAULT) as processes, \
+                 mock.patch.multiple(launcher.os, execv=mock.DEFAULT, execve=mock.DEFAULT, execvpe=mock.DEFAULT) as execs:
+                # Cold/no stamp must request repair, not a version/capabilities/
+                # temporary serve probe (nor an inspection-only daemon start).
+                self.assertFalse(launcher.runtime_fully_compatible(binary, contract, root))
+                launcher.write_runtime_metadata(binary, self.capability_payload())
+                self.assertTrue(launcher.runtime_fully_compatible(binary, contract, root))
+                launcher.write_compatibility_stamp(binary, contract, contract_path, root)
+                self.assertTrue(launcher.compatibility_stamp_current(binary, contract, contract_path, root))
+                launcher.clear_compatibility_stamp(root)
+                self.assertTrue(launcher.runtime_fully_compatible(binary, contract, root))
+                for spy in [*processes.values(), *execs.values()]:
+                    spy.assert_not_called()
 
-            launcher.run_binary = lambda got_binary, args, **kwargs: subprocess.CompletedProcess(
-                [str(got_binary), *args], 0, stdout=json.dumps({"version": "0.18.1"}), stderr=""
-            )
-
-            def forbidden_fallback(*args, **kwargs):
-                raise AssertionError("exact capability contracts must not use weaker fallback checks")
-
-            launcher.tools_compatible = forbidden_fallback
-            launcher.commands_compatible = forbidden_fallback
-
-            self.assertFalse(launcher.runtime_fully_compatible(binary, contract, temp))
-
-    def test_successful_capabilities_probe_skips_fanout(self):
+    def test_invalid_metadata_capabilities_are_not_compatible(self):
         launcher = load_launcher()
-        import tempfile
-
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            binary = temp / "ws-mcp"
-            binary.write_text("stub", encoding="utf-8")
+            binary = Path(temp_dir) / "ws-mcp"
+            binary.write_bytes(b"runtime")
+            cases = {
+                "version": {"version": "0.17.9"},
+                "patch_version": {"version": "0.18.0"},
+                "protocol": {"mcp_protocol": "2024-11-05"},
+                "tools": {"tools": []},
+                "commands": {"commands": []},
+            }
+            for name, change in cases.items():
+                with self.subTest(name=name):
+                    launcher.write_runtime_metadata(binary, dict(self.capability_payload(), **change))
+                    self.assertFalse(launcher.runtime_capabilities_compatible(binary, self.capability_contract()))
 
-            launcher.runtime_capabilities_compatible = lambda got_binary, contract, **kwargs: got_binary == binary
-
-            def forbidden_fanout(*args, **kwargs):
-                raise AssertionError("fallback validation should not run after a successful capabilities probe")
-
-            launcher.run_binary = forbidden_fanout
-            launcher.tools_compatible = forbidden_fanout
-            launcher.commands_compatible = forbidden_fanout
-
-            self.assertTrue(launcher.runtime_fully_compatible(binary, {"plugin_version": "0.18.1"}, temp))
-
-    def test_absent_or_invalid_capabilities_probe_falls_back(self):
+    def test_exact_optional_surface_inventory_rejects_extras(self):
         launcher = load_launcher()
-
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp = Path(temp_dir)
-            binary = temp / "ws-mcp"
-            binary.write_text("stub", encoding="utf-8")
-            calls = []
+            binary = Path(temp_dir) / "ws-mcp"
+            binary.write_bytes(b"runtime")
+            contract = dict(self.capability_contract(), runtime_capabilities={"match": "exact"})
+            payload = self.capability_payload()
+            payload["tools"].append("unexpected.tool")
+            launcher.write_runtime_metadata(binary, payload)
+            self.assertFalse(launcher.runtime_fully_compatible(binary, contract, binary.parent))
+            launcher.write_runtime_metadata(binary, self.capability_payload())
+            identity = launcher.read_runtime_metadata(binary)
+            self.assertEqual(identity["tools"], ["runtime.info"])
+            self.assertEqual(identity["commands"], ["runtime.info"])
+            self.assertTrue(launcher.runtime_fully_compatible(binary, contract, binary.parent))
 
-            def fake_run_binary(got_binary, args, **kwargs):
-                calls.append(tuple(args))
-                if tuple(args) == ("runtime", "capabilities"):
-                    return subprocess.CompletedProcess([str(got_binary), *args], 2, stdout="", stderr="unknown command")
-                if tuple(args) != ("version",):
-                    raise AssertionError(f"unexpected run_binary call: {args}")
-                return subprocess.CompletedProcess([str(got_binary), *args], 0, stdout="0.18.1\n", stderr="")
+    def test_legacy_release_identity_needs_no_new_capabilities_fields(self):
+        launcher = load_launcher()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            binary = Path(temp_dir) / "ws-mcp"
+            binary.write_bytes(b"old release")
+            contract = dict(self.capability_contract(), runtime_capabilities={"match": "exact"})
+            # The release installer obtains this identity from a versioned
+            # release and checksums, not the connecting plugin's desired version.
+            launcher.write_runtime_metadata(binary, {"version": "0.18.1"})
+            identity = launcher.read_runtime_metadata(binary)
+            self.assertEqual(identity["version"], "0.18.1")
+            self.assertIsNone(identity["tools"])
+            self.assertIsNone(identity["commands"])
+            self.assertTrue(launcher.runtime_fully_compatible(binary, contract, binary.parent))
 
-            launcher.run_binary = fake_run_binary
-            launcher.tools_compatible = lambda got_binary, contract, runtime_dir: True
-            launcher.commands_compatible = lambda got_binary, contract: True
+    def test_stamp_binds_hash_and_actual_accepted_version(self):
+        launcher = load_launcher()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            binary = root / "ws-mcp"
+            binary.write_bytes(b"first")
+            contract = self.capability_contract()
+            contract_path = root / "runtime.json"
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+            launcher.write_runtime_metadata(binary, {"version": "0.18.9-dev"})
+            launcher.write_compatibility_stamp(binary, contract, contract_path, root, "source")
+            stamp = json.loads(launcher.compatibility_stamp_path(root).read_text())
+            self.assertEqual(stamp["accepted_runtime_version"], "0.18.9-dev")
+            self.assertEqual(stamp["binary_sha256"], launcher.sha256_file(binary))
+            launcher.write_runtime_metadata(binary, {"version": "0.18.9-dev"})
+            self.assertTrue(launcher.compatibility_stamp_current(binary, contract, contract_path, root, "source"))
+            before = binary.stat()
+            binary.write_bytes(b"other")  # Same size, same mtime, different content.
+            os.utime(binary, ns=(before.st_atime_ns, before.st_mtime_ns))
+            self.assertIsNone(launcher.read_runtime_metadata(binary))
+            self.assertFalse(launcher.compatibility_stamp_current(binary, contract, contract_path, root, "source"))
+            self.assertFalse(launcher.runtime_fully_compatible(binary, contract, root))
+            # Even a producer cannot rebind an existing identity to other bytes.
+            with self.assertRaises(ValueError):
+                launcher.write_runtime_metadata(binary, dict(stamp, version="0.18.9-dev"))
 
-            self.assertTrue(launcher.runtime_fully_compatible(binary, {"plugin_version": "0.18.1"}, temp))
-            self.assertEqual(calls, [("runtime", "capabilities"), ("version",)])
+    def test_metadata_alone_does_not_assert_desired_version(self):
+        launcher = load_launcher()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            binary = Path(temp_dir) / "ws-mcp"
+            binary.write_bytes(b"old release")
+            launcher.write_runtime_metadata(binary, {"version": "0.17.9"})
+            self.assertFalse(launcher.runtime_fully_compatible(binary, self.capability_contract(), binary.parent))
+            launcher.runtime_metadata_path(binary).write_text('{"schema_version":1,"version":"0.18.1"}')
+            self.assertIsNone(launcher.read_runtime_metadata(binary))
+
+    def test_bootstrap_copy_and_install_preserve_hash_bound_identity(self):
+        launcher = load_launcher()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "build"
+            source.write_bytes(b"runtime")
+            launcher.write_runtime_metadata(source, self.capability_payload())
+            runtime_dir = root / "runtime"
+            binary = runtime_dir / "ws-mcp"
+            with mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": str(source), "WS_MCP_BOOTSTRAP_URL": ""}), \
+                 mock.patch.object(launcher.subprocess, "run") as run, mock.patch.object(launcher.subprocess, "Popen") as popen:
+                launcher.install_runtime(root, runtime_dir, binary, "asset", self.capability_contract(), "linux", "linux-amd64")
+                self.assertEqual(launcher.read_runtime_metadata(binary), launcher.read_runtime_metadata(source))
+                self.assertTrue(launcher.runtime_fully_compatible(binary, self.capability_contract(), runtime_dir))
+                self.assertEqual(sorted(p.name for p in runtime_dir.iterdir()), ["ws-mcp", "ws-mcp.metadata.json"])
+                run.assert_not_called()
+                popen.assert_not_called()
+
+    def test_bootstrap_without_identity_fails_without_running_binary(self):
+        launcher = load_launcher()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "build"
+            source.write_bytes(b"runtime")
+            with mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": str(source), "WS_MCP_BOOTSTRAP_URL": ""}), \
+                 mock.patch.object(launcher.subprocess, "run") as run:
+                with self.assertRaises(SystemExit):
+                    launcher.install_runtime(root, root / "runtime", root / "runtime" / "ws-mcp", "asset", self.capability_contract(), "linux", "linux-amd64")
+                run.assert_not_called()
+                self.assertEqual(list((root / "runtime").iterdir()), [])
+
+    def test_local_build_identity_comes_from_source_not_desired_contract(self):
+        launcher = load_launcher()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            tool = root / "tool"
+            (tool / "cmd" / "ws-mcp").mkdir(parents=True)
+            (tool / "internal" / "mcp").mkdir(parents=True)
+            (tool / "cmd" / "ws-mcp" / "main.go").write_text('var version = "0.18.9-dev"\nvar sourceCommit = "source"\n')
+            (tool / "internal" / "mcp" / "server.go").write_text('const ProtocolVersion = "2025-03-26"\n')
+            local = {"tool_dir": tool, "go": root / "go"}
+            binary = root / "ws-mcp"
+
+            def fake_go(argv, **kwargs):
+                self.assertEqual(argv[:3], [str(local["go"]), "build", "-o"])
+                Path(argv[3]).write_bytes(b"source build")
+                return subprocess.CompletedProcess(argv, 0)
+
+            with mock.patch.object(launcher.subprocess, "run", side_effect=fake_go) as run:
+                self.assertTrue(launcher.build_local_devenv_runtime(root, binary, self.capability_contract(), local, "linux"))
+            self.assertEqual(run.call_count, 1)  # Only go build; never the ws binary.
+            self.assertEqual(launcher.read_runtime_metadata(binary)["version"], "0.18.9-dev")
+            self.assertEqual(launcher.read_runtime_metadata(binary)["source_commit"], "source")
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ["tool", "ws-mcp", "ws-mcp.metadata.json"])
+            # Another minor cannot be made compatible by stamping the desired contract.
+            (tool / "cmd" / "ws-mcp" / "main.go").write_text('var version = "0.19.0-dev"\nvar sourceCommit = "source"\n')
+            with mock.patch.object(launcher.subprocess, "run", side_effect=fake_go):
+                self.assertFalse(launcher.build_local_devenv_runtime(root, binary, self.capability_contract(), local, "linux"))
+            self.assertEqual(launcher.read_runtime_metadata(binary)["version"], "0.18.9-dev")
+
+    def test_bootstrap_url_carries_verified_metadata(self):
+        launcher = load_launcher()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            binary = root / "ws-mcp"
+            payload = b"bootstrap runtime"
+            identity = dict(self.capability_payload(), schema_version=1, binary_sha256=hashlib.sha256(payload).hexdigest())
+
+            def download(url, dest):
+                if url.endswith(".metadata.json"):
+                    dest.write_text(json.dumps(identity))
+                else:
+                    dest.write_bytes(payload)
+
+            with mock.patch.dict(os.environ, {"WS_MCP_BOOTSTRAP_BINARY": "", "WS_MCP_BOOTSTRAP_URL": "https://example/ws-mcp"}), \
+                 mock.patch.object(launcher, "download_file", side_effect=download), \
+                 mock.patch.object(launcher.subprocess, "run") as run:
+                launcher.install_runtime(root, root, binary, "asset", self.capability_contract(), "linux", "linux-amd64")
+                self.assertEqual(launcher.read_runtime_metadata(binary), identity)
+                identity["binary_sha256"] = "incorrect"
+                with self.assertRaises(SystemExit):
+                    launcher.install_runtime(root, root, binary, "asset", self.capability_contract(), "linux", "linux-amd64")
+                run.assert_not_called()
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ["ws-mcp", "ws-mcp.metadata.json"])
 
     def test_download_repair_uses_process_unique_temp_paths(self):
         launcher = load_launcher()
@@ -244,10 +313,61 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             )
 
             self.assertEqual(binary.read_bytes(), payload)
-            self.assertEqual(len(destinations), 2)
-            self.assertEqual(len(set(destinations)), 2)
+            self.assertEqual(launcher.read_runtime_metadata(binary)["version"], "0.18.1")
+            # A release-tag override identifies the bytes, not the plugin's desired patch.
+            with mock.patch.dict(os.environ, {"WS_MCP_RELEASE_TAG": "v0.18.0"}):
+                launcher.install_downloaded_runtime(binary, temp, asset, {"plugin_version": "0.18.1", "release_repository": "example/repo"})
+            self.assertEqual(launcher.read_runtime_metadata(binary)["version"], "0.18.0")
+            self.assertFalse(launcher.runtime_fully_compatible(binary, self.capability_contract(), temp))
+            self.assertEqual(len(destinations), 4)
+            self.assertEqual(len(set(destinations)), 4)
             self.assertNotIn(f"{binary.name}.download", destinations)
             self.assertNotIn("SHA256SUMS.download", destinations)
+
+    def test_checksum_verified_release_repairs_locked_legacy_binary_in_place(self):
+        launcher = load_launcher()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            binary = root / "ws-mcp"
+            binary.write_bytes(b"legacy release")
+            digest = launcher.sha256_file(binary)
+            real_replace = os.replace
+
+            def replace(source, destination):
+                self.assertNotEqual(destination, binary, "identical legacy bytes need no executable replacement")
+                return real_replace(source, destination)
+
+            def download(url, destination):
+                if url.endswith("SHA256SUMS"):
+                    destination.write_text(f"{digest}  asset\n")
+                else:
+                    destination.write_bytes(binary.read_bytes())
+
+            contract = dict(self.capability_contract(), release_repository="example/repo", release_tag="v0.18.1")
+            with mock.patch.object(launcher, "download_file", side_effect=download), \
+                 mock.patch.object(launcher.os, "replace", side_effect=replace), \
+                 mock.patch.object(launcher.subprocess, "run") as run:
+                launcher.install_downloaded_runtime(binary, root, "asset", contract)
+                self.assertTrue(launcher.runtime_fully_compatible(binary, contract, root))
+                run.assert_not_called()
+            self.assertEqual(launcher.read_runtime_metadata(binary)["version"], "0.18.1")
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ["ws-mcp", "ws-mcp.metadata.json"])
+
+    def test_release_checksum_mismatch_never_stamps_or_installs(self):
+        launcher = load_launcher()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            binary = root / "ws-mcp"
+
+            def download(url, destination):
+                destination.write_text("wrong-checksum  asset\n" if url.endswith("SHA256SUMS") else "wrong binary")
+
+            with mock.patch.object(launcher, "download_file", side_effect=download), \
+                 mock.patch.object(launcher.subprocess, "run") as run:
+                with self.assertRaises(SystemExit):
+                    launcher.install_downloaded_runtime(binary, root, "asset", {"release_repository": "example/repo", "release_tag": "v0.18.1"})
+                run.assert_not_called()
+            self.assertEqual(list(root.iterdir()), [])
 
     def test_runtime_binary_name_is_contract_addressed(self):
         launcher = load_launcher()
@@ -506,112 +626,37 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             launcher.apply_skills_root_env(plugin_dir / "nope", env)
             self.assertNotIn("WS_SKILLS_ROOT", env)
 
-    def test_main_exports_plugin_roots_before_exec(self):
-        launcher = load_launcher()
+    def test_main_exports_caller_context_and_returns_daemon_exit_codes_without_exec(self):
         plugin_dir = LAUNCHER_PATH.parent.parent
-        captured = {}
-
-        def fake_execvpe(binary, args, env):
-            captured["binary"] = binary
-            captured["args"] = args
-            captured["env"] = dict(env)
-
-        launcher.host_os = lambda: "linux"
-        launcher.host_arch = lambda: "amd64"
-        launcher.bootstrap_runtime_forced = lambda: False
-        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
-        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
-        launcher.compatibility_stamp_current = lambda *args: True
-        launcher.set_breadcrumb_dir = lambda runtime_dir: None
-        launcher.clear_launch_breadcrumb = lambda: None
-        launcher.detect_project_root = lambda plugin_dir: None
-        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
-        launcher.note = lambda message: None
-
-        with mock.patch.object(launcher.os, "execvpe", fake_execvpe):
-            with mock.patch.dict(launcher.os.environ, {}, clear=True):
-                self.assertEqual(launcher.main(), 1)
-
-        self.assertEqual(captured["env"]["WS_RSRC_ROOT"], str(plugin_dir / "rsrc"))
-        self.assertEqual(captured["env"]["WS_SKILLS_ROOT"], str(plugin_dir / "skills"))
-
-    def test_main_exports_its_parent_as_the_harness_pid_over_an_inherited_one(self):
-        launcher = load_launcher()
-        captured = {}
-
-        def fake_execvpe(binary, args, env):
-            captured["env"] = dict(env)
-
-        launcher.host_os = lambda: "linux"
-        launcher.host_arch = lambda: "amd64"
-        launcher.bootstrap_runtime_forced = lambda: False
-        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
-        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
-        launcher.compatibility_stamp_current = lambda *args: True
-        launcher.set_breadcrumb_dir = lambda runtime_dir: None
-        launcher.clear_launch_breadcrumb = lambda: None
-        launcher.detect_project_root = lambda plugin_dir: None
-        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
-        launcher.note = lambda message: None
-
-        # A launcher started below another one inherits that one's value.
-        with mock.patch.object(launcher.os, "execvpe", fake_execvpe):
-            with mock.patch.dict(launcher.os.environ, {"WS_MCP_HARNESS_PID": "1"}, clear=True):
-                self.assertEqual(launcher.main(), 1)
-
-        self.assertEqual(captured["env"]["WS_MCP_HARNESS_PID"], str(os.getppid()))
-        # The daemon path sends the same environment in its hello.
-        hello = launcher.proxy_hello("mcp", ["serve", "--stdio"], captured["env"], "0.0.0")
-        self.assertEqual(hello["env"]["WS_MCP_HARNESS_PID"], str(os.getppid()))
-
-    def test_windows_abnormal_exit_writes_complementary_breadcrumb(self):
-        launcher = load_launcher()
-
-        launcher.host_os = lambda: "windows"
-        launcher.host_arch = lambda: "amd64"
-        launcher.bootstrap_runtime_forced = lambda: False
-        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
-        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
-        launcher.compatibility_stamp_current = lambda *args: True
-        launcher.detect_project_root = lambda plugin_dir: None
-        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
-        launcher.note = lambda message: None
-
-        with tempfile.TemporaryDirectory() as runtime_dir:
-            with mock.patch.object(launcher.subprocess, "call", return_value=3221225477):
-                with mock.patch.dict(
-                    launcher.os.environ, {"WS_MCP_RUNTIME_DIR": runtime_dir}, clear=True
-                ):
-                    self.assertEqual(launcher.main(), 3221225477)
-
-            abnormal_exit = Path(runtime_dir) / "last-abnormal-exit"
-            launch_error = Path(runtime_dir) / "last-launch-error"
-            self.assertTrue(abnormal_exit.exists())
-            self.assertIn("3221225477", abnormal_exit.read_text(encoding="utf-8"))
-            self.assertFalse(launch_error.exists())
-
-    def test_windows_clean_exit_does_not_write_breadcrumb(self):
-        launcher = load_launcher()
-
-        launcher.host_os = lambda: "windows"
-        launcher.host_arch = lambda: "amd64"
-        launcher.bootstrap_runtime_forced = lambda: False
-        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
-        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
-        launcher.compatibility_stamp_current = lambda *args: True
-        launcher.detect_project_root = lambda plugin_dir: None
-        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
-        launcher.note = lambda message: None
-
-        with tempfile.TemporaryDirectory() as runtime_dir:
-            with mock.patch.object(launcher.subprocess, "call", return_value=0):
-                with mock.patch.dict(
-                    launcher.os.environ, {"WS_MCP_RUNTIME_DIR": runtime_dir}, clear=True
-                ):
-                    self.assertEqual(launcher.main(), 0)
-
-            abnormal_exit = Path(runtime_dir) / "last-abnormal-exit"
-            self.assertFalse(abnormal_exit.exists())
+        for os_name, code in (("linux", 0), ("windows", 7)):
+            with self.subTest(os_name=os_name):
+                launcher = load_launcher()
+                captured = {}
+                def fake_proxy(link, argv, stdout, stderr, input_text=None):
+                    captured.update(env=dict(link.env), argv=argv)
+                    return code
+                with tempfile.TemporaryDirectory() as runtime_dir, \
+                     mock.patch.dict(os.environ, {"WS_MCP_RUNTIME_DIR": runtime_dir, "WS_MCP_HARNESS_PID": "1", "WS_MCP_LAUNCHER_DIRECT": "1"}, clear=True), \
+                     mock.patch.object(launcher, "host_os", return_value=os_name), \
+                     mock.patch.object(launcher, "host_arch", return_value="amd64"), \
+                     mock.patch.object(launcher, "compatibility_stamp_current", return_value=True), \
+                     mock.patch.object(launcher, "detect_project_root"), \
+                     mock.patch.object(launcher, "proxy_cli", side_effect=fake_proxy), \
+                     mock.patch.object(launcher.sys, "argv", ["launcher", "tools"]), \
+                     mock.patch.object(launcher.sys, "stdout", mock.Mock(buffer=io.BytesIO())), \
+                     mock.patch.object(launcher.sys, "stderr", mock.Mock(buffer=io.BytesIO())), \
+                     mock.patch.multiple(launcher.subprocess, run=mock.DEFAULT, Popen=mock.DEFAULT, call=mock.DEFAULT) as children, \
+                     mock.patch.object(launcher.os, "execvpe") as execute:
+                    self.assertEqual(launcher.main(), code)
+                    for child in children.values():
+                        child.assert_not_called()
+                    execute.assert_not_called()
+                    self.assertFalse((Path(runtime_dir) / "last-abnormal-exit").exists())
+                self.assertEqual(captured["argv"], ["tools"])
+                self.assertEqual(captured["env"]["WS_MCP_HARNESS_PID"], str(os.getppid()))
+                self.assertEqual(captured["env"]["WS_RSRC_ROOT"], str(plugin_dir / "rsrc"))
+                self.assertEqual(captured["env"]["WS_SKILLS_ROOT"], str(plugin_dir / "skills"))
+                self.assertIn("ws-mcp-launcher.py", captured["env"]["WS_MCP_CLI_NAME"])
 
     def test_local_devenv_build_env_recovers_home_when_absent(self):
         launcher = load_launcher()

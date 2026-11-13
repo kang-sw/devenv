@@ -207,6 +207,57 @@ Use the named symbols/searches to find edit sites after parallel work lands.
 | risk.test | high | Cross-version peers, process-spawn assertions and Windows antivirus acceptance require distinct coverage |
 | risk.security_or_contract | high | Authenticated daemon routing and independently updated clients must preserve isolation and T0 compatibility |
 
+## Implementation Checkpoint (1866275ec) - 2026-11-13
+
+No phase is complete; this ticket remains in `ready/` without Results.
+
+- `8ac8230ff`: hash-bound build/release/bootstrap/copy/seed identity replaces
+  executable compatibility probes; `dev.check_built` reads metadata.
+- `eaf75a31c`: existing product CLI handlers run in-process in the daemon,
+  with per-connection environment/root/owner and optional hello `stdin`.
+- `1866275ec`: daemon-only launcher dispatch, no ProcessStream/DIRECT/exec
+  escape, immediate disconnected MCP errors and initialize-only replay,
+  health/legacy hello discovery, Python mailbox re-arm commands, metadata
+  staging, synchronized launcher mirrors, and updated operational manuals.
+- Remote verification: metadata leaf passed 38 capabilities + 15 coldload +
+  9 dev tests and metadata-only Linux/Windows cross-build checks. Go CLI leaf
+  passed affected packages excluding launcher integration and the base LAN
+  timeout. Latest launcher run passed all 87 launcher Python tests.
+- Latest command: `bash D:/sys_lock.sh remote w5090 run
+  single-exe-launcher 15 --sync <worktree> -- 'export
+  PATH=$HOME/sdk/go/bin:$PATH; export PYTHONDONTWRITEBYTECODE=1;
+  python3 -m unittest discover -s agents-plugin/tests -p
+  "test_ws_mcp_launcher_*.py" -b && cd agents-plugin-tool && go test
+  ./cmd/ws-mcp -count=1 -run "TestLauncher"'` was not green:
+  `TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy` at
+  `launcher_proxy_test.go:283` expects exactly one staged file, but staging
+  now correctly carries `<binary>.metadata.json` too. The analogous Python
+  directory assertion was fixed in the preceding run: worker stop (f), a
+  second failure with the same stale-test root cause. The Go assertion is
+  intentionally left for the lead's resumed/higher-tier run.
+- Still required: finish Phase 1 integration/full gate and independent R1,
+  fixes-only R2; Phase 2 Pi waiter/bootstrap metadata producer and cleanup,
+  Pi tests and full gate. The daemon-created worker MCP bridge and holder
+  spawning remain untouched, owned by their separate branches.
+- No live daemon restart, image-name process kill, push, or Windows/AhnLab
+  live acceptance was performed. Combined worker MCP acceptance and the
+  Windows/AhnLab check remain lead/owner work.
+
+## Forward
+
+- Pre-existing remote Linux test: at base `91ca854f2`, locked w5090 command
+  `go test ./cmd/ws-mcp -count=1 -run
+  "^TestHostedConnectionSeeingALANChangeReplacesTheDaemon$"` reproduced
+  `daemon_proxy_test.go:505: not within 10s: the predecessor to exit`
+  (19.058 s). The CLI leaf diagnosed an exited zombie counted alive. Exclude
+  this one test from the phase gate and track its process-liveness test
+  separately; do not broaden this urgent ticket into lifecycle repair. The
+  lead also confirmed three w5090-environment holder failures at `v0.49.0`:
+  `TestUnattachedHolderIsListedWithItsCauseAndKilledUnderTheGuard`,
+  `TestGuardedKillHoldsAfterAWallClockStep`, and
+  `TestHolderOutlivesTheProcessThatStartedIt`. These four tests are the only
+  exclusions from the full Go gates.
+
 ## Phases
 
 ### Phase 1: Make the launcher daemon-only and inspect versions without execution
@@ -259,6 +310,31 @@ and `agents-plugin-tool/cmd/ws-mcp/launcher_proxy_test.go` as applicable:
 
 **Deferred boundary:** Phase 2 owns Pi-specific waiter/bootstrap callers and
 `dev.py`; the separate branch owns daemon-created workers' MCP command.
+
+### Result (fa267b5f8) - 2026-11-13
+
+- Phase 1 completed. Commits `8ac8230ff`, `eaf75a31c`, `1866275ec`,
+  `bb0d0e72b`, `f3305c01c`, and `fa267b5f8` implement daemon-only product
+  dispatch, metadata-only compatibility/identity, in-process CLI/Stop routing,
+  UTF-8 stdin, all supported stdio flag shapes, recovery-time repair, bounded
+  download/build waits, and synchronized launcher mirrors/manuals.
+- Lead continuation explicitly accepted the sidecar expectation change and
+  overrode the earlier stop (f). Native merge `e1c0b61a9` imported develop's
+  Python worker MCP bridge and Pi holder isolation without conflict; both
+  intents are retained. No duplicate bridge/holder implementation was added.
+- Full locked w5090 gate passed: 87 launcher Python tests; 24 wsflow tests
+  (2 environment skips); `go test ./... -count=1` with only the four
+  lead-confirmed environment exclusions in Forward. Independent R1 found
+  three Critical and two Important issues: stdio flag dispatch, locale input,
+  cold-repair bounds, worker-token CLI parity, and repair after a no-local
+  runtime startup. All were fixed. Locked fix verification passed all 92
+  launcher Python tests and Go launcher/worker-token CLI targets. Fixes-only
+  R2 was clean (0 Critical/Important/Minor); no third review or extra sweep.
+- `dev.py` metadata checks/seeding landed early with the identity seam;
+  Phase 2 still owns the Pi waiter/bootstrap callers. Workflow route/render
+  tools were unavailable; bundled conventions/reviewer guidance and native
+  Git were used. No live dashboard restart, Windows/AhnLab acceptance, or
+  push was performed. Live Windows/AhnLab acceptance remains owner-owned.
 
 ### Phase 2: Remove Pi/dev probe and waiter execution, then verify the topology
 

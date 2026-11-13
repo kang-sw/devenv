@@ -402,37 +402,47 @@ const stopHookMailboxEnv = "WS_MAILBOX"
 // no-op empty-slug path) so the harness writing the Stop payload never sees
 // a reader that exited without reading it.
 func mailboxCodexStopHook(args []string) {
-	fs := flag.NewFlagSet("mailbox codex-stop-hook", flag.ExitOnError)
+	os.Exit(runCodexStopHook(args, os.Stdin, os.Stdout, os.Stderr, "", os.Getenv, wsmailbox.Paths{}))
+}
+
+// runCodexStopHook is shared by the direct CLI and daemon hosting.
+// Input and stores belong to this invocation, never the daemon process.
+func runCodexStopHook(args []string, stdin io.Reader, stdout, stderr io.Writer, cwd string, getenv func(string) string, paths wsmailbox.Paths) int {
+	fs := flag.NewFlagSet("mailbox codex-stop-hook", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 	root := fs.String("root", ".", "caller's own worktree/clone root; only needed to resolve a worktree/clone-scope slug. Falls back to the Stop payload's own cwd, then WS_MCP_PROJECT_ROOT, when left at its default")
 	slug := fs.String("slug", "", `override for the mailbox slug "name@scope" to check; the shipped hook never passes this, reading WS_MAILBOX from its own environment instead. Empty (both) means nothing to check`)
 	reason := fs.String("reason", defaultStopHookReason, "instruction text returned to the model when unread mail is pending")
-	_ = fs.Parse(args)
+	parseErr := fs.Parse(args)
 
 	// Always read (and thus drain) stdin before any exit path, including
 	// the no-op ones below: exiting first would leave the harness's Stop
 	// payload write unread on this end.
-	payload, payloadErr := readStopHookPayload[codexStopHookPayload](os.Stdin)
+	payload, payloadErr := readStopHookPayload[codexStopHookPayload](stdin)
+	if parseErr != nil {
+		return 0
+	}
 
 	*slug = strings.TrimSpace(*slug)
 	if *slug == "" {
-		*slug = strings.TrimSpace(os.Getenv(stopHookMailboxEnv))
+		*slug = strings.TrimSpace(getenv(stopHookMailboxEnv))
 	}
 	if *slug == "" {
 		// No durable inbox to check (no WS_MAILBOX): this hook has nothing
 		// to do. The env-less wake path is the model's own background-wait
 		// registration at piggyback time, not this hook.
-		os.Exit(0)
+		return 0
 	}
 
 	if payloadErr != nil {
-		fmt.Fprintf(os.Stderr, "ws-mcp mailbox codex-stop-hook: warning: could not read Stop hook payload: %v\n", payloadErr)
-		os.Exit(0)
+		fmt.Fprintf(stderr, "ws-mcp mailbox codex-stop-hook: warning: could not read Stop hook payload: %v\n", payloadErr)
+		return 0
 	}
 	if payload.StopHookActive {
 		// Loop guard: this is the re-entry Stop from a prior block. Blocking
 		// again here would loop regardless of whether the agent drained the
 		// mail on its one injected instruction cycle.
-		os.Exit(0)
+		return 0
 	}
 
 	effectiveRoot := strings.TrimSpace(*root)
@@ -444,19 +454,19 @@ func mailboxCodexStopHook(args []string) {
 		effectiveRoot = payload.Cwd
 	}
 
-	notify, _, err := wsmailbox.ShouldNotifyNamedInboxUnread(*slug, defaultRoot(effectiveRoot))
+	effectiveRoot = defaultRootFrom(effectiveRoot, getenv)
+	if cwd != "" && !filepath.IsAbs(effectiveRoot) {
+		effectiveRoot = filepath.Join(cwd, effectiveRoot)
+	}
+	notify, _, err := paths.ShouldNotifyNamedInboxUnread(*slug, effectiveRoot)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ws-mcp mailbox codex-stop-hook: warning: could not check %s: %v\n", *slug, err)
-		os.Exit(0)
+		fmt.Fprintf(stderr, "ws-mcp mailbox codex-stop-hook: warning: could not check %s: %v\n", *slug, err)
+		return 0
 	}
-	if !notify {
-		os.Exit(0)
+	if notify {
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"decision": "block", "reason": *reason})
 	}
-
-	printJSONOrFatal("mailbox codex-stop-hook", map[string]any{
-		"decision": "block",
-		"reason":   *reason,
-	}, nil)
+	return 0
 }
 
 // defaultStopHookReason is the instruction handed back to the model through

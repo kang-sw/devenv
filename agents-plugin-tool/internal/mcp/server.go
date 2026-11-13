@@ -5548,7 +5548,13 @@ func appendRequiredString(raw any, value string) []string {
 	return append(required, value)
 }
 
-func LeadToolNames() []string {
+func LeadToolNames() []string { return leadToolNames(os.Getenv) }
+
+// LeadToolNamesFromEnv reports the runtime inventory under a connecting
+// caller's product mode, without applying a session's tool-profile filter.
+func LeadToolNamesFromEnv(env []string) []string { return leadToolNames(newProcEnv(env).get) }
+
+func leadToolNames(getenv func(string) string) []string {
 	names := make([]string, 0, len(tools()))
 	for _, tool := range tools() {
 		name, _ := tool["name"].(string)
@@ -5556,10 +5562,10 @@ func LeadToolNames() []string {
 		if permanentlyHiddenTool(name) {
 			continue
 		}
-		if NoAgentMode() && noAgentHiddenTool(name) {
+		if envFlagOn(getenv(envNoAgent)) && noAgentHiddenTool(name) {
 			continue
 		}
-		if hiddenUnlessAllowlisted(name) && !parseAllowedTools(os.Getenv(envAllowedTools))[name] {
+		if hiddenUnlessAllowlisted(name) && !parseAllowedTools(getenv(envAllowedTools))[name] {
 			continue
 		}
 		if name != "" {

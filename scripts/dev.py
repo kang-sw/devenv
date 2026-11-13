@@ -75,6 +75,7 @@ def build_local(launcher, scratch: Path) -> Path:
         raise RuntimeError("go is not on PATH")
     out = scratch / binary_name(launcher)
     print(f"building locally: {TOOL_DIR / 'cmd' / 'ws-mcp'}")
+    identity = launcher.source_runtime_metadata(TOOL_DIR)
     proc = subprocess.run(
         [go, "build", "-o", str(out), "./cmd/ws-mcp"],
         cwd=str(TOOL_DIR),
@@ -83,6 +84,7 @@ def build_local(launcher, scratch: Path) -> Path:
     )
     if proc.returncode != 0:
         raise RuntimeError(f"go build exited {proc.returncode}")
+    launcher.write_runtime_metadata(out, identity)
     return out
 
 
@@ -114,7 +116,8 @@ def build_remote(launcher, scratch: Path) -> Path:
     remote_cmd = (
         "export PATH=$HOME/sdk/go/bin:$PATH; "
         f"cd agents-plugin-tool && mkdir -p dist-x && "
-        f"CGO_ENABLED=0 GOOS={goos} GOARCH={goarch} go build -o dist-x/{name} ./cmd/ws-mcp"
+        f"CGO_ENABLED=0 GOOS={goos} GOARCH={goarch} go build -o dist-x/{name} ./cmd/ws-mcp && "
+        f"python3 scripts/write-runtime-metadata.py dist-x/{name}"
     )
     argv = [
         shutil.which("bash") or "bash", SYS_LOCK, "remote", REMOTE, "run", "dev-rerun-daemon", str(REMOTE_BUILD_MINUTES),
@@ -122,6 +125,7 @@ def build_remote(launcher, scratch: Path) -> Path:
         # fails with "sync source missing".
         "--sync", REPO.as_posix(),
         "--fetch", f"{REMOTE_DIST}/{name}={scratch.as_posix()}",
+        "--fetch", f"{REMOTE_DIST}/{name}.metadata.json={scratch.as_posix()}",
         "--", remote_cmd,
     ]
     print(f"building on {REMOTE} for {goos}/{goarch}")
@@ -129,8 +133,8 @@ def build_remote(launcher, scratch: Path) -> Path:
     if proc.returncode != 0:
         raise RuntimeError(f"remote build on {REMOTE} exited {proc.returncode}")
     out = scratch / name
-    if not out.is_file():
-        raise RuntimeError(f"remote build succeeded but {out} was not fetched")
+    if not out.is_file() or launcher.read_runtime_metadata(out) is None:
+        raise RuntimeError(f"remote build succeeded but {out} and its valid metadata were not fetched")
     return out
 
 
@@ -149,10 +153,10 @@ def check_built(launcher, built: Path) -> None:
     A failed gate is a warning, not an error: the daemon does not apply it,
     but a launcher would refuse the same binary as a runtime.
     """
-    proc = subprocess.run([str(built), "version"], capture_output=True, text=True, timeout=30, check=False)
-    if proc.returncode != 0:
-        raise RuntimeError(f"the built binary's `version` exited {proc.returncode}: {proc.stderr.strip()}")
-    print(f"built version: {proc.stdout.strip()}")
+    identity = launcher.read_runtime_metadata(built)
+    if identity is None:
+        raise RuntimeError(f"built binary has no valid hash-bound metadata: {built}")
+    print(f"built version: {identity['version']}")
     try:
         contract = launcher.read_runtime_contract(RUNTIME_CONTRACT)
         accepted = launcher.runtime_capabilities_compatible(built, contract, allow_same_minor=True)
@@ -241,6 +245,11 @@ def seed_package(launcher, plugin_dir: Path, built: Path) -> str:
     platform_name = f"{os_name}-{launcher.host_arch()}"
     runtime_dir = Path(os.environ.get("WS_MCP_RUNTIME_DIR", str(plugin_dir / ".runtime" / platform_name)))
     binary = runtime_dir / launcher.runtime_binary_name(contract, contract_path, os_name)
+    identity = launcher.read_runtime_metadata(built)
+    if identity is None:
+        return "skipped (build metadata missing or hash mismatch)"
+    if not launcher.runtime_capabilities_compatible(built, contract, allow_same_minor=True):
+        return "skipped (build identity incompatible with package)"
     fingerprint = launcher.local_devenv_source_fingerprint(plugin_dir, os_name)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     if not (binary.is_file() and launcher.sha256_file(binary) == launcher.sha256_file(built)):
@@ -254,6 +263,7 @@ def seed_package(launcher, plugin_dir: Path, built: Path) -> str:
         except OSError as exc:
             tmp.unlink(missing_ok=True)
             return f"skipped ({binary.name} not replaceable, likely in use: {exc})"
+    launcher.write_runtime_metadata(binary, identity)
     launcher.write_compatibility_stamp(binary, contract, contract_path, runtime_dir, fingerprint)
     if not launcher.compatibility_stamp_current(binary, contract, contract_path, runtime_dir, fingerprint):
         return "skipped (compatibility stamp not written)"
