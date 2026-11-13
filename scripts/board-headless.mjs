@@ -65,8 +65,13 @@
 //             deep links and out-of-view collapse on dashboard AND standalone
 //             full file pages. Dashboard-only: expanded swaps, overlapping keep
 //             sessions and the pinned column (use --width 1800).
-//   history-cards  The same card/paging probes without deep-link navigation;
-//             useful for independent evidence when navigation is blocked.
+//   history-cards  Card/paging probes without navigation/control/live checks.
+//   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
+//
+// History samples retain rAF geometry as diagnostic evidence and assert <=1px
+// on rAF -> zero-delay-task (post-paint) geometry, after ResizeObserver runs.
+// Navigation height reports arrive <=300ms apart while the existing keep is
+// OPEN. A separate post-end report may move content but must not re-arm it.
 //
 // `serve --history-entries 180` seeds long panel histories and prints the true
 // standalone file URLs too. `history --artifacts <dir>` saves measurements,
@@ -454,8 +459,8 @@ const IN_PAGE = () => {
   // keep session runs.
   bh.startSampler = (names) => {
     const s = bh.scroller(), t0 = performance.now(), samples = [];
-    bh.sampling = { samples, on: true, t0 };
-    const take = () => {
+    const state = bh.sampling = { samples, on: true, t0 };
+    const take = (phase) => {
       const y = {}, ty = {};
       for (const name of names) {
         const n = bh.section(name) || document.getElementById(name);
@@ -463,10 +468,21 @@ const IN_PAGE = () => {
         const m = n && /^matrix(3d)?\((.*)\)$/.exec(getComputedStyle(n).transform || "");
         ty[name] = m ? +m[2].split(",")[m[1] ? 13 : 5] : 0;
       }
-      samples.push({ t: performance.now() - t0, st: s.scrollTop, keep: !!bh.keeping(), y, ty });
+      const h = bh.history && bh.history();
+      samples.push({ t: performance.now() - t0, phase, st: s.scrollTop, keep: !!bh.keeping(), y, ty,
+        history: h ? { steps: h._wbHistorySteps, target: h._wbHistoryTarget?.id || null } : undefined });
     };
-    take();
-    const tick = () => { if (!bh.sampling.on) return; take(); requestAnimationFrame(tick); };
+    take('baseline');
+    const postPaint = !!bh.samplePostPaint;
+    const tick = () => {
+      if (!state.on) return;
+      take('raf');
+      // rAF precedes ResizeObserver delivery. A task queued here runs after
+      // that rendering update, including RO's reveal/keep corrections. Keep
+      // both phases as evidence, but history asserts the post-paint geometry.
+      if (postPaint) setTimeout(() => { if (state.on) take('post-paint'); }, 0);
+      requestAnimationFrame(tick);
+    };
     requestAnimationFrame(tick);
   };
   bh.mark = (label) => { if (bh.sampling && bh.sampling.on) bh.sampling.samples.push({ t: performance.now() - bh.sampling.t0, mark: label }); };
@@ -762,6 +778,7 @@ async function scenarioObserver(ctx) {
 // styles. Only payload height arrival and stream updates are synthetic.
 const HISTORY_PAGE = () => {
   const bh = window.__bh;
+  bh.samplePostPaint = true;
   bh.history = () => document.querySelector('.wb-history[data-history="HISTORY"]');
   bh.historyState = () => {
     const h = bh.history(), live = h.querySelector('.history-live'), clip = h.querySelector('.history-clip');
@@ -805,21 +822,23 @@ async function scenarioHistory(ctx) {
   const dir = path.resolve(ctx.args.artifacts || path.join(os.tmpdir(), `board-history-${Date.now()}`));
   fs.mkdirSync(dir, { recursive: true });
   const report = { url: ctx.args.url, kind, viewport: [ctx.width, ctx.height], measurements: [], omissions: [
-    'This long-panel fixture does not exercise an underfilled multi-resize page chain, exhausted-button states or live entry arrival (covered by the Node policy tests).',
+    'This long-panel fixture does not exercise an underfilled multi-resize page chain (Node policy-test scope).',
     'Standalone has no stream, swap, pinned column or doc-frame iframes; its real inline payload layout is used for late heights.'
   ] };
   if (kind !== 'standalone') report.omissions.pop();
   const measure = (label, data) => { report.measurements.push({ label, ...data }); log(`${label}: ${JSON.stringify(data)}`); };
   const stable = (label, samples, ids) => {
     fs.writeFileSync(path.join(dir, `${label}.json`), JSON.stringify(samples, null, 2));
-    const parts = segments(samples, ids), worst = Math.max(0, ...parts.flatMap((s) => ids.map((id) => s.worst[id]?.d || 0)));
-    measure(label, { maxDy: worst, frames: samples.filter((s) => s.y).length });
-    assert(worst <= 1, `${label}: screen y moved ${worst.toFixed(2)}px (>1px); evidence ${dir}/${label}.json`);
+    const painted = samples.filter((s) => s.mark || s.phase !== 'raf');
+    const worstOf = (list) => Math.max(0, ...segments(list, ids).flatMap((s) => ids.map((id) => s.worst[id]?.d || 0)));
+    const worst = worstOf(painted), rafWorst = worstOf(samples.filter((s) => s.mark || s.phase !== 'post-paint'));
+    assert(painted.some((s) => s.phase === 'post-paint'), `${label}: no post-paint samples`);
+    assert(painted.filter((s) => s.y).every((s) => ids.every((id) => s.y[id] != null)), `${label}: a tracked anchor disappeared`);
+    measure(label, { maxDy: worst, rafMaxDy: rafWorst, frames: painted.filter((s) => s.y).length });
+    assert(worst <= 1, `${label}: post-paint screen y moved ${worst.toFixed(2)}px (>1px); evidence ${dir}/${label}.json`);
   };
   const capture = async (name) => { const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
-  try {
-    await page.evaluate(HISTORY_PAGE);
-    assert(await page.evaluate(() => !!window.__bh.history()), 'seed HISTORY with serve --history-entries 180');
+  async function cards() {
     await page.evaluate(() => window.__bh.positionHistory());
     await waitQuiet(page);
     const first = await page.evaluate(() => window.__bh.historyState());
@@ -862,9 +881,11 @@ async function scenarioHistory(ctx) {
       if (r.before.live >= r.after.steps * 640) assert(r.before.pages === r.after.pages, 'loaded a page even though the clip was filled');
       assert(r.after.steps === r.before.steps + 1, 'clip did not step by one');
       await sleep(100);
+      r.settled = await page.evaluate(() => window.__bh.historyState());
+      if (r.after.live >= r.after.steps * 640) assert(r.settled.pages === r.after.pages, 'later resize over-loaded a clip that was already filled');
       if (r.after.pages < r.before.pages) break;
     }
-    measure('paging', { clicks: paging.map((r) => ({ steps: r.after.steps, pagesBefore: r.before.pages, pagesSync: r.after.pages, liveBefore: r.before.live })) });
+    measure('paging', { clicks: paging.map((r) => ({ steps: r.after.steps, pagesBefore: r.before.pages, pagesSync: r.after.pages, pagesAfterResize: r.settled.pages, liveBefore: r.before.live })) });
     assert(paging.some((r) => r.after.pages < r.before.pages), 'no embedded page was materialized');
 
     // Open an older payload still above the bottom-anchored window. Opening
@@ -925,6 +946,51 @@ async function scenarioHistory(ctx) {
     assert(collapsed.rows === collapseProbe.before.rows && collapsed.pages === collapseProbe.before.pages, 'collapse discarded materialized history');
     assert(JSON.stringify(collapsed.folds) === JSON.stringify(collapseProbe.before.folds), 'collapse changed open/closed folds');
 
+    // Dedicated fully-above expansion: unlike the first visible-clip click,
+    // this button is deliberately clicked while its whole card is out above.
+    const aboveExpansion = await page.evaluate((name) => {
+      const bh = window.__bh, topic = bh.history().closest('.topic');
+      const above = topic.getBoundingClientRect().bottom <= bh.viewTop(bh.scroller());
+      bh.startSampler([name]);
+      bh.history().querySelector('.history-older').click();
+      return { above, steps: bh.historyState().steps };
+    }, collapseProbe.name);
+    assert(aboveExpansion.above && aboveExpansion.steps === 2, 'fully-above expansion fixture was not above or did not expand');
+    await sleep(160);
+    stable('fully-above-expansion', await page.evaluate(() => window.__bh.stopSampler()), [collapseProbe.name]);
+
+    // Arm by showing the expanded card, then scroll the other way until it
+    // is fully BELOW. A tall real preceding payload supplies scroll range;
+    // shrinking a card below must not move that visible preceding topic.
+    await page.evaluate(() => window.__bh.positionHistory());
+    await page.waitForFunction(() => window.wbHistory.seen(window.__bh.history().closest('.topic'), '0px')?.visible, null, { timeout: 2000 });
+    const prior = await page.evaluate(() => {
+      const bh = window.__bh, topics = bh.topics();
+      return topics[topics.indexOf(bh.history().closest('.topic')) - 1]?.dataset.topic;
+    });
+    assert(prior, 'need a topic before HISTORY for the below-collapse probe');
+    if (kind !== 'standalone') await growFrame(page, prior, 1000);
+    else await page.evaluate((name) => {
+      const body = window.__bh.section(name).querySelector('.tdoc > .doc-body');
+      if (!body) throw new Error('preceding topic has no inline payload');
+      body.style.paddingBottom = (parseFloat(getComputedStyle(body).paddingBottom) + 1000) + 'px';
+    }, prior);
+    await waitQuiet(page);
+    const belowCollapse = await page.evaluate((name) => {
+      const bh = window.__bh, topic = bh.history().closest('.topic'), s = bh.scroller();
+      const before = bh.historyState();
+      s.scrollTop += topic.getBoundingClientRect().top - bh.viewBottom(s) - 40;
+      bh.startSampler([name]);
+      return { below: topic.getBoundingClientRect().top >= bh.viewBottom(s), before };
+    }, prior);
+    assert(belowCollapse.below && belowCollapse.before.steps === 2, 'below-collapse fixture was not expanded below the viewport');
+    await page.waitForFunction(() => window.__bh.history()._wbHistorySteps === 1, null, { timeout: 3000 });
+    await sleep(160);
+    stable('below-viewport-collapse', await page.evaluate(() => window.__bh.stopSampler()), [prior]);
+    const belowAfter = await page.evaluate(() => window.__bh.historyState());
+    assert(belowAfter.rows === belowCollapse.before.rows && JSON.stringify(belowAfter.folds) === JSON.stringify(belowCollapse.before.folds),
+      'below collapse lost rows or disclosure choices');
+
     // Reuse the dashboard's actual pin button and its real #bpins scroller.
     if (kind !== 'standalone') {
       assert(ctx.width >= 1600, 'history dashboard pinned-column check requires --width 1800');
@@ -958,8 +1024,26 @@ async function scenarioHistory(ctx) {
       });
       await waitQuiet(page);
     }
+  }
+  try {
+    await page.evaluate(HISTORY_PAGE);
+    assert(await page.evaluate(() => !!window.__bh.history()), 'seed HISTORY with serve --history-entries 180');
+    if (ctx.navigationOnly) {
+      // Recreate the previous 214px rAF excursion's near-full clip: load a
+      // page and let an older payload grow before navigating. This is fixture
+      // setup, not an alternative history implementation or keep session.
+      const older = await page.evaluate(() => {
+        const bh = window.__bh, h = bh.history();
+        h.querySelector('.history-older').click(); h.querySelector('.history-older').click();
+        const row = h.querySelector('.history-live > .wb-entry.panel');
+        row.querySelector('.entry-panel').open = true;
+        return row.id;
+      });
+      await growEntry(page, older, 420);
+      await waitQuiet(page);
+    } else await cards();
     if (ctx.cardsOnly) {
-      report.omissions.push('history-cards intentionally excludes deep-link probes; run history for navigation checks.');
+      report.omissions.push('history-cards intentionally excludes navigation/control/live probes; run history for those checks.');
       return;
     }
 
@@ -997,11 +1081,43 @@ async function scenarioHistory(ctx) {
     }, target);
     await sleep(100);
     await page.evaluate((id) => window.__bh.startSampler([id]), target);
-    await growEntry(page, late, 240);
-    await sleep(750);
-    await growEntry(page, late, 180);
-    await sleep(200);
+    const arrivals = [];
+    for (const px of [240, 180]) {
+      const before = await page.evaluate(() => ({ t: performance.now(), keep: !!window.__bh.keeping(),
+        target: window.__bh.history()._wbHistoryTarget?.id }));
+      assert(before.keep && before.target === target, 'deep-link height report did not arrive during the open navigation session');
+      if (arrivals.length) assert(before.t - arrivals.at(-1).t <= 300, 'deep-link height reports were more than 300ms apart');
+      await growEntry(page, late, px);
+      const after = await page.evaluate(() => ({ t: performance.now(), keep: !!window.__bh.keeping(), target: window.__bh.history()._wbHistoryTarget?.id }));
+      // Actual arrival lies between before/after. This conservative upper
+      // bound proves the reports themselves, not just our calls, are <=300ms.
+      if (arrivals.length) assert(after.t - arrivals.at(-1).t <= 300, 'actual deep-link report spacing could exceed 300ms');
+      assert(after.keep && after.target === target, 'navigation session ended while the height report was arriving');
+      arrivals.push({ ...before, px, after });
+      await sleep(150);
+    }
     stable('deep-link-late-heights', await page.evaluate(() => window.__bh.stopSampler()), [target]);
+    measure('deep-link-open-session-reports', { arrivals, gapsMs: arrivals.slice(1).map((r, i) => r.t - arrivals[i].t) });
+
+    // Quiet/cap/user end is the existing shared helper's authority. A later
+    // report may move the target, but must not resurrect navigation or raise
+    // its clip. Wait for actual end, never infer it from a fixed sleep.
+    await page.waitForFunction(() => !window.__bh.keeping() && window.__bh.history()._wbHistoryTarget === null, null, { timeout: 6000 });
+    const ended = await page.evaluate((id) => ({ steps: window.__bh.historyState().steps,
+      y: document.getElementById(id).getBoundingClientRect().top }), target);
+    await page.evaluate((id) => window.__bh.startSampler([id]), target);
+    await growEntry(page, late, 600);
+    await sleep(200);
+    const postEnd = await page.evaluate((id) => ({ steps: window.__bh.historyState().steps,
+      target: window.__bh.history()._wbHistoryTarget, keep: !!window.__bh.keeping(),
+      y: document.getElementById(id).getBoundingClientRect().top,
+      samples: window.__bh.stopSampler() }), target);
+    fs.writeFileSync(path.join(dir, 'deep-link-post-end.json'), JSON.stringify(postEnd.samples, null, 2));
+    measure('deep-link-post-end', { before: ended, steps: postEnd.steps, target: postEnd.target, keep: postEnd.keep,
+      dyAllowed: postEnd.y - ended.y });
+    assert(postEnd.steps === ended.steps && postEnd.target === null && !postEnd.keep && postEnd.samples.filter((s) => s.y).every((s) =>
+      !s.keep && s.history.steps === ended.steps && s.history.target === null),
+      'post-session height report re-revealed, re-armed or resurrected navigation');
 
     // The deep-linked card has now really been in view: its next complete
     // exit must collapse, preserving folds, just like a manually expanded card.
@@ -1015,6 +1131,56 @@ async function scenarioHistory(ctx) {
       preserved: JSON.stringify(window.__bh.deepFolds) === JSON.stringify(window.__bh.historyState().folds) }));
     measure('deep-link-in-to-out-collapse', deepCollapse);
     assert(deepCollapse.preserved, 'deep-link collapse changed disclosure choices');
+
+    // Deep-link materialization exhausted the embedded pages. A collapsed
+    // clip still needs its button; repeated clicks only raise the 640px clip
+    // until all content fits, at which point the button must hide.
+    await page.evaluate(() => window.__bh.positionHistory());
+    await waitQuiet(page);
+    const exhausted = await page.evaluate(() => window.__bh.historyState());
+    assert(exhausted.pages === 0 && exhausted.button && exhausted.live > 640, 'exhausted pages hid the button while clipped content remained');
+    let fitted = exhausted, controlClicks = 0;
+    while (fitted.button && controlClicks < 100) {
+      const before = fitted;
+      await page.evaluate(() => window.__bh.history().querySelector('.history-older').click());
+      await sleep(20);
+      fitted = await page.evaluate(() => window.__bh.historyState());
+      assert(fitted.pages === 0 && fitted.steps === before.steps + 1, 'exhausted-page click changed more than the clip step');
+      controlClicks++;
+    }
+    measure('exhausted-controls', { clicks: controlClicks, steps: fitted.steps, live: fitted.live, button: fitted.button });
+    assert(!fitted.button && fitted.live <= fitted.steps * 640, 'button did not hide when exhausted content fitted the clip');
+
+    // Return to the latest window through a real viewport exit. Then append
+    // one cloned, rendered system-event chip as a faithful live-arrival HTML
+    // fixture: no copied stream helpers or fabricated CSS, on either host.
+    await page.evaluate(() => {
+      const bh = window.__bh, s = bh.scroller();
+      s.scrollTop += bh.history().closest('.topic').getBoundingClientRect().bottom - bh.viewTop(s) + 20;
+    });
+    await page.waitForFunction(() => window.__bh.history()._wbHistorySteps === 1, null, { timeout: 3000 });
+    await page.evaluate(() => window.__bh.positionHistory());
+    await waitQuiet(page);
+    const arrivalBefore = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), live = h.querySelector('.history-live'), before = bh.historyState();
+      const src = Array.from(live.children).find((n) => n.matches('.system-run'));
+      if (!src) throw new Error('no rendered system event for the arrival fixture');
+      const chip = src.cloneNode(true), entry = chip.querySelector('.wb-entry'), old = entry.id;
+      chip.innerHTML = chip.innerHTML.replaceAll(old, 'e999001');
+      chip.dataset.key = 'system:e999001'; chip.dataset.historyAnchor = 'e999001'; chip.open = false;
+      chip.querySelector('.entry-text').textContent = 'Live arrival fixture';
+      chip.id = 'bh-live-chip'; live.appendChild(chip);
+      return before;
+    });
+    await sleep(100);
+    const arrival = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), clip = h.querySelector('.history-clip').getBoundingClientRect(), chip = document.getElementById('bh-live-chip');
+      return { ...bh.historyState(), newestAtBottom: Math.abs(chip.getBoundingClientRect().bottom - clip.bottom) <= 1 };
+    });
+    measure('live-arrival-fixture', { stepsBefore: arrivalBefore.steps, stepsAfter: arrival.steps,
+      rowsAdded: arrival.rows - arrivalBefore.rows, newestAtBottom: arrival.newestAtBottom, clipScrollTop: arrival.scrollTop });
+    assert(arrival.steps === arrivalBefore.steps && arrival.rows === arrivalBefore.rows + 1 && arrival.newestAtBottom && arrival.scrollTop === 0,
+      'live arrival did not stay at the bottom of an unchanged clip');
   } catch (e) {
     report.failure = e.message;
     report.omissions.push('Stopped at the recorded failure; subsequent checks in the scenario were not run.');
@@ -1031,6 +1197,7 @@ const SCENARIOS = {
   observer: scenarioObserver,
   history: scenarioHistory,
   'history-cards': (ctx) => scenarioHistory({ ...ctx, cardsOnly: true }),
+  'history-paint': (ctx) => scenarioHistory({ ...ctx, navigationOnly: true }),
 };
 
 // --- main ----------------------------------------------------------------------
