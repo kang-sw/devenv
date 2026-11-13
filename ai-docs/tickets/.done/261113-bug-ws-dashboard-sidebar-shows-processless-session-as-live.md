@@ -3,6 +3,7 @@ title: "Dashboard sidebar shows a processless hosted session as live while its p
 related:
   - 261113-bug-ws-daemon-replace-stops-hosted-sessions
   - 261113-bug-ws-launcher-dev-rebuild-replaces-daemon-mid-work
+completed: 2026-11-13
 ---
 
 # Dashboard sidebar shows a processless hosted session as live
@@ -58,3 +59,8 @@ so no dashboard.js state is involved.
 - `261113-bug-ws-daemon-replace-stops-hosted-sessions` (masked exit reason:
   why the swap leaves `child_exited` rather than `stop`).
 - `261113-bug-ws-launcher-dev-rebuild-replaces-daemon-mid-work` (the trigger).
+
+
+## Resolution (2026-11-13)
+
+Fixed by a97c95953 (merge 05ddba10d): RailRow.Stopped() is now true for any live hosted row with a host exit, whatever the reason; the old stop/killed check is UserStopped(). The moon icon was removed (owner: gray text suffices) and the harness badge of stopped rows is dimmed. child_exited rows keep their reason line; only user-stopped rows collapse to one line. The four-state lifecycle ticket may later replace Stopped/UserStopped.
