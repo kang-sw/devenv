@@ -470,6 +470,9 @@
     "261113-feat-ws-dashboard-worktree-delete": {
       "registered_at": "2026-11-13T07:16:15Z"
     },
+    "261113-feat-ws-git-merge-large-source-file-warning": {
+      "registered_at": "2026-11-13T13:37:56Z"
+    },
     "261113-feat-ws-pi-worker-marker-env-guard": {
       "registered_at": "2026-11-13T01:46:15Z"
     },
