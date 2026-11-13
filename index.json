@@ -383,7 +383,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T13:36:13Z"
+        "touched_at": "2026-11-13T13:37:00Z",
+        "impl": {
+          "branch": "impl/develop/frown-grunt-giant"
+        }
       }
     },
     "261112-research-ws-ade-desktop-shell-and-rename": {
