@@ -449,13 +449,14 @@ def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Pa
 
 
 def local_devenv_cache_package(plugin_dir: Path) -> str | None:
-    # Recognize the repo-local plugin install regardless of on-disk layout.
-    # Claude Code runs a directory-source marketplace plugin from the install.sh
-    # snapshot (~/.claude/plugins/ws-plugin/<pkg>), while Codex/Claude package
-    # installs live under <host>/plugins/cache/kang-sw-devenv/<pkg>/<version>.
-    # Match the ws/wsflow package segment under any per-user (.codex/.claude)
-    # plugin tree; the gitignored .local-devenv-runtime marker is the actual
-    # dev opt-in, validated separately. This is HOME-independent.
+    # Recognize a plugin copy installed under a per-user host plugin tree:
+    # the install.sh snapshot (~/.claude/plugins/ws-plugin/<pkg>) or a package
+    # install under <host>/plugins/cache/kang-sw-devenv/<pkg>/<version>. Match
+    # the ws/wsflow package segment under any per-user (.codex/.claude) plugin
+    # tree. This is HOME-independent. A plugin running straight from its source
+    # checkout has no such segment; read_local_devenv_contract accepts that case
+    # through the marker's own source_root instead. Either way the gitignored
+    # .local-devenv-runtime marker is the only dev opt-in.
     parts = plugin_dir.resolve().parts
     if "plugins" not in parts:
         return None
@@ -467,9 +468,17 @@ def local_devenv_cache_package(plugin_dir: Path) -> str | None:
     return None
 
 
+def path_within(child: Path, root: Path, *, case_insensitive: bool) -> bool:
+    # Resolved-path containment by path components; Windows paths compare
+    # case-insensitively.
+    child_parts, root_parts = child.resolve().parts, root.resolve().parts
+    if case_insensitive:
+        child_parts = tuple(part.lower() for part in child_parts)
+        root_parts = tuple(part.lower() for part in root_parts)
+    return child_parts[:len(root_parts)] == root_parts
+
+
 def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
-    if local_devenv_cache_package(plugin_dir) is None:
-        return None
     marker = plugin_dir / ".local-devenv-runtime"
     if not marker.is_file():
         return None
@@ -497,6 +506,12 @@ def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
         resolved[key] = path
     if not resolved["source_root"].is_dir():
         note("local devenv runtime contract is inactive: source_root does not exist")
+        return None
+    # The marker counts for a per-user plugin install, or for a plugin running
+    # from inside the marker's own source checkout; anywhere else it is stale.
+    if local_devenv_cache_package(plugin_dir) is None and not path_within(
+        plugin_dir, resolved["source_root"], case_insensitive=os_name == "windows"
+    ):
         return None
     if not resolved["tool_dir"].is_dir() or not (resolved["tool_dir"] / "cmd" / "ws-mcp").is_dir():
         note("local devenv runtime contract is inactive: tool_dir is not a ws-mcp module")

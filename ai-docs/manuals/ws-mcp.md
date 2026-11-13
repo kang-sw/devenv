@@ -1382,13 +1382,18 @@ paths run checks without publishing.
 
 ## Local Devenv Repair
 
-Local development has one repository-specific repair exception. When the
-installed plugin path is under `~/.codex/plugins/cache/kang-sw-devenv/<ws|wsflow>/`
-or `~/.claude/plugins/cache/kang-sw-devenv/<ws|wsflow>/` and the installed cache
-contains a valid `.local-devenv-runtime` contract, the launcher forces local
-runtime repair before accepting an already compatible cache-local binary. Both
-the Codex and Claude plugin caches are recognized so the same source-build
-dogfood loop works on either host.
+Local development has one repository-specific repair exception. The
+gitignored `.local-devenv-runtime` marker in the plugin directory is the only
+opt-in: with no marker the launcher takes the normal release path whatever the
+plugin's location. With a valid contract, the launcher forces local runtime
+repair before accepting an already compatible cache-local binary when the
+plugin runs from a per-user host plugin tree (`~/.codex/plugins/cache/kang-sw-devenv/<ws|wsflow>/`,
+`~/.claude/plugins/cache/kang-sw-devenv/<ws|wsflow>/`, or the install.sh
+snapshot under `~/.claude/plugins/ws-plugin/<ws|wsflow>/`), or straight from
+its source checkout, i.e. when the plugin directory lies inside the marker's own
+`source_root` (resolved paths; case-insensitive on Windows). Both the Codex and
+Claude plugin trees are recognized so the same source-build dogfood loop works
+on either host.
 
 The contract format is:
 

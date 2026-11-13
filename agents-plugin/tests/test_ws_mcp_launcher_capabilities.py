@@ -357,6 +357,59 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             # A non-plugin path must not activate local repair.
             self.assertIsNone(launcher.local_devenv_cache_package(home / "somewhere" / "ws"))
 
+    def test_plugin_running_from_its_source_checkout_honours_the_marker(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plugin_dir = root / "devenv" / "agents-plugin-wsflow"
+            plugin_dir.mkdir(parents=True)
+            self.write_local_contract(plugin_dir, package_root=root)
+
+            # No plugins/cache segment: only the marker's own source_root
+            # contains the plugin.
+            self.assertIsNone(launcher.local_devenv_cache_package(plugin_dir))
+            self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "linux"))
+            self.assertTrue(launcher.runtime_install_forced(plugin_dir, "linux"))
+            self.assertIsNotNone(launcher.local_devenv_source_fingerprint(plugin_dir, "linux"))
+            # Windows compares the containment case-insensitively.
+            shouting = Path(str(plugin_dir).upper())
+            with mock.patch.object(launcher.Path, "resolve", lambda self, strict=False: self):
+                self.assertTrue(launcher.path_within(shouting, root / "devenv", case_insensitive=True))
+                self.assertFalse(launcher.path_within(shouting, root / "devenv", case_insensitive=False))
+
+            # A marker whose source_root does not contain the plugin is stale
+            # unless the plugin sits in a per-user plugin tree.
+            elsewhere = root / "elsewhere" / "agents-plugin-wsflow"
+            elsewhere.mkdir(parents=True)
+            (elsewhere / ".local-devenv-runtime").write_text(
+                (plugin_dir / ".local-devenv-runtime").read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            self.assertFalse(launcher.local_devenv_runtime_enabled(elsewhere, "linux"))
+            # A sibling that only shares a name prefix is not inside it either.
+            sibling = root / "devenv-other" / "agents-plugin-wsflow"
+            sibling.mkdir(parents=True)
+            (sibling / ".local-devenv-runtime").write_text(
+                (plugin_dir / ".local-devenv-runtime").read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            self.assertFalse(launcher.local_devenv_runtime_enabled(sibling, "linux"))
+
+    def test_no_marker_keeps_the_release_path_for_cache_and_source_layouts(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cache = root / ".claude" / "plugins" / "cache" / "kang-sw-devenv" / "wsflow" / "0.49.0"
+            source = root / "devenv" / "agents-plugin-wsflow"
+            for plugin_dir in (cache, source):
+                plugin_dir.mkdir(parents=True)
+                # A valid contract elsewhere must not leak in: only a marker in
+                # the plugin directory opts a plugin in.
+                self.assertIsNone(launcher.read_local_devenv_contract(plugin_dir, "linux"))
+                self.assertFalse(launcher.local_devenv_runtime_enabled(plugin_dir, "linux"))
+                self.assertFalse(launcher.runtime_install_forced(plugin_dir, "linux"))
+                self.assertIsNone(launcher.local_devenv_source_fingerprint(plugin_dir, "linux"))
+
     def test_apply_rsrc_root_env_points_runtime_at_staged_rsrc_tree(self):
         launcher = load_launcher()
 

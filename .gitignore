@@ -18,6 +18,7 @@ ai-docs/.deps/
 claude/infra/__pycache__/
 agents-plugin/.runtime/
 agents-plugin/.local-devenv-runtime
+agents-plugin-wsflow/.runtime/
 agents-plugin-wsflow/.local-devenv-runtime
 agents-plugin-pi/.runtime/
 agents-plugin-pi/.local-devenv-runtime
