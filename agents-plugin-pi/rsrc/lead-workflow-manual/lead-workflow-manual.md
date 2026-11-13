@@ -68,11 +68,15 @@ choose.
   downstream-observable behavior.
 - **Check** (a fourth kind of ask, a gate rather than a decision class, for
   asks outside a ticket's Open Decision Queue, which keeps the three
-  classes): you ask the user to look at, verify, or approve
-  something, such as "OK this draft and I'll proceed". It is the user's
-  judgment, not a choice among options and not your own call, so it is never
-  an announced default or a technical call, and the user answers each check
-  individually.
+  classes): you ask the user to look at, verify, or confirm
+  a finished artifact, or an action whose choice is already settled, such as
+  "OK this draft and I'll proceed". It is the user's judgment, not a choice
+  among options and not your own call, so it is never an announced default or
+  a technical call. Any "should we do X?" or "which one?" ask, a yes/no one
+  included, is a policy question with options, not a check, since a check
+  offers nothing to choose between.
+  Write each check as one verifiable thing, never several bundled, so the
+  user answers each individually.
 - An item you raise that reverses a prior decision is a policy question, even
   when you can cite a reason for the reversal; a reversal the user states is
   their answer, not a new question.

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>Range picker mockup (261113-feat-ws-tracker-start-date-range-picker)</title></head>
+<body>
+<div id="mk" style="font:13px system-ui,sans-serif;color:#d7dbe3;background:#14161b;padding:16px;display:flex;flex-direction:column;gap:22px"></div>
+<script>
+(function(){
+var C={bg:'#1d2027',line:'#2c313b',span:'rgba(122,162,247,.22)',hand:'#7aa2f7',dim:'#7b8494'};
+function el(t,s,h){var e=document.createElement(t);if(s)e.style.cssText=s;if(h!=null)e.innerHTML=h;return e;}
+function key(d){return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate();}
+function D(y,m,d){return new Date(y,m,d);}
+function month(y,m,o){
+var box=el('div','background:'+C.bg+';border:1px solid '+C.line+';border-radius:10px;padding:10px 7px;width:266px;box-sizing:border-box');
+var head=el('div','display:flex;justify-content:space-between;align-items:center;margin:0 6px 6px');
+head.appendChild(el('span','color:'+C.dim+';font-size:15px','&#8249;'));head.appendChild(el('b','',y+'년 '+(m+1)+'월'));head.appendChild(el('span','color:'+C.dim+';font-size:15px','&#8250;'));
+box.appendChild(head);
+var g=el('div','display:grid;grid-template-columns:repeat(7,36px);row-gap:4px;justify-content:center');
+'일월화수목금토'.split('').forEach(function(w){g.appendChild(el('div','text-align:center;color:'+C.dim+';font-size:11px',w));});
+var first=D(y,m,1).getDay(),n=D(y,m+1,0).getDate();
+for(var i=0;i<first;i++)g.appendChild(el('div',''));
+var lo=o.lo?key(o.lo):null,hi=o.hi?key(o.hi):null,s=o.start?key(o.start):null,d=o.due?key(o.due):null;
+for(var day=1;day<=n;day++){
+var k=key(D(y,m,day)),inS=lo!==null&&k>=lo&&k<=hi;
+var st='position:relative;height:30px;line-height:30px;text-align:center;';
+if(inS)st+='background:'+C.span+';';
+if(k===s&&k===d)st+='border-radius:15px;';else if(k===s)st+='border-radius:15px 0 0 15px;';else if(k===d)st+='border-radius:0 15px 15px 0;';
+var c=el('div',st);
+if(k===s)c.appendChild(el('div','position:absolute;left:0;top:0;width:10px;height:30px;border-radius:15px 0 0 15px;background:'+C.hand+';cursor:ew-resize'));
+if(k===d)c.appendChild(el('div','position:absolute;right:0;top:0;width:10px;height:30px;border-radius:0 15px 15px 0;background:'+C.hand+';cursor:ew-resize'));
+if(o.ghost&&k===d)c.appendChild(el('div','position:absolute;left:0;top:0;width:9px;height:28px;border-radius:15px 0 0 15px;border:1px dashed '+C.hand+';border-right:none;cursor:ew-resize'));
+c.appendChild(el('span','position:relative;'+((k===s||k===d)?'font-weight:700;color:#fff':''),day));
+g.appendChild(c);}
+box.appendChild(g);return box;}
+function field(label,val){var r=el('div','display:flex;align-items:center;gap:8px;flex:1');r.appendChild(el('span','color:'+C.dim+';width:28px;font-size:12px',label));
+var b=el('div','flex:1;border:1px solid '+C.line+';border-radius:6px;padding:4px 8px;font:12px ui-monospace,monospace;'+(val?'':'color:'+C.dim),val||'YYYY-MM-DD');r.appendChild(b);r.appendChild(el('span','color:'+C.dim,'&#215;'));return r;}
+function inputs(a,b,side){var w=el('div','display:flex;'+(side?'gap:14px':'flex-direction:column;gap:6px')+';margin-top:8px;padding:0 4px');w.appendChild(field('시작',a));w.appendChild(field('마감',b));return w;}
+function card(title,note,body){var w=el('div','');w.appendChild(el('div','font-weight:600;margin-bottom:4px',title));w.appendChild(el('div','color:'+C.dim+';font-size:12px;margin-bottom:8px',note));w.appendChild(body);return w;}
+var mk=document.getElementById('mk');
+var a=el('div','display:inline-block;width:266px');a.appendChild(month(2026,10,{start:D(2026,10,10),due:D(2026,10,19),lo:D(2026,10,10),hi:D(2026,10,19)}));a.appendChild(inputs('2026-11-10','2026-11-19',false));
+mk.appendChild(card('A. 한 달 (기본 상태, ~280px)','양 끝 반원 손잡이를 드래그해 start·due 이동. 닫을 때 한 번 저장',a));
+var b=el('div','display:inline-flex;flex-direction:column');var row=el('div','display:flex;gap:10px;align-items:stretch');
+row.appendChild(month(2026,8,{start:D(2026,8,21),lo:D(2026,8,21),hi:D(2026,8,30)}));
+row.appendChild(el('div','display:flex;align-items:center;color:'+C.dim+';font-size:12px;writing-mode:vertical-rl','10월 · 11월 건너뜀'));
+row.appendChild(month(2026,11,{due:D(2026,11,4),lo:D(2026,11,1),hi:D(2026,11,4)}));
+b.appendChild(row);b.appendChild(inputs('2026-09-21','2026-12-04',true));
+mk.appendChild(card('B. 두 패널로 확장 (9월 | 12월)','손잡이를 패널 끝 너머로 끌면 그 패널만 넘어감. 각 패널은 자기 화살표로 따로 이동',b));
+var c=el('div','display:inline-block;width:266px');c.appendChild(month(2026,10,{due:D(2026,10,19),lo:D(2026,10,19),hi:D(2026,10,19),ghost:true}));c.appendChild(inputs('','2026-11-19',false));
+mk.appendChild(card('C. due만 있는 항목','due 날에 오른쪽 반원 + 점선 유령 왼쪽 반원. 유령을 왼쪽으로 끌어내면 start가 생김',c));
+})();
+</script>
+
+</body>
+</html>

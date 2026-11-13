@@ -50,6 +50,7 @@ function closeDialog() { dialogsClosed++; dlg.open = false; }
 function openDialog(kind, d) { opened.push([kind, d.store]); }
 function leavePage() { calls.push('leavePage'); }
 function collapse() { calls.push('collapse'); }
+function keepItemDraft() {}
 function clearTimeout(id) { cleared.push(id); }
 function regMsg(form, text, warn) { var m = form.querySelector('#regmsg'); m.textContent = text; m.hidden = !text; m.warn = !!warn; }
 var dlg = { open: false, form: null, hid: null, querySelector: function (s) { return s === 'form' ? dlg.form : s === '.tkhid' ? dlg.hid : null; } };

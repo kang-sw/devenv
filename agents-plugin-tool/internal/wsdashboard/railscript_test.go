@@ -215,8 +215,8 @@ check("existing branch, custom folder", R.worktreeBody("/w/r", { mode: "old", na
 // Claude.
 check("defaults send the harness alone", R.leadBody("/w/r", { harness: "claude", model: "", effort: "", mode: "" }), { root: "/w/r", harness: "claude", plugin_isolation: "default" });
 check("picked options", R.leadBody("/w/r", { harness: "claude", model: "opus", effort: "high", mode: "plan" }),
-  { root: "/w/r", harness: "claude", model: "opus", effort: "high", permission_mode: "plan", plugin_isolation: "default" });
-check("pi takes no permission mode", R.leadBody("/w/r", { harness: "pi", model: "m", effort: "off", mode: "auto" }), { root: "/w/r", harness: "pi", model: "m", effort: "off", plugin_isolation: "default" });
+  { root: "/w/r", harness: "claude", plugin_isolation: "default", model: "opus", effort: "high", permission_mode: "plan" });
+check("pi takes no permission mode", R.leadBody("/w/r", { harness: "pi", model: "m", effort: "off", mode: "auto" }), { root: "/w/r", harness: "pi", plugin_isolation: "default", model: "m", effort: "off" });
 
 check("isolation is always sent", [R.leadBody("/w/r", { harness: "pi", isolation: "isolated" }).plugin_isolation, R.leadBody("/w/r", { harness: "pi" }).plugin_isolation], ["isolated", "default"]);
 
@@ -374,6 +374,20 @@ check("the saved command", JSON.parse(railStore.load("ws.dashboard.draft.sess1")
 cmdSel = null; restoreDraft();
 check("the command comes back as the selection", cmdSel, { name: "compact", args: "keep the plan" });
 cmdSel = null;
+
+// a board note's images: a pasted one's marker leaves the item and topic
+// notes and the chip on reload, and a reference image a note alone names
+// comes back
+ctext.value = ""; imgs = [{ n: 1, name: "a.png", ref: "00aa-1.png" }, { n: 2, name: "pasted.png", data: "xx" }, { n: 3, name: "p2.png", data: "yy" }];
+chips = { "4": { id: "4", answer: "", note: "see [Image #1] and [Image #2]" } };
+boardAnswers = { "4": { note: "see [Image #1] and [Image #2]", noteOpen: true }, "t:plan": { note: "[Image #3] look", noteOpen: true } };
+notes = []; listeners.input(); advance(400);
+ctext.value = ""; imgs = []; chips = {}; items = {}; boardAnswers = {};
+restoreDraft();
+check("lost markers leave the notes and the chip", [boardAnswers["4"].note, boardAnswers["t:plan"].note, chips["4"].note], ["see [Image #1] and ", "look", "see [Image #1] and "]);
+check("a note's reference image comes back", imgs.map(function (p) { return [p.n, p.ref]; }), [[1, "00aa-1.png"]]);
+check("the restore counts every lost image", notes, ["js.draft.imgslost:2"]);
+ctext.value = ""; imgs = []; chips = {}; items = {}; boardAnswers = {};
 
 // a send clears the draft; what is left is saved again as the next draft
 ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; grid.setAttribute("data-tab", "convo");
