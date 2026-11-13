@@ -39,3 +39,7 @@ the session.
 ## Related
 
 - `261113-bug-ws-launcher-dev-rebuild-replaces-daemon-mid-work`
+
+## Owner Direction
+
+- 2026-11-13: avoid minor version bumps from now on. Cross-version changes should be designed as T0/T1 (additive, alias-preserving) wherever possible; a T2 change or minor bump needs explicit owner approval.
