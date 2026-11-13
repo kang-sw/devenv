@@ -358,6 +358,7 @@
   "js.preview.missing": "根目錄下沒有此檔案",
   "js.preview.none": "此檔案無法在此顯示：{0}",
   "js.preview.openext": "以預設應用程式開啟",
+  "js.preview.reload": "重新載入",
   "js.preview.sandbox": "在與儀表板隔離的沙箱中執行",
   "js.preview.source.note": "以原始碼顯示：HTML 和 SVG 僅在工作階段根目錄內轉譯",
   "js.rel.d": "{0}天",

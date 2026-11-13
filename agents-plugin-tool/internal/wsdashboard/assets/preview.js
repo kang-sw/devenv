@@ -87,7 +87,14 @@
   // The header's own action, open in the default app, runs a host command:
   // only a browser on the daemon's machine is offered it, and the daemon
   // checks again.
-  function actions() { return local() ? [{ icon: "external-link", title: wsT("js.preview.openext"), run: openExternal }] : []; }
+  // The reload action loads the card again, whatever it shows: the route is
+  // asked afresh (a new capability for a frame, so it works for a sandboxed
+  // frame, whose window is opaque to the page), and the content is redrawn.
+  function actions() {
+    var a = local() ? [{ icon: "external-link", title: wsT("js.preview.openext"), run: openExternal }] : [];
+    a.push({ icon: "refresh-cw", title: wsT("js.preview.reload"), run: load });
+    return a;
+  }
   function head(card, icon, text) {
     var d = card.data;
     card.title({ icon: icon, name: baseName(d.path), sub: d.path, badge: text });

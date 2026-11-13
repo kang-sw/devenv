@@ -358,6 +358,7 @@
   "js.preview.missing": "ルート内にそのファイルはありません",
   "js.preview.none": "このファイルはここでは表示できません: {0}",
   "js.preview.openext": "既定のアプリで開く",
+  "js.preview.reload": "再読み込み",
   "js.preview.sandbox": "ダッシュボードから隔離されたサンドボックスで実行されます",
   "js.preview.source.note": "ソースとして表示しています。HTML と SVG はセッションルート内でのみレンダリングされます",
   "js.rel.d": "{0}日",

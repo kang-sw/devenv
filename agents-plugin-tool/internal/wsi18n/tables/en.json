@@ -358,6 +358,7 @@
   "js.preview.missing": "No such file under the root",
   "js.preview.none": "This file can't be shown here: {0}",
   "js.preview.openext": "Open in the default app",
+  "js.preview.reload": "Reload",
   "js.preview.sandbox": "Runs in a sandbox, isolated from the dashboard",
   "js.preview.source.note": "Shown as source: HTML and SVG render only under the session root",
   "js.rel.d": "{0}d",

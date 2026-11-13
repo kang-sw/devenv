@@ -358,6 +358,7 @@
   "js.preview.missing": "Não há esse arquivo sob a raiz",
   "js.preview.none": "Este arquivo não pode ser exibido aqui: {0}",
   "js.preview.openext": "Abrir no aplicativo padrão",
+  "js.preview.reload": "Recarregar",
   "js.preview.sandbox": "Executa em um ambiente isolado do painel",
   "js.preview.source.note": "Exibido como código-fonte: HTML e SVG só são renderizados sob a raiz da sessão",
   "js.rel.d": "{0} d",
