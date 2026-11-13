@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d027b49160890a53
 sage-review-completeness-reviewed: d027b49160890a53
+completed: 2026-11-14
 ---
 
 # Dashboard session rail: reliable reorder, hover rename/copy, depth-1 session tree, context menu
