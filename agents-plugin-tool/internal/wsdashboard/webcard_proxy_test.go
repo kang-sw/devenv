@@ -537,6 +537,11 @@ func TestWebCardInjectsOnlyIntoHTML(t *testing.T) {
 		w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
 		_, _ = w.Write(buf.Bytes())
 	})
+	u.mux.HandleFunc("/badgzip", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = io.WriteString(w, webDevPage)
+	})
 	// Not real brotli: the proxy must not touch an encoding it cannot decode.
 	const brBody = "\x1b\x00<html><head></head>\x03"
 	u.mux.HandleFunc("/br", func(w http.ResponseWriter, r *http.Request) {
@@ -570,6 +575,12 @@ func TestWebCardInjectsOnlyIntoHTML(t *testing.T) {
 	}
 	if cl := h.Get("Content-Length"); cl != "" && cl != strconv.Itoa(len(body)) {
 		t.Errorf("gzip page Content-Length %s, body %d bytes", cl, len(body))
+	}
+	// A gzip header that does not decode: the decoder has read part of the
+	// body, so the page answers 502 rather than a truncated gzip body.
+	code, h, body = webGet(t, proxy+"/badgzip", map[string]string{"Accept-Encoding": "gzip"})
+	if code != http.StatusBadGateway || h.Get("Content-Encoding") != "" || !strings.Contains(body, errWebBadGzip.Error()) {
+		t.Errorf("bad gzip page = %d (Content-Encoding %q): %q", code, h.Get("Content-Encoding"), body)
 	}
 	code, h, body = webGet(t, proxy+"/br", map[string]string{"Accept-Encoding": "br"})
 	if code != http.StatusOK || h.Get("Content-Encoding") != "br" || body != brBody {
@@ -956,6 +967,29 @@ func TestWebCardSameTargetKeepsItsEntry(t *testing.T) {
 	}
 	if d, _, err := g.registerURL("http://127.0.0.1/"); err != nil || d.base != "http://127.0.0.1:80" {
 		t.Errorf("default port = %+v %v", d, err)
+	}
+}
+
+// TestWebCardNestedRootsKeepTheirOwnBase pins that a directory's base is
+// relative to the registering session's root: a repository session and a
+// subfolder session registering the same directory each get their own
+// entry and base, while the same root registering again keeps its entry.
+func TestWebCardNestedRootsKeepTheirOwnBase(t *testing.T) {
+	g, _ := newTestWebRegistry(t)
+	repo := t.TempDir()
+	webWrite(t, repo, "app/site/index.html", "<html></html>")
+	sub := filepath.Join(repo, "app")
+	outer, _, err := g.registerDir(repo, "app/site/index.html")
+	if err != nil || outer.base != "app/site" {
+		t.Fatalf("repository root = %+v %v, want base app/site", outer, err)
+	}
+	inner, _, err := g.registerDir(sub, "site/index.html")
+	if err != nil || inner == outer || inner.base != "site" {
+		t.Errorf("subfolder root = %+v %v, want its own entry with base site", inner, err)
+	}
+	again, _, err := g.registerDir(repo, "app/site")
+	if err != nil || again != outer {
+		t.Errorf("repository root again = %+v %v, want its first entry", again, err)
 	}
 }
 

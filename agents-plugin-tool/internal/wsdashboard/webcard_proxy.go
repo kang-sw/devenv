@@ -102,6 +102,9 @@ var (
 	// errWebRedirect is the proxy's refusal of a redirect to another
 	// origin than the target's own.
 	errWebRedirect = errors.New("the page redirected to another origin, which a web card does not follow: open it in a tab")
+	// errWebBadGzip is a gzip HTML page whose header does not decode: by
+	// then the decoder has read part of the body, so it cannot pass on.
+	errWebBadGzip = errors.New("the page's gzip body does not decode")
 )
 
 // webRefusal is a target the registry refuses to register: not a localhost
@@ -224,7 +227,7 @@ func (g *webRegistry) sweep() {
 			continue
 		}
 		if now.Sub(l.active) >= g.idle {
-			fmt.Fprintf(g.log, "dashboard: web card listener %s on port %d closed after %s idle\n", e.key, l.port, g.idle)
+			fmt.Fprintf(g.log, "dashboard: web card listener %q on port %d closed after %s idle\n", e.key, l.port, g.idle)
 			g.closeListener(l)
 		}
 	}
@@ -383,7 +386,10 @@ func (g *webRegistry) registerDir(root, p string) (*webEntry, string, error) {
 	if g.closed {
 		return nil, "", errWebClosed
 	}
-	e, created := g.entry("dir:"+realDir, func(e *webEntry) { e.dir, e.base = realDir, filepath.ToSlash(base) })
+	// Keyed by the root too: base is relative to it, so sessions whose
+	// roots nest (a repository and a subfolder of it) each get their own
+	// entry for the same directory, with their own base.
+	e, created := g.entry("dir:"+realRoot+"\x00"+realDir, func(e *webEntry) { e.dir, e.base = realDir, filepath.ToSlash(base) })
 	if _, err := g.ensure(e); err != nil {
 		if created {
 			g.forget(e)
@@ -587,7 +593,7 @@ func (g *webRegistry) reverseProxy(target *url.URL) *httputil.ReverseProxy {
 			return injectResponse(res)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			if errors.Is(err, errWebRedirect) {
+			if errors.Is(err, errWebRedirect) || errors.Is(err, errWebBadGzip) {
 				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
@@ -725,7 +731,7 @@ func injectResponse(res *http.Response) error {
 	case "gzip", "x-gzip":
 		zr, err := gzip.NewReader(res.Body)
 		if err != nil {
-			return nil
+			return errWebBadGzip
 		}
 		src = zr
 	default:
