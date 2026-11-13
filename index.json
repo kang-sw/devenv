@@ -432,19 +432,6 @@
     "261113-feat-ws-dashboard-hosted-claude-stream-agent-messages": {
       "registered_at": "2026-11-13T10:22:34Z"
     },
-    "261113-feat-ws-dashboard-rail-usage-gutter": {
-      "registered_at": "2026-11-13T08:05:08Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T08:29:44Z",
-        "impl": {
-          "branch": "impl/develop/lunar-coil-phony"
-        }
-      }
-    },
     "261113-feat-ws-dashboard-session-four-state-lifecycle": {
       "registered_at": "2026-11-13T10:12:43Z"
     },
@@ -510,6 +497,9 @@
     },
     "261114-bug-ws-dashboard-panel-frames-reload-on-topic-update": {
       "registered_at": "2026-11-13T16:07:55Z"
+    },
+    "261114-bug-ws-dashboard-search-palette-minors": {
+      "registered_at": "2026-11-13T16:54:43Z"
     },
     "261114-bug-ws-pi-version-probe-never-refreshes": {
       "registered_at": "2026-11-13T16:28:48Z"
