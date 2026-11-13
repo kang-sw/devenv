@@ -4520,9 +4520,10 @@
     return h + '</div></div>';
   }
   // The open picker after a change: the grid draws again (a focused arrow keeps its focus), the
-  // inputs other than the focused one take the ends, and the error, the panel count, and the
-  // menu's width follow.
-  function rangeDraw() {
+  // inputs other than src (the one being typed in, if any) take the ends, and the error, the panel
+  // count, and the menu's width follow. A drag or a clear leaves no src: a focused input still
+  // follows it.
+  function rangeDraw(src) {
     var r = MN && MN.rg, c = $('tkrcal');
     if (!r || !c) return;
     var f = document.activeElement, fa = f && c.contains(f) && f.getAttribute('data-act') === 'm-rpage' ? [f.getAttribute('data-side'), f.getAttribute('data-dir')] : null;
@@ -4533,7 +4534,7 @@
     ['s', 'd'].forEach(function (side) {
       var i = $('tkr' + side);
       if (!i) return;
-      if (i !== f && i.value !== r[side]) i.value = r[side];
+      if (i !== src && i.value !== r[side]) i.value = r[side];
       if (r.err) { i.setAttribute('aria-invalid', 'true'); i.setAttribute('aria-describedby', 'tkrerr'); } else { i.removeAttribute('aria-invalid'); i.removeAttribute('aria-describedby'); }
     });
     $('tkrerr').hidden = !r.err;
@@ -4545,7 +4546,7 @@
     var r = MN && MN.step === 'due' && MN.rg, side = t.getAttribute('data-rin');
     if (!r) return;
     r[side] = t.value || ''; r.last = side; r.err = rangeBad(r);
-    rangeFit(r); rangeDraw();
+    rangeFit(r); rangeDraw(t);
   }
   // the month arrows (view only) and the clear buttons (that end in the pick; the picker stays open)
   function rangeAct(k, a) {

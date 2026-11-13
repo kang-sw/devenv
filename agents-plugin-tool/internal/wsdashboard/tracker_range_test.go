@@ -242,6 +242,19 @@ done();
 	}
 }
 
+// TestTrackerRangeDrawFollowsDrag pins that a drag or a clear redraws a
+// focused input too (tracker.js rangeDraw): only the input being typed in
+// (rangeInput's source) keeps its own text, so the field the picker opened
+// focused never shows a stale end after a handle drag.
+func TestTrackerRangeDrawFollowsDrag(t *testing.T) {
+	if !strings.Contains(trackerFn(t, `function rangeDraw\(src\)`, false), "if (i !== src && i.value !== r[side]) i.value = r[side];") {
+		t.Error("rangeDraw no longer updates every input but the typing source")
+	}
+	if !strings.Contains(trackerFn(t, `function rangeInput\(t\)`, false), "rangeFit(r); rangeDraw(t);") {
+		t.Error("rangeInput no longer passes its own input as the redraw source")
+	}
+}
+
 // TestTrackerLabelPickerDiscard pins the discard capsule and Esc on the label
 // pickers (tracker.js menuDiscard): the item labels step's pending toggles
 // drop and nothing is written; the new row's label toggles, which edit the
