@@ -56,6 +56,7 @@ var allowedCSSOverlaps = map[string]string{
 	"done dashboard,whiteboard":         "dashboard extends the whiteboard board vocabulary it is inlined after",
 	"drag dashboard,tracker,whiteboard": "shared host atom restyled per module",
 	"err dashboard,tracker":             "pre-existing dashboard and tracker overlap (host styles the tracker mount), grandfathered",
+	"entry-panel dashboard,whiteboard":  "dashboard extends the whiteboard board vocabulary it is inlined after",
 	"flash dashboard,whiteboard":        "dashboard extends the whiteboard board vocabulary it is inlined after",
 	"framed dashboard,whiteboard":       "dashboard extends the whiteboard board vocabulary it is inlined after",
 	"go dashboard,tracker":              "pre-existing dashboard and tracker overlap (host styles the tracker mount), grandfathered",

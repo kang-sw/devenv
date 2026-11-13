@@ -148,6 +148,7 @@
   "js.card.grip": "Drag to resize; double-click to reset",
   "js.card.max": "Maximize",
   "js.card.min": "Back to the card (Esc)",
+  "js.card.back": "Back to the board (Esc)",
   "js.card.pin": "Pin",
   "js.chip.remove": "remove this answer",
   "js.chip.tnote.open": "show this topic note on the board",

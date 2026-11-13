@@ -652,6 +652,21 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .bcard[data-max] .bc-folded, .bcard[data-max] .bc-grip, .bcard[data-max] .bc-pin, .bcard[data-max] .bc-fold, .bcard[data-max] .bc-max, .bcard[data-max] .bc-close { display: none; }
 .bcard[data-max] .bc-min { display: inline-grid; }
 @media (max-width: 640px) { .bcard[data-max] .bc-in { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
+/* A large topic or topic panel (cards.js sheet): the board's own node, drawn
+   fixed where a maximized card's box stands, over the same scrim, its
+   content scrolling under its head. The maximize button (right of a topic's
+   pin, at the end of a panel's head) gives way to the back button, and a
+   large topic's pin hides as a maximized card's does. */
+.tbar .d-max, .tbar .d-min { color: inherit; opacity: .45; }
+.tbar:hover .d-max, .tbar:hover .d-min, .tbar .d-max:focus-visible, .tbar .d-min:focus-visible { opacity: .9; }
+.tbar > .d-min, summary > .d-min { display: none; }
+section.topic[data-max], details.entry-panel[data-max] { position: fixed; z-index: 48; top: 52px; left: 16px; right: 16px; bottom: 12px; margin: 0; overflow: auto; overscroll-behavior: contain; box-shadow: var(--wb-shadow-hi); }
+section.topic[data-max] { background: var(--wb-card); }
+section.topic[data-max] > .tophead, details.entry-panel[data-max] > summary { position: sticky; top: 0; z-index: 2; }
+details.entry-panel[data-max] > summary { background: var(--wb-bg); cursor: default; }
+section.topic[data-max] > .tophead > .tbar > .d-max, section.topic[data-max] > .tophead > .tbar > .tpin, details.entry-panel[data-max] > summary > .d-max { display: none; }
+section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-max] > summary > .d-min { display: inline-grid; }
+@media (max-width: 640px) { section.topic[data-max], details.entry-panel[data-max] { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
 @media (prefers-reduced-motion: reduce) { .bcard.flash .bc-in { animation: none; } .bc-grip::after { transition: none; } }
 
 /* ===== preview cards (preview.js) =====

@@ -148,6 +148,7 @@
   "js.card.grip": "Faire glisser pour redimensionner ; double-clic pour réinitialiser",
   "js.card.max": "Agrandir",
   "js.card.min": "Revenir à la carte (Échap)",
+  "js.card.back": "Revenir au tableau (Échap)",
   "js.card.pin": "Épingler",
   "js.chip.remove": "supprimer cette réponse",
   "js.chip.tnote.open": "afficher cette note de sujet sur le tableau",
