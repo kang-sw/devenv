@@ -79,7 +79,7 @@ func (p Paths) SweepUndelivered(now time.Time, threshold time.Duration) (posted 
 				}
 				posted++
 				return nil
-			})
+			}, record)
 		}))
 	} else if !os.IsNotExist(e) {
 		record(e)
@@ -108,7 +108,7 @@ func (p Paths) SweepUndelivered(now time.Time, threshold time.Duration) (posted 
 				}
 				posted++
 				return nil
-			})
+			}, record)
 		}))
 	}
 	return posted, errors.Join(errs...)
@@ -116,10 +116,11 @@ func (p Paths) SweepUndelivered(now time.Time, threshold time.Duration) (posted 
 
 // Mark under the source queue lock, then post after scanning: a notice may
 // append to the very queue being swept (self-mail), trimming its oldest item.
-func sweepQueues(queues map[string][]Envelope, now time.Time, threshold time.Duration, recipient func(string) string, post func(Address, string) error) error {
+func sweepQueues(queues map[string][]Envelope, now time.Time, threshold time.Duration, recipient func(string) string, post func(Address, string) error, failed func(error)) error {
 	type notice struct {
 		sender  Address
 		content string
+		message *Envelope
 	}
 	var notices []notice
 	for name, queue := range queues {
@@ -142,7 +143,7 @@ func sweepQueues(queues map[string][]Envelope, now time.Time, threshold time.Dur
 			}
 			first, _, _ := strings.Cut(m.Content, "\n")
 			content := fmt.Sprintf("Message to %s sent %s was not read; the recipient session may have exited. The message remains queued and may still be read.\nFirst line: %s", recipient(name), m.SentAt, first)
-			notices = append(notices, notice{sender, content})
+			notices = append(notices, notice{sender, content, m})
 			m.UndeliveredNotified = true
 		}
 	}
@@ -151,7 +152,10 @@ func sweepQueues(queues map[string][]Envelope, now time.Time, threshold time.Dur
 	}
 	for _, n := range notices {
 		if err := post(n.sender, n.content); err != nil {
-			return err
+			// Persist successful notices even if a different destination is
+			// unavailable, or the next sweep would send those again too.
+			n.message.UndeliveredNotified = false
+			failed(err)
 		}
 	}
 	return nil

@@ -1,6 +1,7 @@
 package wsmailbox
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -117,6 +118,34 @@ func TestSweepSelfMailAtQueueLimit(t *testing.T) {
 	}
 	if posted, err := p.SweepUndelivered(time.Now(), 3*time.Minute); err != nil || posted != 0 {
 		t.Fatalf("self mail again: %d, %v", posted, err)
+	}
+}
+
+func TestSweepKeepsSuccessfulNoticeWhenAnotherDestinationFails(t *testing.T) {
+	now := time.Now().UTC()
+	stamp := now.Add(-time.Hour).Format(time.RFC3339)
+	queues := map[string][]Envelope{"recipient": {
+		{ReplyTo: "id:available", SentAt: stamp},
+		{ReplyTo: "id:unavailable", SentAt: stamp},
+	}}
+	posted, failures := 0, 0
+	sweep := func() error {
+		return sweepQueues(queues, now, 3*time.Minute, func(name string) string { return name }, func(sender Address, _ string) error {
+			if sender.ReplyID == "unavailable" {
+				return errors.New("destination unavailable")
+			}
+			posted++
+			return nil
+		}, func(error) { failures++ })
+	}
+	if err := sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if err := sweep(); err != nil {
+		t.Fatal(err)
+	}
+	if posted != 1 || failures != 2 || !queues["recipient"][0].UndeliveredNotified || queues["recipient"][1].UndeliveredNotified {
+		t.Fatalf("posted %d, failures %d, queues %+v", posted, failures, queues)
 	}
 }
 
