@@ -1,10 +1,10 @@
 import { expect, test } from 'claude-code/testing'
-import { createMailboxWait } from './register'
-import { createWatcher, type WatcherEdges } from './watcher'
+import { createMailboxWait, observeRecv } from './register'
+import { createDrainLedger, createWatcher, recvResultMail, type DrainLedger, type WatcherEdges } from './watcher'
 
 const tick = async () => { for (let i = 0; i < 30; i++) await Promise.resolve() }
 
-function processes() {
+function processes(ledger?: DrainLedger) {
   type Step = { done: false; value: { stream: 'stdout' | 'stderr'; text: string } } | { done: true; value: { code: number; signal: null } }
   const children: { argv: string[]; closed: boolean; send: (text: string, stream?: 'stdout' | 'stderr') => void; exit: (code: number) => void }[] = []
   const spawn = (argv: string[]) => {
@@ -25,7 +25,7 @@ function processes() {
       return: async () => { child.closed = true; child.exit(130); return { done: true as const, value: { code: 130, signal: null } } },
     }
   }
-  const wait = createMailboxWait(spawn as never, '/launcher.py', () => {})
+  const wait = createMailboxWait(spawn as never, '/launcher.py', () => {}, ledger)
   const binding = new AbortController()
   const arm = (board = false, interrupt = false, signal = new AbortController().signal) => wait('k', undefined, { board, interrupt }, signal, binding.signal)
   return { children, wait, binding, arm }
@@ -141,5 +141,120 @@ test('watcher drains two arrivals through one streaming child and stops it while
     expect(p.children.length).toBe(1)
     watcher.stop('session ended')
     expect(p.children[0]!.closed).toBe(true)
+  }
+})
+
+const M1 = { from: 'alice', content: 'one', sent_at: '2026-11-13T10:00:00Z' }
+const M2 = { from: 'bob', content: 'two\nlines', sent_at: '2026-11-13T10:00:01Z' }
+const M3 = { from: 'carol', content: 'three', sent_at: '2026-11-13T10:00:05Z' }
+const arrival = (named: object[], kinds = ['mail']) => JSON.stringify({ timed_out: false, unread: named.length, board: 0, interrupt: 0, kinds, named, reply: [] }) + '\n'
+
+test('a buffered arrival the drain already received does not wake; mail after the drain still does', async () => {
+  const ledger = createDrainLedger()
+  const p = processes(ledger)
+  const first = p.arm()
+  // M2 arrives before the drain: its line is buffered behind the first wake.
+  p.children[0]!.send(arrival([M1]) + arrival([M2]))
+  expect(await first).toBe('mail')
+  ledger.record([M1, M2]) // the drain received both
+  let woke: unknown
+  const second = p.arm().then((o) => (woke = o))
+  await tick()
+  expect(woke).toBe(undefined)
+  // Mail after the drain and before this arm reads it wakes at once.
+  p.children[0]!.send(arrival([M3]))
+  await second
+  expect(woke).toBe('mail')
+  expect(p.children.length).toBe(1)
+  p.binding.abort()
+})
+
+test('a partly received arrival still wakes, and a received mail+board line keeps its board kind', async () => {
+  const ledger = createDrainLedger()
+  const p = processes(ledger)
+  const first = p.arm(true)
+  p.children[0]!.send(arrival([M1]))
+  expect(await first).toBe('mail')
+  ledger.record([M1, M2])
+  const second = p.arm(true)
+  p.children[0]!.send(arrival([M2, M3]))
+  expect(await second).toBe('mail')
+  ledger.record([M1])
+  const third = p.arm(true)
+  p.children[0]!.send(arrival([M1], ['mail', 'board']))
+  expect(await third).toBe('board')
+  p.binding.abort()
+})
+
+test('a new stream child forgets earlier drains', async () => {
+  const ledger = createDrainLedger()
+  const p = processes(ledger)
+  const first = p.arm()
+  p.children[0]!.send(arrival([M1]))
+  expect(await first).toBe('mail')
+  ledger.record([M1])
+  const second = p.arm(true) // a flag change replaces the child
+  expect(p.children.length).toBe(2)
+  p.children[1]!.send(arrival([M1]))
+  expect(await second).toBe('mail')
+  p.binding.abort()
+})
+
+test('the line that woke a drain is not recorded, so an identical later message still wakes', () => {
+  const ledger = createDrainLedger()
+  const again = { ...M1, from: 'bob' } // same second, same text, sent after the drain
+  expect(ledger.filter(arrival([M1]))).toBe(arrival([M1])) // wakes the drain
+  ledger.record([M1])
+  expect(ledger.filter(arrival([again]))).toBe(arrival([again]))
+})
+
+test('an arrival the drain did not get clears the ledger', () => {
+  const ledger = createDrainLedger()
+  ledger.record([M1]) // received without a line, e.g. before this child started
+  expect(ledger.filter(arrival([M3]))).toBe(arrival([M3]))
+  expect(ledger.filter(arrival([M1]))).toBe(arrival([M1]))
+})
+
+test('recv results give their envelopes in both forms', () => {
+  expect(recvResultMail(JSON.stringify([M1, M2]))).toEqual([M1, M2])
+  expect(recvResultMail(`[${M1.sent_at}] alice: one\n[${M2.sent_at}] bob: two\nlines\n`)).toEqual([
+    { sent_at: M1.sent_at, content: 'one' },
+    { sent_at: M2.sent_at, content: 'two\nlines' },
+  ])
+  expect(recvResultMail('no unread mail\n')).toEqual([])
+})
+
+test('watcher: a second arrival before recv gets no extra wake, in both modes', async () => {
+  for (const mode of ['direct', 'notice'] as const) {
+    const ledger = createDrainLedger()
+    const p = processes(ledger)
+    let queued = [M1, M2]
+    const prompts: string[] = []
+    const edges: WatcherEdges = {
+      mode, label: 'test mailbox', wait: p.wait,
+      // As register.ts wires it: the direct drain records what recv returned.
+      drain: async () => { const mail = queued; queued = []; ledger.record(mail); return { kind: 'mail', mail } },
+      submit: async (items) => { prompts.push(...items.map((i) => i.text)) },
+      append: async () => {}, turnRunning: () => false, recvTool: () => 'mcp__ws__mailbox_recv',
+      sleep: async () => {}, notice: () => {}, record: () => {}, log: () => {},
+    }
+    const watcher = createWatcher(edges)
+    watcher.bind('k')
+    p.children[0]!.send(arrival([M1]) + arrival([M2]))
+    await tick()
+    expect(prompts.length).toBe(1)
+    if (mode === 'notice') {
+      // The model's own recv, in its text form, drains both.
+      const text = queued.map((m) => `[${m.sent_at}] ${m.from}: ${m.content}\n`).join('')
+      queued = []
+      observeRecv(watcher, { tool: 'mcp__ws__mailbox_recv', originPlugin: 'engine', sessionKey: 'k' }, { text } as never, 'mcp__ws__mailbox_recv', () => {}, ledger)
+    }
+    await tick()
+    expect(prompts.length).toBe(1)
+    queued = [M3]
+    p.children[0]!.send(arrival([M3]))
+    await tick()
+    expect(prompts.length).toBe(2)
+    watcher.stop('session ended')
   }
 })

@@ -506,8 +506,8 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .note[hidden] + .nimgs { display: none; }
 .arow > .nimgs, .ckrow > .nimgs { flex-basis: 100%; margin: 0 10px 8px 34px; }
 .srow > .nimgs { flex-basis: 100%; margin-top: 4px; }
-.topic > .nimgs { margin: 0 10px 6px; }
-.topic.quiet > .nimgs { margin: 0 6px 4px; }
+.tophead > .nimgs { margin: 0 10px 6px; }
+.topic.quiet > .tophead > .nimgs { margin: 0 6px 4px; }
 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; white-space: normal; }
 .thumbs .thumb { position: relative; display: block; }
 .thumbs .thumb img { display: block; max-width: 160px; max-height: 120px; border-radius: 6px; object-fit: contain; background: var(--wb-muted); }
@@ -1485,13 +1485,15 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 :root { --pbw: calc(1680px - 32px - 356px); }
 .dash.board { --pbw: 900px; }
 .bpcol { display: none; }
-/* An empty board fills its column's height, as the idle pin zone (.bpzone) fills its strip: a quiet full-bleed dashed placeholder, not a short strip. */
-.r-board:has(> .empty:only-child) { height: 100%; }
-.r-board > .empty:only-child { height: 100%; min-height: 54px; box-sizing: border-box; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
+/* An empty board (no topic or card in it; the placeholder may follow an empty #bpins or a future toolbar card) is a quiet dashed placeholder, as the idle pin zone (.bpzone) is. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
+.r-board:not(:has(> .topic, > .bcard)) > .empty { box-sizing: border-box; min-height: 54px; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
+.dgrid.live > .bcol:has(> .r-board > .empty) { position: relative; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)):has(> .empty) { position: absolute; inset: 0 4px 0 2px; display: flex; flex-direction: column; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)) > .empty { flex: 1 1 0; }
 .bpins:empty { display: none; }
 .r-board > .bpins { margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px dashed var(--wb-line); }
 .r-board > .bpins::before { content: attr(data-label); display: block; padding: 0 2px 6px; font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); }
-.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 2px 4px 40px 2px; }
+.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 10px 4px 40px 2px; }
 /* The pinned column has no rail (cards.js), so its topics' bars and cards' headers stick to the top of this scroller by CSS alone, as the board's do. The pin list above the board sits in the rail's host (.wb-rail) and is railed with the board. */
 .bpcol > .bpins .topic { overflow: hidden; overflow: clip; }
 .bpcol > .bpins .topic > .tophead { position: sticky; top: 0; z-index: 2; }
@@ -1740,8 +1742,8 @@ dialog.rdeldlg [hidden] { display: none !important; }
 .rdeldlg .rdholders { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
 .rdeldlg .rdholders li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .rdeldlg .rdholders .nm { font-family: var(--wb-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.rdeldlg .rdholders .st { margin-left: auto; flex: none; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
-.rdeldlg .rdholders li.live .st { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
+.rdeldlg .rdholders .rdst { margin-left: auto; flex: none; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rdeldlg .rdholders li.live .rdst { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
 .rdeldlg .rdnote, .rdeldlg .rdforce { margin: 0; padding: 7px 10px; border-radius: 8px; overflow-wrap: anywhere; }
 .rdeldlg .rdnote.bad { background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); color: var(--wb-fail); }
 .rdeldlg .rdnote.warn, .rdeldlg .rdforce { background: color-mix(in srgb, var(--wb-warn) 14%, var(--wb-card)); color: var(--wb-warn-ink); }
@@ -1860,3 +1862,41 @@ html:not([data-sysopen]) .rail .rdel { display: none; }
   .rail .bots .i { animation: none; }
   .rail .hi .rrun, .rail .hi.perm { animation: none; }
 }
+
+/* ===== iframe shell (the "shell" template, shell.js) =====
+   The shell's frames fill the window under its rail and header, so a page
+   it frames lays out against the window as it does standing alone (every
+   breakpoint above holds); only the shown frame (.on) is visible, and a
+   hidden one keeps its layout and state. The shell page never scrolls: its
+   wrap is one window tall, as a live session page's, and lets every click
+   through to the frame but on the rail, the header's items, and the memo
+   pad (whose own rules admit clicks while open). A page the shell frames
+   (data-frame) keeps an empty rail placeholder (railph) and its header's
+   items invisible under the shell's, which mirror them (the head message).
+   A frame whose page scrolls as a whole moves the shell's header and rail
+   with it (dashboard.js shScroll), as that page's own would move. While
+   a frame shows a backdrop over the whole window, the shell's rail and
+   header dim by the same amount (--fdim) and let clicks through to it.
+   The shell's rail rows stay unseen until its stored marks apply
+   (data-premark, the shell template).
+   The index keeps its own header (a null head): the shell's header shows
+   only its rail button (sh-own), and the framed index shows its own items
+   but its placeholder rail button. Framed, the index lays out as a session
+   page does: its list (ixmain) beside the rail's placeholder, left-aligned
+   at its own width, and the tracker's drawer as a session page's. */
+:root[data-shell], :root[data-shell] body { overflow: hidden; }
+.frames { position: fixed; inset: 0; z-index: 0; }
+.frames > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; visibility: hidden; background: var(--wb-bg); }
+.frames > iframe.on { visibility: visible; z-index: 1; }
+:root[data-shell] .dwrap { position: relative; z-index: 1; pointer-events: none; }
+:root[data-shell] .dwrap > .top > *, :root[data-shell] #rail { pointer-events: auto; }
+:root[data-shell][data-fdim] .dwrap > .top, :root[data-shell][data-fdim] #rail { filter: brightness(var(--fdim, 1)); }
+:root[data-shell][data-fdim] .dwrap > .top > *, :root[data-shell][data-fdim] #rail { pointer-events: none; }
+.rail[data-premark] > .r-rail { visibility: hidden; }
+:root[data-shell] .dwrap > .top.sh-own > :not(.back) { display: none; }
+:root[data-frame]:not([data-mode="index"]) .dwrap > .top > *, :root[data-frame] .dwrap > .top > .back { visibility: hidden; }
+.ixmain { min-width: 0; max-width: 1080px; }
+body.tk-paged .ixmain { display: none; }
+:root[data-frame] .dash.index { --tkml: 0px; --tkmaxw: initial; }
+@media (min-width: 1600px) { :root[data-frame] .dash.index { --tkmaxw: none; } }
+:root[data-frame] .rail-ph { visibility: hidden; box-shadow: none; background: none; }

@@ -471,6 +471,8 @@
       btn.setAttribute("aria-expanded", list.hidden ? "false" : "true");
       return;
     }
+    // Every row hidden (all answered, "hide answered" on): nothing to lift, or the popover opens empty.
+    if (!Array.prototype.some.call(list.querySelectorAll(".ckrow"), function (r) { return getComputedStyle(r).display !== "none"; })) return;
     drop();
     var cs = getComputedStyle(list), spacer = d.createElement("div");
     spacer.className = "ckspace";

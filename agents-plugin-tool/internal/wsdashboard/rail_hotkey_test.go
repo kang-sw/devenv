@@ -41,6 +41,7 @@ var cls = {}, attrs = {};
 var root = { classList: { contains: function (c) { return !!cls[c]; }, toggle: function (c, on) { cls[c] = !!on; } }, hasAttribute: function (a) { return !!attrs[a]; } };
 var memoCalls = [], memoPad = { open: function (on, wide) { memoCalls.push([on, wide]); } };
 var railEl = {}, railBtn = { setAttribute: function () {} }, WsRail = {};
+var framed = false;
 var RAIL_WIDE = { matches: false }, RAIL_XWIDE = { matches: false };
 var frameWin = {}, otherWin = {}, frameEl = { tag: "iframe.doc-frame", getAttribute: function () { return "topic:body"; } };
 function docFrame(win) { return win === frameWin ? frameEl : undefined; }

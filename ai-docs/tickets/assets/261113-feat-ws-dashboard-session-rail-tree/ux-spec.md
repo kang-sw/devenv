@@ -5,7 +5,7 @@ screenshot `dashboard/sessions/sweatradartakingoverwrite/inbox/attachments/33591
 Owner answers: (534)=c tree and order server-side; (535)=a a right-click
 menu on every row; (536)=a children only within the same workspace; (537)
 ok on MAIN's technical direction; (538) ok; (539)=a; (540)=a. Code read
-against develop 14aabe4b5. No owner question remains open.
+against develop 14aabe4b5. Decision 13 (2026-11-14 owner feedback): (554)=a, reading A.
 
 Suggested stem: `261113-feat-ws-dashboard-session-rail-tree`.
 
@@ -199,6 +199,37 @@ Phase 1 addresses all four:
     - Each op announces its result through an aria-live line ("EXEC → 메인
       아래로").
     - Invalid ops are refused with the same reason strings as the route.
+13. **Branch row hierarchy and the star after the title (owner feedback,
+    2026-11-14; screenshot
+    `dashboard/sessions/sweatradartakingoverwrite/inbox/attachments/c3dacd3e8aaf6f02-1.png`;
+    mockup `shared/docs/session-rail-branch-indent-mockup.html`).**
+    - Problem: the workspace icon (`.wsbar`, padding 12 px) and the
+      worktree branch icon (`.wthd`, padding 12 px) share one column, so
+      the branch row competes with the workspace header.
+    - Reading A, (554)=a: "별도
+      타이틀의 오른쪽에" reads as "별(star)도". The star moves from the
+      row's left gutter to just after the name (after the hosted icon). It
+      is still revealed on hover or focus, and a starred row always shows
+      its filled star. The name ellipsizes before the star, so the star
+      never leaves the row.
+    - The branch row (`.wthd`) indents to the star's old column (28 px),
+      and the worktree guide line moves under the branch icon (about 34
+      px). The harness icon stays at 49 px, so the rail reads 12 / 28 / 49
+      px: workspace, worktree, session.
+    - The drag grip (decision 1) takes the 14 px gutter between the guide
+      line and the harness icon, where the star used to be. The pencil and
+      clipboard (decision 10) keep the time slot on the right edge.
+    - Child rows (decision 5) indent from 49 px as before. Under (540)=a a
+      child shows no star.
+    - Alternative reading (B), not recommended: the branch moves next to
+      the workspace title, revealed on hover, and the branch row goes away.
+      A repository with several worktrees would then lose the per-worktree
+      grouping of its sessions.
+    - Phase 1, because it touches the same row markup as the grip and the
+      hover icons. The `.star` button must stay outside the `<a class="rl">`
+      link (no nested interactive content). The worker picks how to place
+      it after the name, for example by splitting the link so that it
+      wraps only the row's text parts.
 
 ## Constraints
 
@@ -223,7 +254,7 @@ Phase 1 addresses all four:
 
 ### Phase 1: reliable reorder + hover rename/copy (no tree, local order kept)
 
-Decisions 1, 2, 10. This fixes the reported "drag does not take" and ships
+Decisions 1, 2, 10, 13. This fixes the reported "drag does not take" and ships
 the pencil/clipboard. Order is still local in this phase.
 
 Verification:

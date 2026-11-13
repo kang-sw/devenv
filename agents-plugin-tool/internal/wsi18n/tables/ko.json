@@ -325,6 +325,7 @@
   "js.interrupt.ok": "중단 요청을 보냈습니다.",
   "js.interrupt.restored": "중단 요청을 보냈습니다: 보류된 메시지가 입력란으로 돌아왔습니다.",
   "js.interrupt.title": "lead의 진행 중인 턴을 멈춥니다. 보류된 메시지는 입력란으로 돌아옵니다",
+  "js.memo.toolong": "메모가 너무 깁니다: {0}바이트 (한도 {1})",
   "js.mention.label": "파일 제안: 위/아래로 이동, Tab 또는 Enter로 삽입, Escape로 닫기",
   "js.menu.copyabs": "절대 경로 복사",
   "js.menu.copyrel": "상대 경로 복사",

@@ -13,6 +13,11 @@ import (
 // MCP reconnect (the ws mod's request_mcp_reconnect, under any server).
 const claudeReconnectLever = "__request_mcp_reconnect"
 
+// claudeCompactionLever ends the name of the tool a lead calls to ask for a
+// compaction at the end of its turn (the ws mod's request_compaction, under
+// any server).
+const claudeCompactionLever = "__request_compaction"
+
 // claudeEffortType is an effort-carrier subagent type: one whose name,
 // after any "<plugin>:" prefix, is effort-<level>.
 var claudeEffortType = regexp.MustCompile(`(^|:)effort-(low|medium|high|xhigh|max)$`)

@@ -477,7 +477,7 @@ func TestGitRefreshRouteAndStream(t *testing.T) {
 	f.d.git.gap = 0
 	route := f.base + "/s/livesession/git"
 
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `class="gh pending"`) {
 		t.Fatalf("page lacks the pending handle")
 	}
@@ -503,7 +503,7 @@ func TestGitRefreshRouteAndStream(t *testing.T) {
 	}
 
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
-	resp, err := client.Get(f.base + "/s/livesession/events?h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
+	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -588,9 +588,9 @@ func TestGitBadgeFollowsTheStreamedSnapshot(t *testing.T) {
 		f.d.broker.wake("livesession")
 	}
 	snapshot("first reply", 1)
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
-	resp, err := client.Get(f.base + "/s/livesession/events?h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
+	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)
 	}

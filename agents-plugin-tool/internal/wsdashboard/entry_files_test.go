@@ -35,7 +35,7 @@ func TestSessionPageReadsEachEntryFileOnce(t *testing.T) {
 	drainOne(t, f, "livesession", "first answer")
 	render := func() {
 		t.Helper()
-		if code, body := get(t, f.base+"/s/livesession"); code != http.StatusOK {
+		if code, body := get(t, f.base+"/s/livesession?frame=1"); code != http.StatusOK {
 			t.Fatalf("GET /s/livesession = %d: %s", code, body)
 		}
 	}

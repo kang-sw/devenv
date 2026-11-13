@@ -221,7 +221,9 @@ func TestRenderDispatchSeparatesResourceAndWorktreeRoots(t *testing.T) {
 			args := map[string]any{"name": "impl-pb", "session_key": leadKey}
 			if tc.override != "" {
 				args["root_override"] = tc.override
-				wantRoot = worktree
+				// A root_override binds to its resolved path (macOS /var is
+				// itself a symlink to /private/var).
+				wantRoot = canonicalTestPath(t, worktree)
 			}
 			resp := callToolOnce(t, s, 1, "playbook.render", args)
 			if toolIsError(t, resp) {
@@ -294,8 +296,8 @@ func TestRenderFromWorktreeSessionCommitsInThatWorktree(t *testing.T) {
 	}
 
 	overrideKey := render(t, map[string]any{"name": "impl-pb", "session_key": workerKey, "root_override": other})
-	if entry, ok := s.sessions.lookup(overrideKey); !ok || entry.root != other {
-		t.Errorf("root_override child = %+v, found=%v; want bound to %q", entry, ok, other)
+	if entry, ok := s.sessions.lookup(overrideKey); !ok || entry.root != canonicalTestPath(t, other) {
+		t.Errorf("root_override child = %+v, found=%v; want bound to %q", entry, ok, canonicalTestPath(t, other))
 	}
 
 	childKey := render(t, map[string]any{"name": "impl-pb", "session_key": workerKey})
