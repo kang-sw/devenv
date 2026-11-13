@@ -286,6 +286,53 @@ R.moveRow(tk2, tk1, "before", make);
 check("after a parent is after its children; a child among its siblings", [ids(TG), ids(tkids)], [["s", "m", "rkids", "a", "o", "rended"], ["k2", "k1"]]);
 check("collapsed parents persist", [R.kidsCollapsed(ss).toggle("m"), R.kidsCollapsed(ss).has("m"), ss.load("ws.dashboard.railkids")], [true, true, '["m"]']);
 
+// The keyboard path (keyMove) and the context menu's "move under"
+// (underRows). Workspace /k: worktree /k lists s (starred), m (a parent:
+// c1 of /k, c2 of /k/wt, and c3 of /k/v under it), b, and the ended e;
+// worktree /k/wt lists x (starred) and y; worktree /k/v lists no row.
+// Folder workspace /g lists g1.
+var KL = new El("rlist"), KW = KL.appendChild(new El("rws", { "data-ws": "/k" })), KB = KW.appendChild(new El("wsbody"));
+var KG = KB.appendChild(new El("rwt", { "data-g": "/k" })).appendChild(new El("rsessions"));
+var KH = KB.appendChild(new El("rwt", { "data-g": "/k/wt" })).appendChild(new El("rsessions"));
+KB.appendChild(new El("rwt", { "data-g": "/k/v" }));
+var ks = KG.appendChild(star(row("s"), true)), km = KG.appendChild(row("m")), kbox = KG.appendChild(kidsBox("m"));
+var kc1 = kbox.appendChild(kid("c1", "/k")), kc2 = kbox.appendChild(kid("c2", "/k/wt")), kc3 = kbox.appendChild(kid("c3", "/k/v"));
+var kb = KG.appendChild(row("b")), ke = KG.appendChild(new El("rended")).appendChild(new El("rsessions")).appendChild(row("e"));
+ke.classList.add("ended"); km.setAttribute("data-kids", "1");
+var kx = KH.appendChild(star(row("x"), true)), ky = KH.appendChild(row("y"));
+var KF = KL.appendChild(new El("rws", { "data-ws": "/g" })), kg1 = KF.appendChild(new El("wsbody")).appendChild(new El("rsessions")).appendChild(row("g1"));
+var K = R.keyMove;
+// up and down: past the next live row of its level, by dropZone's rules
+check("up before a parent, not into it", K(kb, "up"), { zone: "before", ref: "m", op: { op: "move", rid: "b", before: "m" } });
+check("down past a row, after its unit", K(km, "down"), { zone: "after", ref: "b", op: { op: "move", rid: "m", after: "b" } });
+check("up across the stars refuses", K(km, "up"), { refusal: "stars" });
+check("nothing past the ends (the ended fold is no row to pass)", [K(ks, "up"), K(kb, "down"), K(kg1, "up"), K(kc1, "up"), K(kc3, "down")], [null, null, null, null, null]);
+check("among the children", [K(kc2, "up"), K(kc1, "down")],
+  [{ zone: "before", ref: "c1", op: { op: "move", rid: "c2", before: "c1" } }, { zone: "after", ref: "c2", op: { op: "move", rid: "c1", after: "c2" } }]);
+check("an ended row moves no way", ["up", "down", "in", "out"].map(function (k) { return K(ke, k); }), [{ refusal: "ended" }, { refusal: "ended" }, { refusal: "ended" }, { refusal: "ended" }]);
+// in: the previous top-level row takes it as its last child
+check("in attaches to the previous row", K(kb, "in"), { zone: "child", ref: "m", op: { op: "attach", rid: "b", parent: "m" } });
+check("in crosses the stars", K(ky, "in"), { zone: "child", ref: "x", op: { op: "attach", rid: "y", parent: "x" } });
+check("in: a parent or a child goes no deeper", [K(km, "in"), K(kc2, "in")], [{ refusal: "depth" }, { refusal: "depth" }]);
+check("in: no previous row", [K(ks, "in"), K(kx, "in")], [null, null]);
+// out: next to its old parent in the parent's group, else the head of its
+// own group's unstarred rows, else after its last, else unshown
+check("out next to the parent", K(kc1, "out"), { zone: "after", ref: "m", op: { op: "detach", rid: "c1" } });
+check("out to its own group's head, past the stars", K(kc2, "out"), { zone: "before", ref: "y", op: { op: "detach", rid: "c2" } });
+star(ky, true);
+check("out after an all-starred group", K(kc2, "out"), { zone: "after", ref: "y", op: { op: "detach", rid: "c2" } });
+star(ky, false);
+check("out to a group with no row is not shown", K(kc3, "out"), { zone: "", ref: "", op: { op: "detach", rid: "c3" } });
+check("out: a top-level row has no parent", [K(kb, "out"), K(km, "out")], [{ refusal: "toplevel" }, { refusal: "toplevel" }]);
+check("an unknown key", K(kb, "home"), null);
+// underRows: every valid parent of the workspace in the rail's order, its
+// own parent aside; none for an ended row or a parent
+function under(r) { var u = R.underRows(r); return { rows: u.rows.map(function (x) { return x.getAttribute("data-rid"); }), refusal: u.refusal }; }
+check("a top-level row's parents", under(kb), { rows: ["s", "m", "x", "y"], refusal: "" });
+check("a child's parents, its own aside", under(kc2), { rows: ["s", "b", "x", "y"], refusal: "" });
+check("no parent for a parent or an ended row", [under(km), under(ke)], [{ rows: [], refusal: "depth" }, { rows: [], refusal: "ended" }]);
+check("another workspace's rows are never parents", under(kg1), { rows: [], refusal: "" });
+
 // markCurrent marks only the viewed row.
 var rows = box.children.slice(0, 3);
 R.markCurrent(rows, "r2");
@@ -383,7 +430,8 @@ if (bad.length) console.log(bad.join("\n"));
 // retired local layout's import and clearing, the layout refusals' strings
 // and the stale-render check, the press's swap hold, re-find, and drop
 // refusals, the tree's drop zones, no-op drops, shown drops and their undo,
-// and collapsed parents, the viewed row's mark, the add popovers' placement, branch
+// and collapsed parents, the keyboard path's moves and the context menu's
+// "move under" parents, the viewed row's mark, the add popovers' placement, branch
 // filter, and add-worktree request, the worktree delete modal's Delete gate
 // and submit, the spawn request, the revive route
 // and entry mark, the hand-off notice, and an approval card's input

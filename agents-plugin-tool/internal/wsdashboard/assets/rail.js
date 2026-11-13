@@ -3,8 +3,9 @@
   // page's script (dashboard.js): per-session drafts, the collapsed
   // workspaces and parents, and the rail's client-side marks (the viewed
   // session's row, the revive entry in flight), with the drag's refusal,
-  // re-find, and swap-hold rules, the tree's drop zones, and the rail
-  // layout route's answers. The daemon keeps the rows' order and tree, the
+  // re-find, and swap-hold rules, the tree's drop zones (which the keyboard
+  // path's moves and the context menu's "move under" read too), and the
+  // rail layout route's answers. The daemon keeps the rows' order and tree, the
   // stars, and the workspace order (its rail layout, POST /rail/layout)
   // and renders the rail in that order; the page only reads a row's star
   // and place from it. The drafts and the collapsed sets are in
@@ -364,6 +365,69 @@
     }
     return null;
   }
+  function liveRows(box) { return rowsIn(box).filter(function (r) { return !hasClass(r, "ended"); }); }
+  function rowOf(root, rid) { return root && rid ? refind(root, { cls: "rs", attr: "data-rid", val: rid }) : null; }
+
+  // keyMove is the keyboard path's op for the session row item (Alt and an
+  // arrow): "up" and "down" reorder it past the next live row of its level
+  // (its group's top-level rows, or its parent's children), "in" attaches
+  // it to the previous top-level row as its last child, and "out" detaches
+  // a child, which the route lands right after its old parent when that is
+  // in the child's own group, else at the head of its own group (the page
+  // shows it before that group's first unstarred row). It answers
+  // dropZone's { zone, ref, op }, read by dropZone's rules where a place is
+  // involved (zone and ref empty when the page has no row to show the
+  // detach against: the route still places it), or { refusal } with the
+  // route's reason for an op it would refuse (an ended row moves no way,
+  // a child or a parent never goes one level deeper, a top-level row has
+  // no parent to leave); null when there is no row to move past.
+  function keyMove(item, dir) {
+    var d = rowFacts(item);
+    if (!d.rid) return null;
+    if (!d.live) return { refusal: "ended" };
+    var rows = liveRows(item.parentNode), i = rows.indexOf(item), t;
+    if (dir === "up" || dir === "down") {
+      t = rows[dir === "up" ? i - 1 : i + 1];
+      if (!t) return null;
+      var tf = rowFacts(t);
+      tf.first = "";
+      return dropZone(d, tf, dir === "up" ? 0 : 1);
+    }
+    if (dir === "in") {
+      if (d.parent || d.kids) return { refusal: "depth" };
+      t = rows[i - 1];
+      return t ? dropZone(d, rowFacts(t), 0.5) : null;
+    }
+    if (dir !== "out") return null;
+    if (!d.parent) return { refusal: "toplevel" };
+    var op = { op: "detach", rid: d.rid }, p = rowOf(up(item, "rws"), d.parent);
+    if (p && rowGroup(p) === d.group) return { zone: "after", ref: d.parent, op: op };
+    var home = liveRows(homeRows(item)), first = home.filter(function (r) { return !starred(r); })[0];
+    if (first) return { zone: "before", ref: attr(first, "data-rid") || "", op: op };
+    if (home.length) return { zone: "after", ref: attr(home[home.length - 1], "data-rid") || "", op: op };
+    return { zone: "", ref: "", op: op };
+  }
+  // underRows is where the context menu's "move under" can put the session
+  // row item: { rows, refusal }, rows every row of its workspace whose
+  // middle would take it as a child (dropZone; its own parent aside) in
+  // the rail's order, refusal the route's reason when none can (an ended
+  // row, or a parent, which never becomes a child), else "".
+  function underRows(item) {
+    var d = rowFacts(item), out = [];
+    if (!d.live) return { rows: out, refusal: "ended" };
+    if (d.kids) return { rows: out, refusal: "depth" };
+    (function walk(n) {
+      var kids = (n && n.children) || [];
+      for (var i = 0; i < kids.length; i++) {
+        var k = kids[i];
+        if (hasClass(k, "rs")) {
+          var z = k !== item ? dropZone(d, rowFacts(k), 0.5) : null;
+          if (z && z.zone === "child" && z.ref !== d.parent) out.push(k);
+        } else walk(k);
+      }
+    })(up(item, "rws"));
+    return { rows: out, refusal: "" };
+  }
 
   // itemKey names a dragged item, a session row by reply-id or a workspace
   // section by path, so refind can find the node a swap put in its place.
@@ -573,6 +637,8 @@
     dropNoop: dropNoop,
     moveRow: moveRow,
     homeRows: homeRows,
+    keyMove: keyMove,
+    underRows: underRows,
     itemKey: itemKey,
     refind: refind,
     swapGate: swapGate,
