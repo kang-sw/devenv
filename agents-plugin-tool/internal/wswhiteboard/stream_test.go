@@ -304,3 +304,18 @@ func TestStreamSegmentsFoldRunsBetweenPanels(t *testing.T) {
 		t.Fatal("an owner answer is not its own row between system chips")
 	}
 }
+
+// Owner rule: a log row's role marker sits on the first line beside the clock,
+// never vertically centred against wrapped text.
+func TestStreamRoleMarkerPinsToFirstLine(t *testing.T) {
+	css, err := embeddedAsset("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), `.entry-line > .evi { align-self: flex-start;`) {
+		t.Error("page.css does not pin the stream role marker to the first line")
+	}
+	if regexp.MustCompile(`\.evi \{[^}]*align-self: center`).Match(css) {
+		t.Error("page.css centres the role marker on wrapped rows")
+	}
+}

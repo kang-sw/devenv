@@ -430,7 +430,10 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .wb-entry.system .entry-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-entry.owner > .entry-line { background: color-mix(in srgb, var(--wb-accent-policy) 8%, transparent); }
 .wb-entry.owner .entry-text { color: color-mix(in srgb, var(--wb-accent-policy) 70%, var(--wb-fg)); }
-.evi { flex: none; align-self: center; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 8.5px; font-weight: 800; line-height: 1; font-style: normal; }
+.evi { flex: none; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 8.5px; font-weight: 800; line-height: 1; font-style: normal; }
+/* the marker sits on the first line beside the clock, never centred on a wrapped
+   row: the 2px drop centres the 15px badge in the ~19-20px first line box */
+.entry-line > .evi { align-self: flex-start; margin-top: 2px; }
 .evi.lead { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
 .evi.owner { background: color-mix(in srgb, var(--wb-accent-policy) 22%, transparent); color: var(--wb-accent-policy); }
 .evi.sys::before { content: ""; width: 5px; height: 5px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: .7; }
