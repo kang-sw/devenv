@@ -89,12 +89,16 @@
   // marks with data-rail (its key, unique among the marked nodes), in board
   // order; an item with no height (hidden) is left out. A marked node's
   // attributes name its bar (data-rail-bar: the header that sticks while
-  // it is current, as a topic's .tbar does under the host's own rule), its
+  // it is current, as a topic's head does under the host's own rule), its
   // capsule's text (data-rail-name), and the icon its capsule leads with
-  // (data-rail-icon, copied).
+  // (data-rail-icon, copied). A topic's bar (.tbar, what a capsule morphs
+  // from and into) sits in its head (.tophead: the bar, the note, and the
+  // summary line), and the head is what sticks (stickOf); a marked node's
+  // bar is both.
   var ITEMS = "section.topic[data-topic], [data-rail]";
   function isTopic(t) { return t.hasAttribute("data-topic"); }
-  function barOf(t) { return t.querySelector(isTopic(t) ? ":scope > .tbar" : "[data-rail-bar]"); }
+  function barOf(t) { return t.querySelector(isTopic(t) ? ":scope > .tophead > .tbar" : "[data-rail-bar]"); }
+  function stickOf(t) { return t.querySelector(isTopic(t) ? ":scope > .tophead" : "[data-rail-bar]"); }
   function keyOf(t) { return isTopic(t) ? t.getAttribute("data-topic") : "\u0001" + t.getAttribute("data-rail"); }
 
   function fill(b, t, extra) {
@@ -105,7 +109,7 @@
     if (isTopic(t)) {
       // The rail shows the topic's visible name (.tname, its label), not
       // data-topic, which carries the key a stemmed topic is addressed by.
-      var tn = t.querySelector(":scope > .tbar .tname"), pol = t.querySelector(":scope > .tbar > .chip.policy");
+      var tn = t.querySelector(":scope > .tophead > .tbar .tname"), pol = t.querySelector(":scope > .tophead > .tbar > .chip.policy");
       name = tn ? tn.textContent : t.getAttribute("data-topic");
       n = pol ? pol.textContent.trim() : "";
     } else {
@@ -158,9 +162,9 @@
     draw({
       top: top,
       cur: cur,
-      // The current bar sits at the stick line; it is stuck (and casts its
+      // The current head sits at the stick line; it is stuck (and casts its
       // shadow) once its card's top has passed that line.
-      bar: cur >= 0 ? barOf(topics[cur]) : null,
+      bar: cur >= 0 ? stickOf(topics[cur]) : null,
       stuck: cur >= 0 && rects[cur].top < vt + top - 0.5,
       up: [above - 1, above - 2].filter(function (x) { return x >= 0; }),
       upMore: Math.max(0, above - 2),
@@ -172,8 +176,13 @@
 
   function draw(s) {
     var key = s ? [inset, s.top, s.upMore, s.downMore, s.replyOff, s.stuck, names(s.up), names(s.down), names([s.cur])].join("|") : "" + inset;
-    // A re-queried board can hold bars that never got the offset.
-    if (key === last) { if (fresh) offsets(); return; }
+    // A re-queried board can hold heads that never got the offset, and the
+    // current head may have changed height (a note opened, a summary line
+    // wrapping), which resizes its topic and so re-queries.
+    if (key === last) {
+      if (fresh) { if (s && s.bar) vals.h = inset + s.top + s.bar.offsetHeight + "px"; offsets(); }
+      return;
+    }
     last = key;
     // The motion's reads are skipped when no capsule can move: the same
     // items in the same slots (a change of the stuck shadow or a "+N"
@@ -184,11 +193,12 @@
     moved = member;
     var bar = s && s.bar, shadow = s && s.stuck ? bar : null;
     if (stuck !== shadow) {
+      if (lifted && lifted.head !== shadow) drop();
       if (stuck) stuck.classList.remove("wb-stuck");
       if (shadow) shadow.classList.add("wb-stuck");
       stuck = shadow;
     }
-    // The bar's height is read before the capsule writes below, so the
+    // The head's height is read before the capsule writes below, so the
     // read restyles only what the shadow toggle touched.
     var barH = bar ? bar.offsetHeight : 0;
     var up = s ? s.up : [], down = s ? s.down : [];
@@ -216,10 +226,9 @@
   }
 
   // offsets puts the rail's offsets on the elements that read them: every
-  // item's bar gets --wb-rail-top (where it sticks, under the host's own
-  // sticky rule), each topic's note --wb-rail-note (where it sticks: under
-  // its bar, page.css), the open-question pill's top wrapper --wb-rail-h
-  // (the stack and the current bar), and its bottom wrapper --wb-rail-bot
+  // item's sticking head gets --wb-rail-top (where it sticks, under the
+  // host's own sticky rule), the open-question pill's top wrapper
+  // --wb-rail-h (the stack and the current head), and its bottom wrapper --wb-rail-bot
   // (the bottom capsules). Never on host: a custom property there is
   // inherited by every node of the board, so each write restyled the whole
   // board. A value an element already holds is not written again.
@@ -231,20 +240,9 @@
     had[name] = v;
     el.style.setProperty(name, v);
   }
-  // A note's offset is the bar's stick line plus the bar's own height. Every
-  // note gets it, open or not, so a note opened mid-topic sticks at once.
-  // All bar heights are read before any write, so the reads cost one
-  // layout; a bar that changes height resizes its topic, and the re-query
-  // that follows (fresh) writes the new offset.
   function offsets() {
     fresh = false;
-    var top = parseFloat(vals.top) || 0, notes = [];
-    found.forEach(function (t) {
-      var n = isTopic(t) && t.querySelector(":scope > textarea.tnote"), b = n && barOf(t);
-      if (b) notes.push([n, top + b.offsetHeight + "px"]);
-    });
-    notes.forEach(function (p) { put(p[0], "--wb-rail-note", p[1]); });
-    found.forEach(function (t) { put(barOf(t), "--wb-rail-top", vals.top); });
+    found.forEach(function (t) { put(stickOf(t), "--wb-rail-top", vals.top); });
     put(host.querySelector(".oq-wrap.top"), "--wb-rail-h", vals.h);
     put(host.querySelector(".oq-wrap.bot"), "--wb-rail-bot", vals.bot);
   }
@@ -394,7 +392,7 @@
       el.appendChild(c);
     });
     ghosts[edge] = [el];
-    if (!bar && into.classList.contains("wb-stuck")) {
+    if (!bar && into.closest(".wb-stuck")) {
       var plate = d.createElement("div");
       plate.className = "wb-rail-ghost";
       plate.style.cssText = "left:" + el.style.left + ";width:" + el.style.width + ";top:" + (to.top - w.top) + "px;height:" + to.height + "px;background:var(--wb-bg)";
@@ -444,6 +442,47 @@
   }
   wraps.top.addEventListener("click", jump);
   wraps.bot.addEventListener("click", jump);
+
+  // Check pill (button.ckbtn in an open topic's head). At rest it folds the
+  // topic's in-flow check list. On a stuck head the list is out of view, so
+  // the pill lifts the list itself into the head, where page.css hangs it as
+  // a popover over the body; a spacer of the list's height keeps its place,
+  // so nothing under it moves. The real list moves rather than a copy: its
+  // answer controls are what form.js reads. A second click, the head
+  // unsticking, or a teardown puts it back (drop).
+  var lifted = null;
+  function drop() {
+    var l = lifted;
+    lifted = null;
+    if (!l) return;
+    if (l.spacer.parentNode) l.spacer.parentNode.replaceChild(l.list, l.spacer);
+    else if (l.list.parentNode) l.list.parentNode.removeChild(l.list);
+    l.list.hidden = l.hid;
+    l.btn.setAttribute("aria-expanded", l.hid ? "false" : "true");
+  }
+  function pill(e) {
+    var btn = e.target.closest && e.target.closest("button.ckbtn"), head = btn && btn.closest(".tophead");
+    if (!head || !box.contains(head)) return;
+    if (lifted && lifted.head === head) return drop();
+    var list = head.parentNode.querySelector(":scope > .checks");
+    if (!list) return;
+    if (!head.classList.contains("wb-stuck")) {
+      list.hidden = !list.hidden;
+      btn.setAttribute("aria-expanded", list.hidden ? "false" : "true");
+      return;
+    }
+    drop();
+    var cs = getComputedStyle(list), spacer = d.createElement("div");
+    spacer.className = "ckspace";
+    spacer.setAttribute("aria-hidden", "true");
+    if (!list.hidden) spacer.style.cssText = "height:" + list.offsetHeight + "px;margin:" + cs.marginTop + " 0 " + cs.marginBottom;
+    lifted = { head: head, list: list, spacer: spacer, btn: btn, hid: list.hidden };
+    list.parentNode.replaceChild(spacer, list);
+    list.hidden = false;
+    head.appendChild(list);
+    btn.setAttribute("aria-expanded", "true");
+  }
+  box.addEventListener("click", pill);
   kick();
 
   st.off = function () {
@@ -454,6 +493,8 @@
     window.removeEventListener("resize", reflow);
     wraps.top.removeEventListener("click", jump);
     wraps.bot.removeEventListener("click", jump);
+    box.removeEventListener("click", pill);
+    drop();
     if (stuck) stuck.classList.remove("wb-stuck");
     stuck = null;
     dropGhost();

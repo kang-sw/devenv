@@ -846,7 +846,7 @@ func TestApplyTopicSetsReplacesAndClearsABody(t *testing.T) {
 	// The name is required.
 	wantProblems(t, refused(t, st, `<wb:topic><wb:body>x</wb:body></wb:topic>`), "<wb:topic> (line 1) name: required")
 	wantProblems(t, refused(t, st, `<wb:topic name=" "><wb:body>x</wb:body></wb:topic>`), "name: must be non-empty")
-	wantProblems(t, refused(t, st, `<wb:topic name="n" mode="x"><wb:body>x</wb:body></wb:topic>`), "<wb:topic> (line 1): unknown attribute mode (known: name, label)")
+	wantProblems(t, refused(t, st, `<wb:topic name="n" mode="x"><wb:body>x</wb:body></wb:topic>`), "<wb:topic> (line 1): unknown attribute mode (known: name, label, tickets)")
 }
 
 func TestApplyTopicSameBodyIsNoChange(t *testing.T) {

@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d765664857d80e60
 sage-review-completeness-reviewed: d765664857d80e60
+completed: 2026-11-13
 ---
 
 # Whiteboard topic tickets and sticky head
@@ -226,3 +227,31 @@ Verification:
 - Headless Chromium screenshots matching the r7b mockup states (rest,
   stuck, stuck popover, narrow, glow) on the file page and the dashboard
   page; no page errors.
+
+### Result (671a45c4a) - 2026-11-13
+
+Implemented in 489b3bcd2 (store, grammar, query), 4da9a30c7 (render, head,
+rail, dashboard dependents), 42d272729 (host resolvers, dashboard watch),
+671a45c4a (playbook and mirrors).
+
+- `wsxmlcmd.Group.Extras` replaces the single extra; `wb:topic` takes
+  `label` and `tickets`. Malformed stems refuse the batch; repeats are kept
+  once; a commandless `tickets=""` on an unknown topic is refused.
+- The open topic's head summary carries the agent line and the check pill;
+  a legacy recap stays a card under the head; a closed topic's head is the
+  bar and note only and keeps `.chead` in its fold. The pill is a button
+  where rail.js runs and a span on the embed. The stuck-head popover moves
+  the real `.checks` node into the head with a same-height spacer.
+- `--wb-rail-note` is retired (the note rides in the sticky head); rail.js
+  refreshes `--wb-rail-h` when a re-queried draw finds the current head
+  resized.
+- Deviation: `dashboard.css`'s `section.topic > .tbar` grab-cursor rule was
+  retargeted to `> .tophead > .tbar` under Decision 13.
+- Embed cap raised 45% -> 46% (populated embed 44.2% -> 44.9%), reason in
+  the test comment and 4da9a30c7.
+- Headless Chromium (file page and dashboard, light and dark): rest, stuck,
+  stuck popover (list lifted, restored on the second click), glow, and narrow
+  at 560px; no page errors.
+- Open: a closed topic with a live linked ticket still glows (unpinned
+  either way); the popover's lift/restore has no fake-DOM test, only the
+  Chromium run.

@@ -452,6 +452,7 @@ func (s *Server) renderWhiteboard(rec *sessionRecord, sessionKey string, withEmb
 			Panels:        whiteboardPanels(in),
 			FileLink:      whiteboardItemFileLink(rec.Root, whiteboardPageDir(in)),
 			FullBoardLink: whiteboardFileLink(rec.Root, whiteboardPageDir(in), filepath.Join(pageDir, "index.html")),
+			Tickets:       &whiteboardTickets{root: rec.Root},
 		}
 	}
 

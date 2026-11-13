@@ -37,7 +37,7 @@ Object.defineProperty(E.prototype, "parentNode", { get: function () { return thi
 Object.defineProperty(E.prototype, "lastChild", { get: function () { return this.children[this.children.length - 1] || null; } });
 document.body.animate = function () {};
 board.addEventListener = function (t, f) { listeners[t] = f; };
-function topics(off) { board.children.forEach(function (t) { if (t.attrs["data-topic"]) { var i = "abcdef".indexOf(t.attrs["data-topic"]); t.y = i * 600 - off; t.children[0].y = t.y; } }); }
+function topics(off) { board.children.forEach(function (t) { if (t.attrs["data-topic"]) { var i = "abcdef".indexOf(t.attrs["data-topic"]); t.y = i * 600 - off; t.children[0].y = t.children[0].children[0].y = t.y; } }); }
 function ghosts() { return anims.filter(function (e) { return e.cls["wb-rail-ghost"]; }).length; }
 ` + string(data) + `
 frame();

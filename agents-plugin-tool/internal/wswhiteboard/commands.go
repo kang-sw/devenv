@@ -13,8 +13,9 @@ var itemFieldNames = []string{"title", "option", "recommend", "why", "link"}
 // order of the playbook's table. A wb:topic group names the topic its
 // commands (wb:body, wb:edit, wb:panel, wb:log, wb:add, wb:close) act on, so a topic's long
 // name is written once per batch; its optional label attribute makes the
-// name a stem and sets the topic's label (applyLabel), and a labelled group
-// may hold no commands. Item fields are plain text, so an escaped
+// name a stem and sets the topic's label (applyLabel), its optional tickets
+// attribute replaces the topic's linked ticket stems (applyGroup), and a
+// group carrying either may hold no commands. Item fields are plain text, so an escaped
 // one is decoded; topic/panel payloads, log text, wb:edit's old and new
 // (matched against a stored body), and an answer (the
 // user's verbatim words) are not.
@@ -23,7 +24,7 @@ var grammar = wsxmlcmd.Grammar{
 	RefuseFieldOpenings: true,
 	// wb:topic once took the body itself; the hint shows the form that
 	// replaced it to a caller still writing the old one.
-	Group: &wsxmlcmd.Group{Name: "topic", Attr: "name", Extra: "label", Hint: `a topic body goes in <wb:body> inside the group, and an empty <wb:body/> clears it: <wb:topic name="..."><wb:body>...</wb:body></wb:topic>`},
+	Group: &wsxmlcmd.Group{Name: "topic", Attr: "name", Extras: []string{"label", "tickets"}, Hint: `a topic body goes in <wb:body> inside the group, and an empty <wb:body/> clears it: <wb:topic name="..."><wb:body>...</wb:body></wb:topic>`},
 	Commands: map[string]wsxmlcmd.Spec{
 		"body":      {Kind: wsxmlcmd.Leaf, Scoped: true},
 		"edit":      {Kind: wsxmlcmd.Container, Attrs: []string{"replace_all"}, Fields: []string{"old", "new"}, Scoped: true},
