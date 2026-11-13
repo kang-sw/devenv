@@ -507,7 +507,7 @@
     var pin = (name === "entries" || name === "convlive") && pinned();
     var scroll = scrollState();
     var answers = board ? boardRead(readAnswers) : null;
-    var railTop = name === "rail" ? railScrollTop() : null;
+    var railTop = name === "rail" ? railScrollTop() : null, railFoc = name === "rail" ? railFocus() : null;
     var frameH = board ? boardRead(frameHeights) : null;
     var history = board ? captureBoardHistory() : null;
     var before = board && !still && !reducedMotion() ? boardSpots(el) : null;
@@ -573,7 +573,7 @@
     if (name === "entries") syncChead();
     if (name === "head" && !sseOn) connected(false);
     if (name === "head") labelSwapped();
-    if (name === "rail") { railMarks(); railScrollTo(railTop); }
+    if (name === "rail") { railMarks(); railScrollTo(railTop); railRefocus(railFoc); }
     if (name === "head" || name === "convlive") leadSwapped(name);
     if (name === "rail" || name === "sessions") apScan(el);
   }
@@ -5634,8 +5634,9 @@
   var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
   // rp is the open rail popover (the next blocks): its controller P, kind,
   // what it concerns (ws: a workspace, the folder a new session starts in,
-  // or the viewed session), and the button it hangs from.
-  var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpIds = 0;
+  // the viewed session, or a row menu's session), and the button it hangs
+  // from (a row menu's: the row's link; at, where in the row it opened).
+  var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpRow = null, rpIds = 0;
   function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches) && (!root.hasAttribute("data-pincol") || !!(RAIL_XWIDE && RAIL_XWIDE.matches)); }
   function railShown() { return root.classList.contains("rail-open"); }
   // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column.
@@ -5671,6 +5672,34 @@
     });
     railPopSync();
   }
+  // railFocus is what holds the focus in the rail before a swap replaces
+  // every row: a row's link or one of its buttons, by the row's reply-id;
+  // railRefocus puts it back on the new row after the swap, unless the
+  // focus went elsewhere meanwhile. A keyboard move (Alt and an arrow)
+  // lands its swap on the row it moved, so the next key still finds it.
+  var RAIL_FOCUS = [".rl", ".star", ".kidtog", ".drren", ".drcopy", ".rrev"];
+  function railFocus() {
+    var a = doc.activeElement, row = a && railEl && WsRail && railEl.contains(a) && a.closest ? a.closest(".rs") : null;
+    if (!row) return null;
+    for (var i = 0; i < RAIL_FOCUS.length; i++) if (a.matches(RAIL_FOCUS[i])) return { rid: row.getAttribute("data-rid") || "", sel: RAIL_FOCUS[i] };
+    return null;
+  }
+  function railRefocus(f) {
+    var a = doc.activeElement, r = region("rail");
+    if (!f || !r || (a && a !== doc.body)) return;
+    var row = WsRail.refind(r, { cls: "rs", attr: "data-rid", val: f.rid }), n = row && row.querySelector(f.sel);
+    if (n && n.getClientRects().length) n.focus({ preventScroll: true });
+  }
+  // railSay says text in the rail's live line (rlive, made once outside
+  // the rail region): what a keyboard or menu move did.
+  var rliveEl = null;
+  function railSay(text) { if (rliveEl) rliveEl.textContent = text; }
+  // railName is a session row's name as shown: its label, else its
+  // reply-id.
+  function railName(row) {
+    var nm = row && row.querySelector(".rid");
+    return nm ? nm.textContent : "";
+  }
   // kidFold collapses (fold) or expands the parent row's children, a view
   // preference kept per browser.
   function kidFold(row, fold) {
@@ -5704,14 +5733,15 @@
   }
   // layoutSave posts a layout op the page already shows: the rail swaps
   // wait meanwhile, an applied op's generation marks every older render
-  // stale, and a refused one runs undo (which puts the page back) and
-  // toasts the reason.
-  function layoutSave(body, undo) {
+  // stale and runs done, and a refused one runs undo (which puts the page
+  // back) and toasts the reason.
+  function layoutSave(body, undo, done) {
     railSaving++;
     layoutPost(body, function (status, v) {
       railSaving--;
       if (v.applied === true) {
         if (+v.gen > railMinGen) railMinGen = +v.gen;
+        if (done) done();
       } else {
         if (undo) undo();
         toast(status ? wsT(WsRail.layoutRefusal(v.reason)) : wsT("js.post.unreachable"));
@@ -5755,7 +5785,40 @@
       ended: railRelease
     });
   }
+  // railMove shows the session row's move z (WsRail.keyMove's, or the row
+  // menu's) at once, the focus kept on the row's link, and posts its op;
+  // once the op applied the live line says what it did ("EXEC → under
+  // 메인"), and a refused one goes back with the reason in a toast. A
+  // collapsed parent the row goes under opens. A detach the page has no
+  // row to show against (no z.zone) shows with the daemon's render.
+  function railMove(row, z) {
+    var o = z.op, name = railName(row), undo = null, link = row.querySelector(".rl");
+    var ref = z.ref ? WsRail.refind(railEl, { cls: "rs", attr: "data-rid", val: z.ref }) : null;
+    var text = o.op === "attach" ? wsT("js.rail.moved.under", name, railName(WsRail.refind(railEl, { cls: "rs", attr: "data-rid", val: o.parent })))
+      : o.op === "detach" ? wsT("js.rail.moved.top", name)
+      : o.before ? wsT("js.rail.moved.before", name, railName(ref)) : wsT("js.rail.moved.after", name, railName(ref));
+    if (ref && z.zone) {
+      if (z.zone === "child" && ref.classList.contains("kcol")) kidFold(ref, false);
+      undo = WsRail.moveRow(row, ref, z.zone, function () {
+        var b = doc.createElement("div");
+        b.className = "rkids";
+        return b;
+      });
+      railMarks();
+    }
+    if (link) link.focus();
+    layoutSave(o, function () {
+      if (!undo) return;
+      undo();
+      railMarks();
+      if (link && link.isConnected && (!doc.activeElement || doc.activeElement === doc.body)) link.focus();
+    }, function () { railSay(text); });
+  }
   if (railEl && WsRail) {
+    // The live line the keyboard path and the row menu say their moves in.
+    rliveEl = doc.body.appendChild(mk("div", "rlive"));
+    rliveEl.setAttribute("role", "status");
+    rliveEl.setAttribute("aria-live", "polite");
     if (railBtn) railBtn.addEventListener("click", function (e) {
       if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       e.preventDefault();
@@ -5865,6 +5928,33 @@
       if (!row || !row.querySelector(".kidtog")) return;
       e.preventDefault();
       kidFold(row, e.key === "ArrowLeft");
+    });
+    // The keyboard path: Alt and an arrow on a focused row move it
+    // (WsRail.keyMove; railMove): Up and Down past the next row of its
+    // level, Right under the top-level row above it as its last child,
+    // Left out of its parent. One move posts at a time (another key
+    // meanwhile does nothing, as two posts in flight could land out of
+    // order), and a refused one toasts the route's reason. Alt+Left and
+    // Alt+Right are also the browser's Back and Forward (Windows, Linux;
+    // under the iframe shell a Back would pop the shell's history), so the
+    // row takes them even when they move nothing. Shift+F10 and the
+    // ContextMenu key open the row's menu (railRowMenu).
+    var RAIL_KEYS = { ArrowUp: "up", ArrowDown: "down", ArrowRight: "in", ArrowLeft: "out" };
+    railEl.addEventListener("keydown", function (e) {
+      var t = e.target, row = t.closest && !t.closest("input, textarea") ? t.closest(".rs") : null;
+      if (!row || e.ctrlKey || e.metaKey || e.isComposing) return;
+      if (!e.altKey && ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu")) {
+        e.preventDefault();
+        railRowMenu(row, null);
+        return;
+      }
+      var dir = RAIL_KEYS[e.key];
+      if (!dir || !e.altKey || e.shiftKey) return;
+      e.preventDefault();
+      if (railSaving > 0 || rdrag || railEditing()) return;
+      var z = WsRail.keyMove(row, dir);
+      if (z && z.refusal) toast(wsT(WsRail.layoutRefusal(z.refusal)));
+      else if (z) railMove(row, z);
     });
     // The rail list keeps its scroll across navigations.
     var savedRailTop = parseInt(load(RAIL_SCROLL_KEY), 10);
@@ -6494,36 +6584,47 @@
     if (rp.btn && rp.btn.isConnected) return rp.btn;
     var r = region("rail"), h = region("head"), found = null;
     if (rp.kind === "sess") found = h && h.querySelector(".host.hbtn");
-    else if (r) q(rp.kind === "lead" ? ".rnew" : '.radd[data-add="' + rp.kind + '"]', r).forEach(function (b) {
+    else if (rp.kind === "row") {
+      var row = r && WsRail.refind(r, { cls: "rs", attr: "data-rid", val: rp.ws });
+      found = row && row.querySelector(".rl");
+    } else if (r) q(rp.kind === "lead" ? ".rnew" : '.radd[data-add="' + rp.kind + '"]', r).forEach(function (b) {
       if (rpKey(rp.kind, b) === rp.ws) found = b;
     });
     rp.btn = found;
     return found;
   }
+  // A row menu stands at the place in its row it opened at (the pointer),
+  // following the row, else under the whole row.
   function railPopPlace() {
     var b = railPopBtn();
     if (!b) return;
-    var el = rp.P.el, at = WsRail.popPlace(b.getBoundingClientRect(), el.offsetWidth, el.offsetHeight, root.clientWidth || window.innerWidth, root.clientHeight || window.innerHeight);
+    var el = rp.P.el, a = b.getBoundingClientRect();
+    if (rp.kind === "row") {
+      var rr = b.closest(".rs").getBoundingClientRect(), o = rp.at;
+      a = o ? { top: rr.top + o.dy, bottom: rr.top + o.dy, left: rr.left + o.dx, right: rr.left + o.dx + el.offsetWidth } : rr;
+    }
+    var at = WsRail.popPlace(a, el.offsetWidth, el.offsetHeight, root.clientWidth || window.innerWidth, root.clientHeight || window.innerHeight);
     el.style.top = at.top + "px";
     el.style.left = at.left + "px";
   }
   // railPopSync runs after a rail swap: the new + shows its popover open, and
-  // a popover whose + is gone (its workspace left the rail) closes.
+  // a popover whose + is gone (its workspace left the rail) closes, as does
+  // a row menu whose row is gone or hidden.
   function railPopSync() {
     if (!rp.P) return;
     var b = railPopBtn();
-    if (!b) { railPopClose(false); return; }
-    b.setAttribute("aria-expanded", "true");
+    if (!b || (rp.kind === "row" && !b.getClientRects().length)) { railPopClose(false); return; }
+    if (rp.kind !== "row") b.setAttribute("aria-expanded", "true");
     railPopPlace();
   }
   function railPopClose(refocus) {
     if (!rp.P) return;
-    var P = rp.P, b = railPopBtn();
+    var P = rp.P, b = railPopBtn(), row = rp.kind === "row";
     P.close();
     P.el.hidden = true;
     rp = { P: null, kind: "", ws: "", btn: null };
     if (b) {
-      b.setAttribute("aria-expanded", "false");
+      if (!row) b.setAttribute("aria-expanded", "false");
       if (refocus) b.focus();
     }
   }
@@ -6578,6 +6679,247 @@
       btn.disabled = false;
       toast(status >= 200 && status < 300 ? wsT("js.rail.forgot", nm ? nm.textContent : path) : railErr(status, s));
     });
+  }
+
+  // --- rail row menu --------------------------------------------------------------
+  // Every session row has a menu: a right click on the row, a long touch on
+  // it (RM_HOLD; a touch on its grip drags at once instead), or Shift+F10
+  // or the ContextMenu key on it (the rail's keydown) opens it. It renames
+  // and copies the address as the row's own buttons do, moves the row under
+  // another session (the rows WsRail.underRows allows, a list that opens in
+  // place; shown disabled, with the reason, when there is none), detaches a
+  // child from its parent (where Alt+Left puts it), and revives an ended
+  // row as its own button does; a hosted row adds the session menu of that
+  // row's session (rpSessMake(true)), shown once its state says this viewer
+  // holds the controls. It is a rail popover (kind "row", rp.ws the row's
+  // reply-id) at the pointer, or under the row from the keyboard, kept on
+  // the row across a rail swap; the arrows, Home, and End move among its
+  // items, Right and Left open and close the list, and Escape closes the
+  // list, then the menu, the focus back on the row's link. The items are
+  // made at each open, from the row as it was then; each one acts on the
+  // row as the rail shows it when picked.
+  var RM_HOLD = 500, rmHold = null, rmHeld = false;
+  function rpRowMake() {
+    var P = { gen: 0, rid: "", sess: null };
+    var el = P.el = mk("div", "rpop rmenu");
+    el.hidden = true;
+    var list = el.appendChild(mk("div", "rmlist")), under = null, sub = null;
+    list.setAttribute("role", "menu");
+    function rowNow() {
+      var r = region("rail");
+      return r ? WsRail.refind(r, { cls: "rs", attr: "data-rid", val: P.rid }) : null;
+    }
+    // item adds a menu item under box; a pick runs fn(row), or toasts why
+    // a disabled item does nothing.
+    function item(box, icon, text, fn) {
+      var b = box.appendChild(rpBtn("rmi"));
+      b.setAttribute("role", "menuitem");
+      b.appendChild(icon ? gIcon(icon) : mk("span", "i"));
+      b.appendChild(mk("span", "rmt", text));
+      b.addEventListener("click", function () {
+        if (b.getAttribute("aria-disabled") === "true") { if (b.title) toast(b.title); return; }
+        var row = rowNow();
+        if (row) fn(row);
+        else railPopClose(false);
+      });
+      return b;
+    }
+    function items(box) {
+      return Array.prototype.filter.call(box.children, function (b) { return b.getAttribute("role") === "menuitem" && !b.hidden; });
+    }
+    function subShow(on) {
+      sub.hidden = !on;
+      under.setAttribute("aria-expanded", String(on));
+    }
+    list.addEventListener("keydown", function (e) {
+      var t = e.target, box = t.parentNode;
+      if (e.altKey || e.ctrlKey || e.metaKey || e.isComposing || !box) return;
+      var bs = items(box), i = bs.indexOf(t), n = -1;
+      if (e.key === "ArrowDown") n = (i + 1) % bs.length;
+      else if (e.key === "ArrowUp") n = i < 0 ? bs.length - 1 : (i + bs.length - 1) % bs.length;
+      else if (e.key === "Home") n = 0;
+      else if (e.key === "End") n = bs.length - 1;
+      else if (e.key === "ArrowRight" && t === under && under.getAttribute("aria-disabled") !== "true") {
+        e.preventDefault();
+        if (sub.hidden) under.click();
+        else if (items(sub)[0]) items(sub)[0].focus();
+        return;
+      } else if (e.key === "ArrowLeft" && sub && box === sub) {
+        e.preventDefault();
+        P.back();
+        return;
+      } else return;
+      e.preventDefault();
+      if (bs[n]) bs[n].focus();
+    });
+    // moveUnder moves row under the row pid, as a drop on its middle would.
+    function moveUnder(row, pid) {
+      var r = region("rail"), p = r && WsRail.refind(r, { cls: "rs", attr: "data-rid", val: pid });
+      var z = p ? WsRail.dropZone(WsRail.rowFacts(row), WsRail.rowFacts(p), 0.5) : { refusal: "unknown" };
+      railPopClose(true);
+      if (z && z.zone === "child") railMove(row, z);
+      else toast(wsT(WsRail.layoutRefusal((z && z.refusal) || "invalid")));
+    }
+    P.open = function (id, row) {
+      P.gen++;
+      P.rid = id;
+      list.textContent = "";
+      under = sub = null;
+      list.setAttribute("aria-label", railName(row));
+      var d = WsRail.rowFacts(row), pen = row.querySelector(".drren"), cp = row.querySelector(".drcopy"), rev = row.querySelector(".rrev");
+      if (pen) item(list, "pencil", pen.getAttribute("aria-label") || "", function (r) {
+        railPopClose(false);
+        railRename(r);
+      });
+      if (cp) item(list, "copy", cp.getAttribute("aria-label") || "", function (r) {
+        var c = r.querySelector(".drcopy");
+        railPopClose(true);
+        if (c) copyText(c.getAttribute("data-copy") || "");
+      });
+      if (d.live) {
+        var u = WsRail.underRows(row), chev = gIcon("chev");
+        under = item(list, "", wsT("js.rail.menu.under"), function () {
+          subShow(sub.hidden);
+          railPopPlace();
+          var f = items(sub)[0];
+          if (!sub.hidden && f) f.focus();
+        });
+        chev.setAttribute("class", "i rmgo");
+        under.appendChild(chev);
+        sub = list.appendChild(mk("div", "rmsub"));
+        sub.id = rpId();
+        sub.setAttribute("role", "menu");
+        sub.setAttribute("aria-label", wsT("js.rail.menu.under"));
+        under.setAttribute("aria-haspopup", "menu");
+        under.setAttribute("aria-controls", sub.id);
+        subShow(false);
+        u.rows.forEach(function (k) {
+          var pid = k.getAttribute("data-rid") || "";
+          item(sub, "", railName(k), function (r) { moveUnder(r, pid); }).title = pid;
+        });
+        if (!u.rows.length) {
+          under.setAttribute("aria-disabled", "true");
+          under.title = wsT(u.refusal ? WsRail.layoutRefusal(u.refusal) : "js.rail.menu.nounder");
+        }
+      }
+      if (d.live && d.parent) item(list, "back", wsT("js.rail.menu.detach"), function (r) {
+        var z = WsRail.keyMove(r, "out");
+        railPopClose(true);
+        if (z && z.refusal) toast(wsT(WsRail.layoutRefusal(z.refusal)));
+        else if (z) railMove(r, z);
+      });
+      if (rev) {
+        var rb = item(list, "", rev.textContent, function (r) {
+          var b = r.querySelector(".rrev");
+          railPopClose(true);
+          if (b) railRevive(b);
+        });
+        if (rev.title) rb.title = rev.title;
+        if (rev.getAttribute("aria-disabled") === "true") rb.setAttribute("aria-disabled", "true");
+      }
+      if (row.querySelector(".hosted")) {
+        if (!P.sess) P.sess = rpSessMake(true);
+        el.appendChild(P.sess.el);
+        P.sess.open(id);
+      } else if (P.sess) P.sess.close();
+    };
+    // back closes the open "move under" list, the focus back on its item;
+    // false when none is open.
+    P.back = function () {
+      if (!sub || sub.hidden) return false;
+      subShow(false);
+      railPopPlace();
+      under.focus();
+      return true;
+    };
+    P.focus = function () {
+      var f = items(list)[0];
+      if (f) f.focus();
+    };
+    P.close = function () {
+      P.gen++;
+      if (sub) subShow(false);
+      if (P.sess) P.sess.close();
+    };
+    return P;
+  }
+  // railRowMenu opens row's menu at pt (the pointer, {x, y}) or, with
+  // none, under the row. On the row whose menu is open it only moves it to
+  // pt: a long touch and the contextmenu event a browser sends for it, or
+  // Shift+F10 and the one some browsers send after it, open it once.
+  function railRowMenu(row, pt) {
+    var id = row.getAttribute("data-rid") || "", link = row.querySelector(".rl");
+    if (!id || !link) return;
+    var rr = row.getBoundingClientRect(), at = pt ? { dx: pt.x - rr.left, dy: pt.y - rr.top } : null;
+    if (rp.P && rp.kind === "row" && rp.ws === id) {
+      if (at) { rp.at = at; railPopPlace(); }
+      return;
+    }
+    railPopClose(false);
+    var P = rpRow || (rpRow = rpRowMake());
+    if (!P.el.parentNode) doc.body.appendChild(P.el);
+    rp = { P: P, kind: "row", ws: id, btn: link, at: at };
+    P.open(id, row);
+    P.el.hidden = false;
+    railPopPlace();
+    P.focus();
+  }
+  function rmCancel(e) {
+    if (!rmHold || (e && e.pointerId !== rmHold.id)) return;
+    clearTimeout(rmHold.timer);
+    rmHold = null;
+  }
+  if (railEl && WsRail) {
+    // A right click on a row opens its menu at the pointer (one the
+    // keyboard sends, with no point in the row, under the row). A press on
+    // a grip is the drag's (its long touch opens nothing).
+    railEl.addEventListener("contextmenu", function (e) {
+      var t = e.target, row = t.closest && !t.closest("input, textarea") ? t.closest(".rs") : null;
+      if (!row || rdrag) return;
+      e.preventDefault();
+      var rr = row.getBoundingClientRect(), x = e.clientX, y = e.clientY;
+      railRowMenu(row, x >= rr.left && x <= rr.right && y >= rr.top && y <= rr.bottom ? { x: x, y: y } : null);
+    });
+    // A right click anywhere else closes a row menu (inside it, it opens
+    // no browser menu over it).
+    doc.addEventListener("contextmenu", function (e) {
+      var t = e.target;
+      if (!rp.P || rp.kind !== "row" || !t || !t.closest) return;
+      if (rp.P.el.contains(t)) { e.preventDefault(); return; }
+      var row = t.closest(".rs");
+      if (!row || !railEl.contains(row) || row.getAttribute("data-rid") !== rp.ws) railPopClose(false);
+    }, true);
+    // A touch held still on a row for RM_HOLD opens its menu there; one
+    // that moves past RD_SLOP (a scroll) or lifts first does not. The
+    // click the held touch may end with is the menu's, not the link's (a
+    // keyboard's click, detail 0, never is).
+    railEl.addEventListener("pointerdown", function (e) {
+      rmHeld = false;
+      rmCancel(null);
+      if (e.pointerType !== "touch" || !e.isPrimary) return;
+      var t = e.target, row = t.closest && !t.closest(".drgrip, input, textarea") ? t.closest(".rs") : null;
+      if (!row) return;
+      var id = row.getAttribute("data-rid") || "", h = { id: e.pointerId, x: e.clientX, y: e.clientY, timer: 0 };
+      h.timer = setTimeout(function () {
+        var r = region("rail"), now = r && WsRail.refind(r, { cls: "rs", attr: "data-rid", val: id });
+        rmHold = null;
+        if (!now || rdrag || railEditing()) return;
+        rmHeld = true;
+        railRowMenu(now, { x: h.x, y: h.y });
+      }, RM_HOLD);
+      rmHold = h;
+    });
+    doc.addEventListener("pointermove", function (e) {
+      if (rmHold && e.pointerId === rmHold.id && (Math.abs(e.clientX - rmHold.x) > RD_SLOP || Math.abs(e.clientY - rmHold.y) > RD_SLOP)) rmCancel(e);
+    });
+    doc.addEventListener("pointerup", rmCancel);
+    doc.addEventListener("pointercancel", rmCancel);
+    window.addEventListener("click", function (e) {
+      if (!rmHeld || !e.detail || !railEl.contains(e.target)) return;
+      rmHeld = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
   }
 
   // --- rail worktree delete ----------------------------------------------------
@@ -6785,9 +7127,13 @@
   }
   if (railEl && WsRail) {
     // Escape closes the popover before anything else hears it (the rail
-    // overlay and the drawer would close on it too).
+    // overlay and the drawer would close on it too); in a row menu it first
+    // closes the open "move under" list.
     window.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && rp.P) { e.preventDefault(); e.stopPropagation(); railPopClose(true); }
+      if (e.key !== "Escape" || !rp.P) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!(rp.P.back && rp.P.back())) railPopClose(true);
     }, true);
     // A click outside the popover and its + closes it. Capture sees the
     // target before the popover's own handlers redraw it.
@@ -7043,9 +7389,21 @@
   // they end, and close's confirmation then names their count too. A
   // refused change shows in the menu's error line, and the rows return to
   // what the session has.
-  function rpSessMake() {
-    var P = { gen: 0, busy: false };
-    var el = P.el = rpPop(wsT("js.lead.menu"));
+  // With inRow it is instead the section a hosted row's menu (the rail row
+  // menu) shows for that row's session, which may not be the viewed one:
+  // P.rid is that session, its state (P.st) is read from GET
+  // /agents/<P.rid> when the row menu opens, its actions post to that
+  // session's routes, and the section shows only while its state says
+  // this viewer holds the controls. A change to the viewed session updates
+  // the page's own state (lead.st) too.
+  function rpSessMake(inRow) {
+    var P = { gen: 0, busy: false, rid: rid, st: null };
+    var el = P.el = inRow ? mk("div", "rmsess") : rpPop(wsT("js.lead.menu"));
+    if (inRow) {
+      el.hidden = true;
+      el.setAttribute("role", "group");
+      el.setAttribute("aria-label", wsT("js.lead.menu"));
+    }
     el.appendChild(mk("div", "sphd", wsT("js.lead.menu")));
     var rows = leadRows(el.appendChild(mk("div", "spopts")), function (sel) {
       var body = {};
@@ -7066,8 +7424,10 @@
     var handoff = actBtn(luIcon("square-terminal"), "", wsT("js.lead.handoff")), close = actBtn("power", " danger", wsT("js.lead.close"));
     handoff.note.textContent = wsT("js.lead.handoff.note");
     close.note.textContent = wsT("js.lead.close.note");
+    // state is the session's last read state.
+    function state() { return inRow ? P.st : lead.st; }
     // bgTasks is the background task count of the last read state.
-    function bgTasks() { return Number(lead.st && lead.st.background_tasks) || 0; }
+    function bgTasks() { var st = state(); return Number(st && st.background_tasks) || 0; }
     var err = el.appendChild(mk("p", "spnote err"));
     err.setAttribute("aria-live", "polite");
     var failed = "";
@@ -7077,20 +7437,40 @@
       P.busy = true;
       failed = "";
       P.draw();
-      railPost("/agents/" + encodeURIComponent(rid) + "/" + action, body, function (st, v, s) {
+      railPost("/agents/" + encodeURIComponent(P.rid) + "/" + action, body, function (st, v, s) {
         P.busy = false;
         if (st === 200 && v.id) {
-          lead.st = v;
-          if (action === "close" && rpLive(P, gen)) railPopClose(false);
-          leadDraw();
+          if (inRow && gen === P.gen) P.st = v;
+          if (!inRow || (P.rid === rid && (hostedPage || handedPage))) lead.st = v;
+          if (action === "close" && P.live(gen)) railPopClose(false);
+          P.redraw();
           return;
         }
-        if (rpLive(P, gen)) failed = leadErr(st, s);
+        if (P.live(gen)) failed = leadErr(st, s);
         else toast(leadErr(st, s));
-        leadDraw();
-        leadFetch();
+        P.redraw();
+        P.fetch();
       });
     }
+    // live reports the menu still open as it was when gen was taken;
+    // redraw shows a new state (the head's own menu redraws with the
+    // page's state), and fetch reads it again.
+    P.live = function (gen) { return inRow ? !!rp.P && rp.P.sess === P && P.gen === gen : rpLive(P, gen); };
+    P.redraw = function () {
+      if (!inRow) { leadDraw(); return; }
+      P.draw();
+      if (P.rid === rid && (hostedPage || handedPage)) leadDraw();
+    };
+    P.fetch = function () {
+      if (!inRow) { leadFetch(); return; }
+      var gen = P.gen;
+      tkFetch("/agents/" + encodeURIComponent(P.rid), undefined, function (status, v) {
+        if (gen !== P.gen) return;
+        if (status === 200 && v.id) P.st = v;
+        else if (status === 404) P.st = null;
+        P.draw();
+      });
+    };
     stop.b.addEventListener("click", function () {
       var n = bgTasks();
       if (n < 1 || window.confirm(wsTn("js.lead.stop.confirm", n))) act("stop", {});
@@ -7110,7 +7490,15 @@
     // draw shows the session's state; it runs when the menu opens and after
     // every read of the state while it is open.
     P.draw = function () {
-      var st = lead.st;
+      var st = state();
+      if (inRow) {
+        var can = !!(st && st.can_control && !leadGone(st));
+        if (el.hidden !== !can) {
+          el.hidden = !can;
+          railPopPlace();
+        }
+        if (!can) return;
+      }
       if (!st) return;
       var text = failed || (st.error ? String(st.error) : "");
       rows.set(String(st.backend || ""), { model: String(st.model || ""), effort: String(st.effort || ""), mode: String(st.permission_mode || ""), active: st.process ? String(st.active_mode || "") : "" });
@@ -7127,16 +7515,26 @@
       err.textContent = text;
       err.hidden = !text;
     };
-    P.open = function () {
+    // open takes the row's session (inRow; the head's menu is the viewed
+    // session's).
+    P.open = function (id) {
       var gen = ++P.gen;
       P.busy = false;
       failed = "";
+      if (inRow) {
+        P.rid = id;
+        P.st = null;
+      }
       P.draw();
-      leadChoices(function () { if (rpLive(P, gen)) { P.draw(); railPopPlace(); } });
-      leadFetch();
+      leadChoices(function () { if (P.live(gen)) { P.draw(); railPopPlace(); } });
+      P.fetch();
     };
     P.focus = function () { rows.model.focus(); };
-    P.close = function () {};
+    P.close = function () {
+      if (!inRow) return;
+      P.gen++;
+      el.hidden = true;
+    };
     return P;
   }
 
