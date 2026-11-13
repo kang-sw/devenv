@@ -6077,6 +6077,8 @@
     var d = $('tkqpop');
     d.hidden = false; d.showModal(); $('tkqs').setAttribute('aria-expanded', 'true');
     qs.step = qStepOf(d.getBoundingClientRect ? d.getBoundingClientRect().width : 0);
+    // each opening starts on the step's first view; only the query is restored
+    qs.cur = QORDER[qs.step][0]; qs.prev = null;
     $('tkqin').value = qs.q; qRun(); $('tkqin').focus();
     if ($('tkqin').select) $('tkqin').select();
   }

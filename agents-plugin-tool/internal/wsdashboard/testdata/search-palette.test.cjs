@@ -301,6 +301,7 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert.equal(qs.open, false);
   assert.deepEqual(events.filter(x => x[0] === 'preview').pop(), ['preview', 'a.txt', { root: '/tmp/food/' }]);
   ctx.qOpen();
+  assert.equal(qs.cur, 'all', 'each opening starts on the first view');
   type('C:\\Users\\');
   assert.deepEqual(plain(qs.path), { dir: 'C:\\Users\\', leaf: '', sep: '\\' });
   type('/nope/');

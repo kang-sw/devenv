@@ -140,7 +140,7 @@
 .tk .tk-qline { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tk .qopt .tk-qx { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tk .tk-qmore { font-size: 11px; color: var(--wb-muted-fg); padding: 3px 8px; }
-.tk .tk-qerr { color: var(--wb-fail); }
+.tk .qnone.tk-qerr { color: var(--wb-fail); }
 .tk .tk-qskel { height: 20px; margin: 4px 7px; border-radius: 6px; background: var(--wb-muted); }
 .tk .qboard { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .tk .qboard b { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
