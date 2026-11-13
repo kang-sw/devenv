@@ -1464,7 +1464,6 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   .rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
   .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
   .rail-open .rscrim { opacity: 1; pointer-events: auto; }
-  .rail .rkids { margin-left: 10px; }
 }
 /* ===== pinned column (cards.js, dashboard.js board cards) =====
    Pinned topics and cards stand in the pin list (.bpins). It is the board
@@ -1648,6 +1647,9 @@ a[data-wl="file"]:not([href]) { color: inherit; }
    drag the valid parent under the pointer's middle is the child zone
    (rdkid): an accent outline and tint and a trailing arrow, no line. */
 .rail .rkids { margin-left: 14px; border-left: 2px solid var(--wb-muted); }
+/* the overlay rail's step, after the rule it overrides (the pinned
+   column's overlay, with its higher specificity, sits in its own block) */
+@media (max-width: 1599.98px) { .rail .rkids { margin-left: 10px; } }
 .rail .rs.kcol + .rkids { display: none; }
 .rail .rs:not(.kcol) .kap, .rail .rs:not(.kcol) .kidorb { display: none; }
 .rail .rkids .star, .rail .rkids .drmsg { display: none; }
