@@ -33,3 +33,7 @@ fallback connection. No protocol or compatibility change is authorized.
 For this dogfood session, put the short state summary in the topic body
 instead of sending `wb:recap`; leave the refused batch unapplied and retry
 with supported commands only.
+
+## Dropped
+
+2026-11-13: dropped by the owner (board item 77 = c). Release 0.50 removed `wb:recap` without an alias, so the doc/runtime mismatch no longer exists.
