@@ -33,7 +33,7 @@ func TestHiddenFrameHoldsItsUpdatesUntilShown(t *testing.T) {
 
 	runNode(t, "hidden frame", "(function () {\n"+streamPageHarness+`
 framed = true;
-var parentWin = { got: [], postMessage: function (m, o) { parentWin.got.push([m.wsShell, o]); } }, otherWin = {};
+var parentWin = { got: [], hashes: [], postMessage: function (m, o) { parentWin.got.push([m.wsShell, o]); if (m.wsShell === "hash") parentWin.hashes.push(m.hash); } }, otherWin = {};
 var listeners = {};
 window.addEventListener = function (t, fn) { (listeners[t] = listeners[t] || []).push(fn); };
 window.parent = parentWin;
@@ -41,7 +41,7 @@ window.scrollY = 0;
 window.innerWidth = 1200;
 location.origin = "http://localhost:1234";
 location.hash = "";
-var history = { pushState: function (s, t, u) { location.hash = u; }, replaceState: function () {} };
+var history = { pushState: function (s, t, u) { location.hash = u; }, replaceState: function (s, t, u) { location.hash = u; } };
 doc.querySelector = function () { return null; };
 doc.addEventListener = function () {};
 doc.title = "sess - ws dashboard";
@@ -104,6 +104,12 @@ s.msg("tracker", { rev: 9 });
 check("and then acts on updates as they come", log, ["swap:board.6", "nudge:9"]);
 history.pushState(null, "", "#/store");
 check("the frame posted its layout, title, and a hash route its own history call moved to its parent only", parentWin.got.map(function (x) { return x.join(" "); }), ["layout http://localhost:1234", "title http://localhost:1234", "hash http://localhost:1234"]);
+history.replaceState(null, "", "#/store/item");
+location.hash = "#/back";
+listeners.popstate.forEach(function (fn) { fn({}); });
+location.hash = "#/typed";
+listeners.hashchange.forEach(function (fn) { fn({}); });
+check("each way a hash route moves posts its hash", parentWin.hashes, ["#/store", "#/store/item", "#/back", "#/typed"]);
 process.stdout.write(bad.join("\n"));
 })();
 `)

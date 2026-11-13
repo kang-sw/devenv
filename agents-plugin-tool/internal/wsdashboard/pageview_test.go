@@ -882,7 +882,7 @@ func TestHostedSessionMarks(t *testing.T) {
 		t.Errorf("hosted marks on the index = %d, want 1: %s", n, rows)
 	}
 	for local, want := range map[bool]bool{true: true, false: false} {
-		index, err := renderIndexPage(view, regions, nil, local, false)
+		index, err := renderIndexPage(view, regions, nil, local, true)
 		if err != nil {
 			t.Fatal(err)
 		}

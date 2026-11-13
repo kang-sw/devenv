@@ -36,7 +36,7 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 	if strings.Contains(board, `id="ctabs"`) || strings.Contains(board, `id="files"`) {
 		t.Error("the board-first page, which has no conversation column, carries the Files tab")
 	}
-	if _, index := get(t, f.base+"/"); strings.Contains(index, "window.WsFiles = {") {
+	if _, index := get(t, f.base+"/?frame=1"); strings.Contains(index, "window.WsFiles = {") {
 		t.Error("the index page carries the file explorer")
 	}
 	css := mustAsset(t, "dashboard.css")

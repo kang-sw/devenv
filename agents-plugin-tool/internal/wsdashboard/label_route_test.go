@@ -85,7 +85,7 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 	if !strings.Contains(page, `data-rid="livesession"`) || !strings.Contains(page, `href="/s/livesession"`) {
 		t.Errorf("the label replaced the reply-id outside the display")
 	}
-	_, index := get(t, f.base+"/")
+	_, index := get(t, f.base+"/?frame=1")
 	if !strings.Contains(index, `<span class="rid lbl" title="livesession">Build bot</span>`) {
 		t.Errorf("index list lacks the label")
 	}

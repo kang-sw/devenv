@@ -82,7 +82,7 @@ func TestDevAssetsShowEditsWithoutARestart(t *testing.T) {
 			t.Errorf("an edit marked %q does not show on the session page", want)
 		}
 	}
-	if _, index := get(t, f.base+"/"); !strings.Contains(index, "devdashcss") {
+	if _, index := get(t, f.base+"/?frame=1"); !strings.Contains(index, "devdashcss") {
 		t.Error("a css edit does not show on the index page")
 	}
 

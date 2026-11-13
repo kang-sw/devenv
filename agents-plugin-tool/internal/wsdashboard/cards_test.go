@@ -60,7 +60,7 @@ func TestLucideIconsAreVendoredWithTheirLicense(t *testing.T) {
 			t.Errorf("the session page lacks %q", want)
 		}
 	}
-	if _, index := get(t, f.base+"/"); strings.Contains(index, "window.WsCards = {") {
+	if _, index := get(t, f.base+"/?frame=1"); strings.Contains(index, "window.WsCards = {") {
 		t.Error("the index page, which has no board, carries the card framework")
 	}
 }
