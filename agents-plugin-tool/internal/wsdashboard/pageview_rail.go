@@ -111,6 +111,11 @@ type RailRow struct {
 	// Label is the session's display label, shown in place of ReplyID;
 	// empty when it has none.
 	Label string
+	// Project is the registration's project folder. MailboxOpen is the
+	// row's copy tag up to its closing (mailboxOpen), from the worktree the
+	// row sits under, never a per-row git read: set by buildRailView once
+	// that worktree's branch is known.
+	Project, MailboxOpen string
 	// Working reports a lead at work: a live adapter and a phase other than
 	// idle and permission (a permission wait is the lead waiting on the
 	// user). The index's working total counts permission waits; the rail
@@ -362,6 +367,8 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			}
 			sortRailRows(ws.Sessions, regs)
 			sortRailEnded(ws.Ended, regs)
+			railMailbox(ws.Sessions, "", "")
+			railMailbox(ws.Ended, "", "")
 			view.Workspaces = append(view.Workspaces, ws)
 			continue
 		}
@@ -462,6 +469,12 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			}
 			sortRailRows(a.wt.Sessions, a.regs)
 			sortRailEnded(a.wt.Ended, a.regs)
+			branch := a.wt.Branch
+			if a.wt.Detached {
+				branch = ""
+			}
+			railMailbox(a.wt.Sessions, a.wt.Path, branch)
+			railMailbox(a.wt.Ended, a.wt.Path, branch)
 			ws.Worktrees = append(ws.Worktrees, a.wt)
 		}
 		sort.SliceStable(ws.Worktrees, func(i, j int) bool {
@@ -506,6 +519,7 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 	row := RailRow{
 		ReplyID:     reg.ReplyID,
 		Label:       in.Session.Label,
+		Project:     reg.Project,
 		Harness:     reg.Harness,
 		Live:        live,
 		CountPolicy: in.Session.CountPolicy,
@@ -533,6 +547,24 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 		}
 	}
 	return row
+}
+
+// MailboxRef is the tag the row's copy button copies: for a session in a
+// listed worktree, the very tag the head's name copies.
+func (r RailRow) MailboxRef() string { return mailboxRef(r.MailboxOpen, r.Label) }
+
+// LabelMax bounds a rename typed into a rail row, as SessionView.LabelMax.
+func (RailView) LabelMax() int { return maxLabelRunes }
+
+// railMailbox sets each row's copy tag from the worktree it sits under:
+// root is that worktree's top level, branch its branch unless detached. A
+// plain folder passes neither, as the head's name copies no root or branch
+// outside a repository.
+func railMailbox(rows []RailRow, root, branch string) {
+	for i := range rows {
+		r := &rows[i]
+		r.MailboxOpen = mailboxOpen(r.ReplyID, r.Project, root, branch, r.Harness)
+	}
 }
 
 // Stopped reports a hosted session with no harness process: the rail shows

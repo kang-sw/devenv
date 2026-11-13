@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -359,6 +360,71 @@ func TestRailRowApproval(t *testing.T) {
 		if ws.Approvals != 1 {
 			t.Errorf("workspace %s approvals = %d, want 1", ws.Path, ws.Approvals)
 		}
+	}
+}
+
+// TestRailRowMailboxRef pins a rail row's copy tag: the head's builder fed
+// from the rail view, never a per-row git read. A session in a listed
+// worktree copies the very tag its head's name copies (root only when it is
+// not the project, no branch on a detached worktree, the label escaped as
+// the body); a plain folder's row names no root or branch, as the head's
+// name outside a repository.
+func TestRailRowMailboxRef(t *testing.T) {
+	now := time.Now()
+	repo, feat := filepath.FromSlash("/w/repo"), filepath.FromSlash("/w/feature")
+	sub := filepath.Join(repo, "sub")
+	labeled := railSession("feat", feat, now, time.Time{})
+	labeled.Label = `a" & <b>`
+	view := buildRailView([]railInput{
+		{Session: railSession("rootsub", sub, now, time.Time{}), Repo: repo},
+		{Session: labeled, Repo: repo},
+		{Session: railSession("idle", filepath.FromSlash("/w/idle"), now.Add(-time.Hour), now.Add(-time.Minute)), Repo: repo},
+		{Session: railSession("plain", filepath.FromSlash("/w/plain/sub"), now, time.Time{})},
+	}, map[string]railRepo{repo: {Read: true, Entries: []railWorktreeEntry{
+		{Path: repo, Branch: "develop"},
+		{Path: feat, Branch: "feat/x"},
+		{Path: "/w/idle", Detached: true},
+	}}}, []storedWorkspace{{Path: filepath.FromSlash("/w/plain")}}, now)
+	rows := map[string]RailRow{}
+	for _, ws := range view.Workspaces {
+		for _, r := range append(ws.Sessions, ws.Ended...) {
+			rows[r.ReplyID] = r
+		}
+		for _, wt := range ws.Worktrees {
+			for _, r := range append(wt.Sessions, wt.Ended...) {
+				rows[r.ReplyID] = r
+			}
+		}
+	}
+	head := func(id, project, label, top, branch string, detached bool) string {
+		return SessionView{ReplyID: id, Project: project, Harness: "claude", Label: label,
+			Git: &GitBadge{TopLevel: top, Repo: wslive.Repo{Branch: branch, Detached: detached}}}.MailboxRef()
+	}
+	for _, c := range []struct{ id, want string }{
+		{"rootsub", head("rootsub", sub, "", repo, "develop", false)},
+		{"feat", head("feat", feat, `a" & <b>`, feat, "feat/x", false)},
+		{"idle", head("idle", filepath.FromSlash("/w/idle"), "", filepath.FromSlash("/w/idle"), "", true)},
+		{"plain", SessionView{ReplyID: "plain", Project: filepath.FromSlash("/w/plain/sub"), Harness: "claude"}.MailboxRef()},
+	} {
+		if got := rows[c.id].MailboxRef(); got != c.want {
+			t.Errorf("row %s copies %q, want the head's %q", c.id, got, c.want)
+		}
+	}
+	if got := rows["rootsub"].MailboxRef(); !strings.Contains(got, ` root="`+repo+`" branch="develop"`) {
+		t.Errorf("a session in a folder of its worktree copies %q, want the worktree as root", got)
+	}
+	if got := rows["plain"].MailboxRef(); strings.Contains(got, "root=") || strings.Contains(got, "branch=") {
+		t.Errorf("a plain folder's row copies %q, want no root or branch", got)
+	}
+	html, err := renderRailRegion(view, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `class="drcopy" data-copy="` + template.HTMLEscapeString(rows["feat"].MailboxRef()) + `" data-mailbox-open="` + template.HTMLEscapeString(rows["feat"].MailboxOpen) + `"`; !strings.Contains(string(html.HTML), want) {
+		t.Errorf("the rail lacks the labeled row's copy button %s:\n%s", want, html.HTML)
+	}
+	if !strings.Contains(string(html.HTML), `<div class="rlist" id="rlist" data-max="64">`) {
+		t.Errorf("the rail list lacks the rename limit:\n%s", html.HTML)
 	}
 }
 
@@ -858,9 +924,9 @@ func TestRailMarkupRevive(t *testing.T) {
 	}
 	const reason = `This session&#39;s harness reported no conversation to resume (it last ran with an older ws plugin)`
 	for id, want := range map[string]string{
-		"taken":  `</a><button type="button" class="rrev" data-revive="takeover" title="Continue this session in the dashboard">Take over</button></div>`,
-		"closed": `</a><button type="button" class="rrev" data-revive="reopen" title="Open this closed session again in the dashboard">Reopen</button></div>`,
-		"stuck":  `</a><button type="button" class="rrev" data-revive="takeover" aria-disabled="true" title="` + reason + `" aria-label="` + reason + `">Take over</button></div>`,
+		"taken":  `</div><button type="button" class="rrev" data-revive="takeover" title="Continue this session in the dashboard">Take over</button></div>`,
+		"closed": `</div><button type="button" class="rrev" data-revive="reopen" title="Open this closed session again in the dashboard">Reopen</button></div>`,
+		"stuck":  `</div><button type="button" class="rrev" data-revive="takeover" aria-disabled="true" title="` + reason + `" aria-label="` + reason + `">Take over</button></div>`,
 	} {
 		if row := rowOf(id); !strings.Contains(row, want) {
 			t.Errorf("row %s lacks %s:\n%s", id, want, row)

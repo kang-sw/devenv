@@ -1584,20 +1584,24 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .wsbody { padding-top: 2px; }
 .rail .rwt { padding: 4px 0 2px; }
 .rail .rwt.empty .wthd { opacity: .6; }
-.rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
+.rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
 .rail .wthd .i { width: 12px; height: 12px; }
 .rail .wthd .br { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .rail .wthd .wf { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .rail .wthd .gs { margin-left: auto; font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rail .wsbody > .rsessions { margin-top: 4px; }
-.rail .rsessions { margin: 0 8px 0 18px; padding-left: 4px; border-left: 2px solid var(--wb-muted); }
+/* the hierarchy reads in three columns: the workspace icon at 12px, the
+   branch icon at 28px with the worktree's guide line under it, and the
+   harness icon at 49px; a row's grip takes the 14px between the guide line
+   and its harness icon */
+.rail .rsessions { margin: 0 8px 0 33px; padding-left: 0; border-left: 2px solid var(--wb-muted); }
 .rail .rended .rsessions { margin: 0; padding: 0; border: 0; }
 .rail .rended > summary { list-style: none; font-size: 11.5px; color: var(--wb-muted-fg); padding: 4px 8px 2px 14px; cursor: pointer; }
 .rail .rended > summary::-webkit-details-marker { display: none; }
 .rail .rended > summary::after { content: " \25b8"; }
 .rail .rended[open] > summary::after { content: " \25be"; }
 .rail .rended > summary:hover { color: var(--wb-primary); }
-.rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; border-radius: 6px; }
+.rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; padding-left: 14px; border-radius: 6px; }
 .rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
 .rail .rs.ended { opacity: .75; }
@@ -1609,7 +1613,21 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rs.rdrag, .rail .rws.rdrag { opacity: .45; }
 .rdragging, .rdragging * { cursor: grabbing !important; }
 .rdrop { position: fixed; z-index: 46; height: 2px; border-radius: 1px; background: var(--wb-primary); opacity: .7; pointer-events: none; }
-.rail .star { width: 16px; height: 16px; margin: 6px 5px 0 4px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; transition: opacity .12s; }
+/* a live row's grip, the only part of a row that drags (the rest is its
+   link): shown while the row is hovered or focused, always on a touch
+   screen, where it takes the touch from scrolling; over a place the drop is
+   refused the cursor says no and a hint beside the pointer says why */
+.rail .drgrip { position: absolute; left: 0; top: 0; bottom: 0; width: 14px; display: flex; justify-content: center; padding-top: 6px; box-sizing: border-box; color: var(--wb-muted-fg); cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; opacity: 0; transition: opacity .12s; }
+.rail .drgrip .i { width: 10px; height: 14px; stroke-width: 2.4; }
+.rail .rs:hover .drgrip, .rail .rs:focus-within .drgrip { opacity: .7; }
+.rail .drgrip:hover { opacity: 1; color: var(--wb-fg); }
+@media (pointer: coarse) { .rail .drgrip { opacity: .55; } }
+.rdragging.drno, .rdragging.drno * { cursor: not-allowed !important; }
+.drhint { position: fixed; z-index: 47; padding: 4px 8px; border-radius: 6px; background: var(--wb-fg); color: var(--wb-bg); font-size: 12px; font-weight: 600; white-space: nowrap; box-shadow: var(--wb-shadow-hi); pointer-events: none; }
+/* the star follows the name: hidden until the row is hovered or focused
+   (a starred row always shows it), keeping its width meanwhile so the name
+   never moves, and the name ellipsizes before it */
+.rail .star { width: 16px; height: 16px; margin: 0; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; transition: opacity .12s; }
 .rail .star .i { width: 13px; height: 13px; stroke-width: 1.4; }
 .rail .star:hover { background: var(--wb-muted); }
 .rail .star[aria-pressed="true"] { opacity: 1; color: var(--star); }
@@ -1626,9 +1644,35 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rrev[aria-disabled="true"] { color: var(--wb-muted-fg); border-style: dashed; cursor: not-allowed; }
 .rail .rrev[aria-disabled="true"]:hover { background: var(--wb-card); }
 .rail .rrev.busy { opacity: .55; cursor: progress; }
-.rail .rl { display: block; flex: 1 1 auto; min-width: 0; padding: 5px 8px 5px 0; color: inherit; text-decoration: none; border-radius: 6px; }
+/* a row's link is split around the star (no button inside a link): the
+   name part (.rl, the one tab stop), the rest of the first line (.drtail),
+   and the message line (.drmsg) all open the session */
+.rail .drbody { flex: 1 1 auto; min-width: 0; }
+.rail .rl { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; padding: 5px 0; color: inherit; text-decoration: none; border-radius: 6px; }
 .rail .rl:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; }
-.rail .s1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .s1 { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .s1 [hidden] { display: none; }
+.rail .drtail { flex: 1 1 0; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 5px 8px 5px 0; color: inherit; text-decoration: none; }
+.rail .drmsg { display: block; margin-top: -4px; padding: 0 8px 5px 0; color: inherit; text-decoration: none; }
+/* the time slot on the first line's right edge, wide enough for the hover
+   pencil and clipboard that take it (the time hides), so neither the name
+   nor the badges move */
+.rail .drslot { flex: none; min-width: 44px; text-align: right; }
+.rail .dracts { position: absolute; top: 0; bottom: 0; right: 8px; display: none; align-items: center; gap: 2px; }
+.rail .dracts button { display: inline-grid; place-items: center; width: 20px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .dracts .i { width: 13px; height: 13px; stroke-width: 1.6; }
+.rail .dracts button:hover, .rail .dracts button:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+@media (hover: hover) {
+  .rail .rs:hover .dracts { display: flex; }
+  .rail .rs:hover .drslot { visibility: hidden; }
+}
+.rail .rs:focus-within .dracts { display: flex; }
+.rail .rs:focus-within .drslot { visibility: hidden; }
+/* a row's rename: the input stands where the name was */
+.rail .drinp { flex: 1 1 0; min-width: 60px; margin: 3px 0; padding: 1px 4px; font: inherit; font-size: 12.5px; color: var(--wb-fg); background: var(--wb-card); border: 1px solid var(--wb-primary); border-radius: 4px; outline: none; -webkit-user-select: text; user-select: text; }
+.rail .rs .s1:has(.drinp) .drtail { flex: none; }
+.rail .rs .s1:has(.drinp) .dracts { display: none; }
+.rail .rs .s1:has(.drinp) .drslot { visibility: visible; }
 .rail .rid { font-family: var(--wb-mono); font-size: 12.5px; font-weight: 700; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .rail .rid.lbl { font-family: var(--wb-sans); font-weight: 600; }
 .rail .rs.cur .rid { color: var(--wb-fg); }

@@ -488,12 +488,13 @@
     var el = region(name);
     if (!el) return;
     var board = name === "board";
-    if (el.getAttribute("data-h") === hash) { if (board) deferred = null; if (name === "rail") railHeld = null; return; }
+    if (el.getAttribute("data-h") === hash) { if (board) deferred = null; if (name === "rail" && railGate) railGate.forget(); return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board && window.WsCards && window.WsCards.dragging && window.WsCards.dragging()) { boardDragHeld = { hash: hash, html: html }; return; }
-    // A rail swap waits while a row is dragged in the rail, and lands when
-    // the drag ends (rdEnd).
-    if (name === "rail" && rdrag && rdrag.on) { railHeld = { hash: hash, html: html }; return; }
+    // A rail swap waits from a press on a grip or bar until it ends, and
+    // while a row's rename is open (railGate), and lands when that ends
+    // (railRelease).
+    if (name === "rail" && railGate && railGate.offer({ hash: hash, html: html })) return;
     if (name === "head") {
       if (labelEditing()) { headHeld = { hash: hash, html: html }; return; }
       headHeld = null;
@@ -2495,7 +2496,8 @@
   // cancels (the tracker's in-place title edit also cancels on Escape), and
   // an empty value clears the label, which shows the reply-id again. A head
   // swap that arrives while the input is open waits (headHeld) and lands
-  // when the edit ends, so a stream update never drops the typing.
+  // when the edit ends, so a stream update never drops the typing. A rail
+  // row's pencil runs the same edit on that row (railRename).
   var headHeld = null;
   function labelEditing() {
     var h = region("head");
@@ -5616,9 +5618,9 @@
   var railStore = { load: load, save: save };
   var starSet = WsRail ? WsRail.stars(railStore) : null, colSet = WsRail ? WsRail.collapsed(railStore) : null;
   var sessOrder = WsRail ? WsRail.sessionOrder(railStore) : null, wsOrd = WsRail ? WsRail.wsOrder(railStore) : null;
-  // rdrag is the press or drag in the rail (the drag block below), railHeld
-  // the rail swap held back while it drags.
-  var rdrag = null, railHeld = null;
+  // rdrag is the press or drag in the rail (the drag block below); railGate
+  // holds the rail swaps back while it lasts or a row's rename is open.
+  var rdrag = null, railGate = WsRail ? WsRail.swapGate(function () { return !!rdrag || railEditing(); }) : null;
   var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
   var RAIL_XWIDE = window.matchMedia ? window.matchMedia("(min-width: 2200px)") : null;
   var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
@@ -5659,6 +5661,38 @@
       if (tog) tog.setAttribute("aria-expanded", String(!col));
     });
     railPopSync();
+  }
+  // railRelease lands the rail swap held while a press or a rename lasted,
+  // once neither does.
+  function railRelease() {
+    var h = railGate && railGate.release();
+    if (h) swap("rail", h.hash, h.html);
+  }
+  function railEditing() { return !!(railEl && railEl.querySelector(".drinp")); }
+  // railRename runs the head's rename (labelStart) on a rail row: the name,
+  // its hosted mark, and the star give way to the input, which posts to
+  // that session's label route; a save shows the label in the row and, for
+  // the viewed session, in the head. The rail swap waits while it is open.
+  function railRename(row) {
+    if (!row || railEditing()) return;
+    var id = row.getAttribute("data-rid") || "", s1 = row.querySelector(".s1"), nm = row.querySelector(".rid");
+    var pen = row.querySelector(".drren"), cp = row.querySelector(".drcopy"), star = row.querySelector(".star"), list = $("rlist");
+    if (!id || !s1 || !nm || !pen || !star) return;
+    labelStart({
+      box: s1, at: star, cls: "drinp", hide: [nm, row.querySelector(".hosted"), star], route: "/s/" + encodeURIComponent(id) + "/label",
+      label: pen.getAttribute("data-label") || "", max: +(list && list.getAttribute("data-max")) || 64,
+      ph: id, aria: pen.getAttribute("aria-label") || "",
+      saved: function (label) {
+        pen.setAttribute("data-label", label);
+        nm.textContent = label || id;
+        nm.classList.toggle("lbl", !!label);
+        if (label) nm.setAttribute("title", id); else nm.removeAttribute("title");
+        if (cp) labelCopy(cp, label);
+        var h = region("head"), sn = id === rid && h ? h.querySelector(".sname") : null;
+        if (sn) labelShow(sn, label);
+      },
+      ended: railRelease
+    });
   }
   if (railEl && WsRail) {
     if (railBtn) railBtn.addEventListener("click", function (e) {
@@ -5718,6 +5752,18 @@
         railDelete(del);
         return;
       }
+      var ren = t.closest && t.closest(".drren");
+      if (ren) {
+        e.preventDefault();
+        railRename(ren.closest(".rs"));
+        return;
+      }
+      var cp = t.closest && t.closest(".drcopy");
+      if (cp) {
+        e.preventDefault();
+        copyText(cp.getAttribute("data-copy") || "");
+        return;
+      }
       // The whole bar toggles the workspace's collapse; its toggle button
       // (.wstog) is the keyboard's way to it.
       var bar = t.closest && t.closest(".wsbar");
@@ -5747,18 +5793,26 @@
   }
 
   // --- rail drag: sessions within their group, workspaces among themselves ---
-  // A live session row drags among the live rows of its own group (its
-  // worktree or folder workspace) on its side of the stars; a workspace
-  // section drags by its bar among the sections. A line shows where it
-  // lands, and the drop stores the group's new order (WsRail.sessionOrder,
-  // wsOrder), which railMarks applies after every swap. A press that never
-  // moves past RD_SLOP stays a click; a touch drags only after holding
-  // still for RD_HOLD, so a swipe still scrolls the list. No drag starts
-  // from a button in a row or bar (star, revive, +, forget); the bar's own
-  // toggle is the bar. The rows are links, whose native drag would take the
-  // pointer away, so it is cancelled.
-  var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 28;
-  var rdragged = false, rdLineEl = null, rdRaf = 0;
+  // A live session row drags by its grip (the gutter left of its harness
+  // icon) among the live rows of its own group (its worktree or folder
+  // workspace) on its side of the stars; a workspace section drags by its
+  // bar among the sections. A line shows where it lands, clamped to the
+  // list's edge when that place is scrolled out of view, and the drop
+  // stores the group's new order (WsRail.sessionOrder, wsOrder), which
+  // railMarks applies at once and after every swap. Over a place it cannot
+  // land (another workspace or worktree, the other side of the stars) the
+  // cursor says no and a hint says why. A press that never moves past
+  // RD_SLOP stays a click. The rest of a row is its link and never drags; a
+  // touch on a grip drags with no hold, while a touch on a bar drags only
+  // after holding still for RD_HOLD, so a swipe still scrolls the list. No
+  // drag starts from a button in a bar (+, forget); the bar's own toggle is
+  // the bar. A link's native drag would take the pointer away, so it is
+  // cancelled. Every rail swap waits from the press until it ends
+  // (railGate), and a node replaced anyway is found again by its reply-id
+  // or path.
+  var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 48;
+  var RD_HINT = { ws: "js.rail.drag.ws", wt: "js.rail.drag.wt", stars: "js.rail.drag.stars" };
+  var rdragged = false, rdLineEl = null, rdHintEl = null, rdRaf = 0;
   function rdPeers(item) {
     var ws = item.classList.contains("rws");
     return Array.prototype.filter.call(item.parentNode.children, function (c) {
@@ -5777,14 +5831,53 @@
     rdLineEl.style.top = box.top + "px";
     rdLineEl.hidden = false;
   }
-  // rdOver places the drop at the pointer's y: before the first peer whose
-  // middle is below it, else after the last. A drop that would leave the
-  // item where it stands shows no line. Near the list's top or bottom edge
-  // the list scrolls, and keeps scrolling while the pointer stays there.
-  function rdOver(y) {
+  // rdHint shows why a drop is refused (why, a WsRail.dropRefusal value)
+  // beside the pointer, with the not-allowed cursor; an empty why hides it.
+  function rdHint(why, x, y) {
+    root.classList.toggle("drno", !!why);
+    if (!why) { if (rdHintEl) rdHintEl.hidden = true; return; }
+    if (!rdHintEl) {
+      rdHintEl = doc.body.appendChild(doc.createElement("div"));
+      rdHintEl.className = "drhint";
+      rdHintEl.setAttribute("role", "status");
+    }
+    rdHintEl.textContent = wsT(RD_HINT[why]);
+    rdHintEl.style.left = Math.round(x + 14) + "px";
+    rdHintEl.style.top = Math.round(y + 16) + "px";
+    rdHintEl.hidden = false;
+  }
+  // rdItem keeps the press on its item: a node a swap replaced anyway is
+  // found again (WsRail.refind) and takes the drag's marks. False when it is
+  // gone.
+  function rdItem(d) {
+    if (d.item.isConnected) return true;
+    var n = WsRail.refind(railEl, d.key);
+    if (!n) return false;
+    d.item = n;
+    if (d.on) {
+      n.classList.add("rdrag");
+      try { n.setPointerCapture(d.id); } catch (x) { /* no capture: the moves still land on the document */ }
+    }
+    return true;
+  }
+  // rdOver places the drop at the pointer (x, y): before the first peer
+  // whose middle is below y, else after the last. A drop that would leave
+  // the item where it stands shows no line, and one the pointer's place
+  // refuses shows the hint instead. Near the list's top or bottom edge the
+  // list scrolls, and keeps scrolling while the pointer stays there.
+  function rdOver(x, y) {
     var d = rdrag, list = $("rlist");
     if (!d || !d.on) return;
+    d.x = x;
     d.y = y;
+    var lr = list ? list.getBoundingClientRect() : null;
+    d.edge = lr ? (y < lr.top + RD_EDGE ? -1 : y > lr.bottom - RD_EDGE ? 1 : 0) : 0;
+    if (d.edge && !rdRaf) rdRaf = requestAnimationFrame(rdScroll);
+    d.noop = true;
+    if (!rdItem(d)) { rdHint(""); rdLine(null); return; }
+    var why = WsRail.dropRefusal(d.item, doc.elementFromPoint(x, y));
+    rdHint(why, x, y);
+    if (why) { rdLine(null); return; }
     var peers = rdPeers(d.item), at = peers.length, i;
     for (i = 0; i < peers.length; i++) {
       var r = peers[i].getBoundingClientRect();
@@ -5794,14 +5887,12 @@
     d.noop = at === me || at === me + 1;
     d.ref = at < peers.length ? peers[at] : peers[peers.length - 1];
     d.after = at === peers.length;
-    var lr = list ? list.getBoundingClientRect() : null;
-    d.edge = lr ? (y < lr.top + RD_EDGE ? -1 : y > lr.bottom - RD_EDGE ? 1 : 0) : 0;
-    if (d.edge && !rdRaf) rdRaf = requestAnimationFrame(rdScroll);
     if (d.noop) { rdLine(null); return; }
     var rr = d.ref.getBoundingClientRect(), top = d.after ? rr.bottom : rr.top;
     if (!d.after && at > 0) top = (peers[at - 1].getBoundingClientRect().bottom + rr.top) / 2;
-    if (lr && (top < lr.top || top > lr.bottom)) { rdLine(null); return; }
-    rdLine({ left: rr.left, width: rr.width, top: Math.round(top - 1) });
+    top = Math.round(top - 1);
+    if (lr) top = Math.max(Math.round(lr.top), Math.min(Math.round(lr.bottom) - 2, top));
+    rdLine({ left: rr.left, width: rr.width, top: top });
   }
   function rdScroll() {
     rdRaf = 0;
@@ -5810,30 +5901,35 @@
     var was = list.scrollTop;
     list.scrollTop += d.edge * 8;
     if (list.scrollTop === was) return;
-    rdOver(d.y);
+    rdOver(d.x, d.y);
   }
   function rdStart(e) {
     if (rdrag || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
-    var t = e.target, b = t.closest && t.closest("button");
-    if (!t.closest || (b && !b.classList.contains("wstog"))) return;
-    var item = t.closest(".rs, .wsbar");
-    if (!item || !railEl.contains(item)) return;
-    if (item.classList.contains("wsbar")) item = item.closest(".rws");
-    else if (item.classList.contains("ended") || item.parentNode.closest(".rended")) return;
-    if (!item || rdPeers(item).length < 2) return;
-    rdrag = { item: item, id: e.pointerId, x0: e.clientX, y0: e.clientY, y: e.clientY, on: false, touch: e.pointerType === "touch", timer: 0, ref: null, after: false, noop: true, edge: 0 };
-    if (rdrag.touch) rdrag.timer = setTimeout(function () { if (rdrag && !rdrag.on) rdBegin(); }, RD_HOLD);
+    var t = e.target, item, grip = t.closest && t.closest(".drgrip");
+    if (!t.closest) return;
+    if (grip) {
+      item = grip.closest(".rs");
+      if (!item || !railEl.contains(item) || item.classList.contains("ended") || item.parentNode.closest(".rended")) return;
+    } else {
+      var b = t.closest("button"), bar = t.closest(".wsbar");
+      if ((b && !b.classList.contains("wstog")) || !bar || !railEl.contains(bar)) return;
+      item = bar.closest(".rws");
+      if (!item || rdPeers(item).length < 2) return;
+    }
+    var touch = e.pointerType === "touch";
+    rdrag = { item: item, key: WsRail.itemKey(item), id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, touch: touch, hold: touch && !grip, timer: 0, ref: null, after: false, noop: true, edge: 0 };
+    if (rdrag.hold) rdrag.timer = setTimeout(function () { if (rdrag && !rdrag.on) rdBegin(); }, RD_HOLD);
   }
   function rdBegin() {
     var d = rdrag;
-    if (!d.item.isConnected) { rdrag = null; return; }
+    if (!rdItem(d)) { rdEnd(null); return; }
     d.on = true;
     try { d.item.setPointerCapture(d.id); } catch (x) { /* no capture: the moves still land on the document */ }
     d.item.classList.add("rdrag");
     root.classList.add("rdragging");
     var sel = window.getSelection && window.getSelection();
     if (sel && sel.removeAllRanges) sel.removeAllRanges();
-    rdOver(d.y);
+    rdOver(d.x, d.y);
   }
   function rdMove(e) {
     var d = rdrag;
@@ -5842,35 +5938,39 @@
     if (e.pointerType === "mouse" && e.buttons !== undefined && (e.buttons & 1) === 0) { rdEnd(null); return; }
     if (!d.on) {
       if (Math.abs(e.clientX - d.x0) <= RD_SLOP && Math.abs(e.clientY - d.y0) <= RD_SLOP) return;
-      // A touch that moves before its hold is a scroll.
-      if (d.touch) { rdEnd(null); return; }
+      // A touch on a bar that moves before its hold is a scroll.
+      if (d.hold) { rdEnd(null); return; }
+      d.x = e.clientX;
       d.y = e.clientY;
       rdBegin();
       if (!rdrag) return;
     }
     e.preventDefault();
-    rdOver(e.clientY);
+    rdOver(e.clientX, e.clientY);
   }
   // rdEnd ends the press or drag; only a release drops (a cancel, or a
-  // release this page never heard, leaves the rail as it stood). A drag's
-  // click is swallowed (the capture listener below), and the rail swap
-  // held during it lands.
+  // release this page never heard, leaves the rail as it stood). A drop
+  // applies the saved order at once (railMarks). A drag's click is
+  // swallowed (the capture listener below), and the rail swap held since
+  // the press lands after it.
   function rdEnd(e) {
     var d = rdrag;
     if (!d || (e && e.pointerId !== d.id)) return;
+    if (d.on && !d.item.isConnected) rdOver(d.x, d.y);
     rdrag = null;
     clearTimeout(d.timer);
-    if (!d.on) return;
-    d.item.classList.remove("rdrag");
-    root.classList.remove("rdragging");
-    rdLine(null);
-    rdragged = true;
-    setTimeout(function () { rdragged = false; }, 0);
-    if (e && e.type === "pointerup" && !d.noop && d.item.isConnected && WsRail.drop(d.item, d.ref, d.after)) rdSave(d.item);
-    var h = railHeld;
-    railHeld = null;
-    if (h) swap("rail", h.hash, h.html);
-    else railMarks();
+    if (d.on) {
+      d.item.classList.remove("rdrag");
+      root.classList.remove("rdragging");
+      rdLine(null);
+      rdHint("");
+      rdragged = true;
+      setTimeout(function () { rdragged = false; }, 0);
+      if (e && e.type === "pointerup" && !d.noop && d.item.isConnected && WsRail.drop(d.item, d.ref, d.after)) rdSave(d.item);
+      railMarks();
+    }
+    // The press's click lands first, on the nodes it pressed.
+    setTimeout(railRelease, 0);
   }
   function rdSave(item) {
     var r = region("rail");
@@ -5889,9 +5989,12 @@
     doc.addEventListener("pointermove", rdMove);
     doc.addEventListener("pointerup", rdEnd);
     doc.addEventListener("pointercancel", rdEnd);
+    // A press the window loses (another window took the focus) ends there,
+    // so a release it never hears does not hold the rail's swaps.
+    window.addEventListener("blur", function () { rdEnd(null); });
     railEl.addEventListener("click", function (e) { if (rdragged) { e.preventDefault(); e.stopPropagation(); } }, true);
     railEl.addEventListener("dragstart", function (e) { if (e.target.closest && e.target.closest(".rs, .wsbar")) e.preventDefault(); });
-    // A held touch is a drag, not a scroll or the long-press menu.
+    // A dragged touch is a drag, not a scroll or the long-press menu.
     railEl.addEventListener("touchmove", function (e) { if (rdrag && rdrag.on) e.preventDefault(); }, { passive: false });
     railEl.addEventListener("contextmenu", function (e) { if (rdrag && rdrag.touch) e.preventDefault(); });
   }
