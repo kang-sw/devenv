@@ -8,186 +8,145 @@ title: "pi.spawn subagents outlive a daemon restart under a holder"
 
 Dogfood 2026-11-13: `python scripts/dev.py rerun daemon` interrupted four
 mid-turn `pi.spawn` subagents. Each lead received "turn interrupted: the
-dashboard daemon exited while the turn ran" and had to re-send the work.
-Hosted leads survived the same restart.
+dashboard daemon exited while the turn ran" and had to re-send work;
+holder-hosted leads survived.
 
-Peer evidence (InspectTGV, wsflow 0.49.0, 2026-11-13): another lead's rerun
-exited the machine-wide daemon at 02:11:28Z and 02:14:41Z, interrupting a Pi
-worker and its nested leaf. Two ws-mcp builds and two dashboard processes
-were observed, with repeated MCP reconnects. Afterwards `pi.list` said
-"running", `pi.wait` said "interrupted", and `pi.send` queued indefinitely;
-`pi.stop` and respawn were required. Preserve this as an acceptance regression,
-not as proof that the multiple builds caused the stale state.
+Peer evidence (InspectTGV, wsflow 0.49.0): another lead's rerun exited the
+machine-wide daemon at 02:11:28Z and 02:14:41Z, interrupting a worker and its
+nested leaf. Two builds/dashboard processes and repeated MCP reconnects were
+observed. Afterwards `pi.list` said "running", `pi.wait` said "interrupted",
+and `pi.send` queued forever; stop/respawn was required. Preserve that
+regression without assuming the multiple builds caused it.
 
-### Existing holder and hosted-lead recovery
+### Hosted leads already rejoin held processes
 
-- `agents-plugin-tool/internal/wsholder/holder.py:1-75` defines the existing
-  transport: a detached Python holder owns one child, keeps stdin open and
-  continuously drains stdout/stderr into a sequenced bounded ring. Its
-  owner-only descriptor supplies the loopback port and attach token. The
-  successor authenticates, takes the single attach slot, requests replay,
-  then receives live output; `input` writes to the same child's stdin.
-  Disconnecting is not EOF. A live child prevents the holder's idle exit.
-- `agents-plugin-tool/cmd/ws-mcp/dashboard.go:79-92,256-284` constructs one
-  holder manager and passes it to the agent runner. The hosted session code
-  installs the endpoint and starts the runner before holder scanning;
-  shutdown closes the runner before detaching the manager
-  (`agents-plugin-tool/internal/wsdashboard/daemon.go:421-454,597-604`).
-- A Claude lead's `startLead` builds a `holderChild` and records its identity
-  and PID (`agents-plugin-tool/internal/wsagent/runner.go:1808-1896`).
-  `ClaudeBackend.Start` routes stream-json through `startChild`, without
-  re-sending initialize on attachment
-  (`agents-plugin-tool/internal/wsagent/claude.go:316-345`). The holder spawns
-  it in **pipe**, not PTY, mode; the adapter splits replayed stdout into the
-  same JSON lines and sends input through the holder
-  (`agents-plugin-tool/internal/wsagent/holder.go:157-197,226-263`).
-- On shutdown, a lead detaches and persists its applied sequence rather than
-  closing its process (`agents-plugin-tool/internal/wsagent/runner.go:2542-2556`);
-  manager close only drops connections
-  (`agents-plugin-tool/internal/wsholder/manager.go:224-240`). On startup,
-  conversation adapters register before the first scan
-  (`agents-plugin-tool/internal/wsagent/runner.go:208-264,397-402`). The manager
-  discovers descriptors, authenticates and replays the ring; its own cursor
-  is memory-only, so a new manager requests the whole retained ring
-  (`agents-plugin-tool/internal/wsholder/manager.go:343-402`).
-- Persisted `HolderID`, `HostPID`, `HolderSeq` and answered permission IDs
-  distinguish replay from newly applied output
-  (`agents-plugin-tool/internal/wsagent/record.go:66-83`). Replay rebuilds
-  mapper and turn state with side effects suppressed for already-applied
-  lines (`agents-plugin-tool/internal/wsagent/stream.go:164-195`). The runner
-  waits for the scan and replay watermark, handles missing holders, and
-  only then releases queued input. Lost ring boundaries conservatively hold
-  input, with a Pi `get_state` probe when available
-  (`agents-plugin-tool/internal/wsagent/runner.go:1920-2075`). This is process
-  reattachment, not merely starting another process on a saved session.
+- The detached Python holder owns persistent child pipes, continuously drains
+  stdout/stderr into a sequenced bounded ring, and advertises an owner-only
+  descriptor containing its loopback endpoint/token. The next daemon
+  authenticates, takes the attach slot, replays output and continues the same
+  stdin/RPC stream. Detach is not EOF; a live child prevents idle expiry
+  (`agents-plugin-tool/internal/wsholder/holder.py:1-75`).
+- Dashboard wiring passes the manager to the runner; hosted-session startup
+  registers adapters before scanning, and shutdown closes the runner before
+  detaching the manager (`agents-plugin-tool/cmd/ws-mcp/dashboard.go:79-92,256-284`,
+  `agents-plugin-tool/internal/wsdashboard/daemon.go:421-454,597-604`).
+  Claude's backend uses `startChild` without repeating initialize on rejoin;
+  the adapter transports JSON lines in holder **pipe** mode
+  (`agents-plugin-tool/internal/wsagent/claude.go:316-345`,
+  `agents-plugin-tool/internal/wsagent/holder.go:157-197,226-263`).
+- The runner persists holder identity/PID and the last wholly applied output
+  sequence, then detaches on shutdown. The manager discovers descriptors and
+  replays the retained ring (`agents-plugin-tool/internal/wsagent/record.go:66-83`,
+  `agents-plugin-tool/internal/wsagent/runner.go:2542-2556`,
+  `agents-plugin-tool/internal/wsholder/manager.go:224-240,343-402`). Replayed
+  lines rebuild mapper/turn state quietly; new lines apply normally. Input
+  waits for scan/replay completion, with missing-holder and wrapped-ring
+  handling (`agents-plugin-tool/internal/wsagent/stream.go:164-195`,
+  `agents-plugin-tool/internal/wsagent/runner.go:1920-2075`).
 
-### Current Pi workers and state ownership
+### Pi workers bypass that recovery
 
-- `Runner.Spawn` creates a non-lead conversation with parent/tier metadata
-  (`agents-plugin-tool/internal/wsagent/spawn.go:58-111,116-165`). Its start
-  composes the restricted profile, delegate ws key and MCP bridge
-  (`agents-plugin-tool/internal/wsagent/runner.go:1733-1803`). Pi runs
-  `--mode rpc` on its persisted `pi/session.jsonl`; prompts are JSONL RPC
-  commands, not command-line prompts
-  (`agents-plugin-tool/internal/wsagent/pi.go:121-124,246-285,323-362,395-407`).
-- Holding is currently conditional on `StartSpec.Lead.Holder`
+- Spawn records parent/tier and starts a restricted non-lead process with a
+  delegate key/MCP bridge. Pi uses `--mode rpc`, a saved `pi/session.jsonl`,
+  and JSONL prompt commands (`agents-plugin-tool/internal/wsagent/spawn.go:58-165`,
+  `agents-plugin-tool/internal/wsagent/runner.go:1733-1803`,
+  `agents-plugin-tool/internal/wsagent/pi.go:246-285,323-407`). Holding is gated
+  on `StartSpec.Lead.Holder`, so workers use daemon-owned `exec.Cmd` pipes
   (`agents-plugin-tool/internal/wsagent/backend.go:61-78`,
-  `agents-plugin-tool/internal/wsagent/stream.go:102-161`). Workers therefore
-  use daemon-owned `exec.Cmd` pipes. Shutdown's `letGo` preserves only leads
-  and calls `stopProcess` for workers; closing stdin ends the RPC process,
-  with termination fallback. Reload unconditionally settles a parent's open
-  turn as interrupted (`agents-plugin-tool/internal/wsagent/runner.go:408-414,2528-2556`,
-  `agents-plugin-tool/internal/wsagent/spawn.go:276-282`). Saving the Pi
-  session does not preserve an in-flight turn.
-- `pi.list` uses the runner's in-memory `c.turn` and `c.proc`, not the last
-  persisted settle (`agents-plugin-tool/internal/wsagent/runner.go:1344-1374`).
-  `pi.send` persists inbox input, but `kick` refuses it while `c.turn` or
-  replay is set (`agents-plugin-tool/internal/wsagent/runner.go:678-712,1552-1555`).
-  `pi.wait` uses memory-only send counters, settle channels and parent-wait
-  registrations (`agents-plugin-tool/internal/wsagent/children.go:691-792`).
-  These separate state paths explain why fixing only the wait result cannot
-  establish the list/send invariant; reproduce the peer inconsistency in tests.
-- This is **not** an entirely memory-only spawn store: `Record` persists
-  parent/tier, `TurnOpen`, `LastTurn`, queued input and pending/received
-  nested reports; startup seeds the last settle from it
+  `agents-plugin-tool/internal/wsagent/stream.go:102-161`). Shutdown stops
+  workers; reload unconditionally interrupts their open turns
+  (`agents-plugin-tool/internal/wsagent/runner.go:408-414,2528-2556`,
+  `agents-plugin-tool/internal/wsagent/spawn.go:276-282`). A session file alone
+  cannot preserve an in-flight turn.
+- List status comes from memory-only `c.turn`/`c.proc`; send persists inbox
+  input but `kick` refuses it while running/replaying; wait uses in-memory
+  send counters, settle channels and parent-wait registrations
+  (`agents-plugin-tool/internal/wsagent/runner.go:678-712,1344-1374,1552-1555`,
+  `agents-plugin-tool/internal/wsagent/children.go:691-792`). Persisted state
+  includes parent/tier, `TurnOpen`, `LastTurn`, queued input and nested
+  pending/received reports; startup seeds the last settle. Active reply,
+  covered-send marks, held parent result and steered reports are memory-only
   (`agents-plugin-tool/internal/wsagent/record.go:91-127`,
-  `agents-plugin-tool/internal/wsagent/runner.go:383-389`). In-flight reply,
-  send/settle marks, held parent result, steered reports and waiters are
-  memory-only (`agents-plugin-tool/internal/wsagent/runner.go:1115-1147`).
-- Nested children have a second restart hazard: their capability token is
-  issued per process into an in-memory map and never persisted
-  (`agents-plugin-tool/internal/wsagent/children.go:18-38,103-151`). The held
-  MCP bridge would retain that old token and fixed endpoint environment;
-  forwarding reads both directly on each call
-  (`agents-plugin-tool/internal/mcp/pi_forward.go:31-79`). A surviving process
-  alone cannot restore its `pi.*` authority.
-- Completion is not yet a durable exactly-once handoff. `publish` persists a
-  settle before invoking `Options.Report`, but only conversation parents
-  get pending-report entries
-  (`agents-plugin-tool/internal/wsagent/spawn.go:229-273`). Lead reports use
-  an unconditional mailbox append, with failures merely logged
-  (`agents-plugin-tool/internal/mcp/pi_tools.go:490-511`,
-  `agents-plugin-tool/internal/wsmailbox/replyid.go:150-164`). Nested delivery
-  removes the child's pending reports before handing them to the parent;
-  steering/held-result state also needs recovery
+  `agents-plugin-tool/internal/wsagent/runner.go:383-389,1115-1147`). Repair
+  list/send state as well as the wait result.
+- Nested capability tokens exist only in memory and are issued per process;
+  the surviving MCP bridge would retain its old token and endpoint environment
+  (`agents-plugin-tool/internal/wsagent/children.go:18-38,103-151`,
+  `agents-plugin-tool/internal/mcp/pi_forward.go:31-79`). Depth is capped at 2
+  (`agents-plugin-tool/internal/wsagent/children.go:57-59`).
+- Completion needs replay deduplication: settlement is persisted before the
+  report callback, but lead delivery is an unconditional mailbox append;
+  only conversation parents have pending-report entries
+  (`agents-plugin-tool/internal/wsagent/spawn.go:229-273`,
+  `agents-plugin-tool/internal/mcp/pi_tools.go:490-511`,
+  `agents-plugin-tool/internal/wsmailbox/replyid.go:150-164`). Nested handoff
+  removes pending reports before acceptance, while steering and parent-result
+  holds also require recovery
   (`agents-plugin-tool/internal/wsagent/children.go:423-461,488-633`).
 
 ## Decisions
 
-- **Owner direction, 2026-11-13:** isolate a `pi.spawn` subagent's process
-  lifetime from the dashboard daemon, as for a holder-hosted Claude lead.
-  A dev rerun or release replacement rejoins the same running turn.
-  **Rejected:** merely warning about or refusing restarts while turns run;
-  the daemon is machine-wide and workers in other sessions/projects count.
-- **The holder fits Pi RPC.** It transports bytes over persistent pipes;
-  hosted Pi leads already use it (`agents-plugin-tool/internal/wsagent/pi.go:364-393`).
-  Reuse that transport and replay machinery. Separate holding from
-  `LeadSpec`: a held worker must retain its restricted tools/instructions,
-  delegate key and MCP bridge, never acquire lead permissions or ambient
-  user configuration. Give worker holders a distinct `pi-worker` kind for
-  ownership/orphan cleanup. Scope the change to spawned Pi conversations and
-  existing lead behavior; do not change every non-lead backend's lifetime.
-- Persist and restore holder identity, applied-output watermark and the
-  active turn's identity/covered-send marks before accepting list/send/wait
-  operations. Reconstruct worker turn starts too: Pi's mapper currently emits
-  `agent_start` only for leads (`agents-plugin-tool/internal/wsagent/pi.go:690-695`).
-  Rejoin before scanning; do not auto-interrupt a held `TurnOpen`, re-submit
-  its prompt, or start a second process. Replay old lines quietly, apply new
-  lines once, and settle a running turn at `agent_settled` (not `agent_end`
-  or prompt acceptance); preserve immediate settlement for a refused or
-  handled prompt that starts no run. Recover the final reply and parent-result hold,
-  not only the running boolean.
-- Retain the existing bounded-ring transport/protocol. Handle partial lines,
-  ring gaps and a turn that finished while detached. After a gap, query Pi
-  `get_state` and reconcile the active turn with the saved Pi session/RPC
-  message history; never interpret a missing boundary as success or wait
-  forever for an idle process. If a result truly cannot be reconstructed,
-  expose a specific recovery failure once rather than inventing completion.
-  A failed probe must not authorize a second process or a duplicate prompt.
-- Preserve nested authority for the **same held process**: persist its
-  capability secret in the owner-only agent record, restore token lookup
-  before serving requests, and revoke on actual process end/close, not on
-  daemon detach. Validate the holder/process association before restoring
-  authority. Resolve the current daemon endpoint from its discovery file
-  for forwarded calls rather than relying on the inherited port. Preserve
-  parent ownership, tier caps, depth 2 and close-descendants-first semantics.
-  A disconnected HTTP wait is reissued, not restored as a live goroutine;
-  reconnect must not blindly retry a side-effecting spawn/send.
-- Use a stable persisted turn/report ID and a durable report outbox for both
-  parent kinds. Accept report IDs idempotently at the recipient, then
-  acknowledge delivery. Mailbox deduplication receipts must survive claiming
-  or draining mail, not just inspect the current queue. Persist nested
-  acceptance/steering and held-parent-result state, reconcile against replay,
-  and preserve the existing wait-vs-report ownership rule. Daemon failure
-  before/after either side of a handoff must not lose or repeat completion.
-  A lead's wait remains a fallback and does not suppress its completion mail.
-- A genuinely gone process is **idle with an interrupted result/error**,
-  never phantom-running. Clear stale process/turn/replay flags consistently;
-  settle the old turn once before draining queued input. `pi.send` then
-  starts a fresh turn on the same saved Pi session. A live but temporarily
-  unattached holder is not "gone"; wait for scanning/reattachment evidence.
-- **Compatibility: T2 overall.** Phase 1 is an internal stale-state repair;
-  Phase 2 changes the on-disk recovery contract: `turn_open` no longer means
-  "interrupt on load", and turn/report delivery, capability and parent-hold
-  state become durable rather than disposable. Older writers discard fields
-  they do not know (`agents-plugin-tool/internal/wsagent/record.go:195-226`),
-  so optional fields alone do not justify T0. Raise the agent record's
-  `schema_version` from 1 and add newer-schema write refusal; migrate legacy
-  records without holders through interrupted/idle recovery. Apply the same
-  version/write-guard discipline to any non-additively changed mailbox store.
-  Land the breaking slice only in a minor bump under
-  `ai-docs/manuals/release-compatibility.md`; unsupported downgrade writers
-  are not a supported recovery path. Keep holder protocol 1 unchanged and
-  its v/v-1 attach window intact; any necessary non-additive protocol change
-  must explicitly raise its number and remain T2, not silently alter replay.
+- priority: top (owner 2026-11-13). This blocks all other Windows work.
+- **Owner direction, 2026-11-13:** isolate Pi subagent process lifetime from
+  the dashboard daemon as for a holder-hosted Claude lead. Dev reruns and
+  release replacements rejoin the same running turn. **Rejected:** merely
+  warning/refusing restarts while turns run, including other projects' turns.
+- **One bounded Phase 1, one worker:** land holder/rejoin behavior and the
+  small dead-process reconciliation together. A stale-state-only patch does
+  not remove the Windows blocker. Reuse existing holder/replay infrastructure;
+  no generic process-supervision, mailbox or dashboard redesign, exhaustive
+  fault-matrix project, or separate preliminary phase.
+- **Pi RPC fits the holder:** hosted Pi leads already use it
+  (`agents-plugin-tool/internal/wsagent/pi.go:364-393`). Move holder selection
+  out of `LeadSpec` so spawned Pi workers can use it without becoming leads.
+  Preserve restricted tools/instructions, delegate keys and MCP bridges.
+  Use a distinct `pi-worker` holder kind for ownership/orphan cleanup; leave
+  unrelated non-lead backends alone.
+- Rejoin recorded workers before scanning/releasing input. Persist holder
+  identity, applied sequence, active turn/send coverage, reply and held-parent
+  result needed to resume. Do not interrupt a live held `TurnOpen`, repeat its
+  prompt or launch a second process. Map worker `agent_start` too (currently
+  lead-only: `agents-plugin-tool/internal/wsagent/pi.go:690-695`). Rebuild old
+  lines quietly, apply new lines once, and settle on `agent_settled`, not
+  prompt acceptance/`agent_end`; retain immediate refused/handled-no-run cases.
+- Keep holder protocol 1 and its existing bounded ring. Reuse partial-line,
+  replay-watermark and `get_state` probing. After a gap reconcile with Pi's
+  saved session/RPC messages; if the final result cannot be reconstructed,
+  report a specific recovery failure once, never fabricated success or an
+  indefinite idle-process hold. A failed probe cannot justify another process.
+- Preserve depth-2 children and their parent/tier restrictions. Persist the
+  capability secret in the owner-only agent record; validate its held-process
+  association and restore token lookup before accepting nested calls. Revoke
+  on actual process end/close, not daemon detach. Forward calls discover the
+  current endpoint instead of retaining an obsolete port. Reissue disconnected
+  waits; never blindly retry side-effecting spawn/send calls.
+- Scope delivery changes to **Pi completion reports**: stable persisted
+  turn/report IDs, a retryable pending report for either parent kind, and
+  recipient deduplication before acknowledging handoff. Mail deduplication
+  must survive mail claim/drain. Recover nested acceptance/steering and parent
+  holds; retain wait-vs-report ownership, with lead waits still leaving one
+  completion mail. This is not a general mailbox exactly-once API project.
+- If the process is genuinely gone, settle interrupted once, show **idle with
+  the interruption error**, clear stale turn/process/replay flags, then drain
+  queued input. `pi.send` starts a new turn on the saved session. Do not clear
+  a genuinely new queued turn, or mistake a delayed scan/unattached live holder
+  for a dead process. Preserve explicit stop and close-descendants-first.
+- **Compatibility: T2.** The recovery contract changes non-additively:
+  `turn_open` no longer means interrupt-on-load, and durable turn/report/token
+  state must survive writers. Existing struct round-trips discard unknown
+  fields (`agents-plugin-tool/internal/wsagent/record.go:195-226`), so optional
+  fields alone are not T0. Raise agent `schema_version` from 1 to 2 with
+  newer-schema write refusal; migrate unheld legacy records through
+  interrupted/idle recovery. Version/guard any non-additively changed mailbox
+  state likewise. Land only in a minor bump; unsupported old downgrade
+  writers are not a supported recovery path. No holder protocol change.
 
 ## Constraints
 
-- Non-UI implementation runs through `ws/pi.*` workers. This ticket adds no
-  UI and no restart guard; do not restart the shared dogfood daemon merely
-  to exercise tests. Use isolated test daemons/state directories.
-- Applicable `AGENTS.md` Implementation Conventions rows (read before editing
-  matching paths):
+- Non-UI implementation runs through `ws/pi.*` workers. No UI/restart guard;
+  use isolated daemon state for tests, not a restart of the shared daemon.
+- Applicable `AGENTS.md` Implementation Conventions rows; read each manual
+  before editing matching paths:
 
   | paths | manual |
   |---|---|
@@ -195,88 +154,58 @@ not as proof that the multiple builds caused the stale state.
   | `agents-plugin-tool/internal/mcp/` | `ai-docs/manuals/ws-mcp.md` |
   | `agents-plugin-tool/internal/` | `ai-docs/manuals/release-compatibility.md` |
 
-- Expected implementation scope: `agents-plugin-tool/internal/wsagent/`,
-  `internal/mcp/`, `internal/wsmailbox/`, holder integration/tests under
-  `internal/wsholder/`, and daemon wiring/tests in `internal/wsdashboard/`
-  or `cmd/ws-mcp/` only as needed. Keep shipped strings downstream-neutral;
-  no ticket/manual paths from this repository in tool output.
-- Builds and Go tests run on the `sys_lock` remote **w5090**, with the remote
-  resource lock held; record commands, revision and results. Windows-specific
-  holder behavior also needs a **local Windows check**. Holder starts request
-  job breakaway, retry without it and advertise `restart_safe: false` when
-  refused (`agents-plugin-tool/internal/wsholder/spawn_windows.go:12-32`,
-  `agents-plugin-tool/internal/wsholder/manager.go:583-588`). Do not conceal
-  this limitation or claim a Linux run verifies Windows job isolation.
-- Retain explicit `pi.stop`/close/interrupt behavior, transcript history,
-  session IDs, delegate restrictions, nested wait delivery semantics and
-  existing Claude/Pi hosted-lead recovery. No secret token in tool output,
-  logs or completion mail. No unrelated harness or dashboard redesign.
+- Scope: `agents-plugin-tool/internal/wsagent/`, Pi report/forwarding code in
+  `internal/mcp/`, narrowly needed `internal/wsmailbox/` deduplication, holder
+  integration/tests in `internal/wsholder/`, and daemon wiring/tests only as
+  needed. Keep shipped output downstream-neutral and secrets out of logs/mail.
+- Builds/tests run on `sys_lock` remote **w5090**, holding its resource lock.
+  Windows holder behavior also requires a **local Windows check**: job
+  breakaway is requested, refusal retries inside the job and advertises
+  `restart_safe: false` (`agents-plugin-tool/internal/wsholder/spawn_windows.go:12-32`,
+  `agents-plugin-tool/internal/wsholder/manager.go:583-588`). Do not hide that
+  limitation or treat remote Linux results as Windows isolation evidence.
+- Preserve transcript/session identity, delegate restrictions, explicit
+  stop/interrupt and existing Claude/Pi hosted-lead recovery. The lead runs
+  the design gate and promotes todo -> ready before implementation.
 
 ## Phases
 
-### Phase 1: Reconcile dead-process state before accepting another turn
+### Phase 1: Pi workers and nested children rejoin after daemon replacement
 
-Independent defensive fix; Phase 2 depends on it. This phase does not claim
-that running Pi work survives a restart.
-
-- Outcome: legacy/unheld records whose process is gone settle interrupted
-  once, show idle with an actionable error, and have no stale running or
-  replay flag blocking sends. Preserve a genuinely new turn started from
-  queued input after that settlement; do not clear it as part of old-turn
-  cleanup. No synthetic interruption for an already settled/closed record.
-- Go tests: add `TestPiProcessGoneIsIdleAndSendStartsNewTurn` (seed the peer's
-  contradictory list/wait state, assert wait interrupted, list idle and a
-  follow-up actually reaches a newly started process); cover queued input,
-  parent-before-child and child-before-parent load order, repeated reloads
-  and one interruption report. Extend
-  `TestRestartSettlesTheCutTurnBeforeTheNextStarts` in `children_test.go`;
-  retain the legacy behavior covered by
-  `TestDaemonExitReportsTheCutTurnAsInterrupted` in `spawn_test.go`.
-- Verification: under the w5090 lock, run the focused recovery tests and
-  `go test ./internal/wsagent ./internal/mcp` from `agents-plugin-tool/`.
-  Record the observed list/wait/send transition; a successful queue append
-  alone does not prove a new turn starts.
-
-### Phase 2: Hold and rejoin spawned Pi turns, including their children
-
-- Outcome: implement the Decisions' worker transport, schema migration,
-  replay/turn recovery, durable report handoff and nested-token recovery.
-  Shutdown detaches held workers; new-daemon startup rejoins all projects'
-  workers before releasing input. A turn finishing during downtime is
-  recovered and reported once, even across a second restart. Keep explicit
-  stop destructive and sweep orphan **worker** holders without sweeping
-  another holder consumer's processes.
-- Go tests: add `TestPiDaemonRestartMidTurnCompletesWithOneCompletionMail`
-  using the real holder and a deterministic fake Pi RPC executable. Start a
-  turn, replace an isolated daemon, assert the same holder/child PID and
-  session, consume the remaining RPC output, get the final answer through
-  wait, and count exactly one completion mail. Assert no extra prompt or
-  interrupted result. Repeat for normal shutdown and abrupt daemon loss,
-  completion during downtime, a second restart, and separate parent roots.
-- Go tests: add `TestPiNestedDaemonRestartRejoinsBothDepths`: lead -> worker
-  -> leaf survives, the retained token can list/wait/send/spawn at permitted
-  depth after rejoin (including an endpoint-port change), the leaf reports
-  once, the worker's held report releases correctly, and a depth-2 caller
-  still cannot spawn. Cover running/idle parent, steering pending/consumed,
-  reissued waits, closed parent and stop-descendants-first.
-- Go tests: extend `TestPiProcessGoneIsIdleAndSendStartsNewTurn` for a missing
-  holder, holder retained with exited child, and process loss during replay;
-  distinguish these from a delayed first scan or temporarily unattached
-  live holder. Add partial-line, wrapped-ring/get_state, idle-probe race,
-  final-reply recovery and non-lead tool-surface regression fixtures.
-- Go tests: inject failures before/after settle persistence, outbox enqueue,
-  mailbox append/claim and delivery acknowledgement, plus nested recipient
-  acceptance/steering. Assert no missing/duplicate report and no stale wait
-  target after queued sends. Add schema-1 migration, schema-2 reload,
-  newer-schema write refusal and unchanged holder-v1 compatibility tests.
-  Existing tests expecting interruption must remain for genuinely unheld or
-  dead legacy processes, not be deleted wholesale.
-- Verification: with the w5090 lock, run focused cases repeatedly, race-test
-  `./internal/wsagent ./internal/wsholder ./internal/mcp ./internal/wsmailbox`,
-  then `go test ./...` and `go build ./cmd/ws-mcp` from `agents-plugin-tool/`.
-  Re-run hosted Claude/Pi lead rejoin tests. On local Windows use isolated
-  daemon/holder state to check mid-turn replacement, actual process identity,
-  one completion mail, nested reconnect and job breakaway/fallback reporting.
-  Record platform, commands and evidence; remote-only verification leaves
-  the Windows acceptance check outstanding. The lead performs the design
-  gate and promotes this ticket from todo to ready before implementation.
+- **Outcome:** one worker lands the existing-holder integration, minimal
+  durable turn/report/token recovery, and stale-state cleanup described in
+  Decisions as one reviewable slice. Normal shutdown detaches workers; the
+  successor rejoins the same processes across sessions/projects, consumes
+  remaining RPC output, and reports each completed turn once. A turn ending
+  during downtime is recovered. No stale-state-only milestone or prerequisite
+  refactor; retain the current holder protocol and profile boundaries.
+- **Go acceptance tests:**
+  - `TestPiDaemonRestartMidTurnCompletesWithOneCompletionMail`: real holder
+    plus deterministic fake Pi RPC child; replace an isolated daemon mid-turn,
+    assert identical holder/child PID and session, final reply via wait and
+    exactly one mail, no repeated prompt/interruption. Include abrupt daemon
+    loss, completion while detached and another restart after delivery.
+  - `TestPiNestedDaemonRestartRejoinsBothDepths`: worker and leaf survive;
+    retained credentials/endpoint discovery permit list/wait/send and legal
+    spawns after rejoin, depth-2 spawn remains refused, leaf completion reaches
+    its parent once, held parent result releases, and explicit stop closes
+    descendants. Cover an endpoint-port change and both parent load orders.
+  - `TestPiProcessGoneIsIdleAndSendStartsNewTurn`: missing holder/exited child
+    yields wait interrupted, list idle/error and an actually started follow-up
+    turn, not merely queued text. Cover delayed scans, queued next input and
+    repeated reload without duplicate interruption. Retain legacy/unheld
+    coverage from `TestRestartSettlesTheCutTurnBeforeTheNextStarts` and
+    `TestDaemonExitReportsTheCutTurnAsInterrupted`.
+- **Focused regressions:** partial/gapped replay plus idle `get_state` probe;
+  final reply and held-parent recovery; report restart immediately before/
+  after handoff, including claimed mail and nested steering; schema-1
+  migration/schema-2 reload/newer-schema write refusal; worker tool restrictions
+  and unchanged hosted-lead recovery. Extend existing fixtures rather than
+  creating a generic new test framework.
+- **Verification:** under the w5090 lock, run the named tests repeatedly,
+  `go test -race ./internal/wsagent ./internal/wsholder ./internal/mcp ./internal/wsmailbox`,
+  `go test ./...` and `go build ./cmd/ws-mcp` from `agents-plugin-tool/`.
+  Locally on Windows, use isolated daemon/holder state to check a mid-turn
+  replacement, same process identities, one completion mail, nested reconnect,
+  and breakaway/fallback reporting. Record revision, platform, commands and
+  results; missing Windows evidence remains an explicit acceptance gap.
