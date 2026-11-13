@@ -380,13 +380,10 @@
       "registered_at": "2026-11-12T14:40:21Z",
       "lease": {
         "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
+        "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T01:51:20Z",
-        "impl": {
-          "branch": "impl/develop/frown-grunt-giant"
-        }
+        "touched_at": "2026-11-13T13:36:13Z"
       }
     },
     "261112-research-ws-ade-desktop-shell-and-rename": {
