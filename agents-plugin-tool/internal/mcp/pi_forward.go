@@ -24,7 +24,7 @@ import (
 
 // piForwardSlack is how much longer than its own wait a forwarded pi.wait
 // waits for the daemon's answer.
-const piForwardSlack = 30 * time.Second
+const piForwardSlack = wsagent.PiForwardSlack
 
 // piForwardTimeout bounds every other forwarded call.
 const piForwardTimeout = 60 * time.Second
@@ -261,7 +261,7 @@ func piWorkerDescriptions() map[string]string {
 		"pi.list":       "List the Pi subagents you spawned, open and closed: id, status (idle, running, or closed), model and effort, working directory, label, held messages, and the last error.",
 		"pi.stop":       "Close one of your Pi subagents and, first, its own subagents: its process stops and a running turn ends with it. No report follows. Its record stays: pi.list shows it closed, pi.transcript still reads it, and pi.send resumes it if its session file still exists.",
 		"pi.transcript": "Read one of your Pi subagents' conversation, oldest first: the messages it was sent, its replies, its tool calls by tool, and its turn ends. Works for a closed subagent too.",
-		"pi.wait":       fmt.Sprintf("Block until the turn of one of your Pi subagents that took your last pi.send (or pi.spawn's prompt) ends or fails, and return its status and final assistant message; it never returns an earlier turn's message, and a turn that already ended returns at once. The answer is that turn's report: it is not also steered into your turn. A turn whose report already reached you before the wait returns its status alone, saying so. timeout_s defaults to %d and is capped at %d; when it passes first the status is running, and the report comes to you as usual.", int(piWaitDefault/time.Second), int(piWaitMax/time.Second)),
+		"pi.wait":       fmt.Sprintf("Use only when you must have your own child's result before continuing; otherwise end your turn and let its report arrive. Block until the turn of one of your Pi subagents that took your last pi.send (or pi.spawn's prompt) ends or fails, and return its status and final assistant message; it never returns an earlier turn's message, and a turn that already ended returns at once. The answer is that turn's report: it is not also steered into your turn. A turn whose report already reached you before the wait returns its status alone, saying so. timeout_s defaults to %d and is capped at %d; when it passes first the status is running, and the report comes to you as usual.", int(piWaitDefault/time.Second), int(piWaitMax/time.Second)),
 	}
 }
 

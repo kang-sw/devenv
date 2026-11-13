@@ -119,6 +119,15 @@ func parsePiModels(out []byte) ([]ModelChoice, error) {
 // registers exactly those servers through Pi's built-in MCP support.
 const piBridgeFile = "ws-agent-mcp.ts"
 
+// PiWaitMax caps pi.wait in both the MCP tool and the token route.
+const PiWaitMax = 1800 * time.Second
+
+// PiForwardSlack leaves time for the daemon to answer a forwarded wait.
+const PiForwardSlack = 30 * time.Second
+
+// piMCPTimeout exceeds even a maximum forwarded wait, with transport margin.
+const piMCPTimeout = PiWaitMax + PiForwardSlack + 30*time.Second
+
 // piDir is where a conversation's Pi session lives.
 func piDir(dir string) string { return filepath.Join(dir, "pi") }
 
@@ -214,6 +223,7 @@ func piMCPServers(spec StartSpec) (map[string]any, error) {
 			"env":      spec.WSMCP.Env,
 			"cwd":      spec.workDir(),
 			"exposure": "direct",
+			"timeout":  piMCPTimeout.Seconds(),
 		}
 	}
 	return servers, nil
