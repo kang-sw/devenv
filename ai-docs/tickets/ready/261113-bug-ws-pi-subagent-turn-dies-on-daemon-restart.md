@@ -239,6 +239,25 @@ claim that running Pi work survives a restart.
   `go test ./internal/wsagent ./internal/mcp` from `agents-plugin-tool/`;
   record the observed list/wait/send transition.
 
+### Result (744a5241f) - 2026-11-13
+
+- Reconciliation clears stale turn/process/replay state and exposes the
+  interruption error while idle, before queued input can start a new turn.
+  Startup waits for reconciliation so an earlier LastTurn cannot answer a
+  wait for the cut turn.
+- Observed contract: completed A -> open B -> restart -> wait interrupted,
+  list idle/error/no process -> send C actually submitted -> wait done.
+  A settled record gets no further synthetic interruption.
+- w5090 resource lock: focused process-gone, queued-next-turn ordering and
+  legacy interruption tests passed; `go test ./internal/wsagent ./internal/mcp`
+  passed, then passed again after R1's startup-barrier fix. R2 fixes-only
+  review resolved the single substantive finding.
+- No Forwards. Shared daemon and Windows live behavior not exercised.
+- Workflow/route/convention read tools were unavailable in this session;
+  read bundled ticket conventions and used the supplied branch and native git
+  under the lead's wrong-root safety override. Review performed independently
+  through Pi.
+
 ### Phase 2: Rejoin held Pi workers and their nested children
 
 - **Outcome:** reuse the hosted Pi lead holder transport with a distinct
