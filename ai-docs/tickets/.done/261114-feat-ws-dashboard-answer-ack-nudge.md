@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 817154cceffbcadb
 sage-review-completeness-reviewed: 817154cceffbcadb
+completed: 2026-11-14
 ---
 
 # Dashboard answer-ack nudge: one follow-up turn naming answered board items still open after the agent's turn, and note-only sent marks that clear at turn settle
