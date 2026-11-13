@@ -251,6 +251,9 @@ func TestPiWorkerResumeAcceptsLegacyRootKeyAndRefusesForeignKey(t *testing.T) {
 				if err := writeRecord(dir, rec); err != nil {
 					t.Fatal(err)
 				}
+				if err := os.MkdirAll(filepath.Dir(piSessionFile(dir)), 0o700); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.WriteFile(piSessionFile(dir), []byte("persisted conversation\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
