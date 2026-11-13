@@ -257,32 +257,77 @@ done();
 }
 
 // TestTrackerRowTitleEdit pins the list row's hover pencil: only an editor
-// gets it, and its in-place edit writes one item.edit of the trimmed title on
-// Enter or blur, nothing when the title is unchanged or blank, and nothing on
-// Escape.
+// gets it, it turns the row into the new row's edit row (same chips) prefilled
+// from the item, and its save sends only what changed - one item.edit, the
+// viewer's own status, the assign - while Escape, the x, and an unchanged
+// draft write nothing. There is no blur rule, as in the new row.
 func TestTrackerRowTitleEdit(t *testing.T) {
-	if !strings.Contains(trackerFn(t, `function irow\(o\)`, false), "titleEdHtml(it)") {
-		t.Error("the list row does not draw the title pencil")
+	if !strings.Contains(trackerFn(t, `function irow\(o\)`, false), "return editRowHtml(o);") {
+		t.Error("the list row does not give way to the edit row")
 	}
-	runTrackerCases(t, "row title edit", trackerCheckJS+`
-var editor = true, sent = [], el = { value: '' }, renders = 0, ui = {}, VS = { items: { i1: { id: 'i1', title: 'Old' } } };
+	if !strings.Contains(trackerFn(t, `function irow\(o\)`, false), "titleEdHtml(it)") {
+		t.Error("the list row does not draw the pencil")
+	}
+	if !strings.Contains(trackerFn(t, `function editRowHtml\(o\)`, false), "nrowChips(n)") {
+		t.Error("the edit row does not reuse the new row's chips")
+	}
+	js, err := dashboardFS.ReadFile("assets/tracker.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(js), "e.target.id !== 'tkned'") {
+		t.Error("the edit row saves on blur; the new row's convention is none")
+	}
+	runTrackerCases(t, "row edit", trackerCheckJS+`
+var editor = true, sent = [], rec = null, canAsg = true, ui = {}, renders = 0, toasts = 0, elv = { value: '' };
+var VS = { viewer: { member: 'me' }, priority: { default: 1, names: ['low', 'mid', 'high'] }, labels: [{ id: 'L1' }, { id: 'L2' }],
+  items: { i1: { id: 'i1', kind: 'task', title: 'Old', status: 'idea', due: '2026-12-01', priority: 2, labels: ['L1'], author: 'me', assignments: [] } } };
 function canEdit() { return editor; }
+function canAssign() { return canAsg; }
+function mineLive() { return rec; }
+function holders(it) { return it.assignments; }
 function wsT(k) { return k; }
 function render() { renders++; }
-function $() { return ui.tedit ? el : null; }
-function commit(ev) { sent.push(ev); }
-`+trackerFn(t, `function esc\(s\)`, false)+trackerFn(t, `function attr\(k, v\)`, true)+trackerFn(t, `function tipAttr\(text\)`, true)+trackerFn(t, `function partIcon\(icon\)`, true)+trackerFn(t, `function titleEdHtml\(it\)`, false)+trackerFn(t, `function endTitleEdit\(save\)`, false)+`
-function go(v, save) { ui.tedit = { item: 'i1', rk: 'r', val: 'Old' }; el.value = v; endTitleEdit(save); }
+function toast() { toasts++; }
+function $() { return ui.ned ? elv : null; }
+function commit(ev, then, prep) { sent.push(ev); if (prep) prep([]); }
+function labelOf(id) { return VS.labels.filter(function (l) { return l.id === id; })[0]; }
+function nrowSt(n) { return n.ed && rec ? n.st : ''; }
+function nrowPri(n) { return n.pri != null ? n.pri : VS.priority.default; }
+function asgEvents(item, sel, compl) { return [['item.assign', { item: item, who: sel.map(function (o) { return o.id; }), compl: compl }]]; }
+function esc(s) { return s; }
+function attr(k, v) { return ' data-' + k + '="' + v + '"'; }
+function tipAttr(x) { return ''; }
+function partIcon(i) { return i; }
+`+trackerFn(t, `function titleEdHtml\(it\)`, false)+trackerFn(t, `function editWho\(it\)`, false)+trackerFn(t, `function startRowEdit\(id, rk\)`, false)+trackerFn(t, `function editRowEvents\(n, it, title\)`, false)+trackerFn(t, `function endRowEdit\(\)`, false)+trackerFn(t, `function saveRowEdit\(\)`, false)+`
+var document = { querySelector: function () { return null; } }, CSS = { escape: function (x) { return x; } };
+function draft() { startRowEdit('i1', 'r'); return ui.ned; }
+function save(mut, title) { var n = draft(); if (mut) mut(n); elv.value = title == null ? n.val : title; sent = []; saveRowEdit(); return sent; }
 check('an editor gets the pencil', titleEdHtml(VS.items.i1).indexOf('data-act="tedit" data-item="i1"') > 0, true);
 editor = false;
 check('anyone else gets none', titleEdHtml(VS.items.i1), '');
-go('  New  ', true);
-check('Enter or blur writes the trimmed title once', [sent, ui.tedit], [[[['item.edit', { item: 'i1', title: 'New' }]]], null]);
-sent = [];
-go('Old', true); go('   ', true); go('New', false);
-check('unchanged, blank, and cancelled write nothing', sent, []);
-endTitleEdit(true);
-check('a second end after the edit closed does nothing', sent, []);
+check('and cannot start the edit', (startRowEdit('i1', 'r'), ui.ned), undefined);
+editor = true;
+var n = draft();
+check('the draft is prefilled from the item', [n.val, n.st, n.who, n.due, n.pri, n.labels, n.canAsg], ['Old', 'idea', ['me'], '2026-12-01', 2, ['L1'], true]);
+check('an untouched draft writes nothing', [save(), ui.ned === null, toasts], [[], false, 1]);
+ui.ned = null;
+check('title, priority, due, and labels go in one item.edit', save(function (n) { n.pri = 0; n.due = ''; n.labels = ['L2']; }, '  New  '),
+  [[['item.edit', { item: 'i1', title: 'New', priority: 0, due: null, labels: ['L2'] }]]]);
+check('a successful save closes the row', ui.ned, null);
+check('a blank title keeps the old one', save(function (n) { n.pri = 0; }, '   '), [[['item.edit', { item: 'i1', priority: 0 }]]]);
+check('labels the list no longer holds are dropped', save(function (n) { n.labels = ['L1', 'gone']; }), []);
+rec = { status: 'idea' };
+check('a changed own status is its own item.status', save(function (n) { n.st = 'doing'; }), [[['item.status', { item: 'i1', status: 'doing' }]]]);
+check('done closes the item', save(function (n) { n.st = 'done'; }), [[['item.close', { item: 'i1' }]]]);
+check('a changed assignee list is the assign', save(function (n) { n.who = ['you']; }), [[['item.assign', { item: 'i1', who: ['you'], compl: null }]]]);
+check('edit, status, and assign are one batch in that order', save(function (n) { n.st = 'todo'; n.pri = 0; n.who = ['you']; }),
+  [[['item.edit', { item: 'i1', priority: 0 }], ['item.status', { item: 'i1', status: 'todo' }], ['item.assign', { item: 'i1', who: ['you'], compl: null }]]]);
+canAsg = false;
+check('without the assign right the assignees are not written', save(function (n) { n.who = ['you']; }), []);
+ui.ned = null; renders = 0;
+draft(); sent = []; endRowEdit();
+check('cancel closes the row and writes nothing', [sent, ui.ned, renders], [[], null, 2]);
 done();
 `)
 }
