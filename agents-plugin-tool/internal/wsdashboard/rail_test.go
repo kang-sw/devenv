@@ -812,8 +812,8 @@ func TestRailMarkupHostedSessions(t *testing.T) {
 			t.Errorf("a session the daemon does not host shows %q:\n%s", not, other)
 		}
 	}
-	if !strings.Contains(other, `<span class="hi pi run" role="img" aria-label="pi · lead working" title="pi · lead working">P</span>`) || !strings.Contains(other, `<span class="s2">hi</span>`) {
-		t.Errorf("the working row lost its turning icon or message:\n%s", other)
+	if !strings.Contains(other, `<span class="hi pi run" role="img" aria-label="pi · lead working" title="pi · lead working">P<span class="orb"><span class="rrun"></span></span></span>`) || !strings.Contains(other, `<span class="s2">hi</span>`) {
+		t.Errorf("the working row lost its orbit line or message:\n%s", other)
 	}
 	if f := rowOf("failed"); !strings.Contains(f, `<span class="hi claude err" role="img" aria-label="claude · usage limit reached" title="claude · usage limit reached">C</span>`) || strings.Contains(f, "hi claude run") {
 		t.Errorf("the failed row lacks its error ring:\n%s", f)
