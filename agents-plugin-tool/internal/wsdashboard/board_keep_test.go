@@ -25,10 +25,12 @@ func TestBoardKeepWiring(t *testing.T) {
 	}
 	order := []string{
 		"var before = board && !still && !reducedMotion() ? boardSpots(el) : null;",
-		"var kept = board ? boardKeep(el) : null;",
+		"var kept = board ? boardKeep(el) : null, boardTop = before && kept ? el.getBoundingClientRect().top : null;",
 		"ins = morphBoard(el, html);",
 		"if (kept) boardKeepSettle(kept, el, ins);",
 		"window.wbHistory.sweep(); ins.forEach(watchBoard);",
+		`q("iframe.doc-frame", n).forEach(function (f) { f.wbKeep = true; });`,
+		"if (kept) kept.h.apply();\n        startMotion(",
 		"restoreScroll(scroll);",
 		"window.wbHistory.restore(b, history); });",
 		"if (kept) kept.h.apply();",
@@ -40,6 +42,11 @@ func TestBoardKeepWiring(t *testing.T) {
 			t.Fatalf("swap lacks %q after offset %d", s, at)
 		}
 		at += i + len(s)
+	}
+	// A frame the swap brought keeps the board in place on its first
+	// height change, which may land after the swap's session ended.
+	if !strings.Contains(js, "var kept = f.wbKeep && Math.abs(to - from) >= 1 && b && b.contains(f) ? boardKeep(b) : null;\n        if (kept) f.wbKeep = false;\n        f.style.height = to + \"px\";\n        if (kept) kept.h.apply();") {
+		t.Error("a swapped-in frame's late height is not compensated")
 	}
 	if !strings.Contains(js, "\n  boardBoxes().forEach(watchBoard);\n") {
 		t.Error("the initial board's sections are not watched at load")

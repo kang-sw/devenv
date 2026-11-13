@@ -14,7 +14,8 @@
 //             Phase 1). Scrolls to the middle, updates an off-screen topic
 //             above and then one below; every topic in view that the swaps do
 //             not move must hold its screen y within 1 px through the motion
-//             and through a body frame above growing 1 s later. Then a user
+//             and through the body frame of the topic updated above (a frame
+//             the swap brought) growing 1 s later. Then a user
 //             scroll during a session must end it (wbHistory.keeping goes
 //             null, the session writes no more scrollTop).
 //   observer  The shared visibility source (wbHistory.watch / seen): a topic
@@ -506,6 +507,10 @@ async function scrollToMiddle(page) {
 // ResizeObserver does not run until the frame scrolls into view. Resolves
 // once the page sized the frame.
 async function growFrame(page, name, px) {
+  // A swapped-in frame loads beside the old one (.doc-frame-next) and
+  // takes its place once drawn: grow the one shown.
+  await page.waitForFunction((n) => !document.querySelector(`#r-board section.topic[data-topic="${n}"] iframe.doc-frame-next`), name, { timeout: 5000 })
+    .catch(() => { throw new Failure(`topic ${name}'s next body frame never took its place`); });
   const handle = await page.$(`#r-board section.topic[data-topic="${name}"] iframe.doc-frame`);
   assert(handle, `topic ${name} has no body frame`);
   const before = await handle.evaluate((f) => f.getBoundingClientRect().height);
@@ -578,10 +583,12 @@ async function scenarioKeep(ctx) {
   const above = lay.filter((t) => t.where === "above"), below = lay.filter((t) => t.where === "below"), inView = lay.filter((t) => t.where === "in");
   assert(above.length >= 3 && below.length >= 1 && inView.length >= 1, `the board must overflow both ways from the middle (above ${above.length}, in view ${inView.length}, below ${below.length}); seed more topics`);
   // The update above is the second topic (it rises past the head, off
-  // screen); the frame that grows late is the topic right above the
-  // viewport, which no swap moves; the update below is the bottom open
-  // topic, which rises past the viewport to the head.
-  const upAbove = above[1].name, lateGrow = above[above.length - 1].name, upBelow = below[below.length - 1].name;
+  // screen); the update below is the bottom open topic, which rises past
+  // the viewport to the head. The frame that grows late is the one the
+  // first swap brought for the topic updated above: a swap's frames report
+  // their heights late (load, reveal), which is what the compensation has
+  // to hold through after the swap's own motion.
+  const upAbove = above[1].name, lateGrow = upAbove, upBelow = below[below.length - 1].name;
   const tracked = inView.map((t) => t.name);
   log(`in view: ${tracked.join(", ")}; update above: ${upAbove}; update below: ${upBelow}; late frame: ${lateGrow}`);
 
@@ -634,20 +641,23 @@ async function scenarioKeep(ctx) {
   const probe = await page.evaluate(() => {
     const bh = window.__bh, s = bh.scroller(), t = bh.viewTop(s);
     const n = bh.topics().find((x) => x.getBoundingClientRect().bottom > t + 1);
-    return { name: n.getAttribute("data-topic"), y: n.getBoundingClientRect().top, writes: bh.writesOn(s), anchorCss: getComputedStyle(s === document.scrollingElement ? document.documentElement : s).overflowAnchor };
+    return { name: n.getAttribute("data-topic"), y: n.getBoundingClientRect().top, st: s.scrollTop, writes: bh.writesOn(s), anchorCss: getComputedStyle(s === document.scrollingElement ? document.documentElement : s).overflowAnchor };
   });
   await growFrame(page, grow2, 250);
   await sleep(400);
-  const after = await page.evaluate((name) => { const bh = window.__bh; return { y: bh.section(name).getBoundingClientRect().top, writes: bh.writesOn(bh.scroller()), keep: !!bh.keeping() }; }, probe.name);
+  const after = await page.evaluate((name) => { const bh = window.__bh; return { y: bh.section(name).getBoundingClientRect().top, st: bh.scroller().scrollTop, writes: bh.writesOn(bh.scroller()), keep: !!bh.keeping() }; }, probe.name);
   log(`after the user scroll: keep session ${after.keep ? "running" : "ended"}; scrollTop writes from script ${probe.writes} -> ${after.writes}; ${probe.name}.y ${probe.y.toFixed(1)} -> ${after.y.toFixed(1)} after ${grow2} grew 250px above (overflow-anchor ${probe.anchorCss})`);
   const okUser = [
     ctx.check(!after.keep, "a keep session started again without a swap"),
     ctx.check(after.writes === probe.writes, `the scroller took ${after.writes - probe.writes} scrollTop writes from script after the user scroll ended the session`),
     // With native anchoring off on the scroller the growth above must
-    // show: nothing compensates it any more. Where native anchoring is
-    // back (the document between sessions) the browser itself may
-    // compensate it, so only the absence of script writes is checked.
-    probe.anchorCss !== "none" || ctx.check(after.y - probe.y >= 240, `${probe.name} moved only ${(after.y - probe.y).toFixed(1)}px after a 250px growth above with no session running`),
+    // show: nothing compensates it any more, so the scroll offset stays
+    // (the topic's own y also follows other frames above that re-report
+    // their heights meanwhile, so it is logged, not asserted). Where
+    // native anchoring is back (the document between sessions) the
+    // browser itself may compensate it, so only the absence of script
+    // writes is checked.
+    probe.anchorCss !== "none" || ctx.check(Math.abs(after.st - probe.st) <= 1 && after.y - probe.y > 100, `the scroll moved ${probe.st} -> ${after.st} (${probe.name}.y ${probe.y.toFixed(1)} -> ${after.y.toFixed(1)}) after a 250px growth above with no session running`),
   ].every(Boolean);
   if (ended && okUser) log("ok: a user scroll ended the session and the session no longer writes");
 }

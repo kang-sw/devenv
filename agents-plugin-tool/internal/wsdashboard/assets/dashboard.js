@@ -514,7 +514,7 @@
     var frameH = board ? boardRead(frameHeights) : null;
     var history = board ? captureBoardHistory() : null;
     var before = board && !still && !reducedMotion() ? boardSpots(el) : null;
-    var kept = board ? boardKeep(el) : null;
+    var kept = board ? boardKeep(el) : null, boardTop = before && kept ? el.getBoundingClientRect().top : null;
     // The entries merge and the board morph prepare only the nodes they
     // insert; any other region is replaced whole. A finished reply's mermaid
     // fences draw once merged; the streaming reply (convlive) keeps them
@@ -534,10 +534,14 @@
         sweepOutImgs(n);
         setFrameHeights(n, frameH);
         writeAnswers(n, answers);
+        q("iframe.doc-frame", n).forEach(function (f) { f.wbKeep = true; });
       });
       if (before) {
         var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });
-        startMotion(moves.concat(slideBoard(el, before)));
+        // A kept board slides in screen terms, once the scroll is
+        // compensated: what the session holds in place does not slide.
+        if (kept) kept.h.apply();
+        startMotion(moves.concat(slideBoard(el, before, kept && window.wbHistory.keeping(kept.h.scroller) ? boardTop : null)));
         ins.forEach(function (n) { q("iframe.doc-frame", n).forEach(function (f) { if (!f.wbOut) f.wbGrow = true; }); });
       }
     } else {
@@ -966,13 +970,16 @@
   // Nothing moves in the DOM (moving a frame reloads it), and the
   // animation fills nothing, so no transform stays behind. A maximized card
   // stays put: a transform would anchor its fixed inner box to the card.
-  function slideBoard(el, before) {
-    var top = el.getBoundingClientRect().top, out = [];
+  // With from, the board's top when the spots were read, a slide runs in
+  // screen terms (a swap compensated the scroll between, boardKeep):
+  // an element standing where it stood on screen does not move.
+  function slideBoard(el, before, from) {
+    var top = el.getBoundingClientRect().top, shift = typeof from === "number" ? from - top : 0, out = [];
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n), card = k === null && n.hasAttribute("data-card");
       var b = k !== null ? before["t:" + k] : card ? before["c:" + n.getAttribute("data-card")] : null;
       if (!b || b.paged || !n.animate || (card && n.hasAttribute("data-max"))) return;
-      var dy = b.y - (n.getBoundingClientRect().top - top);
+      var dy = b.y + shift - (n.getBoundingClientRect().top - top);
       if (Math.abs(dy) < 1) return;
       out.push(n.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }));
     });
@@ -3415,8 +3422,14 @@
       // shown it is asked for its height again.
       if (f.wbNext) { postTheme(f); return; }
       if (h >= 0 && h < 100000) {
-        var from = f.getBoundingClientRect().height, to = Math.ceil(h);
+        var from = f.getBoundingClientRect().height, to = Math.ceil(h), b = region("board");
+        // A frame a board swap brought (wbKeep) reports its height late,
+        // after the swap's keep session may have ended: its first change
+        // keeps the board in place as the swap did.
+        var kept = f.wbKeep && Math.abs(to - from) >= 1 && b && b.contains(f) ? boardKeep(b) : null;
+        if (kept) f.wbKeep = false;
         f.style.height = to + "px";
+        if (kept) kept.h.apply();
         // The first height a frame of a moving board swap reports eases
         // from the height the frame stood at (board motion, slideBoard).
         if (f.wbGrow) {
