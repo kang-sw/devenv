@@ -12,6 +12,7 @@ import (
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // whiteboardFixture is one lead session in a fresh git repository, with the
@@ -442,10 +443,7 @@ func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
 				return origRename(from, to)
 			}
 			resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="policy"><wb:title>committed-marker</wb:title></wb:add></wb:topic>`})
-			text := toolText(t, resp)
-			if !isToolError(resp) || !strings.Contains(text, "board committed; write "+map[string]string{"page": "full page", "stamp": "stamp"}[target]) {
-				t.Fatalf("persistent sharing violation must explicitly report committed state: %s", resp)
-			}
+			assertWhiteboardPublicationError(t, resp, "board committed; write "+map[string]string{"page": "full page", "stamp": "stamp"}[target])
 			rec, err := newSessionStore().readWhiteboard(f.key)
 			if err != nil || len(rec.Whiteboard.Items) != 2 || rec.Whiteboard.Seq != 6 {
 				t.Fatalf("a failed publication must keep its committed batch: %+v, %v", rec.Whiteboard, err)
@@ -671,10 +669,18 @@ func TestWhiteboardUpdateResultCarriesStaleTopicNudge(t *testing.T) {
 	if text := f.update(t, bodies.String()); strings.Contains(text, "info: ") {
 		t.Fatalf("fresh topics must not nudge:\n%s", text)
 	}
-	old := time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
+	// Seed an aged board under a fresh key: committed entry timestamps are
+	// immutable, and aging only current content no longer makes a topic stale.
+	key, err := f.s.sessions.mint(f.root, roleLead, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.key = key
+	old := time.Now().Add(-2 * time.Hour).UTC()
 	if err := f.s.sessions.mutateRecord(f.key, partWhiteboard, func(rec *sessionRecord) error {
-		for i := range rec.Whiteboard.Topics {
-			rec.Whiteboard.Topics[i].ChangedAt = old
+		_, problems := wswhiteboard.Apply(rec.Whiteboard, bodies.String(), wswhiteboard.Env{Now: old})
+		if len(problems) > 0 {
+			return errors.New(strings.Join(problems, "; "))
 		}
 		return nil
 	}); err != nil {

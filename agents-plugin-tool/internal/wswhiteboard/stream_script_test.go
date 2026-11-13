@@ -15,6 +15,7 @@ func TestHistoryScriptPagingRevealAndSwapAnchorsUnderNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Keep the history DOM and bubbling model local to this stream test.
 	script := `var BOARD = '', BODY_CLASS = '';` + formPrelude + `
 Object.defineProperty(E.prototype, 'id', { get: function () { return this.attrs.id || ''; } });
 Object.defineProperty(E.prototype, 'tagName', { get: function () { return this.tag.toUpperCase(); } });
@@ -37,13 +38,32 @@ E.prototype.getBoundingClientRect = function () {
   return { top: top, bottom: top + 20, height: index >= 0 ? 20 : 0 };
 };
 var loads = 0;
-E.prototype.dispatchEvent = function (event) { if (event.type === 'wbhistoryload') { loads++; check('load event root', event.detail.root === this, true); } };
-function CustomEvent(type, init) { this.type = type; this.detail = init.detail; }
+function CustomEvent(type, init) { init = init || {}; this.type = type; this.detail = init.detail; this.bubbles = !!init.bubbles; this.cancelBubble = false; }
+CustomEvent.prototype.stopPropagation = function () { this.cancelBubble = true; };
+E.prototype.dispatchEvent = function (event) {
+  event.target = this;
+  if (event.type === 'wbhistoryload') { loads++; check('load event root', event.detail.root === this, true); }
+  var path = [this];
+  if (event.bubbles) for (var p = this.parent; p; p = p.parent) path.push(p);
+  path.some(function (node) {
+    event.currentTarget = node;
+    (node.on[event.type] || []).slice().forEach(function (fn) { fn.call(node, event); });
+    return event.cancelBubble;
+  });
+  event.currentTarget = null;
+  return true;
+};
+fire = function (element, type) { element.dispatchEvent(new CustomEvent(type, { bubbles: type === 'click' })); };
 var observers = [];
 function ResizeObserver(fn) { this.fn = fn; observers.push(this); }
 ResizeObserver.prototype.observe = function () {}; ResizeObserver.prototype.disconnect = function () {};
-function board(n) {
-  function row(i) { return '<article class="wb-entry '+(i === 1 ? 'panel' : 'agent')+'" id="e'+i+'" data-entry="e'+i+'" data-history-anchor="e'+i+'"'+(i === 1 ? ' data-panel="p1"' : '')+'>'+(i === 1 ? '<details class="entry-panel" id="p1" data-key="entry:e1"><summary>panel</summary></details>' : 'line '+i)+'</article>'; }
+function board(n, panelAt) {
+  panelAt = panelAt || 1;
+  function row(i) {
+    var panel = i === panelAt;
+    return '<article class="wb-entry '+(panel ? 'panel' : 'agent')+'" id="e'+i+'" data-entry="e'+i+'" data-history-anchor="e'+i+'"'+(panel ? ' data-panel="p1"' : '')+'>'+
+      (panel ? '<details class="entry-panel" id="p1" data-key="entry:e'+i+'"><summary>panel</summary><iframe class="doc-frame" data-doc="t:panel:e'+i+'"></iframe></details>' : 'line '+i)+'</article>';
+  }
   var start = Math.max(1, n-49), out = '<details class="topic-stream" open><summary>history</summary><div class="wb-history" data-history="t"><button class="history-older">older</button><div class="history-live">';
   for (var i = start; i <= n; i++) out += row(i);
   out += '</div>';
@@ -59,7 +79,7 @@ var h = board(123);
 check('initial window is 50', h.querySelectorAll('.wb-entry').length, 50);
 check('initial reader follows bottom', h.scrollTop, 900);
 window.wbHistory.init(document);
-check('init wires once', h.querySelector('.history-older').on.click.length, 1);
+check('init wires container once', (h.on.click || []).length, 1);
 h.scrollTop = 220; fire(h, 'scroll');
 var anchor = window.wbHistory.capture(document)[0].position.anchor;
 click(h.querySelector('.history-older'));
@@ -136,6 +156,77 @@ check('deferred topic is not initially live', document.querySelectorAll('.topic'
 target = window.wbHistory.loadTarget(document, 'p1');
 check('navigation loads deferred topic and panel page', [document.querySelectorAll('.topic').length, target && target.id, target && target.open], [1,'p1',true]);
 check('deferred topic keeps actual key', document.querySelector('.topic').getAttribute('data-topic'), 'old');
+// Retaining a panel frame during a log append must not strand the new
+// older-page button on an already-bound history container.
+function framedBoard(n) {
+  var h = board(n, 140), fold = h.closest('.topic-stream');
+  var topic = new E('section', { 'class': 'topic', 'data-topic': 't' });
+  root.insertBefore(topic, fold);
+  topic.insertBefore(fold, null);
+  return h;
+}
+// Model frameGraft's child replacement down the retained frame ancestry:
+// keep the section/history/live/panel path, replace its siblings, and put
+// the incoming frame beside the old one pending its asynchronous reveal.
+function graftFrame(oldTopic, newTopic) {
+  var oldFrame = oldTopic.querySelector('iframe.doc-frame'), newFrame = newTopic.querySelector('iframe.doc-frame');
+  function path(frame, topic) { var out = []; for (var p = frame; p; p = p.parentElement) { out.push(p); if (p === topic) break; } return out; }
+  var oldPath = path(oldFrame, oldTopic), newPath = path(newFrame, newTopic);
+  check('graft paths have matching shape', oldPath.map(function (n) { return n.tagName; }), newPath.map(function (n) { return n.tagName; }));
+  newFrame.setAttribute('class', 'doc-frame doc-frame-next');
+  for (var i = oldPath.length - 1; i > 0; i--) {
+    var kept = oldPath[i - 1], incoming = newPath[i - 1], parent = oldPath[i], before = true;
+    parent.attrs = Object.assign({}, newPath[i].attrs);
+    parent.children.slice().forEach(function (child) { if (child !== kept) child.remove(); });
+    newPath[i].children.slice().forEach(function (child) {
+      if (child === incoming) { before = false; if (child === newFrame) parent.insertBefore(child, null); }
+      else parent.insertBefore(child, before ? kept : null);
+    });
+  }
+}
+h = framedBoard(160);
+window.wbHistory.init(document);
+check('graft fixture starts with fifty entries', h.querySelectorAll('.wb-entry').length, 50);
+var retainedRoot = root, topic = h.closest('.topic'), live = h.querySelector('.history-live');
+var frame = h.querySelector('iframe.doc-frame'), oldButton = h.querySelector('.history-older'), oldLine = h.querySelector('[id="e150"]');
+check('first live frame is a late panel', frame.closest('.wb-entry').id, 'e140');
+h.querySelector('.entry-panel').open = true;
+h.scrollTop = 587; fire(h, 'scroll');
+var snapshot = window.wbHistory.capture(document), anchor = snapshot[0].position.anchor;
+check('reader is anchored inside retained panel', anchor, { id: 'e140', run: false, offset: -7 });
+check('reader is not following bottom', snapshot[0].position.bottom, false);
+// An agent-log append shifts the fifty-entry tail by one. Unlike a whole
+// board replacement, the graft leaves _wbHistoryBound on the live container.
+var fresh = framedBoard(161), replacementButton = fresh.querySelector('.history-older');
+graftFrame(topic, fresh.closest('.topic'));
+root = retainedRoot;
+check('history and live containers retained', [topic.querySelector('.wb-history') === h, h.querySelector('.history-live') === live, h._wbHistoryBound], [true, true, true]);
+check('graft replaces older button and ordinary live entries', [h.querySelector('.history-older') === replacementButton, oldButton.parentElement, h.querySelector('[id="e150"]') !== oldLine], [true, null, true]);
+check('graft retains old frame beside pending incoming frame', [h.querySelector('iframe.doc-frame') === frame, h.querySelectorAll('iframe.doc-frame').length], [true, 2]);
+window.wbHistory.init(topic);
+window.wbHistory.restore(topic, snapshot);
+window.wbHistory.restore(document, snapshot);
+check('graft restoration keeps one delegated listener', (h.on.click || []).length, 1);
+check('graft restoration preserves viewport anchor', window.wbHistory.capture(document)[0].position.anchor, anchor);
+check('restoration materializes just the saved boundary page', [h.querySelectorAll('.wb-entry').length, h.querySelector('.wb-entry').id], [100, 'e62']);
+check('restoration keeps panel disclosure open', h.querySelector('.entry-panel').open, true);
+var count = h.querySelectorAll('.wb-entry').length, top = h.scrollTop, beforeLoads = loads;
+click(h.querySelector('[id="e150"]'));
+check('unrelated live clicks do not load history', h.querySelectorAll('.wb-entry').length, count);
+var label = new E('span'); replacementButton.insertBefore(label, null);
+var clickSeen = null, loadSeen = null, scrolls = 0;
+retainedRoot.addEventListener('click', function (event) { clickSeen = [event.target === label, event.currentTarget === retainedRoot, event.bubbles]; });
+retainedRoot.addEventListener('wbhistoryload', function (event) { loadSeen = [event.target === h, event.currentTarget === retainedRoot, event.detail.root === h]; });
+retainedRoot.addEventListener('scroll', function () { scrolls++; });
+fire(h, 'scroll');
+check('scroll events do not bubble in history harness', scrolls, 0);
+click(label);
+check('replacement button descendant click bubbles with original target', clickSeen, [true, true, true]);
+check('older click after graft loads exactly fifty', h.querySelectorAll('.wb-entry').length, count + 50);
+check('older click after graft preserves chronological bounds', [h.querySelector('.wb-entry').id, h.querySelectorAll('.wb-entry').slice(-1)[0].id], ['e12', 'e161']);
+check('older click after graft preserves viewport anchor', window.wbHistory.capture(document)[0].position.anchor, anchor);
+check('older click after graft shifts only internal scroll', h.scrollTop, top + 1000);
+check('older click after graft emits one bubbling load', [loads - beforeLoads, loadSeen], [1, [true, true, true]]);
 if (bad.length) throw new Error(bad.join('\n'));
 `
 	cmd := exec.Command(node, "-e", script)

@@ -52,10 +52,11 @@ var (
 	whiteboardFilePattern = regexp.MustCompile(`^([a-z0-9]+)(?:\.html|\.stamp\.js|-[0-9a-f]+\.html)$`)
 )
 
-// Test seams for the rename retry (technical decision 119): a browser polling
-// the stamp holds a brief read handle, and on Windows a rename over a file
-// that is open fails with a sharing violation.
+// Test seams for output publication and the rename retry (technical decision
+// 119): a browser polling the stamp holds a brief read handle, and on Windows
+// a rename over a file that is open fails with a sharing violation.
 var (
+	whiteboardMkdirAll        = os.MkdirAll
 	whiteboardRename          = os.Rename
 	whiteboardRenameRetryable = renameSharingViolation
 	whiteboardRenameAttempts  = 5
@@ -525,13 +526,18 @@ type whiteboardOutput struct {
 	path, text, label string
 }
 
-// Publication follows the durable store commit; a failed page write never
+// Publication follows the durable store commit; a failed output write never
 // rolls back accepted history or publishes a stamp ahead of its page.
-func (r whiteboardRender) publish() error {
+func (r whiteboardRender) publish() (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("board committed; %w; fix the output problem, then retry whiteboard.update with commands: \"\" (render-only); do not resend accepted commands", err)
+		}
+	}()
 	for _, file := range r.files {
 		dir := filepath.Dir(file.path)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
+		if err := whiteboardMkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create output directory %s: %w", dir, err)
 		}
 		if strings.HasSuffix(file.path, ".html") {
 			if err := ensureWhiteboardMermaid(dir, file.text); err != nil {
@@ -539,7 +545,7 @@ func (r whiteboardRender) publish() error {
 			}
 		}
 		if err := writeWhiteboardFile(file.path, []byte(file.text)); err != nil {
-			return fmt.Errorf("board committed; write %s: %w", file.label, err)
+			return fmt.Errorf("write %s: %w", file.label, err)
 		}
 	}
 	for _, path := range r.evicted {

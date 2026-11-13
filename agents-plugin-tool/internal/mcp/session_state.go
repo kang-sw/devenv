@@ -672,18 +672,25 @@ func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPa
 // whole. It holds s.mu to avoid racing a concurrent write, touches the
 // record, and never migrates it.
 func (s *sessionStore) readState(sessionKey string, parts recordPart) (sessionRecord, bool) {
+	record, err := s.readStateWithError(sessionKey, parts)
+	return record, err == nil
+}
+
+// readStateWithError preserves load failures for callers that distinguish a
+// missing session key from an unreadable part or authoritative whiteboard.
+func (s *sessionStore) readStateWithError(sessionKey string, parts recordPart) (sessionRecord, error) {
 	d, err := s.dirs()
 	if err != nil {
-		return sessionRecord{}, false
+		return sessionRecord{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, ok := s.readRecord(d, sessionKey, parts)
-	if !ok {
-		return sessionRecord{}, false
+	record, _, err := s.loadRecord(d, sessionKey, parts, nil)
+	if err != nil {
+		return sessionRecord{}, err
 	}
 	s.touch(d, sessionKey)
-	return record, true
+	return record, nil
 }
 
 // setAgenda upserts an agenda blob under key.

@@ -156,8 +156,10 @@
       h.scrollTop = h.scrollHeight;
       h._wbPosition = position(h);
       h.addEventListener('scroll', function () { h._wbPosition = position(h); }, { passive: true });
-      var button = h.querySelector('.history-older');
-      if (button) button.addEventListener('click', function () {
+      // Frame grafts keep this container but replace its older-page button.
+      h.addEventListener('click', function (e) {
+        var button = e.target.closest && e.target.closest('.history-older');
+        if (!button || button.closest('.wb-history') !== h) return;
         var saved = position(h);
         loadOne(h);
         applyPosition(h, saved);

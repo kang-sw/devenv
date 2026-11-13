@@ -514,6 +514,93 @@ func TestFolderTopicAdoptionKeepsDirectory(t *testing.T) {
 	}
 }
 
+func TestFolderConversionAdoptionIgnoresStaleCloseMapping(t *testing.T) {
+	for _, closed := range []bool{false, true} {
+		t.Run(fmt.Sprint(closed), func(t *testing.T) {
+			dir := t.TempDir()
+			legacy := &State{
+				Topics:       []TopicDoc{{Name: "Old title", Body: "body", Recap: "imported history", RecapAt: "2026-11-01T01:02:03Z"}},
+				ClosedTopics: []string{"s"}, CloseResults: map[string]string{"s": "stale destination result"},
+			}
+			converted := folderOpen(t, dir, legacy)
+			wantImport := []Entry{{ID: "e1", Kind: EntryAgent, Text: "imported history", At: legacy.Topics[0].RecapAt, Imported: true}}
+			if !reflect.DeepEqual(entries(t, converted, "Old title"), wantImport) {
+				t.Fatal("conversion lost imported entry identity")
+			}
+			f := FolderStore{Dir: dir}
+			if closed {
+				// Also retain panel files and the source's own system close event.
+				if err := f.Update(nil, func(s *State) error {
+					mustApply(t, s, `<wb:topic name="Old title"><wb:panel recap="mockup">immutable payload</wb:panel><wb:close result="source result"/></wb:topic>`)
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := folderOpen(t, dir, nil)
+			var beforeMeta folderSession
+			if _, err := folderDecode(filepath.Join(dir, "meta.json"), &beforeMeta); err != nil {
+				t.Fatal(err)
+			}
+			if len(beforeMeta.Topics) != 2 || beforeMeta.Topics[0].Key != "Old title" || beforeMeta.Topics[1].Key != "s" {
+				t.Fatalf("missing retained/stale mappings: %+v", beforeMeta.Topics)
+			}
+			source := beforeMeta.Topics[0]
+			if !folderDirID(source.Dir) {
+				t.Fatalf("not an opaque topic directory: %q", source.Dir)
+			}
+			history := folderTree(t, dir)
+			var adopted *State
+			if err := f.Update(nil, func(s *State) error {
+				mustApply(t, s, `<wb:topic name="s" label="Old title"/>`)
+				adopted = s.clone()
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if len(adopted.Topics) != 1 || adopted.Topics[0].Name != "s" || adopted.TopicLabel("s") != "Old title" || adopted.TopicBody("s") != "body" {
+				t.Fatalf("adoption lost topic identity: %s", folderJSON(adopted))
+			}
+			if adopted.EntrySeq != before.EntrySeq || !reflect.DeepEqual(adopted.Topics[0].Entries, before.Topics[0].Entries) {
+				t.Fatal("adoption changed entry identity or appended events")
+			}
+			var wantClosed []string
+			wantResult := ""
+			if closed {
+				wantClosed, wantResult = []string{"s"}, "source result"
+			}
+			if !reflect.DeepEqual(adopted.ClosedTopics, wantClosed) || len(adopted.CloseResults) != len(wantClosed) || adopted.CloseResults["s"] != wantResult {
+				t.Fatalf("adoption retained stale destination close state: %s", folderJSON(adopted))
+			}
+			var afterMeta folderSession
+			if _, err := folderDecode(filepath.Join(dir, "meta.json"), &afterMeta); err != nil {
+				t.Fatal(err)
+			}
+			wantRef := source
+			wantRef.Key = "s"
+			if len(afterMeta.Topics) != 1 || afterMeta.Topics[0] != wantRef || afterMeta.NextTopic != beforeMeta.NextTopic {
+				t.Fatalf("adoption changed directory/log mapping: %+v", afterMeta.Topics)
+			}
+			for path, data := range history {
+				if strings.HasSuffix(path, "/log.jsonl") || strings.Contains(path, "/panels/") {
+					if string(folderRead(t, filepath.Join(dir, filepath.FromSlash(path)))) != data {
+						t.Fatalf("adoption rewrote history: %s", path)
+					}
+				}
+			}
+			after := folderTree(t, dir)
+			for _, snapshot := range []*State{nil, legacy} {
+				if got := folderOpen(t, dir, snapshot); !reflect.DeepEqual(got, adopted) {
+					t.Fatalf("restart changed adopted entries or reimported legacy: %s", folderJSON(got))
+				}
+				if !reflect.DeepEqual(after, folderTree(t, dir)) {
+					t.Fatal("restart rewrote authority or duplicated an import")
+				}
+			}
+		})
+	}
+}
+
 func TestFolderConcurrentWriters(t *testing.T) {
 	dir := t.TempDir()
 	folderOpen(t, dir, &State{Topics: []TopicDoc{{Name: "topic", Body: "body"}}})

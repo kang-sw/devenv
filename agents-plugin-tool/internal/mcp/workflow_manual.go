@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -279,10 +280,13 @@ func (s *Server) handleWorkflowState(id json.RawMessage, args map[string]any) re
 		return toolTextResponse(id, "", fmt.Errorf("workflow_state: a valid session_key is required"))
 	}
 
-	// 2. Reuse workflow_manual's fail-loud notice verbatim for any unresolvable
-	//    key (including the sentinel, which is never a stored record). NEVER mint.
-	rec, recOK := s.sessions.readState(key, partAgenda|partTodos|partWhiteboard)
-	if !recOK {
+	// 2. Only a missing key gets workflow_manual's no-record notice (including
+	//    the sentinel). Part/board load failures report their real error. NEVER mint.
+	rec, err := s.sessions.readStateWithError(key, partAgenda|partTodos|partWhiteboard)
+	if err != nil && (!errors.Is(err, errSessionNotFound) || errors.Is(err, errSessionUnreadable)) {
+		return toolTextResponse(id, "", fmt.Errorf("workflow_state: %w", err))
+	}
+	if err != nil {
 		notice := fmt.Sprintf("## Session State\n(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)", key)
 		return toolTextResponse(id, notice+"\n", nil)
 	}
@@ -334,8 +338,11 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 	//    gate via lookup-miss, so a non-lead caller reaching this path could read
 	//    that mention to discover the escalation. Return only a no-restore notice
 	//    naming lead-revive (a skill, not the ferrule/sentinel surface). NEVER mint.
-	rec, recOK := s.sessions.readState(key, partAgenda|partTodos|partWhiteboard)
-	if key != freshBootstrapKey && !recOK {
+	rec, err := s.sessions.readStateWithError(key, partAgenda|partTodos|partWhiteboard)
+	if key != freshBootstrapKey && err != nil {
+		if !errors.Is(err, errSessionNotFound) || errors.Is(err, errSessionUnreadable) {
+			return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
+		}
 		notice := fmt.Sprintf("## Session State\n(no restorable state for session key %q; this key resolves to no stored session record — do not assume prior agenda/todo. If you are the lead recovering after compaction, re-run lead-revive to restore your session.)", key)
 		return toolTextResponse(id, notice+"\n", nil)
 	}
@@ -404,8 +411,8 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		return toolTextResponse(id, "", fmt.Errorf("workflow_manual: %w", err))
 	}
 
-	// Only FRESH (sentinel) and CONTINUE (recOK) remain; the sentinel branch is
-	// checked first so it never depends on a (non-existent) sentinel record.
+	// Only FRESH (sentinel) and CONTINUE (resolved record) remain. Check the
+	// sentinel first so it never depends on a (non-existent) sentinel record.
 	if key == freshBootstrapKey {
 		if root != "" {
 			// 3a. FRESH with root (canonicalized above): mint a lead key, strip
@@ -469,7 +476,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 			body = injectSkepticalPosture(body)
 		}
 	} else {
-		// 4. CONTINUE (recOK): strip both markers and inner content; append state.
+		// 4. CONTINUE: strip both markers and inner content; append state.
 		body = stripModeGatedRegion(body, false)
 		if rec.Root != "" {
 			profilesBlock, err := worktreeProfilesForManual(s.sessionConfigOptions(key))

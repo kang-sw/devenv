@@ -572,17 +572,19 @@ func (f FolderStore) plan(meta *folderSession, before, after *State) (*folderInt
 		ref := folderTopicRef{Key: key}
 		oldKey := key
 		if meta != nil {
+			// Adoption retains the source topic's history directory even when
+			// the destination key still has a stale close-only mapping.
 			for _, old := range meta.Topics {
-				if old.Key == key {
-					ref = old
+				if !used[old.Dir] && !slices.Contains(keys, old.Key) && before.topicKnown(old.Key) && folderSameTopic(before, after, old.Key, key) {
+					ref, oldKey = old, old.Key
+					ref.Key = key
 					break
 				}
 			}
 			if ref.Dir == "" {
 				for _, old := range meta.Topics {
-					if !used[old.Dir] && !slices.Contains(keys, old.Key) && folderSameTopic(before, after, old.Key, key) {
-						ref, oldKey = old, old.Key
-						ref.Key = key
+					if old.Key == key {
+						ref = old
 						break
 					}
 				}
