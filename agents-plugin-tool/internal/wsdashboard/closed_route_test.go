@@ -69,7 +69,7 @@ func TestClosedRouteServesTheTopicsPastTheCap(t *testing.T) {
 	if first, last := strings.Index(rest, `>c5</span>`), strings.Index(rest, `>c1</span>`); first < 0 || last < first {
 		t.Errorf("closed topics out of close order: c5 at %d, c1 at %d", first, last)
 	}
-	if !strings.Contains(rest, `<iframe class="doc-frame" title="c5"`) {
+	if !strings.Contains(rest, `<div class="doc-frame" title="c5"`) {
 		t.Errorf("a closed topic's body is not framed:\n%.600s", rest)
 	}
 	page := getClosed(t, f.base+"/s/boardsession/closed?from=30&n=2")

@@ -96,12 +96,29 @@
   }
   // The per-second tick visits only what follows the clock: the relative
   // times and the usage paces. A hidden tab skips it, and showing the tab
-  // again catches up at once rather than on the next tick.
+  // again catches up at once rather than on the next tick. The two sets are
+  // kept (tickSets) and collected again only once the page changed: one
+  // observer on the document drops them on any insertion or removal, and on
+  // a change to an attribute they select on, wherever it happens (a board
+  // swap, a conversation entry, a history load, a node this script builds),
+  // except the tick's own text writes inside a time or a pace.
+  var tickSets = null;
+  function tickDirty(records) {
+    if (records.some(function (r) {
+      var n = r.target;
+      return !(r.type === "childList" && (n.tagName === "TIME" || (n.tagName === "EM" && n.classList.contains("u-pace"))));
+    })) tickSets = null;
+  }
+  if (window.MutationObserver) new MutationObserver(tickDirty).observe(doc, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-ms", "data-f", "data-reset"] });
   function tickTimes() {
     if (doc.hidden || shHidden) return;
     var now = Date.now();
-    q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"]').forEach(function (t) { fmtTime(t, now); });
-    q("em.u-pace[data-reset]").forEach(function (e) { pace(e, now); });
+    if (!tickSets || !window.MutationObserver) tickSets = {
+      times: q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"]'),
+      paces: q("em.u-pace[data-reset]")
+    };
+    tickSets.times.forEach(function (t) { fmtTime(t, now); });
+    tickSets.paces.forEach(function (e) { pace(e, now); });
   }
   setInterval(tickTimes, 1000);
   doc.addEventListener("visibilitychange", tickTimes);
@@ -586,6 +603,7 @@
         fmtTimes(n);
         sweepOutImgs(n);
         setFrameHeights(n, frameH);
+        mountFrames(n);
         writeAnswers(n, answers);
         q("iframe.doc-frame", n).forEach(function (f) { f.wbKeep = true; });
       });
@@ -605,6 +623,7 @@
     }
     el.setAttribute("data-h", hash);
     if (board) {
+      indexFrames();
       if (window.wbForm) window.wbForm();
       mermaid(ins);
       syncChips();
@@ -649,13 +668,18 @@
   // sent marks, answers, frame themes and heights). Everything else the
   // board holds (the closed-topic control, the reply bar) is replaced. The
   // initial record is the board as served, read before anything changes it.
+  // The server stamps each section with data-th, a hash of its rendered
+  // bytes (TopicHTML, render.go), compared in place of the HTML (topicSeen).
   var boardSeen = {};
   function topicKey(n) {
     return n.nodeType === 1 && n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic") ? n.getAttribute("data-topic") : null;
   }
+  function topicSeen(n) {
+    return n.getAttribute("data-th") || n.outerHTML;
+  }
   (function () {
     var b = region("board");
-    if (b) Array.prototype.forEach.call(b.children, function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = n.outerHTML; });
+    if (b) Array.prototype.forEach.call(b.children, function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = topicSeen(n); });
   })();
   // --- board cards (cards.js): the page's own cards among the topics --------
   // The framework mounts on the board region once, before any board swap,
@@ -713,6 +737,7 @@
         if (window.wbHistory) window.wbHistory.init(n);
         watchBoard(n);
         restoreOpen(n);
+        mountFrames(n);
         if (window.wbBindBoard) window.wbBindBoard(n);
         if (window.wbAgo) window.wbAgo(n);
         mermaid([n]);
@@ -729,6 +754,10 @@
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
   boardBoxes().forEach(watchBoard);
+  // The served board's frames mount once the cards have moved the pinned
+  // topics into the pin list, so no frame loads and then moves, paced so the
+  // whole board's mounting never lengthens one long task.
+  mountFramesPaced(doc);
   // --- the Files pane (files.js): mounted once, loaded when first shown -------
   if (live && fpane && window.WsFiles) {
     window.WsFiles.mount(fpane, {
@@ -740,7 +769,7 @@
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {
-    var src = frag(html), seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [];
+    var src = frag(html), seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [], changed = [];
     var pinBox = window.WsCards.pinList();
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n);
@@ -767,7 +796,7 @@
         if (n.matches("button.closed-more[data-closed-next]")) more = n;
         return;
       }
-      var h = n.outerHTML, key = "t:" + k;
+      var h = topicSeen(n), key = "t:" + k;
       seen[key] = h;
       // A topic that closes while the page shows it folds once: the
       // server folds a closed topic's body and settled rows under the same
@@ -778,6 +807,7 @@
       else {
         var g = live[key] && frameGraftable(live[key], n);
         if (g) grafts.push(g);
+        if (live[key]) changed.push({ old: live[key], n: n, g: g });
         want.push(n); ins.push(n);
       }
     });
@@ -832,6 +862,10 @@
     // none of them, so a changed one whose old section stands there keeps
     // it.
     var plan = window.WsCards.weave(want), woven = plan.board;
+    // A changed topic's unchanged entry frames are kept, moved aside before
+    // the grafts and the settle would detach them (frameKeep), and moved
+    // into their placeholders' places once the board has settled (frameKept).
+    var reuse = frameKeep(changed);
     var pinGrafts = grafts.filter(function (g) { return plan.pins.indexOf(g.n) >= 0 && g.old.parentNode === pinBox; });
     frameGrafts(el, woven, grafts.filter(function (g) { return plan.pins.indexOf(g.n) < 0; })).concat(pinGrafts).forEach(function (g) {
       frameGraft(g);
@@ -840,7 +874,55 @@
       ins[ins.indexOf(g.n)] = g.old;
     });
     window.WsCards.settle(el, plan);
+    frameKept(reuse);
     return ins;
+  }
+  // --- keyed frame reuse: a changed topic keeps its unchanged entry frames --
+  // An entry frame (data-doc-key entry:eN) is immutable per entry, so inside
+  // a changed topic an incoming entry placeholder takes the old topic's
+  // mounted frame of the same data-doc-key and the same data-srcdoc (the
+  // same key need not mean the same document: image inlining and relay
+  // lists change it); each old frame pairs once, so duplicate keys pair off
+  // one by one. Only Element.moveBefore keeps a frame's document across a
+  // move, and only between connected nodes: frameKeep moves the paired old
+  // frames into a hidden holder on the page before anything detaches them,
+  // and frameKept moves each into its placeholder's place, the placeholder
+  // dropped, once the new section stands on the page. A placeholder that
+  // stays unpaired is mounted as usual (mountFrames). A frame a graft holds
+  // (frameGraft's chain) and the topic-body frame (topic:, a stable key over
+  // changing content) are never paired. Without moveBefore nothing is kept.
+  function frameKeep(changed) {
+    if (!changed.length || !doc.body || !doc.body.moveBefore) return null;
+    var pairs = [];
+    changed.forEach(function (c) {
+      var held = c.g ? c.g.oc[0] : null, olds = {};
+      q('iframe.doc-frame[data-doc-key^="entry:"]:not(.doc-frame-next)', c.old).forEach(function (f) {
+        if (f === held || !f.hasAttribute("data-srcdoc")) return;
+        var k = f.getAttribute("data-doc-key") + "\n" + f.getAttribute("data-srcdoc");
+        (olds[k] = olds[k] || []).push(f);
+      });
+      q('div.doc-frame[data-doc-key^="entry:"]', c.n).forEach(function (p) {
+        if (c.g && p === c.g.nc[0]) return;
+        var list = olds[p.getAttribute("data-doc-key") + "\n" + p.getAttribute("data-srcdoc")];
+        if (list && list.length) pairs.push({ f: list.shift(), p: p });
+      });
+    });
+    if (!pairs.length) return null;
+    var holder = doc.createElement("div");
+    holder.hidden = true;
+    doc.body.appendChild(holder);
+    pairs.forEach(function (x) { holder.moveBefore(x.f, null); });
+    return { holder: holder, pairs: pairs };
+  }
+  function frameKept(r) {
+    if (!r) return;
+    r.pairs.forEach(function (x) {
+      var at = x.p.parentNode;
+      if (!at || !x.p.isConnected) return;
+      at.moveBefore(x.f, x.p);
+      at.removeChild(x.p);
+    });
+    r.holder.parentNode.removeChild(r.holder);
   }
   // --- a changed topic's body frame, double-buffered --------------------------
   // A changed topic's new section would bring a new body frame, blank until
@@ -865,11 +947,13 @@
   // of the same shape), or null.
   function frameGraftable(old, n) {
     if (old.classList.contains("closed") || n.classList.contains("closed")) return null;
-    var of = q("iframe.doc-frame:not(.doc-frame-next)", old)[0], nf = q("iframe.doc-frame", n)[0];
+    var of = q(".doc-frame:not(.doc-frame-next)", old)[0], nf = q(".doc-frame", n)[0];
     if (!of || !nf || of.getAttribute("data-doc") !== nf.getAttribute("data-doc")) return null;
     var oc = frameChain(of, old), nc = frameChain(nf, n);
     if (!oc || !nc || oc.length !== nc.length) return null;
-    for (var i = 0; i < oc.length; i++) if (oc[i].tagName !== nc[i].tagName) return null;
+    // The frames themselves may differ in kind (a mounted iframe, an
+    // incoming placeholder: frameGraft mounts it).
+    for (var i = 1; i < oc.length; i++) if (oc[i].tagName !== nc[i].tagName) return null;
     return { old: old, n: n, oc: oc, nc: nc };
   }
   // frameGrafts returns the grafts that move nothing settling el into want
@@ -919,15 +1003,14 @@
   // attributes and children, except its child on the path, which stays.
   // At the bottom the new frame goes in after the old one, pending.
   function frameGraft(g) {
-    var of = g.oc[0], nf = g.nc[0];
-    nf.classList.add("doc-frame-next");
-    nf.setAttribute("tabindex", "-1");
-    nf.setAttribute("aria-hidden", "true");
-    nf.wbNext = true;
-    nf.wbOld = of;
-    of.wbOut = true;
-    nf.addEventListener("load", function () { frameShow(nf); });
-    setTimeout(function () { frameReveal(nf); }, frameRevealMs);
+    var of = g.oc[0], mounted = of.tagName === "IFRAME";
+    // The next frame of a mounted frame is mounted before it goes in, and
+    // before anything holds it (expandos, the load listener): a placeholder
+    // would show nothing to reveal. The next frame of an unmounted one (a
+    // closed fold) is a placeholder that simply takes the old one's place.
+    if (mounted && g.nc[0].tagName !== "IFRAME") g.nc[0] = mountFrame(g.nc[0]);
+    var nf = g.nc[0];
+    if (mounted) frameNext(nf, of);
     for (var i = g.oc.length - 1; i > 0; i--) {
       var oa = g.oc[i], na = g.nc[i], oc = g.oc[i - 1], nc = g.nc[i - 1], before = true;
       Array.prototype.slice.call(oa.attributes).forEach(function (a) { if (!na.hasAttribute(a.name)) oa.removeAttribute(a.name); });
@@ -939,6 +1022,18 @@
         else oa.appendChild(c);
       });
     }
+    if (!mounted) of.parentNode.removeChild(of);
+  }
+  // frameNext makes nf the pending next frame of mounted frame of.
+  function frameNext(nf, of) {
+    nf.classList.add("doc-frame-next");
+    nf.setAttribute("tabindex", "-1");
+    nf.setAttribute("aria-hidden", "true");
+    nf.wbNext = true;
+    nf.wbOld = of;
+    of.wbOut = true;
+    nf.addEventListener("load", function () { frameShow(nf); });
+    setTimeout(function () { frameReveal(nf); }, frameRevealMs);
   }
   // frameShow reveals pending frame f once it has loaded and drawn: a
   // frame revealed in the frame it loads in can still show blank for a
@@ -1546,6 +1641,8 @@
   // grammar the board's copy-answers and the server's delivered message use).
   function boardAnswers() {
     if (cchips) return window.wbAnswers.block(chipList(), []);
+    // A keystroke's reply build may still wait for its frame (form.js).
+    if (window.wbFlushReply) window.wbFlushReply();
     var b = region("board"), r = b && b.querySelector("#reply-text");
     return r ? r.value.trim() : "";
   }
@@ -3522,8 +3619,78 @@
   // (an http(s) URL for a url link, a scheme-less daemon path for a file
   // link), so a forged message can at most offer a menu the user must pick
   // from.
+  // Lazy frames: the server writes each frame as an inert placeholder, a
+  // div.doc-frame carrying the frame's attributes, its document as
+  // data-srcdoc and its sandbox tokens as data-sandbox (wswhiteboard
+  // framedDoc). It becomes the iframe (mountFrame) only while every
+  // <details> around it is open (frameShown): on page load, on a toggle open
+  // (frameToggle, a capture listener, as toggle does not bubble; a
+  // programmatic open such as restoreOpen's or boardJump's fires toggle
+  // too), and for what a board swap, an adopted closed page, or a history
+  // load inserts. A frame never unmounts; a closed fold keeps its frames.
+  // Readers that need a live window (docFrame, postTheme, the size request,
+  // wbGrow, wbKeep) select iframe.doc-frame and skip placeholders; the
+  // height memory and the palette read .doc-frame, either kind.
+  function frameShown(f) {
+    if (!f.isConnected) return false;
+    for (var p = f.parentNode; p && p.nodeType === 1; p = p.parentNode) if (p.tagName === "DETAILS" && !p.open) return false;
+    return true;
+  }
+  // mountFrame replaces placeholder p with its iframe and returns the
+  // iframe. sandbox and srcdoc are set before the iframe is connected: a
+  // sandbox set later applies only to the next navigation, and an iframe
+  // connected without srcdoc commits about:blank at once. data-srcdoc stays
+  // for comparisons.
+  function mountFrame(p) {
+    var f = doc.createElement("iframe");
+    Array.prototype.forEach.call(p.attributes, function (a) { if (a.name !== "data-sandbox") f.setAttribute(a.name, a.value); });
+    f.setAttribute("sandbox", p.getAttribute("data-sandbox") || "");
+    f.setAttribute("srcdoc", p.getAttribute("data-srcdoc") || "");
+    if (p.parentNode) p.parentNode.replaceChild(f, p);
+    return f;
+  }
+  function mountFrames(el) {
+    q("div.doc-frame[data-srcdoc]", el).forEach(function (p) {
+      if (frameShown(p)) mountFrame(p);
+    });
+  }
+  // mountFramesPaced is mountFrames over the page load's whole board, in
+  // slices of about 8 ms: the first slice runs now, each later one in its
+  // own task, so mounting every open frame at once never lengthens the
+  // load's longest task (measured: Phase 1 of the board performance
+  // ticket). A placeholder a swap or a toggle open took meanwhile is
+  // skipped (frameShown checks it is still connected).
+  function mountFramesPaced(el) {
+    var list = q("div.doc-frame[data-srcdoc]", el);
+    (function slice() {
+      var t = performance.now();
+      while (list.length && performance.now() - t < 8) {
+        var p = list.shift();
+        if (frameShown(p)) mountFrame(p);
+      }
+      if (list.length) setTimeout(slice, 0);
+    })();
+  }
+  function frameToggle(e) {
+    var d = e.target;
+    if (d && d.tagName === "DETAILS" && d.open) mountFrames(d);
+  }
+  doc.addEventListener("toggle", frameToggle, true);
+  // docFrame resolves through frameWins (contentWindow -> board frame),
+  // indexed again by every board swap and on any miss: a frame that moved
+  // without Element.moveBefore (a pin, a reorder) took a new window, and a
+  // message from a window that is no board frame finds none either way.
+  var frameWins = new Map();
+  function indexFrames() {
+    frameWins = new Map();
+    boardQ("iframe.doc-frame").forEach(function (f) { if (f.contentWindow) frameWins.set(f.contentWindow, f); });
+  }
   function docFrame(win) {
-    return q("iframe.doc-frame").filter(function (f) { return inBoard(f) && f.contentWindow === win; })[0];
+    var f = frameWins.get(win);
+    if (f && f.contentWindow === win && inBoard(f)) return f;
+    indexFrames();
+    f = frameWins.get(win);
+    return f && inBoard(f) ? f : undefined;
   }
   // Only an existing board item or latest stable panel target may be
   // navigated. The history loader accepts bare IDs, never selectors/URLs.
@@ -3555,6 +3722,7 @@
     var el = e.detail && e.detail.root;
     if (!el || !inBoard(el)) return;
     restoreOpen(el);
+    mountFrames(el);
     fmtTimes(el);
     sweepOutImgs(el);
     if (window.wbBindBoard) window.wbBindBoard(el);
@@ -3616,6 +3784,46 @@
       if (b) postDoc(f, { wbDoc: "img", id: id, blob: b });
     }, function () {});
   }
+  // A frame's height lands in the next frame callback, with every other
+  // height reported meanwhile (applyFrameHeights): one host layout for a
+  // board's worth of frames rather than one per message. The height it
+  // eases from is its set height (style.height), 0 when it has none, as the
+  // stylesheet's iframe.doc-frame starts it, so nothing reads layout.
+  var frameSizes = new Map(), frameSizeFrame = 0;
+  function queueFrameHeight(f, h) {
+    frameSizes.set(f, h);
+    if (!frameSizeFrame) frameSizeFrame = requestAnimationFrame(applyFrameHeights);
+  }
+  function applyFrameHeights() {
+    var batch = frameSizes, b = region("board"), kept = null;
+    frameSizes = new Map();
+    frameSizeFrame = 0;
+    // A frame a board swap brought (wbKeep) reports its height late, after
+    // the swap's keep session may have ended: its first change keeps the
+    // board in place as the swap did, one session for the whole batch,
+    // started before any height lands. A session still running keeps the
+    // anchor the swap picked (the topmost entry in view may be one the swap
+    // moved).
+    batch.forEach(function (h, f) {
+      if (!f.wbKeep || Math.abs(Math.ceil(h) - (parseFloat(f.style.height) || 0)) < 1 || !b || !b.contains(f)) return;
+      if (!kept) kept = boardKept() || boardKeep(b);
+      if (kept) f.wbKeep = false;
+    });
+    batch.forEach(function (h, f) {
+      var from = parseFloat(f.style.height) || 0, to = Math.ceil(h);
+      f.style.height = to + "px";
+      // The first height a frame of a moving board swap reports eases
+      // from the height the frame stood at (board motion, slideBoard).
+      if (f.wbGrow) {
+        f.wbGrow = false;
+        if (f.animate && Math.abs(to - from) >= 1) f.animate([{ height: from + "px" }, { height: to + "px" }], { duration: 200, easing: "ease-out" });
+      }
+      // A frame rendered before a theme switch (a board swap on a stream
+      // opened earlier) takes the current theme when it first reports.
+      postTheme(f);
+    });
+    if (kept) kept.h.apply();
+  }
   window.addEventListener("message", function (e) {
     var f = docFrame(e.source), m = e.data;
     if (!f || !m || typeof m !== "object") return;
@@ -3626,27 +3834,8 @@
       // A pending frame (frameGraft) keeps the old frame's height: once
       // shown it is asked for its height again.
       if (f.wbNext) { postTheme(f); return; }
-      if (h >= 0 && h < 100000) {
-        var from = f.getBoundingClientRect().height, to = Math.ceil(h), b = region("board");
-        // A frame a board swap brought (wbKeep) reports its height late,
-        // after the swap's keep session may have ended: its first change
-        // keeps the board in place as the swap did. A session still running
-        // keeps the anchor the swap picked (the topmost entry in view may be
-        // one the swap moved).
-        var kept = f.wbKeep && Math.abs(to - from) >= 1 && b && b.contains(f) ? boardKept() || boardKeep(b) : null;
-        if (kept) f.wbKeep = false;
-        f.style.height = to + "px";
-        if (kept) kept.h.apply();
-        // The first height a frame of a moving board swap reports eases
-        // from the height the frame stood at (board motion, slideBoard).
-        if (f.wbGrow) {
-          f.wbGrow = false;
-          if (f.animate && Math.abs(to - from) >= 1) f.animate([{ height: from + "px" }, { height: to + "px" }], { duration: 200, easing: "ease-out" });
-        }
-      }
-      // A frame rendered before a theme switch (a board swap on a stream
-      // opened earlier) takes the current theme when it first reports.
-      postTheme(f);
+      if (h >= 0 && h < 100000) queueFrameHeight(f, h);
+      else postTheme(f);
     } else if (m.wbDoc === "jump") {
       boardJump(str(m.id));
     } else if (m.wbDoc === "link") {
@@ -3672,15 +3861,16 @@
   // A swap re-creates a changed topic's frame (or loads its next one beside
   // the old one, frameGraft), which starts at no height until it posts one;
   // it takes the old frame of the same topic's height meanwhile. A pending
-  // next frame's height is not the topic's.
+  // next frame's height is not the topic's. A placeholder (mountFrame) keeps
+  // and takes a height as its frame does.
   function frameHeights(el) {
     var h = {};
-    q("iframe.doc-frame:not(.doc-frame-next)", el).forEach(function (f) { if (f.style.height) h[f.getAttribute("data-doc")] = f.style.height; });
+    q(".doc-frame:not(.doc-frame-next)", el).forEach(function (f) { if (f.style.height) h[f.getAttribute("data-doc")] = f.style.height; });
     return h;
   }
   function setFrameHeights(el, h) {
     if (!h) return;
-    q("iframe.doc-frame", el).forEach(function (f) {
+    q(".doc-frame", el).forEach(function (f) {
       var k = f.getAttribute("data-doc");
       if (Object.prototype.hasOwnProperty.call(h, k)) f.style.height = h[k];
     });
@@ -5012,7 +5202,8 @@
       // A board frame is an iframe or, before it mounts, an inert div.doc-frame placeholder.
       var body = topic.querySelector(".doc-body"), frame = body && body.querySelector(".doc-frame"), text;
       if (frame) {
-        // srcdoc is available even for an opaque-origin sandbox. A template
+        // The frame's document text (data-srcdoc, wswhiteboard framedDoc) is
+        // there even for an unmounted or opaque-origin frame. A template
         // parses it inertly: never execute a body's scripts or fetch its images.
         var parsed = doc.createElement("template");
         // An unmounted frame holds its document in data-srcdoc until it mounts.

@@ -29,7 +29,7 @@ func TestBoardEntryFrameBridgeStaysNarrow(t *testing.T) {
 		t.Fatal(err)
 	}
 	js := string(data)
-	src := whiteboardBridgeFunctions(t, js, "boardJump", "docFrame", "postDoc", "str", "num", "mentionOf", "selEl", "entryAt", "frameMention")
+	src := whiteboardBridgeFunctions(t, js, "boardJump", "indexFrames", "docFrame", "postDoc", "str", "num", "mentionOf", "selEl", "entryAt", "frameMention")
 	listener := regexp.MustCompile(`window\.addEventListener\("message", function \(e\) \{\n    var f = docFrame\(e\.source\), m = e\.data;\n    if \(!f \|\| !m \|\| typeof m !== "object"\) return;[\s\S]*?\n  \}\);\n`).FindString(js)
 	if listener == "" {
 		t.Fatal("no source-gated frame listener")
@@ -61,6 +61,8 @@ function frame(owned, entry) {
 }
 var own = frame(true, "e7"), foreign = frame(false, "e999"), frames = [own, foreign];
 function q() { return frames; }
+function boardQ() { return frames; }
+var frameWins = new Map();
 function placeMention(p) { pending = p; mpend = p; }
 function hideMention() { pending = null; mpend = null; }
 `+src+listener+`
