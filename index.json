@@ -540,6 +540,9 @@
     "261114-bug-ws-shared-daemon-restarts-without-a-swap": {
       "registered_at": "2026-11-13T15:28:36Z"
     },
+    "261114-chore-ws-tracker-start-date-docs-and-query-output": {
+      "registered_at": "2026-11-13T16:03:50Z"
+    },
     "261114-feat-ws-dashboard-answer-ack-nudge": {
       "registered_at": "2026-11-13T15:27:39Z"
     },
