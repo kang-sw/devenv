@@ -17,16 +17,18 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { readLocalDevenvMarker, buildLocalDevenvBootstrap, createChildRuntimeEnsurer, runtimeContractHash, type ChildRuntimeEnsureDeps, type LocalDevenvBuildDeps } from "../src/local-devenv.ts";
 import { wrapLaunchErrorWithLocalDevenvContext } from "../src/bridge.ts";
 import { buildStdioSpawnOptions, spawnWsMcpClient } from "../src/mcp-stdio-client.ts";
 import { isLeadOrFork, readSpawnRole, WS_PI_SPAWN_ROLE_ENV } from "../src/process-role.ts";
 import { buildRpcClientOptions } from "../src/spawner.ts";
+import { startFakeDaemon, type FakeDaemon } from "./fixtures/fake-daemon.ts";
 
 function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -685,6 +687,68 @@ describe("createChildRuntimeEnsurer: lead reinstalls ws-mcp on runtime.json drif
       assert.equal(output.trim(), bumpedVersion);
       assert.equal(existsSync(executed), false, "neither version inspection executes the bootstrap");
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("child runtime version check never executes the ws binary or starts a daemon, even beside one a session launcher would replace", async () => {
+    const dir = tempDir("ws-pi-child-runtime-daemon-");
+    let daemon: FakeDaemon | undefined;
+    try {
+      const pluginDir = join(dir, "plugin");
+      const runtimeDir = join(dir, "runtime");
+      const cache = join(dir, "cache");
+      mkdirSync(join(pluginDir, "bin"), { recursive: true });
+      mkdirSync(join(pluginDir, "rsrc"), { recursive: true });
+      writeFileSync(join(pluginDir, "rsrc", "manifest.json"), "{}");
+      const launcherPath = join(pluginDir, "bin", "ws-mcp-launcher.py");
+      writeFileSync(launcherPath, readFileSync(join(process.cwd(), "bin", "ws-mcp-launcher.py"), "utf8"));
+      writeMarker(pluginDir, { schema_version: 1, source_root: makeSourceRoot(dir), tool_dir: makeToolDir(dir), go: makeExecutableStub(dir) });
+      const runtimeJsonPath = join(pluginDir, "runtime.json");
+      const baseText = readFileSync(join(process.cwd(), "runtime.json"), "utf8");
+      writeFileSync(runtimeJsonPath, baseText);
+      const base = JSON.parse(baseText) as { plugin_version: string };
+      const bumpedVersion = base.plugin_version.replace(/\d+$/, (patch) => String(Number(patch) + 1));
+      const bumpedText = baseText.replace(`"plugin_version": "${base.plugin_version}"`, `"plugin_version": "${bumpedVersion}"`);
+
+      // The running daemon predates the bump and an older build: a session
+      // launcher would replace it, so any start would show up below.
+      daemon = await startFakeDaemon(cache, { version: base.plugin_version, buildTime: 1 });
+      // The obsolete direct bypass is set and must change nothing.
+      const launcherEnv = { PATH: process.env.PATH ?? "", WS_MCP_RUNTIME_DIR: runtimeDir, WS_CACHE_HOME: cache, WS_MCP_LAUNCHER_DIRECT: "1" };
+      const executed = join(dir, "binary-executed");
+      // Asynchronous launcher runs: the fake daemon answers from this event loop.
+      const runLauncher = async (args: string[], env: Record<string, string>): Promise<string> =>
+        (await promisify(execFile)("python3", [launcherPath, ...args], { cwd: pluginDir, env: { ...launcherEnv, ...env }, encoding: "utf8" })).stdout;
+      const ensure = createChildRuntimeEnsurer({
+        role: undefined,
+        pluginDir,
+        runtimeJsonPath,
+        baselineHash: runtimeContractHash(baseText),
+        // A sentinel ws-mcp, its staged daemon copy included: any execution journals its argv.
+        runBuild: (argv) => {
+          writeFileSync(
+            argv[argv.indexOf("-o") + 1],
+            `#!/usr/bin/env python3\nimport sys\nopen(${JSON.stringify(executed)}, 'a').write(' '.join(sys.argv) + '\\n')\nraise SystemExit(1)\n`,
+            { mode: 0o755 },
+          );
+        },
+        runLauncher,
+      })!;
+
+      writeFileSync(runtimeJsonPath, bumpedText);
+      await ensure();
+      const installed = join(runtimeDir, `ws-mcp-${bumpedVersion}-${createHash("sha256").update(bumpedText).digest("hex").slice(0, 12)}${process.platform === "win32" ? ".exe" : ""}`);
+      assert.equal(JSON.parse(readFileSync(`${installed}.metadata.json`, "utf8")).version, bumpedVersion, "the bootstrap check read the installed build's metadata");
+
+      // Without the override, a version check reads the live daemon's /health.
+      assert.equal((await runLauncher(["version"], { WS_MCP_BOOTSTRAP_BINARY: "", WS_MCP_BOOTSTRAP_URL: "" })).trim(), base.plugin_version);
+      assert.ok(daemon.healthCount() > 0, "the daemon was asked over HTTP");
+      assert.equal(existsSync(executed) ? readFileSync(executed, "utf8") : "", "", "no version check executed the ws binary");
+      assert.deepEqual(daemon.hellos, [], "no version check opened a daemon session");
+      assert.equal(existsSync(join(cache, "dashboard", "bin")), false, "nothing was staged for an inspection-only daemon start");
+    } finally {
+      await daemon?.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });

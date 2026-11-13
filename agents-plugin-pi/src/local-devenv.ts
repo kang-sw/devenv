@@ -246,8 +246,10 @@ export interface ChildRuntimeEnsureDeps {
  * bridge's startup contract included). On drift it rebuilds from source,
  * stamped with the CURRENT `plugin_version`, and runs the unchanged launcher
  * once with `WS_MCP_BOOTSTRAP_BINARY` so its own install/verify/stamp path
- * places the binary at the new contract path. `version` is forwarded because
- * a bare launcher run execs the stdio server and blocks on stdin.
+ * places the binary at the new contract path. `version` is the launcher's
+ * inspection command: with the override it installs the build and reports
+ * the version from its hash-bound metadata, executing no ws binary and
+ * starting no daemon (a bare launcher run would serve stdio and block).
  *
  * Concurrent launches after one drift share the single in-flight rebuild; a
  * settled contract is memoized so later launches do nothing; a failure is
