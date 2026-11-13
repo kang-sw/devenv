@@ -753,7 +753,7 @@
     var r = mineLive(it), who = editWho(it), n = ui.ned = { item: id, rk: rk, ed: id, val: it.title, kind: it.kind, st: r ? r.status : it.status, who: who, compl: null,
       due: it.due || '', pri: it.priority != null ? it.priority : null, labels: (it.labels || []).slice(), canAsg: canAssign(it, VS.viewer.member) };
     // what the editor opened on: a save sends only the fields the user moved off these (editRowEvents)
-    n.orig = { title: n.val, st: n.st, due: n.due, pri: nrowPri(n), who: who.slice(), labels: n.labels.slice() };
+    n.orig = { title: n.val, st: n.st, due: n.due, pri: n.pri, who: who.slice(), labels: n.labels.slice() };
     render();
     var el = $('tkned');
     if (el) { el.focus(); el.select(); }
@@ -773,10 +773,10 @@
   // wrote meanwhile and the user left alone is kept.
   function editRowEvents(n, it, title) {
     var ev = [], ep = { item: it.id }, topic = it.kind === 'topic', r = mineLive(it), st = nrowSt(n), o = n.orig;
-    if (title && title !== o.title && title !== it.title) ep.title = title;
+    if (title && title !== o.title.trim() && title !== it.title) ep.title = title;
     if (!topic) {
       var pri = nrowPri(n), due = n.due || null;
-      if (pri !== o.pri && pri !== (it.priority != null ? it.priority : VS.priority.default)) ep.priority = pri;
+      if (n.pri !== o.pri && pri !== (it.priority != null ? it.priority : VS.priority.default)) ep.priority = pri;
       if (due !== (o.due || null) && due !== (it.due || null)) ep.due = due;
     }
     // the draft's label picks (what it added and dropped since the prefill) over the item's labels
@@ -786,12 +786,12 @@
     if (!sameLabels(picked, it.labels)) ep.labels = picked;
     if (Object.keys(ep).length > 1) ev.push(['item.edit', ep]);
     if (st && r && st !== o.st && st !== r.status) ev.push(st === 'done' ? ['item.close', { item: it.id }] : ['item.status', { item: it.id, status: st }]);
-    // the assignees as a delta over who is assigned now: item.assign for the people picked who hold
-    // nothing, item.unassign for the ones the user dropped from the prefill who still hold it. The
+    // the assignees as a delta over who is assigned now: item.assign for new picks since open who
+    // hold nothing, item.unassign for the ones dropped from the prefill who still hold it. The
     // completion pick rides on the added people only: the store keeps a holding's completion, and
     // re-assigning a kept person to change it would end their record (status, acceptance).
     if (n.canAsg && n.who.slice().sort().join(' ') !== o.who.slice().sort().join(' ')) {
-      var cur = editHeld(it), add = n.who.filter(function (x) { return cur.indexOf(x) < 0; });
+      var cur = editHeld(it), add = n.who.filter(function (x) { return o.who.indexOf(x) < 0 && cur.indexOf(x) < 0; });
       if (add.length) ev = ev.concat(asgEvents(it.id, add.map(function (id) { return { t: 'p', id: id }; }), n.compl));
       o.who.forEach(function (x) { if (n.who.indexOf(x) < 0 && cur.indexOf(x) >= 0) ev.push(['item.unassign', { item: it.id, assignee: x }]); });
     }
@@ -5025,16 +5025,16 @@
     if (!(VS.labels || []).length) return '<p class="mempty">' + wsT("js.tk.labels.empty") + '</p>' + (VS.viewer.admin ? msep() + mi('m-ladd', esc(wsT("js.tk.new.labels.add")), {}, { icon: 'plus' }) : '');
     return labelChecklist(labelsOver(labelBase(it), MN.lset));
   }
-  // item id -> the labels its labels write still in flight sets (labelWrite). A step reopened before
-  // that write lands draws and applies its picks over it, so a second close does not write the first
-  // close's pick away from the stale labels the view still shows.
+  // [store, item id] -> each in-flight write's own label picks, laid over the live labels.
+  // Settling one write removes only its picks, leaving any others still in flight.
   var LPEND = {};
-  function labelBase(it) { return LPEND[it.id] || it.labels; }
+  function labelBase(it) { return (LPEND[JSON.stringify([ui.store, it.id])] || []).reduce(function (ls, set) { return labelsOver(ls, set); }, it.labels); }
   // A labels step's write (labelPending's events): pending for its item until it lands or is refused.
   function labelWrite(ev, then) {
-    var id = ev[0][1].item, ls = ev[0][1].labels;
-    LPEND[id] = ls;
-    function settled() { if (LPEND[id] === ls) delete LPEND[id]; }
+    var id = ev[0][1].item, key = JSON.stringify([ui.store, id]), set = labelPicks(labelBase(VS.items[id]), ev[0][1].labels);
+    var pending = LPEND[key] || (LPEND[key] = []);
+    pending.push(set);
+    function settled() { pending.splice(pending.indexOf(set), 1); if (!pending.length) delete LPEND[key]; }
     commit(ev, then, settled, settled);
   }
   // Labels cur with the picks set (label id -> wanted on) laid over, in the store's list order
