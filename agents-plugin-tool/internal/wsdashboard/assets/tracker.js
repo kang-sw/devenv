@@ -6497,7 +6497,7 @@
     qs.open = false; qAbort(); qs.gen++;
     $('tkqpop').close(); $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
     var b = qs.back; qs.back = null;
-    if (b && b.isConnected) b.focus(); else $('tkqs').focus();
+    if (b && b.isConnected) b.focus({ preventScroll: true }); else $('tkqs').focus({ preventScroll: true });
   }
   // Esc clears a query first and closes the palette on an empty one.
   function qEsc() { if ($('tkqin').value) { $('tkqin').value = ''; qRun(); } else qClose(); }

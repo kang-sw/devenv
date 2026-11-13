@@ -111,6 +111,9 @@
     var term = mk("span", "board-term-slot");
     term.id = "board-term-slot";
     row.appendChild(term);
+    var web = mk("span", "board-web-slot");
+    web.id = "board-web-slot";
+    row.appendChild(web);
     var search = action("board-search", "search", wsT("js.board.toolbar.search"), actions.search);
     search.appendChild(mk("kbd", "", "Ctrl K"));
     if (actions.files) action("board-files", "folder-open", wsT("js.board.toolbar.files"), actions.files);

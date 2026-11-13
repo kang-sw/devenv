@@ -675,7 +675,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
    Only the view folds: no card record or disclosure is changed. Keeping
    off-screen items renderable avoids remembered unfolded intrinsic sizes. */
 :root[data-overview] body { background: color-mix(in srgb, var(--wb-bg) 28%, #000); }
-:root[data-overview] :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter) { filter: brightness(.28) saturate(.4); }
+:root[data-overview] :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { filter: brightness(.28) saturate(.4); }
 :root[data-overview] .r-board :is(section.topic, .bcard) { content-visibility: visible !important; cursor: pointer; }
 :root[data-overview] .r-board section.topic:not([data-overview-motion]) > :not(.tophead),
 :root[data-overview] .r-board .tophead > .tnote,
@@ -703,13 +703,13 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .overview-ghost .rtext { overflow: hidden; }
 .overview-ghost :is(.tnote-toggle, .d-max, .d-min, .bc-acts, .bc-fold, .bc-max, .bc-close) { opacity: 0; }
 .overview-ghost-body { height: 100%; background: var(--wb-card); }
-:root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter) { transition: filter 240ms cubic-bezier(.2,.8,.2,1); }
+:root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { transition: filter 240ms cubic-bezier(.2,.8,.2,1); }
 .overview-spacer { flex: none; pointer-events: none; }
 .overview-flash { animation: overview-flash 1.2s ease-out; }
 @keyframes overview-flash { from { outline: 3px solid var(--wb-primary); outline-offset: 0; } to { outline: 0 solid transparent; outline-offset: 3px; } }
 @media (prefers-reduced-motion: reduce) {
   .overview-flash { animation: none; outline: 2px solid var(--wb-primary); outline-offset: 1px; }
-  :root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter) { transition: none; }
+  :root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { transition: none; }
 }
 
 /* ===== preview cards (preview.js) =====
@@ -767,11 +767,11 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .board-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--wb-muted); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .board-action .li { width: 14px; height: 14px; flex: none; }
 .board-action:hover, .board-action:focus-visible { border-color: var(--wb-muted-fg); }
-.board-action[aria-pressed="true"], .tnew[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); }
+.board-action[aria-pressed="true"], .tnew[aria-expanded="true"], .wnew[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); }
 .board-action kbd { font: 600 10.5px ui-monospace, Menlo, monospace; color: var(--wb-muted-fg); border: 1px solid var(--wb-line); border-radius: 4px; padding: 0 4px; }
 .board-count { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
-.board-term-slot { position: relative; display: flex; flex: none; }
-.board-term-slot:empty { display: none; }
+.board-term-slot, .board-web-slot { position: relative; display: flex; flex: none; }
+.board-term-slot:empty, .board-web-slot:empty { display: none; }
 @container board-toolbar (max-width: 540px) {
   .board-action:not(.board-overview) .board-label, .board-action kbd { display: none; }
   .board-action:not(.board-overview) { padding-inline: 8px; }
@@ -815,7 +815,6 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .wc-badge[hidden] { display: none; }
 .ibtn.wc-att:has(.wc-badge:not([hidden])) { opacity: 1; color: var(--wb-fail); }
 .tnew + .tnew { margin-left: 2px; }
-.tfix .tnew + .tnew { margin-left: 8px; }
 /* the holder card's terminals whose session is gone */
 .hdterms { display: grid; gap: 2px; }
 .hdsub { font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 2px; }

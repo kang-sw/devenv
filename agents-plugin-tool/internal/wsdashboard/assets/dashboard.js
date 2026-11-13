@@ -3828,6 +3828,15 @@
     if (!frameSizeFrame) frameSizeFrame = requestAnimationFrame(applyFrameHeights);
   }
   function applyFrameHeights() {
+    // While overview is active or transitioning, board frames are inside
+    // display:none containers and report collapsed heights. Applying those
+    // would overwrite the saved inline heights that exit uses to restore the
+    // unfolded layout, causing a height jump at the end of the exit motion.
+    // Re-queue until overview releases.
+    if (window.WsOverview && window.WsOverview.holding()) {
+      frameSizeFrame = requestAnimationFrame(applyFrameHeights);
+      return;
+    }
     var batch = frameSizes, b = region("board"), kept = null;
     frameSizes = new Map();
     frameSizeFrame = 0;

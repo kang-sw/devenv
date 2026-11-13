@@ -25,7 +25,7 @@ function count() { return bar.querySelector(".board-count").textContent; }
 first("toolbar first on a narrow board");
 check("toolbar precedes pins", bar.nextSibling === pins, true);
 check("not a card or rail item", [page.W.is(bar), bar.hasAttribute("data-rail"), bar.querySelectorAll(".tpin, .bc-hd").length], [false, false, 0]);
-check("button order and terminal slot", bar.firstChild.children.map(function (n) { return n.className; }), ["board-action board-overview", "board-term-slot", "board-action board-search", "board-action board-files", "board-count"]);
+check("button order and terminal slot", bar.firstChild.children.map(function (n) { return n.className; }), ["board-action board-overview", "board-term-slot", "board-web-slot", "board-action board-search", "board-action board-files", "board-count"]);
 check("overview starts unpressed", bar.querySelector(".board-overview").getAttribute("aria-pressed"), "false");
 ["overview", "search", "files"].forEach(function (name) { bar.querySelector(".board-" + name).fire("click", {}); });
 check("actions use mount callbacks", calls, ["overview", "search", "files"]);
