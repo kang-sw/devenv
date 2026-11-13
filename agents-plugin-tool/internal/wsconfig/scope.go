@@ -257,6 +257,9 @@ func RepoScoped(key string, resolverBacked bool) bool {
 // DefaultScope returns the declared default write scope for the given item key,
 // falling back to ScopeProject when the item has no declaration.
 func DefaultScope(key string) Scope {
+	if ValidPreferenceKey(key) {
+		return ScopeGlobal
+	}
 	if s, ok := scopeRegistry[key]; ok {
 		return s
 	}

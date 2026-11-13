@@ -129,6 +129,7 @@ func dashboardCommand(args []string) {
 		closeTracker()
 		fatal("dashboard", err)
 	}
+	stopMailboxSweep := startMailboxSweep(logw)
 	wsdashboard.LogDevAssets(logw, devRoot)
 	// Holding the lock, this daemon is the one the staged copies were for;
 	// every copy but its own is unused now.
@@ -156,6 +157,7 @@ func dashboardCommand(args []string) {
 		daemon.Close()
 	case <-daemon.Done():
 	}
+	stopMailboxSweep()
 	// The lock and endpoint are released (the successor is starting); a
 	// hosted call that outlived the drain budget still runs and ends on its
 	// own, and the replacement goroutine, when one runs, spawns the

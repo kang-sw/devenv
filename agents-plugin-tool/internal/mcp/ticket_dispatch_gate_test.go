@@ -1,12 +1,16 @@
 package mcp
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wsdoc"
 )
 
 // TestTicketsQueryPointResolveDispatchBlocked pins the dispatch-time hard gate's
@@ -209,30 +213,44 @@ func TestTicketsQueryBlockedMarkerAndDispatchGateAreDistinctLines(t *testing.T) 
 	}
 }
 
-// TestTicketsQueryPointResolveDispatchGateFailsOpen verifies the documented
-// fail-open contract at the server point-resolve seam (server.go's
-// `blockErr == nil` guard): when the dispatch gate's live whole-board scan
-// errors, the gate degrades silently — the point-resolve still returns the
-// ticket, does not surface an error, and simply omits dispatch_blocked, rather
-// than turning a plain "where is this stem" resolve into a failure.
-//
-// The scan error is injected with an unreadable ticket file in .dropped/: only
-// DispatchBlockFor's boardByStem scan reads .dropped/ (and .done/), while the
-// consumer's own point-resolve scan (ready/todo/idea by default) does not — so
-// the ticket still resolves while the gate's scan fails. The prerequisite is
-// left unlanded in ready/, so absent the injected error the gate WOULD emit a
-// dispatch_blocked line (see TestTicketsQueryPointResolveDispatchBlocked); its
-// absence here is therefore the fail-open path, not a no-op.
 func TestTicketsQueryPointResolveDispatchGateFailsOpen(t *testing.T) {
+	useLeadProfile(t)
+	root := t.TempDir()
+	mustWrite(t, root, "ai-docs/tickets/ready/260101-feat-consumer.md",
+		"---\ntitle: Consumer\nblocked-by: 260101-feat-prereq\n---\n# Consumer\n")
+	initGit(t, root)
+	server := NewServer(root, "test")
+	called := false
+	server.dispatchBlock = func(_ string, info wsdoc.TicketInfo, _ []string) (*wsdoc.DispatchBlock, error) {
+		called = true
+		if info.Stem != "260101-feat-consumer" || len(info.BlockedBy) != 1 {
+			t.Fatalf("gate received wrong resolved ticket: %+v", info)
+		}
+		return nil, errors.New("injected dispatch scan failure")
+	}
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tickets.query","arguments":{"ticket_stem":"260101-feat-consumer"}}}` + "\n"
+	var out bytes.Buffer
+	if err := serveStdioWithSession(t, server, root, input, &out); err != nil {
+		t.Fatal(err)
+	}
+	raw := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))["1"]
+	resp := toolText(t, raw)
+	if !called || strings.Contains(raw, `"isError":true`) || strings.Contains(resp, "injected dispatch scan failure") {
+		t.Fatalf("dispatch scan failure was not swallowed: %s", raw)
+	}
+	if !strings.Contains(resp, "260101-feat-consumer") || strings.Contains(resp, "dispatch_blocked") {
+		t.Fatalf("point resolve did not return the ticket without dispatch_blocked: %s", resp)
+	}
+}
+
+// Point resolution scans terminal directories too, so a read error there must
+// be reported rather than mistaken for a missing ticket.
+func TestTicketsQueryPointResolveTerminalScanError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		// The scan error is injected via chmod 0o000 to deny read, which Windows
 		// does not honor (its file mode only toggles the read-only bit, which
-		// gates writes, not reads), so the "unreadable" file stays readable, the
-		// board scan succeeds, and the gate correctly emits dispatch_blocked —
-		// making the injection, not the fail-open contract, the thing that fails.
-		// The fail-open path itself is platform-independent Go; POSIX coverage
-		// below is sufficient.
-		t.Skip("chmod 0o000 read-denial is POSIX-only; fail-open path covered on POSIX")
+		// gates writes, not reads), so the "unreadable" file stays readable.
+		t.Skip("chmod 0o000 read-denial is POSIX-only")
 	}
 	if os.Geteuid() == 0 {
 		t.Skip("running as root; chmod 000 does not deny read")
@@ -244,9 +262,7 @@ func TestTicketsQueryPointResolveDispatchGateFailsOpen(t *testing.T) {
 		"---\ntitle: Prereq\n---\n# Prereq\n\n## Phases\n\n### Phase 1: A\n")
 	mustWrite(t, root, "ai-docs/tickets/ready/260101-feat-consumer.md",
 		"---\ntitle: Consumer\nblocked-by: 260101-feat-prereq\n---\n# Consumer\n\n## Phases\n\n### Phase 1: X\n")
-	// An unreadable file in .dropped/ (scanned only by the gate's whole-board
-	// scan) makes boardByStem's readTicket fail, forcing DispatchBlockFor to
-	// return an error.
+	// An unreadable file in .dropped/ makes the point-resolve scan fail.
 	junkRel := "ai-docs/tickets/.dropped/260101-feat-unreadable.md"
 	mustWrite(t, root, junkRel, "---\ntitle: Junk\n---\n# Junk\n")
 	junkPath := filepath.Join(root, junkRel)
@@ -258,14 +274,7 @@ func TestTicketsQueryPointResolveDispatchGateFailsOpen(t *testing.T) {
 
 	resp := callScopedTool(t, root, 1, "tickets.query", map[string]any{"ticket_stem": "260101-feat-consumer"})
 
-	// The ticket still resolves (fail-open did not propagate the scan error as a
-	// call error): an error response would carry the failure text, not the stem.
-	if !strings.Contains(resp, "260101-feat-consumer") {
-		t.Fatalf("point-resolve did not return the ticket when the gate scan failed (error was not swallowed):\n%s", resp)
-	}
-	// The gate degraded silently: no dispatch_blocked despite an unlanded
-	// prerequisite, because the scan errored.
-	if strings.Contains(resp, "dispatch_blocked") {
-		t.Fatalf("gate must degrade silently on a scan error, but emitted a dispatch_blocked line:\n%s", resp)
+	if !strings.Contains(resp, "permission denied") {
+		t.Fatalf("point-resolve did not report the terminal scan error:\n%s", resp)
 	}
 }

@@ -3,16 +3,14 @@ package mcp
 import (
 	"fmt"
 	"strings"
+
+	"github.com/kang-sw/devenv/internal/wsdoc"
 )
 
 // Shared fact-parsing helpers for the route.resolve_* tools and the other
 // handlers that accept their typed-fact and format argument shapes.
 
-type factString struct {
-	Value   string
-	Present bool
-	Null    bool
-}
+type factString = wsdoc.FactString
 
 func parseRouteFormat(raw any) (string, error) {
 	if raw == nil {

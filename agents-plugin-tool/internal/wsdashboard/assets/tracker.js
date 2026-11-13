@@ -145,8 +145,12 @@
 //
 // opts:
 //   header           the page header element; the drawer hangs from its bottom edge
-//   qsSlot           an element in the header the quick-switcher button and popup
-//                    go into
+//   qsSlot           an element in the header for the search-palette button
+//   searchRows(update) optional host rows: {group (0..4), kind, title, text?,
+//                    hint?, id?, topic?, href?, at?}; session labels, topics,
+//                    bodies, items, answers in that order. Read on open;
+//                    update(rows) may replace them as older board pages load.
+//   searchPick(row)  opens a selected host row; tracker rows keep their actions
 //   pageParent       where the store page node goes; while a store page shows, the
 //                    body carries the class tk-paged and the host's CSS hides its
 //                    own conversation column and session drawer
@@ -302,6 +306,7 @@
     knew: {},             // store -> { val } while the "all" kanban's idea column shows its "+" input row
     sub: null,            // { item: parent, rk: the row it sits under, val } while an "add subtask" input row shows
     iedit: null,          // { item, title, body, project, mpick } while the item window edits the item in place
+    itemDrafts: Object.create(null), // store -> item -> cached draft, or null after discard
     cedit: null,          // { cid, body, mpick } while an own comment is edited in place; mpick: member ids picked with @ meanwhile
     edpv: {},             // editor textarea id -> { text, html, err, busy } while that editor shows its preview (editorHtml)
     eatt: {},             // editor textarea id -> [{oid, name, size, mime}] images uploaded into that editor since it opened (edImages)
@@ -2931,6 +2936,7 @@
     h += '<div class="iw-grid"><div class="iw-main">';
     if (ed) h += '<div class="iw-body iw-edit">' + editorHtml('iw-ebody', { value: ed.body, rows: 5, label: wsT("js.tk.form.body"), pv: 'sh-body' }) +
       '<input type="text" id="iw-eproj" data-keep autocomplete="off" value="' + esc(ed.project) + '" placeholder="' + wsT("js.tk.form.project") + '" aria-label="' + wsT("js.tk.form.project") + '">' + labelPickHtml(ed) +
+      (ed.restored ? '<div class="muted" role="status">Draft restored ' + btn('iedit-discard', 'Discard draft', {}) + '</div>' : '') +
       '<div class="tb">' + btn('iedit-save', wsT("js.tk.dlg.save"), {}, 'primary') + btn('iedit-x', wsT("js.tk.dlg.cancel"), {}) + '<span class="muted">' + wsT("js.tk.edit.hint") + '</span></div></div>';
     else if (it.body || it.mentions.length || it.attachments.length)
       h += '<div class="iw-body">' + (it.body ? textBlock('sh-body', 'items', it.id, it.body, attr('focus', 'body')) : '') + mentionChips(it.mentions) + attChips(it.attachments, true) + '</div>';
@@ -3154,7 +3160,7 @@
   // its own draft across a render instead).
   function edKeep(t) {
     if (t.id === 'tkcedit' && ui.cedit) ui.cedit.body = t.value;
-    else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value;
+    else if (/^iw-e(title|body|proj)$/.test(t.id) && ui.iedit) { ui.iedit[{ 'iw-etitle': 'title', 'iw-ebody': 'body', 'iw-eproj': 'project' }[t.id]] = t.value; keepItemDraft(); }
     else if (t.id === 'wk-ebody' && wk().edit) wk().edit.text = t.value;
     else if (t.id === 'wk-epath' && wk().edit) wk().edit.newPath = t.value;
   }
@@ -3632,6 +3638,7 @@
     function gone(n) { return !!n && order.indexOf(n) < 0; }
     var lost = gone(ui.store);
     if (lost) {
+      keepItemDraft();
       ui.store = order[0] || null;
       ui.item = null; ui.win = false; ui.last = null; ui.sel = null; ui.sub = null; ui.iedit = null; ui.cedit = null; ui.replyTo = null; ui.itemChanged = true;
     } else if (!ui.store) ui.store = order[0] || null;
@@ -5095,18 +5102,56 @@
     var f = (MN.lab && $('tkmenu').querySelector('[data-act="m-ltog"][data-label="' + CSS.escape(MN.lab) + '"]')) || $('tkmenu').querySelector('[data-mi]');
     if (f) f.focus({ preventScroll: true });
   }
+  // Each draft has its own key so other items and stores cannot overwrite it. Storage may
+  // be disabled or full; the cached copy still works for the lifetime of this page.
+  function draftBucket(store) { return ui.itemDrafts[store] || (ui.itemDrafts[store] = Object.create(null)); }
+  function draftKey(store, item) { return PFX + 'itemDraft.' + encodeURIComponent(JSON.stringify([store, item])); }
+  function removeItemDraft(store, item) {
+    draftBucket(store)[item] = null;
+    try { localStorage.removeItem(draftKey(store, item)); } catch (err) { /* storage unavailable */ }
+  }
+  function validItemDraft(d, item) {
+    return d && d.item === item && typeof d.title === 'string' && typeof d.origTitle === 'string' &&
+      typeof d.body === 'string' && typeof d.seen === 'string' && typeof d.project === 'string' &&
+      typeof d.origProject === 'string' && Array.isArray(d.base) && Array.isArray(d.labels) &&
+      Array.isArray(d.lorig) && Array.isArray(d.mpick) && (!d.attachments || Array.isArray(d.attachments));
+  }
+  function keepItemDraft() {
+    var e = ui.iedit;
+    if (!e || !ui.store) return;
+    var bucket = draftBucket(ui.store);
+    if (e.title !== e.origTitle || e.body !== e.seen || e.project !== e.origProject || !sameLabels(e.labels, e.lorig)) {
+      e.attachments = (ui.eatt['iw-ebody'] || []).slice();
+      bucket[e.item] = JSON.parse(JSON.stringify(e));
+      try { localStorage.setItem(draftKey(ui.store, e.item), JSON.stringify(bucket[e.item])); } catch (err) { /* storage unavailable */ }
+    } else removeItemDraft(ui.store, e.item);
+  }
+  function restoreItemDraft(store, item) {
+    var bucket = draftBucket(store);
+    if (!Object.prototype.hasOwnProperty.call(bucket, item)) {
+      var saved = null;
+      try { saved = JSON.parse(localStorage.getItem(draftKey(store, item))); } catch (err) { /* storage unavailable or corrupt */ }
+      bucket[item] = validItemDraft(saved, item) ? saved : null;
+    }
+    var d = bucket[item];
+    if (!d) return null;
+    var e = JSON.parse(JSON.stringify(d));
+    e.restored = true;
+    ui.eatt['iw-ebody'] = (e.attachments || []).slice();
+    return e;
+  }
   // The item window's edit mode and a comment's edit in place.
   function startEdit(id) {
     var it = VS.items[id];
     if (!it) return;
     if (!(ui.win && ui.item === id)) showItem(id);
     // seen and base pin the body revision the editor started from; body follows the textarea
-    ui.iedit = { item: id, title: it.title, body: it.body || '', seen: it.body || '', base: (it.bodyRev || []).slice(), project: it.project || '', labels: (it.labels || []).slice(), lorig: (it.labels || []).slice(), mpick: [] };
+    ui.iedit = { item: id, title: it.title, origTitle: it.title, body: it.body || '', seen: it.body || '', base: (it.bodyRev || []).slice(), project: it.project || '', origProject: it.project || '', labels: (it.labels || []).slice(), lorig: (it.labels || []).slice(), mpick: [] };
     delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody'];
     render();
     if ($('iw-etitle')) $('iw-etitle').focus();
   }
-  function endEdit() { ui.iedit = null; render(); var b = $('tkwinbody').querySelector('.iw-more'); if (b) b.focus(); }
+  function endEdit() { if (ui.iedit) removeItemDraft(ui.store, ui.iedit.item); ui.iedit = null; render(); var b = $('tkwinbody').querySelector('.iw-more'); if (b) b.focus(); }
   function saveEdit() {
     var e = ui.iedit, it = e && VS.items[e.item];
     if (!it) return;
@@ -5128,7 +5173,14 @@
       var eas = savedAtts('iw-ebody', ep.body);
       if (eas.length) ep.attachments = eas;
     }
-    commit([['item.edit', ep]], null, function () { ui.iedit = null; });
+    keepItemDraft();
+    var store = ui.store, submitted = JSON.stringify(e);
+    commit([['item.edit', ep]], null, function (results) {
+      if (!results.length || results.some(function (r) { return r.status !== 'applied'; })) return;
+      var bucket = draftBucket(store), d = bucket[e.item];
+      if (d && JSON.stringify(d) === submitted) removeItemDraft(store, e.item);
+      if (ui.iedit === e && JSON.stringify(e) === submitted) { removeItemDraft(store, e.item); ui.iedit = null; }
+    });
   }
   function startCedit(cid) {
     var c = VS.comments[cid];
@@ -5292,7 +5344,7 @@
   function setInert(on) {
     if (!on) { inerted.forEach(function (el) { el.inert = false; }); inerted = []; return; }
     if (inerted.length) return;
-    var keep = [$('tkwin'), $('tkdlg'), $('tktoast'), $('wstoasts'), $('tktip'), $('tkmenu')];
+    var keep = [$('tkwin'), $('tkdlg'), $('tkqpop'), $('tktoast'), $('wstoasts'), $('tktip'), $('tkmenu')];
     Array.prototype.forEach.call(document.body.children, function (el) {
       if (keep.indexOf(el) < 0 && !el.inert) { el.inert = true; inerted.push(el); }
     });
@@ -5472,7 +5524,7 @@
   function openStore(name) {
     if (ui.open === name) { collapse(); return; }
     if (ui.open) syncNow(ui.open, true); // switching to another store while one is open applies it
-    if (ui.store !== name) { ui.item = null; ui.win = false; ui.last = null; ui.itemChanged = true; $('tkbody').scrollTop = 0; }
+    if (ui.store !== name) { keepItemDraft(); ui.iedit = null; ui.item = null; ui.win = false; ui.last = null; ui.itemChanged = true; $('tkbody').scrollTop = 0; }
     ui.store = name; ui.open = name;
     bringUp(name);
     render();
@@ -5491,6 +5543,8 @@
     if ((AD.stores() || []).indexOf(storeId) < 0) return false;
     var sv = AD.view(storeId);
     if (!sv || !sv.items[itemId]) return false;
+    var switching = !ui.win || ui.store !== storeId || ui.item !== itemId;
+    if (switching) { keepItemDraft(); ui.iedit = null; }
     if (ui.page && ui.page !== storeId) { history.pushState(null, '', '#/' + encodeURIComponent(storeId)); applyRoute(); } // on a store page: go to the item's store page
     if (ui.store !== storeId) {
       if (ui.open) { syncNow(ui.open, true); ui.open = null; }
@@ -5500,6 +5554,7 @@
     if (ui.item !== itemId) { ui.iedit = null; ui.cedit = null; if (ui.sub && ui.sub.rk.indexOf('iw:') === 0) ui.sub = null; }
     if (MN) closeMenu(false);
     ui.item = itemId; ui.win = true; ui.itemChanged = true; ui.aopen = null; ui.replyTo = null; ui.mdraft = []; ui.adraft = [];
+    if (switching) ui.iedit = restoreItemDraft(storeId, itemId);
     ui.focus = focus ? { ev: focus, flash: true } : null;
     render();
     $('tkwin').firstElementChild.focus({ preventScroll: true });
@@ -5566,6 +5621,7 @@
   }
   function closeItemWindow() {
     var back = ui.winReturn;
+    keepItemDraft();
     ui.win = false; ui.winReturn = null; ui.focus = null; ui.replyTo = null; ui.mdraft = []; ui.adraft = []; ui.iedit = null; ui.cedit = null;
     if (ui.sub && ui.sub.rk.indexOf('iw:') === 0) ui.sub = null;
     if (MN) closeMenu(false);
@@ -5614,7 +5670,7 @@
       if (ui.page) syncNow(ui.page, true);
       if (s) {
         if (ui.open) { syncNow(ui.open, true); ui.open = null; }
-        if (ui.store !== s) { ui.item = null; ui.win = false; ui.last = null; ui.sel = null; ui.itemChanged = true; }
+        if (ui.store !== s) { keepItemDraft(); ui.iedit = null; ui.item = null; ui.win = false; ui.last = null; ui.sel = null; ui.itemChanged = true; }
         ui.store = s;
         bringUp(s);
       }
@@ -5625,39 +5681,81 @@
   }
   function leavePage() { history.pushState(null, '', location.pathname + location.search); applyRoute(); }
 
-  // The quick switcher: the magnifier in the header opens one search over the stores (by
-  // name and label) and the items of every store (by title; items hidden by a tombstone
-  // are left out, everything else is visible to every member), read from each store's
-  // current view state. A store opens its page; an item opens its window; a host action
-  // (ext.qsActions) opens its dialog. Arrow keys move, Enter picks, Esc closes, and focus
-  // returns to where it was.
-  var qs = { open: false, items: [], idx: 0, back: null };
+  // One palette: host session/board rows first, tracker rows last. The host
+  // supplies plain text and a picker; the tracker keeps its existing actions.
+  var qs = { open: false, items: [], idx: 0, back: null, rows: [] };
+  // Fuzzy subsequence score. Try each first match so a scattered early match
+  // cannot hide a compact later one. Long prose needs a reasonably dense span.
+  function qScore(text, query, prose) {
+    var s = String(text || '').toLowerCase(), q = query.toLowerCase(), best = null;
+    if (!q) return { score: 0, start: 0, end: 0 };
+    for (var start = s.indexOf(q[0]); start >= 0; start = s.indexOf(q[0], start + 1)) {
+      var pos = start, score = 10 - start * 0.05, run = 1, ok = true;
+      for (var i = 1; i < q.length; i++) {
+        var next = s.indexOf(q[i], pos + 1);
+        if (next < 0) { ok = false; break; }
+        if (next === pos + 1) { run++; score += 10 + run * 4; }
+        else { run = 1; score += 10 - (next - pos - 1) * 2; }
+        pos = next;
+      }
+      if (ok && (!prose || pos - start + 1 <= Math.max(24, q.length * 6)) && (!best || score > best.score)) best = { score: score, start: start, end: pos + 1 };
+    }
+    return best;
+  }
+  function qRank(rows, query) {
+    var q = query.trim().toLowerCase(), jump = /^\.(\d+)$/.exec(q);
+    if (jump) {
+      var ids = rows.filter(function (x) { return x.kind === 'board-item' && x.id.indexOf(jump[1]) === 0; });
+      var exact = ids.filter(function (x) { return x.id === jump[1]; });
+      return (exact.length ? exact : ids).sort(function (a, b) { return Number(a.id) - Number(b.id); });
+    }
+    var hits = [];
+    rows.forEach(function (x, i) {
+      if (!q && x.group !== 1 && x.group !== 3) return;
+      var m = qScore(x.text || x.title, q, x.group === 2 || x.group === 4);
+      if (m) hits.push({ row: x, score: m.score, order: i });
+    });
+    hits.sort(function (a, b) { return a.row.group - b.row.group || (q ? b.score - a.score : (b.row.at || 0) - (a.row.at || 0)) || a.order - b.order; });
+    return hits.map(function (x) { return x.row; });
+  }
+  function qShortcut(e) {
+    if (e.isComposing || e.keyCode === 229 || e.altKey || e.metaKey) return false;
+    if (e.ctrlKey) return !e.shiftKey && (e.code === 'Space' || e.key === ' ' || e.key.toLowerCase() === 'k');
+    return e.key === '/' && !(e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'));
+  }
   function qResults(q0) {
-    var q = q0.trim().toLowerCase();
-    var out = [];
+    var q = q0.trim().toLowerCase(), out = qs.rows.slice();
     order.forEach(function (n) {
       var st = vss[n] ? vss[n].store : { label: '' };
-      if (!q || n.toLowerCase().indexOf(q) >= 0 || String(st.label).toLowerCase().indexOf(q) >= 0) out.push({ kind: 'store', store: n, label: st.label });
+      out.push({ group: 5, kind: 'store', store: n, label: st.label, title: n, text: n + ' ' + (st.label || '') });
     });
-    if (X.qsActions && VS) (X.qsActions(ui.store, VS, q) || []).forEach(function (x) { out.push({ kind: 'action', key: x.key, icon: x.icon, title: x.title, hint: x.hint, tag: x.tag }); });
-    if (q) order.forEach(function (n) {
+    if (X.qsActions && VS) (X.qsActions(ui.store, VS, q) || []).forEach(function (x) { out.push({ group: 5, kind: 'action', key: x.key, icon: x.icon, title: x.title, hint: x.hint, tag: x.tag }); });
+    order.forEach(function (n) {
       var V = vss[n];
       if (!V) return;
       V.itemOrder.forEach(function (id) {
         var it = V.items[id];
-        if (!it.hidden && it.title.toLowerCase().indexOf(q) >= 0) out.push({ kind: 'item', store: n, item: id, title: it.title, alias: it.alias, st: it.kind === 'topic' ? 'topic' : it.status });
+        if (!it.hidden) out.push({ group: 5, kind: 'item', store: n, item: id, title: it.title, alias: it.alias, st: it.kind === 'topic' ? 'topic' : it.status });
       });
     });
-    return out.slice(0, 30);
+    return qRank(out, q);
+  }
+  function qGroup(g) {
+    return [wsT("js.tk.qs.sessions"), wsT("js.tk.qs.topics"), wsT("js.tk.qs.bodies"), wsT("js.tk.qs.questions"), wsT("js.tk.qs.answers"), wsT("js.tk.qs.tracker")][g];
+  }
+  function qExcerpt(text, query) {
+    var m = qScore(text, query.trim(), true), start = m ? Math.max(0, m.start - 35) : 0;
+    return (start ? '…' : '') + text.slice(start, start + 150) + (text.length > start + 150 ? '…' : '');
   }
   function qRender() {
     var list = qs.items = qResults($('tkqin').value), last = null, h = '';
     if (qs.idx >= list.length) qs.idx = Math.max(0, list.length - 1);
     list.forEach(function (x, i) {
-      if (x.kind !== last) { last = x.kind; h += '<li class="qgrp" role="presentation">' + (x.kind === 'store' ? wsT("js.tk.qs.stores") : x.kind === 'action' ? wsT("js.tk.qs.actions") : wsT("js.tk.tab.items")) + '</li>'; }
+      if (x.group !== last) { last = x.group; h += '<li class="qgrp" role="presentation">' + qGroup(x.group) + '</li>'; }
       h += '<li class="qopt' + (i === qs.idx ? ' on' : '') + '" role="option" id="tkqopt-' + i + '" aria-selected="' + (i === qs.idx) + '"' + attr('qi', i) + '>' +
-        (x.kind === 'action' ? '<svg class="i"><use href="' + esc(x.icon || '#tki-plus') + '"/></svg><b>' + esc(x.title) + '</b><span class="muted">' + esc(x.hint || '') + '</span><span class="grow"></span><span class="qk">' + esc(x.tag || '') + '</span>' :
-          x.kind === 'store' ? '<svg class="i"><use href="#tki-tasks"/></svg><b>' + esc(x.store) + '</b><span class="muted">' + esc(x.label) + '</span><span class="grow"></span><span class="qk">' + wsT("js.tk.qs.openpage") + '</span>' :
+        (x.group < 5 ? '<span class="qboard"><b>' + esc(x.group === 2 || x.group === 4 ? qExcerpt(x.title, $('tkqin').value) : x.title) + '</b><span class="muted">' + esc(x.hint || '') + '</span></span><span class="grow"></span><span class="qk">' + esc(x.id ? '(' + x.id + ')' : '') + '</span>' :
+          x.kind === 'action' ? '<svg class="i"><use href="' + esc(x.icon || '#tki-plus') + '"/></svg><b>' + esc(x.title) + '</b><span class="muted">' + esc(x.hint || '') + '</span><span class="grow"></span><span class="qk">' + esc(x.tag || wsT("js.tk.qs.actions")) + '</span>' :
+          x.kind === 'store' ? '<svg class="i"><use href="#tki-tasks"/></svg><b>' + esc(x.store) + '</b><span class="muted">' + esc(x.label) + '</span><span class="grow"></span><span class="qk" title="' + wsT("js.tk.qs.stores") + '">' + wsT("js.tk.qs.openpage") + '</span>' :
           '<span class="sti">' + SI.svg(x.st) + '</span><span class="qt">' + esc(x.title) + '</span><span class="grow"></span><code class="al">' + esc(x.alias) + '</code><span class="qk">' + esc(x.store) + '</span>') + '</li>';
     });
     $('tkqlist').innerHTML = h || '<li class="qnone" role="presentation">' + wsT("js.tk.qs.none") + '</li>';
@@ -5668,19 +5766,21 @@
   function qOpen() {
     if (qs.open) return;
     qs.open = true; qs.idx = 0; qs.back = document.activeElement;
-    $('tkqpop').hidden = false; $('tkqs').setAttribute('aria-expanded', 'true');
+    qs.rows = O.searchRows ? O.searchRows(function (rows) { if (qs.open) { qs.rows = rows; qRender(); } }) : [];
+    $('tkqpop').hidden = false; $('tkqpop').showModal(); $('tkqs').setAttribute('aria-expanded', 'true');
     $('tkqin').value = ''; qRender(); $('tkqin').focus();
   }
-  function qClose(keepFocus) {
+  function qClose() {
     if (!qs.open) return;
-    qs.open = false; $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
+    qs.open = false; $('tkqpop').close(); $('tkqpop').hidden = true; $('tkqs').setAttribute('aria-expanded', 'false');
     var b = qs.back; qs.back = null;
-    if (!keepFocus && b && b.isConnected) b.focus(); else if (!keepFocus) $('tkqs').focus();
+    if (b && b.isConnected) b.focus(); else $('tkqs').focus();
   }
   function qPick(i) {
     var x = qs.items[i];
     if (!x) return;
-    qClose(true);
+    qClose();
+    if (x.group < 5) { if (ui.win) closeItemWindow(); if (O.searchPick) O.searchPick(x); return; }
     if (x.kind === 'action') { if (X.dialogs && X.dialogs[x.key]) openDialog(x.key, {}); else if (X.action) X.action(x.key, null, H); return; }
     if (x.kind === 'store') { if (ui.page !== x.store) location.hash = '#/' + encodeURIComponent(x.store); else $('tkqs').focus(); }
     else if (!openItemWindow(x.store, x.item, { opener: $('tkqs') })) toast(wsT("js.tk.toast.hiddenitem"));
@@ -5828,11 +5928,12 @@
     b.appendChild(el('div', { class: 'tk tk-tip', id: 'tktip', role: 'tooltip', hidden: '' }));
     b.appendChild(el('div', { class: 'tk tk-menu', id: 'tkmenu', role: 'menu', hidden: '' }));
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
-      '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + '" aria-haspopup="dialog" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>' +
-      '<span class="tk-qpop" id="tkqpop" role="dialog" aria-label="' + wsT("js.tk.qs.tip") + '" hidden>' +
+      '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-haspopup="dialog" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
+    b.appendChild(el('dialog', { class: 'tk tk-palette', id: 'tkqpop', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
+      '<label class="tk-qlabel" for="tkqin">' + wsT("js.tk.qs.tip") + '<kbd>Ctrl+K</kbd></label>' +
       '<input id="tkqin" type="text" role="combobox" aria-controls="tkqlist" aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.qs.placeholder") + '">' +
       '<ul id="tkqlist" role="listbox" aria-label="' + wsT("js.tk.qs.results") + '"></ul>' +
-      '<span class="tk-qhint">' + wsT("js.tk.qs.hint") + '</span></span>'));
+      '<span class="tk-qhint">' + wsT("js.tk.qs.hint") + '</span>'));
   }
   // Delegated handlers act only on the renderer's own nodes, so the host page's clicks,
   // changes, and keys stay the host's.
@@ -5881,7 +5982,7 @@
 
     document.addEventListener('click', function (e) {
       var t = e.target;
-      if (qs.open && !(t.closest && t.closest('#tkqpop, #tkqs'))) qClose(true);
+      if (qs.open && (t === $('tkqpop') || !(t.closest && t.closest('#tkqpop, #tkqs')))) qClose();
       if (mentionBox(t)) mentionSync(); // a click into an @token opens it, elsewhere in the box closes it
       else if (MP && !(t.closest && t.closest('#tkmpop, #cmention'))) mentionClose();
       // a click outside the menu closes it; a click on its own opener toggles it shut
@@ -5922,12 +6023,12 @@
         else if (STEPS[k]) itemMenu(d.item, a, null, { step: k, op: d.op, who: d.who, req: d.req });
         else if (k === 'edit') { closeMenu(false); startEdit(d.item); }
         else if (k === 'iedit-save') saveEdit();
-        else if (k === 'ilabel' && ui.iedit) { var il = ui.iedit.labels, ix = il.indexOf(d.label); if (ix >= 0) il.splice(ix, 1); else il.push(d.label); render(); }
+        else if (k === 'ilabel' && ui.iedit) { var il = ui.iedit.labels, ix = il.indexOf(d.label); if (ix >= 0) il.splice(ix, 1); else il.push(d.label); keepItemDraft(); render(); }
         else if (k === 'lsearch') labelSearch(d.label);
         else if (k === 'tedit') startRowEdit(d.item, (a.closest('.irow') || a).getAttribute('data-rk'));
         else if (k === 'claimf') claimableFilter();
         else if (k === 'slabel-rm') labelRemove(d.label);
-        else if (k === 'iedit-x') endEdit();
+        else if (k === 'iedit-x' || k === 'iedit-discard') endEdit();
         else if (k === 'cedit') startCedit(d.cid);
         else if (k === 'cedit-save') saveCedit();
         else if (k === 'cedit-x') endCedit();
@@ -6158,8 +6259,14 @@
       itemMenu(m.getAttribute('data-mitem') || m.getAttribute('data-item'), m, { x: e.clientX, y: e.clientY });
     });
     document.addEventListener('mouseout', function (e) { if (!e.relatedTarget && tipFor) hideTip(); });
-    $('tkqin').addEventListener('input', function () { qs.idx = 0; qRender(); });
+    document.addEventListener('keydown', function (e) {
+      if (!e.defaultPrevented && qShortcut(e)) { e.preventDefault(); e.stopImmediatePropagation(); qOpen(); }
+    }, true);
+    $('tkqpop').addEventListener('cancel', function (e) { e.preventDefault(); qClose(); });
+    $('tkqin').addEventListener('input', function (e) { if (!e.isComposing) { qs.idx = 0; qRender(); } });
+    $('tkqin').addEventListener('compositionend', function () { qs.idx = 0; qRender(); });
     $('tkqin').addEventListener('keydown', function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); var n = qs.items.length; if (n) { qs.idx = (qs.idx + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; qRender(); } }
       else if (e.key === 'Enter') { e.preventDefault(); qPick(qs.idx); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); qClose(); }
@@ -6266,6 +6373,7 @@
     // the layout follows the width: re-render when it crosses a breakpoint, else refit
     window.addEventListener('resize', function () { if (MN) closeMenu(false); if (MP) mentionSync(); if (layoutOf() !== ui.layout) render(); else { if (!ui.page) fitDrawer(); measure(); } });
     // the store page route: reload on #/<storeId> restores the page; back and forward follow the hash
+    window.addEventListener('pagehide', keepItemDraft);
     window.addEventListener('hashchange', applyRoute);
     window.addEventListener('popstate', function () { if (routeStore() !== ui.page) applyRoute(); });
     // the host opened its own drawer: an open store collapses (and so syncs)
@@ -6289,6 +6397,7 @@
       openStore: openStore,
       closeStore: function () { if (ui.open) collapse(); },
       openItemWindow: openItemWindow,
+      leavePage: leavePage,
       viewerChanged: function (id) {
         ui.last = null;
         if (id === ui.store && viewing()) bringUp(id);

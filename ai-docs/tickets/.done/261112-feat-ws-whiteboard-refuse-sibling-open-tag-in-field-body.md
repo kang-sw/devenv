@@ -1,5 +1,6 @@
 ---
 title: "whiteboard.update refuses a field body that holds a sibling field's opening tag"
+completed: 2026-11-13
 ---
 
 # whiteboard.update refuses a field body that holds a sibling field's opening tag
@@ -27,3 +28,7 @@ the command syntax already supports.
 
 Parser check in `agents-plugin-tool/internal/wswhiteboard` command parsing,
 with a table test; CDATA keeps the literal text accepted.
+
+### Result
+
+Whiteboard container fields reject literal openings of fields accepted by the same command, with a positioned diagnostic; CDATA preserves literal openings. The shared parser enables this check only for the whiteboard grammar. Verified on w5090 with the whiteboard and MCP package tests and the full Go suite (known host-specific failures excluded).

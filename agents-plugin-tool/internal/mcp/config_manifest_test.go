@@ -69,6 +69,7 @@ func TestLoadDeclaredConfigRejectsInvalidManifests(t *testing.T) {
 		{"schema_version", `{"schema_version":2,"namespace":"acme.","keys":[{"key":"acme.a","type":"string","default":"x","description":"d"}]}`, "schema_version"},
 		{"namespace_shape", `{"schema_version":1,"namespace":"Acme","keys":[{"key":"Acme.a","type":"string","default":"x","description":"d"}]}`, "namespace"},
 		{"reserved_namespace", `{"schema_version":1,"namespace":"prompt.","keys":[{"key":"prompt.a","type":"string","default":"x","description":"d"}]}`, "reserved"},
+		{"preference_namespace", `{"schema_version":1,"namespace":"preference.","keys":[{"key":"preference.a","type":"string","default":"x","description":"d"}]}`, "reserved"},
 		{"builtin_collision", `{"schema_version":1,"namespace":"workflow.","keys":[{"key":"workflow.a","type":"string","default":"x","description":"d"}]}`, "collides with built-in key"},
 		{"no_keys", `{"schema_version":1,"namespace":"acme.","keys":[]}`, "no keys"},
 		{"key_outside_namespace", `{"schema_version":1,"namespace":"acme.","keys":[{"key":"other.a","type":"string","default":"x","description":"d"}]}`, "must be \"acme.\""},

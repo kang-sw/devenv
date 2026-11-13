@@ -40,6 +40,8 @@ type Server struct {
 	// indexOpts configures the ticket ownership index client; zero values
 	// take the library defaults. Tests inject clocks and timeouts here.
 	indexOpts wsindex.Options
+	// dispatchBlock permits a test to inject a failure between the two scans.
+	dispatchBlock func(string, wsdoc.TicketInfo, []string) (*wsdoc.DispatchBlock, error)
 	// declared holds the adapter-declared config keys loaded from the
 	// envConfigManifests manifests at construction.
 	declared declaredConfig
@@ -1167,6 +1169,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value %w", key, err))
 				}
 				value = normalized
+			} else if wsconfig.ValidPreferenceKey(entry.Key) {
+				if !hasValue {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value is required unless reset is true", key))
+				}
+				// Preserve text verbatim; an explicit empty string clears the slot.
 			} else if len(fieldEnum(entry.ValueFields, "value")) == 0 {
 				// Free-form knob (workflow.lang): keep the caller's case. An empty
 				// value would store a blank override; reset is the unset path.
@@ -1750,8 +1757,8 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			result, err := wsdoc.TicketsStatus(root, wsdoc.TicketStatusOptions{
 				Env:            s.environ(),
 				TicketStem:     ticketStem,
-				IncludeDone:    boolArgument(params.Arguments["include_done"]),
-				IncludeDropped: boolArgument(params.Arguments["include_dropped"]),
+				IncludeDone:    true,
+				IncludeDropped: true,
 				// This point-resolve branch is a resolution surface by
 				// definition: it answers "where is this stem", so a hidden
 				// ticket must be reported as hidden-but-found rather than
@@ -1766,7 +1773,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			// this stem" resolve into an error — since the promotion closure is
 			// the other half of the same gate.
 			if err == nil && result != nil {
-				if block, blockErr := wsdoc.DispatchBlockForEnv(root, *result, s.environ()); blockErr == nil {
+				if block, blockErr := s.dispatchBlock(root, *result, s.environ()); blockErr == nil {
 					result.DispatchBlocked = block
 				}
 				// The warning token rides both projections whenever the feature is
@@ -2203,6 +2210,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// Determine worktree root: root_override (when set) or session-bound root.
 		var worktreeRoot string
 		if rootOverride != "" {
+			var err error
+			rootOverride, err = canonicalGitRoot(s.gitRunner(), rootOverride)
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
 			worktreeRoot = rootOverride
 		} else {
 			var err error
@@ -3011,6 +3023,22 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		SelectorFields: langEntry.SelectorFields,
 		ValueFields:    langEntry.ValueFields,
 		Current:        currentWorkflowPreference(resolver, sessionKey, langEntry.Key),
+	})
+
+	preferences, err := resolver.ListScalars(sessionKey, wsconfig.PreferencePrefix)
+	if err != nil {
+		return tuningCatalog{}, err
+	}
+	preferenceEntry := preferenceKnobEntry("preference.<slot>")
+	appendKnob(preferenceEntry, tuningKnob{
+		ID:             preferenceEntry.Key,
+		Kind:           "user_preference",
+		Description:    "Named standing preferences. Replace <slot> with a name matching ^[a-z0-9][a-z0-9_-]*$. Slots accumulate across session > project > repo > global; the first value per slot wins. An empty string hides the slot, reset removes the chosen scope's entry. The manual prints default first, then other names ascending, without labels. default falls back to the legacy UserPreferenceSection override, then the seed. workflow.lang is independent of every slot.",
+		Writer:         tuningWriter{Tool: preferenceEntry.WriterTool, FixedArguments: map[string]string{"key": preferenceEntry.Key}},
+		Reset:          &tuningWriter{Tool: preferenceEntry.ResetTool, FixedArguments: map[string]string{"key": preferenceEntry.Key, "reset": "true"}},
+		SelectorFields: preferenceEntry.SelectorFields,
+		ValueFields:    preferenceEntry.ValueFields,
+		Current:        preferences,
 	})
 
 	agentTiers, err := currentAgentTierMappings(configOpts)
@@ -5226,13 +5254,13 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.query",
-			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket and returns its status metadata, erroring if the stem is not found; this exact form remains unpaginated. Otherwise this is a discovery search, paginated after all filters in deterministic status-rank and ticket-stem order: offset defaults to 0; limit defaults to 50 and accepts 1 through 200; request the next page with offset + limit. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Every projection (discovery and point-resolve) also carries blocked_headings: the verbatim body heading lines beginning with '## Blocked', rendered as blocked_marker lines in compact text. This is advisory evidence only, distinct from the typed dispatch_blocked gate — it creates no hard block and its suffix is returned uninterpreted, so a caller reads the referenced section to judge whether the blocker is current. When the ticket-assignee-aware project flag is on, every projection also carries assignee (the ticket's assignee emails) and a computed assignee_gate {assign_any, assigned_to_current, warning}; a ticket assigned to someone else renders 'assignee: <email>   # NOT ASSIGNED TO YOU' in compact text. Setting assigned_to_me=true additionally hard-omits others'-assigned tickets from a discovery result (assign-any and self-assigned tickets remain). Both are inert while the flag is off. When the project uses the origin ticket ownership index, every projection also carries ownership {level: self|local|remote|unowned|unknown, email, track, worktree, phase, touched_at, impl_branch, provisional, origin_closed, index_state, cache_age_seconds}; compact discovery text lists the caller's own and unowned tickets in full and collapses tickets held elsewhere or closed on origin to one line each, and trailing ticket-index lines report a stale cache or pending offline entries. Defaults to compact text; use format=json for structured metadata.",
+			"description": "Query ticket paths by text query, ticket stem, or mentions of another ticket stem. A ticket_stem given alone (no query, no mentions_ticket_stem, no statuses) point-resolves that ticket across all statuses, including done and dropped, and returns its status metadata, erroring if the stem is not found; this exact form remains unpaginated. Otherwise this is a discovery search, paginated after all filters in deterministic status-rank and ticket-stem order: offset defaults to 0; limit defaults to 50 and accepts 1 through 200; request the next page with offset + limit. The point-resolve projection also carries a dispatch_blocked {blocking_stem, reason} field, computed live, when the ticket declares a blocked-by: prerequisite that has not landed (the producer is not yet in .done/, or its named phase carries no ### Result); it is absent otherwise and never on a discovery listing. Every projection (discovery and point-resolve) also carries blocked_headings: the verbatim body heading lines beginning with '## Blocked', rendered as blocked_marker lines in compact text. This is advisory evidence only, distinct from the typed dispatch_blocked gate — it creates no hard block and its suffix is returned uninterpreted, so a caller reads the referenced section to judge whether the blocker is current. When the ticket-assignee-aware project flag is on, every projection also carries assignee (the ticket's assignee emails) and a computed assignee_gate {assign_any, assigned_to_current, warning}; a ticket assigned to someone else renders 'assignee: <email>   # NOT ASSIGNED TO YOU' in compact text. Setting assigned_to_me=true additionally hard-omits others'-assigned tickets from a discovery result (assign-any and self-assigned tickets remain). Both are inert while the flag is off. When the project uses the origin ticket ownership index, every projection also carries ownership {level: self|local|remote|unowned|unknown, email, track, worktree, phase, touched_at, impl_branch, provisional, origin_closed, index_state, cache_age_seconds}; compact discovery text lists the caller's own and unowned tickets in full and collapses tickets held elsewhere or closed on origin to one line each, and trailing ticket-index lines report a stale cache or pending offline entries. Defaults to compact text; use format=json for structured metadata.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"statuses":             stringArrayProperty("Optional ticket statuses to scan: ready, todo, idea, done, dropped."),
-					"include_done":         boolProperty("Include ai-docs/tickets/.done when true."),
-					"include_dropped":      boolProperty("Include ai-docs/tickets/.dropped when true."),
+					"include_done":         boolProperty("Include ai-docs/tickets/.done in discovery when true; point-resolve always includes it."),
+					"include_dropped":      boolProperty("Include ai-docs/tickets/.dropped in discovery when true; point-resolve always includes it."),
 					"query":                stringProperty("Optional case-insensitive text query."),
 					"ticket_stem":          stringProperty("Optional exact ticket stem. Given alone, point-resolves that ticket."),
 					"mentions_ticket_stem": stringProperty("Optional ticket stem that result tickets must mention."),

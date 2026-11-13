@@ -150,6 +150,27 @@ func TestPiBridgeRegistersOnlyTheProfileServers(t *testing.T) {
 	}
 }
 
+func TestPiMCPServersUseWorkingDirectory(t *testing.T) {
+	for _, cwd := range []string{"", "/work", "/other-worktree"} {
+		t.Run(cwd, func(t *testing.T) {
+			spec := piSpec(t, `{"backend":"pi"}`)
+			spec.Root, spec.Cwd = "/work", cwd
+			spec.WSMCP = &MCPCommand{Command: "/bin/ws-mcp"}
+			servers, err := piMCPServers(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := cwd
+			if want == "" {
+				want = spec.Root
+			}
+			if got := servers[ReservedMCPServer].(map[string]any)["cwd"]; got != want {
+				t.Fatalf("ws-mcp cwd = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestPiEnv(t *testing.T) {
 	got := piEnv([]string{"PATH=/bin", "WS_PI_ROLE=lead", "WS_MAILBOX=lead@m", "WS_MAILBOX_AUTO=1", "PI_SKIP_VERSION_CHECK=0", "HOME=/h"})
 	slices.Sort(got)
@@ -269,8 +290,13 @@ func TestPiMapperToolTurn(t *testing.T) {
 	if len(batches) != 3 {
 		t.Fatalf("each assistant message's calls are one batch: %v", batches)
 	}
-	if len(replies.sent) != 1 || replies.sent[0]["type"] != "get_session_stats" {
-		t.Fatalf("the settled turn asks for session statistics: %v", replies.sent)
+	if len(replies.sent) < 2 {
+		t.Fatalf("running and settled turns ask for session statistics: %v", replies.sent)
+	}
+	for _, sent := range replies.sent {
+		if sent["type"] != "get_session_stats" {
+			t.Fatalf("unexpected mapper request: %v", sent)
+		}
 	}
 }
 

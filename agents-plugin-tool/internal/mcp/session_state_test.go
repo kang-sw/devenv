@@ -3399,6 +3399,9 @@ func TestWorkflowManualFreshMode(t *testing.T) {
 	// is never minted, so the keyed lead-only gate sees a lookup-miss and skips;
 	// the call reaches the handler, which maps the sentinel to fresh mode.
 	resp := callToolWithKey(t, server, 5001, freshBootstrapKey, "workflow_manual", nil)
+	if !strings.HasPrefix(resp, workflowManualReadFullNotice+"\n\n") {
+		t.Fatalf("fresh mode must start with the full-result notice: %s", resp)
+	}
 
 	// Self-bootstrap fragment must be present (gated region is KEPT).
 	if !strings.Contains(resp, "mint your lead key") {

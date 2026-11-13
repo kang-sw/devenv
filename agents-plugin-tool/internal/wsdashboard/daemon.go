@@ -191,6 +191,7 @@ type Daemon struct {
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
 	lan     bool
 	tokenMu sync.Mutex
+	memoMu  sync.Mutex // serializes daemon-local memo read/modify/write
 	// pprof serves the pprof routes (pprofHandler).
 	pprof bool
 	// buildTime is the build time /health reports; zero is unknown.
@@ -641,6 +642,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc(pwaPrefix, handlePWA)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
+	mux.HandleFunc("/rail/memos", d.handleMemos)
 	if d.workspaces != nil {
 		d.workspaceRoutes(mux)
 	}

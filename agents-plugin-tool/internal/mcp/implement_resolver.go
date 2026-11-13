@@ -35,31 +35,10 @@ type implementTargetInput struct {
 	ScopeSlug  string `json:"scope_slug,omitempty"`
 }
 
-type implementFactsInput struct {
-	Scope      implementScopeFactsInput      `json:"scope,omitempty"`
-	Complexity implementComplexityFactsInput `json:"complexity,omitempty"`
-	Risk       implementRiskFactsInput       `json:"risk,omitempty"`
-}
-
-type implementScopeFactsInput struct {
-	Span            factString `json:"span,omitempty"`
-	Surface         factString `json:"surface,omitempty"`
-	NewPublicSymbol factString `json:"new_public_symbol,omitempty"`
-	NewTypeContract factString `json:"new_type_contract,omitempty"`
-	TestSurface     factString `json:"test_surface,omitempty"`
-}
-
-type implementComplexityFactsInput struct {
-	ReusePoints    factString `json:"reuse_points,omitempty"`
-	SideEffectRisk factString `json:"side_effect_risk,omitempty"`
-}
-
-type implementRiskFactsInput struct {
-	Correctness        factString `json:"correctness,omitempty"`
-	Fit                factString `json:"fit,omitempty"`
-	Test               factString `json:"test,omitempty"`
-	SecurityOrContract factString `json:"security_or_contract,omitempty"`
-}
+type implementFactsInput = wsdoc.Facts
+type implementScopeFactsInput = wsdoc.ScopeFacts
+type implementComplexityFactsInput = wsdoc.ComplexityFacts
+type implementRiskFactsInput = wsdoc.RiskFacts
 
 type implementPolicyInput struct {
 	Branch implementBranchPolicyInput `json:"branch,omitempty"`
@@ -416,100 +395,7 @@ func implementRouteFactsLine(source implementRouteFactsSource) string {
 }
 
 func parseImplementFacts(raw any) (implementFactsInput, error) {
-	if raw == nil {
-		return implementFactsInput{}, nil
-	}
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return implementFactsInput{}, fmt.Errorf("facts must be an object")
-	}
-	var out implementFactsInput
-	if group, ok := m["scope"]; ok && group != nil {
-		gm, ok := group.(map[string]any)
-		if !ok {
-			return out, fmt.Errorf("facts.scope must be an object")
-		}
-		scope, err := parseImplementScopeFacts(gm)
-		if err != nil {
-			return out, err
-		}
-		out.Scope = scope
-	}
-	if group, ok := m["complexity"]; ok && group != nil {
-		gm, ok := group.(map[string]any)
-		if !ok {
-			return out, fmt.Errorf("facts.complexity must be an object")
-		}
-		complexity, err := parseImplementComplexityFacts(gm)
-		if err != nil {
-			return out, err
-		}
-		out.Complexity = complexity
-	}
-	if group, ok := m["risk"]; ok && group != nil {
-		gm, ok := group.(map[string]any)
-		if !ok {
-			return out, fmt.Errorf("facts.risk must be an object")
-		}
-		risk, err := parseImplementRiskFacts(gm)
-		if err != nil {
-			return out, err
-		}
-		out.Risk = risk
-	}
-	return out, nil
-}
-
-func parseImplementScopeFacts(m map[string]any) (implementScopeFactsInput, error) {
-	var out implementScopeFactsInput
-	var err error
-	if out.Span, err = parseEnumFact(m, "span", []string{"single-file", "multi-file", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.scope.%w", err)
-	}
-	if out.Surface, err = parseEnumFact(m, "surface", []string{"internal", "public-interface", "cross-module", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.scope.%w", err)
-	}
-	if out.NewPublicSymbol, err = parseEnumFact(m, "new_public_symbol", []string{"yes", "no", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.scope.%w", err)
-	}
-	if out.NewTypeContract, err = parseEnumFact(m, "new_type_contract", []string{"yes", "no", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.scope.%w", err)
-	}
-	if out.TestSurface, err = parseEnumFact(m, "test_surface", []string{"none", "existing", "new-files", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.scope.%w", err)
-	}
-	return out, nil
-}
-
-func parseImplementComplexityFacts(m map[string]any) (implementComplexityFactsInput, error) {
-	var out implementComplexityFactsInput
-	var err error
-	if out.ReusePoints, err = parseEnumFact(m, "reuse_points", []string{"confirmed", "unconfirmed", "not-applicable", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.complexity.%w", err)
-	}
-	if out.SideEffectRisk, err = parseEnumFact(m, "side_effect_risk", []string{"low", "moderate", "high", "unknown"}); err != nil {
-		return out, fmt.Errorf("facts.complexity.%w", err)
-	}
-	return out, nil
-}
-
-func parseImplementRiskFacts(m map[string]any) (implementRiskFactsInput, error) {
-	var out implementRiskFactsInput
-	var err error
-	for _, field := range []struct {
-		name string
-		dest *factString
-	}{
-		{"correctness", &out.Correctness},
-		{"fit", &out.Fit},
-		{"test", &out.Test},
-		{"security_or_contract", &out.SecurityOrContract},
-	} {
-		if *field.dest, err = parseEnumFact(m, field.name, []string{"low", "moderate", "high", "unknown"}); err != nil {
-			return out, fmt.Errorf("facts.risk.%w", err)
-		}
-	}
-	return out, nil
+	return wsdoc.ParseImplementFacts(raw)
 }
 
 func parseImplementPolicy(raw any) (implementPolicyInput, error) {

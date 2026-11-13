@@ -73,6 +73,16 @@ Wake
    identifies you correctly to a sender who may hold no durable address of
    their own.
 
+A send confirms queueing, not reading. If the message remains unread for
+`dashboard.mailbox_undelivered_minutes` (global, minimum 1, default 3), the
+daemon sends one system notice back to your sending address: your named
+inbox, or your reply handle if you have no name. Like other mail, it wakes an
+armed wait or a session run by the daemon. It checks every 30 seconds and
+re-reads the threshold each time, so a tune needs no restart. The notice includes the recipient,
+send time, and first line; it means the peer may have exited, not that it
+cannot still read the message. The message stays queued, and a late read sends
+no follow-up notice. System mail never triggers these notices.
+
 ## On: work with a peer lead session
 
 The session on the other end is a peer lead with the same workflow authority

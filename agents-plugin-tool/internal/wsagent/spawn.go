@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
-	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -65,9 +64,8 @@ type TurnReport struct {
 
 // SpawnSpec is a spawned conversation's launch: Runner.Spawn.
 type SpawnSpec struct {
-	// Profile is a non-lead agent profile; Root the conversation's working
-	// root (absolute), which its ws session key is bound to unless Cwd
-	// resolves to a different Git worktree.
+	// Profile is a non-lead agent profile; Root anchors mail and config
+	// (absolute). A Pi worker's ws session key is bound to Cwd instead.
 	Profile string
 	Root    string
 	// Cwd is the directory its process runs in: absolute, an existing
@@ -149,20 +147,6 @@ func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
 		return State{}, badRequest("cwd %s is not a directory", cwd)
 	}
 	spec.Cwd = cwd
-	if cwd != spec.Root {
-		// Both a lead's spawn and a worker's nested spawn come here. Bind
-		// the whole conversation to cwd's worktree, so Mint, Ensure and
-		// the attached ws-mcp agree; a plain folder keeps the caller's root.
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		out, err := (wsgit.ExecRunner{}).RunGit(ctx, cwd, "rev-parse", "--show-toplevel")
-		if root := strings.TrimSpace(string(out)); err == nil && root != "" {
-			if evaluated, err := filepath.EvalSymlinks(root); err == nil {
-				root = evaluated
-			}
-			spec.Root = filepath.Clean(root)
-		}
-	}
 	spec.Label = cleanLabel(spec.Label)
 	return r.create(spec.Profile, spec.Root, nil, &spec)
 }

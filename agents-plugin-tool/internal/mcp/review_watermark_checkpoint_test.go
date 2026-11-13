@@ -114,12 +114,18 @@ func TestServeStdioWorkflowManualReviewWatermarkNudgeSurfacesAndQuiets(t *testin
 	const nudgeMarker = "review watermark is"
 
 	freshResp := callToolWithKey(t, s, 1, freshBootstrapKey, "workflow_manual", map[string]any{"root": root})
+	if !strings.HasPrefix(freshResp, workflowManualReadFullNotice+"\n\n") {
+		t.Fatalf("workflow_manual FRESH-with-root must start with the full-result notice: %s", freshResp)
+	}
 	if !strings.Contains(freshResp, nudgeMarker) {
 		t.Fatalf("workflow_manual FRESH-with-root should carry the review-watermark nudge for a stale range: %s", freshResp)
 	}
 
 	key, _ := parseLoginResponse(t, callLogin(t, s, 2, root, nil))
 	continueRespStale := callToolWithKey(t, s, 3, key, "workflow_manual", nil)
+	if !strings.HasPrefix(continueRespStale, workflowManualReadFullNotice+"\n\n") {
+		t.Fatalf("workflow_manual CONTINUE must start with the full-result notice: %s", continueRespStale)
+	}
 	if !strings.Contains(continueRespStale, nudgeMarker) {
 		t.Fatalf("workflow_manual CONTINUE should carry the review-watermark nudge for a stale range: %s", continueRespStale)
 	}

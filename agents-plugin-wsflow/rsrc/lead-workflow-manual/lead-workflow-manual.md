@@ -24,6 +24,7 @@ skill without a standalone acknowledgement.
 ## Available workflow primitives
 
 Treat MCP tool schemas as the authority for arguments and response fields.
+Read any tool result the host truncates or saves to a file in full before acting on it, so no returned instructions are missed.
 
 ### Session setup
 
@@ -41,8 +42,8 @@ independent track, including another track in the same worktree.
 
 <!-- ws:override:UserPreferenceSection desc="user standing preferences for communication, terminology, and workflow behavior" -->
 Use the project's terminology and communication style.
-{{.WorkflowLang}}
 <!-- ws:/override:UserPreferenceSection -->
+{{.WorkflowLang}}
 
 ### Asking the user
 

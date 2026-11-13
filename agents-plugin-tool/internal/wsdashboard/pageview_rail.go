@@ -59,6 +59,7 @@ type RailView struct {
 type RailWorkspace struct {
 	// Name is Path's last element; Path the repository root or folder.
 	Name, Path string
+	MemoCount  int
 	// Repo marks a repository: its sessions sit under Worktrees. A plain
 	// folder lists them directly in Sessions and Ended.
 	Repo bool
@@ -514,6 +515,13 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 		}
 	}
 	return row
+}
+
+// Stopped reports a session the user stopped (the holder's "stop" reason, or
+// the kill a stop falls back to): the rail shows it asleep. Any other host
+// exit, a crash among them, keeps its reason line.
+func (r RailRow) Stopped() bool {
+	return r.Exit != nil && (r.Exit.Reason == "stop" || r.Exit.Reason == "killed")
 }
 
 // leadWorking reports a phase in which the lead works: anything but idle

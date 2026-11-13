@@ -410,6 +410,7 @@ type toolBatch struct {
 	seq       int64
 	startedAt int64
 	calls     []*toolCall
+	usage     *wslive.TokenUsage
 }
 
 type toolCall struct {
@@ -440,6 +441,20 @@ func (t *batchTracker) addCall(group, id, name, args string, now int64) []Event 
 	}
 	t.batch.calls = append(t.batch.calls, &toolCall{id: id, name: name, args: args, startedAt: now})
 	return append(out, t.event())
+}
+
+// setUsage replaces the current message's usage, never adds it: Claude may
+// split a message across lines carrying the same (or updated) counts.
+func (t *batchTracker) setUsage(group string, usage *wslive.TokenUsage) []Event {
+	if t.batch == nil || t.batch.group != group || usage == nil {
+		return nil
+	}
+	if t.batch.usage != nil && *t.batch.usage == *usage {
+		return nil
+	}
+	u := *usage
+	t.batch.usage = &u
+	return []Event{t.event()}
 }
 
 // endCall ends the call id; the batch finishes when it was the last open
@@ -494,6 +509,7 @@ type wireBatch struct {
 	EndedAt   *int64              `json:"endedAt,omitempty"`
 	Running   *wslive.RunningView `json:"running,omitempty"`
 	Calls     []wireCall          `json:"calls,omitempty"`
+	Usage     *wslive.TokenUsage  `json:"usage,omitempty"`
 }
 
 type wireCall struct {
@@ -508,7 +524,7 @@ type wireCall struct {
 // a call is unfinished, else ended.
 func (t *batchTracker) event() Event {
 	b := t.batch
-	w := wireBatch{Epoch: t.epoch, Seq: b.seq, ToolNames: []string{}, CallCount: len(b.calls), StartedAt: b.startedAt}
+	w := wireBatch{Epoch: t.epoch, Seq: b.seq, ToolNames: []string{}, CallCount: len(b.calls), StartedAt: b.startedAt, Usage: b.usage}
 	var running *toolCall
 	done, open := 0, 0
 	var ended int64

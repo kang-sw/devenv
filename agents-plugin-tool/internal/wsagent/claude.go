@@ -1215,6 +1215,12 @@ func (m *claudeMapper) assistant(raw json.RawMessage, now int64, alerted bool) [
 			}
 		}
 	}
+	if u := msg.Usage; u != nil && !alerted {
+		out = append(out, m.batches.setUsage(msg.ID, &wslive.TokenUsage{
+			Input: u.InputTokens, Output: u.OutputTokens,
+			CacheRead: u.CacheReadInputTokens, CacheWrite: u.CacheCreationInputTokens,
+		})...)
+	}
 	return out
 }
 

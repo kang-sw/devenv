@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -399,6 +400,10 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		settleC:    make(chan struct{}),
 	}
 	c.live.beforeSnapshot = c.seedSpawnRows
+	if usage := c.live.st.Snapshot(r.opts.Now().UnixMilli()).Usage; usage != nil && usage.Context != nil && usage.Context.Tokens != nil {
+		tokens := float64(*usage.Context.Tokens)
+		c.contextTokens = &tokens
+	}
 	if len(seed) > 0 {
 		c.live.applyQuiet(wslive.Event{Kind: wslive.KindCommands, Commands: seed})
 	}
@@ -554,8 +559,14 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		if key, err = r.opts.LeadKeys.MintLead(root); err != nil {
 			return State{}, fmt.Errorf("mint the lead session key: %w", err)
 		}
-	} else if key, err = r.opts.Keys.Mint(root); err != nil {
-		return State{}, fmt.Errorf("mint ws session key: %w", err)
+	} else {
+		keyRoot := root
+		if spawn != nil && rp.Definition.Backend == BackendPi && spawn.Cwd != "" {
+			keyRoot = spawn.Cwd
+		}
+		if key, err = r.opts.Keys.Mint(keyRoot); err != nil {
+			return State{}, fmt.Errorf("mint ws session key: %w", err)
+		}
 	}
 	now := r.opts.Now()
 	rec := Record{
@@ -977,6 +988,11 @@ type State struct {
 	Process bool   `json:"process"`
 	Model   string `json:"model,omitempty"`
 	Effort  string `json:"effort,omitempty"`
+	// ContextTokens and OutputTps are the child's own latest usage; the
+	// approximate streaming rate is absent when no turn runs.
+	ContextTokens *float64           `json:"contextTokens,omitempty"`
+	OutputTps     *float64           `json:"outputTps,omitempty"`
+	Batches       []wslive.BatchView `json:"batches,omitempty"`
 	// Held counts the messages waiting for the next turn.
 	Held int `json:"held"`
 	// Page is the conversation's dashboard page path.
@@ -1038,6 +1054,10 @@ type State struct {
 // to a terminal.
 func (r *Runner) closedState(rec Record) State {
 	st := closedState(rec)
+	if snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))); err == nil && snap.Usage != nil && snap.Usage.Context != nil && snap.Usage.Context.Tokens != nil {
+		tokens := float64(*snap.Usage.Context.Tokens)
+		st.ContextTokens = &tokens
+	}
 	if st.Status == StatusHandedOff {
 		st.ResumeCommand = resumeCommand(rec, wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
 	}
@@ -1077,12 +1097,15 @@ type conv struct {
 	// mu guards what state() reads: rec and the status fields below. Send
 	// holds it across its closed check and inbox write; close sets closed
 	// under it before it drops the held messages.
-	mu      sync.Mutex
-	rec     Record
-	proc    Process
-	turn    bool
-	lastErr string
-	closed  bool
+	mu            sync.Mutex
+	rec           Record
+	proc          Process
+	turn          bool
+	lastErr       string
+	closed        bool
+	contextTokens *float64
+	outputTps     *float64
+	batches       []wslive.BatchView
 	// approvals are a lead's waiting tool permission prompts, oldest first;
 	// activeMode and bgTasks are what its harness last reported.
 	approvals  []ApprovalRequest
@@ -1438,6 +1461,11 @@ func (c *conv) state() State {
 	st.Process = c.proc != nil
 	st.Held = len(held) + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
 	st.Error = c.lastErr
+	st.ContextTokens = c.contextTokens
+	st.Batches = c.batches
+	if c.turn && !c.closed {
+		st.OutputTps = c.outputTps
+	}
 	if c.rec.Lead {
 		st.ActiveMode, st.BackgroundTasks, st.ActionNeeded = c.activeMode, c.bgTasks, c.actionNeeded
 		st.Background, st.Monitors = copyCount(c.background), copyCount(c.monitors)
@@ -1619,13 +1647,43 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 	if ev.Kind == wslive.KindReset {
 		c.spawnDirty = true
 	}
+	usageChanged := false
+	if ev.Kind == wslive.KindStatus {
+		c.setStatus(func() {
+			if ctx := ev.Context; ctx != nil {
+				// An explicit unknown context (e.g. after compaction) clears
+				// the previous figure in the row as well as the child's band.
+				tokens := float64(0)
+				if ctx.Tokens != nil {
+					tokens = float64(*ctx.Tokens)
+				}
+				if tokens >= 0 && tokens <= wslive.MaxContextTokens && (c.contextTokens == nil || *c.contextTokens != tokens) {
+					c.contextTokens, usageChanged = &tokens, true
+				}
+			}
+			if rate := ev.OutputTps; rate != nil && *rate >= 0 && *rate <= wslive.MaxOutputTps && (c.outputTps == nil || *c.outputTps != *rate) {
+				v := *rate
+				c.outputTps, usageChanged = &v, true
+			}
+		})
+	}
 	if len(quiet) > 0 && quiet[0] {
 		c.live.applyQuiet(ev)
-		return
-	}
-	if c.live.apply(ev) {
+	} else if c.live.apply(ev) {
 		c.ringDirty = true
 		c.r.notify(c.rec.ReplyID, c.rec.Root)
+	}
+	activityChanged := false
+	if (ev.Kind == wslive.KindAgent && ev.AgentID == "" && ev.Batches != nil) || ev.Kind == wslive.KindReset || ev.Kind == wslive.KindTurnEnd || ev.Kind == wslive.KindReply {
+		batches := c.live.st.Snapshot(c.r.opts.Now().UnixMilli()).Lead.Batches
+		c.setStatus(func() {
+			if !reflect.DeepEqual(c.batches, batches) {
+				c.batches, activityChanged = batches, true
+			}
+		})
+	}
+	if usageChanged || activityChanged {
+		c.watched()
 	}
 }
 
@@ -1855,7 +1913,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 	}
 	instructions := ""
 	if !attach {
-		if err := c.r.opts.Keys.Ensure(rec.Root, rec.WSKey); err != nil {
+		keyRoot := rec.Root
+		if rec.Backend == BackendPi {
+			keyRoot = rec.workDir()
+		}
+		if err := c.r.opts.Keys.Ensure(keyRoot, rec.WSKey); err != nil {
 			return fmt.Errorf("ws session key: %w", err)
 		}
 		var err error

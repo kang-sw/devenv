@@ -47,8 +47,17 @@ func mergeSpawnAgents(agents []Agent, known map[string]string) []Agent {
 	for i, j := range targets {
 		a, d := agents[i], &agents[j]
 		aliases[a.ID] = d.ID
-		d.Activity = a.Activity
-		d.ContextTokens, d.OutputTps = a.ContextTokens, a.OutputTps
+		if len(d.Batches) == 0 {
+			d.Activity = a.Activity
+		}
+		// Hosted children have their own telemetry. A native alias may
+		// carry activity alone; its absent figures must not erase those.
+		if d.ContextTokens == 0 {
+			d.ContextTokens = a.ContextTokens
+		}
+		if a.OutputTps > 0 {
+			d.OutputTps = a.OutputTps
+		}
 		if d.Model == "" {
 			d.Model = a.Model
 		}
