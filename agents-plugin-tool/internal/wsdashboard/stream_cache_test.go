@@ -225,7 +225,7 @@ func TestStreamsOfOnePageShareOneRender(t *testing.T) {
 	}
 
 	// ThemeFrames pins a frame's document to the theme this way.
-	darkFrame := `srcdoc="` + template.HTMLEscapeString(`<!DOCTYPE html><html data-theme="dark">`)
+	darkFrame := `data-srcdoc="` + template.HTMLEscapeString(`<!DOCTYPE html><html data-theme="dark">`)
 	renders := f.d.stats.SessionRenders.Load()
 	f.change(t, "livesession", f.project, "shared change", 4)
 	for _, s := range []<-chan sseEvent{a, b} {

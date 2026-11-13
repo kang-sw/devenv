@@ -522,6 +522,7 @@
         fmtTimes(n);
         sweepOutImgs(n);
         setFrameHeights(n, frameH);
+        mountFrames(n);
         writeAnswers(n, answers);
       });
       if (before) {
@@ -639,6 +640,7 @@
       adopted: function (n) {
         if (window.wbHistory) window.wbHistory.init(n);
         restoreOpen(n);
+        mountFrames(n);
         if (window.wbBindBoard) window.wbBindBoard(n);
         if (window.wbAgo) window.wbAgo(n);
         mermaid([n]);
@@ -653,6 +655,9 @@
     if (window.WsTerm) window.WsTerm.mount($("bcol"));
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
+  // The served board's frames mount once the cards have moved the pinned
+  // topics into the pin list, so no frame loads and then moves.
+  mountFrames(doc);
   // --- the Files pane (files.js): mounted once, loaded when first shown -------
   if (live && fpane && window.WsFiles) {
     window.WsFiles.mount(fpane, {
@@ -844,6 +849,11 @@
   // At the bottom the new frame goes in after the old one, pending.
   function frameGraft(g) {
     var of = g.oc[0], nf = g.nc[0];
+    // A frame put on the page with no document loads about:blank at once,
+    // which would reveal it blank: the next frame of a mounted frame gets its
+    // document before it goes in (mountFrames). The next frame of an
+    // unmounted one (a closed fold) stays unmounted, as unseen as the old.
+    if (of.hasAttribute("srcdoc") && nf.hasAttribute("data-srcdoc")) nf.setAttribute("srcdoc", nf.getAttribute("data-srcdoc"));
     nf.classList.add("doc-frame-next");
     nf.setAttribute("tabindex", "-1");
     nf.setAttribute("aria-hidden", "true");
@@ -3239,6 +3249,28 @@
   // (an http(s) URL for a url link, a scheme-less daemon path for a file
   // link), so a forged message can at most offer a menu the user must pick
   // from.
+  // Lazy frames: a frame arrives with its document as data-srcdoc and loads
+  // it (srcdoc, from data-srcdoc, which stays for comparisons) only while
+  // every <details> around it is open (frameShown): on page load, on a
+  // toggle open (frameToggle, a capture listener, as toggle does not bubble;
+  // a programmatic open such as restoreOpen's or boardJump's fires toggle
+  // too), and for what a board swap, an adopted closed page, or a history
+  // load inserts. A frame never unmounts; a closed fold keeps its frames.
+  function frameShown(f) {
+    if (!f.isConnected) return false;
+    for (var p = f.parentNode; p && p.nodeType === 1; p = p.parentNode) if (p.tagName === "DETAILS" && !p.open) return false;
+    return true;
+  }
+  function mountFrames(el) {
+    q("iframe.doc-frame[data-srcdoc]:not([srcdoc])", el).forEach(function (f) {
+      if (frameShown(f)) f.setAttribute("srcdoc", f.getAttribute("data-srcdoc"));
+    });
+  }
+  function frameToggle(e) {
+    var d = e.target;
+    if (d && d.tagName === "DETAILS" && d.open) mountFrames(d);
+  }
+  doc.addEventListener("toggle", frameToggle, true);
   function docFrame(win) {
     return q("iframe.doc-frame").filter(function (f) { return inBoard(f) && f.contentWindow === win; })[0];
   }
@@ -3270,6 +3302,7 @@
     var el = e.detail && e.detail.root;
     if (!el || !inBoard(el)) return;
     restoreOpen(el);
+    mountFrames(el);
     fmtTimes(el);
     sweepOutImgs(el);
     if (window.wbBindBoard) window.wbBindBoard(el);
@@ -4707,10 +4740,11 @@
       rows.push({ group: 1, kind: "board-topic", topic: name, title: label, at: at });
       var body = topic.querySelector(".doc-body"), frame = body && body.querySelector("iframe.doc-frame"), text;
       if (frame) {
-        // srcdoc is available even for an opaque-origin sandbox. A template
+        // The frame's document text (data-srcdoc, wswhiteboard framedDoc) is
+        // there even for an unmounted or opaque-origin frame. A template
         // parses it inertly: never execute a body's scripts or fetch its images.
         var parsed = doc.createElement("template");
-        parsed.innerHTML = frame.getAttribute("srcdoc") || "";
+        parsed.innerHTML = frame.getAttribute("data-srcdoc") || frame.getAttribute("srcdoc") || "";
         text = paletteText(parsed.content.querySelector(".doc-body"));
       } else text = paletteText(body);
       var recap = paletteText(topic.querySelector(".rtext"));

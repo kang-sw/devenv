@@ -544,6 +544,12 @@ const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 // hands the frame the image (doc-frame.js and the dashboard script).
 // The frame carries its topic name as data-doc, so the host can keep each
 // frame's height across a board swap.
+//
+// The document is data-srcdoc, not srcdoc: the frame is created empty and
+// the host page loads the document (sets srcdoc from data-srcdoc, keeping
+// data-srcdoc) only once every <details> around the frame is open
+// (dashboard.js mountFrames), so a frame under a closed fold costs no
+// document until it is opened.
 func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mermaid bool, relays []string, a *pageAssets) template.HTML {
 	title, key, entryAttr := topic, "topic:"+topic, ""
 	if entry != "" {
@@ -566,7 +572,7 @@ func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mer
 	if len(relays) > 0 {
 		relay = ` data-relay="` + template.HTMLEscapeString(strings.Join(relays, " ")) + `"`
 	}
-	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(title) + `" data-doc="` + template.HTMLEscapeString(key) + `" data-doc-key="` + template.HTMLEscapeString(key) + `" data-topic="` + template.HTMLEscapeString(topic) + `"` + entryAttr + relay + ` sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
+	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(title) + `" data-doc="` + template.HTMLEscapeString(key) + `" data-doc-key="` + template.HTMLEscapeString(key) + `" data-topic="` + template.HTMLEscapeString(topic) + `"` + entryAttr + relay + ` sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" data-srcdoc="` +
 		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
 }
 
@@ -590,7 +596,9 @@ const frameDocStart = `<!DOCTYPE html><html>`
 // returns board unchanged (the frames follow the OS, as the page does). The
 // daemon applies it per request, from the request's theme cookie, so the
 // board itself renders theme-free; the page script carries a later switch
-// to the frames (doc-frame.js).
+// to the frames (doc-frame.js). The match is a plain substring, so it pins
+// a frame's data-srcdoc document (framedDoc) just as a srcdoc one: the
+// document must open with frameDocStart, nothing before it.
 func ThemeFrames(board template.HTML, theme string) template.HTML {
 	if theme != "light" && theme != "dark" {
 		return board

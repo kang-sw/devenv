@@ -72,11 +72,11 @@ func TestPagesRenderTheThemeCookieOnTheRoot(t *testing.T) {
 }
 
 // frameRoots returns the root element (<html ...>) of every topic-body
-// frame's srcdoc document in page, as a browser parses the attribute.
+// frame's document (data-srcdoc) in page, as a browser parses the attribute.
 func frameRoots(t *testing.T, page string) []string {
 	t.Helper()
 	var out []string
-	for _, m := range regexp.MustCompile(`<iframe class="doc-frame"[^>]* srcdoc="([^"]*)"`).FindAllStringSubmatch(page, -1) {
+	for _, m := range regexp.MustCompile(`<iframe class="doc-frame"[^>]* data-srcdoc="([^"]*)"`).FindAllStringSubmatch(page, -1) {
 		doc := html.UnescapeString(m[1])
 		i := strings.Index(doc, "<html")
 		if i < 0 {

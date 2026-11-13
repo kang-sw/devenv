@@ -173,7 +173,7 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 	if strings.Contains(html, `id="wb-now"`) || strings.Contains(html, `class="now`) {
 		t.Errorf("the served board carries a Now slot:\n%.600s", html)
 	}
-	frames := regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="([^"]*)" data-topic="([^"]*)"(?: data-relay="[^"]*")? sandbox="([^"]*)" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(html, -1)
+	frames := regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="([^"]*)" data-topic="([^"]*)"(?: data-relay="[^"]*")? sandbox="([^"]*)" data-srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(html, -1)
 	if len(frames) != 2 {
 		t.Fatalf("doc-frame iframes = %d, want one per topic body:\n%.600s", len(frames), html)
 	}
@@ -223,7 +223,7 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 		t.Errorf("a topic with a body and no items must render its frame: %v", docs)
 	}
 	if strings.Contains(html, "<details><summary>more") {
-		t.Errorf("a body's raw HTML must reach the served page only inside its frame's srcdoc")
+		t.Errorf("a body's raw HTML must reach the served page only inside its frame's document")
 	}
 }
 

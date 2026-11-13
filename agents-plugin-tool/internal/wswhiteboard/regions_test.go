@@ -263,12 +263,12 @@ func markup(page string) string {
 
 var scriptElement = regexp.MustCompile(`(?s)<script>.*?</script>`)
 
-// frameDocs returns the srcdoc document of every topic-body frame in board,
+// frameDocs returns the document (data-srcdoc) of every topic-body frame in board,
 // keyed by topic name, unescaped as a browser reads the attribute.
 func frameDocs(t *testing.T, board string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, m := range regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="[^"]*" data-topic="[^"]*"(?: data-entry="[^"]*")?(?: data-relay="[^"]*")? sandbox="[^"]*" srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(board, -1) {
+	for _, m := range regexp.MustCompile(`<iframe class="doc-frame" title="([^"]*)" data-doc="([^"]*)" data-doc-key="[^"]*" data-topic="[^"]*"(?: data-entry="[^"]*")?(?: data-relay="[^"]*")? sandbox="[^"]*" data-srcdoc="([^"]*)"></iframe>`).FindAllStringSubmatch(board, -1) {
 		name := strings.TrimPrefix(html.UnescapeString(m[2]), "topic:")
 		if !strings.HasPrefix(name, "entry:") && html.UnescapeString(m[1]) != name {
 			t.Errorf("frame title %q differs from its data-doc %q", m[1], m[2])
@@ -296,10 +296,12 @@ func TestServedTopicBodyRendersInASandboxedFrame(t *testing.T) {
 		t.Fatal(err)
 	}
 	board := string(regions.Board)
-	if !strings.Contains(board, `<div class="doc-body framed"><iframe class="doc-frame" title="doc" data-doc="topic:doc" data-doc-key="topic:doc" data-topic="doc" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="`) {
+	if !strings.Contains(board, `<div class="doc-body framed"><iframe class="doc-frame" title="doc" data-doc="topic:doc" data-doc-key="topic:doc" data-topic="doc" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" data-srcdoc="`) {
 		t.Fatalf("body frame missing or its sandbox changed:\n%.600s", board)
 	}
-	wantNone(t, board, "allow-same-origin", "<script", "<canvas")
+	// The frame is served unmounted: its document is data-srcdoc, which the
+	// page loads once the frame's folds are open (dashboard.js mountFrames).
+	wantNone(t, board, "allow-same-origin", "<script", "<canvas", " srcdoc=")
 	assets, _ := loadAssets()
 	doc1 := frameDocs(t, board)["doc"]
 	wantAll(t, doc1, `<base target="_blank">`, "--wb-bg:", "<strong>plan</strong>", `<canvas id="c"`, "fetch('/s/r/message'", assets.docFrame, `<body class="doc-frame"><div class="doc-body md">`,
