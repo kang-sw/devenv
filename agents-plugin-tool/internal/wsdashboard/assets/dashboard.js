@@ -7503,11 +7503,13 @@
     });
     window.addEventListener("popstate", function () { shOpen(location.pathname + location.hash, false); });
     // The shell's hotkeys besides the rail's: the search palette's keys
-    // (tracker.js qShortcut) open the shown frame's palette.
+    // (tracker.js qShortcut) open the shown frame's palette; Ctrl+K and
+    // Ctrl+Space stay with editors by qShortcut's target rule.
     doc.addEventListener("keydown", function (e) {
       if (e.isComposing || e.keyCode === 229 || e.altKey || e.metaKey || e.defaultPrevented) return;
       var t = e.target, typing = !!(t && t.closest && t.closest("input, textarea, select, [contenteditable]:not([contenteditable=\"false\"])"));
-      if (e.ctrlKey ? !e.shiftKey && (e.code === "Space" || e.key === " " || (e.key || "").toLowerCase() === "k") : e.key === "/" && !typing) {
+      var editor = !!(t && t.closest && t.closest(".xterm, textarea, [contenteditable]:not([contenteditable=\"false\"])"));
+      if (e.ctrlKey ? !editor && !e.shiftKey && (e.code === "Space" || e.key === " " || (e.key || "").toLowerCase() === "k") : e.key === "/" && !typing) {
         e.preventDefault();
         shSearch();
       }
