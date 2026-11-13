@@ -466,7 +466,7 @@ func TestPageShowsAttachmentThumbnails(t *testing.T) {
 	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "livesession")), []wslive.RingEntry{{Kind: wslive.RingUser, Origin: wslive.OriginWhiteboard, Text: text}}); err != nil {
 		t.Fatal(err)
 	}
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
 		`<div class="hpart">held one</div><div class="thumbs"><a class="thumb" href="/s/livesession/attachment/` + heldName + `"`,
 		`<img src="/s/livesession/attachment/` + heldName + `" alt="` + heldName + `"`,
@@ -502,7 +502,7 @@ func TestPageTagsMarkersAndNumbersThumbnails(t *testing.T) {
 	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "livesession")), []wslive.RingEntry{{Kind: wslive.RingUser, Origin: wslive.OriginWhiteboard, Text: text}}); err != nil {
 		t.Fatal(err)
 	}
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	tag := func(n string) string {
 		return `<span class="imgtag" title="attached image #` + n + `">#` + n + `</span>`
 	}

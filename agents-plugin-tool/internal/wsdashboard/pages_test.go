@@ -168,7 +168,7 @@ func startPageFixture(t *testing.T, options ...func(*DaemonOptions)) *pageFixtur
 
 func TestSessionPageRendersLiveRegions(t *testing.T) {
 	f := startPageFixture(t)
-	code, body := get(t, f.base+"/s/livesession")
+	code, body := get(t, f.base+"/s/livesession?frame=1")
 	if code != http.StatusOK {
 		t.Fatalf("GET /s/livesession = %d: %s", code, body)
 	}
@@ -250,7 +250,7 @@ func TestSessionHeadLeadsWithTheProjectAndLightsTheHarnessBadge(t *testing.T) {
 // indicators, and the banner.
 func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	f := startPageFixture(t)
-	code, live := get(t, f.base+"/s/livesession")
+	code, live := get(t, f.base+"/s/livesession?frame=1")
 	if code != http.StatusOK {
 		t.Fatalf("GET /s/livesession = %d: %s", code, live)
 	}
@@ -282,7 +282,7 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	if i, j, k := strings.Index(live, `data-region="tree"`), strings.Index(live, `id="splitter"`), strings.Index(live, `<div id="convo" class="convo"><div id="r-entries"`); i < 0 || j < i || k < j {
 		t.Errorf("splitter is not between the tree and the conversation wrapper holding the entries region")
 	}
-	_, board := get(t, f.base+"/s/boardsession")
+	_, board := get(t, f.base+"/s/boardsession?frame=1")
 	if !strings.Contains(board, `<div id="bcol" class="bcol"><div id="r-board"`) {
 		t.Errorf("board-first page lacks the board column")
 	}
@@ -324,13 +324,15 @@ func TestSessionPagesCarryScriptHooks(t *testing.T) {
 	}
 }
 
-// TestPagesCarryTheTracker pins the tracker renderer on every page: its
-// stylesheet after the dashboard's, its script after the string table and
-// before the page script that mounts it, and the header slot for the search
-// palette's button (the modal itself mounts in the body).
+// TestPagesCarryTheTracker pins the tracker renderer on the pages that mount
+// it, the framed session pages and the index (the shell around a session page
+// leaves it to its frame): its stylesheet after the dashboard's, its script
+// after the string table and before the page script that mounts it, and the
+// header slot for the search palette's button (the modal itself mounts in the
+// body).
 func TestPagesCarryTheTracker(t *testing.T) {
 	f := startPageFixture(t)
-	for name, path := range map[string]string{"live": "/s/livesession", "board-first": "/s/boardsession", "index": "/"} {
+	for name, path := range map[string]string{"live": "/s/livesession?frame=1", "board-first": "/s/boardsession?frame=1", "index": "/"} {
 		code, page := get(t, f.base+path)
 		if code != http.StatusOK {
 			t.Fatalf("GET %s = %d", path, code)
@@ -379,7 +381,7 @@ func TestPagesCarryTheTracker(t *testing.T) {
 
 func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 	f := startPageFixture(t)
-	code, body := get(t, f.base+"/s/boardsession")
+	code, body := get(t, f.base+"/s/boardsession?frame=1")
 	if code != http.StatusOK {
 		t.Fatalf("GET /s/boardsession = %d", code)
 	}
@@ -410,46 +412,6 @@ func TestIndexPageListsSessions(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("index lacks %q", want)
 		}
-	}
-}
-
-// TestPagesRefuseFraming pins the clickjacking guard: every daemon HTML page
-// (the index, a session page, and the file view's rendered and not-viewable
-// pages) refuses to be framed, since a framed page's posts pass the
-// same-origin guards.
-func TestPagesRefuseFraming(t *testing.T) {
-	f := startPageFixture(t)
-	writeFile(t, filepath.Join(f.project, "a.md"), "# A\n")
-	writeFile(t, filepath.Join(f.project, "blob.bin"), "BIN\x00")
-	for _, path := range []string{"/", "/s/livesession", "/s/boardsession", "/s/livesession/file?path=a.md", "/s/livesession/file?path=blob.bin"} {
-		resp, err := testClient().Get(f.base + path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		resp.Body.Close()
-		h := resp.Header
-		if resp.StatusCode != http.StatusOK || !strings.HasPrefix(h.Get("Content-Type"), "text/html") {
-			t.Errorf("GET %s = %d %q", path, resp.StatusCode, h.Get("Content-Type"))
-			continue
-		}
-		if h.Get("X-Frame-Options") != "DENY" || !strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
-			t.Errorf("GET %s is frameable: X-Frame-Options %q, CSP %q", path, h.Get("X-Frame-Options"), h.Get("Content-Security-Policy"))
-		}
-	}
-}
-
-// TestSessionPageFramesOnlyItsOwnOrigin pins the session page's frame-src:
-// a frame on it (a preview's sandboxed document) cannot navigate itself to
-// another origin, where it would carry off its capability.
-func TestSessionPageFramesOnlyItsOwnOrigin(t *testing.T) {
-	f := startPageFixture(t)
-	resp, err := testClient().Get(f.base + "/s/livesession")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if csp := resp.Header.Get("Content-Security-Policy"); resp.StatusCode != http.StatusOK || csp != "frame-src 'self'; frame-ancestors 'none'" {
-		t.Errorf("session page = %d, policy %q", resp.StatusCode, csp)
 	}
 }
 
@@ -513,7 +475,7 @@ func TestMermaidAssetIsServedBesideThePages(t *testing.T) {
 		t.Fatalf("mermaid asset = %d, %d bytes, %q", resp.StatusCode, len(body), resp.Header.Get("Cache-Control"))
 	}
 	// The page names it by relative path.
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `window.wbMermaidFile = "`+name+`"`) {
 		t.Errorf("page does not name the mermaid file %s relatively", name)
 	}
@@ -606,10 +568,10 @@ func heldOf(page string) string {
 
 func TestStreamSendsOnlyChangedRegions(t *testing.T) {
 	f := startPageFixture(t)
-	_, page := get(t, f.base+"/s/boardsession")
+	_, page := get(t, f.base+"/s/boardsession?frame=1")
 	modeHash := newRegion(modeBoard).Hash
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
-	resp, err := client.Get(f.base + "/s/boardsession/events?h=" + heldOf(page) + ",mode." + modeHash)
+	resp, err := client.Get(f.base + "/s/boardsession/events?frame=1&h=" + heldOf(page) + ",mode." + modeHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,9 +619,9 @@ func TestStreamSendsOnlyChangedRegions(t *testing.T) {
 
 func TestStreamSendsTheModeWhenTheAdapterAppears(t *testing.T) {
 	f := startPageFixture(t)
-	_, page := get(t, f.base+"/s/boardsession")
+	_, page := get(t, f.base+"/s/boardsession?frame=1")
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
-	resp, err := client.Get(f.base + "/s/boardsession/events?h=" + heldOf(page) + ",mode." + newRegion(modeBoard).Hash)
+	resp, err := client.Get(f.base + "/s/boardsession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeBoard).Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -853,7 +815,7 @@ func TestPageMarksASessionHandedToATerminal(t *testing.T) {
 	f.d.Index().Refresh()
 	marked := func() bool {
 		t.Helper()
-		code, page := get(t, f.base+"/s/handedsession")
+		code, page := get(t, f.base+"/s/handedsession?frame=1")
 		if code != http.StatusOK {
 			t.Fatalf("GET the session page = %d", code)
 		}

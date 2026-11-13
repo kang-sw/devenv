@@ -16,7 +16,7 @@ import (
 // none of it.
 func TestFilesTabOnTheSessionPage(t *testing.T) {
 	f := startPageFixture(t)
-	_, live := get(t, f.base+"/s/livesession")
+	_, live := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
 		`<div id="chead" class="thead chead"><nav id="ctabs" class="ctabs"`, `data-ctab="convo" aria-pressed="true"`, `data-ctab="files" aria-pressed="false"`,
 		`<span class="csum"></span><span class="fsum"></span></div>`,
@@ -32,7 +32,7 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 	if i, j, k := strings.Index(live, `id="splitter"`), strings.Index(live, `id="ctabs"`), strings.Index(live, `<div id="convo" class="convo">`); i < 0 || j < i || k < j {
 		t.Error("the conversation panel's tabs do not head the conversation, below the splitter")
 	}
-	_, board := get(t, f.base+"/s/boardsession")
+	_, board := get(t, f.base+"/s/boardsession?frame=1")
 	if strings.Contains(board, `id="ctabs"`) || strings.Contains(board, `id="files"`) {
 		t.Error("the board-first page, which has no conversation column, carries the Files tab")
 	}

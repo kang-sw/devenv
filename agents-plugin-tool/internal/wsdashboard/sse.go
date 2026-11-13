@@ -255,15 +255,30 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 	}
 	// The session rail is a render of its own, shared by every session
 	// page, sent over the same stream; its worktree lists are read while
-	// some stream shows it.
+	// some stream shows it. A page the shell frames (?frame=1) shows no
+	// rail: the shell's own stream carries it (handleRailEvents).
 	var side *pageSource
-	if only.has(regionRail) {
+	if only.has(regionRail) && !framedRequest(r) {
 		release := d.rail.watch()
 		defer release()
 		rail := d.railPageSource(lang, requestTheme(r))
 		side = &rail
 	}
 	d.stream(w, r, d.sessionPageSource(replyID, lang, requestTheme(r)), only, side)
+}
+
+// handleRailEvents serves GET /rail/events: the iframe shell's stream, the
+// session rail alone (railPageSource), whose worktree lists are read while
+// some stream shows it. The pages the shell frames stream their own
+// regions.
+func (d *Daemon) handleRailEvents(w http.ResponseWriter, r *http.Request) {
+	if !streamMethod(w, r) {
+		return
+	}
+	lang, _ := requestLang(r)
+	release := d.rail.watch()
+	defer release()
+	d.stream(w, r, d.railPageSource(lang, requestTheme(r)), nil, nil)
 }
 
 // sessionPageSource renders replyID's session page in lang and theme for

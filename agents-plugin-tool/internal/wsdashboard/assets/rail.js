@@ -1,7 +1,8 @@
 (function () {
   // The session rail's browser-side state, window.WsRail, for the session
-  // page's script (dashboard.js): per-session drafts, the starred sessions,
-  // the collapsed workspaces, and the rail's client-side marks (the viewed
+  // page's script (dashboard.js) and the iframe shell's first paint:
+  // per-session drafts, the starred sessions, the collapsed workspaces and
+  // the ended folds left open, and the rail's client-side marks (the viewed
   // session's row, the starred rows pinned first, the drag order of the
   // sessions and workspaces, the revive entry in flight). The stored state is in localStorage under ws.dashboard.,
   // through the store the caller passes ({ load(key), save(key, value or
@@ -13,6 +14,7 @@
   var DRAFT = "ws.dashboard.draft.", DRAFTS = "ws.dashboard.drafts";
   var STARS = "ws.dashboard.stars", COLLAPSED = "ws.dashboard.railcol";
   var ORDER = "ws.dashboard.railorder", WSORDER = "ws.dashboard.wsorder";
+  var ENDED = "ws.dashboard.railended";
   // DRAFT_CAP bounds the sessions whose drafts are kept; the oldest saved
   // goes first.
   var DRAFT_CAP = 50;
@@ -91,24 +93,32 @@
   }
 
   // A set of strings kept as one JSON array: has(x), toggle(x) returning
-  // the new state, list().
+  // the new state, put(x, on), list().
   function stringSet(store, key) {
     function list() { return strings(parse(store.load(key), [])); }
+    function put(x, on) {
+      var l = list(), i = l.indexOf(x);
+      if ((i >= 0) === !!on) return;
+      if (i >= 0) l.splice(i, 1); else l.push(x);
+      store.save(key, l.length ? JSON.stringify(l) : null);
+    }
     return {
       list: list,
       has: function (x) { return list().indexOf(x) >= 0; },
       toggle: function (x) {
-        var l = list(), i = l.indexOf(x);
-        if (i >= 0) l.splice(i, 1); else l.push(x);
-        store.save(key, l.length ? JSON.stringify(l) : null);
-        return i < 0;
-      }
+        var on = list().indexOf(x) < 0;
+        put(x, on);
+        return on;
+      },
+      put: put
     };
   }
   // stars are the starred sessions' reply-ids; collapsed the collapsed
-  // workspaces' paths.
+  // workspaces' paths; endedOpen the ended folds (details.rended) left
+  // open, by their data-key.
   function stars(store) { return stringSet(store, STARS); }
   function collapsed(store) { return stringSet(store, COLLAPSED); }
+  function endedOpen(store) { return stringSet(store, ENDED); }
 
   // orderList is a drag order: ids kept as one JSON array. list() reads it;
   // place(group, present) stores group (the ids of one group, in their new
@@ -214,6 +224,34 @@
       var cur = r.getAttribute("data-rid") === rid, a = r.querySelector(".rl");
       if (cur) r.classList.add("cur"); else r.classList.remove("cur");
       if (a) { if (cur) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); }
+    });
+  }
+
+  // state is the rail's stored sets over store, as marks reads them.
+  function state(store) {
+    return { stars: stars(store), collapsed: collapsed(store), order: sessionOrder(store), wsOrder: wsOrder(store), ended: endedOpen(store) };
+  }
+  // marks applies the stored marks (s, state) to the rendered rail region
+  // r: pins the starred rows and puts the live ones in their drag order (an
+  // ended fold's keep the server's), puts the workspaces in theirs, marks
+  // the viewed session's row (rid), collapses the collapsed workspaces, and
+  // opens the ended folds left open. The page script runs it after every
+  // rail swap; the iframe shell also runs it as soon as the rail is parsed,
+  // before the first paint, so a reload never shows the server's rail.
+  function marks(r, s, rid) {
+    var order = s.order.list(), list = r.querySelector(".rlist");
+    function all(sel) { return Array.prototype.slice.call(r.querySelectorAll(sel)); }
+    all(".rsessions").forEach(function (box) { pin(box, s.stars, box.parentNode.closest(".rended") ? null : order); });
+    if (list) arrange(list, s.wsOrder.list());
+    markCurrent(all(".rs"), rid);
+    all(".rws").forEach(function (ws) {
+      var col = s.collapsed.has(ws.getAttribute("data-ws") || ""), tog = ws.querySelector(".wstog");
+      if (col) ws.classList.add("col"); else ws.classList.remove("col");
+      if (tog) tog.setAttribute("aria-expanded", String(!col));
+    });
+    all("details.rended[data-key]").forEach(function (d) {
+      var open = s.ended.has(d.getAttribute("data-key"));
+      if (d.open !== open) d.open = open;
     });
   }
 
@@ -336,6 +374,9 @@
     stripMarkers: stripMarkers,
     stars: stars,
     collapsed: collapsed,
+    endedOpen: endedOpen,
+    state: state,
+    marks: marks,
     sessionOrder: sessionOrder,
     wsOrder: wsOrder,
     pin: pin,

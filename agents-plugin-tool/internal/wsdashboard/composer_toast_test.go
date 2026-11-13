@@ -79,7 +79,7 @@ process.stdout.write(bad.join("\n"));
 // notes: its outcomes are toasts.
 func TestComposerHasNoNoteRow(t *testing.T) {
 	f := startPageFixture(t)
-	code, live := get(t, f.base+"/s/livesession")
+	code, live := get(t, f.base+"/s/livesession?frame=1")
 	if code != http.StatusOK {
 		t.Fatalf("GET /s/livesession = %d", code)
 	}

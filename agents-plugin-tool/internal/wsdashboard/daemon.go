@@ -612,7 +612,9 @@ func (d *Daemon) Close() {
 // Handler is the daemon's HTTP surface. Every route first passes the access
 // guard (the loopback Host guard, or in LAN mode the guard that also admits
 // the LAN token; access.go); the daemon sends no CORS headers. The pages (/,
-// /s/<reply-id>, their SSE or WebSocket streams, and a session's image, file view, and
+// /s/<reply-id>, served as the iframe shell or, with ?frame=1, as the page
+// it frames; their SSE or WebSocket streams, the shell's rail stream
+// /rail/events, and a session's image, file view, and
 // history routes, and the app manifest and its icons, pwa.go) are read-only; a session's message, cancel, steer, and interrupt
 // routes (inbox_routes.go), with a tracker host the tracker POST routes
 // (tracker_routes.go), and with a support handler the support POST routes
@@ -642,6 +644,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc(pwaPrefix, handlePWA)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
+	mux.HandleFunc(railEventsRoute, d.handleRailEvents)
 	mux.HandleFunc("/rail/memos", d.handleMemos)
 	if d.workspaces != nil {
 		d.workspaceRoutes(mux)
