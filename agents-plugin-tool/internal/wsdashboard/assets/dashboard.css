@@ -884,7 +884,10 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
    Fixed over the page on both session pages, so opening it moves nothing
    under it. .dr-in matches .dwrap's width below 1600px and spans the
    window from it, so the handles (the drawer's, the git chips, the
-   tracker's row) sit at the window's right edge; the clip reveals the sheet from
+   tracker's row) sit at the window's right edge; there the sheet is 960px
+   at most, anchored right under the handles, so it never covers the
+   session rail's column (1600px less 960px and the paddings leaves 624px
+   on its left). The clip reveals the sheet from
    the header's bottom (--drtop) and the handle rides its bottom edge, or
    hangs from the page's top edge while closed. The page script sets the
    clip height, the sheet height, the handle's top, and --drhw (the handle's
@@ -894,11 +897,15 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
 :root { --drhw: 0px; --dpad: 16px; }
 .drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: 40; pointer-events: none; }
 .dr-in { position: relative; max-width: 1680px; margin: 0; }
-@media (min-width: 1600px) { .dr-in { max-width: none; } .dash:not(.index) { --tkmaxw: none; } }
 .dr-clip { position: absolute; top: var(--drtop, 48px); left: var(--dpad); right: var(--dpad); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
 .drawer.open .dr-clip, .drawer.drag .dr-clip { visibility: visible; }
 .drawer.anim .dr-clip { transition: height .18s ease-out, visibility 0s linear .18s; }
 .drawer.anim.open .dr-clip { transition: height .18s ease-out, visibility 0s; }
+@media (min-width: 1600px) {
+  .dr-in { max-width: none; }
+  .dash:not(.index) { --tkmaxw: none; }
+  .dr-clip { left: auto; width: min(960px, calc(100% - 2 * var(--dpad))); }
+}
 .dr-sheet { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; background: var(--wb-bg); border-top: 1px solid var(--wb-muted); }
 .dr-body { flex: 1 1 0; min-height: 0; overflow: hidden; padding: 10px; display: flex; gap: 10px; }
 /* the panels drawer's body: the panels region and the drawer's own cards

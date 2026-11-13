@@ -13,14 +13,20 @@ import (
 // window cannot push the column below its floor) and the column fills the
 // remaining width to the window's right edge, 280px at least. From 1600px both drawers (the session drawer's
 // .dr-in, the tracker's through --tkmaxw and --tkml) span the window, so
-// their handles stand at its right edge whether or not anything is pinned.
+// their handles stand at its right edge whether or not anything is pinned,
+// while the session drawer's sheet stays 960px at most, anchored right
+// under them, clear of the session rail.
 func TestPinnedColumnFillsTheWindowRightOfTheBoard(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
 		".dwrap { margin: 0; padding: 12px 16px; max-width: 1680px; }",
 		".dwrap.narrow { margin: 0 auto; max-width: 1080px; padding-top: 16px; }",
 		".dr-in { position: relative; max-width: 1680px; margin: 0; }",
-		"@media (min-width: 1600px) { .dr-in { max-width: none; } .dash:not(.index) { --tkmaxw: none; } }",
+		`@media (min-width: 1600px) {
+  .dr-in { max-width: none; }
+  .dash:not(.index) { --tkmaxw: none; }
+  .dr-clip { left: auto; width: min(960px, calc(100% - 2 * var(--dpad))); }
+}`,
 		"@media (min-width: 1600px) { .dgrid.board { margin: 0; } }",
 		".dash { --tkml: 0px; }",
 		".dash.index { --tkmaxw: 1080px; --tkml: auto; }",
