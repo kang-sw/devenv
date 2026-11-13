@@ -1,0 +1,1 @@
+Approved mockup for ticket 261113-feat-ws-whiteboard-topic-panels-and-log. index.html holds several layout variants; the approved one is G (interleave), selected with [data-view=G]. Board decisions that override the mockup: paging stays 50 entries per page with a load-older button ((202)=a); system events fold into a count row ((57)=b).
