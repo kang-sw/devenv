@@ -507,7 +507,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T15:27:17Z"
+        "touched_at": "2026-11-13T15:27:53Z",
+        "impl": {
+          "branch": "impl/develop/dolly-magma-grief"
+        }
       }
     },
     "261113-feat-ws-pi-worker-marker-env-guard": {
