@@ -20,11 +20,10 @@ in both the Go domain (`internal/wstracker`) and the dashboard engine
    bodies have no size cap, so two very large concurrent rewrites cost a lot of
    memory on every replay. Options: a body size cap, or a linear-space diff.
 
-The third gap (attachments dropped on a text-neutral based edit) is fixed:
-attachments now merge three-way by oid from the base value instead of as a
-union over the writes whose lines survive (the review-sweep fix for a merging
-edit that could not remove an attachment). Refs and mentions still follow the
-surviving lines.
+The third gap (attachments dropped on a text-neutral based edit) is fixed by
+612919435: attachments now merge three-way by oid from the base value instead
+of as a union over the writes whose lines survive. Refs and mentions still
+follow the surviving lines.
 
 Also unverified at merge: the two-window same-base merge driven through the
 dashboard (domain tests cover it).

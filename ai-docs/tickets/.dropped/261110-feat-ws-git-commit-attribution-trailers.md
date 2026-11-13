@@ -1,5 +1,6 @@
 ---
 title: "ws/git.commit cannot carry the harness's attribution trailer lines"
+dropped: 2026-11-13
 ---
 
 # ws/git.commit cannot carry attribution trailer lines
@@ -22,3 +23,8 @@ branch ended with uneven trailers across its commits.
 
 - MCP tool schema change under `agents-plugin-tool/internal/mcp/`; read
   `ai-docs/manuals/ws-mcp.md` and `shipped-surface-boundary.md` first.
+
+
+## Dropped (2026-11-13)
+
+Owner 2026-11-13: dropped; the Claude Code harness owns its attribution trailer behavior, so a ws-side mechanism is not worth it.

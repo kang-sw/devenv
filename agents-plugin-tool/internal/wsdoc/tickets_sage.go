@@ -199,7 +199,7 @@ func SageGate(root string, opts SageGateOptions, cfg SageReviewConfig) (SageGate
 	// implementation route resolver reads them off the ticket, so a ticket
 	// that reaches ready/ without them cannot be routed at all, and spending a
 	// completeness reviewer on it first would review a ticket that is
-	// structurally incomplete. Presence only — the reviewer judges the values.
+	// structurally incomplete. Present enum values also use the resolver parser.
 	// nonImplementationCategories are exempt here because they carry no phases
 	// and never reach an implementation run, so they have no facts to carry.
 	//
@@ -212,6 +212,9 @@ func SageGate(root string, opts SageGateOptions, cfg SageReviewConfig) (SageGate
 	}
 	if missingRouteFacts(ticketAbs, stem) {
 		return SageGateResult{Action: "stop_missing_route_facts"}, nil
+	}
+	if err := invalidRouteFactValues(ticketAbs, stem); err != nil {
+		return SageGateResult{}, err
 	}
 	if !designRequired && !completenessRequired {
 		return SageGateResult{Action: "skip"}, nil

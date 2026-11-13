@@ -19,7 +19,8 @@ var itemFieldNames = []string{"title", "option", "recommend", "why", "link"}
 // wb:edit's old and new (matched against a stored body), and an answer (the
 // user's verbatim words) are not.
 var grammar = wsxmlcmd.Grammar{
-	Prefix: "wb:",
+	Prefix:              "wb:",
+	RefuseFieldOpenings: true,
 	// wb:topic once took the body itself; the hint shows the form that
 	// replaced it to a caller still writing the old one.
 	Group: &wsxmlcmd.Group{Name: "topic", Attr: "name", Extra: "label", Hint: `a topic body goes in <wb:body> inside the group, and an empty <wb:body/> clears it: <wb:topic name="..."><wb:body>...</wb:body></wb:topic>`},

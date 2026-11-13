@@ -27,3 +27,12 @@ at the pre-change HEAD, so the flake predates the hotfix.
 
 - Mirror test changes to `agents-plugin-wsflow/hooks/claude-mod/`.
 - Run tests niced (`nice -n 19`) and scoped locally.
+
+## Investigation (2026-11-13)
+
+The engine uses wall time for `now` and a mock clock for scheduling in tests.
+The first flush, however, is scheduled at zero delay, so the mismatch does not
+establish the reported first-intake failure's cause; later flushes and retries
+remain a suspected timing area. A scoped, niced `claude plugin test` run of
+`dashboard-engine.test.ts` on Windows produced no output and timed out after
+120 seconds; it did not reproduce a specific assertion failure. No fix was made.

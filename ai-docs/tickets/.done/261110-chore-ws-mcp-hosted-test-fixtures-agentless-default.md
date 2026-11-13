@@ -1,5 +1,6 @@
 ---
 title: "Hosted-env test fixture defaults to agentless mode, hiding agent-backed tools"
+completed: 2026-11-13
 ---
 
 # Hosted-env test fixture defaults to agentless mode
@@ -26,6 +27,26 @@ agent-backed tools like exec.spawn; the test clears it explicitly."
 - keep the default but make a call to a hidden tool fail loudly in the
   fixture (for example assert the expected tool set), or
 - document the default at the helper with the reason it is agentless.
+
+## Decisions
+
+- Use agent mode by default and require an explicit agentless opt-in. This is
+  test-only and touches no cross-version surface; compatibility tiers do not apply.
+
+## Phases
+
+### Phase 1: Make the hosted fixture's agent mode explicit
+
+Default the hosted environment fixture to agent mode, retain an explicit
+agentless override, and cover both tool-availability outcomes. No product
+behavior is changed. Verify the hosted MCP tests using the required remote Go runner.
+
+### Result - 2026-11-13
+
+The fixture no longer seeds `WS_MCP_NO_AGENT`; the existing exec-path test
+uses that default, and a new test checks `exec.spawn` call availability in both
+modes. The tool is permanently hidden from `tools/list`, even when callable.
+On w5090, both tests passed with `-count=3`.
 
 ## Constraints
 

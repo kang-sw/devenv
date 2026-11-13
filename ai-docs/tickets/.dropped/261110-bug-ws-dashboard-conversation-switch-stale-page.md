@@ -1,5 +1,6 @@
 ---
 title: "Dashboard page freezes on a Claude conversation switch; the new page starts with the old figures"
+dropped: 2026-11-13
 ---
 
 # Dashboard page freezes on a conversation switch
@@ -42,3 +43,8 @@ every model tool call, like the band). The page-switch part remains.
 - claude-mod changes mirror to `agents-plugin-wsflow/hooks/claude-mod/`
   (`ai-docs/manuals/wsflow-mirroring.md`).
 - Go tests via `~/.local/bin/ws-rgo` only.
+
+
+## Resolution (2026-11-13)
+
+Owner 2026-11-13 (board item (51)): dropped. The stale page is a CLI-path issue; the CLI path stays a fallback and the daemon-hosted agent becomes the main path, so this is not worth fixing.

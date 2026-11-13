@@ -108,6 +108,8 @@ type Grammar struct {
 	Prefix   string
 	Commands map[string]Spec
 	Group    *Group
+	// RefuseFieldOpenings rejects literal sibling field openings in field bodies.
+	RefuseFieldOpenings bool
 }
 
 func (g Grammar) isGroup(tag string) bool {
@@ -334,7 +336,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 	if !tag.selfClosing {
 		switch spec.Kind {
 		case Leaf:
-			body, ok := r.readBody(tag.name, tag.at, spec.DecodeBody)
+			body, ok := r.readBody(tag.name, tag.at, spec.DecodeBody, nil, "")
 			if !ok {
 				return false
 			}
@@ -349,7 +351,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 				r.skipUnknown(tag)
 			}
 		case Container:
-			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.decodeFieldTags(spec)) {
+			if !r.readFields(&cmd, r.g.fieldTags(spec), r.g.decodeFieldTags(spec), r.g.RefuseFieldOpenings) {
 				return false
 			}
 		}
@@ -575,7 +577,7 @@ type bodySegment struct {
 // readBody reads raw text up to the exact closing tag of name, passing CDATA
 // sections through, and strips the one newline at each end; with decode, it
 // then decodes the text outside CDATA.
-func (t *tokenizer) readBody(name string, from int, decode bool) (string, bool) {
+func (t *tokenizer) readBody(name string, from int, decode bool, fields []string, label string) (string, bool) {
 	closing := "</" + name + ">"
 	var segs []bodySegment
 	var text strings.Builder
@@ -609,6 +611,12 @@ func (t *tokenizer) readBody(name string, from int, decode bool) (string, bool) 
 			segs = append(segs, bodySegment{text: rest[9 : 9+end], cdata: true})
 			t.i += 9 + end + 3
 		default:
+			for _, field := range fields {
+				if strings.HasPrefix(rest, "<"+field+">") {
+					t.p.Add("%s field <%s> (line %d): body holds an opening <%s> - missing </%s>?", label, name, t.lineAt(t.i), field, name)
+					break
+				}
+			}
 			text.WriteByte('<')
 			t.i++
 		}
@@ -802,7 +810,7 @@ func checkAttrs(p *Problems, label string, attrs []Attr, known []string) {
 
 // readFields reads a container command's field tags (fields, full tags) up
 // to its closing tag, decoding the bodies of the tags in decode.
-func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]bool) bool {
+func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]bool, refuseOpenings bool) bool {
 	closing := "</" + cmd.Tag + ">"
 	for {
 		t.skipSpace()
@@ -847,7 +855,11 @@ func (t *tokenizer) readFields(cmd *Command, fields []string, decode map[string]
 		checkAttrs(t.p, fmt.Sprintf("%s field <%s>", cmd.Label(), tag.name), tag.attrs, nil)
 		f := Field{Tag: tag.name, Line: line}
 		if !tag.selfClosing {
-			body, ok := t.readBody(tag.name, tag.at, decode[tag.name])
+			var openings []string
+			if refuseOpenings {
+				openings = fields
+			}
+			body, ok := t.readBody(tag.name, tag.at, decode[tag.name], openings, cmd.Label())
 			if !ok {
 				return false
 			}
