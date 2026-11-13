@@ -715,3 +715,61 @@ Verification:
   drags. Shift+F10 opens it from the keyboard; Alt+arrows reorder, attach
   and detach with an aria-live announcement, and Alt+← / Alt+→ leave the
   page URL and history length unchanged.
+
+### Result (b710d81ce) - 2026-11-14
+
+Landed in 066d31ea6, a5ae6f511, 4d760277c, and the lite-review fix b710d81ce.
+
+- **Pure helpers in rail.js:** `WsRail.keyMove` (the Alt+arrow op for a row,
+  or the route's refusal code) and `WsRail.underRows` (the eligible parents
+  for "move under"). Both have node tests.
+- **Row menu** (a new rail popover kind, `rp` kind "row"):
+  - It opens on right click, on a 500 ms long-press of a row under touch (the
+    grip still drags with no hold), and on Shift+F10 or the ContextMenu key.
+  - Entries: rename, copy address, move under ▸, detach (children only), and
+    reopen/take over (ended rows with a revive).
+  - Hosted rows add the session menu for that rid. `rpSessMake` now takes the
+    row's rid, reads `/agents/<rid>`, and posts to it. The head menu keeps the
+    viewed rid.
+  - Placement uses `popPlace`. Escape returns focus to the row. Arrow, Home
+    and End navigate the menu.
+- **Keyboard:** Alt+↑/↓ reorder, Alt+→ attaches to the previous top-level
+  sibling, and Alt+← detaches.
+  - Every Alt+arrow press is `preventDefault`ed.
+  - An applied op is announced in an aria-live line. A refusal toasts the
+    route's reason string.
+  - One keyboard op is in flight at a time.
+- **Translations:** the seven new `js.rail.menu.*` and `js.rail.moved.*` keys
+  are unchecked worker translations in their non-English entries.
+
+Verification:
+- `gofmt`, `go build ./...`, `go vet`, and
+  `go test ./internal/wsdashboard/ ./internal/wsi18n/...`: ok after
+  b710d81ce.
+- `node scripts/rail-headless.mjs`: all 22 scenarios passed after b710d81ce.
+  - `menu`: rename, copy, move under, and detach on a non-hosted row.
+  - `menu-hosted`: an effort change from another hosted row's menu hit only
+    `/agents/<that rid>/settings`. The page routed both requests, so no harness
+    ran.
+  - `menu-touch`: the long-press opens the menu, and the grip drags.
+  - `menu-keys`: Shift+F10 and the ContextMenu key.
+  - `keys`: Alt+arrows reorder, attach, and detach with an announcement. URL
+    and `history.length` are unchanged.
+- Lite review (one pass): no Critical findings. The Important finding was
+  fixed in b710d81ce: a row placed after an orphan landed on the wrong side
+  because the orphan ranked by its ended parent's slot. Now the orphan's own
+  order entry ranks it once a placement has stored one. The Minor finding was
+  also fixed: layout posts time out after 15 s.
+
+Decisions:
+- "Move under" expands in place below its item. With no candidate it is
+  disabled, and its tooltip gives the reason.
+- Ended rows get no "move under" or "detach" entry.
+- A hand-off from another row's menu shows its resume command on that
+  session's page.
+
+Forward:
+- A label saved on this page shows before its render arrives. If a second
+  writer sets it back first, the page stays stale until the next rail change,
+  because the daemon dedupes each stream against the render it last sent. A
+  client-only fix was tried and reverted (b710d81ce).
