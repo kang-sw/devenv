@@ -463,7 +463,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T13:39:32Z"
+        "touched_at": "2026-11-13T13:40:10Z",
+        "impl": {
+          "branch": "impl/develop/dress-map-hunk"
+        }
       }
     },
     "261113-feat-ws-tracker-start-date-range-picker": {
