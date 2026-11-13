@@ -416,7 +416,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-13T14:40:45Z",
         "impl": {
           "branch": "impl/develop/pox-veal-stoke"
@@ -513,19 +513,6 @@
     "261114-feat-ws-conversation-audit-event-store": {
       "registered_at": "2026-11-13T16:33:10Z"
     },
-    "261114-feat-ws-dashboard-answer-ack-nudge": {
-      "registered_at": "2026-11-13T15:27:39Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T16:14:35Z",
-        "impl": {
-          "branch": "impl/develop/basin-smell-lent"
-        }
-      }
-    },
     "261114-feat-ws-dashboard-board-toolbar-overview": {
       "registered_at": "2026-11-13T15:39:27Z",
       "lease": {
@@ -541,19 +528,6 @@
     },
     "261114-feat-ws-dashboard-conversation-audit-view": {
       "registered_at": "2026-11-13T16:39:01Z"
-    },
-    "261114-feat-ws-dashboard-unified-search-palette": {
-      "registered_at": "2026-11-13T15:14:01Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T15:48:49Z",
-        "impl": {
-          "branch": "impl/develop/rabid-rink-stomp"
-        }
-      }
     },
     "261114-refactor-ws-split-oversized-source-files": {
       "registered_at": "2026-11-13T15:16:33Z"
