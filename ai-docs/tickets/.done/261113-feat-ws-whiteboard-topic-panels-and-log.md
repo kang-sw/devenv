@@ -675,6 +675,56 @@ Go-generated dashboard JS harnesses, production JS syntax, Pi version/mirror
 9/9, and all 15 browser gates with zero page errors. Self-review left no substantive
 issue in this ticket's scope.
 
+#### Edition (e30578dd4) - 2026-11-13 — R1 important fixes
+
+Independent R1 returned concern with five important findings. Develop
+`afb5959a4` was merged first in `c316ae2bf`; this fixes-only pass addresses
+all five findings, with independent fixes-only R2 still pending:
+
+1. Folder mapping resolves retained topic identity before a stale exact-key
+   close-only mapping. Conversion, adoption, and restart preserve directory,
+   log/panel bytes, imported entry IDs, and the source close state.
+   Test: `TestFolderConversionAdoptionIgnoresStaleCloseMapping`.
+2. Workflow manual/state use an error-returning loader. Missing-key notices
+   remain for absent keys; newer schemas, missing panels, and lock timeouts
+   return the real board error instead of claiming agenda/todos are absent.
+   Test: `TestWorkflowManualAndStateReportWhiteboardReadErrors` covers both
+   handlers and confirms agenda/todos remain unchanged and independently readable.
+3. Stale-topic age includes stream timestamps, including imported recap times.
+   Tests: `TestStaleNudgeUsesLogAndPanelActivity` and
+   `TestStaleNudgeUsesConvertedRecapActivity`. The existing MCP
+   `TestWhiteboardUpdateResultCarriesStaleTopicNudge` now seeds an actually aged
+   board at creation rather than aging only content or rewriting immutable events.
+4. Older-page clicks delegate from the retained history container, so frame
+   grafts can replace the button without losing its listener.
+   `TestHistoryScriptPagingRevealAndSwapAnchorsUnderNode` now includes the
+   160-to-161 entry/e140 retained-frame graft, history restoration, replacement
+   button/descendant clicks, fifty-entry loading, and viewport-anchor preservation.
+5. Every publication failure identifies committed state and gives empty-command
+   render-only repair guidance. Directory and Mermaid-asset failures are injected
+   by `TestWhiteboardPublicationDirectoryAndMermaidFailuresRepairWithoutDuplicateEvents`;
+   `TestWhiteboardRenameRetriesSharingViolation` also verifies the repair wording.
+   Repair preserves item IDs, entry IDs, and log bytes without replaying the add.
+
+Verification: full remote w5090 `go test ./...` passed with only
+`TestHostedConnectionSeeingALANChangeReplacesTheDaemon` excluded, and the local
+locked stream.js Node harness passed. The initial full run exposed the old MCP
+stale-age fixture's content-only aging; its setup was corrected and the full
+suite rerun green. No production changes beyond these five fixes were made.
+Store `schema_version: 2`, the T2/0.50 target, and the no-dual-write contract
+are unchanged. The ticket remains closed; R2 is not claimed complete.
+
+##### Forward — R1 minor items (not implemented)
+
+The coordinates below are the R1 report's references:
+
+- `folders.go:320`: RecapChanged ordering when imported recap timestamps tie.
+- `recap_test.go:62-68`: summary clock/hover assertions.
+- `topics_test.go:124-139`: archive-eviction legacy fixture.
+- `folders_test.go:539`: competing first-open and high-floor conversion cases.
+- The browser fixture is gated by `WS_WHITEBOARD_BROWSER_FIXTURE` and has no CI
+  caller; CI wiring remains deferred.
+
 ## Resolution
 
 All three dependency-ordered phases are implemented in `972766abc`, `5695371fb`,
