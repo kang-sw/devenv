@@ -1,5 +1,6 @@
 ---
 title: "Whiteboard topics carry panels and a log; per-topic folder storage"
+completed: 2026-11-13
 related:
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "follower; lands after this ticket and uses the latest agent log line instead of recap"
   261113-feat-ws-whiteboard-update-refusal-cost: "related; its wb:append proposal is superseded, not its remaining refusal/answer work"
@@ -587,6 +588,16 @@ merging across page boundaries, deferred closed targets, and external embed link
 the served narrow fixture must select the dashboard's board tab before asserting
 visibility. Shared local-lock queueing delayed that harness-only correction.
 
+#### Edition (5b8d58710) - 2026-11-13
+
+Historical versions now use a distinct disclosure key after re-posting, so
+refresh cannot restore a formerly latest version's automatic open state beside
+the new version. Later manual historical disclosures still persist. The final
+local history/bridge/relay/mention harnesses and all 15 static-browser gates
+passed, including served narrow Board-tab selection, SSE/history restoration,
+and deferred closed targets, with zero page errors. This clears the verification
+Forward above; 14 retained screenshots are listed in Resolution.
+
 ### Phase 3: Query contract and synchronized playbook guidance
 
 Depends on Phases 1 and 2. Implement the confirmed query selectors and
@@ -634,3 +645,68 @@ Verification expectations:
   answer an item, query metadata and one panel, render/refresh both page
   surfaces, revive, restart, and verify no new writes touched legacy board
   fields. Confirm the complete breaking contract is scheduled for 0.50.
+
+### Result (5b8d58710) - 2026-11-13
+
+Implemented metadata-only discovery, filter-before-limit chronological entry
+windows, exclusive time/ID boundaries, omission counts, full-text search without
+payload dumping, and explicit legacy item/current-content queries. `panel:pN`
+retrieves the latest payload, `panel:eN` an immutable version, and `entry:eN` one
+log record; metadata headers precede untouched text without an added trailing
+newline. Missing/wrong-kind locators and incompatible selectors fail explicitly.
+Session/revive summaries use the latest agent line, never a system event or an
+unconverted recap fallback. Imported provenance remains in stored/query metadata.
+
+Canonical guidance, its manifest, wsflow, and Pi copies are synchronized. One
+fresh-reader pass fixed existing-ask lookup, update-only terminal output, and the
+distinction between agent interpretation and duplicated system events. The
+note-only-answer finding is explicitly out of scope and already owned by the
+refusal-cost ticket; inherited language-precedence wording is a minor Forward.
+The sticky-head follower now depends on this ticket and consumes `LatestAgent`;
+the refusal-cost handoff explicitly retires its append proposal without claiming
+its remaining mutation/answer work is implemented.
+
+Verification: full remote Go suite passed with the previously recorded known
+exclusion; focused store/MCP/dashboard tests and fresh-session inline/split
+conversion/query/render/revive/restart smoke tests passed without legacy writes.
+Manifest/mirror/product-mode guards passed; wsflow Python ran 24 tests (one
+skipped). Local locked validation passed the history harness, ten exported
+Go-generated dashboard JS harnesses, production JS syntax, Pi version/mirror
+9/9, and all 15 browser gates with zero page errors. Self-review left no substantive
+issue in this ticket's scope.
+
+## Resolution
+
+All three dependency-ordered phases are implemented in `972766abc`, `5695371fb`,
+and `5b8d58710`. The complete T2 contract targets **0.50.0**, with folder
+`schema_version: 2`, one-shot conversion, immutable old rollback snapshots, and
+no dual-write. No sticky-head implementation or refusal-cost mutation/status
+change is included. Temporary files were removed except the gate screenshots.
+
+### Forward
+
+- Minor: clarify the inherited authored-text language-precedence sentence in a
+  later documentation pass; no language-policy change was made here.
+- Note-only answer mapping/status remains owned by
+  `261113-feat-ws-whiteboard-update-refusal-cost`, not this ticket.
+- Dogfood tool transport: `261113-bug-ws-pi-wait-times-out-before-requested-bound`
+  records a 300-second `pi.wait` returning the transport's 60-second timeout.
+
+### Retained gate screenshots
+
+All files are under `D:/Temp/wb-messages/gate-screenshots/`:
+
+- `file-light-wide.png`
+- `file-light-narrow.png`
+- `file-dark-wide.png`
+- `file-dark-narrow.png`
+- `served-light-wide.png`
+- `served-light-narrow.png`
+- `served-dark-wide.png`
+- `served-dark-narrow.png`
+- `served-history-older.png`
+- `served-SSE-history-restoration.png`
+- `served-sandbox-panel-jump.png`
+- `served-beyond-closed-cap-jump.png`
+- `served-cross-entry-mentions.png`
+- `served-long-panel-image.png`
