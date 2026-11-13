@@ -398,6 +398,16 @@
     "261112-research-ws-single-lead-skill-playbook-routing": {
       "registered_at": "2026-11-12T07:50:32Z"
     },
+    "261113-bug-ws-dashboard-pinned-panel-sticky-header": {
+      "registered_at": "2026-11-13T14:26:45Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-13T14:26:45Z"
+      }
+    },
     "261113-bug-ws-launcher-falls-to-direct-path-during-daemon-replacement": {
       "registered_at": "2026-11-13T04:57:48Z"
     },
