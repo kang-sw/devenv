@@ -279,8 +279,10 @@ func TestLauncherServesThroughTheDaemonItStartsFromTheStagedCopy(t *testing.T) {
 	}
 	wantStaged := "ws-mcp-dashboard-" + wsdashboard.ExecutableContentHash(bin)[:16] + strings.ToLower(filepath.Ext(runtimeName))
 	entries, err := os.ReadDir(filepath.Join(dir, "bin"))
-	if err != nil || len(entries) != 1 || entries[0].Name() != wantStaged {
-		t.Fatalf("staged binaries = %v (%v), want exactly %s (the Python staging must name the copy as Go's StageExecutable does)", entries, err, wantStaged)
+	// Python staging carries the content-bound identity beside the executable.
+	// ReadDir sorts names: the sidecar follows the binary it identifies.
+	if err != nil || len(entries) != 2 || entries[0].Name() != wantStaged || entries[1].Name() != wantStaged+".metadata.json" {
+		t.Fatalf("staged entries = %v (%v), want exactly %s and its metadata sidecar (the executable name must match Go's StageExecutable)", entries, err, wantStaged)
 	}
 	if ep.PID == client.cmd.Process.Pid {
 		t.Fatal("the daemon is the launcher process")
