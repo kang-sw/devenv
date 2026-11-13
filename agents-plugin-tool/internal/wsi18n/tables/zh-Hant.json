@@ -325,6 +325,7 @@
   "js.interrupt.ok": "已送出中斷。",
   "js.interrupt.restored": "已送出中斷：暫存的訊息已回到輸入框。",
   "js.interrupt.title": "停止 lead 進行中的回合；暫存的訊息會回到輸入框",
+  "js.memo.toolong": "備忘過長:{0} 位元組(上限 {1})",
   "js.mention.label": "檔案建議：上/下鍵移動，Tab 或 Enter 插入，Escape 關閉",
   "js.menu.copyabs": "複製絕對路徑",
   "js.menu.copyrel": "複製相對路徑",

@@ -325,6 +325,7 @@
   "js.interrupt.ok": "Interrupt sent.",
   "js.interrupt.restored": "Interrupt sent: the held messages are back in the composer.",
   "js.interrupt.title": "stop the lead's running turn; held messages return to the composer",
+  "js.memo.toolong": "Memo is too long: {0} bytes (limit {1})",
   "js.mention.label": "File suggestions: Up/Down moves, Tab or Enter inserts, Escape closes",
   "js.menu.copyabs": "Copy absolute path",
   "js.menu.copyrel": "Copy relative path",

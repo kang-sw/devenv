@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/kang-sw/devenv/internal/wsrsrc"
 )
 
 // bundledPluginRoot uses the daemon's package, never the session's project or
-// an installed marketplace copy. Source builds without a launcher-provided
-// resource root use the package beside this source tree.
+// an installed marketplace copy. It resolves only through the resource root
+// (WS_RSRC_ROOT or the executable-derived bundle); a source build gets its
+// package from the launcher environment, never from a source-tree path.
 func bundledPluginRoot() (string, error) {
 	rsrc, err := wsrsrc.ResolveRoot()
 	if err != nil {
@@ -22,20 +22,15 @@ func bundledPluginRoot() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve bundled plugin path: %w", err)
 	}
-	if err := validateBundledPlugin(root); err == nil {
-		return root, nil
-	} else if os.Getenv(wsrsrc.EnvRsrcRoot) != "" {
-		// An explicit resource root must not silently select a different
-		// package (in particular ws in place of wsflow).
-		return "", err
-	}
-	if _, source, _, ok := runtime.Caller(0); ok && filepath.IsAbs(source) {
-		devRoot := filepath.Clean(filepath.Join(filepath.Dir(source), "..", "..", "..", "agents-plugin"))
-		if err := validateBundledPlugin(devRoot); err == nil {
-			return devRoot, nil
+	if err := validateBundledPlugin(root); err != nil {
+		if os.Getenv(wsrsrc.EnvRsrcRoot) != "" {
+			// An explicit resource root must not silently select a different
+			// package (in particular ws in place of wsflow).
+			return "", err
 		}
+		return "", fmt.Errorf("bundled plugin not found at %s; start the daemon through its plugin launcher: %w", root, err)
 	}
-	return "", fmt.Errorf("bundled plugin not found at %s; start the daemon through its plugin launcher", root)
+	return root, nil
 }
 
 func validateBundledPlugin(root string) error {

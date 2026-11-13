@@ -5533,7 +5533,7 @@ func tools() []map[string]any {
 					"session_key":   stringProperty("Caller's ws session key (required for root resolution; lead callers trigger child-key minting)."),
 					"name":          stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
 					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter. In wsflow no-agent mode, legacy render-eligible stems append context as a ## Render Context block instead. For delegate-implementer, the plan_stem key names the reserved plan and is not a template variable."},
-					"root_override": stringProperty("Optional delegate worktree path for prompt artifact allocation and child-key binding. Playbooks, manifests, and includes use the plugin resource root (WS_RSRC_ROOT or the executable-derived bundle)."),
+					"root_override": stringProperty("Optional delegate worktree path for prompt artifact allocation and child-key binding. The path resolves to its Git worktree root with symlinks resolved, and the child key binds to that resolved path. Playbooks, manifests, and includes use the plugin resource root (WS_RSRC_ROOT or the executable-derived bundle)."),
 					"tier_override": stringProperty("Optional capability tier (small/medium/large/xlarge) that replaces the playbook's own frontmatter tier for this render only, driving both the in-body RoleModel substitution and the recommended-tier/recommended-model/recommended-reasoning-effort payload lines. Absent, render uses the frontmatter tier unchanged. An unknown tier is rejected, not coerced."),
 				},
 				"required": []string{"name"},
