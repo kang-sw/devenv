@@ -398,9 +398,6 @@
     "261112-research-ws-single-lead-skill-playbook-routing": {
       "registered_at": "2026-11-12T07:50:32Z"
     },
-    "261113-bug-ws-claude-mod-band-tests-cc-2-1-323": {
-      "registered_at": "2026-11-12T23:13:45Z"
-    },
     "261113-bug-ws-launcher-falls-to-direct-path-during-daemon-replacement": {
       "registered_at": "2026-11-13T04:57:48Z"
     },
@@ -422,7 +419,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "9091c57d68d03c76",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-13T08:29:44Z",
         "impl": {
           "branch": "impl/develop/lunar-coil-phony"
