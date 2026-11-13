@@ -1,5 +1,6 @@
 ---
 title: "User preferences as named slots that layer across config levels"
+completed: 2026-11-13
 ---
 
 # User preferences as named slots that layer across config levels
@@ -96,6 +97,28 @@ slots:
   `default` cleared, with a legacy override set, and absent when `workflow.lang`
   is unset.
 
+### Result (8c8759ec1) - 2026-11-13
+
+- Implemented scalar prefix listing with session support, per-key precedence,
+  empty-string tombstones, and reset fall-through. Added validated
+  `preference.<slot>` tuning and family discovery through `config.list`;
+  reserved its namespace against adapter manifests.
+- The manual renders `default` first and remaining slots alphabetically as
+  unlabeled paragraphs. The legacy harness/all override remains a read fallback;
+  when neither default nor legacy exists, the existing seed sentence stays.
+  `workflow.lang` now renders independently outside the override point.
+- Regenerated the canonical manifest and wsflow resource mirror, and synchronized
+  the Pi resource mirror required by its drift guard. Verified wsflow product-mode
+  rendering and its existing workflow-manual shim target.
+- Verification on remote w5090 through the lock: targeted tests passed;
+  `go test ./... -skip '^TestHostedConnectionSeeingALANChangeReplacesTheDaemon$'`
+  passed every package. The initial unfiltered run encountered that authorized
+  known remote-only failure; no investigation. wsflow Python package checks
+  passed (24 tests, 2 skips). `git diff --check` passed.
+- One self-review pass completed. Forward (minor): the fallback seed sentence
+  appears in both the resource and Go preference renderer; the rendering tests
+  pin their agreement, but a future seed change must update both.
+
 ## Decisions
 
 Compatibility tier: T0 (additive key family, legacy key still honored; no
@@ -131,3 +154,9 @@ removal, no store shape change), per `ai-docs/manuals/release-compatibility.md`.
   `default` would drop the language line. Knock-on: a user who overrode the old
   single value (which replaced the seed, language line included) now sees one
   extra language line.
+
+## Resolution
+
+Completed Phase 1 in `8c8759ec1`. Named preference slots are additive (T0),
+legacy writes and reads remain supported, and all package resource copies agree.
+No implementation scope remains; the minor maintenance Forward is recorded above.

@@ -350,7 +350,7 @@ var configRegistry = []configKeyEntry{
 		ResolverBacked: true,
 	},
 	{
-		// workflow.lang is the one free-form scalar knob: its value field
+		// workflow.lang is a free-form scalar knob: its value field
 		// declares no Enum, which is what exempts it from config.tune's
 		// lowercase-and-enum-check normalization (a language name such as
 		// "Korean" is stored as written).
@@ -504,6 +504,9 @@ func resolveConfigEntryForKey(key string) (configKeyEntry, bool) {
 		if entry.Key == key {
 			return entry, true
 		}
+	}
+	if wsconfig.ValidPreferenceKey(key) {
+		return preferenceKnobEntry(key), true
 	}
 	if strings.HasPrefix(key, "prompt.") {
 		return promptKnobEntry(strings.TrimPrefix(key, "prompt.")), true

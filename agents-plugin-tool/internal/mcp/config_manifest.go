@@ -45,7 +45,7 @@ var (
 	// may not claim: prompt.<pointId> overrides, the agents.tier writer, and
 	// the worktree.* knobs (the worktree.profile.<name> family included), and
 	// the agent.profile.<name> family.
-	reservedConfigPrefixes = []string{"prompt.", "agents.", "worktree.", "agent."}
+	reservedConfigPrefixes = []string{"prompt.", "agents.", "worktree.", "agent.", "preference."}
 )
 
 // configManifestFile is the on-disk adapter key manifest:

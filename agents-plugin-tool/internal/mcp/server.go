@@ -1169,6 +1169,11 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value %w", key, err))
 				}
 				value = normalized
+			} else if wsconfig.ValidPreferenceKey(entry.Key) {
+				if !hasValue {
+					return toolTextResponse(req.ID, "", fmt.Errorf("config.tune: %s value is required unless reset is true", key))
+				}
+				// Preserve text verbatim; an explicit empty string clears the slot.
 			} else if len(fieldEnum(entry.ValueFields, "value")) == 0 {
 				// Free-form knob (workflow.lang): keep the caller's case. An empty
 				// value would store a blank override; reset is the unset path.
@@ -3018,6 +3023,22 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 		SelectorFields: langEntry.SelectorFields,
 		ValueFields:    langEntry.ValueFields,
 		Current:        currentWorkflowPreference(resolver, sessionKey, langEntry.Key),
+	})
+
+	preferences, err := resolver.ListScalars(sessionKey, wsconfig.PreferencePrefix)
+	if err != nil {
+		return tuningCatalog{}, err
+	}
+	preferenceEntry := preferenceKnobEntry("preference.<slot>")
+	appendKnob(preferenceEntry, tuningKnob{
+		ID:             preferenceEntry.Key,
+		Kind:           "user_preference",
+		Description:    "Named standing preferences. Replace <slot> with a name matching ^[a-z0-9][a-z0-9_-]*$. Slots accumulate across session > project > repo > global; the first value per slot wins. An empty string hides the slot, reset removes the chosen scope's entry. The manual prints default first, then other names ascending, without labels. default falls back to the legacy UserPreferenceSection override, then the seed. workflow.lang is independent of every slot.",
+		Writer:         tuningWriter{Tool: preferenceEntry.WriterTool, FixedArguments: map[string]string{"key": preferenceEntry.Key}},
+		Reset:          &tuningWriter{Tool: preferenceEntry.ResetTool, FixedArguments: map[string]string{"key": preferenceEntry.Key, "reset": "true"}},
+		SelectorFields: preferenceEntry.SelectorFields,
+		ValueFields:    preferenceEntry.ValueFields,
+		Current:        preferences,
 	})
 
 	agentTiers, err := currentAgentTierMappings(configOpts)
