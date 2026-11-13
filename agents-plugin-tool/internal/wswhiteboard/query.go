@@ -36,6 +36,8 @@ type QueryTopic struct {
 	// set only when the query prints bodies.
 	BodyLen int
 	Body    string
+	// Tickets are the topic's linked ticket stems, in the order written.
+	Tickets []string
 	// LatestAgent is the current-state line, never a panel or system event.
 	LatestAgent *Entry
 	// Entries contain selected stream metadata/log text; panel Text is never
@@ -343,6 +345,9 @@ func topicLine(t QueryTopic) string {
 	}
 	if t.CloseResult != "" {
 		parts = append(parts, "result: "+Plain(t.CloseResult))
+	}
+	if len(t.Tickets) > 0 {
+		parts = append(parts, "tickets: "+strings.Join(t.Tickets, " "))
 	}
 	name := fmt.Sprintf("%q", Plain(t.Label))
 	if t.Stem != "" {

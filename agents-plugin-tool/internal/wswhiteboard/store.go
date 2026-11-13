@@ -231,6 +231,11 @@ type TopicDoc struct {
 	// change moves neither Changed nor ChangedAt.
 	RecapChanged int    `json:"recap_changed,omitempty"`
 	RecapAt      string `json:"recap_at,omitempty"`
+	// Tickets are the ticket stems a lead linked to the topic (wb:topic
+	// tickets=), in the order written; a page resolves each one's status at
+	// render time (TicketResolver). They are topic metadata, like a label:
+	// setting them moves neither Changed nor the topic's close state.
+	Tickets []string `json:"tickets,omitempty"`
 }
 
 // Recency is the entry's latest change mark, the body's or the recap's.
@@ -264,8 +269,8 @@ type State struct {
 	// it only while the topic is closed) and the next close replaces it; a
 	// topic closed before the field has none.
 	CloseResults map[string]string `json:"close_results,omitempty"`
-	// Topics holds topics with content, entries, or a legacy recap, in
-	// first-set order. A store
+	// Topics holds topics with content, entries, linked tickets, or a legacy
+	// recap, in first-set order. A store
 	// written while the board had a Now slot keeps its "now" text on disk
 	// until the next write; the field is gone, so nothing reads it.
 	Topics []TopicDoc `json:"topics,omitempty"`
@@ -471,11 +476,12 @@ func (s *State) clearTopicBody(topic string) {
 	s.dropTopicDoc(topic)
 }
 
-// dropTopicDoc drops a topic document only when content, legacy recap, and
-// history are all empty. A topic left with no item either loses its close mark.
+// dropTopicDoc drops a topic document only when content, legacy recap,
+// history, and linked tickets are all empty. A topic left with no item either
+// loses its close mark.
 func (s *State) dropTopicDoc(topic string) {
 	i := s.topicDocIndex(topic)
-	if i < 0 || s.Topics[i].Body != "" || s.Topics[i].Recap != "" || len(s.Topics[i].Entries) > 0 {
+	if i < 0 || s.Topics[i].Body != "" || s.Topics[i].Recap != "" || len(s.Topics[i].Entries) > 0 || len(s.Topics[i].Tickets) > 0 {
 		return
 	}
 	s.Topics = append(s.Topics[:i], s.Topics[i+1:]...)
@@ -607,7 +613,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 
 	for _, cmd := range cmds {
 		if cmd.IsGroup() {
-			keys[cmd.Scope] = applyLabel(p, work, cmd)
+			keys[cmd.Scope] = applyGroup(p, work, cmd)
 			continue
 		}
 		switch cmd.Tag {
