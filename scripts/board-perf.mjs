@@ -2,9 +2,9 @@
 // Board frontend performance harness. Repository-local developer command; not
 // shipped with any plugin package.
 //
-//   node scripts/board-perf.mjs run [--tree DIR] [--rates 4,6] [--runs 3]
+//   node scripts/board-perf.mjs run [--tree DIR[,DIR...]] [--rates 4,6] [--runs 3]
 //        [--scenarios a,b,c,d,e] [--idle 60] [--shape 8,6,4,2,60]
-//        [--label NAME] [--out FILE.json]
+//        [--label NAME[,NAME...]] [--out FILE.json[,FILE.json...]]
 //   node scripts/board-perf.mjs compare BEFORE.json AFTER.json [--targets SPEC]
 //   node scripts/board-perf.mjs shot [--tree DIR] [--shape ...] --out DIR
 //   node scripts/board-perf.mjs diff DIR_A DIR_B
@@ -25,7 +25,9 @@
 // Every run of b-e starts from its own cold load, which counts as an (a)
 // sample, so (a) gets four times --runs samples per rate. `compare` prints
 // the per-metric median change at each rate and the ticket's A/B keep rule
-// verdict at 4x for the target metrics (--targets "a:Frames,e:LayoutDuration"). `shot` captures the board column at scroll
+// verdict at 4x for the target metrics (--targets "a:Frames,e:LayoutDuration"),
+// with each metric's within-side spread; several trees in one run alternate
+// run by run (the noise amendment's A/B form). `shot` captures the board column at scroll
 // stops (LOOK captures); `diff` compares two capture sets pixel by pixel.
 //
 // Playwright: the cached copy under ~/.npm/_npx/*/node_modules/playwright is
@@ -280,51 +282,52 @@ async function scenario(name, page, cdp, server, opts) {
 }
 
 async function run(args) {
-  const tree = path.resolve(args.tree || path.join(REPO, "agents-plugin-tool"));
+  // --tree may name several trees, comma-separated (with --label and --out
+  // lists in step): each run then measures every tree in turn, the order
+  // alternating run by run, so host drift lands on every side alike.
+  const trees = (args.tree || path.join(REPO, "agents-plugin-tool")).split(",").map((t) => path.resolve(t));
+  const labels = args.label ? args.label.split(",") : trees.map((t) => path.basename(t));
+  const outs = args.out ? args.out.split(",") : [];
   const rates = (args.rates || "4,6").split(",").map(Number);
   const runs = +(args.runs || 3);
   const scen = (args.scenarios || "a,b,c,d,e").split(",");
   const opts = { idle: +(args.idle || 60) };
-  const bin = buildServer(tree);
+  const bins = trees.map(buildServer);
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true, channel: args.channel });
-  const result = { label: args.label || path.basename(tree), tree, shape: args.shape || "8,6,4,2,60", rates, runs, idle: opts.idle, version: browser.version(), samples: {} };
+  const results = trees.map((tree, i) => ({ label: labels[i] || path.basename(tree), tree, shape: args.shape || "8,6,4,2,60", rates, runs, idle: opts.idle, alternated: trees.length > 1, version: browser.version(), samples: {} }));
+  const order = (r) => (r % 2 ? trees.map((_, i) => trees.length - 1 - i) : trees.map((_, i) => i));
   try {
     for (const rate of rates) {
       for (const s of scen) {
         // Every run of b-e starts with a cold load, which is an (a)
         // sample; a alone runs `runs` cold loads of its own.
-        if (s === "a") {
-          if (scen.some((x) => x !== "a")) continue;
-          for (let r = 0; r < runs; r++) {
-            const server = await startServer(bin, args.shape);
-            const { context, a } = await coldLoad(browser, server.url, rate, opts);
-            push(result, "a", rate, a);
+        if (s === "a" && scen.some((x) => x !== "a")) continue;
+        for (let r = 0; r < runs; r++) {
+          for (const i of order(r)) {
+            const server = await startServer(bins[i], args.shape);
+            const { context, page, cdp, a } = await coldLoad(browser, server.url, rate, opts);
+            if (scen.includes("a")) push(results[i], "a", rate, a);
+            if (s !== "a") {
+              const m0 = await metrics(cdp), p0 = await probe(page);
+              await scenario(s, page, cdp, server, opts);
+              push(results[i], s, rate, sample(m0, await metrics(cdp), p0, await probe(page)));
+            }
             await context.close();
             await server.stop();
-            process.stderr.write(`${rate}x a#${r + 1} done\n`);
+            process.stderr.write(`${results[i].label} ${rate}x ${s}#${r + 1} done\n`);
           }
-          continue;
-        }
-        for (let r = 0; r < runs; r++) {
-          const server = await startServer(bin, args.shape);
-          const { context, page, cdp, a } = await coldLoad(browser, server.url, rate, opts);
-          if (scen.includes("a")) push(result, "a", rate, a);
-          const m0 = await metrics(cdp), p0 = await probe(page);
-          await scenario(s, page, cdp, server, opts);
-          push(result, s, rate, sample(m0, await metrics(cdp), p0, await probe(page)));
-          await context.close();
-          await server.stop();
-          process.stderr.write(`${rate}x ${s}#${r + 1} done\n`);
         }
       }
     }
   } finally {
     await browser.close();
   }
-  const out = args.out || path.join(os.tmpdir(), `board-perf-${result.label}-${Date.now()}.json`);
-  fs.writeFileSync(out, JSON.stringify(result, null, 2));
-  process.stdout.write(table(result) + `\nwrote ${out}\n`);
+  results.forEach((result, i) => {
+    const out = outs[i] || path.join(os.tmpdir(), `board-perf-${result.label}-${Date.now()}.json`);
+    fs.writeFileSync(out, JSON.stringify(result, null, 2));
+    process.stdout.write(table(result) + `\nwrote ${out}\n`);
+  });
 }
 
 function push(result, s, rate, x) {
@@ -362,7 +365,16 @@ function compare(args) {
   const A = JSON.parse(fs.readFileSync(aPath, "utf8")), B = JSON.parse(fs.readFileSync(bPath, "utf8"));
   const ma = medians(A), mb = medians(B);
   const targets = (args.targets || "").split(",").filter(Boolean).map((t) => t.split(":"));
-  let s = `${A.label} -> ${B.label}\n| scenario | metric | before | after | change |\n|---|---|---|---|---|\n`;
+  // spread is a metric's within-side spread: max minus min over a side's
+  // runs as a share of its median, the larger of the two sides. A judged
+  // change within it is marked (~): the noise amendment re-runs both
+  // sides, alternating, with at least 5 runs each.
+  const spread = (k, m) => Math.max(...[A, B].map((R) => {
+    const xs = (R.samples[k] || []).map((x) => x[m]).filter((v) => typeof v === "number" && isFinite(v));
+    const md = median(xs);
+    return xs.length && md ? (Math.max(...xs) - Math.min(...xs)) / Math.abs(md) : 0;
+  }));
+  let s = `${A.label} -> ${B.label}\n| scenario | metric | before | after | change | spread |\n|---|---|---|---|---|---|\n`;
   const regress = [], improved = [];
   for (const k of Object.keys(mb).sort()) {
     if (!ma[k]) continue;
@@ -370,12 +382,14 @@ function compare(args) {
       const x = ma[k][m], y = mb[k][m];
       if (!isFinite(x) || !isFinite(y)) continue;
       const ch = x === 0 ? (y === 0 ? 0 : Infinity) : (y - x) / Math.abs(x);
-      s += `| ${k} | ${m} | ${fmt(x)} | ${fmt(y)} | ${isFinite(ch) ? (ch * 100).toFixed(1) + "%" : "new"} |\n`;
+      const sp = spread(k, m);
+      s += `| ${k} | ${m} | ${fmt(x)} | ${fmt(y)} | ${isFinite(ch) ? (ch * 100).toFixed(1) + "%" : "new"} | ${(sp * 100).toFixed(0)}% |\n`;
       if (!k.endsWith("@4")) continue;
+      const tag = Math.abs(ch) <= sp ? " (~ within " + (sp * 100).toFixed(0) + "% spread)" : "";
       // A regression counts past 10% and past a floor of noise in absolute
       // terms (one layout, 1 ms, one frame, one long task).
-      if (!UNJUDGED.has(m) && ch > 0.1 && y - x >= 1) regress.push(`${k} ${m} ${(ch * 100).toFixed(1)}%`);
-      if (targets.some(([sc, mt]) => `${sc}@4` === k && mt === m) && ch <= -0.1) improved.push(`${k} ${m} ${(ch * 100).toFixed(1)}%`);
+      if (!UNJUDGED.has(m) && ch > 0.1 && y - x >= 1) regress.push(`${k} ${m} ${(ch * 100).toFixed(1)}%${tag}`);
+      if (targets.some(([sc, mt]) => `${sc}@4` === k && mt === m) && ch <= -0.1) improved.push(`${k} ${m} ${(ch * 100).toFixed(1)}%${tag}`);
     }
   }
   s += `\ntargets improved >=10% at 4x: ${improved.join("; ") || "none"}\nregressions >10% at 4x: ${regress.join("; ") || "none"}\n`;
