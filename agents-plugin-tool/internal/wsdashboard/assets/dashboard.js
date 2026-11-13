@@ -6157,7 +6157,7 @@
   // is sent from that page's composer. A refused or failed spawn shows in
   // the popover's error line and keeps it open.
   function rpLeadMake() {
-    var P = { gen: 0, busy: false, root: "", harness: "claude" };
+    var P = { gen: 0, busy: false, root: "", harness: "claude", iso: "default" };
     var el = P.el = rpPop(wsT("js.lead.title"));
     el.appendChild(mk("div", "sphd", wsT("js.lead.title")));
     var loc = el.appendChild(mk("div", "sploc"));
@@ -6168,6 +6168,16 @@
     var hbtn = { claude: rpBtn("", "Claude"), pi: rpBtn("", "Pi") };
     Object.keys(hbtn).forEach(function (k) { hbtn[k].setAttribute("role", "radio"); hbtn[k].setAttribute("data-harness", k); seg.appendChild(hbtn[k]); });
     var rows = leadRows(el.appendChild(mk("div", "spopts")), edited);
+    // Plugin isolation: which plugins the hosted session loads. The pick goes
+    // out as plugin_isolation; Pi's standalone binary supports only isolated.
+    var isec = el.appendChild(mk("div", "spsec"));
+    isec.appendChild(mk("div", "splbl", wsT("js.lead.iso")));
+    var iseg = isec.appendChild(mk("div", "spseg"));
+    iseg.setAttribute("role", "radiogroup");
+    iseg.setAttribute("aria-label", wsT("js.lead.iso"));
+    var ibtn = { "default": rpBtn("", wsT("js.lead.iso.default")), isolated: rpBtn("", wsT("js.lead.iso.isolated")) };
+    Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("role", "radio"); ibtn[k].setAttribute("data-iso", k); iseg.appendChild(ibtn[k]); });
+    var idesc = isec.appendChild(mk("p", "spdesc"));
     var err = el.appendChild(mk("p", "spnote err"));
     err.setAttribute("aria-live", "polite");
     var row = el.appendChild(mk("div", "sprow"));
@@ -6183,6 +6193,8 @@
         hbtn[k].disabled = off(k);
         hbtn[k].title = off(k) ? wsT("js.sup.unavail", k, h.error || "") : "";
       });
+      Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("aria-checked", String(P.iso === k)); });
+      idesc.textContent = wsT(P.iso === "isolated" ? "js.lead.iso.isolated.hint" : "js.lead.iso.default.hint") + (P.harness === "pi" ? " " + wsT("js.lead.iso.pi") : "");
       go.disabled = P.busy || off(P.harness);
     }
     // edited drops an earlier spawn's error once the form changed.
@@ -6207,7 +6219,7 @@
       setErr("");
       status.textContent = wsT("js.lead.starting");
       sync();
-      railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value }), function (st, v, s) {
+      railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value, isolation: P.iso }), function (st, v, s) {
         if (st === 201 && v.id) {
           saveDraft();
           location.href = "/s/" + encodeURIComponent(String(v.id));
@@ -6221,6 +6233,7 @@
         railPopPlace();
       });
     }
+    iseg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-iso]"); if (b) { P.iso = b.getAttribute("data-iso"); sync(); } });
     seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-harness]"); if (b && !b.disabled) setHarness(b.getAttribute("data-harness")); });
     cancel.addEventListener("click", function () { railPopClose(true); });
     go.addEventListener("click", submit);
@@ -6229,6 +6242,7 @@
       P.busy = false;
       P.root = key;
       P.harness = "claude";
+      P.iso = "default";
       loc.textContent = "";
       loc.appendChild(gIcon(branch ? "repo" : "wsfolder"));
       loc.appendChild(mk("span", null, name));
