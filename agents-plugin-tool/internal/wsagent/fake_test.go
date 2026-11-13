@@ -289,10 +289,11 @@ func (p *fakeProc) nextSent(t *testing.T) string {
 	}
 }
 
-// fakeKeys mints sequential keys and records Ensure calls.
+// fakeKeys mints root-bound keys and records successful Ensure calls.
 type fakeKeys struct {
 	mu      sync.Mutex
 	n       int
+	roots   map[string]string
 	ensured []string
 	// mintGates hold the Mint calls for a root until released (gateMint).
 	mintGates map[string]*gate
@@ -324,7 +325,12 @@ func (k *fakeKeys) Mint(root string) (string, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.n++
-	return fmt.Sprintf("fake-agent-key-%d-%d", time.Now().UnixNano(), k.n), nil
+	key := fmt.Sprintf("fake-agent-key-%d-%d", time.Now().UnixNano(), k.n)
+	if k.roots == nil {
+		k.roots = map[string]string{}
+	}
+	k.roots[key] = root
+	return key, nil
 }
 
 func (k *fakeKeys) Ensure(root, key string) error {
@@ -333,6 +339,13 @@ func (k *fakeKeys) Ensure(root, key string) error {
 	if key == "" {
 		return errors.New("empty key")
 	}
+	if stored, ok := k.roots[key]; ok && stored != root {
+		return fmt.Errorf("session key record is not this conversation's (root %s)", stored)
+	}
+	if k.roots == nil {
+		k.roots = map[string]string{}
+	}
+	k.roots[key] = root
 	k.ensured = append(k.ensured, key)
 	return nil
 }

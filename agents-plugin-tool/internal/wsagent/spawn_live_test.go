@@ -2,7 +2,9 @@ package wsagent
 
 import (
 	"context"
+	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -197,6 +199,75 @@ func TestHostedSpawnProjectionListsOncePerInvalidationNotPerStreamWrite(t *testi
 	})
 	if refreshDelta != 1 || streamDelta != 0 {
 		t.Fatalf("global listings: one refresh=%d, ordinary stream/heartbeat writes=%d", refreshDelta, streamDelta)
+	}
+}
+
+func TestHostedUsageWakesDoNotRereadClosedSnapshots(t *testing.T) {
+	h := newLeadHarness(t)
+	h.opts.WSMCP = func(string) (MCPCommand, error) { return MCPCommand{Command: "/unused/ws-mcp"}, nil }
+	var reads atomic.Int64
+	h.opts.closedSnapshotRead = func(string) { reads.Add(1) }
+	h.start()
+	lead := h.lead(BackendClaude, LeadOptions{})
+	spawn := func() State {
+		t.Helper()
+		st, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Parent: &ParentRef{Kind: ParentLead, ReplyID: lead.ID}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.holder(st.ID)
+		return st
+	}
+	setUsage := func(id string, tokens int64, rate float64) {
+		t.Helper()
+		c := h.runner.conv(id)
+		c.do(func() {
+			c.apply(wslive.Event{Kind: wslive.KindStatus, Context: &wslive.UsageContext{Tokens: &tokens}, OutputTps: &rate})
+		})
+	}
+	finished, active := spawn(), spawn()
+	file := piSessionFile(h.runner.conv(finished.ID).dir)
+	setUsage(finished.ID, 1200, 10)
+	if _, err := h.runner.CloseConversation(finished.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st := h.state(finished.ID); st.ContextTokens == nil || *st.ContextTokens != 1200 {
+		t.Fatalf("closed usage = %+v", st)
+	}
+	before := reads.Load()
+	if before != 1 {
+		t.Fatalf("initial closed snapshot reads = %d, want 1", before)
+	}
+	for i := range 5 {
+		setUsage(active.ID, int64(2000+i), float64(20+i))
+		eventually(t, "usage-only wake reaches the hosted row", func() bool {
+			for _, a := range h.snapshot(lead.ID).Agents {
+				if a.ID == "pi:"+active.ID {
+					return a.ContextTokens == int64(2000+i) && a.OutputTps == float64(20+i)
+				}
+			}
+			return false
+		})
+	}
+	if got := reads.Load(); got != before {
+		t.Fatalf("usage-only wakes reread closed snapshots: %d -> %d", before, got)
+	}
+	// A closed Pi child can reopen. Its next closure must not reuse the
+	// previous lifetime's cached usage, even within the same timestamp second.
+	if err := os.WriteFile(file, []byte("persisted conversation\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.send(finished.ID, "continue")
+	h.holder(finished.ID)
+	setUsage(finished.ID, 3400, 30)
+	if _, err := h.runner.CloseConversation(finished.ID); err != nil {
+		t.Fatal(err)
+	}
+	if st := h.state(finished.ID); st.ContextTokens == nil || *st.ContextTokens != 3400 {
+		t.Fatalf("reclosed usage reused stale cache: %+v", st)
+	}
+	if got := reads.Load(); got != before+1 {
+		t.Fatalf("new closure snapshot reads = %d, want %d", got, before+1)
 	}
 }
 

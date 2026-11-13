@@ -161,6 +161,8 @@ type Options struct {
 	heartbeat time.Duration
 	// spawnListed observes global spawn-projection listings in tests.
 	spawnListed func(string)
+	// closedSnapshotRead observes closed/handed-off snapshot reads in tests.
+	closedSnapshotRead func(string)
 }
 
 // Runner hosts the agent conversations of one dashboard daemon.
@@ -174,6 +176,9 @@ type Runner struct {
 	quit   chan struct{}
 	wg     sync.WaitGroup
 	once   sync.Once
+	// closedRows caches immutable closed states under mu, until reopened.
+	// Handed-off snapshots still belong to a terminal and are not cached.
+	closedRows map[string]State
 	// resumeMu serializes Pi child revival with close cascades without
 	// holding mu over store writes or conversation startup.
 	resumeMu sync.Mutex
@@ -457,6 +462,7 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	r.mu.Lock()
 	r.convs[rec.ReplyID] = c
 	delete(r.closed, rec.ReplyID)
+	delete(r.closedRows, rec.ReplyID)
 	r.wg.Add(1)
 	go c.loop()
 	r.mu.Unlock()
@@ -720,12 +726,16 @@ func (r *Runner) Get(id string) (State, error) {
 	r.mu.Lock()
 	c, open := r.convs[id]
 	rec, closed := r.closed[id]
+	var st State
+	if closed && !open {
+		st = r.closedState(rec)
+	}
 	r.mu.Unlock()
 	switch {
 	case open:
 		return c.state(), nil
 	case closed:
-		return r.closedState(rec), nil
+		return st, nil
 	}
 	return State{}, errUnknown
 }
@@ -1088,15 +1098,28 @@ type State struct {
 }
 
 // closedState is the state of a record no loop serves: closed, or handed
-// to a terminal.
+// to a terminal. The caller holds r.mu.
 func (r *Runner) closedState(rec Record) State {
+	if rec.ClosedAt != "" {
+		if st, ok := r.closedRows[rec.ReplyID]; ok {
+			return st
+		}
+	}
 	st := closedState(rec)
+	if r.opts.closedSnapshotRead != nil {
+		r.opts.closedSnapshotRead(rec.ReplyID)
+	}
 	if snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))); err == nil && snap.Usage != nil && snap.Usage.Context != nil && snap.Usage.Context.Tokens != nil {
 		tokens := float64(*snap.Usage.Context.Tokens)
 		st.ContextTokens = &tokens
 	}
 	if st.Status == StatusHandedOff {
 		st.ResumeCommand = resumeCommand(rec, wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
+	} else {
+		if r.closedRows == nil {
+			r.closedRows = map[string]State{}
+		}
+		r.closedRows[rec.ReplyID] = st
 	}
 	return st
 }
@@ -1984,7 +2007,14 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 			keyRoot = rec.workDir()
 		}
 		if err := c.r.opts.Keys.Ensure(keyRoot, rec.WSKey); err != nil {
-			return fmt.Errorf("ws session key: %w", err)
+			// 0.49.x bound Pi child keys to Root even when Cwd differed.
+			// Ensure still checks root and scope: a foreign key fails both.
+			if rec.Backend != BackendPi || rec.Parent == nil || keyRoot == rec.Root {
+				return fmt.Errorf("ws session key: %w", err)
+			}
+			if err := c.r.opts.Keys.Ensure(rec.Root, rec.WSKey); err != nil {
+				return fmt.Errorf("ws session key: %w", err)
+			}
 		}
 		var err error
 		instructions, err = composeInstructions(c.dir, rec, def)
