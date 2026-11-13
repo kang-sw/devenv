@@ -20,15 +20,16 @@ Recorded as todo for later; the UI track (dashboard web frontend owner) is the e
 ## Decisions
 
 - The four states above, as the owner stated them (2026-11-13).
+- (402) (owner, 2026-11-13): hidden sessions appear as a collapsed group with a count, refined by the owner: the current stopped-sessions slot splits into two halves, hidden sessions on the left and pending-deletion/stopped on the right. The two halves act as one tri-state radio: none expanded / hidden expanded / stopped expanded. Rejected: a filter toggle only.
+- (403) (owner, 2026-11-13): a message or mail to a hidden session wakes it and it returns to active-on, like an asleep session. Rejected: staying hidden with the mail queued until unhide.
+- (405) (confirmed, 2026-11-13; technical): hidden is persisted as an optional field on the session record (T0, additive; survives daemon restarts). Rejected: a display-only derived state, because deriving it in the frontend loses it on restart.
 
 ## Open Decision Queue
 
 Last ID: (405)
 
-(402) [open] [policy] How hidden sessions appear in the list: a collapsed "Hidden" group at the bottom with a count (recommended) vs only behind a filter toggle.
-(403) [open] [policy] A message or mail to a hidden session: it stays hidden and the mail queues until the user unhides it (recommended) vs it wakes and returns to active-on like an asleep session.
 (404) [open] [policy] When a pending-deletion session is actually removed: manual delete only (recommended; same as today's stopped state) vs auto-delete after a retention period with restore before then.
-(405) [open] [technical] Hidden is persisted as an optional field on the session record (T0, additive; survives daemon restarts) over a display-only derived state - Rejected: deriving it in the frontend loses it on restart.
+Owner question 2026-11-13: does existing stopped-session auto-deletion already cover this? Answer pending code check.
 
 ## Constraints
 
