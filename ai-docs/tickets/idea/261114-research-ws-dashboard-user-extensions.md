@@ -15,9 +15,9 @@ user install local extensions to the dashboard. An extension shows UI in a
 drawer at the bottom right of the dashboard and can read dashboard data.
 The design panels live in that board topic.
 
-This ticket is research only ((564)): it records the agreed shape and the
-open backend question; it carries no implementation plan. An actionable
-ticket derives from the Confirmed Decisions below once (569) is answered.
+This ticket is research only ((564)): it records the agreed frontend and
+backend shapes; it carries no implementation plan. An actionable ticket
+derives from the Confirmed Decisions below.
 
 ## Frontend extension shape
 
@@ -40,7 +40,7 @@ v1 is read-only: sessions (list and status), board topics and items, and
 tracker data, plus the drawer UI. Write actions are a later, additive
 extension of the same bridge.
 
-## Backend extension shape (open)
+## Backend extension shape
 
 Owner, answering (563), asked whether an extension can also have a backend
 attached to the daemon, tied into the daemon's hooks:
@@ -52,7 +52,7 @@ whether a daemon-attached backend could be considered — embedded Lua or
 Python, or a daemon WebSocket endpoint such as `/ext/events` that a
 separately started process connects to over IPC.)
 
-Candidates (question (569)):
+Candidates (question (569); the owner chose (a), see Confirmed Decisions):
 
 - (a) The daemon spawns a child process the manifest names and talks to it
   over stdio JSON lines with the same `v: 1` schema as the frontend bridge.
@@ -62,7 +62,7 @@ Candidates (question (569)):
 - (c) The daemon embeds a Lua or JS engine and runs the extension's script
   in-process.
 
-Whichever shape wins, hooks mean: the daemon forwards to the backend the
+With (a), hooks mean: the daemon forwards to the backend the
 daemon events the manifest subscribes to (session status, board, tracker).
 That generalizes today's `tracker-hooks.json` runner from "tracker events
 to a one-shot command" to "subscribed daemon events to an extension
@@ -145,7 +145,16 @@ backend".
 - **(563)=a, v1 scope.** v1 is read-only (sessions list/status, board
   topics/items, tracker) plus the drawer UI; write actions arrive later as
   additive bridge requests (T0). The owner attached the backend question
-  to this answer; it is open as (569).
+  to this answer; it was settled as (569).
+- **(569)=a, backend extension shape.** The daemon spawns the child
+  process the manifest names and talks to it over stdio JSON lines with the
+  same `v: 1` schema as the frontend bridge. An external tool that is
+  already running is attached through a small adapter program that the
+  daemon spawns, so (b)'s advantage (attaching a separately started
+  process) is covered without an `/ext/events` endpoint. Owner, verbatim:
+  "569=a^이게 제일 유연하긴 하겠네요. b의 장점도 어차피 어댑터 프로그램을 만든다
+  그러면 상쇄되는 거고." (Gist: (a) is the most flexible; (b)'s advantage
+  is cancelled out anyway once an adapter program is written.)
 - **(568)=a, outbound network.** The extension document's CSP `connect-src`
   allows only the hosts the manifest declares, and installation shows that
   list to the user.
@@ -166,8 +175,7 @@ backend".
   (manifest permissions for extensions; adapter capability negotiation for
   the chat adapter). Non-authoritative: the chat-adapter research has not
   settled its shape.
-- **Backend (a), as MAIN recommends.** Daemon-spawned child over stdio JSON
-  lines with the same `v: 1` schema; lifecycle tied to the extension being
+- **Backend (a) lifecycle details.** Lifecycle tied to the extension being
   enabled; the manifest names the argv like `tracker-hooks.json` does (no
   shell), and only the machine's user installs it.
 - **Generalize the hooks file into extension subscriptions.** The
@@ -177,11 +185,9 @@ backend".
 
 ### Open Questions
 
-- **(569) Backend extension shape** — pending owner answer: (a) spawned
-  child over stdio JSON lines (MAIN's recommendation), (b) `/ext/events`
-  WebSocket with a token for a separately started process, or (c) an
-  embedded Lua/JS engine. Includes how manifest-subscribed daemon events
-  (session status, board, tracker) are forwarded to the backend.
+- **Backend event forwarding.** How the manifest-subscribed daemon events
+  (session status, board, tracker) are forwarded over the (569)=a stdio
+  channel: framing, backpressure, and delivery after a daemon restart.
 - **Schema sharing with the chat adapter.** Whether this bridge's `v: 1`
   envelope and event vocabulary should be the same schema as
   `261112-research-ws-daemon-extension-protocol-chat-adapter`'s protocol
@@ -193,6 +199,10 @@ backend".
 
 ### Rejected Alternatives
 
-- Not recorded here: the options that lost in (562), (563), and (568) are
+- **(569) (b) `/ext/events` WebSocket and (c) embedded Lua/JS engine.**
+  Rejected for (a): (b)'s one advantage, attaching a process started
+  separately, is covered by a small adapter program spawned under (a), and
+  (b) adds a port and a token; (c) ties extensions to one embedded language.
+- Not recorded here otherwise: the options that lost in (562), (563), and (568) are
   in the board topic `user-extensions` design panels; copy them in if a
   derived ticket needs the reasons.
