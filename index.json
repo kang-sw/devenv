@@ -398,6 +398,9 @@
     "261112-research-ws-single-lead-skill-playbook-routing": {
       "registered_at": "2026-11-12T07:50:32Z"
     },
+    "261113-bug-ws-hosted-pi-start-misses-uninstalled-extension-deps": {
+      "registered_at": "2026-11-13T10:24:58Z"
+    },
     "261113-bug-ws-launcher-falls-to-direct-path-during-daemon-replacement": {
       "registered_at": "2026-11-13T04:57:48Z"
     },
