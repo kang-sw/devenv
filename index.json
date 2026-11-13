@@ -456,7 +456,14 @@
       "registered_at": "2026-11-12T23:13:45Z"
     },
     "261113-bug-ws-hosted-session-exit-cause-lost-with-holder-dir": {
-      "registered_at": "2026-11-13T03:48:53Z"
+      "registered_at": "2026-11-13T03:48:53Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-13T05:08:24Z"
+      }
     },
     "261113-bug-ws-hosted-sessions-show-no-pi-or-batch-token-usage": {
       "registered_at": "2026-11-13T05:07:03Z"
