@@ -487,7 +487,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T16:32:19Z"
+        "touched_at": "2026-11-13T16:33:02Z",
+        "impl": {
+          "branch": "impl/develop/life-dole-panda"
+        }
       }
     },
     "261113-feat-ws-whiteboard-update-refusal-cost": {
