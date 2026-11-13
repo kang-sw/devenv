@@ -124,6 +124,24 @@ func piBundledEntries() ([]string, error) {
 		if err != nil || entry == "" || filepath.IsAbs(entry) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || !fileExists(path) {
 			return nil, fmt.Errorf("bundled Pi extension entry %q is missing or invalid", entry)
 		}
+		// Pi loads a local package in place and never installs its npm
+		// dependencies, so a source entry needs them on disk or the Pi process
+		// exits at load. Prefer the self-contained bundle while it is fresh; a
+		// missing dependency is a bundleErr so the caller takes the MCP bridge.
+		var bundleNote error
+		if filepath.ToSlash(rel) == piBundleSource {
+			if bundleNote = piBundleFresh(root); bundleNote == nil {
+				entries = append(entries, filepath.Join(root, filepath.FromSlash(piBundleFile)))
+				continue
+			}
+		}
+		if missing := piMissingLoadDeps(path); len(missing) > 0 {
+			err := fmt.Errorf("%s cannot load: npm dependencies %s are not installed in any node_modules above it", path, strings.Join(missing, ", "))
+			if bundleNote != nil {
+				err = fmt.Errorf("%w, and %v", err, bundleNote)
+			}
+			return nil, err
+		}
 		entries = append(entries, path)
 	}
 	return entries, nil

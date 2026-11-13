@@ -40,7 +40,17 @@ func piLeadBundle(t *testing.T, root string) string {
 	piLeadFile(t, filepath.Join(root, "package.json"), `{"pi":{"extensions":["./lib/hosted.ts"]}}`)
 	entry := filepath.Join(root, "lib", "hosted.ts")
 	piLeadFile(t, entry, "export default function () {}")
+	piLeadDeps(t, filepath.Dir(root))
 	return entry
+}
+
+// piLeadDeps installs the extension's load-time deps in dir/node_modules, where
+// Node's ancestor lookup from any entry below dir finds them.
+func piLeadDeps(t *testing.T, dir string) {
+	t.Helper()
+	for _, dep := range piExtensionLoadDeps {
+		piLeadFile(t, filepath.Join(dir, "node_modules", dep, "package.json"), `{"name":"`+dep+`"}`)
+	}
 }
 
 func TestPiLeadBundledEntries(t *testing.T) {
