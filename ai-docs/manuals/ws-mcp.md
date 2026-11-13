@@ -556,7 +556,15 @@ machine) or the daemon's own, so no other web page can drive an agent. After
 a daemon restart the runner re-registers each conversation with no process
 and starts one at its next send. An attached ws-mcp gets
 `WS_MCP_ALLOWED_TOOLS` (the profile's ws tools) and `WS_MCP_NO_DASHBOARD`,
-and no mailbox identity.
+and no mailbox identity. Its command is Python plus the starting plugin's
+`bin/ws-mcp-launcher.py serve --stdio`, never the daemon's staged executable.
+The plugin is resolved beside `WS_RSRC_ROOT`; a missing launcher refuses the
+start. The launcher's interpreter (`WS_MCP_HOLDER_PYTHON`) is reused when
+known, else `python3` on PATH (Windows: `py -3` fallback). The conversation's
+root overrides `WS_MCP_PROJECT_ROOT` in that command's environment, keeping
+proxy mode's exact arguments and preventing the daemon's lead root leaking
+into the worker. A proxy-hosted worker still uses its capability token for
+nested `pi.*` calls, not the daemon's lead runner handle.
 
 A spawned conversation (`internal/wsagent/spawn.go`) is a non-lead
 conversation another session opens with its first message (`Runner.Spawn`:
