@@ -480,19 +480,6 @@
     "261113-feat-ws-tracker-calendar-multi-day-spans": {
       "registered_at": "2026-11-13T13:42:45Z"
     },
-    "261113-feat-ws-tracker-start-date-range-picker": {
-      "registered_at": "2026-11-13T01:26:48Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T14:47:25Z",
-        "impl": {
-          "branch": "impl/develop/boozy-thee-easel"
-        }
-      }
-    },
     "261113-feat-ws-tracker-wiki-html-pages": {
       "registered_at": "2026-11-13T13:38:01Z",
       "lease": {
