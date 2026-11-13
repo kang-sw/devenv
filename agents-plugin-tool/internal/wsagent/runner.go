@@ -1018,6 +1018,10 @@ type State struct {
 	// BackgroundTasks counts the harness's running background tasks, as its
 	// stream last reported them.
 	BackgroundTasks int `json:"background_tasks,omitempty"`
+	// Background and Monitors are known shell/monitor counts, absent when
+	// the harness only exposes an aggregate.
+	Background *int `json:"background,omitempty"`
+	Monitors   *int `json:"monitors,omitempty"`
 	// ActionNeeded is set while the harness reports that it waits on the
 	// user with no prompt in Approvals to answer; it says what to do.
 	ActionNeeded string `json:"action_needed,omitempty"`
@@ -1107,6 +1111,8 @@ type conv struct {
 	approvals  []ApprovalRequest
 	activeMode string
 	bgTasks    int
+	background *int
+	monitors   *int
 	// actionNeeded is State.ActionNeeded.
 	actionNeeded string
 	// failure and mcpBroken are State.Failure and State.MCPBroken.
@@ -1462,6 +1468,7 @@ func (c *conv) state() State {
 	}
 	if c.rec.Lead {
 		st.ActiveMode, st.BackgroundTasks, st.ActionNeeded = c.activeMode, c.bgTasks, c.actionNeeded
+		st.Background, st.Monitors = copyCount(c.background), copyCount(c.monitors)
 		st.Approvals = append([]ApprovalRequest(nil), c.approvals...)
 		if c.failure != nil {
 			f := *c.failure
@@ -1820,6 +1827,9 @@ func (c *conv) kick() {
 	if text != "" {
 		origin = wslive.OriginWhiteboard
 		c.apply(wslive.Event{Kind: wslive.KindUser, Origin: origin, Text: text})
+	}
+	for _, text := range mail {
+		c.apply(*wakeEvent("mail", "mailbox", "", text).Live)
 	}
 	c.apply(wslive.Event{Kind: wslive.KindTurnStart, Origin: origin})
 	c.watched()
@@ -2488,8 +2498,11 @@ func (c *conv) handle(ev Event) {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, ev.Notice)
 		}
 	case ev.BackgroundTasks != nil:
-		if n := *ev.BackgroundTasks; n != c.bgTasks {
-			c.setStatus(func() { c.bgTasks = n })
+		if n := *ev.BackgroundTasks; n != c.bgTasks || !sameCount(c.background, ev.Background) || !sameCount(c.monitors, ev.Monitors) {
+			c.setStatus(func() {
+				c.bgTasks = n
+				c.background, c.monitors = copyCount(ev.Background), copyCount(ev.Monitors)
+			})
 			c.syncHost(quiet)
 			c.changed(quiet)
 			if n == 0 && !c.turn && !quiet {
@@ -2830,7 +2843,10 @@ func (c *conv) processEnded() {
 	c.clearApprovals()
 	c.harnessState = ""
 	c.checkAction(false)
-	c.setStatus(func() { c.activeMode, c.bgTasks, c.mcpBroken = "", 0, nil })
+	c.setStatus(func() {
+		c.activeMode, c.bgTasks, c.mcpBroken = "", 0, nil
+		c.background, c.monitors = nil, nil
+	})
 	c.mcpSeen, c.mcpChecking, c.mcpAgain, c.mcpAgainNames = nil, false, false, nil
 	c.retry, c.alerted = nil, false
 	c.syncHost(true)

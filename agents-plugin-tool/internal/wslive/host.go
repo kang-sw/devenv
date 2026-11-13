@@ -57,6 +57,10 @@ type Host struct {
 	// shells, monitors, and background subagents), as its stream last
 	// reported the whole list.
 	BackgroundTasks int `json:"backgroundTasks,omitempty"`
+	// Background and Monitors split the aggregate when task types are observable.
+	// Nil is unknown, distinct from a known zero; BackgroundTasks keeps its meaning.
+	Background *int `json:"background,omitempty"`
+	Monitors   *int `json:"monitors,omitempty"`
 	// Failure is the typed failure that keeps the session from working (a
 	// login needed, a model unavailable, a usage limit) until a turn
 	// succeeds; nil when none.
@@ -87,6 +91,7 @@ func (st *State) SetHost(h *Host) bool {
 	if h != nil {
 		c := *h
 		c.BackgroundTasks = max(c.BackgroundTasks, 0)
+		c.Background, c.Monitors = taskCount(c.Background), taskCount(c.Monitors)
 		if c.Failure != nil {
 			f := *c.Failure
 			f.Text = cleanLine(st.scrub.scrub(f.Text), NoticeTextRunes)
@@ -118,6 +123,7 @@ func (h *Host) clone() *Host {
 		return nil
 	}
 	c := *h
+	c.Background, c.Monitors = taskCount(h.Background), taskCount(h.Monitors)
 	if h.Failure != nil {
 		f := *h.Failure
 		c.Failure = &f

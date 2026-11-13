@@ -499,7 +499,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "ok: %d of %d events applied\n", applied, len(rawEvents))
-	b.WriteString("accepts: " + strings.Join(wslive.OptionalKinds, ", ") + "\n")
+	b.WriteString("accepts: " + strings.Join(wslive.OptionalKinds, ", ") + ", " + wslive.TaskCountsCapability + "\n")
 	for _, p := range problems {
 		b.WriteString("skipped " + p + "\n")
 	}

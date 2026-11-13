@@ -1824,7 +1824,7 @@ function materializeHeldInput(held: HeldInput): PushBatchItem {
     };
   }
   const status = computeRunningStatusLine(held.registry);
-  const base: Record<string, unknown> = held.record ? { agent_id: held.record.agentId, ...held.payload } : { ...held.payload };
+  const base: Record<string, unknown> = held.record ? { agent_id: held.record.agentId, ...(held.family === "ws-agent-settled" ? { failed: held.record.lastRunFailed === true } : {}), ...held.payload } : { ...held.payload };
   const details = status ? { ...base, status } : base;
   const displayId = held.record?.alias ? `${held.record.alias} (${held.record.agentId})` : held.record?.agentId;
   return {
@@ -1848,7 +1848,7 @@ function sendPush(
 ): void {
   const wasHeld = terminal?.state === "held";
   const status = computeRunningStatusLine(registry);
-  const base: Record<string, unknown> = record ? { agent_id: record.agentId, ...payload } : { ...payload };
+  const base: Record<string, unknown> = record ? { agent_id: record.agentId, ...(family === "ws-agent-settled" ? { failed: record.lastRunFailed === true } : {}), ...payload } : { ...payload };
   const details = status ? { ...base, status } : base;
   // 260905 (alias/park/cap ticket): pushed-message heads print the alias when
   // there is one, followed by the uuid — a one-line, zero-signature-churn
