@@ -394,6 +394,51 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             )
             self.assertFalse(launcher.local_devenv_runtime_enabled(sibling, "linux"))
 
+    def test_source_fingerprint_covers_embedded_assets_but_not_test_only_files(self):
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plugin_dir = root / "devenv" / "agents-plugin-wsflow"
+            plugin_dir.mkdir(parents=True)
+            contract = self.write_local_contract(plugin_dir, package_root=root)
+            tool_dir = contract["tool_dir"]
+            asset = tool_dir / "internal" / "dash" / "assets" / "app.js"
+            asset.parent.mkdir(parents=True)
+            asset.write_text("one", encoding="utf-8")
+            source = tool_dir / "internal" / "dash" / "dash.go"
+            source.write_text("package dash\n", encoding="utf-8")
+
+            def fingerprint():
+                value = launcher.local_devenv_source_fingerprint(plugin_dir, "linux")
+                self.assertIsNotNone(value)
+                return value
+
+            def touch(path, content):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                os.utime(path, ns=(1_000_000_000, 1_000_000_000 + len(content)))
+
+            baseline = fingerprint()
+            self.assertEqual(fingerprint(), baseline)
+
+            # Ignored: test files, testdata, dist output, dot-directories.
+            touch(tool_dir / "internal" / "dash" / "dash_test.go", "package dash\n")
+            touch(tool_dir / "internal" / "dash" / "testdata" / "case.json", "{}")
+            touch(tool_dir / "dist" / "ws-mcp", "binary")
+            touch(tool_dir / "dist-extra" / "ws-mcp", "binary")
+            touch(tool_dir / ".cache" / "x.go", "package x\n")
+            self.assertEqual(fingerprint(), baseline)
+            touch(tool_dir / "internal" / "dash" / "dash_test.go", "package dash // edited\n")
+            self.assertEqual(fingerprint(), baseline)
+
+            # Counted: an asset-only change, and a new non-Go embed input.
+            touch(asset, "two-changed")
+            changed = fingerprint()
+            self.assertNotEqual(changed, baseline)
+            touch(tool_dir / "internal" / "dash" / "assets" / "new.css", "body{}")
+            self.assertNotEqual(fingerprint(), changed)
+
     def test_no_marker_keeps_the_release_path_for_cache_and_source_layouts(self):
         launcher = load_launcher()
 
