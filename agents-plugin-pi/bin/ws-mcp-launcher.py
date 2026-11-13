@@ -4,6 +4,7 @@ import json
 import os
 import platform as platform_module
 import shutil
+import stat as stat_module
 import subprocess
 import sys
 import tempfile
@@ -449,13 +450,14 @@ def install_tmp_runtime(tmp: Path, binary: Path, contract: dict, runtime_dir: Pa
 
 
 def local_devenv_cache_package(plugin_dir: Path) -> str | None:
-    # Recognize the repo-local plugin install regardless of on-disk layout.
-    # Claude Code runs a directory-source marketplace plugin from the install.sh
-    # snapshot (~/.claude/plugins/ws-plugin/<pkg>), while Codex/Claude package
-    # installs live under <host>/plugins/cache/kang-sw-devenv/<pkg>/<version>.
-    # Match the ws/wsflow package segment under any per-user (.codex/.claude)
-    # plugin tree; the gitignored .local-devenv-runtime marker is the actual
-    # dev opt-in, validated separately. This is HOME-independent.
+    # Recognize a plugin copy installed under a per-user host plugin tree:
+    # the install.sh snapshot (~/.claude/plugins/ws-plugin/<pkg>) or a package
+    # install under <host>/plugins/cache/kang-sw-devenv/<pkg>/<version>. Match
+    # the ws/wsflow package segment under any per-user (.codex/.claude) plugin
+    # tree. This is HOME-independent. A plugin running straight from its source
+    # checkout has no such segment; read_local_devenv_contract accepts that case
+    # through the marker's own source_root instead. Either way the gitignored
+    # .local-devenv-runtime marker is the only dev opt-in.
     parts = plugin_dir.resolve().parts
     if "plugins" not in parts:
         return None
@@ -467,9 +469,17 @@ def local_devenv_cache_package(plugin_dir: Path) -> str | None:
     return None
 
 
+def path_within(child: Path, root: Path, *, case_insensitive: bool) -> bool:
+    # Resolved-path containment by path components; Windows paths compare
+    # case-insensitively.
+    child_parts, root_parts = child.resolve().parts, root.resolve().parts
+    if case_insensitive:
+        child_parts = tuple(part.lower() for part in child_parts)
+        root_parts = tuple(part.lower() for part in root_parts)
+    return child_parts[:len(root_parts)] == root_parts
+
+
 def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
-    if local_devenv_cache_package(plugin_dir) is None:
-        return None
     marker = plugin_dir / ".local-devenv-runtime"
     if not marker.is_file():
         return None
@@ -497,6 +507,12 @@ def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
         resolved[key] = path
     if not resolved["source_root"].is_dir():
         note("local devenv runtime contract is inactive: source_root does not exist")
+        return None
+    # The marker counts for a per-user plugin install, or for a plugin running
+    # from inside the marker's own source checkout; anywhere else it is stale.
+    if local_devenv_cache_package(plugin_dir) is None and not path_within(
+        plugin_dir, resolved["source_root"], case_insensitive=os_name == "windows"
+    ):
         return None
     if not resolved["tool_dir"].is_dir() or not (resolved["tool_dir"] / "cmd" / "ws-mcp").is_dir():
         note("local devenv runtime contract is inactive: tool_dir is not a ws-mcp module")
@@ -531,21 +547,32 @@ def local_devenv_source_fingerprint(plugin_dir: Path, os_name: str) -> str | Non
     # Fingerprint the local ws-mcp source tree so an unchanged tree can reuse the
     # cached runtime binary instead of forcing a `go build` on every launch (the
     # forced rebuild blew past the MCP startup timeout on cold caches). Uses stat
-    # metadata only (no file reads) to stay cheap on the startup path.
+    # metadata only (no file reads) to stay cheap on the startup path. Every
+    # regular file under tool_dir counts, so //go:embed inputs (assets, i18n
+    # tables, embedded rsrc) are covered without parsing embed patterns; test
+    # files, testdata, dist* output, and dot-directories cannot change the
+    # binary and are skipped.
     contract = read_local_devenv_contract(plugin_dir, os_name)
     if contract is None:
         return None
     tool_dir = contract["tool_dir"]
     entries = []
-    try:
-        for path in tool_dir.rglob("*.go"):
+    walk_errors = []
+    for dirpath, dirnames, filenames in os.walk(tool_dir, onerror=walk_errors.append):
+        dirnames[:] = [d for d in dirnames if d != "testdata" and not d.startswith(("dist", "."))]
+        for filename in filenames:
+            if filename.endswith("_test.go"):
+                continue
+            path = Path(dirpath) / filename
             try:
                 st = path.stat()
             except OSError:
                 continue
+            if not stat_module.S_ISREG(st.st_mode):
+                continue
             entries.append((str(path.relative_to(tool_dir)), st.st_size, st.st_mtime_ns))
-    except OSError as exc:
-        note(f"local devenv source fingerprint walk failed: {exc}")
+    if walk_errors:
+        note(f"local devenv source fingerprint walk failed: {walk_errors[0]}")
         return None
     for name in ("go.mod", "go.sum"):
         candidate = tool_dir / name
@@ -560,7 +587,7 @@ def local_devenv_source_fingerprint(plugin_dir: Path, os_name: str) -> str | Non
     except OSError:
         pass
     digest = hashlib.sha256()
-    for rel, size, mtime in sorted(entries):
+    for rel, size, mtime in sorted(set(entries)):
         digest.update(f"{rel}\x00{size}\x00{mtime}\x00".encode("utf-8"))
     return digest.hexdigest()
 

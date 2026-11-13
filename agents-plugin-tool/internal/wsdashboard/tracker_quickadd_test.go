@@ -74,7 +74,7 @@ func TestTrackerQuickAddRow(t *testing.T) {
 	}
 	src := trackerFn(t, `function nrowFill\(n\)`, false) + trackerFn(t, `function nrowMine\(n\)`, true) +
 		trackerFn(t, `var NROW_ST = `, true) + trackerFn(t, `function nrowStMode\(n\)`, false) + trackerFn(t, `function nrowSt\(n\)`, true) +
-		trackerFn(t, `function nrowPri\(n\)`, true) + trackerFn(t, `function nrowLabels\(n\)`, true) + trackerFn(t, `function nrowKind\(kind\)`, false) +
+		trackerFn(t, `function nrowStOpts\(n\)`, true) + trackerFn(t, `function nrowPri\(n\)`, true) + trackerFn(t, `function nrowLabels\(n\)`, true) + trackerFn(t, `function nrowKind\(kind\)`, false) +
 		trackerFn(t, `function createNew\(\)`, false) + trackerFn(t, `function asIdea\(cp, s\)`, false) + trackerFn(t, `function heldTopic\(cp, holder\)`, false)
 	runTrackerCases(t, "quick-add", trackerCheckJS+`
 var VS = { viewer: { member: 'me', reach: { kim: true } }, priority: { names: ['low', 'mid', 'high'], default: 1 },
@@ -157,9 +157,10 @@ func TestTrackerPriorityChipAndLabelPicker(t *testing.T) {
 // TestTrackerPropertyCardLabelPicker pins the property card's label row: an
 // editor's row is a button that opens the item menu's labels step (anyone
 // else's only shows the chips, an empty set as "-"; an editor's empty set a
-// muted "add a label"); the step lists the store's labels as toggle chips
-// and a toggle writes the item's labels at once (in the store's list order)
-// with the step kept open; an empty store says so and, for an admin only,
+// muted "add a label"); the step lists the store's labels as a checklist
+// drawing the user's picks over the item's current labels (in the store's
+// list order) with the step kept open, the write owed at close
+// (TestTrackerLabelStepAppliesOnClose); an empty store says so and, for an admin only,
 // offers the store settings' label dialog. Escape on the step closes it,
 // focus back on the row.
 func TestTrackerPropertyCardLabelPicker(t *testing.T) {
@@ -174,7 +175,7 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 	}
 	act := trackerFn(t, `function menuAct\(k, a\)`, false)
 	for _, want := range []string{
-		"case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lsel = labelToggled(MN.lsel || it.labels, MN.lab); return labelStepRedraw();",
+		"case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lset = labelFlip(MN.lset, it.labels, MN.lab); return labelStepRedraw();",
 		"case 'm-ladd': return labelDialog({});",
 	} {
 		if !strings.Contains(act, want) {
@@ -194,7 +195,7 @@ func TestTrackerPropertyCardLabelPicker(t *testing.T) {
 		trackerFn(t, `function dataAttrs\(data\)`, false) + trackerFn(t, `function mi\(act, label, data, o\)`, false) + trackerFn(t, `function msep\(\)`, true) +
 		trackerFn(t, `function labelOf\(id\)`, true) + trackerFn(t, `function labelChip\(l, act, extra\)`, false) + trackerFn(t, `function labelChips\(it, act\)`, false) +
 		trackerFn(t, `function labelsProp\(it\)`, false) + trackerFn(t, `function newLabelsHtml\(n\)`, true) +
-		trackerFn(t, `function labelChecklist\(cur\)`, false) + trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelToggled\(cur, lid\)`, false)
+		trackerFn(t, `function labelChecklist\(cur\)`, false) + trackerFn(t, `function labelStepHtml\(it\)`, false) + trackerFn(t, `function labelsOver\(cur, set\)`, false)
 	runTrackerCases(t, "property card labels", trackerCheckJS+`
 var VS = { viewer: { member: 'me', admin: false }, labels: [{ id: 'L1', name: 'docs', color: '#111111' }, { id: 'L2', name: 'dev', color: '#222222' }] }, editor = true, MN = { kind: 'item', step: 'labels' };
 function wsT(k) { return k; }
@@ -209,13 +210,18 @@ editor = false;
 check('a viewer without the edit right sees the chips only', labelsProp(it), '<span class="chip lbl"><span class="ldot" style="background:#222222"></span>dev</span>');
 check('a viewer without the edit right sees "-" for no labels', labelsProp({ id: 'i2', labels: [] }), '<span class="muted">-</span>');
 var st = labelStepHtml(it);
-check('the step is the quick-add checklist over the item's labels, the picked one checked', [has(st, 'role="menuitemcheckbox" aria-checked="false" data-mi data-act="m-ltog" data-label="L1"') || has(st, 'data-act="m-ltog" data-label="L1"'), has(st, 'aria-checked="true" data-mi'), has(st, 'class="cbx"'), has(st, 'class="mlrow"')], [true, true, true, true]);
-check('the pick starts as the item's labels', MN.lsel, ['L2']);
-check('a toggle adds in list order', labelToggled(['L2'], 'L1'), ['L1', 'L2']);
-check('a toggle removes', labelToggled(['L1', 'L2'], 'L1'), ['L2']);
-check('a toggle drops labels the list no longer holds', labelToggled(['gone', 'L1'], 'L2'), ['L1', 'L2']);
-MN.lsel = ['L1', 'L2'];
-check('the step draws the local pick', has(labelStepHtml(it), 'aria-checked="true" data-mi data-act="m-ltog" data-label="L1"') || has(labelStepHtml(it), 'data-act="m-ltog" data-label="L1"'), true);
+check('the step is the quick-add checklist over the item\'s labels, the picked one checked', [has(st, 'role="menuitemcheckbox" aria-checked="false" data-mi data-act="m-ltog" data-label="L1"') || has(st, 'data-act="m-ltog" data-label="L1"'), has(st, 'aria-checked="true" data-mi'), has(st, 'class="cbx"'), has(st, 'class="mlrow"')], [true, true, true, true]);
+check('drawing the step records no pick', MN.lset, undefined);
+check('a pick on adds in list order', labelsOver(['L2'], { L1: true }), ['L1', 'L2']);
+check('a pick off removes', labelsOver(['L1', 'L2'], { L1: false }), ['L2']);
+check('labels the list no longer holds drop', labelsOver(['gone', 'L1'], { L2: true }), ['L1', 'L2']);
+check('no picks: the labels as they are, in list order', labelsOver(['L2', 'L1'], null), ['L1', 'L2']);
+MN.lset = { L1: true };
+st = labelStepHtml(it);
+check('the step draws the picks over the item\'s labels', [has(st, 'aria-checked="true" data-mi data-act="m-ltog" data-label="L1"'), has(st, 'aria-checked="true" data-mi data-act="m-ltog" data-label="L2"')], [true, true]);
+it.labels = ['L2', 'L1'];
+MN.lset = { L1: false };
+check('the picks lay over the labels the item holds now: L1 picked off, L2 as held', [has(labelStepHtml(it), 'aria-checked="false" data-mi data-act="m-ltog" data-label="L1"'), has(labelStepHtml(it), 'aria-checked="true" data-mi data-act="m-ltog" data-label="L2"')], [true, true]);
 VS.labels = [];
 check('an empty store says so, no add for a non-admin', labelStepHtml(it), '<p class="mempty">js.tk.labels.empty</p>');
 VS.viewer.admin = true;
@@ -225,10 +231,13 @@ done();
 }
 
 // TestTrackerLabelStepAppliesOnClose pins the labels step's batching
-// (tracker.js labelPending, called by closeMenu): toggles only move the local
-// pick, and closing the menu owes one item.edit of the net pick, none when the
-// pick equals the item's labels (a toggle and its undo), labels the list no
-// longer holds dropped, nothing when the item or the edit right is gone.
+// (tracker.js labelPending, called by closeMenu): a toggle only records the
+// user's pick (labelFlip), and closing the menu owes one item.edit of the
+// picks laid over the item's labels as they are at close, none without a pick
+// or when the picks change nothing (a toggle and its undo), labels the list no
+// longer holds dropped, nothing when the item or the edit right is gone. A
+// label another viewer adds while the step is open, or one a previous close
+// is still writing, is never written away by a stale copy.
 func TestTrackerLabelStepAppliesOnClose(t *testing.T) {
 	cm := trackerFn(t, `function closeMenu\(refocus\)`, false)
 	for _, want := range []string{"var lw = labelPending(m);", "if (lw) commit(lw);"} {
@@ -239,19 +248,36 @@ func TestTrackerLabelStepAppliesOnClose(t *testing.T) {
 	runTrackerCases(t, "label step applies on close", trackerCheckJS+`
 var editor = true, VS = { items: { i1: { id: 'i1', labels: ['L1'] } }, labels: [{ id: 'L1' }, { id: 'L2' }, { id: 'L3' }] };
 function canEdit() { return editor; }
-`+trackerFn(t, `function labelOf\(id\)`, true)+trackerFn(t, `function labelToggled\(cur, lid\)`, false)+trackerFn(t, `function labelPending\(m\)`, false)+`
-function m(sel) { return { kind: 'item', step: 'labels', item: 'i1', lsel: sel }; }
-check('a net change is one write of the pick', labelPending(m(['L1', 'L2'])), [['item.edit', { item: 'i1', labels: ['L1', 'L2'] }]]);
-check('a toggle and its undo write nothing', labelPending(m(labelToggled(labelToggled(['L1'], 'L2'), 'L2'))), null);
-check('removing the only label writes the empty list', labelPending(m([])), [['item.edit', { item: 'i1', labels: [] }]]);
-check('labels the list no longer holds are dropped from the write', labelPending(m(['L1', 'gone', 'L3'])), [['item.edit', { item: 'i1', labels: ['L1', 'L3'] }]]);
-check('a pick naming only a gone label beside the item's is no change', labelPending(m(['L1', 'gone'])), null);
-check('no pick drawn, nothing owed', labelPending(m(null)), null);
-check('another step owes nothing', labelPending({ kind: 'item', step: 'pri', item: 'i1', lsel: ['L2'] }), null);
+`+trackerFn(t, `function labelOf\(id\)`, true)+trackerFn(t, `function labelsOver\(cur, set\)`, false)+trackerFn(t, `function labelFlip\(set, cur, lid\)`, false)+
+		trackerFn(t, `function sameLabels\(a, b\)`, false)+trackerFn(t, `function labelPending\(m\)`, false)+`
+// a labels step on i1: the toggles flip each label from how the step draws it over the item's labels then
+function step() { var s = { kind: 'item', step: 'labels', item: 'i1', lset: null }; s.tog = function (lid) { s.lset = labelFlip(s.lset, VS.items.i1.labels, lid); return s; }; return s; }
+function held(ls) { VS.items.i1.labels = ls; }
+check('a pick on is one write over the labels', labelPending(step().tog('L2')), [['item.edit', { item: 'i1', labels: ['L1', 'L2'] }]]);
+check('a toggle and its undo write nothing', labelPending(step().tog('L2').tog('L2')), null);
+check('picking the only label off writes the empty list', labelPending(step().tog('L1')), [['item.edit', { item: 'i1', labels: [] }]]);
+check('no toggle, nothing owed', labelPending(step()), null);
+// scenario A: another viewer adds L3 while the step is open; closing without a toggle must not write it away
+var a = step();
+held(['L1', 'L3']);
+check('a label added meanwhile, no toggle: no write', labelPending(a), null);
+check('a label added meanwhile is kept beside the pick', labelPending(a.tog('L2')), [['item.edit', { item: 'i1', labels: ['L1', 'L2', 'L3'] }]]);
+held(['L1']);
+// scenario B: L2 picked and the step closed (its write in flight), reopened before the write lands, closed again
+var b1 = step().tog('L2'), w1 = labelPending(b1), b2 = step();
+check('the reopened step with no toggle owes nothing', labelPending(b2), null);
+held(['L1', 'L2']); // w1 lands
+check('nor after the first write lands', [w1, labelPending(b2)], [[['item.edit', { item: 'i1', labels: ['L1', 'L2'] }]], null]);
+check('a toggle after it lands applies over the landed labels', labelPending(b2.tog('L3')), [['item.edit', { item: 'i1', labels: ['L1', 'L2', 'L3'] }]]);
+held(['L1', 'gone']);
+check('labels the list no longer holds are dropped from the write', labelPending(step().tog('L3')), [['item.edit', { item: 'i1', labels: ['L1', 'L3'] }]]);
+check('a pick changing nothing listed is no change', labelPending({ kind: 'item', step: 'labels', item: 'i1', lset: { L1: true, gone: false } }), null);
+held(['L1']);
+check('another step owes nothing', labelPending({ kind: 'item', step: 'pri', item: 'i1', lset: { L2: true } }), null);
 editor = false;
-check('without the edit right nothing is written', labelPending(m(['L2'])), null);
+check('without the edit right nothing is written', labelPending(step().tog('L2')), null);
 editor = true;
-check('a gone item owes nothing', labelPending({ kind: 'item', step: 'labels', item: 'zz', lsel: ['L2'] }), null);
+check('a gone item owes nothing', labelPending({ kind: 'item', step: 'labels', item: 'zz', lset: { L2: true } }), null);
 done();
 `)
 }
@@ -279,7 +305,7 @@ func TestTrackerRowTitleEdit(t *testing.T) {
 		t.Error("the edit row saves on blur; the new row's convention is none")
 	}
 	runTrackerCases(t, "row edit", trackerCheckJS+`
-var editor = true, sent = [], rec = null, canAsg = true, ui = {}, renders = 0, toasts = 0, elv = { value: '' };
+var editor = true, sent = [], rec = null, canAsg = true, ui = {}, renders = 0, toasts = 0, elv = { value: '', focus: function () {}, select: function () {} };
 var VS = { viewer: { member: 'me' }, priority: { default: 1, names: ['low', 'mid', 'high'] }, labels: [{ id: 'L1' }, { id: 'L2' }],
   items: { i1: { id: 'i1', kind: 'task', title: 'Old', status: 'idea', due: '2026-12-01', priority: 2, labels: ['L1'], author: 'me', assignments: [] } } };
 function canEdit() { return editor; }
@@ -299,7 +325,8 @@ function esc(s) { return s; }
 function attr(k, v) { return ' data-' + k + '="' + v + '"'; }
 function tipAttr(x) { return ''; }
 function partIcon(i) { return i; }
-`+trackerFn(t, `function titleEdHtml\(it\)`, false)+trackerFn(t, `function editWho\(it\)`, false)+trackerFn(t, `function startRowEdit\(id, rk\)`, false)+trackerFn(t, `function editRowEvents\(n, it, title\)`, false)+trackerFn(t, `function endRowEdit\(\)`, false)+trackerFn(t, `function saveRowEdit\(\)`, false)+`
+`+trackerFn(t, `function titleEdHtml\(it\)`, false)+trackerFn(t, `function editWho\(it\)`, false)+trackerFn(t, `function startRowEdit\(id, rk\)`, false)+trackerFn(t, `function editRowEvents\(n, it, title\)`, false)+trackerFn(t, `function endRowEdit\(\)`, false)+trackerFn(t, `function saveRowEdit\(\)`, false)+
+		trackerFn(t, `function labelsOver\(cur, set\)`, false)+trackerFn(t, `function labelPicks\(from, to\)`, false)+trackerFn(t, `function sameLabels\(a, b\)`, false)+`
 var document = { querySelector: function () { return null; } }, CSS = { escape: function (x) { return x; } };
 function draft() { startRowEdit('i1', 'r'); return ui.ned; }
 function save(mut, title) { var n = draft(); if (mut) mut(n); elv.value = title == null ? n.val : title; sent = []; saveRowEdit(); return sent; }
@@ -310,13 +337,19 @@ check('and cannot start the edit', (startRowEdit('i1', 'r'), ui.ned), undefined)
 editor = true;
 var n = draft();
 check('the draft is prefilled from the item', [n.val, n.st, n.who, n.due, n.pri, n.labels, n.canAsg], ['Old', 'idea', ['me'], '2026-12-01', 2, ['L1'], true]);
-check('an untouched draft writes nothing', [save(), ui.ned === null, toasts], [[], false, 1]);
+check('an untouched draft writes nothing, says so, and closes the row', [save(), ui.ned === null, toasts], [[], true, 1]);
 ui.ned = null;
 check('title, priority, due, and labels go in one item.edit', save(function (n) { n.pri = 0; n.due = ''; n.labels = ['L2']; }, '  New  '),
   [[['item.edit', { item: 'i1', title: 'New', priority: 0, due: null, labels: ['L2'] }]]]);
 check('a successful save closes the row', ui.ned, null);
 check('a blank title keeps the old one', save(function (n) { n.pri = 0; }, '   '), [[['item.edit', { item: 'i1', priority: 0 }]]]);
 check('labels the list no longer holds are dropped', save(function (n) { n.labels = ['L1', 'gone']; }), []);
+// another viewer adds L2 after the draft was prefilled: an untouched labels chip writes nothing, a pick applies over L2
+check('a label added meanwhile, labels untouched: no labels write', save(function (n) { VS.items.i1.labels = ['L1', 'L2']; }), []);
+VS.items.i1.labels = ['L1'];
+check('a label added meanwhile is kept beside the draft\'s pick', save(function (n) { VS.items.i1.labels = ['L1', 'L2']; n.labels = []; }),
+  [[['item.edit', { item: 'i1', labels: ['L2'] }]]]);
+VS.items.i1.labels = ['L1'];
 rec = { status: 'idea' };
 check('a changed own status is its own item.status', save(function (n) { n.st = 'doing'; }), [[['item.status', { item: 'i1', status: 'doing' }]]]);
 check('done closes the item', save(function (n) { n.st = 'done'; }), [[['item.close', { item: 'i1' }]]]);
@@ -328,6 +361,55 @@ check('without the assign right the assignees are not written', save(function (n
 ui.ned = null; renders = 0;
 draft(); sent = []; endRowEdit();
 check('cancel closes the row and writes nothing', [sent, ui.ned, renders], [[], null, 2]);
+done();
+`)
+}
+
+// TestTrackerEditRowClickOpensNothing pins the row edit's click rule (tracker.js
+// clickItem, editRowHtml): the edit row keeps the row's data-item, yet a click
+// anywhere in it (the kind icon, the room between its chips, the title input)
+// opens no item window, while a list row's title and a feed entry still do and
+// the dialog never does. The kind icon is plain and names the kind: the store
+// cannot change an item's kind (item.edit has no kind field), so it carries
+// neither the new row's toggle act nor its "click to make it a ..." tooltip.
+func TestTrackerEditRowClickOpensNothing(t *testing.T) {
+	click := trackerBlock(t, `document\.addEventListener\('click', function \(e\) \{`, `\n    document\.addEventListener\('submit'`)
+	if !strings.Contains(click, "var it = clickItem(t);\n      if (it) { e.preventDefault(); showItem(") {
+		t.Error("the click handler's item-window fallback does not go through clickItem")
+	}
+	runTrackerCases(t, "edit row click", trackerCheckJS+`
+var ui = { ned: { item: 'i1', rk: 'r:i1', kind: 'task', val: 'Old' } }, SI = { svg: function (k) { return '<svg>' + k + '</svg>'; } };
+function wsT(k) { return k; }
+function esc(s) { return s; }
+function attr(k, v) { return ' data-' + k + '="' + v + '"'; }
+function tipAttr(x) { return ' data-tip="' + x + '"'; }
+function kindName(k) { return 'kind:' + k; }
+function nrowChips() { return '<chips>'; }
+`+trackerFn(t, `function editRowHtml\(o\)`, false)+trackerFn(t, `function clickItem\(t\)`, false)+`
+// a fake element tree whose closest() takes the simple selectors clickItem uses (tag, #id, .class, [attr], comma lists)
+function matches(e, sel) {
+  var m = /^([a-z]*)(#[\w-]+)?((?:\.[\w-]+)*)(?:\[([\w-]+)\])?$/.exec(sel.trim());
+  if (!m) throw new Error('unsupported selector ' + sel);
+  return (!m[1] || e.tag === m[1]) && (!m[2] || e.id === m[2].slice(1)) &&
+    m[3].split('.').filter(Boolean).every(function (c) { return e.cls.indexOf(c) >= 0; }) && (!m[4] || m[4] in e.attrs);
+}
+function el(tag, o, parent) {
+  return { tag: tag, id: o.id || '', cls: (o.cls || '').split(' ').filter(Boolean), attrs: o.attrs || {}, parent: parent || null,
+    closest: function (sel) { for (var e = this; e; e = e.parent) if (sel.split(',').some(function (s) { return matches(e, s); })) return e; return null; } };
+}
+var h = editRowHtml({});
+check('the edit row is marked as the edit and keeps the row ids', [h.indexOf('<div class="nrow ned" data-item="i1" data-rk="r:i1">') === 0], [true]);
+check('its kind icon is a plain span naming the kind, no toggle', [h.indexOf('<span class="nkind" data-tip="kind:task"><svg>todo</svg></span>') > 0, h.indexOf('nkind"' + ' data-act') < 0, h.indexOf('js.tk.new.kind') < 0], [true, true, true]);
+ui.ned.kind = 'topic';
+check('a topic names the topic kind', editRowHtml({}).indexOf('<span class="nkind" data-tip="kind:topic"><svg>topic</svg></span>') > 0, true);
+var row = el('div', { cls: 'nrow ned', attrs: { 'data-item': 'i1' } }), kind = el('span', { cls: 'nkind' }, row), icon = el('svg', {}, kind), inp = el('input', { id: 'tkned' }, row);
+check('a click on the edit row\'s kind icon, its gaps, or its input opens nothing', [clickItem(kind), clickItem(icon), clickItem(row), clickItem(inp)], [null, null, null, null]);
+var irow = el('div', { cls: 'irow', attrs: { 'data-item': 'i2' } }), title = el('a', { cls: 'title', attrs: { 'data-item': 'i2' } }, el('div', { cls: 'ir-main' }, irow));
+check('a list row\'s title still opens its item', clickItem(title) === title, true);
+var entry = el('div', { cls: 'row click', attrs: { 'data-item': 'i3' } }), snip = el('span', {}, entry);
+check('a feed entry still opens its item', clickItem(snip) === entry, true);
+var dlg = el('div', { id: 'tkdlg' }), inDlg = el('span', { attrs: { 'data-item': 'i4' } }, dlg);
+check('nothing in the dialog opens an item', clickItem(inDlg), null);
 done();
 `)
 }
@@ -629,7 +711,7 @@ func TestTrackerRowPartsOpenTheirPickers(t *testing.T) {
 			t.Errorf("the click handler lacks %q", want)
 		}
 	}
-	if i, j := strings.Index(click, "rowClick(row, t)"), strings.Index(click, "var it = t.closest('[data-item]');"); i < 0 || j < 0 || i > j {
+	if i, j := strings.Index(click, "rowClick(row, t)"), strings.Index(click, "var it = clickItem(t);"); i < 0 || j < 0 || i > j {
 		t.Error("a row click does not stop before the [data-item] fallback that opens the item window")
 	}
 	if !strings.Contains(trackerBlock(t, `// keyboard: a focused row shows`, `\n`+"      // ArrowRight"), "if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('irow') && own(e.target)) { e.preventDefault(); showItem(e.target.getAttribute('data-item')); return; }") {
@@ -641,7 +723,7 @@ func TestTrackerRowPartsOpenTheirPickers(t *testing.T) {
 		trackerFn(t, `function partHtml\(cls, tip, inner, it, step\)`, false) + trackerFn(t, `function partIcon\(icon\)`, true) +
 		trackerFn(t, `function whoHtml\(it, ed\)`, false) + trackerFn(t, `function priHtml\(it, ed\)`, false) + trackerFn(t, `var ENDED = `, true) +
 		trackerFn(t, `function dueHtml\(it, st, ed\)`, false) + trackerFn(t, `function labelEdHtml\(it\)`, false) + trackerFn(t, `function dayNum\(d\)`, true) +
-		trackerFn(t, `function today\(\)`, true) + irow + trackerFn(t, `function rowClick\(row, t\)`, false) + trackerFn(t, `function labelStepRedraw\(\)`, false) +
+		trackerFn(t, `function today\(\)`, true) + trackerFn(t, `function titleEdHtml\(it\)`, false) + irow + trackerFn(t, `function rowClick\(row, t\)`, false) + trackerFn(t, `function labelStepRedraw\(\)`, false) +
 		trackerFn(t, `function openerMoved\(\)`, false)
 	if !strings.Contains(trackerBlock(t, `document\.addEventListener\('scroll', function \(e\) \{`, `\n    \}, true\);`), "&& openerMoved()) closeMenu(false);") {
 		t.Error("a scroll closes the item menu whether or not its opener moved")
@@ -753,7 +835,7 @@ done();
 	for _, want := range []string{
 		".tk :where(button.rp) { font: inherit; color: inherit; border: 0; background: none; margin: 0; padding: 0; }",
 		".tk .irow:is(:hover, :focus-within, .sel) .rpe, .tk .rpe[aria-expanded=\"true\"] { visibility: visible; }",
-		".tk .irow:is(:hover, :focus-within, .sel) .rlab, .tk .rlab[aria-expanded=\"true\"] { display: inline-flex; }",
+		".tk .irow:is(:hover, :focus-within, .sel) :is(.rlab, .rtit), .tk .rlab[aria-expanded=\"true\"] { display: inline-flex; }",
 		".tk .irow:is(:hover, :focus-visible, :has(:focus-visible)) > .ir-more { visibility: visible; }",
 	} {
 		if !strings.Contains(string(css), want) {

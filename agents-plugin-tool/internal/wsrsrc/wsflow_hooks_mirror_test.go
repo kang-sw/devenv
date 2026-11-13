@@ -70,3 +70,27 @@ func TestWsflowReviveNudgeMirrorUpToDate(t *testing.T) {
 			"Resync with: cp agents-plugin/hooks/compact-revive-nudge.py agents-plugin-wsflow/hooks/compact-revive-nudge.py", rel, rel)
 	}
 }
+
+// TestWsflowLauncherMirrorUpToDate is the drift guard for the wsflow copy of
+// bin/ws-mcp-launcher.py. The launcher reads its package-specific values from
+// the sibling runtime.json and its package directory, so it has nothing to vary
+// per package and must stay BYTE-IDENTICAL to agents-plugin/'s. Together with
+// TestPiMirrorUpToDate this holds all three launcher copies equal, the same
+// check the release workflow's "Validate plugin release contract" step makes
+// with diff -q, so a missed copy fails Go CI before it fails a tagged build.
+func TestWsflowLauncherMirrorUpToDate(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	rel := filepath.Join("bin", "ws-mcp-launcher.py")
+	want, err := os.ReadFile(filepath.Join(repoRoot, "agents-plugin", rel))
+	if err != nil {
+		t.Fatalf("read canonical launcher: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(repoRoot, "agents-plugin-wsflow", rel))
+	if err != nil {
+		t.Fatalf("read wsflow launcher: %v", err)
+	}
+	if !bytes.Equal(want, got) {
+		t.Fatalf("agents-plugin-wsflow/%s has drifted from agents-plugin/%s.\n"+
+			"Resync with: cp agents-plugin/bin/ws-mcp-launcher.py agents-plugin-wsflow/bin/ws-mcp-launcher.py", rel, rel)
+	}
+}
