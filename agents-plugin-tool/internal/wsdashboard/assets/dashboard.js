@@ -491,9 +491,13 @@
     if (el.getAttribute("data-h") === hash) { if (board) deferred = null; if (name === "rail" && railGate) railGate.forget(); return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board && window.WsCards && window.WsCards.dragging && window.WsCards.dragging()) { boardDragHeld = { hash: hash, html: html }; return; }
-    // A rail swap waits from a press on a grip or bar until it ends, and
-    // while a row's rename is open (railGate), and lands when that ends
-    // (railRelease).
+    // A rail render from before the layout change this page saw applied
+    // would undo it on screen until the next one: it is dropped, and the
+    // render after the change follows.
+    if (name === "rail" && WsRail && WsRail.staleRail(html, railMinGen)) return;
+    // A rail swap waits from a press on a grip or bar until it ends, while
+    // a row's rename is open, and while a layout change posts (railGate),
+    // and lands when that ends (railRelease).
     if (name === "rail" && railGate && railGate.offer({ hash: hash, html: html })) return;
     if (name === "head") {
       if (labelEditing()) { headHeld = { hash: hash, html: html }; return; }
@@ -5603,24 +5607,27 @@
   }
 
   // --- session rail ------------------------------------------------------------
-  // The rail (r-rail) is one render shared by every session page: the page
-  // marks its own row, pins the starred rows, puts the sessions and
-  // workspaces in the order the user dragged them to, and collapses the
-  // workspaces the user collapsed (rail.js keeps those in storage), and
-  // opens the add popovers (the blocks after the drag's). From 1600px the
-  // rail is a column, except below 2200px while the pinned column shows
-  // (data-pincol on the root, the board cards block): the pinned column
-  // takes its place. Otherwise the top-left arrow slides it in over the
-  // page, and Esc, the scrim, or picking a session closes it. The arrow
-  // stays a link to the sessions index for a modified click.
+  // The rail (r-rail) is one render shared by every session page, in the
+  // order and with the stars of the daemon's rail layout (a drag or a star
+  // posts a layout op, and the rail swap shows it): the page marks its own
+  // row, collapses the workspaces the user collapsed (rail.js keeps those
+  // in storage), and opens the add popovers (the blocks after the drag's).
+  // From 1600px the rail is a column, except below 2200px while the pinned
+  // column shows (data-pincol on the root, the board cards block): the
+  // pinned column takes its place. Otherwise the top-left arrow slides it
+  // in over the page, and Esc, the scrim, or picking a session closes it.
+  // The arrow stays a link to the sessions index for a modified click.
   var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
   var memoPad = railEl && $("memo-pad") && window.WsMemo ? window.WsMemo.mount(doc, railEl, $("memo-pad"), function (open) { railOpen(open === true); }) : null;
   var railStore = { load: load, save: save };
-  var starSet = WsRail ? WsRail.stars(railStore) : null, colSet = WsRail ? WsRail.collapsed(railStore) : null;
-  var sessOrder = WsRail ? WsRail.sessionOrder(railStore) : null, wsOrd = WsRail ? WsRail.wsOrder(railStore) : null;
-  // rdrag is the press or drag in the rail (the drag block below); railGate
-  // holds the rail swaps back while it lasts or a row's rename is open.
-  var rdrag = null, railGate = WsRail ? WsRail.swapGate(function () { return !!rdrag || railEditing(); }) : null;
+  var colSet = WsRail ? WsRail.collapsed(railStore) : null;
+  // rdrag is the press or drag in the rail (the drag block below);
+  // railSaving counts the layout ops in flight, and railMinGen is the
+  // layout generation the last one applied answered (a rail render below
+  // it is stale); railGate holds the rail swaps back while a press lasts,
+  // a row's rename is open, or an op posts.
+  var rdrag = null, railSaving = 0, railMinGen = 0;
+  var railGate = WsRail ? WsRail.swapGate(function () { return !!rdrag || railEditing() || railSaving > 0; }) : null;
   var RAIL_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null;
   var RAIL_XWIDE = window.matchMedia ? window.matchMedia("(min-width: 2200px)") : null;
   var RAIL_SCROLL_KEY = "ws.dashboard.railscroll";
@@ -5644,14 +5651,10 @@
   function railScrollTop() { var l = $("rlist"); return l ? l.scrollTop : null; }
   function railScrollTo(top) { var l = $("rlist"); if (l && top !== null && top !== undefined && l.scrollTop !== top) l.scrollTop = top; }
   // railMarks applies the page's marks to the rail as rendered: after
-  // load and after every rail swap. The drag order applies to the live
-  // rows; the ended fold's keep the server's order.
+  // load and after every rail swap.
   function railMarks() {
     var r = region("rail");
     if (!r || !WsRail) return;
-    var order = sessOrder.list(), list = $("rlist");
-    q(".rsessions", r).forEach(function (box) { WsRail.pin(box, starSet, box.parentNode.closest(".rended") ? null : order); });
-    if (list) WsRail.arrange(list, wsOrd.list());
     WsRail.markCurrent(q(".rs", r), rid);
     if (memoPad) memoPad.sync(rid);
     WsRail.markRevive(q(".rs", r), revBusy);
@@ -5662,13 +5665,55 @@
     });
     railPopSync();
   }
-  // railRelease lands the rail swap held while a press or a rename lasted,
-  // once neither does.
+  // railRelease lands the rail swap held while a press, a rename, or a
+  // layout op lasted, once none does.
   function railRelease() {
     var h = railGate && railGate.release();
     if (h) swap("rail", h.hash, h.html);
   }
   function railEditing() { return !!(railEl && railEl.querySelector(".drinp")); }
+  // layoutPost posts body, one rail layout op, to POST /rail/layout;
+  // done(status, answer) gets the HTTP status (0: the daemon was not
+  // reached) and the parsed answer, {} when it is not JSON. The route
+  // answers JSON ({applied, reason, gen}) for a refusal as for a success.
+  function layoutPost(body, done) {
+    if (!window.fetch) { done(0, {}); return; }
+    fetch("/rail/layout", {
+      method: "POST", credentials: "same-origin", cache: "no-store",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.text().then(function (s) {
+        var v = {};
+        try { v = s ? JSON.parse(s) : {}; } catch (e) { v = {}; }
+        done(r.status, v && typeof v === "object" ? v : {});
+      });
+    }, function () { done(0, {}); });
+  }
+  // layoutSave posts a layout op the page already shows: the rail swaps
+  // wait meanwhile, an applied op's generation marks every older render
+  // stale, and a refused one runs undo (which puts the page back) and
+  // toasts the reason.
+  function layoutSave(body, undo) {
+    railSaving++;
+    layoutPost(body, function (status, v) {
+      railSaving--;
+      if (v.applied === true) {
+        if (+v.gen > railMinGen) railMinGen = +v.gen;
+      } else {
+        if (undo) undo();
+        toast(status ? wsT(WsRail.layoutRefusal(v.reason)) : wsT("js.post.unreachable"));
+      }
+      railRelease();
+    });
+  }
+  // layoutImport runs once on load: a browser that kept the rail's order
+  // and stars locally before the daemon kept them imports them into an
+  // empty layout, and drops them once the daemon answered (rail.js
+  // legacyImport, legacyDone).
+  function layoutImport() {
+    var list = $("rlist"), body = list && WsRail.legacyImport(railStore, list.hasAttribute("data-layout-empty"));
+    if (body) layoutPost(body, function (status, v) { WsRail.legacyDone(railStore, v); });
+  }
   // railRename runs the head's rename (labelStart) on a rail row: the name,
   // its hosted mark, and the star give way to the input, which posts to
   // that session's label route; a save shows the label in the row and, for
@@ -5714,12 +5759,17 @@
     [RAIL_WIDE, RAIL_XWIDE].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { railOpen(false); }); });
     railEl.addEventListener("click", function (e) {
       var t = e.target;
+      // A star shows pressed at once; the rail swap after the op moves the
+      // row.
       var star = t.closest && t.closest(".star");
       if (star) {
         e.preventDefault();
-        var row = star.closest(".rs");
-        if (row) starSet.toggle(row.getAttribute("data-rid") || "");
-        railMarks();
+        var row = star.closest(".rs"), on = star.getAttribute("aria-pressed") !== "true";
+        if (!row) return;
+        star.setAttribute("aria-pressed", String(on));
+        layoutSave({ op: on ? "star" : "unstar", rid: row.getAttribute("data-rid") || "" }, function () {
+          star.setAttribute("aria-pressed", String(!on));
+        });
         return;
       }
       var add = t.closest && t.closest(".radd");
@@ -5790,6 +5840,7 @@
     railMarks();
     if (isFinite(savedRailTop)) railScrollTo(savedRailTop);
     railOpen(!!(memoPad && memoPad.resume()));
+    layoutImport();
   }
 
   // --- rail drag: sessions within their group, workspaces among themselves ---
@@ -5798,8 +5849,9 @@
   // workspace) on its side of the stars; a workspace section drags by its
   // bar among the sections. A line shows where it lands, clamped to the
   // list's edge when that place is scrolled out of view, and the drop
-  // stores the group's new order (WsRail.sessionOrder, wsOrder), which
-  // railMarks applies at once and after every swap. Over a place it cannot
+  // moves it at once and posts the move to the rail layout (layoutSave),
+  // which the next rail swap shows; a refused move goes back to where it
+  // stood, with the reason in a toast. Over a place it cannot
   // land (another workspace or worktree, the other side of the stars) the
   // cursor says no and a hint says why. A press that never moves past
   // RD_SLOP stays a click. The rest of a row is its link and never drags; a
@@ -5811,12 +5863,11 @@
   // (railGate), and a node replaced anyway is found again by its reply-id
   // or path.
   var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 48;
-  var RD_HINT = { ws: "js.rail.drag.ws", wt: "js.rail.drag.wt", stars: "js.rail.drag.stars" };
   var rdragged = false, rdLineEl = null, rdHintEl = null, rdRaf = 0;
   function rdPeers(item) {
     var ws = item.classList.contains("rws");
     return Array.prototype.filter.call(item.parentNode.children, function (c) {
-      return ws ? c.classList.contains("rws") : c.classList.contains("rs") && !c.classList.contains("ended") && !!c.wsStar === !!item.wsStar;
+      return ws ? c.classList.contains("rws") : c.classList.contains("rs") && !c.classList.contains("ended") && WsRail.starred(c) === WsRail.starred(item);
     });
   }
   function rdLine(box) {
@@ -5841,7 +5892,7 @@
       rdHintEl.className = "drhint";
       rdHintEl.setAttribute("role", "status");
     }
-    rdHintEl.textContent = wsT(RD_HINT[why]);
+    rdHintEl.textContent = wsT(WsRail.layoutRefusal(why));
     rdHintEl.style.left = Math.round(x + 14) + "px";
     rdHintEl.style.top = Math.round(y + 16) + "px";
     rdHintEl.hidden = false;
@@ -5950,9 +6001,9 @@
   }
   // rdEnd ends the press or drag; only a release drops (a cancel, or a
   // release this page never heard, leaves the rail as it stood). A drop
-  // applies the saved order at once (railMarks). A drag's click is
+  // moves the item at once and posts the move (rdSave). A drag's click is
   // swallowed (the capture listener below), and the rail swap held since
-  // the press lands after it.
+  // the press lands after it, or after the move's answer.
   function rdEnd(e) {
     var d = rdrag;
     if (!d || (e && e.pointerId !== d.id)) return;
@@ -5966,23 +6017,25 @@
       rdHint("");
       rdragged = true;
       setTimeout(function () { rdragged = false; }, 0);
-      if (e && e.type === "pointerup" && !d.noop && d.item.isConnected && WsRail.drop(d.item, d.ref, d.after)) rdSave(d.item);
+      if (e && e.type === "pointerup" && !d.noop && d.item.isConnected) rdSave(d.item, d.ref, d.after);
       railMarks();
     }
     // The press's click lands first, on the nodes it pressed.
     setTimeout(railRelease, 0);
   }
-  function rdSave(item) {
-    var r = region("rail");
-    if (!r) return;
-    function rid(c) { return c.getAttribute("data-rid") || ""; }
-    if (item.classList.contains("rws")) {
-      var paths = q(".rws", r).map(function (w) { return w.getAttribute("data-ws") || ""; });
-      wsOrd.place(paths, paths);
-      return;
-    }
-    var group = Array.prototype.filter.call(item.parentNode.children, function (c) { return c.classList.contains("rs") && !c.classList.contains("ended"); });
-    sessOrder.place(group.map(rid), q(".rs", r).map(rid));
+  // rdSave drops item next to ref (WsRail.drop) and posts the move, a
+  // session's (move) or a workspace's (wsmove), with an undo that puts
+  // the item back where it stood.
+  function rdSave(item, ref, after) {
+    var box = item.parentNode, next = item.nextSibling;
+    if (!WsRail.drop(item, ref, after)) return;
+    var ws = item.classList.contains("rws"), attr = ws ? "data-ws" : "data-rid";
+    var body = ws ? { op: "wsmove", path: item.getAttribute(attr) || "" } : { op: "move", rid: item.getAttribute(attr) || "" };
+    body[after ? "after" : "before"] = ref.getAttribute(attr) || "";
+    layoutSave(body, function () {
+      if (box.isConnected && item.isConnected) box.insertBefore(item, next && next.parentNode === box ? next : null);
+      railMarks();
+    });
   }
   if (railEl && WsRail) {
     railEl.addEventListener("pointerdown", rdStart);

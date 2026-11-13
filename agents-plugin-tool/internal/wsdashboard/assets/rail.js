@@ -1,16 +1,19 @@
 (function () {
   // The session rail's browser-side state, window.WsRail, for the session
-  // page's script (dashboard.js): per-session drafts, the starred sessions,
-  // the collapsed workspaces, and the rail's client-side marks (the viewed
-  // session's row, the starred rows pinned first, the drag order of the
-  // sessions and workspaces, the revive entry in flight), with the drag's
-  // refusal, re-find, and swap-hold rules. The stored state is in localStorage under ws.dashboard.,
-  // through the store the caller passes ({ load(key), save(key, value or
-  // null) }, which must not throw), so the page works the same with storage
-  // absent; nothing reaches the server. The DOM helpers touch only the
-  // elements they are given; the revive route and hand-off notice, the
-  // popover and delete modal helpers at the end, and the approval card's
-  // input preview after them, are pure.
+  // page's script (dashboard.js): per-session drafts, the collapsed
+  // workspaces, and the rail's client-side marks (the viewed session's row,
+  // the revive entry in flight), with the drag's refusal, re-find, and
+  // swap-hold rules, and the rail layout route's answers. The daemon keeps
+  // the rows' order, the stars, and the workspace order (its rail layout,
+  // POST /rail/layout) and renders the rail in that order; the page only
+  // reads a row's star from it. The drafts and the collapsed set are in
+  // localStorage under ws.dashboard., through the store the caller passes
+  // ({ load(key), save(key, value or null) }, which must not throw), so the
+  // page works the same with storage absent; the retired local order and
+  // stars are read there once, for the layout's import. The DOM helpers
+  // touch only the elements they are given; the revive route and hand-off
+  // notice, the popover and delete modal helpers at the end, and the
+  // approval card's input preview after them, are pure.
   var DRAFT = "ws.dashboard.draft.", DRAFTS = "ws.dashboard.drafts";
   var STARS = "ws.dashboard.stars", COLLAPSED = "ws.dashboard.railcol";
   var ORDER = "ws.dashboard.railorder", WSORDER = "ws.dashboard.wsorder";
@@ -106,93 +109,66 @@
       }
     };
   }
-  // stars are the starred sessions' reply-ids; collapsed the collapsed
-  // workspaces' paths.
-  function stars(store) { return stringSet(store, STARS); }
+  // collapsed is the collapsed workspaces' paths.
   function collapsed(store) { return stringSet(store, COLLAPSED); }
 
-  // orderList is a drag order: ids kept as one JSON array. list() reads it;
-  // place(group, present) stores group (the ids of one group, in their new
-  // order) in place of that group's ids and drops each stored id present
-  // (every id the rail shows) does not hold, returning what it stored. The
-  // groups' ids never overlap, so one array holds every group's order. A
-  // store that throws reads as no order and keeps nothing: the rail shows
-  // the server's order.
-  function orderList(store, key) {
-    function list() { try { return strings(parse(store.load(key), [])); } catch (e) { return []; } }
-    return {
-      list: list,
-      place: function (group, present) {
-        var g = strings(group), keep = Object.create(null);
-        strings(present).forEach(function (x) { keep[x] = true; });
-        var l = list().filter(function (x) { return keep[x] && g.indexOf(x) < 0; }).concat(g);
-        try { store.save(key, l.length ? JSON.stringify(l) : null); } catch (e) { /* not kept: the server's order stands */ }
-        return l;
-      }
-    };
+  // LEGACY are the retired local layout's keys (the starred sessions, the
+  // sessions' drag order by reply-id, the workspaces' by path), and what
+  // the import op calls each.
+  var LEGACY = [[ORDER, "order"], [STARS, "stars"], [WSORDER, "wsorder"]];
+  function legacyClear(store) { LEGACY.forEach(function (k) { store.save(k[0], null); }); }
+  // legacyImport is the rail layout's import of the retired local layout
+  // held in store, for a page whose rail reports the server layout empty
+  // (empty); null when there is nothing to import. A server layout that
+  // holds an entry wins: the local keys are cleared, never imported.
+  function legacyImport(store, empty) {
+    var body = { op: "import" }, any = false;
+    LEGACY.forEach(function (k) {
+      var v = strings(parse(store.load(k[0]), []));
+      body[k[1]] = v;
+      if (store.load(k[0]) !== null) any = true;
+    });
+    if (!any) return null;
+    if (!empty) { legacyClear(store); return null; }
+    return body;
   }
-  // sessionOrder is the sessions' drag order by reply-id, wsOrder the
-  // workspaces' by path.
-  function sessionOrder(store) { return orderList(store, ORDER); }
-  function wsOrder(store) { return orderList(store, WSORDER); }
+  // legacyDone takes the import's answer: an import applied, or one the
+  // server did not apply (another browser's came first), clears the local
+  // keys; any other answer (retry: the daemon has not read its registry
+  // yet; an unreachable daemon) keeps them for a later load.
+  function legacyDone(store, answer) {
+    var a = answer || {};
+    if (a.applied === true || a.reason === "not_applied") legacyClear(store);
+  }
+
+  // LAYOUT_REFUSALS maps the rail layout route's refusal reasons (the
+  // layout* codes in rail_layout.go) to their strings; the drag's own
+  // refusals (dropRefusal) and later the tree's and the keyboard's name
+  // the same codes. layoutRefusal is a reason's string key, an unknown or
+  // missing reason's the generic one.
+  var LAYOUT_REFUSALS = {
+    unknown: "js.rail.layout.unknown", ended: "js.rail.layout.ended", self: "js.rail.layout.self",
+    depth: "js.rail.layout.depth", workspace: "js.rail.layout.workspace", group: "js.rail.layout.group",
+    level: "js.rail.layout.level", stars: "js.rail.layout.stars", child: "js.rail.layout.child",
+    toplevel: "js.rail.layout.toplevel", invalid: "js.rail.layout.invalid", retry: "js.rail.layout.retry",
+    store: "js.rail.layout.store"
+  };
+  function layoutRefusal(reason) {
+    return LAYOUT_REFUSALS.hasOwnProperty(reason) ? LAYOUT_REFUSALS[reason] : LAYOUT_REFUSALS.invalid;
+  }
+  // staleRail reports a rail render (its HTML) older than the layout
+  // generation min: its list's data-lgen is below it. A render without one
+  // is never stale.
+  function staleRail(html, min) {
+    var m = /\bdata-lgen="([0-9]+)"/.exec(String(html || ""));
+    return !!m && +m[1] < min;
+  }
 
   function hasClass(el, c) { return (" " + (el.className || "") + " ").indexOf(" " + c + " ") >= 0; }
-  function kids(box, c) {
-    return Array.prototype.slice.call(box.children).filter(function (el) { return hasClass(el, c); });
-  }
-  // settle puts els (box's children, sorted) in their order before after,
-  // touching nothing when they already stand in it: a moved node loses the
-  // focus, and the rail re-sorts on every click that marks it.
-  function settle(box, els, after) {
-    var same = true;
-    for (var i = 1; i < els.length && same; i++) same = els[i - 1].nextSibling === els[i];
-    if (same && (els[els.length - 1].nextSibling || null) === after) return;
-    els.forEach(function (el) { box.insertBefore(el, after); });
-  }
-  function ord(el, i) {
-    if (el.getAttribute("data-ord") === null) el.setAttribute("data-ord", String(i));
-    return +el.getAttribute("data-ord");
-  }
-
-  // pin marks each row of box (a rail sessions list) starred or not from
-  // starred (a stars set) and orders the starred rows first. Within each
-  // part the rows follow order (the drag order's ids, for a list of live
-  // rows): a row it does not hold (a session new since the last drag)
-  // first, then the rest as it lists them; without order, and among the
-  // new rows, in the order the server sent (data-ord, set on first sight).
-  // Unstarring a row returns it to its place. Anything after the rows (the
-  // ended fold) stays after them.
-  function pin(box, starred, order) {
-    var rows = kids(box, "rs");
-    if (!rows.length) return;
-    var after = rows[rows.length - 1].nextSibling || null;
-    rows.forEach(function (r, i) {
-      var id = r.getAttribute("data-rid") || "", s = starred.has(id);
-      r.wsOrd = ord(r, i);
-      r.wsRank = order ? order.indexOf(id) : -1;
-      r.wsStar = s;
-      var b = r.querySelector(".star");
-      if (b) b.setAttribute("aria-pressed", String(s));
-    });
-    rows.sort(function (a, b) { return (b.wsStar - a.wsStar) || (a.wsRank - b.wsRank) || (a.wsOrd - b.wsOrd); });
-    settle(box, rows, after);
-  }
-
-  // arrange orders the workspace sections of list (the rail's list) by
-  // order (the drag order's paths); a section it does not hold goes after
-  // the ordered ones, in the order the server sent (data-ord). Anything
-  // after the sections stays after them.
-  function arrange(list, order) {
-    var ws = kids(list, "rws");
-    if (!ws.length) return;
-    var after = ws[ws.length - 1].nextSibling || null;
-    ws.forEach(function (w, i) {
-      var k = (order || []).indexOf(w.getAttribute("data-ws") || "");
-      w.wsOrd = ord(w, i);
-      w.wsRank = k < 0 ? Infinity : k;
-    });
-    ws.sort(function (a, b) { return (a.wsRank - b.wsRank) || (a.wsOrd - b.wsOrd); });
-    settle(list, ws, after);
+  // starred reports a session row whose star the daemon rendered pressed.
+  function starred(el) {
+    var b = el && el.querySelector ? el.querySelector(".star") : null;
+    return !!b && b.getAttribute("aria-pressed") === "true";
   }
 
   // drop moves item (a live session row or a workspace section) next to
@@ -203,7 +179,7 @@
   function drop(item, ref, after) {
     if (!item || !ref || item === ref || !item.parentNode || ref.parentNode !== item.parentNode) return false;
     var kind = hasClass(item, "rws") ? "rws" : "rs";
-    if (!hasClass(ref, kind) || hasClass(item, "ended") || hasClass(ref, "ended") || !!item.wsStar !== !!ref.wsStar) return false;
+    if (!hasClass(ref, kind) || hasClass(item, "ended") || hasClass(ref, "ended") || (kind === "rs" && starred(item) !== starred(ref))) return false;
     item.parentNode.insertBefore(item, after ? ref.nextSibling : ref);
     return true;
   }
@@ -214,20 +190,21 @@
     return null;
   }
   // dropRefusal names why a dragged session row cannot land where the
-  // pointer is (over, the element under it): "ws" over another workspace,
-  // "wt" over another worktree of its own, "stars" over a live row of its
-  // own list on the other side of the stars; "" anywhere else (its own
-  // group, a header, the ended fold, or outside the list, where the drop
-  // takes the nearest place). A workspace section is never refused.
+  // pointer is (over, the element under it), as a layout refusal reason
+  // (LAYOUT_REFUSALS): "workspace" over another workspace, "group" over
+  // another worktree of its own, "stars" over a live row of its own list on
+  // the other side of the stars; "" anywhere else (its own group, a header,
+  // the ended fold, or outside the list, where the drop takes the nearest
+  // place). A workspace section is never refused.
   function dropRefusal(item, over) {
     if (!item || !over || hasClass(item, "rws")) return "";
     var ws = up(over, "rws");
     if (!ws) return "";
-    if (ws !== up(item, "rws")) return "ws";
+    if (ws !== up(item, "rws")) return "workspace";
     var wt = up(over, "rwt");
-    if (wt && wt !== up(item, "rwt")) return "wt";
+    if (wt && wt !== up(item, "rwt")) return "group";
     var row = up(over, "rs");
-    if (row && row !== item && row.parentNode === item.parentNode && !hasClass(row, "ended") && !!row.wsStar !== !!item.wsStar) return "stars";
+    if (row && row !== item && row.parentNode === item.parentNode && !hasClass(row, "ended") && starred(row) !== starred(item)) return "stars";
     return "";
   }
 
@@ -425,12 +402,12 @@
     drafts: drafts,
     emptyDraft: emptyDraft,
     stripMarkers: stripMarkers,
-    stars: stars,
     collapsed: collapsed,
-    sessionOrder: sessionOrder,
-    wsOrder: wsOrder,
-    pin: pin,
-    arrange: arrange,
+    legacyImport: legacyImport,
+    legacyDone: legacyDone,
+    layoutRefusal: layoutRefusal,
+    staleRail: staleRail,
+    starred: starred,
     drop: drop,
     dropRefusal: dropRefusal,
     itemKey: itemKey,
