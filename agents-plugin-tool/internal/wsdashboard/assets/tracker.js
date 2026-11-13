@@ -5847,6 +5847,8 @@
   function qPathRows(a, p) {
     var leaf = p.leaf.toLowerCase(), pre = [], fz = [];
     ((a && a.entries) || []).forEach(function (x, i) {
+      // a deleted file (gone) has nothing to open; a link is never opened or descended
+      if (x.gone || x.link) return;
       var r = { name: x.name, dir: !!x.dir, key: x.name };
       if (x.name.toLowerCase().indexOf(leaf) === 0) pre.push(r);
       else { var m = qScore(x.name, leaf); if (m) fz.push({ row: r, score: m.score, order: i }); }
@@ -5881,7 +5883,10 @@
   function qRun() {
     var q = $('tkqin').value, t = q.trim(), gen = ++qs.gen, now = Date.now();
     qAbort();
+    var wasPath = !!qs.path;
     qs.q = q; qs.sel = {}; qs.path = qPathOf(t);
+    // path rows ({name, dir}) and found files ({path}) draw differently: never keep one as the other's stale rows
+    if (!!qs.path !== wasPath) qs.S.files = qSlot0();
     qs.jump = qStrip(t);
     qs.S.board = qDone(qBoard(qs.rows, t));
     qs.S.tracker = qDone(qTracker(t));
@@ -6144,7 +6149,8 @@
   // since macOS Option changes e.key.
   function qKey(e) {
     var k = e.key, v = qs.cur, d = /^Digit([0-5])$/.exec(e.code || '');
-    if (e.altKey && d) { e.preventDefault(); if (d[1] === '0') qEnterJump(); else { qs.cur = QSLOTS[d[1] - 1]; qRender(); } return; }
+    // AltGr (Ctrl+Alt on Windows) types characters on some layouts; it stays typing
+    if (e.altKey && !e.ctrlKey && d) { e.preventDefault(); if (d[1] === '0') qEnterJump(); else { qs.cur = QSLOTS[d[1] - 1]; qRender(); } return; }
     if (k === 'Tab') { e.preventDefault(); qTab(e.shiftKey ? -1 : 1); return; }
     if (v === 'jump' && (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown')) {
       e.preventDefault();

@@ -224,6 +224,9 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert.equal(qs.cur, 'board');
   press('¢', { altKey: true, code: 'Digit4' });
   assert.equal(qs.cur, 'tracker', 'Alt+4 matched on e.code (macOS Option changes e.key)');
+  const altGr = press('²', { altKey: true, ctrlKey: true, code: 'Digit2' });
+  assert.equal(qs.cur, 'tracker', 'AltGr+2 (Ctrl+Alt) types instead of jumping');
+  assert(!altGr.prevented);
   press('º', { altKey: true, code: 'Digit0' });
   assert.equal(qs.cur, 'jump');
   press('ArrowDown');
@@ -285,8 +288,8 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert(node('tkqscope').textContent.includes(wsT('js.tk.qs.scopepath', '/tmp/')));
   flush();
   assert.deepEqual(plain(calls.filter(c => c[0] !== 'search')), [['list', '/tmp/']]);
-  settle('list', { entries: [{ name: 'bar', dir: false }, { name: 'xfoy' }, { name: 'food', dir: true }, { name: 'fo.txt' }] }); await tick();
-  assert.deepEqual(plain(S().files.rows.map(r => r.name)), ['food', 'fo.txt', 'xfoy'], 'prefix matches first, then fuzzy');
+  settle('list', { entries: [{ name: 'bar', dir: false }, { name: 'xfoy' }, { name: 'food', dir: true }, { name: 'fo.txt' }, { name: 'fold', link: true }, { name: 'fogone', gone: true }] }); await tick();
+  assert.deepEqual(plain(S().files.rows.map(r => r.name)), ['food', 'fo.txt', 'xfoy'], 'prefix matches first, then fuzzy; links and gone files dropped');
   qs.cur = 'files';
   press('Enter');
   assert.equal(node('tkqin').value, '/tmp/food/', 'Enter on a folder completes the path');
@@ -309,6 +312,20 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   settle('list', { status: 404, text: 'no such directory' }, true); await tick();
   assert.equal(S().files.state, 'err');
   assert(node('tkqlist').innerHTML.includes(wsT('js.tk.qs.listfail', 'no such directory')), 'the refusal shows as an error row');
+  // Leaving path mode with listed rows, and entering it with found files, drops the other kind's rows.
+  type('/tmp/');
+  flush();
+  settle('list', { entries: [{ name: 'a.txt' }] }); await tick();
+  assert.equal(S().files.rows.length, 1);
+  type('a');
+  assert.equal(S().files.rows.length, 0, 'path rows are not kept as stale found files');
+  assert.equal(S().files.state, 'run');
+  assert.equal(timers.length, 1, 'the next fetch is armed');
+  flush();
+  settle('find', { items: [{ path: 'src/a.go' }] }); await tick();
+  type('/tmp/');
+  assert.equal(S().files.rows.length, 0, 'found files are not kept as stale path rows');
+  pend.splice(0); timers = [];
   // A LAN viewer never enters path mode: the text is an ordinary query.
   local = false; pend.splice(0); calls.splice(0); searches.splice(0);
   type('/tmp/fo');
@@ -355,15 +372,21 @@ async function hostCases() {
   // Open, unanswered items have no answer chip; an unmounted frame reads data-srcdoc.
   const textNode = text => ({ cloneNode: () => ({ textContent: text }) });
   const unanswered = { id: 'item-42', hasAttribute: () => true, querySelector: () => textNode('Unanswered question') };
-  const frame = { getAttribute: k => k === 'data-srcdoc' ? '<div class="doc-body">Deferred body</div>' : null };
-  const boardTopic = { getAttribute: () => 'example', querySelector: s => s === '.tname' ? textNode('Example') : s === '.doc-body' ? { querySelector: () => frame } : null };
-  let parsedFrom = '';
+  // the board frame as a mounted iframe (srcdoc) and as an unmounted placeholder div (data-srcdoc)
+  const frames = { iframe: { getAttribute: k => k === 'srcdoc' ? '<div class="doc-body">Mounted body</div>' : null },
+    placeholder: { getAttribute: k => k === 'data-srcdoc' ? '<div class="doc-body">Deferred body</div>' : null } };
+  let frame = null, parsedFrom = '';
+  const boardTopic = { getAttribute: () => 'example', querySelector: s => s === '.tname' ? textNode('Example') : s === '.doc-body' ? { querySelector: f => f === '.doc-frame' ? frame : null } : null };
   const rowsCtx = vm.createContext({ framed: false, readItem: () => null, boardQ: () => [boardTopic],
-    doc: { createElement: () => ({ set innerHTML(v) { parsedFrom = v; }, content: { querySelector: () => textNode('Deferred body') } }) },
+    doc: { createElement: () => ({ set innerHTML(v) { parsedFrom = v; }, content: { querySelector: () => textNode(parsedFrom) } }) },
     q: (s, root) => s === '[id^="item-"]' && root === boardTopic ? [unanswered] : [] });
   vm.runInContext(block(dashboard, '  function paletteText(', '  function paletteClosed('), rowsCtx);
-  assert.deepEqual(plain(rowsCtx.paletteRows().map(x => x.group)), [1, 2, 3]);
-  assert(parsedFrom.includes('Deferred body'), 'the unmounted frame body is searched');
+  for (const [kind, text] of [['iframe', 'Mounted body'], ['placeholder', 'Deferred body']]) {
+    frame = frames[kind];
+    const got = rowsCtx.paletteRows();
+    assert.deepEqual(plain(got.map(x => x.group)), [1, 2, 3]);
+    assert(got[1].title.includes(text), 'the ' + kind + ' frame body is searched');
+  }
 
   // Jump against a fresh node; Ctrl+Enter (keep) leaves the focus in the palette.
   const fold = { tagName: 'DETAILS', open: false };

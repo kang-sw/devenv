@@ -4725,13 +4725,14 @@
       var name = topic.getAttribute("data-topic"), label = paletteText(topic.querySelector(".tname")) || name;
       var time = topic.querySelector(".tbar time"), at = time ? Number(time.getAttribute("data-at")) || Date.parse(time.getAttribute("datetime")) || 0 : 0;
       rows.push({ group: 1, kind: "board-topic", topic: name, title: label, at: at });
-      var body = topic.querySelector(".doc-body"), frame = body && body.querySelector("iframe.doc-frame"), text;
+      // A board frame is an iframe or, before it mounts, an inert div.doc-frame placeholder.
+      var body = topic.querySelector(".doc-body"), frame = body && body.querySelector(".doc-frame"), text;
       if (frame) {
         // srcdoc is available even for an opaque-origin sandbox. A template
         // parses it inertly: never execute a body's scripts or fetch its images.
         var parsed = doc.createElement("template");
-        // An unmounted board frame holds its document in data-srcdoc until it mounts.
-        parsed.innerHTML = frame.getAttribute("srcdoc") || frame.getAttribute("data-srcdoc") || "";
+        // An unmounted frame holds its document in data-srcdoc until it mounts.
+        parsed.innerHTML = frame.getAttribute("data-srcdoc") || frame.getAttribute("srcdoc") || "";
         text = paletteText(parsed.content.querySelector(".doc-body"));
       } else text = paletteText(body);
       var recap = paletteText(topic.querySelector(".rtext"));
