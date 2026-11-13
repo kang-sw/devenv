@@ -36,7 +36,7 @@ func TestMessageCarriesPicksAndConsoles(t *testing.T) {
 	}
 
 	// The held bubble shows capsules, not element text.
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
 		`<span class="achip mchip pchip" title="http://localhost:5173/settings&#10;#save&#10;Save"><b>#save</b><span class="anote">Save</span></span>`,
 		`<b>#empty</b></span>`,
@@ -186,7 +186,7 @@ func TestDeliveredPicksAndConsolesRenderAsCapsules(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
 		`<span class="achip mchip pchip" title="http://localhost:5173/&#10;[data-testid=&#34;a&amp;b&#34;]&#10;x &lt; y"><b>[data-testid=&#34;a&amp;b&#34;]</b><span class="anote">x &lt; y</span></span>`,
 		`<span class="achip mchip cchip" title="http://localhost:5173/&#10;E1 &lt;boom&gt;&#10;E2&#10;E3"><b>console &times;3</b><span class="anote">http://localhost:5173/</span></span></div>user words</div>`,
