@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: c510d46b47d38e43
 sage-review-completeness-reviewed: c510d46b47d38e43
+completed: 2026-11-13
 ---
 
 # Dashboard board notes: paste images into the note pen
