@@ -421,7 +421,14 @@
       "registered_at": "2026-11-13T14:07:32Z"
     },
     "261113-feat-ws-compaction-before-queued-followup": {
-      "registered_at": "2026-11-13T14:03:06Z"
+      "registered_at": "2026-11-13T14:03:06Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T15:22:22Z"
+      }
     },
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
