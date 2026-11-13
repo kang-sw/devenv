@@ -628,9 +628,11 @@ owns the whole tree:
   worker's own server checks neither.
 - **Cwd.** A worker's empty `cwd` is the worker's own working directory
   (its record's `cwd`, else its root), and a relative one resolves against
-  it, so a worker in a worktree spawns into that worktree; the child's root
-  (its session key's) stays the worker's. A lead's `pi.spawn` keeps
-  resolving against the lead's root.
+  it, so a worker in a worktree spawns into that worktree. Both a lead's
+  and a worker's spawn bind the child's root (and its delegate key) to the
+  Git worktree containing the resolved cwd; a cwd outside Git keeps the
+  caller's root. A lead's `pi.spawn` keeps resolving cwd against the lead's
+  root.
 - **Caps.** A spawn records the holder as the child's parent (`parent.kind:
   "conversation"`). The lead is depth 0, its Pi worker depth 1, and that
   worker's child depth 2, which is refused a spawn with the cap named. The
