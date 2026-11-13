@@ -4465,6 +4465,11 @@
   // ghost for the other, which a drag pulls out into that end. Two panels show when the ends fall
   // in different months, each paged on its own; the panels refit only on an open, a typed date, a
   // clear, or a drag end. Under the grid, a date input and a clear button per end.
+  // A plain click on a day moves an end too (rangeClick), so an end whose day no panel shows can
+  // still be set; it never inverts the pair. Two panels on different months: the left sets the
+  // start, the right the due. Else (one panel, or both on one month) the end nearer the day moves,
+  // the due on a tie; with one end set, a day on or after the start sets the due, a day before it
+  // moves the start, and mirrored for a lone due; with none set, the click sets the due.
   // Any close applies the pick once (closeMenu): an item's changed ends as one item.edit, a row's
   // draft fields; Esc and the discard capsule drop it (menuDiscard). An inverted pair is refused
   // by every close that can stay open (menuApplyClose).
@@ -4560,9 +4565,13 @@
     rangeDraw();
   }
   // an end moved by a drag, clamped at the other end (the ends never swap or push each other)
+  function rangeClamp(r, side, day) {
+    if (side === 's' && r.d && day > r.d) return r.d;
+    if (side === 'd' && r.s && day < r.s) return r.s;
+    return day;
+  }
   function rangeSet(r, side, day) {
-    if (side === 's' && r.d && day > r.d) day = r.d;
-    if (side === 'd' && r.s && day < r.s) day = r.s;
+    day = rangeClamp(r, side, day);
     if (r[side] === day) return;
     r[side] = day; r.last = side; r.err = rangeBad(r);
     rangeDraw();
@@ -4582,8 +4591,23 @@
   }
   // Pointer drags (mouse and touch) on a handle, captured by the menu so a redrawn grid keeps the
   // drag. A day under the pointer moves the end there; outside the end's panel the edge pages
-  // (rangeEdge, then every RG_EDGE_MS while it stays out). A tap on a day with neither end set sets the due.
+  // (rangeEdge, then every RG_EDGE_MS while it stays out). A plain click on a day moves an end (rangeClick).
   var RG_EDGE_MS = 450;
+  // the end a click on day moves, per the rules above the picker's functions; pane is the clicked panel, 'l' or 'r'
+  function rangeClickEnd(r, day, pane) {
+    if (!r.s && !r.d) return 'd';
+    if (r.rm && r.rm !== r.lm) return pane === 'r' ? 'd' : 's';
+    if (!r.d) return day >= r.s ? 'd' : 's';
+    if (!r.s) return day <= r.d ? 's' : 'd';
+    return Math.abs(dayNum(day) - dayNum(r.s)) < Math.abs(dayNum(day) - dayNum(r.d)) ? 's' : 'd';
+  }
+  function rangeClick(r, day, pane) {
+    var side = rangeClickEnd(r, day, pane);
+    day = rangeClamp(r, side, day);
+    if (r[side] === day) return;
+    r[side] = day; r.last = side; r.err = rangeBad(r);
+    rangeFit(r); rangeDraw();
+  }
   function rangeDown(e) {
     // On a picker with the capsule, a press on anything but a control (a day, a header, the panel)
     // keeps focus where it was: focus left on the body would take Esc and Tab away from menuKey.
@@ -4592,7 +4616,8 @@
     if (!r || e.button > 0) return;
     if (!k) {
       var cell = e.target.closest('[data-day]');
-      if (cell && !r.s && !r.d) { r.d = cell.getAttribute('data-day'); r.last = 'd'; rangeFit(r); rangeDraw(); }
+      var pn = cell && cell.closest('[data-rgg]');
+      if (cell) rangeClick(r, cell.getAttribute('data-day'), pn && pn.getAttribute('data-rgg'));
       return;
     }
     e.preventDefault();
