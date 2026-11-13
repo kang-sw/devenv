@@ -128,6 +128,9 @@ type DaemonOptions struct {
 	// keepAlive replaces sseKeepAlive, so a test drives the streams' idle
 	// frame and the WebSocket read window; zero is sseKeepAlive.
 	keepAlive time.Duration
+	// ackDelay replaces ackCheckDelay, so a test drives the answer check;
+	// zero is ackCheckDelay.
+	ackDelay time.Duration
 }
 
 // MailWaker receives the daemon's mailbox wake signals (DaemonOptions.MailWake).
@@ -186,8 +189,12 @@ type Daemon struct {
 	snapshots *SnapshotCache
 	// live is the hosted sessions' snapshot slots (live_hosted.go).
 	live hostedSlots
-	// inboxMu serializes the daemon's own inbox writes (sends and cancels).
+	// inboxMu serializes the daemon's own inbox writes (sends and cancels,
+	// and the answer check's record and nudge).
 	inboxMu sync.Mutex
+	// acks runs the answer checks (ack_check.go), nil without a session
+	// index.
+	acks *ackChecker
 	// lan is LAN mode; tokenMu serializes reading and minting the LAN token.
 	lan     bool
 	tokenMu sync.Mutex
@@ -416,6 +423,11 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 	}
 	if opts.Sessions != nil {
 		d.source = agentSessions{inner: opts.Sessions, dir: opts.Dir, now: time.Now, snaps: d.snapshots}
+		delay := opts.ackDelay
+		if delay <= 0 {
+			delay = ackCheckDelay
+		}
+		d.acks = &ackChecker{delay: delay, run: d.checkAnswers}
 		d.index = NewIndex(IndexOptions{Dir: opts.Dir, Source: d.source, Log: logw, OnChange: d.sessionChanged})
 	}
 	d.server = &http.Server{Handler: d.Handler(), ReadHeaderTimeout: 10 * time.Second}
@@ -524,6 +536,7 @@ func (d *Daemon) sessionChanged(replyID string) {
 	}
 	d.stats.WakeSession.Add(1)
 	d.broker.wake(replyID)
+	d.acks.poke(replyID)
 }
 
 // agentChanged is the agent runner's write hook, called from the
@@ -538,6 +551,7 @@ func (d *Daemon) agentChanged(replyID, _ string) {
 	}
 	d.stats.WakeAgent.Add(1)
 	d.broker.wake(replyID)
+	d.acks.poke(replyID)
 }
 
 // poll fills the session index at once and then re-reads every registered
@@ -578,6 +592,7 @@ func (d *Daemon) Done() <-chan struct{} { return d.done }
 func (d *Daemon) Close() {
 	d.closeOnce.Do(func() {
 		close(d.stop)
+		d.acks.close()
 		// Shutdown closes the listener at once, so no new session or page
 		// connects, and the hosted sessions drain meanwhile (proxy.go):
 		// the whole stop stays under the successor's lock wait.

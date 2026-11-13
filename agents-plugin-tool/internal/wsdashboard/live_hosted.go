@@ -143,6 +143,7 @@ func (s *daemonLiveSlot) Publish(snap wslive.Snapshot) {
 	if changed {
 		d.stats.WakeLive.Add(1)
 		d.broker.wake(liveDep(s.replyID))
+		d.acks.poke(s.replyID)
 	}
 }
 
@@ -156,6 +157,7 @@ func (s *daemonLiveSlot) RingAppended() {
 	d.live.mu.Unlock()
 	d.stats.WakeLive.Add(1)
 	d.broker.wake(ringDep(s.replyID))
+	d.acks.poke(s.replyID)
 }
 
 func (s *daemonLiveSlot) Close() {

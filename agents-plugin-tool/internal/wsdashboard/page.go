@@ -99,6 +99,25 @@ type ContactSource interface {
 	ReadContacts(reg Registration) (contacts []Contact, ok bool)
 }
 
+// BoardItemsSource is a SessionSource that reads a session's board item
+// status alone, without rendering the board: the daemon's answer check
+// (ack_check.go) reads it to tell which answered items the session still
+// left open. ok is false when the session no longer exists or the source
+// cannot read it; a source without the interface gets no answer check.
+type BoardItemsSource interface {
+	BoardItems(reg Registration) (items BoardItems, ok bool)
+}
+
+// BoardItems is a session board's item status.
+type BoardItems struct {
+	// Open holds the ID of every item whose status is open; an assumed,
+	// answered, withdrawn, or superseded item, and a missing one, is absent.
+	Open map[int]bool
+	// Reasked maps each re-asked item's ID to its latest re-ask time, epoch
+	// milliseconds (PageContent.Reasked); nil when none was re-asked.
+	Reasked map[int]int64
+}
+
 // MailPrintSource is an optional SessionSource seam: a print of what a
 // session's page shows from its own mail state outside any watched file (in
 // ws-mcp, its reply-registry entry's contacts and its reply-id unread
