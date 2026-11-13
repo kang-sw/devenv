@@ -410,7 +410,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-13T14:32:48Z",
         "impl": {
           "branch": "impl/develop/bribe-amiss-icky"
@@ -419,19 +419,6 @@
     },
     "261113-feat-werkschaft-thin-tauri-shell": {
       "registered_at": "2026-11-13T14:07:32Z"
-    },
-    "261113-feat-ws-compaction-before-queued-followup": {
-      "registered_at": "2026-11-13T14:03:06Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T15:23:03Z",
-        "impl": {
-          "branch": "impl/develop/twice-tweet-much"
-        }
-      }
     },
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
