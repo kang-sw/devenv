@@ -463,6 +463,38 @@ Verification:
   - The `sent · note` mark disappears, and the open-question pill count
     rises by one.
 
+### Result (bf4e1be18) - 2026-11-14
+
+- Landed:
+  - `newestTurn`, `turnStart`, and `settledTurnStart` in
+    `wsdashboard/pageview_inbox.go`. A newest turn with no duration reports
+    no start, with no fallback to an older turn. The start is commented as
+    approximate.
+  - `sentMarks(drained, held, reasked, settled)` clears a drained note-only
+    chip with `0 < SentAt < settled`. A cleared newest chip leaves no older
+    value mark behind.
+  - `buildSessionView` passes `settledTurnStart(in.Ring)`.
+- Tests (b8d1e55a7):
+  - `TestSentMarksClearNoteOnlyChipsAtTurnSettle` covers every listed case,
+    plus a held answer after a cleared note.
+  - `TestSettledTurnStartReadsTheNewestTurn`.
+  - `TestSessionPageDropsANoteOnlySentMarkOnceItsTurnSettles` covers the
+    convlive `.sentdata` drop.
+  - `TestCheckRowClientPaths` is extended so `applySent` without the entry
+    removes `sent-sent` and the `sentmark`. `TestTabLabelAsksAreThePillsItems`
+    and `TestTabLabelCount` stay green.
+- Verification:
+  - `go test ./internal/wsdashboard/ -count=1`: ok.
+  - Headless check on an isolated dev daemon (scratch `WS_CACHE_HOME`, own
+    port, shut down afterwards):
+    - Server-side, `.sentdata` went from
+      `<i data-id="01" data-answer="" data-note="just a note" data-state="sent">`
+      to empty once a `turn` ring entry starting after the chip landed.
+    - In live Chromium, `.sent-sent` and the `sent · note` sentmark
+      disappeared without a reload.
+    - The tab title's open count, which comes from the pill's count, went
+      from (1) to (2).
+
 ### Phase 2: Daemon answer check and nudge
 
 Implements Decisions 1, 2, and 5-9. Depends on Phase 1's settled-turn
@@ -540,6 +572,73 @@ Verification:
   - The conversation shows the nudge as the next user turn, once. The item
     keeps its `sent` mark until the agent records it.
 
+### Result (bf4e1be18) - 2026-11-14
+
+- Landed:
+  - `BoardItemsSource` and `BoardItems` in `wsdashboard/page.go`.
+    `agentSessions.BoardItems` forwards them; an agent conversation gets an
+    empty value and true.
+  - `mcp.DashboardSessionSource.BoardItems` (7f7573afc) reads
+    `record.Whiteboard` without a render.
+  - `wsdashboard/ack_check.go`:
+    - the `ack-check.json` read and write (temp file and rename), and the
+      pure `ackBatch` / `ackNudgeIDs` / `ackNudgeText`;
+    - `checkAnswers`, which runs the Decision 5 gates in order and adds the
+      aborted, no-duration, and interrupt skips;
+    - the first-evaluation seed;
+    - `commitAnswerCheck`, which re-checks held messages and the whole record
+      under `d.inboxMu`, then writes the record and sends;
+    - `ackChecker`, the per-session coalescing timer (1 s), closed in
+      `Daemon.Close`.
+  - Triggers: `sessionChanged`, `agentChanged`, `daemonLiveSlot.Publish`
+    (when changed), and `RingAppended`.
+  - `inboxChanged` is extracted from `inboxAnswered`; the nudge uses it.
+  - The interrupt route records `interruptedAt` through `recordInterrupt`.
+  - Decision 11:
+    - `wslive.Event.Reason` and `RingEntry.Reason` (`omitempty`), copied
+      onto the `RingTurn` entry.
+    - `dashboard_intake` describes `turn_end {reason?}`.
+    - The Claude mod sends `reason` on the main-thread `turn_end`
+      (fa0dde139), mirrored to wsflow.
+- Decisions taken:
+  - The answer check asks `agentSessions.readsBoardItems()` first, so a
+    source without `BoardItemsSource` never gets a seed file written.
+  - Before the board read, the batch is computed without the re-ask map.
+    Re-ask only drops chips, so an empty result there means an empty batch.
+  - The interrupt route takes the session directory as the inbox
+    directory's parent, which keeps `inboxWrite`'s signature.
+  - The commit compares the whole record, so an interrupt that lands
+    between the unlocked read and the commit also aborts the commit.
+- Tests (b8d1e55a7):
+  - `ack_check_test.go` covers:
+    - the pure functions: bounds, note-only, stale, missing and non-open
+      items, sorting, the 20-ID cap, and the exact Decision 9 text;
+    - one integration test for each Verification scenario: nudge once, no
+      loop, recorded, note-only, held input, busy, dashboard interrupt
+      through the real route, terminal stop with each reason, first
+      evaluation, no duration, no adapter or agent conversation, restart,
+      and concurrency under `-race`;
+    - the trigger path.
+  - `TestDashboardBoardItemsReadsOpenItemsAndReaskTimes` and
+    `TestDashboardIntakeKeepsTheTurnEndReason` (mcp).
+  - The mod `dashboard.test.ts` checks that the `turn_end` reason is
+    present for `answer`, `aborted`, and `error`, and absent when empty.
+- Verification:
+  - `go test ./internal/wsdashboard/ -count=15 -race -run 'Ack|AnswerCheck|...'`: ok.
+  - `go test ./internal/mcp/` (full package): ok.
+  - `claude plugin test .` in `agents-plugin`: 821 pass.
+  - `TestWsflowHooksMirrorUpToDate`: ok.
+  - `python3 -m unittest discover agents-plugin-wsflow/tests`: ok.
+  - Headless check on an isolated dev daemon:
+    - The first check seeded `through` and sent nothing.
+    - A drained value chip for open item (01), followed by a newer turn,
+      gave exactly one held entry with the Decision 9 text naming (01).
+    - `through` was set to that turn's start.
+    - The page showed the held nudge, and the item kept its `sent` mark.
+    - Later triggers (held nudge, drained nudge, the nudge turn settled with
+      the item still open) sent nothing more.
+  - Independent lite review: clean.
+
 ### Phase 3: Runbook
 
 - In `ai-docs/manuals/ws-mcp.md`, describe:
@@ -556,3 +655,19 @@ Verification:
   note-only mark clearing at turn settle; each statement matches the code.
 - `go test ./...` from `agents-plugin-tool/` stays green apart from the
   known darwin environment failures.
+
+### Result (f2399e6e3) - 2026-11-14
+
+- Landed: `ws-mcp.md` explains how the inbox drives the note-only mark
+  clearing, and gives `sessions/<reply-id>/ack-check.json` its own entry.
+  - The entry covers the `through` and `interruptedAt` fields, the batch
+    rule, the triggers, every Decision 5 gate as a bullet, the aborted and
+    interrupt skips, the first-evaluation seed, and once per batch.
+  - It also covers the write-before-send rule and the lock re-check.
+- Verification:
+  - The independent lite review checked the runbook against the code and
+    found it consistent.
+  - `go test ./... -count=1 -timeout 45m` from `agents-plugin-tool/` passed
+    every package except the known darwin environment failures:
+    - `cmd/ws-mcp` TestHostedConnectionSeeingALANChangeReplacesTheDaemon;
+    - `internal/wsagent` TestClaudeLeadLocalSettingsCanonicalWorktree.
