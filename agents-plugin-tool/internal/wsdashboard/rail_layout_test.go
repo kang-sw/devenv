@@ -46,17 +46,21 @@ func layoutTestFacts() railFacts { return railFactsOf(layoutTestView()) }
 func emptyLayout() *railLayoutDoc { return &railLayoutDoc{Workspaces: map[string]*railLayoutWS{}} }
 
 // layoutRendered is the test view ordered by doc: each group's live ids
-// (by the group's path), the plain folder's ended ids ("ended"), and the
-// workspaces ("ws"), each joined by spaces; starred holds the ids whose
-// star counts.
+// in reading order, a parent's children right after it (by the group's
+// path), the plain folder's ended ids ("ended"), and the workspaces
+// ("ws"), each joined by spaces; starred holds the ids whose star counts.
 func layoutRendered(doc *railLayoutDoc) (order map[string]string, starred []string) {
 	view := layoutTestView()
 	orderRailView(&view, doc, layoutTestFacts())
 	order = map[string]string{}
 	var ws []string
 	add := func(key string, rows []RailRow) {
-		order[key] = strings.Join(railIDs(rows), " ")
+		var flat []RailRow
 		for _, r := range rows {
+			flat = append(append(flat, r), r.Children...)
+		}
+		order[key] = strings.Join(railIDs(flat), " ")
+		for _, r := range flat {
 			if r.Starred {
 				starred = append(starred, r.ReplyID)
 			}
@@ -460,6 +464,87 @@ func TestRailViewOrder(t *testing.T) {
 	orderRailView(&view, emptyLayout(), layoutTestFacts())
 	if !view.LayoutEmpty {
 		t.Error("an empty layout reads as non-empty")
+	}
+}
+
+// railTreeView is the test view on a tree: a1 holds b1 (of the linked
+// worktree, on feat/x) and a2 (waiting on an approval, its message long,
+// its stored star inert), b1 works, and a3 holds the ended ae.
+func railTreeView() RailView {
+	view := layoutTestView()
+	repo := &view.Workspaces[1]
+	repo.Worktrees[0].Branch = "main"
+	repo.Worktrees[1].Branch, repo.Worktrees[1].Folder = "feat/x", "feat"
+	repo.Worktrees[0].Sessions[1].Approval = &ApprovalWait{Tool: "Bash", Args: "git push"}
+	repo.Worktrees[0].Sessions[1].Message = "the whole last message"
+	repo.Worktrees[1].Sessions[0].Working = true
+	f := railFactsOf(view)
+	doc := emptyLayout()
+	doc.Workspaces["/w/repo"] = &railLayoutWS{Stars: []string{"a2", "ae"}, Children: map[string][]string{"a1": {"b1", "a2"}, "a3": {"ae"}}}
+	orderRailView(&view, doc, f)
+	return view
+}
+
+// TestRailViewTree pins the tree the view renders: a live child of a live
+// top-level parent leaves its own group's list for its parent's Children,
+// whatever group it is in, in the children order, starless, with a branch
+// tag when its worktree is not its parent's; the parent rolls its
+// children's approval waits and work up; an ended child stays in its
+// group's ended fold, its star hidden.
+func TestRailViewTree(t *testing.T) {
+	repo := railTreeView().Workspaces[1]
+	root, feat := repo.Worktrees[0], repo.Worktrees[1]
+	if got := strings.Join(railIDs(root.Sessions), " "); got != "a1 a3 a4" {
+		t.Errorf("root lists %q, want a1 a3 a4", got)
+	}
+	if got := strings.Join(railIDs(feat.Sessions), " "); got != "b2" {
+		t.Errorf("feat lists %q, want b2", got)
+	}
+	a1 := root.Sessions[0]
+	if got := strings.Join(railIDs(a1.Children), " "); got != "b1 a2" {
+		t.Fatalf("a1's children = %q, want b1 a2", got)
+	}
+	b1, a2 := a1.Children[0], a1.Children[1]
+	if !b1.Child || b1.BranchTag != "feat/x" || b1.Group != "/w/feat" || !b1.StarHidden {
+		t.Errorf("b1 = %+v, want a starless child tagged feat/x", b1)
+	}
+	if !a2.Child || a2.BranchTag != "" || a2.Starred || !a2.StarHidden {
+		t.Errorf("a2 = %+v, want a starless untagged child", a2)
+	}
+	if !a1.HasChildren || a1.KidApprovals != 1 || !a1.KidWorking || a1.Child {
+		t.Errorf("a1 = %+v, want a parent with one approval and work rolled up", a1)
+	}
+	a3 := root.Sessions[1]
+	if !a3.HasChildren || len(a3.Children) != 0 || a3.KidApprovals != 0 || a3.KidWorking {
+		t.Errorf("a3 = %+v, want a stored parent with no live child", a3)
+	}
+	if ae := root.Ended[0]; ae.ReplyID != "ae" || !ae.StarHidden || ae.Starred || ae.Child {
+		t.Errorf("ae = %+v, want an ended child in the fold, star hidden", ae)
+	}
+	if a4 := root.Sessions[2]; a4.HasChildren || a4.StarHidden {
+		t.Errorf("a4 = %+v, want a plain row", a4)
+	}
+}
+
+// TestRailViewOrphanPlacement pins an ended parent's live children: each
+// renders top-level in its own worktree group, in the parent's slot when
+// it shares the parent's worktree, else at the head of its group.
+func TestRailViewOrphanPlacement(t *testing.T) {
+	doc := emptyLayout()
+	doc.Workspaces["/w/repo"] = &railLayoutWS{Order: []string{"a1", "ae", "a2", "b1"}, Children: map[string][]string{"ae": {"a3", "b2"}}}
+	view := layoutTestView()
+	orderRailView(&view, doc, layoutTestFacts())
+	root, feat := view.Workspaces[1].Worktrees[0], view.Workspaces[1].Worktrees[1]
+	if got := strings.Join(railIDs(root.Sessions), " "); got != "a4 a1 a3 a2" {
+		t.Errorf("root lists %q, want a4 a1 a3 a2 (a3 in ae's slot)", got)
+	}
+	if got := strings.Join(railIDs(feat.Sessions), " "); got != "b2 b1" {
+		t.Errorf("feat lists %q, want b2 b1 (b2 at its group's head)", got)
+	}
+	for _, r := range append(root.Sessions, feat.Sessions...) {
+		if r.Child || r.StarHidden || len(r.Children) != 0 {
+			t.Errorf("%s = %+v, want a top-level row", r.ReplyID, r)
+		}
 	}
 }
 

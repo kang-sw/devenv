@@ -976,24 +976,33 @@ func pruneRailLayout(doc *railLayoutDoc, f railFacts) {
 // orderRailView orders view, as buildRailView built it, by the layout doc
 // (f read off that same view): within each worktree group the starred units
 // first, then the layout's order, a row it does not hold first, then the
-// rail's own order (newest registration first); a child of a live parent in
-// its group right after the parent, in the parent's children order (the
-// tree renders in a later phase; until then a child is a flat row). The
-// ended rows keep their own order (last seen), the starred ones first.
-// Each row's Starred is its star as it counts (a child's is inert). The
-// workspaces follow the workspace order, the rest after in the rail's
-// order.
+// rail's own order (newest registration first). A live child of a live
+// top-level parent leaves its own group's list for its parent's Children,
+// in the parent's children order, whatever group either is in; an
+// orphan, an ended child, and a child whose parent shows as a child itself
+// (a hand-edited file) stay in their own group. The ended rows keep their
+// own order (last seen), the starred ones first. Each row's Starred is its
+// star as it counts (a child's is inert), and Group, HasChildren, and the
+// roll-ups are set. The workspaces follow the workspace order, the rest
+// after in the rail's order.
 func orderRailView(view *RailView, doc *railLayoutDoc, f railFacts) {
 	for i := range view.Workspaces {
 		w := &view.Workspaces[i]
 		s := doc.scope(w.Path, f, false)
 		if !w.Repo {
-			s.orderRows(w.Sessions, w.Ended)
+			s.orderTree([]railGroupRows{{w.Path, "", &w.Sessions, &w.Ended}})
 			continue
 		}
+		groups := make([]railGroupRows, len(w.Worktrees))
 		for j := range w.Worktrees {
-			s.orderRows(w.Worktrees[j].Sessions, w.Worktrees[j].Ended)
+			wt := &w.Worktrees[j]
+			tag := wt.Branch
+			if wt.Detached || tag == "" {
+				tag = wt.Folder
+			}
+			groups[j] = railGroupRows{wt.Path, tag, &wt.Sessions, &wt.Ended}
 		}
+		s.orderTree(groups)
 	}
 	rank := map[string]int{}
 	for i, p := range railWSSeq(doc, f) {
@@ -1005,25 +1014,85 @@ func orderRailView(view *RailView, doc *railLayoutDoc, f railFacts) {
 	view.LayoutEmpty = railLayoutEmpty(doc)
 }
 
-// orderRows orders one worktree group's live and ended rows (orderRailView).
+// railGroupRows is one worktree group of a workspace as orderTree reads
+// it: its path, its branch tag (railRow.BranchTag), and its row lists.
+type railGroupRows struct {
+	path, tag   string
+	live, ended *[]RailRow
+}
+
+// nests reports a live child that renders under its parent: the parent is
+// live and shows top-level.
+func (s layoutScope) nests(id string) bool {
+	return s.child(id) && !s.child(s.parent(id))
+}
+
+// orderTree orders one workspace's groups (orderRailView).
+func (s layoutScope) orderTree(groups []railGroupRows) {
+	kids := map[string]RailRow{}
+	tags := map[string]string{}
+	for _, g := range groups {
+		tags[g.path] = g.tag
+		top := (*g.live)[:0]
+		for _, r := range *g.live {
+			r.Group, r.HasChildren = g.path, s.hasChildren(r.ReplyID)
+			if s.nests(r.ReplyID) {
+				kids[r.ReplyID] = r
+				continue
+			}
+			top = append(top, r)
+		}
+		*g.live = top
+		for i := range *g.ended {
+			e := &(*g.ended)[i]
+			e.Group, e.HasChildren, e.StarHidden = g.path, s.hasChildren(e.ReplyID), s.child(e.ReplyID)
+		}
+		s.orderRows(*g.live, *g.ended)
+	}
+	for _, g := range groups {
+		for i := range *g.live {
+			p := &(*g.live)[i]
+			for _, id := range s.childIDs(p.ReplyID) {
+				k, ok := kids[id]
+				if !ok || s.parent(id) != p.ReplyID {
+					continue
+				}
+				delete(kids, id)
+				k.Child, k.Starred, k.StarHidden = true, false, true
+				if k.Group != p.Group {
+					k.BranchTag = tags[k.Group]
+				}
+				if k.Approval != nil {
+					p.KidApprovals++
+				} else if k.Working {
+					p.KidWorking = true
+				}
+				p.Children = append(p.Children, k)
+			}
+		}
+	}
+}
+
+// childIDs is id's stored children, in their order.
+func (s layoutScope) childIDs(id string) []string {
+	if s.w == nil {
+		return nil
+	}
+	return s.w.Children[id]
+}
+
+// orderRows orders one worktree group's top-level live rows and its ended
+// rows (orderTree).
 func (s layoutScope) orderRows(live, ended []RailRow) {
 	type unitKey struct {
-		star           bool
-		rank, pos, kid int
-	}
-	unit := func(id string) unitKey {
-		return unitKey{star: s.starOn(id), rank: s.rank(id), pos: s.f.rows[id].Pos}
+		star      bool
+		rank, pos int
 	}
 	keys := map[string]unitKey{}
 	for i := range live {
 		id := live[i].ReplyID
-		k := unit(id)
-		if p := s.parent(id); s.child(id) && s.f.rows[p].Group == s.f.rows[id].Group {
-			k = unit(p)
-			k.kid = 1 + slices.Index(s.w.Children[p], id)
-		}
-		keys[id] = k
-		live[i].Starred = s.starOn(id)
+		keys[id] = unitKey{star: s.starOn(id), rank: s.rank(id), pos: s.f.rows[id].Pos}
+		live[i].Starred = keys[id].star
 	}
 	sort.SliceStable(live, func(i, j int) bool {
 		a, b := keys[live[i].ReplyID], keys[live[j].ReplyID]
@@ -1032,10 +1101,8 @@ func (s layoutScope) orderRows(live, ended []RailRow) {
 			return a.star
 		case a.rank != b.rank:
 			return a.rank < b.rank
-		case a.pos != b.pos:
-			return a.pos < b.pos
 		}
-		return a.kid < b.kid
+		return a.pos < b.pos
 	})
 	for i := range ended {
 		ended[i].Starred = s.starOn(ended[i].ReplyID)

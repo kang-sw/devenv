@@ -153,6 +153,25 @@ type RailRow struct {
 	// Starred marks a starred session whose star counts (the rail layout's
 	// stars; a child's is inert while it is a child).
 	Starred bool
+	// The tree, as the rail layout sets it (orderRailView). Group is the
+	// path of the worktree group the session belongs to (its worktree, or
+	// a plain-folder workspace). Children are a live top-level row's live
+	// children in their order, rendered under it; Child marks such a row,
+	// and BranchTag names its worktree (its branch, else its folder) when
+	// that differs from its parent's. StarHidden marks a stored child of a
+	// live parent (an ended one too, in the ended fold): its star is inert,
+	// so the row shows none. HasChildren marks a stored parent of a live or
+	// an ended child, which can never become a child. KidApprovals and
+	// KidWorking roll the children's approval waits and work up onto the
+	// parent, shown while the page collapses it.
+	Group        string
+	Children     []RailRow
+	Child        bool
+	BranchTag    string
+	StarHidden   bool
+	HasChildren  bool
+	KidApprovals int
+	KidWorking   bool
 	// Revive is how the dashboard brings an ended session back, on a daemon
 	// that hosts lead sessions: ReviveReopen for a closed hosted session,
 	// ReviveTakeover for a session a terminal harness ran, empty when it

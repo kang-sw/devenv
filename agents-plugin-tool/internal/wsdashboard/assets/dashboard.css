@@ -1464,6 +1464,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   .rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
   .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
   .rail-open .rscrim { opacity: 1; pointer-events: auto; }
+  .rail .rkids { margin-left: 10px; }
 }
 /* ===== pinned column (cards.js, dashboard.js board cards) =====
    Pinned topics and cards stand in the pin list (.bpins). It is the board
@@ -1513,6 +1514,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   :root[data-pincol].rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
   :root[data-pincol] .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
   :root[data-pincol].rail-open .rscrim { opacity: 1; pointer-events: auto; }
+  :root[data-pincol] .rail .rkids { margin-left: 10px; }
   :root[data-pincol] .top > .back { display: inline-flex; }
 }
 @media (min-width: 2200px) {
@@ -1636,6 +1638,31 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rs:hover .star[aria-pressed="false"], .rail .rs:focus-within .star[aria-pressed="false"] { opacity: .6; }
 .rail .rs .star[aria-pressed="false"]:hover, .rail .star[aria-pressed="false"]:focus-visible { opacity: 1; }
 @media (hover: none) { .rail .star[aria-pressed="false"] { opacity: .35; } }
+/* the tree: a parent's children box (.rkids) indents its rows one step
+   from the harness column (16px; 12px in the overlay rail) under a guide
+   line. The parent's toggle (chevron and child count) turns while the
+   page collapses it (kcol), which hides the box and shows the children's
+   roll-ups on the parent: the "?" approval badge and the working orb on
+   its harness icon. A child shows no star and no message line, and its
+   branch tag names its worktree when that is not its parent's. During a
+   drag the valid parent under the pointer's middle is the child zone
+   (rdkid): an accent outline and tint and a trailing arrow, no line. */
+.rail .rkids { margin-left: 14px; border-left: 2px solid var(--wb-muted); }
+.rail .rs.kcol + .rkids { display: none; }
+.rail .rs:not(.kcol) .kap, .rail .rs:not(.kcol) .kidorb { display: none; }
+.rail .rkids .star, .rail .rkids .drmsg { display: none; }
+.rail .kidtog { flex: none; display: inline-flex; align-items: center; gap: 1px; height: 16px; padding: 0 4px 0 1px; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
+.rail .kidtog .i { width: 12px; height: 12px; stroke-width: 1.8; transition: transform .15s; }
+.rail .kidtog:hover, .rail .kidtog:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+.rail .rs.kcol .kidtog .i { transform: rotate(-90deg); }
+.rail .rbt { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 45%; font-family: var(--wb-mono); font-size: 10.5px; font-weight: 600; color: var(--wb-muted-fg); white-space: nowrap; }
+.rail .rbt .i { width: 10px; height: 10px; flex: none; }
+.rail .rbt span { overflow: hidden; text-overflow: ellipsis; }
+.rail .rs.rdkid { outline: 1.5px solid var(--wb-primary); outline-offset: -1.5px; background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.rail .rs.rdkid::after { content: "\21b3"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; font-weight: 800; color: var(--wb-primary); pointer-events: none; }
+.rdragging .rail .rs .dracts { display: none; }
+.rdragging .rail .rs .drslot { visibility: visible; }
+.rail .rs.rdkid .drslot { visibility: hidden; }
 /* the revive entry of an ended row: always shown, so a touch screen reaches
    it; a blocked one stays readable and says why on hover and to a reader */
 .rail .rrev { flex: none; align-self: center; margin: 0 6px 0 0; padding: 2px 7px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--wb-card); color: var(--wb-primary); font: inherit; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer; }
@@ -1903,4 +1930,5 @@ html:not([data-sysopen]) .rail .rdel { display: none; }
   .bgbadge { animation: none; }
   .rail .bots .i { animation: none; }
   .rail .hi .rrun, .rail .hi.perm { animation: none; }
+  .rail .kidtog .i { transition: none; }
 }

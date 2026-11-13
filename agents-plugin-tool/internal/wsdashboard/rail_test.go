@@ -1027,3 +1027,73 @@ func TestRailStoppedRowSleeps(t *testing.T) {
 		t.Error("dashboard.css keeps the moon's rules")
 	}
 }
+
+// TestRailMarkupTree pins a tree's markup: a parent's children follow its
+// row in its children box; a child row is one line (no message line, the
+// message in its title), starless, carries its own group, and its branch
+// tag when its worktree is not its parent's; a parent carries its toggle,
+// data-kids, and its children's roll-ups (the "?" badge, the working orb)
+// whatever the page's collapse state, which only the page sets (kcol), and
+// the stylesheet shows the roll-ups only while the page collapses it.
+func TestRailMarkupTree(t *testing.T) {
+	region, err := renderRailRegion(railTreeView(), "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(region.HTML)
+	rowOf := func(id string) string {
+		_, rest, ok := strings.Cut(html, `data-rid="`+id+`"`)
+		if !ok {
+			t.Fatalf("no row %s:\n%s", id, html)
+		}
+		end := len(rest)
+		for _, m := range []string{`<div class="rs`, `<div class="rkids"`, `<details`, `</details>`} {
+			if i := strings.Index(rest, m); i >= 0 && i < end {
+				end = i
+			}
+		}
+		return rest[:end]
+	}
+	if !strings.Contains(html, `</div></div><div class="rkids" data-parent="a1"><div class="rs" data-rid="b1"`) {
+		t.Errorf("a1's children do not follow its row in its box:\n%s", html)
+	}
+	a1 := rowOf("a1")
+	for _, want := range []string{` data-kids="1"`, `class="kidtog" aria-expanded="true" title="2 sessions under this one: show or hide"`, `<span class="kn">2</span>`,
+		`<span class="chip perm kap" title="1 session under this one awaits approval">?</span>`, `<span class="orb kidorb">`, `class="star"`} {
+		if !strings.Contains(a1, want) {
+			t.Errorf("the parent a1 lacks %s:\n%s", want, a1)
+		}
+	}
+	if strings.Contains(html, "kcol") {
+		t.Errorf("the render carries a collapse state:\n%s", html)
+	}
+	a2 := rowOf("a2")
+	if !strings.Contains(a2, ` data-g="/w/repo" title="the whole last message">`) || strings.Contains(a2, `class="drmsg"`) || strings.Contains(a2, `class="star"`) || strings.Contains(a2, `class="rbt"`) {
+		t.Errorf("the child a2 is not one starless untagged line titled with its message:\n%s", a2)
+	}
+	if !strings.Contains(a2, `<span class="chip perm" title=`) {
+		t.Errorf("the child a2 lost its approval badge:\n%s", a2)
+	}
+	b1 := rowOf("b1")
+	if !strings.Contains(b1, ` data-g="/w/feat"`) || !strings.Contains(b1, `<span class="rbt" title="/w/feat"><svg class="i" aria-hidden="true"><use href="#i-branch"/></svg><span>feat/x</span></span>`) {
+		t.Errorf("the child b1 of another worktree lacks its group or branch tag:\n%s", b1)
+	}
+	if a3 := rowOf("a3"); !strings.Contains(a3, ` data-kids="1"`) || strings.Contains(a3, "kidtog") || strings.Contains(a3, "kap") {
+		t.Errorf("a3, a parent of an ended child only, is marked wrong:\n%s", a3)
+	}
+	if ae := rowOf("ae"); strings.Contains(ae, `class="star"`) || strings.Contains(ae, "data-g=") {
+		t.Errorf("the ended child ae shows a star or sits as a child:\n%s", ae)
+	}
+	if a4 := rowOf("a4"); strings.Contains(a4, "data-kids") || !strings.Contains(a4, `class="star"`) {
+		t.Errorf("a4 is marked as a parent or lost its star:\n%s", a4)
+	}
+	css, err := dashboardFS.ReadFile("assets/dashboard.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{".rail .rs.kcol + .rkids { display: none; }", ".rail .rs:not(.kcol) .kap, .rail .rs:not(.kcol) .kidorb { display: none; }"} {
+		if !strings.Contains(string(css), rule) {
+			t.Errorf("dashboard.css lacks %q", rule)
+		}
+	}
+}
