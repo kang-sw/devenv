@@ -1,5 +1,9 @@
 ---
 title: "Dashboard composer placeholder is clipped on first render"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 9074a7e2178b834a
+sage-review-completeness-reviewed: 9074a7e2178b834a
 ---
 
 # Dashboard composer placeholder is clipped on first render
@@ -10,7 +14,7 @@ Owner report, macOS, 2026-11-13 (cosmetic): the session composer textarea
 sometimes renders its placeholder ("이 세션에 메시지를 보냅니다. Enter로 전송,
 Shift+Enter로 줄 바꿈. 보드 답변과 붙여넣은 이미지가 함께 첨부됩니다.") wrapped
 to two lines but sized for one, so the second line is cut off at the bottom.
-The composer should be sized to fit its placeholder from the first render.
+The composer should be sized to fit its placeholder from the first render, and stay so after width changes and placeholder swaps (see Expected and Decisions).
 
 ## Prior Decisions
 
@@ -64,7 +68,21 @@ The composer should be sized to fit its placeholder from the first render.
 On first render and on width change, an empty composer is tall enough for
 its whole placeholder (still capped at the existing 160px).
 
+## Decisions
+
+- Fix in JS (technical, EXEC 2026-11-13, from fact population): `grow()` sizes an empty composer to its wrapped placeholder by measuring the placeholder text, preferably reusing the geometry of the existing `.chl` mention layer (same font, padding, wrapping and scrollbar-adjusted right padding; `dashboard.tmpl:22`) so a second mirror cannot drift, still capped at 160px. `grow()` also runs at first render (the init block), after every placeholder swap (`setInput`, `renderCmd`), and on width-only changes of the composer (a `ResizeObserver` that ignores height-only changes, so setting the height cannot loop). Rejected: CSS `field-sizing: content` alone, because 591aa4b0 kept auto-grow in JS since field-sizing is not universal.
+- Compatibility: T0 (asset only). The support-chat card textarea and the tracker editor are out of scope.
+
 ## Constraints
 
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin-tool/)
 - Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
+- Keep the textarea markup pinned by `wsdashboard/pages_test.go` stable, or update the pin; the send button keeps matching the textarea height (4d86dce6, 783d58c5).
+
+## Phases
+
+### Phase 1: Size the empty composer to its placeholder
+
+Implement the Decisions in `agents-plugin-tool/internal/wsdashboard/assets/dashboard.js` (and `dashboard.css` only if the mirror needs a rule).
+
+Verification: `go test ./internal/wsdashboard/...` passes (node-run tests keep their `grow()` stubs). Headless Chromium on a dev dashboard: with the Korean placeholder at a narrow composer width, the empty composer shows every placeholder line on first load, after a window narrowing, after a send clears the box, and after an input-mode switch; the height never exceeds 160px; the send button matches the textarea height. Capture before/after screenshots and state what was not checked interactively, including Safari/WebKit when it was not checked.

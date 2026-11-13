@@ -1,5 +1,11 @@
 ---
+related:
+  261107-feat-ws-dashboard-composer-image-attach: "the composer image pipeline this reuses"
 title: "Dashboard board notes: paste images into the note pen"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: c510d46b47d38e43
+sage-review-completeness-reviewed: c510d46b47d38e43
 ---
 
 # Dashboard board notes: paste images into the note pen
@@ -18,7 +24,11 @@ Owner request (2026-11-13): allow pasting images into the whiteboard note pen (i
 ## Decisions
 
 - Decision 1 (owner, 2026-11-13): the note pen accepts pasted images; each image becomes an attachment delivered with the outgoing dashboard message, and the note text carries `[Image #N]` at the caret, like the composer.
-- Decision 2 (owner, 2026-11-13; was 412): One image counter is shared across the composer text and every board note in the same outgoing message, so each [Image #N] in one message is unique. Rejected: a separate per-note counter, which repeats [Image #1] within one message.
+- Decision 2 (owner, 2026-11-13): One image counter is shared across the composer text and every board note in the same outgoing message, so each [Image #N] in one message is unique. Rejected: a separate per-note counter, which repeats [Image #1] within one message.
+
+- Decision 3 (technical, EXEC 2026-11-13, from fact population): `wsinbox.Merge` (`agents-plugin-tool/internal/wsinbox/inbox.go`) also renumbers `[Image #N]` markers inside chip notes and topic notes when a send merges into a held message, so Decision 2's uniqueness holds after a merge. The entry shape is unchanged (T0). Rejected: a separate numbering rule for notes (two numbering schemes in one message).
+- Decision 4 (announced default, EXEC 2026-11-13; revised from design review): paste is dashboard-only, wired in `dashboard.js` (a delegated `paste` listener on the board region, or an optional `form.js` hook if that proves simpler; the implementer picks). The static board page pastes nothing, because it has no attachment channel (`wswhiteboard/render.go`). Note images join the one image list of the outgoing message, but the image state is today bound to the composer text (`ctext`), so every routine that reads markers covers the composer text plus every item note and topic note: `syncMarkers()` (it would otherwise drop note images on the next composer keystroke), `nextNum()`, the fresh-draft `imgSeq` reset after send, and `restoreHeld` renumbering and missing-marker detection. Chips are per note: a note's image chips sit with that note's pen, and x on a chip removes that note's marker. The image caps (`IMG_MAX`, `IMG_BYTES`) are shared across the composer and all notes, with the composer's existing over-cap behaviour. Rejected: moving the image pipeline into `form.js`; pushing note images into `imgs` without widening those routines (images silently lost).
+- Decision 5 (technical, EXEC 2026-11-13): a cancel or board swap that rebuilds note text (`restoreTopics`, `setItem`) restores the note's image chips with it, so no `[Image #N]` marker is left without its attachment. The image data comes from where the composer already gets it on the same path (the page's image list, or the held message's images that `restoreHeld` restores); an image whose data is not available is handled like the reload case below. Rejected: dropping images on rebuild (orphaned markers). A draft restored on reload follows the composer precedent: images held only as page data are lost, so their markers are stripped from item and topic notes too (`WsRail.stripMarkers`) and counted in the `js.draft.imgslost` warning.
 
 ## Constraints
 
@@ -46,7 +56,7 @@ Owner request (2026-11-13): allow pasting images into the whiteboard note pen (i
 | scope.span | multi-file | agents-plugin-tool/internal/wswhiteboard/assets/form.js, agents-plugin-tool/internal/wsdashboard/assets/dashboard.js, likely agents-plugin-tool/internal/wsinbox/inbox.go |
 | scope.surface | cross-module | wswhiteboard asset, wsdashboard asset, and the wsinbox merge path; no exported Go symbol named |
 | scope.new_public_symbol | no | none |
-| scope.new_type_contract | unknown | whether notes carry image data on the existing wire (chips/topics note strings plus images/n) or need a new field is not stated; see report decision gap |
+| scope.new_type_contract | no | images ride the existing message images/refs; `wsinbox` Normalize (inbox.go ~L434-475) accepts images whose markers sit only in notes; notes stay text (Decisions 3-4, T0) |
 | scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/attachments_test.go, agents-plugin-tool/internal/wswhiteboard/answers_script_test.go, agents-plugin-tool/internal/wswhiteboard/topic_header_test.go; no automated browser paste test |
 | complexity.reuse_points | confirmed | composer image pipeline in dashboard.js:1362-1504 (imgs, nextNum, marker, paste handler) read; it lives in the dashboard.js closure, form.js is a separate shared script |
 | complexity.side_effect_risk | moderate | form.js also runs on the static board page, which has no attachment channel; the shared counter touches the composer's draft numbering and clear-after-send |
@@ -59,6 +69,10 @@ Owner request (2026-11-13): allow pasting images into the whiteboard note pen (i
 
 ### Phase 1: Paste images into board notes
 
-Let item notes and topic notes accept pasted images, reusing the composer's attachment pipeline, with `[Image #N]` inserted at the caret and each image sent as an attachment of the outgoing message.
+Let item notes and topic notes accept pasted images, reusing the composer's attachment pipeline through the `form.js` paste hook (Decision 4), with `[Image #N]` inserted at the caret and each image sent as an attachment of the outgoing message. Extend `wsinbox.Merge` per Decision 3 and restore chips on rebuild per Decision 5.
+
+Place topic-note chips so they work inside the sticky `.tophead` of `261112-feat-ws-whiteboard-topic-tickets-sticky-head` when that lands first (the stuck head grows by the chip row; LOOK-check it).
+
+Tests: a Go test that `wsinbox.Merge` renumbers markers in chip and topic notes; node-run `dashboard.js` (and `form.js` if touched) tests that a composer keystroke keeps note images, numbering spans composer and notes, cancel restore renumbers note markers without duplicating them in the composer, chips are restored on rebuild, and reload strips orphan note markers.
 
 Verification: paste two images into an item note and one into a topic note, plus one in the composer; send; check the lead receives four attachments with unique `[Image #N]` references matching the note text. Dark and light LOOK capture of the note pen with an image chip.
