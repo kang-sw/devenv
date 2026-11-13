@@ -1318,6 +1318,7 @@
   "js.wb.ago.now": "adesso",
   "js.wb.copy": "Copia",
   "js.wb.copy.done": "Copiato",
+  "js.wb.copy.wrap": "A capo automatico",
   "js.wb.tag.announced": "Default annunciato — ha un'unica risposta che deriva da vincoli esistenti, decisioni precedenti o convenzioni del progetto; basta una conferma.",
   "js.wb.tag.policy": "Questione di indirizzo — dipende dalle tue preferenze, priorità o dalla direzione del prodotto; scegli un'opzione.",
   "js.wb.tag.technical": "Decisione tecnica — scelta dall'agente per motivi tecnici, indipendenti dalle tue preferenze; la motivazione è nell'elemento; rispondi ok se non hai obiezioni.",

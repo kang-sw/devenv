@@ -1318,6 +1318,7 @@
   "js.wb.ago.now": "à l'instant",
   "js.wb.copy": "Copier",
   "js.wb.copy.done": "Copié",
+  "js.wb.copy.wrap": "Renvoyer les longues lignes",
   "js.wb.tag.announced": "Choix par défaut annoncé — n'a qu'une réponse, qui découle des contraintes existantes, de décisions antérieures ou des conventions du projet ; il suffit d'en prendre acte.",
   "js.wb.tag.policy": "Question de principe — dépend de vos préférences, priorités ou de l'orientation du produit ; choisissez une option.",
   "js.wb.tag.technical": "Décision technique — choix de l'agent pour des raisons techniques, indépendant de vos préférences ; la justification figure sur l'élément ; répondez ok sauf objection.",
