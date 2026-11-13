@@ -169,6 +169,9 @@ type Runner struct {
 	quit   chan struct{}
 	wg     sync.WaitGroup
 	once   sync.Once
+	// resumeMu serializes Pi child revival with close cascades without
+	// holding mu over store writes or conversation startup.
+	resumeMu sync.Mutex
 	// scanned is closed once the holder manager's first scan returned, or
 	// at Start when there is no manager (scanDone); scanOnce closes it.
 	scanned  chan struct{}
@@ -438,6 +441,7 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	}
 	r.mu.Lock()
 	r.convs[rec.ReplyID] = c
+	delete(r.closed, rec.ReplyID)
 	r.wg.Add(1)
 	go c.loop()
 	r.mu.Unlock()
@@ -710,6 +714,8 @@ func (r *Runner) List() []State {
 // Send holds text as the conversation's next user message. It is submitted
 // now when no turn runs. A spawned Pi worker takes it as a native steer
 // during a running turn; other conversations hold it until that turn ends.
+// A closed spawned Pi child is reopened on its existing session file;
+// other closed conversations still refuse sends.
 // It reports whether the message is still held.
 //
 // Send returns once the message is in the conversation's inbox: it neither
@@ -724,7 +730,7 @@ func (r *Runner) Send(id, text string) (State, error) {
 	if strings.TrimSpace(text) == "" {
 		return State{}, badRequest("text is empty")
 	}
-	c, err := r.open(id)
+	c, err := r.resumePiChild(id)
 	if err != nil {
 		return State{}, err
 	}
@@ -847,12 +853,15 @@ func (r *Runner) SetPermissionMode(id, mode string) (State, error) {
 	})
 }
 
-// CloseConversation ends the conversation for good: its process stops,
-// held messages are dropped, later sends are refused, and its session
-// directory stays readable. Its open descendants through conversation
-// parents (children.go) close first, deepest first. A conversation parent
+// CloseConversation ends the conversation: its process stops, held
+// messages are dropped, and its session directory stays readable. A spawned
+// Pi child can be reopened by Send; other closed conversations refuse it.
+// Its open descendants through conversation parents (children.go) close
+// first, deepest first. A conversation parent
 // whose done turn waited for this child's report is released.
 func (r *Runner) CloseConversation(id string) (State, error) {
+	r.resumeMu.Lock()
+	defer r.resumeMu.Unlock()
 	if _, err := r.open(id); err != nil {
 		return State{}, err
 	}
@@ -2911,7 +2920,7 @@ func (c *conv) stopIdle() {
 	}
 }
 
-// close ends the conversation for good. It marks the conversation closed
+// close ends the conversation's current lifetime. It marks it closed
 // first, under mu, so a Send either wrote before (and its message is
 // dropped below with the other held ones) or is refused.
 func (c *conv) close() {

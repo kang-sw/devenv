@@ -586,15 +586,23 @@ session: `pi.spawn {prompt, tier, cwd?, label?}` (model and effort from the
 tier's entry in the `pi` harness bucket of `agents.tier`, which only the
 user's `config.tune` sets; an unset tier is refused with that key named;
 `cwd` relative to the session's root), `pi.send` (a running child's native
-Pi steer at the next tool boundary; with no turn running, a new turn at once), `pi.list` (the caller's
-own children), `pi.stop` (closes; the record stays), `pi.transcript`, and
+Pi steer at the next tool boundary; with no turn running, a new turn at once;
+a closed child resumes on the same session file, keeping its id, cwd, model,
+effort, and label; a missing session file is refused), `pi.list` (the caller's
+own children), `pi.stop` (ends the process and closes its descendants; the
+record stays resumable by `pi.send`), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
 send). The daemon mails each settled turn to the parent lead's reply-id
 queue with no sender (`mailbox.recv` shows `system`) and wakes the mailbox
 waits; a steered message belongs to the turn that takes it, whose completion
 mail covers it without an extra turn. A steer refused or not taken before
 the turn ends is cleared from Pi's queue and sent as the next turn instead.
-Nothing is mailed after `pi.stop`. `tools/list` shows the tools only
+The stop itself mails nothing; a turn started by a later `pi.send` reports
+as usual. A child whose process died, including across a daemon restart,
+already resumes through the ordinary lazy-start path; no second spawn or
+record is needed. The parent's reply-id is derived from its session key,
+so restarting a lead with the same key keeps its children addressable.
+`tools/list` shows the tools only
 when `dashboard.pi_spawn_enabled` is on (ws on, wsflow and Pi off; read
 once per server, so a change applies at the next reconnect), the server is
 hosted by the daemon (`ServerOptions.Agents` is the daemon's runner; a
@@ -670,7 +678,8 @@ owns the whole tree:
   settles before the restart sends the input the record kept for the next
   turn, so that next turn stays open.
 - **Close.** Closing a conversation closes its open descendants first,
-  deepest first. A process stop (the stop route, an idle stop, a settings
+  deepest first. `pi.send` can reopen a closed Pi child alone on its
+  existing session file; descendants stay closed until sent to themselves. A process stop (the stop route, an idle stop, a settings
   change) does not cascade, and a child's report resumes the stopped
   parent. A report to a closed parent stays in the child's record.
 
