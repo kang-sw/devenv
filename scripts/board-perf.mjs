@@ -4,7 +4,7 @@
 //
 //   node scripts/board-perf.mjs run [--tree DIR[,DIR...]] [--rates 4,6] [--runs 3]
 //        [--scenarios a,b,c,d,e] [--idle 60] [--shape 8,6,4,2,60]
-//        [--label NAME[,NAME...]] [--out FILE.json[,FILE.json...]]
+//        [--label NAME[,NAME...]] [--out FILE.json[,FILE.json...]] [--gc]
 //   node scripts/board-perf.mjs compare BEFORE.json AFTER.json [--targets SPEC]
 //   node scripts/board-perf.mjs shot [--tree DIR] [--shape ...] --out DIR
 //   node scripts/board-perf.mjs diff DIR_A DIR_B
@@ -162,6 +162,20 @@ async function metrics(cdp) {
   return out;
 }
 
+// endMetrics is a scenario's closing metrics. With --gc, the absolute
+// counts (Nodes, Frames, JSHeapUsedSize) are read again after a forced
+// garbage collection, so they count what the page still holds rather than
+// what a collection that happened or not left behind; the durations stay
+// those read before it.
+async function endMetrics(cdp, opts) {
+  const m = await metrics(cdp);
+  if (!opts.gc) return m;
+  await cdp.send("HeapProfiler.collectGarbage");
+  const g = await metrics(cdp);
+  for (const k of ["Nodes", "Frames", "JSHeapUsedSize"]) m[k] = g[k];
+  return m;
+}
+
 // sess is the frame that holds the session page: the iframe shell's
 // session frame (?frame=1), else (a tree from before the shell) the page.
 // Performance metrics are the page's whole renderer, the shell included,
@@ -238,7 +252,7 @@ async function coldLoad(browser, url, rate, opts) {
   await quiet(page, cdp);
   const quietMs = Date.now() - t0 - 1000; // the last two calm windows
   const p1 = await probe(page);
-  const a = sample(m0, await metrics(cdp), null, p1);
+  const a = sample(m0, await endMetrics(cdp, opts), null, p1);
   a.quietMs = quietMs;
   return { context, page, cdp, a };
 }
@@ -291,11 +305,11 @@ async function run(args) {
   const rates = (args.rates || "4,6").split(",").map(Number);
   const runs = +(args.runs || 3);
   const scen = (args.scenarios || "a,b,c,d,e").split(",");
-  const opts = { idle: +(args.idle || 60) };
+  const opts = { idle: +(args.idle || 60), gc: !!args.gc };
   const bins = trees.map(buildServer);
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true, channel: args.channel });
-  const results = trees.map((tree, i) => ({ label: labels[i] || path.basename(tree), tree, shape: args.shape || "8,6,4,2,60", rates, runs, idle: opts.idle, alternated: trees.length > 1, version: browser.version(), samples: {} }));
+  const results = trees.map((tree, i) => ({ label: labels[i] || path.basename(tree), tree, shape: args.shape || "8,6,4,2,60", rates, runs, idle: opts.idle, gc: opts.gc, alternated: trees.length > 1, version: browser.version(), samples: {} }));
   const order = (r) => (r % 2 ? trees.map((_, i) => trees.length - 1 - i) : trees.map((_, i) => i));
   try {
     for (const rate of rates) {
@@ -311,7 +325,8 @@ async function run(args) {
             if (s !== "a") {
               const m0 = await metrics(cdp), p0 = await probe(page);
               await scenario(s, page, cdp, server, opts);
-              push(results[i], s, rate, sample(m0, await metrics(cdp), p0, await probe(page)));
+              const m1 = await endMetrics(cdp, opts);
+              push(results[i], s, rate, sample(m0, m1, p0, await probe(page)));
             }
             await context.close();
             await server.stop();
