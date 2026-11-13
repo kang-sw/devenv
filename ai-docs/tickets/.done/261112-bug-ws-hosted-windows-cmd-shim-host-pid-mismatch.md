@@ -2,6 +2,7 @@
 title: "Hosted sessions on Windows: a .cmd shim makes the host PID cmd.exe, so the session is refused its key"
 related:
   261110-feat-ws-dashboard-headless-lead-sessions: hosted lead sessions
+completed: 2026-11-13
 ---
 
 # Hosted sessions on Windows: a .cmd shim makes the host PID cmd.exe, so the session is refused its key
@@ -50,3 +51,8 @@ Claude's native installer yields `claude.exe`, which is unaffected.
 - Verification needs a Windows host; see `ai-docs/manuals/windows-dogfood.md`.
 - Manuals: `ai-docs/manuals/shipped-surface-boundary.md`,
   `ai-docs/manuals/release-compatibility.md`.
+
+
+## Resolution (2026-11-13)
+
+Fixed by a3795bf8a (merged 0e455291b): wsagent unwraps a Windows npm cmd-shim to node before spawning. Verified on this Windows host 2026-11-13 with the npm-installed Pi (`C:\Users\user\AppData\Roaming\npm\pi.cmd`): a dashboard-hosted Pi lead row (`refutablevarnishmultitudesnowsuit`) records `host_pid` 6548, which is `node.exe` running pi-coding-agent's `cli.js --mode rpc`, its ws-mcp launcher (python3.13.exe) is a direct child of that node, and no second row was registered for the session.
