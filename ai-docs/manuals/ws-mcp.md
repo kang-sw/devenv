@@ -585,23 +585,32 @@ The `pi.*` tools (`internal/mcp/pi_tools.go`, lead-only) put this on a
 session: `pi.spawn {prompt, tier, cwd?, label?}` (model and effort from the
 tier's entry in the `pi` harness bucket of `agents.tier`, which only the
 user's `config.tune` sets; an unset tier is refused with that key named;
-`cwd` relative to the session's root), `pi.send`, `pi.list` (the caller's
+`cwd` relative to the session's root), `pi.send` (a running child's native
+Pi steer at the next tool boundary; with no turn running, a new turn at once), `pi.list` (the caller's
 own children), `pi.stop` (closes; the record stays), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
 send). The daemon mails each settled turn to the parent lead's reply-id
 queue with no sender (`mailbox.recv` shows `system`) and wakes the mailbox
-waits; nothing is mailed after `pi.stop`. `tools/list` shows the tools only
+waits; a steered message belongs to the turn that takes it, whose completion
+mail covers it without an extra turn. A steer refused or not taken before
+the turn ends is cleared from Pi's queue and sent as the next turn instead.
+Nothing is mailed after `pi.stop`. `tools/list` shows the tools only
 when `dashboard.pi_spawn_enabled` is on (ws on, wsflow and Pi off; read
 once per server, so a change applies at the next reconnect), the server is
 hosted by the daemon (`ServerOptions.Agents` is the daemon's runner; a
 legacy standalone ws-mcp has none and a call is refused naming the daemon), and
-`pi --version`, probed once per process, is 1.0 or later. Each hosted
-server watches the runner and feeds a child's row (`pi:<id>`, `agentKind:
-"pi"`, linked to the child's page) into its parent's live state; a live
-session the server creates, or one an adapter resets, gets its open
-children's rows again, so they come back after a reconnect. A session whose
-dashboard feed is off gets no row. The agents panel shows a running Pi row
-with a blinking `pi` badge in place of the pulse.
+`pi --version`, probed once per process, is 1.0 or later. Each intake-fed
+server watches the runner and feeds the owning lead's recursive spawn tree
+(`pi:<id>`, `agentKind: "pi"`, linked to the child's page) into its live state;
+a live session the server creates, or one an adapter resets, gets its open
+descendants' rows again, so they come back after a reconnect. A dashboard-hosted
+lead instead gets those rows from its runner-owned snapshot writer, including
+after daemon replacement; hosted intake remains off. Descendants nest under
+their spawner through ordinary `parentId` links. When a harness also reports the
+same conversation (its reply-id or native conversation id), the snapshot keeps
+one daemon-owned lifecycle row with the harness's activity and telemetry. An
+intake-only session whose dashboard feed is off gets no row. The agents panel
+shows a running Pi row with a blinking `pi` badge in place of the pulse.
 
 A spawned Pi worker spawns Pi subagents of its own through the daemon
 (`internal/wsagent/children.go`, `internal/mcp/pi_forward.go`); the daemon
@@ -1281,7 +1290,7 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
 | `WS_MCP_RELEASE_REPOSITORY` | Override the GitHub release repository from `runtime.json`. |
-| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.49.0`. |
+| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.49.1`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_LAUNCHER_DIRECT` | Obsolete; ignored. It never enables executable fallback. |
@@ -1340,7 +1349,7 @@ The helper updates plugin manifests, runtime contracts, Go runtime development
 defaults, release workflow references, build script defaults, selected
 documentation references, and the `agents-plugin-pi/` mirrors (`runtime.json`,
 `bin/ws-mcp-launcher.py`, `rsrc/`, resynced byte-for-byte from `agents-plugin/`,
-plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.49.0-dev` satisfy the
+plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.49.1-dev` satisfy the
 plugin version the helper just set; older or newer minor releases are stale. The
 concrete range lives in `runtime.json.required_mcp` — read it there rather than
 restating a version here, which froze at `0.29.2` for seven minor releases
@@ -1494,7 +1503,7 @@ Level 2 validates local release assets:
 
 ```bash
 cd agents-plugin-tool
-scripts/build-release-assets.sh 0.49.0-dev
+scripts/build-release-assets.sh 0.49.1-dev
 python3 ../agents-plugin/bin/ws-mcp-launcher.py version
 cd dist
 shasum -a 256 -c SHA256SUMS

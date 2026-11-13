@@ -107,9 +107,9 @@ type Record struct {
 	// to that parent yet, oldest first: a report's absence is its
 	// "delivered" mark. A report whose parent is closed stays here.
 	PendingReports []PendingReport `json:"pending_reports,omitempty"`
-	// Reports are its own children's reports the runner handed to this
-	// conversation and no turn has taken yet, oldest first: they go with
-	// its next turn, as a lead's claimed Mail does.
+	// Reports are child reports and steered user messages no turn took,
+	// oldest first: they go with its next turn, as a lead's claimed Mail
+	// does. A refused or untaken steer is cleared from Pi before requeue.
 	Reports []string `json:"reports,omitempty"`
 	// LastTurn is the last reported turn of a conversation with a Parent,
 	// with the id of the pending report it made (empty when its parent's
@@ -129,9 +129,12 @@ type Record struct {
 	Voided           uint64          `json:"voided,omitempty"`
 	HeldTurn         *TurnResult     `json:"held_turn,omitempty"`
 	Steered          []steeredReport `json:"steered_reports,omitempty"`
-	SteerSeq         int             `json:"steer_seq,omitempty"`
-	SteerAnswers     int             `json:"steer_answers,omitempty"`
-	SteerAnswerSeq   uint64          `json:"steer_answer_seq,omitempty"`
+	// SteerMarks holds Send coverage by steer sequence. Keep this optional
+	// metadata top-level so an older Record writer preserves it as unknown.
+	SteerMarks     map[int]uint64 `json:"steer_marks,omitempty"`
+	SteerSeq       int            `json:"steer_seq,omitempty"`
+	SteerAnswers   int            `json:"steer_answers,omitempty"`
+	SteerAnswerSeq uint64         `json:"steer_answer_seq,omitempty"`
 
 	// unknown holds newer writers' top-level members across read-modify-write.
 	// It is immutable after decoding, so value copies of Record can share it.
@@ -329,6 +332,8 @@ type liveWriter struct {
 	st  *wslive.State
 	now func() time.Time
 	log io.Writer
+	// beforeSnapshot refreshes daemon-owned rows in this writer's loop.
+	beforeSnapshot func()
 }
 
 // newLiveWriter starts from the finished subagents of the snapshot an
@@ -416,7 +421,7 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 // is gone, so no end will come for them.
 func (w *liveWriter) endAgents() {
 	for _, a := range w.st.Snapshot(w.now().UnixMilli()).Agents {
-		if a.Status == wslive.StatusRunning {
+		if a.Status == wslive.StatusRunning && a.AgentKind != wslive.AgentKindPi {
 			w.apply(wslive.Event{Kind: wslive.KindAgent, AgentID: a.ID, Status: wslive.StatusFailed})
 		}
 	}
@@ -430,6 +435,9 @@ func (w *liveWriter) setAdapter(name string) {
 }
 
 func (w *liveWriter) writeSnapshot() {
+	if w.beforeSnapshot != nil {
+		w.beforeSnapshot()
+	}
 	raw, err := json.Marshal(w.st.Snapshot(w.now().UnixMilli()))
 	if err == nil {
 		err = writeFileAtomic(wslive.SnapshotPath(w.dir), raw, 0o644)

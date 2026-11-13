@@ -1,6 +1,6 @@
 {
   "name": "wsflow",
-  "version": "0.49.0",
+  "version": "0.49.1",
   "description": "Workflow plugin for project context, tickets, docs, and Git tools, shipped with conservative defaults: its optional Claude Code features stay off until a config tune turns them on.",
   "author": {
     "name": "kang-sw"

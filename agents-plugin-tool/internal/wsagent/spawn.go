@@ -336,7 +336,8 @@ func (c *conv) watched() {
 // Watch calls fn with a spawned conversation's state (one with a parent)
 // whenever it opens, starts or settles a turn, or closes, until stop is
 // called. fn runs on the conversation's loop or on the caller of Spawn or
-// CloseConversation: it must return promptly and must not call the runner.
+// CloseConversation: it must return promptly. Only read-only Get, List, and
+// Children calls are safe; it must never wait on a conversation's loop.
 func (r *Runner) Watch(fn func(State)) (stop func()) {
 	key := &fn
 	r.watchMu.Lock()
@@ -353,6 +354,7 @@ func (r *Runner) Watch(fn func(State)) (stop func()) {
 }
 
 func (r *Runner) emit(st State) {
+	r.wakeSpawnParents(st)
 	r.watchMu.Lock()
 	fns := make([]func(State), 0, len(r.watchers))
 	for fn := range r.watchers {

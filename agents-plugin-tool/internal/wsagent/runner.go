@@ -154,6 +154,8 @@ type Options struct {
 	ChildCheck func() error
 	// heartbeat overrides wslive.HeartbeatInterval for tests.
 	heartbeat time.Duration
+	// spawnListed observes global spawn-projection listings in tests.
+	spawnListed func(string)
 }
 
 // Runner hosts the agent conversations of one dashboard daemon.
@@ -248,6 +250,15 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			// it there, before the scan below replays the holder's records.
 			// A turn the last daemon's exit cut off settles there too.
 			r.startConv(rec, nil)
+		}
+	}
+	// All records are loaded now, including children sorted after their lead.
+	for _, st := range r.List() {
+		if c := r.conv(st.ID); c != nil {
+			c.do(func() {
+				c.spawnDirty = true
+				c.live.writeSnapshot()
+			})
 		}
 	}
 	// A child loaded before its parent found no parent to report to.
@@ -371,17 +382,20 @@ func (r *Runner) conv(replyID string) *conv {
 func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	c := &conv{
-		r:       r,
-		dir:     dir,
-		inbox:   wsinbox.Dir(dir),
-		rec:     rec,
-		live:    newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
-		reqs:    make(chan func()),
-		inboxC:  make(chan struct{}, 1),
-		mailC:   make(chan struct{}, 1),
-		done:    make(chan struct{}),
-		settleC: make(chan struct{}),
+		r:          r,
+		dir:        dir,
+		inbox:      wsinbox.Dir(dir),
+		rec:        rec,
+		live:       newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
+		reqs:       make(chan func()),
+		inboxC:     make(chan struct{}, 1),
+		spawnC:     make(chan struct{}, 1),
+		spawnDirty: true,
+		mailC:      make(chan struct{}, 1),
+		done:       make(chan struct{}),
+		settleC:    make(chan struct{}),
 	}
+	c.live.beforeSnapshot = c.seedSpawnRows
 	if len(seed) > 0 {
 		c.live.applyQuiet(wslive.Event{Kind: wslive.KindCommands, Commands: seed})
 	}
@@ -391,12 +405,18 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		c.heldRes.mark = rec.TurnMark
 	}
 	c.steered = slices.Clone(rec.Steered)
+	for i := range c.steered {
+		c.steered[i].Mark = rec.SteerMarks[c.steered[i].Seq]
+	}
 	c.steerSeq, c.steerAnswers = rec.SteerSeq, rec.SteerAnswers
 	if last := rec.LastTurn; last != nil {
 		// Persisted coverage keeps a wait for queued input from taking a
 		// prior settlement. Legacy records retain their zero-count behavior.
 		c.settled, c.settledReport = last.Result, last.ID
 		c.settled.n, c.settled.mark = 1, last.Mark
+		if !rec.TurnOpen && (last.Result.Status == TurnFailed || last.Result.Status == TurnInterrupted) {
+			c.lastErr = last.Result.Error
+		}
 	}
 	c.writeRegistration()
 	// A row a terminal login took while no daemon ran: the loop lets the
@@ -688,8 +708,9 @@ func (r *Runner) List() []State {
 }
 
 // Send holds text as the conversation's next user message. It is submitted
-// now when no turn runs, else when the running turn ends; held sends merge
-// into one message. It reports whether the message is still held.
+// now when no turn runs. A spawned Pi worker takes it as a native steer
+// during a running turn; other conversations hold it until that turn ends.
+// It reports whether the message is still held.
 //
 // Send returns once the message is in the conversation's inbox: it neither
 // waits for the loop nor starts the process, which the loop does on its
@@ -715,7 +736,8 @@ func (r *Runner) Send(id, text string) (State, error) {
 		c.mu.Unlock()
 		return State{}, err
 	}
-	_, _, err = wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{text}}, r.opts.Now())
+	steer := c.rec.Parent != nil && c.rec.Backend == BackendPi && !c.rec.Lead
+	_, _, err = wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{text}, Steer: steer}, r.opts.Now())
 	if err == nil {
 		// After the write, under the lock kick drains with: a turn whose
 		// drain counted this send holds its message (Wait).
@@ -1072,6 +1094,9 @@ type conv struct {
 	// mailbox may hold mail (signalMail); stopMail ends the watch.
 	mailC    chan struct{}
 	stopMail func()
+	// spawnC coalesces daemon-owned descendant changes for this writer.
+	spawnC     chan struct{}
+	spawnDirty bool
 	// spawning is set from the row write that precedes a spawn until the
 	// spawn settled: the row then names no process and is not stopped, so
 	// a terminal login is refused meanwhile (Registration.HostMayRun).
@@ -1159,7 +1184,7 @@ type conv struct {
 	// parent's waits by target, and holding mirrors heldRes != nil; all
 	// three under mu. Loop-owned: heldRes is a
 	// done turn held for its children's reports; steered are the
-	// children's reports steered into the running turn and not yet taken
+	// reports and user messages steered into the running turn and not yet taken
 	// by it, steerSeq the steer commands the process was written and
 	// steerAnswers how many it answered.
 	settledReport string
@@ -1242,14 +1267,18 @@ func (c *conv) inboxChanged() {
 	c.kick()
 }
 
-// steer writes a lead's steered messages to its process while a turn runs:
+// steer writes steered messages to the process while a turn runs:
 // the user marked them to reach the harness now, not at the turn's end.
 // They join the running turn, so no turn starts. Messages not marked stay
 // held, with no turn running a marked one is an ordinary send (kick), and
 // a backend that takes no message mid-turn, or a rejoin that cannot tell
 // whether the turn runs (wrapHold), keeps it held.
 func (c *conv) steer() {
-	if !c.rec.Lead || !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed {
+	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed {
+		return
+	}
+	if !c.rec.Lead {
+		c.steerWorker()
 		return
 	}
 	st, ok := c.proc.(steerer)
@@ -1314,6 +1343,10 @@ func (c *conv) loop() {
 			c.inboxChanged()
 		case <-c.mailC:
 			c.mailChanged()
+		case <-c.spawnC:
+			c.spawnDirty = true
+			c.live.writeSnapshot()
+			c.changed(false)
 		case ev, ok := <-c.events:
 			if !ok {
 				c.processExited()
@@ -1559,6 +1592,9 @@ func (c *conv) dropHeld() {
 // apply applies a wslive event and tells the daemon when it wrote. quiet
 // (a replayed holder record) applies it to the state alone.
 func (c *conv) apply(ev wslive.Event, quiet ...bool) {
+	if ev.Kind == wslive.KindReset {
+		c.spawnDirty = true
+	}
 	if len(quiet) > 0 && quiet[0] {
 		c.live.applyQuiet(ev)
 		return
@@ -1580,7 +1616,7 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 // it, which each turn end submits; mail waits for the next message turn, or
 // goes alone once nothing is queued.
 func (c *conv) kick() {
-	if c.closed || c.turn || c.replaying || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
+	if c.closed || c.turn || c.replaying || len(c.steered) > 0 || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
 		return
 	}
 	held, err := wsinbox.Held(c.inbox)
@@ -2459,15 +2495,17 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	if quiet {
 		return
 	}
+	// Observers must see the terminal diagnostic in the same emission as
+	// the settled lifecycle, including mapped Pi agent_settled failures.
+	if turnErr != "" {
+		c.setStatus(func() { c.lastErr = turnErr })
+	}
 	if ran && !c.replaying {
 		status := TurnDone
 		if turnErr != "" {
 			status = TurnFailed
 		}
 		c.settleTurn(status, turnErr, c.turnMark)
-	}
-	if turnErr != "" {
-		c.setStatus(func() { c.lastErr = turnErr })
 	}
 	if c.replaying {
 		return

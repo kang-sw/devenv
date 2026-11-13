@@ -356,7 +356,7 @@ func Normalize(e Entry) (Entry, error) {
 	if e.Command != nil {
 		return normalizeCommand(e)
 	}
-	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt}
+	out := Entry{SchemaVersion: SchemaVersion, SentAt: e.SentAt, Steer: e.Steer}
 	size := 0
 	for _, p := range e.Parts {
 		p = strings.TrimSpace(p)
@@ -726,8 +726,8 @@ func claim(dir, name, op string) (string, error) {
 // Send holds add in the inbox at dir: merged into the newest held entry that
 // is not steered when there is one, or as a new entry. It returns the
 // resulting entry's name and whether it merged. add is normalized first
-// (Normalize); its SentAt is set from now when zero. A command send is
-// always a new entry.
+// (Normalize); its SentAt is set from now when zero. A command or steered
+// send is always a new entry: it must not promote unrelated held text.
 func Send(dir string, add Entry, now time.Time) (name string, merged bool, err error) {
 	if add.SentAt == 0 {
 		add.SentAt = now.UnixMilli()
@@ -743,7 +743,7 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", false, fmt.Errorf("create inbox dir: %w", err)
 	}
-	if add.Command != nil {
+	if add.Command != nil || add.Steer {
 		name, err = writeEntry(dir, add)
 		return name, false, err
 	}

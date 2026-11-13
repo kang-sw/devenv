@@ -185,6 +185,28 @@ func wsManifests() string {
 
 var piToolNames = []string{"pi.list", "pi.send", "pi.spawn", "pi.stop", "pi.transcript", "pi.wait"}
 
+func TestPiSendDescribesNativeSteeringWithoutChangingArguments(t *testing.T) {
+	for _, def := range piToolDefinitions() {
+		if def["name"] != "pi.send" {
+			continue
+		}
+		for _, tool := range []map[string]any{def, piWorkerTool(def)} {
+			desc := tool["description"].(string)
+			for _, want := range []string{"With no turn running it starts the next turn now", "steers that running turn at the next tool boundary", "without cancelling in-flight tool calls", "no extra turn"} {
+				if !strings.Contains(desc, want) {
+					t.Errorf("pi.send description lacks %q: %s", want, desc)
+				}
+			}
+			props := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
+			if len(props) != 4 || props["session_key"] == nil || props["id"] == nil || props["message"] == nil || props["format"] == nil {
+				t.Fatalf("pi.send arguments changed: %v", props)
+			}
+		}
+		return
+	}
+	t.Fatal("pi.send is missing")
+}
+
 func listedPiTools(s *Server) []string {
 	var out []string
 	for _, tool := range s.filteredTools() {
@@ -374,7 +396,7 @@ func TestPiToolsScopeToTheCallingLead(t *testing.T) {
 		t.Fatalf("a refused send reached the child")
 	}
 
-	if out := callToolWithKey(t, f.server, 6, f.key, "pi.send", map[string]any{"id": "child1", "message": "more"}); !strings.Contains(out, "sent to Pi subagent child1") {
+	if out := callToolWithKey(t, f.server, 6, f.key, "pi.send", map[string]any{"id": "child1", "message": "more"}); !strings.Contains(out, "steers its running turn at the next tool boundary") || !strings.Contains(out, "completion mail covers the message") {
 		t.Fatalf("pi.send = %q", out)
 	}
 	if got := agents.sent["child1"]; len(got) != 1 || got[0] != "more" {
@@ -491,6 +513,18 @@ func TestPiRowsFeedTheParentsLiveStateAndReplay(t *testing.T) {
 	if rows := liveAgents(t, s, f.keyA); len(rows) != 1 {
 		t.Fatalf("another lead's child is not this lead's row: %+v", rows)
 	}
+	nested := wsagent.ParentRef{Kind: wsagent.ParentConversation, ReplyID: child.ID}
+	grandchild, _ := agents.Spawn(wsagent.SpawnSpec{Root: f.root, Cwd: f.root, Label: "grandchild", Parent: &nested})
+	if row := liveAgents(t, s, f.keyA)["pi:"+grandchild.ID]; row.ParentID != "pi:"+child.ID || row.Status != wslive.StatusRunning {
+		t.Fatalf("the grandchild nests under its spawner: %+v", row)
+	}
+	if rows := liveAgents(t, s, f.keyB); len(rows) != 1 {
+		t.Fatalf("another lead cannot see the descendant: %+v", rows)
+	}
+	agents.set(grandchild.ID, func(st *wsagent.State) { st.Status = wsagent.StatusIdle })
+	if row := liveAgents(t, s, f.keyA)["pi:"+grandchild.ID]; row.Status != wslive.StatusDone {
+		t.Fatalf("a grandchild settles its row: %+v", row)
+	}
 	agents.set(child.ID, func(st *wsagent.State) { st.Status = wsagent.StatusIdle })
 	if row := liveAgents(t, s, f.keyA)["pi:"+child.ID]; row.Status != wslive.StatusDone {
 		t.Fatalf("a settled turn ends the row: %+v", row)
@@ -515,11 +549,12 @@ func TestPiRowsFeedTheParentsLiveStateAndReplay(t *testing.T) {
 	// An adapter reset clears the tree; the runner's rows come back.
 	intake(t, s2, f.keyA, map[string]any{"kind": "reset"}, map[string]any{"kind": "agent", "agentId": "native"})
 	rows := liveAgents(t, s2, f.keyA)
-	if rows["pi:"+child.ID].AgentKind != wslive.AgentKindPi || rows["native"].ID == "" {
+	if rows["pi:"+child.ID].AgentKind != wslive.AgentKindPi || rows["native"].ID == "" || rows["pi:"+grandchild.ID].ParentID != "pi:"+child.ID || rows["pi:"+grandchild.ID].Status != wslive.StatusDone {
 		t.Fatalf("after a reset the pi row is back beside the adapter's: %+v", rows)
 	}
 
-	// A closed child is not seeded into a new state.
+	// Closing settles displayed rows; a new state seeds no closed tree.
+	agents.set(grandchild.ID, func(st *wsagent.State) { st.Status = wsagent.StatusClosed })
 	agents.set(child.ID, func(st *wsagent.State) { st.Status = wsagent.StatusClosed })
 	s2.Close()
 	s3 := NewServerWithOptions(ServerOptions{Root: f.root, Version: "test", Agents: agents})

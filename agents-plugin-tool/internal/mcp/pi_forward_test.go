@@ -147,7 +147,7 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	if out := callToolWithKey(t, s, 5, key, "pi.list", nil); !strings.Contains(out, "kid1  running  prov/small/low") {
 		t.Fatalf("pi.list = %q", out)
 	}
-	if out := callToolWithKey(t, s, 6, key, "pi.send", map[string]any{"id": "kid1", "message": "more"}); !strings.Contains(out, "sent to Pi subagent kid1") || route.last().body["message"] != "more" {
+	if out := callToolWithKey(t, s, 6, key, "pi.send", map[string]any{"id": "kid1", "message": "more"}); !strings.Contains(out, "steers its running turn at the next tool boundary") || !strings.Contains(out, "report covers the message") || route.last().body["message"] != "more" {
 		t.Fatalf("pi.send = %q", out)
 	}
 	if out := callToolWithKey(t, s, 7, key, "pi.transcript", map[string]any{"id": "kid1"}); !strings.Contains(out, "kid says hi") {
