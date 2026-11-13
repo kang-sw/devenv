@@ -1,5 +1,6 @@
 ---
 title: "Mailbox: notify the sender when a message is not read within 3 minutes"
+completed: 2026-11-13
 related:
   261111-feat-ws-mailbox-wait-without-process-relaunch: "the mailbox wait path a wake notice would ride; no shared decision"
 ---
@@ -63,7 +64,9 @@ idempotent in meaning, so this is tolerated within a minor.
 - A late read after the notice gets no follow-up notice (see `## Decisions`).
 - Manuals: `ai-docs/manuals/ws-mcp.md`,
   `ai-docs/manuals/release-compatibility.md`,
-  `ai-docs/manuals/shipped-surface-boundary.md`.
+  `ai-docs/manuals/shipped-surface-boundary.md`,
+  `ai-docs/manuals/wsflow-mirroring.md`,
+  `ai-docs/manuals/skill-authoring.md`.
 - Notices never trigger notices: system mail (no `From`, no `ReplyTo`) and
   notice mail are never swept.
 
@@ -76,6 +79,21 @@ Daemon sweep over the reply-id and named queues; post the notice with
 Tests with a fake clock: unread past N notifies once; a claim before N never
 notifies; system mail never notifies.
 
+### Result (c9ae4d757) - 2026-11-13
+
+Implemented a daemon-owned 30-second sweep over reply-id, machine, worktree,
+and clone queues, including queues without live dashboard sessions. Notices
+use the system-mail append path and wake the existing mailbox hub. The optional
+`undelivered_notified` marker is persisted under the source lock; original mail
+is not explicitly removed, and claims need no new hook. Tests advance an
+explicit clock through early/overdue/repeated sweeps, early and late claims,
+system-mail exclusion, all supported return routes, and bounded self-mail.
+
+Remote `w5090` full `go test ./...` completed with only the known failure
+recorded under Forward below. Self-review refinement `bdd24e921` preserves
+successful notice markers when another destination fails; its regression and
+the full wsmailbox package passed remotely.
+
 ### Phase 2: configuration
 
 Add `dashboard.mailbox_undelivered_minutes` (integer, minimum 1, default 3) to
@@ -86,6 +104,21 @@ test must pass. Document the key in the mailbox playbook (generic text only; if
 playbook text changes, mirror per `ai-docs/manuals/wsflow-mirroring.md` and read
 `ai-docs/manuals/skill-authoring.md`). Test: a threshold tune changes when the
 notice fires.
+
+### Result (95f335508) - 2026-11-13
+
+Added the global-only integer key (minimum 1, default 3) to ws and wsflow,
+and to Pi because the existing three-package parity contract requires it.
+The daemon reads the global value on every sweep; tests verify a live threshold
+change, invalid-value fallback, scope refusal, and startup delivery/wake without
+listed sessions. The mailbox playbook documents the notice and its return
+routing; wsflow and Pi resources and content manifests are synchronized.
+
+Remote `w5090` full `go test ./... -skip
+TestHostedConnectionSeeingALANChangeReplacesTheDaemon` passed. wsflow package
+checks passed (24 tests, 2 skips). After the self-review fix and fresh-reader
+wording fixes, targeted mailbox, config, daemon wake, and resource-mirror checks
+passed remotely. No changed Invariants/Constraints directives.
 
 ## Decisions
 
@@ -119,3 +152,27 @@ config key `dashboard.mailbox_undelivered_minutes`; no new tool or flag), per
 - [technical] A read after the notice sends no follow-up "delivered" notice; the
   notice already says the message may still be read. Rejected: a follow-up on a
   late claim, which adds a hook into `claimMail` and a second wake.
+- Lead implementation clarification: `default_scope` is `global`, and other
+  scopes are refused/ignored because one daemon serves the machine.
+
+## Resolution
+
+Both phases are complete. T0 remains unchanged: one optional envelope marker
+and an optional config key; no new tool, flag, protocol, or claim behavior.
+The work was implemented and self-reviewed once on
+`impl/develop/mailbox-undelivered`.
+
+### Forward
+
+- Known environment failure: the user-declared w5090-only
+  `cmd/ws-mcp TestHostedConnectionSeeingALANChangeReplacesTheDaemon` predecessor
+  shutdown timeout occurred in the initial full check and was excluded from
+  the final full check. No other failures remain; the holder tests passed.
+- Minor, accepted storage limitation: when source and sender queues occupy
+  different files, a crash or source-write failure after posting but before
+  persisting the source marker can duplicate an idempotent notice. No second
+  state store or transaction layer was added; old writers dropping the marker
+  also retain the already-accepted duplicate-notice caveat.
+- Minor fresh-reader wording follow-up: the playbook could explicitly say the
+  threshold starts at send time and replace "tune" with "threshold change".
+  The existing text adds no gate, and tests pin send-time-based behavior.
