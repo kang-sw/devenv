@@ -709,6 +709,41 @@ describe('lever', () => {
     expect(h.compacts).toBe(1)
   })
 
+  test('leverPending: true at the end of the turn that carried the call, until that turn end passed', async () => {
+    const { c, runScheduled } = harness()
+    expect(c.leverPending('answer')).toBe(false)
+    c.lever(undefined, false)
+    expect(c.leverPending('answer')).toBe(true)
+    // A subagent's turn end is not the turn that carried the call.
+    c.turnComplete('sub-1', 'answer')
+    expect(c.leverPending('answer')).toBe(true)
+    // The carrying turn's end: it arms once, so a later turn end for the same request reads false.
+    c.turnComplete(undefined, 'answer')
+    expect(c.leverPending('answer')).toBe(false)
+    // A repeat call in a later turn carries the call again.
+    c.lever(undefined, false)
+    expect(c.leverPending('answer')).toBe(true)
+    await runScheduled()
+    // The step ran and the compaction landed: nothing is owed.
+    expect(c.leverPending('answer')).toBe(false)
+  })
+
+  test('leverPending: false for an aborted turn, and after it parked the request', async () => {
+    const { c } = harness()
+    c.lever(undefined, true)
+    expect(c.leverPending('aborted')).toBe(false)
+    c.turnComplete(undefined, 'aborted')
+    // The parked request's compact step is still owed, but the next turn end does not hold for it.
+    expect(c.leverPending('answer')).toBe(false)
+  })
+
+  test('leverPending: false once another compaction landed first', async () => {
+    const { c } = harness()
+    c.lever(undefined, true)
+    c.compacted('auto', undefined, { messages: [] })
+    expect(c.leverPending('answer')).toBe(false)
+  })
+
   test('a subagent call is refused and records nothing', async () => {
     const { h, c, turnEnd } = harness()
     expect(c.lever('sub-1', true)).toEqual({ deny: SUBAGENT_DENY })

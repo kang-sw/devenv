@@ -217,7 +217,182 @@
       }
     });
   }
-  window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget };
+  // viewKit holds the visibility source and the keep-in-place helper every
+  // board host shares (the dashboard's board, the standalone page's
+  // history). win gives the globals it uses, so the kit runs under a fake
+  // window too.
+  //
+  // watch(node, {onChange, onOut, margin}) subscribes to node's viewport
+  // visibility: one IntersectionObserver per rootMargin, all with root null,
+  // so whichever ancestor scrolls (a column, the pinned column, the
+  // document) clips it. Each call is its own subscription. onChange gets
+  // every report {node, ratio, visible, rect}; onOut runs once per change
+  // from ratio > 0 to 0 (a first report of 0 has not left view). seen(node)
+  // reads the node's last report without a layout. sweep() drops the
+  // subscriptions of nodes no longer on the page.
+  //
+  // keep(node, {offset, observe, onEnd}) keeps node at its offset from its
+  // nearest scroller's top until layout settles: measured now, in layout
+  // terms (a running transform, as a slide's, does not count), so it is
+  // called before the DOM change it compensates, and apply() right after
+  // it. An offset given puts node there instead. A ResizeObserver over the
+  // scroller's content (and observe) re-applies on every layout change. The
+  // session ends 500 ms after the last change ("quiet"), 5 s after it began
+  // ("cap"), on a scroll it did not write ("user"), or on end() ("ended").
+  // One session per scroller: a keep on a scroller that has one re-anchors
+  // it (node, offset, observed nodes) and restarts both windows, so two
+  // callers never take each other's writes for a user scroll. keeping(el)
+  // returns the session el has, which other scroll writers leave alone.
+  // While a session runs its scroller takes overflow-anchor: none, so the
+  // browser's own anchoring does not compensate a second time.
+  function viewKit(win) {
+    var doc = win.document, observers = {}, reports = new WeakMap(), sessions = new Map();
+    var QUIET = 500, CAP = 5000;
+    function observer(margin) {
+      if (observers[margin]) return observers[margin];
+      var o = observers[margin] = { subs: new Map(), io: null };
+      o.io = new win.IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          var list = o.subs.get(e.target);
+          if (!list) return;
+          var r = { node: e.target, ratio: e.intersectionRatio, visible: e.intersectionRatio > 0, rect: e.boundingClientRect };
+          var s = reports.get(e.target) || { by: {} };
+          s.by[margin] = r;
+          s.last = r;
+          reports.set(e.target, s);
+          list.slice().forEach(function (sub) {
+            if (sub.gone) return;
+            var was = sub.ratio;
+            sub.ratio = r.ratio;
+            if (sub.onChange) sub.onChange(r);
+            if (sub.onOut && was > 0 && r.ratio === 0) sub.onOut(r);
+          });
+        });
+      }, { root: null, rootMargin: margin, threshold: [0] });
+      return o;
+    }
+    function drop(sub) {
+      if (sub.gone) return;
+      sub.gone = true;
+      var o = observers[sub.margin], list = o && o.subs.get(sub.node);
+      if (!list) return;
+      list.splice(list.indexOf(sub), 1);
+      if (!list.length) { o.subs.delete(sub.node); o.io.unobserve(sub.node); }
+    }
+    function watch(node, opt) {
+      opt = opt || {};
+      var sub = { node: node, margin: opt.margin || "0px", onChange: opt.onChange, onOut: opt.onOut, ratio: undefined, gone: false };
+      var handle = { node: node, unwatch: function () { drop(sub); } };
+      if (!node || !win.IntersectionObserver) { sub.gone = true; return handle; }
+      var o = observer(sub.margin), list = o.subs.get(node);
+      // A node already observed reports only on a change: observing it
+      // again gives the new subscription its first report.
+      if (list) { list.push(sub); o.io.unobserve(node); } else o.subs.set(node, [sub]);
+      o.io.observe(node);
+      return handle;
+    }
+    function unwatch(handle) { if (handle && handle.unwatch) handle.unwatch(); }
+    function sweep() {
+      Object.keys(observers).forEach(function (m) {
+        var gone = [];
+        observers[m].subs.forEach(function (list, node) { if (!node.isConnected) gone = gone.concat(list); });
+        gone.forEach(drop);
+      });
+    }
+    function seen(node, margin) {
+      var s = reports.get(node);
+      return s ? (margin ? s.by[margin] || null : s.last) : null;
+    }
+    // A node's nearest scroller: the first ancestor whose overflow scrolls
+    // and whose content overflows it, else the document's.
+    function docScroller() { return doc.scrollingElement || doc.documentElement; }
+    function scrollerOf(node) {
+      for (var p = node && node.parentElement; p && p !== doc.body && p !== doc.documentElement; p = p.parentElement) {
+        var oy = win.getComputedStyle(p).overflowY;
+        if ((oy === "auto" || oy === "scroll" || oy === "overlay") && p.scrollHeight > p.clientHeight) return p;
+      }
+      return docScroller();
+    }
+    function shiftY(el) {
+      var t = win.getComputedStyle(el).transform, m = t && /^matrix(3d)?\((.*)\)$/.exec(t);
+      if (!m) return 0;
+      var v = m[2].split(",").map(parseFloat);
+      return (m[1] ? v[13] : v[5]) || 0;
+    }
+    // layoutTop is node's top in the viewport with the transforms between
+    // it and its scroller taken out; scrollerTop is the scroller's content
+    // top in the viewport.
+    function layoutTop(node, scroller) {
+      var y = node.getBoundingClientRect().top;
+      for (var p = node; p && p !== scroller; p = p.parentElement) y -= shiftY(p);
+      return y;
+    }
+    function scrollerTop(scroller) { return scroller === docScroller() ? 0 : scroller.getBoundingClientRect().top + (scroller.clientTop || 0); }
+    function keep(node, opt) {
+      opt = opt || {};
+      var scroller = scrollerOf(node), s = sessions.get(scroller);
+      var offset = typeof opt.offset === "number" ? opt.offset : layoutTop(node, scroller) - scrollerTop(scroller);
+      if (!s) s = start(scroller);
+      s.node = node;
+      s.offset = offset;
+      if (opt.onEnd) s.ends.push(opt.onEnd);
+      if (s.ro) (opt.observe || []).forEach(function (el) { if (el) s.ro.observe(el); });
+      s.restart(true);
+      if (typeof opt.offset === "number") s.handle.apply();
+      return s.handle;
+    }
+    function start(scroller) {
+      var s = { node: null, offset: 0, ends: [], ro: null, quiet: 0, cap: 0, done: false, wrote: scroller.scrollTop };
+      var main = scroller === docScroller(), anchorEl = main ? doc.documentElement : scroller, target = main ? win : scroller;
+      var was = anchorEl.style.overflowAnchor;
+      anchorEl.style.overflowAnchor = "none";
+      function apply() {
+        if (s.done) return;
+        if (!s.node.isConnected) { end("ended"); return; }
+        var d = layoutTop(s.node, scroller) - scrollerTop(scroller) - s.offset;
+        if (Math.abs(d) >= 0.5) scroller.scrollTop += d;
+        s.wrote = scroller.scrollTop;
+      }
+      function end(reason) {
+        if (s.done) return;
+        s.done = true;
+        sessions.delete(scroller);
+        if (s.ro) s.ro.disconnect();
+        win.clearTimeout(s.quiet);
+        win.clearTimeout(s.cap);
+        target.removeEventListener("scroll", onScroll);
+        anchorEl.style.overflowAnchor = was;
+        s.ends.forEach(function (fn) { fn(reason); });
+      }
+      function onScroll() {
+        if (s.done || Math.abs(scroller.scrollTop - s.wrote) <= 1) return;
+        // Content that shrank under the scroll clamps it: not the user's.
+        var max = scroller.scrollHeight - scroller.clientHeight;
+        if (s.wrote > max + 1 && Math.abs(scroller.scrollTop - max) <= 1) { apply(); return; }
+        end("user");
+      }
+      s.restart = function (both) {
+        win.clearTimeout(s.quiet);
+        s.quiet = win.setTimeout(function () { end("quiet"); }, QUIET);
+        if (!both) return;
+        win.clearTimeout(s.cap);
+        s.cap = win.setTimeout(function () { end("cap"); }, CAP);
+      };
+      s.handle = { scroller: scroller, apply: apply, end: function () { end("ended"); } };
+      if (win.ResizeObserver) {
+        s.ro = new win.ResizeObserver(function () { if (s.done) return; apply(); s.restart(false); });
+        (main ? [doc.body] : Array.prototype.slice.call(scroller.children)).forEach(function (el) { if (el) s.ro.observe(el); });
+      }
+      target.addEventListener("scroll", onScroll, { passive: true });
+      sessions.set(scroller, s);
+      return s;
+    }
+    function keeping(scroller) { var s = sessions.get(scroller); return s ? s.handle : null; }
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping };
+  }
+  var kit = viewKit(window);
+  window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget,
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {

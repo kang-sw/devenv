@@ -148,6 +148,15 @@ export type Compaction = {
    * compaction end, so held dashboard messages follow the continuation.
    */
   continuation: () => Promise<void>
+  /**
+   * Whether the main-thread turn ending with `reason` carried a lever call
+   * whose compact step is still owed: read at that turn end before
+   * turnComplete hears of it, so the mailbox push holds queued dashboard
+   * messages for the compaction. False once that turn end passed (it arms
+   * once per lever call), for an aborted turn (the request is parked, and
+   * no step is scheduled), and once a compaction landed first.
+   */
+  leverPending: (reason: string) => boolean
 }
 
 /** A lever call waiting for its turn to end. */
@@ -161,6 +170,8 @@ type Request = {
    * until that step starts; undefined while none is queued.
    */
   scheduled: number | undefined
+  /** Set at the first main-thread turn end after the latest lever call; see Compaction.leverPending. */
+  ended: boolean
 }
 
 /** The breakdown's figures, keyed by the model window they were read under. */
@@ -460,8 +471,10 @@ export function createCompaction(): Compaction {
       // A repeat call while one is pending replaces the flag (latest wins, so
       // an unset one clears an earlier true) and keeps the request's
       // compact-step state.
-      if (request) request.resume = checked.resume
-      else request = { resume: checked.resume, compact: true, scheduled: undefined }
+      if (request) {
+        request.resume = checked.resume
+        request.ended = false
+      } else request = { resume: checked.resume, compact: true, scheduled: undefined, ended: false }
       debug(`compaction requested; resume: ${checked.resume}`)
       return { result: leverResult(checked.resume) }
     },
@@ -520,6 +533,8 @@ export function createCompaction(): Compaction {
         }
       }
       const r = request
+      // The turn that carried the call has ended, whatever its reason (see leverPending).
+      if (agentId === undefined && r) r.ended = true
       if (agentId !== undefined || reason === 'aborted' || !r || leverCompacting || !edges) return
       if (!r.compact) return finish(r)
       if (r.scheduled !== undefined) debug('the scheduled compaction step did not run; scheduling it again')
@@ -567,5 +582,7 @@ export function createCompaction(): Compaction {
       if (!continuing()) return Promise.resolve()
       return new Promise<void>((resolve) => waiters.push(resolve))
     },
+
+    leverPending: (reason) => reason !== 'aborted' && !leverCompacting && request?.compact === true && !request.ended,
   }
 }

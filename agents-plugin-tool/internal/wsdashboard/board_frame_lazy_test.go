@@ -266,6 +266,10 @@ Frame.prototype.animate = function (keys) { this.anims.push(keys.map(function (k
 function boardQ(sel) { if (sel === "iframe.doc-frame") queries++; return frames.slice(); }
 function inBoard(f) { return frames.indexOf(f) >= 0; }
 var frameWins = new Map(), frameSizes = new Map(), frameSizeFrame = 0, frameMessage;
+var board = { contains: function (f) { return frames.indexOf(f) >= 0; } }, keeps = [], applied = 0;
+function region(name) { return name === "board" ? board : null; }
+function boardKept() { return null; }
+function boardKeep(b) { keeps.push(frames.slice(7, 10).map(function (f) { return f.style.height; }).join()); return { h: { apply: function () { applied++; } } }; }
 var window = { addEventListener: function (t, fn) { if (t === "message") frameMessage = fn; } };
 `+src+listener+`
 for (var i = 0; i < 20; i++) frames.push(new Frame("entry:e" + i));
@@ -299,6 +303,16 @@ check("a moved frame is indexed again on a miss", frames[5].style.height === "77
 // A window that is no board frame finds nothing.
 frameMessage({ source: { id: "stranger" }, data: { wbDoc: "height", docKey: "entry:e6", height: 1 } });
 check("a stranger's message changes nothing", raf.length === 0 && frames[6].style.height === "107px");
+// Frames a board swap brought (wbKeep) start one keep session for the
+// batch, before any height lands, applied once after; a wbKeep frame whose
+// height does not change keeps its mark for a later report.
+frames[7].wbKeep = frames[8].wbKeep = frames[9].wbKeep = true;
+[7, 8].forEach(function (i) { frameMessage({ source: frames[i].contentWindow, data: { wbDoc: "height", docKey: "entry:e" + i, height: 500 } }); });
+frameMessage({ source: frames[9].contentWindow, data: { wbDoc: "height", docKey: "entry:e9", height: 110 } });
+raf.shift()();
+check("one keep session for the batch, started before the heights landed: " + keeps, keeps.length === 1 && keeps[0] === "108px,109px,110px");
+check("the session applies once, after the heights: " + applied, applied === 1 && frames[7].style.height === "500px");
+check("only the frames that changed drop the mark", !frames[7].wbKeep && !frames[8].wbKeep && frames[9].wbKeep);
 if (bad.length) console.log(bad.join("\n"));
 `)
 }
@@ -324,7 +338,7 @@ func TestTickTimesKeepsItsSetsUntilThePageChanges(t *testing.T) {
 var bad = [];
 function check(what, ok) { if (!ok) bad.push(what); }
 var queries = 0, times = [{ id: "t1" }], paces = [{ id: "p1" }], formatted = [];
-var doc = { hidden: false };
+var doc = { hidden: false }, shHidden = false;
 var window = { MutationObserver: function () {} };
 function q(sel) { queries++; return sel.indexOf("time") === 0 ? times.slice() : paces.slice(); }
 function fmtTime(t) { formatted.push(t.id); }

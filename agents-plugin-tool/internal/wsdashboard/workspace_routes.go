@@ -32,6 +32,11 @@ import (
 //     workspace's branches and default folder for the add-worktree form.
 //   - /rail/worktrees/add {"workspace","branch","new","base","folder"} runs
 //     git worktree add in a repository workspace (railworktreeadd.go).
+//   - /rail/worktrees/delete/preview {"workspace","path"} and
+//     /rail/worktrees/delete {"workspace","path","force","token"} check and
+//     run git worktree remove of a linked worktree (railworktreedelete.go).
+//     Unlike the others they also need a browser on this machine: a delete
+//     discards files.
 //
 // The worktree routes act only on a repository the rail shows: a stored
 // workspace, or the repository of a listed session. Every answer's text is
@@ -55,6 +60,8 @@ func (d *Daemon) workspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(workspaceForgetRoute, d.handleWorkspaceForget)
 	mux.HandleFunc(worktreeOptionsRoute, d.handleWorktreeOptions)
 	mux.HandleFunc(worktreeAddRoute, d.handleWorktreeAdd)
+	mux.HandleFunc(worktreeDeletePreviewRoute, d.handleWorktreeDeletePreview)
+	mux.HandleFunc(worktreeDeleteRoute, d.handleWorktreeDelete)
 }
 
 // workspaceBody runs the routes' shared checks and decodes the body into

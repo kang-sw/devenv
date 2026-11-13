@@ -2166,7 +2166,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		body, recommendedTier, err := printPlaybook(s, rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
+		body, recommendedTier, err := printPlaybookForCaller(s, strings.TrimSpace(keyStr), rsrcRoot, name, callerContext, s.configOptions(), printWorkflowLangRV.Value, printOverrideLookup)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -2275,7 +2275,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, rsrcRoot, worktreeRoot, name, callerContext, s.configOptions(), mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
+		path, planPath, recommendedTier, err := renderPlaybookWithPlan(s, strings.TrimSpace(renderSessionKey), rsrcRoot, worktreeRoot, name, callerContext, s.configOptions(), mintRoot, parentKey, renderWorkflowLangRV.Value, renderOverrideLookup, tierOverride, planStem)
 		text := withRecommendedRenderBinding(path, s.currentHarness(), recommendedTier, s.configOptions())
 		if planPath != "" {
 			text += "\n" + planPathLinePrefix + planPath
@@ -5089,15 +5089,15 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        wikiQueryTool,
-			"description": "Read-only; read a tracker store's wikis: markdown pages kept on git branches of the store, with full history. For a top-level lead, or a store's support conversation on its own store. op list lists the wikis, pages a wiki's pages, read one page with the commit it was read at (the base a wiki.update save of that page must name), search finds text in the pages, history lists commits with their signature verdicts, diff shows a page's change, and recovery lists tips a rewind or deletion replaced. A link wiki:<name>/<path> in a store's item, comment, or wiki page names the page <path> of the wiki <name> in that store. Text by default; format \"json\" for structured output.",
+			"description": "Read-only; read a tracker store's wikis: pages kept on git branches of the store, with full history. A page is Markdown, or an HTML page when its path ends in .html: a whole HTML document the dashboard shows in a sandboxed frame, where its scripts run but it cannot show the wiki's images or resolve attachment: references. For a top-level lead, or a store's support conversation on its own store. op list lists the wikis, pages a wiki's pages, read one page with the commit it was read at (the base a wiki.update save of that page must name), search finds text in the pages, history lists commits with their signature verdicts, diff shows a page's change, and recovery lists tips a rewind or deletion replaced. A link wiki:<name>/<path> in a store's item, comment, or wiki page names the page <path> of the wiki <name> in that store. Text by default; format \"json\" for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"session_key": stringProperty("Caller's ws session key (see ws:workflow-manual)."),
 					"store":       stringProperty("The ID of a registered tracker store, as tracker.query lists them."),
-					"op":          enumStringProperty("list: the store's wikis and their tips. pages: the pages of wiki (at commit when given). read: page path of wiki (at commit when given) and the commit read, the base for a later save. search: lines of wiki's pages containing query (case-insensitive) at the tip. history: wiki's commits, or those touching path, newest first. diff: path's change in commit to, against from or the parent of to. recovery: the replaced tips kept on this machine, of wiki or of every wiki.", wikiQueryOps),
+					"op":          enumStringProperty("list: the store's wikis and their tips. pages: the pages of wiki (at commit when given). read: page path of wiki (at commit when given), its kind (markdown or html), and the commit read, the base for a later save. search: lines of wiki's pages containing query (case-insensitive) at the tip, an HTML page's raw source included. history: wiki's commits, or those touching path, newest first. diff: path's change in commit to, against from or the parent of to. recovery: the replaced tips kept on this machine, of wiki or of every wiki.", wikiQueryOps),
 					"wiki":        stringProperty("The wiki name: [a-z0-9][a-z0-9-]*, at most 64 characters. Required by every op but list and recovery."),
-					"path":        stringProperty("A page path: folder segments and the page name joined by /, without the .md suffix, such as guides/setup. Required by read and diff; narrows history."),
+					"path":        stringProperty("A page path: folder segments and the page name joined by /. A Markdown page is named without a suffix, such as guides/setup (guides/setup.md names the same page); a path ending in .html, such as guides/setup.html, names an HTML page. Required by read and diff; narrows history."),
 					"commit":      stringProperty("A full commit id to read pages or a page at instead of the tip (from history or recovery)."),
 					"query":       stringProperty("The text search finds (a fixed string, not a pattern)."),
 					"from":        stringProperty("diff: the full commit id to diff from; omitted, the parent of to."),
@@ -5110,7 +5110,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        wikiUpdateTool,
-			"description": "Save one edit to a tracker store's wiki as a signed commit. For a top-level lead, or a store's support conversation on its own store. Read the page with wiki.query op=read first and pass the commit it returned as base: a save never falls back to the current tip. When others saved since your base, a non-overlapping edit merges automatically; an overlapping one, or a base that is not an ancestor of the tip, is refused as a conflict carrying both texts and the tip to save on next. new_wiki: true creates a wiki that does not exist yet, with no base. The result names the new commit, the base for your next save. Item bodies, comments, and pages link a page of the same store as [text](wiki:<name>/<path>), the page <path> of the wiki <name>.",
+			"description": "Save one edit to a tracker store's wiki as a signed commit. For a top-level lead, or a store's support conversation on its own store. Read the page with wiki.query op=read first and pass the commit it returned as base: a save never falls back to the current tip. When others saved since your base, a non-overlapping edit merges automatically; an overlapping one, or a base that is not an ancestor of the tip, is refused as a conflict carrying both texts and the tip to save on next. new_wiki: true creates a wiki that does not exist yet, with no base. The result names the new commit, the base for your next save. A path ending in .html makes an HTML page: its content is a whole HTML document, scripts and styles included, which the dashboard shows in a sandboxed frame; such a page cannot show pasted images or resolve attachment: references, so a write of one carries no images. Item bodies, comments, and pages link a page of the same store as [text](wiki:<name>/<path>), the page <path> of the wiki <name>.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -5120,14 +5120,14 @@ func tools() []map[string]any {
 					"op":          enumStringProperty("write: put content at path (creating or replacing the page). rename: move path to to. delete: remove path. restore: put path back as commit held it, with the images it references.", wikiUpdateOps),
 					"base":        stringProperty("The full commit id the edit started from: the commit wiki.query op=read returned, or the commit of your previous save. Required unless new_wiki. A stale base is refused as a conflict."),
 					"new_wiki":    boolProperty("true creates the wiki with this save; refused when the wiki already exists. Pass no base with it."),
-					"path":        stringProperty("The page path: folder segments and the page name joined by /, without the .md suffix, such as guides/setup."),
-					"to":          stringProperty("rename: the new page path; refused when a page is already there."),
-					"content":     stringProperty("write: the whole markdown text of the page."),
+					"path":        stringProperty("The page path: folder segments and the page name joined by /. A Markdown page is named without a suffix, such as guides/setup (guides/setup.md names the same page); a path ending in .html, such as guides/setup.html, names an HTML page. No folder, and no other page name, ends in .md or .html."),
+					"to":          stringProperty("rename: the new page path; refused when a page is already there. Its suffix sets the kind, so a rename may turn a Markdown page into an HTML page or back."),
+					"content":     stringProperty("write: the whole page text: Markdown, or for an HTML page a whole HTML document."),
 					"commit":      stringProperty("restore: the full commit id to restore the page from (from history or recovery)."),
 					"message":     stringProperty("Optional commit message body under the generated subject."),
 					"images": map[string]any{
 						"type":        "array",
-						"description": "write: images saved beside the page, each a PNG, JPEG, GIF, or WebP. A page shows one as ![alt](attachment:<sha256>), where <sha256> is the lowercase hex sha256 of the image bytes, so the same write's content can already reference it; the result lists each image's sha256.",
+						"description": "write: images saved beside a Markdown page, each a PNG, JPEG, GIF, or WebP; refused for an HTML page, which cannot show them. A Markdown page shows one as ![alt](attachment:<sha256>), where <sha256> is the lowercase hex sha256 of the image bytes, so the same write's content can already reference it; the result lists each image's sha256.",
 						"items": map[string]any{
 							"type": "object",
 							"properties": map[string]any{
@@ -5533,7 +5533,7 @@ func tools() []map[string]any {
 					"session_key":   stringProperty("Caller's ws session key (required for root resolution; lead callers trigger child-key minting)."),
 					"name":          stringProperty("Playbook name (bare stem resolvable by the rsrc loader)."),
 					"context":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optional caller-supplied substitution values for variables declared in the playbook's frontmatter. In wsflow no-agent mode, legacy render-eligible stems append context as a ## Render Context block instead. For delegate-implementer, the plan_stem key names the reserved plan and is not a template variable."},
-					"root_override": stringProperty("Optional delegate worktree path for prompt artifact allocation and child-key binding. Playbooks, manifests, and includes use the plugin resource root (WS_RSRC_ROOT or the executable-derived bundle)."),
+					"root_override": stringProperty("Optional delegate worktree path for prompt artifact allocation and child-key binding. The path resolves to its Git worktree root with symlinks resolved, and the child key binds to that resolved path. Playbooks, manifests, and includes use the plugin resource root (WS_RSRC_ROOT or the executable-derived bundle)."),
 					"tier_override": stringProperty("Optional capability tier (small/medium/large/xlarge) that replaces the playbook's own frontmatter tier for this render only, driving both the in-body RoleModel substitution and the recommended-tier/recommended-model/recommended-reasoning-effort payload lines. Absent, render uses the frontmatter tier unchanged. An unknown tier is rejected, not coerced."),
 				},
 				"required": []string{"name"},
@@ -5705,8 +5705,9 @@ func roleAllowsTool(role toolRole, name string) bool {
 			return false
 		}
 		// config.get is a read-only single-key read; a child must reach it to
-		// inherit its lead's session-scope values.
-		return name == "config.get" || !strings.HasPrefix(name, "config.")
+		// inherit its lead's session-scope values. config.resolve_agent is a
+		// read-only tier resolution a worker playbook runs before each spawn.
+		return name == "config.get" || name == "config.resolve_agent" || !strings.HasPrefix(name, "config.")
 	case roleLeaf:
 		if name == "config.get" {
 			return true

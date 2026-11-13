@@ -101,7 +101,7 @@ func TestTopicFramesCarryThePinnedTheme(t *testing.T) {
 		{"", `<html>`},
 		{"auto", `<html>`},
 	} {
-		for _, path := range []string{"/s/boardsession", "/s/livesession"} {
+		for _, path := range []string{"/s/boardsession?frame=1", "/s/livesession?frame=1"} {
 			_, body := getTheme(t, f.base+path, c.cookie)
 			for _, root := range frameRoots(t, body) {
 				if root != c.want {
@@ -143,7 +143,7 @@ func TestTopicFramesCarryThePinnedTheme(t *testing.T) {
 // board-first pages included, in every language.
 func TestGearHoldsTheThemeSection(t *testing.T) {
 	f := startPageFixture(t)
-	for _, path := range []string{"/", "/s/boardsession", "/s/livesession"} {
+	for _, path := range []string{"/?frame=1", "/s/boardsession?frame=1", "/s/livesession?frame=1"} {
 		for _, l := range wsi18n.Languages() {
 			_, body := getLang(t, f.base+path, l.Code, "")
 			for _, key := range []string{"gear.theme", "gear.theme.auto", "gear.theme.light", "gear.theme.dark"} {

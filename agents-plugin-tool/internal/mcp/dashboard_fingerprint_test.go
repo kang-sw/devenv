@@ -217,7 +217,7 @@ func TestDashboardTopicTicketMoveInvalidatesTheBoard(t *testing.T) {
 	f.update(t, `<wb:topic name="t" tickets="261101-feat-linked"><wb:log>working</wb:log></wb:topic>`)
 
 	page := readPageOK(t, src, reg)
-	if !strings.Contains(string(page.Board.Board), `class="tk idea"`) {
+	if !strings.Contains(string(page.Board.Board), `class="wbtk idea"`) {
 		t.Fatalf("the board lacks the idea badge:\n%s", page.Board.Board)
 	}
 	for _, dir := range wsdoc.TicketStatusDirs {
@@ -243,7 +243,7 @@ func TestDashboardTopicTicketMoveInvalidatesTheBoard(t *testing.T) {
 	if boardRenders(src) == before {
 		t.Fatal("a linked ticket's move reused the memoized board")
 	}
-	if !strings.Contains(string(page.Board.Board), `class="tk done"`) {
+	if !strings.Contains(string(page.Board.Board), `class="wbtk done"`) {
 		t.Fatalf("the re-rendered board lacks the done badge:\n%s", page.Board.Board)
 	}
 }

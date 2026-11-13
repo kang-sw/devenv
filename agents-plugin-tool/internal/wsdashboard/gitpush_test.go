@@ -314,12 +314,12 @@ func TestGitPushRoute(t *testing.T) {
 		t.Fatal("a refused request pushed")
 	}
 
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `data-git="push"`) {
 		t.Fatal("the session page lacks the git sheet's push button")
 	}
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
-	resp, err := client.Get(f.base + "/s/livesession/events?h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
+	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)
 	}

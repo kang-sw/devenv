@@ -10,6 +10,7 @@ related:
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "ready, in flight; touches page.tmpl link/check templates (#7, text overlap)"
 sage-review-completeness-reviewed: fe98018b7c409278
 sage-review-design-reviewed: fe98018b7c409278
+completed: 2026-11-14
 ---
 
 # Release-gate sweep fixes: eight Important findings in c8d5479fe..be2e22005
@@ -249,6 +250,86 @@ Verification:
   `-timeout 40m` (the default 10m panics).
 - `go test ./...` for the touched packages, the claude-mod / wsflow / Pi test
   suites, and the wsflow mirror drift tests pass.
+
+### Result (4f135f5e7) - 2026-11-14
+
+Commits e1b11a147..4f135f5e7 apply all eight Decisions (T0 throughout).
+
+- #1 (701398372): `qShortcut` leaves Ctrl+K / Ctrl+Space to `.xterm`,
+  `textarea` and editable `contenteditable` targets; the page body still
+  opens the palette. `search-palette.test.cjs` covers both. iframe-shell has
+  not landed, so there is no forwarder case yet; when it lands, the
+  frame-side forwarder needs the same target check.
+- #2 (cdfa2716a, 4f135f5e7): memo add and edit count trimmed UTF-8 bytes
+  (surrogate pairs as 4), show `js.memo.toolong` on input, and refuse the
+  submit over 8000 bytes. Cancelling an over-limit edit clears its refusal.
+  `memo_test.cjs` covers CJK at 8001 / 8000 bytes and emoji; a Go test pins
+  the server cap at exactly 8000 bytes. All 11 i18n tables have the key.
+  The non-English strings were not reviewed by native speakers.
+- #3 (4e7f12d7b, 05e1da627, 4f135f5e7): a drain ledger in claude-mod (and
+  the wsflow mirror) and in Pi records what each recv drain received and
+  checks buffered `--stream` lines when they are consumed. A line whose every
+  mail envelope was received loses its `mail` kind (board or interrupt kinds
+  stay). Mail that arrives after the drain still wakes, and a line carrying
+  such mail clears the ledger. The review fix keeps the waking line's own
+  envelopes out of the record. Without it, a different sender's identical
+  text in the same RFC3339 second was swallowed until the reminder.
+  Residual: the key is `sent_at` plus content. An identical same-second
+  message can now cause at most a spurious extra wake (the safe direction),
+  or, only in the gap before any line reports mail the drain did not get, be
+  matched by a drained envelope that was never reported on the stream. That
+  needs identical text in the same second; the ledger is bounded at 1000
+  entries and cleared per stream child.
+- #4 (a3fb49a5b): `bundledPluginRoot` has no `runtime.Caller` source-tree
+  fallback. Without `WS_RSRC_ROOT` it returns an error that names the
+  launcher. A unit test pins the refusal, and the wsagent `TestMain` sets
+  `WS_RSRC_ROOT`.
+- #5 (8b7359f14): the adapter's main-module guard compares realpaths; a
+  JS test launches through a symlinked directory and sees the CLI start.
+- #6 (36d5d1233): `errPiNoSDK` is a sentinel. On a default-mode Pi lead
+  without the SDK, `piLeadLaunch` starts isolated and emits one combined
+  `PluginWarning`; other `piSDKPaths` errors still fail. Tests cover the
+  standalone and legacy-record isolated starts (record unchanged), a non-SDK
+  error that still fails, and combined warnings that keep both texts.
+- #7 (e512d80d2): the plain inline pipeline (link fields and readings) has
+  emphasis turned off; the `TextInline` doc says so.
+  `TestRenderPageLinkFieldsAndReadingsKeepEmphasisLiteral` passes alongside
+  the existing reference-link, code-span, URL and bare-path tests.
+- #8 (35a140498): the render tests expect the symlink-resolved
+  root_override root, and the `root_override` description states the
+  contract. Failing before and passing after on darwin:
+  `TestRenderDispatchSeparatesResourceAndWorktreeRoots`,
+  `TestRenderFromWorktreeSessionCommitsInThatWorktree`,
+  `TestRenderPathMintedChildRecordsLeadParent`. The plan says "four", but
+  its own list names three, and only those three reproduced.
+
+Verification (darwin): `go test ./internal/mcp/ -timeout 100m` ok
+(838.690s); wswhiteboard, wsdashboard, wsi18n, wsrsrc (mirror drift) ok;
+`claude plugin test agents-plugin` and `agents-plugin-wsflow` 807 pass /
+0 fail; `claude plugin validate` passes (warnings unchanged); Pi `npm test`
+2686 pass / 0 fail / 3 skipped; `test_go_string_literals_downstream_neutral`
+ok; `memo_test.cjs` and `search-palette.test.cjs` pass.
+
+Known darwin failures, confirmed unrelated to #5 / #8 and left as is:
+- `TestPiLeadResolverAdapter`: `installResolver` fails closed ("Pi's
+  JavaScript SDK has no compatible extension resolver"). The installed Pi
+  1.0.4 has no `getResourcePathKey` in its SDK, and the review saw the same
+  failure with the 0.84.4 dependency. On current Pi, default plugin
+  isolation fails closed. Follow-up candidate: adapt the resolver to the
+  current Pi SDK.
+- `TestClaudeLeadLocalSettingsCanonicalWorktree`: the test compares an
+  unresolved worktree root with `EvalSymlinks(home)` (/var vs /private/var),
+  a pre-existing test asymmetry.
+- `TestLeadRejoinsItsProcessAfterADaemonRestart`,
+  `TestLeadRejoinDoesNotStallBehindALongReplay`,
+  `TestLeadHandedToATerminalIsLetGo`: flaky, and they also fail on base
+  e1b11a147 with `-count=5`.
+
+Review (lite): one Important (the #3 waking-line record), fixed in 4f135f5e7.
+Minors fixed: the stale `piSDKPaths` comment, ledger clear on mail the drain
+did not get, and the memo cancel status. The client trims with JS `trim` and
+the server with Go `TrimSpace`; they disagree at edge whitespace such as
+U+FEFF. That is cosmetic, since the server cap stays authoritative.
 
 ## Sage Review Round 1 (2026-11-13)
 

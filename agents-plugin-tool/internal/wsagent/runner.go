@@ -121,6 +121,10 @@ type Options struct {
 	WSMCP func(root string) (MCPCommand, error)
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
+	// Timer starts the lever hold's cap timer (leverHoldCap): a channel
+	// that fires once d passed, and a stop that ends it early; nil uses
+	// time.NewTimer.
+	Timer func(d time.Duration) (<-chan time.Time, func())
 	// Log receives diagnostics; nil discards them.
 	Log io.Writer
 	// Holders is the session holder manager lead conversations run under,
@@ -200,6 +204,12 @@ type Runner struct {
 func NewRunner(opts Options) *Runner {
 	if opts.Now == nil {
 		opts.Now = time.Now
+	}
+	if opts.Timer == nil {
+		opts.Timer = func(d time.Duration) (<-chan time.Time, func()) {
+			t := time.NewTimer(d)
+			return t.C, func() { t.Stop() }
+		}
 	}
 	if opts.Log == nil {
 		opts.Log = io.Discard
@@ -1205,6 +1215,15 @@ type conv struct {
 	// while it waits on the user with no prompt to show (checkAction).
 	harnessState string
 	actionTimer  *time.Timer
+	// leverC is the lever hold's cap timer and leverStop its stop: armed
+	// at the end of a turn that carried a successful compaction lever call
+	// (Event.CompactRequested), it holds kick until that compaction starts
+	// (its CompactStart), leverHoldCap passes, the next turn ends, or the
+	// process exits. interruptAsked is set when the runner interrupted the
+	// running turn, until its end: an interrupted lever turn does not arm.
+	leverC         <-chan time.Time
+	leverStop      func()
+	interruptAsked bool
 	// The process's MCP recovery (runner_recovery.go). mcpSeen are the
 	// servers it reported connected; mcpBroken (above) are those that broke
 	// and did not come back in-stream, and a restart is due at the next
@@ -1390,7 +1409,8 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC <-chan time.Time
+		var idleC, actionC, leverC <-chan time.Time
+		leverC = c.leverC
 		if c.idle != nil {
 			idleC = c.idle.C
 		}
@@ -1430,6 +1450,10 @@ func (c *conv) loop() {
 		case <-actionC:
 			c.actionTimer = nil
 			c.actionDue()
+		case <-leverC:
+			// No compaction started within the cap: what waited goes now.
+			c.leverC, c.leverStop = nil, nil
+			c.kick()
 		case <-beat.C:
 			c.live.writeSnapshot()
 			c.persistSeq()
@@ -1732,7 +1756,7 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 // it, which each turn end submits; mail waits for the next message turn, or
 // goes alone once nothing is queued.
 func (c *conv) kick() {
-	if c.closed || c.turn || c.replaying || len(c.steered) > 0 || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
+	if c.closed || c.turn || c.replaying || len(c.steered) > 0 || c.leverC != nil || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
 		return
 	}
 	held, err := wsinbox.Held(c.inbox)
@@ -2503,6 +2527,11 @@ func (c *conv) handle(ev Event) {
 			c.update(func(rec *Record) { rec.SessionID = ev.SessionID })
 		}
 	case ev.Live != nil:
+		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase == wslive.CompactStart {
+			// The requested compaction started: its own turn holds kick
+			// until it ends.
+			c.holdForLever(false)
+		}
 		if ev.Live.Kind == wslive.KindReply && ev.Live.Final && !(quiet && c.rec.Parent != nil && ev.Seq <= c.rec.TurnStartSeq) {
 			c.reply = ev.Live.Text
 		}
@@ -2544,6 +2573,11 @@ func (c *conv) handle(ev Event) {
 			return
 		}
 		c.replayBoundary = c.replayBoundary || c.replaying
+		if !quiet {
+			// Every turn end lifts an earlier hold; a lever turn arms anew.
+			c.holdForLever(ev.CompactRequested && !c.interruptAsked)
+			c.interruptAsked = false
+		}
 		c.endTurn(ev.TurnError, quiet)
 	case ev.Approval != nil:
 		c.addApproval(*ev.Approval, quiet)
@@ -2848,6 +2882,9 @@ func (c *conv) answerApproval(id string, allow bool, message string) error {
 func (c *conv) processExited() {
 	rejoining, proc := c.replaying, c.proc
 	c.events = nil
+	// No compaction follows from a process that is gone.
+	c.holdForLever(false)
+	c.interruptAsked = false
 	if c.replaying && c.rec.Parent != nil {
 		// Apply any completed replayed turn before handling an exited child.
 		if c.rec.TurnOpen && !c.turn && c.replayBoundary {
@@ -3017,9 +3054,27 @@ func (c *conv) checkInterrupt() {
 	if err != nil || len(recs) == 0 || !c.turn || c.proc == nil {
 		return
 	}
+	c.interruptAsked = true
 	if err := c.proc.Interrupt(); err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: interrupt: %v\n", c.rec.ReplyID, err)
 		c.stopProcess("")
+	}
+}
+
+// leverHoldCap bounds how long queued input waits, after a turn that
+// carried a successful compaction lever call, for that compaction to start.
+const leverHoldCap = 5 * time.Second
+
+// holdForLever lifts the lever hold, ending its cap timer, and with arm
+// starts it anew. Lifting submits nothing itself: the caller's own kick
+// (a turn end's) or the compaction turn's end does.
+func (c *conv) holdForLever(arm bool) {
+	if c.leverStop != nil {
+		c.leverStop()
+	}
+	c.leverC, c.leverStop = nil, nil
+	if arm {
+		c.leverC, c.leverStop = c.r.opts.Timer(leverHoldCap)
 	}
 }
 

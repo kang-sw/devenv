@@ -25,4 +25,5 @@
 <symbol id="i-stop" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.4"/></symbol>
 <symbol id="i-pencil" viewBox="0 0 16 16"><path d="M10.9 2.7a1.4 1.4 0 0 1 2 2L5.4 12.2l-2.9.8.8-2.9z"/><path d="M9.6 4l2 2"/></symbol>
 <symbol id="i-power" viewBox="0 0 16 16"><path d="M8 2.2v5.2"/><path d="M4.6 4.4a5 5 0 1 0 6.8 0"/></symbol>
+<symbol id="i-trash" viewBox="0 0 16 16"><path d="M2.8 4.3h10.4M6.3 4.3V2.8h3.4v1.5"/><path d="M4.2 4.3l.6 8.4a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8.4"/><path d="M6.7 7v4M9.3 7v4"/></symbol>
 </svg>

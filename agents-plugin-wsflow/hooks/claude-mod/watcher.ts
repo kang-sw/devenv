@@ -57,7 +57,15 @@ import type { InboxCommand, InboxItem } from './dashboard'
  * (`continuation`, waited on at most COMPACTION_CONTINUATION_WAIT_MS): when a
  * main-thread turn runs by then (the continuation's, or one the person
  * started), its turn end takes it; otherwise it is drained and submitted as a
- * turn end would. The held board message goes ahead of the mail still queued
+ * turn end would. A main-thread turn end that carried a successful call of
+ * the compaction lever (`leverPending`) holds its board part for the
+ * compaction the lever requested, LEVER_HOLD_MS at most: the compaction's
+ * start hands the held messages to its release above, and when no
+ * compaction started by the cap they are released as a turn end would, or
+ * left for the end of a turn that runs by then. The next main-thread turn
+ * end lifts the hold too. A board wake meanwhile holds its message as one
+ * during a running turn does, and the mail still queued at that turn end is
+ * submitted as usual. The held board message goes ahead of the mail still queued
  * at that turn end: mail is delivered once the board drain and submit settle (or
  * BOARD_FIRST_WAIT_MS passes), so the user's own message starts the next turn
  * and the mail joins it as the mail path delivers it. A board submit the host
@@ -250,6 +258,13 @@ export interface WatcherEdges {
    * absent, none is ever pending.
    */
   continuation?: () => Promise<void>
+  /**
+   * Read at a main-thread turn end, before the compaction feature hears of
+   * it: whether that turn carried a successful compaction lever call whose
+   * compaction is still owed, so the turn end holds the board messages for
+   * it (LEVER_HOLD_MS at most). Absent, no turn end holds.
+   */
+  leverPending?: () => boolean
 }
 
 export type BindResult = 'bound' | 'unchanged' | 'rebound'
@@ -263,6 +278,8 @@ export const BOARD_FIRST_WAIT_MS = 5_000
 export const STEER_DRAIN_WAIT_MS = 2_000
 /** At a compaction end, the longest held board messages wait for a compaction continuation to go first. */
 export const COMPACTION_CONTINUATION_WAIT_MS = 10_000
+/** After a turn end that carried a compaction lever call, the longest board messages wait for that compaction to start. */
+export const LEVER_HOLD_MS = 5_000
 
 export function nextBackoff(prev: number): number {
   return prev <= 0 ? BACKOFF_MIN_MS : Math.min(prev * 2, BACKOFF_MAX_MS)
@@ -300,6 +317,108 @@ export function parseRecvText(text: string | undefined): DrainedMail[] {
   }
   if (!Array.isArray(parsed)) return [{ raw: trimmed }]
   return parsed.map((c): DrainedMail => (isEnvelope(c) ? c : { raw: JSON.stringify(c) }))
+}
+
+/**
+ * The envelopes a recv drain returned, so a `--stream` arrival line buffered
+ * before that drain does not wake the session again for mail it already
+ * received. A line is matched by its envelopes (`sent_at` and `content`,
+ * the fields recv's text and JSON forms both carry), with multiplicity; each
+ * match is consumed. Only a line whose every mail envelope was received loses
+ * its `mail` kind: mail that arrived after the drain still wakes at once, and
+ * such a line clears the ledger, since nothing after it predates the drain.
+ * Envelopes of lines already passed through (the line that woke the drain)
+ * are not recorded: no later line reports them, and a stale record could
+ * match an identical later message (same second, same text) and swallow it.
+ */
+export interface DrainLedger {
+  /** Record what a drain received; items that are not envelopes are ignored. */
+  record: (mail: readonly DrainedMail[]) => void
+  /** The arrival line with an already-received `mail` kind removed; undefined when nothing is left to wake for. */
+  filter: (line: string) => string | undefined
+  /** Forget every record: a new stream child reports only mail still queued. */
+  clear: () => void
+}
+
+const DRAIN_LEDGER_MAX = 1_000
+
+export function createDrainLedger(): DrainLedger {
+  const counts = new Map<string, number>()
+  // Envelopes of lines passed through since the last record.
+  const delivered = new Map<string, number>()
+  const keyOf = (m: { sent_at?: unknown; content: string }) => `${typeof m.sent_at === 'string' ? m.sent_at : ''}\u0000${m.content}`
+  const take = (map: Map<string, number>, key: string) => {
+    const n = map.get(key) ?? 0
+    if (n === 1) map.delete(key)
+    else if (n > 1) map.set(key, n - 1)
+    return n > 0
+  }
+  const add = (map: Map<string, number>, key: string) => {
+    // Bounded: an entry no line ever matched only lingers until the next child.
+    if (map.size >= DRAIN_LEDGER_MAX) map.clear()
+    map.set(key, (map.get(key) ?? 0) + 1)
+  }
+  return {
+    record(mail) {
+      for (const m of mail) {
+        if (!('content' in m) || typeof m.content !== 'string') continue
+        const key = keyOf(m)
+        if (!take(delivered, key)) add(counts, key)
+      }
+      delivered.clear()
+    },
+    filter(line) {
+      let parsed: { kinds?: unknown; named?: unknown; reply?: unknown }
+      try {
+        parsed = JSON.parse(line) as typeof parsed
+      } catch {
+        return line
+      }
+      const kinds = parsed?.kinds
+      if (!Array.isArray(kinds) || !kinds.includes('mail')) return line
+      const envelopes = [parsed.named, parsed.reply].flatMap((list) => (Array.isArray(list) ? list : []))
+      if (envelopes.length === 0) return line
+      let covered = true
+      for (const e of envelopes) {
+        if (!isEnvelope(e)) {
+          covered = false
+          continue
+        }
+        const key = keyOf(e)
+        if (take(counts, key)) continue
+        covered = false
+        add(delivered, key)
+      }
+      if (!covered) {
+        // Mail the drain did not get arrived after it, so every later line is
+        // newer than the drain too: forget its records, or one could match
+        // an identical later message and swallow its wake.
+        counts.clear()
+        return line
+      }
+      const rest = kinds.filter((k) => k !== 'mail')
+      return rest.some((k) => ['board', 'interrupt'].includes(k)) ? JSON.stringify({ ...parsed, kinds: rest }) : undefined
+    },
+    clear() {
+      counts.clear()
+      delivered.clear()
+    },
+  }
+}
+
+/**
+ * The envelopes in a recv result as the model reads it: the `format: "json"`
+ * array, or the text form's `[<sent_at>] <sender>: <content>` entries (only
+ * `sent_at` and `content` are kept). Anything else yields none.
+ */
+export function recvResultMail(text: string | undefined): DrainedMail[] {
+  const parsed = parseRecvText(text)
+  if (parsed.length !== 1 || 'content' in parsed[0]!) return parsed
+  const raw = parsed[0]!.raw
+  const head = /^\[([^\]\n]+)\] [^\n]*?: /gm
+  const found: { sent_at: string; start: number; end: number }[] = []
+  for (let m = head.exec(raw); m !== null; m = head.exec(raw)) found.push({ sent_at: m[1]!, start: m.index, end: m.index + m[0].length })
+  return found.map((h, i) => ({ sent_at: h.sent_at, content: raw.slice(h.end, i + 1 < found.length ? found[i + 1]!.start - 1 : raw.length) }))
 }
 
 const field = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
@@ -383,12 +502,14 @@ export interface Watcher {
    * The main-thread turn ended: drain and submit the held board messages,
    * then submit whatever mail is still queued as one prompt, else append it;
    * after an interrupt, only the newly drained board messages are submitted
-   * and the rest is appended. Never throws.
+   * and the rest is appended. A turn that carried a compaction lever call
+   * (`leverPending`) holds the board messages for that compaction instead
+   * (LEVER_HOLD_MS at most); its mail is submitted as usual. Never throws.
    */
   turnCompleted: () => void
   /** A main-thread turn started: the interrupted mark, if any, is cleared. */
   turnStarted: () => void
-  /** A main-conversation compaction began: board messages are held until it ends. */
+  /** A main-conversation compaction began: board messages are held until it ends, and a lever hold is handed to that end. */
   compactStarted: () => void
   /**
    * That compaction settled (landed, vetoed, or failed): once any compaction
@@ -433,6 +554,13 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   let compacting = false
   /** Bumped at every compaction start: a release a later compaction superseded does nothing. */
   let compactions = 0
+  /**
+   * The armed lever hold (see LEVER_HOLD_MS): set at a turn end whose turn
+   * carried a compaction lever call, until that compaction starts, its cap
+   * fires, the next main-thread turn end, or a stop. Aborting it ends its
+   * cap wait.
+   */
+  let leverHold: AbortController | undefined
   /** Board drains run one at a time, so a turn end and an idle wake never interleave their submits. */
   let boardChain: Promise<unknown> = Promise.resolve()
   /**
@@ -478,9 +606,68 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     }
   }
 
-  /** Whether board messages are held rather than submitted now: a main-thread turn runs or the main conversation compacts. */
+  /**
+   * Whether board messages are held rather than submitted now: a main-thread
+   * turn runs, the main conversation compacts, or a requested compaction is
+   * still to start (the lever hold).
+   */
   function boardBusy(): boolean {
-    return compacting || edges.turnRunning()
+    return compacting || leverHold !== undefined || edges.turnRunning()
+  }
+
+  /** What holds board messages now, for a log line. */
+  function holder(): string {
+    if (compacting) return 'running compaction ends'
+    if (leverHold !== undefined && !edges.turnRunning()) return 'requested compaction starts'
+    return 'running turn ends'
+  }
+
+  /** Lift the armed lever hold, ending its cap wait; nothing is released here. */
+  function liftLeverHold(): void {
+    leverHold?.abort()
+    leverHold = undefined
+  }
+
+  /** Whether the ending turn carried a compaction lever call still owed; a failing edge reads as none. */
+  function leverOwed(): boolean {
+    try {
+      return edges.leverPending?.() === true
+    } catch (err) {
+      edges.log(`${edges.label}: reading the pending compaction request failed: ${String(err)}`)
+      return false
+    }
+  }
+
+  /**
+   * Hold the board messages for the compaction the ending turn requested:
+   * until it starts (compactStarted hands them to its release), or
+   * LEVER_HOLD_MS. The cap wait is raced outside the board chain, never
+   * awaited in it. At the cap, a compaction or a turn running by then takes
+   * them at its end; otherwise they are released as a turn end would.
+   */
+  function armLeverHold(): void {
+    liftLeverHold()
+    const mine = new AbortController()
+    leverHold = mine
+    const stopsAt = stops
+    edges.log(`${edges.label}: the turn requested a compaction; dashboard messages are held until it starts, ${LEVER_HOLD_MS}ms at most`)
+    void Promise.resolve()
+      .then(() => edges.sleep(LEVER_HOLD_MS, mine.signal))
+      .catch((err) => edges.log(`${edges.label}: waiting on the requested compaction failed: ${String(err)}`))
+      .then(() => {
+        // Lifted meanwhile: a compaction start, a turn end, or a stop took over.
+        if (leverHold !== mine) return
+        leverHold = undefined
+        if (compacting || stops !== stopsAt) return
+        const myKey = key
+        if (myKey === undefined || !edges.board || !(boardHeld || boardLeft())) return
+        if (edges.turnRunning()) {
+          edges.log(`${edges.label}: no compaction started within ${LEVER_HOLD_MS}ms and a main-thread turn runs; its turn end takes the held dashboard messages`)
+          return
+        }
+        edges.log(`${edges.label}: no compaction started within ${LEVER_HOLD_MS}ms; releasing the held dashboard messages`)
+        void releaseBoard(myKey, boardHeld, interrupted, 'lever-hold')
+      })
   }
 
   /** Whether the next wait carries the board flag: board submission on and nothing held for a turn end. */
@@ -588,7 +775,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     if (myKey === undefined || !edges.board || !boardLeft()) return
     if (boardBusy()) {
       boardHeld = true
-      edges.log(`${edges.label}: dashboard messages behind a command are held until the running ${compacting ? 'compaction' : 'turn'} ends`)
+      edges.log(`${edges.label}: dashboard messages behind a command are held until the ${holder()}`)
       rearmStaleWait()
       return
     }
@@ -804,8 +991,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       return
     }
     steerStranded.push(...texts)
-    // During a compaction its release submits them instead.
-    if (!compacting) void flushBoard(myKey, false)
+    // During a compaction, or while a requested one is still to start, its release submits them instead.
+    if (!compacting && leverHold === undefined) void flushBoard(myKey, false)
   }
 
   /**
@@ -1028,7 +1215,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
         if (boardBusy()) {
           // Held for the turn end (or the compaction's release), where the page can still merge or cancel it.
           boardHeld = true
-          edges.log(`${edges.label}: a dashboard message for ${myKey} is held until the running ${compacting ? 'compaction' : 'turn'} ends`)
+          edges.log(`${edges.label}: a dashboard message for ${myKey} is held until the ${holder()}`)
         } else {
           const flushed = await flushBoard(myKey)
           if (signal.aborted) return
@@ -1188,6 +1375,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       steerStranded = []
       boardHeld = false
       interrupted = false
+      liftLeverHold()
       if (!ctrl) return
       stops += 1
       lastStop = reason
@@ -1255,6 +1443,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       }
       const myKey = key
       const drainHeld = boardHeld || boardWanted()
+      // Every main-thread turn end lifts an earlier lever hold: this one holds anew or releases as usual.
+      liftLeverHold()
       if (myKey === undefined || !edges.board || !(drainHeld || boardLeft())) {
         boardHeld = false
         sendMail()
@@ -1263,6 +1453,14 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       if (compacting) {
         // The compaction's release takes the board part; the mail does not wait for it.
         edges.log(`${edges.label}: the turn ended during a compaction; the dashboard messages stay held for its end`)
+        sendMail()
+        return
+      }
+      if (leverOwed()) {
+        // The compaction the turn requested goes first; mail keeps its turn-end submit.
+        boardHeld = drainHeld
+        rearmStaleWait()
+        armLeverHold()
         sendMail()
         return
       }
@@ -1283,6 +1481,8 @@ export function createWatcher(edges: WatcherEdges): Watcher {
     compactStarted() {
       compacting = true
       compactions += 1
+      // The requested compaction started: its release takes what the lever hold kept.
+      liftLeverHold()
     },
     compactEnded() {
       if (!compacting) return

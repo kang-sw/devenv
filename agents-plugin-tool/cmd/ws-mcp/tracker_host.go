@@ -570,11 +570,22 @@ func (t *dashboardTracker) WikiRead(ctx context.Context, id, wiki, path string) 
 	if err != nil {
 		return wsdashboard.TrackerWikiPage{}, wikiError(err, true)
 	}
+	// The read succeeded, so path is a page path.
+	path, _ = wsledger.CanonicalWikiPath(path)
+	page := wsdashboard.TrackerWikiPage{Path: path, Kind: wsledger.WikiPageKind(path), Content: content, Commit: at}
+	if page.Kind == wsledger.WikiKindHTML {
+		// An HTML page is any store member's whole document: it runs only
+		// in the sandboxed frame (wswhiteboard.SandboxedPage), never in the
+		// dashboard's origin, and its attachment: references stay literal.
+		page.HTML = string(wswhiteboard.SandboxedPage(wiki+"/"+path, content))
+		return page, nil
+	}
 	tree, err := t.h.WikiImages(ctx, id, wiki)
 	if err != nil {
 		return wsdashboard.TrackerWikiPage{}, readError(err)
 	}
-	return wsdashboard.TrackerWikiPage{Path: path, Content: content, Commit: at, HTML: string(trackerText(content, attachmentSources(id, wiki, tree, nil)))}, nil
+	page.HTML = string(trackerText(content, attachmentSources(id, wiki, tree, nil)))
+	return page, nil
 }
 
 // WikiSave applies the page's edit. The images the request names are the

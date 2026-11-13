@@ -60,23 +60,24 @@ func TestAssetIDFollowsAssetContent(t *testing.T) {
 	if a, _ := loadDashboardAssets(); a.data.ID != base {
 		t.Errorf("the embedded assets' identity %q differs from a rebuild's %q", a.data.ID, base)
 	}
-	for _, name := range []string{"dashboard.js", "dashboard.css", "dashboard.tmpl", "rail.js", "tracker.css", "memo.js", "memo.css"} {
+	for _, name := range []string{"dashboard.js", "dashboard.css", "dashboard.tmpl", "rail.js", "shell.js", "tracker.css", "memo.js", "memo.css"} {
 		if build(name) == base {
 			t.Errorf("an edit to %s keeps the identity", name)
 		}
 	}
 }
 
-// TestPagesAndStreamsCarryTheAssetID pins the delivery: both page kinds that
-// inline dashboard.js and hold a stream carry the identity on their root,
-// and each stream's first event names the same one, on every connect.
+// TestPagesAndStreamsCarryTheAssetID pins the delivery: every page kind that
+// inlines dashboard.js and holds a stream (the iframe shell, the session
+// page it frames, the index) carries the identity on its root, and each
+// stream's first event names the same one, on every connect.
 func TestPagesAndStreamsCarryTheAssetID(t *testing.T) {
 	f := startPageFixture(t)
 	a, err := loadDashboardAssets()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []struct{ page, stream string }{{"/s/livesession", "/s/livesession/events"}, {"/", "/events"}} {
+	for _, c := range []struct{ page, stream string }{{"/s/livesession", railEventsRoute}, {"/s/livesession?frame=1", "/s/livesession/events?frame=1"}, {"/", "/events"}} {
 		_, body := get(t, f.base+c.page)
 		if got := dataAssets(t, body); got != a.data.ID {
 			t.Errorf("page %s carries data-assets %q, want %q", c.page, got, a.data.ID)
@@ -100,7 +101,7 @@ func TestPagesAndStreamsCarryTheAssetID(t *testing.T) {
 func TestDevAssetsIDFollowsTheServedFiles(t *testing.T) {
 	dash, _ := devSource(t)
 	f := startPageFixture(t)
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	before := dataAssets(t, page)
 	if before == "" {
 		t.Fatal("the dev page carries no data-assets")
@@ -113,7 +114,7 @@ func TestDevAssetsIDFollowsTheServedFiles(t *testing.T) {
 	if stream == before {
 		t.Fatal("a script edit keeps the dev identity")
 	}
-	_, page = get(t, f.base+"/s/livesession")
+	_, page = get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, "/*devid*/") || dataAssets(t, page) != stream {
 		t.Errorf("the reloaded dev page carries %q, the stream %q", dataAssets(t, page), stream)
 	}

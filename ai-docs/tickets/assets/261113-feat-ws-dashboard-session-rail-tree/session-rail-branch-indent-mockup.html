@@ -1,0 +1,96 @@
+<div class="rm">
+<style>
+.rm{--bg:#141518;--card:#1e2024;--fg:#e7e7e4;--mu:#a2a6ad;--pri:#7aa2ff;--line:#2c2f35;--topic:#262a31;--star:#f2b632;font:13px/1.35 system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;color:var(--fg);background:var(--bg);padding:14px;}
+.rm *{box-sizing:border-box}
+.rm h1{font-size:14px;margin:0 0 4px}
+.rm .lead{color:var(--mu);font-size:12px;margin:0 0 12px}
+.rm .cols{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+.rm .col{width:300px;flex:none}
+.rm .cap{font-size:12px;font-weight:700;margin:0 0 6px;display:flex;gap:6px;align-items:center}
+.rm .cap .tag{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:#33363d;color:var(--mu)}
+.rm .cap .tag.rec{background:color-mix(in srgb,var(--pri) 25%,var(--card));color:var(--pri)}
+.rm .rail{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 0 8px;overflow:hidden}
+.rm .note{color:var(--mu);font-size:11.5px;margin:8px 2px 0;line-height:1.45}
+.rm .note b{color:var(--fg)}
+.rm svg{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.rm .wsbar{display:flex;align-items:center;gap:8px;padding:3px 12px;min-height:28px;background:var(--topic)}
+.rm .wsbar .nm{font-weight:700;white-space:nowrap}
+.rm .wsbar .pp{font-family:ui-monospace,Menlo,monospace;font-size:11px;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}
+.rm .wsbar .hb{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--mu);display:inline-flex;gap:4px;align-items:center;opacity:0;transition:opacity .12s;white-space:nowrap}
+.rm .wsbar:hover .hb{opacity:1}
+.rm .wsbar .ct{margin-left:auto;font-size:11px;font-weight:700;padding:0 7px;border-radius:999px;background:rgb(127 127 127/.28)}
+.rm .wthd{display:flex;align-items:center;gap:6px;padding:6px 12px 2px;font-size:12px;font-weight:800;color:var(--mu)}
+.rm .wthd .br{font-family:ui-monospace,Menlo,monospace;font-weight:700;color:var(--fg)}
+.rm .wthd .wf{font-weight:500}
+.rm .rss{margin:4px 8px 0 18px;padding-left:4px;border-left:2px solid #33363d}
+.rm .rs{display:flex;align-items:flex-start;border-radius:6px;padding:4px 6px 5px 0;position:relative}
+.rm .rs:hover,.rm .rs.hv{background:color-mix(in srgb,var(--pri) 6%,var(--card))}
+.rm .rs.cur{background:color-mix(in srgb,var(--pri) 12%,var(--card))}
+.rm .star{width:16px;height:16px;margin:2px 5px 0 4px;display:inline-grid;place-items:center;color:var(--mu);opacity:0;flex:none}
+.rm .star.on{opacity:1;color:var(--star)}
+.rm .star.on svg{fill:currentColor}
+.rm .rs:hover .star,.rm .rs.hv .star{opacity:.6}
+.rm .rs:hover .star.on,.rm .rs.hv .star.on{opacity:1}
+.rm .rl{min-width:0;flex:1}
+.rm .s1{display:flex;align-items:center;gap:5px;min-width:0}
+.rm .hi{width:18px;height:18px;border-radius:4px;display:inline-grid;place-items:center;font-size:11px;font-weight:800;flex:none;background:#c9714f;color:#fff}
+.rm .hi.pi{background:#111;border:1px solid #555}
+.rm .bots{display:inline-flex;gap:2px;align-items:center;color:var(--mu);font-weight:700;font-size:12px}
+.rm .bots svg{color:#8b93c9}
+.rm .rid{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rm .rid.lbl{color:var(--pri)}
+.rm .hosted{color:var(--mu);display:inline-flex}
+.rm .rsp{flex:1}
+.rm .t{font-size:11px;color:var(--mu);white-space:nowrap}
+.rm .ic{display:none;gap:2px;color:var(--mu)}
+.rm .rs:hover .t,.rm .rs.hv .t{display:none}
+.rm .rs:hover .ic,.rm .rs.hv .ic{display:inline-flex}
+.rm .ic span{width:20px;height:18px;display:inline-grid;place-items:center;border-radius:4px}
+.rm .s2{color:var(--mu);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.rm .ended{font-size:11.5px;color:var(--mu);padding:4px 8px 2px 14px}
+.rm .rws+.rws{margin-top:8px}
+.rm .A .wthd{padding-left:28px}
+.rm .A .rss{margin-left:33px;padding-left:14px}
+.rm .A .rs .star.lead{display:none}
+.rm .A .star.tail{margin:0 0 0 1px;width:15px}
+.rm .A .ended{padding-left:14px}
+.rm .A .s2{margin-left:0}
+.rm .ruler{position:relative;height:14px;margin:0 0 2px}
+.rm .ruler i{position:absolute;top:0;font-style:normal;font-size:9.5px;color:#6f7580;transform:translateX(-50%)}
+.rm .ruler i::after{content:"";position:absolute;left:50%;top:11px;width:1px;height:6px;background:#4a4f58}
+.rm .col:first-child .rs .ic{display:none!important}
+.rm .col:first-child .rs .t{display:inline!important}
+.rm .B .wthd{display:none}
+.rm .B .wsbar .pp{display:none}
+.rm .tog{display:flex;gap:6px;margin:0 0 12px}
+.rm .tog button{font:inherit;font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+.rm .tog button[aria-pressed="true"]{border-color:var(--pri);color:var(--pri)}
+</style>
+<h1>세션 레일 · 브랜치 행 위계 (전/후)</h1>
+<p class="lead">오너 피드백: 워크스페이스 제목과 브랜치 행이 같은 들여쓰기라 위계가 안 읽힘. 행 위에 마우스를 올려 hover 상태를 보세요. 아래 버튼은 모든 행을 hover 상태로 고정합니다.</p>
+<div class="tog"><button type="button" id="rmHv" aria-pressed="false">hover 상태 고정</button></div>
+<div class="cols">
+<div class="col"><div class="cap">현재 <span class="tag">develop</span></div>
+<div class="ruler"><i style="left:12px">12</i><i style="left:36px">별 28</i><i style="left:58px">49</i></div>
+<div class="rail" data-v="cur"></div>
+<p class="note">작업공간 아이콘(12px)과 브랜치 아이콘(12px)이 같은 열. 왼쪽 별 자리(28px)는 hover 전엔 빈칸.</p></div>
+<div class="col A"><div class="cap">안 A <span class="tag rec">권장 해석</span></div>
+<div class="ruler"><i style="left:12px">12</i><i style="left:34px">28</i><i style="left:58px">49</i></div>
+<div class="rail" data-v="A"></div>
+<p class="note"><b>별(☆)도 제목 오른쪽</b>으로, hover 때만 표시(켜진 별은 항상). 비워진 별 자리(28px)까지 <b>브랜치 행을 들여쓰기</b>하고 트리 선이 그 아래에서 시작. 세션 아이콘은 49px 그대로 → 12 / 28 / 49 세 단계로 읽힘. hover의 연필·클립보드(레일 트리 스펙 Phase 1)는 오른쪽 끝 시간 자리 그대로.</p></div>
+<div class="col B"><div class="cap">안 B <span class="tag">대안 해석</span></div>
+<div class="ruler"></div>
+<div class="rail" data-v="B"></div>
+<p class="note"><b>브랜치를 작업공간 제목 오른쪽</b>에 두고 hover로 표시, 브랜치 행은 없앰. 저장소에 워크트리가 여럿이면(devenv는 보통 여럿) 세션을 워크트리별로 묶을 곳이 없어져서 비권장.</p></div>
+</div>
+<script>
+(function(){
+var root=document.currentScript.parentNode;
+var I={repo:'<svg viewBox="0 0 16 16"><path d="M3 2.5h9.5v11H4.5A1.5 1.5 0 0 1 3 12V2.5z"/><path d="M3 12a1.5 1.5 0 0 1 1.5-1.5h8"/></svg>',br:'<svg viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.5"/><circle cx="4.5" cy="12.5" r="1.5"/><circle cx="11.5" cy="5.5" r="1.5"/><path d="M4.5 5v6M11.5 7c0 2.5-3 2.5-7 4"/></svg>',star:'<svg viewBox="0 0 16 16"><path d="M8 1.8l1.9 3.9 4.2.6-3 3 .7 4.2L8 11.5l-3.8 2 .7-4.2-3-3 4.2-.6z"/></svg>',bot:'<svg viewBox="0 0 16 16"><rect x="3" y="5" width="10" height="8" rx="2"/><path d="M8 2.5V5M6 9h0M10 9h0"/></svg>',host:'<svg viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="4" rx="1"/><rect x="2.5" y="9" width="11" height="4" rx="1"/></svg>',pen:'<svg viewBox="0 0 16 16"><path d="M10.5 2.5l3 3L6 13H3v-3z"/></svg>',clip:'<svg viewBox="0 0 16 16"><rect x="4" y="3" width="8" height="11" rx="1.5"/><path d="M6 3V2h4v1"/></svg>'};
+var WS=[{nm:"devenv",pp:"/Users/kang-sw/devenv",ct:4,br:"develop",wf:"루트",rows:[{h:"C",b:2,n:"메인",star:1,cur:1,m:"UX도 원인을 확인하고 두 목업 원본 파일을…",t:"2분"},{h:"C",b:13,n:"EXEC",lbl:1,host:1,m:"지금은 백그라운드 작업만 기다리는 중이…",t:"5분"},{h:"C",b:2,n:"UI",lbl:1,host:1,m:"MAIN이 오너가 말한 \"목업 버튼 무반응\"…",t:"8분"},{h:"P",n:"audacitysaidcondoneglacier",m:"",t:"1시간"}],ended:4},{nm:"gunpowder-odyssey",pp:"/Users/kang-sw/gunpowder-odyssey",ct:0,br:"main",wf:"루트",rows:[],ended:0}];
+function rail(v){var h="";WS.forEach(function(w){h+='<section class="rws"><div class="wsbar"><span style="opacity:.8;display:inline-flex">'+I.repo+'</span><span class="nm">'+w.nm+'</span><span class="pp">'+w.pp+'</span>'+(v==="B"?'<span class="hb">'+I.br+w.br+' · '+w.wf+'</span>':'')+'<span class="ct">'+w.ct+'</span></div><div class="wthd">'+I.br+'<span class="br">'+w.br+'</span><span class="wf">· '+w.wf+'</span></div>';if(w.rows.length||w.ended){h+='<div class="rss">';w.rows.forEach(function(r){var st='<span class="star'+(r.star?' on':'')+' X">'+I.star+'</span>';h+='<div class="rs'+(r.cur?' cur':'')+'">'+(v==="A"?'':st.replace(" X"," lead"))+'<div class="rl"><div class="s1"><span class="hi'+(r.h==="P"?' pi':'')+'">'+r.h+'</span>'+(r.b?'<span class="bots">'+I.bot+r.b+'</span>':'')+'<span class="rid'+(r.lbl?' lbl':'')+'">'+r.n+'</span>'+(r.host?'<span class="hosted">'+I.host+'</span>':'')+(v==="A"?st.replace(" X"," tail"):'')+'<span class="rsp"></span><span class="t">'+r.t+'</span><span class="ic"><span title="이름 바꾸기">'+I.pen+'</span><span title="주소 복사">'+I.clip+'</span></span></div>'+(r.m?'<div class="s2">'+r.m+'</div>':'')+'</div></div>';});if(w.ended)h+='<div class="ended">종료된 세션 '+w.ended+'개 ▸</div>';h+='</div>';}h+='</section>';});return h;}
+root.querySelectorAll(".rail").forEach(function(el){el.innerHTML=rail(el.getAttribute("data-v"));});
+var b=root.querySelector("#rmHv");b.addEventListener("click",function(){var on=b.getAttribute("aria-pressed")!=="true";b.setAttribute("aria-pressed",String(on));root.querySelectorAll(".rs, .wsbar").forEach(function(r){r.classList.toggle("hv",on);});root.querySelectorAll(".B .hb").forEach(function(x){x.style.opacity=on?1:"";});});
+})();
+</script>
+</div>

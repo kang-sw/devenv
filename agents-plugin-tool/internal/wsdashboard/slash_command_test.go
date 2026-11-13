@@ -247,7 +247,7 @@ func TestHeldCommandBubbleHasNoSteer(t *testing.T) {
 	f.withCommands(t, wslive.SlashCommand{Name: "compact", Source: "builtin"})
 	text, _ := f.send(t, `{"text":"plain"}`)
 	cmd, _ := f.send(t, `{"command":"compact","args":"keep <the> plan"}`)
-	code, page := get(t, f.base+"/s/livesession")
+	code, page := get(t, f.base+"/s/livesession?frame=1")
 	if code != http.StatusOK {
 		t.Fatalf("GET /s/livesession = %d", code)
 	}
@@ -311,12 +311,12 @@ func TestCommandListReachesThePageOnlyWhenListed(t *testing.T) {
 	}
 
 	f := startPageFixture(t)
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `<div id="r-cmds" class="region r-cmds" data-region="cmds"`) || strings.Contains(page, `data-name="compact"`) {
 		t.Error("the live page without a command list has data in its cmds region, or no region")
 	}
 	f.withCommands(t, wslive.SlashCommand{Name: "compact", Source: "builtin"})
-	_, page = get(t, f.base+"/s/livesession")
+	_, page = get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `<i data-name="compact" data-src="builtin"></i>`) {
 		t.Error("the live page does not carry the session's command list")
 	}
