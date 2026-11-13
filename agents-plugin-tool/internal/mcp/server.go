@@ -565,6 +565,9 @@ func builtinConfigDefaults() map[string]string {
 		wsconfig.ItemTicketAssigneeAware:       "off",
 		wsconfig.ItemWorktreeNudgeStaleDays:    worktreeNudgeStaleDaysKey.Default,
 		wsconfig.ItemWorktreeNudgePreservedGB:  worktreeNudgePreservedGBKey.Default,
+		wsconfig.ItemGitMergeSizeSoftLines:     gitMergeSizeSoftLinesKey.Default,
+		wsconfig.ItemGitMergeSizeHardLines:     gitMergeSizeHardLinesKey.Default,
+		wsconfig.ItemGitMergeSizeExtensions:    gitMergeSizeExtensionsKey.Default,
 	}
 }
 
@@ -1378,19 +1381,21 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// rather than failing the merge; a config load error (a malformed
 		// committed repo file) fails loud like every other repo-anchored reader.
 		var mergePoolRoots []string
+		mergeSizeGuard := defaultMergeSizeGuard()
 		if mergeKey, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(mergeKey) != "" {
 			resolver := s.sessionResolver(mergeKey, builtinConfigDefaults())
 			poolRV, poolErr := resolver.Get(mergeKey, wsconfig.ItemWorktreePool)
 			if poolErr != nil {
 				return toolTextResponse(req.ID, "", fmt.Errorf("git.merge: %w", poolErr))
 			}
+			mergeSizeGuard = resolveMergeSizeGuard(&resolver, mergeKey)
 			if entries, lerr := listWorktrees(context.Background(), s.gitRunner(), root); lerr == nil && len(entries) > 0 {
 				mergePoolRoots = ownedPoolRoots(poolRV.Value, entries[0].Path)
 			}
 		}
 		result, err := mergeImplBranch(context.Background(), root, s.gitRunner(), branch, target, wsgit.CommitOptions{
 			Title: title, Description: description, AIContext: stringList(mergeAIContextRaw), UpdatedTickets: stringList(params.Arguments["updated_tickets"]),
-		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget}, mergePoolRoots)
+		}, implMergeAcknowledgement{ReleaseTargetOverride: releaseOverride, ExpectedSourceOID: expectedSource, ExpectedTargetOID: expectedTarget}, mergePoolRoots, mergeSizeGuard)
 		if wantsJSON(params.Arguments) {
 			return toolJSONResponse(req.ID, result, err)
 		}
@@ -3087,6 +3092,22 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 			ID:          entry.Key,
 			Kind:        "worktree_nudge",
 			Description: k.Description + " Value: " + k.domain() + "; builtin " + k.Default + ".",
+			Writer:      tuningWriter{Tool: entry.WriterTool, FixedArguments: map[string]string{"key": entry.Key}},
+			Reset: &tuningWriter{
+				Tool:           entry.ResetTool,
+				FixedArguments: map[string]string{"key": entry.Key, "reset": "true"},
+			},
+			SelectorFields: entry.SelectorFields,
+			ValueFields:    entry.ValueFields,
+			Current:        currentWorkflowPreference(resolver, sessionKey, entry.Key),
+		})
+	}
+	for _, k := range gitMergeSizeKeys {
+		entry := k.entry()
+		appendKnob(entry, tuningKnob{
+			ID:          entry.Key,
+			Kind:        "git_merge_size",
+			Description: k.Description + " Value: " + k.domain() + "; builtin " + strconv.Quote(k.Default) + ".",
 			Writer:      tuningWriter{Tool: entry.WriterTool, FixedArguments: map[string]string{"key": entry.Key}},
 			Reset: &tuningWriter{
 				Tool:           entry.ResetTool,
@@ -4800,7 +4821,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "git.merge",
-			"description": "Lead-only. Merge an exact local source branch into an exact local target using --no-ff. Switches to and leaves the caller on the target branch (no switch-back), so any tolerated worktree change travels to the target checkout and is reported as a non-blocking advisory. Tolerates a dirty worktree but requires a clean index: staged changes and unmerged paths are refused, while unstaged tracked modifications and untracked files are allowed (git's native switch/merge still refuses one that overlaps a merged path). Delete merged impl/* and goal/* sources; preserve other sources. Main/master return policy_blocked diagnostics by default; explicit release-target acknowledgement bound to inspected source_oid and target_oid permits retry. Must-resolve safety findings cannot be waived. Conflicts remain on the target for lead-delegate to resolve. Defaults to text; use format=json for structured output.",
+			"description": "Lead-only. Merge an exact local source branch into an exact local target using --no-ff. Switches to and leaves the caller on the target branch (no switch-back), so any tolerated worktree change travels to the target checkout and is reported as a non-blocking advisory. Tolerates a dirty worktree but requires a clean index: staged changes and unmerged paths are refused, while unstaged tracked modifications and untracked files are allowed (git's native switch/merge still refuses one that overlaps a merged path). Delete merged impl/* and goal/* sources; preserve other sources. Main/master return policy_blocked diagnostics by default; explicit release-target acknowledgement bound to inspected source_oid and target_oid permits retry. Must-resolve safety findings cannot be waived. Conflicts remain on the target for lead-delegate to resolve. A landed impl/* or goal/* merge may carry advisory size diagnostics for source files it pushed past git.merge_size_soft_lines or edited at git.merge_size_hard_lines or more; relay them to the user rather than splitting the file yourself. Defaults to text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

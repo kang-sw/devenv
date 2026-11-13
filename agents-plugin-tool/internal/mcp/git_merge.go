@@ -73,7 +73,7 @@ func (r implMergeResult) text() string {
 	return text
 }
 
-func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, branch, target string, message wsgit.CommitOptions, acknowledgement implMergeAcknowledgement, poolRoots []string) (implMergeResult, error) {
+func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, branch, target string, message wsgit.CommitOptions, acknowledgement implMergeAcknowledgement, poolRoots []string, sizeGuard mergeSizeGuard) (implMergeResult, error) {
 	result := implMergeResult{}
 	run := func(args ...string) (string, error) {
 		out, err := runner.RunGit(ctx, root, args...)
@@ -373,8 +373,11 @@ func mergeImplBranch(ctx context.Context, root string, runner wsgit.Runner, bran
 		})
 	}
 	if !isImpl && !strings.HasPrefix(branch, "goal/") {
+		// Generic promotion (develop -> main) carries no size warnings: they
+		// were already given at each impl/goal unit merge it contains.
 		return result, nil
 	}
+	result.Diagnostics = append(result.Diagnostics, mergeSizeWarnings(ctx, root, runner, sizeGuard, result.TargetOID, result.SourceOID, result.Commit)...)
 	if _, err := run("branch", "-d", "--", branch); err != nil {
 		// The merge itself succeeded, so this is not a fatal error and status
 		// stays "merged" — converting it would misreport a landed merge. But a

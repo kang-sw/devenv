@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 82eb8bb3d61b914f
 sage-review-design-reviewed: 82eb8bb3d61b914f
+completed: 2026-11-13
 ---
 
 # git.merge: warn when a merge grows a source file past a size limit
@@ -177,3 +178,36 @@ crossing L), a `linguist-generated` file (no warning), a key set to 0
 (disables that rule), and a conflicting merge (no warning, status
 unchanged). Config tests show the three keys in `config.list` with their
 defaults and accept a `config.tune` override.
+
+### Result (c55b2e282) - 2026-11-13
+
+- Landed: `agents-plugin-tool/internal/mcp/git_merge_size.go` computes
+  advisory `size_soft_limit` / `size_hard_limit` diagnostics (and one
+  `size_check_failed` when Git fails) after a landed `impl/*` or `goal/*`
+  merge, over merge-base..source for files with a configured extension.
+  Line counts use `git grep -c -I -z -e ''` (binary/empty files drop out);
+  renames take the old path's merge-base count, and a pure rename (R100) is
+  not an edit (ce4cbd83d). Attributes come from `git check-attr --source
+  <merge commit>`, falling back to the working tree. Each Resolution tells
+  the lead not to split on its own, to ask the user about refactor permission
+  and timing, and names the `.gitattributes` lines
+  (`/<path> ws-size-guard=<lines + 20%, rounded up to 100>` or
+  `/<path> -ws-size-guard`; anchored, glob-escaped, C-quoted when needed).
+- Config: `git.merge_size_soft_lines` (1000), `git.merge_size_hard_lines`
+  (2000), `git.merge_size_extensions` declared as built-in keys
+  (wsconfig items with project default scope, `builtinConfigDefaults`,
+  `resolveConfigEntryForKey`, tuning catalog kind `git_merge_size`); `git.`
+  added to `reservedConfigPrefixes`. The dispatch resolves them through the
+  session resolver; keyless calls use the defaults. The `git.merge` tool
+  description mentions the advisory diagnostics.
+- Verification: `go test -run 'MergeSize|Gitattributes|GitMergeSize|ImplMerge|GenericMerge' ./internal/mcp/`
+  passes; `go test ./internal/wsconfig/` passes. Full `go test ./internal/mcp/`
+  fails only TestRenderDispatchSeparatesResourceAndWorktreeRoots,
+  TestRenderFromWorktreeSessionCommitsInThatWorktree, and
+  TestRenderPathMintedChildRecordsLeadParent, which fail identically on the
+  base commit (macOS /private/var canonicalization).
+- Decisions: tests live in a new `git_merge_size_test.go` rather than
+  `git_merge_test.go` (cosmetic); a malformed `ws-size-guard=<value>` skips
+  the path; `ai-docs/manuals/ws-mcp.md` unchanged because it has no
+  `git.merge` section listing result diagnostics; a target-side rename of a
+  file the source edited is skipped (advisory false negative, accepted).
