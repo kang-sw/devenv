@@ -133,7 +133,9 @@ if (-not $DryRun) {
         tool_dir       = $ToolDir
         go             = $GoPath
     } | ConvertTo-Json
-    Set-Content -Path (Join-Path $PluginWs '.local-devenv-runtime') -Value $marker -Encoding utf8
+    # BOM-less UTF-8 on both Windows PowerShell 5.1 and pwsh: 5.1's
+    # `Set-Content -Encoding utf8` prepends a BOM.
+    [System.IO.File]::WriteAllText((Join-Path $PluginWs '.local-devenv-runtime'), $marker, (New-Object System.Text.UTF8Encoding $false))
 }
 
 # --- 6. install via claude CLI if present (drops a stale record first) --------
