@@ -14,6 +14,12 @@ It then seeds the same build into each local-devenv package dir of this checkout
 (a valid .local-devenv-runtime marker) with the launcher's own runtime name and
 compatibility stamp, so the next session start does not rebuild the same source
 locally. --no-seed skips that.
+
+The daemon is started with WS_RSRC_ROOT/WS_SKILLS_ROOT pointing at this
+checkout's agents-plugin-wsflow package, as its launcher would set them: the
+daemon resolves the Python launcher it hands to Pi workers as
+<dir(WS_RSRC_ROOT)>/bin/ws-mcp-launcher.py, and the staged exe has no package
+beside it.
 """
 import argparse
 import importlib.util
@@ -42,6 +48,11 @@ REMOTE_DIST = "agents-plugin-tool/dist-x"
 
 # Package dirs of this checkout whose launcher runtime gets seeded.
 SEED_PACKAGES = ("agents-plugin", "agents-plugin-wsflow")
+
+# Package dir whose rsrc/ and skills/ the daemon is started against, as the
+# launcher of that package would; its bin/ws-mcp-launcher.py is what Pi
+# workers run.
+DAEMON_PACKAGE = REPO / "agents-plugin-wsflow"
 
 # How long to wait for a daemon to leave, and for daemon-start to finish. The
 # launcher gives a replacement DefaultStartWait plus a margin; a drain adds up
@@ -208,8 +219,12 @@ def shutdown_and_wait(launcher, daemon_dir: Path, endpoint: dict, old_pid) -> No
     raise RuntimeError(f"daemon pid {old_pid} did not exit within {GONE_WAIT_SECONDS:.0f}s of /shutdown")
 
 
-def run_daemon_start(launcher, staged: Path, build_time: int) -> dict:
+def run_daemon_start(launcher, staged: Path, build_time: int, plugin_dir: Path = DAEMON_PACKAGE) -> dict:
     env = dict(os.environ)
+    # Set, not defaulted: a shell inside a harness session can inherit a
+    # versioned plugin-cache path, and this command means this checkout.
+    env["WS_RSRC_ROOT"] = str(plugin_dir / "rsrc")
+    env["WS_SKILLS_ROOT"] = str(plugin_dir / "skills")
     # The daemon starts session holders with the interpreter that started it.
     if not env.get("WS_MCP_HOLDER_PYTHON") and sys.executable:
         env["WS_MCP_HOLDER_PYTHON"] = sys.executable
