@@ -1026,7 +1026,7 @@ async function scenarioToolbar(ctx) {
   });
   qa(first.first && (!first.capable || first.terminal) && first.terminal === first.capable && first.files === first.pane && !first.old && !first.rail && !first.card && first.pos !== 'sticky', 'toolbar is first, non-card/non-rail/non-sticky, with capability-gated actions', first);
   if (ctx.width < 1600) qa(first.next === 'bpins', 'normal-width pin list follows toolbar');
-  const expected = ['board-overview', ...(first.terminal ? ['tnew'] : []), ...(first.order.some((s) => /web/.test(s)) ? ['web'] : []), 'board-search', ...(first.files ? ['board-files'] : [])];
+  const expected = ['board-overview', ...(first.terminal ? ['tnew'] : []), ...(first.order.some((s) => /wnew/.test(s)) ? ['wnew'] : []), 'board-search', ...(first.files ? ['board-files'] : [])];
   qa(first.order.length === expected.length && expected.every((s, i) => first.order[i].includes(s)), 'toolbar action order', first.order);
   qa(first.labels.every((x) => x.shown === (x.overview || first.width > 540)) && (first.width > 540 || first.hint === 'none'), 'label collapse keys on toolbar width, preserving Overview', first);
   await capture(ctx, tab, kind + '-normal');

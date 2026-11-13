@@ -167,7 +167,7 @@ process.stdout.write(bad.join("\n"));
 func TestToolbarPageActionHooks(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	for _, want := range []string{
-		`search: function () { var b = $("tkqs"); if (b) b.click(); }`,
+		`search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } }`,
 		`files: fpane && window.WsFiles ? function ()`,
 		`if (!tabShown("convo")) setTab("convo");`,
 		`setCtab("files");`,

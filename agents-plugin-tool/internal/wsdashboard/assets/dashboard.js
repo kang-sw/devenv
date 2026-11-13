@@ -724,7 +724,7 @@
       key: "ws.dashboard.cards." + rid, load: load, save: save,
       toolbar: {
         overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
-        search: function () { var b = $("tkqs"); if (b) b.click(); },
+        search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
         files: fpane && window.WsFiles ? function () { afterOverview(function () {
           if (!tabShown("convo")) setTab("convo");
           setCtab("files");

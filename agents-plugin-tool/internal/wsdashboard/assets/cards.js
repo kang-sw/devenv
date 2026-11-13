@@ -103,7 +103,7 @@
       b.appendChild(mk("span", "board-label", label));
       b.title = label;
       b.setAttribute("aria-label", label);
-      b.addEventListener("click", function () { if (run) run(); });
+      b.addEventListener("click", function (e) { if (run) run(e); });
       row.appendChild(b);
       return b;
     }
