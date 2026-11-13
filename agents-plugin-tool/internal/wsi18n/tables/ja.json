@@ -1420,6 +1420,7 @@
   "wb.banner": "ボードが更新されました。回答中のため再読み込みを保留しています",
   "wb.check.no": "no と答える",
   "wb.checks": "確認依頼",
+  "wb.checks.hide": "回答済みの依頼を隠す",
   "wb.checks.progress": "回答 {0} / {1}",
   "wb.closed": "クローズ済み",
   "wb.closed.more": "表示していないクローズ済みトピック {0} 件",

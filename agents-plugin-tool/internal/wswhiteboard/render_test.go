@@ -895,8 +895,9 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	// on. 35% left the topic bar's pen, note box, and updated time room;
 	// 40% adds the settled rows' expanded bodies (each settled item's
 	// rationale and options ride in the snapshot so it unfolds without script);
-	// 42% adds the check list's styles and answer staging.
-	if len(out) > budget*42/100 {
+	// 42% adds the check list's styles and answer staging; 43% its hide
+	// toggle (styles, icon, and script, about 2.7 KB a page).
+	if len(out) > budget*43/100 {
 		t.Errorf("populated embed is %d bytes, not well under 512 KiB", len(out))
 	}
 }

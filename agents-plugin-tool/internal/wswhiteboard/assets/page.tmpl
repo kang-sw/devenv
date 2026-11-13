@@ -64,8 +64,10 @@ them Static, with none of those attributes, the pick shown by a class. */}}
 {{/* checks is a topic's check list: under the recap while the topic is open,
 inside the settled fold once it is closed. Rows carry no class tag, and none
 reuses label.ack, which the reply bar's all-ok box selects page-wide: a check
-is answered one at a time. */}}
-{{define "checks"}}<div class="checks"><div class="chead">{{icon "todo"}}{{t "wb.checks"}}<span class="prog">{{t "wb.checks.progress" .AnsweredChecks (len .Checks)}}</span></div>{{range .Checks}}{{template "check" ($.Page.ItemOf .)}}{{end}}</div>{{end}}
+is answered one at a time. An open topic's list with an answered check carries
+the hide toggle (button.ckhide), which form.js wires and page.css hides where
+that script does not run. */}}
+{{define "checks"}}<div class="checks"><div class="chead">{{icon "todo"}}{{t "wb.checks"}}<span class="prog">{{t "wb.checks.progress" .AnsweredChecks (len .Checks)}}</span>{{if and (not .Closed) .HideableChecks}}<button type="button" class="btn mini ckhide" aria-pressed="true" title="{{t "wb.checks.hide"}}">{{icon "eye-off"}}</button>{{end}}</div>{{range .Checks}}{{template "check" ($.Page.ItemOf .)}}{{end}}</div>{{end}}
 
 {{/* check is one check row. An open row's box answers ok and its x button
 no (form.js); an answered or assumed row is locked and stamped, a "no" row

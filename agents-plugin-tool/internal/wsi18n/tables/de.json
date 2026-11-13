@@ -1420,6 +1420,7 @@
   "wb.banner": "Board aktualisiert; Neuladen aufgeschoben, solange du antwortest",
   "wb.check.no": "mit no antworten",
   "wb.checks": "prüfen",
+  "wb.checks.hide": "beantwortete Anfragen ausblenden",
   "wb.checks.progress": "beantwortet {0} / {1}",
   "wb.closed": "geschlossen",
   "wb.closed.more": "{0} weitere geschlossene Themen nicht angezeigt",

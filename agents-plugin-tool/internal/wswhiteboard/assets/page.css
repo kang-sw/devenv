@@ -332,6 +332,16 @@ label.ck { cursor: pointer; }
 .ckrow[data-no] .ck input { accent-color: var(--wb-muted-fg); opacity: .45; }
 /* a row holding a staged answer or note */
 .ckrow.staged { box-shadow: inset 3px 0 0 var(--wb-primary); }
+/* the hide toggle in an open topic's check header: form.js keeps its state on
+   <html> as data-ck-hide, so without that script the button stays hidden and
+   every row shows. While it is on, an answered row (no data-id; an open or
+   assumed row keeps one) is hidden, and the first row left visible drops the
+   divider a hidden row above it would have drawn. */
+.checks .ckhide { width: 20px; height: 18px; margin: -2px -4px -2px 0; background: transparent; color: var(--wb-muted-fg); }
+.checks .ckhide[aria-pressed="true"] { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, transparent); }
+html:not([data-ck-hide]) .checks .ckhide { display: none; }
+html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:not([data-id]) { display: none; }
+html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:nth-child(1 of .ckrow[data-id]) { border-top: 0; }
 
 /* settled: collapsed tonal chip */
 details.settled { font-size: 13px; }

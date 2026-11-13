@@ -1420,6 +1420,7 @@
   "wb.banner": "看板已更新；你回答期間已延後重新載入",
   "wb.check.no": "回答 no",
   "wb.checks": "確認請求",
+  "wb.checks.hide": "隱藏已答覆的請求",
   "wb.checks.progress": "已答 {0} / {1}",
   "wb.closed": "已關閉",
   "wb.closed.more": "另有 {0} 個已關閉主題未顯示",

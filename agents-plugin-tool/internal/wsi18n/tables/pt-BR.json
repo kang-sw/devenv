@@ -1420,6 +1420,7 @@
   "wb.banner": "quadro atualizado; o recarregamento foi adiado enquanto você responde",
   "wb.check.no": "responder no",
   "wb.checks": "verificar",
+  "wb.checks.hide": "ocultar solicitações respondidas",
   "wb.checks.progress": "respondidas {0} / {1}",
   "wb.closed": "fechado",
   "wb.closed.more": "mais {0} tópicos fechados não exibidos",

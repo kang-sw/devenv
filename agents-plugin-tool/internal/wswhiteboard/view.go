@@ -244,6 +244,19 @@ func (t TopicView) OpenChecks() int {
 // assumed an answer for: the check list's progress count.
 func (t TopicView) AnsweredChecks() int { return len(t.Checks) - t.OpenChecks() }
 
+// HideableChecks counts the checks the open check list's hide toggle folds
+// away: those the user answered. An assumed check stays, since the user can
+// still veto it.
+func (t TopicView) HideableChecks() int {
+	n := 0
+	for _, c := range t.Checks {
+		if c.Status == StatusAnswered {
+			n++
+		}
+	}
+	return n
+}
+
 // AskCount is the topic bar's amber "answer needed" count: its open policy
 // items and open checks.
 func (t TopicView) AskCount() int { return len(t.Policy) + t.OpenChecks() }
