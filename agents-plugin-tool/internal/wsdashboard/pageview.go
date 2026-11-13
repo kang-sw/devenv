@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"math"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -105,24 +106,37 @@ type SessionView struct {
 	Holders bool
 }
 
-// MailboxRef is what a click on the head's name copies: the session's
-// mailbox address, marked as one, naming the session's label when it has
-// one (mailboxRef).
-func (v SessionView) MailboxRef() string { return mailboxRef(v.ReplyID, v.Label) }
-
-// mailboxRef is the mailbox address of replyID marked as one:
-// `(mailbox) id:<rid>`, or `(mailbox, label "<label>") id:<rid>` with label
-// quoted, a `"` or `\` in it backslash-escaped. dashboard.js mailboxRef builds
-// the same text after a rename, before the head re-renders.
-func mailboxRef(replyID, label string) string {
-	if label == "" {
-		return "(mailbox) " + wsmailbox.ReplyIDPrefix + replyID
+// MailboxOpen is the copy tag's opening attributes, also used after a rename.
+func (v SessionView) MailboxOpen() string {
+	attr := func(s string) string { return mailboxAttrEscaper.Replace(s) }
+	open := `<mailbox id="` + attr(wsmailbox.ReplyIDPrefix+v.ReplyID) + `" dir="` + attr(v.Project) + `"`
+	if v.Git != nil {
+		root := v.Git.TopLevel
+		a, b := filepath.Clean(root), filepath.Clean(v.Project)
+		if root != "" && !(a == b || runtime.GOOS == "windows" && strings.EqualFold(a, b)) {
+			open += ` root="` + attr(root) + `"`
+		}
+		if !v.Git.Detached && v.Git.Branch != "" {
+			open += ` branch="` + attr(v.Git.Branch) + `"`
+		}
 	}
-	return `(mailbox, label "` + labelQuoter.Replace(label) + `") ` + wsmailbox.ReplyIDPrefix + replyID
+	if v.Harness != "" {
+		open += ` harness="` + attr(v.Harness) + `"`
+	}
+	return open
 }
 
-// labelQuoter escapes a label for mailboxRef's quotes.
-var labelQuoter = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+// MailboxRef is the tag copied by the head's name.
+func (v SessionView) MailboxRef() string {
+	open := v.MailboxOpen()
+	if v.Label == "" {
+		return open + `/>`
+	}
+	return open + `>` + mailboxTextEscaper.Replace(v.Label) + `</mailbox>`
+}
+
+var mailboxAttrEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+var mailboxTextEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // LabelMax is the longest label the label route accepts, in characters,
 // which the head's rename input takes as its limit.
