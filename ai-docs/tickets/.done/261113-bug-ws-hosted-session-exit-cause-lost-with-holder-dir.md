@@ -1,5 +1,6 @@
 ---
 title: "A hosted session's exit cause is lost when its holder directory is cleaned up"
+completed: 2026-11-13
 ---
 
 # A hosted session's exit cause is lost when its holder directory is cleaned up
@@ -30,3 +31,8 @@ directory is removed, and show it on the session row (e.g. "ended: exit 1 at
 
 - Where the record lives (daemon log vs the session store) and its
   compatibility tier (a new optional field is T0).
+
+
+## Resolution (2026-11-13)
+
+Fixed by delegate: 70678ab2e retains hosted holder exit details; 2d10d7277 treats Linux zombie holders as stopped (a branch-only timeout it exposed). Merged 89ad004ec. Live check of the exit record in the dashboard is part of the owner's post-merge checks.
