@@ -7,8 +7,8 @@ import (
 )
 
 // railJSHarness is a minimal DOM (children, attributes, classes, one-class
-// querySelector, insertBefore, nextSibling) and an in-memory store for
-// running rail.js under node.
+// querySelector, insertBefore, removeChild, nextSibling) and an in-memory
+// store for running rail.js under node.
 const railJSHarness = `
 var window = {};
 var bad = [];
@@ -26,6 +26,7 @@ El.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k
 El.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 El.prototype.removeAttribute = function (k) { delete this.attrs[k]; };
 El.prototype.appendChild = function (c) { return this.insertBefore(c, null); };
+El.prototype.removeChild = function (c) { this.children.splice(this.children.indexOf(c), 1); c.parentNode = null; return c; };
 El.prototype.insertBefore = function (c, ref) {
   if (c.parentNode) { var p = c.parentNode.children; p.splice(p.indexOf(c), 1); }
   var i = ref ? this.children.indexOf(ref) : -1;
@@ -211,6 +212,80 @@ check("over the other side of the stars", [R.dropRefusal(p2, T1.g.children[0]), 
 check("outside the list", [R.dropRefusal(p2, RL), R.dropRefusal(p2, null)], ["", ""]);
 check("a workspace section is never refused", R.dropRefusal(W1, F.children[0]), "");
 
+// The tree. Workspace /r: worktree /r lists s (starred), m (a parent:
+// k1 of /r and k2 of /r/wt under it), o (an orphan: it shows top-level),
+// a, and the ended e; worktree /r/wt lists w1. Folder workspace /f lists
+// f1.
+function kid(rid, g) { var r = new El("rs", { "data-rid": rid, "data-g": g }); r.appendChild(new El("rl")); return r; }
+function kidsBox(parent) { return new El("rkids", { "data-parent": parent }); }
+var TL = new El("rlist"), TW = TL.appendChild(new El("rws", { "data-ws": "/r" })), TB = TW.appendChild(new El("wsbody"));
+var TT = TB.appendChild(new El("rwt", { "data-g": "/r" })), TG = TT.appendChild(new El("rsessions"));
+var TU = TB.appendChild(new El("rwt", { "data-g": "/r/wt" })), TH = TU.appendChild(new El("rsessions"));
+var ts = TG.appendChild(star(row("s"), true)), tm = TG.appendChild(row("m")), tkids = TG.appendChild(kidsBox("m"));
+var tk1 = tkids.appendChild(kid("k1", "/r")), tk2 = tkids.appendChild(kid("k2", "/r/wt"));
+var to = TG.appendChild(row("o")), ta = TG.appendChild(row("a")), tfold = TG.appendChild(new El("rended")), te = tfold.appendChild(new El("rsessions")).appendChild(row("e"));
+te.classList.add("ended"); tm.setAttribute("data-kids", "1");
+var tw1 = TH.appendChild(row("w1"));
+var TF = TL.appendChild(new El("rws", { "data-ws": "/f" })), tf1 = TF.appendChild(new El("wsbody")).appendChild(new El("rsessions")).appendChild(row("f1"));
+var F = R.rowFacts;
+check("a parent's facts", F(tm), { rid: "m", ws: "/r", group: "/r", live: true, parent: "", kids: true, star: false, first: "k1" });
+check("a child's facts: its own group", F(tk2), { rid: "k2", ws: "/r", group: "/r/wt", live: true, parent: "m", kids: false, star: false, first: "" });
+check("a starred row, an ended row, a folder workspace's row", [F(ts).star, F(te).live, F(tf1).group], [true, false, "/f"]);
+tm.classList.add("kcol");
+check("a collapsed parent shows no first child", F(tm).first, "");
+check("the line after a collapsed parent is after its unit", R.dropZone(F(ta), F(tm), 0.9), { zone: "after", ref: "m", op: { op: "move", rid: "a", after: "m" } });
+tm.classList.remove("kcol");
+// a valid parent: its middle half attaches, its quarters reorder; the line
+// after a parent whose children show is before its first child
+check("a valid parent's middle attaches", R.dropZone(F(ta), F(tm), 0.5), { zone: "child", ref: "m", op: { op: "attach", rid: "a", parent: "m" } });
+check("a valid parent's top quarter is before it", R.dropZone(F(ta), F(tm), 0.2), { zone: "before", ref: "m", op: { op: "move", rid: "a", before: "m" } });
+check("a valid parent's bottom quarter is before its first child", R.dropZone(F(ta), F(tm), 0.8), { zone: "before", ref: "k1", op: { op: "attach", rid: "a", parent: "m", before: "k1" } });
+check("an orphan is a valid parent", R.dropZone(F(ta), F(to), 0.5), { zone: "child", ref: "o", op: { op: "attach", rid: "a", parent: "o" } });
+check("an attach crosses the stars, a reorder does not", [R.dropZone(F(ta), F(ts), 0.5).zone, R.dropZone(F(ta), F(ts), 0.1)], ["child", { refusal: "stars" }]);
+check("an attach crosses the worktrees, a reorder does not", [R.dropZone(F(ta), F(tw1), 0.5).op, R.dropZone(F(ta), F(tw1), 0.9)], [{ op: "attach", rid: "a", parent: "w1" }, { refusal: "group" }]);
+// a parent with children dragged: no middle zone, never onto its own children
+check("a dragged parent finds no child zone", [R.dropZone(F(tm), F(ta), 0.4), R.dropZone(F(tm), F(ta), 0.6).zone], [{ zone: "before", ref: "a", op: { op: "move", rid: "m", before: "a" } }, "after"]);
+check("a dragged parent's children are no target, nor itself", [R.dropZone(F(tm), F(tk1), 0.5), R.dropZone(F(tm), F(tm), 0.5)], [null, null]);
+check("a dragged parent among another's children is too deep", R.dropZone(F(tm), { rid: "x", ws: "/r", group: "/r", live: true, parent: "o", kids: false, star: false, first: "" }, 0.5), { refusal: "depth" });
+// cross-workspace, ended targets
+check("another workspace's row refuses", [R.dropZone(F(ta), F(tf1), 0.5), R.dropZone(F(tf1), F(ta), 0.1)], [{ refusal: "workspace" }, { refusal: "workspace" }]);
+check("an ended row refuses", [R.dropZone(F(ta), F(te), 0.5), R.dropZone(F(tk1), F(te), 0.1)], [{ refusal: "ended" }, { refusal: "ended" }]);
+// a child row has no middle zone: its halves are lines among its siblings
+check("a child row's halves attach next to it", [R.dropZone(F(ta), F(tk1), 0.5), R.dropZone(F(ta), F(tk2), 0.3)],
+  [{ zone: "after", ref: "k1", op: { op: "attach", rid: "a", parent: "m", after: "k1" } }, { zone: "before", ref: "k2", op: { op: "attach", rid: "a", parent: "m", before: "k2" } }]);
+check("a child among its siblings moves", R.dropZone(F(tk2), F(tk1), 0.2), { zone: "before", ref: "k1", op: { op: "move", rid: "k2", before: "k1" } });
+check("a dragged parent over another group's row refuses", R.dropZone(F(tm), F(tw1), 0.5), { refusal: "group" });
+// the top-level line detaches a child only in its own group
+check("a detach line in another group refuses", [R.dropZone(F(tk2), F(ta), 0.1), R.dropZone(F(tk2), F(ts), 0.9)], [{ refusal: "group" }, { refusal: "group" }]);
+check("a detach line in its own group", [R.dropZone(F(tk2), F(tw1), 0.9), R.dropZone(F(tk1), F(ts), 0.1)],
+  [{ zone: "after", ref: "w1", op: { op: "detach", rid: "k2", after: "w1" } }, { zone: "before", ref: "s", op: { op: "detach", rid: "k1", before: "s" } }]);
+// dropNoop: a line beside the row, or an attach to its own parent while last
+check("noop drops", [R.dropNoop(to, R.dropZone(F(to), F(ta), 0.1)), R.dropNoop(ta, R.dropZone(F(ta), F(to), 0.9)), R.dropNoop(tk2, R.dropZone(F(tk2), F(tm), 0.5)), R.dropNoop(tk2, R.dropZone(F(tk2), F(tk1), 0.9))], [true, true, true, true]);
+check("drops that move", [R.dropNoop(ta, R.dropZone(F(ta), F(ts), 0.5)), R.dropNoop(tk1, R.dropZone(F(tk1), F(tm), 0.5)), R.dropNoop(tk1, R.dropZone(F(tk1), F(tk2), 0.9)), R.dropNoop(ta, null)], [false, false, false, true]);
+// homeRows: where a drop over no row puts a row's top-level peers;
+// dropRefusal reads a child's own group, not its parent's
+check("home lists", [R.homeRows(ta) === TG, R.homeRows(tk1) === TG, R.homeRows(tk2) === TH, R.homeRows(tf1) === tf1.parentNode], [true, true, true, true]);
+check("a child's own group", [R.dropRefusal(tk2, TH), R.dropRefusal(tk2, TG), R.dropRefusal(tk1, TG), R.dropRefusal(tk1, TH)], ["", "group", "", "group"]);
+// moveRow: the drop shown at once, and its undo
+var make = function () { return new El("rkids"); };
+var u1 = R.moveRow(ta, to, "child", make);
+check("an attach makes the children's box", [ids(TG), ids(TG.children[4]), TG.children[4].getAttribute("data-parent"), ta.getAttribute("data-g")], [["s", "m", "rkids", "o", "rkids", "rended"], ["a"], "o", "/r"]);
+u1();
+check("its undo", [ids(TG), ta.getAttribute("data-g")], [["s", "m", "rkids", "o", "a", "rended"], null]);
+var u2 = R.moveRow(tk2, tw1, "after", make);
+check("a detach to its own group", [ids(TH), ids(tkids), tk2.getAttribute("data-g")], [["w1", "k2"], ["k1"], "/r/wt"]);
+var u3 = R.moveRow(tk1, ta, "before", make);
+check("the last child's leave drops the box", [ids(TG), tkids.parentNode], [["s", "m", "o", "k1", "a", "rended"], null]);
+u3(); u2();
+check("undone in turn", [ids(TG), ids(tkids), ids(TH)], [["s", "m", "rkids", "o", "a", "rended"], ["k1", "k2"], ["w1"]]);
+var u4 = R.moveRow(tm, ta, "after", make);
+check("a parent moves with its children", ids(TG), ["s", "o", "a", "m", "rkids", "rended"]);
+u4();
+R.moveRow(ta, tm, "after", make);
+R.moveRow(tk2, tk1, "before", make);
+check("after a parent is after its children; a child among its siblings", [ids(TG), ids(tkids)], [["s", "m", "rkids", "a", "o", "rended"], ["k2", "k1"]]);
+check("collapsed parents persist", [R.kidsCollapsed(ss).toggle("m"), R.kidsCollapsed(ss).has("m"), ss.load("ws.dashboard.railkids")], [true, true, '["m"]']);
+
 // markCurrent marks only the viewed row.
 var rows = box.children.slice(0, 3);
 R.markCurrent(rows, "r2");
@@ -307,7 +382,8 @@ if (bad.length) console.log(bad.join("\n"));
 // collapsed workspaces, a row's rendered star, the drag's drops, the
 // retired local layout's import and clearing, the layout refusals' strings
 // and the stale-render check, the press's swap hold, re-find, and drop
-// refusals, the viewed row's mark, the add popovers' placement, branch
+// refusals, the tree's drop zones, no-op drops, shown drops and their undo,
+// and collapsed parents, the viewed row's mark, the add popovers' placement, branch
 // filter, and add-worktree request, the worktree delete modal's Delete gate
 // and submit, the spawn request, the revive route
 // and entry mark, the hand-off notice, and an approval card's input
