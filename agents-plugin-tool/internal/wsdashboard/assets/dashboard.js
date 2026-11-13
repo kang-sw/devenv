@@ -545,6 +545,7 @@
     if (!el) return;
     var board = name === "board";
     if (el.getAttribute("data-h") === hash) { if (board) deferred = null; if (name === "rail") railHeld = null; return; }
+    if (board && window.WsOverview && window.WsOverview.holding()) { boardOverviewHeld = { hash: hash, html: html }; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board && window.WsCards && window.WsCards.dragging && window.WsCards.dragging()) { boardDragHeld = { hash: hash, html: html }; return; }
     // A rail swap waits while a row is dragged in the rail, and lands when
@@ -670,7 +671,8 @@
   // A board swap waits while a card or topic is dragged (boardDragHeld), and
   // lands at the drag's end.
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
-  var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null;
+  var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null, boardOverviewHeld = null;
+  function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }
   function pinColumnFits(n) {
     return n > 0 && !!(PIN_WIDE && PIN_WIDE.matches) && !(live && (grid.getAttribute("data-layout") || load(LAYOUT_KEY)) === "tabs");
   }
@@ -688,13 +690,14 @@
     window.WsCards.mount(cardBoard, {
       key: "ws.dashboard.cards." + rid, load: load, save: save,
       toolbar: {
+        overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
         search: function () { var b = $("tkqs"); if (b) b.click(); },
-        files: fpane && window.WsFiles ? function () {
+        files: fpane && window.WsFiles ? function () { afterOverview(function () {
           if (!tabShown("convo")) setTab("convo");
           setCtab("files");
           var filter = fpane.querySelector("input");
           if (filter) filter.focus();
-        } : null
+        }); } : null
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
@@ -724,6 +727,24 @@
         if (h) swap("board", h.hash, h.html, true);
       }
     });
+    // wbForm creates wbHistory near the end of page startup. Mount overview
+    // after that, not here while only the card framework exists.
+    function mountBoardOverview() {
+      if (!window.WsOverview || !window.wbHistory) return;
+      window.WsOverview.mount({
+      rid: rid, board: cardBoard, toolbar: window.WsCards.toolbar(), pins: window.WsCards.pinList(),
+      keep: window.wbHistory.keep, place: window.WsCards.overview, toast: toast, rail: railKey,
+      reveal: function () { if (live && !tabShown("board")) setTab("board"); },
+      frames: function () { return boardRead(frameHeights); },
+      restoreFrames: function (h) { boardBoxes().forEach(function (b) { setFrameHeights(b, h); }); },
+      changed: function () { doc.dispatchEvent(new Event("ws-overview")); },
+      release: function () {
+        var h = boardOverviewHeld;
+        boardOverviewHeld = null;
+        if (h) swap("board", h.hash, h.html, true);
+      }
+      });
+    }
     if (window.WsTerm) window.WsTerm.mount($("bcol"));
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
@@ -4911,6 +4932,7 @@
     var topic = boardQ("section.topic[data-topic]").filter(function (n) { return n.getAttribute("data-topic") === row.topic; })[0];
     var target = row.id ? $("item-" + row.id) : topic;
     if (!target || !topic) return;
+    if (window.WsOverview && window.WsOverview.pick(topic, o)) return;
     if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
     if (live && !tabShown("board")) setTab("board");
     if (row.kind === "board-body") target = topic.querySelector(".tdoc") || topic;
@@ -5805,6 +5827,7 @@
   // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column;
   // a framed page hands it to the shell, which holds the rail.
   function railKey() {
+    if (window.WsOverview && window.WsOverview.holding()) { window.WsOverview.after(railKey); return; }
     if (framed) { shPost("key", { key: "rail" }); return; }
     if (!railEl || !WsRail) return;
     railOpen(!railShown());
@@ -7738,7 +7761,7 @@
     // window: a modal dialog's, or an overlay's (the item and git windows,
     // the image viewer, a maximized card's scrim).
     function dim() {
-      var a = 0;
+      var a = window.WsOverview && window.WsOverview.active() ? 0.72 : 0;
       q("dialog[open]").forEach(function (d) {
         var modal = false;
         try { modal = d.matches(":modal"); } catch (x) { modal = false; }
@@ -7760,6 +7783,7 @@
       send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim() });
     }
     function queue() { if (!queued) queued = setTimeout(post, 16); }
+    doc.addEventListener("ws-overview", queue);
     var top = doc.querySelector(".dwrap > .top");
     if (window.MutationObserver) {
       var mo = new MutationObserver(queue);
@@ -7843,6 +7867,7 @@
   // posts it again.
   q("iframe.doc-frame").forEach(function (f) { postDoc(f, { wbDoc: "size" }); });
   if (window.wbForm) window.wbForm();
+  if (cardBoard) mountBoardOverview();
   applySent();
   restoreDraft();
   tlCount();

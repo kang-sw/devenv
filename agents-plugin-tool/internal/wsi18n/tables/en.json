@@ -303,6 +303,7 @@
   "js.board.toolbar.overview": "Overview",
   "js.board.toolbar.search": "Search",
   "js.board.toolbar.files": "Files",
+  "js.board.overview.hint": "Outside click · Esc: back to your place · Card click: go to that card",
   "js.board.toolbar.count": "open {0} · closed {1}",
   "js.term.new": "New terminal",
   "js.term.new.title": "Open a terminal on this computer",

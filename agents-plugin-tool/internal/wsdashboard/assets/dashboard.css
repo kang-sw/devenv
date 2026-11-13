@@ -667,6 +667,33 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 @media (max-width: 640px) { section.topic[data-max], details.entry-panel[data-max] { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
 @media (prefers-reduced-motion: reduce) { .bcard.flash .bc-in { animation: none; } .bc-grip::after { transition: none; } }
 
+/* ===== overview picker (overview.js) =====
+   Only the view folds: no card record or disclosure is changed. Keeping
+   off-screen items renderable avoids remembered unfolded intrinsic sizes. */
+:root[data-overview] body { background: color-mix(in srgb, var(--wb-bg) 28%, #000); }
+:root[data-overview] :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter) { filter: brightness(.28) saturate(.4); }
+:root[data-overview] .r-board :is(section.topic, .bcard) { content-visibility: visible !important; cursor: pointer; }
+:root[data-overview] .r-board section.topic > :not(.tophead),
+:root[data-overview] .r-board .tophead > .tnote,
+:root[data-overview] .r-board .bcard :is(.bc-body, .bc-grip, .bc-folded),
+:root[data-overview] .r-board > .reply { display: none !important; }
+:root[data-overview] .r-board .tophead, :root[data-overview] .r-board .bc-hd { position: static !important; }
+:root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+:root[data-overview] .r-board :is(.tnote-toggle, .d-max, .d-min, .bc-acts, .bc-fold, .bc-max, .bc-close),
+:root[data-overview] .r-board .tpin:not([aria-pressed="true"]),
+:root[data-overview] .r-board .bc-pin:not([aria-pressed="true"]) { opacity: 0; pointer-events: none; }
+:root[data-overview] .r-board :is(.tpin, .bc-pin)[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); pointer-events: none; }
+:root[data-overview] .r-board :is(section.topic, .bcard) { position: relative; margin-bottom: 6px; }
+:root[data-overview] .r-board :is(section.topic, .bcard):is(:hover, :focus-visible) { outline: 1px solid var(--wb-primary); outline-offset: -1px; }
+.overview-here::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--wb-primary); z-index: 3; pointer-events: none; }
+:root[data-overview][data-pincol] .r-board > .bpins { border: 0; padding: 0; margin-bottom: 0; }
+:root[data-overview][data-pincol] .r-board > .bpins::before { display: none; }
+:root[data-overview]:not([data-pincol]) .r-board > .bpins::before { filter: brightness(.28) saturate(.4); }
+.overview-spacer { flex: none; pointer-events: none; }
+.overview-flash { animation: overview-flash 1.2s ease-out; }
+@keyframes overview-flash { from { outline: 3px solid var(--wb-primary); outline-offset: 0; } to { outline: 0 solid transparent; outline-offset: 3px; } }
+@media (prefers-reduced-motion: reduce) { .overview-flash { animation: none; outline: 2px solid var(--wb-primary); outline-offset: 1px; } }
+
 /* ===== preview cards (preview.js) =====
    What a preview card's body holds, one per kind the preview route
    answers. The text view's line height is fixed (preview.js LINE), since a

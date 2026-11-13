@@ -303,6 +303,7 @@
   "js.board.toolbar.overview": "概览",
   "js.board.toolbar.search": "搜索",
   "js.board.toolbar.files": "文件",
+  "js.board.overview.hint": "点击外部或 Esc：返回原位 · 点击卡片：转到该卡片",
   "js.board.toolbar.count": "进行中 {0} · 已关闭 {1}",
   "js.term.new": "新建终端",
   "js.term.new.title": "在这台电脑上打开终端",

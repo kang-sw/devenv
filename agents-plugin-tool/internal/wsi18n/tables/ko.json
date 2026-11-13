@@ -303,6 +303,7 @@
   "js.board.toolbar.overview": "한 눈에 보기",
   "js.board.toolbar.search": "검색",
   "js.board.toolbar.files": "파일",
+  "js.board.overview.hint": "바깥 클릭·Esc: 원래 자리로 · 카드 클릭: 그 카드로",
   "js.board.toolbar.count": "진행 중 {0} · 종료 {1}",
   "js.term.new": "새 터미널",
   "js.term.new.title": "이 컴퓨터에서 터미널 열기",

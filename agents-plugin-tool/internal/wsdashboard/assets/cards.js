@@ -577,6 +577,7 @@
   // video keeps running through maximize and back. One thing is large at a
   // time: a card, or a board node (sheet: a topic, or a topic's panel).
   function maximize(c) {
+    if (c && window.WsOverview && window.WsOverview.holding()) { window.WsOverview.after(function () { maximize(c); }); return; }
     if (maxed === c) return;
     if (maxed) {
       var was = maxed;
@@ -825,7 +826,7 @@
     if (d.scr.scrollTop !== was) over(d.x, d.y);
   }
   function dragStart(e) {
-    if (dg || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
+    if (overviewOn || dg || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
     var t = e.target;
     if (!t.closest || t.closest("button, a, input, textarea, select, summary, label")) return;
     var head = t.closest(".tbar, .bc-hd");

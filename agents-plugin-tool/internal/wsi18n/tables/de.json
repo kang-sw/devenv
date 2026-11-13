@@ -303,6 +303,7 @@
   "js.board.toolbar.overview": "Übersicht",
   "js.board.toolbar.search": "Suchen",
   "js.board.toolbar.files": "Dateien",
+  "js.board.overview.hint": "Außen klicken · Esc: zurück · Karte anklicken: zur Karte",
   "js.board.toolbar.count": "offen {0} · geschlossen {1}",
   "js.term.new": "Neues Terminal",
   "js.term.new.title": "Ein Terminal auf diesem Computer öffnen",

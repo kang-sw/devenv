@@ -31,6 +31,10 @@ var cssModules = []struct {
 // those modules may both define it. A new module joining the class is a new
 // collision and fails.
 var allowedCSSOverlaps = map[string]string{
+	"rtext dashboard,whiteboard":        "overview clamps the existing whiteboard recap, scoped to data-overview",
+	"trecap dashboard,whiteboard":       "overview clamps the existing whiteboard recap, scoped to data-overview",
+	"tnote dashboard,whiteboard":        "overview hides existing whiteboard note fields without changing their state",
+	"tnote-toggle dashboard,whiteboard": "overview fades existing whiteboard head actions, scoped to data-overview",
 	"achip dashboard,tracker":           "pre-existing dashboard and tracker overlap (host styles the tracker mount), grandfathered",
 	"ack tracker,whiteboard":            "pre-existing tracker and whiteboard overlap, grandfathered",
 	"agent dashboard,whiteboard":        "dashboard extends the whiteboard board vocabulary it is inlined after",

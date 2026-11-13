@@ -540,11 +540,14 @@
   function pick(body) {
     ui.err.textContent = "";
     busy(true);
-    create(body, function (err) {
-      busy(false);
-      if (err) { ui.err.textContent = err; if (body.folder === "path") ui.in.focus(); return; }
-      closePop(false);
-    });
+    var run = function () {
+      create(body, function (err) {
+        busy(false);
+        if (err) { ui.err.textContent = err; if (body.folder === "path") ui.in.focus(); return; }
+        closePop(false);
+      });
+    };
+    if (window.WsOverview) window.WsOverview.after(run); else run();
   }
   function drawOpts() {
     ui.opts.textContent = "";

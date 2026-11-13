@@ -303,6 +303,7 @@
   "js.board.toolbar.overview": "Обзор",
   "js.board.toolbar.search": "Поиск",
   "js.board.toolbar.files": "Файлы",
+  "js.board.overview.hint": "Щелчок снаружи · Esc: назад · Щелчок по карточке: перейти к ней",
   "js.board.toolbar.count": "открыто {0} · закрыто {1}",
   "js.term.new": "Новый терминал",
   "js.term.new.title": "Открыть терминал на этом компьютере",
