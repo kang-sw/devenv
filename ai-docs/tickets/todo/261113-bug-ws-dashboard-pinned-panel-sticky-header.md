@@ -1,5 +1,8 @@
 ---
 title: "Dashboard: a pinned topic's sticky header does not stick in the pinned column"
+blocked-by:
+  - 261112-feat-ws-whiteboard-topic-tickets-sticky-head
+  - 261113-feat-ws-dashboard-iframe-shell
 related:
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "the sticky topic head this should match; still in ready/, not merged"
   261113-feat-ws-dashboard-iframe-shell: "changes how the board is framed; may change the pinned column's embedding"
@@ -21,7 +24,12 @@ The pinned topic's header sticks to the top of the pinned column while its conte
 
 - Board stickiness is scoped to the whiteboard rail: `.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px) }` (`agents-plugin-tool/internal/wswhiteboard/assets/page.css:656`) and, for cards, `.wb-rail .bcard:not([data-max]) .bc-hd` (`agents-plugin-tool/internal/wsdashboard/assets/dashboard.css:608`). rail.js adds the `wb-rail` class only to the board host (`agents-plugin-tool/internal/wswhiteboard/assets/rail.js:22`).
 - The pinned list `.bpins` lives in `.bpcol` and is its own scroll container (`agents-plugin-tool/internal/wsdashboard/assets/dashboard.css#L1482-L1482`, `overflow: auto`), outside `.wb-rail`, so the `.wb-rail`-scoped sticky rules do not match pinned topics and cards. rail.js also drives `--wb-rail-top` and the stuck shadow for the board's items only.
-- Fix direction: apply the same sticky rules (and a stuck-state shadow) to `.bpins` topics and cards against `.bpins` as the scroller, either by scoping the rules to `.bpins` too or by running a rail instance over it. Confirm `.bpins` topics are not clipped by an overflow ancestor.
+- Fix direction: apply the same sticky rules (and a stuck-state shadow) to `.bpins` topics and cards against `.bpins` as the scroller, by scoping the rules to `.bpins` too (see Decisions). Confirm `.bpins` topics are not clipped by an overflow ancestor.
+
+## Decisions
+
+- Fix by CSS scoping only: the sticky rules and the stuck-state shadow also match `.bpins` topics and cards, with `.bpins` as the scroller (announced default, EXEC 2026-11-13). Rejected: a rail instance over the pinned column, already rejected by `261112-feat-ws-dashboard-pin-column` decision 451 ("the pinned column has no rail") and commit 9c7cae82.
+- Lands after `261112-feat-ws-whiteboard-topic-tickets-sticky-head` and `261113-feat-ws-dashboard-iframe-shell` (`blocked-by:`), because the fix targets their final markup (`.tophead`, shell framing); landing order set by the MAIN lead 2026-11-13.
 
 ## Constraints
 

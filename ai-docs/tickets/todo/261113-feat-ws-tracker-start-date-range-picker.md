@@ -60,9 +60,13 @@ today's due step until this ticket lands.
 - The server refuses an item whose start is after its due, on create and on
   any edit that sets either side; clearing `due` leaves `start` as is.
   Rejected: enforcing it only in the picker (MCP writers bypass the picker).
-- Gantt and calendar bars begin at `start`, falling back to the derived
-  `started`, then the creation time. Rejected: replacing `started` (existing
-  items without a start would lose their bars' start).
+- Gantt bars begin at `start`, falling back to the derived `started`, then
+  the creation time. Rejected: replacing `started` (existing items without a
+  start would lose their bars' start).
+- (480)=a (owner, 2026-11-13): the calendar view stays due-day only (one
+  cell per item on its due day). Rejected: multi-day start..due spans in the
+  month grid now; recorded for later as
+  `261113-feat-ws-tracker-calendar-multi-day-spans` (idea).
 - One range-picker component serves the item menu's due step, the new-item
   composer's due chip, and the pencil edit row. Rejected: a picker per entry
   point (behaviour drifts; ad8bde38e applied the same rule to the label
@@ -150,7 +154,7 @@ today's due step until this ticket lands.
 - Dashboard: the range picker described in Background replaces the due
   picker at every entry point; the row due badge shows the range when a start
   is set (exact format is the worker's call, matching the existing D-N / D-day
-  / D+N badge); gantt and calendar use the start date.
+  / D+N badge); gantt uses the start date; the calendar stays due-day only.
 - Tests: `wstracker` store and validation tests (including start after due
   refused, clear, replay), reasons parity (`reasons.json`, reference
   `engine.js`, `TestFlaggedReasons`), MCP argument tests, tracker asset tests
