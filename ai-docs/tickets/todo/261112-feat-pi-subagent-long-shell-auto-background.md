@@ -18,7 +18,34 @@ every blocking shell command in a Pi subagent switch to a background shell
 after 30 seconds, so the subagent's turn frees up and the message gets
 through.
 
+## Owner Concept (2026-11-13)
+
+Not yet settled; captured verbatim in substance for the Open Decision Queue.
+
+- A ws tool, working name `ws/exec.run(shell: bool, args: [], cwd?: string
+  = <current dir>, exe: <exec name>, async?: bool = false)`, modelled on the
+  background shell the hosted Pi session already uses.
+- `async: true` returns at once with a command id `exec_<three words, no
+  separator>` (e.g. `exec_shinybrightfuture`, mailbox-id style).
+- `async: false` waits up to 30 s. Finishing inside 30 s returns normally.
+  Past 30 s the command converts to async and the agent learns "converted to
+  async, exec id: exec_..." without a new turn being fired; the agent is then
+  free to take messages. When the command later finishes, that completion
+  fires a new turn.
+- After conversion the agent manages it with sibling commands (`stop`,
+  `tail`, ...). Deliberately no `wait`: an agent that wants to wait simply
+  stops producing output and is woken by the completion.
+
 ## Open Questions
+
+- Where the process lives (daemon vs per-session MCP server) and its
+  lifetime across turn end, agent close, and daemon replacement.
+- Which harnesses get the tool: on Claude Code and Codex it would bypass the
+  host's own command permission/sandbox layer, so it may need to be Pi-only
+  or gated by config.
+- Shell resolution for `shell: true` on Windows (Git Bash, PowerShell, cmd)
+  and output encoding.
+- Output retention and the `tail` window; process-tree stop on Windows.
 
 - Whether Pi exposes a background-shell facility the adapter can hand a
   running command to, or the adapter must own the process and return a
