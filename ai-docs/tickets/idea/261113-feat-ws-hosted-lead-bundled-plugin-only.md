@@ -56,13 +56,26 @@ suppresses settings `packages` entries.
 - Compatibility tier: T0 (additive optional config key + launch args); note the
   lead-observable behavior change.
 
-## Open questions (board items, pending owner)
+## Confirmed Decisions
 
-- (392) Default isolation scope for hosted leads: replace only ws/wsflow vs
-  isolate everything vs knob (default replace-only, knob for extreme).
-  Recommendation: knob.
-- (393) In extreme mode keep user permissions/hooks/CLAUDE.md memory vs
-  `--setting-sources ""`. Recommendation: keep, if probe (1) passes.
-- Pending acks: (394) bundled copy always wins on version mismatch; (395) child
-  launch path unchanged; (396) probe (1)-(3) before implementing; (397) bundled
-  = daemon's own package root; (398) tier T0.
+Owner answers 2026-11-13.
+
+- (392) = c, owner note "choose it in the session spawn modal". The isolation
+  level is chosen per session in the dashboard session-spawn modal. Default:
+  "replace only ws/wsflow with the bundled copy, keep other user
+  plugins/extensions". Option: "isolated: disable all user plugins/extensions,
+  enable only bundled ws/wsflow". A config key may supply the modal's default;
+  the modal choice is the authority. Rejected: replace-only with no choice;
+  always-isolated.
+- (393) = a. Isolated mode keeps user/project settings sources (permissions,
+  hooks, CLAUDE.md memory); only plugins are disabled. Depends on probe (1); if
+  it fails, the fallback is re-asked. Rejected: `--setting-sources ""`.
+- (394) The bundled copy always wins on version mismatch.
+- (395) The child launch path is unchanged.
+- (396) Probes (1)-(3) run before implementation.
+- (397) "Bundled" = plugin root of the daemon's own package (ws or wsflow);
+  repo `agents-plugin*` in dev builds.
+- (398) Tier T0; the lead-observable behavior change is noted.
+- Scope note: the spawn-modal UI is owned by the UI track (separate session);
+  this ticket's backend adds the launch-arg plumbing and a per-session field
+  the modal sets.
