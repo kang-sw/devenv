@@ -517,10 +517,18 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 	return row
 }
 
-// Stopped reports a session the user stopped (the holder's "stop" reason, or
-// the kill a stop falls back to): the rail shows it asleep. Any other host
-// exit, a crash among them, keeps its reason line.
+// Stopped reports a hosted session with no harness process: the rail shows
+// it asleep (a muted title and a dimmed harness icon), whatever ended the
+// process. The runner keeps heartbeating such a row, so Live alone would
+// draw it as running. An ended row sleeps only when the user stopped it.
 func (r RailRow) Stopped() bool {
+	return r.Exit != nil && (r.Live || r.UserStopped())
+}
+
+// UserStopped reports a session the user stopped (the holder's "stop"
+// reason, or the kill a stop falls back to): its row drops the reason line.
+// Any other host exit (a crash, a child that exited) keeps it.
+func (r RailRow) UserStopped() bool {
 	return r.Exit != nil && (r.Exit.Reason == "stop" || r.Exit.Reason == "killed")
 }
 
