@@ -339,8 +339,9 @@ body.tk-paged .tk-drawer { display: none; }
 .tk .rpe .i { width: 13px; height: 13px; vertical-align: -2px; }
 .tk .rpe:hover, .tk .rpe[aria-expanded="true"] { color: var(--wb-primary); }
 .tk .irow:is(:hover, :focus-within, .sel) .rpe, .tk .rpe[aria-expanded="true"] { visibility: visible; }
-.tk .rlab { display: none; flex: none; width: 18px; justify-content: center; }
-.tk .irow:is(:hover, :focus-within, .sel) .rlab, .tk .rlab[aria-expanded="true"] { display: inline-flex; }
+.tk .rlab, .tk .rtit { display: none; flex: none; width: 18px; justify-content: center; }
+.tk .irow:is(:hover, :focus-within, .sel) :is(.rlab, .rtit), .tk .rlab[aria-expanded="true"] { display: inline-flex; }
+.tk .ir-main .tedit { flex: 1 1 auto; min-width: 8em; height: 24px; padding: 0 6px; border: 0; border-radius: 5px; outline: 1.5px solid var(--wb-primary); background: var(--wb-card); color: var(--wb-fg); font: inherit; font-weight: 600; }
 .tk .wicon { display: inline-flex; flex: none; color: var(--tk-conc); }
 .tk .wicon.flag { color: var(--tk-fail); }
 .tk .udot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); }

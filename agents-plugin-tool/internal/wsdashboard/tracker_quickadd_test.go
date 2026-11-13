@@ -256,6 +256,37 @@ done();
 `)
 }
 
+// TestTrackerRowTitleEdit pins the list row's hover pencil: only an editor
+// gets it, and its in-place edit writes one item.edit of the trimmed title on
+// Enter or blur, nothing when the title is unchanged or blank, and nothing on
+// Escape.
+func TestTrackerRowTitleEdit(t *testing.T) {
+	if !strings.Contains(trackerFn(t, `function irow\(o\)`, false), "titleEdHtml(it)") {
+		t.Error("the list row does not draw the title pencil")
+	}
+	runTrackerCases(t, "row title edit", trackerCheckJS+`
+var editor = true, sent = [], el = { value: '' }, renders = 0, ui = {}, VS = { items: { i1: { id: 'i1', title: 'Old' } } };
+function canEdit() { return editor; }
+function wsT(k) { return k; }
+function render() { renders++; }
+function $() { return ui.tedit ? el : null; }
+function commit(ev) { sent.push(ev); }
+`+trackerFn(t, `function esc\(s\)`, false)+trackerFn(t, `function attr\(k, v\)`, true)+trackerFn(t, `function tipAttr\(text\)`, true)+trackerFn(t, `function partIcon\(icon\)`, true)+trackerFn(t, `function titleEdHtml\(it\)`, false)+trackerFn(t, `function endTitleEdit\(save\)`, false)+`
+function go(v, save) { ui.tedit = { item: 'i1', rk: 'r', val: 'Old' }; el.value = v; endTitleEdit(save); }
+check('an editor gets the pencil', titleEdHtml(VS.items.i1).indexOf('data-act="tedit" data-item="i1"') > 0, true);
+editor = false;
+check('anyone else gets none', titleEdHtml(VS.items.i1), '');
+go('  New  ', true);
+check('Enter or blur writes the trimmed title once', [sent, ui.tedit], [[[['item.edit', { item: 'i1', title: 'New' }]]], null]);
+sent = [];
+go('Old', true); go('   ', true); go('New', false);
+check('unchanged, blank, and cancelled write nothing', sent, []);
+endTitleEdit(true);
+check('a second end after the edit closed does nothing', sent, []);
+done();
+`)
+}
+
 // TestTrackerInsertDepthMarkers pins the hover insert's depth markers: every
 // level slot from the root to one under the row above, but the badge's own,
 // carries a marker; a tick where a place is (insOpts), an x where none is.

@@ -722,6 +722,31 @@
     if (!canEdit(it) || !((VS.labels || []).length || VS.viewer.admin)) return '';
     return partHtml('rlab rpe', wsT("js.tk.prop.labels.edit"), partIcon('tag'), it, 'labels');
   }
+  // A list row's title pencil: an editor's way to rename in place (startTitleEdit); it takes no
+  // room until the row is hovered or focused, like the label icon.
+  function titleEdHtml(it) {
+    if (!canEdit(it)) return '';
+    var tip = wsT("js.tk.act.edit");
+    return '<button type="button" class="rp rpe rtit" tabindex="-1"' + attr('act', 'tedit') + attr('item', it.id) + ' aria-label="' + esc(tip) + '"' + tipAttr(tip) + '>' + partIcon('pen') + '</button>';
+  }
+  // The in-place title edit (ui.tedit): Enter and blur save, Esc cancels. One item.edit of the
+  // title, as the edit form's save (saveEdit) sends it; unchanged or blank after trim writes nothing.
+  function startTitleEdit(id, rk) {
+    var it = VS.items[id];
+    if (!it || !canEdit(it)) return;
+    ui.tedit = { item: id, rk: rk, val: it.title };
+    render();
+    var el = $('tktedit');
+    if (el) { el.focus(); el.select(); }
+  }
+  function endTitleEdit(save) {
+    var e = ui.tedit, el = $('tktedit');
+    if (!e) return;
+    ui.tedit = null;
+    var v = el ? el.value.trim() : e.val.trim(), it = VS.items[e.item];
+    render();
+    if (save && it && v && v !== it.title) commit([['item.edit', { item: e.item, title: v }]]);
+  }
   var FLAGGED = {}, UNREAD = {}; // per render: item -> flagged writes in its own thread; item -> unread notification entries
   function warnHtml(it) {
     var f = FLAGGED[it.id] || 0, c = it.concurrent;
@@ -960,6 +985,7 @@
   // open it), anywhere else only focuses the row, where Enter opens it.
   function rowClick(row, t) {
     if (t.closest('a.title')) return true;
+    if (t.closest('input')) return false; // the title's in-place input keeps focus
     row.focus({ preventScroll: true });
     return false;
   }
@@ -1006,11 +1032,13 @@
   // when it is selected: then the selection moves.
   function irow(o) {
     var it = VS.items[o.item], r = o.rec, st = stKey(it, r), ms = mselHas(it.id), ed = canEdit(it) && it.kind !== 'topic';
+    var te = ui.tedit && ui.tedit.item === it.id && ui.tedit.rk === o.rk; // the title is being renamed in place
     if (MSEEN) MSEEN[it.id] = true;
-    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (ms ? ' msel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + (ms || canMove(it) ? ' draggable="true"' : '') +
+    return '<div class="irow' + (ui.sel === o.rk ? ' sel' : '') + (ms ? ' msel' : '') + (o.closed ? ' closed' : '') + (o.ctx ? ' ctx' : '') + '" tabindex="0"' + (!te && (ms || canMove(it)) ? ' draggable="true"' : '') +
       attr('item', it.id) + attr('rk', o.rk) + (r ? attr('rec', r.id) : '') +
       (o.depth ? ' style="--ind:' + o.depth + '"' : '') + '><div class="ir-main">' + mcbHtml(it, ms) + (o.tw != null ? o.tw : o.depth ? '<span class="ind">&#8627;</span>' : '') + stBtn(st, it, r) +
-      '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + (o.tsub || '') + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + labelEdHtml(it) + '<span class="grow"></span>' +
+      (te ? '<input type="text" class="tedit" id="tktedit" data-keep autocomplete="off" value="' + esc(ui.tedit.val) + '" aria-label="' + esc(wsT("js.tk.form.title")) + '">' :
+        '<a class="title" href="#" tabindex="-1"' + attr('item', it.id) + '>' + esc(it.title) + '</a>' + titleEdHtml(it)) + (o.tsub || '') + openChip(it) + labelChips(it, 'lsearch') + warnHtml(it) + dotHtml(it) + labelEdHtml(it) + '<span class="grow"></span>' +
       '<span class="ir-acts">' + moreBtn(it.id, '', true) + '</span>' + whoHtml(it, canAssign(it, VS.viewer.member)) + priHtml(it, ed) + dueHtml(it, st, ed) + '</div>' +
       '<div class="ir-more">' + detailsHtml(it, r, o.more) + '</div></div>';
   }
@@ -5782,6 +5810,7 @@
         else if (k === 'iedit-save') saveEdit();
         else if (k === 'ilabel' && ui.iedit) { var il = ui.iedit.labels, ix = il.indexOf(d.label); if (ix >= 0) il.splice(ix, 1); else il.push(d.label); render(); }
         else if (k === 'lsearch') labelSearch(d.label);
+        else if (k === 'tedit') startTitleEdit(d.item, (a.closest('.irow') || a).getAttribute('data-rk'));
         else if (k === 'claimf') claimableFilter();
         else if (k === 'slabel-rm') labelRemove(d.label);
         else if (k === 'iedit-x') endEdit();
@@ -5912,6 +5941,7 @@
       if (t.id === 'tknew' && ui.nrow[ui.store]) ui.nrow[ui.store].val = t.value;
       else if (t.id === 'tkknew' && ui.knew[ui.store]) ui.knew[ui.store].val = t.value;
       else if (t.id === 'tksub' && ui.sub) ui.sub.val = t.value;
+      else if (t.id === 'tktedit' && ui.tedit) ui.tedit.val = t.value;
       else if (t.id === 'tkaq' && MN && MN.step === 'assign') { var as = asgState(); as.q = t.value; as.idx = 0; asgDraw(); }
       else if (t.id === 'tkmq' && MN) { MN.q = t.value; var ml = $('tkmenu').querySelector('.mlist'); if (ml) ml.innerHTML = mqList(VS.items[MN.item]); }
       else if (t.id === 'tkmvq' && MN && MN.mv) { MN.q = t.value; var mvl = $('tkmenu').querySelector('.mlist'); if (mvl) mvl.innerHTML = moveList(MN.mv); }
@@ -5989,6 +6019,12 @@
       var row = own(e.target) && e.target.closest('.irow');
       if (row && !row.contains(e.relatedTarget)) placeMore(row);
       linkHi(own(e.target) && e.target.closest('.kcard, .citem'));
+    });
+    // focus leaving the title's input saves it (Enter and Esc end it first, so this sees no edit).
+    // Deferred: a re-render replaces the input and puts focus back on its new one, which is no leaving.
+    document.addEventListener('focusout', function (e) {
+      if (e.target.id !== 'tktedit' || !own(e.target)) return;
+      setTimeout(function () { if (ui.tedit && document.activeElement !== $('tktedit')) endTitleEdit(true); }, 0);
     });
     document.addEventListener('focusin', function (e) {
       if (MP && e.target.id !== MP.box) mentionClose();
@@ -6078,6 +6114,7 @@
         var esc1 = e.key === 'Escape';
         if (id === 'tknew') { if (plain) { e.preventDefault(); createNew(); } else if (esc1) { e.preventDefault(); closeNewRow(); } return; }
         if (id === 'tkknew') { if (plain) { e.preventDefault(); createKnew(); } else if (esc1) { e.preventDefault(); closeKnew(); } return; }
+        if (id === 'tktedit') { if (plain) { e.preventDefault(); endTitleEdit(true); } else if (esc1) { e.preventDefault(); endTitleEdit(false); } return; }
         if (id === 'tksub') { if (plain) { e.preventDefault(); createSub(); } else if (esc1) { e.preventDefault(); closeSub(); } return; }
         if (id === 'iw-etitle' || id === 'iw-eproj') { if (plain || chord) { e.preventDefault(); saveEdit(); } else if (esc1) { e.preventDefault(); endEdit(); } return; }
         if (t.hasAttribute('data-mention')) {
