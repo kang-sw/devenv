@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: ea6e424bd3bc2475
 sage-review-completeness-reviewed: ea6e424bd3bc2475
+completed: 2026-11-14
 ---
 
 # Whiteboard topic history: no inner scroll; load older entries upward in place
@@ -256,9 +257,63 @@ dashboard board region and on the standalone whiteboard page:
 
 LOOK captures of a long topic before and after "load more" on both surfaces.
 
-## Blocked - review remediation non-convergence (2026-11-14)
+### Result (397f746f6) - 2026-11-14
 
-No phase Result or closure is claimed. EXEC settled the previous lifetime
+- VERIFIED: prerequisite Phase 1 landed in `3ee1d448b` (Result recorded by
+  `cb68e48ce`); the existing shared `wbHistory.watch` / `keep` are reused.
+  Both surfaces now use bottom-anchored 640px clip steps without inner
+  scrolling or the old history tabindex. Loaded rows and fold choices survive
+  viewport collapse and board replacement. The shared `viewKit` is byte-identical
+  to the base (SHA256 `7ec85535314edf6c811d145b56d6f50d91af7380c75086f21427be065f2cefcb`).
+- VERIFIED: EXEC retry diagnostics attribute the native loop warning to the
+  final folded-log history delivery on both hosts, not startup/keyboard.
+  Control at develop merge-base `2d46f8c1d`, using the same renderer seed,
+  emitted zero warnings on either host, including exhaustion by separate
+  clicks. It is therefore not waived as a pre-existing defect. Deferring
+  control visibility changes out of the history callback, including reentrant
+  binding, eliminates the warning. INFERRED: shrinking shallower observed
+  ancestors caused skipped observations; browser-internal depth scheduling
+  was not instrumented. Control evidence: `/tmp/ro-baseline-0Sw0xO/evidence/`.
+- VERIFIED: real Tab originally focused p156 under a rail capsule on both
+  hosts (`elementFromPoint` at its center). Navigation now clears computed
+  sticky head top plus height in the same keep call. Final center hits belong
+  to the focused summary on both hosts; clip.scrollTop remains 0. Dashboard
+  summary y=138.140625..170.140625; standalone y=86.140625..116.140625.
+- VERIFIED: final native `history-regressions` passes both hosts (2.5s/1.6s),
+  with zero native errors: one synchronous page, then distinct actual native
+  deliveries advance 50 -> 100 -> 150 -> 200 rows at unchanged 80px height.
+  A real visible-to-out collapse cancels continuation with seven pages left.
+  Node contracts also cover reentrant control deferral and sticky offsets.
+- VERIFIED: full `history` passes dashboard/true standalone (8.2s/4.4s), with
+  zero native errors and 0px post-paint expansion, latest-entry late-height,
+  above/below collapse and deep-link drift. Dashboard swap/load-more uses the
+  identical keep session and the pinned case selects `#bpins`. Exhausted-control
+  states, retained folds/rows, initial observer zero, live-arrival fixture and
+  post-session non-rearming pass. The 640px clip remains workable; no fallback.
+- VERIFIED: uncached `go test -count=1 ./internal/wswhiteboard/...
+  ./internal/wsdashboard/...` passes (26.763s/129.813s); `observer` passes (3.0s),
+  genuine body-frame `keep` passes (4.9s; <=0.45px, no writes after user scroll),
+  `node --check scripts/board-headless.mjs` and `git diff --check` pass.
+  New log-only fixtures required selecting real body frames for keep and a real
+  log payload for standalone below-collapse; assertions were not relaxed.
+- VERIFIED: prior independent Lite findings are resolved. Original whole-ticket
+  review: `/tmp/history-lite-review-keg-reverb-giblet.md`. One fresh retry-delta
+  review (`6b0819338..397f746f6`) reports 0 Critical/Important/Minor, independently
+  reruns native regressions on both hosts and verifies exact served assets:
+  `/tmp/history-final-dV87jh/REVIEW.md`. No further review round requested.
+- VERIFIED: full logs, raw measurements, phase diagnostics, inspected before/after
+  load-more LOOK captures on both hosts and after-Tab captures are indexed in
+  `/tmp/history-final-dV87jh/VERIFIED.md`. Only isolated headless serve daemons
+  were used; the shared daemon was never restarted or swapped.
+- Omitted: non-Chromium/compositor-filmstrip runs, server-delivered live arrival
+  (rendered DOM fixture used), and long cap/user-navigation overlap. Standalone
+  has inline bodies and no dashboard swaps/pins. Navigation lifetime remains
+  the existing quiet/cap/user keep lifetime; no new local session or helper.
+
+## Prior blocked state - resolved by Result above (2026-11-14)
+
+Historical stop evidence follows; its pending items are resolved above.
+At that stop, no phase Result or closure was claimed. EXEC settled the previous lifetime
 stop; the dated clarification is now in Decision 8's Deep links bullet.
 Shared `viewKit` remains byte-identical to the starting revision (SHA256
 `7ec85535314edf6c811d145b56d6f50d91af7380c75086f21427be065f2cefcb`).
