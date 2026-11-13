@@ -57,8 +57,13 @@ func cliHello(t *testing.T) wsdashboard.ProxyHello {
 // Run the real host/session/frame path without starting any ws executable.
 func hostedCLIResult(t *testing.T, hello wsdashboard.ProxyHello, argv ...string) (string, string, int) {
 	t.Helper()
+	return hostedCLIResultWithHost(t, &proxyHost{logw: io.Discard}, hello, argv...)
+}
+
+func hostedCLIResultWithHost(t *testing.T, host *proxyHost, hello wsdashboard.ProxyHello, argv ...string) (string, string, int) {
+	t.Helper()
 	hello.Argv = argv
-	session, err := (&proxyHost{logw: io.Discard}).Accept(hello)
+	session, err := host.Accept(hello)
 	if err != nil {
 		t.Fatal(err)
 	}

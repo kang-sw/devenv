@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/mcp"
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsdoc"
@@ -73,7 +74,9 @@ func (c *hostedCLI) server(root string) *mcp.Server {
 	opts := mcp.ServerOptions{Root: root, Version: version, SourceCommit: sourceCommit,
 		Env: c.env, OwnerPID: c.hello.OwnerPID, Harness: c.hello.Harness, Diag: c.stderr}
 	if c.host != nil {
-		opts.Agents = c.host.agents
+		if c.host.agents != nil && strings.TrimSpace(c.getenv(wsagent.EnvPiToken)) == "" {
+			opts.Agents = c.host.agents
+		}
 		if d := c.host.live.Load(); d != nil {
 			opts.Live = d
 		}
