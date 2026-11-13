@@ -218,7 +218,16 @@
     }
   });
   function ready() { post({ wsWeb: "ready", path: here() }); }
-  window.addEventListener("popstate", ready);
-  window.addEventListener("hashchange", ready);
+  // A same-document move announces the new address with ready, which the
+  // host takes as a new page: it ends pick mode and clears the badge. The
+  // page keeps its ring, so pick mode ends here too and the count it still
+  // holds is posted again.
+  function moved() {
+    if (picking) stopPick();
+    ready();
+    if (errors) post({ wsWeb: "errors", count: errors });
+  }
+  window.addEventListener("popstate", moved);
+  window.addEventListener("hashchange", moved);
   ready();
 })();

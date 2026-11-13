@@ -203,6 +203,25 @@ test('ready is posted again on popstate and hashchange', () => {
   assert.deepEqual(page.take(), [{ wsWeb: 'ready', path: '/app?q=1#next' }, { wsWeb: 'ready', path: '/other?q=1#next' }]);
 });
 
+test('a same-document move ends pick mode and posts the count the page still holds', () => {
+  const page = boot();
+  page.ctx.console.error('one');
+  page.ctx.console.error('two');
+  page.flush();
+  page.fromHost({ wsWeb: 'pick', on: true });
+  page.take();
+  page.ctx.location.hash = '#next';
+  page.dispatch('hashchange');
+  assert.deepEqual(page.take(), [
+    { wsWeb: 'picking', on: false },
+    { wsWeb: 'ready', path: '/app?q=1#next' },
+    { wsWeb: 'errors', count: 2 },
+  ]);
+  assert.equal(page.listeners.filter(l => l.capture).length, 0);
+  page.fromHost({ wsWeb: 'attach' });
+  assert.deepEqual(page.take()[0].lines, ['one', 'two']);
+});
+
 test('messages from another origin, another source, or without a wsWeb type are ignored', () => {
   const page = boot();
   page.take();
