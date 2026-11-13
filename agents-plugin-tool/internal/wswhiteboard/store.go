@@ -206,11 +206,12 @@ type Embed struct {
 }
 
 // TopicDoc is a topic's content beside its items: its body, block markdown
-// with inline HTML written as is, rendered above the topic's items, and its
-// recap, a short status line rendered above the body. The two are
-// independent parts, each with its own change mark and time, and the
-// topic's recency is the later of the two; an entry holds at least one of
-// them (dropTopicDoc).
+// with inline HTML written as is, rendered above the topic's items, its
+// recap, a short status line rendered above the body, and the ticket stems
+// it links. The body and recap are independent parts, each with its own
+// change mark and time, and the topic's recency is the later of the two;
+// the ticket list is metadata with neither. An entry holds at least one of
+// the three (dropTopicDoc).
 type TopicDoc struct {
 	Name string `json:"name"`
 	Body string `json:"body"`
@@ -234,6 +235,11 @@ type TopicDoc struct {
 	// change moves neither Changed nor ChangedAt.
 	RecapChanged int    `json:"recap_changed,omitempty"`
 	RecapAt      string `json:"recap_at,omitempty"`
+	// Tickets are the ticket stems the topic links, in the order written
+	// (wb:topic tickets, applyTickets); nil when it links none. Like a
+	// label, the list moves neither the topic's recency nor its close
+	// state.
+	Tickets []string `json:"tickets,omitempty"`
 }
 
 // Recency is the entry's latest change mark, the body's or the recap's.
@@ -363,8 +369,8 @@ func (s *State) index(id int) int {
 	return -1
 }
 
-// topicKnown reports whether topic has an item, a body, or a recap (a
-// Topics entry holds at least one of the two).
+// topicKnown reports whether topic has an item, a body, a recap, or a
+// linked ticket (a Topics entry holds at least one of the three).
 func (s *State) topicKnown(topic string) bool {
 	for _, item := range s.Items {
 		if item.Topic == topic {
@@ -508,12 +514,12 @@ func (s *State) clearTopicRecap(topic string) {
 	s.dropTopicDoc(topic)
 }
 
-// dropTopicDoc drops topic's entry once it holds neither a body nor a
-// recap. A topic left with no item either is gone, so its closed mark goes
+// dropTopicDoc drops topic's entry once it holds no body, no recap, and no
+// ticket. A topic left with no item either is gone, so its closed mark goes
 // too.
 func (s *State) dropTopicDoc(topic string) {
 	i := s.topicDocIndex(topic)
-	if i < 0 || s.Topics[i].Body != "" || s.Topics[i].Recap != "" {
+	if i < 0 || s.Topics[i].Body != "" || s.Topics[i].Recap != "" || len(s.Topics[i].Tickets) > 0 {
 		return
 	}
 	s.Topics = append(s.Topics[:i], s.Topics[i+1:]...)
@@ -645,7 +651,16 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 
 	for _, cmd := range cmds {
 		if cmd.IsGroup() {
-			keys[cmd.Scope] = applyLabel(p, work, cmd)
+			key := ""
+			if _, labelled := cmd.Scope.ExtraOf("label"); labelled {
+				key = applyLabel(p, work, cmd)
+			} else if name, ok := cmd.Scoped(); ok {
+				key = work.resolveTopic(name)
+			}
+			if key != "" {
+				applyTickets(p, work, cmd, key)
+			}
+			keys[cmd.Scope] = key
 			continue
 		}
 		switch cmd.Tag {

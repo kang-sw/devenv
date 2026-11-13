@@ -16,8 +16,9 @@
 //     the root passes its attribute to the commands inside it. A scoped
 //     command sits only inside a group and every other command only outside
 //     one; groups do not nest, and a group takes no command position. A
-//     group holds at least one command, unless the grammar declares an
-//     optional extra group attribute (Group.Extra) and the group carries it.
+//     group holds at least one command, unless the grammar declares
+//     optional extra group attributes (Group.Extra) and the group carries
+//     one of them.
 //   - A body is raw text up to the first exact closing tag of its element
 //     (`</wb:why>`), so `<`, `&`, inline HTML, and mermaid are written as is.
 //     A CDATA section (`<![CDATA[...]]>`) passes its content through
@@ -88,12 +89,13 @@ type Group struct {
 	Name string
 	// Attr is the group's required attribute.
 	Attr string
-	// Extra, when set, is an optional second attribute. A group that
-	// carries it may hold no commands (or be written self-closing), and it
-	// comes out of Parse as a Command of its own ahead of its commands
-	// (Command.IsGroup), so the caller sees the attribute even then. A grammar
-	// that leaves Extra empty reads groups exactly as before.
-	Extra string
+	// Extra names the group's optional attributes beside Attr. A group
+	// that carries any of them may hold no commands (or be written
+	// self-closing), and it comes out of Parse as a Command of its own ahead
+	// of its commands (Command.IsGroup), so the caller sees the attributes
+	// even then. A grammar that leaves Extra empty reads groups exactly as
+	// before.
+	Extra []string
 	// Hint, when set, follows the problem a group with no commands, or with
 	// text ahead of its first command, gets: a group that once took a body
 	// of its own points its callers at the form that replaced it.
@@ -169,12 +171,23 @@ type Scope struct {
 	// Attr is the group's attribute name; Value its value, "" when the
 	// attribute is missing or blank (a problem Parse records).
 	Attr, Value string
-	// Extra is the value of the grammar's optional extra group attribute
-	// (Group.Extra) as written, and HasExtra whether the group carries it.
-	Extra    string
-	HasExtra bool
+	// Extra holds the grammar's optional group attributes (Group.Extra)
+	// the group carries, by name, with their values as written; nil when it
+	// carries none.
+	Extra map[string]string
 	// Commands counts the commands the group holds.
 	Commands int
+}
+
+// HasExtra reports whether the group carries any of the grammar's optional
+// group attributes.
+func (s *Scope) HasExtra() bool { return len(s.Extra) > 0 }
+
+// ExtraOf returns the value of the optional group attribute name and
+// whether the group carries it.
+func (s *Scope) ExtraOf(name string) (string, bool) {
+	v, ok := s.Extra[name]
+	return v, ok
 }
 
 // Label names the group in a problem: its tag and line.
@@ -214,8 +227,8 @@ func (c Command) Scoped() (string, bool) {
 	return c.Scope.Value, true
 }
 
-// IsGroup reports whether c stands for a group that carries its grammar's
-// extra attribute rather than for a command.
+// IsGroup reports whether c stands for a group that carries one of its
+// grammar's extra attributes rather than for a command.
 func (c Command) IsGroup() bool {
 	return c.Pos == 0 && c.Scope != nil
 }
@@ -366,10 +379,14 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 func (r *parser) group(tag openTag) {
 	g, p := r.g.Group, r.p
 	scope := &Scope{Tag: tag.name, Line: r.lineAt(tag.at), Attr: g.Attr}
-	known := []string{g.Attr}
-	if g.Extra != "" {
-		known = append(known, g.Extra)
-		scope.Extra, scope.HasExtra = attrOf(tag.attrs, g.Extra)
+	known := append([]string{g.Attr}, g.Extra...)
+	for _, name := range g.Extra {
+		if v, ok := attrOf(tag.attrs, name); ok {
+			if scope.Extra == nil {
+				scope.Extra = map[string]string{}
+			}
+			scope.Extra[name] = v
+		}
 	}
 	checkAttrs(p, scope.Label(), tag.attrs, known)
 	if v, present := attrOf(tag.attrs, g.Attr); !present {
@@ -377,7 +394,7 @@ func (r *parser) group(tag openTag) {
 	} else if NonEmpty(p, scope.At(), v) {
 		scope.Value = v
 	}
-	if scope.HasExtra {
+	if scope.HasExtra() {
 		r.out = append(r.out, Command{Line: scope.Line, Tag: tag.name, Attrs: tag.attrs, Scope: scope})
 	}
 	hint := ""
@@ -385,7 +402,7 @@ func (r *parser) group(tag openTag) {
 		hint = "; " + g.Hint
 	}
 	if tag.selfClosing {
-		if !scope.HasExtra {
+		if !scope.HasExtra() {
 			p.Add("%s: holds no commands%s", scope.Label(), hint)
 		}
 		return
@@ -441,7 +458,7 @@ func (r *parser) group(tag openTag) {
 			return
 		}
 	}
-	if commands == 0 && !scope.HasExtra {
+	if commands == 0 && !scope.HasExtra() {
 		p.Add("%s: holds no commands%s", scope.Label(), hint)
 	}
 }

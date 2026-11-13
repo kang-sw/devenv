@@ -42,6 +42,8 @@ type QueryTopic struct {
 	// 3339 UTC), printed at every depth whatever the body filter, for a
 	// closed topic too; "" when the topic has none.
 	Recap, RecapAt string
+	// Tickets are the ticket stems the topic links, as stored.
+	Tickets []string
 	// LastChange is the latest change time of the topic's items, body, and
 	// recap, RFC 3339 UTC, "" when none is recorded.
 	LastChange string
@@ -266,6 +268,7 @@ func Query(state *State, payload any) (QueryResult, []string) {
 				t.Body = doc.Body
 			}
 			t.Recap, t.RecapAt = doc.Recap, doc.RecapAt
+			t.Tickets = doc.Tickets
 		}
 		if !latest.IsZero() {
 			t.LastChange = latest.UTC().Format(time.RFC3339)
@@ -371,6 +374,9 @@ func topicLine(t QueryTopic) string {
 	parts := []string{"items: " + statusCounts(t.Counts)}
 	if t.BodyLen > 0 {
 		parts = append(parts, fmt.Sprintf("body: %d chars", t.BodyLen))
+	}
+	if len(t.Tickets) > 0 {
+		parts = append(parts, "tickets: "+strings.Join(t.Tickets, " "))
 	}
 	if t.LastChange != "" {
 		parts = append(parts, "changed: "+t.LastChange)

@@ -55,9 +55,10 @@ function sel(root, s) { var out = [];
   var all = desc(root, []); return out.sort(function (a, b) { return all.indexOf(a) - all.indexOf(b); }); }
 E.prototype.querySelectorAll = function (s) { return sel(this, s); };
 E.prototype.querySelector = function (s) { return sel(this, s)[0] || null; };
+E.prototype.closest = function (s) { for (var n = this; n; n = n.parent) if (one(n, s)) return n; return null; };
 var board = new E("div", "bcol", { id: "bcol" }); board.name = "host"; board.h = 800; board.scrollTop = 0; board.scrollHeight = 4000; board.clientHeight = 800; board.scroller = true;
 var oqTop = board.appendChild(new E("div", "oq-wrap top")), oqBot = board.appendChild(new E("div", "oq-wrap bot")); oqTop.name = "oq-top"; oqBot.name = "oq-bot";
-function topic(key, y) { var t = board.appendChild(new E("section", "topic", { "data-topic": key })); t.y = y; t.h = 500; var bar = t.appendChild(new E("div", "tbar")); bar.name = "bar-" + key; bar.h = 30; bar.y = y; bar.appendChild(new E("span", "tname")).textContent = key; return t; }
+function topic(key, y) { var t = board.appendChild(new E("section", "topic", { "data-topic": key })); t.y = y; t.h = 500; var head = t.appendChild(new E("div", "tophead")); head.name = "head-" + key; head.h = 30; head.y = y; var bar = head.appendChild(new E("div", "tbar")); bar.name = "bar-" + key; bar.h = 30; bar.y = y; bar.appendChild(new E("span", "tname")).textContent = key; return t; }
 ["a", "b", "c", "d", "e", "f"].forEach(function (k, i) { topic(k, i * 600); });
 var queue = [], ro = null;
 var document = { body: new E("body"), getElementById: function (id) { return id === "bcol" ? board : null; }, querySelector: function () { return null; }, createElement: function (t) { return new E(t); } };
@@ -69,14 +70,15 @@ function hostWrites() { return writes.filter(function (w) { return w[0] === "hos
 `
 
 // TestRailOffsetsSkipTheHost pins where rail.js puts its offsets: each
-// item's bar carries --wb-rail-top, each topic's note --wb-rail-note (its
-// bar's stick line plus the bar's height), the open-question pill's wrappers carry
-// --wb-rail-h and --wb-rail-bot, and the host carries none (a custom
-// property on the host is inherited by every board node, so each write
-// restyled the whole board). An unchanged value is not written again, and a
-// bar the board gains on a re-query gets the current value even when the
-// rail's draw does not change. The cases execute under node when it is
-// installed.
+// topic's head (the unit that sticks: its bar, note, recap, and check pill)
+// carries --wb-rail-top, the open-question pill's wrappers carry
+// --wb-rail-h (the stack and the current head's height) and --wb-rail-bot,
+// and the host carries none (a custom property on the host is inherited by
+// every board node, so each write restyled the whole board). Nothing inside
+// a head gets an offset of its own. An unchanged value is not written
+// again, and a head the board gains on a re-query gets the current value
+// even when the rail's draw does not change. The cases execute under node
+// when it is installed.
 func TestRailOffsetsSkipTheHost(t *testing.T) {
 	data, err := assetFS.ReadFile("assets/rail.js")
 	if err != nil {
@@ -89,7 +91,7 @@ func TestRailOffsetsSkipTheHost(t *testing.T) {
 	script := railPrelude + string(data) + `
 frame();
 check("no host offset", hostWrites(), []);
-check("first bar at the line", board.querySelector(".tbar").props["--wb-rail-top"], "0px");
+check("first head at the line", board.querySelector(".tophead").props["--wb-rail-top"], "0px");
 // Scroll into topic c: two capsules above (4 + 2 * 20 = 44), the current
 // bar 30 tall, two topics below the bottom line.
 board.scrollTop = 1250;
@@ -99,25 +101,23 @@ board.scrollTop = 1250;
 	script += `
 writes = []; ro(); frame();
 check("no host offset after scroll", hostWrites(), []);
-check("every bar sticks under two capsules", board.querySelectorAll("section.topic > .tbar").map(function (b) { return b.props["--wb-rail-top"]; }), ["44px", "44px", "44px", "44px", "44px", "44px"]);
-check("pill top clears the stack and the bar", oqTop.props["--wb-rail-h"], "74px");
+check("every head sticks under two capsules", board.querySelectorAll("section.topic > .tophead").map(function (b) { return b.props["--wb-rail-top"]; }), ["44px", "44px", "44px", "44px", "44px", "44px"]);
+check("pill top clears the stack and the head", oqTop.props["--wb-rail-h"], "74px");
 check("pill bottom clears two capsules", oqBot.props["--wb-rail-bot"], (14 + 2 * 17 + 3 + 4) + "px");
 writes = []; ro(); frame();
 check("an unchanged draw writes nothing", writes.filter(function (w) { return /^--wb-rail/.test(w[1]); }), []);
 // A collapsed topic (no height) is no rail item, so the draw stays the
-// same, but its bar is still the board's and gets the offset.
+// same, but its head is still the board's and gets the offset.
 var g = topic("g", 3600); g.h = 0; writes = []; ro(); frame();
-check("a new bar gets the current offset", g.children[0].props["--wb-rail-top"], "44px");
-check("only the new bar is written", writes.filter(function (w) { return /^--wb-rail/.test(w[1]); }).map(function (w) { return w[0]; }), ["bar-g"]);
-// A topic's note sticks under its bar: the stick line plus that bar's own
-// height, written whether the note is open or not, and again when the bar
-// grows (a wrapped bar).
-var ta = board.querySelector("section.topic"), na = ta.appendChild(new E("textarea", "note tnote", { "data-topic": "a" })); na.name = "note-a"; na.hidden = true;
-writes = []; ro(); frame();
-check("a closed note gets its offset", na.props["--wb-rail-note"], "74px");
-ta.children[0].h = 52; writes = []; ro(); frame();
-check("a taller bar moves its note", na.props["--wb-rail-note"], "96px");
-check("only the note is written", writes.filter(function (w) { return /^--wb-rail/.test(w[1]); }).map(function (w) { return w[0]; }), ["note-a"]);
+check("a new head gets the current offset", g.children[0].props["--wb-rail-top"], "44px");
+check("only the new head is written", writes.filter(function (w) { return /^--wb-rail/.test(w[1]); }).map(function (w) { return w[0]; }), ["head-g"]);
+// The current head grows (an open note, a recap, the check pill): the
+// open-question pill clears its whole height, and nothing in the head
+// gets an offset of its own.
+var tc = board.querySelectorAll("section.topic")[2], na = tc.children[0].appendChild(new E("textarea", "note tnote", { "data-topic": "c" })); na.name = "note-c";
+tc.children[0].h = 80; writes = []; ro(); frame();
+check("a taller current head moves the pill", oqTop.props["--wb-rail-h"], "124px");
+check("only the pill is written", writes.filter(function (w) { return /^--wb-rail/.test(w[1]); }).map(function (w) { return w[0]; }), ["oq-top"]);
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {

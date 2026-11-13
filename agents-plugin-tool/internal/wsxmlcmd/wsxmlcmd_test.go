@@ -1,6 +1,7 @@
 package wsxmlcmd
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -300,39 +301,49 @@ func TestGroupRules(t *testing.T) {
 	}
 }
 
-// extraGrammar is groupGrammar with an optional extra group attribute.
+// extraGrammar is groupGrammar with two optional extra group attributes.
 var extraGrammar = Grammar{
 	Prefix:   "tr:",
-	Group:    &Group{Name: "in", Attr: "name", Extra: "label", Hint: groupGrammar.Group.Hint},
+	Group:    &Group{Name: "in", Attr: "name", Extra: []string{"label", "tags"}, Hint: groupGrammar.Group.Hint},
 	Commands: groupGrammar.Commands,
 }
 
-// A group carrying the grammar's extra attribute comes out as a Command of
-// its own ahead of its commands and may hold none; one without it still
-// needs a command. The extra attribute is opt-in: groupGrammar refuses it.
+// A group carrying any of the grammar's extra attributes comes out as a
+// Command of its own ahead of its commands, holds each one it carries by
+// name, and may hold no commands; one carrying none still needs a command.
+// The extra attributes are opt-in: groupGrammar refuses them.
 func TestGroupExtraAttribute(t *testing.T) {
-	cmds, problems := parse(extraGrammar, `<tr:in name="a" label="A &amp; B"><tr:note>x</tr:note></tr:in><tr:in name="b" label="B"/><tr:in name="c" label="C"> </tr:in><tr:in name="d"><tr:note>y</tr:note></tr:in>`)
+	cmds, problems := parse(extraGrammar, `<tr:in name="a" label="A &amp; B"><tr:note>x</tr:note></tr:in><tr:in name="b" label="B"/><tr:in name="c" label="C"> </tr:in><tr:in name="d"><tr:note>y</tr:note></tr:in><tr:in name="e" tags="x y" label="E"/><tr:in name="f" tags=""/>`)
 	if len(problems) > 0 {
 		t.Fatalf("problems: %q", problems)
 	}
-	if len(cmds) != 5 {
+	if len(cmds) != 7 {
 		t.Fatalf("commands = %+v", cmds)
 	}
 	for i, want := range []struct {
-		tag, scope, extra string
-		group, hasExtra   bool
-		commands          int
+		tag, scope string
+		extra      map[string]string
+		group      bool
+		commands   int
 	}{
-		{"tr:in", "a", "A & B", true, true, 1},
-		{"tr:note", "a", "A & B", false, true, 1},
-		{"tr:in", "b", "B", true, true, 0},
-		{"tr:in", "c", "C", true, true, 0},
-		{"tr:note", "d", "", false, false, 1},
+		{"tr:in", "a", map[string]string{"label": "A & B"}, true, 1},
+		{"tr:note", "a", map[string]string{"label": "A & B"}, false, 1},
+		{"tr:in", "b", map[string]string{"label": "B"}, true, 0},
+		{"tr:in", "c", map[string]string{"label": "C"}, true, 0},
+		{"tr:note", "d", nil, false, 1},
+		{"tr:in", "e", map[string]string{"label": "E", "tags": "x y"}, true, 0},
+		{"tr:in", "f", map[string]string{"tags": ""}, true, 0},
 	} {
 		c := cmds[i]
-		if c.Tag != want.tag || c.IsGroup() != want.group || c.Scope.Value != want.scope || c.Scope.Extra != want.extra || c.Scope.HasExtra != want.hasExtra || c.Scope.Commands != want.commands {
+		if c.Tag != want.tag || c.IsGroup() != want.group || c.Scope.Value != want.scope || !maps.Equal(c.Scope.Extra, want.extra) || c.Scope.HasExtra() != (want.extra != nil) || c.Scope.Commands != want.commands {
 			t.Errorf("command %d = %+v scope %+v", i, c, c.Scope)
 		}
+	}
+	if v, ok := cmds[5].Scope.ExtraOf("tags"); !ok || v != "x y" {
+		t.Errorf("ExtraOf(tags) = %q, %t", v, ok)
+	}
+	if _, ok := cmds[0].Scope.ExtraOf("tags"); ok {
+		t.Error("ExtraOf reports an attribute the group does not carry")
 	}
 	if cmds[0].Scope != cmds[1].Scope || cmds[0].Pos != 0 || cmds[1].Pos != 1 || cmds[4].Pos != 2 {
 		t.Fatalf("positions/scopes = %+v / %+v", cmds[0], cmds[1])
@@ -343,6 +354,10 @@ func TestGroupExtraAttribute(t *testing.T) {
 	_, problems = parse(extraGrammar, `<tr:in name="a"/>`)
 	if want := []string{`<tr:in> (line 1): holds no commands; write <tr:in name="..."><tr:note>...</tr:note></tr:in>`}; !slices.Equal(problems, want) {
 		t.Fatalf("empty unlabelled group: %q", problems)
+	}
+	_, problems = parse(extraGrammar, `<tr:in name="a" kind="k"/>`)
+	if want := []string{"<tr:in> (line 1): unknown attribute kind (known: name, label, tags)", `<tr:in> (line 1): holds no commands; write <tr:in name="..."><tr:note>...</tr:note></tr:in>`}; !slices.Equal(problems, want) {
+		t.Fatalf("unknown extra: %q", problems)
 	}
 	cmds, problems = parse(groupGrammar, `<tr:in name="a" label="A"><tr:note>x</tr:note></tr:in>`)
 	if want := []string{"<tr:in> (line 1): unknown attribute label (known: name)"}; !slices.Equal(problems, want) || len(cmds) != 1 || cmds[0].IsGroup() {

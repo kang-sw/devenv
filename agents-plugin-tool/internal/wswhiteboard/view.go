@@ -2,6 +2,7 @@ package wswhiteboard
 
 import (
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -193,6 +194,58 @@ type TopicView struct {
 	UpdatedClock string
 	// Fresh counts the items new since the previous embed (embed only).
 	Fresh int
+	// Tickets are the tickets the topic links, in the order written, each
+	// with its status as the host's resolver read it (ViewInput.TicketStatus).
+	Tickets []TicketView
+	// Live marks a topic with live work: at least one linked ticket that is
+	// still idea, todo, or ready and of a category that does work (feat,
+	// bug, refactor, chore). A linked research or epic ticket shows as a
+	// badge but never makes a topic live.
+	Live bool
+}
+
+// TicketView is one ticket a topic links, as its badge shows it.
+type TicketView struct {
+	// Stem is the ticket's stem; Short is the stem without its date
+	// prefix, the badge's text.
+	Stem, Short string
+	// Status is the status directory that holds the ticket: idea, todo,
+	// ready, done, or dropped; TicketUnknown when the resolver found none.
+	Status string
+}
+
+// TicketUnknown is the status of a linked ticket the host's resolver did not
+// find; its badge renders muted.
+const TicketUnknown = "unknown"
+
+// liveCategories are the ticket categories whose live tickets make a topic
+// live.
+var liveCategories = map[string]bool{"feat": true, "bug": true, "refactor": true, "chore": true}
+
+// ticketView resolves stem through status, a nil status resolving nothing.
+func ticketView(stem string, status func(stem string) (string, bool)) TicketView {
+	tv := TicketView{Stem: stem, Short: stem, Status: TicketUnknown}
+	if _, rest, ok := strings.Cut(stem, "-"); ok {
+		tv.Short = rest
+	}
+	if status != nil {
+		if s, ok := status(stem); ok {
+			tv.Status = s
+		}
+	}
+	return tv
+}
+
+// live reports whether t is live work: still open (idea, todo, or ready) and
+// of a category that does work. The category is the stem's second segment.
+func (t TicketView) live() bool {
+	switch t.Status {
+	case "idea", "todo", "ready":
+	default:
+		return false
+	}
+	category, _, _ := strings.Cut(t.Short, "-")
+	return liveCategories[category]
 }
 
 // DocOpen reports whether the topic's body renders open.
@@ -403,6 +456,11 @@ type ViewInput struct {
 	Closed *ClosedWindow
 	// Location is the time zone of UpdatedClock; nil is the local zone.
 	Location *time.Location
+	// TicketStatus resolves a linked ticket's stem to its status (idea,
+	// todo, ready, done, or dropped), false when the host finds no such
+	// ticket; nil resolves none, so every badge reads unknown. The host
+	// supplies it, so the board never reads a ticket tree itself.
+	TicketStatus func(stem string) (status string, ok bool)
 }
 
 // ClosedWindow selects capped closed topics by index in close order, the
@@ -490,6 +548,11 @@ func BuildView(state *State, in ViewInput) View {
 		block.DocStale = itemsChanged[doc.Name] > doc.Changed
 		block.DocNew = in.Layout == LayoutEmbed && doc.Body != "" && doc.Changed > state.LastEmbedSeq
 		block.Recap = doc.Recap
+		for _, stem := range doc.Tickets {
+			tv := ticketView(stem, in.TicketStatus)
+			block.Tickets = append(block.Tickets, tv)
+			block.Live = block.Live || tv.live()
+		}
 	}
 	stampUpdated(state, blocks, in.Location)
 	for _, block := range blocks {

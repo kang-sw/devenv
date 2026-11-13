@@ -280,11 +280,11 @@ function mk(spec, attrs, kids) {
   (kids || []).forEach(function (k) { e.appendChild(k); });
   return e;
 }
-// topic builds a topic section as the board serves it: open with its bar
-// time, or closed; fresh adds the update mark.
+// topic builds a topic section as the board serves it, its bar in its head:
+// open with its bar time, or closed; fresh adds the update mark.
 function topic(name, at, closed, fresh) {
   var bar = mk("div.tbar", {}, [mk("span.tlead", {}, [mk("span.tname")])].concat(closed ? [] : [mk("time.tago", { "data-at": at })]).concat(fresh ? [mk("span.chip.fresh")] : []).concat([mk("button.btn.mini.tnote-toggle")]));
-  var t = mk("section.topic" + (closed ? ".closed" : ""), { "data-topic": name }, [bar]);
+  var t = mk("section.topic" + (closed ? ".closed" : ""), { "data-topic": name }, [mk("div.tophead", {}, [bar])]);
   t.label = name + (closed ? "/c" : "") + (fresh ? "*" : "");
   return t;
 }
@@ -391,10 +391,10 @@ check("an updated pinned topic keeps its index, with the board's update mark", p
 check("its new bar carries the pressed pin", pinBtn(B2).getAttribute("aria-pressed"), "true");
 
 // A pinned topic updated through the frame graft keeps its pin pressed.
-var oldBar = A2.querySelector(".tbar"), A3 = topic("a", 2800, false, true);
+var oldHead = A2.querySelector(".tophead"), A3 = topic("a", 2800, false, true);
 swap([B2, A3, C, topic("x", 0, true), more(31), reply()], function (p) {
-  // The morph keeps the old section and gives it the new bar's content.
-  A2.removeChild(oldBar); A2.insertBefore(A3.querySelector(".tbar"), A2.firstChild);
+  // The morph keeps the old section and gives it the new head's content.
+  A2.removeChild(oldHead); A2.insertBefore(A3.querySelector(".tophead"), A2.firstChild);
   p.pins[p.pins.indexOf(A3)] = A2;
 });
 check("a pinned topic updated through the graft keeps its section and index", [pinsOf(), page.W.pinList().children[2] === A2], [["Ca", "b*", "a"], true]);

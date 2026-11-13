@@ -86,6 +86,9 @@
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
     });
+    q("button.ckpill", root).forEach(function (b) {
+      if (once(b)) b.addEventListener("click", function () { checkPill(b); });
+    });
     q("button[data-bulk]", root).forEach(function (chip) {
       if (once(chip)) chip.addEventListener("click", function () { bulkAnswer(chip); });
     });
@@ -96,6 +99,43 @@
       el.addEventListener("change", build);
     });
     inPageLinks(root);
+  }
+  // A topic head's check pill folds or unfolds the check list under the head
+  // at rest. While the head is stuck (rail.js marks it wb-stuck) it opens the
+  // list's rows in the popover under the head instead: the rows move there
+  // rather than being copied, so the page keeps one row per ID for the
+  // answer scripts, and the list keeps its height meanwhile, so the board
+  // under it does not move. They move back when the pill closes the popover
+  // or the head comes unstuck.
+  function pillParts(b) {
+    var head = b.closest(".tophead"), topic = head && head.parentNode;
+    return { head: head, pop: head && head.querySelector(".cpop"), list: topic && topic.querySelector(":scope > .checks") };
+  }
+  function popClose(b) {
+    var p = pillParts(b);
+    if (!p.pop || p.pop.hidden || !p.list) return;
+    while (p.pop.firstChild) p.list.appendChild(p.pop.firstChild);
+    p.list.style.minHeight = "";
+    p.pop.hidden = true;
+    b.setAttribute("aria-expanded", String(!p.list.hidden));
+  }
+  function checkPill(b) {
+    var p = pillParts(b);
+    if (!p.pop || !p.list) return;
+    if (!p.pop.hidden) return popClose(b);
+    if (!p.head.classList.contains("wb-stuck")) {
+      p.list.hidden = !p.list.hidden;
+      b.setAttribute("aria-expanded", String(!p.list.hidden));
+      return;
+    }
+    p.list.style.minHeight = p.list.offsetHeight + "px";
+    while (p.list.firstChild) p.pop.appendChild(p.list.firstChild);
+    p.pop.hidden = false;
+    b.setAttribute("aria-expanded", "true");
+    if (!p.head.wbUnstick && window.MutationObserver) {
+      p.head.wbUnstick = new MutationObserver(function () { if (!p.head.classList.contains("wb-stuck")) popClose(b); });
+      p.head.wbUnstick.observe(p.head, { attributes: true, attributeFilter: ["class"] });
+    }
   }
   // A topic bar's count chip, where it is a button (the dashboard board),
   // answers every open item of its topic that it counts, as if each control

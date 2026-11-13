@@ -2,6 +2,8 @@ package wswhiteboard
 
 import (
 	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsxmlcmd"
 )
@@ -79,11 +81,13 @@ func (s *State) nameTaken(name, self string) bool {
 // a stem. A known stem takes the label (a rename); a stemless topic keyed
 // by the name takes it as its stem (adoption in place); an unknown stem
 // adopts the stemless topic keyed by the label, moving everything keyed by
-// it to the stem, or else starts a new stemmed topic, which an empty group
-// cannot do since a topic with nothing in it does not persist.
+// it to the stem, or else starts a new stemmed topic, which a group with no
+// command and no ticket cannot do since a topic with nothing in it does not
+// persist.
 func applyLabel(p *problems, work *State, cmd command) string {
 	scope := cmd.Scope
-	name, label := scope.Value, scope.Extra
+	name := scope.Value
+	label, _ := scope.ExtraOf("label")
 	at := cmd.Label() + " label"
 	labelOK := wsxmlcmd.NonEmpty(p, at, label)
 	if name == "" || !labelOK {
@@ -117,8 +121,8 @@ func applyLabel(p *problems, work *State, cmd command) string {
 		if taken(name) {
 			return ""
 		}
-		if scope.Commands == 0 {
-			p.Add("%s: holds no commands, and %q names no topic to rename or adopt; a new topic needs a command", cmd.Label(), name)
+		if tickets, _ := scope.ExtraOf("tickets"); scope.Commands == 0 && strings.TrimSpace(tickets) == "" {
+			p.Add("%s: holds no commands, and %q names no topic to rename or adopt; a new topic needs a command or tickets", cmd.Label(), name)
 			return ""
 		}
 	}
@@ -165,5 +169,40 @@ func (s *State) pruneLabels() {
 	}
 	if len(s.Labels) == 0 {
 		s.Labels = nil
+	}
+}
+
+// ticketStemPattern is what a linked ticket's stem looks like: a six-digit
+// date, then its category and name (YYMMDD-category-name).
+var ticketStemPattern = regexp.MustCompile(`^\d{6}-[\w-]+$`)
+
+// applyTickets applies a wb:topic group's tickets attribute, when it carries
+// one, to the topic key names: a space-separated list of ticket stems that
+// replaces the topic's list whole, "" clearing it; a repeated stem counts
+// once. Like a label, the list is metadata: setting or clearing it neither
+// moves the topic's recency nor reopens a closed topic. A list starts a
+// topic of its own, as a body or a recap does.
+func applyTickets(p *problems, work *State, cmd command, key string) {
+	raw, ok := cmd.Scope.ExtraOf("tickets")
+	if !ok {
+		return
+	}
+	var stems []string
+	for _, stem := range strings.Fields(raw) {
+		if !ticketStemPattern.MatchString(stem) {
+			p.Add("%s tickets: %q is not a ticket stem (YYMMDD-category-name)", cmd.Label(), stem)
+			continue
+		}
+		if !slices.Contains(stems, stem) {
+			stems = append(stems, stem)
+		}
+	}
+	if len(stems) > 0 {
+		work.topicDoc(key).Tickets = stems
+		return
+	}
+	if i := work.topicDocIndex(key); i >= 0 {
+		work.Topics[i].Tickets = nil
+		work.dropTopicDoc(key)
 	}
 }
