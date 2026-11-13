@@ -417,6 +417,84 @@ Verification:
     both page kinds, and a topic that a swap inserts is watched from that
     swap on.
 
+### Result (0b58bed9a) - 2026-11-14
+
+Landed (14bb9a454, 7bb5b42f8, 20a325460, 0b58bed9a):
+- `stream.js` `viewKit(win)` puts `watch` / `unwatch` / `sweep` / `seen` /
+  `keep` / `keeping` on `window.wbHistory` under the decision 8 contract.
+  `seen(node, margin?)` takes an optional margin (additive): the last report
+  of that margin's observer, else the latest of any. Observers use
+  `threshold: [0]`, so reports come on enter and leave only.
+- Nearest scroller = the first ancestor with `overflow-y` auto/scroll/overlay
+  whose content overflows it, else `document.scrollingElement`. That gives
+  `#bcol` on adapter pages, `#bpins` in the pinned column, and the document
+  otherwise, without naming them in the shared helper. Every session sets
+  inline `overflow-anchor: none` on its scroller (the root element for the
+  document) and restores it at the end. CSS adds it to `.dgrid.live > .bcol`
+  and `.bpcol > .bpins` only, so a non-scrolling board column keeps native
+  anchoring for the document.
+- `dashboard.js`:
+  - `boardKeep` starts the session before the morph on the topmost topic
+    or card in view.
+  - `boardKeepSettle` picks the anchor after the morph with `boardAnchor`
+    (a held entry first, else the first one that is not moving). Moving
+    means in `ins`, removed, or re-parented. A different pick re-anchors
+    through `keep(node, {offset})` at its offset from before the morph.
+    When nothing in view stays, the session ends.
+  - `restoreScroll` skips the scroller that `wbHistory.keeping` owns.
+  - No compensation runs while a card is maximized or the board column is
+    hidden.
+- Two fixes found by the harness:
+  - `slideBoard(el, before, from)` slides in screen terms while a session
+    owns the scroll. Before, held topics still slid by the size of the
+    compensation.
+  - Frames a swap brings are marked `wbKeep`. Their first height change runs
+    through the running board session, or a new `boardKeep` when the
+    session has already ended. The 500 ms quiet window had ended before late
+    frame reports arrived.
+- Board topic sections are watched with no callbacks at load, on morph
+  insert, on a fetched closed page, and on cards.js adopt, and swept after
+  each morph. Phase 2 adds the consumers.
+- `pageHidden()` replaces `doc.hidden` in the `hiddenRegions` feed and in
+  `showRegions`. No iframe-shell hidden message exists on this branch, so it
+  reads `doc.hidden` alone.
+- `scripts/board-headless.mjs` is committed with these scenarios:
+  - `keep` and `observer`, each detecting the page kind from `#tabbar`.
+  - `serve`, which builds ws-mcp into a temp dir, runs an isolated
+    `ws-mcp dashboard --port 0` with `WS_CACHE_HOME` and dev assets, seeds
+    an adapter session and a board-only session, and prints both URLs. This
+    avoids replacing the shared daemon; the header also names
+    `scripts/dev.py rerun daemon`.
+  - Board updates are injected client-side through the page's captured
+    stream socket, as a faithful reorder of the last board region. A late
+    height is posted from inside the frame.
+
+Verification:
+- `go test ./internal/wsdashboard/ ./internal/wswhiteboard/` passes. The new
+  node cases are `TestViewKitUnderNode` (nearest scroller, layout-term
+  measure, 500 ms quiet, 5 s cap, user scroll, two overlapping keeps
+  re-anchoring, the document scroller, watch bookkeeping, sweep, per-margin
+  observers), `TestBoardKeepUnderNode` (anchor pick, settle, watchBoard
+  once, restoreScroll skip), `TestBoardKeepWiring`, and the screen-term case
+  in `TestBoardTopicMotion`.
+- `node scripts/board-headless.mjs keep|observer --url <page>` passes on the
+  adapter page (`#bcol`) and on the board-only page (document).
+  - The worst |dy| of the topics in view is 0.45 px through the rise from
+    above, the rise from below, and the swapped-in frame growing 300 px 1 s
+    later.
+  - A user wheel scroll ends the session, and no script writes follow.
+  - `onOut` fires once, and an inserted topic is watched.
+  - Chromium only; WebKit is not run.
+- Lite review: no Critical or Important findings. Two Minors are fixed
+  (0b58bed9a). The third, missing node coverage for the layout reads in
+  `boardView`/`layoutY` and the clamp branch of `onScroll`, is left to the
+  harness.
+
+Forward (261113-feat-ws-dashboard-iframe-shell): the shell's hidden/low-rate
+message for a session frame should set the state that `pageHidden()`
+(dashboard.js, beside `hiddenRegions`) reads. Its "shown" message should run
+`showRegions()` as `visibilitychange` does.
+
 ### Phase 2: rise hold, release, batching, guards
 
 Hold map + `order()` override (decisions 1-3, 5). Release (a) consumes the

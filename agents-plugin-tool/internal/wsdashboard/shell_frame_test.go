@@ -8,7 +8,7 @@ import (
 
 // TestHiddenFrameHoldsItsUpdatesUntilShown pins a framed page's side of the
 // shell's visibility message (dashboard.js shFrameInit, connect,
-// showRegions, tickTimes): a frame the shell hides gets no visibilitychange,
+// pageHidden, showRegions, tickTimes): a frame the shell hides gets no visibilitychange,
 // so the shell tells it (shown); hidden, it keeps only each region's newest
 // update and applies none, skips the clock, and defers the tracker reload,
 // as a hidden tab does; shown, it applies the held updates once each, reads
@@ -27,6 +27,7 @@ func TestHiddenFrameHoldsItsUpdatesUntilShown(t *testing.T) {
 	open := block("openStream", `(?s)\n  function openStream\(path, on\) \{.*?\n  \}\n`)
 	connect := block("connected ... connect", `(?s)\n  var sseOn = true;\n.*?\n  // showRegions applies`)
 	show := block("showRegions", `(?s)\n  function showRegions\(\) \{.*?\n  \}\n`)
+	hidden := block("pageHidden", `\n  function pageHidden\(\) \{[^\n]*\}\n`)
 	tick := block("tickTimes", `(?s)\n  function tickTimes\(\) \{.*?\n  \}\n`)
 	frame := block("shFrameInit", `(?s)\n  function shFrameInit\(\) \{.*?\n  \}\n  // shShellInit`)
 	post := block("shPost", `(?s)\n  function shPost\(kind, m\) \{.*?\n  \}\n`)
@@ -69,7 +70,7 @@ function fmtTime() { times++; }
 function pace() {}
 Date.now = function () { return 0; };
 q = function (sel) { return /time\[data-ms\]/.test(sel) ? [{}] : sel === "#sse" ? [indicator] : []; };
-`+mustAsset(t, "shell.js")+open+connect+show+tick+post+frame+`
+`+mustAsset(t, "shell.js")+hidden+open+connect+show+tick+post+frame+`
 connect();
 shFrameInit();
 var s = sockets[0];

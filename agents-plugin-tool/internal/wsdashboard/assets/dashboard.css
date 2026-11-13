@@ -760,7 +760,8 @@ body:has(> .tfix) .r-board .reply { margin-right: 44px; }
 .dgrid.live > .splitter { grid-area: split; }
 .dgrid.live > .convo { grid-area: convo; overflow: auto; }
 .dgrid.live > .composer { grid-area: composer; margin-top: 10px; }
-.dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; padding: 2px 4px 0 2px; }
+/* A scrolling board column and the pinned column (.bpins) take no native scroll anchoring: a board swap compensates them itself (wbHistory.keep). */
+.dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
 .dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
 /* The conversation panel's header (chead) carries its own tabs (ctabs):
    "Conversation | Files". Under the Files tab the Files pane takes the
@@ -1493,7 +1494,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .bpins:empty { display: none; }
 .r-board > .bpins { margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px dashed var(--wb-line); }
 .r-board > .bpins::before { content: attr(data-label); display: block; padding: 0 2px 6px; font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); }
-.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 10px 4px 40px 2px; }
+.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; overflow-anchor: none; padding: 10px 4px 40px 2px; }
 /* The pinned column has no rail (cards.js), so its topics' bars and cards' headers stick to the top of this scroller by CSS alone, as the board's do. The pin list above the board sits in the rail's host (.wb-rail) and is railed with the board. */
 .bpcol > .bpins .topic { overflow: hidden; overflow: clip; }
 .bpcol > .bpins .topic > .tophead { position: sticky; top: 0; z-index: 2; }
