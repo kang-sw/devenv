@@ -1,5 +1,6 @@
 ---
 title: "Pi wait MCP call times out before its requested wait bound"
+completed: 2026-11-13
 ---
 
 # Pi wait MCP call times out before its requested wait bound
@@ -16,3 +17,8 @@ blocking interval; this was not investigated during the implementation.
 
 Make the advertised wait bound reachable, or return the child's running
 status within the transport deadline without presenting an MCP failure.
+
+
+## Resolution (2026-11-13)
+
+Fixed by 3eb38e6ad (piMCPTimeout ~1860s, agents-plugin-tool/.../pi.go:131). Live check 2026-11-13 (decision 474): pi.wait with timeout_s 300 against a Pi worker running `sleep 100` blocked from 13:28:28Z until the turn ended (~100s, past the former 60s cut-off) and returned the turn's final message with no MCP client timeout. Duplicate of 261113-bug-pi-wait-mcp-client-timeout-before-requested-deadline, closed together.
