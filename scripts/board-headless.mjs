@@ -3,7 +3,7 @@
 // dashboard board's motion and scroll behaviour. Not shipped with any plugin
 // package.
 //
-//     node scripts/board-headless.mjs serve [--topics N] [--keep-tmp]
+//     node scripts/board-headless.mjs serve [--topics N] [--history-entries N] [--keep-tmp]
 //     node scripts/board-headless.mjs <scenario> --url <session page> [--width W] [--height H] [--headed] [--trace]
 //
 // Scenarios run in headless Chromium, 1440x900 by default. Each checks every
@@ -43,9 +43,8 @@
 //     board several viewports tall, prints both page URLs, and runs until
 //     killed (Ctrl-C), then stops the daemon and removes the temp directory.
 //     It never touches a daemon already running on this machine.
-//   - `python scripts/dev.py rerun daemon` replaces this machine's shared dev
-//     daemon with one built from this tree; any session page it serves
-//     works. It restarts the daemon other sessions use.
+//   - Any existing daemon serving this tree's assets also works. Never restart
+//     or replace a shared daemon merely to run this harness; prefer `serve`.
 //
 // Board updates are injected client-side, so a scenario never writes to the
 // server: an init script wraps window.WebSocket to capture the page's stream
@@ -62,8 +61,25 @@
 // beside the old one) and exactly the added ones as new; a board that
 // differs from what the page last saw would show up as extra changes.
 //
-// The scenarios need a dashboard session page (/s/<reply id>): the
-// standalone whiteboard file page has no stream to inject into.
+//   history   640px history clips, bounded paging, late-height anchoring,
+//             deep links and out-of-view collapse on dashboard AND standalone
+//             full file pages. Dashboard-only: expanded swaps, overlapping keep
+//             sessions and the pinned column (use --width 1800).
+//   history-cards  Card/paging probes without navigation/control/live checks.
+//   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
+//   history-regressions  Native RO delivery for renderer-produced closed log
+//             pages, collapse cancellation, and real Tab into clipped summaries.
+//
+// History samples retain rAF geometry as diagnostic evidence and assert <=1px
+// on rAF -> zero-delay-task (post-paint) geometry, after ResizeObserver runs.
+// Navigation height reports arrive <=300ms apart while the existing keep is
+// OPEN. A separate post-end report may move content but must not re-arm it.
+//
+// `serve --history-entries 180` seeds long panel histories and prints the true
+// standalone file URLs too. `history --artifacts <dir>` saves measurements,
+// per-frame samples and before/after PNGs. Standalone full pages have unframed
+// entry bodies, so their late-height probe grows that real body, not an invented
+// dashboard iframe. Swaps/keep/observer still require a dashboard stream.
 //
 // Playwright is not a dependency of this repository. It is resolved from
 // the npx cache (~/.npm/_npx/*/node_modules/playwright, newest version
@@ -178,7 +194,7 @@ function topicCommands(i) {
 
 // seedSession makes a project with one ws session and a board of n topics,
 // and returns its reply id and canonical root.
-function seedSession(tmp, bin, label, n) {
+function seedSession(tmp, bin, label, n, historyEntries) {
   const proj = path.join(tmp, `proj-${label}`);
   fs.mkdirSync(path.join(proj, "ai-docs"), { recursive: true });
   fs.writeFileSync(path.join(proj, "ai-docs", "_index.md"), `# ${label}\n`);
@@ -197,7 +213,27 @@ function seedSession(tmp, bin, label, n) {
     if (m) rid = m[1];
   }
   if (!rid) throw new Error(`no whiteboard reply id for the ${label} session`);
-  return { rid, root: fer.root, key: fer.session_key };
+  if (historyEntries) {
+    // Real renderer output, including its 50-entry templates and disclosure
+    // keys. Distinct panels avoid turning the long history into one log fold.
+    const entries = Array.from({ length: historyEntries }, (_, i) =>
+      `<wb:panel recap="History panel ${i + 1}"><p>History payload ${i + 1}: delayed content height fixture.</p></wb:panel>`).join("");
+    run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key,
+      commands: `<wb:topic name="HISTORY">${entries}</wb:topic>` })], { cwd: proj, env });
+    // Renderer-produced closed log runs exercise size-neutral page joins:
+    // newest 47 folded rows + three visible tail rows; older pages fold whole.
+    for (const [name, count] of [['LOGCHAIN', 200], ['LOGCANCEL', 600]]) {
+      const logs = Array.from({ length: count }, (_, i) => `<wb:log>Folded history line ${i + 1}</wb:log>`).join('');
+      run(bin, ['call', 'whiteboard.update', JSON.stringify({
+        session_key: fer.session_key, commands: `<wb:topic name="${name}">${logs}</wb:topic>`
+      })], { cwd: proj, env });
+    }
+    // Keep topics on both sides, so collapse compensation cannot be masked
+    // by the document's scroll-range clamp.
+    run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: topicCommands(n + 1) })], { cwd: proj, env });
+  }
+  return { rid, root: fer.root, key: fer.session_key,
+    standalone: pathToFileURL(path.join(fer.root, "ai-docs", "whiteboards", rid, "index.html")).href };
 }
 
 async function waitFor(fn, ms, what) {
@@ -234,10 +270,10 @@ async function serve(args) {
   try {
     const bin = path.join(tmp, "ws-mcp");
     log(`building ws-mcp from ${TOOL_DIR} ...`);
-    run("go", ["build", "-o", bin, "./cmd/ws-mcp"], { cwd: TOOL_DIR });
+    run("go", ["build", "-o", bin, "./cmd/ws-mcp"], { cwd: TOOL_DIR, env: childEnv(tmp) });
     log(`seeding two sessions (${n} topics each) ...`);
-    const adapter = seedSession(tmp, bin, "adapter", n);
-    const board = seedSession(tmp, bin, "board", n);
+    const adapter = seedSession(tmp, bin, "adapter", n, +(args["history-entries"] || 0));
+    const board = seedSession(tmp, bin, "board", n, +(args["history-entries"] || 0));
     const dashDir = path.join(tmp, "cache", "dashboard");
     const out = fs.openSync(path.join(tmp, "daemon.log"), "a");
     daemon = spawn(bin, ["dashboard", "--port", "0"], {
@@ -282,6 +318,7 @@ async function serve(args) {
     log(`daemon pid ${daemon.pid} on ${base} (temp ${tmp})`);
     log(`adapter page: ${base}/s/${adapter.rid}`);
     log(`board page:   ${base}/s/${board.rid}`);
+    log(`standalone:   ${board.standalone}`);
     log("serving; Ctrl-C stops the daemon and removes the temp directory");
   } catch (e) {
     console.error(`board-headless serve: ${e.message}`);
@@ -302,7 +339,39 @@ const INIT = () => {
   // same-origin page then reuses, so the frame's URL is not checked here.
   // The body frames are grandchildren and are skipped.
   if (window.top !== window && window.parent !== window.top) return;
-  const bh = (window.__bh = { sockets: [], board: null, writes: [] });
+  const bh = (window.__bh = { sockets: [], board: null, writes: [], resizeDeliveries: [], historyLoads: [], observerErrors: [], observerErrorDetails: [] });
+  // Observe actual native deliveries; never invoke a callback or re-observe
+  // on the harness's behalf. Filter to the history's own observer, excluding
+  // the shared keep observer which also watches history-live.
+  window.addEventListener('error', (e) => {
+    if (!/ResizeObserver.*loop/i.test(e.message || '')) return;
+    bh.observerErrors.push(e.message);
+    bh.observerErrorDetails.push({ message: e.message, t: performance.now(), phase: bh.regressionPhase || 'startup',
+      lastHistoryDelivery: bh.resizeDeliveries.at(-1)?.id || null });
+  });
+  const NativeResize = window.ResizeObserver;
+  window.ResizeObserver = class extends NativeResize {
+    constructor(callback) {
+      super((entries, observer) => {
+        const targets = entries.filter((e) => e.target.matches?.('.history-live') &&
+          e.target.closest('.wb-history')?._wbHistoryObserver === observer);
+        const snapshot = (live) => {
+          const h = live.closest('.wb-history');
+          return { name: h.dataset.history, pages: h.querySelectorAll('template[data-history-page]').length,
+            rows: live.querySelectorAll('.wb-entry').length, height: live.scrollHeight, steps: h._wbHistorySteps };
+        };
+        const record = targets.length ? { id: bh.resizeDeliveries.length + 1, t: performance.now(),
+          before: targets.map((e) => snapshot(e.target)) } : null;
+        const previous = bh.activeResize;
+        if (record) { bh.resizeDeliveries.push(record); bh.activeResize = record.id; }
+        try { callback.call(observer, entries, observer); }
+        finally {
+          if (record) record.after = targets.map((e) => snapshot(e.target));
+          bh.activeResize = previous;
+        }
+      });
+    }
+  };
   const Native = window.WebSocket;
   class Captured extends Native {
     constructor(...a) {
@@ -328,18 +397,29 @@ const INIT = () => {
 // IN_PAGE installs the in-page half of the shared helpers on window.__bh.
 const IN_PAGE = () => {
   const bh = window.__bh;
+  // The shell can reuse its child's initial about:blank window with a NEW
+  // Document. Bind document events here, not in that initial document's INIT.
+  if (bh.historyLoadDocument !== document) {
+    bh.historyLoadDocument = document;
+    document.addEventListener('wbhistoryload', (e) => {
+      const h = e.detail?.root;
+      if (h?.matches('.wb-history')) bh.historyLoads.push({ t: performance.now(), name: h.dataset.history,
+        delivery: bh.activeResize || null, pages: h.querySelectorAll('template[data-history-page]').length,
+        rows: h.querySelectorAll('.history-live .wb-entry').length });
+    });
+  }
   const q = (sel, root) => Array.from((root || document).querySelectorAll(sel));
-  bh.board_ = () => document.getElementById("r-board");
-  bh.kind = () => (document.getElementById("tabbar") ? "adapter" : "board");
+  bh.board_ = () => document.getElementById("r-board") || document.querySelector("body.full .grid > main");
+  bh.kind = () => (document.body.classList.contains("full") ? "standalone" : document.getElementById("tabbar") ? "adapter" : "board");
   bh.scroller = () => {
-    const c = document.getElementById("bcol");
+    const c = bh.focus && bh.focus.closest("#bpins") || document.getElementById("bcol");
     const oy = c && getComputedStyle(c).overflowY;
     return c && (oy === "auto" || oy === "scroll") && c.scrollHeight > c.clientHeight ? c : document.scrollingElement;
   };
   bh.viewTop = (s) => (s === document.scrollingElement ? 0 : Math.max(0, s.getBoundingClientRect().top + s.clientTop));
   bh.viewBottom = (s) => (s === document.scrollingElement ? innerHeight : Math.min(innerHeight, s.getBoundingClientRect().top + s.clientTop + s.clientHeight));
   bh.topics = () => q("section.topic[data-topic]", bh.board_()).filter((n) => !n.classList.contains("closed"));
-  bh.section = (name) => bh.topics().find((n) => n.getAttribute("data-topic") === name) || null;
+  bh.section = (name) => q("section.topic[data-topic]").find((n) => n.getAttribute("data-topic") === name) || null;
   // Topics by where they stand against the scroller's viewport.
   bh.layout = () => {
     const s = bh.scroller(), top = bh.viewTop(s), bottom = bh.viewBottom(s);
@@ -432,19 +512,30 @@ const IN_PAGE = () => {
   // keep session runs.
   bh.startSampler = (names) => {
     const s = bh.scroller(), t0 = performance.now(), samples = [];
-    bh.sampling = { samples, on: true, t0 };
-    const take = () => {
+    const state = bh.sampling = { samples, on: true, t0 };
+    const take = (phase) => {
       const y = {}, ty = {};
       for (const name of names) {
-        const n = bh.section(name);
+        const n = bh.section(name) || document.getElementById(name);
         y[name] = n ? n.getBoundingClientRect().top : null;
         const m = n && /^matrix(3d)?\((.*)\)$/.exec(getComputedStyle(n).transform || "");
         ty[name] = m ? +m[2].split(",")[m[1] ? 13 : 5] : 0;
       }
-      samples.push({ t: performance.now() - t0, st: s.scrollTop, keep: !!bh.keeping(), y, ty });
+      const h = bh.history && bh.history();
+      samples.push({ t: performance.now() - t0, phase, st: s.scrollTop, keep: !!bh.keeping(), y, ty,
+        history: h ? { steps: h._wbHistorySteps, target: h._wbHistoryTarget?.id || null } : undefined });
     };
-    take();
-    const tick = () => { if (!bh.sampling.on) return; take(); requestAnimationFrame(tick); };
+    take('baseline');
+    const postPaint = !!bh.samplePostPaint;
+    const tick = () => {
+      if (!state.on) return;
+      take('raf');
+      // rAF precedes ResizeObserver delivery. A task queued here runs after
+      // that rendering update, including RO's reveal/keep corrections. Keep
+      // both phases as evidence, but history asserts the post-paint geometry.
+      if (postPaint) setTimeout(() => { if (state.on) take('post-paint'); }, 0);
+      requestAnimationFrame(tick);
+    };
     requestAnimationFrame(tick);
   };
   bh.mark = (label) => { if (bh.sampling && bh.sampling.on) bh.sampling.samples.push({ t: performance.now() - bh.sampling.t0, mark: label }); };
@@ -455,7 +546,7 @@ const IN_PAGE = () => {
 const BROWSERS = [];
 
 // openBoard opens url in a fresh headless Chromium, waits for the board, its
-// stream socket and its body frames' first heights, shows the board column
+// stream socket (dashboard only) and its body frames' first heights, shows the board column
 // on an adapter page, and returns { browser, page, tab, kind }. url may be the
 // iframe shell (/s/<rid>): page is then the session page it frames (a
 // Playwright Frame, which fills the window, so its coordinates are the
@@ -481,9 +572,9 @@ async function openBoard(ctx) {
     await page.waitForLoadState("load");
   }
   await page.evaluate(IN_PAGE);
-  await page.waitForFunction(() => document.querySelectorAll("#r-board section.topic[data-topic]").length > 0, null, { timeout: 10000 });
-  await page.waitForFunction(() => window.__bh.sockets.some((s) => s.readyState === 1 && typeof s.onmessage === "function"), null, { timeout: 10000 });
+  await page.waitForFunction(() => window.__bh.board_()?.querySelector("section.topic[data-topic]"), null, { timeout: 10000 });
   const kind = await page.evaluate(() => window.__bh.kind());
+  if (kind !== "standalone") await page.waitForFunction(() => window.__bh.sockets.some((s) => s.readyState === 1 && typeof s.onmessage === "function"), null, { timeout: 10000 });
   if (kind === "adapter") {
     const shown = await page.evaluate(() => { const c = document.getElementById("bcol"); return !!c && c.getClientRects().length > 0; });
     if (!shown) await page.click('#tabbar [data-tab="board"]');
@@ -522,12 +613,12 @@ async function scrollToMiddle(page) {
 // cross-origin frame (a sandboxed srcdoc body frame is one), so its
 // ResizeObserver does not run until the frame scrolls into view. Resolves
 // once the page sized the frame.
-async function growFrame(page, name, px) {
+async function growFrame(page, name, px, selector = `#r-board section.topic[data-topic="${name}"] iframe.doc-frame`) {
   // A swapped-in frame loads beside the old one (.doc-frame-next) and
   // takes its place once drawn: grow the one shown.
   await page.waitForFunction((n) => !document.querySelector(`#r-board section.topic[data-topic="${n}"] iframe.doc-frame-next`), name, { timeout: 5000 })
     .catch(() => { throw new Failure(`topic ${name}'s next body frame never took its place`); });
-  const handle = await page.$(`#r-board section.topic[data-topic="${name}"] iframe.doc-frame`);
+  const handle = await page.$(selector);
   assert(handle, `topic ${name} has no body frame`);
   const before = await handle.evaluate((f) => f.getBoundingClientRect().height);
   const frame = await handle.contentFrame();
@@ -604,7 +695,11 @@ async function scenarioKeep(ctx) {
   // first swap brought for the topic updated above: a swap's frames report
   // their heights late (load, reveal), which is what the compensation has
   // to hold through after the swap's own motion.
-  const upAbove = above[1].name, lateGrow = upAbove, upBelow = below[below.length - 1].name;
+  // History seeds also contain log-only topics. Late body-height probes
+  // require a real frame, not simply the second topic in board order.
+  const framedAbove = await page.evaluate((names) => names.filter((n) => window.__bh.section(n).querySelector('.tdoc iframe.doc-frame')), above.map((t) => t.name));
+  assert(framedAbove.length >= 2, 'need two framed topics above for the late-height probe');
+  const upAbove = framedAbove[1], lateGrow = upAbove, upBelow = below[below.length - 1].name;
   const tracked = inView.map((t) => t.name);
   log(`in view: ${tracked.join(", ")}; update above: ${upAbove}; update below: ${upBelow}; late frame: ${lateGrow}`);
 
@@ -639,7 +734,9 @@ async function scenarioKeep(ctx) {
   const lay2 = await page.evaluate(() => window.__bh.layout());
   const above2 = lay2.filter((t) => t.where === "above");
   assert(above2.length >= 3, "too few topics above the viewport for the user-scroll part");
-  const up2 = above2[1].name, grow2 = above2[above2.length - 1].name;
+  const framedAbove2 = await page.evaluate((names) => names.filter((n) => window.__bh.section(n).querySelector('.tdoc iframe.doc-frame')), above2.map((t) => t.name));
+  assert(framedAbove2.length >= 1, 'need a framed topic above for the post-user-scroll height probe');
+  const up2 = above2[1].name, grow2 = framedAbove2.at(-1);
   assertChanged(await page.evaluate((n) => window.__bh.update([n]), up2), [up2]);
   const running = await page.evaluate(() => !!window.__bh.keeping());
   assert(running, "no keep session runs right after a board swap");
@@ -689,9 +786,12 @@ async function scenarioObserver(ctx) {
   await page.evaluate((name) => {
     const bh = window.__bh;
     bh.outs = 0;
-    bh.obsHandle = window.wbHistory.watch(bh.section(name), { onOut: () => { bh.outs++; } });
+    bh.obsChanges = 0;
+    bh.obsHandle = window.wbHistory.watch(bh.section(name), { onChange: () => { bh.obsChanges++; }, onOut: () => { bh.outs++; } });
   }, target);
-  await page.waitForFunction((name) => { const r = window.wbHistory.seen(window.__bh.section(name)); return r && r.visible; }, target, { timeout: 2000 })
+  // seen() can still contain the dashboard's earlier report. Wait for OUR
+  // subscription's first delivery before scrolling, or onOut is unarmed.
+  await page.waitForFunction((name) => { const bh = window.__bh, r = window.wbHistory.seen(bh.section(name)); return bh.obsChanges > 0 && r && r.visible; }, target, { timeout: 2000 })
     .catch(() => { throw new Failure(`no in-view report for ${target} after watch()`); });
   // Scroll it fully out of view (past its bottom), then further.
   await page.evaluate((name) => {
@@ -733,9 +833,595 @@ async function scenarioObserver(ctx) {
   log(`ok: the inserted ${fresh} section is watched (wbWatch; first report ${first ? "in view" : "out of view"}; in view once scrolled in)`);
 }
 
+// History probes use the real host's wbHistory, event delegation, DOM and
+// styles. Only payload height arrival and stream updates are synthetic.
+const HISTORY_PAGE = () => {
+  const bh = window.__bh;
+  bh.samplePostPaint = true;
+  bh.history = (name = 'HISTORY') => Array.from(document.querySelectorAll('.wb-history')).find((h) => h.dataset.history === name);
+  bh.historyState = (name = 'HISTORY') => {
+    const h = bh.history(name), live = h.querySelector('.history-live'), clip = h.querySelector('.history-clip');
+    const r = clip.getBoundingClientRect();
+    return { steps: h._wbHistorySteps, pages: h.querySelectorAll('template[data-history-page]').length,
+      rows: live.querySelectorAll('.wb-entry').length, live: live.scrollHeight, height: r.height,
+      top: r.top, bottom: r.bottom, scrollTop: clip.scrollTop,
+      maxHeight: getComputedStyle(clip).maxHeight, overflow: getComputedStyle(h).overflowY,
+      button: !h.querySelector('.history-older').hidden,
+      latest: Array.from(live.children).filter((n) => n.matches('.wb-entry')).at(-1)?.id,
+      folds: Array.from(live.querySelectorAll('details[data-key]')).map((d) => [d.dataset.key, d.open]) };
+  };
+  bh.positionHistory = () => {
+    const s = bh.scroller(), r = bh.history().querySelector('.history-clip').getBoundingClientRect();
+    s.scrollTop += r.top - bh.viewTop(s) - 100;
+  };
+};
+
+async function growEntry(page, id, px) {
+  await page.evaluate(([id, px]) => window.__bh.mark(`late payload height (${id} +${px}px)`), [id, px]);
+  const selector = `#${id} .entry-body iframe.doc-frame`;
+  const framed = await page.locator(selector).count();
+  if (framed) return growFrame(page, id, px, selector);
+  // The true standalone renderer deliberately has no doc-frame iframes.
+  // Grow its actual inline payload, giving ResizeObserver the same late
+  // layout change; do not substitute dashboard markup for the full file.
+  const delta = await page.evaluate(([id, px]) => {
+    const body = document.querySelector(`#${id} .entry-body`);
+    if (!body) throw new Error(`no entry body for ${id}`);
+    const before = body.getBoundingClientRect().height;
+    // Padding simulates payload growth without changing paragraph margin
+    // collapse (an appended sibling would add a second, unrelated delta).
+    body.style.paddingBottom = (parseFloat(getComputedStyle(body).paddingBottom) + px) + 'px';
+    return body.getBoundingClientRect().height - before;
+  }, [id, px]);
+  assert(Math.abs(delta - px) <= 1, `${id}'s inline payload grew ${delta}px, expected ${px}px`);
+}
+
+async function scenarioHistory(ctx) {
+  const opened = await openBoard(ctx), { page, tab, kind } = opened;
+  const dir = path.resolve(ctx.args.artifacts || path.join(os.tmpdir(), `board-history-${Date.now()}`));
+  fs.mkdirSync(dir, { recursive: true });
+  const report = { url: ctx.args.url, kind, viewport: [ctx.width, ctx.height], measurements: [], omissions: [
+    'Size-neutral log-chain and keyboard regressions run separately in history-regressions.',
+    'Standalone has no stream, swap, pinned column or doc-frame iframes; its real inline payload layout is used for late heights.'
+  ] };
+  if (kind !== 'standalone') report.omissions.pop();
+  const measure = (label, data) => { report.measurements.push({ label, ...data }); log(`${label}: ${JSON.stringify(data)}`); };
+  const stable = (label, samples, ids) => {
+    fs.writeFileSync(path.join(dir, `${label}.json`), JSON.stringify(samples, null, 2));
+    const painted = samples.filter((s) => s.mark || s.phase !== 'raf');
+    const worstOf = (list) => Math.max(0, ...segments(list, ids).flatMap((s) => ids.map((id) => s.worst[id]?.d || 0)));
+    const worst = worstOf(painted), rafWorst = worstOf(samples.filter((s) => s.mark || s.phase !== 'post-paint'));
+    assert(painted.some((s) => s.phase === 'post-paint'), `${label}: no post-paint samples`);
+    assert(painted.filter((s) => s.y).every((s) => ids.every((id) => s.y[id] != null)), `${label}: a tracked anchor disappeared`);
+    measure(label, { maxDy: worst, rafMaxDy: rafWorst, frames: painted.filter((s) => s.y).length });
+    assert(worst <= 1, `${label}: post-paint screen y moved ${worst.toFixed(2)}px (>1px); evidence ${dir}/${label}.json`);
+  };
+  const capture = async (name) => { const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
+  async function cards() {
+    await page.evaluate(() => window.__bh.positionHistory());
+    await waitQuiet(page);
+    const first = await page.evaluate(() => window.__bh.historyState());
+    measure('initial', first);
+    assert(first.steps === 1 && Math.abs(first.height - 640) <= 1, `initial clip is ${first.height}px at step ${first.steps}, not 640px`);
+    assert(first.pages >= 2 && first.rows === 50, 'need 50 live entries and at least two inert older pages');
+    assert(first.overflow !== 'auto' && first.overflow !== 'scroll' && first.scrollTop === 0, 'history has an inner scroll');
+    await capture('before-load-more');
+
+    // Watch the oldest intersecting row and the newest row through a real
+    // button click. No Playwright auto-scroll is allowed to move the anchor.
+    const ids = await page.evaluate(() => {
+      const h = window.__bh.history(), clip = h.querySelector('.history-clip').getBoundingClientRect();
+      const entries = Array.from(h.querySelectorAll('.history-live > .wb-entry'));
+      return [entries.find((e) => e.getBoundingClientRect().bottom > clip.top).id, entries.at(-1).id];
+    });
+    await page.evaluate((ids) => window.__bh.startSampler(ids), ids);
+    const click = await page.evaluate(() => {
+      const bh = window.__bh, before = bh.historyState();
+      bh.history().querySelector('.history-older').click();
+      return { before, after: bh.historyState() };
+    });
+    await sleep(180);
+    await capture('after-load-more');
+    stable('expand-anchor', await page.evaluate(() => window.__bh.stopSampler()), ids);
+    assert(click.after.steps === 2 && Math.abs(click.after.height - 1280) <= 1, 'load-more did not raise the clip by exactly 640px');
+    assert(click.before.pages - click.after.pages <= 1, 'one click synchronously loaded more than one page');
+
+    // Fill successive 640px steps until an embedded page is needed. Record
+    // the synchronous boundary separately from ResizeObserver's later work.
+    const paging = [];
+    for (let i = 0; i < 20; i++) {
+      const r = await page.evaluate(() => {
+        const bh = window.__bh, before = bh.historyState();
+        bh.history().querySelector('.history-older').click();
+        return { before, after: bh.historyState() };
+      });
+      paging.push(r);
+      assert(r.before.pages - r.after.pages <= 1, 'one click synchronously loaded multiple pages');
+      if (r.before.live >= r.after.steps * 640) assert(r.before.pages === r.after.pages, 'loaded a page even though the clip was filled');
+      assert(r.after.steps === r.before.steps + 1, 'clip did not step by one');
+      await sleep(100);
+      r.settled = await page.evaluate(() => window.__bh.historyState());
+      if (r.after.live >= r.after.steps * 640) assert(r.settled.pages === r.after.pages, 'later resize over-loaded a clip that was already filled');
+      if (r.after.pages < r.before.pages) break;
+    }
+    measure('paging', { clicks: paging.map((r) => ({ steps: r.after.steps, pagesBefore: r.before.pages, pagesSync: r.after.pages, pagesAfterResize: r.settled.pages, liveBefore: r.before.live })) });
+    assert(paging.some((r) => r.after.pages < r.before.pages), 'no embedded page was materialized');
+
+    // Open an older payload still above the bottom-anchored window. Opening
+    // and then growing it are distinct real layout changes. Check after the
+    // keep quiet window as well as within it.
+    const older = await page.evaluate(() => {
+      const entries = Array.from(window.__bh.history().querySelectorAll('.history-live > .wb-entry'));
+      entries[0].querySelector('details').open = true;
+      return entries[0].id;
+    });
+    await sleep(150);
+    await page.evaluate((id) => window.__bh.startSampler([id]), first.latest);
+    await growEntry(page, older, 240);
+    await sleep(750);
+    await growEntry(page, older, 180);
+    await sleep(200);
+    stable('latest-late-heights', await page.evaluate(() => window.__bh.stopSampler()), [first.latest]);
+
+    if (kind !== 'standalone') {
+      // Expansion and the existing swap compensation must use the SAME
+      // handle, not merely two sessions that happen to produce equal y.
+      await waitQuiet(page);
+      const res = await page.evaluate(async () => {
+        const bh = window.__bh;
+        const above = bh.layout().filter((t) => t.where === 'above' && t.name !== 'HISTORY');
+        const name = above[0]?.name || bh.topics().find((n) => n.dataset.topic !== 'HISTORY').dataset.topic;
+        const before = bh.historyState(), r = await bh.update(['HISTORY', name]);
+        const swap = bh.keeping();
+        bh.history().querySelector('.history-older').click();
+        return { name, r, same: !!swap && swap === bh.keeping(), before, after: bh.historyState() };
+      });
+      assertChanged(res.r, ['HISTORY', res.name]);
+      measure('expanded-swap-overlap', { sameSession: res.same, stepsBefore: res.before.steps, stepsAfter: res.after.steps, rowsBefore: res.before.rows, rowsAfter: res.after.rows });
+      assert(res.same, 'history expansion did not merge into the existing swap keep session');
+      assert(res.after.steps === res.before.steps + 1 && res.after.rows >= res.before.rows, 'swap lost expanded history');
+      await waitQuiet(page);
+    }
+
+    // A fully out card collapses once it has been in view. Its materialized
+    // entries and disclosure choices must survive; the next visible topic
+    // must not jump when the card above it shrinks.
+    await page.evaluate(() => window.__bh.positionHistory());
+    await waitQuiet(page);
+    const collapseProbe = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), topic = h.closest('.topic'), s = bh.scroller();
+      const next = bh.topics()[bh.topics().indexOf(topic) + 1];
+      if (!next) throw new Error('need a topic below HISTORY');
+      const before = bh.historyState();
+      s.scrollTop += topic.getBoundingClientRect().bottom - bh.viewTop(s) + 20;
+      bh.startSampler([next.dataset.topic]);
+      return { name: next.dataset.topic, before };
+    });
+    await page.waitForFunction(() => window.__bh.history()._wbHistorySteps === 1, null, { timeout: 3000 });
+    await sleep(160);
+    stable('collapse-anchor', await page.evaluate(() => window.__bh.stopSampler()), [collapseProbe.name]);
+    const collapsed = await page.evaluate(() => window.__bh.historyState());
+    measure('collapsed', collapsed);
+    assert(collapsed.rows === collapseProbe.before.rows && collapsed.pages === collapseProbe.before.pages, 'collapse discarded materialized history');
+    assert(JSON.stringify(collapsed.folds) === JSON.stringify(collapseProbe.before.folds), 'collapse changed open/closed folds');
+
+    // Dedicated fully-above expansion: unlike the first visible-clip click,
+    // this button is deliberately clicked while its whole card is out above.
+    const aboveExpansion = await page.evaluate((name) => {
+      const bh = window.__bh, topic = bh.history().closest('.topic');
+      const above = topic.getBoundingClientRect().bottom <= bh.viewTop(bh.scroller());
+      bh.startSampler([name]);
+      bh.history().querySelector('.history-older').click();
+      return { above, steps: bh.historyState().steps };
+    }, collapseProbe.name);
+    assert(aboveExpansion.above && aboveExpansion.steps === 2, 'fully-above expansion fixture was not above or did not expand');
+    await sleep(160);
+    stable('fully-above-expansion', await page.evaluate(() => window.__bh.stopSampler()), [collapseProbe.name]);
+
+    // Arm by showing the expanded card, then scroll the other way until it
+    // is fully BELOW. A tall real preceding payload supplies scroll range;
+    // shrinking a card below must not move that visible preceding topic.
+    await page.evaluate(() => window.__bh.positionHistory());
+    await page.waitForFunction(() => window.wbHistory.seen(window.__bh.history().closest('.topic'), '0px')?.visible, null, { timeout: 2000 });
+    const prior = await page.evaluate(() => {
+      const bh = window.__bh, topics = bh.topics();
+      return topics[topics.indexOf(bh.history().closest('.topic')) - 1]?.dataset.topic;
+    });
+    assert(prior, 'need a topic before HISTORY for the below-collapse probe');
+    if (kind !== 'standalone') await growFrame(page, prior, 1000);
+    else await page.evaluate((name) => {
+      const body = window.__bh.section(name).querySelector('.tdoc > .doc-body, .history-live');
+      if (!body) throw new Error('preceding topic has no inline body or log payload');
+      body.style.paddingBottom = (parseFloat(getComputedStyle(body).paddingBottom) + 1000) + 'px';
+    }, prior);
+    await waitQuiet(page);
+    const belowCollapse = await page.evaluate((name) => {
+      const bh = window.__bh, topic = bh.history().closest('.topic'), s = bh.scroller();
+      const before = bh.historyState();
+      s.scrollTop += topic.getBoundingClientRect().top - bh.viewBottom(s) - 40;
+      bh.startSampler([name]);
+      return { below: topic.getBoundingClientRect().top >= bh.viewBottom(s), before };
+    }, prior);
+    assert(belowCollapse.below && belowCollapse.before.steps === 2, 'below-collapse fixture was not expanded below the viewport');
+    await page.waitForFunction(() => window.__bh.history()._wbHistorySteps === 1, null, { timeout: 3000 });
+    await sleep(160);
+    stable('below-viewport-collapse', await page.evaluate(() => window.__bh.stopSampler()), [prior]);
+    const belowAfter = await page.evaluate(() => window.__bh.historyState());
+    assert(belowAfter.rows === belowCollapse.before.rows && JSON.stringify(belowAfter.folds) === JSON.stringify(belowCollapse.before.folds),
+      'below collapse lost rows or disclosure choices');
+
+    // Reuse the dashboard's actual pin button and its real #bpins scroller.
+    if (kind !== 'standalone') {
+      assert(ctx.width >= 1600, 'history dashboard pinned-column check requires --width 1800');
+      await page.evaluate(() => {
+        const bh = window.__bh, topic = bh.history().closest('.topic');
+        // A single 640px card may fit the column. Pin a tall peer as well,
+        // so #bpins is already an overflowing scroller BEFORE keep chooses
+        // the anchor's scroller (not only after the expansion).
+        const peer = bh.topics().find((n) => n !== topic && n.querySelector('iframe.doc-frame'));
+        if (!peer) throw new Error('need a tall peer for the pinned-column probe');
+        bh.pinPeer = peer.dataset.topic;
+        peer.querySelector('.tpin').click(); topic.querySelector('.tpin').click();
+      });
+      await page.waitForFunction(() => {
+        const bh = window.__bh, pins = bh.history().closest('#bpins');
+        return pins && document.documentElement.hasAttribute('data-pincol') && pins.scrollHeight > pins.clientHeight;
+      }, null, { timeout: 3000 });
+      await page.evaluate(() => { window.__bh.focus = window.__bh.history(); window.__bh.positionHistory(); });
+      await waitQuiet(page);
+      const pin = await page.evaluate(() => {
+        const bh = window.__bh, h = bh.history(), s = bh.scroller(), before = bh.historyState();
+        h.querySelector('.history-older').click();
+        return { scroller: s.id, sameScroller: window.wbHistory.keeping(s)?.scroller === s, before: before.steps, after: bh.historyState().steps };
+      });
+      measure('pinned-column', pin);
+      assert(pin.scroller === 'bpins' && pin.sameScroller && pin.after === pin.before + 1, 'pinned topic expansion did not keep in #bpins');
+      await page.evaluate(() => {
+        const bh = window.__bh;
+        bh.history().closest('.topic').querySelector('.tpin').click();
+        bh.section(bh.pinPeer).querySelector('.tpin').click(); bh.focus = null;
+      });
+      await waitQuiet(page);
+    }
+  }
+  try {
+    await page.evaluate(HISTORY_PAGE);
+    assert(await page.evaluate(() => !!window.__bh.history()), 'seed HISTORY with serve --history-entries 180');
+    if (ctx.navigationOnly) {
+      // Recreate the previous 214px rAF excursion's near-full clip: load a
+      // page and let an older payload grow before navigating. This is fixture
+      // setup, not an alternative history implementation or keep session.
+      const older = await page.evaluate(() => {
+        const bh = window.__bh, h = bh.history();
+        h.querySelector('.history-older').click(); h.querySelector('.history-older').click();
+        const row = h.querySelector('.history-live > .wb-entry.panel');
+        row.querySelector('.entry-panel').open = true;
+        return row.id;
+      });
+      await growEntry(page, older, 420);
+      await waitQuiet(page);
+    } else await cards();
+    if (ctx.cardsOnly) {
+      report.omissions.push('history-cards intentionally excludes navigation/control/live probes; run history for those checks.');
+      return;
+    }
+
+    // Force an actual first IO zero on the newly armed deep-link watch by
+    // positioning the fixture card horizontally outside the viewport. The
+    // real observer still runs, and vertical keep writes are not intercepted.
+    const target = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), topic = h.closest('.topic');
+      const pages = h.querySelectorAll('template[data-history-page]');
+      const panel = pages[pages.length - 1]?.content.querySelector('.entry-panel[id]');
+      if (!panel) throw new Error('need an older deep-link target');
+      topic.style.transform = 'translateX(10000px)';
+      const a = document.createElement('a'); a.href = '#' + panel.id; a.textContent = 'history target'; topic.appendChild(a); a.click(); a.remove();
+      return panel.id;
+    });
+    await page.waitForFunction(() => { const bh = window.__bh, r = window.wbHistory.seen(bh.history().closest('.topic'), '0px'); return r && !r.visible; }, null, { timeout: 2000 });
+    const zero = await page.evaluate(() => window.__bh.historyState());
+    assert(zero.steps > 1, 'first observer zero collapsed the deep-linked card');
+    measure('deep-link-initial-zero', { target, steps: zero.steps, clipScrollTop: zero.scrollTop });
+    await page.evaluate(() => { window.__bh.history().closest('.topic').style.transform = ''; });
+    await page.waitForFunction(() => window.wbHistory.seen(window.__bh.history().closest('.topic'), '0px')?.visible, null, { timeout: 2000 });
+    const visible = await page.evaluate((id) => {
+      const node = document.getElementById(id), r = node.getBoundingClientRect(), clip = node.closest('.wb-history').querySelector('.history-clip').getBoundingClientRect(), bh = window.__bh;
+      return { y: r.top, clipTop: clip.top, clipBottom: clip.bottom, viewTop: bh.viewTop(bh.scroller()), viewBottom: bh.viewBottom(bh.scroller()), clipScrollTop: node.closest('.history-clip').scrollTop };
+    }, target);
+    measure('deep-link-visible', visible);
+    assert(visible.y >= visible.clipTop - 1 && visible.y < visible.clipBottom && visible.y >= visible.viewTop && visible.y < visible.viewBottom && visible.clipScrollTop === 0, 'deep-link target not revealed in the bottom-anchored clip');
+    const late = await page.evaluate((id) => {
+      const entry = document.getElementById(id).closest('.wb-entry');
+      let next = entry.nextElementSibling;
+      while (next && !next.matches('.wb-entry.panel')) next = next.nextElementSibling;
+      if (!next) throw new Error('need a panel payload below the deep-link target');
+      next.querySelector('.entry-panel').open = true;
+      return next.id;
+    }, target);
+    await sleep(100);
+    await page.evaluate((id) => window.__bh.startSampler([id]), target);
+    const arrivals = [];
+    for (const px of [240, 180]) {
+      const before = await page.evaluate(() => ({ t: performance.now(), keep: !!window.__bh.keeping(),
+        target: window.__bh.history()._wbHistoryTarget?.id }));
+      assert(before.keep && before.target === target, 'deep-link height report did not arrive during the open navigation session');
+      if (arrivals.length) assert(before.t - arrivals.at(-1).t <= 300, 'deep-link height reports were more than 300ms apart');
+      await growEntry(page, late, px);
+      const after = await page.evaluate(() => ({ t: performance.now(), keep: !!window.__bh.keeping(), target: window.__bh.history()._wbHistoryTarget?.id }));
+      // Actual arrival lies between before/after. This conservative upper
+      // bound proves the reports themselves, not just our calls, are <=300ms.
+      if (arrivals.length) assert(after.t - arrivals.at(-1).t <= 300, 'actual deep-link report spacing could exceed 300ms');
+      assert(after.keep && after.target === target, 'navigation session ended while the height report was arriving');
+      arrivals.push({ ...before, px, after });
+      await sleep(150);
+    }
+    stable('deep-link-late-heights', await page.evaluate(() => window.__bh.stopSampler()), [target]);
+    measure('deep-link-open-session-reports', { arrivals, gapsMs: arrivals.slice(1).map((r, i) => r.t - arrivals[i].t) });
+
+    // Quiet/cap/user end is the existing shared helper's authority. A later
+    // report may move the target, but must not resurrect navigation or raise
+    // its clip. Wait for actual end, never infer it from a fixed sleep.
+    await page.waitForFunction(() => !window.__bh.keeping() && window.__bh.history()._wbHistoryTarget === null, null, { timeout: 6000 });
+    const ended = await page.evaluate((id) => ({ steps: window.__bh.historyState().steps,
+      y: document.getElementById(id).getBoundingClientRect().top }), target);
+    await page.evaluate((id) => window.__bh.startSampler([id]), target);
+    await growEntry(page, late, 600);
+    await sleep(200);
+    const postEnd = await page.evaluate((id) => ({ steps: window.__bh.historyState().steps,
+      target: window.__bh.history()._wbHistoryTarget, keep: !!window.__bh.keeping(),
+      y: document.getElementById(id).getBoundingClientRect().top,
+      samples: window.__bh.stopSampler() }), target);
+    fs.writeFileSync(path.join(dir, 'deep-link-post-end.json'), JSON.stringify(postEnd.samples, null, 2));
+    measure('deep-link-post-end', { before: ended, steps: postEnd.steps, target: postEnd.target, keep: postEnd.keep,
+      dyAllowed: postEnd.y - ended.y });
+    assert(postEnd.steps === ended.steps && postEnd.target === null && !postEnd.keep && postEnd.samples.filter((s) => s.y).every((s) =>
+      !s.keep && s.history.steps === ended.steps && s.history.target === null),
+      'post-session height report re-revealed, re-armed or resurrected navigation');
+
+    // The deep-linked card has now really been in view: its next complete
+    // exit must collapse, preserving folds, just like a manually expanded card.
+    await page.evaluate(() => {
+      const bh = window.__bh, s = bh.scroller(), topic = bh.history().closest('.topic');
+      bh.deepFolds = bh.historyState().folds;
+      s.scrollTop += topic.getBoundingClientRect().bottom - bh.viewTop(s) + 20;
+    });
+    await page.waitForFunction(() => window.__bh.history()._wbHistorySteps === 1, null, { timeout: 3000 });
+    const deepCollapse = await page.evaluate(() => ({ steps: window.__bh.historyState().steps,
+      preserved: JSON.stringify(window.__bh.deepFolds) === JSON.stringify(window.__bh.historyState().folds) }));
+    measure('deep-link-in-to-out-collapse', deepCollapse);
+    assert(deepCollapse.preserved, 'deep-link collapse changed disclosure choices');
+
+    // Deep-link materialization exhausted the embedded pages. A collapsed
+    // clip still needs its button; repeated clicks only raise the 640px clip
+    // until all content fits, at which point the button must hide.
+    await page.evaluate(() => window.__bh.positionHistory());
+    await waitQuiet(page);
+    const exhausted = await page.evaluate(() => window.__bh.historyState());
+    assert(exhausted.pages === 0 && exhausted.button && exhausted.live > 640, 'exhausted pages hid the button while clipped content remained');
+    let fitted = exhausted, controlClicks = 0;
+    while (fitted.button && controlClicks < 100) {
+      const before = fitted;
+      await page.evaluate(() => window.__bh.history().querySelector('.history-older').click());
+      await sleep(20);
+      fitted = await page.evaluate(() => window.__bh.historyState());
+      assert(fitted.pages === 0 && fitted.steps === before.steps + 1, 'exhausted-page click changed more than the clip step');
+      controlClicks++;
+    }
+    measure('exhausted-controls', { clicks: controlClicks, steps: fitted.steps, live: fitted.live, button: fitted.button });
+    assert(!fitted.button && fitted.live <= fitted.steps * 640, 'button did not hide when exhausted content fitted the clip');
+
+    // Return to the latest window through a real viewport exit. Then append
+    // one cloned, rendered system-event chip as a faithful live-arrival HTML
+    // fixture: no copied stream helpers or fabricated CSS, on either host.
+    await page.evaluate(() => {
+      const bh = window.__bh, s = bh.scroller();
+      s.scrollTop += bh.history().closest('.topic').getBoundingClientRect().bottom - bh.viewTop(s) + 20;
+    });
+    await page.waitForFunction(() => window.__bh.history()._wbHistorySteps === 1, null, { timeout: 3000 });
+    await page.evaluate(() => window.__bh.positionHistory());
+    await waitQuiet(page);
+    const arrivalBefore = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), live = h.querySelector('.history-live'), before = bh.historyState();
+      const src = Array.from(live.children).find((n) => n.matches('.system-run'));
+      if (!src) throw new Error('no rendered system event for the arrival fixture');
+      const chip = src.cloneNode(true), entry = chip.querySelector('.wb-entry'), old = entry.id;
+      chip.innerHTML = chip.innerHTML.replaceAll(old, 'e999001');
+      chip.dataset.key = 'system:e999001'; chip.dataset.historyAnchor = 'e999001'; chip.open = false;
+      chip.querySelector('.entry-text').textContent = 'Live arrival fixture';
+      chip.id = 'bh-live-chip'; live.appendChild(chip);
+      return before;
+    });
+    await sleep(100);
+    const arrival = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), clip = h.querySelector('.history-clip').getBoundingClientRect(), chip = document.getElementById('bh-live-chip');
+      return { ...bh.historyState(), newestAtBottom: Math.abs(chip.getBoundingClientRect().bottom - clip.bottom) <= 1 };
+    });
+    measure('live-arrival-fixture', { stepsBefore: arrivalBefore.steps, stepsAfter: arrival.steps,
+      rowsAdded: arrival.rows - arrivalBefore.rows, newestAtBottom: arrival.newestAtBottom, clipScrollTop: arrival.scrollTop });
+    assert(arrival.steps === arrivalBefore.steps && arrival.rows === arrivalBefore.rows + 1 && arrival.newestAtBottom && arrival.scrollTop === 0,
+      'live arrival did not stay at the bottom of an unchanged clip');
+    const observerErrors = await page.evaluate(() => window.__bh.observerErrors);
+    assert(observerErrors.length === 0, `native ResizeObserver loop errors: ${observerErrors.join(' | ')}`);
+  } catch (e) {
+    report.failure = e.message;
+    report.omissions.push('Stopped at the recorded failure; subsequent checks in the scenario were not run.');
+    throw e;
+  } finally {
+    report.errors = ctx.errors; report.failures = ctx.failures;
+    report.native = await page.evaluate(() => ({ observerErrors: window.__bh.observerErrors,
+      observerErrorDetails: window.__bh.observerErrorDetails })).catch(() => null);
+    fs.writeFileSync(path.join(dir, 'measurements.json'), JSON.stringify(report, null, 2));
+    log(`history artifacts: ${dir}`);
+  }
+}
+
+// Remediation verification, not an independent review: real renderer output,
+// native RO/IO deliveries and actual sequential keyboard focus on both hosts.
+async function scenarioHistoryRegressions(ctx) {
+  const { page, tab, kind } = await openBoard(ctx);
+  const dir = path.resolve(ctx.args.artifacts || path.join(os.tmpdir(), `board-history-regressions-${Date.now()}`));
+  fs.mkdirSync(dir, { recursive: true });
+  const report = { url: ctx.args.url, kind, measurements: [], omissions: [] };
+  const measure = (label, data) => { report.measurements.push({ label, ...data }); log(`${label}: ${JSON.stringify(data)}`); };
+  const capture = async (name) => { const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
+  const paint = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0))));
+  try {
+    await page.evaluate(HISTORY_PAGE);
+    await page.evaluate(() => { window.__bh.regressionPhase = 'keyboard'; });
+    assert(await page.evaluate(() => ['HISTORY', 'LOGCHAIN', 'LOGCANCEL'].every((n) => !!window.__bh.history(n))),
+      'seed renderer-produced panel/log histories with serve --history-entries 180');
+
+    // The old failure was a real Tab into the first clipped summary, not an
+    // explicit focus() on the desired row or a synthetic focusin callback.
+    await page.evaluate(() => window.__bh.positionHistory());
+    await waitQuiet(page);
+    await page.locator('.wb-history[data-history="HISTORY"] > .history-older').focus();
+    const keyboardBefore = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), clip = h.querySelector('.history-clip').getBoundingClientRect();
+      const node = h.querySelector('.history-live .entry-panel > summary'), r = node.getBoundingClientRect();
+      bh.expectedTab = node;
+      return { buttonFocused: document.activeElement === h.querySelector('.history-older'),
+        panel: node.closest('.entry-panel').id, top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
+        clipped: r.bottom <= clip.top, clipScrollTop: h.querySelector('.history-clip').scrollTop };
+    });
+    measure('keyboard-before-tab', keyboardBefore);
+    assert(keyboardBefore.buttonFocused && keyboardBefore.clipped && keyboardBefore.clipScrollTop === 0, 'Tab fixture must start at load-more with the next summary clipped');
+    await capture('before-tab');
+    await tab.keyboard.press('Tab');
+    await paint();
+    await sleep(100);
+    const keyboardAfter = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), node = document.activeElement, r = node.getBoundingClientRect();
+      const clip = h.querySelector('.history-clip').getBoundingClientRect(), s = bh.scroller();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { expected: node === bh.expectedTab, summary: node.matches('.entry-panel > summary'),
+        centerExposed: !!hit && (hit === node || node.contains(hit)),
+        centerHit: hit && { tag: hit.tagName, id: hit.id, classes: hit.className },
+        panel: node.closest('.entry-panel')?.id, top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
+        viewTop: bh.viewTop(s), viewBottom: bh.viewBottom(s), clipScrollTop: h.querySelector('.history-clip').scrollTop,
+        steps: h._wbHistorySteps };
+    });
+    measure('keyboard-after-tab', keyboardAfter);
+    await capture('after-tab');
+    assert(keyboardAfter.expected && keyboardAfter.summary && keyboardAfter.top >= keyboardAfter.clipTop - 1 &&
+      keyboardAfter.bottom <= keyboardAfter.clipBottom + 1 && keyboardAfter.top >= keyboardAfter.viewTop - 1 &&
+      keyboardAfter.bottom <= keyboardAfter.viewBottom + 1 && keyboardAfter.clipScrollTop === 0 && keyboardAfter.centerExposed,
+      'actual Tab focused a summary outside the clip/page, under a sticky overlay, or scrolled the clip');
+    await page.evaluate(() => document.activeElement.blur());
+
+    async function settledLog(name) {
+      await page.evaluate((name) => {
+        const bh = window.__bh, s = bh.scroller(), topic = bh.history(name).closest('.topic');
+        s.scrollTop += topic.getBoundingClientRect().top - bh.viewTop(s) - 100;
+      }, name);
+      await page.waitForFunction((name) => window.__bh.resizeDeliveries.some((d) => d.after?.some((r) => r.name === name && r.steps === 1)), name, { timeout: 2000 });
+      await waitQuiet(page);
+      // Ensure an initial observer notification cannot be mistaken for a
+      // materialization-triggered delivery after our click.
+      await sleep(100);
+      return page.evaluate((name) => {
+        const bh = window.__bh, h = bh.history(name), live = h.querySelector('.history-live');
+        return { ...bh.historyState(name), folded: !!live.querySelector(':scope > details.run-fold:not([open])'),
+          tailRows: live.querySelectorAll(':scope > .wb-entry').length,
+          deliveries: bh.resizeDeliveries.filter((d) => d.after?.some((r) => r.name === name)).length };
+      }, name);
+    }
+    const clickLog = (name) => page.evaluate((name) => {
+      const bh = window.__bh, before = bh.historyState(name);
+      bh.history(name).querySelector('.history-older').click();
+      return { before, after: bh.historyState(name) };
+    }, name);
+    const boundedClick = (r) => {
+      assert(r.before.pages - r.after.pages === 1 && r.after.rows === r.before.rows + 50,
+        'closed-run click must materialize exactly one 50-row page synchronously');
+      assert(r.after.steps === 2 && Math.abs(r.after.live - r.before.live) <= 1 && r.after.live < 1280,
+        'closed-run merge must be size-neutral and leave the expanded clip underfilled');
+    };
+
+    await page.evaluate(() => { window.__bh.regressionPhase = 'neutral-chain'; });
+    const initial = await settledLog('LOGCHAIN');
+    measure('neutral-chain-initial', initial);
+    assert(initial.rows === 50 && initial.pages >= 3 && initial.folded && initial.tailRows === 3 && initial.deliveries >= 1,
+      'need settled, renderer-produced 47-folded/3-tail-row history and at least three older pages');
+    await capture('before-neutral-chain');
+    const click = await clickLog('LOGCHAIN');
+    boundedClick(click);
+    measure('neutral-chain-click', click);
+    await page.waitForFunction(() => {
+      const s = window.__bh.historyState('LOGCHAIN'); return s.pages === 0 || s.live >= s.steps * 640;
+    }, null, { timeout: 3000 });
+    await sleep(150);
+    const drained = await page.evaluate(() => window.__bh.historyState('LOGCHAIN'));
+    const chain = await page.evaluate(() => ({
+      loads: window.__bh.historyLoads.filter((r) => r.name === 'LOGCHAIN'),
+      deliveries: window.__bh.resizeDeliveries.filter((d) => d.before.some((r) => r.name === 'LOGCHAIN'))
+    }));
+    measure('neutral-chain-drained', { state: drained, ...chain });
+    assert(drained.pages === 0 && drained.rows === initial.rows + initial.pages * 50 && Math.abs(drained.live - initial.live) <= 1,
+      'size-neutral folded chain did not drain all pages without changing height');
+    assert(chain.loads.length === initial.pages && chain.loads[0].delivery === null &&
+      chain.loads.slice(1).every((l) => l.delivery !== null) && new Set(chain.loads.slice(1).map((l) => l.delivery)).size === initial.pages - 1,
+      'continuation must load one page per distinct actual native RO delivery, never a synchronous multi-page loop');
+    for (const d of chain.deliveries) {
+      const b = d.before.find((r) => r.name === 'LOGCHAIN'), a = d.after.find((r) => r.name === 'LOGCHAIN');
+      assert(b.pages - a.pages <= 1, 'one native RO callback materialized multiple pages');
+    }
+    await capture('after-neutral-chain');
+
+    // A longer real log stream leaves pages pending while native IO arms
+    // the newly expanded subscription. No callbacks are called manually.
+    await page.evaluate(() => { window.__bh.regressionPhase = 'cancellation'; });
+    const cancelInitial = await settledLog('LOGCANCEL');
+    assert(cancelInitial.pages >= 8 && cancelInitial.rows === 50, 'need enough older pages to cancel a running chain');
+    const cancelClick = await clickLog('LOGCANCEL');
+    boundedClick(cancelClick);
+    await page.evaluate(() => {
+      const bh = window.__bh; bh.cancelVisible = false;
+      bh.cancelWatch = window.wbHistory.watch(bh.history('LOGCANCEL').closest('.topic'), {
+        onChange: (r) => { if (r.visible) bh.cancelVisible = true; }
+      });
+    });
+    await page.waitForFunction(() => window.__bh.cancelVisible, null, { timeout: 2000 });
+    const exit = await page.evaluate(() => {
+      const bh = window.__bh, topic = bh.history('LOGCANCEL').closest('.topic'), s = bh.scroller();
+      const before = bh.historyState('LOGCANCEL');
+      s.scrollTop += topic.getBoundingClientRect().bottom - bh.viewTop(s) + 40;
+      return before;
+    });
+    assert(exit.pages > 0 && exit.steps === 2, 'cancellation fixture drained before its visible->out transition');
+    await page.waitForFunction(() => window.__bh.history('LOGCANCEL')._wbHistorySteps === 1, null, { timeout: 2000 });
+    const collapsed = await page.evaluate(() => window.__bh.historyState('LOGCANCEL'));
+    await sleep(350);
+    const canceled = await page.evaluate(() => {
+      const bh = window.__bh; bh.cancelWatch.unwatch();
+      return { ...bh.historyState('LOGCANCEL'), pending: !!bh.history('LOGCANCEL')._wbHistoryReobserve };
+    });
+    measure('neutral-chain-canceled', { initial: cancelInitial, click: cancelClick, exit, collapsed, settled: canceled });
+    assert(collapsed.pages > 0 && canceled.pages === collapsed.pages && canceled.rows === collapsed.rows && canceled.steps === 1 && !canceled.pending,
+      'collapsed history continued materializing older pages or left a pending reobserve');
+    await capture('after-cancellation');
+    const observerErrors = await page.evaluate(() => window.__bh.observerErrors);
+    assert(observerErrors.length === 0, `native ResizeObserver loop errors: ${observerErrors.join(' | ')}`);
+  } catch (e) {
+    report.failure = e.message;
+    throw e;
+  } finally {
+    report.errors = ctx.errors;
+    report.native = await page.evaluate(() => ({ deliveries: window.__bh.resizeDeliveries,
+      loads: window.__bh.historyLoads, observerErrors: window.__bh.observerErrors,
+      observerErrorDetails: window.__bh.observerErrorDetails })).catch(() => null);
+    fs.writeFileSync(path.join(dir, 'measurements.json'), JSON.stringify(report, null, 2));
+    log(`history regression artifacts: ${dir}`);
+  }
+}
+
 const SCENARIOS = {
   keep: scenarioKeep,
   observer: scenarioObserver,
+  history: scenarioHistory,
+  'history-cards': (ctx) => scenarioHistory({ ...ctx, cardsOnly: true }),
+  'history-paint': (ctx) => scenarioHistory({ ...ctx, navigationOnly: true }),
+  'history-regressions': scenarioHistoryRegressions,
 };
 
 // --- main ----------------------------------------------------------------------
@@ -745,8 +1431,8 @@ async function main() {
   const name = args._[0];
   if (name === "serve") return serve(args);
   if (!name || !SCENARIOS[name] || !args.url || args.url === true) {
-    console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--keep-tmp]");
-    console.error(`       node scripts/board-headless.mjs <${Object.keys(SCENARIOS).join("|")}> --url <session page> [--width W] [--height H] [--headed]`);
+    console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--history-entries N] [--keep-tmp]");
+    console.error(`       node scripts/board-headless.mjs <${Object.keys(SCENARIOS).join("|")}> --url <session or full file page> [--width W] [--height H] [--headed] [--artifacts DIR]`);
     process.exit(2);
   }
   // check records a failed expectation and lets the scenario go on, so one

@@ -32,7 +32,6 @@ func TestBoardKeepWiring(t *testing.T) {
 		`q("iframe.doc-frame", n).forEach(function (f) { f.wbKeep = true; });`,
 		"if (kept) kept.h.apply();\n        startMotion(",
 		"restoreScroll(scroll);",
-		"window.wbHistory.restore(b, history); });",
 		"if (kept) kept.h.apply();",
 	}
 	at := 0

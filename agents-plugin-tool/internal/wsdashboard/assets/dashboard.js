@@ -614,8 +614,6 @@
     if (name === "panels") drawerSync();
     if (name === "git") gitSwapped();
     restoreScroll(scroll);
-    // Disclosure and frame-height restoration can move the history viewport.
-    if (board && window.wbHistory) boardBoxes().forEach(function (b) { window.wbHistory.restore(b, history); });
     if (kept) kept.h.apply();
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
@@ -3502,7 +3500,9 @@
     if (!target) target = $(id);
     if (!target || target.id !== id || !inBoard(target)) return;
     for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
-    target.scrollIntoView({ block: "start" });
+    // History targets were revealed and anchored by the shared loader.
+    // scrollIntoView would also scroll the overflow:hidden clip itself.
+    if (!target.closest(".wb-history")) target.scrollIntoView({ block: "start" });
     return target;
   }
   function captureBoardHistory() {
