@@ -76,3 +76,19 @@ Place topic-note chips so they work inside the sticky `.tophead` of `261112-feat
 Tests: a Go test that `wsinbox.Merge` renumbers markers in chip and topic notes; node-run `dashboard.js` (and `form.js` if touched) tests that a composer keystroke keeps note images, numbering spans composer and notes, cancel restore renumbers note markers without duplicating them in the composer, chips are restored on rebuild, and reload strips orphan note markers.
 
 Verification: paste two images into an item note and one into a topic note, plus one in the composer; send; check the lead receives four attachments with unique `[Image #N]` references matching the note text. Dark and light LOOK capture of the note pen with an image chip.
+
+### Result (e05b6fedf) - 2026-11-13
+
+Landed in 3ca6d9a6e (wsinbox), 2e4716b77 (dashboard), and e05b6fedf (review fix).
+
+- `wsinbox.Merge` renumbers `[Image #N]` markers in the later send's chip notes and topic notes with the same map as its text parts (Decision 3); entry shape unchanged (T0). Test: `TestMergeRenumbersMarkersInNotes`.
+- Paste is wired in `dashboard.js` only: a document `paste` listener on board `textarea.note` (item and topic notes) feeds the composer's `addFiles`, with the marker at the note's caret; `form.js` is untouched (Decision 4). One image list and number sequence span the composer text, every board note, and the notes of answer chips whose item left the board (`allNums`), used by `syncMarkers`, `nextNum`, `deleteMarkers`, the post-send `imgSeq` reset, and `restoreHeld`.
+- Chip placement is derived from the text on each render (`imgHomes`): a note's chips sit in a `.nimgs` row right after the note, hidden while the note is closed; an off-board chip's images show in the composer row. A board swap re-renders the rows (Decision 5).
+- `restoreHeld` renumbers chip-note and topic-note markers with the message text, holds marker sync until every marker has landed, and gives any image no restored text names a composer marker. A reload strips lost images' markers from item notes, topic notes, and chips (`WsRail.stripMarkers`, counted in `js.draft.imgslost`) and restores reference images that only a note names.
+- The sticky `.tophead` of 261112-feat-ws-whiteboard-topic-tickets-sticky-head has not landed; topic-note chips sit after the topic note (not sticky).
+
+Verification:
+- `go test ./internal/wsinbox/`: ok.
+- `go test ./internal/wsdashboard/`: only 5 failures, all pre-existing on the base commit (TestMailboxBadgeTopLevel, TestRailScript, three tracker tests). The new `TestBoardNoteImages` runs under node, and the updated `TestRailDraftRestore` and `TestSlashCommandRestoresAsSelection` pass.
+- `go test ./internal/wswhiteboard/`: ok.
+- LOOK (headless Chromium against a page fixture): two images pasted into an item note, one into an ack note, one into a topic note, and one into the composer. A real send delivered 5 attachments, numbered 1-5, with each `[Image #N]` in the chip notes, topic note, and text matching. Dark and light captures of the note pen with image chips were made. A composer keystroke kept the note images, and closing a note hid its chip row.
