@@ -37,6 +37,8 @@ workers, terminals, started 04:27Z-07:20Z) has `restart_safe: true`, so
 restart_safe does not distinguish survivors from casualties. The casualties'
 holder directories are gone, so their own restart_safe is unknowable now.
 
+Owner note (2026-11-13, later the same day): the owner reports the affected session was not actually lost from their point of view; what alarmed them was the conversation's last line reading stopped / exit code 0 with reason `child_exited`, which they read as a crash. So the confirmed user-facing problem is at least the misleading exit line: a daemon-replace-time child exit is rendered like an ordinary stop with no hint of the cause or that the session can be resumed. Whether the Claude child really exited because of the replace (and was later resumed) is still the open question below.
+
 ## Mechanism
 
 Confirmed from code (graceful replace does not stop holders):
@@ -84,6 +86,7 @@ replace semantics is an observable behavior change, ask first.
   ticket's defer idea).
 - On Windows, make holders survive the daemon unconditionally; if breakaway is
   refused, say so loudly (dashboard row, not just a descriptor flag).
+- Render a daemon-replace-time exit distinctly (e.g. reason `daemon_replaced`, with a resume hint) instead of the generic stopped / exit code 0 line.
 
 ## Open questions
 
