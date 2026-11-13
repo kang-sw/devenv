@@ -25,6 +25,8 @@ const (
 	freshOnlyEnd   = "<!-- ws:fresh-only:end -->"
 )
 
+const workflowManualReadFullNotice = "If the host shows this result truncated or saved to a file, read it in full before acting: the session rules below are binding."
+
 // freshBootstrapKey is the reserved sentinel that triggers fresh mode in
 // ws.workflow_manual when a caller does not yet have a lead session key.
 // It is an opaque, deliberately non-descriptive handshake token — no privilege
@@ -462,7 +464,7 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 				body = injectReviewTrackNudge(body, nudge)
 				_ = s.sessions.setReviewTrackNudgeShown(mintedKey)
 			}
-			return toolTextResponse(id, body+"\n", nil)
+			return toolTextResponse(id, workflowManualReadFullNotice+"\n\n"+body+"\n", nil)
 		}
 		// 3b. FRESH (sentinel, no root): keep the gated bootstrap line; strip only markers.
 		body = stripModeGatedRegion(body, true)
@@ -525,5 +527,5 @@ func (s *Server) handleWorkflowManual(id json.RawMessage, args map[string]any) r
 		}
 	}
 
-	return toolTextResponse(id, body+"\n", nil)
+	return toolTextResponse(id, workflowManualReadFullNotice+"\n\n"+body+"\n", nil)
 }
