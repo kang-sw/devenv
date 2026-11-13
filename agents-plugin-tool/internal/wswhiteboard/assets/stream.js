@@ -33,6 +33,31 @@
     h._wbHistorySteps = Math.max(1, n);
     h.style.setProperty('--wb-history-height', (h._wbHistorySteps * STEP) + 'px');
   }
+  // Extend --wb-history-height so no entry is half-clipped at the top of the
+  // visible region. With flex-end the newest entries sit at the bottom and
+  // older entries overflow upward; the clip line is .history-clip's top edge.
+  // After layout, if an entry straddles that edge, grow the height to include
+  // it fully. history-live is flex:none so the resize does not loop.
+  function snap(h) {
+    var clip = h.querySelector('.history-clip'), live = h.querySelector('.history-live');
+    if (!clip || !live) return;
+    var cr = clip.getBoundingClientRect(), lr = live.getBoundingClientRect();
+    if (lr.height <= cr.height + 1) return; // content fits, nothing clipped
+    var clipTop = cr.top, children = live.children;
+    for (var i = 0; i < children.length; i++) {
+      var c = children[i];
+      if (c.tagName === 'TEMPLATE') continue;
+      var r = c.getBoundingClientRect();
+      if (!r.height) continue;
+      if (r.top < clipTop - 1 && r.bottom > clipTop + 1) {
+        // this entry straddles the clip line — include it fully
+        var extra = Math.ceil(clipTop - r.top);
+        h.style.setProperty('--wb-history-height', ((h._wbHistorySteps || 1) * STEP + extra) + 'px');
+        return;
+      }
+      if (r.top >= clipTop - 1) return; // past the clip line, done
+    }
+  }
   function updateControl(h) {
     var live = h.querySelector('.history-live');
     var more = !!h.querySelector('template[data-history-page]') || live.scrollHeight > (h._wbHistorySteps || 1) * STEP;
@@ -98,6 +123,7 @@
     h._wbHistoryOut = false;
     h._wbHistoryTarget = null;
     steps(h, 1);
+    snap(h);
     updateControl(h);
     if (kept) kept.apply();
   }
@@ -113,6 +139,7 @@
   function reveal(h, node) {
     var live = h.querySelector('.history-live');
     steps(h, Math.max(h._wbHistorySteps || 1, Math.ceil((live.getBoundingClientRect().bottom - node.getBoundingClientRect().top) / STEP)));
+    snap(h);
     updateControl(h);
   }
   function navigate(h, node) {
@@ -273,6 +300,7 @@
         if (entry) run.open = systems.get(entry.id);
       });
       steps(h, saved.steps || 1);
+      snap(h);
       updateControl(h);
       arm(h);
     });
@@ -282,6 +310,7 @@
       if (h._wbHistoryBound) { updateControl(h); return; }
       h._wbHistoryBound = true;
       steps(h, 1);
+      snap(h);
       updateControl(h);
       arm(h);
       // Hidden overflow is not keyboard navigation: a clipped summary is
@@ -305,6 +334,7 @@
         // At most one page here. Only a later content resize may load the
         // next: iframe heights have not arrived at materialization time.
         if (live.scrollHeight < h._wbHistorySteps * STEP) loadOne(h);
+        snap(h);
         updateControl(h);
         if (kept) kept.apply();
       });
@@ -317,6 +347,7 @@
             // Initial layout alone does not load older pages; a user has to
             // expand first. A collapse cancels the bounded resize chain.
             if (h._wbHistorySteps > 1 && h.querySelector('.history-live').scrollHeight < h._wbHistorySteps * STEP) loadOne(h);
+            snap(h);
             updateControl(h);
           } finally { h._wbHistoryResizing = false; }
         });
