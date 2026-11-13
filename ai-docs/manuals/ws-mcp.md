@@ -591,12 +591,16 @@ The `pi.*` tools (`internal/mcp/pi_tools.go`, lead-only) put this on a
 session: `pi.spawn {prompt, tier, cwd?, label?}` (model and effort from the
 tier's entry in the `pi` harness bucket of `agents.tier`, which only the
 user's `config.tune` sets; an unset tier is refused with that key named;
-`cwd` relative to the session's root), `pi.send`, `pi.list` (the caller's
+`cwd` relative to the session's root), `pi.send` (a running child's native
+Pi steer at the next tool boundary; with no turn running, a new turn at once), `pi.list` (the caller's
 own children), `pi.stop` (closes; the record stays), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
 send). The daemon mails each settled turn to the parent lead's reply-id
 queue with no sender (`mailbox.recv` shows `system`) and wakes the mailbox
-waits; nothing is mailed after `pi.stop`. `tools/list` shows the tools only
+waits; a steered message belongs to the turn that takes it, whose completion
+mail covers it without an extra turn. A steer refused or not taken before
+the turn ends is cleared from Pi's queue and sent as the next turn instead.
+Nothing is mailed after `pi.stop`. `tools/list` shows the tools only
 when `dashboard.pi_spawn_enabled` is on (ws on, wsflow and Pi off; read
 once per server, so a change applies at the next reconnect), the server is
 hosted by the daemon (`ServerOptions.Agents` is the daemon's runner; a

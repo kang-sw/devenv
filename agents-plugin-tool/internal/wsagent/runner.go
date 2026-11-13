@@ -391,6 +391,9 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		c.heldRes.mark = rec.TurnMark
 	}
 	c.steered = slices.Clone(rec.Steered)
+	for i := range c.steered {
+		c.steered[i].Mark = rec.SteerMarks[c.steered[i].Seq]
+	}
 	c.steerSeq, c.steerAnswers = rec.SteerSeq, rec.SteerAnswers
 	if last := rec.LastTurn; last != nil {
 		// Persisted coverage keeps a wait for queued input from taking a
@@ -688,8 +691,9 @@ func (r *Runner) List() []State {
 }
 
 // Send holds text as the conversation's next user message. It is submitted
-// now when no turn runs, else when the running turn ends; held sends merge
-// into one message. It reports whether the message is still held.
+// now when no turn runs. A spawned Pi worker takes it as a native steer
+// during a running turn; other conversations hold it until that turn ends.
+// It reports whether the message is still held.
 //
 // Send returns once the message is in the conversation's inbox: it neither
 // waits for the loop nor starts the process, which the loop does on its
@@ -715,7 +719,8 @@ func (r *Runner) Send(id, text string) (State, error) {
 		c.mu.Unlock()
 		return State{}, err
 	}
-	_, _, err = wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{text}}, r.opts.Now())
+	steer := c.rec.Parent != nil && c.rec.Backend == BackendPi && !c.rec.Lead
+	_, _, err = wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{text}, Steer: steer}, r.opts.Now())
 	if err == nil {
 		// After the write, under the lock kick drains with: a turn whose
 		// drain counted this send holds its message (Wait).
@@ -1159,7 +1164,7 @@ type conv struct {
 	// parent's waits by target, and holding mirrors heldRes != nil; all
 	// three under mu. Loop-owned: heldRes is a
 	// done turn held for its children's reports; steered are the
-	// children's reports steered into the running turn and not yet taken
+	// reports and user messages steered into the running turn and not yet taken
 	// by it, steerSeq the steer commands the process was written and
 	// steerAnswers how many it answered.
 	settledReport string
@@ -1242,14 +1247,18 @@ func (c *conv) inboxChanged() {
 	c.kick()
 }
 
-// steer writes a lead's steered messages to its process while a turn runs:
+// steer writes steered messages to the process while a turn runs:
 // the user marked them to reach the harness now, not at the turn's end.
 // They join the running turn, so no turn starts. Messages not marked stay
 // held, with no turn running a marked one is an ordinary send (kick), and
 // a backend that takes no message mid-turn, or a rejoin that cannot tell
 // whether the turn runs (wrapHold), keeps it held.
 func (c *conv) steer() {
-	if !c.rec.Lead || !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed {
+	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed {
+		return
+	}
+	if !c.rec.Lead {
+		c.steerWorker()
 		return
 	}
 	st, ok := c.proc.(steerer)
@@ -1580,7 +1589,7 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 // it, which each turn end submits; mail waits for the next message turn, or
 // goes alone once nothing is queued.
 func (c *conv) kick() {
-	if c.closed || c.turn || c.replaying || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
+	if c.closed || c.turn || c.replaying || len(c.steered) > 0 || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
 		return
 	}
 	held, err := wsinbox.Held(c.inbox)

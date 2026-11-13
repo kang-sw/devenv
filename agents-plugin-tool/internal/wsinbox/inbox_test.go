@@ -92,6 +92,23 @@ func TestSendWritesThenMergesIntoTheHeldEntry(t *testing.T) {
 	}
 }
 
+func TestSteeredSendDoesNotMergeOrPromoteHeldText(t *testing.T) {
+	dir := Dir(t.TempDir())
+	first, _ := send(t, dir, "held")
+	name, merged, err := Send(dir, Entry{Parts: []string{"steer"}, Steer: true}, time.Now())
+	if err != nil || merged || name == first {
+		t.Fatalf("steered Send = %s, %v, %v", name, merged, err)
+	}
+	recs, err := DrainSteer(dir)
+	if err != nil || len(recs) != 1 || recs[0].Entry.Text() != "steer" {
+		t.Fatalf("steered drain = %+v, %v", recs, err)
+	}
+	held, err := Held(dir)
+	if err != nil || len(held) != 1 || held[0].Name != first || held[0].Entry.Text() != "held" {
+		t.Fatalf("unrelated text stays held = %+v, %v", held, err)
+	}
+}
+
 func TestCancelReturnsTheHeldEntry(t *testing.T) {
 	dir := Dir(t.TempDir())
 	name, _ := send(t, dir, "hello", Chip{ID: "03", Answer: "a"})
