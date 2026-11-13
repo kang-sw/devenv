@@ -179,7 +179,12 @@
     if (doc.scrollingElement) s.push([doc.scrollingElement, doc.scrollingElement.scrollTop]);
     return s;
   }
-  function restoreScroll(s) { s.forEach(function (p) { if (p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; }); }
+  // A pane a keep session holds (wbHistory.keeping: a board swap's
+  // compensation, a history page loading) is the session's to scroll.
+  function restoreScroll(s) {
+    var kept = window.wbHistory && window.wbHistory.keeping;
+    s.forEach(function (p) { if (!(kept && kept(p[0])) && p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; });
+  }
 
   // The conversation stays at the bottom while the user has it there. Its
   // two regions (entries, convlive) scroll together inside #convo, which
@@ -476,6 +481,9 @@
   // counts as held: a reconnect meanwhile names its hash, and the update
   // still lands when the tab shows.
   var modeHash = "", hiddenRegions = {};
+  // pageHidden tells whether nobody sees the page: region updates are held
+  // (hiddenRegions) while it holds, and land when it ends (showRegions).
+  function pageHidden() { return doc.hidden; }
   function held() {
     return q("[data-region]").map(function (el) {
       var name = el.getAttribute("data-region"), p = hiddenRegions[name];
@@ -506,6 +514,7 @@
     var frameH = board ? boardRead(frameHeights) : null;
     var history = board ? captureBoardHistory() : null;
     var before = board && !still && !reducedMotion() ? boardSpots(el) : null;
+    var kept = board ? boardKeep(el) : null;
     // The entries merge and the board morph prepare only the nodes they
     // insert; any other region is replaced whole. A finished reply's mermaid
     // fences draw once merged; the streaming reply (convlive) keeps them
@@ -514,6 +523,8 @@
     if (name === "entries") mergeEntriesRegion(el, html, pin);
     else if (board) {
       ins = morphBoard(el, html);
+      if (kept) boardKeepSettle(kept, el, ins);
+      if (window.wbHistory && window.wbHistory.sweep) { window.wbHistory.sweep(); ins.forEach(watchBoard); }
       ins.forEach(function (n) {
         // Materialize the reader's older pages before restoring disclosures
         // and frame heights, including immutable panel versions off the tail.
@@ -553,6 +564,7 @@
     restoreScroll(scroll);
     // Disclosure and frame-height restoration can move the history viewport.
     if (board && window.wbHistory) boardBoxes().forEach(function (b) { window.wbHistory.restore(b, history); });
+    if (kept) kept.h.apply();
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
       var dot = tabDot(TAB[name]);
@@ -638,6 +650,7 @@
       },
       adopted: function (n) {
         if (window.wbHistory) window.wbHistory.init(n);
+        watchBoard(n);
         restoreOpen(n);
         if (window.wbBindBoard) window.wbBindBoard(n);
         if (window.wbAgo) window.wbAgo(n);
@@ -653,6 +666,7 @@
     if (window.WsTerm) window.WsTerm.mount($("bcol"));
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
+  boardBoxes().forEach(watchBoard);
   // --- the Files pane (files.js): mounted once, loaded when first shown -------
   if (live && fpane && window.WsFiles) {
     window.WsFiles.mount(fpane, {
@@ -984,6 +998,64 @@
       list.forEach(function (a) { if (a.playState === "running") a.startTime = t; });
     });
   }
+  // Board scroll compensation: a board swap keeps what the user reads where
+  // it stands. The anchor is the topmost topic or card in view that the
+  // swap does not move (a held topic before any), and one wbHistory.keep
+  // session holds its offset from the board's scroller through the swap and
+  // the layout changes after it (growth, late frame heights, restored
+  // history pages), until they settle or the user scrolls. A maximized card
+  // is left alone, and so is a board column not shown.
+  // boardView lists the topics and cards in view, topmost first, each with
+  // its top in layout terms (a running slide's transform taken out) and
+  // its parent, before the morph.
+  function layoutY(n) {
+    var m = /^matrix(3d)?\((.*)\)$/.exec(getComputedStyle(n).transform || ""), v = m ? m[2].split(",").map(parseFloat) : null;
+    return n.getBoundingClientRect().top - (v ? (m[1] ? v[13] : v[5]) || 0 : 0);
+  }
+  function boardView(el) {
+    var c = $("bcol").getBoundingClientRect(), top = Math.max(0, c.top), bottom = Math.min(window.innerHeight, c.bottom);
+    return q("section.topic[data-topic], [data-card]", el).filter(function (n) {
+      var r = n.getBoundingClientRect();
+      return r.height > 0 && r.bottom > top && r.top < bottom;
+    }).map(function (n) { return { n: n, y: layoutY(n), parent: n.parentNode }; }).sort(function (a, b) { return a.y - b.y; });
+  }
+  // boardAnchor picks the anchor from view: the first held entry, else the
+  // first one moving(entry) does not claim, else null.
+  function boardAnchor(view, moving) {
+    var held = view.filter(function (c) { return c.held; })[0];
+    return held || view.filter(function (c) { return !moving(c); })[0] || null;
+  }
+  // boardKeep starts the session on the topmost entry in view, before the
+  // morph, and returns it with the view, each entry's offset from the
+  // scroller's top; boardKeepSettle moves it, after the morph, to the
+  // anchor, at that entry's offset from before, or ends it when the swap
+  // moved everything in view. A moving entry is one the morph inserted or
+  // kept as a changed topic's section (ins), took off the board, or moved
+  // to another parent.
+  function boardKeep(el) {
+    if (!window.wbHistory || !window.wbHistory.keep || !visible($("bcol")) || doc.querySelector("[data-card][data-max]")) return null;
+    var view = boardView(el);
+    if (!view.length) return null;
+    var h = window.wbHistory.keep(view[0].n, { observe: [el] }), s = h.scroller;
+    var top = s === doc.scrollingElement ? 0 : s.getBoundingClientRect().top + s.clientTop;
+    view.forEach(function (c) { c.off = c.y - top; });
+    return { h: h, view: view };
+  }
+  function boardKeepSettle(k, el, ins) {
+    var moved = new Set(ins);
+    var pick = boardAnchor(k.view, function (c) { return moved.has(c.n) || !el.contains(c.n) || c.n.parentNode !== c.parent; });
+    if (!pick) k.h.end();
+    else if (pick !== k.view[0]) window.wbHistory.keep(pick.n, { offset: pick.off });
+  }
+  // watchBoard puts the board's topic sections under root (root itself
+  // included) under the shared visibility source (wbHistory.watch), once
+  // each; a swap sweeps the ones it removed. wbHistory.seen reads their
+  // reports.
+  function watchBoard(root) {
+    if (!window.wbHistory || !window.wbHistory.watch || !root || root.nodeType !== 1) return;
+    var list = root.matches("section.topic[data-topic]") ? [root] : q("section.topic[data-topic]", root);
+    list.forEach(function (n) { if (!n.wbWatch) n.wbWatch = window.wbHistory.watch(n); });
+  }
 
   // --- conversation entries: merged by key, never re-rendered ----------------
   // Each entry element carries data-entry, its ring entry name; names sort in
@@ -1163,6 +1235,7 @@
         t.parentNode.replaceChild(s, t);
       });
       btn.parentNode.replaceChild(page, btn);
+      watchBoard(page);
       if (window.WsCards && window.WsCards.decorate) window.WsCards.decorate();
       restoreOpen(page);
       if (window.wbBindBoard) window.wbBindBoard(page);
@@ -5508,7 +5581,7 @@
       // A hidden tab keeps only each region's newest update and applies none;
       // showing the tab applies them (showRegions). The stream stays open, so
       // the light events (tracker) still arrive and act.
-      if (doc.hidden) {
+      if (pageHidden()) {
         delete hiddenRegions[ev.name];
         hiddenRegions[ev.name] = { hash: ev.hash, html: ev.html };
         tlHold(ev.name, ev.hash, ev.html);
@@ -5544,7 +5617,7 @@
   // showRegions applies, once each and in arrival order, the region updates
   // a hidden tab held back.
   function showRegions() {
-    if (doc.hidden) return;
+    if (pageHidden()) return;
     var p = hiddenRegions;
     hiddenRegions = {};
     Object.keys(p).forEach(function (name) { swap(name, p[name].hash, p[name].html); });
