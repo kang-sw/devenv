@@ -67,6 +67,8 @@
 //             sessions and the pinned column (use --width 1800).
 //   history-cards  Card/paging probes without navigation/control/live checks.
 //   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
+//   history-regressions  Native RO delivery for renderer-produced closed log
+//             pages, collapse cancellation, and real Tab into clipped summaries.
 //
 // History samples retain rAF geometry as diagnostic evidence and assert <=1px
 // on rAF -> zero-delay-task (post-paint) geometry, after ResizeObserver runs.
@@ -218,6 +220,14 @@ function seedSession(tmp, bin, label, n, historyEntries) {
       `<wb:panel recap="History panel ${i + 1}"><p>History payload ${i + 1}: delayed content height fixture.</p></wb:panel>`).join("");
     run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key,
       commands: `<wb:topic name="HISTORY">${entries}</wb:topic>` })], { cwd: proj, env });
+    // Renderer-produced closed log runs exercise size-neutral page joins:
+    // newest 47 folded rows + three visible tail rows; older pages fold whole.
+    for (const [name, count] of [['LOGCHAIN', 200], ['LOGCANCEL', 600]]) {
+      const logs = Array.from({ length: count }, (_, i) => `<wb:log>Folded history line ${i + 1}</wb:log>`).join('');
+      run(bin, ['call', 'whiteboard.update', JSON.stringify({
+        session_key: fer.session_key, commands: `<wb:topic name="${name}">${logs}</wb:topic>`
+      })], { cwd: proj, env });
+    }
     // Keep topics on both sides, so collapse compensation cannot be masked
     // by the document's scroll-range clamp.
     run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: topicCommands(n + 1) })], { cwd: proj, env });
@@ -329,7 +339,39 @@ const INIT = () => {
   // same-origin page then reuses, so the frame's URL is not checked here.
   // The body frames are grandchildren and are skipped.
   if (window.top !== window && window.parent !== window.top) return;
-  const bh = (window.__bh = { sockets: [], board: null, writes: [] });
+  const bh = (window.__bh = { sockets: [], board: null, writes: [], resizeDeliveries: [], historyLoads: [], observerErrors: [], observerErrorDetails: [] });
+  // Observe actual native deliveries; never invoke a callback or re-observe
+  // on the harness's behalf. Filter to the history's own observer, excluding
+  // the shared keep observer which also watches history-live.
+  window.addEventListener('error', (e) => {
+    if (!/ResizeObserver.*loop/i.test(e.message || '')) return;
+    bh.observerErrors.push(e.message);
+    bh.observerErrorDetails.push({ message: e.message, t: performance.now(), phase: bh.regressionPhase || 'startup',
+      lastHistoryDelivery: bh.resizeDeliveries.at(-1)?.id || null });
+  });
+  const NativeResize = window.ResizeObserver;
+  window.ResizeObserver = class extends NativeResize {
+    constructor(callback) {
+      super((entries, observer) => {
+        const targets = entries.filter((e) => e.target.matches?.('.history-live') &&
+          e.target.closest('.wb-history')?._wbHistoryObserver === observer);
+        const snapshot = (live) => {
+          const h = live.closest('.wb-history');
+          return { name: h.dataset.history, pages: h.querySelectorAll('template[data-history-page]').length,
+            rows: live.querySelectorAll('.wb-entry').length, height: live.scrollHeight, steps: h._wbHistorySteps };
+        };
+        const record = targets.length ? { id: bh.resizeDeliveries.length + 1, t: performance.now(),
+          before: targets.map((e) => snapshot(e.target)) } : null;
+        const previous = bh.activeResize;
+        if (record) { bh.resizeDeliveries.push(record); bh.activeResize = record.id; }
+        try { callback.call(observer, entries, observer); }
+        finally {
+          if (record) record.after = targets.map((e) => snapshot(e.target));
+          bh.activeResize = previous;
+        }
+      });
+    }
+  };
   const Native = window.WebSocket;
   class Captured extends Native {
     constructor(...a) {
@@ -355,6 +397,17 @@ const INIT = () => {
 // IN_PAGE installs the in-page half of the shared helpers on window.__bh.
 const IN_PAGE = () => {
   const bh = window.__bh;
+  // The shell can reuse its child's initial about:blank window with a NEW
+  // Document. Bind document events here, not in that initial document's INIT.
+  if (bh.historyLoadDocument !== document) {
+    bh.historyLoadDocument = document;
+    document.addEventListener('wbhistoryload', (e) => {
+      const h = e.detail?.root;
+      if (h?.matches('.wb-history')) bh.historyLoads.push({ t: performance.now(), name: h.dataset.history,
+        delivery: bh.activeResize || null, pages: h.querySelectorAll('template[data-history-page]').length,
+        rows: h.querySelectorAll('.history-live .wb-entry').length });
+    });
+  }
   const q = (sel, root) => Array.from((root || document).querySelectorAll(sel));
   bh.board_ = () => document.getElementById("r-board") || document.querySelector("body.full .grid > main");
   bh.kind = () => (document.body.classList.contains("full") ? "standalone" : document.getElementById("tabbar") ? "adapter" : "board");
@@ -779,9 +832,9 @@ async function scenarioObserver(ctx) {
 const HISTORY_PAGE = () => {
   const bh = window.__bh;
   bh.samplePostPaint = true;
-  bh.history = () => document.querySelector('.wb-history[data-history="HISTORY"]');
-  bh.historyState = () => {
-    const h = bh.history(), live = h.querySelector('.history-live'), clip = h.querySelector('.history-clip');
+  bh.history = (name = 'HISTORY') => Array.from(document.querySelectorAll('.wb-history')).find((h) => h.dataset.history === name);
+  bh.historyState = (name = 'HISTORY') => {
+    const h = bh.history(name), live = h.querySelector('.history-live'), clip = h.querySelector('.history-clip');
     const r = clip.getBoundingClientRect();
     return { steps: h._wbHistorySteps, pages: h.querySelectorAll('template[data-history-page]').length,
       rows: live.querySelectorAll('.wb-entry').length, live: live.scrollHeight, height: r.height,
@@ -822,7 +875,7 @@ async function scenarioHistory(ctx) {
   const dir = path.resolve(ctx.args.artifacts || path.join(os.tmpdir(), `board-history-${Date.now()}`));
   fs.mkdirSync(dir, { recursive: true });
   const report = { url: ctx.args.url, kind, viewport: [ctx.width, ctx.height], measurements: [], omissions: [
-    'This long-panel fixture does not exercise an underfilled multi-resize page chain (Node policy-test scope).',
+    'Size-neutral log-chain and keyboard regressions run separately in history-regressions.',
     'Standalone has no stream, swap, pinned column or doc-frame iframes; its real inline payload layout is used for late heights.'
   ] };
   if (kind !== 'standalone') report.omissions.pop();
@@ -1192,12 +1245,170 @@ async function scenarioHistory(ctx) {
   }
 }
 
+// Remediation verification, not an independent review: real renderer output,
+// native RO/IO deliveries and actual sequential keyboard focus on both hosts.
+async function scenarioHistoryRegressions(ctx) {
+  const { page, tab, kind } = await openBoard(ctx);
+  const dir = path.resolve(ctx.args.artifacts || path.join(os.tmpdir(), `board-history-regressions-${Date.now()}`));
+  fs.mkdirSync(dir, { recursive: true });
+  const report = { url: ctx.args.url, kind, measurements: [], omissions: [] };
+  const measure = (label, data) => { report.measurements.push({ label, ...data }); log(`${label}: ${JSON.stringify(data)}`); };
+  const capture = async (name) => { const p = path.join(dir, `${kind}-${name}.png`); await tab.screenshot({ path: p }); log(`capture: ${p}`); };
+  const paint = () => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0))));
+  try {
+    await page.evaluate(HISTORY_PAGE);
+    await page.evaluate(() => { window.__bh.regressionPhase = 'keyboard'; });
+    assert(await page.evaluate(() => ['HISTORY', 'LOGCHAIN', 'LOGCANCEL'].every((n) => !!window.__bh.history(n))),
+      'seed renderer-produced panel/log histories with serve --history-entries 180');
+
+    // The old failure was a real Tab into the first clipped summary, not an
+    // explicit focus() on the desired row or a synthetic focusin callback.
+    await page.evaluate(() => window.__bh.positionHistory());
+    await waitQuiet(page);
+    await page.locator('.wb-history[data-history="HISTORY"] > .history-older').focus();
+    const keyboardBefore = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), clip = h.querySelector('.history-clip').getBoundingClientRect();
+      const node = h.querySelector('.history-live .entry-panel > summary'), r = node.getBoundingClientRect();
+      bh.expectedTab = node;
+      return { buttonFocused: document.activeElement === h.querySelector('.history-older'),
+        panel: node.closest('.entry-panel').id, top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
+        clipped: r.bottom <= clip.top, clipScrollTop: h.querySelector('.history-clip').scrollTop };
+    });
+    measure('keyboard-before-tab', keyboardBefore);
+    assert(keyboardBefore.buttonFocused && keyboardBefore.clipped && keyboardBefore.clipScrollTop === 0, 'Tab fixture must start at load-more with the next summary clipped');
+    await capture('before-tab');
+    await tab.keyboard.press('Tab');
+    await paint();
+    await sleep(100);
+    const keyboardAfter = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), node = document.activeElement, r = node.getBoundingClientRect();
+      const clip = h.querySelector('.history-clip').getBoundingClientRect(), s = bh.scroller();
+      return { expected: node === bh.expectedTab, summary: node.matches('.entry-panel > summary'),
+        panel: node.closest('.entry-panel')?.id, top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
+        viewTop: bh.viewTop(s), viewBottom: bh.viewBottom(s), clipScrollTop: h.querySelector('.history-clip').scrollTop,
+        steps: h._wbHistorySteps };
+    });
+    measure('keyboard-after-tab', keyboardAfter);
+    await capture('after-tab');
+    assert(keyboardAfter.expected && keyboardAfter.summary && keyboardAfter.top >= keyboardAfter.clipTop - 1 &&
+      keyboardAfter.bottom <= keyboardAfter.clipBottom + 1 && keyboardAfter.top >= keyboardAfter.viewTop - 1 &&
+      keyboardAfter.bottom <= keyboardAfter.viewBottom + 1 && keyboardAfter.clipScrollTop === 0,
+      'actual Tab focused a summary outside the clip/page or scrolled the clip');
+    await page.evaluate(() => document.activeElement.blur());
+
+    async function settledLog(name) {
+      await page.evaluate((name) => {
+        const bh = window.__bh, s = bh.scroller(), topic = bh.history(name).closest('.topic');
+        s.scrollTop += topic.getBoundingClientRect().top - bh.viewTop(s) - 100;
+      }, name);
+      await page.waitForFunction((name) => window.__bh.resizeDeliveries.some((d) => d.after?.some((r) => r.name === name && r.steps === 1)), name, { timeout: 2000 });
+      await waitQuiet(page);
+      // Ensure an initial observer notification cannot be mistaken for a
+      // materialization-triggered delivery after our click.
+      await sleep(100);
+      return page.evaluate((name) => {
+        const bh = window.__bh, h = bh.history(name), live = h.querySelector('.history-live');
+        return { ...bh.historyState(name), folded: !!live.querySelector(':scope > details.run-fold:not([open])'),
+          tailRows: live.querySelectorAll(':scope > .wb-entry').length,
+          deliveries: bh.resizeDeliveries.filter((d) => d.after?.some((r) => r.name === name)).length };
+      }, name);
+    }
+    const clickLog = (name) => page.evaluate((name) => {
+      const bh = window.__bh, before = bh.historyState(name);
+      bh.history(name).querySelector('.history-older').click();
+      return { before, after: bh.historyState(name) };
+    }, name);
+    const boundedClick = (r) => {
+      assert(r.before.pages - r.after.pages === 1 && r.after.rows === r.before.rows + 50,
+        'closed-run click must materialize exactly one 50-row page synchronously');
+      assert(r.after.steps === 2 && Math.abs(r.after.live - r.before.live) <= 1 && r.after.live < 1280,
+        'closed-run merge must be size-neutral and leave the expanded clip underfilled');
+    };
+
+    await page.evaluate(() => { window.__bh.regressionPhase = 'neutral-chain'; });
+    const initial = await settledLog('LOGCHAIN');
+    measure('neutral-chain-initial', initial);
+    assert(initial.rows === 50 && initial.pages >= 3 && initial.folded && initial.tailRows === 3 && initial.deliveries >= 1,
+      'need settled, renderer-produced 47-folded/3-tail-row history and at least three older pages');
+    await capture('before-neutral-chain');
+    const click = await clickLog('LOGCHAIN');
+    boundedClick(click);
+    measure('neutral-chain-click', click);
+    await page.waitForFunction(() => {
+      const s = window.__bh.historyState('LOGCHAIN'); return s.pages === 0 || s.live >= s.steps * 640;
+    }, null, { timeout: 3000 });
+    await sleep(150);
+    const drained = await page.evaluate(() => window.__bh.historyState('LOGCHAIN'));
+    const chain = await page.evaluate(() => ({
+      loads: window.__bh.historyLoads.filter((r) => r.name === 'LOGCHAIN'),
+      deliveries: window.__bh.resizeDeliveries.filter((d) => d.before.some((r) => r.name === 'LOGCHAIN'))
+    }));
+    measure('neutral-chain-drained', { state: drained, ...chain });
+    assert(drained.pages === 0 && drained.rows === initial.rows + initial.pages * 50 && Math.abs(drained.live - initial.live) <= 1,
+      'size-neutral folded chain did not drain all pages without changing height');
+    assert(chain.loads.length === initial.pages && chain.loads[0].delivery === null &&
+      chain.loads.slice(1).every((l) => l.delivery !== null) && new Set(chain.loads.slice(1).map((l) => l.delivery)).size === initial.pages - 1,
+      'continuation must load one page per distinct actual native RO delivery, never a synchronous multi-page loop');
+    for (const d of chain.deliveries) {
+      const b = d.before.find((r) => r.name === 'LOGCHAIN'), a = d.after.find((r) => r.name === 'LOGCHAIN');
+      assert(b.pages - a.pages <= 1, 'one native RO callback materialized multiple pages');
+    }
+    await capture('after-neutral-chain');
+
+    // A longer real log stream leaves pages pending while native IO arms
+    // the newly expanded subscription. No callbacks are called manually.
+    await page.evaluate(() => { window.__bh.regressionPhase = 'cancellation'; });
+    const cancelInitial = await settledLog('LOGCANCEL');
+    assert(cancelInitial.pages >= 8 && cancelInitial.rows === 50, 'need enough older pages to cancel a running chain');
+    const cancelClick = await clickLog('LOGCANCEL');
+    boundedClick(cancelClick);
+    await page.evaluate(() => {
+      const bh = window.__bh; bh.cancelVisible = false;
+      bh.cancelWatch = window.wbHistory.watch(bh.history('LOGCANCEL').closest('.topic'), {
+        onChange: (r) => { if (r.visible) bh.cancelVisible = true; }
+      });
+    });
+    await page.waitForFunction(() => window.__bh.cancelVisible, null, { timeout: 2000 });
+    const exit = await page.evaluate(() => {
+      const bh = window.__bh, topic = bh.history('LOGCANCEL').closest('.topic'), s = bh.scroller();
+      const before = bh.historyState('LOGCANCEL');
+      s.scrollTop += topic.getBoundingClientRect().bottom - bh.viewTop(s) + 40;
+      return before;
+    });
+    assert(exit.pages > 0 && exit.steps === 2, 'cancellation fixture drained before its visible->out transition');
+    await page.waitForFunction(() => window.__bh.history('LOGCANCEL')._wbHistorySteps === 1, null, { timeout: 2000 });
+    const collapsed = await page.evaluate(() => window.__bh.historyState('LOGCANCEL'));
+    await sleep(350);
+    const canceled = await page.evaluate(() => {
+      const bh = window.__bh; bh.cancelWatch.unwatch();
+      return { ...bh.historyState('LOGCANCEL'), pending: !!bh.history('LOGCANCEL')._wbHistoryReobserve };
+    });
+    measure('neutral-chain-canceled', { initial: cancelInitial, click: cancelClick, exit, collapsed, settled: canceled });
+    assert(collapsed.pages > 0 && canceled.pages === collapsed.pages && canceled.rows === collapsed.rows && canceled.steps === 1 && !canceled.pending,
+      'collapsed history continued materializing older pages or left a pending reobserve');
+    await capture('after-cancellation');
+    const observerErrors = await page.evaluate(() => window.__bh.observerErrors);
+    assert(observerErrors.length === 0, `native ResizeObserver loop errors: ${observerErrors.join(' | ')}`);
+  } catch (e) {
+    report.failure = e.message;
+    throw e;
+  } finally {
+    report.errors = ctx.errors;
+    report.native = await page.evaluate(() => ({ deliveries: window.__bh.resizeDeliveries,
+      loads: window.__bh.historyLoads, observerErrors: window.__bh.observerErrors,
+      observerErrorDetails: window.__bh.observerErrorDetails })).catch(() => null);
+    fs.writeFileSync(path.join(dir, 'measurements.json'), JSON.stringify(report, null, 2));
+    log(`history regression artifacts: ${dir}`);
+  }
+}
+
 const SCENARIOS = {
   keep: scenarioKeep,
   observer: scenarioObserver,
   history: scenarioHistory,
   'history-cards': (ctx) => scenarioHistory({ ...ctx, cardsOnly: true }),
   'history-paint': (ctx) => scenarioHistory({ ...ctx, navigationOnly: true }),
+  'history-regressions': scenarioHistoryRegressions,
 };
 
 // --- main ----------------------------------------------------------------------
