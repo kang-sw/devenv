@@ -217,7 +217,8 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	refresh := r.URL.Query().Get("refresh") == "1" && (r.Header.Get("Sec-Fetch-Site") == "same-origin" || sameOrigin(r))
+	// Cross-origin pages cannot set the custom header without a CORS preflight, which the daemon does not grant.
+	refresh := r.URL.Query().Get("refresh") == "1" && (r.Header.Get("Sec-Fetch-Site") == "same-origin" || sameOrigin(r) || r.Header.Get("X-WS-Usage-Refresh") == "1")
 	d.planUsage.query(r.Context(), refresh)
 	_ = json.NewEncoder(w).Encode(map[string]any{"entries": d.planUsage.entries(), "warnPercent": bandWarnPercent, "critPercent": bandCritPercent})
 }
