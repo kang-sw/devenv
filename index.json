@@ -501,7 +501,14 @@
       "registered_at": "2026-11-13T10:12:43Z"
     },
     "261113-feat-ws-dashboard-session-rail-tree": {
-      "registered_at": "2026-11-13T14:37:02Z"
+      "registered_at": "2026-11-13T14:37:02Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T15:27:17Z"
+      }
     },
     "261113-feat-ws-pi-worker-marker-env-guard": {
       "registered_at": "2026-11-13T01:46:15Z"
