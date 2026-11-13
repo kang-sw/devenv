@@ -86,29 +86,32 @@ regression without assuming the multiple builds caused it.
 
 ## Decisions
 
-- priority: top (owner 2026-11-13). This blocks all other Windows work.
+- Priority: top (owner 2026-11-13, blocks all Windows work)
 - **Owner direction, 2026-11-13:** isolate Pi subagent process lifetime from
   the dashboard daemon as for a holder-hosted Claude lead. Dev reruns and
   release replacements rejoin the same running turn. **Rejected:** merely
   warning/refusing restarts while turns run, including other projects' turns.
-- **One bounded Phase 1, one worker:** land holder/rejoin behavior and the
-  small dead-process reconciliation together. A stale-state-only patch does
-  not remove the Windows blocker. Reuse existing holder/replay infrastructure;
-  no generic process-supervision, mailbox or dashboard redesign, exhaustive
-  fault-matrix project, or separate preliminary phase.
+- **Lead scope cuts, 2026-11-13:** simplest correct implementation for speed.
+  Phase 1 is the small stale-state fix; Phase 2 reuses holder/rejoin and the
+  existing publish/settle path. No new outbox, mailbox deduplication receipts,
+  recipient-side idempotent report IDs or generic delivery redesign. Accept
+  the documented downgrade consequence and one possible duplicate completion
+  mail at the append/mark crash boundary; do not expand the worker test matrix.
 - **Pi RPC fits the holder:** hosted Pi leads already use it
   (`agents-plugin-tool/internal/wsagent/pi.go:364-393`). Move holder selection
   out of `LeadSpec` so spawned Pi workers can use it without becoming leads.
   Preserve restricted tools/instructions, delegate keys and MCP bridges.
   Use a distinct `pi-worker` holder kind for ownership/orphan cleanup; leave
   unrelated non-lead backends alone.
-- Rejoin recorded workers before scanning/releasing input. Persist holder
-  identity, applied sequence, active turn/send coverage, reply and held-parent
-  result needed to resume. Do not interrupt a live held `TurnOpen`, repeat its
-  prompt or launch a second process. Map worker `agent_start` too (currently
-  lead-only: `agents-plugin-tool/internal/wsagent/pi.go:690-695`). Rebuild old
-  lines quietly, apply new lines once, and settle on `agent_settled`, not
-  prompt acceptance/`agent_end`; retain immediate refused/handled-no-run cases.
+- Rejoin recorded workers before scanning/releasing input. Reuse optional
+  holder identity/applied-sequence fields and reconstruct turn/send coverage,
+  reply and parent holds from existing records and replay, persisting only
+  what rejoin strictly needs. Do not interrupt a live held `TurnOpen`, repeat
+  its prompt or launch a second process. Map worker `agent_start` too
+  (currently lead-only: `agents-plugin-tool/internal/wsagent/pi.go:690-695`).
+  Rebuild old lines quietly, apply new lines once, and settle on
+  `agent_settled`, not prompt acceptance/`agent_end`; retain immediate
+  refused/handled-no-run cases.
 - Keep holder protocol 1 and its existing bounded ring. Reuse partial-line,
   replay-watermark and `get_state` probing. After a gap reconcile with Pi's
   saved session/RPC messages; if the final result cannot be reconstructed,
@@ -120,26 +123,39 @@ regression without assuming the multiple builds caused it.
   on actual process end/close, not daemon detach. Forward calls discover the
   current endpoint instead of retaining an obsolete port. Reissue disconnected
   waits; never blindly retry side-effecting spawn/send calls.
-- Scope delivery changes to **Pi completion reports**: stable persisted
-  turn/report IDs, a retryable pending report for either parent kind, and
-  recipient deduplication before acknowledging handoff. Mail deduplication
-  must survive mail claim/drain. Recover nested acceptance/steering and parent
-  holds; retain wait-vs-report ownership, with lead waits still leaving one
-  completion mail. This is not a general mailbox exactly-once API project.
+- Reuse `publish`/settle and the existing completion-mail append. Persist the
+  **last reported turn ID** on the agent record so rejoin replay does not
+  normally report a completed turn twice. Mark it after reporting: a daemon
+  crash exactly between mailbox append and that mark may duplicate **one
+  completion mail**, explicitly accepted. This is not an exactly-once
+  guarantee. Keep existing persisted nested pending-report entries and
+  wait-vs-report ownership; add no steering persistence beyond what rejoin
+  strictly needs. Lead waits still leave the normal completion mail.
 - If the process is genuinely gone, settle interrupted once, show **idle with
   the interruption error**, clear stale turn/process/replay flags, then drain
   queued input. `pi.send` starts a new turn on the saved session. Do not clear
   a genuinely new queued turn, or mistake a delayed scan/unattached live holder
   for a dead process. Preserve explicit stop and close-descendants-first.
-- **Compatibility: T2.** The recovery contract changes non-additively:
-  `turn_open` no longer means interrupt-on-load, and durable turn/report/token
-  state must survive writers. Existing struct round-trips discard unknown
-  fields (`agents-plugin-tool/internal/wsagent/record.go:195-226`), so optional
-  fields alone are not T0. Raise agent `schema_version` from 1 to 2 with
-  newer-schema write refusal; migrate unheld legacy records through
-  interrupted/idle recovery. Version/guard any non-additively changed mailbox
-  state likewise. Land only in a minor bump; unsupported old downgrade
-  writers are not a supported recovery path. No holder protocol change.
+- **Additive implementation, no schema bump:** holder identity, applied
+  sequence, last reported turn ID and capability secret are optional record
+  fields; reuse existing ones where present. Keep `schema_version` unchanged.
+  A legacy record, or one rewritten by an older daemon that dropped those
+  fields, takes Phase 1's process-gone -> interrupted once -> idle fallback.
+  **Accepted downgrade consequence:** an older daemon interrupts the turn and
+  leaves its held worker process orphaned until the newer daemon's
+  `pi-worker` orphan sweep. Do not claim downgrade preserves running work.
+- **Compatibility: retain T2 under the current manual, despite the requested
+  T0 classification.** Scenarios 1/2 introduce no removed tools/arguments;
+  scenario 3 needs no tool-list change, so reconnect alone does not force T1.
+  The actual conflict is scenario 4's older-writer field loss
+  (`ai-docs/manuals/release-compatibility.md:51`) and the explicit T0 condition
+  that read-modify-write preserves unknown fields (`:58-60`). Existing record
+  round-trips drop them (`agents-plugin-tool/internal/wsagent/record.go:195-226`).
+  Optional fields plus an accepted fallback do not meet that written condition.
+  No schema/protocol bump or compatibility-guard work is assigned to this
+  worker slice; the manual's T2 minor/version requirement (`:73-75`) conflicts
+  with the requested no-bump release. Resolve the policy exception below at
+  the design/release gate rather than silently relaxing the manual.
 
 ## Constraints
 
@@ -155,13 +171,14 @@ regression without assuming the multiple builds caused it.
   | `agents-plugin-tool/internal/` | `ai-docs/manuals/release-compatibility.md` |
 
 - Scope: `agents-plugin-tool/internal/wsagent/`, Pi report/forwarding code in
-  `internal/mcp/`, narrowly needed `internal/wsmailbox/` deduplication, holder
-  integration/tests in `internal/wsholder/`, and daemon wiring/tests only as
-  needed. Keep shipped output downstream-neutral and secrets out of logs/mail.
+  `internal/mcp/`, holder integration/tests in `internal/wsholder/`, and daemon
+  wiring/tests only as needed. No mailbox-store changes. Keep shipped output
+  downstream-neutral and secrets out of logs/mail.
 - Builds/tests run on `sys_lock` remote **w5090**, holding its resource lock.
-  Windows holder behavior also requires a **local Windows check**: job
-  breakaway is requested, refusal retries inside the job and advertises
-  `restart_safe: false` (`agents-plugin-tool/internal/wsholder/spawn_windows.go:12-32`,
+  The **local Windows live check belongs to the lead/owner, not the worker
+  gate**. Check job breakaway/fallback: refusal retries inside the job and
+  advertises `restart_safe: false`
+  (`agents-plugin-tool/internal/wsholder/spawn_windows.go:12-32`,
   `agents-plugin-tool/internal/wsholder/manager.go:583-588`). Do not hide that
   limitation or treat remote Linux results as Windows isolation evidence.
 - Preserve transcript/session identity, delegate restrictions, explicit
@@ -170,42 +187,63 @@ regression without assuming the multiple builds caused it.
 
 ## Phases
 
-### Phase 1: Pi workers and nested children rejoin after daemon replacement
+### Phase 1: Reconcile dead-process state before accepting another turn
 
-- **Outcome:** one worker lands the existing-holder integration, minimal
-  durable turn/report/token recovery, and stale-state cleanup described in
-  Decisions as one reviewable slice. Normal shutdown detaches workers; the
-  successor rejoins the same processes across sessions/projects, consumes
-  remaining RPC output, and reports each completed turn once. A turn ending
-  during downtime is recovered. No stale-state-only milestone or prerequisite
-  refactor; retain the current holder protocol and profile boundaries.
-- **Go acceptance tests:**
+Independent small defensive fix; Phase 2 depends on it. This phase does not
+claim that running Pi work survives a restart.
+
+- **Outcome:** legacy/unheld records whose process is gone settle interrupted
+  once, show idle with the interruption error, and clear stale process/turn/
+  replay flags. Settle before draining queued input; never clear the genuinely
+  new turn that input starts. Already settled/closed records get no synthetic
+  interruption. A subsequent `pi.send` actually starts a new turn.
+- **Go tests:** `TestPiProcessGoneIsIdleAndSendStartsNewTurn` reproduces the
+  contradictory list/wait state and verifies idle/error plus an actually
+  started follow-up, not merely a queue append. Preserve queued-next-turn
+  ordering in `TestRestartSettlesTheCutTurnBeforeTheNextStarts` and legacy
+  interruption coverage in `TestDaemonExitReportsTheCutTurnAsInterrupted`.
+- **Verification:** under the w5090 lock, run the focused tests and
+  `go test ./internal/wsagent ./internal/mcp` from `agents-plugin-tool/`;
+  record the observed list/wait/send transition.
+
+### Phase 2: Rejoin held Pi workers and their nested children
+
+- **Outcome:** reuse the hosted Pi lead holder transport with a distinct
+  `pi-worker` kind while retaining worker tools, delegate key and MCP bridge.
+  Shutdown detaches; the successor rejoins across sessions/projects before
+  releasing input. Restore nested tokens and discover the current endpoint.
+  Replay the remaining turn and use existing publish/settle plus the last
+  reported turn marker; retain the accepted append/mark duplicate-mail window.
+  Sweep orphan worker holders without affecting other holder consumers.
+- **Go tests, bounded to these scenarios:**
   - `TestPiDaemonRestartMidTurnCompletesWithOneCompletionMail`: real holder
-    plus deterministic fake Pi RPC child; replace an isolated daemon mid-turn,
-    assert identical holder/child PID and session, final reply via wait and
-    exactly one mail, no repeated prompt/interruption. Include abrupt daemon
-    loss, completion while detached and another restart after delivery.
-  - `TestPiNestedDaemonRestartRejoinsBothDepths`: worker and leaf survive;
-    retained credentials/endpoint discovery permit list/wait/send and legal
-    spawns after rejoin, depth-2 spawn remains refused, leaf completion reaches
-    its parent once, held parent result releases, and explicit stop closes
-    descendants. Cover an endpoint-port change and both parent load orders.
-  - `TestPiProcessGoneIsIdleAndSendStartsNewTurn`: missing holder/exited child
-    yields wait interrupted, list idle/error and an actually started follow-up
-    turn, not merely queued text. Cover delayed scans, queued next input and
-    repeated reload without duplicate interruption. Retain legacy/unheld
-    coverage from `TestRestartSettlesTheCutTurnBeforeTheNextStarts` and
-    `TestDaemonExitReportsTheCutTurnAsInterrupted`.
-- **Focused regressions:** partial/gapped replay plus idle `get_state` probe;
-  final reply and held-parent recovery; report restart immediately before/
-  after handoff, including claimed mail and nested steering; schema-1
-  migration/schema-2 reload/newer-schema write refusal; worker tool restrictions
-  and unchanged hosted-lead recovery. Extend existing fixtures rather than
-  creating a generic new test framework.
-- **Verification:** under the w5090 lock, run the named tests repeatedly,
-  `go test -race ./internal/wsagent ./internal/wsholder ./internal/mcp ./internal/wsmailbox`,
-  `go test ./...` and `go build ./cmd/ws-mcp` from `agents-plugin-tool/`.
-  Locally on Windows, use isolated daemon/holder state to check a mid-turn
-  replacement, same process identities, one completion mail, nested reconnect,
-  and breakaway/fallback reporting. Record revision, platform, commands and
-  results; missing Windows evidence remains an explicit acceptance gap.
+    and deterministic fake Pi RPC child; normal shutdown mid-turn and turn
+    finished during downtime. Assert the same holder/child PID and session,
+    final reply via wait, one completion mail, no repeated prompt/interruption.
+    Add **one** abrupt-daemon-loss case; no repeat/second-restart matrix.
+  - `TestPiNestedDaemonRestartRejoinsBothDepths`: worker and leaf rejoin;
+    nested `pi.*` works after an endpoint-port change, and depth-2 spawn
+    remains refused. Preserve existing pending-report/parent-hold behavior.
+  - Extend `TestPiProcessGoneIsIdleAndSendStartsNewTurn` for a missing holder
+    and a holder whose child exited: interrupted once -> idle/error -> send
+    starts a new turn. A not-yet-complete scan is not evidence of process loss.
+  - Legacy record fallback: omit holder fields, including a fixture rewritten
+    by the old record shape that drops optional recovery fields; verify Phase
+    1 behavior with unchanged schema. Confirm the newer `pi-worker` sweep
+    cleans the orphan left by the documented downgrade.
+- **Verification:** under the w5090 lock, run those focused cases,
+  `go test ./internal/wsagent ./internal/wsholder ./internal/mcp` and
+  `go build ./cmd/ws-mcp` from `agents-plugin-tool/`; record revision/commands/
+  results. No new fault-injection matrix or race-test sweep. The lead/owner
+  separately performs the local Windows live replacement check (process
+  identity, completion mail, nested reconnect and breakaway/fallback); that
+  check is not a worker landing gate.
+
+## Open Decision Queue
+
+- **Release-policy exception:** authorize T0/no schema bump for this explicitly
+  accepted lossy-downgrade fallback despite the manual's unknown-field
+  preservation condition, or retain the manual's T2 minor/version requirement?
+  All technical scope cuts above are settled; this is only authority to waive
+  the current release rule, not a request to revisit the accepted downgrade
+  or duplicate-mail trade-offs.
