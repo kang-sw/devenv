@@ -106,14 +106,16 @@
   // p (its path, search, and hash on the proxy origin): a dev server's page
   // is its own URL; a static page is its workspace path, the registered
   // directory (relative to the session root) and the decoded file path. A
-  // decoded name holding a control character stays encoded.
+  // decoded name holding a control character or a ".." step stays encoded:
+  // the page posts the path, and an encoded "%2F.." must not climb out of
+  // the registered directory once decoded.
   function pageURL(w, p) {
     if (!w.reg) return "";
     if (w.reg.kind === "dev") return cut(oneLine(w.reg.base + p), URL_BYTES);
     var m = /^([^?#]*)(.*)$/.exec(p), name = m[1].replace(/^\//, "");
     try {
       var d = decodeURIComponent(name);
-      if (!/[\x00-\x1f\x7f]/.test(d)) name = d;
+      if (!/[\x00-\x1f\x7f]/.test(d) && !/(^|[\/\\])\.\.([\/\\]|$)/.test(d)) name = d;
     } catch (e) { /* kept encoded */ }
     return cut(oneLine((w.reg.base ? w.reg.base + "/" : "") + name + m[2]) || ".", URL_BYTES);
   }
@@ -121,10 +123,15 @@
   // static page's workspace path when it is a file at the top of the
   // registered directory (a deeper one would register a narrower directory
   // on restore, on another proxy origin), else null (the record stays).
+  // The decoded name must still be one file name: the page posts the path,
+  // and a "..%2Fother%2Fx.html" would otherwise point the restored card at
+  // another file of the root.
   function record(w, p) {
     if (w.reg.kind === "dev") return { url: pageURL(w, p) };
-    var name = /^\/([^?#\/]+)(?:[?#]|$)/.exec(p);
+    var name = /^\/([^?#\/]+)(?:[?#]|$)/.exec(p), d;
     if (!name) return null;
+    try { d = decodeURIComponent(name[1]); } catch (e) { return null; }
+    if (/[\/\\\x00-\x1f\x7f]/.test(d) || d === "." || d === "..") return null;
     return { path: pageURL(w, "/" + name[1]) };
   }
 

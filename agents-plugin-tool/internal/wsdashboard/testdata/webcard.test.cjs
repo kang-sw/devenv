@@ -303,6 +303,16 @@ test('the record follows the page the card shows', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(st.c.data)), { path: 'docs/site/other.html' });
   ready(s, st, '/sub/deeper.html');
   assert.deepEqual(JSON.parse(JSON.stringify(st.c.data)), { path: 'docs/site/other.html' }, 'a deeper page keeps the record');
+  // The page posts the path: an encoded separator or a dot step never moves
+  // the record out of the registered directory.
+  for (const forged of ['/..%2Fother%2Fx.html', '/..%5Cx.html', '/sub%2Fx.html', '/..', '/%2E%2E', '/.', '/%E0%A4%A.html', '/a%00.html']) {
+    ready(s, st, forged);
+    assert.deepEqual(JSON.parse(JSON.stringify(st.c.data)), { path: 'docs/site/other.html' }, 'forged ' + forged);
+  }
+  ready(s, st, '/..%2Fother%2Fx.html');
+  assert.equal(st.c.w.bar.value, 'docs/site/..%2Fother%2Fx.html', 'a ".." step stays encoded in the address');
+  ready(s, st, '/caf%C3%A9.html');
+  assert.deepEqual(JSON.parse(JSON.stringify(st.c.data)), { path: 'docs/site/café.html' });
 });
 
 test('the address bar moves the wrapper on the same dev origin and registers otherwise', () => {
