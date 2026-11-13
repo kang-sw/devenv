@@ -3,6 +3,7 @@ package mcp
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -29,12 +30,33 @@ const harnessSessionMax = 4096
 // test seam).
 var hostedProcessAlive = wsstate.ProcessAlive
 
+// harnessProcessParent is the process-table lookup behind harnessPID (a test
+// seam): the parent PID and image name of a process.
+var harnessProcessParent = wsstate.ProcessParent
+
 // harnessPID is the PID of this server's harness as its launcher reported
-// it; zero when it reported none.
+// it, with a Windows shell wrapper skipped (see wrappedHarnessPID); zero when
+// it reported none. Every consumer of the harness PID reads it here, so they
+// all see the same value.
 func (s *Server) harnessPID() int {
 	pid, _ := strconv.Atoi(strings.TrimSpace(s.getenv(envHarnessPID)))
-	if pid < 0 {
+	if pid <= 0 {
 		return 0
+	}
+	return wrappedHarnessPID(runtime.GOOS, pid, harnessProcessParent)
+}
+
+// wrappedHarnessPID is pid, or on Windows, when pid is a cmd.exe process, its
+// parent. A harness there commonly starts a stdio server as `cmd.exe /c ...`,
+// so the process that started the launcher is that wrapper, not the harness.
+// Exactly one level is skipped, so a nested harness is not mistaken for the
+// outer one, and any lookup failure keeps pid.
+func wrappedHarnessPID(goos string, pid int, parentOf func(int) (int, string, bool)) int {
+	if goos != "windows" {
+		return pid
+	}
+	if parent, image, ok := parentOf(pid); ok && parent > 0 && strings.EqualFold(image, "cmd.exe") {
+		return parent
 	}
 	return pid
 }

@@ -197,7 +197,9 @@ const (
 	envHostedSessionRow = "WS_HOSTED_SESSION_ROW"
 	// envHarnessPID is the PID of the process that started this ws-mcp's
 	// launcher: the harness. The launcher sets it on every start, to its
-	// own parent, never an inherited value.
+	// own parent, never an inherited value. On Windows that parent may be a
+	// cmd.exe wrapper; the runtime reads it through Server.harnessPID, which
+	// skips it.
 	envHarnessPID = "WS_MCP_HARNESS_PID"
 	// envDebugLog names a file every debug event is appended to.
 	envDebugLog = "WS_MCP_DEBUG_LOG"

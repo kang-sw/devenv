@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -290,7 +289,7 @@ func (s *Server) resolveHostedSession() string {
 	}
 	key := strings.TrimSpace(s.getenv(envHostedSessionKey))
 	row := strings.TrimSpace(s.getenv(envHostedSessionRow))
-	harness, _ := strconv.Atoi(strings.TrimSpace(s.getenv(envHarnessPID)))
+	harness := s.harnessPID()
 	if key == "" || row == "" || harness <= 0 {
 		return ""
 	}

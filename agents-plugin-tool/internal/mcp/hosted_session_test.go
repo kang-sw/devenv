@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -575,5 +576,61 @@ func TestDropHarnessSessionEnvLeavesNoSessionToInherit(t *testing.T) {
 	}
 	if got := NewServer(t.TempDir(), "test").hostedSessionKey(); got != "" {
 		t.Fatalf("hosted key after the drop = %q", got)
+	}
+}
+
+func TestWrappedHarnessPID(t *testing.T) {
+	table := map[int]struct {
+		parent int
+		image  string
+	}{
+		100: {50, "cmd.exe"},
+		50:  {10, "cmd.exe"},
+		200: {60, "claude.exe"},
+		300: {0, "cmd.exe"},
+	}
+	lookup := func(pid int) (int, string, bool) {
+		row, ok := table[pid]
+		return row.parent, row.image, ok
+	}
+	failing := func(int) (int, string, bool) { return 0, "", false }
+	cases := []struct {
+		name   string
+		goos   string
+		pid    int
+		lookup func(int) (int, string, bool)
+		want   int
+	}{
+		{"windows cmd.exe wrapper gives its parent", "windows", 100, lookup, 50},
+		{"windows skips exactly one level", "windows", 50, lookup, 10},
+		{"windows other image is kept", "windows", 200, lookup, 200},
+		{"windows cmd.exe without a parent is kept", "windows", 300, lookup, 300},
+		{"windows unknown process is kept", "windows", 999, lookup, 999},
+		{"windows lookup failure is kept", "windows", 100, failing, 100},
+		{"image match ignores case", "windows", 100, func(int) (int, string, bool) { return 50, "CMD.EXE", true }, 50},
+		{"non-windows never looks up", "linux", 100, func(int) (int, string, bool) { t.Error("lookup on linux"); return 50, "cmd.exe", true }, 100},
+	}
+	for _, c := range cases {
+		if got := wrappedHarnessPID(c.goos, c.pid, c.lookup); got != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+func TestHarnessPIDReadsThroughTheWrapperSkip(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("the wrapper skip applies on Windows only")
+	}
+	prev := harnessProcessParent
+	t.Cleanup(func() { harnessProcessParent = prev })
+	harnessProcessParent = func(pid int) (int, string, bool) { return 50, "cmd.exe", pid == 100 }
+	t.Setenv(envHarnessPID, "100")
+	s := &Server{}
+	if got := s.harnessPID(); got != 50 {
+		t.Errorf("harnessPID = %d, want 50", got)
+	}
+	t.Setenv(envHarnessPID, "-3")
+	if got := s.harnessPID(); got != 0 {
+		t.Errorf("harnessPID of a negative value = %d, want 0", got)
 	}
 }
