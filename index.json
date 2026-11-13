@@ -497,6 +497,9 @@
     "261113-feat-ws-dashboard-browser-pane": {
       "registered_at": "2026-11-13T07:16:08Z"
     },
+    "261113-feat-ws-dashboard-worktree-delete": {
+      "registered_at": "2026-11-13T07:16:15Z"
+    },
     "261113-feat-ws-pi-worker-marker-env-guard": {
       "registered_at": "2026-11-13T01:46:15Z"
     },
