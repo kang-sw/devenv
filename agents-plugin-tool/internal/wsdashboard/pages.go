@@ -300,6 +300,8 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 		"lang":  func() string { return effectiveLang(lang) },
 		"langs": wsi18n.Languages,
 		"i18n":  func() template.JS { return wsi18n.Script(lang) },
+		// pwa is a page head's manifest link and theme-color metas (pwa.go).
+		"pwa": pwaHead,
 	}
 }
 

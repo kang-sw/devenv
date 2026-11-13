@@ -26,6 +26,7 @@ var findingTmpl = template.Must(template.New("finding").Parse(`<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{{.PWA}}
 <title>{{.Finding}}</title>
 <style>
 :root{color-scheme:light dark;--bg:#fff;--fg:#1f2328;--dim:#656d76}
@@ -77,6 +78,7 @@ func (d *Daemon) serveFindingSession(w http.ResponseWriter, r *http.Request, rep
 	var b strings.Builder
 	_ = findingTmpl.Execute(&b, map[string]any{
 		"Theme":    requestTheme(r),
+		"PWA":      pwaHead(requestTheme(r)),
 		"Lang":     lang,
 		"Finding":  wsi18n.T(lang, "session.finding"),
 		"NotFound": wsi18n.T(lang, "session.notfound"),

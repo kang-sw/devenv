@@ -612,7 +612,7 @@ func (d *Daemon) Close() {
 // guard (the loopback Host guard, or in LAN mode the guard that also admits
 // the LAN token; access.go); the daemon sends no CORS headers. The pages (/,
 // /s/<reply-id>, their SSE or WebSocket streams, and a session's image, file view, and
-// history routes) are read-only; a session's message, cancel, steer, and interrupt
+// history routes, and the app manifest and its icons, pwa.go) are read-only; a session's message, cancel, steer, and interrupt
 // routes (inbox_routes.go), with a tracker host the tracker POST routes
 // (tracker_routes.go), and with a support handler the support POST routes
 // (a tracker store's support conversation: send, new, select) are the only
@@ -638,6 +638,7 @@ func (d *Daemon) Handler() http.Handler {
 	}
 	mux.HandleFunc("/nudge", d.handleNudge)
 	mux.HandleFunc("/events", d.handleIndexEvents)
+	mux.HandleFunc(pwaPrefix, handlePWA)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
 	if d.workspaces != nil {
