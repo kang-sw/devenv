@@ -95,11 +95,15 @@ func claudeLeadEnv(spec StartSpec) []string {
 }
 
 // claudeLeadArgs is the command line of a lead conversation: print mode
-// with stream-json both ways and nothing held back, so user and project
-// settings, plugins, hooks, memory, and MCP servers load as in the user's
-// own session. Tool permission prompts come to the daemon
-// (--permission-prompt-tool stdio) as can_use_tool control requests.
-func claudeLeadArgs(spec StartSpec) []string {
+// with stream-json both ways, user/project settings, hooks, memory, and MCP
+// servers. Plugin overrides replace installed ws copies with the daemon's
+// bundle, or disable all other plugins in isolated mode. Tool permission
+// prompts come to the daemon (--permission-prompt-tool stdio).
+func claudeLeadArgs(spec StartSpec) ([]string, error) {
+	plugins, err := claudeLeadPluginArgs(spec)
+	if err != nil {
+		return nil, err
+	}
 	mode := spec.Lead.PermissionMode
 	if mode == "" {
 		mode = DefaultLeadPermissionMode
@@ -121,13 +125,13 @@ func claudeLeadArgs(spec StartSpec) []string {
 	if spec.SessionID != "" {
 		args = append(args, "--resume", spec.SessionID)
 	}
-	return args
+	return append(args, plugins...), nil
 }
 
 // claudeArgs is the claude command line for spec, without the executable.
 func claudeArgs(spec StartSpec) ([]string, error) {
 	if spec.Lead != nil {
-		return claudeLeadArgs(spec), nil
+		return claudeLeadArgs(spec)
 	}
 	p := spec.Profile
 	mcpConfig, err := claudeMCPConfig(spec)

@@ -85,11 +85,12 @@ type settingsRequest struct {
 }
 
 type leadRequest struct {
-	Root           string `json:"root"`
-	Harness        string `json:"harness"`
-	Model          string `json:"model"`
-	Effort         string `json:"effort"`
-	PermissionMode string `json:"permission_mode"`
+	Root            string `json:"root"`
+	Harness         string `json:"harness"`
+	Model           string `json:"model"`
+	Effort          string `json:"effort"`
+	PermissionMode  string `json:"permission_mode"`
+	PluginIsolation string `json:"plugin_isolation"`
 }
 
 type approvalRequest struct {
@@ -159,7 +160,7 @@ func (r *Runner) serve(w http.ResponseWriter, req *http.Request) {
 		if !decode(w, req, &body) {
 			return
 		}
-		st, err := r.CreateLead(body.Harness, body.Root, LeadOptions{Model: body.Model, Effort: body.Effort, PermissionMode: body.PermissionMode})
+		st, err := r.CreateLead(body.Harness, body.Root, LeadOptions{Model: body.Model, Effort: body.Effort, PermissionMode: body.PermissionMode, PluginIsolation: body.PluginIsolation})
 		writeAnswer(w, http.StatusCreated, view(st), err)
 	case id == "" && req.Method == http.MethodPost:
 		var body createRequest
