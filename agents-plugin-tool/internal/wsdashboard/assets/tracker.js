@@ -753,7 +753,7 @@
     var r = mineLive(it), who = editWho(it), n = ui.ned = { item: id, rk: rk, ed: id, val: it.title, kind: it.kind, st: r ? r.status : it.status, who: who, compl: null,
       due: it.due || '', pri: it.priority != null ? it.priority : null, labels: (it.labels || []).slice(), canAsg: canAssign(it, VS.viewer.member) };
     // what the editor opened on: a save sends only the fields the user moved off these (editRowEvents)
-    n.orig = { title: n.val, st: n.st, due: n.due, pri: n.pri, who: who.slice(), labels: n.labels.slice() };
+    n.orig = { title: n.val, st: n.st, due: n.due, pri: n.pri, who: who.slice(), held: editHeld(it), labels: n.labels.slice() };
     render();
     var el = $('tkned');
     if (el) { el.focus(); el.select(); }
@@ -790,8 +790,9 @@
     // hold nothing, item.unassign for the ones dropped from the prefill who still hold it. The
     // completion pick rides on the added people only: the store keeps a holding's completion, and
     // re-assigning a kept person to change it would end their record (status, acceptance).
+    // A kept fallback prefill needs a real assignment when a new pick would displace the fallback.
     if (n.canAsg && n.who.slice().sort().join(' ') !== o.who.slice().sort().join(' ')) {
-      var cur = editHeld(it), add = n.who.filter(function (x) { return o.who.indexOf(x) < 0 && cur.indexOf(x) < 0; });
+      var cur = editHeld(it), add = n.who.filter(function (x) { return o.held.indexOf(x) < 0 && cur.indexOf(x) < 0; });
       if (add.length) ev = ev.concat(asgEvents(it.id, add.map(function (id) { return { t: 'p', id: id }; }), n.compl));
       o.who.forEach(function (x) { if (n.who.indexOf(x) < 0 && cur.indexOf(x) >= 0) ev.push(['item.unassign', { item: it.id, assignee: x }]); });
     }

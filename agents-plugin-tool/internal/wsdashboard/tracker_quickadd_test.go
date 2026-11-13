@@ -506,6 +506,43 @@ done();
 `)
 }
 
+// TestTrackerEditRowRetainsFallbackCreator checks that keeping the fallback
+// creator beside a new assignee explicitly assigns both before fallback displacement.
+func TestTrackerEditRowRetainsFallbackCreator(t *testing.T) {
+	runTrackerCases(t, "row edit retains fallback creator", trackerCheckJS+`
+var VS = { viewer: { member: 'me', reach: {} }, priority: { default: 1, names: ['low', 'mid'] }, labels: [],
+  items: { i1: { id: 'i1', kind: 'task', title: 'Task', status: 'todo', priority: 1, labels: [], author: 'me', assignments: ['fb'] } },
+  assignments: { fb: { to: 'me', state: 'live', status: 'todo', fallback: true } } };
+var ui = { store: 's1' }, sent = [], el = { value: 'Task', focus: function () {}, select: function () {} };
+function canEdit() { return true; }
+function render() {}
+function toast() {}
+function wsT(k) { return k; }
+function esc(s) { return s; }
+function $(id) { return el; }
+function nrowSt(n) { return n.st; }
+function wrote() {}
+function endRowEdit() { ui.ned = null; }
+var AD = { dispatch: function (store, ev, cb) { sent.push(ev); cb({ ok: true }); } };
+`+trackerFn(t, `function A\(id\)`, true)+trackerFn(t, `function holders\(it\)`, true)+trackerFn(t, `function mineLive\(it\)`, true)+
+		trackerFn(t, `function canAssign\(it, v\)`, true)+trackerFn(t, `function editHeld\(it\)`, false)+trackerFn(t, `function editWho\(it\)`, false)+
+		trackerFn(t, `function startRowEdit\(id, rk\)`, false)+trackerFn(t, `function editRowEvents\(n, it, title\)`, false)+trackerFn(t, `function saveRowEdit\(\)`, false)+
+		trackerFn(t, `function nrowPri\(n\)`, true)+trackerFn(t, `function labelOf\(id\)`, true)+trackerFn(t, `function labelsOver\(cur, set\)`, false)+
+		trackerFn(t, `function labelPicks\(from, to\)`, false)+trackerFn(t, `function sameLabels\(a, b\)`, false)+
+		trackerFn(t, `function complClass\(o\)`, false)+trackerFn(t, `function asgClass\(o, compl\)`, true)+trackerFn(t, `function asgEvents\(item, sel, compl\)`, false)+
+		trackerFn(t, `function commit\(events, then, prep, fail\)`, false)+`
+startRowEdit('i1', 'r');
+check('fallback prefills the creator without a real assignment', [ui.ned.who, editHeld(VS.items.i1)], [['me'], []]);
+saveRowEdit();
+check('an untouched fallback selection writes nothing', sent, []);
+startRowEdit('i1', 'r');
+ui.ned.who.push('B');
+saveRowEdit();
+check('keeping the fallback creator with B explicitly assigns both', sent, [[{ type: 'item.assign', payload: { item: 'i1', targets: ['me', 'B'], completion: 'assignee' }, origin: 'human' }]]);
+done();
+`)
+}
+
 // TestTrackerEditRowWrappedStatus pins the row edit's status chip on the
 // viewer's done or dropped holding (tracker.js nrowStMode): the store takes no
 // item.status there ("reopen it first"), so, as the item menu (canStatus), the
