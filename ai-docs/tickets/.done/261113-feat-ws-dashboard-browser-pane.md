@@ -8,6 +8,7 @@ related:
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "co-edits the whiteboard playbook and mirrors"
 sage-review-design-reviewed: 802beb765812f714
 sage-review-completeness-reviewed: 802beb765812f714
+completed: 2026-11-14
 ---
 
 # Dashboard web card: proxied localhost page with element pick and console-error attach
