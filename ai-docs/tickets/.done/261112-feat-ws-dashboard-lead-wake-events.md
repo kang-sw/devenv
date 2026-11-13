@@ -2,6 +2,7 @@
 title: Show what woke the lead, and background/monitor counts, in the dashboard conversation
 related:
   261112-feat-ws-mixed-version-compat-guards: new adapter event kinds and fields are cross-version surfaces; this ticket's additions must stay T0
+completed: 2026-11-13
 ---
 
 # Show what woke the lead, and background/monitor counts, in the dashboard conversation
@@ -120,6 +121,34 @@ topic `conv-events`.
   still producing a `user` entry); a page render test for divider and card
   markup; a headless visual check against the mockup.
 
+### Result (fd75fe2f9) - 2026-11-13
+
+- Added negotiated `wake` intake/ring entries, bounded/scrubbed payloads,
+  completion dividers, expandable content cards, and wake-associated lead-turn
+  summaries without extending the existing origin enum. Claude and Pi preserve
+  person messages; hosted Claude uses task notifications and successful mail
+  delivery, while hosted Pi uses an optional widget channel older runners ignore.
+- Self-review pass fixed retry negotiation letting a turn overtake its wake,
+  and associated Pi's custom input arriving immediately after `agent_start`
+  with its still-unworked originless turn. Recorded Claude summaries are report
+  content, so successful notifications with a summary render as report cards.
+- Verification: remote Phase 1 full Go run exposed i18n/mirror drift, corrected
+  before focused `wslive`, `mcp`, `wsagent`, `wsdashboard`, and `wsi18n` tests
+  passed. Phase 2's full Go run subsequently passed with the approved LAN-change
+  test excluded. Local Claude pure tests: 78 passed; all three new engine-hook
+  tests passed after correcting a test's native error-result shape. Latest
+  full dashboard-engine run: 52 passed, two unchanged cases timed out.
+- Headless Chrome checked a real-CSS fixture with collapsed/expanded cards,
+  completion chip, lead-turn rows and the floating pills (1000x900);
+  screenshot: `D:/Temp/wakeev/visual.png`.
+- Forward: native scheduled/message causes not exposed by hosted Claude are
+  not inferred. Pi understands a `ws-scheduled` custom message but has no native
+  scheduled producer. The original session scratchpad mockup was unavailable,
+  so exact screenshot comparison remains unverified.
+- Forward: intermittent existing Claude engine tests (whiteboard prompt and
+  permission notification) hit their 5-second timeout under concurrent local
+  load; the original 51-test dashboard-engine baseline passed separately.
+
 ### Phase 2: Background and monitor badges
 
 - `status` count fields `background` and `monitors`; Claude mod counts `run_in_background`
@@ -131,3 +160,32 @@ topic `conv-events`.
   pill.
 - Verification: count tests per adapter (start, finish, abort), page render
   test for zero/non-zero pills.
+
+### Result (fd75fe2f9) - 2026-11-13
+
+- Added optional `background`/`monitors` status fields and separate zero-hidden
+  pills after the subagent badge. Counts require both `status` and the new
+  `task_counts` capability: older daemons already accept `status`, so that
+  token alone cannot authorize sending new fields (T0).
+- Claude tracks observable shell/Monitor identities through launches,
+  notifications, stops and aborted launches. Pi samples its registry at flush
+  and dirties counts on membership changes. Hosted typed lists expose optional
+  splits while preserving the existing aggregate for idle-stop/recovery;
+  hosted Pi sends extension counts through its optional widget channel.
+- Self-review pass preserved unknown versus explicit zero and aggregate
+  semantics, and corrected literal plural-key lookup for the new pills.
+  Remote `go test ./... -skip
+  TestHostedConnectionSeeingALANChangeReplacesTheDaemon` passed; no holder
+  failures occurred. Claude/wsflow plugin validation and mirror checks passed.
+- Merged develop into this branch at `6de17db43`, retaining search palette,
+  memo pad, preference and mailbox-copy changes. Post-merge remote tests passed
+  for `wsdashboard`, `wsagent`, `mcp`, `wslive`, `wsrsrc`, and `wsi18n`.
+  Local post-merge dashboard JavaScript checks: 10 passed; focused Pi adapter,
+  background, hosted, mailbox and push tests: 224 passed, 3 skipped.
+- Forward: tasks predating Claude mod startup/reload cannot be reconstructed
+  from these hooks. Unknown hosted task types retain only the legacy aggregate;
+  Monitor type spellings need a recorded harness fixture. Some Pi POSIX
+  process-group tests are platform-skipped on Windows.
+- Forward: the broader Pi/spawner run had 457 passed, 3 skipped, and one
+  unchanged Windows owned-home permission-removal assertion failed; no
+  filesystem retention behavior was changed by this ticket.
