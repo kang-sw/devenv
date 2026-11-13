@@ -489,7 +489,14 @@
       "registered_at": "2026-11-13T01:26:48Z"
     },
     "261113-feat-ws-tracker-wiki-html-pages": {
-      "registered_at": "2026-11-13T13:38:01Z"
+      "registered_at": "2026-11-13T13:38:01Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T14:22:57Z"
+      }
     },
     "261113-feat-ws-whiteboard-topic-history-load-more": {
       "registered_at": "2026-11-13T14:03:12Z"
