@@ -916,7 +916,7 @@ func TestRailRowRevive(t *testing.T) {
 }
 
 // TestRailStoppedRowSleeps pins a user-stopped hosted session's row: a moon
-// before its harness icon, a muted title, and no second line by style. Any
+// between its harness icon and title, a muted title, and no second line by style. Any
 // other host exit keeps its reason line, and an unknown harness shows "?".
 func TestRailStoppedRowSleeps(t *testing.T) {
 	stopped := RailRow{ReplyID: "stopped", Harness: "claude", Live: true, Hosted: true, Exit: &HostExit{Reason: "stop"}, Message: "last reply"}
@@ -933,7 +933,7 @@ func TestRailStoppedRowSleeps(t *testing.T) {
 		row, _, _ := strings.Cut(rest, `</a></div>`)
 		return row
 	}
-	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped" data-rid="stopped"`) || !strings.Contains(row, `<span class="s1"><span class="zz" title="`) {
+	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped" data-rid="stopped"`) || !strings.Contains(row, `">C</span><span class="zz" title="`) {
 		t.Errorf("the stopped row lacks its stopped class or moon:\n%s", row)
 	}
 	if row := rowOf("crashed"); strings.Contains(html, `class="rs stopped" data-rid="crashed"`) || strings.Contains(row, `class="zz"`) || !strings.Contains(row, `<span class="s2"><span class="host-exit">`) || !strings.Contains(row, "exit code 1") {
