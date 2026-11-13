@@ -175,6 +175,26 @@ test('a pick adds one pick with the dev page URL', () => {
   assert.equal(button(o, 'pick').getAttribute('aria-pressed'), 'false');
 });
 
+test('Escape on the pick toggle ends pick mode', () => {
+  const b = boot();
+  const o = openCard(b, { url: 'http://localhost:5173/' }, DEV);
+  ready(b, o, '/');
+  let prevented = 0;
+  const esc = { key: 'Escape', preventDefault() { prevented++; } };
+  button(o, 'pick').fire('keydown', esc);
+  assert.equal(prevented, 0, 'Escape with pick mode off is left to the page');
+  button(o, 'pick').fire('click');
+  b.message(o.win, HOST, { wsWeb: 'picking', on: true });
+  button(o, 'pick').fire('keydown', { key: 'Enter', preventDefault() { prevented++; } });
+  button(o, 'pick').fire('keydown', esc);
+  assert.equal(prevented, 1);
+  assert.deepEqual(o.sent.map(s => s.m), [{ wsWeb: 'pick', on: true }, { wsWeb: 'pick', on: false }]);
+  assert.ok(o.sent.every(s => s.origin === HOST));
+  b.message(o.win, HOST, { wsWeb: 'picking', on: false });
+  b.message(o.win, HOST, { wsWeb: 'pick', path: '/', selector: '#late', text: '' });
+  assert.deepEqual(b.picks, [], 'a pick after Escape is dropped');
+});
+
 test('a static pick names the workspace path', () => {
   const b = boot();
   const o = openCard(b, { path: 'docs/site/index.html' }, STATIC);

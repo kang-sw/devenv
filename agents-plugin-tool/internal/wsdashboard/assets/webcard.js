@@ -373,6 +373,15 @@
       w.badge.setAttribute("aria-hidden", "true");
       w.badge.hidden = true;
       w.att.appendChild(w.badge);
+      // Escape inside the page ends pick mode there; focus left on the
+      // toggle (it was just clicked) ends it here, before a maximized
+      // card's Escape takes the key.
+      w.pick.addEventListener("keydown", function (e) {
+        if (e.key !== "Escape" || !(w.picking || w.armed)) return;
+        e.preventDefault();
+        w.armed = false;
+        send(card, { wsWeb: "pick", on: false });
+      });
     }
     w.tab = btns[btns.length - 1];
     paint(card);
