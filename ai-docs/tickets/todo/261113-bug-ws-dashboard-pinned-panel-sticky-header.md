@@ -20,6 +20,11 @@ On the dashboard session page (wide view), a whiteboard topic can be pinned into
 
 The pinned topic's header sticks to the top of the pinned column while its content scrolls, as it does in the board.
 
+Both pin layouts are in scope (owner board screenshot, relayed by MAIN
+2026-11-13): the pinned column (`.bpcol`) and the pin area atop the board
+column in narrower layouts. Both are the same movable `#bpins` element
+(3e922446), so the fix and its verification cover each layout's scroller.
+
 ## Likely cause (inferred, not verified)
 
 - Board stickiness is scoped to the whiteboard rail: `.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px) }` (`agents-plugin-tool/internal/wswhiteboard/assets/page.css:656`) and, for cards, `.wb-rail .bcard:not([data-max]) .bc-hd` (`agents-plugin-tool/internal/wsdashboard/assets/dashboard.css:608`). rail.js adds the `wb-rail` class only to the board host (`agents-plugin-tool/internal/wswhiteboard/assets/rail.js:22`).
