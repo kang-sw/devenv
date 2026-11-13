@@ -218,6 +218,29 @@ func (t *dashboardTracker) Search(ctx context.Context, id, query string) ([]stri
 	return v.View.Search(q), nil
 }
 
+// SearchHits is Search's twin for the palette: the same grammar and view,
+// answering the places the items matched. The conversion to the dashboard's
+// JSON-level type lives here because wsdashboard does not import wstracker.
+func (t *dashboardTracker) SearchHits(ctx context.Context, id, query string) ([]wsdashboard.TrackerSearchHit, error) {
+	if t.err != nil {
+		return nil, redacted(t.err)
+	}
+	q, err := wstracker.ParseQuery(query)
+	if err != nil {
+		return nil, &wsdashboard.TrackerSearchError{Message: err.Error()}
+	}
+	v, err := t.h.ViewWithin(ctx, id, 0, dashboardViewWait)
+	if err != nil {
+		return nil, redacted(err)
+	}
+	found := v.View.SearchHits(q)
+	out := make([]wsdashboard.TrackerSearchHit, len(found))
+	for i, h := range found {
+		out[i] = wsdashboard.TrackerSearchHit(h)
+	}
+	return out, nil
+}
+
 // dashboardView is the view JSON the tracker drawer reads: the store view
 // plus html, its item bodies and comment texts rendered as markdown. The
 // rendering is added here, not in wstrackerhost's view state, whose shape
