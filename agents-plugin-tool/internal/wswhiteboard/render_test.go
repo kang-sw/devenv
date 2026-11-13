@@ -2,6 +2,7 @@ package wswhiteboard
 
 import (
 	"fmt"
+	"html"
 	"regexp"
 	"strings"
 	"testing"
@@ -1170,4 +1171,32 @@ func TestRenderPageFollowsViewLanguage(t *testing.T) {
 	if strings.Contains(ko, " lang=") {
 		t.Error("the page sets a lang attribute")
 	}
+}
+
+// Link fields and readings are paths and identifiers: emphasis markers stay
+// literal there, while references, code spans, bare URLs and bare paths still
+// render.
+func TestRenderPageLinkFieldsAndReadingsKeepEmphasisLiteral(t *testing.T) {
+	const glob, ident = "rsrc/*.md and internal/*.go", "snake_case_name"
+	st := &State{Counter: 4, Seq: 3, SettleSeq: 4, Items: []Item{
+		{ID: 1, Class: ClassTechnical, Topic: "t", Title: "open", Status: StatusOpen,
+			Links: []string{glob, ident, "see {{2}}", "`code_span`", "https://example.com/a_b", "docs/guide.md"}},
+		{ID: 2, Class: ClassTechnical, Topic: "t", Title: "read", Status: StatusAnswered, Answer: glob + " " + ident, Settled: 2, Changed: 2},
+		{ID: 3, Class: ClassCheck, Topic: "t", Title: "check", Status: StatusAnswered, Answer: "no, " + glob + " " + ident, Settled: 3, Changed: 2},
+	}}
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	body := regexp.MustCompile(`(?s)<script.*?</script>|<style.*?</style>`).ReplaceAllString(out, "")
+	text := html.UnescapeString(regexp.MustCompile(`<[^>]*>`).ReplaceAllString(body, ""))
+	if got := strings.Count(text, glob); got < 3 {
+		t.Errorf("glob text kept verbatim %d times, want link, reading and check reading", got)
+	}
+	if got := strings.Count(text, ident); got < 3 {
+		t.Errorf("identifier kept verbatim %d times, want link, reading and check reading", got)
+	}
+	wantNone(t, body, "<em>", "<strong>")
+	wantAll(t, body,
+		`see <a href="#item-2">(02)</a>`,
+		`<code>code_span</code>`,
+		`href="https://example.com/a_b"`,
+		`docs/guide.md</a>`)
 }
