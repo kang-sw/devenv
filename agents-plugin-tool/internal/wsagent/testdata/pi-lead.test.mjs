@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -80,6 +80,27 @@ test("bootstrap runs original CLI in-process with unchanged argv and cwd", (t) =
   assert.deepEqual(output.argv, [cli, ...args]);
   assert.equal(realpathSync(output.cwd), realpathSync(root));
   assert.deepEqual(output.paths, ["/user/extension.ts"]);
+});
+
+test("adapter launched through a symlinked directory still starts the CLI", { skip: process.platform === "win32" }, (t) => {
+  const root = fixture(t);
+  json(join(root, "package.json"), { type: "module" });
+  const sdk = file(join(root, "index.js"), `export class DefaultPackageManager {
+    async resolve() { return {extensions: []}; }
+    async resolveExtensionSources() { return {extensions: []}; }
+  }`);
+  file(join(root, "core/source-info.js"), "export const getResourcePathKey = (path) => path;");
+  const cli = file(join(root, "cli.js"), "console.log('pi started');");
+  // The launcher writes the adapter into the state dir and passes that
+  // spelling as argv[1]; here the state dir is reached through a symlink.
+  const state = join(root, "state");
+  mkdirSync(state);
+  copyFileSync(fileURLToPath(new URL("../pi_lead.mjs", import.meta.url)), join(state, "ws-lead.mjs"));
+  const linked = join(root, "linked-state");
+  symlinkSync(state, linked, "dir");
+  const run = spawnSync(process.execPath, [join(linked, "ws-lead.mjs"), sdk, cli], { cwd: root, encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), "pi started");
 });
 
 test("fallback bridge preserves effective prompt and supplies hosted session identity", async () => {

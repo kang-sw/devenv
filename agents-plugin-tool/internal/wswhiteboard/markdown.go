@@ -91,7 +91,7 @@ func newMarkdown(p *pageData) *markdown {
 	// transformer turns a "[x]: y" title into a link definition.
 	inlineOptions := []parser.Option{
 		parser.WithBlockParsers(util.Prioritized(parser.NewParagraphParser(), 100)),
-		parser.WithInlineParsers(inlineParsers(refs, false, !p.noInlineTags)...),
+		parser.WithInlineParsers(inlineParsers(refs, false, !p.noInlineTags, true)...),
 	}
 	if !p.noInlineTags {
 		inlineOptions = append(inlineOptions, parser.WithASTTransformers(util.Prioritized(inlineTagTransformer{}, 100)))
@@ -106,7 +106,9 @@ func newMarkdown(p *pageData) *markdown {
 	plain := goldmark.New(
 		goldmark.WithParser(parser.NewParser(
 			parser.WithBlockParsers(util.Prioritized(parser.NewParagraphParser(), 100)),
-			parser.WithInlineParsers(inlineParsers(refs, false, false)...),
+			// No emphasis parser: link fields and readings are paths and
+			// identifiers, so * and _ stay literal.
+			parser.WithInlineParsers(inlineParsers(refs, false, false, false)...),
 		)),
 		goldmark.WithRendererOptions(renderer.WithNodeRenderers(util.Prioritized(&mdRenderer{page: p, inline: true}, 100))),
 	)
@@ -137,11 +139,11 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 	}
 	inlineTags := !rawHTML && !p.noInlineTags
 	parserOptions := []parser.Option{
-		parser.WithInlineParsers(inlineParsers(refs, rawHTML, inlineTags)...),
+		parser.WithInlineParsers(inlineParsers(refs, rawHTML, inlineTags, true)...),
 		parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
 	}
 	if rawHTML {
-		blocks = append(blocks, util.Prioritized(parser.NewHTMLBlockParser(), 900))
+		blocks = append(blocks, util.Prioritized(newRawTextHTMLBlockParser(), 900))
 		options = append(options, html.WithUnsafe())
 	}
 	if inlineTags {
@@ -162,15 +164,17 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 // inlineParsers is goldmark's default inline set, its code span parser
 // linking a whole-path span (codePathParser), plus refs and the bare URL
 // and path parsers (bare_links.go), with the raw
-// HTML parser when rawHTML and the allowlisted inline tags (inline_tags.go)
-// when inlineTags.
-func inlineParsers(refs util.PrioritizedValue, rawHTML, inlineTags bool) []util.PrioritizedValue {
+// HTML parser when rawHTML, the allowlisted inline tags (inline_tags.go)
+// when inlineTags, and the emphasis parser only when emphasis.
+func inlineParsers(refs util.PrioritizedValue, rawHTML, inlineTags, emphasis bool) []util.PrioritizedValue {
 	list := []util.PrioritizedValue{
 		util.Prioritized(codePathParser{parser.NewCodeSpanParser()}, 100),
 		util.Prioritized(parser.NewLinkParser(), 200),
 		util.Prioritized(parser.NewAutoLinkParser(), 300),
-		util.Prioritized(parser.NewEmphasisParser(), 500),
 		refs,
+	}
+	if emphasis {
+		list = append(list, util.Prioritized(parser.NewEmphasisParser(), 500))
 	}
 	list = append(list, bareLinkParsers()...)
 	if rawHTML {
@@ -215,8 +219,9 @@ func (p *pageData) Inline(s string) template.HTML {
 	return p.convert(p.markdown().inline, s)
 }
 
-// TextInline keeps every HTML tag literal in plain item links/readings, while
-// still honoring Markdown code exclusions and authored item/panel references.
+// TextInline renders item links and readings: every HTML tag and all emphasis
+// (asterisks, underscores) stay literal, while code spans, authored item/panel
+// references, bare URLs and bare paths still render.
 func (p *pageData) TextInline(s string) template.HTML {
 	return p.convert(p.markdown().inlineText, s)
 }

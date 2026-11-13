@@ -5815,10 +5815,15 @@
     hits.sort(function (a, b) { return a.row.group - b.row.group || (q ? b.score - a.score : (b.row.at || 0) - (a.row.at || 0)) || a.order - b.order; });
     return hits.map(function (x) { return x.row; });
   }
+  // Editors keep their own keys: a terminal card (its .xterm helper textarea),
+  // the composer, and any textarea or contenteditable never lose Ctrl+K or
+  // Ctrl+Space to the palette; / also stays typed in inputs and selects.
   function qShortcut(e) {
     if (e.isComposing || e.keyCode === 229 || e.altKey || e.metaKey) return false;
-    if (e.ctrlKey) return !e.shiftKey && (e.code === 'Space' || e.key === ' ' || e.key.toLowerCase() === 'k');
-    return e.key === '/' && !(e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'));
+    var t = e.target && e.target.closest ? e.target : null;
+    if (e.ctrlKey) return !e.shiftKey && (e.code === 'Space' || e.key === ' ' || e.key.toLowerCase() === 'k') &&
+      !(t && t.closest('.xterm, textarea, [contenteditable]:not([contenteditable="false"])'));
+    return e.key === '/' && !(t && t.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'));
   }
   function qResults(q0) {
     var q = q0.trim().toLowerCase(), out = qs.rows.slice();

@@ -44,8 +44,9 @@ var (
 	// reservedConfigPrefixes are built-in key families a manifest namespace
 	// may not claim: prompt.<pointId> overrides, the agents.tier writer, and
 	// the worktree.* knobs (the worktree.profile.<name> family included), and
-	// the agent.profile.<name> family.
-	reservedConfigPrefixes = []string{"prompt.", "agents.", "worktree.", "agent.", "preference."}
+	// the agent.profile.<name> family, and the git.* knobs (git.merge's size
+	// warning thresholds).
+	reservedConfigPrefixes = []string{"prompt.", "agents.", "worktree.", "agent.", "preference.", "git."}
 )
 
 // configManifestFile is the on-disk adapter key manifest:

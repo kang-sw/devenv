@@ -8,6 +8,7 @@ related:
   261113-feat-ws-dashboard-iframe-shell: "moves the rail, and this ticket's row action and modal, into the shell document"
 sage-review-completeness-reviewed: 94d0326925600751
 sage-review-design-reviewed: 94d0326925600751
+completed: 2026-11-14
 ---
 
 # Dashboard rail: delete a linked worktree with a preview-and-confirm modal
@@ -207,3 +208,42 @@ example a file dirtied, is refused or needs force again); force behaves as
 the old policy defines; access guard refuses a non-local viewer. A node test
 that the delete button stays disabled until the typed name matches. A LOOK
 capture of the modal with a dirty and a clean worktree.
+
+### Result (65b0d9ae2) - 2026-11-14
+
+- 730704940: `wsgit.PorcelainPaths` / `wsgit.CountUnreachedCommits` are now
+  shared by `worktree.remove` and the dashboard (decision 11);
+  `worktree.remove` is unchanged in behavior and stays pool-only.
+- 929d91bc3: `POST /rail/worktrees/delete/preview` and
+  `/rail/worktrees/delete` (`railworktreedelete.go`). Access requires a local
+  viewer (404 otherwise), then own-Origin. The check reports the dirty
+  count and paths, a detached HEAD's unreached commits, initialized
+  submodules, the lock, and holders (live sessions and terminals block;
+  ended ones are listed only), plus whether force is needed and a state
+  token. The submit re-validates: it returns a 409 JSON check for a refusal
+  (primary, unknown, pooled under the rail, default, or legacy roots,
+  missing, locked, busy), for force needed but not sent, and for force sent
+  on a stale token (`changed`). Otherwise it runs
+  `git worktree remove [--force]` from the primary, keeps the branch, and
+  re-reads the rail. `--force` is passed only when the fresh check needs it.
+  A check made before the first terminal scan answers 503. The rail marks
+  linked, non-pooled rows deletable and renders a trash button there. The
+  manual `ws-mcp.md` drift is fixed.
+- 65b0d9ae2: a `<dialog>` modal with one typed-name input. A 409 check
+  redraws the modal in place and clears the typed name. Pure helpers
+  `WsRail.deleteReady` and `deleteBody` have node cases. CSS gates the button
+  for remote viewers. JS keys are added in all 11 tables.
+- Verification: `go build ./...` passes, and
+  `go test ./internal/wsdashboard/ ./internal/wsi18n/ ./internal/wsgit/`
+  passes. The server tests use temp repos only and cover every refusal, the
+  force and re-validation cases, submodules, a running terminal on real
+  holders, the non-local 404, and the rail flag and markup. LOOK captures of
+  the dirty, clean, busy, and changed modals, light and dark, were made with
+  headless Chromium against a page fixture (not committed).
+- Lite review: clean with 3 minor remaining, recorded and not fixed:
+  - A failed `git worktree remove` (502) does not re-read the rail.
+  - Untested guard paths: the terminals-not-scanned 503, a pool-source read
+    failure failing the check, the 409 git-busy text, and the 20-path dirty
+    truncation.
+  - A stored workspace whose root is itself a linked worktree gets no
+    delete button on its root row, although the routes would accept it.

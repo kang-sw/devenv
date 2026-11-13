@@ -1,3 +1,4 @@
+/* class prefix: d (new classes; legacy classes keep their names) */
 /* Dashboard pages. The whiteboard stylesheet is inlined before this one and
    owns the shared variables, the board, panels, chips, and buttons; this
    sheet adds the live layer (agent tree, conversation, composer),
@@ -505,8 +506,8 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .note[hidden] + .nimgs { display: none; }
 .arow > .nimgs, .ckrow > .nimgs { flex-basis: 100%; margin: 0 10px 8px 34px; }
 .srow > .nimgs { flex-basis: 100%; margin-top: 4px; }
-.topic > .nimgs { margin: 0 10px 6px; }
-.topic.quiet > .nimgs { margin: 0 6px 4px; }
+.tophead > .nimgs { margin: 0 10px 6px; }
+.topic.quiet > .tophead > .nimgs { margin: 0 6px 4px; }
 .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; white-space: normal; }
 .thumbs .thumb { position: relative; display: block; }
 .thumbs .thumb img { display: block; max-width: 160px; max-height: 120px; border-radius: 6px; object-fit: contain; background: var(--wb-muted); }
@@ -1484,13 +1485,20 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 :root { --pbw: calc(1680px - 32px - 356px); }
 .dash.board { --pbw: 900px; }
 .bpcol { display: none; }
+/* An empty board (no topic or card in it; the placeholder may follow an empty #bpins or a future toolbar card) is a quiet dashed placeholder, as the idle pin zone (.bpzone) is. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
+.r-board:not(:has(> .topic, > .bcard)) > .empty { box-sizing: border-box; min-height: 54px; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
+.dgrid.live > .bcol:has(> .r-board > .empty) { position: relative; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)):has(> .empty) { position: absolute; inset: 0 4px 0 2px; display: flex; flex-direction: column; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)) > .empty { flex: 1 1 0; }
 .bpins:empty { display: none; }
 .r-board > .bpins { margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px dashed var(--wb-line); }
 .r-board > .bpins::before { content: attr(data-label); display: block; padding: 0 2px 6px; font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); }
-.bp-hd { flex: none; display: flex; align-items: center; gap: 6px; padding: 4px 6px 8px 4px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
-.bp-hd .li { width: 13px; height: 13px; }
-.bp-ct { font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); }
-.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 2px 4px 40px 2px; }
+.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; padding: 10px 4px 40px 2px; }
+/* The pinned column has no rail (cards.js), so its topics' bars and cards' headers stick to the top of this scroller by CSS alone, as the board's do. The pin list above the board sits in the rail's host (.wb-rail) and is railed with the board. */
+.bpcol > .bpins .topic { overflow: hidden; overflow: clip; }
+.bpcol > .bpins .topic > .tophead { position: sticky; top: 0; z-index: 2; }
+.bpcol > .bpins .topic:not(.quiet) > .tophead > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+.bpcol > .bpins .bcard:not([data-max]) .bc-hd { position: sticky; top: 0; z-index: 1; background: var(--wb-card); border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
 .bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
 .bp-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .bp-edge:hover::after, .bp-edge.drag::after { background: var(--wb-primary); }
@@ -1531,7 +1539,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .tbar:hover .tpin, .tbar .tpin:focus-visible { opacity: .9; }
 .tbar .tpin[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); }
 .tbar .tpin[aria-pressed="true"] .li, .bc-pin[aria-pressed="true"] .li { fill: color-mix(in srgb, var(--wb-primary) 25%, transparent); }
-.r-board section.topic > .tbar, .bpins section.topic > .tbar, .bc-hd { cursor: grab; }
+.r-board section.topic > .tophead > .tbar, .bpins section.topic > .tophead > .tbar, .bc-hd { cursor: grab; }
 :root[data-bdrag], :root[data-bdrag] * { cursor: grabbing !important; -webkit-user-select: none; user-select: none; }
 .bdrag { opacity: .4; }
 .bdrop { position: fixed; z-index: 46; height: 3px; border-radius: 2px; background: var(--wb-primary); pointer-events: none; }
@@ -1563,15 +1571,17 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .wsbar .pp { font-family: var(--wb-mono); font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .rail .wsbar .ct { margin-left: auto; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: rgb(127 127 127 / .28); flex: none; }
 .rail .rws.col .wsbody { display: none; }
-/* the + buttons (a worktree row's new session among them) and forget: quiet
-   until their line is hovered or they are focused (faint always on touch
-   screens), full on hover and while their popover is open */
-.rail .radd, .rail .rforget, .rail .rnew { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity .12s; }
-.rail .radd .i, .rail .rforget .i, .rail .rnew .i { width: 13px; height: 13px; stroke-width: 1.8; }
-.rail .rhd:hover .radd, .rail .wsbar:hover .radd, .rail .wsbar:hover .rforget, .rail .wthd:hover .rnew, .rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible { opacity: .7; }
-@media (hover: none) { .rail .radd, .rail .rforget, .rail .rnew { opacity: .5; } }
-.rail .rhd .radd:hover, .rail .wsbar .radd:hover, .rail .wsbar .rforget:hover, .rail .rhd .radd[aria-expanded="true"], .rail .wsbar .radd[aria-expanded="true"], .rail .rnew:hover, .rail .rnew[aria-expanded="true"] { opacity: 1; background: rgb(127 127 127 / .22); }
-.rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+/* the + buttons (a worktree row's new session among them), forget, and a
+   worktree row's delete: quiet until their line is hovered or they are
+   focused (faint always on touch screens), full on hover and while their
+   popover is open */
+.rail .radd, .rail .rforget, .rail .rnew, .rail .rdel { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity .12s; }
+.rail .radd .i, .rail .rforget .i, .rail .rnew .i, .rail .rdel .i { width: 13px; height: 13px; stroke-width: 1.8; }
+.rail .rhd:hover .radd, .rail .wsbar:hover .radd, .rail .wsbar:hover .rforget, .rail .wthd:hover .rnew, .rail .wthd:hover .rdel, .rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible, .rail .rdel:focus-visible { opacity: .7; }
+@media (hover: none) { .rail .radd, .rail .rforget, .rail .rnew, .rail .rdel { opacity: .5; } }
+.rail .rhd .radd:hover, .rail .wsbar .radd:hover, .rail .wsbar .rforget:hover, .rail .rhd .radd[aria-expanded="true"], .rail .wsbar .radd[aria-expanded="true"], .rail .rnew:hover, .rail .rnew[aria-expanded="true"], .rail .rdel:hover { opacity: 1; background: rgb(127 127 127 / .22); }
+.rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible, .rail .rdel:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+.rail .rdel:hover { color: var(--wb-fail); }
 .rail .rforget:disabled { cursor: progress; }
 .rail .wsbody { padding-top: 2px; }
 .rail .rwt { padding: 4px 0 2px; }
@@ -1705,6 +1715,52 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rpop .pbtn.go { background: var(--wb-primary); color: var(--wb-primary-fg); }
 .rpop .pbtn:disabled { opacity: .45; cursor: default; }
 .rpop .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+/* the rail's worktree delete modal: a <dialog> the page script makes once
+   outside the rail region and shows modal from a row's trash button (which,
+   like the new-session +, only a browser on the daemon's machine sees). The
+   check's facts (the changed files in a scrolling list, the holders with a
+   live one marked as blocking), the refusal note, the force notice, the
+   typed-name confirmation, and a danger-coloured Delete */
+dialog.rdeldlg { width: min(460px, calc(100vw - 24px)); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; border: 0; border-radius: 12px;
+  background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); font-size: 12.5px; }
+dialog.rdeldlg[open] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+dialog.rdeldlg::backdrop { background: var(--scrim, rgb(0 0 0 / .35)); }
+dialog.rdeldlg [hidden] { display: none !important; }
+.rdeldlg .rdhd { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; font-weight: 800; }
+.rdeldlg .rdhd .i { width: 15px; height: 15px; flex: none; color: var(--wb-fail); }
+.rdeldlg .rdpath { margin-top: -6px; padding: 0; background: none; font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdfacts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rdeldlg .rdfacts:empty { display: none; }
+.rdeldlg .rdfact { display: flex; align-items: flex-start; gap: 7px; min-width: 0; overflow-wrap: anywhere; }
+.rdeldlg .rdfact .i { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--wb-muted-fg); }
+.rdeldlg .rdfact.warn, .rdeldlg .rdfact.warn .i { color: var(--wb-warn-ink); }
+.rdeldlg .rdfact.bad, .rdeldlg .rdfact.bad .i { color: var(--wb-fail); }
+.rdeldlg .rdpaths { list-style: none; margin: 0 0 0 20px; padding: 4px 8px; max-height: 132px; overflow-y: auto; overscroll-behavior: contain; border-radius: 6px; background: var(--wb-muted); font: 11.5px/1.5 var(--wb-mono); }
+.rdeldlg .rdpaths li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rdeldlg .rdpaths li.more { font-family: var(--wb-sans); color: var(--wb-muted-fg); }
+.rdeldlg .rdsub { margin-top: 3px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.rdeldlg .rdholders { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.rdeldlg .rdholders li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.rdeldlg .rdholders .nm { font-family: var(--wb-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rdeldlg .rdholders .rdst { margin-left: auto; flex: none; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rdeldlg .rdholders li.live .rdst { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
+.rdeldlg .rdnote, .rdeldlg .rdforce { margin: 0; padding: 7px 10px; border-radius: 8px; overflow-wrap: anywhere; }
+.rdeldlg .rdnote.bad { background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); color: var(--wb-fail); }
+.rdeldlg .rdnote.warn, .rdeldlg .rdforce { background: color-mix(in srgb, var(--wb-warn) 14%, var(--wb-card)); color: var(--wb-warn-ink); }
+.rdeldlg .rdforcehd { font-weight: 800; }
+.rdeldlg .rdforce ul { margin: 3px 0 0; padding-left: 18px; }
+.rdeldlg .rdconf { display: grid; gap: 5px; }
+.rdeldlg .rdconft { font-size: 12px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdconft code { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); background: var(--wb-muted); padding: 0 4px; border-radius: 4px; }
+.rdeldlg .rdq { width: 100%; box-sizing: border-box; font: 12.5px var(--wb-mono); border: 0; border-radius: 8px; padding: 5px 8px; background: var(--wb-muted); color: inherit; }
+.rdeldlg .rdq:focus-visible { outline: 1.5px solid var(--wb-fail); }
+.rdeldlg .rdmsg { margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdmsg.err { color: var(--wb-fail); }
+.rdeldlg .rdrow { display: flex; justify-content: flex-end; gap: 6px; }
+.rdeldlg .pbtn { white-space: nowrap; flex: none; font: inherit; font-size: 12px; font-weight: 700; border: 0; border-radius: 999px; padding: 4px 14px; cursor: pointer; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rdeldlg .pbtn.danger { background: var(--wb-fail); color: var(--wb-card); }
+.rdeldlg .pbtn:disabled { opacity: .45; cursor: default; }
+.rdeldlg .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
 /* daemon-hosted lead sessions: the hosted mark beside a harness badge; the
    new-session button after a worktree row's label (styled with the + buttons
    above), which only a browser on the daemon's machine sees (the spawn route
@@ -1719,6 +1775,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .wsbar .chip.perm + .ct { margin-left: 0; }
 .rail .wsbar .chip.perm { margin-left: auto; }
 html:not([data-sysopen]) .rail .rnew { display: none; }
+html:not([data-sysopen]) .rail .rdel { display: none; }
 .rpop .sploc { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: -4px; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
 .rpop .sploc .i { width: 12px; height: 12px; flex: none; }
 .rpop .sploc b { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
@@ -1805,3 +1862,41 @@ html:not([data-sysopen]) .rail .rnew { display: none; }
   .rail .bots .i { animation: none; }
   .rail .hi .rrun, .rail .hi.perm { animation: none; }
 }
+
+/* ===== iframe shell (the "shell" template, shell.js) =====
+   The shell's frames fill the window under its rail and header, so a page
+   it frames lays out against the window as it does standing alone (every
+   breakpoint above holds); only the shown frame (.on) is visible, and a
+   hidden one keeps its layout and state. The shell page never scrolls: its
+   wrap is one window tall, as a live session page's, and lets every click
+   through to the frame but on the rail, the header's items, and the memo
+   pad (whose own rules admit clicks while open). A page the shell frames
+   (data-frame) keeps an empty rail placeholder (railph) and its header's
+   items invisible under the shell's, which mirror them (the head message).
+   A frame whose page scrolls as a whole moves the shell's header and rail
+   with it (dashboard.js shScroll), as that page's own would move. While
+   a frame shows a backdrop over the whole window, the shell's rail and
+   header dim by the same amount (--fdim) and let clicks through to it.
+   The shell's rail rows stay unseen until its stored marks apply
+   (data-premark, the shell template).
+   The index keeps its own header (a null head): the shell's header shows
+   only its rail button (sh-own), and the framed index shows its own items
+   but its placeholder rail button. Framed, the index lays out as a session
+   page does: its list (ixmain) beside the rail's placeholder, left-aligned
+   at its own width, and the tracker's drawer as a session page's. */
+:root[data-shell], :root[data-shell] body { overflow: hidden; }
+.frames { position: fixed; inset: 0; z-index: 0; }
+.frames > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; visibility: hidden; background: var(--wb-bg); }
+.frames > iframe.on { visibility: visible; z-index: 1; }
+:root[data-shell] .dwrap { position: relative; z-index: 1; pointer-events: none; }
+:root[data-shell] .dwrap > .top > *, :root[data-shell] #rail { pointer-events: auto; }
+:root[data-shell][data-fdim] .dwrap > .top, :root[data-shell][data-fdim] #rail { filter: brightness(var(--fdim, 1)); }
+:root[data-shell][data-fdim] .dwrap > .top > *, :root[data-shell][data-fdim] #rail { pointer-events: none; }
+.rail[data-premark] > .r-rail { visibility: hidden; }
+:root[data-shell] .dwrap > .top.sh-own > :not(.back) { display: none; }
+:root[data-frame]:not([data-mode="index"]) .dwrap > .top > *, :root[data-frame] .dwrap > .top > .back { visibility: hidden; }
+.ixmain { min-width: 0; max-width: 1080px; }
+body.tk-paged .ixmain { display: none; }
+:root[data-frame] .dash.index { --tkml: 0px; --tkmaxw: initial; }
+@media (min-width: 1600px) { :root[data-frame] .dash.index { --tkmaxw: none; } }
+:root[data-frame] .rail-ph { visibility: hidden; box-shadow: none; background: none; }

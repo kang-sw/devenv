@@ -264,3 +264,23 @@ func joined(values []string) string {
 	}
 	return out
 }
+
+// TestTicketStatusLocatesByDirectory pins TicketStatus: the status is the
+// directory holding the stem, a closed directory's name without its dot,
+// and a malformed or missing stem resolves to nothing.
+func TestTicketStatusLocatesByDirectory(t *testing.T) {
+	root := t.TempDir()
+	for dir, stem := range map[string]string{"idea": "261101-feat-a", "todo": "261101-feat-b", "ready": "261101-feat-c", ".done": "261101-feat-d", ".dropped": "261101-feat-e"} {
+		mustWrite(t, root, "ai-docs/tickets/"+dir+"/"+stem+".md", "# x\n")
+	}
+	for stem, want := range map[string]string{"261101-feat-a": "idea", "261101-feat-b": "todo", "261101-feat-c": "ready", "261101-feat-d": "done", "261101-feat-e": "dropped"} {
+		if got, ok := TicketStatus(root, stem); !ok || got != want {
+			t.Errorf("TicketStatus(%s) = %q, %v; want %q", stem, got, ok, want)
+		}
+	}
+	for _, stem := range []string{"261101-feat-missing", "../idea/261101-feat-a", "not-a-stem"} {
+		if got, ok := TicketStatus(root, stem); ok {
+			t.Errorf("TicketStatus(%s) = %q, want none", stem, got)
+		}
+	}
+}

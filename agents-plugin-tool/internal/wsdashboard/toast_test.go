@@ -149,6 +149,8 @@ N.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 N.prototype.closest = function () { return this.up; };
 var title = "sess - ws dashboard";
 var doc = { hidden: false };
+var shell = false, framed = false, shHidden = false;
+function shPost() {}
 Object.defineProperty(doc, "title", { get: function () { return title; }, set: function (v) { writes++; title = v; } });
 var root = new N(), REG = {}, FR = {};
 function region(name) { return REG[name] || null; }
@@ -267,12 +269,14 @@ process.stdout.write(bad.join("\n"));
 }
 
 // TestPagesCarryTheToastStackAndTitleHost pins the shared toast stack on
-// every dashboard page, after the string table and ahead of the tracker and
-// page scripts that use it, and the html marker that makes the board's
-// open-question pill leave the title to the page.
+// every dashboard page (the framed session pages, the index, and the shell
+// around a session page), after the string table and ahead of the tracker and
+// page scripts that use it, and on the pages that run the board, the html
+// marker that makes the board's open-question pill leave the title to the
+// page.
 func TestPagesCarryTheToastStackAndTitleHost(t *testing.T) {
 	f := startPageFixture(t)
-	for name, path := range map[string]string{"live": "/s/livesession", "board-first": "/s/boardsession", "index": "/"} {
+	for name, path := range map[string]string{"live": "/s/livesession?frame=1", "board-first": "/s/boardsession?frame=1", "index": "/?frame=1"} {
 		code, page := get(t, f.base+path)
 		if code != http.StatusOK {
 			t.Fatalf("GET %s = %d", path, code)
@@ -295,5 +299,15 @@ func TestPagesCarryTheToastStackAndTitleHost(t *testing.T) {
 		if strings.Contains(page, "ltoast") {
 			t.Errorf("%s page still carries the old link toast", name)
 		}
+	}
+	// The shell keeps no board or tracker of its own: only the stack, once,
+	// after the string table and ahead of the page script.
+	_, shell := get(t, f.base+"/s/livesession")
+	i18n, toast, script := strings.Index(shell, "window.wsT = function"), strings.Index(shell, "window.WsToast = { show: show }"), strings.Index(shell, "The dashboard page script, shared")
+	if i18n < 0 || toast < i18n || script < toast || strings.Count(shell, "window.WsToast = { show: show }") != 1 {
+		t.Errorf("shell: the toast stack is missing, repeated, or not between the string table and the page script")
+	}
+	if !strings.Contains(shell, ".wstoasts {") {
+		t.Errorf("shell lacks the toast stack's stylesheet")
 	}
 }

@@ -1,6 +1,7 @@
 ---
 title: ws dashboard frontend performance - profile and optimize
 related:
+  261113-feat-ws-whiteboard-board-frontend-performance: "absorbs this ticket's board scope ((417) board-note typing, long whiteboard, the board candidate techniques) and the (473) measurement; this ticket keeps the non-board surfaces"
   261113-feat-ws-dashboard-iframe-shell: session-switch cost is structural (full document reload per navigation) and is addressed there; this ticket measures (d) but does not restructure navigation
 ---
 
@@ -59,6 +60,12 @@ established causes.
   lands.
 
 ## Constraints
+
+- Board scope moved (owner (532)=a, 2026-11-13): the whiteboard board's
+  frames, swaps, note typing and idle timers, and the measurement harness,
+  belong to `261113-feat-ws-whiteboard-board-frontend-performance`; this
+  ticket keeps the non-board surfaces (tracker, conversation regions,
+  script parse cost) and reuses that ticket's harness.
 
 - No server-side protocol or store change unless Phase 1 proves a server
   payload is the hotspot; then it must be T0 additive per AGENTS.md

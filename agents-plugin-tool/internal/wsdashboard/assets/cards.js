@@ -69,7 +69,7 @@
   // column's list while the page shows that column (colOn). boardw is the
   // board's width beside the column as the user dragged it (0: the
   // stylesheet's).
-  var pins = null, col = null, colOn = false, boardw = 0, zone = null, count = null;
+  var pins = null, col = null, colOn = false, boardw = 0, zone = null;
 
   function licon(name) { return '<svg class="li" aria-hidden="true"><use href="#l-' + name + '"/></svg>'; }
   function mk(tag, cls, text) {
@@ -269,7 +269,6 @@
   // there are, and tells it when that changes.
   function relayout() {
     var n = pinned().length, on = !!(col && opt && opt.shows && opt.shows(n));
-    if (count) count.textContent = String(n);
     if (on === colOn) return;
     colOn = on;
     if (opt.layout) opt.layout(on);
@@ -282,7 +281,7 @@
     [board, colOn ? pins : null].forEach(function (box) {
       if (!box) return;
       Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (sec) {
-        var bar = child(sec, "tbar");
+        var head = child(sec, "tophead"), bar = head && child(head, "tbar");
         if (!bar) return;
         var r = topics[sec.getAttribute("data-topic")], on = !!(r && r.pinned && r.el === sec);
         var b = child(bar, "tpin");
@@ -684,7 +683,7 @@
     if (!t.closest || t.closest("button, a, input, textarea, select, summary, label")) return;
     var head = t.closest(".tbar, .bc-hd");
     if (!head) return;
-    var el = head.classList.contains("bc-hd") ? head.closest(".bcard") : head.parentNode;
+    var el = head.classList.contains("bc-hd") ? head.closest(".bcard") : head.closest("section.topic");
     if (!el || el.hasAttribute("data-max") || !(isCard(el) || topicName(el) !== null)) return;
     var u = unitOf(el);
     if (!u) return;
@@ -744,7 +743,7 @@
 
   // --- the pinned column ----------------------------------------------------------
   // The page hands an empty element (opt.column's host); the framework
-  // fills it: a header with the pin count, a width handle on its left edge,
+  // fills it: a width handle on its left edge,
   // where it meets the board, and the pin list while the column shows. The
   // column fills the window right of the board, so the handle sizes the
   // board (--boardw, the width of the board's .dgrid cell, kept with the
@@ -757,11 +756,6 @@
   }
   function boardCell() { return board.closest && board.closest(".dgrid"); }
   function buildCol() {
-    var hd = mk("div", "bp-hd");
-    hd.innerHTML = licon("pin");
-    hd.appendChild(mk("span", "", wsT("js.pins.title")));
-    count = hd.appendChild(mk("span", "bp-ct", "0"));
-    col.appendChild(hd);
     edgeHandle();
   }
   function edgeHandle() {
@@ -875,7 +869,7 @@
         box.addEventListener("pointerdown", dragStart);
         box.addEventListener("click", function (e) {
           var b = e.target.closest && e.target.closest(".tpin");
-          if (b && b.parentNode.classList.contains("tbar")) pinTopic(b.parentNode.parentNode, b.getAttribute("aria-pressed") !== "true");
+          if (b && b.parentNode.classList.contains("tbar")) pinTopic(b.parentNode.closest("section.topic"), b.getAttribute("aria-pressed") !== "true");
         });
         box.addEventListener("contextmenu", function (e) { if (dg && dg.touch) e.preventDefault(); });
       });

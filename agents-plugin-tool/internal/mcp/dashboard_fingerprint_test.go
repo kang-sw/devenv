@@ -3,6 +3,8 @@ package mcp
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -199,5 +201,49 @@ func TestDashboardHistoryCacheReadsEachEntryOnce(t *testing.T) {
 	src.boards.mu.Unlock()
 	if history || print || boards != 0 {
 		t.Fatalf("ForgetSession kept history %t, fingerprint %t, %d board renders", history, print, boards)
+	}
+}
+
+// TestDashboardTopicTicketMoveInvalidatesTheBoard pins Decision 17: the
+// served board's ticket resolver names every status directory it consults
+// as a watched file, so a linked ticket moving between two directories the
+// ticket panel never lists (idea/ to .done/) renders the board again, now
+// with the moved status.
+func TestDashboardTopicTicketMoveInvalidatesTheBoard(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	writeTicket(t, f.root, "idea", "261101-feat-linked", "Linked")
+	f.update(t, `<wb:topic name="t" tickets="261101-feat-linked"><wb:log>working</wb:log></wb:topic>`)
+
+	page := readPageOK(t, src, reg)
+	if !strings.Contains(string(page.Board.Board), `class="tk idea"`) {
+		t.Fatalf("the board lacks the idea badge:\n%s", page.Board.Board)
+	}
+	for _, dir := range wsdoc.TicketStatusDirs {
+		want := filepath.Join(f.root, "ai-docs", "tickets", dir)
+		if !slices.Contains(page.Watch, want) {
+			t.Errorf("the board does not watch %s", want)
+		}
+	}
+	readPageOK(t, src, reg)
+	before := boardRenders(src)
+	if readPageOK(t, src, reg); boardRenders(src) != before {
+		t.Fatal("an unchanged re-read rendered the board")
+	}
+	from := filepath.Join(f.root, "ai-docs", "tickets", "idea", "261101-feat-linked.md")
+	to := filepath.Join(f.root, "ai-docs", "tickets", ".done", "261101-feat-linked.md")
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(from, to); err != nil {
+		t.Fatal(err)
+	}
+	page = readPageOK(t, src, reg)
+	if boardRenders(src) == before {
+		t.Fatal("a linked ticket's move reused the memoized board")
+	}
+	if !strings.Contains(string(page.Board.Board), `class="tk done"`) {
+		t.Fatalf("the re-rendered board lacks the done badge:\n%s", page.Board.Board)
 	}
 }

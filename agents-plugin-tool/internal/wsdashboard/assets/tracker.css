@@ -1,3 +1,4 @@
+/* class prefix: tk (new classes use tk-) */
 /* Tracker renderer styles (tracker.js). Every rule is scoped to the renderer's
    own nodes: each node it creates carries the class tk, and every selector
    starts at one, so nothing here reaches the host page.
@@ -77,7 +78,7 @@
 
 /* ===== centered search palette: sessions, board, then tracker ===== */
 .tk.tk-qswrap { display: block; }
-.tk.tk-palette { position: fixed; inset: 0; margin: auto; width: min(680px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); box-sizing: border-box; border: 1px solid var(--wb-line); color: var(--wb-fg); background: var(--wb-card); border-radius: 14px; box-shadow: var(--wb-shadow-hi);
+.tk.tk-palette { position: fixed; inset: 0; margin: auto; width: min(680px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 32px); box-sizing: border-box; border: 1px solid var(--wb-line); color: var(--wb-fg); background: var(--wb-card); border-radius: 14px; box-shadow: var(--wb-shadow-hi);
   padding: 14px; }
 .tk.tk-palette[open] { display: flex; flex-direction: column; gap: 10px; }
 .tk.tk-palette[hidden] { display: none; }
@@ -148,7 +149,7 @@
 .tk .lpick { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 6px 0; font-size: 12px; }
 .tk .btn.ghost { opacity: .6; }
 .tk .ts { font-family: var(--wb-mono); font-size: 11px; white-space: nowrap; }
-.tk .al { font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); margin-right: 2px; }
+.tk .al { flex: none; white-space: nowrap; font-family: var(--wb-mono); font-size: 11px; color: var(--wb-muted-fg); margin-right: 2px; }
 .tk .conc { margin: 4px 0 2px; padding: 4px 8px; border-radius: 6px; border-left: 3px solid var(--tk-conc); background: color-mix(in srgb, var(--tk-conc) 12%, var(--wb-card)); font-size: 12px; color: var(--wb-fg); }
 .tk ul.plain { list-style: none; margin: 0; padding: 0; }
 .tk .bar { display: inline-block; width: 72px; height: 6px; border-radius: 3px; background: var(--wb-muted); overflow: hidden; vertical-align: middle; flex: none; }

@@ -103,6 +103,28 @@ func ticketPanel(in whiteboardPanelInput) (wswhiteboard.Panel, bool) {
 	return wswhiteboard.Panel{ID: "tickets", Title: wsi18n.T(in.lang, "panel.tickets"), Icon: "board", Count: count, Lanes: lanes}, true
 }
 
+// whiteboardTickets resolves the ticket stems a topic links (wb:topic
+// tickets=) against the session root's ticket board, for the topic bar's
+// badges (wswhiteboard.TicketResolver). watch, set on a served page, is
+// handed every status directory the first time a stem is resolved: a ticket
+// moving between them changes a listing, which invalidates the page's
+// memoized render (boardWatchStamp stamps a directory by its listing).
+type whiteboardTickets struct {
+	root    string
+	watch   func(string)
+	watched bool
+}
+
+func (w *whiteboardTickets) TicketStatus(stem string) (string, bool) {
+	if w.watch != nil && !w.watched {
+		w.watched = true
+		for _, dir := range wsdoc.TicketStatusDirs {
+			w.watch(filepath.Join(w.root, filepath.FromSlash(wsdoc.TicketsDir), dir))
+		}
+	}
+	return wsdoc.TicketStatus(w.root, stem)
+}
+
 // whiteboardTicketsList lists the tickets a ticket panel shows (a test
 // seam: it reads every listed ticket in full).
 var whiteboardTicketsList = wsdoc.TicketsList

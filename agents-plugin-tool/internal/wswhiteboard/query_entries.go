@@ -381,6 +381,7 @@ func makeQueryTopic(state *State, name string, items []Item, body bool) QueryTop
 	if index := state.topicDocIndex(name); index >= 0 {
 		doc := state.Topics[index]
 		t.BodyLen = utf8.RuneCountInString(doc.Body)
+		t.Tickets = doc.Tickets
 		if body {
 			t.Body = doc.Body
 		}

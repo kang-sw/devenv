@@ -225,13 +225,68 @@ func TestPiLeadUnixNPMSymlink(t *testing.T) {
 	}
 }
 
-func TestPiLeadStandaloneDefaultRefused(t *testing.T) {
+// A default-mode lead on a Pi without its JavaScript SDK cannot keep its other
+// extensions; it starts isolated with a warning naming that start.
+func TestPiLeadStandaloneDefaultStartsIsolated(t *testing.T) {
+	for _, isolation := range []string{"", "default"} {
+		t.Run(isolation, func(t *testing.T) {
+			spec, root := piLeadFixture(t)
+			entry := piLeadBundle(t, root)
+			spec.Lead.PluginIsolation = isolation
+			warning := "stale warning"
+			spec.Lead.PluginWarning = func(text string) { warning = text }
+			command := filepath.Join(spec.Root, "standalone-pi")
+			piLeadFile(t, command, "binary")
+			got, args, err := piLeadLaunch(command, nil, spec)
+			if err != nil || got != command {
+				t.Fatalf("command %q, error %v", got, err)
+			}
+			if !slices.Equal(args, append(piLeadArgs(spec), "--no-extensions", "--extension", entry)) {
+				t.Fatalf("isolated fallback args = %v", args)
+			}
+			if warning != piNoSDKWarning {
+				t.Fatalf("warning = %q", warning)
+			}
+			if spec.Lead.PluginIsolation != isolation {
+				t.Fatalf("launch must not rewrite the requested isolation: %q", spec.Lead.PluginIsolation)
+			}
+		})
+	}
+}
+
+// Only the missing-SDK refusal selects the isolated start; any other
+// resolution failure still fails the launch.
+func TestPiLeadOtherSDKErrorsStillFail(t *testing.T) {
 	spec, root := piLeadFixture(t)
 	piLeadBundle(t, root)
+	warned := false
+	spec.Lead.PluginWarning = func(text string) { warned = warned || text != "" }
+	missing := filepath.Join(spec.Root, "no-such-pi")
+	if _, _, err := piLeadLaunch(missing, nil, spec); err == nil || errors.Is(err, errPiNoSDK) {
+		t.Fatalf("unresolvable CLI must fail, not start isolated: %v", err)
+	}
+	if warned {
+		t.Fatal("a failed launch must not report the isolated start")
+	}
+}
+
+// PluginWarning holds one value, so the bridge fallback and the isolated start
+// share it and both texts survive.
+func TestPiLeadNoSDKAndBridgeWarningsCombine(t *testing.T) {
+	spec, _ := piLeadFixture(t)
+	spec.Lead.Env = map[string]string{EnvHostedSessionKey: "lead-key"}
+	warning := ""
+	spec.Lead.PluginWarning = func(text string) { warning = text }
+	spec.Lead.WSMCP = func() (MCPCommand, error) { return MCPCommand{Command: "/bundled/ws"}, nil }
 	command := filepath.Join(spec.Root, "standalone-pi")
 	piLeadFile(t, command, "binary")
-	if _, _, err := piLeadLaunch(command, nil, spec); err == nil || !strings.Contains(err.Error(), "JavaScript SDK") {
-		t.Fatalf("cannot safely restore from a standalone binary without its SDK: %v", err)
+	_, args, err := piLeadLaunch(command, nil, spec)
+	bridge := filepath.Join(piDir(spec.Dir), piBridgeFile)
+	if err != nil || !slices.Equal(args, append(piLeadArgs(spec), "--no-extensions", "--extension", "builtin:mcp", "--extension", bridge)) {
+		t.Fatalf("args %v, error %v", args, err)
+	}
+	if !strings.Contains(warning, "using the ws MCP bridge") || !strings.Contains(warning, piNoSDKWarning) {
+		t.Fatalf("combined warning lost a text: %q", warning)
 	}
 }
 

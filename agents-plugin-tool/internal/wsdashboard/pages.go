@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -114,6 +114,10 @@ type pageAssetsData struct {
 	// toggles, which the session page's script uses.
 	RailScript template.JS
 	MemoScript template.JS
+	// ShellScript is the iframe shell's pure helpers (shell.js,
+	// window.WsShell): the frame LRU, the paths a shell frames, and the
+	// shell-frame message shapes, which the shell and its frames both load.
+	ShellScript template.JS
 	// CardsScript is the board card framework (cards.js, window.WsCards),
 	// PreviewScript its file preview kind (preview.js, window.WsPreview),
 	// and FilesScript the conversation column's file explorer (files.js,
@@ -207,6 +211,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		ToastScript:      template.JS(get("toast.js")),
 		RailScript:       template.JS(get("rail.js")),
 		MemoScript:       template.JS(get("memo.js")),
+		ShellScript:      template.JS(get("shell.js")),
 		CardsScript:      template.JS(get("cards.js")),
 		PreviewScript:    template.JS(get("preview.js")),
 		FilesScript:      template.JS(get("files.js")),
@@ -573,10 +578,34 @@ type sessionPageData struct {
 	// the page (XtermAsset) when the daemon runs terminals and the page
 	// was asked for by a browser on this machine, and empty otherwise.
 	Terminal string
-	regions  regionSet
+	// Frame renders the session page as the iframe shell frames it
+	// (?frame=1, shellPageData): the shell's rail and header stand over
+	// it, so the page keeps both only as invisible placeholders that lay
+	// it out as before. Without it the page stands alone (the tests'
+	// renders).
+	Frame   bool
+	regions regionSet
 }
 
 func (p sessionPageData) regionByName(name string) renderedRegion { return p.regions[name] }
+
+// shellPageData is the iframe shell (the "shell" template): the session
+// rail and the top header, which stay across navigations, over the frames
+// the dashboard's pages load in (shell.js, dashboard.js). RID is the
+// session it opens on, empty on the index; Src is the first frame's path,
+// Title the tab's title until that frame names one. Its regions are the
+// rail and, on a session, the opening session's head; later heads come
+// from the frames. OwnHead marks a first page that keeps its own header
+// (the index), beside which the shell shows only its rail button.
+type shellPageData struct {
+	Lang, LangPref, Theme string
+	Assets                pageAssetsData
+	SysOpen, OwnHead      bool
+	RID, Src, Title       string
+	regions               regionSet
+}
+
+func (p shellPageData) regionByName(name string) renderedRegion { return p.regions[name] }
 
 type indexPageData struct {
 	IndexView
@@ -586,7 +615,10 @@ type indexPageData struct {
 	LAN *LANAccess
 	// Local marks a page asked for by a browser on this machine, like
 	// sessionPageData.SysOpen.
-	Local   bool
+	Local bool
+	// Frame marks the index as the iframe shell frames it (?frame=1): laid
+	// out beside a placeholder for the shell's rail, under its own header.
+	Frame   bool
 	regions regionSet
 }
 
@@ -652,12 +684,47 @@ func renderedEntries(entries []ConvEntry) string {
 // sysOpen offers the system-open link action (sessionPageData.SysOpen), and
 // terminal, when not empty, terminals (sessionPageData.Terminal).
 func renderSessionPage(view SessionView, regions regionSet, sysOpen bool, terminal string) (string, error) {
+	return renderSessionPageData(sessionPageData{SessionView: view, SysOpen: sysOpen, Terminal: terminal, regions: regions})
+}
+
+// renderSessionPageData renders the session template from p, filling in the
+// assets.
+func renderSessionPageData(p sessionPageData) (string, error) {
 	a, err := loadDashboardAssets()
 	if err != nil {
 		return "", err
 	}
+	p.Assets = a.data
 	var buf bytes.Buffer
-	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "session", sessionPageData{SessionView: view, Assets: a.data, SysOpen: sysOpen, Terminal: terminal, regions: regions})
+	err = a.templateFor(p.Lang).ExecuteTemplate(&buf, "session", p)
+	return buf.String(), err
+}
+
+// renderShellPage renders the shell page p, filling in the assets. view,
+// when not nil, is the session the shell opens on, whose head the shell
+// shows until its frame hands over its own.
+func renderShellPage(p shellPageData, view *SessionView) (string, error) {
+	a, err := loadDashboardAssets()
+	if err != nil {
+		return "", err
+	}
+	p.Assets = a.data
+	t := a.templateFor(p.Lang)
+	var buf bytes.Buffer
+	head := renderedRegion{}
+	if view != nil {
+		if err := t.ExecuteTemplate(&buf, "r-"+regionHead, *view); err != nil {
+			return "", fmt.Errorf("dashboard region %s: %w", regionHead, err)
+		}
+		head = newRegion(buf.String())
+		buf.Reset()
+	}
+	regions := regionSet{regionHead: head}
+	for name, r := range p.regions {
+		regions[name] = r
+	}
+	p.regions = regions
+	err = t.ExecuteTemplate(&buf, "shell", p)
 	return buf.String(), err
 }
 
@@ -673,13 +740,15 @@ func renderIndexRegions(view IndexView) (regionSet, error) {
 	return regionSet{regionSessions: newRegion(buf.String())}, nil
 }
 
-func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess, local bool) (string, error) {
+// renderIndexPage renders the index; frame renders it as the iframe shell
+// frames it.
+func renderIndexPage(view IndexView, regions regionSet, lan *LANAccess, local, frame bool) (string, error) {
 	a, err := loadDashboardAssets()
 	if err != nil {
 		return "", err
 	}
 	var buf bytes.Buffer
-	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "index", indexPageData{IndexView: view, Assets: a.data, LAN: lan, Local: local, regions: regions})
+	err = a.templateFor(view.Lang).ExecuteTemplate(&buf, "index", indexPageData{IndexView: view, Assets: a.data, LAN: lan, Local: local, Frame: frame, regions: regions})
 	return buf.String(), err
 }
 
@@ -981,7 +1050,8 @@ func (d *Daemon) pagesIn(lang string) pageReader {
 	return r
 }
 
-// handleIndex serves /.
+// handleIndex serves /: the iframe shell, which loads the index in a frame
+// of its own, or with ?frame=1 the index as the shell frames it.
 func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -990,13 +1060,18 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if !readMethod(w, r) {
 		return
 	}
+	if !framedRequest(r) {
+		d.serveShell(w, r, nil, "/?frame=1")
+		return
+	}
 	lang, pref := requestLang(r)
 	view := d.pagesIn(lang).indexView()
 	view.Lang, view.LangPref, view.Theme = lang, pref, requestTheme(r)
 	regions, err := renderIndexRegions(view)
 	if err == nil {
 		var html string
-		if html, err = renderIndexPage(view, regions, d.lanAccessFor(r), localViewer(r)); err == nil {
+		if html, err = renderIndexPage(view, regions, d.lanAccessFor(r), localViewer(r), true); err == nil {
+			admitShellFrame(w, frameAncestorsSelf)
 			writeHTML(w, html)
 			return
 		}
@@ -1098,7 +1173,12 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleSessionPage serves /s/<reply-id>: the iframe shell, which keeps the
+// rail and the top header across session switches and loads each session
+// page in a frame of its own, or with ?frame=1 that session page as the
+// shell frames it (framedRequest).
 func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, replyID string) {
+	frame := framedRequest(r)
 	lang, pref := requestLang(r)
 	view, ok := d.pagesIn(lang).session(replyID)
 	if !ok {
@@ -1110,26 +1190,22 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 		return
 	}
 	view.Lang, view.LangPref, view.Theme = lang, pref, requestTheme(r)
+	if !frame {
+		d.serveShell(w, r, &view, "/s/"+replyID+"?frame=1")
+		return
+	}
 	view.Git = d.git.badge(view.Project)
 	view.Worktrees = d.worktrees != nil
 	view.Holders = d.holders != nil
 	regions, err := renderSessionRegions(view, d.entries)
 	if err == nil {
-		// The rail is rendered as its stream renders it, outside the
-		// session's own regions (railPageSource).
-		var rail renderedRegion
-		if rail, err = renderRailRegion(d.railView(d.pagesIn(lang)), lang); err == nil {
-			regions[regionRail] = rail
-		}
-	}
-	if err == nil {
 		var html string
-		terminal := ""
+		page := sessionPageData{SessionView: view, SysOpen: localViewer(r), Frame: true, regions: regions}
 		if d.offersTerminals(r) {
-			terminal, _ = XtermAsset()
+			page.Terminal, _ = XtermAsset()
 		}
-		if html, err = renderSessionPage(view, regions, localViewer(r), terminal); err == nil {
-			w.Header().Set("Content-Security-Policy", sessionPageCSP)
+		if html, err = renderSessionPageData(page); err == nil {
+			admitShellFrame(w, sessionPageCSP(true))
 			writeHTML(w, html)
 			return
 		}
@@ -1137,6 +1213,38 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 	fmt.Fprintf(d.log, "dashboard: render session %s: %v\n", replyID, err)
 	http.Error(w, "render failed", http.StatusInternalServerError)
 }
+
+// serveShell serves the iframe shell whose first frame loads src: the
+// session rail, rendered as its stream renders it (railPageSource), and the
+// top header, holding view's head when the shell opens on a session; with
+// no view (the index) the first page keeps its own header.
+func (d *Daemon) serveShell(w http.ResponseWriter, r *http.Request, view *SessionView, src string) {
+	lang, pref := requestLang(r)
+	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), OwnHead: view == nil, Src: src, Title: "ws dashboard"}
+	if view != nil {
+		page.RID = view.ReplyID
+		page.Title = view.Label
+		if page.Title == "" {
+			page.Title = view.ReplyID
+		}
+		page.Title += " - ws dashboard"
+	}
+	rail, err := renderRailRegion(d.railView(d.pagesIn(lang)), lang)
+	if err == nil {
+		page.regions = regionSet{regionRail: rail}
+		var html string
+		if html, err = renderShellPage(page, view); err == nil {
+			w.Header().Set("Content-Security-Policy", sessionPageCSP(false))
+			writeHTML(w, html)
+			return
+		}
+	}
+	fmt.Fprintf(d.log, "dashboard: render shell: %v\n", err)
+	http.Error(w, "render failed", http.StatusInternalServerError)
+}
+
+// framedRequest reports a request for the page a shell frames (?frame=1).
+func framedRequest(r *http.Request) bool { return r.URL.Query().Get("frame") == "1" }
 
 // historyPageMax bounds one history page's n.
 const historyPageMax = 4 * wslive.RingCap
@@ -1266,18 +1374,42 @@ func readMethod(w http.ResponseWriter, r *http.Request) bool {
 // own script posts carry the daemon's Origin, so the same-origin and loopback
 // guards on the write routes would pass a clickjacked board answer, message,
 // steer, cancel, interrupt, or system open; only refusing the frame stops it.
+// The one exception is a page the iframe shell frames (?frame=1,
+// admitShellFrame), which only a page of the daemon's own origin may frame.
 const frameAncestorsNone = "frame-ancestors 'none'"
 
-// sessionPageCSP is the session page's policy: frameAncestorsNone, and
-// frame-src 'self', so no frame on the page (a preview's sandboxed
-// document, a topic body) can navigate itself to another origin, where a
-// preview's document would carry its capability (fs_capability.go). A topic
-// body's srcdoc frame loads under it.
-const sessionPageCSP = "frame-src 'self'; " + frameAncestorsNone
+// sessionPageCSP is the session page's policy: frame-src 'self', so no
+// frame on the page (a preview's sandboxed document, a topic body, a
+// shell's session frame) can navigate itself to another origin, where a
+// preview's document would carry its capability (fs_capability.go), and
+// the page's own framing: the shell refuses every framing
+// (frameAncestorsNone), and the page a shell frames (frame) admits its
+// own origin only. A topic body's srcdoc frame loads under it.
+func sessionPageCSP(frame bool) string {
+	if frame {
+		return "frame-src 'self'; " + frameAncestorsSelf
+	}
+	return "frame-src 'self'; " + frameAncestorsNone
+}
+
+// frameAncestorsSelf admits framing by a page of the daemon's own origin
+// only: the iframe shell framing a page (?frame=1, admitShellFrame).
+const frameAncestorsSelf = "frame-ancestors 'self'"
+
+// admitShellFrame sets the framing headers of a page the iframe shell
+// frames: csp, which admits the daemon's own origin as the page's framer
+// (frameAncestorsSelf), and X-Frame-Options SAMEORIGIN in place of
+// writeHTML's DENY.
+func admitShellFrame(w http.ResponseWriter, csp string) {
+	w.Header().Set("Content-Security-Policy", csp)
+	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+}
 
 // writeHTML writes a daemon HTML page. A caller that sets its own
-// Content-Security-Policy includes frameAncestorsNone in it; without one the
-// page gets frameAncestorsNone alone.
+// Content-Security-Policy includes frameAncestorsNone in it (or, for a page
+// the shell frames, frameAncestorsSelf: admitShellFrame); without one the
+// page gets frameAncestorsNone alone, and X-Frame-Options DENY unless the
+// caller set SAMEORIGIN.
 func writeHTML(w http.ResponseWriter, html string) { writeHTMLStatus(w, http.StatusOK, html) }
 
 // writeHTMLStatus is writeHTML with the status the page answers.
@@ -1286,7 +1418,9 @@ func writeHTMLStatus(w http.ResponseWriter, status int, html string) {
 	if w.Header().Get("Content-Security-Policy") == "" {
 		w.Header().Set("Content-Security-Policy", frameAncestorsNone)
 	}
-	w.Header().Set("X-Frame-Options", "DENY")
+	if w.Header().Get("X-Frame-Options") == "" {
+		w.Header().Set("X-Frame-Options", "DENY")
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
