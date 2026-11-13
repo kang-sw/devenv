@@ -673,9 +673,9 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 :root[data-overview] body { background: color-mix(in srgb, var(--wb-bg) 28%, #000); }
 :root[data-overview] :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter) { filter: brightness(.28) saturate(.4); }
 :root[data-overview] .r-board :is(section.topic, .bcard) { content-visibility: visible !important; cursor: pointer; }
-:root[data-overview] .r-board section.topic > :not(.tophead),
+:root[data-overview] .r-board section.topic:not([data-overview-motion]) > :not(.tophead),
 :root[data-overview] .r-board .tophead > .tnote,
-:root[data-overview] .r-board .bcard :is(.bc-body, .bc-grip, .bc-folded),
+:root[data-overview] .r-board .bcard:not([data-overview-motion]) :is(.bc-body, .bc-grip, .bc-folded),
 :root[data-overview] .r-board > .reply { display: none !important; }
 :root[data-overview] .r-board .tophead, :root[data-overview] .r-board .bc-hd { position: static !important; }
 :root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -689,10 +689,24 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 :root[data-overview][data-pincol] .r-board > .bpins { border: 0; padding: 0; margin-bottom: 0; }
 :root[data-overview][data-pincol] .r-board > .bpins::before { display: none; }
 :root[data-overview]:not([data-pincol]) .r-board > .bpins::before { filter: brightness(.28) saturate(.4); }
+:root[data-overview] .r-board > .bpins:not(:empty) { display: flow-root; }
+.r-board [data-overview-motion], .bpins [data-overview-motion] { content-visibility: visible !important; position: relative; }
+:is(.r-board, .bpins) [data-overview-motion] :is(.tophead, .bc-hd) { position: static !important; }
+:is(.r-board, .bpins) [data-overview-motion] .trecap .rtext { display: block; overflow: hidden; }
+.overview-spacer, .overview-slot { flex: none; pointer-events: none; }
+.overview-ghost { position: fixed; z-index: 46; pointer-events: none; box-sizing: border-box; overflow: hidden; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
+.overview-ghost > .tophead, .overview-ghost > .bc-hd { position: static !important; }
+.overview-ghost .rtext { overflow: hidden; }
+.overview-ghost :is(.tnote-toggle, .d-max, .d-min, .bc-acts, .bc-fold, .bc-max, .bc-close) { opacity: 0; }
+.overview-ghost-body { height: 100%; background: var(--wb-card); }
+:root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter) { transition: filter 240ms cubic-bezier(.2,.8,.2,1); }
 .overview-spacer { flex: none; pointer-events: none; }
 .overview-flash { animation: overview-flash 1.2s ease-out; }
 @keyframes overview-flash { from { outline: 3px solid var(--wb-primary); outline-offset: 0; } to { outline: 0 solid transparent; outline-offset: 3px; } }
-@media (prefers-reduced-motion: reduce) { .overview-flash { animation: none; outline: 2px solid var(--wb-primary); outline-offset: 1px; } }
+@media (prefers-reduced-motion: reduce) {
+  .overview-flash { animation: none; outline: 2px solid var(--wb-primary); outline-offset: 1px; }
+  :root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter) { transition: none; }
+}
 
 /* ===== preview cards (preview.js) =====
    What a preview card's body holds, one per kind the preview route

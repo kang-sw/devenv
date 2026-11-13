@@ -9,7 +9,7 @@ import (
 func TestOverviewPureContracts(t *testing.T) {
 	js := mustAsset(t, "overview.js")
 	var src strings.Builder
-	for _, name := range []string{"anchor", "classify", "layer", "readState"} {
+	for _, name := range []string{"anchor", "classify", "layer", "readState", "ease"} {
 		f := regexp.MustCompile(`(?s)\n  function ` + name + `\([^\n]*\) \{.*?\n  \}\n`).FindString(js)
 		if f == "" {
 			t.Fatalf("missing %s", name)
@@ -23,6 +23,9 @@ var o={board:{contains:function(t){return t.inBoard;}}}, ITEM="items", showing="
 var doc={querySelector:function(sel){return showing && sel.indexOf(showing)>=0 ? {} : null;}};
 `+src.String()+`
 function node(top,bottom) { return {getBoundingClientRect:function(){return {top:top,bottom:bottom};}}; }
+check("curve endpoints",[ease(0),ease(1)],[0,1]);
+var prev=0;for(var i=0;i<=100;i++){var e=ease(i/100);check("curve monotone "+i,e>=prev,true);prev=e;}
+check("approved curve at midpoint",Math.abs(ease(0.5)-0.946079)<0.0001,true);
 var a=node(-40,20),b=node(20,80),v={top:10,bottom:100};
 check("first visible",anchor([a,b],{top:-80,bottom:0},v)===a,true);
 check("toolbar visible means no anchor",anchor([a,b],{top:0,bottom:40},v),null);
