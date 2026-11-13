@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -513,11 +514,43 @@ func (r *Runner) deliverPending() {
 	}
 }
 
-// steeredReport is a child's report steered into the running turn: seq is
-// its steer command's place among the process's (steerSeq).
+// steeredReport is a report or user message steered into the running turn:
+// seq is its steer command's place among the process's (steerSeq). Mark is
+// the Send coverage of a user message, applied only once Pi takes it.
 type steeredReport struct {
 	Text string `json:"text"`
 	Seq  int    `json:"seq"`
+	Mark uint64 `json:"-"`
+}
+
+// steerWorker submits a spawned Pi worker's marked inbox messages through
+// the same acknowledged, recoverable native steer path as child reports.
+// The caller checked that its turn runs and replay has finished.
+func (c *conv) steerWorker() {
+	if c.rec.Parent == nil || c.rec.Backend != BackendPi {
+		return
+	}
+	if _, ok := c.proc.(reportSteerer); !ok {
+		return
+	}
+	// Every Runner.Send to this worker is marked for steering. Serialize
+	// the drain and its coverage against Send, as kick does for prompts.
+	c.mu.Lock()
+	recs, _ := wsinbox.DrainSteer(c.inbox)
+	covered := c.sends
+	c.mu.Unlock()
+	var parts []string
+	for _, rec := range recs {
+		if text := strings.TrimSpace(rec.Entry.Text()); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) == 0 {
+		return
+	}
+	c.drained = covered
+	c.update(func(rec *Record) { rec.Drained = covered })
+	c.takeSteer(strings.Join(parts, "\n\n"), covered)
 }
 
 // takeReport takes a child's report into the conversation: steered into
@@ -525,17 +558,21 @@ type steeredReport struct {
 // which it took (reportSteerer), else kept for its next turn
 // (Record.Reports), which starts now when none runs. It runs in the loop.
 func (c *conv) takeReport(text string) {
+	c.takeSteer(text, 0)
+}
+
+func (c *conv) takeSteer(text string, mark uint64) {
 	if st, ok := c.proc.(reportSteerer); ok && c.turn && !c.rec.Lead && !c.replaying && !c.wrapHold {
 		err := st.Steer(text)
 		if err == nil {
 			c.steerSeq++
-			c.steered = append(c.steered, steeredReport{Text: text, Seq: c.steerSeq})
+			c.steered = append(c.steered, steeredReport{Text: text, Seq: c.steerSeq, Mark: mark})
 			c.saveSteered()
 			c.apply(wslive.Event{Kind: wslive.KindUser, Origin: wslive.OriginWhiteboard, Text: text})
 			c.changed(false)
 			return
 		}
-		fmt.Fprintf(c.r.opts.Log, "agent %s: steer a child's report: %v\n", c.rec.ReplyID, err)
+		fmt.Fprintf(c.r.opts.Log, "agent %s: steer a message: %v\n", c.rec.ReplyID, err)
 	}
 	c.update(func(rec *Record) { rec.Reports = append(rec.Reports, text) })
 	c.kick()
@@ -565,11 +602,12 @@ func (c *conv) steerAnswered(refusal string) {
 	}
 }
 
-// steerTaken drops a steered report the running turn took. It runs in the
-// loop.
+// steerTaken drops a steered message the running turn took and advances
+// that turn's Send coverage. It runs in the loop.
 func (c *conv) steerTaken(text string) {
 	for i, s := range c.steered {
 		if s.Text == text {
+			c.turnMark = max(c.turnMark, s.Mark)
 			c.steered = slices.Delete(c.steered, i, i+1)
 			c.saveSteered()
 			return
@@ -619,10 +657,22 @@ func (c *conv) requeueSteered() bool {
 }
 
 func (c *conv) saveSteered() {
-	if c.rec.HolderID == "" && len(c.rec.Steered) == 0 {
+	if c.rec.HolderID == "" && len(c.rec.Steered) == 0 && c.rec.TurnMark == c.turnMark {
 		return
 	}
-	c.update(func(rec *Record) { rec.Steered = slices.Clone(c.steered); rec.SteerSeq = c.steerSeq })
+	c.update(func(rec *Record) {
+		rec.Steered = slices.Clone(c.steered)
+		rec.SteerSeq, rec.TurnMark = c.steerSeq, c.turnMark
+		rec.SteerMarks = nil
+		for _, s := range c.steered {
+			if s.Mark != 0 {
+				if rec.SteerMarks == nil {
+					rec.SteerMarks = map[int]uint64{}
+				}
+				rec.SteerMarks[s.Seq] = s.Mark
+			}
+		}
+	})
 }
 
 // holdsReport reports whether a done turn of the conversation waits for

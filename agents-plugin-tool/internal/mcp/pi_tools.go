@@ -205,11 +205,7 @@ func (s *Server) handlePiTool(ctx context.Context, id json.RawMessage, tool stri
 		if wantsJSON(args) {
 			return toolJSONResponse(id, piChild(st), nil)
 		}
-		how := "starts its next turn now"
-		if st.Status == wsagent.StatusRunning {
-			how = "waits for its running turn to end, then goes as its next turn (with any other message sent meanwhile)"
-		}
-		return toolTextResponse(id, fmt.Sprintf("sent to Pi subagent %s: the message %s. Its completion mail arrives when that turn ends.\n", child, how), nil)
+		return toolTextResponse(id, fmt.Sprintf("sent to Pi subagent %s: starts a turn if idle, otherwise steers its running turn at the next tool boundary. That turn's completion mail covers the message.\n", child), nil)
 	case "pi.stop":
 		st, err := s.pi.agents.CloseConversation(child)
 		if err != nil {
@@ -535,7 +531,7 @@ func piToolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "pi.send",
-			"description": "Send one of this session's Pi subagents a follow-up message. With no turn running it starts the next turn now; during a turn it waits for that turn to end and then goes as the next turn, merged with any other message sent meanwhile. A completion mail follows the turn, as after pi.spawn; pi.wait is the fallback.",
+			"description": "Send one of this session's Pi subagents a follow-up message. With no turn running it starts the next turn now; during a turn it steers that running turn at the next tool boundary, without cancelling in-flight tool calls. The running turn's completion mail covers the steered message; no extra turn is queued after it is taken. pi.wait is the fallback.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

@@ -185,6 +185,28 @@ func wsManifests() string {
 
 var piToolNames = []string{"pi.list", "pi.send", "pi.spawn", "pi.stop", "pi.transcript", "pi.wait"}
 
+func TestPiSendDescribesNativeSteeringWithoutChangingArguments(t *testing.T) {
+	for _, def := range piToolDefinitions() {
+		if def["name"] != "pi.send" {
+			continue
+		}
+		for _, tool := range []map[string]any{def, piWorkerTool(def)} {
+			desc := tool["description"].(string)
+			for _, want := range []string{"With no turn running it starts the next turn now", "steers that running turn at the next tool boundary", "without cancelling in-flight tool calls", "no extra turn"} {
+				if !strings.Contains(desc, want) {
+					t.Errorf("pi.send description lacks %q: %s", want, desc)
+				}
+			}
+			props := tool["inputSchema"].(map[string]any)["properties"].(map[string]any)
+			if len(props) != 4 || props["session_key"] == nil || props["id"] == nil || props["message"] == nil || props["format"] == nil {
+				t.Fatalf("pi.send arguments changed: %v", props)
+			}
+		}
+		return
+	}
+	t.Fatal("pi.send is missing")
+}
+
 func listedPiTools(s *Server) []string {
 	var out []string
 	for _, tool := range s.filteredTools() {
@@ -374,7 +396,7 @@ func TestPiToolsScopeToTheCallingLead(t *testing.T) {
 		t.Fatalf("a refused send reached the child")
 	}
 
-	if out := callToolWithKey(t, f.server, 6, f.key, "pi.send", map[string]any{"id": "child1", "message": "more"}); !strings.Contains(out, "sent to Pi subagent child1") {
+	if out := callToolWithKey(t, f.server, 6, f.key, "pi.send", map[string]any{"id": "child1", "message": "more"}); !strings.Contains(out, "steers its running turn at the next tool boundary") || !strings.Contains(out, "completion mail covers the message") {
 		t.Fatalf("pi.send = %q", out)
 	}
 	if got := agents.sent["child1"]; len(got) != 1 || got[0] != "more" {
