@@ -6,6 +6,7 @@ blocked-by:
 related:
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "the sticky topic head this should match; still in ready/, not merged"
   261113-feat-ws-dashboard-iframe-shell: "changes how the board is framed; may change the pinned column's embedding"
+completed: 2026-11-13
 ---
 
 # Pinned panel sticky header
@@ -77,3 +78,8 @@ column in narrower layouts. Both are the same movable `#bpins` element
 Reproduce, confirm the cause above, then make a pinned topic's bar (and a pinned card's header) stick to the top of `.bpcol > .bpins` while its content scrolls.
 
 Verification: a LOOK capture of the pinned column scrolled with a topic header stuck at its top; a capture of the main board and of the narrow layout showing them unchanged.
+
+
+## Resolution (2026-11-13)
+
+Fixed by the MAIN lead's ticketless delegate on fix/wb-pin-empty-sticky, commit 8c6b1f5b7, merged into develop at 05447f96e. `.bpcol > .bpins` topic bars and card headers stick. The above-board `#bpins` already sat inside `.wb-rail`, so the existing rail rules cover it; scoping to bare `#bpins` would have overridden `--wb-rail-top`. This covers both pin layouts. Not done: the pin column has no stuck-state shadow, because rail.js sets `.wb-stuck` for the board only; this is cosmetic and left to UX post-swap QA. The interaction with `.tophead` from 261112-feat-ws-whiteboard-topic-tickets-sticky-head is re-checked when that branch merges.

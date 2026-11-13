@@ -136,9 +136,9 @@ Technical, set by the EXEC lead from the reviewers' proposed fixes
 
 ## Open Decision Queue
 
-Last ID: (532)
+Last ID: (533)
 
-(532) [open] [policy] How board link fields and readings render (#7): (a) fully plain text, or (b) the same inline pipeline without emphasis
+(533) [open] [policy] How board link fields and readings render (#7): (a) fully plain text, or (b) the same inline pipeline without emphasis
 - The finding: `rsrc/*.md and internal/*.go` in a link field loses its asterisks to emphasis. Link fields and readings render through `pageData.TextInline` (`wswhiteboard/markdown.go:218-222`), added in 5695371fb to keep raw HTML literal while still honoring code spans, item/panel references, bare URLs and bare paths; `render_test.go:571` pins `see {{2}}` in a Links field rendering as a reference link. The EXEC draft decision ("plain text, matching `FormatQuery`'s `Plain`") would remove references and make URLs and paths in a link field unclickable.
 - a: fully plain text (matches the query output exactly; drops references and clickable links; rewrites the pinned tests).
 - b: drop only the emphasis parser from the inline pipeline for these fields (asterisks and underscores stay literal; references, code spans, URLs and paths keep working; the query output stays `Plain`).
@@ -236,6 +236,14 @@ Verification:
 - #8: run `go test ./internal/mcp/` locally on darwin (CI has no macOS
   runner); the Result names the four tests that failed before and pass
   after.
+- Known darwin failures on develop (sticky-head worker, 2026-11-13), likely
+  #5 / #8: `internal/mcp` `TestRenderDispatchSeparatesResourceAndWorktreeRoots`,
+  `TestRenderFromWorktreeSessionCommitsInThatWorktree`,
+  `TestRenderPathMintedChildRecordsLeadParent`; `internal/wsagent`
+  `TestClaudeLeadLocalSettingsCanonicalWorktree`, `TestPiLeadResolverAdapter`.
+  The worker confirms each cause, fixes those that belong to #5 / #8, and
+  reports any other cause in its Result. `internal/mcp` needs
+  `-timeout 40m` (the default 10m panics).
 - `go test ./...` for the touched packages, the claude-mod / wsflow / Pi test
   suites, and the wsflow mirror drift tests pass.
 
