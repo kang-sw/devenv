@@ -1280,6 +1280,12 @@ func TestAgentActiveTime(t *testing.T) {
 		t.Errorf("finished active time and stats = %s", html)
 	}
 
+	ended.ActiveMs = 0 // older snapshots have no accumulated timing
+	html = renderNamed(t, "agent", ended)
+	if strings.Contains(html, `data-span="0"`) {
+		t.Errorf("finished row with unknown active time has a duration: %s", html)
+	}
+
 	ended.ContextTokens = 0
 	html = renderNamed(t, "agent", ended)
 	if !strings.Contains(html, `<span class="astat"><span><time class="t"`) || !strings.Contains(html, `data-f="ago"`) {

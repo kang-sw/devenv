@@ -3030,7 +3030,10 @@ func (c *conv) close() {
 	c.live.setAdapter("")
 	c.writeRegistration()
 	if c.rec.TurnOpen {
-		c.update(func(rec *Record) { rec.TurnOpen = false })
+		c.update(func(rec *Record) {
+			finishActiveTurn(rec, c.r.opts.Now().UnixMilli())
+			rec.TurnOpen = false
+		})
 	}
 	c.signalSettled()
 	c.watched()
