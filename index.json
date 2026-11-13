@@ -109,9 +109,6 @@
     "260911-research-impl-lifecycle-merge-authority-goal-loop-rehoming": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260912-bug-ticket-query-point-resolve-terminal-status": {
-      "registered_at": "2026-09-24T10:38:33Z"
-    },
     "260913-bug-ticket-guardrails-dont-enforce-category-enum": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
@@ -213,9 +210,6 @@
     },
     "261007-bug-pi-mailbox-waiter-keeps-bootstrap-key-after-adoption": {
       "registered_at": "2026-10-07T13:33:39Z"
-    },
-    "261007-bug-ready-gate-accepts-invalid-route-fact-values": {
-      "registered_at": "2026-10-07T13:02:01Z"
     },
     "261007-bug-sage-gate-keeps-stale-skipped-design-posture": {
       "registered_at": "2026-10-07T05:20:30Z"
@@ -328,36 +322,14 @@
     "261109-research-windows-code-signing-signpath": {
       "registered_at": "2026-11-09T00:46:52Z"
     },
-    "261110-bug-ws-dashboard-conversation-switch-stale-page": {
-      "registered_at": "2026-11-10T14:09:28Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T05:56:38Z"
-      }
-    },
     "261110-bug-ws-mcp-move-close-guard-flake-and-suite-timeout": {
       "registered_at": "2026-11-10T01:04:17Z"
-    },
-    "261110-bug-ws-tickets-query-point-resolve-hides-done": {
-      "registered_at": "2026-11-10T04:35:59Z"
-    },
-    "261110-bug-ws-tracker-item-window-drops-unsaved-edits": {
-      "registered_at": "2026-11-10T13:38:46Z"
-    },
-    "261110-bug-ws-whiteboard-option-quote-parse": {
-      "registered_at": "2026-11-10T14:07:44Z"
     },
     "261110-chore-ws-claude-mod-dashboard-engine-test-load-flake": {
       "registered_at": "2026-11-10T14:09:31Z"
     },
     "261110-chore-ws-mcp-ci-windows-rest-shard-speed": {
       "registered_at": "2026-11-10T13:20:08Z"
-    },
-    "261110-chore-ws-mcp-hosted-test-fixtures-agentless-default": {
-      "registered_at": "2026-11-10T13:35:45Z"
     },
     "261110-chore-ws-mcp-test-suite-runtime": {
       "registered_at": "2026-11-09T15:09:05Z"
@@ -368,9 +340,6 @@
     "261110-epic-ws-tracker-team-feedback": {
       "registered_at": "2026-11-10T06:49:09Z"
     },
-    "261110-feat-ws-git-commit-attribution-trailers": {
-      "registered_at": "2026-11-10T14:07:46Z"
-    },
     "261110-research-ws-dashboard-agent-host-foundations": {
       "registered_at": "2026-11-09T15:09:40Z"
     },
@@ -379,15 +348,6 @@
     },
     "261111-bug-ws-dashboard-daemon-idle-cpu-windows": {
       "registered_at": "2026-11-11T07:52:16Z"
-    },
-    "261111-bug-ws-launcher-dev-daemon-never-replaced": {
-      "registered_at": "2026-11-11T00:10:56Z"
-    },
-    "261111-bug-ws-route-facts-invalid-value-passes-ready-gate": {
-      "registered_at": "2026-11-11T09:10:32Z"
-    },
-    "261111-bug-ws-tickets-promotion-accepts-invalid-route-fact-enum": {
-      "registered_at": "2026-11-11T07:02:07Z"
     },
     "261111-bug-ws-tracker-body-merge-minor-gaps": {
       "registered_at": "2026-11-11T10:28:07Z"
@@ -416,33 +376,11 @@
     "261112-feat-ws-dashboard-lead-wake-events": {
       "registered_at": "2026-11-12T02:03:05Z"
     },
-    "261112-feat-ws-dashboard-rail-memo-pad": {
-      "registered_at": "2026-11-12T08:18:40Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T06:23:04Z"
-      }
-    },
-    "261112-feat-ws-dashboard-search-palette": {
-      "registered_at": "2026-11-12T08:16:38Z"
-    },
     "261112-feat-ws-dashboard-session-rewind": {
       "registered_at": "2026-11-12T08:40:41Z"
     },
-    "261112-feat-ws-mailbox-undelivered-notice": {
-      "registered_at": "2026-11-12T07:07:22Z"
-    },
     "261112-feat-ws-mixed-version-compat-guards": {
       "registered_at": "2026-11-12T01:58:07Z"
-    },
-    "261112-feat-ws-user-preference-slots": {
-      "registered_at": "2026-11-12T07:07:16Z"
-    },
-    "261112-feat-ws-whiteboard-refuse-sibling-open-tag-in-field-body": {
-      "registered_at": "2026-11-12T06:04:00Z"
     },
     "261112-feat-ws-whiteboard-topic-tickets-sticky-head": {
       "registered_at": "2026-11-12T14:40:21Z",
@@ -469,33 +407,20 @@
     "261113-bug-ws-claude-mod-band-tests-cc-2-1-323": {
       "registered_at": "2026-11-12T23:13:45Z"
     },
-    "261113-bug-ws-hosted-session-exit-cause-lost-with-holder-dir": {
-      "registered_at": "2026-11-13T03:48:53Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "9091c57d68d03c76",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T05:08:24Z"
-      }
-    },
-    "261113-bug-ws-hosted-sessions-show-no-pi-or-batch-token-usage": {
-      "registered_at": "2026-11-13T05:07:03Z"
-    },
     "261113-bug-ws-launcher-falls-to-direct-path-during-daemon-replacement": {
       "registered_at": "2026-11-13T04:57:48Z"
     },
     "261113-bug-ws-only-the-dashboard-daemon-runs-an-exe": {
       "registered_at": "2026-11-13T02:44:42Z"
     },
-    "261113-bug-ws-playbook-render-root-override-key-bound-to-lead-root": {
-      "registered_at": "2026-11-13T03:59:10Z"
-    },
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
     },
     "261113-feat-ws-dashboard-browser-pane": {
       "registered_at": "2026-11-13T07:16:08Z"
+    },
+    "261113-feat-ws-dashboard-rail-usage-gutter": {
+      "registered_at": "2026-11-13T08:05:08Z"
     },
     "261113-feat-ws-dashboard-worktree-delete": {
       "registered_at": "2026-11-13T07:16:15Z"
