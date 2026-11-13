@@ -277,8 +277,8 @@ func TestPiMapperToolTurn(t *testing.T) {
 func TestPiMapperRefusesUnlistedTool(t *testing.T) {
 	spec := piSpec(t, `{"backend":"pi","tools":["read"]}`)
 	_, _, events, _ := replayPi(t, "pi-tool-turn.jsonl", spec, nil)
-	if len(events) == 0 || events[0].Fatal == nil || !strings.Contains(events[0].Fatal.Error(), "mcp__ws__project_tree, mcp__ws__runtime_read") {
-		t.Fatalf("the declared tool set should be refused before any call, got %+v", events)
+	if len(events) < 2 || !events[0].TurnStart || events[0].Live != nil || events[1].Fatal == nil || !strings.Contains(events[1].Fatal.Error(), "mcp__ws__project_tree, mcp__ws__runtime_read") {
+		t.Fatalf("agent_start must be followed by the loadout refusal before any call, got %+v", events)
 	}
 }
 

@@ -734,18 +734,26 @@
   // The chips only change the draft; Enter saves it, the x or Esc drops it. Like the new row it has
   // no blur or outside-click rule: it stays open until one of those. Saving sends what changed
   // (editRowEvents): one item.edit of the title, priority, due, and labels; the viewer's own status
-  // as item.status (item.close for done), as the item menu does; and the assignees as item.assign,
-  // only where the viewer may assign (canAssign: the creator).
-  function editWho(it) {
+  // as item.status (item.close for done), as the item menu does; and the assignees as item.assign
+  // and item.unassign, only where the viewer may assign (canAssign: the creator).
+  // editHeld: the people really assigned (live or pending), the fallback and rule requests left out.
+  function editHeld(it) {
     var w = holders(it).filter(function (r) { return !r.fallback && !r.ruleRequest; }).map(function (r) { return r.to; });
-    return w.length ? w.filter(function (x, i) { return w.indexOf(x) === i; }) : [it.author];
+    return w.filter(function (x, i) { return w.indexOf(x) === i; });
+  }
+  // the assignee chip's prefill: the people assigned; a task nobody else holds shows its creator
+  // (the store's fallback holding), an unheld topic nobody (a topic has no fallback)
+  function editWho(it) {
+    var w = editHeld(it);
+    return w.length || it.kind === 'topic' ? w : [it.author];
   }
   function startRowEdit(id, rk) {
     var it = VS.items[id];
     if (!it || !canEdit(it)) return;
     var r = mineLive(it), who = editWho(it), n = ui.ned = { item: id, rk: rk, ed: id, val: it.title, kind: it.kind, st: r ? r.status : it.status, who: who, compl: null,
       due: it.due || '', pri: it.priority != null ? it.priority : null, labels: (it.labels || []).slice(), canAsg: canAssign(it, VS.viewer.member) };
-    n.orig = { who: who.slice(), labels: n.labels.slice() };
+    // what the editor opened on: a save sends only the fields the user moved off these (editRowEvents)
+    n.orig = { title: n.val, st: n.st, due: n.due, pri: n.pri, who: who.slice(), held: editHeld(it), labels: n.labels.slice() };
     render();
     var el = $('tkned');
     if (el) { el.focus(); el.select(); }
@@ -760,13 +768,16 @@
       nrowChips(n) +
       '<button type="button" class="ia"' + attr('act', 'ned-x') + ' aria-label="' + wsT("js.tk.dlg.cancel") + '"' + tipAttr(wsT("js.tk.new.close")) + '><svg class="i"><use href="#tki-x"/></svg></button></div>';
   }
-  // the events a save of draft n sends for item it: only the fields that changed ([] for none)
+  // The events a save of draft n sends for item it ([] for none): only the fields the user changed
+  // since the editor opened (n.orig) that still differ from the item, so a field another viewer
+  // wrote meanwhile and the user left alone is kept.
   function editRowEvents(n, it, title) {
-    var ev = [], ep = { item: it.id }, topic = it.kind === 'topic', r = mineLive(it), st = nrowSt(n);
-    if (title && title !== it.title) ep.title = title;
+    var ev = [], ep = { item: it.id }, topic = it.kind === 'topic', r = mineLive(it), st = nrowSt(n), o = n.orig;
+    if (title && title !== o.title.trim() && title !== it.title) ep.title = title;
     if (!topic) {
-      if (nrowPri(n) !== (it.priority != null ? it.priority : VS.priority.default)) ep.priority = nrowPri(n);
-      if ((n.due || null) !== (it.due || null)) ep.due = n.due || null;
+      var pri = nrowPri(n), due = n.due || null;
+      if (n.pri !== o.pri && pri !== (it.priority != null ? it.priority : VS.priority.default)) ep.priority = pri;
+      if (due !== (o.due || null) && due !== (it.due || null)) ep.due = due;
     }
     // the draft's label picks (what it added and dropped since the prefill) over the item's labels
     // as they are now, so a label another viewer wrote meanwhile is kept; labels the list no longer
@@ -774,9 +785,16 @@
     var picked = labelsOver(it.labels, labelPicks(n.orig.labels, n.labels));
     if (!sameLabels(picked, it.labels)) ep.labels = picked;
     if (Object.keys(ep).length > 1) ev.push(['item.edit', ep]);
-    if (st && r && st !== r.status) ev.push(st === 'done' ? ['item.close', { item: it.id }] : ['item.status', { item: it.id, status: st }]);
-    if (n.canAsg && (n.compl || n.who.slice().sort().join(' ') !== n.orig.who.slice().sort().join(' '))) {
-      ev = ev.concat(asgEvents(it.id, n.who.map(function (id) { return { t: 'p', id: id }; }), n.compl));
+    if (st && r && st !== o.st && st !== r.status) ev.push(st === 'done' ? ['item.close', { item: it.id }] : ['item.status', { item: it.id, status: st }]);
+    // the assignees as a delta over who is assigned now: item.assign for new picks since open who
+    // hold nothing, item.unassign for the ones dropped from the prefill who still hold it. The
+    // completion pick rides on the added people only: the store keeps a holding's completion, and
+    // re-assigning a kept person to change it would end their record (status, acceptance).
+    // A kept fallback prefill needs a real assignment when a new pick would displace the fallback.
+    if (n.canAsg && n.who.slice().sort().join(' ') !== o.who.slice().sort().join(' ')) {
+      var cur = editHeld(it), add = n.who.filter(function (x) { return o.held.indexOf(x) < 0 && cur.indexOf(x) < 0; });
+      if (add.length) ev = ev.concat(asgEvents(it.id, add.map(function (id) { return { t: 'p', id: id }; }), n.compl));
+      o.who.forEach(function (x) { if (n.who.indexOf(x) < 0 && cur.indexOf(x) >= 0) ev.push(['item.unassign', { item: it.id, assignee: x }]); });
     }
     return ev;
   }
@@ -792,7 +810,8 @@
     if (!it) return;
     var ev = editRowEvents(n, it, (el ? el.value : n.val).trim()); // a blank title keeps the old one
     if (!ev.length) { toast(wsT("js.tk.toast.unchanged")); return endRowEdit(); }
-    commit(ev, null, function () { ui.ned = null; });
+    // only this save's draft closes: another row's edit opened while this one was in flight stays
+    commit(ev, null, function () { if (ui.ned === n) ui.ned = null; });
   }
   var FLAGGED = {}, UNREAD = {}; // per render: item -> flagged writes in its own thread; item -> unread notification entries
   function warnHtml(it) {
@@ -3853,7 +3872,7 @@
       if (!el.matches('a[href], button, input, [tabindex]')) el = el.querySelector('a[href], button, [tabindex]');
       if (el) el.focus({ preventScroll: true });
     }
-    if (lw) commit(lw);
+    if (lw) labelWrite(lw);
   }
   function menuBack() {
     if (!MN.from) { closeMenu(true); return; }
@@ -4302,7 +4321,7 @@
         return commit([['item.edit', { item: id, due: dv }]]);
       }
       case 'm-due-clear': return commit([['item.edit', { item: id, due: null }]]);
-      case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lset = labelFlip(MN.lset, it.labels, MN.lab); return labelStepRedraw();
+      case 'm-ltog': MN.lab = a.getAttribute('data-label'); MN.lset = labelFlip(MN.lset, labelBase(it), MN.lab); return labelStepRedraw();
       case 'm-ledit': return labelDialog({ label: a.getAttribute('data-label') });
       case 'm-lrm': return labelRemove(a.getAttribute('data-label'), function () { if (MN) MN.lab = null; });
       case 'm-ladd': return labelDialog({});
@@ -4436,7 +4455,9 @@
   function nrowStMode(n) {
     var v = VS.viewer.member;
     if (n.kind === 'topic') return '';
-    if (n.ed) return mineLive(VS.items[n.ed]) && (!n.canAsg || nrowMine(n)) ? 'own' : ''; // an edit writes the viewer's own status only
+    // an edit writes the viewer's own status only, and none on a done or dropped holding: the store
+    // takes no item.status there (reopen it first), so as the item menu (canStatus) it offers none
+    if (n.ed) { var r = mineLive(VS.items[n.ed]); return r && !wrapped(r.status) && (!n.canAsg || nrowMine(n)) ? 'own' : ''; }
     if (nrowMine(n)) return 'own';
     return n.who.length && n.who.every(function (id) { return id !== v && !!VS.viewer.reach[id]; }) ? 'wrap' : '';
   }
@@ -5003,7 +5024,19 @@
   // labels in the store it says so, and an admin gets the store settings' label dialog.
   function labelStepHtml(it) {
     if (!(VS.labels || []).length) return '<p class="mempty">' + wsT("js.tk.labels.empty") + '</p>' + (VS.viewer.admin ? msep() + mi('m-ladd', esc(wsT("js.tk.new.labels.add")), {}, { icon: 'plus' }) : '');
-    return labelChecklist(labelsOver(it.labels, MN.lset));
+    return labelChecklist(labelsOver(labelBase(it), MN.lset));
+  }
+  // [store, item id] -> each in-flight write's own label picks, laid over the live labels.
+  // Settling one write removes only its picks, leaving any others still in flight.
+  var LPEND = {};
+  function labelBase(it) { return (LPEND[JSON.stringify([ui.store, it.id])] || []).reduce(function (ls, set) { return labelsOver(ls, set); }, it.labels); }
+  // A labels step's write (labelPending's events): pending for its item until it lands or is refused.
+  function labelWrite(ev, then) {
+    var id = ev[0][1].item, key = JSON.stringify([ui.store, id]), set = labelPicks(labelBase(VS.items[id]), ev[0][1].labels);
+    var pending = LPEND[key] || (LPEND[key] = []);
+    pending.push(set);
+    function settled() { pending.splice(pending.indexOf(set), 1); if (!pending.length) delete LPEND[key]; }
+    commit(ev, then, settled, settled);
   }
   // Labels cur with the picks set (label id -> wanted on) laid over, in the store's list order
   // (labels no longer listed drop).
@@ -5035,8 +5068,8 @@
   function labelPending(m) {
     var it = m.kind === 'item' && m.step === 'labels' && m.lset && VS && VS.items[m.item];
     if (!it || !canEdit(it)) return null;
-    var picked = labelsOver(it.labels, m.lset);
-    return sameLabels(picked, it.labels) ? null : [['item.edit', { item: it.id, labels: picked }]];
+    var base = labelBase(it), picked = labelsOver(base, m.lset);
+    return sameLabels(picked, base) ? null : [['item.edit', { item: it.id, labels: picked }]];
   }
   // The store label dialog from the labels step: the pick is written first, the dialog opens once
   // that write returns (a written batch closes any open dialog).
@@ -5044,7 +5077,7 @@
     var ev = labelPending(MN);
     MN.lset = null;
     closeMenu(false);
-    if (ev) commit(ev, function () { openDialog('slabel', arg); }); else openDialog('slabel', arg);
+    if (ev) labelWrite(ev, function () { openDialog('slabel', arg); }); else openDialog('slabel', arg);
   }
   // The labels step after a write: the property card drew again, so the step re-anchors on its new
   // button, redraws over the written item, and keeps focus on the toggled chip. It closes when the
@@ -5068,7 +5101,7 @@
     if (!it) return;
     if (!(ui.win && ui.item === id)) showItem(id);
     // seen and base pin the body revision the editor started from; body follows the textarea
-    ui.iedit = { item: id, title: it.title, body: it.body || '', seen: it.body || '', base: (it.bodyRev || []).slice(), project: it.project || '', labels: (it.labels || []).slice(), mpick: [] };
+    ui.iedit = { item: id, title: it.title, body: it.body || '', seen: it.body || '', base: (it.bodyRev || []).slice(), project: it.project || '', labels: (it.labels || []).slice(), lorig: (it.labels || []).slice(), mpick: [] };
     delete ui.edpv['iw-ebody']; delete ui.eatt['iw-ebody'];
     render();
     if ($('iw-etitle')) $('iw-etitle').focus();
@@ -5082,9 +5115,11 @@
     // the body is judged against the revision loaded at startEdit, not the live one a concurrent
     // edit may have moved; sent with base, the store merges it three-way with edits since
     if (cur.body !== e.seen) { ep.body = cur.body; if (e.base.length) ep.base = e.base; }
-    // labels the list no longer holds are dropped from the pick, so an edit never writes one
-    var picked = e.labels.filter(function (x) { return !!labelOf(x); });
-    if (picked.slice().sort().join(' ') !== (it.labels || []).slice().sort().join(' ')) ep.labels = picked;
+    // the edit's label picks (what it added and dropped since startEdit) over the item's labels as
+    // they are now, as the row edit's save: a label another viewer wrote meanwhile is kept; labels
+    // the list no longer holds are dropped, so an edit never writes one
+    var picked = labelsOver(it.labels, labelPicks(e.lorig, e.labels));
+    if (!sameLabels(picked, it.labels)) ep.labels = picked;
     if (!('title' in ep) && !('body' in ep) && !('project' in ep) && !('labels' in ep)) { toast(wsT("js.tk.toast.unchanged")); return endEdit(); }
     if ('body' in ep) {
       var km = keptMentions(withPicks(it.mentions, e.mpick), ep.body), ers = refsIn(ep.body);

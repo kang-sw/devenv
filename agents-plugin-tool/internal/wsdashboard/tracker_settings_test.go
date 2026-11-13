@@ -93,7 +93,7 @@ func TestTrackerLabelsInTheDashboard(t *testing.T) {
 		t.Errorf("a label chip does not search label:\n%s", search)
 	}
 	save := regexp.MustCompile(`function saveEdit\(\) \{\n[\s\S]*?\n  \}\n`).FindString(js)
-	if !strings.Contains(save, "if (picked.slice().sort().join(' ') !== (it.labels || []).slice().sort().join(' ')) ep.labels = picked;") {
+	if !strings.Contains(save, "if (!sameLabels(picked, it.labels)) ep.labels = picked;") {
 		t.Errorf("saveEdit does not write changed labels:\n%s", save)
 	}
 	for _, typ := range []string{"roles.add_label", "roles.edit_label", "roles.remove_label"} {

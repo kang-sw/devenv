@@ -1,5 +1,6 @@
 ---
 title: "pi.spawn subagents outlive a daemon restart under a holder"
+completed: 2026-11-13
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 4c674ce7b8197ff6
@@ -239,6 +240,25 @@ claim that running Pi work survives a restart.
   `go test ./internal/wsagent ./internal/mcp` from `agents-plugin-tool/`;
   record the observed list/wait/send transition.
 
+### Result (744a5241f) - 2026-11-13
+
+- Reconciliation clears stale turn/process/replay state and exposes the
+  interruption error while idle, before queued input can start a new turn.
+  Startup waits for reconciliation so an earlier LastTurn cannot answer a
+  wait for the cut turn.
+- Observed contract: completed A -> open B -> restart -> wait interrupted,
+  list idle/error/no process -> send C actually submitted -> wait done.
+  A settled record gets no further synthetic interruption.
+- w5090 resource lock: focused process-gone, queued-next-turn ordering and
+  legacy interruption tests passed; `go test ./internal/wsagent ./internal/mcp`
+  passed, then passed again after R1's startup-barrier fix. R2 fixes-only
+  review resolved the single substantive finding.
+- No Forwards. Shared daemon and Windows live behavior not exercised.
+- Workflow/route/convention read tools were unavailable in this session;
+  read bundled ticket conventions and used the supplied branch and native git
+  under the lead's wrong-root safety override. Review performed independently
+  through Pi.
+
 ### Phase 2: Rejoin held Pi workers and their nested children
 
 - **Outcome:** reuse the hosted Pi lead holder transport with a distinct
@@ -273,3 +293,46 @@ claim that running Pi work survives a restart.
   separately performs the local Windows live replacement check (process
   identity, completion mail, nested reconnect and breakaway/fallback); that
   check is not a worker landing gate.
+
+### Result (184452a15) - 2026-11-13
+
+- Restricted Pi workers now use distinct `pi-worker` holders without lead
+  privileges. Shutdown detaches; rejoin preserves holder/child PID, backend
+  session and delegate identity, rebuilds quiet output and send coverage, and
+  settles at `agent_settled` without repeating the prompt. Orphan sweeping
+  leaves unrelated holder kinds alone.
+- Nested capabilities are persisted privately, bound to holder metadata by a
+  digest, and restored before accepting nested calls. Forwarding discovers
+  the current endpoint and reissues disconnected/detached waits within the
+  original timeout, never blindly retrying spawn/send/stop. Depth/tier caps,
+  pending reports and parent holds survive rejoin.
+- Optional state includes last reported turn identity, active send coverage,
+  held results and strictly needed steering recovery. Unknown top-level JSON
+  members round-trip with unchanged schema 1. Bounded replay gaps use current
+  RPC state and saved messages or a specific failure. The accepted append/mark
+  boundary can still duplicate one completion mail. Old-writer field loss
+  takes the interruption/idle fallback and subsequent worker-orphan sweep.
+- Independent R1 identified six substantive recovery issues; all were fixed,
+  and fixes-only R2 found none remaining. The full suite then exposed a new
+  readiness-channel double close on repeated Start; the existing regression
+  passed after applying the scan readiness's `sync.Once` pattern.
+- Verification on w5090 under sys_lock, code revision `184452a15` (the tested
+  precommit code snapshot): focused restart/nested/process-gone/record/forward
+  cases were exercised during development. Final passing command:
+  `go test ./internal/wsagent ./internal/wsholder ./internal/mcp -skip
+  '^(TestUnattachedHolderIsListedWithItsCauseAndKilledUnderTheGuard|TestGuardedKillHoldsAfterAWallClockStep|TestHolderOutlivesTheProcessThatStartedIt)$'
+  -count=1 -timeout=8m && go build ./cmd/ws-mcp`. Package results: wsagent
+  58.734s, wsholder 13.942s, mcp 142.445s; build and lock job
+  `6a5443b795554ade98ea913c27f93bf8` exited 0. No race sweep or additional
+  repeated-restart matrix was run.
+- **Forward (one known-base/environment item):** the three skipped holder
+  tests all fail at base `47b7f4417` on w5090: the starter test times out
+  stopping an orphan holder; guarded-kill tests time out observing child death.
+  The abrupt-loss worker scenario itself passes; its cleanup tolerates only
+  the exact Stop timeout with a verified Linux zombie and absent descriptor.
+  Production holder behavior is unchanged. Restore unexcluded coverage after
+  resolving this environment/cleanup issue.
+- Not checked live: local Windows replacement, process isolation/job
+  breakaway or `restart_safe: false` fallback, real-harness completion mail
+  and nested reconnect. These remain the lead/owner's check. The shared
+  dashboard daemon was never restarted; tests used isolated state and children.

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/mcp"
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsrsrc"
@@ -97,7 +98,9 @@ func (h *proxyHost) Accept(hello wsdashboard.ProxyHello) (wsdashboard.ProxySessi
 		if d := h.live.Load(); d != nil {
 			opts.Live = d
 		}
-		if h.agents != nil {
+		// A worker now connects through the launcher too. Its capability
+		// token, not a lead runner handle, scopes its nested pi.* calls.
+		if h.agents != nil && strings.TrimSpace(hello.Env[wsagent.EnvPiToken]) == "" {
 			opts.Agents = h.agents
 		}
 		server := mcp.NewServerWithOptions(opts)

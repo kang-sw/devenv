@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -65,7 +66,8 @@ type TurnReport struct {
 // SpawnSpec is a spawned conversation's launch: Runner.Spawn.
 type SpawnSpec struct {
 	// Profile is a non-lead agent profile; Root the conversation's working
-	// root (absolute), which its ws session key is bound to.
+	// root (absolute), which its ws session key is bound to unless Cwd
+	// resolves to a different Git worktree.
 	Profile string
 	Root    string
 	// Cwd is the directory its process runs in: absolute, an existing
@@ -147,6 +149,20 @@ func (r *Runner) Spawn(spec SpawnSpec) (State, error) {
 		return State{}, badRequest("cwd %s is not a directory", cwd)
 	}
 	spec.Cwd = cwd
+	if cwd != spec.Root {
+		// Both a lead's spawn and a worker's nested spawn come here. Bind
+		// the whole conversation to cwd's worktree, so Mint, Ensure and
+		// the attached ws-mcp agree; a plain folder keeps the caller's root.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		out, err := (wsgit.ExecRunner{}).RunGit(ctx, cwd, "rev-parse", "--show-toplevel")
+		if root := strings.TrimSpace(string(out)); err == nil && root != "" {
+			if evaluated, err := filepath.EvalSymlinks(root); err == nil {
+				root = evaluated
+			}
+			spec.Root = filepath.Clean(root)
+		}
+	}
 	spec.Label = cleanLabel(spec.Label)
 	return r.create(spec.Profile, spec.Root, nil, &spec)
 }
@@ -205,11 +221,6 @@ func (c *conv) settleTurn(status, errText string, mark uint64) {
 	c.reply = ""
 	if status == TurnDone && c.holdsReport() {
 		c.hold(&res)
-		if c.rec.TurnOpen || c.rec.LastTurn != nil {
-			// A wait after a restart waits for this turn's release, not
-			// the turn reported before it.
-			c.update(func(rec *Record) { rec.TurnOpen, rec.LastTurn = false, nil })
-		}
 		c.watched()
 		return
 	}
@@ -222,6 +233,10 @@ func (c *conv) settleTurn(status, errText string, mark uint64) {
 // loop.
 func (c *conv) hold(res *TurnResult) {
 	c.heldRes = res
+	if res != nil {
+		// A wait after a restart waits for this held turn, not its predecessor.
+		c.update(func(rec *Record) { rec.HeldTurn, rec.TurnOpen, rec.LastTurn = res, false, nil })
+	}
 	c.mu.Lock()
 	c.holding = res != nil
 	c.mu.Unlock()
@@ -248,7 +263,7 @@ func (c *conv) publish(res TurnResult) {
 	} else {
 		c.update(func(rec *Record) {
 			settle()
-			rec.TurnOpen = false
+			rec.TurnOpen, rec.HeldTurn = false, nil
 			if toConv {
 				if waited = c.parentWaitTakes(res.mark); !waited {
 					id := newReportID()
@@ -257,7 +272,8 @@ func (c *conv) publish(res TurnResult) {
 				}
 			}
 			if parent != nil {
-				rec.LastTurn = &PendingReport{ID: c.settledReport, Result: res}
+				rec.ReportID = newReportID()
+				rec.LastTurn = &PendingReport{ID: c.settledReport, Result: res, Mark: res.mark}
 			}
 		})
 	}
@@ -265,14 +281,25 @@ func (c *conv) publish(res TurnResult) {
 	if parent == nil {
 		return
 	}
+	c.reportLast()
 	st := c.state()
-	if report := c.r.opts.Report; report != nil {
-		report(TurnReport{Parent: *parent, Child: st, Result: res})
-	}
 	if toConv && !waited {
 		c.r.deliverLater(c.rec.ReplyID)
 	}
 	c.r.emit(st)
+}
+
+// reportLast uses the existing append/report path. Marking after the callback
+// accepts one duplicate mail if the daemon dies between append and this write.
+func (c *conv) reportLast() {
+	last := c.rec.LastTurn
+	if last == nil || c.rec.Parent == nil || c.rec.ReportID == "" || c.rec.ReportID == c.rec.LastReportedTurn {
+		return
+	}
+	if report := c.r.opts.Report; report != nil {
+		report(TurnReport{Parent: *c.rec.Parent, Child: c.state(), Result: last.Result})
+	}
+	c.update(func(rec *Record) { rec.LastReportedTurn = rec.ReportID })
 }
 
 // interrupted settles the turn a daemon's exit cut off, which the record
@@ -281,7 +308,14 @@ func (c *conv) interrupted() {
 	if c.closed || !c.rec.TurnOpen {
 		return
 	}
-	c.settleTurn(TurnInterrupted, "the dashboard daemon exited while the turn ran", 0)
+	const reason = "the dashboard daemon exited while the turn ran"
+	// Reconcile the lost turn before any queued input can open its successor.
+	// Settlement alone wakes waiters but leaves list/send's running flags stale.
+	c.setStatus(func() { c.turn, c.proc, c.lastErr = false, nil, reason })
+	c.events = nil
+	c.replaying, c.replayAsked, c.replayGap, c.replayBoundary, c.wrapHold = false, false, false, false, false
+	c.apply(wslive.Event{Kind: wslive.KindTurnEnd})
+	c.settleTurn(TurnInterrupted, reason, c.turnMark)
 }
 
 // signalSettled wakes every Wait.

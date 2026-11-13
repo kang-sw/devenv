@@ -102,9 +102,9 @@ func newStreamProcess(mapper lineMapper, proto lineProtocol) *streamProcess {
 // startChild starts cmd and maps its output: under a session holder when
 // spec asks for one (a lead conversation), else as the daemon's own child.
 func startChild(spec StartSpec, cmd *exec.Cmd, mapper lineMapper, proto lineProtocol) (*streamProcess, error) {
-	if spec.Lead != nil && spec.Lead.Holder != nil {
+	if spec.Holder != nil {
 		p := newStreamProcess(mapper, proto)
-		if err := spec.Lead.Holder.start(p, cmd); err != nil {
+		if err := spec.Holder.start(p, cmd); err != nil {
 			return nil, err
 		}
 		return p, nil
