@@ -275,7 +275,7 @@ func TestDocStaleClassReachesBothRenderPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	board := string(regions.Board)
-	if !strings.Contains(board, `<div class="doc-body framed chg-stale"><iframe`) {
+	if !strings.Contains(board, `<div class="doc-body framed chg-stale"><div class="doc-frame"`) {
 		t.Error("the served page's stale body frame box lacks chg-stale")
 	}
 	if doc := frameDocs(t, board)["t"]; !strings.Contains(doc, `<body class="doc-frame"><div class="doc-body md chg-stale">`) {
@@ -291,7 +291,7 @@ func TestDocStaleClassReachesBothRenderPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if board := string(regions.Board); !strings.Contains(board, `<div class="doc-body framed"><iframe`) || strings.Contains(board, `chg-stale"`) {
+	if board := string(regions.Board); !strings.Contains(board, `<div class="doc-body framed"><div class="doc-frame"`) || strings.Contains(board, `chg-stale"`) {
 		t.Error("the served page marks a fresh body stale")
 	}
 }

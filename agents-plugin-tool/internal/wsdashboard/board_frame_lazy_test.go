@@ -28,15 +28,17 @@ func dashboardFuncs(t *testing.T, names ...string) string {
 // frameDOM is a minimal DOM for the lazy frame cases: elements with
 // attributes, children, an open property on details that queues a toggle
 // event the way a browser does (asynchronously, at the details), and q over
-// the few selectors the functions under test use.
+// the few selectors the functions under test use. An iframe records whether
+// it was connected when its sandbox and srcdoc were set, and one connected
+// with no srcdoc commits about:blank at once (blank).
 const frameDOM = `
 var bad = [];
 function check(what, ok) { if (!ok) bad.push(what); }
-var queue = [];
+var queue = [], SANDBOX = "allow-scripts allow-popups allow-popups-to-escape-sandbox";
 function tick() { while (queue.length) queue.shift()(); }
 function El(tag, attrs, kids) {
   this.tagName = tag.toUpperCase(); this.nodeType = 1; this.parentNode = null; this.childNodes = [];
-  this.attrs = {}; this._open = false; this.listeners = {};
+  this.attrs = {}; this._open = false; this.listeners = {}; this.setLive = {}; this.style = {};
   var self = this;
   Object.keys(attrs || {}).forEach(function (k) { self.attrs[k] = attrs[k]; });
   if (this.tagName === "DETAILS") this._open = this.attrs.open !== undefined;
@@ -65,10 +67,7 @@ El.prototype = {
   },
   getAttribute: function (k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; },
   hasAttribute: function (k) { return Object.prototype.hasOwnProperty.call(this.attrs, k); },
-  setAttribute: function (k, v) {
-    this.attrs[k] = String(v);
-    if (k === "srcdoc" && this.tagName === "IFRAME") this.loads = (this.loads || 0) + (this.isConnected ? 1 : 0);
-  },
+  setAttribute: function (k, v) { this.attrs[k] = String(v); this.setLive[k] = this.isConnected; },
   removeAttribute: function (k) { delete this.attrs[k]; },
   addEventListener: function (type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); },
   removeChild: function (c) { this.childNodes.splice(this.childNodes.indexOf(c), 1); c.parentNode = null; return c; },
@@ -77,15 +76,16 @@ El.prototype = {
     var i = ref ? this.childNodes.indexOf(ref) : this.childNodes.length;
     this.childNodes.splice(i, 0, c); c.parentNode = this;
     // A frame put on the page with no document loads about:blank at once.
-    if (c.tagName === "IFRAME" && c.isConnected && !c.hasAttribute("srcdoc")) (c.listeners.load || []).forEach(function (fn) { fn(); });
+    if (c.tagName === "IFRAME" && c.isConnected && !c.hasAttribute("srcdoc")) { c.blank = true; (c.listeners.load || []).forEach(function (fn) { fn(); }); }
     return c;
   },
+  replaceChild: function (c, old) { this.insertBefore(c, old); return this.removeChild(old); },
   appendChild: function (c) { return this.insertBefore(c, null); },
   scrollIntoView: function () {}
 };
 function walk(root, out) { root.childNodes.forEach(function (c) { out.push(c); walk(c, out); }); return out; }
 var SEL = {
-  "iframe.doc-frame[data-srcdoc]:not([srcdoc])": function (n) { return n.tagName === "IFRAME" && n.classList.contains("doc-frame") && n.hasAttribute("data-srcdoc") && !n.hasAttribute("srcdoc"); },
+  "div.doc-frame[data-srcdoc]": function (n) { return n.tagName === "DIV" && n.classList.contains("doc-frame") && n.hasAttribute("data-srcdoc"); },
   "details": function (n) { return n.tagName === "DETAILS"; },
   "details[data-key]": function (n) { return n.tagName === "DETAILS" && n.hasAttribute("data-key"); }
 };
@@ -97,33 +97,53 @@ function q(sel, root) {
 var doc = new El("html");
 doc.nodeType = 9;
 doc.capture = {};
+doc.createElement = function (tag) { return new El(tag); };
 doc.addEventListener = function (type, fn, capture) { if (capture) (doc.capture[type] = doc.capture[type] || []).push(fn); };
 doc.dispatch = function (type, target) { (doc.capture[type] || []).forEach(function (fn) { fn({ target: target, type: type }); }); };
-function frame(key, text) { return new El("iframe", { "class": "doc-frame", "data-doc": key, "data-doc-key": key, "data-srcdoc": text || "<!DOCTYPE html><html>" + key }); }
-function mounted(f) { return f.getAttribute("srcdoc") === f.getAttribute("data-srcdoc") && f.hasAttribute("data-srcdoc"); }
+// frame is a served placeholder (wswhiteboard framedDoc).
+function frame(key, text) { return new El("div", { "class": "doc-frame", title: key, "data-doc": key, "data-doc-key": key, "data-sandbox": SANDBOX, "data-srcdoc": text || "<!DOCTYPE html><html>" + key }); }
+// el is what stands for placeholder p now: p itself, or the frame mounted
+// in its place (found by data-doc in p's old parent).
+function el(p) {
+  if (p.parentNode || p.tagName === "IFRAME") return p;
+  var all = walk(doc, []).filter(function (n) { return n.tagName === "IFRAME" && n.getAttribute("data-doc") === p.getAttribute("data-doc"); });
+  return all[all.length - 1] || p;
+}
+// mounted: an iframe stands in p's place, sandboxed and given its document
+// before it was connected, never committing about:blank, data-srcdoc kept.
+function mounted(p) {
+  var f = el(p);
+  return f.tagName === "IFRAME" && f.getAttribute("srcdoc") === p.getAttribute("data-srcdoc") && f.getAttribute("data-srcdoc") === p.getAttribute("data-srcdoc") &&
+    f.getAttribute("sandbox") === SANDBOX && !f.hasAttribute("data-sandbox") && f.setLive.sandbox === false && f.setLive.srcdoc === false && !f.blank;
+}
+function placeholder(p) { return el(p) === p && p.tagName === "DIV" && !p.hasAttribute("srcdoc"); }
 var window = {};
 function setTimeout() {}
 function requestAnimationFrame() {}
 `
 
 // TestBoardFramesMountLazily pins the lazy frame mount (wswhiteboard
-// framedDoc's data-srcdoc, dashboard.js mountFrames): a frame loads its
-// document only once every details around it is open, on the page's first
-// pass (a pinned topic's frame in the pin list included), on a toggle open
-// whether the user's or a programmatic one (restoreOpen after a swap,
-// boardJump), and for what a swap inserts; a frame under a closed fold or
-// off the page stays unmounted, and data-srcdoc stays for comparisons. A
-// changed topic's next body frame (frameGraft) gets its document before it
-// goes in when the old frame had one, so it never shows blank. The cases
-// execute under node when it is installed.
+// framedDoc's placeholder, dashboard.js mountFrame and mountFrames): a
+// placeholder becomes its frame only once every details around it is open,
+// on the page's first pass (a pinned topic's frame in the pin list
+// included), on a toggle open whether the user's or a programmatic one
+// (restoreOpen after a swap, boardJump), and for what a swap inserts; one
+// under a closed fold or off the page stays a placeholder. The mounted frame
+// takes the placeholder's attributes, the exact sandbox token set and its
+// srcdoc before it is connected (it never commits about:blank), and keeps
+// data-srcdoc for comparisons. A changed topic's next body frame (frameGraft)
+// is mounted before it goes in when the old frame was mounted, so it never
+// shows blank; the next of an unmounted one takes its place as a
+// placeholder. The cases execute under node when it is installed.
 func TestBoardFramesMountLazily(t *testing.T) {
-	src := dashboardFuncs(t, "frameShown", "mountFrames", "frameToggle", "isPeer", "openKey", "restoreOpenOne", "restoreOpen", "boardJump", "frameGraft")
+	src := dashboardFuncs(t, "frameShown", "mountFrame", "mountFrames", "frameToggle", "isPeer", "openKey", "restoreOpenOne", "restoreOpen", "boardJump", "frameGraft", "frameNext")
 	runNode(t, "lazy frame mount", frameDOM+src+`
 var openState = {}, PEER_KEY = "p.";
 function load() { return null; }
 doc.addEventListener("toggle", frameToggle, true);
 
 var A = frame("topic:x"), B = frame("entry:e1"), C = frame("entry:e2"), D = frame("entry:e3"), P = frame("topic:pinned");
+B.setAttribute("data-entry", "e1"); B.setAttribute("data-relay", "/s/r/out?p=a"); B.setAttribute("style", "height: 40px");
 var tdoc = new El("details", { "class": "tdoc", "data-key": "doc:x" }, [new El("div", {}, [A])]);
 var versions = new El("details", { "class": "panel-versions", "data-key": "versions:e1" }, [new El("article", { id: "e2" }, [new El("details", { open: "" }, [C])])]);
 var stream = new El("details", { "class": "topic-stream", open: "" }, [new El("article", {}, [new El("details", { "class": "entry-panel", open: "" }, [B, versions])])]);
@@ -132,22 +152,24 @@ var pins = new El("div", { "class": "pins" }, [new El("section", { "class": "top
 var inert = new El("template", {}, [D]);
 doc.appendChild(board); doc.appendChild(pins);
 
-// Before any pass nothing is mounted: the served frames carry data-srcdoc only.
-check("served frames start unmounted", [A, B, C, D, P].every(function (f) { return !f.hasAttribute("srcdoc"); }));
+check("served frames start as placeholders", [A, B, C, D, P].every(placeholder));
 mountFrames(doc);
 check("an open chain mounts", mounted(B));
+var fb = el(B);
+check("the frame takes the placeholder's attributes: " + JSON.stringify(fb.attrs), fb.getAttribute("class") === "doc-frame" && fb.getAttribute("title") === "entry:e1" && fb.getAttribute("data-doc-key") === "entry:e1" &&
+  fb.getAttribute("data-entry") === "e1" && fb.getAttribute("data-relay") === "/s/r/out?p=a" && fb.getAttribute("style") === "height: 40px");
+check("the frame stands where its placeholder stood", fb.parentNode && fb.parentNode.childNodes[0] === fb);
 check("a pinned topic's frame mounts in the pin list", mounted(P));
-check("a frame under a closed tdoc stays unmounted", !A.hasAttribute("srcdoc"));
-check("a frame under a closed versions fold stays unmounted", !C.hasAttribute("srcdoc"));
-check("a frame off the page stays unmounted", !D.hasAttribute("srcdoc"));
-check("data-srcdoc stays on a mounted frame", B.getAttribute("data-srcdoc") === "<!DOCTYPE html><html>entry:e1");
+check("a frame under a closed tdoc stays a placeholder", placeholder(A));
+check("a frame under a closed versions fold stays a placeholder", placeholder(C));
+check("a frame off the page stays a placeholder", placeholder(D));
 
 // A user's toggle open.
 tdoc.open = true; tick();
 check("a toggle open mounts", mounted(A));
-var loadsA = A.loads;
+var fa = el(A);
 tdoc.open = false; tick(); tdoc.open = true; tick();
-check("a mounted frame is not mounted again", A.loads === loadsA);
+check("a mounted frame is not mounted again", el(A) === fa);
 
 // restoreOpen after a swap opens a fold programmatically: its toggle mounts.
 var R = frame("entry:e4"), rfold = new El("details", { "data-key": "run:e4" }, [R]);
@@ -162,7 +184,7 @@ function $(id) { return id === "e2" ? versions.childNodes[0] : null; }
 function inBoard(n) { for (; n; n = n.parentNode) if (n === board) return true; return false; }
 function boardBoxes() { return [board]; }
 var hit = boardJump("p1");
-check("boardJump refuses an id it cannot find", hit === undefined && !C.hasAttribute("srcdoc"));
+check("boardJump refuses an id it cannot find", hit === undefined && placeholder(C));
 $ = function (id) { return id === "p2" ? Object.assign(versions.childNodes[0], { id: "p2" }) : null; };
 boardJump("p2"); tick();
 check("boardJump's opens mount", mounted(C));
@@ -171,30 +193,29 @@ check("boardJump's opens mount", mounted(C));
 var N1 = frame("entry:e5"), N2 = frame("entry:e6");
 var n = new El("section", { "class": "topic", "data-topic": "z" }, [new El("details", { open: "" }, [N1]), new El("details", {}, [N2])]);
 mountFrames(n);
-check("a section off the page mounts nothing", !N1.hasAttribute("srcdoc"));
+check("a section off the page mounts nothing", placeholder(N1));
 board.appendChild(n); mountFrames(n);
-check("an inserted section mounts its open frames", mounted(N1) && !N2.hasAttribute("srcdoc"));
+check("an inserted section mounts its open frames", mounted(N1) && placeholder(N2));
 
-// frameGraft: the next body frame of a mounted frame gets its document
-// before it goes in; the next frame of an unmounted one stays unmounted.
+// frameGraft: the next body frame of a mounted frame is mounted before it
+// goes in; the next frame of an unmounted one takes its place unmounted.
 function graft(oldMounted) {
   var of = frame("topic:g", "<!DOCTYPE html><html>old"), nf = frame("topic:g", "<!DOCTYPE html><html>new");
-  if (oldMounted) of.setAttribute("srcdoc", of.getAttribute("data-srcdoc"));
+  if (oldMounted) of = mountFrame(of);
   var od = new El("div", { "class": "doc-body framed" }, [of]), nd = new El("div", { "class": "doc-body framed" }, [nf]);
   var old = new El("section", { "class": "topic", "data-topic": "g" }, [od]), nsec = new El("section", { "class": "topic", "data-topic": "g" }, [nd]);
   board.appendChild(old);
-  var blank = false;
-  frameShow = function (f) { if (!f.hasAttribute("srcdoc")) blank = true; };
-  frameGraft({ old: old, n: nsec, oc: [of, od, old], nc: [nf, nd, nsec] });
-  return { nf: nf, blank: blank, placed: od.childNodes.indexOf(nf) === 1 };
+  var g = { old: old, n: nsec, oc: [of, od, old], nc: [nf, nd, nsec] };
+  frameGraft(g);
+  return { nf: nf, f: g.nc[0], od: od, of: of };
 }
-var frameShow, frameRevealMs = 1500;
+var frameShow = function () {}, frameRevealMs = 1500;
 function frameReveal() {}
 var g1 = graft(true);
-check("the next frame of a mounted frame goes in mounted", g1.placed && mounted(g1.nf) && g1.nf.getAttribute("srcdoc") === "<!DOCTYPE html><html>new");
-check("the next frame of a mounted frame never loads blank", !g1.blank);
+check("the next frame of a mounted frame goes in mounted, beside the old", mounted(g1.nf) && g1.od.childNodes[0] === g1.of && g1.od.childNodes[1] === g1.f);
+check("the next frame is pending, and the graft holds the frame, not the placeholder", g1.f.wbNext === true && g1.f.wbOld === g1.of && g1.of.wbOut === true && (g1.f.listeners.load || []).length === 1 && g1.nf.wbNext === undefined);
 var g2 = graft(false);
-check("the next frame of an unmounted frame stays unmounted", g2.placed && !g2.nf.hasAttribute("srcdoc"));
+check("the next frame of an unmounted frame takes its place as a placeholder", placeholder(g2.nf) && g2.od.childNodes.length === 1 && g2.od.childNodes[0] === g2.nf && !g2.nf.wbNext);
 
 if (bad.length) console.log(bad.join("\n"));
 `)

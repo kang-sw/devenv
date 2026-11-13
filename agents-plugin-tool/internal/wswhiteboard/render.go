@@ -551,11 +551,14 @@ const frameCSS = "html, body { background: transparent; overflow: hidden; }"
 // The frame carries its topic name as data-doc, so the host can keep each
 // frame's height across a board swap.
 //
-// The document is data-srcdoc, not srcdoc: the frame is created empty and
-// the host page loads the document (sets srcdoc from data-srcdoc, keeping
-// data-srcdoc) only once every <details> around the frame is open
-// (dashboard.js mountFrames), so a frame under a closed fold costs no
-// document until it is opened.
+// The server never mounts a frame: it writes an inert placeholder, a div
+// carrying the frame's class and attributes, its document as data-srcdoc,
+// and its sandbox token set as data-sandbox (frameSandbox). The host page
+// replaces the placeholder with the iframe (dashboard.js mountFrame), sandbox
+// and srcdoc set before it is connected, only once every <details> around it
+// is open (mountFrames), so a frame under a closed fold costs no document
+// until it is opened. An <iframe> left without srcdoc would not be inert: it
+// commits an about:blank document synchronously as the page parses.
 func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mermaid bool, relays []string, a *pageAssets) template.HTML {
 	title, key, entryAttr := topic, "topic:"+topic, ""
 	if entry != "" {
@@ -578,12 +581,13 @@ func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mer
 	if len(relays) > 0 {
 		relay = ` data-relay="` + template.HTMLEscapeString(strings.Join(relays, " ")) + `"`
 	}
-	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(title) + `" data-doc="` + template.HTMLEscapeString(key) + `" data-doc-key="` + template.HTMLEscapeString(key) + `" data-topic="` + template.HTMLEscapeString(topic) + `"` + entryAttr + relay + ` sandbox="` + frameSandbox + `" data-srcdoc="` +
-		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
+	return template.HTML(`<div class="doc-frame" title="` + template.HTMLEscapeString(title) + `" data-doc="` + template.HTMLEscapeString(key) + `" data-doc-key="` + template.HTMLEscapeString(key) + `" data-topic="` + template.HTMLEscapeString(topic) + `"` + entryAttr + relay + ` data-sandbox="` + frameSandbox + `" data-srcdoc="` +
+		template.HTMLEscapeString(doc.String()) + `"></div>`)
 }
 
 // frameSandbox is the sandbox token set of every srcdoc frame the daemon
-// builds (framedDoc, SandboxedPage): allow-scripts, so the document's own
+// builds (SandboxedPage, and framedDoc's placeholder, whose data-sandbox the
+// page copies onto the frame it mounts): allow-scripts, so the document's own
 // scripts run, but no allow-same-origin, so they run in an opaque origin
 // that can neither read the host page nor reach the daemon's routes with
 // the viewer's credentials; popups open as ordinary pages. Adding a token
@@ -631,8 +635,8 @@ const frameDocStart = `<!DOCTYPE html><html>`
 // daemon applies it per request, from the request's theme cookie, so the
 // board itself renders theme-free; the page script carries a later switch
 // to the frames (doc-frame.js). The match is a plain substring, so it pins
-// a frame's data-srcdoc document (framedDoc) just as a srcdoc one: the
-// document must open with frameDocStart, nothing before it.
+// a placeholder's data-srcdoc document (framedDoc) just as a frame's srcdoc
+// one: the document must open with frameDocStart, nothing before it.
 func ThemeFrames(board template.HTML, theme string) template.HTML {
 	if theme != "light" && theme != "dark" {
 		return board

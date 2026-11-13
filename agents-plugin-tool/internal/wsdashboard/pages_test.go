@@ -176,7 +176,7 @@ func TestSessionPageRendersLiveRegions(t *testing.T) {
 		`data-region="tree"`, `data-region="entries"`, `data-region="convlive"`, `data-region="board"`, `data-region="panels"`,
 		`id="composer"`, `id="p-settings"`, "live board text",
 		// A topic body sits in its sandboxed frame; there is no Now slot.
-		`<iframe class="doc-frame" title="Plan" data-doc="topic:Plan" data-doc-key="topic:Plan"`,
+		`<div class="doc-frame" title="Plan" data-doc="topic:Plan" data-doc-key="topic:Plan"`,
 		`id="splitter"`, `data-input="enter"`, `data-input="mod"`,
 		`<span class="src wb">whiteboard</span>`, `<span class="src">terminal</span>`,
 		"streamed &lt;partial&gt; reply",

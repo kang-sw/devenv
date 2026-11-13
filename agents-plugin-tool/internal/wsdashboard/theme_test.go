@@ -76,7 +76,7 @@ func TestPagesRenderTheThemeCookieOnTheRoot(t *testing.T) {
 func frameRoots(t *testing.T, page string) []string {
 	t.Helper()
 	var out []string
-	for _, m := range regexp.MustCompile(`<iframe class="doc-frame"[^>]* data-srcdoc="([^"]*)"`).FindAllStringSubmatch(page, -1) {
+	for _, m := range regexp.MustCompile(`<div class="doc-frame"[^>]* data-srcdoc="([^"]*)"`).FindAllStringSubmatch(page, -1) {
 		doc := html.UnescapeString(m[1])
 		i := strings.Index(doc, "<html")
 		if i < 0 {

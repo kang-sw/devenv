@@ -852,11 +852,13 @@
   // of the same shape), or null.
   function frameGraftable(old, n) {
     if (old.classList.contains("closed") || n.classList.contains("closed")) return null;
-    var of = q("iframe.doc-frame:not(.doc-frame-next)", old)[0], nf = q("iframe.doc-frame", n)[0];
+    var of = q(".doc-frame:not(.doc-frame-next)", old)[0], nf = q(".doc-frame", n)[0];
     if (!of || !nf || of.getAttribute("data-doc") !== nf.getAttribute("data-doc")) return null;
     var oc = frameChain(of, old), nc = frameChain(nf, n);
     if (!oc || !nc || oc.length !== nc.length) return null;
-    for (var i = 0; i < oc.length; i++) if (oc[i].tagName !== nc[i].tagName) return null;
+    // The frames themselves may differ in kind (a mounted iframe, an
+    // incoming placeholder: frameGraft mounts it).
+    for (var i = 1; i < oc.length; i++) if (oc[i].tagName !== nc[i].tagName) return null;
     return { old: old, n: n, oc: oc, nc: nc };
   }
   // frameGrafts returns the grafts that move nothing settling el into want
@@ -906,20 +908,14 @@
   // attributes and children, except its child on the path, which stays.
   // At the bottom the new frame goes in after the old one, pending.
   function frameGraft(g) {
-    var of = g.oc[0], nf = g.nc[0];
-    // A frame put on the page with no document loads about:blank at once,
-    // which would reveal it blank: the next frame of a mounted frame gets its
-    // document before it goes in (mountFrames). The next frame of an
-    // unmounted one (a closed fold) stays unmounted, as unseen as the old.
-    if (of.hasAttribute("srcdoc") && nf.hasAttribute("data-srcdoc")) nf.setAttribute("srcdoc", nf.getAttribute("data-srcdoc"));
-    nf.classList.add("doc-frame-next");
-    nf.setAttribute("tabindex", "-1");
-    nf.setAttribute("aria-hidden", "true");
-    nf.wbNext = true;
-    nf.wbOld = of;
-    of.wbOut = true;
-    nf.addEventListener("load", function () { frameShow(nf); });
-    setTimeout(function () { frameReveal(nf); }, frameRevealMs);
+    var of = g.oc[0], mounted = of.tagName === "IFRAME";
+    // The next frame of a mounted frame is mounted before it goes in, and
+    // before anything holds it (expandos, the load listener): a placeholder
+    // would show nothing to reveal. The next frame of an unmounted one (a
+    // closed fold) is a placeholder that simply takes the old one's place.
+    if (mounted && g.nc[0].tagName !== "IFRAME") g.nc[0] = mountFrame(g.nc[0]);
+    var nf = g.nc[0];
+    if (mounted) frameNext(nf, of);
     for (var i = g.oc.length - 1; i > 0; i--) {
       var oa = g.oc[i], na = g.nc[i], oc = g.oc[i - 1], nc = g.nc[i - 1], before = true;
       Array.prototype.slice.call(oa.attributes).forEach(function (a) { if (!na.hasAttribute(a.name)) oa.removeAttribute(a.name); });
@@ -931,6 +927,18 @@
         else oa.appendChild(c);
       });
     }
+    if (!mounted) of.parentNode.removeChild(of);
+  }
+  // frameNext makes nf the pending next frame of mounted frame of.
+  function frameNext(nf, of) {
+    nf.classList.add("doc-frame-next");
+    nf.setAttribute("tabindex", "-1");
+    nf.setAttribute("aria-hidden", "true");
+    nf.wbNext = true;
+    nf.wbOld = of;
+    of.wbOut = true;
+    nf.addEventListener("load", function () { frameShow(nf); });
+    setTimeout(function () { frameReveal(nf); }, frameRevealMs);
   }
   // frameShow reveals pending frame f once it has loaded and drawn: a
   // frame revealed in the frame it loads in can still show blank for a
@@ -3377,21 +3385,39 @@
   // (an http(s) URL for a url link, a scheme-less daemon path for a file
   // link), so a forged message can at most offer a menu the user must pick
   // from.
-  // Lazy frames: a frame arrives with its document as data-srcdoc and loads
-  // it (srcdoc, from data-srcdoc, which stays for comparisons) only while
-  // every <details> around it is open (frameShown): on page load, on a
-  // toggle open (frameToggle, a capture listener, as toggle does not bubble;
-  // a programmatic open such as restoreOpen's or boardJump's fires toggle
+  // Lazy frames: the server writes each frame as an inert placeholder, a
+  // div.doc-frame carrying the frame's attributes, its document as
+  // data-srcdoc and its sandbox tokens as data-sandbox (wswhiteboard
+  // framedDoc). It becomes the iframe (mountFrame) only while every
+  // <details> around it is open (frameShown): on page load, on a toggle open
+  // (frameToggle, a capture listener, as toggle does not bubble; a
+  // programmatic open such as restoreOpen's or boardJump's fires toggle
   // too), and for what a board swap, an adopted closed page, or a history
   // load inserts. A frame never unmounts; a closed fold keeps its frames.
+  // Readers that need a live window (docFrame, postTheme, the size request,
+  // wbGrow, wbKeep) select iframe.doc-frame and skip placeholders; the
+  // height memory and the palette read .doc-frame, either kind.
   function frameShown(f) {
     if (!f.isConnected) return false;
     for (var p = f.parentNode; p && p.nodeType === 1; p = p.parentNode) if (p.tagName === "DETAILS" && !p.open) return false;
     return true;
   }
+  // mountFrame replaces placeholder p with its iframe and returns the
+  // iframe. sandbox and srcdoc are set before the iframe is connected: a
+  // sandbox set later applies only to the next navigation, and an iframe
+  // connected without srcdoc commits about:blank at once. data-srcdoc stays
+  // for comparisons.
+  function mountFrame(p) {
+    var f = doc.createElement("iframe");
+    Array.prototype.forEach.call(p.attributes, function (a) { if (a.name !== "data-sandbox") f.setAttribute(a.name, a.value); });
+    f.setAttribute("sandbox", p.getAttribute("data-sandbox") || "");
+    f.setAttribute("srcdoc", p.getAttribute("data-srcdoc") || "");
+    if (p.parentNode) p.parentNode.replaceChild(f, p);
+    return f;
+  }
   function mountFrames(el) {
-    q("iframe.doc-frame[data-srcdoc]:not([srcdoc])", el).forEach(function (f) {
-      if (frameShown(f)) f.setAttribute("srcdoc", f.getAttribute("data-srcdoc"));
+    q("div.doc-frame[data-srcdoc]", el).forEach(function (p) {
+      if (frameShown(p)) mountFrame(p);
     });
   }
   function frameToggle(e) {
@@ -3575,15 +3601,16 @@
   // A swap re-creates a changed topic's frame (or loads its next one beside
   // the old one, frameGraft), which starts at no height until it posts one;
   // it takes the old frame of the same topic's height meanwhile. A pending
-  // next frame's height is not the topic's.
+  // next frame's height is not the topic's. A placeholder (mountFrame) keeps
+  // and takes a height as its frame does.
   function frameHeights(el) {
     var h = {};
-    q("iframe.doc-frame:not(.doc-frame-next)", el).forEach(function (f) { if (f.style.height) h[f.getAttribute("data-doc")] = f.style.height; });
+    q(".doc-frame:not(.doc-frame-next)", el).forEach(function (f) { if (f.style.height) h[f.getAttribute("data-doc")] = f.style.height; });
     return h;
   }
   function setFrameHeights(el, h) {
     if (!h) return;
-    q("iframe.doc-frame", el).forEach(function (f) {
+    q(".doc-frame", el).forEach(function (f) {
       var k = f.getAttribute("data-doc");
       if (Object.prototype.hasOwnProperty.call(h, k)) f.style.height = h[k];
     });
@@ -4908,7 +4935,7 @@
       var name = topic.getAttribute("data-topic"), label = paletteText(topic.querySelector(".tname")) || name;
       var time = topic.querySelector(".tbar time"), at = time ? Number(time.getAttribute("data-at")) || Date.parse(time.getAttribute("datetime")) || 0 : 0;
       rows.push({ group: 1, kind: "board-topic", topic: name, title: label, at: at });
-      var body = topic.querySelector(".doc-body"), frame = body && body.querySelector("iframe.doc-frame"), text;
+      var body = topic.querySelector(".doc-body"), frame = body && body.querySelector(".doc-frame"), text;
       if (frame) {
         // The frame's document text (data-srcdoc, wswhiteboard framedDoc) is
         // there even for an unmounted or opaque-origin frame. A template
