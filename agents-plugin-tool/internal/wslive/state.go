@@ -178,7 +178,13 @@ type State struct {
 	gap toolGap
 
 	agents map[string]*agentState
-	usage  *Usage
+	// spawnAliases groups native/daemon producer ids for retention. A native
+	// alias cannot revive an evicted daemon lifecycle; only the daemon can.
+	spawnAliases map[string]string
+	// spawnReplies preserves delegate identity across the same eviction window,
+	// including a native producer first seen after canonical eviction.
+	spawnReplies map[string]string
+	usage        *Usage
 	// commands is the adapter's slash command list (KindCommands).
 	commands []SlashCommand
 	// host is what a host that runs the harness itself reports (SetHost);
@@ -469,6 +475,22 @@ func (st *State) finishReply(text string) RingEntry {
 func (st *State) staleEvent(ev Event) bool {
 	if ev.AgentID == "" {
 		return false
+	}
+	if ev.AgentKind != AgentKindPi {
+		target := st.spawnAliases[ev.AgentID]
+		if target == "" && strings.TrimSpace(ev.SessionKey) != "" {
+			target = st.spawnReplies[wsmailbox.ReplyID(strings.TrimSpace(ev.SessionKey))]
+		}
+		if target == "" && slices.Contains(st.evicted, "pi:"+ev.AgentID) {
+			target = "pi:" + ev.AgentID
+		}
+		if target != "" && slices.Contains(st.evicted, target) {
+			if st.spawnAliases == nil {
+				st.spawnAliases = map[string]string{}
+			}
+			st.spawnAliases[ev.AgentID] = target
+			return true
+		}
 	}
 	if _, ok := st.agents[ev.AgentID]; ok {
 		return false
@@ -772,8 +794,33 @@ func (act *activityState) setPhase(phase string, at int64) {
 // retain keeps every running agent (up to RunningAgentCap, least recently
 // updated dropped first) and the FinishedAgentCap most recently finished.
 func (st *State) retain() {
-	var running, finished []*agentState
+	var identities []Agent
 	for _, a := range st.agents {
+		identities = append(identities, Agent{ID: a.id, ReplyID: a.replyID, AgentKind: a.kind})
+		if a.kind == AgentKindPi && a.replyID != "" {
+			if st.spawnReplies == nil {
+				st.spawnReplies = map[string]string{}
+			}
+			st.spawnReplies[a.replyID] = a.id
+		}
+	}
+	for i, j := range spawnAgentTargets(identities, st.spawnAliases) {
+		if st.spawnAliases == nil {
+			st.spawnAliases = map[string]string{}
+		}
+		st.spawnAliases[identities[i].ID] = identities[j].ID
+	}
+	groups := map[string][]*agentState{}
+	for _, a := range st.agents {
+		id := a.id
+		if target := st.spawnAliases[id]; st.agents[target] != nil {
+			id = target
+		}
+		groups[id] = append(groups[id], a)
+	}
+	var running, finished []*agentState
+	for id := range groups {
+		a := st.agents[id]
 		if a.status == StatusRunning {
 			running = append(running, a)
 		} else {
@@ -786,7 +833,9 @@ func (st *State) retain() {
 		}
 		sort.Slice(list, func(i, j int) bool { return newer(list[i], list[j]) })
 		for _, a := range list[keep:] {
-			delete(st.agents, a.id)
+			for _, producer := range groups[a.id] {
+				delete(st.agents, producer.id)
+			}
 			if a.status != StatusRunning {
 				st.evicted = append(st.evicted, a.id)
 			}
@@ -806,6 +855,14 @@ func (st *State) retain() {
 	})
 	if over := len(st.evicted) - evictedCap; over > 0 {
 		st.evicted = slices.Delete(st.evicted, 0, over)
+	}
+	// Alias tombstones have the same bounded lifetime as ordinary evictions.
+	for _, identities := range []map[string]string{st.spawnAliases, st.spawnReplies} {
+		for alias, target := range identities {
+			if st.agents[target] == nil && !slices.Contains(st.evicted, target) {
+				delete(identities, alias)
+			}
+		}
 	}
 }
 
@@ -905,7 +962,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 		}
 		return snap.Agents[i].ID < snap.Agents[j].ID
 	})
-	snap.Agents = mergeSpawnAgents(snap.Agents)
+	snap.Agents = mergeSpawnAgents(snap.Agents, st.spawnAliases)
 	return snap
 }
 

@@ -7,6 +7,10 @@ import "github.com/kang-sw/devenv/internal/wslive"
 func SpawnAgentEvent(st State, key string) wslive.Event {
 	status := wslive.StatusDone
 	switch {
+	case st.Status == StatusClosed:
+		// Closed records have no live diagnostic; closing settles the row
+		// identically before and after its loop leaves the runner.
+		status = wslive.StatusDone
 	case st.Status == StatusRunning || (st.Status != StatusClosed && st.Held > 0):
 		status = wslive.StatusRunning
 	case st.Error != "":
@@ -74,6 +78,10 @@ func SpawnTree(parent ParentRef, children func(ParentRef) []State) []State {
 // seedSpawnRows runs only in the owning conversation's loop (or before it
 // starts). Its writer stays the sole snapshot writer; hosted intake stays off.
 func (c *conv) seedSpawnRows() {
+	if !c.spawnDirty {
+		return
+	}
+	c.spawnDirty = false
 	kind := ParentConversation
 	if c.rec.Lead {
 		kind = ParentLead
@@ -82,7 +90,18 @@ func (c *conv) seedSpawnRows() {
 	for _, a := range c.live.st.Snapshot(c.r.opts.Now().UnixMilli()).Agents {
 		known[a.ID] = true
 	}
-	for _, st := range SpawnTree(ParentRef{Kind: kind, ReplyID: c.rec.ReplyID}, c.r.Children) {
+	// One global listing per invalidation, not one filesystem-backed List
+	// per descendant, and never discovery on ordinary streaming snapshots.
+	if c.r.opts.spawnListed != nil {
+		c.r.opts.spawnListed(c.rec.ReplyID)
+	}
+	byParent := map[ParentRef][]State{}
+	for _, st := range c.r.List() {
+		if st.Parent != nil {
+			byParent[*st.Parent] = append(byParent[*st.Parent], st)
+		}
+	}
+	for _, st := range SpawnTree(ParentRef{Kind: kind, ReplyID: c.rec.ReplyID}, func(p ParentRef) []State { return byParent[p] }) {
 		if st.Status == StatusClosed && !known["pi:"+st.ID] {
 			continue
 		}

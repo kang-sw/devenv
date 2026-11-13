@@ -2,16 +2,16 @@ package wslive
 
 import "strings"
 
-// mergeSpawnAgents keeps the daemon's identity, nesting and lifecycle when a
-// harness also reports that conversation. Preserve the harness's activity and
-// telemetry, and redirect its children's parent ids to the retained row.
-// This is snapshot-only: neither producer's later events lose their target.
-func mergeSpawnAgents(agents []Agent) []Agent {
-	byReply, byNative := map[string]int{}, map[string]int{}
+// spawnAgentTargets identifies native/daemon aliases for both retention and
+// presentation. Known aliases survive eviction/revival even if a later native
+// event omits the delegate key it originally supplied.
+func spawnAgentTargets(agents []Agent, known map[string]string) map[int]int {
+	byID, byReply, byNative := map[string]int{}, map[string]int{}, map[string]int{}
 	for i, a := range agents {
 		if a.AgentKind != AgentKindPi {
 			continue
 		}
+		byID[a.ID] = i
 		if a.ReplyID != "" {
 			byReply[a.ReplyID] = i
 		}
@@ -19,21 +19,34 @@ func mergeSpawnAgents(agents []Agent) []Agent {
 			byNative[strings.TrimPrefix(a.ID, "pi:")] = i
 		}
 	}
-	aliases := map[string]string{}
-	drop := map[int]bool{}
+	targets := map[int]int{}
 	for i, a := range agents {
 		if a.AgentKind == AgentKindPi {
 			continue
 		}
-		j, ok := byReply[a.ReplyID]
+		j, ok := byID[known[a.ID]]
+		if !ok {
+			j, ok = byReply[a.ReplyID]
+		}
 		if !ok {
 			j, ok = byNative[a.ID]
 		}
 		if !ok {
 			continue
 		}
-		d := &agents[j]
-		aliases[a.ID], drop[i] = d.ID, true
+		targets[i] = j
+	}
+	return targets
+}
+
+// mergeSpawnAgents keeps daemon identity/nesting/lifecycle and native activity
+// without consuming either producer's future mutable event target.
+func mergeSpawnAgents(agents []Agent, known map[string]string) []Agent {
+	aliases := map[string]string{}
+	targets := spawnAgentTargets(agents, known)
+	for i, j := range targets {
+		a, d := agents[i], &agents[j]
+		aliases[a.ID] = d.ID
 		d.Activity = a.Activity
 		d.ContextTokens, d.OutputTps = a.ContextTokens, a.OutputTps
 		if d.Model == "" {
@@ -46,9 +59,9 @@ func mergeSpawnAgents(agents []Agent) []Agent {
 			d.OutputTps = 0
 		}
 	}
-	out := make([]Agent, 0, len(agents)-len(drop))
+	out := make([]Agent, 0, len(agents)-len(targets))
 	for i, a := range agents {
-		if drop[i] {
+		if _, drop := targets[i]; drop {
 			continue
 		}
 		if parent, ok := aliases[a.ParentID]; ok {

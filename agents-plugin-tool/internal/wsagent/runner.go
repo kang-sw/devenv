@@ -154,6 +154,8 @@ type Options struct {
 	ChildCheck func() error
 	// heartbeat overrides wslive.HeartbeatInterval for tests.
 	heartbeat time.Duration
+	// spawnListed observes global spawn-projection listings in tests.
+	spawnListed func(string)
 }
 
 // Runner hosts the agent conversations of one dashboard daemon.
@@ -253,7 +255,10 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 	// All records are loaded now, including children sorted after their lead.
 	for _, st := range r.List() {
 		if c := r.conv(st.ID); c != nil {
-			c.do(func() { c.live.writeSnapshot() })
+			c.do(func() {
+				c.spawnDirty = true
+				c.live.writeSnapshot()
+			})
 		}
 	}
 	// A child loaded before its parent found no parent to report to.
@@ -377,17 +382,18 @@ func (r *Runner) conv(replyID string) *conv {
 func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	c := &conv{
-		r:       r,
-		dir:     dir,
-		inbox:   wsinbox.Dir(dir),
-		rec:     rec,
-		live:    newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
-		reqs:    make(chan func()),
-		inboxC:  make(chan struct{}, 1),
-		spawnC:  make(chan struct{}, 1),
-		mailC:   make(chan struct{}, 1),
-		done:    make(chan struct{}),
-		settleC: make(chan struct{}),
+		r:          r,
+		dir:        dir,
+		inbox:      wsinbox.Dir(dir),
+		rec:        rec,
+		live:       newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
+		reqs:       make(chan func()),
+		inboxC:     make(chan struct{}, 1),
+		spawnC:     make(chan struct{}, 1),
+		spawnDirty: true,
+		mailC:      make(chan struct{}, 1),
+		done:       make(chan struct{}),
+		settleC:    make(chan struct{}),
 	}
 	c.live.beforeSnapshot = c.seedSpawnRows
 	if len(seed) > 0 {
@@ -405,6 +411,9 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		// prior settlement. Legacy records retain their zero-count behavior.
 		c.settled, c.settledReport = last.Result, last.ID
 		c.settled.n, c.settled.mark = 1, last.Mark
+		if !rec.TurnOpen && (last.Result.Status == TurnFailed || last.Result.Status == TurnInterrupted) {
+			c.lastErr = last.Result.Error
+		}
 	}
 	c.writeRegistration()
 	// A row a terminal login took while no daemon ran: the loop lets the
@@ -1081,7 +1090,8 @@ type conv struct {
 	mailC    chan struct{}
 	stopMail func()
 	// spawnC coalesces daemon-owned descendant changes for this writer.
-	spawnC chan struct{}
+	spawnC     chan struct{}
+	spawnDirty bool
 	// spawning is set from the row write that precedes a spawn until the
 	// spawn settled: the row then names no process and is not stopped, so
 	// a terminal login is refused meanwhile (Registration.HostMayRun).
@@ -1325,6 +1335,7 @@ func (c *conv) loop() {
 		case <-c.mailC:
 			c.mailChanged()
 		case <-c.spawnC:
+			c.spawnDirty = true
 			c.live.writeSnapshot()
 			c.changed(false)
 		case ev, ok := <-c.events:
@@ -1572,6 +1583,9 @@ func (c *conv) dropHeld() {
 // apply applies a wslive event and tells the daemon when it wrote. quiet
 // (a replayed holder record) applies it to the state alone.
 func (c *conv) apply(ev wslive.Event, quiet ...bool) {
+	if ev.Kind == wslive.KindReset {
+		c.spawnDirty = true
+	}
 	if len(quiet) > 0 && quiet[0] {
 		c.live.applyQuiet(ev)
 		return
@@ -2472,15 +2486,17 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	if quiet {
 		return
 	}
+	// Observers must see the terminal diagnostic in the same emission as
+	// the settled lifecycle, including mapped Pi agent_settled failures.
+	if turnErr != "" {
+		c.setStatus(func() { c.lastErr = turnErr })
+	}
 	if ran && !c.replaying {
 		status := TurnDone
 		if turnErr != "" {
 			status = TurnFailed
 		}
 		c.settleTurn(status, turnErr, c.turnMark)
-	}
-	if turnErr != "" {
-		c.setStatus(func() { c.lastErr = turnErr })
 	}
 	if c.replaying {
 		return

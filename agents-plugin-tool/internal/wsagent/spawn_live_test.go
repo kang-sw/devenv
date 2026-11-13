@@ -2,6 +2,7 @@ package wsagent
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -86,10 +87,117 @@ func TestHostedLeadSpawnRowsSurviveDaemonReplacement(t *testing.T) {
 	waitRows(wslive.StatusRunning, wslive.StatusDone)
 	h.holders.exit(childHolder, 1)
 	waitRows(wslive.StatusFailed, wslive.StatusDone)
+	// A settled failure is durable; losing lastErr on replacement must not
+	// turn an open failed worker into a successful row.
+	h.restart()
+	waitRows(wslive.StatusFailed, wslive.StatusDone)
+	h.send(child.ID, "genuine next turn")
+	h.holders.out(h.holder(child.ID), `{"type":"agent_start"}`)
+	waitRows(wslive.StatusRunning, wslive.StatusDone)
 	if _, err := h.runner.CloseConversation(child.ID); err != nil {
 		t.Fatal(err)
 	}
 	waitRows(wslive.StatusDone, wslive.StatusDone)
+}
+
+func TestMappedPiFailureReachesRecursiveWatchFeedBeforeAnotherUpdate(t *testing.T) {
+	h, _ := newFakePiRecoveryHarness(t)
+	worker, _ := spawnRecoveryWorker(t, h)
+	var mu sync.Mutex
+	feed := wslive.NewState("intake-lead")
+	var terminal []State
+	stop := h.runner.Watch(func(st State) {
+		if SpawnLead(st, h.runner.Get) != leadParent.ReplyID {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		feed.Apply(SpawnAgentEvent(st, ""), time.Now().UnixMilli())
+		if st.Parent != nil && st.Parent.Kind == ParentConversation && st.Status == StatusIdle && st.Held == 0 {
+			terminal = append(terminal, st)
+		}
+	})
+	defer stop()
+	leaf, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "fail", Tier: "small", Parent: &ParentRef{Kind: ParentConversation, ReplyID: worker.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := h.holder(leaf.ID)
+	h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"mapped failure","content":[]}}`, `{"type":"agent_settled"}`)
+	eventually(t, "one coherent failed descendant emission", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(terminal) > 0
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	if len(terminal) != 1 || terminal[0].Error != "mapped failure" {
+		t.Fatalf("terminal emission before later updates: %+v", terminal)
+	}
+	found := false
+	for _, row := range feed.Snapshot(time.Now().UnixMilli()).Agents {
+		if row.ID == "pi:"+leaf.ID {
+			found = true
+			if row.Status != wslive.StatusFailed || row.ParentID != "pi:"+worker.ID {
+				t.Fatalf("recursive feed lost mapped failure: %+v", row)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("recursive feed lost failed leaf")
+	}
+}
+
+func TestHostedSpawnProjectionListsOncePerInvalidationNotPerStreamWrite(t *testing.T) {
+	h := newLeadHarness(t)
+	h.opts.WSMCP = func(string) (MCPCommand, error) { return MCPCommand{Command: "/unused/ws-mcp"}, nil }
+	var mu sync.Mutex
+	counts := map[string]int{}
+	h.opts.spawnListed = func(id string) {
+		mu.Lock()
+		counts[id]++
+		mu.Unlock()
+	}
+	count := func(id string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		return counts[id]
+	}
+	h.start()
+	lead := h.lead(BackendClaude, LeadOptions{})
+	for range 3 {
+		worker, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "work", Parent: &ParentRef{Kind: ParentLead, ReplyID: lead.ID}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.holder(worker.ID)
+		leaf, err := h.runner.Spawn(SpawnSpec{Profile: PiWorkerProfile, Root: h.root, Prompt: "leaf", Parent: &ParentRef{Kind: ParentConversation, ReplyID: worker.ID}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.holder(leaf.ID)
+	}
+	c := h.runner.conv(lead.ID)
+	var refreshDelta, streamDelta int
+	c.do(func() {
+		// Drain pending coalesced wakes and force one complete tree refresh.
+		for len(c.spawnC) > 0 {
+			<-c.spawnC
+		}
+		before := count(lead.ID)
+		c.spawnDirty = true
+		c.live.writeSnapshot()
+		refreshDelta = count(lead.ID) - before
+		before = count(lead.ID)
+		for range 20 {
+			c.apply(wslive.Event{Kind: wslive.KindReply, Text: "streaming"})
+			c.live.writeSnapshot() // a heartbeat is cheap too
+		}
+		streamDelta = count(lead.ID) - before
+	})
+	if refreshDelta != 1 || streamDelta != 0 {
+		t.Fatalf("global listings: one refresh=%d, ordinary stream/heartbeat writes=%d", refreshDelta, streamDelta)
+	}
 }
 
 func strPtr(s string) *string { return &s }
