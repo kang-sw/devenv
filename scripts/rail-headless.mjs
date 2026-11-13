@@ -8,14 +8,15 @@
 //   node scripts/rail-headless.mjs grip-reorder look  the named scenarios, in order
 //   node scripts/rail-headless.mjs --list             the scenario names
 //
-// Options: --shots DIR (where the look scenario saves its captures; default a
-// fresh rail-headless-shots-* folder under the OS temp dir, printed), --keep
-// (keep the fixture's temp dir), --headed (show the browser).
+// Options: --shots DIR (where the look and tree scenarios save their captures;
+// default a fresh rail-headless-shots-* folder under the OS temp dir, printed),
+// --keep (keep the fixture's temp dir), --headed (show the browser).
 //
 // It never touches the shared dashboard daemon or its cache. It builds ws-mcp
 // from this checkout into a temp dir, seeds a fixture there (git repositories
 // with a linked worktree, a plain folder, and fake session registrations:
-// several workspaces and worktrees, live and ended rows, labeled ones), and
+// several workspaces and worktrees, live and ended rows, labeled ones, a
+// hosted one waiting on a tool approval), and
 // starts its own daemon (`ws-mcp dashboard --port 0`) with WS_CACHE_HOME,
 // WS_CONFIG_HOME, and HOME pointed into that temp dir and the assets served
 // live from this checkout (WS_MCP_DASHBOARD_DEV_SOURCE). It reads the port
@@ -96,9 +97,11 @@ function replyID(key) {
 }
 
 // --------------------------------------------------------------- fixture --
-// The seeded sessions. ws: the folder (alpha and beta are repositories,
-// alpha-feat alpha's linked worktree on feat/x, notes a plain folder); sub
-// roots the session in a folder of it; ended folds the row.
+// The seeded sessions. ws: the folder (alpha, beta, and gamma are
+// repositories, alpha-feat alpha's linked worktree on feat/x, notes a plain
+// folder); sub roots the session in a folder of it; ended folds the row;
+// approval makes the row a hosted session whose present adapter reports
+// its lead waiting on that tool approval (the tree scenario's roll-up).
 const LONG = "A very long session label that keeps going well past the edge";
 const SESSIONS = [
   ...Array.from({ length: 18 }, (_, i) => ({ key: `rail-a-${String(i + 1).padStart(2, "0")}`, ws: "alpha" })),
@@ -111,6 +114,10 @@ const SESSIONS = [
   { key: "rail-b-1", ws: "beta" },
   { key: "rail-b-2", ws: "beta" },
   { key: "rail-n-1", ws: "notes" },
+  { key: "rail-g-main", ws: "gamma" },
+  { key: "rail-g-exec", ws: "gamma", harness: "codex" },
+  { key: "rail-g-ui", ws: "gamma", approval: { toolName: "Bash", argsPreview: "git push origin develop" } },
+  { key: "rail-g-other", ws: "gamma" },
 ];
 const LABELS = { "rail-a-02": "Build bot", "rail-a-05": LONG };
 
@@ -125,8 +132,8 @@ function stamp(ms) { return new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z")
 
 function seed(root) {
   const work = path.join(root, "work"), cache = path.join(root, "cache");
-  const dirs = { alpha: path.join(work, "alpha"), "alpha-feat": path.join(work, "alpha-feat"), beta: path.join(work, "beta"), notes: path.join(work, "notes") };
-  for (const name of ["alpha", "beta"]) {
+  const dirs = { alpha: path.join(work, "alpha"), "alpha-feat": path.join(work, "alpha-feat"), beta: path.join(work, "beta"), gamma: path.join(work, "gamma"), notes: path.join(work, "notes") };
+  for (const name of ["alpha", "beta", "gamma"]) {
     fs.mkdirSync(dirs[name], { recursive: true });
     git(dirs[name], "init", "-q", "-b", "main");
     git(dirs[name], "commit", "--allow-empty", "-qm", "initial");
@@ -134,7 +141,7 @@ function seed(root) {
   git(dirs.alpha, "worktree", "add", "-q", "-b", "feat/x", dirs["alpha-feat"]);
   fs.mkdirSync(path.join(dirs.alpha, "sub"), { recursive: true });
   fs.mkdirSync(dirs.notes, { recursive: true });
-  const common = { alpha: path.join(dirs.alpha, ".git"), "alpha-feat": path.join(dirs.alpha, ".git"), beta: path.join(dirs.beta, ".git"), notes: "" };
+  const common = { alpha: path.join(dirs.alpha, ".git"), "alpha-feat": path.join(dirs.alpha, ".git"), beta: path.join(dirs.beta, ".git"), gamma: path.join(dirs.gamma, ".git"), notes: "" };
   const now = Date.now(), fx = { root, work, cache, dirs, rid: {}, project: {}, label: {}, live: [], ended: [] };
   SESSIONS.forEach((s, i) => {
     const rid = replyID(s.key), project = s.sub ? path.join(dirs[s.ws], s.sub) : dirs[s.ws];
@@ -153,10 +160,16 @@ function seed(root) {
     // it so.
     if (s.ended) reg.heartbeat_at = reg.ended_at = stamp(now - (40 + i) * 60_000);
     else reg.heartbeat_at = stamp(now + 60 * 60_000);
+    if (s.approval) reg.hosted = true;
     writeJSON(path.join(dir, "registration.json"), reg);
     // A finished tool batch gives the row its last-tool time.
     const t = now - (i + 1) * 97_000;
-    writeJSON(path.join(dir, "snapshot.json"), { schemaVersion: 1, replyId: rid, updatedAt: now, lead: { batches: [{ seq: 1, toolNames: ["Bash"], callCount: 1, failed: 0, startedAt: t - 2000, endedAt: t }] } });
+    const snap = { schemaVersion: 1, replyId: rid, updatedAt: now, lead: { batches: [{ seq: 1, toolNames: ["Bash"], callCount: 1, failed: 0, startedAt: t - 2000, endedAt: t }] } };
+    // A hosted row's approval wait is its lead's permission phase as a
+    // present adapter reports it: a snapshot that names its adapter and,
+    // stamped ahead of the clock like the heartbeat, never goes stale.
+    if (s.approval) Object.assign(snap, { adapter: "claude", updatedAt: now + 60 * 60_000 }, { lead: { ...snap.lead, phase: "permission", permission: s.approval } });
+    writeJSON(path.join(dir, "snapshot.json"), snap);
     if (LABELS[s.key]) {
       fx.label[s.key] = LABELS[s.key];
       writeJSON(path.join(dir, "label.json"), { label: LABELS[s.key] });
@@ -564,8 +577,12 @@ const SCENARIOS = [
       assert(await t.hint() === "Can't move to another workspace", `over another workspace the hint is "${await t.hint()}"`);
       assert(await page.evaluate(() => getComputedStyle(document.body).cursor) === "not-allowed", "the cursor does not say no");
       assert(!(await t.line()), "a refused place shows a drop line");
+      // A live row of its own workspace is a parent the dragged row may
+      // attach to by its middle (the tree scenario), so the other
+      // worktree's and the starred row's refusals are read at a row's top
+      // edge, a line before it.
       b = await t.box(`${t.sel("rail-f-2")} .rid`);
-      await page.mouse.move(b.x + 20, b.y + b.height / 2, { steps: 10 });
+      await page.mouse.move(b.x + 20, (await t.box(t.sel("rail-f-2"))).y + 3, { steps: 10 });
       assert(await t.hint() === "Can't move to another worktree", `over another worktree the hint is "${await t.hint()}"`);
       await page.mouse.up();
       assert(!(await t.hint()) && !(await page.evaluate(() => document.documentElement.classList.contains("drno"))), "the hint outlived the drag");
@@ -580,7 +597,7 @@ const SCENARIOS = [
       const at2 = await t.press("rail-a-03");
       await page.mouse.move(at2.x, at2.y + 8, { steps: 2 });
       b = await t.box(`${t.sel("rail-a-10")} .rid`);
-      await page.mouse.move(b.x + 20, b.y + b.height / 2, { steps: 10 });
+      await page.mouse.move(b.x + 20, (await t.box(t.sel("rail-a-10"))).y + 3, { steps: 10 });
       assert(await t.hint() === "Can't move across the starred sessions", `over the starred row the hint is "${await t.hint()}"`);
       await page.mouse.up();
       // A one-row group drags (to say why it cannot go elsewhere).
@@ -919,6 +936,157 @@ const SCENARIOS = [
       await sheet.close();
       for (const f of shots) assert(fs.statSync(f).size > 1000, `${f} is empty`);
       console.log(shots.map((f) => `  ${f}`).join("\n"));
+    },
+  },
+  {
+    name: "tree",
+    about: "a parent's middle attaches (outlined, no line), a line among the children reorders them at the child indent, a top-level line detaches; a collapsed parent rolls up a child's approval wait, its toggle and Left/Right fold it, a reload keeps the fold; TREE captures in the column and the overlay",
+    contexts: [{ viewport: { width: 1700, height: 820 }, colorScheme: "dark" }],
+    async run(t, browser) {
+      const { page, fx } = t;
+      await t.open("rail-g-main");
+      for (const [k, l] of [["rail-g-main", "메인"], ["rail-g-exec", "EXEC"], ["rail-g-ui", "UI"]]) await t.relabel(k, l);
+      await until("the labels in the rail", async () => { const n = await t.railNames(); return ["메인", "EXEC", "UI"].every((l) => n.includes(l)); });
+      const [main, exec, ui, other] = ["rail-g-main", "rail-g-exec", "rail-g-ui", "rail-g-other"].map((k) => t.rid(k));
+      const mainSel = t.sel("rail-g-main");
+      const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      // kids is the reply-ids shown under 메인; top the live top-level rows
+      // of gamma's worktree; outlined the rows outlined as a drop's parent.
+      const kids = () => page.evaluate((p) => [...document.querySelectorAll(`#rlist .rkids[data-parent="${p}"] > .rs`)].map((r) => r.getAttribute("data-rid")), main);
+      const top = () => t.group("rail-g-other");
+      const outlined = () => page.evaluate(() => [...document.querySelectorAll("#rlist .rs.rdkid")].map((r) => r.getAttribute("data-rid")));
+      // drag presses key's grip with gamma's bar 100px below the list's top
+      // (clear of the edge scroll), drags past the slop, and moves to y(box)
+      // over the onto row; it answers what the drag shows there.
+      const mid = (b) => b.y + b.height / 2, edge = (b) => b.y + 3;
+      async function drag(key, onto, y) {
+        await t.barAt(fx.dirs.gamma);
+        const at = await t.press(key);
+        await page.mouse.move(at.x, at.y + 8, { steps: 2 });
+        assert(await t.dragging(), `${key}'s grip did not start a drag`);
+        const box = await t.box(t.sel(onto));
+        await page.mouse.move(at.x, y(box), { steps: 10 });
+        return { box, line: await t.line(), hint: await t.hint(), outlined: await outlined() };
+      }
+      // drop releases the drag: ok holds at once (the shown drop) and
+      // after the daemon's render lands (the layout op's rail swap).
+      async function drop(what, ok) {
+        const h0 = await t.railHash();
+        await page.mouse.up();
+        assert(await ok(), `the drop does not show ${what} at once`);
+        assert((await outlined()).length === 0 && !(await t.line()), "the drop's outline or line outlived it");
+        await until(`the daemon's render of ${what}`, async () => (await t.railHash()) !== h0 && (await ok()));
+      }
+      // snap captures the rail; held, as the pointer and focus leave it,
+      // or else with no hover or focus on a row.
+      const tree = [], out = opt.shots || fs.mkdtempSync(path.join(os.tmpdir(), "rail-headless-shots-"));
+      fs.mkdirSync(out, { recursive: true });
+      async function snap(p, name, held) {
+        const file = path.join(out, name);
+        if (!held) {
+          await p.mouse.move(5, 5);
+          await p.evaluate(() => document.activeElement && document.activeElement.blur());
+          await sleep(250);
+        }
+        await p.locator("#rail").screenshot({ path: file, animations: "disabled" });
+        tree.push(file);
+      }
+      // Attach by a parent's middle: 메인 outlined, no line, no hint.
+      let s = await drag("rail-g-exec", "rail-g-main", mid);
+      assert(same(s.outlined, [main]) && !s.line && !s.hint, `over 메인's middle: outlined ${s.outlined}, line ${JSON.stringify(s.line)}, hint "${s.hint}"`);
+      await snap(page, "tree-column-attach-zone.png", true);
+      await drop("EXEC under 메인", async () => same(await kids(), [exec]) && !(await top()).includes(exec));
+      assert(await page.locator(`${mainSel} .kidtog`).count() === 1, "메인 shows no toggle once it has a child");
+      s = await drag("rail-g-ui", "rail-g-main", mid);
+      assert(same(s.outlined, [main]) && !s.line, `over 메인's middle: outlined ${s.outlined}, line ${JSON.stringify(s.line)}`);
+      await drop("UI after EXEC under 메인", async () => same(await kids(), [exec, ui]));
+      assert(await page.textContent(`${mainSel} .kidtog .kn`) === "2", "메인's toggle does not count two children");
+      // A child is indented one step (16px) and shows no star.
+      const ind = await page.evaluate(([p, k]) => {
+        const L = document.getElementById("rlist").getBoundingClientRect().left;
+        const hi = (r) => document.querySelector(`#rlist .rs[data-rid="${r}"] .hi`).getBoundingClientRect().left - L;
+        return { parent: hi(p), kid: hi(k), star: !!document.querySelector(`#rlist .rs[data-rid="${k}"] .star`) };
+      }, [main, exec]);
+      near(ind.parent, 49, "메인's harness icon");
+      near(ind.kid, 65, "a child's harness icon");
+      assert(!ind.star, "a child shows a star");
+      // Reorder the children: a line at the child indent, before EXEC.
+      s = await drag("rail-g-ui", "rail-g-exec", edge);
+      assert(s.line && !s.hint && s.outlined.length === 0, `over EXEC's top: line ${JSON.stringify(s.line)}, hint "${s.hint}", outlined ${s.outlined}`);
+      await snap(page, "tree-column-child-line.png", true);
+      near(s.line.left, s.box.x, "the line among the children's left");
+      near(s.line.top, s.box.y - 1, "the line among the children's top", 1.5);
+      const mb = await t.box(mainSel);
+      assert(s.line.left > mb.x + 10, `the line among the children starts at ${s.line.left}, not indented from 메인's ${mb.x}`);
+      await drop("UI before EXEC", async () => same(await kids(), [ui, exec]));
+      // A top-level row held by its grip over a child's indent reads the
+      // child row at its height: a line among the children. Back over the
+      // held row itself it drops nothing.
+      {
+        await t.barAt(fx.dirs.gamma);
+        const at = await t.press("rail-g-other");
+        await page.mouse.move(at.x, at.y + 8, { steps: 2 });
+        const eb = await t.box(t.sel("rail-g-exec"));
+        assert(at.x < eb.x, `the grip (${at.x}) is not left of the child row (${eb.x})`);
+        await page.mouse.move(at.x, eb.y + 3, { steps: 10 });
+        const l = await t.line();
+        assert(l && Math.abs(l.left - eb.x) <= 0.6 && !(await t.hint()), `over a child's indent: line ${JSON.stringify(l)}, hint "${await t.hint()}"`);
+        await page.mouse.move(at.x, at.y, { steps: 10 });
+        assert(!(await t.line()), "over the held row itself a line shows");
+        await page.mouse.up();
+        assert(same(await kids(), [ui, exec]) && (await top()).includes(other), "a drag back to its own place moved rows");
+      }
+      // Detach by a top-level line: before rail-g-other, at its indent.
+      s = await drag("rail-g-exec", "rail-g-other", edge);
+      assert(s.line && !s.hint && s.outlined.length === 0, `over rail-g-other's top: line ${JSON.stringify(s.line)}, hint "${s.hint}", outlined ${s.outlined}`);
+      near(s.line.left, s.box.x, "the top-level line's left");
+      near(s.line.left, mb.x, "the top-level line's left against 메인's");
+      await drop("EXEC detached before rail-g-other", async () => {
+        const tl = await top();
+        return same(await kids(), [ui]) && tl.indexOf(exec) >= 0 && tl.indexOf(exec) === tl.indexOf(other) - 1;
+      });
+      // The roll-up: UI waits on an approval (the seeded snapshot); 메인
+      // shows it only while collapsed, and UI's own chip only while shown.
+      const kap = () => page.evaluate((s) => { const k = document.querySelector(`${s} .kap`); return !!k && getComputedStyle(k).display !== "none"; }, mainSel);
+      const uiShown = () => page.locator(t.sel("rail-g-ui")).isVisible();
+      const folded = async () => (await page.getAttribute(`${mainSel} .kidtog`, "aria-expanded")) === "false" && (await page.evaluate((s) => document.querySelector(s).classList.contains("kcol"), mainSel));
+      assert(await page.locator(`${t.sel("rail-g-ui")}[data-ap]`).count() === 1, "UI does not wait on an approval; the seeded snapshot did not take");
+      assert(await page.locator(`${mainSel} .kap`).count() === 1, "메인 carries no roll-up for UI's wait");
+      assert(!(await kap()) && (await uiShown()) && (await page.locator(`${t.sel("rail-g-ui")} .chip.perm`).isVisible()), "expanded: the roll-up shows, or UI's own chip does not");
+      await t.barAt(fx.dirs.gamma);
+      await snap(page, "tree-column-expanded.png");
+      await page.click(`${mainSel} .kidtog`);
+      assert(await folded() && (await kap()) && !(await uiShown()), "the toggle did not collapse 메인 with the roll-up shown");
+      assert(await page.getAttribute(`${mainSel} .kap`, "title") === "1 session under this one awaits approval", `the roll-up says "${await page.getAttribute(`${mainSel} .kap`, "title")}"`);
+      await snap(page, "tree-column-collapsed.png");
+      await page.focus(`${mainSel} .rl`);
+      await page.keyboard.press("ArrowRight");
+      assert(!(await folded()) && !(await kap()) && (await uiShown()), "ArrowRight did not expand 메인");
+      await page.keyboard.press("ArrowLeft");
+      assert(await folded() && (await kap()) && !(await uiShown()), "ArrowLeft did not collapse 메인");
+      await t.open("rail-g-main");
+      assert(await folded() && (await kap()), "a reload lost 메인's fold");
+      // The overlay rail: a 12px step.
+      const o = await makeContext(browser, t.base, t.fx, { viewport: { width: 1200, height: 820 }, colorScheme: "dark" });
+      try {
+        await o.open("rail-g-main");
+        await o.page.click("#railbtn");
+        await until("the overlay rail", () => o.page.evaluate(() => document.documentElement.classList.contains("rail-open")));
+        await sleep(400);
+        await o.barAt(fx.dirs.gamma);
+        const oi = await o.page.evaluate(([p, k]) => {
+          const hi = (r) => document.querySelector(`#rlist .rs[data-rid="${r}"] .hi`).getBoundingClientRect().left;
+          return hi(k) - hi(p);
+        }, [main, ui]);
+        near(oi, 12, "the overlay's child step");
+        await snap(o.page, "tree-overlay-expanded.png");
+        await o.page.click(`${o.sel("rail-g-main")} .kidtog`);
+        await snap(o.page, "tree-overlay-collapsed.png");
+      } finally {
+        await o.context.close();
+      }
+      for (const f of tree) assert(fs.statSync(f).size > 1000, `${f} is empty`);
+      console.log(tree.map((f) => `  ${f}`).join("\n"));
     },
   },
 ];
