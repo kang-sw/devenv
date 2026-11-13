@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ROW_POLL_MS, ROW_WAIT_MS, flagOn, hostedMode, missingKeyWarning, parsePid, resolveHostedMode, rowVerdict, unconfirmedWarning, type HostedProbe } from './hosted'
+import { HARNESS_PID_ARGV, ROW_POLL_MS, ROW_WAIT_MS, flagOn, hostedMode, missingKeyWarning, parseHarnessPid, parsePid, resolveHostedMode, rowVerdict, unconfirmedWarning, type HostedProbe } from './hosted'
 
 test('the flag takes the truthy spellings ws-mcp accepts, case and whitespace aside', () => {
   for (const value of ['1', 'true', 'TRUE', ' yes ', 'on']) expect(flagOn(value)).toBe(true)
@@ -33,6 +33,26 @@ test('a registration names this process, another one, or none yet', () => {
 test('a process id is digits alone', () => {
   expect(parsePid('4242\n')).toBe(4242)
   for (const text of ['', 'Python 3.12.0\n', '0\n', '-1\n', '42 43\n', '4.2\n']) expect(parsePid(text)).toBe(undefined)
+})
+
+test('a bare id is the harness; a Windows cmd.exe wrapper is skipped once, and only cmd.exe', () => {
+  // Not Windows, or a lookup that failed: the probe prints the id alone.
+  expect(parseHarnessPid('4242\n')).toBe(4242)
+  // Windows: the printed id is the cmd.exe Claude Code runs a host command through.
+  expect(parseHarnessPid('9001 4242 cmd.exe\r\n')).toBe(4242)
+  expect(parseHarnessPid('9001 4242 CMD.EXE\n')).toBe(4242)
+  // Any other image is the process itself: a second harness the hosted session's shell started stays itself.
+  for (const image of ['claude.exe', 'bash.exe', 'python3.13.exe', 'xcmd.exe', 'cmd.exe.exe']) expect(parseHarnessPid(`9001 4242 ${image}\n`)).toBe(9001)
+  // A parent that does not read keeps the printed id; anything that is not a probe line reads as none.
+  expect(parseHarnessPid('9001 0 cmd.exe\n')).toBe(9001)
+  for (const text of ['', 'Python 3.12.0\n', '0\n', '0 4242 cmd.exe\n', '9001 4242\n', 'x 4242 cmd.exe\n']) expect(parseHarnessPid(text)).toBe(undefined)
+})
+
+test('the probe argv is one line with no double quotes, which a cmd.exe wrapper would cut or mangle', () => {
+  expect(HARNESS_PID_ARGV.slice(0, 2)).toEqual(['python3', '-c'])
+  expect(HARNESS_PID_ARGV).toHaveLength(3)
+  expect(HARNESS_PID_ARGV[2]).toMatch(/^[\x20-\x7e]+$/)
+  expect(HARNESS_PID_ARGV[2]).not.toMatch(/["%&|<>^]/)
 })
 
 const VARS = { flag: '1', key: ' hosted-key ', row: ' /state/registration.json ' }
@@ -122,4 +142,14 @@ test('a process id that cannot be read is an ordinary session with a warning, an
     expect(got.mode).toBe('unconfirmed')
     expect(blind.p.reads).toEqual([])
   }
+})
+
+test('behind a Windows cmd.exe wrapper the registration naming the harness is mine, and one naming another process is not', async () => {
+  const wrapped = (text: string) => {
+    const t = probe({ text })
+    return { ...t, hooks: { ...t.hooks, pid: async () => parseHarnessPid('9001 4242 cmd.exe\r\n') } }
+  }
+  expect(await resolveHostedMode(VARS, wrapped(row(4242)).hooks)).toEqual({ mode: 'hosted', key: 'hosted-key' })
+  expect(await resolveHostedMode(VARS, wrapped(row(9001)).hooks)).toEqual({ mode: 'off' })
+  expect(await resolveHostedMode(VARS, wrapped(row(5555)).hooks)).toEqual({ mode: 'off' })
 })
