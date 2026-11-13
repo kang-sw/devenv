@@ -261,6 +261,7 @@
           s.last = r;
           reports.set(e.target, s);
           list.slice().forEach(function (sub) {
+            if (sub.gone) return;
             var was = sub.ratio;
             sub.ratio = r.ratio;
             if (sub.onChange) sub.onChange(r);

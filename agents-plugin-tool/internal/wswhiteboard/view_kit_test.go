@@ -212,6 +212,13 @@ gone.connected = false; k.sweep();
 check("sweep drops the removed node from every observer", [io.obs.map(function (n) { return n.name; }), ios[1].obs.length], [["kept"], 0]);
 ios[1].report(gone, 1);
 check("a swept subscription hears nothing", wide, 0);
+// A subscription dropped by another one's callback in the same report
+// hears nothing more.
+var x = topic(board, "x", bcol, 0), heard = [], wy;
+k.watch(x, { onChange: function () { heard.push("first"); wy.unwatch(); } });
+wy = k.watch(x, { onChange: function () { heard.push("second"); } });
+io.report(x, 1);
+check("a subscription dropped mid-report is not called", heard, ["first"]);
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {

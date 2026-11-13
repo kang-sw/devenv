@@ -1048,6 +1048,12 @@
     view.forEach(function (c) { c.off = c.y - top; });
     return { h: h, view: view };
   }
+  // boardKept returns the session running on the board column's scroller,
+  // in boardKeep's shape, or null.
+  function boardKept() {
+    var w = window.wbHistory, h = w && w.keeping ? w.keeping($("bcol")) || w.keeping(doc.scrollingElement) : null;
+    return h ? { h: h } : null;
+  }
   function boardKeepSettle(k, el, ins) {
     var moved = new Set(ins);
     var pick = boardAnchor(k.view, function (c) { return moved.has(c.n) || !el.contains(c.n) || c.n.parentNode !== c.parent; });
@@ -3425,8 +3431,10 @@
         var from = f.getBoundingClientRect().height, to = Math.ceil(h), b = region("board");
         // A frame a board swap brought (wbKeep) reports its height late,
         // after the swap's keep session may have ended: its first change
-        // keeps the board in place as the swap did.
-        var kept = f.wbKeep && Math.abs(to - from) >= 1 && b && b.contains(f) ? boardKeep(b) : null;
+        // keeps the board in place as the swap did. A session still running
+        // keeps the anchor the swap picked (the topmost entry in view may be
+        // one the swap moved).
+        var kept = f.wbKeep && Math.abs(to - from) >= 1 && b && b.contains(f) ? boardKept() || boardKeep(b) : null;
         if (kept) f.wbKeep = false;
         f.style.height = to + "px";
         if (kept) kept.h.apply();
