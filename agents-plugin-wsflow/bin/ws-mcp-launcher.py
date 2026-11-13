@@ -1570,6 +1570,74 @@ class McpProxy:
                 return
 
 
+def windows_process_entry(pid: int) -> tuple[int, str] | None:
+    """Return (parent pid, image name) for `pid` from a Toolhelp snapshot, or None."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessEntry32(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry32)]
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry32)]
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    th32cs_snapprocess = 0x00000002
+    snapshot = kernel32.CreateToolhelp32Snapshot(th32cs_snapprocess, 0)
+    if snapshot is None or snapshot == ctypes.c_void_p(-1).value:
+        return None
+    try:
+        entry = ProcessEntry32()
+        entry.dwSize = ctypes.sizeof(ProcessEntry32)
+        ok = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while ok:
+            if entry.th32ProcessID == pid:
+                return int(entry.th32ParentProcessID), str(entry.szExeFile)
+            ok = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return None
+
+
+def harness_pid(os_name: str, lookup=windows_process_entry) -> int:
+    """Return the pid of the harness that started this launcher.
+
+    That is the direct parent, except on Windows where a harness commonly starts
+    a stdio server through a `cmd.exe /c` wrapper: a direct cmd.exe parent is
+    skipped once, so the wrapper's own parent is reported. Any lookup failure
+    leaves the direct parent.
+    """
+    ppid = os.getppid()
+    if os_name != "windows":
+        return ppid
+    try:
+        entry = lookup(ppid)
+        if entry is not None:
+            parent, image = entry
+            if image.lower() == "cmd.exe" and parent > 0:
+                return parent
+    except Exception:
+        pass
+    return ppid
+
+
 def watch_parent_exit(on_exit) -> None:
     """Call on_exit when the parent process ends (Windows; POSIX relies on signals).
 
@@ -1750,7 +1818,7 @@ def main() -> int:
     # The process that started this launcher is the harness whose session the
     # runtime serves. The runtime reads it from here on both paths (its own
     # environment, or the hello's), so an inherited value never stands.
-    os.environ["WS_MCP_HARNESS_PID"] = str(os.getppid())
+    os.environ["WS_MCP_HARNESS_PID"] = str(harness_pid(os_name))
     wait_for_rsrc_tree(plugin_dir)
     apply_rsrc_root_env(plugin_dir, os.environ)
     apply_skills_root_env(plugin_dir, os.environ)
