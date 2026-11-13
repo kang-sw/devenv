@@ -1,5 +1,6 @@
 import importlib.util
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -142,6 +143,9 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             launcher.write_runtime_metadata(binary, payload)
             self.assertFalse(launcher.runtime_fully_compatible(binary, contract, binary.parent))
             launcher.write_runtime_metadata(binary, self.capability_payload())
+            identity = launcher.read_runtime_metadata(binary)
+            self.assertEqual(identity["tools"], ["runtime.info"])
+            self.assertEqual(identity["commands"], ["runtime.info"])
             self.assertTrue(launcher.runtime_fully_compatible(binary, contract, binary.parent))
 
     def test_legacy_release_identity_needs_no_new_capabilities_fields(self):
@@ -153,6 +157,10 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             # The release installer obtains this identity from a versioned
             # release and checksums, not the connecting plugin's desired version.
             launcher.write_runtime_metadata(binary, {"version": "0.18.1"})
+            identity = launcher.read_runtime_metadata(binary)
+            self.assertEqual(identity["version"], "0.18.1")
+            self.assertIsNone(identity["tools"])
+            self.assertIsNone(identity["commands"])
             self.assertTrue(launcher.runtime_fully_compatible(binary, contract, binary.parent))
 
     def test_stamp_binds_hash_and_actual_accepted_version(self):
@@ -618,112 +626,37 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             launcher.apply_skills_root_env(plugin_dir / "nope", env)
             self.assertNotIn("WS_SKILLS_ROOT", env)
 
-    def test_main_exports_plugin_roots_before_exec(self):
-        launcher = load_launcher()
+    def test_main_exports_caller_context_and_returns_daemon_exit_codes_without_exec(self):
         plugin_dir = LAUNCHER_PATH.parent.parent
-        captured = {}
-
-        def fake_execvpe(binary, args, env):
-            captured["binary"] = binary
-            captured["args"] = args
-            captured["env"] = dict(env)
-
-        launcher.host_os = lambda: "linux"
-        launcher.host_arch = lambda: "amd64"
-        launcher.bootstrap_runtime_forced = lambda: False
-        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
-        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
-        launcher.compatibility_stamp_current = lambda *args: True
-        launcher.set_breadcrumb_dir = lambda runtime_dir: None
-        launcher.clear_launch_breadcrumb = lambda: None
-        launcher.detect_project_root = lambda plugin_dir: None
-        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
-        launcher.note = lambda message: None
-
-        with mock.patch.object(launcher.os, "execvpe", fake_execvpe):
-            with mock.patch.dict(launcher.os.environ, {}, clear=True):
-                self.assertEqual(launcher.main(), 1)
-
-        self.assertEqual(captured["env"]["WS_RSRC_ROOT"], str(plugin_dir / "rsrc"))
-        self.assertEqual(captured["env"]["WS_SKILLS_ROOT"], str(plugin_dir / "skills"))
-
-    def test_main_exports_its_parent_as_the_harness_pid_over_an_inherited_one(self):
-        launcher = load_launcher()
-        captured = {}
-
-        def fake_execvpe(binary, args, env):
-            captured["env"] = dict(env)
-
-        launcher.host_os = lambda: "linux"
-        launcher.host_arch = lambda: "amd64"
-        launcher.bootstrap_runtime_forced = lambda: False
-        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
-        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
-        launcher.compatibility_stamp_current = lambda *args: True
-        launcher.set_breadcrumb_dir = lambda runtime_dir: None
-        launcher.clear_launch_breadcrumb = lambda: None
-        launcher.detect_project_root = lambda plugin_dir: None
-        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
-        launcher.note = lambda message: None
-
-        # A launcher started below another one inherits that one's value.
-        with mock.patch.object(launcher.os, "execvpe", fake_execvpe):
-            with mock.patch.dict(launcher.os.environ, {"WS_MCP_HARNESS_PID": "1"}, clear=True):
-                self.assertEqual(launcher.main(), 1)
-
-        self.assertEqual(captured["env"]["WS_MCP_HARNESS_PID"], str(os.getppid()))
-        # The daemon path sends the same environment in its hello.
-        hello = launcher.proxy_hello("mcp", ["serve", "--stdio"], captured["env"], "0.0.0")
-        self.assertEqual(hello["env"]["WS_MCP_HARNESS_PID"], str(os.getppid()))
-
-    def test_windows_abnormal_exit_writes_complementary_breadcrumb(self):
-        launcher = load_launcher()
-
-        launcher.host_os = lambda: "windows"
-        launcher.host_arch = lambda: "amd64"
-        launcher.bootstrap_runtime_forced = lambda: False
-        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
-        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
-        launcher.compatibility_stamp_current = lambda *args: True
-        launcher.detect_project_root = lambda plugin_dir: None
-        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
-        launcher.note = lambda message: None
-
-        with tempfile.TemporaryDirectory() as runtime_dir:
-            with mock.patch.object(launcher.subprocess, "call", return_value=3221225477):
-                with mock.patch.dict(
-                    launcher.os.environ, {"WS_MCP_RUNTIME_DIR": runtime_dir}, clear=True
-                ):
-                    self.assertEqual(launcher.main(), 3221225477)
-
-            abnormal_exit = Path(runtime_dir) / "last-abnormal-exit"
-            launch_error = Path(runtime_dir) / "last-launch-error"
-            self.assertTrue(abnormal_exit.exists())
-            self.assertIn("3221225477", abnormal_exit.read_text(encoding="utf-8"))
-            self.assertFalse(launch_error.exists())
-
-    def test_windows_clean_exit_does_not_write_breadcrumb(self):
-        launcher = load_launcher()
-
-        launcher.host_os = lambda: "windows"
-        launcher.host_arch = lambda: "amd64"
-        launcher.bootstrap_runtime_forced = lambda: False
-        launcher.local_devenv_runtime_enabled = lambda plugin_dir, os_name: False
-        launcher.runtime_install_forced = lambda plugin_dir, os_name, local_enabled: False
-        launcher.compatibility_stamp_current = lambda *args: True
-        launcher.detect_project_root = lambda plugin_dir: None
-        launcher.wait_for_rsrc_tree = lambda plugin_dir: None
-        launcher.note = lambda message: None
-
-        with tempfile.TemporaryDirectory() as runtime_dir:
-            with mock.patch.object(launcher.subprocess, "call", return_value=0):
-                with mock.patch.dict(
-                    launcher.os.environ, {"WS_MCP_RUNTIME_DIR": runtime_dir}, clear=True
-                ):
-                    self.assertEqual(launcher.main(), 0)
-
-            abnormal_exit = Path(runtime_dir) / "last-abnormal-exit"
-            self.assertFalse(abnormal_exit.exists())
+        for os_name, code in (("linux", 0), ("windows", 7)):
+            with self.subTest(os_name=os_name):
+                launcher = load_launcher()
+                captured = {}
+                def fake_proxy(link, argv, stdout, stderr, input_text=None):
+                    captured.update(env=dict(link.env), argv=argv)
+                    return code
+                with tempfile.TemporaryDirectory() as runtime_dir, \
+                     mock.patch.dict(os.environ, {"WS_MCP_RUNTIME_DIR": runtime_dir, "WS_MCP_HARNESS_PID": "1", "WS_MCP_LAUNCHER_DIRECT": "1"}, clear=True), \
+                     mock.patch.object(launcher, "host_os", return_value=os_name), \
+                     mock.patch.object(launcher, "host_arch", return_value="amd64"), \
+                     mock.patch.object(launcher, "compatibility_stamp_current", return_value=True), \
+                     mock.patch.object(launcher, "detect_project_root"), \
+                     mock.patch.object(launcher, "proxy_cli", side_effect=fake_proxy), \
+                     mock.patch.object(launcher.sys, "argv", ["launcher", "tools"]), \
+                     mock.patch.object(launcher.sys, "stdout", mock.Mock(buffer=io.BytesIO())), \
+                     mock.patch.object(launcher.sys, "stderr", mock.Mock(buffer=io.BytesIO())), \
+                     mock.patch.multiple(launcher.subprocess, run=mock.DEFAULT, Popen=mock.DEFAULT, call=mock.DEFAULT) as children, \
+                     mock.patch.object(launcher.os, "execvpe") as execute:
+                    self.assertEqual(launcher.main(), code)
+                    for child in children.values():
+                        child.assert_not_called()
+                    execute.assert_not_called()
+                    self.assertFalse((Path(runtime_dir) / "last-abnormal-exit").exists())
+                self.assertEqual(captured["argv"], ["tools"])
+                self.assertEqual(captured["env"]["WS_MCP_HARNESS_PID"], str(os.getppid()))
+                self.assertEqual(captured["env"]["WS_RSRC_ROOT"], str(plugin_dir / "rsrc"))
+                self.assertEqual(captured["env"]["WS_SKILLS_ROOT"], str(plugin_dir / "skills"))
+                self.assertIn("ws-mcp-launcher.py", captured["env"]["WS_MCP_CLI_NAME"])
 
     def test_local_devenv_build_env_recovers_home_when_absent(self):
         launcher = load_launcher()

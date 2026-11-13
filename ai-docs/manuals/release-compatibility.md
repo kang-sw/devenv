@@ -12,7 +12,9 @@ recorded in the ticket's `## Decisions`, so the release gate only confirms it.
 
 ## How Versions Meet
 
-- **One daemon per machine.** Within a minor the newest version wins
+- **One daemon per cache root.** Only its dashboard daemon runs a ws executable;
+  Python launchers and holders are the adapters. Starting or replacing that
+  daemon is the sole executable lifecycle exception. Within a minor the newest version wins
   (`ensure.go` keepRunning, `version.go` CompareVersions). An older client
   never replaces a newer daemon. Equal version strings fall back to binary
   mtime.
@@ -21,10 +23,10 @@ recorded in the ticket's `## Decisions`, so the release gate only confirms it.
   plugin's own directory (`WS_RSRC_ROOT` is required). The typical in-minor
   skew is old skill text running against a newer binary. Playbook content
   always matches its own package's skills.
-- **A minor mismatch splits the binary but not the stores.** The launcher
-  writes one stderr line, bypasses the daemon, and runs its own binary per
-  session; the shared stores (session parts, mailbox, inbox, sqlite, tracker)
-  stay shared. This is the main risk.
+- **A minor mismatch never creates a second server.** The current hello
+  rejects it; the Python adapter diagnoses "dashboard daemon not reachable"
+  and retries without executable fallback. Cross-minor acceptance and notices
+  remain owned by the mixed-version guards ticket.
 - **There is effectively no version negotiation.** The `/mcp` hello requires
   `protocol: 1` exactly. The hello's plugin version is used only for the minor
   check and is not recorded per session. `runtime.json` per-tool ranges are
@@ -48,7 +50,7 @@ recorded in the ticket's `## Decisions`, so the release gate only confirms it.
 | 1 | Pi updated a patch, Claude still on the older patch (same minor) | The daemon is replaced by Pi's newer binary; Claude sessions reconnect and run old skill text on the new binary. Fine if tools/args were only added; a removed or renamed arg fails loudly as unknown | added: T0; removed: T2 (today possible even in a patch) |
 | 2 | Claude updated, Pi older (same minor) | Symmetric to 1; Pi's pin (daemon >= bundled) passes | same as 1 |
 | 3 | Another harness replaces the daemon mid-session | In-flight calls get `-32000`, the launcher reconnects; the tool list is not refreshed, so new tools stay invisible and removed tools fail on call | T1 |
-| 4 | Minor mismatch (Pi 0.49 / Claude 0.48) | Claude runs the 0.48 binary directly while the daemon is 0.49; both write the same stores: new fields lost, the old binary opens the new DB, the tracker rejects events; nobody is told | T2 |
+| 4 | Minor mismatch (Pi 0.49 / Claude 0.48) | Current hello rejects it; no direct server is started. Future mixed-version acceptance still needs store guards against old writers dropping fields or opening newer schemas | T2 for non-additive store/protocol changes |
 | 5 | Same version string, different build (release vs dev) | mtime decides; a newer file wins even with older code; total order, no flapping, but a wasted replace attempt per session start | T0 (cost only) |
 | 6 | Local dev: source newer than binary | Asset-only changes are not picked up (`261112-bug-ws-launcher-fingerprint-skips-embedded-assets`) | dev-only bug |
 | 7 | Tracker ledger synced across machines on different versions | The older side flags new event types as errors | T2 (cross-machine; daemon rules cannot prevent it) |
@@ -77,9 +79,10 @@ recorded in the ticket's `## Decisions`, so the release gate only confirms it.
    minor mismatch it injects a strong notice into that session's tool results
    and workflow manual ("plugin compatibility is broken; tell the user to
    update") plus a dashboard badge, and the session keeps working. A patch
-   difference shows only a quiet dashboard badge. A session that fell back to
-   direct execution makes the same judgment from the daemon's `/health`
-   version.
+   difference shows only a quiet dashboard badge. There is no direct-execution
+   fallback. Inspection reads `/health`, or the existing hello version when
+   health/version information is missing; it never executes a ws binary or
+   starts a daemon just to obtain its version.
 4. **A daemon replacement refreshes the tool list.** `tools/list_changed`
    first; where a host ignores it, a forced reconnect (the Claude mod watchdog
    widened to version or content-hash changes; Pi re-fetches `tools/list` on

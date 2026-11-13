@@ -4,6 +4,7 @@ import json
 import os
 import platform as platform_module
 import re
+import shlex
 import shutil
 import stat as stat_module
 import subprocess
@@ -43,23 +44,6 @@ def clear_launch_breadcrumb() -> None:
         return
     try:
         (_BREADCRUMB_DIR / "last-launch-error").unlink(missing_ok=True)
-    except Exception:
-        pass
-
-
-def write_exit_breadcrumb(exit_code: int) -> None:
-    # Best-effort durable record of a mid-session abnormal child exit, so a
-    # Windows-side crash leaves a readable reason in the runtime dir. This
-    # complements (never overwrites) last-launch-error, which only reflects
-    # startup failures.
-    if _BREADCRUMB_DIR is None:
-        return
-    try:
-        _BREADCRUMB_DIR.mkdir(parents=True, exist_ok=True)
-        (_BREADCRUMB_DIR / "last-abnormal-exit").write_text(
-            f"{time.strftime('%Y-%m-%dT%H:%M:%S')} ws-mcp-launcher: child exited abnormally with code {exit_code}\n",
-            encoding="utf-8",
-        )
     except Exception:
         pass
 
@@ -212,7 +196,11 @@ def runtime_metadata_path(binary: Path) -> Path:
 
 
 def read_runtime_metadata(binary: Path) -> dict | None:
-    """Read identity only when its hash still identifies these exact bytes."""
+    """Read hash-verified identity, with version and tools/commands keys.
+
+    Inventories are lists when recorded by the producer, otherwise None (unknown,
+    not an empty surface). Never fill them from the connecting runtime contract.
+    """
     try:
         payload = json.loads(runtime_metadata_path(binary).read_text(encoding="utf-8"))
         if (not isinstance(payload, dict) or payload.get("schema_version") != 1
@@ -220,6 +208,8 @@ def read_runtime_metadata(binary: Path) -> dict | None:
                 or version_tuple(payload["version"]) is None
                 or payload.get("binary_sha256") != sha256_file(binary)):
             return None
+        payload.setdefault("tools", None)
+        payload.setdefault("commands", None)
         return payload
     except (OSError, ValueError):
         return None
@@ -748,9 +738,9 @@ def runtime_capabilities_compatible(binary: Path, contract: dict, *, allow_same_
     exact = _capabilities_match_exact(contract)
     # Versioned build/release identity is sufficient for older producers that
     # predate optional surface inventories. Live capabilities belong to the daemon.
-    if "tools" in payload and not _capabilities_match_contract(payload, "tools", runtime_tools(contract), exact=exact):
+    if payload.get("tools") is not None and not _capabilities_match_contract(payload, "tools", runtime_tools(contract), exact=exact):
         return False
-    if "commands" in payload and not _capabilities_match_contract(payload, "commands", runtime_commands(contract), exact=exact):
+    if payload.get("commands") is not None and not _capabilities_match_contract(payload, "commands", runtime_commands(contract), exact=exact):
         return False
     return True
 
@@ -869,17 +859,10 @@ def apply_skills_root_env(plugin_dir: Path, env: dict) -> None:
 # ---------------------------------------------------------------------------
 # Daemon-hosted MCP: the launcher as a proxy.
 #
-# `serve --stdio` and `mailbox wait` do not run the runtime binary. They
-# connect to the machine's dashboard daemon (one per cache root), which hosts
-# one MCP server per connection built from the hello line below, and copy
-# bytes between stdin/stdout and that connection. The daemon runs from a
-# content-hash-named copy of the runtime binary under the daemon's bin/
-# directory (the name wsdashboard.StageExecutable produces), so on this path
-# the only ws-mcp executable that runs is that staged copy, once per version.
-# When no daemon can be reached within the budgets below, or the daemon is in
-# another minor, the launcher runs the direct path (the runtime binary itself)
-# and says so once on stderr. Wire format: internal/wsdashboard/proxy.go in
-# the ws-mcp source (the hello line, then MCP bytes or CLI frames).
+# Product commands use the authenticated daemon transport or read metadata.
+# Only a necessary daemon start/replacement executes the staged ws binary;
+# missing, incompatible or hung peers never select a second server.
+# Wire format: internal/wsdashboard/proxy.go (hello, then MCP or CLI frames).
 # ---------------------------------------------------------------------------
 
 DEFAULT_CACHE_DIR_NAME = "ws@kang-sw-devenv"  # wsstate.defaultCacheDirName
@@ -892,18 +875,15 @@ PROXY_PROTOCOL = 1
 PROXY_REPLAY_ID_PREFIX = "ws-mcp-launcher-replay-"
 DAEMON_DEFAULT_START_WAIT = 10.0  # wsdashboard.DefaultStartWait, seconds
 PROXY_LOST_REQUEST_CODE = -32000
-# A daemon connection that ends within this many seconds of being made is a
-# quick close; after this many quick closes in a row the proxy stops
-# reconnecting and hands over to a direct `serve --stdio` child.
+# Repeated quick closes back off rather than starting a second MCP server.
 PROXY_QUICK_CLOSE_SECONDS = 2.0
-PROXY_MAX_QUICK_CLOSES = 3
 # After the client closed its stdin, how long the proxy keeps reading the
 # answers to the requests still in flight before closing the connection.
 PROXY_DRAIN_SECONDS = 10.0
 
 
-class ProxyFallback(Exception):
-    """The daemon path is not available; the caller runs the direct path."""
+class DaemonUnavailable(Exception):
+    """The daemon connection failed; executable fallback is never permitted."""
 
 
 def proxy_cache_root(env: dict) -> Path:
@@ -967,6 +947,9 @@ def stage_daemon_binary(binary: Path, bin_dir: Path) -> Path:
         shutil.copyfile(binary, tmp)
         os.chmod(tmp, 0o755)
         os.replace(tmp, target)
+    metadata = read_runtime_metadata(binary)
+    if metadata is not None:
+        write_runtime_metadata(target, metadata)
     return target
 
 
@@ -1065,9 +1048,7 @@ def daemon_health(port: int, timeout: float) -> dict | None:
         return None
     finally:
         conn.close()
-    if not isinstance(payload, dict) or not isinstance(payload.get("version"), str):
-        return None
-    return payload
+    return payload if isinstance(payload, dict) else None
 
 
 # Environment variables whose values are paths the hosted server reads. A
@@ -1114,12 +1095,21 @@ def proxy_hello(mode: str, argv: list[str], env: dict, runtime_version: str) -> 
     """The first line on the stream: this connection's process context."""
     cwd = os.getcwd()
     env = hello_env(env, cwd)
+    root = env.get("WS_MCP_PROJECT_ROOT", "")
+    if mode == "mcp":
+        for index, arg in enumerate(argv[1:], 1):
+            if arg in {"--root", "-root"} and index + 1 < len(argv):
+                root = argv[index + 1]
+            elif arg.startswith(("--root=", "-root=")):
+                root = arg.split("=", 1)[1]
+        if root and root != ".":
+            root = os.path.abspath(root)
     return {
         "protocol": PROXY_PROTOCOL,
         "mode": mode,
         "argv": list(argv),
         "cwd": cwd,
-        "project_root": env.get("WS_MCP_PROJECT_ROOT", ""),
+        "project_root": root,
         "env": env,
         "harness": env.get("WS_MCP_HARNESS", ""),
         "owner_pid": os.getpid(),
@@ -1130,9 +1120,10 @@ def proxy_hello(mode: str, argv: list[str], env: dict, runtime_version: str) -> 
 class SocketStream:
     """A newline-delimited stream over the upgraded daemon connection."""
 
-    def __init__(self, sock, reader) -> None:
+    def __init__(self, sock, reader, daemon_version: str = "") -> None:
         self.sock = sock
         self.reader = reader
+        self.daemon_version = daemon_version
 
     def read_line(self) -> bytes:
         try:
@@ -1173,43 +1164,6 @@ class SocketStream:
         return 0
 
 
-class ProcessStream:
-    """The same stream shape over a direct `serve --stdio` child."""
-
-    def __init__(self, argv: list[str], env: dict) -> None:
-        self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
-
-    def read_line(self) -> bytes:
-        try:
-            return self.proc.stdout.readline()
-        except (OSError, ValueError):
-            return b""
-
-    def write(self, data: bytes) -> bool:
-        try:
-            self.proc.stdin.write(data)
-            self.proc.stdin.flush()
-            return True
-        except (OSError, ValueError):
-            return False
-
-    def close_write(self) -> None:
-        self.close()
-
-    def close(self) -> None:
-        try:
-            self.proc.stdin.close()
-        except OSError:
-            pass
-
-    def wait(self) -> int:
-        try:
-            return self.proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            self.proc.kill()
-            return self.proc.wait()
-
-
 def daemon_upgrade(endpoint: dict, hello: dict, timeout: float) -> SocketStream:
     """Open the MCP route: HTTP Upgrade, the hello line, the accept line."""
     import socket as socket_module
@@ -1218,7 +1172,7 @@ def daemon_upgrade(endpoint: dict, hello: dict, timeout: float) -> SocketStream:
     try:
         sock = socket_module.create_connection(("127.0.0.1", port), timeout=timeout)
     except OSError as exc:
-        raise ProxyFallback(f"daemon connection failed: {exc}") from exc
+        raise DaemonUnavailable(f"daemon connection failed: {exc}") from exc
     try:
         request = (
             f"GET {PROXY_PATH} HTTP/1.1\r\n"
@@ -1236,7 +1190,7 @@ def daemon_upgrade(endpoint: dict, hello: dict, timeout: float) -> SocketStream:
             if not header or header == b"\r\n":
                 break
         if " 101 " not in f" {status} ":
-            raise ProxyFallback(f"daemon refused the MCP route: {status or 'no answer'}")
+            raise DaemonUnavailable(f"daemon refused the MCP route: {status or 'no answer'}")
         sock.sendall(json.dumps(hello, separators=(",", ":")).encode("utf-8") + b"\n")
         raw = reader.readline()
         try:
@@ -1244,15 +1198,15 @@ def daemon_upgrade(endpoint: dict, hello: dict, timeout: float) -> SocketStream:
         except ValueError:
             accept = None
         if not isinstance(accept, dict):
-            raise ProxyFallback("daemon closed the MCP route before answering the hello")
+            raise DaemonUnavailable("daemon closed the MCP route before answering the hello")
         if not accept.get("ok"):
-            raise ProxyFallback(f"daemon refused this session: {accept.get('reason') or 'no reason given'}")
+            raise DaemonUnavailable(f"daemon refused this session: {accept.get('reason') or 'no reason given'}")
         sock.settimeout(None)
-        return SocketStream(sock, reader)
+        return SocketStream(sock, reader, str(accept.get("version", "")))
     except (OSError, ValueError) as exc:
         sock.close()
-        raise ProxyFallback(f"daemon connection failed: {exc}") from exc
-    except ProxyFallback:
+        raise DaemonUnavailable(f"daemon connection failed: {exc}") from exc
+    except DaemonUnavailable:
         sock.close()
         raise
 
@@ -1269,17 +1223,17 @@ class DaemonLink:
         *,
         answer_budget: float | None = None,
         start_budget: float | None = None,
+        allow_start: bool = True,
     ) -> None:
         self.binary = binary
         self.runtime_version = runtime_version
         self.os_name = os_name
         self.env = env
+        self.allow_start = allow_start
         self.daemon_dir = proxy_daemon_dir(env)
         extra = 10.0 if os_name == "windows" else 5.0
-        # A running daemon that does not answer sends the launcher to the
-        # direct path after this long; a start, replacement, or reconnect
-        # waits at least DefaultStartWait plus this long, so a draining
-        # predecessor never pushes the launcher onto the direct path.
+        # Each connection/start attempt is bounded; failed attempts never
+        # select another executable server.
         self.answer_budget = extra if answer_budget is None else answer_budget
         self.start_budget = DAEMON_DEFAULT_START_WAIT + extra if start_budget is None else start_budget
         try:
@@ -1288,6 +1242,11 @@ class DaemonLink:
             self.build_time = 0
         self._content_hash: str | None = None
         self.started = False
+        self.start_error = ""
+        metadata = read_runtime_metadata(binary)
+        self.binary_version = metadata["version"] if metadata is not None else runtime_version
+        if metadata is None:
+            self.build_time = 0
 
     def content_hash(self) -> str:
         """The runtime binary's sha256, computed once and only when needed."""
@@ -1303,7 +1262,24 @@ class DaemonLink:
         endpoint = read_daemon_endpoint(self.daemon_dir)
         if endpoint is None:
             return None, None
-        return endpoint, daemon_health(int(endpoint["port"]), timeout)
+        health = daemon_health(int(endpoint["port"]), timeout)
+        if health is None or not health.get("version"):
+            # Older compatible daemons need no new version endpoint or stamp.
+            # Their existing hello already returns the actual daemon version.
+            hello = proxy_hello("mcp", ["serve", "--stdio"], self.env, self.runtime_version)
+            try:
+                stream = daemon_upgrade(endpoint, hello, timeout)
+            except DaemonUnavailable:
+                if health is not None:
+                    raise
+                return endpoint, None
+            try:
+                if not stream.daemon_version:
+                    raise DaemonUnavailable("daemon answered but supplied no version information")
+                health = dict(health or {}, version=stream.daemon_version)
+            finally:
+                stream.close()
+        return endpoint, health
 
     def wait_healthy(self, budget: float) -> tuple[dict | None, dict | None]:
         deadline = time.monotonic() + budget
@@ -1333,8 +1309,8 @@ class DaemonLink:
         the suffix order would hide every rebuild at that core.
         """
         version = str(health.get("version", ""))
-        order = compare_daemon_versions(version, self.runtime_version)
-        if order != 0 and not same_core(version, self.runtime_version):
+        order = compare_daemon_versions(version, self.binary_version)
+        if order != 0 and not same_core(version, self.binary_version):
             return order < 0
         build_time = health.get("build_time")
         if not (isinstance(build_time, int) and 0 < self.build_time and build_time < self.build_time):
@@ -1347,10 +1323,14 @@ class DaemonLink:
     def start_daemon(self) -> bool:
         """Run the staged binary's daemon-start entry; True when it reports a daemon."""
         self.started = True
+        if read_runtime_metadata(self.binary) is None:
+            self.start_error = "no verified runtime metadata available to start the daemon"
+            return False
         try:
             staged = stage_daemon_binary(self.binary, self.daemon_dir / DAEMON_BIN_DIR_NAME)
         except OSError as exc:
-            note(f"staging the daemon binary failed: {exc}")
+            self.start_error = f"staging the daemon binary failed: {exc}"
+            note(self.start_error)
             return False
         argv = [str(staged), "daemon-start", "--build-time", str(self.build_time)]
         note(f"starting the daemon: {' '.join(argv)}")
@@ -1370,12 +1350,14 @@ class DaemonLink:
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            note(f"daemon-start failed: {exc}")
+            self.start_error = f"daemon-start failed: {exc}"
+            note(self.start_error)
             return False
         for line in proc.stderr.splitlines():
             note(f"daemon-start: {line}")
         if proc.returncode != 0:
-            note(f"daemon-start exited {proc.returncode}: {proc.stdout.strip()}")
+            self.start_error = f"daemon-start exited {proc.returncode}: {proc.stderr.strip() or proc.stdout.strip()}"
+            note(self.start_error)
             return False
         return True
 
@@ -1384,10 +1366,7 @@ class DaemonLink:
 
         grace is how long a daemon that answers nothing is given before one is
         started: a reconnect under a replacement gives the successor a moment.
-        Without grace, a daemon whose port accepts but never answers within
-        the answer budget is a wedged daemon: no start is attempted (its lock
-        would make the start wait out the whole start budget), the caller
-        runs the direct path.
+        A wedged daemon is diagnosed without trying to start a second one.
         """
         if grace > 0:
             endpoint, health = self.wait_healthy(grace)
@@ -1395,24 +1374,26 @@ class DaemonLink:
             try:
                 endpoint, health = self.probe(self.answer_budget)
             except DaemonHung as exc:
-                raise ProxyFallback(str(exc)) from exc
-        if health is None or self.needs_start(health):
+                raise DaemonUnavailable(str(exc)) from exc
+        if health is None and not self.allow_start:
+            raise DaemonUnavailable("no running daemon answered; inspection never starts one")
+        if self.allow_start and (health is None or self.needs_start(health)):
             if not self.start_daemon():
-                raise ProxyFallback("no daemon could be started")
+                raise DaemonUnavailable(self.start_error or "no daemon could be started")
             endpoint, health = self.wait_healthy(self.start_budget)
             if health is None or endpoint is None:
-                raise ProxyFallback(f"no daemon answered within {self.start_budget:.0f}s of starting one")
-            if self.needs_start(health) and compare_daemon_versions(str(health.get("version", "")), self.runtime_version) <= 0:
+                raise DaemonUnavailable(f"no daemon answered within {self.start_budget:.0f}s of starting one")
+            if self.needs_start(health) and compare_daemon_versions(str(health.get("version", "")), self.binary_version) <= 0:
                 # daemon-start reported a daemon, but the one answering is
                 # still the older one (it refused to stop, or won the lock
                 # race): never settle on it. A same-core daemon whose suffix
                 # sorts after runtime_version is one daemon-start keeps by
                 # design (wsdashboard.keepRunning: a release binary never
                 # replaces a "-dev" daemon of its core), so it is used.
-                raise ProxyFallback(f"daemon {health.get('version', '')} (build {health.get('build_time', 0)}) is older than this plugin's runtime and was not replaced")
+                raise DaemonUnavailable(f"daemon {health.get('version', '')} (build {health.get('build_time', 0)}) is older than this plugin's runtime and was not replaced")
         version = str(health.get("version", ""))
         if not same_minor(version, self.runtime_version):
-            raise ProxyFallback(f"daemon {version} is outside this plugin's minor ({self.runtime_version})")
+            raise DaemonUnavailable(f"daemon {version} is outside this plugin's minor ({self.runtime_version})")
         return daemon_upgrade(endpoint, hello, self.answer_budget)
 
 
@@ -1435,18 +1416,19 @@ class McpProxy:
     replaced or died), the proxy reconnects, replays the client's `initialize`
     under an id of its own (dropping that answer) and
     `notifications/initialized`, and answers every request still in flight
-    with an error, so the client never sees the server go away. When no
-    daemon comes back, a direct `serve --stdio` child takes over the same way.
+    with an error. While disconnected, requests fail promptly rather than
+    waiting for recovery or replaying a tool side effect.
     """
 
-    def __init__(self, link: DaemonLink, hello: dict, direct_argv: list[str], stdin, stdout, stderr) -> None:
+    def __init__(self, link: DaemonLink, hello: dict, stdin, stdout, stderr) -> None:
         self.link = link
         self.hello = hello
-        self.direct_argv = direct_argv
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
         self.lock = threading.Lock()
+        self.output_lock = threading.Lock()
+        self.stdin_done = threading.Event()
         self.stream = None
         self.initialize: dict | None = None
         self.initialized: bytes | None = None
@@ -1465,29 +1447,48 @@ class McpProxy:
         self.connected_at = time.monotonic()
         pump = threading.Thread(target=self.pump_client, name="ws-mcp-launcher-stdin", daemon=True)
         pump.start()
-        exit_code = 0
         while True:
+            if stream is None:
+                if self.stdin_closed:
+                    break
+                stream = self.recover()
+                continue
             line = stream.read_line()
             if not line:
                 if self.stdin_closed:
+                    self.fail_inflight("dashboard daemon not reachable: connection closed")
                     break
-                successor = self.recover()
-                if successor is None:
-                    exit_code = 1
-                    break
-                stream = successor
+                stream = self.recover()
                 continue
-            if self.deliver(line):
-                try:
-                    self.stdout.write(line if line.endswith(b"\n") else line + b"\n")
-                    self.stdout.flush()
-                except (OSError, ValueError):
-                    break
+            if self.deliver(line) and not self.output(line):
+                break
         with self.lock:
             final = self.stream
-        final.close()
-        code = final.wait()
-        return code if exit_code == 0 else exit_code
+        if final is not None:
+            final.close()
+            return final.wait()
+        return 1
+
+    def output(self, line: bytes) -> bool:
+        try:
+            with self.output_lock:
+                self.stdout.write(line if line.endswith(b"\n") else line + b"\n")
+                self.stdout.flush()
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def error(self, request_id, message: str) -> None:
+        self.output(json.dumps({"jsonrpc": "2.0", "id": request_id,
+                               "error": {"code": PROXY_LOST_REQUEST_CODE, "message": message}},
+                              separators=(",", ":")).encode("utf-8"))
+
+    def fail_inflight(self, message: str) -> None:
+        with self.lock:
+            lost = list(self.inflight.values())
+            self.inflight.clear()
+        for request_id in lost:
+            self.error(request_id, message)
 
     def pump_client(self) -> None:
         while True:
@@ -1505,13 +1506,21 @@ class McpProxy:
                         self.initialize = message
                     elif method == "notifications/initialized":
                         self.initialized = line
-                    if method is not None and "id" in message:
-                        self.inflight[json_id_key(message["id"])] = message["id"]
                 stream = self.stream
-            stream.write(line)
+                request = message is not None and message.get("method") is not None and "id" in message
+                if stream is not None:
+                    if request:
+                        self.inflight[json_id_key(message["id"])] = message["id"]
+                    if not stream.write(line):
+                        stream.close()
+            if stream is None and request:
+                self.error(message["id"], "dashboard daemon not reachable; request was not sent")
         with self.lock:
             self.stdin_closed = True
+            self.stdin_done.set()
             stream = self.stream
+        if stream is None:
+            return
         # Half-close: the server sees EOF, finishes the requests in flight,
         # and closes when it is done; run() delivers those answers meanwhile
         # and ends at the server's close. A server that never closes is cut
@@ -1537,31 +1546,23 @@ class McpProxy:
     def recover(self):
         with self.lock:
             old = self.stream
-        if isinstance(old, ProcessStream):
+            self.stream = None
+        if old is not None:
+            old.close()
+            if time.monotonic() - self.connected_at < PROXY_QUICK_CLOSE_SECONDS:
+                self.quick_closes += 1
+            else:
+                self.quick_closes = 0
+        # Fail before reconnecting, not after its budget expires. Requests
+        # arriving meanwhile also fail in pump_client and are never replayed.
+        self.fail_inflight("dashboard daemon not reachable; the request did not complete")
+        if self.stdin_done.wait(min(5.0, 0.5 * max(1, self.quick_closes))):
             return None
-        old.close()
-        if time.monotonic() - self.connected_at < PROXY_QUICK_CLOSE_SECONDS:
-            self.quick_closes += 1
-        else:
-            self.quick_closes = 0
-        stream = None
-        if self.quick_closes >= PROXY_MAX_QUICK_CLOSES:
-            print(f"ws-mcp-launcher: the daemon closed {self.quick_closes} connections in a row right after accepting them; continuing on the direct path", file=self.stderr, flush=True)
-        else:
-            if self.quick_closes:
-                # Back off between quick closes: 0.5 s, then 1 s.
-                time.sleep(0.5 * self.quick_closes)
-            try:
-                stream = self.link.connect(self.hello, grace=1.5)
-                note("daemon connection lost; reconnected")
-            except ProxyFallback as exc:
-                print(f"ws-mcp-launcher: daemon connection lost and not recovered ({exc}); continuing on the direct path", file=self.stderr, flush=True)
-        if stream is None:
-            try:
-                stream = ProcessStream(self.direct_argv, self.link.env)
-            except OSError as exc2:
-                print(f"ws-mcp-launcher: direct path failed: {exc2}", file=self.stderr, flush=True)
-                return None
+        try:
+            stream = self.link.connect(self.hello, grace=1.5)
+        except (DaemonUnavailable, DaemonHung) as exc:
+            print(f"ws-mcp-launcher: dashboard daemon not reachable: {exc}", file=self.stderr, flush=True)
+            return None
         self.replay_into(stream)
         self.connected_at = time.monotonic()
         return stream
@@ -1586,16 +1587,7 @@ class McpProxy:
                 if self.initialized is not None:
                     stream.write(self.initialized)
         for request_id in lost:
-            error = {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {"code": PROXY_LOST_REQUEST_CODE, "message": "ws-mcp daemon connection was replaced; the request did not complete"},
-            }
-            try:
-                self.stdout.write(json.dumps(error, separators=(",", ":")).encode("utf-8") + b"\n")
-                self.stdout.flush()
-            except (OSError, ValueError):
-                return
+            self.error(request_id, "dashboard daemon not reachable; the request did not complete")
 
 
 def watch_parent_exit(on_exit) -> None:
@@ -1632,25 +1624,23 @@ def watch_parent_exit(on_exit) -> None:
     threading.Thread(target=run, name="ws-mcp-launcher-parent-watch", daemon=True).start()
 
 
-def proxy_mode(argv: list[str]) -> str | None:
-    """Which argv the daemon hosts: `serve --stdio` as MCP, `mailbox wait` as CLI."""
-    if argv == ["serve", "--stdio"]:
+def proxy_mode(argv: list[str]) -> str:
+    """All product commands stay in the daemon; only its starter executes."""
+    if argv[:2] == ["serve", "--stdio"]:
         return "mcp"
-    if argv[:2] == ["mailbox", "wait"]:
-        return "cli"
-    return None
+    if argv[:1] == ["daemon-start"]:
+        return "lifecycle"
+    return "cli"
 
 
-def proxy_serve(link: DaemonLink, argv: list[str], stdin, stdout, stderr) -> int | None:
-    """Serve argv through the daemon; None means run the direct path instead."""
+def proxy_serve(link: DaemonLink, argv: list[str], stdin, stdout, stderr) -> int:
     hello = proxy_hello("mcp", argv, link.env, link.runtime_version)
     try:
         stream = link.connect(hello)
-    except ProxyFallback as exc:
-        print(f"ws-mcp-launcher: {exc}; running the direct path", file=stderr, flush=True)
-        return None
-    note("serving through the daemon")
-    return McpProxy(link, hello, [str(link.binary), *argv], stdin, stdout, stderr).run(stream)
+    except (DaemonUnavailable, DaemonHung) as exc:
+        print(f"ws-mcp-launcher: dashboard daemon not reachable: {exc}", file=stderr, flush=True)
+        stream = None
+    return McpProxy(link, hello, stdin, stdout, stderr).run(stream)
 
 
 def write_bytes(stream, text: str) -> None:
@@ -1661,24 +1651,24 @@ def write_bytes(stream, text: str) -> None:
     stream.flush()
 
 
-def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr) -> int | None:
-    """Run argv (a `mailbox wait`) in the daemon; None means run it directly.
-
-    stdout and stderr are binary streams (sys.stdout.buffer, sys.stderr.buffer).
-    """
+def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr, input_text: str | None = None) -> int:
+    """Run once through authenticated CLI frames. Never replay a command."""
     hello = proxy_hello("cli", argv, link.env, link.runtime_version)
+    if input_text is not None:
+        hello["stdin"] = input_text
+    failure_code = 0 if argv[:2] == ["mailbox", "codex-stop-hook"] else 1
     try:
         stream = link.connect(hello)
-    except ProxyFallback as exc:
-        write_bytes(stderr, f"ws-mcp-launcher: {exc}; running the direct path\n")
-        return None
+    except (DaemonUnavailable, DaemonHung) as exc:
+        write_bytes(stderr, f"ws-mcp-launcher: dashboard daemon not reachable: {exc}\n")
+        return failure_code
     watch_parent_exit(stream.close)
     while True:
         line = stream.read_line()
         if not line:
-            write_bytes(stderr, "ws-mcp-launcher: daemon connection closed before the command finished\n")
+            write_bytes(stderr, "ws-mcp-launcher: dashboard daemon not reachable: connection closed before the command finished\n")
             stream.close()
-            return 1
+            return failure_code
         frame = parse_jsonrpc_line(line)
         if frame is None:
             continue
@@ -1697,25 +1687,24 @@ def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr) -> int | None:
             return code if isinstance(code, int) and not isinstance(code, bool) else 1
 
 
-def compat_probe_binary(binary: Path, env: dict, mode) -> Path:
-    """The executable the compatibility probe runs.
-
-    On the daemon path the plugin-dir copy never executes: the probe runs the
-    staged daemon copy (byte-identical, so the verdict is the same), which keeps
-    one executable path per build for the endpoint protector. Off that path,
-    or when staging fails, the runtime binary itself.
-    """
-    if mode is None or proxy_disabled(env) or not binary.is_file():
-        return binary
-    try:
-        return stage_daemon_binary(binary, proxy_daemon_dir(env) / DAEMON_BIN_DIR_NAME)
-    except OSError as exc:
-        note(f"staging the runtime for the compatibility probe failed: {exc}")
-        return binary
-
-
-def proxy_disabled(env: dict) -> bool:
-    return env.get("WS_MCP_LAUNCHER_DIRECT", "").strip().lower() in {"1", "true", "yes", "on"}
+def inspect_runtime(link: DaemonLink, argv: list[str], health: dict | None) -> int:
+    """Read live identity or content-bound metadata, without starting a daemon."""
+    metadata = read_runtime_metadata(link.binary)
+    identity = health or metadata
+    if identity is None:
+        fail("dashboard daemon not reachable and no hash-bound runtime metadata available")
+    if argv == ["version"]:
+        print(identity["version"])
+        return 0
+    if health is not None:
+        return proxy_cli(link, argv, sys.stdout.buffer, sys.stderr.buffer)
+    if argv == ["runtime", "info"]:
+        print(json.dumps({"version": identity["version"], "source_commit": identity.get("source_commit", "")}))
+        return 0
+    if identity.get("tools") is None or identity.get("commands") is None:
+        fail("dashboard daemon not reachable; live capabilities unavailable in runtime metadata")
+    print(json.dumps({key: identity.get(key) for key in ("version", "source_commit", "mcp_protocol", "tools", "commands")}))
+    return 0
 
 
 def main() -> int:
@@ -1733,26 +1722,46 @@ def main() -> int:
     binary = runtime_dir / binary_name
     asset = f"ws-mcp-{platform_name}{'.exe' if os_name == 'windows' else ''}"
 
+    argv = sys.argv[1:]
+    mode = proxy_mode(argv)
+    inspection = argv in (["version"], ["runtime", "info"], ["runtime", "capabilities"])
     bootstrap_forced = bootstrap_runtime_forced()
     local_enabled = local_devenv_runtime_enabled(plugin_dir, os_name)
     install_forced = runtime_install_forced(plugin_dir, os_name, local_enabled=local_enabled)
-    # The stamp encodes the local source fingerprint, so a stamp hit under local
-    # devenv proves the cached binary already matches the current source: skip the
-    # rebuild. A miss means the source changed (or no runtime exists) -> rebuild.
     source_fingerprint = local_devenv_source_fingerprint(plugin_dir, os_name) if local_enabled else None
 
-    mode = proxy_mode(sys.argv[1:])
+    detect_project_root(plugin_dir)
+    os.environ["WS_MCP_RUNTIME_BINARY"] = str(binary)
+    os.environ["WS_MCP_HARNESS_PID"] = str(os.getppid())
+    # Printed mailbox waits must lead back to Python too (Codex has no shim on PATH).
+    os.environ.setdefault("WS_MCP_CLI_NAME", shlex.join([sys.executable, str(launcher_path)]))
+    apply_rsrc_root_env(plugin_dir, os.environ)
+    apply_skills_root_env(plugin_dir, os.environ)
+    link = DaemonLink(binary, str(contract.get("plugin_version", "")), os_name, os.environ, allow_start=not inspection)
+    try:
+        _, health = link.probe(link.answer_budget)
+    except (DaemonHung, DaemonUnavailable) as exc:
+        note(str(exc))
+        health = None
+
+    if inspection and not bootstrap_forced:
+        return inspect_runtime(link, argv, health)
+    usable_daemon = health is not None and same_minor(str(health.get("version", "")), link.runtime_version) and (
+        compare_daemon_versions(str(health["version"]), link.runtime_version) >= 0 or same_core(str(health["version"]), link.runtime_version))
     need_install = False
     if bootstrap_forced:
         note("forcing runtime install from bootstrap binary or url")
         clear_compatibility_stamp(runtime_dir)
         need_install = True
+    elif usable_daemon and not install_forced:
+        # An already compatible daemon never requires a local metadata upgrade.
+        pass
     elif compatibility_stamp_current(binary, contract, contract_path, runtime_dir, source_fingerprint):
         pass
     elif install_forced and local_enabled:
         note("local devenv source changed or runtime missing; rebuilding from source")
         need_install = True
-    elif runtime_fully_compatible(compat_probe_binary(binary, os.environ, mode), contract, runtime_dir, allow_same_minor=local_enabled):
+    elif runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=local_enabled):
         write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
     else:
         need_install = True
@@ -1760,46 +1769,41 @@ def main() -> int:
     if need_install:
         note("installing or repairing incompatible runtime")
         clear_compatibility_stamp(runtime_dir)
-        install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name, force_local=local_enabled)
-        if not runtime_fully_compatible(compat_probe_binary(binary, os.environ, mode), contract, runtime_dir, allow_same_minor=local_enabled):
-            fail("incompatible ws-mcp runtime after repair")
-        write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
+        try:
+            install_runtime(plugin_dir, runtime_dir, binary, asset, contract, os_name, platform_name, force_local=local_enabled)
+            if not runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=local_enabled):
+                fail("incompatible ws-mcp runtime after repair")
+            write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
+        except SystemExit:
+            if inspection or mode == "lifecycle":
+                raise
+            # Keep the adapter available to answer requests with a framed error.
+            # A healthy daemon can still serve even if local repair failed.
+            pass
 
-    # Runtime is present and compatible; clear any stale failure breadcrumb so
-    # last-launch-error only exists when the most recent launch actually failed.
-    clear_launch_breadcrumb()
-    detect_project_root(plugin_dir)
-    note(f"plugin_dir={plugin_dir}")
-    note(f"runtime_dir={runtime_dir}")
-    note(f"cwd={Path.cwd()}")
-    note(f"project_root={os.environ.get('WS_MCP_PROJECT_ROOT', '')}")
-
-    os.environ["WS_MCP_RUNTIME_BINARY"] = str(binary)
-    # The process that started this launcher is the harness whose session the
-    # runtime serves. The runtime reads it from here on both paths (its own
-    # environment, or the hello's), so an inherited value never stands.
-    os.environ["WS_MCP_HARNESS_PID"] = str(os.getppid())
+    link = DaemonLink(binary, str(contract.get("plugin_version", "")), os_name, os.environ, allow_start=not inspection)
+    if inspection:
+        # An explicit bootstrap+version repairs a child runtime but never starts it.
+        return inspect_runtime(link, argv, None)
+    if mode == "lifecycle":
+        if health is not None and not link.needs_start(health):
+            print(json.dumps(dict(health, outcome="kept")))
+            return 0
+        if read_runtime_metadata(binary) is None:
+            fail("dashboard daemon not reachable: no verified runtime to start")
+        staged = stage_daemon_binary(binary, link.daemon_dir / DAEMON_BIN_DIR_NAME)
+        return subprocess.call([str(staged), *argv], env=os.environ)
     wait_for_rsrc_tree(plugin_dir)
     apply_rsrc_root_env(plugin_dir, os.environ)
     apply_skills_root_env(plugin_dir, os.environ)
-    if mode is not None and not proxy_disabled(os.environ):
-        # The runtime's version is the one the contract accepted: the daemon's
-        # build time, not a second run of the binary, tells a newer build apart.
-        link = DaemonLink(binary, str(contract.get("plugin_version", "")), os_name, os.environ)
-        if mode == "mcp":
-            code = proxy_serve(link, sys.argv[1:], sys.stdin.buffer, sys.stdout.buffer, sys.stderr)
-        else:
-            code = proxy_cli(link, sys.argv[1:], sys.stdout.buffer, sys.stderr.buffer)
-        if code is not None:
-            return code
-    args = [str(binary), *sys.argv[1:]]
-    if os_name == "windows":
-        exit_code = subprocess.call(args)
-        if exit_code != 0:
-            write_exit_breadcrumb(exit_code)
-        return exit_code
-    os.execvpe(str(binary), args, os.environ)
-    return 1
+    clear_launch_breadcrumb()
+    if mode == "mcp":
+        return proxy_serve(link, argv, sys.stdin.buffer, sys.stdout.buffer, sys.stderr)
+    reads_stdin = argv[:2] == ["mailbox", "codex-stop-hook"] or (
+        argv[:2] == ["git", "commit"] and ("--description-file=-" in argv or "-description-file=-" in argv
+        or any(arg in {"--description-file", "-description-file"} and index + 1 < len(argv) and argv[index + 1] == "-"
+               for index, arg in enumerate(argv))))
+    return proxy_cli(link, argv, sys.stdout.buffer, sys.stderr.buffer, sys.stdin.read() if reads_stdin else None)
 
 
 if __name__ == "__main__":
