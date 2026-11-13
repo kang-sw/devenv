@@ -42,6 +42,11 @@ Add the rule to lead-ticket: store an approved visual reference durably, link it
 
 Verification: the playbook/manual drift and mirror tests pass. A rendered lead-ticket playbook shows the new text. The checklist output for an actionable ticket includes the visual-reference item.
 
+### Result (9d5cdfc) - 2026-11-13
+
+Based on `9d5cdfc`. Added the lead-side visual-reference bullet to `agents-plugin/rsrc/lead-ticket/lead-ticket.md` and its wsflow and pi mirrors, with manifests synchronized.
+Go `./internal/wsrsrc/... ./internal/mcp/...` and wsflow package tests passed (one wsflow test skipped). The separate checklist change remains open.
+
 ### Phase 2: Worker-side comparison and check narrowing
 
 Worker playbook: when a ticket links a visual reference, capture the result and compare it against the reference before closing the phase, and report both paths. Narrow the `check` definition in the workflow manual `### Asking the user` and the whiteboard playbook `class` bullet per Decision 2, leaving the `assumed` rule unchanged. Also add the granularity guidance per Decision 4: check items are written granular, one verifiable thing per item, never bundled. Apply the mirrors.
