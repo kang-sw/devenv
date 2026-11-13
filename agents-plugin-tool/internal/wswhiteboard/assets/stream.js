@@ -29,20 +29,31 @@
   // A fold (a long log run, or a system-event chip) anchors by its first
   // entry while closed; once open, its entries anchor themselves.
   function isFold(node) { return node.classList.contains('system-run') || node.classList.contains('run-fold'); }
+  // _wbHistoryBase is the pixel target before snap (cumulative: each
+  // "load more" adds STEP from the previous snapped height).
+  // _wbHistorySteps tracks how many times the user expanded, for
+  // capture/restore and the "has expanded" check.
   function steps(h, n) {
     h._wbHistorySteps = Math.max(1, n);
-    h.style.setProperty('--wb-history-height', (h._wbHistorySteps * STEP) + 'px');
+    var base = h._wbHistoryBase || STEP;
+    h.style.setProperty('--wb-history-height', base + 'px');
+  }
+  function setBase(h, px) {
+    h._wbHistoryBase = Math.max(STEP, px);
+    h.style.setProperty('--wb-history-height', h._wbHistoryBase + 'px');
   }
   // Extend --wb-history-height so no entry is half-clipped at the top of the
   // visible region. With flex-end the newest entries sit at the bottom and
   // older entries overflow upward; the clip line is .history-clip's top edge.
   // After layout, if an entry straddles that edge, grow the height to include
   // it fully. history-live is flex:none so the resize does not loop.
+  // Each "load more" measures from the snapped height, not a fixed step
+  // multiple, so each reveal is consistently ~640px of new entries.
   function snap(h) {
     var clip = h.querySelector('.history-clip'), live = h.querySelector('.history-live');
     if (!clip || !live) return;
     var cr = clip.getBoundingClientRect(), lr = live.getBoundingClientRect();
-    if (lr.height <= cr.height + 1) return; // content fits, nothing clipped
+    if (lr.height <= cr.height + 1) { h._wbHistorySnapped = h._wbHistoryBase || STEP; return; }
     var clipTop = cr.top, children = live.children;
     for (var i = 0; i < children.length; i++) {
       var c = children[i];
@@ -50,17 +61,19 @@
       var r = c.getBoundingClientRect();
       if (!r.height) continue;
       if (r.top < clipTop - 1 && r.bottom > clipTop + 1) {
-        // this entry straddles the clip line — include it fully
         var extra = Math.ceil(clipTop - r.top);
-        h.style.setProperty('--wb-history-height', ((h._wbHistorySteps || 1) * STEP + extra) + 'px');
+        var snapped = (h._wbHistoryBase || STEP) + extra;
+        h._wbHistorySnapped = snapped;
+        h.style.setProperty('--wb-history-height', snapped + 'px');
         return;
       }
-      if (r.top >= clipTop - 1) return; // past the clip line, done
+      if (r.top >= clipTop - 1) break;
     }
+    h._wbHistorySnapped = h._wbHistoryBase || STEP;
   }
   function updateControl(h) {
     var live = h.querySelector('.history-live');
-    var more = !!h.querySelector('template[data-history-page]') || live.scrollHeight > (h._wbHistorySteps || 1) * STEP;
+    var more = !!h.querySelector('template[data-history-page]') || live.scrollHeight > (h._wbHistorySnapped || h._wbHistoryBase || STEP);
     var button = h.querySelector('.history-older');
     if ((!button || button.hidden === !more) && h.classList.contains('history-more') === more) return;
     // Hiding the exhausted control resizes shallower ancestors watched by
@@ -122,6 +135,7 @@
     var anchor = below(topic), kept = anchor && kit.keep(anchor, { observe: [h.querySelector('.history-live')] });
     h._wbHistoryOut = false;
     h._wbHistoryTarget = null;
+    setBase(h, STEP);
     steps(h, 1);
     snap(h);
     updateControl(h);
@@ -138,7 +152,10 @@
   }
   function reveal(h, node) {
     var live = h.querySelector('.history-live');
-    steps(h, Math.max(h._wbHistorySteps || 1, Math.ceil((live.getBoundingClientRect().bottom - node.getBoundingClientRect().top) / STEP)));
+    var needed = live.getBoundingClientRect().bottom - node.getBoundingClientRect().top;
+    var base = Math.max(h._wbHistoryBase || STEP, Math.ceil(needed / STEP) * STEP);
+    setBase(h, base);
+    steps(h, Math.max(h._wbHistorySteps || 1, Math.ceil(needed / STEP)));
     snap(h);
     updateControl(h);
   }
@@ -220,7 +237,7 @@
       h._wbHistoryReobserve = true;
       window.requestAnimationFrame(function () {
         h._wbHistoryReobserve = false;
-        if (!h.isConnected || h._wbHistorySteps <= 1 || live.scrollHeight >= h._wbHistorySteps * STEP || !h.querySelector('template[data-history-page]')) return;
+        if (!h.isConnected || h._wbHistorySteps <= 1 || live.scrollHeight >= (h._wbHistoryBase || STEP) || !h.querySelector('template[data-history-page]')) return;
         h._wbHistoryObserver.unobserve(live);
         h._wbHistoryObserver.observe(live);
       });
@@ -299,6 +316,7 @@
         var entry = Array.from(run.querySelectorAll('.wb-entry')).find(function (e) { return systems.has(e.id); });
         if (entry) run.open = systems.get(entry.id);
       });
+      setBase(h, (saved.steps || 1) * STEP);
       steps(h, saved.steps || 1);
       snap(h);
       updateControl(h);
@@ -309,6 +327,7 @@
     histories(root).forEach(function (h) {
       if (h._wbHistoryBound) { updateControl(h); return; }
       h._wbHistoryBound = true;
+      setBase(h, STEP);
       steps(h, 1);
       snap(h);
       updateControl(h);
@@ -329,11 +348,14 @@
         var anchor = oldest(h), live = h.querySelector('.history-live');
         var kept = anchor && kit.keep(anchor, { observe: [live] });
         h._wbHistoryTarget = null;
+        // Each "load more" extends 640px from the previous snapped height,
+        // then snap() includes the straddling entry.
+        setBase(h, (h._wbHistorySnapped || h._wbHistoryBase || STEP) + STEP);
         steps(h, (h._wbHistorySteps || 1) + 1);
         arm(h);
         // At most one page here. Only a later content resize may load the
         // next: iframe heights have not arrived at materialization time.
-        if (live.scrollHeight < h._wbHistorySteps * STEP) loadOne(h);
+        if (live.scrollHeight < (h._wbHistoryBase || STEP)) loadOne(h);
         snap(h);
         updateControl(h);
         if (kept) kept.apply();
@@ -346,7 +368,7 @@
             if (h._wbHistoryTarget) reveal(h, h._wbHistoryTarget);
             // Initial layout alone does not load older pages; a user has to
             // expand first. A collapse cancels the bounded resize chain.
-            if (h._wbHistorySteps > 1 && h.querySelector('.history-live').scrollHeight < h._wbHistorySteps * STEP) loadOne(h);
+            if (h._wbHistorySteps > 1 && h.querySelector('.history-live').scrollHeight < (h._wbHistoryBase || STEP)) loadOne(h);
             snap(h);
             updateControl(h);
           } finally { h._wbHistoryResizing = false; }
