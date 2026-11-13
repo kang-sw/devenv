@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 206a381a30c4f335
 sage-review-completeness-reviewed: 206a381a30c4f335
+completed: 2026-11-13
 ---
 
 # Tickets link approved visual references; board checks narrow to verifying finished work
@@ -132,3 +133,13 @@ Verification: `go test ./internal/wsdoc/... ./internal/mcp/...` and the
 mirror/manifest drift tests pass; `tickets.checklist(type: feat, phase:
 content)` output includes the new item; the rendered lead-ticket playbook
 shows the promote-step refusal.
+
+### Result (c43933348) - 2026-11-13
+
+Landed in `c43933348`. The actionable `content` checklist gains item 3 (approved visual reference stored in the tracked assets folder, linked by path, verification requires a side-by-side result-capture comparison); `ticketChecklistIntent` stays at three items. The bundled `ticket-conventions.md` Content section states the generic `<ticket root>/assets/<stem>/` folder rule with text forms preferred. lead-ticket's `## Promote to ready/` gains step 2, refusing the move while an approved reference is unlinked or its comparison is absent from the verification (later steps renumbered; nothing referenced them by number). Text and checklist only: no `tickets.sage_gate` code was needed. wsflow and pi mirrors and manifests synced.
+
+Tests: fragment assertion added in `mcp/tickets_checklist_test.go`; the verbatim non-research content pin in `wsdoc/research_outcome_test.go` updated deliberately for the new item.
+
+Also per lead direction: the worker visual-reference bullet (Phase 2) now reports `compared <capture> vs <reference>: match|mismatch` under `verification:`, identical in `ticket-worker` and `ticket-worker-elevated`.
+
+Verification: `go build ./...`; `go test ./internal/wsdoc/... ./internal/wsrsrc/... ./internal/wswhiteboard/...` pass; wsflow `python3 -m unittest discover -s tests` 24 OK (2 skipped); lite review: no findings. The `internal/mcp` suite result is in the final report (the macOS `/private/var` tempdir failures are pre-existing).
