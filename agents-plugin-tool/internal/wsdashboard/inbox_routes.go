@@ -179,25 +179,32 @@ func (d *Daemon) inboxSession(w http.ResponseWriter, r *http.Request, replyID st
 }
 
 // inboxAnswered answers a write route with its inbox write's outcome, and
-// on success tells the index (a scheduled re-read the answer does not wait
-// for), the session's streams, the hosted mailbox waits, and the agent
-// runner (for a conversation it hosts) that the inbox changed.
+// on success runs the post-write wakes (inboxChanged).
 func (d *Daemon) inboxAnswered(w http.ResponseWriter, s Session, status int, answer any) {
 	if status == http.StatusOK {
-		d.index.Reread(s.ReplyID)
-		d.stats.WakeInbox.Add(1)
-		d.broker.wake(s.ReplyID)
-		if d.mailWake != nil {
-			d.mailWake.Wake()
-		}
-		if (s.Agent || s.Hosted) && d.agents != nil {
-			d.agents.InboxChanged(s.ReplyID)
-		}
+		d.inboxChanged(s)
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, status, answer)
 		return
 	}
 	http.Error(w, fmt.Sprint(answer), status)
+}
+
+// inboxChanged follows a daemon write to session s's inbox (a write route's,
+// or the answer check's nudge): it tells the index (a scheduled re-read the
+// caller does not wait for), the session's streams, the hosted mailbox
+// waits, and the agent runner (for a conversation it hosts) that the inbox
+// changed.
+func (d *Daemon) inboxChanged(s Session) {
+	d.index.Reread(s.ReplyID)
+	d.stats.WakeInbox.Add(1)
+	d.broker.wake(s.ReplyID)
+	if d.mailWake != nil {
+		d.mailWake.Wake()
+	}
+	if (s.Agent || s.Hosted) && d.agents != nil {
+		d.agents.InboxChanged(s.ReplyID)
+	}
 }
 
 // handleInboxWrite serves the message, cancel, steer, and interrupt routes
@@ -527,6 +534,9 @@ func (d *Daemon) inboxWrite(dir, route string, raw []byte, now time.Time) (int, 
 			fmt.Fprintf(d.log, "dashboard: inbox interrupt: %v\n", err)
 			return http.StatusInternalServerError, "could not interrupt the session"
 		}
+		// The owner stopped the turn: its answer check waits for the next
+		// turn that ends normally.
+		d.recordInterrupt(dir, now)
 		held := make([]map[string]any, 0, len(records))
 		for _, r := range records {
 			item := heldAnswer(dir, r.Entry)

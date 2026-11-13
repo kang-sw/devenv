@@ -94,6 +94,26 @@ func (s agentSessions) ReadContacts(reg Registration) ([]Contact, bool) {
 	return nil, false
 }
 
+// BoardItems forwards to the configured source (BoardItemsSource); an agent
+// conversation has no board.
+func (s agentSessions) BoardItems(reg Registration) (BoardItems, bool) {
+	if reg.Agent {
+		return BoardItems{}, true
+	}
+	if bs, ok := s.inner.(BoardItemsSource); ok {
+		return bs.BoardItems(reg)
+	}
+	return BoardItems{}, false
+}
+
+// readsBoardItems reports whether the configured source reads board items
+// (BoardItemsSource), so the answer check skips a session it could never
+// judge before reading anything else of it.
+func (s agentSessions) readsBoardItems() bool {
+	_, ok := s.inner.(BoardItemsSource)
+	return ok
+}
+
 // MailPrint forwards to the configured source (MailPrintSource); an agent
 // conversation has no mailbox.
 func (s agentSessions) MailPrint(reg Registration) (string, bool) {

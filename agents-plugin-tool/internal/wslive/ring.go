@@ -80,6 +80,9 @@ type RingEntry struct {
 	Done       int   `json:"done,omitempty"`
 	Failed     int   `json:"failed,omitempty"`
 	DurationMs int64 `json:"durationMs,omitempty"`
+	// Reason is a turn's end reason (Event.Reason), absent when its
+	// turn_end named none.
+	Reason string `json:"reason,omitempty"`
 	// Tools is a tools row's summary.
 	Tools *ToolSummary `json:"tools,omitempty"`
 	// Direction, Peer, and Title describe a mail line; HistoryKey is the

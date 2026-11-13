@@ -718,6 +718,36 @@ func TestDashboardReadPageCarriesReaskTimes(t *testing.T) {
 	}
 }
 
+// TestDashboardBoardItemsReadsOpenItemsAndReaskTimes pins the daemon answer
+// check's board source: the open items by ID (not the answered, assumed, or
+// withdrawn ones) and each re-asked item's re-ask time, read from the stored
+// board; a session with no board is empty, and an unknown session is false.
+func TestDashboardBoardItemsReadsOpenItemsAndReaskTimes(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	src := dashboardPageSource(t, nil)
+	reg := wsdashboard.Registration{ReplyID: f.replyID(), Project: f.root}
+	if items, ok := src.BoardItems(reg); !ok || len(items.Open) != 0 || len(items.Reasked) != 0 {
+		t.Fatalf("no board: BoardItems = %+v, %v; want empty and true", items, ok)
+	}
+	f.update(t, `<wb:topic name="t"><wb:add class="technical"><wb:title>one</wb:title></wb:add><wb:add class="technical"><wb:title>two</wb:title></wb:add><wb:add class="technical"><wb:title>three</wb:title></wb:add><wb:add class="technical"><wb:title>four</wb:title></wb:add><wb:add class="technical"><wb:title>five</wb:title></wb:add></wb:topic>`)
+	f.update(t, `<wb:answer id="2" value="ok">fine</wb:answer><wb:answer id="3" value="ok" assumed="true">assume</wb:answer><wb:patch id="4" status="withdrawn"/>`)
+	before := time.Now().UnixMilli()
+	f.update(t, `<wb:patch id="1" class="policy"><wb:option>x</wb:option><wb:option>y</wb:option></wb:patch>`)
+	items, ok := src.BoardItems(reg)
+	if !ok {
+		t.Fatal("BoardItems found no session")
+	}
+	if len(items.Open) != 2 || !items.Open[1] || !items.Open[5] {
+		t.Errorf("Open = %v, want items 1 and 5 only", items.Open)
+	}
+	if len(items.Reasked) != 1 || items.Reasked[1] < before || items.Reasked[1] > time.Now().UnixMilli() {
+		t.Errorf("Reasked = %v, want item 1 at or after %d", items.Reasked, before)
+	}
+	if _, ok := src.BoardItems(wsdashboard.Registration{ReplyID: "nope", Project: f.root}); ok {
+		t.Error("BoardItems read an unknown session")
+	}
+}
+
 // TestDashboardReadClosedTopicsPastTheCap pins the served board's closed-topic
 // cap end to end: the board ends with the show-more control, and
 // ReadClosedTopics renders the topics past the cap under the served link

@@ -167,6 +167,35 @@ func TestDashboardIntakeWritesSnapshotAndRing(t *testing.T) {
 	}
 }
 
+// TestDashboardIntakeKeepsTheTurnEndReason pins the optional reason of a
+// turn_end: it lands on the turn's ring entry, and a turn_end without one
+// stores an entry with no reason key, as before.
+func TestDashboardIntakeKeepsTheTurnEndReason(t *testing.T) {
+	f := newLiveFixture(t, true)
+	fastLive(t, 20*time.Millisecond)
+
+	intake(t, f.server, f.keyA,
+		map[string]any{"kind": "turn_start", "at": 1000},
+		map[string]any{"kind": "turn_end", "at": 2000, "reason": "aborted"},
+		map[string]any{"kind": "turn_start", "at": 3000},
+		map[string]any{"kind": "turn_end", "at": 4000},
+	)
+	ring := readLiveRing(t, f.sessionDir(f.replyA))
+	if len(ring) != 2 || ring[0].Kind != wslive.RingTurn || ring[0].Reason != wslive.TurnAborted || ring[0].DurationMs != 1000 ||
+		ring[1].Kind != wslive.RingTurn || ring[1].Reason != "" || ring[1].DurationMs != 1000 {
+		t.Fatalf("ring = %+v", ring)
+	}
+	for i, rec := range ring {
+		raw, err := json.Marshal(rec.RingEntry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if has := strings.Contains(string(raw), `"reason"`); has != (i == 0) {
+			t.Errorf("ring entry %d JSON %s: reason key present = %v", i, raw, has)
+		}
+	}
+}
+
 // TestDashboardIntakeDebounceCoalescesABurst pins the debounce: a burst of
 // intake calls inside one window is one snapshot write.
 func TestDashboardIntakeDebounceCoalescesABurst(t *testing.T) {

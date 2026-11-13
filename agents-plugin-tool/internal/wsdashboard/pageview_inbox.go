@@ -160,6 +160,48 @@ func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 	return out
 }
 
+// newestTurn is the conversation's newest finished turn: the newest RingTurn
+// record of ring (oldest first); false when ring holds none.
+func newestTurn(ring []wslive.RingRecord) (wslive.RingRecord, bool) {
+	for i := len(ring) - 1; i >= 0; i-- {
+		if ring[i].Kind == wslive.RingTurn {
+			return ring[i], true
+		}
+	}
+	return wslive.RingRecord{}, false
+}
+
+// turnStart is a finished turn's start, epoch milliseconds: its record's
+// time less its duration. False when the turn carries no duration (its
+// turn_end came after the state lost the turn's start, as across a daemon
+// restart): its start would read as its end, and a chip sent during the
+// turn would count as sent before it.
+//
+// The start is approximate. At is the ring file's write stamp, taken after
+// the adapter's turn_end reached ws-mcp and the ring flushed, while
+// DurationMs comes from the event clocks, so the start runs late by that
+// latency. The answer check's held-message gate and its coalescing delay
+// absorb it.
+func turnStart(turn wslive.RingRecord) (int64, bool) {
+	if turn.DurationMs <= 0 {
+		return 0, false
+	}
+	return turn.At.UnixMilli() - turn.DurationMs, true
+}
+
+// settledTurnStart is the start of the conversation's newest finished turn
+// (newestTurn, turnStart); 0 when there is none or it has no usable start.
+// A chip sent before it was in the inbox when that turn began, and both
+// adapters drain the inbox as a turn starts, so the turn has handled it.
+func settledTurnStart(ring []wslive.RingRecord) int64 {
+	turn, ok := newestTurn(ring)
+	if !ok {
+		return 0
+	}
+	start, _ := turnStart(turn)
+	return start
+}
+
 // sentMarks derives each board item's sent mark from the inbox: the newest
 // chip for the item across the drained records and then the held entries, so
 // a held answer shows over an earlier delivered one. The drained records are
@@ -169,8 +211,16 @@ func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 // answered an earlier ask and marks nothing, so the item waits on the user
 // again. A chip without a send time (written before chips carried one)
 // keeps its mark.
-func sentMarks(drained, held []wsinbox.Record, reasked map[int]int64) []SentMark {
+//
+// settled is the newest settled turn's start (settledTurnStart, 0 for none):
+// a drained note-only chip (no answer value) sent before it was delivered
+// to a turn that has finished, so it clears its item's mark, and the item
+// waits on the user again; an older value chip's mark does not come back.
+// The note stays in the delivered message and the drained record. A held
+// chip, and a value chip, keep their marks.
+func sentMarks(drained, held []wsinbox.Record, reasked map[int]int64, settled int64) []SentMark {
 	var order []string
+	seen := map[string]bool{}
 	marks := map[string]SentMark{}
 	stale := func(c wsinbox.Chip) bool {
 		if c.SentAt == 0 || len(reasked) == 0 {
@@ -189,7 +239,12 @@ func sentMarks(drained, held []wsinbox.Record, reasked map[int]int64) []SentMark
 				if stale(c) {
 					continue
 				}
-				if _, seen := marks[c.ID]; !seen {
+				if !isHeld && c.Answer == "" && c.SentAt > 0 && c.SentAt < settled {
+					delete(marks, c.ID)
+					continue
+				}
+				if !seen[c.ID] {
+					seen[c.ID] = true
 					order = append(order, c.ID)
 				}
 				marks[c.ID] = SentMark{ID: c.ID, Answer: c.Answer, Note: c.Note, Held: isHeld}
@@ -200,7 +255,9 @@ func sentMarks(drained, held []wsinbox.Record, reasked map[int]int64) []SentMark
 	add(held, true)
 	out := make([]SentMark, 0, len(order))
 	for _, id := range order {
-		out = append(out, marks[id])
+		if m, ok := marks[id]; ok {
+			out = append(out, m)
+		}
 	}
 	return out
 }
