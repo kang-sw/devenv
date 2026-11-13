@@ -977,6 +977,17 @@ describe("createBridgeInterruptDrain", () => {
 });
 
 describe("buildMailboxPushMessage", () => {
+  test("system labels survive the drain and show without becoming reply addresses", async () => {
+    const envelope = { label: "pi:childone", content: "Reply with pi.send(id: childone), not mailbox.send.\nall green", sent_at: "2026-01-02T03:04:05Z" };
+    const drain = createBridgeDrain(async () => ({ content: [{ type: "text", text: JSON.stringify([envelope]) }] }), "k");
+    assert.deepEqual(await drain(), [envelope]);
+    const message = buildMailboxPushMessage(envelope);
+    // Same literal as the Go and Claude watcher suites.
+    assert.equal(message.content, "mail from pi:childone (2026-01-02T03:04:05Z):\nReply with pi.send(id: childone), not mailbox.send.\nall green");
+    assert.deepEqual(message.details, envelope);
+    assert.ok(buildMailboxPushMessage({ ...envelope, from: "peer@repo" }).content.startsWith("mail from peer@repo "));
+    assert.ok(buildMailboxPushMessage({ ...envelope, reply_to: "id:abc123" }).content.startsWith("mail from id:abc123 "));
+  });
   test("a shared-layer sender uses its slug handle and carries the full envelope in details", () => {
     const message = buildMailboxPushMessage({ from: "scout@worktree", content: "run the ready ticket", sent_at: "2026-09-15T12:00:00Z" });
     assert.equal(message.customType, WS_MAILBOX_CUSTOM_TYPE);

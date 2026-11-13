@@ -495,7 +495,8 @@ func PiTurnReporter(log io.Writer) func(wsagent.TurnReport) {
 		}
 		path, err := wsmailbox.Paths{}.ReplyRegistry()
 		if err == nil {
-			err = wsmailbox.PostSystem(path, rep.Parent.ReplyID, wsagent.ReportText(rep), time.Now())
+			content := fmt.Sprintf("Reply with pi.send(id: %s), not mailbox.send.\n%s", rep.Result.ID, wsagent.ReportText(rep))
+			err = wsmailbox.PostSystem(path, rep.Parent.ReplyID, "pi:"+rep.Result.ID, content, time.Now())
 		}
 		if err != nil {
 			if log != nil {

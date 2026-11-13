@@ -66,12 +66,13 @@ import type { SpawnRole } from "./process-role.ts";
 
 /**
  * One queued mailbox message, mirroring the ws `Envelope` JSON shape
- * (`{from?, reply_to?, content, sent_at}`). Exactly one of `from`/`reply_to`
- * is set on delivery; `content` is free text and always present.
+ * (`{from?, reply_to?, label?, content, sent_at}`). Peer delivery sets one
+ * of `from`/`reply_to`; system mail may use a display-only `label` instead.
  */
 export interface MailboxEnvelope {
   from?: string;
   reply_to?: string;
+  label?: string;
   content: string;
   sent_at?: string;
 }
@@ -119,7 +120,7 @@ export interface MailboxPushMessage {
   customType: typeof WS_MAILBOX_CUSTOM_TYPE;
   content: string;
   display: true;
-  details: { from?: string; reply_to?: string; content: string; sent_at?: string };
+  details: MailboxEnvelope;
 }
 
 /**
@@ -127,10 +128,10 @@ export interface MailboxPushMessage {
  * reads only `content`, so it opens with a human `mail from <handle>` head and
  * the free-text body; `details` carries the same fields structurally. `handle`
  * is the sender's shared-layer slug (`from`) when present, otherwise the
- * reply-id handle (`reply_to`).
+ * reply-id handle (`reply_to`), then a display-only system label (`label`).
  */
 export function buildMailboxPushMessage(envelope: MailboxEnvelope): MailboxPushMessage {
-  const handle = envelope.from?.trim() || envelope.reply_to?.trim() || "unknown";
+  const handle = envelope.from?.trim() || envelope.reply_to?.trim() || envelope.label?.trim() || "unknown";
   const stamp = envelope.sent_at?.trim();
   const head = stamp ? `mail from ${handle} (${stamp})` : `mail from ${handle}`;
   return {
@@ -140,6 +141,7 @@ export function buildMailboxPushMessage(envelope: MailboxEnvelope): MailboxPushM
     details: {
       ...(envelope.from ? { from: envelope.from } : {}),
       ...(envelope.reply_to ? { reply_to: envelope.reply_to } : {}),
+      ...(envelope.label ? { label: envelope.label } : {}),
       content: envelope.content,
       ...(stamp ? { sent_at: stamp } : {}),
     },

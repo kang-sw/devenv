@@ -79,9 +79,11 @@ type Presence struct {
 // Envelope is one queued message. Exactly one of From/ReplyTo is set on
 // delivery (Decision 12): From when the recipient shares a layer where the
 // sender published a slug, ReplyTo (an "id:<reply-id>" handle) otherwise.
+// System messages set neither; Label is display-only, never a reply address.
 type Envelope struct {
 	From    string `json:"from,omitempty"`
 	ReplyTo string `json:"reply_to,omitempty"`
+	Label   string `json:"label,omitempty"`
 	Content string `json:"content"`
 	SentAt  string `json:"sent_at"`
 }

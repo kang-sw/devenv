@@ -51,6 +51,53 @@ func TestFormatMailBatchMatchesTheClaudeAdapterPrompt(t *testing.T) {
 	}
 }
 
+func TestPiMailLabelRoundTripsWithoutRecordingAContact(t *testing.T) {
+	setupMailboxTestEnv(t)
+	root := t.TempDir()
+	initGit(t, root)
+	s := NewServer(root, "test")
+	defer s.Close()
+	key := mailboxLogin(t, s, 1, root)
+	m := wsmailbox.Envelope{Label: "pi:childone", Content: "Reply with pi.send(id: childone), not mailbox.send.\nall green", SentAt: "2026-01-02T03:04:05Z"}
+	// Same literal as the Pi adapter and Claude watcher suites.
+	want := "mail from pi:childone (2026-01-02T03:04:05Z):\nReply with pi.send(id: childone), not mailbox.send.\nall green"
+	if got := formatMailEnvelope(m); got != want {
+		t.Fatalf("push text = %q, want %q", got, want)
+	}
+	parsed := parseMailText(want)
+	if parsed != m {
+		t.Fatalf("returned label mail = %+v, want %+v", parsed, m)
+	}
+	path, err := s.mailboxPaths().ReplyRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wsmailbox.WithReplyLock(path, func(store *wsmailbox.ReplyStore) error {
+		store.Queues = wsmailbox.AppendQueue(store.Queues, wsmailbox.ReplyID(key), parsed)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := callToolWithKey(t, s, 2, key, "mailbox.recv", nil)
+	if !strings.Contains(out, "pi:childone: Reply with pi.send") {
+		t.Fatalf("recv label = %q", out)
+	}
+	if entry, _ := replyEntryFor(t, key); len(entry.Contacts) != 0 {
+		t.Fatalf("returned label mail recorded contacts: %+v", entry.Contacts)
+	}
+	for _, peer := range []wsmailbox.Envelope{
+		{From: "peer@repo", Label: m.Label},
+		{ReplyTo: "id:abc123", Label: m.Label},
+	} {
+		if strings.Contains(formatMailEnvelope(peer), m.Label) || mailboxSender(peer) == m.Label {
+			t.Fatalf("label overrides a reply address: %+v", peer)
+		}
+	}
+	if mailboxSender(wsmailbox.Envelope{}) != "system" {
+		t.Fatal("old senderless envelopes must still read as system")
+	}
+}
+
 // TestLeadMailboxDeliversClaimedMailOnce: mail sent to a hosted lead's key
 // is signalled to its watch, claimed once with the text the session reads,
 // and gone for every later reader; the claim shows in the session's mail

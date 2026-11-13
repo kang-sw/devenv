@@ -149,6 +149,7 @@ export type DrainMode = 'direct' | 'notice'
 export interface MailboxEnvelope {
   from?: string
   reply_to?: string
+  label?: string
   content: string
   sent_at?: string
 }
@@ -277,6 +278,7 @@ export function mapWaitExit(code: number | null, aborted: boolean): WaitOutcome 
 
 function isEnvelope(c: unknown): c is MailboxEnvelope {
   return !!c && typeof c === 'object' && typeof (c as { content?: unknown }).content === 'string'
+    && ((c as { label?: unknown }).label === undefined || typeof (c as { label?: unknown }).label === 'string')
 }
 
 /**
@@ -303,7 +305,7 @@ const field = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
 /** One envelope as the pi adapter frames it: `mail from <handle> (<sent_at>):` then the body. */
 export function formatEnvelope(m: DrainedMail): string {
   if (!('content' in m)) return `unparsed mailbox recv output:\n${m.raw}`
-  const handle = field(m.from) || field(m.reply_to) || 'unknown'
+  const handle = field(m.from) || field(m.reply_to) || field(m.label) || 'unknown'
   const stamp = field(m.sent_at)
   return `${stamp ? `mail from ${handle} (${stamp})` : `mail from ${handle}`}:\n${m.content}`
 }
@@ -324,7 +326,7 @@ export function formatNotice(label: string, recvTool: string, key: string): stri
 /** A drained item as a caption unit reads it: its sender's handle (as formatEnvelope names it) and its body. */
 export function mailItems(mail: readonly DrainedMail[]): MailItem[] {
   return mail.map((m) =>
-    'content' in m ? { from: field(m.from) || field(m.reply_to) || 'unknown', body: m.content } : { from: 'unparsed recv output', body: m.raw },
+    'content' in m ? { from: field(m.from) || field(m.reply_to) || field(m.label) || 'unknown', body: m.content } : { from: 'unparsed recv output', body: m.raw },
   )
 }
 

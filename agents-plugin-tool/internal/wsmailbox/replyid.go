@@ -150,15 +150,16 @@ func emptyReplyStore() ReplyStore {
 // PostSystem appends a system message to reply-id replyID's queue in the
 // reply registry at path: one the ws runtime itself sends (a spawned
 // agent's turn report), from no session, so it carries neither From nor
-// ReplyTo and has no address to answer. Every mailbox send but this one
+// ReplyTo and has no address to answer. label is display-only (empty is valid).
+// Every mailbox send but this one
 // goes through the mailbox.send tool, whose From stamp needs the sender's
 // own identity. The caller wakes the waits.
-func PostSystem(path, replyID, content string, sentAt time.Time) error {
+func PostSystem(path, replyID, label, content string, sentAt time.Time) error {
 	if replyID == "" {
 		return fmt.Errorf("post system message: empty reply-id")
 	}
 	return WithReplyLock(path, func(store *ReplyStore) error {
-		store.Queues = AppendQueue(store.Queues, replyID, Envelope{Content: content, SentAt: sentAt.UTC().Format(time.RFC3339)})
+		store.Queues = AppendQueue(store.Queues, replyID, Envelope{Label: label, Content: content, SentAt: sentAt.UTC().Format(time.RFC3339)})
 		return nil
 	})
 }

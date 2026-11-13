@@ -277,15 +277,17 @@ func TestReloginToAHostedSessionWithNoProcessTakesItsRow(t *testing.T) {
 
 func TestParseMailTextReadsBackWhatTheBatchFormatWrote(t *testing.T) {
 	mail := []wsmailbox.Envelope{
-		{From: "peer@repo", Content: "first: line\n\nmail from nobody (never):\nstill the body", SentAt: "2026-01-02T03:04:05Z"},
-		{ReplyTo: wsmailbox.ReplyIDPrefix + "abc123", Content: "second", SentAt: "2026-01-02T03:04:06Z"},
+		{From: "peer@clone", Content: "first: line\n\nmail from nobody (never):\nstill the body", SentAt: "2026-01-02T03:04:05Z"},
+		{ReplyTo: wsmailbox.ReplyIDPrefix + "abcdef", Content: "second", SentAt: "2026-01-02T03:04:06Z"},
 		{Content: "third, from no one", SentAt: "2026-01-02T03:04:07Z"},
+		{Label: "pi:childone", Content: "Reply with pi.send(id: childone), not mailbox.send.\nall green", SentAt: "2026-01-02T03:04:08Z"},
 	}
 	texts := formatMailBatch(leadMailLabel, leadMailRecvTool, "some-key", mail)
 	want := []wsmailbox.Envelope{
 		mail[0],
 		{From: mail[1].ReplyTo, Content: "second", SentAt: mail[1].SentAt},
 		mail[2],
+		mail[3],
 	}
 	for i, text := range texts {
 		if got := parseMailText(text); got != want[i] {
