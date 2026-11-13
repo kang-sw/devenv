@@ -6358,7 +6358,7 @@
             else if (h.harness) name += " (" + h.harness + ")";
             li.appendChild(mk("span", "nm", name));
             var state = h.live ? "js.rail.wt.del.live" : h.kind === "terminal" ? "js.rail.wt.del.exited" : "js.rail.wt.del.ended";
-            li.appendChild(mk("span", "st", wsT(state)));
+            li.appendChild(mk("span", "rdst", wsT(state)));
           });
         }
       }
