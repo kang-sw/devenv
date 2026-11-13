@@ -39,6 +39,10 @@ this file. The Worker Protocol appended below governs; read it first.
 - A behavior change with no test change is a review finding. Tests are the
   behavioral contract; there is no separate behavior document to keep in sync.
 - Claim "pass" only after reading the full output of the command you ran.
+- When the ticket links an approved visual reference, capture the result and
+  compare it side by side against the reference before closing the phase: fix a
+  mismatch, or list it under `unresolved:`, and list both paths under
+  `verification:`. A ticket that links none has no such step.
 - Diagnose blame before fixing a failing test (implementation, test, or
   environment); never patch a test to match a broken implementation. A
   second failure with the same root cause as an earlier one in this run is

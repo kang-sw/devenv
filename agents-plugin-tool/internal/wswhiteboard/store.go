@@ -24,8 +24,8 @@ import (
 )
 
 // Item classes, the workflow manual's asking classes. A check is a gate, not
-// a decision: a request that the user look at, verify, or approve something.
-// The page lists a topic's checks under its recap, each answered on its own
+// a decision: a request that the user look at, verify, or confirm a finished
+// artifact. The page lists a topic's checks under its recap, each answered on its own
 // (ok, no, or a note), and counts an open one with the open policy items.
 const (
 	ClassPolicy    = "policy"

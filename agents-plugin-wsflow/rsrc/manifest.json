@@ -30,7 +30,7 @@
     "lead-use-mailbox/arm-the-wait.pi.md": "fce77e67ab83ae06a1698df262c7f51f7f20ef662b64a90e5e1bdbe08807480a",
     "lead-use-mailbox/lead-use-mailbox.md": "f8ce356a3f8173520a6866b2d85fd2a1dcda418040447838a78e8071b22450a6",
     "lead-workflow-manual/command-syntax.md": "e921542693430ba83f5fa21adf14afe13f2e87e318bfa2b2a89a14708fda0d6d",
-    "lead-workflow-manual/lead-workflow-manual.md": "5ebfbeaa82bacf3290926a9e9f840437af4dc66f2c9ad6aec1b09923b533e56c",
+    "lead-workflow-manual/lead-workflow-manual.md": "511fa633cf58237a30342e04a2836e1919215bafe1e98e1bb2a31df0d3d58f85",
     "lead-workflow-manual/native-spawn-binding.claude.md": "fc7258226abd15ad2baef2ef8a361f6777d8390868a595853f61812def0cf310",
     "lead-workflow-manual/native-spawn-binding.codex.md": "ea1977984de016a95df292c3384e93982aa67b12bbd5e8850c7ed792acbdf284",
     "lead-workflow-manual/native-spawn-binding.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -46,10 +46,10 @@
     "ticket-reviewer-completeness/ticket-reviewer-completeness.md": "12efbce33b5311810a162974d99702252549639f1a064fd84331005328c60b37",
     "ticket-reviewer-design/ticket-reviewer-design.md": "c419116074ce2da1377918774fbf41f82228e4d8c392bb11f0351c63cb4705f6",
     "ticket-selector/ticket-selector.md": "e547c5031d733a6546a99fb139cd11d9db3e80744cdc39787be961187993d9fd",
-    "ticket-worker-elevated/ticket-worker-elevated.md": "066bbca91712d90f99a686b8f7f9ba7119203a04ee61df5a70efe1cd2f1a8866",
-    "ticket-worker/ticket-worker.md": "558322907db3f72affbcaf79668a37f4143ca4d71729c90f94f29a3f6b95fb9f",
+    "ticket-worker-elevated/ticket-worker-elevated.md": "c91803649fd4ba572368180b23f02dd55864e5e577d76f9072b90af889ee21bd",
+    "ticket-worker/ticket-worker.md": "5798751bf6711d36732e94ddab61c11bda11d060e1c6dd14b5c4d8f903d96ea2",
     "tracker/tracker.md": "054d2d2ba9a72a66fc9c2ab79ed22b3c614f3b0249259e2c927aef8f50c807e7",
-    "whiteboard/whiteboard.md": "de7226f4be6cb27061e9a53bf6f18cc65460f6c97c963ad72ab2a4bdd13521c3",
+    "whiteboard/whiteboard.md": "715218015ae4f1b4e0acdfc41a548c490b947895059aa96dbb2fe035c9f0d357",
     "worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3"
   }
 }
