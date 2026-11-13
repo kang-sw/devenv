@@ -19,7 +19,7 @@ func TestBoardClosingTopicFolds(t *testing.T) {
 	}
 	js := string(data)
 	var src string
-	for _, name := range []string{"openKey", "restoreOpenOne", "restoreOpen", "forgetOpen", "topicKey", "topicSeen", "morphBoard", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft"} {
+	for _, name := range []string{"openKey", "restoreOpenOne", "restoreOpen", "forgetOpen", "topicKey", "topicSeen", "morphBoard", "frameKeep", "frameKept", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft"} {
 		f := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(js)
 		if f == "" {
 			t.Fatalf("dashboard.js holds no %s", name)
@@ -49,7 +49,7 @@ function q(sel, el) { return Array.prototype.slice.call(el.querySelectorAll(sel)
 function frag(nodes) { return { childNodes: nodes }; }
 function isPeer() { return false; }
 var window = { WsCards: { weave: function (w) { return { pins: [], board: w }; }, settle: function (el, p) { el.children = p.board; }, pinList: function () { return null; } } };
-var openState = {}, boardSeen = {};
+var openState = {}, boardSeen = {}, doc = {};
 `+src+`
 // topic builds a topic section whose body and one settled row the server
 // renders folded; html stands for the section's markup version.

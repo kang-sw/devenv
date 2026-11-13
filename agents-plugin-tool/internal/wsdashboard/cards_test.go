@@ -553,7 +553,7 @@ func TestBoardPinnedClosedPagesCount(t *testing.T) {
 	}
 	js := string(data)
 	var src string
-	for _, name := range []string{"openKey", "restoreOpenOne", "restoreOpen", "forgetOpen", "topicKey", "topicSeen", "morphBoard", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft"} {
+	for _, name := range []string{"openKey", "restoreOpenOne", "restoreOpen", "forgetOpen", "topicKey", "topicSeen", "morphBoard", "frameKeep", "frameKept", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft"} {
 		f := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(js)
 		if f == "" {
 			t.Fatalf("dashboard.js holds no %s", name)

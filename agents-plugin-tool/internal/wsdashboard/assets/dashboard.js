@@ -727,7 +727,7 @@
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {
-    var src = frag(html), seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [];
+    var src = frag(html), seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [], changed = [];
     var pinBox = window.WsCards.pinList();
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n);
@@ -765,6 +765,7 @@
       else {
         var g = live[key] && frameGraftable(live[key], n);
         if (g) grafts.push(g);
+        if (live[key]) changed.push({ old: live[key], n: n, g: g });
         want.push(n); ins.push(n);
       }
     });
@@ -819,6 +820,10 @@
     // none of them, so a changed one whose old section stands there keeps
     // it.
     var plan = window.WsCards.weave(want), woven = plan.board;
+    // A changed topic's unchanged entry frames are kept, moved aside before
+    // the grafts and the settle would detach them (frameKeep), and moved
+    // into their placeholders' places once the board has settled (frameKept).
+    var reuse = frameKeep(changed);
     var pinGrafts = grafts.filter(function (g) { return plan.pins.indexOf(g.n) >= 0 && g.old.parentNode === pinBox; });
     frameGrafts(el, woven, grafts.filter(function (g) { return plan.pins.indexOf(g.n) < 0; })).concat(pinGrafts).forEach(function (g) {
       frameGraft(g);
@@ -827,7 +832,55 @@
       ins[ins.indexOf(g.n)] = g.old;
     });
     window.WsCards.settle(el, plan);
+    frameKept(reuse);
     return ins;
+  }
+  // --- keyed frame reuse: a changed topic keeps its unchanged entry frames --
+  // An entry frame (data-doc-key entry:eN) is immutable per entry, so inside
+  // a changed topic an incoming entry placeholder takes the old topic's
+  // mounted frame of the same data-doc-key and the same data-srcdoc (the
+  // same key need not mean the same document: image inlining and relay
+  // lists change it); each old frame pairs once, so duplicate keys pair off
+  // one by one. Only Element.moveBefore keeps a frame's document across a
+  // move, and only between connected nodes: frameKeep moves the paired old
+  // frames into a hidden holder on the page before anything detaches them,
+  // and frameKept moves each into its placeholder's place, the placeholder
+  // dropped, once the new section stands on the page. A placeholder that
+  // stays unpaired is mounted as usual (mountFrames). A frame a graft holds
+  // (frameGraft's chain) and the topic-body frame (topic:, a stable key over
+  // changing content) are never paired. Without moveBefore nothing is kept.
+  function frameKeep(changed) {
+    if (!changed.length || !doc.body || !doc.body.moveBefore) return null;
+    var pairs = [];
+    changed.forEach(function (c) {
+      var held = c.g ? c.g.oc[0] : null, olds = {};
+      q('iframe.doc-frame[data-doc-key^="entry:"]:not(.doc-frame-next)', c.old).forEach(function (f) {
+        if (f === held || !f.hasAttribute("data-srcdoc")) return;
+        var k = f.getAttribute("data-doc-key") + "\n" + f.getAttribute("data-srcdoc");
+        (olds[k] = olds[k] || []).push(f);
+      });
+      q('div.doc-frame[data-doc-key^="entry:"]', c.n).forEach(function (p) {
+        if (c.g && p === c.g.nc[0]) return;
+        var list = olds[p.getAttribute("data-doc-key") + "\n" + p.getAttribute("data-srcdoc")];
+        if (list && list.length) pairs.push({ f: list.shift(), p: p });
+      });
+    });
+    if (!pairs.length) return null;
+    var holder = doc.createElement("div");
+    holder.hidden = true;
+    doc.body.appendChild(holder);
+    pairs.forEach(function (x) { holder.moveBefore(x.f, null); });
+    return { holder: holder, pairs: pairs };
+  }
+  function frameKept(r) {
+    if (!r) return;
+    r.pairs.forEach(function (x) {
+      var at = x.p.parentNode;
+      if (!at || !x.p.isConnected) return;
+      at.moveBefore(x.f, x.p);
+      at.removeChild(x.p);
+    });
+    r.holder.parentNode.removeChild(r.holder);
   }
   // --- a changed topic's body frame, double-buffered --------------------------
   // A changed topic's new section would bring a new body frame, blank until

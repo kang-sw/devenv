@@ -8,7 +8,7 @@ import "testing"
 // data-th replaces it; a section without data-th compares its HTML as
 // before. The record is the incoming hash, never the live DOM.
 func TestBoardKeepsATopicByItsHash(t *testing.T) {
-	src := dashboardFuncs(t, "openKey", "restoreOpenOne", "restoreOpen", "forgetOpen", "topicKey", "topicSeen", "morphBoard", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft")
+	src := dashboardFuncs(t, "openKey", "restoreOpenOne", "restoreOpen", "forgetOpen", "topicKey", "topicSeen", "morphBoard", "frameKeep", "frameKept", "frameChain", "frameGraftable", "frameGrafts", "settleMoves", "frameGraft")
 	runNode(t, "board topic hash", `
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
@@ -24,7 +24,7 @@ function q(sel, el) { return Array.prototype.slice.call(el.querySelectorAll(sel)
 function frag(nodes) { return { childNodes: nodes }; }
 function isPeer() { return false; }
 var window = { WsCards: { weave: function (w) { return { pins: [], board: w }; }, settle: function (el, p) { el.children = p.board; }, pinList: function () { return null; } } };
-var openState = {}, boardSeen = {};
+var openState = {}, boardSeen = {}, doc = {};
 `+src+`
 function topic(name, th, html) { var a = { "data-topic": name }; if (th) a["data-th"] = th; return new El("SECTION", ["topic"], a, html); }
 var board = new El("DIV"), a = topic("A", "h1", "A served"), b = topic("B", null, "B1");
