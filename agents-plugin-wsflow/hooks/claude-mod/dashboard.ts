@@ -1491,7 +1491,7 @@ export function createDashboard(edges: DashboardEdges): Dashboard {
         return
       }
       turnOpen = false
-      settleBefore({ kind: 'turn_end', at: now })
+      settleBefore({ kind: 'turn_end', at: now, ...(reason ? { reason } : {}) })
     }),
     stepBegan: guard('step start', (agentId: string | undefined, step: string, request?: Parameters<Dashboard['stepBegan']>[2]) => {
       const id = idOf(agentId)
