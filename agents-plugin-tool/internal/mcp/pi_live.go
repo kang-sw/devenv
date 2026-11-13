@@ -9,10 +9,10 @@ import (
 // panel of the lead's own live state: a row per child, marked with
 // AgentKindPi and linked to the child's conversation page. The server
 // subscribes to the daemon runner's spawned conversations and applies each
-// change of a child whose parent is one of its live sessions; a live
-// session it creates, and one an adapter reset, gets its open children's
-// rows from the runner, so the rows come back after a reconnect. A session
-// whose dashboard feed is off has no live session here, so no row.
+// change of a descendant owned by one of its live sessions; a live session
+// it creates, and one an adapter reset, gets its open spawn tree from the
+// runner, so the rows come back after a reconnect. Hosted leads use their
+// runner-owned writer instead; their intake remains disabled.
 
 // startPiFeed subscribes the server to the runner's spawned conversations;
 // Server.Close ends it.
@@ -23,13 +23,14 @@ func (s *Server) startPiFeed() {
 	s.pi.stopWatch = s.pi.agents.Watch(s.piChanged)
 }
 
-// piChanged applies one child's change to its parent's live sessions in
-// this server. It runs on the child's conversation loop.
+// piChanged applies one descendant's change to its owning lead's live sessions
+// in this server. It runs on the child's conversation loop.
 func (s *Server) piChanged(st wsagent.State) {
-	if st.Parent == nil || st.Parent.Kind != wsagent.ParentLead {
+	lead := wsagent.SpawnLead(st, s.pi.agents.Get)
+	if lead == "" {
 		return
 	}
-	sessions := s.live.byReplyID(st.Parent.ReplyID)
+	sessions := s.live.byReplyID(lead)
 	if len(sessions) == 0 {
 		return
 	}
@@ -39,13 +40,13 @@ func (s *Server) piChanged(st wsagent.State) {
 	}
 }
 
-// piSeed gives a live session the rows of its open Pi children.
+// piSeed gives a live session the rows of its open Pi spawn tree.
 func (s *Server) piSeed(ls *liveSession) {
 	if s.pi.agents == nil {
 		return
 	}
 	var rows []wslive.Event
-	for _, st := range s.pi.agents.Children(wsagent.ParentRef{Kind: wsagent.ParentLead, ReplyID: ls.replyID}) {
+	for _, st := range wsagent.SpawnTree(wsagent.ParentRef{Kind: wsagent.ParentLead, ReplyID: ls.replyID}, s.pi.agents.Children) {
 		if st.Status != wsagent.StatusClosed {
 			rows = append(rows, s.piRow(st))
 		}
@@ -55,33 +56,10 @@ func (s *Server) piSeed(ls *liveSession) {
 	}
 }
 
-// piAgentPrefix keeps a child's row id apart from the host's own agent ids.
-const piAgentPrefix = "pi:"
-
 // piRow is a child's agent event: running while a turn runs or a message
 // waits for one, failed after a failure, else done (a closed child too).
 func (s *Server) piRow(st wsagent.State) wslive.Event {
-	status := wslive.StatusDone
-	switch {
-	case st.Status == wsagent.StatusRunning || (st.Status != wsagent.StatusClosed && st.Held > 0):
-		status = wslive.StatusRunning
-	case st.Error != "":
-		status = wslive.StatusFailed
-	}
-	label := st.Label
-	if label == "" {
-		label = "Pi subagent " + st.ID
-	}
-	return wslive.Event{
-		Kind:       wslive.KindAgent,
-		AgentID:    piAgentPrefix + st.ID,
-		AgentKind:  wslive.AgentKindPi,
-		Label:      label,
-		Status:     status,
-		Model:      st.Model,
-		Effort:     st.Effort,
-		SessionKey: s.piChildKey(st.ID),
-	}
+	return wsagent.SpawnAgentEvent(st, s.piChildKey(st.ID))
 }
 
 // piChildKey is a child's ws session key, which labels its row with the

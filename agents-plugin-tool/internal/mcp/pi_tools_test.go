@@ -513,6 +513,18 @@ func TestPiRowsFeedTheParentsLiveStateAndReplay(t *testing.T) {
 	if rows := liveAgents(t, s, f.keyA); len(rows) != 1 {
 		t.Fatalf("another lead's child is not this lead's row: %+v", rows)
 	}
+	nested := wsagent.ParentRef{Kind: wsagent.ParentConversation, ReplyID: child.ID}
+	grandchild, _ := agents.Spawn(wsagent.SpawnSpec{Root: f.root, Cwd: f.root, Label: "grandchild", Parent: &nested})
+	if row := liveAgents(t, s, f.keyA)["pi:"+grandchild.ID]; row.ParentID != "pi:"+child.ID || row.Status != wslive.StatusRunning {
+		t.Fatalf("the grandchild nests under its spawner: %+v", row)
+	}
+	if rows := liveAgents(t, s, f.keyB); len(rows) != 1 {
+		t.Fatalf("another lead cannot see the descendant: %+v", rows)
+	}
+	agents.set(grandchild.ID, func(st *wsagent.State) { st.Status = wsagent.StatusIdle })
+	if row := liveAgents(t, s, f.keyA)["pi:"+grandchild.ID]; row.Status != wslive.StatusDone {
+		t.Fatalf("a grandchild settles its row: %+v", row)
+	}
 	agents.set(child.ID, func(st *wsagent.State) { st.Status = wsagent.StatusIdle })
 	if row := liveAgents(t, s, f.keyA)["pi:"+child.ID]; row.Status != wslive.StatusDone {
 		t.Fatalf("a settled turn ends the row: %+v", row)
@@ -537,11 +549,12 @@ func TestPiRowsFeedTheParentsLiveStateAndReplay(t *testing.T) {
 	// An adapter reset clears the tree; the runner's rows come back.
 	intake(t, s2, f.keyA, map[string]any{"kind": "reset"}, map[string]any{"kind": "agent", "agentId": "native"})
 	rows := liveAgents(t, s2, f.keyA)
-	if rows["pi:"+child.ID].AgentKind != wslive.AgentKindPi || rows["native"].ID == "" {
+	if rows["pi:"+child.ID].AgentKind != wslive.AgentKindPi || rows["native"].ID == "" || rows["pi:"+grandchild.ID].ParentID != "pi:"+child.ID || rows["pi:"+grandchild.ID].Status != wslive.StatusDone {
 		t.Fatalf("after a reset the pi row is back beside the adapter's: %+v", rows)
 	}
 
-	// A closed child is not seeded into a new state.
+	// Closing settles displayed rows; a new state seeds no closed tree.
+	agents.set(grandchild.ID, func(st *wsagent.State) { st.Status = wsagent.StatusClosed })
 	agents.set(child.ID, func(st *wsagent.State) { st.Status = wsagent.StatusClosed })
 	s2.Close()
 	s3 := NewServerWithOptions(ServerOptions{Root: f.root, Version: "test", Agents: agents})

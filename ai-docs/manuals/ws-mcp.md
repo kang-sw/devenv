@@ -605,13 +605,18 @@ when `dashboard.pi_spawn_enabled` is on (ws on, wsflow and Pi off; read
 once per server, so a change applies at the next reconnect), the server is
 hosted by the daemon (`ServerOptions.Agents` is the daemon's runner; a
 direct-path ws-mcp has none and a call is refused naming the daemon), and
-`pi --version`, probed once per process, is 1.0 or later. Each hosted
-server watches the runner and feeds a child's row (`pi:<id>`, `agentKind:
-"pi"`, linked to the child's page) into its parent's live state; a live
-session the server creates, or one an adapter resets, gets its open
-children's rows again, so they come back after a reconnect. A session whose
-dashboard feed is off gets no row. The agents panel shows a running Pi row
-with a blinking `pi` badge in place of the pulse.
+`pi --version`, probed once per process, is 1.0 or later. Each intake-fed
+server watches the runner and feeds the owning lead's recursive spawn tree
+(`pi:<id>`, `agentKind: "pi"`, linked to the child's page) into its live state;
+a live session the server creates, or one an adapter resets, gets its open
+descendants' rows again, so they come back after a reconnect. A dashboard-hosted
+lead instead gets those rows from its runner-owned snapshot writer, including
+after daemon replacement; hosted intake remains off. Descendants nest under
+their spawner through ordinary `parentId` links. When a harness also reports the
+same conversation (its reply-id or native conversation id), the snapshot keeps
+one daemon-owned lifecycle row with the harness's activity and telemetry. An
+intake-only session whose dashboard feed is off gets no row. The agents panel
+shows a running Pi row with a blinking `pi` badge in place of the pulse.
 
 A spawned Pi worker spawns Pi subagents of its own through the daemon
 (`internal/wsagent/children.go`, `internal/mcp/pi_forward.go`); the daemon

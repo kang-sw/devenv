@@ -332,6 +332,8 @@ type liveWriter struct {
 	st  *wslive.State
 	now func() time.Time
 	log io.Writer
+	// beforeSnapshot refreshes daemon-owned rows in this writer's loop.
+	beforeSnapshot func()
 }
 
 // newLiveWriter starts from the finished subagents of the snapshot an
@@ -419,7 +421,7 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 // is gone, so no end will come for them.
 func (w *liveWriter) endAgents() {
 	for _, a := range w.st.Snapshot(w.now().UnixMilli()).Agents {
-		if a.Status == wslive.StatusRunning {
+		if a.Status == wslive.StatusRunning && a.AgentKind != wslive.AgentKindPi {
 			w.apply(wslive.Event{Kind: wslive.KindAgent, AgentID: a.ID, Status: wslive.StatusFailed})
 		}
 	}
@@ -433,6 +435,9 @@ func (w *liveWriter) setAdapter(name string) {
 }
 
 func (w *liveWriter) writeSnapshot() {
+	if w.beforeSnapshot != nil {
+		w.beforeSnapshot()
+	}
 	raw, err := json.Marshal(w.st.Snapshot(w.now().UnixMilli()))
 	if err == nil {
 		err = writeFileAtomic(wslive.SnapshotPath(w.dir), raw, 0o644)
