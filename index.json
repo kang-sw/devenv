@@ -557,7 +557,14 @@
       "registered_at": "2026-11-13T15:39:27Z"
     },
     "261114-feat-ws-dashboard-unified-search-palette": {
-      "registered_at": "2026-11-13T15:14:01Z"
+      "registered_at": "2026-11-13T15:14:01Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T15:48:15Z"
+      }
     },
     "261114-refactor-ws-split-oversized-source-files": {
       "registered_at": "2026-11-13T15:16:33Z"
