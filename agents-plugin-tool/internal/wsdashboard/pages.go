@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/webframe.js assets/webinject.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -1041,6 +1041,9 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	} else if sub == "label" {
 		d.handleSessionLabel(w, r, replyID)
 		return
+	} else if sub == "web" || strings.HasPrefix(sub, "web/") {
+		d.handleWeb(w, r, replyID, strings.TrimPrefix(sub, "web"))
+		return
 	}
 	if !readMethod(w, r) {
 		return
@@ -1277,7 +1280,10 @@ const sessionPageCSP = "frame-src 'self'; " + frameAncestorsNone
 
 // writeHTML writes a daemon HTML page. A caller that sets its own
 // Content-Security-Policy includes frameAncestorsNone in it; without one the
-// page gets frameAncestorsNone alone.
+// page gets frameAncestorsNone alone. The one daemon page that does not go
+// through it is the web card's wrapper frame (writeWebFrame,
+// webcard_routes.go), which the session page frames: it sends
+// frame-ancestors 'self' and X-Frame-Options SAMEORIGIN instead.
 func writeHTML(w http.ResponseWriter, html string) { writeHTMLStatus(w, http.StatusOK, html) }
 
 // writeHTMLStatus is writeHTML with the status the page answers.
