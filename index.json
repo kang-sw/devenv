@@ -458,6 +458,9 @@
     "261113-bug-ws-hosted-session-exit-cause-lost-with-holder-dir": {
       "registered_at": "2026-11-13T03:48:53Z"
     },
+    "261113-bug-ws-hosted-sessions-show-no-pi-or-batch-token-usage": {
+      "registered_at": "2026-11-13T05:07:03Z"
+    },
     "261113-bug-ws-launcher-falls-to-direct-path-during-daemon-replacement": {
       "registered_at": "2026-11-13T04:57:48Z"
     },
