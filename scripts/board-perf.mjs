@@ -431,8 +431,11 @@ async function shot(args) {
       await page.waitForTimeout(1500);
       await quiet(page, cdp);
       const col = await sess(page).$("#bcol");
-      const stops = await sess(page).evaluate(() => { const c = document.getElementById("bcol"); c.scrollTop = 0; return Math.ceil(c.scrollHeight / c.clientHeight); });
-      for (let i = 0; i < stops; i++) {
+      // The stop count is read again at every stop: frames far from the view
+      // stay placeholders (viewport bands), so the column grows as frames
+      // mount on the way down.
+      await sess(page).evaluate(() => { document.getElementById("bcol").scrollTop = 0; });
+      for (let i = 0; await sess(page).evaluate((i) => { const c = document.getElementById("bcol"); return i < Math.ceil(c.scrollHeight / c.clientHeight); }, i); i++) {
         await sess(page).evaluate((i) => { const c = document.getElementById("bcol"); c.scrollTop = i * c.clientHeight; }, i);
         await page.waitForTimeout(700);
         await col.screenshot({ path: path.join(out, `${scheme}-${String(i).padStart(2, "0")}.png`), animations: "disabled", caret: "hide" });
