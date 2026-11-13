@@ -1,5 +1,6 @@
 ---
 title: "Hosted sessions show no token usage on Pi rows or tool-batch lines"
+completed: 2026-11-13
 ---
 
 # Hosted sessions show no token usage on Pi rows or tool-batch lines
@@ -64,9 +65,44 @@ hosted batches. Use Pi message usage too if directly available. Leave the
 composer context bar outside this change. Verify mapper counts, throttling,
 row projection/recovery, and existing token-chip rendering with remote Go tests.
 
-## Open
+### Result (d567abd01) - 2026-11-13
 
-- Whether the owner also saw the composer context bar missing (the screenshot
-  crop excluded it); if so, check the SSE live-update path for the `ctx`
-  region, which the investigation did not verify.
-- Cost of mid-turn `get_session_stats` calls on a busy Pi.
+- Pi child status usage now feeds optional `State.ContextTokens` and
+  `State.OutputTps` through `SpawnAgentEvent` into the hosted lead's row.
+  Context survives daemon recovery and closure; an explicitly unknown context
+  clears the previous figure, and settled rows omit the streaming rate.
+  Activity-only native aliases no longer erase the child's own telemetry.
+- Assistant `message_end` and `turn_end` request Pi stats while work continues,
+  with mid-turn requests coalesced to one per second. `agent_settled` keeps its
+  unconditional final refresh. Rate estimates use the child's output tokens
+  over its received streaming span, excluding request/tool latency; absent or
+  burst-flushed streams do not fabricate a rate.
+- Hosted batches carry optional `Usage`, populated from both Claude and Pi
+  assistant messages. Claude split-line updates replace rather than accumulate
+  the same message's usage. Finished batches reach the existing ring summaries
+  and token-chip renderer without a presentation change. Pi usage was directly
+  available, so no Pi batch-source follow-up was necessary.
+- Verification on remote w5090: `go test ./internal/wsagent/...
+  ./internal/wslive/... ./internal/wsdashboard/...` passed twice (final wsagent
+  19.947s; the other final results cached). Final `go test ./...` passed every
+  package except the owner-excluded
+  `cmd/ws-mcp.TestHostedConnectionSeeingALANChangeReplacesTheDaemon`
+  predecessor-exit timeout. `internal/wsholder` passed (15.165s); no known
+  holder-shutdown failures occurred. No excluded failure was investigated.
+- Regression coverage exercises both mappers through wire decoding and finished
+  ring usage, split-message replacement, missing usage, throttled running stats,
+  own-child rates, native aliases, unknown context, and running/closed recovery.
+- One self-review pass completed. Fixed explicit unknown-context projection and
+  removed unrelated formatting churn. `git diff --check` passed.
+- Forward: Hosted Pi's rate is an approximate first-update-to-message-end
+  figure. Align it with native Pi's visible-block/reasoning-excluded estimator
+  if exact cross-surface rate parity is needed.
+- Forward: The possible composer context-bar / `ctx` SSE gap remains unverified
+  and outside this ticket; the reported screenshot did not include that region.
+
+## Resolution
+
+Implemented both Idea parts on `impl/develop/hosted-token-usage`, including the
+owner's mid-turn stats decision. Closed using the `git mv` fallback because
+`ws tickets.close` is unavailable in this worker's tool set. All additions are
+optional (T0); no protocol or schema version changed.
