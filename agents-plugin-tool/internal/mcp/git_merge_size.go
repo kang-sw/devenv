@@ -136,7 +136,7 @@ func mergeSizeWarnings(ctx context.Context, root string, runner wsgit.Runner, gu
 		return failed("merge-base", err)
 	}
 	base = strings.TrimSpace(base)
-	diff, err := run(top, "-c", "core.quotePath=false", "diff", "--name-status", "-z", "--find-renames", "--diff-filter=AMR", base, sourceOID)
+	diff, err := run(top, "diff", "--name-status", "-z", "--find-renames", "--diff-filter=AMR", base, sourceOID)
 	if err != nil {
 		return failed("diff", err)
 	}
@@ -158,7 +158,9 @@ func mergeSizeWarnings(ctx context.Context, root string, runner wsgit.Runner, gu
 			}
 			oldPath, newPath := fields[i+1], fields[i+2]
 			i += 3
-			if guard.covers(newPath) {
+			// R100 is a move with no content change: not an edit, so neither
+			// rule applies (the soft rule could not fire on equal counts).
+			if status != "R100" && guard.covers(newPath) {
 				edited[newPath] = oldPath
 				order = append(order, newPath)
 			}

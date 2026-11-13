@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -219,6 +220,47 @@ func TestMergeSizeWarningScope(t *testing.T) {
 		d, ok := got["dir name/odd[1].go"]
 		if !ok || !strings.Contains(d.Resolution, `"/dir name/odd\\[1].go" ws-size-guard=100`) {
 			t.Fatalf("got %+v", got)
+		}
+	})
+}
+
+func TestMergeSizeWarningEdgeCases(t *testing.T) {
+	t.Run("pure-rename-silent", func(t *testing.T) {
+		root, unit := sizeFixture(t, "", map[string]int{"big.go": 25}, map[string]int{"other.txt": 1})
+		runGit(t, root, "mv", "big.go", "moved.go")
+		runGit(t, root, "commit", "-m", "move only")
+		if got := sizeDiagnostics(mergeWithGuard(t, root, unit, newMergeSizeGuard(10, 20, "go"))); len(got) != 0 {
+			t.Fatalf("a move with no content change warned: %+v", got)
+		}
+	})
+	t.Run("boundaries-and-attribute-values", func(t *testing.T) {
+		attributes := "above.go ws-size-guard\ngen.go ws-size-guard=abc\n"
+		root, unit := sizeFixture(t, attributes,
+			map[string]int{"cross.go": 5, "big.go": 5, "above.go": 5, "gen.go": 5},
+			map[string]int{"cross.go": 10, "big.go": 20, "above.go": 11, "gen.go": 50})
+		got := sizeDiagnostics(mergeWithGuard(t, root, unit, newMergeSizeGuard(10, 20, "go")))
+		// cross.go at exactly N stays silent; big.go at exactly M is hard; a
+		// bare ws-size-guard applies the configured limits; a malformed
+		// ws-size-guard value skips the path.
+		if len(got) != 2 || got["big.go"].Code != "size_hard_limit" || got["above.go"].Code != "size_soft_limit" {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("check-failure-keeps-merged", func(t *testing.T) {
+		root, unit := sizeFixture(t, "", map[string]int{"cross.go": 5}, map[string]int{"cross.go": 15})
+		runner := mergeInterceptRunner{intercept: func(_ context.Context, _ string, args []string) ([]byte, error, bool) {
+			if len(args) > 0 && args[0] == "--literal-pathspecs" {
+				return nil, errors.New("injected grep failure"), true
+			}
+			return nil, nil, false
+		}}
+		r, err := mergeImplBranch(context.Background(), root, runner, unit, "", mergeMessage(), implMergeAcknowledgement{}, nil, newMergeSizeGuard(10, 20, "go"))
+		if err != nil || r.Status != "merged" || !r.BranchDeleted {
+			t.Fatalf("result=%+v err=%v", r, err)
+		}
+		d := requireMergeDiagnostic(t, r, "size_check_failed", "advisory")
+		if !strings.Contains(d.Reason, "injected grep failure") || len(r.Diagnostics) != 1 {
+			t.Fatalf("diagnostics = %+v", r.Diagnostics)
 		}
 	})
 }
