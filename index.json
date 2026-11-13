@@ -389,7 +389,14 @@
       "registered_at": "2026-11-13T04:57:48Z"
     },
     "261113-bug-ws-only-the-dashboard-daemon-runs-an-exe": {
-      "registered_at": "2026-11-13T02:44:42Z"
+      "registered_at": "2026-11-13T02:44:42Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T15:13:38Z"
+      }
     },
     "261113-bug-ws-pi-explore-local-query-fails-on-web-search-provider": {
       "registered_at": "2026-11-13T10:25:03Z"
@@ -483,19 +490,6 @@
     "261113-feat-ws-dashboard-session-rail-tree": {
       "registered_at": "2026-11-13T14:37:02Z"
     },
-    "261113-feat-ws-dashboard-worktree-delete": {
-      "registered_at": "2026-11-13T07:16:15Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T14:23:48Z",
-        "impl": {
-          "branch": "impl/develop/goal-nail-bash"
-        }
-      }
-    },
     "261113-feat-ws-pi-worker-marker-env-guard": {
       "registered_at": "2026-11-13T01:46:15Z"
     },
@@ -546,19 +540,6 @@
     },
     "261113-feat-ws-whiteboard-update-refusal-cost": {
       "registered_at": "2026-11-13T04:24:45Z"
-    },
-    "261113-fix-ws-playbook-spawn-idiom-and-delegate-resolve-agent": {
-      "registered_at": "2026-11-13T14:00:10Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T14:23:42Z",
-        "impl": {
-          "branch": "impl/develop/oat-storm-twine"
-        }
-      }
     },
     "261113-refactor-ws-dashboard-drop-lan-serving": {
       "registered_at": "2026-11-13T14:07:27Z"
