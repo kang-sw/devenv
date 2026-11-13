@@ -697,10 +697,11 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
     def test_local_devenv_build_env_recovers_home_when_absent(self):
         launcher = load_launcher()
 
-        with mock.patch.object(launcher.Path, "home", return_value=Path("/home/recovered")):
+        recovered = Path("/home/recovered")
+        with mock.patch.object(launcher.Path, "home", return_value=recovered):
             with mock.patch.dict(launcher.os.environ, {}, clear=True):
                 env = launcher.local_devenv_build_env("linux")
-                self.assertEqual(env["HOME"], "/home/recovered")
+                self.assertEqual(env["HOME"], str(recovered))
                 # Non-Windows must not inject Windows cache vars.
                 self.assertNotIn("USERPROFILE", env)
                 self.assertNotIn("LOCALAPPDATA", env)

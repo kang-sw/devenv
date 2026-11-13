@@ -91,6 +91,41 @@ func hostedCLIResultWithHost(t *testing.T, host *proxyHost, hello wsdashboard.Pr
 	return "", "", -1
 }
 
+// configStorePath decodes `config list --format json` rather than matching
+// raw text: JSON escapes Windows path separators.
+func configStorePath(out string) string {
+	var payload struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal([]byte(out), &payload) != nil {
+		return ""
+	}
+	return payload.Path
+}
+
+// pathWithin compares symlink-resolved paths: the store may report either form
+// (macOS /var -> /private/var), and the store file need not exist yet.
+func pathWithin(path, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	resolve := func(p string) string {
+		// Resolve the longest existing prefix and re-append the rest.
+		for dir, rest := filepath.Clean(p), ""; ; {
+			if r, err := filepath.EvalSymlinks(dir); err == nil {
+				return filepath.Join(r, rest)
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				return p
+			}
+			dir, rest = parent, filepath.Join(filepath.Base(dir), rest)
+		}
+	}
+	rel, err := filepath.Rel(resolve(root), resolve(path))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func TestHostedCLIExistingShapesAndOldHello(t *testing.T) {
 	hello := cliHello(t) // No stdin or project_root: an older hello still works.
 	for _, tc := range []struct {
@@ -141,7 +176,7 @@ func TestHostedCLIConcurrentCallerIsolation(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			out, stderr, code := hostedCLIResult(t, hello, "config", "list", "--format", "json")
-			if code != 0 || !strings.Contains(out, hello.Env["WS_CACHE_HOME"]) {
+			if code != 0 || !pathWithin(configStorePath(out), hello.Env["WS_CACHE_HOME"]) {
 				t.Errorf("wrong config store: %s %s (%d)", out, stderr, code)
 			}
 			out, stderr, code = hostedCLIResult(t, hello, "tools")
@@ -180,7 +215,7 @@ func TestHostedCLIOmittedHomeOverridesDoNotInheritDaemon(t *testing.T) {
 	t.Setenv("WS_CACHE_HOME", t.TempDir())
 	t.Setenv("WS_CONFIG_HOME", t.TempDir())
 	out, stderr, code := hostedCLIResult(t, hello, "config", "list", "--format", "json")
-	if code != 0 || !strings.Contains(out, home) || strings.Contains(out, os.Getenv("WS_CACHE_HOME")) {
+	if store := configStorePath(out); code != 0 || !pathWithin(store, home) || pathWithin(store, os.Getenv("WS_CACHE_HOME")) {
 		t.Fatalf("omitted overrides inherited daemon: %s %s (%d)", out, stderr, code)
 	}
 	if _, added := hello.Env["WS_CACHE_HOME"]; added {

@@ -12,8 +12,10 @@ import importlib.util
 import io
 import json
 import os
+import platform
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -63,6 +65,27 @@ if args[:2] == ["mailbox", "wait"]:
     sys.exit(3)
 sys.exit(2)
 """
+
+
+# Windows platform.uname() spawns `cmd /c ver` on its first call; take it now,
+# before run_main replaces subprocess with mocks that forbid any process.
+platform.uname()
+
+
+def run_fake_runtime_under_python(real_run):
+    """Windows cannot exec FAKE_RUNTIME's shebang: run it under this interpreter."""
+    shebang = FAKE_RUNTIME.split("\n", 1)[0].encode()
+
+    def run(args, *rest, **kwargs):
+        if isinstance(args, (list, tuple)) and args:
+            try:
+                with open(args[0], "rb") as fh:
+                    if fh.read(len(shebang)) == shebang:
+                        args = [sys.executable, *args]
+            except OSError:
+                pass
+        return real_run(args, *rest, **kwargs)
+    return run
 
 
 def load_launcher():
@@ -293,6 +316,10 @@ class LauncherProxyTest(unittest.TestCase):
         # Exercise exhaustion without spending the production 75s per test.
         self.launcher.DAEMON_RETRY_SECONDS = 0.3
         self.launcher.DAEMON_RETRY_POLL_SECONDS = 0.05
+        if os.name == "nt":
+            patcher = mock.patch.object(subprocess, "run", run_fake_runtime_under_python(subprocess.run))
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.tmp = tempfile.TemporaryDirectory(prefix="ws-launcher-proxy.")
         self.addCleanup(self.tmp.cleanup)
         # Resolved: the launcher reports real paths, and macOS's temp dir
