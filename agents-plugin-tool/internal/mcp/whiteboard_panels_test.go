@@ -61,7 +61,7 @@ func readPage(t *testing.T, path string) string {
 
 func (f *whiteboardFixture) fullPage(t *testing.T) string {
 	t.Helper()
-	return readPage(t, filepath.Join(f.dir(), f.replyID()+".html"))
+	return readPage(t, f.pagePath())
 }
 
 func writeTicket(t *testing.T, root, status, stem, title string) {
@@ -156,7 +156,7 @@ func TestWhiteboardTicketPanel(t *testing.T) {
 	if strings.Contains(full, "Idea X") {
 		t.Fatalf("idea tickets must not be listed")
 	}
-	assertLinksResolve(t, "full", f.dir(), links, false)
+	assertLinksResolve(t, "full", f.pageDir(), links, false)
 
 	embedPage := func(embed string) string {
 		t.Helper()

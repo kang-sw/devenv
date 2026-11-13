@@ -439,6 +439,25 @@ item IDs.
   ticket. Reconcile its recap references and sequencing before that ticket
   is dispatched; leave its frozen results, if any, intact.
 
+## Implementation Parameters
+
+- The panel payload cap is **2 MiB of UTF-8 bytes**. Representative fixtures
+  measured 144,150 bytes for mockup HTML and 614,025 / 606,029 bytes for
+  embedded-image Markdown; larger material links an external file.
+- Durable entry locators are `eN`, board-wide across both logs and panel
+  versions; stable latest-panel targets remain `pN`. A panel mention's `eN`
+  therefore selects its immutable version, not whichever version is latest.
+- The schema-2 folder transaction atomically installs `pending.json` as its
+  commit decision, containing exact panel/topic/session bytes and log append
+  offsets. Locked replay completes partial appends idempotently, publishes
+  session metadata last, then writes a `committed.json` receipt before removing
+  the intent. The receipt prevents stale legacy fallback after publication.
+  Derived output publishes only after commit, under the same lock.
+- History starts with **50 entries per topic**, loads older pages of 50 into
+  a bounded-height scroll area, and preserves the visible entry/offset through
+  older loading and SSE updates. A viewer at the bottom follows new entries;
+  one reading history keeps that anchor. Embeds omit the stream payloads.
+
 ## Phases
 
 The three-phase split is Decision 16. Intermediate phases are not independently shipped

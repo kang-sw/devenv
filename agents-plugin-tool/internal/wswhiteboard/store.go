@@ -205,15 +205,12 @@ type Embed struct {
 	Name string `json:"name"`
 }
 
-// TopicDoc is a topic's content beside its items: its body, block markdown
-// with inline HTML written as is, rendered above the topic's items, and its
-// recap, a short status line rendered above the body. The two are
-// independent parts, each with its own change mark and time, and the
-// topic's recency is the later of the two; an entry holds at least one of
-// them (dropTopicDoc).
+// TopicDoc holds a topic's current content and immutable entry stream.
+// Recap fields remain readable for legacy snapshots; wb:recap is retired.
 type TopicDoc struct {
-	Name string `json:"name"`
-	Body string `json:"body"`
+	Name    string  `json:"name"`
+	Body    string  `json:"body"`
+	Entries []Entry `json:"entries,omitempty"`
 	// Changed is the render sequence of the update that last changed the
 	// body; it counts toward the topic's recency like an item's Changed.
 	// Zero while the entry has no body.
@@ -239,12 +236,15 @@ type TopicDoc struct {
 // Recency is the entry's latest change mark, the body's or the recap's.
 func (d TopicDoc) Recency() int { return max(d.Changed, d.RecapChanged) }
 
-// State is the whole whiteboard of one session. The MCP layer stores it in
-// the session state record; a nil State means the session has no board.
+// State is the pure in-memory whiteboard of one session. The host owns its
+// persistence boundary; a nil State means the session has no board.
 type State struct {
 	// Counter is the highest ID the store has minted, adopted, or been
 	// floored to; a minted ID is Counter+1.
 	Counter int `json:"counter"`
+	// EntrySeq and PanelCounter are the board-wide durable ID high-water marks.
+	EntrySeq     int `json:"entry_seq,omitempty"`
+	PanelCounter int `json:"panel_counter,omitempty"`
 	// Seq is the render sequence: every render (an update or an implicit
 	// todo/agenda refresh) increments it.
 	Seq int `json:"seq"`
@@ -264,8 +264,8 @@ type State struct {
 	// it only while the topic is closed) and the next close replaces it; a
 	// topic closed before the field has none.
 	CloseResults map[string]string `json:"close_results,omitempty"`
-	// Topics holds the topics that have a body or a recap, in first-set
-	// order. A store
+	// Topics holds topics with content, entries, or a legacy recap, in
+	// first-set order. A store
 	// written while the board had a Now slot keeps its "now" text on disk
 	// until the next write; the field is gone, so nothing reads it.
 	Topics []TopicDoc `json:"topics,omitempty"`
@@ -363,8 +363,7 @@ func (s *State) index(id int) int {
 	return -1
 }
 
-// topicKnown reports whether topic has an item, a body, or a recap (a
-// Topics entry holds at least one of the two).
+// topicKnown reports whether topic has items, content, entries, or a legacy recap.
 func (s *State) topicKnown(topic string) bool {
 	for _, item := range s.Items {
 		if item.Topic == topic {
@@ -435,14 +434,14 @@ func baseDoc(base *State, topic string) (TopicDoc, bool) {
 	return TopicDoc{}, false
 }
 
-// setTopicBody sets topic's body; a change marks the body changed and, as
-// an added item does, reopens a closed topic. Change marks are per update
+// setTopicBody sets topic's body and change marks; callers handle reopening
+// and events. Change marks are per update
 // batch: base is the state as the batch began, and the marks diff against
 // the body it held there, so several edits to one topic in a batch keep all
 // their marks and a body the batch created marks nothing. Edits that bring
 // the body back to the one the batch began with change nothing: the body
-// keeps that body's marks, Changed, and ChangedAt. The recap is never
-// touched, so a wb:recap earlier in the batch stands.
+// keeps that body's marks, Changed, and ChangedAt. Entries and legacy recap
+// fields are never touched.
 func (s *State) setTopicBody(topic, body string, mark int, base *State) {
 	if i := s.topicDocIndex(topic); i >= 0 && s.Topics[i].Body == body {
 		return
@@ -458,30 +457,6 @@ func (s *State) setTopicBody(topic, body string, mark int, base *State) {
 	}
 	d.Body = body
 	d.Changed = mark
-	if s.topicClosed(topic) {
-		s.reopenTopic(topic)
-	}
-}
-
-// setTopicRecap sets topic's recap as setTopicBody sets a body: a change
-// marks the recap changed (RecapChanged, so the topic's recency moves) and
-// reopens a closed topic; the same recap again is no change. A recap the
-// batch brings back to the one it began with keeps that recap's change mark
-// and time. The body is never touched.
-func (s *State) setTopicRecap(topic, recap string, mark int, base *State) {
-	if s.TopicRecap(topic) == recap {
-		return
-	}
-	d := s.topicDoc(topic)
-	if b, ok := baseDoc(base, topic); ok && b.Recap == recap {
-		d.Recap, d.RecapChanged, d.RecapAt = b.Recap, b.RecapChanged, b.RecapAt
-		return
-	}
-	d.Recap = recap
-	d.RecapChanged = mark
-	if s.topicClosed(topic) {
-		s.reopenTopic(topic)
-	}
 }
 
 // clearTopicBody drops topic's body with its marks and change time; the
@@ -496,24 +471,11 @@ func (s *State) clearTopicBody(topic string) {
 	s.dropTopicDoc(topic)
 }
 
-// clearTopicRecap drops topic's recap with its change time; the body stays.
-// Like clearing a body, it is no new content: it neither moves the topic's
-// recency forward nor reopens a closed topic.
-func (s *State) clearTopicRecap(topic string) {
-	i := s.topicDocIndex(topic)
-	if i < 0 {
-		return
-	}
-	s.Topics[i].Recap, s.Topics[i].RecapChanged, s.Topics[i].RecapAt = "", 0, ""
-	s.dropTopicDoc(topic)
-}
-
-// dropTopicDoc drops topic's entry once it holds neither a body nor a
-// recap. A topic left with no item either is gone, so its closed mark goes
-// too.
+// dropTopicDoc drops a topic document only when content, legacy recap, and
+// history are all empty. A topic left with no item either loses its close mark.
 func (s *State) dropTopicDoc(topic string) {
 	i := s.topicDocIndex(topic)
-	if i < 0 || s.Topics[i].Body != "" || s.Topics[i].Recap != "" {
+	if i < 0 || s.Topics[i].Body != "" || s.Topics[i].Recap != "" || len(s.Topics[i].Entries) > 0 {
 		return
 	}
 	s.Topics = append(s.Topics[:i], s.Topics[i+1:]...)
@@ -650,7 +612,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		}
 		switch cmd.Tag {
 		case "wb:add":
-			id := applyAdd(p, work, cmd, topicOf, mark)
+			id := applyAdd(p, work, cmd, topicOf, mark, env.Now)
 			out.IDs = append(out.IDs, id)
 			optionWarn = work.noteNonPolicyOptions(optionWarn, id)
 		case "wb:answer":
@@ -658,13 +620,15 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		case "wb:patch":
 			optionWarn = work.noteNonPolicyOptions(optionWarn, applyPatch(p, work, cmd, mark, env.Now))
 		case "wb:body":
-			applyBody(p, work, state, cmd, topicOf, mark)
+			applyBody(p, work, state, cmd, topicOf, mark, env.Now)
 		case "wb:edit":
-			applyEdit(p, work, state, cmd, topicOf, mark)
-		case "wb:recap":
-			applyRecap(work, state, cmd, topicOf, mark)
+			applyEdit(p, work, state, cmd, topicOf, mark, env.Now)
+		case "wb:panel":
+			applyPanel(p, work, cmd, topicOf, env.Now)
+		case "wb:log":
+			applyLog(p, work, cmd, topicOf, env.Now)
 		case "wb:close":
-			withdrawn := applyClose(p, work, cmd, topicOf, mark)
+			withdrawn := applyClose(p, work, cmd, topicOf, mark, env.Now)
 			for _, id := range withdrawn {
 				closedBy[id] = cmd.Label()
 			}
@@ -711,23 +675,26 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 // now, answer fields kept as history); a later reopen of the topic does not
 // restore them. An assumed item already reads as settled and stays assumed.
 // It returns the withdrawn IDs.
-func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, mark int) []int {
+func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, mark int, now time.Time) []int {
 	topic, topicOK := topicOf(cmd)
 	result, resultOK := wsxmlcmd.RequiredAttr(p, cmd, "result")
 	if !topicOK || !resultOK {
 		return nil
 	}
 	if !work.topicKnown(topic) {
-		p.Add("%s: no item, topic body, or recap has topic %q", cmd.Label(), topic)
+		p.Add("%s: no items, content, or entries for topic %q", cmd.Label(), topic)
 		return nil
 	}
-	if !work.topicClosed(topic) {
+	closed := work.topicClosed(topic)
+	result = strings.TrimSpace(result)
+	resultChanged := work.CloseResults[topic] != result
+	if !closed {
 		work.ClosedTopics = append(work.ClosedTopics, topic)
 	}
 	if work.CloseResults == nil {
 		work.CloseResults = map[string]string{}
 	}
-	work.CloseResults[topic] = strings.TrimSpace(result)
+	work.CloseResults[topic] = result
 	var withdrawn []int
 	for i := range work.Items {
 		item := &work.Items[i]
@@ -738,6 +705,12 @@ func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, ma
 		item.Changed = mark
 		work.settle(item)
 		withdrawn = append(withdrawn, item.ID)
+		work.eventItem(topic, item.ID, now, "Item {{%d}} withdrawn [%s] by topic close: %s", item.ID, item.Class, item.Title)
+	}
+	if !closed {
+		work.event(topic, now, "Topic closed: %s", result)
+	} else if resultChanged {
+		work.event(topic, now, "Topic close result updated: %s", result)
 	}
 	return withdrawn
 }
@@ -842,7 +815,7 @@ func checkOptions(p *problems, cmd command, options []string) []string {
 	return options
 }
 
-func applyAdd(p *problems, work *State, cmd command, topicOf topicResolver, mark int) int {
+func applyAdd(p *problems, work *State, cmd command, topicOf topicResolver, mark int, now time.Time) int {
 	item := Item{Status: StatusOpen, Changed: mark, Asked: mark}
 	before := len(p.List)
 	if _, present := cmd.Attr("id"); present {
@@ -881,10 +854,9 @@ func applyAdd(p *problems, work *State, cmd command, topicOf topicResolver, mark
 	} else if item.ID > work.Counter {
 		work.Counter = item.ID
 	}
-	if work.topicClosed(item.Topic) {
-		work.reopenTopic(item.Topic)
-	}
+	work.reopenWithEvent(item.Topic, now)
 	work.Items = append(work.Items, item)
+	work.eventItem(item.Topic, item.ID, now, "Item {{%d}} added [%s]: %s", item.ID, item.Class, item.Title)
 	return item.ID
 }
 
@@ -921,17 +893,25 @@ func applyAnswer(p *problems, work *State, cmd command, mark int, now time.Time,
 			p.Add("%s: a policy answer value starts with its option letter (%s); got %q", label, letterRange(len(item.Options)), answer)
 			continue
 		}
+		status := StatusAnswered
+		if assumed {
+			status = StatusAssumed
+		}
+		if item.Status == status && item.Answer == answer && item.AnswerQuote == quote {
+			continue
+		}
 		item.Answer = answer
 		item.AnswerQuote = quote
 		item.AnsweredAt = now.UTC().Format(time.RFC3339)
 		item.Changed = mark
 		work.settle(item)
+		item.Status = status
 		if assumed {
-			item.Status = StatusAssumed
-			continue
+			work.eventItem(item.Topic, item.ID, now, "Item {{%d}} assumed [%s]: %s; owner quote: %q", item.ID, item.Class, answer, quote)
+		} else {
+			work.AnswerSeq = mark
+			work.eventItem(item.Topic, item.ID, now, "Item {{%d}} answered [%s]: %s; owner quote: %q", item.ID, item.Class, answer, quote)
 		}
-		item.Status = StatusAnswered
-		work.AnswerSeq = mark
 	}
 }
 
@@ -1060,6 +1040,11 @@ func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) 
 	if len(p.List) > before {
 		return id
 	}
+	if after == prev.Status && next.Class == prev.Class && next.Title == prev.Title &&
+		next.Recommendation == prev.Recommendation && next.Rationale == prev.Rationale &&
+		slices.Equal(next.Options, prev.Options) && slices.Equal(next.Links, prev.Links) {
+		return id
+	}
 	next.Changed = mark
 	reopened := false
 	if status != "" && status != next.Status {
@@ -1080,47 +1065,39 @@ func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) 
 		next.Asked = mark
 	}
 	work.Items[idx] = next
+	work.eventItem(next.Topic, id, now, "Item {{%d}} patched [%s] (%s -> %s): %s", id, next.Class, prev.Status, next.Status, next.Title)
 	return id
 }
 
 // applyBody replaces a topic's body whole; an empty (or blank) body clears
 // it. The same body again is no change.
-func applyBody(p *problems, work, base *State, cmd command, topicOf topicResolver, mark int) {
+func applyBody(p *problems, work, base *State, cmd command, topicOf topicResolver, mark int, now time.Time) {
 	name, ok := topicOf(cmd)
 	if !ok {
 		return
 	}
 	body := cmd.Body
 	if strings.TrimSpace(body) == "" {
-		work.clearTopicBody(name)
+		if work.TopicBody(name) != "" {
+			work.event(name, now, "Content cleared.")
+			work.clearTopicBody(name)
+		}
 		return
 	}
 	if fullDocument(body) {
 		p.Add("%s: a topic body takes markdown with inline HTML, not a full document (found <!DOCTYPE or <html)", cmd.Label())
 		return
 	}
-	work.setTopicBody(name, body, mark, base)
-}
-
-// applyRecap replaces a topic's recap whole; an empty (or blank) body
-// clears it. The recap is stored trimmed, so the same recap again, however
-// it is padded, is no change.
-func applyRecap(work, base *State, cmd command, topicOf topicResolver, mark int) {
-	name, ok := topicOf(cmd)
-	if !ok {
-		return
+	if work.TopicBody(name) != body {
+		work.setTopicBody(name, body, mark, base)
+		work.reopenWithEvent(name, now)
+		work.event(name, now, "Content updated.")
 	}
-	recap := strings.TrimSpace(cmd.Body)
-	if recap == "" {
-		work.clearTopicRecap(name)
-		return
-	}
-	work.setTopicRecap(name, recap, mark, base)
 }
 
 // applyEdit replaces one exact match of old in a topic's body with new, or
 // every match with replace_all="true".
-func applyEdit(p *problems, work, base *State, cmd command, topicOf topicResolver, mark int) {
+func applyEdit(p *problems, work, base *State, cmd command, topicOf topicResolver, mark int, now time.Time) {
 	name, nameOK := topicOf(cmd)
 	all, _ := wsxmlcmd.BoolAttr(p, cmd, "replace_all")
 	old, hasOld := cmd.Single(p, "wb:old")
@@ -1152,6 +1129,7 @@ func applyEdit(p *problems, work, base *State, cmd command, topicOf topicResolve
 	}
 	next := strings.ReplaceAll(body, old, repl)
 	if strings.TrimSpace(next) == "" {
+		work.event(name, now, "Content cleared.")
 		work.clearTopicBody(name)
 		return
 	}
@@ -1159,7 +1137,11 @@ func applyEdit(p *problems, work, base *State, cmd command, topicOf topicResolve
 		p.Add("%s: the edited body would hold a full document (found <!DOCTYPE or <html)", cmd.Label())
 		return
 	}
-	work.setTopicBody(name, next, mark, base)
+	if next != body {
+		work.setTopicBody(name, next, mark, base)
+		work.reopenWithEvent(name, now)
+		work.event(name, now, "Content edited.")
+	}
 }
 
 // checkPolicyShape checks what a policy item's options and recommendation

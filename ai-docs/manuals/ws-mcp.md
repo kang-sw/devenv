@@ -54,8 +54,14 @@ bundled conventions rather than repository-local source paths.
 Each session key is a directory, `<cache root>/sessions/<key>/`, holding
 `key.json` (the identity - root, scope, parent - plus the session-scope
 config overrides, the child note, and the once-only flags), `agenda.json`,
-`todos.json`, and `whiteboard.json`. An absent part file is that part
-empty. A write replaces only the part files it changes, each atomically, and
+and `todos.json`. A pre-0.50 `whiteboard.json` remains an immutable rollback
+snapshot. Whiteboards now live under the project's
+`ai-docs/whiteboards/<reply-id>/`: versioned session `meta.json`, opaque topic
+folders holding `meta.json`, immutable panel versions, and append-only
+`log.jsonl`, with a derived `index.html`. The first board open (queries and
+dashboard reads included) converts the old snapshot once under the folder
+lock. New writes never update either old board representation, and key expiry
+does not delete authoritative topic folders. An absent agenda/todo part is empty. A write replaces only the part files it changes, each atomically, and
 the lookup every keyed call makes reads `key.json` alone, except
 `dashboard.intake`'s: intake and the live snapshot writer's activity check
 keep each key's identity (root, scope, parent, written only at mint) in
@@ -73,9 +79,11 @@ older than 30 days.
 
 The older layout, one `<cache root>/keys/<key>.json` per key, is still read:
 a key with no `key.json` is served whole from its legacy file, and the
-session's first write moves it into `sessions/<key>/` and deletes the legacy
-file. Reads never move it, and no pass moves the rest; an unwritten legacy
-file ages out through the same prune.
+session's first write moves its session metadata into `sessions/<key>/`.
+A board-bearing legacy file is retained byte-for-byte, and its original board
+is copied into split `whiteboard.json` for rollback; boardless legacy files
+are deleted. Reads never migrate session metadata, and no pass moves the rest;
+an unwritten legacy file ages out through the same prune.
 
 Restart every ws process after updating ws, as an install update already
 expects: the session MCP servers (a host restart or MCP reconnect) and the
@@ -1299,7 +1307,7 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
 | `WS_MCP_RELEASE_REPOSITORY` | Override the GitHub release repository from `runtime.json`. |
-| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.49.1`. |
+| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.50.0`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_LAUNCHER_DIRECT` | Obsolete; ignored. It never enables executable fallback. |
@@ -1358,7 +1366,7 @@ The helper updates plugin manifests, runtime contracts, Go runtime development
 defaults, release workflow references, build script defaults, selected
 documentation references, and the `agents-plugin-pi/` mirrors (`runtime.json`,
 `bin/ws-mcp-launcher.py`, `rsrc/`, resynced byte-for-byte from `agents-plugin/`,
-plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.49.1-dev` satisfy the
+plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.50.0-dev` satisfy the
 plugin version the helper just set; older or newer minor releases are stale. The
 concrete range lives in `runtime.json.required_mcp` — read it there rather than
 restating a version here, which froze at `0.29.2` for seven minor releases
@@ -1512,7 +1520,7 @@ Level 2 validates local release assets:
 
 ```bash
 cd agents-plugin-tool
-scripts/build-release-assets.sh 0.49.1-dev
+scripts/build-release-assets.sh 0.50.0-dev
 python3 ../agents-plugin/bin/ws-mcp-launcher.py version
 cd dist
 shasum -a 256 -c SHA256SUMS

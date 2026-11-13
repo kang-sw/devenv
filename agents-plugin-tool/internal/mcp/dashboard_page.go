@@ -178,6 +178,10 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 func boardMemoBase(key string, record sessionRecord, lang string, reasked map[int]int64, replies string) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "seq\x00%d\x00lang\x00%s\x00replies\x00%s\x00", record.Whiteboard.Seq, lang, replies)
+	// Folder metadata, logs, and panel versions are authoritative inputs too;
+	// equal render sequences must not hide changed on-disk content.
+	board, _ := json.Marshal(record.Whiteboard)
+	h.Write(board)
 	todos, _ := json.Marshal(record.Todos)
 	agenda, _ := json.Marshal(record.Agenda)
 	asked, _ := json.Marshal(reasked)
@@ -213,6 +217,8 @@ func (src *DashboardSessionSource) renderBoardNow(key string, record sessionReco
 	// The ticket files the panels list and the images a topic body inlines
 	// change without a nudge, so the page names them (PageContent.Watch).
 	watch := func(path string) { out.watch = append(out.watch, path) }
+	folder := whiteboardFolder(record.Root, key).Dir
+	watchWhiteboardFiles(folder, watch)
 	in := servedViewInput(record, replyID)
 	inline := in.DocImageSrc
 	in.DocImageSrc = func(path string) string {

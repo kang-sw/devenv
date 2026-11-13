@@ -193,7 +193,7 @@ func TestApplyRefusedBatchAppliesNothingAndReportsEveryProblem(t *testing.T) {
 	}
 	// A valid command ahead of a bad one is not applied either.
 	problems = refused(t, st, addXML(ClassTechnical, "t", "fine")+"\n"+`<wb:topic name="nowhere"><wb:close result="done"/></wb:topic>`)
-	wantProblems(t, problems, `command 2 <wb:close> (line 2): no item, topic body, or recap has topic "nowhere"`)
+	wantProblems(t, problems, `command 2 <wb:close> (line 2): no items, content, or entries for topic "nowhere"`)
 }
 
 func TestApplyAddFieldRules(t *testing.T) {
@@ -492,7 +492,7 @@ func TestRotationKeepsTenMostRecentSettledBoardWide(t *testing.T) {
 		}
 	}
 	problems := refused(t, st, `<wb:topic name="missing"><wb:close result="done"/></wb:topic>`)
-	wantProblems(t, problems, `no item, topic body, or recap has topic "missing"`)
+	wantProblems(t, problems, `no items, content, or entries for topic "missing"`)
 	// Closing twice keeps one mark; a close sits in its topic's group.
 	mustApply(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic>`)
 	if len(st.ClosedTopics) != 1 {
@@ -879,32 +879,33 @@ func TestApplyTopicEmptyBodyClears(t *testing.T) {
 		st := &State{}
 		mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "body"))
 		mustApply(t, st, clear)
-		if st.TopicBody("t") != "" || len(st.Topics) != 0 {
+		if st.TopicBody("t") != "" || len(st.Topics) != 1 || len(st.Topics[0].Entries) != 3 {
 			t.Fatalf("%s: topics = %+v", name, st.Topics)
 		}
 		if len(st.Items) != 1 {
 			t.Fatalf("%s: clearing a body keeps the topic's items", name)
 		}
-		// Clearing again, and clearing a topic that never had a body, is no problem.
+		// Clearing again emits nothing; clearing absent content creates no topic.
+		seq := st.EntrySeq
 		mustApply(t, st, clear)
 		mustApply(t, st, `<wb:topic name="never"><wb:body/></wb:topic>`)
-		if len(st.Topics) != 0 {
+		if len(st.Topics) != 1 || st.EntrySeq != seq || st.topicKnown("never") {
 			t.Fatalf("%s: topics = %+v", name, st.Topics)
 		}
 	}
-	// A topic with items stays closed when its body is cleared; a topic left
-	// with neither drops its closed mark, and is unknown again.
+	// Clearing content keeps history and the topic's closed state, whether
+	// or not it also has items.
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "has items", "x")+topicXML("has items", "b")+topicXML("only body", "b")+`<wb:topic name="has items"><wb:close result="done"/></wb:topic><wb:topic name="only body"><wb:close result="done"/></wb:topic>`)
 	mustApply(t, st, `<wb:topic name="has items"><wb:body/></wb:topic><wb:topic name="only body"><wb:body/></wb:topic>`)
-	if !st.topicClosed("has items") || st.topicClosed("only body") || len(st.ClosedTopics) != 1 {
+	if !st.topicClosed("has items") || !st.topicClosed("only body") || len(st.ClosedTopics) != 2 {
 		t.Fatalf("closed topics = %v", st.ClosedTopics)
 	}
-	if st.topicKnown("only body") {
-		t.Fatal("a topic with neither items nor body must be gone")
+	if !st.topicKnown("only body") || len(entries(t, st, "only body")) == 0 {
+		t.Fatal("a topic's history must survive clearing its content")
 	}
-	wantProblems(t, refused(t, st, `<wb:topic name="only body"><wb:close result="done"/></wb:topic>`), `no item, topic body, or recap has topic "only body"`)
-	// A body set again afterwards starts open.
+	mustApply(t, st, `<wb:topic name="only body"><wb:close result="done"/></wb:topic>`)
+	// New content afterwards reopens the retained topic.
 	mustApply(t, st, topicXML("only body", "back"))
 	if st.topicClosed("only body") {
 		t.Fatal("a recreated topic must not come back closed")
@@ -1021,8 +1022,8 @@ func TestApplyEditReplaceAllAndDelete(t *testing.T) {
 	}
 	// An edit that leaves nothing clears the body like an empty wb:body.
 	mustApply(t, st, `<wb:topic name="t"><wb:edit replace_all="true"><wb:old>A</wb:old><wb:new/></wb:edit></wb:topic>`)
-	if len(st.Topics) != 0 {
-		t.Fatalf("topics = %+v", st.Topics)
+	if st.TopicBody("t") != "" || len(entries(t, st, "t")) != 6 {
+		t.Fatalf("clearing must keep edit history: %+v", st.Topics)
 	}
 }
 

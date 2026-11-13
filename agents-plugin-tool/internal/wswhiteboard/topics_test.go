@@ -106,27 +106,37 @@ func TestStemRefusals(t *testing.T) {
 	}
 }
 
-// A label goes when its topic disappears, so the stem is free for a new
-// topic; archive eviction of the topic's last items drops it too.
-func TestLabelDroppedWhenItsTopicDisappears(t *testing.T) {
+// New topics retain their labels with immutable history, even when content
+// is cleared or all items age out of the archive.
+func TestLabelRetainedWithTopicHistory(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, `<wb:topic name="tmp" label="Temporary"><wb:body>only a body</wb:body></wb:topic>`)
 	mustApply(t, st, `<wb:topic name="tmp"><wb:body/></wb:topic>`)
-	if st.Labels != nil {
-		t.Fatalf("label kept after its topic went: %v", st.Labels)
+	if st.Labels["tmp"] != "Temporary" || !st.topicKnown("tmp") {
+		t.Fatalf("label/history lost after clearing content: %v", st.Labels)
 	}
-	// "Temporary" is free again: a new stemless topic takes it.
+	// The label still resolves to the retained topic, not a new stemless one.
 	mustApply(t, st, topicXML("Temporary", "x"))
-	if st.TopicBody("Temporary") != "x" {
-		t.Fatalf("freed label: %+v", st.Topics)
+	if st.TopicBody("tmp") != "x" || st.topicKnown("Temporary") {
+		t.Fatalf("retained label: %+v", st.Topics)
 	}
 
 	st = &State{}
 	mustApply(t, st, `<wb:topic name="old" label="Old"><wb:add class="technical"><wb:title>first</wb:title></wb:add></wb:topic>`)
 	mustApply(t, st, `<wb:answer id="1" value="ok">ok</wb:answer>`)
 	settleItems(t, st, "other", ArchiveCap)
-	if st.topicKnown("old") || st.stemmed("old") {
-		t.Fatalf("eviction left topic old: items %d, labels %v", len(st.Items), st.Labels)
+	if !st.topicKnown("old") || !st.stemmed("old") || st.index(1) >= 0 {
+		t.Fatalf("eviction lost history/label or kept old item: items %d, labels %v", len(st.Items), st.Labels)
+	}
+}
+
+// A legacy topic without retained history still frees its label when gone.
+func TestLegacyLabelPrunedWhenItsTopicDisappears(t *testing.T) {
+	st := &State{Topics: []TopicDoc{{Name: "tmp", Body: "legacy"}}, Labels: map[string]string{"tmp": "Temporary"}}
+	st.clearTopicBody("tmp")
+	st.pruneLabels()
+	if st.topicKnown("tmp") || st.Labels != nil {
+		t.Fatalf("legacy empty topic kept its label: %+v", st)
 	}
 }
 

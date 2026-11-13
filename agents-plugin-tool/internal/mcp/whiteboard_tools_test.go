@@ -79,9 +79,17 @@ func (f *whiteboardFixture) replyID() string {
 	return wsmailbox.ReplyID(f.key)
 }
 
+func (f *whiteboardFixture) pageDir() string {
+	return filepath.Join(f.dir(), f.replyID())
+}
+
+func (f *whiteboardFixture) pagePath() string {
+	return filepath.Join(f.pageDir(), "index.html")
+}
+
 func (f *whiteboardFixture) stamp(t *testing.T) string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(f.dir(), f.replyID()+".stamp.js"))
+	data, err := os.ReadFile(filepath.Join(f.pageDir(), "index.stamp.js"))
 	if err != nil {
 		t.Fatalf("read stamp: %v", err)
 	}
@@ -234,6 +242,20 @@ func TestWhiteboardUpdateRendersPageEmbedAndStampInOrder(t *testing.T) {
 	var order []string
 	orig := whiteboardRename
 	whiteboardRename = func(from, to string) error {
+		if len(order) == 0 {
+			var committed struct {
+				State struct {
+					Seq int `json:"seq"`
+				} `json:"state"`
+				ItemOrder []int `json:"item_order"`
+			}
+			if err := json.Unmarshal(readFileForTest(t, filepath.Join(f.pageDir(), "meta.json")), &committed); err != nil {
+				t.Fatal(err)
+			}
+			if committed.State.Seq != 1 || len(committed.ItemOrder) != 2 {
+				t.Fatalf("output publication preceded the durable board commit: %+v", committed)
+			}
+		}
 		order = append(order, filepath.Base(to))
 		return orig(from, to)
 	}
@@ -255,17 +277,17 @@ func TestWhiteboardUpdateRendersPageEmbedAndStampInOrder(t *testing.T) {
 	full := resultLine(t, text, "full: ")
 	embed := resultLine(t, text, "embed: ")
 	rid := f.replyID()
-	if full != "ai-docs/whiteboards/"+rid+".html" || !strings.HasPrefix(embed, "ai-docs/whiteboards/"+rid+"-") {
+	if full != "ai-docs/whiteboards/"+rid+"/index.html" || !strings.HasPrefix(embed, "ai-docs/whiteboards/"+rid+"-") {
 		t.Fatalf("paths full=%q embed=%q", full, embed)
 	}
-	if len(order) != 3 || order[0] != filepath.Base(embed) || order[1] != rid+".html" || order[2] != rid+".stamp.js" {
+	if len(order) != 3 || order[0] != filepath.Base(embed) || order[1] != "index.html" || order[2] != "index.stamp.js" {
 		t.Fatalf("write order = %v, want embed, page, then stamp", order)
 	}
 	page, err := os.ReadFile(filepath.Join(f.root, full))
 	if err != nil || !strings.HasPrefix(string(page), "<!DOCTYPE html>") || !strings.Contains(string(page), "Two columns?") {
 		t.Fatalf("full page missing or wrong (%v):\n%.300s", err, page)
 	}
-	if !strings.Contains(string(page), `data-stamp="`+rid+`.stamp.js"`) {
+	if !strings.Contains(string(page), `data-stamp="index.stamp.js"`) {
 		t.Fatalf("full page must poll its stamp")
 	}
 	if got := f.stamp(t); got != "wbStamp(\"1\");\n" {
@@ -387,7 +409,7 @@ func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
 	for _, target := range []string{"page", "stamp"} {
 		t.Run(target, func(t *testing.T) {
 			f := newWhiteboardFixture(t)
-			suffix := map[string]string{"page": f.replyID() + ".html", "stamp": f.replyID() + ".stamp.js"}[target]
+			suffix := map[string]string{"page": "index.html", "stamp": "index.stamp.js"}[target]
 			sharing := errors.New("simulated sharing violation")
 			origRename, origRetryable, origBackoff := whiteboardRename, whiteboardRenameRetryable, whiteboardRenameBackoff
 			defer func() {
@@ -410,36 +432,47 @@ func TestWhiteboardRenameRetriesSharingViolation(t *testing.T) {
 			for i := 0; i < 4; i++ {
 				f.update(t, ``)
 			}
-			// A violation that outlasts the retries fails the render. The batch
-			// is not persisted, and the embed files still match the record: the
-			// failed render's own embed is gone and no recorded embed was evicted.
+			// Publication follows the durable commit. An exhausted retry reports
+			// an error, keeps the accepted mutation, and leaves the old stamp.
+			beforeStamp := f.stamp(t)
 			whiteboardRename = func(from, to string) error {
 				if filepath.Base(to) == suffix {
 					return sharing
 				}
 				return origRename(from, to)
 			}
-			resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="policy"><wb:title>y</wb:title></wb:add></wb:topic>`})
-			if !isToolError(resp) || !strings.Contains(toolText(t, resp), "write "+map[string]string{"page": "full page", "stamp": "stamp"}[target]) {
-				t.Fatalf("persistent sharing violation must fail the render: %s", resp)
+			resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="t"><wb:add class="policy"><wb:title>committed-marker</wb:title></wb:add></wb:topic>`})
+			text := toolText(t, resp)
+			if !isToolError(resp) || !strings.Contains(text, "board committed; write "+map[string]string{"page": "full page", "stamp": "stamp"}[target]) {
+				t.Fatalf("persistent sharing violation must explicitly report committed state: %s", resp)
 			}
-			rec, _ := f.s.sessions.readState(f.key, partAll)
-			if len(rec.Whiteboard.Items) != 1 {
-				t.Fatalf("a failed render must not persist its batch: %d items", len(rec.Whiteboard.Items))
+			rec, err := newSessionStore().readWhiteboard(f.key)
+			if err != nil || len(rec.Whiteboard.Items) != 2 || rec.Whiteboard.Seq != 6 {
+				t.Fatalf("a failed publication must keep its committed batch: %+v, %v", rec.Whiteboard, err)
 			}
-			var recorded []string
-			for _, e := range rec.Whiteboard.Embeds {
-				recorded = append(recorded, e.Name)
+			if got := f.stamp(t); got != beforeStamp {
+				t.Fatalf("failed publication advanced the stamp: %q -> %q", beforeStamp, got)
 			}
-			sort.Strings(recorded)
-			if got := f.embeds(t, f.dir()); strings.Join(got, ",") != strings.Join(recorded, ",") || len(got) != 5 {
-				t.Fatalf("embeds on disk %v must match the record %v after a failed render", got, recorded)
+			entries := rec.Whiteboard.EntrySeq
+			whiteboardRename = origRename
+			f.update(t, ``)
+			repaired, err := newSessionStore().readWhiteboard(f.key)
+			if err != nil || len(repaired.Whiteboard.Items) != 2 || repaired.Whiteboard.EntrySeq != entries {
+				t.Fatalf("repair must not repeat the accepted mutation: %+v, %v", repaired.Whiteboard, err)
+			}
+			if f.stamp(t) != "wbStamp(\"7\");\n" || !strings.Contains(f.fullPage(t), "committed-marker") {
+				t.Fatal("a later render did not repair the page and stamp")
+			}
+			for _, e := range repaired.Whiteboard.Embeds {
+				if !exists(filepath.Join(f.dir(), e.Name)) {
+					t.Fatalf("repaired render is missing recorded embed %s", e.Name)
+				}
 			}
 		})
 	}
 }
 
-func TestWhiteboardExcludeFailureLeavesNoFolder(t *testing.T) {
+func TestWhiteboardExcludeFailureLeavesNoCommittedBoard(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	exclude := filepath.Join(f.root, ".git", "info", "exclude")
 	os.Remove(exclude)
@@ -449,9 +482,7 @@ func TestWhiteboardExcludeFailureLeavesNoFolder(t *testing.T) {
 	if resp := f.call(t, "whiteboard.update", map[string]any{"commands": ""}); !isToolError(resp) {
 		t.Fatalf("an unwritable exclude file must fail the first render: %s", resp)
 	}
-	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("a failed exclude registration must leave no folder, so the next render retries it")
-	}
+	assertWhiteboardUncommittedForTest(t, f.pageDir())
 	os.Remove(exclude)
 	f.update(t, ``)
 	if n := excludeEntries(t, f.root); n != 1 {
@@ -482,9 +513,7 @@ func TestWhiteboardRefusalsCarryProblemsAndPlaybookPointer(t *testing.T) {
 	if strings.Contains(text, "## Command syntax") || strings.Contains(text, "## Commands") || strings.Contains(text, "## Query") {
 		t.Fatalf("the update refusal must not repeat playbook sections:\n%s", text)
 	}
-	if _, err := os.Stat(f.dir()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("a refused first update must write nothing")
-	}
+	assertWhiteboardUncommittedForTest(t, f.pageDir())
 
 	resp = f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"status": "done"}})
 	text = toolText(t, resp)
@@ -575,7 +604,7 @@ func TestWhiteboardQueryAndTopicBodyThroughTools(t *testing.T) {
 <wb:topic name="t"><wb:body>
 background body-marker line
 </wb:body></wb:topic>`)
-	pagePath := filepath.Join(f.dir(), f.replyID()+".html")
+	pagePath := f.pagePath()
 	page, _ := os.ReadFile(pagePath)
 	if body, item := strings.Index(string(page), "body-marker"), strings.Index(string(page), "settle me"); body < 0 || body > item {
 		t.Fatalf("a topic body must render above its items (body %d, item %d)", body, item)
@@ -702,7 +731,7 @@ func TestWhiteboardTodoAndAgendaWritesRenderFullPageOnly(t *testing.T) {
 					t.Fatalf("after %s stamp = %q, want %q", step.tool, got, want)
 				}
 			}
-			page, _ := os.ReadFile(filepath.Join(f.dir(), f.replyID()+".html"))
+			page, _ := os.ReadFile(f.pagePath())
 			if !strings.Contains(string(page), "write tests") {
 				t.Fatalf("the full page must show the current todos")
 			}
@@ -1100,7 +1129,7 @@ func TestWhiteboardGarbageCollection(t *testing.T) {
 			t.Fatalf("orphan %s must be deleted", name)
 		}
 	}
-	for _, name := range append(live, f.replyID()+".html", f.replyID()+".stamp.js", "deadorphanid.now.md", f.replyID()+".now.md", "notes.txt", whiteboardGCMarker) {
+	for _, name := range append(live, filepath.Join(f.replyID(), "index.html"), filepath.Join(f.replyID(), "index.stamp.js"), filepath.Join(f.replyID(), "meta.json"), "deadorphanid.now.md", f.replyID()+".now.md", "notes.txt", whiteboardGCMarker) {
 		if _, err := os.Stat(filepath.Join(f.dir(), name)); err != nil {
 			t.Fatalf("%s must be kept: %v", name, err)
 		}
@@ -1118,6 +1147,23 @@ func TestWhiteboardGarbageCollection(t *testing.T) {
 	manual()
 	if _, err := os.Stat(filepath.Join(f.dir(), "laterorphan.html")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the next day's scan must delete the orphan")
+	}
+
+	// Expiring the key permits derived embed collection, never recursive
+	// deletion of authoritative topic metadata, logs, or panel versions.
+	f.update(t, `<wb:topic name="durable"><wb:panel recap="kept">payload</wb:panel><wb:log>still here</wb:log></wb:topic>`)
+	before := whiteboardTreeForTest(t, f.pageDir())
+	d, _ := f.s.sessions.dirs()
+	if err := os.RemoveAll(d.keyDir(f.key)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(f.dir(), whiteboardGCMarker), old, old); err != nil {
+		t.Fatal(err)
+	}
+	f.s.maybeCollectWhiteboards(f.root)
+	assertWhiteboardTreeForTest(t, f.pageDir(), before)
+	if got := f.embeds(t, f.dir()); len(got) != 0 {
+		t.Fatalf("expired session embeds survived collection: %v", got)
 	}
 }
 

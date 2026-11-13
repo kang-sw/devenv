@@ -137,7 +137,11 @@ func whiteboardPageDir(in whiteboardPanelInput) string {
 	if in.layout == wswhiteboard.LayoutEmbed && in.rec.Whiteboard != nil && in.rec.Whiteboard.EmbedDir != "" {
 		return in.rec.Whiteboard.EmbedDir
 	}
-	return filepath.Join(in.root, filepath.FromSlash(whiteboardDirRel))
+	dir := filepath.Join(in.root, filepath.FromSlash(whiteboardDirRel))
+	if in.layout == wswhiteboard.LayoutFull {
+		return filepath.Join(dir, in.replyID)
+	}
+	return dir
 }
 
 // whiteboardFileLink links target from a page in pageDir: a relative path

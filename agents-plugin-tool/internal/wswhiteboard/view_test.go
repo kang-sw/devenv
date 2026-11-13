@@ -97,7 +97,7 @@ func TestSameUpdateTopicsOrderByBumpReason(t *testing.T) {
 		addXML(ClassPolicy, "assumed", "s", "x", "y")+
 		`<wb:answer id="5" value="a" assumed="true">fine</wb:answer>`+
 		topicXML("doc", "a body")+
-		recapXML("recapped", "a recap"))
+		topicXML("recapped", "another body"))
 	// mixed ranks by its body over its answer; an item asked and settled in
 	// the same update asks nothing, so assumed ranks with the answered one.
 	wantTopicOrder(t, st, "policy", "ack", "mixed", "doc", "recapped", "answered", "assumed")
@@ -235,7 +235,7 @@ func TestEmbedShowsABodyOpenOnlyWhenChanged(t *testing.T) {
 }
 
 // A body's change marks go stale (dimmed) once an item of its topic changes
-// after the body's latest edit; a recap change does not count, and the next
+// after the body's latest edit; a log entry does not count, and the next
 // body edit makes them fresh again.
 func TestDocStaleFollowsItemChangesAfterTheBodyEdit(t *testing.T) {
 	stale := func(st *State, name string) bool { return topicView(t, st, LayoutFull, name).DocStale }
@@ -246,9 +246,9 @@ func TestDocStaleFollowsItemChangesAfterTheBodyEdit(t *testing.T) {
 	if stale(st, "t") {
 		t.Fatal("a body edit with no item change after it is fresh")
 	}
-	mustApply(t, st, `<wb:topic name="t"><wb:recap>a recap</wb:recap></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:log>a log line</wb:log></wb:topic>`)
 	if stale(st, "t") {
-		t.Fatal("a recap change does not stale the marks")
+		t.Fatal("a log entry does not stale the marks")
 	}
 	mustApply(t, st, addXML(ClassTechnical, "other", "z"))
 	if stale(st, "t") {

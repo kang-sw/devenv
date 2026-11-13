@@ -34,10 +34,10 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 <wb:why>![shot](img/shot%20one.png)
 [web](https://example.com/)</wb:why>
 </wb:add></wb:topic>`)
-	full := readWhiteboardPage(t, filepath.Join(f.dir(), f.replyID()+".html"))
+	full := readWhiteboardPage(t, f.pagePath())
 	for _, want := range []string{
-		`<img src="../../img/shot%20one.png" alt="shot"/>`,
-		`<a href="../../docs/notes.md">notes</a>`,
+		`<img src="../../../img/shot%20one.png" alt="shot"/>`,
+		`<a href="../../../docs/notes.md">notes</a>`,
 		`<a href="https://example.com/" target="_blank" rel="noopener noreferrer">web</a>`,
 	} {
 		if !strings.Contains(full, want) {
@@ -63,7 +63,7 @@ func TestWhiteboardMarkdownFileLinks(t *testing.T) {
 			t.Errorf("embed in an outside embed_dir lacks %q", want)
 		}
 	}
-	if full := readWhiteboardPage(t, filepath.Join(f.dir(), f.replyID()+".html")); !strings.Contains(full, `<img src="../../img/shot%20one.png"`) {
+	if full := readWhiteboardPage(t, f.pagePath()); !strings.Contains(full, `<img src="../../../img/shot%20one.png"`) {
 		t.Errorf("the full page must keep its repository-relative link while embed_dir is set")
 	}
 }
@@ -82,7 +82,7 @@ func TestWhiteboardMarkdownFileLinkNeverYieldsAScheme(t *testing.T) {
 <wb:why>[c](./javascript:alert(3))
 ![d](javascript%3Ax.png)</wb:why>
 </wb:add></wb:topic>`), "embed: ")
-	full := readWhiteboardPage(t, filepath.Join(f.dir(), f.replyID()+".html"))
+	full := readWhiteboardPage(t, f.pagePath())
 	inRepo := readWhiteboardPage(t, filepath.Join(f.root, embed))
 	for name, page := range map[string]string{"full": full, "embed in the repository root": inRepo} {
 		for _, bad := range []string{`href="javascript`, `src="javascript`} {
@@ -91,7 +91,7 @@ func TestWhiteboardMarkdownFileLinkNeverYieldsAScheme(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{`href="./javascript:alert(1)">a</a>`, `href="./javascript:alert(2)">b</a>`} {
+	for _, want := range []string{`href="../javascript:alert(1)">a</a>`, `href="../javascript:alert(2)">b</a>`} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full page lacks %q", want)
 		}
@@ -124,7 +124,10 @@ func TestWhiteboardMermaidAssetWrittenOnce(t *testing.T) {
 		t.Fatalf("mermaid script not written beside the pages: %v (%d of %d bytes)", err, len(got), len(data))
 	}
 	tag := `<script src="` + name + `"></script>`
-	for _, page := range []string{filepath.Join(f.dir(), f.replyID()+".html"), filepath.Join(f.root, embed)} {
+	for _, page := range []string{f.pagePath(), filepath.Join(f.root, embed)} {
+		if got, err := os.ReadFile(filepath.Join(filepath.Dir(page), name)); err != nil || len(got) != len(data) {
+			t.Errorf("%s is missing its adjacent mermaid asset: %v", page, err)
+		}
 		if !strings.Contains(readWhiteboardPage(t, page), tag) {
 			t.Errorf("%s does not load the shared script by its relative name", page)
 		}

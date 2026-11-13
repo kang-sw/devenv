@@ -210,7 +210,7 @@ func TestDashboardServedPageRendersTopicBodyInAFrame(t *testing.T) {
 		t.Errorf("a body without an outside image must list no relay")
 	}
 	// The page written to disk and the embed take no relay.
-	written := append([]string{f.replyID() + ".html"}, f.embeds(t, f.dir())...)
+	written := append([]string{filepath.Join(f.replyID(), "index.html")}, f.embeds(t, f.dir())...)
 	if len(written) < 2 {
 		t.Fatalf("pages written to disk = %v, want the full page and an embed", written)
 	}
@@ -608,7 +608,7 @@ func TestDashboardPointerLineFollowsTheLastNudge(t *testing.T) {
 	root := dashboardGitRoot(t)
 	s, key, _ := dashboardSessionServer(t, root, true)
 	replyID := wsmailbox.ReplyID(key)
-	path := "ai-docs/whiteboards/" + replyID + ".html"
+	path := "ai-docs/whiteboards/" + replyID + "/index.html"
 	update := func(s *Server, key string) string {
 		t.Helper()
 		resp := dashCall(t, s, "whiteboard.update", map[string]any{"session_key": key, "commands": ""})
@@ -650,7 +650,7 @@ func TestDashboardPointerLineFollowsTheLastNudge(t *testing.T) {
 	startFakeDaemon(t, dir, http.StatusNoContent, false)
 	sOff, keyOff, _ := dashboardSessionServer(t, root, false)
 	dashCall(t, sOff, "todo.list", map[string]any{"session_key": keyOff})
-	if got := update(sOff, keyOff); got != "ai-docs/whiteboards/"+wsmailbox.ReplyID(keyOff)+".html" {
+	if got := update(sOff, keyOff); got != "ai-docs/whiteboards/"+wsmailbox.ReplyID(keyOff)+"/index.html" {
 		t.Fatalf("full: of a key-off session = %q", got)
 	}
 }
