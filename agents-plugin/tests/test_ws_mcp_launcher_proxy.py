@@ -693,13 +693,13 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertFalse(hasattr(self.launcher, "ProcessStream"))
         self.assertFalse(hasattr(self.launcher, "proxy_disabled"))
 
-    def run_main(self, argv, *, input_text="", forbid_install=False):
+    def run_main(self, argv, *, input_text="", input_encoding="utf-8", forbid_install=False, allow_build=False):
         stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
         stderr = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
         env = dict(self.env, WS_MCP_RUNTIME_DIR=str(self.root), WS_MCP_LAUNCHER_DIRECT="1")
         with mock.patch.dict(os.environ, env, clear=True), \
              mock.patch.object(sys, "argv", [str(LAUNCHER_PATH), *argv]), \
-             mock.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(input_text.encode()), encoding="utf-8")), \
+             mock.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(input_text.encode("utf-8")), encoding=input_encoding)), \
              mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr), \
              mock.patch.object(self.launcher, "detect_project_root"), \
              mock.patch.object(self.launcher, "read_runtime_contract", return_value={"plugin_version": "0.48.16"}), \
@@ -707,8 +707,18 @@ class LauncherProxyTest(unittest.TestCase):
              mock.patch.multiple(self.launcher.subprocess, run=mock.DEFAULT, Popen=mock.DEFAULT, call=mock.DEFAULT) as processes, \
              mock.patch.multiple(self.launcher.os, execv=mock.DEFAULT, execve=mock.DEFAULT, execvpe=mock.DEFAULT) as execs, \
              mock.patch.object(self.launcher, "install_runtime", side_effect=AssertionError("unexpected repair")) if forbid_install else mock.patch.object(self.launcher, "note"):
+            if allow_build:
+                processes["run"].side_effect = self.launcher.subprocess.TimeoutExpired(["fake-go", "build"], 0.05)
             code = self.launcher.main()
-            for process in [*processes.values(), *execs.values()]:
+            for name, process in processes.items():
+                if allow_build and name == "run":
+                    self.assertTrue(process.called)
+                    for call in process.call_args_list:
+                        self.assertEqual(call.args[0][0], "fake-go")
+                        self.assertEqual(call.kwargs["timeout"], self.launcher.RUNTIME_BUILD_TIMEOUT)
+                else:
+                    process.assert_not_called()
+            for process in execs.values():
                 process.assert_not_called()
         stdout.flush()
         stderr.flush()
@@ -790,6 +800,110 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertTrue(all("dashboard daemon not reachable" in reply["error"]["message"] for reply in replies))
         self.assertIn("starter refused", stderr.getvalue())
         self.assertEqual(self.runtime_log(), [])
+
+    def test_all_valid_stdio_flag_shapes_preserve_mcp_ids_and_root(self):
+        daemon = self.daemon()
+        daemon.write_endpoint(self.daemon_dir)
+        root = str(self.root / "explicit-root")
+        payload = '{"jsonrpc":"2.0","id":"init","method":"initialize"}\n{"jsonrpc":"2.0","id":22,"method":"tools/list"}\n'
+        for argv in (["serve", "--root", root, "--stdio"], ["serve", "-stdio", "-root", root],
+                     ["serve", "--stdio=true", "--root=" + root], ["serve", "-root=" + root, "-stdio=1"]):
+            with self.subTest(argv=argv):
+                code, output, _ = self.run_main(argv, input_text=payload, forbid_install=True)
+                self.assertEqual(code, 0)
+                replies = [json.loads(line) for line in output.splitlines()]
+                self.assertEqual([reply["id"] for reply in replies], ["init", 22])
+                self.assertIn("tools", replies[1]["result"])
+                self.assertEqual(daemon.hellos[-1]["project_root"], root)
+        for argv in (["serve", "--stdio=false"], ["serve", "--stdio=invalid"], ["serve", "--unknown", "--stdio"]):
+            self.assertEqual(self.launcher.proxy_mode(argv), "cli")
+
+    def test_cli_stdin_is_utf8_even_under_a_non_utf8_windows_wrapper(self):
+        daemon = self.daemon(cli_exit_code=0)
+        daemon.write_endpoint(self.daemon_dir)
+        for argv, payload in ((["git", "commit", "--description-file", "-"], "한글 commit body — café"),
+                              (["mailbox", "codex-stop-hook"], '{"cwd":"D:/작업/저장소","stop_hook_active":true}')):
+            with self.subTest(argv=argv):
+                code, _, _ = self.run_main(argv, input_text=payload, input_encoding="cp1252", forbid_install=True)
+                self.assertEqual(code, 0)
+                self.assertEqual(daemon.hellos[-1]["stdin"], payload)
+
+    def test_cold_stalled_download_reaches_framed_mcp_errors(self):
+        silent = socket.socket()
+        silent.bind(("127.0.0.1", 0))
+        silent.listen(8)
+        self.addCleanup(silent.close)
+        self.env["WS_MCP_BOOTSTRAP_URL"] = f"http://127.0.0.1:{silent.getsockname()[1]}/runtime"
+        self.binary.unlink()
+        self.launcher.runtime_metadata_path(self.binary).unlink()
+        payload = '{"jsonrpc":"2.0","id":"cold","method":"initialize"}\n{"jsonrpc":"2.0","id":3,"method":"tools/call"}\n'
+        started = time.monotonic()
+        with mock.patch.object(self.launcher, "RUNTIME_DOWNLOAD_TIMEOUT", 0.05):
+            code, output, stderr = self.run_main(["serve", "--stdio"], input_text=payload)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(code, 1)
+        replies = [json.loads(line) for line in output.splitlines()]
+        self.assertEqual([reply["id"] for reply in replies], ["cold", 3])
+        self.assertTrue(all("dashboard daemon not reachable" in reply["error"]["message"] for reply in replies))
+        self.assertIn(b"timed out", stderr)
+
+    def test_cold_build_timeout_reaches_framed_mcp_errors(self):
+        self.binary.unlink()
+        self.launcher.runtime_metadata_path(self.binary).unlink()
+        def build(*args, **kwargs):
+            self.launcher.build_local_devenv_runtime(self.root, self.binary, {"plugin_version": "0.48.16"},
+                {"tool_dir": self.root, "go": Path("fake-go")}, "linux")
+        payload = '{"jsonrpc":"2.0","id":"build","method":"initialize"}\n'
+        with mock.patch.object(self.launcher, "install_runtime", side_effect=build), \
+             mock.patch.object(self.launcher, "source_runtime_metadata", return_value={"version": "0.48.16"}):
+            code, output, stderr = self.run_main(["serve", "--stdio"], input_text=payload, allow_build=True)
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(output)["id"], "build")
+        self.assertIn("dashboard daemon not reachable", json.loads(output)["error"]["message"])
+        self.assertIn(b"timed out", stderr)
+
+    def test_recovery_repairs_missing_runtime_only_when_start_becomes_needed(self):
+        source = self.root / "repair-source"
+        self.launcher.copy_runtime(self.binary, source)
+        self.binary.unlink()
+        self.launcher.runtime_metadata_path(self.binary).unlink()
+        for transient_initial_failure in (False, True):
+            with self.subTest(transient_initial_failure=transient_initial_failure):
+                attempts = []
+                def repair():
+                    attempts.append(True)
+                    if transient_initial_failure and len(attempts) == 1:
+                        return False
+                    self.launcher.copy_runtime(source, self.binary)
+                    return True
+                old = self.daemon(name="old", slow_methods={"side-effect"})
+                successor = self.daemon(name="repaired")
+                self.point_start_at(successor)
+                if not transient_initial_failure:
+                    old.write_endpoint(self.daemon_dir)
+                else:
+                    (self.daemon_dir / "endpoint.json").unlink(missing_ok=True)
+                client = ProxyClient(self.launcher, self.link(repair_runtime=repair))
+                client.send("initialize")
+                client.recv()
+                if not transient_initial_failure:
+                    self.assertEqual(attempts, [], "healthy old daemon needs no local upgrade")
+                    lost_id = client.send("side-effect")
+                    time.sleep(0.1)
+                    old.close()
+                    self.assertEqual(client.recv()["id"], lost_id)
+                self.wait_for_hello(successor, timeout=8)
+                ping_id = client.send("ping")
+                reply = client.recv()
+                self.assertEqual(reply["id"], ping_id)
+                self.assertEqual(reply["result"]["served_by"], "repaired")
+                self.assertEqual(client.close(), 0)
+                self.assertTrue(attempts)
+                self.assertNotIn("side-effect", [method for method, _ in successor.requests])
+                self.assertTrue(all(row["args"][0] == "daemon-start" for row in self.runtime_log()))
+                self.binary.unlink()
+                self.launcher.runtime_metadata_path(self.binary).unlink()
+                successor.close()
 
     # --- parity with Go -----------------------------------------------------------
 

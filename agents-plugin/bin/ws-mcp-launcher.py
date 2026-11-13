@@ -16,6 +16,8 @@ from pathlib import Path
 
 
 _BREADCRUMB_DIR: Path | None = None
+RUNTIME_DOWNLOAD_TIMEOUT = 10.0
+RUNTIME_BUILD_TIMEOUT = 120.0
 
 
 def set_breadcrumb_dir(runtime_dir: Path) -> None:
@@ -169,7 +171,7 @@ def download_file(url: str, destination: Path) -> None:
     import urllib.request
 
     try:
-        with urllib.request.urlopen(url) as response, destination.open("wb") as out:
+        with urllib.request.urlopen(url, timeout=RUNTIME_DOWNLOAD_TIMEOUT) as response, destination.open("wb") as out:
             shutil.copyfileobj(response, out)
     except Exception as exc:
         fail(f"failed to download {url}: {exc}")
@@ -626,6 +628,7 @@ def build_local_devenv_runtime(runtime_dir: Path, binary: Path, contract: dict, 
             [str(go_binary), "build", "-o", str(tmp), "./cmd/ws-mcp"],
             cwd=str(tool_dir),
             env=local_devenv_build_env(os_name),
+            timeout=RUNTIME_BUILD_TIMEOUT,
             check=False,
         )
         if proc.returncode == 0:
@@ -1097,13 +1100,9 @@ def proxy_hello(mode: str, argv: list[str], env: dict, runtime_version: str) -> 
     env = hello_env(env, cwd)
     root = env.get("WS_MCP_PROJECT_ROOT", "")
     if mode == "mcp":
-        for index, arg in enumerate(argv[1:], 1):
-            if arg in {"--root", "-root"} and index + 1 < len(argv):
-                root = argv[index + 1]
-            elif arg.startswith(("--root=", "-root=")):
-                root = arg.split("=", 1)[1]
-        if root and root != ".":
-            root = os.path.abspath(root)
+        explicit_root = stdio_root(argv)
+        if explicit_root and explicit_root != ".":
+            root = os.path.abspath(explicit_root)
     return {
         "protocol": PROXY_PROTOCOL,
         "mode": mode,
@@ -1224,12 +1223,14 @@ class DaemonLink:
         answer_budget: float | None = None,
         start_budget: float | None = None,
         allow_start: bool = True,
+        repair_runtime=None,
     ) -> None:
         self.binary = binary
         self.runtime_version = runtime_version
         self.os_name = os_name
         self.env = env
         self.allow_start = allow_start
+        self.repair_runtime = repair_runtime
         self.daemon_dir = proxy_daemon_dir(env)
         extra = 10.0 if os_name == "windows" else 5.0
         # Each connection/start attempt is bounded; failed attempts never
@@ -1323,9 +1324,18 @@ class DaemonLink:
     def start_daemon(self) -> bool:
         """Run the staged binary's daemon-start entry; True when it reports a daemon."""
         self.started = True
-        if read_runtime_metadata(self.binary) is None:
+        # Healthy peers do not need a local candidate. Repair only when a
+        # start/replacement is actually required, including after reconnect.
+        if self.repair_runtime is not None and not self.repair_runtime():
+            self.start_error = "runtime repair failed; no verified runtime available to start the daemon"
+            return False
+        metadata = read_runtime_metadata(self.binary)
+        if metadata is None:
             self.start_error = "no verified runtime metadata available to start the daemon"
             return False
+        self.binary_version = metadata["version"]
+        self.build_time = self.binary.stat().st_mtime_ns // 1_000_000
+        self._content_hash = None
         try:
             staged = stage_daemon_binary(self.binary, self.daemon_dir / DAEMON_BIN_DIR_NAME)
         except OSError as exc:
@@ -1624,9 +1634,41 @@ def watch_parent_exit(on_exit) -> None:
     threading.Thread(target=run, name="ws-mcp-launcher-parent-watch", daemon=True).start()
 
 
+def stdio_root(argv: list[str]) -> str | None:
+    """Parse serve's Go flag shapes; None means not a valid stdio invocation."""
+    if argv[:1] != ["serve"]:
+        return None
+    stdio, root, index = False, "", 1
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--" or not arg.startswith("-"):
+            break  # Go flag parsing stops at the first positional argument.
+        name, assignment, value = arg.partition("=")
+        if name in {"--stdio", "-stdio"}:
+            if not assignment:
+                stdio = True
+            elif value in {"1", "t", "T", "TRUE", "true", "True"}:
+                stdio = True
+            elif value in {"0", "f", "F", "FALSE", "false", "False"}:
+                stdio = False
+            else:
+                return None
+        elif name in {"--root", "-root"}:
+            if not assignment:
+                index += 1
+                if index >= len(argv):
+                    return None
+                value = argv[index]
+            root = value
+        else:
+            return None
+        index += 1
+    return root if stdio else None
+
+
 def proxy_mode(argv: list[str]) -> str:
     """All product commands stay in the daemon; only its starter executes."""
-    if argv[:2] == ["serve", "--stdio"]:
+    if stdio_root(argv) is not None:
         return "mcp"
     if argv[:1] == ["daemon-start"]:
         return "lifecycle"
@@ -1766,7 +1808,9 @@ def main() -> int:
     else:
         need_install = True
 
-    if need_install:
+    def repair_runtime(force: bool = False) -> bool:
+        if not force and runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=local_enabled):
+            return True
         note("installing or repairing incompatible runtime")
         clear_compatibility_stamp(runtime_dir)
         try:
@@ -1774,14 +1818,17 @@ def main() -> int:
             if not runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=local_enabled):
                 fail("incompatible ws-mcp runtime after repair")
             write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
-        except SystemExit:
+            return True
+        except (SystemExit, OSError, ValueError, subprocess.SubprocessError) as exc:
+            print(f"ws-mcp-launcher: runtime repair failed: {exc}", file=sys.stderr, flush=True)
             if inspection or mode == "lifecycle":
-                raise
-            # Keep the adapter available to answer requests with a framed error.
-            # A healthy daemon can still serve even if local repair failed.
-            pass
+                fail(f"dashboard daemon not reachable: runtime repair failed: {exc}")
+            return False
 
-    link = DaemonLink(binary, str(contract.get("plugin_version", "")), os_name, os.environ, allow_start=not inspection)
+    if need_install:
+        repair_runtime(force=True)
+    link = DaemonLink(binary, str(contract.get("plugin_version", "")), os_name, os.environ,
+                      allow_start=not inspection, repair_runtime=repair_runtime)
     if inspection:
         # An explicit bootstrap+version repairs a child runtime but never starts it.
         return inspect_runtime(link, argv, None)
@@ -1803,7 +1850,10 @@ def main() -> int:
         argv[:2] == ["git", "commit"] and ("--description-file=-" in argv or "-description-file=-" in argv
         or any(arg in {"--description-file", "-description-file"} and index + 1 < len(argv) and argv[index + 1] == "-"
                for index, arg in enumerate(argv))))
-    return proxy_cli(link, argv, sys.stdout.buffer, sys.stderr.buffer, sys.stdin.read() if reads_stdin else None)
+    # The pipe is UTF-8 regardless of Python's Windows console/locale encoding.
+    # Replacement matches Go JSON decoding for malformed UTF-8 hook payloads.
+    input_text = sys.stdin.buffer.read().decode("utf-8", errors="replace") if reads_stdin else None
+    return proxy_cli(link, argv, sys.stdout.buffer, sys.stderr.buffer, input_text)
 
 
 if __name__ == "__main__":
