@@ -55,8 +55,11 @@
 * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--wb-fg) 24%, transparent) transparent; }
 *:hover { scrollbar-color: color-mix(in srgb, var(--wb-fg) 42%, transparent) transparent; }
 
-.dwrap { margin: 0 auto; padding: 12px 16px; max-width: 1680px; }
-.dwrap.narrow { max-width: 1080px; padding-top: 16px; }
+/* A session page stands at the window's left edge: wider than its 1680px
+   cap, the spare width stays on the right, where the pinned column fills it
+   (the pinned column block below). The index page stays centred. */
+.dwrap { margin: 0; padding: 12px 16px; max-width: 1680px; }
+.dwrap.narrow { margin: 0 auto; max-width: 1080px; padding-top: 16px; }
 
 /* ===== top bar ===== */
 .top { gap: 10px; margin-bottom: 10px; }
@@ -869,6 +872,7 @@ body:has(> .tfix) .r-board .reply { margin-right: 44px; }
 /* board-first page: no live layer; the board in one readable column that
    the page scrolls */
 .dgrid.board { display: block; max-width: 900px; margin: 0 auto; }
+@media (min-width: 1600px) { .dgrid.board { margin: 0; } }
 
 /* A changed topic's next body frame loads over the frame it replaces,
    unseen and out of the layout, until it has loaded and drawn (the page
@@ -887,7 +891,7 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
    card in a wrapping grid (below), or the git sheet (gitbody). */
 :root { --drhw: 0px; --dpad: 16px; }
 .drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: 40; pointer-events: none; }
-.dr-in { position: relative; max-width: 1680px; margin: 0 auto; }
+.dr-in { position: relative; max-width: 1680px; margin: 0; }
 .dr-clip { position: absolute; top: var(--drtop, 48px); left: var(--dpad); right: var(--dpad); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
 .drawer.open .dr-clip, .drawer.drag .dr-clip { visibility: visible; }
 .drawer.anim .dr-clip { transition: height .18s ease-out, visibility 0s linear .18s; }
@@ -1281,7 +1285,8 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
    (--tkmaxw). While a store page shows (body.tk-paged), it takes the page's
    own content's place on every page, in a column one window tall. */
 .qsslot:empty { display: none; }
-.dash.index { --tkmaxw: 1080px; }
+.dash { --tkml: 0px; }
+.dash.index { --tkmaxw: 1080px; --tkml: auto; }
 body.tk-paged .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 body.tk-paged .dwrap > .top { flex: none; }
 body.tk-paged #grid, body.tk-paged #drawer, body.tk-paged #dash-banner, body.tk-paged #r-sessions, body.tk-paged .lanbox { display: none; }
@@ -1444,9 +1449,14 @@ a[data-wl="file"]:not([href]) { color: inherit; }
    column takes the session rail's place and the rail overlays as it does
    below 1600px (the arrow and Ctrl+` open it); from 2200px both show. The
    store page (.tk-spage) takes the hidden grid's cell in every one of
-   these grids. The column scrolls on its own; a handle on each edge drags
-   its width (--pinw, kept by cards.js): the left one, in the gap toward
-   the board, still widens it once the page fills the window. */
+   these grids. The board keeps its no-pin width (--pbw: the 1680px page
+   less its paddings, the rail and its gap; the board-first page's 900px
+   column) and the column fills the window's remaining width to its right,
+   so the page fills the window. The column scrolls on its own; a handle on
+   each edge drags its least width (--pinw, kept by cards.js): past the
+   remaining width it narrows the board. */
+:root { --pbw: calc(1680px - 32px - 356px); }
+.dash.board { --pbw: 900px; }
 .bpcol { display: none; }
 .bpins:empty { display: none; }
 .r-board > .bpins { margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px dashed var(--wb-line); }
@@ -1461,16 +1471,15 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .bp-edge:hover::after, .bp-edge.drag::after { background: var(--wb-primary); }
 @media (min-width: 1600px) {
   :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
-  :root[data-pincol] .dbody { grid-template-columns: minmax(0, 1fr) var(--pinw, 480px); }
+  :root[data-pincol] .dbody { grid-template-columns: minmax(0, var(--pbw)) minmax(var(--pinw, 480px), 1fr); }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
   .dash:not(.live) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+  /* the page fills the window; the drawers follow it, so their handles stay at its right edge */
+  :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dr-in { max-width: none; }
+  :root[data-pincol] .tk-drawer { --tkmaxw: none; }
 }
 @media (min-width: 1600px) and (max-width: 2199.98px) {
-  /* the column takes the rail's place: the page grows by the column and its gap less the rail's 356px */
-  :root[data-pincol] .dwrap:not(.narrow) { max-width: calc(1680px - 340px + var(--pinw, 480px)); }
-  /* the drawers follow the widened page, so their handles stay at its right edge */
-  :root[data-pincol] .dr-in { max-width: calc(1680px - 340px + var(--pinw, 480px)); }
-  :root[data-pincol] .tk-drawer { --tkmaxw: calc(1680px - 340px + var(--pinw, 480px)); }
+  /* the column takes the rail's place, and the rail overlays */
   :root[data-pincol] .rail { position: fixed; z-index: 45; top: 12px; bottom: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px); max-height: none; box-shadow: var(--wb-shadow-hi); transform: translateX(calc(-100% - 20px)); visibility: hidden; transition: transform .22s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .22s; }
   :root[data-pincol].rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
   :root[data-pincol] .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
@@ -1478,11 +1487,8 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   :root[data-pincol] .top > .back { display: inline-flex; }
 }
 @media (min-width: 2200px) {
-  /* rail and column both show: the page grows by the column and its gap, so the board keeps its no-pin width */
-  :root[data-pincol] .dwrap:not(.narrow) { max-width: calc(1680px + 16px + var(--pinw, 480px)); }
-  :root[data-pincol] .dr-in { max-width: calc(1680px + 16px + var(--pinw, 480px)); }
-  :root[data-pincol] .tk-drawer { --tkmaxw: calc(1680px + 16px + var(--pinw, 480px)); }
-  :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, 1fr) var(--pinw, 480px); }
+  /* rail and column both show */
+  :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, var(--pbw)) minmax(var(--pinw, 480px), 1fr); }
   :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
   :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
   :root[data-pincol] .bpcol { grid-column: 3; }
@@ -1492,7 +1498,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
    drop zones show while a drag runs (data-bdrag on the root): the empty
    pin group atop the board ("group"), or the zone along the right edge
    where a first pin opens the pinned column ("edge"). The zone fills the
-   strip right of the page (the page is 1680px wide at most while nothing
+   strip right of the left-aligned page (1680px wide at most while nothing
    is pinned), and at least 48px, so it leaves the board column to its own
    reorder drops; where the strip is narrow its label runs vertically. */
 .tbar .tpin { color: inherit; opacity: .45; }
@@ -1506,10 +1512,10 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .bdrop[hidden] { display: none; }
 :root[data-bdrag="group"] .r-board > .bpins:empty { display: block; position: sticky; top: var(--wb-rail-inset, 0px); z-index: 5; min-height: 54px; padding: 0; border: 1.5px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-bg)); }
 :root[data-bdrag="group"] .r-board > .bpins:empty::before { content: attr(data-drop); padding: 18px 12px; text-align: center; color: var(--wb-primary); }
-.bpzone { position: fixed; z-index: 40; top: 64px; bottom: 16px; right: 12px; width: clamp(48px, calc((100vw - 1680px) / 2 + 4px), 380px); display: none; place-items: center; padding: 12px; border: 2px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; font-size: 13px; text-align: center; pointer-events: none; }
+.bpzone { position: fixed; z-index: 40; top: 64px; bottom: 16px; right: 12px; width: clamp(48px, calc(100vw - 1676px), 380px); display: none; place-items: center; padding: 12px; border: 2px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; font-size: 13px; text-align: center; pointer-events: none; }
 :root[data-bdrag="edge"] .bpzone { display: grid; }
 .bpzone.over { background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
-@media (max-width: 1879.98px) { .bpzone { writing-mode: vertical-rl; padding: 12px 4px; } }
+@media (max-width: 1779.98px) { .bpzone { writing-mode: vertical-rl; padding: 12px 4px; } }
 .rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
 .rail .rsp { flex: 1; }
 .rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }
