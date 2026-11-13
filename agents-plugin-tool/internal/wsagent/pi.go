@@ -214,6 +214,9 @@ func piMCPServers(spec StartSpec) (map[string]any, error) {
 			"env":      spec.WSMCP.Env,
 			"cwd":      spec.workDir(),
 			"exposure": "direct",
+			// Pi's default 60s request timeout must not cut off the launcher's
+			// 75s unsent-request wait (including initialize and tools/list).
+			"timeout": 120,
 		}
 	}
 	return servers, nil

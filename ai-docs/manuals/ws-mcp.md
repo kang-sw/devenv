@@ -1202,9 +1202,13 @@ starts a daemon.
 
 Unavailability is explicit: stderr includes "dashboard daemon not reachable"
 and the underlying cause. MCP requests receive `-32000` with their original
-IDs while recovery retries with bounded attempts/backoff; no tool side effect
-is replayed. One-shot CLI commands return nonzero without replaying a command
-whose outcome may be unknown. Codex Stop retains its fail-open exit 0.
+IDs when a sent request's outcome is unknown; no tool side effect is replayed.
+Requests not yet sent wait up to 75 s for the daemon, re-reading its endpoint
+about every 3 s; exhaustion adds `(waited 75s for the dashboard daemon)` to
+the existing error. This includes MCP `initialize`, `tools/list`, and
+`tools/call`, and one-shot CLI forwarding before its command-carrying hello
+is sent. A failure after sending that hello or an MCP request is not retried.
+Codex Stop retains its fail-open exit 0.
 
 Reconnect: when the connection ends while the client is still attached (the
 daemon was replaced or died), the proxy connects again (giving a successor
@@ -1215,11 +1219,14 @@ answer, re-sends `notifications/initialized`, and answers every request that
 was in flight with a JSON-RPC error (`-32000`, "ws-mcp daemon connection was
 replaced"); the client never sees the server go away. Reconnecting is
 paced: a connection the daemon closes within 2 s counts as a quick close;
-retries back off by 0.5 s × the count, capped at 5 s. Three quick closes,
+retries wait at least 3 s, rising by 0.5 s × the count to a 5 s cap. Three quick closes,
 failed starts, refused hellos, and reconnect failures never switch to a
-child server. In-flight calls fail before waiting for recovery, and calls
-arriving during the gap fail immediately. A hosted server for a reconnected session re-registers that
-session's mailbox presence on its first keyed call and keeps the owner
+child server. In-flight calls fail before waiting for recovery; calls not yet
+sent wait within the 75 s budget instead. The stdio proxy stays alive even after a
+`tools/list` wait expires, so later requests can use the successor. Pi's
+runner-generated ws MCP registration allows 120 s per request so its default
+60 s timeout does not cut off that wait. A hosted server for a reconnected
+session re-registers that session's mailbox presence on its first keyed call and keeps the owner
 pointer and the `WS_MAILBOX_AUTO` stem its predecessor published, provided
 that record is still live (its PID alive and `last_seen` within the ten-minute
 liveness threshold); a stale record under a reused PID is replaced whole, and

@@ -290,6 +290,9 @@ class LauncherProxyTest(unittest.TestCase):
     def setUp(self):
         time.sleep = _REAL_SLEEP
         self.launcher = load_launcher()
+        # Exercise exhaustion without spending the production 75s per test.
+        self.launcher.DAEMON_RETRY_SECONDS = 0.3
+        self.launcher.DAEMON_RETRY_POLL_SECONDS = 0.05
         self.tmp = tempfile.TemporaryDirectory(prefix="ws-launcher-proxy.")
         self.addCleanup(self.tmp.cleanup)
         # Resolved: the launcher reports real paths, and macOS's temp dir
@@ -544,8 +547,9 @@ class LauncherProxyTest(unittest.TestCase):
         answer = client.recv()
         self.assertEqual(answer["id"], slow_id)
         self.assertEqual(answer["error"]["code"], -32000)
+        self.assertEqual(answer["error"]["message"], "dashboard daemon not reachable; the request did not complete")
         # Lost calls fail immediately, before recovery. Wait for the successor
-        # before expecting the ping to succeed; calls during the gap also fail.
+        # before expecting the ping to succeed; unsent calls wait during the gap.
         self.wait_for_hello(new)
         # The replayed initialize answer is dropped: the next line is the ping's.
         ping_id = client.send("ping")
@@ -553,6 +557,8 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(answer["id"], ping_id)
         self.assertEqual(answer["result"]["served_by"], "new")
         self.assertEqual(client.close(), 0)
+        self.assertEqual([m for m, _ in old.requests].count("slow"), 1)
+        self.assertNotIn("slow", [m for m, _ in new.requests])
 
     def test_a_daemon_that_dies_with_no_successor_is_restarted(self):
         old = self.daemon(name="old")
@@ -617,6 +623,134 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertEqual(client.close(), 1)
         self.assertTrue(all(r["args"][0] == "daemon-start" for r in self.runtime_log() if "args" in r))
         self.assertEqual([r for r in self.runtime_log() if "recv" in r], [])
+
+    def test_unsent_tools_list_waits_for_endpoint_after_three_attempts(self):
+        self.launcher.DAEMON_RETRY_SECONDS = 3.0
+        old = self.daemon(name="old")
+        old.write_endpoint(self.daemon_dir)
+        client = ProxyClient(self.launcher, self.link(allow_start=False))
+        client.send("initialize")
+        client.recv()
+        client.send("notifications/initialized", notification=True)
+        (self.daemon_dir / "endpoint.json").unlink()
+        successor = self.daemon(name="successor")
+        attempts = []
+        original = self.launcher.read_daemon_endpoint
+        def discover(directory):
+            value = original(directory)
+            if value is None:
+                attempts.append(True)
+                if len(attempts) == 3:
+                    successor.write_endpoint(directory)
+            return value
+        with mock.patch.object(self.launcher, "read_daemon_endpoint", side_effect=discover):
+            old.close()
+            time.sleep(0.1)
+            list_id = client.send("tools/list")
+            call_id = client.send("tools/call")
+            answer = client.recv()
+            call_answer = client.recv()
+        self.assertEqual(call_answer["id"], call_id)
+        self.assertEqual(call_answer["result"]["served_by"], "successor")
+        self.assertEqual(answer["id"], list_id)
+        self.assertIn("tools", answer["result"])
+        self.assertGreaterEqual(len(attempts), 3)
+        self.assertEqual([r for r in successor.requests if r[0] == "tools/call"], [("tools/call", call_id)])
+        self.assertEqual(client.close(), 0)
+
+    def test_initial_initialize_waits_without_replaying_the_unsent_original(self):
+        self.launcher.DAEMON_RETRY_SECONDS = 3.0
+        daemon = self.daemon()
+        attempts = []
+        original = self.launcher.read_daemon_endpoint
+        def discover(directory):
+            attempts.append(True)
+            if len(attempts) == 3:
+                daemon.write_endpoint(directory)
+            return original(directory)
+        with mock.patch.object(self.launcher, "read_daemon_endpoint", side_effect=discover):
+            client = ProxyClient(self.launcher, self.link(allow_start=False))
+            init_id = client.send("initialize")
+            answer = client.recv()
+        self.assertEqual(answer["id"], init_id)
+        self.assertIn("serverInfo", answer["result"])
+        client.send("tools/list")
+        self.assertIn("tools", client.recv()["result"])
+        self.assertEqual(client.close(), 0)
+        self.assertEqual([r for r in daemon.requests if r[0] == "initialize"], [("initialize", init_id)])
+
+    def test_tools_list_exhaustion_keeps_stdio_alive_for_later_reconnect(self):
+        old = self.daemon()
+        old.write_endpoint(self.daemon_dir)
+        client = ProxyClient(self.launcher, self.link(allow_start=False))
+        client.send("initialize")
+        client.recv()
+        (self.daemon_dir / "endpoint.json").unlink()
+        old.close()
+        time.sleep(0.1)
+        started = time.monotonic()
+        request_id = client.send("tools/list")
+        call_id = client.send("tools/call")
+        answers = {reply["id"]: reply for reply in (client.recv(), client.recv())}
+        self.assertLess(time.monotonic() - started, 0.55, "concurrent calls must not wait two budgets")
+        self.assertIn("waited 0.3s", answers[call_id]["error"]["message"])
+        answer = answers[request_id]
+        self.assertEqual(answer["id"], request_id)
+        self.assertEqual(answer["error"]["message"],
+                         "dashboard daemon not reachable; request was not sent (waited 0.3s for the dashboard daemon)")
+        self.assertTrue(client.thread.is_alive())
+        successor = self.daemon(name="successor")
+        successor.write_endpoint(self.daemon_dir)
+        self.wait_for_hello(successor)
+        client.send("tools/list")
+        self.assertIn("tools", client.recv()["result"])
+        self.assertEqual(client.close(), 0)
+
+    def test_cli_retries_missing_and_stale_endpoints_with_one_deadline(self):
+        self.launcher.DAEMON_RETRY_SECONDS = 10.0
+        self.launcher.DAEMON_RETRY_POLL_SECONDS = 1.0
+        for stale in (False, True):
+            with self.subTest(stale=stale):
+                now = [0.0]
+                reads = []
+                daemon = self.daemon(cli_exit_code=0)
+                link = self.link(allow_start=False)
+                def discover(directory):
+                    reads.append(directory)
+                    if len(reads) >= 3:
+                        return daemon.endpoint()
+                    return {"port": 1, "token": "stale"} if stale else None
+                stdout = io.BytesIO()
+                with mock.patch.object(self.launcher.time, "monotonic", side_effect=lambda: now[0]), \
+                     mock.patch.object(self.launcher.time, "sleep", side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)), \
+                     mock.patch.object(self.launcher, "read_daemon_endpoint", side_effect=discover):
+                    code = self.launcher.proxy_cli(link, ["tools"], stdout, io.BytesIO())
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(stdout.getvalue())["served_by"], "daemon")
+                self.assertEqual(len(reads), 3)
+                self.assertEqual(len(daemon.hellos), 1)
+
+    def test_cli_never_appears_exhausts_budget(self):
+        now = [0.0]
+        stderr = io.BytesIO()
+        with mock.patch.object(self.launcher.time, "monotonic", side_effect=lambda: now[0]), \
+             mock.patch.object(self.launcher.time, "sleep", side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)):
+            code = self.launcher.proxy_cli(self.link(allow_start=False), ["tools"], io.BytesIO(), stderr)
+        self.assertEqual(code, 1)
+        self.assertEqual(now[0], 0.3)
+        self.assertIn(b"(waited 0.3s for the dashboard daemon)", stderr.getvalue())
+
+    def test_cli_failure_after_hello_is_not_retried(self):
+        for refuse in (False, True):
+            with self.subTest(refuse=refuse):
+                daemon = self.daemon(refuse_reason="closing after hello" if refuse else "")
+                daemon.write_endpoint(self.daemon_dir)
+                # Close after acceptance without a final frame.
+                daemon.serve_cli = lambda conn, hello: None
+                stderr = io.BytesIO()
+                self.assertEqual(self.launcher.proxy_cli(self.link(), ["tools"], io.BytesIO(), stderr), 1)
+                self.assertEqual(len(daemon.hellos), 1)
+                self.assertNotIn(b"waited", stderr.getvalue())
 
     def test_stdin_close_ends_the_session(self):
         daemon = self.daemon()
@@ -843,7 +977,7 @@ class LauncherProxyTest(unittest.TestCase):
             child.assert_not_called()
             self.assertTrue(all(call.args[0][1] == "daemon-start" for call in starter.call_args_list))
         replies = [json.loads(line) for line in stdout.getvalue().splitlines()]
-        self.assertEqual([reply["id"] for reply in replies], ["first", 7])
+        self.assertCountEqual([reply["id"] for reply in replies], ["first", 7])
         self.assertTrue(all("dashboard daemon not reachable" in reply["error"]["message"] for reply in replies))
         self.assertIn("starter refused", stderr.getvalue())
         self.assertEqual(self.runtime_log(), [])
@@ -890,7 +1024,7 @@ class LauncherProxyTest(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 2)
         self.assertEqual(code, 1)
         replies = [json.loads(line) for line in output.splitlines()]
-        self.assertEqual([reply["id"] for reply in replies], ["cold", 3])
+        self.assertCountEqual([reply["id"] for reply in replies], ["cold", 3])
         self.assertTrue(all("dashboard daemon not reachable" in reply["error"]["message"] for reply in replies))
         self.assertIn(b"timed out", stderr)
 
