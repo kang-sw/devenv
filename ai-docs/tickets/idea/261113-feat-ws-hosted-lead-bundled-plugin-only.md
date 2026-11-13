@@ -58,11 +58,11 @@ suppresses settings `packages` entries.
 
 ## Open questions (board items, pending owner)
 
-- (393) Default isolation scope for hosted leads: replace only ws/wsflow vs
+- (392) Default isolation scope for hosted leads: replace only ws/wsflow vs
   isolate everything vs knob (default replace-only, knob for extreme).
   Recommendation: knob.
-- (394) In extreme mode keep user permissions/hooks/CLAUDE.md memory vs
+- (393) In extreme mode keep user permissions/hooks/CLAUDE.md memory vs
   `--setting-sources ""`. Recommendation: keep, if probe (1) passes.
-- Pending acks: (395) bundled copy always wins on version mismatch; (396) child
-  launch path unchanged; (397) probe (1)-(3) before implementing; (398) bundled
-  = daemon's own package root.
+- Pending acks: (394) bundled copy always wins on version mismatch; (395) child
+  launch path unchanged; (396) probe (1)-(3) before implementing; (397) bundled
+  = daemon's own package root; (398) tier T0.
