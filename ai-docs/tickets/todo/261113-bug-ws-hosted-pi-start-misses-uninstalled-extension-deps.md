@@ -31,13 +31,8 @@ Estimate (not a decision): Phase 1 is small, Phase 2 is medium.
 1. (408)=c. A release ships the Pi extension (`agents-plugin-pi`) as one self-contained JS bundle with its npm runtime deps inlined (yaml, ipaddr.js, jiti, linkedom, pi-web-access), placed where hosted Pi finds it beside the bundled plugin. Hosted Pi loads the bundle in preference to `src/index.ts`. Option a (preflight + MCP-bridge fallback) is included as the safety net under c: before passing `--extension`, check that the entry can load (the bundle exists, or for a source checkout the deps resolve). On failure, fall back to the MCP bridge with a visible PluginWarning instead of letting Pi exit.
    - Rejected: b, where the launcher runs npm install into a cache at start. It needs npm and network at session start, and it is fragile on Windows.
 2. Compatibility tier T0 (AGENTS.md Compatibility Tiers): no MCP, protocol or store change.
-
-## Open Decision Queue
-
-Last ID: (411)
-
-(410) [open] [technical] Where the bundle is built: in the release build vs a committed generated artifact. The release builder w5090 has Go but no Node, so building in the release needs Node there (or esbuild's standalone binary); committing the generated bundle avoids that but adds a generated file to git. Settle before ready.
-(411) [open] [technical] Bundler: esbuild vs others. esbuild is the default candidate (single binary, handles TS); jiti-loaded TS must also be handled. Settle before ready.
+3. (410)=A developer machine with Node generates the stage-2 single JS bundle, which is committed to git rather than generated during the release build. The release build host w5090 has Go only, no Node/npm, and bundling needs the npm dependencies installed. The bundle carries a header with a hash of its inputs (extension sources plus lockfile); a Go test recomputes the hash and fails when it differs, so the staleness check also runs on the Node-less build host. Mark the bundle as generated (for example, `.gitattributes linguist-generated / -diff`) so review skips it. Rejected: generating during the release build, which needs Node or npm on the build host.
+4. (411)=Use esbuild for the bundler: it handles TypeScript natively, is a single executable, and turns the TypeScript currently loaded through jiti into static imports in the bundle. Rejected: rollup/webpack, which need more plugins and configuration without a gain.
 
 ## Constraints
 
