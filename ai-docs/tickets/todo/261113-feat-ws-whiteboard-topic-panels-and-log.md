@@ -567,6 +567,26 @@ Verification expectations:
   **44% of 512 KiB**, not the follower ticket's stale 42% citation
   (`agents-plugin-tool/internal/wswhiteboard/render_test.go:891-903`).
 
+### Result (5695371fb) - 2026-11-13
+
+Implemented the mixed chronological stream, immutable-version folds, latest-three
+panel expansion, 50-entry paging, folded system runs, compact embeds, and full-width
+file layout. History and closed-topic targets materialize from inert templates;
+viewport/disclosure state survives region swaps. Panel frames retain opaque origins
+and distinct namespaced identities, with source/key validation on the shared bridge.
+Entry mentions survive selection splitting, drafts, cancellation, steering,
+interrupts, inbox persistence, and old/new serialization. Authored item/panel
+references remain distinct from selected-text attribution.
+
+Full remote Go suite passed (the previously recorded owner-known exclusion only).
+Initial static-browser checks passed file light/dark at both widths, keyboard
+folds, older history/anchor preservation, sandbox panel jumps, cross-entry drafts,
+and long-image/frame identity gates with no page errors. Self-review fixed run
+merging across page boundaries, deferred closed targets, and external embed links.
+**Forward to Phase 3 verification:** rerun the final local Node/browser bundle;
+the served narrow fixture must select the dashboard's board tab before asserting
+visibility. Shared local-lock queueing delayed that harness-only correction.
+
 ### Phase 3: Query contract and synchronized playbook guidance
 
 Depends on Phases 1 and 2. Implement the confirmed query selectors and

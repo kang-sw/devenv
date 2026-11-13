@@ -5,8 +5,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
-	"unicode/utf8"
 )
 
 // Query depths: one line per topic, then one line per item under its topic,
@@ -38,21 +36,27 @@ type QueryTopic struct {
 	// set only when the query prints bodies.
 	BodyLen int
 	Body    string
-	// Recap is the topic's recap as stored and RecapAt its update time (RFC
-	// 3339 UTC), printed at every depth whatever the body filter, for a
-	// closed topic too; "" when the topic has none.
-	Recap, RecapAt string
-	// LastChange is the latest change time of the topic's items, body, and
-	// recap, RFC 3339 UTC, "" when none is recorded.
+	// LatestAgent is the current-state line, never a panel or system event.
+	LatestAgent *Entry
+	// Entries contain selected stream metadata/log text; panel Text is never
+	// populated here. Panels is discovery's latest matching version per pN.
+	Entries, Panels               []Entry
+	OmittedEntries, OmittedPanels int
+	// LastChange is the latest change time of items, content, or entries,
+	// RFC 3339 UTC, "" when none is recorded.
 	LastChange string
 	// Items are the matching items in ID order; none at depth topics.
 	Items []Item
 }
 
-// QueryResult is a whiteboard.query result: the topic -> item -> detail tree
-// and what the defaults left out.
+// QueryResult holds topic/item or stream metadata, one direct entry when
+// requested, and counts explaining what the defaults left out.
 type QueryResult struct {
-	Depth string
+	// Mode is empty for explicit legacy item/content queries.
+	Mode   string
+	Last   int
+	Direct *QueryEntry
+	Depth  string
 	// Fields are the detail fields printed at depth full; nil prints all.
 	Fields []string
 	Topics []QueryTopic
@@ -155,7 +159,7 @@ func parseQuery(p *problems, payload any) queryFilter {
 		f.statuses = map[string]bool{StatusOpen: true}
 		f.defaultStatus = true
 	}
-	f.body = target == "topic"
+	// Current content is retrieved only by explicit body:true, at every depth.
 	if hasBody {
 		f.body = body
 	}
@@ -166,10 +170,10 @@ func parseQuery(p *problems, payload any) queryFilter {
 	return f
 }
 
-// Query returns the whiteboard.query result for payload: filters AND
-// together (id and ids union), topics in the order their first item was
-// added (body-only topics after, in body order), items in ID order.
-func Query(state *State, payload any) (QueryResult, []string) {
+// queryItems retains explicit item/content queries: filters AND together
+// (id and ids union), topics in first-item order with content-only topics
+// after them, and items in ID order.
+func queryItems(state *State, payload any) (QueryResult, []string) {
 	p := &problems{}
 	f := parseQuery(p, payload)
 	if len(p.List) > 0 {
@@ -240,36 +244,7 @@ func Query(state *State, payload any) (QueryResult, []string) {
 			r.FoldedItems += len(all)
 			continue
 		}
-		t := QueryTopic{Name: name, Label: state.TopicLabel(name), Closed: closed, Counts: map[string]int{}}
-		if state.stemmed(name) {
-			t.Stem = name
-		}
-		if closed {
-			t.CloseResult = state.CloseResults[name]
-		}
-		var latest time.Time
-		touch := func(at string) {
-			if changed, err := time.Parse(time.RFC3339, at); err == nil && changed.After(latest) {
-				latest = changed
-			}
-		}
-		for _, item := range all {
-			t.Counts[item.Status]++
-			touch(item.ChangedAt)
-		}
-		if i := state.topicDocIndex(name); i >= 0 {
-			doc := state.Topics[i]
-			t.BodyLen = utf8.RuneCountInString(doc.Body)
-			touch(doc.ChangedAt)
-			touch(doc.RecapAt)
-			if f.body {
-				t.Body = doc.Body
-			}
-			t.Recap, t.RecapAt = doc.Recap, doc.RecapAt
-		}
-		if !latest.IsZero() {
-			t.LastChange = latest.UTC().Format(time.RFC3339)
-		}
+		t := makeQueryTopic(state, name, all, f.body)
 		if f.depth != DepthTopics {
 			t.Items = matched
 			if f.defaultStatus {
@@ -313,15 +288,14 @@ func (f queryFilter) matches(item Item) ([]string, bool) {
 	return fields, len(fields) > 0
 }
 
-// FormatQuery renders a query result as compact text: per topic a header
-// line, its recap line, its body between marker lines when printed, then an
-// indented line per item and its detail lines (depth summary or full); a last line names
-// what the defaults left out. Item fields, the topic label, and the close
-// result print board markup as plain text: the title, links, label, result,
-// and answer through Plain, options, recommendation, and rationale through
-// PlainHTML, matching what the page renders as markup in each; the recap,
-// the body, and an answer quote print as stored.
+// FormatQuery renders compact discovery/stream metadata or the retained
+// explicit item/content tree. Current-state lines and explicit content print
+// as stored; item markup follows Plain/PlainHTML and owner quotes stay exact.
+// Direct retrieval emits one header followed by the untouched payload bytes.
 func FormatQuery(r QueryResult) string {
+	if r.Mode != "" {
+		return formatEntryQuery(r)
+	}
 	var sb strings.Builder
 	if len(r.Topics) == 0 {
 		sb.WriteString("no matching items\n")
@@ -331,15 +305,7 @@ func FormatQuery(r QueryResult) string {
 	quoted := map[[2]string]int{}
 	for _, t := range r.Topics {
 		sb.WriteString(topicLine(t) + "\n")
-		if t.Recap != "" {
-			at := ""
-			if t.RecapAt != "" {
-				at = " (changed: " + t.RecapAt + ")"
-			}
-			// Continuation lines are indented, so a multi-line recap never
-			// reads as a topic or body line of its own.
-			sb.WriteString("recap" + at + ": " + strings.ReplaceAll(t.Recap, "\n", "\n  ") + "\n")
-		}
+		writeQueryCurrent(&sb, t.LatestAgent)
 		if t.Body != "" {
 			sb.WriteString("topic body:\n<<<\n" + t.Body + "\n>>>\n")
 		}

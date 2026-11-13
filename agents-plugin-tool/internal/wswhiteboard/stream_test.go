@@ -85,6 +85,20 @@ func TestStreamViewOrderFoldsAndLatestAgent(t *testing.T) {
 	}
 }
 
+// A previously expanded latest version must not inherit that open state once
+// a re-post makes it historical. Later manual historical disclosures still
+// retain their own stable key across refreshes.
+func TestPanelRepostChangesHistoricalDisclosureKey(t *testing.T) {
+	st := streamFixture()
+	st.Topics[0].Entries = st.Topics[0].Entries[:8]
+	before := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, before, `data-key="entry:e3" id="p1"`)
+	st.Topics[0].Entries = append(st.Topics[0].Entries, Entry{ID: "e9", Kind: EntryPanel, PanelID: "p1", Recap: "new version", Text: "replacement", At: testNow.Format(time.RFC3339)})
+	after := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	wantAll(t, after, `data-key="entry:e3:history"><summary`, `data-key="entry:e9" id="p1" open>`)
+	wantNone(t, after, `data-key="entry:e3"`)
+}
+
 func TestStreamHistoryWindowsAreFiftyChronologicalEntries(t *testing.T) {
 	st := &State{Topics: []TopicDoc{{Name: "t"}}}
 	for i := 1; i <= 123; i++ {
@@ -131,7 +145,7 @@ func TestStreamRenderMetadataChronologyAndSandbox(t *testing.T) {
 		}
 		previous = index
 	}
-	wantAll(t, board, `data-entry="e1" data-kind="system" data-entry-item="17"`, `system events 2`, `data-key="entry:e3"><summary`, `data-key="entry:e9" id="p1" open>`, `class="latest-version" href="#p1"`, `data-doc="entry:e3" data-doc-key="entry:e3" data-topic="t" data-entry="e3"`, `data-doc="topic:t/e3" data-doc-key="topic:t/e3" data-topic="t/e3"`)
+	wantAll(t, board, `data-entry="e1" data-kind="system" data-entry-item="17"`, `system events 2`, `data-key="entry:e3:history"><summary`, `data-key="entry:e9" id="p1" open>`, `class="latest-version" href="#p1"`, `data-doc="entry:e3" data-doc-key="entry:e3" data-topic="t" data-entry="e3"`, `data-doc="topic:t/e3" data-doc-key="topic:t/e3" data-topic="t/e3"`)
 	if strings.Count(board, `id="p1"`) != 1 || strings.Contains(board, `data-id="17"`) {
 		t.Fatal("panel target duplicated or event attribution became an answer control")
 	}

@@ -97,6 +97,21 @@ var beforeBound = bound;
 window.wbBindBoard(root);
 check('board binding wrapper preserves existing host hook', bound, beforeBound + 1);
 check('load notification emitted', loads > 0, true);
+// Re-posting changes a prior latest version's disclosure key, so automatic
+// refresh cannot restore its former open state beside the new latest card.
+next = board(123); window.wbHistory.init(document);
+window.wbHistory.loadTarget(document, 'p1');
+var latestOpen = window.wbHistory.capture(document);
+next = board(124); var historicalPanel = window.wbHistory.loadTarget(document, 'p1');
+historicalPanel.setAttribute('data-key', 'entry:e1:history'); historicalPanel.open = false;
+window.wbHistory.restore(document, latestOpen);
+check('repost folds previously expanded latest version', historicalPanel.open, false);
+historicalPanel.open = true;
+var historicalOpen = window.wbHistory.capture(document);
+next = board(125); historicalPanel = window.wbHistory.loadTarget(document, 'p1');
+historicalPanel.setAttribute('data-key', 'entry:e1:history'); historicalPanel.open = false;
+window.wbHistory.restore(document, historicalOpen);
+check('manual historical disclosure survives later swaps', historicalPanel.open, true);
 // A single system run crosses the fifty-entry page boundary. Preserve the
 // existing disclosure and chronological child entries when the chips merge.
 function systems(from, end, open) { var out = '<details class="system-run" data-key="system:e'+from+'" data-history-anchor="e'+from+'"'+(open ? ' open' : '')+'><summary>system events '+(end-from+1)+'</summary>'; for(var i=from;i<=end;i++) out += '<article class="wb-entry system" id="e'+i+'" data-entry="e'+i+'" data-history-anchor="e'+i+'">event</article>'; return out+'</details>'; }

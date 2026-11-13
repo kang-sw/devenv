@@ -104,7 +104,7 @@ func agendaSizeNote(agenda map[string]json.RawMessage) string {
 
 // renderSessionState builds the ## Session State section from a session record.
 // It renders agenda blobs (keyed alphabetically), open whiteboard topics'
-// recaps, then the todo summary.
+// latest-agent topic summaries, then the todo summary.
 // Only scaffolding strings are handler-owned here; no manual prose.
 func renderSessionState(rec sessionRecord) string {
 	var sb strings.Builder
@@ -142,7 +142,7 @@ func renderSessionState(rec sessionRecord) string {
 		}
 	}
 
-	sb.WriteString(renderWhiteboardRecaps(rec.Whiteboard))
+	sb.WriteString(renderWhiteboardSummaries(rec.Whiteboard))
 
 	// Todo summary.
 	sb.WriteString("\n### Todos\n")
@@ -152,34 +152,31 @@ func renderSessionState(rec sessionRecord) string {
 	return sb.String()
 }
 
-// renderWhiteboardRecaps lists each open whiteboard topic's recap, one line
-// per topic in the board's topic order, so a revived lead sees where each
-// topic stands without a separate whiteboard.query. Closed topics and topics
-// without a recap are skipped; with none left it renders nothing.
-func renderWhiteboardRecaps(board *wswhiteboard.State) string {
-	// Depth topics with no target lists only open topics (closed ones fold).
-	res, problems := wswhiteboard.Query(board, map[string]any{"depth": wswhiteboard.DepthTopics})
+// renderWhiteboardSummaries lists each open topic's latest agent log line.
+// Panels and system events never replace the current-state summary. Legacy
+// recaps reach this path only through first-open conversion into agent entries.
+func renderWhiteboardSummaries(board *wswhiteboard.State) string {
+	res, problems := wswhiteboard.Query(board, nil)
 	if len(problems) > 0 {
 		return ""
 	}
 	var lines strings.Builder
 	for _, t := range res.Topics {
-		if t.Closed || t.Recap == "" {
+		if t.Closed || t.LatestAgent == nil {
 			continue
 		}
 		name := t.Stem
 		if name == "" {
 			name = t.Name
 		}
-		// Continuation lines are indented (as wswhiteboard.FormatQuery does),
-		// so a multi-line recap never reads as a heading or list item.
+		// Imported lines may be multi-line; keep continuations indented.
 		// Item references read as the page shows them, (nn).
-		lines.WriteString("- " + name + ": " + strings.ReplaceAll(board.TextRefs(t.Recap), "\n", "\n  ") + "\n")
+		lines.WriteString("- " + name + ": " + strings.ReplaceAll(board.TextRefs(t.LatestAgent.Text), "\n", "\n  ") + "\n")
 	}
 	if lines.Len() == 0 {
 		return ""
 	}
-	return "\n### Whiteboard recaps\n" + lines.String()
+	return "\n### Whiteboard topics\n" + lines.String()
 }
 
 // injectSessionKeyLine finds the first blockquote line containing

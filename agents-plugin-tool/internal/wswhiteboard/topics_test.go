@@ -170,5 +170,5 @@ func TestPreStemStoreLoads(t *testing.T) {
 	if strings.Contains(string(mustMarshal(t, &st)), `"labels"`) {
 		t.Fatalf("a store with no stems must not write labels")
 	}
-	wantText(t, "pre-stem query", queryText(t, &st, `{"topic":"Done topic"}`), []string{`topic "Done topic" [closed]`, "(02) [withdrawn]"}, nil)
+	wantText(t, "pre-stem query", queryText(t, &st, `{"topic":"Done topic","depth":"summary"}`), []string{`topic "Done topic" [closed]`, "(02) [withdrawn]"}, nil)
 }

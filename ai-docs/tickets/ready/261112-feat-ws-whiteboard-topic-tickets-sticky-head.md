@@ -1,7 +1,9 @@
 ---
-title: "Whiteboard: topic-linked ticket badges, live-ticket glow, and a sticky topic head carrying recap and check pill"
+title: "Whiteboard: topic-linked ticket badges, live-ticket glow, and a sticky head carrying the latest agent line and check pill"
+blocked-by: 261113-feat-ws-whiteboard-topic-panels-and-log
 related:
   261112-feat-ws-whiteboard-check-items: prerequisite
+  261113-feat-ws-whiteboard-topic-panels-and-log: "prerequisite; latest-agent summary and authoritative topic folders"
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d765664857d80e60
@@ -24,6 +26,16 @@ shipped `agents-plugin-tool/internal/wswhiteboard/assets/page.css` plus the
 r6 check list from `261112-feat-ws-whiteboard-check-items`. Its commit
 bodies record the measured head heights.
 
+## Implementation Handoff (2026-11-13)
+
+The panels/log prerequisite lands first. The sticky summary consumes
+`TopicView.LatestAgent` (or `TopicDoc.LatestAgent()`), never the legacy recap
+fallback in `Summary()` or the latest system event. Panel `recap` attributes remain panel metadata, not
+this head's summary. Store topic links in authoritative topic `meta.json`
+through the folder transaction; do not revive cache Whiteboard writes. Preserve
+entry history and shared history-window/disclosure restoration. The old mockup
+and Prior Decisions remain historical visual evidence only.
+
 ## Decisions
 
 1. **Explicit links.** A lead links ticket stems to a topic through a
@@ -44,7 +56,7 @@ bodies record the measured head heights.
    none, has no glow. (604.) Rejected: a colour per status (adds hues; the
    glow means one thing, "live").
 5. **Sticky unit**: a new `.tophead` wrapper holds the bar, the note
-   (`.tnote`), the recap, and the check pill and sticks as one at the bar's
+   (`.tnote`), the latest agent log line, and the check pill and sticks as one at the bar's
    current stick line; `rail.js` selectors on `.tbar` follow to
    `.tophead > .tbar` (full dependent list in Decision 13). (605.) Rejected:
    sticky siblings with computed offsets (needs a measured offset each).
@@ -57,11 +69,12 @@ bodies record the measured head heights.
    bar, before the time and count chips; at 600px or narrower they take
    their own right-aligned, wrapping row under the bar. (607.) Rejected:
    beside the topic name (squeezes the name to three lines when narrow).
-8. **Recap in the head** is plain muted 12.5px text on the head's surface,
-   no card and no accent bar, sharing a line with the check pill (the pill
-   wraps below it under 600px); a hairline under the head separates it from
-   the body. A recap outside the head (a closed topic) keeps today's card
-   style. (r7b, 614.) Rejected: keeping a thin accent bar (reads as a second
+8. **Latest agent line in the head** is plain muted 12.5px text on the head's
+   surface, no card and no accent bar, sharing a line with the check pill
+   (the pill wraps below it under 600px); a hairline under the head separates
+   it from the body. The line outside the head (a closed topic) keeps the
+   summary card style. No agent line means no summary; a system event never
+   substitutes for it. (r7b, 614.) Rejected: keeping a thin accent bar (reads as a second
    heading).
 9. **Status resolution.** The server resolves each linked stem's status at
    render time from the project's ticket tree (which status directory holds
@@ -93,7 +106,7 @@ bodies record the measured head heights.
 14. **Grammar.** `wsxmlcmd.Group` (internal shared package) gains support for
     more than one extra attribute; `wb:topic` keeps `label` and adds optional
     `tickets`, a space-separated stem list. `TopicDoc`'s keep-invariant
-    (`dropTopicDoc`: body or recap) extends to a non-empty ticket list, so a
+    (`dropTopicDoc`: content, entries, or legacy recap) extends to a non-empty ticket list, so a
     topic with only `tickets=` survives. Rejected: encoding tickets in the
     label or in a separate command (a second way to address a topic).
 15. **Status resolver is injected.** The render takes a small resolver
@@ -103,7 +116,7 @@ bodies record the measured head heights.
     package. A stem the resolver does not find renders as a muted "unknown"
     badge, never an error. Rejected: wswhiteboard reading the ticket tree
     itself (couples the render package to the store layout).
-16. **Sticky recap, the later addition.** Decision (299) b of
+16. **Sticky summary, the later addition.** Decision (299) b of
     `261111-feat-ws-whiteboard-topic-recap` rejected a sticky recap but
     allowed adding it later; the owner's request (board (29), a promotion of
     this ticket, which specifies the sticky head) is that later addition.
@@ -120,21 +133,24 @@ bodies record the measured head heights.
     artifact. Rejected: polling the tree on every render.
 18. **Small semantics.** Setting or clearing `tickets` is topic metadata like
     `label`: it neither moves the topic's recency nor reopens a closed topic
-    (`store.go` precedent for a cleared body or recap), and a test pins it.
+    (the existing label and cleared-content behavior), and emits no system
+    event; a test pins it.
     The glow category is the stem's second segment; only `feat`, `bug`,
     `refactor`, and `chore` can glow, and the glow test covers a non-listed
     category. Route Facts rows that still say `.thead` read as `.tophead`.
 19. **Details the mockup settles.** The check pill reads done/total like
     `.chead` and is absent for a topic with no check items; at rest the check
     list starts expanded, as today. A closed topic renders no `.tophead`
-    stickiness; its recap keeps the card style (Decision 8). `whiteboard.query`
+    stickiness; its latest agent line keeps the summary card style (Decision 8).
+    `whiteboard.query`
     prints a topic's linked stems on its topic line as `tickets: <stem> ...`.
     Parenthesised board numbers in these decisions are provenance only; each
     decision's prose stands alone.
 
 ## Constraints
 
-- Lands after `261112-feat-ws-whiteboard-check-items` (done); the check list
+- Lands after `261113-feat-ws-whiteboard-topic-panels-and-log` and
+  `261112-feat-ws-whiteboard-check-items` (done); the check list
   comes from it, shipped as `.checks` with a `.chead` progress line
   (`agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl#L64-L69`,
   `.../assets/page.css#L300-L302`). No summary pill exists yet: the check pill
@@ -178,10 +194,10 @@ bodies record the measured head heights.
 | scope.new_type_contract | yes | TopicDoc gains a stem-list field; a render-time stem-to-status resolver contract is needed and unspecified (wswhiteboard has no ticket-tree access today) |
 | scope.test_surface | existing | agents-plugin-tool/internal/wswhiteboard/*_test.go (render_test.go, store_test.go, commands_test.go, query_test.go, rail_offsets_test.go, topic_header_test.go) |
 | complexity.reuse_points | unconfirmed | rail.js stick-line and page.css sticky rules are reusable; no existing stem-to-status resolver found in wswhiteboard or wsdashboard |
-| complexity.side_effect_risk | high | moving .tbar under .thead breaks direct-child tbar selectors in rail.js, page.css, cards.js; .thead collides with dashboard.css; embed budget at 41.9 of 42 percent |
+| complexity.side_effect_risk | high | moving .tbar under .thead breaks direct-child tbar selectors in rail.js, page.css, cards.js; .thead collides with dashboard.css; embed budget guarded at 44 percent of 512 KiB |
 | risk.correctness | moderate | sticky geometry, popover-on-stuck, and rail offsets are measured behavior pinned by rail_offsets_test.go |
 | risk.fit | high | the planned .thead class already exists in dashboard.css and the board avoids dashboard-scoped classes (dab009c4) |
-| risk.test | moderate | headless Chromium states on two pages plus the 42 percent embed budget test at render_test.go#L891-L899 |
+| risk.test | moderate | headless Chromium states on two pages plus the 44 percent embed budget test at render_test.go#L891-L899 |
 | risk.security_or_contract | moderate | T0 optional attribute on a shared store shape and the Extra-only group grammar; stems render into tooltips so escaping must hold |
 
 ## Phases
@@ -194,7 +210,7 @@ bodies record the measured head heights.
   text documents the attribute.
 - Render: badges (Decisions 2, 3, 7), glow (Decision 4), status through the
   injected resolver supplied by both hosts (Decisions 9, 15), `.tophead`
-  with note, recap, and check pill (Decisions 5, 6, 8), and every
+  with note, latest agent line, and check pill (Decisions 5, 6, 8), and every
   direct-child `.tbar` dependent moved with the bar (Decision 13), light
   and dark.
 
@@ -205,9 +221,8 @@ Verification:
   topic with only `tickets=` survives `dropTopicDoc`; a test pins that the
   board uses `.tophead` and no board asset uses `.thead` (like
   `TestCheckRowClassIsTheBoardsOwn`).
-- Embed size test (render_test.go ~891-899) is at 41.9% of its 42% cap: if
-  the new CSS/JS exceeds the cap, the worker raises it with a stated reason
-  in the commit, or trims.
+- Keep the embed size test meaningful at its current 44% of 512 KiB cap;
+  trim new CSS/JS to fit, or state the reason for a changed cap in the commit.
 - Headless Chromium screenshots matching the r7b mockup states (rest,
   stuck, stuck popover, narrow, glow) on the file page and the dashboard
   page; no page errors.

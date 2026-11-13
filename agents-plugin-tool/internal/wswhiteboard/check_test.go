@@ -59,7 +59,7 @@ func TestCheckClassTakesAckAnswersAndWarnsOnOptions(t *testing.T) {
 
 func TestQueryListsACheckLikeAnyItem(t *testing.T) {
 	st := checkBoard(t)
-	text := queryText(t, st, `{"topic":"t"}`)
+	text := queryText(t, st, `{"topic":"t","depth":"summary"}`)
 	wantText(t, "check items", text, []string{
 		"(03) [open] [check] look at the draft",
 		"(04) [answered] [check] release notes",

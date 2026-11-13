@@ -4,50 +4,41 @@ kind: print
 
 # Whiteboard
 
-The session whiteboard is a top-level lead's board for its user. The server
-keeps the items you ask (IDs, statuses, verbatim answers), topic bodies, and
-topic recaps, and renders them with the session's todos, agendas, ready and
-todo tickets, and mailbox into a full page beside the terminal and an embed
-snapshot for a host that shows HTML inline. Workers and subagents do not use it.
+The session whiteboard is a top-level lead's board for its user. Each topic
+holds current content, append-only panels, and a compact discussion log,
+beside the items you ask (IDs, statuses, verbatim answers). Use current
+content for the durable state of the work, panels for substantial discussion
+or visuals, and an agent log line for the current-state summary. The latest
+agent line supplies that summary; later server events do not replace it.
+Embeds keep the items but show panel recaps and the latest agent line instead
+of current content or accumulated payloads, with a link to the full board.
+Workers and subagents do not use the board.
 
 ## Calls
 
-- `{{.McpNamespace}}/whiteboard.update(session_key, commands)` applies one
-  batch, rewrites the full page, bumps its change stamp, and writes a new
-  embed snapshot. Make one call per turn with all of that turn's changes;
-  empty `commands` only re-renders. The result gives `ids:` (the batch's
-  `wb:add` IDs, in order), `full:` (the session's dashboard page URL while
-  the dashboard daemon serves the session, else the full page path relative
-  to the session root), and `embed:` (the snapshot's path, or its bare file
-  name while an embed folder is set). An `info:` line names the items a
-  `wb:close` withdrew, items holding options under a class other than
-  `policy` (only a policy item's options are offered as picks), and, at most
-  once an hour, open topics unchanged for an hour with nothing waiting on the
-  user; close the finished ones with `wb:close`.
-- `{{.McpNamespace}}/whiteboard.query(session_key, payload)` prints the
-  board as a topic, item, and detail tree and changes nothing; with no
-  payload, every open topic and its open items. Query before adding, so a
-  question the board already holds is patched or reused, not added twice;
-  `text` also finds one already settled.
-- After the first update, todo and agenda writes, ticket moves, closes, and
-  creations, and mailbox sends and receives re-render the full page and bump
-  its stamp themselves, with no embed.
+- Collect a turn's board changes into one
+  `{{.McpNamespace}}/whiteboard.update` call.
+- Before adding a question, use `{{.McpNamespace}}/whiteboard.query` with
+  `depth: "items"` and a `text` or `topic` filter, so existing ask IDs and
+  statuses are available for reuse or patching. Default discovery is compact
+  topic metadata; neither form implicitly retrieves bodies.
 
 ## Commands
 
-Write board text (titles, options, rationale, recommendations, answer readings, topic bodies, and recaps) in the conversation language, the `workflow.lang` value when set; IDs, class and status tags, `ok`/`no` answers, and option letters stay as written.
+Write authored board text in the conversation language, the `workflow.lang` value when set; IDs, class and status tags, `ok`/`no` answers, and option letters stay as written.
 
 Every tag carries the prefix `wb:` and follows the command syntax rules.
 `wb:topic` is the group: its `name` names the topic once for the
-`wb:body`, `wb:recap`, `wb:edit`, `wb:add`, and `wb:close` inside it. A
+`wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, and `wb:close` inside it. A
 batch may hold several `wb:topic` groups.
 
 | command | attributes | content |
 |---|---|---|
-| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:recap`, `wb:edit`, `wb:add`, `wb:close`; none with `label` |
-| `wb:body` | none | the topic's body, replaced whole; empty clears it |
-| `wb:recap` | none | the topic's recap, replaced whole; empty clears it |
-| `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new` |
+| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:close`; none with `label` |
+| `wb:body` | none | current content, replaced whole; empty clears it |
+| `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new`, editing current content only |
+| `wb:panel` | `recap`, `id?` | optional payload; `recap` must be nonempty |
+| `wb:log` | none | one nonempty agent-authored line of inline Markdown |
 | `wb:add` | `id?`, `class` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
 | `wb:close` | `result` | none |
 | `wb:answer` | `id` or `ids`, `value`, `assumed?` | the user's verbatim words |
@@ -61,7 +52,8 @@ batch may hold several `wb:topic` groups.
 ## Context
 Markdown up to the closing tag.
 </wb:body>
-<wb:recap>In review: parser branch, waiting on CI</wb:recap>
+<wb:panel recap="Parser-first tradeoff">Keep the review slice small; see {{12}}.</wb:panel>
+<wb:log>In review: parser branch, waiting on CI</wb:log>
 <wb:add class="policy">
 <wb:title>Ship the <code>parser</code> before the renderer?</wb:title>
 <wb:option>Parser first</wb:option>
@@ -94,7 +86,7 @@ Markdown up to the closing tag.
   in the workflow manual's `### Asking the user`. A `check` is a gate, not a
   decision class: a request that the user look at, verify, or approve
   something ("OK this draft and I'll proceed", "verify on your machine"). It
-  renders as a checklist under the topic recap, and the user answers each
+  renders as a checklist in the topic, and the user answers each
   one individually: `ok`, `no`, or a note. An item belongs to its group's
   topic, which groups items on the page; `wb:title` is one line.
 - `id` on `wb:add`: omitted, the server mints one past the highest ID it has
@@ -109,7 +101,7 @@ Markdown up to the closing tag.
 - Markdown: `wb:title` takes inline markdown (bold, italic, code, links)
   and the tags `<code>`, `<b>`, `<strong>`, `<i>`, `<em>`, `<kbd>`, and
   `<br>` written without attributes; any other tag shows as text.
-  `wb:option`, `wb:why`, `wb:recommend`, and `wb:recap` take block markdown
+  `wb:option`, `wb:why`, and `wb:recommend` take block markdown
   with line breaks kept: lists, code blocks, tables, images, and a
   `` ```mermaid `` fenced block drawn as a diagram, plus HTML such as `<img>`, `<table>`,
   `<details>`, and simple inline SVG, shown as static markup with script,
@@ -124,12 +116,15 @@ Markdown up to the closing tag.
 - `wb:why`: a technical or announced item's citation or reasoning, a
   policy item's context, or a check's note on what to look at. `wb:link`: one per link, such as a ticket stem, a
   commit, or `supersedes {{12}}`.
-- Item references: write `{{12}}` in an item field, the markdown text of a
-  topic body (never inside its HTML), or the reading part of an answer
-  `value` to cite item `(12)`. The page shows `(12)`, linked when that item
-  is on the page, and verbatim when the store holds no such item; a
-  reference is never refused. A plain `(12)` is literal text, and a
-  `wb:answer` body, the user's verbatim words, is never resolved.
+- Authored references: `{{12}}` cites item `(12)` in item fields, current
+  content, panels, log text, and the reading part of an answer `value`.
+  `{{p3}}` cites the latest version of panel `p3`; `#p3` is its stable link
+  target across re-posts. Known item references show `(12)` and link when
+  their item is on the page; known panel references reveal their latest
+  version, loading older history if needed. Unknown references stay
+  literal, as do references inside code or raw HTML. A plain `(12)` is
+  literal text. References are citations, not user-selected mentions or
+  answers; a `wb:answer` body, the user's verbatim words, is never resolved.
 - `wb:answer`: `value` is, for a policy item, its option letter, optionally
   followed by `, <text>`; for a technical, announced, or check item, `ok`,
   `no`, or short text. A later answer replaces an earlier one. The body, required, is
@@ -158,54 +153,57 @@ Markdown up to the closing tag.
   that only edits `wb:why`, `wb:recommend`, or links, or resends the current
   title, class, or options, is not a re-ask; a title fix on an item the
   patch leaves settled stamps nothing.
-- `wb:close` collapses a topic's settled items, its body, and its recap; the
-  topic needs an item, a body, or a recap. `result` is required: one
-  sentence saying how the topic ended, shown dimmed beside the closed
-  topic's name. Closing withdraws every item of the topic still `open`, with
-  `result` as the reason, and an `info:` line names them; an `assumed` item
-  stays assumed. Put a batch's answers to the topic's items before its
-  `wb:close`, since an answer after the close finds the item withdrawn.
-  Adding an item to a closed topic, or changing its body or recap, reopens
-  it and hides the result, but does not restore the withdrawn items; the
-  next close replaces the result. Closed topics with nothing waiting on the
-  user go last, most recently closed first; past 30, the dashboard page
-  loads the rest on request and the file page and embed print how many are
-  left out.
-- Topic body: one per topic, rendered above its items, for context that
-  outlasts a chat reply: background, the shape of a decision, a diagram; a
-  topic may hold a body and no items. `wb:body` replaces the body whole,
-  an empty one clears it, and the same body again is no change. `wb:edit`
-  replaces the one exact match of `wb:old` with `wb:new` (an empty `wb:new`
-  deletes it), or every match with `replace_all="true"`; no match, or
-  several without `replace_all`, is refused. To insert, put the anchor in
-  `wb:old` and the anchor plus the insertion in `wb:new`. Change a body with
-  `wb:edit` rather than resending it; `whiteboard.query` with `topic` prints
-  the stored body to quote from. A body shows open on the full page unless
-  its topic is closed, and on the embed only when it changed since the
-  previous embed.
-- A body is block markdown as in `wb:option`, with inline HTML written as
-  is, never a full HTML document: inline SVG, or canvas 2D drawn by an
-  inline script, with no external `src`, `href`, or fetch. A large
-  standalone visual goes to a `{{.McpNamespace}}/path.generate` file linked
-  from it.
+- `wb:close` requires an existing topic and a `result`: one sentence saying
+  how it ended. Closing withdraws every item still `open`; an `assumed`
+  item stays assumed. Put a batch's answers before its `wb:close`, since
+  an answer after the close finds the item withdrawn. Adding an item,
+  changing nonempty current content, or appending a panel or agent line reopens a
+  closed topic without restoring withdrawn items. Server events alone do
+  not reopen it. The next close replaces the result, not the history.
+- Current content: one body per topic, holding the durable current state,
+  not the accumulating conversation. A topic can have content or entries
+  without items. `wb:body` replaces content whole; empty clears it and the
+  same content again is no change. `wb:edit` replaces one exact `wb:old`
+  match with `wb:new` (empty deletes it), or every match with
+  `replace_all="true"`; no match, or several without `replace_all`, is
+  refused. To insert, quote the anchor in `wb:old` and the anchor plus the
+  insertion in `wb:new`. Retrieve content with `body: true` to obtain an
+  exact edit anchor; a topic-only discovery query does not print it.
+- Current content and panel payloads take block Markdown with inline HTML,
+  never a full HTML document: inline SVG, or canvas 2D drawn by an inline
+  script, with no external `src`, `href`, or fetch. Served payloads run in
+  isolated sandboxes. Put a standalone document in a
+  `{{.McpNamespace}}/path.generate` file and link it from the board.
 - HTML in a body: a line that starts with a block tag such as `<div>` or
   `<details>`, or holds a lone tag such as `<svg ...>`, starts raw HTML that
   runs to the next blank line, so put a blank line between HTML and the
   markdown after it, and keep blank lines out of HTML, since an indented
   line after one becomes a code block. A line that starts with an inline tag
   such as `<b>` is markdown text, whose line breaks render as `<br>`.
-- Topic recap: one or two lines at the top of the topic, above its body,
-  with its own update time, for state that spans turns, such as
-  `READY · reviewed · in implementation: <branch>`. Give a topic that is in
-  implementation or blocked a recap, refresh it whenever that state
-  changes, and keep it to one or two lines; a stale recap misleads more
-  than none. A recap, like a topic body, states status and never asks the
-  user anything: anything waiting on the user is an item, not recap text.
-  "OK this draft and I'll proceed" is a `wb:add` item (`check` for a plain
-  confirmation, `policy` for a choice), so it shows as waiting on the user. `wb:recap` replaces it whole,
-  an empty one clears it, and the same recap again is no change and keeps
-  its time. A changed recap counts as a change to the topic, as a body
-  change does; clearing it reopens nothing.
+- Panels: `recap` is required and nonempty; a recap-only panel is a message.
+  An optional payload carries a longer opinion, mockup, diagram, or image.
+  Omit `id` to mint a board-wide `pN`; use an existing `id="pN"` in the
+  same topic to append a complete new version, even when the text is the
+  same. Each immutable version has its own durable `eN` entry locator;
+  older versions remain in history while `pN` always targets the latest.
+  There is no `panel` attribute on `wb:edit`: re-post the whole panel,
+  including its recap and any payload, instead of editing it in place.
+  Split content-heavy material into several (sub)panels rather than one
+  huge panel; payloads are capped at 2 MiB of UTF-8 bytes, with an external
+  file link as the alternative.
+- Agent log: `wb:log` appends one line of inline Markdown, without images,
+  HTML, or block structures. Append a current-state line when the work's
+  state changes, so the latest agent line remains a useful summary; put
+  substantial discussion in a panel instead of rewriting current content.
+  The server records successful item/content/panel/close/reopen transitions
+  as system events. Agent lines give a concise interpretation of current
+  state; verbatim duplication of the server's event records is not required.
+- Keep asks in items: "OK this draft and I'll proceed" is `wb:add` with
+  `class="check"` (or `policy` for a choice), not a panel or log line.
+  Options, recommendations, `wb:why`, links, and check answers remain item
+  data, not automatically created panels. `wb:recap` is removed without an
+  alias, and `wb:append` is refused; the panel's `recap` attribute is not
+  the retired command.
 - `wb:floor` raises the ID counter so the next minted ID is one past `id`; a
   floor at or below the counter is ignored. `wb:embed-dir`: see Host embed
   folder.
@@ -213,58 +211,76 @@ Markdown up to the closing tag.
 ## Query
 
 ```text
-whiteboard.query payload: {topic?, ids?, id?, status?, text?, depth?, fields?, body?, closed?}
+whiteboard.query payload: {topic?, text?, closed?, entries?, since?, last?, kind?, panel?, entry?, id?, ids?, status?, depth?, fields?, body?}
 ```
 
-- `payload` is a JSON object, every field optional. The filters `topic`,
-  `id`, `ids`, `status`, and `text` AND together, except that `id` (a
-  number) and `ids` (a list of numbers) union. `topic` and `status` take one
-  string or a list; `topic` resolves each name as `wb:topic name` does, and
-  `status` takes any of the five statuses. `text` matches a substring of an
-  item's title, options, rationale, or answer, ignoring case, and each
-  matching item line ends with `[match: <fields>]`.
-- `depth`: `topics` prints one line per topic: open or closed, its item
-  counts by status, its body length, its last change, and its close result
-  when closed; at every depth a recap line with its update time follows.
-  `items` adds a line per item under its topic: ID, status, class, title. `summary` adds, under an open item, its full ask, and under
-  an answered or assumed item one decoded answer line (`answer: b: <option
-  text> - <note>`, ` (assumed)` appended); a withdrawn or superseded item
-  keeps only its line. `full` adds every detail; `fields`, a list from
-  `options`, `recommendation`, `rationale`, `answer`, `answered_at`,
-  `answer_quote`, and `links`, picks which, all when omitted; `fields`
-  without `depth` means `full`. Items answered together print their shared
-  `answer_quote` once, then `same as (nn)`.
-- `body: true` prints each listed topic's body after its topic line.
-  `closed: true` lists closed topics, whose items follow the same depth and
-  status as any topic's; otherwise one `omitted:` count stands for them.
-- The defaults come from the most specific target present, and an explicit
-  `depth`, `status`, `body`, or `closed` overrides them:
+`payload` is a JSON object. Choose discovery, explicit item/content access,
+or direct retrieval; their selectors are not silently mixed.
 
-  | target | depth | status | body | closed topics |
-  |---|---|---|---|---|
-  | `ids` or `id` | `summary` | all | no | listed |
-  | `topic` | `summary` | all | yes | listed |
-  | `text` | `items` | all | no | listed |
-  | none | `items` | `open` | no | folded |
+### Discovery and entry filters
 
-  So `{"status": "answered"}` prints answered items at depth `items`; add
-  `"depth": "full"` for their details, such as the `answer_quote` a ticket
-  quotes. `ids` and `text` list only the topics holding a match.
-- A topic line names a stemmed topic `topic <stem> "<label>"` and a
-  stemless one `topic "<name>"`. Item fields, labels, and close results
-  print `<code>` as backticks and `<br>` as a space, and drop the other
-  inline tags; options, recommendations, and `wb:why` drop every tag and
-  keep its text, an image as its alt text, script and style as nothing. The
-  topic body, the recap, and `answer_quote` print as stored, so a `wb:edit`
-  quote copies the body exactly.
-- Topics print in the order their first item was added, items in ID order.
-  A last `omitted:` line counts what the defaults left out and names the
-  filter that shows it.
+- Without explicit item/content selectors, default discovery is metadata:
+  each topic's latest agent line, its last ten log entries, and panel recaps.
+  The recap list uses the newest matching version of each `pN`; a text
+  match may therefore name a historical `eN`, not the current version.
+  A `topic` or `text` filter still does not return current content or panel
+  payloads. System events cannot replace the latest-agent summary.
+- `topic` takes a name or list, resolving stems and labels as `wb:topic`
+  does. `closed: true` includes closed topics; topic/text-targeted discovery
+  includes matching closed topics by default, while untargeted discovery
+  leaves them out. An explicit `closed` overrides that default.
+- `entries` selects `"log"`, `"panel"`, or `"all"`. `kind` selects
+  `"agent"` or `"system"` log entries. `since` is an exclusive RFC 3339
+  timestamp or durable `eN` boundary; equal timestamps remain distinguishable
+  by entry ID. `last` is a positive integer selecting the newest matching
+  tail. Filters apply before the limit; the selected window prints oldest
+  to newest. With explicit `entries`, historical panel-version metadata is
+  eligible for the same filtered tail; discovery never returns payloads.
+- `text` is case-insensitive substring search across current content,
+  panel recaps/payloads, log text, and item fields. Matching a payload does
+  not print it: use the direct retrieval form to inspect exact bytes.
+
+### Explicit items and current content
+
+- Any explicit `id`, `ids`, `status`, `depth`, `fields`, or `body` selects
+  the item/content interface. Do not combine these with `entries`,
+  `since`, `last`, or `kind`; incompatible selectors are refused.
+  `topic`, `text`, and `closed` can still narrow an item query.
+- `id` is a positive numeric item ID; `ids` is a list. When both are
+  present they union; other item filters AND together. `status` takes one
+  or a list of `open`, `answered`, `assumed`, `withdrawn`, `superseded`.
+- `depth`: `topics` lists topic metadata; `items` adds item lines;
+  `summary` adds full open asks or decoded answered/assumed readings;
+  `full` adds details. `fields` selects from `options`, `recommendation`,
+  `rationale`, `answer`, `answered_at`, `answer_quote`, and `links`; it
+  implies `full` when depth is omitted. Use `answer_quote` for the user's
+  exact words, rather than reconstructing them from an interpreted value.
+- `body: true` explicitly retrieves current content, verbatim for exact
+  `wb:edit` anchors. `body: false` does not. Neither form returns a panel
+  payload, and `topic` alone never implies body retrieval.
+
+### Direct immutable-entry retrieval
+
+- `panel: "p7"` retrieves that panel's latest full payload verbatim;
+  `panel: "e47"` retrieves one exact immutable panel version's payload.
+  A recap-only version has an empty payload, not a fallback to an older
+  version that carried one.
+- `entry: "e47"` retrieves one agent/system log entry, with topic, kind,
+  timestamp, and verbatim text. A panel version is retrieved through
+  `panel`, not `entry`.
+- A direct result is one metadata header, a newline, then untouched stored
+  text; no trailing newline is added.
+- Either direct selector may carry an optional `topic` assertion naming
+  its owner, but no other selectors. `panel` and `entry` cannot be combined;
+  missing locators, a wrong topic/kind, or incompatible filters are refused
+  rather than redirected to a different entry.
 
 ## Each turn
 
-After the update, give one terminal line naming the `full:` URL or path the
-update returned and the IDs you asked this turn:
+After an update, give one terminal line naming its `full:` URL or path and
+any new ask IDs from that turn; omit the ` - ...` suffix when there were no
+new asks. Do not make an update or emit a status line just to fill this
+template on an unchanged turn:
 
 ```text
 Whiteboard: <full> - (102), (103)
@@ -321,13 +337,19 @@ opens the message without one), before the typed text, one element per
 line in the order added:
 
 ```text
-<wb:mention topic="<topic>" id="62">selected text</wb:mention>
+<wb:mention topic="<topic>" id="62" entry="e47">selected text</wb:mention>
 ```
 
-`topic` names the topic as a topic note line does; `id`, present only when
-the whole selection lay in one item, names that item; the content is the
-selected text with `&`, `<`, and `>` written `&amp;`, `&lt;`, and `&gt;`.
-It is what the typed text points at, read as its context; it records no
-answer.
+`topic` names the topic as a topic note line does. Optional numeric `id`
+attributes the selection to an item, including a system event about that
+item. Optional `entry="eN"` identifies the selected immutable panel version
+or agent/system log entry; it is not the stable latest-panel `pN` target.
+Selections crossing entries arrive as ordered entry-specific mentions.
+Existing topic-only and topic/item mentions remain valid. The content is
+the selected text with `&`, `<`, and `>` written `&amp;`, `&lt;`, and `&gt;`.
+Resolve a panel locator with `panel: "eN"` and a log locator with
+`entry: "eN"` when its exact context is needed; do not silently substitute
+the latest panel version. Mentions supply context for the user's typed
+message, not answers or authored `{{12}}`/`{{p3}}` references.
 
-Confirmed decisions reach a ticket only through `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture; the board clears with the session key.
+Confirmed decisions reach a ticket only through `{{.SkillNamespace}}:lead-ticket`, once the user moves to capture. Authoritative topic folders remain after the session key expires; do not treat key expiry as board deletion.

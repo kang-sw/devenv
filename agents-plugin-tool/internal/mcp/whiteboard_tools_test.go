@@ -629,18 +629,17 @@ background body-marker line
 	if strings.Contains(text, "topic body:") {
 		t.Fatalf("a query without topic must not print a body:\n%s", text)
 	}
-	text = toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"topic": "t"}}))
+	text = toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"topic": "t", "body": true}}))
 	if !strings.Contains(text, "topic body:") || !strings.Contains(text, "background body-marker line") || !strings.Contains(text, "settle me") {
 		t.Fatalf("query with topic must print the body and the items:\n%s", text)
 	}
-	// With no payload the query lists open items only and names the answered
-	// one it left out.
-	if text := toolText(t, f.call(t, "whiteboard.query", map[string]any{})); strings.Contains(text, "(01)") || !strings.Contains(text, "topic \"t\" [open]") || !strings.Contains(text, "omitted: 1 item not open (answered 1)") {
-		t.Fatalf("query with no payload must list the topic and omit the answered item:\n%s", text)
+	// Discovery exposes metadata and system history, not item detail/body.
+	if text := toolText(t, f.call(t, "whiteboard.query", map[string]any{})); !strings.Contains(text, "topic \"t\" [open]") || strings.Contains(text, "topic body:") || strings.Contains(text, "background body-marker") || strings.Contains(text, "  (01) [answered]") {
+		t.Fatalf("query with no payload must stay metadata-only:\n%s", text)
 	}
 	// wb:edit changes the stored body, and the next query shows the change.
 	f.update(t, `<wb:topic name="t"><wb:edit><wb:old>body-marker</wb:old><wb:new>edited-marker</wb:new></wb:edit></wb:topic>`)
-	text = toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"topic": "t"}}))
+	text = toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"topic": "t", "body": true}}))
 	if !strings.Contains(text, "background edited-marker line") || strings.Contains(text, "body-marker") {
 		t.Fatalf("query after wb:edit:\n%s", text)
 	}
@@ -1195,9 +1194,9 @@ func TestWhiteboardWorkflowTextFollowsKnob(t *testing.T) {
 		"Otherwise the chat carries the conversation as usual.",
 		"#### Commands",
 		"`commands` is one string of commands.",
-		"write `{{12}}` in an item field",
+		"Authored references: `{{12}}` cites item `(12)`",
 		"Whiteboard: <full> - (102), (103)",
-		"session's dashboard page URL while the dashboard daemon serves the session,",
+		"The latest agent line supplies that summary; later server events do not replace it.",
 		"- Discussion IDs come from the whiteboard store",
 	} {
 		if !strings.Contains(collapseSpace(manualOn), want) {
@@ -1266,7 +1265,6 @@ func TestWhiteboardPlaybookStatesPointerAndEmbedDirWithoutNamingAHost(t *testing
 	flat := collapseSpace(text)
 	for _, want := range []string{
 		"Whiteboard: <full> - (102), (103)",
-		"session's dashboard page URL while the dashboard daemon serves the session,",
 		"When the host's instructions name a folder its embedded files must live in,",
 		"send `<wb:embed-dir path=\"<folder>\"/>` on your first update after the session starts",
 		"embed the bare file name the update returns",

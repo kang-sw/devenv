@@ -104,15 +104,20 @@ func TestLegacyRecapReferencesAndSandbox(t *testing.T) {
 	}
 }
 
-func TestLegacyQueryPrintsTheRecap(t *testing.T) {
+func TestQueryReadsAgentLinesInsteadOfLegacyRecaps(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "t", "x")+topicXML("t", "body"))
-	legacyRecap(st, "t", "READY · <code>x</code>\nline two")
+	legacyRecap(st, "t", "legacy READY · <code>x</code>\nline two")
 	legacyRecap(st, "c", "closed recap")
 	mustApply(t, st, `<wb:topic name="c"><wb:close result="done"/></wb:topic>`)
-	at := testNow.Format(time.RFC3339)
-	wantText(t, "depth topics", queryText(t, st, `{"depth":"topics"}`), []string{`topic "t" [open] items: open 1; body: 4 chars; changed: ` + at + "\nrecap (changed: " + at + "): READY · <code>x</code>\n  line two\n"}, []string{"topic body:", "closed recap"})
-	wantText(t, "depth items", queryText(t, st, `{}`), []string{"\nrecap (changed: " + at + "): READY", "  (01) [open]"}, nil)
-	wantText(t, "body", queryText(t, st, `{"topic":"t"}`), []string{"recap (changed: " + at + "): READY · <code>x</code>\n  line two\ntopic body:\n<<<\nbody\n>>>\n"}, nil)
-	wantText(t, "closed", queryText(t, st, `{"closed":true,"depth":"topics"}`), []string{`topic "c" [closed] items: none; changed: ` + at + "; result: done\nrecap (changed: " + at + "): closed recap\n"}, nil)
+	// Import belongs to the locked loader, not to a pure query fallback.
+	wantText(t, "unconverted snapshot", queryText(t, st, `{"depth":"topics"}`), []string{`topic "t" [open]`}, []string{"legacy READY", "closed recap", "current "})
+	mustApply(t, st, `<wb:topic name="t"><wb:log>READY · current agent line</wb:log></wb:topic>`)
+	agent, _ := st.LatestAgent("t")
+	current := "current " + agent.ID + " " + agent.At + ": READY · current agent line"
+	wantText(t, "depth topics", queryText(t, st, `{"depth":"topics"}`), []string{current}, []string{"legacy READY", "topic body:", "closed recap"})
+	wantText(t, "discovery", queryText(t, st, `{}`), []string{current}, []string{"(01) [open]", "topic body:"})
+	wantText(t, "explicit items", queryText(t, st, `{"depth":"items"}`), []string{"(01) [open]"}, []string{"legacy READY"})
+	wantText(t, "explicit body", queryText(t, st, `{"topic":"t","body":true}`), []string{current, "topic body:\n<<<\nbody\n>>>\n"}, []string{"legacy READY"})
+	wantText(t, "closed", queryText(t, st, `{"closed":true,"depth":"topics"}`), []string{`topic "c" [closed]`}, []string{"closed recap", "legacy READY"})
 }
