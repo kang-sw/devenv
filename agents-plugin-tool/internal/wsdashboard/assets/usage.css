@@ -1,0 +1,24 @@
+/* The footer gutter and details are deliberately separate from rail styling. */
+.rail .usage-toggle { display: flex; align-items: center; gap: 18px; min-height: 25px; width: 100%; padding: 2px 0; border: 0; background: none; color: var(--wb-fg); cursor: pointer; font: inherit; text-align: left; }
+.rail .usage-toggle:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; border-radius: 3px; }
+.usage-harness { display: inline-flex; align-items: center; gap: 4px; }
+.usage-harness .hi, .usage-pop .hi { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 4px; font: 800 11px/1 var(--wb-mono, monospace); }
+.usage-harness .claude, .usage-pop .claude { background: #D97757; color: #fff; }
+.usage-harness .codex, .usage-pop .codex { background: #10A37F; color: #fff; }
+.usage-bar { position: relative; display: inline-block; width: 4px; height: 22px; border-radius: 2px; overflow: hidden; background: var(--wb-muted); }
+.usage-fill { position: absolute; bottom: 0; left: 0; width: 100%; background: var(--wb-primary); border-radius: inherit; }
+.usage-bar.warning .usage-fill { background: var(--wb-warn-ink, #d49d38); }
+.usage-bar.critical .usage-fill { background: var(--wb-fail, #d95f68); }
+.usage-bar.unknown { opacity: .45; }
+.usage-empty, .usage-meta, .usage-plan, .usage-status { color: var(--wb-muted-fg); }
+.usage-pop { width: 310px; }
+.usage-pop:focus { outline: none; }
+.usage-heading { display: flex; align-items: center; gap: 7px; }
+.usage-plan { margin-left: auto; font-size: 11px; }
+.usage-close { margin-left: auto; padding: 0 3px; border: 0; background: none; color: var(--wb-muted-fg); font: inherit; cursor: pointer; }
+.usage-account { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--wb-line); }
+.usage-window { display: flex; justify-content: space-between; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.usage-window.warning b { color: var(--wb-warn-ink, #d49d38); }
+.usage-window.critical b { color: var(--wb-fail, #d95f68); }
+.usage-meta { font-size: 11px; }
+.usage-status { margin: 3px 0; font-size: 12px; }

@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: ffb1e7f8ab55eb84
 sage-review-design-reviewed: ffb1e7f8ab55eb84
+completed: 2026-11-13
 ---
 
 # Dashboard rail: per-harness plan-usage gutter in the bottom-left corner
@@ -211,3 +212,49 @@ app-server; app-server failure -> "usage unavailable", no Pi call; absent or
 API-key-only -> Pi token; Pi token expired -> no call + status), and
 that no token text appears in logs or errors. A LOOK capture of the rail
 footer with a Claude and a Codex gutter and the open popover.
+
+### Result (f9b3c7924) - 2026-11-13
+
+- Added the daemon-private plan usage cache and viewer-authorized `GET
+  /rail/usage`. Existing hosted Claude snapshots and claude-mod snapshots feed
+  the same persisted, account-blind stale-window guard; no hook/feed change
+  was needed. Expired windows are omitted and heartbeat-only repeats do not
+  refresh `asOf`.
+- Added a bounded, short-lived Codex app-server handshake and duration-based
+  weekly classification. Only absent/API-key CLI logins select Pi fallback;
+  CLI errors never fall through. Pi expiry makes no request; upstream errors
+  are sanitized, redirects refused, credentials never enter cache/view data.
+  Endpoint/header and response contracts were checked against Orca's Codex
+  backend source and OpenAI's generated rate-limit protocol types. No live
+  Pi-token request or real credential-tree test was performed.
+- Added `usage.js` / `usage.css`, replaced only the rail footer link, and
+  connected the existing popover lifecycle with minimal shared-file hooks.
+  Details sort tightest first and show plan, window percentage/reset, age,
+  source, and missing/error status. Viewer requests share the daemon cache;
+  visible connected pages poll every five minutes, popover opens request a
+  refresh, and concurrent opens coalesce for five seconds. No resident
+  app-server or background poller was added.
+- Integrated develop's lead-wake-events work before verification (merge
+  `1c97546ee`).
+  The final `git -c merge.directoryRenames=false merge-tree --write-tree
+  develop HEAD` against develop `e6102aea7` was clean, with no newer shared
+  dashboard asset changes since the integration.
+- Verification: remote w5090 full `go test ./internal/wsdashboard/
+  ./internal/wslive/ ./internal/wsagent/` passed after fixes (wsdashboard
+  86.056s; wslive cached; wsagent 23.294s). Windows wsdashboard test binary
+  cross-compilation passed. Local locked Node checks passed: dashboard.js
+  syntax plus all four usage/task-badge tests.
+- Independent medium R1 found two Important test-contract gaps. Fix
+  `1baf6c3e6` replaced the Unix-only canned shell fake with a copied,
+  cross-platform test executable validating the full request sequence,
+  added negative protocol tests and Windows batch-shim coverage, and fixed
+  Windows cmd.exe quoting. Fixes-only R2 was clean. Reviews ran through
+  standalone Pi CLI because `pi.*` calls remained profile-denied; no review
+  was performed by the implementer.
+- LOOK passed using a static fake-data fixture and headless Chrome:
+  `D:/Temp/rail-usage-gutter/footer.png` and
+  `D:/Temp/rail-usage-gutter/popover.png`. Both captures were inspected; no
+  live dashboard daemon was started, restarted, or replaced.
+- Forward: Windows runtime execution is not claimed by the remote Linux
+  check (the Windows test binary compiled); live Pi fallback confirmation
+  remains the owner's post-merge check, per decision 4.

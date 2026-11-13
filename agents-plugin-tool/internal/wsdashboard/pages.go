@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js
 var dashboardFS embed.FS
 
 // Region names. The session page's regions in order; the index page has one.
@@ -112,8 +112,9 @@ type pageAssetsData struct {
 	// RailScript is the session rail's browser-side state (rail.js,
 	// window.WsRail): per-session drafts, stars, and the rail's own
 	// toggles, which the session page's script uses.
-	RailScript template.JS
-	MemoScript template.JS
+	RailScript  template.JS
+	MemoScript  template.JS
+	UsageScript template.JS
 	// ShellScript is the iframe shell's pure helpers (shell.js,
 	// window.WsShell): the frame LRU, the paths a shell frames, and the
 	// shell-frame message shapes, which the shell and its frames both load.
@@ -202,7 +203,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		return nil, lerr
 	}
 	a := &dashboardAssets{data: pageAssetsData{
-		CSS:              template.CSS(get("dashboard.css") + "\n" + get("memo.css")),
+		CSS:              template.CSS(get("dashboard.css") + "\n" + get("memo.css") + "\n" + get("usage.css")),
 		Script:           template.JS(get("dashboard.js")),
 		Sprite:           template.HTML(strings.TrimSpace(get("sprite.svg"))),
 		TrackerCSS:       template.CSS(get("tracker.css")),
@@ -211,6 +212,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		ToastScript:      template.JS(get("toast.js")),
 		RailScript:       template.JS(get("rail.js")),
 		MemoScript:       template.JS(get("memo.js")),
+		UsageScript:      template.JS(get("usage.js")),
 		ShellScript:      template.JS(get("shell.js")),
 		CardsScript:      template.JS(get("cards.js")),
 		PreviewScript:    template.JS(get("preview.js")),

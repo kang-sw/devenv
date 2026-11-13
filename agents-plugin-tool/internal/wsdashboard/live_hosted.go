@@ -137,6 +137,7 @@ func (s *daemonLiveSlot) Publish(snap wslive.Snapshot) {
 		h.SetLiveSnapshot(d.dir, s.replyID, snap)
 	}
 	d.live.mu.Unlock()
+	d.planUsage.pushClaude(&snap)
 	if d.index != nil && snap.UpdatedAt > 0 {
 		d.index.SetSnapshotUpdatedAt(s.replyID, time.UnixMilli(snap.UpdatedAt))
 	}
