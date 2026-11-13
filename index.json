@@ -518,7 +518,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-13T14:22:50Z"
+        "touched_at": "2026-11-13T14:23:42Z",
+        "impl": {
+          "branch": "impl/develop/oat-storm-twine"
+        }
       }
     },
     "261113-refactor-ws-dashboard-drop-lan-serving": {
