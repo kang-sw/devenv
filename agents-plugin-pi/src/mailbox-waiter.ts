@@ -258,6 +258,8 @@ export function boardSteerDeps(wiring: BoardSteerWiring): BoardSteerDeps {
 /** The per-wake seam; subprocess implementations may also own a cached child. */
 export type MailboxRunWait = ((signal: AbortSignal, arm: MailboxWaitArm) => Promise<MailboxWaitOutcome>) & {
   dispose?: () => Promise<void>;
+  /** What a drain received, so a cached child's buffered arrival for it does not wake again. */
+  drained?: (envelopes: readonly MailboxEnvelope[]) => void;
 };
 
 export interface MailboxWaiterDeps {
@@ -571,6 +573,7 @@ export function startMailboxWaiter(deps: MailboxWaiterDeps): MailboxWaiterHandle
       if (outcome === "mail" || outcome === "mail+board") {
         try {
           const envelopes = await deps.drainMail();
+          deps.runWait.drained?.(envelopes);
           if (envelopes.length > 0 && !controller.signal.aborted) {
             try {
               deps.admit(envelopes);
@@ -822,16 +825,76 @@ export function sessionMailboxWaitOptions(
 }
 
 type StreamOutcome = MailboxWaitOutcome | "unsupported";
+
+/**
+ * The envelopes the drains received, so a `--stream` arrival line buffered
+ * while the waiter drained does not wake it again for mail recv already
+ * removed. A line is matched by its named/reply envelopes (`sent_at` and
+ * `content`), with multiplicity, and each match is consumed. Only a line whose
+ * every mail envelope was received loses its `mail` kind; mail that arrived
+ * after the drain still wakes at once.
+ */
+export interface DrainLedger {
+  record: (envelopes: readonly MailboxEnvelope[]) => void;
+  /** The line with an already-received `mail` kind removed; undefined when nothing is left to wake for. */
+  filter: (line: string) => string | undefined;
+  clear: () => void;
+}
+
+const DRAIN_LEDGER_MAX = 1_000;
+
+export function createDrainLedger(): DrainLedger {
+  const counts = new Map<string, number>();
+  const keyOf = (e: { sent_at?: unknown; content: string }): string => `${typeof e.sent_at === "string" ? e.sent_at : ""}\u0000${e.content}`;
+  return {
+    record(envelopes) {
+      for (const e of envelopes) {
+        if (!e || typeof e.content !== "string") continue;
+        // Bounded: an entry no line ever matched only lingers until the next child.
+        if (counts.size >= DRAIN_LEDGER_MAX) counts.clear();
+        const key = keyOf(e);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+    },
+    filter(line) {
+      if (counts.size === 0) return line;
+      let parsed: { kinds?: unknown; named?: unknown; reply?: unknown } | null;
+      try { parsed = JSON.parse(line); } catch { return line; }
+      const kinds = parsed?.kinds;
+      if (!parsed || !Array.isArray(kinds) || !kinds.includes("mail")) return line;
+      const envelopes = [parsed.named, parsed.reply].flatMap((list) => (Array.isArray(list) ? list : []));
+      if (envelopes.length === 0) return line;
+      let covered = true;
+      for (const e of envelopes) {
+        if (!e || typeof e !== "object" || typeof (e as { content?: unknown }).content !== "string") { covered = false; continue; }
+        const key = keyOf(e as { sent_at?: unknown; content: string });
+        const n = counts.get(key) ?? 0;
+        if (n === 0) covered = false;
+        else if (n === 1) counts.delete(key);
+        else counts.set(key, n - 1);
+      }
+      if (!covered) return line;
+      const rest = kinds.filter((kind) => kind !== "mail");
+      return rest.some((kind) => kind === "board" || kind === "interrupt") ? JSON.stringify({ ...parsed, kinds: rest }) : undefined;
+    },
+    clear() { counts.clear(); },
+  };
+}
 const WAIT_USAGE_ERROR = /flag provided but not defined|unknown (?:flag|option)|unrecognized (?:arguments?|option)|(?:^|\n)\s*usage(?::|\s+of\b)/i;
 
-/** One child, with arrivals queued while the caller is busy draining. */
-function startMailboxStream(options: SubprocessWaitOptions, arm: MailboxWaitArm, spawnChild: typeof spawn) {
+/**
+ * One child, with arrivals queued while the caller is busy draining. A queued
+ * arrival is checked against `ledger` when it is consumed, after any drain
+ * that overtook it has recorded what it received.
+ */
+function startMailboxStream(options: SubprocessWaitOptions, arm: MailboxWaitArm, spawnChild: typeof spawn, ledger: DrainLedger) {
   const child = spawnChild("python3", [...buildMailboxWaitArgv({ ...options, ...arm }), "--stream"], {
     cwd: options.pluginDir,
     stdio: ["ignore", "pipe", "pipe"],
   });
   const lines = createInterface({ input: child.stdout!, crlfDelay: Infinity });
-  const queue: MailboxWaitOutcome[] = [];
+  // Each entry is read when consumed; undefined means the arrival is stale.
+  const queue: (() => MailboxWaitOutcome | undefined)[] = [];
   let pending: ((outcome: StreamOutcome) => void) | undefined;
   let terminal: StreamOutcome | undefined;
   let seenArrival = false;
@@ -849,13 +912,19 @@ function startMailboxStream(options: SubprocessWaitOptions, arm: MailboxWaitArm,
     detachAbort();
     resolve();
   }));
-  const deliver = (outcome: MailboxWaitOutcome): void => {
+  const deliver = (read: () => MailboxWaitOutcome | undefined): void => {
     if (pending) {
+      const outcome = read();
+      if (outcome === undefined) return;
       clearTimeout(recheck);
       const resolve = pending;
       pending = undefined;
       resolve(outcome);
-    } else queue.push(outcome);
+    } else queue.push(read);
+  };
+  const arrival = (line: string) => (): MailboxWaitOutcome | undefined => {
+    const fresh = ledger.filter(line);
+    return fresh === undefined ? undefined : boardWakeOutcome(fresh, arm.boardInterrupt);
   };
   const report = (text: string): void => {
     if (stopped) return;
@@ -870,7 +939,7 @@ function startMailboxStream(options: SubprocessWaitOptions, arm: MailboxWaitArm,
     if (record && typeof record === "object" && record.timed_out !== true
       && Array.isArray(record.kinds) && record.kinds.some((kind) => ["mail", "board", "interrupt"].includes(kind))) {
       seenArrival = true;
-      deliver(boardWakeOutcome(line, arm.boardInterrupt));
+      deliver(arrival(line));
     } else rejectedFlag ||= WAIT_USAGE_ERROR.test(line);
   });
   child.stderr!.setEncoding("utf8");
@@ -931,13 +1000,16 @@ function startMailboxStream(options: SubprocessWaitOptions, arm: MailboxWaitArm,
       detachAbort = () => signal.removeEventListener("abort", onAbort);
       signal.addEventListener("abort", onAbort, { once: true });
       if (signal.aborted) { void stop(); return closed.then(() => "stopped"); }
-      if (queue.length > 0) return Promise.resolve(queue.shift()!);
+      while (queue.length > 0) {
+        const outcome = queue.shift()!();
+        if (outcome !== undefined) return Promise.resolve(outcome);
+      }
       if (terminal !== undefined) return Promise.resolve(terminal);
       return new Promise((resolve) => {
         pending = resolve;
         // Preserve the old idle config-check cadence even though CLI stream
         // deadlines are silent. This re-arms the seam, not the child process.
-        recheck = setTimeout(() => deliver("timeout"), 10 * 60 * 1_000);
+        recheck = setTimeout(() => deliver(() => "timeout"), 10 * 60 * 1_000);
         recheck.unref();
       });
     },
@@ -959,6 +1031,7 @@ export function createSubprocessWait(options: SubprocessWaitOptions, spawnChild:
     try { return await legacyWait; } finally { legacyWait = undefined; }
   };
   let stream: ReturnType<typeof startMailboxStream> | undefined;
+  const ledger = createDrainLedger();
   const streamSupport = options.streamSupport ?? {};
   let disposed = false;
   const runWait: ReturnType<typeof createSubprocessWait> = async (signal, requested) => {
@@ -981,7 +1054,11 @@ export function createSubprocessWait(options: SubprocessWaitOptions, spawnChild:
       stream = undefined;
     }
     if (disposed || signal.aborted) return "stopped";
-    stream ??= startMailboxStream(options, arm, spawnChild);
+    if (!stream) {
+      // A new child reports only mail still queued, never what a drain took.
+      ledger.clear();
+      stream = startMailboxStream(options, arm, spawnChild, ledger);
+    }
     const outcome = await stream.next(signal);
     if (outcome === "unsupported") streamSupport.unsupported = true;
     if (outcome === "error" || outcome === "stopped" || outcome === "unsupported") {
@@ -992,6 +1069,7 @@ export function createSubprocessWait(options: SubprocessWaitOptions, spawnChild:
     if (outcome === "unsupported") return runLegacy(signal, arm);
     return outcome;
   };
+  runWait.drained = (envelopes) => ledger.record(envelopes);
   runWait.dispose = async () => {
     disposed = true;
     lifetime.abort();
