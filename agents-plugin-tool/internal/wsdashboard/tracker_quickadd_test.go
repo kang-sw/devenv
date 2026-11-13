@@ -349,6 +349,7 @@ var VS = { items: { i1: { id: 'i1', title: 'T', body: '', project: '', labels: [
 var ui = { win: true, item: 'i1', edpv: {}, eatt: {} }, sent = [];
 function wsT(k) { return k; }
 function showItem() {}
+function keepItemDraft() {}
 function render() {}
 function toast() {}
 function endEdit() { ui.iedit = null; }

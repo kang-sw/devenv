@@ -35,6 +35,7 @@ var views = {}, opened = [], toasts = [], bad = [];
 var AD = { stores: function () { return ["team", "home"]; }, view: function (id) { return views[id] || null; } };
 var ui = { page: null, store: null, open: null, item: null, win: false, routeItem: null };
 function syncNow() {}
+function keepItemDraft() {}
 function bringUp() {}
 function render() {}
 function esc(s) { return s; }
