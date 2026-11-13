@@ -1,13 +1,15 @@
 ---
 title: "Release-gate sweep fixes: eight Important findings in c8d5479fe..be2e22005"
-sage-review-design: blocked
-sage-review-completeness: blocked
+sage-review-design: completed
+sage-review-completeness: completed
 related:
   261113-bug-ws-hosted-pi-start-misses-uninstalled-extension-deps: "landed c41f18fc0; reworked pi_lead.go launch and fallback (#5, #6)"
   261113-feat-ws-hosted-lead-bundled-plugin-only: "#6 is an owner-approved narrow deviation from its (392)=c ((526)=a)"
   261113-feat-ws-dashboard-iframe-shell: "ready, in flight; forwards shell hotkeys from session frames (#1)"
   261113-bug-ws-only-the-dashboard-daemon-runs-an-exe: "ready; its Phase 2 reworks how mailbox-waiter.ts spawns the waiter (#3)"
   261112-feat-ws-whiteboard-topic-tickets-sticky-head: "ready, in flight; touches page.tmpl link/check templates (#7, text overlap)"
+sage-review-completeness-reviewed: fe98018b7c409278
+sage-review-design-reviewed: fe98018b7c409278
 ---
 
 # Release-gate sweep fixes: eight Important findings in c8d5479fe..be2e22005
@@ -123,9 +125,15 @@ Technical, set by the EXEC lead from the reviewers' proposed fixes
    other path-resolution errors; because `PluginWarning` holds one value
    (`runner.go:2111-2112`), when the bridge warning and the isolated start
    both apply, the two texts are combined into one warning.
-7. (#7) Link fields and readings render as plain text on the page, matching
-   `FormatQuery`'s `Plain`. Rejected: escaping Markdown in the query output
-   instead (the fields are paths and identifiers, not prose).
+7. (#7) Link fields and readings (`Reading`, `CheckReading`) keep the
+   inline pipeline (`pageData.TextInline`, `wswhiteboard/markdown.go:218-222`)
+   but without its emphasis parser: asterisks and underscores stay literal,
+   while code spans, item/panel references, bare URLs and bare paths keep
+   working; the query output stays `Plain` ((533)=b, owner 2026-11-13).
+   Rejected: (a) fully plain text (drops the references and clickable links
+   5695371fb added on purpose and `render_test.go:571` pins); escaping
+   Markdown in the query output instead (the fields are paths and
+   identifiers, not prose).
 8. (#8) Tests compare against `EvalSymlinks(want)`; the `root_override`
    tool description states the resolved-path contract (a symlinked override
    binds to its resolved path). Rejected: dropping the symlink resolution
@@ -133,17 +141,6 @@ Technical, set by the EXEC lead from the reviewers' proposed fixes
 9. Compatibility tier: T0. Dashboard and board asset content, hook script
    behavior, launcher-internal Go, and one tool description sentence; no
    tool, argument, store, or protocol change.
-
-## Open Decision Queue
-
-Last ID: (533)
-
-(533) [open] [policy] How board link fields and readings render (#7): (a) fully plain text, or (b) the same inline pipeline without emphasis
-- The finding: `rsrc/*.md and internal/*.go` in a link field loses its asterisks to emphasis. Link fields and readings render through `pageData.TextInline` (`wswhiteboard/markdown.go:218-222`), added in 5695371fb to keep raw HTML literal while still honoring code spans, item/panel references, bare URLs and bare paths; `render_test.go:571` pins `see {{2}}` in a Links field rendering as a reference link. The EXEC draft decision ("plain text, matching `FormatQuery`'s `Plain`") would remove references and make URLs and paths in a link field unclickable.
-- a: fully plain text (matches the query output exactly; drops references and clickable links; rewrites the pinned tests).
-- b: drop only the emphasis parser from the inline pipeline for these fields (asterisks and underscores stay literal; references, code spans, URLs and paths keep working; the query output stays `Plain`).
-- Readings (`Reading`, `CheckReading`) are agent prose; under (b) they follow the same rule so one field family has one renderer.
-> b: it fixes the reported loss without removing the reference and link behavior 5695371fb added on purpose and the tests pin.
 
 ## Constraints
 
@@ -198,7 +195,7 @@ Last ID: (533)
 | scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/testdata/search-palette.test.cjs, wsdashboard/memos_test.go, wsagent/pi_lead_test.go, wsagent/lead_isolation_test.go, agents-plugin-pi/test/mailbox-waiter.test.ts, claude-mod register tests, agents-plugin/tests/test_shipped_surfaces_downstream_neutral.py; new cases are added inside these |
 | complexity.reuse_points | confirmed | wsrsrc.ResolveRoot in bundledPluginRoot (#4); PluginWarning in pi_lead.go with its own text (#6; the bridge bundleErr branch is not reused); wswhiteboard TextInline and Plain (#7); canonicalGitRoot (#8); the '/' target check in qShortcut (#1) |
 | complexity.side_effect_risk | moderate | #6 changes launch mode for legacy hosted Pi lead records and #3 touches wake timing in three waiters |
-| risk.correctness | moderate | eight independent fixes; #3 stale-arrival discard can drop a wake that is still wanted |
+| risk.correctness | moderate | eight independent fixes; #3 envelope comparison must still wake on mail that arrives after the drain |
 | risk.fit | moderate | #6 is a recorded deviation from (392)=c and from the extension-deps Decision 6 single-signal rule; #1 overlaps iframe-shell hotkey routing |
 | risk.test | moderate | #8 failures reproduce only on macOS, which CI does not run; #5 needs a symlinked-directory adapter run |
 | risk.security_or_contract | moderate | #2 settles a stored-data byte contract on the client; #6 changes a hosted launch path; #8 changes a tool description |
@@ -231,8 +228,14 @@ Verification:
   fallback, and that combined warnings keep both texts; a runner test that a legacy lead record (no isolation field) on a Pi
   without the JS SDK starts isolated with the `PluginWarning` and its record
   unchanged, and that a Pi with the SDK still starts in default mode.
-- #7: a render test that `rsrc/*.md and internal/*.go` in a link field
-  renders verbatim.
+- #7: a render test that `rsrc/*.md and internal/*.go` and `snake_case_name`
+  in a link field and in a reading keep their text content verbatim
+  (asterisks and underscores literal; a bare-path link wrapping a token is
+  acceptable as long as the text is unchanged), while the pinned `see {{2}}`
+  reference link (`render_test.go:571`), a panel reference, a code span, a
+  bare URL and a bare path in a link field still render as before. Update
+  the `TextInline` doc comment (`markdown.go:218-219`) to say emphasis stays
+  literal.
 - #8: run `go test ./internal/mcp/` locally on darwin (CI has no macOS
   runner); the Result names the four tests that failed before and pass
   after.
@@ -247,7 +250,7 @@ Verification:
 - `go test ./...` for the touched packages, the claude-mod / wsflow / Pi test
   suites, and the wsflow mirror drift tests pass.
 
-## Blocked (2026-11-13)
+## Sage Review Round 1 (2026-11-13)
 
 ### Design Reviewer — block
 
