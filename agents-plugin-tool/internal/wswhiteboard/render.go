@@ -566,8 +566,36 @@ func (p *pageData) framedDoc(topic, entry string, body template.HTML, stale, mer
 	if len(relays) > 0 {
 		relay = ` data-relay="` + template.HTMLEscapeString(strings.Join(relays, " ")) + `"`
 	}
-	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(title) + `" data-doc="` + template.HTMLEscapeString(key) + `" data-doc-key="` + template.HTMLEscapeString(key) + `" data-topic="` + template.HTMLEscapeString(topic) + `"` + entryAttr + relay + ` sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" srcdoc="` +
+	return template.HTML(`<iframe class="doc-frame" title="` + template.HTMLEscapeString(title) + `" data-doc="` + template.HTMLEscapeString(key) + `" data-doc-key="` + template.HTMLEscapeString(key) + `" data-topic="` + template.HTMLEscapeString(topic) + `"` + entryAttr + relay + ` sandbox="` + frameSandbox + `" srcdoc="` +
 		template.HTMLEscapeString(doc.String()) + `"></iframe>`)
+}
+
+// frameSandbox is the sandbox token set of every srcdoc frame the daemon
+// builds (framedDoc, SandboxedPage): allow-scripts, so the document's own
+// scripts run, but no allow-same-origin, so they run in an opaque origin
+// that can neither read the host page nor reach the daemon's routes with
+// the viewer's credentials; popups open as ordinary pages. Adding a token
+// here (allow-same-origin above all, or allow-forms, allow-top-navigation,
+// allow-modals, allow-downloads) breaks that isolation for every frame.
+const frameSandbox = "allow-scripts allow-popups allow-popups-to-escape-sandbox"
+
+// SandboxedPage returns the frame that shows doc, a whole author-written
+// HTML document, under frameSandbox: an <iframe> titled title whose srcdoc
+// is doc verbatim, escaped as an attribute. Nothing is injected - no
+// stylesheet, script, <base>, or CSP meta - so the author's page renders
+// as written; the host neither posts to nor listens for messages from it.
+//
+// A srcdoc document inherits the policy container of the page that frames
+// it, sandbox or not: whatever Content-Security-Policy the hosting page
+// sends governs the author's page too. The tracker pages send only
+// frame-src and frame-ancestors (pinned in the dashboard's page tests), so
+// an author page may load scripts and styles from any origin; a later
+// script-src, connect-src, or default-src on a page that hosts these
+// frames silently breaks them, and frame-src 'self' already keeps an author
+// page from framing another origin.
+func SandboxedPage(title, doc string) template.HTML {
+	return template.HTML(`<iframe title="` + template.HTMLEscapeString(title) + `" sandbox="` + frameSandbox + `" srcdoc="` +
+		template.HTMLEscapeString(doc) + `"></iframe>`)
 }
 
 // staleClass is the class a topic body carries once its change marks are

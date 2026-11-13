@@ -38,7 +38,7 @@ func getLang(t *testing.T, url, cookie, accept string) (int, string) {
 
 func TestSessionPageFollowsTheLanguageChoice(t *testing.T) {
 	f := startPageFixture(t)
-	url := f.base + "/s/livesession"
+	url := f.base + "/s/livesession?frame=1"
 	cases := []struct {
 		name, cookie, accept string
 		lang, pref           string
@@ -68,24 +68,32 @@ func TestSessionPageFollowsTheLanguageChoice(t *testing.T) {
 		if strings.Contains(body, "<html lang=") || strings.Contains(body, " lang=\"") {
 			t.Errorf("%s: the page sets a lang attribute", c.name)
 		}
+		// The shell around the page takes the same choice.
+		_, shell := getLang(t, f.base+"/s/livesession", c.cookie, c.accept)
+		for _, want := range []string{`data-lang="` + c.lang + `"`, `data-langpref="` + c.pref + `"`} {
+			if !strings.Contains(shell, want) {
+				t.Errorf("%s: the shell lacks %q", c.name, want)
+			}
+		}
 	}
 }
 
 // TestEveryPageHasSettingsWithTheLanguageItem pins where the settings are:
 // the index page's gear menu, and a session page's drawer card, the gear
-// gone from its top bar.
+// gone from its top bar. The shell around a session page holds neither (its
+// frame's drawer does), only the string table its scripts read.
 func TestEveryPageHasSettingsWithTheLanguageItem(t *testing.T) {
 	f := startPageFixture(t)
 	for _, c := range []struct {
 		name, path string
 		layout     bool
 	}{
-		{"session list", "/", false},
-		{"board-first session", "/s/boardsession", false},
-		{"adapter session", "/s/livesession", true},
+		{"session list", "/?frame=1", false},
+		{"board-first session", "/s/boardsession?frame=1", false},
+		{"adapter session", "/s/livesession?frame=1", true},
 	} {
 		_, body := getLang(t, f.base+c.path, "ko", "")
-		if c.path == "/" {
+		if c.path == "/?frame=1" {
 			if !strings.Contains(body, `id="gear"`) || !strings.Contains(body, `id="gmenu"`) {
 				t.Errorf("%s: no gear", c.name)
 			}
@@ -114,13 +122,22 @@ func TestEveryPageHasSettingsWithTheLanguageItem(t *testing.T) {
 			t.Errorf("%s: layout and input items present = %v, want %v", c.name, has, c.layout)
 		}
 	}
+	_, shell := getLang(t, f.base+"/s/livesession", "ko", "")
+	if !strings.Contains(shell, "window.wsT") {
+		t.Error("shell: no client string table")
+	}
+	for _, absent := range []string{`id="gear"`, `id="gmenu"`, `id="p-settings"`} {
+		if strings.Contains(shell, absent) {
+			t.Errorf("shell holds %q, which belongs to the page it frames", absent)
+		}
+	}
 }
 
 // Viewers in two languages share one entry cache: a cached entry from one
 // must never reach the other.
 func TestEntryCacheKeepsLanguagesApart(t *testing.T) {
 	f := startPageFixture(t)
-	url := f.base + "/s/livesession"
+	url := f.base + "/s/livesession?frame=1"
 	for i, lang := range []string{"ko", "en", "ko", "en"} {
 		_, body := getLang(t, url, lang, "")
 		en, ko := `<span class="src wb">whiteboard</span>`, `<span class="src wb">화이트보드</span>`

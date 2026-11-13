@@ -27,7 +27,7 @@ func TestBoardTopicMotion(t *testing.T) {
 	key := regexp.MustCompile(`(?s)\n  function topicKey\(n\) \{.*?\n  \}\n`).FindString(js)
 	motion := regexp.MustCompile(`(?s)\n  function topicMotion\(before, ins\) \{.*?\n  \}\n`).FindString(js)
 	grow := regexp.MustCompile(`(?s)\n  function growTopic\(n, from\) \{.*?\n  \}\n`).FindString(js)
-	slide := regexp.MustCompile(`(?s)\n  function slideBoard\(el, before\) \{.*?\n  \}\n`).FindString(js)
+	slide := regexp.MustCompile(`(?s)\n  function slideBoard\(el, before, from\) \{.*?\n  \}\n`).FindString(js)
 	before := regexp.MustCompile(`\n    var before = board [^\n]*\n`).FindString(js)
 	if key == "" || motion == "" || grow == "" || slide == "" || before == "" {
 		t.Fatal("dashboard.js holds no topicKey / topicMotion / growTopic / slideBoard / swap before-spots line")
@@ -35,8 +35,11 @@ func TestBoardTopicMotion(t *testing.T) {
 	if !strings.Contains(js, `swap("board", d.hash, d.html, true);`) {
 		t.Error("the deferred board swap does not land still")
 	}
-	if !strings.Contains(js, "        var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });\n        startMotion(moves.concat(slideBoard(el, before)));\n") {
-		t.Error("swap does not grow the inserted topics after preparing them, then slide the board, and start both at the first frame")
+	if !strings.Contains(js, "        var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });\n") {
+		t.Error("swap does not grow the inserted topics after preparing them")
+	}
+	if !strings.Contains(js, "        if (kept) kept.h.apply();\n        startMotion(moves.concat(slideBoard(el, before, kept && window.wbHistory.keeping(kept.h.scroller) ? boardTop : null)));\n") {
+		t.Error("swap does not compensate the scroll, then slide the board (in screen terms while kept), and start both at the first frame")
 	}
 	runNode(t, "board topic motion", `
 var bad = [];
@@ -86,6 +89,15 @@ check("a shifted topic slides back", down.anims, [[[{ transform: "translateY(-80
 check("a card slides", crd.anims, [[[{ transform: "translateY(-80px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }]]);
 check("a maximized card, a large topic, a topic holding a large panel, a new topic, one out of the closed pages, an unmoved one, and other nodes stay still",
   [maxed, big, holder, born, unpaged, stay, other].map(function (n) { return n.anims.length; }), [0, 0, 0, 0, 0, 0, 0]);
+// A compensated swap: the board's top moved from 100 to -100 on screen (the
+// scroll followed a topic rising above), so Down, 180 below the board's
+// top now and 0 before, stands where it stood on screen (screen 80 ->
+// 80): it does not slide; Up, at screen 310 before and -100 now, does.
+board.y = -100; up.anims = []; down.anims = [];
+up.y = -100; down.y = 80; board.children = [up, down];
+slideBoard(board, { "t:Up": { h: 50, y: 230 }, "t:Down": { h: 70, y: 0 } }, 80);
+check("in screen terms, a topic held in place does not slide", down.anims, []);
+check("in screen terms, the topic that moved slides from its old screen spot", up.anims, [[[{ transform: "translateY(410px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }]]);
 
 function decide(board, still, rm) {
   var el = {};

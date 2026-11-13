@@ -1,0 +1,382 @@
+<style>
+.sp{--bg:#141518;--fg:#e7e7e4;--card:#1e2024;--muted:#a2a6ad;--pri:#7aa2ff;--line:color-mix(in srgb,#e7e7e4 16%,transparent);--soft:color-mix(in srgb,#e7e7e4 7%,transparent);--ok:#6cc39a;--warn:#e0a36c;--fail:#f0797e;
+  font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--fg);background:var(--bg);padding:12px;box-sizing:border-box}
+.sp *{box-sizing:border-box}
+.sp [hidden]{display:none!important}
+.sp .bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+.sp .bar b{font-size:12px;color:var(--muted);margin-right:2px}
+.sp button.seg{font:inherit;font-size:12px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+.sp button.seg.on{background:var(--pri);color:#0c1424;border-color:var(--pri);font-weight:700}
+.sp .sep{width:1px;height:18px;background:var(--line);margin:0 4px}
+.sp .stage{position:relative;border:1px dashed var(--line);border-radius:12px;overflow:hidden;background:repeating-linear-gradient(135deg,#17181c 0 12px,#15161a 12px 24px)}
+.sp .scaler{transform-origin:0 0;position:absolute;left:0;top:0}
+.sp .dash{position:absolute;inset:0;padding:18px;color:var(--muted);font-size:12px}
+.sp .dash .opened{display:none;max-width:560px;margin:40px auto;background:var(--card);border:1px solid var(--pri);border-radius:12px;padding:14px 16px;box-shadow:0 0 0 4px color-mix(in srgb,var(--pri) 25%,transparent);color:var(--fg)}
+.sp .dash .opened.on{display:block;animation:spflash 1.2s ease-out}
+@keyframes spflash{0%{box-shadow:0 0 0 14px color-mix(in srgb,var(--pri) 45%,transparent)}100%{box-shadow:0 0 0 4px color-mix(in srgb,var(--pri) 25%,transparent)}}
+.sp .pal{position:absolute;left:50%;top:22px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 2px 4px #0008,0 8px 22px #0006}
+.sp .pal[hidden]{display:none}
+.sp .qrow{display:flex;gap:8px;align-items:center}
+.sp .qrow input{flex:1;font:inherit;font-size:16px;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--fg);outline:none}
+.sp .qrow input:focus{outline:2px solid var(--pri);outline-offset:1px}
+.sp .mode{font-size:11px;padding:3px 8px;border-radius:999px;background:var(--soft);color:var(--muted);white-space:nowrap}
+.sp .jump{display:flex;gap:6px;flex-wrap:wrap;align-items:center;min-height:24px}
+.sp .jump .lbl{font-size:11px;font-weight:800;color:var(--muted);margin-right:2px}
+.sp .chip{display:flex;align-items:center;gap:5px;font-size:12px;padding:3px 9px 3px 4px;border-radius:999px;border:1px solid var(--line);background:var(--bg);cursor:pointer;white-space:nowrap}
+.sp .chip.on{border-color:var(--pri);background:color-mix(in srgb,var(--pri) 20%,transparent)}
+.sp .chip.dimsel{border-style:dashed}
+.sp .mode.scope{color:var(--fg)}
+.sp .mode.exact{background:color-mix(in srgb,var(--ok) 22%,transparent);color:var(--ok);font-weight:700}
+.sp .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.sp .tab{display:flex;align-items:center;gap:4px;padding:6px 6px;font-size:12px;color:var(--muted);border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;user-select:none}
+.sp .tab.on{color:var(--fg);border-bottom-color:var(--pri);font-weight:700}
+.sp .tab.zero{opacity:.45}
+.sp .cnt{font-size:10px;font-variant-numeric:tabular-nums;padding:0 4px;border-radius:999px;background:var(--soft);min-width:16px;text-align:center}
+.sp .spin{width:10px;height:10px;border-radius:50%;border:2px solid color-mix(in srgb,var(--pri) 30%,transparent);border-top-color:var(--pri);animation:sprot .7s linear infinite;flex:none}
+@keyframes sprot{to{transform:rotate(360deg)}}
+.sp .grid{display:grid;gap:8px;min-height:0;flex:1}
+.sp .pane{display:flex;flex-direction:column;min-height:0;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--bg) 40%,var(--card));overflow:hidden}
+.sp .pane.single{border:0;background:none;border-radius:0}
+.sp .pane.focus{border-color:color-mix(in srgb,var(--pri) 60%,var(--line))}
+.sp .scroll{overflow:auto;min-height:0;flex:1;overscroll-behavior:contain;padding:2px 4px 6px}
+.sp .sec{margin-top:4px}
+.sp .sh{display:flex;align-items:center;gap:6px;padding:6px 6px 3px;font-size:11px;font-weight:800;color:var(--muted);letter-spacing:.03em;position:sticky;top:0;background:inherit;cursor:pointer}
+.sp .pane>.sh{background:color-mix(in srgb,var(--bg) 25%,var(--card));border-bottom:1px solid var(--line);padding:7px 9px}
+.sp .sh .k{font-weight:600;font-size:10px;padding:0 4px;border:1px solid var(--line);border-radius:4px;color:var(--muted)}
+.sp .sh .st{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums;display:flex;gap:5px;align-items:center}
+.sp .sh.cur{color:var(--pri)}
+.sp ul{list-style:none;margin:0;padding:0}
+.sp li.r{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:7px;cursor:pointer;min-width:0;animation:spin .18s ease-out}
+@keyframes spin{from{opacity:0;transform:translateY(-3px)}}
+.sp li.r.tall{flex-direction:column;align-items:stretch;gap:1px}
+.sp li.r:hover{background:var(--soft)}
+.sp li.r.on{background:color-mix(in srgb,var(--pri) 20%,transparent);outline:1px solid color-mix(in srgb,var(--pri) 55%,transparent)}
+.sp li.r.on.dimsel{background:var(--soft);outline:1px dashed var(--line)}
+.sp .stale li.r{opacity:.42}
+.sp .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.sp .m{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.sp .grow{flex:1}
+.sp .id{font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--warn);flex:none}
+.sp code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
+.sp .al{color:var(--muted);flex:none}
+.sp .code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;overflow:hidden;text-overflow:ellipsis;color:#d6d8dc}
+.sp mark{background:color-mix(in srgb,var(--warn) 35%,transparent);color:inherit;border-radius:2px}
+.sp .dot{width:8px;height:8px;border-radius:50%;flex:none}
+.sp .badge{font-size:10px;padding:1px 6px;border-radius:999px;background:var(--soft);color:var(--muted);flex:none}
+.sp .badge.exact{background:color-mix(in srgb,var(--ok) 22%,transparent);color:var(--ok)}
+.sp .more{font-size:11px;color:var(--muted);padding:3px 8px}
+.sp .empty{padding:14px 10px;color:var(--muted);font-size:12px;text-align:center}
+.sp .empty b{display:block;color:var(--fg);font-size:12px;margin-bottom:2px}
+.sp .skel{height:22px;margin:4px 7px;border-radius:6px;background:linear-gradient(90deg,var(--soft),color-mix(in srgb,var(--fg) 12%,transparent),var(--soft));background-size:200% 100%;animation:spsk 1s linear infinite}
+@keyframes spsk{to{background-position:-200% 0}}
+.sp .foot{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:7px}
+.sp kbd{font:10px ui-monospace,monospace;padding:0 4px;border:1px solid var(--line);border-radius:4px;color:var(--fg)}
+.sp .toast{position:absolute;right:16px;bottom:14px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:12px;box-shadow:0 6px 18px #0008;opacity:0;transition:opacity .2s}
+.sp .toast.on{opacity:1}
+.sp .notes{margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.sp .notes section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.sp .notes h4{margin:0 0 6px;font-size:12px}
+.sp .notes ul{padding-left:16px;list-style:disc;color:var(--muted);font-size:12px}
+.sp .notes li{margin:2px 0}
+.sp .notes li b{color:var(--fg);font-weight:600}
+</style>
+<div class="sp" id="sp">
+  <div class="bar">
+    <b>폭</b>
+    <button class="seg" data-w="narrow">좁게 · 440</button>
+    <button class="seg" data-w="medium">중간 · 820</button>
+    <button class="seg" data-w="wide">넓게 · 1240</button>
+    <span class="sep"></span>
+    <b>예시 쿼리</b>
+    <button class="seg" data-q="palette">palette</button>
+    <button class="seg" data-q="53">53</button>
+    <button class="seg" data-q="(531)">(531)</button>
+    <button class="seg" data-q="stream cancel">stream cancel</button>
+    <button class="seg" data-q="qzxv">결과 없음</button>
+    <button class="seg" data-demo>▶ 타이핑 데모</button>
+    <button class="seg" data-reopen>Ctrl+K 다시 열기</button>
+  </div>
+  <div class="stage" id="spStage">
+    <div class="scaler" id="spScaler">
+      <div class="dash" id="spDash">대시보드 (배경) — 팔레트에서 결과를 열면 여기에 어떤 화면이 열리는지 표시됩니다.
+        <div class="opened" id="spOpened"></div>
+      </div>
+      <div class="pal" id="spPal" role="dialog" aria-label="통합 검색">
+        <div class="qrow">
+          <input id="spIn" autocomplete="off" spellcheck="false" placeholder="파일, 내용, 보드 (123), 트래커, 세션·액션 검색…" role="combobox" aria-expanded="true">
+          <span class="mode" id="spMode">퍼지</span>
+          <span class="mode scope" title="파일·내용 검색 범위: 보고 있는 세션의 프로젝트 폴더, .gitignore 적용, 데몬 내장 Go 검색">📁 devenv/ · .gitignore</span>
+        </div>
+        <div class="jump" id="spJump"></div>
+        <div class="tabs" id="spTabs" role="tablist"></div>
+        <div class="grid" id="spGrid"></div>
+        <div class="foot" id="spFoot"></div>
+      </div>
+      <div class="toast" id="spToast"></div>
+    </div>
+  </div>
+  <div class="notes">
+    <section><h4>소스 5개 · 동시에 스트리밍</h4><ul>
+      <li><b>이동·명령 줄</b>: 세션·스토어·액션. 입력창 바로 아래 칩 줄, 즉시 필터. 첫 행에서 <kbd>↑</kbd> 또는 <kbd>Alt+0</kbd>으로 진입, <kbd>←→</kbd> 이동, <kbd>↓</kbd> 복귀. ((543)=a)</li>
+      <li><b>보드</b>: 토픽·본문·질문/답·번호 항목. 숫자만 쳐도 숫자만 쳐도 ID 퍼지 매칭(접두 우선). <code>(531)</code>은 정확히 그 항목 하나 → 바로 선택되어 Enter로 열림. <code>.123</code> 문법 폐지.</li>
+      <li><b>파일</b>: 이름 퍼지, 배치로 계속 도착.</li>
+      <li><b>파일·내용 범위</b>: 보고 있는 세션의 프로젝트 폴더, .gitignore 준수 (칩으로 표시).</li>
+      <li><b>내용</b>: 데몬 내장 Go 검색(ripgrep 의존 없음), 리터럴, 파일:줄 + 매치 줄. 한도(200) 넘으면 "200+".</li>
+      <li><b>트래커</b>: 항목 제목/별칭. <b>트래커 내용</b>: 본문·댓글 발췌.</li>
+    </ul></section>
+    <section><h4>취소 가능 · 지연 숨기기</h4><ul>
+      <li>키 입력마다 진행 중인 모든 쿼리 취소, 새 세대로 재시작.</li>
+      <li>로컬 소스(보드·트래커)는 즉시, 파일·내용은 80ms 디바운스.</li>
+      <li>이전 결과는 지우지 않고 흐리게 유지 → 새 결과 첫 배치가 오면 교체 (깜빡임 없음).</li>
+      <li>선택은 같은 결과가 남아 있으면 그 결과를 따라감 — 늦게 온 배치가 커서를 밀지 않음.</li>
+      <li>슬롯마다 상태: 대기 / 검색 중(n) / 완료(n · 시간) / 한도 / 결과 없음.</li>
+    </ul></section>
+    <section><h4>폭별 배치</h4><ul>
+      <li><b>좁게 (&lt;600)</b>: 한 목록 + 라벨 탭. 이동·명령 줄은 모든 폭에서 입력창 아래. "전체" 탭은 소스별 상위 3개.</li>
+      <li><b>중간 (600–1000)</b>: 2열 — 이름 결과(보드·파일·트래커) | 본문 결과(내용·트래커 내용). 포커스된 섹션만 펼침(12), 나머지는 3개.</li>
+      <li><b>넓게 (≥1000)</b>: 3열 5칸 — 내용이 가운데 세로 전체.</li>
+      <li>팔레트 폭 = min(대시보드 폭 − 48, 단계 최대폭).</li>
+    </ul></section>
+    <section><h4>키보드 · 열기</h4><ul>
+      <li>포커스는 항상 입력창(타이핑 유지). <kbd>↑↓</kbd> 슬롯 안 이동, <kbd>Tab</kbd>/<kbd>Shift+Tab</kbd> 다음/이전 슬롯(좁게: 탭, 넓게: 칸, 결과 없는 슬롯은 건너뜀), <kbd>Alt+1–5</kbd> 슬롯 직행.</li>
+      <li><kbd>Enter</kbd> 열고 닫기, <kbd>Ctrl+Enter</kbd> 뒤에서 열기(팔레트 유지), <kbd>Esc</kbd> 쿼리 있으면 지우기 → 한 번 더 닫기.</li>
+      <li>파일 → 미리보기 / 내용 → 미리보기 해당 줄 하이라이트 / 보드 → 스크롤 + 플래시 / 트래커 → 항목 창 / 트래커 내용 → 항목 창의 해당 댓글.</li>
+    </ul></section>
+  </div>
+</div>
+<script>
+(function(){
+var $=function(id){return document.getElementById(id)};
+var esc=function(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})};
+/* ---------- fake corpus ---------- */
+var FILES=['agents-plugin-tool/internal/wsdashboard/assets/tracker.js','agents-plugin-tool/internal/wsdashboard/assets/tracker.css','agents-plugin-tool/internal/wsdashboard/assets/dashboard.js','agents-plugin-tool/internal/wsdashboard/assets/dashboard.css','agents-plugin-tool/internal/wsdashboard/assets/cards.js','agents-plugin-tool/internal/wsdashboard/assets/rail.js','agents-plugin-tool/internal/wsdashboard/assets/preview.js','agents-plugin-tool/internal/wsdashboard/assets/files.js','agents-plugin-tool/internal/wsdashboard/assets/terminal.js','agents-plugin-tool/internal/wsdashboard/pages.go','agents-plugin-tool/internal/wsdashboard/pageview.go','agents-plugin-tool/internal/wsdashboard/pageview_rail.go','agents-plugin-tool/internal/wsdashboard/search_route.go','agents-plugin-tool/internal/wsdashboard/search_stream.go','agents-plugin-tool/internal/wsdashboard/search_stream_test.go','agents-plugin-tool/internal/wsdashboard/palette_test.go','agents-plugin-tool/internal/wswhiteboard/view.go','agents-plugin-tool/internal/wswhiteboard/assets/stream.js','agents-plugin-tool/internal/wswhiteboard/assets/page.css','agents-plugin-tool/internal/wstracker/store.go','agents-plugin-tool/internal/wstracker/query.go','agents-plugin-tool/internal/wstracker/search.go','agents-plugin-tool/internal/wsi18n/tables/ko.json','agents-plugin-tool/internal/wsi18n/tables/en.json','agents-plugin/skills/lead-run/SKILL.md','agents-plugin/rsrc/playbooks/worker.md','ai-docs/tickets/todo/261113-feat-ws-dashboard-board-reorder-hold.md','ai-docs/tickets/todo/261113-feat-ws-dashboard-browser-pane.md','ai-docs/tickets/todo/261113-feat-ws-tracker-start-date-range-picker.md','ai-docs/tickets/ready/261112-feat-ws-dashboard-unified-search.md','ai-docs/manuals/release-compatibility.md','ai-docs/manuals/ws-mcp.md','agents-plugin-tool/internal/mcp/server.go','agents-plugin-tool/internal/mcp/cancel.go','agents-plugin-tool/internal/wsgit/stream.go','agents-plugin-tool/cmd/ws-mcp/main.go'];
+var CONTENT=[
+['assets/tracker.js',5684,'  // One palette: host session/board rows first, tracker rows last. The host'],
+['assets/tracker.js',5707,'    var q = query.trim().toLowerCase(), jump = /^\\.(\\d+)$/.exec(q);'],
+['assets/tracker.js',5932,"    b.appendChild(el('dialog', { class: 'tk tk-palette', id: 'tkqpop' },"],
+['assets/tracker.js',5781,'  function qOpen() {'],
+['assets/tracker.js',5788,'  function qClose() {'],
+['assets/tracker.css',80,'.tk.tk-palette { position: fixed; inset: 0; margin: auto; width: min(680px, …'],
+['assets/tracker.css',89,'.tk.tk-palette ul { list-style: none; max-height: min(520px, 62dvh); overflow: auto; }'],
+['assets/dashboard.js',2511,'  // stream board updates; cancel the pending swap when a newer frame lands'],
+['assets/dashboard.js',4120,'function searchRows(cb) { return hostRows.concat(boardRows(cb)); }'],
+['assets/dashboard.js',4188,'  if (pick.kind === "board-item") scrollToItem(pick.id, { flash: true });'],
+['wsdashboard/search_stream.go',41,'// Stream sends results in batches and stops when ctx is cancelled.'],
+['wsdashboard/search_stream.go',58,'	case <-ctx.Done(): return ctx.Err() // a newer query cancelled us'],
+['wsdashboard/search_stream.go',77,'	enc.Encode(batch{Source: "content", Gen: gen, Rows: rows})'],
+['wsdashboard/search_route.go',23,'	mux.HandleFunc("/search/stream", d.searchStream) // SSE, one per palette query'],
+['wsdashboard/search_route.go',36,'	cancel := d.cancelPrevious(clientID) // cancel the palette\'s older generation'],
+['wsdashboard/palette_test.go',12,'func TestPaletteExactParenID(t *testing.T) { // "(531)" matches item 531 only'],
+['wsdashboard/palette_test.go',30,'	want(t, rank("53"), "531", "532", "530", "153")'],
+['wswhiteboard/assets/stream.js',210,'function wbHistory() { /* stream older pages, cancel on scroll away */ }'],
+['wswhiteboard/view.go',582,'	// order board topics by last update'],
+['wstracker/search.go',19,'// Search scans titles, bodies and comments; it streams hits per store.'],
+['wstracker/search.go',44,'		if ctx.Err() != nil { return } // cancelled by a newer palette query'],
+['mcp/cancel.go',15,'// cancel propagates notifications/cancelled to the running tool call'],
+['wsgit/stream.go',88,'	// stream rg output line by line; kill the child on cancel'],
+['tickets/ready/261112-feat-ws-dashboard-unified-search.md',40,'- (531) clip steps of 640px; palette reuses the same stream helper'],
+['tickets/todo/261113-feat-ws-dashboard-board-reorder-hold.md',61,'5. Release batching: a pill click releases every held topic with a slide.'],
+['i18n/tables/ko.json',812,'  "js.tk.qs.tip": "검색 (Ctrl+K)",'],
+['i18n/tables/ko.json',813,'  "js.tk.qs.none": "결과 없음",'],
+['i18n/tables/en.json',812,'  "js.tk.qs.tip": "Search (Ctrl+K)",'],
+['assets/preview.js',140,'  function openPreview(path, line) { /* scroll to line and mark the match */ }'],
+['assets/files.js',77,'// files list streams in from /files?stream=1; cancel on close'],
+['assets/terminal.js',301,'  if (ctrlK && inTerminal) return; // release-gate fix #1: Ctrl+K capture'],
+['assets/cards.js',512,'  // palette pick: open the card, keep scroll, flash once'],
+['manuals/ws-mcp.md',220,'Streaming tool output is cancellable; the client sends notifications/cancelled.']
+];
+var BOARD=[[501,'결정','토픽 히스토리 더보기: 접기 되돌리기','topic-history'],[512,'질문','보드 재정렬: 포커스 중엔 보류할까?','board-reorder-hold'],[515,'결정','닫히는 토픽도 보류','board-reorder-hold'],[527,'결정','UX 세션: 티켓 없는 UI 수정 허용','track setup'],[528,'질문','더보기 단계 크기','topic-history'],[529,'결정','달력 주 시작: 일요일','start-date picker'],[530,'질문','브라우저 패널 쿠키 경고','browser-pane'],[531,'결정','더보기 640px 단계 · 하단 고정','topic-history'],[532,'결정','보드 프론트엔드 성능 티켓','board perf'],[533,'결정','릴리스 게이트 수정 접기','release gate'],[534,'결정','세션 트리 서버 저장','session-rail'],[535,'결정','모든 행에 우클릭 메뉴','session-rail'],[538,'결정','즐겨찾기·워크스페이스 순서 서버로','session-rail'],[539,'결정','부모 종료 시 자식 최상위 승격','session-rail'],[540,'결정','자식은 즐겨찾기 불가','session-rail'],[541,'결정','시작일: 포커스 해제 = 저장, 버리기 캡슐','start-date picker'],[153,'결정','검색 팔레트 단축키 Ctrl+K','palette v1'],[353,'질문','팔레트 결과 그룹 순서','palette v1']];
+BOARD.push([null,'토픽','통합 검색 팔레트 목업','unified search'],[null,'토픽','세션 레일 트리 스펙','session-rail'],[null,'본문','스트리밍 취소: 세대 번호로 늦은 배치 버리기','unified search']);
+var JUMP=[['세션','MAIN · sweatradar','보는 중'],['세션','EXEC · regroup',''],['세션','UX · ibuprofen',''],['스토어','devenv','트래커'],['스토어','team','트래커'],['액션','새 작업','트래커'],['액션','보드 열 접기/펼치기',''],['액션','설정 열기','']];
+var TRACK=[['ksw.dev-41','통합 검색 팔레트 목업','doing','devenv'],['ksw.dev-38','팔레트 .tk 클래스 충돌 수정','doing','devenv'],['ksw.dev-35','검색 스트리밍 취소 API','todo','devenv'],['ksw.dev-29','세션 레일 트리','todo','devenv'],['ksw.dev-27','보드 재정렬 보류','todo','devenv'],['team.ux-12','달력 시작일 범위 선택','in-review','team'],['team.ux-9','브라우저 패널 프록시','blocked','team'],['team.ops-4','릴리스 게이트 Ctrl+K 캡처','done','team']];
+var TNOTE=[['ksw.dev-41','통합 검색 팔레트 목업','본문','좁게는 라벨 탭, 넓어질수록 다중 그리드. 모든 검색은 취소 가능한 스트리밍.'],['ksw.dev-35','검색 스트리밍 취소 API','댓글 · maya','새 키 입력이 오면 서버 쪽 rg 프로세스를 kill 해야 함. SSE 연결을 끊는 것으로 충분?'],['ksw.dev-35','검색 스트리밍 취소 API','본문','세대 번호(gen)로 늦게 온 배치를 버린다. 팔레트 하나당 스트림 하나.'],['ksw.dev-38','팔레트 .tk 클래스 충돌 수정','댓글 · raj','tk 배지 클래스가 palette 레이아웃을 찌그러뜨림. 이름 공간 분리.'],['team.ux-12','달력 시작일 범위 선택','본문','포커스 해제 = 저장. 빨간 버리기 캡슐을 팝업 옆에 띄움.'],['ksw.dev-29','세션 레일 트리','댓글 · ksw','(539) 부모가 끝나면 자식은 최상위로, 부활 시 다시 들어감.'],['team.ops-4','릴리스 게이트 Ctrl+K 캡처','본문','터미널·컴포저 안에서도 Ctrl+K가 팔레트를 열도록 캡처 순서 변경.'],['ksw.dev-27','보드 재정렬 보류','댓글 · ksw','stream 갱신 중에도 읽던 위치 유지, cancel 시 즉시 해제.']];
+var SRC={
+ board:{label:'보드',key:1,prof:{first:15,step:0,batch:99}},
+ files:{label:'파일',key:2,prof:{first:110,step:120,batch:4,debounce:80}},
+ content:{label:'내용',key:3,prof:{first:240,step:150,batch:4,debounce:80,cap:200}},
+ tracker:{label:'트래커',key:4,prof:{first:50,step:0,batch:99}},
+ tnote:{label:'트래커 내용',key:5,prof:{first:170,step:190,batch:2}}
+};
+var ORDER5=['board','files','content','tracker','tnote'];
+var LAYOUTS={
+ narrow:{w:440,h:540,tabs:['all'].concat(ORDER5),order:['all'].concat(ORDER5)},
+ medium:{w:820,h:560,panes:[['names',['board','files','tracker']],['texts',['content','tnote']]],order:['board','files','tracker','content','tnote']},
+ wide:{w:1240,h:600,panes:[['board',['board']],['content',['content']],['tracker',['tracker']],['files',['files']],['tnote',['tnote']]],order:['board','files','content','tracker','tnote']}
+};
+/* ---------- matching ---------- */
+function fuzzy(text,q){var s=text.toLowerCase(),p=-1,idx=[],sc=0,run=0;q=q.toLowerCase().replace(/\s+/g,'');if(!q)return null;
+ for(var i=0;i<q.length;i++){var n=s.indexOf(q[i],p+1);if(n<0)return null;run=(n===p+1)?run+1:0;sc+=10+run*4-(n-p-1)*0.3;idx.push(n);p=n}return{sc:sc,idx:idx}}
+function hlIdx(text,idx){var set={},o='';idx.forEach(function(i){set[i]=1});for(var i=0;i<text.length;i++){var c=esc(text[i]);o+=set[i]?'<mark>'+c+'</mark>':c}return o}
+function hlSub(text,q){if(!q)return esc(text);var lo=text.toLowerCase(),ql=q.toLowerCase(),o='',i=0,j;while((j=lo.indexOf(ql,i))>=0){o+=esc(text.slice(i,j))+'<mark>'+esc(text.slice(j,j+q.length))+'</mark>';i=j+q.length}return o+esc(text.slice(i))}
+function words(q){return q.trim().toLowerCase().split(/\s+/).filter(Boolean)}
+function hlWords(text,ws){var o=esc(text);ws.forEach(function(w){o=o.replace(new RegExp('('+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),'<mark>$1</mark>')});return o}
+function search(src,q){
+ var t=q.trim(),ex=/^\((\d+)\)$/.exec(t),num=/^\d+$/.test(t),ws=words(t);
+ if(src==='board'){
+  if(!t)return BOARD.filter(function(b){return b[0]!=null}).slice(-5).reverse().map(function(b){return{key:'b'+b[0],b:b,recent:1}});
+  if(ex){return BOARD.filter(function(b){return String(b[0])===ex[1]}).map(function(b){return{key:'b'+b[0],b:b,exact:1}})}
+  if(num){return BOARD.filter(function(b){return b[0]!=null&&String(b[0]).indexOf(t)>=0}).sort(function(a,b){var pa=String(a[0]).indexOf(t)===0,pb=String(b[0]).indexOf(t)===0;return(pb-pa)||a[0]-b[0]}).map(function(b){return{key:'b'+b[0],b:b,num:t}})}
+  return BOARD.map(function(b){var m=fuzzy(b[2],t);return m&&{key:'b'+b[0],b:b,m:m}}).filter(Boolean).sort(function(a,b){return b.m.sc-a.m.sc})}
+ if(src==='files'){
+  if(!t)return FILES.slice(0,4).map(function(f){return{key:f,f:f,recent:1}});
+  return FILES.map(function(f){var base=f.split('/').pop(),m=fuzzy(base,t)||fuzzy(f,t);return m&&{key:f,f:f,m:m,onBase:!!fuzzy(base,t)}}).filter(Boolean).sort(function(a,b){return(b.onBase-a.onBase)||b.m.sc-a.m.sc})}
+ if(src==='content'){
+  if(!t)return[];
+  var out=CONTENT.filter(function(c){var l=c[2].toLowerCase();return ws.every(function(w){return l.indexOf(w)>=0})}).map(function(c){return{key:c[0]+':'+c[1],c:c,ws:ws}});
+  return out}
+ if(src==='tracker'){
+  if(!t)return TRACK.filter(function(x){return x[2]==='doing'}).map(function(x){return{key:x[0],x:x,recent:1}});
+  return TRACK.map(function(x){var m=fuzzy(x[1]+' '+x[0],t);return m&&{key:x[0],x:x,m:m}}).filter(Boolean).sort(function(a,b){return b.m.sc-a.m.sc})}
+ if(src==='tnote'){
+  if(!t)return[];
+  return TNOTE.filter(function(n){var l=(n[3]+' '+n[1]).toLowerCase();return ws.every(function(w){return l.indexOf(w)>=0})}).map(function(n,i){return{key:n[0]+'#'+i,n:n,ws:ws}})}
+}
+/* ---------- state + streaming engine ---------- */
+var S={layout:'narrow',q:'',gen:0,slot:'all',row:{},open:true,slots:{}};
+ORDER5.forEach(function(k){S.slots[k]={rows:[],state:'idle',stale:false,timers:[],ms:0,total:0,cancelled:false}});
+var debT=null;
+function jumpFor(q){var t=q.trim();if(!t)return JUMP.slice(0,4).map(function(j,i){return{key:'j'+i,j:j}});if(/^\(?\d+\)?$/.test(t))return[];return JUMP.map(function(j,i){var m=fuzzy(j[1],t)||fuzzy(j[0]+' '+j[1],t);return m&&{key:'j'+i,j:j,m:m}}).filter(Boolean).sort(function(a,b){return b.m.sc-a.m.sc}).slice(0,6)}
+function startQuery(q){
+ S.q=q;var gen=++S.gen,t0=performance.now();S.jump=jumpFor(q);if(S.slot==='jump'&&!S.jump.length)S.slot=S.prev||LAYOUTS[S.layout].order[0];
+ var ex=/^\((\d+)\)$/.exec(q.trim());
+ $('spMode').textContent=ex?'정확 ('+ex[1]+')':/^\d+$/.test(q.trim())?'번호 퍼지':q.trim()?'퍼지 · 리터럴':'최근';
+ $('spMode').className='mode'+(ex?' exact':'');
+ S.row={};ORDER5.forEach(function(k){var s=S.slots[k];s._selKey=null;s.timers.forEach(clearTimeout);s.timers=[];
+  s.cancelled=s.state==='running';s.stale=s.rows.length>0;s.state='running';s.total=0;});
+ render();
+ ORDER5.forEach(function(k){
+  var s=S.slots[k],p=SRC[k].prof,all=search(k,q)||[],cap=p.cap||1e9,shown=Math.min(all.length,40);
+  if(!q.trim()&&(k==='content'||k==='tnote')){s.rows=[];s.stale=false;s.state='idle';return}
+  var delay=(p.debounce||0)+p.first+Math.random()*40,i=0;
+  function batch(){if(gen!==S.gen)return;
+   if(s.stale||i===0){s.rows=[];s.stale=false}
+   var n=p.step?p.batch:shown;s.rows=s.rows.concat(all.slice(i,i+n));i+=n;s.total=s.rows.length;s.cancelled=false;
+   if(i>=shown){s.state='done';s.ms=Math.round(performance.now()-t0);s.capped=all.length>=cap;}
+   else s.timers.push(setTimeout(batch,p.step+Math.random()*60));
+   if(ex&&k==='board'&&s.rows.length){if(S.layout==='narrow'){S.slot='all';S.row.all=0}else{S.slot='board';S.row.board=0}}
+   render()}
+  s.timers.push(setTimeout(batch,delay));
+ });
+}
+function cur(){return S.slot}
+function slotRows(k){return k==='jump'?(S.jump||[]):S.slots[k].rows}
+/* ---------- rendering ---------- */
+function rowHTML(k,r,sel,dim){
+ var cls='r'+(sel?' on':'')+(sel&&dim?' dimsel':''),a=' data-k="'+k+'" data-key="'+esc(r.key)+'"';
+ if(k==='board'){var b=r.b;return'<li class="'+cls+'"'+a+'>'+(b[0]==null?'<span class="id" style="color:var(--muted)">#</span>':'<span class="id">('+(r.num?String(b[0]).replace(r.num,'<mark>'+r.num+'</mark>'):b[0])+')</span>')+'<span class="t">'+(r.m?hlIdx(b[2],r.m.idx):esc(b[2]))+'</span><span class="grow"></span>'+(r.exact?'<span class="badge exact">정확히 일치</span>':'')+'<span class="badge">'+b[1]+'</span><span class="m">'+esc(b[3])+'</span></li>'}
+ if(k==='files'){var parts=r.f.split('/'),base=parts.pop(),m=r.m&&r.onBase?fuzzy(base,S.q):null;return'<li class="'+cls+'"'+a+'><span class="m" style="flex:none">📄</span><span class="t">'+(m?hlIdx(base,m.idx):esc(base))+'</span><span class="m">'+esc(parts.slice(-2).join('/'))+'</span></li>'}
+ if(k==='content'){var c=r.c;return'<li class="'+cls+' tall"'+a+'><span class="m">'+esc(c[0])+':'+c[1]+'</span><span class="code">'+hlWords(c[2].trim(),r.ws)+'</span></li>'}
+ if(k==='tracker'){var x=r.x,col={doing:'var(--pri)',todo:'var(--muted)','in-review':'var(--warn)',blocked:'var(--fail)',done:'var(--ok)'}[x[2]];return'<li class="'+cls+'"'+a+'><span class="dot" style="background:'+col+'"></span><span class="t">'+(r.m?hlIdx(x[1],r.m.idx.filter(function(i){return i<x[1].length})):esc(x[1]))+'</span><span class="grow"></span><code class="al">'+x[0]+'</code></li>'}
+ if(k==='tnote'){var n=r.n;return'<li class="'+cls+' tall"'+a+'><span class="t" style="font-size:12px"><b>'+esc(n[1])+'</b> <span class="m">· '+esc(n[2])+' · '+n[0]+'</span></span><span class="m" style="white-space:normal">'+hlWords(n[3],r.ws)+'</span></li>'}
+}
+function status(k){var s=S.slots[k];
+ if(s.state==='idle')return'<span>대기</span>';
+ if(s.state==='running')return(s.cancelled?'<span style="color:var(--warn)">취소 → 재검색</span>':'')+'<span class="spin"></span><span>'+(s.stale?'…':s.total)+'</span>';
+ if(!s.total)return'<span>결과 없음</span>';
+ return'<span>'+(s.capped?'200+':s.total)+' · '+(s.ms/1000).toFixed(1)+'s</span>'}
+function emptyHTML(k){var s=S.slots[k];
+ if(s.state==='idle')return'<div class="empty">'+(k==='content'?'입력하면 저장소 전체를 rg로 검색':'입력하면 트래커 본문·댓글 검색')+'</div>';
+ if(s.state==='running')return'<div class="skel"></div><div class="skel" style="width:70%"></div>';
+ return'<div class="empty"><b>결과 없음</b>'+(k==='board'&&/^\(\d+\)$/.test(S.q.trim())?'그 번호의 보드 항목이 없습니다':'다른 단어로 시도하거나 Tab으로 다른 소스 보기')+'</div>'}
+function listHTML(k,cap,dimSel,compact){var s=S.slots[k],rows=s.rows;
+ if(!rows.length)return compact&&s.state==='done'?'':emptyHTML(k);
+ var sel=S.row[k]||0,h='<ul class="'+(s.stale?'stale':'')+'">';
+ rows.slice(0,cap).forEach(function(r,i){h+=rowHTML(k,r,i===sel&&(cur()===k||dimSel),cur()!==k)});
+ if(rows.length>cap)h+='<li class="more">+ '+(rows.length-cap)+'개 더 · Tab으로 이 소스 열기</li>';
+ return h+'</ul>'}
+function secHead(k,inPane){return'<div class="sh'+(cur()===k?' cur':'')+'" data-slot="'+k+'"><span>'+SRC[k].label+'</span><span class="k">Alt+'+SRC[k].key+'</span><span class="st">'+status(k)+'</span></div>'}
+function render(){
+ var L=LAYOUTS[S.layout],pal=$('spPal');
+ pal.style.width=L.w+'px';pal.style.height=L.h+'px';
+ var tabs=$('spTabs'),grid=$('spGrid'),js=S.jump||[],jsel=S.row.jump||0;
+ $('spJump').hidden=!js.length;
+ $('spJump').innerHTML='<span class="lbl">이동·명령</span>'+js.map(function(x,i){var on=i===jsel&&cur()==='jump';return'<span class="chip'+(on?' on':'')+'" data-k="jump" data-key="'+x.key+'"><span class="badge">'+x.j[0]+'</span><span>'+(x.m?hlIdx(x.j[1],(fuzzy(x.j[1],S.q)||{idx:[]}).idx):esc(x.j[1]))+'</span>'+(x.j[2]?'<span class="m">'+x.j[2]+'</span>':'')+'</span>'}).join('')+'<span class="m" style="margin-left:auto"><kbd>Alt+0</kbd></span>';
+ if(L.tabs){
+  tabs.hidden=false;
+  tabs.innerHTML=L.tabs.map(function(k){var on=cur()===k;if(k==='all'){var run=ORDER5.some(function(x){return S.slots[x].state==='running'});return'<div class="tab'+(on?' on':'')+'" data-slot="all" role="tab">전체'+(run?'<span class="spin"></span>':'')+'</div>'}
+   var s=S.slots[k];return'<div class="tab'+(on?' on':'')+(s.state==='done'&&!s.total?' zero':'')+'" data-slot="'+k+'" role="tab">'+SRC[k].label+(s.state==='running'?'<span class="spin"></span>':'')+(s.state!=='idle'?'<span class="cnt">'+(s.stale?'…':s.capped?'200+':s.total)+'</span>':'')+'</div>'}).join('');
+  grid.style.gridTemplateColumns='1fr';grid.style.gridTemplateAreas='';grid.style.gridTemplateRows='';
+  var h='<div class="pane single"><div class="scroll">';
+  if(cur()==='all'){
+   var flat=allFlat(),ai=S.row.all||0,n=0;
+   var exactFirst=/^\(\d+\)$|^\d+$/.test(S.q.trim());
+   ORDER5.forEach(function(k){var s=S.slots[k];if(s.state==='done'&&!s.total)return;if(s.state==='idle'&&!s.rows.length)return;
+    h+='<div class="sec">'+secHead(k)+'<ul class="'+(s.stale?'stale':'')+'">';
+    if(!s.rows.length)h+='<div class="skel"></div>';
+    s.rows.slice(0,3).forEach(function(r){h+=rowHTML(k,r,n===ai,false);n++});
+    if(s.rows.length>3)h+='<li class="more">+ '+(s.rows.length-3)+'개 더 — '+SRC[k].label+' 탭 (Alt+'+SRC[k].key+')</li>';
+    h+='</ul></div>'});
+   if(!n&&ORDER5.every(function(k){return S.slots[k].state!=='running'}))h+='<div class="empty"><b>어느 소스에도 결과 없음</b>맞춤법을 확인하거나, 숫자만 입력해 보드 번호로 찾아보세요</div>';
+  } else h+=listHTML(cur(),200);
+  grid.innerHTML=h+'</div></div>';
+ } else {
+  tabs.hidden=true;
+  if(S.layout==='medium'){grid.style.gridTemplateColumns='1fr 1.25fr';grid.style.gridTemplateAreas='"names texts"'}
+  else{grid.style.gridTemplateColumns='1fr 1.5fr 1fr';grid.style.gridTemplateAreas='"board content tracker" "files content tnote"';grid.style.gridTemplateRows='1fr 1fr'}
+  if(S.layout==='medium')grid.style.gridTemplateRows='1fr';
+  grid.innerHTML=L.panes.map(function(p){var foc=p[1].indexOf(cur())>=0;
+   if(p[1].length===1){var k=p[1][0];return'<div class="pane'+(foc?' focus':'')+'" style="grid-area:'+p[0]+'">'+secHead(k)+'<div class="scroll">'+listHTML(k,60)+'</div></div>'}
+   return'<div class="pane'+(foc?' focus':'')+'" style="grid-area:'+p[0]+'"><div class="scroll">'+p[1].map(function(k){return'<div class="sec">'+secHead(k)+listHTML(k,cur()===k?12:3,false,true)+'</div>'}).join('')+'</div></div>'}).join('');
+ }
+ $('spFoot').innerHTML='<span><kbd>↑</kbd><kbd>↓</kbd> 이동</span><span><kbd>Tab</kbd> '+(L.tabs?'다음 탭':'다음 칸')+'</span><span><kbd>Alt+0–5</kbd> 소스 직행</span><span><kbd>Enter</kbd> 열기</span><span><kbd>Ctrl+Enter</kbd> 뒤에서 열기</span><span><kbd>Esc</kbd> 지우기/닫기</span><span class="grow"></span><span>세대 #'+S.gen+'</span>';
+ var on=grid.querySelector('li.r.on:not(.dimsel)');if(on)on.scrollIntoView({block:'nearest'});
+ fit();
+}
+function allFlat(){var out=[];ORDER5.forEach(function(k){S.slots[k].rows.slice(0,3).forEach(function(r){out.push([k,r])})});return out}
+function selected(){if(cur()==='jump'){var jr=(S.jump||[])[S.row.jump||0];return jr&&['jump',jr]}if(cur()==='all'){var f=allFlat();return f[S.row.all||0]}var k=cur(),r=slotRows(k)[S.row[k]||0];return r&&[k,r]}
+/* ---------- open ---------- */
+function describe(k,r){
+ if(k==='jump')return[r.j[0]+' — '+r.j[1],r.j[0]==='세션'?'그 세션 페이지로 이동.':r.j[0]==='스토어'?'트래커 스토어 페이지 열기.':'액션 실행 (대화상자가 있으면 열림).'];
+ if(k==='board'&&r.b[0]==null)return['보드 '+r.b[1]+' — 스크롤 + 플래시','토픽 "'+r.b[3]+'" ('+r.b[2]+')'];
+ if(k==='board')return['보드 항목 ('+r.b[0]+') — 스크롤 + 플래시','토픽 "'+r.b[3]+'"의 항목 ('+r.b[0]+') '+r.b[2]+'. 보드 열이 숨겨져 있으면 펼친 뒤 스크롤.'];
+ if(k==='files')return['파일 미리보기','미리보기 패널에서 '+r.f+' 열림.'];
+ if(k==='content')return['미리보기 '+r.c[0]+':'+r.c[1],'해당 줄로 스크롤하고 매치를 하이라이트. ↑↓로 다른 매치를 고르면 미리보기만 바뀜.'];
+ if(k==='tracker')return['트래커 항목 창 '+r.x[0],r.x[1]+' ('+r.x[2]+')'];
+ return['트래커 항목 창 '+r.n[0]+' → '+r.n[2],'항목 창을 열고 해당 '+(r.n[2]==='본문'?'본문 위치':'댓글')+'로 스크롤 + 하이라이트.']}
+function openSel(bg){var s=selected();if(!s)return;var d=describe(s[0],s[1]);
+ if(bg){toast('뒤에서 열림: '+d[0]);return}
+ S.open=false;$('spPal').hidden=true;var o=$('spOpened');o.innerHTML='<b>'+esc(d[0])+'</b><div class="m" style="white-space:normal;margin-top:4px">'+esc(d[1])+'</div><div class="m" style="margin-top:8px">Ctrl+K 로 다시 열면 이전 쿼리와 선택이 그대로 남아 있음.</div>';o.classList.remove('on');void o.offsetWidth;o.classList.add('on')}
+function reopen(){S.open=true;$('spPal').hidden=false;$('spOpened').classList.remove('on');$('spIn').focus();$('spIn').select()}
+var tt;function toast(m){var t=$('spToast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(function(){t.classList.remove('on')},1600)}
+/* ---------- input + keys ---------- */
+$('spIn').addEventListener('input',function(){startQuery(this.value)});
+$('spIn').addEventListener('keydown',function(e){
+ var L=LAYOUTS[S.layout],ord=L.order,i=ord.indexOf(cur());
+ if(e.key==='Tab'){e.preventDefault();var j=i;for(var n=0;n<ord.length;n++){j=(j+(e.shiftKey?-1:1)+ord.length)%ord.length;var z=S.slots[ord[j]];if(cur()==='jump'){j=ord.indexOf(S.prev||ord[0]);break}if(!z||!(z.state==='done'&&!z.total))break}S.slot=ord[j];render();return}
+ if(cur()==='jump'&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){e.preventDefault();S.row.jump=Math.max(0,Math.min(S.jump.length-1,(S.row.jump||0)+(e.key==='ArrowRight'?1:-1)));render();return}
+ if(cur()==='jump'&&e.key==='ArrowDown'){e.preventDefault();S.slot=S.prev||ord[0];render();return}
+ if(e.altKey&&e.key==='0'&&S.jump.length){e.preventDefault();if(cur()!=='jump')S.prev=cur();S.slot='jump';render();return}
+ if(e.key==='ArrowUp'&&cur()!=='jump'&&!(S.row[cur()]||0)&&S.jump.length){e.preventDefault();S.prev=cur();S.slot='jump';S.row.jump=0;render();return}
+ if(e.altKey&&/^[1-5]$/.test(e.key)){e.preventDefault();S.slot=ORDER5[+e.key-1];render();return}
+ if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();var k=cur(),n=k==='all'?allFlat().length:slotRows(k).length;if(!n)return;
+  S.row[k]=Math.max(0,Math.min(n-1,(S.row[k]||0)+(e.key==='ArrowDown'?1:-1)));render();return}
+ if(e.key==='Enter'){e.preventDefault();openSel(e.ctrlKey||e.metaKey);return}
+ if(e.key==='Escape'){e.preventDefault();if(this.value){this.value='';startQuery('')}else{S.open=false;$('spPal').hidden=true}}
+});
+document.addEventListener('keydown',function(e){if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'&&!S.open){e.preventDefault();reopen()}});
+$('spPal').addEventListener('mousedown',function(e){
+ var li=e.target.closest('li.r,.chip'),sh=e.target.closest('[data-slot]');
+ if(li){e.preventDefault();var k=li.dataset.k,key=li.dataset.key;
+  if(k==='jump'){S.slot='jump';S.row.jump=slotRows(k).findIndex(function(r){return r.key===key})}
+  else if(cur()==='all'){var f=allFlat();S.row.all=f.findIndex(function(x){return x[0]===k&&x[1].key===key})}
+  else{S.slot=k;S.row[k]=slotRows(k).findIndex(function(r){return r.key===key})}
+  render();openSel(e.ctrlKey||e.metaKey);return}
+ if(sh){e.preventDefault();S.slot=sh.dataset.slot;render();$('spIn').focus()}
+});
+/* keep selection on the same result when late batches land */
+var _render=render;render=function(){ORDER5.forEach(function(k){var s=S.slots[k];if(s._selKey&&s.rows.length){var j=s.rows.findIndex(function(r){return r.key===s._selKey});if(j>=0&&cur()===k)S.row[k]=j}if((S.row[k]||0)>=s.rows.length)S.row[k]=0});_render();ORDER5.forEach(function(k){var r=S.slots[k].rows[S.row[k]||0];S.slots[k]._selKey=r&&r.key})};
+/* ---------- toolbar ---------- */
+function setLayout(w){S.layout=w;var ord=LAYOUTS[w].order;if(ord.indexOf(S.slot)<0)S.slot=ord[0];
+ [].forEach.call(document.querySelectorAll('.sp [data-w]'),function(b){b.classList.toggle('on',b.dataset.w===w)});render();$('spIn').focus()}
+function fit(){var st=$('spStage'),L=LAYOUTS[S.layout],W=L.w+80,H=L.h+60,sc=Math.min(1,(st.clientWidth)/W);
+ var sl=$('spScaler');sl.style.width=W+'px';sl.style.height=H+'px';sl.style.transform='scale('+sc+')';st.style.height=Math.ceil(H*sc)+'px'}
+window.addEventListener('resize',fit);
+[].forEach.call(document.querySelectorAll('.sp [data-w]'),function(b){b.onclick=function(){setLayout(b.dataset.w)}});
+[].forEach.call(document.querySelectorAll('.sp [data-q]'),function(b){b.onclick=function(){if(!S.open)reopen();$('spIn').value=b.dataset.q;startQuery(b.dataset.q);$('spIn').focus()}});
+document.querySelector('.sp [data-reopen]').onclick=reopen;
+var demoT=[];document.querySelector('.sp [data-demo]').onclick=function(){demoT.forEach(clearTimeout);demoT=[];if(!S.open)reopen();$('spIn').focus();
+ var seq=[];'stream'.split('').forEach(function(c,i){seq.push([130,'stream'.slice(0,i+1)])});seq.push([1600,'stream c']);seq.push([120,'stream ca']);seq.push([120,'stream can']);seq.push([1800,'(']);seq.push([130,'(5']);seq.push([130,'(53']);seq.push([130,'(531']);seq.push([130,'(531)']);
+ var t=0;seq.forEach(function(s){t+=s[0];demoT.push(setTimeout(function(){$('spIn').value=s[1];startQuery(s[1])},t))})};
+setLayout('narrow');startQuery('');
+})();
+</script>

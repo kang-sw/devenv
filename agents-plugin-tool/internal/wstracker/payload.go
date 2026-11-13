@@ -72,7 +72,8 @@ type ItemCreate struct {
 	Title       string       `json:"title"`
 	Body        string       `json:"body,omitempty"`
 	Project     string       `json:"project,omitempty"`
-	Due         string       `json:"due,omitempty"` // YYYY-MM-DD
+	Due         string       `json:"due,omitempty"`   // YYYY-MM-DD
+	Start       string       `json:"start,omitempty"` // YYYY-MM-DD; not after Due
 	Priority    *int         `json:"priority,omitempty"`
 	Parent      string       `json:"parent,omitempty"`
 	After       *string      `json:"after,omitempty"`
@@ -213,7 +214,7 @@ type ItemStatus struct {
 }
 
 // ItemEdit is the payload of item.edit: a raw object, because a present
-// null clears due and an absent field is untouched. mentions, attachments,
+// null clears due or start and an absent field is untouched. mentions, attachments,
 // and refs go only with a body, and replace the body's lists.
 type ItemEdit map[string]any
 

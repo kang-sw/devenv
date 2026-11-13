@@ -20,8 +20,8 @@ var (
 	// itemFields are the item.edit fields, in the engine's order. stage is
 	// retired: only older events carry it (see apply), so editFields, the
 	// list a refusal names, leaves it out.
-	itemFields = []string{"title", "body", "project", "due", "priority", "labels", "stage"}
-	editFields = itemFields[:6]
+	itemFields = []string{"title", "body", "project", "due", "start", "priority", "labels", "stage"}
+	editFields = itemFields[:7]
 )
 
 // DefaultStaleDays is the stale threshold (284): a live assignment in doing
@@ -117,7 +117,7 @@ func (m *member) revokedBy(k memberKey) *node {
 type item struct {
 	id, alias, kind      string
 	title, body, project string
-	due                  *string
+	due, start           *string
 	priority             int
 	parent, author       string
 	// after is the sibling anchor (528) when afterSet: "" = first. Unset
@@ -1281,6 +1281,9 @@ func (s *state) apply(n *node) {
 		if d, ok := p["due"].(string); ok && d != "" {
 			it.due = &d
 		}
+		if d, ok := p["start"].(string); ok && d != "" {
+			it.start = &d
+		}
 		if v, ok := p.intOf("priority"); ok {
 			it.priority = v
 		}
@@ -1320,15 +1323,19 @@ func (s *state) apply(n *node) {
 					v = jsString(p[f])
 				}
 				it.project = s.write(key, label, n, v).(string)
-			case "due":
+			case "due", "start":
 				var v any
 				if !p.null(f) {
 					v = jsString(p[f])
 				}
+				var d *string
 				if w, ok := s.write(key, label, n, v).(string); ok {
-					it.due = &w
+					d = &w
+				}
+				if f == "due" {
+					it.due = d
 				} else {
-					it.due = nil
+					it.start = d
 				}
 			case "priority":
 				v, _ := p.intOf(f)

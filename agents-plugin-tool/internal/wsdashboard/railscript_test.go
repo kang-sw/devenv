@@ -302,6 +302,7 @@ var listeners = {}, winListeners = {};
 var doc = { hidden: false, addEventListener: function (t, fn) { listeners[t] = fn; } };
 window.addEventListener = function (t, fn) { winListeners[t] = fn; };
 var WsRail = window.WsRail, rid = "sess1", live = true, railStore = memStore();
+var shell = false, framed = false;
 var grid = new El("grid", { "data-tab": "convo" });
 var ctext = { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: function (a, b) { this.selectionStart = a; this.selectionEnd = b; } };
 var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [];
@@ -343,11 +344,11 @@ func TestRailDraftRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(data)
-	block := regexp.MustCompile(`(?s)\n  // --- per-session drafts -.*?\n\n  if \(live\) \{`).FindString(src)
+	block := regexp.MustCompile(`(?s)\n  // --- per-session drafts -.*?\n\n  // --- iframe shell`).FindString(src)
 	if block == "" {
-		t.Fatal("dashboard.js holds no per-session drafts block ending before if (live)")
+		t.Fatal("dashboard.js holds no per-session drafts block ending before the iframe shell block")
 	}
-	block = strings.TrimSuffix(block, "if (live) {")
+	block = strings.TrimSuffix(block, "// --- iframe shell")
 	if !regexp.MustCompile(`(?s)\n  function sendMessage\(\) \{.*?post\("message", body, function \(ok, res\) \{\n[^\n]*\n      if \(!ok\) \{[^\n]*return; \}\n.*?\n      clearDraft\(\);\n    \}\);\n  \}\n`).MatchString(src) {
 		t.Error("a successful send no longer clears the draft")
 	}

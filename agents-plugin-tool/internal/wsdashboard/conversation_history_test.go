@@ -206,7 +206,7 @@ func TestHistoryRoutePagesByCursor(t *testing.T) {
 		t.Errorf("newest page does not hold the newest %d entries", wslive.RingCap)
 	}
 	// The live page draws the same newest entries.
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `data-entry="`+names[11]+`"`) || strings.Contains(page, `data-entry="`+names[10]+`"`) {
 		t.Errorf("the live page does not draw exactly the newest %d entries", wslive.RingCap)
 	}
@@ -270,7 +270,7 @@ func TestHistoryRouteReadsWithoutAnAdapter(t *testing.T) {
 // index.
 func TestSessionLeavingTheIndexDropsItsCachedEntries(t *testing.T) {
 	f := startPageFixture(t)
-	if code, _ := get(t, f.base+"/s/livesession"); code != http.StatusOK {
+	if code, _ := get(t, f.base+"/s/livesession?frame=1"); code != http.StatusOK {
 		t.Fatal("page not served")
 	}
 	if n := f.d.entries.size("livesession"); n != 4 {
@@ -289,9 +289,9 @@ func TestSessionLeavingTheIndexDropsItsCachedEntries(t *testing.T) {
 // reply growing resends the small convlive region and nothing else.
 func TestStreamSendsOnlyTheLiveRegionForAStreamingTick(t *testing.T) {
 	f := startPageFixture(t)
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
-	resp, err := client.Get(f.base + "/s/livesession/events?h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
+	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)
 	}

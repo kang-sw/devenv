@@ -1031,15 +1031,12 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
     if (mailboxRole === undefined && hosted.mode !== "hosted") {
       const mailboxHandle = handle;
       const mailboxCallTool: MailboxToolCall = (name, args) => mailboxHandle.client.callTool(name, args);
-      let runtimeReady = false;
       const slot = createMailboxWaiterSlot({
         resolveSlug: (key) => resolveMailboxSelfSlug(mailboxCallTool, key),
         start: (key, slug) => {
-          if (!runtimeReady) {
-            runtimeReady = true;
-            // The bridge launcher has installed its bootstrap before this arm.
-            mailboxHandle.releaseLocalBootstrap();
-          }
+          // The bridge launcher has installed its bootstrap before this arm,
+          // and the wait runs through that launcher (idempotent release).
+          mailboxHandle.releaseLocalBootstrap();
           return startMailboxWaiter({
             runWait: createSubprocessWait(sessionMailboxWaitOptions({
               launcherPath,

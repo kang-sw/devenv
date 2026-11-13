@@ -54,13 +54,13 @@ func TestLucideIconsAreVendoredWithTheirLicense(t *testing.T) {
 		}
 	}
 	f := startPageFixture(t)
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{`<symbol id="l-pin" viewBox="0 0 24 24">`, "window.WsCards = {", "window.WsPreview = {"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the session page lacks %q", want)
 		}
 	}
-	if _, index := get(t, f.base+"/"); strings.Contains(index, "window.WsCards = {") {
+	if _, index := get(t, f.base+"/?frame=1"); strings.Contains(index, "window.WsCards = {") {
 		t.Error("the index page, which has no board, carries the card framework")
 	}
 }

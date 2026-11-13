@@ -140,6 +140,24 @@ func TestMemoRoutesAndRailBadge(t *testing.T) {
 	}
 }
 
+// The memo cap is 8000 UTF-8 bytes of the trimmed text, not characters: the
+// client enforces the same byte count (memo_test.cjs).
+func TestMemoRouteCapsTrimmedTextAtEightThousandBytes(t *testing.T) {
+	f := startPageFixture(t)
+	add := func(text string) (int, string) {
+		raw, _ := json.Marshal(map[string]string{"workspace": f.project, "action": "add", "id": "", "text": text})
+		code, _, out := postJSON(t, f.base+"/rail/memos", f.base, string(raw))
+		return code, out
+	}
+	atLimit := strings.Repeat("가", 2666) + "ab" // 2668 characters, 8000 bytes
+	if code, out := add("  " + atLimit + "\n"); code != http.StatusOK {
+		t.Fatalf("8000 bytes of CJK = %d %s", code, out)
+	}
+	if code, out := add(atLimit + "c"); code != http.StatusBadRequest {
+		t.Fatalf("8001 bytes of CJK = %d %s", code, out)
+	}
+}
+
 func TestMemoScript(t *testing.T) {
 	harness, err := os.ReadFile("testdata/memo_test.cjs")
 	if err != nil {

@@ -193,7 +193,7 @@ func TestSnapshotCacheFollowsTheSession(t *testing.T) {
 	}
 	render := func() {
 		t.Helper()
-		if code, body := get(t, f.base+"/s/livesession"); code != 200 {
+		if code, body := get(t, f.base+"/s/livesession?frame=1"); code != 200 {
 			t.Fatalf("GET /s/livesession = %d: %s", code, body)
 		}
 	}

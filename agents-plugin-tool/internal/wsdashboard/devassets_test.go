@@ -82,7 +82,7 @@ func TestDevAssetsShowEditsWithoutARestart(t *testing.T) {
 			t.Errorf("an edit marked %q does not show on the session page", want)
 		}
 	}
-	if _, index := get(t, f.base+"/"); !strings.Contains(index, "devdashcss") {
+	if _, index := get(t, f.base+"/?frame=1"); !strings.Contains(index, "devdashcss") {
 		t.Error("a css edit does not show on the index page")
 	}
 
@@ -110,13 +110,13 @@ func TestDevAssetsReportABrokenTemplateAndRecover(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{{define "r-head"}}{{if}}{{end}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := get(t, f.base+"/s/livesession"); code != http.StatusInternalServerError {
+	if code, _ := get(t, f.base+"/s/livesession?frame=1"); code != http.StatusInternalServerError {
 		t.Errorf("a broken template served status %d, want 500", code)
 	}
 	if err := os.WriteFile(path, good, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if code, body := get(t, f.base+"/s/livesession"); code != http.StatusOK || !strings.Contains(body, `data-region="board"`) {
+	if code, body := get(t, f.base+"/s/livesession?frame=1"); code != http.StatusOK || !strings.Contains(body, `data-region="board"`) {
 		t.Errorf("the fixed template did not recover: %d", code)
 	}
 }
