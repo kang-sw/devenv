@@ -86,3 +86,33 @@ its whole placeholder (still capped at the existing 160px).
 Implement the Decisions in `agents-plugin-tool/internal/wsdashboard/assets/dashboard.js` (and `dashboard.css` only if the mirror needs a rule).
 
 Verification: `go test ./internal/wsdashboard/...` passes (node-run tests keep their `grow()` stubs). Headless Chromium on a dev dashboard: with the Korean placeholder at a narrow composer width, the empty composer shows every placeholder line on first load, after a window narrowing, after a send clears the box, and after an input-mode switch; the height never exceeds 160px; the send button matches the textarea height. Capture before/after screenshots and state what was not checked interactively, including Safari/WebKit when it was not checked.
+
+### Result (b4fbc2769) - 2026-11-13
+
+Landed in `agents-plugin-tool/internal/wsdashboard/assets/dashboard.js` and `dashboard.css`:
+`grow()` sizes an empty composer to its wrapped placeholder, measured in a hidden
+`.chl.chm` copy of the mention layer (same font, padding, wrapping; right padding
+follows the layer's), capped at 160px. `growCtext()` runs at first render, after
+`document.fonts.ready`, after `setInput` and `renderCmd` placeholder swaps, and from a
+`ResizeObserver` on the textarea that acts only on width changes (height-only changes
+are ignored, so no loop). New `composer_placeholder_test.go` pins the grow decision
+logic under node (stubbed layout) and the wiring sites.
+
+Verification:
+- `go test ./internal/wsdashboard/ -run 'TestComposer|TestSlash|TestSessionPagesCarry'`: ok.
+- Full `go test ./internal/wsdashboard/...`: five failures, identical on the base commit
+  (TestMailboxBadgeTopLevel `/private/var` symlink, TestRailScript JSON key order,
+  three tracker tests `keepItemDraft is not defined`); unrelated to this change.
+- Headless Chromium (ko-KR, live session page, fixture daemon): before, empty composer 38px
+  at every width with the second placeholder line clipped; after, 55px at 340/420/503/608px
+  composer widths and 75px at 300px, on first load, after viewport resizes, after input-mode
+  switch (mod placeholder: 75px at 340px), and after clearing typed text; send button height
+  equals the textarea each time; never above 160px.
+- Lite review (one pass): clean.
+
+Not checked: Safari/WebKit; real send round-trip (clear path exercised by emptying the box
+and dispatching `input`); the narrow-window screenshots were taken but only the 420px
+before/after pair was inspected visually.
+
+Decisions: placeholder measured in a separate hidden `.chl` copy rather than the live
+`#chl` (which is `inset:0` and sized by the field, so it cannot report content height).
