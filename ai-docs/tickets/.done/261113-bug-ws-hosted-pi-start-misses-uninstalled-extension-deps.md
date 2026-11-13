@@ -10,6 +10,7 @@ related:
   - 261113-fix-ws-playbook-spawn-idiom-and-delegate-resolve-agent
 sage-review-design-reviewed: 9aa6c61a1121da9e
 sage-review-completeness-reviewed: 9aa6c61a1121da9e
+completed: 2026-11-13
 ---
 
 # Hosted Pi start does not check the local extension's dependencies
@@ -94,8 +95,23 @@ In `pi_lead.go` (`piBundledEntries` / `preparePiLeadLaunch`), before passing `--
 
 Verification: a Go unit test over a temp fixture checkout (manifest and entry present, no `node_modules` on any ancestor) asserts the bridge launch with `PluginWarning` set, for both Isolated and Default; a second fixture with the deps at an ancestor `node_modules` asserts the native `--extension` launch. Live: a hosted Pi lead on a checkout whose `agents-plugin-pi` has no node_modules starts on the MCP bridge with a warning in both Isolated and Default, instead of exiting with `Cannot find module 'yaml'`.
 
+### Result (e39095a38) - 2026-11-13
+
+- `piBundledEntries` (`pi_lead.go`) now preflights a non-bundle entry: `piMissingLoadDeps` (`pi_bundle.go`) walks ancestor `node_modules` from the entry's directory for `yaml`, `linkedom`, `ipaddr.js` (Decision 7). A missing dep returns an error naming the deps (plus the bundle's missing/stale reason), which flows through the existing `bundleErr` branch to the MCP bridge with a `PluginWarning` (Decision 6).
+- Tests: `TestPiLeadMissingDepsFallsBackToBridge` (Isolated and Default, warning names exactly the missing deps); the shared `piLeadBundle` fixture now installs the deps at an ancestor `node_modules`, so the existing native-launch tests cover the deps-present path.
+- Live: `pi 1.0.4 --mode rpc --no-extensions -e <copy>/agents-plugin-pi/src/index.ts` on a node_modules-free copy reproduces `Cannot find module 'yaml'`; that is the case the preflight now routes to the bridge. A dashboard-hosted run was not performed in this worker.
+
 ### Phase 2: Single-JS bundle
 
 Add an esbuild bundle script in `agents-plugin-pi` (an npm script or a script under `agents-plugin-pi/scripts/`) that a developer with Node runs; it writes the bundle under `agents-plugin-pi/dist/` with a header carrying the hash of its inputs (extension sources plus `package-lock.json`), keeps the host Pi packages and `pi-web-access` external (Constraints; Decision 1 (479)), and the bundle is committed and marked generated in `.gitattributes` (Decision 3). `build-release-assets.sh` is unchanged: the Node-less release host relies on the committed bundle, and a Go test recomputes the input hash and fails when the bundle is stale (technical, (482)-(488) acknowledged 2026-11-13). Hosted Pi prefers the bundle over `src/index.ts` when it exists and is fresh (Decision 5); Phase 1's preflight covers a missing or stale bundle. The build script copies `eff_large_wordlist.txt` into `dist/` (Decision 1). Add `dist/` to `package.json` `files`. Check that `index.ts` `extensionEntryPath` and the child spawns in `spawner.ts` carry the bundle path consistently when the bundle is loaded. Depends on (410) and (411).
 
 Verification: the Go staleness test passes on the committed bundle and fails, naming the regeneration command, after an input source edit without a rebuild; a launcher unit test shows a stale header selects `src/index.ts`; with no `node_modules` anywhere, a hosted Pi lead loads the full extension from the bundle (not the bridge), a background task gets a word-chain ID (wordlist read from `dist/`), and web search reports its missing-package diagnostic; the release-shaped layout that `piBundledEntries` resolves (the installed plugin's sibling `agents-plugin-pi`) contains `dist/`; the existing `agents-plugin-pi` tests pass.
+
+### Result (e39095a38) - 2026-11-13
+
+- `agents-plugin-pi/scripts/bundle.mjs` (`npm run bundle`; `esbuild@0.28.2` pinned devDependency in the lockfile) writes `dist/index.js` (ESM, node22) with yaml/linkedom/ipaddr.js inlined, the three host Pi packages and `pi-web-access` external, a `createRequire` banner for inlined CommonJS, the first-line header `// ws-pi-bundle-inputs: sha256-<hex>`, and copies `dist/eff_large_wordlist.txt`. `dist/` is committed, in `package.json` `files`, and `.gitattributes` `linguist-generated -diff`. `pi.extensions` stays `./src/index.ts`; `build-release-assets.sh` unchanged.
+- `piBundleInputHash` (non-test Go, `pi_bundle.go`) mirrors the script; `piBundledEntries` substitutes `dist/index.js` for `src/index.ts` only when the header matches, else falls back to the source entry and the Phase 1 preflight.
+- Decision deviation (recorded): the hash input set is every `src/**/*.ts` and `src/**/*.mjs`, not excluding `web-search-helper.mjs`, because `web-search.ts` statically imports it and esbuild inlines it (Decision 5's own rule: files the bundle inlines).
+- `extensionEntryPath`/children: from the bundle `import.meta.url` is `dist/index.js`, so `pluginDir`, `web-search.ts` package root and `spawner.ts` child `--extension` all carry the bundle path consistently.
+- Verification: `go test ./internal/wsagent/` - all new tests pass (`TestPiBundleCommittedIsFresh`, `TestPiBundleInputHashCoversInputsOnly`, `TestPiLeadPrefersFreshBundle`); only the pre-existing `TestClaudeLeadLocalSettingsCanonicalWorktree` and `TestPiLeadResolverAdapter` fail, identically without this change. Appending a line to `src/summary-id.ts` makes the staleness test fail with "dist/index.js is stale ... cd agents-plugin-pi && npm install && npm run bundle". `npm test` in agents-plugin-pi: 2684 pass, 0 fail. Live: Pi 1.0.4 RPC on a node_modules-free copy loads `dist/index.js` (registers 70 ws tools and the extension commands); the bundle reads the wordlist via `new URL("./eff_large_wordlist.txt", import.meta.url)` from `dist/`. Not run: a background-task word-chain ID and a web-search diagnostic inside a live hosted lead (both need a model turn).
+- Note: the raw-byte lockfile hash also stales the bundle when an `npm install` only rewrites the lockfile root `version`; regenerate in that case.
