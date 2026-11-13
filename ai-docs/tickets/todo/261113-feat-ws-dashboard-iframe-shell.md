@@ -47,6 +47,27 @@ now open.
   per session and fan out by hash cache; the sidebar is subscribed only by the
   shell. (2) Hidden frames get no `visibilitychange` - the shell tells them so
   they lower update frequency. (3) Per-frame JS memory - LRU cap.
+- (418) Shell contents: sidebar plus top header (global search, notifications,
+  session title/badges); the agent panel stays in the frame. Owner answer
+  2026-11-13. Rejected: a sidebar only; c agent panel in the shell (it is
+  per-session content).
+- (419) All dashboard pages (tracker, wiki, ...) open as frames inside the
+  shell, so the sidebar never re-renders on any navigation. Owner answer
+  2026-11-13. Rejected: a session pages only.
+- (420) Narrow/mobile keeps today's overlay sidebar. Owner answer 2026-11-13.
+  Rejected: b top dropdown session picker.
+- (421) Keep the 5 most recent frames (LRU), no config key. Owner ok
+  2026-11-13. Rejected: unlimited (each frame holds its own JS heap).
+- (422) Address bar keeps `/s/<id>`; frames load the same path with
+  `?frame=1`; the shell updates the URL with `history.pushState`. Owner ok
+  2026-11-13. Rejected: a new URL scheme (breaks links, bookmarks, embeds).
+- (423) Sidebar flicker fix (collapse/pin/order state in the server render)
+  ships in shell Phase 1. Owner ok 2026-11-13.
+- Wide-view layout rule (owner, 2026-11-13, from the dash-nav note): in wide
+  view all panels are left-aligned and the pinned panel always fills the
+  remaining width to the right. This lands first as a separate quick change on
+  branch `impl/develop/wide-left-align` (in progress); the shell must preserve
+  that layout.
 - Implementer is a Claude Opus worker: the owner directs frontend adjustments
   to Opus agents and the change needs LOOK visual judgment. Rejected: Pi worker.
 
@@ -60,33 +81,21 @@ now open.
 
 ## Phases
 
-Draft; may change after the queue settles.
+Preserve the wide-view layout rule from `## Decisions` (left-aligned panels,
+pinned panel fills the remaining right width) throughout.
 
-### Phase 1: Shell, sidebar, flicker fix, session frames
+### Phase 1: Shell, sidebar, header, flicker fix, session frames
 
-Shell plus sidebar in the shell; flicker fix (collapse/pin/order state
-reflected in the server render); session frames with LRU and `pushState` URLs.
+Shell holding the sidebar and top header (global search, notifications,
+session title/badges); flicker fix (collapse/pin/order state reflected in the
+server render); session frames (agent panel stays in the frame) with a 5-frame
+LRU and `pushState` URLs (`/s/<id>`, frames load `?frame=1`). Narrow/mobile
+keeps the overlay sidebar.
 
-### Phase 2: Remaining pages, throttling, render fan-out
+### Phase 2: Remaining pages as frames, throttling, render fan-out
 
-Remaining pages as frames, hidden-frame throttling, and the render fan-out
-cache.
+All remaining dashboard pages (tracker, wiki, ...) open as frames inside the
+shell, plus hidden-frame throttling and the render fan-out cache.
 
 Verification: LOOK captures wide and narrow; measured session-switch time
 before/after.
-
-## Open Decision Queue
-
-Last ID: (423)
-
-(418) [open] [policy] What the persistent shell holds: a sidebar only; b sidebar + top header (global search, notifications, session title/badges); c b + agent panel. Recommendation: b - global search and notifications are session-independent; the agent panel is per-session content.
-
-(419) [open] [policy] Non-session pages (tracker, wiki, etc.) also open as frames inside the shell: a session pages only; b all dashboard pages. Recommendation: b - the sidebar then never re-renders on any navigation; tracker.js is ~6.4k lines; framing is page-agnostic.
-
-(420) [open] [policy] Narrow/mobile sidebar: a overlay as today; b replace with a top dropdown session picker. Recommendation: a - no change, keeps four-state and tri-state radio sidebar features.
-
-(421) [open] [technical] Keep the 5 most recent frames (LRU, no config key) over unlimited - each frame holds its own JS heap; 5 covers normal back-and-forth; tune after measurement.
-
-(422) [open] [technical] Address bar keeps /s/<id>; frames load the same path with ?frame=1; the shell updates the URL with history.pushState - over a new URL scheme, so existing links, bookmarks and embeds keep working.
-
-(423) [open] [announced] Sidebar flicker fix (collapse/pin/order state in server render) ships in shell Phase 1 - citation: owner (42) answer, flicker fix goes together with the new structure after the design discussion.
