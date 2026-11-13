@@ -64,12 +64,55 @@ func TestBodiesAreRawText(t *testing.T) {
 	}
 }
 
+func TestQuotesInBodiesDoNotHideClosingTags(t *testing.T) {
+	for name, text := range map[string]string{
+		"single quoted Korean": "select '열기'",
+		"single quoted ASCII":  "select 'open'",
+		"double quoted ASCII":  `select "open"`,
+		"unmatched single":     "it's <b>open</b>",
+		"unmatched double":     `a "quoted <b>word</b>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cmds := mustParse(t, `<wb:topic name="t"><wb:add class="policy"><wb:title>pick</wb:title><wb:option>`+text+`</wb:option><wb:option>other</wb:option><wb:why>`+text+`</wb:why></wb:add><wb:body>`+text+`</wb:body><wb:close/></wb:topic>`)
+			if len(cmds) != 3 {
+				t.Fatalf("commands = %+v", cmds)
+			}
+			options := cmds[0].FieldsOf("wb:option")
+			why := cmds[0].FieldsOf("wb:why")
+			if len(options) != 2 || options[0] != text || options[1] != "other" || len(why) != 1 || why[0] != text || cmds[1].Body != text || cmds[2].Tag != "wb:close" {
+				t.Fatalf("commands = %+v", cmds)
+			}
+		})
+	}
+}
+
 func TestBodyEndsAtItsOwnExactClosingTag(t *testing.T) {
 	// Other closing tags, a lookalike, and the format's own tags are text.
 	body := `quoting the format: <wb:topic name="t"><wb:add class="policy"><wb:title>x</wb:title></wb:add></wb:topic> and </wb:why> and </wb:bodyx>, a < b`
 	cmds := mustParse(t, `<wb:topic name="t"><wb:body>`+body+`</wb:body><wb:close result="done"/></wb:topic>`)
 	if len(cmds) != 2 || cmds[0].Body != body || cmds[1].Tag != "wb:close" {
 		t.Fatalf("commands = %+v", cmds)
+	}
+}
+
+func TestFieldBodiesRefuseSiblingOpenings(t *testing.T) {
+	for _, tc := range []struct{ command, body, want string }{
+		{"add", "<wb:option>first</option>\n<wb:option>second</wb:option>", "field <wb:option> (line 2): body holds an opening <wb:option> - missing </wb:option>?"},
+		{"patch", "<wb:why>first <wb:title>second</wb:why>", "field <wb:why> (line 1): body holds an opening <wb:title> - missing </wb:why>?"},
+		{"edit", "<wb:old>first <wb:new>second</wb:old>", "field <wb:old> (line 1): body holds an opening <wb:new> - missing </wb:old>?"},
+	} {
+		input := `<wb:topic name="t"><wb:` + tc.command + `>` + tc.body + `</wb:` + tc.command + `></wb:topic>`
+		if tc.command == "patch" {
+			input = `<wb:patch id="1">` + tc.body + `</wb:patch>`
+		}
+		_, problems := parse(input)
+		if !hasProblem(problems, tc.want) {
+			t.Errorf("%s: problems %q lack %q", tc.command, problems, tc.want)
+		}
+	}
+	cmds := mustParse(t, `<wb:patch id="1"><wb:why><![CDATA[<wb:title>]]> and <wb:titlex></wb:why></wb:patch>`)
+	if got := cmds[0].Fields[0].Body; got != `<wb:title> and <wb:titlex>` {
+		t.Fatalf("body = %q", got)
 	}
 }
 
