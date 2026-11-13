@@ -1,5 +1,6 @@
 ---
 title: "whiteboard.update refuses a wb:option holding single-quoted words"
+completed: 2026-11-13
 ---
 
 # whiteboard.update refuses a wb:option holding single-quoted words
@@ -26,3 +27,7 @@ the start of an attribute value and scans past the closing tag.
 
 - Parser under `agents-plugin-tool/internal/wswhiteboard/`; Go tests via
   `~/.local/bin/ws-rgo`.
+
+## Result
+
+Already fixed at the branch base: the shared parser's `readBody` scans for `<`, exact closing tags, and CDATA, not quotes. Regression tests verify Korean and ASCII single quotes, double quotes, and unmatched quotes in option, why, and body text. The whiteboard and MCP tests and full Go suite passed on w5090 (known host-specific failures excluded).
