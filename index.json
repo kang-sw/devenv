@@ -423,7 +423,14 @@
       "registered_at": "2026-11-13T08:05:31Z"
     },
     "261113-feat-ws-dashboard-rail-usage-gutter": {
-      "registered_at": "2026-11-13T08:05:08Z"
+      "registered_at": "2026-11-13T08:05:08Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-13T08:23:36Z"
+      }
     },
     "261113-feat-ws-dashboard-worktree-delete": {
       "registered_at": "2026-11-13T07:16:15Z"
