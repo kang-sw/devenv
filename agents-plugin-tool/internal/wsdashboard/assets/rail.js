@@ -3,7 +3,8 @@
   // page's script (dashboard.js): per-session drafts, the starred sessions,
   // the collapsed workspaces, and the rail's client-side marks (the viewed
   // session's row, the starred rows pinned first, the drag order of the
-  // sessions and workspaces, the revive entry in flight). The stored state is in localStorage under ws.dashboard.,
+  // sessions and workspaces, the revive entry in flight), with the drag's
+  // refusal, re-find, and swap-hold rules. The stored state is in localStorage under ws.dashboard.,
   // through the store the caller passes ({ load(key), save(key, value or
   // null) }, which must not throw), so the page works the same with storage
   // absent; nothing reaches the server. The DOM helpers touch only the
@@ -207,6 +208,70 @@
     return true;
   }
 
+  // up is el or its nearest ancestor of class c, or null.
+  function up(el, c) {
+    for (var n = el; n; n = n.parentNode) if (hasClass(n, c)) return n;
+    return null;
+  }
+  // dropRefusal names why a dragged session row cannot land where the
+  // pointer is (over, the element under it): "ws" over another workspace,
+  // "wt" over another worktree of its own, "stars" over a live row of its
+  // own list on the other side of the stars; "" anywhere else (its own
+  // group, a header, the ended fold, or outside the list, where the drop
+  // takes the nearest place). A workspace section is never refused.
+  function dropRefusal(item, over) {
+    if (!item || !over || hasClass(item, "rws")) return "";
+    var ws = up(over, "rws");
+    if (!ws) return "";
+    if (ws !== up(item, "rws")) return "ws";
+    var wt = up(over, "rwt");
+    if (wt && wt !== up(item, "rwt")) return "wt";
+    var row = up(over, "rs");
+    if (row && row !== item && row.parentNode === item.parentNode && !hasClass(row, "ended") && !!row.wsStar !== !!item.wsStar) return "stars";
+    return "";
+  }
+
+  // itemKey names a dragged item, a session row by reply-id or a workspace
+  // section by path, so refind can find the node a swap put in its place.
+  function itemKey(el) {
+    var ws = hasClass(el, "rws"), attr = ws ? "data-ws" : "data-rid";
+    return { cls: ws ? "rws" : "rs", attr: attr, val: el.getAttribute(attr) || "" };
+  }
+  // refind is the element under box that key names, or null.
+  function refind(box, key) {
+    var kids = box.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i];
+      if (hasClass(k, key.cls) && k.getAttribute(key.attr) === key.val) return k;
+      var deep = refind(k, key);
+      if (deep) return deep;
+    }
+    return null;
+  }
+
+  // swapGate holds the rail's swaps while busy() reports a press, a drag,
+  // or an open rename on it, since a swap replaces every row node: offer(s)
+  // reports whether it held s (the latest offer replaces an earlier one),
+  // release() hands the held swap back once busy() clears (null while busy
+  // or with none held), and forget() drops it (its hash turned current).
+  function swapGate(busy) {
+    var held = null;
+    return {
+      offer: function (s) {
+        if (!busy()) return false;
+        held = s;
+        return true;
+      },
+      release: function () {
+        if (busy() || !held) return null;
+        var s = held;
+        held = null;
+        return s;
+      },
+      forget: function () { held = null; }
+    };
+  }
+
   // markCurrent marks the row of the viewed session rid among rows: the
   // .cur class and aria-current on its link; any other row loses both.
   function markCurrent(rows, rid) {
@@ -367,6 +432,10 @@
     pin: pin,
     arrange: arrange,
     drop: drop,
+    dropRefusal: dropRefusal,
+    itemKey: itemKey,
+    refind: refind,
+    swapGate: swapGate,
     markCurrent: markCurrent,
     reviveRoute: reviveRoute,
     markRevive: markRevive,

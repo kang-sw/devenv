@@ -175,6 +175,61 @@ var wl2 = wsList(["/a", "/b", "/c", "/d", "/0"]);
 R.arrange(wl2, wo.list());
 check("unknown workspaces go after the ordered ones, in server order", ids(wl2), ["/c", "/a", "/b", "/d", "/0"]);
 check("the workspace order is its own", [JSON.parse(os.load("ws.dashboard.wsorder")), JSON.parse(os.load("ws.dashboard.railorder"))[0]], [["/c", "/a", "/b"], "b1"]);
+// The press and its swaps: a rail swap offered during a press is held (the
+// latest replaces an earlier one) and handed back only once the press ends;
+// one whose hash turned current is forgotten; with no press none is held.
+var pressing = false, gate = R.swapGate(function () { return pressing; });
+check("no press: a swap lands at once", [gate.offer({ hash: "h0" }), gate.release()], [false, null]);
+pressing = true;
+check("a swap during the press is held", [gate.offer({ hash: "h1" }), gate.offer({ hash: "h2" })], [true, true]);
+check("nothing is released while the press lasts", gate.release(), null);
+pressing = false;
+check("the press's end releases the latest held swap, once", [gate.release(), gate.release()], [{ hash: "h2" }, null]);
+pressing = true;
+gate.offer({ hash: "h3" });
+gate.forget();
+pressing = false;
+check("a held swap whose hash turned current is forgotten", gate.release(), null);
+// A node a swap replaced anyway is found again in the new render: a row by
+// its reply-id, a workspace section by its path; one the render lacks is
+// gone.
+var oldL = wsList(["/a", "/b"]), oldG = group(["r1", "r2"]);
+oldL.children[1].appendChild(oldG);
+var rkey = R.itemKey(oldG.children[1]), wkey = R.itemKey(oldL.children[0]);
+check("a row's key is its reply-id, a section's its path", [rkey, wkey], [{ cls: "rs", attr: "data-rid", val: "r2" }, { cls: "rws", attr: "data-ws", val: "/a" }]);
+var newL = wsList(["/a", "/b"]), newG = group(["r2", "r1"]);
+newL.children[1].appendChild(newG);
+check("the replaced row is found again", R.refind(newL, rkey) === newG.children[0], true);
+check("the replaced section is found again", R.refind(newL, wkey) === newL.children[0], true);
+check("a row the new render lacks is gone", R.refind(newL, R.itemKey(row("r9"))), null);
+// A refused drop says why: over another workspace, another worktree of its
+// own, or its own list's other side of the stars; over its own group, a
+// header, its ended fold, itself, or outside the list the drop takes the
+// nearest place instead. A workspace section is never refused.
+function worktree(rids, ended) {
+  var w = new El("rwt"), hd = new El("wthd"), g = group(rids, ended);
+  w.appendChild(hd); w.appendChild(g);
+  w.g = g; w.hd = hd;
+  return w;
+}
+function inside(el) { return el.appendChild(new El("s1")); }
+var RL = new El("rlist"), W1 = new El("rws", { "data-ws": "/r" }), W2 = new El("rws", { "data-ws": "/f" });
+var bar1 = W1.appendChild(new El("wsbar")), body1 = W1.appendChild(new El("wsbody"));
+var T1 = body1.appendChild(worktree(["p1", "p2", "p3"], ["px"])), T2 = body1.appendChild(worktree(["q1"]));
+W2.appendChild(new El("wsbar"));
+var F = W2.appendChild(new El("wsbody")).appendChild(group(["f1"]));
+RL.appendChild(W1); RL.appendChild(W2);
+var sp = R.stars(memStore());
+sp.toggle("p1");
+R.pin(T1.g, sp, null);
+var p2 = T1.g.children[1];
+check("over its own group", [R.dropRefusal(p2, T1.g.children[2]), R.dropRefusal(p2, inside(T1.g.children[2])), R.dropRefusal(p2, T1.g)], ["", "", ""]);
+check("over its own header, bar, ended fold, or itself", [R.dropRefusal(p2, T1.hd), R.dropRefusal(p2, bar1), R.dropRefusal(p2, T1.g.inner.children[0]), R.dropRefusal(p2, inside(p2))], ["", "", "", ""]);
+check("over another worktree", [R.dropRefusal(p2, T2.g.children[0]), R.dropRefusal(p2, T2.hd)], ["wt", "wt"]);
+check("over another workspace", [R.dropRefusal(p2, F.children[0]), R.dropRefusal(p2, W2), R.dropRefusal(F.children[0], p2)], ["ws", "ws", "ws"]);
+check("over the other side of the stars", [R.dropRefusal(p2, T1.g.children[0]), R.dropRefusal(T1.g.children[0], inside(T1.g.children[2]))], ["stars", "stars"]);
+check("outside the list", [R.dropRefusal(p2, RL), R.dropRefusal(p2, null)], ["", ""]);
+check("a workspace section is never refused", R.dropRefusal(W1, F.children[0]), "");
 // settle leaves rows already in order where they stand.
 var gs = group(["s1", "s2"]), moved = 0, ib = gs.insertBefore;
 gs.insertBefore = function (c, r) { moved++; return ib.call(this, c, r); };
@@ -276,7 +331,8 @@ if (bad.length) console.log(bad.join("\n"));
 // cap, the stripping of lost image markers, the leave guard, starred-row
 // pinning and its undo, the persisted stars and collapsed workspaces, the
 // drag order of the sessions and workspaces (its drops, storage, and
-// pruning), the viewed row's mark, the add popovers' placement, branch
+// pruning), the press's swap hold, re-find, and drop refusals, the viewed
+// row's mark, the add popovers' placement, branch
 // filter, and add-worktree request, the worktree delete modal's Delete gate
 // and submit, the spawn request, the revive route
 // and entry mark, the hand-off notice, and an approval card's input
