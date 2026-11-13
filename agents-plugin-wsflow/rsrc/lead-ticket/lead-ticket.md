@@ -32,7 +32,7 @@ asking, so judgment is spent here and not at run time.
   product, API, or verification decision: decisions with their rejected
   alternatives, constraints, verification expectations, and the manuals that
   apply.
-- When the user approved a visual reference for the work, store it in the tracked `<ticket root>/assets/<stem>/` folder, link its path in the ticket, and require a side-by-side comparison of a result capture against it in verification; do not promote to `ready/` without the link and comparison, so the approved reference is not lost.
+- When the user approved a visual reference for the work, store it, preferring a text form such as HTML or SVG over a binary image, in the tracked `<ticket root>/assets/<stem>/` folder, link its path in the ticket, and require a side-by-side comparison of a result capture against it in verification; do not promote to `ready/` without the link and comparison, so the approved reference is not lost.
 - Epics stay board-level; implementation detail goes into the child, as a
   separate invocation.
 - Plan text with a `### Result` is frozen; append `#### Edition (<hash>) -
