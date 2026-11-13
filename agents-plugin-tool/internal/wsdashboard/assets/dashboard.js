@@ -542,6 +542,8 @@
     if (name === "tree" || name === "convlive") drawerWait();
     if (TL_REGIONS[name]) { delete tlHeld[name]; tlCount(); }
     if (name === "convlive") syncBadge();
+    // A list that arrives while a / waits in the box opens the picker.
+    if (name === "cmds" && slash) slash.sync();
     if (name === "entries") syncChead();
     if (name === "head" && !sseOn) connected(false);
     if (name === "head") labelSwapped();

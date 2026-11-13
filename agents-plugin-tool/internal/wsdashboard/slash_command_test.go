@@ -320,3 +320,13 @@ func TestCommandListReachesThePageOnlyWhenListed(t *testing.T) {
 		t.Error("the live page does not carry the session's command list")
 	}
 }
+
+// TestSwapReopensThePickerWhenTheListArrives: a session whose command list
+// arrives after the page (a just-created hosted session) opens the picker
+// for a / already waiting in the box, with no reload and no further key.
+func TestSwapReopensThePickerWhenTheListArrives(t *testing.T) {
+	_, dash := pageScripts(t)
+	if !strings.Contains(dash, `if (name === "cmds" && slash) slash.sync();`) {
+		t.Error("swap does not hand a new command list to the slash picker")
+	}
+}
