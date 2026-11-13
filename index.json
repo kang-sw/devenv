@@ -410,19 +410,6 @@
         }
       }
     },
-    "261113-feat-ws-dashboard-browser-pane": {
-      "registered_at": "2026-11-13T07:16:08Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-13T14:40:45Z",
-        "impl": {
-          "branch": "impl/develop/pox-veal-stoke"
-        }
-      }
-    },
     "261113-feat-ws-dashboard-frontend-performance-profile-and-optimize": {
       "registered_at": "2026-11-13T10:51:55Z"
     },
@@ -473,7 +460,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-13T17:47:52Z",
         "impl": {
           "branch": "impl/develop/life-dole-panda"
