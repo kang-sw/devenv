@@ -118,10 +118,15 @@ func TestStreamHistoryWindowsAreFiftyChronologicalEntries(t *testing.T) {
 	}
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
 	live := out[strings.Index(out, `<div class="history-live">`):strings.Index(out, `<template data-history-page`)]
-	if strings.Count(live, `class="wb-entry agent"`) != 50 || !strings.Contains(live, `id="e74"`) || strings.Contains(live, `id="e73"`) {
+	if strings.Count(live, `class="wb-entry agent`) != 50 || !strings.Contains(live, `id="e74"`) || strings.Contains(live, `id="e73"`) {
 		t.Fatal("initial live DOM does not hold exactly the newest 50 entries")
 	}
-	wantAll(t, out, `<template data-history-page data-count="50">`, `<template data-history-page data-count="23">`, "Load 50 older entries")
+	// The newest run folds all but its last three lines; only e123 is current.
+	wantAll(t, live, `<details class="run-fold" data-key="run:e74" data-history-anchor="e74">`, `Log 47 · `, `class="wb-entry agent current" id="e123"`)
+	if strings.Count(live, ` current"`) != 1 || strings.Index(live, `id="e121"`) < strings.Index(live, `</details>`) || strings.Index(live, `id="e120"`) > strings.Index(live, `</details>`) {
+		t.Fatal("the newest three lines are not visible below the fold, or more than one line is current")
+	}
+	wantAll(t, out, `<template data-history-page data-count="50">`, `<template data-history-page data-count="23">`, ">Load older<")
 }
 
 func TestStreamRenderMetadataChronologyAndSandbox(t *testing.T) {
@@ -137,15 +142,17 @@ func TestStreamRenderMetadataChronologyAndSandbox(t *testing.T) {
 	}
 	board := string(regions.Board)
 	topic := board[:strings.Index(board, `data-topic="t/e3"`)]
+	// The stream is chronological, except that p1's earlier version (e3)
+	// folds under its latest version's card (e9) instead of its own slot.
 	previous := -1
-	for i := 1; i <= 10; i++ {
+	for _, i := range []int{1, 2, 4, 5, 6, 7, 8, 9, 3, 10} {
 		index := strings.Index(topic, fmt.Sprintf(`id="e%d"`, i))
 		if index < previous || index < 0 {
 			t.Fatalf("entry %d moved from its chronological slot", i)
 		}
 		previous = index
 	}
-	wantAll(t, board, `data-entry="e1" data-kind="system" data-entry-item="17"`, `system events 2`, `data-key="entry:e3:history"><summary`, `data-key="entry:e9" id="p1" open>`, `class="latest-version" href="#p1"`, `data-doc="entry:e3" data-doc-key="entry:e3" data-topic="t" data-entry="e3"`, `data-doc="topic:t/e3" data-doc-key="topic:t/e3" data-topic="t/e3"`)
+	wantAll(t, board, `data-entry="e1" data-kind="system" data-entry-item="17"`, `System events 3 · `, `data-key="entry:e3:history"><summary`, `data-key="entry:e9" id="p1" open>`, `<details class="panel-versions" data-key="versions:e9">`, `Earlier versions 1`, `data-doc="entry:e3" data-doc-key="entry:e3" data-topic="t" data-entry="e3"`, `data-doc="topic:t/e3" data-doc-key="topic:t/e3" data-topic="t/e3"`)
 	if strings.Count(board, `id="p1"`) != 1 || strings.Contains(board, `data-id="17"`) {
 		t.Fatal("panel target duplicated or event attribution became an answer control")
 	}
@@ -251,5 +258,49 @@ func TestPanelAuthoredReferencesAcrossAllSurfaces(t *testing.T) {
 	// A template cannot accidentally become raw host HTML on the served page.
 	if strings.Contains(html.UnescapeString(regexp.MustCompile(`srcdoc="[^"]*"`).ReplaceAllString(out, "")), "allow-same-origin") {
 		t.Fatal("unexpected privileged panel sandbox")
+	}
+}
+
+// Segments interleaves latest panel cards with log runs: a run over three
+// rows folds whole between panels, the newest run keeps three rows visible,
+// an owner answer is its own row, and other system events share one chip.
+func TestStreamSegmentsFoldRunsBetweenPanels(t *testing.T) {
+	v := func(id, kind string) EntryView { return EntryView{Entry: Entry{ID: id, Kind: kind}} }
+	panel := v("p", EntryPanel)
+	panel.PanelID = "p1"
+	owner := v("o", EntrySystem)
+	owner.ItemID, owner.Text = 4, "Item {{4}} answered [a]"
+	page := EntryPage{Runs: []EntryRun{
+		{Entry: v("a1", EntryAgent)}, {Systems: []EntryView{v("s1", EntrySystem), v("s2", EntrySystem)}},
+		{Entry: v("a2", EntryAgent)}, {Entry: v("a3", EntryAgent)},
+		{Entry: panel},
+		{Systems: []EntryView{v("s3", EntrySystem), owner, v("s4", EntrySystem)}},
+		{Entry: v("a4", EntryAgent)}, {Entry: v("a5", EntryAgent)},
+	}}
+	shape := func(segs []StreamSegment) []string {
+		var out []string
+		for _, s := range segs {
+			if s.IsPanel() {
+				out = append(out, "panel:"+s.Panel.ID)
+				continue
+			}
+			out = append(out, fmt.Sprintf("fold:%d/rows:%d", len(s.Fold), len(s.Rows)))
+		}
+		return out
+	}
+	tail := page.Segments(true)
+	if got := fmt.Sprint(shape(tail)); got != "[fold:4/rows:0 panel:p fold:2/rows:3]" {
+		t.Fatalf("tail segments %s", got)
+	}
+	if got := fmt.Sprint(shape(page.Segments(false))); got != "[fold:4/rows:0 panel:p fold:5/rows:0]" {
+		t.Fatalf("older-page segments %s", got)
+	}
+	if tail[0].FoldKey() != "a1" || tail[0].FoldCount() != 5 || tail[0].FoldOwner() || !tail[2].FoldOwner() {
+		t.Fatal("fold key, count, or owner flag")
+	}
+	// s3 | owner | s4: the owner answer splits the chips around it.
+	last := tail[2]
+	if len(last.Fold[0].Systems) != 1 || last.Fold[1].Entry.ID != "o" || !last.Fold[1].Owner() || len(last.Rows[0].Systems) != 1 || last.Rows[0].Systems[0].ID != "s4" {
+		t.Fatal("an owner answer is not its own row between system chips")
 	}
 }

@@ -397,40 +397,94 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 /* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
 .trecap .rtext { flex: 1; min-width: 0; overflow-wrap: anywhere; contain: paint; }
 .trecap .rat { flex: none; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trecap .rat .evi { display: inline-flex; vertical-align: -3px; margin-right: 5px; }
 
-/* Interleaved topic stream: bounded scrolling, no topic side rail. The JS
-   owns entry/offset anchoring rather than the browser's implicit anchoring. */
-.topic-stream { margin: 10px; }
-.topic-stream > summary { cursor: pointer; color: var(--wb-muted-fg); font-size: 12px; }
-.wb-history { max-height: min(65vh, 720px); overflow-y: auto; overflow-x: hidden; overflow-anchor: none; padding: 8px 2px 2px; scrollbar-gutter: stable; }
-.wb-history:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; border-radius: 6px; }
-.history-older { display: block; margin: 0 auto 8px; }
+/* Topic stream: one chronological column under a thin divider, full card
+   width with no side rail. A quiet header carries the counts; log rows are one
+   line each with the clock in a fixed column on the left; panels are cards
+   inside the topic card. The scroll area is bounded, and the JS owns
+   entry/offset anchoring rather than the browser's implicit anchoring. */
+.topic-stream { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); font-size: 13px; }
+.topic-stream > summary, .tstream > .mhead { list-style: none; display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
+.topic-stream > summary { cursor: pointer; }
+.topic-stream > summary::-webkit-details-marker { display: none; }
+.topic-stream:not([open]) > summary { padding-bottom: 0; }
+.topic-stream:not([open]) > summary::before, .run-fold > summary > .lbl::before, .system-run > summary > .lbl::before, .panel-versions > summary::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.run-fold[open] > summary > .lbl::before, .system-run[open] > summary > .lbl::before, .panel-versions[open] > summary::before { transform: rotate(90deg); }
+.topic-stream > summary .i, .tstream > .mhead .i { width: 12px; height: 12px; }
+.topic-stream > summary .n, .tstream > .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.topic-stream > summary .mmeta { margin-left: auto; font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.wb-history { max-height: min(65vh, 720px); overflow-y: auto; overflow-x: hidden; overflow-anchor: none; scrollbar-gutter: stable; }
+.wb-history:focus { outline: none; }
+.wb-history:focus-visible { outline: 1px solid color-mix(in srgb, var(--wb-primary) 50%, transparent); border-radius: 6px; }
+.history-older { display: block; margin: 2px auto 6px; border: 0; height: 22px; padding: 0 10px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 12px; font-weight: 600; cursor: pointer; }
+.history-older:hover { color: var(--wb-fg); }
 .history-older[hidden] { display: none; }
-.wb-entry { min-width: 0; overflow-wrap: anywhere; margin: 0 0 8px; }
-.entry-panel { background: var(--wb-bg); border: 1px solid var(--wb-line); border-radius: 8px; overflow: hidden; }
-.entry-panel > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 7px 10px; list-style: none; }
-.entry-panel > summary::-webkit-details-marker { display: none; }
-.entry-panel > summary::before { content: "▸"; color: var(--wb-muted-fg); }
-.entry-panel[open] > summary::before { content: "▾"; }
-.entry-panel > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
-.entry-label { font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
-.entry-recap { flex: 1; min-width: 0; font-weight: 600; }
-.entry-at, .entry-imported { color: var(--wb-muted-fg); font-size: 11px; white-space: nowrap; }
-.entry-at { font-variant-numeric: tabular-nums; }
-.historical .entry-panel { border-style: dashed; background: transparent; }
-.historical .entry-recap { font-weight: 400; }
-.latest-version { font-size: 11px; }
-.entry-line { display: flex; align-items: baseline; gap: 8px; padding: 3px 8px; font-size: 13px; }
+.wb-entry { min-width: 0; overflow-wrap: anywhere; }
+/* log rows: clock column, then a small marker (L agent, O owner), then text */
+.entry-line { display: flex; align-items: baseline; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.6; color: var(--wb-muted-fg); }
+.entry-line:hover { background: var(--wb-wash); }
+.entry-line > .entry-at { flex: none; width: 38px; font: 11px/1.6 var(--wb-mono); font-variant-numeric: tabular-nums; opacity: .8; cursor: default; }
 .entry-text { flex: 1; min-width: 0; }
-.wb-entry.agent .entry-line { border-left: 2px solid var(--wb-primary); }
-.system-run { margin-bottom: 8px; color: var(--wb-muted-fg); }
-.system-run > summary { cursor: pointer; width: fit-content; border-radius: 999px; padding: 1px 9px; background: var(--wb-muted); font-size: 11px; }
-.system-run[open] > summary { margin-bottom: 4px; }
-.system-run .wb-entry { margin-bottom: 1px; }
-.system-run .entry-line { font-size: 12px; }
-.panel-recaps { list-style: none; margin: 8px 10px 10px; padding: 0; font-size: 13px; }
-.panel-recaps li { padding: 3px 0; overflow-wrap: anywhere; }
-.panel-recaps li > a { font: 11px var(--wb-mono); margin-right: 6px; }
+.wb-entry.agent > .entry-line { color: var(--wb-fg); font-size: 12.5px; }
+.wb-entry.system .entry-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb-entry.owner > .entry-line { background: color-mix(in srgb, var(--wb-accent-policy) 8%, transparent); }
+.wb-entry.owner .entry-text { color: color-mix(in srgb, var(--wb-accent-policy) 70%, var(--wb-fg)); }
+.evi { flex: none; align-self: center; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 8.5px; font-weight: 800; line-height: 1; font-style: normal; }
+.evi.lead { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.evi.owner { background: color-mix(in srgb, var(--wb-accent-policy) 22%, transparent); color: var(--wb-accent-policy); }
+.evi.sys::before { content: ""; width: 5px; height: 5px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: .7; }
+.ptag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-policy) 18%, transparent); color: var(--wb-accent-policy); }
+.entry-imported { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); }
+/* folds: a long log run, and adjacent system events, behind one quiet row
+   whose dotted rule stands in the clock column */
+.run-fold > summary, .system-run > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 1.7; color: var(--wb-muted-fg); cursor: pointer; font-variant-numeric: tabular-nums; }
+.run-fold > summary::-webkit-details-marker, .system-run > summary::-webkit-details-marker { display: none; }
+.run-fold > summary:hover, .system-run > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.run-fold > summary > .rl, .system-run > summary > .rl { flex: none; width: 38px; border-top: 1px dotted color-mix(in srgb, var(--wb-fg) 30%, transparent); }
+.run-fold > summary > .lbl, .system-run > summary > .lbl { min-width: 0; }
+.run-fold.owner > summary > .lbl::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; vertical-align: 1px; border-radius: 50%; background: var(--wb-accent-policy); }
+/* panel: a card inside the topic card; its recap is the title, with the time,
+   a size hint, and its #pN target on the right. A recap-only panel is a
+   message card. */
+.wb-entry.panel { margin: 6px 0; }
+.entry-panel { background: var(--wb-bg); border-radius: 10px; overflow: hidden; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fg) 9%, transparent); }
+.entry-panel > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 10px; cursor: pointer; }
+.entry-panel > summary::-webkit-details-marker { display: none; }
+.entry-panel > summary:hover { background: var(--wb-wash); }
+.entry-panel > summary::before { content: "\25B8"; flex: none; width: 10px; font-size: 10px; color: var(--wb-muted-fg); }
+.entry-panel[open] > summary::before { content: "\25BE"; }
+.entry-panel[open]:not(.msg) > summary { border-bottom: 1px solid var(--wb-line); }
+.entry-panel > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
+.entry-panel.msg > summary { cursor: default; }
+.entry-panel.msg > summary:hover { background: transparent; }
+.entry-panel.msg > summary::before { content: ""; width: 3px; align-self: stretch; margin: 2px 4px 2px 0; border-radius: 2px; background: var(--wb-accent-policy); }
+.entry-recap { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; overflow-wrap: anywhere; }
+.entry-panel:not([open]):not(.msg) > summary .entry-recap { font-size: 13px; font-weight: 600; }
+.pmeta { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pmeta .entry-at { font: 11px var(--wb-mono); }
+.pmeta .hint { padding: 0 6px; border-radius: 999px; background: var(--wb-muted); line-height: 16px; }
+.pmeta a.mref { font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
+.pmeta a.mref:hover { color: var(--wb-primary); }
+.entry-body.doc-body { font-size: 13.5px; }
+.panel-versions { margin: 0 10px 8px; }
+.entry-panel[open]:not(.msg) > .panel-versions { margin-top: 8px; }
+.panel-versions > summary { list-style: none; display: flex; align-items: center; width: fit-content; padding: 2px 6px; border-radius: 6px; font-size: 11.5px; color: var(--wb-muted-fg); cursor: pointer; }
+.panel-versions > summary::-webkit-details-marker { display: none; }
+.panel-versions > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.historical .entry-panel { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.historical .entry-recap { font-weight: 400; }
+@media (max-width: 560px) {
+  .entry-panel > summary { flex-wrap: wrap; }
+  .entry-panel > summary > .pmeta { margin-left: auto; }
+}
+/* the embed: the latest panel recaps under the same quiet header */
+.tstream { margin: 0 14px; padding: 7px 0 8px; border-top: 1px solid var(--wb-line); }
+.panel-recaps { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.panel-recaps li { display: flex; align-items: baseline; gap: 8px; padding: 1px 6px; border-radius: 6px; }
+.panel-recaps li > .entry-recap { font-size: 13px; font-weight: 600; }
+.panel-recaps li > .entry-at { flex: none; font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
+.panel-recaps li > a.mref { flex: none; font: 600 11px var(--wb-mono); text-decoration: none; }
 .full-board-link { font-size: 12px; margin: 10px 0; }
 
 /* topic body: block markdown above the topic's items, folded under its own summary */
