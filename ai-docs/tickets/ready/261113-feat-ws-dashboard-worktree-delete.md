@@ -1,11 +1,13 @@
 ---
 title: "Dashboard rail: delete a linked worktree with a preview-and-confirm modal"
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
 related:
   261020-feat-worktree-profiles: "worktree.remove stays pool-only; profile pre_remove hooks do not apply: pooled worktrees are refused (decision 12, (519))"
   260525-feat-ws-dashboard-workroot-polishing-backlog: "dropped follow-up of the archived Rust deletion policy"
   261113-feat-ws-dashboard-iframe-shell: "moves the rail, and this ticket's row action and modal, into the shell document"
+sage-review-completeness-reviewed: 94d0326925600751
+sage-review-design-reviewed: 94d0326925600751
 ---
 
 # Dashboard rail: delete a linked worktree with a preview-and-confirm modal
@@ -35,14 +37,16 @@ Research (2026-11-13):
   commits, and live leases, and keeps the branch. Because it refuses foreign
   worktrees unconditionally, the dashboard needs its own route.
 - Current rail: `RailWorktree` (`pageview_rail.go`), `railworktrees.go`
-  (`git worktree list --porcelain`); no delete action and no pool/foreign
-  distinction. The row's change count is a stale snapshot, so deletion must
+  (`git worktree list --porcelain`); no delete action. Pooled rows are
+  already filtered by `repo.Pools` (`pageview_rail.go:27-30`, `:427`),
+  which decision 12 relies on. The row's change count is a stale snapshot, so deletion must
   re-check. `/s/<rid>/worktrees` GET is read-only; `worktrees/cleanup` only
   messages the session. Route template: `handleWorktreeAdd` in
   `workspace_routes.go` (`workspaceBody`, `railRepository`, `beginGitAction`,
   `d.rail.reread`, `broker.wake`; `workspaceBody` checks `sameOrigin` only, not
   `localViewer`: `agents-plugin-tool/internal/wsdashboard/workspace_routes.go#L62-L81`,
-  so decision 5's local-viewer gate is new code in the delete route). Existing confirm UI is `window.confirm`;
+  and decision 5's gate reuses `TrustedWrite` (`access.go:156`), which
+  already returns (localViewer, sameOrigin) for the terminal card's rule). Existing confirm UI is `window.confirm`;
   `railPopOpen` (`dashboard.js`) is the popover pattern.
 
 ## Decisions
@@ -73,7 +77,9 @@ Research (2026-11-13):
    initialized submodules), and the modal says force will be used.
    Rejected: a popover; `window.confirm`.
 5. **Access**: same-machine viewer and same-origin only (`localViewer` +
-   `sameOrigin`, the terminal card's rule); a LAN token alone cannot delete.
+   `sameOrigin`, the terminal card's rule, through the existing
+   `TrustedWrite`, `access.go:156`, not a new helper; design review
+   2026-11-13); a LAN token alone cannot delete.
 6. **Execution**: `git worktree remove` run from the primary worktree's root;
    afterwards the rail re-reads (`d.rail.reread`, `broker.wake`) like the add
    route.
@@ -117,10 +123,15 @@ Research (2026-11-13):
 12. **Pooled worktrees are refused** ((519), owner 2026-11-13: dashboard
     deletion never touches ws pool worktrees; those stay with
     `worktree.remove`). A target is pooled when its cleaned absolute path is
-    under the repository's resolved `worktree_pool` root or under the default
-    pool root (`<git root>/../.ws-worktrees/<git root dir name>`), so a
-    changed config never exposes the old pool; the route resolves the knob
-    per repository without a session key. The rail row carries a deletable
+    under any of: the pool roots the rail already receives
+    (`RailRepository.Pools` from `DashboardSessionSource.ReadRepoWorktrees`,
+    which mirrors `ownedPoolRoots`, `mcp/dashboard_worktrees.go`), the
+    default pool root (`<git root>/../.ws-worktrees/<git root dir name>`), and
+    the legacy in-tree pool root (`<git root>/.ws-worktrees`, which
+    `provisionWorktree` falls back to, `mcp/worktree_tools.go:134-140`,
+    `:175-189`); the last two count unconditionally, so a changed config
+    never exposes an old pool. Pool resolution stays in `mcp` behind that
+    seam, consistent with decision 11 (design review 2026-11-13). The rail row carries a deletable
     flag and shows no delete action on pooled rows (the rail hides pooled
     rows except while one holds a listed session, `pageview_rail.go`); the
     preview and the submit both refuse a pooled target, and the modal says the
@@ -164,9 +175,9 @@ Research (2026-11-13):
 | scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/workspace_routes_test.go, rail_test.go, railscript_test.go; mcp/worktree_remove_test.go for the reused checks; new test files possible |
 | complexity.reuse_points | confirmed | decision 11: countUnreachedCommits and porcelainPaths move from package mcp into a shared package both callers import; the lease check stays in mcp (decision 12) |
 | complexity.side_effect_risk | high | runs git worktree remove on arbitrary linked worktrees including ones outside the ws pool, deleting the directory and any uncommitted files |
-| risk.correctness | high | force semantics, locked and submodule worktrees, unreached detached-HEAD commits, live sessions and leases, and submit-time re-validation must all hold on a destructive path |
+| risk.correctness | high | force semantics, locked and submodule worktrees, unreached detached-HEAD commits, live sessions, and submit-time re-validation must all hold on a destructive path |
 | risk.fit | moderate | follows the add-worktree route pattern but the dashboard has no typed-confirm modal yet (confirm UI is window.confirm) |
-| risk.test | high | needs temp-repo matrix for dirty, unreached, lease, lock, submodule and primary cases plus a LOOK capture of the modal |
+| risk.test | high | needs temp-repo matrix for dirty, unreached, pooled, lock, submodule and primary cases plus a LOOK capture of the modal |
 | risk.security_or_contract | high | destructive route; workspaceBody enforces sameOrigin only, so localViewer must be added; the target path must be validated against git worktree list of a rail-known repository |
 
 ## Phases
@@ -185,8 +196,9 @@ Research (2026-11-13):
 Verification: Go tests over temp repos - preview reports dirty / unreached /
 session / lock / submodule state; submit refuses the primary worktree, a path
 not in `git worktree list`, a locked worktree, a worktree with a live session,
-a pooled worktree (under the resolved or the default pool root, decision
-12; the preview refuses it too and the rail row has no delete action), and anything the old policy refuses without
+a pooled worktree (decision 12: one test each under the rail's pool root,
+the default root, and the legacy in-tree root; the preview refuses it too and
+the rail row has no delete action), and anything the old policy refuses without
 force; a detached HEAD's unreached commits need force while a branch
 worktree with commits no other branch reaches deletes without force and the
 branch survives; a worktree with initialized submodules is removed only with

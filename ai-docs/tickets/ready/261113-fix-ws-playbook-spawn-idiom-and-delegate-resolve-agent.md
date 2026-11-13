@@ -3,8 +3,10 @@ title: "Playbook text: legacy ws-agent-spawn idiom and delegate-refused config.r
 related:
   261112-research-ws-hosted-pi-missing-workflow-tools: finding source (decision 390)
   261113-feat-ws-pi-mini-lead-profile: neighbour (Pi mini-lead profile)
-sage-review-design: blocked
-sage-review-completeness: blocked
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 0d82df5c03233044
+sage-review-completeness-reviewed: 0d82df5c03233044
 ---
 
 # Playbook spawn idiom and delegate resolve_agent
@@ -60,8 +62,11 @@ Two shipped playbook text issues, independent of the Pi allowlist:
   `builtin:mcp` client (its clientInfo is unverified). So the switch keys on
   the caller's recorded launch signal regardless of the detected harness,
   and the MCP-only branch supplies a full terminology row: besides
-  `SpawnIdiom` and `ContinueIdiom`, `ExploreAgent` becomes a read-only
-  `pi.spawn` at the small tier, because the native `explore` tool
+  `SpawnIdiom` and `ContinueIdiom`, `ExploreAgent` becomes a `pi.spawn` at
+  the small tier with a read-only brief (no read-only `pi.spawn` profile
+  exists today, `pi_tools.go:530-536`, so the rendered wording asks for
+  read-only work and does not promise enforcement; design review
+  2026-11-13), because the native `explore` tool
   (`playbook_tools.go:41`) is just as absent there (the (478) rationale:
   never name a tool the session lacks). The signal is derived from existing
   records (a non-lead Pi backend runs `--no-extensions` plus `builtin:mcp`
@@ -136,10 +141,9 @@ Two shipped playbook text issues, independent of the Pi allowlist:
   `pi.spawn`.
 - Mirror the changes into `agents-plugin-wsflow/` per the mirroring manual
   and into `agents-plugin-pi/rsrc/`; re-hash both rsrc manifests.
-- Overlap: ready `261113-feat-ws-ticket-visual-reference-and-ask-classes`
-  Phase 2 (in flight) edits the worker playbooks, including all three
-  elevated copies; whichever lands second rebases its text and manifest
-  hashes.
+- `261113-feat-ws-ticket-visual-reference-and-ask-classes` has landed
+  (41893a65c) and edited the worker playbooks, including all three elevated
+  copies; build on its text and re-hash the manifests.
 - Verify: playbook render tests (both idiom branches, including
   `ExploreAgent`), at least one test through the real detection path (from
   the caller's session key or initialize to the rendered idiom, not a
@@ -150,7 +154,7 @@ Two shipped playbook text issues, independent of the Pi allowlist:
   `ticket-worker-elevated` for an MCP-only Pi caller names `pi.spawn` with the
   resolved tier.
 
-## Blocked (2026-11-13)
+## Sage Review Round 1 (2026-11-13)
 
 ### Design Reviewer — concern
 

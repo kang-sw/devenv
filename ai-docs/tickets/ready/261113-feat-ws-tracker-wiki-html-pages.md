@@ -1,11 +1,13 @@
 ---
 title: "Tracker wiki renders HTML pages in a sandboxed frame"
-sage-review-design: blocked
-sage-review-completeness: blocked
+sage-review-design: completed
+sage-review-completeness: completed
 related:
   261110-feat-ws-dashboard-file-preview: "prior sandboxed HTML frame (allow-scripts, no allow-same-origin) and its finding that a framed page can carry what it reads elsewhere"
   261108-feat-ws-tracker-wiki-git-branch: "the wiki store, the .md page addressing this ticket extends, and the page-read response {path, content, commit, html}"
   261113-feat-ws-dashboard-iframe-shell: "the tracker page becomes a frame inside the shell, so the wiki HTML frame nests one level deeper"
+sage-review-design-reviewed: 60521c76fe7ba918
+sage-review-completeness-reviewed: 60521c76fe7ba918
 ---
 
 # Tracker wiki renders HTML pages in a sandboxed frame
@@ -47,7 +49,7 @@ The `.md` suffix is baked into every page operation through `pageFile` (`wiki.go
 - Isolation holds without the LAN guard (review 2026-11-13, autonomous). Owner (490) drops LAN serving; the isolation argument does not rely on it. A local viewer's requests pass the guard without any cookie (`localViewer`, `access.go:146`), so the frame's requests to the daemon are not refused for lacking credentials. What keeps the frame away from privileged actions: every write route requires `sameOrigin`, which refuses an `Origin` of `null` (`inbox_routes.go:141`); no route grants CORS to `null` except the capability routes, which need a capability path the frame never receives and refuse fetches (`fs_capability.go` `capRefused`); and the host receives no message from wiki frames.
 - Attachments not resolved in HTML pages (review 2026-11-13, autonomous; completeness #6). An HTML page's `attachment:<sha256>` text stays literal, over inlining referenced wiki images into the `srcdoc` as `data:` URLs - author markup and scripts can build a reference in ways a host rewrite cannot find, inlining multiplies the read payload, and topic bodies already set the precedent that references resolve in Markdown but not in HTML (d192e81f). Completion rule: this ticket is complete without attachment resolution; the `wiki.update` description states that an HTML page cannot show pasted images, and the worker's result records the limitation with a forward note naming the candidate mechanism (host-side `data:` inlining bounded like `ImageDataURL`'s 2 MiB) for a follow-up ticket.
 - HTML editing in the dashboard (review 2026-11-13, autonomous). An HTML page edits as source in the existing editor with no Preview tab and no image paste or upload, over a render-route preview for the html kind - the render route stays Markdown-only with no contract change, and the saved view is the preview.
-- Compatibility: T0. The page kind and the response field `kind` are additive and optional: an older reader of the page read ignores `kind`; older `WikiPages` readers **ignore**, rather than list, `.html` files, and older reads append `.md` (`agents-plugin-tool/internal/wsledger/wiki.go:143`, `:541`, `:572`); no store schema, tracker event, or MCP argument changes, and the wiki's on-disk shape gains only a new file extension. Existing Markdown behavior remains intact. The old-daemon caveat under (498)=a is a cross-version behavior gap, not a protocol break.
+- Compatibility: T0. The page kind and the response field `kind` are additive and optional: an older reader of the page read ignores `kind`; older `WikiPages` readers **ignore**, rather than list, `.html` files, and older reads append `.md` (`agents-plugin-tool/internal/wsledger/wiki.go:143`, `:541`, `:572`); no store schema, tracker event, or MCP argument changes, and the wiki's on-disk shape gains only a new file extension. Existing Markdown behavior remains intact. The old-daemon caveat under (498)=a is a cross-version behavior gap, not a protocol break. The tier covers the wire shape only; the narrowing of previously valid paths (`x.html` Markdown names and `.html` folders become unaddressable, existing `x.html.md` blobs are skipped) is owner-approved under (498)=a, not an open tier question.
 
 ## Prior Decisions
 
@@ -70,7 +72,7 @@ The `.md` suffix is baked into every page operation through `pageFile` (`wiki.go
 | scope.new_type_contract | yes | TrackerWikiPage gains `kind` (always present) and `html` carries iframe markup for an HTML page; wiki.query op=read JSON gains `kind`; additive, T0 (Decisions: page-read contract) |
 | scope.test_surface | existing | internal/wsledger/wiki_test.go, cmd/ws-mcp/tracker_host_test.go, internal/mcp/wiki_tools_test.go, internal/wsdashboard/tracker_wiki_test.go, internal/wswhiteboard/*_test.go, tracker.js node tests (runTrackerNode) |
 | complexity.reuse_points | confirmed | framedDoc's sandbox attribute at internal/wswhiteboard/render.go#L547-L569 becomes a shared constant; mergeTrees needs no change |
-| complexity.side_effect_risk | moderate | the .md suffix is baked into path validation, listing, search, and rename/conflict code at wiki.go#L134, #L559, #L632, #L1391, so a second page kind touches shared paths |
+| complexity.side_effect_risk | moderate | the .md suffix is baked into path validation, listing, search, and rename/conflict code at wiki.go:143, :543, :597, :1371 (Background's anchors), so a second page kind touches shared paths |
 | risk.correctness | moderate | extension-keyed kind must not break the .md listing, search, rename guard, and merge paths; the frame layer must survive render()'s full innerHTML rebuild |
 | risk.fit | moderate | a new generic builder beside framedDoc; the frame layer nests inside the planned dashboard iframe shell (261113-feat-ws-dashboard-iframe-shell, ready) |
 | risk.test | moderate | frame sandbox attributes are pinned as markup in Go; frame lifetime and isolation are browser behavior checked by node tests and a manual browser check |
@@ -91,6 +93,7 @@ Acceptance criteria:
 - Concurrent non-overlapping edits of an HTML page merge; overlapping edits refuse with conflict path `x.html`.
 - A write to an HTML page carrying `images` is refused.
 - The page read of an HTML page returns `kind: "html"` and `html` holding exactly one iframe whose `sandbox` is `allow-scripts allow-popups allow-popups-to-escape-sandbox` (no `allow-same-origin`) and whose `srcdoc` is the escaped content; a Markdown page returns `kind: "markdown"` and still renders raw tags as escaped text.
+- `wiki.query op=read` JSON carries `kind` and its text header names the kind; the `wiki.update` and `wiki.query` descriptions describe HTML pages, including that an HTML page cannot show images or resolve `attachment:` references.
 - Existing whiteboard frame tests pass unchanged.
 
 #### Verification
@@ -105,7 +108,9 @@ Acceptance criteria:
 
 - An HTML page shows in a frame filling the page area, outside the `.md` article, and bypasses `refLinksHtml`.
 - A draw that keeps (store, wiki, path, commit) keeps the same frame element attached (no reload); a change of any of the four replaces it.
-- The layer is empty or hidden whenever the slot is absent: another page, edit or conflict view, item window open, drawer closed, store switched.
+- While the slot is absent but the (store, wiki, path, commit) key is unchanged (item window open, edit or conflict view, drawer closed), the layer is hidden and the frame survives, so returning does not reload it; a key change (another page, store switched) empties the layer.
+- The layer repositions with the slot's geometry on drawer resize and layout changes (pin width, wide layout, iframe-shell resizing), not only on redraw.
+- A `wiki:` link to an `x.html` path, from a Markdown page or an item, opens like any wiki path and the kind-dispatching page read renders it in the frame layer.
 - `tracker.js` registers no `message` handler for wiki frames.
 - Creating `notes/x.html`, saving, and reopening shows the rendered page; the editor for it has no Preview tab and ignores image paste.
 
@@ -117,10 +122,11 @@ Acceptance criteria:
 
 HTML must never execute in the dashboard origin: omit `allow-same-origin`; keep the whiteboard's sandbox token set; do not expose host actions through frame messages. The isolation must hold for a local viewer, independent of LAN serving, which owner (490) is dropping (today the dashboard can bind to the LAN with token access, `agents-plugin-tool/internal/wsdashboard/access.go:18`).
 
+- A `srcdoc` frame inherits the tracker page's CSP (its policy container), even when sandboxed. Today the tracker page sends only `frame-ancestors 'none'` (`writeHTMLStatus`, `pages.go:1286`), so author pages load CDN scripts as intended; any later `script-src`, `connect-src`, or `default-src` on the tracker page (including iframe-shell's `?frame=1` headers) would silently break them. Leave a comment at the HTML frame builder site and pin the tracker page's policy in a test (design review 2026-11-13).
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin-tool/; the tool descriptions and `ErrWikiBadPath` are shipped text)
 - Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
 
-## Blocked (2026-11-13)
+## Sage Review Round 1 (2026-11-13)
 
 ### Design Reviewer — block
 
