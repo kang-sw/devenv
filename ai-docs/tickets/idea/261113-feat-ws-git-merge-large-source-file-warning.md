@@ -59,7 +59,4 @@ files with known source extensions:
   own and to ask the user about refactor permission and timing. Rejected: a
   bare "splitting recommended".
 - Compatibility tier: T0 (additive).
-
-## Open Decision Queue
-Last ID: (428)
-(428) [open] [technical] Suppression list lives in .gitattributes as a `ws-size-guard` attribute (`-ws-size-guard` disables the warning for matching paths; `ws-size-guard=<lines>` overrides the limit for them) over a new `.wsignored` file (owner's suggestion) - .gitattributes already has gitignore-style patterns with per-directory accumulation, `git check-attr` evaluates it with no new parser, the generated/vendored exclusion lives in the same file, and a per-path limit value gives (425) b's "warn again only after notable growth".
+- (428): the suppression list lives in .gitattributes as a `ws-size-guard` attribute (`-ws-size-guard` disables the warning for matching paths; `ws-size-guard=<lines>` overrides the limit for them). Rejected: a new `.wsignored` file (owner's initial suggestion) - .gitattributes already gives gitignore-style per-directory patterns evaluated by `git check-attr`, and holds the generated/vendored exclusion. A per-path limit value gives (425) b's "warn again only after notable growth".
