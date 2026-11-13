@@ -178,6 +178,10 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 func boardMemoBase(key string, record sessionRecord, lang string, reasked map[int]int64, replies string) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "seq\x00%d\x00lang\x00%s\x00replies\x00%s\x00", record.Whiteboard.Seq, lang, replies)
+	// Folder metadata, logs, and panel versions are authoritative inputs too;
+	// equal render sequences must not hide changed on-disk content.
+	board, _ := json.Marshal(record.Whiteboard)
+	h.Write(board)
 	todos, _ := json.Marshal(record.Todos)
 	agenda, _ := json.Marshal(record.Agenda)
 	asked, _ := json.Marshal(reasked)
@@ -210,10 +214,14 @@ func (src *DashboardSessionSource) renderBoardNow(key string, record sessionReco
 	var out boardRender
 	// BuildView only reads the state: the served page never begins a render
 	// or writes a file, so the stored board and the static page are untouched.
-	// The ticket files the panels list and the images a topic body inlines
+	// The ticket files the panels list, the ticket status directories the
+	// topic badges resolve against, and the images a topic body inlines
 	// change without a nudge, so the page names them (PageContent.Watch).
 	watch := func(path string) { out.watch = append(out.watch, path) }
+	folder := whiteboardFolder(record.Root, key).Dir
+	watchWhiteboardFiles(folder, watch)
 	in := servedViewInput(record, replyID)
+	in.Tickets = &whiteboardTickets{root: record.Root, watch: watch}
 	inline := in.DocImageSrc
 	in.DocImageSrc = func(path string) string {
 		watch(docImagePath(record.Root, path))
@@ -311,6 +319,7 @@ func servedViewInput(record sessionRecord, replyID string) wswhiteboard.ViewInpu
 		// loopback viewer, through the image route; a topic body's frame asks
 		// the page to fetch it there (wswhiteboard.View OutsideImage).
 		OutsideImage: wsdashboard.OutsideImage(record.Root, replyID),
+		Tickets:      &whiteboardTickets{root: record.Root},
 	}
 }
 

@@ -225,9 +225,9 @@ func (m *LeadMailbox) Return(root, key string, texts []string) error {
 // parseMailText reads one of formatMailBatch's texts back into the envelope
 // it was made from: the batch head, when the text opens with it, is
 // dropped, and the "mail from <handle> (<sent_at>):" line gives the sender
-// and the time. The handle goes back as From: every reader of an envelope
-// takes its From, else its ReplyTo, as the one handle it shows and replies
-// to. A text of another shape (a record written by other code) goes back
+// and the time. An address goes back as From; a display-only handle goes
+// back as Label so it never becomes a correspondent or reply target.
+// A text of another shape (a record written by other code) goes back
 // whole with no sender and the current time.
 func parseMailText(text string) wsmailbox.Envelope {
 	body := text
@@ -249,22 +249,30 @@ func parseMailText(text string) wsmailbox.Envelope {
 	if handle == "" || strings.ContainsAny(handle, "\n") {
 		return whole
 	}
-	if handle == "unknown" {
-		handle = ""
-	}
 	if stamp == "" {
 		stamp = whole.SentAt
 	}
-	return wsmailbox.Envelope{From: handle, Content: content, SentAt: stamp}
+	m := wsmailbox.Envelope{Content: content, SentAt: stamp}
+	if handle != "unknown" {
+		if _, err := wsmailbox.ParseAddress(handle); err == nil {
+			m.From = handle
+		} else {
+			m.Label = handle
+		}
+	}
+	return m
 }
 
 // formatMailEnvelope is one message as a session reads it: a "mail from
 // <handle> (<sent_at>):" line, the handle being the sender's address or
-// else its reply handle, then the body.
+// else its reply handle or display label, then the body.
 func formatMailEnvelope(m wsmailbox.Envelope) string {
 	handle := strings.TrimSpace(m.From)
 	if handle == "" {
 		handle = strings.TrimSpace(m.ReplyTo)
+	}
+	if handle == "" {
+		handle = strings.TrimSpace(m.Label)
 	}
 	if handle == "" {
 		handle = "unknown"
@@ -280,8 +288,8 @@ func formatMailEnvelope(m wsmailbox.Envelope) string {
 // first opening with the batch's head: joined by blank lines they are, byte
 // for byte, the prompt the Claude adapter's mailbox wait submits for the
 // same batch under the same label and recv tool name (its formatBatch).
-// The two are pinned to one literal in both test suites; change them
-// together.
+// Go, Claude, and Pi envelope heads are pinned to matching literals in
+// their test suites; change them together.
 func formatMailBatch(label, recvTool, key string, mail []wsmailbox.Envelope) []string {
 	texts := make([]string, 0, len(mail))
 	for _, m := range mail {

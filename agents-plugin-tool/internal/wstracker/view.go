@@ -118,6 +118,7 @@ type ItemView struct {
 	Project       string   `json:"project"`
 	Labels        []string `json:"labels"` // live label ids, in the order written
 	Due           *string  `json:"due"`
+	Start         *string  `json:"start,omitempty"`
 	Priority      int      `json:"priority"`
 	PriorityLevel int      `json:"priorityLevel"`
 	PriorityName  string   `json:"priorityName"`
@@ -761,7 +762,7 @@ func (r *replayed) view(stream string, now time.Time, staleDays int) *View {
 		}
 		lv := S.prio.level(it.priority)
 		iv := ItemView{ID: id, Alias: it.alias, Kind: it.kind, Title: it.title, Body: it.body, BodyRev: S.bodyRev(id), Project: it.project, Labels: S.liveLabels(it.labels),
-			Due: it.due, Priority: it.priority, PriorityLevel: lv, PriorityName: S.prio.names[lv], Author: it.author,
+			Due: it.due, Start: it.start, Priority: it.priority, PriorityLevel: lv, PriorityName: S.prio.names[lv], Author: it.author,
 			TS: ts(it.ts), Hidden: it.hidden, Edited: ref(it.edited), Status: nz(status[id]),
 			Counted: r.counted(it, status[id]), Children: []string{}, Assignments: orEmpty(recIDs), Pending: orEmpty(pend),
 			Thread: orEmpty(threads[id]), Depth: len(chain) - 1,

@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>화이트보드 메시지 로그 - 변형 비교 목업</title>
+<style>
+/* ---- copied from wswhiteboard/assets/page.css (theme vars, topic card, recap, doc, md) ---- */
+:root {
+  --wb-bg: #f3f3f0; --wb-fg: #1b1d21; --wb-card: #ffffff; --wb-muted: #e9e8e3; --wb-muted-fg: #5f646b;
+  --wb-primary: #2b62d9; --wb-primary-fg: #ffffff; --wb-topic: #2c3038; --wb-on-topic: #ffffff;
+  --wb-now: var(--wb-primary); --wb-on-now: var(--wb-primary-fg);
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-wash: color-mix(in srgb, var(--wb-fg) 6%, transparent);
+  --wb-policy: #b25000; --wb-on-policy: #ffffff;
+  --wb-accent-policy: #b25000;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wb-bg: #141518; --wb-fg: #e7e7e4; --wb-card: #1e2024; --wb-muted: #2b2d32; --wb-muted-fg: #a2a6ad;
+    --wb-primary: #7aa2ff; --wb-primary-fg: #0c1424; --wb-topic: #2a2d33; --wb-on-topic: #e4e5e8;
+    --wb-now: #243457; --wb-on-now: #d3defb; --wb-policy: #5b3a1c; --wb-on-policy: #f6d9bd;
+    --wb-accent-policy: #e0a36c;
+    --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+    --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  }
+}
+:root[data-theme="dark"] {
+  --wb-bg: #141518; --wb-fg: #e7e7e4; --wb-card: #1e2024; --wb-muted: #2b2d32; --wb-muted-fg: #a2a6ad;
+  --wb-primary: #7aa2ff; --wb-primary-fg: #0c1424; --wb-topic: #2a2d33; --wb-on-topic: #e4e5e8;
+  --wb-now: #243457; --wb-on-now: #d3defb; --wb-policy: #5b3a1c; --wb-on-policy: #f6d9bd;
+  --wb-accent-policy: #e0a36c;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--wb-fg) 24%, transparent) transparent; }
+*:hover { scrollbar-color: color-mix(in srgb, var(--wb-fg) 42%, transparent) transparent; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); }
+.id, code { font-family: var(--wb-mono); }
+button { font: inherit; color: inherit; }
+a { color: var(--wb-primary); }
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.topic { position: relative; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); margin-bottom: 16px; overflow: hidden; }
+.tbar { display: flex; align-items: center; gap: 6px; padding: 4px 12px; min-height: 30px; background: var(--wb-topic); color: var(--wb-on-topic); }
+.tbar .tlead { margin-right: auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.tbar .tname { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+.tbar .tago { font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tbar .tnote-toggle { background: transparent; color: inherit; opacity: .7; flex: none; }
+.topic.has-doc > .tbar { padding-right: 46px; }
+:not(pre) > code { font-size: .92em; background: var(--wb-muted); border-radius: 4px; padding: 0 4px; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md table, .md blockquote { margin: 0 0 6px; }
+.md ul, .md ol { padding-left: 18px; }
+.md li { margin: 2px 0; }
+.btn { font-size: 13px; background: var(--wb-muted); border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.btn.mini { padding: 0; width: 24px; height: 22px; }
+.trecap { display: flex; align-items: baseline; gap: 10px; margin: 10px 10px 0; padding: 7px 10px; font-size: 13px; background: var(--wb-wash); border-left: 3px solid var(--wb-accent-policy); border-radius: 0 8px 8px 0; }
+.trecap .rtext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.trecap .rat { flex: none; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+details.tdoc > summary { position: absolute; top: 5px; right: 12px; cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 9px; border-radius: 999px; background: rgb(127 127 127 / .28); color: var(--wb-on-topic); }
+details.tdoc > summary::-webkit-details-marker { display: none; }
+.doc-body { padding: 10px 14px 12px; overflow-x: auto; overflow-wrap: anywhere; }
+.doc-body > :first-child { margin-top: 0; }
+.doc-body > :last-child { margin-bottom: 0; }
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- mockup chrome ---- */
+.ctl { position: sticky; top: 0; z-index: 20; background: var(--wb-bg); border-bottom: 1px solid var(--wb-line); padding: 8px 16px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12.5px; }
+.ctl h1 { font-size: 15px; margin: 0 6px 0 0; font-weight: 700; }
+.ctl .grp { display: inline-flex; align-items: center; gap: 6px; color: var(--wb-muted-fg); }
+.seg { display: inline-flex; background: var(--wb-muted); border-radius: 999px; padding: 2px; }
+.seg button { border: 0; background: transparent; border-radius: 999px; padding: 2px 10px; font-size: 12.5px; cursor: pointer; color: var(--wb-muted-fg); }
+.seg button[aria-pressed="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow); font-weight: 700; }
+.ctl .act { border: 0; border-radius: 999px; padding: 3px 12px; font-size: 12.5px; cursor: pointer; background: var(--wb-now); color: var(--wb-on-now); font-weight: 700; }
+.ctl .act.sec { background: var(--wb-muted); color: var(--wb-fg); font-weight: 500; }
+.ctl .legend { margin-left: auto; color: var(--wb-muted-fg); display: inline-flex; gap: 8px; align-items: center; }
+.wrap { margin: 0 auto; padding: 16px; max-width: 780px; }
+.wrap.all { max-width: 1560px; }
+.vgrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px 20px; align-items: start; }
+.wrap.all .vgrid { grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); }
+.variant[hidden] { display: none; }
+.vcap { margin: 4px 2px 8px; }
+.vcap h2 { font-size: 14px; margin: 0; }
+.vcap p { margin: 2px 0 0; font-size: 12.5px; color: var(--wb-muted-fg); }
+
+/* ---- message log (the new part) ---- */
+.msgs { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); font-size: 13px; }
+.mhead { display: flex; align-items: center; gap: 6px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); min-height: 22px; }
+.mhead .i { width: 12px; height: 12px; }
+.mhead .n { font-variant-numeric: tabular-nums; letter-spacing: 0; font-size: 11.5px; }
+.mhead .mmeta { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.msg { display: flex; align-items: baseline; gap: 8px; padding: 2px 6px; border-radius: 6px; line-height: 1.45; }
+.msg:hover { background: var(--wb-wash); }
+.msg.owner { background: color-mix(in srgb, var(--wb-accent-policy) 7%, transparent); }
+.msg .mt { flex: none; font: 11.5px/1.45 var(--wb-mono); color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; cursor: default; }
+.msg .who { flex: none; align-self: center; width: 15px; height: 15px; border-radius: 50%; font-size: 9px; font-weight: 800; line-height: 1; display: inline-flex; align-items: center; justify-content: center; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.who.owner { background: color-mix(in srgb, var(--wb-accent-policy) 24%, transparent); color: var(--wb-accent-policy); }
+.msg .mtext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.msg .mtext p { margin: 0; }
+.msg .mtext ul { margin: 1px 0 0; padding-left: 16px; }
+.msg .mtext li { margin: 0; }
+.msg.fresh { animation: mfresh 1.8s ease-out; }
+@keyframes mfresh { from { background: color-mix(in srgb, var(--wb-primary) 26%, transparent); } to { background: transparent; } }
+.mbtn { border: 0; height: 22px; padding: 0 10px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.mbtn:hover { color: var(--wb-fg); }
+.mbtn.ghost { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-muted); }
+.mbtn.hot { background: var(--wb-now); color: var(--wb-on-now); }
+.mctl { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 2px 0 4px; }
+.mrest { font-size: 11.5px; color: var(--wb-muted-fg); }
+.pgsep { border-top: 1px dashed var(--wb-line); margin: 3px 6px; }
+.mnone { padding: 4px 6px; font-size: 12.5px; color: var(--wb-muted-fg); }
+
+/* A: chat, time on the right */
+.vA .msg .mt { order: 3; margin-left: auto; padding-left: 6px; }
+
+/* B: pager */
+.pager { display: flex; justify-content: center; align-items: center; gap: 3px; margin-top: 6px; }
+.pg { border: 0; min-width: 24px; height: 22px; padding: 0 6px; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.pg:hover:not(:disabled) { background: var(--wb-wash); color: var(--wb-fg); }
+.pg[aria-current="page"] { background: var(--wb-topic); color: var(--wb-on-topic); font-weight: 700; }
+.pg:disabled { opacity: .35; cursor: default; }
+.pgell { color: var(--wb-muted-fg); padding: 0 2px; font-size: 12px; }
+
+/* C: height cap */
+.mboxw { position: relative; }
+.mbox { overflow-y: auto; overscroll-behavior: contain; }
+.mbox.fade-top { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22px); mask-image: linear-gradient(to bottom, transparent, #000 22px); }
+.msent { text-align: center; font-size: 11.5px; color: var(--wb-muted-fg); padding: 4px 0 6px; }
+.jump { position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); border: 0; height: 24px; padding: 0 11px; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 0 0 1px var(--wb-line), var(--wb-shadow-hi); font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.jump.new { background: var(--wb-now); color: var(--wb-on-now); box-shadow: var(--wb-shadow-hi); }
+.jump[hidden] { display: none; }
+
+/* D: compact timeline */
+.tl { gap: 0; padding-top: 1px; padding-bottom: 1px; }
+.tl .mt { width: 46px; padding-right: 8px; margin-right: 8px; border-right: 1px solid var(--wb-line); text-align: right; }
+.tl .who { width: 13px; height: 13px; font-size: 8px; margin-right: 6px; }
+.tl .mtext.one { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl .mtext.one p { display: inline; }
+.tl .xmore { font-size: 10.5px; color: var(--wb-muted-fg); margin-left: 6px; padding: 0 5px; border-radius: 999px; background: var(--wb-muted); }
+.tl.has-more { cursor: pointer; }
+.tl.x .mtext.one, .tl:not(.x) .mtext.full { display: none; }
+details.grp > summary, details.efold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 6px; font-size: 12px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+details.grp > summary::-webkit-details-marker, details.efold > summary::-webkit-details-marker { display: none; }
+details.grp > summary:hover, details.efold > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+details.grp > summary::before, details.efold > summary::before { content: ""; flex: none; width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+details.grp[open] > summary::before, details.efold[open] > summary::before { transform: rotate(90deg); }
+details.grp[open] > summary { color: var(--wb-fg); font-weight: 600; }
+details.grp > summary .gp { font: 700 10.5px/1 var(--wb-mono); padding: 2px 5px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+details.grp > summary .od { width: 6px; height: 6px; border-radius: 50%; background: var(--wb-accent-policy); }
+details.grp > .gbody, details.dmore > .gbody { padding: 1px 0 3px 0; }
+details.dmore > .gbody { padding-left: 12px; }
+
+/* E: recap split */
+details.efold { margin-bottom: 2px; }
+details.efold > summary .sub { margin-left: auto; font-size: 11px; }
+details.efold > .gbody { margin: 2px 0 4px 12px; padding-left: 8px; border-left: 2px solid var(--wb-muted); }
+.rline { display: flex; align-items: center; gap: 8px; margin: 4px 6px; font-size: 11px; font-weight: 700; color: var(--wb-accent-policy); font-variant-numeric: tabular-nums; }
+.rline::before, .rline::after { content: ""; flex: 1; border-top: 1px solid color-mix(in srgb, var(--wb-accent-policy) 45%, transparent); }
+.rline::before { flex: 0 0 10px; }
+
+/* block markdown (copied from page.css .md rules) */
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-size: inherit; margin: 0 0 4px; }
+.md blockquote { padding: 5px 11px; border-left: 3px solid color-mix(in srgb, var(--wb-primary) 70%, transparent); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--wb-primary) 7%, transparent); color: color-mix(in srgb, var(--wb-fg) 78%, var(--wb-muted-fg)); }
+.md blockquote > :last-child { margin-bottom: 0; }
+.md pre { background: var(--wb-muted); border-radius: 8px; padding: 6px 9px; overflow-x: auto; font-size: 12.5px; }
+.md pre > code { background: none; padding: 0; font-size: inherit; }
+.md table { display: table; width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; border: 1px solid var(--wb-line); border-radius: 8px; }
+.md th, .md td { padding: 5px 10px; vertical-align: top; overflow-wrap: break-word; }
+.md th + th, .md td + td { border-left: 1px solid color-mix(in srgb, var(--wb-line) 55%, transparent); }
+.md th { text-align: left; background: var(--wb-wash); font-weight: 700; border-bottom: 1px solid var(--wb-line); }
+.md td { border-top: 1px solid var(--wb-line); }
+.md tbody tr:first-child td { border-top: 0; }
+.md tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--wb-fg) 3%, transparent); }
+
+/* ---- F–H: panels (big cards in the topic) + one-line log ---- */
+.wrap.wide { max-width: 1100px; }
+.topic.ncard { container: tcard / inline-size; }
+.tpin { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 10px 10px 0; padding: 7px 10px; font-size: 13px; background: var(--wb-wash); border-left: 3px solid var(--wb-accent-policy); border-radius: 0 8px 8px 0; }
+.tpin .ptext { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tpin .pat { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tpin.fresh { animation: pinfresh 1.8s ease-out; }
+@keyframes pinfresh { from { background: color-mix(in srgb, var(--wb-accent-policy) 32%, transparent); } to { background: var(--wb-wash); } }
+.evi { flex: none; width: 15px; display: inline-flex; justify-content: center; align-items: center; }
+.evi .i { width: 11px; height: 11px; stroke-width: 2; }
+.evi.lead { height: 15px; border-radius: 50%; font-size: 8.5px; font-weight: 800; background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.nsec { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); }
+.nsec .mhead .i, .rail .mhead .i { width: 12px; height: 12px; }
+.doc-body a.mref { font-family: var(--wb-mono); font-size: .92em; font-weight: 600; text-decoration: none; padding: 0 4px; border-radius: 4px; background: color-mix(in srgb, var(--wb-primary) 12%, transparent); }
+.doc-body a.mref:hover { background: color-mix(in srgb, var(--wb-primary) 22%, transparent); }
+
+/* panel: a card inside the topic card */
+.dstack { display: flex; flex-direction: column; gap: 6px; }
+.pnl { background: var(--wb-bg); border-radius: 10px; overflow: hidden; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fg) 9%, transparent); }
+.pbar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; min-height: 30px; cursor: pointer; }
+.pbar:hover { background: var(--wb-wash); }
+.pnl.open > .pbar { border-bottom: 1px solid var(--wb-line); }
+.pcaret { flex: none; width: 10px; font-size: 10px; color: var(--wb-muted-fg); }
+.ptitle { flex: 1; min-width: 0; font-weight: 700; font-size: 13.5px; overflow-wrap: anywhere; }
+.pnl:not(.open) .ptitle { font-weight: 600; font-size: 13px; }
+.pmeta { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pmeta .mt { font: 11px var(--wb-mono); }
+.pmeta .hint { padding: 0 6px; border-radius: 999px; background: var(--wb-muted); line-height: 16px; }
+.pmeta a.mref { font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
+.pmeta a.mref:hover { color: var(--wb-primary); }
+.pbody { padding: 10px 14px 12px; font-size: 13.5px; overflow-wrap: anywhere; }
+.pnl.flash { animation: wbflash 1.8s ease-out; }
+.pnl.fresh { animation: pfresh 1.8s ease-out; }
+@keyframes wbflash { 0%, 30% { box-shadow: 0 0 0 2px var(--wb-primary); } 100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fg) 9%, transparent); } }
+@keyframes pfresh { from { box-shadow: 0 0 0 2px color-mix(in srgb, var(--wb-primary) 60%, transparent); } }
+details.dfold { margin-bottom: 6px; }
+details.dfold > summary, details.grp > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 6px; font-size: 12px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+details.dfold > summary::-webkit-details-marker { display: none; }
+details.dfold > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+details.dfold > summary::before { content: ""; flex: none; width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+details.dfold[open] > summary::before { transform: rotate(90deg); }
+details.dfold[open] > summary { margin-bottom: 6px; }
+
+/* placeholder images and the mini UI mockup */
+.figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin: 0 0 8px; }
+.ph { margin: 0 0 8px; max-width: 520px; }
+.figs .ph { max-width: none; }
+.figs .ph { margin: 0; }
+.ph svg { display: block; width: 100%; height: auto; max-height: 260px; background: var(--wb-muted); border-radius: 8px; }
+.ph figcaption { margin-top: 3px; font-size: 11.5px; color: var(--wb-muted-fg); }
+.ph .a { fill: var(--wb-primary); }
+.ph .b { fill: color-mix(in srgb, var(--wb-fg) 14%, transparent); }
+.ph .c { fill: var(--wb-card); }
+.ph .d { fill: color-mix(in srgb, var(--wb-fg) 22%, transparent); }
+.ph .s { stroke: var(--wb-muted-fg); stroke-width: 1.5; fill: none; }
+.ph .sf { fill: var(--wb-muted-fg); }
+.mk { max-width: 380px; border-radius: 8px; overflow: hidden; background: var(--wb-card); box-shadow: 0 0 0 1px var(--wb-line), var(--wb-shadow); font-size: 10.5px; line-height: 1.4; }
+.mk-bar { display: flex; justify-content: space-between; padding: 3px 8px; background: var(--wb-topic); color: var(--wb-on-topic); font-weight: 700; }
+.mk-pin { display: flex; justify-content: space-between; gap: 8px; margin: 5px 6px 0; padding: 2px 6px; border-left: 2px solid var(--wb-accent-policy); background: var(--wb-wash); }
+.mk-pin span, .mk-bar span { opacity: .7; font-weight: 400; }
+.mk i { display: block; height: 5px; margin: 4px 0; border-radius: 3px; background: color-mix(in srgb, var(--wb-fg) 14%, transparent); }
+.mk-doc { padding: 2px 8px 2px; }
+.mk-pnl { margin: 4px 6px; padding: 2px 6px; border-radius: 5px; background: var(--wb-bg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.mk-pnl b { font-weight: 700; }
+.mk-log { display: flex; flex-direction: column; margin: 4px 6px 6px; padding-top: 3px; border-top: 1px solid var(--wb-line); font: 9.5px/1.5 var(--wb-mono); color: var(--wb-muted-fg); }
+.mk-log .more { color: var(--wb-primary); }
+.mk-fold { margin: 2px 6px; font: 9.5px/1.5 var(--wb-mono); color: var(--wb-muted-fg); }
+.mk-grid { display: grid; grid-template-columns: minmax(0, 1fr) 36%; }
+.mk-grid .mk-log { border-top: 0; border-left: 1px solid var(--wb-line); margin: 4px 6px 6px 0; padding: 0 0 0 5px; }
+
+/* one-line log */
+.ll { display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.6; color: var(--wb-muted-fg); }
+.ll:hover { background: var(--wb-wash); }
+.ll .mt { flex: none; width: 38px; font: 11px/1.6 var(--wb-mono); font-variant-numeric: tabular-nums; opacity: .8; }
+.ll .lt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ll.agent { color: var(--wb-fg); font-size: 12.5px; }
+.ll.answer .evi { color: var(--wb-accent-policy); }
+.ll.answer .lt { color: color-mix(in srgb, var(--wb-accent-policy) 70%, var(--wb-muted-fg)); }
+.ll.panel { color: var(--wb-fg); }
+.ll.panel .evi { color: var(--wb-primary); }
+.ll[data-act] { cursor: pointer; }
+.ll a.mref { font: 700 11.5px var(--wb-mono); text-decoration: none; }
+.ll.fresh, .lfold.fresh { animation: mfresh 1.8s ease-out; }
+.ptag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px; background: color-mix(in srgb, var(--wb-accent-policy) 18%, transparent); color: var(--wb-accent-policy); }
+.ref { font-family: var(--wb-mono); font-weight: 700; font-size: 11.5px; }
+.lfold { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 1.7; color: var(--wb-muted-fg); cursor: pointer; text-align: left; }
+.lfold:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.lfold .rl { flex: none; width: 38px; border-top: 1px dotted color-mix(in srgb, var(--wb-fg) 30%, transparent); }
+.lfold .ics { display: inline-flex; gap: 3px; opacity: .8; }
+.lfold .ics .i { width: 11px; height: 11px; stroke-width: 2; }
+.lolder { margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px dashed var(--wb-line); }
+
+/* G: one chronological stream */
+.stream .pnl { margin: 6px 0; }
+.srun { margin: 2px 0; }
+
+/* H: side rail on wide cards, stacked below otherwise */
+.hgrid .rail { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
+@container tcard (min-width: 820px) {
+  .hgrid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; align-items: start; }
+  .hgrid .rail { position: sticky; top: 76px; margin: 10px 10px 10px 0; padding: 4px 6px 6px 8px; border-top: 0; border-left: 1px solid var(--wb-line); max-height: calc(100vh - 96px); }
+  .hgrid .rail .lt { white-space: normal; overflow-wrap: anywhere; }
+  .hgrid .rail .ll { align-items: baseline; }
+}
+.topic.vH { overflow: clip; }
+</style>
+</head>
+<body>
+<div class="ctl">
+  <h1>메시지 로그 변형 비교</h1>
+  <span class="grp">새 방향 <span class="seg" id="views">
+    <button data-view="new">F–H 비교</button><button data-view="F">F 적층</button><button data-view="G">G 인터리브</button><button data-view="H">H 사이드 레일</button>
+  </span></span>
+  <span class="grp">이전안 <span class="seg" id="views2">
+    <button data-view="A">A</button><button data-view="B">B</button><button data-view="C">C</button><button data-view="D">D</button><button data-view="E">E</button><button data-view="all">전체 보기</button>
+  </span></span>
+  <span class="grp" title="F–H: 로그 묶음 크기 · A–E: 페이지 크기">묶음 크기 N <span class="seg" id="sizes"><button data-n="5">5</button><button data-n="8">8</button><button data-n="12">12</button></span></span>
+  <button class="act" id="addpanel" title="F–H: 무작위 크기의 패널 + '패널 추가' 로그">+ 패널</button>
+  <button class="act" id="add" title="F–H: 새 현재 상태가 됨 · A–E: 메시지 추가">+ 에이전트 로그</button>
+  <button class="act sec" id="addsys" title="F–H 전용: 무작위 시스템 이벤트">+ 시스템 이벤트</button>
+  <button class="act sec" id="add5" title="에이전트 로그 60% / 시스템 이벤트 40% 무작위 5건">+5 섞어서</button>
+  <button class="act sec" id="reset">초기화</button>
+  <button class="act sec" id="theme">테마: 자동</button>
+  <span class="legend">시각에 마우스를 올리면 상대 시간 · #pN을 누르면 해당 패널로 이동</span>
+</div>
+<div class="wrap" id="wrap"><div class="vgrid" id="grid"></div></div>
+
+<script>
+(() => {
+'use strict';
+const ICON = {
+  book: '<svg class="i" viewBox="0 0 16 16"><path d="M2.5 3c1.8-.6 3.8-.4 5.5.8 1.7-1.2 3.7-1.4 5.5-.8v9.5c-1.8-.6-3.8-.4-5.5.8-1.7-1.2-3.7-1.4-5.5-.8z"/><path d="M8 3.8v9.5"/></svg>',
+  pen: '<svg class="i" viewBox="0 0 16 16"><path d="M10.5 2.5l3 3L6 13H3v-3z"/><path d="M9 4l3 3"/></svg>',
+  msg: '<svg class="i" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7.5H7l-3 2.5V11H2.5z"/></svg>'
+};
+
+// ---- sample data -------------------------------------------------------
+// [author, markdown text, minutes since the previous message]
+const SEED = [
+  ['lead', '세션 시작. `develop` 기준 `8ee7bd73b`에서 이어서 진행', 0],
+  ['lead', '티켓 `260913-fix-hosted-session-exit` ready 확인, 워커 1 스폰', 4],
+  ['owner', '오늘은 exit-cause 먼저 끝내고 토큰 사용량은 내일 보자', 3],
+  ['lead', '알겠습니다. 토큰 사용량 건은 idea 티켓으로만 남겨둠', 1],
+  ['lead', '워커 1 탐색 완료 — 원인은 holder dir 삭제 후 exit 정보 유실', 9],
+  ['lead', '`go test ./internal/wsholder/...` 1회차: 2 FAIL (zombie 판정)', 6],
+  ['lead', 'Linux zombie를 stopped로 취급하도록 수정 방향 정리', 3],
+  ['lead', '워커 1 구현 커밋 `2d10d72` 보고', 11],
+  ['lead', '테스트 재실행 — 전부 통과 (142 passed, 0.8s)', 2],
+  ['lead', '리뷰어 2명 스폰 (correctness / compatibility)', 1],
+  ['lead', '리뷰 결과: correctness 이슈 없음, compat는 **T0**로 판정', 8],
+  ['owner', 'exit 정보를 얼마나 보관해? 무한이면 곤란', 2],
+  ['lead', '최근 32개만 유지하고 오래된 항목은 회전 삭제. 상한은 `wsholder.exit_keep`로 조정 가능', 2],
+  ['lead', '데몬 재시작 (`ws daemon restart`) — 0.4s, 세션 3개 재접속 확인', 5],
+  ['lead', '대시보드에서 exit cause 표시 확인', 2],
+  ['lead', '머지 준비: `wb/exit-cause` → `develop` fast-forward 불가, merge 커밋으로 진행', 4],
+  ['lead', '머지 완료 `89ad004`', 1],
+  ['lead', '티켓 close — `260913-fix-hosted-session-exit` → `.done`', 1],
+  ['owner', '좋아. 다음은 화이트보드 메시지 로그 아이디어 보자', 6],
+  ['lead', 'idea 티켓 작성 중. 배경은 [refoundation 감사 티켓](#ticket-260909) 참고', 3],
+  ['lead', '현재 body는 덮어쓰기 전용이라 시간순 기록이 사라진다는 점 정리', 4],
+  ['lead', '관찰 요약:\n- 리드가 body를 로그처럼 쓰는 경우가 많음\n- recap과 겹치는 문장이 매번 다시 쓰임', 3],
+  ['lead', '설계 후보 4개 초안 (chat / feed / height cap / timeline)', 7],
+  ['owner', '목업으로 비교해보고 싶어. 다크모드도 같이', 2],
+  ['lead', '목업 작업 delegate로 넘김', 1],
+  ['lead', 'Windows에서 `go test` 1건 flaky — 파일 잠금 타이밍, 재실행 시 통과', 9],
+  ['lead', 'flaky 건은 idea 티켓 `261113-flaky-wsholder-lock`으로 캡처', 2],
+  // recap was written after the message above
+  ['lead', '워커 2 스폰 — 메시지 저장소 스키마 탐색', 6],
+  ['lead', '저장 형식 후보: topic별 append-only JSONL vs 기존 store의 배열 필드', 7],
+  ['lead', '배열 필드는 store `schema_version` 상승이 필요 → T2. JSONL이면 T0', 3],
+  ['owner', 'T0로 가자', 2],
+  ['lead', 'JSONL 채택. 경로는 `whiteboard/<topic>.msgs.jsonl`', 1],
+  ['lead', '`go vet ./...` 통과, lint 경고 0', 8],
+  ['lead', '데몬 재시작 후 SSE 재연결 3s 지연 관찰 — 기존 동작과 동일, 무시', 4],
+  ['lead', '워커 2 보고: 렌더 경로에 페이지 파라미터 추가 필요', 6],
+  ['lead', '테스트 1회차 `TestMsgPaging` FAIL — off-by-one, 수정 중', 5],
+  ['lead', '`TestMsgPaging` 통과. 전체 151 passed', 4],
+];
+const RECAP_AFTER = 26; // index of the last message the recap already reflects
+const POOL = [
+  ['lead', '테스트 재실행 — 전부 통과 (`go test ./...`)'],
+  ['lead', '데몬 상태 확인: healthy, 세션 4개'],
+  ['lead', '워커 3 스폰 — 대시보드 렌더 경로 반영'],
+  ['owner', '페이지 크기 기본값은 8로 하자'],
+  ['lead', '`git merge --no-ff wb/msg-log` 완료, 충돌 없음'],
+  ['lead', '리뷰어 보고: minor 1건 — 빈 로그일 때 헤더 문구'],
+  ['lead', 'SSE 재연결 확인, 지연 0.3s'],
+  ['lead', '티켓 `261113-wb-message-log` Phase 1 Result 기록'],
+];
+
+let msgs, recapAt, N = 8, view = 'all', nextId, poolI;
+const fresh = new Set();
+function seed() {
+  const total = SEED.reduce((s, x) => s + x[2], 0);
+  let t = Date.now() - 2 * 60000 - total * 60000;
+  msgs = SEED.map((x, i) => { t += x[2] * 60000; return { id: i + 1, who: x[0], text: x[1], at: t }; });
+  recapAt = msgs[RECAP_AFTER].at + 60000;
+  nextId = msgs.length + 1; poolI = 0;
+}
+
+// ---- helpers -----------------------------------------------------------
+const pad = n => String(n).padStart(2, '0');
+const clock = t => { const d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const stamp = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${clock(t)}`; };
+function rel(t) {
+  const m = Math.floor((Date.now() - t) / 60000);
+  if (m < 1) return '방금';
+  if (m < 60) return m + '분 전';
+  const h = Math.floor(m / 60);
+  return h < 24 ? h + '시간 ' + (m % 60 ? (m % 60) + '분 ' : '') + '전' : Math.floor(h / 24) + '일 전';
+}
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function inline(s) {
+  return esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>')
+    // #pN panel anchors (F–H): the card's click handler scrolls to the panel
+    .replace(/(^|\s)#p(\d+)\b/g, '$1<a class="mref" href="#p$2" data-pid="$2">#p$2</a>');
+}
+// tiny block markdown: paragraphs, - lists, | tables |, ### headings, > quotes, ``` fences,
+// and placeholder figures ![caption](img:chart|flow|shot|photo) / ![caption](ui:pinned|stream|rail)
+const FIG = /^!\[([^\]]*)\]\((img|ui):(\w+)\)$/;
+function md(text) {
+  const L = text.split('\n'), cells = r => r.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+  const special = /^(```|\||#{1,6} |- |> |!\[)/;
+  let out = '', i = 0;
+  while (i < L.length) {
+    const l = L[i];
+    if (FIG.test(l)) {
+      const figs = [];
+      while (i < L.length && FIG.test(L[i])) { const [, cap, kind, name] = L[i++].match(FIG); figs.push(`<figure class="ph">${kind === 'img' ? IMG[name] : UI[name]}<figcaption>${inline(cap)}</figcaption></figure>`); }
+      out += figs.length > 1 ? `<div class="figs">${figs.join('')}</div>` : figs[0];
+    }
+    else if (l.startsWith('```')) { const b = []; i++; while (i < L.length && !L[i].startsWith('```')) b.push(L[i++]); i++; out += `<pre><code>${esc(b.join('\n'))}</code></pre>`; }
+    else if (l.startsWith('|')) {
+      const rows = []; while (i < L.length && L[i].startsWith('|')) rows.push(L[i++]);
+      out += `<table><thead><tr>${cells(rows[0]).map(c => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${rows.slice(2).map(r => `<tr>${cells(r).map(c => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    }
+    else if (/^#{1,6} /.test(l)) { out += `<h4>${inline(l.replace(/^#+ /, ''))}</h4>`; i++; }
+    else if (l.startsWith('> ')) { const b = []; while (i < L.length && L[i].startsWith('> ')) b.push(inline(L[i++].slice(2))); out += `<blockquote><p>${b.join('<br>')}</p></blockquote>`; }
+    else if (l.startsWith('- ')) { out += '<ul>'; while (i < L.length && L[i].startsWith('- ')) out += `<li>${inline(L[i++].slice(2))}</li>`; out += '</ul>'; }
+    else if (!l.trim()) i++;
+    else { const b = []; while (i < L.length && L[i].trim() && !special.test(L[i])) b.push(inline(L[i++])); out += `<p>${b.join('<br>')}</p>`; }
+  }
+  return out;
+}
+const WHO = { lead: ['L', '리드'], owner: ['O', '오너'] };
+const timeEl = m => `<time class="mt" datetime="${new Date(m.at).toISOString()}" data-at="${m.at}">${clock(m.at)}</time>`;
+const whoEl = m => `<span class="who ${m.who}" title="${WHO[m.who][1]}">${WHO[m.who][0]}</span>`;
+const row = m => `<div class="msg ${m.who}${fresh.has(m.id) ? ' fresh' : ''}" data-id="${m.id}">${timeEl(m)}${whoEl(m)}<div class="mtext md">${md(m.text)}</div></div>`;
+function tlRow(m) {
+  const lines = m.text.split('\n');
+  const more = lines.length > 1 ? `<span class="xmore">+${lines.length - 1}줄</span>` : '';
+  return `<div class="msg tl ${m.who}${more ? ' has-more' : ''}${fresh.has(m.id) ? ' fresh' : ''}" data-id="${m.id}">${timeEl(m)}${whoEl(m)}<div class="mtext one md">${inline(lines[0])}${more}</div>${more ? `<div class="mtext full md">${md(m.text)}</div>` : ''}</div>`;
+}
+const head = (meta) => `<div class="mhead">${ICON.msg}메시지 <span class="n">${msgs.length}</span><span class="mmeta">${meta || ''}</span></div>`;
+const range = (a, b) => `${clock(a.at)}–${clock(b.at)}`;
+function pageList(cur, n) {
+  const s = new Set([1, n, cur - 1, cur, cur + 1]);
+  if (cur <= 3) [2, 3, 4].forEach(x => s.add(x));
+  if (cur >= n - 2) [n - 1, n - 2, n - 3].forEach(x => s.add(x));
+  const arr = [...s].filter(x => x >= 1 && x <= n).sort((a, b) => a - b), out = [];
+  arr.forEach((x, i) => { if (i && x - arr[i - 1] > 1) out.push('…'); out.push(x); });
+  return out;
+}
+function pager(cur, n, act) {
+  let h = `<div class="pager"><button class="pg" data-act="${act}" data-p="${cur - 1}" ${cur <= 1 ? 'disabled' : ''} title="이전">‹</button>`;
+  for (const p of pageList(cur, n)) h += p === '…' ? '<span class="pgell">…</span>' : `<button class="pg" data-act="${act}" data-p="${p}" ${p === cur ? 'aria-current="page"' : ''}>${p}</button>`;
+  return h + `<button class="pg" data-act="${act}" data-p="${cur + 1}" ${cur >= n ? 'disabled' : ''} title="다음">›</button></div>`;
+}
+
+// ---- variants ----------------------------------------------------------
+const V = {};
+
+V.A = {
+  title: 'A. 채팅형', desc: '최신이 아래. 최근 N개만 보이고, 위의 "이전 메시지 N개"를 누르면 이전 페이지가 위에 붙는다(화면 위치 유지). 점선은 페이지 경계.',
+  reset() { this.extra = 0; },
+  render(el) {
+    const total = msgs.length, shown = Math.min(total, N * (1 + this.extra)), start = total - shown;
+    let h = head(`최근 ${shown}개`);
+    if (start > 0 || this.extra) {
+      h += '<div class="mctl">';
+      if (start > 0) h += `<button class="mbtn" data-act="older">↑ 이전 메시지 ${Math.min(N, start)}개</button><span class="mrest">남은 ${start}개</span>`;
+      if (this.extra) h += `<button class="mbtn ghost" data-act="collapse">접기</button>`;
+      h += '</div>';
+    }
+    for (let i = start; i < total; i++) {
+      if (i > start && (total - i) % N === 0) h += '<div class="pgsep"></div>';
+      h += row(msgs[i]);
+    }
+    el.innerHTML = h;
+  },
+  act(el, a) {
+    if (a === 'older') {
+      const first = el.querySelector('.msg'), id = first.dataset.id, y = first.getBoundingClientRect().top;
+      this.extra++; this.render(el);
+      const same = el.querySelector(`.msg[data-id="${id}"]`);
+      if (same) window.scrollBy(0, same.getBoundingClientRect().top - y);
+    } else if (a === 'collapse') { this.extra = 0; this.render(el); }
+  },
+};
+
+V.B = {
+  title: 'B. 피드형', desc: '최신이 위. 페이지당 N개 고정, 목록 아래 번호 페이저. 최신 기준 페이지라 새 메시지가 오면 뒤 페이지 내용이 한 칸씩 밀린다(2페이지 이상에서 추가해 보기).',
+  reset() { this.page = 1; this.unseen = 0; },
+  render(el) {
+    const total = msgs.length, pages = Math.max(1, Math.ceil(total / N));
+    this.page = Math.min(Math.max(1, this.page), pages);
+    if (this.page === 1) this.unseen = 0;
+    const a = (this.page - 1) * N, list = msgs.slice().reverse().slice(a, a + N);
+    const chip = this.unseen ? `<button class="mbtn hot" data-act="pg" data-p="1">↑ 새 메시지 ${this.unseen}개</button>` : '';
+    let h = head(`${chip}${a + 1}–${a + list.length} / ${total}`);
+    h += list.map(row).join('');
+    h += pager(this.page, pages, 'pg');
+    el.innerHTML = h;
+  },
+  act(el, a, t) { if (a === 'pg') { this.page = +t.dataset.p; this.render(el); } },
+  onAdd() { if (this.page > 1) this.unseen++; },
+};
+
+V.C = {
+  title: 'C. 높이 제한', desc: '약 N줄 높이의 박스 안에서 스크롤, 기본은 최신(아래)에 붙어 있다. 위로 올리면 "최신으로" 칩, 그 상태에서 새 메시지가 오면 "새 메시지 n개" 칩. 맨 위에 닿으면 이전 2N개를 지연 로드.',
+  reset() { this.loaded = Math.min(msgs.length, 2 * N); this.unseen = 0; this.atBottom = true; },
+  render(el, mode) {
+    const old = el.querySelector('.mbox'), prevTop = old ? old.scrollTop : 0, prevH = old ? old.scrollHeight : 0;
+    const total = msgs.length; this.loaded = Math.min(total, this.loaded);
+    const start = total - this.loaded;
+    let h = head(`${this.loaded}/${total} 로드됨`);
+    h += `<div class="mboxw"><div class="mbox" style="max-height:${N * 23 + 6}px">`;
+    h += start > 0 ? `<div class="msent">↑ 끝까지 올리면 이전 ${Math.min(2 * N, start)}개를 더 불러옴 · 남은 ${start}개</div>` : '<div class="msent">— 첫 메시지 —</div>';
+    for (let i = start; i < total; i++) h += row(msgs[i]);
+    h += '</div><button class="jump" data-act="bottom" hidden></button></div>';
+    el.innerHTML = h;
+    const box = el.querySelector('.mbox');
+    if (this.atBottom) box.scrollTop = box.scrollHeight;
+    else if (mode === 'prepend') box.scrollTop = prevTop + (box.scrollHeight - prevH);
+    else box.scrollTop = prevTop;
+    this.sync(el);
+  },
+  sync(el) {
+    const box = el.querySelector('.mbox'), jump = el.querySelector('.jump');
+    jump.hidden = this.atBottom;
+    jump.classList.toggle('new', this.unseen > 0);
+    jump.textContent = this.unseen ? `↓ 새 메시지 ${this.unseen}개` : '↓ 최신으로';
+    box.classList.toggle('fade-top', box.scrollTop > 4);
+  },
+  scroll(el, box) {
+    if (!box.clientHeight) return; // hidden tab
+    this.atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 6;
+    if (this.atBottom) this.unseen = 0;
+    if (box.scrollTop < 24 && this.loaded < msgs.length) { this.loaded = Math.min(msgs.length, this.loaded + 2 * N); this.render(el, 'prepend'); return; }
+    this.sync(el);
+  },
+  act(el, a) { if (a === 'bottom') { const box = el.querySelector('.mbox'); box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' }); } },
+  onAdd() { this.loaded++; if (!this.atBottom) this.unseen++; },
+};
+
+V.D = {
+  title: 'D. 컴팩트 타임라인', desc: '시각 열 + 한 줄 텍스트(여러 줄은 "+n줄", 클릭해 펼침). 페이지는 오래된 쪽부터 고정된 N개 묶음이라 새 메시지가 와도 기존 묶음이 흔들리지 않는다. 최신 묶음만 펼침(최신 묶음이 N/2 미만이면 직전 묶음도), 이전 묶음 3개 너머는 "더 이전"으로 한 번 더 접힘.',
+  reset() { this.ov = new Map(); this.moreOpen = false; },
+  render(el) {
+    const total = msgs.length, G = Math.ceil(total / N), last = G - 1, lastCount = total - last * N;
+    const groups = [];
+    for (let g = 0; g < G; g++) groups.push(msgs.slice(g * N, (g + 1) * N));
+    const isOpen = g => this.ov.has(g) ? this.ov.get(g) : (g === last || (g === last - 1 && lastCount < Math.ceil(N / 2)));
+    const grp = g => {
+      const list = groups[g], owners = list.filter(m => m.who === 'owner').length;
+      return `<details class="grp" data-g="${g}"${isOpen(g) ? ' open' : ''}><summary><span class="gp">p${g + 1}</span>${range(list[0], list[list.length - 1])} · ${list.length}개${owners ? `<span class="od" title="오너 메시지 ${owners}개"></span>` : ''}</summary><div class="gbody">${list.map(tlRow).join('')}</div></details>`;
+    };
+    let h = head(`묶음 ${G}개 · ${N}개씩`);
+    const cut = Math.max(0, last - 3); // groups [0, cut) fold into "더 이전"
+    if (cut > 0) {
+      const a = groups[0][0], b = groups[cut - 1][groups[cut - 1].length - 1];
+      h += `<details class="grp dmore"${this.moreOpen ? ' open' : ''}><summary>더 이전 · 묶음 ${cut}개 (${cut * N}개) ${range(a, b)}</summary><div class="gbody">`;
+      for (let g = 0; g < cut; g++) h += grp(g);
+      h += '</div></details>';
+    }
+    for (let g = cut; g < G; g++) h += grp(g);
+    el.innerHTML = h;
+  },
+  toggle(el, d) {
+    if (d.classList.contains('dmore')) this.moreOpen = d.open;
+    else if (d.dataset.g != null) this.ov.set(+d.dataset.g, d.open);
+  },
+  click(el, e) { const r = e.target.closest('.tl.has-more'); if (r && !e.target.closest('a')) r.classList.toggle('x'); },
+};
+
+V.E = {
+  title: 'E. recap 기준 분할 (제안)', desc: 'recap/body가 이미 반영한 메시지는 "recap에 반영됨"으로 접고(내부는 최신순 페이지), recap 이후 메시지만 펼쳐 둔다. 이후 메시지도 N개 상한. "recap 갱신"으로 시뮬레이션: 리드가 recap을 쓰면 로그가 자연히 비워진다.',
+  reset() { this.more = 0; this.page = 1; this.foldOpen = false; },
+  render(el) {
+    const after = msgs.filter(m => m.at > recapAt), before = msgs.filter(m => m.at <= recapAt);
+    let h = head(`recap 이후 ${after.length}개 <button class="mbtn ghost" data-act="recap" title="recap을 지금 갱신한 것으로 가정">recap 갱신</button>`);
+    if (before.length) {
+      const pages = Math.max(1, Math.ceil(before.length / N));
+      this.page = Math.min(Math.max(1, this.page), pages);
+      const a = (this.page - 1) * N, list = before.slice().reverse().slice(a, a + N);
+      h += `<details class="efold"${this.foldOpen ? ' open' : ''}><summary>recap에 반영됨 · ${before.length}개<span class="sub">${range(before[0], before[before.length - 1])}</span></summary><div class="gbody">${list.map(tlRow).join('')}${pages > 1 ? pager(this.page, pages, 'epg') : ''}</div></details>`;
+    }
+    h += `<div class="rline">recap ${clock(recapAt)} 이후 · ${after.length}개</div>`;
+    if (!after.length) h += '<div class="mnone">recap 이후 새 메시지 없음</div>';
+    else {
+      const shown = Math.min(after.length, N * (1 + this.more)), start = after.length - shown;
+      if (start > 0 || this.more) {
+        h += '<div class="mctl">';
+        if (start > 0) h += `<button class="mbtn" data-act="more">↑ ${Math.min(N, start)}개 더 보기</button><span class="mrest">남은 ${start}개</span>`;
+        if (this.more) h += '<button class="mbtn ghost" data-act="less">접기</button>';
+        h += '</div>';
+      }
+      h += after.slice(start).map(row).join('');
+    }
+    el.innerHTML = h;
+  },
+  act(el, a, t) {
+    if (a === 'more') this.more++;
+    else if (a === 'less') this.more = 0;
+    else if (a === 'epg') this.page = +t.dataset.p;
+    else if (a === 'recap') { recapAt = Date.now(); this.more = 0; this.page = 1; updateCards(); }
+    this.render(el);
+  },
+  toggle(el, d) { if (d.classList.contains('efold')) this.foldOpen = d.open; },
+};
+
+// ---- topic entries (F–H): panels + one-line log --------------------------
+const SYSI = {
+  create: '<svg class="i" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>',
+  policy: '<svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M6.6 6.6a1.5 1.5 0 1 1 2 1.4c-.4.2-.6.5-.6.9v.3M8 11h.01"/></svg>',
+  close: '<svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>',
+  edit: '<svg class="i" viewBox="0 0 16 16"><path d="M10.5 2.5l3 3L6 13H3v-3z"/></svg>',
+  answer: '<svg class="i" viewBox="0 0 16 16"><path d="M6.5 4L3 7.5 6.5 11"/><path d="M3 7.5h6a4 4 0 0 1 4 4v1"/></svg>',
+  ack: '<svg class="i" viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="2"/><path d="M5.5 8l2 2 3-4"/></svg>',
+  check: '<svg class="i" viewBox="0 0 16 16"><path d="M2.5 4.5l1 1 2-2M2.5 10.5l1 1 2-2M8 4.5h5.5M8 10.5h5.5"/></svg>',
+  panel: '<svg class="i" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M2.5 6.2h11"/></svg>',
+  log: '<svg class="i" viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></svg>',
+};
+const SYSNAME = { create: '토픽', policy: '정책', close: '닫힘', edit: '편집', answer: '오너 답변', ack: '확인', check: '체크', panel: '패널' };
+const IMG = {
+  chart: '<svg viewBox="0 0 240 110"><path class="s" d="M18 95h208"/>' + [30, 55, 40, 75, 62, 88].map((h, i) => `<rect class="${i === 5 ? 'a' : 'b'}" x="${30 + i * 32}" y="${95 - h}" width="20" height="${h}" rx="2"/>`).join('') + '</svg>',
+  flow: '<svg viewBox="0 0 240 110"><rect class="c" x="12" y="38" width="56" height="34" rx="6"/><rect class="a" x="92" y="38" width="56" height="34" rx="6"/><rect class="c" x="172" y="38" width="56" height="34" rx="6"/><path class="s" d="M68 55h18M148 55h18"/><path class="sf" d="M84 50l6 5-6 5zM164 50l6 5-6 5z"/></svg>',
+  shot: '<svg viewBox="0 0 240 140"><rect class="c" x="6" y="6" width="228" height="128" rx="6"/><rect class="d" x="6" y="6" width="228" height="16" rx="6"/><circle class="b" cx="16" cy="14" r="3"/><circle class="b" cx="26" cy="14" r="3"/><rect class="b" x="16" y="32" width="60" height="92" rx="3"/><rect class="b" x="86" y="32" width="136" height="10" rx="3"/><rect class="a" x="86" y="48" width="136" height="6" rx="3"/><rect class="b" x="86" y="60" width="110" height="6" rx="3"/><rect class="b" x="86" y="72" width="124" height="6" rx="3"/><rect class="b" x="86" y="90" width="136" height="34" rx="4"/></svg>',
+  photo: '<svg viewBox="0 0 240 130"><rect class="b" width="240" height="130"/><circle class="a" cx="186" cy="34" r="14"/><path class="c" d="M0 130l70-70 45 45 30-28 95 53z"/></svg>',
+};
+const UI = {
+  pinned: '<div class="mk"><div class="mk-bar">whiteboard-messages<span>14:12</span></div><div class="mk-pin">남은 일: 대시보드 반영 <span>8분 전</span></div><div class="mk-doc"><i style="width:72%"></i><i style="width:55%"></i><i style="width:63%"></i></div><div class="mk-pnl"><b>▾ 시안 A</b><i style="width:84%"></i><i style="width:66%"></i></div><div class="mk-pnl"><b>▸ 저장 형식 비교</b></div><div class="mk-log"><span>14:03 ✓ 항목 닫힘 #13</span><span>14:05 L 렌더 테스트 통과</span><span class="more">▸ 이전 로그 32줄</span></div></div>',
+  stream: '<div class="mk"><div class="mk-bar">whiteboard-messages<span>14:12</span></div><div class="mk-pin">남은 일: 대시보드 반영 <span>8분 전</span></div><div class="mk-log" style="border:0"><span>13:40 L 워커 2 스폰</span></div><div class="mk-pnl"><b>▾ 저장 형식 비교</b><i style="width:80%"></i><i style="width:60%"></i></div><div class="mk-fold">┄┄ ▸ 로그 5줄</div><div class="mk-pnl"><b>▾ 실측</b><i style="width:70%"></i></div><div class="mk-log"><span>14:05 L 렌더 테스트 통과</span></div></div>',
+  rail: '<div class="mk"><div class="mk-bar">whiteboard-messages<span>14:12</span></div><div class="mk-pin">남은 일: 대시보드 반영 <span>8분 전</span></div><div class="mk-grid"><div><div class="mk-doc"><i style="width:80%"></i><i style="width:60%"></i></div><div class="mk-pnl"><b>▾ 보고서</b><i style="width:85%"></i><i style="width:70%"></i></div><div class="mk-pnl"><b>▸ 시안 C</b></div></div><div class="mk-log"><span>13:40 L 스폰</span><span>13:52 ✓ #12</span><span>14:01 ▭ #p8</span><span>14:05 L 통과</span></div></div></div>',
+};
+const P = (...l) => l.join('\n');
+// l: agent log line, s: system event {y}, p: panel {t, body}; g = minutes since the previous entry.
+// Each panel is followed by its own "패널 추가" system event (seedLog adds it).
+const LOG_SEED = [
+  { k: 's', y: 'create', t: '토픽 생성 `whiteboard-messages`', g: 0 },
+  { k: 'l', t: '세션 시작 — 화이트보드 기록 구조 재설계를 이 토픽에서 추적', g: 1 },
+  { k: 's', y: 'edit', t: 'content 편집 (+4/−0줄)', g: 2 },
+  { k: 'l', t: '배경 조사 착수 — 리드가 body를 로그처럼 쓰는 사례 수집', g: 3 },
+  { k: 'p', t: '문제 정리 — body가 로그가 되는 이유', g: 9, body: P(
+    '### 왜 body가 로그가 되는가',
+    '리드는 토픽 body를 "현재 상태"로 덮어쓰라는 규칙을 받지만, 진행 기록을 남길 곳이 body뿐이라 끝에 `- HH:MM ...` 줄을 덧붙인다. 수집한 12건 중 9건이 이 형태였다.',
+    '',
+    '그 결과 body는 두 역할을 동시에 진다. 지금의 상태를 말해야 하고, 지나온 경과도 담아야 한다. 덮어쓰기 규칙을 지키면 경과가 사라지고, 경과를 남기면 현재 상태가 묻힌다.',
+    '',
+    '![사례 12건의 body 사용 형태 — 덧붙임 로그가 가장 많다](img:chart)',
+    '',
+    '- 덧붙임 로그가 가장 많고, 한 번 쓰고 버리는 표·시안이 그다음',
+    '- recap은 덧붙임 로그의 마지막 줄과 거의 같은 말을 반복',
+    '- 결론: 경과(로그)와 일회성 자료(패널)를 body에서 떼어 내야 한다') },
+  { k: 'l', t: '사례 12건 정리 완료 — 문제 정의를 패널로 남김', g: 1 },
+  { k: 's', y: 'policy', t: '정책 추가 #10 — 저장 형식', g: 3 },
+  { k: 'p', t: '저장 형식 비교 — store 배열 vs JSONL', g: 2, body: P(
+    '| 항목 | store 배열 필드 | topic별 JSONL |',
+    '|---|---|---|',
+    '| 호환성 | T2 — `schema_version` 상승 | T0 — 새 파일만 추가 |',
+    '| 동시 append | 전체 재작성, 잠금이 김 | 줄 단위 append |',
+    '| 큰 패널 | store가 비대해짐 | 패널 본문은 별도 파일 |',
+    '| 페이지 읽기 | 전체 로드 | 끝에서 역방향 스캔 |',
+    '',
+    '추천은 **JSONL**. 패널 본문은 커질 수 있으므로 로그 줄에는 제목과 `#pN`만 남기고, 본문은 `whiteboard/<topic>/p<N>.md`로 분리한다.') },
+  { k: 's', y: 'answer', t: '오너 답변 (10)=b', g: 6 },
+  { k: 's', y: 'close', t: '항목 닫힘 #10 (result: JSONL 채택)', g: 1 },
+  { k: 'l', t: 'JSONL로 진행, 호환성 `T0`', g: 1 },
+  { k: 'l', t: '워커 1 스폰 — `wswhiteboard` 저장 경로 구현', g: 4 },
+  { k: 'l', t: '`go test ./internal/wswhiteboard/...` 1회차 1 FAIL — 동시 append 순서', g: 12 },
+  { k: 'l', t: '순서 보장은 seq 번호로 해결, 타임스탬프 정렬 제거', g: 4 },
+  { k: 'l', t: '재실행 — 전부 통과 (88 passed, 0.6s)', g: 3 },
+  { k: 'l', t: '머지 완료 `a41c9e2` → `develop`', g: 6 },
+  { k: 's', y: 'edit', t: 'content 편집 (+2/−1줄)', g: 1 },
+  { k: 'p', t: '시안 A — 상태 고정 + 패널 데크', g: 8, body: P(
+    '최신 에이전트 로그 줄을 tbar 바로 아래에 **현재 상태**로 고정하고, 그 아래 content, 패널 데크, 로그 순으로 쌓는다.',
+    '',
+    '![시안 A 레이아웃](ui:pinned)',
+    '',
+    '- 패널은 최근 3개만 펼치고 나머지는 제목 줄로 접는다',
+    '- 로그는 최근 5줄만 보이고 나머지는 "이전 로그"로 접는다',
+    '- 장점: 현재 상태 → 지속 상태 → 자료 → 경과 순으로 읽힌다',
+    '- 단점: 패널과 그 패널을 만든 로그 줄이 멀리 떨어진다') },
+  { k: 'p', t: '시안 B — 하나의 시간순 스트림', g: 3, body: P(
+    '패널과 로그를 한 줄기의 시간순 스트림에 섞는다. 패널 사이 로그가 3줄을 넘으면 "로그 n줄"로 접는다.',
+    '',
+    '![시안 B 레이아웃](ui:stream)',
+    '![흐름: 로그 → 패널 → 로그](img:flow)',
+    '',
+    '패널이 만들어진 맥락이 바로 위아래에 보인다는 점이 가장 큰 장점이다. 대신 오래된 패널을 찾으려면 스트림을 거슬러 올라가야 하고, content의 `#pN` 링크가 그 길잡이가 된다.') },
+  { k: 'l', t: '시안 A·B 패널 작성 — 오너 검토 요청', g: 1 },
+  { k: 's', y: 'policy', t: '정책 추가 #12 — recap 처리', g: 1 },
+  { k: 'p', t: '의견: recap을 없애도 되는가', g: 4, body: P(
+    '### 요지',
+    'recap은 "지금 이 토픽은 어디쯤인가"에 답하는 한 문단이다. 그런데 실제로 리드가 쓰는 recap의 대부분은 직전 작업 보고와 같은 말이다. 같은 내용을 두 곳에 쓰면 둘 중 하나는 반드시 낡는다.',
+    '',
+    '최신 에이전트 로그 줄을 현재 상태로 쓰면 이 중복이 사라진다. 리드는 원래 하던 대로 한 줄을 남기고, 그 줄이 곧 상태가 된다. 상태를 따로 갱신하는 걸 잊을 일이 없다.',
+    '',
+    '### 반론과 답',
+    '- **한 줄로 부족할 때** — 상태가 길어지면 패널로 쓰고, 로그 줄은 그 패널을 가리킨다',
+    '- **사소한 줄이 상태가 될 때** — "데몬 재시작" 같은 줄이 최신이 되면 상태가 가벼워진다. 시스템 이벤트는 상태가 되지 않으므로 대부분 피할 수 있고, 남는 경우는 리드 쪽 규칙으로 다룬다',
+    '- **기존 recap 데이터** — 업그레이드 시 첫 로그 줄로 옮긴다',
+    '',
+    '> 결론: recap을 없애고, `recap` 인자는 한 마이너 동안 로그 줄 작성의 별칭으로 남긴다 (T1).') },
+  { k: 's', y: 'answer', t: '오너 답변 (12)=b', g: 9 },
+  { k: 'l', t: 'recap 제거 확정 — 최신 에이전트 로그 줄이 현재 상태 (`recap`은 T1 별칭)', g: 1 },
+  { k: 's', y: 'close', t: '항목 닫힘 #12 (result: 로그로 통합)', g: 1 },
+  { k: 's', y: 'edit', t: 'content 편집 (+3/−2줄)', g: 1 },
+  { k: 'l', t: '데몬 재시작 — 절차는 [ws-mcp 런북](https://example.invalid/ws-mcp) 기준, 세션 3개 재접속', g: 8 },
+  { k: 's', y: 'policy', t: '정책 추가 #13 — 기본 로그 묶음 크기', g: 5 },
+  { k: 'p', t: '기본 로그 묶음 크기 실측', g: 3, body: P(
+    '| N | 펼친 묶음 높이 | 한 화면에 보이는 범위 | 평가 |',
+    '|---|---|---|---|',
+    '| 5 | 약 110px | 최근 20분 | 짧음 — 묶음 전환 잦음 |',
+    '| 8 | 약 170px | 최근 40분 | **추천** — 패널과 한 화면 |',
+    '| 12 | 약 250px | 최근 1시간 | 패널이 아래로 밀림 |',
+    '',
+    '![N별 펼친 높이(px) — 오른쪽이 추천값 8](img:chart)',
+    '',
+    '측정: 1440×900, 대시보드 embed 폭 780px, 패널 3개 펼친 상태.') },
+  { k: 's', y: 'answer', t: '오너 답변 (13)=b', g: 7 },
+  { k: 's', y: 'close', t: '항목 닫힘 #13 (result: 8)', g: 1 },
+  { k: 'l', t: '렌더 테스트 `TestStreamChunks` 통과 (151 passed)', g: 9 },
+  { k: 'p', t: '대시보드 스크린샷 3종', g: 6, body: P(
+    '대시보드에서 새 구조를 렌더한 화면. 왼쪽부터 전체 페이지, embed(780px), 모바일 폭.',
+    '',
+    '![전체 페이지 — 레일 표시](img:shot)',
+    '![embed 780px — 로그가 아래로](img:shot)',
+    '![모바일 폭](img:photo)',
+    '',
+    '다크 모드에서 시스템 이벤트 아이콘의 대비가 약하다. 다음 묶음에서 수정.') },
+  { k: 's', y: 'edit', t: 'content 편집 (+1/−0줄)', g: 1 },
+  { k: 'l', t: '남은 일: 대시보드 반영과 다크 모드 대비 수정 — 워커 3 스폰 대기', g: 3 },
+  { k: 's', y: 'check', t: '체크 추가 #14 — 대시보드에서도 같은 구조 표시', g: 2 },
+  { k: 's', y: 'answer', t: '오너 확인 (14)=ok', g: 3 },
+];
+const AGENT_LINES = [
+  '워커 3 스폰 — 대시보드 렌더 반영',
+  '워커 3 보고: 대시보드 렌더 완료, 보고서 패널 참고',
+  '테스트 재실행 — 전부 통과 (`go test ./...`, 156 passed)',
+  '머지 완료 `c7d21f0` → `develop`',
+  '다크 모드 대비 수정 — 아이콘 불투명도 0.85 → 1',
+  'SSE 재연결 확인 — 지연 0.3s, 이상 없음',
+];
+const PANEL_TITLES = ['워커 3 보고서 — 대시보드 렌더', '시안 C — 접힌 패널 미리보기', '실측: 다크 모드 대비', '의견: 패널에도 상한이 필요한가', '회의 메모 — 릴리스 범위'];
+function panelBody(size) {
+  const a = '대시보드 embed(780px)와 전체 페이지(1200px)에서 같은 구조를 렌더했다. 패널은 접힌 상태에서 제목·시각·크기 힌트만 보이고, 펼치면 본문이 카드 안에 들어간다.';
+  const b = '접힌 패널이 많아지면 "이전 패널 n개"로 한 번 더 접는다. 로그 줄은 패널과 분리되어 있어 패널이 늘어도 현재 상태 줄의 위치는 변하지 않는다.';
+  if (size === 'S') return P(a, '', b);
+  if (size === 'M') return P(a, '', '![측정 결과](img:chart)', '', '- 접힌 패널 높이 30px', '- 펼친 패널 평균 420px', '', b);
+  return P('### 요약', a, '', '| 화면 | 결과 | 비고 |', '|---|---|---|', '| 전체 페이지 | 정상 | 레일 표시 |', '| embed 780px | 정상 | 레일이 아래로 |', '| 다크 모드 | 수정 필요 | 이미지 대비 |', '',
+    '![전체 페이지](img:shot)', '![embed](img:shot)', '', '![레이아웃 목업](ui:rail)', '', b, '', '> 다음 단계: 다크 모드 대비 수정 후 재측정.');
+}
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const SYS_GEN = [
+  () => ({ y: 'policy', t: `정책 추가 #${itemNo++} — ${pick(['로그 보존 기간', '패널 기본 접힘 수', '패널 본문 크기 상한'])}` }),
+  () => ({ y: 'answer', t: `오너 답변 (${itemNo - 1})=${pick(['a', 'b', 'c'])}` }),
+  () => ({ y: 'close', t: `항목 닫힘 #${itemNo - 1} (result: ${pick(['완료', '보류', '기각'])})` }),
+  () => ({ y: 'edit', t: `content 편집 (+${1 + Math.floor(Math.random() * 12)}/−${Math.floor(Math.random() * 4)}줄)` }),
+  () => ({ y: 'ack', t: `확인 항목 추가 #${itemNo++} — ${pick(['패널 링크 형식', '로그 내보내기', '패널 수정 불가'])}` }),
+];
+let log, logId, pNo, itemNo, agentI, panelI;
+const freshLog = new Set();
+function hintOf(body) {
+  const img = (body.match(/\]\(img:/g) || []).length, ui = (body.match(/\]\(ui:/g) || []).length;
+  return [img ? `이미지 ${img}` : '', ui ? `목업 ${ui}` : '', `${body.split('\n').length}줄`].filter(Boolean).join(' · ');
+}
+function makePanel(t, body, at) {
+  const p = { id: logId++, k: 'p', pid: ++pNo, t, body, hint: hintOf(body), at };
+  return [p, { id: logId++, k: 's', y: 'panel', t: `패널 추가: ${t} → #p${p.pid}`, pid: p.pid, at: at + 1000 }];
+}
+function seedLog() {
+  const total = LOG_SEED.reduce((s, e) => s + e.g, 0);
+  let t = Date.now() - 60000 - total * 60000;
+  logId = 1; pNo = 0; itemNo = 15; agentI = 0; panelI = 0; log = [];
+  for (const e of LOG_SEED) {
+    t += e.g * 60000;
+    if (e.k === 'p') log.push(...makePanel(e.t, e.body, t));
+    else log.push({ id: logId++, k: e.k, y: e.y, t: e.t, at: t });
+  }
+}
+const panels = () => log.filter(e => e.k === 'p');
+const lines = () => log.filter(e => e.k !== 'p');
+const latestLine = () => { for (let i = log.length - 1; i >= 0; i--) if (log[i].k === 'l') return log[i]; };
+const evText = t => inline(t).replace(/(#\d+|\(\d+\)=\w+)/g, '<span class="ref">$1</span>');
+function lineHTML(e, st) {
+  const fr = freshLog.has(e.id) ? ' fresh' : '';
+  if (e.k === 'l') return `<div class="ll agent${fr}">${timeEl(e)}<span class="evi lead" title="에이전트(리드)">L</span><span class="lt">${inline(e.t)}${e.id === st.pinId ? '<span class="ptag">현재 상태</span>' : ''}</span></div>`;
+  return `<div class="ll ${e.y}${fr}"${e.pid ? ` data-act="goto" data-pid="${e.pid}" title="패널로 이동"` : ''}>${timeEl(e)}<span class="evi" title="${SYSNAME[e.y]}">${SYSI[e.y]}</span><span class="lt">${evText(e.t)}</span></div>`;
+}
+function panelHTML(p, st) {
+  const open = st.pov.has(p.pid) ? st.pov.get(p.pid) : st.recentP.includes(p.pid);
+  return `<article class="pnl${open ? ' open' : ''}${freshLog.has(p.id) ? ' fresh' : ''}" data-pid="${p.pid}"><header class="pbar" data-act="panel" data-pid="${p.pid}"><span class="pcaret">${open ? '▾' : '▸'}</span><span class="ptitle">${inline(p.t)}</span><span class="pmeta">${timeEl(p)}<span class="hint">${p.hint}</span><a class="mref" href="#p${p.pid}" data-pid="${p.pid}">#p${p.pid}</a></span></header>${open ? `<div class="pbody md">${md(p.body)}</div>` : ''}</article>`;
+}
+// panel deck: chronological; the latest 3 open by default, older ones are title
+// rows, and once more than 4 such rows pile up the oldest fold into one line
+function deckHTML(st) {
+  const ps = panels();
+  if (!ps.length) return '<div class="mnone">패널 없음</div>';
+  const foldN = Math.max(0, ps.length - 3 - 4);
+  const fi = ps.findIndex(p => p.pid === st.focus);
+  if (fi >= 0 && fi < foldN) st.deckMore = true;
+  let h = `<div class="mhead">${SYSI.panel}패널 <span class="n">${ps.length}</span><span class="mmeta">최근 3개 펼침</span></div>`;
+  if (foldN) h += `<details class="dfold" data-key="deck"${st.deckMore ? ' open' : ''}><summary>이전 패널 ${foldN}개 · ${range(ps[0], ps[foldN - 1])}</summary><div class="dstack">${ps.slice(0, foldN).map(p => panelHTML(p, st)).join('')}</div></details>`;
+  return h + `<div class="dstack">${ps.slice(foldN).map(p => panelHTML(p, st)).join('')}</div>`;
+}
+const logHead = (ls, extra) => `<div class="mhead">${SYSI.log}로그 <span class="n">${ls.length}</span><span class="mmeta">에이전트 ${ls.filter(e => e.k === 'l').length} · 시스템 ${ls.filter(e => e.k === 's').length}${extra || ''}</span></div>`;
+const unitAt = u => u.run ? u.run[0].at : u.at;
+const unitEnd = u => u.run ? u.run[u.run.length - 1].at : u.at;
+function sumLines(list) {
+  return `${clock(list[0].at)}–${clock(list[list.length - 1].at)} · ${list.length}줄${list.some(e => e.y === 'answer') ? '<span class="od" title="오너 답변 포함"></span>' : ''}`;
+}
+function sumStream(list) {
+  const np = list.filter(u => u.k === 'p').length, nl = list.reduce((s, u) => s + (u.run ? u.run.length : 0), 0);
+  return `${clock(unitAt(list[0]))}–${clock(unitEnd(list[list.length - 1]))} · ${[np ? `패널 ${np}` : '', nl ? `로그 ${nl}줄` : ''].filter(Boolean).join(' · ')}`;
+}
+// fixed-size chunks anchored at the oldest unit: appending never moves an
+// existing boundary; the newest chunk opens (and the previous one while the
+// newest is under half full); chunks before the last four fold into "더 이전"
+function chunks(units, st, key, rowsFn, sumFn) {
+  if (!units.length) return '<div class="mnone">기록 없음</div>';
+  const n = units.length, G = Math.ceil(n / N), last = G - 1, lastCount = n - last * N, cut = Math.max(0, last - 3);
+  const ov = st.ov[key] || (st.ov[key] = new Map());
+  if (st.focus != null) {
+    const hit = units.findIndex(u => u.k === 'p' && u.pid === st.focus);
+    if (hit >= 0) { const g = Math.floor(hit / N); ov.set(g, true); if (g < cut) st.more[key] = true; }
+  }
+  const isOpen = g => ov.has(g) ? ov.get(g) : (g === last || (g === last - 1 && lastCount < Math.ceil(N / 2)));
+  const grp = g => {
+    const list = units.slice(g * N, (g + 1) * N);
+    return `<details class="grp" data-g="${g}" data-key="${key}"${isOpen(g) ? ' open' : ''}><summary><span class="gp">p${g + 1}</span>${sumFn(list)}</summary><div class="gbody">${rowsFn(list)}</div></details>`;
+  };
+  let h = '';
+  if (cut > 0) {
+    h += `<details class="grp dmore" data-key="${key}"${st.more[key] ? ' open' : ''}><summary>더 이전 · 묶음 ${cut}개 ${clock(unitAt(units[0]))}–${clock(unitEnd(units[cut * N - 1]))}</summary><div class="gbody">`;
+    for (let g = 0; g < cut; g++) h += grp(g);
+    h += '</div></details>';
+  }
+  for (let g = cut; g < G; g++) h += grp(g);
+  return h;
+}
+function pinHTML(e) {
+  return `<div class="tpin${freshLog.has(e.id) ? ' fresh' : ''}" title="최신 에이전트 로그 줄 = 현재 상태"><div class="ptext">${inline(e.t)}</div><span class="pat"><span class="evi lead">L</span><time class="rel" data-at="${e.at}">${clock(e.at)} · ${rel(e.at)}</time></span></div>`;
+}
+const NBASE = {
+  log: true,
+  reset() { this.ov = {}; this.more = {}; this.pov = new Map(); this.runs = new Set(); this.focus = null; this.deckMore = false; this.logOpen = false; this.railBottom = true; },
+  prep(card) {
+    const pin = latestLine();
+    this.pinId = pin.id; this.recentP = panels().slice(-3).map(p => p.pid);
+    card.querySelector('.pin-slot').innerHTML = pinHTML(pin);
+  },
+  toggle(card, d) {
+    const key = d.dataset.key; if (!key) return;
+    if (key === 'deck') this.deckMore = d.open;
+    else if (d.classList.contains('dmore')) this.more[key] = d.open;
+    else (this.ov[key] || (this.ov[key] = new Map())).set(+d.dataset.g, d.open);
+  },
+  act(card, a, t) {
+    if (a === 'goto') return this.goto(card, +t.dataset.pid);
+    if (a === 'panel') { const pid = +t.dataset.pid, cur = this.pov.has(pid) ? this.pov.get(pid) : this.recentP.includes(pid); this.pov.set(pid, !cur); }
+    else if (a === 'logopen') this.logOpen = !this.logOpen;
+    else if (a === 'run') { const k = +t.dataset.k; this.runs.has(k) ? this.runs.delete(k) : this.runs.add(k); }
+    this.render(card);
+  },
+  // #pN link or a panel's log line: open whatever folds hold it, expand it, flash it
+  goto(card, pid) {
+    this.focus = pid; this.pov.set(pid, true);
+    this.render(card); this.focus = null;
+    const el = card.querySelector(`.pnl[data-pid="${pid}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  },
+};
+
+V.F = Object.assign(Object.create(NBASE), {
+  title: 'F. 적층형',
+  desc: 'tbar → 현재 상태(최신 에이전트 로그 줄) → content → 패널 데크 → 로그. 패널은 최근 3개 펼침, 나머지는 제목 줄(시각 · 크기 힌트 · #pN). 로그는 최근 5줄만 보이고 "이전 로그"를 펼치면 오래된 쪽부터 고정된 N줄 묶음으로 페이지가 나뉜다.',
+  shell: () => `<div class="pin-slot"></div>${DOC()}<div class="nsec deck-slot"></div><div class="nsec log-slot"></div>`,
+  render(card) {
+    this.prep(card);
+    card.querySelector('.deck-slot').innerHTML = deckHTML(this);
+    const ls = lines(), older = ls.slice(0, Math.max(0, ls.length - 5));
+    let h = logHead(ls);
+    if (older.length) {
+      h += `<button class="lfold" data-act="logopen"><span class="rl"></span>${this.logOpen ? '▾ 이전 로그 접기' : `▸ 이전 로그 ${older.length}줄`}</button>`;
+      if (this.logOpen) h += `<div class="lolder">${chunks(older, this, 'log', l => l.map(e => lineHTML(e, this)).join(''), sumLines)}</div>`;
+    }
+    card.querySelector('.log-slot').innerHTML = h + ls.slice(-5).map(e => lineHTML(e, this)).join('');
+  },
+});
+
+V.G = Object.assign(Object.create(NBASE), {
+  title: 'G. 인터리브 스트림',
+  desc: '패널과 로그를 하나의 시간순 스트림으로. 패널은 로그 줄 사이에 큰 카드로 놓이고, 패널 사이 로그가 3줄을 넘으면 "로그 n줄"로 접힌다(맨 끝 묶음은 최근 3줄을 남김). 스트림은 패널 1개 또는 로그 묶음 1개를 한 단위로, 오래된 쪽부터 N단위씩 고정 묶음.',
+  shell: () => `<div class="pin-slot"></div>${DOC()}<div class="nsec stream stream-slot"></div>`,
+  runHTML(u) {
+    const r = u.run, key = r[0].id, rows = l => l.map(e => lineHTML(e, this)).join('');
+    const fr = r.some(e => freshLog.has(e.id)) ? ' fresh' : '';
+    const ics = [...new Set(r.map(e => e.k === 'l' ? null : e.y).filter(Boolean))].slice(0, 6).map(y => SYSI[y]).join('');
+    if (r.length <= 3) return `<div class="srun">${rows(r)}</div>`;
+    if (this.runs.has(key)) return `<div class="srun"><button class="lfold" data-act="run" data-k="${key}"><span class="rl"></span>▾ 로그 ${r.length}줄 접기</button>${rows(r)}</div>`;
+    if (u.tail) return `<div class="srun"><button class="lfold${fr}" data-act="run" data-k="${key}"><span class="rl"></span>▸ 로그 ${r.length - 3}줄 더 · ${range(r[0], r[r.length - 4])}<span class="ics">${ics}</span></button>${rows(r.slice(-3))}</div>`;
+    return `<div class="srun"><button class="lfold${fr}" data-act="run" data-k="${key}"><span class="rl"></span>▸ 로그 ${r.length}줄 · ${range(r[0], r[r.length - 1])}<span class="ics">${ics}</span></button></div>`;
+  },
+  render(card) {
+    this.prep(card);
+    const units = []; let run = [];
+    for (const e of log) { if (e.k === 'p') { if (run.length) units.push({ run }); run = []; units.push(e); } else run.push(e); }
+    if (run.length) units.push({ run, tail: true });
+    const np = panels().length, nl = log.length - np;
+    card.querySelector('.stream-slot').innerHTML = `<div class="mhead">${SYSI.log}기록 <span class="n">${log.length}</span><span class="mmeta">패널 ${np} · 로그 ${nl}줄 · ${N}단위 묶음</span></div>` +
+      chunks(units, this, 'stream', list => list.map(u => u.k === 'p' ? panelHTML(u, this) : this.runHTML(u)).join(''), sumStream);
+  },
+});
+
+V.H = Object.assign(Object.create(NBASE), {
+  title: 'H. 사이드 레일',
+  desc: '넓은 카드(820px 이상)에서는 content와 패널 데크가 본문 열, 로그는 오른쪽 좁은 레일(스크롤 시 고정, 최신에 붙어 있음). 로그 줄 중 패널을 가리키는 줄("패널 추가 → #pN")을 누르면 그 패널로 이동한다. 좁은 카드에서는 레일이 데크 아래로 내려간다(전체 보기의 좁은 칸에서 확인).',
+  shell: () => `<div class="pin-slot"></div><div class="hgrid"><div class="hmain">${DOC()}<div class="nsec deck-slot"></div></div><aside class="rail log-slot"></aside></div>`,
+  render(card) {
+    this.prep(card);
+    card.querySelector('.deck-slot').innerHTML = deckHTML(this);
+    const rail = card.querySelector('.rail'), prev = rail.scrollTop, ls = lines();
+    rail.innerHTML = logHead(ls) + chunks(ls, this, 'rail', l => l.map(e => lineHTML(e, this)).join(''), sumLines);
+    rail.scrollTop = this.railBottom ? rail.scrollHeight : prev;
+  },
+  scroll(card, t) { if (t.classList.contains('rail') && t.clientHeight) this.railBottom = t.scrollHeight - t.scrollTop - t.clientHeight < 6; },
+});
+
+// ---- page shell --------------------------------------------------------
+const KEYS = ['F', 'G', 'H', 'A', 'B', 'C', 'D', 'E'], NEW = ['F', 'G', 'H'];
+const grid = document.getElementById('grid');
+const DOC = () => `<details class="tdoc" open><summary title="본문">${ICON.book}</summary><div class="doc-body md">${md(P(
+  '**현재 상태**',
+  '- 저장: topic별 append-only JSONL (`T0`), 패널 본문은 별도 파일 — 근거 #p2',
+  '- recap 제거: 최신 에이전트 로그 줄이 현재 상태 (`recap` 인자는 T1 별칭) — #p5',
+  '- 기본 로그 묶음 크기 8 — 실측 #p6',
+  '',
+  '**참고 패널**',
+  '- 문제 정의 #p1 · 채택 시안 #p3 (대안 #p4)',
+  '- 최신 대시보드 화면 #p7'))}</div></details>`;
+const tbar = () => `<div class="tbar"><span class="tlead"><span class="tname">whiteboard-messages</span></span><time class="tago" title="업데이트됨"></time><button class="btn mini tnote-toggle" title="토픽 메모">${ICON.pen}</button></div>`;
+function card(k) {
+  const cap = `<div class="vcap"><h2>${V[k].title}</h2><p>${V[k].desc}</p></div>`;
+  if (V[k].log) return `<div class="variant" id="var-${k}">${cap}<section class="topic has-doc ncard v${k}" data-topic="whiteboard-messages">${tbar()}${V[k].shell()}</section></div>`;
+  return `<div class="variant" id="var-${k}">${cap}
+<section class="topic has-doc v${k}" data-topic="whiteboard-messages">${tbar()}
+<div class="trecap"><div class="rtext md"><p>메시지 로그 저장은 JSONL(<code>T0</code>)로 확정했고 페이징 테스트까지 통과했다. 지금은 렌더 변형을 비교 중.</p></div><span class="rat">recap <time class="tago rat-t"></time></span></div>
+<details class="tdoc" open><summary title="본문">${ICON.book}</summary><div class="doc-body md">
+<p><b>현재 상태</b></p>
+<ul><li>저장: topic별 append-only JSONL — 호환성 <code>T0</code></li><li>렌더: content 아래, 표시 상한 N개 + 이전 페이지</li><li>남은 일: 변형 선택 → 대시보드 반영, 기본 N 결정</li></ul>
+</div></details>
+<div class="msgs" data-v="${k}"></div></section></div>`;
+}
+seed(); seedLog();
+grid.innerHTML = KEYS.map(card).join('');
+const boxes = {};
+for (const k of KEYS) {
+  const el = V[k].log ? grid.querySelector(`#var-${k} .topic`) : grid.querySelector(`.msgs[data-v="${k}"]`); boxes[k] = el;
+  document.getElementById('var-' + k).addEventListener('click', e => {
+    const a = e.target.closest('a.mref');
+    if (a) { e.preventDefault(); if (V[k].goto) V[k].goto(el, +a.dataset.pid); return; }
+    if (!el.contains(e.target) || e.target.closest('a')) return;
+    const b = e.target.closest('[data-act]');
+    if (b && !b.disabled) { V[k].act(el, b.dataset.act, b); return; }
+    if (V[k].click) V[k].click(el, e);
+  });
+  el.addEventListener('toggle', e => { if (V[k].toggle && e.target.tagName === 'DETAILS') V[k].toggle(el, e.target); }, true);
+  el.addEventListener('scroll', e => { const c = e.target.classList; if (V[k].scroll && c && (c.contains('mbox') || c.contains('rail'))) V[k].scroll(el, e.target); }, true);
+}
+function updateCards() {
+  grid.querySelectorAll('.topic').forEach(sec => {
+    const last = sec.classList.contains('ncard') ? log[log.length - 1] : msgs[msgs.length - 1];
+    const t = sec.querySelector('.tbar .tago'); t.textContent = clock(last.at); t.dataset.at = last.at;
+  });
+  grid.querySelectorAll('.rat-t').forEach(t => { t.textContent = clock(recapAt); t.dataset.at = recapAt; });
+}
+function renderAll() { updateCards(); for (const k of KEYS) V[k].render(boxes[k]); }
+function resetAll() { for (const k of KEYS) V[k].reset(); }
+
+function setView(v) {
+  view = v;
+  const wrap = document.getElementById('wrap');
+  wrap.classList.toggle('all', v === 'all');
+  wrap.classList.toggle('wide', v === 'new' || NEW.includes(v));
+  for (const k of KEYS) document.getElementById('var-' + k).hidden = !(v === 'all' || v === k || (v === 'new' && NEW.includes(k)));
+  document.querySelectorAll('#views button, #views2 button').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === v));
+  renderAll(); // C and the H rail need a visible box to pin themselves to the newest
+}
+function setN(n) {
+  N = n;
+  document.querySelectorAll('#sizes button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.n === n));
+  resetAll(); renderAll();
+}
+function markFresh(set, id) { set.add(id); setTimeout(() => set.delete(id), 1800); }
+function addOld(at) {
+  const p = POOL[poolI++ % POOL.length];
+  const m = { id: nextId++, who: p[0], text: p[1], at };
+  msgs.push(m); markFresh(fresh, m.id);
+  for (const k of KEYS) if (V[k].onAdd) V[k].onAdd();
+}
+function addEntries(...es) { for (const e of es) { log.push(e); markFresh(freshLog, e.id); } }
+function addLine(at) { addEntries({ id: logId++, k: 'l', t: AGENT_LINES[agentI++ % AGENT_LINES.length], at }); addOld(at); }
+function addSys(at) { addEntries(Object.assign({ id: logId++, k: 's', at }, pick(SYS_GEN)())); }
+function addPanel(at) { addEntries(...makePanel(PANEL_TITLES[panelI++ % PANEL_TITLES.length], panelBody(pick(['S', 'M', 'L'])), at)); }
+
+document.getElementById('views').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setView(b.dataset.view); });
+document.getElementById('views2').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setView(b.dataset.view); });
+document.getElementById('sizes').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setN(+b.dataset.n); });
+document.getElementById('addpanel').addEventListener('click', () => { addPanel(Date.now()); renderAll(); });
+document.getElementById('add').addEventListener('click', () => { addLine(Date.now()); renderAll(); });
+document.getElementById('addsys').addEventListener('click', () => { addSys(Date.now()); renderAll(); });
+document.getElementById('add5').addEventListener('click', () => {
+  for (let i = 0; i < 5; i++) { const at = Date.now() - (4 - i) * 2000; Math.random() < .6 ? addLine(at) : addSys(at); }
+  renderAll();
+});
+document.getElementById('reset').addEventListener('click', () => { seed(); seedLog(); fresh.clear(); freshLog.clear(); resetAll(); renderAll(); });
+const THEMES = [['auto', '자동'], ['light', '라이트'], ['dark', '다크']];
+let themeI = 0;
+document.getElementById('theme').addEventListener('click', e => {
+  themeI = (themeI + 1) % THEMES.length;
+  const [v, label] = THEMES[themeI];
+  if (v === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = v;
+  e.currentTarget.textContent = '테마: ' + label;
+});
+// relative time on hover, computed when shown so it never goes stale
+document.addEventListener('mouseover', e => {
+  const t = e.target.closest('time[data-at]');
+  if (t) t.title = t.classList.contains('rel') ? stamp(+t.dataset.at) : (t.classList.contains('mt') ? '' : '업데이트 · ') + rel(+t.dataset.at) + ' · ' + stamp(+t.dataset.at);
+});
+// the pinned status's "n분 전" ticks on its own
+setInterval(() => document.querySelectorAll('time.rel[data-at]').forEach(t => { t.textContent = clock(+t.dataset.at) + ' · ' + rel(+t.dataset.at); }), 20000);
+
+resetAll();
+setN(8);
+setView('new');
+})();
+</script>
+</body>
+</html>

@@ -358,8 +358,8 @@ func TestPiSpawnResolvesThePiTierAndCwd(t *testing.T) {
 		t.Fatalf("spawn spec = %+v", spec)
 	}
 	abs := t.TempDir()
-	callToolWithKey(t, f.server, 5, f.key, "pi.spawn", map[string]any{"prompt": "y", "tier": "medium", "cwd": abs, "label": "second"})
-	if spec := agents.specs[1]; spec.Cwd != abs || spec.Label != "second" || spec.Model != "sol" {
+	callToolWithKey(t, f.server, 5, f.key, "pi.spawn", map[string]any{"prompt": "y", "tier": "medium", "cwd": abs, "label": "second", "profile": "pi-mini-lead"})
+	if spec := agents.specs[1]; spec.Cwd != abs || spec.Label != "second" || spec.Model != "sol" || spec.Profile != wsagent.PiMiniLeadProfile {
 		t.Fatalf("an absolute cwd and a label pass through: %+v", spec)
 	}
 	callToolWithKey(t, f.server, 6, f.key, "pi.spawn", map[string]any{"prompt": "z", "tier": "light"})
@@ -462,13 +462,16 @@ func TestPiTurnReporterMailsTheParent(t *testing.T) {
 		Result: wsagent.TurnResult{ID: "childone", Status: wsagent.TurnInterrupted, Error: "the dashboard daemon exited while the turn ran"},
 	})
 	out := callToolWithKey(t, s, 2, key, "mailbox.recv", nil)
-	for _, want := range []string{`system: [Pi subagent childone "worker"] turn done`, "all green", "system: [Pi subagent childone] turn interrupted: the dashboard daemon exited while the turn ran"} {
+	for _, want := range []string{`pi:childone: Reply with pi.send(id: childone), not mailbox.send.` + "\n" + `[Pi subagent childone "worker"] turn done`, "all green", "[Pi subagent childone] turn interrupted: the dashboard daemon exited while the turn ran"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("mailbox.recv lacks %q: %q", want, out)
 		}
 	}
 	if strings.Count(out, "[Pi subagent") != 2 {
 		t.Fatalf("one mail per lead report: %q", out)
+	}
+	if entry, _ := replyEntryFor(t, key); len(entry.Contacts) != 0 {
+		t.Fatalf("display labels must not become contacts: %+v", entry.Contacts)
 	}
 }
 

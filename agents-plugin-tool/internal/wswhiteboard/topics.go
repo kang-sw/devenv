@@ -2,12 +2,14 @@ package wswhiteboard
 
 import (
 	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/kang-sw/devenv/internal/wsxmlcmd"
 )
 
 // A topic is keyed by one string: items carry it (Item.Topic), and so do
-// its body and recap (TopicDoc.Name), its close state, and its close result. A
+// its content and entries (TopicDoc.Name), its close state, and its close result. A
 // stemmed topic's key is a short stem the lead chose, and its label, the
 // name the page shows, lives in State.Labels; a stemless topic, such as
 // every topic of a store written before stems, is keyed by its label.
@@ -74,16 +76,84 @@ func (s *State) nameTaken(name, self string) bool {
 	return name != self && !s.stemmed(name) && s.topicKnown(name)
 }
 
+// ticketStemPattern is what a linked ticket stem looks like: the ticket
+// store's YYMMDD-category-name.
+var ticketStemPattern = regexp.MustCompile(`^\d{6}-[\w-]+$`)
+
+// applyGroup applies a wb:topic group that carries an extra attribute (label
+// or tickets) and returns the key its commands act on, "" when it was
+// refused. A label applies first (applyLabel); tickets then replace the
+// topic's linked stems, a space-separated list that tickets="" clears. Like a
+// label they are metadata: no recency change, no reopen, no event. A group
+// with tickets and no command must name a known topic unless it links at
+// least one stem, which makes a new topic persist.
+func applyGroup(p *problems, work *State, cmd command) string {
+	scope := cmd.Scope
+	raw, hasTickets := scope.Extra("tickets")
+	var stems []string
+	ticketsOK := true
+	if hasTickets {
+		stems, ticketsOK = ticketStems(p, cmd.At("tickets"), raw)
+	}
+	key := ""
+	if _, labelled := scope.Extra("label"); labelled {
+		key = applyLabel(p, work, cmd, len(stems) > 0)
+	} else if scope.Value != "" {
+		key = work.resolveTopic(scope.Value)
+		if scope.Commands == 0 && len(stems) == 0 && !work.topicKnown(key) {
+			p.Add("%s: holds no commands, and %q names no topic to clear tickets on", cmd.Label(), scope.Value)
+			return ""
+		}
+	}
+	if key != "" && hasTickets && ticketsOK {
+		work.setTopicTickets(key, stems)
+	}
+	return key
+}
+
+// ticketStems reads a tickets attribute: space-separated ticket stems, each
+// once (a repeat is dropped), "" for none.
+func ticketStems(p *problems, at, raw string) ([]string, bool) {
+	var stems []string
+	ok := true
+	for _, stem := range strings.Fields(raw) {
+		if !ticketStemPattern.MatchString(stem) {
+			p.Add("%s: %q is not a ticket stem (YYMMDD-category-name)", at, stem)
+			ok = false
+			continue
+		}
+		if !slices.Contains(stems, stem) {
+			stems = append(stems, stem)
+		}
+	}
+	return stems, ok
+}
+
+// setTopicTickets replaces topic's linked ticket stems; none clears them,
+// dropping a topic document left with nothing else.
+func (s *State) setTopicTickets(topic string, stems []string) {
+	if len(stems) > 0 {
+		s.topicDoc(topic).Tickets = stems
+		return
+	}
+	if i := s.topicDocIndex(topic); i >= 0 {
+		s.Topics[i].Tickets = nil
+		s.dropTopicDoc(topic)
+	}
+}
+
 // applyLabel applies a wb:topic group that carries a label and returns the
 // key its commands act on, "" when it was refused. The group's name must be
 // a stem. A known stem takes the label (a rename); a stemless topic keyed
 // by the name takes it as its stem (adoption in place); an unknown stem
 // adopts the stemless topic keyed by the label, moving everything keyed by
 // it to the stem, or else starts a new stemmed topic, which an empty group
-// cannot do since a topic with nothing in it does not persist.
-func applyLabel(p *problems, work *State, cmd command) string {
+// cannot do since a topic with nothing in it does not persist, unless the
+// group links tickets (linking).
+func applyLabel(p *problems, work *State, cmd command, linking bool) string {
 	scope := cmd.Scope
-	name, label := scope.Value, scope.Extra
+	name := scope.Value
+	label, _ := scope.Extra("label")
 	at := cmd.Label() + " label"
 	labelOK := wsxmlcmd.NonEmpty(p, at, label)
 	if name == "" || !labelOK {
@@ -117,7 +187,7 @@ func applyLabel(p *problems, work *State, cmd command) string {
 		if taken(name) {
 			return ""
 		}
-		if scope.Commands == 0 {
+		if scope.Commands == 0 && !linking {
 			p.Add("%s: holds no commands, and %q names no topic to rename or adopt; a new topic needs a command", cmd.Label(), name)
 			return ""
 		}
@@ -129,8 +199,8 @@ func applyLabel(p *problems, work *State, cmd command) string {
 	return name
 }
 
-// renameTopic moves everything keyed by from to the key to: items, body and
-// recap, close state, and close result. A close mark or result already under to is
+// renameTopic moves everything keyed by from to the key to: items, content,
+// entries, linked tickets, legacy recap, close state, and close result. A close mark or result already under to is
 // stale (archive eviction drops a topic's items but not its close state), so
 // it goes first rather than closing or doubling the moved topic.
 func (s *State) renameTopic(from, to string) {
@@ -156,7 +226,7 @@ func (s *State) renameTopic(from, to string) {
 }
 
 // pruneLabels drops the label of every stem whose topic is gone (no item,
-// body, or recap left), so a stale stem never blocks a new topic.
+// content, entries, or legacy recap left), so a stale stem never blocks a new topic.
 func (s *State) pruneLabels() {
 	for stem := range s.Labels {
 		if !s.topicKnown(stem) {

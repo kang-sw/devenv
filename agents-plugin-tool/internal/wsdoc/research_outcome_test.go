@@ -60,7 +60,8 @@ func TestResearchChecklistAuthorityBoundary(t *testing.T) {
 func TestNonResearchChecklistsRemainVerbatim(t *testing.T) {
 	want := map[string]string{
 		"content": `1. Capture every settled decision, contract, agreed API/type/event/UI sketch (literal, not prose-flattened), rejected alternative, constraint, forward-compatibility guardrail, and verification expectation; include suggested implementation strategy only when it was agreed, constrains implementation, or is needed to recover the intended contract.
-2. Exclude anything unconfirmed — return it to the Open Decision Queue instead of writing it; exclude source-local edit notes unless they are settled constraints.`,
+2. Exclude anything unconfirmed — return it to the Open Decision Queue instead of writing it; exclude source-local edit notes unless they are settled constraints.
+3. When the user approved a visual reference, check that it is stored in the ticket's tracked assets folder, linked by path, and that the verification requires a side-by-side comparison of a result capture against it.`,
 		"intent": `1. Test: could a fresh implementer build a materially different caller-visible, workflow, API, or verification result from the settled discussion without contradicting the ticket? If yes, capture the missing settled decision.
 2. Check that API/type/event/UI sketches were preserved literally, not prose-flattened.
 3. Check that no unconfirmed mechanism choice, future-scope hint, Result Forward note, or focus "Next" line was written.`,

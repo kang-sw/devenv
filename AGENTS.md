@@ -113,6 +113,12 @@ before release, not discovered there.
   protocol or tracker event change. T2 lands only in a minor bump, with the
   store's `schema_version` or the protocol number raised.
 
+Avoid T2. Design a cross-version change as T0 or T1 (additive, or keeping
+the old name as an alias) whenever one can carry it; a T2 change, and the
+minor bump it forces, needs the owner's explicit approval before a ticket
+settles it. A minor bump locks out every installed-plugin session still on
+the previous minor once a dev rebuild replaces the shared daemon.
+
 Scenario sheet and enforcement: `ai-docs/manuals/release-compatibility.md`.
 
 ### Branch Policy
@@ -284,8 +290,8 @@ ai-docs/tickets/.dropped/
   agents, plugin packaging, helper commands, MCP tooling, and dev-environment
   templates. Tickets and manuals here describe the workflow system itself;
   downstream application material belongs in downstream projects. Active plugin
-  package: `agents-plugin/` (`ws@0.49.1`). Conservative-default
-  distribution: `agents-plugin-wsflow/` (`wsflow@0.49.1`). Native
+  package: `agents-plugin/` (`ws@0.50.0`). Conservative-default
+  distribution: `agents-plugin-wsflow/` (`wsflow@0.50.0`). Native
   MCP/tooling source: `agents-plugin-tool/`. Retired Claude source material:
   `ai-docs/ref/claude-home-legacy.md` and git history.
 - **Project map / topology.**

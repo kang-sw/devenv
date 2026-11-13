@@ -1,11 +1,14 @@
 ---
-title: "ws-ade: a standalone desktop app (Tauri or similar) around the dashboard daemon, and renaming the product to ws-ade"
+title: "Werkschaft: local-only product concept - desktop shell, zero-install built-in agent, distribution, and the rename (formerly ws-ade)"
 related:
-  261110-epic-ws-dashboard-agent-host: "its Scope defers a desktop shell until the browser dashboard is complete ((18) a, (19)); this research does not change that order"
+  261110-epic-ws-dashboard-agent-host: "its Scope deferred a desktop shell until the browser dashboard is complete ((18) a, (19)); (493)=b reverses that order for a thin shell built in parallel"
   261110-research-ws-dashboard-agent-host-foundations: "holds the earlier Tauri-vs-Electron question; this ticket carries it forward"
+  261113-bug-ws-only-the-dashboard-daemon-runs-an-exe: "same direction as (494): the holder's python3 dependency moves to Go"
+  261113-bug-ws-hosted-pi-start-misses-uninstalled-extension-deps: "the committed single-JS Pi extension bundle is what an isolated-mode built-in Pi agent loads ((495))"
+  261109-research-windows-code-signing-signpath: "signing for the shipped exe/zip (SmartScreen, Gatekeeper)"
 ---
 
-# ws-ade: desktop shell and product rename
+# Werkschaft: local-only product concept (formerly ws-ade)
 
 ## Background
 
@@ -18,6 +21,16 @@ The browser dashboard already opens headless lead sessions, hosts their
 processes in the session holder, and gives a browser terminal, so the app
 is mainly a shell that bundles the daemon as a sidecar and opens a window.
 
+Owner direction, 2026-11-13 (product-concept round, relayed by the MAIN
+lead; "일단 리서치 티켓?으로 잡아서 논의 확장해보죠"): the product is
+local-only (LAN dropped; remote access comes later through a separate remote
+daemon or a tunnel); the localhost browser UI stays tier 1 and Tauri support
+is a goal; security boundaries that exist only because of LAN are relaxed;
+long term the exe self-updates from the latest GitHub release or ships
+through an installer; the product carries a built-in agent. The product name
+is Werkschaft ((496)), superseding `ws-ade`. Topics 3-5 below carry the new
+questions; Topics 1-2 keep their earlier scope with the name updated.
+
 ## Topic 1: desktop shell
 
 - Tauri against Electron (or another option) for wrapping the existing web
@@ -29,7 +42,7 @@ is mainly a shell that bundles the daemon as a sidecar and opens a window.
   starts, and how it coexists with a daemon a terminal session already
   started.
 
-## Topic 2: rename to ws-ade
+## Topic 2: rename to Werkschaft
 
 - Every place the repository or root directory name is a key: per-project
   cache and state paths (for example `~/.cache/ws@<owner>-<repo>/`), the
@@ -40,6 +53,36 @@ is mainly a shell that bundles the daemon as a sidecar and opens a window.
   registrations.
 - Where the product name shows (app title, dashboard header) versus ids that
   stay.
+
+## Topic 3: local-only daemon
+
+- Remove LAN serving as a T1 change ((490)): which code paths, settings and
+  docs `dashboard.lan_enabled` and `--lan` reach, and the one-minor
+  accept-and-warn window before deletion.
+- Which security boundaries exist only for LAN and can be relaxed, versus
+  the browser-threat boundaries ((491)) and the other-local-OS-user
+  protections ((492)) that stay.
+
+## Topic 4: zero-install built-in agent
+
+- One install yields the dashboard and a built-in agent ((494)): the
+  holder's `python3` dependency ported to Go, and what else a fresh machine
+  lacks today.
+- The built-in agent is the Pi standalone binary loading our extension in
+  isolated mode with no Node ((495)). Before a ticket settles it, verify Pi
+  standalone's distribution channel, binary size, license, redistribution
+  terms, and supported login flows (MAIN can run that investigation).
+
+## Topic 5: distribution and daemon ownership
+
+- The thin Tauri shell built now, in parallel ((493)=b): scope, what it
+  verifies (WKWebView on macOS, WebView2 on Windows; today only headless
+  Chromium is checked), and its packaging (zip first, installer as soon as
+  possible).
+- Who owns the daemon binary once an app ships one beside the shell (see
+  Open Questions).
+- Signing: SmartScreen for an unsigned Windows exe, Gatekeeper and
+  notarization on macOS; links `261109-research-windows-code-signing-signpath`.
 
 ## Outcome Ledger
 
@@ -214,16 +257,59 @@ name text changes. The only name-as-text keys are the first two rows.
 | Documentation | `ai-docs/manuals/ws-mcp.md:1012,1281-1282`, `ai-docs/manuals/codex-integration.md:24`, `CHANGELOG.md`, old plans | Mostly the marketplace/cache constants above; update only if those change. |
 
 ### Confirmed Decisions
-- Research the desktop shell now; its implementation keeps the agent-host
-  epic's order, after the browser dashboard is complete (user, (574) b).
+- ~~Research the desktop shell now; its implementation keeps the agent-host
+  epic's order, after the browser dashboard is complete (user, (574) b).~~
+  Superseded 2026-11-13 by (493)=b below.
 - Rename scope: the repository/project and the user-visible product name
-  become ws-ade (app and dashboard labels); the plugin ids `ws` and `wsflow`
+  change (app and dashboard labels); the plugin ids `ws` and `wsflow`
   stay, since changing them would break every downstream install
-  (user, (575) b).
+  (user, (575) b). The name is Werkschaft ((496) below).
+- (490) technical, owner ok 2026-11-13: drop LAN serving as a T1 change:
+  `dashboard.lan_enabled` and `--lan` are accepted but ignored with a
+  warning for one minor, then deleted.
+- (491) announced, owner ok 2026-11-13: every browser-threat boundary stays:
+  hostGuard, sameOrigin, Sec-Fetch checks, CSP, sandboxed iframes,
+  capability checks. Only boundaries that exist solely for LAN are relaxed.
+- (492)=a, owner 2026-11-13: the other-local-OS-user protections stay: the
+  endpoint token file at 0600, and the bearer on `/shutdown` and the proxy.
+- (493)=b, owner 2026-11-13: build a thin Tauri shell now, in parallel with
+  the browser dashboard, reversing agent-host (18)(19) and (574) b. Owner's
+  reasoning (verbatim): "자동 업데이트 없는 얇은 tauri 셸이 있으면 렌더링
+  검증도 할 수 있고, 그냥 사용자한테 패키지된 exe 하나를 던져서 사용하게
+  하기도 좀 수월하지 않을까 싶긴 한데요. (초반엔 zip 파일로 배포를 하는
+  한이 있더라도, 가능한 빨리 installer로 전환하는 게 목표긴 하지만요) 또
+  어차피 개밥 먹어도 사실 tauri shell app 업데이트보단 데몬 쪽 업데이트가
+  거의 절대 다수일 거라 제가 개밥 먹기도 좋지 않나? 싶은 측면이 있고요.
+  tauri 앱 자체는 사실 지금 시점에 거의 완성까지 만들어버릴 수 있지
+  않나요? 자동 업데이터도 사실상 데몬 실행 파일을 하나 옆에 깔아두고 ->
+  그걸 실행한다. 끝인 거 같은데."
+- (494)=a, owner 2026-11-13: full zero-install: one install yields the
+  dashboard and the built-in agent; the holder's `python3` dependency is
+  ported to Go.
+- (495)=a, owner 2026-11-13: the built-in agent is the bundled Pi standalone
+  binary loading our extension in isolated mode, with no Node; conditional
+  on verifying Pi standalone's distribution, size, license, redistribution
+  terms, and supported login flows.
+- (496) announced, owner ok 2026-11-13: the product name is Werkschaft,
+  superseding `ws-ade`.
 
 ### Proposals
 
 Non-authoritative; nothing here is decided.
+
+- **Thin shell scope (MAIN lead, 2026-11-13).** Attach to a running daemon,
+  or launch the daemon exe placed beside the shell; load
+  `http://127.0.0.1:<port>` directly, because a `tauri://` origin is refused
+  by the same-origin write routes; single instance; external links open in
+  the system browser; closing the window leaves the daemon running; the
+  shell does not update itself (daemon updates dominate, and the "updater"
+  is replacing the daemon exe beside the shell).
+- **Daemon ownership (EXEC lead, 2026-11-13).** Until self-update lands,
+  the plugin launcher's SHA256-pinned daemon stays the authority: the shell
+  attaches to whatever daemon is running and starts its beside-exe daemon
+  only when none is, and never replaces a running daemon. Revisit when the
+  app self-updates, because an app-driven daemon update can raise the minor
+  and lock out plugin sessions still on the previous one.
 
 - **Shell choice: Tauri 2.x, thin remote-URL shell.** The UI is already
   served over loopback HTTP and requires an `http` same-origin, so the shell
@@ -283,6 +369,17 @@ Non-authoritative; nothing here is decided.
   new harness-command setting are T0.
 
 ### Open Questions
+- Daemon binary ownership once an app ships one: today the plugin launcher
+  downloads it per plugin version and pins it by SHA256, and plugin sessions
+  share it. If the app updates the daemon independently, two install paths
+  compete, and a minor bump locks out plugin sessions on the previous minor.
+  Candidates: the app owns the daemon when present and the launcher uses it;
+  the launcher owns it and the app attaches; or the reverse. See Proposals.
+- Signing: a zip of an unsigned exe hits Windows SmartScreen; macOS
+  Gatekeeper needs right-click-open or notarization (Apple developer
+  account). See `261109-research-windows-code-signing-signpath`.
+- Pi standalone binary: distribution, size, license, redistribution terms,
+  login flows ((495) condition).
 - Does the Tauri notification plugin's `window.Notification` override
   carry `onclick` (focus window, open the approval card)? Needs a spike.
 - What is the narrowest capability that lets `http://localhost:<port>`
@@ -294,8 +391,8 @@ Non-authoritative; nothing here is decided.
 - In WKWebView, do the preview frames (sandboxed, opaque origin) and the
   `Sec-Fetch-Site` iframe bug (WebKit 256472) change the capability
   route's behavior? Needs a run against the shipped dashboard.
-- Python holder: require or bundle (see Proposals)? Needs a product call
-  on the "no prerequisites" promise.
+- ~~Python holder: require or bundle?~~ Settled by (494)=a: port the holder
+  to Go.
 - Is `codex` expected as a harness in the app? The daemon has only Claude
   and Pi backends today.
 - Who renames directories: only this repo's maintainer, or downstream
@@ -306,6 +403,8 @@ Non-authoritative; nothing here is decided.
   if Tauri's Rust requirement is a blocker.
 
 ### Rejected Alternatives
-- Starting the desktop shell implementation now ((574) a): the dashboard
-  still changes quickly, so a shell built now would be reworked.
+- ~~Starting the desktop shell implementation now ((574) a)~~: reinstated
+  for a thin shell by (493)=b, 2026-11-13.
+- Keeping LAN serving ((490)): remote access moves to a separate remote
+  daemon or a tunnel later.
 - Renaming the plugin ids ((575) c): a T2 break for every downstream install.

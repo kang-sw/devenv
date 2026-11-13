@@ -4,6 +4,7 @@ import { EventEmitter, getEventListeners } from "node:events";
 import { PassThrough } from "node:stream";
 import { spawn } from "node:child_process";
 import {
+  createDrainLedger,
   createMailboxWaiterSlot,
   createSubprocessWait,
   sessionMailboxWaitOptions,
@@ -335,4 +336,67 @@ describe("streaming mailbox subprocess", () => {
     await slot.done;
     assert.ok(children.every((child) => child.closed));
   });
+
+  test("a buffered arrival the drain already received does not wake; mail after the drain still does", async () => {
+    const { children, spawnChild } = subprocesses();
+    const m1 = { from: "alice", content: "one", sent_at: "2026-11-13T10:00:00Z" };
+    const m2 = { from: "bob", content: "two", sent_at: "2026-11-13T10:00:01Z" };
+    const m3 = { from: "carol", content: "three", sent_at: "2026-11-13T10:00:05Z" };
+    const line = (named: object[]): string => JSON.stringify({ timed_out: false, kinds: ["mail"], named, reply: [] }) + "\n";
+    let queued = [m1];
+    let drains = 0;
+    const admitted: string[][] = [];
+    let release!: () => void;
+    const drainStarted = new Promise<void>((resolve) => { release = resolve; });
+    const waiter = startMailboxWaiter({
+      runWait: createSubprocessWait(options, spawnChild),
+      drainMail: async () => {
+        drains += 1;
+        if (drains === 1) {
+          // m2 lands before recv runs: its line is buffered behind this wake.
+          queued.push(m2);
+          children[0]!.stdout.write(line([m2]));
+          release();
+          await tick();
+        }
+        const mail = queued;
+        queued = [];
+        return mail;
+      },
+      admit: (envelopes) => { admitted.push(envelopes.map((e) => e.content)); },
+    });
+    try {
+      await tick();
+      children[0]!.stdout.write(line([m1]));
+      await drainStarted;
+      for (let i = 0; i < 5; i++) await tick();
+      assert.deepEqual(admitted, [["one", "two"]]);
+      assert.equal(drains, 1, "the buffered m2 line must not wake another drain");
+      // Mail after the drain and before the re-arm reads it wakes promptly.
+      queued = [m3];
+      children[0]!.stdout.write(line([m3]));
+      for (let i = 0; i < 5; i++) await tick();
+      assert.equal(drains, 2);
+      assert.deepEqual(admitted, [["one", "two"], ["three"]]);
+      assert.equal(children.length, 1);
+    } finally {
+      waiter.stop();
+      await waiter.done;
+    }
+  });
+});
+
+test("the drain ledger skips the line that woke the drain and clears on mail the drain did not get", () => {
+  const m1 = { from: "alice", content: "one", sent_at: "2026-11-13T10:00:00Z" };
+  const again = { ...m1, from: "bob" }; // same second, same text, sent after the drain
+  const m3 = { from: "carol", content: "three", sent_at: "2026-11-13T10:00:05Z" };
+  const line = (named: object[]): string => JSON.stringify({ timed_out: false, kinds: ["mail"], named, reply: [] }) + "\n";
+  let ledger = createDrainLedger();
+  assert.equal(ledger.filter(line([m1])), line([m1]), "wakes the drain");
+  ledger.record([m1]);
+  assert.equal(ledger.filter(line([again])), line([again]), "an identical later message must still wake");
+  ledger = createDrainLedger();
+  ledger.record([m1]); // received without a line, e.g. before this child started
+  assert.equal(ledger.filter(line([m3])), line([m3]));
+  assert.equal(ledger.filter(line([m1])), line([m1]), "mail the drain did not get clears the ledger");
 });

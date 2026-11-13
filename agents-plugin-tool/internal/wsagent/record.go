@@ -28,8 +28,13 @@ type Record struct {
 	SchemaVersion int    `json:"schema_version"`
 	ReplyID       string `json:"reply_id"`
 	Profile       string `json:"profile"`
-	Backend       string `json:"backend"`
-	Root          string `json:"root"`
+	// ResolvedDefinition is the Pi worker's last launched profile, not a
+	// re-resolution of its name. It is the capability ceiling for children
+	// and the definition used when reattaching its still-running process.
+	// Older records snapshot on their next launch.
+	ResolvedDefinition *Profile `json:"resolved_definition,omitempty"`
+	Backend            string   `json:"backend"`
+	Root               string   `json:"root"`
 	// SessionID is the backend session the next process resumes; empty
 	// until the first process reported one.
 	SessionID string `json:"backend_session_id,omitempty"`
@@ -55,6 +60,10 @@ type Record struct {
 	Lead bool `json:"lead,omitempty"`
 	// PermissionMode is the permission mode the next process launches in.
 	PermissionMode string `json:"permission_mode,omitempty"`
+	// PluginIsolation selects the lead's plugin loadout across restarts.
+	PluginIsolation string `json:"plugin_isolation,omitempty"`
+	// PluginWarning records a bundled-plugin fallback warning, if any.
+	PluginWarning string `json:"plugin_warning,omitempty"`
 	// Cwd is the directory the session's process runs in when that is not
 	// Root: a session taken over from a terminal harness keeps the
 	// directory that harness ran in, since the harness resolves its
@@ -118,17 +127,19 @@ type Record struct {
 	// the first report and while a done turn is held for the children.
 	LastTurn *PendingReport `json:"last_turn,omitempty"`
 	// Worker recovery fields are additive; old writers fall back to interruption.
-	ReportID         string          `json:"report_id,omitempty"`
-	LastReportedTurn string          `json:"last_reported_turn,omitempty"`
-	Capability       string          `json:"capability_secret,omitempty"`
-	Sends            uint64          `json:"sends,omitempty"`
-	Drained          uint64          `json:"drained,omitempty"`
-	TurnMark         uint64          `json:"turn_mark,omitempty"`
-	TurnStartedAt    int64           `json:"turn_started_at,omitempty"`
-	TurnStartSeq     uint64          `json:"turn_start_seq,omitempty"`
-	Voided           uint64          `json:"voided,omitempty"`
-	HeldTurn         *TurnResult     `json:"held_turn,omitempty"`
-	Steered          []steeredReport `json:"steered_reports,omitempty"`
+	ReportID         string `json:"report_id,omitempty"`
+	LastReportedTurn string `json:"last_reported_turn,omitempty"`
+	Capability       string `json:"capability_secret,omitempty"`
+	Sends            uint64 `json:"sends,omitempty"`
+	Drained          uint64 `json:"drained,omitempty"`
+	TurnMark         uint64 `json:"turn_mark,omitempty"`
+	TurnStartedAt    int64  `json:"turn_started_at,omitempty"`
+	// ActiveMs is the accumulated duration of closed child turns.
+	ActiveMs     int64           `json:"active_ms,omitempty"`
+	TurnStartSeq uint64          `json:"turn_start_seq,omitempty"`
+	Voided       uint64          `json:"voided,omitempty"`
+	HeldTurn     *TurnResult     `json:"held_turn,omitempty"`
+	Steered      []steeredReport `json:"steered_reports,omitempty"`
 	// SteerMarks holds Send coverage by steer sequence. Keep this optional
 	// metadata top-level so an older Record writer preserves it as unknown.
 	SteerMarks     map[int]uint64 `json:"steer_marks,omitempty"`

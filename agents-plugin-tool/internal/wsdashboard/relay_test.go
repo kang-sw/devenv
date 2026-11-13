@@ -38,7 +38,7 @@ func TestTopicBodyImageRelayStaysNarrow(t *testing.T) {
 		`if (!href || typeof id !== "number"`,
 		`fetch(href, { credentials: "same-origin"`,
 		`/^image\/[a-z0-9.+-]+$/.test(type)`,
-		`f.contentWindow.postMessage({ wbDoc: "img", id: id, blob: b }, "*")`,
+		`postDoc(f, { wbDoc: "img", id: id, blob: b })`,
 	} {
 		if !strings.Contains(relay, want) {
 			t.Errorf("relayImage lacks %q:\n%s", want, relay)

@@ -23,7 +23,9 @@ import {
   createWatcher,
   EMPTY_DRAIN_BACKOFF_MS,
   formatBatch,
+  formatEnvelope,
   formatNotice,
+  LEVER_HOLD_MS,
   mailItems,
   mapWaitExit,
   nextBackoff,
@@ -2057,6 +2059,187 @@ describe('board messages during a compaction', () => {
   })
 })
 
+describe('board messages behind a requested compaction', () => {
+  /**
+   * A watcher bound to k1 with board submission on and its first wait armed;
+   * `lever` is what the leverPending edge reads, `continuation` the
+   * compaction continuation edge when given.
+   */
+  async function boardOn(continuation?: () => Promise<void>) {
+    const h = harness('direct')
+    h.board.on = true
+    const lever = { pending: false }
+    h.edges.leverPending = () => lever.pending
+    if (continuation) h.edges.continuation = continuation
+    const w = createWatcher(h.edges)
+    w.bind('k1')
+    await tick()
+    return { h, w, lever }
+  }
+
+  /** A turn that ends with `pick B` held, and a lever call when `lever.pending` reads true. */
+  async function heldTurnEnd(h: ReturnType<typeof harness>, w: ReturnType<typeof createWatcher>) {
+    h.turn.running = true
+    h.board.inbox.push('pick B')
+    await wake(h, 'board')
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+  }
+
+  const capSleep = (h: ReturnType<typeof harness>) => h.sleeps.find((x) => x.ms === LEVER_HOLD_MS)
+
+  test('a turn end whose turn requested a compaction holds the board release, the wait re-armed without the flag', async () => {
+    const { h, w, lever } = await boardOn()
+    lever.pending = true
+    await heldTurnEnd(h, w)
+    expect(h.board.drains).toEqual([])
+    expect(h.board.submitted).toEqual([])
+    expect(h.board.inbox).toEqual(['pick B'])
+    expect(h.waits.at(-1)!.board).toBe(false)
+    expect(capSleep(h)).toBeDefined()
+  })
+
+  test('the compaction start takes the held messages to its release after the continuation, and the cap never fires after it', async () => {
+    const cont = deferred<void>()
+    const { h, w, lever } = await boardOn(() => cont.promise)
+    lever.pending = true
+    await heldTurnEnd(h, w)
+    const cap = capSleep(h)!
+    w.compactStarted()
+    await tick()
+    // The start ended the cap wait without releasing anything.
+    expect(h.board.drains).toEqual([])
+    w.compactEnded()
+    await tick()
+    expect(h.board.drains).toEqual([])
+    cont.resolve()
+    await tick()
+    expect(h.board.submitted).toEqual([['pick B']])
+    // A late cap resolve releases nothing more.
+    cap.d.resolve()
+    await tick()
+    expect(h.board.drains).toEqual(['k1'])
+    expect(h.board.submitted).toEqual([['pick B']])
+  })
+
+  test('with the continue flag, the resume prompt\'s turn starts before the held message, which its turn end takes', async () => {
+    const cont = deferred<void>()
+    const { h, w, lever } = await boardOn(() => cont.promise)
+    lever.pending = true
+    await heldTurnEnd(h, w)
+    w.compactStarted()
+    w.compactEnded()
+    await tick()
+    // The resume prompt's turn starts as its submit settles.
+    h.turn.running = true
+    w.turnStarted()
+    cont.resolve()
+    await tick()
+    expect(h.board.submitted).toEqual([])
+    lever.pending = false
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['pick B']])
+  })
+
+  test('the cap releases the held messages when no compaction started, and the wait gets its flag back', async () => {
+    const { h, w, lever } = await boardOn()
+    lever.pending = true
+    await heldTurnEnd(h, w)
+    expect(h.board.submitted).toEqual([])
+    capSleep(h)!.d.resolve()
+    await tick()
+    expect(h.board.drains).toEqual(['k1'])
+    expect(h.board.submitted).toEqual([['pick B']])
+    expect(h.waits.at(-1)!.board).toBe(true)
+  })
+
+  test('at the cap with a turn running, the messages stay held until that turn\'s end', async () => {
+    const { h, w, lever } = await boardOn()
+    lever.pending = true
+    await heldTurnEnd(h, w)
+    h.turn.running = true
+    capSleep(h)!.d.resolve()
+    await tick()
+    expect(h.board.drains).toEqual([])
+    lever.pending = false
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['pick B']])
+  })
+
+  test('a board wake in the settle gap is held until the compaction or the cap', async () => {
+    const { h, w, lever } = await boardOn()
+    lever.pending = true
+    h.turn.running = true
+    w.turnCompleted()
+    h.turn.running = false
+    await tick()
+    h.board.inbox.push('late one')
+    await wake(h, 'board')
+    expect(h.board.drains).toEqual([])
+    expect(h.board.submitted).toEqual([])
+    expect(h.waits.at(-1)!.board).toBe(false)
+    capSleep(h)!.d.resolve()
+    await tick()
+    expect(h.board.submitted).toEqual([['late one']])
+  })
+
+  test('a turn end with no lever call still owed (none made, an aborted lever turn, or one a landing dropped) releases at once', async () => {
+    const { h, w } = await boardOn()
+    await heldTurnEnd(h, w)
+    expect(h.board.submitted).toEqual([['pick B']])
+    expect(capSleep(h)).toBeUndefined()
+  })
+
+  test('mail queued during the lever turn is still submitted at its end', async () => {
+    const { h, w, lever } = await boardOn()
+    lever.pending = true
+    h.turn.running = true
+    h.board.inbox.push('pick B')
+    await wake(h, 'both', { kind: 'mail', mail: mailA })
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.order).toEqual(['mail'])
+    expect(h.board.submitted).toEqual([])
+    capSleep(h)!.d.resolve()
+    await tick()
+    expect(h.order).toEqual(['mail', 'board'])
+  })
+
+  test('the cap wait never blocks the board chain: the next turn end releases while it is still out', async () => {
+    const { h, w, lever } = await boardOn()
+    // The cap's sleep never settles, not even on its abort.
+    const sleep = h.edges.sleep
+    h.edges.sleep = (ms, signal) => (ms === LEVER_HOLD_MS ? new Promise<void>(() => {}) : sleep(ms, signal))
+    lever.pending = true
+    await heldTurnEnd(h, w)
+    expect(h.board.submitted).toEqual([])
+    lever.pending = false
+    h.board.inbox.push('next')
+    h.turn.running = true
+    w.turnStarted()
+    h.turn.running = false
+    w.turnCompleted()
+    await tick()
+    expect(h.board.submitted).toEqual([['pick B', 'next']])
+  })
+
+  test('a stop lifts the hold: a later cap releases nothing', async () => {
+    const { h, w, lever } = await boardOn()
+    lever.pending = true
+    await heldTurnEnd(h, w)
+    w.stop('session.end clear')
+    capSleep(h)!.d.resolve()
+    await tick()
+    expect(h.board.drains).toEqual([])
+  })
+})
+
 /** Resolve the latest wait as an interrupt wake, with `also` beside it and `drained` as the mail drain's answer. */
 async function interruptWake(h: ReturnType<typeof harness>, also?: WakeKind, drained?: DrainResult) {
   if (drained) h.drainQueue.push(drained)
@@ -2589,6 +2772,19 @@ describe('pure helpers', () => {
       { raw: 'null' },
     ])
     expect(classifyRecv({ result: undefined, text: 'garbled' } as never)).toEqual({ kind: 'mail', mail: [{ raw: 'garbled' }] })
+  })
+
+  test('system labels render consistently without becoming reply addresses', () => {
+    const mail = { label: 'pi:childone', content: 'Reply with pi.send(id: childone), not mailbox.send.\nall green', sent_at: '2026-01-02T03:04:05Z' }
+    expect(parseRecvText(JSON.stringify([mail]))).toEqual([mail])
+    // Same literal as the Go and Pi adapter suites.
+    expect(formatEnvelope(mail)).toBe('mail from pi:childone (2026-01-02T03:04:05Z):\nReply with pi.send(id: childone), not mailbox.send.\nall green')
+    expect(mailItems([mail])).toEqual([{ from: 'pi:childone', body: mail.content }])
+    expect(batchLine('ws mailbox', [mail])).toBe('[ws mailbox] 1 message from pi:childone')
+    expect(formatEnvelope({ ...mail, from: 'peer@repo' })).toContain('mail from peer@repo (')
+    expect(formatEnvelope({ ...mail, reply_to: 'id:abc123' })).toContain('mail from id:abc123 (')
+    expect(formatEnvelope({ content: 'old shape' })).toBe('mail from unknown:\nold shape')
+    expect(parseRecvText('[{"content":"bad label","label":5}]')).toEqual([{ raw: '{"content":"bad label","label":5}' }])
   })
 
   test('raw items and odd envelope fields format without throwing', () => {

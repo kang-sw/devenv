@@ -1,5 +1,7 @@
 ---
 title: "whiteboard.update: one malformed command throws away a large batch"
+related:
+  261113-feat-ws-whiteboard-topic-panels-and-log: "append proposal superseded; folder transaction and entry model are now the baseline"
 ---
 
 # whiteboard.update: one malformed command throws away a large batch
@@ -26,8 +28,8 @@ lead's context. In one session three refusals came from three patterns:
   not the full command reference.
 - Apply-what-validates or per-topic atomicity, or keep the refused batch's
   bodies server-side so a retry can reference them instead of resending.
-- `wb:edit` on an empty body with no match: allow an append form (e.g.
-  `wb:append`) or treat an empty-body edit as setting the body.
+- Improve the correction path for `wb:edit` on an empty body. The earlier
+  append-form proposal is superseded by panels/logs; `wb:append` stays refused.
 - `wb:answer` accepts a note-only value for a policy item (answered with a
   note, no option chosen), matching the answer block's `^<note>` form.
 
@@ -55,10 +57,22 @@ lead's context. In one session three refusals came from three patterns:
   withdraws it. Compatibility: a new item status in the whiteboard store is
   a store change; settle its tier at promotion.
 
+## Panels/log Handoff (2026-11-13)
+
+`261113-feat-ws-whiteboard-topic-panels-and-log` supersedes only the proposed
+`wb:append`, not this ticket's partial-application, failure-echo, or note-only
+answer work. Current content still uses `wb:body` and exact-match `wb:edit`;
+substantial accumulation uses immutable panel versions and agent log lines.
+The remaining mutation work must use the recoverable folder transaction and
+emit events only for accepted changes. Note-only guidance must define the
+new status/value mapping when that feature lands; it must not invent an option
+letter. The prerequisite deliberately retains whole-batch atomicity until this
+ticket implements the owner's per-command decision.
+
 ## Candidate Design (lead, for discussion)
 
 - Atomic unit: a `wb:topic` group (top-level commands each on their own),
-  so an answer-then-close or edit-then-recap sequence inside one topic never
+  so an answer-then-close or edit-then-log sequence inside one topic never
   half-applies; one change stamp per call stays.
 - Failure echo: a skeleton tree with the failed command's tag, attributes,
   line, and error, without echoing large content the caller already holds:
@@ -67,9 +81,9 @@ lead's context. In one session three refusals came from three patterns:
   candidate's line number and a one-line context; add heading-scoped edits
   (e.g. `wb:section heading="..." op="replace|append|before|after"`) so the
   common "add or replace a section" needs no substring anchor.
-- Pattern 2: `wb:append` (creates the body when there is none); a
-  `wb:edit` against an empty body applies `wb:new` as the body, since there
-  is nothing to lose.
+- Pattern 2: suggest `wb:body` when current content is empty. No
+  `wb:append` command; any change to empty-body `wb:edit` semantics still
+  requires owner discussion.
 - Pattern 3 options: (a) a note-only answer is recorded as answered with no
   option chosen; (b) a new status meaning "user commented, lead's move"
   that leaves the item off the user's waiting list until the lead re-asks,

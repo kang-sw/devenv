@@ -41,17 +41,20 @@ var cls = {}, attrs = {};
 var root = { classList: { contains: function (c) { return !!cls[c]; }, toggle: function (c, on) { cls[c] = !!on; } }, hasAttribute: function (a) { return !!attrs[a]; } };
 var memoCalls = [], memoPad = { open: function (on, wide) { memoCalls.push([on, wide]); } };
 var railEl = {}, railBtn = { setAttribute: function () {} }, WsRail = {};
+var framed = false;
 var RAIL_WIDE = { matches: false }, RAIL_XWIDE = { matches: false };
-var frameWin = {}, otherWin = {}, frameEl = { tag: "iframe.doc-frame" };
+var frameWin = {}, otherWin = {}, frameEl = { tag: "iframe.doc-frame", getAttribute: function () { return "topic:body"; } };
 function docFrame(win) { return win === frameWin ? frameEl : undefined; }
 var handler = null;
 var window = { addEventListener: function (t, fn) { if (t === "message") handler = fn; } };
 `+src+listener+`
-function send(src, data) { handler({ source: src, data: data }); }
+function send(src, data) { if (data.docKey === undefined) data.docKey = "topic:body"; handler({ source: src, data: data }); }
 send(frameWin, { wbDoc: "rail" });
 check("a doc frame's key opens the rail below 1600px", !!cls["rail-open"], true);
 send(frameWin, { wbDoc: "rail" });
 check("and closes it again", !!cls["rail-open"], false);
+send(frameWin, { wbDoc: "rail", docKey: "entry:e7" });
+check("a matching window with the wrong document identity is ignored", !!cls["rail-open"], false);
 send(otherWin, { wbDoc: "rail" });
 check("a window that is no doc frame is ignored", !!cls["rail-open"], false);
 RAIL_WIDE.matches = true;

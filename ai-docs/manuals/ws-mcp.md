@@ -54,8 +54,14 @@ bundled conventions rather than repository-local source paths.
 Each session key is a directory, `<cache root>/sessions/<key>/`, holding
 `key.json` (the identity - root, scope, parent - plus the session-scope
 config overrides, the child note, and the once-only flags), `agenda.json`,
-`todos.json`, and `whiteboard.json`. An absent part file is that part
-empty. A write replaces only the part files it changes, each atomically, and
+and `todos.json`. A pre-0.50 `whiteboard.json` remains an immutable rollback
+snapshot. Whiteboards now live under the project's
+`ai-docs/whiteboards/<reply-id>/`: versioned session `meta.json`, opaque topic
+folders holding `meta.json`, immutable panel versions, and append-only
+`log.jsonl`, with a derived `index.html`. The first board open (queries and
+dashboard reads included) converts the old snapshot once under the folder
+lock. New writes never update either old board representation, and key expiry
+does not delete authoritative topic folders. An absent agenda/todo part is empty. A write replaces only the part files it changes, each atomically, and
 the lookup every keyed call makes reads `key.json` alone, except
 `dashboard.intake`'s: intake and the live snapshot writer's activity check
 keep each key's identity (root, scope, parent, written only at mint) in
@@ -73,9 +79,11 @@ older than 30 days.
 
 The older layout, one `<cache root>/keys/<key>.json` per key, is still read:
 a key with no `key.json` is served whole from its legacy file, and the
-session's first write moves it into `sessions/<key>/` and deletes the legacy
-file. Reads never move it, and no pass moves the rest; an unwritten legacy
-file ages out through the same prune.
+session's first write moves its session metadata into `sessions/<key>/`.
+A board-bearing legacy file is retained byte-for-byte, and its original board
+is copied into split `whiteboard.json` for rollback; boardless legacy files
+are deleted. Reads never migrate session metadata, and no pass moves the rest;
+an unwritten legacy file ages out through the same prune.
 
 Restart every ws process after updating ws, as an install update already
 expects: the session MCP servers (a host restart or MCP reconnect) and the
@@ -319,7 +327,7 @@ cached 2 minutes); an answer with a size still unmeasured says `sizing`, and
 rules below and holds one message: a line in the page's language asking the
 session to clean up unused worktrees, then the pool as text, cut at 48 KiB
 with a `... N more worktrees` line (singular for one). The dashboard never
-removes or releases a worktree itself.
+removes or releases a pooled worktree itself.
 
 Every session page carries the session rail (`internal/wsdashboard/rail.go`,
 `pageview_rail.go`): the listed sessions grouped by repository (or plain
@@ -337,6 +345,17 @@ for a newly shown repository alone, and on `POST /rail/refresh` (own Origin;
 409 with no streaming page). Change counts come from the newest session
 snapshot in the worktree; the rail never reads a working tree. Drafts,
 stars, and collapsed workspaces are browser-local (`assets/rail.js`).
+A linked worktree row that no pool root holds (the source's pools, the
+default `<root>/../.ws-worktrees/<name>`, the legacy `<root>/.ws-worktrees`)
+offers a delete to a browser on this machine (`railworktreedelete.go`):
+`POST /rail/worktrees/delete/preview` answers the check (changes, a detached
+HEAD's unreached commits, initialized submodules, lock, the sessions and
+terminals in it, whether force is needed, and a token of that state); `POST
+/rail/worktrees/delete` checks again and answers 409 with the fresh check
+when it is refused (primary, pooled, missing, locked, a live session or
+terminal), needs force the submit did not carry, or was forced on a stale
+token; else it runs `git worktree remove [--force]` from the primary and
+keeps the branch. A viewer elsewhere gets 404.
 Ended sessions fold apart under each worktree and stay listed as long as
 the index holds them (their registry directory and session record exist),
 past the index page's 24-hour window: on a daemon that hosts lead sessions
@@ -578,14 +597,19 @@ restart a wait on a conversation that settled before it answers at once.
 `Runner.Watch` reports each change of a conversation with a parent.
 The built-in `pi-worker` profile is Pi's coding tools plus ws's
 `git.status`, `git.diff`, `git.log`, `git.merge_base`, `git.commit`, and the
-six `pi.*` tools, with no instruction file. A spawn records its `tier`
+six `pi.*` tools, with no instruction file. The built-in `pi-mini-lead`
+adds `tickets.query/acquire/release/close/move/verify/checklist`, read-only
+`note.query`, `playbook.read`, `playbook.render`, `path.generate`, and
+`route.resolve_implement`. It keeps a delegate key, not lead authority, and
+adds no note, whiteboard, or tracker writes. A spawn records its `tier`
 (`SpawnSpec.Tier`, `Record.tier`; an unknown name is refused).
 
 The `pi.*` tools (`internal/mcp/pi_tools.go`, lead-only) put this on a
-session: `pi.spawn {prompt, tier, cwd?, label?}` (model and effort from the
+session: `pi.spawn {prompt, tier, profile?, cwd?, label?}` (model and effort from the
 tier's entry in the `pi` harness bucket of `agents.tier`, which only the
 user's `config.tune` sets; an unset tier is refused with that key named;
-`cwd` relative to the session's root), `pi.send` (a running child's native
+`cwd` relative to the session's root; `profile` names any resolvable non-lead
+Pi `agent.profile.<name>`, default `pi-worker`), `pi.send` (a running child's native
 Pi steer at the next tool boundary; with no turn running, a new turn at once;
 a closed child resumes on the same session file, keeping its id, cwd, model,
 effort, and label; a missing session file is refused), `pi.list` (the caller's
@@ -593,8 +617,10 @@ own children), `pi.stop` (ends the process and closes its descendants; the
 record stays resumable by `pi.send`), `pi.transcript`, and
 `pi.wait` (default 300 s, at most 1800 s, for the turn after the last
 send). The daemon mails each settled turn to the parent lead's reply-id
-queue with no sender (`mailbox.recv` shows `system`) and wakes the mailbox
-waits; a steered message belongs to the turn that takes it, whose completion
+queue with the display-only label `pi:<subagent id>` (no reply address) and
+wakes the mailbox waits; the first body line directs replies through `pi.send`,
+not `mailbox.send`. For other senderless system mail without a label,
+`mailbox.recv` still shows `system`. For Pi completion reports, a steered message belongs to the turn that takes it, whose completion
 mail covers it without an extra turn. A steer refused or not taken before
 the turn ends is cleared from Pi's queue and sent as the next turn instead.
 The stop itself mails nothing; a turn started by a later `pi.send` reports
@@ -658,6 +684,18 @@ owns the whole tree:
   child's tier resolves in the `pi` bucket alone and may not rank above the
   holder's own (`small` < `medium` < `large` < `xlarge`); a holder with no recorded tier
   is refused.
+- **Profiles.** An omitted `profile` always means `pi-worker`, even for a
+  mini-lead parent. A non-lead parent's child must be a subset of its launched
+  resolved `ws_tools`, `tools`, and `mcp_servers` (including each server's
+  definition); an excess is refused naming both profiles and the tools.
+  Overrides are honored, not ranked by profile name. Each Pi process launch
+  persists the exact checked definition on its record, uses that same copy
+  to launch, and checks again on restart against its parent's launched copy.
+  Widening a parent's config does not widen an already-running parent's
+  ceiling. A still-running process reattaches with its saved definition;
+  older records without one cannot spawn children while reattached, until an
+  actual process launch resolves and snapshots their definition. Lead parents
+  have no subset ceiling.
 - **Reports.** A child's settled turn waits in its record
   (`pending_reports`) until the runner hands it to the parent. A running
   parent turn gets it as a Pi `steer`. Otherwise it is kept in the parent's
@@ -1202,9 +1240,13 @@ starts a daemon.
 
 Unavailability is explicit: stderr includes "dashboard daemon not reachable"
 and the underlying cause. MCP requests receive `-32000` with their original
-IDs while recovery retries with bounded attempts/backoff; no tool side effect
-is replayed. One-shot CLI commands return nonzero without replaying a command
-whose outcome may be unknown. Codex Stop retains its fail-open exit 0.
+IDs when a sent request's outcome is unknown; no tool side effect is replayed.
+Requests not yet sent wait up to 75 s for the daemon, re-reading its endpoint
+about every 3 s; exhaustion adds `(waited 75s for the dashboard daemon)` to
+the existing error. This includes MCP `initialize`, `tools/list`, and
+`tools/call`, and one-shot CLI forwarding before its command-carrying hello
+is sent. A failure after sending that hello or an MCP request is not retried.
+Codex Stop retains its fail-open exit 0.
 
 Reconnect: when the connection ends while the client is still attached (the
 daemon was replaced or died), the proxy connects again (giving a successor
@@ -1215,12 +1257,17 @@ answer, re-sends `notifications/initialized`, and answers every request that
 was in flight with a JSON-RPC error (`-32000`, "ws-mcp daemon connection was
 replaced"); the client never sees the server go away. Reconnecting is
 paced: a connection the daemon closes within 2 s counts as a quick close;
-retries back off by 0.5 s × the count, capped at 5 s. Three quick closes,
-failed starts, refused hellos, and reconnect failures never switch to a
-child server. In-flight calls fail before waiting for recovery, and calls
-arriving during the gap fail immediately. A hosted server for a reconnected session re-registers that
-session's mailbox presence on its first keyed call and keeps the owner
-pointer and the `WS_MAILBOX_AUTO` stem its predecessor published, provided
+retries wait at least 3 s, rising by 0.5 s × the count to a 5 s cap. Three
+quick closes, failed starts, refused hellos, and reconnect failures never
+switch to a child server. In-flight calls fail before waiting for recovery;
+calls not yet sent wait within the 75 s budget instead. The stdio proxy stays
+alive even after a `tools/list` wait expires, so later requests can use the
+successor. Pi's runner-generated ws MCP registration allows 1860 s per request
+to cover a maximum forwarded Pi wait with transport margin; it also exceeds
+the launcher's 75 s recovery budget, which Pi's default 60 s timeout would
+cut off. A hosted server for a reconnected session re-registers that session's
+mailbox presence on its first keyed call and keeps the owner pointer and the
+`WS_MAILBOX_AUTO` stem its predecessor published, provided
 that record is still live (its PID alive and `last_seen` within the ten-minute
 liveness threshold); a stale record under a reused PID is replaced whole, and
 among several live auto records the first name in order is the one kept.
@@ -1311,7 +1358,7 @@ Current launcher inputs:
 | `WS_MCP_BOOTSTRAP_URL` | Download a prebuilt binary when no runtime binary exists. |
 | `WS_MCP_BOOTSTRAP_SHA256` | Optional SHA-256 checksum for `WS_MCP_BOOTSTRAP_URL`. |
 | `WS_MCP_RELEASE_REPOSITORY` | Override the GitHub release repository from `runtime.json`. |
-| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.49.1`. |
+| `WS_MCP_RELEASE_TAG` | Override the release tag from `runtime.json`, for example `v0.50.0`. |
 | `WS_MCP_RELEASE_BASE_URL` | Override the full release asset base URL; useful for local file or HTTP smoke tests. |
 | `WS_MCP_LAUNCHER_DEBUG` | Print launcher diagnostics to stderr when set to `1`. |
 | `WS_MCP_LAUNCHER_DIRECT` | Obsolete; ignored. It never enables executable fallback. |
@@ -1370,7 +1417,7 @@ The helper updates plugin manifests, runtime contracts, Go runtime development
 defaults, release workflow references, build script defaults, selected
 documentation references, and the `agents-plugin-pi/` mirrors (`runtime.json`,
 `bin/ws-mcp-launcher.py`, `rsrc/`, resynced byte-for-byte from `agents-plugin/`,
-plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.49.1-dev` satisfy the
+plus both `ws-pi-bridge` `package.json` versions). Development binaries such as `0.50.0-dev` satisfy the
 plugin version the helper just set; older or newer minor releases are stale. The
 concrete range lives in `runtime.json.required_mcp` — read it there rather than
 restating a version here, which froze at `0.29.2` for seven minor releases
@@ -1524,7 +1571,7 @@ Level 2 validates local release assets:
 
 ```bash
 cd agents-plugin-tool
-scripts/build-release-assets.sh 0.49.1-dev
+scripts/build-release-assets.sh 0.50.0-dev
 python3 ../agents-plugin/bin/ws-mcp-launcher.py version
 cd dist
 shasum -a 256 -c SHA256SUMS

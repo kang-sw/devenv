@@ -97,7 +97,7 @@ func TestSameUpdateTopicsOrderByBumpReason(t *testing.T) {
 		addXML(ClassPolicy, "assumed", "s", "x", "y")+
 		`<wb:answer id="5" value="a" assumed="true">fine</wb:answer>`+
 		topicXML("doc", "a body")+
-		recapXML("recapped", "a recap"))
+		topicXML("recapped", "another body"))
 	// mixed ranks by its body over its answer; an item asked and settled in
 	// the same update asks nothing, so assumed ranks with the answered one.
 	wantTopicOrder(t, st, "policy", "ack", "mixed", "doc", "recapped", "answered", "assumed")
@@ -194,48 +194,29 @@ func TestBodyOpenOnTheFullPageUnlessClosed(t *testing.T) {
 	}
 }
 
-// The embed shows a body open only when it changed since the previous embed.
-func TestEmbedShowsABodyOpenOnlyWhenChanged(t *testing.T) {
+// Snapshot embeds omit current-content payloads regardless of freshness.
+// Full pages still carry them, independent of the previous embed mark.
+func TestEmbedOmitsCurrentContent(t *testing.T) {
 	st := &State{}
-	mustApply(t, st, addXML(ClassTechnical, "a", "x")+topicXML("a", "body a")+topicXML("b", "body b"))
-	// The first embed: both bodies are new.
+	mustApply(t, st, topicXML("a", "body a")+topicXML("b", "body b"))
 	for _, name := range []string{"a", "b"} {
-		if tv := topicView(t, st, LayoutEmbed, name); !tv.DocNew || !tv.DocOpen(true) || tv.Quiet {
-			t.Fatalf("%s before any embed = %+v", name, tv)
+		tv := topicView(t, st, LayoutEmbed, name)
+		if tv.Doc != "" || tv.DocNew || tv.DocOpen(true) {
+			t.Fatalf("embed carries current content: %+v", tv)
 		}
 	}
 	st.LastEmbedSeq = st.Seq
-	// Change only b's body.
-	mustApply(t, st, `<wb:topic name="b"><wb:edit><wb:old>body b</wb:old><wb:new>body b2</wb:new></wb:edit></wb:topic>`)
-	a, b := topicView(t, st, LayoutEmbed, "a"), topicView(t, st, LayoutEmbed, "b")
-	if a.DocNew || a.DocOpen(true) || !b.DocNew || !b.DocOpen(true) {
-		t.Fatalf("embed a = %+v b = %+v", a, b)
-	}
-	// The full page is unaffected by the embed's freshness.
-	if a.Doc != "body a" || b.Doc != "body b2" {
-		t.Fatalf("bodies = %q %q", a.Doc, b.Doc)
-	}
-	if full := topicView(t, st, LayoutFull, "a"); full.DocNew || !full.DocOpen(false) {
-		t.Fatalf("full page a = %+v", full)
-	}
-	if bq := topicView(t, st, LayoutEmbed, "b"); bq.Quiet {
-		t.Fatalf("a topic whose body changed is not quiet in the embed: %+v", bq)
-	}
-	// The same body again is no change, so it stays closed on the embed.
-	st.LastEmbedSeq = st.Seq
 	mustApply(t, st, topicXML("b", "body b2"))
-	if tv := topicView(t, st, LayoutEmbed, "b"); tv.DocNew || tv.DocOpen(true) || !tv.Quiet {
-		t.Fatalf("an unchanged body on the embed = %+v", tv)
+	if full := topicView(t, st, LayoutFull, "b"); full.Doc != "body b2" || !full.DocOpen(false) {
+		t.Fatalf("full page current content lost: %+v", full)
 	}
-	// A closed topic never opens its body, changed or not.
-	mustApply(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic>`)
-	if tv := topicView(t, st, LayoutEmbed, "a"); tv.DocOpen(true) || !tv.Closed {
-		t.Fatalf("closed topic on the embed = %+v", tv)
+	if embed := topicView(t, st, LayoutEmbed, "b"); embed.Doc != "" || embed.DocNew {
+		t.Fatalf("fresh current content leaked into embed: %+v", embed)
 	}
 }
 
 // A body's change marks go stale (dimmed) once an item of its topic changes
-// after the body's latest edit; a recap change does not count, and the next
+// after the body's latest edit; a log entry does not count, and the next
 // body edit makes them fresh again.
 func TestDocStaleFollowsItemChangesAfterTheBodyEdit(t *testing.T) {
 	stale := func(st *State, name string) bool { return topicView(t, st, LayoutFull, name).DocStale }
@@ -246,9 +227,9 @@ func TestDocStaleFollowsItemChangesAfterTheBodyEdit(t *testing.T) {
 	if stale(st, "t") {
 		t.Fatal("a body edit with no item change after it is fresh")
 	}
-	mustApply(t, st, `<wb:topic name="t"><wb:recap>a recap</wb:recap></wb:topic>`)
+	mustApply(t, st, `<wb:topic name="t"><wb:log>a log line</wb:log></wb:topic>`)
 	if stale(st, "t") {
-		t.Fatal("a recap change does not stale the marks")
+		t.Fatal("a log entry does not stale the marks")
 	}
 	mustApply(t, st, addXML(ClassTechnical, "other", "z"))
 	if stale(st, "t") {

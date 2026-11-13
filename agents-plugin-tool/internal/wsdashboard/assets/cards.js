@@ -3,7 +3,8 @@
   // the board column, among the board's topics. The framework owns what
   // every card kind shares: the header's pin, fold, maximize, and close
   // buttons, the body's base height and its drag handle, the maximize sheet
-  // with Escape, where a card stands in the board flow, and the record of
+  // with Escape (which also draws a topic or a topic's panel large), where
+  // a card stands in the board flow, and the record of
   // all of that in browser storage. A kind supplies the header's content,
   // its own header actions, the body, the folded content, and its
   // lifecycle, and never places or sizes a card itself.
@@ -60,15 +61,16 @@
   // Element.moveBefore even that move keeps the card's state; a move between
   // the board and the pinned column takes it too.
   var doc = document;
-  var BASE = 260, MIN = 72, STEP = 24, PINW_MIN = 280;
+  var BASE = 260, MIN = 72, STEP = 24, PINW_MIN = 280, BOARDW_MIN = 400;
   // A press drags past SLOP px; a touch drags after holding HOLD ms (the
   // session rail's drag thresholds), and EDGE px from a list's edge scrolls it.
   var SLOP = 5, HOLD = 380, EDGE = 28;
   var kinds = {}, cards = [], topics = {}, board = null, opt = null, maxed = null, scrim = null, seq = 0;
   // pins is the pin list: the board region's first node, or the pinned
-  // column's list while the page shows that column (colOn). pinw is the
-  // column's width as the user dragged it (0: the stylesheet's).
-  var pins = null, col = null, colOn = false, pinw = 0, zone = null, count = null;
+  // column's list while the page shows that column (colOn). boardw is the
+  // board's width beside the column as the user dragged it (0: the
+  // stylesheet's).
+  var pins = null, col = null, colOn = false, boardw = 0, zone = null;
 
   function licon(name) { return '<svg class="li" aria-hidden="true"><use href="#l-' + name + '"/></svg>'; }
   function mk(tag, cls, text) {
@@ -268,20 +270,21 @@
   // there are, and tells it when that changes.
   function relayout() {
     var n = pinned().length, on = !!(col && opt && opt.shows && opt.shows(n));
-    if (count) count.textContent = String(n);
     if (on === colOn) return;
     colOn = on;
     if (opt.layout) opt.layout(on);
   }
   // decorate gives every topic on the board a pin button in its title bar,
-  // before the note pen, pressed while the topic is pinned. A board update
+  // before the note pen, pressed while the topic is pinned, and the
+  // maximize button and its back button right of the pin. A board update
   // brings a changed topic's bar anew (a new section, or the old one with
-  // the new bar's content), so this runs after every settle.
+  // the new bar's content), so this runs after every settle, and draws a
+  // large topic or panel large again on the node that now stands for it.
   function decorate() {
     [board, colOn ? pins : null].forEach(function (box) {
       if (!box) return;
       Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (sec) {
-        var bar = child(sec, "tbar");
+        var head = child(sec, "tophead"), bar = head && child(head, "tbar");
         if (!bar) return;
         var r = topics[sec.getAttribute("data-topic")], on = !!(r && r.pinned && r.el === sec);
         var b = child(bar, "tpin");
@@ -289,10 +292,15 @@
           b = ibtn("tpin", "pin", wsT("js.card.pin"));
           bar.insertBefore(b, child(bar, "tnote-toggle"));
         }
+        if (!child(bar, "d-max")) {
+          bar.insertBefore(ibtn("d-max", "maximize-2", wsT("js.card.max")), b.nextSibling);
+          bar.insertBefore(ibtn("d-min", "minimize-2", wsT("js.card.back")), b.nextSibling.nextSibling);
+        }
         b.setAttribute("aria-pressed", String(on));
         if (on) sec.setAttribute("data-pinned", ""); else sec.removeAttribute("data-pinned");
       });
     });
+    if (maxed && !(maxed instanceof Card)) follow(maxed);
   }
   // leaveSlot marks the place of a topic that leaves a fetched closed page
   // (dashboard.js loadClosed) for the pin list or the board: the page's
@@ -324,17 +332,19 @@
   }
 
   // --- storage ----------------------------------------------------------------
-  // The record is {cards, topics, w}: the cards' view state, the topics
-  // pinned or moved by hand, and the pinned column's width. A record from
-  // before topics joined is the cards' list alone.
+  // The record is {cards, topics, bw}: the cards' view state, the topics
+  // pinned or moved by hand, and the board's width beside the pinned
+  // column. A record from before topics joined is the cards' list alone; a
+  // record's w (the column's own width, before the column filled the
+  // window) is dropped.
   function persist() {
     if (!opt) return;
     var ts = Object.keys(topics).map(function (k) { return topics[k]; }).filter(function (r) { return r.pinned || r.at; }).map(function (r) {
       return { n: r.name, p: r.pinned, a: r.at, b: r.bar };
     });
-    opt.save(opt.key, cards.length || ts.length || pinw ? JSON.stringify({ cards: cards.map(function (c) {
+    opt.save(opt.key, cards.length || ts.length || boardw ? JSON.stringify({ cards: cards.map(function (c) {
       return { id: c.id, kind: c.kind, pinned: c.pinned, at: c.at, fold: c.folded, h: c.h, data: c.data };
-    }), topics: ts, w: pinw }) : null);
+    }), topics: ts, bw: boardw }) : null);
   }
   function stored() {
     var v = null;
@@ -344,7 +354,7 @@
     return {
       cards: (Array.isArray(v.cards) ? v.cards : []).filter(function (r) { return r && typeof r.kind === "string" && kinds[r.kind]; }),
       topics: (Array.isArray(v.topics) ? v.topics : []).filter(function (r) { return r && typeof r.n === "string" && (+r.p || +r.a); }),
-      w: +v.w || 0
+      bw: +v.bw || 0
     };
   }
 
@@ -520,17 +530,25 @@
   // A maximized card is the same node, drawn fixed over both columns (the
   // stylesheet's [data-max] rules) with a scrim behind it; its place in the
   // board keeps its height meanwhile. Nothing is moved, so a frame or a
-  // video keeps running through maximize and back.
+  // video keeps running through maximize and back. One thing is large at a
+  // time: a card, or a board node (sheet: a topic, or a topic's panel).
   function maximize(c) {
     if (maxed === c) return;
     if (maxed) {
-      maxed.el.removeAttribute("data-max");
-      maxed.el.style.height = "";
-      scrim.hidden = true;
       var was = maxed;
       maxed = null;
-      was.sized();
-      if (was.maxBtn.isConnected) was.maxBtn.focus();
+      scrim.hidden = true;
+      if (was instanceof Card) {
+        was.el.removeAttribute("data-max");
+        was.el.style.height = "";
+        was.sized();
+        if (was.maxBtn.isConnected) was.maxBtn.focus();
+      } else {
+        // The focus comes back without scrolling: the node's place is where
+        // it was left.
+        var back = shrink(was);
+        if (back) back.focus({ preventScroll: true });
+      }
     }
     if (!c) return;
     if (!scrim) {
@@ -538,12 +556,98 @@
       scrim.addEventListener("click", function () { maximize(null); });
       doc.body.appendChild(scrim);
     }
-    c.el.style.height = c.el.getBoundingClientRect().height + "px";
-    c.el.setAttribute("data-max", "");
     scrim.hidden = false;
     maxed = c;
+    if (!(c instanceof Card)) {
+      grow(c);
+      if (!c.el) { maximize(null); return; }
+      var m = sheetBtn(c.el, "d-min");
+      if (m) m.focus({ preventScroll: true });
+      return;
+    }
+    c.el.style.height = c.el.getBoundingClientRect().height + "px";
+    c.el.setAttribute("data-max", "");
     c.sized();
     c.minBtn.focus();
+  }
+  // A board node drawn large is the whiteboard's own (cards.js never
+  // builds it), and a board update may bring it anew, so its sheet names
+  // it: a topic by its name, a panel by its data-key. The node stays where
+  // it stands, drawn fixed by the stylesheet's [data-max] rules: a panel's
+  // entry keeps its height meanwhile, as a card does, and a topic, the
+  // board's own child with nothing around it to hold its place, gives the
+  // scroll offsets it changed back on its way out.
+  function sheet(btn) {
+    var p = btn.parentNode;
+    if (p.classList.contains("tbar")) {
+      var sec = p.closest("section.topic");
+      return topicName(sec) !== null ? { topic: true, key: sec.getAttribute("data-topic"), el: null } : null;
+    }
+    var d = p.tagName === "SUMMARY" ? p.parentNode : null;
+    return d && d.matches("details.entry-panel[data-key]") ? { topic: false, key: d.getAttribute("data-key"), el: null } : null;
+  }
+  function sheetNode(t) {
+    var sel = t.topic ? "section.topic[data-topic]" : "details.entry-panel[data-key]", attr = t.topic ? "data-topic" : "data-key", n = null;
+    [board, col].some(function (box) {
+      n = box ? Array.prototype.filter.call(box.querySelectorAll(sel), function (x) { return x.getAttribute(attr) === t.key; })[0] || null : null;
+      return !!n;
+    });
+    return n;
+  }
+  function sheetBtn(n, cls) {
+    var row = n.tagName === "DETAILS" ? n.firstElementChild : child(child(n, "tophead") || n, "tbar");
+    return row ? child(row, cls) : null;
+  }
+  function grow(t) {
+    var n = sheetNode(t);
+    if (t.el && t.el !== n) shrinkNode(t);
+    t.el = n;
+    if (!n || n.hasAttribute("data-max")) return;
+    if (t.topic) {
+      if (!t.scroll) {
+        t.scroll = [];
+        for (var x = n.parentNode; x && x.nodeType === 1; x = x.parentNode) if (x.scrollHeight > x.clientHeight) t.scroll.push([x, x.scrollTop]);
+      }
+    } else {
+      n.open = true;
+      n.parentNode.style.height = n.parentNode.getBoundingClientRect().height + "px";
+    }
+    n.setAttribute("data-max", "");
+  }
+  function shrinkNode(t) {
+    t.el.removeAttribute("data-max");
+    if (!t.topic && t.el.parentNode) t.el.parentNode.style.height = "";
+  }
+  // shrink draws t's node in its place again and returns its maximize
+  // button, the focus's way back.
+  function shrink(t) {
+    var n = t.el && t.el.isConnected ? t.el : null;
+    if (t.el) shrinkNode(t);
+    (t.scroll || []).forEach(function (s) { s[0].scrollTop = s[1]; });
+    return n ? sheetBtn(n, "d-max") : null;
+  }
+  // follow draws a large board node large again after a board update: on
+  // its new node, or, with the node gone, nothing is large any more. A
+  // focus the update took (the old head's back button) goes to the new one.
+  function follow(t) {
+    if (!sheetNode(t)) { maximize(null); return; }
+    grow(t);
+    var a = doc.activeElement, m = sheetBtn(t.el, "d-min");
+    if (m && (!a || a === doc.body)) m.focus({ preventScroll: true });
+  }
+  function sheetClick(e) {
+    var b = e.target.closest && e.target.closest(".d-max, .d-min");
+    if (b && (b.parentNode.classList.contains("tbar") || b.parentNode.tagName === "SUMMARY")) {
+      // A button in a panel's head must not fold or unfold the panel.
+      e.preventDefault();
+      if (b.classList.contains("d-min")) { maximize(null); return; }
+      var t = sheet(b);
+      if (t) maximize(t);
+      return;
+    }
+    // A large panel stays open: its head does not fold it.
+    var s = e.target.closest && e.target.closest("summary");
+    if (s && s.parentNode.matches("details.entry-panel[data-max]") && !e.target.closest("a, button")) e.preventDefault();
   }
   doc.addEventListener("keydown", function (e) {
     if (e.key !== "Escape" || !maxed || e.defaultPrevented) return;
@@ -681,7 +785,7 @@
     if (!t.closest || t.closest("button, a, input, textarea, select, summary, label")) return;
     var head = t.closest(".tbar, .bc-hd");
     if (!head) return;
-    var el = head.classList.contains("bc-hd") ? head.closest(".bcard") : head.parentNode;
+    var el = head.classList.contains("bc-hd") ? head.closest(".bcard") : head.closest("section.topic");
     if (!el || el.hasAttribute("data-max") || !(isCard(el) || topicName(el) !== null)) return;
     var u = unitOf(el);
     if (!u) return;
@@ -741,44 +845,39 @@
 
   // --- the pinned column ----------------------------------------------------------
   // The page hands an empty element (opt.column's host); the framework
-  // fills it: a header with the pin count, a width handle on each edge
-  // (dragged outward, either widens it, so the left one still widens once
-  // the page fills the window; its width is kept with the pins; double
-  // click goes back to the stylesheet's), and the pin list while the
-  // column shows.
+  // fills it: a width handle on its left edge,
+  // where it meets the board, and the pin list while the column shows. The
+  // column fills the window right of the board, so the handle sizes the
+  // board (--boardw, the width of the board's .dgrid cell, kept with the
+  // pins; double click goes back to the stylesheet's): at least BOARDW_MIN,
+  // and at most what leaves the column PINW_MIN.
   function setWidth(w) {
-    pinw = w ? Math.max(PINW_MIN, Math.round(w)) : 0;
-    if (pinw) doc.documentElement.style.setProperty("--pinw", pinw + "px");
-    else doc.documentElement.style.removeProperty("--pinw");
+    boardw = w ? Math.max(BOARDW_MIN, Math.round(w)) : 0;
+    if (boardw) doc.documentElement.style.setProperty("--boardw", boardw + "px");
+    else doc.documentElement.style.removeProperty("--boardw");
   }
+  function boardCell() { return board.closest && board.closest(".dgrid"); }
   function buildCol() {
-    var hd = mk("div", "bp-hd");
-    hd.innerHTML = licon("pin");
-    hd.appendChild(mk("span", "", wsT("js.pins.title")));
-    count = hd.appendChild(mk("span", "bp-ct", "0"));
-    col.appendChild(hd);
-    edgeHandle("left", -1);
-    edgeHandle("right", 1);
+    edgeHandle();
   }
-  // edgeHandle adds the width handle on side: dir is +1 where a drag to the
-  // right widens the column, -1 where a drag to the left does.
-  function edgeHandle(side, dir) {
+  function edgeHandle() {
     var edge = mk("div", "bp-edge"), from = null;
-    edge.setAttribute("data-edge", side);
+    edge.setAttribute("data-edge", "left");
     edge.setAttribute("role", "separator");
     edge.setAttribute("aria-orientation", "vertical");
     edge.title = wsT("js.pins.width");
     edge.setAttribute("aria-label", wsT("js.pins.width"));
     col.appendChild(edge);
     edge.addEventListener("pointerdown", function (e) {
-      if (e.button !== undefined && e.button !== 0) return;
-      from = { x: e.clientX, w: col.getBoundingClientRect().width };
+      var cell = boardCell(), w = cell ? cell.getBoundingClientRect().width : 0;
+      if ((e.button !== undefined && e.button !== 0) || !w) return;
+      from = { x: e.clientX, w: w, max: w + col.getBoundingClientRect().width - PINW_MIN };
       edge.classList.add("drag");
       try { edge.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the move still lands */ }
       e.preventDefault();
     });
     edge.addEventListener("pointermove", function (e) {
-      if (from) setWidth(Math.min(from.w + dir * (e.clientX - from.x), window.innerWidth * 0.5));
+      if (from) setWidth(Math.min(from.w + e.clientX - from.x, Math.max(from.max, BOARDW_MIN)));
     });
     function end() { if (!from) return; from = null; edge.classList.remove("drag"); persist(); }
     edge.addEventListener("pointerup", end);
@@ -859,7 +958,7 @@
         zone.setAttribute("aria-hidden", "true");
       }
       var s = stored();
-      setWidth(s.w);
+      setWidth(s.bw);
       s.topics.forEach(function (r) { topics[r.n] = { name: r.n, pinned: +r.p || 0, at: +r.a || 0, bar: +r.b || 0, el: null }; });
       s.cards.forEach(function (r) { add(r.kind, r); });
       // The pin list enters the page before anything moves into it, so a
@@ -872,7 +971,8 @@
         box.addEventListener("pointerdown", dragStart);
         box.addEventListener("click", function (e) {
           var b = e.target.closest && e.target.closest(".tpin");
-          if (b && b.parentNode.classList.contains("tbar")) pinTopic(b.parentNode.parentNode, b.getAttribute("aria-pressed") !== "true");
+          if (b && b.parentNode.classList.contains("tbar")) pinTopic(b.parentNode.closest("section.topic"), b.getAttribute("aria-pressed") !== "true");
+          sheetClick(e);
         });
         box.addEventListener("contextmenu", function (e) { if (dg && dg.touch) e.preventDefault(); });
       });

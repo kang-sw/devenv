@@ -58,8 +58,8 @@ type StartSpec struct {
 	// Env is the environment the child starts from; the backend removes the
 	// harness variables an inherited parent session leaves behind.
 	Env []string
-	// Lead is set for a lead conversation (Profile.Lead): the process starts
-	// as the user's own session does, with unrestricted harness setup.
+	// Lead is set for a lead conversation (Profile.Lead): user settings stay
+	// active, while the daemon selects its bundled plugin.
 	Lead *LeadSpec
 	// Holder selects durable transport independently of lead privileges.
 	Holder *holderChild
@@ -69,6 +69,12 @@ type StartSpec struct {
 type LeadSpec struct {
 	// PermissionMode is the permission mode to launch in (claude).
 	PermissionMode string
+	// PluginIsolation is default (replace ws only) or isolated (bundled only).
+	PluginIsolation string
+	// PluginWarning records a launch warning on the session; empty clears it.
+	PluginWarning func(string)
+	// WSMCP resolves the bundled MCP launcher if Pi needs its bridge fallback.
+	WSMCP func() (MCPCommand, error)
 	// Env is set on the child over the backend's own scrub: the
 	// hosted-session variables.
 	Env map[string]string
@@ -280,6 +286,12 @@ type Event struct {
 	// in an error (a refusal, an interrupt).
 	TurnEnd   bool
 	TurnError string
+	// CompactRequested (with TurnEnd): the ending turn carried a successful
+	// compaction lever call (a *__request_compaction tool call whose result
+	// is not an error) and was not interrupted. The runner holds queued
+	// input until that compaction starts (leverHoldCap at most), so the
+	// compaction runs before the next turn.
+	CompactRequested bool
 	// Fatal ends the process with an error the conversation reports, such as
 	// a failed init check; the process exits after it.
 	Fatal error

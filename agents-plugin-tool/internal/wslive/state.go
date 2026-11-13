@@ -90,6 +90,11 @@ type Event struct {
 	// event type is Kind, under "kind", so the marker has a key of its own.
 	AgentKind string `json:"agentKind,omitempty"`
 	Status    string `json:"status,omitempty"`
+	// ActiveMs is closed-turn work; TurnStartedAt is the current turn's
+	// epoch-millisecond start, or zero when no turn is working. Pi agent
+	// events carry authoritative values, including zero.
+	ActiveMs      int64 `json:"activeMs,omitempty"`
+	TurnStartedAt int64 `json:"turnStartedAt,omitempty"`
 	// Caption replaces the caption when present; "" clears it.
 	Caption *string `json:"caption,omitempty"`
 	// Batches replaces the agent's batch list when present.
@@ -159,6 +164,7 @@ type agentState struct {
 	id, parentID, label, replyID, status string
 	kind                                 string
 	startedAt, endedAt, touched          int64
+	activeMs, turnStartedAt              int64
 	model, effort                        string
 	contextTokens                        int64
 	outputTps                            float64
@@ -539,7 +545,7 @@ func (st *State) activityFor(id string, at int64) (*activityState, error) {
 func (st *State) agent(id string, at int64) *agentState {
 	a, ok := st.agents[id]
 	if !ok {
-		a = &agentState{id: id, status: StatusRunning, startedAt: at}
+		a = &agentState{id: id, status: StatusRunning, startedAt: at, turnStartedAt: at}
 		st.agents[id] = a
 		st.evicted = slices.DeleteFunc(st.evicted, func(e string) bool { return e == id })
 	}
@@ -553,7 +559,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		batches = st.normalizeBatches(ev.Batches)
 	}
 	if ev.AgentID == "" {
-		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || hasTelemetry(ev) {
+		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || hasTelemetry(ev) {
 			return fmt.Errorf("the lead takes only batches and caption; set agentId for a subagent")
 		}
 		st.setActivity(&st.lead, ev, batches)
@@ -586,14 +592,29 @@ func (st *State) applyAgent(ev Event, at int64) error {
 	st.setTelemetry(a, ev)
 	switch ev.Status {
 	case StatusRunning:
+		if a.status != StatusRunning && a.kind != AgentKindPi {
+			a.turnStartedAt = at
+		}
 		a.status, a.endedAt = StatusRunning, 0
 	case StatusDone, StatusFailed:
 		if a.status == StatusRunning {
 			a.endedAt = at
+			if a.kind != AgentKindPi {
+				if a.turnStartedAt > 0 && at > a.turnStartedAt {
+					a.activeMs += at - a.turnStartedAt
+				}
+				a.turnStartedAt = 0
+			}
 		}
 		a.status = ev.Status
 		a.permission = nil
 		st.batchesEnded += uint64(len(closeBatches(&a.activityState, at)))
+	}
+	if ev.AgentKind == AgentKindPi {
+		// Pi's record owns timing, independent of the presentation status:
+		// held-but-idle agents can appear running without an active turn.
+		a.activeMs = max(ev.ActiveMs, 0)
+		a.turnStartedAt = max(ev.TurnStartedAt, 0)
 	}
 	if a.status != StatusRunning {
 		// An ended subagent produces no output, so it shows no rate.
@@ -916,6 +937,7 @@ func (st *State) SeedFinished(prev Snapshot) {
 			status:        p.Status,
 			startedAt:     p.StartedAt,
 			endedAt:       p.EndedAt,
+			activeMs:      p.ActiveMs,
 			touched:       p.EndedAt,
 			model:         cleanLine(st.scrub.scrub(p.Model), ModelRunes),
 			effort:        cleanLine(st.scrub.scrub(p.Effort), EffortRunes),
@@ -966,15 +988,17 @@ func (st *State) Snapshot(now int64) Snapshot {
 	snap.Commands = append([]SlashCommand(nil), st.commands...)
 	for _, a := range st.agents {
 		snap.Agents = append(snap.Agents, Agent{
-			Activity:  a.view(),
-			ID:        a.id,
-			ParentID:  a.parentID,
-			Label:     a.label,
-			ReplyID:   a.replyID,
-			Status:    a.status,
-			StartedAt: a.startedAt,
-			EndedAt:   a.endedAt,
-			AgentKind: a.kind,
+			Activity:      a.view(),
+			ID:            a.id,
+			ParentID:      a.parentID,
+			Label:         a.label,
+			ReplyID:       a.replyID,
+			Status:        a.status,
+			StartedAt:     a.startedAt,
+			EndedAt:       a.endedAt,
+			ActiveMs:      a.activeMs,
+			TurnStartedAt: a.turnStartedAt,
+			AgentKind:     a.kind,
 
 			Model:         a.model,
 			Effort:        a.effort,

@@ -882,7 +882,7 @@ func TestHostedSessionMarks(t *testing.T) {
 		t.Errorf("hosted marks on the index = %d, want 1: %s", n, rows)
 	}
 	for local, want := range map[bool]bool{true: true, false: false} {
-		index, err := renderIndexPage(view, regions, nil, local)
+		index, err := renderIndexPage(view, regions, nil, local, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1250,6 +1250,46 @@ func TestAgentRowStats(t *testing.T) {
 	}
 	if js := mustAsset(t, "dashboard.js"); strings.Contains(js, "agentTip") {
 		t.Errorf("dashboard.js still carries the stats hover card")
+	}
+}
+
+// TestAgentActiveTime keeps elapsed working time separate from the time since
+// completion, including a held Pi row that is marked running but is idle.
+func TestAgentActiveTime(t *testing.T) {
+	start := testNow.UnixMilli()
+	running := AgentNode{Agent: wslive.Agent{ID: "pi:1", Status: wslive.StatusRunning, ActiveMs: 12_000, TurnStartedAt: start, EndedAt: start - 60_000}}
+	html := renderNamed(t, "agent", running)
+	want := fmt.Sprintf(`data-ms="%d" data-f="since"`, start-12_000)
+	if !strings.Contains(html, want) || strings.Contains(html, `data-f="ago"`) {
+		t.Errorf("running active time = %s; want %s and no ago", html, want)
+	}
+
+	running.TurnStartedAt = 0 // held but no turn is working
+	html = renderNamed(t, "agent", running)
+	if !strings.Contains(html, `data-span="12000">12s`) || strings.Contains(html, `data-f="since"`) {
+		t.Errorf("held idle active time = %s", html)
+	}
+
+	ended := AgentNode{Agent: wslive.Agent{ID: "done", Status: wslive.StatusDone, ActiveMs: 72_000, EndedAt: start, ContextTokens: 1000}}
+	html = renderNamed(t, "agent", ended)
+	stats := strings.Index(html, `<span class="astat">`)
+	ctx := strings.Index(html, `class="actx"`)
+	ago := strings.Index(html, `data-f="ago"`)
+	am := strings.Index(html, `<span class="am">`)
+	if stats < 0 || ctx < stats || ago < ctx || am < ago || !strings.Contains(html, `data-span="72000">1m 12s`) || strings.Contains(html, `data-f="since"`) {
+		t.Errorf("finished active time and stats = %s", html)
+	}
+
+	ended.ActiveMs = 0 // older snapshots have no accumulated timing
+	html = renderNamed(t, "agent", ended)
+	if strings.Contains(html, `data-span="0"`) {
+		t.Errorf("finished row with unknown active time has a duration: %s", html)
+	}
+
+	ended.ContextTokens = 0
+	html = renderNamed(t, "agent", ended)
+	if !strings.Contains(html, `<span class="astat"><span><time class="t"`) || !strings.Contains(html, `data-f="ago"`) {
+		t.Errorf("ago-only stats missing: %s", html)
 	}
 }
 

@@ -119,6 +119,17 @@ func parsePiModels(out []byte) ([]ModelChoice, error) {
 // registers exactly those servers through Pi's built-in MCP support.
 const piBridgeFile = "ws-agent-mcp.ts"
 
+// PiWaitMax caps pi.wait in both the MCP tool and the token route.
+const PiWaitMax = 1800 * time.Second
+
+// PiForwardSlack leaves time for the daemon to answer a forwarded wait.
+const PiForwardSlack = 30 * time.Second
+
+// piMCPTimeout exceeds even a maximum forwarded wait, with transport margin.
+// It also covers the launcher's 75s unsent-request wait, including initialize
+// and tools/list, which Pi's default 60s request timeout would cut off.
+const piMCPTimeout = PiWaitMax + PiForwardSlack + 30*time.Second
+
 // piDir is where a conversation's Pi session lives.
 func piDir(dir string) string { return filepath.Join(dir, "pi") }
 
@@ -214,6 +225,7 @@ func piMCPServers(spec StartSpec) (map[string]any, error) {
 			"env":      spec.WSMCP.Env,
 			"cwd":      spec.workDir(),
 			"exposure": "direct",
+			"timeout":  piMCPTimeout.Seconds(),
 		}
 	}
 	return servers, nil
@@ -275,11 +287,63 @@ func piArgs(spec StartSpec, bridge string) []string {
 	return args
 }
 
-// piLeadArgs is the pi command line of a lead conversation: RPC mode on the
-// conversation's own session file, with the user's extensions, skills, and
-// context files as an ordinary pi session loads them. A session taken over
-// from a terminal runs on that session's file instead (spec.SessionFile),
-// in pi's own session directory for it.
+// piExtensionPackage is the package.json name of the native ws Pi extension,
+// the extension that registers the explore, ws-agent-spawn, and
+// ws-agent-send tools.
+const piExtensionPackage = "ws-pi-bridge"
+
+// PiMCPOnly reports whether rec is a Pi conversation that reaches ws only
+// through Pi's builtin MCP client, without the native ws Pi extension and so
+// without the tools that extension registers. A spawned conversation is
+// MCP-only unless def's plugins load the extension, because piArgs starts it
+// with --no-extensions; a hosted lead is MCP-only when piLeadLaunch fell back
+// to the MCP bridge, which it records as PluginWarning (a successful bundled
+// launch clears it). def is the conversation's launched profile; a nil def
+// loads no plugin. Records of other backends are never MCP-only.
+func PiMCPOnly(rec Record, def *Profile) bool {
+	if rec.Backend != BackendPi {
+		return false
+	}
+	if rec.Lead {
+		return rec.PluginWarning != ""
+	}
+	if def == nil {
+		return true
+	}
+	for _, path := range def.PluginPaths(rec.Root) {
+		if isPiExtensionPath(path) {
+			return false
+		}
+	}
+	return true
+}
+
+// isPiExtensionPath reports whether the nearest package.json at or above path
+// names the native ws Pi extension package; an extension path may name the
+// package directory or any entry file inside it.
+func isPiExtensionPath(path string) bool {
+	if path == "" {
+		return false
+	}
+	for dir := filepath.Clean(path); ; {
+		if raw, err := os.ReadFile(filepath.Join(dir, "package.json")); err == nil {
+			var manifest struct {
+				Name string `json:"name"`
+			}
+			return json.Unmarshal(raw, &manifest) == nil && manifest.Name == piExtensionPackage
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
+// piLeadArgs is the base command line of a lead conversation. Plugin
+// isolation is added by preparePiLeadLaunch; skills, settings and context
+// files keep Pi's ordinary behavior. A terminal takeover keeps its session
+// file (spec.SessionFile), in Pi's own session directory for it.
 func piLeadArgs(spec StartSpec) []string {
 	args := []string{"--mode", "rpc"}
 	if own := piSessionFile(spec.Dir); spec.SessionFile != "" && spec.SessionFile != own {
@@ -381,11 +445,18 @@ func (b PiBackend) startLead(spec StartSpec) (Process, error) {
 	if err := os.MkdirAll(piDir(spec.Dir), 0o700); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(command, append(pre, piLeadArgs(spec)...)...)
+	attach := spec.Holder != nil && spec.Holder.id != ""
+	args := append(pre, piLeadArgs(spec)...)
+	if !attach {
+		command, args, err = preparePiLeadLaunch(command, pre, spec)
+		if err != nil {
+			return nil, fmt.Errorf("pi lead launch: %w", err)
+		}
+	}
+	cmd := exec.Command(command, args...)
 	cmd.Dir = spec.workDir()
 	cmd.Env = piLeadEnv(spec)
 	m := newPiMapper(spec)
-	attach := spec.Holder != nil && spec.Holder.id != ""
 	p, err := startChild(spec, cmd, m, piProtocol{})
 	if err != nil {
 		return nil, err

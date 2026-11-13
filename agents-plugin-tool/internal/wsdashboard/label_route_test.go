@@ -85,7 +85,7 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 	if !strings.Contains(page, `data-rid="livesession"`) || !strings.Contains(page, `href="/s/livesession"`) {
 		t.Errorf("the label replaced the reply-id outside the display")
 	}
-	_, index := get(t, f.base+"/")
+	_, index := get(t, f.base+"/?frame=1")
 	if !strings.Contains(index, `<span class="rid lbl" title="livesession">Build bot</span>`) {
 		t.Errorf("index list lacks the label")
 	}
@@ -432,8 +432,13 @@ func TestMailboxBadgeTopLevel(t *testing.T) {
 		t.Fatal(err)
 	}
 	badge := readGitBadge(sub)
-	if filepath.Clean(badge.TopLevel) != filepath.Clean(root) {
-		t.Fatalf("badge toplevel = %q, want %q", badge.TopLevel, root)
+	// git reports the resolved path; t.TempDir may sit behind a symlink (macOS /var).
+	want, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := filepath.EvalSymlinks(badge.TopLevel); err != nil || got != want {
+		t.Fatalf("badge toplevel = %q, want %q (err %v)", badge.TopLevel, want, err)
 	}
 }
 

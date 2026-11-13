@@ -60,7 +60,7 @@ func TestWikiToolsSaveReadHistoryAndConflicts(t *testing.T) {
 	}
 
 	text := f.wikiCall(t, wikiQueryTool, map[string]any{"store": "me", "op": "read", "wiki": "docs", "path": "guides/setup"})
-	if !strings.HasPrefix(text, "wiki docs page guides/setup @ "+c1+"\n") || !strings.Contains(text, "base for wiki.update: "+c1) || !strings.HasSuffix(text, "one\ntwo\nthree\n") {
+	if !strings.HasPrefix(text, "wiki docs page guides/setup (markdown) @ "+c1+"\n") || !strings.Contains(text, "base for wiki.update: "+c1) || !strings.HasSuffix(text, "one\ntwo\nthree\n") {
 		t.Fatalf("read should name its commit as the base, then the content:\n%s", text)
 	}
 	content, base := f.wikiRead(t, "guides/setup")
@@ -217,5 +217,55 @@ func TestWikiToolsSupportConversationOwnStoreOnly(t *testing.T) {
 	}
 	if out := f.wikiCall(t, wikiQueryTool, map[string]any{"store": "other", "op": "list"}); !strings.Contains(out, "has no wikis") {
 		t.Fatalf("a refused save must write nothing: %s", out)
+	}
+}
+
+// TestWikiToolsHTMLPages: a .html path saves and reads an HTML page whose
+// read names its kind in the text header and the JSON value; a .md path
+// answers under its canonical name; a write of an HTML page carrying
+// images is refused; both tool descriptions describe HTML pages.
+func TestWikiToolsHTMLPages(t *testing.T) {
+	f := newTrackerLeadFixture(t)
+	f.trackerUpdate(t, trackerPersonal)
+	doc := "<!DOCTYPE html>\n<html><body><p>hi</p></body></html>\n"
+	out := f.wikiCall(t, wikiUpdateTool, map[string]any{"store": "me", "wiki": "docs", "op": "write", "new_wiki": true, "path": "notes/x.html", "content": doc})
+	c1 := wikiSaved(t, out)
+	if !strings.Contains(out, "saved write notes/x.html\n") {
+		t.Fatalf("save result = %s", out)
+	}
+	text := f.wikiCall(t, wikiQueryTool, map[string]any{"store": "me", "op": "read", "wiki": "docs", "path": "notes/x.html"})
+	if !strings.HasPrefix(text, "wiki docs page notes/x.html (html) @ "+c1+"\n") || !strings.HasSuffix(text, doc) {
+		t.Fatalf("html read text = %s", text)
+	}
+	raw := f.wikiCall(t, wikiQueryTool, map[string]any{"store": "me", "op": "read", "wiki": "docs", "path": "notes/x.html", "format": "json"})
+	var got struct{ Path, Kind, Content string }
+	if err := json.Unmarshal([]byte(raw), &got); err != nil || got.Path != "notes/x.html" || got.Kind != "html" || got.Content != doc {
+		t.Fatalf("html read json = %+v, %v\n%s", got, err, raw)
+	}
+	out = f.wikiCall(t, wikiUpdateTool, map[string]any{"store": "me", "wiki": "docs", "op": "write", "base": c1, "path": "notes/x.md", "content": "md\n", "format": "json"})
+	var saved struct{ Path, Commit string }
+	if err := json.Unmarshal([]byte(out), &saved); err != nil || saved.Path != "notes/x" {
+		t.Fatalf("a .md save answers under %+v, %v; want the canonical notes/x", saved, err)
+	}
+	raw = f.wikiCall(t, wikiQueryTool, map[string]any{"store": "me", "op": "read", "wiki": "docs", "path": "notes/x.md", "format": "json"})
+	if err := json.Unmarshal([]byte(raw), &got); err != nil || got.Path != "notes/x" || got.Kind != "markdown" || got.Content != "md\n" {
+		t.Fatalf("markdown read json = %+v, %v", got, err)
+	}
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	refused := f.trackerRefused(t, wikiUpdateTool, map[string]any{"store": "me", "wiki": "docs", "op": "write", "base": saved.Commit, "path": "notes/x.html",
+		"content": doc, "images": []any{map[string]any{"data": base64.StdEncoding.EncodeToString(png)}}})
+	if !strings.Contains(refused, "HTML page cannot show images") {
+		t.Errorf("an html write with images must be refused: %s", refused)
+	}
+	for _, name := range []string{wikiQueryTool, wikiUpdateTool} {
+		var desc string
+		for _, tool := range tools() {
+			if tool["name"] == name {
+				desc, _ = tool["description"].(string)
+			}
+		}
+		if !strings.Contains(desc, ".html") || !strings.Contains(desc, "sandboxed frame") || !strings.Contains(desc, "attachment:") {
+			t.Errorf("%s description does not describe HTML pages: %s", name, desc)
+		}
 	}
 }

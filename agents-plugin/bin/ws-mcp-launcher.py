@@ -878,6 +878,9 @@ PROXY_PROTOCOL = 1
 PROXY_REPLAY_ID_PREFIX = "ws-mcp-launcher-replay-"
 DAEMON_DEFAULT_START_WAIT = 10.0  # wsdashboard.DefaultStartWait, seconds
 PROXY_LOST_REQUEST_CODE = -32000
+# One bounded wait for requests not yet sent, shared by MCP and CLI forwarding.
+DAEMON_RETRY_SECONDS = 75.0
+DAEMON_RETRY_POLL_SECONDS = 3.0
 # Repeated quick closes back off rather than starting a second MCP server.
 PROXY_QUICK_CLOSE_SECONDS = 2.0
 # After the client closed its stdin, how long the proxy keeps reading the
@@ -887,6 +890,10 @@ PROXY_DRAIN_SECONDS = 10.0
 
 class DaemonUnavailable(Exception):
     """The daemon connection failed; executable fallback is never permitted."""
+
+
+class DaemonRequestSent(DaemonUnavailable):
+    """A CLI hello may have executed its command; never retry it."""
 
 
 def proxy_cache_root(env: dict) -> Path:
@@ -1168,6 +1175,7 @@ def daemon_upgrade(endpoint: dict, hello: dict, timeout: float) -> SocketStream:
     import socket as socket_module
 
     port = int(endpoint["port"])
+    request_sent = False
     try:
         sock = socket_module.create_connection(("127.0.0.1", port), timeout=timeout)
     except OSError as exc:
@@ -1190,6 +1198,9 @@ def daemon_upgrade(endpoint: dict, hello: dict, timeout: float) -> SocketStream:
                 break
         if " 101 " not in f" {status} ":
             raise DaemonUnavailable(f"daemon refused the MCP route: {status or 'no answer'}")
+        # CLI commands are carried by the hello itself. Even a failed write
+        # can have sent bytes, so everything after this point is non-retryable.
+        request_sent = hello.get("mode") == "cli"
         sock.sendall(json.dumps(hello, separators=(",", ":")).encode("utf-8") + b"\n")
         raw = reader.readline()
         try:
@@ -1204,10 +1215,45 @@ def daemon_upgrade(endpoint: dict, hello: dict, timeout: float) -> SocketStream:
         return SocketStream(sock, reader, str(accept.get("version", "")))
     except (OSError, ValueError) as exc:
         sock.close()
-        raise DaemonUnavailable(f"daemon connection failed: {exc}") from exc
-    except DaemonUnavailable:
+        error = DaemonRequestSent if request_sent else DaemonUnavailable
+        raise error(f"daemon connection failed: {exc}") from exc
+    except DaemonUnavailable as exc:
         sock.close()
+        if request_sent:
+            raise DaemonRequestSent(str(exc)) from exc
         raise
+
+
+def wait_daemon_connection(link, hello: dict):
+    """Retry only before a command was sent; rediscover the endpoint each time.
+
+    Keep the existing first connection's start/replacement behavior. Subsequent
+    attempts only connect to the successor, never repeatedly start a daemon.
+    """
+    deadline = time.monotonic() + DAEMON_RETRY_SECONDS
+    try:
+        return link.connect(hello)
+    except DaemonRequestSent:
+        raise
+    except (DaemonUnavailable, DaemonHung) as exc:
+        failure = exc
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise DaemonUnavailable(f"{failure} (waited {DAEMON_RETRY_SECONDS:g}s for the dashboard daemon)")
+        time.sleep(min(DAEMON_RETRY_POLL_SECONDS, remaining))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            continue
+        endpoint = read_daemon_endpoint(link.daemon_dir)
+        if endpoint is None:
+            continue
+        try:
+            return daemon_upgrade(endpoint, hello, min(DAEMON_RETRY_POLL_SECONDS, remaining))
+        except DaemonRequestSent:
+            raise
+        except (DaemonUnavailable, DaemonHung) as exc:
+            failure = exc
 
 
 class DaemonLink:
@@ -1426,8 +1472,8 @@ class McpProxy:
     replaced or died), the proxy reconnects, replays the client's `initialize`
     under an id of its own (dropping that answer) and
     `notifications/initialized`, and answers every request still in flight
-    with an error. While disconnected, requests fail promptly rather than
-    waiting for recovery or replaying a tool side effect.
+    with an error. While disconnected, unsent requests wait up to 75 seconds
+    for recovery. Requests already sent are never replayed.
     """
 
     def __init__(self, link: DaemonLink, hello: dict, stdin, stdout, stderr) -> None:
@@ -1437,6 +1483,8 @@ class McpProxy:
         self.stdout = stdout
         self.stderr = stderr
         self.lock = threading.Lock()
+        self.pending_done = threading.Condition(self.lock)
+        self.pending: dict[str, tuple[bytes, dict, threading.Timer]] = {}
         self.output_lock = threading.Lock()
         self.stdin_done = threading.Event()
         self.stream = None
@@ -1509,23 +1557,23 @@ class McpProxy:
             if not line:
                 break
             message = parse_jsonrpc_line(line)
+            request = message is not None and message.get("method") is not None and "id" in message
             with self.lock:
-                if message is not None:
-                    method = message.get("method")
-                    if method == "initialize" and "id" in message:
-                        self.initialize = message
-                    elif method == "notifications/initialized":
-                        self.initialized = line
-                stream = self.stream
-                request = message is not None and message.get("method") is not None and "id" in message
-                if stream is not None:
-                    if request:
-                        self.inflight[json_id_key(message["id"])] = message["id"]
-                    if not stream.write(line):
-                        stream.close()
-            if stream is None and request:
-                self.error(message["id"], "dashboard daemon not reachable; request was not sent")
-        with self.lock:
+                if request and self.stream is None:
+                    # Each request has its own budget, even when a client sends
+                    # several concurrently. None has attempted a socket write.
+                    key = json_id_key(message["id"])
+                    timer = threading.Timer(DAEMON_RETRY_SECONDS, self.expire_pending, args=(key,))
+                    timer.daemon = True
+                    self.pending[key] = (line, message, timer)
+                    timer.start()
+                else:
+                    self.forward(line, message)
+        with self.pending_done:
+            # EOF still lets unsent requests finish within their budgets, just
+            # as half-close below lets already-sent requests finish.
+            while self.pending:
+                self.pending_done.wait()
             self.stdin_closed = True
             self.stdin_done.set()
             stream = self.stream
@@ -1539,6 +1587,29 @@ class McpProxy:
         cutoff = threading.Timer(PROXY_DRAIN_SECONDS, stream.close)
         cutoff.daemon = True
         cutoff.start()
+
+    def forward(self, line: bytes, message: dict | None) -> None:
+        """Attempt one write while holding lock; never retry a failed write."""
+        if message is not None:
+            method = message.get("method")
+            if method == "initialize" and "id" in message and self.stream is not None:
+                # Capture only sent initialize requests, so recovery cannot
+                # replay an unsent one AND forward its queued original.
+                self.initialize = message
+            elif method == "notifications/initialized":
+                self.initialized = line
+        if self.stream is not None:
+            if message is not None and message.get("method") is not None and "id" in message:
+                self.inflight[json_id_key(message["id"])] = message["id"]
+            if not self.stream.write(line):
+                self.stream.close()
+
+    def expire_pending(self, key: str) -> None:
+        with self.pending_done:
+            pending = self.pending.pop(key, None)
+            if pending is not None:
+                self.error(pending[1]["id"], f"dashboard daemon not reachable; request was not sent (waited {DAEMON_RETRY_SECONDS:g}s for the dashboard daemon)")
+            self.pending_done.notify_all()
 
     def deliver(self, line: bytes) -> bool:
         """Bookkeeping for a server line; False drops it."""
@@ -1563,10 +1634,10 @@ class McpProxy:
                 self.quick_closes += 1
             else:
                 self.quick_closes = 0
-        # Fail before reconnecting, not after its budget expires. Requests
-        # arriving meanwhile also fail in pump_client and are never replayed.
+        # Sent requests fail before reconnecting: their outcome is unknown.
+        # Unsent requests wait independently in pump_client.
         self.fail_inflight("dashboard daemon not reachable; the request did not complete")
-        if self.stdin_done.wait(min(5.0, 0.5 * max(1, self.quick_closes))):
+        if self.stdin_done.wait(max(DAEMON_RETRY_POLL_SECONDS, min(5.0, 0.5 * self.quick_closes))):
             return None
         try:
             stream = self.link.connect(self.hello, grace=1.5)
@@ -1596,6 +1667,12 @@ class McpProxy:
                 stream.write(json.dumps(replay, separators=(",", ":")).encode("utf-8") + b"\n")
                 if self.initialized is not None:
                     stream.write(self.initialized)
+            pending = list(self.pending.values())
+            self.pending.clear()
+            for line, message, timer in pending:
+                timer.cancel()
+                self.forward(line, message)
+            self.pending_done.notify_all()
         for request_id in lost:
             self.error(request_id, "dashboard daemon not reachable; the request did not complete")
 
@@ -1707,7 +1784,7 @@ def proxy_cli(link: DaemonLink, argv: list[str], stdout, stderr, input_text: str
         hello["stdin"] = input_text
     failure_code = 0 if argv[:2] == ["mailbox", "codex-stop-hook"] else 1
     try:
-        stream = link.connect(hello)
+        stream = wait_daemon_connection(link, hello)
     except (DaemonUnavailable, DaemonHung) as exc:
         write_bytes(stderr, f"ws-mcp-launcher: dashboard daemon not reachable: {exc}\n")
         return failure_code

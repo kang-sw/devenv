@@ -2,6 +2,7 @@ package wswhiteboard
 
 import (
 	"fmt"
+	"html"
 	"regexp"
 	"strings"
 	"testing"
@@ -191,7 +192,7 @@ var docTag = regexp.MustCompile(`<details class="tdoc"[^>]*>`)
 // unless the topic is closed, and open on the embed only when it changed
 // since the previous embed.
 func TestRenderPageTopicBodyPlacement(t *testing.T) {
-	for name, layout := range layouts() {
+	for name, layout := range map[string]Layout{"full": LayoutFull} {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout **notes**", Changed: 12}, {Name: "초기 범위", Body: "closed notes", Changed: 3}, {Name: "tool surface", Body: "old notes", Changed: 4}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
@@ -245,7 +246,7 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic has-doc" data-topic="notes"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
+	wantAll(t, out, `<section class="topic has-doc" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
 		`<details class="tdoc" data-key="doc:notes" open>`, "<h1>Plan</h1>", "<li>one</li>")
 	wantNone(t, out, `class="tbody"`)
 	// Nothing to answer: the reply bar waits hidden for a topic note.
@@ -253,7 +254,7 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic quiet closed has-doc" data-topic="notes"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
+	wantAll(t, out, `<section class="topic quiet closed has-doc" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
 		`<details class="tdoc" data-key="doc:notes"><summary`, "<h1>Plan</h1>")
 	wantNone(t, out, `data-key="doc:notes" open`)
 }
@@ -266,7 +267,7 @@ func TestRenderPageTopicKeyAttribute(t *testing.T) {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: `say "hi" & <go>`, Body: "notes", Changed: 12}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		if !strings.Contains(out, `<section class="topic has-doc" data-topic="say &#34;hi&#34; &amp; &lt;go&gt;"><div class="tbar">`) {
+		if !regexp.MustCompile(`<section class="topic[^"]*" data-topic="say &#34;hi&#34; &amp; &lt;go&gt;"><div class="tophead"><div class="tbar">`).MatchString(out) {
 			t.Errorf("%s: topic key attribute missing or unescaped", name)
 		}
 		if strings.Count(out, `<section class="topic`) != len(regexp.MustCompile(`<section class="topic[^"]*" data-topic="`).FindAllString(out, -1)) {
@@ -280,12 +281,12 @@ func TestRenderPageTopicKeyAttribute(t *testing.T) {
 // stylesheet pins the summary onto the bar instead of giving it a row; a
 // topic without a body carries neither the mark nor a details.
 func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
-	for name, layout := range layouts() {
+	for name, layout := range map[string]Layout{"full": LayoutFull} {
 		st := sampleState()
 		st.Topics = []TopicDoc{{Name: "embed layout", Body: "layout notes", Changed: 12}}
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
-		wantAll(t, out, `<section class="topic has-doc" data-topic="embed layout"><div class="tbar"><span class="tlead"><span class="tname">embed layout</span></span>`,
-			`.topic.has-doc > .tbar { padding-right:`, `details.tdoc > summary { position: absolute;`)
+		wantAll(t, out, `<section class="topic has-doc" data-topic="embed layout"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">embed layout</span></span>`,
+			`.topic.has-doc > .tophead > .tbar { padding-right:`, `details.tdoc > summary { position: absolute;`)
 		start := strings.Index(out, `<span class="tname">embed retention</span>`)
 		if start < 0 {
 			t.Fatalf("%s: topic missing", name)
@@ -296,14 +297,13 @@ func TestRenderPageTopicBodyToggleBelongsToTheBar(t *testing.T) {
 	}
 }
 
-// TestRenderPageEmbedMarksANewBody: the embed's body summary carries the new
-// dot only when the body changed since the previous embed.
-func TestRenderPageEmbedMarksANewBody(t *testing.T) {
+// Embeds no longer carry current content, even when it changed. Panel recaps
+// and the latest agent line replace the old body/freshness presentation.
+func TestRenderPageEmbedOmitsCurrentBody(t *testing.T) {
 	st := &State{Seq: 12, LastEmbedSeq: 10, Topics: []TopicDoc{{Name: "fresh", Body: "f", Changed: 12}, {Name: "stale", Body: "s", Changed: 5}}}
 	embed := render(t, BuildView(st, ViewInput{Layout: LayoutEmbed, ReplyID: "r"}))
-	wantAll(t, embed,
-		`data-key="doc:fresh" open><summary title="topic notes"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg><span class="new" title="new since the previous embed"></span></summary>`,
-		`data-key="doc:stale"><summary title="topic notes"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg></summary>`)
+	wantNone(t, markup(embed), `data-key="doc:fresh"`, `data-key="doc:stale"`, `class="doc-body`)
+	wantAll(t, embed, `href="r/index.html">Open full board</a>`)
 	full := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
 	wantNone(t, full, `class="new"`)
 	wantAll(t, full, `data-key="doc:fresh" open>`, `data-key="doc:stale" open>`)
@@ -339,7 +339,7 @@ func TestRenderPageEscapesItemTextButNotTopicBody(t *testing.T) {
 		if !strings.Contains(out, `<div class="rec-line md" title="recommendation"><b><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>a</b> <u>why</u></div>`) {
 			t.Errorf("%s: a kept tag in the recommendation is not kept", name)
 		}
-		if !strings.Contains(out, `<b id="doc-raw">raw <i>doc</i></b>`) {
+		if layout == LayoutFull && !strings.Contains(out, `<b id="doc-raw">raw <i>doc</i></b>`) {
 			t.Errorf("%s: topic body is not written unescaped", name)
 		}
 		if !strings.Contains(out, `<use href="#i-list"/>`) {
@@ -375,7 +375,6 @@ func TestTopicBodyRendersMarkdownWithInlineHTML(t *testing.T) {
 	body := "# Plan\n\n- one\n- **two**\n\n```mermaid\ngraph TD; A-->B\n```\n\n" + sampleDoc
 	for name, in := range map[string]ViewInput{
 		"disk":   {Layout: LayoutFull},
-		"embed":  {Layout: LayoutEmbed},
 		"served": {Layout: LayoutFull, FileText: func(p string) string { return p }, ImageSrc: func(string) string { return "" }},
 	} {
 		inner, page := docBody(t, body, in)
@@ -655,7 +654,7 @@ func TestRenderPageQuietAndCollapsedSettled(t *testing.T) {
 	}
 
 	embed := render(t, sampleView(LayoutEmbed))
-	if !strings.Contains(embed, `<section class="topic quiet" data-topic="tool surface"><div class="tbar"><span class="tlead"><span class="tname">tool surface</span></span>`) {
+	if !strings.Contains(embed, `<section class="topic quiet" data-topic="tool surface"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">tool surface</span></span>`) {
 		t.Errorf("embed: settled-only topic with nothing new is not quiet")
 	}
 }
@@ -716,13 +715,13 @@ func TestRenderPageReplyBar(t *testing.T) {
 
 func TestRenderPagePanels(t *testing.T) {
 	full := render(t, sampleView(LayoutFull))
-	for _, want := range []string{`<details class="panel" id="p-todo" open>`, `<details class="panel" id="p-agenda" open>`, `<aside class="side">`, `<li class="done" title="mockup"><span class="box"><svg class="i" aria-hidden="true"><use href="#i-box-done"/></svg></span>`, `<li class="keyed"><code>whiteboard.render</code>`} {
+	for _, want := range []string{`<details class="panel" id="p-todo" open>`, `<details class="panel" id="p-agenda" open>`, `<aside class="side flat">`, `<li class="done" title="mockup"><span class="box"><svg class="i" aria-hidden="true"><use href="#i-box-done"/></svg></span>`, `<li class="keyed"><code>whiteboard.render</code>`} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full page lacks %q", want)
 		}
 	}
-	if strings.Index(full, `<aside class="side">`) < strings.Index(full, `<main>`) {
-		t.Errorf("sidebar precedes the main column")
+	if strings.Index(full, `<aside class="side flat">`) < strings.Index(full, `</main>`) {
+		t.Errorf("auxiliary sections must follow the full-width board")
 	}
 	embed := render(t, sampleView(LayoutEmbed))
 	for _, want := range []string{`<details class="panel" id="p-todo">`, `<details class="panel" id="p-agenda">`, `<div class="side flat">`} {
@@ -897,8 +896,12 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	// rationale and options ride in the snapshot so it unfolds without script);
 	// 42% adds the check list's styles and answer staging; 43% its hide
 	// toggle (styles, icon, and script, about 2.7 KB a page); 44% the code
-	// blocks' wrap toggle (button, wrapped-line styles, and script, about 1.7 KB).
-	if len(out) > budget*44/100 {
+	// blocks' wrap toggle (button, wrapped-line styles, and script, about 1.7 KB);
+	// 45% the topic stream's interleave styles (log rows with a clock column,
+	// folds, panel cards, the embed's panel titles; about 6 KB); 46% the
+	// topic head (linked ticket badges and their status marks, the glow, the
+	// summary line and check pill, the stuck head's popover; about 3.2 KB).
+	if len(out) > budget*46/100 {
 		t.Errorf("populated embed is %d bytes, not well under 512 KiB", len(out))
 	}
 }
@@ -1042,16 +1045,15 @@ func TestTopicRailBarCapsuleMotion(t *testing.T) {
 		`var top = Math.max(r.top, lim), bottom = Math.max(r.bottom, lim);`,
 		`if (p.top) p.top.r = shows(p.top.r);`,
 		`if (!bar && edge === "top") to = shows(to);`,
-		`if (!bar && into.classList.contains("wb-stuck")) {`,
+		`if (!bar && into.closest(".wb-stuck")) {`,
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("the rail script lacks %q", want)
 		}
 	}
 	for _, want := range []string{
-		`.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }`,
-		`.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 2; }`,
-		`.wb-rail .topic > .tnote { position: sticky; top: calc(var(--wb-rail-note, 30px) + 6px); z-index: 1; }`,
+		`.wb-rail .topic > .tophead.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }`,
+		`.wb-rail .topic > .tophead { position: sticky; top: var(--wb-rail-top, 0px); z-index: 2; }`,
 		`.wb-rail-wrap { position: sticky; height: 0; z-index: 2; pointer-events: none; }`,
 		`.wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }`,
 		`.wb-rail-wrap .wb-rail-ghost { position: absolute;`,
@@ -1085,12 +1087,13 @@ func TestTopicRailRailsHostItems(t *testing.T) {
 	js, css := string(assets.FormScript), string(assets.CSS)
 	for _, want := range []string{
 		`var ITEMS = "section.topic[data-topic], [data-rail]";`,
-		`function barOf(t) { return t.querySelector(isTopic(t) ? ":scope > .tbar" : "[data-rail-bar]"); }`,
+		`function barOf(t) { return t.querySelector(isTopic(t) ? ":scope > .tophead > .tbar" : "[data-rail-bar]"); }`,
+		`function stickOf(t) { return t.querySelector(isTopic(t) ? ":scope > .tophead" : "[data-rail-bar]"); }`,
 		`function keyOf(t) { return isTopic(t) ? t.getAttribute("data-topic") : "\u0001" + t.getAttribute("data-rail"); }`,
 		`if (dirty) { found = Array.prototype.slice.call(box.querySelectorAll(ITEMS)); dirty = false; fresh = true; }`,
 		`if (r.height) { topics.push(t); rects.push(r); }`,
 		`var nm = t.querySelector("[data-rail-name]"), ic = t.querySelector("[data-rail-icon]");`,
-		`bar: cur >= 0 ? barOf(topics[cur]) : null,`,
+		`bar: cur >= 0 ? stickOf(topics[cur]) : null,`,
 		`return topics[i] ? keyOf(topics[i]) : "";`,
 		`var TN = ".tname, [data-rail-name], .cn";`,
 		`<span class="ci" hidden></span><span class="cn"></span>`,
@@ -1168,4 +1171,32 @@ func TestRenderPageFollowsViewLanguage(t *testing.T) {
 	if strings.Contains(ko, " lang=") {
 		t.Error("the page sets a lang attribute")
 	}
+}
+
+// Link fields and readings are paths and identifiers: emphasis markers stay
+// literal there, while references, code spans, bare URLs and bare paths still
+// render.
+func TestRenderPageLinkFieldsAndReadingsKeepEmphasisLiteral(t *testing.T) {
+	const glob, ident = "rsrc/*.md and internal/*.go", "snake_case_name"
+	st := &State{Counter: 4, Seq: 3, SettleSeq: 4, Items: []Item{
+		{ID: 1, Class: ClassTechnical, Topic: "t", Title: "open", Status: StatusOpen,
+			Links: []string{glob, ident, "see {{2}}", "`code_span`", "https://example.com/a_b", "docs/guide.md"}},
+		{ID: 2, Class: ClassTechnical, Topic: "t", Title: "read", Status: StatusAnswered, Answer: glob + " " + ident, Settled: 2, Changed: 2},
+		{ID: 3, Class: ClassCheck, Topic: "t", Title: "check", Status: StatusAnswered, Answer: "no, " + glob + " " + ident, Settled: 3, Changed: 2},
+	}}
+	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
+	body := regexp.MustCompile(`(?s)<script.*?</script>|<style.*?</style>`).ReplaceAllString(out, "")
+	text := html.UnescapeString(regexp.MustCompile(`<[^>]*>`).ReplaceAllString(body, ""))
+	if got := strings.Count(text, glob); got < 3 {
+		t.Errorf("glob text kept verbatim %d times, want link, reading and check reading", got)
+	}
+	if got := strings.Count(text, ident); got < 3 {
+		t.Errorf("identifier kept verbatim %d times, want link, reading and check reading", got)
+	}
+	wantNone(t, body, "<em>", "<strong>")
+	wantAll(t, body,
+		`see <a href="#item-2">(02)</a>`,
+		`<code>code_span</code>`,
+		`href="https://example.com/a_b"`,
+		`docs/guide.md</a>`)
 }

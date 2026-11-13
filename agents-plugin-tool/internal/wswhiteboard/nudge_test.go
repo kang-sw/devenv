@@ -128,6 +128,63 @@ func TestStaleNudgeLegacyStore(t *testing.T) {
 	}
 }
 
+func TestStaleNudgeUsesLogAndPanelActivity(t *testing.T) {
+	for _, tc := range []struct {
+		name, command string
+	}{
+		{"log-only", `<wb:log>Current state</wb:log>`},
+		{"panel-only", `<wb:panel recap="Current panel">payload</wb:panel>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var commands strings.Builder
+			for _, name := range []string{"A", "B", "C", "D", "E"} {
+				commands.WriteString(`<wb:topic name="` + name + `">` + tc.command + `</wb:topic>`)
+			}
+			st := &State{}
+			if out := applyAt(t, st, commands.String(), testNow); out.Info != "" {
+				t.Fatalf("fresh entry-only topics must not nudge: %s", out.Info)
+			}
+			if out := applyAt(t, st, "", testNow.Add(59*time.Minute)); out.Info != "" {
+				t.Fatalf("entry activity is not stale before an hour: %s", out.Info)
+			}
+			// Refreshing only the stream must reset a topic's stale age just as
+			// changing the retired recap did, without needing content or items.
+			if out := applyAt(t, st, commands.String(), testNow.Add(61*time.Minute)); out.Info != "" {
+				t.Fatalf("new entries must refresh their topics: %s", out.Info)
+			}
+			if out := applyAt(t, st, "", testNow.Add(120*time.Minute)); out.Info != "" {
+				t.Fatalf("refreshed entries are not an hour old: %s", out.Info)
+			}
+			if out := applyAt(t, st, "", testNow.Add(121*time.Minute)); !strings.HasPrefix(out.Info, "5 of 5 open topics unchanged for 60+ min (A, B, C, D, E)") {
+				t.Fatalf("entry-only topics must eventually become stale: %q", out.Info)
+			}
+		})
+	}
+}
+
+func TestStaleNudgeUsesConvertedRecapActivity(t *testing.T) {
+	legacy := &State{Seq: 1}
+	at := testNow.Format(time.RFC3339Nano)
+	for _, name := range []string{"A", "B", "C", "D", "E"} {
+		legacy.Topics = append(legacy.Topics, TopicDoc{Name: name, Recap: "Current legacy state", RecapChanged: 1, RecapAt: at})
+	}
+	converted, err := (FolderStore{Dir: t.TempDir()}).Open(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, doc := range converted.Topics {
+		if doc.RecapAt != "" || len(doc.Entries) != 1 || !doc.Entries[0].Imported || doc.Entries[0].At != at {
+			t.Fatalf("fixture must carry its original recap time only in the imported entry: %+v", doc)
+		}
+	}
+	if out := applyAt(t, converted, "", testNow.Add(59*time.Minute)); out.Info != "" {
+		t.Fatalf("conversion must preserve recap freshness: %s", out.Info)
+	}
+	if out := applyAt(t, converted, "", testNow.Add(61*time.Minute)); !strings.HasPrefix(out.Info, "5 of 5 open topics unchanged for 60+ min (A, B, C, D, E)") {
+		t.Fatalf("converted recap topics must age from their recorded time: %q", out.Info)
+	}
+}
+
 func TestStaleNudgeNeverRenders(t *testing.T) {
 	st := staleBoard(t)
 	if out := applyAt(t, st, ``, testNow.Add(61*time.Minute)); out.Info == "" {

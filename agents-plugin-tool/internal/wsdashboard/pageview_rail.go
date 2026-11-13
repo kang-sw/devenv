@@ -92,6 +92,11 @@ type RailWorktree struct {
 	// shows no count. The rail never reads a working tree itself.
 	Changes    int
 	HasChanges bool
+	// Deletable marks a linked worktree the rail's delete offers: one the
+	// repository's worktree list names, neither its primary worktree nor
+	// under a ws worktree pool (worktreePoolRoots). The delete routes check
+	// again; this only places the button.
+	Deletable bool
 	// Sessions are the live sessions, Ended the ended ones.
 	Sessions, Ended []RailRow
 }
@@ -431,8 +436,21 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			}
 			addWT(e)
 		}
+		// A linked worktree the list names is deletable unless it is
+		// pooled.
+		linked := map[string]bool{}
+		var pools []string
+		if len(entries) > 0 {
+			pools = worktreePoolRoots(repo.Pools, filepath.Clean(entries[0].Path))
+			for _, e := range entries[1:] {
+				if !e.Prunable {
+					linked[filepath.Clean(e.Path)] = true
+				}
+			}
+		}
 		for _, p := range order {
 			a := accs[p]
+			a.wt.Deletable = linked[p] && !a.wt.Root && !worktreePooled(pools, p)
 			if a.snap != nil {
 				r := a.snap.Repo
 				a.wt.Changes, a.wt.HasChanges = r.Modified+r.Staged+r.Untracked, true
@@ -517,10 +535,17 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 	return row
 }
 
-// Stopped reports a session the user stopped (the holder's "stop" reason, or
-// the kill a stop falls back to): the rail shows it asleep. Any other host
-// exit, a crash among them, keeps its reason line.
+// Stopped reports a hosted session with no harness process: the rail shows
+// it asleep (a muted title and a dimmed harness icon), whatever ended the
+// process. The runner keeps heartbeating such a row, so Live alone would
+// draw it as running. An ended row sleeps only when the user stopped it.
 func (r RailRow) Stopped() bool {
+	return r.Exit != nil && (r.Live || r.UserStopped())
+}
+
+// UserStopped reports a session the user stopped (the holder's "stop"
+// reason, or the kill a stop falls back to); an ended row sleeps only then.
+func (r RailRow) UserStopped() bool {
 	return r.Exit != nil && (r.Exit.Reason == "stop" || r.Exit.Reason == "killed")
 }
 

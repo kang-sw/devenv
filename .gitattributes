@@ -7,3 +7,6 @@
 # passing on Linux/macOS. `text=auto` still lets git auto-detect and leave
 # binary files untouched.
 * text=auto eol=lf
+
+# Generated single-file Pi extension bundle (scripts/bundle.mjs); review src/ instead.
+agents-plugin-pi/dist/** linguist-generated=true -diff

@@ -121,6 +121,10 @@ type Options struct {
 	WSMCP func(root string) (MCPCommand, error)
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
+	// Timer starts the lever hold's cap timer (leverHoldCap): a channel
+	// that fires once d passed, and a stop that ends it early; nil uses
+	// time.NewTimer.
+	Timer func(d time.Duration) (<-chan time.Time, func())
 	// Log receives diagnostics; nil discards them.
 	Log io.Writer
 	// Holders is the session holder manager lead conversations run under,
@@ -200,6 +204,12 @@ type Runner struct {
 func NewRunner(opts Options) *Runner {
 	if opts.Now == nil {
 		opts.Now = time.Now
+	}
+	if opts.Timer == nil {
+		opts.Timer = func(d time.Duration) (<-chan time.Time, func()) {
+			t := time.NewTimer(d)
+			return t.C, func() { t.Stop() }
+		}
 	}
 	if opts.Log == nil {
 		opts.Log = io.Discard
@@ -494,9 +504,18 @@ func endedError(rec Record) error {
 // LeadOptions are a lead conversation's spawn choices; an empty one takes
 // the profile's value (the harness default when it has none).
 type LeadOptions struct {
-	Model          string
-	Effort         string
-	PermissionMode string
+	Model           string
+	Effort          string
+	PermissionMode  string
+	PluginIsolation string
+}
+
+// leadPluginIsolation supplies the additive field's legacy default.
+func leadPluginIsolation(value string) string {
+	if value == "" {
+		return "default"
+	}
+	return value
 }
 
 // Create opens a conversation of profile bound to root. It resolves and
@@ -525,6 +544,10 @@ func (r *Runner) CreateLead(backend, root string, opts LeadOptions) (State, erro
 	if opts.PermissionMode != "" && !ValidLeadPermissionMode(opts.PermissionMode) {
 		return State{}, badRequest("permission_mode %q must be one of %s", opts.PermissionMode, strings.Join(LeadPermissionModes, ", "))
 	}
+	opts.PluginIsolation = leadPluginIsolation(opts.PluginIsolation)
+	if opts.PluginIsolation != "default" && opts.PluginIsolation != "isolated" {
+		return State{}, badRequest("plugin_isolation must be default or isolated; got %q", opts.PluginIsolation)
+	}
 	return r.create(profile, root, &opts, nil)
 }
 
@@ -548,6 +571,14 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 			return State{}, &requestError{status: http.StatusForbidden, msg: fmt.Sprintf("agent profile %q is a lead profile: a lead session is spawned from the dashboard on this machine", rp.Name)}
 		}
 		return State{}, badRequest("agent profile %q is not a lead profile (lead: true)", rp.Name)
+	}
+	if spawn != nil {
+		if spawn.Tier != "" && rp.Definition.Backend != BackendPi {
+			return State{}, badRequest("pi.spawn: profile %q must be a non-lead Pi profile", rp.Name)
+		}
+		if err := r.checkChildProfile(spawn.Parent, rp.Name, rp.Definition); err != nil {
+			return State{}, err
+		}
 	}
 	var key string
 	if lead != nil {
@@ -582,6 +613,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	}
 	if lead != nil {
 		rec.Lead = true
+		rec.PluginIsolation = leadPluginIsolation(lead.PluginIsolation)
 		rec.PermissionMode = rp.Definition.PermissionMode
 		if lead.Model != "" {
 			rec.Model = lead.Model
@@ -1010,8 +1042,10 @@ type State struct {
 	// PermissionMode is the mode the next process launches in, and
 	// ActiveMode the one the running harness last reported (it may fall
 	// back from the one asked for).
-	PermissionMode string `json:"permission_mode,omitempty"`
-	ActiveMode     string `json:"active_mode,omitempty"`
+	PermissionMode  string `json:"permission_mode,omitempty"`
+	ActiveMode      string `json:"active_mode,omitempty"`
+	PluginIsolation string `json:"plugin_isolation,omitempty"`
+	PluginWarning   string `json:"plugin_warning,omitempty"`
 	// Approvals are the tool permission prompts waiting for an answer,
 	// oldest first.
 	Approvals []ApprovalRequest `json:"approvals,omitempty"`
@@ -1048,6 +1082,9 @@ type State struct {
 	// Tier is a spawned conversation's capability tier, when its spawner
 	// chose the model by one.
 	Tier string `json:"tier,omitempty"`
+	// ActiveMs excludes the current turn; TurnStartedAt is set only while it runs.
+	ActiveMs      int64 `json:"active_ms,omitempty"`
+	TurnStartedAt int64 `json:"turn_started_at,omitempty"`
 }
 
 // closedState is the state of a record no loop serves: closed, or handed
@@ -1065,7 +1102,11 @@ func (r *Runner) closedState(rec Record) State {
 }
 
 func closedState(rec Record) State {
-	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label, Tier: rec.Tier}
+	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label, Tier: rec.Tier, ActiveMs: rec.ActiveMs}
+	if rec.Lead {
+		st.PluginIsolation = leadPluginIsolation(rec.PluginIsolation)
+		st.PluginWarning = rec.PluginWarning
+	}
 	if rec.Parent != nil {
 		parent := *rec.Parent
 		st.Parent = &parent
@@ -1174,6 +1215,15 @@ type conv struct {
 	// while it waits on the user with no prompt to show (checkAction).
 	harnessState string
 	actionTimer  *time.Timer
+	// leverC is the lever hold's cap timer and leverStop its stop: armed
+	// at the end of a turn that carried a successful compaction lever call
+	// (Event.CompactRequested), it holds kick until that compaction starts
+	// (its CompactStart), leverHoldCap passes, the next turn ends, or the
+	// process exits. interruptAsked is set when the runner interrupted the
+	// running turn, until its end: an interrupted lever turn does not arm.
+	leverC         <-chan time.Time
+	leverStop      func()
+	interruptAsked bool
 	// The process's MCP recovery (runner_recovery.go). mcpSeen are the
 	// servers it reported connected; mcpBroken (above) are those that broke
 	// and did not come back in-stream, and a restart is due at the next
@@ -1359,7 +1409,8 @@ func (c *conv) loop() {
 		return
 	}
 	for {
-		var idleC, actionC <-chan time.Time
+		var idleC, actionC, leverC <-chan time.Time
+		leverC = c.leverC
 		if c.idle != nil {
 			idleC = c.idle.C
 		}
@@ -1399,6 +1450,10 @@ func (c *conv) loop() {
 		case <-actionC:
 			c.actionTimer = nil
 			c.actionDue()
+		case <-leverC:
+			// No compaction started within the cap: what waited goes now.
+			c.leverC, c.leverStop = nil, nil
+			c.kick()
 		case <-beat.C:
 			c.live.writeSnapshot()
 			c.persistSeq()
@@ -1450,6 +1505,9 @@ func (c *conv) state() State {
 	st.Status, st.ClosedAt = StatusIdle, ""
 	if c.turn {
 		st.Status = StatusRunning
+		if !c.closed && c.rec.Parent != nil && c.rec.TurnOpen {
+			st.TurnStartedAt = c.rec.TurnStartedAt
+		}
 	}
 	if c.closed {
 		st.Status, st.ClosedAt = StatusClosed, c.rec.ClosedAt
@@ -1698,7 +1756,7 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 // it, which each turn end submits; mail waits for the next message turn, or
 // goes alone once nothing is queued.
 func (c *conv) kick() {
-	if c.closed || c.turn || c.replaying || len(c.steered) > 0 || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
+	if c.closed || c.turn || c.replaying || len(c.steered) > 0 || c.leverC != nil || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
 		return
 	}
 	held, err := wsinbox.Held(c.inbox)
@@ -1896,6 +1954,9 @@ func (c *conv) startProcess() error {
 	if rp.Definition.Backend != rec.Backend {
 		return fmt.Errorf("agent profile %q now selects backend %q; this conversation runs on %q", rec.Profile, rp.Definition.Backend, rec.Backend)
 	}
+	if rp.Definition.Lead != rec.Lead {
+		return fmt.Errorf("agent profile %q changed its lead setting; refusing to start", rec.Profile)
+	}
 	if rec.Lead {
 		return c.startLead(rec, rp.Definition, false)
 	}
@@ -1903,6 +1964,11 @@ func (c *conv) startProcess() error {
 }
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
+	if rec.Backend == BackendPi && !attach {
+		if err := c.r.checkChildProfile(rec.Parent, rec.Profile, def); err != nil {
+			return err
+		}
+	}
 	if rec.Backend == BackendPi && c.r.opts.Holders != nil && !attach {
 		if !c.r.scanDone() {
 			return errors.New("holder scan is not complete")
@@ -1979,6 +2045,11 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		if attach {
 			spec.Holder.id, spec.Holder.skipTo = rec.HolderID, rec.HolderSeq
 		}
+	}
+	if rec.Backend == BackendPi && !attach {
+		// Persist exactly the definition checked above and passed to Start,
+		// after retiring the previous process. Reattachment keeps this copy.
+		c.update(func(rec *Record) { rec.ResolvedDefinition = &def })
 	}
 	proc, err := c.r.opts.Backends[rec.Backend].Start(context.Background(), spec)
 	if err != nil {
@@ -2059,7 +2130,35 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		Env:         environ(),
 		Holder:      holder,
 		Lead: &LeadSpec{
-			PermissionMode: rec.PermissionMode,
+			PermissionMode:  rec.PermissionMode,
+			PluginIsolation: leadPluginIsolation(rec.PluginIsolation),
+			PluginWarning: func(warning string) {
+				c.update(func(rec *Record) { rec.PluginWarning = warning })
+				if warning != "" {
+					fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", rec.ReplyID, warning)
+				}
+			},
+			WSMCP: func() (MCPCommand, error) {
+				if c.r.opts.WSMCP == nil {
+					return MCPCommand{}, errors.New("bundled ws-mcp launcher unavailable")
+				}
+				cmd, err := c.r.opts.WSMCP(rec.workDir())
+				if err != nil {
+					return MCPCommand{}, err
+				}
+				env := map[string]string{}
+				for name, value := range cmd.Env {
+					env[name] = value
+				}
+				env[EnvAllowedTools], env[EnvPiToken], env[EnvPiEndpoint] = "", "", ""
+				for _, name := range mailboxIdentityEnv {
+					env[name] = ""
+				}
+				env[EnvHostedSession], env[EnvHostedSessionKey] = "1", rec.WSKey
+				env[EnvHostedSessionRow] = wsdashboard.RegistrationPath(c.r.opts.Dir, rec.ReplyID)
+				cmd.Env = env
+				return cmd, nil
+			},
 			Env: map[string]string{
 				EnvHostedSession:    "1",
 				EnvHostedSessionKey: rec.WSKey,
@@ -2132,7 +2231,12 @@ func (c *conv) retireHolder() error {
 func (c *conv) reattach() {
 	rec := c.record()
 	def := Profile{Backend: rec.Backend, Lead: rec.Lead}
-	if rp, err := c.r.resolve(rec.Profile, rec.Root); err == nil && rp.Definition.Backend == rec.Backend {
+	if rec.Backend == BackendPi && rec.ResolvedDefinition != nil {
+		def = *rec.ResolvedDefinition
+	} else if rp, err := c.r.resolve(rec.Profile, rec.Root); err == nil && rp.Definition.Backend == rec.Backend {
+		// Best-effort mapping for a legacy held process is not evidence of
+		// what it launched with. Keep its child ceiling unavailable until
+		// an actual startWorker launch records the checked definition.
 		def = rp.Definition
 	}
 	var err error
@@ -2423,6 +2527,11 @@ func (c *conv) handle(ev Event) {
 			c.update(func(rec *Record) { rec.SessionID = ev.SessionID })
 		}
 	case ev.Live != nil:
+		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase == wslive.CompactStart {
+			// The requested compaction started: its own turn holds kick
+			// until it ends.
+			c.holdForLever(false)
+		}
 		if ev.Live.Kind == wslive.KindReply && ev.Live.Final && !(quiet && c.rec.Parent != nil && ev.Seq <= c.rec.TurnStartSeq) {
 			c.reply = ev.Live.Text
 		}
@@ -2464,6 +2573,11 @@ func (c *conv) handle(ev Event) {
 			return
 		}
 		c.replayBoundary = c.replayBoundary || c.replaying
+		if !quiet {
+			// Every turn end lifts an earlier hold; a lever turn arms anew.
+			c.holdForLever(ev.CompactRequested && !c.interruptAsked)
+			c.interruptAsked = false
+		}
 		c.endTurn(ev.TurnError, quiet)
 	case ev.Approval != nil:
 		c.addApproval(*ev.Approval, quiet)
@@ -2768,6 +2882,9 @@ func (c *conv) answerApproval(id string, allow bool, message string) error {
 func (c *conv) processExited() {
 	rejoining, proc := c.replaying, c.proc
 	c.events = nil
+	// No compaction follows from a process that is gone.
+	c.holdForLever(false)
+	c.interruptAsked = false
 	if c.replaying && c.rec.Parent != nil {
 		// Apply any completed replayed turn before handling an exited child.
 		if c.rec.TurnOpen && !c.turn && c.replayBoundary {
@@ -2937,9 +3054,27 @@ func (c *conv) checkInterrupt() {
 	if err != nil || len(recs) == 0 || !c.turn || c.proc == nil {
 		return
 	}
+	c.interruptAsked = true
 	if err := c.proc.Interrupt(); err != nil {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: interrupt: %v\n", c.rec.ReplyID, err)
 		c.stopProcess("")
+	}
+}
+
+// leverHoldCap bounds how long queued input waits, after a turn that
+// carried a successful compaction lever call, for that compaction to start.
+const leverHoldCap = 5 * time.Second
+
+// holdForLever lifts the lever hold, ending its cap timer, and with arm
+// starts it anew. Lifting submits nothing itself: the caller's own kick
+// (a turn end's) or the compaction turn's end does.
+func (c *conv) holdForLever(arm bool) {
+	if c.leverStop != nil {
+		c.leverStop()
+	}
+	c.leverC, c.leverStop = nil, nil
+	if arm {
+		c.leverC, c.leverStop = c.r.opts.Timer(leverHoldCap)
 	}
 }
 
@@ -3024,7 +3159,10 @@ func (c *conv) close() {
 	c.live.setAdapter("")
 	c.writeRegistration()
 	if c.rec.TurnOpen {
-		c.update(func(rec *Record) { rec.TurnOpen = false })
+		c.update(func(rec *Record) {
+			finishActiveTurn(rec, c.r.opts.Now().UnixMilli())
+			rec.TurnOpen = false
+		})
 	}
 	c.signalSettled()
 	c.watched()

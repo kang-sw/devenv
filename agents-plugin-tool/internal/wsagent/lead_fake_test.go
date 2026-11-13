@@ -711,6 +711,13 @@ func newLeadHarness(t *testing.T) *leadHarness {
 	// unwrap), which a missing file fails; the holders are fakes, so
 	// nothing ever runs the command.
 	setLookPath(t, func(file string) (string, error) { return file, nil })
+	// Pi resource discovery belongs to its installed SDK; these fake
+	// commands have no SDK and the fake holder never executes them.
+	restorePi := preparePiLeadLaunch
+	preparePiLeadLaunch = func(command string, pre []string, spec StartSpec) (string, []string, error) {
+		return command, append(pre, piLeadArgs(spec)...), nil
+	}
+	t.Cleanup(func() { preparePiLeadLaunch = restorePi })
 	restore := environ
 	environ = func() []string { return slices.Clone(leadDaemonEnv) }
 	t.Cleanup(func() { environ = restore })

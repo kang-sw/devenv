@@ -114,6 +114,7 @@ actual result under `### Result`.
 ## Content
 
 - Record the judgment implementation cannot re-derive: the choice among workable alternatives, why the others lost, agreed interfaces, and what the ticket deliberately leaves untouched.
+- An approved visual reference (mockup, screenshot, design file) lives in the tracked `<ticket root>/assets/<stem>/` folder, linked by path from the ticket; prefer text forms such as HTML or SVG over binary images, as a preference rather than a constraint. A path outside the tracked tree does not survive cleanup or travel with the ticket.
 - Point at code by the search that finds it rather than by surveyed coordinates; `file:line` earns its place as evidence for a claim, not as an edit target.
 
 ## General

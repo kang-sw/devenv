@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>board-reorder-hold mockup v2</title>
+<!-- Archived 2026-11-13 from MAIN board topic board-reorder-hold, panel "목업 v2" (source /tmp/rhmock/payload-v2.html). Visual reference only: where it differs from the ticket Decisions (hover deferral, quiescence-ended compensation, slide on pill release), the Decisions win. -->
+</head><body style="background:#0f1115;margin:16px">
+<style>
+#rh2{font:13px/1.4 system-ui,sans-serif;color:#ddd}
+.rh2bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
+#rh2 button{background:#2a2f3a;color:#ddd;border:1px solid #444;border-radius:4px;padding:2px 8px;cursor:pointer;font:inherit}
+.rh2bar label{display:flex;gap:4px;align-items:center}
+.rh2w{display:flex;gap:6px}
+#rh2pc,#rh2vp{height:340px;overflow-y:auto;border:1px solid #444;border-radius:6px;padding:6px;background:#15181e;box-sizing:border-box}
+#rh2pc{display:none;width:120px;flex:none}
+.rh2pin #rh2pc{display:block}
+#rh2vp{flex:1;min-width:0;overflow-anchor:none;position:relative}
+.rh2c{position:relative;border:1px solid #3a4150;border-left:3px solid #3a4150;border-radius:6px;margin-bottom:6px;padding:6px 8px;background:#1d222b}
+.rh2c.rh2held{border-left-color:#5c7cfa}
+.rh2s{background:#222;border-style:dashed;color:#9aa}
+.rh2p{background:#2b2630}
+.rh2h{display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap}
+.rh2ts{color:#8a93a3;font-size:11px}
+.rh2tag{display:none;background:#3b5bdb;color:#fff;border-radius:10px;padding:0 7px;font-size:11px}
+.rh2held .rh2tag,.rh2fold .rh2tag{display:inline-block}
+.rh2fold .rh2tag{background:#555}
+.rh2fold .rh2b,.rh2fold .rh2x{display:none}
+.rh2ch{margin:10px 0 6px;color:#8a93a3;font-size:12px;border-top:1px solid #333;padding-top:4px}
+.rh2pw{position:sticky;top:0;height:0;z-index:5;text-align:center}
+#rh2pill{display:none;margin-top:2px;background:#3b5bdb!important;color:#fff!important;border:0!important;border-radius:12px!important;padding:2px 12px!important;box-shadow:0 2px 8px #000a}
+#rh2pill.on{display:inline-block}
+#rh2log{margin-top:6px;height:96px;overflow:auto;font:11px/1.35 ui-monospace,monospace;color:#9aa;background:#111;border-radius:4px;padding:4px 6px}
+</style>
+<div id="rh2">
+<div class="rh2bar">
+<button id="rh2off">화면 밖 토픽 업데이트</button>
+<button id="rh2two">같은 순간에 두 토픽 업데이트</button>
+<button id="rh2pins">핀: 보드 위</button>
+<button id="rh2slow">느린 프레임</button>
+<label><input type="checkbox" id="rh2hold" checked>보류</label>
+<label><input type="checkbox" id="rh2comp" checked>스크롤 보정</label>
+<button id="rh2reset">초기화</button>
+</div>
+<div class="rh2w"><div id="rh2pc"></div><div id="rh2vp"><div class="rh2pw"><button id="rh2pill"></button></div></div></div>
+<div id="rh2log"></div>
+</div>
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)},vp=$('rh2vp'),pc=$('rh2pc'),lg=$('rh2log'),pill=$('rh2pill'),root=$('rh2');
+var N=12,hs=[90,130,70,110,150,80,120,95,140,75,105,125],C,held,clock,sess,atop,tm=[];
+var rm=matchMedia('(prefers-reduced-motion:reduce)');
+var ro=new ResizeObserver(function(){if(sess&&Date.now()<sess.end)rest()});
+function log(s){var d=document.createElement('div');d.textContent=s;lg.appendChild(d);lg.scrollTop=1e9}
+function on(i){return $(i).checked}
+function mk(id,k,n,h){
+  var c=document.createElement('div'),t=k==='t';
+  c.className='rh2c '+(k==='s'?'rh2s':k==='p'?'rh2p':'');c.setAttribute('data-i',id);
+  c.innerHTML='<div class="rh2h"><b>'+(k==='s'?'카드 '+id+' (고정)':k==='p'?'핀 '+id:id)+'</b>'+(t?'<span><i class="rh2tag"></i> <span class="rh2ts"></span> <button class="rh2u">이 토픽 업데이트</button> <button class="rh2x">닫기</button></span>':'<i class="rh2tag"></i>')+'</div><div class="rh2b" style="min-height:'+(h||20)+'px">'+(t?'토픽 '+id+' 내용 선택해 보세요':'')+'</div>';
+  C[id]={el:c,k:k,n:n,last:N-n,h:h};ro.observe(c);return c;
+}
+function eff(id){return held[id]?held[id].at:C[id].last}
+function list(){
+  var t=[],c=[],id;
+  for(id in C)if(C[id].k==='t')(C[id].cl?c:t).push(id);
+  t.sort(function(a,b){return eff(b)-eff(a)||C[a].n-C[b].n});
+  c.sort(function(a,b){return C[b].cl-C[a].cl});
+  t.splice(0,0,'A');t.splice(6,0,'B');
+  return (atop?['P1','P2']:[]).concat(t,['H'],c);
+}
+function cur(){var o=[],i,e;for(i=0;i<vp.children.length;i++){e=vp.children[i].getAttribute('data-i');if(e)o.push(e)}return o}
+function ov(id){var r=C[id].el.getBoundingClientRect(),v=vp.getBoundingClientRect();return Math.min(r.bottom,v.bottom)-Math.max(r.top,v.top)}
+function top(id){return C[id].el.getBoundingClientRect().top-vp.getBoundingClientRect().top}
+function pick(mv){
+  var l=cur(),i;
+  for(i=0;i<l.length;i++)if(held[l[i]]&&ov(l[i])>0)return l[i];
+  for(i=0;i<l.length;i++)if(C[l[i]].k!=='h'&&!mv[l[i]]&&ov(l[i])>1)return l[i];
+  return null;
+}
+function rest(){
+  if(!sess)return;var d=top(sess.id)-sess.y;
+  if(Math.abs(d)>.3)vp.scrollTop+=d;sess.x=vp.scrollTop;
+}
+function build(){
+  var l=list(),id,o,h,n=0,tg;
+  root.classList.toggle('rh2pin',!atop);
+  if(!atop){pc.appendChild(C.P1.el);pc.appendChild(C.P2.el)}
+  l.forEach(function(i){vp.appendChild(C[i].el)});
+  for(id in C){
+    o=C[id];h=held[id];if(h&&!h.c)n++;
+    o.el.classList.toggle('rh2held',!!h);
+    o.el.classList.toggle('rh2fold',!!(o.cl||h&&h.c));
+    tg=o.el.querySelector('.rh2tag');if(tg)tg.textContent=(o.cl||h&&h.c)?'닫힘':'moved ↑';
+    if(o.k==='t')o.el.querySelector('.rh2ts').textContent='#'+o.last;
+  }
+  pill.textContent=n+'개 업데이트됨 ↑';pill.className=n?'on':'';
+}
+// one layout pass: pick anchor, change, rebuild, restore (+ keep restoring via RO)
+function apply(mv,slide,fn){
+  var a=on('rh2comp')?pick(mv):null,ay=a&&top(a),bf={};
+  if(slide&&!rm.matches)cur().forEach(function(i){bf[i]=C[i].el.getBoundingClientRect().top});
+  if(fn)fn();
+  build();
+  if(a){sess={id:a,y:ay,x:0,end:Date.now()+1500};rest()}else sess=null;
+  Object.keys(bf).forEach(function(i){
+    var dy=bf[i]-C[i].el.getBoundingClientRect().top;
+    if(Math.abs(dy)>1)C[i].el.animate([{transform:'translateY('+dy+'px)'},{transform:'none'}],{duration:220,easing:'ease-out'});
+  });
+}
+function nudge(id){if(!rm.matches)C[id].el.animate([{transform:'none'},{transform:'translateY(-3px)'},{transform:'none'}],{duration:300})}
+function update(ids){
+  var up=[],nd=[],mv={},slide=false;
+  ids.forEach(function(id){
+    var t=C[id];
+    if(t.cl){log(id+' 닫힌 토픽: 업데이트 무시');return}
+    var old=t.last;t.last=N+(++clock);
+    if(held[id]){log(id+' 다시 업데이트: 보류 유지, 처음 시각 그대로(제자리)');nd.push(id)}
+    else up.push([id,old,t.last]);
+  });
+  up.forEach(function(p){mv[p[0]]=1});
+  up.forEach(function(p){
+    var id=p[0],cl=cur(),v=vp.getBoundingClientRect(),nl,to,from,k,r,dv;
+    up.forEach(function(q){if(q[0]!==id)C[q[0]].last=q[1]});
+    nl=list();
+    up.forEach(function(q){C[q[0]].last=q[2]});
+    to=nl.indexOf(id);from=cl.indexOf(id);
+    if(to>=from){log(id+' 업데이트: 순서 변화 없음');return}
+    if(on('rh2hold')&&ov(id)>=Math.min(48,C[id].el.offsetHeight-2)){
+      for(k=to+1;k<nl.length&&mv[nl[k]];k++);
+      r=C[nl[k]].el.getBoundingClientRect();
+      dv=r.top>v.top+8&&r.top-C[id].el.offsetHeight<v.bottom-8;
+      if(!dv){held[id]={at:p[1]};nd.push(id);log(id+' 업데이트: 보이는 중이고 목적지는 화면 밖 → 제자리 보류');return}
+      slide=true;log(id+' 업데이트: 목적지가 보임 → 220ms 슬라이드로 이동');return;
+    }
+    log(id+' 업데이트: '+(on('rh2hold')?'화면 밖이라 바로 이동(보정으로 보이는 카드 고정)':'보류 꺼짐: 바로 이동'));
+  });
+  Object.keys(held).forEach(function(i){delete mv[i]});
+  apply(mv,slide&&on('rh2hold'));
+  nd.forEach(nudge);
+}
+function close(id){
+  var t=C[id],h=held[id];
+  if(t.cl||h&&h.c)return;
+  if(on('rh2hold')&&ov(id)>0){
+    held[id]={at:h?h.at:t.last,c:1};log(id+' 닫기: 보이는 중이라 접힌 채 제자리 유지');apply({});
+  }else{
+    delete held[id];t.cl=++clock;log(id+' 닫기: 화면 밖이라 바로 닫힌 토픽으로 이동');var m={};m[id]=1;apply(m);
+  }
+}
+function busy(id){
+  var s=document.getSelection(),e=C[id].el;
+  if(s&&!s.isCollapsed&&s.rangeCount&&(e.contains(s.anchorNode)||e.contains(s.focusNode)))return true;
+  return e.matches(':focus-within');
+}
+function check(force){
+  var r=[],mv={};
+  Object.keys(held).forEach(function(id){
+    if(force||ov(id)<=0){if(!force&&busy(id)){return}r.push(id)}
+  });
+  if(!r.length)return;
+  r.forEach(function(id){
+    mv[id]=1;
+    if(held[id].c)C[id].cl=++clock;
+    delete held[id];
+  });
+  log('보류 해제 한 번에: '+r.join(', ')+(force?' (알림 클릭)':' (시야 밖)'));
+  apply(mv);
+}
+vp.addEventListener('scroll',function(){
+  if(sess&&Math.abs(vp.scrollTop-sess.x)>1)sess=null;
+  check();
+});
+document.addEventListener('selectionchange',function(){setTimeout(check,0)});
+root.addEventListener('focusout',function(){setTimeout(check,0)});
+root.addEventListener('click',function(e){
+  var b=e.target,c=b.closest&&b.closest('.rh2c');
+  if(!c)return;var id=c.getAttribute('data-i');
+  if(b.className==='rh2u')update([id]);else if(b.className==='rh2x')close(id);
+});
+pill.onclick=function(){check(true);sess=null;vp.scrollTo({top:0,behavior:'smooth'});log('알림 클릭: 모두 해제하고 맨 위로 스크롤')};
+function topics(f){return cur().filter(function(i){return C[i].k==='t'&&!C[i].cl&&!held[i]&&f(i)})}
+function rnd(a){return a[Math.floor(Math.random()*a.length)]}
+function offs(){return topics(function(i){return ov(i)<=0&&cur().indexOf(i)>2})}
+function viss(){return topics(function(i){return ov(i)>=60})}
+$('rh2off').onclick=function(){var o=offs();if(!o.length)return log('화면 밖 토픽 없음');update([rnd(o)])};
+$('rh2two').onclick=function(){
+  var o=offs(),v=viss();if(!o.length||!v.length)return log('보이는/화면 밖 토픽이 부족함');
+  update([rnd(v),rnd(o)]);
+};
+$('rh2pins').onclick=function(){
+  atop=!atop;this.textContent=atop?'핀: 보드 위':'핀: 핀 컬럼';
+  log(atop?'핀을 보드 위로 쌓음(목적지는 핀 아래)':'핀 컬럼으로 분리(보류는 메인 컬럼에만 적용)');apply({});
+};
+function grow(id){apply({},false,function(){var t=C[id];t.h+=120;t.el.querySelector('.rh2b').style.minHeight=t.h+'px'});log(id+' 높이 +120px (늦은 iframe 높이 보고), 앵커 유지')}
+$('rh2slow').onclick=function(){
+  var a=pick({}),l=cur(),t=null,i;
+  for(i=0;i<l.length&&l[i]!==a;i++)if(C[l[i]].k==='t'&&!C[l[i]].cl)t=l[i];
+  if(!t)return log('앵커 위에 토픽이 없음: 스크롤을 더 내려 보세요');
+  log('느린 프레임: '+t+'가 1초 뒤, 다시 1.5초 뒤 커짐 (앵커 '+a+')');
+  tm.push(setTimeout(function(){grow(t)},1000),setTimeout(function(){grow(t)},2500));
+};
+function reset(){
+  var i;tm.forEach(clearTimeout);tm=[];ro.disconnect();sess=null;
+  while(vp.children.length>1)vp.removeChild(vp.lastChild);pc.innerHTML='';
+  C={};held={};clock=0;atop=true;$('rh2pins').textContent='핀: 보드 위';
+  for(i=0;i<N;i++)mk('T'+(i+1),'t',i,hs[i]);
+  mk('A','s',0);mk('B','s',0);mk('P1','p',0,10);mk('P2','p',0,10);
+  C.H={el:document.createElement('div'),k:'h'};C.H.el.className='rh2ch';C.H.el.textContent='닫힌 토픽';C.H.el.setAttribute('data-i','H');
+  build();vp.scrollTop=400;lg.innerHTML='';
+  log('초기화: 중간쯤으로 스크롤됨. 보이는 카드에서 "이 토픽 업데이트"/"닫기"를 눌러 보세요.');
+}
+$('rh2reset').onclick=reset;
+reset();
+})();
+</script>
+
+</body></html>

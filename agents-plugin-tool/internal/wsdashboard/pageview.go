@@ -232,9 +232,18 @@ func (a AgentNode) Rate() int64 {
 	return max(int64(math.Round(a.OutputTps)), 1)
 }
 
-// HasStats reports whether the row shows any telemetry stat.
+// ActiveSince is the shifted ticker base for the current working segment.
+// A running row without a turn start can be held but idle; it must not tick.
+func (a AgentNode) ActiveSince() int64 {
+	if !a.IsRunning() || a.TurnStartedAt <= 0 {
+		return 0
+	}
+	return a.TurnStartedAt - max(a.ActiveMs, 0)
+}
+
+// HasStats reports whether the row shows telemetry or a finished timestamp.
 func (a AgentNode) HasStats() bool {
-	return a.ModelText() != "" || a.ContextText() != "" || a.Rate() > 0
+	return a.ModelText() != "" || a.ContextText() != "" || a.Rate() > 0 || (!a.IsRunning() && a.EndedAt > 0)
 }
 
 // PeerGroup is the lead's peer leads: every live peer and the most recent

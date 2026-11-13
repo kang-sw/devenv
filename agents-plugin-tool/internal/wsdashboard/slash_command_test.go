@@ -205,10 +205,11 @@ process.stdout.write(bad.join("\n"));
 // line with a warning.
 func TestSlashCommandRestoresAsSelection(t *testing.T) {
 	mention, dash := pageScripts(t)
-	restore := composerFunc(t, dash, "restoreHeld")
+	restore := composerFunc(t, dash, "restoreHeld") + composerFunc(t, dash, "restoreHeldNow")
 	send := composerFunc(t, dash, "sendMessage")
 	runNode(t, "slash restore", slashDOM+mention+slashPrelude+`
-var imgSeq = 0, chips = {}, bmentions = [], MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
+var imgSeq = 0, chips = {}, bmentions = [], holdSync = false, MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
+function allNums() { return markerNums(ctext.value); } function syncMarkers() {}
 function markerNums(text) { var out = {}, re = new RegExp(MARKER, "g"), m; while ((m = re.exec(text))) out[+m[1]] = true; return out; }
 function marker(n) { return "[Image #" + n + "]"; }
 function attachSrc(n) { return n; } function restoreTopics() { return []; } function shiftMentions() {}
@@ -246,7 +247,7 @@ func TestHeldCommandBubbleHasNoSteer(t *testing.T) {
 	f.withCommands(t, wslive.SlashCommand{Name: "compact", Source: "builtin"})
 	text, _ := f.send(t, `{"text":"plain"}`)
 	cmd, _ := f.send(t, `{"command":"compact","args":"keep <the> plan"}`)
-	code, page := get(t, f.base+"/s/livesession")
+	code, page := get(t, f.base+"/s/livesession?frame=1")
 	if code != http.StatusOK {
 		t.Fatalf("GET /s/livesession = %d", code)
 	}
@@ -310,12 +311,12 @@ func TestCommandListReachesThePageOnlyWhenListed(t *testing.T) {
 	}
 
 	f := startPageFixture(t)
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `<div id="r-cmds" class="region r-cmds" data-region="cmds"`) || strings.Contains(page, `data-name="compact"`) {
 		t.Error("the live page without a command list has data in its cmds region, or no region")
 	}
 	f.withCommands(t, wslive.SlashCommand{Name: "compact", Source: "builtin"})
-	_, page = get(t, f.base+"/s/livesession")
+	_, page = get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `<i data-name="compact" data-src="builtin"></i>`) {
 		t.Error("the live page does not carry the session's command list")
 	}

@@ -1,7 +1,9 @@
 package wswhiteboard
 
 import (
+	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -32,6 +34,9 @@ type View struct {
 	// file name beside the page. Empty for the embed.
 	StampFile string
 	Topics    []TopicView
+	// DeferredTopics are capped closed topics, carried inert for explicit
+	// panel/entry navigation without another stream protocol.
+	DeferredTopics []TopicView
 	// ClosedMore counts the closed topics past the ones Topics holds, in close
 	// order; ClosedNext is the index (ClosedWindow.From) of the first of them.
 	ClosedMore, ClosedNext int
@@ -45,6 +50,10 @@ type View struct {
 	// Stored holds every item ID the store holds, so a {{nn}} reference to
 	// an item the page omits still resolves as a known item.
 	Stored map[int]bool
+	// StoredPanels holds board-wide stable pN targets, including older pages.
+	StoredPanels map[string]bool
+	// FullBoardLink is the embed's link to the full board, relative by default.
+	FullBoardLink string
 	// FileLink turns a file path a markdown link or image names (relative
 	// to the session root, or absolute) into the href the page uses from
 	// the folder it is written to. Nil keeps the path as written.
@@ -157,6 +166,14 @@ type TopicView struct {
 	RecapMs    int64
 	RecapClock string
 	RecapStamp string
+	// LatestAgent supplies the current-state summary, never a system event.
+	// Recap remains a read-only fallback for unconverted legacy views.
+	LatestAgent *Entry
+	// Stream is the newest HistoryWindow entries; Older holds inert pages,
+	// nearest first. PanelRecaps lists latest distinct panels for the embed.
+	Stream      EntryPage
+	Older       []EntryPage
+	PanelRecaps []EntryView
 	// Policy and Acks are the topic's items waiting on the user; they never
 	// collapse.
 	Policy []ItemView
@@ -193,7 +210,96 @@ type TopicView struct {
 	UpdatedClock string
 	// Fresh counts the items new since the previous embed (embed only).
 	Fresh int
+	// Tickets are the topic's linked tickets, in the order the lead wrote
+	// them, each with the status ViewInput.Tickets resolved at render time.
+	Tickets []TicketBadge
+	// Live marks a topic with live work: at least one linked ticket still
+	// idea, todo, or ready whose category is actionable (liveCategories).
+	// The page gives it a glow.
+	Live bool
 }
+
+// Linked ticket statuses: a ticket's status directory, or TicketUnknown for
+// a stem the resolver does not find.
+const (
+	TicketIdea    = "idea"
+	TicketTodo    = "todo"
+	TicketReady   = "ready"
+	TicketDone    = "done"
+	TicketDropped = "dropped"
+	TicketUnknown = "unknown"
+)
+
+// liveCategories are the ticket categories (a stem's second segment) whose
+// open tickets light a topic's glow: work to carry out. A linked research or
+// epic ticket still shows as a badge, but never makes a topic live.
+var liveCategories = []string{"feat", "bug", "refactor", "chore"}
+
+// TicketResolver resolves a linked ticket stem to its status: the status
+// directory that holds it (TicketIdea, TicketTodo, TicketReady, TicketDone,
+// or TicketDropped), false when none does. The host supplies it; this
+// package never reads a ticket tree.
+type TicketResolver interface {
+	TicketStatus(stem string) (status string, ok bool)
+}
+
+// TicketBadge is one linked ticket as a topic bar shows it.
+type TicketBadge struct {
+	// Stem is the full stem; Name is the stem without its date prefix, the
+	// badge's text.
+	Stem, Name string
+	// Status is the resolved status, TicketUnknown when the resolver does
+	// not find the stem (or the view has no resolver).
+	Status string
+}
+
+// live reports whether the badge's ticket is open work of an actionable
+// category.
+func (b TicketBadge) live() bool {
+	switch b.Status {
+	case TicketIdea, TicketTodo, TicketReady:
+	default:
+		return false
+	}
+	parts := strings.SplitN(b.Name, "-", 2)
+	return slices.Contains(liveCategories, parts[0])
+}
+
+// ticketBadges resolves stems through resolve (nil resolves none), caching
+// each stem's status in seen across the view's topics.
+func ticketBadges(stems []string, resolve TicketResolver, seen map[string]string) []TicketBadge {
+	var out []TicketBadge
+	for _, stem := range stems {
+		status, ok := seen[stem]
+		if !ok {
+			status = TicketUnknown
+			if resolve != nil {
+				if s, found := resolve.TicketStatus(stem); found && slices.Contains([]string{TicketIdea, TicketTodo, TicketReady, TicketDone, TicketDropped}, s) {
+					status = s
+				}
+			}
+			seen[stem] = status
+		}
+		name := stem
+		if _, rest, cut := strings.Cut(stem, "-"); cut {
+			name = rest
+		}
+		out = append(out, TicketBadge{Stem: stem, Name: name, Status: status})
+	}
+	return out
+}
+
+// HeadSummary reports whether the topic's head carries its summary line: an
+// open topic with a latest agent line or a check list. The line holds the
+// agent line (never a legacy recap or a system event) and the check pill.
+func (t TopicView) HeadSummary() bool {
+	return !t.Closed && (t.LatestAgent != nil || t.ChecksShown())
+}
+
+// LegacyRecapOpen reports whether an open topic shows an unconverted legacy
+// recap, as a card under the head: it has no agent line to stand in the
+// head.
+func (t TopicView) LegacyRecapOpen() bool { return t.RecapOpen() && t.LatestAgent == nil }
 
 // DocOpen reports whether the topic's body renders open.
 func (t TopicView) DocOpen(embed bool) bool {
@@ -205,11 +311,19 @@ func (t TopicView) DocOpen(embed bool) bool {
 
 // RecapOpen reports whether the recap shows at the top of the topic: it has
 // one and is open.
-func (t TopicView) RecapOpen() bool { return t.Recap != "" && !t.Closed }
+func (t TopicView) RecapOpen() bool { return t.Summary() != "" && !t.Closed }
+
+// Summary is the latest agent line, or a legacy recap when not converted.
+func (t TopicView) Summary() string {
+	if t.LatestAgent != nil {
+		return t.LatestAgent.Text
+	}
+	return t.Recap
+}
 
 // RecapFolded reports whether the recap folds with the body: it has one and
 // is closed.
-func (t TopicView) RecapFolded() bool { return t.Recap != "" && t.Closed }
+func (t TopicView) RecapFolded() bool { return t.Summary() != "" && t.Closed }
 
 // HasFold reports whether the topic renders the body's fold: it has a body,
 // or a recap folded into it.
@@ -399,9 +513,10 @@ func withActions(panels []Panel, fileActions func(string) FileAction) []Panel {
 
 // ViewInput is what BuildView needs beyond the State.
 type ViewInput struct {
-	Layout  Layout
-	ReplyID string
-	Panels  []Panel
+	Layout        Layout
+	ReplyID       string
+	Panels        []Panel
+	FullBoardLink string
 	// FileLink, FileText, ImageSrc, DocImageSrc, FileActions, and
 	// OutsideImage are copied to the View.
 	FileLink     func(path string) string
@@ -410,6 +525,9 @@ type ViewInput struct {
 	DocImageSrc  func(path string) string
 	FileActions  func(path string) FileAction
 	OutsideImage func(path string) FileAction
+	// Tickets resolves each topic's linked ticket stems to their status;
+	// nil shows every linked ticket as unknown.
+	Tickets TicketResolver
 	// Closed, when set, builds the view of the capped closed topics alone,
 	// the served page's show-more fetch; nil builds the whole board with the
 	// first ClosedCap of them.
@@ -427,17 +545,29 @@ type ClosedWindow struct {
 // BuildView derives a page view from state.
 func BuildView(state *State, in ViewInput) View {
 	view := View{
-		Layout:       in.Layout,
-		ReplyID:      in.ReplyID,
-		Seq:          state.Seq,
-		Panels:       in.Panels,
-		Stored:       map[int]bool{},
-		FileLink:     in.FileLink,
-		FileText:     in.FileText,
-		ImageSrc:     in.ImageSrc,
-		DocImageSrc:  in.DocImageSrc,
-		FileActions:  in.FileActions,
-		OutsideImage: in.OutsideImage,
+		Layout:        in.Layout,
+		ReplyID:       in.ReplyID,
+		Seq:           state.Seq,
+		Panels:        in.Panels,
+		Stored:        map[int]bool{},
+		StoredPanels:  map[string]bool{},
+		FullBoardLink: in.FullBoardLink,
+		FileLink:      in.FileLink,
+		FileText:      in.FileText,
+		ImageSrc:      in.ImageSrc,
+		DocImageSrc:   in.DocImageSrc,
+		FileActions:   in.FileActions,
+		OutsideImage:  in.OutsideImage,
+	}
+	if view.FullBoardLink == "" {
+		view.FullBoardLink = in.ReplyID + "/index.html"
+	}
+	for _, doc := range state.Topics {
+		for _, entry := range doc.Entries {
+			if entry.Kind == EntryPanel {
+				view.StoredPanels[entry.PanelID] = true
+			}
+		}
 	}
 	if in.FileActions != nil && in.FileText != nil {
 		view.Panels = withActions(in.Panels, in.FileActions)
@@ -496,13 +626,24 @@ func BuildView(state *State, in ViewInput) View {
 		}
 	}
 
+	ticketStatus := map[string]string{}
 	for _, doc := range state.Topics {
 		block := blockOf(doc.Name)
+		block.Tickets = ticketBadges(doc.Tickets, in.Tickets, ticketStatus)
+		block.Live = slices.ContainsFunc(block.Tickets, TicketBadge.live)
 		block.Doc = doc.Body
 		block.DocMarks = doc.Marks
 		block.DocStale = itemsChanged[doc.Name] > doc.Changed
 		block.DocNew = in.Layout == LayoutEmbed && doc.Body != "" && doc.Changed > state.LastEmbedSeq
 		block.Recap = doc.Recap
+		if latest, ok := doc.LatestAgent(); ok {
+			block.LatestAgent = &latest
+		}
+		block.PanelRecaps, block.Stream, block.Older = streamView(doc, block.Closed, in.Location)
+		if in.Layout == LayoutEmbed {
+			block.Doc, block.DocMarks, block.DocNew = "", nil, false
+			block.Stream, block.Older = EntryPage{}, nil
+		}
 	}
 	stampUpdated(state, blocks, in.Location)
 	for _, block := range blocks {
@@ -521,7 +662,7 @@ func BuildView(state *State, in ViewInput) View {
 	// Quiet follows what the page shows, so an unread body that stays folded
 	// (the embed, an unchanged body) does not make a topic look active.
 	quiet := func(t *TopicView) bool {
-		return !t.waiting() && len(t.Expanded) == 0 && !t.ChecksShown() && !t.DocOpen(in.Layout == LayoutEmbed) && !t.RecapOpen()
+		return !t.waiting() && len(t.Expanded) == 0 && !t.ChecksShown() && !t.DocOpen(in.Layout == LayoutEmbed) && !t.RecapOpen() && (t.Closed || len(t.PanelRecaps) == 0)
 	}
 	for _, name := range order {
 		block := blocks[name]
@@ -548,6 +689,9 @@ func BuildView(state *State, in ViewInput) View {
 	rank := bumpRank(state, activity)
 	sort.SliceStable(order, func(i, j int) bool {
 		a, b := order[i], order[j]
+		if blocks[a].UpdatedMs != blocks[b].UpdatedMs {
+			return blocks[a].UpdatedMs > blocks[b].UpdatedMs
+		}
 		if activity[a] != activity[b] {
 			return activity[a] > activity[b]
 		}
@@ -579,6 +723,11 @@ func BuildView(state *State, in ViewInput) View {
 	view.ClosedNext, view.ClosedMore = end, len(capped)-end
 	for _, name := range shown {
 		view.Topics = append(view.Topics, *blocks[name])
+	}
+	if in.Closed == nil && in.Layout == LayoutFull {
+		for _, name := range capped[end:] {
+			view.DeferredTopics = append(view.DeferredTopics, *blocks[name])
+		}
 	}
 	return view
 }
@@ -646,7 +795,14 @@ func stampUpdated(state *State, blocks map[string]*TopicView, loc *time.Location
 	for _, doc := range state.Topics {
 		touch(doc.Name, doc.ChangedAt)
 		touch(doc.Name, doc.RecapAt)
-		if t, err := time.Parse(time.RFC3339, doc.RecapAt); err == nil && doc.Recap != "" {
+		for _, entry := range doc.Entries {
+			touch(doc.Name, entry.At)
+		}
+		at, summary := doc.RecapAt, doc.Recap
+		if agent, ok := doc.LatestAgent(); ok {
+			at, summary = agent.At, agent.Text
+		}
+		if t, err := time.Parse(time.RFC3339Nano, at); err == nil && summary != "" {
 			block := blocks[doc.Name]
 			block.RecapAt = t.UTC().Format(time.RFC3339)
 			block.RecapMs = t.UnixMilli()

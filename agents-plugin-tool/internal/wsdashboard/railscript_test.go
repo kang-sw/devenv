@@ -211,12 +211,35 @@ check("new branch from the detached HEAD", R.worktreeBody("/w/r", { mode: "new",
 check("existing branch, custom folder", R.worktreeBody("/w/r", { mode: "old", name: "ignored", base: "main", pick: "free", custom: true, folder: " /w/wt ", shown: "/w/.wt/r/261112-1333" }),
   { workspace: "/w/r", branch: "free", "new": false, base: "", folder: "/w/wt" });
 
+// deleteReady: Delete stays off until the typed name is the folder exactly,
+// for a refused check, and for a check that answered an earlier open; the
+// submit's own refusals (force, changed) only ask for the name again.
+var clean = { path: "/w/feat-x", folder: "feat-x", branch: "feat", dirty: 0, unreached: 0, force: false, token: "t1" };
+var dirty = { path: "/w/feat-x", folder: "feat-x", dirty: 2, force: true, token: "t2" };
+check("off until the name matches", ["", "f", "feat-", "feat-x"].map(function (s) { return R.deleteReady({ key: 3, check: clean }, s, 3); }), [false, false, false, true]);
+check("the name must match exactly", ["Feat-x", " feat-x", "feat-x ", "feat-xx", "/w/feat-x"].map(function (s) { return R.deleteReady({ key: 3, check: clean }, s, 3); }), [false, false, false, false, false]);
+check("a refused check stays off", ["unknown", "primary", "pooled", "missing", "locked", "busy"].map(function (r) {
+  return R.deleteReady({ key: 3, check: { folder: "feat-x", refusal: r, note: "n" } }, "feat-x", 3);
+}), [false, false, false, false, false, false]);
+check("a stale check stays off", [R.deleteReady({ key: 2, check: clean }, "feat-x", 3), R.deleteReady(null, "feat-x", 3), R.deleteReady({ key: 3, check: null }, "feat-x", 3)], [false, false, false]);
+check("a forced check needs its token", [R.deleteReady({ key: 1, check: dirty }, "feat-x", 1), R.deleteReady({ key: 1, check: { folder: "feat-x", force: true } }, "feat-x", 1)], [true, false]);
+check("the submit's own refusals ask for the name again", ["force", "changed"].map(function (r) {
+  var c = { folder: "feat-x", force: true, token: "t3", refusal: r, note: "n" };
+  return [R.deleteReady({ key: 4, check: c }, "", 4), R.deleteReady({ key: 4, check: c }, "feat-x", 4)];
+}), [[false, true], [false, true]]);
+check("no folder never matches", R.deleteReady({ key: 1, check: { folder: "" } }, "", 1), false);
+// deleteBody: force and the token only when the check needs force.
+check("a clean delete sends no force", R.deleteBody("/w/r", "/w/feat-x", clean), { workspace: "/w/r", path: "/w/feat-x", force: false, token: "" });
+check("a forced delete sends the token", R.deleteBody("/w/r", "/w/feat-x", dirty), { workspace: "/w/r", path: "/w/feat-x", force: true, token: "t2" });
+
 // leadBody: only the picked options go out, and a permission mode only to
 // Claude.
-check("defaults send the harness alone", R.leadBody("/w/r", { harness: "claude", model: "", effort: "", mode: "" }), { root: "/w/r", harness: "claude" });
+check("defaults send the harness alone", R.leadBody("/w/r", { harness: "claude", model: "", effort: "", mode: "" }), { root: "/w/r", harness: "claude", plugin_isolation: "default" });
 check("picked options", R.leadBody("/w/r", { harness: "claude", model: "opus", effort: "high", mode: "plan" }),
-  { root: "/w/r", harness: "claude", model: "opus", effort: "high", permission_mode: "plan" });
-check("pi takes no permission mode", R.leadBody("/w/r", { harness: "pi", model: "m", effort: "off", mode: "auto" }), { root: "/w/r", harness: "pi", model: "m", effort: "off" });
+  { root: "/w/r", harness: "claude", plugin_isolation: "default", model: "opus", effort: "high", permission_mode: "plan" });
+check("pi takes no permission mode", R.leadBody("/w/r", { harness: "pi", model: "m", effort: "off", mode: "auto" }), { root: "/w/r", harness: "pi", plugin_isolation: "default", model: "m", effort: "off" });
+
+check("isolation is always sent", [R.leadBody("/w/r", { harness: "pi", isolation: "isolated" }).plugin_isolation, R.leadBody("/w/r", { harness: "pi" }).plugin_isolation], ["isolated", "default"]);
 
 // reviveRoute: a known move of a named session, its id escaped.
 check("takeover route", R.reviveRoute("takeover", "a b"), "/agents/a%20b/takeover");
@@ -254,7 +277,8 @@ if (bad.length) console.log(bad.join("\n"));
 // pinning and its undo, the persisted stars and collapsed workspaces, the
 // drag order of the sessions and workspaces (its drops, storage, and
 // pruning), the viewed row's mark, the add popovers' placement, branch
-// filter, and add-worktree request, the spawn request, the revive route
+// filter, and add-worktree request, the worktree delete modal's Delete gate
+// and submit, the spawn request, the revive route
 // and entry mark, the hand-off notice, and an approval card's input
 // preview.
 func TestRailScript(t *testing.T) {
@@ -278,6 +302,7 @@ var listeners = {}, winListeners = {};
 var doc = { hidden: false, addEventListener: function (t, fn) { listeners[t] = fn; } };
 window.addEventListener = function (t, fn) { winListeners[t] = fn; };
 var WsRail = window.WsRail, rid = "sess1", live = true, railStore = memStore();
+var shell = false, framed = false;
 var grid = new El("grid", { "data-tab": "convo" });
 var ctext = { value: "", selectionStart: 0, selectionEnd: 0, setSelectionRange: function (a, b) { this.selectionStart = a; this.selectionEnd = b; } };
 var mentions = [], mentionWas = "", imgs = [], imgSeq = 0, chips = {}, cchips = {}, items = {}, openState = {}, boardAnswers = {}, notes = [], bmentions = [];
@@ -319,11 +344,11 @@ func TestRailDraftRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(data)
-	block := regexp.MustCompile(`(?s)\n  // --- per-session drafts -.*?\n\n  if \(live\) \{`).FindString(src)
+	block := regexp.MustCompile(`(?s)\n  // --- per-session drafts -.*?\n\n  // --- iframe shell`).FindString(src)
 	if block == "" {
-		t.Fatal("dashboard.js holds no per-session drafts block ending before if (live)")
+		t.Fatal("dashboard.js holds no per-session drafts block ending before the iframe shell block")
 	}
-	block = strings.TrimSuffix(block, "if (live) {")
+	block = strings.TrimSuffix(block, "// --- iframe shell")
 	if !regexp.MustCompile(`(?s)\n  function sendMessage\(\) \{.*?post\("message", body, function \(ok, res\) \{\n[^\n]*\n      if \(!ok\) \{[^\n]*return; \}\n.*?\n      clearDraft\(\);\n    \}\);\n  \}\n`).MatchString(src) {
 		t.Error("a successful send no longer clears the draft")
 	}
@@ -335,7 +360,7 @@ mentions = [{ start: 3, end: 7, text: "@bob", extra: 1 }];
 imgs = [{ n: 1, name: "a.png", ref: "00aa-1.png" }, { n: 2, name: "pasted.png", data: "xx" }];
 boardAnswers = { "3": { answer: "yes" }, "topic:2": { note: "keep it" } };
 chips = { "3": { id: "3", answer: "yes" } };
-bmentions = [{ topic: "plan", id: "3", text: "picked text" }];
+bmentions = [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }];
 openState = { "rended:/w": true, "gone": false };
 grid.setAttribute("data-tab", "board");
 listeners.input();
@@ -344,13 +369,13 @@ advance(400);
 var saved = JSON.parse(railStore.load("ws.dashboard.draft.sess1"));
 check("the saved draft", [saved.text, saved.mentions, saved.sel, saved.refs, saved.lost, saved.open, saved.tab],
   [ctext.value, [{ start: 3, end: 7, text: "@bob" }], [6, 6], [{ ref: "00aa-1.png", name: "a.png", n: 1 }], [2], { "rended:/w": true }, "board"]);
-check("the saved board mentions", saved.bmentions, [{ topic: "plan", id: "3", text: "picked text" }]);
+check("the saved board mentions", saved.bmentions, [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }]);
 check("the guard asks while a pasted image is held", (function () { var e = { preventDefault: function () {} }; winListeners.beforeunload(e); return e.returnValue; })(), "");
 
 // a reload of the page: empty composer and state, then the restore
 ctext.value = ""; mentions = []; imgs = []; chips = {}; items = {}; openState = {}; boardAnswers = {}; bmentions = []; grid.setAttribute("data-tab", "convo");
 restoreDraft();
-check("the board mentions come back", bmentions, [{ topic: "plan", id: "3", text: "picked text" }]);
+check("the board mentions come back", bmentions, [{ topic: "plan", id: "3", entry: "e7", text: "picked text" }]);
 check("text without the pasted image's marker", ctext.value, "hi @bob see [Image #1] and end");
 check("mentions, selection, the reference image", [mentions, [ctext.selectionStart, ctext.selectionEnd], imgs.map(function (p) { return [p.n, p.ref, p.url]; })],
   [[{ start: 3, end: 7, text: "@bob" }], [6, 6], [[1, "00aa-1.png", "/s/sess1/attachment/00aa-1.png"]]]);
@@ -372,6 +397,20 @@ check("the saved command", JSON.parse(railStore.load("ws.dashboard.draft.sess1")
 cmdSel = null; restoreDraft();
 check("the command comes back as the selection", cmdSel, { name: "compact", args: "keep the plan" });
 cmdSel = null;
+
+// a board note's images: a pasted one's marker leaves the item and topic
+// notes and the chip on reload, and a reference image a note alone names
+// comes back
+ctext.value = ""; imgs = [{ n: 1, name: "a.png", ref: "00aa-1.png" }, { n: 2, name: "pasted.png", data: "xx" }, { n: 3, name: "p2.png", data: "yy" }];
+chips = { "4": { id: "4", answer: "", note: "see [Image #1] and [Image #2]" } };
+boardAnswers = { "4": { note: "see [Image #1] and [Image #2]", noteOpen: true }, "t:plan": { note: "[Image #3] look", noteOpen: true } };
+notes = []; listeners.input(); advance(400);
+ctext.value = ""; imgs = []; chips = {}; items = {}; boardAnswers = {};
+restoreDraft();
+check("lost markers leave the notes and the chip", [boardAnswers["4"].note, boardAnswers["t:plan"].note, chips["4"].note], ["see [Image #1] and ", "look", "see [Image #1] and "]);
+check("a note's reference image comes back", imgs.map(function (p) { return [p.n, p.ref]; }), [[1, "00aa-1.png"]]);
+check("the restore counts every lost image", notes, ["js.draft.imgslost:2"]);
+ctext.value = ""; imgs = []; chips = {}; items = {}; boardAnswers = {};
 
 // a send clears the draft; what is left is saved again as the next draft
 ctext.value = ""; imgs = []; chips = {}; boardAnswers = {}; openState = {}; bmentions = []; grid.setAttribute("data-tab", "convo");

@@ -58,11 +58,10 @@ func lastLine(text string) string {
 
 const changedAt = "changed: 2026-11-04T09:00:00Z"
 
-// An unfiltered query prints every open topic with its open items at depth
-// items, folds closed topics, and names both omissions on its last line.
-func TestQueryUnfilteredDefault(t *testing.T) {
+// Explicit item selectors retain the old open-item defaults and omissions.
+func TestQueryLegacyItemsDefault(t *testing.T) {
 	st := queryBoard(t)
-	text := queryText(t, st, "")
+	text := queryText(t, st, `{"depth":"items"}`)
 	want := `topic "a" [open] items: open 1, answered 1, assumed 1; ` + changedAt + `
   (01) [open] [policy] pick one
 topic "b" [open] items: open 1; body: 10 chars; ` + changedAt + `
@@ -73,8 +72,8 @@ omitted: 2 items not open (answered 1, assumed 1), shown by status, topic, or id
 	if text != want {
 		t.Fatalf("unfiltered query:\n%s\nwant:\n%s", text, want)
 	}
-	if got := queryText(t, st, `{}`); got != want {
-		t.Fatalf("an empty payload must match no payload:\n%s", got)
+	if got := queryText(t, st, `{"body":false}`); got != want {
+		t.Fatalf("explicit body:false keeps legacy item defaults:\n%s", got)
 	}
 }
 
@@ -141,28 +140,28 @@ func TestQueryIDs(t *testing.T) {
 	}
 }
 
-// topic prints the topic body after its topic line and every item at depth
-// summary; a named closed topic is listed with its result.
+// Explicit summary/body selectors retrieve items and content; topic alone
+// is metadata discovery. A named closed topic is listed with its result.
 func TestQueryTopic(t *testing.T) {
 	st := queryBoard(t)
-	text := queryText(t, st, `{"topic":"b"}`)
+	text := queryText(t, st, `{"topic":"b","depth":"summary","body":true}`)
 	if !strings.HasPrefix(text, `topic "b" [open] items: open 1; body: 10 chars; `+changedAt+"\ntopic body:\n<<<\nnotes on b\n>>>\n  (04) [open] [technical] open b\n") {
 		t.Fatalf("topic query:\n%s", text)
 	}
-	text = queryText(t, st, `{"topic":["a","c"]}`)
+	text = queryText(t, st, `{"topic":["a","c"],"depth":"summary"}`)
 	wantText(t, "topic list", text,
 		[]string{"(01) [open]", "    a) optx first", "(02) [answered]", "(03) [assumed]", `topic "c" [closed] items: withdrawn 1; ` + changedAt + "; result: done c\n  (05) [withdrawn] [technical] close me"},
 		[]string{`topic "b"`, "omitted:"})
-	if text := queryText(t, st, `{"topic":"d"}`); text != `topic "d" [open] items: none; body: 8 chars; `+changedAt+"\ntopic body:\n<<<\n배경 notes\n>>>\n" {
+	if text := queryText(t, st, `{"topic":"d","body":true}`); text != `topic "d" [open] items: none; body: 8 chars; `+changedAt+"\ntopic body:\n<<<\n배경 notes\n>>>\n" {
 		t.Fatalf("body-only topic: %q", text)
 	}
-	if text := queryText(t, st, `{"topic":"nothing"}`); text != "no matching items\n" {
+	if text := queryText(t, st, `{"topic":"nothing","depth":"items"}`); text != "no matching items\n" {
 		t.Fatalf("unknown topic: %q", text)
 	}
-	if text := queryText(t, &State{}, `{"topic":"x"}`); text != "no matching items\n" {
+	if text := queryText(t, &State{}, `{"topic":"x","depth":"items"}`); text != "no matching items\n" {
 		t.Fatalf("empty board: %q", text)
 	}
-	if r, problems := Query(nil, queryPayload(t, `{"topic":"x"}`)); len(problems) > 0 || FormatQuery(r) != "no matching items\n" {
+	if r, problems := Query(nil, queryPayload(t, `{"topic":"x","depth":"items"}`)); len(problems) > 0 || FormatQuery(r) != "no matching items\n" {
 		t.Fatalf("nil state: %v %q", problems, FormatQuery(r))
 	}
 }
@@ -171,16 +170,16 @@ func TestQueryTopic(t *testing.T) {
 // every status and closed topics, at depth items.
 func TestQueryText(t *testing.T) {
 	st := queryBoard(t)
-	text := queryText(t, st, `{"text":"ZETA"}`)
+	text := queryText(t, st, `{"text":"ZETA","depth":"items"}`)
 	if text != `topic "a" [open] items: open 1, answered 1, assumed 1; `+changedAt+"\n  (02) [answered] [technical] settled q [match: rationale]\n" {
 		t.Fatalf("text over rationale:\n%s", text)
 	}
-	wantText(t, "text over options", queryText(t, st, `{"text":"OPTX"}`), []string{"(01)"}, []string{"(02)", "a) optx"})
-	wantText(t, "text over title in a closed topic", queryText(t, st, `{"text":"close me"}`), []string{`topic "c" [closed]`, "(05) [withdrawn]"}, []string{`topic "a"`, "omitted:"})
-	wantText(t, "text over answer", queryText(t, st, `{"text":"OK"}`), []string{"(02)", "(03)"}, []string{"(01)", "(04)"})
+	wantText(t, "text over options", queryText(t, st, `{"text":"OPTX","depth":"items"}`), []string{"(01)"}, []string{"(02)", "a) optx"})
+	wantText(t, "text over title in a closed topic", queryText(t, st, `{"text":"close me","depth":"items"}`), []string{`topic "c" [closed]`, "(05) [withdrawn]"}, []string{`topic "a"`, "omitted:"})
+	wantText(t, "text over answer", queryText(t, st, `{"text":"OK","depth":"items"}`), []string{"(02)", "(03)"}, []string{"(01)", "(04)"})
 	// topic with text takes the topic defaults with text ANDed in.
-	wantText(t, "topic and text", queryText(t, st, `{"topic":"a","text":"zeta"}`), []string{"(02) [answered] [technical] settled q [match: rationale]\n    answer: ok\n"}, []string{"(01)", "(03)"})
-	if text := queryText(t, st, `{"topic":"b","text":"zeta"}`); text != "no matching items\n" {
+	wantText(t, "topic and text", queryText(t, st, `{"topic":"a","text":"zeta","depth":"summary"}`), []string{"(02) [answered] [technical] settled q [match: rationale]\n    answer: ok\n"}, []string{"(01)", "(03)"})
+	if text := queryText(t, st, `{"topic":"b","text":"zeta","depth":"summary"}`); text != "no matching items\n" {
 		t.Fatalf("topic and text with no match: %q", text)
 	}
 }
@@ -204,12 +203,12 @@ func TestQueryStatus(t *testing.T) {
 // default; an explicit closed overrides the per-target default.
 func TestQueryClosedAndOverrides(t *testing.T) {
 	st := queryBoard(t)
-	text := queryText(t, st, `{"closed":true}`)
+	text := queryText(t, st, `{"closed":true,"depth":"items"}`)
 	wantText(t, "closed true", text, []string{`topic "c" [closed] items: withdrawn 1; ` + changedAt + "; result: done c\n"}, []string{"(05)", "closed topic with"})
 	if lastLine(text) != "omitted: 3 items not open (answered 1, assumed 1, withdrawn 1), shown by status, topic, or ids" {
 		t.Fatalf("closed true omission line: %q", lastLine(text))
 	}
-	if text := queryText(t, st, `{"topic":"c","closed":false}`); text != "no matching items\nomitted: 1 closed topic with 1 item, listed by closed: true or topic\n" {
+	if text := queryText(t, st, `{"topic":"c","closed":false,"depth":"items"}`); text != "no matching items\nomitted: 1 closed topic with 1 item, listed by closed: true or topic\n" {
 		t.Fatalf("topic with closed false: %q", text)
 	}
 	wantText(t, "topic without body", queryText(t, st, `{"topic":"b","body":false}`), []string{"(04)"}, []string{"topic body:"})
@@ -284,7 +283,7 @@ second</wb:why><wb:link>https://example.com</wb:link></wb:add>
 // open item as depth full does.
 func TestQuerySummary(t *testing.T) {
 	st := summaryBoard(t)
-	text := queryText(t, st, `{"topic":"s"}`)
+	text := queryText(t, st, `{"topic":"s","depth":"summary","body":true}`)
 	want := `topic "s" [open] items: open 1, answered 5, assumed 1, withdrawn 1; body: 35 chars; ` + changedAt + `
 topic body:
 <<<
@@ -314,7 +313,7 @@ body <code>kept</code> <b>as is</b>
 	if text != want {
 		t.Fatalf("summary:\n%s\nwant:\n%s", text, want)
 	}
-	if got := queryText(t, st, `{"topic":"s","depth":"summary"}`); got != text {
+	if got := queryText(t, st, `{"topic":"s","depth":"summary","body":true}`); got != text {
 		t.Fatalf("explicit summary differs from the topic default:\n%s", got)
 	}
 	// An open item at summary prints exactly as at full.
@@ -329,7 +328,7 @@ body <code>kept</code> <b>as is</b>
 // the answer quote.
 func TestQueryFullOutputShape(t *testing.T) {
 	st := summaryBoard(t)
-	text := queryText(t, st, `{"topic":"s","depth":"full"}`)
+	text := queryText(t, st, `{"topic":"s","depth":"full","body":true}`)
 	wantText(t, "full", text, []string{
 		"  (01) [answered] [policy] Order `parse` or emit?\n    a) Emitter first\n    b) Parser first\n    recommendation: b\n    rationale: line one\n    line two\n    answer: b, note text\n    answer_quote: \"b <code>please</code>\"\n",
 		"topic body:\n<<<\nbody <code>kept</code> <b>as is</b>\n>>>\n",
@@ -345,10 +344,10 @@ func TestQueryFullOutputShape(t *testing.T) {
 // A text match names the fields it matched; matching reads stored text.
 func TestQueryTextMatchFields(t *testing.T) {
 	st := summaryBoard(t)
-	wantText(t, "text over title and options", queryText(t, st, `{"text":"first"}`),
+	wantText(t, "text over title and options", queryText(t, st, `{"text":"first","depth":"items"}`),
 		[]string{"  (01) [answered] [policy] Order `parse` or emit? [match: options]\n", "  (02) [open] [policy] open ask [match: rationale]\n"}, []string{"(03)"})
-	wantText(t, "text over markup", queryText(t, st, `{"text":"<code>parse"}`), []string{"(01) [answered] [policy] Order `parse` or emit? [match: title]"}, nil)
-	wantText(t, "text over title and answer", queryText(t, st, `{"text":"g"}`), []string{"(05) [answered] [policy] free form [match: answer]", "(06) [answered] [technical] g1 [match: title]"}, nil)
+	wantText(t, "text over markup", queryText(t, st, `{"text":"<code>parse","depth":"items"}`), []string{"(01) [answered] [policy] Order `parse` or emit? [match: title]"}, nil)
+	wantText(t, "text over title and answer", queryText(t, st, `{"text":"g","depth":"items"}`), []string{"(05) [answered] [policy] free form [match: answer]", "(06) [answered] [technical] g1 [match: title]"}, nil)
 }
 
 func TestPlain(t *testing.T) {

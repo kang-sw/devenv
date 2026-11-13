@@ -108,10 +108,12 @@ type sessionRecord struct {
 	// Todos is the ordered step-level checklist for the session (todos.json).
 	// Nil when empty. See session_state.go.
 	Todos []todoItem `json:"todos,omitempty"`
-	// Whiteboard is the session whiteboard's item store (whiteboard.json,
-	// whiteboard_tools.go). Nil until the first whiteboard.update creates the
-	// board; its presence also gates the implicit todo/agenda re-render.
+	// Whiteboard decodes the legacy snapshot; board-aware loaders replace this
+	// in-memory value with the topic-folder authority. New writes never update
+	// the cache part. Nil means no board and gates implicit panel refresh.
 	Whiteboard *wswhiteboard.State `json:"whiteboard,omitempty"`
+	// Prepared derived output, published under the folder lock after commit.
+	boardOutput *whiteboardRender
 }
 
 // sessionRecordSchemaVersion is key.json's schema version. Version 1 was the

@@ -88,7 +88,7 @@ func pathBody(t *testing.T, key, path string) string {
 // route at all on a daemon that keeps no stored workspaces.
 func TestWorkspaceRoutesNeedTheDaemonsOrigin(t *testing.T) {
 	f := startPageFixture(t, withWorkspaces(t))
-	routes := []string{workspacePreviewRoute, workspaceAddRoute, workspaceForgetRoute, worktreeOptionsRoute, worktreeAddRoute}
+	routes := []string{workspacePreviewRoute, workspaceAddRoute, workspaceForgetRoute, worktreeOptionsRoute, worktreeAddRoute, worktreeDeletePreviewRoute, worktreeDeleteRoute}
 	for _, route := range routes {
 		for _, o := range []string{"", "null", "http://evil.example"} {
 			if code, header, _ := postJSON(t, f.base+route, o, `{"path":"`+f.project+`","workspace":"`+f.project+`"}`); code != http.StatusForbidden {

@@ -199,6 +199,28 @@ type TicketPhase struct {
 	ResultPresent bool   `json:"result_present"`
 }
 
+// TicketStatusDirs are the ticket status directories under TicketsDir, in
+// the order TicketStatus looks.
+var TicketStatusDirs = []string{"ready", "todo", "idea", ".done", ".dropped"}
+
+// TicketStatus locates stem on disk under root's ticket board by a stat per
+// status directory (TicketStatusDirs) and returns its status: idea, todo,
+// ready, done, or dropped (a closed directory's name without its dot).
+// false when stem is no ticket stem or no directory holds it. It reads no
+// ticket file and no index, so a page can resolve many stems per render.
+func TicketStatus(root, stem string) (string, bool) {
+	if !ticketStemRE.MatchString(stem) {
+		return "", false
+	}
+	for _, dir := range TicketStatusDirs {
+		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(TicketsDir), dir, stem+".md"))
+		if err == nil && !info.IsDir() {
+			return strings.TrimPrefix(dir, "."), true
+		}
+	}
+	return "", false
+}
+
 func TicketsList(root string, opts TicketListOptions) ([]TicketInfo, error) {
 	return scanTickets(root, ticketScanOptions{
 		Statuses:       opts.Statuses,

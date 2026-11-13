@@ -138,8 +138,12 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 		t.Fatalf("pi.spawn = %q", out)
 	}
 	call := route.last()
-	if call.path != "/agents/by-token/spawn" || call.auth != "Bearer tok123" || call.body["prompt"] != "sub task" || call.body["tier"] != "small" || call.body["cwd"] != "sub" || call.body["label"] != "sub" {
+	if call.path != "/agents/by-token/spawn" || call.auth != "Bearer tok123" || call.body["prompt"] != "sub task" || call.body["tier"] != "small" || call.body["cwd"] != "sub" || call.body["label"] != "sub" || call.body["profile"] != wsagent.PiWorkerProfile {
 		t.Fatalf("forwarded spawn = %+v", call)
+	}
+	callToolWithKey(t, s, 30, key, "pi.spawn", map[string]any{"prompt": "mini", "tier": "small", "profile": "custom-pi"})
+	if call := route.last(); call.body["profile"] != "custom-pi" {
+		t.Fatalf("explicit profile must reach the daemon: %+v", call)
 	}
 	if out := callToolWithKey(t, s, 4, key, "pi.spawn", map[string]any{"prompt": "x", "tier": "large"}); !strings.Contains(out, `tier "large" is above this conversation's own tier "medium"`) {
 		t.Fatalf("a daemon refusal reaches the worker: %q", out)
@@ -170,6 +174,43 @@ func TestPiWorkerForwardsPiToolsOnItsToken(t *testing.T) {
 	daemon.Close()
 	if out := callToolWithKey(t, s, 11, key, "pi.list", nil); !strings.Contains(out, "the dashboard daemon") || !strings.Contains(out, "did not answer") {
 		t.Fatalf("an unreachable daemon = %q", out)
+	}
+}
+
+type piDeadlineTransport struct{ t *testing.T }
+
+func (p piDeadlineTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var body struct {
+		Timeout float64 `json:"timeout_s"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		p.t.Fatal(err)
+	}
+	deadline, ok := req.Context().Deadline()
+	remaining := time.Until(deadline)
+	want := 1000*time.Second + piForwardSlack
+	if body.Timeout != 1000 || !ok || remaining > want || remaining < want-time.Second {
+		p.t.Fatalf("forwarded wait: timeout=%v deadline remaining=%v, want %v", body.Timeout, remaining, want)
+	}
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"kid1","status":"running"}`)), Header: http.Header{}}, nil
+}
+
+func TestPiForwardWaitDeadlineIncludesRequestedBudget(t *testing.T) {
+	setupMailboxTestEnv(t)
+	t.Setenv(wsagent.EnvPiToken, "tok123")
+	t.Setenv(wsagent.EnvPiEndpoint, "http://127.0.0.1:1")
+	s := NewServer(t.TempDir(), "test")
+	defer s.Close()
+	key, err := s.sessions.mint(s.root, roleDelegate, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: piDeadlineTransport{t}}
+	t.Cleanup(func() { http.DefaultClient = old })
+	out := callToolWithKey(t, s, 1, key, "pi.wait", map[string]any{"id": "kid1", "timeout_s": 1000})
+	if !strings.Contains(out, "still running") {
+		t.Fatalf("pi.wait = %q", out)
 	}
 }
 

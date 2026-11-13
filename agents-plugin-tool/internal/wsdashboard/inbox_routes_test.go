@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -92,7 +93,7 @@ func TestMessageRouteWritesThenMergesTheHeldEntry(t *testing.T) {
 
 	// The held bubble shows both sends with a divider, the chips, and a
 	// cancel control; the sent data marks the held answers.
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
 		`class="msg user held" data-entry="` + second + `"`,
 		`<div class="hpart">first send</div><hr class="pdiv"><div class="hpart">second send</div>`,
@@ -128,7 +129,7 @@ func TestMessageCarriesTopicNotesAndAnswersShowAsCapsules(t *testing.T) {
 	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "livesession")), ring); err != nil {
 		t.Fatal(err)
 	}
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
 		`<div class="bub"><div class="hchips"><span class="achip"><b>(03)</b> a</span><span class="achip tchip"><b>[ship-gate]</b><span class="anote" title="why?">why?</span></span></div><div class="hpart">hello</div></div>`,
 		`<div class="bub"><div class="hchips"><span class="achip"><b>(124..126)</b> ok</span><span class="achip"><b>(130)</b> b<span class="anote" title="line` + "\n" + `two">line` + "\n" + `two</span></span><span class="achip tchip"><b>[plan]</b><span class="anote" title="later">later</span></span></div>user &lt;words&gt;</div>`,
@@ -176,7 +177,7 @@ func TestMessageCarriesMentionsAsCapsules(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
 		`<div class="bub"><div class="hchips"><span class="achip"><b>(03)</b> a</span><span class="achip mchip" title="a &lt; b"><b>[ship-gate] (03)</b><span class="anote">a &lt; b</span></span><span class="achip mchip" title="whole topic"><b>[plan]</b><span class="anote">whole topic</span></span></div><div class="hpart">see these</div></div>`,
 		`<div class="bub"><div class="hchips"><span class="achip mchip" title="x &amp; &lt;y&gt;"><b>[plan] (7)</b><span class="anote">x &amp; &lt;y&gt;</span></span></div>user words</div>`,
@@ -201,6 +202,51 @@ func TestMessageCarriesMentionsAsCapsules(t *testing.T) {
 	}
 	if code, _, raw := postJSON(t, f.base+"/s/livesession/message", f.base, `{"mentions":[{"topic":"t","id":"x1","text":"y"}]}`); code != http.StatusBadRequest {
 		t.Errorf("a malformed mention was not refused: %s", raw)
+	}
+}
+
+func TestMessageEntryMentionsSurviveRouteLifecycle(t *testing.T) {
+	f := startPageFixture(t)
+	f.send(t, `{"mentions":[{"topic":"topic","entry":"e7","text":"same selected text"}]}`)
+	id, merged := f.send(t, `{"mentions":[{"topic":"topic","id":"3","entry":"e8","text":"same selected text"}]}`)
+	if !merged {
+		t.Fatal("entry mentions did not merge")
+	}
+	want := []wsinbox.Mention{{Topic: "topic", Entry: "e7", Text: "same selected text"}, {Topic: "topic", ID: "3", Entry: "e8", Text: "same selected text"}}
+	if held := f.held(t); len(held) != 1 || !reflect.DeepEqual(held[0].Entry.Mentions, want) {
+		t.Fatalf("held mentions = %+v", held)
+	}
+	code, _, raw := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+id+`"}`)
+	var cancelled struct {
+		Mentions []wsinbox.Mention `json:"mentions"`
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(raw), &cancelled) != nil || !reflect.DeepEqual(cancelled.Mentions, want) {
+		t.Fatalf("cancel = %d %s", code, raw)
+	}
+	body, err := json.Marshal(cancelled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ = f.send(t, string(body))
+	if code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+id+`"}`); code != http.StatusOK {
+		t.Fatalf("steer = %d %s", code, raw)
+	}
+	if held := f.held(t); len(held) != 1 || !held[0].Entry.Steer || !reflect.DeepEqual(held[0].Entry.Mentions, want) {
+		t.Fatalf("steered mentions = %+v", held)
+	}
+	code, _, raw = postJSON(t, f.base+"/s/livesession/interrupt", f.base, ``)
+	var interrupted struct {
+		Held []struct {
+			Mentions []wsinbox.Mention `json:"mentions"`
+		} `json:"held"`
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(raw), &interrupted) != nil || len(interrupted.Held) != 1 || !reflect.DeepEqual(interrupted.Held[0].Mentions, want) {
+		t.Fatalf("interrupt = %d %s", code, raw)
+	}
+	for _, entry := range []string{"p7", "e0", "e01", "e-1", "e7x"} {
+		if code, _, raw := postJSON(t, f.base+"/s/livesession/message", f.base, `{"mentions":[{"topic":"t","entry":"`+entry+`","text":"x"}]}`); code != http.StatusBadRequest {
+			t.Errorf("entry %q accepted: %d %s", entry, code, raw)
+		}
 	}
 }
 
@@ -266,14 +312,14 @@ func TestCancelRefusedOnAClaimedEntryAndASendAfterADrainStartsANewOne(t *testing
 	}
 	// Sent marks: the held answer shows over the delivered one; once drained
 	// the mark reads sent, and survives a reload since it is on disk.
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `<i data-id="03" data-answer="b" data-note="" data-state="held">`) {
 		t.Errorf("page lacks the held mark for 03")
 	}
 	if _, err := wsinbox.Drain(f.inbox("livesession")); err != nil {
 		t.Fatal(err)
 	}
-	_, page = get(t, f.base+"/s/livesession")
+	_, page = get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `<i data-id="03" data-answer="b" data-note="" data-state="sent">`) || strings.Contains(page, `class="msg user held"`) {
 		t.Errorf("after the drain the page lacks the sent mark or still shows a held bubble")
 	}
@@ -298,7 +344,7 @@ func TestSteerRouteRewritesTheHeldEntryMarkedAndAcceptsNoMerge(t *testing.T) {
 		t.Fatalf("held after steer = %+v", held)
 	}
 	// The page shows the steer marker and no steer control for it.
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `class="heldtag steertag"`) || strings.Contains(page, `data-steer="`+ans.ID+`"`) || !strings.Contains(page, `data-cancel="`+ans.ID+`"`) {
 		t.Errorf("page lacks the steer marker, still offers steer, or lost cancel for the steered bubble")
 	}
@@ -310,7 +356,7 @@ func TestSteerRouteRewritesTheHeldEntryMarkedAndAcceptsNoMerge(t *testing.T) {
 	if held := f.held(t); len(held) != 2 || held[0].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\npromote me" || held[1].Entry.Steer {
 		t.Fatalf("held = %+v", held)
 	}
-	_, page = get(t, f.base+"/s/livesession")
+	_, page = get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `data-steer="`+next+`"`) {
 		t.Errorf("page lacks the steer control for the unsteered bubble")
 	}
@@ -427,7 +473,7 @@ func TestInterruptRouteTakesBackEveryHeldMessageAndWritesTheEntry(t *testing.T) 
 		t.Fatalf("interrupt with nothing held = %d: %s", code, raw)
 	}
 	// The page renders no bubble for the interrupt entry.
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	if strings.Contains(page, `class="msg user held"`) {
 		t.Errorf("page renders a held bubble for an interrupt entry")
 	}
@@ -519,7 +565,7 @@ func assertNoCORS(t *testing.T, h http.Header) {
 
 func TestSessionWithoutAdapterHasNoComposerAndItsMessageRouteRefuses(t *testing.T) {
 	f := startPageFixture(t)
-	_, page := get(t, f.base+"/s/boardsession")
+	_, page := get(t, f.base+"/s/boardsession?frame=1")
 	for _, absent := range []string{`id="csend"`, `id="cchips"`, `id="ctext"`, `class="sentdata"`} {
 		if strings.Contains(page, absent) {
 			t.Errorf("board-first page carries %q", absent)
@@ -539,9 +585,9 @@ func TestSessionWithoutAdapterHasNoComposerAndItsMessageRouteRefuses(t *testing.
 
 func TestStreamSendsTheConversationAfterASend(t *testing.T) {
 	f := startPageFixture(t)
-	_, page := get(t, f.base+"/s/livesession")
+	_, page := get(t, f.base+"/s/livesession?frame=1")
 	client := &http.Client{Transport: &http.Transport{Proxy: nil}}
-	resp, err := client.Get(f.base + "/s/livesession/events?h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
+	resp, err := client.Get(f.base + "/s/livesession/events?frame=1&h=" + heldOf(page) + ",mode." + newRegion(modeLive).Hash)
 	if err != nil {
 		t.Fatal(err)
 	}

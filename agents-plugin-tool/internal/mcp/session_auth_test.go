@@ -511,6 +511,27 @@ func TestCapabilityScopedKeyGatesTools(t *testing.T) {
 	})
 	assertGateError(t, "delegate/config.list", deniedPromptListResp, -32601)
 
+	// delegate key: config.resolve_agent is a read-only tier resolution a
+	// worker playbook runs before each spawn, so it passes the gate.
+	resolveResp := callToolOnce(t, server, 7, "config.resolve_agent", map[string]any{
+		"session_key": delegateKey,
+		"tier":        "medium",
+	})
+	var resolved struct {
+		Error *struct{ Code int } `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(resolveResp), &resolved); err != nil {
+		t.Fatalf("parse delegate/config.resolve_agent response: %v\n%s", err, resolveResp)
+	}
+	if resolved.Error != nil || toolIsError(t, resolveResp) || toolText(t, resolveResp) == "" {
+		t.Fatalf("delegate/config.resolve_agent must succeed: %s", resolveResp)
+	}
+	// leaf key: config.resolve_agent stays refused.
+	assertGateError(t, "leaf/config.resolve_agent", callToolOnce(t, server, 8, "config.resolve_agent", map[string]any{
+		"session_key": leafKey,
+		"tier":        "medium",
+	}), -32601)
+
 	// Non-lead key calling the bootstrap tool must be denied (self-bootstrap escalation block).
 	deniedLoginResp := callToolOnce(t, server, 3, "ferrule", map[string]any{
 		"session_key": leafKey,
@@ -712,8 +733,9 @@ func TestRenderPathMintedChildRecordsLeadParent(t *testing.T) {
 	if childEntry.scope != roleLeaf {
 		t.Fatalf("rendered child scope = %q, want %q", childEntry.scope, roleLeaf)
 	}
-	if childEntry.root != rsrcRoot {
-		t.Fatalf("rendered child root = %q, want root_override %q", childEntry.root, rsrcRoot)
+	// A root_override binds to its resolved path.
+	if want := canonicalTestPath(t, rsrcRoot); childEntry.root != want {
+		t.Fatalf("rendered child root = %q, want resolved root_override %q", childEntry.root, want)
 	}
 }
 

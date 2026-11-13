@@ -55,6 +55,15 @@ for (const selector of ['input', 'textarea', 'select', '[contenteditable]']) {
 assert.equal(ctx.qShortcut(key('k', {ctrlKey: true})), true);
 assert.equal(ctx.qShortcut(key(' ', {ctrlKey: true, code: 'Space'})), true);
 assert.equal(ctx.qShortcut(key('k', {ctrlKey: true, isComposing: true})), false);
+// Terminal cards (the .xterm helper textarea) and the composer (a textarea)
+// keep Ctrl+K / Ctrl+Space; the page body still opens the palette.
+function inside(selector) { return { closest: s => s.split(',').map(x => x.trim().split(':')[0]).includes(selector) ? {} : null }; }
+for (const target of [inside('.xterm'), inside('textarea'), inside('[contenteditable]')]) {
+  assert.equal(ctx.qShortcut(key('k', {ctrlKey: true, target})), false, 'Ctrl+K from an editor');
+  assert.equal(ctx.qShortcut(key(' ', {ctrlKey: true, code: 'Space', target})), false, 'Ctrl+Space from an editor');
+}
+assert.equal(ctx.qShortcut(key('k', {ctrlKey: true, target: inside('body')})), true, 'Ctrl+K from the page body');
+assert.equal(ctx.qShortcut(key(' ', {ctrlKey: true, code: 'Space', target: inside('body')})), true, 'Ctrl+Space from the page body');
 assert.equal(ctx.qShortcut(key('/', {keyCode: 229})), false);
 assert.equal(ctx.qShortcut(key('/', {altKey: true})), false);
 ctx.O.searchRows = () => rows;
@@ -94,7 +103,7 @@ assert(!tracker.includes('class="tk-qpop"'), 'old anchored popover removed');
 const textNode = text => ({cloneNode: () => ({textContent: text})});
 const unanswered = {id: 'item-42', hasAttribute: () => true, querySelector: () => textNode('Unanswered question')};
 const boardTopic = {getAttribute: () => 'example', querySelector: s => s === '.tname' ? textNode('Example') : null};
-const rowsCtx = vm.createContext({boardQ: () => [boardTopic], readItem: () => null,
+const rowsCtx = vm.createContext({framed: false, doc: {}, boardQ: () => [boardTopic], readItem: () => null,
   q: (s, root) => s === '[id^="item-"]' && root === boardTopic ? [unanswered] : []});
 vm.runInContext(block(dashboard, '  function paletteText(', '  function paletteClosed('), rowsCtx);
 assert.deepEqual(plain(rowsCtx.paletteRows().map(x => x.group)), [1, 3]);
@@ -108,7 +117,9 @@ const target = { parentElement: fold, tagName: 'DIV', classList: {remove() {}, a
 fold.parentElement = topic;
 const pickCtx = vm.createContext({ doc: { body: {classList: {contains: () => false}}, documentElement: {} },
   boardQ: () => [topic], $: () => target, live: true, tabShown: () => false,
-  setTab: tab => events.push(['tab', tab]), setTimeout: fn => fn(), location: {} });
+  setTab: tab => events.push(['tab', tab]), setTimeout: fn => fn(), location: {},
+  // The page stands alone: going to a page loads it at the top level.
+  go: href => { pickCtx.location.href = href; } });
 vm.runInContext(block(dashboard, '  function palettePick(', '\n  function tkMount('), pickCtx);
 pickCtx.palettePick({kind: 'board-item', topic: 'closed', id: '153'});
 assert(events.some(x => x[0] === 'scroll' && x[1] === true), 'enclosing closed fold opened before scroll');

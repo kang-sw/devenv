@@ -1,3 +1,4 @@
+/* class prefix: wb (new classes use wb; the sticky-head ticket badge is .wbtk) */
 /* Material-style board: roles are told apart by filled header bars, not outlines.
    Surfaces follow the host theme; role fills are template-owned so the text on
    them keeps its contrast whatever the host palette is. */
@@ -131,10 +132,9 @@ button.chip.bulk:active { filter: brightness(.95); }
 button.chip.bulk:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 
 /* layout */
-.grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
-.grid.solo { grid-template-columns: minmax(0, 1fr); }
-@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
-.side { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 12px; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+.grid > main { min-width: 0; }
+.side { display: flex; flex-direction: column; gap: 10px; }
 .side.flat { position: static; margin-top: 14px; }
 
 /* topic: one elevated surface with a filled title bar */
@@ -146,13 +146,16 @@ button.chip.bulk:focus-visible { outline: 2px solid var(--wb-primary); outline-o
 .tbar .tago { font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tbar .tnote-toggle { background: transparent; color: inherit; opacity: .7; flex: none; }
 .tbar .tnote-toggle:hover { opacity: 1; }
-/* A topic's note is a floating capsule: rounded, on the card colour, with a
-   soft shadow and inset from the topic's edges, so it reads apart from the
-   body that scrolls under it while it sticks below the bar (the rail rules
-   below). It grows with its text up to about six lines, then scrolls. */
-.topic > .tnote { width: calc(100% - 20px); margin: 6px 10px; border: 1px solid var(--wb-line); border-radius: 10px; box-shadow: var(--wb-shadow-hi); max-height: calc(6 * 1.4em + 14px); overflow-y: auto; }
-.topic > .tnote:focus { border-color: var(--wb-primary); }
-.topic.quiet > .tnote { width: calc(100% - 12px); margin: 4px 6px; }
+/* A topic's note is a floating capsule in the topic's head: rounded, on the
+   card colour, with a soft shadow and inset from the topic's edges, so it
+   reads apart from the body that scrolls under the stuck head (the rail
+   rules below). It grows with its text up to about six lines, then scrolls. */
+.tophead > .tnote { width: calc(100% - 20px); margin: 6px 10px; border: 1px solid var(--wb-line); border-radius: 10px; box-shadow: var(--wb-shadow-hi); max-height: calc(6 * 1.4em + 14px); overflow-y: auto; }
+.tophead > .tnote:focus { border-color: var(--wb-primary); }
+.topic.quiet > .tophead > .tnote { width: calc(100% - 12px); margin: 4px 6px; }
+/* The head carries the topic's own surface, so the body scrolling under a
+   stuck head does not show through it. */
+.tophead { background: inherit; }
 .closed-more { display: block; margin: 0 0 16px; font-size: 12.5px; color: var(--wb-muted-fg); }
 button.closed-more { display: flex; margin: 0 auto 16px; }
 .tbar .chip:not(.policy):not(.ok):not(.fresh) { background: rgb(127 127 127 / .28); color: inherit; }
@@ -340,14 +343,14 @@ label.ck { cursor: pointer; }
 .ckrow[data-no] .ck input { accent-color: var(--wb-muted-fg); opacity: .45; }
 /* a row holding a staged answer or note */
 .ckrow.staged { box-shadow: inset 3px 0 0 var(--wb-primary); }
-/* the hide toggle in an open topic's check header: form.js keeps its state on
+/* the hide toggle in an open topic's check pill: form.js keeps its state on
    <html> as data-ck-hide, so without that script the button stays hidden and
    every row shows. While it is on, an answered row (no data-id; an open or
    assumed row keeps one) is hidden, and the first row left visible drops the
    divider a hidden row above it would have drawn. */
-.checks .ckhide { width: 20px; height: 18px; margin: -2px -4px -2px 0; background: transparent; color: var(--wb-muted-fg); }
-.checks .ckhide[aria-pressed="true"] { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, transparent); }
-html:not([data-ck-hide]) .checks .ckhide { display: none; }
+.ckhide { width: 20px; height: 18px; background: transparent; color: var(--wb-muted-fg); }
+.ckhide[aria-pressed="true"] { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, transparent); }
+html:not([data-ck-hide]) .ckhide { display: none; }
 html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:not([data-id]) { display: none; }
 html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:nth-child(1 of .ckrow[data-id]) { border-top: 0; }
 
@@ -398,14 +401,143 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 /* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
 .trecap .rtext { flex: 1; min-width: 0; overflow-wrap: anywhere; contain: paint; }
 .trecap .rat { flex: none; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trecap .rat .evi { display: inline-flex; vertical-align: -3px; margin-right: 5px; }
+/* An open topic's head summary line: the latest agent line as plain muted
+   text on the head's surface (no card), sharing the line with the check pill,
+   which wraps under it when narrow; a hairline under the head ends it. */
+.tsub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 6px 12px; border-bottom: 1px solid var(--wb-line); }
+.tsub > .trecap { flex: 1 1 22em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
+.tsub > .trecap .rat { font-size: 10.5px; }
+.ckpill { flex: none; display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.ckbtn { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+button.ckbtn { cursor: pointer; }
+button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
+.ckbtn .i { width: 12px; height: 12px; }
+.ckbtn .prog { font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none; font-size: 11.5px; font-weight: 700; }
+
+/* Linked tickets: badges at the bar's right, before its time; status is a
+   colour and a mark's shape (idea hollow, todo half, ready filled, done a
+   check, dropped a cross and struck through). The bar is dark in both
+   themes, so the hues are fixed; a quiet topic's muted bar keeps the shapes. */
+.ttix { flex: 0 1 auto; min-width: 0; max-width: min(52%, 360px); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px 4px; }
+.wbtk { --c: #c9a7ff; display: inline-flex; align-items: center; gap: 5px; height: 17px; max-width: 100%; padding: 0 8px 0 6px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1; color: var(--c); background: color-mix(in srgb, var(--c) 20%, transparent); }
+.wbtk .st { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; }
+.wbtk .i { flex: none; width: 9px; height: 9px; margin: 0 -1px; stroke-width: 2.4; }
+.wbtk .nm { min-width: 0; max-width: 17ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wbtk.todo { --c: #8db8ff; }
+.wbtk.todo .st { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.wbtk.ready { --c: #7fd6a8; }
+.wbtk.ready .st { background: currentColor; }
+.wbtk.done, .wbtk.dropped, .wbtk.unknown { --c: var(--wb-on-topic); opacity: .6; background: rgb(127 127 127 / .22); }
+.wbtk.dropped .nm { text-decoration: line-through; }
+.wbtk.unknown .st { border-style: dashed; }
+.topic.quiet .wbtk { color: var(--wb-muted-fg); background: rgb(127 127 127 / .18); }
+/* a topic with live work (a linked open ticket to carry out) glows in the
+   board's primary: a 1px ring and a soft halo */
+.topic.live { box-shadow: var(--wb-shadow), 0 0 0 1px color-mix(in srgb, var(--wb-primary) 38%, transparent), 0 0 18px 2px color-mix(in srgb, var(--wb-primary) 22%, transparent); }
+@media (max-width: 600px) {
+  .tbar:has(> .ttix) { flex-wrap: wrap; row-gap: 4px; }
+  .tbar > .ttix { order: 9; flex: 1 1 100%; max-width: none; }
+}
+
+/* Topic stream: one chronological column under a thin divider, full card
+   width with no side rail. A quiet header carries the counts; log rows are one
+   line each with the clock in a fixed column on the left; panels are cards
+   inside the topic card. The scroll area is bounded, and the JS owns
+   entry/offset anchoring rather than the browser's implicit anchoring. */
+.topic-stream { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); font-size: 13px; }
+.topic-stream > summary, .tstream > .mhead { list-style: none; display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
+.topic-stream > summary { cursor: pointer; }
+.topic-stream > summary::-webkit-details-marker { display: none; }
+.topic-stream:not([open]) > summary { padding-bottom: 0; }
+.topic-stream:not([open]) > summary::before, .run-fold > summary > .lbl::before, .system-run > summary > .lbl::before, .panel-versions > summary::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.run-fold[open] > summary > .lbl::before, .system-run[open] > summary > .lbl::before, .panel-versions[open] > summary::before { transform: rotate(90deg); }
+.topic-stream > summary .i, .tstream > .mhead .i { width: 12px; height: 12px; }
+.topic-stream > summary .n, .tstream > .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.topic-stream > summary .mmeta { margin-left: auto; font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.wb-history { max-height: min(65vh, 720px); overflow-y: auto; overflow-x: hidden; overflow-anchor: none; scrollbar-gutter: stable; }
+.wb-history:focus { outline: none; }
+.wb-history:focus-visible { outline: 1px solid color-mix(in srgb, var(--wb-primary) 50%, transparent); border-radius: 6px; }
+.history-older { display: block; margin: 2px auto 6px; border: 0; height: 22px; padding: 0 10px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 12px; font-weight: 600; cursor: pointer; }
+.history-older:hover { color: var(--wb-fg); }
+.history-older[hidden] { display: none; }
+.wb-entry { min-width: 0; overflow-wrap: anywhere; }
+/* log rows: clock column, then a small marker (L agent, O owner), then text */
+.entry-line { display: flex; align-items: baseline; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.6; color: var(--wb-muted-fg); }
+.entry-line:hover { background: var(--wb-wash); }
+.entry-line > .entry-at { flex: none; width: 38px; font: 11px/1.6 var(--wb-mono); font-variant-numeric: tabular-nums; opacity: .8; cursor: default; }
+.entry-text { flex: 1; min-width: 0; }
+.wb-entry.agent > .entry-line { color: var(--wb-fg); font-size: 12.5px; }
+.wb-entry.system .entry-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wb-entry.owner > .entry-line { background: color-mix(in srgb, var(--wb-accent-policy) 8%, transparent); }
+.wb-entry.owner .entry-text { color: color-mix(in srgb, var(--wb-accent-policy) 70%, var(--wb-fg)); }
+.evi { flex: none; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 8.5px; font-weight: 800; line-height: 1; font-style: normal; }
+/* the marker sits on the first line beside the clock, never centred on a wrapped
+   row: the 2px drop centres the 15px badge in the ~19-20px first line box */
+.entry-line > .evi { align-self: flex-start; margin-top: 2px; }
+.evi.lead { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
+.evi.owner { background: color-mix(in srgb, var(--wb-accent-policy) 22%, transparent); color: var(--wb-accent-policy); }
+.evi.sys::before { content: ""; width: 5px; height: 5px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: .7; }
+.ptag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-policy) 18%, transparent); color: var(--wb-accent-policy); }
+.entry-imported { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); }
+/* folds: a long log run, and adjacent system events, behind one quiet row
+   whose dotted rule stands in the clock column */
+.run-fold > summary, .system-run > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 1.7; color: var(--wb-muted-fg); cursor: pointer; font-variant-numeric: tabular-nums; }
+.run-fold > summary::-webkit-details-marker, .system-run > summary::-webkit-details-marker { display: none; }
+.run-fold > summary:hover, .system-run > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.run-fold > summary > .rl, .system-run > summary > .rl { flex: none; width: 38px; border-top: 1px dotted color-mix(in srgb, var(--wb-fg) 30%, transparent); }
+.run-fold > summary > .lbl, .system-run > summary > .lbl { min-width: 0; }
+.run-fold.owner > summary > .lbl::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; vertical-align: 1px; border-radius: 50%; background: var(--wb-accent-policy); }
+/* panel: a card inside the topic card; its recap is the title, with the time,
+   a size hint, and its #pN target on the right. A recap-only panel is a
+   message card. */
+.wb-entry.panel { margin: 6px 0; }
+.entry-panel { background: var(--wb-bg); border-radius: 10px; overflow: hidden; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fg) 9%, transparent); }
+.entry-panel > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 10px; cursor: pointer; }
+.entry-panel > summary::-webkit-details-marker { display: none; }
+.entry-panel > summary:hover { background: var(--wb-wash); }
+.entry-panel > summary::before { content: "\25B8"; flex: none; width: 10px; font-size: 10px; color: var(--wb-muted-fg); }
+.entry-panel[open] > summary::before { content: "\25BE"; }
+.entry-panel[open]:not(.msg) > summary { border-bottom: 1px solid var(--wb-line); }
+.entry-panel > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
+.entry-panel.msg > summary { cursor: default; }
+.entry-panel.msg > summary:hover { background: transparent; }
+.entry-panel.msg > summary::before { content: ""; width: 3px; align-self: stretch; margin: 2px 4px 2px 0; border-radius: 2px; background: var(--wb-accent-policy); }
+.entry-recap { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; overflow-wrap: anywhere; }
+.entry-panel:not([open]):not(.msg) > summary .entry-recap { font-size: 13px; font-weight: 600; }
+.pmeta { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pmeta .entry-at { font: 11px var(--wb-mono); }
+.pmeta .hint { padding: 0 6px; border-radius: 999px; background: var(--wb-muted); line-height: 16px; }
+.pmeta a.mref { font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
+.pmeta a.mref:hover { color: var(--wb-primary); }
+.entry-body.doc-body { font-size: 13.5px; }
+.panel-versions { margin: 0 10px 8px; }
+.entry-panel[open]:not(.msg) > .panel-versions { margin-top: 8px; }
+.panel-versions > summary { list-style: none; display: flex; align-items: center; width: fit-content; padding: 2px 6px; border-radius: 6px; font-size: 11.5px; color: var(--wb-muted-fg); cursor: pointer; }
+.panel-versions > summary::-webkit-details-marker { display: none; }
+.panel-versions > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.historical .entry-panel { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.historical .entry-recap { font-weight: 400; }
+@media (max-width: 560px) {
+  .entry-panel > summary { flex-wrap: wrap; }
+  .entry-panel > summary > .pmeta { margin-left: auto; }
+}
+/* the embed: the latest panel recaps under the same quiet header */
+.tstream { margin: 0 14px; padding: 7px 0 8px; border-top: 1px solid var(--wb-line); }
+.panel-recaps { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.panel-recaps li { display: flex; align-items: baseline; gap: 8px; padding: 1px 6px; border-radius: 6px; }
+.panel-recaps li > .entry-recap { font-size: 13px; font-weight: 600; }
+.panel-recaps li > .entry-at { flex: none; font: 11px var(--wb-mono); color: var(--wb-muted-fg); }
+.panel-recaps li > a.mref { flex: none; font: 600 11px var(--wb-mono); text-decoration: none; }
+.full-board-link { font-size: 12px; margin: 10px 0; }
 
 /* topic body: block markdown above the topic's items, folded under its own summary */
 /* The summary is the topic bar's button: it is taken out of the details' flow
    and pinned to the bar's right end (the bar reserves room for it), so the body
    opens as a full-width block under the bar. */
 .topic { position: relative; }
-.topic.has-doc > .tbar { padding-right: 46px; }
-.topic.has-doc:has(> details.tdoc > summary .new) > .tbar { padding-right: 60px; }
+.topic.has-doc > .tophead > .tbar { padding-right: 46px; }
+.topic.has-doc:has(> details.tdoc > summary .new) > .tophead > .tbar { padding-right: 60px; }
 details.tdoc > summary { position: absolute; top: 5px; right: 12px; cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 9px; border-radius: 999px; background: rgb(127 127 127 / .28); color: var(--wb-on-topic); }
 details.tdoc > summary::-webkit-details-marker { display: none; }
 details.tdoc > summary .new { background: currentColor; }
@@ -549,33 +681,24 @@ details.panel .body { container-type: inline-size; }
 .oq-seg:hover { filter: brightness(1.1); }
 .oq-seg:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 
-/* topic rail (rail.js): the current topic's bar sticks under the top capsules
-   (--wb-rail-top, which rail.js sets on each bar itself: on the host it
+/* topic rail (rail.js): the current topic's head (.tophead: its bar, note,
+   and summary line, one sticky unit) sticks under the top capsules
+   (--wb-rail-top, which rail.js sets on each head itself: on the host it
    would restyle the whole board on every redraw), and zero-height sticky
    wrappers at each end of the board carry the jump capsules. A host that keeps a sticky row of its own at the
    top of its scroll area sets --wb-rail-inset to its height: the top
-   capsules and the bar stick below it. The topic clips rather than hides its overflow, so
-   it is no scroll container and its bar sticks to the board's scroller. The
+   capsules and the head stick below it. The topic clips rather than hides its overflow, so
+   it is no scroll container and its head sticks to the board's scroller. The
    capsule height, gap, and paddings are mirrored in rail.js (CAP, GAP, PAD,
    FADE): change them together. A host that rails its own board nodes
    (data-rail, rail.js) sticks their bars itself, at --wb-rail-top (set on
    each data-rail-bar), and
    styles their .wb-stuck shadow. */
 .wb-rail .topic { overflow: hidden; overflow: clip; }
-.wb-rail .topic > .tbar { position: sticky; top: var(--wb-rail-top, 0px); z-index: 2; }
-/* An open note sticks right under its topic's bar (--wb-rail-note, the bar's
-   stick line plus its height, which rail.js sets on each note), so it stays
-   at hand while the topic scrolls and leaves with the topic. It draws above
-   the topic's body and below the bar (z-index 1 < 2): when the card's end
-   pushes both up, the note slides under the bar. It keeps its top margin as
-   a gap under the bar, so it does not move when it starts to stick. The
-   fallback is a one-line bar under no capsules, for the frame before the
-   rail's first run. */
-.wb-rail .topic > .tnote { position: sticky; top: calc(var(--wb-rail-note, 30px) + 6px); z-index: 1; }
-.wb-rail .topic.quiet > .tnote { top: calc(var(--wb-rail-note, 30px) + 4px); }
-.wb-rail .topic:not(.quiet) > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
-/* A stuck bar stays under the top capsule stack (z-index 2 < the wrapper's
-   3): a bar that its card's end pushes up slides under the stack, and the
+.wb-rail .topic > .tophead { position: sticky; top: var(--wb-rail-top, 0px); z-index: 2; }
+.wb-rail .topic:not(.quiet) > .tophead > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+/* A stuck head stays under the top capsule stack (z-index 2 < the wrapper's
+   3): a head that its card's end pushes up slides under the stack, and the
    morph copy (rail.js motion) draws the turn into a capsule over it. Drawn
    above the stack, a short topic (a quiet one is all bar, so its bar cannot
    stick lower) straddling the stick line covered every capsule. The
@@ -583,9 +706,14 @@ details.panel .body { container-type: inline-size; }
    (offset up by its spread, so it reaches the corners and not below the
    bar; the topic clips its sides): the card scrolling under a stuck bar
    showed through them. */
-.wb-rail .topic > .tbar.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
-/* the book button stays at the card's top and scrolls away under a stuck bar, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
-.wb-rail .topic.has-doc:has(> details.tdoc) > .tbar.wb-stuck { padding-right: 12px; }
+.wb-rail .topic > .tophead.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
+/* A stuck head keeps its recap to two lines: the full recap would take most of a short viewport. */
+.wb-rail .topic > .tophead.wb-stuck .tsub > .trecap .rtext { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* the book button stays at the card's top and scrolls away under a stuck head, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
+.wb-rail .topic.has-doc:has(> details.tdoc) > .tophead.wb-stuck > .tbar { padding-right: 12px; }
+/* The check pill of a stuck head lifts the topic's check list into the head
+   (rail.js): it hangs under the head as a popover over the body. */
+.tophead > .checks { position: absolute; left: 10px; right: 10px; top: 100%; z-index: 1; margin: 4px 0 0; max-height: 46vh; overflow-y: auto; box-shadow: var(--wb-shadow-hi), 0 0 0 1px var(--wb-line); }
 .wb-rail .topic > details.tdoc > summary { z-index: 2; }
 .wb-rail-wrap { position: sticky; height: 0; z-index: 2; pointer-events: none; }
 .wb-rail-wrap.up { top: var(--wb-rail-inset, 0px); z-index: 3; }

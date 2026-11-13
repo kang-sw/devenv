@@ -14,6 +14,15 @@
   // load (luIcon, below).
   var SVGNS = "http://www.w3.org/2000/svg";
   var rid = root.getAttribute("data-rid");
+  // The iframe shell (shell.js, the shell block below): shell marks the
+  // shell page, which holds the rail and the top header and no page's own
+  // content; framed marks a page the shell frames (?frame=1), which leaves
+  // the rail and its header's items to the shell; neither holds for a page
+  // standing alone. A framed page opened outside a frame goes to its shell.
+  // shHidden is a framed page the shell hides: like a hidden tab, it holds
+  // its region updates and skips the clock until it shows.
+  var shell = root.hasAttribute("data-shell"), framed = root.hasAttribute("data-frame") && !!window.WsShell, shHidden = false;
+  if (framed && window.parent === window) { location.replace(location.pathname + location.hash); return; }
 
   // --- browser storage: guarded, since a locked-down browser throws on access
   var store = null;
@@ -89,7 +98,7 @@
   // times and the usage paces. A hidden tab skips it, and showing the tab
   // again catches up at once rather than on the next tick.
   function tickTimes() {
-    if (doc.hidden) return;
+    if (doc.hidden || shHidden) return;
     var now = Date.now();
     q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"]').forEach(function (t) { fmtTime(t, now); });
     q("em.u-pace[data-reset]").forEach(function (e) { pace(e, now); });
@@ -118,6 +127,8 @@
   var PEER_KEY = "ws.dashboard.peer.";
   function isPeer(d) { return d.classList.contains("peer") && d.hasAttribute("data-peer"); }
   function openKey(d) {
+    // The rail's ended folds keep their state in storage (rail.js marks).
+    if (d.classList.contains("rended")) return null;
     if (d.hasAttribute("data-key")) return "k:" + d.getAttribute("data-key");
     if (d.classList.contains("panel") && d.id) return "p:" + d.id;
     return null;
@@ -126,6 +137,7 @@
     var d = e.target;
     if (!d || d.tagName !== "DETAILS") return;
     if (isPeer(d)) { save(PEER_KEY + d.getAttribute("data-peer"), d.open ? "1" : null); return; }
+    if (d.classList.contains("rended") && d.hasAttribute("data-key") && railSets) { railSets.ended.put(d.getAttribute("data-key"), d.open); return; }
     var k = openKey(d);
     if (k) openState[k] = d.open;
   }, true);
@@ -179,7 +191,12 @@
     if (doc.scrollingElement) s.push([doc.scrollingElement, doc.scrollingElement.scrollTop]);
     return s;
   }
-  function restoreScroll(s) { s.forEach(function (p) { if (p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; }); }
+  // A pane a keep session holds (wbHistory.keeping: a board swap's
+  // compensation, a history page loading) is the session's to scroll.
+  function restoreScroll(s) {
+    var kept = window.wbHistory && window.wbHistory.keeping;
+    s.forEach(function (p) { if (!(kept && kept(p[0])) && p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; });
+  }
 
   // The conversation stays at the bottom while the user has it there. Its
   // two regions (entries, convlive) scroll together inside #convo, which
@@ -317,7 +334,7 @@
     inputMode = v === "mod" ? "mod" : "enter";
     q(".gmenu [data-input]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-input") === inputMode)); });
     var t = $("ctext");
-    if (t) t.placeholder = HINT[inputMode];
+    if (t) { t.placeholder = HINT[inputMode]; growCtext(); }
   }
   function setTab(t) {
     grid.setAttribute("data-tab", t);
@@ -357,6 +374,7 @@
     root.setAttribute("data-langpref", v);
     markLang();
     if (holdsDraft()) banner(wsT("js.banner.lang"));
+    else if (framed) window.parent.location.reload();
     else location.reload();
   }
   markLang();
@@ -372,8 +390,11 @@
     var cur = root.getAttribute("data-theme") || "";
     q(".gmenu [data-theme-set]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-theme-set") === cur)); });
   }
-  function setTheme(v) {
+  // setTheme picks the theme v; a framed page also hands it to the shell,
+  // which passes it on to its other frames (quiet: the shell's own pass).
+  function setTheme(v, quiet) {
     if (v !== "light" && v !== "dark") v = "";
+    if (framed && !quiet) shPost("theme", { theme: v });
     doc.cookie = THEME_COOKIE + "=" + v + "; Path=/; SameSite=Lax; Max-Age=" + (v ? 31536000 : 0);
     if (v) root.setAttribute("data-theme", v);
     else root.removeAttribute("data-theme");
@@ -387,8 +408,14 @@
     q("iframe.doc-frame").forEach(postTheme);
     if (window.mermaid && q("pre.mermaid[data-processed]").length) window.wbMermaid();
   }
+  function postDoc(f, message) {
+    var key = f.getAttribute("data-doc-key");
+    if (!key || key !== f.getAttribute("data-doc") || !f.contentWindow) return;
+    message.docKey = key;
+    f.contentWindow.postMessage(message, "*");
+  }
   function postTheme(f) {
-    if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "theme", theme: root.getAttribute("data-theme") || "" }, "*");
+    postDoc(f, { wbDoc: "theme", theme: root.getAttribute("data-theme") || "" });
   }
   markTheme();
 
@@ -470,6 +497,10 @@
   // counts as held: a reconnect meanwhile names its hash, and the update
   // still lands when the tab shows.
   var modeHash = "", hiddenRegions = {};
+  // pageHidden tells whether nobody sees the page (a hidden tab, or a frame
+  // the shell hides): region updates are held (hiddenRegions) while it
+  // holds, and land when it ends (showRegions).
+  function pageHidden() { return doc.hidden || shHidden; }
   function held() {
     return q("[data-region]").map(function (el) {
       var name = el.getAttribute("data-region"), p = hiddenRegions[name];
@@ -498,7 +529,9 @@
     var answers = board ? boardRead(readAnswers) : null;
     var railTop = name === "rail" ? railScrollTop() : null;
     var frameH = board ? boardRead(frameHeights) : null;
+    var history = board ? captureBoardHistory() : null;
     var before = board && !still && !reducedMotion() ? boardSpots(el) : null;
+    var kept = board ? boardKeep(el) : null, boardTop = before && kept ? el.getBoundingClientRect().top : null;
     // The entries merge and the board morph prepare only the nodes they
     // insert; any other region is replaced whole. A finished reply's mermaid
     // fences draw once merged; the streaming reply (convlive) keeps them
@@ -507,16 +540,25 @@
     if (name === "entries") mergeEntriesRegion(el, html, pin);
     else if (board) {
       ins = morphBoard(el, html);
+      if (kept) boardKeepSettle(kept, el, ins);
+      if (window.wbHistory && window.wbHistory.sweep) { window.wbHistory.sweep(); ins.forEach(watchBoard); }
       ins.forEach(function (n) {
+        // Materialize the reader's older pages before restoring disclosures
+        // and frame heights, including immutable panel versions off the tail.
+        if (window.wbHistory) { window.wbHistory.init(n); window.wbHistory.restore(n, history); }
         restoreOpen(n);
         fmtTimes(n);
         sweepOutImgs(n);
         setFrameHeights(n, frameH);
         writeAnswers(n, answers);
+        q("iframe.doc-frame", n).forEach(function (f) { f.wbKeep = true; });
       });
       if (before) {
         var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });
-        startMotion(moves.concat(slideBoard(el, before)));
+        // A kept board slides in screen terms, once the scroll is
+        // compensated: what the session holds in place does not slide.
+        if (kept) kept.h.apply();
+        startMotion(moves.concat(slideBoard(el, before, kept && window.wbHistory.keeping(kept.h.scroller) ? boardTop : null)));
         ins.forEach(function (n) { q("iframe.doc-frame", n).forEach(function (f) { if (!f.wbOut) f.wbGrow = true; }); });
       }
     } else {
@@ -530,6 +572,9 @@
       if (window.wbForm) window.wbForm();
       mermaid(ins);
       syncChips();
+      // The notes came back with their markers (writeAnswers); their image
+      // rows go back after them, and a note the swap took drops its images.
+      if (ctext) { syncMarkers(); renderImgs(); }
       // A mention button over a body frame the swap removed has nothing left
       // to add.
       if (mpend && mpend.frame && !doc.contains(mpend.frame)) hideMention();
@@ -538,6 +583,9 @@
     if (name === "panels") drawerSync();
     if (name === "git") gitSwapped();
     restoreScroll(scroll);
+    // Disclosure and frame-height restoration can move the history viewport.
+    if (board && window.wbHistory) boardBoxes().forEach(function (b) { window.wbHistory.restore(b, history); });
+    if (kept) kept.h.apply();
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
       var dot = tabDot(TAB[name]);
@@ -622,6 +670,8 @@
         }).then(function (res) { done(frag(res.html || "").firstElementChild); }, function () { done(null); });
       },
       adopted: function (n) {
+        if (window.wbHistory) window.wbHistory.init(n);
+        watchBoard(n);
         restoreOpen(n);
         if (window.wbBindBoard) window.wbBindBoard(n);
         if (window.wbAgo) window.wbAgo(n);
@@ -637,6 +687,7 @@
     if (window.WsTerm) window.WsTerm.mount($("bcol"));
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
+  boardBoxes().forEach(watchBoard);
   // --- the Files pane (files.js): mounted once, loaded when first shown -------
   if (live && fpane && window.WsFiles) {
     window.WsFiles.mount(fpane, {
@@ -869,7 +920,7 @@
     var o = f.wbOld;
     f.wbOld = null;
     if (o && o.parentNode) o.parentNode.removeChild(o);
-    if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "size" }, "*");
+    postDoc(f, { wbDoc: "size" });
   }
   // Board motion: a board swap's inserted topic sections grow from the
   // height they had before (a topic the board did not hold grows from 0)
@@ -899,12 +950,13 @@
     return h;
   }
   // topicMotion returns, in order, the inserted topic sections that animate
-  // and the height each starts from.
+  // and the height each starts from. A large topic (cards.js) does not
+  // grow: its height is the sheet's.
   function topicMotion(before, ins) {
     var out = [];
     ins.forEach(function (n) {
       var k = topicKey(n);
-      if (k === null) return;
+      if (k === null || n.hasAttribute("data-max")) return;
       var b = before["t:" + k];
       if (b && b.paged) return;
       out.push({ n: n, from: b ? b.h : 0 });
@@ -934,15 +986,19 @@
   // none. It runs after the growth started, so the places it reads are the
   // growth's first frame and slide and growth add up to one movement.
   // Nothing moves in the DOM (moving a frame reloads it), and the
-  // animation fills nothing, so no transform stays behind. A maximized card
-  // stays put: a transform would anchor its fixed inner box to the card.
-  function slideBoard(el, before) {
-    var top = el.getBoundingClientRect().top, out = [];
+  // animation fills nothing, so no transform stays behind. A maximized card,
+  // a large topic, and a topic holding a large panel stay put: a transform
+  // would anchor the fixed box to the moving node.
+  // With from, the board's top when the spots were read, a slide runs in
+  // screen terms (a swap compensated the scroll between, boardKeep):
+  // an element standing where it stood on screen does not move.
+  function slideBoard(el, before, from) {
+    var top = el.getBoundingClientRect().top, shift = typeof from === "number" ? from - top : 0, out = [];
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n), card = k === null && n.hasAttribute("data-card");
       var b = k !== null ? before["t:" + k] : card ? before["c:" + n.getAttribute("data-card")] : null;
-      if (!b || b.paged || !n.animate || (card && n.hasAttribute("data-max"))) return;
-      var dy = b.y - (n.getBoundingClientRect().top - top);
+      if (!b || b.paged || !n.animate || n.hasAttribute("data-max") || (k !== null && n.querySelector("details[data-max]"))) return;
+      var dy = b.y + shift - (n.getBoundingClientRect().top - top);
       if (Math.abs(dy) < 1) return;
       out.push(n.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }));
     });
@@ -967,6 +1023,70 @@
       var t = performance.now();
       list.forEach(function (a) { if (a.playState === "running") a.startTime = t; });
     });
+  }
+  // Board scroll compensation: a board swap keeps what the user reads where
+  // it stands. The anchor is the topmost topic or card in view that the
+  // swap does not move (a held topic before any), and one wbHistory.keep
+  // session holds its offset from the board's scroller through the swap and
+  // the layout changes after it (growth, late frame heights, restored
+  // history pages), until they settle or the user scrolls. A maximized card
+  // is left alone, and so is a board column not shown.
+  // boardView lists the topics and cards in view, topmost first, each with
+  // its top in layout terms (a running slide's transform taken out) and
+  // its parent, before the morph.
+  function layoutY(n) {
+    var m = /^matrix(3d)?\((.*)\)$/.exec(getComputedStyle(n).transform || ""), v = m ? m[2].split(",").map(parseFloat) : null;
+    return n.getBoundingClientRect().top - (v ? (m[1] ? v[13] : v[5]) || 0 : 0);
+  }
+  function boardView(el) {
+    var c = $("bcol").getBoundingClientRect(), top = Math.max(0, c.top), bottom = Math.min(window.innerHeight, c.bottom);
+    return q("section.topic[data-topic], [data-card]", el).filter(function (n) {
+      var r = n.getBoundingClientRect();
+      return r.height > 0 && r.bottom > top && r.top < bottom;
+    }).map(function (n) { return { n: n, y: layoutY(n), parent: n.parentNode }; }).sort(function (a, b) { return a.y - b.y; });
+  }
+  // boardAnchor picks the anchor from view: the first held entry, else the
+  // first one moving(entry) does not claim, else null.
+  function boardAnchor(view, moving) {
+    var held = view.filter(function (c) { return c.held; })[0];
+    return held || view.filter(function (c) { return !moving(c); })[0] || null;
+  }
+  // boardKeep starts the session on the topmost entry in view, before the
+  // morph, and returns it with the view, each entry's offset from the
+  // scroller's top; boardKeepSettle moves it, after the morph, to the
+  // anchor, at that entry's offset from before, or ends it when the swap
+  // moved everything in view. A moving entry is one the morph inserted or
+  // kept as a changed topic's section (ins), took off the board, or moved
+  // to another parent.
+  function boardKeep(el) {
+    if (!window.wbHistory || !window.wbHistory.keep || !visible($("bcol")) || doc.querySelector("[data-card][data-max]")) return null;
+    var view = boardView(el);
+    if (!view.length) return null;
+    var h = window.wbHistory.keep(view[0].n, { observe: [el] }), s = h.scroller;
+    var top = s === doc.scrollingElement ? 0 : s.getBoundingClientRect().top + s.clientTop;
+    view.forEach(function (c) { c.off = c.y - top; });
+    return { h: h, view: view };
+  }
+  // boardKept returns the session running on the board column's scroller,
+  // in boardKeep's shape, or null.
+  function boardKept() {
+    var w = window.wbHistory, h = w && w.keeping ? w.keeping($("bcol")) || w.keeping(doc.scrollingElement) : null;
+    return h ? { h: h } : null;
+  }
+  function boardKeepSettle(k, el, ins) {
+    var moved = new Set(ins);
+    var pick = boardAnchor(k.view, function (c) { return moved.has(c.n) || !el.contains(c.n) || c.n.parentNode !== c.parent; });
+    if (!pick) k.h.end();
+    else if (pick !== k.view[0]) window.wbHistory.keep(pick.n, { offset: pick.off });
+  }
+  // watchBoard puts the board's topic sections under root (root itself
+  // included) under the shared visibility source (wbHistory.watch), once
+  // each; a swap sweeps the ones it removed. wbHistory.seen reads their
+  // reports.
+  function watchBoard(root) {
+    if (!window.wbHistory || !window.wbHistory.watch || !root || root.nodeType !== 1) return;
+    var list = root.matches("section.topic[data-topic]") ? [root] : q("section.topic[data-topic]", root);
+    list.forEach(function (n) { if (!n.wbWatch) n.wbWatch = window.wbHistory.watch(n); });
   }
 
   // --- conversation entries: merged by key, never re-rendered ----------------
@@ -1118,6 +1238,10 @@
   // fetches the next page from the closed route into the control's place,
   // ending with the next control when more remain. The fetched pages stay
   // across board swaps (morphBoard).
+  function boardTopicPresent(name) {
+    return boardQ("section.topic[data-topic]").some(function (shown) { return shown.getAttribute("data-topic") === name; }) ||
+      !!(window.WsCards && window.WsCards.pinnedTopic(name));
+  }
   function loadClosed(btn) {
     if (!window.fetch || btn.disabled) return;
     btn.disabled = true;
@@ -1131,11 +1255,11 @@
       // names (a topic closed or reopened): the page fetched may not follow
       // what shows now, and the control is clicked again.
       if (!btn.parentNode || !page || +btn.getAttribute("data-closed-next") !== from) { btn.disabled = false; return; }
-      // A topic pinned here (cards.js) already stands in the pin list; a
-      // slot keeps its place in the pages' count (morphBoard).
+      // Pinned topics and closed topics materialized by a panel jump already
+      // stand on the board; slots retain their place in the page count.
       q("section.topic[data-topic]", page).forEach(function (t) {
         var name = t.getAttribute("data-topic");
-        if (!window.WsCards || !window.WsCards.pinnedTopic(name)) return;
+        if (!boardTopicPresent(name)) return;
         var s = doc.createElement("span");
         s.className = "closed-slot";
         s.hidden = true;
@@ -1143,6 +1267,7 @@
         t.parentNode.replaceChild(s, t);
       });
       btn.parentNode.replaceChild(page, btn);
+      watchBoard(page);
       if (window.WsCards && window.WsCards.decorate) window.WsCards.decorate();
       restoreOpen(page);
       if (window.wbBindBoard) window.wbBindBoard(page);
@@ -1252,7 +1377,7 @@
       var el = doc.createElement("span"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
       el.className = "achip mchip";
       el.title = m.text;
-      b.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "");
+      b.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "");
       el.appendChild(b);
       t.className = "anote";
       t.textContent = m.text.replace(/\s+/g, " ");
@@ -1310,7 +1435,48 @@
   // for them: noteWarn for a failure or warning, noteOk for a success.
   function noteWarn(text) { if (window.WsToast) window.WsToast.show(text, { kind: "warn" }); }
   function noteOk(text) { if (window.WsToast) window.WsToast.show(text); }
-  function grow() { ctext.style.height = "auto"; ctext.style.height = Math.min(160, ctext.scrollHeight) + "px"; }
+  // grow sizes the message box to its text; an empty box is sized to its
+  // wrapped placeholder instead, because an empty textarea's scrollHeight
+  // need not count it. The placeholder is measured in a hidden copy of the
+  // mention layer (.chl, same font, padding and wrapping), so the two
+  // cannot drift. A width change or a placeholder swap grows it again
+  // (see growCtext below).
+  var cmeasure = null;
+  function placeholderHeight() {
+    var ph = ctext.getAttribute("placeholder");
+    if (!ph || !ctext.parentNode) return 0;
+    if (!cmeasure) {
+      cmeasure = doc.createElement("div");
+      cmeasure.className = "chl chm";
+      cmeasure.setAttribute("aria-hidden", "true");
+      ctext.parentNode.appendChild(cmeasure);
+    }
+    cmeasure.style.paddingRight = chl ? chl.style.paddingRight : "";
+    cmeasure.textContent = ph;
+    return cmeasure.offsetHeight;
+  }
+  function grow() {
+    ctext.style.height = "auto";
+    var h = ctext.scrollHeight;
+    if (!ctext.value) h = Math.max(h, placeholderHeight());
+    ctext.style.height = Math.min(160, h) + "px";
+  }
+  // growCtext keeps an empty box fitted to its placeholder: at first render
+  // and once the fonts load, after each placeholder swap (setInput,
+  // renderCmd call it), and when only the width changes (the observer skips
+  // height-only changes, so setting the height cannot loop).
+  function growCtext() { if (ctext) grow(); }
+  if (ctext) {
+    var ctextW = -1;
+    if (window.ResizeObserver) new ResizeObserver(function () {
+      var w = ctext.offsetWidth;
+      if (w === ctextW) return;
+      ctextW = w;
+      grow();
+    }).observe(ctext);
+    if (doc.fonts && doc.fonts.ready) doc.fonts.ready.then(growCtext);
+    growCtext();
+  }
   // post sends a write route's JSON body; done(ok, answer) gets the parsed
   // answer, or the server's refusal text. A route is the session's own
   // unless it starts with "/", a daemon-wide route.
@@ -1342,7 +1508,14 @@
   // (rewriting text the user is editing shakes it); the server renumbers a
   // send that merges into a held message, so the page never numbers across
   // sends.
-  var cimgs = $("cimgs"), imgs = [], imgSeq = 0, imgTrash = {};
+  //
+  // The board's note pens (item notes and topic notes) take pasted images
+  // too: one image list and one number sequence span the composer text and
+  // every note, since one send carries them all. An image's chip sits with
+  // the field whose text names it: the composer's row, or a row right after
+  // that note; a note whose item left the board lives on in its answer chip,
+  // and its images show in the composer's row.
+  var cimgs = $("cimgs"), imgs = [], imgSeq = 0, imgTrash = {}, holdSync = false, imgLayout = "";
   var IMG_TYPES = { "image/png": 1, "image/jpeg": 1, "image/gif": 1, "image/webp": 1 };
   var IMG_MAX = 8, IMG_BYTES = 10 * 1024 * 1024;
   var MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
@@ -1354,41 +1527,74 @@
     while ((m = re.exec(text))) out[+m[1]] = true;
     return out;
   }
+  // boardNotes are the board's note pens: every item note and topic note
+  // (a topic note is a textarea.note too).
+  function boardNotes() { return boardQ("textarea.note"); }
+  // strayChips are the answer chips whose item left the board: their notes
+  // still go with the send, so their markers still name images.
+  function strayChips() { return chipList().filter(function (c) { return c.note && !boardItem(c.id); }); }
+  // allNums is the set of image numbers the markers of the whole draft name:
+  // the composer text, every note on the board, and the stray chips' notes.
+  function allNums() {
+    var text = [ctext.value].concat(boardNotes().map(function (n) { return n.value; }), strayChips().map(function (c) { return c.note; }));
+    return markerNums(text.join("\n"));
+  }
   // nextNum is a number no image, dropped image, or marker of this draft
   // has used.
   function nextNum() {
-    Object.keys(markerNums(ctext.value)).forEach(function (k) { imgSeq = Math.max(imgSeq, +k); });
+    Object.keys(allNums()).forEach(function (k) { imgSeq = Math.max(imgSeq, +k); });
     return ++imgSeq;
   }
-  // editText replaces [start, end) of the composer's text with s through the
-  // browser's editing command, so the undo stack keeps the edit, else
-  // through setRangeText; either way an input event follows.
-  function editText(start, end, s) {
-    if (doc.activeElement !== ctext) ctext.focus();
-    ctext.setSelectionRange(start, end);
+  // editField replaces [start, end) of a text field's value with s through
+  // the browser's editing command, so the undo stack keeps the edit, else
+  // through setRangeText; either way an input event follows. A field that
+  // cannot take the focus (a closed note) takes setRangeText, so the
+  // command never edits whatever else holds the focus.
+  function editField(el, start, end, s) {
+    if (doc.activeElement !== el) el.focus();
+    el.setSelectionRange(start, end);
     var done = false;
-    try { done = s ? doc.execCommand("insertText", false, s) : start === end || doc.execCommand("delete"); } catch (e) { done = false; }
+    if (doc.activeElement === el) {
+      try { done = s ? doc.execCommand("insertText", false, s) : start === end || doc.execCommand("delete"); } catch (e) { done = false; }
+    }
     if (!done) {
-      ctext.setRangeText(s, start, end, "end");
-      ctext.dispatchEvent(new Event("input", { bubbles: true }));
+      el.setRangeText(s, start, end, "end");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
-  // insertMarkers puts the markers for nums at the cursor, spaced from the
-  // text around them.
-  function insertMarkers(nums) {
+  // editText is editField on the composer's text.
+  function editText(start, end, s) { editField(ctext, start, end, s); }
+  // insertMarkers puts the markers for nums at el's cursor (the composer's
+  // by default), spaced from the text around them.
+  function insertMarkers(nums, el) {
+    el = el || ctext;
     if (!nums.length) return;
-    var v = ctext.value, a = ctext.selectionStart, b = ctext.selectionEnd, s = nums.map(marker).join(" ");
+    var v = el.value, a = el.selectionStart, b = el.selectionEnd, s = nums.map(marker).join(" ");
     if (a > 0 && !/\s/.test(v.charAt(a - 1))) s = " " + s;
     if (b >= v.length || !/\s/.test(v.charAt(b))) s += " ";
-    editText(a, b, s);
+    editField(el, a, b, s);
   }
-  // deleteMarkers deletes each marker naming n, with the space after it.
+  // deleteMarkers deletes each marker naming n, with the space after it,
+  // wherever the draft holds one: the composer, a note, or a stray chip's
+  // note. The stray chips go first: each field edit re-syncs the images,
+  // which a marker left in a stray chip would bring back.
   function deleteMarkers(n) {
-    var re = new RegExp("\\[Image #" + n + "\\] ?", "g"), v = ctext.value, spans = [], m;
-    while ((m = re.exec(v))) spans.push([m.index, m.index + m[0].length]);
-    spans.reverse().forEach(function (sp) { editText(sp[0], sp[1], ""); });
+    var src = "\\[Image #" + n + "\\] ?";
+    var stray = strayChips().filter(function (c) { return new RegExp(src).test(c.note); });
+    stray.forEach(function (c) {
+      c.note = c.note.replace(new RegExp(src, "g"), "").trim();
+      if (!c.answer && !c.note) dropChip(c.id);
+    });
+    if (stray.length) renderChips();
+    [ctext].concat(boardNotes()).forEach(function (el) {
+      var re = new RegExp(src, "g"), v = el.value, spans = [], m;
+      while ((m = re.exec(v))) spans.push([m.index, m.index + m[0].length]);
+      spans.reverse().forEach(function (sp) { editField(el, sp[0], sp[1], ""); });
+    });
   }
-  function addFiles(files) {
+  // addFiles attaches image files, their markers going in at el's cursor
+  // (the composer's by default).
+  function addFiles(files, el) {
     var refused = "", added = [];
     files.forEach(function (f) {
       if (!IMG_TYPES[f.type]) { refused = wsT("js.img.type", f.name || wsT("js.img.thefile")); return; }
@@ -1403,7 +1609,7 @@
       rd.readAsDataURL(f);
     });
     renderImgs();
-    insertMarkers(added);
+    insertMarkers(added, el);
     if (refused) noteWarn(wsT("js.img.refused", refused));
   }
   function dropImg(it) {
@@ -1425,11 +1631,13 @@
     Object.keys(imgTrash).forEach(function (k) { release(imgTrash[k]); });
     imgTrash = {};
   }
-  // syncMarkers follows the text: an image whose marker is gone is dropped
-  // (into imgTrash), and a dropped one whose marker is back returns.
+  // syncMarkers follows the draft's text (allNums): an image whose marker is
+  // gone is dropped (into imgTrash), and a dropped one whose marker is back
+  // returns. A restore that moves markers between fields (restoreHeld)
+  // holds it off until every marker has landed.
   function syncMarkers() {
-    if (!imgs.length && !Object.keys(imgTrash).length) return;
-    var have = markerNums(ctext.value), changed = false;
+    if (holdSync || (!imgs.length && !Object.keys(imgTrash).length)) return;
+    var have = allNums(), changed = false;
     imgs.slice().forEach(function (it) {
       if (!have[it.n]) { dropImg(it); imgTrash[it.n] = it; changed = true; }
     });
@@ -1441,9 +1649,23 @@
     imgs.sort(function (a, b) { return a.n - b.n; });
     renderImgs();
   }
+  // imgHomes is each image's field: -1 for the composer, else its index in
+  // notes. The composer's text wins a marker both name, and an image no
+  // field names (a stray chip's) shows in the composer's row.
+  function imgHomes(notes) {
+    var own = markerNums(ctext.value), names = notes.map(function (n) { return markerNums(n.value); });
+    return imgs.map(function (it) {
+      if (own[it.n]) return -1;
+      for (var i = 0; i < names.length; i++) if (names[i][it.n]) return i;
+      return -1;
+    });
+  }
   function renderImgs() {
     if (!cimgs) return;
+    var notes = boardNotes(), homes = imgHomes(notes), rows = {};
+    imgLayout = JSON.stringify(homes);
     cimgs.textContent = "";
+    boardQ(".nimgs").forEach(function (r) { r.parentNode.removeChild(r); });
     imgs.forEach(function (it, i) {
       var el = doc.createElement("span"), im = doc.createElement("img"), x = doc.createElement("button"), num = doc.createElement("span");
       el.className = "ichip";
@@ -1459,8 +1681,26 @@
       x.title = wsT("js.img.remove");
       x.textContent = "×";
       el.appendChild(x);
-      cimgs.appendChild(el);
+      var h = homes[i];
+      if (h < 0) { cimgs.appendChild(el); return; }
+      // A note's row follows the note, so it hides with it (CSS) and
+      // leaves with it when a board swap replaces its topic.
+      if (!rows[h]) {
+        rows[h] = doc.createElement("span");
+        rows[h].className = "nimgs";
+        notes[h].parentNode.insertBefore(rows[h], notes[h].nextSibling);
+      }
+      rows[h].appendChild(el);
     });
+  }
+  // followImgs moves the chips after an edit in a note that changed which
+  // field names an image, and puts back the rows a board swap took.
+  function followImgs() {
+    if (!imgs.length && !boardQ(".nimgs").length) return;
+    var homes = imgHomes(boardNotes()), rows = boardQ(".nimgs").length;
+    var want = {};
+    homes.forEach(function (h) { if (h >= 0) want[h] = true; });
+    if (JSON.stringify(homes) !== imgLayout || rows !== Object.keys(want).length) renderImgs();
   }
   // imageFiles is the image files a clipboard or drop carries.
   function imageFiles(dt) {
@@ -1477,17 +1717,25 @@
     }
     return out;
   }
+  // pasteImages attaches the images a paste into el carries.
+  function pasteImages(e, el) {
+    var files = imageFiles(e.clipboardData).filter(function (f) { return f.type.indexOf("image/") === 0; });
+    if (!files.length) return;
+    // A paste that carries text as well (a copied web page) still pastes
+    // its text; a screenshot carries only the image. The markers go in
+    // once the paste is done, after any pasted text.
+    var types = Array.prototype.slice.call(e.clipboardData.types || []);
+    if (types.indexOf("text/plain") < 0) e.preventDefault();
+    setTimeout(function () { addFiles(files, el); }, 0);
+  }
   var composer = $("composer");
   if (ctext && cimgs && composer) {
-    ctext.addEventListener("paste", function (e) {
-      var files = imageFiles(e.clipboardData).filter(function (f) { return f.type.indexOf("image/") === 0; });
-      if (!files.length) return;
-      // A paste that carries text as well (a copied web page) still pastes
-      // its text; a screenshot carries only the image. The markers go in
-      // once the paste is done, after any pasted text.
-      var types = Array.prototype.slice.call(e.clipboardData.types || []);
-      if (types.indexOf("text/plain") < 0) e.preventDefault();
-      setTimeout(function () { addFiles(files); }, 0);
+    ctext.addEventListener("paste", function (e) { pasteImages(e, ctext); });
+    // A board note pen pastes into the same draft; one listener on the
+    // document covers the notes every board swap brings.
+    doc.addEventListener("paste", function (e) {
+      var el = e.target;
+      if (el && el.tagName === "TEXTAREA" && el.classList.contains("note") && inBoard(el)) pasteImages(e, el);
     });
     var hasFiles = function (e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0; };
     composer.addEventListener("dragover", function (e) {
@@ -1659,6 +1907,7 @@
     if (name) name.textContent = cmdSel ? "/" + cmdSel.name : "";
     if (args) { args.textContent = fixed ? cmdSel.args : ""; args.hidden = !fixed || !cmdSel.args; }
     ctext.setAttribute("placeholder", cmdSel && !fixed ? wsT("js.cmd.args", cmdSel.name) : ctextHint);
+    grow();
   }
   // setCommand selects command name; args, when a string, stays on the
   // capsule, and otherwise the message box holds the arguments.
@@ -1718,21 +1967,27 @@
   // reports it ({wbDoc: "sel"}, doc-frame.js) and the button stands over it.
   var mbtn = null, mpend = null, mraf = 0;
   // mentionOf is the mention a selection makes: the topic card's key, the
-  // item ID when both ends of the selection lie in the same item card ("" for
-  // an end outside every item), and the selected text; null for a blank
-  // selection, since a mention points at content.
-  function mentionOf(topic, startId, endId, text) {
+  // item ID when both ends lie in one item (or trusted system-event
+  // provenance), the optional immutable entry locator, and selected text.
+  function mentionOf(topic, startId, endId, text, entry) {
     text = (text || "").trim();
     if (!topic || !text) return null;
     var m = { topic: topic, text: text };
     if (startId && startId === endId) m.id = startId;
+    if (entry && /^e[1-9][0-9]*$/.test(entry)) m.entry = entry;
     return m;
+  }
+  function entryAt(n) {
+    var el = selEl(n), entry = el && el.closest && el.closest("[data-entry]");
+    return entry && /^e[1-9][0-9]*$/.test(entry.getAttribute("data-entry") || "") ? entry : null;
   }
   function selEl(n) { return n && (n.nodeType === 1 ? n : n.parentNode); }
   // itemIdAt is the ID of the item card n lies in, "" outside every card; the
   // card's element id carries it on every kind (a settled row has no data-id).
   function itemIdAt(n) {
-    var el = selEl(n), item = el && el.closest && el.closest(".card[id], .arow[id], .ckrow[id], .srow[id]");
+    var el = selEl(n), entry = entryAt(n), provenance = entry && entry.getAttribute("data-entry-item");
+    if (entry) return /^[0-9]{1,6}$/.test(provenance || "") ? provenance : "";
+    var item = el && el.closest && el.closest(".card[id], .arow[id], .ckrow[id], .srow[id]");
     var m = item && /^item-([0-9]{1,6})$/.exec(item.getAttribute("id") || "");
     return m ? m[1] : "";
   }
@@ -1741,20 +1996,57 @@
     var rs = r.getClientRects();
     return rs.length ? rs[rs.length - 1] : r.getBoundingClientRect();
   }
-  // hostMention is the pending mention of this page's own selection, null
-  // unless it lies in one topic card of the board, outside a form field.
+  // Split a cross-entry selection in document order, clipping each part to
+  // its selected text nodes. Locator and item provenance come only from
+  // host-owned entry wrappers, never authored references or frame messages.
+  // A selection outside entries retains the old topic/item-only behavior.
+  function selectionMentions(range, ta, tf, text) {
+    var entries = boardQ("[data-entry]").filter(function (el) { return range.intersectsNode(el); });
+    if (!entries.length) {
+      var plain = ta === tf && mentionOf(ta.getAttribute("data-topic"), itemIdAt(range.startContainer), itemIdAt(range.endContainer), text);
+      return plain ? [plain] : [];
+    }
+    var base = range.commonAncestorContainer, parts = [], part = null;
+    if (base.nodeType === 3) base = base.parentNode;
+    var walk = doc.createTreeWalker(base, 4), node;
+    while ((node = walk.nextNode())) {
+      var el = selEl(node), topic = el && el.closest("section.topic[data-topic]");
+      if (!topic || !inBoard(el) || !range.intersectsNode(node) || el.closest("script, style, template, [hidden]")) continue;
+      if (el.getClientRects && !el.getClientRects().length) continue;
+      var start = node === range.startContainer ? range.startOffset : 0;
+      var end = node === range.endContainer ? range.endOffset : node.nodeValue.length;
+      if (end <= start) continue;
+      var entry = entryAt(node), id = entry ? entry.getAttribute("data-entry") : "", key = topic.getAttribute("data-topic");
+      if (!part || part.topic !== key || part.entry !== id) {
+        part = { topic: key, entry: id, text: "", block: null, startId: itemIdAt(node), endId: "" };
+        parts.push(part);
+      }
+      // Accumulate only clipped visible nodes. An enclosing Range.toString()
+      // would reintroduce skipped collapsed entries, scripts, or templates.
+      var chunk = node.nodeValue.slice(start, end), block = el.closest("p, li, div, summary, article, section, pre, blockquote, h1, h2, h3, h4, h5, h6");
+      if (part.text && block !== part.block && !/\s$/.test(part.text) && !/^\s/.test(chunk)) part.text += "\n";
+      part.text += chunk;
+      part.block = block;
+      part.endId = itemIdAt(node);
+    }
+    return parts.map(function (p) {
+      return mentionOf(p.topic, p.startId, p.endId, p.text, p.entry);
+    }).filter(Boolean);
+  }
+  // hostMention is the pending mention(s) of this page's own selection,
+  // outside a form field. Entry-spanning selections become ordered parts.
   function hostMention() {
     var sel = window.getSelection ? window.getSelection() : null;
     if (!region("board") || !sel || sel.isCollapsed || !sel.rangeCount) return null;
     var a = selEl(sel.anchorNode), f = selEl(sel.focusNode), act = doc.activeElement;
     if (!a || !f || !inBoard(a) || !inBoard(f)) return null;
     if (act && /^(TEXTAREA|INPUT)$/.test(act.tagName) && inBoard(act)) return null;
-    var ta = a.closest("section.topic[data-topic]");
-    if (!ta || ta !== f.closest("section.topic[data-topic]")) return null;
-    var m = mentionOf(ta.getAttribute("data-topic"), itemIdAt(sel.anchorNode), itemIdAt(sel.focusNode), sel.toString());
-    if (!m) return null;
-    var r = endRect(sel.getRangeAt(0));
-    return { m: m, x: r.right, y: r.bottom };
+    var ta = a.closest("section.topic[data-topic]"), tf = f.closest("section.topic[data-topic]");
+    if (!ta || !tf) return null;
+    var range = sel.getRangeAt(0), mentions = selectionMentions(range, ta, tf, sel.toString());
+    if (!mentions.length) return null;
+    var r = endRect(range);
+    return mentions.length === 1 ? { m: mentions[0], x: r.right, y: r.bottom } : { ms: mentions, x: r.right, y: r.bottom };
   }
   function hideMention() {
     mpend = null;
@@ -1796,15 +2088,22 @@
     var p = mpend;
     hideMention();
     if (!p) return;
-    bmentions.push(p.m);
-    if (p.frame) { if (p.frame.contentWindow) p.frame.contentWindow.postMessage({ wbDoc: "unsel" }, "*"); }
+    bmentions = bmentions.concat(p.ms || [p.m]);
+    if (p.frame) postDoc(p.frame, { wbDoc: "unsel" });
     else if (window.getSelection) window.getSelection().removeAllRanges();
     renderChips();
   }
   // frameMention takes a body frame's selection report: its text and where
   // its end stands inside the frame.
   function frameMention(f, text, x, y) {
-    var t = f.closest("section.topic[data-topic]"), m = t && mentionOf(t.getAttribute("data-topic"), "", "", text);
+    var t = f.closest("section.topic[data-topic]"), entry = f.getAttribute("data-entry") || "";
+    var item = f.getAttribute("data-entry-item") || "", parentEntry = entryAt(f.parentNode);
+    if (!item && parentEntry) item = parentEntry.getAttribute("data-entry-item") || "";
+    if (!/^[0-9]{1,6}$/.test(item)) item = "";
+    // Entry identity is the host's iframe attribute, not a claimed eN in
+    // the message or inside its sandboxed document.
+    var topic = f.getAttribute("data-topic") || (t && t.getAttribute("data-topic"));
+    var m = t && topic === t.getAttribute("data-topic") && mentionOf(topic, item, item, text, entry);
     if (m) placeMention({ m: m, frame: f, x: x, y: y });
     else if (mpend && mpend.frame === f) hideMention();
   }
@@ -1857,9 +2156,6 @@
       if (ctext.value.trim() === raw) { ctext.value = ""; grow(); clearMentions(); }
       pics.forEach(function (p) { dropImg(p); release(p); });
       clearTrash();
-      // A fresh draft numbers its images from 1 again.
-      if (!imgs.length && !ctext.value) imgSeq = 0;
-      renderImgs();
       // Compare by value: a board event during the send, or clearing one
       // card, re-reads the chips into new objects. Drop every sent chip
       // before clearing any card, since clearing one re-syncs the rest.
@@ -1877,6 +2173,10 @@
       // A send closes the open notes; one edited during it keeps its text.
       closeTopicNotes();
       renderChips();
+      // A fresh draft numbers its images from 1 again: nothing is left that
+      // a marker or an image could name.
+      if (!imgs.length && !ctext.value && !chipList().length && !topicNotes().length) imgSeq = 0;
+      renderImgs();
       // The sent draft is gone; what was typed during the send is saved
       // again as the next draft.
       // No toast on success: the held bubble in the conversation is the
@@ -1888,21 +2188,37 @@
   // stored draft returned.
   function validMentions(list) {
     return (Array.isArray(list) ? list : []).filter(function (m) {
-      return m && typeof m.topic === "string" && m.topic && typeof m.text === "string" && m.text;
-    }).map(function (m) { return m.id ? { topic: m.topic, id: String(m.id), text: m.text } : { topic: m.topic, text: m.text }; });
+      return m && typeof m.topic === "string" && m.topic && typeof m.text === "string" && m.text &&
+        (!m.id || /^[0-9]{1,6}$/.test(String(m.id))) &&
+        (m.entry == null || m.entry === "" || typeof m.entry === "string" && /^e[1-9][0-9]*$/.test(m.entry));
+    }).map(function (m) {
+      var out = m.id ? { topic: m.topic, id: String(m.id), text: m.text } : { topic: m.topic, text: m.text };
+      if (m.entry) out.entry = m.entry;
+      return out;
+    });
   }
   // restoreHeld puts held messages a cancel or an interrupt took back into
   // the composer, oldest first, ahead of the draft: their texts joined as
   // paragraphs, their answer chips, their mentions, their topic notes back
   // on the board's topics (restoreTopics), and their images as chips that
-  // reference the written files, with their markers in the returned text. Each
-  // message's numbers move above the highest the draft and the messages
-  // before it use, the markers with them, as the server numbers a merge.
+  // reference the written files, with their markers in the returned text
+  // and notes. Each message's numbers move above the highest the draft and
+  // the messages before it use, the markers in its text, chip notes, and
+  // topic notes with them, as the server numbers a merge. An image no
+  // restored text names (a message held before images were numbered, or a
+  // note a newer one replaced) gets a marker in the composer, so the next
+  // edit does not drop it.
   //
   // A returned command becomes the composer's selection (see the slash
   // commands section). Only one fits: a second, or one returned while
   // another is selected, comes back as its typed line, with a warning.
   function restoreHeld(list) {
+    holdSync = true;
+    try { restoreHeldNow(list); } finally { holdSync = false; }
+    syncMarkers();
+    renderImgs();
+  }
+  function restoreHeldNow(list) {
     var cmd = null, astext = 0;
     list = list.map(function (res) {
       var c = res.command;
@@ -1914,45 +2230,47 @@
     var cur = ctext.value.trim(), top = imgSeq, backs = [], back;
     // The draft's mentions move with it, past its leading whitespace's trim.
     var lead = ctext.value.length - ctext.value.replace(/^\s+/, "").length;
-    Object.keys(markerNums(cur)).forEach(function (k) { top = Math.max(top, +k); });
+    Object.keys(allNums()).forEach(function (k) { top = Math.max(top, +k); });
     imgs.forEach(function (p) { top = Math.max(top, p.n); });
+    // A later message's answer replaces an earlier one's, and a chip
+    // attached since keeps its newer answer.
+    var got = {}, order = [];
     list.forEach(function (res) {
-      var text = res.text || "", names = res.images || [], nums = res.nums || [], renum = {}, offset = top;
+      var names = res.images || [], nums = res.nums || [], renum = {}, offset = top;
       names.forEach(function (name, i) {
         var n = nums[i] || i + 1, have = imgs.filter(function (p) { return p.ref === name; })[0];
         renum[n] = have ? have.n : n + offset;
         if (!have) imgs.push({ name: name, url: attachSrc(name), data: null, ref: name, n: renum[n] });
         top = Math.max(top, renum[n]);
       });
-      text = text.replace(new RegExp(MARKER, "g"), function (m, k) { return renum[+k] ? marker(renum[+k]) : m; });
-      // A message held before images were numbered has no markers: give
-      // each image one, or the next edit would drop it.
-      var marked = markerNums(text), missing = [];
-      names.forEach(function (name, i) { var n = renum[nums[i] || i + 1]; if (!marked[n]) missing.push(marker(n)); });
-      if (missing.length) text += (text ? "\n" : "") + missing.join(" ");
-      var stray = restoreTopics(res.topics || []);
+      var rn = function (s) { return (s || "").replace(new RegExp(MARKER, "g"), function (m, k) { return renum[+k] ? marker(renum[+k]) : m; }); };
+      var text = rn(res.text);
+      (res.chips || []).forEach(function (c) {
+        var o = {};
+        Object.keys(c).forEach(function (k) { o[k] = c[k]; });
+        if (c.note) o.note = rn(c.note);
+        if (!got[c.id]) order.push(c.id);
+        got[c.id] = o;
+      });
+      var stray = restoreTopics((res.topics || []).map(function (tn) { return { topic: tn.topic, note: rn(tn.note) }; }));
       if (stray.length) text += (text ? "\n\n" : "") + stray.join("\n");
       if (text) backs.push(text);
     });
     imgSeq = top;
+    order.forEach(function (id) { if (!chips[id]) { putChip(got[id]); setItem(id, got[id]); } });
     back = backs.join("\n\n");
+    var named = allNums(), inBack = markerNums(back), missing = [];
+    imgs.forEach(function (p) { if (!named[p.n] && !inBack[p.n]) missing.push(marker(p.n)); });
+    if (missing.length) back += (back ? "\n" : "") + missing.join(" ");
     ctext.value = back + (back && cur ? "\n\n" : "") + cur;
     grow();
     shiftMentions(back.length + (back && cur ? 2 : 0) - lead);
     imgs.sort(function (a, b) { return a.n - b.n; });
-    // A later message's answer replaces an earlier one's, and a chip
-    // attached since keeps its newer answer.
-    var got = {}, order = [];
-    list.forEach(function (res) {
-      (res.chips || []).forEach(function (c) { if (!got[c.id]) order.push(c.id); got[c.id] = c; });
-    });
-    order.forEach(function (id) { if (!chips[id]) { putChip(got[id]); setItem(id, got[id]); } });
     // Their mentions go back ahead of the draft's, oldest message first.
     var held = [];
     list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
     bmentions = held.concat(bmentions);
     renderChips();
-    renderImgs();
     if (cmd) {
       if (ctext.value.trim()) setCommand(cmd.name, cmd.args || "");
       else { ctext.value = cmd.args || ""; grow(); clearMentions(); setCommand(cmd.name); }
@@ -2184,6 +2502,8 @@
       doc.addEventListener(type, function (e) {
         if (!inBoard(e.target)) return;
         syncChips();
+        syncMarkers();
+        followImgs();
       });
     });
   }
@@ -3025,8 +3345,43 @@
   // link), so a forged message can at most offer a menu the user must pick
   // from.
   function docFrame(win) {
-    return q("iframe.doc-frame").filter(function (f) { return f.contentWindow === win; })[0];
+    return q("iframe.doc-frame").filter(function (f) { return inBoard(f) && f.contentWindow === win; })[0];
   }
+  // Only an existing board item or latest stable panel target may be
+  // navigated. The history loader accepts bare IDs, never selectors/URLs.
+  function boardJump(id) {
+    if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|p[1-9][0-9]*)$/.test(id)) return;
+    var target = null;
+    if (window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id); return !!target; });
+    if (!target) target = $(id);
+    if (!target || target.id !== id || !inBoard(target)) return;
+    for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
+    target.scrollIntoView({ block: "start" });
+    return target;
+  }
+  function captureBoardHistory() {
+    return window.wbHistory ? boardBoxes().reduce(function (all, b) { return all.concat(window.wbHistory.capture(b)); }, []) : null;
+  }
+  // Native fragments also need to materialize paged panels and open folds.
+  doc.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest("a[href]");
+    if (!a || !inBoard(a) || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var href = a.getAttribute("href") || "";
+    if (href.charAt(0) !== "#" || !boardJump(href.slice(1))) return;
+    e.preventDefault();
+    try { window.history.replaceState(null, "", href); } catch (x) {}
+  });
+  doc.addEventListener("wbhistoryload", function (e) {
+    var el = e.detail && e.detail.root;
+    if (!el || !inBoard(el)) return;
+    restoreOpen(el);
+    fmtTimes(el);
+    sweepOutImgs(el);
+    if (window.wbBindBoard) window.wbBindBoard(el);
+    mermaid([el]);
+  });
+  window.addEventListener("hashchange", function () { boardJump(location.hash.slice(1)); });
+  if (location.hash) boardJump(location.hash.slice(1));
   function str(v) { return typeof v === "string" ? v : ""; }
   function num(v) { return typeof v === "number" && isFinite(v) ? v : 0; }
   function frameLink(m) {
@@ -3078,20 +3433,30 @@
       var type = (r.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
       return r.ok && /^image\/[a-z0-9.+-]+$/.test(type) ? r.blob() : null;
     }).then(function (b) {
-      if (b && f.contentWindow) f.contentWindow.postMessage({ wbDoc: "img", id: id, blob: b }, "*");
+      if (b) postDoc(f, { wbDoc: "img", id: id, blob: b });
     }, function () {});
   }
   window.addEventListener("message", function (e) {
     var f = docFrame(e.source), m = e.data;
     if (!f || !m || typeof m !== "object") return;
+    var key = f.getAttribute("data-doc-key");
+    if (!key || m.docKey !== key || f.getAttribute("data-doc") !== key) return;
     if (m.wbDoc === "height") {
       var h = num(m.height);
       // A pending frame (frameGraft) keeps the old frame's height: once
       // shown it is asked for its height again.
       if (f.wbNext) { postTheme(f); return; }
       if (h >= 0 && h < 100000) {
-        var from = f.getBoundingClientRect().height, to = Math.ceil(h);
+        var from = f.getBoundingClientRect().height, to = Math.ceil(h), b = region("board");
+        // A frame a board swap brought (wbKeep) reports its height late,
+        // after the swap's keep session may have ended: its first change
+        // keeps the board in place as the swap did. A session still running
+        // keeps the anchor the swap picked (the topmost entry in view may be
+        // one the swap moved).
+        var kept = f.wbKeep && Math.abs(to - from) >= 1 && b && b.contains(f) ? boardKept() || boardKeep(b) : null;
+        if (kept) f.wbKeep = false;
         f.style.height = to + "px";
+        if (kept) kept.h.apply();
         // The first height a frame of a moving board swap reports eases
         // from the height the frame stood at (board motion, slideBoard).
         if (f.wbGrow) {
@@ -3103,8 +3468,7 @@
       // opened earlier) takes the current theme when it first reports.
       postTheme(f);
     } else if (m.wbDoc === "jump") {
-      var item = /^item-\d+$/.test(str(m.id)) && $(m.id);
-      if (item) item.scrollIntoView({ block: "start" });
+      boardJump(str(m.id));
     } else if (m.wbDoc === "link") {
       var a = frameLink(m);
       if (!a) return;
@@ -4446,7 +4810,7 @@
     // show-more path so older hits are searchable and already mounted to jump to.
     if (update) paletteClosed(update);
     var rows = [];
-    q("#rail .rs[data-rid]").forEach(function (el) {
+    q("#rail .rs[data-rid]", framed ? shParentDoc() : doc).forEach(function (el) {
       var label = el.querySelector(".rid"), link = el.querySelector("a.rl");
       if (label && link) rows.push({ group: 0, kind: "session", title: label.textContent.trim(), href: link.getAttribute("href") });
     });
@@ -4490,7 +4854,7 @@
     });
   }
   function palettePick(row) {
-    if (row.kind === "session") { location.href = row.href; return; }
+    if (row.kind === "session") { go(row.href); return; }
     // Look the target up again: an SSE board swap may have replaced its node
     // while the palette was open. Open every enclosing fold before scrolling.
     var topic = boardQ("section.topic[data-topic]").filter(function (n) { return n.getAttribute("data-topic") === row.topic; })[0];
@@ -5084,6 +5448,8 @@
   var TL_ASK = '.card.policy[id^="item-"], .arow[id^="item-"], .ckrow[data-id]:not([data-assumed])';
   var tlHeld = {}, tlPill = 0, tlTk = 0, tlAsks = -1, tlPerm = 0, tlN = -1, tlBase = null;
   function tlRetitle() {
+    // The shell's title is its shown frame's (the title message).
+    if (shell) return;
     var n = tlTk + tlPerm + (tlAsks >= 0 ? tlAsks : tlPill);
     if (n === tlN) return;
     tlN = n;
@@ -5092,12 +5458,13 @@
       if (tlBase === null) { tlBase = doc.title.replace(/^\(\d+\) /, ""); root.setAttribute("data-wb-title", tlBase); }
     }
     doc.title = (n ? "(" + n + ") " : "") + tlBase;
+    shPost("title", { title: doc.title });
   }
   window.wbTitleCount = function (n) { tlPill = n; tlRetitle(); };
   // tlRebase replaces the label's base (a rename's new tab title, which a
   // head swap brings).
   function tlRebase(base) {
-    if (!base || base === tlBase) return;
+    if (shell || !base || base === tlBase) return;
     tlBase = base;
     root.setAttribute("data-wb-title", base);
     tlN = -1;
@@ -5169,7 +5536,7 @@
           if (base[x.key]) return;
           base[x.key] = 1;
           if (doc.hidden) tlHidden.push(x);
-          else tlNotice(x);
+          else if (!shHidden) tlNotice(x);
         });
       }
     }
@@ -5233,8 +5600,10 @@
   var ASSETS_TRIED = "ws.dashboard.assetsreload";
   function connect() {
     if (!window.WebSocket) return;
-    var path = mode === "index" ? "/events" : "/s/" + rid + "/events";
-    var st = openStream(path + "?h=" + encodeURIComponent(held()), {
+    // The shell streams the rail alone; a framed session page streams its
+    // session without the rail.
+    var path = shell ? "/rail/events" : mode === "index" ? "/events" : "/s/" + rid + "/events";
+    var st = openStream(path + "?h=" + encodeURIComponent(held()) + (framed && mode !== "index" ? "&frame=1" : ""), {
       open: function () { connected(true); },
       // Reopen with the hashes held now, so a reconnect sends only what
       // changed since.
@@ -5257,7 +5626,7 @@
       // A hidden tab keeps only each region's newest update and applies none;
       // showing the tab applies them (showRegions). The stream stays open, so
       // the light events (tracker) still arrive and act.
-      if (doc.hidden) {
+      if (pageHidden()) {
         delete hiddenRegions[ev.name];
         hiddenRegions[ev.name] = { hash: ev.hash, html: ev.html };
         tlHold(ev.name, ev.hash, ev.html);
@@ -5266,8 +5635,11 @@
       }
       swap(ev.name, ev.hash, ev.html);
     }
+    // A frame the shell hides reads the tracker once it shows (shShown).
     function onTracker(ev) {
-      if (ev && typeof ev.rev === "number") trackerNudge(ev.rev);
+      if (!ev || typeof ev.rev !== "number") return;
+      if (shHidden) shTrackerRev = ev.rev;
+      else trackerNudge(ev.rev);
     }
     // Every (re)connect first names the page assets the daemon serves now:
     // other ones than this page runs (a replaced daemon) reload it, as
@@ -5279,7 +5651,7 @@
       var mine = root.getAttribute("data-assets"), tried = null;
       if (!ev || !ev.id || !mine || ev.id === mine) return;
       try { tried = window.sessionStorage.getItem(ASSETS_TRIED); } catch (x) {}
-      if (holdsDraft() || tried === ev.id) { banner(wsT("js.banner.updated")); return; }
+      if (holdsDraft() || shDrafts() || tried === ev.id) { banner(wsT("js.banner.updated")); return; }
       try { window.sessionStorage.setItem(ASSETS_TRIED, ev.id); } catch (x) {}
       location.reload();
     }
@@ -5293,7 +5665,7 @@
   // showRegions applies, once each and in arrival order, the region updates
   // a hidden tab held back.
   function showRegions() {
-    if (doc.hidden) return;
+    if (pageHidden()) return;
     var p = hiddenRegions;
     hiddenRegions = {};
     Object.keys(p).forEach(function (name) { swap(name, p[name].hash, p[name].html); });
@@ -5311,6 +5683,9 @@
   // holdsDraft reports unsent work a reload would drop: composer text,
   // answers picked on the board, or an attached image.
   function holdsDraft() { return !!((ctext && ctext.value) || cmdSel || boardAnswers() || imgs.length || topicNotes().length); }
+  // The shell asks its frames before an assets reload, which reloads them
+  // too (shDrafts).
+  if (framed) window.wsHoldsDraft = holdsDraft;
   function modeChanged(next) {
     // The other mode has other regions, and a reload renders them; text typed
     // in the composer or answers picked on the board are never dropped for it.
@@ -5334,9 +5709,9 @@
   // stays a link to the sessions index for a modified click.
   var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
   var memoPad = railEl && $("memo-pad") && window.WsMemo ? window.WsMemo.mount(doc, railEl, $("memo-pad"), function (open) { railOpen(open === true); }) : null;
-  var railStore = { load: load, save: save };
-  var starSet = WsRail ? WsRail.stars(railStore) : null, colSet = WsRail ? WsRail.collapsed(railStore) : null;
-  var sessOrder = WsRail ? WsRail.sessionOrder(railStore) : null, wsOrd = WsRail ? WsRail.wsOrder(railStore) : null;
+  var railStore = { load: load, save: save }, railSets = WsRail ? WsRail.state(railStore) : null;
+  var starSet = railSets && railSets.stars, colSet = railSets && railSets.collapsed;
+  var sessOrder = railSets && railSets.order, wsOrd = railSets && railSets.wsOrder;
   // rdrag is the press or drag in the rail (the drag block below), railHeld
   // the rail swap held back while it drags.
   var rdrag = null, railHeld = null;
@@ -5350,8 +5725,10 @@
   var usageGutter = railEl && window.WsUsage ? window.WsUsage.mount(doc, railEl) : null;
   function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches) && (!root.hasAttribute("data-pincol") || !!(RAIL_XWIDE && RAIL_XWIDE.matches)); }
   function railShown() { return root.classList.contains("rail-open"); }
-  // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column.
+  // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column;
+  // a framed page hands it to the shell, which holds the rail.
   function railKey() {
+    if (framed) { shPost("key", { key: "rail" }); return; }
     if (!railEl || !WsRail) return;
     railOpen(!railShown());
   }
@@ -5369,17 +5746,9 @@
   function railMarks() {
     var r = region("rail");
     if (!r || !WsRail) return;
-    var order = sessOrder.list(), list = $("rlist");
-    q(".rsessions", r).forEach(function (box) { WsRail.pin(box, starSet, box.parentNode.closest(".rended") ? null : order); });
-    if (list) WsRail.arrange(list, wsOrd.list());
-    WsRail.markCurrent(q(".rs", r), rid);
+    WsRail.marks(r, railSets, rid);
     if (memoPad) memoPad.sync(rid);
     WsRail.markRevive(q(".rs", r), revBusy);
-    q(".rws", r).forEach(function (ws) {
-      var col = colSet.has(ws.getAttribute("data-ws") || ""), tog = ws.querySelector(".wstog");
-      ws.classList.toggle("col", col);
-      if (tog) tog.setAttribute("aria-expanded", String(!col));
-    });
     if (usageGutter) usageGutter.sync();
     railPopSync();
   }
@@ -5437,6 +5806,12 @@
         railPopOpen("lead", fresh);
         return;
       }
+      var del = t.closest && t.closest(".rdel");
+      if (del) {
+        e.preventDefault();
+        railDelete(del);
+        return;
+      }
       // The whole bar toggles the workspace's collapse; its toggle button
       // (.wstog) is the keyboard's way to it.
       var bar = t.closest && t.closest(".wsbar");
@@ -5454,8 +5829,13 @@
         return;
       }
       // Picking a session navigates; the draft is saved first and the
-      // overlay closes, so a back navigation finds the page as it was.
-      if (t.closest && t.closest("a[href]")) { saveDraft(); if (memoPad) memoPad.remember(); railOpen(false); }
+      // overlay closes, so a back navigation finds the page as it was. The
+      // shell keeps its page (and the memo pad's state) and shows the
+      // session's frame (the shell's link clicks, below).
+      if (t.closest && t.closest("a[href]")) {
+        if (!shell) { saveDraft(); if (memoPad) memoPad.remember(); }
+        railOpen(false);
+      }
     });
     // The rail list keeps its scroll across navigations.
     var savedRailTop = parseInt(load(RAIL_SCROLL_KEY), 10);
@@ -6004,8 +6384,8 @@
     railPost(route, {}, function (status, v, s) {
       if (status === 200) {
         saveDraft();
-        if (id === rid) window.location.reload();
-        else window.location.href = "/s/" + encodeURIComponent(id);
+        if (id === rid) { if (shell) shReload(); else window.location.reload(); }
+        else go("/s/" + encodeURIComponent(id));
         return;
       }
       revBusy = "";
@@ -6023,7 +6403,214 @@
       toast(status >= 200 && status < 300 ? wsT("js.rail.forgot", nm ? nm.textContent : path) : railErr(status, s));
     });
   }
+
+  // --- rail worktree delete ----------------------------------------------------
+  // A linked worktree row's trash button (.rdel) opens the delete modal: a
+  // <dialog> shown modal, made once outside the rail region (which every
+  // update replaces). It reads the daemon's check (the preview route) and
+  // shows it: the folder, the branch the delete keeps, the changed files, a
+  // detached HEAD's unreached commits, submodules, the lock, and the
+  // sessions and terminals in the worktree (a live one blocks, an ended one
+  // is listed only); the refusal's note when there is one; and, when the
+  // check needs force, that force will be used and why. Delete turns on
+  // once the folder name is typed exactly against the current open's check
+  // (WsRail.deleteReady): an answer to an earlier open is dropped. The
+  // submit carries force and the check's token only when the check needs
+  // force (WsRail.deleteBody). A 409 with a check (refused, or force needed
+  // or moved since the check) shows that check in place and clears the
+  // typed name, so the next confirmation is made against what is shown now;
+  // a failure's text shows inline. A success closes the modal and toasts its
+  // message; the stream redraws the rail. Escape and Cancel close it.
+  var rdel = null;
+  function rdelMake() {
+    var D = { seq: 0, ws: "", path: "", shown: null, busy: false, btn: null };
+    var dl = D.el = mk("dialog", "rdeldlg");
+    var hd = dl.appendChild(mk("h2", "rdhd"));
+    hd.id = rpId();
+    dl.setAttribute("aria-labelledby", hd.id);
+    hd.appendChild(gIcon("trash"));
+    hd.appendChild(mk("span", null, wsT("js.rail.wt.del.title")));
+    var where = dl.appendChild(mk("code", "rdpath"));
+    var facts = dl.appendChild(mk("div", "rdfacts"));
+    facts.setAttribute("aria-live", "polite");
+    var note = dl.appendChild(mk("p", "rdnote"));
+    var force = dl.appendChild(mk("div", "rdforce"));
+    var conf = dl.appendChild(mk("label", "rdconf"));
+    var confText = conf.appendChild(mk("span", "rdconft"));
+    var inp = conf.appendChild(rpInput("rdq"));
+    var msg = dl.appendChild(mk("p", "rdmsg"));
+    msg.setAttribute("aria-live", "polite");
+    var row = dl.appendChild(mk("div", "rdrow"));
+    var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
+    var go = row.appendChild(rpBtn("pbtn danger", wsT("js.rail.wt.del.submit")));
+    function setMsg(text, err) { msg.textContent = text || ""; msg.className = "rdmsg" + (err ? " err" : ""); msg.hidden = !text; }
+    function sync() { go.disabled = D.busy || !WsRail.deleteReady(D.shown, inp.value, D.seq); }
+    // fact is one line of the check: an icon, its text, and an optional tone.
+    function fact(icon, text, tone) {
+      var f = facts.appendChild(mk("div", "rdfact" + (tone ? " " + tone : "")));
+      f.appendChild(gIcon(icon));
+      f.appendChild(mk("span", null, text));
+      return f;
+    }
+    // draw shows the check c. The worktree's state (changes, commits,
+    // submodules, lock, holders) shows only once the daemon read it (the
+    // token marks that): a refusal before the read (unknown, primary,
+    // pooled, missing) has none to show.
+    function draw(c) {
+      var r = c.refusal ? String(c.refusal) : "", blocked = !!r && r !== "force" && r !== "changed", read = !!c.token;
+      var folder = String(c.folder || "");
+      where.textContent = String(c.path || D.path);
+      where.title = where.textContent;
+      facts.textContent = "";
+      if (c.detached) fact("branch", wsT("js.rail.wt.del.detached"));
+      else if (c.branch) fact("branch", wsT("js.rail.wt.del.branch", String(c.branch)));
+      if (read) {
+        var paths = Array.isArray(c.dirty_paths) ? c.dirty_paths : [], dirty = +c.dirty || 0;
+        if (dirty > 0) {
+          fact("pencil", wsTn("js.rail.wt.del.dirty", dirty), "warn");
+          var ul = facts.appendChild(mk("ul", "rdpaths"));
+          paths.forEach(function (p) { var li = ul.appendChild(mk("li", null, String(p))); li.title = li.textContent; });
+          if (dirty > paths.length) ul.appendChild(mk("li", "more", wsT("js.rail.wt.del.more", dirty - paths.length)));
+        } else fact("check", wsT("js.rail.wt.del.clean"));
+        if (c.detached && +c.unreached > 0) fact("branch", wsTn("js.rail.wt.del.unreached", +c.unreached), "warn");
+        if (c.submodules) fact("repo", wsT("js.rail.wt.del.submodules"), "warn");
+        if (c.locked) fact("lock", c.lock_reason ? wsT("js.rail.wt.del.lockedwhy", String(c.lock_reason)) : wsT("js.rail.wt.del.locked"), "bad");
+        var holders = Array.isArray(c.holders) ? c.holders : [];
+        if (holders.length) {
+          facts.appendChild(mk("div", "rdsub", wsT("js.rail.wt.del.holders")));
+          var hl = facts.appendChild(mk("ul", "rdholders"));
+          holders.forEach(function (h) {
+            var li = hl.appendChild(mk("li", h.live ? "live" : null));
+            var name = String(h.label || h.id || "");
+            if (h.kind === "terminal") name = h.label ? wsT("js.rail.wt.del.terminalfrom", String(h.id || ""), String(h.label)) : wsT("js.rail.wt.del.terminal", String(h.id || ""));
+            else if (h.harness) name += " (" + h.harness + ")";
+            var nm = li.appendChild(mk("span", "nm", name));
+            nm.title = nm.textContent;
+            var state = h.live ? "js.rail.wt.del.live" : h.kind === "terminal" ? "js.rail.wt.del.exited" : "js.rail.wt.del.ended";
+            li.appendChild(mk("span", "rdst", wsT(state)));
+          });
+        }
+      }
+      note.textContent = String(c.note || "");
+      note.className = "rdnote" + (blocked ? " bad" : " warn");
+      note.hidden = !c.note;
+      force.textContent = "";
+      force.hidden = blocked || !c.force;
+      if (c.force && !blocked) {
+        force.appendChild(mk("div", "rdforcehd", wsT("js.rail.wt.del.force")));
+        var why = force.appendChild(mk("ul"));
+        if (+c.dirty > 0) why.appendChild(mk("li", null, wsT("js.rail.wt.del.why.dirty")));
+        if (+c.unreached > 0) why.appendChild(mk("li", null, wsT("js.rail.wt.del.why.unreached")));
+        if (c.submodules) why.appendChild(mk("li", null, wsT("js.rail.wt.del.why.submodules")));
+      }
+      conf.hidden = blocked || !folder;
+      confText.textContent = "";
+      wsT("js.rail.wt.del.confirm", "\u0001").split("\u0001").forEach(function (part, i) {
+        if (i) confText.appendChild(mk("code", null, folder));
+        if (part) confText.appendChild(doc.createTextNode(part));
+      });
+      go.textContent = wsT(c.force ? "js.rail.wt.del.forcesubmit" : "js.rail.wt.del.submit");
+    }
+    // show displays the check c as request n's answer; again clears the
+    // typed name, so a check that changed is confirmed afresh.
+    function show(c, n, again) {
+      D.shown = { key: n, check: c };
+      draw(c);
+      if (again) {
+        inp.value = "";
+        if (!conf.hidden) setMsg(wsT("js.rail.wt.del.again"), false);
+      }
+      sync();
+      if (!conf.hidden) inp.focus();
+    }
+    function submit() {
+      sync();
+      if (go.disabled) return;
+      var n = D.seq, c = D.shown.check;
+      D.busy = true;
+      setMsg("", false);
+      go.textContent = wsT("js.rail.wt.del.busy");
+      sync();
+      railPost("/rail/worktrees/delete", WsRail.deleteBody(D.ws, D.path, c), function (st, v, s) {
+        if (st === 200) {
+          if (n === D.seq) D.close();
+          toast(String(v.message || ""));
+          return;
+        }
+        // A 409 answers with the fresh check, or with text while another
+        // git action of the repository runs.
+        var fresh = null;
+        if (st === 409) { try { fresh = JSON.parse(s); } catch (e) { fresh = null; } }
+        if (!fresh || typeof fresh !== "object" || Array.isArray(fresh)) fresh = null;
+        if (n !== D.seq) { toast(fresh && fresh.note ? String(fresh.note) : railErr(st, fresh ? "" : s)); return; }
+        D.busy = false;
+        if (fresh) { show(fresh, n, true); return; }
+        draw(c);
+        setMsg(railErr(st, s), true);
+        sync();
+      });
+    }
+    inp.addEventListener("input", function () { if (!D.busy) setMsg("", false); sync(); });
+    rpEnter(inp, submit);
+    go.addEventListener("click", submit);
+    cancel.addEventListener("click", function () { D.close(); });
+    // The native Escape (cancel) closes through close too.
+    dl.addEventListener("cancel", function (e) { e.preventDefault(); D.close(); });
+    dl.addEventListener("close", function () {
+      D.seq++;
+      D.busy = false;
+      var b = D.btn;
+      if (!b || !b.isConnected) {
+        b = null;
+        q(".rdel", region("rail") || railEl).forEach(function (x) { if (x.getAttribute("data-path") === D.path) b = x; });
+      }
+      if (b) b.focus();
+    });
+    D.open = function (btn) {
+      var n = ++D.seq;
+      D.btn = btn;
+      D.ws = btn.getAttribute("data-ws") || "";
+      D.path = btn.getAttribute("data-path") || "";
+      D.shown = null;
+      D.busy = false;
+      inp.value = "";
+      setMsg("", false);
+      draw({ path: D.path, folder: btn.getAttribute("data-folder") || "" });
+      conf.hidden = true;
+      facts.appendChild(mk("div", "rdfact", wsT("js.rail.wt.del.loading")));
+      sync();
+      if (!dl.parentNode) doc.body.appendChild(dl);
+      if (!dl.open) dl.showModal();
+      cancel.focus();
+      railPost("/rail/worktrees/delete/preview", { workspace: D.ws, path: D.path }, function (st, v, s) {
+        if (n !== D.seq) return;
+        if (st !== 200) {
+          facts.textContent = "";
+          setMsg(railErr(st, s), true);
+          sync();
+          return;
+        }
+        show(v, n, false);
+      });
+    };
+    D.close = function () { if (dl.open) dl.close(); };
+    return D;
+  }
+  function railDelete(btn) {
+    if (!btn.getAttribute("data-path")) return;
+    rdel = rdel || rdelMake();
+    rdel.open(btn);
+  }
   if (railEl && WsRail) {
+    // Escape closes the delete modal before anything else hears it (the
+    // rail overlay would close on it too).
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && rdel && rdel.el.open) { e.preventDefault(); e.stopPropagation(); rdel.close(); }
+    }, true);
+  }
+  // A framed page opens the session menu (the shell's menu message) against
+  // its own head's chip, which stands where the shell shows its copy.
+  if ((railEl || framed) && WsRail) {
     // Escape closes the popover before anything else hears it (the rail
     // overlay and the drawer would close on it too).
     window.addEventListener("keydown", function (e) {
@@ -6162,7 +6749,7 @@
   // is sent from that page's composer. A refused or failed spawn shows in
   // the popover's error line and keeps it open.
   function rpLeadMake() {
-    var P = { gen: 0, busy: false, root: "", harness: "claude" };
+    var P = { gen: 0, busy: false, root: "", harness: "claude", iso: "default" };
     var el = P.el = rpPop(wsT("js.lead.title"));
     el.appendChild(mk("div", "sphd", wsT("js.lead.title")));
     var loc = el.appendChild(mk("div", "sploc"));
@@ -6173,6 +6760,16 @@
     var hbtn = { claude: rpBtn("", "Claude"), pi: rpBtn("", "Pi") };
     Object.keys(hbtn).forEach(function (k) { hbtn[k].setAttribute("role", "radio"); hbtn[k].setAttribute("data-harness", k); seg.appendChild(hbtn[k]); });
     var rows = leadRows(el.appendChild(mk("div", "spopts")), edited);
+    // Plugin isolation: which plugins the hosted session loads. The pick goes
+    // out as plugin_isolation; Pi's standalone binary supports only isolated.
+    var isec = el.appendChild(mk("div", "spsec"));
+    isec.appendChild(mk("div", "splbl", wsT("js.lead.iso")));
+    var iseg = isec.appendChild(mk("div", "spseg"));
+    iseg.setAttribute("role", "radiogroup");
+    iseg.setAttribute("aria-label", wsT("js.lead.iso"));
+    var ibtn = { "default": rpBtn("", wsT("js.lead.iso.default")), isolated: rpBtn("", wsT("js.lead.iso.isolated")) };
+    Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("role", "radio"); ibtn[k].setAttribute("data-iso", k); iseg.appendChild(ibtn[k]); });
+    var idesc = isec.appendChild(mk("p", "spdesc"));
     var err = el.appendChild(mk("p", "spnote err"));
     err.setAttribute("aria-live", "polite");
     var row = el.appendChild(mk("div", "sprow"));
@@ -6188,6 +6785,8 @@
         hbtn[k].disabled = off(k);
         hbtn[k].title = off(k) ? wsT("js.sup.unavail", k, h.error || "") : "";
       });
+      Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("aria-checked", String(P.iso === k)); });
+      idesc.textContent = wsT(P.iso === "isolated" ? "js.lead.iso.isolated.hint" : "js.lead.iso.default.hint") + (P.harness === "pi" ? " " + wsT("js.lead.iso.pi") : "");
       go.disabled = P.busy || off(P.harness);
     }
     // edited drops an earlier spawn's error once the form changed.
@@ -6212,10 +6811,10 @@
       setErr("");
       status.textContent = wsT("js.lead.starting");
       sync();
-      railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value }), function (st, v, s) {
+      railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value, isolation: P.iso }), function (st, v, s) {
         if (st === 201 && v.id) {
           saveDraft();
-          location.href = "/s/" + encodeURIComponent(String(v.id));
+          go("/s/" + encodeURIComponent(String(v.id)));
           return;
         }
         P.busy = false;
@@ -6226,6 +6825,7 @@
         railPopPlace();
       });
     }
+    iseg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-iso]"); if (b) { P.iso = b.getAttribute("data-iso"); sync(); } });
     seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-harness]"); if (b && !b.disabled) setHarness(b.getAttribute("data-harness")); });
     cancel.addEventListener("click", function () { railPopClose(true); });
     go.addEventListener("click", submit);
@@ -6234,6 +6834,7 @@
       P.busy = false;
       P.root = key;
       P.harness = "claude";
+      P.iso = "default";
       loc.textContent = "";
       loc.appendChild(gIcon(branch ? "repo" : "wsfolder"));
       loc.appendChild(mk("span", null, name));
@@ -6619,7 +7220,8 @@
     });
   }
   function apScan(el) {
-    if (!el) return;
+    // A framed page's shell notifies, from its rail.
+    if (!el || framed) return;
     var now = {}, fresh = [];
     apRows(el).forEach(function (r) {
       var k = apKey(r);
@@ -6641,7 +7243,7 @@
   function apGo(r) {
     if (r.rid === rid) return;
     saveDraft();
-    location.href = "/s/" + encodeURIComponent(r.rid);
+    go("/s/" + encodeURIComponent(r.rid));
   }
   function apNotify(r) {
     // the viewed session's own wait, in a tab the user is looking at, is
@@ -6672,12 +7274,12 @@
   if (hostedPage) {
     doc.addEventListener("click", function (e) {
       var t = e.target, chip = t && t.closest && t.closest(".host.hbtn");
-      if (chip && railEl && WsRail) { e.preventDefault(); railPopOpen("sess", chip); }
+      if (chip && (railEl || framed) && WsRail) { e.preventDefault(); railPopOpen("sess", chip); }
       else if (t && t.closest && t.closest("#csend")) notifAsk();
     });
     doc.addEventListener("keydown", function (e) {
       var t = e.target;
-      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !t.classList.contains("hbtn") || !railEl || !WsRail) return;
+      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !t.classList.contains("hbtn") || !(railEl || framed) || !WsRail) return;
       e.preventDefault();
       railPopOpen("sess", t);
     });
@@ -6690,9 +7292,11 @@
   // finds it: the composer's text, mentions, and selection, its slash
   // command selection, the board answers and topic notes, the answer chips, the images that reference
   // written attachments, the open details, and the tab. Pasted images are
-  // not kept: a restored draft says so, and while the page holds one,
-  // leaving it asks first (the browser's leave-page confirmation).
-  var draftStore = WsRail && rid ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
+  // not kept: their markers leave the composer text and the notes, a
+  // restored draft says so, and while the page holds one, leaving it asks
+  // first (the browser's leave-page confirmation).
+  // The shell holds no draft: its frames keep their own.
+  var draftStore = WsRail && rid && !shell ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
@@ -6732,6 +7336,15 @@
     if (!d) return;
     restoring = true;
     try {
+      var lost = Array.isArray(d.lost) ? d.lost : [], named = "";
+      // A lost image's marker leaves the notes as it leaves the text; what
+      // the restored notes still name may bring a reference image back.
+      var unlost = function (note) { return typeof note === "string" && note ? WsRail.stripMarkers(note, [], lost).text : note; };
+      if (d.answers && typeof d.answers === "object") Object.keys(d.answers).forEach(function (k) {
+        var a = d.answers[k];
+        if (a && a.note) { a.note = unlost(a.note); named += "\n" + a.note; }
+      });
+      if (Array.isArray(d.chips)) d.chips.forEach(function (c) { if (c && c.note) { c.note = unlost(c.note); named += "\n" + c.note; } });
       if (d.open && typeof d.open === "object") {
         Object.keys(d.open).forEach(function (k) { if (!Object.prototype.hasOwnProperty.call(openState, k)) openState[k] = true; });
         restoreOpen(doc);
@@ -6750,22 +7363,24 @@
         renderChips();
       }
       if (ccmd && !cmdSel && d.cmd && typeof d.cmd.name === "string" && d.cmd.name) setCommand(d.cmd.name, d.cmd.args);
-      var lost = Array.isArray(d.lost) ? d.lost : [];
       if (ctext && typeof d.text === "string" && d.text && !ctext.value) {
         var s = WsRail.stripMarkers(d.text, Array.isArray(d.mentions) ? d.mentions : [], lost);
         ctext.value = s.text;
         mentions = s.mentions.filter(function (m) { return liveMention(m, s.text); });
         mentionWas = ctext.value;
+        named += "\n" + s.text;
+        grow();
+        paintMentions();
+        if (Array.isArray(d.sel)) { try { ctext.setSelectionRange(d.sel[0], d.sel[1]); } catch (e) { /* out of range */ } }
+      }
+      if (ctext) {
         (Array.isArray(d.refs) ? d.refs : []).forEach(function (p) {
-          if (!p || !p.ref || !markerNums(s.text)[p.n]) return;
+          if (!p || !p.ref || !markerNums(named)[p.n] || imgs.some(function (q) { return q.n === p.n; })) return;
           imgs.push({ name: p.name || p.ref, url: attachSrc(p.ref), data: null, ref: p.ref, n: p.n });
           imgSeq = Math.max(imgSeq, p.n);
         });
         imgs.sort(function (a, b) { return a.n - b.n; });
-        grow();
-        paintMentions();
         renderImgs();
-        if (Array.isArray(d.sel)) { try { ctext.setSelectionRange(d.sel[0], d.sel[1]); } catch (e) { /* out of range */ } }
       }
       if (live && d.tab === "board") setTab("board");
       if (lost.length) noteWarn(wsT("js.draft.imgslost", lost.length));
@@ -6780,6 +7395,362 @@
     window.addEventListener("beforeunload", WsRail.leaveGuard(function () { return imgs.some(function (p) { return !p.ref; }); }));
   }
 
+  // --- iframe shell -------------------------------------------------------------
+  // The shell page (shell) shows one frame at a time (.on) and keeps the
+  // WsShell.LIMIT most recently opened; a page not yet loaded loads in a
+  // hidden frame while the shown one stays, and shows once loaded. The
+  // address bar names the shown page (pushState; popstate shows the page it
+  // goes back to). The shell's header mirrors the shown frame's (the head
+  // message): its head region, its search button, and the header's padding
+  // and height, so both headers lay out alike and the frame's own items
+  // stay invisible under the shell's. The rail marks the session a page
+  // opens on at once (shRid). A page the shell frames (framed) hands its
+  // header, title, layout, scroll, and the shell's hotkeys to the shell,
+  // and every link it would load as a page to the shell (go); shell.js
+  // lists the messages.
+  var shFrames = [], shOn = null, shWant = null, shOrder = [], shHeadHtml = null, shSeq = 0, shTrackerRev = null;
+  var shTop = doc.querySelector(".dwrap > .top"), shBody = doc.querySelector(".dwrap > .dbody");
+  // shPost sends a framed page's message of kind to its shell.
+  function shPost(kind, m) {
+    if (!framed) return;
+    m = m || {};
+    m.wsShell = kind;
+    try { window.parent.postMessage(m, location.origin); } catch (x) { /* the shell left */ }
+  }
+  function shParentDoc() { try { return window.parent.document; } catch (x) { return doc; } }
+  // go shows the page href names: a framed page asks its shell, the shell
+  // shows it in a frame, and any other page, or a page the shell does not
+  // frame, loads at the top level.
+  function go(href) {
+    var u = new URL(href, location.href);
+    if (shell) { shOpen(u.href, true); return; }
+    if (framed) {
+      if (window.WsShell.framed(u, location.origin)) shPost("nav", { href: u.href });
+      else window.top.location.href = u.href;
+      return;
+    }
+    location.href = u.href;
+  }
+  // A plain click on a link the page would load goes through go, but a
+  // link to the page's own document (a hash route) and one that opens
+  // elsewhere (a target, a download, a modified click).
+  if (shell || framed) window.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target && e.target.closest && e.target.closest("a[href]");
+    if (!a || (a.target && a.target !== "_self" && a.target !== "_top") || a.hasAttribute("download")) return;
+    var u;
+    try { u = new URL(a.href, location.href); } catch (x) { return; }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return;
+    if (u.origin === location.origin && u.pathname === location.pathname && u.search === location.search && u.hash) return;
+    if (shell && !window.WsShell.framed(u, location.origin)) return;
+    e.preventDefault();
+    go(u.href);
+  });
+
+  // shHolds reports a frame holding unsent work; shDrafts any frame, which
+  // an assets reload of the shell would drop.
+  function shHolds(x) {
+    try { return !!(x.el.contentWindow.wsHoldsDraft && x.el.contentWindow.wsHoldsDraft()); } catch (e) { return false; }
+  }
+  function shDrafts() { return shFrames.some(shHolds); }
+  function shSend(ent, kind, m) {
+    m = m || {};
+    m.wsShell = kind;
+    try { ent.el.contentWindow.postMessage(m, location.origin); } catch (x) { /* unloading */ }
+  }
+  function shFind(path) { return shFrames.filter(function (x) { return x.f.path === path; })[0] || null; }
+  function shEnt(win) { return shFrames.filter(function (x) { return x.el.contentWindow === win; })[0] || null; }
+  // Each load (a first one, a reload) tells the frame whether it shows: a
+  // page loads believing it shows, and a hidden frame's reload, or a frame
+  // superseded before it ever showed, must hold its updates.
+  function shAdd(el, f) {
+    var ent = { el: el, f: f, head: null, title: "", pincol: false, dim: 0, y: 0, loaded: false };
+    el.addEventListener("load", function () {
+      ent.loaded = true;
+      if (shWant === ent) shShow(ent);
+      else shSend(ent, "shown", { shown: ent === shOn });
+    });
+    shFrames.push(ent);
+    return ent;
+  }
+  // shOpen shows the page href names (a page the shell frames; any other
+  // loads at the top level); push adds a history entry for it.
+  function shOpen(href, push) {
+    var u = new URL(href, location.href), f = window.WsShell.framed(u, location.origin);
+    if (!f) { location.href = u.href; return; }
+    if (push && location.pathname + location.hash !== f.path + f.hash) history.pushState(null, "", f.path + f.hash);
+    var ent = shFind(f.path);
+    if (!ent) {
+      var el = doc.createElement("iframe");
+      el.className = "sframe";
+      el.title = doc.title;
+      ent = shAdd(el, f);
+      el.src = window.WsShell.src(f);
+      $("frames").appendChild(el);
+    } else if (f.hash !== ent.f.hash) {
+      try { ent.el.contentWindow.location.hash = f.hash; } catch (x) { /* unloading */ }
+    }
+    ent.f = f;
+    // The page opened is the most recent, the one shown until it loads the
+    // next: pages opened and left before they ever showed go first. A frame
+    // holding unsent work stays loaded past the limit (removing it would
+    // drop its pasted images unasked) and is dropped once it holds none.
+    var a = shOn ? window.WsShell.touch(shOrder, shOn.f.path) : { order: shOrder, evict: [] }, t = window.WsShell.touch(a.order, f.path);
+    shOrder = t.order;
+    a.evict.concat(t.evict).forEach(function (p) {
+      var x = shFind(p);
+      if (!x) return;
+      if (x === shOn || shHolds(x)) { shOrder.push(p); return; }
+      shFrames.splice(shFrames.indexOf(x), 1);
+      x.el.remove();
+    });
+    shRid(f.rid);
+    if (ent === shOn) { shWant = null; return; }
+    shWant = ent;
+    if (ent.loaded) shShow(ent);
+  }
+  // shRid marks the session the shell shows (rid, the rail's viewed row,
+  // the memo pad's workspace).
+  function shRid(id) {
+    if (id === rid) return;
+    rid = id;
+    root.setAttribute("data-rid", id);
+    railMarks();
+  }
+  function shShow(ent) {
+    shWant = null;
+    var was = shOn;
+    if (was === ent) return;
+    // A rename in progress names the session it was started for.
+    var sn = region("head") && region("head").querySelector(".sname");
+    if (sn && labelEditing()) labelEnd(sn);
+    headHeld = null;
+    shOn = ent;
+    ent.el.classList.add("on");
+    if (was) {
+      was.el.classList.remove("on");
+      shSend(was, "shown", { shown: false });
+    }
+    shSend(ent, "shown", { shown: true });
+    shRid(ent.f.rid);
+    shHead(ent);
+    shLayout(ent);
+    shScroll(ent);
+    if (ent.title) doc.title = ent.title;
+    try { ent.el.contentWindow.focus(); } catch (x) { /* unloading */ }
+  }
+  function shReload() { if (shOn) try { shOn.el.contentWindow.location.reload(); } catch (x) { /* unloading */ } }
+  // shHead shows the shown frame's header: its head region (none while the
+  // frame has not named one) and search button, or with the head null the
+  // frame's own header (sh-own) beside the shell's rail button.
+  function shHead(ent) {
+    var m = ent.head, html = m ? m.html : "", qs = $("qsslot");
+    shTop.classList.toggle("sh-own", html === null);
+    if (html === null) html = "";
+    if (html !== shHeadHtml) {
+      shHeadHtml = html;
+      shSeq++;
+      swap("head", "f" + shSeq, html);
+    }
+    if (qs && qs.innerHTML !== (m ? m.qs : "")) qs.innerHTML = m ? m.qs : "";
+    shTop.style.paddingRight = m ? m.pad + "px" : "";
+    shTop.style.minHeight = m ? m.top + "px" : "";
+  }
+  // shLayout takes the shown frame's pinned column (the rail overlays
+  // beside it below 2200px) and its backdrop's dim.
+  function shLayout(ent) {
+    if (ent.pincol !== root.hasAttribute("data-pincol")) {
+      if (ent.pincol) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
+      railOpen(false);
+    }
+    if (ent.dim > 0) {
+      root.style.setProperty("--fdim", String(Math.max(0, 1 - ent.dim)));
+      root.setAttribute("data-fdim", "");
+    } else root.removeAttribute("data-fdim");
+  }
+  // shScroll moves the header and the rail with a frame whose page scrolls
+  // as a whole, as its own would move: the header scrolls away, and the
+  // rail rises with it until it stands at the wrap's top padding.
+  function shScroll(ent) {
+    var y = Math.max(0, ent.y || 0);
+    shTop.style.transform = y ? "translateY(" + -y + "px)" : "";
+    if (shBody) shBody.style.marginTop = y ? -Math.min(y, shTop.offsetHeight + 10) + "px" : "";
+  }
+  function shSearch() {
+    if (!shOn) return;
+    try { shOn.el.focus(); } catch (x) { /* unloading */ }
+    shSend(shOn, "search");
+  }
+  if (shell && window.WsShell) {
+    window.addEventListener("message", function (e) {
+      if (e.origin !== location.origin) return;
+      var m = window.WsShell.message(e.data), ent = m && shEnt(e.source), on = !!ent && ent === shOn;
+      if (!ent) return;
+      switch (m.wsShell) {
+        case "head": ent.head = m; if (on) shHead(ent); break;
+        case "title": ent.title = m.title; if (on) doc.title = m.title; break;
+        case "nav": if (on) shOpen(m.href, true); break;
+        case "key":
+          if (!on) break;
+          if (m.key === "rail") railKey();
+          else if (m.key === "esc" && railShown()) railOpen(false);
+          break;
+        case "layout": ent.pincol = m.pincol; ent.dim = m.dim; if (on) shLayout(ent); break;
+        case "scroll": ent.y = m.y; if (on) shScroll(ent); break;
+        case "hash": if (on && location.hash !== m.hash) history.replaceState(null, "", ent.f.path + m.hash); ent.f.hash = m.hash; break;
+        case "theme":
+          setTheme(m.theme, true);
+          shFrames.forEach(function (x) { if (x !== ent) shSend(x, "theme", { theme: m.theme }); });
+          break;
+      }
+    });
+    window.addEventListener("popstate", function () { shOpen(location.pathname + location.hash, false); });
+    // The shell's hotkeys besides the rail's: the search palette's keys
+    // (tracker.js qShortcut) open the shown frame's palette; Ctrl+K and
+    // Ctrl+Space stay with editors by qShortcut's target rule.
+    doc.addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229 || e.altKey || e.metaKey || e.defaultPrevented) return;
+      var t = e.target, typing = !!(t && t.closest && t.closest("input, textarea, select, [contenteditable]:not([contenteditable=\"false\"])"));
+      var editor = !!(t && t.closest && t.closest(".xterm, textarea, [contenteditable]:not([contenteditable=\"false\"])"));
+      if (e.ctrlKey ? !editor && !e.shiftKey && (e.code === "Space" || e.key === " " || (e.key || "").toLowerCase() === "k") : e.key === "/" && !typing) {
+        e.preventDefault();
+        shSearch();
+      }
+    });
+    if (shTop) shTop.addEventListener("click", function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      if (t.closest("#tkqs")) { e.preventDefault(); shSearch(); return; }
+      if (t.closest(".host.hbtn") && shOn) { e.preventDefault(); try { shOn.el.focus(); } catch (x) {} shSend(shOn, "menu"); }
+    });
+    if (shTop) shTop.addEventListener("keydown", function (e) {
+      var t = e.target;
+      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !t.classList.contains("hbtn") || !shOn) return;
+      e.preventDefault();
+      try { shOn.el.focus(); } catch (x) {}
+      shSend(shOn, "menu");
+    });
+  }
+  // shFrameInit wires a framed page to its shell: the header, the layout,
+  // the scroll, and hash routes go up as they change, and the shell's
+  // messages come down.
+  function shFrameInit() {
+    var sent = {}, queued = null;
+    function send(kind, m) {
+      var k = JSON.stringify(m);
+      if (sent[kind] === k) return;
+      sent[kind] = k;
+      shPost(kind, m);
+    }
+    // inline gives the search slot's icons their own paths: the shell
+    // holds none of the tracker's symbols.
+    function inline(el) {
+      var c = el.cloneNode(true);
+      q("svg use", c).forEach(function (u) {
+        var id = (u.getAttribute("href") || "").replace(/^#/, ""), sym = id ? doc.getElementById(id) : null, svg = u.parentNode;
+        if (!sym || !svg) return;
+        if (sym.getAttribute("viewBox")) svg.setAttribute("viewBox", sym.getAttribute("viewBox"));
+        svg.innerHTML = sym.innerHTML;
+      });
+      return c.innerHTML;
+    }
+    // dim is the alpha of the backdrop the page shows over the whole
+    // window: a modal dialog's, or an overlay's (the item and git windows,
+    // the image viewer, a maximized card's scrim).
+    function dim() {
+      var a = 0;
+      q("dialog[open]").forEach(function (d) {
+        var modal = false;
+        try { modal = d.matches(":modal"); } catch (x) { modal = false; }
+        if (modal) a = Math.max(a, window.WsShell.alpha(getComputedStyle(d, "::backdrop").backgroundColor));
+      });
+      q(".tk-iwin-back:not([hidden]), .gwin-back:not([hidden]), .wbv:not([hidden]), .bc-scrim:not([hidden])").forEach(function (el) {
+        if (el.getClientRects().length) a = Math.max(a, window.WsShell.alpha(getComputedStyle(el).backgroundColor));
+      });
+      return Math.round(a * 100) / 100;
+    }
+    function post() {
+      queued = null;
+      var top = doc.querySelector(".dwrap > .top"), h = region("head"), qs = $("qsslot");
+      if (top) send("head", {
+        html: h ? h.innerHTML : null, qs: qs ? inline(qs) : "",
+        pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
+        top: top.offsetHeight
+      });
+      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim() });
+    }
+    function queue() { if (!queued) queued = setTimeout(post, 16); }
+    var top = doc.querySelector(".dwrap > .top");
+    if (window.MutationObserver) {
+      var mo = new MutationObserver(queue);
+      if (top) mo.observe(top, { subtree: true, childList: true, attributes: true, characterData: true });
+      mo.observe(root, { attributes: true, attributeFilter: ["style", "data-pincol"] });
+      mo.observe(doc.body, { childList: true });
+      mo.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ["open", "hidden"] });
+    }
+    window.addEventListener("resize", queue);
+    window.addEventListener("scroll", function () { send("scroll", { y: Math.round(window.scrollY) }); });
+    // A hash route moves by hashchange or by the page's own history calls
+    // (tracker.js's store pages), which fire none: either way the shell's
+    // address takes the hash.
+    function hash() { send("hash", { hash: location.hash }); }
+    window.addEventListener("hashchange", hash);
+    window.addEventListener("popstate", hash);
+    ["pushState", "replaceState"].forEach(function (k) {
+      var orig = history[k];
+      if (typeof orig !== "function") return;
+      history[k] = function () {
+        var r = orig.apply(history, arguments);
+        hash();
+        return r;
+      };
+    });
+    // Escape and the rail hotkey reach the shell from inside the page (the
+    // rail's own handler is the shell's).
+    doc.addEventListener("keydown", function (e) {
+      if (e.code === "Backquote" && e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.isComposing) { e.preventDefault(); railKey(); }
+      else if (e.key === "Escape" && !e.defaultPrevented) shPost("key", { key: "esc" });
+    });
+    window.addEventListener("message", function (e) {
+      if (e.source !== window.parent || e.origin !== location.origin) return;
+      var m = window.WsShell.message(e.data);
+      if (!m) return;
+      if (m.wsShell === "shown") {
+        shHidden = !m.shown;
+        if (shHidden) return;
+        showRegions();
+        tickTimes();
+        if (shTrackerRev !== null) { var rev = shTrackerRev; shTrackerRev = null; trackerNudge(rev); }
+        queue();
+      } else if (m.wsShell === "search") {
+        var b = $("tkqs");
+        if (b) b.click();
+      } else if (m.wsShell === "menu") {
+        var h = region("head"), chip = h && h.querySelector(".host.hbtn");
+        if (chip && WsRail) railPopOpen("sess", chip);
+      } else if (m.wsShell === "theme") setTheme(m.theme, true);
+      else if (m.wsShell === "sync") { sent = {}; post(); shPost("title", { title: doc.title }); }
+    });
+    post();
+    shPost("title", { title: doc.title });
+    if (window.scrollY) send("scroll", { y: Math.round(window.scrollY) });
+  }
+  // shShellInit takes the frame the shell page loaded with: the page its
+  // address names (its path and hash, which never reached the daemon; a
+  // query, such as a LAN token, is not the page's) and asks it for its
+  // header, in case it posted before this script listened. A frame already
+  // loaded fires no load for shAdd to see.
+  function shShellInit() {
+    var el = doc.querySelector("#frames > iframe"), f = window.WsShell.framed(new URL(location.pathname + location.hash, location.origin), location.origin);
+    if (!el || !f) return;
+    var ent = shAdd(el, f);
+    shOn = ent;
+    shOrder = [f.path];
+    if (f.hash) { el.src = window.WsShell.src(f); return; }
+    try { ent.loaded = el.contentDocument.readyState === "complete"; } catch (x) { /* not yet */ }
+    shSend(ent, "sync");
+  }
+
   if (live) {
     setLayout(load(LAYOUT_KEY));
     setSplit(savedSplit());
@@ -6790,7 +7761,7 @@
   restoreOpen(doc);
   // A body frame that posted its height before the listener above existed
   // posts it again.
-  q("iframe.doc-frame").forEach(function (f) { if (f.contentWindow) f.contentWindow.postMessage({ wbDoc: "size" }, "*"); });
+  q("iframe.doc-frame").forEach(function (f) { postDoc(f, { wbDoc: "size" }); });
   if (window.wbForm) window.wbForm();
   applySent();
   restoreDraft();
@@ -6803,6 +7774,8 @@
   mermaid();
   pinConvo();
   nearTop();
-  trackerStart();
+  if (framed) shFrameInit();
+  if (shell && window.WsShell) shShellInit();
+  if (!shell) trackerStart();
   connect();
 })();

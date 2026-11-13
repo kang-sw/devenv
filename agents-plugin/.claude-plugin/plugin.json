@@ -1,12 +1,12 @@
 {
   "name": "ws",
-  "version": "0.49.1",
+  "version": "0.50.0",
   "description": "Workflow plugin for host-neutral skills, project context, tickets, and Git tools.",
   "author": {
     "name": "kang-sw"
   },
   "repository": "https://github.com/kang-sw/devenv",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "agents": [
     "./claude-agents/effort-low.md",
     "./claude-agents/effort-medium.md",

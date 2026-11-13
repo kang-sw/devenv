@@ -372,12 +372,16 @@ func Normalize(e Entry) (Entry, error) {
 	for _, m := range e.Mentions {
 		m.Topic = strings.TrimSpace(m.Topic)
 		m.ID = strings.TrimSpace(m.ID)
+		m.Entry = strings.TrimSpace(m.Entry)
 		m.Text = strings.TrimSpace(m.Text)
 		if m.Topic == "" || len(m.Topic) > maxTopicLen || strings.ContainsAny(m.Topic, "\r\n") {
 			return Entry{}, fmt.Errorf("%w: mention topic %q", ErrInvalid, m.Topic)
 		}
 		if m.ID != "" && !chipIDPattern.MatchString(m.ID) {
 			return Entry{}, fmt.Errorf("%w: mention item id %q", ErrInvalid, m.ID)
+		}
+		if m.Entry != "" && !mentionEntryPattern.MatchString(m.Entry) {
+			return Entry{}, fmt.Errorf("%w: mention entry %q (expected eN)", ErrInvalid, m.Entry)
 		}
 		if m.Text == "" {
 			continue
@@ -551,27 +555,15 @@ func maxInt(list []int) int {
 // chips and topic notes over base's: the later chip for an item, and the
 // later note for a topic, wins. base's first-send time is kept.
 // add's images are renumbered to continue base's, each number raised by
-// base's highest, and every marker in add's parts naming one of add's images
-// is rewritten to its new number; an image base already lists takes base's
-// number. The image cap is the caller's to check before the send.
+// base's highest, and every marker in add's parts, chip notes, and topic
+// notes naming one of add's images is rewritten to its new number, so the
+// numbers stay unique across the merged message; an image base already lists
+// takes base's number. The image cap is the caller's to check before the
+// send.
 func Merge(base, add Entry) Entry {
 	out := Entry{SchemaVersion: SchemaVersion, SentAt: base.SentAt}
 	if out.SentAt == 0 {
 		out.SentAt = add.SentAt
-	}
-	out.Chips = append([]Chip{}, base.Chips...)
-	for _, c := range add.Chips {
-		if c.SentAt == 0 {
-			c.SentAt = add.SentAt
-		}
-		out.Chips = putChip(out.Chips, c)
-	}
-	out.Topics = append([]TopicNote{}, base.Topics...)
-	for _, t := range add.Topics {
-		out.Topics = putTopic(out.Topics, t)
-	}
-	if len(out.Topics) == 0 {
-		out.Topics = nil
 	}
 	out.Mentions = append(append([]Mention(nil), base.Mentions...), add.Mentions...)
 	baseNums := base.Nums()
@@ -596,6 +588,22 @@ func Merge(base, add Entry) Entry {
 	out.Parts = append([]string{}, base.Parts...)
 	for _, p := range add.Parts {
 		out.Parts = append(out.Parts, renumberMarkers(p, renum))
+	}
+	out.Chips = append([]Chip{}, base.Chips...)
+	for _, c := range add.Chips {
+		if c.SentAt == 0 {
+			c.SentAt = add.SentAt
+		}
+		c.Note = renumberMarkers(c.Note, renum)
+		out.Chips = putChip(out.Chips, c)
+	}
+	out.Topics = append([]TopicNote{}, base.Topics...)
+	for _, t := range add.Topics {
+		t.Note = renumberMarkers(t.Note, renum)
+		out.Topics = putTopic(out.Topics, t)
+	}
+	if len(out.Topics) == 0 {
+		out.Topics = nil
 	}
 	return out
 }

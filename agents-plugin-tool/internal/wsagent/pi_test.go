@@ -139,6 +139,10 @@ func TestPiBridgeRegistersOnlyTheProfileServers(t *testing.T) {
 	if len(got) != 3 || got["ws"]["command"] != "/bin/ws-mcp" || got["ws"]["cwd"] != "/work" || got["ws"]["exposure"] != "direct" {
 		t.Fatalf("ws-mcp should register direct at the root: %v", got)
 	}
+	timeout, _ := got["ws"]["timeout"].(float64)
+	if timeout != piMCPTimeout.Seconds() || timeout <= (PiWaitMax+PiForwardSlack).Seconds() {
+		t.Fatalf("ws-mcp timeout must outlast a maximum forwarded wait: %v", got["ws"])
+	}
 	if env, _ := got["ws"]["env"].(map[string]any); env[EnvAllowedTools] != "tickets.query" {
 		t.Fatalf("ws-mcp's allowlist travels in its env: %v", got["ws"])
 	}
@@ -714,5 +718,50 @@ func TestPiBackendStart(t *testing.T) {
 	t.Cleanup(func() { lookPath = restore })
 	if _, err := (PiBackend{}).Start(context.Background(), plain); err == nil || !strings.Contains(err.Error(), "pi backend") {
 		t.Fatalf("a missing pi names the backend, got %v", err)
+	}
+}
+
+// TestPiMCPOnly pins which Pi conversations run without the native ws Pi
+// extension: a spawned conversation unless its launched profile loads the
+// extension package (by directory or entry file), and a hosted lead only
+// after its bridge fallback recorded a plugin warning.
+func TestPiMCPOnly(t *testing.T) {
+	root := t.TempDir()
+	ext := filepath.Join(root, "ext")
+	if err := os.MkdirAll(filepath.Join(ext, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ext, "package.json"), []byte(`{"name":"`+piExtensionPackage+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(root, "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "package.json"), []byte(`{"name":"another-extension"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spawned := Record{Backend: BackendPi, Root: root}
+	cases := []struct {
+		name string
+		rec  Record
+		def  *Profile
+		want bool
+	}{
+		{"spawned without a profile", spawned, nil, true},
+		{"spawned with no plugins", spawned, &Profile{Backend: BackendPi}, true},
+		{"spawned with another extension", spawned, &Profile{Backend: BackendPi, Plugins: []string{"other/index.ts"}}, true},
+		{"spawned with the extension entry", spawned, &Profile{Backend: BackendPi, Plugins: []string{"ext/src/index.ts"}}, false},
+		{"spawned with the extension directory", spawned, &Profile{Backend: BackendPi, Plugins: []string{ext}}, false},
+		{"hosted lead on the bundled extension", Record{Backend: BackendPi, Lead: true}, nil, false},
+		{"hosted lead on the bridge fallback", Record{Backend: BackendPi, Lead: true, PluginWarning: "Bundled Pi extension unavailable"}, nil, true},
+		{"claude conversation", Record{Backend: BackendClaude, Root: root}, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := PiMCPOnly(tc.rec, tc.def); got != tc.want {
+				t.Fatalf("PiMCPOnly = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

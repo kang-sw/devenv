@@ -40,7 +40,7 @@
   var ORIGINS = ['human', 'agent', 'agent-auto'];
   // stage is retired: only older events carry it (see apply), so EDIT_FIELDS, the
   // list a refusal names, leaves it out.
-  var ITEM_FIELDS = ['title', 'body', 'project', 'due', 'priority', 'labels', 'stage'], EDIT_FIELDS = ITEM_FIELDS.slice(0, 6);
+  var ITEM_FIELDS = ['title', 'body', 'project', 'due', 'start', 'priority', 'labels', 'stage'], EDIT_FIELDS = ITEM_FIELDS.slice(0, 7);
   // The store's label list (admin-only roles events); a label's id is its add
   // event's id, and an item's labels field is a list of those ids.
   var LABEL_LIST = ['roles.add_label', 'roles.edit_label', 'roles.remove_label'], COLOR_RE = /^#[0-9a-f]{6}$/;
@@ -373,6 +373,7 @@
     if (has(p, 'title') && !p.title) rej('title cannot be empty');
     if (p.project != null && typeof p.project !== 'string') rej('project is one optional free-text string');
     if (p.due != null && !(typeof p.due === 'string' && DUE_RE.test(p.due) && !isNaN(Date.parse(p.due)))) rej('due is an optional YYYY-MM-DD date');
+    if (p.start != null && !(typeof p.start === 'string' && DUE_RE.test(p.start) && !isNaN(Date.parse(p.start)))) rej('start is an optional YYYY-MM-DD date');
     if (p.priority != null && !(Number.isInteger(p.priority) && p.priority >= 0 && p.priority < S.prio.names.length))
       rej('priority must be a level 0..' + (S.prio.names.length - 1) + ' (' + S.prio.names.join(' / ') + ')');
     if (p.labels != null) {
@@ -562,9 +563,11 @@
   // flags by them, so an event written before such a rule existed keeps folding as it
   // did (Go: checkWrite). An item.assign reaching below its writer a (a member below a,
   // a rule rooted at a or below a, mode all) takes completion assigner: a confirms the
-  // wrap-up, its holder sends it to review. A topic keeps no completion. S is the state
-  // after the dispatched call; null when nothing refuses.
+  // wrap-up, its holder sends it to review. A topic keeps no completion. An item's
+  // start falls on or before its due (startAfterDue). S is the state after the
+  // dispatched call; null when nothing refuses.
   function writeRefusal(S, a, type, p) {
+    if (type === 'item.create' || type === 'item.edit') return startAfterDue(S, type, p);
     if (type !== 'item.assign' || (p.completion || 'assignee') !== 'assignee') return null;
     var it = has(S.items, String(p.item)) ? S.items[p.item] : null;
     if (!it || it.kind === 'topic') return null;
@@ -575,6 +578,22 @@
     else if (p.mode === 'all') rule(a);
     else (p.people || []).forEach(person);
     return low.length ? 'completion must be assigner for an assignment below ' + a + ' (' + low.join(', ') + '): ' + a + ' confirms its wrap-up' : null;
+  }
+
+  // An item.create carrying both start and due, or an item.edit setting either (the
+  // side it leaves out is the item's, a side set to null is cleared), whose start is
+  // after its due; a clear never refuses. Concurrent edits can still fold to such a
+  // pair, and every reader shows it as written, so this is a write-time rule only.
+  function startAfterDue(S, type, p) {
+    var it = null;
+    if (type === 'item.edit') {
+      if (p.start == null && p.due == null) return null;
+      it = has(S.items, String(p.item)) ? S.items[p.item] : null;
+      if (!it) return null;
+    }
+    function val(f) { return has(p, f) ? p[f] || '' : (it && it[f]) || ''; }
+    var start = val('start'), due = val('due');
+    return start && due && start > due ? 'start ' + start + ' is after due ' + due : null;
   }
 
   // Why who's accept on item is refused: one of their pending assignments there is a
@@ -1521,7 +1540,7 @@
       case 'item.create':
         // (154 a) task and todo are one kind: a todo create folds as a task.
         S.items[n.id] = { id: n.id, alias: n.alias, kind: p.kind === 'todo' ? 'task' : p.kind, title: p.title, body: p.body || '', project: p.project || '',
-          due: p.due || null, priority: p.priority != null ? p.priority : S.prio.default,
+          due: p.due || null, start: p.start || null, priority: p.priority != null ? p.priority : S.prio.default,
           parent: p.parent || null, after: has(p, 'after') ? (p.after || null) : undefined, author: a, ts: n.ts, hidden: false, edited: null, node: n,
           mentions: mentionsOf(p), attachments: attachmentsOf(p), refs: refsOf(p), labels: labelsOf(p), cc: [] };
         S.items[n.id].placedBy = S.items[n.id].parentBy = n;
@@ -1566,7 +1585,7 @@
           }
           if (f === 'labels') { it.labels = write(S, 'it:' + it.id + ':labels', 'labels of ' + it.alias, n, { labels: labelsOf(p) }, C).labels; return; }
           if (f === 'body') { applyBody(S, it, n, C); return; } // the running fold value, not the register's winner
-          it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' ? null : '') : p[f], C);
+          it[f] = write(S, 'it:' + it.id + ':' + f, f + ' of ' + it.alias, n, p[f] == null ? (f === 'due' || f === 'start' ? null : '') : p[f], C);
         });
         it.edited = n;
         break;
@@ -1996,7 +2015,7 @@
       recs.forEach(function (r) { r.writes.forEach(function (w) { if (w.type === 'item.status' && w.p.status === 'doing' && (!started || String(w.ts) < started)) started = String(w.ts); }); });
       items[it.id] = { id: it.id, alias: it.alias, kind: it.kind, title: it.title, body: it.body, bodyRev: bodyRev(S, it.id), project: it.project,
         labels: it.labels.filter(function (id) { return !!liveLabel(S, id); }),
-        due: it.due, priority: it.priority, priorityLevel: priorityLevel(S.prio, it.priority), priorityName: S.prio.names[priorityLevel(S.prio, it.priority)],
+        due: it.due, start: it.start || undefined, priority: it.priority, priorityLevel: priorityLevel(S.prio, it.priority), priorityName: S.prio.names[priorityLevel(S.prio, it.priority)],
         parent: it.parent && S.items[it.parent] ? it.parent : null, author: it.author, ts: it.ts, hidden: !!it.hidden,
         edited: it.edited ? { id: it.edited.id, ts: it.edited.ts } : null, status: itemStatus(g, it), counted: counted(g, it),
         rollup: rollup(g, it), lastActivity: lastAct[it.id] || it.ts, started: started,

@@ -52,7 +52,7 @@ var (
 	mermaidOnce sync.Once
 	mermaidName string
 
-	itemRefPrefix = regexp.MustCompile(`^\{\{([0-9]+)\}\}`)
+	itemRefPrefix = regexp.MustCompile(`^\{\{(p[1-9][0-9]*|[0-9]+)\}\}`)
 	drivePath     = regexp.MustCompile(`^[A-Za-z]:[\\/]`)
 )
 
@@ -78,19 +78,20 @@ func UsesMermaid(page string) bool {
 // and link targets against that page.
 type markdown struct {
 	block, inline goldmark.Markdown
+	inlineText    goldmark.Markdown
 	// raw is block with raw HTML passed through, built on first use (topic
 	// bodies and finished lead replies only).
 	raw goldmark.Markdown
 }
 
 func newMarkdown(p *pageData) *markdown {
-	refs := util.Prioritized(itemRefParser{stored: p.Stored}, 100)
+	refs := util.Prioritized(itemRefParser{stored: p.Stored, panels: p.StoredPanels}, 100)
 	// Inline only: the paragraph is the one block parser, so list markers,
 	// headings, fences, and quotes stay literal text, and no paragraph
 	// transformer turns a "[x]: y" title into a link definition.
 	inlineOptions := []parser.Option{
 		parser.WithBlockParsers(util.Prioritized(parser.NewParagraphParser(), 100)),
-		parser.WithInlineParsers(inlineParsers(refs, false, !p.noInlineTags)...),
+		parser.WithInlineParsers(inlineParsers(refs, false, !p.noInlineTags, true)...),
 	}
 	if !p.noInlineTags {
 		inlineOptions = append(inlineOptions, parser.WithASTTransformers(util.Prioritized(inlineTagTransformer{}, 100)))
@@ -102,7 +103,16 @@ func newMarkdown(p *pageData) *markdown {
 			renderer.WithNodeRenderers(util.Prioritized(&mdRenderer{page: p, inline: true}, 100)),
 		),
 	)
-	return &markdown{block: blockMarkdown(p, refs, false), inline: inline}
+	plain := goldmark.New(
+		goldmark.WithParser(parser.NewParser(
+			parser.WithBlockParsers(util.Prioritized(parser.NewParagraphParser(), 100)),
+			// No emphasis parser: link fields and readings are paths and
+			// identifiers, so * and _ stay literal.
+			parser.WithInlineParsers(inlineParsers(refs, false, false, false)...),
+		)),
+		goldmark.WithRendererOptions(renderer.WithNodeRenderers(util.Prioritized(&mdRenderer{page: p, inline: true}, 100))),
+	)
+	return &markdown{block: blockMarkdown(p, refs, false), inline: inline, inlineText: plain}
 }
 
 // blockMarkdown is the block pipeline with hard-wrapped lines. Without
@@ -129,11 +139,11 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 	}
 	inlineTags := !rawHTML && !p.noInlineTags
 	parserOptions := []parser.Option{
-		parser.WithInlineParsers(inlineParsers(refs, rawHTML, inlineTags)...),
+		parser.WithInlineParsers(inlineParsers(refs, rawHTML, inlineTags, true)...),
 		parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
 	}
 	if rawHTML {
-		blocks = append(blocks, util.Prioritized(parser.NewHTMLBlockParser(), 900))
+		blocks = append(blocks, util.Prioritized(newRawTextHTMLBlockParser(), 900))
 		options = append(options, html.WithUnsafe())
 	}
 	if inlineTags {
@@ -154,15 +164,17 @@ func blockMarkdown(p *pageData, refs util.PrioritizedValue, rawHTML bool) goldma
 // inlineParsers is goldmark's default inline set, its code span parser
 // linking a whole-path span (codePathParser), plus refs and the bare URL
 // and path parsers (bare_links.go), with the raw
-// HTML parser when rawHTML and the allowlisted inline tags (inline_tags.go)
-// when inlineTags.
-func inlineParsers(refs util.PrioritizedValue, rawHTML, inlineTags bool) []util.PrioritizedValue {
+// HTML parser when rawHTML, the allowlisted inline tags (inline_tags.go)
+// when inlineTags, and the emphasis parser only when emphasis.
+func inlineParsers(refs util.PrioritizedValue, rawHTML, inlineTags, emphasis bool) []util.PrioritizedValue {
 	list := []util.PrioritizedValue{
 		util.Prioritized(codePathParser{parser.NewCodeSpanParser()}, 100),
 		util.Prioritized(parser.NewLinkParser(), 200),
 		util.Prioritized(parser.NewAutoLinkParser(), 300),
-		util.Prioritized(parser.NewEmphasisParser(), 500),
 		refs,
+	}
+	if emphasis {
+		list = append(list, util.Prioritized(parser.NewEmphasisParser(), 500))
 	}
 	list = append(list, bareLinkParsers()...)
 	if rawHTML {
@@ -185,7 +197,7 @@ func (p *pageData) markdown() *markdown {
 func (p *pageData) rawMarkdown() goldmark.Markdown {
 	md := p.markdown()
 	if md.raw == nil {
-		md.raw = blockMarkdown(p, util.Prioritized(itemRefParser{stored: p.Stored}, 100), true)
+		md.raw = blockMarkdown(p, util.Prioritized(itemRefParser{stored: p.Stored, panels: p.StoredPanels}, 100), true)
 	}
 	return md.raw
 }
@@ -205,6 +217,13 @@ func (p *pageData) renderDoc(s string, marks []BlockMark) template.HTML {
 // references; an image shows its alt text.
 func (p *pageData) Inline(s string) template.HTML {
 	return p.convert(p.markdown().inline, s)
+}
+
+// TextInline renders item links and readings: every HTML tag and all emphasis
+// (asterisks, underscores) stay literal, while code spans, authored item/panel
+// references, bare URLs and bare paths still render.
+func (p *pageData) TextInline(s string) template.HTML {
+	return p.convert(p.markdown().inlineText, s)
 }
 
 // Block renders s as block markdown with hard-wrapped lines, every tag the
@@ -577,6 +596,7 @@ func (p *pageData) fileHref(path, suffix string) string {
 // literal. An ID the store does not hold stays verbatim text.
 type itemRefParser struct {
 	stored map[int]bool
+	panels map[string]bool
 }
 
 func (itemRefParser) Trigger() []byte { return []byte{'{'} }
@@ -587,7 +607,15 @@ func (r itemRefParser) Parse(_ ast.Node, block text.Reader, _ parser.Context) as
 	if m == nil {
 		return nil
 	}
-	id, err := strconv.Atoi(string(m[1]))
+	ref := string(m[1])
+	if strings.HasPrefix(ref, "p") {
+		if !r.panels[ref] {
+			return nil
+		}
+		block.Advance(len(m[0]))
+		return &itemRefNode{PanelID: ref}
+	}
+	id, err := strconv.Atoi(ref)
 	if err != nil || !r.stored[id] {
 		return nil
 	}
@@ -599,13 +627,14 @@ var kindItemRef = ast.NewNodeKind("WhiteboardItemRef")
 
 type itemRefNode struct {
 	ast.BaseInline
-	ID int
+	ID      int
+	PanelID string
 }
 
 func (n *itemRefNode) Kind() ast.NodeKind { return kindItemRef }
 
 func (n *itemRefNode) Dump(source []byte, level int) {
-	ast.DumpHelper(n, source, level, map[string]string{"ID": strconv.Itoa(n.ID)}, nil)
+	ast.DumpHelper(n, source, level, map[string]string{"ID": strconv.Itoa(n.ID), "PanelID": n.PanelID}, nil)
 }
 
 // mdRenderer overrides goldmark's HTML renderer for every node that carries
@@ -929,7 +958,11 @@ func writeAltText(w util.BufWriter, source []byte, n ast.Node) {
 		case *ast.String:
 			_, _ = w.Write(util.EscapeHTML(t.Value))
 		case *itemRefNode:
-			_, _ = w.WriteString(FormatID(t.ID))
+			if t.PanelID != "" {
+				_, _ = w.WriteString(t.PanelID)
+			} else {
+				_, _ = w.WriteString(FormatID(t.ID))
+			}
 		default:
 			writeAltText(w, source, c)
 		}
@@ -978,7 +1011,10 @@ func (r *mdRenderer) itemRef(w util.BufWriter, _ []byte, node ast.Node, entering
 		return ast.WalkContinue, nil
 	}
 	n := node.(*itemRefNode)
-	label := FormatID(n.ID)
+	label, target, onPage := FormatID(n.ID), "item-"+strconv.Itoa(n.ID), r.page.onPage[n.ID]
+	if n.PanelID != "" {
+		label, target, onPage = n.PanelID, n.PanelID, r.page.panelOnPage[n.PanelID]
+	}
 	inLink := false
 	for a := n.Parent(); a != nil; a = a.Parent() {
 		if a.Kind() == ast.KindLink {
@@ -986,8 +1022,8 @@ func (r *mdRenderer) itemRef(w util.BufWriter, _ []byte, node ast.Node, entering
 			break
 		}
 	}
-	if r.page.onPage[n.ID] && !inLink {
-		_, _ = w.WriteString(`<a href="#item-` + strconv.Itoa(n.ID) + `">` + label + `</a>`)
+	if onPage && !inLink {
+		_, _ = w.WriteString(`<a href="#` + target + `">` + label + `</a>`)
 	} else {
 		_, _ = w.WriteString(label)
 	}

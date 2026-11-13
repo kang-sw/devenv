@@ -107,7 +107,7 @@ func (s *Server) handleWikiQuery(ctx context.Context, id json.RawMessage, args m
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	op, wiki, path := a["op"], a["wiki"], a["path"]
+	op, wiki, path := a["op"], a["wiki"], canonicalWikiPath(a["path"])
 	asJSON := wantsJSON(args)
 	need := func(names ...string) error {
 		var missing []string
@@ -188,9 +188,10 @@ func (s *Server) handleWikiQuery(ctx context.Context, id json.RawMessage, args m
 		if err != nil {
 			return wikiFailure(id, tool, err)
 		}
-		fmt.Fprintf(&sb, "wiki %s page %s @ %s\n", wiki, path, at)
+		kind := wsledger.WikiPageKind(path)
+		fmt.Fprintf(&sb, "wiki %s page %s (%s) @ %s\n", wiki, path, kind, at)
 		fmt.Fprintf(&sb, "base for %s: %s\n---\n%s", wikiUpdateTool, at, content)
-		value = map[string]any{"wiki": wiki, "path": path, "commit": at, "content": content}
+		value = map[string]any{"wiki": wiki, "path": path, "kind": kind, "commit": at, "content": content}
 	case "search":
 		hits, at, err := h.WikiSearch(ctx, store, wiki, a["query"])
 		if err != nil {
@@ -362,8 +363,8 @@ func (s *Server) handleWikiUpdate(ctx context.Context, id json.RawMessage, args 
 		Base:    a["base"],
 		NewWiki: boolArgument(args["new_wiki"]),
 		Op:      op,
-		Path:    a["path"],
-		To:      a["to"],
+		Path:    canonicalWikiPath(a["path"]),
+		To:      canonicalWikiPath(a["to"]),
 		Content: content,
 		Commit:  a["commit"],
 		Message: a["message"],
@@ -525,6 +526,16 @@ func decodeWikiBase64(s string) ([]byte, error) {
 func wikiImageOID(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// canonicalWikiPath is path in its canonical form (guide.md answers as
+// guide), or path unchanged when it is no page path, for the store to
+// refuse.
+func canonicalWikiPath(path string) string {
+	if c, ok := wsledger.CanonicalWikiPath(path); ok {
+		return c
+	}
+	return path
 }
 
 func wikiShort(oid string) string {

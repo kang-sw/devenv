@@ -32,6 +32,7 @@ asking, so judgment is spent here and not at run time.
   product, API, or verification decision: decisions with their rejected
   alternatives, constraints, verification expectations, and the manuals that
   apply.
+- When the user approved a visual reference for the work, store it, preferring a text form such as HTML or SVG over a binary image, in the tracked `<ticket root>/assets/<stem>/` folder, link its path in the ticket, and require a side-by-side comparison of a result capture against it in verification; do not promote to `ready/` without the link and comparison, so the approved reference is not lost.
 - Epics stay board-level; implementation detail goes into the child, as a
   separate invocation.
 - Plan text with a `### Result` is frozen; append `#### Edition (<hash>) -
@@ -273,7 +274,13 @@ promotion is a batch of one.
    in `ready/`, `.done/`, or the same batch, recorded as `related: <stem>:
    prerequisite` or a prerequisite `parent:`. Otherwise name the blocking
    stem and stop before any move.
-2. For every actionable member, run **Ground: fact population** before any
+2. Refuse the move for any member whose approved visual reference is not
+   linked by path in the ticket, or whose verification lacks the side-by-side
+   comparison of a result capture against it; fix the ticket first, since a
+   promoted ticket whose reference is missing reaches the worker without the
+   look it must match. A member with no approved visual reference is
+   unaffected.
+3. For every actionable member, run **Ground: fact population** before any
    reviewer reads the batch, then settle any queue it opened to the settle
    point and delete each member's section. Resolve each
    `{{.McpNamespace}}/tickets.sage_gate(stem, landing: "ready")` while tickets
@@ -282,12 +289,12 @@ promotion is a batch of one.
    design stage follows the `sage_review_design` knob and the completeness
    stage the `sage_review` knob, so a stage the gate resolves `skipped` gets no
    reviewer.
-3. A single-ticket promotion uses the existing single-ticket reviewer path:
+4. A single-ticket promotion uses the existing single-ticket reviewer path:
    render the selected reviewers, pass its path and `relations:` table, and
    record their verdicts. For multiple actionable tickets, use **Batch design
    review** below in place of isolated design dispatches. Completeness review
    remains per ticket, only for stages the gate selected.
-4. The lead maps results into `{{.McpNamespace}}/tickets.sage_stamp` per ticket.
+5. The lead maps results into `{{.McpNamespace}}/tickets.sage_stamp` per ticket.
    Use `combined` when both stages have current verdicts, including a retained
    completeness verdict whose premises are unchanged on a design-only retry;
    this clears both postures after a combined block without another completeness
@@ -299,12 +306,12 @@ promotion is a batch of one.
    issues remain in the completeness verdict so blocked diagnostics distinguish
    them. Retain the individual reviewer outcomes as the next round's baseline,
    even when combined stamping marks both stages blocked.
-5. Move with `{{.McpNamespace}}/tickets.move(stem, to: "ready")` in dependency
+6. Move with `{{.McpNamespace}}/tickets.move(stem, to: "ready")` in dependency
    order only after all reviews settle. Any unresolved block leaves the whole
    batch at its original statuses; report the blocker and affected stems.
    If a move fails after earlier moves succeeded, restore those members to
    their original statuses before reporting the failure.
-6. Stamps leave files uncommitted. One `{{.McpNamespace}}/git.commit` carries
+7. Stamps leave files uncommitted. One `{{.McpNamespace}}/git.commit` carries
    the batch, its `## AI Context` naming the order.
 
 The stamp digests the body, so any `## Route Facts` the populator wrote are
