@@ -423,6 +423,9 @@
     "261113-bug-ws-release-gate-sweep-fixes": {
       "registered_at": "2026-11-13T14:00:39Z"
     },
+    "261113-feat-ws-compaction-before-queued-followup": {
+      "registered_at": "2026-11-13T14:03:06Z"
+    },
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
     },
