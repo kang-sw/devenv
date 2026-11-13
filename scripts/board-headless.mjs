@@ -3,7 +3,7 @@
 // dashboard board's motion and scroll behaviour. Not shipped with any plugin
 // package.
 //
-//     node scripts/board-headless.mjs serve [--topics N] [--history-entries N] [--keep-tmp]
+//     node scripts/board-headless.mjs serve [--topics N] [--history-entries N] [--mermaid] [--keep-tmp]
 //     node scripts/board-headless.mjs <scenario> --url <session page> [--width W] [--height H] [--headed] [--trace]
 //
 // Scenarios run in headless Chromium, 1440x900 by default. Each checks every
@@ -21,6 +21,17 @@
 //   observer  The shared visibility source (wbHistory.watch / seen): a topic
 //             scrolled fully out of view fires onOut once, and a topic a swap
 //             inserts is watched from that swap on.
+//   bands     Viewport mount/unmount (needs `serve --mermaid --topics 30`:
+//             the oldest topic, MERMAID, holds a mermaid fence and a panel,
+//             and the topics above it were never laid out at load). At load
+//             the bottom topic's frame is a placeholder; a jump (location hash) to
+//             its panel lands and holds within 1 px while the frames around it
+//             mount, and draws its mermaid; scrolling up and back down a
+//             step at a time keeps the topic in view within 1 px of where the
+//             step put it (no jump), mounts frames before they enter the view,
+//             turns frames far from the view into placeholders that keep
+//             their height, and remounts the mermaid topic with its diagram
+//             drawn again in a new frame.
 //
 // The page kind is detected, not named: a page with #tabbar is an adapter
 // page (the board column #bcol scrolls); one without is a board-only page
@@ -194,7 +205,7 @@ function topicCommands(i) {
 
 // seedSession makes a project with one ws session and a board of n topics,
 // and returns its reply id and canonical root.
-function seedSession(tmp, bin, label, n, historyEntries) {
+function seedSession(tmp, bin, label, n, historyEntries, mermaid) {
   const proj = path.join(tmp, `proj-${label}`);
   fs.mkdirSync(path.join(proj, "ai-docs"), { recursive: true });
   fs.writeFileSync(path.join(proj, "ai-docs", "_index.md"), `# ${label}\n`);
@@ -206,6 +217,16 @@ function seedSession(tmp, bin, label, n, historyEntries) {
   });
   const fer = JSON.parse(run(bin, ["call", "ferrule", JSON.stringify({ root: proj, format: "json" })], { cwd: proj, env }));
   let rid = null;
+  // The mermaid topic is seeded first, so it is the oldest, at the bottom:
+  // a body with a mermaid fence and a panel, the bands scenario's jump
+  // target.
+  if (mermaid) {
+    const body = "## MERMAID\n\n```mermaid\ngraph TD; A-->B; B-->C; C-->A\n```\n";
+    const out = run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key,
+      commands: `<wb:topic name="MERMAID"><wb:body>${body}</wb:body><wb:panel recap="Jump target"><p>Panel under the mermaid topic.</p></wb:panel></wb:topic>` })], { cwd: proj, env });
+    const m = /ai-docs\/whiteboards\/([a-z0-9]+)\/index\.html/.exec(out);
+    if (m) rid = m[1];
+  }
   // One update per topic, so each topic has its own last-change time.
   for (let i = 1; i <= n; i++) {
     const out = run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: topicCommands(i) })], { cwd: proj, env });
@@ -272,8 +293,8 @@ async function serve(args) {
     log(`building ws-mcp from ${TOOL_DIR} ...`);
     run("go", ["build", "-o", bin, "./cmd/ws-mcp"], { cwd: TOOL_DIR, env: childEnv(tmp) });
     log(`seeding two sessions (${n} topics each) ...`);
-    const adapter = seedSession(tmp, bin, "adapter", n, +(args["history-entries"] || 0));
-    const board = seedSession(tmp, bin, "board", n, +(args["history-entries"] || 0));
+    const adapter = seedSession(tmp, bin, "adapter", n, +(args["history-entries"] || 0), !!args.mermaid);
+    const board = seedSession(tmp, bin, "board", n, +(args["history-entries"] || 0), !!args.mermaid);
     const dashDir = path.join(tmp, "cache", "dashboard");
     const out = fs.openSync(path.join(tmp, "daemon.log"), "a");
     daemon = spawn(bin, ["dashboard", "--port", "0"], {
@@ -493,7 +514,9 @@ const IN_PAGE = () => {
     const html = t.innerHTML, hash = "bh" + now.toString(16);
     const ws = bh.sockets.find((s) => s.readyState === 1 && typeof s.onmessage === "function");
     if (!ws) throw new Error("no open stream socket on the page");
-    const look = (n) => ({ n, frames: q("iframe.doc-frame:not(.doc-frame-next)", n) });
+    // Frames of either kind: a topic far from the view holds placeholders
+    // (the viewport bands), and a changed one gets new placeholders.
+    const look = (n) => ({ n, frames: q(".doc-frame:not(.doc-frame-next)", n) });
     const before = new Map(q("section.topic[data-topic]", bh.board_()).map((n) => [n.getAttribute("data-topic"), look(n)]));
     bh.mark("swap: " + (names || []).concat((add || []).map((a) => "+" + a.name)).join(", "));
     ws.onmessage({ data: JSON.stringify({ event: "region", data: { name: "board", hash, html } }) });
@@ -599,10 +622,10 @@ async function waitQuiet(page, ms = 8000) {
   }, null, { timeout: ms, polling: "raf" });
 }
 
-// scrollToMiddle puts the scroller at the middle of its range and returns
-// the topic layout there.
-async function scrollToMiddle(page) {
-  await page.evaluate(() => { const s = window.__bh.scroller(); s.scrollTop = Math.round((s.scrollHeight - s.clientHeight) / 2); });
+// scrollToMiddle puts the scroller at the middle of its range, or at most
+// views viewports down when given, and returns the topic layout there.
+async function scrollToMiddle(page, views) {
+  await page.evaluate((v) => { const s = window.__bh.scroller(); s.scrollTop = Math.round(Math.min((s.scrollHeight - s.clientHeight) / 2, v ? v * s.clientHeight : Infinity)); }, views || 0);
   await waitQuiet(page);
   return page.evaluate(() => window.__bh.layout());
 }
@@ -689,7 +712,10 @@ async function scenarioKeep(ctx) {
   log(`page kind: ${kind} (scroller: ${kind === "adapter" ? "#bcol" : "document"})`);
   const scrollerName = await page.evaluate(() => { const s = window.__bh.scroller(); return s === document.scrollingElement ? "document" : "#" + s.id; });
   assert(scrollerName === (kind === "adapter" ? "#bcol" : "document"), `the board scrolls in ${scrollerName} on a ${kind} page`);
-  const lay = await scrollToMiddle(page);
+  // At most 2.5 viewports down: the topic updated above rises to the
+  // head, which must stay within the viewport bands' far band (4 viewports)
+  // for its frame to stay mounted and report late.
+  const lay = await scrollToMiddle(page, 2.5);
   const above = lay.filter((t) => t.where === "above"), below = lay.filter((t) => t.where === "below"), inView = lay.filter((t) => t.where === "in");
   assert(above.length >= 3 && below.length >= 1 && inView.length >= 1, `the board must overflow both ways from the middle (above ${above.length}, in view ${inView.length}, below ${below.length}); seed more topics`);
   // The update above is the second topic (it rises past the head, off
@@ -702,7 +728,10 @@ async function scenarioKeep(ctx) {
   // require a real frame, not simply the second topic in board order.
   const framedAbove = await page.evaluate((names) => names.filter((n) => window.__bh.section(n).querySelector('.tdoc iframe.doc-frame')), above.map((t) => t.name));
   assert(framedAbove.length >= 2, 'need two framed topics above for the late-height probe');
-  const upAbove = framedAbove[1], lateGrow = upAbove, upBelow = below[below.length - 1].name;
+  // The framed topic above nearest the view: one far up skips its rendering
+  // (content-visibility), and its update brings a placeholder the viewport
+  // bands mount only once it comes near, not a frame that reports late.
+  const upAbove = framedAbove.at(-1), lateGrow = upAbove, upBelow = below[below.length - 1].name;
   const tracked = inView.map((t) => t.name);
   log(`in view: ${tracked.join(", ")}; update above: ${upAbove}; update below: ${upBelow}; late frame: ${lateGrow}`);
 
@@ -834,6 +863,113 @@ async function scenarioObserver(ctx) {
   await page.waitForFunction((name) => { const r = window.wbHistory.seen(window.__bh.section(name)); return r && r.visible; }, fresh, { timeout: 2000 })
     .catch(() => { throw new Failure(`the inserted ${fresh} section reported no visibility after being scrolled into view`); });
   log(`ok: the inserted ${fresh} section is watched (wbWatch; first report ${first ? "in view" : "out of view"}; in view once scrolled in)`);
+}
+
+// BANDS_PAGE's bandTopics reads, per open topic, where it stands against the view and
+// its body frame: mounted (iframe), or a placeholder with its height.
+const BANDS_PAGE = () => {
+  const bh = window.__bh;
+  bh.bandTopics = () => {
+    const s = bh.scroller(), top = bh.viewTop(s), bottom = bh.viewBottom(s), h = bottom - top;
+    return bh.topics().map((n) => {
+      const r = n.getBoundingClientRect(), f = n.querySelector(".tdoc .doc-frame");
+      return { name: n.getAttribute("data-topic"), top: r.top - top, bottom: r.bottom - top, view: h, win: innerHeight,
+        frame: f ? (f.tagName === "IFRAME" ? "iframe" : "placeholder") : "none", height: f ? f.style.height : "" };
+    });
+  };
+};
+
+async function mermaidDrawn(page, name) {
+  const handle = await page.$(`section.topic[data-topic="${name}"] .tdoc iframe.doc-frame`);
+  if (!handle) return { frame: null, drawn: false };
+  const frame = await handle.contentFrame();
+  const drawn = frame ? await frame.waitForFunction(() => !!document.querySelector("pre.mermaid svg"), null, { timeout: 8000 }).then(() => true, () => false) : false;
+  return { frame: handle, drawn };
+}
+
+async function scenarioBands(ctx) {
+  const { page, kind } = await openBoard(ctx);
+  log(`page kind: ${kind}`);
+  await page.evaluate(BANDS_PAGE);
+  assert(await page.evaluate(() => !!(window.wbHistory && window.wbHistory.bands)), "this browser's view kit has no scroll margins (wbHistory.bands): the viewport bands are off");
+  assert(await page.evaluate(() => !!window.__bh.section("MERMAID")), "no MERMAID topic on the board: run `serve --mermaid`");
+  const M = "MERMAID";
+  // 1. At load the bottom topic is far below: a placeholder never mounted.
+  const load = await page.evaluate(() => window.__bh.bandTopics());
+  const mLoad = load.find((t) => t.name === M);
+  ctx.check(mLoad.frame === "placeholder", `at load the far MERMAID topic's body frame is a ${mLoad.frame}, expected a placeholder`);
+  ctx.check(load.filter((t) => t.top < t.view && t.bottom > 0).every((t) => t.frame === "iframe"), "at load a topic in view holds a placeholder");
+  // Topics never laid out (a placeholder with no height) are what grows
+  // above the view on the way back up from the jump.
+  const unsized = load.filter((t) => t.frame === "placeholder" && !t.height).length;
+  assert(unsized >= 4, `only ${unsized} topic(s) were never laid out at load: run \`serve --mermaid --topics 30\``);
+
+  // 2. A jump to the panel under MERMAID lands and holds while the frames
+  // around it mount and report their heights.
+  const pid = await page.evaluate((n) => { const e = window.__bh.section(n).querySelector(".wb-entry[data-panel]"); return e && e.getAttribute("data-panel"); }, M);
+  assert(pid, "the MERMAID topic has no panel to jump to");
+  await page.evaluate((id) => { window.__bh.jumpTarget = id; location.hash = "#" + id; }, pid);
+  await page.waitForFunction((id) => { const t = document.getElementById(id); return t && t.getBoundingClientRect().height > 0; }, pid, { timeout: 3000 })
+    .catch(() => { throw new Failure(`the jump to ${pid} found no target`); });
+  await sleep(100);
+  const ys = [];
+  const t0 = Date.now();
+  while (Date.now() - t0 < 2000) {
+    ys.push(await page.evaluate((id) => document.getElementById(id).getBoundingClientRect().top, pid));
+    await sleep(50);
+  }
+  const drift = Math.max(...ys) - Math.min(...ys);
+  ctx.check(drift <= 1, `the jump target ${pid} moved ${drift.toFixed(1)}px within 2s of landing (from ${ys[0].toFixed(1)})`);
+  const land = await page.evaluate((id) => { const bh = window.__bh, s = bh.scroller(); return document.getElementById(id).getBoundingClientRect().top - bh.viewTop(s); }, pid);
+  ctx.check(land > -2 && land < 900, `the jump target ${pid} stands ${land.toFixed(1)}px from the view's top`);
+  const m1 = await mermaidDrawn(page, M);
+  ctx.check(m1.frame && m1.drawn, "after the jump the MERMAID topic's frame did not mount with its diagram drawn");
+  log(`jump to ${pid}: landed ${land.toFixed(1)}px from the view top, drift ${drift.toFixed(1)}px over 2s; mermaid ${m1.drawn ? "drawn" : "not drawn"}`);
+
+  // 3. Up to the top a step at a time, then back down: each step keeps the
+  // topic in view where the step put it, frames mount before they enter the
+  // view, and frames far from the view are placeholders with their height.
+  const steps = async (dir) => {
+    const bad = [], late = [];
+    let worst = 0;
+    for (let i = 0; i < 80; i++) {
+      const before = await page.evaluate(() => {
+        const bh = window.__bh, s = bh.scroller(), top = bh.viewTop(s);
+        const ref = bh.topics().find((n) => n.getBoundingClientRect().bottom > top + 40);
+        return { st: s.scrollTop, max: s.scrollHeight - s.clientHeight, ref: ref.getAttribute("data-topic"), y: ref.getBoundingClientRect().top, h: s.clientHeight };
+      });
+      if (dir < 0 ? before.st <= 0 : before.st >= before.max - 1) break;
+      const want = Math.round(before.h * 0.6) * dir;
+      const moved = await page.evaluate((d) => { const s = window.__bh.scroller(), was = s.scrollTop; s.scrollTop = was + d; return s.scrollTop - was; }, want);
+      await sleep(250);
+      const after = await page.evaluate((ref) => window.__bh.section(ref).getBoundingClientRect().top, before.ref);
+      const off = after - (before.y - moved);
+      worst = Math.max(worst, Math.abs(off));
+      if (Math.abs(off) > 1) bad.push(`${before.ref} ${off.toFixed(1)}px at scrollTop ${before.st}`);
+      const lay = await page.evaluate(() => window.__bh.bandTopics());
+      lay.filter((t) => t.top < t.view && t.bottom > 0 && t.frame === "placeholder").forEach((t) => late.push(`${t.name} at scrollTop ${before.st + moved}`));
+    }
+    return { bad, late, worst };
+  };
+  const up = await steps(-1);
+  ctx.check(!up.bad.length, `scrolling up moved the topic in view off its step: ${up.bad.join("; ")}`);
+  ctx.check(!up.late.length, `scrolling up showed placeholders in view: ${up.late.join("; ")}`);
+  const top = await page.evaluate(() => window.__bh.bandTopics());
+  // The far band reaches four window heights past the view's bottom.
+  const far = top.filter((t) => t.top > t.view + 4 * t.win + 50);
+  const mTop = top.find((t) => t.name === M);
+  ctx.check(far.length > 0 && far.every((t) => t.frame === "placeholder"), `at the top a topic beyond the far band holds a mounted frame: ${far.filter((t) => t.frame !== "placeholder").map((t) => t.name).join(", ")}`);
+  ctx.check(far.every((t) => /px$/.test(t.height) && parseFloat(t.height) > 0), `a far placeholder lost its height: ${far.filter((t) => !/px$/.test(t.height)).map((t) => t.name).join(", ")}`);
+  ctx.check(mTop.frame === "placeholder" && parseFloat(mTop.height) > 0, `at the top the MERMAID topic holds ${mTop.frame} (height ${mTop.height || "none"}), expected a placeholder with its height`);
+  log(`up: worst step offset ${up.worst.toFixed(2)}px; at the top ${far.length} topic(s) beyond the far band, all placeholders with heights`);
+  const down = await steps(1);
+  ctx.check(!down.bad.length, `scrolling down moved the topic in view off its step: ${down.bad.join("; ")}`);
+  ctx.check(!down.late.length, `scrolling down showed placeholders in view: ${down.late.join("; ")}`);
+  const m2 = await mermaidDrawn(page, M);
+  ctx.check(m2.frame && m2.drawn, "back at the bottom the MERMAID topic's frame did not remount with its diagram drawn");
+  const fresh = m1.frame && m2.frame ? await page.evaluate(([a, b]) => a !== b && !a.isConnected, [m1.frame, m2.frame]) : false;
+  ctx.check(fresh, "the MERMAID topic's frame at the bottom is not a new one: it never unmounted");
+  log(`down: worst step offset ${down.worst.toFixed(2)}px; MERMAID remounted (${fresh ? "new frame" : "same frame"}), diagram ${m2.drawn ? "drawn" : "not drawn"}`);
 }
 
 // History probes use the real host's wbHistory, event delegation, DOM and
@@ -1421,6 +1557,7 @@ async function scenarioHistoryRegressions(ctx) {
 const SCENARIOS = {
   keep: scenarioKeep,
   observer: scenarioObserver,
+  bands: scenarioBands,
   history: scenarioHistory,
   'history-cards': (ctx) => scenarioHistory({ ...ctx, cardsOnly: true }),
   'history-paint': (ctx) => scenarioHistory({ ...ctx, navigationOnly: true }),
@@ -1434,7 +1571,7 @@ async function main() {
   const name = args._[0];
   if (name === "serve") return serve(args);
   if (!name || !SCENARIOS[name] || !args.url || args.url === true) {
-    console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--history-entries N] [--keep-tmp]");
+    console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--history-entries N] [--mermaid] [--keep-tmp]");
     console.error(`       node scripts/board-headless.mjs <${Object.keys(SCENARIOS).join("|")}> --url <session or full file page> [--width W] [--height H] [--headed] [--artifacts DIR]`);
     process.exit(2);
   }
