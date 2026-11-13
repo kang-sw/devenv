@@ -469,6 +469,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   let streamMessage: unknown;
   let lastStreamText: string | undefined;
   let turnOpen = false;
+  let turnAborted = false;
   let nextTurnOrigin: DashboardOrigin | undefined;
   let resyncDue = false;
   let disabledUntil = 0;
@@ -757,7 +758,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
   }
 
   function onLeadEvent(event: unknown): void {
-    const e = event as { type?: string; message?: unknown; assistantMessageEvent?: unknown; text?: unknown; source?: unknown; reason?: unknown };
+    const e = event as { type?: string; message?: unknown; assistantMessageEvent?: unknown; text?: unknown; source?: unknown; reason?: unknown; aborted?: unknown };
     switch (e.type) {
       case "input": {
         // An input with no origin of its own (the adapter's wake message for
@@ -769,6 +770,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
       case "agent_start":
         if (turnOpen) return;
         turnOpen = true;
+        turnAborted = false;
         lastTurnStart = { kind: "turn_start", ...(nextTurnOrigin ? { origin: nextTurnOrigin } : {}), at: now() };
         settleBefore(lastTurnStart);
         nextTurnOrigin = undefined;
@@ -780,7 +782,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
           return;
         }
         turnOpen = false;
-        settleBefore({ kind: "turn_end", at: now() });
+        settleBefore({ kind: "turn_end", at: now(), ...(e.aborted === true || (e.aborted === undefined && turnAborted) ? { reason: "aborted" } : {}) });
         return;
       case "message_update": {
         if (observeBatchEvent(lead, withToolcallName(e) as Parameters<typeof observeBatchEvent>[1], now())) leadDirty = true;
@@ -836,6 +838,11 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
       case "tool_execution_end":
       case "turn_end":
       case "agent_end":
+        if (e.type === "turn_end") {
+          // Pi 0.84.x has no agent_settled.aborted; its last assistant stop reason carries the abort.
+          const message = e.message as { role?: unknown; stopReason?: unknown } | undefined;
+          turnAborted = message?.role === "assistant" && message.stopReason === "aborted";
+        }
         if (observeBatchEvent(lead, e as Parameters<typeof observeBatchEvent>[1], now())) leadDirty = true;
         scheduleFlush();
         return;
@@ -862,6 +869,7 @@ export function createDashboardFeed(options: DashboardFeedOptions): DashboardFee
     streamMessage = undefined;
     lastStreamText = undefined;
     turnOpen = false;
+    turnAborted = false;
     nextTurnOrigin = undefined;
     resyncDue = false;
     disabledUntil = 0;
