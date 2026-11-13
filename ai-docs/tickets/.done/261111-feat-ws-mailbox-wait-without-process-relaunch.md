@@ -1,5 +1,6 @@
 ---
 title: "Mailbox wait without launching a new process on every wake"
+completed: 2026-11-13
 related:
   261111-bug-ws-dashboard-daemon-idle-cpu-windows: "sibling from the same CPU probe (board (288) b)"
   261112-feat-ws-mailbox-undelivered-notice: "its notice rides whichever wait is armed; no shared decision"
@@ -76,11 +77,48 @@ Add the stream mode to `mailbox wait`: attached to the daemon wait, one line
 per arrival, listening marker held for the process life, ended by signal or
 parent death. Tests at the `wsmailbox.Wait` / `runMailboxWait` level.
 
+### Result (a10df27ef) - 2026-11-13
+
+- Added `--stream`: immediate JSONL arrivals, no empty-timeout output or exit,
+  and one listening marker held until cancellation/disconnection. Unchanged
+  pending arrivals are retried at the timeout interval (default 10 minutes),
+  while new pending items wake immediately without a hot loop.
+- Added live stdout CLI frames and synchronized all three Python launchers.
+  Windows parent-death handling now covers an already-exited parent; POSIX
+  reparenting also closes the connection, including with ignored stdin.
+  One-shot waits and model-facing playbooks are unchanged.
+- Verification: the remote w5090 full Go suite passed with only
+  `TestHostedConnectionSeeingALANChangeReplacesTheDaemon` excluded, as allowed.
+  The unfiltered run failed only that known timeout. Focused streaming,
+  cancellation, launcher/SIGTERM, and added POSIX-parent-death tests passed.
+
 ### Phase 2: adapters use the stream
 
 Claude mod watcher and Pi waiter consume the stream; a board-flag change
 restarts it; fall back to one-shot on an unsupported-flag error. Measure
 per-wake CPU and memory before and after on Windows.
+
+### Result (0b5eada71) - 2026-11-13
+
+- Claude mod and Pi retain one streaming child across wakes and silent timeout
+  windows. Board-mode changes restart it; cancellation, rebinding, and shutdown
+  dispose it even between arms. Recv remains the authoritative drain.
+- Unknown-flag/usage rejection, or a nonzero exit before any arrival, selects
+  the existing one-shot loop for the remaining session. Pi shares that choice
+  across key rebinds. An intentional abort does not downgrade; a crash after
+  arrivals remains an error/backoff/retry. Arrival bodies are not interpreted
+  as usage diagnostics. The Claude mod mirror remains byte-identical.
+- Verification: Pi's focused mailbox checks pass 110/110, including real-child
+  reuse, lifecycle cleanup, and skew fallback. Claude's controller/stream and
+  engine-backed streaming checks pass 138/138 in each package. Both plugin
+  validations pass; wsflow Python passes 24 tests (one skipped), and all three
+  new launcher tests pass. Broad Windows failures are recorded below.
+- One quick Windows sample under the local lock, three wakes against the same
+  fake daemon to isolate launcher cost: one-shot CPU averaged **0.250 s/wake**;
+  stream incremental CPU was **0.000 s/wake measured** (below process-timer
+  resolution), excluding its once-only **0.28125 s** startup. Working set was
+  **34.45 MiB** before versus **34.33 MiB** steady after. Launches fell from
+  three to one. This is a launcher-only local sample, not a daemon benchmark.
 
 ## Decisions
 
@@ -105,3 +143,38 @@ content unchanged), per `ai-docs/manuals/release-compatibility.md`.
   because an older same-minor daemon may win the cache root
   (`release-compatibility.md`, scenarios 1-2) and the fallback keeps the change
   T0. Rejected: failing the session.
+
+## Forward
+
+- Broad Windows validation has pre-existing failures, reproduced once at base
+  `c3f4ae6c4`: Claude's band/hosted assertions and variable 5-second engine
+  timeouts (base 662 pass / 114 fail; implementation 665 / 120, wsflow 699 /
+  86). Every implementation non-timeout assertion failure is also present at
+  base. Python has the same 8 failures and 22 errors at base: POSIX fake
+  executables on Windows, cp949 fixture decoding, mocked platform probes,
+  and path spelling. The archive-only base run adds one non-Git setup error.
+  These are not expanded into mailbox-stream repairs.
+- The full Pi check was attempted once and stalled after readiness failures in
+  `agent-channel-launch.test.ts`. Bounding stuck workers let it report 2448
+  tests: 2183 passed, 222 failed, 18 cancelled, 25 skipped. A targeted base run
+  reproduced `fork readiness rejected (session escaped owned home)` on resume
+  (one pass, one failure). Other broad failures are not individually
+  base-proven. Remaining-file diagnostics hit deadlines/forced terminations
+  and the lock cap (87/92 file outcomes, only 13 exit-zero); those results are
+  incomplete/inconclusive, not claimed green. The mailbox checks themselves
+  pass 110/110.
+- Minor review: notice mode can consume a buffered stream arrival after the
+  model's recv already drained the queue, producing an extra empty-recv
+  notice. Direct mode still submits only what recv removed; no payload is
+  delivered twice.
+- Separate dogfood capture:
+  `261113-bug-pi-wait-mcp-client-timeout-before-requested-deadline` records a
+  300-second `pi.wait` cut off by the MCP client's 60-second timeout.
+
+## Resolution
+
+Both phases are implemented and committed. `mailbox wait --stream` and its
+adapter use are additive T0 changes; model-armed one-shot waits, their
+playbooks, and daemon-hosted lead delivery are unchanged. Runtime and focused
+adapter checks pass; broad Windows validation limitations and the minor
+notice-mode follow-up remain recorded in Forward.
