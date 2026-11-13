@@ -521,6 +521,9 @@
     "261113-feat-ws-whiteboard-update-refusal-cost": {
       "registered_at": "2026-11-13T04:24:45Z"
     },
+    "261113-fix-ws-playbook-spawn-idiom-and-delegate-resolve-agent": {
+      "registered_at": "2026-11-13T14:00:10Z"
+    },
     "261113-research-hosted-detection-by-session-identity": {
       "registered_at": "2026-11-13T01:12:42Z"
     },
