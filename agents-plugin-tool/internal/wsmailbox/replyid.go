@@ -158,9 +158,15 @@ func PostSystem(path, replyID, content string, sentAt time.Time) error {
 		return fmt.Errorf("post system message: empty reply-id")
 	}
 	return WithReplyLock(path, func(store *ReplyStore) error {
-		store.Queues = AppendQueue(store.Queues, replyID, Envelope{Content: content, SentAt: sentAt.UTC().Format(time.RFC3339)})
+		store.Queues = postSystem(store.Queues, replyID, content, sentAt)
 		return nil
 	})
+}
+
+// postSystem is also used by the sweep while it already holds the destination
+// store's lock; calling PostSystem there would try to acquire that lock twice.
+func postSystem(queues map[string][]Envelope, name, content string, sentAt time.Time) map[string][]Envelope {
+	return AppendQueue(queues, name, Envelope{Content: content, SentAt: sentAt.UTC().Format(time.RFC3339)})
 }
 
 // WithReplyLock performs an flock-serialized read-modify-write on the
