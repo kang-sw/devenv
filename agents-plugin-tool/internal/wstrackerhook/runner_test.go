@@ -420,7 +420,7 @@ func TestEventJSONCarriesTheVersionedFields(t *testing.T) {
 	w.start()
 	id := wsledger.EventID{Member: "bo", Clone: "pc", Seq: 1}
 	long := strings.Repeat("가", commentLimit+20)
-	w.src.views["team"].Items["maya.pc#1"] = wstracker.ItemView{ID: "maya.pc#1", Alias: "a1", Title: "Index", Kind: "task", Due: ptr("2026-11-20")}
+	w.src.views["team"].Items["maya.pc#1"] = wstracker.ItemView{ID: "maya.pc#1", Alias: "a1", Title: "Index", Kind: "task", Due: ptr("2026-11-20"), Start: ptr("2026-11-15")}
 	w.src.addEvent("team", &fakeEvent{id: id, ts: t0, settled: true, acts: []wstracker.Activity{{
 		Event: id, TS: t0, Kind: wstracker.ActComment, Item: "maya.pc#1", Actor: "bo", Target: "ada", Comment: long, Concerns: []string{"ada"}}}})
 	w.scan()
@@ -429,12 +429,15 @@ func TestEventJSONCarriesTheVersionedFields(t *testing.T) {
 	want := Event{V: 1, ID: "bo.pc#1", Kind: "comment", TS: "2026-11-11T12:00:00Z",
 		Store: StoreRef{ID: "team", Name: "TEAM"}, Item: ItemRef{ID: "maya.pc#1", Alias: "a1", Title: "Index", Kind: "task"},
 		Actor: &Member{ID: "bo", Name: "Bo"}, Target: &Member{ID: "ada", Name: "Ada"},
-		Detail: Detail{Comment: strings.Repeat("가", commentLimit), Due: "2026-11-20T00:00:00Z"},
+		Detail: Detail{Comment: strings.Repeat("가", commentLimit), Due: "2026-11-20T00:00:00Z", Start: "2026-11-15T00:00:00Z"},
 		URL:    "http://127.0.0.1:7000/#/team/maya.pc%231"}
 	gj, _ := json.Marshal(got)
 	wj, _ := json.Marshal(want)
 	if string(gj) != string(wj) {
 		t.Fatalf("event:\n got %s\nwant %s", gj, wj)
+	}
+	if !strings.Contains(string(gj), `"due":"2026-11-20T00:00:00Z","start":"2026-11-15T00:00:00Z"`) {
+		t.Fatalf("detail start: %s", gj)
 	}
 }
 

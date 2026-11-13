@@ -48,6 +48,13 @@ type fakeTracker struct {
 	wikiSaves    []TrackerWikiSave
 }
 
+// The search-hits method set the palette's tracker content source reads:
+// pinned beside the fake so a signature change fails to compile.
+var (
+	_ TrackerHost                                                                    = (*fakeTracker)(nil)
+	_ func(TrackerHost, context.Context, string, string) ([]TrackerSearchHit, error) = TrackerHost.SearchHits
+)
+
 func newFakeTracker() *fakeTracker {
 	return &fakeTracker{
 		stores:    []TrackerStore{{ID: "team", Label: "Team", Member: "ada", Remote: "https://***@example.invalid/x.git"}},
@@ -107,6 +114,30 @@ func (f *fakeTracker) Search(_ context.Context, id, query string) ([]string, err
 		if strings.Contains(it, query) {
 			out = append(out, it)
 		}
+	}
+	return out, nil
+}
+
+// SearchHits answers the fake's two items as a real host would: ada.pc#1
+// matched in its body and in a comment, ada.pc#2 on its title only.
+func (f *fakeTracker) SearchHits(_ context.Context, id, query string) ([]TrackerSearchHit, error) {
+	f.record("searchhits " + id + " " + query)
+	if strings.HasPrefix(query, "bad:") {
+		return nil, &TrackerSearchError{Message: `search "` + query + `": bad takes nothing`}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.viewErr != nil {
+		return nil, f.viewErr
+	}
+	var out []TrackerSearchHit
+	if strings.Contains("ada.pc#1", query) {
+		out = append(out,
+			TrackerSearchHit{ID: "ada.pc#1", Title: "One", Alias: "one", Kind: "task", Status: "doing", Field: "body", Text: "the …body… text"},
+			TrackerSearchHit{ID: "ada.pc#1", Title: "One", Alias: "one", Kind: "task", Status: "doing", Field: "comment", Comment: "lena.pc#1", Text: "a comment"})
+	}
+	if strings.Contains("ada.pc#2", query) {
+		out = append(out, TrackerSearchHit{ID: "ada.pc#2", Title: "Two", Kind: "topic", Hidden: true, Field: "item"})
 	}
 	return out, nil
 }
@@ -281,7 +312,7 @@ func (f *fakeTracker) WikiRead(_ context.Context, id, wiki, path string) (Tracke
 	if !ok {
 		return TrackerWikiPage{}, ErrTrackerWikiNotFound
 	}
-	return TrackerWikiPage{Path: path, Content: content, Commit: f.wikiCommit(), HTML: "<p>{wiki " + wiki + "} " + content + "</p>"}, nil
+	return TrackerWikiPage{Path: path, Kind: "markdown", Content: content, Commit: f.wikiCommit(), HTML: "<p>{wiki " + wiki + "} " + content + "</p>"}, nil
 }
 
 func (f *fakeTracker) WikiSave(_ context.Context, id, wiki string, req TrackerWikiSave) (TrackerWikiSaveResult, error) {
@@ -483,6 +514,33 @@ func TestTrackerRoutesAnswer(t *testing.T) {
 	}
 	if rev := trackerRev(t, d); rev != 0 {
 		t.Fatalf("a search bumped the revision to %d", rev)
+	}
+
+	// excerpts=1 adds the hits beside the distinct ids: a body hit and a
+	// comment hit with its comment id, then an item hit. Any other value
+	// leaves the answer as it was.
+	code, body = call(d, http.MethodGet, "/tracker/stores/team/search?q=%23&excerpts=1", "")
+	wantHits := `{"hits":[` +
+		`{"id":"ada.pc#1","title":"One","alias":"one","kind":"task","status":"doing","field":"body","text":"the …body… text"},` +
+		`{"id":"ada.pc#1","title":"One","alias":"one","kind":"task","status":"doing","field":"comment","comment":"lena.pc#1","text":"a comment"},` +
+		`{"id":"ada.pc#2","title":"Two","alias":"","kind":"topic","status":"","hidden":true,"field":"item"}],` +
+		`"ids":["ada.pc#1","ada.pc#2"]}` + "\n"
+	if code != http.StatusOK || body != wantHits {
+		t.Fatalf("search with excerpts = %d %s", code, body)
+	}
+	code, body = call(d, http.MethodGet, "/tracker/stores/team/search?q=none&excerpts=1", "")
+	if code != http.StatusOK || body != `{"hits":[],"ids":[]}`+"\n" {
+		t.Fatalf("search with excerpts and no match = %d %s", code, body)
+	}
+	for _, q := range []string{"%232", "%232&excerpts=0", "%232&excerpts=true", "%232&excerpts="} {
+		code, body = call(d, http.MethodGet, "/tracker/stores/team/search?q="+q, "")
+		if code != http.StatusOK || body != `{"ids":["ada.pc#2"]}`+"\n" {
+			t.Fatalf("search ?q=%s = %d %s", q, code, body)
+		}
+	}
+	code, body = call(d, http.MethodGet, "/tracker/stores/team/search?q=bad:x&excerpts=1", "")
+	if code != http.StatusBadRequest || body != `{"error":"search \"bad:x\": bad takes nothing"}`+"\n" {
+		t.Fatalf("malformed search with excerpts = %d %s", code, body)
 	}
 
 	code, body = call(d, http.MethodPost, "/tracker/stores/team/dispatch", `{"events":[{"type":"item.create","payload":{"title":"x"}},{"type":"comment.add","payload":{"item":"$1"}}]}`)
@@ -990,7 +1048,7 @@ func TestTrackerWikiRoutes(t *testing.T) {
 		t.Fatalf("pages = %d %s", code, body)
 	}
 	code, body = call(d, http.MethodGet, "/tracker/stores/team/wiki/notes/page?path=guide%2Fhome", "")
-	if code != http.StatusOK || body != `{"path":"guide/home","content":"# Home\n","commit":"c1","html":"\u003cp\u003e{wiki notes} # Home\n\u003c/p\u003e"}`+"\n" {
+	if code != http.StatusOK || body != `{"path":"guide/home","kind":"markdown","content":"# Home\n","commit":"c1","html":"\u003cp\u003e{wiki notes} # Home\n\u003c/p\u003e"}`+"\n" {
 		t.Fatalf("page = %d %s", code, body)
 	}
 	if code, body := call(d, http.MethodGet, "/tracker/stores/team/wiki/notes/page?path=nope", ""); code != http.StatusNotFound {

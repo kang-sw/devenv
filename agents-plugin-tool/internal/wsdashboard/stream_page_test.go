@@ -36,6 +36,9 @@ function wsT(k) { return k; }
 var indicator = { title: "", off: false, classList: { toggle: function (c, on) { indicator.off = on; } } };
 function q() { return [indicator]; }
 var doc = { hidden: false };
+// The page stands alone: no shell around it, no shell above it.
+var shell = false, framed = false, shHidden = false, shTrackerRev = null;
+function shDrafts() { return false; }
 `
 
 // TestPageStreamsRideWebSocket pins the page side of the stream transport
@@ -73,6 +76,7 @@ func TestPageStreamsRideWebSocket(t *testing.T) {
 	runNode(t, "page stream", "(function () {\n"+streamPageHarness+`
 var mode = "session", rid = "rid1", heldNow = "board.1,head.2", hiddenRegions = {}, modeHash = "", liveMode = false;
 function held() { return heldNow; }
+function pageHidden() { return doc.hidden; }
 function trackerLost() { log.push("lost"); }
 function trackerNudge(rev) { log.push("nudge:" + rev); }
 function swap(name, hash, html) { log.push("swap:" + name + "." + hash); }

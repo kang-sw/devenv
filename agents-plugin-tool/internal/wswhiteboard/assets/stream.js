@@ -25,39 +25,109 @@
     if (id[0] === 'e') return node.matches('.wb-entry[data-entry="' + id + '"]') ? node : null;
     return node.matches('.entry-panel') && node.closest('.wb-entry[data-panel="' + id + '"]') ? node : null;
   }
-  function nearBottom(h) { return h.scrollHeight - h.clientHeight - h.scrollTop < 12; }
+  var STEP = 640;
   // A fold (a long log run, or a system-event chip) anchors by its first
   // entry while closed; once open, its entries anchor themselves.
   function isFold(node) { return node.classList.contains('system-run') || node.classList.contains('run-fold'); }
-  function position(h) {
-    var rect = h.getBoundingClientRect(), anchor = null;
-    Array.from(h.querySelectorAll('[data-history-anchor]')).some(function (node) {
+  function steps(h, n) {
+    h._wbHistorySteps = Math.max(1, n);
+    h.style.setProperty('--wb-history-height', (h._wbHistorySteps * STEP) + 'px');
+  }
+  function updateControl(h) {
+    var live = h.querySelector('.history-live');
+    var more = !!h.querySelector('template[data-history-page]') || live.scrollHeight > (h._wbHistorySteps || 1) * STEP;
+    var button = h.querySelector('.history-older');
+    if ((!button || button.hidden === !more) && h.classList.contains('history-more') === more) return;
+    // Hiding the exhausted control resizes shallower ancestors watched by
+    // keep/rail. Do that outside this history's resize delivery, including
+    // reentrant init calls from loadOne -> wbBindBoard.
+    if (h._wbHistoryResizing) {
+      if (!h._wbHistoryControlFrame) {
+        h._wbHistoryControlFrame = true;
+        window.requestAnimationFrame(function () {
+          h._wbHistoryControlFrame = false;
+          if (h.isConnected) updateControl(h);
+        });
+      }
+      return;
+    }
+    if (button) button.hidden = !more;
+    h.classList.toggle('history-more', more);
+  }
+  function oldest(h) {
+    var clip = h.querySelector('.history-clip').getBoundingClientRect();
+    return Array.from(h.querySelectorAll('[data-history-anchor]')).find(function (node) {
       if (isFold(node) && node.open) return false;
       var r = node.getBoundingClientRect();
-      if (r.height && r.bottom > rect.top && r.top < rect.bottom) {
-        anchor = { id: node.getAttribute('data-history-anchor'), run: isFold(node), offset: r.top - rect.top };
-        return true;
-      }
-      return false;
+      return r.height && r.bottom > clip.top && r.top < clip.bottom;
     });
-    return { bottom: nearBottom(h), anchor: anchor, top: h.scrollTop };
   }
-  function applyPosition(h, state) {
-    if (!state) return;
-    if (state.bottom) h.scrollTop = h.scrollHeight;
-    else {
-      var a = state.anchor;
-      var node = a && (a.run ? h.querySelector('details.system-run[data-key="system:' + a.id + '"]') || h.querySelector('details.run-fold[data-key="run:' + a.id + '"]') : find(h, a.id));
-      if (!node && a && a.run) {
-        // A merged fold is keyed by its new first entry; find the old one inside.
-        var event = find(h, a.id);
-        node = event && (event.closest('details.run-fold') || event.closest('details.system-run'));
+  // A fully out card has no internal anchor. Keep the topmost visible
+  // content below it in the same column (or the standalone document).
+  function below(topic) {
+    var box = topic.closest('#bpins') || topic.closest('#bcol'), root = box || document;
+    var r = box ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+    var top = Math.max(0, r.top), bottom = Math.min(window.innerHeight, r.bottom);
+    if (topic.getBoundingClientRect().bottom > top) return null;
+    return Array.from(root.querySelectorAll('.topic, [data-card], .reply')).filter(function (node) {
+      if (node === topic || topic.contains(node) || !(topic.compareDocumentPosition(node) & 4)) return false;
+      var n = node.getBoundingClientRect();
+      return n.height && n.bottom > top && n.top < bottom;
+    }).sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; })[0];
+  }
+  function collapse(h) {
+    if (!h._wbHistoryOut || (h._wbHistorySteps || 1) === 1) return;
+    var topic = h.closest('.topic'), a = document.activeElement;
+    if (!topic || !topic.isConnected || topic.hasAttribute('data-max')) return;
+    if (a && (h.contains(a) || ((a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.closest('.topic')))) return;
+    var root = topic.closest('#bcol') || topic.closest('.wrap') || document;
+    var motion = root.getAnimations ? root.getAnimations({ subtree: true }).filter(function (m) {
+      var n = m.effect && m.effect.target;
+      return m.playState === 'running' && n && n.matches('.topic, [data-card], iframe.doc-frame');
+    }) : [];
+    if (motion.length) {
+      if (!h._wbHistoryWaiting) {
+        h._wbHistoryWaiting = true;
+        Promise.all(motion.map(function (m) { return m.finished.catch(function () {}); })).then(function () {
+          h._wbHistoryWaiting = false; collapse(h);
+        });
       }
-      if (node && node.getBoundingClientRect().height) {
-        h.scrollTop += node.getBoundingClientRect().top - h.getBoundingClientRect().top - a.offset;
-      } else h.scrollTop = state.top;
+      return;
     }
-    h._wbPosition = position(h);
+    var anchor = below(topic), kept = anchor && kit.keep(anchor, { observe: [h.querySelector('.history-live')] });
+    h._wbHistoryOut = false;
+    h._wbHistoryTarget = null;
+    steps(h, 1);
+    updateControl(h);
+    if (kept) kept.apply();
+  }
+  function arm(h) {
+    var topic = h.closest('.topic');
+    h._wbHistoryOut = false;
+    kit.unwatch(h._wbHistoryWatch);
+    if (topic) h._wbHistoryWatch = kit.watch(topic, {
+      onChange: function (r) { if (r.visible) h._wbHistoryOut = false; },
+      onOut: function () { h._wbHistoryOut = true; collapse(h); }
+    });
+  }
+  function reveal(h, node) {
+    var live = h.querySelector('.history-live');
+    steps(h, Math.max(h._wbHistorySteps || 1, Math.ceil((live.getBoundingClientRect().bottom - node.getBoundingClientRect().top) / STEP)));
+    updateControl(h);
+  }
+  function navigate(h, node) {
+    reveal(h, node);
+    arm(h);
+    h._wbHistoryTarget = node;
+    // Page navigation must clear the topic's sticky head AND the rail/host
+    // stack above it. A fixed page-top offset can leave keyboard focus
+    // inside the clip but hidden behind those capsules on either surface.
+    var head = h.closest('.topic').querySelector('.tophead'), offset = 12;
+    var style = head && window.getComputedStyle(head);
+    if (style && style.position === 'sticky') offset += (parseFloat(style.top) || 0) + head.offsetHeight;
+    kit.keep(node, { offset: offset, observe: [h.querySelector('.history-live')], onEnd: function () {
+      if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
+    } });
   }
   // relabel rewrites a fold's key, anchor, and "n entries · from-to" label
   // after a merge, as the server writes them (EntryPage.Segments).
@@ -109,14 +179,25 @@
   function loadOne(h) {
     var page = h.querySelector('template[data-history-page]');
     if (!page) return false;
-    var live = h.querySelector('.history-live'), boundary = live.children[0];
+    var live = h.querySelector('.history-live'), boundary = live.children[0], height = live.scrollHeight;
     live.insertBefore(page.content.cloneNode(true), live.firstChild);
     page.remove();
     if (boundary) joinBoundary(live, boundary);
-    var button = h.querySelector('.history-older');
-    if (button) button.hidden = !h.querySelector('template[data-history-page]');
     if (window.wbBindBoard) window.wbBindBoard(h);
     h.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: h } }));
+    // Joining closed runs can add a page without changing content size.
+    // Re-arm this content observer on the next frame so it delivers that
+    // page's layout even then. Never run a synchronous multi-page loop or
+    // re-observe inside a resize delivery (which would cause a loop error).
+    if (h._wbHistoryObserver && height === live.scrollHeight && !h._wbHistoryReobserve) {
+      h._wbHistoryReobserve = true;
+      window.requestAnimationFrame(function () {
+        h._wbHistoryReobserve = false;
+        if (!h.isConnected || h._wbHistorySteps <= 1 || live.scrollHeight >= h._wbHistorySteps * STEP || !h.querySelector('template[data-history-page]')) return;
+        h._wbHistoryObserver.unobserve(live);
+        h._wbHistoryObserver.observe(live);
+      });
+    }
     return true;
   }
   // Materialize only known targets. Loading all intervening pages preserves
@@ -159,13 +240,15 @@
     }
     // Highlight the reached target once, restarting a running flash.
     mark.classList.toggle('flash', false); void mark.offsetWidth; mark.classList.toggle('flash', true);
+    var h = node.closest('.wb-history');
+    if (h) navigate(h, node);
     return node;
   }
   function capture(root) {
     return histories(root).map(function (h) {
       var first = h.querySelector('.wb-entry');
       var fold = h.closest('.topic-stream');
-      return { key: h.getAttribute('data-history'), first: first && first.id, open: !fold || fold.open, position: position(h),
+      return { key: h.getAttribute('data-history'), first: first && first.id, open: !fold || fold.open, steps: h._wbHistorySteps || 1,
         folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }),
         systems: Array.from(h.querySelectorAll('.system-run .wb-entry')).map(function (e) { return [e.id, e.closest('.system-run').open]; }) };
     });
@@ -189,35 +272,235 @@
         var entry = Array.from(run.querySelectorAll('.wb-entry')).find(function (e) { return systems.has(e.id); });
         if (entry) run.open = systems.get(entry.id);
       });
-      applyPosition(h, saved.position);
+      steps(h, saved.steps || 1);
+      updateControl(h);
+      arm(h);
     });
   }
   function init(root) {
     histories(root).forEach(function (h) {
-      if (h._wbHistoryBound) return;
+      if (h._wbHistoryBound) { updateControl(h); return; }
       h._wbHistoryBound = true;
-      h.scrollTop = h.scrollHeight;
-      h._wbPosition = position(h);
-      h.addEventListener('scroll', function () { h._wbPosition = position(h); }, { passive: true });
+      steps(h, 1);
+      updateControl(h);
+      arm(h);
+      // Hidden overflow is not keyboard navigation: a clipped summary is
+      // still tabbable. Reveal focused controls through the same page keep
+      // path as deep links, never by scrolling the clipped box.
+      h.addEventListener('focusin', function (e) {
+        var live = h.querySelector('.history-live'), node = e.target;
+        if (!live.contains(node)) return;
+        var r = node.getBoundingClientRect(), clip = h.querySelector('.history-clip').getBoundingClientRect();
+        if (r.top < clip.top || r.bottom > clip.bottom) navigate(h, node);
+      });
       // Frame grafts keep this container but replace its older-page button.
       h.addEventListener('click', function (e) {
         var button = e.target.closest && e.target.closest('.history-older');
         if (!button || button.closest('.wb-history') !== h) return;
-        var saved = position(h);
-        loadOne(h);
-        applyPosition(h, saved);
+        var anchor = oldest(h), live = h.querySelector('.history-live');
+        var kept = anchor && kit.keep(anchor, { observe: [live] });
+        h._wbHistoryTarget = null;
+        steps(h, (h._wbHistorySteps || 1) + 1);
+        arm(h);
+        // At most one page here. Only a later content resize may load the
+        // next: iframe heights have not arrived at materialization time.
+        if (live.scrollHeight < h._wbHistorySteps * STEP) loadOne(h);
+        updateControl(h);
+        if (kept) kept.apply();
       });
       if (typeof ResizeObserver !== 'undefined') {
         var observer = new ResizeObserver(function () {
           if (h.isConnected === false) { observer.disconnect(); return; }
-          applyPosition(h, h._wbPosition);
+          h._wbHistoryResizing = true;
+          try {
+            if (h._wbHistoryTarget) reveal(h, h._wbHistoryTarget);
+            // Initial layout alone does not load older pages; a user has to
+            // expand first. A collapse cancels the bounded resize chain.
+            if (h._wbHistorySteps > 1 && h.querySelector('.history-live').scrollHeight < h._wbHistorySteps * STEP) loadOne(h);
+            updateControl(h);
+          } finally { h._wbHistoryResizing = false; }
         });
         observer.observe(h.querySelector('.history-live'));
         h._wbHistoryObserver = observer;
       }
     });
   }
-  window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget };
+  // viewKit holds the visibility source and the keep-in-place helper every
+  // board host shares (the dashboard's board, the standalone page's
+  // history). win gives the globals it uses, so the kit runs under a fake
+  // window too.
+  //
+  // watch(node, {onChange, onOut, margin}) subscribes to node's viewport
+  // visibility: one IntersectionObserver per rootMargin, all with root null,
+  // so whichever ancestor scrolls (a column, the pinned column, the
+  // document) clips it. Each call is its own subscription. onChange gets
+  // every report {node, ratio, visible, rect}; onOut runs once per change
+  // from ratio > 0 to 0 (a first report of 0 has not left view). seen(node)
+  // reads the node's last report without a layout. sweep() drops the
+  // subscriptions of nodes no longer on the page.
+  //
+  // keep(node, {offset, observe, onEnd}) keeps node at its offset from its
+  // nearest scroller's top until layout settles: measured now, in layout
+  // terms (a running transform, as a slide's, does not count), so it is
+  // called before the DOM change it compensates, and apply() right after
+  // it. An offset given puts node there instead. A ResizeObserver over the
+  // scroller's content (and observe) re-applies on every layout change. The
+  // session ends 500 ms after the last change ("quiet"), 5 s after it began
+  // ("cap"), on a scroll it did not write ("user"), or on end() ("ended").
+  // One session per scroller: a keep on a scroller that has one re-anchors
+  // it (node, offset, observed nodes) and restarts both windows, so two
+  // callers never take each other's writes for a user scroll. keeping(el)
+  // returns the session el has, which other scroll writers leave alone.
+  // While a session runs its scroller takes overflow-anchor: none, so the
+  // browser's own anchoring does not compensate a second time.
+  function viewKit(win) {
+    var doc = win.document, observers = {}, reports = new WeakMap(), sessions = new Map();
+    var QUIET = 500, CAP = 5000;
+    function observer(margin) {
+      if (observers[margin]) return observers[margin];
+      var o = observers[margin] = { subs: new Map(), io: null };
+      o.io = new win.IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          var list = o.subs.get(e.target);
+          if (!list) return;
+          var r = { node: e.target, ratio: e.intersectionRatio, visible: e.intersectionRatio > 0, rect: e.boundingClientRect };
+          var s = reports.get(e.target) || { by: {} };
+          s.by[margin] = r;
+          s.last = r;
+          reports.set(e.target, s);
+          list.slice().forEach(function (sub) {
+            if (sub.gone) return;
+            var was = sub.ratio;
+            sub.ratio = r.ratio;
+            if (sub.onChange) sub.onChange(r);
+            if (sub.onOut && was > 0 && r.ratio === 0) sub.onOut(r);
+          });
+        });
+      }, { root: null, rootMargin: margin, threshold: [0] });
+      return o;
+    }
+    function drop(sub) {
+      if (sub.gone) return;
+      sub.gone = true;
+      var o = observers[sub.margin], list = o && o.subs.get(sub.node);
+      if (!list) return;
+      list.splice(list.indexOf(sub), 1);
+      if (!list.length) { o.subs.delete(sub.node); o.io.unobserve(sub.node); }
+    }
+    function watch(node, opt) {
+      opt = opt || {};
+      var sub = { node: node, margin: opt.margin || "0px", onChange: opt.onChange, onOut: opt.onOut, ratio: undefined, gone: false };
+      var handle = { node: node, unwatch: function () { drop(sub); } };
+      if (!node || !win.IntersectionObserver) { sub.gone = true; return handle; }
+      var o = observer(sub.margin), list = o.subs.get(node);
+      // A node already observed reports only on a change: observing it
+      // again gives the new subscription its first report.
+      if (list) { list.push(sub); o.io.unobserve(node); } else o.subs.set(node, [sub]);
+      o.io.observe(node);
+      return handle;
+    }
+    function unwatch(handle) { if (handle && handle.unwatch) handle.unwatch(); }
+    function sweep() {
+      Object.keys(observers).forEach(function (m) {
+        var gone = [];
+        observers[m].subs.forEach(function (list, node) { if (!node.isConnected) gone = gone.concat(list); });
+        gone.forEach(drop);
+      });
+    }
+    function seen(node, margin) {
+      var s = reports.get(node);
+      return s ? (margin ? s.by[margin] || null : s.last) : null;
+    }
+    // A node's nearest scroller: the first ancestor whose overflow scrolls
+    // and whose content overflows it, else the document's.
+    function docScroller() { return doc.scrollingElement || doc.documentElement; }
+    function scrollerOf(node) {
+      for (var p = node && node.parentElement; p && p !== doc.body && p !== doc.documentElement; p = p.parentElement) {
+        var oy = win.getComputedStyle(p).overflowY;
+        if ((oy === "auto" || oy === "scroll" || oy === "overlay") && p.scrollHeight > p.clientHeight) return p;
+      }
+      return docScroller();
+    }
+    function shiftY(el) {
+      var t = win.getComputedStyle(el).transform, m = t && /^matrix(3d)?\((.*)\)$/.exec(t);
+      if (!m) return 0;
+      var v = m[2].split(",").map(parseFloat);
+      return (m[1] ? v[13] : v[5]) || 0;
+    }
+    // layoutTop is node's top in the viewport with the transforms between
+    // it and its scroller taken out; scrollerTop is the scroller's content
+    // top in the viewport.
+    function layoutTop(node, scroller) {
+      var y = node.getBoundingClientRect().top;
+      for (var p = node; p && p !== scroller; p = p.parentElement) y -= shiftY(p);
+      return y;
+    }
+    function scrollerTop(scroller) { return scroller === docScroller() ? 0 : scroller.getBoundingClientRect().top + (scroller.clientTop || 0); }
+    function keep(node, opt) {
+      opt = opt || {};
+      var scroller = scrollerOf(node), s = sessions.get(scroller);
+      var offset = typeof opt.offset === "number" ? opt.offset : layoutTop(node, scroller) - scrollerTop(scroller);
+      if (!s) s = start(scroller);
+      s.node = node;
+      s.offset = offset;
+      if (opt.onEnd) s.ends.push(opt.onEnd);
+      if (s.ro) (opt.observe || []).forEach(function (el) { if (el) s.ro.observe(el); });
+      s.restart(true);
+      if (typeof opt.offset === "number") s.handle.apply();
+      return s.handle;
+    }
+    function start(scroller) {
+      var s = { node: null, offset: 0, ends: [], ro: null, quiet: 0, cap: 0, done: false, wrote: scroller.scrollTop };
+      var main = scroller === docScroller(), anchorEl = main ? doc.documentElement : scroller, target = main ? win : scroller;
+      var was = anchorEl.style.overflowAnchor;
+      anchorEl.style.overflowAnchor = "none";
+      function apply() {
+        if (s.done) return;
+        if (!s.node.isConnected) { end("ended"); return; }
+        var d = layoutTop(s.node, scroller) - scrollerTop(scroller) - s.offset;
+        if (Math.abs(d) >= 0.5) scroller.scrollTop += d;
+        s.wrote = scroller.scrollTop;
+      }
+      function end(reason) {
+        if (s.done) return;
+        s.done = true;
+        sessions.delete(scroller);
+        if (s.ro) s.ro.disconnect();
+        win.clearTimeout(s.quiet);
+        win.clearTimeout(s.cap);
+        target.removeEventListener("scroll", onScroll);
+        anchorEl.style.overflowAnchor = was;
+        s.ends.forEach(function (fn) { fn(reason); });
+      }
+      function onScroll() {
+        if (s.done || Math.abs(scroller.scrollTop - s.wrote) <= 1) return;
+        // Content that shrank under the scroll clamps it: not the user's.
+        var max = scroller.scrollHeight - scroller.clientHeight;
+        if (s.wrote > max + 1 && Math.abs(scroller.scrollTop - max) <= 1) { apply(); return; }
+        end("user");
+      }
+      s.restart = function (both) {
+        win.clearTimeout(s.quiet);
+        s.quiet = win.setTimeout(function () { end("quiet"); }, QUIET);
+        if (!both) return;
+        win.clearTimeout(s.cap);
+        s.cap = win.setTimeout(function () { end("cap"); }, CAP);
+      };
+      s.handle = { scroller: scroller, apply: apply, end: function () { end("ended"); } };
+      if (win.ResizeObserver) {
+        s.ro = new win.ResizeObserver(function () { if (s.done) return; apply(); s.restart(false); });
+        (main ? [doc.body] : Array.prototype.slice.call(scroller.children)).forEach(function (el) { if (el) s.ro.observe(el); });
+      }
+      target.addEventListener("scroll", onScroll, { passive: true });
+      sessions.set(scroller, s);
+      return s;
+    }
+    function keeping(scroller) { var s = sessions.get(scroller); return s ? s.handle : null; }
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping };
+  }
+  var kit = viewKit(window);
+  window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget,
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {
@@ -230,13 +513,16 @@
     window.wbBindBoard.wbHistoryBound = true;
   }
   init(document);
+  document.addEventListener('focusout', function () {
+    window.setTimeout(function () { histories(document).forEach(collapse); }, 0);
+  });
 
   // The standalone file page navigates its own fragments. The dashboard has
   // its own allowlisted bridge, scroll policy, and region-swap lifecycle.
   if (document.body && document.body.classList.contains('full')) {
     function jump(id) {
       var node = loadTarget(document, id);
-      if (node) node.scrollIntoView({ block: 'nearest' });
+      if (node && !node.closest('.wb-history')) node.scrollIntoView({ block: 'nearest' });
       return node;
     }
     document.addEventListener('click', function (e) {

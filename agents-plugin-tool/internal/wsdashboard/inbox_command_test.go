@@ -155,10 +155,10 @@ func TestCommandIsHeldOnlyFromThisMachineAndOnlyWhenListed(t *testing.T) {
 		t.Fatalf("local /compact text not held: %+v", held)
 	}
 
-	if page := serve(f.d, local, http.MethodGet, "/s/livesession", "").Body.String(); !strings.Contains(page, `<i data-name="compact" data-src="builtin"></i>`) {
+	if page := serve(f.d, local, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); !strings.Contains(page, `<i data-name="compact" data-src="builtin"></i>`) {
 		t.Error("the local page does not carry the command list")
 	}
-	if page := serve(f.d, lan, http.MethodGet, "/s/livesession", "").Body.String(); strings.Contains(page, `data-region="cmds"`) {
+	if page := serve(f.d, lan, http.MethodGet, "/s/livesession?frame=1", "").Body.String(); strings.Contains(page, `data-region="cmds"`) {
 		t.Error("the LAN page carries the command list region")
 	}
 }

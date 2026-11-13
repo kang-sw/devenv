@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 2295162df900666f
 sage-review-completeness-reviewed: 2295162df900666f
+completed: 2026-11-14
 ---
 
 # ws: only the dashboard daemon runs a ws executable
@@ -366,3 +367,89 @@ only a genuinely needed daemon start/replacement executes a ws binary. Do not
 claim remote Linux tests prove the Windows/AhnLab behavior; record any live
 check not yet performed explicitly. No UI changes, holder recovery redesign,
 or mixed-version guard implementation is included in this phase.
+
+### Result (1fea54cbc) - 2026-11-14
+
+- Phase 2 completed, owner (551)=a. `677711b3a` was merged to develop in
+  `0b3daf8e1` without its review under owner (45)=b. It sends every Pi mailbox
+  wait, stream and one-shot, through `python3 <launcher> mailbox wait`, and it
+  removes the waiter's immutable-exe staging, bypass and cleanup ownership.
+  `b11facf4f` adds the named process-spawn tests, drops the redundant
+  `runtimeReady` guard (`releaseLocalBootstrap` is idempotent), and refreshes
+  stale comments. `1fea54cbc` regenerates the committed Pi bundle, which those
+  `src/` edits had made stale. `dev.py` `check_built` and seeding had already
+  moved to hash-bound metadata in Phase 1.
+- Where the named tests live:
+  - `test_pi_waiter_always_uses_python_launcher_and_daemon`:
+    `agents-plugin-pi/test/mailbox-daemon.integration.test.ts`. It covers a
+    release-backed and a source-loaded plugin, using a real launcher copy and
+    the in-process fake daemon `test/fixtures/fake-daemon.ts`.
+  - `test_child_runtime_version_check_never_executes_ws_binary`: the
+    `createChildRuntimeEnsurer` case in `test/local-devenv.test.ts`.
+  - `test_dev_check_built_reads_metadata_without_ws_process_spawn`:
+    `scripts/test_dev.py`.
+- Process-spawn assertions:
+  - The runtime binary is a sentinel that journals any execution.
+  - Every waiter spawn is `python3` with `[launcher, "mailbox", "wait", ...]`.
+    Each wait reaches the fake daemon as exactly one CLI-mode hello.
+  - The sentinel journal stays empty. No `cache/dashboard/bin` is staged, and
+    the `go` stub of the source build never runs.
+  - Stream mode: three wake kinds arrive on one child; a re-arm with changed
+    board flags restarts it; abort closes the daemon connection.
+  - One-shot mode: mail, board-inbox, board-steer, interrupt, timeout and
+    abort.
+  - Child-runtime version check: it installs the bootstrap and reports the
+    metadata version. A bare `version` next to a daemon the launcher would
+    replace reports from `/health`, with no hello, no execution and no staged
+    daemon.
+  - `check_built`: every `subprocess` and `os` process API is spied, and none
+    is called.
+  - Two mutations each failed the new tests: the launcher executing the binary,
+    and inspection starting the daemon.
+- Verification ran locally on macOS. sys_lock w5090 can only be driven from the
+  Windows host, so this is a declared deviation.
+  - Full Pi `node --test`: 2688 pass, 3 skipped, 0 fail.
+  - Focused Pi set after `npm ci`: 247 pass, 2 skipped.
+  - Launcher Python suites: 101 OK. wsflow: 24 OK (2 skips).
+    `scripts/test_dev.py`: 10 OK. The three launchers are byte-identical.
+- Go: this run changed no Go or launcher input. The only Go-visible input was
+  the Pi bundle; the stale bundle failed `TestPiBundleCommittedIsFresh` until
+  `1fea54cbc`, and that test then passed. The rest of the local
+  `go test ./... -count=1` passed apart from failures that are either
+  pre-existing or caused by the test environment:
+  - The Forward exclusion `TestHostedConnectionSeeingALANChangeReplacesTheDaemon`.
+  - The known env-only `TestClaudeLeadLocalSettingsCanonicalWorktree` and
+    `TestPiLeadResolverAdapter`.
+  - macOS `/private/var` path canonicalization in three `internal/mcp` render
+    tests.
+  - `tk`/`wbtk` badge-class expectations in
+    `TestDashboardTopicTicketMoveInvalidatesTheBoard` and
+    `TestWhiteboardFilePageResolvesTopicTickets`, from the dashboard CSS
+    rename work.
+  - The timing-flaky `TestLeadHandedToATerminalIsLetGo`, which fails 4 of 10
+    runs at base.
+  - All except the Forward exclusion and `TestWhiteboardFilePageResolvesTopicTickets`
+    reproduced at base `f1e45292c` in a temporary worktree.
+  - `internal/mcp` and `wsledger` needed more than the default 10m timeout
+    locally. With `-timeout 40m`, `wsledger` passed.
+- Lite review ran once, with one fresh reviewer over `677711b3a` and
+  `b11facf4f`: 0 Critical, 0 Important, 7 Minor. The Minor findings are
+  recorded only:
+  - On Windows the mailbox-daemon test passes without proving anything, because
+    the sentinel and the `go` stub are scripts.
+  - The fixture's `git commit` does not set `commit.gpgsign=false`.
+  - `dispose?.()` silently no-ops if `dispose` is dropped.
+  - The diagnostics assertion is narrow.
+  - The child-runtime test injects its own `runLauncher`.
+  - The source fixture hand-unlinks the bootstrap.
+  - The `os` spy list is narrower than its comment claims.
+- Not performed: the Windows/AhnLab live acceptance. That covers launcher
+  startup, version checks, the Pi mailbox wait, Codex Stop and daemon-spawned
+  Pi worker MCP, and it should follow coordination with
+  `fix/pi-spawn-key-bound-to-cwd-worktree`. It stays owner-owned. The local
+  macOS tests do not prove the Windows/AhnLab behavior.
+
+
+## Resolution (2026-11-14)
+
+Phases 1 and 2 are implemented and have Results. Only the dashboard daemon executes a ws binary; the launcher, Pi waiters and version checks are Python adapters that read health or hash-bound metadata. The Windows/AhnLab live acceptance was not performed and remains owner-owned.

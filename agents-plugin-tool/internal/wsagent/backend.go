@@ -286,6 +286,12 @@ type Event struct {
 	// in an error (a refusal, an interrupt).
 	TurnEnd   bool
 	TurnError string
+	// CompactRequested (with TurnEnd): the ending turn carried a successful
+	// compaction lever call (a *__request_compaction tool call whose result
+	// is not an error) and was not interrupted. The runner holds queued
+	// input until that compaction starts (leverHoldCap at most), so the
+	// compaction runs before the next turn.
+	CompactRequested bool
 	// Fatal ends the process with an error the conversation reports, such as
 	// a failed init check; the process exits after it.
 	Fatal error

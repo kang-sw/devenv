@@ -60,12 +60,13 @@ type Member struct {
 }
 
 // Detail carries what the kind says: status for status and closed, the
-// comment's first characters for comment, and the item's due date whenever
-// it has one.
+// comment's first characters for comment, and the item's due and start
+// dates whenever it has them.
 type Detail struct {
 	Status  string `json:"status,omitempty"`
 	Comment string `json:"comment,omitempty"`
 	Due     string `json:"due,omitempty"`
+	Start   string `json:"start,omitempty"`
 }
 
 // candidate is one event the hooks may receive, before the scope filter.
@@ -105,6 +106,11 @@ func eventBase(e wstrackerhost.StoreEntry, v *wstracker.View, item, base string,
 		if it.Due != nil {
 			if at, ok := dueTime(*it.Due, loc); ok {
 				ev.Detail.Due = at.Format(time.RFC3339)
+			}
+		}
+		if it.Start != nil {
+			if at, ok := dueTime(*it.Start, loc); ok {
+				ev.Detail.Start = at.Format(time.RFC3339)
 			}
 		}
 	}

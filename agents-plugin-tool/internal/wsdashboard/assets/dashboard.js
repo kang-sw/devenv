@@ -14,6 +14,15 @@
   // load (luIcon, below).
   var SVGNS = "http://www.w3.org/2000/svg";
   var rid = root.getAttribute("data-rid");
+  // The iframe shell (shell.js, the shell block below): shell marks the
+  // shell page, which holds the rail and the top header and no page's own
+  // content; framed marks a page the shell frames (?frame=1), which leaves
+  // the rail and its header's items to the shell; neither holds for a page
+  // standing alone. A framed page opened outside a frame goes to its shell.
+  // shHidden is a framed page the shell hides: like a hidden tab, it holds
+  // its region updates and skips the clock until it shows.
+  var shell = root.hasAttribute("data-shell"), framed = root.hasAttribute("data-frame") && !!window.WsShell, shHidden = false;
+  if (framed && window.parent === window) { location.replace(location.pathname + location.hash); return; }
 
   // --- browser storage: guarded, since a locked-down browser throws on access
   var store = null;
@@ -89,7 +98,7 @@
   // times and the usage paces. A hidden tab skips it, and showing the tab
   // again catches up at once rather than on the next tick.
   function tickTimes() {
-    if (doc.hidden) return;
+    if (doc.hidden || shHidden) return;
     var now = Date.now();
     q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"]').forEach(function (t) { fmtTime(t, now); });
     q("em.u-pace[data-reset]").forEach(function (e) { pace(e, now); });
@@ -116,8 +125,39 @@
   // re-applies it to the new elements.
   var openState = {};
   var PEER_KEY = "ws.dashboard.peer.";
+  // A board panel the user folds by hand stays folded across a reload, a
+  // session switch and a frame the shell evicted, none of which keep
+  // openState. The folded panels are one capped LRU list in storage
+  // (SHUT_KEY), each "<session>/<data-key>": the key names the entry, so an
+  // overwrite (a new entry under the same panel id) is not matched and
+  // opens by the server's default again. Opening the panel by hand removes
+  // it; beyond SHUT_CAP the least recently folded is dropped.
+  var SHUT_KEY = "ws.dashboard.panelshut", SHUT_CAP = 200, shutSet = null;
+  function isPanel(d) { return d.classList.contains("entry-panel") && d.hasAttribute("data-key"); }
+  function shutId(d) { return rid + "/" + d.getAttribute("data-key"); }
+  function shutList() {
+    try {
+      var v = JSON.parse(load(SHUT_KEY) || "[]");
+      return Array.isArray(v) ? v.filter(function (x) { return typeof x === "string"; }) : [];
+    } catch (e) { return []; }
+  }
+  function shutHas(id) {
+    if (!shutSet) { shutSet = {}; shutList().forEach(function (x) { shutSet[x] = true; }); }
+    return !!shutSet[id];
+  }
+  function shutPut(id, on) {
+    if (shutHas(id) === on && !on) return;
+    var l = shutList().filter(function (x) { return x !== id; });
+    if (on) l.push(id);
+    save(SHUT_KEY, l.length ? JSON.stringify(l.slice(-SHUT_CAP)) : null);
+    shutSet = null;
+  }
+  // Another tab or frame wrote the list; read it again.
+  window.addEventListener("storage", function (e) { if (e.key === SHUT_KEY || e.key === null) shutSet = null; });
   function isPeer(d) { return d.classList.contains("peer") && d.hasAttribute("data-peer"); }
   function openKey(d) {
+    // The rail's ended folds keep their state in storage (rail.js marks).
+    if (d.classList.contains("rended")) return null;
     if (d.hasAttribute("data-key")) return "k:" + d.getAttribute("data-key");
     if (d.classList.contains("panel") && d.id) return "p:" + d.id;
     return null;
@@ -126,13 +166,16 @@
     var d = e.target;
     if (!d || d.tagName !== "DETAILS") return;
     if (isPeer(d)) { save(PEER_KEY + d.getAttribute("data-peer"), d.open ? "1" : null); return; }
+    if (d.classList.contains("rended") && d.hasAttribute("data-key") && railSets) { railSets.ended.put(d.getAttribute("data-key"), d.open); return; }
     var k = openKey(d);
     if (k) openState[k] = d.open;
+    if (isPanel(d)) shutPut(shutId(d), !d.open);
   }, true);
   function restoreOpenOne(d) {
     if (isPeer(d)) { d.open = load(PEER_KEY + d.getAttribute("data-peer")) === "1"; return; }
     var k = openKey(d);
     if (k && Object.prototype.hasOwnProperty.call(openState, k)) d.open = openState[k];
+    else if (isPanel(d) && shutHas(shutId(d))) d.open = false;
   }
   function restoreOpen(el) {
     if (el.tagName === "DETAILS") restoreOpenOne(el);
@@ -179,7 +222,12 @@
     if (doc.scrollingElement) s.push([doc.scrollingElement, doc.scrollingElement.scrollTop]);
     return s;
   }
-  function restoreScroll(s) { s.forEach(function (p) { if (p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; }); }
+  // A pane a keep session holds (wbHistory.keeping: a board swap's
+  // compensation, a history page loading) is the session's to scroll.
+  function restoreScroll(s) {
+    var kept = window.wbHistory && window.wbHistory.keeping;
+    s.forEach(function (p) { if (!(kept && kept(p[0])) && p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; });
+  }
 
   // The conversation stays at the bottom while the user has it there. Its
   // two regions (entries, convlive) scroll together inside #convo, which
@@ -357,6 +405,7 @@
     root.setAttribute("data-langpref", v);
     markLang();
     if (holdsDraft()) banner(wsT("js.banner.lang"));
+    else if (framed) window.parent.location.reload();
     else location.reload();
   }
   markLang();
@@ -372,8 +421,11 @@
     var cur = root.getAttribute("data-theme") || "";
     q(".gmenu [data-theme-set]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-theme-set") === cur)); });
   }
-  function setTheme(v) {
+  // setTheme picks the theme v; a framed page also hands it to the shell,
+  // which passes it on to its other frames (quiet: the shell's own pass).
+  function setTheme(v, quiet) {
     if (v !== "light" && v !== "dark") v = "";
+    if (framed && !quiet) shPost("theme", { theme: v });
     doc.cookie = THEME_COOKIE + "=" + v + "; Path=/; SameSite=Lax; Max-Age=" + (v ? 31536000 : 0);
     if (v) root.setAttribute("data-theme", v);
     else root.removeAttribute("data-theme");
@@ -476,6 +528,10 @@
   // counts as held: a reconnect meanwhile names its hash, and the update
   // still lands when the tab shows.
   var modeHash = "", hiddenRegions = {};
+  // pageHidden tells whether nobody sees the page (a hidden tab, or a frame
+  // the shell hides): region updates are held (hiddenRegions) while it
+  // holds, and land when it ends (showRegions).
+  function pageHidden() { return doc.hidden || shHidden; }
   function held() {
     return q("[data-region]").map(function (el) {
       var name = el.getAttribute("data-region"), p = hiddenRegions[name];
@@ -511,6 +567,7 @@
     var frameH = board ? boardRead(frameHeights) : null;
     var history = board ? captureBoardHistory() : null;
     var before = board && !still && !reducedMotion() ? boardSpots(el) : null;
+    var kept = board ? boardKeep(el) : null, boardTop = before && kept ? el.getBoundingClientRect().top : null;
     // The entries merge and the board morph prepare only the nodes they
     // insert; any other region is replaced whole. A finished reply's mermaid
     // fences draw once merged; the streaming reply (convlive) keeps them
@@ -519,6 +576,8 @@
     if (name === "entries") mergeEntriesRegion(el, html, pin);
     else if (board) {
       ins = morphBoard(el, html);
+      if (kept) boardKeepSettle(kept, el, ins);
+      if (window.wbHistory && window.wbHistory.sweep) { window.wbHistory.sweep(); ins.forEach(watchBoard); }
       ins.forEach(function (n) {
         // Materialize the reader's older pages before restoring disclosures
         // and frame heights, including immutable panel versions off the tail.
@@ -528,10 +587,14 @@
         sweepOutImgs(n);
         setFrameHeights(n, frameH);
         writeAnswers(n, answers);
+        q("iframe.doc-frame", n).forEach(function (f) { f.wbKeep = true; });
       });
       if (before) {
         var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });
-        startMotion(moves.concat(slideBoard(el, before)));
+        // A kept board slides in screen terms, once the scroll is
+        // compensated: what the session holds in place does not slide.
+        if (kept) kept.h.apply();
+        startMotion(moves.concat(slideBoard(el, before, kept && window.wbHistory.keeping(kept.h.scroller) ? boardTop : null)));
         ins.forEach(function (n) { q("iframe.doc-frame", n).forEach(function (f) { if (!f.wbOut) f.wbGrow = true; }); });
       }
     } else {
@@ -556,8 +619,7 @@
     if (name === "panels") drawerSync();
     if (name === "git") gitSwapped();
     restoreScroll(scroll);
-    // Disclosure and frame-height restoration can move the history viewport.
-    if (board && window.wbHistory) boardBoxes().forEach(function (b) { window.wbHistory.restore(b, history); });
+    if (kept) kept.h.apply();
     if (pin) pinConvo();
     if (live && TAB[name] && !tabShown(TAB[name])) {
       var dot = tabDot(TAB[name]);
@@ -603,6 +665,9 @@
   // Terminal cards (terminal.js) exist only on a page the server marked
   // data-term; their module adds the "+ Terminal" button at the end of
   // the composer's status line (or fixed at the page's corner without one).
+  // Web cards (webcard.js) exist only on a data-sysopen page; their "+ Web"
+  // button stands beside it, and their picks and console errors go to the
+  // composer's chips (web picks, below).
   // The pinned column (bpcol) is the page body's last column: from 1600px,
   // while anything is pinned, unless the layout menu says "tabs" (one
   // column at a time, where the pins stand atop the board). The root's
@@ -618,6 +683,9 @@
   if (cardBoard) {
     if (window.WsPreview) window.WsPreview.setup({ renderDiff: gwRender, post: post, toast: toast });
     if (window.WsTerm) window.WsTerm.setup({ post: post, toast: toast });
+    // The composer's chips come later in this script: the hooks are hoisted
+    // functions, and cchips is not yet assigned here.
+    if (window.WsWeb) window.WsWeb.setup($("cchips") ? { post: post, toast: toast, rid: rid, addPick: addWebPick, addConsole: addWebConsole } : { post: post, toast: toast, rid: rid });
     var bpcol = null, dbody = cardBoard.closest(".dbody");
     if (dbody) {
       bpcol = doc.createElement("aside");
@@ -643,6 +711,7 @@
       },
       adopted: function (n) {
         if (window.wbHistory) window.wbHistory.init(n);
+        watchBoard(n);
         restoreOpen(n);
         if (window.wbBindBoard) window.wbBindBoard(n);
         if (window.wbAgo) window.wbAgo(n);
@@ -656,8 +725,10 @@
       }
     });
     if (window.WsTerm) window.WsTerm.mount($("bcol"));
+    if (window.WsWeb) window.WsWeb.mount($("bcol"));
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
+  boardBoxes().forEach(watchBoard);
   // --- the Files pane (files.js): mounted once, loaded when first shown -------
   if (live && fpane && window.WsFiles) {
     window.WsFiles.mount(fpane, {
@@ -920,12 +991,13 @@
     return h;
   }
   // topicMotion returns, in order, the inserted topic sections that animate
-  // and the height each starts from.
+  // and the height each starts from. A large topic (cards.js) does not
+  // grow: its height is the sheet's.
   function topicMotion(before, ins) {
     var out = [];
     ins.forEach(function (n) {
       var k = topicKey(n);
-      if (k === null) return;
+      if (k === null || n.hasAttribute("data-max")) return;
       var b = before["t:" + k];
       if (b && b.paged) return;
       out.push({ n: n, from: b ? b.h : 0 });
@@ -955,15 +1027,19 @@
   // none. It runs after the growth started, so the places it reads are the
   // growth's first frame and slide and growth add up to one movement.
   // Nothing moves in the DOM (moving a frame reloads it), and the
-  // animation fills nothing, so no transform stays behind. A maximized card
-  // stays put: a transform would anchor its fixed inner box to the card.
-  function slideBoard(el, before) {
-    var top = el.getBoundingClientRect().top, out = [];
+  // animation fills nothing, so no transform stays behind. A maximized card,
+  // a large topic, and a topic holding a large panel stay put: a transform
+  // would anchor the fixed box to the moving node.
+  // With from, the board's top when the spots were read, a slide runs in
+  // screen terms (a swap compensated the scroll between, boardKeep):
+  // an element standing where it stood on screen does not move.
+  function slideBoard(el, before, from) {
+    var top = el.getBoundingClientRect().top, shift = typeof from === "number" ? from - top : 0, out = [];
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n), card = k === null && n.hasAttribute("data-card");
       var b = k !== null ? before["t:" + k] : card ? before["c:" + n.getAttribute("data-card")] : null;
-      if (!b || b.paged || !n.animate || (card && n.hasAttribute("data-max"))) return;
-      var dy = b.y - (n.getBoundingClientRect().top - top);
+      if (!b || b.paged || !n.animate || n.hasAttribute("data-max") || (k !== null && n.querySelector("details[data-max]"))) return;
+      var dy = b.y + shift - (n.getBoundingClientRect().top - top);
       if (Math.abs(dy) < 1) return;
       out.push(n.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: 200, easing: "ease-out" }));
     });
@@ -988,6 +1064,70 @@
       var t = performance.now();
       list.forEach(function (a) { if (a.playState === "running") a.startTime = t; });
     });
+  }
+  // Board scroll compensation: a board swap keeps what the user reads where
+  // it stands. The anchor is the topmost topic or card in view that the
+  // swap does not move (a held topic before any), and one wbHistory.keep
+  // session holds its offset from the board's scroller through the swap and
+  // the layout changes after it (growth, late frame heights, restored
+  // history pages), until they settle or the user scrolls. A maximized card
+  // is left alone, and so is a board column not shown.
+  // boardView lists the topics and cards in view, topmost first, each with
+  // its top in layout terms (a running slide's transform taken out) and
+  // its parent, before the morph.
+  function layoutY(n) {
+    var m = /^matrix(3d)?\((.*)\)$/.exec(getComputedStyle(n).transform || ""), v = m ? m[2].split(",").map(parseFloat) : null;
+    return n.getBoundingClientRect().top - (v ? (m[1] ? v[13] : v[5]) || 0 : 0);
+  }
+  function boardView(el) {
+    var c = $("bcol").getBoundingClientRect(), top = Math.max(0, c.top), bottom = Math.min(window.innerHeight, c.bottom);
+    return q("section.topic[data-topic], [data-card]", el).filter(function (n) {
+      var r = n.getBoundingClientRect();
+      return r.height > 0 && r.bottom > top && r.top < bottom;
+    }).map(function (n) { return { n: n, y: layoutY(n), parent: n.parentNode }; }).sort(function (a, b) { return a.y - b.y; });
+  }
+  // boardAnchor picks the anchor from view: the first held entry, else the
+  // first one moving(entry) does not claim, else null.
+  function boardAnchor(view, moving) {
+    var held = view.filter(function (c) { return c.held; })[0];
+    return held || view.filter(function (c) { return !moving(c); })[0] || null;
+  }
+  // boardKeep starts the session on the topmost entry in view, before the
+  // morph, and returns it with the view, each entry's offset from the
+  // scroller's top; boardKeepSettle moves it, after the morph, to the
+  // anchor, at that entry's offset from before, or ends it when the swap
+  // moved everything in view. A moving entry is one the morph inserted or
+  // kept as a changed topic's section (ins), took off the board, or moved
+  // to another parent.
+  function boardKeep(el) {
+    if (!window.wbHistory || !window.wbHistory.keep || !visible($("bcol")) || doc.querySelector("[data-card][data-max]")) return null;
+    var view = boardView(el);
+    if (!view.length) return null;
+    var h = window.wbHistory.keep(view[0].n, { observe: [el] }), s = h.scroller;
+    var top = s === doc.scrollingElement ? 0 : s.getBoundingClientRect().top + s.clientTop;
+    view.forEach(function (c) { c.off = c.y - top; });
+    return { h: h, view: view };
+  }
+  // boardKept returns the session running on the board column's scroller,
+  // in boardKeep's shape, or null.
+  function boardKept() {
+    var w = window.wbHistory, h = w && w.keeping ? w.keeping($("bcol")) || w.keeping(doc.scrollingElement) : null;
+    return h ? { h: h } : null;
+  }
+  function boardKeepSettle(k, el, ins) {
+    var moved = new Set(ins);
+    var pick = boardAnchor(k.view, function (c) { return moved.has(c.n) || !el.contains(c.n) || c.n.parentNode !== c.parent; });
+    if (!pick) k.h.end();
+    else if (pick !== k.view[0]) window.wbHistory.keep(pick.n, { offset: pick.off });
+  }
+  // watchBoard puts the board's topic sections under root (root itself
+  // included) under the shared visibility source (wbHistory.watch), once
+  // each; a swap sweeps the ones it removed. wbHistory.seen reads their
+  // reports.
+  function watchBoard(root) {
+    if (!window.wbHistory || !window.wbHistory.watch || !root || root.nodeType !== 1) return;
+    var list = root.matches("section.topic[data-topic]") ? [root] : q("section.topic[data-topic]", root);
+    list.forEach(function (n) { if (!n.wbWatch) n.wbWatch = window.wbHistory.watch(n); });
   }
 
   // --- conversation entries: merged by key, never re-rendered ----------------
@@ -1168,6 +1308,7 @@
         t.parentNode.replaceChild(s, t);
       });
       btn.parentNode.replaceChild(page, btn);
+      watchBoard(page);
       if (window.WsCards && window.WsCards.decorate) window.WsCards.decorate();
       restoreOpen(page);
       if (window.wbBindBoard) window.wbBindBoard(page);
@@ -1187,6 +1328,9 @@
   // bmentions are the board mentions the composer holds, in the order added
   // (board mentions, below).
   var bmentions = [];
+  // wpicks and wconsoles are the web card's picked elements and console
+  // blocks the composer holds, in the order added (web picks, below).
+  var wpicks = [], wconsoles = [];
   function chipList() { return chipOrder.map(function (id) { return chips[id]; }); }
   function putChip(c) { if (!chips[c.id]) chipOrder.push(c.id); chips[c.id] = c; }
   function dropChip(id) { delete chips[id]; chipOrder = chipOrder.filter(function (x) { return x !== id; }); }
@@ -1289,6 +1433,80 @@
       el.appendChild(x);
       cchips.appendChild(el);
     });
+    // A web card's picked element: its selector and text; a console block:
+    // its error count and page. The held message shows the same capsules
+    // (dashboard.tmpl achips).
+    wpicks.forEach(function (p, i) {
+      var el = doc.createElement("span"), b = doc.createElement("b"), x = doc.createElement("button");
+      el.className = "achip mchip pchip";
+      el.title = p.url + "\n" + p.selector + (p.text ? "\n" + p.text : "");
+      b.textContent = p.selector;
+      el.appendChild(b);
+      if (p.text) {
+        var t = doc.createElement("span");
+        t.className = "anote";
+        t.textContent = p.text;
+        el.appendChild(t);
+      }
+      x.className = "unchip";
+      x.setAttribute("data-unwpick", String(i));
+      x.title = wsT("js.web.chip.pick.remove");
+      x.textContent = "×";
+      el.appendChild(x);
+      cchips.appendChild(el);
+    });
+    wconsoles.forEach(function (c, i) {
+      var el = doc.createElement("span"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
+      el.className = "achip mchip cchip";
+      el.title = c.url + "\n" + c.lines.join("\n");
+      b.textContent = wsT("js.web.chip.console", c.lines.length);
+      el.appendChild(b);
+      t.className = "anote";
+      t.textContent = c.url;
+      el.appendChild(t);
+      x.className = "unchip";
+      x.setAttribute("data-unwcon", String(i));
+      x.title = wsT("js.web.chip.console.remove");
+      x.textContent = "×";
+      el.appendChild(x);
+      cchips.appendChild(el);
+    });
+  }
+  // --- web picks: what a web card (webcard.js) attaches -------------------------
+  // A picked element and a console block are chips beside the mentions,
+  // sent as the message's picks and consoles. The inbox refuses a send over
+  // its caps whole (WEB_PICKS picks, WEB_CONSOLES console blocks), so the
+  // composer takes no more than that and says so. A cancel or a stored
+  // draft brings them back as they were, even past a cap: the send then
+  // says why, and nothing is lost.
+  var WEB_PICKS = 50, WEB_CONSOLES = 10;
+  function addWebPick(p) {
+    if (wpicks.length >= WEB_PICKS) { noteWarn(wsT("js.web.cap.picks", WEB_PICKS)); return false; }
+    wpicks = wpicks.concat([p]);
+    renderChips();
+    queueDraft();
+    return true;
+  }
+  function addWebConsole(c) {
+    if (wconsoles.length >= WEB_CONSOLES) { noteWarn(wsT("js.web.cap.consoles", WEB_CONSOLES)); return false; }
+    wconsoles = wconsoles.concat([c]);
+    renderChips();
+    queueDraft();
+    return true;
+  }
+  // validPicks and validConsoles keep the well-formed entries of a list a
+  // cancel or a stored draft returned.
+  function validPicks(list) {
+    return (Array.isArray(list) ? list : []).filter(function (p) {
+      return p && typeof p.url === "string" && p.url && typeof p.selector === "string" && p.selector && (p.text == null || typeof p.text === "string");
+    }).map(function (p) { return { url: p.url, selector: p.selector, text: p.text || "" }; });
+  }
+  function validConsoles(list) {
+    return (Array.isArray(list) ? list : []).filter(function (c) {
+      return c && typeof c.url === "string" && c.url && Array.isArray(c.lines);
+    }).map(function (c) {
+      return { url: c.url, lines: c.lines.filter(function (l) { return typeof l === "string" && l.trim(); }) };
+    }).filter(function (c) { return c.lines.length; });
   }
   // topicNote is the board's note for a topic, matched by attribute value so
   // a topic name needs no selector escaping.
@@ -2040,9 +2258,12 @@
     if (sending) return;
     if (cmdSel) { sendCommand(); return; }
     var raw = ctext.value.trim(), t = sendText().trim(), list = chipList(), pics = imgs.slice(), notes = topicNotes(), said = bmentions.slice();
-    if (!t && !list.length && !pics.length && !notes.length && !said.length) { noteWarn(wsT("js.send.empty")); return; }
+    var wp = wpicks.slice(), wc = wconsoles.slice();
+    if (!t && !list.length && !pics.length && !notes.length && !said.length && !wp.length && !wc.length) { noteWarn(wsT("js.send.empty")); return; }
     if (pics.some(function (p) { return !p.ref && p.data === null; })) { noteWarn(wsT("js.send.reading")); return; }
     var body = { text: t, chips: list, topics: notes.map(function (n) { return { topic: n.topic, note: n.value.trim() }; }), mentions: said };
+    if (wp.length) body.picks = wp;
+    if (wc.length) body.consoles = wc;
     var up = pics.filter(function (p) { return !p.ref; }), refs = pics.filter(function (p) { return !!p.ref; });
     if (up.length) body.images = up.map(function (p) { return { name: p.name, data: p.data, n: p.n }; });
     if (refs.length) {
@@ -2064,6 +2285,8 @@
       sent.forEach(function (c) { setItem(c.id, null); });
       // A mention added during the send stays for the next one.
       bmentions = bmentions.filter(function (m) { return said.indexOf(m) < 0; });
+      wpicks = wpicks.filter(function (p) { return wp.indexOf(p) < 0; });
+      wconsoles = wconsoles.filter(function (c) { return wc.indexOf(c) < 0; });
       // A topic note edited during the send stays for the next one.
       notes.forEach(function (n) {
         if (n.el.value !== n.value) return;
@@ -2099,7 +2322,7 @@
   }
   // restoreHeld puts held messages a cancel or an interrupt took back into
   // the composer, oldest first, ahead of the draft: their texts joined as
-  // paragraphs, their answer chips, their mentions, their topic notes back
+  // paragraphs, their answer chips, their mentions and web picks, their topic notes back
   // on the board's topics (restoreTopics), and their images as chips that
   // reference the written files, with their markers in the returned text
   // and notes. Each message's numbers move above the highest the draft and
@@ -2170,6 +2393,11 @@
     var held = [];
     list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
     bmentions = held.concat(bmentions);
+    // So do their picked elements and console blocks.
+    var hp = [], hc = [];
+    list.forEach(function (res) { hp = hp.concat(validPicks(res.picks)); hc = hc.concat(validConsoles(res.consoles)); });
+    wpicks = hp.concat(wpicks);
+    wconsoles = hc.concat(wconsoles);
     renderChips();
     if (cmd) {
       if (ctext.value.trim()) setCommand(cmd.name, cmd.args || "");
@@ -2419,6 +2647,10 @@
     if (u) { clearTopicNote(u.getAttribute("data-untchip")); renderChips(); return; }
     u = t.closest("[data-unmchip]");
     if (u) { bmentions.splice(+u.getAttribute("data-unmchip"), 1); renderChips(); return; }
+    u = t.closest("[data-unwpick]");
+    if (u) { wpicks.splice(+u.getAttribute("data-unwpick"), 1); renderChips(); return; }
+    u = t.closest("[data-unwcon]");
+    if (u) { wconsoles.splice(+u.getAttribute("data-unwcon"), 1); renderChips(); return; }
     if (t.closest("[data-wbmention]")) { addMention(); return; }
     u = t.closest("[data-tchip]");
     if (u) { focusTopicNote(u.getAttribute("data-tchip")); return; }
@@ -2646,6 +2878,19 @@
     return !!window.WsPreview && !!cardBoard && root.hasAttribute("data-sysopen") && a.getAttribute("data-wl") === "file" &&
       !a.getAttribute("data-rel") && !!abs && window.WsPreview.takes(abs);
   }
+  // webLink reports a link a plain click opens in a web card (webcard.js,
+  // only on a data-sysopen page): an http(s) link to a localhost page
+  // other than this daemon's own port. webFile reports an HTML file under
+  // the session root, which the link menu offers to open in a web card.
+  function webLink(a) {
+    return !!window.WsWeb && !!cardBoard && root.hasAttribute("data-sysopen") && a.getAttribute("data-wl") === "url" &&
+      !!a.getAttribute("href") && window.WsWeb.localLink(a.href);
+  }
+  function webFile(a) {
+    var rel = a.getAttribute("data-rel");
+    return !!window.WsWeb && !!cardBoard && root.hasAttribute("data-sysopen") && a.getAttribute("data-wl") === "file" &&
+      !a.hasAttribute("data-out") && !!rel && /\.html?$/i.test(rel);
+  }
   // openOutsideTab opens an outside HTML file as a page in a tab of its own.
   // The tab opens blank inside the click, since the URL comes from a POST
   // (the outside-link route mints its capability) and a tab opened after
@@ -2670,11 +2915,13 @@
     var rel = a.getAttribute("data-rel"), abs = a.getAttribute("data-abs"), url = a.href;
     var sys = root.hasAttribute("data-sysopen"), out = a.hasAttribute("data-out");
     var items = [];
+    if (webLink(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ url: url }); }]);
     if (previews(a)) items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(rel); }]);
     else if (outsideOpens(a)) {
       items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(abs, { out: true }); }]);
       if (/\.html?$/i.test(abs)) items.push([wsT("js.menu.newtab"), function () { openOutsideTab(abs); }]);
     }
+    if (webFile(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ path: rel }); }]);
     if (linkOpens(a)) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
     if (href && sys && !out) {
       items.push([wsT("js.menu.sysopen"), function () {
@@ -2729,15 +2976,17 @@
     if (linkOpens(a) && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
     e.preventDefault();
     // A pointer click on a link the preview can show opens the preview
-    // slot; its menu is on the right click and on the keyboard activation
-    // (a click event with no detail).
+    // slot, and one on a localhost page a web card; their menu is on the
+    // right click and on the keyboard activation (a click event with no
+    // detail).
+    if (e.detail !== 0 && webLink(a)) { window.WsWeb.open({ url: a.href }); return; }
     if (e.detail !== 0 && previews(a)) { window.WsPreview.open(a.getAttribute("data-rel")); return; }
     if (e.detail !== 0 && outsideOpens(a)) { window.WsPreview.open(a.getAttribute("data-abs"), { out: true }); return; }
     linkAt(a, e);
   }, true);
   doc.addEventListener("contextmenu", function (e) {
     var a = e.target && e.target.closest && e.target.closest("a[data-wl]");
-    if (!a || !(previews(a) || outsideOpens(a))) return;
+    if (!a || !(previews(a) || outsideOpens(a) || webLink(a))) return;
     e.preventDefault();
     openLinkMenu(a, e.clientX, e.clientY);
   });
@@ -3285,7 +3534,9 @@
     if (!target) target = $(id);
     if (!target || target.id !== id || !inBoard(target)) return;
     for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
-    target.scrollIntoView({ block: "start" });
+    // History targets were revealed and anchored by the shared loader.
+    // scrollIntoView would also scroll the overflow:hidden clip itself.
+    if (!target.closest(".wb-history")) target.scrollIntoView({ block: "start" });
     return target;
   }
   function captureBoardHistory() {
@@ -3376,8 +3627,16 @@
       // shown it is asked for its height again.
       if (f.wbNext) { postTheme(f); return; }
       if (h >= 0 && h < 100000) {
-        var from = f.getBoundingClientRect().height, to = Math.ceil(h);
+        var from = f.getBoundingClientRect().height, to = Math.ceil(h), b = region("board");
+        // A frame a board swap brought (wbKeep) reports its height late,
+        // after the swap's keep session may have ended: its first change
+        // keeps the board in place as the swap did. A session still running
+        // keeps the anchor the swap picked (the topmost entry in view may be
+        // one the swap moved).
+        var kept = f.wbKeep && Math.abs(to - from) >= 1 && b && b.contains(f) ? boardKept() || boardKeep(b) : null;
+        if (kept) f.wbKeep = false;
         f.style.height = to + "px";
+        if (kept) kept.h.apply();
         // The first height a frame of a moving board swap reports eases
         // from the height the frame stood at (board motion, slideBoard).
         if (f.wbGrow) {
@@ -3393,6 +3652,13 @@
     } else if (m.wbDoc === "link") {
       var a = frameLink(m);
       if (!a) return;
+      // A body frame reports a plain click and a keyboard activation alike:
+      // a localhost page opens its web card on either, but only while the
+      // user is acting (a click in a frame activates this page too), so a
+      // body's script cannot open one by posting alone; otherwise its menu
+      // offers the card.
+      var act = navigator.userActivation;
+      if (webLink(a) && act && act.isActive) { window.WsWeb.open({ url: a.href }); return; }
       var r = f.getBoundingClientRect();
       openLinkMenu(a, r.left + num(m.x), r.top + num(m.y));
     } else if (m.wbDoc === "img") {
@@ -4480,10 +4746,12 @@
   // tkFetch calls a tracker route, a POST when body is given; done(status,
   // answer) gets the HTTP status (0: the daemon was not reached) and the
   // parsed JSON answer ({} when there is none).
-  function tkFetch(path, body, done, keepalive) {
+  // signal, when given, aborts the request (done then gets status 0).
+  function tkFetch(path, body, done, keepalive, signal) {
     var o = { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store" };
     if (body !== undefined) { o.headers = { "Content-Type": "application/json" }; o.body = JSON.stringify(body); }
     if (keepalive) o.keepalive = true;
+    if (signal) o.signal = signal;
     fetch(path, o).then(function (r) {
       return r.text().then(function (s) {
         var v = null;
@@ -4655,11 +4923,13 @@
     },
     // The Items search box: the daemon parses the query by the tracker's search grammar
     // (tracker_routes.go: the search route); a malformed query answers 400 with its message.
-    search: function (id, q, done) {
-      tkFetch(tkUrl(id, "search?q=" + encodeURIComponent(q)), undefined, function (status, v) {
-        if (status === 200 && Array.isArray(v.ids)) done({ ok: true, ids: v.ids });
-        else done({ ok: false, error: tkErrText(status, v) });
-      });
+    // The search palette asks for excerpts (o.excerpts) and aborts through o.signal.
+    search: function (id, q, done, o) {
+      o = o || {};
+      tkFetch(tkUrl(id, "search?q=" + encodeURIComponent(q) + (o.excerpts ? "&excerpts=1" : "")), undefined, function (status, v) {
+        if (status === 200 && Array.isArray(v.ids)) done({ ok: true, ids: v.ids, hits: Array.isArray(v.hits) ? v.hits : [] });
+        else done({ ok: false, error: tkErrText(status, v), status: status });
+      }, false, o.signal);
     },
     // The store's wiki branches (tracker_routes.go: the wiki routes). A save that
     // cannot merge answers 409 with both texts, passed on as res.conflict.
@@ -4731,7 +5001,7 @@
     // show-more path so older hits are searchable and already mounted to jump to.
     if (update) paletteClosed(update);
     var rows = [];
-    q("#rail .rs[data-rid]").forEach(function (el) {
+    q("#rail .rs[data-rid]", framed ? shParentDoc() : doc).forEach(function (el) {
       var label = el.querySelector(".rid"), link = el.querySelector("a.rl");
       if (label && link) rows.push({ group: 0, kind: "session", title: label.textContent.trim(), href: link.getAttribute("href") });
     });
@@ -4739,12 +5009,14 @@
       var name = topic.getAttribute("data-topic"), label = paletteText(topic.querySelector(".tname")) || name;
       var time = topic.querySelector(".tbar time"), at = time ? Number(time.getAttribute("data-at")) || Date.parse(time.getAttribute("datetime")) || 0 : 0;
       rows.push({ group: 1, kind: "board-topic", topic: name, title: label, at: at });
-      var body = topic.querySelector(".doc-body"), frame = body && body.querySelector("iframe.doc-frame"), text;
+      // A board frame is an iframe or, before it mounts, an inert div.doc-frame placeholder.
+      var body = topic.querySelector(".doc-body"), frame = body && body.querySelector(".doc-frame"), text;
       if (frame) {
         // srcdoc is available even for an opaque-origin sandbox. A template
         // parses it inertly: never execute a body's scripts or fetch its images.
         var parsed = doc.createElement("template");
-        parsed.innerHTML = frame.getAttribute("srcdoc") || "";
+        // An unmounted frame holds its document in data-srcdoc until it mounts.
+        parsed.innerHTML = frame.getAttribute("data-srcdoc") || frame.getAttribute("srcdoc") || "";
         text = paletteText(parsed.content.querySelector(".doc-body"));
       } else text = paletteText(body);
       var recap = paletteText(topic.querySelector(".rtext"));
@@ -4774,8 +5046,10 @@
       paletteClosed(update);
     });
   }
-  function palettePick(row) {
-    if (row.kind === "session") { location.href = row.href; return; }
+  // o.keep (the palette's Ctrl+Enter) scrolls and flashes the target behind
+  // the open palette, which keeps the focus.
+  function palettePick(row, o) {
+    if (row.kind === "session") { go(row.href); return; }
     // Look the target up again: an SSE board swap may have replaced its node
     // while the palette was open. Open every enclosing fold before scrolling.
     var topic = boardQ("section.topic[data-topic]").filter(function (n) { return n.getAttribute("data-topic") === row.topic; })[0];
@@ -4792,13 +5066,39 @@
       var toggle = topic.querySelector("button.ckhide[aria-pressed=true]");
       if (toggle) toggle.click();
     }
-    target.setAttribute("tabindex", "-1");
-    target.focus({ preventScroll: true });
+    if (!(o && o.keep)) {
+      target.setAttribute("tabindex", "-1");
+      target.focus({ preventScroll: true });
+    }
     target.scrollIntoView({ block: "center" });
     target.classList.remove("palette-flash");
     void target.offsetWidth;
     target.classList.add("palette-flash");
     setTimeout(function () { target.classList.remove("palette-flash"); }, 1600);
+  }
+  // The palette's file hooks (tracker.js keeps no page knowledge): the
+  // session's file routes (fs_search.go, fs_routes.go), the preview card
+  // (preview.js), and fs/act's open. A page without a session has none.
+  function paletteFs(route, params, signal) {
+    var qs = Object.keys(params).map(function (k) { return k + "=" + encodeURIComponent(params[k]); }).join("&");
+    return fetch("/s/" + rid + "/fs/" + route + "?" + qs, { credentials: "same-origin", cache: "no-store", signal: signal }).then(function (r) {
+      if (r.ok) return r.json();
+      return r.text().then(function (t) { throw { status: r.status, text: (t || "").trim() }; });
+    });
+  }
+  function paletteFiles(o) {
+    if (!rid || !window.fetch) return o;
+    o.fileLocal = function () { return root.hasAttribute("data-sysopen"); };
+    o.fileScope = function () { var h = region("head"), m = h && h.querySelector(".meta"); return m ? m.textContent.trim() : ""; };
+    o.fileFind = function (q, signal) { return paletteFs("find", { q: q }, signal); };
+    o.fileSearch = function (q, signal) { return paletteFs("search", { q: q }, signal); };
+    // the directory is the browsing root itself; dir equal to an absolute root is refused
+    o.fileList = function (dir, signal) { return paletteFs("list", { root: dir }, signal); };
+    o.filePreview = function (path, opt) { if (window.WsPreview) window.WsPreview.open(path, opt); };
+    o.fileOpen = function (name, dir) {
+      post("fs/act", { path: name, action: "open", root: dir }, function (ok, v) { toast(ok ? wsT("js.toast.openednative") : wsT("js.toast.openfail", v)); });
+    };
+    return o;
   }
 
   function tkMount() {
@@ -4806,8 +5106,8 @@
     if (!header || !slot || !wrap) return;
     header.classList.add("tk-room");
     if (tkSupport) tkAdapter.ext = supExt();
-    tkApi = window.WsTracker.mount(tkAdapter, { header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
-      drawerHeight: { get: function () { return drH; }, set: drSetH }, searchRows: paletteRows, searchPick: palettePick });
+    tkApi = window.WsTracker.mount(tkAdapter, paletteFiles({ header: header, qsSlot: slot, pageParent: wrap.querySelector(":scope > .dbody") || wrap, storagePrefix: "ws.tracker.", onRender: tlTracker,
+      drawerHeight: { get: function () { return drH; }, set: drSetH }, searchRows: paletteRows, searchPick: palettePick }));
   }
   function trackerStart() {
     if (window.WsTracker && window.fetch) tkReload();
@@ -5369,6 +5669,8 @@
   var TL_ASK = '.card.policy[id^="item-"], .arow[id^="item-"], .ckrow[data-id]:not([data-assumed])';
   var tlHeld = {}, tlPill = 0, tlTk = 0, tlAsks = -1, tlPerm = 0, tlN = -1, tlBase = null;
   function tlRetitle() {
+    // The shell's title is its shown frame's (the title message).
+    if (shell) return;
     var n = tlTk + tlPerm + (tlAsks >= 0 ? tlAsks : tlPill);
     if (n === tlN) return;
     tlN = n;
@@ -5377,12 +5679,13 @@
       if (tlBase === null) { tlBase = doc.title.replace(/^\(\d+\) /, ""); root.setAttribute("data-wb-title", tlBase); }
     }
     doc.title = (n ? "(" + n + ") " : "") + tlBase;
+    shPost("title", { title: doc.title });
   }
   window.wbTitleCount = function (n) { tlPill = n; tlRetitle(); };
   // tlRebase replaces the label's base (a rename's new tab title, which a
   // head swap brings).
   function tlRebase(base) {
-    if (!base || base === tlBase) return;
+    if (shell || !base || base === tlBase) return;
     tlBase = base;
     root.setAttribute("data-wb-title", base);
     tlN = -1;
@@ -5454,7 +5757,7 @@
           if (base[x.key]) return;
           base[x.key] = 1;
           if (doc.hidden) tlHidden.push(x);
-          else tlNotice(x);
+          else if (!shHidden) tlNotice(x);
         });
       }
     }
@@ -5518,8 +5821,10 @@
   var ASSETS_TRIED = "ws.dashboard.assetsreload";
   function connect() {
     if (!window.WebSocket) return;
-    var path = mode === "index" ? "/events" : "/s/" + rid + "/events";
-    var st = openStream(path + "?h=" + encodeURIComponent(held()), {
+    // The shell streams the rail alone; a framed session page streams its
+    // session without the rail.
+    var path = shell ? "/rail/events" : mode === "index" ? "/events" : "/s/" + rid + "/events";
+    var st = openStream(path + "?h=" + encodeURIComponent(held()) + (framed && mode !== "index" ? "&frame=1" : ""), {
       open: function () { connected(true); },
       // Reopen with the hashes held now, so a reconnect sends only what
       // changed since.
@@ -5542,7 +5847,7 @@
       // A hidden tab keeps only each region's newest update and applies none;
       // showing the tab applies them (showRegions). The stream stays open, so
       // the light events (tracker) still arrive and act.
-      if (doc.hidden) {
+      if (pageHidden()) {
         delete hiddenRegions[ev.name];
         hiddenRegions[ev.name] = { hash: ev.hash, html: ev.html };
         tlHold(ev.name, ev.hash, ev.html);
@@ -5551,8 +5856,11 @@
       }
       swap(ev.name, ev.hash, ev.html);
     }
+    // A frame the shell hides reads the tracker once it shows (shShown).
     function onTracker(ev) {
-      if (ev && typeof ev.rev === "number") trackerNudge(ev.rev);
+      if (!ev || typeof ev.rev !== "number") return;
+      if (shHidden) shTrackerRev = ev.rev;
+      else trackerNudge(ev.rev);
     }
     // Every (re)connect first names the page assets the daemon serves now:
     // other ones than this page runs (a replaced daemon) reload it, as
@@ -5564,7 +5872,7 @@
       var mine = root.getAttribute("data-assets"), tried = null;
       if (!ev || !ev.id || !mine || ev.id === mine) return;
       try { tried = window.sessionStorage.getItem(ASSETS_TRIED); } catch (x) {}
-      if (holdsDraft() || tried === ev.id) { banner(wsT("js.banner.updated")); return; }
+      if (holdsDraft() || shDrafts() || tried === ev.id) { banner(wsT("js.banner.updated")); return; }
       try { window.sessionStorage.setItem(ASSETS_TRIED, ev.id); } catch (x) {}
       location.reload();
     }
@@ -5578,7 +5886,7 @@
   // showRegions applies, once each and in arrival order, the region updates
   // a hidden tab held back.
   function showRegions() {
-    if (doc.hidden) return;
+    if (pageHidden()) return;
     var p = hiddenRegions;
     hiddenRegions = {};
     Object.keys(p).forEach(function (name) { swap(name, p[name].hash, p[name].html); });
@@ -5596,6 +5904,9 @@
   // holdsDraft reports unsent work a reload would drop: composer text,
   // answers picked on the board, or an attached image.
   function holdsDraft() { return !!((ctext && ctext.value) || cmdSel || boardAnswers() || imgs.length || topicNotes().length); }
+  // The shell asks its frames before an assets reload, which reloads them
+  // too (shDrafts).
+  if (framed) window.wsHoldsDraft = holdsDraft;
   function modeChanged(next) {
     // The other mode has other regions, and a reload renders them; text typed
     // in the composer or answers picked on the board are never dropped for it.
@@ -5620,8 +5931,8 @@
   // The arrow stays a link to the sessions index for a modified click.
   var railEl = $("rail"), railBtn = $("railbtn"), rscrim = $("rscrim"), WsRail = window.WsRail;
   var memoPad = railEl && $("memo-pad") && window.WsMemo ? window.WsMemo.mount(doc, railEl, $("memo-pad"), function (open) { railOpen(open === true); }) : null;
-  var railStore = { load: load, save: save };
-  var colSet = WsRail ? WsRail.collapsed(railStore) : null, kidSet = WsRail ? WsRail.kidsCollapsed(railStore) : null;
+  var railStore = { load: load, save: save }, railSets = WsRail ? WsRail.state(railStore) : null;
+  var colSet = railSets && railSets.collapsed, kidSet = railSets && railSets.kids;
   // rdrag is the press or drag in the rail (the drag block below);
   // railSaving counts the layout ops in flight, and railMinGen is the
   // layout generation the last one applied answered (a rail render below
@@ -5636,11 +5947,14 @@
   // what it concerns (ws: a workspace, the folder a new session starts in,
   // the viewed session, or a row menu's session), and the button it hangs
   // from (a row menu's: the row's link; at, where in the row it opened).
-  var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpRow = null, rpIds = 0;
+  var rp = { P: null, kind: "", ws: "", btn: null }, rpWs = null, rpWt = null, rpLead = null, rpSess = null, rpRow = null, rpUsage = null, rpIds = 0;
+  var usageGutter = railEl && window.WsUsage ? window.WsUsage.mount(doc, railEl) : null;
   function railWide() { return !!(RAIL_WIDE && RAIL_WIDE.matches) && (!root.hasAttribute("data-pincol") || !!(RAIL_XWIDE && RAIL_XWIDE.matches)); }
   function railShown() { return root.classList.contains("rail-open"); }
-  // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column.
+  // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column;
+  // a framed page hands it to the shell, which holds the rail.
   function railKey() {
+    if (framed) { shPost("key", { key: "rail" }); return; }
     if (!railEl || !WsRail) return;
     railOpen(!railShown());
   }
@@ -5657,19 +5971,10 @@
   function railMarks() {
     var r = region("rail");
     if (!r || !WsRail) return;
-    WsRail.markCurrent(q(".rs", r), rid);
+    WsRail.marks(r, railSets, rid);
     if (memoPad) memoPad.sync(rid);
     WsRail.markRevive(q(".rs", r), revBusy);
-    q(".rws", r).forEach(function (ws) {
-      var col = colSet.has(ws.getAttribute("data-ws") || ""), tog = ws.querySelector(".wstog");
-      ws.classList.toggle("col", col);
-      if (tog) tog.setAttribute("aria-expanded", String(!col));
-    });
-    q(".kidtog", r).forEach(function (tog) {
-      var row = tog.closest(".rs"), col = !!row && kidSet.has(row.getAttribute("data-rid") || "");
-      if (row) row.classList.toggle("kcol", col);
-      tog.setAttribute("aria-expanded", String(!col));
-    });
+    if (usageGutter) usageGutter.sync();
     railPopSync();
   }
   // railFocus is what holds the focus in the rail before a swap replaces
@@ -5870,6 +6175,8 @@
         if (kr) kidFold(kr, !kr.classList.contains("kcol"));
         return;
       }
+      var usage = t.closest && t.closest(".usage-toggle");
+      if (usage && usageGutter) { e.preventDefault(); railPopOpen("usage", usage); return; }
       var add = t.closest && t.closest(".radd");
       if (add) {
         e.preventDefault();
@@ -5929,8 +6236,13 @@
         return;
       }
       // Picking a session navigates; the draft is saved first and the
-      // overlay closes, so a back navigation finds the page as it was.
-      if (t.closest && t.closest("a[href]")) { saveDraft(); if (memoPad) memoPad.remember(); railOpen(false); }
+      // overlay closes, so a back navigation finds the page as it was. The
+      // shell keeps its page (and the memo pad's state) and shows the
+      // session's frame (the shell's link clicks, below).
+      if (t.closest && t.closest("a[href]")) {
+        if (!shell) { saveDraft(); if (memoPad) memoPad.remember(); }
+        railOpen(false);
+      }
     });
     // Left and Right on a focused parent row collapse and expand it (with
     // Alt they are the keyboard path's, not this).
@@ -6595,7 +6907,8 @@
     if (!rp.P) return null;
     if (rp.btn && rp.btn.isConnected) return rp.btn;
     var r = region("rail"), h = region("head"), found = null;
-    if (rp.kind === "sess") found = h && h.querySelector(".host.hbtn");
+    if (rp.kind === "usage") found = r && r.querySelector(".usage-toggle");
+    else if (rp.kind === "sess") found = h && h.querySelector(".host.hbtn");
     else if (rp.kind === "row") {
       var row = r && WsRail.refind(r, { cls: "rs", attr: "data-rid", val: rp.ws });
       found = row && row.querySelector(".rl");
@@ -6647,7 +6960,7 @@
     var bar = btn.closest(".rws"), ws = rpKey(kind, btn);
     if (rp.P && rp.kind === kind && rp.ws === ws) { railPopClose(true); return; }
     railPopClose(false);
-    var P = kind === "wt" ? rpWt || (rpWt = rpWtMake()) : kind === "lead" ? rpLead || (rpLead = rpLeadMake()) : kind === "sess" ? rpSess || (rpSess = rpSessMake()) : rpWs || (rpWs = rpWsMake());
+    var P = kind === "usage" ? rpUsage || (rpUsage = usageGutter.makePopover(railPopPlace, function () { railPopClose(true); })) : kind === "wt" ? rpWt || (rpWt = rpWtMake()) : kind === "lead" ? rpLead || (rpLead = rpLeadMake()) : kind === "sess" ? rpSess || (rpSess = rpSessMake()) : rpWs || (rpWs = rpWsMake());
     if (!P.el.parentNode) doc.body.appendChild(P.el);
     rp = { P: P, kind: kind, ws: ws, btn: btn };
     btn.setAttribute("aria-expanded", "true");
@@ -6673,8 +6986,8 @@
     railPost(route, {}, function (status, v, s) {
       if (status === 200) {
         saveDraft();
-        if (id === rid) window.location.reload();
-        else window.location.href = "/s/" + encodeURIComponent(id);
+        if (id === rid) { if (shell) shReload(); else window.location.reload(); }
+        else go("/s/" + encodeURIComponent(id));
         return;
       }
       revBusy = "";
@@ -6999,7 +7312,7 @@
         if (dirty > 0) {
           fact("pencil", wsTn("js.rail.wt.del.dirty", dirty), "warn");
           var ul = facts.appendChild(mk("ul", "rdpaths"));
-          paths.forEach(function (p) { ul.appendChild(mk("li", null, String(p))); });
+          paths.forEach(function (p) { var li = ul.appendChild(mk("li", null, String(p))); li.title = li.textContent; });
           if (dirty > paths.length) ul.appendChild(mk("li", "more", wsT("js.rail.wt.del.more", dirty - paths.length)));
         } else fact("check", wsT("js.rail.wt.del.clean"));
         if (c.detached && +c.unreached > 0) fact("branch", wsTn("js.rail.wt.del.unreached", +c.unreached), "warn");
@@ -7014,7 +7327,8 @@
             var name = String(h.label || h.id || "");
             if (h.kind === "terminal") name = h.label ? wsT("js.rail.wt.del.terminalfrom", String(h.id || ""), String(h.label)) : wsT("js.rail.wt.del.terminal", String(h.id || ""));
             else if (h.harness) name += " (" + h.harness + ")";
-            li.appendChild(mk("span", "nm", name));
+            var nm = li.appendChild(mk("span", "nm", name));
+            nm.title = nm.textContent;
             var state = h.live ? "js.rail.wt.del.live" : h.kind === "terminal" ? "js.rail.wt.del.exited" : "js.rail.wt.del.ended";
             li.appendChild(mk("span", "rdst", wsT(state)));
           });
@@ -7137,7 +7451,9 @@
       if (e.key === "Escape" && rdel && rdel.el.open) { e.preventDefault(); e.stopPropagation(); rdel.close(); }
     }, true);
   }
-  if (railEl && WsRail) {
+  // A framed page opens the session menu (the shell's menu message) against
+  // its own head's chip, which stands where the shell shows its copy.
+  if ((railEl || framed) && WsRail) {
     // Escape closes the popover before anything else hears it (the rail
     // overlay and the drawer would close on it too); in a row menu it first
     // closes the open "move under" list.
@@ -7152,7 +7468,7 @@
     doc.addEventListener("click", function (e) {
       var t = e.target;
       if (!rp.P || !t || !t.closest) return;
-      if (rp.P.el.contains(t) || t.closest(".radd, .rnew, .hbtn")) return;
+      if (rp.P.el.contains(t) || t.closest(".radd, .rnew, .hbtn, .usage-toggle")) return;
       railPopClose(false);
     }, true);
     window.addEventListener("resize", railPopPlace);
@@ -7345,7 +7661,7 @@
       railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value, isolation: P.iso }), function (st, v, s) {
         if (st === 201 && v.id) {
           saveDraft();
-          location.href = "/s/" + encodeURIComponent(String(v.id));
+          go("/s/" + encodeURIComponent(String(v.id)));
           return;
         }
         P.busy = false;
@@ -7803,7 +8119,8 @@
     });
   }
   function apScan(el) {
-    if (!el) return;
+    // A framed page's shell notifies, from its rail.
+    if (!el || framed) return;
     var now = {}, fresh = [];
     apRows(el).forEach(function (r) {
       var k = apKey(r);
@@ -7825,7 +8142,7 @@
   function apGo(r) {
     if (r.rid === rid) return;
     saveDraft();
-    location.href = "/s/" + encodeURIComponent(r.rid);
+    go("/s/" + encodeURIComponent(r.rid));
   }
   function apNotify(r) {
     // the viewed session's own wait, in a tab the user is looking at, is
@@ -7856,12 +8173,12 @@
   if (hostedPage) {
     doc.addEventListener("click", function (e) {
       var t = e.target, chip = t && t.closest && t.closest(".host.hbtn");
-      if (chip && railEl && WsRail) { e.preventDefault(); railPopOpen("sess", chip); }
+      if (chip && (railEl || framed) && WsRail) { e.preventDefault(); railPopOpen("sess", chip); }
       else if (t && t.closest && t.closest("#csend")) notifAsk();
     });
     doc.addEventListener("keydown", function (e) {
       var t = e.target;
-      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !t.classList.contains("hbtn") || !railEl || !WsRail) return;
+      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !t.classList.contains("hbtn") || !(railEl || framed) || !WsRail) return;
       e.preventDefault();
       railPopOpen("sess", t);
     });
@@ -7872,12 +8189,13 @@
   // and the page's view state around it, is kept per session in storage
   // (rail.js drafts), so switching sessions in the rail and coming back
   // finds it: the composer's text, mentions, and selection, its slash
-  // command selection, the board answers and topic notes, the answer chips, the images that reference
+  // command selection, the board answers and topic notes, the answer chips, the web picks, the images that reference
   // written attachments, the open details, and the tab. Pasted images are
   // not kept: their markers leave the composer text and the notes, a
   // restored draft says so, and while the page holds one, leaving it asks
   // first (the browser's leave-page confirmation).
-  var draftStore = WsRail && rid ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
+  // The shell holds no draft: its frames keep their own.
+  var draftStore = WsRail && rid && !shell ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
@@ -7888,6 +8206,8 @@
       answers: b ? boardRead(readAnswers) : {},
       chips: chipList(),
       bmentions: bmentions.slice(),
+      wpicks: wpicks.slice(),
+      wconsoles: wconsoles.slice(),
       refs: imgs.filter(function (p) { return !!p.ref; }).map(function (p) { return { ref: p.ref, name: p.name, n: p.n }; }),
       lost: imgs.filter(function (p) { return !p.ref; }).map(function (p) { return p.n; }),
       open: open,
@@ -7927,7 +8247,10 @@
       });
       if (Array.isArray(d.chips)) d.chips.forEach(function (c) { if (c && c.note) { c.note = unlost(c.note); named += "\n" + c.note; } });
       if (d.open && typeof d.open === "object") {
-        Object.keys(d.open).forEach(function (k) { if (!Object.prototype.hasOwnProperty.call(openState, k)) openState[k] = true; });
+        Object.keys(d.open).forEach(function (k) {
+          // A panel folded by hand outranks a draft saved while it was open.
+          if (!Object.prototype.hasOwnProperty.call(openState, k) && !(k.indexOf("k:entry:") === 0 && shutHas(rid + "/" + k.slice(2)))) openState[k] = true;
+        });
         restoreOpen(doc);
       }
       var b = region("board");
@@ -7941,6 +8264,11 @@
       }
       if (cchips && !bmentions.length && validMentions(d.bmentions).length) {
         bmentions = validMentions(d.bmentions);
+        renderChips();
+      }
+      if (cchips && !wpicks.length && !wconsoles.length && (validPicks(d.wpicks).length || validConsoles(d.wconsoles).length)) {
+        wpicks = validPicks(d.wpicks);
+        wconsoles = validConsoles(d.wconsoles);
         renderChips();
       }
       if (ccmd && !cmdSel && d.cmd && typeof d.cmd.name === "string" && d.cmd.name) setCommand(d.cmd.name, d.cmd.args);
@@ -7976,6 +8304,362 @@
     window.addEventListener("beforeunload", WsRail.leaveGuard(function () { return imgs.some(function (p) { return !p.ref; }); }));
   }
 
+  // --- iframe shell -------------------------------------------------------------
+  // The shell page (shell) shows one frame at a time (.on) and keeps the
+  // WsShell.LIMIT most recently opened; a page not yet loaded loads in a
+  // hidden frame while the shown one stays, and shows once loaded. The
+  // address bar names the shown page (pushState; popstate shows the page it
+  // goes back to). The shell's header mirrors the shown frame's (the head
+  // message): its head region, its search button, and the header's padding
+  // and height, so both headers lay out alike and the frame's own items
+  // stay invisible under the shell's. The rail marks the session a page
+  // opens on at once (shRid). A page the shell frames (framed) hands its
+  // header, title, layout, scroll, and the shell's hotkeys to the shell,
+  // and every link it would load as a page to the shell (go); shell.js
+  // lists the messages.
+  var shFrames = [], shOn = null, shWant = null, shOrder = [], shHeadHtml = null, shSeq = 0, shTrackerRev = null;
+  var shTop = doc.querySelector(".dwrap > .top"), shBody = doc.querySelector(".dwrap > .dbody");
+  // shPost sends a framed page's message of kind to its shell.
+  function shPost(kind, m) {
+    if (!framed) return;
+    m = m || {};
+    m.wsShell = kind;
+    try { window.parent.postMessage(m, location.origin); } catch (x) { /* the shell left */ }
+  }
+  function shParentDoc() { try { return window.parent.document; } catch (x) { return doc; } }
+  // go shows the page href names: a framed page asks its shell, the shell
+  // shows it in a frame, and any other page, or a page the shell does not
+  // frame, loads at the top level.
+  function go(href) {
+    var u = new URL(href, location.href);
+    if (shell) { shOpen(u.href, true); return; }
+    if (framed) {
+      if (window.WsShell.framed(u, location.origin)) shPost("nav", { href: u.href });
+      else window.top.location.href = u.href;
+      return;
+    }
+    location.href = u.href;
+  }
+  // A plain click on a link the page would load goes through go, but a
+  // link to the page's own document (a hash route) and one that opens
+  // elsewhere (a target, a download, a modified click).
+  if (shell || framed) window.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target && e.target.closest && e.target.closest("a[href]");
+    if (!a || (a.target && a.target !== "_self" && a.target !== "_top") || a.hasAttribute("download")) return;
+    var u;
+    try { u = new URL(a.href, location.href); } catch (x) { return; }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return;
+    if (u.origin === location.origin && u.pathname === location.pathname && u.search === location.search && u.hash) return;
+    if (shell && !window.WsShell.framed(u, location.origin)) return;
+    e.preventDefault();
+    go(u.href);
+  });
+
+  // shHolds reports a frame holding unsent work; shDrafts any frame, which
+  // an assets reload of the shell would drop.
+  function shHolds(x) {
+    try { return !!(x.el.contentWindow.wsHoldsDraft && x.el.contentWindow.wsHoldsDraft()); } catch (e) { return false; }
+  }
+  function shDrafts() { return shFrames.some(shHolds); }
+  function shSend(ent, kind, m) {
+    m = m || {};
+    m.wsShell = kind;
+    try { ent.el.contentWindow.postMessage(m, location.origin); } catch (x) { /* unloading */ }
+  }
+  function shFind(path) { return shFrames.filter(function (x) { return x.f.path === path; })[0] || null; }
+  function shEnt(win) { return shFrames.filter(function (x) { return x.el.contentWindow === win; })[0] || null; }
+  // Each load (a first one, a reload) tells the frame whether it shows: a
+  // page loads believing it shows, and a hidden frame's reload, or a frame
+  // superseded before it ever showed, must hold its updates.
+  function shAdd(el, f) {
+    var ent = { el: el, f: f, head: null, title: "", pincol: false, dim: 0, y: 0, loaded: false };
+    el.addEventListener("load", function () {
+      ent.loaded = true;
+      if (shWant === ent) shShow(ent);
+      else shSend(ent, "shown", { shown: ent === shOn });
+    });
+    shFrames.push(ent);
+    return ent;
+  }
+  // shOpen shows the page href names (a page the shell frames; any other
+  // loads at the top level); push adds a history entry for it.
+  function shOpen(href, push) {
+    var u = new URL(href, location.href), f = window.WsShell.framed(u, location.origin);
+    if (!f) { location.href = u.href; return; }
+    if (push && location.pathname + location.hash !== f.path + f.hash) history.pushState(null, "", f.path + f.hash);
+    var ent = shFind(f.path);
+    if (!ent) {
+      var el = doc.createElement("iframe");
+      el.className = "sframe";
+      el.title = doc.title;
+      ent = shAdd(el, f);
+      el.src = window.WsShell.src(f);
+      $("frames").appendChild(el);
+    } else if (f.hash !== ent.f.hash) {
+      try { ent.el.contentWindow.location.hash = f.hash; } catch (x) { /* unloading */ }
+    }
+    ent.f = f;
+    // The page opened is the most recent, the one shown until it loads the
+    // next: pages opened and left before they ever showed go first. A frame
+    // holding unsent work stays loaded past the limit (removing it would
+    // drop its pasted images unasked) and is dropped once it holds none.
+    var a = shOn ? window.WsShell.touch(shOrder, shOn.f.path) : { order: shOrder, evict: [] }, t = window.WsShell.touch(a.order, f.path);
+    shOrder = t.order;
+    a.evict.concat(t.evict).forEach(function (p) {
+      var x = shFind(p);
+      if (!x) return;
+      if (x === shOn || shHolds(x)) { shOrder.push(p); return; }
+      shFrames.splice(shFrames.indexOf(x), 1);
+      x.el.remove();
+    });
+    shRid(f.rid);
+    if (ent === shOn) { shWant = null; return; }
+    shWant = ent;
+    if (ent.loaded) shShow(ent);
+  }
+  // shRid marks the session the shell shows (rid, the rail's viewed row,
+  // the memo pad's workspace).
+  function shRid(id) {
+    if (id === rid) return;
+    rid = id;
+    root.setAttribute("data-rid", id);
+    railMarks();
+  }
+  function shShow(ent) {
+    shWant = null;
+    var was = shOn;
+    if (was === ent) return;
+    // A rename in progress names the session it was started for.
+    var sn = region("head") && region("head").querySelector(".sname");
+    if (sn && labelEditing()) labelEnd(sn);
+    headHeld = null;
+    shOn = ent;
+    ent.el.classList.add("on");
+    if (was) {
+      was.el.classList.remove("on");
+      shSend(was, "shown", { shown: false });
+    }
+    shSend(ent, "shown", { shown: true });
+    shRid(ent.f.rid);
+    shHead(ent);
+    shLayout(ent);
+    shScroll(ent);
+    if (ent.title) doc.title = ent.title;
+    try { ent.el.contentWindow.focus(); } catch (x) { /* unloading */ }
+  }
+  function shReload() { if (shOn) try { shOn.el.contentWindow.location.reload(); } catch (x) { /* unloading */ } }
+  // shHead shows the shown frame's header: its head region (none while the
+  // frame has not named one) and search button, or with the head null the
+  // frame's own header (sh-own) beside the shell's rail button.
+  function shHead(ent) {
+    var m = ent.head, html = m ? m.html : "", qs = $("qsslot");
+    shTop.classList.toggle("sh-own", html === null);
+    if (html === null) html = "";
+    if (html !== shHeadHtml) {
+      shHeadHtml = html;
+      shSeq++;
+      swap("head", "f" + shSeq, html);
+    }
+    if (qs && qs.innerHTML !== (m ? m.qs : "")) qs.innerHTML = m ? m.qs : "";
+    shTop.style.paddingRight = m ? m.pad + "px" : "";
+    shTop.style.minHeight = m ? m.top + "px" : "";
+  }
+  // shLayout takes the shown frame's pinned column (the rail overlays
+  // beside it below 2200px) and its backdrop's dim.
+  function shLayout(ent) {
+    if (ent.pincol !== root.hasAttribute("data-pincol")) {
+      if (ent.pincol) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
+      railOpen(false);
+    }
+    if (ent.dim > 0) {
+      root.style.setProperty("--fdim", String(Math.max(0, 1 - ent.dim)));
+      root.setAttribute("data-fdim", "");
+    } else root.removeAttribute("data-fdim");
+  }
+  // shScroll moves the header and the rail with a frame whose page scrolls
+  // as a whole, as its own would move: the header scrolls away, and the
+  // rail rises with it until it stands at the wrap's top padding.
+  function shScroll(ent) {
+    var y = Math.max(0, ent.y || 0);
+    shTop.style.transform = y ? "translateY(" + -y + "px)" : "";
+    if (shBody) shBody.style.marginTop = y ? -Math.min(y, shTop.offsetHeight + 10) + "px" : "";
+  }
+  function shSearch() {
+    if (!shOn) return;
+    try { shOn.el.focus(); } catch (x) { /* unloading */ }
+    shSend(shOn, "search");
+  }
+  if (shell && window.WsShell) {
+    window.addEventListener("message", function (e) {
+      if (e.origin !== location.origin) return;
+      var m = window.WsShell.message(e.data), ent = m && shEnt(e.source), on = !!ent && ent === shOn;
+      if (!ent) return;
+      switch (m.wsShell) {
+        case "head": ent.head = m; if (on) shHead(ent); break;
+        case "title": ent.title = m.title; if (on) doc.title = m.title; break;
+        case "nav": if (on) shOpen(m.href, true); break;
+        case "key":
+          if (!on) break;
+          if (m.key === "rail") railKey();
+          else if (m.key === "esc" && railShown()) railOpen(false);
+          break;
+        case "layout": ent.pincol = m.pincol; ent.dim = m.dim; if (on) shLayout(ent); break;
+        case "scroll": ent.y = m.y; if (on) shScroll(ent); break;
+        case "hash": if (on && location.hash !== m.hash) history.replaceState(null, "", ent.f.path + m.hash); ent.f.hash = m.hash; break;
+        case "theme":
+          setTheme(m.theme, true);
+          shFrames.forEach(function (x) { if (x !== ent) shSend(x, "theme", { theme: m.theme }); });
+          break;
+      }
+    });
+    window.addEventListener("popstate", function () { shOpen(location.pathname + location.hash, false); });
+    // The shell's hotkeys besides the rail's: the search palette's keys
+    // (tracker.js qShortcut) open the shown frame's palette; Ctrl+K and
+    // Ctrl+Space stay with editors by qShortcut's target rule.
+    doc.addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229 || e.altKey || e.metaKey || e.defaultPrevented) return;
+      var t = e.target, typing = !!(t && t.closest && t.closest("input, textarea, select, [contenteditable]:not([contenteditable=\"false\"])"));
+      var editor = !!(t && t.closest && t.closest(".xterm, textarea, [contenteditable]:not([contenteditable=\"false\"])"));
+      if (e.ctrlKey ? !editor && !e.shiftKey && (e.code === "Space" || e.key === " " || (e.key || "").toLowerCase() === "k") : e.key === "/" && !typing) {
+        e.preventDefault();
+        shSearch();
+      }
+    });
+    if (shTop) shTop.addEventListener("click", function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      if (t.closest("#tkqs")) { e.preventDefault(); shSearch(); return; }
+      if (t.closest(".host.hbtn") && shOn) { e.preventDefault(); try { shOn.el.focus(); } catch (x) {} shSend(shOn, "menu"); }
+    });
+    if (shTop) shTop.addEventListener("keydown", function (e) {
+      var t = e.target;
+      if ((e.key !== "Enter" && e.key !== " ") || !t || !t.classList || !t.classList.contains("hbtn") || !shOn) return;
+      e.preventDefault();
+      try { shOn.el.focus(); } catch (x) {}
+      shSend(shOn, "menu");
+    });
+  }
+  // shFrameInit wires a framed page to its shell: the header, the layout,
+  // the scroll, and hash routes go up as they change, and the shell's
+  // messages come down.
+  function shFrameInit() {
+    var sent = {}, queued = null;
+    function send(kind, m) {
+      var k = JSON.stringify(m);
+      if (sent[kind] === k) return;
+      sent[kind] = k;
+      shPost(kind, m);
+    }
+    // inline gives the search slot's icons their own paths: the shell
+    // holds none of the tracker's symbols.
+    function inline(el) {
+      var c = el.cloneNode(true);
+      q("svg use", c).forEach(function (u) {
+        var id = (u.getAttribute("href") || "").replace(/^#/, ""), sym = id ? doc.getElementById(id) : null, svg = u.parentNode;
+        if (!sym || !svg) return;
+        if (sym.getAttribute("viewBox")) svg.setAttribute("viewBox", sym.getAttribute("viewBox"));
+        svg.innerHTML = sym.innerHTML;
+      });
+      return c.innerHTML;
+    }
+    // dim is the alpha of the backdrop the page shows over the whole
+    // window: a modal dialog's, or an overlay's (the item and git windows,
+    // the image viewer, a maximized card's scrim).
+    function dim() {
+      var a = 0;
+      q("dialog[open]").forEach(function (d) {
+        var modal = false;
+        try { modal = d.matches(":modal"); } catch (x) { modal = false; }
+        if (modal) a = Math.max(a, window.WsShell.alpha(getComputedStyle(d, "::backdrop").backgroundColor));
+      });
+      q(".tk-iwin-back:not([hidden]), .gwin-back:not([hidden]), .wbv:not([hidden]), .bc-scrim:not([hidden])").forEach(function (el) {
+        if (el.getClientRects().length) a = Math.max(a, window.WsShell.alpha(getComputedStyle(el).backgroundColor));
+      });
+      return Math.round(a * 100) / 100;
+    }
+    function post() {
+      queued = null;
+      var top = doc.querySelector(".dwrap > .top"), h = region("head"), qs = $("qsslot");
+      if (top) send("head", {
+        html: h ? h.innerHTML : null, qs: qs ? inline(qs) : "",
+        pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
+        top: top.offsetHeight
+      });
+      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim() });
+    }
+    function queue() { if (!queued) queued = setTimeout(post, 16); }
+    var top = doc.querySelector(".dwrap > .top");
+    if (window.MutationObserver) {
+      var mo = new MutationObserver(queue);
+      if (top) mo.observe(top, { subtree: true, childList: true, attributes: true, characterData: true });
+      mo.observe(root, { attributes: true, attributeFilter: ["style", "data-pincol"] });
+      mo.observe(doc.body, { childList: true });
+      mo.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ["open", "hidden"] });
+    }
+    window.addEventListener("resize", queue);
+    window.addEventListener("scroll", function () { send("scroll", { y: Math.round(window.scrollY) }); });
+    // A hash route moves by hashchange or by the page's own history calls
+    // (tracker.js's store pages), which fire none: either way the shell's
+    // address takes the hash.
+    function hash() { send("hash", { hash: location.hash }); }
+    window.addEventListener("hashchange", hash);
+    window.addEventListener("popstate", hash);
+    ["pushState", "replaceState"].forEach(function (k) {
+      var orig = history[k];
+      if (typeof orig !== "function") return;
+      history[k] = function () {
+        var r = orig.apply(history, arguments);
+        hash();
+        return r;
+      };
+    });
+    // Escape and the rail hotkey reach the shell from inside the page (the
+    // rail's own handler is the shell's).
+    doc.addEventListener("keydown", function (e) {
+      if (e.code === "Backquote" && e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.isComposing) { e.preventDefault(); railKey(); }
+      else if (e.key === "Escape" && !e.defaultPrevented) shPost("key", { key: "esc" });
+    });
+    window.addEventListener("message", function (e) {
+      if (e.source !== window.parent || e.origin !== location.origin) return;
+      var m = window.WsShell.message(e.data);
+      if (!m) return;
+      if (m.wsShell === "shown") {
+        shHidden = !m.shown;
+        if (shHidden) return;
+        showRegions();
+        tickTimes();
+        if (shTrackerRev !== null) { var rev = shTrackerRev; shTrackerRev = null; trackerNudge(rev); }
+        queue();
+      } else if (m.wsShell === "search") {
+        var b = $("tkqs");
+        if (b) b.click();
+      } else if (m.wsShell === "menu") {
+        var h = region("head"), chip = h && h.querySelector(".host.hbtn");
+        if (chip && WsRail) railPopOpen("sess", chip);
+      } else if (m.wsShell === "theme") setTheme(m.theme, true);
+      else if (m.wsShell === "sync") { sent = {}; post(); shPost("title", { title: doc.title }); }
+    });
+    post();
+    shPost("title", { title: doc.title });
+    if (window.scrollY) send("scroll", { y: Math.round(window.scrollY) });
+  }
+  // shShellInit takes the frame the shell page loaded with: the page its
+  // address names (its path and hash, which never reached the daemon; a
+  // query, such as a LAN token, is not the page's) and asks it for its
+  // header, in case it posted before this script listened. A frame already
+  // loaded fires no load for shAdd to see.
+  function shShellInit() {
+    var el = doc.querySelector("#frames > iframe"), f = window.WsShell.framed(new URL(location.pathname + location.hash, location.origin), location.origin);
+    if (!el || !f) return;
+    var ent = shAdd(el, f);
+    shOn = ent;
+    shOrder = [f.path];
+    if (f.hash) { el.src = window.WsShell.src(f); return; }
+    try { ent.loaded = el.contentDocument.readyState === "complete"; } catch (x) { /* not yet */ }
+    shSend(ent, "sync");
+  }
+
   if (live) {
     setLayout(load(LAYOUT_KEY));
     setSplit(savedSplit());
@@ -7999,6 +8683,8 @@
   mermaid();
   pinConvo();
   nearTop();
-  trackerStart();
+  if (framed) shFrameInit();
+  if (shell && window.WsShell) shShellInit();
+  if (!shell) trackerStart();
   connect();
 })();

@@ -138,8 +138,8 @@ func trackerEventSpec(kind wsxmlcmd.Kind, attrs ...string) wsxmlcmd.Spec {
 // the store commands. A body is the event's text field: the item body, the
 // comment, or the note.
 var trackerCommands = map[string]trackerCommandDef{
-	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "labels", "due", "priority", "parent", "after", "mentions", "refs"), buildItemCreate},
-	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "labels", "due", "priority", "mentions", "refs", "clear", "base"), buildItemEdit},
+	wstracker.TypeItemCreate: {trackerEventSpec(wsxmlcmd.Leaf, "kind", "title", "project", "labels", "due", "start", "priority", "parent", "after", "mentions", "refs"), buildItemCreate},
+	wstracker.TypeItemEdit:   {trackerEventSpec(wsxmlcmd.Leaf, "item", "title", "project", "labels", "due", "start", "priority", "mentions", "refs", "clear", "base"), buildItemEdit},
 	wstracker.TypeItemHide:   {trackerEventSpec(wsxmlcmd.Empty, "item"), buildItemOnly},
 	wstracker.TypeItemMove:   {trackerEventSpec(wsxmlcmd.Empty, "item", "parent", "after"), buildItemMove},
 	wstracker.TypeItemAssign: {trackerEventSpec(wsxmlcmd.Empty, "item", "people", "rules", "levels", "completion"), buildItemAssign},
@@ -291,6 +291,7 @@ func buildItemCreate(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	b.optional(cmd, ev, "project")
 	b.labelRefList(cmd, ev)
 	b.optional(cmd, ev, "due")
+	b.optional(cmd, ev, "start")
 	if n, ok := trackerLevelAttr(b.p, cmd, "priority", false); ok {
 		ev.payload["priority"] = n
 	}
@@ -312,7 +313,7 @@ func buildItemCreate(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 
 // buildItemEdit writes only the fields the command changes: an attribute
 // present sets its field, a non-empty body sets the body, and clear names
-// fields to empty (body) or remove (due, written as null).
+// fields to empty (body) or remove (due and start, written as null).
 func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	b.itemRef(cmd, ev, "item")
 	if v, ok := cmd.Attr("title"); ok && wsxmlcmd.NonEmpty(b.p, cmd.At("title"), v) {
@@ -325,6 +326,9 @@ func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 	b.labelRefList(cmd, ev)
 	if v, ok := cmd.Attr("due"); ok && wsxmlcmd.NonEmpty(b.p, cmd.At("due")+" (clear=\"due\" removes it)", v) {
 		ev.payload["due"] = v
+	}
+	if v, ok := cmd.Attr("start"); ok && wsxmlcmd.NonEmpty(b.p, cmd.At("start")+" (clear=\"start\" removes it)", v) {
+		ev.payload["start"] = v
 	}
 	if n, ok := trackerLevelAttr(b.p, cmd, "priority", false); ok {
 		ev.payload["priority"] = n
@@ -347,8 +351,13 @@ func buildItemEdit(b *trackerBatch, cmd wsxmlcmd.Command, ev *trackerEvent) {
 					b.p.Add("%s: clear=\"due\" with a due attribute; send one or the other", cmd.Label())
 				}
 				ev.payload["due"] = nil
+			case "start":
+				if _, set := cmd.Attr("start"); set {
+					b.p.Add("%s: clear=\"start\" with a start attribute; send one or the other", cmd.Label())
+				}
+				ev.payload["start"] = nil
 			default:
-				b.p.Add("%s: must list body or due; got %q", cmd.At("clear"), field)
+				b.p.Add("%s: must list body, due, or start; got %q", cmd.At("clear"), field)
 			}
 		}
 	}

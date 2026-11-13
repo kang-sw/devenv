@@ -69,7 +69,10 @@ export function installResolver(DefaultPackageManager, pathKey) {
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// Node resolves the main module's symlinks for import.meta.url but leaves
+// argv[1] as spelled, so compare realpaths on both sides: a symlinked state
+// dir (or macOS /var -> /private/var) must still start Pi.
+if (process.argv[1] && canonical(fileURLToPath(import.meta.url)) === canonical(process.argv[1])) {
   const [sdk, cli, ...args] = process.argv.slice(2);
   const sdkURL = pathToFileURL(sdk);
   const { DefaultPackageManager } = await import(sdkURL.href);

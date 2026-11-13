@@ -88,9 +88,10 @@ function restoreTopics(list) {
   list.forEach(function (tn) { if (tn.topic !== "plan") { stray.push("[" + tn.topic + "] " + tn.note); return; } tnote.value = tn.note; tnote.dispatchEvent(new Event("input")); });
   return stray;
 }
-var cmdSel = null, bmentions = [];
+var cmdSel = null, bmentions = [], wpicks = [], wconsoles = [];
 function grow() {} function shiftMentions() {} function clearMentions() {} function setCommand() {}
 function validMentions() { return []; }
+function validPicks() { return []; } function validConsoles() { return []; }
 function attachSrc(n) { return "/a/" + n; }
 // rowNums is the image numbers shown in a chip row; noteRow the row after a note.
 function rowNums(row) { return row ? row.children.map(function (c) { return c.children[1].textContent; }) : null; }

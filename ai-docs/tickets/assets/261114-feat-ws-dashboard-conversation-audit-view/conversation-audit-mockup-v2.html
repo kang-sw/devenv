@@ -1,0 +1,323 @@
+<style>
+.ca{--bg:#141518;--fg:#e7e7e4;--card:#1e2024;--muted:#a2a6ad;--pri:#7aa2ff;--line:color-mix(in srgb,#e7e7e4 16%,transparent);--soft:color-mix(in srgb,#e7e7e4 7%,transparent);--ok:#6cc39a;--warn:#e0a36c;--fail:#f0797e;--hook:#b9a6f5;--rem:#6fcdd4;--think:#a2a6ad;
+  font:13px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--fg);background:var(--bg);padding:12px;box-sizing:border-box}
+.ca *{box-sizing:border-box}
+.ca [hidden]{display:none!important}
+.ca .bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
+.ca .bar b{font-size:12px;color:var(--muted)}
+.ca button.seg{font:inherit;font-size:12px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+.ca button.seg.on{background:var(--pri);color:#0c1424;border-color:var(--pri);font-weight:700}
+.ca .stage{position:relative;border:1px dashed var(--line);border-radius:12px;overflow:hidden}
+.ca .scaler{transform-origin:0 0;position:absolute;left:0;top:0;background:var(--bg)}
+/* conversation pane */
+.ca .pane{position:absolute;left:0;top:0;bottom:0;display:flex;flex-direction:column;border-right:1px solid var(--line)}
+.ca .phead{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--card)}
+.ca .phead input{flex:1 1 180px;min-width:0;font:inherit;font-size:12px;padding:5px 9px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.ca .phead input:focus{outline:2px solid var(--pri);outline-offset:0}
+.ca .fchip{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);cursor:pointer;user-select:none;color:var(--muted);display:flex;gap:4px;align-items:center}
+.ca .fchip.on{color:var(--fg);background:var(--soft)}
+.ca .fchip i{width:7px;height:7px;border-radius:50%;display:inline-block}
+.ca .feed{flex:1;overflow:auto;padding:12px 14px 40px;display:flex;flex-direction:column;gap:8px}
+.ca .msg.user{align-self:flex-end;max-width:80%;background:#26385e;color:#d2dcf6;border-radius:14px;padding:7px 12px}
+.ca .mh{font-size:11px;color:var(--muted);display:flex;gap:6px;align-items:baseline}
+.ca .mh b{color:var(--fg)}
+.ca .msg.lead .bub{background:var(--card);border-radius:12px;padding:8px 12px;margin-top:3px}
+/* tool strip: every call is a row, the first few visible */
+.ca .strip{border-left:2px solid var(--line);margin-left:6px;padding-left:8px;display:flex;flex-direction:column;gap:1px}
+.ca .shead{font-size:11px;color:var(--muted);display:flex;gap:8px;align-items:center;cursor:pointer;padding:1px 0}
+.ca .shead:hover{color:var(--fg)}
+.ca .call,.ca .hid{display:flex;align-items:center;gap:7px;padding:2px 7px;border-radius:6px;font-size:12px;cursor:pointer;min-width:0}
+.ca .call:hover,.ca .hid:hover{background:var(--soft)}
+.ca .call.sel,.ca .hid.sel{background:color-mix(in srgb,var(--pri) 18%,transparent);outline:1px solid color-mix(in srgb,var(--pri) 55%,transparent)}
+.ca .call .mk{width:12px;flex:none;text-align:center}
+.ca .call .tn{font:600 11.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft);padding:0 6px;border-radius:5px;flex:none}
+.ca .call .ar{font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.ca .call .nm{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;flex:none}
+.ca .call .hit,.ca .hid .hit{font-size:10px;padding:0 6px;border-radius:999px;background:color-mix(in srgb,var(--warn) 30%,transparent);color:var(--warn);flex:none}
+.ca .call .att{font-size:10px;color:var(--hook);flex:none}
+.ca .more{font-size:11px;color:var(--muted);padding:1px 7px;cursor:pointer}
+.ca .more:hover{color:var(--pri)}
+/* hidden events: thin collapsed rows */
+.ca .hid{font-size:11px;color:var(--muted);border:1px dashed var(--line);padding:1px 8px;align-self:flex-start;max-width:100%}
+.ca .hid .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.ca .hid>span:not(.pv){white-space:nowrap;flex:none}
+.ca .hid .pv{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-style:italic}
+.ca .hid.inner{margin-left:19px;border:0;padding:0 7px}
+.ca .sysrow{align-self:stretch;text-align:center;font-size:11px;color:var(--muted);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:3px;cursor:pointer}
+.ca .sysrow:hover{color:var(--fg);background:var(--soft)}
+.ca mark{background:color-mix(in srgb,var(--warn) 38%,transparent);color:inherit;border-radius:2px}
+.ca mark.cur{background:var(--warn);color:#141518}
+/* floating audit window */
+.ca .win{position:absolute;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 2px 4px #0009,0 14px 40px #000a;overflow:hidden;resize:both;min-width:320px;min-height:240px;z-index:5}
+.ca .win.sheet{left:0!important;right:0;bottom:0;top:auto!important;width:auto!important;border-radius:14px 14px 0 0;resize:none}
+.ca .win.sheet .grab{display:block}
+.ca .grab{display:none;width:40px;height:4px;border-radius:2px;background:var(--line);margin:6px auto 0}
+.ca .wh{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);cursor:move;user-select:none;background:color-mix(in srgb,var(--bg) 30%,var(--card))}
+.ca .wh .tn{font:700 12px ui-monospace,Menlo,monospace}
+.ca .wh .st{font-size:11px;padding:0 7px;border-radius:999px;white-space:nowrap;flex:none}
+.ca .wh .st.ok{background:color-mix(in srgb,var(--ok) 22%,transparent);color:var(--ok)}
+.ca .wh .st.fail{background:color-mix(in srgb,var(--fail) 22%,transparent);color:var(--fail)}
+.ca .wh .m{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ca .wh .grow{flex:1}
+.ca .ib{font:inherit;font-size:12px;width:24px;height:24px;border-radius:6px;border:1px solid transparent;background:none;color:var(--muted);cursor:pointer;display:grid;place-items:center;flex:none}
+.ca .ib:hover{background:var(--soft);color:var(--fg);border-color:var(--line)}
+.ca .wtabs{display:flex;gap:2px;padding:0 8px;border-bottom:1px solid var(--line)}
+.ca .wtab{font-size:12px;padding:6px 9px;color:var(--muted);border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;display:flex;gap:5px;align-items:center}
+.ca .wtab.on{color:var(--fg);border-bottom-color:var(--pri);font-weight:700}
+.ca .wtab .c{font-size:10px;padding:0 5px;border-radius:999px;background:var(--soft)}
+.ca .wtool{display:flex;gap:6px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}
+.ca .wtool input{font:inherit;font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg);width:180px}
+.ca .wtool input:focus{outline:2px solid var(--pri);outline-offset:0}
+.ca .banner{margin:8px 10px 0;padding:6px 9px;border-radius:8px;font-size:11.5px;background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 35%,transparent)}
+.ca .banner.info{background:var(--soft);color:var(--muted);border-color:var(--line)}
+.ca .wb{flex:1;overflow:auto;min-height:0}
+.ca .code{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;padding:6px 0;counter-reset:ln}
+.ca .code .l{display:flex;padding-right:12px}
+.ca .code .l:hover{background:var(--soft)}
+.ca .code .n{width:46px;flex:none;text-align:right;padding-right:10px;color:color-mix(in srgb,var(--muted) 70%,transparent);user-select:none}
+.ca .code .t{white-space:pre;min-width:0}
+.ca .code.wrap .t{white-space:pre-wrap;word-break:break-all}
+.ca .code .l.err .t{color:var(--fail)}
+.ca .code .l.cut{background:color-mix(in srgb,var(--warn) 10%,transparent)}
+.ca .code .l.cut .t{color:var(--warn)}
+.ca .red{display:inline-flex;gap:4px;align-items:center;font:600 11px system-ui,sans-serif;padding:0 6px;border-radius:5px;background:repeating-linear-gradient(135deg,#3a2a2c 0 6px,#33252a 6px 12px);color:#f0b3b6;border:1px solid #6b3a3e;vertical-align:1px;cursor:help}
+.ca .kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;padding:10px 12px;font-size:12px}
+.ca .kv dt{color:var(--muted)}
+.ca .kv dd{margin:0;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;word-break:break-all}
+.ca .kv h5{grid-column:1/-1;margin:8px 0 0;font-size:11px;color:var(--muted);letter-spacing:.04em}
+.ca .evl{padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+.ca .ev{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.ca .ev .eh{display:flex;gap:6px;align-items:center;padding:4px 8px;font-size:11px;background:var(--soft)}
+.ca .ev pre{margin:0;padding:6px 9px;font:11.5px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap}
+.ca .wf{display:flex;flex-wrap:wrap;gap:4px 12px;padding:6px 10px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+.ca kbd{font:10px ui-monospace,monospace;padding:0 4px;border:1px solid var(--line);border-radius:4px;color:var(--fg)}
+.ca .hx{font:600 10px ui-monospace,Menlo,monospace;padding:1px 6px;border-radius:5px;background:color-mix(in srgb,var(--pri) 18%,transparent);color:var(--pri);flex:none;white-space:nowrap}
+.ca .notes{margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.ca .notes section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.ca .notes h4{margin:0 0 6px;font-size:12px}
+.ca .notes ul{padding-left:16px;margin:0;color:var(--muted);font-size:12px}
+.ca .notes li{margin:2px 0}
+.ca .notes li b{color:var(--fg);font-weight:600}
+.ca .side{position:absolute;top:0;bottom:0;right:0;padding:18px;color:var(--muted);font-size:12px;background:repeating-linear-gradient(135deg,#17181c 0 12px,#15161a 12px 24px)}
+</style>
+<div class="ca" id="ca">
+  <div class="bar">
+    <b>폭</b>
+    <button class="seg" data-w="narrow">좁게 · 420 (하단 시트)</button>
+    <button class="seg" data-w="wide">넓게 · 1200 (떠 있는 창)</button>
+    <span style="width:1px;height:18px;background:var(--line);margin:0 4px"></span>
+    <b>바로 열기</b>
+    <button class="seg" data-open="c-bash">Bash 긴 출력</button>
+    <button class="seg" data-open="c-mail">메일 입력 (리댁션)</button>
+    <button class="seg" data-open="h-compact">컴팩션 요약</button>
+    <button class="seg" data-open="h-session">세션 시작 컨텍스트</button>
+  </div>
+  <div class="stage" id="caStage" style="max-width:100%"><div class="scaler" id="caScaler">
+    <div class="side" id="caSide">대시보드의 나머지 영역 (보드 등)</div>
+    <div class="pane" id="caPane">
+      <div class="phead">
+        <span class="hx" title="이 대화를 실어 온 하네스 스트림. 다른 하네스(codex, pi, antigravity 등)도 같은 이벤트 형식으로 정규화">claude · stream-json</span>
+        <input id="caQ" placeholder="대화 전체 검색 — 입력·출력·숨은 이벤트 포함" autocomplete="off">
+        <span class="fchip on" data-f="reminder"><i style="background:var(--rem)"></i>리마인더</span>
+        <span class="fchip on" data-f="hook"><i style="background:var(--hook)"></i>훅</span>
+        <span class="fchip" data-f="thinking"><i style="background:var(--think)"></i>사고</span>
+        <span class="fchip on" data-f="system"><i style="background:var(--warn)"></i>시스템</span>
+      </div>
+      <div class="feed" id="caFeed"></div>
+    </div>
+    <div id="caWins"></div>
+  </div></div>
+  <div class="notes">
+    <section><h4>대화 목록 조정</h4><ul>
+      <li><b>도구 묶음 → 호출 목록</b>: 접힌 pill 대신 호출마다 한 줄(상태 · 도구 · 인자 미리보기 · 시간 · 토큰). 3개까지 보이고 나머지는 "+n개".</li>
+      <li>모든 호출·숨은 이벤트 행이 클릭 가능 → 감사 창. <kbd>J</kbd>/<kbd>K</kbd> 행 이동, <kbd>Enter</kbd> 열기.</li>
+      <li><b>숨은 이벤트</b>: 점선 한 줄로 접힘(종류 색 점 + 미리보기). 상단 칩으로 종류별 표시/숨김. 호출에 붙은 훅·리마인더는 그 호출 아래 들여쓰기.</li>
+      <li><b>대화 전체 검색</b>: 저장된 출력까지 검색, 맞은 행에 "출력 3" 배지, 감사 창은 그 매치로 열림.</li>
+    </ul></section>
+    <section><h4>감사 창</h4><ul>
+      <li>탭: <b>입력 · 출력 · 메타 · 원본 · 연결 이벤트</b>. 원본은 하네스 기록 JSON 그대로.</li>
+      <li>긴 출력: 줄 번호, 창 안 검색(<kbd>Ctrl+F</kbd>, <kbd>Enter</kbd>/<kbd>Shift+Enter</kbd> 다음/이전), 줄바꿈 토글, 복사.</li>
+      <li><b>모델이 본 것 vs 저장된 것</b>: 하네스가 잘라 전달한 지점을 줄에 표시 — 그 아래는 모델이 못 본 부분.</li>
+      <li><b>리댁션</b>: 빗금 칩 <span class="red">🔒 종류 · 길이</span>. 원문은 저장 안 함, 규칙 이름만 표시.</li>
+      <li><kbd>←</kbd>/<kbd>→</kbd> 이전/다음 호출로 창 내용 교체, <kbd>Esc</kbd> 닫기. 📌 고정하면 새 창으로 열림(여러 개 비교).</li>
+    </ul></section>
+    <section><h4>폭별</h4><ul>
+      <li><b>넓게</b>: 떠 있는 창, 헤더로 끌기, 모서리로 크기 조절. 처음엔 대화 오른쪽에 원래 행을 가리지 않게 배치. 원래 행은 선택 표시 유지.</li>
+      <li><b>좁게</b>: 하단 시트(높이 72%), 탭은 가로 스크롤, 메타는 1열.</li>
+    </ul></section>
+    <section><h4>하네스 중립 ((545)=a, (546)=a)</h4><ul>
+      <li>데몬이 하네스 JSON 스트림의 <b>모든 이벤트</b>를 자체 저장소에 보관(전체 도구 입출력 + 숨은 이벤트), 기존 GC·리댁션 적용.</li>
+      <li>대화 머리·창 머리에 <b>하네스 배지</b>(claude · stream-json). codex·pi·antigravity 등도 같은 이벤트 종류로 정규화 → 같은 목록·같은 창.</li>
+      <li>원본 탭 = 정규화 봉투 + 하네스 원본 이벤트 그대로.</li>
+      <li>시스템 프롬프트: 스트림이 실어 올 때만 세션 시작 행에 표시. API 프록시 캡처 없음.</li>
+      <li>스트림에 오는 이벤트 종류는 빠짐없이 행으로: 훅 출력, 시스템 알림·리마인더, 컴팩션 요약, 사고, 하위 에이전트 등. 모르는 종류는 "기타" 행 + 원본 탭.</li>
+    </ul></section>
+  </div>
+</div>
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)};
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+var RED=/⟦REDACTED:([a-z_]+):(\d+)⟧/g;
+function redact(h){return h.replace(/⟦REDACTED:([a-z_]+):(\d+)⟧/g,function(_,k,n){return'<span class="red" title="wsredact 규칙: '+k+' · 원문 '+n+'자, 저장 안 됨">🔒 '+k+' · '+n+'자</span>'})}
+/* ---------- fake data ---------- */
+function goTest(){var o=['$ go test ./internal/wsdashboard/... -run "Palette|Board|Pins" -count=1'];
+ var pk=['palette','board_motion','pins_column','tophead_sticky','note_images','composer_ph'];
+ for(var i=0;i<380;i++){var p=pk[i%pk.length];
+  if(i===141)o.push('    pins_column_test.go:88: empty board: got height 58px, want full (r-board > .empty:only-child)');
+  else if(i===142)o.push('--- FAIL: TestPinsEmptyFullHeight (0.41s)');
+  else if(i===217)o.push('    env: WS_TRACKER_TOKEN=⟦REDACTED:api_token:40⟧ GIT_ASKPASS=/usr/local/bin/ws-askpass');
+  else o.push('=== RUN   Test'+p.replace(/(^|_)(\w)/g,function(_,a,b){return b.toUpperCase()})+'/case_'+(i%23)+'\n--- PASS: Test'+p.replace(/(^|_)(\w)/g,function(_,a,b){return b.toUpperCase()})+'/case_'+(i%23)+' (0.0'+(i%9)+'s)')}
+ o.push('FAIL');o.push('FAIL\tagents-plugin-tool/internal/wsdashboard\t7.412s');o.push('ok  \tagents-plugin-tool/internal/wswhiteboard\t2.031s');
+ return o.join('\n').split('\n')}
+var BASH_OUT=goTest();
+var CALLS={
+ 'c-read':{tool:'Read',st:'ok',args:'assets/cards.js · 840–870',dur:'0.1s',tok:'+1.2k',input:{file_path:'/Users/kang-sw/devenv/agents-plugin-tool/internal/wsdashboard/assets/cards.js',offset:840,limit:30},out:['    mount: function (el, o) {','      board = el;','      opt = o;','      col = o.column || null;','      pins = mk("div", "bpins");','      pins.id = "bpins";','      …','      board.insertBefore(pins, board.firstChild);'],att:[]},
+ 'c-grep':{tool:'Grep',st:'ok',args:'"nimgs|empty:only-child" dashboard.css',dur:'0.2s',tok:'+340',input:{pattern:'nimgs|empty:only-child',path:'assets/dashboard.css','-n':true},out:['504:.nimgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }','508:.topic > .nimgs { margin: 0 10px 6px; }','1488:.r-board:has(> .empty:only-child) { height: 100%; }'],att:[]},
+ 'c-bash':{tool:'Bash',st:'fail',args:'go test ./internal/wsdashboard/... -run "Palette|Board|Pins"',dur:'7.6s',tok:'+9.8k',exit:1,input:{command:'cd agents-plugin-tool && go test ./internal/wsdashboard/... -run "Palette|Board|Pins" -count=1',description:'Run dashboard palette/board/pins tests',timeout:600000},out:BASH_OUT,cutAt:300,
+  att:[{k:'hook',name:'PostToolUse',src:'ws plugin',text:'(응답 언어: 한국어)'},{k:'reminder',name:'system-reminder',src:'harness',text:'This command modified 1 file you\'ve previously read: cards.js. Call Read before editing.'}]},
+ 'c-edit':{tool:'Edit',st:'ok',args:'assets/dashboard.css: .topic > .nimgs → .tophead > .nimgs',dur:'0.1s',tok:'+210',input:{file_path:'assets/dashboard.css',old_string:'.topic > .nimgs { margin: 0 10px 6px; }',new_string:'.tophead > .nimgs { margin: 0 10px 6px; }'},out:['The file assets/dashboard.css has been updated successfully.'],att:[]},
+ 'c-mail':{tool:'mailbox_send',st:'ok',args:'to: id:regroup… · "UX -> EXEC: post-swap QA…"',dur:'0.3s',tok:'+1.1k',input:{session_key:'erratic-hardly-tremor',to:'id:regrouppunctuateconstantcanyon',content:'UX -> EXEC: post-swap QA (e1b11a147).\nRegressions:\n1. topic-note image chips flush…\nAuth for the preview proxy: Bearer ⟦REDACTED:bearer_token:64⟧\n…'},out:['sent to id:regrouppunctuateconstantcanyon','reply_to: id:ibuprofenpetitewhimsicaloak'],att:[{k:'hook',name:'PostToolUse',src:'ws plugin',text:'(응답 언어: 한국어)'}]},
+ 'c-agent':{tool:'Agent',st:'ok',args:'general-purpose · "Headless visual QA after daemon swap"',dur:'12m 25s',tok:'149k (하위)',input:{subagent_type:'general-purpose',description:'Headless visual QA after daemon swap',prompt:'Run read-only headless Playwright QA against http://127.0.0.1:29417/ …'},out:['I found three regressions; most of the five commits work.','…','(하위 에이전트 트랜스크립트: 63 tool uses — 연결 이벤트 탭에서 열기)'],att:[{k:'system',name:'subagent transcript',src:'harness',text:'afb22133787dd581d · 63 tool uses · 745s · 149k tokens → 별도 감사 창으로 열림'}]}
+};
+var HID={
+ 'h-session':{k:'system',title:'세션 시작 컨텍스트',pv:'CLAUDE.md · AGENTS.md · 스킬 목록 · SessionStart 훅 · (시스템 프롬프트: 스트림에 없음)',
+  sections:[['시스템 프롬프트','이 하네스 스트림(claude · stream-json)에는 실려 오지 않음 — 표시할 것 없음. 스트림이 시스템 프롬프트를 실어 오는 하네스라면 이 자리에 전문이 표시됨 (API 프록시 캡처는 하지 않음).'],['CLAUDE.md / AGENTS.md','# AGENTS.md - devenv\n\n## Current Authority\n`AGENTS.md` is the canonical root workflow context…\n(전체 412줄)'],['SessionStart 훅 (ws plugin)','[message from ws plugin] Context was just compacted. If you are a top-level ws lead session…'],['스킬 목록','ws:lead-audit-doc, ws:lead-bootstrap, ws:lead-discuss, ws:lead-review, ws:lead-revive, … (31개)']]},
+ 'h-rem1':{k:'reminder',title:'system-reminder',pv:'The user hasn\'t heard from you in a while — say in a few words what you\'re doing…',sections:[['내용','The user hasn\'t heard from you in a while — say in a few words what you\'re doing, then continue.']]},
+ 'h-hook1':{k:'hook',title:'UserPromptSubmit 훅',pv:'(응답 언어: 한국어)',sections:[['ws plugin · UserPromptSubmit','(응답 언어: 한국어)']]},
+ 'h-think':{k:'thinking',title:'사고 블록',pv:'1.3k 토큰 · 내용은 서명만 저장됨',sections:[['사고','하네스 기록에는 서명(signature)만 있음 — 본문 없음. 토큰 수: 1,312']]},
+ 'h-compact':{k:'system',title:'컴팩션 요약',pv:'자동 · 18.2k자 요약 · 60% 권고선',sections:[['요약 (하네스가 다음 컨텍스트에 넣은 그대로)','Summary:\n1. Primary Request and Intent:\n   This session is the **UX lead session** in a three-session setup set by the owner:\n   - **MAIN** (id:sweatradartakingoverwrite): discussion and investigation…\n   - **EXEC** (id:regrouppunctuateconstantcanyon): all execution…\n   …\n9. Optional Next Step:\n   When the QA subagent\'s completion notification arrives…'],['트리거','auto · 컨텍스트 60% 권고 후 수동 요청']]}
+};
+var FEED=[
+ {t:'sys',id:'h-session',label:'세션 시작 · 컨텍스트 3건 · 시스템 프롬프트는 이 하네스 스트림에 없음'},
+ {t:'user',text:'post-swap QA 결과 확인하고 회귀 있으면 EXEC에 보고',at:'23:38'},
+ {t:'hid',id:'h-hook1'},
+ {t:'hid',id:'h-think'},
+ {t:'tools',dur:'8.1s',calls:['c-read','c-grep','c-bash','c-edit']},
+ {t:'hid',id:'h-rem1'},
+ {t:'lead',text:'QA 보고서에 나온 회귀 3건의 원인을 develop 코드에서 확인했습니다. EXEC에 보고합니다.',at:'23:41'},
+ {t:'tools',dur:'12m 26s',calls:['c-agent','c-mail']},
+ {t:'sys',id:'h-compact',label:'컴팩션 · 자동 · 요약 18.2k자'},
+ {t:'lead',text:'데몬 교체 후 화면 QA를 마치고 EXEC에 보고했습니다. 회귀 3건, 사소한 것 2건.',at:'23:52'}
+];
+var COLOR={reminder:'var(--rem)',hook:'var(--hook)',thinking:'var(--think)',system:'var(--warn)'};
+var KIND={reminder:'리마인더',hook:'훅',thinking:'사고',system:'시스템'};
+/* ---------- state ---------- */
+var S={w:'wide',q:'',filters:{reminder:1,hook:1,thinking:0,system:1},sel:null,open:{},wins:[],expand:{}};
+function textOf(id){var c=CALLS[id];if(c)return(JSON.stringify(c.input)+'\n'+c.out.join('\n')+'\n'+c.att.map(function(a){return a.text}).join('\n'));var h=HID[id];return h.pv+'\n'+h.sections.map(function(s){return s[1]}).join('\n')}
+function hits(id){if(!S.q)return 0;var t=textOf(id).toLowerCase(),q=S.q.toLowerCase(),n=0,i=0;while((i=t.indexOf(q,i))>=0){n++;i+=q.length}return n}
+function hl(s){s=esc(s);if(!S.q)return s;var q=esc(S.q).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');return s.replace(new RegExp('('+q+')','ig'),'<mark>$1</mark>')}
+/* ---------- feed ---------- */
+function rows(){var o=[];FEED.forEach(function(e){if(e.t==='tools'){e.calls.forEach(function(c){o.push(c);CALLS[c].att.forEach(function(a,i){if(S.filters[a.k])o.push(c+'#'+i)})})}else if(e.t==='hid'||e.t==='sys'){if(S.filters[HID[e.id].k])o.push(e.id)}});return o}
+function callRow(id){var c=CALLS[id],h=hits(id);return'<div class="call'+(S.sel===id?' sel':'')+'" data-id="'+id+'"><span class="mk" style="color:'+(c.st==='fail'?'var(--fail)':'var(--ok)')+'">'+(c.st==='fail'?'✗':'✓')+'</span><span class="tn">'+c.tool+'</span><span class="ar">'+hl(c.args)+'</span>'+(h?'<span class="hit">출력 '+h+'</span>':'')+(c.att.length?'<span class="att" title="연결 이벤트">◆'+c.att.length+'</span>':'')+'<span class="nm">'+c.dur+' · '+c.tok+'</span></div>'+
+ c.att.map(function(a,i){if(!S.filters[a.k])return'';var rid=id+'#'+i;return'<div class="hid inner'+(S.sel===rid?' sel':'')+'" data-id="'+rid+'"><span class="dot" style="background:'+COLOR[a.k]+'"></span><span>'+esc(a.name)+'</span><span class="pv">'+hl(a.text)+'</span></div>'}).join('')}
+function hidRow(id){var h=HID[id],n=hits(id);return'<div class="hid'+(S.sel===id?' sel':'')+'" data-id="'+id+'"><span class="dot" style="background:'+COLOR[h.k]+'"></span><span>'+KIND[h.k]+' · '+esc(h.title)+'</span><span class="pv">'+hl(h.pv)+'</span>'+(n?'<span class="hit">'+n+'</span>':'')+'</div>'}
+function renderFeed(){var h='';
+ FEED.forEach(function(e,ei){
+  if(e.t==='user')h+='<div class="msg user">'+hl(e.text)+'</div>';
+  else if(e.t==='lead')h+='<div class="msg lead"><div class="mh"><b>리드</b>'+e.at+'</div><div class="bub">'+hl(e.text)+'</div></div>';
+  else if(e.t==='hid'){if(S.filters[HID[e.id].k])h+=hidRow(e.id)}
+  else if(e.t==='sys'){if(S.filters.system){var n=hits(e.id);h+='<div class="sysrow'+(S.sel===e.id?' sel':'')+'" data-id="'+e.id+'">⚙ '+esc(e.label)+(n?' <span class="hit" style="font-size:10px;color:var(--warn)">· '+n+'</span>':'')+' — 클릭해 감사</div>'}}
+  else if(e.t==='tools'){var ex=S.expand[ei]||S.q,show=ex?e.calls:e.calls.slice(0,3),fail=e.calls.filter(function(c){return CALLS[c].st==='fail'}).length;
+   h+='<div class="strip"><div class="shead" data-x="'+ei+'">호출 '+e.calls.length+(fail?' · <b style="color:var(--fail)">실패 '+fail+'</b>':'')+' · '+e.dur+'</div>'+show.map(callRow).join('')+(e.calls.length>show.length?'<div class="more" data-x="'+ei+'">+ '+(e.calls.length-show.length)+'개 더</div>':'')+'</div>'}
+ });
+ $('caFeed').innerHTML=h}
+/* ---------- audit window ---------- */
+var Z=10;
+function winFor(id){var base=id.split('#')[0],ai=id.indexOf('#')>0?+id.split('#')[1]:-1;
+ if(CALLS[base]&&ai>=0){var a=CALLS[base].att[ai];return{kind:'event',title:a.name,sub:KIND[a.k]+' · '+a.src+' · '+CALLS[base].tool+' 호출에 연결',sections:[[a.name,a.text]],raw:{type:'attachment',parentToolUseId:'toolu_01'+base.slice(2),hookEvent:a.name,content:a.text}}}
+ if(CALLS[base])return{kind:'call',c:CALLS[base]};
+ var h=HID[base];return{kind:'event',title:h.title,sub:KIND[h.k],sections:h.sections,raw:{harness:'claude',stream:'stream-json',kind:h.k,native:{type:h.k==='thinking'?'assistant/thinking':'system',subtype:h.title,content:h.sections.map(function(s){return s[1]}).join('\n')}}}}
+function openWin(id,pinNew){
+ S.sel=id;renderFeed();
+ var w=S.wins.filter(function(x){return!x.pinned})[0];
+ if(!w||pinNew){w={id:id,tab:'out',q:'',cur:0,wrap:false,pinned:false,el:document.createElement('div'),x:0,y:0};S.wins.push(w);$('caWins').appendChild(w.el);
+  var L=S.wins.length-1;w.x=S.w==='wide'?560+L*28:0;w.y=60+L*28}
+ w.id=id;var d=winFor(id);w.tab=d.kind==='call'?(S.q?'out':(w.tab||'out')):'body';if(d.kind==='call'&&['in','out','meta','raw','att'].indexOf(w.tab)<0)w.tab='out';
+ w.q=S.q||'';w.cur=0;drawWin(w)}
+function codeLines(lines,w,cutAt){var q=w.q.toLowerCase(),k=0,h='';
+ lines.forEach(function(l,i){var t=esc(l),cls='l';
+  if(/FAIL/.test(l)||/: got /.test(l))cls+=' err';
+  if(q&&l.toLowerCase().indexOf(q)>=0){t=t.replace(new RegExp('('+esc(w.q).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig'),function(m){return'<mark data-m="'+(k++)+'">'+m+'</mark>'})}
+  h+='<div class="'+cls+'"><span class="n">'+(i+1)+'</span><span class="t">'+redact(t)+'</span></div>';
+  if(cutAt&&i===cutAt-1)h+='<div class="l cut"><span class="n">✂</span><span class="t">── 하네스가 여기서 잘라 모델에 전달 (30,000자). 아래 '+(lines.length-cutAt)+'줄은 모델이 보지 못함 ──</span></div>'});
+ w.total=k;return'<div class="code'+(w.wrap?' wrap':'')+'">'+h+'</div>'}
+function drawWin(w){var d=winFor(w.id),el=w.el,h='';
+ el.className='win'+(S.w==='narrow'?' sheet':'');
+ if(S.w==='narrow'){el.style.height='72%';el.style.width='';}else{el.style.left=w.x+'px';el.style.top=w.y+'px';if(!el.style.width){el.style.width='600px';el.style.height='560px'}}
+ el.style.zIndex=++Z;
+ var nav='<button class="ib" data-a="prev" title="이전 (←)">‹</button><button class="ib" data-a="next" title="다음 (→)">›</button>';
+ if(d.kind==='call'){var c=d.c,red=(JSON.stringify(c.input)+c.out.join('')).match(RED);red=red?red.length:0;
+  h+='<div class="grab"></div><div class="wh" data-drag><span class="hx">claude</span><span class="tn">'+c.tool+'</span><span class="st '+(c.st==='fail'?'fail':'ok')+'">'+(c.st==='fail'?'실패'+(c.exit!=null?' · exit '+c.exit:''):'성공')+'</span><span class="m">'+esc(c.args)+'</span><span class="grow"></span>'+nav+'<button class="ib" data-a="copy" title="현재 탭 복사">⧉</button><button class="ib" data-a="pin" title="고정 — 다음 호출은 새 창">'+(w.pinned?'📌':'📍')+'</button><button class="ib" data-a="close" title="닫기 (Esc)">✕</button></div>';
+  var tabs=[['in','입력'],['out','출력',c.out.length+'줄'],['meta','메타'],['raw','원본'],['att','연결 이벤트',c.att.length]];
+  h+='<div class="wtabs">'+tabs.map(function(t){return'<div class="wtab'+(w.tab===t[0]?' on':'')+'" data-tab="'+t[0]+'">'+t[1]+(t[2]!==undefined?'<span class="c">'+t[2]+'</span>':'')+'</div>'}).join('')+'</div>';
+  if(w.tab==='out'||w.tab==='in'){
+   h+='<div class="wtool"><input data-wq placeholder="이 창에서 검색 (Ctrl+F)" value="'+esc(w.q)+'"><span data-cnt></span><button class="ib" data-a="mprev">↑</button><button class="ib" data-a="mnext">↓</button><span class="grow" style="flex:1"></span><label style="display:flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox" data-wrap'+(w.wrap?' checked':'')+' style="width:auto">줄바꿈</label></div>';
+   if(w.tab==='out'&&c.cutAt)h+='<div class="banner">모델에는 앞 '+c.cutAt+'줄(30,000자)만 전달됨 — 여기는 저장된 전체 '+c.out.length+'줄. ✂ 표시 아래는 모델이 보지 못한 부분.</div>';
+   if(red)h+='<div class="banner info">리댁션 '+red+'건: 원문은 저장되지 않고 규칙 이름과 길이만 남음.</div>';
+   var lines=w.tab==='out'?c.out:JSON.stringify(c.input,null,2).split('\n').map(function(l){return l.replace(/\\n/g,'\n')}).join('\n').split('\n');
+   h+='<div class="wb">'+codeLines(lines,w,w.tab==='out'?c.cutAt:0)+'</div>';
+  } else if(w.tab==='meta'){
+   h+='<div class="wb"><dl class="kv"><h5>호출</h5><dt>tool_use_id</dt><dd>toolu_01'+w.id.slice(2)+'Xq9…</dd><dt>시작 · 끝</dt><dd>23:39:02.114 → 23:39:09.731</dd><dt>소요</dt><dd>'+c.dur+'</dd>'+(c.exit!=null?'<dt>exit code</dt><dd>'+c.exit+'</dd>':'')+'<dt>권한</dt><dd>auto mode · 규칙 Bash(go test:*) 허용</dd><dt>cwd</dt><dd>/Users/kang-sw/devenv</dd><h5>토큰 (이 호출 직후 요청)</h5><dt>입력 · 캐시</dt><dd>176k · 캐시 읽기 174k</dd><dt>증가분</dt><dd>'+c.tok+'</dd><dt>모델</dt><dd>claude-opus-5-5 · effort high</dd><h5>저장</h5><dt>저장 크기</dt><dd>입력 0.3 KB · 출력 '+(c.out.join('\n').length/1024).toFixed(1)+' KB</dd><dt>리댁션</dt><dd>'+red+'건 (wsredact)</dd><dt>출처</dt><dd>claude · stream-json · 이벤트 #412–413</dd><dt>보존</dt><dd>데몬 저장소 · 기존 GC 규칙 + wsredact</dd></dl></div>';
+  } else if(w.tab==='raw'){
+   var raw={type:'assistant',message:{content:[{type:'tool_use',id:'toolu_01'+w.id.slice(2),name:c.tool,input:c.input}]}},res={type:'user',message:{content:[{type:'tool_result',tool_use_id:'toolu_01'+w.id.slice(2),is_error:c.st==='fail',content:c.out.slice(0,4).join('\n')+'\n… ('+c.out.length+' lines)'}]}};
+   var env={harness:'claude',stream:'stream-json',kind:'tool_call',id:'toolu_01'+w.id.slice(2),seq:[412,413],native:'↓ 하네스가 보낸 원본 이벤트 2개'};h+='<div class="banner info">정규화 봉투(하네스 무관) + 하네스가 보낸 원본 이벤트 그대로. 다른 하네스도 같은 봉투, native만 다름.</div><div class="wb">'+codeLines((JSON.stringify(env,null,2)+'\n'+JSON.stringify(raw,null,2)+'\n'+JSON.stringify(res,null,2)).split('\n'),w,0)+'</div>';
+  } else {
+   h+='<div class="wb"><div class="evl">'+(c.att.length?c.att.map(function(a,i){return'<div class="ev"><div class="eh"><span class="dot" style="width:7px;height:7px;border-radius:50%;background:'+COLOR[a.k]+'"></span><b>'+esc(a.name)+'</b><span style="color:var(--muted)">'+KIND[a.k]+' · '+esc(a.src)+'</span><span style="flex:1"></span><button class="ib" data-a="ev" data-ev="'+w.id+'#'+i+'" title="별도 창">↗</button></div><pre>'+redact(esc(a.text))+'</pre></div>'}).join(''):'<div style="color:var(--muted);font-size:12px">이 호출에 연결된 훅·리마인더 없음</div>')+'</div></div>';
+  }
+ } else {
+  h+='<div class="grab"></div><div class="wh" data-drag><span class="hx">claude</span><span class="tn">'+esc(d.title)+'</span><span class="m">'+esc(d.sub)+'</span><span class="grow"></span>'+nav+'<button class="ib" data-a="copy">⧉</button><button class="ib" data-a="close" title="닫기 (Esc)">✕</button></div>';
+  var tabs2=[['body','내용'],['raw','원본']];
+  h+='<div class="wtabs">'+tabs2.map(function(t){return'<div class="wtab'+(w.tab===t[0]?' on':'')+'" data-tab="'+t[0]+'">'+t[1]+'</div>'}).join('')+'</div>';
+  if(w.tab==='raw')h+='<div class="wb">'+codeLines(JSON.stringify(d.raw,null,2).split('\n'),w,0)+'</div>';
+  else h+='<div class="wb"><div class="evl">'+d.sections.map(function(s){return'<div class="ev"><div class="eh"><b>'+esc(s[0])+'</b></div><pre>'+redact(hl(s[1]))+'</pre></div>'}).join('')+'</div></div>';
+ }
+ h+='<div class="wf"><span><kbd>←</kbd><kbd>→</kbd> 이전/다음</span><span><kbd>Ctrl+F</kbd> 창 검색</span><span><kbd>Esc</kbd> 닫기</span>'+(S.w==='wide'?'<span>헤더 끌기 · 모서리 크기 조절</span>':'')+'</div>';
+ el.innerHTML=h;el.dataset.wid=S.wins.indexOf(w);
+ markCur(w)}
+function markCur(w){var ms=w.el.querySelectorAll('mark[data-m]'),c=w.el.querySelector('[data-cnt]');if(c)c.textContent=w.q?(ms.length?(w.cur+1)+' / '+ms.length:'0건'):'';
+ ms.forEach(function(m,i){m.classList.toggle('cur',i===w.cur)});if(ms[w.cur])ms[w.cur].scrollIntoView({block:'center'})}
+function step(w,dir){var all=rows(),i=all.indexOf(w.id);if(i<0)i=0;var n=all[(i+dir+all.length)%all.length];w.id=n;S.sel=n;renderFeed();var d=winFor(n);w.tab=d.kind==='call'?(['in','out','meta','raw','att'].indexOf(w.tab)>=0?w.tab:'out'):'body';w.cur=0;drawWin(w)}
+function closeWin(w){w.el.remove();S.wins.splice(S.wins.indexOf(w),1);if(!S.wins.length){S.sel=null;renderFeed()}}
+/* ---------- events ---------- */
+$('caFeed').addEventListener('click',function(e){var x=e.target.closest('[data-x]');if(x){S.expand[x.dataset.x]=!S.expand[x.dataset.x];renderFeed();return}
+ var r=e.target.closest('[data-id]');if(r)openWin(r.dataset.id,e.shiftKey)});
+document.querySelector('.ca .phead').addEventListener('click',function(e){var f=e.target.closest('[data-f]');if(!f)return;S.filters[f.dataset.f]=S.filters[f.dataset.f]?0:1;f.classList.toggle('on');renderFeed()});
+$('caQ').addEventListener('input',function(){S.q=this.value.trim();renderFeed()});
+$('caWins').addEventListener('click',function(e){var el=e.target.closest('.win');if(!el)return;var w=S.wins[+el.dataset.wid];el.style.zIndex=++Z;
+ var t=e.target.closest('[data-tab]');if(t){w.tab=t.dataset.tab;w.cur=0;drawWin(w);return}
+ var a=e.target.closest('[data-a]');if(!a)return;var k=a.dataset.a;
+ if(k==='close')closeWin(w);else if(k==='prev')step(w,-1);else if(k==='next')step(w,1);
+ else if(k==='pin'){w.pinned=!w.pinned;drawWin(w)}
+ else if(k==='mnext'||k==='mprev'){var n=w.el.querySelectorAll('mark[data-m]').length;if(n){w.cur=(w.cur+(k==='mnext'?1:-1)+n)%n;markCur(w)}}
+ else if(k==='ev')openWin(a.dataset.ev,true);
+ else if(k==='copy'){a.textContent='✓';setTimeout(function(){a.textContent='⧉'},900)}});
+$('caWins').addEventListener('input',function(e){var el=e.target.closest('.win'),w=S.wins[+el.dataset.wid];
+ if(e.target.matches('[data-wq]')){w.q=e.target.value;w.cur=0;var pos=e.target.selectionStart;drawWin(w);var i=w.el.querySelector('[data-wq]');i.focus();i.setSelectionRange(pos,pos)}
+ else if(e.target.matches('[data-wrap]')){w.wrap=e.target.checked;drawWin(w)}});
+$('caWins').addEventListener('keydown',function(e){if(!e.target.matches('[data-wq]'))return;var w=S.wins[+e.target.closest('.win').dataset.wid];
+ if(e.key==='Enter'){e.preventDefault();var n=w.el.querySelectorAll('mark[data-m]').length;if(n){w.cur=(w.cur+(e.shiftKey?-1:1)+n)%n;markCur(w)}}});
+document.addEventListener('keydown',function(e){var top=S.wins[S.wins.length-1];
+ if(e.target.matches('input')&&e.key!=='Escape')return;
+ if(top&&e.key==='Escape'){closeWin(top);return}
+ if(top&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){e.preventDefault();step(top,e.key==='ArrowRight'?1:-1);return}
+ if(top&&(e.ctrlKey||e.metaKey)&&e.key==='f'){e.preventDefault();var i=top.el.querySelector('[data-wq]');if(i)i.focus();return}
+ if(e.key==='j'||e.key==='k'){var all=rows(),i=all.indexOf(S.sel);S.sel=all[Math.max(0,Math.min(all.length-1,i+(e.key==='j'?1:-1)))];renderFeed()}
+ if(e.key==='Enter'&&S.sel)openWin(S.sel)});
+/* drag by header */
+var drag=null;
+$('caWins').addEventListener('pointerdown',function(e){var hd=e.target.closest('[data-drag]');if(!hd||e.target.closest('button')||S.w!=='wide')return;var el=hd.closest('.win'),w=S.wins[+el.dataset.wid];drag={w:w,x:e.clientX,y:e.clientY,ox:w.x,oy:w.y,sc:scale};hd.setPointerCapture(e.pointerId)});
+$('caWins').addEventListener('pointermove',function(e){if(!drag)return;var w=drag.w;w.x=drag.ox+(e.clientX-drag.x)/drag.sc;w.y=Math.max(0,drag.oy+(e.clientY-drag.y)/drag.sc);w.el.style.left=w.x+'px';w.el.style.top=w.y+'px'});
+$('caWins').addEventListener('pointerup',function(){drag=null});
+/* ---------- layout ---------- */
+var scale=1,DIM={narrow:{w:420,h:760,pane:420},wide:{w:1200,h:720,pane:520}};
+function setW(w){S.w=w;[].forEach.call(document.querySelectorAll('.ca [data-w]'),function(b){b.classList.toggle('on',b.dataset.w===w)});
+ var D=DIM[w];$('caScaler').style.width=D.w+'px';$('caScaler').style.height=D.h+'px';$('caPane').style.width=D.pane+'px';$('caSide').style.left=D.pane+'px';$('caSide').hidden=w==='narrow';
+ S.wins.forEach(function(x,i){x.x=w==='wide'?560+i*28:0;x.y=60+i*28;x.el.style.width='';x.el.style.height='';drawWin(x)});fit()}
+function fit(){var D=DIM[S.w],st=$('caStage');scale=Math.min(1,st.clientWidth/D.w);$('caScaler').style.transform='scale('+scale+')';st.style.height=Math.ceil(D.h*scale)+'px'}
+window.addEventListener('resize',fit);
+[].forEach.call(document.querySelectorAll('.ca [data-w]'),function(b){b.onclick=function(){setW(b.dataset.w)}});
+[].forEach.call(document.querySelectorAll('.ca [data-open]'),function(b){b.onclick=function(){openWin(b.dataset.open)}});
+renderFeed();setW('wide');openWin('c-bash');
+})();
+</script>

@@ -1,5 +1,5 @@
 {{define "session"}}<!DOCTYPE html>
-<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}{{if .Hosted}} data-hosted="1"{{end}}{{if .HandedOff}} data-handed="1"{{end}}{{with .Terminal}} data-term="{{.}}"{{end}}>
+<html data-mode="{{.Mode}}" data-rid="{{.ReplyID}}" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}{{if .Hosted}} data-hosted="1"{{end}}{{if .HandedOff}} data-handed="1"{{end}}{{with .Terminal}} data-term="{{.}}"{{end}}{{if .Frame}} data-frame="1"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
 <title>{{template "stitle" .}}</title>
 <style>{{.Assets.WhiteboardCSS}}</style>{{if .Terminal}}
@@ -7,11 +7,11 @@
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
 <body class="dash {{.Mode}}">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}{{.Assets.LucideSprite}}<div class="dwrap">
-<div class="top"><a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}} (Ctrl+`)" aria-label="{{t "nav.sessions"}} (Ctrl+`)" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
+<div class="top">{{template "railbtn"}}{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
 {{template "drawer" .}}
 <div class="banner" id="dash-banner" hidden></div>
-<div class="dbody"><aside id="rail" class="rail" aria-label="{{t "rail.title"}}">{{region . "rail"}}</aside><div class="rscrim" id="rscrim"></div>
-<aside id="memo-pad" class="memo-pad" aria-label="Workspace memos" aria-hidden="true"><header><b>Memos · <span id="memo-workspace"></span></b><button type="button" id="memo-close" aria-label="Close memos">✕</button></header><textarea id="memo-input" rows="2" maxlength="8000" aria-label="New memo" placeholder="Add a memo · Enter to save, Shift+Enter for a newline"></textarea><p id="memo-status" role="status"></p><div id="memo-list" class="memo-list"></div><div id="memo-undo" hidden>Memo deleted. <button type="button">Undo</button></div></aside>
+<div class="dbody">{{if .Frame}}{{template "railph"}}{{else}}<aside id="rail" class="rail" aria-label="{{t "rail.title"}}">{{region . "rail"}}</aside><div class="rscrim" id="rscrim"></div>
+{{template "memopad"}}{{end}}
 <main id="grid" class="dgrid {{.Mode}}">
 {{if .Adapter}}<nav id="tabbar" class="tabbar"><button data-tab="convo" aria-pressed="true">{{icon "chat"}}{{t "tab.conversation"}}<span class="tdot"></span></button><button data-tab="board" aria-pressed="false">{{icon "board"}}{{t "tab.board"}}<span class="tdot"></span></button></nav>
 <section id="files" class="fpane" aria-label="{{t "tab.files"}}"></section>
@@ -35,13 +35,70 @@ window.wbMermaidFile = {{.Assets.MermaidFile}};</script>
 <script>{{.Assets.MentionScript}}</script>
 <script>{{.Assets.RailScript}}</script>
 <script>{{.Assets.MemoScript}}</script>
+<script>{{.Assets.UsageScript}}</script>
+<script>{{.Assets.ShellScript}}</script>
 <script>{{.Assets.CardsScript}}</script>
 <script>{{.Assets.PreviewScript}}</script>
 <script>{{.Assets.FilesScript}}</script>{{if .Terminal}}
-<script>{{.Assets.TerminalScript}}</script>{{end}}
+<script>{{.Assets.TerminalScript}}</script>{{end}}{{if .SysOpen}}
+<script>{{.Assets.WebScript}}</script>{{end}}
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
+
+{{/* The iframe shell (shellPageData, shell.js): the session rail and the
+top header, which stay across navigations, over the frames the dashboard's
+pages load in (#frames, the first one the page asked for). Each frame's page
+lays itself out as it stands alone, under placeholders for the rail and the
+header's shell-owned items (railph, data-frame), and hands its head to the
+shell. The rail takes its stored marks before it ever shows: rail.js loads
+in the head, and the inline script right after the rail applies the marks
+(rail.js marks) and lifts data-premark, which keeps the rail's rows unseen
+until then. */}}
+{{define "shell"}}<!DOCTYPE html>
+<html data-mode="shell" data-shell="1" data-rid="{{.RID}}" data-assets="{{.Assets.ID}}" data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .SysOpen}} data-sysopen="1"{{end}}>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
+<title>{{.Title}}</title>
+<style>{{.Assets.WhiteboardCSS}}</style>
+<style>{{.Assets.CSS}}</style>
+<style>{{.Assets.TrackerCSS}}</style>
+<script>{{.Assets.RailScript}}</script></head>
+<body class="dash live shell">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}{{.Assets.LucideSprite}}<div class="frames" id="frames"><iframe class="sframe on" src="{{.Src}}" title="{{.Title}}"></iframe></div>
+<div class="dwrap">
+<div class="top{{if .OwnHead}} sh-own{{end}}">{{template "railbtn"}}{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
+<div class="dbody"><aside id="rail" class="rail" aria-label="{{t "rail.title"}}" data-premark>{{region . "rail"}}</aside><script>(function () {
+  var R = window.WsRail, r = document.getElementById("r-rail"), s = null;
+  try {
+    try { s = window.localStorage; } catch (e) { s = null; }
+    var store = { load: function (k) { try { return s ? s.getItem(k) : null; } catch (e) { return null; } }, save: function () {} };
+    if (!R || !r) return;
+    R.marks(r, R.state(store), document.documentElement.getAttribute("data-rid"));
+    var list = document.getElementById("rlist"), top = parseInt(store.load("ws.dashboard.railscroll"), 10);
+    if (list && isFinite(top)) list.scrollTop = top;
+  } finally { document.getElementById("rail").removeAttribute("data-premark"); }
+})();</script><div class="rscrim" id="rscrim"></div>
+{{template "memopad"}}</div></div>
+<script>{{i18n}}</script>
+<script>{{.Assets.ToastScript}}</script>
+<script>{{.Assets.MemoScript}}</script>
+<script>{{.Assets.UsageScript}}</script>
+<script>{{.Assets.ShellScript}}</script>
+<script>{{.Assets.Script}}</script>
+</body></html>
+{{end}}
+
+{{/* The rail button: it opens the session rail where the rail overlays
+the page (narrow windows, beside the pinned column), and on a page the
+iframe shell frames holds the place of the shell's own (data-frame). */}}
+{{define "railbtn"}}<a class="back" id="railbtn" href="/" title="{{t "nav.sessions"}} (Ctrl+`)" aria-label="{{t "nav.sessions"}} (Ctrl+`)" aria-controls="rail" aria-expanded="false">{{icon "back"}}</a>{{end}}
+
+{{/* The rail's placeholder on a page the iframe shell frames: an empty,
+invisible rail that takes the rail's place in every layout, under the
+shell's own rail. */}}
+{{define "railph"}}<aside class="rail rail-ph" aria-hidden="true"></aside>{{end}}
+
+{{/* The workspace memo pad beside the rail (memo.js). */}}
+{{define "memopad"}}<aside id="memo-pad" class="memo-pad" aria-label="Workspace memos" aria-hidden="true"><header><b>Memos · <span id="memo-workspace"></span></b><button type="button" id="memo-close" aria-label="Close memos">✕</button></header><textarea id="memo-input" rows="2" maxlength="8000" aria-label="New memo" placeholder="Add a memo · Enter to save, Shift+Enter for a newline"></textarea><p id="memo-status" role="status"></p><div id="memo-list" class="memo-list"></div><div id="memo-undo" hidden>Memo deleted. <button type="button">Undo</button></div></aside>{{end}}
 
 {{/* The search-palette button slot. Its modal mounts in the body, outside
 header stacking contexts (dashboard.js mounts the tracker renderer). */}}
@@ -223,8 +280,10 @@ the turn end. */}}
 composer's chips: "(ids) value" with the note beside it, a topic note as
 "[topic]" and its note. A held bubble lists one per chip, a delivered one
 one per line of the answer block its text started with. The message's
-mentions follow as "[topic] (id)" and an excerpt of the selected text. */}}
-{{define "achips"}}{{if or .Answers .Mentions}}<div class="hchips">{{range .Answers}}{{if .Topic}}<span class="achip tchip"><b>[{{.Topic}}]</b><span class="anote" title="{{.Note}}">{{.Note}}</span></span>{{else}}<span class="achip"><b>({{.IDs}})</b> {{or .Value "note"}}{{with .Note}}<span class="anote" title="{{.}}">{{.}}</span>{{end}}</span>{{end}}{{end}}{{range .Mentions}}<span class="achip mchip" title="{{.Text}}"><b>[{{.Topic}}]{{with .ID}} ({{.}}){{end}}</b><span class="anote">{{.Text}}</span></span>{{end}}</div>{{end}}{{end}}
+mentions follow as "[topic] (id)" and an excerpt of the selected text, then
+a picked page element as its selector and text, and attached console errors
+as "console xN" and the page's URL. */}}
+{{define "achips"}}{{if or .Answers .Mentions .Picks .Consoles}}<div class="hchips">{{range .Answers}}{{if .Topic}}<span class="achip tchip"><b>[{{.Topic}}]</b><span class="anote" title="{{.Note}}">{{.Note}}</span></span>{{else}}<span class="achip"><b>({{.IDs}})</b> {{or .Value "note"}}{{with .Note}}<span class="anote" title="{{.}}">{{.}}</span>{{end}}</span>{{end}}{{end}}{{range .Mentions}}<span class="achip mchip" title="{{.Text}}"><b>[{{.Topic}}]{{with .ID}} ({{.}}){{end}}</b><span class="anote">{{.Text}}</span></span>{{end}}{{range .Picks}}<span class="achip mchip pchip" title="{{.URL}}&#10;{{.Selector}}{{with .Text}}&#10;{{.}}{{end}}"><b>{{.Selector}}</b>{{with .Text}}<span class="anote">{{.}}</span>{{end}}</span>{{end}}{{range .Consoles}}<span class="achip mchip cchip" title="{{.URL}}{{range .Lines}}&#10;{{.}}{{end}}"><b>console &times;{{len .Lines}}</b><span class="anote">{{.URL}}</span></span>{{end}}</div>{{end}}{{end}}
 
 {{define "thumbs"}}<div class="thumbs">{{range .}}{{if .Src}}<a class="thumb" href="{{.Src}}" target="_blank" rel="noopener noreferrer" title="{{.Path}}"><img src="{{.Src}}" alt="{{.Name}}" loading="lazy">{{with .Num}}<span class="tnum">#{{.}}</span>{{end}}</a>{{else}}<span class="ipath">{{if .Num}}Image #{{.Num}}: {{.Path}}{{else}}[image: {{.Path}}]{{end}}</span>{{end}}{{end}}</div>{{end}}
 
@@ -244,20 +303,23 @@ line, the head's failure chip, and a rail row's error ring title. */}}
 {{define "mailhead"}}<span class="arr">{{if eq .Direction "sent"}}→{{else}}←{{end}}</span>{{if .PeerLinked}}<a class="mpeer" href="/s/{{.PeerReplyID}}"{{if .PeerLabel}} title="{{.Peer}}"{{end}}>{{or .PeerLabel .Peer}}</a>{{else}}<span class="mpeer">{{.Peer}}</span>{{end}}<span class="mfirst">: {{.Title}}</span>{{template "clock" .At}}{{end}}
 
 {{define "index"}}<!DOCTYPE html>
-<html data-mode="index" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .Local}} data-sysopen="1"{{end}}>
+<html data-mode="index" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .Local}} data-sysopen="1"{{end}}{{if .Frame}} data-frame="1"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
 <title>ws dashboard</title>
 <style>{{.Assets.WhiteboardCSS}}</style>
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
-<body class="dash index">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap narrow">
-<div class="top"><h1>ws dashboard</h1><span class="meta">v{{.Version}}</span>{{template "sse"}}{{template "qsslot"}}{{template "gear" false}}</div>
+<body class="dash index">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap{{if not .Frame}} narrow{{end}}">
+<div class="top">{{if .Frame}}{{template "railbtn"}}{{end}}<h1>ws dashboard</h1><span class="meta">v{{.Version}}</span>{{template "sse"}}{{template "qsslot"}}{{template "gear" false}}</div>
+{{if .Frame}}<div class="dbody">{{template "railph"}}<main class="ixmain">{{end}}
 {{with .LAN}}<div class="lanbox"><b>{{t "lan.on"}}</b> {{t "lan.open"}}{{range .URLs}}<code class="lanurl">{{.}}</code>{{end}}<span class="lannote">{{tcode "lan.note" .TokenFile}}</span></div>{{end}}
 {{region . "sessions"}}
+{{if .Frame}}</main></div>{{end}}
 </div>
 <script>{{i18n}}</script>
 <script>{{.Assets.ToastScript}}</script>
 <script>{{.Assets.TrackerScript}}</script>
+<script>{{.Assets.ShellScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
 {{end}}
@@ -288,7 +350,7 @@ stored parent data-kids. A workspace bar is a container,
 not a button: its collapse toggle (.wstog), the add-worktree + (a repository
 on a daemon that keeps stored workspaces), and forget (a stored workspace)
 are sibling buttons. */}}
-{{define "r-rail"}}<div class="rhd"><b class="rtitle">{{t "rail.title"}}</b>{{if .CanAdd}}<button type="button" class="radd" data-add="ws" title="{{t "rail.ws.add"}}" aria-label="{{t "rail.ws.add"}}" aria-haspopup="dialog" aria-expanded="false">{{icon "plus"}}</button>{{end}}<span class="rsp"></span><span class="chip" title="{{t "rail.live.title"}}">{{t "index.live" .Live}}</span>{{with .CountApproval}}<span class="chip perm" title="{{t "rail.approvals"}}">{{icon "lock"}}{{.}}</span>{{end}}{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}<button type="button" class="rref" id="railref" title="{{t "rail.refresh"}}" aria-label="{{t "rail.refresh"}}">{{icon "reload"}}</button></div><div class="rlist" id="rlist" data-max="{{.LabelMax}}" data-lgen="{{.LayoutGen}}"{{if .LayoutEmpty}} data-layout-empty="1"{{end}}>{{range $ws := .Workspaces}}<section class="rws" data-ws="{{.Path}}"><div class="wsbar"><button type="button" class="wstog" aria-expanded="true" title="{{.Path}}">{{if .Repo}}<span class="wsi" title="{{t "rail.repo"}}">{{icon "repo"}}</span>{{else}}<span class="wsi" title="{{t "rail.folder"}}">{{icon "wsfolder"}}</span>{{end}}<span class="nm">{{.Name}}</span><span class="pp">{{.Path}}</span></button>{{if and .Repo $.CanAdd}}<button type="button" class="radd" data-add="wt" title="{{t "rail.wt.add" .Name}}" aria-label="{{t "rail.wt.add" .Name}}" aria-haspopup="dialog" aria-expanded="false">{{icon "plus"}}</button>{{end}}{{if .Stored}}<button type="button" class="rforget" title="{{t "rail.ws.forget" .Name}}" aria-label="{{t "rail.ws.forget" .Name}}">{{icon "x"}}</button>{{end}}{{with .Approvals}}<span class="chip perm" title="{{t "rail.approvals"}}">{{icon "lock"}}{{.}}</span>{{end}}<button type="button" class="memo-count" title="Workspace memos" aria-label="Workspace memos">▤ <span>{{.MemoCount}}</span></button><span class="ct" title="{{t "rail.live.title"}}">{{.Live}}</span></div><div class="wsbody">{{if .Repo}}{{range .Worktrees}}<div class="rwt{{if .Empty}} empty{{end}}" data-g="{{.Path}}"><div class="wthd" title="{{.Path}}">{{icon "branch"}}<span class="br">{{if .Detached}}{{t "rail.detached"}}{{else}}{{.Branch}}{{end}}</span><span class="wf">· {{if .Root}}{{t "rail.root"}}{{else}}{{.Folder}}{{end}}</span>{{if $.CanSpawn}}{{$b := .Branch}}{{if .Detached}}{{$b = t "rail.detached"}}{{end}}<button type="button" class="rnew" data-root="{{.Path}}" data-name="{{$ws.Name}}" data-branch="{{$b}}" title="{{t "rail.new.title" $b}}" aria-label="{{t "rail.new.title" $b}}" aria-haspopup="dialog" aria-expanded="false">{{icon "plus"}}</button>{{end}}{{if and .Deletable $.CanAdd}}<button type="button" class="rdel" data-ws="{{$ws.Path}}" data-path="{{.Path}}" data-folder="{{.Folder}}" title="{{t "rail.wt.delete" .Folder}}" aria-label="{{t "rail.wt.delete" .Folder}}" aria-haspopup="dialog">{{icon "trash"}}</button>{{end}}{{if .HasChanges}}<span class="gs" title="{{t "rail.changes"}}">±{{.Changes}}</span>{{end}}</div>{{template "rsessions" .}}</div>{{end}}{{else}}{{template "rsessions" .}}{{end}}</div></section>{{else}}<div class="empty">{{t "index.empty"}}</div>{{end}}</div><div class="rfoot"><a href="/">{{t "nav.sessions"}}</a></div>{{end}}
+{{define "r-rail"}}<div class="rhd"><b class="rtitle">{{t "rail.title"}}</b>{{if .CanAdd}}<button type="button" class="radd" data-add="ws" title="{{t "rail.ws.add"}}" aria-label="{{t "rail.ws.add"}}" aria-haspopup="dialog" aria-expanded="false">{{icon "plus"}}</button>{{end}}<span class="rsp"></span><span class="chip" title="{{t "rail.live.title"}}">{{t "index.live" .Live}}</span>{{with .CountApproval}}<span class="chip perm" title="{{t "rail.approvals"}}">{{icon "lock"}}{{.}}</span>{{end}}{{with .CountPolicy}}<span class="chip policy" title="{{t "chip.answer"}}">{{icon "ask"}}{{.}}</span>{{end}}<button type="button" class="rref" id="railref" title="{{t "rail.refresh"}}" aria-label="{{t "rail.refresh"}}">{{icon "reload"}}</button></div><div class="rlist" id="rlist" data-max="{{.LabelMax}}" data-lgen="{{.LayoutGen}}"{{if .LayoutEmpty}} data-layout-empty="1"{{end}}>{{range $ws := .Workspaces}}<section class="rws" data-ws="{{.Path}}"><div class="wsbar"><button type="button" class="wstog" aria-expanded="true" title="{{.Path}}">{{if .Repo}}<span class="wsi" title="{{t "rail.repo"}}">{{icon "repo"}}</span>{{else}}<span class="wsi" title="{{t "rail.folder"}}">{{icon "wsfolder"}}</span>{{end}}<span class="nm">{{.Name}}</span><span class="pp">{{.Path}}</span></button>{{if and .Repo $.CanAdd}}<button type="button" class="radd" data-add="wt" title="{{t "rail.wt.add" .Name}}" aria-label="{{t "rail.wt.add" .Name}}" aria-haspopup="dialog" aria-expanded="false">{{icon "plus"}}</button>{{end}}{{if .Stored}}<button type="button" class="rforget" title="{{t "rail.ws.forget" .Name}}" aria-label="{{t "rail.ws.forget" .Name}}">{{icon "x"}}</button>{{end}}{{with .Approvals}}<span class="chip perm" title="{{t "rail.approvals"}}">{{icon "lock"}}{{.}}</span>{{end}}<button type="button" class="memo-count" title="Workspace memos" aria-label="Workspace memos">▤ <span>{{.MemoCount}}</span></button><span class="ct" title="{{t "rail.live.title"}}">{{.Live}}</span></div><div class="wsbody">{{if .Repo}}{{range .Worktrees}}<div class="rwt{{if .Empty}} empty{{end}}" data-g="{{.Path}}"><div class="wthd" title="{{.Path}}">{{icon "branch"}}<span class="br">{{if .Detached}}{{t "rail.detached"}}{{else}}{{.Branch}}{{end}}</span><span class="wf">· {{if .Root}}{{t "rail.root"}}{{else}}{{.Folder}}{{end}}</span>{{if $.CanSpawn}}{{$b := .Branch}}{{if .Detached}}{{$b = t "rail.detached"}}{{end}}<button type="button" class="rnew" data-root="{{.Path}}" data-name="{{$ws.Name}}" data-branch="{{$b}}" title="{{t "rail.new.title" $b}}" aria-label="{{t "rail.new.title" $b}}" aria-haspopup="dialog" aria-expanded="false">{{icon "plus"}}</button>{{end}}{{if and .Deletable $.CanAdd}}<button type="button" class="rdel" data-ws="{{$ws.Path}}" data-path="{{.Path}}" data-folder="{{.Folder}}" title="{{t "rail.wt.delete" .Folder}}" aria-label="{{t "rail.wt.delete" .Folder}}" aria-haspopup="dialog">{{icon "trash"}}</button>{{end}}{{if .HasChanges}}<span class="gs" title="{{t "rail.changes"}}">±{{.Changes}}</span>{{end}}</div>{{template "rsessions" .}}</div>{{end}}{{else}}{{template "rsessions" .}}{{end}}</div></section>{{else}}<div class="empty">{{t "index.empty"}}</div>{{end}}</div><div class="rfoot"><button type="button" class="usage-toggle" aria-label="Plan usage" aria-haspopup="dialog" aria-expanded="false"><span class="usage-empty">Plan usage</span></button></div>{{end}}
 
 {{define "rsessions"}}{{if or .Sessions .Ended}}<div class="rsessions">{{range .Sessions}}{{$p := .ReplyID}}{{template "rrow" .}}{{with .Children}}<div class="rkids" data-parent="{{$p}}">{{range .}}{{template "rrow" .}}{{end}}</div>{{end}}{{end}}{{with .Ended}}<details class="rended" data-key="rended:{{$.Path}}"><summary>{{t "rail.ended" (len .)}}</summary><div class="rsessions">{{range .}}{{template "rrow" .}}{{end}}</div></details>{{end}}</div>{{end}}{{end}}
 

@@ -92,8 +92,11 @@ export interface BridgeHandle {
    * opening a second connection to the launcher.
    */
   client: McpStdioClient;
-  /** Unique local bootstrap that launched this connected bridge; copy it once for the mailbox before releasing it. */
-  /** Release the bootstrap after the mailbox owns its copy; also called on shutdown/failure. */
+  /**
+   * Delete this bridge's unique local bootstrap build and its metadata once
+   * the bridge's launcher has installed them; idempotent, and also called on
+   * shutdown/failure. Mailbox waits run through the launcher and need no copy.
+   */
   releaseLocalBootstrap(): void;
   /**
    * Awaited before every child launch (spawn or dormant resume). Present only

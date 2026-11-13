@@ -74,16 +74,13 @@ func TestBundledPluginRootInvalidExplicitRootDoesNotFallBack(t *testing.T) {
 	}
 }
 
-func TestBundledPluginRootSourceBuild(t *testing.T) {
+// Without a launcher-provided resource root, resolution uses only the
+// executable-derived bundle; a test binary has none beside it, and there is no
+// source-tree fallback.
+func TestBundledPluginRootWithoutResourceRootHasNoSourceFallback(t *testing.T) {
 	t.Setenv(wsrsrc.EnvRsrcRoot, "")
 	root, err := bundledPluginRoot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !filepath.IsAbs(root) {
-		t.Fatalf("source-build root is not absolute: %s", root)
-	}
-	if err := validateBundledPlugin(root); err != nil {
-		t.Fatal(err)
+	if err == nil || root != "" {
+		t.Fatalf("bundledPluginRoot without resource root = %q, %v; want refusal", root, err)
 	}
 }

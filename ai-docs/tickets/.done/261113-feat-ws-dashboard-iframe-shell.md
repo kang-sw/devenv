@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 1ad6563f62410a0a
 sage-review-completeness-reviewed: 1ad6563f62410a0a
+completed: 2026-11-14
 ---
 
 # ws dashboard iframe shell
@@ -186,6 +187,108 @@ click on an in-frame `/s/<id>` link switches frames through the shell (URL
 updated by `pushState`, no plain-page load in the frame); browser back and
 forward switch frames.
 
+### Result (ffca4d075) - 2026-11-14
+
+Landed (review fixes in bff1dcdb1):
+
+- `/s/<id>` serves the shell (`{{define "shell"}}`): the session rail, the top
+  header, and `#frames`. `/s/<id>?frame=1` serves the session page as before,
+  with `data-frame`, an invisible rail placeholder (`railph`), and invisible
+  header items.
+- Overlay model. Frames fill the window under the shell. The shell's rail and
+  header items take pointer events above them, so each framed page keeps its
+  own media queries, the wide-view left-aligned layout, and the pinned column
+  unchanged.
+- Streams. The shell streams the rail alone on the new `GET /rail/events`.
+  `/s/<id>/events?frame=1` omits the rail. The plain session stream still
+  carries it, which keeps older open pages working (T0).
+- Frames. `WsShell.LIMIT` = 5, recency ordered (`WsShell.touch`). The shown
+  frame is never evicted, and pages opened and left before they showed go
+  first. A frame holding unsent work stays past the limit until it holds none.
+  The address bar uses `pushState`; `popstate` shows the kept frame.
+- Hidden frames are told on every load and switch (`shown`). While hidden they
+  hold region swaps (newest per region), skip the clock, defer the tracker
+  reload, and skip tracker toasts. On show they apply the held work once.
+- Framing headers per (503). `?frame=1` session and finding responses send
+  `frame-ancestors 'self'` and `SAMEORIGIN`. Every other response keeps
+  `'none'` and `DENY`. The session page keeps `frame-src 'self'` with no
+  proxy origins (coordinator directive superseding the Composed CSP proxy
+  text). `TestPagesRefuseFraming` keeps a `sameOrigin` list a later route
+  joins.
+
+Flicker fix (501): rail.js moved into the shell's `<head>`. An inline script
+placed right after the rail calls `WsRail.marks(r-rail, WsRail.state(store),
+rid)` before the parser yields, then restores the rail scroll.
+`data-premark` keeps the rail rows unseen until that script ran. Ended folds
+are now persisted too (`ws.dashboard.railended`, browser storage, T0). No
+cookie or server state is involved.
+
+postMessage shapes (UI control only; `WsShell.message` type-checks each kind,
+and a receiver takes a message only from its own origin, the shell only from
+one of its frames and a frame only from its parent):
+
+- frame to shell:
+  - `head {html|null, qs, pad, top}`
+  - `title {title}`
+  - `nav {href}`
+  - `key {key: "rail"|"esc"}`
+  - `layout {pincol, dim}`
+  - `scroll {y}`
+  - `hash {hash}`
+  - `theme {theme}`
+- shell to frame:
+  - `shown {shown}`
+  - `search {}`
+  - `menu {}`
+  - `sync {}`
+  - `theme {theme}`
+
+Decisions taken (for veto):
+
+- The search palette stays in the frame. The shell's mirrored search button
+  and Ctrl+K / Ctrl+Space / "/" send `search`, and the palette reads its
+  session rows from the shell's rail.
+- The hosted session menu chip in the shell sends `menu`.
+- The shell dims its rail and header by the frame's modal backdrop alpha
+  (`layout.dim`), so overlays read window-wide.
+- Pages that scroll as a whole (board-first) send `scroll`, and the shell's
+  header and rail move like the sticky originals.
+- Non-session links in a frame navigate the top level (Phase 1 rule). The
+  shell's own non-framed links do too.
+
+Verification (local; the sys_lock remote w5090 was unavailable):
+
+- `go test ./internal/wsdashboard/` passes except five tests that fail
+  identically on the base commit: `TestMailboxBadgeTopLevel`,
+  `TestRailScript`, and three tracker UI node tests.
+- New tests:
+  - `TestPagesRefuseFraming`, `TestSessionPageFramesOnlyItsOwnOrigin`
+  - `TestSessionURLServesTheShellAroundItsFramedPage`
+  - `TestShellStreamsTheRailAndItsFramesTheirRegions`
+  - `TestShellScript`, `TestRailMarks`
+  - `TestShellSwitchesFramesThroughItsGlue`: message trust, load/hidden
+    state, pushState/popstate, the LRU, click interception
+- LOOK: the wide (1800) shell is pixel-identical to the pre-change page.
+  The narrow (1200) shell keeps the overlay rail with the memo pad and
+  scrim, matching the pre-change page.
+- Flicker, headless at 8x CPU throttle: at the first animation frame with
+  rail rows, the shell already shows the stored star, order, current row,
+  and a collapsed workspace. The pre-change page shows the server's order
+  in both cases.
+- Headless interaction, no page errors:
+  - with focus in a frame, Ctrl+` toggles the shell rail and Esc closes it
+  - Ctrl+K in a frame opens the palette with focus in its input
+  - the shell's search button opens the frame's palette, and a palette
+    session pick switches frames
+  - an in-frame `/s/<id>` link switches frames via pushState, with no load
+    in the frame
+  - back and forward switch frames
+  - a URL with a query still registers its frame
+- Switch times on the test fixture:
+  - warm (kept frame): 25-33 ms click-to-painted (9-13 ms in-page)
+  - cold: 81-132 ms
+  - the pre-change full reload, same method: 74-123 ms
+
 ### Phase 2: Remaining pages as frames, throttling, render fan-out
 
 All remaining dashboard pages open as frames inside the shell: every
@@ -201,3 +304,99 @@ that two frames of the same session cause one region render per update
 today's full reload (owner-observed 500-1000 ms), pass when switching to a
 session still in the LRU completes under 100 ms and a cold switch is no
 slower than the baseline.
+
+### Result (3310356af) - 2026-11-14
+
+Landed (review fixes in b8936093d):
+
+- `/` serves the shell, and its first frame is the index with `?frame=1`.
+  `/?frame=1` serves the framed index: `data-frame`, the rail placeholder,
+  and its list (`ixmain`) left-aligned at max 1080px beside the rail. It
+  answers `frame-ancestors 'self'` and `SAMEORIGIN`, and it joins the
+  `sameOrigin` list in `TestPagesRefuseFraming`. The shell at `/` keeps
+  `'none'` and `DENY`.
+- `WsShell.framed` takes `/`, so index and session pages switch frames
+  through the shell in both directions: a row in the index, the rail's
+  "all sessions" link, palette picks, and back and forward.
+- The index keeps its own header (`head` with `html: null`). The shell's top
+  shows only its rail button (`sh-own`), and the framed index shows its own
+  title, search slot, and gear.
+- Hash sync: a frame posts `hash` on `hashchange`, on `popstate`, and after
+  its own `history.pushState` and `replaceState`. The tracker's store pages
+  move the hash by history calls and fire no `hashchange`.
+- postMessage shapes: unchanged from Phase 1. The index sends the same
+  kinds, with `head.html` null.
+
+Decisions taken (for veto):
+
+- The index keeps its own header rather than mirroring it into the shell.
+  It has no session head, and its title, search slot, and gear already sit
+  in its own top bar.
+- Framed, the index drops its centered narrow layout. It follows the
+  wide-view rule (left-aligned panels) beside the rail.
+- The hash sync wraps the frame's history calls rather than changing the
+  tracker's code, so any page code that moves the hash that way is covered.
+- On the index the shell has no current session, so the rail's memo pad
+  follows the first workspace.
+
+Exceptions (not framed; each still refuses framing or is not an HTML page):
+
+- File views (`/s/<id>/file?path=`), opened in a tab of their own
+- The outside-file view and its re-mint page (`/s/<id>/fs/...`), opened in
+  a tab of their own
+- Capability-served preview documents, which keep their own sandboxed
+  framing by the session page
+- PWA assets, and the API, support, agent, holder, and debug routes, which
+  are not dashboard pages
+
+The tracker and its wiki are hash routes and views inside the index and
+session pages, so they are framed with those pages.
+
+Hidden-frame throttling and render fan-out landed with Phase 1's frames
+(bff1dcdb1). Their Phase 2 tests:
+
+- `TestHiddenFrameHoldsItsUpdatesUntilShown`: a hidden frame holds region
+  swaps (newest per region), skips the clock, defers the tracker reload, and
+  applies all of it once when shown.
+- `TestFramesOfOneSessionShareOneRender`: two framed streams of one session
+  and two rail streams cost one session render and one rail render per
+  update.
+
+The index frame streams `/events` under the same hold. Wait notifications
+come from the shell's rail only, since a framed page scans none.
+
+Verification (local; the sys_lock remote w5090 was unavailable):
+
+- `go test ./internal/wsdashboard/`: only the five base-commit failures
+  remain (see Phase 1). New or changed tests:
+  - `TestIndexServesTheShellAroundItsFramedPage`
+  - the index cases in `TestShellScript`
+  - `TestPagesRefuseFraming` with `/?frame=1`
+  - in `TestHiddenFrameHoldsItsUpdatesUntilShown`, the hash a frame posts
+    on pushState, replaceState, popstate, and hashchange
+  - the LAN test, which now also pins that the shell at `/` carries no token
+  - index-content tests (pages, i18n, theme, toast, cards, files, label,
+    support chat, dev assets), which now read `/?frame=1`
+- Lite review: one Important finding, fixed. Two negative index
+  assertions could no longer fail against the shell. The three Minor
+  findings were taken or recorded above.
+- LOOK, wide (1800): the rail at left, and the index header and list
+  left-aligned beside it. The pre-change index is a centered narrow list
+  with no rail.
+- LOOK, narrow (1200): the rail button opens the overlay rail with its memo
+  pad, as on a session page. Scrolled, the index header and the shell's
+  rail button move away together.
+- Headless, no page errors (only the fixture's existing `/tracker/stores`
+  404):
+  - a row click shows the session frame via pushState
+  - "all sessions" shows the kept index frame
+  - back and forward switch frames
+  - Ctrl+K in the index frame opens its palette
+- Switch times, click-to-painted on the test fixture:
+  - index to session: cold 131 ms, warm 30-32 ms
+  - session to index: warm 30-32 ms
+  - pre-change full reload: index to session 74-148 ms, session to index
+    56-67 ms
+  - session to session (Phase 1): warm 25-33 ms, cold 81-132 ms
+  - Every warm switch is under 100 ms. Cold switches fall within the
+    pre-change reload range.

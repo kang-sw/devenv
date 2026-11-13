@@ -241,7 +241,7 @@ func TestByteSize(t *testing.T) {
 // card.
 func TestWorktreesCardInTheDrawer(t *testing.T) {
 	f, _, _, _ := worktreeFixture(t)
-	_, live := get(t, f.base+"/s/livesession")
+	_, live := get(t, f.base+"/s/livesession?frame=1")
 	panels, card, settings := strings.Index(live, `data-region="panels"`), strings.Index(live, `id="p-worktrees"`), strings.Index(live, `id="p-settings"`)
 	if panels < 0 || card < panels || settings < card {
 		t.Fatalf("drawer order: panels %d, worktrees %d, settings %d", panels, card, settings)
@@ -251,13 +251,13 @@ func TestWorktreesCardInTheDrawer(t *testing.T) {
 			t.Errorf("live page lacks %q", want)
 		}
 	}
-	_, board := get(t, f.base+"/s/boardsession")
+	_, board := get(t, f.base+"/s/boardsession?frame=1")
 	if !strings.Contains(board, `id="wtclean" disabled title="this session has no live host adapter to ask">`) {
 		t.Errorf("board-first page's cleanup button is not disabled with its reason")
 	}
 
 	bare := startPageFixture(t)
-	if _, page := get(t, bare.base+"/s/livesession"); strings.Contains(page, `id="p-worktrees"`) || !strings.Contains(page, `id="p-settings"`) {
+	if _, page := get(t, bare.base+"/s/livesession?frame=1"); strings.Contains(page, `id="p-worktrees"`) || !strings.Contains(page, `id="p-settings"`) {
 		t.Errorf("a daemon without a worktree source: worktrees card present or settings card missing")
 	}
 }

@@ -965,6 +965,22 @@ const SCENARIOS = [
       } finally {
         await o.context.close();
       }
+      // The light scheme: the rail column, then the whole shell page (the
+      // rail in the shell's document beside the framed session page).
+      const l = await makeContext(browser, t.base, t.fx, { viewport: { width: 1700, height: 820 }, colorScheme: "light" });
+      try {
+        await l.open("rail-f-1");
+        assert(await l.page.evaluate(() => document.documentElement.hasAttribute("data-shell") && !!document.querySelector("iframe.sframe.on") && !!document.getElementById("rlist")), "the rail is not in the iframe shell's document");
+        await l.page.hover(`${l.sel("rail-a-03")} .rid`);
+        await sleep(250);
+        await snap(l.page, "#rail", "rail-column-hover-light.png");
+        await snap(l.page, "body", "shell-light.png");
+      } finally {
+        await l.context.close();
+      }
+      await t.page.mouse.move(1600, 400);
+      await sleep(250);
+      await snap(t.page, "body", "shell-dark.png");
       if (fs.existsSync(MOCKUP)) {
         const m = await t.context.newPage();
         await m.setViewportSize({ width: 1100, height: 900 });
@@ -1273,9 +1289,13 @@ const SCENARIOS = [
       await page.keyboard.press("Escape");
       assert(!(await t.menu()), "Escape did not close the row menu");
       // The viewed session's own menu, on the head's chip, posts to its own.
+      // Under the iframe shell the shell's head mirrors the framed page's,
+      // and a click on its chip asks the shown frame to open the menu
+      // against its own head (the shell's "menu" message): the menu is in
+      // that frame's document.
       posts.length = 0;
       await page.click(".host.hbtn");
-      const head = page.locator(".rpop:not(.rmenu):not([hidden])");
+      const head = page.frameLocator("iframe.sframe.on").locator(".rpop:not(.rmenu):not([hidden])");
       await until("the head's session menu", async () => (await head.count()) === 1);
       v = await pick(head);
       await until("the viewed session's settings post", () => posts.length > 0);

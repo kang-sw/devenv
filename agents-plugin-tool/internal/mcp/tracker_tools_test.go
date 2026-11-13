@@ -827,7 +827,46 @@ func TestTrackerUpdateRefusesStage(t *testing.T) {
 	for _, want := range []string{
 		`command 1 <tk:item.create> (line 1): unknown attribute stage (known: `,
 		`command 2 <tk:item.edit> (line 1): unknown attribute stage (known: `,
-		`command 3 <tk:item.edit> (line 1) clear: must list body or due; got "stage"`,
+		`command 3 <tk:item.edit> (line 1) clear: must list body, due, or start; got "stage"`,
+	} {
+		if !slices.ContainsFunc(problems.List, func(p string) bool { return strings.HasPrefix(p, want) }) {
+			t.Errorf("problems missing %q:\n%q", want, problems.List)
+		}
+	}
+}
+
+// start rides item.create and item.edit like due: an attribute sets it,
+// clear="start" writes null, and an edit that names only start carries no
+// other field.
+func TestTrackerUpdateStart(t *testing.T) {
+	b := trackerPlan(t, `<tk:item.create kind="task" title="t" start="2026-11-05" due="2026-11-10"/>`+
+		`<tk:item.edit item="$1" start="2026-11-07"/>`+
+		`<tk:item.edit item="$1" clear="start"/>`+
+		`<tk:item.edit item="$1" start="2026-11-08" clear="due"/>`)
+	for i, want := range []map[string]any{
+		{"kind": "task", "title": "t", "start": "2026-11-05", "due": "2026-11-10"},
+		{"start": "2026-11-07"},
+		{"start": nil},
+		{"start": "2026-11-08", "due": nil},
+	} {
+		got := map[string]any{}
+		for k, v := range b.events[i].payload {
+			if k != "item" {
+				got[k] = v
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("event %d (%s) payload %v, want %v", i+1, b.events[i].typ, got, want)
+		}
+	}
+
+	var problems wsxmlcmd.Problems
+	planTrackerBatch(&problems, `<tk:store name="team"><tk:item.create kind="task" title="t"/>`+
+		`<tk:item.edit item="$1" start="2026-11-07" clear="start"/>`+
+		`<tk:item.edit item="$1" start=""/></tk:store>`, []wstrackerhost.StoreEntry{{ID: "team", Member: "ada"}}, trackerTestReach)
+	for _, want := range []string{
+		`command 2 <tk:item.edit> (line 1): clear="start" with a start attribute; send one or the other`,
+		`command 3 <tk:item.edit> (line 1) start (clear="start" removes it)`,
 	} {
 		if !slices.ContainsFunc(problems.List, func(p string) bool { return strings.HasPrefix(p, want) }) {
 			t.Errorf("problems missing %q:\n%q", want, problems.List)

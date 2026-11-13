@@ -1,24 +1,26 @@
 (function () {
   // The session rail's browser-side state, window.WsRail, for the session
-  // page's script (dashboard.js): per-session drafts, the collapsed
-  // workspaces and parents, and the rail's client-side marks (the viewed
-  // session's row, the revive entry in flight), with the drag's refusal,
-  // re-find, and swap-hold rules, the tree's drop zones (which the keyboard
-  // path's moves and the context menu's "move under" read too), and the
-  // rail layout route's answers. The daemon keeps the rows' order and tree, the
-  // stars, and the workspace order (its rail layout, POST /rail/layout)
-  // and renders the rail in that order; the page only reads a row's star
-  // and place from it. The drafts and the collapsed sets are in
-  // localStorage under ws.dashboard., through the store the caller passes
-  // ({ load(key), save(key, value or null) }, which must not throw), so the
-  // page works the same with storage absent; the retired local order and
-  // stars are read there once, for the layout's import. The DOM helpers
-  // touch only the elements they are given; the revive route and hand-off
-  // notice, the popover and delete modal helpers at the end, and the
-  // approval card's input preview after them, are pure.
+  // page's script (dashboard.js) and the iframe shell's first paint:
+  // per-session drafts, the collapsed workspaces, parents, and ended folds
+  // left open, and the rail's client-side marks (the viewed session's row,
+  // the revive entry in flight), with the drag's refusal, re-find, and
+  // swap-hold rules, the tree's drop zones (which the keyboard path's moves
+  // and the context menu's "move under" read too), and the rail layout
+  // route's answers. The daemon keeps the rows' order and tree, the stars,
+  // and the workspace order (its rail layout, POST /rail/layout) and renders
+  // the rail in that order; the page only reads a row's star and place from
+  // it. The drafts and the collapsed and open sets are in localStorage
+  // under ws.dashboard., through the store the caller passes ({ load(key),
+  // save(key, value or null) }, which must not throw), so the page works
+  // the same with storage absent; the retired local order and stars are
+  // read there once, for the layout's import. The DOM helpers touch only
+  // the elements they are given; the revive route and hand-off notice, the
+  // popover and delete modal helpers at the end, and the approval card's
+  // input preview after them, are pure.
   var DRAFT = "ws.dashboard.draft.", DRAFTS = "ws.dashboard.drafts";
   var STARS = "ws.dashboard.stars", COLLAPSED = "ws.dashboard.railcol";
   var ORDER = "ws.dashboard.railorder", WSORDER = "ws.dashboard.wsorder";
+  var ENDED = "ws.dashboard.railended";
   // DRAFT_CAP bounds the sessions whose drafts are kept; the oldest saved
   // goes first.
   var DRAFT_CAP = 50;
@@ -35,13 +37,16 @@
   // ([start, end]), cmd its slash command selection ({name, args}: args a
   // string when the capsule holds them, else null), answers the board answers by item (readAnswers' shape,
   // topic notes among them), chips the answer chips, bmentions the board
-  // mentions ({topic, id?, text}), refs the images that
+  // mentions ({topic, id?, text}), wpicks and wconsoles the web card's
+  // picked elements ({url, selector, text}) and console blocks ({url,
+  // lines}), refs the images that
   // reference written attachment files ({ref, name, n}), lost the numbers
   // of the pasted images it could not keep, open the open details by key, and tab
   // the tab shown. emptyDraft reports one that holds nothing to restore.
   function emptyDraft(d) {
     if (!d || typeof d !== "object") return true;
-    return !d.text && !d.cmd && !(d.chips && d.chips.length) && !(d.bmentions && d.bmentions.length) && !keys(d.answers).length && !(d.refs && d.refs.length) &&
+    return !d.text && !d.cmd && !(d.chips && d.chips.length) && !(d.bmentions && d.bmentions.length) &&
+      !(d.wpicks && d.wpicks.length) && !(d.wconsoles && d.wconsoles.length) && !keys(d.answers).length && !(d.refs && d.refs.length) &&
       !(d.lost && d.lost.length) && !keys(d.open).length && (!d.tab || d.tab === "convo");
   }
 
@@ -97,22 +102,30 @@
   }
 
   // A set of strings kept as one JSON array: has(x), toggle(x) returning
-  // the new state, list().
+  // the new state, put(x, on), list().
   function stringSet(store, key) {
     function list() { return strings(parse(store.load(key), [])); }
+    function put(x, on) {
+      var l = list(), i = l.indexOf(x);
+      if ((i >= 0) === !!on) return;
+      if (i >= 0) l.splice(i, 1); else l.push(x);
+      store.save(key, l.length ? JSON.stringify(l) : null);
+    }
     return {
       list: list,
       has: function (x) { return list().indexOf(x) >= 0; },
       toggle: function (x) {
-        var l = list(), i = l.indexOf(x);
-        if (i >= 0) l.splice(i, 1); else l.push(x);
-        store.save(key, l.length ? JSON.stringify(l) : null);
-        return i < 0;
-      }
+        var on = list().indexOf(x) < 0;
+        put(x, on);
+        return on;
+      },
+      put: put
     };
   }
-  // collapsed is the collapsed workspaces' paths.
+  // collapsed is the collapsed workspaces' paths; endedOpen the ended
+  // folds (details.rended) left open, by their data-key.
   function collapsed(store) { return stringSet(store, COLLAPSED); }
+  function endedOpen(store) { return stringSet(store, ENDED); }
 
   // LEGACY are the retired local layout's keys (the starred sessions, the
   // sessions' drag order by reply-id, the workspaces' by path), and what
@@ -480,6 +493,37 @@
     });
   }
 
+  // state is the rail's stored sets over store, as marks reads them: the
+  // collapsed workspaces and parents and the ended folds left open. The
+  // rows' order and stars come rendered from the daemon's layout.
+  function state(store) {
+    return { collapsed: collapsed(store), kids: kidsCollapsed(store), ended: endedOpen(store) };
+  }
+  // marks applies the stored marks (s, state) to the rendered rail region
+  // r: marks the viewed session's row (rid), collapses the collapsed
+  // workspaces and parents, and opens the ended folds left open. The page
+  // script runs it after every rail swap; the iframe shell also runs it as
+  // soon as the rail is parsed, before the first paint, so a reload never
+  // shows a fold the browser keeps closed open.
+  function marks(r, s, rid) {
+    function all(sel) { return Array.prototype.slice.call(r.querySelectorAll(sel)); }
+    markCurrent(all(".rs"), rid);
+    all(".rws").forEach(function (ws) {
+      var col = s.collapsed.has(ws.getAttribute("data-ws") || ""), tog = ws.querySelector(".wstog");
+      if (col) ws.classList.add("col"); else ws.classList.remove("col");
+      if (tog) tog.setAttribute("aria-expanded", String(!col));
+    });
+    all(".kidtog").forEach(function (tog) {
+      var row = tog.closest(".rs"), col = !!row && s.kids.has(row.getAttribute("data-rid") || "");
+      if (row) { if (col) row.classList.add("kcol"); else row.classList.remove("kcol"); }
+      tog.setAttribute("aria-expanded", String(!col));
+    });
+    all("details.rended[data-key]").forEach(function (d) {
+      var open = s.ended.has(d.getAttribute("data-key"));
+      if (d.open !== open) d.open = open;
+    });
+  }
+
   // REVIVE_MOVES are the ways an ended row brings its session back (its
   // revive entry's data-revive); each is the session's route of that name.
   var REVIVE_MOVES = { takeover: true, reopen: true };
@@ -629,6 +673,9 @@
     layoutRefusal: layoutRefusal,
     staleRail: staleRail,
     starred: starred,
+    endedOpen: endedOpen,
+    state: state,
+    marks: marks,
     drop: drop,
     dropRefusal: dropRefusal,
     kidsCollapsed: kidsCollapsed,

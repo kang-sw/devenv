@@ -322,6 +322,25 @@ func TestFSListMarksIgnoredEntries(t *testing.T) {
 	}
 }
 
+// TestFSListAbsoluteRootWithoutDir pins the request shape the palette's path
+// mode sends: a local viewer's fs/list with root=<abs dir> and no dir answers
+// 200 with that directory's own entries, folders first. A path query that
+// ends in a separator and one that does not (its parent) both reduce to this
+// shape, so the second root here is the first with a trailing slash.
+func TestFSListAbsoluteRootWithoutDir(t *testing.T) {
+	f := startPageFixture(t, lanMode)
+	local, _ := fsViewers(t, f)
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "note.txt"), "N")
+	writeFile(t, filepath.Join(dir, "sub", "deep.txt"), "D")
+	for _, root := range []string{dir, dir + string(filepath.Separator)} {
+		code, a := fsList(t, f, local, "root="+url.QueryEscape(root))
+		if got := strings.Join(entryNames(a), " "); code != http.StatusOK || a.Session || got != "sub/ note.txt" {
+			t.Errorf("root=%q without dir = %d session %v entries %q, want 200 and %q", root, code, a.Session, got, "sub/ note.txt")
+		}
+	}
+}
+
 // TestFSChangeRootIsLoopbackOnly pins the root parameter: a browser on
 // this machine lists, previews, and reads an image under another absolute
 // folder, where an HTML file shows as its source with no capability; a LAN

@@ -437,6 +437,10 @@ type ConvEntry struct {
 	// message), taken out of its text and shown as capsules after the
 	// answer capsules.
 	Mentions []wsinbox.Mention
+	// Picks and Consoles are the web card's pick and console elements after
+	// the mentions, taken out of its text and shown as capsules after them.
+	Picks    []wsinbox.Pick
+	Consoles []wsinbox.Console
 	// Rendered is the entry's whole element, from the entry cache.
 	Rendered template.HTML
 	// Body is a mail line's full message from the mailbox history; HasBody
@@ -564,7 +568,7 @@ func buildSessionView(in pageInputs) SessionView {
 	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID))
 	splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
-	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked)
+	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked, settledTurnStart(in.Ring))
 	v.Conversation.Subagents = subagentCounts(reg.ReplyID, in.Snapshot.Agents, lookup, in.Now)
 	return v
 }

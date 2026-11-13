@@ -122,6 +122,24 @@ check("a held check row is marked held", [b.cls["sent-held"], b.cls["sent-sent"]
 check("a sent check row is marked sent", ROWS["05"].cls["sent-sent"], true);
 var mark = b.head.kids[1];
 check("the mark follows the ID chip", [b.head.kids.length, mark && mark.className, mark && mark.textContent], [2, "sentmark held", "held · no"]);
+
+// A note-only sent chip marks its row "sent · note"; once the sent data
+// drops the item's entry (the note's turn settled), the next run clears the
+// row's sent class and its mark, and the other rows keep theirs.
+ROWS["06"] = checkRow("06");
+var noted = new N({ "data-id": "06", "data-state": "sent", "data-answer": "", "data-note": "why" });
+PAGE.sel[".sentdata i[data-id]"] = [held, sent, noted];
+function marks() { var out = []; Object.keys(ROWS).forEach(function (k) { ROWS[k].head.kids.forEach(function (m) { if (/^sentmark/.test(m.className || "")) out.push(m); }); }); return out; }
+MARKS = marks();
+applySent(false);
+var nm = ROWS["06"].head.kids[1];
+check("a note-only chip marks its row sent", [ROWS["06"].cls["sent-sent"], nm && nm.textContent], [true, "sent · note"]);
+PAGE.sel[".sentdata i[data-id]"] = [held, sent];
+MARKS = marks();
+applySent(false);
+check("a dropped entry clears the row's sent class", [ROWS["06"].cls["sent-sent"], ROWS["06"].cls["sent-held"]], [undefined, undefined]);
+check("a dropped entry removes the row's mark", ROWS["06"].head.kids.length, 1);
+check("the other rows keep their marks", [b.cls["sent-held"], ROWS["05"].cls["sent-sent"], b.head.kids.length, ROWS["05"].head.kids.length], [true, true, 2, 2]);
 process.stdout.write(bad.join("\n"));`)
 }
 

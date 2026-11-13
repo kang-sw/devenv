@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -798,5 +800,58 @@ func TestDashboardTrackerBusyMapping(t *testing.T) {
 		if errors.Is(err, wsdashboard.ErrTrackerBusy) {
 			t.Errorf("%s mapping of another error = %v, want no ErrTrackerBusy", name, err)
 		}
+	}
+}
+
+// TestDashboardTrackerWikiHTMLPage: the page read of an HTML page answers
+// kind html and, in html, exactly one frame under the whiteboard sandbox
+// (no allow-same-origin) whose srcdoc is the escaped document; a Markdown
+// page answers kind markdown, its canonical path for a .md address, and
+// still escapes raw tags; a dashboard save of an HTML page naming a staged
+// image is refused.
+func TestDashboardTrackerWikiHTMLPage(t *testing.T) {
+	dt, _ := newTestTracker(t)
+	ctx := context.Background()
+	doc := "<!DOCTYPE html>\n<html><body><script>document.body.dataset.ran = '1'</script><p>a & b</p></body></html>\n"
+	res, err := dt.WikiSave(ctx, "team", "docs", wsdashboard.TrackerWikiSave{NewWiki: true, Op: "write", Path: "notes/x.html", Content: doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = dt.WikiSave(ctx, "team", "docs", wsdashboard.TrackerWikiSave{Base: res.Commit, Op: "write", Path: "notes/x.md", Content: "<b>raw</b> text\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pages, err := dt.WikiPages(ctx, "team", "docs"); err != nil || strings.Join(pages.Pages, ",") != "notes/x,notes/x.html" {
+		t.Fatalf("pages = %+v, %v", pages, err)
+	}
+	page, err := dt.WikiRead(ctx, "team", "docs", "notes/x.html")
+	if err != nil || page.Kind != "html" || page.Path != "notes/x.html" || page.Content != doc || page.Commit != res.Commit {
+		t.Fatalf("html read = %+v, %v", page, err)
+	}
+	m := regexp.MustCompile(`^<iframe title="[^"]*" sandbox="([^"]*)" srcdoc="([^"]*)"></iframe>$`).FindStringSubmatch(page.HTML)
+	if m == nil || strings.Count(page.HTML, "<iframe") != 1 {
+		t.Fatalf("html page markup = %q", page.HTML)
+	}
+	if m[1] != "allow-scripts allow-popups allow-popups-to-escape-sandbox" || strings.Contains(m[1], "allow-same-origin") {
+		t.Fatalf("sandbox = %q", m[1])
+	}
+	if html.UnescapeString(m[2]) != doc || strings.Contains(m[2], "<script>") {
+		t.Fatalf("srcdoc = %q", m[2])
+	}
+	md, err := dt.WikiRead(ctx, "team", "docs", "notes/x.md")
+	if err != nil || md.Kind != "markdown" || md.Path != "notes/x" || md.Content != "<b>raw</b> text\n" {
+		t.Fatalf("markdown read = %+v, %v", md, err)
+	}
+	if strings.Contains(md.HTML, "<b>") || !strings.Contains(md.HTML, "&lt;b&gt;raw&lt;/b&gt;") || strings.Contains(md.HTML, "<iframe") {
+		t.Fatalf("markdown html = %q", md.HTML)
+	}
+	data := append([]byte("\x89PNG\r\n\x1a\n"), "html"...)
+	att, err := dt.StageAttachment(ctx, "team", "shot.png", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = dt.WikiSave(ctx, "team", "docs", wsdashboard.TrackerWikiSave{Base: res.Commit, Op: "write", Path: "notes/x.html", Content: doc + "<p>more</p>\n", Attachments: []wsdashboard.TrackerAttachment{att}})
+	if !errors.Is(err, wsdashboard.ErrTrackerWikiRefused) || !strings.Contains(err.Error(), "HTML page cannot show images") {
+		t.Fatalf("html save with an image = %v, want a refusal", err)
 	}
 }

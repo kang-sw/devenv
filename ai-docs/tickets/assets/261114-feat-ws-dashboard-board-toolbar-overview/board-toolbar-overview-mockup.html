@@ -1,0 +1,109 @@
+<div class="bt" id="btRoot">
+<style>
+.bt{--bg:#141518;--card:#1e2024;--card2:#24272c;--fg:#e7e7e4;--mu:#a2a6ad;--pri:#7aa2ff;--line:#2c2f35;--topic:#262a31;--ok:#5fbf7f;--warn:#e0a84a;--star:#f2b632;font:13px/1.4 system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;color:var(--fg);background:var(--bg);padding:14px;}
+.bt *{box-sizing:border-box}
+.bt svg{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.bt .chrome{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+.bt .chrome h1{font-size:14px;margin:0 10px 0 0}
+.bt .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.bt .seg button{font:inherit;font-size:12px;padding:3px 11px;border:0;background:var(--card);color:var(--mu);cursor:pointer}
+.bt .seg button[aria-pressed="true"]{background:color-mix(in srgb,var(--pri) 22%,var(--card));color:var(--pri)}
+.bt .hint{color:var(--mu);font-size:12px}
+.bt .page{display:flex;gap:14px;align-items:flex-start;margin:0 auto;transition:width .2s}
+.bt .page.w{width:1240px}
+.bt .page.n{width:420px}
+.bt .bcol{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:10px;height:640px;overflow:auto;padding:2px 4px 40px 2px;scroll-behavior:smooth}
+.bt .pcol{flex:0 0 330px;display:flex;flex-direction:column;gap:10px;height:640px;overflow:auto}
+.bt .page.n .pcol{display:none}
+.bt .tb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:7px 8px;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.bt .tb .b{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:8px;border:1px solid transparent;background:var(--card2);color:var(--fg);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.bt .tb .b:hover{border-color:#3a3e46}
+.bt .tb .b[aria-pressed="true"]{background:color-mix(in srgb,var(--pri) 24%,var(--card));color:var(--pri);border-color:color-mix(in srgb,var(--pri) 45%,transparent)}
+.bt .tb .b kbd{font:600 10.5px ui-monospace,Menlo,monospace;color:var(--mu);border:1px solid #3a3e46;border-radius:4px;padding:0 4px}
+.bt .tb .sp{flex:1}
+.bt .tb .ct{font-size:11.5px;color:var(--mu);white-space:nowrap}
+.bt .tb .ct b{color:var(--fg)}
+.bt .page.n .tb .b .lb{display:none}
+.bt .page.n .tb .b.ov .lb{display:inline}
+.bt .page.n .tb .b kbd{display:none}
+.bt .tbwrap{position:relative}
+.bt .tpop{position:absolute;top:40px;left:130px;z-index:5;width:230px;background:var(--card2);border:1px solid #3a3e46;border-radius:10px;padding:6px;box-shadow:0 8px 24px rgb(0 0 0/.45)}
+.bt .page.n .tpop{left:60px}
+.bt .tpop .lbx{font-size:11px;color:var(--mu);padding:4px 8px}
+.bt .tpop button{display:block;width:100%;text-align:left;font:inherit;font-size:12.5px;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:var(--fg);cursor:pointer}
+.bt .tpop button:hover{background:#30343b}
+.bt .tpop small{color:var(--mu);font-family:ui-monospace,Menlo,monospace;font-size:10.5px;display:block}
+.bt .topic{border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden;flex:none}
+.bt .tophead{background:var(--topic);padding:8px 12px 8px}
+.bt .tbar{display:flex;align-items:center;gap:7px;min-width:0}
+.bt .tname{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.bt .pinm{color:var(--star);display:none}
+.bt .wbtk{font-size:10.5px;font-weight:700;padding:0 7px;height:17px;display:inline-flex;align-items:center;border-radius:999px;background:color-mix(in srgb,var(--ok) 22%,var(--card));color:var(--ok);white-space:nowrap}
+.bt .wbtk.todo{background:color-mix(in srgb,var(--pri) 20%,var(--card));color:var(--pri)}
+.bt .chk{font-size:10.5px;font-weight:700;padding:0 7px;height:17px;display:inline-flex;align-items:center;gap:3px;border-radius:999px;background:color-mix(in srgb,var(--warn) 22%,var(--card));color:var(--warn);white-space:nowrap}
+.bt .tsp{flex:1}
+.bt .tm{font-size:11.5px;color:var(--mu);white-space:nowrap}
+.bt .live{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent);flex:none}
+.bt .ha{color:var(--mu);display:inline-flex;gap:8px}
+.bt .tsub{display:flex;gap:8px;align-items:flex-start;margin-top:6px;color:#cfd2d6;font-size:12.5px}
+.bt .tsub .rt{flex:1;min-width:0}
+.bt .tsub .ev{font-size:10px;font-weight:800;width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;background:#3b4566;color:#b8c6ff;flex:none;margin-top:1px}
+.bt .tbody{padding:8px 12px 10px;display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+.bt .lg{display:flex;gap:8px;color:#cfd2d6}
+.bt .lg .tm{min-width:38px}
+.bt .card{border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden;flex:none}
+.bt .card .ch{display:flex;align-items:center;gap:7px;padding:6px 10px;background:var(--card2);font-size:12.5px;font-weight:700}
+.bt .card .term{background:#0c0d0f;font:11.5px/1.5 ui-monospace,Menlo,monospace;color:#b9e3b9;padding:8px 10px;height:92px}
+.bt .closed{font-size:12px;color:var(--mu);padding:4px 6px}
+.bt .flash{animation:btf 1.2s ease-out}
+@keyframes btf{0%{box-shadow:0 0 0 3px var(--pri)}100%{box-shadow:0 0 0 0 transparent}}
+.bt .page.ov .bcol{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));align-content:start;grid-auto-rows:max-content;gap:10px}
+.bt .page.ov .tbwrap{grid-column:1/-1}
+.bt .page.ov .tbody,.bt .page.ov .card,.bt .page.ov .closed{display:none}
+.bt .page.ov .pcol{display:none}
+.bt .page.ov .topic.pinned .pinm{display:inline-flex}
+.bt .page.ov .topic{cursor:pointer;transition:border-color .12s}
+.bt .page.ov .topic:hover,.bt .page.ov .topic:focus-visible{border-color:color-mix(in srgb,var(--pri) 60%,transparent);outline:0}
+.bt .page.ov .tophead{height:100%;padding:9px 12px 10px}
+.bt .page.ov .tsub .rt{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.bt .page.ov.n .bcol{grid-template-columns:1fr;gap:6px}
+.bt .page.ov.n .tsub .rt{-webkit-line-clamp:2}
+.bt .page.ov .ha{display:none}
+.bt .notes{max-width:1240px;margin:14px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px;color:var(--mu)}
+.bt .notes div{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.bt .notes b{color:var(--fg)}
+.bt .notes ul{margin:4px 0 0;padding-left:16px}
+.bt .toast{position:absolute;left:50%;transform:translateX(-50%);top:58px;background:#30343b;color:var(--fg);padding:6px 12px;border-radius:8px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
+.bt .toast.on{opacity:1}
+</style>
+<div class="chrome"><h1>보드 툴바 · 한 눈에 보기</h1><span class="seg" id="btW"><button type="button" data-w="n" aria-pressed="false">좁게 420</button><button type="button" data-w="w" aria-pressed="true">넓게 1240</button></span><span class="hint">툴바는 보드의 첫 카드(고정 아님, 스크롤하면 같이 올라감). 타일을 누르면 일반 보기로 돌아가 그 토픽으로 이동 · Esc로도 복귀</span></div>
+<div style="position:relative"><div class="toast" id="btToast"></div>
+<div class="page w" id="btPage"><div class="bcol" id="btCol"></div><div class="pcol" id="btPins"></div></div></div>
+<div class="notes"><div><b>툴바 카드</b><ul><li>항상 보드 열의 첫 자식. 고정된 토픽(좁은 화면)보다도 위. sticky 아님.</li><li>드래그·고정·접기·닫기 없음, 재정렬 대상 아님.</li><li>버튼 제안: 한 눈에 보기 · 새 터미널▾ (지금 입력창 아래 버튼과 같은 폴더 선택) · 검색 Ctrl+K · 파일. 오른쪽에 열린 토픽 수.</li></ul></div><div><b>한 눈에 보기</b><ul><li>모든 열린 토픽이 머리(이름·배지·질문·시간)+recap만 남은 타일로. 넓으면 격자, 좁으면 한 줄 목록.</li><li>고정 토픽은 격자 맨 앞(핀 표시), 고정 열은 숨김. 터미널 등 카드와 닫힌 토픽은 숨김.</li><li>recap은 지금 제목 아래 보이는 최신 리드 줄 그대로(3줄 자름). 순서는 보드 순서 그대로.</li></ul></div></div>
+<script>
+(function(){
+var R=document.getElementById("btRoot"),col=R.querySelector("#btCol"),pcol=R.querySelector("#btPins"),page=R.querySelector("#btPage"),toast=R.querySelector("#btToast");
+var I={grid:'<svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>',term:'<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M4.5 6l2 2-2 2M8 10.5h3.5"/></svg>',search:'<svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5l3.5 3.5"/></svg>',files:'<svg viewBox="0 0 16 16"><path d="M2 4.5V12a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 14 12V6.5A1.5 1.5 0 0 0 12.5 5H8L6.5 3H3.5A1.5 1.5 0 0 0 2 4.5z"/></svg>',pin:'<svg viewBox="0 0 16 16"><path d="M6 2h4l-.5 4 2.5 2.5H4L6.5 6z"/><path d="M8 8.5V14"/></svg>',pen:'<svg viewBox="0 0 16 16"><path d="M10.5 2.5l3 3L6 13H3v-3z"/></svg>',q:'<svg viewBox="0 0 16 16" style="width:11px;height:11px"><circle cx="8" cy="8" r="6"/><path d="M6.3 6.3a1.8 1.8 0 1 1 2.4 1.7c-.5.2-.7.6-.7 1V10M8 12h0"/></svg>',dn:'<svg viewBox="0 0 16 16" style="width:11px;height:11px"><path d="M4 6l4 4 4-4"/></svg>'};
+var T=[{n:"status-board",pin:1,tm:"방금",live:1,r:"현황: 실행 중 3건(보드 성능, 시작일 범위, CSS 회귀), 승격 준비 2건, 오너 질문 4건 대기."},{n:"board-toolbar",tm:"1분 전",live:1,q:2,r:"새 아이디어: 보드 맨 위에 항상 첫 카드인 버튼 행. '한 눈에 보기'를 누르면 모든 토픽이 머리+recap만 남은 격자로 압축. UX 목업 요청."},{n:"session-rail",tm:"3분 전",q:1,tk:"todo",r:"새 피드백: 워크스페이스 줄과 브랜치 줄이 같은 위계로 보여 눈에 안 들어옴. UX 해석 A(별을 이름 오른쪽으로, 브랜치 줄을 별 자리까지 들여쓰기) 확인 대기."},{n:"search-palette",tm:"12분 전",q:2,r:"통합 검색 팔레트 v2 목업 게시. 보드·파일·내용·트래커·메모 다섯 출처, 좁게/중간/넓게. 행 배치와 범위 넓히기 칩 질문 남음."},{n:"conversation-audit",tm:"20분 전",r:"(545)=a, (546)=a: 모든 입출력을 하네스 중립 봉투로 저장. 감사 창 목업 확정, 티켓 초안 대기."},{n:"css-regressions",tm:"25분 전",tk:"ready",r:"교체 후 회귀 3건 + 사소한 것 2건 수정 브랜치 진행 중. 팔레트 폭과 별칭 줄바꿈도 같이 묶음."},{n:"usage-gutter",tm:"1시간 전",tk:"ready",r:"레일 왼쪽 아래에 하네스별 사용량 막대. Claude 2개(5시간·주간), Codex 1개. 클릭하면 자세히."},{n:"board-reorder-hold",tm:"2시간 전",tk:"todo",r:"보고 있는 토픽은 업데이트돼도 제자리 유지, 스크롤 보정. 4단계 계획, 표시기는 (525)=b."},{n:"browser-pane",tm:"3시간 전",tk:"todo",q:1,r:"대시보드 안 브라우저 패널. 쿠키 관련 주의점 (530) 열려 있음."}];
+var LOG=["리드: 원문 받음, 해석 정리 중","UX: 목업 초안 작성","리드: 오너 확인 질문 게시"];
+function topic(t,i){var s=document.createElement("section");s.className="topic"+(t.pin?" pinned":"");s.setAttribute("data-t",t.n);s.tabIndex=-1;s.innerHTML='<div class="tophead"><div class="tbar"><span class="pinm" title="고정">'+I.pin+'</span>'+(t.live?'<span class="live" title="방금 갱신"></span>':'')+'<span class="tname">'+t.n+'</span>'+(t.tk?'<span class="wbtk '+t.tk+'">'+t.tk+'</span>':'')+(t.q?'<span class="chk">'+I.q+'질문 '+t.q+'</span>':'')+'<span class="tsp"></span><span class="tm">'+t.tm+'</span><span class="ha">'+I.pin+I.pen+'</span></div><div class="tsub"><span class="ev">L</span><span class="rt">'+t.r+'</span></div></div><div class="tbody">'+LOG.map(function(l,k){return '<div class="lg"><span class="tm">'+(k*4+2)+'분</span><span>'+l+'</span></div>';}).join("")+'</div>';s.addEventListener("click",function(){if(!page.classList.contains("ov"))return;setOv(false);setTimeout(function(){s.scrollIntoView({block:"start"});s.classList.remove("flash");void s.offsetWidth;s.classList.add("flash");},30);});s.addEventListener("keydown",function(e){if(e.key==="Enter"&&page.classList.contains("ov"))s.click();});return s;}
+var tbw=document.createElement("div");tbw.className="tbwrap";tbw.innerHTML='<div class="tb"><button type="button" class="b ov" aria-pressed="false">'+I.grid+'<span class="lb">한 눈에 보기</span></button><button type="button" class="b tn" aria-haspopup="dialog" aria-expanded="false" title="새 터미널">'+I.term+'<span class="lb">새 터미널</span>'+I.dn+'</button><button type="button" class="b sr" title="검색 (Ctrl+K)">'+I.search+'<span class="lb">검색</span><kbd>Ctrl K</kbd></button><button type="button" class="b fl" title="파일">'+I.files+'<span class="lb">파일</span></button><span class="sp"></span><span class="ct">열린 토픽 <b>'+T.length+'</b> · 닫힘 3</span></div><div class="tpop" hidden><div class="lbx">새 터미널 폴더</div><button type="button">이 워크트리<small>~/devenv</small></button><button type="button">저장소 루트<small>~/devenv</small></button><button type="button">경로 입력…</button></div>';
+var ovb=tbw.querySelector(".ov"),tnb=tbw.querySelector(".tn"),pop=tbw.querySelector(".tpop");
+function say(m){toast.textContent=m;toast.classList.add("on");clearTimeout(say.t);say.t=setTimeout(function(){toast.classList.remove("on");},1400);}
+function layout(){var w=page.classList.contains("w"),ov=page.classList.contains("ov");col.textContent="";pcol.textContent="";col.appendChild(tbw);var pins=T.filter(function(t){return t.pin;}),rest=T.filter(function(t){return !t.pin;});if(ov||!w){pins.forEach(function(t){col.appendChild(nodes[t.n]);});}else{pins.forEach(function(t){pcol.appendChild(nodes[t.n]);});}rest.forEach(function(t,i){col.appendChild(nodes[t.n]);if(i===1)col.appendChild(card);});col.appendChild(closed);R.querySelectorAll(".topic").forEach(function(s){s.tabIndex=ov?0:-1;});}
+var nodes={};T.forEach(function(t,i){nodes[t.n]=topic(t,i);});
+var card=document.createElement("div");card.className="card";card.innerHTML='<div class="ch">'+I.term+'터미널 · ~/devenv</div><div class="term">$ go test ./internal/wsdashboard/...<br>ok  wsdashboard 4.2s<br>$ _</div>';
+var closed=document.createElement("div");closed.className="closed";closed.textContent="닫힌 토픽 3개 ▸";
+function setOv(on){page.classList.toggle("ov",on);ovb.setAttribute("aria-pressed",String(on));layout();col.scrollTop=0;}
+ovb.addEventListener("click",function(){setOv(!page.classList.contains("ov"));});
+tnb.addEventListener("click",function(e){e.stopPropagation();pop.hidden=!pop.hidden;tnb.setAttribute("aria-expanded",String(!pop.hidden));});
+pop.addEventListener("click",function(e){if(e.target.closest("button")){pop.hidden=true;tnb.setAttribute("aria-expanded","false");say("터미널 카드가 툴바 바로 아래에 열림 (목업)");}});
+tbw.querySelector(".sr").addEventListener("click",function(){say("Ctrl+K 팔레트 열림 (목업)");});
+tbw.querySelector(".fl").addEventListener("click",function(){say("파일 서랍 열림 (목업)");});
+R.addEventListener("click",function(e){if(!pop.hidden&&!e.target.closest(".tpop")&&!e.target.closest(".tn")){pop.hidden=true;tnb.setAttribute("aria-expanded","false");}});
+document.addEventListener("keydown",function(e){if(e.key==="Escape"){if(!pop.hidden){pop.hidden=true;tnb.setAttribute("aria-expanded","false");}else if(page.classList.contains("ov"))setOv(false);}});
+R.querySelectorAll("#btW button").forEach(function(b){b.addEventListener("click",function(){R.querySelectorAll("#btW button").forEach(function(x){x.setAttribute("aria-pressed",String(x===b));});page.classList.remove("w","n");page.classList.add(b.getAttribute("data-w"));layout();});});
+layout();
+})();
+</script>
+</div>

@@ -22,6 +22,10 @@ const regionRail = "rail"
 // worktree lists.
 const railRoute = "/rail/refresh"
 
+// railEventsRoute is the iframe shell's stream: the rail alone
+// (handleRailEvents).
+const railEventsRoute = "/rail/events"
+
 // railView reads what the rail shows: railBaseView, ordered by the rail
 // layout (orderRailView), with each workspace's memo count.
 func (d *Daemon) railView(r pageReader) RailView {

@@ -137,12 +137,14 @@ func (s *daemonLiveSlot) Publish(snap wslive.Snapshot) {
 		h.SetLiveSnapshot(d.dir, s.replyID, snap)
 	}
 	d.live.mu.Unlock()
+	d.planUsage.pushClaude(&snap)
 	if d.index != nil && snap.UpdatedAt > 0 {
 		d.index.SetSnapshotUpdatedAt(s.replyID, time.UnixMilli(snap.UpdatedAt))
 	}
 	if changed {
 		d.stats.WakeLive.Add(1)
 		d.broker.wake(liveDep(s.replyID))
+		d.acks.poke(s.replyID)
 	}
 }
 
@@ -156,6 +158,7 @@ func (s *daemonLiveSlot) RingAppended() {
 	d.live.mu.Unlock()
 	d.stats.WakeLive.Add(1)
 	d.broker.wake(ringDep(s.replyID))
+	d.acks.poke(s.replyID)
 }
 
 func (s *daemonLiveSlot) Close() {

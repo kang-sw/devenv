@@ -18,8 +18,10 @@ import (
 //
 //	GET  /tracker/stores                 {"stores": [...], "rev": N, "support": B}
 //	GET  /tracker/stores/<id>/view       {"view": ..., "seen": {"badge", "read"}}
-//	GET  /tracker/stores/<id>/search?q=<query>
+//	GET  /tracker/stores/<id>/search?q=<query>[&excerpts=1]
 //	                                     {"ids": [...]}: the items passing the search, in tree order;
+//	                                     with excerpts=1 also "hits": [...], one per place an item
+//	                                     matched (TrackerSearchHit), ids being the distinct hit ids;
 //	                                     a malformed query is 400 with the host's message
 //	POST /tracker/stores/<id>/dispatch   {"events": [...]} -> {"ids": [...]}; a refusal is 409
 //	POST /tracker/stores/<id>/check      the sync report
@@ -182,6 +184,12 @@ type TrackerHost interface {
 	// in tree order, hidden items included when they pass. A query the
 	// grammar refuses is a *TrackerSearchError.
 	Search(ctx context.Context, id, query string) ([]string, error)
+	// SearchHits runs the same search as Search, with the same grammar and
+	// the same *TrackerSearchError for a query it refuses, and returns the
+	// places the items matched instead of their ids: per item, in tree
+	// order, its body hit, then up to three comment hits, or one "item" hit
+	// when neither matched (see TrackerSearchHit).
+	SearchHits(ctx context.Context, id, query string) ([]TrackerSearchHit, error)
 	// Dispatch appends events to store id in one batch and returns their
 	// ids. A refusal is a *TrackerRefusal error; nothing was written.
 	Dispatch(ctx context.Context, id string, events []TrackerEvent) ([]string, error)
@@ -247,6 +255,24 @@ type TrackerSearchError struct {
 
 func (e *TrackerSearchError) Error() string { return e.Message }
 
+// TrackerSearchHit is one place an item matched a search, the element of the
+// search route's "hits" with excerpts=1. Field is "body" or "comment" when a
+// free-text term occurs in the item's body or in a shown comment (Comment is
+// that comment's id, Text an excerpt around the match), and "item" with no
+// Text when the item matched on its title, alias, id, project, or only on
+// field filters. Status is the derived status, empty for a topic.
+type TrackerSearchHit struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Alias   string `json:"alias"`
+	Kind    string `json:"kind"`
+	Status  string `json:"status"`
+	Hidden  bool   `json:"hidden,omitempty"`
+	Field   string `json:"field"`
+	Comment string `json:"comment,omitempty"`
+	Text    string `json:"text,omitempty"`
+}
+
 // TrackerRenderRequest is the render route's body: the markdown text an
 // editor holds and the attachments its save would carry (the stored ones
 // plus the images uploaded meanwhile), which the host may render inline
@@ -274,11 +300,15 @@ type TrackerWikiPages struct {
 }
 
 // TrackerWikiPage is one page as read at Commit, the base a save of this
-// edit sends. HTML is the content rendered as the render route renders it
-// in that wiki's mode (the tree's images show), so a page read draws at
-// once.
+// edit sends. Path is the canonical page path and Kind the page's kind,
+// "markdown" or "html". For a Markdown page HTML is the content rendered
+// as the render route renders it in that wiki's mode (the tree's images
+// show), so a page read draws at once; for an HTML page it is the
+// sandboxed frame showing the content, built by the host so the browser
+// never renders a page itself.
 type TrackerWikiPage struct {
 	Path    string `json:"path"`
+	Kind    string `json:"kind"`
 	Content string `json:"content"`
 	Commit  string `json:"commit"`
 	HTML    string `json:"html"`
@@ -649,7 +679,16 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, v)
 	case op == "search":
 		// A read: nothing changed, so the revision stays.
-		ids, err := d.tracker.Search(r.Context(), storeID, r.URL.Query().Get("q"))
+		query := r.URL.Query()
+		var ids []string
+		var hits []TrackerSearchHit
+		var err error
+		excerpts := query.Get("excerpts") == "1"
+		if excerpts {
+			hits, err = d.tracker.SearchHits(r.Context(), storeID, query.Get("q"))
+		} else {
+			ids, err = d.tracker.Search(r.Context(), storeID, query.Get("q"))
+		}
 		if err != nil {
 			var bad *TrackerSearchError
 			if errors.As(err, &bad) {
@@ -659,7 +698,18 @@ func (d *Daemon) handleTracker(w http.ResponseWriter, r *http.Request) {
 			trackerError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ids": nonNil(ids)})
+		if !excerpts {
+			writeJSON(w, http.StatusOK, map[string]any{"ids": nonNil(ids)})
+			return
+		}
+		// Hits of one item are adjacent, so the distinct ids keep tree order.
+		ids = []string{}
+		for _, h := range hits {
+			if len(ids) == 0 || ids[len(ids)-1] != h.ID {
+				ids = append(ids, h.ID)
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ids": ids, "hits": nonNil(hits)})
 	case op == "dispatch":
 		d.trackerDispatch(ctx, w, r, storeID)
 	case op == "check" || op == "sync":
