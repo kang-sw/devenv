@@ -665,9 +665,9 @@ func webWrite(t *testing.T, root, rel, data string) string {
 // serving: the registered file and its siblings and subdirectories serve
 // (HTML injected, the proxy's frame-ancestors set); a ../ path, a symlink
 // leading out (file or directory), a dotfile, and a dot-named directory
-// answer 404; a dot-named ancestor of the registered directory does not
-// block it; the registered directory swapped for a symlink afterwards is
-// refused on the next request.
+// answer 404; a dot-named directory on the registered path is refused at
+// registration (a page there could fetch all of it); the registered
+// directory swapped for a symlink afterwards is refused on the next request.
 func TestWebCardServesARegisteredDirectoryOnly(t *testing.T) {
 	f := startPageFixture(t)
 	outside := t.TempDir()
@@ -714,15 +714,25 @@ func TestWebCardServesARegisteredDirectoryOnly(t *testing.T) {
 		}
 	}
 
-	// A dot-named ancestor of the registered directory does not block it.
+	// A dot-named directory anywhere on the registered path is refused, and
+	// registers nothing: the page could fetch every file of it.
 	webWrite(t, f.project, ".docs/site/index.html", "<html><head></head><body>docs page</body></html>")
-	docs := registerWebTarget(t, f, `{"path":".docs/site/index.html"}`)
-	if docs.Base != ".docs/site" {
-		t.Errorf("dot-ancestor registration = %+v", docs)
+	webWrite(t, f.project, ".git/x.html", "<html></html>")
+	webWrite(t, f.project, "site/.cache/x.html", "<html></html>")
+	f.d.web.mu.Lock()
+	before := len(f.d.web.byKey)
+	f.d.web.mu.Unlock()
+	for _, p := range []string{".docs/site/index.html", ".docs/site", ".git/x.html", "site/.cache/x.html", "site/.cache", "site/.env"} {
+		body, _ := json.Marshal(map[string]string{"path": p})
+		if code, _, raw := postJSON(t, f.base+"/s/livesession/web", f.base, string(body)); code != http.StatusBadRequest {
+			t.Errorf("register dot path %q = %d, want 400: %s", p, code, raw)
+		}
 	}
-	docsProxy := "http://127.0.0.1:" + strconv.Itoa(webPort(f.d.web, docs.ID))
-	if code, _, body := webGet(t, docsProxy+"/index.html", nil); code != http.StatusOK || !strings.Contains(body, "docs page") || !strings.Contains(body, webInjectTag) {
-		t.Errorf("dot-ancestor page = %d: %s", code, body)
+	f.d.web.mu.Lock()
+	after := len(f.d.web.byKey)
+	f.d.web.mu.Unlock()
+	if after != before {
+		t.Errorf("dot paths registered %d entries", after-before)
 	}
 
 	// The registered directory swapped for a symlink leading out.
@@ -740,6 +750,86 @@ func TestWebCardServesARegisteredDirectoryOnly(t *testing.T) {
 	}
 	if code, _, body := webGet(t, swapProxy+"/index.html", nil); code != http.StatusNotFound {
 		t.Errorf("swap page after the swap = %d, want 404: %s", code, body)
+	}
+}
+
+// TestWebCardRootFileServesOnlyItself pins the static scope of a file at
+// the session root's top: that file alone, never the root's other files (a
+// page there could fetch them all); the root itself, reached as a path or
+// through a symlink, is refused at registration.
+func TestWebCardRootFileServesOnlyItself(t *testing.T) {
+	f := startPageFixture(t)
+	webWrite(t, f.project, "report.html", "<html><head><title>report</title></head><body>report page</body></html>")
+	webWrite(t, f.project, "chart.js", "console.log('chart')")
+	webWrite(t, f.project, "index.html", "<html><head></head><body>root index</body></html>")
+	webWrite(t, f.project, "notes.txt", "root notes")
+	webWrite(t, f.project, "site/index.html", "<html><head></head><body>site page</body></html>")
+	if err := os.Symlink(f.project, filepath.Join(f.project, "rootlink")); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := registerWebTarget(t, f, `{"path":"report.html"}`)
+	if reg.Kind != "static" || reg.Base != "" || reg.Path != "/report.html" {
+		t.Fatalf("registration = %+v", reg)
+	}
+	proxy := "http://127.0.0.1:" + strconv.Itoa(webPort(f.d.web, reg.ID))
+	if code, _, body := webGet(t, proxy+"/report.html", nil); code != http.StatusOK || !strings.Contains(body, "<head>"+webInjectTag+"<title>report</title>") {
+		t.Errorf("report = %d: %s", code, body)
+	}
+	for _, path := range []string{"/", "/index.html", "/chart.js", "/notes.txt", "/site/index.html", "/site/", "/report.html/../notes.txt", "/rootlink/report.html"} {
+		if code, _, body := webGet(t, proxy+path, nil); code != http.StatusNotFound {
+			t.Errorf("GET %s on a root file's listener = %d, want 404: %s", path, code, body)
+		}
+	}
+	// A file in a subdirectory keeps its directory subtree.
+	site := registerWebTarget(t, f, `{"path":"site/index.html"}`)
+	if site.ID == reg.ID || site.Base != "site" {
+		t.Errorf("subdirectory registration = %+v", site)
+	}
+	for _, p := range []string{"rootlink", "rootlink/"} {
+		body, _ := json.Marshal(map[string]string{"path": p})
+		if code, _, raw := postJSON(t, f.base+"/s/livesession/web", f.base, string(body)); code != http.StatusBadRequest {
+			t.Errorf("register the root through %q = %d, want 400: %s", p, code, raw)
+		}
+	}
+}
+
+// TestWebCardRefusesGitIgnoredPaths pins the git-ignore refusal of static
+// scopes: inside a repository an ignored file or folder is refused at
+// registration, and an ignored file inside a registered directory answers
+// 404, as the file routes refuse it, since the page can fetch whatever its
+// listener serves.
+func TestWebCardRefusesGitIgnoredPaths(t *testing.T) {
+	g, _ := newTestWebRegistry(t)
+	root := t.TempDir()
+	gitRun(t, root, "init", "-q")
+	webWrite(t, root, ".gitignore", "build/\n*.secret\n")
+	webWrite(t, root, "site/index.html", "<html><head></head><body>site page</body></html>")
+	webWrite(t, root, "site/app.js", "console.log('site')")
+	webWrite(t, root, "site/key.secret", "TOKEN=1")
+	webWrite(t, root, "site/build/out.html", "<html></html>")
+	webWrite(t, root, "build/report.html", "<html></html>")
+	for _, p := range []string{"build/report.html", "build", "site/build/out.html", "site/key.secret"} {
+		var refusal *webRefusal
+		if _, _, err := g.registerDir(root, p); !errors.As(err, &refusal) {
+			t.Errorf("register ignored %q = %v, want a refusal", p, err)
+		}
+	}
+	e, inner, err := g.registerDir(root, "site/index.html")
+	if err != nil || inner != "/index.html" {
+		t.Fatalf("register site = %q, %v", inner, err)
+	}
+	proxy := "http://127.0.0.1:" + strconv.Itoa(webPort(g, e.id))
+	if code, _, body := webGet(t, proxy+"/index.html", nil); code != http.StatusOK || !strings.Contains(body, "site page") {
+		t.Errorf("site page = %d: %s", code, body)
+	}
+	if code, _, _ := webGet(t, proxy+"/app.js", nil); code != http.StatusOK {
+		t.Errorf("tracked sibling = %d, want 200", code)
+	}
+	for _, path := range []string{"/key.secret", "/build/out.html"} {
+		if code, _, body := webGet(t, proxy+path, nil); code != http.StatusNotFound {
+			t.Errorf("GET ignored %s = %d, want 404: %s", path, code, body)
+		}
 	}
 }
 

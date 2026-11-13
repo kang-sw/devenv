@@ -33,12 +33,20 @@ import (
 // small injected script (webinject.js) that picks an element and collects
 // console errors for the composer.
 //
-// Each target (a dev server's origin, or a registered directory) gets its
-// own listener on an ephemeral 127.0.0.1 port, so the proxied page runs on
-// an origin of its own: its cookies and storage work, and the origin
+// Each target (a dev server's origin, or a registered static scope) gets
+// its own listener on an ephemeral 127.0.0.1 port, so the proxied page runs
+// on an origin of its own: its cookies and storage work, and the origin
 // boundary keeps its scripts away from the dashboard's routes. The page
 // talks to the dashboard only by postMessage, through the card's wrapper
 // frame (webcard_routes.go).
+//
+// A static scope is what a page there can read, and the page can read all
+// of it: it runs scripts on its own origin, so fetch("/<any path>") reaches
+// every file the listener serves and can carry it to any other origin. So
+// the scope is the opened file's directory subtree when that directory lies
+// below the session root, and the opened file alone when it sits at the
+// root's top (the root's other files stay out of reach); a dot-named or
+// git-ignored path is refused at registration and on every request.
 //
 // A listener:
 //
@@ -86,7 +94,7 @@ const (
 	webSweepEvery = time.Minute
 	// webInjectPath is the injected script's reserved path on every proxy
 	// origin. Its dot-named segment can never name a served static file
-	// (dotDenied).
+	// (capDenied).
 	webInjectPath = "/.ws-web/inject.js"
 	// webInjectPort is the placeholder webinject.js carries for the
 	// daemon's port, which the listener bakes in.
@@ -136,14 +144,16 @@ type webRegistry struct {
 }
 
 // webEntry is one registered target: a dev server's origin (target), or a
-// registered directory (dir, resolved). base is what a pick's url starts
-// with: the target's origin, or the directory relative to the session root.
+// registered static scope (dir, resolved; with file, that one file of it
+// only). base is what a pick's url starts with: the target's origin, or the
+// directory relative to the session root.
 // port is the last port its listener bound, which a recreated listener
 // binds again when it can.
 type webEntry struct {
 	id, key string
 	target  *url.URL
 	dir     string
+	file    string
 	base    string
 	port    int
 	ln      *webListener
@@ -343,11 +353,14 @@ func (g *webRegistry) registerURL(raw string) (*webEntry, string, error) {
 	return e, inner, nil
 }
 
-// registerDir registers the directory of the file at p (relative to root,
-// or absolute inside it; a directory itself registers as is) and makes sure
-// its listener runs. The directory is resolved through its symlinks and
-// must lie in root resolved the same way; the root itself counts, for a page
-// at its top. It returns the entry and the path to open on the proxy origin.
+// registerDir registers the static scope of the file at p (relative to
+// root, or absolute inside it) and makes sure its listener runs: the file's
+// directory subtree, or the file alone when it sits at the root's top (see
+// the file comment). A directory below the root registers as is; the root
+// itself is refused, as is a dot-named or git-ignored path (capDenied). The
+// directory is resolved through its symlinks and must lie in root resolved
+// the same way. It returns the entry and the path to open on the proxy
+// origin.
 func (g *webRegistry) registerDir(root, p string) (*webEntry, string, error) {
 	refuse := &webRefusal{"a web card opens a file under the session root"}
 	rel, ok := relativeInside(root, p)
@@ -358,6 +371,9 @@ func (g *webRegistry) registerDir(root, p string) (*webEntry, string, error) {
 	info, err := os.Stat(full)
 	if err != nil {
 		return nil, "", refuse
+	}
+	if capDenied(root, rel) {
+		return nil, "", &webRefusal{"a web card does not open a dot-named or git-ignored path"}
 	}
 	dir, inner := full, "/"
 	if !info.IsDir() {
@@ -378,18 +394,23 @@ func (g *webRegistry) registerDir(root, p string) (*webEntry, string, error) {
 	if err != nil || (base != "." && !insideRel(base)) {
 		return nil, "", refuse
 	}
+	// Keyed by the root too: base is relative to it, so sessions whose
+	// roots nest (a repository and a subfolder of it) each get their own
+	// entry for the same directory, with their own base.
+	key, file := "dir:"+realRoot+"\x00"+realDir, ""
 	if base == "." {
-		base = ""
+		if info.IsDir() {
+			return nil, "", &webRefusal{"a web card opens a file, or a folder below the session root, not the whole root"}
+		}
+		base, file = "", filepath.Base(full)
+		key = "file:" + realRoot + "\x00" + filepath.Join(realDir, file)
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.closed {
 		return nil, "", errWebClosed
 	}
-	// Keyed by the root too: base is relative to it, so sessions whose
-	// roots nest (a repository and a subfolder of it) each get their own
-	// entry for the same directory, with their own base.
-	e, created := g.entry("dir:"+realRoot+"\x00"+realDir, func(e *webEntry) { e.dir, e.base = realDir, filepath.ToSlash(base) })
+	e, created := g.entry(key, func(e *webEntry) { e.dir, e.file, e.base = realDir, file, filepath.ToSlash(base) })
 	if _, err := g.ensure(e); err != nil {
 		if created {
 			g.forget(e)
@@ -850,7 +871,7 @@ func (l *webListener) serveStatic(w http.ResponseWriter, r *http.Request) {
 		p += "index.html"
 	}
 	rel := strings.TrimPrefix(path.Clean("/"+p), "/")
-	if rel == "" {
+	if rel == "" || (l.e.file != "" && rel != l.e.file) {
 		fsNotFound(w)
 		return
 	}
@@ -860,7 +881,7 @@ func (l *webListener) serveStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	if dotDenied(dir, rel) {
+	if capDenied(dir, rel) {
 		fsNotFound(w)
 		return
 	}

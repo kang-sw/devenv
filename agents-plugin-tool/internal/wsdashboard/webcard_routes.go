@@ -18,11 +18,12 @@ import (
 // (localViewer: a localhost proxy is an SSRF and execution surface):
 //
 //   - POST /s/<reply-id>/web registers a target, {url} (a localhost dev
-//     server's page) or {path} (an HTML file under the session root, whose
-//     directory is registered), and answers {id, kind ("dev" or "static"),
-//     base, path}: the opaque registration id (the same target keeps its
-//     id), what a pick's url starts with (the target's origin, or the
-//     directory relative to the session root, "" for the root), and the path
+//     server's page) or {path} (an HTML file under the session root: its
+//     directory subtree is registered, or the file alone at the root's top;
+//     webcard_proxy.go registerDir), and answers {id, kind ("dev" or
+//     "static"), base, path}: the opaque registration id (the same target
+//     keeps its id), what a pick's url starts with (the target's origin, or
+//     the directory relative to the session root, "" for the root), and the path
 //     to open on the proxy origin. The card never stores the id; a restored
 //     card registers again. Gated by TrustedWrite (not local 404, another
 //     origin 403); a refused target answers 400 with why, a full registry
