@@ -148,7 +148,8 @@ function requestAnimationFrame() {}
 // data-srcdoc for comparisons. A changed topic's next body frame (frameGraft)
 // is mounted before it goes in when the old frame was mounted, so it never
 // shows blank; the next of an unmounted one, or of one in a topic skipping
-// its rendering (content-visibility), takes its place as a placeholder.
+// its rendering (content-visibility), takes its place as a placeholder;
+// the kept section keeps its content-visibility mark (data-wbcv).
 // Under the viewport bands a jump keeps its target in place (wbHistory.keep).
 // The cases execute under node when it is installed.
 func TestBoardFramesMountLazily(t *testing.T) {
@@ -231,18 +232,19 @@ function graft(oldMounted, skipped) {
   var of = frame("topic:g", "<!DOCTYPE html><html>old"), nf = frame("topic:g", "<!DOCTYPE html><html>new");
   if (oldMounted) of = mountFrame(of);
   var od = new El("div", { "class": "doc-body framed" }, [of]), nd = new El("div", { "class": "doc-body framed" }, [nf]);
-  var old = new El("section", { "class": "topic", "data-topic": "g" }, [od]), nsec = new El("section", { "class": "topic", "data-topic": "g" }, [nd]);
+  var old = new El("section", { "class": "topic", "data-topic": "g", "data-wbcv": "", "data-old": "" }, [od]), nsec = new El("section", { "class": "topic", "data-topic": "g" }, [nd]);
   old.wbSkipped = !!skipped;
   board.appendChild(old);
   var g = { old: old, n: nsec, oc: [of, od, old], nc: [nf, nd, nsec] };
   frameGraft(g);
-  return { nf: nf, f: g.nc[0], od: od, of: of };
+  return { nf: nf, f: g.nc[0], od: od, of: of, old: old };
 }
 var frameShow = function () {}, frameRevealMs = 1500;
 function frameReveal() {}
 var g1 = graft(true);
 check("the next frame of a mounted frame goes in mounted, beside the old", mounted(g1.nf) && g1.od.childNodes[0] === g1.of && g1.od.childNodes[1] === g1.f);
 check("the next frame is pending, and the graft holds the frame, not the placeholder", g1.f.wbNext === true && g1.f.wbOld === g1.of && g1.of.wbOut === true && (g1.f.listeners.load || []).length === 1 && g1.nf.wbNext === undefined);
+check("the kept section keeps its content-visibility mark and drops other old attributes", g1.old.hasAttribute("data-wbcv") && !g1.old.hasAttribute("data-old"));
 var g2 = graft(false);
 check("the next frame of an unmounted frame takes its place as a placeholder", placeholder(g2.nf) && g2.od.childNodes.length === 1 && g2.od.childNodes[0] === g2.nf && !g2.nf.wbNext);
 // In a topic skipping its rendering a new frame would load at no size: the

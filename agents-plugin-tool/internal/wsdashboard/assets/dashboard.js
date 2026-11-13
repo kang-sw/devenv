@@ -1004,8 +1004,10 @@
   }
   // frameGraft moves g's new section content into its old section, level by
   // level down the frame's path: each kept element takes the new element's
-  // attributes and children, except its child on the path, which stays.
-  // At the bottom the new frame goes in after the old one, pending.
+  // attributes and children, except its child on the path, which stays,
+  // and the kept section's content-visibility mark (data-wbcv, viewport
+  // bands), which no served section carries. At the bottom the new frame
+  // goes in after the old one, pending.
   function frameGraft(g) {
     var of = g.oc[0], mounted = of.tagName === "IFRAME" && !g.old.wbSkipped;
     // The next frame of a mounted frame is mounted before it goes in, and
@@ -1020,7 +1022,7 @@
     if (mounted) frameNext(nf, of);
     for (var i = g.oc.length - 1; i > 0; i--) {
       var oa = g.oc[i], na = g.nc[i], oc = g.oc[i - 1], nc = g.nc[i - 1], before = true;
-      Array.prototype.slice.call(oa.attributes).forEach(function (a) { if (!na.hasAttribute(a.name)) oa.removeAttribute(a.name); });
+      Array.prototype.slice.call(oa.attributes).forEach(function (a) { if (!na.hasAttribute(a.name) && a.name !== "data-wbcv") oa.removeAttribute(a.name); });
       Array.prototype.forEach.call(na.attributes, function (a) { if (oa.getAttribute(a.name) !== a.value) oa.setAttribute(a.name, a.value); });
       Array.prototype.slice.call(oa.childNodes).forEach(function (c) { if (c !== oc) oa.removeChild(c); });
       Array.prototype.slice.call(na.childNodes).forEach(function (c) {
