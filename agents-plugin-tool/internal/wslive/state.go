@@ -905,6 +905,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 		}
 		return snap.Agents[i].ID < snap.Agents[j].ID
 	})
+	snap.Agents = mergeSpawnAgents(snap.Agents)
 	return snap
 }
 

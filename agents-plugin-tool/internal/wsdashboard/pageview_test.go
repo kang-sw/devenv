@@ -1101,6 +1101,33 @@ func TestPiAgentRowBlinksAPiBadgeAndLinks(t *testing.T) {
 	}
 }
 
+func TestSpawnTreeUsesOrdinaryNestingAndCountsWithoutDuplicateRows(t *testing.T) {
+	now := testNow
+	st := wslive.NewState("lead-key")
+	st.SetAdapter("claude")
+	for _, ev := range []wslive.Event{
+		{Kind: wslive.KindAgent, AgentID: "pi:child", AgentKind: wslive.AgentKindPi, SessionKey: "child-key", Label: "worker", Status: wslive.StatusRunning},
+		{Kind: wslive.KindAgent, AgentID: "pi:leaf", AgentKind: wslive.AgentKindPi, ParentID: "pi:child", Label: "leaf", Status: wslive.StatusDone},
+		{Kind: wslive.KindAgent, AgentID: "harness-child", SessionKey: "child-key", Label: "duplicate", Status: wslive.StatusRunning},
+	} {
+		if _, err := st.Apply(ev, now.UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snap := st.Snapshot(now.UnixMilli())
+	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: &snap, Now: now})
+	if len(v.Tree.Agents) != 1 || v.Tree.Agents[0].ID != "pi:child" || len(v.Tree.Agents[0].Children) != 1 || v.Tree.Agents[0].Children[0].ID != "pi:leaf" {
+		t.Fatalf("spawn tree = %+v", v.Tree.Agents)
+	}
+	if v.Tree.Running != 1 || v.Tree.Finished != 1 || v.Tree.Failed != 0 {
+		t.Fatalf("counts = %d/%d/%d", v.Tree.Running, v.Tree.Finished, v.Tree.Failed)
+	}
+	html := renderTree(t, v)
+	if !strings.Contains(html, "worker") || !strings.Contains(html, "leaf") || strings.Contains(html, "duplicate") {
+		t.Fatalf("ordinary agents pane lost/duplicated a row: %s", html)
+	}
+}
+
 // TestPeerRowBranch pins the peer row's branch chip: a served peer carries
 // its snapshot's branch (with or without a live adapter) and an unserved one
 // none; the chip draws a branch as the session page's git handle does (goal

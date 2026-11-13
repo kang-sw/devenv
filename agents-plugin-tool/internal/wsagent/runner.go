@@ -250,6 +250,12 @@ func (r *Runner) Start(notify func(replyID, project string)) {
 			r.startConv(rec, nil)
 		}
 	}
+	// All records are loaded now, including children sorted after their lead.
+	for _, st := range r.List() {
+		if c := r.conv(st.ID); c != nil {
+			c.do(func() { c.live.writeSnapshot() })
+		}
+	}
 	// A child loaded before its parent found no parent to report to.
 	r.deliverPending()
 	if r.opts.Holders == nil {
@@ -378,10 +384,12 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		live:    newLiveWriter(dir, rec.WSKey, rec.Backend, r.opts.Now, r.opts.Log),
 		reqs:    make(chan func()),
 		inboxC:  make(chan struct{}, 1),
+		spawnC:  make(chan struct{}, 1),
 		mailC:   make(chan struct{}, 1),
 		done:    make(chan struct{}),
 		settleC: make(chan struct{}),
 	}
+	c.live.beforeSnapshot = c.seedSpawnRows
 	if len(seed) > 0 {
 		c.live.applyQuiet(wslive.Event{Kind: wslive.KindCommands, Commands: seed})
 	}
@@ -1072,6 +1080,8 @@ type conv struct {
 	// mailbox may hold mail (signalMail); stopMail ends the watch.
 	mailC    chan struct{}
 	stopMail func()
+	// spawnC coalesces daemon-owned descendant changes for this writer.
+	spawnC chan struct{}
 	// spawning is set from the row write that precedes a spawn until the
 	// spawn settled: the row then names no process and is not stopped, so
 	// a terminal login is refused meanwhile (Registration.HostMayRun).
@@ -1314,6 +1324,9 @@ func (c *conv) loop() {
 			c.inboxChanged()
 		case <-c.mailC:
 			c.mailChanged()
+		case <-c.spawnC:
+			c.live.writeSnapshot()
+			c.changed(false)
 		case ev, ok := <-c.events:
 			if !ok {
 				c.processExited()
