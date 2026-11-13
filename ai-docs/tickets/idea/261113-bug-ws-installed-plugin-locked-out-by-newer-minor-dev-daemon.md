@@ -43,3 +43,4 @@ the session.
 ## Owner Direction
 
 - 2026-11-13: avoid minor version bumps from now on. Cross-version changes should be designed as T0/T1 (additive, alias-preserving) wherever possible; a T2 change or minor bump needs explicit owner approval.
+- 2026-11-13 (board 401 = c): AGENTS.md Compatibility Tiers now says to avoid T2 and requires owner approval for T2 and minor bumps. This ticket should also make the dev rebuild warn before it replaces the shared daemon with a newer-minor one while live clients run an older minor.

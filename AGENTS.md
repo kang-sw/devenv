@@ -113,6 +113,12 @@ before release, not discovered there.
   protocol or tracker event change. T2 lands only in a minor bump, with the
   store's `schema_version` or the protocol number raised.
 
+Avoid T2. Design a cross-version change as T0 or T1 (additive, or keeping
+the old name as an alias) whenever one can carry it; a T2 change, and the
+minor bump it forces, needs the owner's explicit approval before a ticket
+settles it. A minor bump locks out every installed-plugin session still on
+the previous minor once a dev rebuild replaces the shared daemon.
+
 Scenario sheet and enforcement: `ai-docs/manuals/release-compatibility.md`.
 
 ### Branch Policy
