@@ -20,23 +20,30 @@ func TestSearchPaletteAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"class: 'tk tk-palette'", "$('tkqpop').showModal()", "function qScore(", "function qRank(",
+		"class: 'tk tk-palette'", "d.showModal()", "function qScore(", "function qBoard(",
 		"function qShortcut(", "O.searchRows", "O.searchPick", "e.isComposing || e.keyCode === 229",
 		"$('tkqpop').addEventListener('cancel'", "js.tk.qs.sessions", "js.tk.qs.tracker",
+		"O.fileFind", "O.fileList", "excerpts: true",
 	} {
 		if !strings.Contains(string(tracker), want) {
 			t.Errorf("tracker lacks palette hook %q", want)
 		}
 	}
+	// The renderer stays host-agnostic: the file hooks come from the host.
+	for _, page := range []string{"WsPreview", "/fs/"} {
+		if strings.Contains(string(tracker), page) {
+			t.Errorf("tracker reaches the page's %q itself", page)
+		}
+	}
 	if strings.Contains(string(tracker), `class="tk-qpop"`) || strings.Contains(string(css), ".tk .tk-qpop") {
 		t.Error("old quick-switcher popover remains")
 	}
-	for _, want := range []string{"searchRows: paletteRows", "searchPick: palettePick", "parsed.content.querySelector", `p.open = true`, `target.scrollIntoView({ block: "center" })`} {
+	for _, want := range []string{"searchRows: paletteRows", "searchPick: palettePick", "paletteFiles({", `"&excerpts=1"`, "parsed.content.querySelector", `p.open = true`, `target.scrollIntoView({ block: "center" })`} {
 		if !strings.Contains(string(page), want) {
 			t.Errorf("host lacks palette hook %q", want)
 		}
 	}
-	for _, want := range []string{".tk.tk-palette::backdrop", "100vw - 24px", "prefers-reduced-motion: reduce", ".palette-flash { animation: none; }"} {
+	for _, want := range []string{".tk.tk-palette::backdrop", "min(1240px, calc(100vw - 24px))", "[data-step=wide]", "prefers-reduced-motion: reduce", ".palette-flash { animation: none; }"} {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("palette CSS lacks %q", want)
 		}
