@@ -5882,7 +5882,6 @@
     });
     folder.addEventListener("input", edited);
     rpEnter(folder, submit);
-    iseg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-iso]"); if (b) { P.iso = b.getAttribute("data-iso"); sync(); } });
     cancel.addEventListener("click", function () { railPopClose(true); });
     go.addEventListener("click", submit);
     P.open = function (ws, label) {
@@ -6234,6 +6233,7 @@
         railPopPlace();
       });
     }
+    iseg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-iso]"); if (b) { P.iso = b.getAttribute("data-iso"); sync(); } });
     seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-harness]"); if (b && !b.disabled) setHarness(b.getAttribute("data-harness")); });
     cancel.addEventListener("click", function () { railPopClose(true); });
     go.addEventListener("click", submit);
