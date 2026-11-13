@@ -211,6 +211,27 @@ check("new branch from the detached HEAD", R.worktreeBody("/w/r", { mode: "new",
 check("existing branch, custom folder", R.worktreeBody("/w/r", { mode: "old", name: "ignored", base: "main", pick: "free", custom: true, folder: " /w/wt ", shown: "/w/.wt/r/261112-1333" }),
   { workspace: "/w/r", branch: "free", "new": false, base: "", folder: "/w/wt" });
 
+// deleteReady: Delete stays off until the typed name is the folder exactly,
+// for a refused check, and for a check that answered an earlier open; the
+// submit's own refusals (force, changed) only ask for the name again.
+var clean = { path: "/w/feat-x", folder: "feat-x", branch: "feat", dirty: 0, unreached: 0, force: false, token: "t1" };
+var dirty = { path: "/w/feat-x", folder: "feat-x", dirty: 2, force: true, token: "t2" };
+check("off until the name matches", ["", "f", "feat-", "feat-x"].map(function (s) { return R.deleteReady({ key: 3, check: clean }, s, 3); }), [false, false, false, true]);
+check("the name must match exactly", ["Feat-x", " feat-x", "feat-x ", "feat-xx", "/w/feat-x"].map(function (s) { return R.deleteReady({ key: 3, check: clean }, s, 3); }), [false, false, false, false, false]);
+check("a refused check stays off", ["unknown", "primary", "pooled", "missing", "locked", "busy"].map(function (r) {
+  return R.deleteReady({ key: 3, check: { folder: "feat-x", refusal: r, note: "n" } }, "feat-x", 3);
+}), [false, false, false, false, false, false]);
+check("a stale check stays off", [R.deleteReady({ key: 2, check: clean }, "feat-x", 3), R.deleteReady(null, "feat-x", 3), R.deleteReady({ key: 3, check: null }, "feat-x", 3)], [false, false, false]);
+check("a forced check needs its token", [R.deleteReady({ key: 1, check: dirty }, "feat-x", 1), R.deleteReady({ key: 1, check: { folder: "feat-x", force: true } }, "feat-x", 1)], [true, false]);
+check("the submit's own refusals ask for the name again", ["force", "changed"].map(function (r) {
+  var c = { folder: "feat-x", force: true, token: "t3", refusal: r, note: "n" };
+  return [R.deleteReady({ key: 4, check: c }, "", 4), R.deleteReady({ key: 4, check: c }, "feat-x", 4)];
+}), [[false, true], [false, true]]);
+check("no folder never matches", R.deleteReady({ key: 1, check: { folder: "" } }, "", 1), false);
+// deleteBody: force and the token only when the check needs force.
+check("a clean delete sends no force", R.deleteBody("/w/r", "/w/feat-x", clean), { workspace: "/w/r", path: "/w/feat-x", force: false, token: "" });
+check("a forced delete sends the token", R.deleteBody("/w/r", "/w/feat-x", dirty), { workspace: "/w/r", path: "/w/feat-x", force: true, token: "t2" });
+
 // leadBody: only the picked options go out, and a permission mode only to
 // Claude.
 check("defaults send the harness alone", R.leadBody("/w/r", { harness: "claude", model: "", effort: "", mode: "" }), { root: "/w/r", harness: "claude", plugin_isolation: "default" });
@@ -256,7 +277,8 @@ if (bad.length) console.log(bad.join("\n"));
 // pinning and its undo, the persisted stars and collapsed workspaces, the
 // drag order of the sessions and workspaces (its drops, storage, and
 // pruning), the viewed row's mark, the add popovers' placement, branch
-// filter, and add-worktree request, the spawn request, the revive route
+// filter, and add-worktree request, the worktree delete modal's Delete gate
+// and submit, the spawn request, the revive route
 // and entry mark, the hand-off notice, and an approval card's input
 // preview.
 func TestRailScript(t *testing.T) {

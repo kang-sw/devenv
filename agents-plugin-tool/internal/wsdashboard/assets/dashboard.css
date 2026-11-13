@@ -1569,15 +1569,17 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .wsbar .pp { font-family: var(--wb-mono); font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
 .rail .wsbar .ct { margin-left: auto; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: rgb(127 127 127 / .28); flex: none; }
 .rail .rws.col .wsbody { display: none; }
-/* the + buttons (a worktree row's new session among them) and forget: quiet
-   until their line is hovered or they are focused (faint always on touch
-   screens), full on hover and while their popover is open */
-.rail .radd, .rail .rforget, .rail .rnew { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity .12s; }
-.rail .radd .i, .rail .rforget .i, .rail .rnew .i { width: 13px; height: 13px; stroke-width: 1.8; }
-.rail .rhd:hover .radd, .rail .wsbar:hover .radd, .rail .wsbar:hover .rforget, .rail .wthd:hover .rnew, .rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible { opacity: .7; }
-@media (hover: none) { .rail .radd, .rail .rforget, .rail .rnew { opacity: .5; } }
-.rail .rhd .radd:hover, .rail .wsbar .radd:hover, .rail .wsbar .rforget:hover, .rail .rhd .radd[aria-expanded="true"], .rail .wsbar .radd[aria-expanded="true"], .rail .rnew:hover, .rail .rnew[aria-expanded="true"] { opacity: 1; background: rgb(127 127 127 / .22); }
-.rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+/* the + buttons (a worktree row's new session among them), forget, and a
+   worktree row's delete: quiet until their line is hovered or they are
+   focused (faint always on touch screens), full on hover and while their
+   popover is open */
+.rail .radd, .rail .rforget, .rail .rnew, .rail .rdel { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity .12s; }
+.rail .radd .i, .rail .rforget .i, .rail .rnew .i, .rail .rdel .i { width: 13px; height: 13px; stroke-width: 1.8; }
+.rail .rhd:hover .radd, .rail .wsbar:hover .radd, .rail .wsbar:hover .rforget, .rail .wthd:hover .rnew, .rail .wthd:hover .rdel, .rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible, .rail .rdel:focus-visible { opacity: .7; }
+@media (hover: none) { .rail .radd, .rail .rforget, .rail .rnew, .rail .rdel { opacity: .5; } }
+.rail .rhd .radd:hover, .rail .wsbar .radd:hover, .rail .wsbar .rforget:hover, .rail .rhd .radd[aria-expanded="true"], .rail .wsbar .radd[aria-expanded="true"], .rail .rnew:hover, .rail .rnew[aria-expanded="true"], .rail .rdel:hover { opacity: 1; background: rgb(127 127 127 / .22); }
+.rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible, .rail .rdel:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+.rail .rdel:hover { color: var(--wb-fail); }
 .rail .rforget:disabled { cursor: progress; }
 .rail .wsbody { padding-top: 2px; }
 .rail .rwt { padding: 4px 0 2px; }
@@ -1711,6 +1713,52 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rpop .pbtn.go { background: var(--wb-primary); color: var(--wb-primary-fg); }
 .rpop .pbtn:disabled { opacity: .45; cursor: default; }
 .rpop .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+/* the rail's worktree delete modal: a <dialog> the page script makes once
+   outside the rail region and shows modal from a row's trash button (which,
+   like the new-session +, only a browser on the daemon's machine sees). The
+   check's facts (the changed files in a scrolling list, the holders with a
+   live one marked as blocking), the refusal note, the force notice, the
+   typed-name confirmation, and a danger-coloured Delete */
+dialog.rdeldlg { width: min(460px, calc(100vw - 24px)); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; border: 0; border-radius: 12px;
+  background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); font-size: 12.5px; }
+dialog.rdeldlg[open] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+dialog.rdeldlg::backdrop { background: var(--scrim, rgb(0 0 0 / .35)); }
+dialog.rdeldlg [hidden] { display: none !important; }
+.rdeldlg .rdhd { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; font-weight: 800; }
+.rdeldlg .rdhd .i { width: 15px; height: 15px; flex: none; color: var(--wb-fail); }
+.rdeldlg .rdpath { margin-top: -6px; padding: 0; background: none; font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdfacts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rdeldlg .rdfacts:empty { display: none; }
+.rdeldlg .rdfact { display: flex; align-items: flex-start; gap: 7px; min-width: 0; overflow-wrap: anywhere; }
+.rdeldlg .rdfact .i { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--wb-muted-fg); }
+.rdeldlg .rdfact.warn, .rdeldlg .rdfact.warn .i { color: var(--wb-warn-ink); }
+.rdeldlg .rdfact.bad, .rdeldlg .rdfact.bad .i { color: var(--wb-fail); }
+.rdeldlg .rdpaths { list-style: none; margin: 0 0 0 20px; padding: 4px 8px; max-height: 132px; overflow-y: auto; overscroll-behavior: contain; border-radius: 6px; background: var(--wb-muted); font: 11.5px/1.5 var(--wb-mono); }
+.rdeldlg .rdpaths li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rdeldlg .rdpaths li.more { font-family: var(--wb-sans); color: var(--wb-muted-fg); }
+.rdeldlg .rdsub { margin-top: 3px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.rdeldlg .rdholders { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.rdeldlg .rdholders li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.rdeldlg .rdholders .nm { font-family: var(--wb-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rdeldlg .rdholders .st { margin-left: auto; flex: none; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rdeldlg .rdholders li.live .st { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
+.rdeldlg .rdnote, .rdeldlg .rdforce { margin: 0; padding: 7px 10px; border-radius: 8px; overflow-wrap: anywhere; }
+.rdeldlg .rdnote.bad { background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); color: var(--wb-fail); }
+.rdeldlg .rdnote.warn, .rdeldlg .rdforce { background: color-mix(in srgb, var(--wb-warn) 14%, var(--wb-card)); color: var(--wb-warn-ink); }
+.rdeldlg .rdforcehd { font-weight: 800; }
+.rdeldlg .rdforce ul { margin: 3px 0 0; padding-left: 18px; }
+.rdeldlg .rdconf { display: grid; gap: 5px; }
+.rdeldlg .rdconft { font-size: 12px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdconft code { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); background: var(--wb-muted); padding: 0 4px; border-radius: 4px; }
+.rdeldlg .rdq { width: 100%; box-sizing: border-box; font: 12.5px var(--wb-mono); border: 0; border-radius: 8px; padding: 5px 8px; background: var(--wb-muted); color: inherit; }
+.rdeldlg .rdq:focus-visible { outline: 1.5px solid var(--wb-fail); }
+.rdeldlg .rdmsg { margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdmsg.err { color: var(--wb-fail); }
+.rdeldlg .rdrow { display: flex; justify-content: flex-end; gap: 6px; }
+.rdeldlg .pbtn { white-space: nowrap; flex: none; font: inherit; font-size: 12px; font-weight: 700; border: 0; border-radius: 999px; padding: 4px 14px; cursor: pointer; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rdeldlg .pbtn.danger { background: var(--wb-fail); color: var(--wb-card); }
+.rdeldlg .pbtn:disabled { opacity: .45; cursor: default; }
+.rdeldlg .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
 /* daemon-hosted lead sessions: the hosted mark beside a harness badge; the
    new-session button after a worktree row's label (styled with the + buttons
    above), which only a browser on the daemon's machine sees (the spawn route
@@ -1725,6 +1773,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .wsbar .chip.perm + .ct { margin-left: 0; }
 .rail .wsbar .chip.perm { margin-left: auto; }
 html:not([data-sysopen]) .rail .rnew { display: none; }
+html:not([data-sysopen]) .rail .rdel { display: none; }
 .rpop .sploc { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: -4px; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
 .rpop .sploc .i { width: 12px; height: 12px; flex: none; }
 .rpop .sploc b { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
