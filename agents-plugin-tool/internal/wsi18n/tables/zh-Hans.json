@@ -1420,6 +1420,7 @@
   "wb.banner": "看板已更新；你回答期间已推迟重新加载",
   "wb.check.no": "回答 no",
   "wb.checks": "确认请求",
+  "wb.checks.hide": "隐藏已答复的请求",
   "wb.checks.progress": "已答 {0} / {1}",
   "wb.closed": "已关闭",
   "wb.closed.more": "另有 {0} 个已关闭主题未显示",

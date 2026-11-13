@@ -18,7 +18,7 @@ E.prototype.hasAttribute = function (k) { return k in this.attrs; };
 var calls = 0, listeners = {};
 function wsT(k) { calls++; return "T(" + k + ")"; }
 var document = { getElementById: function () { return null; }, querySelectorAll: function () { return []; },
-  addEventListener: function (type, fn) { (listeners[type] = listeners[type] || []).push(fn); } };
+  addEventListener: function (type, fn) { (listeners[type] = listeners[type] || []).push(fn); }, documentElement: new E() };
 var window = { wsT: wsT };
 function hover(el) { (listeners.mouseover || []).forEach(function (fn) { fn({ target: el }); }); }
 `

@@ -1420,6 +1420,7 @@
   "wb.banner": "board updated; reload deferred while you answer",
   "wb.check.no": "answer no",
   "wb.checks": "check",
+  "wb.checks.hide": "hide answered requests",
   "wb.checks.progress": "answered {0} / {1}",
   "wb.closed": "closed",
   "wb.closed.more": "{0} more closed topics not shown",

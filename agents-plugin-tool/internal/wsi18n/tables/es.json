@@ -1420,6 +1420,7 @@
   "wb.banner": "pizarra actualizada; la recarga se pospone mientras respondes",
   "wb.check.no": "responder no",
   "wb.checks": "comprobar",
+  "wb.checks.hide": "ocultar solicitudes respondidas",
   "wb.checks.progress": "respondidas {0} / {1}",
   "wb.closed": "cerrado",
   "wb.closed.more": "{0} temas cerrados más sin mostrar",

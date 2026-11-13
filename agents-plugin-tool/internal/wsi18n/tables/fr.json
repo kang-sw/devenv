@@ -1420,6 +1420,7 @@
   "wb.banner": "tableau mis à jour ; rechargement différé pendant que vous répondez",
   "wb.check.no": "répondre no",
   "wb.checks": "à vérifier",
+  "wb.checks.hide": "masquer les demandes répondues",
   "wb.checks.progress": "répondu {0} / {1}",
   "wb.closed": "clos",
   "wb.closed.more": "{0} autres sujets clos non affichés",

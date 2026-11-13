@@ -1420,6 +1420,7 @@
   "wb.banner": "보드가 갱신되었습니다. 답변 중이라 새로고침을 미뤘습니다",
   "wb.check.no": "아니요(no)로 답하기",
   "wb.checks": "확인 요청",
+  "wb.checks.hide": "완료된 요청 숨기기",
   "wb.checks.progress": "답변 {0} / {1}",
   "wb.closed": "닫힘",
   "wb.closed.more": "표시하지 않은 닫힌 주제 {0}개",

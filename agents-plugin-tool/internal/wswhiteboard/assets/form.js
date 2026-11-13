@@ -86,6 +86,10 @@
         n.hidden = !n.hidden; if (!n.hidden) { grow(n); n.focus(); }
       });
     });
+    q("button.ckhide", root).forEach(function (b) {
+      b.setAttribute("aria-pressed", ckHidden() ? "true" : "false");
+      if (once(b)) b.addEventListener("click", function () { setCkHide(!ckHidden()); });
+    });
     q("button[data-bulk]", root).forEach(function (chip) {
       if (once(chip)) chip.addEventListener("click", function () { bulkAnswer(chip); });
     });
@@ -240,6 +244,27 @@
       for (var c in tagKeys) if (el.classList.contains(c)) { el.setAttribute("title", wsT(tagKeys[c])); return; }
     });
   }
+
+  // --- answered checks: hidden until the user shows them -----------------
+  // The check header's toggle (button.ckhide) hides an open topic's answered
+  // check rows, on by default. The state is data-ck-hide on <html>, which
+  // page.css reads and a dashboard board swap keeps; a button wired by an
+  // earlier run of this script reads it there too. It persists as one
+  // localStorage value per browser, read again on every run, so a swap also
+  // picks up a change made in another tab. The embed keeps the state for its
+  // page alone and never touches storage.
+  var ckKey = "ws.wb.checks.hideAnswered", ckStore = null;
+  if (!(doc.body && doc.body.classList.contains("embed"))) {
+    try { ckStore = window.localStorage; ckStore.getItem(ckKey); } catch (e) { ckStore = null; }
+  }
+  function ckHidden() { return doc.documentElement.getAttribute("data-ck-hide") !== "0"; }
+  function setCkHide(on) {
+    doc.documentElement.setAttribute("data-ck-hide", on ? "1" : "0");
+    if (ckStore) try { ckStore.setItem(ckKey, on ? "1" : "0"); } catch (e) { /* storage full or off: the state lasts this page */ }
+    q("button.ckhide").forEach(function (b) { b.setAttribute("aria-pressed", on ? "true" : "false"); });
+  }
+  var ckSaved = ckStore ? ckStore.getItem(ckKey) : null;
+  doc.documentElement.setAttribute("data-ck-hide", ckSaved === "0" || (ckSaved === null && !ckHidden()) ? "0" : "1");
 
   bind(doc);
   window.wbBindBoard = bind;
