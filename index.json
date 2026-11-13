@@ -417,7 +417,14 @@
       "registered_at": "2026-11-12T02:03:05Z"
     },
     "261112-feat-ws-dashboard-rail-memo-pad": {
-      "registered_at": "2026-11-12T08:18:40Z"
+      "registered_at": "2026-11-12T08:18:40Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "9091c57d68d03c76",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-13T06:23:04Z"
+      }
     },
     "261112-feat-ws-dashboard-search-palette": {
       "registered_at": "2026-11-12T08:16:38Z"
