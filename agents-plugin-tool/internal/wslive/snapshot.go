@@ -308,6 +308,10 @@ type Agent struct {
 	Status    string `json:"status"`
 	StartedAt int64  `json:"startedAt,omitempty"`
 	EndedAt   int64  `json:"endedAt,omitempty"`
+	// ActiveMs is accumulated closed-turn work; TurnStartedAt is the
+	// current working turn's start, absent between turns.
+	ActiveMs      int64 `json:"activeMs,omitempty"`
+	TurnStartedAt int64 `json:"turnStartedAt,omitempty"`
 	// Model and Effort are what the subagent runs on and its reasoning
 	// effort, ContextTokens its current context size (the latest model
 	// request's whole input), and OutputTps its output tokens per second,

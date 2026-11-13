@@ -1048,6 +1048,9 @@ type State struct {
 	// Tier is a spawned conversation's capability tier, when its spawner
 	// chose the model by one.
 	Tier string `json:"tier,omitempty"`
+	// ActiveMs excludes the current turn; TurnStartedAt is set only while it runs.
+	ActiveMs      int64 `json:"active_ms,omitempty"`
+	TurnStartedAt int64 `json:"turn_started_at,omitempty"`
 }
 
 // closedState is the state of a record no loop serves: closed, or handed
@@ -1065,7 +1068,7 @@ func (r *Runner) closedState(rec Record) State {
 }
 
 func closedState(rec Record) State {
-	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label, Tier: rec.Tier}
+	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label, Tier: rec.Tier, ActiveMs: rec.ActiveMs}
 	if rec.Parent != nil {
 		parent := *rec.Parent
 		st.Parent = &parent
@@ -1450,6 +1453,9 @@ func (c *conv) state() State {
 	st.Status, st.ClosedAt = StatusIdle, ""
 	if c.turn {
 		st.Status = StatusRunning
+		if !c.closed && c.rec.Parent != nil && c.rec.TurnOpen {
+			st.TurnStartedAt = c.rec.TurnStartedAt
+		}
 	}
 	if c.closed {
 		st.Status, st.ClosedAt = StatusClosed, c.rec.ClosedAt

@@ -27,7 +27,11 @@ func SpawnAgentEvent(st State, key string) wslive.Event {
 	ev := wslive.Event{Kind: wslive.KindAgent, AgentID: "pi:" + st.ID,
 		AgentKind: wslive.AgentKindPi, Label: label, Status: status,
 		Model: st.Model, Effort: st.Effort, SessionKey: key,
-		ContextTokens: st.ContextTokens, OutputTps: st.OutputTps}
+		ContextTokens: st.ContextTokens, OutputTps: st.OutputTps,
+		ActiveMs: st.ActiveMs}
+	if st.Status == StatusRunning {
+		ev.TurnStartedAt = st.TurnStartedAt
+	}
 	// An explicit empty list clears the previous activity on the row.
 	ev.Batches = make([]json.RawMessage, 0, len(st.Batches))
 	for _, batch := range st.Batches {
