@@ -54,7 +54,10 @@ files with known source extensions:
 - (426): N and M are config keys (defaults N=1000, M=2000; 0 disables each);
   the extension list is configurable; files marked generated or vendored in
   `.gitattributes` (`linguist-generated` / `linguist-vendored`) are excluded.
-  Rejected: hard-coded values.
+  Rejected: hard-coded values. Owner note 2026-11-13: N, M and the extension list
+  are ordinary config keys that follow the existing config layers (manifest
+  default, then project/user overrides) and are tunable through lead-tune like
+  any other knob; no separate mechanism.
 - (427): the warning text explicitly instructs the lead not to split on its
   own and to ask the user about refactor permission and timing. Rejected: a
   bare "splitting recommended".
