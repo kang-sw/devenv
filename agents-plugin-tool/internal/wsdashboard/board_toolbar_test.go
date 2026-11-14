@@ -190,13 +190,13 @@ func TestToolbarFloatingGeometry(t *testing.T) {
 var bad=[];
 function check(name,got,want){if(JSON.stringify(got)!==JSON.stringify(want))bad.push(name+": "+JSON.stringify(got));}
 function styles(){var p={};return {getPropertyValue:function(k){return p[k]||"";},setProperty:function(k,v){p[k]=v;},removeProperty:function(k){delete p[k];}};}
-var listeners={}, observed, resize, boardTop=0, compact=false, faceHeight=46, countHeight=18, countY=23;
+var listeners={}, observed, resize, boardTop=0, compact=false, faceHeight=46, countHeight=18, countY=23, handles=[];
 var counts={getBoundingClientRect:function(){return {top:countY-countHeight/2,bottom:countY+countHeight/2,height:countHeight};}};
 function action(y){return {getBoundingClientRect:function(){return {top:y-12,bottom:y+12,height:compact?24:30};}};}
 var row={children:[action(23),action(23),counts]}, face={firstChild:row,getClientRects:function(){return [1];},getBoundingClientRect:function(){return {width:700,height:faceHeight,bottom:faceHeight};}};
 var toolbar={firstChild:face,style:styles(),attrs:{},toggleAttribute:function(k,on){this.attrs[k]=on;}};
 var board={getBoundingClientRect:function(){return {top:boardTop};}}, col={style:styles(),clientTop:0,getBoundingClientRect:function(){return {top:0};}}, documentScroller={style:styles()}, active=col;
-var doc={scrollingElement:documentScroller,getElementById:function(){return col;},addEventListener:function(k,fn){listeners[k]=fn;}}, window={addEventListener:function(k,fn){listeners[k]=fn;},ResizeObserver:function(fn){resize=fn;this.observe=function(n){observed=n;};}};
+var doc={scrollingElement:documentScroller,querySelectorAll:function(){return handles;},getElementById:function(){return col;},addEventListener:function(k,fn){listeners[k]=fn;}}, window={addEventListener:function(k,fn){listeners[k]=fn;},ResizeObserver:function(fn){resize=fn;this.observe=function(n){observed=n;};}};
 var maxed=null;
 function scroller(){return active;}
 `+floating+`
@@ -221,6 +221,10 @@ active=documentScroller;resize();
 check("scroller handoff clears old padding",[col.style.getPropertyValue("scroll-padding-top"),documentScroller.style.getPropertyValue("scroll-padding-top")],["","70px"]);
 maxed={files:true,el:{style:styles()}};resize();
 check("Files clears the live face",maxed.el.style.getPropertyValue("--files-top"),"68px");
+handles=[{getClientRects:function(){return [1];},getBoundingClientRect:function(){return {top:0,bottom:34};}}];resize();
+check("document face clears fixed handles",toolbar.style.getPropertyValue("--toolbar-top"),"38px");
+check("document rail and arrivals include handle clearance",[col.style.getPropertyValue("--wb-rail-inset"),documentScroller.style.getPropertyValue("scroll-padding-top")],["104px","108px"]);
+handles=[];
 boardTop=0;compact=false;faceHeight=82;resize();
 check("return restores original slot",[toolbar.attrs["data-floating"],toolbar.style.getPropertyValue("--toolbar-reserved")],[false,"82px"]);
 process.stdout.write(bad.join("\n"));

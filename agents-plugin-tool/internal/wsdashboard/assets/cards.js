@@ -142,7 +142,17 @@
     function update() {
       if (!face.getClientRects().length || !face.getBoundingClientRect().width) return;
       var s = scroller(board) || doc.scrollingElement, main = s === doc.scrollingElement;
-      var top = main ? 0 : s.getBoundingClientRect().top + s.clientTop;
+      // Document boards share the viewport with the fixed drawer handles.
+      // Keep both the face and its counts below them, rather than raising the
+      // toolbar over unrelated controls or changing horizontal action boxes.
+      var inset = 0;
+      if (main) Array.prototype.forEach.call(doc.querySelectorAll(".tk-handle, .gh, .dr-handle"), function (n) {
+        if (!n.getClientRects().length) return;
+        var r = n.getBoundingClientRect();
+        if (r.top <= 0 && r.bottom > 0) inset = Math.max(inset, r.bottom + 4);
+      });
+      style(toolbar, "--toolbar-top", inset + "px");
+      var top = main ? inset : s.getBoundingClientRect().top + s.clientTop;
       var floating = board.getBoundingClientRect().top < top;
       toolbar.toggleAttribute("data-floating", floating);
       if (!floating) countHeight = counts.getBoundingClientRect().height;
@@ -161,10 +171,10 @@
       style(toolbar, "--toolbar-reserved", (floating ? reserved : face.getBoundingClientRect().height) + "px");
       var height = face.getBoundingClientRect().height;
       // The rail already exposes a host inset; include the lower hit extension.
-      style(doc.getElementById("bcol") || board, "--wb-rail-inset", (height + 6) + "px");
+      style(doc.getElementById("bcol") || board, "--wb-rail-inset", (inset + height + 6) + "px");
       if (scrollBox && scrollBox !== s) scrollBox.style.removeProperty("scroll-padding-top");
       scrollBox = s;
-      style(s, "scroll-padding-top", (height + 10) + "px");
+      style(s, "scroll-padding-top", (inset + height + 10) + "px");
       if (maxed && maxed.files) style(maxed.el, "--files-top", Math.max(52, face.getBoundingClientRect().bottom + 8) + "px");
     }
     doc.addEventListener("scroll", update, { capture: true, passive: true });
