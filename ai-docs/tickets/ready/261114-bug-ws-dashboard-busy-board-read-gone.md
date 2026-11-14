@@ -3,6 +3,10 @@ title: "Keep dashboard streams through transient board or session read failures"
 related:
   261114-chore-ws-dashboard-index-removal-diagnostics: "missing timestamp/reason telemetry limits historical attribution"
   261114-bug-ws-shared-daemon-restarts-without-a-swap: "separate daemon-replacement investigation; the observed process did not restart"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: a287b6f219541be6
+sage-review-completeness-reviewed: a287b6f219541be6
 ---
 
 # Keep dashboard streams through transient board or session read failures
@@ -77,10 +81,13 @@ the identified path.
   transient record failures into permanent client termination or rely on a
   stream-only fix after index removal. The exact implementation must preserve
   the existing transport contract and is verified in isolated fixtures.
-- MAIN's 2026-11-14 23:22:25 UTC sequencing places this implementation
-  **after selection-bundle** (`261114-feat-ws-selection-bundle-comment`),
-  superseding the earlier priority after the Pi startup/prompt-admission pair.
-  This amendment is documentation only, not an implementation dispatch.
+- **Sequencing superseded (MAIN, 2026-11-14 23:41:35Z).** MAIN reassigned
+  this ticket from EXEC3 to EXEC4 with "Promote and implement", replacing the
+  earlier 23:22:25 UTC placement after selection-bundle
+  (`261114-feat-ws-selection-bundle-comment`). That placement only serialized
+  EXEC3's own queue; there is no source dependency on selection-bundle, so
+  implementation starts on current `develop` and whichever change lands
+  second reconciles overlapping files.
 - Moving expensive render/publication outside the folder lock is a design
   review topic, not a selected implementation. Preserve ordered publication
   and atomic authoritative state if the lock boundary changes.
@@ -97,10 +104,11 @@ this target and stops for MAIN's settlement before implementation.
 
 ## Constraints
 
-- This amendment remains documentation only. No source fix, build/test, live
-  lock hold, process action, restart or daemon swap is performed here.
-  Implementation is queued after selection-bundle and still needs the normal
-  actionable-ticket preparation and separate execution dispatch.
+- Work only in an isolated worktree with isolated fixtures and state. No
+  live lock hold on the shared daemon, process signal, restart or daemon swap;
+  never touch the shared daemon or port 29417. Run focused tests with
+  `go test -run` only, never the whole `./internal/wsdashboard` package, and
+  end every test run with a scan for processes the run started.
 - Preserve the approved index-retention, scheduled re-read, last-good page
   and one delayed client re-check behavior. Ground the precise retry delay and
   last-good-content lifetime in the implementation review and deterministic
@@ -116,13 +124,41 @@ this target and stops for MAIN's settlement before implementation.
 - Read `ai-docs/manuals/shipped-surface-boundary.md` and
   `ai-docs/manuals/release-compatibility.md` before future tooling edits.
   Settle the compatibility tier before any changed stream/validity contract.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+
+## Prior Decisions
+
+- 261110-bug-ws-dashboard-daemon-read-amplification (2026-11-10, commit): "loadRecord gained a recordFileReader seam (loadRecordWith) instead of a second copy of the split/legacy layout logic" — bearing: constrains
+- 261007-bug-session-record-cross-process-write-race (2026-11-08, commit): "Migration is lazy on the first write, never on read" — bearing: constrains
+- 261111-refactor-ws-minimize-recurring-fs-touches (2026-11-11, commit): "an unreadable-but-present record never stops a live session." — bearing: supports
+- 89eb4b89 (2026-11-10, commit): "one copy of the stat-before-read / equality / never-cache-failures rules instead of two." — bearing: constrains
+- 261112-bug-ws-dashboard-open-tab-keeps-stale-assets-after-daemon-upgrade (2026-11-12, commit): "The event is sent on every stream, region-filtered ones included" — bearing: constrains
+- 3ec591d8 (2026-11-14, commit): "old streams retain full region events and the first opted-in board send is full even if h matches." — bearing: constrains
+- 7804f5f4 (2026-11-12, commit): "The Index reads it on every re-read into Session.Label, so a change raises Session.Rev" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/mcp/dashboard_sessions.go, session_layout.go, whiteboard_store.go; internal/wsdashboard/index.go, sse.go, assets/dashboard.js |
+| scope.surface | cross-module | DashboardSessionSource.ReadSession supplies the wsdashboard source/index contract from mcp. |
+| scope.new_public_symbol | unknown | No new named symbol is specified; the internal three-way result may require an exported cross-package type. |
+| scope.new_type_contract | yes | Phase 1 replaces the boolean source/index/page read classification with found, absent/mismatched and transient outcomes. |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/index_test.go, index_lanes_test.go, conversation_history_test.go; internal/mcp/dashboard_sessions_test.go; internal/wswhiteboard/folders_test.go |
+| complexity.reuse_points | confirmed | FolderStore.Open/UpdateAndPublish, lookupRecord/loadRecordWith, Index.readLane/apply, ForgetSession and servePageStream were inspected. |
+| complexity.side_effect_risk | high | A misclassification removes sessions and clears source/live/render caches through daemon.go#L535-L550. |
+| risk.correctness | high | Retain transient failures without masking true deletion or identity mismatch; distinguish initial 404 from open-stream gone. |
+| risk.fit | moderate | The three-way read must fit existing cache, lane serialization and topic-stream behavior without changing wire semantics. |
+| risk.test | high | Controlled lock contention, malformed records, permission errors and delayed client recovery require deterministic isolated fixtures. |
+| risk.security_or_contract | high | Retained pages must not survive genuine identity invalidation; preserve existing stream and session-identity contracts. |
 
 ## Phases
 
 ### Phase 1: Distinguish transient reads and preserve the valid reader
 
-After selection-bundle and the normal ready/execution gates, use isolated
-state and controlled contention to establish the complete record-error to
+On current `develop`, use isolated state and controlled contention to establish the complete record-error to
 index-removal to open-stream-gone path without touching the shared daemon.
 Implement the approved internal found/absent-or-mismatched/transient result
 through the source, index and page read paths, preserving error classes.
