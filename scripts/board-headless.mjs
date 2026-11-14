@@ -18,9 +18,11 @@
 //             the swap brought) growing 1 s later. Then a user
 //             scroll during a session must end it (wbHistory.keeping goes
 //             null, the session writes no more scrollTop).
-//   toolbar   Toolbar placement, counts, placeholder, terminal availability
-//             and folder popover (terminal POST is a browser-local fixture;
-//             no shell process is started).
+//   toolbar   Compact floating toolbar geometry, full keyboard/hit ownership,
+//             real Files explorer, overview, frames, swaps and popovers.
+//             Terminal POST is browser-local; no shell process is started.
+//             --face-width 266 constrains the production face to the approved
+//             direct-fragment narrow equivalent (not reference typography).
 //   overview  Folded picker, anchors/restores, interactions, held swaps,
 //             palette picks, storage/reload and reduced motion.
 //   overview-motion  Per-rAF height/slot/ghost traces, concurrent clock,
@@ -176,6 +178,7 @@ function cmpVersion(a, b) {
 }
 function findPlaywright() {
   const dirs = [];
+  if (process.env.PLAYWRIGHT_MODULE) dirs.push(process.env.PLAYWRIGHT_MODULE);
   if (process.env.BOARD_HEADLESS_PLAYWRIGHT) dirs.push(process.env.BOARD_HEADLESS_PLAYWRIGHT);
   const npx = path.join(os.homedir(), ".npm", "_npx");
   let found = [];
@@ -911,8 +914,9 @@ const OVERVIEW_PAGE = () => {
   bh.ovId = id;
   bh.ovFind = (key) => items().find((n) => id(n) === key);
   bh.ovState = () => {
-    const s = bh.scroller(), t = document.querySelector('.board-toolbar'), v = bh.viewTop(s), b = bh.viewBottom(s), tr = rect(t);
-    const anchor = tr.bottom > v && tr.top < b ? null : items().find((n) => bh.board_().contains(n) && rect(n).bottom > v && rect(n).top < b);
+    const s = bh.scroller(), t = document.querySelector('.board-toolbar'), v = bh.viewTop(s), b = bh.viewBottom(s), tr = rect(t.querySelector('.board-toolbar-face'));
+    const floating = t.hasAttribute('data-floating'), line = floating ? Math.max(v, tr.bottom) : v;
+    const anchor = !floating && tr.bottom > v && tr.top < b ? null : items().find((n) => bh.board_().contains(n) && rect(n).bottom > line && rect(n).top < b);
     return { st: s.scrollTop, top: v, bottom: b, toolbar: tr, key: id(anchor), y: anchor && rect(anchor).top,
       width: rect(bh.board_()).width, pinTop: document.querySelector('#bpins').scrollTop,
       pincol: root.hasAttribute('data-pincol'), here: id(document.querySelector('.overview-here')), hereY: document.querySelector('.overview-here') && rect(document.querySelector('.overview-here')).top,
@@ -1054,6 +1058,174 @@ async function checkFold(page) {
   qa(recaps.length > 0 && recaps.every((r) => r.clamp === '2' && r.recap <= r.line * 2 + 1), 'existing recap is clamped to at most two lines', recaps);
 }
 
+// Measurements deliberately use production typography. The reference's 46/28,
+// 76/48 and 82/60 are comparison evidence, not asserted production heights.
+async function compactToolbar(ctx, { page, tab, kind }) {
+  const evidence = { kind, viewport: [ctx.width, ctx.height], faceWidth: ctx.args['face-width'] || 'natural',
+    referenceOnly: { desktop: [46, 28], wrap: [76, 48], fragment266: [82, 60] }, measurements: [] };
+  try {
+    await tab.emulateMedia({ reducedMotion: 'reduce' });
+    await page.evaluate((width) => {
+      const bar = document.querySelector('.board-toolbar');
+      if (width) { bar.style.width = width + 'px'; bar.style.maxWidth = '100%'; }
+      __bh.toolbarIdentity = { bar, face: bar.firstElementChild, row: bar.querySelector('.board-tools'), buttons: [...bar.querySelectorAll('.board-action')],
+        frames: [...document.querySelectorAll('iframe.doc-frame')].map((n) => [n, n.contentWindow]) };
+      __bh.toolbarMeasure = () => {
+        const r = (n) => { const v = n.getBoundingClientRect(); return { x: v.x, y: v.y, width: v.width, height: v.height, bottom: v.bottom, right: v.right }; };
+        const face = bar.firstElementChild, s = __bh.scroller(), row = bar.querySelector('.board-tools');
+        return { floating: bar.hasAttribute('data-floating'), wrappedActions: bar.hasAttribute('data-wrapped-actions'),
+          face: r(face), slot: r(bar), scrollTop: s.scrollTop, viewTop: __bh.viewTop(s), scroller: s === document.scrollingElement ? 'document' : s.id,
+          stickyTop: __bh.viewTop(s) + (s === document.scrollingElement ? 0 : parseFloat(getComputedStyle(s).paddingTop) || 0),
+          padding: parseFloat(getComputedStyle(s).scrollPaddingTop), railInset: parseFloat(getComputedStyle(document.querySelector('#bcol')).getPropertyValue('--wb-rail-inset')),
+          counts: { text: bar.querySelector('.board-count').textContent, rect: r(bar.querySelector('.board-count')), font: getComputedStyle(bar.querySelector('.board-count')).fontSize },
+          buttons: [...bar.querySelectorAll('.board-action')].map((n) => {
+            const label = n.querySelector('.board-label'), icon = n.querySelector('.li'), kbd = n.querySelector('kbd');
+            return { cls: n.className, ...r(n), label: getComputedStyle(label).display, font: getComputedStyle(label).fontSize,
+              kbd: kbd && { display: getComputedStyle(kbd).display, font: getComputedStyle(kbd).fontSize },
+              icon: r(icon), iconBox: [getComputedStyle(icon).width, getComputedStyle(icon).height],
+              clipped: label.getClientRects().length > 0 && label.getBoundingClientRect().width > n.clientWidth };
+          }), overflow: Math.max(document.documentElement.scrollWidth - innerWidth, s.scrollWidth - s.clientWidth),
+          transition: [getComputedStyle(bar).transitionDuration, getComputedStyle(face).transitionDuration, getComputedStyle(row).transitionDuration] };
+      };
+      __bh.toolbarSame = () => {
+        const i = __bh.toolbarIdentity;
+        return i.bar === document.querySelector('.board-toolbar') && i.face === i.bar.firstElementChild && i.row === i.face.firstElementChild &&
+          i.buttons.every((b, k) => b === i.bar.querySelectorAll('.board-action')[k]) && document.querySelectorAll('.board-toolbar').length === 1;
+      };
+    }, +(ctx.args['face-width'] || 0));
+    await ovAt(page, 'top');
+    const top = await page.evaluate(() => __bh.toolbarMeasure()); evidence.measurements.push({ phase: 'top', ...top });
+    const actionCount = await page.evaluate(() => 2 + Number(document.documentElement.hasAttribute('data-term')) + Number(document.documentElement.hasAttribute('data-sysopen')) + Number(!!document.querySelector('.fpane')));
+    qa(top.buttons.length === actionCount, 'source fixture offers every available original action', top);
+    qa(top.buttons.every((b) => b.height === 30 && b.icon.height === 14 && b.icon.width === 14 && !b.clipped), 'nonfloating original 30px controls, uniform 14px glyphs, readable labels', top);
+    await capture(ctx, tab, kind + '-compact-top', top);
+    // Real keyboard traversal in both directions, including conditional slots.
+    await page.focus('.board-overview');
+    for (let k = 0; k < actionCount; k++) {
+      qa(await page.evaluate((k) => document.activeElement === __bh.toolbarIdentity.buttons[k], k), 'forward Tab action ' + k);
+      if (k < actionCount - 1) await tab.keyboard.press('Tab');
+    }
+    for (let k = actionCount - 1; k >= 0; k--) {
+      qa(await page.evaluate((k) => document.activeElement === __bh.toolbarIdentity.buttons[k], k), 'reverse Tab action ' + k);
+      if (k) await tab.keyboard.press('Shift+Tab');
+    }
+    await tab.keyboard.press('Tab');
+    await ovAt(page, 'middle');
+    const floating = await page.evaluate(() => __bh.toolbarMeasure()); evidence.measurements.push({ phase: 'floating', ...floating });
+    qa(await page.evaluate(() => document.activeElement.matches('.tnew') && __bh.toolbarSame() && getComputedStyle(document.activeElement).outlineWidth === '2px'), 'floating transition retains mounted controls and visible keyboard focus');
+    qa(floating.floating && Math.abs(floating.face.y - floating.stickyTop) <= 1 && Math.abs(floating.slot.height - top.slot.height) <= 1, 'sticky face reserves the original wrapped slot', { top, floating });
+    qa(floating.face.height < top.face.height && floating.buttons.every((b, k) => b.height === 24 && Math.abs(b.icon.height - 12) < .01 && Math.abs(b.icon.width - 12) < .01 && b.iconBox.every((x) => x === '14px') && b.font === top.buttons[k].font && JSON.stringify(b.kbd) === JSON.stringify(top.buttons[k].kbd) && b.label === top.buttons[k].label && Math.abs(b.x - top.buttons[k].x) < .1 && Math.abs(b.width - top.buttons[k].width) < .1), 'compact vertical geometry preserves horizontal boxes, typography, labels and shortcuts', { top, floating });
+    qa(floating.counts.text === top.counts.text && floating.counts.font === top.counts.font && Math.abs(floating.counts.rect.x - top.counts.rect.x) <= .1 && Math.abs(floating.counts.rect.width - top.counts.rect.width) <= .1 && floating.overflow <= 1 && floating.transition.every((x) => x === '0s'), 'counts/horizontal fit preserved without geometry animations', floating);
+    qa(Math.abs(floating.padding - floating.face.height - 10) < .1 && Math.abs(floating.railInset - floating.face.height - 6) < .1, 'live face publishes navigation and rail clearances', floating);
+    const hits = await page.evaluate(() => {
+      const buttons = __bh.toolbarIdentity.buttons, errors = [], rects = [];
+      buttons.forEach((b, i) => {
+        const r = b.getBoundingClientRect(), hit = { left: r.left, right: r.right, top: r.top - 1, bottom: r.bottom + 5 }; rects.push(hit);
+        if (hit.top < __bh.viewTop(__bh.scroller()) || hit.bottom > __bh.viewBottom(__bh.scroller())) errors.push({ i, outside: hit });
+        // Match the approved rounded hit shape, not its excluded corner
+        // triangles. Half-pixel edge probes also avoid subpixel rounding
+        // outside Chromium's device-pixel hit grid.
+        for (const x of [r.left + r.width * .25, (r.left + r.right) / 2, r.left + r.width * .75]) {
+          for (const y of [hit.top + .5, r.top, (r.top + r.bottom) / 2, r.bottom + .5, hit.bottom - .5]) {
+            const owner = document.elementFromPoint(x, y)?.closest('.board-action');
+            if (owner !== b) errors.push({ i, x, y, owner: owner?.className || document.elementFromPoint(x, y)?.className });
+          }
+        }
+        for (const x of [r.left + .5, r.right - .5]) {
+          if (document.elementFromPoint(x, (r.top + r.bottom) / 2)?.closest('.board-action') !== b) errors.push({ i, horizontalEdge: x });
+        }
+      });
+      rects.forEach((a, i) => rects.slice(i + 1).forEach((b, k) => {
+        if (Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) >= Math.max(a.top, b.top)) errors.push({ overlap: [i, k + i + 1], a, b });
+      }));
+      return { errors, rects, samples: buttons.length * 17 };
+    }); evidence.hits = hits;
+    qa(!hits.errors.length, `all ${hits.samples} edge/interior points belong to viewport-visible disjoint rounded 30px targets`, hits);
+    await capture(ctx, tab, kind + '-compact-floating', floating);
+    const terminal = floating.buttons[1];
+    await tab.mouse.click(terminal.x + terminal.width / 2, terminal.bottom + 4.5);
+    await page.waitForSelector('#board-term-slot .tpop:not([hidden])');
+    const menu = () => page.evaluate(() => {
+      const p = document.querySelector('#board-term-slot .tpop'), r = p.getBoundingClientRect(), b = document.querySelector('.tnew').getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, gap: r.top - b.bottom, height: b.height, viewport: innerHeight };
+    });
+    const smallMenu = await menu(); evidence.smallMenu = smallMenu;
+    qa(smallMenu.gap >= 0 && smallMenu.left >= 0 && smallMenu.right <= ctx.width && smallMenu.bottom <= ctx.height, 'actual lower-hit extension opens contained terminal/profile menu', smallMenu);
+    await ovAt(page, 'top');
+    await page.waitForFunction(() => { const p = document.querySelector('#board-term-slot .tpop'), b = document.querySelector('.tnew'); return Math.abs(p.getBoundingClientRect().top - b.getBoundingClientRect().bottom - 8) < 1; });
+    evidence.restoredMenu = await menu();
+    qa(evidence.restoredMenu.height === 30, 'open terminal menu reanchors after its button resizes', evidence.restoredMenu);
+    await tab.keyboard.press('Escape');
+    qa(await page.evaluate(() => document.activeElement.matches('.tnew') && document.querySelector('#board-term-slot .tpop').hidden), 'terminal Escape consumes dismissal and restores opener');
+    // Actual Files explorer against the isolated project's real filesystem,
+    // before the legacy toolbar scenario installs its deterministic fs routes.
+    if (await page.locator('.board-files').count()) {
+      await page.click('.board-files');
+      await page.waitForSelector('#files .fr');
+      qa(await page.evaluate(() => document.querySelector('#files').hasAttribute('data-max') && document.activeElement.matches('#files .fq')), 'real Files explorer opens and focuses search');
+      await page.click('#files .fr[data-path="ai-docs"]');
+      await page.waitForSelector('#files .fr[data-path="ai-docs/_index.md"]');
+      await page.click('#files .fr[data-path="ai-docs/_index.md"]', { button: 'right' });
+      await page.waitForSelector('.fmenu'); await tab.keyboard.press('Escape');
+      qa(await page.evaluate(() => document.querySelector('#files').hasAttribute('data-max') && !document.querySelector('.fmenu')), 'real Files row menu consumes Escape before the sheet');
+      await page.focus('#files .fq'); await tab.keyboard.press('Escape');
+      qa(await page.evaluate(() => !document.querySelector('#files').hasAttribute('data-max') && document.activeElement.matches('.board-files')), 'Files dismissal restores original opener');
+    }
+    // Full Enter activation of the remaining actions at their real controls.
+    await page.focus('.board-search'); await tab.keyboard.press('Enter');
+    await page.waitForSelector('#tkqpop[open]'); await tab.keyboard.press('Escape');
+    await page.focus('.wnew'); await tab.keyboard.press('Enter');
+    await page.waitForSelector('.wpop:not([hidden])'); await tab.keyboard.press('Escape');
+    // Focus before the reading-position baseline: native focus() may scroll
+    // an ancestor to reveal a previously clipped descendant of a sticky slot.
+    // This probe measures Overview's restoration, not that browser focus step.
+    await page.focus('.board-overview');
+    await ovAt(page, 'middle');
+    const beforeOverview = await page.evaluate(() => __bh.ovState());
+    evidence.overviewBefore = beforeOverview;
+    const anchorMetrics = () => page.evaluate((key) => {
+      const n = __bh.ovFind(key), s = __bh.scroller(), top = __bh.viewTop(s);
+      return { key, y: n?.getBoundingClientRect().top, offset: n && n.getBoundingClientRect().top - top, keeping: !!__bh.keeping(),
+        framesAbove: [...document.querySelectorAll('#r-board .doc-frame')].filter((f) => f.getBoundingClientRect().bottom <= top).map((f) => ({ key: f.dataset.docKey, height: f.getBoundingClientRect().height })) };
+    }, beforeOverview.key);
+    evidence.overviewAnchorBefore = await anchorMetrics();
+    await capture(ctx, tab, kind + '-compact-before-overview', beforeOverview);
+    evidence.overviewAfterFocus = await page.evaluate(() => __bh.ovState());
+    await tab.keyboard.press('Enter'); await ovDone(page, true);
+    evidence.overviewEntered = await page.evaluate(() => ({ state: __bh.ovState(), stored: sessionStorage.getItem('ws.dashboard.overview.' + document.documentElement.dataset.rid) }));
+    qa(await page.evaluate(() => !!document.querySelector('.overview-here')), 'floating Overview Enter retains an exposed reading anchor');
+    await tab.keyboard.press('Escape'); await ovDone(page, false); await waitQuiet(page);
+    evidence.overviewAfter = await page.evaluate(() => __bh.ovState());
+    evidence.overviewAnchorAfter = await anchorMetrics();
+    qa(evidence.overviewAnchorBefore.key === evidence.overviewAnchorAfter.key && Math.abs(evidence.overviewAnchorBefore.offset - evidence.overviewAnchorAfter.offset) <= 1 && beforeOverview.storage === evidence.overviewAfter.storage,
+      'floating overview preserves original reading anchor/offset and card storage (scrollTop may track frame remeasurement)', { before: evidence.overviewAnchorBefore, after: evidence.overviewAnchorAfter, entry: evidence.overviewEntered, scroll: [beforeOverview.st, evidence.overviewAfter.st] });
+    // Native browser target arrival honors the currently published padding.
+    await page.evaluate(() => __bh.topics()[Math.floor(__bh.topics().length / 2)].scrollIntoView({ block: 'start' }));
+    await waitQuiet(page);
+    const arrival = await page.evaluate(() => {
+      const target = __bh.topics()[Math.floor(__bh.topics().length / 2)], face = document.querySelector('.board-toolbar-face').getBoundingClientRect();
+      return { target: target.getBoundingClientRect().top, faceBottom: face.bottom, padding: getComputedStyle(__bh.scroller()).scrollPaddingTop };
+    }); evidence.nativeArrival = arrival;
+    qa(arrival.target >= arrival.faceBottom, 'native scrollIntoView target remains reachable below the face', arrival);
+    await ovAt(page, 'top');
+    const restored = await page.evaluate(() => __bh.toolbarMeasure()); evidence.measurements.push({ phase: 'restored', ...restored });
+    qa(!restored.floating && Math.abs(restored.face.height - top.face.height) <= 1 && Math.abs(restored.slot.height - top.slot.height) <= 1 && await page.evaluate(() => __bh.toolbarSame()), 'return-to-top restores full original geometry and identity', restored);
+    // Unchanged body frames must survive a maximize cycle and board swap.
+    const target = await page.evaluate(() => {
+      const n = __bh.topics().find((n) => n.querySelector('iframe.doc-frame')); __bh.toolbarFrame = n.querySelector('iframe.doc-frame'); __bh.toolbarWindow = __bh.toolbarFrame.contentWindow; return n.dataset.topic;
+    });
+    await page.locator(`section.topic[data-topic="${target}"] .d-max`).click(); await tab.keyboard.press('Escape');
+    qa(await page.evaluate(() => __bh.toolbarFrame.isConnected && __bh.toolbarFrame.contentWindow === __bh.toolbarWindow), 'maximize/restore preserves iframe identity');
+    await page.evaluate(async () => { const base = await __bh.baseBoard(); __bh.ovRegion(base.html); });
+    await waitQuiet(page);
+    qa(await page.evaluate(() => __bh.toolbarSame() && __bh.toolbarFrame.isConnected && __bh.toolbarFrame.contentWindow === __bh.toolbarWindow), 'live board event preserves face/buttons and unchanged iframe browsing context');
+    evidence.pageErrors = ctx.errors;
+    log('production compact measurements (not reference parity): ' + JSON.stringify(evidence));
+  } finally {
+    await capture(ctx, tab, kind + '-compact-result', evidence);
+  }
+}
+
 async function scenarioToolbar(ctx) {
   const { page, tab, kind, browser } = await overviewReady(ctx);
   const first = await page.evaluate(() => {
@@ -1064,11 +1236,12 @@ async function scenarioToolbar(ctx) {
       labels: [...t.querySelectorAll('.board-label')].map((n) => ({ overview: !!n.closest('.board-overview'), shown: getComputedStyle(n).display !== 'none' })),
       width: t.clientWidth, hint: getComputedStyle(t.querySelector('kbd')).display };
   });
-  qa(first.first && (!first.capable || first.terminal) && first.terminal === first.capable && first.files === first.pane && !first.old && !first.rail && !first.card && first.pos !== 'sticky', 'toolbar is first, non-card/non-rail/non-sticky, with capability-gated actions', first);
+  qa(first.first && (!first.capable || first.terminal) && first.terminal === first.capable && first.files === first.pane && !first.old && !first.rail && !first.card && first.pos === 'sticky', 'toolbar is first, non-card/non-rail/sticky, with capability-gated actions', first);
   if (ctx.width < 1600) qa(first.next === 'bpins', 'normal-width pin list follows toolbar');
   const expected = ['board-overview', ...(first.terminal ? ['tnew'] : []), ...(first.order.some((s) => /wnew/.test(s)) ? ['wnew'] : []), 'board-search', ...(first.files ? ['board-files'] : [])];
   qa(first.order.length === expected.length && expected.every((s, i) => first.order[i].includes(s)), 'toolbar action order', first.order);
   qa(first.labels.every((x) => x.shown === (x.overview || first.width > 540)) && (first.width > 540 || first.hint === 'none'), 'label collapse keys on toolbar width, preserving Overview', first);
+  await compactToolbar(ctx, { page, tab, kind });
   if (first.files) {
     // File responses are browser-local fixtures; no host files or native
     // actions are opened. Exercise the mounted explorer, not a replacement.
@@ -1158,9 +1331,8 @@ async function scenarioToolbar(ctx) {
     await ovAt(page, 'top');
   }
   await capture(ctx, tab, kind + '-normal');
-  const top = await page.evaluate(() => __bh.ovState().toolbar.top);
   await ovAt(page, 'middle');
-  qa(await page.evaluate((y) => __bh.ovState().toolbar.top < y - 100, top), 'toolbar scrolls away with board');
+  qa(await page.evaluate(() => Math.abs(__bh.toolbarMeasure().face.y - __bh.toolbarMeasure().stickyTop) <= 1), 'floating face sticks to the active viewport');
   await ovAt(page, 'top');
   if (first.terminal) {
     await page.click('.tnew');
@@ -1188,7 +1360,17 @@ async function scenarioToolbar(ctx) {
     await page.waitForFunction(() => WsCards.list('terminal').some((c) => c.data.tid === 'bh-exited-terminal'));
     qa(created && request.folder === 'worktree' && await page.evaluate(() => __bh.board_().querySelector(':scope > .bcard, :scope > section.topic').dataset.kind === 'terminal'), 'worktree pick opens terminal at head of unpinned flow (browser-local POST fixture)', request);
   }
-  log('SKIP web input popover: browser-pane entry is not on this branch' + (first.order.some((x) => /web/.test(x)) ? ' (unexpected entry; inspect manually)' : ''));
+  if (first.order.some((x) => /wnew/.test(x))) {
+    await page.focus('.wnew'); await tab.keyboard.press('Enter');
+    await page.waitForSelector('.wpop:not([hidden])');
+    const webPop = await page.evaluate(() => {
+      const p = document.querySelector('.wpop'), r = p.getBoundingClientRect(), b = document.querySelector('.wnew').getBoundingClientRect();
+      return { focused: document.activeElement === p.querySelector('input'), left: r.left, right: r.right, top: r.top, bottom: r.bottom, buttonBottom: b.bottom, viewport: [innerWidth, innerHeight] };
+    });
+    qa(webPop.focused && webPop.left >= 0 && webPop.right <= webPop.viewport[0] && webPop.top >= webPop.buttonBottom && webPop.bottom <= webPop.viewport[1], 'Web Enter opens the real viewport-fitting URL/path popover', webPop);
+    await tab.keyboard.press('Escape');
+    qa(await page.evaluate(() => document.querySelector('.wpop').hidden && document.activeElement.matches('.wnew')), 'Web Escape restores opener focus');
+  }
   // Land a board event with a closed section and localized remainder text.
   const base = await page.evaluate(() => __bh.baseBoard());
   await page.evaluate((html) => __bh.ovRegion(html + '<section class="topic closed" data-topic="BHCLOSED"><div class="tophead"><div class="tbar">Closed fixture</div></div></section><button class="closed-more" data-closed-next="1" data-closed-more="7">not a parseable count</button>'), base.html);

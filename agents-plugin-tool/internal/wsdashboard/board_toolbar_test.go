@@ -25,7 +25,7 @@ function count() { return bar.querySelector(".board-count").textContent; }
 first("toolbar first on a narrow board");
 check("toolbar precedes pins", bar.nextSibling === pins, true);
 check("not a card or rail item", [page.W.is(bar), bar.hasAttribute("data-rail"), bar.querySelectorAll(".tpin, .bc-hd").length], [false, false, 0]);
-check("button order and terminal slot", bar.firstChild.children.map(function (n) { return n.className; }), ["board-action board-overview", "board-term-slot", "board-web-slot", "board-action board-search", "board-action board-files", "board-count"]);
+check("button order and terminal slot", bar.querySelector(".board-tools").children.map(function (n) { return n.className; }), ["board-action board-overview", "board-term-slot", "board-web-slot", "board-action board-search", "board-action board-files", "board-count"]);
 check("overview starts unpressed", bar.querySelector(".board-overview").getAttribute("aria-pressed"), "false");
 ["overview", "search", "files"].forEach(function (name) { bar.querySelector(".board-" + name).fire("click", {}); });
 check("overview and search use mount callbacks; Files without an explorer is inert", calls, ["overview", "search"]);
@@ -176,4 +176,53 @@ func TestToolbarPageActionHooks(t *testing.T) {
 			t.Errorf("missing toolbar page hook %s", want)
 		}
 	}
+}
+
+// Exercise the production observer with controlled rectangles, independent of
+// Chromium's font metrics. Browser acceptance covers the actual CSS geometry.
+func TestToolbarFloatingGeometry(t *testing.T) {
+	js := mustAsset(t, "cards.js")
+	floating := regexp.MustCompile(`(?s)\n  function floatToolbar\(\) \{.*?\n  \}\n`).FindString(js)
+	if floating == "" {
+		t.Fatal("missing floatToolbar")
+	}
+	runNode(t, "toolbar floating geometry", `
+var bad=[];
+function check(name,got,want){if(JSON.stringify(got)!==JSON.stringify(want))bad.push(name+": "+JSON.stringify(got));}
+function styles(){var p={};return {getPropertyValue:function(k){return p[k]||"";},setProperty:function(k,v){p[k]=v;},removeProperty:function(k){delete p[k];}};}
+var listeners={}, observed, resize, boardTop=0, compact=false, faceHeight=46, countHeight=18, countY=23;
+var counts={getBoundingClientRect:function(){return {top:countY-countHeight/2,bottom:countY+countHeight/2,height:countHeight};}};
+function action(y){return {getBoundingClientRect:function(){return {top:y-12,bottom:y+12,height:compact?24:30};}};}
+var row={children:[action(23),action(23),counts]}, face={firstChild:row,getClientRects:function(){return [1];},getBoundingClientRect:function(){return {width:700,height:faceHeight,bottom:faceHeight};}};
+var toolbar={firstChild:face,style:styles(),attrs:{},toggleAttribute:function(k,on){this.attrs[k]=on;}};
+var board={getBoundingClientRect:function(){return {top:boardTop};}}, col={style:styles(),clientTop:0,getBoundingClientRect:function(){return {top:0};}}, documentScroller={style:styles()}, active=col;
+var doc={scrollingElement:documentScroller,getElementById:function(){return col;},addEventListener:function(k,fn){listeners[k]=fn;}}, window={addEventListener:function(k,fn){listeners[k]=fn;},ResizeObserver:function(fn){resize=fn;this.observe=function(n){observed=n;};}};
+var maxed=null;
+function scroller(){return active;}
+`+floating+`
+floatToolbar();
+check("observe the one face",observed===face,true);
+check("top reserves original",[toolbar.attrs["data-floating"],toolbar.style.getPropertyValue("--toolbar-reserved")],[false,"46px"]);
+boardTop=-100;compact=true;faceHeight=28;countHeight=14;countY=14;row.children=[action(14),action(14),counts];listeners.scroll();
+check("compact keeps original slot",[toolbar.attrs["data-floating"],toolbar.style.getPropertyValue("--toolbar-reserved")],[true,"46px"]);
+check("face drives rail and arrivals",[col.style.getPropertyValue("--wb-rail-inset"),col.style.getPropertyValue("scroll-padding-top")],["34px","38px"]);
+// Counts alone wrap: the saved original count metrics, not compact metrics,
+// reconstruct the nonfloating footprint.
+countY=40;faceHeight=48;resize();
+check("counts-only wrap",[toolbar.attrs["data-wrapped-actions"],toolbar.style.getPropertyValue("--toolbar-reserved")],[false,"70px"]);
+// In production a counts-only row has the original line-height of the font;
+// a 24px original count line yields the reference's 76px reserved slot.
+boardTop=0;compact=false;countHeight=24;faceHeight=76;resize();
+boardTop=-200;compact=true;countHeight=14;faceHeight=48;resize();
+check("original count height survives floating",toolbar.style.getPropertyValue("--toolbar-reserved"),"76px");
+row.children=[action(14),action(46),counts];countY=46;faceHeight=60;resize();
+check("wrapped actions reserve two original action rows",[toolbar.attrs["data-wrapped-actions"],toolbar.style.getPropertyValue("--toolbar-reserved")],[true,"82px"]);
+active=documentScroller;resize();
+check("scroller handoff clears old padding",[col.style.getPropertyValue("scroll-padding-top"),documentScroller.style.getPropertyValue("scroll-padding-top")],["","70px"]);
+maxed={files:true,el:{style:styles()}};resize();
+check("Files clears the live face",maxed.el.style.getPropertyValue("--files-top"),"68px");
+boardTop=0;compact=false;faceHeight=82;resize();
+check("return restores original slot",[toolbar.attrs["data-floating"],toolbar.style.getPropertyValue("--toolbar-reserved")],[false,"82px"]);
+process.stdout.write(bad.join("\n"));
+`)
 }
