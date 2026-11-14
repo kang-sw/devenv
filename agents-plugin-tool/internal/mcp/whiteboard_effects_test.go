@@ -117,6 +117,13 @@ func TestWhiteboardEffectsDurableIntentErrorsAndPublicationErrors(t *testing.T) 
 		t.Run(stage, func(t *testing.T) {
 			f := newLiveFixture(t, true)
 			wb := effectsWhiteboardFixture(f)
+			// Publication uses the key's canonical root, while liveFixture
+			// retains t.TempDir's spelling (/var vs /private/var on macOS).
+			entry, ok := f.server.sessions.lookup(f.keyA)
+			if !ok {
+				t.Fatal("fixture session key is missing")
+			}
+			wb.root = entry.root
 			injected := errors.New("injected " + stage)
 			f.server.sessions.boardFault = func(at string) error {
 				if at == stage {
