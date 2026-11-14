@@ -352,6 +352,9 @@ label.ck { cursor: pointer; }
 .ckhide[aria-pressed="true"] { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, transparent); }
 html:not([data-ck-hide]) .ckhide { display: none; }
 html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:not([data-id]) { display: none; }
+/* Completed checks moved to HISTORY with the same hide control. Assumed
+   correction rows and explicitly undated legacy rows remain visible. */
+html[data-ck-hide="1"] .topic:not(.closed) .wb-hitem.check:not([data-id]):not(:has(.wb-hunknown)) { display: none; }
 html[data-ck-hide="1"] .topic:not(.closed) .checks .ckrow:nth-child(1 of .ckrow[data-id]) { border-top: 0; }
 
 /* settled: collapsed tonal chip */

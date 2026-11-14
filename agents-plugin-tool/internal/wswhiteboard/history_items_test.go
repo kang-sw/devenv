@@ -95,6 +95,7 @@ func TestHistoryRichDetailIsContentDrivenAndStatic(t *testing.T) {
 		{ID: 1, Topic: "t", Class: ClassTechnical, Title: "short", Status: StatusAnswered, Answer: "ok", AnswerQuote: "ok"},
 		{ID: 2, Topic: "t", Class: ClassPolicy, Title: "rich", Status: StatusAnswered, Answer: "b", AnswerQuote: "The second option preserves every useful detail.", Rationale: "| A | B |\n|---|---|\n| one | two |\n\n```go\nreturn true\n```\n\n<strong>Useful HTML</strong>", Options: []string{"one", "two"}, Recommendation: "b: keep details"},
 		{ID: 3, Topic: "t", Class: ClassTechnical, Title: "title-like", Rationale: "title-like", Status: StatusAnswered, Answer: "ok", AnswerQuote: "ok"},
+		{ID: 4, Topic: "t", Class: ClassTechnical, Title: "genuinely empty", Rationale: " \n\t ", Status: StatusAnswered, Answer: "ok", AnswerQuote: "ok"},
 	}
 	st := &State{Items: items}
 	for _, regions := range []bool{false, true} {
@@ -116,7 +117,35 @@ func TestHistoryRichDetailIsContentDrivenAndStatic(t *testing.T) {
 		wantAll(t, row(2), `<table`, `<pre`, `<strong>Useful HTML</strong>`, "keep details", "The second option preserves every useful detail.", `data-key="item:2"`)
 		wantNone(t, row(2), `data-opt=`, `aria-pressed=`, `role="button"`)
 		wantAll(t, row(3), `data-key="item:3"`, `class="ctx md">title-like`)
+		wantNone(t, row(4), `<details`, `sbody`, `ctx md`)
 	}
+}
+
+func TestHistoryCompletedCheckFilterPreservesUndatedAndAssumedRows(t *testing.T) {
+	css, err := embeddedAsset("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, string(css), `html[data-ck-hide="1"] .topic:not(.closed) .wb-hitem.check:not([data-id]):not(:has(.wb-hunknown)) { display: none; }`)
+	st := &State{Items: []Item{
+		{ID: 1, Topic: "legacy", Class: ClassCheck, Title: "undated completed check", Status: StatusAnswered, Answer: "ok"},
+		{ID: 2, Topic: "legacy", Class: ClassCheck, Title: "undated assumed check", Status: StatusAssumed, Answer: "ok", AnswerQuote: "probably"},
+	}}
+	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
+	wantAll(t, regexpHistoryArticle(out, "item-1"), `wb-hitem check`, `wb-hunknown`)
+	wantAll(t, regexpHistoryArticle(out, "item-2"), `wb-hitem check wb-hassumed`, `data-id="02"`, `wb-hunknown`, `title="correction"`)
+}
+
+func TestHistoryRetirementRetainsRecordedPriorAnswer(t *testing.T) {
+	st := &State{Items: []Item{{ID: 1, Topic: "t", Class: ClassTechnical, Title: "retired after approval", Status: StatusWithdrawn,
+		Answer: "ok", AnswerQuote: "ok", AnsweredAt: "2020-01-01T00:00:00Z"}}, Topics: []TopicDoc{{Name: "t", Entries: []Entry{
+		{ID: "e1", Kind: EntrySystem, ItemID: 1, At: "2020-01-01T00:00:00Z", Text: "Item {{1}} answered [technical]: ok; owner quote: ok"},
+		{ID: "e2", Kind: EntrySystem, ItemID: 1, At: "2021-01-01T00:00:00Z", Text: "Item {{1}} patched [technical] (answered -> withdrawn): retired after approval"},
+	}}}}
+	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
+	row := regexpHistoryArticle(out, "item-1")
+	wantAll(t, row, `data-entry="e2"`, `datetime="2021-01-01T00:00:00Z"`, `wb-hpast">answered: ok`, `datetime="2020-01-01T00:00:00Z"`, ">withdrawn</span>")
+	wantNone(t, row, "archive time")
 }
 
 func regexpHistoryArticle(out, id string) string {

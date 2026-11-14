@@ -88,6 +88,16 @@ func TestHistoryCaptureFixtures(t *testing.T) {
 	apply(fmt.Sprintf(`<wb:patch id="%d" status="superseded"><wb:link>Replacement {{1}}</wb:link></wb:patch>`, superseded), at)
 	add("openPolicy", ClassPolicy, "열린 질문 / Keep answer controls", "The open policy remains independently answerable.", []string{"First choice", "Second choice"}, "b: keep native controls")
 	add("openCheck", ClassCheck, "열린 확인 / Inspect the evidence", "Check the table before answering.", nil, "")
+	answeredCheck := add("answeredCheck", ClassCheck, "완료 확인 / Completed check", "Retain the completed-check visibility control after moving this row into HISTORY.", nil, "")
+	answer(answeredCheck, "ok", "ok", false)
+	announced := add("announced", ClassAnnounced, "안내 / Announced default", "Preserve the announced class and its substantive rationale in the same timeline.", nil, "")
+	answer(announced, "ok", "ok", false)
+	batch := apply(`<wb:topic name="DENSITY"><wb:add class="technical"><wb:title>Known future batch A</wb:title></wb:add><wb:add class="technical"><wb:title>Known future batch B</wb:title></wb:add></wb:topic>`, at)
+	if len(batch.IDs) != 2 {
+		t.Fatal("known creation batch did not produce two items")
+	}
+	itemIDs["futureA"], itemIDs["futureB"] = batch.IDs[0], batch.IDs[1]
+	apply(fmt.Sprintf(`<wb:answer ids="%d %d" value="ok">ok</wb:answer>`, batch.IDs[0], batch.IDs[1]), at)
 
 	panel := func(id, recap, body string) string {
 		attr := ""
@@ -126,6 +136,7 @@ func TestHistoryCaptureFixtures(t *testing.T) {
 			Status: StatusAnswered, Answer: "ok", Changed: 1,
 			ChangedAt: "2026-11-01T08:00:00Z", Settled: 100 + (i*23)%67}
 		if i == 0 {
+			it.Class = ClassCheck // explicit unknown time must survive the completed-check filter
 			it.AnsweredAt = "2026-10-31T07:00:00Z"
 		}
 		st.Items = append(st.Items, it)
@@ -177,6 +188,7 @@ func TestHistoryCaptureFixtures(t *testing.T) {
 	type stage struct {
 		Name         string              `json:"name"`
 		PanelEntries map[string]string   `json:"panelEntries"`
+		Recorded     map[string][]Entry  `json:"recorded"`
 		Languages    map[string]specimen `json:"languages"`
 	}
 	manifest := struct {
@@ -186,9 +198,10 @@ func TestHistoryCaptureFixtures(t *testing.T) {
 		NewPanel         string         `json:"newPanel"`
 		LegacyOrderedIDs []int          `json:"legacyOrderedIDs"`
 		LegacyEntries    []Entry        `json:"legacyEntries"`
+		KnownBatchIDs    []int          `json:"knownBatchIDs"`
 		ItemIDs          map[string]int `json:"itemIDs"`
 		Stages           []stage        `json:"stages"`
-	}{FoldPanel: "p2", OriginalEntry: original, NewPanel: "p4", LegacyOrderedIDs: legacyIDs, LegacyEntries: legacyDoc.Entries, ItemIDs: itemIDs}
+	}{FoldPanel: "p2", OriginalEntry: original, NewPanel: "p4", LegacyOrderedIDs: legacyIDs, LegacyEntries: legacyDoc.Entries, KnownBatchIDs: batch.IDs, ItemIDs: itemIDs}
 	capture := func(name string) {
 		t.Helper()
 		if string(marshal(legacyRecords())) != legacyBefore {
@@ -200,7 +213,10 @@ func TestHistoryCaptureFixtures(t *testing.T) {
 			}
 		}
 		before := string(marshal(st))
-		s := stage{Name: name, PanelEntries: latestPanels(), Languages: map[string]specimen{}}
+		s := stage{Name: name, PanelEntries: latestPanels(), Recorded: map[string][]Entry{}, Languages: map[string]specimen{}}
+		for _, doc := range st.Topics {
+			s.Recorded[doc.Name] = append([]Entry(nil), doc.Entries...)
+		}
 		for _, lang := range []string{"en", "ko"} {
 			view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "history-capture", Location: time.UTC})
 			view.Lang, view.StampFile = lang, ""

@@ -2,7 +2,6 @@
 title: "Unify rich whole-entry HISTORY with the centered header and unobstructed focus"
 related:
   261114-bug-ws-dashboard-oq-wrap-top-class-collision: regression and collision fix owned here; idea remains unchanged
-  261114-bug-ws-whiteboard-fold-reopens-on-panel-republish: EXEC3 supplied baseline cause evidence; no assumption that its unmerged ticket is present
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6ece1ddbc182036b
@@ -163,10 +162,19 @@ decisions; mockup-only checks are not production verification.
   actual batch knowledge, not a timestamp heuristic or invented batch schema.
 - 754 is a bounded owner-approved refinement of current panel identity and
   header presentation, not a wider redesign. EXEC3's deployed-9854 trace
-  proves the old entry-key/new-version default-open mechanism, not the
+  (unmerged idea `261114-bug-ws-whiteboard-fold-reopens-on-panel-republish`,
+  evidence capture `a0802ba03`; not a local prerequisite) proves the old
+  entry-key/new-version default-open mechanism, not the
   reported incident or idle jitter. Verify stable-entry folds under frequent
   unrelated log/panel updates separately from same-pN republish and new-pN
   defaults; do not claim the owner incident or transient jitter resolved.
+- Integration inventory (not implemented here): MAIN owns later approved
+  recap-clamp 758 (`be73f426f`) and latest-log emphasis 773 (exact patch still
+  pending). After MAIN supplies the serialized integration, recheck header/
+  first-height geometry, whole-entry membership, 691 pill exposure, pN folds
+  and update badges, latest-log visibility identity, and both approved
+  references. Do not infer that either patch has landed or overwrite its
+  approved rules; the old two-line harness assertion stays until directed.
 - Shared daemon activation is separate from source integration, announced
   before/after and coordinated after or batched with EXEC1's 652+670. No source,
   runtime, build, fixture or worktree changes belong to this ticket capture.

@@ -110,7 +110,15 @@
 //   history-cards  Card/paging probes without navigation/control/live checks.
 //   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
 //   history-regressions  Exact thirty-line chunks in renderer-produced closed
-//             logs, collapse cancellation, and real Tab into clipped summaries.
+//             logs, collapse cancellation, and real Tab past sticky pills.
+//             Use serve --topics 8 --history-entries 180 --shared-actions for
+//             the original e320 / p156 / e519 regression identities.
+//   history-unified  Real EN/KO renderer fixtures, whole-entry/header/rich
+//             contracts, 754 pN folds/unread updates and both-reference captures.
+//             Generate with WS_HISTORY_FIXTURE_DIR + TestHistoryCaptureFixtures;
+//             serve without --history-entries (an empty panel inventory), then
+//             pass --fixtures DIR. Standalone uses a disposable live HTML copy.
+//             --before captures baseline evidence without a TASK3 verdict.
 //   history-fit  Controlled 3/2/1/oversized geometry, cached/first heights,
 //             exact log boundaries and wrapping without recutting.
 //
@@ -144,6 +152,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { scenarioHistoryUnified } from "./board-history-unified.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TOOL_DIR = path.join(REPO, "agents-plugin-tool");
@@ -1082,18 +1091,15 @@ async function scenarioSharedControls(ctx) {
   });
   const shape = await bodyShape();
   qa(shape.div && !shape.summary && !shape.paddingMarker && shape.visible && shape.title && shape.tickets && shape.state, 'dashboard body is visible div.tdoc without content-only disclosure or reserved padding; title/tickets/state remain', shape);
-  const history = page.locator(topic + ' details.topic-stream');
-  assert(await history.count() === 1, 'renderer supplies independent history disclosure');
-  if (!await history.evaluate((d) => d.open)) await history.locator(':scope > summary').click();
+  const history = page.locator(topic + ' div.topic-stream');
+  assert(await history.count() === 1, 'renderer supplies always-open history');
+  assert(await history.locator(':scope > summary').count() === 0, 'whole-history disclosure must be absent');
   const panels = page.locator(topic + ' details.entry-panel');
   assert(await panels.count() >= 2, 'renderer supplies independent panels');
   if (!await panels.nth(0).evaluate((d) => d.open)) await panels.nth(0).locator(':scope > summary').click();
   if (await panels.nth(1).evaluate((d) => d.open)) await panels.nth(1).locator(':scope > summary').click();
-  await history.locator(':scope > summary').click();
-  qa(!await history.evaluate((d) => d.open), 'history summary remains independently usable');
-  await history.locator(':scope > summary').click();
-  qa(await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'history toggle preserves independently open/closed panels');
-  const disclosures = () => page.locator(topic).evaluate((t) => [...t.querySelectorAll('details.topic-stream,details.entry-panel')].map((d) => [d.getAttribute('data-key'), d.open]));
+  qa(await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'always-open history preserves independently open/closed panels');
+  const disclosures = () => page.locator(topic).evaluate((t) => [...t.querySelectorAll('details.entry-panel,details.panel-versions,details.run-fold,details.system-run,details.sx')].map((d) => [d.getAttribute('data-key'), d.open]));
   const inner = await disclosures();
   await page.locator(topic + ' a[data-wl="file"][data-rel="docs/a.md"]').first().click();
   await page.waitForSelector('.bcard[data-kind="preview"] .pv-md');
@@ -2120,7 +2126,7 @@ async function scenarioPill(ctx) {
       await sleep(3000);
       const result = await page.evaluate(async ({ name, expected }) => {
         const bh = window.__bh, s = bh.scroller(), host = document.getElementById('bcol') || document.querySelector('.wrap');
-        const pill = host.querySelector('.oq-wrap.top .oq-pill'), seg = pill?.querySelector('.oq-seg.open');
+        const pill = host.querySelector('.oq-wrap.wb-oq-top .oq-pill'), seg = pill?.querySelector('.oq-seg.open');
         const count = () => !pill || pill.hidden || !seg || seg.hidden ? 0 : Number(seg.querySelector('.n').textContent);
         bh.pillMO.takeRecords();
         bh.pillChurn = { mounts: 0, unmounts: 0 };
@@ -2165,7 +2171,12 @@ const HISTORY_PAGE = () => {
     const panels = Array.from(live.querySelectorAll(':scope > .wb-entry.panel'));
     const entries = Array.from(live.querySelectorAll('.wb-entry:not(.historical)'));
     return { includedRows: entries.length - entries.findIndex((e) => e.id === h._wbHistoryChunks.at(-1)), steps: h._wbHistorySteps, chunks: h._wbHistoryChunks.slice(), pending: !!h._wbHistoryPending,
-      visiblePanels: panels.filter((p) => p.getBoundingClientRect().bottom > r.top + 1).length,
+      visiblePanels: panels.filter((p) => p.getBoundingClientRect().height > 0).length,
+      excludedRows: live.querySelectorAll(':scope > [data-wb-history-before]').length,
+      whole: Array.from(live.children).filter((n) => n.getBoundingClientRect().height > 0).every((n) => {
+        const b = n.getBoundingClientRect(); return b.top >= r.top - 1 && b.bottom <= r.bottom + 1;
+      }),
+      fade: getComputedStyle(clip, '::after').content,
       pages: h.querySelectorAll('template[data-history-page]').length,
       rows: live.querySelectorAll('.wb-entry').length, live: live.scrollHeight, height: r.height,
       top: r.top, bottom: r.bottom, scrollTop: clip.scrollTop,
@@ -2182,6 +2193,16 @@ const HISTORY_PAGE = () => {
 
 async function growEntry(page, id, px) {
   await page.evaluate(([id, px]) => window.__bh.mark(`late payload height (${id} +${px}px)`), [id, px]);
+  const excluded = await page.evaluate(([id, px]) => {
+    const entry = document.getElementById(id);
+    if (!entry?.closest('[data-wb-history-before]')) return false;
+    const body = entry.querySelector('.entry-body');
+    if (!body || entry.getBoundingClientRect().height !== 0) throw new Error('excluded whole-entry growth fixture is not actually hidden');
+    body.style.paddingBottom = (parseFloat(getComputedStyle(body).paddingBottom) + px) + 'px';
+    if (entry.getBoundingClientRect().height !== 0) throw new Error('excluded payload growth leaked a partial entry');
+    return true;
+  }, [id, px]);
+  if (excluded) return; // no rendered height can arrive from a display:none prefix
   const selector = `#${id} .entry-body iframe.doc-frame`;
   const framed = await page.locator(selector).count();
   if (framed) return growFrame(page, id, px, selector);
@@ -2229,7 +2250,7 @@ async function scenarioHistory(ctx) {
     assert(first.steps === 1 && !first.pending && first.visiblePanels >= 1 && first.visiblePanels <= 3 &&
       (first.height <= 1000 || first.visiblePanels === 1), `invalid first panel chunk: ${JSON.stringify(first)}`);
     assert(first.pages >= 2 && first.rows === 50, 'need 50 live entries and at least two inert older pages');
-    assert(first.overflow !== 'auto' && first.overflow !== 'scroll' && first.scrollTop === 0, 'history has an inner scroll');
+    assert(first.overflow !== 'auto' && first.overflow !== 'scroll' && first.scrollTop === 0 && first.maxHeight === 'none' && first.whole && (first.fade === 'none' || first.fade === 'normal'), 'history must show whole entries without an inner scroll, height clip or fade');
     await capture('before-load-more');
 
     // Watch the oldest intersecting row and the newest row through a real
@@ -2273,9 +2294,9 @@ async function scenarioHistory(ctx) {
     measure('paging', { clicks: paging.map((r) => ({ steps: r.after.steps, pagesBefore: r.before.pages, pagesSync: r.after.pages, pagesAfterResize: r.settled.pages, liveBefore: r.before.live })) });
     assert(paging.some((r) => r.after.pages < r.before.pages), 'no embedded page was materialized');
 
-    // Open an older payload still above the bottom-anchored window. Opening
-    // and then growing it are distinct real layout changes. Check after the
-    // keep quiet window as well as within it.
+    // An excluded whole payload remains excluded through payload growth,
+    // before and after keep's quiet window. Its rendered height is zero;
+    // genuine visible inline/frame height arrivals are covered below.
     const older = await page.evaluate(() => {
       const entries = Array.from(window.__bh.history().querySelectorAll('.history-live > .wb-entry'));
       entries[0].querySelector('details').open = true;
@@ -2523,7 +2544,7 @@ async function scenarioHistory(ctx) {
     await page.evaluate(() => window.__bh.positionHistory());
     await waitQuiet(page);
     const exhausted = await page.evaluate(() => window.__bh.historyState());
-    assert(exhausted.pages === 0 && exhausted.button && exhausted.live > exhausted.height, 'exhausted pages hid the button while clipped content remained');
+    assert(exhausted.pages === 0 && exhausted.button && exhausted.includedRows < exhausted.rows && exhausted.excludedRows > 0, 'exhausted pages hid the button while excluded whole entries remained');
     let fitted = exhausted, controlClicks = 0;
     while (fitted.button && controlClicks < 100) {
       const before = fitted;
@@ -2565,6 +2586,7 @@ async function scenarioHistory(ctx) {
       const chip = src.cloneNode(true), entry = chip.querySelector('.wb-entry'), old = entry.id;
       chip.innerHTML = chip.innerHTML.replaceAll(old, 'e999001');
       chip.dataset.key = 'system:e999001'; chip.dataset.historyAnchor = 'e999001'; chip.open = false;
+      chip.removeAttribute('data-wb-history-before'); // a fresh server row has no private prefix marker
       chip.querySelector('.entry-text').textContent = 'Live arrival fixture';
       chip.id = 'bh-live-chip'; live.appendChild(chip);
       return before;
@@ -2609,39 +2631,61 @@ async function scenarioHistoryRegressions(ctx) {
     assert(await page.evaluate(() => ['HISTORY', 'LOGCHAIN', 'LOGCANCEL'].every((n) => !!window.__bh.history(n))),
       'seed renderer-produced panel/log histories with serve --history-entries 180');
 
-    async function clippedFoldTab(name, selector) {
-      await page.evaluate((name) => {
-        const bh = window.__bh, s = bh.scroller(), clip = bh.history(name).querySelector('.history-clip');
-        s.scrollTop += clip.getBoundingClientRect().top - bh.viewTop(s) - 100;
-      }, name);
+    // Whole-entry selection intentionally removes clipped tabbable content.
+    // Retain the original three identities and the strict 691 hit test: first
+    // reveal the real boundary, position it under the actual pill, then reach
+    // it only with native Tab. No direct focus() or synthetic focusin on it.
+    async function boundaryTab(name, id, selector) {
+      await page.evaluate(([name, id, selector]) => {
+        const bh = window.__bh, h = bh.history(name), node = window.wbHistory.loadTarget(document, id);
+        if (!node || !h.contains(node)) throw new Error(`missing original 691 target ${id}; seed --topics 8 --history-entries 180 --shared-actions`);
+        const fold = node.matches(selector) ? node : node.closest(selector);
+        if (!fold) throw new Error(`${id} is not the expected ${selector}`);
+        fold.open = false;
+        bh.foldTab = { summary: fold.querySelector(':scope > summary'), fold };
+      }, [name, id, selector]);
       await waitQuiet(page);
-      const before = await page.evaluate(([name, selector]) => {
-        const bh = window.__bh, h = bh.history(name), clip = h.querySelector('.history-clip').getBoundingClientRect();
-        const fold = Array.from(h.querySelectorAll(selector)).find((f) => f.querySelector('summary').getBoundingClientRect().top < clip.top - 1);
-        if (!fold) throw new Error(`no clipped ${selector} in ${name}`);
-        const summary = fold.querySelector('summary'), sentinel = document.createElement('button');
-        sentinel.textContent = 'Tab starting point';
-        // Positioned inside the clip without changing the renderer's rows.
-        // Only the subsequent real Tab reaches the clipped disclosure.
-        sentinel.style.cssText = 'position:absolute;bottom:0;height:1px;width:1px;padding:0;border:0;opacity:0';
-        fold.before(sentinel); sentinel.focus({ preventScroll: true });
-        bh.foldTab = { summary, sentinel };
-        return { anchor: fold.dataset.historyAnchor, steps: h._wbHistorySteps, clipped: summary.getBoundingClientRect().top < clip.top - 1 };
-      }, [name, selector]);
-      assert(before.clipped, `${selector} summary must start above the clip`);
+      await page.evaluate(() => {
+        const bh = window.__bh, s = bh.scroller(), node = bh.foldTab.summary;
+        const pill = document.querySelector('.oq-wrap.wb-oq-top .oq-pill:not([hidden])');
+        if (!pill) throw new Error('691 requires a real visible top question pill; seed --shared-actions');
+        const r = node.getBoundingClientRect(), p = pill.getBoundingClientRect();
+        s.scrollTop += (r.top + r.height / 2) - (p.top + p.height / 2);
+      });
+      await waitQuiet(page);
+      const before = await page.evaluate((name) => {
+        const bh = window.__bh, h = bh.history(name), node = bh.foldTab.summary, r = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        const sentinel = document.createElement('button'); sentinel.textContent = 'Tab starting point';
+        sentinel.style.cssText = 'position:absolute;height:1px;width:1px;padding:0;border:0;opacity:0';
+        bh.foldTab.fold.before(sentinel); sentinel.focus({ preventScroll: true }); bh.foldTab.sentinel = sentinel;
+        const wrap = document.querySelector('.oq-wrap.wb-oq-top');
+        return { boundary: h._wbHistoryChunks.at(-1), steps: h._wbHistorySteps,
+          centerCoveredByPill: !!hit?.closest('.oq-pill'), height: r.height,
+          collisionGone: !!wrap && !wrap.classList.contains('top') && parseFloat(getComputedStyle(wrap).marginBottom) === 0,
+          whole: h.querySelector('.history-clip').scrollTop === 0 && getComputedStyle(h.querySelector('.history-clip')).maxHeight === 'none' };
+      }, name);
+      measure(`${id}-before-real-tab`, before);
+      assert(before.height > 0 && before.centerCoveredByPill && before.collisionGone && before.whole,
+        `${id}: setup must prove genuine pill obstruction separately from the removed .top collision`);
+      await capture(`${id}-before-tab`);
       await tab.keyboard.press('Tab');
       await paint();
+      await waitQuiet(page);
       const after = await page.evaluate((name) => {
-        const bh = window.__bh, h = bh.history(name), node = document.activeElement, r = node.getBoundingClientRect(), clip = h.querySelector('.history-clip').getBoundingClientRect();
+        const bh = window.__bh, h = bh.history(name), node = document.activeElement, r = node.getBoundingClientRect(), clip = h.querySelector('.history-clip').getBoundingClientRect(), s = bh.scroller();
         const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
         return { expected: node === bh.foldTab.summary, boundary: h._wbHistoryChunks.at(-1), steps: h._wbHistorySteps,
+          centerExposed: !!hit && (hit === node || node.contains(hit)), pillCoverage: !!hit?.closest('.oq-wrap,.oq-pill'),
+          centerHit: hit && { tag: hit.tagName, id: hit.id, classes: hit.className },
           top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
-          centerExposed: !!hit && (hit === node || node.contains(hit)), clipScrollTop: h.querySelector('.history-clip').scrollTop };
+          viewTop: bh.viewTop(s), viewBottom: bh.viewBottom(s), clipScrollTop: h.querySelector('.history-clip').scrollTop };
       }, name);
-      measure(`${selector}-real-tab`, { before, after });
-      assert(after.expected && after.boundary === before.anchor && after.steps === before.steps + 1 &&
-        after.top >= after.clipTop - 1 && after.bottom <= after.clipBottom + 1 && after.centerExposed && after.clipScrollTop === 0,
-        `real Tab did not reveal clipped ${selector} summary`);
+      measure(`${id}-after-real-tab`, after);
+      await capture(`${id}-after-tab`);
+      assert(after.expected && after.boundary === before.boundary && after.steps === before.steps && after.centerExposed && !after.pillCoverage &&
+        after.top >= after.clipTop - 1 && after.bottom <= after.clipBottom + 1 && after.top >= after.viewTop - 1 && after.bottom <= after.viewBottom + 1 && after.clipScrollTop === 0,
+        `${id}: native Tab did not expose the actual boundary control center`);
       await page.evaluate(() => { document.activeElement.blur(); window.__bh.foldTab.sentinel.remove(); });
       await page.waitForFunction((name) => window.wbHistory.seen(window.__bh.history(name).closest('.topic'), '0px')?.visible, name, { timeout: 2000 });
       await page.evaluate((name) => {
@@ -2650,46 +2694,9 @@ async function scenarioHistoryRegressions(ctx) {
       }, name);
       await page.waitForFunction((name) => window.__bh.history(name)._wbHistorySteps === 1, name, { timeout: 2000 });
     }
-    await clippedFoldTab('HISTORY', '.system-run');
-
-    // The old failure was a real Tab into the first clipped summary, not an
-    // explicit focus() on the desired row or a synthetic focusin callback.
-    await page.evaluate(() => window.__bh.positionHistory());
-    await waitQuiet(page);
-    await page.locator('.wb-history[data-history="HISTORY"] > .history-older').focus();
-    const keyboardBefore = await page.evaluate(() => {
-      const bh = window.__bh, h = bh.history(), clip = h.querySelector('.history-clip').getBoundingClientRect();
-      const node = h.querySelector('.history-live .entry-panel > summary'), r = node.getBoundingClientRect();
-      bh.expectedTab = node;
-      return { buttonFocused: document.activeElement === h.querySelector('.history-older'),
-        panel: node.closest('.entry-panel').id, top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
-        clipped: r.bottom <= clip.top, clipScrollTop: h.querySelector('.history-clip').scrollTop };
-    });
-    measure('keyboard-before-tab', keyboardBefore);
-    assert(keyboardBefore.buttonFocused && keyboardBefore.clipped && keyboardBefore.clipScrollTop === 0, 'Tab fixture must start at load-more with the next summary clipped');
-    await capture('before-tab');
-    await tab.keyboard.press('Tab');
-    await paint();
-    await sleep(100);
-    const keyboardAfter = await page.evaluate(() => {
-      const bh = window.__bh, h = bh.history(), node = document.activeElement, r = node.getBoundingClientRect();
-      const clip = h.querySelector('.history-clip').getBoundingClientRect(), s = bh.scroller();
-      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return { expected: node === bh.expectedTab, summary: node.matches('.entry-panel > summary'),
-        centerExposed: !!hit && (hit === node || node.contains(hit)),
-        centerHit: hit && { tag: hit.tagName, id: hit.id, classes: hit.className },
-        panel: node.closest('.entry-panel')?.id, top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
-        viewTop: bh.viewTop(s), viewBottom: bh.viewBottom(s), clipScrollTop: h.querySelector('.history-clip').scrollTop,
-        steps: h._wbHistorySteps };
-    });
-    measure('keyboard-after-tab', keyboardAfter);
-    await capture('after-tab');
-    assert(keyboardAfter.expected && keyboardAfter.summary && keyboardAfter.top >= keyboardAfter.clipTop - 1 &&
-      keyboardAfter.bottom <= keyboardAfter.clipBottom + 1 && keyboardAfter.top >= keyboardAfter.viewTop - 1 &&
-      keyboardAfter.bottom <= keyboardAfter.viewBottom + 1 && keyboardAfter.clipScrollTop === 0 && keyboardAfter.centerExposed,
-      'actual Tab focused a summary outside the clip/page, under a sticky overlay, or scrolled the clip');
-    await page.evaluate(() => document.activeElement.blur());
-    await clippedFoldTab('LOGCHAIN', '.run-fold');
+    await boundaryTab('HISTORY', 'e320', '.system-run');
+    await boundaryTab('HISTORY', 'p156', '.entry-panel');
+    await boundaryTab('LOGCHAIN', 'e519', '.run-fold');
 
     async function settledLog(name) {
       await page.evaluate((name) => {
@@ -2828,12 +2835,13 @@ async function scenarioHistoryFit(ctx) {
       bh.fitLog = bh.history('LOGCHAIN').querySelector('.wb-entry.agent').cloneNode(true);
       bh.fitFixture = (heights, unknown = false) => {
         const old = bh.history(), h = old.cloneNode(false);
-        h.innerHTML = '<button class="history-older">older</button><div class="history-clip"><div class="history-live"></div></div>';
+        h.innerHTML = '<header class="wb-history-head"><button class="history-older">older</button></header><div class="history-clip"><div class="history-live"></div></div>';
         const live = h.querySelector('.history-live');
         let id = 900000;
         const row = (panel, height) => {
           const n = (panel ? bh.fitPanel : bh.fitLog).cloneNode(true);
           n.id = 'e' + (++id); n.dataset.entry = n.id; n.dataset.historyAnchor = n.id;
+          n.removeAttribute('data-wb-history-before');
           n.style.cssText = `height:${height}px;margin:0;padding:0;box-sizing:border-box;overflow:hidden`;
           if (panel) {
             n.dataset.panel = 'p' + id;
@@ -2956,6 +2964,7 @@ const SCENARIOS = {
   'history-cards': (ctx) => scenarioHistory({ ...ctx, cardsOnly: true }),
   'history-paint': (ctx) => scenarioHistory({ ...ctx, navigationOnly: true }),
   'history-regressions': scenarioHistoryRegressions,
+  'history-unified': (ctx) => scenarioHistoryUnified(ctx, { openBoard, waitQuiet, waitFor, bindPage: IN_PAGE, log, assert }),
 };
 
 // --- main ----------------------------------------------------------------------

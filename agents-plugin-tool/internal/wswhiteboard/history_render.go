@@ -2,6 +2,7 @@ package wswhiteboard
 
 import (
 	"fmt"
+	"html/template"
 	"strings"
 	"time"
 )
@@ -53,6 +54,9 @@ func (d itemData) HistoryStatusKey() string {
 // verbatim tooltip. A title-like rationale or a substantive quote is still
 // content, never a string-similarity/length heuristic for an empty disclosure.
 func (d itemData) HistoryQuote() string {
+	if strings.TrimSpace(d.AnswerQuote) == "" {
+		return ""
+	}
 	if strings.EqualFold(strings.TrimSpace(d.Answer), "ok") && strings.EqualFold(strings.TrimSpace(d.AnswerQuote), "ok") {
 		return ""
 	}
@@ -78,12 +82,26 @@ func (d itemData) HistoryAnswerTime() string {
 // A picked option's remainder is interpretation, not another answer badge.
 // Free-text answers already occupy the single badge and use TextInline there.
 func (d itemData) HistoryReading() string {
-	if d.PickedOption() != nil {
+	if !d.Void() && d.PickedOption() != nil {
 		return d.Reading()
 	}
 	return ""
 }
 
+func (d itemData) HistoryPastAnswer() string {
+	if d.Void() {
+		return d.Answer
+	}
+	return ""
+}
+
+func (d itemData) HistoryRationaleHTML() template.HTML {
+	if strings.TrimSpace(d.Rationale) == "" {
+		return ""
+	}
+	return d.RationaleHTML()
+}
+
 func (d itemData) HistoryExpandable() bool {
-	return len(d.Options) > 0 || d.Rationale != "" || d.RecLetter != "" || d.HistoryQuote() != "" || d.HistoryAnswerTime() != ""
+	return len(d.Options) > 0 || d.RecLetter != "" || d.HistoryQuote() != "" || d.HistoryAnswerTime() != "" || d.HistoryPastAnswer() != "" || strings.TrimSpace(string(d.HistoryRationaleHTML())) != ""
 }
