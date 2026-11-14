@@ -638,9 +638,9 @@
       // The notes came back with their markers (writeAnswers); their image
       // rows go back after them, and a note the swap took drops its images.
       if (ctext) { syncMarkers(); renderImgs(); }
-      // A mention button over a body frame the swap removed has nothing left
-      // to add.
-      if (mpend && mpend.frame && !doc.contains(mpend.frame)) hideMention();
+      // An input-held selection is already a value snapshot, even when its
+      // source frame leaves the board during an update.
+      if (mpend && !mpend.locked && mpend.frame && !doc.contains(mpend.frame)) hideMention();
     }
     if (board || name === "convlive") applySent(board);
     if (name === "panels") drawerSync();
@@ -2263,7 +2263,7 @@
   // lists after its answer block (wsinbox mentions). A topic body is a
   // sandboxed frame whose selection this page cannot read, so the frame
   // reports it ({wbDoc: "sel"}, doc-frame.js) and the button stands over it.
-  var mbtn = null, mpend = null, mraf = 0;
+  var mbtn = null, mnote = null, mpend = null, mraf = 0, mcomposing = false;
   // mentionOf is the mention a selection makes: the topic card's key, the
   // item ID when both ends lie in one item (or trusted system-event
   // provenance), the optional immutable entry locator, and selected text.
@@ -2348,28 +2348,71 @@
   }
   function hideMention() {
     mpend = null;
+    mcomposing = false;
+    if (mnote) mnote.value = "";
     if (mbtn) mbtn.hidden = true;
   }
-  // placeMention shows the button for p by its selection's end, kept on
-  // screen; a frame's selection stands where its frame stands now.
+  // Once the input takes focus, live selection reports may no longer replace
+  // this bundle. The copied mentions and owning session outlive DOM updates.
+  function lockMention() { if (mpend) mpend.locked = true; }
+  // This context is ordinary, editable user text, not wire metadata. Include
+  // the excerpts as well as their locators: ordinal references become wrong
+  // after chip removal, another attachment, or an inbox merge.
+  function selectionNote(ms, note) {
+    note = (note || "").trim();
+    if (!note) return "";
+    return wsT("js.wbmention.context") + "\n" + ms.map(function (m) {
+      return "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "") + "\n> " + m.text.replace(/\r?\n/g, "\n> ");
+    }).join("\n\n") + "\n\n" + wsT("js.wbmention.note") + "\n" + note;
+  }
+  // placeMention shows a snapshot beside its selection. An input-held bundle
+  // keeps its last screen position if its source disappears.
   function placeMention(p) {
+    if (mpend && mpend.locked && p !== mpend) return;
     var x = p.x, y = p.y;
     if (p.frame) {
-      if (!doc.contains(p.frame)) { hideMention(); return; }
-      var fr = p.frame.getBoundingClientRect();
-      x += fr.left; y += fr.top;
+      if (doc.contains(p.frame)) {
+        var fr = p.frame.getBoundingClientRect();
+        x += fr.left; y += fr.top;
+      } else if (p.locked) { x = p.screenX; y = p.screenY; }
+      else { hideMention(); return; }
     }
     if (!mbtn) {
-      mbtn = doc.createElement("button");
-      mbtn.type = "button";
+      mbtn = doc.createElement("div");
       mbtn.className = "wbmention";
-      mbtn.setAttribute("data-wbmention", "");
-      mbtn.textContent = wsT("js.wbmention.add");
-      mbtn.title = wsT("js.wbmention.add.title");
-      // Pressing the button must not move the selection it adds.
-      mbtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      mbtn.setAttribute("data-wbmention-pop", "");
+      mbtn.setAttribute("role", "group");
+      mbtn.setAttribute("aria-label", wsT("js.wbmention.add.title"));
+      mnote = doc.createElement("textarea");
+      mnote.rows = 2;
+      mnote.className = "wbmention-note";
+      mnote.placeholder = wsT("js.wbmention.input");
+      mnote.setAttribute("aria-label", wsT("js.wbmention.input"));
+      var add = doc.createElement("button");
+      add.type = "button";
+      add.setAttribute("data-wbmention", "");
+      add.textContent = wsT("js.wbmention.add");
+      add.title = wsT("js.wbmention.add.title");
+      mbtn.appendChild(mnote);
+      mbtn.appendChild(add);
+      // Capture before focus collapses the host or sandbox selection. Only
+      // the action prevents focus; the input must remain normally editable.
+      mbtn.addEventListener("mousedown", function (e) { lockMention(); if (e.target === add) e.preventDefault(); });
+      mbtn.addEventListener("focusin", lockMention);
+      mnote.addEventListener("compositionstart", function () { mcomposing = true; });
+      mnote.addEventListener("compositionend", function () { mcomposing = false; });
+      mbtn.addEventListener("keydown", function (e) {
+        if (e.isComposing || e.keyCode === 229 || mcomposing) { if (e.target === add) e.preventDefault(); e.stopPropagation(); return; }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideMention(); ctext.focus(); }
+        // Enter edits the note; attachment always uses the explicit action.
+      });
       doc.body.appendChild(mbtn);
     }
+    if (p !== mpend) {
+      p = Object.assign({}, p, { ms: validMentions(p.ms || [p.m]), rid: rid });
+      mnote.value = "";
+    }
+    p.screenX = x; p.screenY = y;
     mpend = p;
     mbtn.hidden = false;
     var w = mbtn.offsetWidth, h = mbtn.offsetHeight;
@@ -2378,22 +2421,30 @@
   }
   function syncHostMention() {
     mraf = 0;
+    if (mpend && mpend.locked) return;
     var p = hostMention();
     if (p) placeMention(p);
     else if (mpend && !mpend.frame) hideMention();
   }
   function addMention() {
     var p = mpend;
+    if (!p || p.rid !== rid || mcomposing) return;
+    var text = selectionNote(p.ms, mnote.value);
     hideMention();
-    if (!p) return;
-    bmentions = bmentions.concat(p.ms || [p.m]);
-    if (p.frame) postDoc(p.frame, { wbDoc: "unsel" });
+    bmentions = bmentions.concat(p.ms);
+    if (p.frame) { if (doc.contains(p.frame)) postDoc(p.frame, { wbDoc: "unsel" }); }
     else if (window.getSelection) window.getSelection().removeAllRanges();
+    // Append rather than replace the composer's selected text. The context
+    // stays readable after ordinary edits, restoration, and merged sends.
+    if (text) editText(ctext.value.length, ctext.value.length, (ctext.value ? "\n\n" : "") + text);
     renderChips();
+    queueDraft();
+    ctext.focus();
   }
   // frameMention takes a body frame's selection report: its text and where
   // its end stands inside the frame.
   function frameMention(f, text, x, y) {
+    if (mpend && mpend.locked) return;
     var t = f.closest("section.topic[data-topic]"), entry = f.getAttribute("data-entry") || "";
     var item = f.getAttribute("data-entry-item") || "", parentEntry = entryAt(f.parentNode);
     if (!item && parentEntry) item = parentEntry.getAttribute("data-entry-item") || "";
@@ -2411,13 +2462,16 @@
     });
     // A press anywhere on this page leaves a frame's selection behind.
     doc.addEventListener("mousedown", function (e) {
-      if (mpend && mpend.frame && !(e.target.closest && e.target.closest("[data-wbmention]"))) hideMention();
+      if (mpend && !mpend.locked && mpend.frame && !(e.target.closest && e.target.closest("[data-wbmention-pop]"))) hideMention();
     }, true);
+    doc.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229 && !mcomposing && mpend) hideMention();
+    });
     // The button follows its selection when the board scrolls or the
     // window resizes.
     var follow = function () {
       if (!mpend) return;
-      if (mpend.frame) { placeMention(mpend); return; }
+      if (mpend.locked || mpend.frame) { placeMention(mpend); return; }
       var p = hostMention();
       if (p) placeMention(p); else hideMention();
     };
