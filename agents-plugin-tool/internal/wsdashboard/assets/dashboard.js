@@ -8142,7 +8142,7 @@
     var row = el.appendChild(mk("div", "sprow"));
     var status = row.appendChild(mk("span", "spnote"));
     var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
-    var go = row.appendChild(rpBtn("pbtn go", wsT("js.lead.start")));
+    var start = row.appendChild(rpBtn("pbtn go", wsT("js.lead.start")));
     function setErr(text) { err.textContent = text || ""; err.hidden = !text; }
     function off(k) { var h = supHarness(k); return !!h && h.available === false; }
     function sync() {
@@ -8154,7 +8154,7 @@
       });
       Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("aria-checked", String(P.iso === k)); });
       idesc.textContent = wsT(P.iso === "isolated" ? "js.lead.iso.isolated.hint" : "js.lead.iso.default.hint") + (P.harness === "pi" ? " " + wsT("js.lead.iso.pi") : "");
-      go.disabled = P.busy || off(P.harness);
+      start.disabled = P.busy || off(P.harness);
     }
     // edited drops an earlier spawn's error once the form changed.
     function edited() {
@@ -8171,7 +8171,7 @@
     }
     function submit() {
       sync();
-      if (go.disabled) return;
+      if (start.disabled) return;
       notifAsk();
       var gen = P.gen;
       P.busy = true;
@@ -8179,13 +8179,15 @@
       status.textContent = wsT("js.lead.starting");
       sync();
       railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value, isolation: P.iso }), function (st, v, s) {
+        P.busy = false;
+        status.textContent = "";
+        sync();
         if (st === 201 && v.id) {
+          if (rpLive(P, gen)) railPopClose(false);
           saveDraft();
           go("/s/" + encodeURIComponent(String(v.id)));
           return;
         }
-        P.busy = false;
-        status.textContent = "";
         if (!rpLive(P, gen)) { toast(leadErr(st, s)); return; }
         setErr(leadErr(st, s));
         sync();
@@ -8195,7 +8197,7 @@
     iseg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-iso]"); if (b) { P.iso = b.getAttribute("data-iso"); sync(); } });
     seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-harness]"); if (b && !b.disabled) setHarness(b.getAttribute("data-harness")); });
     cancel.addEventListener("click", function () { railPopClose(true); });
-    go.addEventListener("click", submit);
+    start.addEventListener("click", submit);
     P.open = function (key, label, btn) {
       var gen = ++P.gen, name = btn.getAttribute("data-name") || label, branch = btn.getAttribute("data-branch") || "";
       P.busy = false;
