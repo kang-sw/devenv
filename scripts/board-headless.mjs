@@ -1228,10 +1228,10 @@ async function scenarioSharedControls(ctx) {
     const body = t.querySelector(':scope > .tdoc');
     return { div: body && body.tagName === 'DIV', summary: !!t.querySelector(':scope > details.tdoc,:scope > .tdoc > summary'),
       paddingMarker: t.classList.contains('has-doc'), visible: body && body.getBoundingClientRect().height > 0,
-      title: t.querySelector('.tname').textContent, tickets: !!t.querySelector('.ttix .wbtk'), state: !!t.querySelector('.tbar .chip') };
+      title: t.querySelector('.tname').textContent, tickets: !!t.querySelector('.ttix, .wbtk'), state: !!t.querySelector('.tbar .chip') };
   });
   const shape = await bodyShape();
-  qa(shape.div && !shape.summary && !shape.paddingMarker && shape.visible && shape.title && shape.tickets && shape.state, 'dashboard body is visible div.tdoc without content-only disclosure or reserved padding; title/tickets/state remain', shape);
+  qa(shape.div && !shape.summary && !shape.paddingMarker && shape.visible && shape.title && !shape.tickets && shape.state, 'dashboard body is visible div.tdoc without content-only disclosure or reserved padding; title/state remain without ticket slot', shape);
   const history = page.locator(topic + ' details.topic-stream');
   assert(await history.count() === 1, 'renderer supplies independent history disclosure');
   if (!await history.evaluate((d) => d.open)) await history.locator(':scope > summary').click();
@@ -1281,7 +1281,7 @@ async function scenarioSharedControls(ctx) {
     const bar = t.querySelector('.tbar');
     return { size: t.getAttribute('data-size'), focus: document.activeElement === t.querySelector('.t-fold'),
       hidden: [...t.querySelectorAll('*')].every((n) => bar.contains(n) || n.contains(bar) || !n.getClientRects().length || n.getBoundingClientRect().height === 0),
-      chrome: !!bar.querySelector('.tname') && !!bar.querySelector('.ttix .wbtk') && !!bar.querySelector('.chip') };
+      chrome: !!bar.querySelector('.tname') && !bar.querySelector('.ttix, .wbtk') && !!bar.querySelector('.chip') };
   });
   qa(fold.size === 'fold' && fold.focus && fold.hidden && fold.chrome, 'whole fold masks every body/history/question region while retaining header chrome and focus', fold);
   qa(JSON.stringify(await disclosures()) === JSON.stringify(inner), 'whole fold does not toggle inner disclosures');
@@ -1330,10 +1330,10 @@ async function scenarioSharedActions(ctx) {
       outside: [...t.querySelectorAll('*')].filter((n) => !bar.contains(n) && !n.contains(bar) && n.getClientRects().length && n.getBoundingClientRect().height > 0).map((n) => n.className) };
   });
   qa(folded.h < before.height && folded.h <= folded.bar + 4 && !folded.outside.length && folded.focus && folded.label && folded.expanded === 'false', 'whole fold removes all rendered body/history/questions, retains keyboard focus and labeled control', folded);
-  qa(folded.text === await page.evaluate(() => __bh.sharedChrome), 'title, ticket badges and state text survive fold');
+  qa(folded.text === await page.evaluate(() => __bh.sharedChrome), 'title and state text survive fold');
   await tab.keyboard.press('Enter');
   qa(await page.evaluate(() => JSON.stringify([...__bh.sharedTopic.querySelectorAll('details')].map((d) => [d.getAttribute('data-key'), d.open])) === JSON.stringify(__bh.sharedDisclosures)), 'expand retains every independent disclosure');
-  qa(await page.locator(topic).evaluate((t) => !!t.querySelector('.ttix') && t.textContent.includes('Open question fixture') && t.textContent.includes('History fixture') && t.querySelectorAll('details.entry-panel').length >= 2), 'fixture uses renderer-owned ticket, question, history and panel regions');
+  qa(await page.locator(topic).evaluate((t) => !t.querySelector('.ttix, .wbtk') && t.textContent.includes('Open question fixture') && t.textContent.includes('History fixture') && t.querySelectorAll('details.entry-panel').length >= 2), 'fixture hides ticket slot and uses renderer-owned question, history and panel regions');
   await capture(ctx, tab, kind + '-expanded');
   const direct = page.locator(topic + ' a[data-wl="file"][data-rel="docs/a.md"]').first();
   assert(await direct.count(), 'server renderer supplies a direct question link');

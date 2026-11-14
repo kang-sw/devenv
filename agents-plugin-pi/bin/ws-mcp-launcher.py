@@ -550,8 +550,8 @@ def local_devenv_source_fingerprint(plugin_dir: Path, os_name: str) -> str | Non
     # metadata only (no file reads) to stay cheap on the startup path. Every
     # regular file under tool_dir counts, so //go:embed inputs (assets, i18n
     # tables, embedded rsrc) are covered without parsing embed patterns; test
-    # files, testdata, dist* output, and dot-directories cannot change the
-    # binary and are skipped.
+    # files, testdata, dist* output, dot-directories, and the independent
+    # top-level desktop package cannot change the binary and are skipped.
     contract = read_local_devenv_contract(plugin_dir, os_name)
     if contract is None:
         return None
@@ -559,6 +559,8 @@ def local_devenv_source_fingerprint(plugin_dir: Path, os_name: str) -> str | Non
     entries = []
     walk_errors = []
     for dirpath, dirnames, filenames in os.walk(tool_dir, onerror=walk_errors.append):
+        if Path(dirpath) == tool_dir and "desktop" in dirnames:
+            dirnames.remove("desktop")
         dirnames[:] = [d for d in dirnames if d != "testdata" and not d.startswith(("dist", "."))]
         for filename in filenames:
             if filename.endswith("_test.go"):
