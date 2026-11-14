@@ -1702,7 +1702,7 @@
   "js.lead.stop.note": "Termine le processus. Le prochain message ou mail le relance.",
   "js.lead.stopped": "Aucun processus ne tourne. Le prochain message ou mail en lance un.",
   "js.lead.close": "Fermer",
-  "js.lead.close.note": "Termine la conversation définitivement. Elle ne peut pas être rouverte.",
+  "js.lead.close.note": "Termine la conversation et le processus, et arrête les réveils par e-mail. Elle peut être rouverte depuis le rail.",
   "js.lead.close.confirm": "Fermer cette session ? Son processus s'arrête et la conversation ne peut pas être poursuivie.",
   "js.ap.title": "Demande d'approbation",
   "js.ap.agent": "sous-agent",
