@@ -89,8 +89,8 @@ func (c *conv) mcpConnected(server string) {
 // failed when named, else those the harness's status report calls failed.
 // A check already running takes the names into one more after it.
 func (c *conv) checkMCP(failed []string) {
-	mc, ok := c.proc.(mcpController)
-	if !ok || c.closed {
+	mc := controlsFor(c.proc).mcp
+	if mc == nil || c.closed {
 		return
 	}
 	if c.mcpChecking {

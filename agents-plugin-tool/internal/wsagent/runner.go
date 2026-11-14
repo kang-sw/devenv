@@ -703,8 +703,8 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 	if err != nil {
 		return ResolvedProfile{}, badRequest("%v", err)
 	}
-	if r.opts.Backends[rp.Definition.Backend] == nil {
-		return ResolvedProfile{}, badRequest("agent profile %q: backend %q is not available in this daemon", rp.Name, rp.Definition.Backend)
+	if _, err := r.backend(rp.Name, rp.Definition.Backend); err != nil {
+		return ResolvedProfile{}, err
 	}
 	if path := rp.Definition.InstructionsPath(root); path != "" {
 		info, err := os.Stat(path)
@@ -719,6 +719,24 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 		return ResolvedProfile{}, badRequest("agent profile %q is a lead profile, but this daemon runs no session holders", rp.Name)
 	}
 	return rp, nil
+}
+
+// backend is shared by profile validation and both launch paths. Keep
+// unavailable backends explicit, including when rejoining a held process.
+func (r *Runner) backend(profile, name string) (Backend, error) {
+	backend := r.opts.Backends[name]
+	if backend == nil {
+		return nil, badRequest("agent profile %q: backend %q is not available in this daemon", profile, name)
+	}
+	return backend, nil
+}
+
+func (c *conv) startBackend(spec StartSpec) (Process, error) {
+	backend, err := c.r.backend(c.rec.Profile, c.rec.Backend)
+	if err != nil {
+		return nil, err
+	}
+	return backend.Start(context.Background(), spec)
 }
 
 // Get reads one conversation's state.
@@ -1392,8 +1410,8 @@ func (c *conv) steer() {
 		c.steerWorker()
 		return
 	}
-	st, ok := c.proc.(steerer)
-	if !ok {
+	st := controlsFor(c.proc).steer
+	if st == nil {
 		return
 	}
 	recs, _ := wsinbox.DrainSteer(c.inbox)
@@ -1959,10 +1977,7 @@ func nextTurn(queue []QueuedInput) (cmd *wsinbox.Command, parts []string, rest [
 // which a harness that reads a message starting with a slash as a command
 // runs as one.
 func (c *conv) runCommand(cmd wsinbox.Command) error {
-	if cr, ok := c.proc.(commandRunner); ok {
-		return cr.RunCommand(cmd)
-	}
-	return c.proc.Send(cmd.Line())
+	return controlsFor(c.proc).runCommand(cmd)
 }
 
 // startProcess resolves the profile again (it may have changed since the
@@ -2081,7 +2096,7 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 		// after retiring the previous process. Reattachment keeps this copy.
 		c.update(func(rec *Record) { rec.ResolvedDefinition = &def })
 	}
-	proc, err := c.r.opts.Backends[rec.Backend].Start(context.Background(), spec)
+	proc, err := c.startBackend(spec)
 	if err != nil {
 		c.r.revokeToken(rec.ReplyID)
 		return err
@@ -2196,7 +2211,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 			},
 		},
 	}
-	proc, err := c.r.opts.Backends[rec.Backend].Start(context.Background(), spec)
+	proc, err := c.startBackend(spec)
 	if c.spawning {
 		c.spawning = false
 		// The spawn settled: its row, written below with the process on
@@ -2407,8 +2422,8 @@ func (c *conv) recoveryFailed(reason string) {
 }
 
 func (c *conv) probeWorkerRecovery() {
-	p, ok := c.proc.(*piProcess)
-	if !ok {
+	p := controlsFor(c.proc).recovery
+	if p == nil {
 		c.recoveryFailed("the held process cannot reconcile RPC messages")
 		return
 	}
@@ -2451,8 +2466,8 @@ func (c *conv) probeWorkerRecovery() {
 // never sends. The ask runs off the loop, whose events it may wait behind;
 // its answer comes back to the loop (wrapProbed).
 func (c *conv) probeWrapHold() {
-	tp, ok := c.proc.(turnProber)
-	if !ok {
+	tp := controlsFor(c.proc).turns
+	if tp == nil {
 		return
 	}
 	proc := c.proc
@@ -2893,8 +2908,8 @@ func (c *conv) answerApproval(id string, allow bool, message string) error {
 			req = &a
 		}
 	}
-	answerer, ok := c.proc.(approvalAnswerer)
-	if req == nil || c.proc == nil || !ok {
+	answerer := controlsFor(c.proc).approval
+	if req == nil || answerer == nil {
 		return conflict("that permission prompt is not waiting: it was answered, withdrawn, or its process ended")
 	}
 	c.dropApproval(id, false)
@@ -3141,14 +3156,15 @@ func (c *conv) applySettings() {
 	}
 	rec := c.record()
 	restart := false
-	if model && c.proc.SetModel(rec.Model) != nil {
+	controls := controlsFor(c.proc)
+	if model && controls.SetModel(rec.Model) != nil {
 		restart = true
 	}
-	if effort && !restart && c.proc.SetEffort(rec.Effort) != nil {
+	if effort && !restart && controls.SetEffort(rec.Effort) != nil {
 		restart = true
 	}
 	if mode && !restart {
-		if ms, ok := c.proc.(modeSetter); !ok || ms.SetPermissionMode(rec.PermissionMode) != nil {
+		if controls.setPermissionMode(rec.PermissionMode) != nil {
 			restart = true
 		}
 	}

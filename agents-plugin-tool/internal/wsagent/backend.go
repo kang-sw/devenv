@@ -171,6 +171,68 @@ type turnProber interface {
 	TurnRunning() (bool, error)
 }
 
+// workerRecoverer reconciles a worker's saved messages after a replay gap.
+// This is separate from turnProber: knowing a harness is idle alone cannot
+// recover a child's final reply or which steered messages it took.
+type workerRecoverer interface {
+	turnProber
+	recoveryReply(startedAt int64) (message, turnErr string, taken []string, err error)
+}
+
+// processControls is the runner's control boundary for one launched process.
+// Nil optional controls are unavailable; required Process controls still
+// decide support from their arguments (notably Pi model/effort changes).
+// It owns no input queue or event reader: delivery stays in the conv loop.
+type processControls struct {
+	Process
+	approval approvalAnswerer
+	mode     modeSetter
+	mcp      mcpController
+	steer    steerer
+	reports  reportSteerer
+	commands commandRunner
+	turns    turnProber
+	recovery workerRecoverer
+}
+
+// processControlProvider narrows a method set when support depends on how
+// the process was launched, rather than just which methods its type has.
+type processControlProvider interface {
+	processControls() processControls
+}
+
+func controlsFor(proc Process) processControls {
+	if provider, ok := proc.(processControlProvider); ok {
+		return provider.processControls()
+	}
+	// Optional interfaces remain the extension point for other Process
+	// implementations, including isolated test processes.
+	c := processControls{Process: proc}
+	c.approval, _ = proc.(approvalAnswerer)
+	c.mode, _ = proc.(modeSetter)
+	c.mcp, _ = proc.(mcpController)
+	c.steer, _ = proc.(steerer)
+	c.reports, _ = proc.(reportSteerer)
+	c.commands, _ = proc.(commandRunner)
+	c.turns, _ = proc.(turnProber)
+	c.recovery, _ = proc.(workerRecoverer)
+	return c
+}
+
+func (c processControls) runCommand(cmd wsinbox.Command) error {
+	if c.commands != nil {
+		return c.commands.RunCommand(cmd)
+	}
+	return c.Send(cmd.Line())
+}
+
+func (c processControls) setPermissionMode(mode string) error {
+	if c.mode == nil {
+		return ErrUnsupported
+	}
+	return c.mode.SetPermissionMode(mode)
+}
+
 // ErrUnsupported is a Process's answer to a control it has no in-stream
 // form of.
 var ErrUnsupported = errors.New("not supported in-stream")
