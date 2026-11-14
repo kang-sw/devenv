@@ -657,6 +657,7 @@ type piMapper struct {
 
 	messages    int
 	turnErr     string
+	turnReason  string
 	lastStatsAt int64
 	// Receipt-time streaming span, excluding request and tool latency. A
 	// missing/burst-flushed stream has no usable rate.
@@ -683,6 +684,7 @@ type piLine struct {
 	Result  json.RawMessage `json:"result"`
 	IsError bool            `json:"isError"`
 	Reason  string          `json:"reason"`
+	Aborted bool            `json:"aborted"`
 	Method  string          `json:"method"`
 	// WidgetKey and WidgetLines are a setWidget request's. The lines stay
 	// raw so a widget of another shape cannot fail the line's decode.
@@ -841,8 +843,9 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 			replies.send(piGetCommands)
 		}
 		err := m.turnErr
-		if m.aborted.Load() {
+		if m.aborted.Load() || l.Aborted {
 			err = ""
+			m.turnReason = wslive.TurnAborted
 		}
 		return m.endTurn(now, err)
 	case "extension_ui_request":
@@ -853,7 +856,13 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 			replies.send(map[string]any{"type": "extension_ui_response", "id": l.ID, "cancelled": true})
 		case "setWidget":
 			if l.WidgetKey == piEventsWidgetKey && m.spec.Lead != nil {
-				return piHostedEvents(l.WidgetLines)
+				out := piHostedEvents(l.WidgetLines)
+				if len(line)+1 > wslive.SummaryFrameBytes {
+					kept := out[:0]
+					for _, ev := range out { if ev.ReasoningSummary == nil { kept = append(kept, ev) } }
+					out = kept
+				}
+				return out
 			}
 			if l.WidgetKey == piAgentsWidgetKey {
 				return piAgentEvents(l.WidgetLines)
@@ -978,8 +987,9 @@ func (m *piMapper) endTurn(now int64, turnErr string) []Event {
 	if ev := m.batches.finish(now, true); ev != nil {
 		out = append(out, *ev)
 	}
-	m.turnErr = ""
-	return append(out, Event{TurnEnd: true, TurnError: turnErr})
+	reason := m.turnReason
+	m.turnErr, m.turnReason = "", ""
+	return append(out, Event{TurnEnd: true, TurnError: turnErr, TurnReason: reason})
 }
 
 func (m *piMapper) message(raw json.RawMessage, now int64) []Event {
@@ -1015,7 +1025,12 @@ func (m *piMapper) message(raw json.RawMessage, now int64) []Event {
 		m.outputStartedAt = 0
 		m.messages++
 		group := strconv.Itoa(m.messages)
-		m.turnErr = ""
+		m.turnErr, m.turnReason = "", ""
+		switch msg.StopReason {
+		case "aborted": m.turnReason = wslive.TurnAborted
+		case "error": m.turnReason = "error"
+		case "length": m.turnReason = "incomplete"
+		}
 		if msg.StopReason == "error" {
 			m.turnErr = strings.TrimSpace(msg.ErrorMessage)
 			if m.turnErr == "" {

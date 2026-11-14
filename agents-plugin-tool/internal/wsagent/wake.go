@@ -164,6 +164,12 @@ func piHostedEvents(raw json.RawMessage) []Event {
 				}
 				out = append(out, wakeEvent(ev.Cause, ev.Source, caption, ev.Text))
 			}
+		case wslive.KindAgent:
+			// Construct a fresh internal event. Every unrelated wire field is
+			// ignored: the widget owns no turn/reset/batch/key authority.
+			if len(lines) == 1 && ev.ReasoningSummary != nil && wslive.ValidateReasoningSummary(ev.ReasoningSummary) == nil {
+				out = append(out, Event{ReasoningSummary: ev.ReasoningSummary})
+			}
 		case wslive.KindStatus:
 			if ev.Background != nil && ev.Monitors != nil && *ev.Background >= 0 && *ev.Monitors >= 0 {
 				n := *ev.Background + *ev.Monitors

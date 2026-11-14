@@ -345,6 +345,11 @@ type liveWriter struct {
 	log io.Writer
 	// beforeSnapshot refreshes daemon-owned rows in this writer's loop.
 	beforeSnapshot func()
+	owner func() (func(), bool)
+	wake func()
+	// Only an observed holder agent_start supplies this real identity.
+	summarySource string
+	summaryNaturalEnd bool
 }
 
 // newLiveWriter starts from the finished subagents of the snapshot an
@@ -371,8 +376,14 @@ func newLiveWriter(dir, key, adapter string, now func() time.Time, log io.Writer
 // apply applies ev and writes what it changed; it reports whether anything
 // was written.
 func (w *liveWriter) apply(ev wslive.Event) bool {
-	res, err := w.st.Apply(ev, w.now().UnixMilli())
-	return w.write(res, err, ev.Kind)
+	var res wslive.Result
+	var err error
+	if ev.ReasoningSummary != nil || (ev.Kind == wslive.KindTurnEnd && w.st.Snapshot(w.now().UnixMilli()).Lead.ReasoningSummary != nil) {
+		res, err = w.applySummary(ev)
+	} else { res, err = w.st.Apply(ev, w.now().UnixMilli()) }
+	changed := w.write(res, err, ev.Kind)
+	if w.owner != nil { w.retrySummaries() }
+	return changed
 }
 
 // applyQuiet applies a replayed event to the state alone: its ring entries
@@ -420,7 +431,7 @@ func (w *liveWriter) write(res wslive.Result, err error, kind string) bool {
 		return false
 	}
 	if len(res.Ring) > 0 {
-		if err := wslive.AppendRing(wslive.RingDir(w.dir), res.Ring); err != nil {
+		if err := w.withOwner(func() error { return wslive.AppendRing(wslive.RingDir(w.dir), res.Ring) }); err != nil {
 			fmt.Fprintf(w.log, "agent %s: ring write: %v\n", w.st.ReplyID(), err)
 		}
 	}
@@ -454,7 +465,7 @@ func (w *liveWriter) writeSnapshot() {
 	}
 	raw, err := json.Marshal(w.st.Snapshot(w.now().UnixMilli()))
 	if err == nil {
-		err = writeFileAtomic(wslive.SnapshotPath(w.dir), raw, 0o644)
+		err = w.withOwner(func() error { return writeFileAtomic(wslive.SnapshotPath(w.dir), raw, 0o644) })
 	}
 	if err != nil {
 		fmt.Fprintf(w.log, "agent %s: snapshot write: %v\n", w.st.ReplyID(), err)

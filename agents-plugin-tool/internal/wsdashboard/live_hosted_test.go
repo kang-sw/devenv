@@ -100,6 +100,24 @@ func TestHostedSlotRendersLiveOnly(t *testing.T) {
 	}
 }
 
+func TestHostedSlotOwnerFencesActualGeneration(t *testing.T) {
+	f := startPageFixture(t)
+	dir := SessionDir(f.dir, "livesession")
+	first, _ := f.d.OpenHostedSlot(dir)
+	owner := first.(LiveSlotOwner)
+	release, ok := owner.LockOwner()
+	if !ok { t.Fatal("actual owner not admitted") }
+	taken := make(chan HostedSlot, 1)
+	go func() { second, _ := f.d.OpenHostedSlot(dir); taken <- second }()
+	select { case <-taken: t.Fatal("takeover bypassed an active mutation fence"); default: }
+	release()
+	second := <-taken
+	if release, ok := owner.LockOwner(); ok { release(); t.Fatal("retired generation may still mutate/write ring") }
+	if release, ok := second.(LiveSlotOwner).LockOwner(); !ok { t.Fatal("new generation not admitted") } else { release() }
+	second.Close()
+	if release, ok := second.(LiveSlotOwner).LockOwner(); ok { release(); t.Fatal("closed generation admitted") }
+}
+
 // TestHostedSlotTakeover pins slot ownership: a slot opened later for the
 // same session takes the copy over, and the earlier slot's publish and
 // close no longer touch it.

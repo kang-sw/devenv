@@ -316,7 +316,10 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 		if st.turnStartedAt > 0 {
 			duration := max(at-st.turnStartedAt, 0)
 			done, failed := st.lead.totals()
-			res.Ring = append(res.Ring, RingEntry{Kind: RingTurn, Origin: st.turnOrigin, WakeTurn: st.turnWake, Done: done, Failed: failed, DurationMs: duration, Reason: ev.Reason, SummaryHistory: st.finishSummary()})
+			// Preserve aggregate clipping without extending summaryHistory's
+			// selected v/commit/requests shape or changing provider status.
+			truncated := st.summary.current != nil && st.summary.current.Truncated
+			res.Ring = append(res.Ring, RingEntry{Kind: RingTurn, Origin: st.turnOrigin, WakeTurn: st.turnWake, Done: done, Failed: failed, DurationMs: duration, Reason: ev.Reason, Truncated: truncated, SummaryHistory: st.finishSummary(ev.Reason)})
 			st.previousTurnMs = duration
 		}
 		st.turnStartedAt, st.turnOrigin = 0, ""

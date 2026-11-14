@@ -61,6 +61,9 @@ const ringStampLayout = "20060102T150405.000000000Z"
 
 // RingEntry is one ring file.
 type RingEntry struct {
+	// Reserved only by the optional receiver path, so freezing a natural
+	// turn before writing its preceding reply/tools cannot reorder the ring.
+	ringStamp time.Time
 	// Kind is user, reply, turn, mail, compact, tools, card, ui, command, or
 	// notice.
 	Kind string `json:"kind"`
@@ -74,6 +77,8 @@ type RingEntry struct {
 	WakeTurn bool   `json:"wakeTurn,omitempty"`
 	// Text is a user message, a lead reply, or a failed compaction's error.
 	Text      string `json:"text,omitempty"`
+	// Truncated qualifies retained text; on a summary-bearing natural turn
+	// it carries aggregate clipping, separately from provider terminal facts.
 	Truncated bool   `json:"truncated,omitempty"`
 	// Done, Failed, and DurationMs summarize a turn: its tool calls and its
 	// length.
@@ -191,8 +196,17 @@ func writeRingEntry(dir string, entry RingEntry) error {
 	if _, err := rand.Read(suffix[:]); err != nil {
 		return err
 	}
-	name := nextRingStamp().Format(ringStampLayout) + "-" + hex.EncodeToString(suffix[:]) + ".json"
+	stamp := entry.ringStamp
+	if stamp.IsZero() { stamp = nextRingStamp() }
+	name := stamp.Format(ringStampLayout) + "-" + hex.EncodeToString(suffix[:]) + ".json"
 	return writeRingRaw(dir, name, raw)
+}
+
+// PrepareSummaryRing reserves existing ring IDs in reducer order before a
+// receiver splits the real turn candidate from its ordinary reply/tool writes.
+// Legacy paths never call it and retain their existing scheduling.
+func PrepareSummaryRing(entries []RingEntry) {
+	for i := range entries { if entries[i].ringStamp.IsZero() { entries[i].ringStamp = nextRingStamp() } }
 }
 
 func writeRingRaw(dir, name string, raw []byte) error {

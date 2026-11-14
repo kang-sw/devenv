@@ -176,6 +176,10 @@ type Runner struct {
 	quit   chan struct{}
 	wg     sync.WaitGroup
 	once   sync.Once
+	// Separate from mu: held through summary mutation/write fencing without
+	// blocking the runner's ordinary List/Get or spawn snapshot reads.
+	summaryMu sync.Mutex
+	summaryOwners map[string]*conv
 	// closedRows caches immutable closed states under mu, until reopened.
 	// Handed-off snapshots still belong to a terminal and are not cached.
 	closedRows map[string]State
@@ -413,6 +417,15 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		mailC:      make(chan struct{}, 1),
 		done:       make(chan struct{}),
 		settleC:    make(chan struct{}),
+	}
+	if rec.Lead {
+		r.summaryMu.Lock()
+		if r.summaryOwners == nil { r.summaryOwners = map[string]*conv{} }
+		r.summaryOwners[rec.ReplyID] = c
+		r.summaryMu.Unlock()
+		c.live.owner = c.lockSummaryWriter
+		c.live.wake = func() { r.notify(rec.ReplyID, rec.Root) }
+		c.live.summaryStore().SetWake(c.live.wake)
 	}
 	c.live.beforeSnapshot = c.seedSpawnRows
 	if usage := c.live.st.Snapshot(r.opts.Now().UnixMilli()).Usage; usage != nil && usage.Context != nil && usage.Context.Tokens != nil {
@@ -1171,6 +1184,8 @@ type conv struct {
 	dir   string
 	inbox string
 	live  *liveWriter
+	summaryGap bool
+	summaryReason string
 	reqs  chan func()
 	// inboxC (one slot) tells the loop the inbox changed (signalInbox).
 	inboxC chan struct{}
@@ -2564,6 +2579,7 @@ func (c *conv) handle(ev Event) {
 	case ev.ReplayDone:
 		c.replayDone(ev.ReplayLost)
 	case ev.ReplayGap:
+		c.summaryGap = true
 		if c.replaying {
 			c.replayGap, c.replayBoundary = true, false
 		}
@@ -2571,6 +2587,8 @@ func (c *conv) handle(ev Event) {
 		if ev.SessionID != c.rec.SessionID {
 			c.update(func(rec *Record) { rec.SessionID = ev.SessionID })
 		}
+	case ev.ReasoningSummary != nil:
+		c.summaryProjection(ev, quiet)
 	case ev.Live != nil:
 		if !quiet && ev.Live.Kind == wslive.KindCompact && ev.Live.Phase == wslive.CompactStart {
 			// The requested compaction started: its own turn holds kick
@@ -2607,6 +2625,7 @@ func (c *conv) handle(ev Event) {
 		fmt.Fprintf(c.r.opts.Log, "agent %s: %v\n", c.rec.ReplyID, ev.Fatal)
 		c.stopProcess("")
 	case ev.TurnStart:
+		c.summaryStart(ev)
 		if quiet && c.rec.Parent != nil && ev.Seq <= c.rec.TurnStartSeq {
 			return
 		}
@@ -2623,7 +2642,11 @@ func (c *conv) handle(ev Event) {
 			c.holdForLever(ev.CompactRequested && !c.interruptAsked)
 			c.interruptAsked = false
 		}
+		c.summaryReason = ev.TurnReason
+		c.live.summaryNaturalEnd = true
 		c.endTurn(ev.TurnError, quiet)
+		c.live.summaryNaturalEnd = false
+		c.live.summarySource, c.summaryReason, c.summaryGap = "", "", false
 	case ev.Approval != nil:
 		c.addApproval(*ev.Approval, quiet)
 	case ev.ApprovalDone != "":
@@ -2737,7 +2760,7 @@ func (c *conv) endTurn(turnErr string, quiet bool) {
 	ran := c.turn
 	if c.turn {
 		c.setStatus(func() { c.turn = false })
-		c.apply(wslive.Event{Kind: wslive.KindTurnEnd}, quiet)
+		c.apply(wslive.Event{Kind: wslive.KindTurnEnd, Reason: c.summaryReason}, quiet)
 	}
 	c.turnSettled(turnErr, quiet)
 	if c.replaying && c.rec.Parent != nil {

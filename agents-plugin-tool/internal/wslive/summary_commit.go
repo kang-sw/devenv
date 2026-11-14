@@ -72,7 +72,9 @@ func (s *SummaryCommits) Register(entry RingEntry) error {
 	}
 	if len(s.pending)>=summaryPendingCap { return fmt.Errorf("reasoning summary pending capacity exhausted") }
 	// The deterministic commit suffix uses the existing ring-name grammar.
-	name:=nextRingStamp().Format(ringStampLayout)+"-"+commit+".json"
+	stamp:=entry.ringStamp
+	if stamp.IsZero() { stamp=nextRingStamp() }
+	name:=stamp.Format(ringStampLayout)+"-"+commit+".json"
 	s.pending=append(s.pending,&frozenSummaryTurn{commit:commit,name:name,raw:append([]byte(nil),raw...)})
 	s.scheduleLocked()
 	return nil

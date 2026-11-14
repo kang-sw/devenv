@@ -47,6 +47,13 @@ type HostedSlot interface {
 	Close()
 }
 
+// LiveSlotOwner is optional: only a daemon-owned generation can admit summary
+// mutations and ring writes. Publish suppression alone cannot fence disk writes.
+// The release must run before Publish, RingAppended, or Close.
+type LiveSlotOwner interface {
+	LockOwner() (release func(), owned bool)
+}
+
 // LiveSnapshotHolder is an optional interface of a SessionSource that reads
 // snapshots through a cache of its own (its change detector): the daemon
 // hands it every hosted copy as well, so its fingerprint and
@@ -123,6 +130,15 @@ type daemonLiveSlot struct {
 	replyID string
 	id      uint64
 	closed  atomic.Bool
+}
+
+func (s *daemonLiveSlot) LockOwner() (func(), bool) {
+	s.d.live.mu.Lock()
+	if s.closed.Load() || s.d.live.owners[s.replyID] != s.id {
+		s.d.live.mu.Unlock()
+		return nil, false
+	}
+	return s.d.live.mu.Unlock, true
 }
 
 func (s *daemonLiveSlot) Publish(snap wslive.Snapshot) {

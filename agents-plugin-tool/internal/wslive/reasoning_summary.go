@@ -176,13 +176,23 @@ func SummaryCommit(replyID, source string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func (st *State) finishSummary() *SummaryHistory {
+func (st *State) finishSummary(reason string) *SummaryHistory {
 	s:=st.summary.current
 	if s==nil { return nil }
 	st.summary.seen[s.Producer]=summaryWatermark{turn:s.Turn,revision:s.Revision,closed:true}
 	st.summary.current=nil
 	st.summary.producer=""
-	// A streaming prefix cannot be called complete without an observed fact.
-	// The adapter supplies actual terminal facts; absent facts remain streaming.
-	return &SummaryHistory{V:1,Commit:SummaryCommit(st.replyID,fmt.Sprintf("%s/%d",s.Producer,s.Turn)),Requests:cloneSummary(s).Requests}
+	requests:=cloneSummary(s).Requests
+	terminal:=""
+	switch reason { case TurnAborted: terminal=SummaryAborted; case "error", "failed": terminal=SummaryFailed; case "length", "incomplete": terminal=SummaryIncomplete }
+	if terminal!="" {
+		for i:=range requests {
+			if requests[i].Status!=SummaryStreaming { continue }
+			requests[i].Status=terminal
+			for j:=range requests[i].Parts { if requests[i].Parts[j].Status==SummaryStreaming { requests[i].Parts[j].Status=terminal } }
+		}
+	}
+	// A successful outer settlement alone never fabricates provider completion.
+	// Only actual error/abort/length facts can terminalize an unfinished prefix.
+	return &SummaryHistory{V:1,Commit:SummaryCommit(st.replyID,fmt.Sprintf("%s/%d",s.Producer,s.Turn)),Requests:requests}
 }
