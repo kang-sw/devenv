@@ -603,7 +603,14 @@
       "registered_at": "2026-11-14T08:45:52Z"
     },
     "261114-feat-ws-live-reasoning-summary": {
-      "registered_at": "2026-11-14T11:47:01Z"
+      "registered_at": "2026-11-14T11:47:01Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "feat/live-reasoning-summary-675",
+        "phase": "active",
+        "touched_at": "2026-11-14T13:46:16Z"
+      }
     },
     "261114-feat-ws-prompt-refusal-conversation-notice": {
       "registered_at": "2026-11-14T12:34:19Z"
