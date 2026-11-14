@@ -446,6 +446,9 @@
     "261114-bug-pi-fork-descendant-key-authority-rejected": {
       "registered_at": "2026-11-14T06:06:07Z"
     },
+    "261114-bug-pi-hosted-key-blocks-lead-worktree-context": {
+      "registered_at": "2026-11-14T11:59:11Z"
+    },
     "261114-bug-ws-dashboard-conversation-send-follow-bottom": {
       "registered_at": "2026-11-14T11:36:43Z"
     },
