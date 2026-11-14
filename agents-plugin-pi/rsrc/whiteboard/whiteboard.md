@@ -23,6 +23,11 @@ Workers and subagents do not use the board.
   statuses are available for reuse or patching. Default discovery is compact
   topic metadata; neither form implicitly retrieves bodies.
 
+## Taking over another session's board
+
+- Only after the source session stops writing, preserve your own board by renaming `ai-docs/whiteboards/<own stem>` to a backup name rather than deleting it, then copy the source session's board folder into that path. Your stem is the last path segment of the `full:` URL printed by `{{.McpNamespace}}/whiteboard.update` (the parent folder of `index.html` for a file path).
+- Call `{{.McpNamespace}}/whiteboard.update` once to regenerate the HTML. Inbox attachments, mailbox history, and agenda do not come along.
+
 ## Commands
 
 Write authored board text in the conversation language, the `workflow.lang` value when set; IDs, class and status tags, `ok`/`no` answers, and option letters stay as written.

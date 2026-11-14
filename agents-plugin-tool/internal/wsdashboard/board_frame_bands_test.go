@@ -1,6 +1,10 @@
 package wsdashboard
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 // TestBoardFrameBands pins the viewport bands (dashboard.js frameNear,
 // bandBoard, bandTopic, topicBand, unmountFrames, unmountFrame): where the
@@ -213,4 +217,21 @@ grow(docAbove, 200); grow(docAbove, 673);
 check("an above-view mount compensates the document by one frame height", html.scrollTop === 1473 && bcol.scrollTop === 950);
 if (bad.length) console.log(bad.join("\n"));
 `)
+}
+
+// TestBoardTopicsDoNotSkipRendering pins owner (627)=a: board topics no
+// longer take content-visibility, so no stylesheet rule may skip a topic's
+// rendering. Overview's `content-visibility: visible` overrides
+// (261114-feat-ws-dashboard-board-toolbar-overview) are harmless and stay.
+func TestBoardTopicsDoNotSkipRendering(t *testing.T) {
+	css, err := os.ReadFile("assets/dashboard.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(css)
+	for _, banned := range []string{"content-visibility: auto", "content-visibility: hidden", "data-wbcv"} {
+		if strings.Contains(s, banned) {
+			t.Errorf("dashboard.css still holds %q; board topics must not skip rendering (627)", banned)
+		}
+	}
 }
