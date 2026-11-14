@@ -559,7 +559,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "feat/content-change-hover-677",
         "phase": "active",
-        "touched_at": "2026-11-14T13:30:30Z"
+        "touched_at": "2026-11-14T13:31:18Z",
+        "impl": {
+          "branch": "impl/feat/content-change-hover-677/awoke-stir-icon"
+        }
       }
     },
     "261114-feat-ws-conversation-audit-event-store": {
