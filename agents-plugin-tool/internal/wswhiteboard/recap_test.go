@@ -65,7 +65,7 @@ func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 		if recap < 0 || (layout == LayoutFull && (recap > doc || doc > items)) || (layout == LayoutEmbed && recap > items) {
 			t.Fatalf("%s: recap %d, doc %d, items %d", name, recap, doc, items)
 		}
-		wantAll(t, block, `<div class="rtext md"><strong>READY</strong> · see <img`, `shot.png`, `<u>kept</u>`, `datetime="2026-11-04T09:00:00Z"`)
+		wantAll(t, block, `<div class="rtext md" title="**READY**`, `"><strong>READY</strong> · see <img`, `shot.png`, `<u>kept</u>`, `datetime="2026-11-04T09:00:00Z"`)
 		wantNone(t, block, "<script>alert")
 		shut := recapBlock(t, out, "shut")
 		fold := docTag.FindStringIndex(shut)
@@ -73,7 +73,7 @@ func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 			t.Fatalf("%s: closed legacy recap is not folded: %s", name, shut)
 		}
 		wantAll(t, shut, `<span class="tresult" title="how the topic ended">Shipped.</span>`)
-		wantAll(t, recapBlock(t, out, "lone"), `<div class="rtext md">only a recap</div>`)
+		wantAll(t, recapBlock(t, out, "lone"), `<div class="rtext md" title="only a recap">only a recap</div>`)
 	}
 }
 

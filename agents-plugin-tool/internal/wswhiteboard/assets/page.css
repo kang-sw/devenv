@@ -399,6 +399,8 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .trecap:last-child, .trecap:has(+ details.tdoc:not([open]):last-child) { margin-bottom: 10px; }
 /* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
 .trecap { contain: paint; }
+/* Clamp the rendered recap, never its stored text; hover titles keep it all reachable. */
+.trecap, .entry-recap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
 .trecap .rtext { display: inline; min-width: 0; overflow-wrap: anywhere; }
 .trecap .rtext > p:first-child { display: inline; }
 .trecap .rat { font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -407,7 +409,8 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
    text on the head's surface (no card), sharing the line with the check pill,
    which wraps under it when narrow; a hairline under the head ends it. */
 .tsub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 6px 12px; border-bottom: 1px solid var(--wb-line); }
-.tsub > .trecap { flex: 1 1 22em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
+/* Reserve four lines before and after sticking, including for a one-line recap. */
+.tsub > .trecap { flex: 1 1 22em; min-width: 0; height: 5.8em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
 .tsub > .trecap .rat { font-size: 10.5px; }
 .ckpill { flex: none; display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .ckbtn { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
@@ -708,8 +711,6 @@ details.panel .body { container-type: inline-size; }
    bar; the topic clips its sides): the card scrolling under a stuck bar
    showed through them. */
 .wb-rail .topic > .tophead.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
-/* A stuck head keeps its recap to two lines: the full recap would take most of a short viewport. */
-.wb-rail .topic > .tophead.wb-stuck .tsub > .trecap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 /* the book button stays at the card's top and scrolls away under a stuck head, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
 .wb-rail .topic.has-doc:has(> details.tdoc) > .tophead.wb-stuck > .tbar { padding-right: 12px; }
 /* The check pill of a stuck head lifts the topic's check list into the head
