@@ -28,6 +28,12 @@ At 07:23:22Z, EXEC 1 reported that the transcript-pointer tool for settled, quie
 
 The retained provenance is EXEC 1's transcript at `/Users/kang-sw/.cache/ws@kang-sw-devenv/dashboard/sessions/suspectcaboosetalonunretired/pi/session.jsonl`, containing the executor's `Dependency-prep result:` and `Terminal report:` messages and approved command ID `call_ad6ecf3f229c483482fc8057590014cb|fc_0c1eec8117dc4b60016af80bd4a48887d09fd5399ac06d1360`. No further history probe, harness investigation, or repair was authorized by recording this observation.
 
+### Fourth continuation occurrence — EXEC 1, 2026-11-14
+
+After MAIN's 08:39 direction, EXEC 1's root `ws-agent-send` to settled operational executor `2dacc5af-1cc8-4739-9ce0-dcb8e390fa29` returned exactly `ws-pi-agent: owned session home is unavailable during resume`. The requested continuation was text-only transaction command preparation, not execution. No retry, probe or foreign-key bypass occurred, and no command, allocation or runtime action ran.
+
+EXEC 1 instead successfully sent command-text preparation to the same retained implementer `09ac01b1`. This is another reported continuation occurrence, not evidence of a proven common cause. Recording it adds no diagnosis or repair scope.
+
 ## Constraints
 
 - Preserve the original session and ownership records before diagnosing cleanup or lifetime behavior.
