@@ -43,16 +43,15 @@ import (
 // The route writes the new ones into the inbox's attachments directory in the
 // same request that holds the message, and the held entry lists their
 // absolute paths and numbers; the session receives each as an
-// "Image #N: <path>" line it opens with its own read tool. A send merged into
-// a held entry has its images and markers renumbered to continue the held
-// ones (wsinbox.Merge), under d.inboxMu, so the page never numbers across
-// sends. A steer rewrites the entry whole, so a steered entry keeps its image
-// paths and numbers.
+// "Image #N: <path>" line it opens with its own read tool. Every send is its
+// own held entry (wsinbox.Send never merges), so an entry's numbers are the
+// ones its send's text names. A steer rewrites the entry whole, so a steered
+// entry keeps its image paths and numbers.
 //
 // A message may instead be a slash command the composer picked: the body's
 // command and args fields, never text the daemon parses. It is held as its
-// own command entry (wsinbox.Command), which no send merges with and steer
-// refuses, and is offered only for a session whose adapter reports a command
+// own command entry (wsinbox.Command), which steer refuses, and is offered
+// only for a session whose adapter reports a command
 // list in its snapshot, so an adapter that cannot run one never drains one.
 // A cancel or interrupt answers a command entry with its command, so the
 // page puts it back as a command selection.
@@ -362,9 +361,9 @@ func decodeImage(up imageUpload) (decodedImage, int, string) {
 
 // sendMessage holds one checked message in the inbox at dir; d.inboxMu is
 // held. It resolves the references, sweeps old unreferenced attachments
-// other than those, checks the merged entry's image cap before writing any
-// file, writes the new images, and sends. A refusal after files were written
-// deletes them.
+// other than those, writes the new images, and sends. The image cap is the
+// message's own (messageWrite checks it), since a send never joins a held
+// entry. A refusal after files were written deletes them.
 func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedImage, now time.Time) (int, any) {
 	attachDir := wsinbox.AttachmentsDir(dir)
 	if len(req.RefNums) != 0 && len(req.RefNums) != len(req.Refs) {
@@ -394,18 +393,6 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 	for _, img := range images {
 		nums = append(nums, img.n)
 	}
-	if count := len(paths) + len(images); count > 0 {
-		// A send merges into the newest unsteered held entry, so the cap
-		// applies to the two together; a steered entry takes no merge, so
-		// its images do not count. A drain racing this can only make the
-		// count over-strict.
-		if target, ok, _ := wsinbox.MergeTarget(dir); ok {
-			count += len(target.Entry.Images)
-		}
-		if count > wsinbox.MaxImages {
-			return http.StatusRequestEntityTooLarge, fmt.Sprintf("the held message would carry %d images: a message holds at most %d", count, wsinbox.MaxImages)
-		}
-	}
 	written, err := writeAttachments(attachDir, images)
 	if err != nil {
 		fmt.Fprintf(d.log, "dashboard: write attachments: %v\n", err)
@@ -421,6 +408,7 @@ func (d *Daemon) sendMessage(dir string, req messageRequest, images []decodedIma
 		fmt.Fprintf(d.log, "dashboard: inbox send: %v\n", err)
 		return http.StatusInternalServerError, "could not hold the message"
 	}
+	// merged is always false now; the field stays for callers that read it.
 	return http.StatusOK, map[string]any{"id": wsinbox.Record{Name: name}.ID(), "merged": merged}
 }
 

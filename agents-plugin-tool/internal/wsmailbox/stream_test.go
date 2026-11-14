@@ -57,8 +57,16 @@ func TestStreamBoardSameCountReplacementAndSteerFilter(t *testing.T) {
 			clock.onSleep = func(time.Duration) {
 				switch clock.sleeps {
 				case 1:
-					// Merges under a fresh filename, still one pending entry.
-					sendBoardMessage(t, inbox, "merged")
+					// Replaced under a fresh filename, still one pending
+					// entry: the held message cancelled and sent again.
+					names, err := wsinbox.MessageNames(inbox)
+					if err != nil || len(names) != 1 {
+						t.Fatalf("names = %v, %v", names, err)
+					}
+					if _, err := wsinbox.Cancel(inbox, names[0]); err != nil {
+						t.Fatal(err)
+					}
+					sendBoardMessage(t, inbox, "replaced")
 				case 2:
 					names, err := wsinbox.MessageNames(inbox)
 					if err != nil || len(names) != 1 {
