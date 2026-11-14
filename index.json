@@ -754,6 +754,9 @@
     "261115-bug-ws-selection-note-repeated-click-chip-count": {
       "registered_at": "2026-11-14T15:49:56Z"
     },
+    "261115-bug-ws-shared-card-browser-harness-bounded-readiness": {
+      "registered_at": "2026-11-14T17:50:49Z"
+    },
     "261115-feat-ws-hosted-codex-adapter-contract": {
       "registered_at": "2026-11-14T15:20:26Z"
     },
