@@ -16,13 +16,14 @@ import (
 
 // The session rail's layout: the order of each worktree group's sessions,
 // the depth-1 session tree (a parent's children), the starred sessions, and
-// the order of the workspaces, kept by the daemon so every browser shows
+// the order of the workspaces and their worktree groups, kept by the daemon so every browser shows
 // the same rail. It is one JSON file in the daemon directory, beside the
 // registry:
 //
 //	{"schema_version": 1,
 //	 "workspace_order": [<workspace path>...],
 //	 "workspaces": {"<workspace path>": {
+//	   "worktree_order": [<worktree path>...], optional group sequence
 //	   "order": [<reply-id>...],              top-level rows, every group's
 //	   "children": {"<parent>": [<reply-id>...]},
 //	   "stars": [<reply-id>...]}}}
@@ -111,10 +112,11 @@ type railLayoutDoc struct {
 
 // railLayoutWS is one workspace's layout.
 type railLayoutWS struct {
-	Order    []string
-	Children map[string][]string
-	Stars    []string
-	extra    map[string]json.RawMessage
+	WorktreeOrder []string
+	Order         []string
+	Children      map[string][]string
+	Stars         []string
+	extra         map[string]json.RawMessage
 }
 
 // takeJSON decodes m[key] into into and removes it from m; a missing key
@@ -175,6 +177,9 @@ func (w *railLayoutWS) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	*w = railLayoutWS{}
+	if err := takeJSON(m, "worktree_order", &w.WorktreeOrder); err != nil {
+		return err
+	}
 	if err := takeJSON(m, "order", &w.Order); err != nil {
 		return err
 	}
@@ -194,6 +199,9 @@ func (w railLayoutWS) MarshalJSON() ([]byte, error) {
 	m := map[string]any{}
 	for k, v := range w.extra {
 		m[k] = v
+	}
+	if len(w.WorktreeOrder) > 0 {
+		m["worktree_order"] = w.WorktreeOrder
 	}
 	m["order"] = nonNilStrings(w.Order)
 	kids := map[string][]string{}
@@ -223,6 +231,7 @@ func (d *railLayoutDoc) normalize() {
 			delete(d.Workspaces, p)
 			continue
 		}
+		w.WorktreeOrder = cleanWorktreeOrder(w.WorktreeOrder)
 		w.Order, w.Stars = uniqueIDs(w.Order), uniqueIDs(w.Stars)
 		for parent, kids := range w.Children {
 			if kids = uniqueIDs(kids); parent == "" || len(kids) == 0 {
@@ -251,7 +260,7 @@ func uniqueIDs(ids []string) []string {
 func (d *railLayoutDoc) clone() *railLayoutDoc {
 	c := &railLayoutDoc{SchemaVersion: d.SchemaVersion, WorkspaceOrder: slices.Clone(d.WorkspaceOrder), extra: d.extra, Workspaces: map[string]*railLayoutWS{}}
 	for p, w := range d.Workspaces {
-		cw := &railLayoutWS{Order: slices.Clone(w.Order), Stars: slices.Clone(w.Stars), extra: w.extra}
+		cw := &railLayoutWS{WorktreeOrder: slices.Clone(w.WorktreeOrder), Order: slices.Clone(w.Order), Stars: slices.Clone(w.Stars), extra: w.extra}
 		if w.Children != nil {
 			cw.Children = map[string][]string{}
 			for parent, kids := range w.Children {
@@ -428,7 +437,7 @@ type railFact struct {
 	WS, Group string
 	Live      bool
 	// Pos is the row's place in its group as the rail lists it before the
-	// layout orders it: the live rows (newest registration first), then
+	// layout orders it: the live rows (oldest registration first), then
 	// the ended ones.
 	Pos int
 }
@@ -438,6 +447,9 @@ type railFacts struct {
 	rows map[string]railFact
 	// groups holds each group's reply-ids in Pos order.
 	groups map[string][]string
+	// worktrees is each repository's complete displayed group inventory in
+	// fallback order, including empty groups (not derivable from rows).
+	worktrees map[string][]string
 	// wsList is the listed workspaces in the order the rail lists them
 	// before the layout orders them; ws the same as a set.
 	wsList []string
@@ -446,7 +458,7 @@ type railFacts struct {
 
 // railFactsOf reads the facts off a rail view, as buildRailView built it.
 func railFactsOf(view RailView) railFacts {
-	f := railFacts{rows: map[string]railFact{}, groups: map[string][]string{}, ws: map[string]bool{}}
+	f := railFacts{rows: map[string]railFact{}, groups: map[string][]string{}, worktrees: map[string][]string{}, ws: map[string]bool{}}
 	add := func(ws, path string, live, ended []RailRow) {
 		group := ws + "\x00" + path
 		for _, list := range [][]RailRow{live, ended} {
@@ -464,6 +476,7 @@ func railFactsOf(view RailView) railFacts {
 			continue
 		}
 		for _, wt := range w.Worktrees {
+			f.worktrees[w.Path] = append(f.worktrees[w.Path], wt.Path)
 			add(w.Path, wt.Path, wt.Sessions, wt.Ended)
 		}
 	}
@@ -472,12 +485,13 @@ func railFactsOf(view RailView) railFacts {
 
 // railLayoutRequest is the layout route's body: an op and what it names.
 type railLayoutRequest struct {
-	Op     string `json:"op"`
-	RID    string `json:"rid,omitempty"`
-	Parent string `json:"parent,omitempty"`
-	Before string `json:"before,omitempty"`
-	After  string `json:"after,omitempty"`
-	Path   string `json:"path,omitempty"`
+	Op        string `json:"op"`
+	RID       string `json:"rid,omitempty"`
+	Parent    string `json:"parent,omitempty"`
+	Before    string `json:"before,omitempty"`
+	After     string `json:"after,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
 	// Order, Stars, and WSOrder are an import's: a browser's retired local
 	// session order, starred sessions, and workspace order.
 	Order   []string `json:"order,omitempty"`
@@ -578,9 +592,9 @@ func (s layoutScope) starOn(id string) bool {
 	return s.w != nil && slices.Contains(s.w.Stars, id) && !s.child(id)
 }
 
-// rank is a top-level row's place in the order: its own entry, -1 for none
-// (a row the order does not hold goes first: a new session on top). An
-// orphan without an entry of its own takes its ended parent's place when
+// rank is a top-level row's place in the order: its own entry, or the
+// tail for an unlisted ordinary live row. Ended rows keep their prior rank
+// and an orphan without an entry of its own takes its ended parent's place when
 // they share a group, else -2, the head of its own group. Once a placement
 // in its group stored the orphan where it shows (place), that entry ranks
 // it, so a row placed before or after the orphan stays on that side of it;
@@ -596,6 +610,9 @@ func (s layoutScope) rank(id string) int {
 			return -2
 		}
 		return slices.Index(s.w.Order, p)
+	}
+	if own < 0 && s.f.rows[id].Live && s.parent(id) == "" {
+		return len(s.w.Order)
 	}
 	return own
 }
@@ -717,6 +734,11 @@ func applyRailLayoutOp(doc *railLayoutDoc, req railLayoutRequest, f railFacts, l
 			return layoutInvalid
 		}
 		return layoutWSMove(doc, f, req.Path, ref, after)
+	case "wtmove":
+		if req.Workspace == "" || req.Path == "" || !given {
+			return layoutInvalid
+		}
+		return layoutWTMove(doc, f, req.Workspace, req.Path, ref, after)
 	case "import":
 		if !loaded {
 			return layoutRetry
@@ -919,7 +941,7 @@ func railLayoutEmpty(doc *railLayoutDoc) bool {
 		return false
 	}
 	for _, w := range doc.Workspaces {
-		if len(w.Order) > 0 || len(w.Stars) > 0 || len(w.Children) > 0 {
+		if len(w.WorktreeOrder) > 0 || len(w.Order) > 0 || len(w.Stars) > 0 || len(w.Children) > 0 {
 			return false
 		}
 	}
@@ -974,7 +996,7 @@ func pruneRailLayout(doc *railLayoutDoc, f railFacts) {
 				w.Children[p] = kids
 			}
 		}
-		if len(w.Order) == 0 && len(w.Stars) == 0 && len(w.Children) == 0 && len(w.extra) == 0 {
+		if len(w.WorktreeOrder) == 0 && len(w.Order) == 0 && len(w.Stars) == 0 && len(w.Children) == 0 && len(w.extra) == 0 {
 			delete(doc.Workspaces, path)
 		}
 	}
@@ -982,8 +1004,9 @@ func pruneRailLayout(doc *railLayoutDoc, f railFacts) {
 
 // orderRailView orders view, as buildRailView built it, by the layout doc
 // (f read off that same view): within each worktree group the starred units
-// first, then the layout's order, a row it does not hold first, then the
-// rail's own order (newest registration first). A live child of a live
+// first, then the layout's order, unlisted ordinary live rows at the tail
+// in registration order (oldest first). Orphans retain their established
+// ranks. A live child of a live
 // top-level parent leaves its own group's list for its parent's Children,
 // in the parent's children order, whatever group either is in; an
 // orphan, an ended child, and a child whose parent shows as a child itself
@@ -1010,6 +1033,13 @@ func orderRailView(view *RailView, doc *railLayoutDoc, f railFacts) {
 			groups[j] = railGroupRows{wt.Path, tag, &wt.Sessions, &wt.Ended}
 		}
 		s.orderTree(groups)
+		rank := map[string]int{}
+		for j, path := range railWTSeq(doc, f, w.Path) {
+			rank[path] = j
+		}
+		sort.SliceStable(w.Worktrees, func(i, j int) bool {
+			return rank[w.Worktrees[i].Path] < rank[w.Worktrees[j].Path]
+		})
 	}
 	rank := map[string]int{}
 	for i, p := range railWSSeq(doc, f) {

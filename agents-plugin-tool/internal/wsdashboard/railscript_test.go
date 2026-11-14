@@ -245,6 +245,7 @@ check("an attach crosses the stars, a reorder does not", [R.dropZone(F(ta), F(ts
 check("an attach crosses the worktrees, a reorder does not", [R.dropZone(F(ta), F(tw1), 0.5).op, R.dropZone(F(ta), F(tw1), 0.9)], [{ op: "attach", rid: "a", parent: "w1" }, { refusal: "group" }]);
 // a parent with children dragged: no middle zone, never onto its own children
 check("a dragged parent finds no child zone", [R.dropZone(F(tm), F(ta), 0.4), R.dropZone(F(tm), F(ta), 0.6).zone], [{ zone: "before", ref: "a", op: { op: "move", rid: "m", before: "a" } }, "after"]);
+check("a parent moves past an expanded parent as a unit", R.dropZone(F(tm), { rid: "other", ws: "/r", group: "/r", live: true, parent: "", kids: true, star: false, first: "otherKid" }, 0.6), { zone: "after", ref: "other", op: { op: "move", rid: "m", after: "other" } });
 check("a dragged parent's children are no target, nor itself", [R.dropZone(F(tm), F(tk1), 0.5), R.dropZone(F(tm), F(tm), 0.5)], [null, null]);
 check("a dragged parent among another's children is too deep", R.dropZone(F(tm), { rid: "x", ws: "/r", group: "/r", live: true, parent: "o", kids: false, star: false, first: "" }, 0.5), { refusal: "depth" });
 // cross-workspace, ended targets
@@ -266,6 +267,15 @@ check("drops that move", [R.dropNoop(ta, R.dropZone(F(ta), F(ts), 0.5)), R.dropN
 // dropRefusal reads a child's own group, not its parent's
 check("home lists", [R.homeRows(ta) === TG, R.homeRows(tk1) === TG, R.homeRows(tk2) === TH, R.homeRows(tf1) === tf1.parentNode], [true, true, true, true]);
 check("a child's own group", [R.dropRefusal(tk2, TH), R.dropRefusal(tk2, TG), R.dropRefusal(tk1, TG), R.dropRefusal(tk1, TH)], ["", "group", "", "group"]);
+// Worktree groups move as complete sibling subtrees. Keys are qualified
+// by workspace even if two workspaces happen to expose the same path.
+var wtkey = R.itemKey(TU);
+check("a group key is workspace-qualified", wtkey, { cls: "rwt", attr: "data-g", val: "/r/wt", ws: "/r" });
+check("a group is found after a swap", R.refind(TL, wtkey) === TU, true);
+check("a group never refinds in a different workspace", R.refind(TL, { cls: "rwt", attr: "data-g", val: "/r/wt", ws: "/f" }), null);
+check("groups move as whole sibling units", [R.drop(TU, TT, false), TB.children[0] === TU, TU.children[0] === TH], [true, true, true]);
+check("group drop refusals", [R.dropRefusal(TU, tf1), R.dropRefusal(TU, TT), R.drop(TU, TF, false)], ["workspace", "", false]);
+R.drop(TU, TT, true);
 // moveRow: the drop shown at once, and its undo
 var make = function () { return new El("rkids"); };
 var u1 = R.moveRow(ta, to, "child", make);

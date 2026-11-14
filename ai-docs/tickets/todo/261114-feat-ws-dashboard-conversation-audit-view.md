@@ -2,10 +2,10 @@
 title: "Dashboard: a conversation audit view - per-call rows, hidden harness events, an audit window, and conversation-wide search"
 blocked-by: 261114-feat-ws-conversation-audit-event-store#phase2
 related:
-  261114-feat-ws-conversation-audit-event-store: "prerequisite (blocked-by #phase2): the daemon's audit store and its read API, queue item (f) = board (599). Every byte this view shows comes from that API. Its item (g) = (601), ToolCallArgs.id in the ring (Phase 1), is the join key from a history row to an audit event (Decision 4)"
+  261114-feat-ws-conversation-audit-event-store: "prerequisite (blocked-by #phase2): the daemon's audit store and its read API, approved contract (599). Every byte this view shows comes from that API. Its approved contract (601), ToolCallArgs.id in the ring (Phase 1), is the join key from a history row to an audit event (Decision 4)"
   261114-feat-ws-dashboard-board-toolbar-overview: "sibling darkroom: overview dims the page through the iframe shell's layout.dim field; this ticket's wide-view darkroom uses the same field for the shell's rail and header"
   261113-feat-ws-dashboard-iframe-shell: "landed (0586a4289): session pages are shell frames; layout.dim and the shell's Esc and Ctrl+K forwarding shape the key rules here"
-  261114-refactor-ws-split-oversized-source-files: "dashboard.js is on its list; the audit view goes to new assets/audit.js and audit.css (Open Decision Queue item (603))"
+  261114-refactor-ws-split-oversized-source-files: "dashboard.js is on its list; the audit view goes to new assets/audit.js and audit.css (approved contract (603))"
 ---
 
 # Dashboard: a conversation audit view - per-call rows, hidden harness events, an audit window, and conversation-wide search
@@ -36,7 +36,8 @@ Its notes panel lists the behaviour this ticket builds:
     a badge such as "출력 3", and the audit window opens on that match.
 - **Audit window.**
   - Tabs: Input, Output, Meta, Raw, Linked events. Raw is the harness's
-    recorded JSON as is.
+    recorded JSON after the backend's pre-write redaction (596), never the
+    original secret.
   - Long outputs get line numbers, an in-window search (Ctrl+F, with Enter and
     Shift+Enter for next and previous), a wrap toggle, and copy.
   - What the model saw vs what was stored: the line where the harness truncated
@@ -134,33 +135,36 @@ What exists today (Pi exploration, 2026-11-14, paths under
      follow-up, and `meta.signature_only`.
    - On a search hit: `call_id`.
 4. **The history-to-audit join key is the call id carried by the ring.** The
-   backend's item (g) = board (601) (1313c11e5, its Phase 1) gives `ToolCallArgs` an
+   backend's approved contract (601) (1313c11e5, its Phase 1) gives `ToolCallArgs` an
    optional `id` equal to the audit store's `call_id`, an additive ring field
    (T0). Calls past `BatchCallCap` in a huge batch get no id. This ticket's
    template emits the id as `data-call` on each call row; a call without one
-   follows queue item (602).
+   follows approved contract (602).
    - Rejected: joining by time window between ring stamps (ambiguous with
      parallel calls and subagents).
 5. **Compatibility tier: T0.** Dashboard asset content, a template change that
    adds attributes, and new i18n keys. No route, MCP tool, store or tracker
    event changes here.
 
-## Open Decision Queue
+### Approved technical contracts (602–611)
 
-Last ID: (610). MAIN minted (602)-(610); (611) is the owner group-ack.
+Authority: owner `594..609,611=ok`, answer recorded 2026-11-14T06:10:20Z
+in MAIN's answer_quote fields; (610) was separately answered `ok` at
+2026-11-14T00:44:56Z. MAIN reaffirmed preservation of approvals 594–611.
+(611) is the UI group acknowledgment, not a separate implementation choice.
 
-- (602) [open] [technical] Ring entries without call ids keep today's folded pill
+- **(602)** Ring entries without call ids keep today's folded pill
   over turning into rows. Those are entries written before the backend change,
   or by a harness the mapper does not cover. In a batch where only the calls
   past `BatchCallCap` lack ids, those calls fold into the "+n" row and are not
   clickable. Only rows with a `data-call` are
   clickable, and hidden-event rows still interleave by `at`. This is chosen
   over a time-window guess, which Decision 4 rejects.
-- (603) [open] [technical] New assets over growing dashboard.js. The new files
+- **(603)** New assets over growing dashboard.js. The new files
   are `assets/audit.js` (a `WsAudit` module mounted from the session page, as
   `WsFiles.mount` is) and `assets/audit.css`, with classes prefixed `au-` so
   the collision guard passes. dashboard.js is on the split-oversized list.
-- (604) [open] [technical] Window and sheet are built new.
+- **(604)** Window and sheet are built new.
   - The wide window is a non-modal floating window with header drag and corner
     resize, clamped to the viewport. Its first placement is right of
     `#convo`, not covering the source row.
@@ -169,7 +173,7 @@ Last ID: (610). MAIN minted (602)-(610); (611) is the owner group-ack.
   - This is chosen over reusing `maximize()` (full-screen, and its scrim covers
     the conversation) or `gwBuild` (modal), and over reusing the drawer (a nav
     surface with its own open state).
-- (605) [open] [technical] Key scope.
+- **(605)** Key scope.
   - J/K/Enter act only while focus is inside `#convo` and not in an editable
     element.
   - ←/→, Esc and Ctrl+F act only while focus is inside an audit window. Ctrl+F
@@ -179,36 +183,58 @@ Last ID: (610). MAIN minted (602)-(610); (611) is the owner group-ack.
     forwarding.
   - This is chosen over page-global keys, which collide with the composer,
     the link menu and the Files pane.
-- (606) [open] [technical] Darkroom mechanics. The darkroom starts with the first
+- **(606)** Darkroom mechanics. The darkroom starts with the first
   window opened by a click in the wide view and ends when the last unpinned
   window closes. A click on the dimmed area ends it and closes unpinned
   windows, like Esc; pinned windows stay open and stay lit. The narrow sheet
   has no darkroom, since the sheet already covers the page. The alternative,
   keeping the darkroom while any window is open, makes the board unreachable
   while a pinned comparison is up.
-- (607) [open] [technical] Fetching.
+- **(607)** Fetching.
   - Opening a call row calls `GET .../audit/events?call=<id>`. Opening any tab
     calls `GET .../audit/event/<id>` once per event and caches it for the
     window's life.
   - A body with `truncated: true` shows a "load more" row that pages through
     the `range` follow-up.
-  - Hidden-event rows page with the history: each `loadHistory` page also
-    fetches `audit/events` bounded by that page's oldest and newest ring
-    stamps.
+  - Hidden-event rows page with history, using (681)'s additive UTC filters.
+    After a ring history page renders, fetch `audit/events` with `since`
+    equal to that page's oldest stamp and `until` equal to the oldest stamp
+    of the immediately newer loaded page; omit `until` for the latest/live
+    page. These half-open intervals include gaps between ring rows without
+    double-owning a timestamp boundary. Follow event-ID cursors within the
+    same interval until `end`, deduplicate by event ID, and order
+    equal-nanosecond events by sequence. Refresh the unbounded latest
+    interval as new events arrive. UTC selects hidden rows; it never
+    guesses a call join.
   - This is chosen over loading the whole audit log up front, which can reach
     the 256 MiB per-session cap.
-- (608) [open] [technical] Pin limit: at most 4 pinned windows. A fifth pin
+- **(608)** Pin limit: at most 4 pinned windows. A fifth pin
   replaces the oldest pinned window and shows a toast. Each new pinned window
   is offset 24px from the last. Unbounded windows can bury the page.
-- (609) [open] [technical] Kind chips default to all on, as the mockup shows.
+- **(609)** Kind chips default to all on, as the mockup shows.
   Their state persists per browser in localStorage
   (`ws.dashboard.auditkinds`), not per session. This matches the panel-fold
   precedent (`ws.dashboard.panelshut`).
-- (610) [open] [technical] Token growth shows as the delta of `ctx_after`
+- **(610)** Token growth shows as the delta of `ctx_after`
   against the previous request's `ctx_after` in the same conversation.
   Parallel calls answered in one request show the delta on the first call and
   "·" on the others, so a shared growth is not counted several times. The
   alternative, the same delta on each, overstates the total.
+
+### Reconciliation and prerequisite
+
+- **(681), MAIN technical settlement, 2026-11-14, T0:** the backend adds
+  optional `since`/`until` RFC3339Nano UTC filters, `[since, until)`, while
+  retaining event-ID pagination and all existing response fields. Invalid or
+  reversed bounds return HTTP 400. (607) uses these only to select hidden
+  events; (601)'s ID join remains unchanged. Rejected: fetching the whole
+  retained audit log for client-side filtering.
+- **(682), MAIN technical settlement, 2026-11-14:** this UI keeps
+  `blocked-by: 261114-feat-ws-conversation-audit-event-store#phase2`.
+  The backend, not this UI, gains the prerequisite
+  `261114-refactor-ws-common-session-interface#phase2`: current context/state
+  parity adoption, no store rewrite or separate migration child. No
+  whole-epic, voice or additional-harness completion gate is added.
 
 ## Constraints
 
@@ -218,16 +244,29 @@ Last ID: (610). MAIN minted (602)-(610); (611) is the owner group-ack.
 - The ring, `/history` and its rendered HTML stay valid for entries without
   call ids. Existing pill behaviour does not regress for them.
 - The audit view must not slow history paging. Audit fetches run after the
-  history page has rendered, and never block it.
+  history page has rendered, and never block it. Preserve event-ID cursors
+  within (681)'s UTC selection bounds and the ID-only call join (601).
 - Every user-visible string is a `js.*` key in all 11 i18n tables.
 - QA uses an isolated daemon (`WS_CACHE_HOME=<tmp> WS_CONFIG_HOME=<tmp>
   HOME=<tmp> <bin> dashboard --port 0`) with a fixture audit store. Never
   contact 127.0.0.1:29417, never run `scripts/dev.py`, and kill nothing you did
   not start.
 
+## Prior Decisions
+
+- Owner `594..609,611=ok`, answer_quote timestamp 2026-11-14T06:10:20Z:
+  (611) acknowledges UI (602)–(610); the prior (610)=`ok` at
+  2026-11-14T00:44:56Z remains valid. Old `[open]` labels were drift.
+- (681) supplies the missing UTC selection contract between backend (599)
+  and UI (607), preserving event-ID cursors and (601)'s call-ID join.
+- (682) preserves the exact backend Phase 2 UI prerequisite; only the
+  backend gains the foundation interface Phase 2 dependency.
+
 ## Phases
 
 ### Phase 1: Call rows and the audit window
+
+After `261114-feat-ws-conversation-audit-event-store#phase2` lands (682):
 
 - The template emits `data-call` per call.
 - A folded tools entry with ids renders as the mockup's call list: three rows,
@@ -254,8 +293,11 @@ Verification:
 
 ### Phase 2: Hidden-event rows, kind chips and keys
 
+Depends on this ticket's Phase 1.
+
 - Dotted one-line rows for hidden events interleave by `at`, paged with
-  history. Hooks and reminders attached to a call are indented under it.
+  history using (607)/(681)'s UTC selection and event-ID continuation.
+  Hooks and reminders attached to a call are indented under it.
 - Kind chips sit at the top of the conversation.
 - J/K/Enter move between rows and open them.
 - The harness badge shows on the conversation header.
@@ -263,10 +305,14 @@ Verification:
 - "Other" rows open on their Raw tab.
 
 Verification: interleaving order tests against ring stamps (equal-ns ties),
-chip persistence, paging both ways, J/K skipping hidden kinds, and LOOK against
-the mockup.
+adjacent ring-page intervals and timestamp gaps, more than one API page in an
+interval, event-ID deduplication and latest-interval live refresh after history
+rendering. Cover chip persistence, paging both ways, J/K skipping hidden
+kinds, and LOOK against the mockup.
 
 ### Phase 3: Conversation-wide search
+
+Depends on this ticket's Phase 2.
 
 - A search box on the conversation pane runs `audit/search`, with text, regex
   and case options and a kind filter.

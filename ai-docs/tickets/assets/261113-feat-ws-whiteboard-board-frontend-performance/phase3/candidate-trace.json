@@ -1,0 +1,1241 @@
+{
+  "samples": [
+    {
+      "at": 18868.799999713898,
+      "reason": "stop 0",
+      "base": 640,
+      "snapped": 640,
+      "style": "640px",
+      "clip": 388.484375,
+      "live": 388.484375,
+      "cut": [],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "at": 20071.699999809265,
+      "reason": "stop 1",
+      "base": 640,
+      "snapped": 640,
+      "style": "640px",
+      "clip": 388.484375,
+      "live": 388.484375,
+      "cut": [],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "at": 21275.5,
+      "reason": "stop 2",
+      "base": 640,
+      "snapped": 640,
+      "style": "640px",
+      "clip": 388.484375,
+      "live": 388.484375,
+      "cut": [],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "at": 22478.099999904633,
+      "reason": "stop 3",
+      "base": 640,
+      "snapped": 640,
+      "style": "640px",
+      "clip": 388.484375,
+      "live": 388.484375,
+      "cut": [],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "at": 23680.89999961853,
+      "reason": "stop 4",
+      "base": 640,
+      "snapped": 640,
+      "style": "640px",
+      "clip": 388.484375,
+      "live": 388.484375,
+      "cut": [],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "at": 24883.699999809265,
+      "reason": "stop 5",
+      "base": 640,
+      "snapped": 859,
+      "style": "859px",
+      "clip": 859,
+      "live": 1045.484375,
+      "cut": [
+        {
+          "id": "e723",
+          "top": -97.390625,
+          "bottom": 191.859375,
+          "height": 289.25
+        }
+      ],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "at": 26086.799999713898,
+      "reason": "stop 6",
+      "base": 640,
+      "snapped": 859,
+      "style": "859px",
+      "clip": 859,
+      "live": 1045.484375,
+      "cut": [
+        {
+          "id": "e723",
+          "top": -97.390625,
+          "bottom": 191.859375,
+          "height": 289.25
+        }
+      ],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    }
+  ],
+  "settled": {
+    "at": 29088.799999713898,
+    "reason": "settled 3s",
+    "base": 640,
+    "snapped": 859,
+    "style": "859px",
+    "clip": 859,
+    "live": 1045.484375,
+    "cut": [
+      {
+        "id": "e723",
+        "top": -97.390625,
+        "bottom": 191.859375,
+        "height": 289.25
+      }
+    ],
+    "frames": [
+      {
+        "key": "entry:e721",
+        "tag": "DIV",
+        "height": ""
+      },
+      {
+        "key": "entry:e653",
+        "tag": "DIV",
+        "height": ""
+      },
+      {
+        "key": "entry:e723",
+        "tag": "IFRAME",
+        "height": "219px"
+      },
+      {
+        "key": "entry:e655",
+        "tag": "DIV",
+        "height": ""
+      },
+      {
+        "key": "entry:e725",
+        "tag": "IFRAME",
+        "height": "219px"
+      },
+      {
+        "key": "entry:e657",
+        "tag": "DIV",
+        "height": ""
+      },
+      {
+        "key": "entry:e727",
+        "tag": "IFRAME",
+        "height": "219px"
+      },
+      {
+        "key": "entry:e659",
+        "tag": "DIV",
+        "height": ""
+      }
+    ]
+  },
+  "trace": [
+    {
+      "before": {
+        "at": 170.09999990463257,
+        "reason": "before style 640px",
+        "base": 640,
+        "style": "",
+        "clip": 388.484375,
+        "live": 388.484375,
+        "cut": [],
+        "frames": [
+          {
+            "key": "entry:e721",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e653",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e723",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e655",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e725",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e657",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e727",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e659",
+            "tag": "DIV",
+            "height": ""
+          }
+        ]
+      },
+      "after": {
+        "at": 170.39999961853027,
+        "reason": "after style 640px",
+        "base": 640,
+        "style": "640px",
+        "clip": 388.484375,
+        "live": 388.484375,
+        "cut": [],
+        "frames": [
+          {
+            "key": "entry:e721",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e653",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e723",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e655",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e725",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e657",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e727",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e659",
+            "tag": "DIV",
+            "height": ""
+          }
+        ]
+      },
+      "stack": [
+        "    at CSSStyleDeclaration.setProperty (<anonymous>:6:364)",
+        "    at setBase (http://127.0.0.1:49623/s/headwayparchedmummygeology?frame=1:7502:13)",
+        "    at http://127.0.0.1:49623/s/headwayparchedmummygeology?frame=1:7789:7",
+        "    at Array.forEach (<anonymous>)"
+      ]
+    },
+    {
+      "before": {
+        "at": 170.7999997138977,
+        "reason": "before style 640px",
+        "base": 640,
+        "style": "640px",
+        "clip": 388.484375,
+        "live": 388.484375,
+        "cut": [],
+        "frames": [
+          {
+            "key": "entry:e721",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e653",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e723",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e655",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e725",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e657",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e727",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e659",
+            "tag": "DIV",
+            "height": ""
+          }
+        ]
+      },
+      "after": {
+        "at": 170.7999997138977,
+        "reason": "after style 640px",
+        "base": 640,
+        "style": "640px",
+        "clip": 388.484375,
+        "live": 388.484375,
+        "cut": [],
+        "frames": [
+          {
+            "key": "entry:e721",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e653",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e723",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e655",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e725",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e657",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e727",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e659",
+            "tag": "DIV",
+            "height": ""
+          }
+        ]
+      },
+      "stack": [
+        "    at CSSStyleDeclaration.setProperty (<anonymous>:6:364)",
+        "    at steps (http://127.0.0.1:49623/s/headwayparchedmummygeology?frame=1:7498:13)",
+        "    at http://127.0.0.1:49623/s/headwayparchedmummygeology?frame=1:7790:7",
+        "    at Array.forEach (<anonymous>)"
+      ]
+    },
+    {
+      "at": 182.19999980926514,
+      "reason": "before history resize",
+      "base": 640,
+      "snapped": 640,
+      "style": "640px",
+      "clip": 388.484375,
+      "live": 388.484375,
+      "cut": [],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "at": 182.2999997138977,
+      "reason": "after history resize",
+      "base": 640,
+      "snapped": 640,
+      "style": "640px",
+      "clip": 388.484375,
+      "live": 388.484375,
+      "cut": [],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "at": 23713.199999809265,
+      "reason": "before history resize",
+      "base": 640,
+      "snapped": 640,
+      "style": "640px",
+      "clip": 640,
+      "live": 826.484375,
+      "cut": [
+        {
+          "id": "e723",
+          "top": -97.390625,
+          "bottom": 191.859375,
+          "height": 289.25
+        }
+      ],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "IFRAME",
+          "height": ""
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "before": {
+        "at": 23713.199999809265,
+        "reason": "before style 738px",
+        "base": 640,
+        "snapped": 738,
+        "style": "640px",
+        "clip": 640,
+        "live": 826.484375,
+        "cut": [
+          {
+            "id": "e723",
+            "top": -97.390625,
+            "bottom": 191.859375,
+            "height": 289.25
+          }
+        ],
+        "frames": [
+          {
+            "key": "entry:e721",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e653",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e723",
+            "tag": "IFRAME",
+            "height": "219px"
+          },
+          {
+            "key": "entry:e655",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e725",
+            "tag": "IFRAME",
+            "height": "219px"
+          },
+          {
+            "key": "entry:e657",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e727",
+            "tag": "IFRAME",
+            "height": ""
+          },
+          {
+            "key": "entry:e659",
+            "tag": "DIV",
+            "height": ""
+          }
+        ]
+      },
+      "after": {
+        "at": 23713.799999713898,
+        "reason": "after style 738px",
+        "base": 640,
+        "snapped": 738,
+        "style": "738px",
+        "clip": 738,
+        "live": 826.484375,
+        "cut": [],
+        "frames": [
+          {
+            "key": "entry:e721",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e653",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e723",
+            "tag": "IFRAME",
+            "height": "219px"
+          },
+          {
+            "key": "entry:e655",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e725",
+            "tag": "IFRAME",
+            "height": "219px"
+          },
+          {
+            "key": "entry:e657",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e727",
+            "tag": "IFRAME",
+            "height": ""
+          },
+          {
+            "key": "entry:e659",
+            "tag": "DIV",
+            "height": ""
+          }
+        ]
+      },
+      "stack": [
+        "    at CSSStyleDeclaration.setProperty (<anonymous>:6:364)",
+        "    at snap (http://127.0.0.1:49623/s/headwayparchedmummygeology?frame=1:7526:17)",
+        "    at http://127.0.0.1:49623/s/headwayparchedmummygeology?frame=1:7831:13",
+        "    at window.ResizeObserver.<anonymous> (<anonymous>:8:263)"
+      ]
+    },
+    {
+      "at": 23714,
+      "reason": "after history resize",
+      "base": 640,
+      "snapped": 738,
+      "style": "738px",
+      "clip": 738,
+      "live": 826.484375,
+      "cut": [],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "IFRAME",
+          "height": ""
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "at": 23720.5,
+      "reason": "before history resize",
+      "base": 640,
+      "snapped": 738,
+      "style": "738px",
+      "clip": 738,
+      "live": 1045.484375,
+      "cut": [
+        {
+          "id": "e723",
+          "top": -218.390625,
+          "bottom": 70.859375,
+          "height": 289.25
+        }
+      ],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    },
+    {
+      "before": {
+        "at": 23720.599999904633,
+        "reason": "before style 859px",
+        "base": 640,
+        "snapped": 859,
+        "style": "738px",
+        "clip": 738,
+        "live": 1045.484375,
+        "cut": [
+          {
+            "id": "e723",
+            "top": -218.390625,
+            "bottom": 70.859375,
+            "height": 289.25
+          }
+        ],
+        "frames": [
+          {
+            "key": "entry:e721",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e653",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e723",
+            "tag": "IFRAME",
+            "height": "219px"
+          },
+          {
+            "key": "entry:e655",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e725",
+            "tag": "IFRAME",
+            "height": "219px"
+          },
+          {
+            "key": "entry:e657",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e727",
+            "tag": "IFRAME",
+            "height": "219px"
+          },
+          {
+            "key": "entry:e659",
+            "tag": "DIV",
+            "height": ""
+          }
+        ]
+      },
+      "after": {
+        "at": 23721.39999961853,
+        "reason": "after style 859px",
+        "base": 640,
+        "snapped": 859,
+        "style": "859px",
+        "clip": 859,
+        "live": 1045.484375,
+        "cut": [
+          {
+            "id": "e723",
+            "top": -97.390625,
+            "bottom": 191.859375,
+            "height": 289.25
+          }
+        ],
+        "frames": [
+          {
+            "key": "entry:e721",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e653",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e723",
+            "tag": "IFRAME",
+            "height": "219px"
+          },
+          {
+            "key": "entry:e655",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e725",
+            "tag": "IFRAME",
+            "height": "219px"
+          },
+          {
+            "key": "entry:e657",
+            "tag": "DIV",
+            "height": ""
+          },
+          {
+            "key": "entry:e727",
+            "tag": "IFRAME",
+            "height": "219px"
+          },
+          {
+            "key": "entry:e659",
+            "tag": "DIV",
+            "height": ""
+          }
+        ]
+      },
+      "stack": [
+        "    at CSSStyleDeclaration.setProperty (<anonymous>:6:364)",
+        "    at snap (http://127.0.0.1:49623/s/headwayparchedmummygeology?frame=1:7526:17)",
+        "    at http://127.0.0.1:49623/s/headwayparchedmummygeology?frame=1:7831:13",
+        "    at window.ResizeObserver.<anonymous> (<anonymous>:8:263)"
+      ]
+    },
+    {
+      "at": 23721.5,
+      "reason": "after history resize",
+      "base": 640,
+      "snapped": 859,
+      "style": "859px",
+      "clip": 859,
+      "live": 1045.484375,
+      "cut": [
+        {
+          "id": "e723",
+          "top": -97.390625,
+          "bottom": 191.859375,
+          "height": 289.25
+        }
+      ],
+      "frames": [
+        {
+          "key": "entry:e721",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e653",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e723",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e655",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e725",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e657",
+          "tag": "DIV",
+          "height": ""
+        },
+        {
+          "key": "entry:e727",
+          "tag": "IFRAME",
+          "height": "219px"
+        },
+        {
+          "key": "entry:e659",
+          "tag": "DIV",
+          "height": ""
+        }
+      ]
+    }
+  ]
+}

@@ -51,6 +51,7 @@ var window = { WsCards: {
   }
 } };
 function frag(nodes) { return { childNodes: nodes }; }
+function boardNodes(input) { return frag(input).childNodes; }
 `+src+`
 function mounted(key, text) { return mountFrame(new El("div", { "class": "doc-frame", "data-doc": key, "data-doc-key": key, "data-sandbox": SANDBOX, "data-srcdoc": text })); }
 function holder(key, text) { return new El("div", { "class": "doc-frame", "data-doc": key, "data-doc-key": key, "data-sandbox": SANDBOX, "data-srcdoc": text }); }

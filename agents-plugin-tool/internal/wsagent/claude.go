@@ -373,6 +373,16 @@ type claudeProcess struct {
 	lead bool
 }
 
+func (p claudeProcess) processControls() processControls {
+	c := processControls{Process: p, steer: p}
+	// Worker launches use dontAsk and have no in-stream permission-mode
+	// or MCP recovery controls, despite sharing the lead's method set.
+	if p.lead {
+		c.approval, c.mode, c.mcp = p, p, p
+	}
+	return c
+}
+
 func (p claudeProcess) Interrupt() error {
 	return p.request("interrupt", map[string]any{"subtype": "interrupt"})
 }

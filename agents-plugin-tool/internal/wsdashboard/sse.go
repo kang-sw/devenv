@@ -327,6 +327,7 @@ func (d *Daemon) sessionPageSource(replyID, lang, theme string) pageSource {
 				return pr
 			}
 			pr.regions = regions
+			pr.board = splitBoardTopics(string(regions[regionBoard].HTML))
 			return pr
 		},
 		stamp: func(in refreshInputs) (string, bool) { return pages.sessionStamp(replyID, in) },
@@ -438,6 +439,10 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 		return
 	}
 	held := parseHeld(r.URL.Query().Get("h"))
+	var topics *boardTopicState
+	if r.URL.Query().Get("topics") == "1" && only.has(regionBoard) && src.key.replyID != "" {
+		topics = &boardTopicState{}
+	}
 	var parts []sidePart
 	if side != nil {
 		part := sidePart{src: *side, page: d.cache.acquire(side.key)}
@@ -469,7 +474,7 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 			}
 			regions := only.apply(pr.regions)
 			sent := false
-			sent, ok := d.sendRegions(sink, regions, held)
+			sent, ok := d.sendRegions(sink, regions, held, topics, pr.board)
 			if !ok {
 				return false
 			}
@@ -490,7 +495,7 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 			if !pr.ok {
 				return true
 			}
-			sent, ok := d.sendRegions(sink, only.apply(pr.regions), held)
+			sent, ok := d.sendRegions(sink, only.apply(pr.regions), held, nil, nil)
 			return ok && (!sent || sink.flush() == nil)
 		}
 		if !send(first, at) {
@@ -596,15 +601,23 @@ type sidePart struct {
 // sendRegions writes the regions whose hash differs from what the browser
 // holds, recording each sent hash in held; sent reports that one was
 // written, ok false that the connection failed.
-func (d *Daemon) sendRegions(sink streamSink, regions regionSet, held map[string]string) (sent, ok bool) {
+func (d *Daemon) sendRegions(sink streamSink, regions regionSet, held map[string]string, topics *boardTopicState, board *boardTopics) (sent, ok bool) {
 	for _, name := range sortedRegionNames(regions) {
 		region := regions[name]
-		if held[name] == region.Hash {
+		isBoard := name == regionBoard && topics != nil
+		if held[name] == region.Hash && !(isBoard && topics.previous == nil) {
 			continue
 		}
-		payload, _ := json.Marshal(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
-		if sink.event("region", payload) != nil {
+		event, data := "region", any(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
+		if isBoard {
+			event, data = topics.event(region, board)
+		}
+		payload, _ := json.Marshal(data)
+		if sink.event(event, payload) != nil {
 			return sent, false
+		}
+		if isBoard {
+			topics.previous = board
 		}
 		d.stats.Sends.Add(1)
 		held[name] = region.Hash

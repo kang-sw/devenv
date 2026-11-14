@@ -22,6 +22,7 @@ El.prototype.matches = function () { return false; };
 El.prototype.querySelectorAll = function () { return []; };
 function q(sel, el) { return Array.prototype.slice.call(el.querySelectorAll(sel)); }
 function frag(nodes) { return { childNodes: nodes }; }
+function boardNodes(input) { return frag(input).childNodes; }
 function isPeer() { return false; }
 var window = { WsCards: { weave: function (w) { return { pins: [], board: w }; }, settle: function (el, p) { el.children = p.board; }, pinList: function () { return null; } } };
 var openState = {}, boardSeen = {}, doc = {};

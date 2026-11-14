@@ -65,7 +65,7 @@ func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 		if recap < 0 || (layout == LayoutFull && (recap > doc || doc > items)) || (layout == LayoutEmbed && recap > items) {
 			t.Fatalf("%s: recap %d, doc %d, items %d", name, recap, doc, items)
 		}
-		wantAll(t, block, `<div class="rtext md"><strong>READY</strong> · see <img`, `shot.png`, `<u>kept</u>`, `datetime="2026-11-04T09:00:00Z"`)
+		wantAll(t, block, `<div class="rtext md" title="**READY**`, `"><strong>READY</strong> · see <img`, `shot.png`, `<u>kept</u>`, `datetime="2026-11-04T09:00:00Z"`)
 		wantNone(t, block, "<script>alert")
 		shut := recapBlock(t, out, "shut")
 		fold := docTag.FindStringIndex(shut)
@@ -73,7 +73,7 @@ func TestLegacyRecapRemainsReadableOnBothLayouts(t *testing.T) {
 			t.Fatalf("%s: closed legacy recap is not folded: %s", name, shut)
 		}
 		wantAll(t, shut, `<span class="tresult" title="how the topic ended">Shipped.</span>`)
-		wantAll(t, recapBlock(t, out, "lone"), `<div class="rtext md">only a recap</div>`)
+		wantAll(t, recapBlock(t, out, "lone"), `<div class="rtext md" title="only a recap">only a recap</div>`)
 	}
 }
 
@@ -95,7 +95,10 @@ func TestLegacyRecapReferencesAndSandbox(t *testing.T) {
 	if recap < 0 || frame < 0 || recap > frame {
 		t.Fatalf("legacy recap %d, frame %d", recap, frame)
 	}
-	wantNone(t, board[:frame], "onerror")
+	// The full source is inert, attribute-escaped hover text; it must never
+	// return as an executable image/event attribute in the rendered recap.
+	wantAll(t, board[:frame], `&lt;img src=x onerror=alert(1)&gt;`)
+	wantNone(t, board[:frame], `<img src=x onerror=alert(1)>`, ` onerror="`, ` onerror='`)
 	if got := st.TextRefs("on {{1}} and {{01}}, not {{99}} or {{x}}"); got != "on (01) and (01), not {{99}} or {{x}}" {
 		t.Errorf("TextRefs = %q", got)
 	}

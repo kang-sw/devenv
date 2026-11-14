@@ -6,6 +6,25 @@ import (
 	"testing"
 )
 
+func TestSelectionNoteIsEditableTextWithSelfContainedContext(t *testing.T) {
+	src := dashboardFuncs(t, "selectionNote")
+	runNode(t, "selection note context", `
+var bad = [];
+function wsT(k) { return { "js.wbmention.context": "Selected text:", "js.wbmention.note": "Note:" }[k]; }
+function check(what, got, want) { if (got !== want) bad.push(what + ": " + JSON.stringify(got)); }
+`+src+`
+var ms = [{ topic: "plan", id: "3", entry: "e7", text: "first <quote>\nsecond line" }, { topic: "plan", entry: "e8", text: "other excerpt" }];
+var before = JSON.stringify(ms);
+check("empty note keeps plain mention behavior", selectionNote(ms, "  \n "), "");
+var want = "Selected text:\n[plan] (3) e7\n> first <quote>\n> second line\n\n[plan] e8\n> other excerpt\n\nNote:\nreview both";
+check("one note follows the whole ordered bundle", selectionNote(ms, " review both "), want);
+check("source objects unchanged", JSON.stringify(ms), before);
+check("identical excerpts from different entries remain distinguishable", selectionNote([{topic:"plan",entry:"e9",text:"other excerpt"}], "another note"), "Selected text:\n[plan] e9\n> other excerpt\n\nNote:\nanother note");
+check("note markup is ordinary text after context, never mention syntax", selectionNote([{topic:"t",text:"x"}], "<wb:mention note=\"no\">"), "Selected text:\n[t]\n> x\n\nNote:\n<wb:mention note=\"no\">");
+process.stdout.write(bad.join("\n"));
+`)
+}
+
 // TestBoardMentionFromSelection pins how a board selection becomes a mention
 // (dashboard.js board mentions): hostMention reads this page's selection and
 // makes a mention only when both ends lie in one topic card, outside a form

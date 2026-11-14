@@ -7,8 +7,9 @@ related:
   261113-feat-ws-whiteboard-topic-history-load-more: "shares the visibility observer with Phase 2; its worker decides template- vs fetch-based older pages"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 55c7dce0b4a4e217
-sage-review-completeness-reviewed: 55c7dce0b4a4e217
+sage-review-design-reviewed: 8016b4b29deea59c
+sage-review-completeness-reviewed: 8016b4b29deea59c
+completed: 2026-11-14
 ---
 
 # Whiteboard board frontend performance: lazy frames, cheaper swaps, measurement harness
@@ -329,6 +330,7 @@ Main findings (static, unmeasured in a browser):
   `ai-docs/manuals/release-compatibility.md`.
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin-tool/`)
 - Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
 
 ## Prior Decisions
 
@@ -345,17 +347,17 @@ Main findings (static, unmeasured in a browser):
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | wswhiteboard/render.go, wsdashboard/assets/dashboard.js, wswhiteboard/assets/form.js, pill.js, stream.js, wsdashboard/access.go, wsdashboard/pages.go, scripts/dev.py area |
-| scope.surface | cross-module | server emits data-srcdoc, data-th, hashed asset route across wswhiteboard and wsdashboard; Phase 3 adds an event type |
-| scope.new_public_symbol | yes | new immutable hashed frame-asset route, data-th attribute, opt-in board event type |
-| scope.new_type_contract | no | none; wire additions only (attributes, route, event) |
-| scope.test_surface | existing | wsdashboard/board_close_fold_test.go, cards_test.go, board_motion_test.go, mcp/dashboard_page_test.go, wswhiteboard/regions_test.go (several assert srcdoc= literally and need updating) |
-| complexity.reuse_points | confirmed | mermaid hashed route (access.go publicAsset, pages.go serveMermaid), frameGraftable, setFrameHeights, reorder-hold visibility observer (pending 261113-feat-ws-dashboard-board-reorder-hold) |
-| complexity.side_effect_risk | high | iframe mount timing, height keying, frameGraft, FLIP, mention selection and rect readers interact; moving frames reloads them today |
-| risk.correctness | high | lazy srcdoc and moveBefore frame reuse can lose heights, mermaid redraw, or scroll position |
-| risk.fit | moderate | overlaps in-flight iframe-shell and reorder-hold on dashboard.js and stream.js; rebase expected |
-| risk.test | high | headless Chromium harness and visual LOOK checks needed; existing regex tests pin srcdoc= |
-| risk.security_or_contract | moderate | new public unauthenticated asset route and CSP interplay; asset is static and content-hashed (T0) |
+| scope.span | multi-file | Remaining Phase 3 verification spans agents-plugin-tool/internal/wsdashboard/board_topics_stream_test.go, board_topics_client_test.go, wswhiteboard/assets/stream.js and scripts/board-perf.mjs; this accommodation edits only this ticket |
+| scope.surface | cross-module | Existing dashboard/whiteboard stream and frame behavior; board-topics wire shape at agents-plugin-tool/internal/wsdashboard/board_topics.go#L20-L32 |
+| scope.new_public_symbol | no | Resumption adds none; topics=1 and board-topics already exist (agents-plugin-tool/internal/wsdashboard/assets/dashboard.js#L6264-L6273) |
+| scope.new_type_contract | no | Resumption adds none; existing boardTopicsEvent is a wire contract, not an absence of one (agents-plugin-tool/internal/wsdashboard/board_topics.go#L26-L32) |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/board_topics_stream_test.go#L26-L133 and board_topics_client_test.go#L38-L98 cover existing Phase 3 contracts; phase3/README.md records the failed LOOK comparison |
+| complexity.reuse_points | confirmed | Existing per-connection diff/fallback (agents-plugin-tool/internal/wsdashboard/board_topics.go#L102-L119), shared decomposition test (board_topics_stream_test.go#L109-L126), and retained phase3/README.md reproduction procedure; independently reviewed history-fit producer 8f24cec5b9ee9e09d7c2d58e5002ddab03842152 landed in develop via 28d8576226cc62312bf2d85d9c4cb306882f3df0 |
+| complexity.side_effect_risk | high | Sequential frame delivery changes history clipping in the unchanged source (agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L53-L73); no integration/runtime action is authorized by this accommodation |
+| risk.correctness | high | Original 219px mismatch remains unresolved; current snap measures the current clip but adds to the original base (agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L55-L67) |
+| risk.fit | moderate | iframe-shell Phase 2 is landed (3310356af is an ancestor of HEAD); root verified history-fit integration 28d8576226cc62312bf2d85d9c4cb306882f3df0, but this retained worktree still has the old source and the common-history A/B stack must be prepared and verified |
+| risk.test | high | phase3/README.md records an Important LOOK gap; matched boundary IDs, settled geometry and the sequential-height replay still need independent verification on the same landed history revision |
+| risk.security_or_contract | moderate | Existing additive T0 event/fallback contract must remain unchanged (agents-plugin-tool/internal/wsdashboard/board_topics.go#L26-L32, board_topics_stream_test.go#L87-L133); this resumption approves no new API or history behavior |
 
 ## Phases
 
@@ -904,6 +906,28 @@ fan-out cache). Before starting, the worker verifies that phase has landed
 recording its Phase 2 result) and stops and reports otherwise. As in Phase 2,
 the prerequisite is prose, deliberately not a typed blocked-by.
 
+**Resumption prerequisite (Phase 3 stop, 2026-11-14).** The original LOOK
+failure below remains open. Before resuming its acceptance run, the root
+lead must confirm that the separately owner-approved history-fit correction
+(641/642; newest 3 -> 2 -> 1 panels within 1000px, minimum one panel,
+first-usable-height cache, finalized boundaries never re-cut) has passed its
+own review/native verification and landed. The correction's plan is
+`ai-docs/.plans/2026-11/14-1357-history-fit-approved-panels.md` on its producer
+branch `fix/history-fit-panels`; its Authority and Contract sections record
+the separate approval. The root verified independently reviewed producer
+`8f24cec5b9ee9e09d7c2d58e5002ddab03842152`, its final native checks, and
+develop integration `28d8576226cc62312bf2d85d9c4cb306882f3df0`; the landed
+stream SHA-256 is
+`5a7e86ab9dc8624e2296335d113d69dcd349aaa65c0e0cbb8765aa806634555a`.
+This satisfies the separate landing dependency only, not performance LOOK
+or this ticket's mandatory resumption design gate. This retained worktree
+still has the old source; the common-history A/B stack below must still be
+prepared and verified through the root-owned integration/resumption path.
+No source integration, activation or acceptance execution is authorized by
+this fact-only ticket update. This need-first gate applies to Phase 3
+resumption only, so it is prose rather than a ticket-wide typed
+`blocked-by`.
+
 - Changed-topics-only `board-topics` events with the `topics=1` opt-in and
   the full-region fallback (Decision 11).
 
@@ -914,3 +938,193 @@ and a non-topic board change each send the full region; a test that two
 connections of one session cause one per-topic render (the fan-out cache); a
 client asset test that an event the page cannot apply falls back to a full
 region; harness scenario (c) before and after.
+
+For the resumed long-board LOOK check, put the **same reviewed, landed
+history-fit revision** on both the performance baseline and candidate;
+record both exact source/commit identities and confirm the history source
+is identical. Keep the existing board, dates, styles, viewport, capture
+procedure and scroll stops unchanged apart from that common approved
+prerequisite. Before comparing captures, verify matched finalized history
+boundary IDs and settled frame geometry at corresponding stops, including
+sequential/late iframe-height delivery without boundary re-cut. If either
+side does not settle or the IDs/geometry differ, preserve the evidence and
+return the discrepancy rather than force heights or normalize captures.
+Repeat the long-board LOOK comparison and inspect the result captures
+side by side. The no-intended-visual-change constraint judges the Phase 3
+difference on this common-history baseline; it does not demand restoration
+of the 640px history contract that the separate approval replaces only upon
+landing (current source still uses STEP = 640 and cumulative snapping:
+`agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L28-L73`; approved
+replacement: producer plan
+`ai-docs/.plans/2026-11/14-1357-history-fit-approved-panels.md#L6-L7`).
+Retain the original failing captures, 219px mismatch, traces and inferred
+timing explanation as failed
+historical evidence, never relabeling them as a pass. The original tests
+cover relevant first-height/growth/restore behavior but do not explicitly
+replay the captured three-frame 219px sequence (existing restore/graft cases:
+`agents-plugin-tool/internal/wswhiteboard/stream_script_test.go#L375-L400`;
+exact failing sequence: `ai-docs/tickets/assets/261113-feat-ws-whiteboard-board-frontend-performance/phase3/README.md#L128-L154`);
+the resumed verification must account for that sequence. The Important
+LOOK finding stays open, and no Phase 3 Result or ticket closure is recorded,
+until this check and its
+independent review pass. Existing scenario (c) metrics and the disclosed
+35.5%/36.8% Nodes cost remain evidence of their tested identities, not a
+substitute for LOOK parity or measurements of the common-history stack.
+
+#### Implementation checkpoint (1341947b3) - 2026-11-14
+
+Phase 3 is implemented in `3ec591d82`, with contract tests in `1341947b3`,
+but is **not complete**: the long-board LOOK constraint remains an Important
+independent review finding. No Phase 3 Result or ticket closure is recorded.
+
+- Verified iframe-shell Phase 2 commit `3310356af` is an ancestor of this
+  run's baseline `d1c3b9d6b`.
+- Added T0 `topics=1` / `board-topics` on both SSE and WebSocket, with
+  shared render decomposition, per-connection hash differences, first-send,
+  reconnect and non-topic full-region fallbacks, and client resynchronization.
+  Immutable incoming snapshots retain accumulated updates through hidden and
+  deferred application, and feed the existing morph for pins and frame reuse.
+- The dashboard/whiteboard suites pass (140.774s; whiteboard cached), as
+  does the MCP dashboard/whiteboard/board/panel/theme/closed/topic/wiki subset
+  (66.371s). The JS syntax check and focused parser test pass.
+- Three alternating scenario (c) runs per side at 4x/6x reduced median
+  ScriptDuration by 45.1%/46.2%, TaskDuration by 39.0%/38.9%, and long-task
+  time by 62.0%/60.6%. Retained canonical inputs increased Nodes by
+  **35.5%/36.8%**; that cost remains disclosed under Decision 12. The owner
+  accepted this CPU/event/identity evidence, not LOOK parity.
+- An isolated browser saw the candidate's initial full board followed by
+  20 incremental updates, each carrying only T00, while preserving T01's
+  element identity. Baseline updates were full regions.
+- Independent lite review found no Critical or additional concrete logic
+  defect, and one Important validation gap: later LOOK captures differ,
+  with T04's history clip 219px taller on the candidate. Stops 06-11 differ
+  by 15.310-52.863% of pixels. This is **not** a clock-only difference or a
+  full LOOK pass.
+- Observation-only diagnostic traces reproduced a persistent partially
+  clipped entry on the baseline and candidate. The unchanged
+  `wswhiteboard/assets/stream.js:53-67` measures extra height against the
+  current clip but adds it to the original base; sequential iframe heights
+  produce clip 640 -> 738 -> 859px with entry e723 still crossing the edge
+  by 97.390625px after three further seconds. The history-live observer
+  (`:363-378`) does not observe the clip itself. Different delivery batches
+  are a supported explanation of the original difference, not proof that
+  Phase 3 cannot influence its timing.
+- Per the owner's resumption boundary, return this pre-existing history-snap
+  blocker rather than expand the history contract or weaken source, dates,
+  or fixtures to certify parity. Proposed next step: a separately authorized,
+  regression-tested sequential-height snap repair, then repeat Phase 3 LOOK
+  validation. No live activation, integration, launchers, or shared-state
+  mutations occurred.
+
+Exact baseline/candidate captures, commands, samples, traces, complete
+measurement output, and independent review are preserved at
+`ai-docs/tickets/assets/261113-feat-ws-whiteboard-board-frontend-performance/phase3/README.md`.
+The original copies remain at `/tmp/ws-board-topics-phase3.3pBANc`.
+
+### Result (689ee449a) - 2026-11-14
+
+Phase 3 is complete under the reviewed common-history verification
+accommodation. The original 219px LOOK comparison remains a failed historical
+comparison; its delivery-timing attribution remains inferred. The same
+independent reviewer accepted the new common-history evidence and resolved
+its existing Important finding before this Result or closure was recorded.
+
+Implementation remains `3ec591d82` and contract tests `1341947b3`. The root
+prepared the resumed source stack in `2b3e54f9a`; this worker made no further
+production source changes or integrations. Evidence is preserved in
+`phase3-common-history/` under this ticket's assets directory:
+`ACCEPTANCE.md`, `REVIEW-ACCEPTANCE.md`, exact commands, raw measurements,
+served responses, snapshots, all capture pairs and the failed driver attempt.
+
+**Exact source, build and served identities.**
+
+- Baseline: `b84a0de4879168f4c4c0b1bfbd74ceeaad7d7bb7`.
+- Candidate: `2b3e54f9ae745bc77f3fdd9840136306593e37ad`.
+- Both contain the independently reviewed history-fit producer `8f24cec5b`
+  through `28d857622`, with stream SHA-256
+  `5a7e86ab9dc8624e2296335d113d69dcd349aaa65c0e0cbb8765aa806634555a`.
+  Their entire whiteboard tree and both capture harnesses have an empty diff.
+- Both were exported from their immutable commits and built fresh. Executable
+  SHA-256 values are baseline
+  `c1c1d27cd096cc1de64bb2468f7823243d32b14d73ceff57d392edf07710e9d4`
+  and candidate
+  `43c4befb1a871fbc51cd64ee092515cbc7e85c959f58dc79bd6ab16174e17dc2`.
+- The isolated served pages contain the exact frozen history and each side's
+  dashboard script bytes; complete source inventories, response hashes and
+  byte-preserving compressed responses are in the evidence. Covered source
+  inputs remained unchanged after testing.
+
+**Fresh verification.** All suites used `-count=1`:
+
+- Baseline `go test -timeout 20m ./internal/wsdashboard ./internal/wswhiteboard`:
+  PASS, 139.552s / 22.282s.
+- Candidate same suites: PASS, 142.402s / 19.218s.
+- Candidate MCP dashboard/whiteboard/board/panel/theme/closed/topic/wiki subset:
+  PASS, 66.566s.
+- Candidate explicit split, incremental stream/client and WebSocket cases:
+  PASS, 10.890s. Existing opt-in, opt-out, first-send/reconnect/non-topic
+  fallback, shared decomposition, accumulated input and identity assertions
+  remain intact.
+
+**LOOK and sequential heights.**
+
+- Both sides use the same original light-mode 1600x1000 procedure, natural
+  dates/styles, twenty updates, native scroll stops and minimum waits, plus
+  the required observation-only settled-state gate. The common approved
+  history produces fifteen natural stops on both sides, not the old stack's
+  thirteen-stop extent. No old 640px restore, forced heights, masks or
+  normalization was introduced.
+- At all fifteen corresponding stops, finalized boundary IDs, pending/far
+  placeholder state and recorded topic/frame/history geometry match exactly:
+  actual maximum numeric difference 0px; observer errors empty.
+- Compared `phase3-common-history/browser/candidate-look/light-00.png`
+  through `light-14.png` against the same-named
+  `phase3-common-history/browser/baseline-look` captures: layout/style match.
+  Thirteen raw pairs are pixel-identical. Stops 04/05 retain 0.298%/0.625%
+  raw pixel differences in real `just now` versus `1 min ago` labels. The
+  worker and independent reviewer inspected both differing pairs side by
+  side; no history/panel displacement remains on this common stack.
+- The explicit replay holds unchanged script network continuations for the
+  actual T04 e723/e725/e727 frames. Two native 219px reports land, then the
+  third about 41ms later. Both sides fit clip 300 -> 738 -> 957px with e723
+  fully exposed, not the old partial-entry snap.
+- Native disclosure opening then renders a real historical frame late. Clip
+  height grows to 1215px while finalized e723 and the first-height cache stay
+  unchanged. Both sides' recorded geometry matches throughout.
+- The first later-growth driver timed out after successful three-height
+  finalization because it opened only the versions group, leaving the
+  nested historical panel closed. Its exact script, states and failure log
+  remain in `browser/sequential-attempt1/`. The root lead authorized the sole
+  input-only correction to open both existing native disclosures within the
+  retained contract, **not** a new human-owner approval. No source, heights,
+  dates, assertions or timeouts changed. The corrected replay passed both
+  identities. The same reviewer acknowledged the precise authority and
+  confirmed that its acceptance did not rely on new human-owner consent.
+
+**Scenario (c), new common-history identities.** Three alternating runs per
+side, Chromium 148.0.7778.96, shape 8,6,4,2,60; absolute counts after GC:
+
+| Metric, median | 4x baseline -> candidate | 6x baseline -> candidate |
+|---|---|---|
+| ScriptDuration ms | 2438 -> 1275 (-47.7%) | 3414 -> 1841 (-46.1%) |
+| TaskDuration ms | 5652 -> 3335 (-41.0%) | 7728 -> 4674 (-39.5%) |
+| Long-task time ms | 3316 -> 1097 (-66.9%) | 4796 -> 1780 (-62.9%) |
+| LayoutCount | 296 -> 297 | 286 -> 279 |
+| LayoutDuration ms | 225 -> 206 | 299 -> 291 |
+| Nodes | 46492 -> 63230 (+36.0%) | 46492 -> 63230 (+36.0%) |
+| Frames / frames built | 15 / 20 -> 15 / 20 | 15 / 20 -> 15 / 20 |
+
+Retained canonical input nodes cost **+36.0% Nodes** on this stack. It remains
+explicit under Decision 12's CPU-over-memory priority. The old
++35.5%/+36.8% cost and old CPU numbers apply only to their original identities.
+Phase 1's automatic keep-rule output still flags Nodes; it is not a Phase 3
+keep rule. Full samples, within-side spreads and output are preserved.
+
+Independent review resolved the existing Important finding under the revised
+contract, with no remaining findings in that acceptance scope. It reviewed
+source/raw artifacts and inspected captures, but did not rerun tests/browser
+or independently recompute pixels/numbers. This closes no claim about the
+old stack's parity. Coverage remains Chromium light-mode, not new Windows,
+other-browser or dark-mode acceptance. No live activation, shared-state
+mutation, installer/host setup, source promotion, merge or push was performed;
+integration and deployment remain the root lead's boundary.

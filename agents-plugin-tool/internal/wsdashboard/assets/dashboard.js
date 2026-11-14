@@ -553,8 +553,8 @@
   // the shell hides): region updates are held (hiddenRegions) while it
   // holds, and land when it ends (showRegions).
   function pageHidden() { return doc.hidden || shHidden; }
-  function held() {
-    return q("[data-region]").map(function (el) {
+  function held(withoutBoard) {
+    return q("[data-region]").filter(function (el) { return !withoutBoard || el.getAttribute("data-region") !== "board"; }).map(function (el) {
       var name = el.getAttribute("data-region"), p = hiddenRegions[name];
       return name + "." + (p ? p.hash : el.getAttribute("data-h"));
     }).concat(mode !== "index" ? ["mode." + modeHash] : []).join(",");
@@ -638,9 +638,9 @@
       // The notes came back with their markers (writeAnswers); their image
       // rows go back after them, and a note the swap took drops its images.
       if (ctext) { syncMarkers(); renderImgs(); }
-      // A mention button over a body frame the swap removed has nothing left
-      // to add.
-      if (mpend && mpend.frame && !doc.contains(mpend.frame)) hideMention();
+      // An input-held selection is already a value snapshot, even when its
+      // source frame leaves the board during an update.
+      if (mpend && !mpend.locked && mpend.frame && !doc.contains(mpend.frame)) hideMention();
     }
     if (board || name === "convlive") applySent(board);
     if (name === "panels") drawerSync();
@@ -798,7 +798,7 @@
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {
-    var src = frag(html), seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [], changed = [];
+    var seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [], changed = [];
     var pinBox = window.WsCards.pinList();
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n);
@@ -816,7 +816,7 @@
       live["t:" + k] = n;
       if (n.classList.contains("closed") && boardSeen["t:" + k] !== undefined) pinShift.push(n);
     });
-    Array.prototype.slice.call(src.childNodes).forEach(function (n) {
+    boardNodes(html, live).forEach(function (n) {
       var k = topicKey(n);
       if (k === null) {
         want.push(n);
@@ -908,6 +908,54 @@
     window.WsCards.settle(el, plan);
     frameKept(reuse);
     return ins;
+  }
+  // --- incremental board inputs ---------------------------------------------
+  // These are immutable incoming snapshots, not the live DOM. Hidden pages,
+  // editing, overview and dragging may defer several events; the newest input
+  // must include all earlier changes even though none has reached morphBoard.
+  // Canonical nodes are parsed once, then cloned only for changed sections.
+  function boardInputFull(html) {
+    var nodes = Array.prototype.slice.call(frag(html).childNodes), topics = Object.create(null), order = [], before = [], after = [], past = false;
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i], key = topicKey(n);
+      if (key === null) { (order.length ? after : before).push(n); if (order.length && n.nodeType === 1) past = true; continue; }
+      if (past || !n.getAttribute("data-th") || Object.prototype.hasOwnProperty.call(topics, key)) return null;
+      topics[key] = n; order.push(key);
+    }
+    return { topics: topics, order: order, before: before, after: after };
+  }
+  function boardInputPatch(prev, ev) {
+    if (!prev || !ev || typeof ev.hash !== "string" || !Array.isArray(ev.order) || !Array.isArray(ev.topics)) return null;
+    var topics = Object.create(null), changes = Object.create(null);
+    for (var i = 0; i < ev.topics.length; i++) {
+      var t = ev.topics[i];
+      if (!t || typeof t.key !== "string" || typeof t.hash !== "string" || typeof t.html !== "string" || Object.prototype.hasOwnProperty.call(changes, t.key)) return null;
+      var parsed = frag(t.html), n = parsed.firstElementChild;
+      if (!n || parsed.childNodes.length !== 1 || topicKey(n) !== t.key || n.getAttribute("data-th") !== t.hash) return null;
+      changes[t.key] = n;
+    }
+    for (var j = 0; j < ev.order.length; j++) {
+      var key = ev.order[j];
+      if (typeof key !== "string" || Object.prototype.hasOwnProperty.call(topics, key)) return null;
+      var node = changes[key] || prev.topics[key];
+      if (!node) return null;
+      topics[key] = node;
+    }
+    if (Object.keys(changes).some(function (key) { return !Object.prototype.hasOwnProperty.call(topics, key); })) return null;
+    return { topics: topics, order: ev.order.slice(), before: prev.before, after: prev.after };
+  }
+  function boardNodes(input, live) {
+    if (typeof input === "string") return Array.prototype.slice.call(frag(input).childNodes);
+    function clone(n) { return n.cloneNode(true); }
+    return input.before.map(clone).concat(input.order.map(function (key) {
+      var n = input.topics[key], old = live && live["t:" + key];
+      return old && boardSeen["t:" + key] === topicSeen(n) ? old : clone(n);
+    }), input.after.map(clone));
+  }
+  function boardInputFragment(input) {
+    var f = doc.createDocumentFragment();
+    boardNodes(input).forEach(function (n) { f.appendChild(n); });
+    return f;
   }
   // --- keyed frame reuse: a changed topic keeps its unchanged entry frames --
   // An entry frame (data-doc-key entry:eN) is immutable per entry, so inside
@@ -2215,7 +2263,7 @@
   // lists after its answer block (wsinbox mentions). A topic body is a
   // sandboxed frame whose selection this page cannot read, so the frame
   // reports it ({wbDoc: "sel"}, doc-frame.js) and the button stands over it.
-  var mbtn = null, mpend = null, mraf = 0;
+  var mbtn = null, mnote = null, mpend = null, mraf = 0, mcomposing = false;
   // mentionOf is the mention a selection makes: the topic card's key, the
   // item ID when both ends lie in one item (or trusted system-event
   // provenance), the optional immutable entry locator, and selected text.
@@ -2300,28 +2348,72 @@
   }
   function hideMention() {
     mpend = null;
+    mcomposing = false;
+    if (mnote) mnote.value = "";
     if (mbtn) mbtn.hidden = true;
   }
-  // placeMention shows the button for p by its selection's end, kept on
-  // screen; a frame's selection stands where its frame stands now.
+  // Once the input takes focus, live selection reports may no longer replace
+  // this bundle. The copied mentions and owning session outlive DOM updates.
+  function lockMention() { if (mpend) mpend.locked = true; }
+  // This context is ordinary, editable user text, not wire metadata. Include
+  // the excerpts as well as their locators: ordinal references become wrong
+  // after chip removal, another attachment, or an inbox merge.
+  function selectionNote(ms, note) {
+    note = (note || "").trim();
+    if (!note) return "";
+    return wsT("js.wbmention.context") + "\n" + ms.map(function (m) {
+      return "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "") + "\n> " + m.text.replace(/\r?\n/g, "\n> ");
+    }).join("\n\n") + "\n\n" + wsT("js.wbmention.note") + "\n" + note;
+  }
+  // placeMention shows a snapshot beside its selection. An input-held bundle
+  // keeps its last screen position if its source disappears.
   function placeMention(p) {
+    if (mpend && mpend.locked && p !== mpend) return;
     var x = p.x, y = p.y;
     if (p.frame) {
-      if (!doc.contains(p.frame)) { hideMention(); return; }
-      var fr = p.frame.getBoundingClientRect();
-      x += fr.left; y += fr.top;
+      if (doc.contains(p.frame)) {
+        var fr = p.frame.getBoundingClientRect();
+        x += fr.left; y += fr.top;
+      } else if (p.locked) { x = p.screenX; y = p.screenY; }
+      else { hideMention(); return; }
     }
     if (!mbtn) {
-      mbtn = doc.createElement("button");
-      mbtn.type = "button";
+      mbtn = doc.createElement("div");
       mbtn.className = "wbmention";
-      mbtn.setAttribute("data-wbmention", "");
-      mbtn.textContent = wsT("js.wbmention.add");
-      mbtn.title = wsT("js.wbmention.add.title");
-      // Pressing the button must not move the selection it adds.
-      mbtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      mbtn.setAttribute("data-wbmention-pop", "");
+      mbtn.setAttribute("role", "group");
+      mbtn.setAttribute("aria-label", wsT("js.wbmention.add.title"));
+      mnote = doc.createElement("textarea");
+      mnote.rows = 2;
+      mnote.className = "wbmention-note";
+      mnote.placeholder = wsT("js.wbmention.input");
+      mnote.setAttribute("aria-label", wsT("js.wbmention.input"));
+      var add = doc.createElement("button");
+      add.type = "button";
+      add.setAttribute("data-wbmention", "");
+      add.innerHTML = '<svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8.5 2.5H2.5v6l5.3 5.3a1 1 0 0 0 1.4 0l4.6-4.6a1 1 0 0 0 0-1.4Z"/><circle cx="5.5" cy="5.5" r=".8"/></svg>';
+      add.appendChild(doc.createTextNode(wsT("js.wbmention.add")));
+      add.title = wsT("js.wbmention.add.title");
+      mbtn.appendChild(mnote);
+      mbtn.appendChild(add);
+      // Capture before focus collapses the host or sandbox selection. Only
+      // the action prevents focus; the input must remain normally editable.
+      mbtn.addEventListener("mousedown", function (e) { lockMention(); if (e.target === add) e.preventDefault(); });
+      mbtn.addEventListener("focusin", lockMention);
+      mnote.addEventListener("compositionstart", function () { mcomposing = true; });
+      mnote.addEventListener("compositionend", function () { mcomposing = false; });
+      mbtn.addEventListener("keydown", function (e) {
+        if (e.isComposing || e.keyCode === 229 || mcomposing) { if (e.target === add) e.preventDefault(); e.stopPropagation(); return; }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideMention(); ctext.focus(); }
+        // Enter edits the note; attachment always uses the explicit action.
+      });
       doc.body.appendChild(mbtn);
     }
+    if (p !== mpend) {
+      p = Object.assign({}, p, { ms: validMentions(p.ms || [p.m]), rid: rid });
+      mnote.value = "";
+    }
+    p.screenX = x; p.screenY = y;
     mpend = p;
     mbtn.hidden = false;
     var w = mbtn.offsetWidth, h = mbtn.offsetHeight;
@@ -2330,22 +2422,30 @@
   }
   function syncHostMention() {
     mraf = 0;
+    if (mpend && mpend.locked) return;
     var p = hostMention();
     if (p) placeMention(p);
     else if (mpend && !mpend.frame) hideMention();
   }
   function addMention() {
     var p = mpend;
+    if (!p || p.rid !== rid || mcomposing) return;
+    var text = selectionNote(p.ms, mnote.value);
     hideMention();
-    if (!p) return;
-    bmentions = bmentions.concat(p.ms || [p.m]);
-    if (p.frame) postDoc(p.frame, { wbDoc: "unsel" });
+    bmentions = bmentions.concat(p.ms);
+    if (p.frame) { if (doc.contains(p.frame)) postDoc(p.frame, { wbDoc: "unsel" }); }
     else if (window.getSelection) window.getSelection().removeAllRanges();
+    // Append rather than replace the composer's selected text. The context
+    // stays readable after ordinary edits, restoration, and merged sends.
+    if (text) editText(ctext.value.length, ctext.value.length, (ctext.value ? "\n\n" : "") + text);
     renderChips();
+    queueDraft();
+    ctext.focus();
   }
   // frameMention takes a body frame's selection report: its text and where
   // its end stands inside the frame.
   function frameMention(f, text, x, y) {
+    if (mpend && mpend.locked) return;
     var t = f.closest("section.topic[data-topic]"), entry = f.getAttribute("data-entry") || "";
     var item = f.getAttribute("data-entry-item") || "", parentEntry = entryAt(f.parentNode);
     if (!item && parentEntry) item = parentEntry.getAttribute("data-entry-item") || "";
@@ -2363,13 +2463,16 @@
     });
     // A press anywhere on this page leaves a frame's selection behind.
     doc.addEventListener("mousedown", function (e) {
-      if (mpend && mpend.frame && !(e.target.closest && e.target.closest("[data-wbmention]"))) hideMention();
+      if (mpend && !mpend.locked && mpend.frame && !(e.target.closest && e.target.closest("[data-wbmention-pop]"))) hideMention();
     }, true);
+    doc.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229 && !mcomposing && mpend) hideMention();
+    });
     // The button follows its selection when the board scrolls or the
     // window resizes.
     var follow = function () {
       if (!mpend) return;
-      if (mpend.frame) { placeMention(mpend); return; }
+      if (mpend.locked || mpend.frame) { placeMention(mpend); return; }
       var p = hostMention();
       if (p) placeMention(p); else hideMention();
     };
@@ -3041,6 +3144,14 @@
       }
     });
   }
+  function previewOpen(a, path, out) {
+    // Frame menus are detached links. Their origin was captured from the
+    // source- and document-key-validated host frame, never the message.
+    var origin = a.wsPreviewOrigin || (a.closest && a.closest("section.topic[data-topic]"));
+    var o = out ? { out: true } : {};
+    if (origin) o.origin = origin;
+    if (out || origin) window.WsPreview.open(path, o); else window.WsPreview.open(path);
+  }
   function openLinkMenu(a, x, y) {
     closeLinkMenu(false);
     var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
@@ -3048,9 +3159,9 @@
     var sys = root.hasAttribute("data-sysopen"), out = a.hasAttribute("data-out");
     var items = [];
     if (webLink(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ url: url }); }]);
-    if (previews(a)) items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(rel); }]);
+    if (previews(a)) items.push([wsT("js.menu.preview"), function () { previewOpen(a, rel, false); }]);
     else if (outsideOpens(a)) {
-      items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(abs, { out: true }); }]);
+      items.push([wsT("js.menu.preview"), function () { previewOpen(a, abs, true); }]);
       if (/\.html?$/i.test(abs)) items.push([wsT("js.menu.newtab"), function () { openOutsideTab(abs); }]);
     }
     if (webFile(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ path: rel }); }]);
@@ -3112,8 +3223,8 @@
     // right click and on the keyboard activation (a click event with no
     // detail).
     if (e.detail !== 0 && webLink(a)) { window.WsWeb.open({ url: a.href }); return; }
-    if (e.detail !== 0 && previews(a)) { window.WsPreview.open(a.getAttribute("data-rel")); return; }
-    if (e.detail !== 0 && outsideOpens(a)) { window.WsPreview.open(a.getAttribute("data-abs"), { out: true }); return; }
+    if (e.detail !== 0 && previews(a)) { previewOpen(a, a.getAttribute("data-rel"), false); return; }
+    if (e.detail !== 0 && outsideOpens(a)) { previewOpen(a, a.getAttribute("data-abs"), true); return; }
     linkAt(a, e);
   }, true);
   doc.addEventListener("contextmenu", function (e) {
@@ -4040,6 +4151,7 @@
     } else if (m.wbDoc === "link") {
       var a = frameLink(m);
       if (!a) return;
+      a.wsPreviewOrigin = f.closest("section.topic[data-topic]");
       // A body frame reports a plain click and a keyboard activation alike:
       // a localhost page opens its web card on either, but only while the
       // user is acting (a click in a frame activates this page too), so a
@@ -6123,7 +6235,7 @@
     if (!TL_REGIONS[name]) return;
     var was = tlHeld[name], el = region(name);
     if (was ? was.hash === hash : !el || el.getAttribute("data-h") === hash) return;
-    tlHeld[name] = { hash: hash, root: frag(html) };
+    tlHeld[name] = { hash: hash, root: name === "board" && typeof html !== "string" ? boardInputFragment(html) : frag(html) };
     tlCount();
   }
   // The tracker term and its new arrivals: each store's first loaded render
@@ -6210,12 +6322,13 @@
     return { close: function () { over = true; try { ws.close(); } catch (x) {} } };
   }
   var ASSETS_TRIED = "ws.dashboard.assetsreload";
-  function connect() {
+  function connect(withoutBoard) {
     if (!window.WebSocket) return;
+    var boardInput = null;
     // The shell streams the rail alone; a framed session page streams its
     // session without the rail.
     var path = shell ? "/rail/events" : mode === "index" ? "/events" : "/s/" + rid + "/events";
-    var st = openStream(path + "?h=" + encodeURIComponent(held()) + (framed && mode !== "index" ? "&frame=1" : ""), {
+    var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : ""), {
       open: function () { connected(true); },
       // Reopen with the hashes held now, so a reconnect sends only what
       // changed since.
@@ -6224,7 +6337,7 @@
         trackerLost();
         setTimeout(connect, 3000);
       },
-      events: { assets: onAssets, region: onRegion, tracker: onTracker, gone: onGone }
+      events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, tracker: onTracker, gone: onGone }
     });
     function onRegion(ev) {
       if (!ev) return;
@@ -6235,6 +6348,26 @@
         syncBadge();
         return;
       }
+      if (ev.name === "board") {
+        boardInput = boardInputFull(ev.html);
+        if (boardInput) ev = { name: "board", hash: ev.hash, html: boardInput };
+      }
+      receiveRegion(ev);
+    }
+    function onBoardTopics(ev) {
+      var next = boardInputPatch(boardInput, ev);
+      if (!next) {
+        // This connection's baseline cannot be trusted. Close it before
+        // reopening without the board hash; other regions keep their hashes.
+        st.close();
+        connected(false);
+        setTimeout(function () { connect(true); }, 0);
+        return;
+      }
+      boardInput = next;
+      receiveRegion({ name: "board", hash: ev.hash, html: next });
+    }
+    function receiveRegion(ev) {
       // A hidden tab keeps only each region's newest update and applies none;
       // showing the tab applies them (showRegions). The stream stays open, so
       // the light events (tracker) still arrive and act.
@@ -6709,9 +6842,9 @@
   var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 48;
   var rdragged = false, rdLineEl = null, rdHintEl = null, rdKidEl = null, rdRaf = 0;
   function rdPeers(item) {
-    var ws = item.classList.contains("rws");
+    var ws = item.classList.contains("rws"), wt = item.classList.contains("rwt");
     return Array.prototype.filter.call(item.parentNode.children, function (c) {
-      return ws ? c.classList.contains("rws") : c.classList.contains("rs") && !c.classList.contains("ended") && WsRail.starred(c) === WsRail.starred(item);
+      return ws ? c.classList.contains("rws") : wt ? c.classList.contains("rwt") : c.classList.contains("rs") && !c.classList.contains("ended") && WsRail.starred(c) === WsRail.starred(item);
     });
   }
   function rdLine(box) {
@@ -6839,10 +6972,13 @@
     rdKid(null);
     if (!rdItem(d)) { rdHint(""); rdLine(null); return; }
     if (d.item.classList.contains("rs")) { rdRow(d, doc.elementFromPoint(x, y), x, y, lr); return; }
-    rdHint("");
+    var wt = d.item.classList.contains("rwt");
+    var why = wt ? WsRail.dropRefusal(d.item, doc.elementFromPoint(x, y)) : "";
+    rdHint(why, x, y);
+    if (why) { rdLine(null); return; }
     var peers = rdPeers(d.item), at = peers.length, i;
     for (i = 0; i < peers.length; i++) {
-      var r = peers[i].getBoundingClientRect();
+      var r = (wt ? peers[i].querySelector(".wthd") : peers[i]).getBoundingClientRect();
       if (y < r.top + r.height / 2) { at = i; break; }
     }
     var me = peers.indexOf(d.item);
@@ -6873,9 +7009,9 @@
       item = grip.closest(".rs");
       if (!item || !railEl.contains(item) || item.classList.contains("ended") || item.parentNode.closest(".rended")) return;
     } else {
-      var b = t.closest("button"), bar = t.closest(".wsbar");
-      if ((b && !b.classList.contains("wstog")) || !bar || !railEl.contains(bar)) return;
-      item = bar.closest(".rws");
+      var b = t.closest("button"), hd = t.closest(".wthd"), bar = hd || t.closest(".wsbar");
+      if ((b && (hd || !b.classList.contains("wstog"))) || !bar || !railEl.contains(bar)) return;
+      item = bar.closest(hd ? ".rwt" : ".rws");
       if (!item || rdPeers(item).length < 2) return;
     }
     var touch = e.pointerType === "touch";
@@ -6950,13 +7086,14 @@
     });
     layoutSave(z.op, function () { undo(); railMarks(); });
   }
-  // rdSave drops a workspace item next to ref (WsRail.drop) and posts the
-  // move (wsmove), with an undo that puts the item back where it stood.
+  // rdSave drops a workspace or complete worktree group next to ref and
+  // posts wsmove/wtmove, with an undo that restores the whole subtree.
   function rdSave(item, ref, after) {
     var box = item.parentNode, next = item.nextSibling;
     if (!WsRail.drop(item, ref, after)) return;
-    var ws = item.classList.contains("rws"), attr = ws ? "data-ws" : "data-rid";
-    var body = ws ? { op: "wsmove", path: item.getAttribute(attr) || "" } : { op: "move", rid: item.getAttribute(attr) || "" };
+    var wt = item.classList.contains("rwt"), attr = wt ? "data-g" : "data-ws";
+    var body = { op: wt ? "wtmove" : "wsmove", path: item.getAttribute(attr) || "" };
+    if (wt) body.workspace = item.closest(".rws").getAttribute("data-ws") || "";
     body[after ? "after" : "before"] = ref.getAttribute(attr) || "";
     layoutSave(body, function () {
       if (box.isConnected && item.isConnected) box.insertBefore(item, next && next.parentNode === box ? next : null);
@@ -6972,7 +7109,7 @@
     // so a release it never hears does not hold the rail's swaps.
     window.addEventListener("blur", function () { rdEnd(null); });
     railEl.addEventListener("click", function (e) { if (rdragged) { e.preventDefault(); e.stopPropagation(); } }, true);
-    railEl.addEventListener("dragstart", function (e) { if (e.target.closest && e.target.closest(".rs, .wsbar")) e.preventDefault(); });
+    railEl.addEventListener("dragstart", function (e) { if (e.target.closest && e.target.closest(".rs, .wsbar, .wthd")) e.preventDefault(); });
     // A dragged touch is a drag, not a scroll or the long-press menu.
     railEl.addEventListener("touchmove", function (e) { if (rdrag && rdrag.on) e.preventDefault(); }, { passive: false });
     railEl.addEventListener("contextmenu", function (e) { if (rdrag && rdrag.touch) e.preventDefault(); });
@@ -8014,7 +8151,7 @@
     var row = el.appendChild(mk("div", "sprow"));
     var status = row.appendChild(mk("span", "spnote"));
     var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
-    var go = row.appendChild(rpBtn("pbtn go", wsT("js.lead.start")));
+    var start = row.appendChild(rpBtn("pbtn go", wsT("js.lead.start")));
     function setErr(text) { err.textContent = text || ""; err.hidden = !text; }
     function off(k) { var h = supHarness(k); return !!h && h.available === false; }
     function sync() {
@@ -8026,7 +8163,7 @@
       });
       Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("aria-checked", String(P.iso === k)); });
       idesc.textContent = wsT(P.iso === "isolated" ? "js.lead.iso.isolated.hint" : "js.lead.iso.default.hint") + (P.harness === "pi" ? " " + wsT("js.lead.iso.pi") : "");
-      go.disabled = P.busy || off(P.harness);
+      start.disabled = P.busy || off(P.harness);
     }
     // edited drops an earlier spawn's error once the form changed.
     function edited() {
@@ -8043,7 +8180,7 @@
     }
     function submit() {
       sync();
-      if (go.disabled) return;
+      if (start.disabled) return;
       notifAsk();
       var gen = P.gen;
       P.busy = true;
@@ -8051,13 +8188,15 @@
       status.textContent = wsT("js.lead.starting");
       sync();
       railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value, isolation: P.iso }), function (st, v, s) {
+        P.busy = false;
+        status.textContent = "";
+        sync();
         if (st === 201 && v.id) {
+          if (rpLive(P, gen)) railPopClose(false);
           saveDraft();
           go("/s/" + encodeURIComponent(String(v.id)));
           return;
         }
-        P.busy = false;
-        status.textContent = "";
         if (!rpLive(P, gen)) { toast(leadErr(st, s)); return; }
         setErr(leadErr(st, s));
         sync();
@@ -8067,7 +8206,7 @@
     iseg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-iso]"); if (b) { P.iso = b.getAttribute("data-iso"); sync(); } });
     seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-harness]"); if (b && !b.disabled) setHarness(b.getAttribute("data-harness")); });
     cancel.addEventListener("click", function () { railPopClose(true); });
-    go.addEventListener("click", submit);
+    start.addEventListener("click", submit);
     P.open = function (key, label, btn) {
       var gen = ++P.gen, name = btn.getAttribute("data-name") || label, branch = btn.getAttribute("data-branch") || "";
       P.busy = false;

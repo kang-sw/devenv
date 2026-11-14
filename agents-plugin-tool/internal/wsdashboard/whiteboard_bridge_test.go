@@ -37,7 +37,11 @@ func TestBoardEntryFrameBridgeStaysNarrow(t *testing.T) {
 	runNode(t, "entry frame bridge", `
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
-var calls = [], jumps = [], pending = null, mpend = null, cchips = {}, handler;
+var calls = [], jumps = [], pending = null, mpend = null, cchips = {}, handler, menus = [];
+var navigator = { userActivation: { isActive: false } };
+function frameLink(m) { return m.href ? { href: m.href } : null; }
+function webLink() { return false; }
+function openLinkMenu(a, x, y) { menus.push({ a: a, x: x, y: y }); }
 var board = { name: "board" }, pins = { name: "pins" }, targets = {};
 function target(id, owned) { return targets[id] = { id: id, owned: owned, tagName: "DIV", parentNode: null, closest: function () { return this.history ? board : null; }, scrollIntoView: function () { jumps.push(id); } }; }
 var fold = { tagName: "DETAILS", owned: true, open: false, parentNode: null };
@@ -57,7 +61,8 @@ var wrapper = { nodeType: 1, getAttribute: function (k) { return k === "data-ent
 function frame(owned, entry) {
   return { nodeType: 1, owned: owned, parentNode: entry ? wrapper : topic, contentWindow: {},
     getAttribute: function (k) { return k === "data-entry" ? entry : k === "data-doc-key" || k === "data-doc" ? "entry:" + entry : null; },
-    closest: function (s) { return s === "[data-entry]" ? (entry ? this : null) : topic; } };
+    closest: function (s) { return s === "[data-entry]" ? (entry ? this : null) : topic; },
+    getBoundingClientRect: function () { return { left: 10, top: 20 }; } };
 }
 var own = frame(true, "e7"), foreign = frame(false, "e999"), frames = [own, foreign];
 function q() { return frames; }
@@ -90,6 +95,15 @@ handler({ source: own.contentWindow, data: { wbDoc: "jump", docKey: "entry:e999"
 check("foreign source or wrong identity cannot jump", jumps, ["p1", "p9", "item-3"]);
 handler({ source: own.contentWindow, data: { wbDoc: "jump", docKey: "entry:e7", id: "p1" } });
 check("own matching frame can jump to a validated target", jumps, ["p1", "p9", "item-3", "p1"]);
+handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md", topic: "forged", origin: "forged", x: 4, y: 5 } });
+check("frame link derives exact origin from validated frame, never message identity", [menus.length, menus[0].a.wsPreviewOrigin === topic, menus[0].x, menus[0].y], [1, true, 14, 25]);
+handler({ source: foreign.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md" } });
+handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:wrong", href: "docs/a.md" } });
+handler({ source: {}, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md" } });
+frames = [foreign]; own.owned = false;
+handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md" } });
+check("unknown, wrong-key, off-board and disappeared frames cannot open menus", menus.length, 1);
+frames = [own, foreign]; own.owned = true;
 var posted = [];
 own.contentWindow.postMessage = function (m) { posted.push(m); };
 postDoc(own, { wbDoc: "size" });

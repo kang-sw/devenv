@@ -1,0 +1,190 @@
+{
+  "scratch_root": "/tmp/ws-board-topics-common-history.EWq6tq",
+  "head": "2b3e54f9ae745bc77f3fdd9840136306593e37ad",
+  "branch": "impl/develop/suing-shut-puppy",
+  "sources": {
+    "baseline": {
+      "revision": "b84a0de4879168f4c4c0b1bfbd74ceeaad7d7bb7",
+      "root": "/tmp/ws-board-topics-common-history.EWq6tq/exports/baseline",
+      "module_git_tree": "7fa7f7360ae4fd779340141fba839f8e59190d25",
+      "root_git_tree": "0b5456eb716e5decae886aeb8653438f8d1d7fd5",
+      "archive_sha256": "57d1f3295f774c5a41a444f0b40188f2b0ae99c24f7cd65abc5344deeb1fb573",
+      "inventory_sha256": "1afba1686abc7e4573b5d7e6c740373335b8fa86a1846ca3c5ae257bd8be2f00",
+      "stream_sha256": "5a7e86ab9dc8624e2296335d113d69dcd349aaa65c0e0cbb8765aa806634555a",
+      "export_unchanged": true,
+      "binary_sha256": "c1c1d27cd096cc1de64bb2468f7823243d32b14d73ceff57d392edf07710e9d4"
+    },
+    "candidate": {
+      "revision": "2b3e54f9ae745bc77f3fdd9840136306593e37ad",
+      "root": "/tmp/ws-board-topics-common-history.EWq6tq/exports/candidate",
+      "module_git_tree": "441841742d7f7db617e596fba78ff92e68e0f717",
+      "root_git_tree": "7cb79feb4ad037f58da544c3a54eba2bb1d2a55d",
+      "archive_sha256": "b66f66e77da81214c7361b418fceaf4ec719a99c243c9e49ff8d763aacd7427f",
+      "inventory_sha256": "cf553e7ada05290945a3c9bfa7f6caf61ca9887128ae034fd4cf2bc7b593bd31",
+      "stream_sha256": "5a7e86ab9dc8624e2296335d113d69dcd349aaa65c0e0cbb8765aa806634555a",
+      "export_unchanged": true,
+      "binary_sha256": "43c4befb1a871fbc51cd64ee092515cbc7e85c959f58dc79bd6ab16174e17dc2"
+    }
+  },
+  "commands": [
+    {
+      "name": "baseline-build",
+      "side": "baseline",
+      "cwd": "/tmp/ws-board-topics-common-history.EWq6tq/exports/baseline/agents-plugin-tool",
+      "argv": [
+        "go",
+        "test",
+        "-c",
+        "-count=1",
+        "-o",
+        "/tmp/ws-board-topics-common-history.EWq6tq/bin/baseline.test",
+        "./internal/mcp"
+      ],
+      "environment": {
+        "WS_CACHE_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/baseline/ws-cache",
+        "WS_CONFIG_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/baseline/ws-config",
+        "GOCACHE": "/tmp/ws-board-topics-common-history.EWq6tq/state/baseline/go-cache"
+      },
+      "exit": 0,
+      "elapsed_seconds": 10.193
+    },
+    {
+      "name": "candidate-build",
+      "side": "candidate",
+      "cwd": "/tmp/ws-board-topics-common-history.EWq6tq/exports/candidate/agents-plugin-tool",
+      "argv": [
+        "go",
+        "test",
+        "-c",
+        "-count=1",
+        "-o",
+        "/tmp/ws-board-topics-common-history.EWq6tq/bin/candidate.test",
+        "./internal/mcp"
+      ],
+      "environment": {
+        "WS_CACHE_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/ws-cache",
+        "WS_CONFIG_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/ws-config",
+        "GOCACHE": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/go-cache"
+      },
+      "exit": 0,
+      "elapsed_seconds": 9.835
+    },
+    {
+      "name": "baseline-suites",
+      "side": "baseline",
+      "cwd": "/tmp/ws-board-topics-common-history.EWq6tq/exports/baseline/agents-plugin-tool",
+      "argv": [
+        "go",
+        "test",
+        "-timeout",
+        "20m",
+        "./internal/wsdashboard",
+        "./internal/wswhiteboard",
+        "-count=1"
+      ],
+      "environment": {
+        "WS_CACHE_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/baseline/ws-cache",
+        "WS_CONFIG_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/baseline/ws-config",
+        "GOCACHE": "/tmp/ws-board-topics-common-history.EWq6tq/state/baseline/go-cache"
+      },
+      "exit": 0,
+      "elapsed_seconds": 141.559
+    },
+    {
+      "name": "candidate-suites",
+      "side": "candidate",
+      "cwd": "/tmp/ws-board-topics-common-history.EWq6tq/exports/candidate/agents-plugin-tool",
+      "argv": [
+        "go",
+        "test",
+        "-timeout",
+        "20m",
+        "./internal/wsdashboard",
+        "./internal/wswhiteboard",
+        "-count=1"
+      ],
+      "environment": {
+        "WS_CACHE_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/ws-cache",
+        "WS_CONFIG_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/ws-config",
+        "GOCACHE": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/go-cache"
+      },
+      "exit": 0,
+      "elapsed_seconds": 144.919
+    },
+    {
+      "name": "candidate-mcp-subset",
+      "side": "candidate",
+      "cwd": "/tmp/ws-board-topics-common-history.EWq6tq/exports/candidate/agents-plugin-tool",
+      "argv": [
+        "go",
+        "test",
+        "-timeout",
+        "20m",
+        "./internal/mcp",
+        "-run",
+        "Dashboard|Whiteboard|Board|Panel|Theme|Closed|Topic|Wiki",
+        "-count=1"
+      ],
+      "environment": {
+        "WS_CACHE_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/ws-cache",
+        "WS_CONFIG_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/ws-config",
+        "GOCACHE": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/go-cache"
+      },
+      "exit": 0,
+      "elapsed_seconds": 67.312
+    },
+    {
+      "name": "candidate-focused",
+      "side": "candidate",
+      "cwd": "/tmp/ws-board-topics-common-history.EWq6tq/exports/candidate/agents-plugin-tool",
+      "argv": [
+        "go",
+        "test",
+        "-timeout",
+        "20m",
+        "./internal/wsdashboard",
+        "-run",
+        "TestSplitBoardTopics|TestBoardTopics|TestPageStreamsRideWebSocket",
+        "-count=1"
+      ],
+      "environment": {
+        "WS_CACHE_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/ws-cache",
+        "WS_CONFIG_HOME": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/ws-config",
+        "GOCACHE": "/tmp/ws-board-topics-common-history.EWq6tq/state/candidate/go-cache"
+      },
+      "exit": 0,
+      "elapsed_seconds": 11.475
+    }
+  ],
+  "required_diff_empty": true,
+  "old_look_failure": "preserved and open",
+  "environment": {
+    "removed_inherited_names": [
+      "WS_HOSTED_SESSION",
+      "WS_HOSTED_SESSION_KEY",
+      "WS_HOSTED_SESSION_ROW",
+      "WS_MAILBOX",
+      "WS_MAILBOX_AUTO",
+      "WS_MCP_BOOTSTRAP_BINARY",
+      "WS_MCP_BOOTSTRAP_URL",
+      "WS_PI_DELEGATION_POLICY",
+      "WS_PI_EXPLORE_MODE",
+      "WS_PI_FORK_AFFINITY",
+      "WS_PI_FORK_CONTEXT",
+      "WS_PI_PARENT_SESSION_KEY",
+      "WS_PI_SPAWN_ROLE",
+      "WS_PI_WEB_HOME",
+      "WS_SKILLS_ROOT"
+    ],
+    "common_overrides": {
+      "GOTOOLCHAIN": "local",
+      "GOPROXY": "off",
+      "GOFLAGS": "-mod=readonly",
+      "GOWORK": "off",
+      "GOMODCACHE": "/Users/kang-sw/go/pkg/mod"
+    },
+    "go_version": "go version go1.26.2 darwin/arm64"
+  },
+  "final_worktree_status": "",
+  "final_head": "2b3e54f9ae745bc77f3fdd9840136306593e37ad"
+}

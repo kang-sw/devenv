@@ -581,7 +581,7 @@ func (c *conv) steerWorker() {
 	if c.rec.Parent == nil || c.rec.Backend != BackendPi {
 		return
 	}
-	if _, ok := c.proc.(reportSteerer); !ok {
+	if controlsFor(c.proc).reports == nil {
 		return
 	}
 	// Every Runner.Send to this worker is marked for steering. Serialize
@@ -613,7 +613,7 @@ func (c *conv) takeReport(text string) {
 }
 
 func (c *conv) takeSteer(text string, mark uint64) {
-	if st, ok := c.proc.(reportSteerer); ok && c.turn && !c.rec.Lead && !c.replaying && !c.wrapHold {
+	if st := controlsFor(c.proc).reports; st != nil && c.turn && !c.rec.Lead && !c.replaying && !c.wrapHold {
 		err := st.Steer(text)
 		if err == nil {
 			c.steerSeq++
@@ -681,7 +681,7 @@ func (c *conv) unsteer() {
 			return
 		}
 	}
-	if st, ok := c.proc.(reportSteerer); ok {
+	if st := controlsFor(c.proc).reports; st != nil {
 		if err := st.ClearSteered(); err != nil {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: drop the steered reports the run did not take: %v\n", c.rec.ReplyID, err)
 			c.stopProcess("")

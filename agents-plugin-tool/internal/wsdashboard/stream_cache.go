@@ -63,6 +63,9 @@ type pageRender struct {
 	// render error). They are shared by every stream of the page: a stream
 	// never modifies them (regionFilter.apply copies).
 	regions regionSet
+	// board is the topic decomposition of regions[board], computed once in
+	// the shared session render, never per connection.
+	board *boardTopics
 	// ok is false once the page is gone.
 	ok bool
 	// deps are the wake tokens the render depends on; nil depends on every

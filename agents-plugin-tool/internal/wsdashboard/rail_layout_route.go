@@ -13,7 +13,7 @@ import (
 // can reorder and star too: the layout is a view preference every viewer
 // shares, with no execution authority.
 //
-// The body is {op, rid?, parent?, before?, after?, path?, order?, stars?,
+// The body is {op, rid?, parent?, before?, after?, path?, workspace?, order?, stars?,
 // wsorder?}:
 //
 //   - move {rid, before|after}: reorder a live session among its group's
@@ -25,6 +25,8 @@ import (
 //     a top-level row of its own group, else next to its old parent).
 //   - star, unstar {rid}: add or remove rid in its workspace's stars.
 //   - wsmove {path, before|after}: reorder a workspace.
+//   - wtmove {workspace, path, before|after}: reorder a displayed worktree
+//     group within its workspace, including root and empty groups.
 //   - import {order, stars, wsorder}: a browser's retired local layout,
 //     taken only into an empty layout.
 //

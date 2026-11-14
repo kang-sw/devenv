@@ -74,19 +74,20 @@ function fetch(url, o) {
   var a = answers.shift() || { status: 500 };
   return Promise.resolve({ ok: !a.status, status: a.status || 200, json: function () { return Promise.resolve(a); } });
 }
-var kinds = {}, list = [];
+var kinds = {}, list = [], placements = [];
 function Card(kind, data) {
   this.kind = kind; this.data = data; this.pinned = false; this.body = new El("div"); this.saves = 0;
   this.body.clientHeight = 100;
 }
 Card.prototype.title = function (t) { this.head = t; };
 Card.prototype.actions = function (a) { this.acts = a; };
-["fold", "show", "bump", "close"].forEach(function (k) { Card.prototype[k] = function () {}; });
+["fold", "show", "close"].forEach(function (k) { Card.prototype[k] = function () {}; });
+Card.prototype.bump = function (origin) { placements.push(["bump", origin]); };
 Card.prototype.save = function () { this.saves++; };
 var window = { WsCards: {
   register: function (name, kind) { kinds[name] = kind; },
   list: function (kind) { return list.filter(function (c) { return c.kind === kind; }); },
-  open: function (kind, data) { var c = new Card(kind, data); list.push(c); kinds[kind].open(c); return c; }
+  open: function (kind, data, at, origin) { placements.push(["open", origin]); var c = new Card(kind, data); list.push(c); kinds[kind].open(c); return c; }
 } };
 eval(`+string(src)+`);
 window.WsPreview.setup({ post: function (route, body, done) { posts.push({ route: route, body: body }); done(true, {}); }, toast: function () {} });
@@ -97,8 +98,10 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
 
   // The first load posts the path and frames the answer's capability URL.
   answers.push({ kind: "frame", abs: abs, frame: "/s/rid1/fs/ocap/CAP1/page.html", view: "/s/rid1/fs/oview/VIEW1/page.html", ttl: 900 });
-  var card = window.WsPreview.open(abs, { out: true });
+  var origin = { topic: "exact node" };
+  var card = window.WsPreview.open(abs, { out: true, origin: origin });
   await settle();
+  check("new preview carries exact node only as transient placement", [placements.length, placements[0][0], placements[0][1] === origin, "origin" in card.data], [1, "open", true, false]);
   check("the first load", calls, [mint]);
   check("the card's record", card.data, { path: abs, out: true });
   var fr = find(card.body, "IFRAME");
@@ -110,8 +113,9 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   kinds.preview.open(card);
   await settle();
   answers.push({ kind: "frame", frame: "/s/rid1/fs/ocap/CAP3/page.html" });
-  window.WsPreview.open(abs, { out: true });
+  window.WsPreview.open(abs, { out: true, origin: origin });
   await settle();
+  check("same-path ordinary reuse bumps with exact origin", [placements.length, placements[1][0], placements[1][1] === origin], [2, "bump", true]);
   check("every load posts", calls, [mint, mint, mint]);
   check("the reloaded frame", find(card.body, "IFRAME").src, "/s/rid1/fs/ocap/CAP3/page.html");
   check("one slot", list.length, 1);
@@ -167,6 +171,11 @@ function settle() { return new Promise(function (r) { setTimeout(r, 0); }); }
   // A pinned card of a path inside the root is not the outside card of
   // the same text.
   card.pinned = true;
+  var before = placements.length;
+  answers.push({ kind: "text", text: "pinned" });
+  var matched = window.WsPreview.open("docs/a.md", { origin: origin, line: 12 });
+  await settle();
+  check("matching pinned reuse never repositions or persists origin", [matched === card, card.pinned, placements.length === before, card.data], [true, true, true, { path: "docs/a.md", line: 12 }]);
   answers.push({ kind: "text", text: "x" });
   var other = window.WsPreview.open("docs/a.md", { out: true });
   await settle();
@@ -256,6 +265,15 @@ check("a click on a link inside the root", [opened, menu()], [[["docs/a.md"]], n
 reset();
 fire("click", pdf, 1);
 check("a click on a file no preview shows", [opened, menu()], [[], ["js.menu.copyabs"]]);
+
+// Direct and menu paths carry the exact enclosing node, not its name.
+var exactTopic = { name: "same-name-is-not-authority" }, closest = inside.closest;
+inside.closest = function (s) { return s === "section.topic[data-topic]" ? exactTopic : closest.call(this, s); };
+reset(); fire("click", inside, 1);
+check("direct link passes exact origin", opened[0][1].origin === exactTopic, true);
+reset(); fire("contextmenu", inside, 1); pick("js.menu.preview");
+check("context preview passes exact origin", opened[0][1].origin === exactTopic, true);
+inside.closest = closest;
 
 // The menu: the keyboard activation and the right click.
 reset();

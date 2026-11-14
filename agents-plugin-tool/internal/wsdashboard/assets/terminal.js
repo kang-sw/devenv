@@ -617,6 +617,8 @@
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closePop(true); }
     });
     window.addEventListener("resize", function () { if (!pop.hidden) placePop(); });
+    // A floating transition changes the face, not the window or opener.
+    if (window.ResizeObserver) new window.ResizeObserver(function () { if (!pop.hidden) placePop(); }).observe(ui.btn);
     doc.addEventListener("mousedown", function (e) {
       if (!pop.hidden && !pop.contains(e.target) && !ui.btn.contains(e.target)) closePop(false);
     }, true);

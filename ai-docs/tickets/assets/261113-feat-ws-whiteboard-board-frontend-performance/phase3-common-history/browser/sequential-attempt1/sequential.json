@@ -1,0 +1,375 @@
+{
+  "status": "failed",
+  "sides": {
+    "baseline": {
+      "routeTrace": [
+        {
+          "action": "held",
+          "key": "entry:e723",
+          "url": "http://127.0.0.1:53132/s/wb-frame-e4ba8bf4bd1b.js",
+          "at": 1794637833736
+        },
+        {
+          "action": "held",
+          "key": "entry:e725",
+          "url": "http://127.0.0.1:53132/s/wb-frame-e4ba8bf4bd1b.js",
+          "at": 1794637833736
+        },
+        {
+          "action": "held",
+          "key": "entry:e727",
+          "url": "http://127.0.0.1:53132/s/wb-frame-e4ba8bf4bd1b.js",
+          "at": 1794637833736
+        },
+        {
+          "action": "released",
+          "key": "entry:e723",
+          "at": 1794637834144
+        },
+        {
+          "action": "released",
+          "key": "entry:e725",
+          "at": 1794637834144
+        },
+        {
+          "action": "released",
+          "key": "entry:e727",
+          "at": 1794637834185
+        }
+      ],
+      "states": [
+        {
+          "label": "three actual frame documents awaiting unchanged script responses",
+          "topic": {
+            "key": "T04",
+            "top": 1124,
+            "left": 2,
+            "width": 691.65625,
+            "height": 961.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": true,
+                "queued": false,
+                "style": "300px",
+                "clip": 300,
+                "live": 388.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": 1189.75,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 1744.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 1804.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 1809.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e655",
+                "tag": "DIV",
+                "style": "",
+                "top": 1876.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 1911.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 1978.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 2012.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 2080.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        },
+        {
+          "label": "first two native 219px heights applied; third response still held",
+          "topic": {
+            "key": "T04",
+            "top": 1124,
+            "left": 2,
+            "width": 691.65625,
+            "height": 1399.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": true,
+                "queued": false,
+                "style": "738px",
+                "clip": 738,
+                "live": 826.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": 1189.75,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 1744.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 1804.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 1809.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e655",
+                "tag": "DIV",
+                "style": "",
+                "top": 2095.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 2130.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 2416.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 2450.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 2518.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        },
+        {
+          "label": "third native 219px height applied; boundary finalized",
+          "topic": {
+            "key": "T04",
+            "top": 1124,
+            "left": 2,
+            "width": 691.65625,
+            "height": 1618.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": false,
+                "queued": false,
+                "style": "957px",
+                "clip": 957,
+                "live": 1045.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": 1189.75,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 1744.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 1804.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 1809.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e655",
+                "tag": "DIV",
+                "style": "",
+                "top": 2095.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 2130.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 2416.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 2450.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 2737.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "failure": "TimeoutError: frame.waitForFunction: Timeout 10000ms exceeded."
+}

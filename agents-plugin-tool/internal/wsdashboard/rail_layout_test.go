@@ -175,7 +175,7 @@ func TestRailLayoutRefusals(t *testing.T) {
 
 // TestRailLayoutMove pins a reorder: within its group's top-level rows on
 // its side of the stars, kept as the group's whole order (a row the layout
-// did not hold, new since, goes first), never touching another group's.
+// did not hold, new since, goes last), never touching another group's.
 func TestRailLayoutMove(t *testing.T) {
 	doc := emptyLayout()
 	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a3", Before: "a1"})
@@ -336,7 +336,7 @@ func TestRailLayoutImport(t *testing.T) {
 	if !slices.Equal(doc.WorkspaceOrder, []string{"/w/repo"}) {
 		t.Errorf("workspace order = %v, want [/w/repo]", doc.WorkspaceOrder)
 	}
-	wantRendered(t, doc, "/w/repo", "a3 a4 a2 a1")
+	wantRendered(t, doc, "/w/repo", "a2 a1 a3 a4")
 	wantRendered(t, doc, "/w/feat", "b1 b2")
 	wantRendered(t, doc, "ws", "/w/repo /w/plain /w/zed")
 
@@ -369,7 +369,7 @@ func TestRailLayoutOrphans(t *testing.T) {
 		doc.Workspaces["/w/repo"] = &railLayoutWS{Order: []string{"a1", "ae", "a2"}, Children: map[string][]string{"ae": {"a3"}}}
 		return doc
 	}
-	wantRendered(t, orphaned(), "/w/repo", "a4 a1 a3 a2")
+	wantRendered(t, orphaned(), "/w/repo", "a1 a3 a2 a4")
 	dropped := func(t *testing.T, doc *railLayoutDoc) {
 		t.Helper()
 		if _, ok := doc.Workspaces["/w/repo"].Children["ae"]; ok {
@@ -380,14 +380,14 @@ func TestRailLayoutOrphans(t *testing.T) {
 	doc := orphaned()
 	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a3", Before: "a1"})
 	dropped(t, doc)
-	wantRendered(t, doc, "/w/repo", "a4 a3 a1 a2")
+	wantRendered(t, doc, "/w/repo", "a3 a1 a2 a4")
 
 	doc = orphaned()
 	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a2", Before: "a3"})
 	if got := doc.Workspaces["/w/repo"].Children["ae"]; !slices.Equal(got, []string{"a3"}) {
 		t.Errorf("a move beside an orphan dropped its link: %v", doc.Workspaces["/w/repo"].Children)
 	}
-	wantRendered(t, doc, "/w/repo", "a4 a1 a2 a3")
+	wantRendered(t, doc, "/w/repo", "a1 a2 a3 a4")
 
 	doc = orphaned()
 	mustApply(t, doc, railLayoutRequest{Op: "attach", RID: "a2", Parent: "a3"})
@@ -395,17 +395,17 @@ func TestRailLayoutOrphans(t *testing.T) {
 	if got := doc.Workspaces["/w/repo"].Children["a3"]; !slices.Equal(got, []string{"a2"}) {
 		t.Errorf("a3's children = %v, want [a2]", got)
 	}
-	wantRendered(t, doc, "/w/repo", "a4 a1 a3 a2")
+	wantRendered(t, doc, "/w/repo", "a1 a3 a2 a4")
 
 	doc = orphaned()
 	mustApply(t, doc, railLayoutRequest{Op: "star", RID: "a3"})
 	dropped(t, doc)
-	wantRendered(t, doc, "/w/repo", "a3 a4 a1 a2")
+	wantRendered(t, doc, "/w/repo", "a3 a1 a2 a4")
 
 	doc = orphaned()
 	mustApply(t, doc, railLayoutRequest{Op: "detach", RID: "a3"})
 	dropped(t, doc)
-	wantRendered(t, doc, "/w/repo", "a4 a1 a3 a2")
+	wantRendered(t, doc, "/w/repo", "a1 a3 a2 a4")
 
 	// A placement drops a nested child's entry, so it cannot outrank its
 	// parent's slot should the parent end.
@@ -431,9 +431,9 @@ func TestRailLayoutOrphans(t *testing.T) {
 	// of its own group, and a move on it keeps that place as the order's.
 	doc = emptyLayout()
 	doc.Workspaces["/w/repo"] = &railLayoutWS{Order: []string{"a1", "a2"}, Children: map[string][]string{"be": {"a3"}}}
-	wantRendered(t, doc, "/w/repo", "a3 a4 a1 a2")
+	wantRendered(t, doc, "/w/repo", "a3 a1 a2 a4")
 	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a1", Before: "a4"})
-	wantRendered(t, doc, "/w/repo", "a3 a1 a4 a2")
+	wantRendered(t, doc, "/w/repo", "a3 a2 a1 a4")
 	mustApply(t, doc, railLayoutRequest{Op: "move", RID: "a2", Before: "a3"})
 	wantRendered(t, doc, "/w/repo", "a2 a3 a1 a4")
 	if got := doc.Workspaces["/w/repo"].Children["be"]; !slices.Equal(got, []string{"a3"}) {
@@ -448,7 +448,7 @@ func TestRailLayoutOrphans(t *testing.T) {
 }
 
 // TestRailViewOrder pins the server's order: starred units first, then the
-// layout's order, a row it does not hold first, then the rail's own order;
+// layout's order, unlisted ordinary live rows last in the rail's own order;
 // a child right after its parent; the ended rows starred first; the
 // workspaces by the workspace order, the rest after.
 func TestRailViewOrder(t *testing.T) {
@@ -470,7 +470,7 @@ func TestRailViewOrder(t *testing.T) {
 	doc.Workspaces["/w/plain"] = &railLayoutWS{Stars: []string{"pf"}}
 	order, starred = layoutRendered(doc)
 	for key, want := range map[string]string{
-		"/w/repo": "a4 a3 a1 a2", "/w/feat": "b1 b2", "/w/plain ended": "pf pe", "ws": "/w/repo /w/plain /w/zed",
+		"/w/repo": "a4 a3 a1 a2", "/w/feat": "b2 b1", "/w/plain ended": "pf pe", "ws": "/w/repo /w/plain /w/zed",
 	} {
 		if order[key] != want {
 			t.Errorf("%s renders %q, want %q", key, order[key], want)
@@ -560,8 +560,8 @@ func TestRailViewOrphanPlacement(t *testing.T) {
 	view := layoutTestView()
 	orderRailView(&view, doc, layoutTestFacts())
 	root, feat := view.Workspaces[1].Worktrees[0], view.Workspaces[1].Worktrees[1]
-	if got := strings.Join(railIDs(root.Sessions), " "); got != "a4 a1 a3 a2" {
-		t.Errorf("root lists %q, want a4 a1 a3 a2 (a3 in ae's slot)", got)
+	if got := strings.Join(railIDs(root.Sessions), " "); got != "a1 a3 a2 a4" {
+		t.Errorf("root lists %q, want a1 a3 a2 a4 (a3 in ae's slot, ordinary a4 last)", got)
 	}
 	if got := strings.Join(railIDs(feat.Sessions), " "); got != "b2 b1" {
 		t.Errorf("feat lists %q, want b2 b1 (b2 at its group's head)", got)
@@ -686,7 +686,7 @@ func TestRailLayoutUnknownEntries(t *testing.T) {
 	s := openRailLayoutStore(dir)
 	doc, _ := s.current()
 	order, starred := layoutRendered(doc)
-	if order["/w/repo"] != "a1 a3 a4 a2" || order["ws"] != "/w/zed /w/plain /w/repo" || !slices.Equal(starred, []string{"a1"}) {
+	if order["/w/repo"] != "a1 a2 a3 a4" || order["ws"] != "/w/zed /w/plain /w/repo" || !slices.Equal(starred, []string{"a1"}) {
 		t.Errorf("read with unknown entries: %v, starred %v", order, starred)
 	}
 	f := layoutTestFacts()
