@@ -150,6 +150,7 @@
   "js.card.min": "Вернуться к карточке (Esc)",
   "js.card.back": "Вернуться к доске (Esc)",
   "js.card.pin": "Закрепить",
+  "js.card.raise": "Переместить наверх",
   "js.chip.remove": "удалить этот ответ",
   "js.chip.tnote.open": "показать эту заметку к теме на доске",
   "js.chip.tnote.remove": "удалить эту заметку к теме",

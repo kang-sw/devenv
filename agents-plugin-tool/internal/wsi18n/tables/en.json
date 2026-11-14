@@ -150,6 +150,7 @@
   "js.card.min": "Back to the card (Esc)",
   "js.card.back": "Back to the board (Esc)",
   "js.card.pin": "Pin",
+  "js.card.raise": "Raise to top",
   "js.chip.remove": "remove this answer",
   "js.chip.tnote.open": "show this topic note on the board",
   "js.chip.tnote.remove": "remove this topic note",

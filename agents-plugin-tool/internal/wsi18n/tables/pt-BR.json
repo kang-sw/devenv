@@ -150,6 +150,7 @@
   "js.card.min": "Voltar ao cartão (Esc)",
   "js.card.back": "Voltar ao quadro (Esc)",
   "js.card.pin": "Fixar",
+  "js.card.raise": "Mover para o topo",
   "js.chip.remove": "remover esta resposta",
   "js.chip.tnote.open": "mostrar esta nota do tópico no quadro",
   "js.chip.tnote.remove": "remover esta nota do tópico",
