@@ -634,7 +634,14 @@
       "registered_at": "2026-11-14T06:03:03Z"
     },
     "261114-feat-ws-whiteboard-topic-state-and-lead-nudges": {
-      "registered_at": "2026-11-14T11:39:09Z"
+      "registered_at": "2026-11-14T11:39:09Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "feat/topic-state-task5",
+        "phase": "active",
+        "touched_at": "2026-11-14T13:44:37Z"
+      }
     },
     "261114-feat-ws-whiteboard-unified-whole-history": {
       "registered_at": "2026-11-14T11:52:35Z",
