@@ -27,9 +27,13 @@ the current tree.
 The approved contract is reproduced below so implementation does not depend on
 the session-local report remaining available. MAIN relayed owner-confirmed
 (802)=a on 2026-11-14 UTC: topic latest-change pull-up reordering and offscreen
-panel height changes must leave already visible panels looking frozen. A change
-inside a visible panel itself is acceptable under this confirmed contract. This
-is not a new reference-centering or closed-topic-reveal feature.
+panel height changes must leave already visible panels looking frozen. MAIN
+then relayed owner-confirmed (803)=a: defer pending rendering changes to panels
+intersecting the viewport, with an explicit bottom badge or fully-offscreen
+application; the owner's own answers and memos apply immediately. This replaces
+(802)'s earlier allowance for immediate changes inside visible panels, not its
+external-change preservation goal. This is not a new reference-centering or
+closed-topic-reveal feature.
 
 ## Decisions
 
@@ -37,10 +41,21 @@ is not a new reference-centering or closed-topic-reveal feature.
   pull-up reordering and offscreen panel height changes so panels already in
   view retain their visible positions. Preserving only the selected reading
   reference is insufficient if another visible panel moves because of those
-  external changes. A visible panel's own content change may change that panel;
-  this decision does not introduce render deferral or a pending-change badge.
-  Apply this ordinary-preservation rule within the user-input and explicit
-  jump-follow priorities below, not as another competing scroll writer.
+  external changes. Apply this ordinary-preservation rule within the user-input
+  and explicit jump-follow priorities below, not as another competing scroll
+  writer. Visible-panel rendering follows the later confirmed (803)=a rule.
+- **Defer visible-panel rendering — owner-confirmed (803)=a.** Any panel
+  intersecting the exposed reading viewport by at least 1 px with a pending
+  change keeps its current rendering. Show a bottom badge labeled
+  `최신 변경 N건 반영`, with the pending-change count and topic name. Apply the
+  pending rendering on badge click or when that panel fully leaves the
+  viewport. On fully-offscreen application, use the same offscreen compensation
+  rule so remaining visible panels do not jump. The owner's own answers and
+  memos apply immediately, including inside the viewport. This supersedes
+  immediate minimal-shift rendering for other visible-panel changes under
+  (802); reject a one-third-viewport shift threshold or reading-line-only
+  deferral as the eligibility rule. The reading line below selects the scroll
+  reference, not which visible panels receive render deferral.
 - **One writer per actual scroller — (800)=a.** Use one owner with states
   `idle`, `user-scrolling`, and `explicit-jump-follow`. Normal preservation is
   a short mutation transaction, not a competing long-lived target selector.
@@ -141,9 +156,13 @@ per transaction. Route known board, history and frame-height mutations through
 it, fold the old fallback writers into it, and compose with the landed explicit
 jump-follow state instead of creating a second navigation authority. Apply the
 (802)=a golden rule to latest-change pull-up reorder and offscreen height
-changes. If a single compensation delta cannot preserve the affected visible
-panels on the actual tree, report the conflicting geometry before expanding the
-approved mechanism; do not silently weaken the golden rule to one reference.
+changes, and implement the confirmed (803)=a pending-rendering and bottom-badge
+behavior for every viewport-intersecting panel, including the owner's immediate
+answer/memo exception. Coordinate badge-click and fully-offscreen application
+with the same scroll owner rather than adding another correction writer. If a
+single compensation delta cannot preserve the affected visible panels on the
+actual tree, report the conflicting geometry before expanding the approved
+mechanism; do not silently weaken the golden rule to one reference.
 
 Verification, in a later explicitly bounded slot:
 
@@ -158,9 +177,18 @@ Verification, in a later explicitly bounded slot:
 - Verify the (802)=a golden rule for topic latest-change pull-up reordering
   and offscreen height changes above and below the viewport, including multiple
   visible panels. Compare each visible panel's before/after position, not only
-  the reading reference. Separate movement caused by an external mutation from
-  a visible panel's own content change; the latter remains acceptable under
-  (802). Do not infer all-visible preservation from one passing anchor sample.
+  the reading reference. Distinguish external changes from the immediate
+  owner-answer/memo exception and explicit badge application under (803).
+  Do not infer all-visible preservation from one passing anchor sample.
+- Verify (803)=a deferral for panels intersecting the viewport by exactly 1 px,
+  for several visible panels, and for visible panels away from the reading
+  line. Confirm current rendering stays unchanged while pending, and the bottom
+  badge shows `최신 변경 N건 반영` with the correct count and topic name.
+  Exercise badge-click application and automatic application only after the
+  affected panel fully leaves the viewport; offscreen application must preserve
+  remaining visible panels. Verify the owner's own answers and memos render
+  immediately. Test these paths on main and independently pinned scrollers,
+  including user scrolling/cooldown and the existing explicit-jump priority.
 - Exercise wheel/touch/pointer/scroll-key cancellation, momentum and the
   200 ms post-scroll cooldown; manager writes must not be mistaken for user
   activity, and updates during user scrolling must not fight the user.
