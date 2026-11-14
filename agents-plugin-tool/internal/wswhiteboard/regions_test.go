@@ -372,7 +372,7 @@ func TestDashboardTopicBodyUsesWholeCardFold(t *testing.T) {
 		t.Fatal(err)
 	}
 	board := string(regions.Board)
-	wantAll(t, board, `<div class="tdoc"><div class="doc-body framed">`, `<details class="topic-stream"`, `<details class="entry-panel`)
+	wantAll(t, board, `<div class="tdoc"><div class="doc-body framed">`, `<div class="topic-stream">`, `<details class="entry-panel`)
 	wantNone(t, board, `<details class="tdoc"`, `data-key="doc:shared"`, "has-doc")
 	// The standalone page has no shared card framework and keeps its toggle.
 	page := render(t, view)

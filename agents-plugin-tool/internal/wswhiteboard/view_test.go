@@ -132,8 +132,11 @@ func TestTopicWithABodyIsNotQuiet(t *testing.T) {
 	if notes := topicView(t, st, LayoutFull, "notes"); notes.Quiet || notes.Doc != "a body" || !notes.DocOpen(false) {
 		t.Fatalf("notes = %+v", notes)
 	}
-	if quiet := topicView(t, st, LayoutFull, "quiet"); !quiet.Quiet || quiet.Doc != "" {
-		t.Fatalf("quiet = %+v", quiet)
+	if quiet := topicView(t, st, LayoutFull, "quiet"); quiet.Quiet || quiet.Doc != "" || quiet.Stream.Count == 0 {
+		t.Fatalf("full-page settled history must stay visible: %+v", quiet)
+	}
+	if quiet := topicView(t, st, LayoutEmbed, "quiet"); !quiet.Quiet || quiet.Doc != "" {
+		t.Fatalf("unchanged embed topic must remain quiet: %+v", quiet)
 	}
 	// A quiet topic that gains a body is no longer quiet.
 	mustApply(t, st, topicXML("quiet", "now with notes"))
@@ -159,7 +162,7 @@ func TestLastAnswerSeqFallsBackForOlderBoards(t *testing.T) {
 }
 
 // A topic with a body and no items is a topic block of its own; closing it
-// makes it Quiet with its body behind a closed fold.
+// keeps full HISTORY visible with its body behind an independent closed fold.
 func TestContentOnlyTopicInTheView(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "just notes"))
@@ -173,7 +176,7 @@ func TestContentOnlyTopicInTheView(t *testing.T) {
 	}
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	notes = topicView(t, st, LayoutFull, "notes")
-	if !notes.Quiet || !notes.Closed || notes.Doc != "just notes" || notes.DocOpen(false) || notes.DocOpen(true) {
+	if notes.Quiet || !notes.Closed || notes.Stream.Count == 0 || notes.Doc != "just notes" || notes.DocOpen(false) || notes.DocOpen(true) {
 		t.Fatalf("closed notes = %+v", notes)
 	}
 }

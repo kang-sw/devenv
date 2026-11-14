@@ -191,7 +191,7 @@ func TestSystemEventsFromAcceptedTransitions(t *testing.T) {
 	mustApply(t, st, `<wb:answer ids="1 2" value="a" assumed="true">seems good</wb:answer><wb:answer ids="1 2" value="a">yes, ship</wb:answer>`)
 	mustApply(t, st, `<wb:patch id="3"><wb:why>correction</wb:why></wb:patch><wb:patch id="3" status="withdrawn"/>`+topicXML("t", "alpha")+`<wb:topic name="t"><wb:edit><wb:old>alpha</wb:old><wb:new>beta</wb:new></wb:edit><wb:close result="Shipped."/></wb:topic>`)
 	want := []string{
-		"Item {{1}} added [policy]: pick", "Item {{2}} added [check]: look", "Item {{3}} added [technical]: withdraw later",
+		"Items added: policy {{1}}, check {{2}}, technical {{3}}.",
 		`Item {{1}} assumed [policy]: a; owner quote: "seems good"`, `Item {{2}} assumed [check]: a; owner quote: "seems good"`,
 		`Item {{1}} answered [policy]: a; owner quote: "yes, ship"`, `Item {{2}} answered [check]: a; owner quote: "yes, ship"`,
 		"Item {{3}} patched [technical] (open -> open): withdraw later", "Item {{3}} patched [technical] (open -> withdrawn): withdraw later",
@@ -200,9 +200,13 @@ func TestSystemEventsFromAcceptedTransitions(t *testing.T) {
 	if got := eventTexts(t, st, "t"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("events = %q, want %q", got, want)
 	}
-	itemIDs := []int{1, 2, 3, 1, 2, 1, 2, 3, 3, 0, 0, 0}
+	itemIDs := []int{0, 1, 2, 1, 2, 3, 3, 0, 0, 0}
+	entryIDs := []string{"e1", "e4", "e5", "e6", "e7", "e8", "e9", "e10", "e11", "e12"}
+	if st.EntrySeq != 12 {
+		t.Fatalf("coalescing must not recycle allocated event IDs: %d", st.EntrySeq)
+	}
 	for i, entry := range entries(t, st, "t") {
-		if entry.ID != fmt.Sprintf("e%d", i+1) || entry.ItemID != itemIDs[i] || entry.At != testNow.Format(time.RFC3339) {
+		if entry.ID != entryIDs[i] || entry.ItemID != itemIDs[i] || entry.At != testNow.Format(time.RFC3339) {
 			t.Fatalf("event order/attribution/time %d = %+v", i, entry)
 		}
 	}
@@ -215,6 +219,36 @@ func TestSystemEventsFromAcceptedTransitions(t *testing.T) {
 	}
 	if !st.topicClosed("t") || item(t, st, 1).Status != StatusAnswered || item(t, st, 2).Status != StatusAnswered {
 		t.Fatal("closing after grouped answers must not withdraw answered items")
+	}
+}
+
+// Only adjacent creation events in one accepting update are a known batch.
+// Equal clocks across updates and intervening logs do not establish one.
+func TestCreationBatchStopsAtUpdatesAndInterveningEvents(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, addXML(ClassTechnical, "t", "first"))
+	mustApply(t, st, addXML(ClassCheck, "t", "second"))
+	before := append([]Entry(nil), entries(t, st, "t")...)
+	mustApply(t, st, addXML(ClassPolicy, "t", "third", "x", "y")+
+		logXML("t", "between creations")+addXML(ClassTechnical, "t", "fourth")+
+		addXML(ClassCheck, "t", "fifth"))
+	got := entries(t, st, "t")
+	if len(got) != 5 || !reflect.DeepEqual(got[:2], before) {
+		t.Fatalf("separate equal-time updates were regrouped: %+v", got)
+	}
+	if got[2].ItemID != 3 || got[2].Text != "Item {{3}} added [policy]: third" ||
+		got[3].Kind != EntryAgent || got[3].Text != "between creations" ||
+		got[4].ItemID != 0 || got[4].Text != "Items added: technical {{4}}, check {{5}}." {
+		t.Fatalf("creation batch crossed an intervening event: %+v", got)
+	}
+	for _, e := range got {
+		if e.At != testNow.Format(time.RFC3339) {
+			t.Fatalf("recorded creation clock changed: %+v", e)
+		}
+	}
+	refused(t, st, addXML(ClassTechnical, "t", "not accepted")+`<wb:nope/>`)
+	if !reflect.DeepEqual(entries(t, st, "t"), got) {
+		t.Fatal("refused creation changed retained history")
 	}
 }
 

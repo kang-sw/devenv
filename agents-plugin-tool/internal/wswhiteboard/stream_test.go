@@ -80,9 +80,12 @@ func TestStreamViewOrderFoldsAndLatestAgent(t *testing.T) {
 			t.Fatal("closed topic expanded a panel")
 		}
 	}
-	if !closed.Quiet {
-		t.Fatal("closed topic must keep its stream folded")
+	if closed.Quiet {
+		t.Fatal("closed topic's whole history must remain visible")
 	}
+	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
+	wantAll(t, out, `<div class="topic-stream">`, `data-key="entry:e3:history"`, `data-key="versions:e9"`, `<details class="system-run`)
+	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:t"`, `<details class="settled"`)
 }
 
 // A previously expanded latest version must not inherit that open state once

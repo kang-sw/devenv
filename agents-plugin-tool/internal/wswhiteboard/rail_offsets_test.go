@@ -57,7 +57,7 @@ function sel(root, s) { var out = [];
 E.prototype.querySelectorAll = function (s) { return sel(this, s); };
 E.prototype.querySelector = function (s) { return sel(this, s)[0] || null; };
 var board = new E("div", "bcol", { id: "bcol" }); board.name = "host"; board.h = 800; board.scrollTop = 0; board.scrollHeight = 4000; board.clientHeight = 800; board.scroller = true;
-var oqTop = board.appendChild(new E("div", "oq-wrap top")), oqBot = board.appendChild(new E("div", "oq-wrap bot")); oqTop.name = "oq-top"; oqBot.name = "oq-bot";
+var oqTop = board.appendChild(new E("div", "oq-wrap wb-oq-top")), oqBot = board.appendChild(new E("div", "oq-wrap wb-oq-bot")); oqTop.name = "oq-top"; oqBot.name = "oq-bot";
 function topic(key, y) { var t = board.appendChild(new E("section", "topic", { "data-topic": key })); t.y = y; t.h = 500; var head = t.appendChild(new E("div", "tophead")); head.name = "head-" + key; head.h = 30; head.y = y; var bar = head.appendChild(new E("div", "tbar")); bar.name = "bar-" + key; bar.h = 30; bar.y = y; bar.appendChild(new E("span", "tname")).textContent = key; return t; }
 ["a", "b", "c", "d", "e", "f"].forEach(function (k, i) { topic(k, i * 600); });
 var queue = [], ro = null;
