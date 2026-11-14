@@ -41,7 +41,16 @@ function size(n){
 }
 function offset(n,live){if(n===live)return 0;var p=n.parent,at=offset(p,live);for(var c of p.children){if(c===n)break;at+=size(c);}return at;}
 Object.defineProperty(E.prototype,'scrollHeight',{get:function(){return size(this);},set:function(){}});
+var navigationGuard=false,navigationOrder=[];
+function navigationGeometry(node,phase){
+  if(!navigationGuard)return;
+  var topic=node.closest&&node.closest('.topic');
+  if(!topic||topic.getAttribute('data-topic')!=='guarded')return;
+  check('whole-topic reveal precedes '+phase,topic.getAttribute('data-size'),'base');navigationOrder.push(phase);
+}
+Object.defineProperty(E.prototype,'offsetWidth',{get:function(){navigationGeometry(this,'flash');return 0;}});
 E.prototype.getBoundingClientRect=function(){
+  navigationGeometry(this,'rect');
   var h=this.closest('.wb-history');if(!h)return {top:0,bottom:100,height:100};
   var live=h.querySelector('.history-live'),total=size(live),height=Math.min(total,parseFloat(h.style['--wb-history-height'])||1000);
   if(this===h||this.matches('.history-clip'))return {top:0,bottom:height,height:height};
@@ -55,9 +64,9 @@ window.setTimeout=function(fn){timers.push(fn);};
 E.prototype.getAnimations=function(){return motions;};
 document.on={};document.addEventListener=function(type,fn){(document.on[type]||(document.on[type]=[])).push(fn);};
 function CustomEvent(type,init){this.type=type;Object.assign(this,init||{});}
-E.prototype.dispatchEvent=function(e){e.target=this;for(var p=this;p;p=e.bubbles?p.parent:null){(p.on[e.type]||[]).slice().forEach(function(fn){fn(e);});}if(e.type==='wbhistoryload'){loads++;check('load root',e.detail.root===this,true);}return true;};
+E.prototype.dispatchEvent=function(e){if(e.type==='wbhistoryload')navigationGeometry(this,'load');e.target=this;for(var p=this;p;p=e.bubbles?p.parent:null){(p.on[e.type]||[]).slice().forEach(function(fn){fn(e);});}if(e.type==='wbhistoryload'){loads++;check('load root',e.detail.root===this,true);}return true;};
 fire=function(e,type){e.dispatchEvent(new CustomEvent(type,{bubbles:true}));};
-window.historyKit={watch:function(n,opt){return {node:n,opt:opt};},unwatch:function(w){if(w)w.gone=true;},keep:function(n,opt){var k={node:n,opt:opt,applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;}};
+window.historyKit={watch:function(n,opt){return {node:n,opt:opt};},unwatch:function(w){if(w)w.gone=true;},keep:function(n,opt){navigationGeometry(n,'keep');var k={node:n,opt:opt,applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;}};
 function visible(h,ratio){var w=h._wbHistoryWatch,was=w.ratio;w.ratio=ratio;w.opt.onChange({visible:ratio>0});if(was>0&&!ratio)w.opt.onOut();}
 function ResizeObserver(fn){this.fn=fn;}
 ResizeObserver.prototype.observe=function(){};ResizeObserver.prototype.disconnect=function(){};
@@ -73,7 +82,7 @@ function board(html,pages){
 }
 function start(html,pages){var h=board(html,pages);window.wbHistory.init(document);flush();return h;}
 function first(h){return h._wbHistoryChunks.at(-1);}
-var bound=0;window.wbBindBoard=function(){bound++;};
+var bound=0;window.wbBindBoard=function(node){if(node)navigationGeometry(node,'bind');bound++;};
 var h=board(panel(1,300)+logs(2,3)+panel(4,300)+logs(5,6)+panel(7,300));
 ` + string(asset) + `
 check('three panels fit including intervening logs',first(h),'e1');
@@ -213,6 +222,52 @@ var target=window.wbHistory.loadTarget(document,'p1');flush();
 check('known panel opens and becomes visible',[target.id,target.open,first(h)],['p1',true,'e1']);
 check('navigation uses shared keep offset',keeps.at(-1).opt.offset,12);
 keeps.at(-1).opt.onEnd();check('keep end clears target',h._wbHistoryTarget,null);
+// A host reveals through its fold owner before the loader's first layout,
+// including reentrant admission hooks and inert closed-topic initialization.
+function unfoldForNavigation(node){
+  var topic=node.closest('.topic');
+  check('callback receives a live owning topic',!!topic&&topic.isConnected,true);
+  topic.setAttribute('data-size','base');navigationOrder.push('owner');
+}
+function guardTopic(h){
+  var topic=h.closest('.topic');topic.setAttribute('data-topic','guarded');topic.setAttribute('data-size','fold');
+  topic.appendChild(new E('details',{'class':'unrelated'}));
+  return topic;
+}
+['live','page'].forEach(function(kind){
+  h=start(kind==='live'?panel(1,200)+panel(2,200)+panel(3,200):panel(51,200)+panel(52,200)+panel(53,200),kind==='page'?[panel(1,200)]:[]);
+  var topic=guardTopic(h),sibling=new E('section',{'class':'topic','data-topic':'other','data-size':'fold'});
+  root.appendChild(sibling);
+  var pages=h.querySelectorAll('template[data-history-page]').length,loadCount=loads,bindCount=bound;
+  check(kind+' fixture holds its target page inert',pages,kind==='page'?1:0);
+  navigationOrder=[];navigationGuard=true;
+  ['p999','p1"] script','p01','#p1','item-3'].forEach(function(id){check(kind+' rejects '+id,window.wbHistory.loadTarget(document,id,unfoldForNavigation),null);});
+  check(kind+' rejected IDs never reveal, load or bind',[navigationOrder,loads,bound,h.querySelectorAll('template[data-history-page]').length],[[],loadCount,bindCount,pages]);
+  var target=window.wbHistory.loadTarget(document,'p1',unfoldForNavigation);flush();
+  check(kind+' reveals through callback before first geometry',navigationOrder[0],'owner');
+  ['rect','flash','keep'].forEach(function(phase){check(kind+' exercises '+phase,navigationOrder.includes(phase),true);});
+  if(kind==='page')['bind','load'].forEach(function(phase){check('page exercises admission '+phase,navigationOrder.includes(phase),true);});
+  check(kind+' opens the known target without unrelated fold changes',[target.id,target.open,topic.querySelector('.unrelated').open,sibling.getAttribute('data-size')],['p1',true,false,'fold']);
+  navigationGuard=false;keeps.at(-1).opt.onEnd();
+});
+// The sought panel can itself be inside a page of an inert topic. Revealing
+// only after materialize returns would miss init -> reset -> choose/fit here.
+h=board(panel(51,200)+panel(52,200)+panel(53,200),[panel(1,200)]);
+var deferredTopic=guardTopic(h),deferred=new E('template',{'data-history-topic':'guarded'});
+deferred.content=new E('#fragment');deferred.content.appendChild(deferredTopic);root.appendChild(deferred);
+window.wbHistory.init(document);
+navigationOrder=[];navigationGuard=true;
+check('unknown inert target cannot reveal or admit',window.wbHistory.loadTarget(document,'p999',unfoldForNavigation),null);
+check('unknown inert topic stays inert',[navigationOrder,!!root.querySelector('template[data-history-topic]')],[[],true]);
+var deferredTarget=window.wbHistory.loadTarget(document,'p1',unfoldForNavigation);flush();
+check('inert topic owner runs before init geometry',navigationOrder[0],'owner');
+['rect','bind','load','flash','keep'].forEach(function(phase){check('inert topic exercises '+phase,navigationOrder.includes(phase),true);});
+check('inert target becomes live and opens without unrelated disclosure',[deferredTarget.isConnected,deferredTarget.open,deferredTarget.closest('.topic').querySelector('.unrelated').open,!!root.querySelector('template[data-history-topic]')],[true,true,false,false]);
+navigationGuard=false;keeps.at(-1).opt.onEnd();
+var revealedSnapshot=window.wbHistory.capture(document),ownerCalls=navigationOrder.filter(function(p){return p==='owner';}).length;
+h=board(panel(51,200)+panel(52,200)+panel(53,200),[panel(1,200)]);guardTopic(h);
+window.wbHistory.restore(document,revealedSnapshot);flush();
+check('callback-free restore does not unfold the whole topic',[h.closest('.topic').getAttribute('data-size'),navigationOrder.filter(function(p){return p==='owner';}).length],['fold',ownerCalls]);
 // Fold summaries have no .wb-entry ancestor: navigate by their existing
 // first-entry anchor for both long logs and adjacent system-event chips.
 ['run-fold','system-run'].forEach(function(kind){
