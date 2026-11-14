@@ -462,7 +462,14 @@
       "registered_at": "2026-11-13T16:07:55Z"
     },
     "261114-bug-ws-dashboard-rail-drag-regression": {
-      "registered_at": "2026-11-14T04:59:37Z"
+      "registered_at": "2026-11-14T04:59:37Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "fix/rail-drag-648",
+        "phase": "active",
+        "touched_at": "2026-11-14T08:16:31Z"
+      }
     },
     "261114-bug-ws-dashboard-search-palette-minors": {
       "registered_at": "2026-11-13T16:54:43Z"
