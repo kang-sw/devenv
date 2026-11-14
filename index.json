@@ -647,7 +647,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "feat/topic-state-task5",
         "phase": "active",
-        "touched_at": "2026-11-14T13:44:37Z"
+        "touched_at": "2026-11-14T13:46:37Z",
+        "impl": {
+          "branch": "impl/feat/topic-state-task5/swarm-easel-clay"
+        }
       }
     },
     "261114-feat-ws-whiteboard-unified-whole-history": {
