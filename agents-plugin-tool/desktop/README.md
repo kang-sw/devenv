@@ -137,6 +137,13 @@ allowed too, with no native permissions. Broader embedded-navigation acceptance
 belongs to the later reliability slice. Internal new-window links reuse the
 existing dashboard window; external new windows are denied after browser handoff.
 
+The webview's user agent is WKWebView's macOS default followed by
+`Werkschaft/<version>`. The dashboard keys its desktop-only link behavior on
+that token: the webview has no tabs, so a plain click on a file path opens the
+dashboard's link menu (preview, open, copy path, ...) and Cmd/Ctrl+click
+previews, where a browser previews on a plain click and leaves a modified
+click to its new tab. The token is a name only, not a credential.
+
 The app registers no commands or plugins, and its explicit capability grants
 zero permissions to local or remote content. The connection document has no
 scripts; its CSP is not a claim about the daemon-served dashboard's CSP.

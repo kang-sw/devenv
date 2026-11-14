@@ -3093,6 +3093,26 @@
   function linkOpens(a) {
     return !!a.getAttribute("href") && (!a.hasAttribute("data-out") || root.hasAttribute("data-sysopen"));
   }
+  // desktopShell reports the Werkschaft desktop app, which names itself in
+  // its user agent ("Werkschaft/<version>"). Its webview has no tabs, so a
+  // modified click on a file link cannot be the browser's new tab there:
+  // left to the webview it navigates the clicked frame in place, onto a
+  // file view that refuses to be framed. In the app a plain click on a file
+  // link opens its menu and a Cmd/Ctrl+click previews (desktopPreview); a
+  // browser keeps the behavior below.
+  function desktopShell() {
+    var n = window.navigator;
+    return !!n && /\bWerkschaft\//.test(n.userAgent || "");
+  }
+  // desktopPreview previews a file link the preview card can show, in the
+  // desktop app only, and reports whether it did.
+  function desktopPreview(a) {
+    if (!desktopShell()) return false;
+    if (previews(a)) previewOpen(a, a.getAttribute("data-rel"), false);
+    else if (outsideOpens(a)) previewOpen(a, a.getAttribute("data-abs"), true);
+    else return false;
+    return true;
+  }
   // previews reports a file link the preview card (preview.js) can show,
   // decided from what the page already knows: a file inside the session
   // root whose extension is not one no preview shows. What the server then
@@ -3216,6 +3236,15 @@
     if (e.button !== 0 || !t || !t.closest) return;
     var a = t.closest("a[data-wl]");
     if (!a) return;
+    // The desktop app: every click on a file link stays on the page; a
+    // pointer Cmd/Ctrl+click previews what the card can show, and any other
+    // click, or a file the card cannot show, opens the menu.
+    if (a.getAttribute("data-wl") === "file" && desktopShell()) {
+      e.preventDefault();
+      if (e.detail !== 0 && (e.metaKey || e.ctrlKey) && desktopPreview(a)) return;
+      linkAt(a, e);
+      return;
+    }
     if (linkOpens(a) && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
     e.preventDefault();
     // A pointer click on a link the preview can show opens the preview
@@ -4160,6 +4189,9 @@
       // offers the card.
       var act = navigator.userActivation;
       if (webLink(a) && act && act.isActive) { window.WsWeb.open({ url: a.href }); return; }
+      // In the desktop app a frame's Cmd/Ctrl+click on a file link (mod)
+      // previews it, under the same user-activation gate.
+      if (m.mod === true && act && act.isActive && desktopPreview(a)) return;
       var r = f.getBoundingClientRect();
       openLinkMenu(a, r.left + num(m.x), r.top + num(m.y));
     } else if (m.wbDoc === "img") {
