@@ -518,6 +518,9 @@
     "261114-bug-ws-pi-fork-acquired-worktree-key-authority": {
       "registered_at": "2026-11-14T08:47:17Z"
     },
+    "261114-bug-ws-pi-reviewer-spawn-hidden-write-scope-contract": {
+      "registered_at": "2026-11-14T14:28:20Z"
+    },
     "261114-bug-ws-pi-settled-executor-resume-home-unavailable": {
       "registered_at": "2026-11-14T06:22:54Z"
     },
