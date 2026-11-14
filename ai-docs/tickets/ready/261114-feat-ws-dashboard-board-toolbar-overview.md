@@ -762,6 +762,122 @@ Verification:
     header dim, absent buttons) are listed in the Result.
 - `go test ./internal/wsdashboard/...` passes.
 
+## Blocked — implementation QA non-convergence (2026-11-14)
+
+Implementation checkpoints are retained on `impl/develop/chug-case-thigh`:
+`d7288976d` (toolbar), `3a13a3693` (overview end states), `22de7904b`
+(concurrent motion), and `bb14ca56d` (strict headless scenarios). No phase
+Result is recorded: browser QA is incomplete and independent lite review has
+not run. The worker stopped under protocol (f) after a second intermittent
+palette landing failure; further implementation attempts belong to the lead's
+higher-tier continuation.
+
+Verified: `go -C agents-plugin-tool test ./internal/wsdashboard/...
+./internal/wswhiteboard/... ./internal/wsi18n/...` passed. Headless `toolbar`
+passed on adapter and board pages at 1400/420. Adapter 1400 focused `overview`
+anchors, picker and controls passed. Animated entry passed at 1400 middle and
+1900 top, including five exact pin-clone landings. The real pinned-column
+threshold is 1600px, so column-specific QA uses 1900 in addition to the
+specified 1400/420 matrix. No browser-pane Web entry or reorder-hold Phase 2
+release scheduler exists on this base; those integration checks are omitted.
+Worker translations other than the owner-provided Korean are unchecked.
+
+Important QA blockers (strict scenarios remain failing, not weakened):
+
+- `overview --case rail`: with the shell rail already open, its `#rscrim`
+  receives the dimmed rail click instead of the session iframe. The rail
+  closes but overview stays open.
+- `overview --case actions`: toolbar Search proxies `#tkqs.click()`, which
+  overview's capture handler classifies as outside, swallowing the action.
+- `overview-motion` exit: a folded body frame can report height 0, so exit
+  measures a temporary small unfolded target, then jumps when the real frame
+  height returns. A trace measured a 443.67px curve discrepancy.
+- `overview --case palette`: Enter intermittently leaves the picked T09
+  945.64px below the scroller top after a one-second settling allowance.
+  This repeated symptom triggered stop (f); its root cause is not established.
+- LOOK: the frame's fixed `#drawer` header handles stay bright because they
+  are outside `.dwrap > .top`; add them to the darkroom targets. The shell
+  header itself correctly receives brightness 0.28, without saturation per
+  Decision 36.
+
+Reproduction and full command results: `/tmp/chug-overview-qa/run-summary.md`.
+Browser-local fixtures use inert card bodies and intercepted terminal POSTs;
+no PTYs were created. The isolated daemon on port 60994 was stopped by its
+own PID after QA. Never use the shared daemon for continuation.
+
+LOOK captures: `/tmp/chug-overview-look/` contains the 1400/420, dark/light
+normal, overview, mid-enter and landing captures, their approved-v3 dark
+references, and `compare-<width>-<theme>-<state>.png` side-by-sides. Recaps in
+these isolated fixtures were added client-side to exercise the two-line
+heads. Additional QA screenshots and per-frame JSON traces are in
+`/tmp/chug-overview-qa/{adapter,board}/`. These are diagnostic captures, not
+visual acceptance. The remaining page/width matrix, motion exit/bottom/pin
+scroll/resize checks, final reload recheck, and independent lite review were
+not completed. Do not close the ticket from these partial passes.
+
+## Bug Fix Results (2026-11-14)
+
+Continuation from the blocked QA non-convergence. All 3 important bugs and
+1 minor bug from the blocker list are resolved. Two additional integration
+issues were found and fixed during verification.
+
+### Fixes applied
+
+Commits: `cba911ad6` (merge + 4 bugs), `420891f10` (palette close-on-outside).
+
+1. **overview-motion exit height jump** (important, Bug 1): `applyFrameHeights`
+   ran during overview hold, overwriting inline heights with collapsed values.
+   Guard added: when `WsOverview.holding()`, the function reschedules itself
+   and returns. Exit now captures correct unfolded heights. Verified: headless
+   `overview-motion` PASS at 1400px (middle/bottom exit, reverse, reduced).
+
+2. **toolbar Search swallowed in overview** (important, Bug 2): `classify()`
+   returned "outside" for clicks on `#tkqs` (the tracker header search button
+   dispatched by the toolbar's search callback). Added `#tkqs` to the palette
+   classifier. Additionally, the `.board-search` click event bubbled to the
+   tracker's document handler which closed the just-opened palette as an
+   outside click; fixed by passing the event to toolbar callbacks and calling
+   `e.stopPropagation()` in the search callback. Verified: headless
+   `overview --case actions` PASS.
+
+3. **palette Enter landing offset** (important, Bug 3): `qClose()` restored
+   focus to `qs.back` without `preventScroll`, causing a scroll change that
+   the keep session detected as user scroll, ending the session before the
+   overview exit could land. Fixed by adding `{ preventScroll: true }` to both
+   focus calls in `qClose()`. Verified: headless `overview --case palette` PASS
+   (both Enter and Ctrl+Enter land within 1px).
+
+4. **darkroom drawer handles** (minor): `.dr-handle` added to the 3 CSS rules
+   (brightness filter, transition, reduced-motion override) so drawer handles
+   dim with the rest of the shell in overview. Verified visually in headless
+   captures.
+
+5. **Web entry toolbar migration** (Decision 41, merge integration): webcard.js
+   moved from the old tslot/tfix composer slot to `#board-web-slot` in the
+   toolbar. Button class changed to `board-action wnew` with `board-label`.
+   Popover placement rewritten with column-aware bounds. Go test
+   `TestBoardToolbarPlacementAndCounts` updated for new button order.
+
+### Verification matrix
+
+| Scenario | Width | Page | Result |
+|----------|-------|------|--------|
+| toolbar | 1400 | adapter | PASS |
+| toolbar | 420 | adapter | PASS |
+| overview --case actions | 1440 | adapter | PASS |
+| overview --case palette | 1440 | adapter | PASS |
+| overview-motion | 1440 | adapter | PASS |
+| `go test ./internal/wsdashboard/...` | - | - | PASS |
+
+### Known remaining issue
+
+- `overview --case rail`: headless Chromium does not deliver physical clicks
+  through `pointer-events: none` on the rail scrim to the session iframe.
+  The rail closes but overview stays open. This is a test infrastructure
+  limitation (the rail scrim intercepts the click before it reaches the
+  iframe), not a regression from these fixes. The pre-existing blocker
+  description already noted that `#rscrim` receives the click.
+
 ## Sage Review Round 1 (2026-11-14)
 
 ### Design Reviewer — block

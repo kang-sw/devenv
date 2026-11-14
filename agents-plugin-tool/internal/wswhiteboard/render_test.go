@@ -900,8 +900,10 @@ func TestRenderPageEmbedSizeBudget(t *testing.T) {
 	// 45% the topic stream's interleave styles (log rows with a clock column,
 	// folds, panel cards, the embed's panel titles; about 6 KB); 46% the
 	// topic head (linked ticket badges and their status marks, the glow, the
-	// summary line and check pill, the stuck head's popover; about 3.2 KB).
-	if len(out) > budget*46/100 {
+	// summary line and check pill, the stuck head's popover; about 3.2 KB);
+	// 47% the closed-more control's data-closed-more attribute (Decision 26,
+	// 261114-feat-ws-dashboard-board-toolbar-overview; about 0.2 KB).
+	if len(out) > budget*47/100 {
 		t.Errorf("populated embed is %d bytes, not well under 512 KiB", len(out))
 	}
 }

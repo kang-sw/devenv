@@ -550,12 +550,10 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    pressure (.hi) stays. */
 .r-ctx:empty, .r-sline:empty { display: none; }
 .r-sline { container-type: inline-size; }
-/* the composer's last row: the sline region, and on a page that offers
-   terminals the terminal slot beside it (outside the region, so a swap
-   keeps the slot); the row collapses with an empty region and no slot */
+/* The composer's status row collapses when its region is empty. */
 .cfoot { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .cfoot > .r-sline { flex: 1 1 auto; min-width: 0; }
-.cfoot:has(> .r-sline:empty):not(:has(> .tslot)) { display: none; }
+.cfoot:has(> .r-sline:empty) { display: none; }
 .sb { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 12px; min-width: 0; font-size: 12.5px; line-height: 1.3; padding: 0 2px; }
 .sb .i { width: 13px; height: 13px; }
 .sb-top { flex-wrap: nowrap; padding-top: 2px; }
@@ -676,6 +674,47 @@ section.topic[data-topic] { contain-intrinsic-size: auto 600px; }
 section.topic[data-topic][data-wbcv]:not([data-max]):not(:has(details.entry-panel[data-max])) { content-visibility: auto; }
 @media (prefers-reduced-motion: reduce) { .bcard.flash .bc-in { animation: none; } .bc-grip::after { transition: none; } }
 
+/* ===== overview picker (overview.js) =====
+   Only the view folds: no card record or disclosure is changed. Keeping
+   off-screen items renderable avoids remembered unfolded intrinsic sizes. */
+:root[data-overview] body { background: color-mix(in srgb, var(--wb-bg) 28%, #000); }
+:root[data-overview] :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { filter: brightness(.28) saturate(.4); }
+:root[data-overview] .r-board :is(section.topic, .bcard) { content-visibility: visible !important; cursor: pointer; }
+:root[data-overview] .r-board section.topic:not([data-overview-motion]) > :not(.tophead),
+:root[data-overview] .r-board .tophead > .tnote,
+:root[data-overview] .r-board .bcard:not([data-overview-motion]) :is(.bc-body, .bc-grip, .bc-folded),
+:root[data-overview] .r-board > .reply { display: none !important; }
+:root[data-overview] .r-board .tophead, :root[data-overview] .r-board .bc-hd { position: static !important; }
+:root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+:root[data-overview] .r-board :is(.tnote-toggle, .d-max, .d-min, .bc-acts, .bc-fold, .bc-max, .bc-close),
+:root[data-overview] .r-board .tpin:not([aria-pressed="true"]),
+:root[data-overview] .r-board .bc-pin:not([aria-pressed="true"]) { opacity: 0; pointer-events: none; }
+:root[data-overview] .r-board :is(.tpin, .bc-pin)[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); pointer-events: none; }
+:root[data-overview] .r-board :is(section.topic, .bcard) { position: relative; margin-bottom: 6px; }
+:root[data-overview] .r-board :is(section.topic, .bcard):is(:hover, :focus-visible) { outline: 1px solid var(--wb-primary); outline-offset: -1px; }
+.overview-here::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--wb-primary); z-index: 3; pointer-events: none; }
+:root[data-overview][data-pincol] .r-board > .bpins { border: 0; padding: 0; margin-bottom: 0; }
+:root[data-overview][data-pincol] .r-board > .bpins::before { display: none; }
+:root[data-overview]:not([data-pincol]) .r-board > .bpins::before { filter: brightness(.28) saturate(.4); }
+:root[data-overview] .r-board > .bpins:not(:empty) { display: flow-root; }
+.r-board [data-overview-motion], .bpins [data-overview-motion] { content-visibility: visible !important; position: relative; }
+:is(.r-board, .bpins) [data-overview-motion] :is(.tophead, .bc-hd) { position: static !important; }
+:is(.r-board, .bpins) [data-overview-motion] .trecap .rtext { display: block; overflow: hidden; }
+.overview-spacer, .overview-slot { flex: none; pointer-events: none; }
+.overview-ghost { position: fixed; z-index: 46; pointer-events: none; box-sizing: border-box; overflow: hidden; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
+.overview-ghost > .tophead, .overview-ghost > .bc-hd { position: static !important; }
+.overview-ghost .rtext { overflow: hidden; }
+.overview-ghost :is(.tnote-toggle, .d-max, .d-min, .bc-acts, .bc-fold, .bc-max, .bc-close) { opacity: 0; }
+.overview-ghost-body { height: 100%; background: var(--wb-card); }
+:root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { transition: filter 240ms cubic-bezier(.2,.8,.2,1); }
+.overview-spacer { flex: none; pointer-events: none; }
+.overview-flash { animation: overview-flash 1.2s ease-out; }
+@keyframes overview-flash { from { outline: 3px solid var(--wb-primary); outline-offset: 0; } to { outline: 0 solid transparent; outline-offset: 3px; } }
+@media (prefers-reduced-motion: reduce) {
+  .overview-flash { animation: none; outline: 2px solid var(--wb-primary); outline-offset: 1px; }
+  :root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { transition: none; }
+}
+
 /* ===== preview cards (preview.js) =====
    What a preview card's body holds, one per kind the preview route
    answers. The text view's line height is fixed (preview.js LINE), since a
@@ -724,23 +763,25 @@ section.topic[data-topic][data-wbcv]:not([data-max]):not(:has(details.entry-pane
 .tm-end .btn { flex: none; height: 24px; font-size: 12px; font-weight: 700; color: var(--wb-fg); }
 .bcard[data-exited] .bc-kind { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
 .tm-fold { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
-/* the "+ Terminal" button (terminal.js) in its slot at the right end of the
-   composer's status line (dashboard.tmpl cfoot): an icon button whose
-   negative margin keeps the line's height, so showing it moves nothing. A
-   page without a composer fixes the slot at its bottom right (.tfix), and
-   its board's sticky copy-answers bar keeps clear of it. The
-   folder popover opens above the button, right-aligned to it; terminal.js
-   moves it right while its left edge would leave the viewport. */
-.tslot { position: relative; flex: none; display: flex; margin-left: auto; }
-.tslot.tfix { position: fixed; right: 16px; bottom: 16px; z-index: 30; }
-.tnew { width: 24px; height: 22px; margin: -3px -2px -3px 0; padding: 0; background: transparent; color: var(--wb-muted-fg); }
-.tnew:hover, .tnew:focus-visible { background: var(--wb-muted); color: var(--wb-fg); }
-.tnew .li { width: 15px; height: 15px; }
-.tnew[aria-expanded="true"] { background: var(--wb-primary); color: var(--wb-primary-fg); }
-.tfix .tnew { width: 36px; height: 36px; margin: 0; background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi); }
-.tfix .tnew .li { width: 18px; height: 18px; }
-body:has(> .tfix) .r-board .reply { margin-right: 44px; }
-.tpop { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 20; width: 340px; max-width: calc(100vw - 16px); background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; }
+/* Board infrastructure, not a card: it scrolls with the board and never
+   joins the topic rail or the drag flow. Collapse by its own column width. */
+.board-toolbar { container: board-toolbar / inline-size; flex: none; position: relative; z-index: 3; min-width: 0; margin-bottom: 10px; border: 1px solid var(--wb-line); border-radius: 12px; background: var(--wb-card); }
+.board-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 8px; }
+.board-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--wb-muted); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.board-action .li { width: 14px; height: 14px; flex: none; }
+.board-action:hover, .board-action:focus-visible { border-color: var(--wb-muted-fg); }
+.board-action[aria-pressed="true"], .tnew[aria-expanded="true"], .wnew[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); }
+.board-action kbd { font: 600 10.5px ui-monospace, Menlo, monospace; color: var(--wb-muted-fg); border: 1px solid var(--wb-line); border-radius: 4px; padding: 0 4px; }
+.board-count { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.board-term-slot, .board-web-slot { position: relative; display: flex; flex: none; }
+.board-term-slot:empty, .board-web-slot:empty { display: none; }
+@container board-toolbar (max-width: 540px) {
+  .board-action:not(.board-overview) .board-label, .board-action kbd { display: none; }
+  .board-action:not(.board-overview) { padding-inline: 8px; }
+}
+/* The folder popover opens below the toolbar button; terminal.js keeps it
+   inside the viewport and gives its options a scroll box when necessary. */
+.tpop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; box-sizing: border-box; width: 340px; max-width: calc(100vw - 16px); overflow: auto; background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; }
 .tpop[hidden] { display: none; }
 .tpop .lb { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); margin: 2px 4px 6px; }
 .tpop .lb + .topts { margin-bottom: 8px; }
@@ -777,7 +818,6 @@ body:has(> .tfix) .r-board .reply { margin-right: 44px; }
 .wc-badge[hidden] { display: none; }
 .ibtn.wc-att:has(.wc-badge:not([hidden])) { opacity: 1; color: var(--wb-fail); }
 .tnew + .tnew { margin-left: 2px; }
-.tfix .tnew + .tnew { margin-left: 8px; }
 /* the holder card's terminals whose session is gone */
 .hdterms { display: grid; gap: 2px; }
 .hdsub { font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 2px; }

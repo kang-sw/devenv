@@ -232,7 +232,7 @@ func TestClosedTopicCapRenders(t *testing.T) {
 		t.Fatal(err)
 	}
 	board := string(regions.Board)
-	wantAll(t, board, `<button class="btn closed-more" data-closed-next="30">show more closed topics (5)</button>`)
+	wantAll(t, board, `<button class="btn closed-more" data-closed-next="30" data-closed-more="5">show more closed topics (5)</button>`)
 	wantNone(t, strings.SplitN(board, `<template data-history-topic`, 2)[0], `<div class="closed-more">`, `>c5</span>`)
 	wantAll(t, board, `<template data-history-topic="c5">`)
 
@@ -251,7 +251,7 @@ func TestClosedTopicCapRenders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantAll(t, string(html), `<button class="btn closed-more" data-closed-next="32">show more closed topics (3)</button></div>`)
+	wantAll(t, string(html), `<button class="btn closed-more" data-closed-next="32" data-closed-more="3">show more closed topics (3)</button></div>`)
 }
 
 // TestStemmedTopicPageNamesItsKey pins how a stemmed topic renders: the

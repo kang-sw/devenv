@@ -235,6 +235,7 @@ if (bad.length) console.log(bad.join("\n"));
 // bands: every board topic remembers its laid-out size (contain-intrinsic-
 // size auto), and only a topic the bands marked (data-wbcv) skips its
 // rendering, never a maximized topic or one holding a maximized panel.
+// Overview and its motion keep items renderable instead of skipping them.
 func TestBoardTopicContentVisibility(t *testing.T) {
 	css, err := os.ReadFile("assets/dashboard.css")
 	if err != nil {
@@ -244,12 +245,14 @@ func TestBoardTopicContentVisibility(t *testing.T) {
 	for _, rule := range []string{
 		"section.topic[data-topic] { contain-intrinsic-size: auto 600px; }",
 		"section.topic[data-topic][data-wbcv]:not([data-max]):not(:has(details.entry-panel[data-max])) { content-visibility: auto; }",
+		":root[data-overview] .r-board :is(section.topic, .bcard) { content-visibility: visible !important; cursor: pointer; }",
+		".r-board [data-overview-motion], .bpins [data-overview-motion] { content-visibility: visible !important; position: relative; }",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("dashboard.css lacks %q", rule)
 		}
 	}
-	if strings.Count(s, "content-visibility:") != 1 {
-		t.Errorf("content-visibility must apply through the marked-topic rule only")
+	if strings.Count(s, "content-visibility:") != 3 {
+		t.Errorf("content-visibility must apply through the marked-topic rule and overview visibility overrides only")
 	}
 }
