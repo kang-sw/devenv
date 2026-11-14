@@ -146,7 +146,7 @@ function topic(top, h, kids) { var t = new E("section"); t.className = "topic"; 
 var rawRect = E.prototype.getBoundingClientRect;
 E.prototype.getBoundingClientRect = function () { if (this.attrs.id) reads.item.push(this.attrs.id); return rawRect.call(this); };
 // Above: u1, u2 in one topic and u3 under a closed fold of it; v1 in a topic
-// crossing the view's top; w1 in no topic; d1, d2 in a topic below; h1 in a
+// crossing the view's top; partially visible w1 in no topic; d1, d2 below; h1 in a
 // topic with no box (not rendered).
 var fold = new E("details"); fold.tagName = "DETAILS"; fold.open = false;
 var u1 = item("u1", -900, ""), u2 = item("u2", -800, "pick"), u3 = item("u3", -700, ""); fold.appendChild(u3);
@@ -157,13 +157,13 @@ items.length = 0; items.push(u1, u2, u3, v1, w1, d1, d2, h1);
 reads = { item: [], topic: 0 };
 fire([]);
 var top = pill(0), bot = pill(1);
-check("top segments", shown(top), [["open", "js.pill.open", "3"], ["ans", "js.pill.answered", "1"]]);
+check("top segments (partially visible w1 excluded)", shown(top), [["open", "js.pill.open", "2"], ["ans", "js.pill.answered", "1"]]);
 check("bottom segments", shown(bot), [["open", "js.pill.open", "2"]]);
 check("only items in no topic or a topic crossing the view read their own rect", reads.item, ["v1", "w1"]);
 check("each topic is read once per update", reads.topic, 4);
 check("visibility watches topics once, not their far controls", [observed.length, observed.filter(function (el) { return items.indexOf(el) >= 0; }).map(function (el) { return el.attrs.id; })], [5, ["w1"]]);
 fire(items.map(function (el) { return { isIntersecting: true, target: el }; }));
-check("stale item visibility cannot remove a far topic's pending items", shown(top), [["open", "js.pill.open", "3"], ["ans", "js.pill.answered", "1"]]);
+check("stale item visibility cannot remove a far topic's pending items", shown(top), [["open", "js.pill.open", "2"], ["ans", "js.pill.answered", "1"]]);
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
