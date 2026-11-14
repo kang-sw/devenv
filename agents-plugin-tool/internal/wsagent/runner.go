@@ -1057,7 +1057,7 @@ type State struct {
 	Held int `json:"held"`
 	// Page is the conversation's dashboard page path.
 	Page string `json:"page"`
-	// Error is the last launch or turn failure; cleared when a turn starts.
+	// Error is the last launch, turn, or command error; cleared when a turn starts.
 	Error     string `json:"error,omitempty"`
 	CreatedAt string `json:"created_at"`
 	ClosedAt  string `json:"closed_at,omitempty"`
@@ -2652,6 +2652,12 @@ func (c *conv) handle(ev Event) {
 		c.update(func(rec *Record) { rec.SteerAnswers, rec.SteerAnswerSeq = c.steerAnswers, ev.Seq })
 	case ev.UserTaken != "":
 		c.steerTaken(ev.UserTaken)
+	case ev.CommandError != "":
+		// Replay rebuilds lifecycle state, not transient command diagnostics.
+		if !quiet {
+			c.setStatus(func() { c.lastErr = ev.CommandError })
+			c.changed(false)
+		}
 	case ev.Notice != "":
 		if !quiet {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, ev.Notice)
