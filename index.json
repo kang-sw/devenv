@@ -649,7 +649,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-14T23:22:11Z",
+        "touched_at": "2026-11-14T23:22:55Z",
         "impl": {
           "branch": "impl/develop/scoff-cone-frays"
         }
