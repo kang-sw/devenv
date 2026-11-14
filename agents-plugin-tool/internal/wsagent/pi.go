@@ -496,6 +496,10 @@ type piProcess struct {
 	lead bool
 }
 
+func (p *piProcess) processControls() processControls {
+	return processControls{Process: p, steer: p, reports: p, commands: p, turns: p, recovery: p}
+}
+
 func (p *piProcess) Send(text string) error {
 	p.mapper.aborted.Store(false)
 	if rest, ok := piCompactCommand(text); p.lead && ok {
