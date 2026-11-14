@@ -1004,25 +1004,22 @@
   }
   // frameGraft moves g's new section content into its old section, level by
   // level down the frame's path: each kept element takes the new element's
-  // attributes and children, except its child on the path, which stays,
-  // and the kept section's content-visibility mark (data-wbcv, viewport
-  // bands), which no served section carries. At the bottom the new frame
-  // goes in after the old one, pending.
+  // attributes and children, except its child on the path, which stays.
+  // At the bottom the new frame goes in after the old one, pending.
   function frameGraft(g) {
-    var of = g.oc[0], mounted = of.tagName === "IFRAME" && !g.old.wbSkipped;
+    var of = g.oc[0], mounted = of.tagName === "IFRAME";
     // The next frame of a mounted frame is mounted before it goes in, and
     // before anything holds it (expandos, the load listener): a placeholder
     // would show nothing to reveal. The next frame of an unmounted one (a
     // closed fold, a topic far from the view) is a placeholder that simply
-    // takes the old one's place; so is that of a frame in a topic skipping
-    // its rendering (content-visibility), where a new frame would load at
-    // no size: the topic mounts it once it comes near (viewport bands).
+    // takes the old one's place: the topic mounts it once it comes near
+    // (viewport bands).
     if (mounted && g.nc[0].tagName !== "IFRAME") g.nc[0] = mountFrame(g.nc[0]);
     var nf = g.nc[0];
     if (mounted) frameNext(nf, of);
     for (var i = g.oc.length - 1; i > 0; i--) {
       var oa = g.oc[i], na = g.nc[i], oc = g.oc[i - 1], nc = g.nc[i - 1], before = true;
-      Array.prototype.slice.call(oa.attributes).forEach(function (a) { if (!na.hasAttribute(a.name) && a.name !== "data-wbcv") oa.removeAttribute(a.name); });
+      Array.prototype.slice.call(oa.attributes).forEach(function (a) { if (!na.hasAttribute(a.name)) oa.removeAttribute(a.name); });
       Array.prototype.forEach.call(na.attributes, function (a) { if (oa.getAttribute(a.name) !== a.value) oa.setAttribute(a.name, a.value); });
       Array.prototype.slice.call(oa.childNodes).forEach(function (c) { if (c !== oc) oa.removeChild(c); });
       Array.prototype.slice.call(na.childNodes).forEach(function (c) {
@@ -3708,16 +3705,11 @@
   // placeholders, paced; one leaving FAR turns its frames back into
   // placeholders that keep their height (unmountFrames), so nothing moves.
   // Between the two a topic keeps what it has, so scrolling back and forth
-  // reloads nothing. The bands are per topic, not per frame: a topic far
-  // from the view skips its rendering (content-visibility, dashboard.css),
-  // and inside it a frame has no box to observe. A frame mounts only where
-  // its topic is near and rendered (frameNear); a topic not reported yet
-  // takes the last report for its name (a changed topic's new section),
+  // reloads nothing. The bands are per topic, not per frame. A frame
+  // mounts only where its topic is near (frameNear); a topic not reported
+  // yet takes the last report for its name (a changed topic's new section),
   // else waits for its first report. A frame in no topic, and every frame
-  // where the browser lacks scroll margins, mounts as before. A topic
-  // takes content-visibility (data-wbcv) at its first report, after it was
-  // laid out once, so a skipped topic keeps its own size, not the
-  // stylesheet's placeholder size.
+  // where the browser lacks scroll margins, mounts as before.
   function boardBands() { return !!(window.wbHistory && window.wbHistory.bands && window.wbHistory.watch); }
   function frameNear(f) {
     if (!boardBands()) return true;
@@ -3725,7 +3717,7 @@
     if (!t) return true;
     bandTopic(t);
     var near = t.wbNear !== undefined ? t.wbNear : topicNear[t.getAttribute("data-topic")] === true;
-    return near && !t.wbSkipped;
+    return near;
   }
   // bandBoard puts the board's topic sections under root (root itself
   // included) under the bands, once each; frameNear bands a topic it meets
@@ -3741,22 +3733,12 @@
       w.watch(t, { margin: NEAR, onChange: function (r) { topicBand(t, r, true); } }),
       w.watch(t, { margin: FAR, onChange: function (r) { topicBand(t, r, false); } })
     ];
-    t.addEventListener("contentvisibilityautostatechange", function (e) {
-      t.wbSkipped = e.skipped;
-      if (e.skipped) return;
-      // The size a topic takes back as it renders again may land before or
-      // after this event: topicResized counts it either way, for two frames.
-      t.wbUnskip = true;
-      requestAnimationFrame(function () { requestAnimationFrame(function () { t.wbUnskip = false; }); });
-      mountFramesPaced(t);
-    });
     if (window.ResizeObserver) (topicRO || (topicRO = new ResizeObserver(topicResized))).observe(t);
   }
   // topicBand takes a band report for topic t. A report with no box (a
   // hidden board column, a topic taken off the page) tells no distance.
   function topicBand(t, r, near) {
     if (!r.rect || (!r.rect.width && !r.rect.height)) return;
-    if (!t.hasAttribute("data-wbcv")) t.setAttribute("data-wbcv", "");
     if (!near) { if (!r.visible) unmountFrames(t); return; }
     t.wbNear = r.visible;
     topicNear[t.getAttribute("data-topic")] = r.visible;
@@ -3793,8 +3775,7 @@
   // so what the bands themselves change above the view would move what the
   // user reads: a frame mounted as its topic comes near resizes the topic
   // when its first height lands at another height than it stood at
-  // (wbFirst, then wbLanded: applyFrameHeights), and a skipped topic takes
-  // its laid-out size back once it renders (wbSkipped, wbUnskip).
+  // (wbFirst, then wbLanded: applyFrameHeights).
   // topicResized scrolls by such a change of a topic standing wholly above
   // the view. A running keep session (a swap, a jump, a history load)
   // compensates by itself, a topic in view or below it moves nothing the
@@ -3816,10 +3797,9 @@
   }
   // topicSettling tells whether topic t's last size change is the bands'
   // own: it holds a frame whose first height has just landed as a change
-  // (each one counts once), or it skips its rendering or has just rendered
-  // again.
+  // (each one counts once).
   function topicSettling(t) {
-    var any = !!(t.wbSkipped || t.wbUnskip);
+    var any = false;
     q("iframe.doc-frame", t).forEach(function (f) {
       if (!f.wbLanded) return;
       f.wbLanded = false;

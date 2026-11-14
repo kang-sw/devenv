@@ -728,9 +728,9 @@ async function scenarioKeep(ctx) {
   // require a real frame, not simply the second topic in board order.
   const framedAbove = await page.evaluate((names) => names.filter((n) => window.__bh.section(n).querySelector('.tdoc iframe.doc-frame')), above.map((t) => t.name));
   assert(framedAbove.length >= 2, 'need two framed topics above for the late-height probe');
-  // The framed topic above nearest the view: one far up skips its rendering
-  // (content-visibility), and its update brings a placeholder the viewport
-  // bands mount only once it comes near, not a frame that reports late.
+  // The framed topic above nearest the view: one far up may be unmounted,
+  // and its update brings a placeholder the viewport bands mount only once
+  // it comes near, not a frame that reports late.
   const upAbove = framedAbove.at(-1), lateGrow = upAbove, upBelow = below[below.length - 1].name;
   const tracked = inView.map((t) => t.name);
   log(`in view: ${tracked.join(", ")}; update above: ${upAbove}; update below: ${upBelow}; late frame: ${lateGrow}`);
