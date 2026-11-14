@@ -136,7 +136,8 @@ if (bad.length) console.log(bad.join("\n"));
 // maximized topic, a topic's first size, and any change while a keep
 // session runs on the scroller move nothing; a topic taken off the page
 // leaves the observer. The pinned column scrolls its own topics where it
-// scrolls, else the board column does. The cases execute under node when
+// scrolls, else the board column does; a board-only page compensates the
+// document scroller. The cases execute under node when
 // it is installed.
 func TestBoardTopicResizeKeepsTheView(t *testing.T) {
 	src := dashboardFuncs(t, "topicResized", "topicSettling", "topicScroller")
@@ -208,6 +209,12 @@ pins.scrollHeight = 100;
 var inner = new Topic("inner", bcol, 0, 100, true);
 grow(inner, 100); grow(inner, 150);
 check("a pin list that does not scroll leaves it to the board column", bcol.scrollTop === 950 && pins.scrollTop === 560);
+// Board-only layout: bcol is not an independent scroller. Its document
+// must receive exactly one height delta (native anchoring is off in CSS).
+bcol.oy = "visible";
+var docAbove = new Topic("doc-above", html, 100, 200);
+grow(docAbove, 200); grow(docAbove, 673);
+check("an above-view mount compensates the document by one frame height", html.scrollTop === 1473 && bcol.scrollTop === 950);
 if (bad.length) console.log(bad.join("\n"));
 `)
 }
