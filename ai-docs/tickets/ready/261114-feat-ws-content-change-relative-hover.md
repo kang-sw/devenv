@@ -1,5 +1,9 @@
 ---
 title: Latest body update time in topic header and change gutter
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: fa3b36bdc68a3c08
+sage-review-completeness-reviewed: fa3b36bdc68a3c08
 ---
 
 # Latest body update time in topic header and change gutter
