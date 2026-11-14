@@ -208,7 +208,7 @@ func rmw(path string, transform func(map[string]Record) map[string]Record) error
 		os.Remove(tmpName)
 		return fmt.Errorf("close temp note store: %w", cerr)
 	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
+	if rerr := wsstate.AtomicReplaceFile(tmpName, path); rerr != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("atomic rename note store: %w", rerr)
 	}

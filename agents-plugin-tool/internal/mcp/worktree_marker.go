@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // worktreeMarkerFileName is the profile marker's file name in a linked
@@ -83,7 +84,7 @@ func writeWorktreeMarker(ctx context.Context, runner wsgit.Runner, wtPath string
 		os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, filepath.Join(dir, worktreeMarkerFileName)); err != nil {
+	if err := wsstate.AtomicReplaceFile(tmpName, filepath.Join(dir, worktreeMarkerFileName)); err != nil {
 		os.Remove(tmpName)
 		return err
 	}

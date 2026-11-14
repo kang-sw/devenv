@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -94,7 +95,10 @@ func writeSnapshot(t *testing.T, dir, id string, snap *wslive.Snapshot) {
 	if err := os.WriteFile(path+".tmp", raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(path+".tmp", path); err != nil {
+	// Replace as the ws-mcp writer does (with its Windows retry): the
+	// daemon may be reading the previous snapshot, which on Windows makes a
+	// plain rename over it fail.
+	if err := wsstate.AtomicReplaceFile(path+".tmp", path); err != nil {
 		t.Fatal(err)
 	}
 }

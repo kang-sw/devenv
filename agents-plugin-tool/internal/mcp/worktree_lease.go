@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/kang-sw/devenv/internal/wsgit"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // worktreeLeaseFileName is the worktree lease record's file name inside a
@@ -70,7 +71,7 @@ func writeWorktreeLease(ctx context.Context, runner wsgit.Runner, wtPath string,
 		os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, filepath.Join(dir, worktreeLeaseFileName)); err != nil {
+	if err := wsstate.AtomicReplaceFile(tmpName, filepath.Join(dir, worktreeLeaseFileName)); err != nil {
 		os.Remove(tmpName)
 		return err
 	}
