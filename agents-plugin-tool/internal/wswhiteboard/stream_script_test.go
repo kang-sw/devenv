@@ -149,6 +149,62 @@ check('joined rows remain chronological',[h.querySelector('.wb-entry').id,h.quer
 h=start(panel(101,200),[panel(51,200),panel(1,200)]);
 check('candidate loading reaches three panels',[first(h),h.querySelectorAll('.wb-entry').length],['e1',3]);
 check('all history fits',h.querySelector('.history-older').hidden,true);
+// A republished oldest selected panel moves inside a newer card. Restore
+// exact finalized IDs, but clip and page at its original chronological cut.
+function repost(oldID,newID){
+  var historical=panel(oldID,400).replace('class="wb-entry panel"','class="wb-entry panel historical"').replace(' id="p'+oldID+'"','').replace(' open>','>');
+  return panel(newID,400).replace('data-panel="p'+newID+'"','data-panel="p'+oldID+'"').replace('id="p'+newID+'"','id="p'+oldID+'"').replace('</details></article>','<details class="panel-versions"><summary>versions</summary>'+historical+'</details></details></article>');
+}
+h=start(panel(1,400)+logs(2,2)+panel(3,400)+logs(4,4)+panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400));
+click(h.querySelector('.history-older'));flush();
+check('republish fixture has finalized expanded boundary',h._wbHistoryChunks,['e7','e3']);
+var republishSnapshot=window.wbHistory.capture(document),republishChunks=h._wbHistoryChunks.slice();
+function republishedBoard(){return board(run(2,logs(2,2)+logs(4,4),false)+panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400)+repost(3,10),[panel(1,400)]);}
+h=republishedBoard();window.wbHistory.restore(document,republishSnapshot);flush();
+check('republish restores exact finalized membership',h._wbHistoryChunks,republishChunks);
+check('republished boundary lives only in Versions',!!h.querySelector('[id="e3"]').closest('.panel-versions'),true);
+check('republish clips at whole chronological successor',h.style['--wb-history-height'],'1660px');
+check('republish splits the log fold at successor',h.querySelectorAll('.run-fold').map(function(d){return d.getAttribute('data-history-anchor');}),['e2','e4']);
+resize(h);check('republish resize never recuts restored chunks',h._wbHistoryChunks,republishChunks);
+click(h.querySelector('.history-older'));flush();
+check('Older advances before historical cutoff',[h._wbHistoryChunks,h._wbHistoryPending,h.querySelector('.history-older').hidden],[['e7','e3','e1'],null,true]);
+h=republishedBoard();window.wbHistory.restore(document,republishSnapshot);flush();window.wbHistory.loadTarget(document,'e2');flush();
+check('navigation can reveal rows before historical cutoff',first(h),'e2');keeps.at(-1).opt.onEnd();
+// When the saved first entry also became historical, its successor may
+// still be inert. Restore the known cut's rows before measuring the clip.
+h=start(panel(3,400)+logs(4,4)+panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400),[logs(1,2)]);
+click(h.querySelector('.history-older'));flush();var deferredSnapshot=window.wbHistory.capture(document);
+check('deferred fixture saves historical first as boundary',[deferredSnapshot[0].first,h._wbHistoryChunks,h.querySelectorAll('template[data-history-page]').length],['e3',['e7','e3'],1]);
+h=board(panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400)+repost(3,10),[run(1,logs(1,2)+logs(4,4),false)]);
+window.wbHistory.restore(document,deferredSnapshot);flush();
+check('historical first restores inert successor and exact cut',[h._wbHistoryChunks,h.style['--wb-history-height'],h.querySelectorAll('template[data-history-page]').length],[['e7','e3'],'1660px',0]);
+click(h.querySelector('.history-older'));flush();check('Older reaches logs before deferred historical cut',[first(h),h._wbHistoryPending,h.querySelector('.history-older').hidden],['e1',null,true]);
+h=start(panel(3,400)+run(4,logs(4,4),true)+panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400),[logs(1,2)]);
+click(h.querySelector('.history-older'));flush();var disclosureSnapshot=window.wbHistory.capture(document);
+h=board(panel(5,400)+logs(6,6)+panel(7,400)+logs(8,8)+panel(9,400)+repost(3,10),[run(1,logs(1,2)+logs(4,4),false)]);
+window.wbHistory.restore(document,disclosureSnapshot);flush();
+check('deferred successor retains saved open disclosure',[h._wbHistoryChunks,h.querySelector('[id="e4"]').closest('.run-fold').open,h.style['--wb-history-height']],[['e7','e3'],true,'1680px']);
+// Even a saved in-flight Older operation resolves that same historical cut.
+var inFlight=JSON.parse(JSON.stringify(republishSnapshot));inFlight[0].chunks.push('e3');inFlight[0].pending={before:'e3'};
+h=republishedBoard();window.wbHistory.restore(document,inFlight);resize(h);
+check('republish restores and finishes pending Older',[h._wbHistoryChunks,h._wbHistoryPending],[['e7','e3','e1'],null]);
+// A truly absent ID must cancel its unfinished chunk, not wedge all clicks.
+var unresolved=JSON.parse(JSON.stringify(republishSnapshot));unresolved[0].chunks[1]='e999';
+h=republishedBoard();window.wbHistory.restore(document,unresolved);flush();
+click(h.querySelector('.history-older'));flush();
+check('unresolvable boundary cancels pending chunk',[h._wbHistoryChunks,h._wbHistorySteps,h._wbHistoryPending],[['e7','e999'],2,null]);
+click(h.querySelector('.history-older'));resize(h);
+check('unresolvable retries do not accumulate chunks',[h._wbHistoryChunks,h._wbHistorySteps,h._wbHistoryPending],[['e7','e999'],2,null]);
+var unresolvedFlight=JSON.parse(JSON.stringify(unresolved));unresolvedFlight[0].chunks.push('e999');unresolvedFlight[0].pending={before:'e999'};
+window.wbHistory.restore(document,unresolvedFlight);resize(h);
+check('unresolvable restored pending clears on resize',[h._wbHistoryChunks,h._wbHistorySteps,h._wbHistoryPending],[['e7','e999'],2,null]);
+window.wbHistory.restore(document,republishSnapshot);flush();click(h.querySelector('.history-older'));flush();
+check('valid restoration recovers Older after missing boundary',[first(h),h._wbHistoryPending],['e1',null]);
+// No older rows remain when the very first selected panel becomes historical.
+h=start(panel(1,400)+panel(2,400)+panel(3,400)+panel(4,400));click(h.querySelector('.history-older'));flush();
+var exhaustedSnapshot=window.wbHistory.capture(document);
+h=board(panel(2,400)+panel(3,400)+panel(4,400)+repost(1,5));window.wbHistory.restore(document,exhaustedSnapshot);flush();
+check('historical first boundary remains exhausted',[h._wbHistoryChunks,h.style['--wb-history-height'],h.querySelector('.history-older').hidden],[['e3','e1'],'1600px',true]);
 // Navigation keeps its original allowlist, fold opening and keep lifetime.
 h=start(logs(51,100),[panel(1,200)+logs(2,50)]);
 check('unknown target refused',window.wbHistory.loadTarget(document,'p999'),null);

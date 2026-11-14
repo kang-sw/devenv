@@ -34,6 +34,15 @@
       return !e.closest('.panel-versions');
     });
   }
+  // Republishing moves an immutable boundary into Versions. Its eN still
+  // defines the chronological cut, not the newer card that now contains it.
+  // Entry IDs increase at append; compare decimal lengths before digits.
+  function newer(id, before) { return id.length > before.length || (id.length === before.length && id > before); }
+  function boundaryRow(h, id) {
+    var node = id && find(h, id);
+    if (!node || !node.closest('.panel-versions')) return node;
+    return rows(h).find(function (e) { return newer(e.id, id); }) || null;
+  }
   // Log-only cuts can fall inside a disclosure. Split just that ancestry,
   // keeping its open state and chronological rows on both sides of the cut.
   function splitAt(h, node) {
@@ -58,7 +67,7 @@
   }
   function boundary(h) { return h._wbHistoryChunks[h._wbHistoryChunks.length - 1]; }
   function fit(h) {
-    var id = boundary(h), node = id && find(h, id), live = h.querySelector('.history-live');
+    var node = boundaryRow(h, boundary(h)), live = h.querySelector('.history-live');
     if (!node) return;
     node = splitAt(h, node);
     // Only the saved boundary's geometry changes on resize, never its ID.
@@ -97,9 +106,16 @@
     if (!h._wbHistoryPending || h._wbHistoryChoosing) return;
     h._wbHistoryChoosing = true;
     try {
-      var all = rows(h), before = h._wbHistoryPending.before;
-      var end = before ? all.findIndex(function (e) { return e.id === before; }) : all.length;
-      if (end < 0) return;
+      var all = rows(h), before = h._wbHistoryPending.before, node = before && boundaryRow(h, before);
+      var end = before ? all.indexOf(node) : all.length;
+      if (end < 0) {
+        // Abandon only the unfinished Older chunk; keep finalized cuts so a
+        // missing entry cannot lock out later clicks or resize retries.
+        h._wbHistoryPending = null;
+        if (h._wbHistoryChunks.length > 1) h._wbHistoryChunks.pop();
+        h._wbHistorySteps = h._wbHistoryChunks.length;
+        return;
+      }
       var older = all.slice(0, end), panels = older.filter(function (e) { return e.classList.contains('panel'); });
       var pages = Array.from(h.querySelectorAll('template[data-history-page]'));
       var heldPanel = pages.some(function (p) { return !!p.content.querySelector('.wb-entry.panel'); });
@@ -117,7 +133,7 @@
           first = candidates[0];
         } else {
           var count = candidates.length;
-          var tail = before ? topRow(h, find(h, before)).getBoundingClientRect().top : h.querySelector('.history-live').getBoundingClientRect().bottom;
+          var tail = before ? splitAt(h, node).getBoundingClientRect().top : h.querySelector('.history-live').getBoundingClientRect().bottom;
           while (count > 1) {
             var start = candidates.length - count, p = candidates[start];
             // Geometry supplies logs, gaps and folded runs. Replace only
@@ -145,7 +161,7 @@
   }
   function updateControl(h) {
     var all = rows(h);
-    var more = !!h.querySelector('template[data-history-page]') || (!!boundary(h) && all[0] && all[0].id !== boundary(h));
+    var more = !!h.querySelector('template[data-history-page]') || (!!boundary(h) && all[0] && all[0] !== boundaryRow(h, boundary(h)));
     var button = h.querySelector('.history-older');
     if ((!button || button.hidden === !more) && h.classList.contains('history-more') === more) return;
     // Hiding the exhausted control resizes shallower ancestors watched by
@@ -227,7 +243,7 @@
     var fold = !entry && node.closest('.run-fold, .system-run');
     if (fold) entry = find(h, fold.getAttribute('data-history-anchor'));
     if (entry) entry = topRow(h, entry).closest('.wb-entry') || entry;
-    if (entry && (!id || all.indexOf(entry) < all.findIndex(function (e) { return e.id === id; }))) {
+    if (entry && (!id || all.indexOf(entry) < all.indexOf(boundaryRow(h, id)))) {
       h._wbHistoryPending = null;
       h._wbHistoryChunks.push(entry.id);
       h._wbHistorySteps = h._wbHistoryChunks.length;
@@ -371,6 +387,20 @@
       var fold = h.closest('.topic-stream');
       if (fold && saved.open !== undefined) fold.open = saved.open;
       if (saved.first) materialize(h, saved.first);
+      if (saved.chunks && saved.chunks.length > 1) saved.chunks.forEach(function (id) {
+        if (!id) return;
+        var node = materialize(h, id), held = null;
+        if (!node || !node.closest('.panel-versions')) return;
+        // Finding the nested version need not load its old chronological
+        // page. Restore every surviving row from that cut, even if the
+        // saved first entry also moved into the newer card's Versions.
+        h.querySelectorAll('template[data-history-page]').forEach(function (page) {
+          page.content.querySelectorAll('.wb-entry').forEach(function (e) {
+            if (!e.closest('.panel-versions') && newer(e.id, id) && (!held || newer(held.id, e.id))) held = e;
+          });
+        });
+        if (held) materialize(h, held.id);
+      });
       // Discard default cuts made by init on the incoming tail. A new log
       // shifts that cut by one, and it must not leave a closed sub-run inside
       // a previously open saved run. Saved cuts/states are recreated below.
@@ -399,7 +429,6 @@
         h._wbHistoryChunks = saved.chunks.slice();
         h._wbHistorySteps = saved.chunks.length;
         h._wbHistoryPending = saved.pending || null;
-        saved.chunks.forEach(function (id) { if (id) materialize(h, id); });
         fit(h);
       } else reset(h);
       updateControl(h);
