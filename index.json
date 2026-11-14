@@ -446,6 +446,9 @@
     "261114-bug-pi-fork-descendant-key-authority-rejected": {
       "registered_at": "2026-11-14T06:06:07Z"
     },
+    "261114-bug-ws-dashboard-conversation-send-follow-bottom": {
+      "registered_at": "2026-11-14T11:36:43Z"
+    },
     "261114-bug-ws-dashboard-history-paint-resizeobserver-loop": {
       "registered_at": "2026-11-13T21:17:34Z"
     },
