@@ -77,13 +77,13 @@
   // stick below it. It is read on every run, since the row can come after
   // the rail.
   var topics = [], found = [], dirty = true, fresh = false, last = "", moved = null, stuck = null, raf = 0, inset = 0;
-  function readInset() { inset = root ? parseFloat(getComputedStyle(host).getPropertyValue("--wb-rail-inset")) || 0 : 0; }
+  function readInset() { inset = parseFloat(getComputedStyle(host).getPropertyValue("--wb-rail-inset")) || 0; }
   // scrollRest is how far the scroller can still scroll down, in px.
   function scrollRest() {
     var e = root || d.scrollingElement || d.documentElement;
     return Math.max(0, e.scrollHeight - e.clientHeight - e.scrollTop);
   }
-  function viewTop() { return root ? root.getBoundingClientRect().top + padTop + inset : 0; }
+  function viewTop() { return (root ? root.getBoundingClientRect().top + padTop : 0) + inset; }
 
   // The rail's items are the board's topics and any other node the host
   // marks with data-rail (its key, unique among the marked nodes), in board

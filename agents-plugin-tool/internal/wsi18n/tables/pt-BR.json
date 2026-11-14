@@ -1702,7 +1702,7 @@
   "js.lead.stop.note": "Encerra o processo. A próxima mensagem ou e-mail o inicia de novo.",
   "js.lead.stopped": "Nenhum processo em execução. A próxima mensagem ou e-mail inicia um.",
   "js.lead.close": "Fechar",
-  "js.lead.close.note": "Encerra a conversa de vez. Não é possível reabri-la.",
+  "js.lead.close.note": "Encerra a conversa e o processo e interrompe os acionamentos por e-mail. Ela pode ser reaberta pela barra lateral.",
   "js.lead.close.confirm": "Fechar esta sessão? O processo é encerrado e a conversa não pode ser continuada.",
   "js.ap.title": "Pedido de aprovação",
   "js.ap.agent": "subagente",
