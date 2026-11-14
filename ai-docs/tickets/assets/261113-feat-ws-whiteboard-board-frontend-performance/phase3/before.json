@@ -1,0 +1,110 @@
+{
+  "label": "before",
+  "tree": "/tmp/ws-board-topics-phase3.3pBANc/before/agents-plugin-tool",
+  "shape": "8,6,4,2,60",
+  "rates": [
+    4,
+    6
+  ],
+  "runs": 3,
+  "idle": 60,
+  "gc": true,
+  "alternated": true,
+  "version": "148.0.7778.96",
+  "samples": {
+    "c@4": [
+      {
+        "Nodes": 46602,
+        "Frames": 19,
+        "JSHeapUsedSize": 9939024,
+        "LayoutCount": 356,
+        "LayoutDuration": 271.433,
+        "RecalcStyleCount": 422,
+        "RecalcStyleDuration": 567.742,
+        "ScriptDuration": 2426.427,
+        "TaskDuration": 5871.782000000001,
+        "longTasks": 20,
+        "longTaskMs": 3414,
+        "framesBuilt": 20,
+        "mountedFrames": 16
+      },
+      {
+        "Nodes": 46602,
+        "Frames": 19,
+        "JSHeapUsedSize": 9941644,
+        "LayoutCount": 355,
+        "LayoutDuration": 271.193,
+        "RecalcStyleCount": 421,
+        "RecalcStyleDuration": 565.552,
+        "ScriptDuration": 2455.8709999999996,
+        "TaskDuration": 5834.737,
+        "longTasks": 20,
+        "longTaskMs": 3410,
+        "framesBuilt": 20,
+        "mountedFrames": 16
+      },
+      {
+        "Nodes": 46602,
+        "Frames": 19,
+        "JSHeapUsedSize": 9931244,
+        "LayoutCount": 354,
+        "LayoutDuration": 251.31799999999998,
+        "RecalcStyleCount": 420,
+        "RecalcStyleDuration": 564.6750000000001,
+        "ScriptDuration": 2505.376,
+        "TaskDuration": 5903.469999999999,
+        "longTasks": 20,
+        "longTaskMs": 3447,
+        "framesBuilt": 20,
+        "mountedFrames": 16
+      }
+    ],
+    "c@6": [
+      {
+        "Nodes": 46163,
+        "Frames": 14,
+        "JSHeapUsedSize": 8020608,
+        "LayoutCount": 328,
+        "LayoutDuration": 391.71199999999993,
+        "RecalcStyleCount": 394,
+        "RecalcStyleDuration": 883.8219999999999,
+        "ScriptDuration": 3784.958,
+        "TaskDuration": 8662.457,
+        "longTasks": 20,
+        "longTaskMs": 5327,
+        "framesBuilt": 20,
+        "mountedFrames": 11
+      },
+      {
+        "Nodes": 46338,
+        "Frames": 16,
+        "JSHeapUsedSize": 8787272,
+        "LayoutCount": 331,
+        "LayoutDuration": 419.818,
+        "RecalcStyleCount": 398,
+        "RecalcStyleDuration": 921.744,
+        "ScriptDuration": 4132.521000000001,
+        "TaskDuration": 9164.132,
+        "longTasks": 20,
+        "longTaskMs": 5656,
+        "framesBuilt": 20,
+        "mountedFrames": 13
+      },
+      {
+        "Nodes": 46251,
+        "Frames": 15,
+        "JSHeapUsedSize": 8400296,
+        "LayoutCount": 330,
+        "LayoutDuration": 407.322,
+        "RecalcStyleCount": 396,
+        "RecalcStyleDuration": 903.546,
+        "ScriptDuration": 3878.7329999999997,
+        "TaskDuration": 8831.74,
+        "longTasks": 20,
+        "longTaskMs": 5393,
+        "framesBuilt": 20,
+        "mountedFrames": 12
+      }
+    ]
+  }
+}

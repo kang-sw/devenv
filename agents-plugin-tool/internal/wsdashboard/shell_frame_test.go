@@ -52,6 +52,7 @@ function $() { return null; }
 var searchOpens = 0, tkApi = { openSearch: function () { searchOpens++; } };
 var mode = "session", rid = "rid1", hiddenRegions = {}, modeHash = "", liveMode = false, tlHeld = {};
 function held() { return ""; }
+function boardInputFull() { return null; }
 function trackerLost() {}
 function trackerNudge(rev) { log.push("nudge:" + rev); }
 function swap(name, hash, html) { log.push("swap:" + name + "." + hash); }
@@ -75,7 +76,7 @@ q = function (sel) { return /time\[data-ms\]/.test(sel) ? [{}] : sel === "#sse" 
 connect();
 shFrameInit();
 var s = sockets[0];
-check("a framed session page streams without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1");
+check("a framed session page streams without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1&topics=1");
 s.onopen({});
 function fromShell(m, src) { m.wsShell = m.wsShell || "shown"; listeners.message.forEach(function (fn) { fn({ source: src || parentWin, origin: location.origin, data: m }); }); }
 fromShell({ wsShell: "search" }, otherWin);
