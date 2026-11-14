@@ -99,7 +99,12 @@
   // The host is the scroll root when it scrolls on its own (the dashboard's
   // board column); otherwise the window scrolls.
   var root = /auto|scroll/.test(getComputedStyle(host).overflowY) ? host : null;
-  var seen = new Set();
+  // Observers only invalidate the display; they are not the pending-item
+  // inventory. Their reports can describe layout before a frame height (or
+  // a scroll compensation) landed. Mixing that snapshot with current topic
+  // rects made static counts depend on observer delivery order.
+  var positions = new Set();
+  items.forEach(function (el) { positions.add(el.closest("section.topic") || el); });
 
   // list is ordered top to bottom; the nearest item at the top edge is the
   // last one, at the bottom edge the first. Each segment jumps to the nearest
@@ -122,14 +127,28 @@
       if (g.length) target[edge][k] = edge === "top" ? g[g.length - 1] : g[0];
     });
   }
+  // Avoid reading every far item's rect: an item in a topic wholly above
+  // or below the view takes its side from the topic's rect, read once per
+  // update, unless a closed fold hides it. Only an item in a topic crossing
+  // the view reads its own rect.
+  function folded(el, topic) {
+    for (var p = el.parentElement; p && p !== topic; p = p.parentElement) if (p.tagName === "DETAILS" && !p.open) return true;
+    return false;
+  }
   function update() {
     var rt = 0, rb = window.innerHeight;
     if (root) { var rr = root.getBoundingClientRect(); rt = rr.top; rb = rr.bottom; }
-    var above = [], below = [];
+    var above = [], below = [], topics = new Map();
     items.forEach(function (el) {
-      if (seen.has(el)) return;
+      var topic = el.closest("section.topic"), tr = topic && topics.get(topic);
+      if (topic && !tr) { tr = topic.getBoundingClientRect(); topics.set(topic, tr); }
+      if (tr && (tr.bottom <= rt || tr.top >= rb)) {
+        if ((tr.width || tr.height) && !folded(el, topic)) (tr.bottom <= rt ? above : below).push(el);
+        return;
+      }
       var r = el.getBoundingClientRect();
       if (!r.width && !r.height) return; // not rendered, e.g. the board tab is hidden
+      if (r.bottom > rt && r.top < rb) return; // currently in view
       (r.top < rt ? above : below).push(el);
     });
     show("top", above);
@@ -141,11 +160,10 @@
     wraps.bot.style.bottom = "calc(" + (reply && reply.offsetHeight ? reply.offsetHeight + 18 : 10) + "px + var(--wb-rail-bot, 0px))";
   }
 
-  var io = new IntersectionObserver(function (entries) {
-    entries.forEach(function (e) { if (e.isIntersecting) seen.add(e.target); else seen.delete(e.target); });
-    update();
-  }, { root: root });
-  items.forEach(function (el) { io.observe(el); });
+  // Watch topic positions, not every far control's rendered visibility.
+  // Counts always come from the data-backed items and one current layout.
+  var io = new IntersectionObserver(update, { root: root });
+  positions.forEach(function (el) { io.observe(el); });
 
   // A jump scroll can carry an item past the view without a crossing the
   // observer reports, and a hidden board column changes size without one; a
@@ -156,7 +174,12 @@
   scroller.addEventListener("scroll", later, { passive: true });
   window.addEventListener("resize", later);
   var ro = window.ResizeObserver ? new ResizeObserver(later) : null;
-  if (ro) ro.observe(host);
+  if (ro) {
+    ro.observe(host);
+    // The host's border box need not resize when a mounted body changes
+    // its topic's height. Refresh even if no topic crosses an IO threshold.
+    positions.forEach(function (el) { ro.observe(el); });
+  }
 
   // A pick, a ticked ack, or a typed note changes an item's draft state; the
   // host-level listeners run after form.js's own control handlers.

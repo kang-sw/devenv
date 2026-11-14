@@ -268,10 +268,11 @@ function Doc() {
 }
 Doc.prototype = {
   createElement: function (t) { return new El(t, this); },
-  addEventListener: function (t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); }
+  addEventListener: function (t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
+  getElementById: function (id) { return this.documentElement.querySelector('[id="' + id + '"]'); }
 };
 var page = null;
-function wsT(k) { return k; }
+function wsT(k, a, b) { return k === "js.board.toolbar.count" ? "open " + a + " · closed " + b : k; }
 // mk builds an element: tag.class.class with attributes and children.
 function mk(spec, attrs, kids) {
   var p = spec.split("."), e = new El(p[0], page.doc);
@@ -288,9 +289,9 @@ function topic(name, at, closed, fresh) {
   t.label = name + (closed ? "/c" : "") + (fresh ? "*" : "");
   return t;
 }
-function more(next) { var b = mk("button.btn.closed-more", { "data-closed-next": next }); b.label = "more" + next; return b; }
+function more(next, remainder) { var b = mk("button.btn.closed-more", { "data-closed-next": next }); if (remainder !== undefined) b.setAttribute("data-closed-more", remainder); b.label = "more" + next; return b; }
 function reply() { var r = mk("div.reply"); r.label = "reply"; return r; }
-function label(n) { return n.label || (n.hasAttribute("data-card") ? n.card || "card" : n.hasAttribute("data-pins") ? "PINS" : n.tagName); }
+function label(n) { return n.label || (n.hasAttribute("data-card") ? n.card || "card" : n.hasAttribute("data-pins") ? "PINS" : n.classList.contains("board-toolbar") ? "TOOLBAR" : n.tagName); }
 function names(el) { return el.children.map(label); }
 // boot loads cards.js into a fresh page whose board region holds served,
 // over store (a reload keeps it), with the pinned column shown when wide.
@@ -303,11 +304,12 @@ function boot(store, served, o) {
   page.board.id = "r-board";
   served().forEach(function (n) { page.board.appendChild(n); });
   page.col = dbody.appendChild(new El("aside", page.doc));
-  var win = { getSelection: function () { return null; }, innerWidth: 2000 };
+  var win = page.win = { getSelection: function () { return null; }, addEventListener: function () {}, innerWidth: 2000, innerHeight: 800 };
   new Function("document", "window", "wsT", "getComputedStyle", "requestAnimationFrame", CARDS)(page.doc, win, wsT, function () { return { overflowY: "visible" }; }, function () {});
   page.W = win.WsCards;
   page.W.register("k", { open: function (c) { c.title({ name: c.data.name }); c.el.card = c.data.name; } });
   page.W.mount(page.board, {
+    toolbar: o.toolbar,
     key: "cards", load: function (k) { return store[k] || null; }, save: function (k, v) { if (v === null) delete store[k]; else store[k] = v; },
     column: page.col, shows: function (n) { return !!o.wide && n > 0; },
     layout: function (on) { page.layouts.push(on); },
@@ -359,7 +361,7 @@ boot(store, served1);
 check("every topic bar has a pin button, then the maximize and back buttons, before its note pen, unpressed",
   [A, B, C].map(function (t) { var b = pinBtn(t); return [!!b, b && b.parentNode.children.slice(b.parentNode.children.indexOf(b)).map(function (x) { return x.className; }), b && b.getAttribute("aria-pressed")]; }),
   [A, B, C].map(function () { return [true, ["ibtn tpin", "ibtn d-max", "ibtn d-min", "btn mini tnote-toggle"], "false"]; }));
-check("an empty pin list heads the board", names(page.board), ["PINS", "a", "b", "c", "x/c", "more31", "reply"]);
+check("the toolbar precedes the empty pin list", names(page.board), ["TOOLBAR", "PINS", "a", "b", "c", "x/c", "more31", "reply"]);
 
 // A pinned topic stands among pinned cards in pin order.
 now = 1100; var ca = page.W.open("k", { name: "Ca" }); ca.pin(true);
@@ -367,18 +369,18 @@ now = 1200; clickPin(B);
 now = 1300; var cb = page.W.open("k", { name: "Cb" }); cb.pin(true);
 check("a pinned topic stands among the pinned cards, in pin order", pinsOf(), ["Ca", "b", "Cb"]);
 check("its pin button is pressed and the section marked", [pinBtn(B).getAttribute("aria-pressed"), B.hasAttribute("data-pinned")], ["true", true]);
-check("the board keeps the rest in its order", names(page.board), ["PINS", "a", "c", "x/c", "more31", "reply"]);
+check("the board keeps the rest in its order", names(page.board), ["TOOLBAR", "PINS", "a", "c", "x/c", "more31", "reply"]);
 cb.pin(false);
-check("an unpinned card enters the flow at its open time", names(page.board), ["PINS", "Cb", "a", "c", "x/c", "more31", "reply"]);
+check("an unpinned card enters the flow at its open time", names(page.board), ["TOOLBAR", "PINS", "Cb", "a", "c", "x/c", "more31", "reply"]);
 cb.close();
 
 // An unpinned hand move is undone by a later bump above it.
 now = 2000;
 page.W.move(C, { pin: false, after: null, before: A });
-check("a topic moved by hand stands where it was dropped", names(page.board), ["PINS", "c", "a", "x/c", "more31", "reply"]);
+check("a topic moved by hand stands where it was dropped", names(page.board), ["TOOLBAR", "PINS", "c", "a", "x/c", "more31", "reply"]);
 var A2 = topic("a", 2500);
 swap([A2, C, topic("x", 0, true), more(31), reply()]);
-check("a topic updated later rises above it", names(page.board), ["PINS", "a", "c", "x/c", "more31", "reply"]);
+check("a topic updated later rises above it", names(page.board), ["TOOLBAR", "PINS", "a", "c", "x/c", "more31", "reply"]);
 var stash = JSON.parse(store.cards);
 check("the move is kept with its bar time", stash.topics.filter(function (r) { return r.n === "c"; }).map(function (r) { return [r.a > 2000 - 1, r.b]; }), [[true, 100]]);
 
@@ -419,14 +421,14 @@ boot(store, function () { return [topic("a", 2800), topic("c", 100), topic("x", 
 check("after a reload the board's missing pinned topic is fetched page by page", [page.closedCalls, page.adopted], [[31, 61], ["b"]]);
 check("pins and their order survive the reload, in the pinned column", [pinsOf(), page.W.pinList().parentNode === page.col, page.layouts], [["Ca", "b/c", "a"], true, [true]]);
 check("the board column holds the rest, no pin list, the hand-moved topic where it stood",
-  names(page.board), ["c", "x/c", "more31", "reply"]);
+  names(page.board), ["TOOLBAR", "c", "x/c", "more31", "reply"]);
 check("the pinned topic in the column has its pin pressed", pinBtn(page.W.pinList().children[2]).getAttribute("aria-pressed"), "true");
 // Unpinning the last pins closes the column; an open topic goes back by
 // recency, a closed one to the head of the closed section.
 page.W.list("k")[0].close();
 clickPin(page.W.pinList().children[0]);
 clickPin(page.W.pinList().children[0]);
-check("the last unpin hides the column and puts the pin list atop the board", [page.layouts, names(page.board)], [[true, false], ["PINS", "a", "c", "b/c", "x/c", "more31", "reply"]]);
+check("the last unpin hides the column and puts the pin list atop the board", [page.layouts, names(page.board)], [[true, false], ["TOOLBAR", "PINS", "a", "c", "b/c", "x/c", "more31", "reply"]]);
 
 // A pin whose topic is gone is dropped.
 store = { cards: saved };
@@ -571,7 +573,7 @@ function frag(nodes) { return { childNodes: nodes }; }
 function isPeer() { return false; }
 function isPanel() { return false; }
 `+src+`
-function served(closed) { return [topic("A", 500)].concat(closed.map(function (n) { return topic(n, 0, true); })).concat([more(1), reply()]); }
+function served(closed) { return [topic("A", 500)].concat(closed.map(function (n) { return topic(n, 0, true); })).concat([more(1, 5), reply()]); }
 function start() {
   var first;
   boot({}, function () { first = served(["X"]); return first; });
@@ -579,7 +581,7 @@ function start() {
   first.forEach(function (n) { var k = topicKey(n); if (k !== null) boardSeen["t:" + k] = n.outerHTML; });
   // "show more" fetched the page from index 1: Y and Z, then more from 3.
   var btn = page.board.querySelector("button.closed-more");
-  var p = mk("div.closed-page", {}, [topic("Y", 0, true), topic("Z", 0, true), more(3)]);
+  var p = mk("div.closed-page", {}, [topic("Y", 0, true), topic("Z", 0, true), more(3, 3)]);
   page.board.insertBefore(p, btn);
   page.board.removeChild(btn);
   return p;
@@ -589,6 +591,7 @@ function tail() { var b = page.board.querySelectorAll("button.closed-more"); ret
 var p = start();
 morphBoard(page.board, served(["X"]));
 check("with nothing pinned the pages count on from the board's control", tail(), "3");
+check("landed morph maintains remainder and total", [page.board.querySelector("button.closed-more").getAttribute("data-closed-more"), page.W.toolbar().querySelector(".board-count").textContent], ["3", "open 1 · closed 6"]);
 clickPin(p.querySelector('section.topic[data-topic="Y"]'));
 check("a topic pinned out of a page leaves a slot there", [pinsOf(), p.querySelectorAll(".closed-slot").map(function (s) { return s.getAttribute("data-slot"); })], [["Y/c"], ["Y"]]);
 morphBoard(page.board, served(["X"]));
@@ -601,6 +604,7 @@ check("a pinned closed topic pushed past the cap stays pinned", pinsOf(), ["X/c"
 check("and a slot at the pages' head counts it", [p.firstChild.getAttribute("data-slot"), tail()], ["X", "4"]);
 morphBoard(page.board, served(["W"]));
 check("a later swap counts it once", [p.querySelectorAll(".closed-slot").length, tail()], [1, "4"]);
+check("pinned slots consume remainder without counting as shown topics", [page.board.querySelector("button.closed-more").getAttribute("data-closed-more"), page.W.toolbar().querySelector(".board-count").textContent], ["2", "open 1 · closed 6"]);
 process.stdout.write(bad.join("\n"));
 `)
 }

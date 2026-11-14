@@ -489,26 +489,39 @@
     return Math.max(20, Math.min(400, Math.floor((w - 40) / 7.8)));
   }
 
-  // --- the "+ Terminal" button and its folder popover -------------------------
-  // The button ends the composer's status line, in the slot beside the sline
-  // region (dashboard.tmpl tslot) rather than inside it: a region swap
-  // replaces the region's contents whole, and the slot keeps the button and
-  // an open popover through it. A page that offers terminals without a
-  // composer (no live adapter) gets the slot fixed at the page's bottom
-  // right. The popover opens above the button, right-aligned to it.
+  // --- the toolbar's new-terminal button and folder popover -------------------
+  // The toolbar survives board swaps, including an open folder popover.
+  // The popover opens below its button and stays inside the viewport.
   function closePop(refocus) {
     if (!ui.pop || ui.pop.hidden) return;
     ui.pop.hidden = true;
     ui.btn.setAttribute("aria-expanded", "false");
     if (refocus) ui.btn.focus();
   }
-  // placePop keeps the open popover inside the viewport: it is anchored at
-  // the button's right edge, and moves right as far as its left edge is out.
   function placePop() {
     var pop = ui.pop;
-    pop.style.right = "";
-    var out = 8 - pop.getBoundingClientRect().left;
-    if (out > 0) pop.style.right = (parseFloat(window.getComputedStyle(pop).right) || 0) - out + "px";
+    var bounds = { left: 8, right: window.innerWidth - 8, top: 8, bottom: window.innerHeight - 8 };
+    // A live board scrolls inside its column, which clips descendants even
+    // when the viewport has room (notably beside the pinned column).
+    var col = ui.col && ui.col.getClientRects().length ? ui.col.getBoundingClientRect() : null;
+    if (col) {
+      bounds.left = Math.max(bounds.left, col.left + 8);
+      bounds.right = Math.min(bounds.right, col.right - 8);
+      bounds.top = Math.max(bounds.top, col.top + 8);
+      bounds.bottom = Math.min(bounds.bottom, col.bottom - 8);
+    }
+    pop.style.left = "0px";
+    pop.style.top = "calc(100% + 8px)";
+    pop.style.maxWidth = Math.max(0, bounds.right - bounds.left) + "px";
+    pop.style.maxHeight = "";
+    var r = pop.getBoundingClientRect();
+    var left = Math.max(bounds.left - r.left, Math.min(0, bounds.right - r.right));
+    pop.style.left = left + "px";
+    // Stay below the button where space allows, and scroll rather than
+    // clipping options when the toolbar is near the viewport's bottom.
+    var top = Math.max(bounds.top, Math.min(r.top, bounds.bottom - 72));
+    pop.style.top = (top - r.top + ui.btn.offsetHeight + 8) + "px";
+    pop.style.maxHeight = Math.max(0, bounds.bottom - top) + "px";
   }
   function optRow(label, path, run) {
     var b = mk("button", "topt");
@@ -527,11 +540,14 @@
   function pick(body) {
     ui.err.textContent = "";
     busy(true);
-    create(body, function (err) {
-      busy(false);
-      if (err) { ui.err.textContent = err; if (body.folder === "path") ui.in.focus(); return; }
-      closePop(false);
-    });
+    var run = function () {
+      create(body, function (err) {
+        busy(false);
+        if (err) { ui.err.textContent = err; if (body.folder === "path") ui.in.focus(); return; }
+        closePop(false);
+      });
+    };
+    if (window.WsOverview) window.WsOverview.after(run); else run();
   }
   function drawOpts() {
     ui.opts.textContent = "";
@@ -551,14 +567,15 @@
     list(function (err) { if (!err && !ui.pop.hidden) { var a = doc.activeElement, i = Array.prototype.indexOf.call(ui.opts.children, a); drawOpts(); if (i >= 0 && ui.opts.children[i]) ui.opts.children[i].focus(); } });
   }
   function button() {
-    var slot = doc.getElementById("tslot");
-    if (!slot) {
-      slot = mk("div", "tslot tfix");
-      doc.body.appendChild(slot);
-    }
-    ui.btn = mk("button", "btn tnew");
+    var slot = doc.getElementById("board-term-slot");
+    if (!slot) return;
+    ui.btn = mk("button", "board-action tnew");
     ui.btn.type = "button";
     ui.btn.innerHTML = cards.icon("square-terminal");
+    ui.btn.appendChild(mk("span", "board-label", wsT("js.term.new")));
+    var arrow = mk("span", "term-arrow", "▾");
+    arrow.setAttribute("aria-hidden", "true");
+    ui.btn.appendChild(arrow);
     ui.btn.title = wsT("js.term.new.title");
     ui.btn.setAttribute("aria-label", wsT("js.term.new"));
     ui.btn.setAttribute("aria-haspopup", "dialog");
@@ -599,6 +616,7 @@
     pop.addEventListener("keydown", function (e) {
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closePop(true); }
     });
+    window.addEventListener("resize", function () { if (!pop.hidden) placePop(); });
     doc.addEventListener("mousedown", function (e) {
       if (!pop.hidden && !pop.contains(e.target) && !ui.btn.contains(e.target)) closePop(false);
     }, true);
@@ -608,12 +626,14 @@
     // setup hands the kind the page's own pieces: post (a session write
     // route, which passes a refusal's text through) and toast.
     setup: function (h) { hooks = h || {}; },
-    // mount adds the "+ Terminal" button for the cards in the board column
+    // mount adds the toolbar's new-terminal button for cards in the board column
     // col and reads the daemon's list, again each time the page becomes
     // visible. The page mounts the card framework first.
     mount: function (col) {
       if (ui.btn || !col) return;
+      ui.col = col;
       button();
+      if (!ui.btn) return;
       reconcile();
       doc.addEventListener("visibilitychange", function () {
         if (doc.hidden) return;

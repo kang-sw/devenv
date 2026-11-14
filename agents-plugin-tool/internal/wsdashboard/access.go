@@ -28,8 +28,9 @@ import (
 // Two routes need neither, both because a sandboxed frame's opaque origin
 // sends no cookie:
 //
-//   - GET and HEAD of the shared mermaid script (publicAsset), which a topic
-//     body's sandboxed frame loads. That frame also inlines its images as
+//   - GET and HEAD of the shared mermaid script and the shared frame
+//     stylesheet and script (publicAsset), which a topic body's sandboxed
+//     frame loads. That frame also inlines its images as
 //     data: URLs (ImageDataURL, up to 2 MiB); a larger image falls back to
 //     the image route, which a LAN viewer's frame cannot load.
 //   - GET and HEAD of the HTML preview's capability route
@@ -126,15 +127,26 @@ func (d *Daemon) lanGuard(next http.Handler) http.Handler {
 	})
 }
 
-// publicAsset reports a read of the shared mermaid script, the one route
-// LAN mode serves without the token. A board's topic body renders in a
-// sandboxed frame whose opaque origin sends no cookie (wswhiteboard
-// framedDoc), and a mermaid block there loads this script itself. The script is the vendored
-// library under a content-hash name, so serving it reveals nothing about any
-// session.
+// publicAsset reports a read of the shared mermaid script or a shared
+// topic-body frame asset, the routes LAN mode serves without the token. A
+// board's topic body renders in a sandboxed frame whose opaque origin sends
+// no cookie (wswhiteboard framedDoc): every frame loads the frame stylesheet
+// and script (wswhiteboard.FrameAsset), and a mermaid block there loads the
+// mermaid script itself. Each is a fixed build asset under a content-hash
+// name, so serving it reveals nothing about any session.
 func publicAsset(r *http.Request) bool {
-	name, _ := wswhiteboard.MermaidAsset()
-	return (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/s/"+name
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	rest, ok := strings.CutPrefix(r.URL.Path, "/s/")
+	if !ok {
+		return false
+	}
+	if name, _ := wswhiteboard.MermaidAsset(); rest == name {
+		return true
+	}
+	_, _, ok = wswhiteboard.FrameAsset(rest)
+	return ok
 }
 
 func tokenMatches(got, token string) bool {

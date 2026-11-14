@@ -29,7 +29,7 @@ func TestBoardKeepWiring(t *testing.T) {
 		"ins = morphBoard(el, html);",
 		"if (kept) boardKeepSettle(kept, el, ins);",
 		"window.wbHistory.sweep(); ins.forEach(watchBoard);",
-		`q("iframe.doc-frame", n).forEach(function (f) { f.wbKeep = true; });`,
+		`q(".doc-frame", n).forEach(function (f) { f.wbKeep = true; });`,
 		"if (kept) kept.h.apply();\n        startMotion(",
 		"restoreScroll(scroll);",
 		"if (kept) kept.h.apply();",

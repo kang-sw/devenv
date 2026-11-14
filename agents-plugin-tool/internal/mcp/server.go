@@ -226,6 +226,7 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
+	s.dashboardReconnect()
 	scanner := bufio.NewScanner(in)
 	encoder := json.NewEncoder(out)
 	var writeMu sync.Mutex

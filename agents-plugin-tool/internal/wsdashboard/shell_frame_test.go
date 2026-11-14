@@ -49,6 +49,7 @@ doc.title = "sess - ws dashboard";
 var root = { hasAttribute: function () { return false; }, clientWidth: 1200 };
 function region() { return null; }
 function $() { return null; }
+var searchOpens = 0, tkApi = { openSearch: function () { searchOpens++; } };
 var mode = "session", rid = "rid1", hiddenRegions = {}, modeHash = "", liveMode = false, tlHeld = {};
 function held() { return ""; }
 function trackerLost() {}
@@ -77,6 +78,10 @@ var s = sockets[0];
 check("a framed session page streams without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1");
 s.onopen({});
 function fromShell(m, src) { m.wsShell = m.wsShell || "shown"; listeners.message.forEach(function (fn) { fn({ source: src || parentWin, origin: location.origin, data: m }); }); }
+fromShell({ wsShell: "search" }, otherWin);
+check("another window cannot open search", searchOpens, 0);
+fromShell({ wsShell: "search" });
+check("the shell opens the palette without a hidden header trigger", searchOpens, 1);
 s.msg("region", { name: "board", hash: "1", html: "" });
 tickTimes();
 check("a shown frame applies regions and ticks the clock", [log, times], [["swap:board.1"], 1]);
@@ -235,6 +240,12 @@ from({}, { wsShell: "head", html: "<b>stray</b>", qs: "", pad: 0, top: 40 });
 from(first.contentWindow, { wsShell: "head", html: 1, qs: "", pad: 0, top: 40 });
 from(first.contentWindow, { wsShell: "nav", href: "/s/b" }, "http://evil:1");
 check("another origin, a window that is no frame, and a malformed message are ignored", [log, pushed], [[], []]);
+from(first.contentWindow, { wsShell: "layout", pincol: false, dim: 0, popover: true });
+check("a frame popover lifts the frame", root.hasAttribute("data-fpopover"), true);
+from(first.contentWindow, { wsShell: "layout", pincol: false, dim: 0.4 });
+check("a modal lifts the frame and clears the popover state", [root.hasAttribute("data-fdim"), root.hasAttribute("data-fpopover")], [true, false]);
+from(first.contentWindow, { wsShell: "layout", pincol: false, dim: 0 });
+check("closing overlays restores the shell layer", [root.hasAttribute("data-fdim"), root.hasAttribute("data-fpopover")], [false, false]);
 
 check("a plain click on a session link is taken", click("/s/b"), true);
 var b = frameOf("/s/b");

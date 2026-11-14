@@ -167,7 +167,7 @@ func TestStreamRenderMetadataChronologyAndSandbox(t *testing.T) {
 		if !strings.HasPrefix(key, "entry:") {
 			key = "topic:" + key
 		}
-		wantAll(t, d, `<!DOCTYPE html><html>`, `--wb-bg:`, `<meta name="wb-doc-key" content="`+key+`">`)
+		wantAll(t, d, `<!DOCTYPE html><html>`, frameCSSLink(t), `<meta name="wb-doc-key" content="`+key+`">`)
 	}
 	for _, theme := range []string{"light", "dark"} {
 		themed := frameDocs(t, string(ThemeFrames(regions.Board, theme)))

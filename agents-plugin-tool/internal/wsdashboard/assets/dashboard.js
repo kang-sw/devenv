@@ -124,6 +124,10 @@
   doc.addEventListener("visibilitychange", tickTimes);
 
   function region(name) { return $("r-" + name); }
+  // The board frames' paced mount list and the viewport bands' state
+  // (mountFramesPaced, frameNear: the lazy frames block), set here, before
+  // the page load's first mount pass runs.
+  var mountList = [], mountTask = false, NEAR = "100% 0px", FAR = "400% 0px", topicNear = {}, topicRO = null;
   // boardBoxes are the elements holding the board's topics: the board
   // region and, while the pinned column shows, the pin list there
   // (cards.js), whose topics are the board's as much as the region's.
@@ -562,6 +566,7 @@
     if (!el) return;
     var board = name === "board";
     if (el.getAttribute("data-h") === hash) { if (board) deferred = null; if (name === "rail" && railGate) railGate.forget(); return; }
+    if (board && window.WsOverview && window.WsOverview.holding()) { boardOverviewHeld = { hash: hash, html: html }; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board && window.WsCards && window.WsCards.dragging && window.WsCards.dragging()) { boardDragHeld = { hash: hash, html: html }; return; }
     // A rail render from before the layout change this page saw applied
@@ -595,6 +600,7 @@
       ins = morphBoard(el, html);
       if (kept) boardKeepSettle(kept, el, ins);
       if (window.wbHistory && window.wbHistory.sweep) { window.wbHistory.sweep(); ins.forEach(watchBoard); }
+      ins.forEach(bandBoard);
       ins.forEach(function (n) {
         // Materialize the reader's older pages before restoring disclosures
         // and frame heights, including immutable panel versions off the tail.
@@ -605,7 +611,9 @@
         setFrameHeights(n, frameH);
         mountFrames(n);
         writeAnswers(n, answers);
-        q("iframe.doc-frame", n).forEach(function (f) { f.wbKeep = true; });
+        // A placeholder a swap brought (the viewport bands mount it later)
+        // takes the mark too, and its frame takes it once mounted.
+        q(".doc-frame", n).forEach(function (f) { f.wbKeep = true; });
       });
       if (before) {
         var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });
@@ -700,7 +708,8 @@
   // A board swap waits while a card or topic is dragged (boardDragHeld), and
   // lands at the drag's end.
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
-  var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null;
+  var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null, boardOverviewHeld = null;
+  function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }
   function pinColumnFits(n) {
     return n > 0 && !!(PIN_WIDE && PIN_WIDE.matches) && !(live && (grid.getAttribute("data-layout") || load(LAYOUT_KEY)) === "tabs");
   }
@@ -720,6 +729,16 @@
     }
     window.WsCards.mount(cardBoard, {
       key: "ws.dashboard.cards." + rid, load: load, save: save,
+      toolbar: {
+        overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
+        search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
+        files: fpane && window.WsFiles ? function () { afterOverview(function () {
+          if (!tabShown("convo")) setTab("convo");
+          setCtab("files");
+          var filter = fpane.querySelector("input");
+          if (filter) filter.focus();
+        }); } : null
+      },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
       layout: function (on) {
@@ -736,6 +755,7 @@
       adopted: function (n) {
         if (window.wbHistory) window.wbHistory.init(n);
         watchBoard(n);
+        bandBoard(n);
         restoreOpen(n);
         mountFrames(n);
         if (window.wbBindBoard) window.wbBindBoard(n);
@@ -749,15 +769,29 @@
         if (h) swap("board", h.hash, h.html, true);
       }
     });
+    // wbForm creates wbHistory near the end of page startup. Mount overview
+    // after that, not here while only the card framework exists.
+    function mountBoardOverview() {
+      if (!window.WsOverview || !window.wbHistory) return;
+      window.WsOverview.mount({
+      rid: rid, board: cardBoard, toolbar: window.WsCards.toolbar(), pins: window.WsCards.pinList(),
+      keep: window.wbHistory.keep, place: window.WsCards.overview, toast: toast, rail: railKey,
+      reveal: function () { if (live && !tabShown("board")) setTab("board"); },
+      frames: function () { return boardRead(frameHeights); },
+      restoreFrames: function (h) { boardBoxes().forEach(function (b) { setFrameHeights(b, h); }); },
+      changed: function () { doc.dispatchEvent(new Event("ws-overview")); },
+      release: function () {
+        var h = boardOverviewHeld;
+        boardOverviewHeld = null;
+        if (h) swap("board", h.hash, h.html, true);
+      }
+      });
+    }
     if (window.WsTerm) window.WsTerm.mount($("bcol"));
     if (window.WsWeb) window.WsWeb.mount($("bcol"));
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
   boardBoxes().forEach(watchBoard);
-  // The served board's frames mount once the cards have moved the pinned
-  // topics into the pin list, so no frame loads and then moves, paced so the
-  // whole board's mounting never lengthens one long task.
-  mountFramesPaced(doc);
   // --- the Files pane (files.js): mounted once, loaded when first shown -------
   if (live && fpane && window.WsFiles) {
     window.WsFiles.mount(fpane, {
@@ -846,7 +880,10 @@
         pages[0].insertBefore(s, anchor);
       });
       var tail = q("button.closed-more[data-closed-next]", pages[pages.length - 1]).pop();
-      if (tail) tail.setAttribute("data-closed-next", String(+more.getAttribute("data-closed-next") + count));
+      if (tail) {
+        tail.setAttribute("data-closed-next", String(+more.getAttribute("data-closed-next") + count));
+        tail.setAttribute("data-closed-more", String(Math.max(0, (+more.getAttribute("data-closed-more") || 0) - count)));
+      }
       want.splice.apply(want, [want.indexOf(more), 1].concat(pages));
       ins.splice(ins.indexOf(more), 1);
     }
@@ -1007,7 +1044,9 @@
     // The next frame of a mounted frame is mounted before it goes in, and
     // before anything holds it (expandos, the load listener): a placeholder
     // would show nothing to reveal. The next frame of an unmounted one (a
-    // closed fold) is a placeholder that simply takes the old one's place.
+    // closed fold, a topic far from the view) is a placeholder that simply
+    // takes the old one's place: the topic mounts it once it comes near
+    // (viewport bands).
     if (mounted && g.nc[0].tagName !== "IFRAME") g.nc[0] = mountFrame(g.nc[0]);
     var nf = g.nc[0];
     if (mounted) frameNext(nf, of);
@@ -1404,6 +1443,7 @@
       });
       btn.parentNode.replaceChild(page, btn);
       watchBoard(page);
+      bandBoard(page);
       if (window.WsCards && window.WsCards.decorate) window.WsCards.decorate();
       restoreOpen(page);
       if (window.wbBindBoard) window.wbBindBoard(page);
@@ -3627,7 +3667,9 @@
   // (frameToggle, a capture listener, as toggle does not bubble; a
   // programmatic open such as restoreOpen's or boardJump's fires toggle
   // too), and for what a board swap, an adopted closed page, or a history
-  // load inserts. A frame never unmounts; a closed fold keeps its frames.
+  // load inserts; where the browser has scroll margins, only near the view
+  // as well (frameNear, the viewport bands below), and a frame far from the
+  // view unmounts again. A closed fold keeps its frames.
   // Readers that need a live window (docFrame, postTheme, the size request,
   // wbGrow, wbKeep) select iframe.doc-frame and skip placeholders; the
   // height memory and the palette read .doc-frame, either kind.
@@ -3646,36 +3688,168 @@
     Array.prototype.forEach.call(p.attributes, function (a) { if (a.name !== "data-sandbox") f.setAttribute(a.name, a.value); });
     f.setAttribute("sandbox", p.getAttribute("data-sandbox") || "");
     f.setAttribute("srcdoc", p.getAttribute("data-srcdoc") || "");
+    // A frame never laid out (no height yet) grows its topic when its first
+    // height lands, and a frame mounted again (unmountFrame) may land at
+    // another height than the one its placeholder kept (a narrower column,
+    // a diagram drawn again): topicResized keeps the view through either
+    // (wbFirst). The marks a board swap left for a frame's first height
+    // (wbKeep, wbGrow) stay on a frame unmounted before that height.
+    if (!p.style.height || p.wbUnmounted) f.wbFirst = true;
+    if (p.wbKeep) f.wbKeep = true;
+    if (p.wbGrow) f.wbGrow = true;
     if (p.parentNode) p.parentNode.replaceChild(f, p);
     return f;
   }
   function mountFrames(el) {
     q("div.doc-frame[data-srcdoc]", el).forEach(function (p) {
-      if (frameShown(p)) mountFrame(p);
+      if (frameShown(p) && frameNear(p)) mountFrame(p);
     });
   }
-  // mountFramesPaced is mountFrames over the page load's whole board, in
-  // slices of about 8 ms: the first slice runs now, each later one in its
-  // own task, so mounting every open frame at once never lengthens the
-  // load's longest task (measured: Phase 1 of the board performance
-  // ticket). A placeholder a swap or a toggle open took meanwhile is
-  // skipped (frameShown checks it is still connected).
+  // mountFramesPaced is mountFrames over a large part of the board (the
+  // page load's whole board, a topic coming near the view), in slices of
+  // about 8 ms through one shared list: the first slice runs now unless one
+  // is already pending, each later one in its own task, so mounting many
+  // frames at once never lengthens the longest task (measured with the
+  // board performance harness). A placeholder a swap or a toggle open took
+  // meanwhile is skipped (frameShown checks it is still connected).
   function mountFramesPaced(el) {
-    var list = q("div.doc-frame[data-srcdoc]", el);
-    (function slice() {
-      var t = performance.now();
-      while (list.length && performance.now() - t < 8) {
-        var p = list.shift();
-        if (frameShown(p)) mountFrame(p);
-      }
-      if (list.length) setTimeout(slice, 0);
-    })();
+    mountList = mountList.concat(q("div.doc-frame[data-srcdoc]", el));
+    if (!mountTask) mountSlice();
+  }
+  function mountSlice() {
+    var t = performance.now();
+    mountTask = true;
+    while (mountList.length && performance.now() - t < 8) {
+      var p = mountList.shift();
+      if (frameShown(p) && frameNear(p)) mountFrame(p);
+    }
+    mountTask = mountList.length > 0;
+    if (mountTask) setTimeout(mountSlice, 0);
   }
   function frameToggle(e) {
     var d = e.target;
     if (d && d.tagName === "DETAILS" && d.open) mountFrames(d);
   }
   doc.addEventListener("toggle", frameToggle, true);
+  // --- viewport bands: open frames mount near the view, unmount far ----------
+  // Where the view kit has scroll margins (wbHistory.bands), each board
+  // topic is watched in two bands (bandTopic): NEAR, a viewport above and
+  // below the view, and FAR, four. A topic entering NEAR mounts its shown
+  // placeholders, paced; one leaving FAR turns its frames back into
+  // placeholders that keep their height (unmountFrames), so nothing moves.
+  // Between the two a topic keeps what it has, so scrolling back and forth
+  // reloads nothing. The bands are per topic, not per frame. A frame
+  // mounts only where its topic is near (frameNear); a topic not reported
+  // yet takes the last report for its name (a changed topic's new section),
+  // else waits for its first report. A frame in no topic, and every frame
+  // where the browser lacks scroll margins, mounts as before.
+  function boardBands() { return !!(window.wbHistory && window.wbHistory.bands && window.wbHistory.watch); }
+  function frameNear(f) {
+    if (!boardBands()) return true;
+    var t = f.parentNode ? f.parentNode.closest("section.topic[data-topic]") : null;
+    if (!t) return true;
+    bandTopic(t);
+    var near = t.wbNear !== undefined ? t.wbNear : topicNear[t.getAttribute("data-topic")] === true;
+    return near;
+  }
+  // bandBoard puts the board's topic sections under root (root itself
+  // included) under the bands, once each; frameNear bands a topic it meets
+  // too.
+  function bandBoard(root) {
+    if (!boardBands() || !root || root.nodeType !== 1) return;
+    (root.matches("section.topic[data-topic]") ? [root] : q("section.topic[data-topic]", root)).forEach(bandTopic);
+  }
+  function bandTopic(t) {
+    if (t.wbBand) return;
+    var w = window.wbHistory;
+    t.wbBand = [
+      w.watch(t, { margin: NEAR, onChange: function (r) { topicBand(t, r, true); } }),
+      w.watch(t, { margin: FAR, onChange: function (r) { topicBand(t, r, false); } })
+    ];
+    if (window.ResizeObserver) (topicRO || (topicRO = new ResizeObserver(topicResized))).observe(t);
+  }
+  // topicBand takes a band report for topic t. A report with no box (a
+  // hidden board column, a topic taken off the page) tells no distance.
+  function topicBand(t, r, near) {
+    if (!r.rect || (!r.rect.width && !r.rect.height)) return;
+    if (!near) { if (!r.visible) unmountFrames(t); return; }
+    t.wbNear = r.visible;
+    topicNear[t.getAttribute("data-topic")] = r.visible;
+    if (r.visible) mountFramesPaced(t);
+  }
+  // unmountFrames turns topic t's frames back into placeholders, except a
+  // frame the page still holds: a graft's pair (wbNext, wbOut), the focused
+  // frame, one holding the user's selection (wbHoldSelection), and the one
+  // a mention button stands over (mpend).
+  function unmountFrames(t) {
+    q("iframe.doc-frame[data-srcdoc]", t).forEach(function (f) {
+      if (f.wbNext || f.wbOut || f.wbHoldSelection || f === doc.activeElement || (mpend && mpend.frame === f)) return;
+      unmountFrame(f);
+    });
+  }
+  // unmountFrame replaces frame f with its placeholder, mountFrame's
+  // inverse, and returns it: the same attributes, the sandbox tokens back
+  // as data-sandbox (data-srcdoc stayed), the height the frame stood at, or
+  // the one it reported last when that has not landed yet, and the marks
+  // a board swap left for its first height (wbKeep, wbGrow), which the
+  // frame mounted again takes; it is marked as unmounted (wbUnmounted).
+  function unmountFrame(f) {
+    var p = doc.createElement("div");
+    p.wbUnmounted = true;
+    if (f.wbKeep) p.wbKeep = true;
+    if (f.wbGrow) p.wbGrow = true;
+    Array.prototype.forEach.call(f.attributes, function (a) { if (a.name !== "srcdoc" && a.name !== "sandbox") p.setAttribute(a.name, a.value); });
+    p.setAttribute("data-sandbox", f.getAttribute("sandbox") || "");
+    if (frameSizes.has(f)) { p.style.height = Math.ceil(frameSizes.get(f)) + "px"; frameSizes.delete(f); }
+    if (f.parentNode) f.parentNode.replaceChild(p, f);
+    return p;
+  }
+  // The board's scrollers take no native scroll anchoring (dashboard.css),
+  // so what the bands themselves change above the view would move what the
+  // user reads: a frame mounted as its topic comes near resizes the topic
+  // when its first height lands at another height than it stood at
+  // (wbFirst, then wbLanded: applyFrameHeights).
+  // topicResized scrolls by such a change of a topic standing wholly above
+  // the view. A running keep session (a swap, a jump, a history load)
+  // compensates by itself, a topic in view or below it moves nothing the
+  // user reads, and any other change (a frame already shown reporting a new
+  // height) is left as it was before the bands.
+  function topicResized(list) {
+    var w = window.wbHistory;
+    list.forEach(function (e) {
+      var t = e.target, was = t.wbSize, box = e.borderBoxSize && e.borderBoxSize[0], h = box ? box.blockSize : e.contentRect.height;
+      if (!t.isConnected) { topicRO.unobserve(t); return; }
+      t.wbSize = h;
+      var banded = topicSettling(t);
+      if (!banded || !was || !h || Math.abs(h - was) < 0.5 || t.hasAttribute("data-max")) return;
+      var s = topicScroller(t);
+      if (w && w.keeping && w.keeping(s)) return;
+      var r = t.getBoundingClientRect(), top = s === doc.scrollingElement ? 0 : s.getBoundingClientRect().top + s.clientTop;
+      if (r.height && r.bottom - (h - was) <= top) s.scrollTop += h - was;
+    });
+  }
+  // topicSettling tells whether topic t's last size change is the bands'
+  // own: it holds a frame whose first height has just landed as a change
+  // (each one counts once).
+  function topicSettling(t) {
+    var any = false;
+    q("iframe.doc-frame", t).forEach(function (f) {
+      if (!f.wbLanded) return;
+      f.wbLanded = false;
+      any = true;
+    });
+    return any;
+  }
+  // topicScroller is the element scrolling topic t: the pinned column or
+  // the board column where it scrolls, else the document.
+  function topicScroller(t) {
+    var list = [t.closest(".bpins"), $("bcol")];
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i];
+      if (s && s.contains(t) && s.scrollHeight > s.clientHeight && /auto|scroll/.test(getComputedStyle(s).overflowY)) return s;
+    }
+    return doc.scrollingElement;
+  }
   // docFrame resolves through frameWins (contentWindow -> board frame),
   // indexed again by every board swap and on any miss: a frame that moved
   // without Element.moveBefore (a pin, a reorder) took a new window, and a
@@ -3703,7 +3877,14 @@
     for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
     // History targets were revealed and anchored by the shared loader.
     // scrollIntoView would also scroll the overflow:hidden clip itself.
-    if (!target.closest(".wb-history")) target.scrollIntoView({ block: "start" });
+    // Under the viewport bands the frames around the target mount and
+    // report their heights after the jump: a keep session holds the target
+    // where it landed meanwhile.
+    if (!target.closest(".wb-history")) {
+      target.scrollIntoView({ block: "start" });
+      var w = window.wbHistory;
+      if (w && w.bands && w.keep) w.keep(target);
+    }
     return target;
   }
   function captureBoardHistory() {
@@ -3795,6 +3976,15 @@
     if (!frameSizeFrame) frameSizeFrame = requestAnimationFrame(applyFrameHeights);
   }
   function applyFrameHeights() {
+    // While overview is active or transitioning, board frames are inside
+    // display:none containers and report collapsed heights. Applying those
+    // would overwrite the saved inline heights that exit uses to restore the
+    // unfolded layout, causing a height jump at the end of the exit motion.
+    // Re-queue until overview releases.
+    if (window.WsOverview && window.WsOverview.holding()) {
+      frameSizeFrame = requestAnimationFrame(applyFrameHeights);
+      return;
+    }
     var batch = frameSizes, b = region("board"), kept = null;
     frameSizes = new Map();
     frameSizeFrame = 0;
@@ -3812,6 +4002,12 @@
     batch.forEach(function (h, f) {
       var from = parseFloat(f.style.height) || 0, to = Math.ceil(h);
       f.style.height = to + "px";
+      // A frame the bands mounted (wbFirst, mountFrame) resizes its topic
+      // by the bands' doing once, when its first height changes it.
+      if (f.wbFirst) {
+        f.wbFirst = false;
+        if (Math.abs(to - from) >= 1) f.wbLanded = true;
+      }
       // The first height a frame of a moving board swap reports eases
       // from the height the frame stood at (board motion, slideBoard).
       if (f.wbGrow) {
@@ -5246,6 +5442,7 @@
     var topic = boardQ("section.topic[data-topic]").filter(function (n) { return n.getAttribute("data-topic") === row.topic; })[0];
     var target = row.id ? $("item-" + row.id) : topic;
     if (!target || !topic) return;
+    if (window.WsOverview && window.WsOverview.pick(topic, o)) return;
     if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
     if (live && !tabShown("board")) setTab("board");
     if (row.kind === "board-body") target = topic.querySelector(".tdoc") || topic;
@@ -6145,6 +6342,7 @@
   // Ctrl+` toggles rail + memos in overlay mode, memos alone beside a column;
   // a framed page hands it to the shell, which holds the rail.
   function railKey() {
+    if (window.WsOverview && window.WsOverview.holding()) { window.WsOverview.after(railKey); return; }
     if (framed) { shPost("key", { key: "rail" }); return; }
     if (!railEl || !WsRail) return;
     railOpen(!railShown());
@@ -8663,6 +8861,7 @@
       if (ent.pincol) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
       railOpen(false);
     }
+    if (ent.popover) root.setAttribute("data-fpopover", ""); else root.removeAttribute("data-fpopover");
     if (ent.dim > 0) {
       root.style.setProperty("--fdim", String(Math.max(0, 1 - ent.dim)));
       root.setAttribute("data-fdim", "");
@@ -8695,7 +8894,7 @@
           if (m.key === "rail") railKey();
           else if (m.key === "esc" && railShown()) railOpen(false);
           break;
-        case "layout": ent.pincol = m.pincol; ent.dim = m.dim; if (on) shLayout(ent); break;
+        case "layout": ent.pincol = m.pincol; ent.dim = m.dim; ent.popover = m.popover === true; if (on) shLayout(ent); break;
         case "scroll": ent.y = m.y; if (on) shScroll(ent); break;
         case "hash": if (on && location.hash !== m.hash) history.replaceState(null, "", ent.f.path + m.hash); ent.f.hash = m.hash; break;
         case "theme":
@@ -8758,7 +8957,7 @@
     // window: a modal dialog's, or an overlay's (the item and git windows,
     // the image viewer, a maximized card's scrim).
     function dim() {
-      var a = 0;
+      var a = window.WsOverview && window.WsOverview.active() ? 0.72 : 0;
       q("dialog[open]").forEach(function (d) {
         var modal = false;
         try { modal = d.matches(":modal"); } catch (x) { modal = false; }
@@ -8777,9 +8976,11 @@
         pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
         top: top.offsetHeight
       });
-      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim() });
+      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(),
+        popover: q(".rpop:not([hidden])").some(function (el) { return el.getClientRects().length > 0; }) });
     }
     function queue() { if (!queued) queued = setTimeout(post, 16); }
+    doc.addEventListener("ws-overview", queue);
     var top = doc.querySelector(".dwrap > .top");
     if (window.MutationObserver) {
       var mo = new MutationObserver(queue);
@@ -8823,8 +9024,8 @@
         if (shTrackerRev !== null) { var rev = shTrackerRev; shTrackerRev = null; trackerNudge(rev); }
         queue();
       } else if (m.wsShell === "search") {
-        var b = $("tkqs");
-        if (b) b.click();
+        // Open, do not toggle a hidden header button via a synthetic click.
+        if (tkApi) tkApi.openSearch();
       } else if (m.wsShell === "menu") {
         var h = region("head"), chip = h && h.querySelector(".host.hbtn");
         if (chip && WsRail) railPopOpen("sess", chip);
@@ -8863,6 +9064,14 @@
   // posts it again.
   q("iframe.doc-frame").forEach(function (f) { postDoc(f, { wbDoc: "size" }); });
   if (window.wbForm) window.wbForm();
+  // The served board's frames mount once the cards have moved the pinned
+  // topics into the pin list, so no frame loads and then moves, paced so the
+  // whole board's mounting never lengthens one long task, and once the
+  // board's script (wbForm) has set up wbHistory, whose visibility source
+  // the viewport bands watch through.
+  boardBoxes().forEach(bandBoard);
+  mountFramesPaced(doc);
+  if (cardBoard) mountBoardOverview();
   applySent();
   restoreDraft();
   tlCount();
