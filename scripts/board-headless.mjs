@@ -104,7 +104,9 @@
 //   panel-header  Compact panel grid at 1440/800/360/320 and 420/421px actual
 //             content in a wide host. Uses `serve --history-entries 180`;
 //             runs on both dashboard kinds and standalone. Browser-local long
-//             titles/body probes never change server data.
+//             titles/body probes never change server data. Checks natural
+//             wrap/cache stability and native observer errors at each width;
+//             --capture-dir retains measurements and responsive screenshots.
 //   history-cards  Card/paging probes without navigation/control/live checks.
 //   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
 //   history-regressions  Exact thirty-line chunks in renderer-produced closed
@@ -2580,9 +2582,24 @@ async function scenarioPanelHeader(ctx) {
       if (JSON.stringify(bh.headerCache) !== JSON.stringify(Array.from(h.querySelectorAll('template[data-history-page]')).map((t) => t.innerHTML))) issues.push('cached pages changed');
       if (JSON.stringify(bh.headerIDs) !== JSON.stringify(Array.from(h.querySelectorAll('[data-entry]')).map((e) => e.dataset.entry))) issues.push('history identity/order changed');
       if (document.documentElement.scrollWidth > innerWidth + 1) issues.push('document overflow');
-      return { issues, rows };
+      const natural = { chunks: h._wbHistoryChunks.slice(), cache: { ...h._wbHistoryHeights },
+        height: h.querySelector('.history-clip').getBoundingClientRect().height,
+        scrollTop: h.querySelector('.history-clip').scrollTop, pending: !!h._wbHistoryPending };
+      if (!bh.headerNatural) bh.headerNatural = { chunks: natural.chunks, cache: natural.cache };
+      if (JSON.stringify(natural.chunks) !== JSON.stringify(bh.headerNatural.chunks)) issues.push('finalized boundary recut');
+      if (Object.keys(bh.headerNatural.cache).some((k) => natural.cache[k] !== bh.headerNatural.cache[k])) issues.push('first-height cache rewritten');
+      if (natural.pending || natural.scrollTop !== 0) issues.push('history pending or clip scrolled');
+      if (bh.observerErrors.length) issues.push('native ResizeObserver errors: ' + bh.observerErrors.join(' | '));
+      return { issues, rows, natural, native: { observerErrors: bh.observerErrors.slice(),
+        observerErrorDetails: bh.observerErrorDetails.slice() } };
     });
     measurements.push({ label, ...r });
+    if (ctx.args['capture-dir']) {
+      const dir = path.resolve(ctx.args['capture-dir']); fs.mkdirSync(dir, { recursive: true });
+      // Write before asserting so a failed native delivery keeps its state.
+      fs.writeFileSync(path.join(dir, `${kind}-panel-header.json`), JSON.stringify({ kind, measurements }, null, 2));
+      await tab.screenshot({ path: path.join(dir, `${kind}-panel-header-${label}.png`) });
+    }
     assert(!r.issues.length, `${label}: ${JSON.stringify(r)}`);
     const intrinsic = await payload.evaluate(() => {
       const n = document.querySelector('#bh-panel-body > p'), s = getComputedStyle(n);
@@ -2633,8 +2650,8 @@ async function scenarioPanelHeader(ctx) {
   }
   assert(await bodyHandle.evaluate((n) => n.isConnected), 'body identity lost');
   log(JSON.stringify({ kind, measurements, tooltip, gaps: [
-    'Frozen cache/id assertions do not prove history boundary or scroll stability; run history/history-regressions separately.',
-    'Uses current branch clock refresh only; unmerged relative-time and history-fit units require root integration checks.',
+    'Natural wrapping preserves finalized boundaries/first heights; run history/history-regressions for paging and scroll stability.',
+    'Uses current branch clock refresh only; unmerged relative-time work remains excluded.',
     ...(kind === 'standalone' ? ['Standalone intentionally has no maximize/minimize controls or body iframe.'] : [])
   ] }, null, 2));
 }
