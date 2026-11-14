@@ -553,8 +553,8 @@
   // the shell hides): region updates are held (hiddenRegions) while it
   // holds, and land when it ends (showRegions).
   function pageHidden() { return doc.hidden || shHidden; }
-  function held() {
-    return q("[data-region]").map(function (el) {
+  function held(withoutBoard) {
+    return q("[data-region]").filter(function (el) { return !withoutBoard || el.getAttribute("data-region") !== "board"; }).map(function (el) {
       var name = el.getAttribute("data-region"), p = hiddenRegions[name];
       return name + "." + (p ? p.hash : el.getAttribute("data-h"));
     }).concat(mode !== "index" ? ["mode." + modeHash] : []).join(",");
@@ -803,7 +803,7 @@
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {
-    var src = frag(html), seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [], changed = [];
+    var seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [], changed = [];
     var pinBox = window.WsCards.pinList();
     Array.prototype.forEach.call(el.children, function (n) {
       var k = topicKey(n);
@@ -821,7 +821,7 @@
       live["t:" + k] = n;
       if (n.classList.contains("closed") && boardSeen["t:" + k] !== undefined) pinShift.push(n);
     });
-    Array.prototype.slice.call(src.childNodes).forEach(function (n) {
+    boardNodes(html, live).forEach(function (n) {
       var k = topicKey(n);
       if (k === null) {
         want.push(n);
@@ -913,6 +913,54 @@
     window.WsCards.settle(el, plan);
     frameKept(reuse);
     return ins;
+  }
+  // --- incremental board inputs ---------------------------------------------
+  // These are immutable incoming snapshots, not the live DOM. Hidden pages,
+  // editing, overview and dragging may defer several events; the newest input
+  // must include all earlier changes even though none has reached morphBoard.
+  // Canonical nodes are parsed once, then cloned only for changed sections.
+  function boardInputFull(html) {
+    var nodes = Array.prototype.slice.call(frag(html).childNodes), topics = Object.create(null), order = [], before = [], after = [], past = false;
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i], key = topicKey(n);
+      if (key === null) { (order.length ? after : before).push(n); if (order.length && n.nodeType === 1) past = true; continue; }
+      if (past || !n.getAttribute("data-th") || Object.prototype.hasOwnProperty.call(topics, key)) return null;
+      topics[key] = n; order.push(key);
+    }
+    return { topics: topics, order: order, before: before, after: after };
+  }
+  function boardInputPatch(prev, ev) {
+    if (!prev || !ev || typeof ev.hash !== "string" || !Array.isArray(ev.order) || !Array.isArray(ev.topics)) return null;
+    var topics = Object.create(null), changes = Object.create(null);
+    for (var i = 0; i < ev.topics.length; i++) {
+      var t = ev.topics[i];
+      if (!t || typeof t.key !== "string" || typeof t.hash !== "string" || typeof t.html !== "string" || Object.prototype.hasOwnProperty.call(changes, t.key)) return null;
+      var parsed = frag(t.html), n = parsed.firstElementChild;
+      if (!n || parsed.childNodes.length !== 1 || topicKey(n) !== t.key || n.getAttribute("data-th") !== t.hash) return null;
+      changes[t.key] = n;
+    }
+    for (var j = 0; j < ev.order.length; j++) {
+      var key = ev.order[j];
+      if (typeof key !== "string" || Object.prototype.hasOwnProperty.call(topics, key)) return null;
+      var node = changes[key] || prev.topics[key];
+      if (!node) return null;
+      topics[key] = node;
+    }
+    if (Object.keys(changes).some(function (key) { return !Object.prototype.hasOwnProperty.call(topics, key); })) return null;
+    return { topics: topics, order: ev.order.slice(), before: prev.before, after: prev.after };
+  }
+  function boardNodes(input, live) {
+    if (typeof input === "string") return Array.prototype.slice.call(frag(input).childNodes);
+    function clone(n) { return n.cloneNode(true); }
+    return input.before.map(clone).concat(input.order.map(function (key) {
+      var n = input.topics[key], old = live && live["t:" + key];
+      return old && boardSeen["t:" + key] === topicSeen(n) ? old : clone(n);
+    }), input.after.map(clone));
+  }
+  function boardInputFragment(input) {
+    var f = doc.createDocumentFragment();
+    boardNodes(input).forEach(function (n) { f.appendChild(n); });
+    return f;
   }
   // --- keyed frame reuse: a changed topic keeps its unchanged entry frames --
   // An entry frame (data-doc-key entry:eN) is immutable per entry, so inside
@@ -6120,7 +6168,7 @@
     if (!TL_REGIONS[name]) return;
     var was = tlHeld[name], el = region(name);
     if (was ? was.hash === hash : !el || el.getAttribute("data-h") === hash) return;
-    tlHeld[name] = { hash: hash, root: frag(html) };
+    tlHeld[name] = { hash: hash, root: name === "board" && typeof html !== "string" ? boardInputFragment(html) : frag(html) };
     tlCount();
   }
   // The tracker term and its new arrivals: each store's first loaded render
@@ -6207,12 +6255,13 @@
     return { close: function () { over = true; try { ws.close(); } catch (x) {} } };
   }
   var ASSETS_TRIED = "ws.dashboard.assetsreload";
-  function connect() {
+  function connect(withoutBoard) {
     if (!window.WebSocket) return;
+    var boardInput = null;
     // The shell streams the rail alone; a framed session page streams its
     // session without the rail.
     var path = shell ? "/rail/events" : mode === "index" ? "/events" : "/s/" + rid + "/events";
-    var st = openStream(path + "?h=" + encodeURIComponent(held()) + (framed && mode !== "index" ? "&frame=1" : ""), {
+    var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : ""), {
       open: function () { connected(true); },
       // Reopen with the hashes held now, so a reconnect sends only what
       // changed since.
@@ -6221,7 +6270,7 @@
         trackerLost();
         setTimeout(connect, 3000);
       },
-      events: { assets: onAssets, region: onRegion, tracker: onTracker, gone: onGone }
+      events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, tracker: onTracker, gone: onGone }
     });
     function onRegion(ev) {
       if (!ev) return;
@@ -6232,6 +6281,26 @@
         syncBadge();
         return;
       }
+      if (ev.name === "board") {
+        boardInput = boardInputFull(ev.html);
+        if (boardInput) ev = { name: "board", hash: ev.hash, html: boardInput };
+      }
+      receiveRegion(ev);
+    }
+    function onBoardTopics(ev) {
+      var next = boardInputPatch(boardInput, ev);
+      if (!next) {
+        // This connection's baseline cannot be trusted. Close it before
+        // reopening without the board hash; other regions keep their hashes.
+        st.close();
+        connected(false);
+        setTimeout(function () { connect(true); }, 0);
+        return;
+      }
+      boardInput = next;
+      receiveRegion({ name: "board", hash: ev.hash, html: next });
+    }
+    function receiveRegion(ev) {
       // A hidden tab keeps only each region's newest update and applies none;
       // showing the tab applies them (showRegions). The stream stays open, so
       // the light events (tracker) still arrive and act.
