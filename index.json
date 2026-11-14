@@ -477,7 +477,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec4/busy-board-read-gone",
         "phase": "active",
-        "touched_at": "2026-11-14T23:55:07Z"
+        "touched_at": "2026-11-14T23:56:50Z",
+        "impl": {
+          "branch": "impl/exec4/busy-board-read-gone/wrist-snuff-visor"
+        }
       }
     },
     "261114-bug-ws-dashboard-conversation-send-follow-bottom": {
