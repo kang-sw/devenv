@@ -459,17 +459,7 @@
       "registered_at": "2026-11-13T16:07:55Z"
     },
     "261114-bug-ws-dashboard-rail-drag-regression": {
-      "registered_at": "2026-11-14T04:59:37Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "fix/rail-drag-648",
-        "phase": "closed",
-        "touched_at": "2026-11-14T08:17:23Z",
-        "impl": {
-          "branch": "impl/fix/rail-drag-648/yam-chaps-ion"
-        }
-      }
+      "registered_at": "2026-11-14T04:59:37Z"
     },
     "261114-bug-ws-dashboard-search-palette-minors": {
       "registered_at": "2026-11-13T16:54:43Z"
