@@ -582,7 +582,15 @@ function wtScenario(name, direction) {
     assert(same(stored.workspaces[t.fx.dirs.alpha].worktree_order, want), `${name}: stored worktree_order differs`);
     assert(same(await wtContents(t), contents) && same(await t.wsOrder(), ws), `${name}: changed subtree or workspace order`);
     const root = t.page.locator(`${wtSel(t, t.fx.dirs.alpha)} > .wthd .wtroot`);
-    assert(await root.count() === 1 && !!(await root.getAttribute("title") || await root.getAttribute("aria-label")), "root header lacks an accessible small root marker");
+    assert(await root.count() === 1 && await root.isVisible() && !!(await root.getAttribute("title") || await root.getAttribute("aria-label")), "root header lacks a visible, accessible small root marker");
+    await t.barAt(t.fx.dirs.alpha);
+    await t.page.mouse.move(1695, 5);
+    const out = opt.shots || fs.mkdtempSync(path.join(os.tmpdir(), "rail-headless-shots-"));
+    fs.mkdirSync(out, { recursive: true });
+    const shot = path.join(out, `${name}-root-marker.png`);
+    await t.page.locator("#rail").screenshot({ path: shot, animations: "disabled" });
+    assert(fs.statSync(shot).size > 1000, `${shot} is empty`);
+    console.log(`  ${shot}`);
   } };
 }
 // A fixture registration is admitted through the isolated source's directory scan.
@@ -954,6 +962,22 @@ const SCENARIOS = [
         assert(JSON.stringify(await o.group(star)) === JSON.stringify(pinned), `a fresh load shows ${(await o.group(star)).join(" ")}`);
         assert(await o.starred(star), "a fresh load lost the star");
         assert(JSON.stringify(await o.wsOrder()) === JSON.stringify(wantWS), `a fresh load shows the workspaces ${(await o.wsOrder()).join(" ")}`);
+        // Counterpart: move that workspace down again, through the pointer
+        // path, and prove the reverse placement persists in both browsers.
+        await t.barAt(above);
+        const down = await t.pressBar(mover);
+        await page.mouse.move(down.x, down.y + 8, { steps: 2 });
+        assert(await t.dragging(), "the downward workspace press did not start a drag");
+        const section = await t.box(`#rlist .rws[data-ws="${above}"]`);
+        await page.mouse.move(down.x, section.y + section.height - 3, { steps: 10 });
+        assert(await t.line(), "no drop line below the workspace");
+        await page.mouse.up();
+        assert(same(await t.wsOrder(), ws), "downward workspace placement is not immediate");
+        await until("the downward workspace order in the other browser", async () => same(await o.wsOrder(), ws));
+        await swapped(t, "workspace down persisted");
+        assert(same(await t.wsOrder(), ws), "swap lost downward workspace placement");
+        await o.open("rail-n-1");
+        assert(same(await o.wsOrder(), ws), "reload lost downward workspace placement");
         const file = fs.readFileSync(path.join(t.fx.cache, "dashboard", "rail-layout.json"), "utf8");
         assert(file.includes(t.rid(star)) && file.includes(mover), "the layout file does not hold the star and the workspace order");
         assert((await t.legacy()).every((v) => v === null) && (await o.legacy()).every((v) => v === null), "a layout change was stored locally");
