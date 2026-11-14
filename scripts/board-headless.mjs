@@ -18,6 +18,9 @@
 //             the swap brought) growing 1 s later. Then a user
 //             scroll during a session must end it (wbHistory.keeping goes
 //             null, the session writes no more scrollTop).
+//   shared-controls  Focused topic-body/header polish, fold/maximum and
+//             arrow-to-line raise controls; no pointer-drag verification.
+//             Use serve --shared-actions with an existing exited terminal.
 //   shared-actions  Whole-card actions and one-time topic-relative previews.
 //             Use serve --shared-actions, wide (1800) and narrow (420).
 //             --case persistence skips independent card maximum geometry.
@@ -1065,6 +1068,93 @@ async function checkFold(page) {
   qa(rows.length > 0 && rows.every((r) => r.hidden && r.h <= r.head + 2.01 && r.cv === 'visible'), 'all topics/cards (including offscreen) fold to their headers', rows.filter((r) => !r.hidden || r.h > r.head + 2.01 || r.cv !== 'visible'));
   const recaps = rows.filter((r) => r.recap !== null);
   qa(recaps.length > 0 && recaps.every((r) => r.clamp === '2' && r.recap <= r.line * 2 + 1), 'existing recap is clamped to at most two lines', recaps);
+}
+
+async function scenarioSharedControls(ctx) {
+  const { page, tab, kind } = await overviewReady(ctx, { seed: false });
+  const topic = 'section.topic[data-topic="SHARED"]';
+  await page.waitForSelector(topic + ' > div.tdoc');
+  const bodyShape = () => page.locator(topic).evaluate((t) => {
+    const body = t.querySelector(':scope > .tdoc');
+    return { div: body && body.tagName === 'DIV', summary: !!t.querySelector(':scope > details.tdoc,:scope > .tdoc > summary'),
+      paddingMarker: t.classList.contains('has-doc'), visible: body && body.getBoundingClientRect().height > 0,
+      title: t.querySelector('.tname').textContent, tickets: !!t.querySelector('.ttix .wbtk'), state: !!t.querySelector('.tbar .chip') };
+  });
+  const shape = await bodyShape();
+  qa(shape.div && !shape.summary && !shape.paddingMarker && shape.visible && shape.title && shape.tickets && shape.state, 'dashboard body is visible div.tdoc without content-only disclosure or reserved padding; title/tickets/state remain', shape);
+  const history = page.locator(topic + ' details.topic-stream');
+  assert(await history.count() === 1, 'renderer supplies independent history disclosure');
+  if (!await history.evaluate((d) => d.open)) await history.locator(':scope > summary').click();
+  const panels = page.locator(topic + ' details.entry-panel');
+  assert(await panels.count() >= 2, 'renderer supplies independent panels');
+  if (!await panels.nth(0).evaluate((d) => d.open)) await panels.nth(0).locator(':scope > summary').click();
+  if (await panels.nth(1).evaluate((d) => d.open)) await panels.nth(1).locator(':scope > summary').click();
+  await history.locator(':scope > summary').click();
+  qa(!await history.evaluate((d) => d.open), 'history summary remains independently usable');
+  await history.locator(':scope > summary').click();
+  qa(await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'history toggle preserves independently open/closed panels');
+  const disclosures = () => page.locator(topic).evaluate((t) => [...t.querySelectorAll('details.topic-stream,details.entry-panel')].map((d) => [d.getAttribute('data-key'), d.open]));
+  const inner = await disclosures();
+  await page.locator(topic + ' a[data-wl="file"][data-rel="docs/a.md"]').first().click();
+  await page.waitForSelector('.bcard[data-kind="preview"] .pv-md');
+  await page.waitForFunction(() => WsCards.list('terminal').some((c) => c.t && c.t.exited));
+  const controls = await page.evaluate(() => {
+    const t = document.querySelector('section.topic[data-topic="SHARED"]'), p = WsCards.list('preview')[0], term = WsCards.list('terminal').find((c) => c.t && c.t.exited);
+    __bh.polishCards = [p, term];
+    const rows = [{ el: t, button: t.querySelector('.t-raise') }].concat(__bh.polishCards.map((c) => ({ el: c.el, button: c.raiseBtn })));
+    return rows.map((r) => ({ kind: r.el.dataset.kind || 'topic', icon: r.button.querySelector('use').getAttribute('href'), label: r.button.getAttribute('aria-label'), title: r.button.title }));
+  });
+  qa(controls.every((c) => c.icon === '#l-arrow-up-to-line' && c.label && c.title === c.label && c.label === controls[0].label), 'topic/preview/exited-terminal raise use upstream arrow-to-line and identical accessible labels', controls);
+  const raised = await page.evaluate(() => {
+    const t = document.querySelector('section.topic[data-topic="SHARED"]'), cards = __bh.polishCards;
+    const rows = [{ el: t, button: t.querySelector('.t-raise'), pin: (on) => WsCards.move(t, { pin: on, index: 0 }) }].concat(cards.map((c) => ({ el: c.el, button: c.raiseBtn, pin: (on) => c.pin(on) })));
+    rows.forEach((r) => r.pin(false));
+    return rows.map((r) => {
+      r.button.click();
+      const ordinary = [...__bh.board_().children].find((n) => n.matches('section.topic,.bcard')) === r.el && !r.el.hasAttribute('data-pinned');
+      rows.forEach((n) => n.pin(true));
+      r.button.click();
+      const pinned = WsCards.pinList().firstElementChild === r.el && r.el.hasAttribute('data-pinned');
+      rows.forEach((n) => n.pin(false));
+      return { ordinary, pinned };
+    });
+  });
+  qa(raised.every((r) => r.ordinary && r.pinned), 'all three raise controls move within ordinary/pinned regions without changing pin state', raised);
+  const dir = path.resolve(ctx.args['capture-dir'] || '/tmp/shared-card-polish-artifacts/' + kind + '-' + ctx.width);
+  fs.mkdirSync(dir, { recursive: true });
+  await page.locator(topic + ' .tbar').screenshot({ path: path.join(dir, 'topic-header-expanded.png') });
+  for (const k of ['preview', 'terminal']) await page.locator('.bcard[data-kind="' + k + '"] .bc-hd').first().screenshot({ path: path.join(dir, k + '-header.png') });
+  await page.locator(topic + ' .tbar').scrollIntoViewIfNeeded();
+  await capture(ctx, tab, kind + '-expanded');
+  await page.locator(topic + ' .t-fold').focus(); await tab.keyboard.press('Enter');
+  const fold = await page.locator(topic).evaluate((t) => {
+    const bar = t.querySelector('.tbar');
+    return { size: t.getAttribute('data-size'), focus: document.activeElement === t.querySelector('.t-fold'),
+      hidden: [...t.querySelectorAll('*')].every((n) => bar.contains(n) || n.contains(bar) || !n.getClientRects().length || n.getBoundingClientRect().height === 0),
+      chrome: !!bar.querySelector('.tname') && !!bar.querySelector('.ttix .wbtk') && !!bar.querySelector('.chip') };
+  });
+  qa(fold.size === 'fold' && fold.focus && fold.hidden && fold.chrome, 'whole fold masks every body/history/question region while retaining header chrome and focus', fold);
+  qa(JSON.stringify(await disclosures()) === JSON.stringify(inner), 'whole fold does not toggle inner disclosures');
+  await page.locator(topic + ' .tbar').screenshot({ path: path.join(dir, 'topic-header-folded.png') });
+  await capture(ctx, tab, kind + '-folded');
+  await page.locator(topic + ' > .tophead > .tbar > .d-max').click();
+  const maximum = await page.locator(topic).boundingBox();
+  qa(maximum.x >= 0 && maximum.y >= 0 && maximum.x + maximum.width <= ctx.width + 1 && maximum.y + maximum.height <= ctx.height + 1 && (await bodyShape()).visible, 'folded topic maximum reveals new body container within viewport', maximum);
+  await capture(ctx, tab, kind + '-maximum');
+  await tab.keyboard.press('Escape');
+  qa(await page.locator(topic).evaluate((t) => !t.hasAttribute('data-max') && t.getAttribute('data-size') === 'fold' && t.querySelector(':scope > .tdoc').getBoundingClientRect().height === 0), 'maximum dismissal restores whole folded mask');
+  assertChanged(await page.evaluate(() => __bh.update(['SHARED'])), ['SHARED']);
+  await waitQuiet(page);
+  qa(await page.locator(topic).getAttribute('data-size') === 'fold' && JSON.stringify(await disclosures()) === JSON.stringify(inner), 'production topic update preserves whole and inner disclosure states');
+  const updated = await bodyShape();
+  qa(updated.div && !updated.summary && !updated.paddingMarker, 'topic source update does not reintroduce content-only control');
+  await page.locator(topic + ' .t-fold').click();
+  // Expansion remounts the updated sandbox body; measure its landed layout.
+  await waitQuiet(page);
+  const expanded = await bodyShape(), restoredInner = await disclosures();
+  qa(expanded.visible && JSON.stringify(restoredInner) === JSON.stringify(inner), 'whole expansion restores visible body and retained independent disclosures', { expanded, inner, restoredInner });
+  await page.locator(topic + ' .tbar').scrollIntoViewIfNeeded();
+  await capture(ctx, tab, kind + '-updated-expanded');
 }
 
 async function scenarioSharedActions(ctx) {
@@ -2852,6 +2942,7 @@ async function scenarioHistoryFit(ctx) {
 }
 
 const SCENARIOS = {
+  'shared-controls': scenarioSharedControls,
   'shared-actions': scenarioSharedActions,
   toolbar: scenarioToolbar,
   overview: scenarioOverview,
