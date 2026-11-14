@@ -481,7 +481,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-14T05:05:09Z"
+        "touched_at": "2026-11-14T05:05:59Z",
+        "impl": {
+          "branch": "impl/develop/chain-jelly-henna"
+        }
       }
     },
     "261114-bug-ws-parallel-worktree-acquire-reuses-same-pool-entry": {
