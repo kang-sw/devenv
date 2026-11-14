@@ -1,7 +1,7 @@
 (function () {
   // The board card framework (window.WsCards): cards the page itself puts in
   // the board column, among the board's topics. The framework owns what
-  // every card kind shares: the header's pin, fold, maximize, and close
+  // every card kind shares: the header's pin, fold, raise, maximize, and close
   // buttons, the body's base height and its drag handle, the maximize sheet
   // with Escape (which also draws a topic or a topic's panel large), where
   // a card stands in the board flow, and the record of
@@ -160,18 +160,21 @@
   // order, by the placement rule; at reads a node's topicAt.
   function order(base, list, at) {
     var pins = list.filter(function (c) { return c.pinned; }).sort(function (a, b) { return a.pinned - b.pinned; });
-    var flow = list.filter(function (c) { return !c.pinned; }).sort(function (a, b) { return b.at - a.at; });
-    var out = pins.map(function (c) { return c.el; }), i = 0;
+    var flow = list.filter(function (c) { return !c.pinned; }).sort(function (a, b) { return b.at - a.at || rank(a) - rank(b); });
+    var out = pins.map(function (c) { return c.el; }), i = 0, counts = {};
     base.forEach(function (n) {
-      var t = at(n);
-      // A card stands below every open topic updated after it opened, and
-      // above everything else.
-      while (i < flow.length && !(t !== null && t > flow[i].at)) out.push(flow[i++].el);
+      var t = at(n), time = t === null ? -1 : t, r = counts[time] || 0;
+      counts[time] = r + 1;
+      // rank is an independent snapshot within a tied timestamp (or the
+      // closed tail), not an attachment to a topic. Ordinary opens retain
+      // the original rule: before all equal/older topics and controls.
+      while (i < flow.length && (flow[i].at > time || (flow[i].at === time && rank(flow[i]) <= r))) out.push(flow[i++].el);
       out.push(n);
     });
     while (i < flow.length) out.push(flow[i++].el);
     return out;
   }
+  function rank(u) { return typeof u.rank === "number" ? u.rank : -1; }
   // settle makes el's children the nodes in want, in order. Stale nodes go
   // first, so the kept ones that stay in order are never moved (moving a
   // frame reloads it). A fixed node already in el is never moved either:
@@ -219,7 +222,7 @@
   // when it was moved, so its own update ends the move), el (its node: the
   // last one the board served, kept while pinned).
   function topicRec(name) { return topics[name] || (topics[name] = { name: name, pinned: 0, at: 0, bar: 0, el: null }); }
-  function tidy(r) { if (!r.pinned && !r.at && topics[r.name] === r) delete topics[r.name]; }
+  function tidy(r) { if (!r.pinned && !r.at && !r.folded && topics[r.name] === r) delete topics[r.name]; }
   // units are the cards and the topics that place themselves: pinned, or
   // moved by hand into the flow.
   function units() {
@@ -346,10 +349,11 @@
           b = ibtn("tpin", "pin", wsT("js.card.pin"));
           bar.insertBefore(b, child(bar, "tnote-toggle"));
         }
-        if (!child(bar, "d-max")) {
-          bar.insertBefore(ibtn("d-max", "maximize-2", wsT("js.card.max")), b.nextSibling);
-          bar.insertBefore(ibtn("d-min", "minimize-2", wsT("js.card.back")), b.nextSibling.nextSibling);
-        }
+        [["t-fold", "chevron-down", "js.card.fold"], ["t-raise", "arrow-up-to-line", "js.card.raise"], ["d-max", "maximize-2", "js.card.max"], ["d-min", "minimize-2", "js.card.back"]].forEach(function (a) {
+          if (!child(bar, a[0])) bar.insertBefore(ibtn(a[0], a[1], wsT(a[2])), child(bar, "tnote-toggle"));
+        });
+        sec.setAttribute("data-size", r && r.folded ? "fold" : "base");
+        child(bar, "t-fold").setAttribute("aria-expanded", String(!(r && r.folded)));
         b.setAttribute("aria-pressed", String(on));
         if (on) sec.setAttribute("data-pinned", ""); else sec.removeAttribute("data-pinned");
       });
@@ -386,6 +390,66 @@
     persist();
   }
 
+  // Shared actions adopt the renderer's topic node rather than wrapping or
+  // rebuilding its body/badges. Topics have no generic close operation.
+  function foldUnit(u, on) {
+    if (u.folded === !!on) return;
+    u.folded = !!on;
+    var head = isCard(u.el) ? child(child(u.el, "bc-in"), "bc-hd") : child(child(u.el, "tophead"), "tbar");
+    var active = doc.activeElement;
+    for (var n = active; n; n = n.parentNode) if (n === u.el) {
+      if (on && head && (!active.closest || !active.closest(".bc-hd, .tbar"))) child(head, isCard(u.el) ? "bc-fold" : "t-fold").focus({ preventScroll: true });
+      break;
+    }
+    if (isCard(u.el)) { u.paint(); if (!on) u.sized(); }
+    else { decorate(); tidy(u); }
+    persist();
+  }
+  function topicUnit(sec) {
+    var r = topicRec(topicName(sec)); r.el = sec; return r;
+  }
+  function raise(u) {
+    if (u.pinned) { drop(u, { pin: true, index: 0 }); return; }
+    u.at = headTime();
+    delete u.rank;
+    if (!isCard(u.el)) u.bar = topicAt(u.el);
+    arrange(u);
+    persist();
+  }
+  // A preview origin is a live renderer-owned topic in this board only.
+  // Detached links retain the exact node, so replacement/removal invalidates
+  // their origin rather than borrowing a same-named or unrelated topic.
+  function originTopic(n) {
+    if (!n || topicName(n) === null || !n.isConnected) return null;
+    for (var p = n.parentNode; p; p = p.parentNode) if (p === board || p === pins) return n;
+    return null;
+  }
+  function openBefore(c, origin) {
+    var n = originTopic(origin), u = n && unitOf(n);
+    delete c.rank;
+    if (!n || u.pinned) { c.at = headTime(); return; }
+    // Fetched closed topics may be nested in a closed-page. Adopt just the
+    // origin into the same ordinary flow, leaving its pagination slot intact.
+    if (n.parentNode !== board) {
+      u = topicUnit(n); u.at = -1; u.bar = topicAt(n);
+      arrange(u);
+    }
+    c.at = eff(n);
+    if (c.at === null) c.at = -1;
+    var target = 0, prev = null, count = 0;
+    Array.prototype.some.call(board.children, function (peer) {
+      var other = unitOf(peer), placed = other && !other.loose && other.at;
+      if (peer === n) { target = placed ? rank(other) : count; return true; }
+      if (peer === c.el || peer === toolbar || peer === pins) return false;
+      var time = eff(peer);
+      if (time === null) time = -1;
+      if (time !== c.at) return false;
+      prev = placed ? rank(other) : count++;
+      return false;
+    });
+    c.rank = prev === null ? target - 1 : (prev + target) / 2;
+  }
+
   // --- storage ----------------------------------------------------------------
   // The record is {cards, topics, bw}: the cards' view state, the topics
   // pinned or moved by hand, and the board's width beside the pinned
@@ -394,11 +458,11 @@
   // window) is dropped.
   function persist() {
     if (!opt) return;
-    var ts = Object.keys(topics).map(function (k) { return topics[k]; }).filter(function (r) { return r.pinned || r.at; }).map(function (r) {
-      return { n: r.name, p: r.pinned, a: r.at, b: r.bar };
+    var ts = Object.keys(topics).map(function (k) { return topics[k]; }).filter(function (r) { return r.pinned || r.at || r.folded; }).map(function (r) {
+      return { n: r.name, p: r.pinned, a: r.at, b: r.bar, f: !!r.folded, rank: r.rank };
     });
     opt.save(opt.key, cards.length || ts.length || boardw ? JSON.stringify({ cards: cards.map(function (c) {
-      return { id: c.id, kind: c.kind, pinned: c.pinned, at: c.at, fold: c.folded, h: c.h, data: c.data };
+      return { id: c.id, kind: c.kind, pinned: c.pinned, at: c.at, rank: c.rank, fold: c.folded, h: c.h, data: c.data };
     }), topics: ts, bw: boardw }) : null);
   }
   function stored() {
@@ -408,7 +472,7 @@
     if (!v || typeof v !== "object") v = {};
     return {
       cards: (Array.isArray(v.cards) ? v.cards : []).filter(function (r) { return r && typeof r.kind === "string" && kinds[r.kind]; }),
-      topics: (Array.isArray(v.topics) ? v.topics : []).filter(function (r) { return r && typeof r.n === "string" && (+r.p || +r.a); }),
+      topics: (Array.isArray(v.topics) ? v.topics : []).filter(function (r) { return r && typeof r.n === "string" && (+r.p || +r.a || r.f); }),
       bw: +v.bw || 0
     };
   }
@@ -419,7 +483,8 @@
     this.k = kinds[kind];
     this.id = rec.id || "c" + Date.now().toString(36) + (seq++).toString(36);
     this.pinned = +rec.pinned || 0;
-    this.at = +rec.at || headTime();
+    this.at = typeof rec.at === "number" && isFinite(rec.at) ? rec.at : headTime();
+    if (typeof rec.rank === "number" && isFinite(rec.rank)) this.rank = rec.rank;
     this.folded = !!rec.fold;
     this.h = +rec.h || 0;
     this.data = rec.data || {};
@@ -444,10 +509,11 @@
     c.acts = mk("span", "bc-acts");
     c.pinBtn = ibtn("bc-pin", "pin", wsT("js.card.pin"));
     c.foldBtn = ibtn("bc-fold", "chevron-down", wsT("js.card.fold"));
+    c.raiseBtn = ibtn("bc-raise", "arrow-up-to-line", wsT("js.card.raise"));
     c.maxBtn = ibtn("bc-max", "maximize-2", wsT("js.card.max"));
     c.minBtn = ibtn("bc-min", "minimize-2", wsT("js.card.min"));
     c.closeBtn = ibtn("bc-close", "x", wsT("js.card.close"));
-    [c.icon, c.name, c.sub, c.badge, c.acts, c.pinBtn, c.foldBtn, c.maxBtn, c.minBtn, c.closeBtn].forEach(function (n) { head.appendChild(n); });
+    [c.icon, c.name, c.sub, c.badge, c.acts, c.pinBtn, c.foldBtn, c.raiseBtn, c.maxBtn, c.minBtn, c.closeBtn].forEach(function (n) { head.appendChild(n); });
     c.foldEl = mk("div", "bc-folded");
     c.body = mk("div", "bc-body");
     c.grip = mk("div", "bc-grip");
@@ -460,6 +526,7 @@
     el.appendChild(inner);
     c.pinBtn.addEventListener("click", function () { c.pin(!c.pinned); });
     c.foldBtn.addEventListener("click", function () { c.fold(!c.folded); });
+    c.raiseBtn.addEventListener("click", function () { raise(c); });
     c.maxBtn.addEventListener("click", function () { maximize(c); });
     c.minBtn.addEventListener("click", function () { maximize(null); });
     c.closeBtn.addEventListener("click", function () { if (!c.k.closing || c.k.closing(c) !== false) c.close(); });
@@ -504,11 +571,7 @@
   Card.prototype.save = function () { persist(); };
   Card.prototype.sized = function () { if (this.k.sized) this.k.sized(this); };
   Card.prototype.fold = function (on) {
-    if (this.folded === !!on) return;
-    this.folded = !!on;
-    this.paint();
-    persist();
-    if (!this.folded) this.sized();
+    foldUnit(this, on);
   };
   Card.prototype.pin = function (on) {
     this.pinned = on ? Date.now() : 0;
@@ -519,9 +582,9 @@
   };
   // bump counts as an open: the card moves to the head of the unpinned
   // flow. A pinned card stays where it is.
-  Card.prototype.bump = function () {
+  Card.prototype.bump = function (origin) {
     if (this.pinned) return;
-    this.at = headTime();
+    openBefore(this, origin);
     arrange(this);
     persist();
   };
@@ -752,6 +815,7 @@
   // closed section.
   function drop(u, to) {
     var was = !!u.pinned, topic = !isCard(u.el);
+    delete u.rank;
     if (topic && u.loose) { var el = u.el; u = topicRec(u.name); u.el = el; }
     if (to.pin) {
       // to.index counts the pins that show; a pinned topic still being
@@ -833,7 +897,7 @@
       scr = colOn ? pins : scroller(board);
     } else if (inside(rectOf(scroller(board) || board), x, y)) {
       scr = scroller(board);
-      if (topicAt(d.el) === null) to = d.unit.pinned ? { pin: false, line: null } : null;
+      if (!isCard(d.el) && topicAt(d.el) === null) to = d.unit.pinned ? { pin: false, line: null } : null;
       else {
         var flow = Array.prototype.filter.call(board.children, function (n) { return n !== d.el && (isCard(n) ? !n.hasAttribute("data-pinned") : topicAt(n) !== null); });
         var br = rectOf(board), f = slot(flow, y, br), after = flow[f.at - 1] || null, before = flow[f.at] || null;
@@ -1048,7 +1112,7 @@
       }
       var s = stored();
       setWidth(s.bw);
-      s.topics.forEach(function (r) { topics[r.n] = { name: r.n, pinned: +r.p || 0, at: +r.a || 0, bar: +r.b || 0, el: null }; });
+      s.topics.forEach(function (r) { topics[r.n] = { name: r.n, pinned: +r.p || 0, at: +r.a || 0, bar: r.b === null ? null : +r.b || 0, folded: !!r.f, rank: r.rank, el: null }; });
       s.cards.forEach(function (r) { add(r.kind, r); });
       // The pin list enters the page before anything moves into it, so a
       // topic pinned on the board moves into it with its frames kept.
@@ -1062,6 +1126,11 @@
         box.addEventListener("click", function (e) {
           var b = e.target.closest && e.target.closest(".tpin");
           if (b && b.parentNode.classList.contains("tbar")) pinTopic(b.parentNode.closest("section.topic"), b.getAttribute("aria-pressed") !== "true");
+          var action = e.target.closest && e.target.closest(".t-fold, .t-raise");
+          if (action && action.parentNode.classList.contains("tbar")) {
+            var u = topicUnit(action.closest("section.topic"));
+            if (action.classList.contains("t-fold")) foldUnit(u, !u.folded); else raise(u);
+          }
           sheetClick(e);
         });
         box.addEventListener("contextmenu", function (e) { if (dg && dg.touch) e.preventDefault(); });
@@ -1078,9 +1147,10 @@
     // flow; data is the kind's record. at, when given, is the card's open
     // time (epoch ms) instead: a card for something that began earlier
     // stands where a card opened then would.
-    open: function (kind, data, at) {
+    open: function (kind, data, at, origin) {
       if (!board || !kinds[kind]) return null;
       var c = add(kind, { data: data, at: at });
+      if (origin) openBefore(c, origin);
       arrange(null);
       persist();
       return c;

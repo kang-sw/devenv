@@ -150,6 +150,7 @@
   "js.card.min": "Revenir à la carte (Échap)",
   "js.card.back": "Revenir au tableau (Échap)",
   "js.card.pin": "Épingler",
+  "js.card.raise": "Déplacer tout en haut",
   "js.chip.remove": "supprimer cette réponse",
   "js.chip.tnote.open": "afficher cette note de sujet sur le tableau",
   "js.chip.tnote.remove": "supprimer cette note de sujet",

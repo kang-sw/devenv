@@ -3089,6 +3089,14 @@
       }
     });
   }
+  function previewOpen(a, path, out) {
+    // Frame menus are detached links. Their origin was captured from the
+    // source- and document-key-validated host frame, never the message.
+    var origin = a.wsPreviewOrigin || (a.closest && a.closest("section.topic[data-topic]"));
+    var o = out ? { out: true } : {};
+    if (origin) o.origin = origin;
+    if (out || origin) window.WsPreview.open(path, o); else window.WsPreview.open(path);
+  }
   function openLinkMenu(a, x, y) {
     closeLinkMenu(false);
     var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
@@ -3096,9 +3104,9 @@
     var sys = root.hasAttribute("data-sysopen"), out = a.hasAttribute("data-out");
     var items = [];
     if (webLink(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ url: url }); }]);
-    if (previews(a)) items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(rel); }]);
+    if (previews(a)) items.push([wsT("js.menu.preview"), function () { previewOpen(a, rel, false); }]);
     else if (outsideOpens(a)) {
-      items.push([wsT("js.menu.preview"), function () { window.WsPreview.open(abs, { out: true }); }]);
+      items.push([wsT("js.menu.preview"), function () { previewOpen(a, abs, true); }]);
       if (/\.html?$/i.test(abs)) items.push([wsT("js.menu.newtab"), function () { openOutsideTab(abs); }]);
     }
     if (webFile(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ path: rel }); }]);
@@ -3160,8 +3168,8 @@
     // right click and on the keyboard activation (a click event with no
     // detail).
     if (e.detail !== 0 && webLink(a)) { window.WsWeb.open({ url: a.href }); return; }
-    if (e.detail !== 0 && previews(a)) { window.WsPreview.open(a.getAttribute("data-rel")); return; }
-    if (e.detail !== 0 && outsideOpens(a)) { window.WsPreview.open(a.getAttribute("data-abs"), { out: true }); return; }
+    if (e.detail !== 0 && previews(a)) { previewOpen(a, a.getAttribute("data-rel"), false); return; }
+    if (e.detail !== 0 && outsideOpens(a)) { previewOpen(a, a.getAttribute("data-abs"), true); return; }
     linkAt(a, e);
   }, true);
   doc.addEventListener("contextmenu", function (e) {
@@ -4080,6 +4088,7 @@
     } else if (m.wbDoc === "link") {
       var a = frameLink(m);
       if (!a) return;
+      a.wsPreviewOrigin = f.closest("section.topic[data-topic]");
       // A body frame reports a plain click and a keyboard activation alike:
       // a localhost page opens its web card on either, but only while the
       // user is acting (a click in a frame activates this page too), so a

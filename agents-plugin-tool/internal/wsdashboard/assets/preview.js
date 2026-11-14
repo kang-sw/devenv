@@ -238,6 +238,8 @@
     // preview card. o.root is a root the explorer changed to; o.line a line
     // to show, which also asks for the file as plain text; o.out marks path
     // as the absolute path of a linked file outside the session root.
+    // o.origin is the exact validated topic node for one-time placement;
+    // it is never part of the kind's persisted data or sandbox capability.
     open: function (path, o) {
       o = o || {};
       var data = { path: path };
@@ -255,9 +257,9 @@
         load(card);
       } else if ((card = slots()[0])) {
         card.data = data;
-        card.bump();
+        card.bump(o.origin);
         load(card);
-      } else card = cards.open(KIND, data);
+      } else card = cards.open(KIND, data, undefined, o.origin);
       if (!card) return null;
       card.fold(false);
       card.show();

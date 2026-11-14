@@ -642,7 +642,13 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .bc-grip:hover::after, .bcard.drag .bc-grip::after, .bc-grip:focus-visible::after { background: var(--wb-primary); }
 .bcard[data-size="fold"] .bc-body, .bcard[data-size="fold"] .bc-grip { display: none; }
 .bcard[data-size="fold"] .bc-folded:not(:empty) { display: block; }
-.bcard[data-size="fold"] .bc-fold .li { transform: rotate(-90deg); }
+.bcard[data-size="fold"] .bc-fold .li, section.topic[data-size="fold"] > .tophead > .tbar > .t-fold .li { transform: rotate(-90deg); }
+/* Mask renderer-owned regions without mutating inner disclosures. Maximum
+   view reveals them temporarily and leaves the whole-card fold intact. */
+section.topic[data-size="fold"]:not([data-max]) > :not(.tophead),
+section.topic[data-size="fold"]:not([data-max]) > .tophead > :not(.tbar),
+section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar > details > :not(summary) { display: none !important; }
+section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar { padding-right: 12px; }
 /* a frame in the body would take the pointer mid-drag */
 .bcard.drag .bc-body { pointer-events: none; }
 .bcard.flash .bc-in { animation: bc-flash .9s ease-out; }
@@ -651,7 +657,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .bc-scrim[hidden] { display: none; }
 .bcard[data-max] .bc-in { position: fixed; z-index: var(--z-modal); top: 52px; left: 16px; right: 16px; bottom: 12px; box-shadow: var(--wb-shadow-hi); }
 .bcard[data-max] .bc-body { display: block; flex: 1 1 0; height: auto !important; }
-.bcard[data-max] .bc-folded, .bcard[data-max] .bc-grip, .bcard[data-max] .bc-pin, .bcard[data-max] .bc-fold, .bcard[data-max] .bc-max, .bcard[data-max] .bc-close { display: none; }
+.bcard[data-max] .bc-folded, .bcard[data-max] .bc-grip, .bcard[data-max] .bc-pin, .bcard[data-max] .bc-fold, .bcard[data-max] .bc-raise, .bcard[data-max] .bc-max, .bcard[data-max] .bc-close { display: none; }
 .bcard[data-max] .bc-min { display: inline-grid; }
 @media (max-width: 640px) { .bcard[data-max] .bc-in { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
 /* A large topic or topic panel (cards.js sheet): the board's own node, drawn
@@ -659,14 +665,14 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    content scrolling under its head. The maximize button (right of a topic's
    pin, at the end of a panel's head) gives way to the back button, and a
    large topic's pin hides as a maximized card's does. */
-.tbar .d-max, .tbar .d-min { color: inherit; opacity: .45; }
-.tbar:hover .d-max, .tbar:hover .d-min, .tbar .d-max:focus-visible, .tbar .d-min:focus-visible { opacity: .9; }
+.tbar :is(.d-max, .d-min, .t-fold, .t-raise) { color: inherit; opacity: .45; }
+.tbar:hover :is(.d-max, .d-min, .t-fold, .t-raise), .tbar :is(.d-max, .d-min, .t-fold, .t-raise):focus-visible { opacity: .9; }
 .tbar > .d-min, summary > .d-min { display: none; }
 section.topic[data-max], details.entry-panel[data-max] { position: fixed; z-index: var(--z-modal); top: 52px; left: 16px; right: 16px; bottom: 12px; margin: 0; overflow: auto; overscroll-behavior: contain; box-shadow: var(--wb-shadow-hi); }
 section.topic[data-max] { background: var(--wb-card); }
 section.topic[data-max] > .tophead, details.entry-panel[data-max] > summary { position: sticky; top: 0; z-index: 2; }
 details.entry-panel[data-max] > summary { background: var(--wb-bg); cursor: default; }
-section.topic[data-max] > .tophead > .tbar > .d-max, section.topic[data-max] > .tophead > .tbar > .tpin, details.entry-panel[data-max] > summary > .d-max { display: none; }
+section.topic[data-max] > .tophead > .tbar > .d-max, section.topic[data-max] > .tophead > .tbar > .tpin, section.topic[data-max] > .tophead > .tbar > .t-fold, section.topic[data-max] > .tophead > .tbar > .t-raise, details.entry-panel[data-max] > summary > .d-max { display: none; }
 section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-max] > summary > .d-min { display: inline-grid; }
 @media (max-width: 640px) { section.topic[data-max], details.entry-panel[data-max] { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
 @media (prefers-reduced-motion: reduce) { .bcard.flash .bc-in { animation: none; } .bc-grip::after { transition: none; } }
@@ -683,7 +689,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 :root[data-overview] .r-board > .reply { display: none !important; }
 :root[data-overview] .r-board .tophead, :root[data-overview] .r-board .bc-hd { position: static !important; }
 :root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-:root[data-overview] .r-board :is(.tnote-toggle, .d-max, .d-min, .bc-acts, .bc-fold, .bc-max, .bc-close),
+:root[data-overview] .r-board :is(.tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close),
 :root[data-overview] .r-board .tpin:not([aria-pressed="true"]),
 :root[data-overview] .r-board .bc-pin:not([aria-pressed="true"]) { opacity: 0; pointer-events: none; }
 :root[data-overview] .r-board :is(.tpin, .bc-pin)[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); pointer-events: none; }
@@ -701,7 +707,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .overview-ghost { position: fixed; z-index: 46; pointer-events: none; box-sizing: border-box; overflow: hidden; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
 .overview-ghost > .tophead, .overview-ghost > .bc-hd { position: static !important; }
 .overview-ghost .rtext { overflow: hidden; }
-.overview-ghost :is(.tnote-toggle, .d-max, .d-min, .bc-acts, .bc-fold, .bc-max, .bc-close) { opacity: 0; }
+.overview-ghost :is(.tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close) { opacity: 0; }
 .overview-ghost-body { height: 100%; background: var(--wb-card); }
 :root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { transition: filter 240ms cubic-bezier(.2,.8,.2,1); }
 .overview-spacer { flex: none; pointer-events: none; }
@@ -746,7 +752,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
    The board column's header row holds "+ Terminal" and its folder
    popover; it stays at the column's top while the cards scroll. */
 .bcard[data-kind="terminal"] .bc-body, .bcard[data-kind="terminal"][data-max] .bc-body { display: flex; flex-direction: column; overflow: hidden; }
-.bcard[data-kind="terminal"][data-size="fold"] .bc-body { display: none; }
+.bcard[data-kind="terminal"][data-size="fold"]:not([data-max]) .bc-body { display: none; }
 .tm-host { flex: 1 1 0; min-height: 0; overflow: hidden; background: var(--wb-card); }
 .tm-host .xterm { height: 100%; padding: 4px 0 4px 10px; }
 .tm-host .xterm-viewport { background: transparent !important; }
