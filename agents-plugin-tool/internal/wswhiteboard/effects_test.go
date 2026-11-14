@@ -144,6 +144,40 @@ func TestSemanticEffectsNoopsRefusalAndSettings(t *testing.T) {
 	}
 }
 
+func TestSemanticEffectsFreshLabelWithoutTicketsPersistsWithFirstContent(t *testing.T) {
+	for _, tc := range []struct {
+		name, command string
+	}{
+		{"body", `<wb:body>First content</wb:body>`},
+		{"item", `<wb:add class="check"><wb:title>First item</wb:title></wb:add>`},
+		{"log", `<wb:log>First log</wb:log>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &State{}
+			out := mustApply(t, s, `<wb:topic name="fresh" label="Fresh topic">`+tc.command+`</wb:topic>`)
+			var labels []Effect
+			for _, e := range out.Effects {
+				if e.Kind == "topic" && e.Field == "label" {
+					labels = append(labels, e)
+				}
+				if e.Kind == "topic" && e.Field == "tickets" {
+					t.Fatalf("fresh topic unexpectedly persisted through tickets: %+v", e)
+				}
+			}
+			want := []Effect{{Kind: "topic", Topic: "fresh", Field: "label", Before: "fresh", After: "Fresh topic"}}
+			if !reflect.DeepEqual(labels, want) {
+				t.Fatalf("first content lost or duplicated the provisional label: got %+v, want %+v", labels, want)
+			}
+			if e := wantEffect(t, out.Effects, "topic", "presence", "", "present"); e.Topic != "fresh" {
+				t.Fatalf("first content persisted the wrong topic: %+v", e)
+			}
+			if !s.topicKnown("fresh") || s.TopicLabel("fresh") != "Fresh topic" {
+				t.Fatalf("first content did not persist its labeled topic: %+v", s)
+			}
+		})
+	}
+}
+
 func TestSemanticEffectsConsecutiveGroupMetadataReversions(t *testing.T) {
 	s := &State{}
 	mustApply(t, s, `<wb:topic name="t" label="Original" tickets="261115-feat-first"><wb:body>Keep</wb:body></wb:topic>`)
