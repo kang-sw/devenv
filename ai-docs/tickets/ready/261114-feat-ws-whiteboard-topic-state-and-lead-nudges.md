@@ -634,6 +634,107 @@ without deleting links/history. Check shared/wsflow rendering and
 mirror/package guards. The linked-ticket compatibility question is answered
 by 707; readiness remains a separate lead-owned step.
 
+### Result (4ba279609) - 2026-11-15
+
+Phase 1 is complete as an independently landable prose/UI slice. Static
+implementation `ff1cbba032a83f2c533714badb4a7473838d7afb` declares the four
+work states, executor/ETA obligation, at most one ask including confirmation
+checks, final-answer closure and concrete-deliverable execution authority.
+Linked-ticket badges and ticket-derived live styling are hidden, not the
+accepted attribute or its validation, replacement/clearing, persisted values,
+query output, internal resolver metadata or status-directory watches. Tests
+cover the changed rendering/hash contract and both product-mode playbooks;
+existing compatibility assertions remain meaningful.
+
+Generated-resource commit
+`4ba279609b2cdb7f58c5fd8b3bc1b367e5a73825` contains exactly the canonical
+manifest and the wsflow/Pi manifest and whiteboard copies. No machine-state
+commands, timer machinery, store migration or API behavior was introduced.
+Ordinary summaries/items/logs carry the new lead obligations until later
+phases are separately authorized.
+
+Verification (executed evidence, not a post-integration claim):
+
+- The sole authorized invocation was
+  `python3 ai-docs/.plans/2026-11/14-2259-topic-state-phase1-bounded-verification.py START`.
+  It ran once on integration HEAD
+  `5dcf9794f1bd45cb0f5959f71146f4a102bc8f69`, including the generated working
+  tree subsequently committed at `4ba279609`. It started on 2026-11-14 at
+  15:33:21 UTC and exited at 15:34:14 UTC, status 0; recorded supervisor
+  elapsed time was 52.687905999831855 seconds, including normal owned-process
+  release and scratch removal. The accepted outer-command composition was
+  910 seconds within a 1080-second hard cap including cleanup.
+- All steps 00–09 exited 0: cache-path discovery, formatting, canonical and
+  wsflow generation, Pi copies, the full whiteboard/resource suites, selected
+  MCP tests, selected Python checks, compile-only build and Git diff checks.
+  Formatting introduced no tracked Go delta. Required generators
+  `TestGenerateRealManifest` (`WSRSRC_REGEN=1`) and
+  `TestRegenerateWsflowRsrcMirror` (`WS_REGEN_WSFLOW_RSRC=1`) passed separately.
+- `go -C agents-plugin-tool test -p=1 ./internal/wswhiteboard ./internal/wsrsrc -count=1 -timeout=120s -v`
+  passed, including the existing four-worker process fixture. All 18 optional
+  Node entry points ran and passed; none skipped for missing Node.
+- `go -C agents-plugin-tool test -p=1 ./internal/mcp -count=1 -timeout=180s -v -run '^(TestWhiteboard|TestDashboardTopicTicketMoveInvalidatesTheBoard)'`
+  passed. This retains the legacy ticket/store/query and directory-watch
+  assertions rather than replacing them with UI-only acceptance.
+- All 19 selected wsflow Python package/static-runtime checks passed. The
+  excluded runtime-capability and harness-PID probe methods were not selected.
+- Expected skips were `TestWhiteboardBrowserFixture` with
+  `WS_WHITEBOARD_BROWSER_FIXTURE` absent, and six ordinary-suite
+  environment-gated resource regeneration entry points. Those ordinary-suite
+  skips do not replace the separately successful required generators.
+- The scratch `ws-mcp` compiled successfully but was never executed, copied
+  or installed. Its owned scratch directory was removed. Diff checks passed.
+  No broader dashboard/browser or supported-host delivery acceptance is claimed.
+
+Evidence and provenance:
+
+- Full retained outputs were read by the worker. The lead's independent
+  read-only `explore-8` audit also read the full retained files and confirmed
+  the single successful batch, 18 Node passes, 19 Python passes and expected
+  skips. Recorded owned PIDs/PGIDs were absent from the full post-run snapshot;
+  the owned-residual file, cleanup log and residual-process log were empty.
+  Together these support recorded-batch quiescence, not arbitrary detached or
+  reparented-process absence.
+- MAIN's 15:29:24 START and lead forwarding are verified in the lead-mail
+  conversation, not embedded authorization receipts in the artifact directory.
+  The post-run scan's 15:35:37 UTC timestamp and five-second outer bound are
+  report-backed, not independent raw-snapshot execution receipts. The lead
+  relayed MAIN's 15:43:25 SLOT DONE acknowledgment; this is also mail-backed.
+  No-retry/download/runtime-activation statements concern the recorded batch,
+  not proof about outside activity. No missing receipt was fabricated.
+- Worktree-local, untracked evidence remains preserved under
+  `ai-docs/.plans/2026-11/14-2259-topic-state-phase1-bounded-verification.logs/`:
+  `batch.jsonl`, command logs 00–09, `environment.json`,
+  `owned-processes.jsonl`, cleanup/residual logs, post-run snapshot/status/
+  owned-residual logs and the provenance-qualified `11-result.md`.
+  The accepted bounded plan and supervisor with the same filename stem, and
+  the separate prior technical-preparation document, remain untracked and
+  unstaged. This tracked Result preserves their material limits and outcomes;
+  local artifact paths are not a claim that raw evidence travels with Git.
+
+Independent review and final integration boundary:
+
+- The route-allocated single-pass lite reviewer returned **clean**, with no
+  findings, after independently deriving and reviewing
+  `106eaa8611791a57a4e935ea4572fcf69cb4a48a..4ba279609b2cdb7f58c5fd8b3bc1b367e5a73825`.
+  All 13 Phase 1 product files were inspected. Review was source/Git/file
+  reads only; it performed no new executable verification or process audit.
+  Detailed report:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@d3adad41/review-paths/c2a14693-01-topic-state-phase1-lite.md`.
+- After that pinned review settled, the lead integrated approved develop
+  `550f46bba` via source `9a73d7e80c1914210b4b59defd5fea68727c1ebe`, producing
+  `72e510185770687b1fa3043263dc5891bf5c456a`. The lead's preview was
+  conflict-free. The worker read the complete incoming diff: dashboard mention
+  CSS/SVG and the empty-rail border plus documentation. Static interaction
+  assessment found no direct overlap with Phase 1 product edits or generated
+  manifest inputs. This is static evidence only, not a new independent review
+  or executed acceptance of the integrated tree.
+- No post-integration or Result-only executable check was authorized or run.
+  Any additional integration/runtime acceptance needs a separately granted
+  slot; MAIN owns parent integration and runtime replacement. There are no
+  unresolved findings from the pinned lite review. Phases 2–3 remain unstarted
+  and unauthorized, and the multiphase ticket stays in `ready/`.
+
 ### Phase 2: Optional topic state, transition history and structural warnings
 
 After Phase 1, implement the selected `wb:state` grammar, four enums,
