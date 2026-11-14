@@ -775,6 +775,9 @@
     "261115-bug-native-windows-implementation-route-revision-path-length": {
       "registered_at": "2026-11-14T15:00:37Z"
     },
+    "261115-bug-pi-print-mode-empty-after-subagent-push": {
+      "registered_at": "2026-11-14T23:55:38Z"
+    },
     "261115-bug-pi-reviewer-write-scope-discoverability": {
       "registered_at": "2026-11-14T18:18:40Z"
     },
