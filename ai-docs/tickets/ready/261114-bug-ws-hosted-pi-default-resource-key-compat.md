@@ -115,7 +115,7 @@ Verification:
 - Obtain independent review before integration. Record exact commands,
   outcomes, source commits and any remaining gaps in the Result.
 
-## Blocked verification (2026-11-14)
+## Earlier blocked verification (2026-11-14)
 
 Exact Pi 1.0.4 native acceptance is **blocked on dependency closure**, not
 established by the synthetic fixtures or current-host results. The isolated
@@ -141,3 +141,47 @@ Evidence already obtained:
 - No shared daemon, installed runtime, user configuration or model request was
   changed or invoked by this implementation. Independent source review and
   exact-host acceptance remain open; the ticket is not complete.
+
+## Exact-host acceptance checkpoint (2026-11-14)
+
+MAIN granted EXEC3 the shared heavy slot after EXEC1's quiescent seed handoff.
+An independent owned temporary copy was verified with internal-only symlinks,
+23,548 independently copied file hashes, lock/inventory agreement and SDK tar,
+manifest and bundle identities. This supersedes the earlier missing-dependency
+block, but **complete acceptance remains unestablished**.
+
+- Source under test: `88ad299198d927103aa13f1e55086ae7da7ccc30`, unchanged at
+  clean checkpoint HEAD `58f491a69bfde26dd9a761f2cb62f1e7e80715fc` before and
+  after the run.
+- Actual graph: coding-agent SDK **1.0.4**, AI/TUI and codemode **1.5.2** as
+  resolved by published ranges. This is not an all-1.0.4 dependency graph.
+- Exact SDK identities (SHA-256): tar
+  `04910bdae661a6529e9d6869b04006f6aad01186398b04a16c6d9793667b96c5`;
+  manifest `248decde30021109984def7ddc8f7bf4caf21ef04910a1303ab19604206c1bd5`;
+  bundle `84b4506ad77165b118b3f2ec4ffaaf8309af560de967ff05d8af6a75c8457052`.
+- From `agents-plugin-tool`, ran `node --test
+  internal/wsagent/testdata/pi-lead.test.mjs` with `WS_PI_TEST_SDK` selecting
+  the owned copy's `node_modules/@earendil-works/pi-coding-agent/dist/bundle/index.js`.
+  Outcome: **14 passed, 1 failed, 0 skipped** (15 tests), exit 1, no timeout;
+  supervisor elapsed 1.655 seconds. The process group was absent in repeated
+  post-run checks.
+- Positive bundled npm-bin startup restored `bundled`, `explicit`, `user`,
+  `package` and `project`. Native saved/never/ask/extension trust, filtering,
+  builtins and reload cases passed.
+- The existing npm-bin test then failed in its **unbundled-SDK negative
+  control**, `pi-lead.test.mjs:227`: Pi 1.0.4 `dist/index.js` imports
+  `MCP_TYPESCRIPT_PREAMBLE` from `pi-codemode/declarations`, but resolved
+  codemode 1.5.2 lacks that export. This is a concrete remaining acceptance
+  gap, not a passing negative control or proof that the entire supported
+  graph works.
+- A duplicate Go adapter rerun was skipped because it invokes the same Node
+  suite; no new Go acceptance is claimed. No dependencies or tests were
+  weakened or changed. Independent implementation review remains open.
+
+Full command, identity, stdout/stderr and quiescence artifacts are under
+`/private/tmp/ws-exec3-pi104-ag2bcjay/`: `identity.json`,
+`node.stdout.log`, `node.stderr.log`, `node-supervisor.json` and
+`settlement.json`. The root read the complete Node output and the failing
+source boundary. No shared daemon, installed runtime, live account or model
+request was invoked; the seed was read/copied, never run or mutated.
+
