@@ -21,10 +21,13 @@ func TestLatestLogHighlightMarkersAndMotion(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantAll(t, string(css),
-		`.topic .trecap[data-kind="agent"], .wb-entry.agent.current { background: var(--wb-latest-log); }`,
-		`--wb-latest-log: color-mix(in srgb, #91df9b 24%, var(--wb-card));`,
+		`.wb-entry.agent.current { background: var(--wb-latest-log); }`,
+		`--wb-latest-log: rgb(110 200 130 / .08);`,
 		`animation: wb-log-arrival 1s ease-in-out 3`,
-		`@media (prefers-reduced-motion: reduce)`, `.wb-log-blink { animation: none; }`)
+		`@media (prefers-reduced-motion: reduce)`, `.wb-entry.agent.current.wb-log-blink { animation: none; }`)
+	if strings.Contains(string(css), `.trecap[data-kind="agent"]`) {
+		t.Fatal("latest-log highlight must not target recap copies")
+	}
 }
 
 func TestLatestLogViewportArrivalUnderNode(t *testing.T) {
@@ -53,12 +56,15 @@ function row(topic,id,at) {
 }
 function blinking(n){return n.classList.contains('wb-log-blink');}
 var first=row('t','e1');candidates=[first];all=[first];
-var document={body:{},querySelectorAll:function(s){return s==='template'?[]:s.indexOf('.trecap')===0?candidates:all;}};
+var document={body:{},querySelectorAll:function(s){return s==='template'?[]:s==='.wb-entry.agent.current'?candidates:all;}};
 var window={matchMedia:function(){return {matches:reduced};},setTimeout:function(fn,ms){check('duration',ms,3000);timers.push(fn);},wbBindBoard:function(){binds++;},
   IntersectionObserver:function(fn){this.fn=fn;this.nodes=new Set();this.observe=function(n){this.nodes.add(n);};this.unobserve=function(n){this.nodes.delete(n);};instances.push(this);}};
 function enter(n,visible){instances[0].fn([{target:n,isIntersecting:visible,intersectionRatio:visible?1:0}]);}
 ` + arrival + `
 check('initial latest never observed',instances[0].nodes.size,0);
+var header=row('t','e2');all.push(header);window.wbLatestLog.init();
+check('header recap never observed',instances[0].nodes.has(header),false);
+check('header recap never blinks',blinking(header),false);
 var next=row('t','e2');candidates=[next];window.wbBindBoard(document);
 check('bind delegates',binds,1);
 check('new latest awaits viewport',instances[0].nodes.has(next),true);
@@ -81,7 +87,7 @@ var oldClosed=row('closed','e6');candidates=[oldClosed];window.wbLatestLog.init(
 check('fetched old closed topic is baseline',instances[0].nodes.size,0);
 var freshTopic=row('new','e7',now+60000);candidates=[freshTopic];window.wbLatestLog.init();
 check('new topic awaits sight',instances[0].nodes.has(freshTopic),true);enter(freshTopic,true);timers.shift()();
-// A second representation of the same line never starts another animation.
+// A replacement of the same lower log never starts another animation.
 var duplicate=row('new','e7',now+60000);candidates=[duplicate];window.wbLatestLog.init();
 check('duplicate consumed by entry identity',instances[0].nodes.size,0);
 // Re-evaluating the shared asset on a board swap retains the seen set.

@@ -20,7 +20,7 @@
   --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
   --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
   --wb-accent-assumed: #b0245a;
-  --wb-latest-log: color-mix(in srgb, #91df9b 24%, var(--wb-card));
+  --wb-latest-log: rgb(110 200 130 / .08);
   --wb-ck-ok: var(--wb-announced);
   --wb-ck-no: #c0262d;
   --wb-accent-policy: #b25000;
@@ -34,15 +34,15 @@
   --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
   color-scheme: light dark;
 }
-/* Both the head recap and its history copy represent the same latest log. */
-.topic .trecap[data-kind="agent"], .wb-entry.agent.current { background: var(--wb-latest-log); }
-.wb-log-blink { animation: wb-log-arrival 1s ease-in-out 3; }
+/* Only the lower log history is highlighted, never the topic's recap. */
+.wb-entry.agent.current { background: var(--wb-latest-log); }
+.wb-entry.agent.current.wb-log-blink { animation: wb-log-arrival 1s ease-in-out 3; }
 @keyframes wb-log-arrival {
   0%, 100% { background: var(--wb-latest-log); }
-  50% { background: var(--wb-card); }
+  50% { background: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .wb-log-blink { animation: none; }
+  .wb-entry.agent.current.wb-log-blink { animation: none; }
 }
 /* Dark palette. The OS preference applies it unless the page pins light
    (data-theme="light"); data-theme="dark" applies it whatever the OS says.
@@ -422,13 +422,13 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
    text on the head's surface (no card), sharing the line with the check pill,
    which wraps under it when narrow; a hairline under the head ends it. */
 .tsub { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; padding: 6px 12px; border-bottom: 1px solid var(--wb-line); overflow: hidden; }
-/* Reserve four whole lines (4 x 1.45em = 5.8em) in both sticky states.
-   Minimum/maximum block sizes prevent an ancestor layout from squeezing the
-   clipping box into a partial line. The pill wraps in flow, outside this box. */
-.tsub > .trecap { flex: 1 1 22em; min-width: 0; height: 5.8em; min-height: 5.8em; max-height: 5.8em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
+/* Content chooses the height, capped at four whole lines (4 x 1.45em).
+   Use the same clamp in both sticky states: sticking itself must not reflow
+   the recap. A changed recap may legitimately grow or shrink the header. */
+.tsub > .trecap { flex: 1 1 22em; min-width: 0; max-height: 5.8em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
 .tsub > .trecap .rat { font-size: 10.5px; }
 /* Inline role/media boxes must fit the same line grid as the recap text. */
-.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: -2px; }
+.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }
 .tsub > .trecap :is(img, svg) { max-height: 1em; width: auto; vertical-align: middle; }
 .ckpill { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; min-width: 0; max-width: 100%; }
 .ckbtn { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: normal; overflow-wrap: anywhere; }

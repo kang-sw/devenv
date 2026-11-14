@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestRecapDisplayClampAndFixedHeaderSlot(t *testing.T) {
+func TestRecapDisplayClampAndContentSizedHeader(t *testing.T) {
 	data, err := embeddedAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
@@ -14,10 +14,15 @@ func TestRecapDisplayClampAndFixedHeaderSlot(t *testing.T) {
 	css := string(data)
 	wantAll(t, css, `.trecap, .entry-recap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }`)
 	slot := regexp.MustCompile(`(?m)^\.tsub > \.trecap \{[^}]+\}`).FindString(css)
-	wantAll(t, slot, `height: 5.8em;`, `font-size: 12.5px;`, `line-height: 1.45;`, `min-width: 0;`)
-	// Sticking must not change either the clamp or the reserved four-line height.
+	wantAll(t, slot, `max-height: 5.8em;`, `font-size: 12.5px;`, `line-height: 1.45;`, `min-width: 0;`, `background: none;`)
+	if regexp.MustCompile(`(?:\{|;)\s*(?:height|min-height)\s*:`).MatchString(slot) {
+		t.Fatal("header recap reserves blank lines instead of shrinking to content")
+	}
+	// The author badge must not enlarge the first line beyond the line grid.
+	wantAll(t, css, `.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }`)
+	// Sticking must not change the shared maximum or content-driven height.
 	if regexp.MustCompile(`(?m)^[^\n{]*\.wb-stuck[^\n{]*\.trecap\s*\{`).MatchString(css) {
-		t.Fatal("stuck recap overrides the shared clamp/slot")
+		t.Fatal("stuck recap overrides the shared clamp/height")
 	}
 }
 
