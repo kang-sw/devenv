@@ -24,6 +24,24 @@ func TestSentMarksTakeTheNewestAnswerAndHeldWins(t *testing.T) {
 	}
 }
 
+// TestSentMarksTakeTheNewestSendNotTheQueueOrder: held records come in queue
+// order, a promoted older send first, and drained records in name order,
+// which a steer renews; the mark is still the newest send's answer.
+func TestSentMarksTakeTheNewestSendNotTheQueueOrder(t *testing.T) {
+	rec := func(sentAt int64, steer bool, answer string) wsinbox.Record {
+		return wsinbox.Record{Entry: wsinbox.Entry{SentAt: sentAt, Steer: steer, Chips: []wsinbox.Chip{{ID: "03", Answer: answer, SentAt: sentAt}}}}
+	}
+	queued := []wsinbox.Record{rec(100, true, "a"), rec(200, false, "b")}
+	want := []SentMark{{ID: "03", Answer: "b", Held: true}}
+	if got := sentMarks(nil, queued, nil, 0); !reflect.DeepEqual(got, want) {
+		t.Fatalf("held sentMarks = %+v, want %+v", got, want)
+	}
+	want[0].Held = false
+	if got := sentMarks([]wsinbox.Record{rec(200, false, "b"), rec(100, true, "a")}, nil, nil, 0); !reflect.DeepEqual(got, want) {
+		t.Fatalf("drained sentMarks = %+v, want %+v", got, want)
+	}
+}
+
 func TestBoardFirstViewReadsNoInbox(t *testing.T) {
 	v := buildSessionView(pageInputs{Held: []wsinbox.Record{{Name: "x.json", Entry: wsinbox.Entry{Parts: []string{"x"}}}}})
 	if v.Adapter || len(v.Conversation.Held) != 0 || len(v.Conversation.Sent) != 0 {

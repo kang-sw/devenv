@@ -1,8 +1,10 @@
 package wsdashboard
 
 import (
+	"cmp"
 	"html/template"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -151,8 +153,9 @@ type SentMark struct {
 	Held             bool
 }
 
-// heldViews lists the held entries, oldest first; attachDir and replyID
-// map their images as attachmentView does.
+// heldViews lists the held entries in the order given, the inbox's queue
+// order (wsinbox.Held: steered, then the rest); attachDir and replyID map
+// their images as attachmentView does.
 func heldViews(held []wsinbox.Record, attachDir, replyID string) []HeldView {
 	out := make([]HeldView, 0, len(held))
 	for _, r := range held {
@@ -240,6 +243,11 @@ func sentMarks(drained, held []wsinbox.Record, reasked map[int]int64, settled in
 		return ok && c.SentAt < at
 	}
 	add := func(records []wsinbox.Record, isHeld bool) {
+		// The newest send's chip wins, so read the records in send order: a
+		// steer moves an entry ahead of later sends in queue order (held)
+		// and gives it a newer name (drained).
+		records = slices.Clone(records)
+		slices.SortStableFunc(records, func(a, b wsinbox.Record) int { return cmp.Compare(a.Entry.SentAt, b.Entry.SentAt) })
 		for _, r := range records {
 			for _, c := range r.Entry.Chips {
 				if stale(c) {
