@@ -609,7 +609,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "feat/live-reasoning-summary-675",
         "phase": "active",
-        "touched_at": "2026-11-14T13:46:16Z"
+        "touched_at": "2026-11-14T13:47:10Z",
+        "impl": {
+          "branch": "impl/feat/live-reasoning-summary-675/fruit-annex-hunk"
+        }
       }
     },
     "261114-feat-ws-prompt-refusal-conversation-notice": {
