@@ -52,9 +52,13 @@ and incremental board updates converge on `swap()` (`:6239-6257,6279-6318`).
 - Capture and investigate the owner-visible reopening scenario separately
   from the existing unchanged-frame reload issue. Share evidence with EXEC2
   before TASK3 verification to avoid duplicate or contradictory fixes.
-- No fold-policy reversal is approved. Inheriting collapse across new panel
-  versions would change the currently documented behavior and must be settled
-  through MAIN before implementation.
+- Owner decision (754)=a, relayed by MAIN on 2026-11-14, changes the policy:
+  a user fold follows stable panel identity across republishing, and the
+  updated panel receives a conspicuous `updated` badge instead of reopening.
+  MAIN assigned implementation to EXEC2's TASK3 rewrite or its immediate
+  follow-up. This ticket supplies baseline evidence, not a duplicate EXEC3
+  implementation. The exact badge presentation and storage mechanics remain
+  with that implementation's design settlement.
 - Compatibility tier for a future fix is not settled. The capture changes
   no runtime/storage/API surface; inspect fold-key persistence and mixed
   readers before claiming a tier for a proposed change.
@@ -80,7 +84,7 @@ and incremental board updates converge on `swap()` (`:6239-6257,6279-6318`).
 
 ## Phases
 
-### Phase 1: Identify the owner trigger and settle fold semantics
+### Phase 1: Hand off the baseline scenario to the policy-owning rewrite
 
 Trace a bounded sequence of user collapse, same-topic unrelated log append,
 other-topic update, and same-panel republish against the deployed baseline.
@@ -88,9 +92,11 @@ Keep observed incident evidence distinct from the source-proven new-entry
 scenario. Coordinate exact fold-key/graft behavior with EXEC2's TASK3 branch
 before choosing the implementation owner or changing semantics.
 
-Report whether the actual incident is same-entry state loss or intended
-new-entry auto-opening. Return any fold inheritance, latest-auto-expand or
-persistence-policy change through MAIN. Once settled, verification must
-separately cover user collapse on unchanged entries, panel overwrite/new entry,
-history disclosures, and retained iframe/document identity under frequent
-updates. No implementation Result is claimed.
+Report whether the actual incident is same-entry state loss or the baseline
+new-entry auto-opening scenario without treating the policy change as proof
+of causality. Apply (754)=a through EXEC2's TASK3 or immediate follow-up;
+return any still-unsettled persistence or badge-design choice through MAIN.
+That work's verification must separately cover retained user folds and an
+updated badge across panel overwrite, unchanged-entry folds, history
+disclosures, and fresh content with retained document identity under unrelated
+updates. No implementation Result or separate EXEC3 fix is claimed.
