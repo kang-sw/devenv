@@ -74,6 +74,63 @@ Before eventual product edits, read the applicable repository manuals: `ai-docs/
 | risk.test | high | INFERRED: Existing toolbar tests cover placement, hooks and popover bounds, while ai-docs/tickets/assets/261114-feat-ws-whiteboard-compact-floating-toolbar/approved-report.md#L65-L67 explicitly excludes the production integration cases required by Phase 1. |
 | risk.security_or_contract | moderate | INFERRED: No protocol or store change is approved, but Phase 1 must preserve action availability, keyboard focus and disjoint operable targets; cards.js#L110-L130 and board_toolbar_test.go constrain those existing actions. |
 
+## Blocked — 2026-11-14 — Worker Protocol (f)
+
+Phase 1 is incomplete and has no Result. Repeated browser failures with the same Web-popover containment root cause triggered stop (f). MAIN confirmed the stop: preserve the implementation and assertions; do not retry, weaken checks, expand scope or merge. This ticket is returned to `todo/` so it is not an advanceable ready-queue item. MAIN owns disposition before any new implementation dispatch or ready promotion.
+
+### Retained candidate and attribution
+
+- **VERIFIED:** Test commit `1b670c9824e4d672510f83f0479ad7c4ba2651ea` and incomplete production checkpoint `5c00e800c7ea17801a9d61cb3b649cae14b9c787` are retained on `impl/docs/compact-floating-toolbar-652/shy-ovary-tarot`, based on `395242d80815f01d4aad5661547b42676f021ff5`. The five production files are `wsdashboard/assets/{cards.js,dashboard.css,overview.js,terminal.js}` and `wswhiteboard/assets/rail.js` under `agents-plugin-tool/internal/`. The original toolbar root reserves its wrapped slot around one mounted face; no duplicate actions or floating scroll writer were introduced. This checkpoint is not acceptance.
+- **VERIFIED:** The failing assertion is `scripts/board-headless.mjs:1370`, “Web Enter opens the real viewport-fitting URL/path popover.” Current production failed at adapter width 800 and width 320 with a constrained 266px toolbar face. The 800px menu ends at x=853.71875; the 320px menu ends at x=380.125. See the exact logs and commands below.
+- **VERIFIED:** Browser-side substitution of all five production assets from `395242d80` reproduces the same 800px menu bounds in the nonfloating baseline. This establishes that this containment defect predates the candidate. The diagnostic records bounds and exits successfully; it is not a passing baseline assertion suite. No 320px baseline assertion run was made, and baseline reproduction does not establish absence of other regressions (`/tmp/compact-toolbar-evidence/web-baseline.cjs`, `web-baseline.json`).
+- **INFERRED:** The coordinate-space mismatch is the root cause: `wsdashboard/assets/webcard.js:421-437` computes viewport coordinates and writes them to an absolutely positioned `.wpop` inside the relative toolbar slot. `webcard.js` was not changed. No production Web fix was attempted or authorized here.
+
+### Exact stopped-run commands and evidence
+
+The following commands are historical evidence, not instructions to retry. Run location was the repository root unless stated otherwise; the now-stopped fixture URL is intentionally retained verbatim.
+
+```sh
+# Current production: both commands failed the retained Web assertion.
+PLAYWRIGHT_MODULE=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright node scripts/board-headless.mjs toolbar --url http://127.0.0.1:59668/s/theftawaretackinessgong --width 800 --capture-dir /tmp/compact-toolbar-evidence/adapter-800
+PLAYWRIGHT_MODULE=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright node scripts/board-headless.mjs toolbar --url http://127.0.0.1:59668/s/theftawaretackinessgong --width 320 --face-width 266 --capture-dir /tmp/compact-toolbar-evidence/adapter-320-266
+# Baseline/current bounds diagnostic: recorded the pre-existing 800px overflow; no assertion verdict.
+PLAYWRIGHT_MODULE=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright node /tmp/compact-toolbar-evidence/web-baseline.cjs
+# From agents-plugin-tool/: failed before the final test-selector correction; not rerun.
+GOPROXY=off go test ./internal/wsdashboard ./internal/wswhiteboard -count=1 -timeout=10m
+```
+
+**VERIFIED:** Full outputs were read at:
+
+- `/tmp/compact-toolbar-evidence/adapter-800.log`
+- `/tmp/compact-toolbar-evidence/adapter-320-266.log`
+- `/tmp/compact-toolbar-evidence/web-baseline.log`
+- `/tmp/compact-toolbar-evidence/web-baseline.json`
+- `/tmp/compact-toolbar-evidence/go-full.log`
+- `/tmp/compact-toolbar-evidence/adapter-1900.log`
+- `/tmp/compact-toolbar-evidence/board-1440.log`
+- `/tmp/compact-toolbar-evidence/keep-board.log`
+- `/tmp/compact-toolbar-evidence/keep-adapter.log`
+
+Baseline/current screenshots are `/tmp/compact-toolbar-evidence/web-baseline-top.png`, `/tmp/compact-toolbar-evidence/web-baseline-floating.png`, `/tmp/compact-toolbar-evidence/web-current-top.png` and `/tmp/compact-toolbar-evidence/web-current-floating.png`. The baseline “floating” filename names the requested probe position, not a floating baseline implementation.
+
+Production measurements and captures are retained at:
+
+- `/tmp/compact-toolbar-evidence/adapter-1900/toolbar-1900-adapter-compact-result.json` and `/tmp/compact-toolbar-evidence/adapter-1900/toolbar-1900-adapter-compact-result.png`
+- `/tmp/compact-toolbar-evidence/adapter-800/toolbar-800-adapter-compact-result.json` and `/tmp/compact-toolbar-evidence/adapter-800/toolbar-800-adapter-compact-result.png`
+- `/tmp/compact-toolbar-evidence/adapter-320-266/toolbar-320-adapter-compact-result.json` and `/tmp/compact-toolbar-evidence/adapter-320-266/toolbar-320-adapter-compact-result.png`
+- `/tmp/compact-toolbar-evidence/board-1440/toolbar-1440-board-compact-result.json` and `/tmp/compact-toolbar-evidence/board-1440/toolbar-1440-board-compact-result.png`
+
+These files are local stopped-run evidence, not tracked acceptance assets. The independent reference comparison has not been performed.
+
+### Partial verification and cleanup
+
+- **VERIFIED:** Complete toolbar scenarios passed for adapter 1900px (7.4s) and board-only 1440px (4.4s). Their complete outputs above cover keyboard traversal, hit samples, terminal menu, available actions, Overview reading anchors, native arrival, return-to-top and frame identity. The synthetic browser-local filesystem/terminal responses and injected production WebSocket packets are not host-filesystem, real PTY or end-to-end publication acceptance.
+- **VERIFIED:** Adapter 1900px measured 46→28px with the original 46px slot retained; adapter 320px/face266 measured 82→60px with the original 82px slot retained. The latter command still failed Web containment. Neither measurement is a production/reference visual match claim.
+- **VERIFIED:** Board-only scroll-keep passed (3.7s, within 1px through swaps and a late frame height). Adapter keep failed its fixture precondition, “need two framed topics above for the late-height probe”; its behavior contract did not execute.
+- **VERIFIED:** The full Go run failed at `terminal_page_test.go:111`, which expected the old container on `.board-toolbar`. The container now belongs to `.board-toolbar-face`; the authorized assertion correction is committed, but no full rerun occurred. The whiteboard package passed in that run (20.037s); the dashboard package did not pass (145.318s). See `go-full.log`.
+- **VERIFIED:** The test delegate stopped isolated supervisor PID 14316 and daemon PID 15913. Subsequent `ps -p 14316,15913 -o pid=,ppid=,stat=,command=` returned no rows. `/tmp/compact-toolbar-evidence/serve.log` records shutdown and preservation of `/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/board-headless-6Z0D12`. No installed/shared daemon or runtime activation was changed.
+- **Omitted due to stop:** Final full Go rerun; complete width/page matrix including normal counts wrapping; history-target arrival and complete both-scroller late-height/transition acceptance; side-by-side comparison against `approved.html` and `approved.fragment.html`; independent lite review. No phase Result, ticket closure, integration, push or production acceptance is claimed.
+
 ## Phases
 
 ### Phase 1: Integrate and verify the approved compact floating toolbar
