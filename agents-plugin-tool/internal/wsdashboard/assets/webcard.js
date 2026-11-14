@@ -409,10 +409,9 @@
     }
   });
 
-  // --- the "+ Web" button and its popover --------------------------------------------
-  // The button stands in the composer's status-line slot beside "+ Terminal"
-  // (terminal.js), or in the slot fixed at the page's corner where the page
-  // has none. Its popover takes a URL or a workspace path.
+  // --- the toolbar's web button and URL/path popover --------------------------------
+  // The button lives in the toolbar's #board-web-slot, right after the
+  // terminal slot (Decision 41). The popover opens below the button.
   function closePop(refocus) {
     if (!ui.pop || ui.pop.hidden) return;
     ui.pop.hidden = true;
@@ -421,9 +420,21 @@
   }
   function placePop() {
     var pop = ui.pop;
-    pop.style.right = "";
-    var out = 8 - pop.getBoundingClientRect().left;
-    if (out > 0) pop.style.right = (parseFloat(window.getComputedStyle(pop).right) || 0) - out + "px";
+    var bounds = { left: 8, right: window.innerWidth - 8, top: 8, bottom: window.innerHeight - 8 };
+    var col = ui.col && ui.col.getClientRects().length ? ui.col.getBoundingClientRect() : null;
+    if (col) {
+      bounds.left = Math.max(bounds.left, col.left + 8);
+      bounds.right = Math.min(bounds.right, col.right - 8);
+      bounds.top = Math.max(bounds.top, col.top + 8);
+      bounds.bottom = Math.min(bounds.bottom, col.bottom - 8);
+    }
+    pop.style.right = ""; pop.style.left = ""; pop.style.top = ""; pop.style.maxHeight = "";
+    var pb = pop.getBoundingClientRect(), bb = ui.btn.getBoundingClientRect();
+    var left = bb.left, right = left + pb.width, top = bb.bottom + 4;
+    if (right > bounds.right) left -= right - bounds.right;
+    if (left < bounds.left) left = bounds.left;
+    if (top + pb.height > bounds.bottom) pop.style.maxHeight = Math.max(120, bounds.bottom - top) + "px";
+    pop.style.left = left + "px"; pop.style.top = top + "px";
   }
   function openPop() {
     ui.in.value = "";
@@ -433,14 +444,12 @@
     ui.in.focus();
   }
   function button() {
-    var slot = doc.getElementById("tslot") || doc.querySelector(".tslot.tfix");
-    if (!slot) {
-      slot = mk("div", "tslot tfix");
-      doc.body.appendChild(slot);
-    }
-    ui.btn = mk("button", "btn tnew wnew");
+    var slot = doc.getElementById("board-web-slot");
+    if (!slot) return;
+    ui.btn = mk("button", "board-action wnew");
     ui.btn.type = "button";
     ui.btn.innerHTML = cards.icon("globe");
+    ui.btn.appendChild(mk("span", "board-label", wsT("js.web.new")));
     ui.btn.title = wsT("js.web.new.title");
     ui.btn.setAttribute("aria-label", wsT("js.web.new"));
     ui.btn.setAttribute("aria-haspopup", "dialog");
@@ -506,10 +515,11 @@
     // offer no pick or attach. The page calls it before it mounts the
     // card framework, which restores the stored cards.
     setup: function (h) { hooks = h || {}; },
-    // mount adds the "+ Web" button. The page mounts the card framework
-    // (and the terminal kind, whose button stands first) before it.
+    // mount adds the toolbar's web button. The page mounts the card
+    // framework (and the terminal kind, whose button stands first) before it.
     mount: function (col) {
       if (ui.btn || !col) return;
+      ui.col = col;
       button();
     },
     open: open,

@@ -66,11 +66,12 @@
   // session rail's drag thresholds), and EDGE px from a list's edge scrolls it.
   var SLOP = 5, HOLD = 380, EDGE = 28;
   var kinds = {}, cards = [], topics = {}, board = null, opt = null, maxed = null, scrim = null, seq = 0;
-  // pins is the pin list: the board region's first node, or the pinned
+  // pins is the pin list: after the toolbar in the board, or the pinned
   // column's list while the page shows that column (colOn). boardw is the
   // board's width beside the column as the user dragged it (0: the
   // stylesheet's).
   var pins = null, col = null, colOn = false, boardw = 0, zone = null;
+  var toolbar = null, counts = null, overviewOn = false;
 
   function licon(name) { return '<svg class="li" aria-hidden="true"><use href="#l-' + name + '"/></svg>'; }
   function mk(tag, cls, text) {
@@ -88,8 +89,53 @@
     return b;
   }
   function isCard(n) { return !!n && n.nodeType === 1 && n.hasAttribute("data-card"); }
-  // fixedNode is what a board update never moves: a card, and the pin list.
-  function fixedNode(n) { return isCard(n) || (!!pins && n === pins); }
+  // The toolbar is infrastructure, not a card, flow peer, or storage record.
+  function fixedNode(n) { return isCard(n) || (!!pins && n === pins) || (!!toolbar && n === toolbar); }
+  function buildToolbar() {
+    toolbar = mk("div", "board-toolbar");
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.setAttribute("aria-label", wsT("js.board.toolbar.label"));
+    var row = mk("div", "board-tools"), actions = opt.toolbar || {};
+    function action(cls, icon, label, run) {
+      var b = mk("button", "board-action " + cls);
+      b.type = "button";
+      b.innerHTML = licon(icon);
+      b.appendChild(mk("span", "board-label", label));
+      b.title = label;
+      b.setAttribute("aria-label", label);
+      b.addEventListener("click", function (e) { if (run) run(e); });
+      row.appendChild(b);
+      return b;
+    }
+    action("board-overview", "chevrons-down-up", wsT("js.board.toolbar.overview"), actions.overview).setAttribute("aria-pressed", "false");
+    var term = mk("span", "board-term-slot");
+    term.id = "board-term-slot";
+    row.appendChild(term);
+    var web = mk("span", "board-web-slot");
+    web.id = "board-web-slot";
+    row.appendChild(web);
+    var search = action("board-search", "search", wsT("js.board.toolbar.search"), actions.search);
+    search.appendChild(mk("kbd", "", "Ctrl K"));
+    if (actions.files) action("board-files", "folder-open", wsT("js.board.toolbar.files"), actions.files);
+    counts = mk("span", "board-count");
+    row.appendChild(counts);
+    toolbar.appendChild(row);
+  }
+  function countTopics() {
+    if (!counts) return;
+    var open = 0, closed = 0, seen = new Set();
+    [board, pins].forEach(function (box) {
+      Array.prototype.forEach.call(box.querySelectorAll("section.topic[data-topic]"), function (n) {
+        var name = n.getAttribute("data-topic");
+        if (seen.has(name)) return;
+        seen.add(name);
+        if (n.classList.contains("closed")) closed++; else open++;
+      });
+    });
+    var more = board.querySelector("button.closed-more[data-closed-more]");
+    if (more) closed += Math.max(0, +more.getAttribute("data-closed-more") || 0);
+    counts.textContent = wsT("js.board.toolbar.count", open, closed);
+  }
   function topicName(n) {
     return n && n.nodeType === 1 && n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic") ? n.getAttribute("data-topic") : null;
   }
@@ -210,7 +256,7 @@
   function split(base) {
     var flow = units().filter(function (u) { return !u.pinned; });
     var out = order(base, flow, topicAt);
-    return { pins: pinned().map(function (u) { return u.el; }), board: colOn ? out : [pins].concat(out) };
+    return { pins: pinned().map(function (u) { return u.el; }), board: [toolbar].concat(colOn && !overviewOn ? out : [pins].concat(out)) };
   }
   function weave(base) {
     var rest = claim(base);
@@ -249,7 +295,7 @@
         catch (e) { box.insertBefore(moved.el, ref); }
       }
     }
-    place(p, function (n) { return n === pins; });
+    place(p, function (n) { return n === pins || n === toolbar; });
   }
   // place settles the pin list, then the board (fixed: what the board's
   // settle never moves): a node pinned from the board moves into the list
@@ -257,7 +303,7 @@
   // into the board. The pin list itself moves to the pinned column first
   // when the page shows one, so the board never lets it go either.
   function place(p, fixed) {
-    if (colOn && pins.parentNode !== col) {
+    if (colOn && !overviewOn && pins.parentNode !== col) {
       try { if (col.moveBefore && pins.isConnected) col.moveBefore(pins, null); else col.appendChild(pins); }
       catch (e) { col.appendChild(pins); }
     }
@@ -301,6 +347,7 @@
       });
     });
     if (maxed && !(maxed instanceof Card)) follow(maxed);
+    countTopics();
   }
   // leaveSlot marks the place of a topic that leaves a fetched closed page
   // (dashboard.js loadClosed) for the pin list or the board: the page's
@@ -536,6 +583,7 @@
   // video keeps running through maximize and back. One thing is large at a
   // time: a card, or a board node (sheet: a topic, or a topic's panel).
   function maximize(c) {
+    if (c && window.WsOverview && window.WsOverview.holding()) { window.WsOverview.after(function () { maximize(c); }); return; }
     if (maxed === c) return;
     if (maxed) {
       var was = maxed;
@@ -744,6 +792,7 @@
     d.x = x; d.y = y;
     var to = null, pr = rectOf(pins), zr = d.mode === "edge" ? rectOf(zone) : null, scr = null;
     if (zr && inside(zr, x, y)) to = { pin: true, index: 0, line: null };
+    else if (inside(rectOf(toolbar), x, y)) { /* the toolbar is never a drop target */ }
     else if (pr && (inside(pr, x, y) || (colOn && inside(rectOf(col), x, y)))) {
       var peers = Array.prototype.filter.call(pins.children, function (n) { return n !== d.el; }), s = slot(peers, y, pr);
       var me = d.unit.pinned ? pinned().indexOf(d.unit) : -1;
@@ -783,7 +832,7 @@
     if (d.scr.scrollTop !== was) over(d.x, d.y);
   }
   function dragStart(e) {
-    if (dg || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
+    if (overviewOn || dg || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
     var t = e.target;
     if (!t.closest || t.closest("button, a, input, textarea, select, summary, label")) return;
     var head = t.closest(".tbar, .bc-hd");
@@ -945,11 +994,14 @@
     // hides), closed(from, done) (fetches the closed-topic page from index
     // from and hands its root to done, or null on a failure), adopted(node)
     // (a topic node the closed route brought, now placed), and drag(on) (a
-    // drag starts or ends: board updates wait meanwhile).
+    // drag starts or ends: board updates wait meanwhile). toolbar supplies
+    // overview(), search(), and optional files() action callbacks.
     mount: function (el, o) {
       board = el;
       opt = o;
       col = o.column || null;
+      overviewOn = false;
+      buildToolbar();
       pins = mk("div", "bpins");
       pins.id = "bpins";
       pins.setAttribute("data-pins", "");
@@ -967,6 +1019,7 @@
       // The pin list enters the page before anything moves into it, so a
       // topic pinned on the board moves into it with its frames kept.
       board.insertBefore(pins, board.firstChild);
+      board.insertBefore(toolbar, pins);
       place(weave(Array.prototype.filter.call(board.childNodes, function (n) { return !fixedNode(n); })), fixedNode);
       persist();
       [board, col].forEach(function (box) {
@@ -1008,6 +1061,10 @@
     // pinList is the pin list's node; pinnedTopic tells whether a topic
     // name is pinned on this page (its node stands in the pin list).
     pinList: function () { return pins; },
+    toolbar: function () { return toolbar; },
+    // Hold the one pin list under the toolbar without changing colOn or
+    // the page's width. Overview's view state and interactions live elsewhere.
+    overview: function (on) { overviewOn = !!on; if (board) arrange(null); },
     pinnedTopic: function (name) { var r = topics[name]; return !!(r && r.pinned && r.el); },
     // relayout places everything again after the page's layout changed
     // (a width crossing, the layout menu).
