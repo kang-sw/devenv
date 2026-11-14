@@ -477,6 +477,13 @@
     for (var p = n.parentNode; p; p = p.parentNode) if (p === board || p === pins) return n;
     return null;
   }
+  // Navigation reveals only the owning whole-topic fold. Inner disclosures
+  // and focus belong to the caller; storage and decoration stay with foldUnit.
+  function unfoldTopic(node) {
+    var sec = originTopic(node && node.closest && node.closest("section.topic[data-topic]"));
+    var r = sec && topics[topicName(sec)];
+    if (r && r.folded) foldUnit(topicUnit(sec), false);
+  }
   function openBefore(c, origin) {
     var n = originTopic(origin), u = n && unitOf(n);
     delete c.rank;
@@ -1234,6 +1241,7 @@
     // decorate gives topics the page added outside a board update (a
     // fetched closed page) their pin buttons.
     decorate: function () { if (board) decorate(); },
+    unfoldTopic: unfoldTopic,
     is: isCard
   };
 })();

@@ -330,6 +330,7 @@
     var target = row.id ? $("item-" + row.id) : topic;
     if (!target || !topic) return;
     if (window.WsOverview && window.WsOverview.pick(topic, o)) return;
+    if (window.WsCards) window.WsCards.unfoldTopic(topic);
     if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
     if (live && !tabShown("board")) setTab("board");
     if (row.kind === "board-body") target = topic.querySelector(".tdoc") || topic;

@@ -1,7 +1,12 @@
 # Static asset extraction map
 
 Status: **UNVERIFIED STATIC PREPARATION**, not a Phase 1 Result or acceptance.
-Source pin: `d0ad8a9f1` (the source tree at preparation HEAD `b8989519a` has the same cut-line assets). Every range below is inclusive and refers to that source pin, not a peer branch. No executable checks or byte comparisons have run.
+Actual before/source pin: `aac39c69f381a82677f0ee6857e8f8fc5bc89322`.
+MAIN repinned the comparison after landing UI-C2/UI-C3 and started its merge
+into static preparation `961c8e3bf1a243b602e9c541b101747a6df8ea26`.
+The earlier `d0ad8a9f1` map is historical, not the next comparison baseline.
+Every range below is inclusive at the new exact source pin. Native Git source
+reads locate the headings/symbols; no executable checks or byte comparisons ran.
 
 ## Dashboard JavaScript
 
@@ -19,15 +24,15 @@ renaming, hoisting changes or new browser API are intended.
 | 1499–2873 | `dashboard-composer.js` | Answer/web chips, images, mentions, slash commands, draft/send handling and task badges |
 | 2874–3297 | `dashboard-actions.js` | Delegated clicks, link actions, session label and context menu |
 | 3298–3762 | `dashboard-drawer.js` | Shared drawer height, drag, fold and sheet controls |
-| 3763–4189 | `dashboard-frames.js` | Mount/bands, frame messages/identity, `boardJump`, history hooks and image relay |
-| 4190–5228 | `dashboard-git.js` | Pooled worktrees, holders, Git actions, graph, commit window and diff |
-| 5229–5941 | `dashboard-tracker.js` | Tracker adapter, palette helpers including `palettePick`, support chat |
-| 5942–6149 | `dashboard-selection.js` | Selection/mention popover |
-| 6150–6443 | `dashboard-stream.js` | Tab label, stream connection, held/hidden regions |
-| 6444–7117 | `dashboard-rail.js` | Rail state, menu entry points and drag/reorder |
-| 7118–8007 | `dashboard-rail-popovers.js` | Workspace/worktree popovers, row menu, worktree delete |
-| 8008–8628 | `dashboard-leads.js` | Hosted sessions, `rpLeadMake`, modal submission/completion and recovery |
-| 8629–9234 | `dashboard-lifecycle.js` | Approval notifications, per-session drafts, iframe shell and original final initialization/IIFE close |
+| 3763–4190 | `dashboard-frames.js` | Mount/bands, frame messages/identity, `boardJump`, history hooks and image relay |
+| 4191–5229 | `dashboard-git.js` | Pooled worktrees, holders, Git actions, graph, commit window and diff |
+| 5230–5943 | `dashboard-tracker.js` | Tracker adapter, palette helpers including `palettePick`, support chat |
+| 5944–6151 | `dashboard-selection.js` | Selection/mention popover |
+| 6152–6445 | `dashboard-stream.js` | Tab label, stream connection, held/hidden regions |
+| 6446–7119 | `dashboard-rail.js` | Rail state, menu entry points and drag/reorder |
+| 7120–8009 | `dashboard-rail-popovers.js` | Workspace/worktree popovers, row menu, worktree delete |
+| 8010–8630 | `dashboard-leads.js` | Hosted sessions, `rpLeadMake`, modal submission/completion and recovery |
+| 8631–9236 | `dashboard-lifecycle.js` | Approval notifications, per-session drafts, iframe shell and original final initialization/IIFE close |
 
 State-owning blocks remain contiguous even when large: composer chips/images/mentions,
 board morph/grafts/keep, and hosted-lead modal lifecycle. Splitting the browser
@@ -61,9 +66,11 @@ in `render.go:pageStyleFiles` order.
 | 606–697 | `page-panels.css` | Side panels, icons, reply bar |
 | 698–805 | `page-sticky.css` | Pills, sticky rail, banner, viewer |
 
-The existing whiteboard JavaScript files and registrations stay untouched.
-There is no `page.js`; `stream.js` retains history geometry/navigation, `rail.js`
-retains sticky ownership, and `form.js` retains board binding.
+The existing whiteboard JavaScript files and registrations are not split.
+Relative to the new before pin they stay untouched: the landed UI-C2/UI-C3
+`stream.js` is retained, `rail.js` retains sticky ownership, and `form.js` retains
+board binding. There is no `page.js`. Git's incoming source diff contains no
+CSS or harness changes; their heading coordinates above/below remain current.
 
 ## Assembly and readers
 
@@ -107,22 +114,36 @@ callbacks, assertions, predicates, historical pins and known-baseline classifica
 remain verbatim. `split.test.mjs` adds browser-free factory/registration/dependency
 contracts, not a substitute for browser acceptance.
 
-## Peer patch landing points (not imported)
+## Landed and pending peer patch landing points
 
-These mappings are static evidence, not acceptance of any peer change.
+These mappings are static source evidence, not executable acceptance.
 
-- **777**: original `dashboard.js:264` comment remains `dashboard.js:264`;
-  original `draftStore` declaration at 8729 becomes `dashboard-lifecycle.js:101`
-  (old hunk 8726 begins at new 98). Baseline still lacks the peer's
-  `mode !== "history"` condition. No 777 patch is incorporated.
-- **UI-C3**, peer-reported `442cbdc9b132a4a5fb0ff1e6d419f882e6726000`:
-  `boardJump` 3985 → `dashboard-frames.js:223`; `palettePick` 5553 →
-  `dashboard-tracker.js:325`. `cards.js:foldUnit/topicUnit/originTopic` and
-  `stream.js:materialize/loadTarget` retain their paths and private ownership.
-  No `WsCards.unfoldTopic` API or `beforeGeometry` callback is added here.
-  Peer test patch destinations retain their names (`cards_test.go`,
-  `whiteboard_bridge_test.go`, `testdata/search-palette.test.cjs`,
-  `wswhiteboard/stream_script_test.go`); whole-source test readers changed only.
+- **777 remains unmerged**: source `dashboard.js:264` comment remains
+  `dashboard.js:264`; source `draftStore` 8731 → `dashboard-lifecycle.js:101`
+  (the former d0ad hunk 8726 is now source 8728 → new 98). The actual before pin
+  still lacks `mode !== "history"`. No 777 change is imported.
+- **UI-C3 is now landed in the exact before pin**:
+  `boardJump` 3985 → `dashboard-frames.js:223`; `palettePick` 5554 →
+  `dashboard-tracker.js:325`. Conflict resolution retains the opening 544-line
+  fragment and transplants the two incoming changes into these owner fragments,
+  rather than appending a second monolith. `boardJump` forwards the existing
+  `WsCards.unfoldTopic` owner to `wbHistory.loadTarget` and invokes it again only
+  after fallback ownership validation. `palettePick` calls it after Overview's
+  handoff and before tab/disclosure/focus/geometry work.
+- `cards.js:482` retains the landed `unfoldTopic` implementation/export, with
+  `foldUnit/topicUnit/originTopic` ownership unchanged. `stream.js:331/359`
+  retains `materialize/loadTarget(beforeGeometry)`: known live targets reveal
+  before return, deferred topics before `init`, known paged histories before
+  `loadOne`; callback-free restore remains callback-free.
+- **UI-C2 is now landed in the exact before pin**: `stream.js:41` retains
+  `boundaryRow` and historical chronological-cut resolution, pending Older
+  cancellation and historical successor materialization during restore. The
+  split does not rewrite those paths.
+- All landed regression assertions remain in `cards_test.go`,
+  `whiteboard_bridge_test.go`, `testdata/search-palette.test.cjs`, and
+  `wswhiteboard/stream_script_test.go`. Auto-merged whole-dashboard readers still
+  use `dashboardTestAsset`/`readAssetSource`; the new cards test correctly reads
+  the unsplit `cards.js`. No raw whole-dashboard reader was introduced.
 - **UI-T5**, peer-reported `7e3abb6e0d84f71da292a83f2d89aec7fe9a3c90`
   (`fix/review794-c2-t5`, also contains unrelated D-C2 launcher work; not imported):
   baseline `bodyShape` ticket selector and initial shape predicate
@@ -137,7 +158,13 @@ These mappings are static evidence, not acceptance of any peer change.
 
 ## Pending
 
-All tests, syntax/byte checks, builds, browser captures, independent lite review,
-Phase 1 Result and closure remain pending MAIN's separately allocated START.
-The UI start pause is unchanged; MAIN alone resumes it and owns deployment.
-See [the single bounded recipe](verification-recipe.md).
+Independent static lite review 8092 covered `b8989519a..961c8e3bf` and reported
+three Important recipe findings, no Critical. This reconciliation addresses
+those findings statically in the recipe; no re-review is requested under lite's
+one-pass allocation, and no executable preservation claim follows.
+
+All tests, syntax/byte checks, builds, browser captures, Phase 1 Result and closure
+remain pending the split's own MAIN START. H's slot grants none of that authority.
+The combined browser recipe remains **NOT START-ready** for the documented real
+supervision/fixture gaps. The UI-start pause and deployment remain MAIN-owned.
+See [the one revised recipe](verification-recipe.md).

@@ -239,6 +239,57 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
+func TestBoardTopicRevealUsesFoldOwner(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _ := json.Marshal(string(data))
+	runNode(t, "topic navigation fold owner", "var CARDS = "+string(src)+";\n"+cardsDOM+`
+var store = {}, A, B;
+function withDisclosures(name, at) {
+  var t = topic(name, at), body = t.appendChild(mk("details.tdoc")), versions = t.appendChild(mk("details.panel-versions"));
+  body.open = true; versions.open = false;
+  return t;
+}
+function served() { A = withDisclosures("a", 300); B = withDisclosures("b", 200); return [A, B]; }
+function records() { return store.cards ? JSON.parse(store.cards).topics : []; }
+function fold(t) { page.board.fire("click", {target: t.querySelector(".t-fold")}); }
+boot(store, served, {wide: true});
+page.W.unfoldTopic(A);
+check("an unfolded no-op creates no topic record", records(), []);
+fold(A); fold(B);
+var oldA = A;
+A = withDisclosures("a", 400);
+swap([A, B]);
+var saved = store.cards, outside = withDisclosures("a", 500);
+page.doc.body.appendChild(outside);
+[oldA, topic("a", 600), outside, mk("div", {"data-topic": "a"}), null].forEach(page.W.unfoldTopic);
+check("detached, replaced, off-board and non-topic nodes cannot borrow the live record", [store.cards, A.getAttribute("data-size")], [saved, "fold"]);
+var body = A.querySelector(".tdoc"), versions = A.querySelector(".panel-versions"), focused = body.appendChild(mk("input")), focusMoves = 0;
+El.prototype.focus = function () { focusMoves++; this.ownerDocument.activeElement = this; };
+page.doc.activeElement = focused;
+page.W.unfoldTopic(focused);
+check("reveal decorates through the fold owner", [A.getAttribute("data-size"), A.querySelector(".t-fold").getAttribute("aria-expanded")], ["base", "true"]);
+check("reveal removes a fold-only record, not another topic's fold", records().map(function (r) { return [r.n, r.f]; }), [["b", true]]);
+check("reveal preserves independent disclosures and focus", [body.open, versions.open, B.getAttribute("data-size"), page.doc.activeElement === focused, focusMoves], [true, false, "fold", true, 0]);
+saved = store.cards;
+page.W.unfoldTopic(A); page.W.decorate();
+check("reveal is idempotent and later decoration does not refold", [store.cards, A.getAttribute("data-size")], [saved, "base"]);
+boot(store, served, {wide: true});
+check("reveal persists across reload without clearing unrelated folds", [A.getAttribute("data-size"), B.getAttribute("data-size")], ["base", "fold"]);
+clickPin(A); fold(A);
+var pinned = records().filter(function (r) { return r.n === "a"; })[0];
+page.W.unfoldTopic(A.querySelector(".tdoc"));
+var revealed = records().filter(function (r) { return r.n === "a"; })[0];
+check("pinned-column reveal preserves placement and its record", [A.parentNode === page.W.pinList(), revealed.p, revealed.a, revealed.b, revealed.f], [true, pinned.p, pinned.a, pinned.b, false]);
+check("pinned reveal still leaves inner disclosures alone", [A.querySelector(".tdoc").open, A.querySelector(".panel-versions").open], [true, false]);
+boot(store, served, {wide: true});
+check("pinned unfolded state survives reload", [A.parentNode === page.W.pinList(), A.getAttribute("data-size"), B.getAttribute("data-size")], [true, "base", "fold"]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
 // boardBoxSrc is dashboard.js's board-box helpers (boardBoxes, boardQ,
 // inBoard, boardRead), for a node harness that runs a function reading the
 // board's topics wherever they stand: the board region or the pin list.

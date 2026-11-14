@@ -15,7 +15,7 @@ test('assembled dashboard source retains its single-script syntax', () => {
 test('move-only sources equal the explicitly pinned baseline', { skip: !process.env.BOARD_SPLIT_BASELINE }, () => {
   const root = new URL('../../', import.meta.url);
   const baseline = path => execFileSync('git', ['show', process.env.BOARD_SPLIT_BASELINE + ':' + path], { cwd: root });
-  for (const [pkg, name] of [['wsdashboard', 'dashboard.js'], ['wsdashboard', 'dashboard.css'], ['wswhiteboard', 'page.css']]) {
+  for (const [pkg, name] of [['wsdashboard', 'dashboard.js'], ['wsdashboard', 'dashboard.css'], ['wswhiteboard', 'page.css'], ['wsdashboard', 'cards.js'], ['wswhiteboard', 'stream.js']]) {
     assert.equal(assetSource.readAssetSource(pkg, name), baseline('agents-plugin-tool/internal/' + pkg + '/assets/' + name).toString(), pkg + '/' + name);
   }
   const old = baseline('scripts/board-headless.mjs').toString();

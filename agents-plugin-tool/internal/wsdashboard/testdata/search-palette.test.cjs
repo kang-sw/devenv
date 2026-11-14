@@ -389,34 +389,52 @@ async function hostCases() {
     assert(got[1].title.includes(text), 'the ' + kind + ' frame body is searched');
   }
 
-  // Jump against a fresh node; Ctrl+Enter (keep) leaves the focus in the palette.
+  // Jump against a fresh node; the whole-topic owner must run before any
+  // landing geometry or focus, without opening unrelated disclosures.
+  let folded = true, active = 'palette';
   const fold = { tagName: 'DETAILS', open: false };
-  const topic = { parentElement: {}, querySelector: () => null, getAttribute: () => 'closed' };
-  const target = { parentElement: fold, tagName: 'DIV', classList: { remove() {}, add() {} },
-    matches: () => false, setAttribute() {}, focus() { events.push(['board-focus']); },
-    scrollIntoView() { events.push(['scroll', fold.open]); } };
+  const topic = { parentElement: {}, querySelector: s => s === '.tdoc' ? body : null, getAttribute: () => 'closed' };
+  function landing(tagName, parentElement) {
+    return { parentElement, tagName, classList: { remove() {}, add() {} },
+      matches: () => false, setAttribute() {},
+      focus() { assert.equal(folded, false, 'owner reveals before focus'); active = this; events.push(['board-focus']); },
+      scrollIntoView() {
+        assert.equal(folded, false, 'owner reveals before scroll');
+        assert.equal(this === body ? body.open : fold.open, true, 'target disclosure opens before scroll');
+        events.push(['scroll']);
+      },
+      get offsetWidth() { assert.equal(folded, false, 'owner reveals before flash geometry'); events.push(['width']); return 0; } };
+  }
+  const body = landing('DETAILS', topic), target = landing('DIV', fold);
   fold.parentElement = topic;
   const pickCtx = vm.createContext({ doc: { body: { classList: { contains: () => false } }, documentElement: {} },
-    window: {}, boardQ: () => [topic], $: () => target, live: true, tabShown: () => false,
-    setTab: tab => events.push(['tab', tab]), setTimeout: fn => fn(), location: {},
-    go: href => { pickCtx.location.href = href; } });
+    window: { WsCards: { unfoldTopic(node) { assert.equal(node, topic); folded = false; events.push(['unfold']); } } },
+    boardQ: () => [topic], $: () => target, live: true, tabShown: () => false,
+    setTab: tab => { assert.equal(folded, false, 'owner reveals before tab handoff'); events.push(['tab', tab]); },
+    setTimeout: fn => fn(), location: {}, go: href => { pickCtx.location.href = href; } });
   vm.runInContext(block(dashboard, '  function palettePick(', "  // The palette's file hooks"), pickCtx);
-  events.length = 0;
-  pickCtx.palettePick({ kind: 'board-item', topic: 'closed', id: '153' }, { keep: true });
-  assert(events.some(x => x[0] === 'scroll' && x[1] === true), 'enclosing closed fold opened before scroll');
-  assert(events.some(x => x[0] === 'tab' && x[1] === 'board'));
-  assert(!events.some(x => x[0] === 'board-focus'), 'keep leaves the focus in the palette');
-  pickCtx.palettePick({ kind: 'board-item', topic: 'closed', id: '153' });
-  assert(events.some(x => x[0] === 'board-focus'));
+  for (const kind of ['board-body', 'board-item', 'board-answer']) {
+    for (const keep of [false, true]) {
+      folded = true; fold.open = false; body.open = false; active = 'palette'; events.length = 0;
+      pickCtx.palettePick({ kind, topic: 'closed', ...(kind === 'board-body' ? {} : { id: '153' }) }, { keep });
+      assert.deepEqual(events[0], ['unfold'], kind + ' reveals through the owner first');
+      assert(events.some(x => x[0] === 'scroll') && events.some(x => x[0] === 'width'));
+      assert(events.some(x => x[0] === 'tab' && x[1] === 'board'));
+      assert.equal(active, keep ? 'palette' : kind === 'board-body' ? body : target, 'keep retains palette focus');
+      assert.equal(kind === 'board-body' ? fold.open : body.open, false, 'unrelated inner disclosure stays closed');
+    }
+  }
   // Both palette gestures use overview's exit/landing path; the host must
   // not scroll inside a folded topic, even when Ctrl+Enter keeps it open.
   const overviewPicks = [];
   pickCtx.window.WsOverview = { pick: (node, opt) => { overviewPicks.push([node === topic, !!(opt && opt.keep)]); return true; } };
-  events.length = 0;
+  events.length = 0; folded = true; active = 'palette';
   pickCtx.palettePick({ kind: 'board-item', topic: 'closed', id: '153' }, { keep: true });
   pickCtx.palettePick({ kind: 'board-item', topic: 'closed', id: '153' });
   assert.deepEqual(overviewPicks, [[true, true], [true, false]]);
-  assert.equal(events.length, 0, 'overview owns all landing scrolls');
+  assert.equal(events.length, 0, 'overview owns all landing scrolls and bypasses the fold owner');
+  assert.equal(folded, true);
+  assert.equal(active, 'palette');
   pickCtx.palettePick({ kind: 'session', href: '/s/other' });
   assert.equal(pickCtx.location.href, '/s/other');
 

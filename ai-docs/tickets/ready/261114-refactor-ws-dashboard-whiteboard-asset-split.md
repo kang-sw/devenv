@@ -34,6 +34,7 @@ There is **no** `wswhiteboard/assets/page.js` in this source. The whiteboard Jav
 - **Publish a move map.** Record each old file and recognizable region/symbol group against its new file, plus the changed embedding/template sites and load order. Ongoing workers use this map to rebase without re-deriving the extraction.
 - **Compatibility: T0 (asset content).** This work changes internal asset organization, not MCP tools/arguments, protocol behavior, tracker events, store shape or configuration fields. Existing caller-visible behavior remains unchanged.
 - **Acceptance includes tests and before/after screenshots.** Capture the actual cut-line baseline, not an older visual reference, and compare the result side by side at matching routes, viewports, state and motion settings. Neither a file move nor syntax checks alone prove behavior preservation.
+- **MAIN's 17:59:12 repin.** Integrate exact develop `aac39c69f381a82677f0ee6857e8f8fc5bc89322` before the split's future slot, preserving its landed UI-C2 history-boundary and UI-C3 topic-unfold/beforeGeometry changes. That exact source is now the actual BEFORE comparison pin, replacing historical `d0ad8a9f1`; unmerged 777 and UI-T5 remain excluded. MAIN owns integration; reconciliation and recipe edits remain static-only while H runs.
 
 ## Constraints
 
@@ -72,26 +73,38 @@ There is **no** `wswhiteboard/assets/page.js` in this source. The whiteboard Jav
 | complexity.side_effect_risk | high | INFERRED: Moving initialization and shared closure regions can reorder handlers, break storage ownership or change CSS cascade across standalone, dashboard and frame consumers. |
 | risk.correctness | high | INFERRED: Phase 1 must preserve scroll/focus, frame identity and asynchronous live updates; existing board_keep_test.go#L15-L65 pins ordering across morph, history restore and late frame height compensation. |
 | risk.fit | moderate | INFERRED: Existing builders and responsibility sections support mechanical extraction, but closure boundaries must be retained rather than replaced with a new exported API. |
-| risk.test | high | INFERRED: Many tests extract source spans from a single file; syntax checks cannot prove assembled behavior or visual equality. The actual d0ad8a9f1 visual baseline is still to be captured in a separately granted heavy slot, not an already-approved mockup. git show -s --format=%B cacd771c1 records owner-accepted open picker/card Important and an incomparable earlier baseline, not full 652 acceptance. |
+| risk.test | high | INFERRED: Many tests extract source spans from a single file; syntax checks cannot prove assembled behavior or visual equality. The actual comparison baseline, repinned by MAIN to exact aac39c69f381a82677f0ee6857e8f8fc5bc89322, is still to be captured in the split's separately granted heavy slot, not an already-approved mockup. git show -s --format=%B cacd771c1 records owner-accepted open picker/card Important and an incomparable earlier baseline, not full 652 acceptance. |
 | risk.security_or_contract | moderate | INFERRED: T0 asset organization must retain trusted frame dispatch, sandboxed document loading and existing action availability; agents-plugin-tool/internal/wswhiteboard/render.go and agents-plugin-tool/internal/wsdashboard/pages.go are assembly boundaries, not authority to change those contracts. |
 
 ## Static Preparation — Awaiting MAIN's Heavy-Slot START
 
-Static move-only T0 preparation is retained on `impl/develop/map-yoga-coach`,
-against source pin `d0ad8a9f1`. This is not a Phase 1 Result or acceptance.
+Static move-only T0 preparation is retained on `impl/develop/map-yoga-coach`.
+MAIN started integration of exact `aac39c69f381a82677f0ee6857e8f8fc5bc89322`
+into preparation `961c8e3bf1a243b602e9c541b101747a6df8ea26`; the worker resolves
+that existing merge, not a rebase or another integration. The new source pin
+includes landed UI-C2/UI-C3. This is not a Phase 1 Result or acceptance.
 No tests, syntax/byte checks, imports, formatters, generators, builds, browsers,
-network/daemon/owner operations or process signals were run. H CRLF keeps first
-priority. MAIN already acquired the ticket lease before dispatch; the worker
-made no acquisition or origin-index call.
+network/daemon/owner operations or process signals ran. H's actual slot grants
+no split execution. MAIN already acquired the lease; no acquisition was repeated.
 
 - [Move map and peer patch landing points](../assets/261114-refactor-ws-dashboard-whiteboard-asset-split/move-map.md).
 - [One bounded offline verification/baseline recipe, not run](../assets/261114-refactor-ws-dashboard-whiteboard-asset-split/verification-recipe.md).
-- Existing whiteboard script ownership and baseline predicates remain; 777,
-  UI-C3 and UI-T5 peer fixes are not imported. Their test results are not this
-  ticket's acceptance. Source-reading tests now use assembled assets.
-- Exact source/behavior preservation is intended, not established. All executable
-  verification, before/after side-by-side comparison, independent lite review,
-  Result and closure remain deferred. The UI-start pause remains MAIN-owned.
+- The merge retains landed UI-C2 history-boundary handling, UI-C3 owner export and
+  pre-geometry callback ordering, and all incoming regression assertions. The two
+  dashboard changes land in `dashboard-frames.js`/`dashboard-tracker.js`; source
+  readers remain assembled. Unmerged 777/UI-T5 changes stay excluded.
+- Independent static lite review 8092 covered `b8989519a..961c8e3bf`, found no
+  Critical and three Important recipe issues. Static corrections select the
+  narrow board tab before visible-topic waiting, mark shared-controls blocked
+  without its separately approved coherent exited-terminal fixture, and specify
+  cumulative deadlines/operation budgets/cleanup reserve/owned-exit handoff.
+  No re-review is requested under lite's one-pass allocation.
+- The one combined recipe remains NOT START-ready: its actual enforcement runner
+  and exited-terminal prerequisite are not supplied by this asset-only scope.
+  Baseline-first failures can leave all candidate coverage explicitly omitted.
+  Exact source/behavior preservation remains unverified; executable verification,
+  side-by-side comparison, Result and closure are deferred. The UI-start pause
+  remains MAIN-owned; peer test receipts are not this ticket's acceptance.
 
 ## Phases
 
