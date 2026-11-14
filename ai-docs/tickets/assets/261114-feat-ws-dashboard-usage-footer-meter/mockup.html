@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:">
+<title>Plan usage · 사용량 표시 개선 시안 732</title>
+<style>
+/* Real assets, read-only references:
+ internal/wswhiteboard/assets/page.css — shared dark tokens and font stacks.
+ internal/wsdashboard/assets/dashboard.css — .rail, .rfoot, .rpop.
+ internal/wsdashboard/assets/usage.css and usage.js — harness marks, labels,
+ provenance strings and current window semantics. New rules use mock-/u-.
+ All values/history below are authored fixtures, not live account data. */
+:root {
+ --wb-bg:#141518; --wb-fg:#e7e7e4; --wb-card:#1e2024;
+ --wb-muted:#2b2d32; --wb-muted-fg:#a2a6ad;
+ --wb-primary:#7aa2ff; --wb-primary-fg:#0c1424;
+ --wb-ok:#6cc39a; --wb-fail:#f0797e; --wb-warn-ink:#e0a36c;
+ --wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent);
+ --wb-shadow:0 1px 2px rgb(0 0 0 / .5),0 2px 8px rgb(0 0 0 / .3);
+ --wb-shadow-hi:0 2px 4px rgb(0 0 0 / .55),0 8px 22px rgb(0 0 0 / .4);
+ --wb-radius:12px;
+ --wb-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+ --wb-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
+ color-scheme:dark;
+}
+* { box-sizing:border-box; }
+html,body { margin:0; background:var(--wb-bg); color:var(--wb-fg); }
+body { font:14px/1.5 var(--wb-sans); }
+button { font:inherit; color:inherit; }
+.i { width:14px; height:14px; display:inline-block; flex:none; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.rail { background:var(--wb-card); border-radius:var(--wb-radius); box-shadow:var(--wb-shadow); display:flex; flex-direction:column; min-height:0; min-width:0; overflow:hidden; }
+.rail .rfoot { flex:none; display:flex; align-items:center; gap:8px; padding:7px 12px; border-top:1px solid var(--wb-muted); font-size:12px; }
+.rail .usage-toggle { display:flex; align-items:center; gap:18px; min-height:25px; width:100%; padding:2px 0; border:0; background:none; color:var(--wb-fg); cursor:default; font:inherit; text-align:left; }
+.usage-harness { display:inline-flex; align-items:center; gap:4px; }
+.usage-harness .hi,.usage-pop .hi { display:inline-flex; align-items:center; justify-content:center; flex:none; width:16px; height:16px; border-radius:4px; font:800 11px/1 var(--wb-mono); }
+.usage-harness .claude,.usage-pop .claude { background:#D97757; color:#fff; }
+.usage-harness .codex,.usage-pop .codex { background:#10A37F; color:#fff; }
+.usage-heading { display:flex; align-items:center; gap:7px; }
+.usage-plan { margin-left:auto; font-size:11px; color:var(--wb-muted-fg); }
+.usage-close { margin-left:auto; padding:0 3px; border:0; background:none; color:var(--wb-muted-fg); font:inherit; cursor:default; }
+.usage-meta { font-size:11px; color:var(--wb-muted-fg); }
+/* A, owner correction: one column per window. Current usage above,
+   smaller pace delta below. Claude has two columns; weekly-only has one. */
+.usage-harness { gap:8px; }
+.u-columns { display:flex; align-items:center; gap:12px; }
+.u-column { display:inline-flex; flex-direction:column; align-items:flex-end; gap:1px; white-space:nowrap; font-family:var(--wb-mono); font-variant-numeric:tabular-nums; }
+.u-current { display:flex; align-items:baseline; gap:3px; }
+.u-number { font:700 15px/1.2 var(--wb-mono); letter-spacing:-.035em; }
+.u-key { color:var(--wb-muted-fg); font:500 9px/1.2 var(--wb-sans); }
+.u-percent { font-size:10px; font-weight:500; }
+.u-pace { font:600 10.5px/1.2 var(--wb-mono); letter-spacing:-.025em; }
+.under { color:var(--wb-ok); }
+.over { color:var(--wb-fail); }
+.u-age { width:16px; height:16px; position:relative; flex:none; display:inline-flex; }
+.u-age .i { position:absolute; width:9px; height:9px; right:-4px; bottom:-3px; border-radius:50%; background:var(--wb-card); color:var(--wb-warn-ink); box-shadow:0 0 0 1px var(--wb-card); }
+.u-stale .u-column { color:var(--wb-muted-fg); }
+.u-stale .u-pace { color:var(--wb-muted-fg); }
+.u-stale .u-number { text-decoration:underline dotted; text-underline-offset:3px; }
+/* B: existing popover surface, 340px wide (the sidebar width), with three
+ compact cumulative usage charts. Dashed line = ideal usage, not prediction. */
+.usage-pop { width:340px; max-width:100%; display:grid; gap:10px; background:var(--wb-card); color:var(--wb-fg); border-radius:10px; box-shadow:var(--wb-shadow-hi),inset 0 0 0 1px var(--wb-line); padding:10px 12px; font-size:12.5px; }
+.u-pop-title { font-size:16px; }
+.u-pop-sub { margin:3px 0 0; font-size:10.5px; color:var(--wb-muted-fg); }
+.usage-account { display:grid; gap:7px; padding:10px 0 0; border-top:1px solid var(--wb-line); }
+.u-window { border-radius:8px; background:color-mix(in srgb,var(--wb-bg) 50%,var(--wb-card)); padding:8px; min-width:0; }
+.u-window-head { display:flex; align-items:baseline; gap:6px; }
+.u-window-name { font-size:12px; font-weight:700; margin-right:auto; }
+.u-window-number { font:800 20px/1.2 var(--wb-mono); font-variant-numeric:tabular-nums; letter-spacing:-.05em; }
+.u-window-number small { font-size:11px; font-weight:500; }
+.u-delta { font:700 10.5px/1.25 var(--wb-mono); white-space:nowrap; padding:2px 4px; border-radius:4px; }
+.u-delta.over { background:color-mix(in srgb,var(--wb-fail) 12%,transparent); }
+.u-delta.under { background:color-mix(in srgb,var(--wb-ok) 12%,transparent); }
+.u-reset { display:flex; flex-wrap:wrap; gap:2px 5px; color:var(--wb-muted-fg); font-size:10px; margin-top:4px; }
+.u-reset strong { color:var(--wb-fg); font-weight:500; }
+.u-chart { display:block; width:100%; height:auto; margin-top:3px; overflow:visible; }
+.u-chart text { font:9px var(--wb-sans); fill:var(--wb-muted-fg); }
+.u-chart .grid { stroke:var(--wb-line); stroke-width:.7; }
+.u-chart .ideal { stroke:var(--wb-muted-fg); stroke-width:1.2; stroke-dasharray:4 4; fill:none; opacity:.75; }
+.u-chart .now { stroke:var(--wb-line); stroke-dasharray:2 3; stroke-width:1; }
+.u-chart .actual { fill:none; stroke:var(--wb-primary); stroke-width:2.3; stroke-linecap:round; stroke-linejoin:round; }
+.u-chart .area { fill:var(--wb-primary); opacity:.09; }
+.u-chart .dot { fill:var(--wb-primary); stroke:var(--wb-card); stroke-width:2; }
+.u-chart .gap { stroke:var(--wb-ok); stroke-width:1.5; }
+.u-chart .gap.over-gap { stroke:var(--wb-fail); }
+.u-chart .gap-end { fill:var(--wb-muted-fg); }
+.u-observed { display:flex; align-items:center; flex-wrap:wrap; gap:3px 7px; font-size:9.5px; color:var(--wb-muted-fg); border-top:1px solid var(--wb-line); padding-top:5px; }
+.u-observed .u-fresh { color:var(--wb-fg); }
+.u-source { font-size:10px; color:var(--wb-muted-fg); }
+.u-chart-legend { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:10px; color:var(--wb-muted-fg); }
+.u-chart-legend span { display:inline-flex; align-items:center; gap:5px; }
+.u-swatch { width:15px; border-top:2px solid var(--wb-primary); }
+.u-swatch.ideal { border-top:1px dashed var(--wb-muted-fg); }
+.u-history-note { font-size:10px; color:var(--wb-muted-fg); padding:7px 8px; background:var(--wb-muted); border-radius:6px; }
+.u-history-note strong { color:var(--wb-fg); }
+/* Design-review sheet only, not proposed application chrome. */
+.mock-sheet { max-width:1248px; margin:0 auto; padding:24px 16px; }
+.mock-eyebrow { color:var(--wb-muted-fg); font:11px var(--wb-mono); margin:0 0 6px; }
+.mock-title { margin:0; font-size:22px; letter-spacing:-.035em; }
+.mock-intro { margin:7px 0 22px; color:var(--wb-muted-fg); font-size:12px; }
+.mock-layout { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:28px; align-items:start; }
+.mock-section { min-width:0; }
+.mock-section h2 { display:flex; gap:7px; align-items:center; font-size:15px; margin:0 0 5px; }
+.mock-letter { display:inline-grid; place-items:center; width:23px; height:23px; background:var(--wb-muted); border-radius:6px; color:var(--wb-muted-fg); font:700 11px var(--wb-mono); }
+.mock-caption { color:var(--wb-muted-fg); font-size:11.5px; margin:0 0 14px; }
+.mock-footer-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:22px 16px; }
+.mock-variant { min-width:0; }
+.mock-variant h3 { font-size:12px; margin:0 0 7px; }
+.mock-rail { width:340px; max-width:100%; }
+.mock-rail-context { padding:9px 12px 8px; color:var(--wb-muted-fg); font-size:10.5px; }
+.mock-rail-context .mock-selected { display:flex; gap:6px; align-items:center; color:var(--wb-fg); margin-top:4px; padding:3px 6px; margin-left:-6px; border-radius:5px; background:var(--wb-muted); font-size:11.5px; }
+.mock-selected .mock-dot { width:5px; height:5px; border-radius:50%; background:var(--wb-primary); }
+.mock-description { margin:7px 0 0; color:var(--wb-muted-fg); font-size:11px; max-width:340px; }
+.mock-reading { margin-top:24px; border-top:1px solid var(--wb-line); padding-top:14px; }
+.mock-reading h3 { margin:0 0 8px; font-size:12px; }
+.mock-formula { background:var(--wb-card); border-radius:8px; padding:12px; font-size:12px; }
+.mock-formula b { font-family:var(--wb-mono); }
+.mock-formula p { margin:5px 0 0; color:var(--wb-muted-fg); font-size:11px; }
+.mock-state-legend { display:flex; gap:8px 14px; flex-wrap:wrap; font-size:11px; margin-top:9px; }
+.mock-notes { margin-top:22px; color:var(--wb-muted-fg); font-size:11px; }
+.mock-notes h3 { color:var(--wb-fg); font-size:12px; margin:0 0 7px; }
+.mock-notes p { margin:5px 0; }
+.mock-notes code { font:10px var(--wb-mono); overflow-wrap:anywhere; }
+.mock-empty { display:flex; align-items:center; gap:10px; margin-top:12px; padding:9px 10px; border:1px dashed var(--wb-line); border-radius:8px; color:var(--wb-muted-fg); font-size:10.5px; }
+.mock-empty svg { width:50px; height:30px; flex:none; }
+.mock-end { margin-top:22px; border-top:1px solid var(--wb-line); padding-top:10px; color:var(--wb-muted-fg); font-size:10.5px; }
+@media(max-width:1080px) {
+ .mock-layout { grid-template-columns:minmax(0,1fr); gap:26px; }
+ .mock-footer-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:600px) {
+ .mock-sheet { padding:16px 10px; }
+ .mock-title { font-size:19px; }
+ .mock-footer-grid { grid-template-columns:minmax(0,1fr); gap:18px; }
+ .mock-description { font-size:10.5px; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="i-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.8"/><path d="M8 4.8V8l2.2 1.4"/></symbol></svg>
+<div class="mock-sheet">
+<header><p class="mock-eyebrow">WS DASHBOARD / 732</p><h1 class="mock-title">사용량, 숫자로 보고 흐름으로 확인하기</h1><p class="mock-intro">기존 다크 테마 · C/X 아이콘 유지 · 모든 수치와 그래프는 디자인 검토용 예시입니다.</p></header>
+<main class="mock-layout">
+<section class="mock-section" aria-labelledby="footer-title">
+<h2 id="footer-title"><span class="mock-letter">A</span>좌하단 · 창별 열, 현재 사용률 / 비교 사용률</h2>
+<p class="mock-caption">340px 사이드바 폭 · 위: 현재 사용률 / 아래: 작은 속도 차이 · Claude 2열 / Codex 1열</p>
+<div class="mock-footer-grid" id="footer-variants"></div>
+<div class="mock-reading"><h3>아래 행은 사용 증가량이 아니라, 시간 대비 속도 차이입니다.</h3><div class="mock-formula"><span class="u-column"><span class="u-number">20<span class="u-percent">%</span></span><span class="u-pace under">−13%</span></span>　아래 행 −13% = 사용 20% − 시간 경과 33%<p>열마다 위는 현재 사용률, 아래는 더 작은 비교 사용률입니다. 차이는 퍼센트포인트이며, 표기는 요청하신 % 형식을 유지합니다.</p></div><div class="mock-state-legend"><span class="under">− 여유 · 시간보다 덜 사용</span><span class="over">+ 초과 · 시간보다 더 사용</span><span>◷ 오래된 값 · 색상 중립화</span></div></div>
+<div class="mock-notes"><h3>시안에서 정한 표시 원칙</h3><p>하네스 아이콘 옆에 창별 열을 둡니다. 위 행은 밝고 크게, 아래 행은 더 작은 글씨와 부호·색으로 구분합니다. 창 이름은 5h / 주로 짧게 표시합니다.</p><p>오래된 값은 마지막 수치를 유지하되 점선 밑줄과 시계 표시를 붙입니다. 녹색으로 현재의 여유를 암시하지 않습니다.</p><p>그래프는 <b>누적 사용률</b>입니다. 배터리 잔량과 반대로 올라가며, 리셋 전 미래 사용량은 예측하지 않습니다.</p></div>
+<div class="mock-notes"><h3>현재 데이터 확인</h3><p>지금은 창별 최신 채택값만 보관합니다. <code>plan_usage.go:21–40, 59–66, 101–103</code><br>Codex도 최신 항목으로 교체합니다. <code>plan_usage_probe.go:60</code></p><p>따라서 오른쪽의 누적 추세선에는 아직 없는 시계열 이력이 필요합니다. 저장 방식은 이 시안의 범위가 아닙니다.</p></div>
+<div class="mock-empty"><svg viewBox="0 0 50 30" aria-hidden="true"><path d="M2 27L48 3" fill="none" stroke="#a2a6ad" stroke-dasharray="3 3"/><circle cx="23" cy="20" r="3" fill="#7aa2ff"/></svg><span><b>이력이 없을 때</b><br>현재 관측점 + 기준선만 표시 · 실제 추세선은 만들지 않음</span></div>
+<div class="mock-notes"><h3>오래된 값 표시</h3><p>30분을 초과한 값은 시계·점선·중립색으로 구분합니다.</p><p>아래 행의 비교 사용률은 마지막 관측 시점에 고정합니다.</p></div>
+</section>
+<section class="mock-section" aria-labelledby="popover-title">
+<h2 id="popover-title"><span class="mock-letter">B</span>Plan usage · 시간별 상세</h2>
+<p class="mock-caption">A-2의 상세 예시 · 5시간 초과 / 주간 여유</p>
+<aside class="usage-pop" aria-label="Plan usage 개선 시안">
+<div><div class="usage-heading"><b class="u-pop-title">Plan usage</b><button class="usage-close" disabled aria-label="닫기 예시">✕</button></div><p class="u-pop-sub">예시 기준: 11/15 00:00 · 누적 사용량 (%)</p></div>
+<div class="u-chart-legend"><span><i class="u-swatch"></i>관측 사용률</span><span><i class="u-swatch ideal"></i>균등 사용 기준</span><span>● 현재 값</span></div>
+<div id="usage-accounts"></div>
+<div class="u-history-note"><strong>가상 이력으로 그린 디자인 예시</strong><br>현재 구현은 최신 값만 보관합니다. 실제 추세선에는 이력 데이터가 필요합니다.</div>
+</aside>
+</section>
+</main>
+<footer class="mock-end">원본: dashboard.css의 .rail / .rfoot / .rpop, usage.css와 usage.js의 사용량 UI · 외부 요청·실제 계정 조회 없음</footer>
+</div>
+<script>
+(function () {
+ 'use strict';
+ const icon = (h, stale) => `<span class="${stale ? 'u-age' : ''}"><span class="hi ${h}">${h === 'claude' ? 'C' : 'X'}</span>${stale ? '<svg class="i"><use href="#i-clock"/></svg>' : ''}</span>`;
+ const column = (key, used, delta) => `<span class="u-column" aria-label="${key === '5h' ? '5시간' : '주간'}: 현재 ${used}%, 비교 ${delta > 0 ? '+' : '−'}${Math.abs(delta)}%"><span class="u-current"><span class="u-key">${key}</span><span class="u-number">${used}<span class="u-percent">%</span></span></span><span class="u-pace ${delta > 0 ? 'over' : 'under'}">${delta > 0 ? '+' : '−'}${Math.abs(delta)}%</span></span>`;
+ const harness = (h, values, stale = false) => `<span class="usage-harness ${stale ? 'u-stale' : ''}" title="${h === 'claude' ? 'Claude' : 'Codex / GPT'}${stale ? ' · 42분 전 값, 당시 속도 차이' : ''}">${icon(h, stale)}<span class="u-columns">${values.map(v => column(...v)).join('')}</span></span>`;
+ const variants = [
+  { id:'normal', title:'A-1 · 정상 / 시간 대비 여유', body:harness('claude', [['5h',20,-13],['주',53,-13]]) + harness('codex', [['주',38,-7]]), note:'C: 5시간·주간 두 열 · X: 주간 한 열. 각 열 위에는 현재값, 아래에는 작은 비교값을 표시합니다.' },
+  { id:'over', title:'A-2 · 속도 초과', body:harness('claude', [['5h',64,31],['주',53,-13]]) + harness('codex', [['주',38,-7]]), note:'5시간 사용률 64%, 경과율 33% → +31%. 양수만 빨강으로 강조합니다.' },
+  { id:'stale', title:'A-3 · 오래된 값', body:harness('claude', [['5h',20,-13],['주',53,-13]], true) + harness('codex', [['주',38,-7]]), note:'C는 42분 전 값: 시계 + 점선 밑줄. 아래 비교값은 마지막 관측 시점에 고정합니다.' },
+  { id:'weekly', title:'A-4 · 주간 한도만 있는 하네스', body:harness('codex', [['주',38,-7]]), note:'주간 한 열만 표시합니다. 위에는 38%, 아래에는 더 작은 −7%. “주”로 창을 구분합니다.' }
+ ];
+ document.getElementById('footer-variants').innerHTML = variants.map(v => `<article class="mock-variant" data-variant="${v.id}"><h3>${v.title}</h3><div class="rail mock-rail"><div class="mock-rail-context">devenv<div class="mock-selected"><span class="mock-dot"></span>sweatradartakingoverwrite</div></div><div class="rfoot"><button class="usage-toggle" type="button" aria-label="Plan usage 표시 예시">${v.body}</button></div></div><p class="mock-description">${v.note}</p></article>`).join('');
+ const chart = (w, id) => {
+  const x = t => 24 + t * 246;
+  const y = p => 88 - p * .76;
+  const px = x(w.elapsed), py = y(w.used), iy = y(w.elapsed * 100);
+  const points = w.samples.map(([t,p]) => `${x(t).toFixed(2)},${y(p).toFixed(2)}`).join(' ');
+  const last = w.samples[w.samples.length - 1];
+  if (last[0] !== w.elapsed || last[1] !== w.used) throw new Error('Fixture end must match current point');
+  return `<svg class="u-chart" viewBox="0 0 288 113" role="img" aria-labelledby="${id}"><title id="${id}">${w.name}: 사용률 ${w.used}%, 시간 경과 ${Math.round(w.elapsed*100)}%, 속도 차이 ${w.delta > 0 ? '+' : '−'}${Math.abs(w.delta)}퍼센트포인트. 그래프는 가상 이력입니다.</title><line class="grid" x1="24" x2="270" y1="12" y2="12"/><line class="grid" x1="24" x2="270" y1="50" y2="50"/><line class="grid" x1="24" x2="270" y1="88" y2="88"/><text x="0" y="15">100</text><text x="5" y="91">0</text><path class="ideal" d="M24 88L270 12"/><line class="now" x1="${px}" x2="${px}" y1="12" y2="88"/><polygon class="area" points="24,88 ${points} ${px},88"/><polyline class="actual" points="${points}"/><line class="gap ${w.delta > 0 ? 'over-gap' : ''}" x1="${px}" x2="${px}" y1="${py}" y2="${iy}"/><circle class="gap-end" cx="${px}" cy="${iy}" r="2"/><circle class="dot" cx="${px}" cy="${py}" r="4"/><text x="24" y="106">${w.startLabel}</text><text x="${px}" y="106" text-anchor="middle">현재</text><text x="270" y="106" text-anchor="end">${w.endLabel}</text></svg>`;
+ };
+ const accounts = [
+  { h:'claude', name:'Claude', plan:'', source:'Claude push', windows:[
+   { name:'5-hour', used:64, elapsed:1/3, delta:31, reset:'11/15 03:20', remaining:'3시간 20분 후 리셋', age:6, startLabel:'22:20', endLabel:'03:20', samples:[[0,0],[.05,4],[.1,12],[.15,16],[.21,30],[.26,45],[.3,60],[1/3,64]] },
+   { name:'Weekly', used:53, elapsed:.66, delta:-13, reset:'11/17 (화) 09:07', remaining:'2일 9시간 후 리셋', age:5, startLabel:'11/10', endLabel:'11/17', samples:[[0,0],[.08,5],[.16,11],[.23,17],[.33,25],[.41,30],[.49,40],[.56,46],[.66,53]] }
+  ]},
+  { h:'codex', name:'Codex / GPT', plan:'pro', source:'via Codex CLI', windows:[
+   { name:'Weekly', used:38, elapsed:.45, delta:-7, reset:'11/18 (수) 20:24', remaining:'3일 20시간 후 리셋', age:0, startLabel:'11/11', endLabel:'11/18', samples:[[0,0],[.07,3],[.14,9],[.2,11],[.26,19],[.32,24],[.39,30],[.45,38]] }
+  ]}
+ ];
+ document.getElementById('usage-accounts').innerHTML = accounts.map((a, i) => `<section class="usage-account"><div class="usage-heading">${icon(a.h, false)}<b>${a.name}</b><span class="usage-plan">${a.plan}</span></div>${a.windows.map((w, j) => `<article class="u-window"><div class="u-window-head"><span class="u-window-name">${w.name}</span><span class="u-window-number">${w.used}<small>%</small></span><span class="u-delta ${w.delta > 0 ? 'over' : 'under'}">(${w.delta > 0 ? '+' : '−'}${Math.abs(w.delta)}%)</span></div><div class="u-reset"><strong>${w.remaining}</strong><span>· ${w.reset}</span></div>${chart(w, `chart-${i}-${j}`)}<div class="u-observed"><span>시간 경과 ${Math.round(w.elapsed*100)}%</span><span>· value from ${w.age} min ago</span></div></article>`).join('')}<div class="u-source">${a.source}</div></section>`).join('');
+})();
+</script>
+</body>
+</html>
