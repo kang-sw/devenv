@@ -83,6 +83,7 @@ type RingEntry struct {
 	// Reason is a turn's end reason (Event.Reason), absent when its
 	// turn_end named none.
 	Reason string `json:"reason,omitempty"`
+	SummaryHistory *SummaryHistory `json:"summaryHistory,omitempty"`
 	// Tools is a tools row's summary.
 	Tools *ToolSummary `json:"tools,omitempty"`
 	// Direction, Peer, and Title describe a mail line; HistoryKey is the
@@ -191,6 +192,10 @@ func writeRingEntry(dir string, entry RingEntry) error {
 		return err
 	}
 	name := nextRingStamp().Format(ringStampLayout) + "-" + hex.EncodeToString(suffix[:]) + ".json"
+	return writeRingRaw(dir, name, raw)
+}
+
+func writeRingRaw(dir, name string, raw []byte) error {
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create conversation ring temp file: %w", err)

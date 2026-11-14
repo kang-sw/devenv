@@ -278,6 +278,8 @@ type Activity struct {
 // Lead is the snapshot's root entry.
 type Lead struct {
 	Activity
+	// ReasoningSummary is lead-only; never part of shared subagent Activity.
+	ReasoningSummary *ReasoningSummary `json:"reasoningSummary,omitempty"`
 	// TurnStartedAt is the current turn's start; absent while idle.
 	TurnStartedAt int64 `json:"turnStartedAt,omitempty"`
 	// TurnOrigin is what started the current turn (terminal, whiteboard,
