@@ -39,8 +39,10 @@ or daemon activation authority in this authoring pass.
 - Intended compatibility tier: T0. MAIN permits prospective provenance only
   if its design survives old writers under T0. Otherwise deliver the confirmed
   713=b hover behavior alone and return prospective provenance as a
-  compatibility question. No optional field, process-only mapping, retention
-  policy, migration, or schema mechanism is selected.
+  compatibility question. No persistent T0 provenance path is evidenced yet,
+  so the current delivery slice is 713=b only, with no new field or transient
+  mapping. The accepted actual relative-age contract is deferred where proof
+  requires that unresolved provenance design, not deleted or implemented.
 - Retain existing 617 recap/log inline-time behavior rather than implement it
   twice. Repair it only if current behavioral verification finds it missing:
   author mark and time (owner example `04:08 · 3시간 전`) lead the body inline,
@@ -94,7 +96,7 @@ response included inline recap styling, not proof that all recap entries
 visually satisfy 617. No stable live recap geometry or hover interaction was
 verified.
 
-## Timestamp evidence and compatibility boundary
+## Remaining gap: provenance compatibility
 
 For a known actual mutation batch, existing `ChangedAt` is its actual edit
 time and covers all its current marks; a separate timestamp per block is not
@@ -135,19 +137,22 @@ contract remains required wherever actual batch provenance is established;
 
 ### Phase 1: Relative marker hover without layout movement
 
-After the lead completes the design/ready gate, implement the approved marker
-hover contract: slight thickening, relative age for proven actual edit times,
-and exact `변경 시각 모름` for unknown/backfilled times. Prospective provenance
-is included only if its design passes the old-writer T0 boundary above;
-otherwise deliver 713=b alone and return the compatibility question without
-selecting a persistence or process-only mechanism. Preserve existing 617
-inline author/time placement; do not broaden this into a history redesign.
+After the lead completes the design/ready gate, implement the approved 713=b
+slice: slight hover thickening and exact `변경 시각 모름` for unknown/backfilled
+or otherwise unproven actual edit times. Include no new persistent field or
+transient mapping. Return the unresolved prospective provenance option as a
+compatibility gap, without another policy question or mechanism selection.
+The original relative actual-age contract remains accepted but its
+provenance-dependent delivery is deferred under MAIN's direction, not claimed
+implemented by this slice. Preserve existing 617 inline author/time placement;
+do not broaden this into a history redesign.
 
 Verification boundary: before/after headless captures at 1280/800/360 widths,
 including green/blue/red and end-deletion marks, multiline content, stale marks,
 framed and unframed bodies, and inline recap/log placement. Exercise relative
-ages from minutes through years wherever provenance is proven, and assert
-exact `변경 시각 모름` plus thickening for unknown/backfilled times. Assert
+ages from minutes through years when the deferred provenance-dependent work
+is authorized; for the current 713=b slice, assert exact `변경 시각 모름` plus
+thickening for unknown/backfilled or otherwise unproven actual times. Assert
 that unrelated topic activity does not change marker age, that hover contains
 no clock/date, and that colors, anchors, content geometry and scroll offsets
 are unchanged. Run the project's relevant whiteboard Go tests and independent
