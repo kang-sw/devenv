@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 87ca94d4f3aee8fb
 sage-review-completeness-reviewed: 87ca94d4f3aee8fb
+completed: 2026-11-14
 ---
 
 # Dashboard rail: repair session and branch/worktree drag ordering
@@ -246,3 +247,57 @@ Verification:
   headless cases for the user-visible regression. Run the focused Go/Node tests
   and the rail harness under isolated temporary runtime paths, recording actual
   failures separately from unavailable verification.
+
+### Result (ebc2555e8) - 2026-11-14
+
+- Reproduced the failures before choosing the repair. A dragged parent landing
+  after an expanded parent was incorrectly redirected before its first child,
+  then refused as too deep; this was not a general index-adjustment defect.
+  Worktree headers did not admit a drag or hold swaps. New sessions sorted
+  newest-first, while saved merging independently put unlisted ordinary rows
+  ahead of saved rows. Baseline evidence: `d73e64281` and
+  `/tmp/rail-drag-baseline-{first,fixture-check,preservation}.log`.
+- `e480c257a` repairs parent-unit placement without changing the existing drop
+  geometry, and adds schema-1 optional `worktree_order` plus workspace-qualified
+  `wtmove`. Root and empty groups move as whole subtrees with optimistic undo,
+  swap holding/refinding and generation protection. Saved absent paths survive
+  pruning and every existing operation; group-only state blocks legacy import.
+  Visible no-ops retain absent slots, and actual moves splice the full saved
+  sequence after appending unlisted groups in fallback order. Unknown fields
+  and old layout fixtures remain valid.
+- `c5abd306f` makes base registration sorting oldest-first and gives only
+  ordinary unlisted live rows a tail rank when merging saved order. Parent
+  units, star sections, orphan inherited/head ranks, ended ordering, revival,
+  and existing operation defaults remain covered. Newcomers append in their
+  own group, without changing membership or child placement.
+- Technical decisions: keep group-specific ordering helpers/tests in adjacent
+  `rail_layout_worktrees.go` / `rail_layout_worktrees_test.go` rather than
+  expanding the session-layout core further; target group headers by midpoint
+  while moving their entire subtrees; use the existing repository icon as a
+  small accessible `.wtroot` marker without changing rail indentation.
+- Verification: focused Go layout/Node-backed rail tests passed; full
+  `go test ./internal/wsdashboard -count=1 -timeout=10m` passed (129.644s),
+  full output `/tmp/rail-admission-648/full.log`. Final source-only
+  `go build -o /tmp/rail-drag-final-ws-mcp ./cmd/ws-mcp`, Node syntax checks
+  for both assets and the harness, and `git diff --check` passed. Windows test
+  binary cross-compilation passed; Windows execution was not performed.
+- All 34 isolated Chromium scenarios passed, including adjacent/non-adjacent
+  parent up/down, across-parent children, worktree root/empty up/down, refused
+  requests and undo, stale generations, sequential admissions with/without
+  manual order in plain/worktree groups, workspace up/down persistence, menus,
+  navigation and emulated touch. Full output: `/tmp/rail-drag-core-full.log`.
+  Root captures: `/tmp/rail-drag-core-shots/worktree-up-root-marker.png` and
+  `/tmp/rail-drag-core-shots/worktree-down-root-marker.png`; the latter was
+  inspected for the visible root marker and intact parent/child units. This
+  ticket supplies no approved visual reference, so no reference comparison
+  applies.
+- Earlier failures were classified before correction: the fixture needed to
+  await the actual 30-second registry poll; Go test authoring had an incorrect
+  field access, an ended-display assumption, and intentional old ordering
+  expectations. Tests were corrected against source and the approved contract,
+  not weakened to accommodate broken behavior.
+- Independent one-pass lite review was clean over `969c98158..ebc2555e8`:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@9a21da5a/review-paths/cd06e270-01-rail-drag-lite.md`.
+  No unresolved findings. Headed-browser, physical-touch and Windows-runtime
+  verification were omitted; no live/shared daemon, launcher, release or push
+  was used. Implementation branch is retained for lead-owned integration.
