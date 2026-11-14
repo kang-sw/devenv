@@ -408,6 +408,114 @@ func TestPiMapperPromptAnswersAndDialogs(t *testing.T) {
 	}
 }
 
+func TestPiMapperCommandAnswerDoesNotSettleActiveRun(t *testing.T) {
+	for _, tc := range []struct {
+		name, line, commandErr string
+	}{
+		{"handled prompt", `{"id":"p1","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}`, ""},
+		{"refused prompt", `{"id":"p1","type":"response","command":"prompt","success":false,"error":"Agent is already processing"}`, "prompt refused: Agent is already processing"},
+		{"completed compact", `{"id":"p1","type":"response","command":"compact","success":true}`, ""},
+		{"refused compact", `{"id":"p1","type":"response","command":"compact","success":false,"error":"busy"}`, "compact refused: busy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := piSpec(t, `{"backend":"pi"}`)
+			spec.Lead = &LeadSpec{}
+			m, r := newPiMapper(spec), &recordedReplies{}
+			m.mapLine([]byte(`{"type":"agent_start"}`), r)
+			events := m.mapLine([]byte(tc.line), r)
+			var commandErr string
+			for _, ev := range events {
+				if ev.TurnEnd || ev.TurnError != "" || ev.Notice != "" || ev.Alert != nil || ev.Live != nil {
+					t.Fatalf("a command answer must not settle, fail, or add conversation output to the active run: %+v", events)
+				}
+				commandErr += ev.CommandError
+			}
+			wantEvents := 0
+			if tc.commandErr != "" {
+				wantEvents = 1
+			}
+			if len(events) != wantEvents || commandErr != tc.commandErr || !slices.Equal(r.answers, []string{"p1"}) {
+				t.Fatalf("command response = %+v, answers %v; want command error %q", events, r.answers, tc.commandErr)
+			}
+			settled := m.mapLine([]byte(`{"type":"agent_settled"}`), r)
+			if len(settled) == 0 || !settled[len(settled)-1].TurnEnd || settled[len(settled)-1].TurnError != "" {
+				t.Fatalf("only native settlement ends the active run, without the command refusal: %+v", settled)
+			}
+			idle := m.mapLine([]byte(tc.line), r)
+			if len(idle) == 0 || !idle[len(idle)-1].TurnEnd || idle[len(idle)-1].TurnError != tc.commandErr {
+				t.Fatalf("the same command answer still settles an idle command: %+v", idle)
+			}
+		})
+	}
+}
+
+func TestPiMapperReplayDistinguishesUnknownFromIdle(t *testing.T) {
+	for _, tc := range []struct {
+		name, boundary string
+		lost, gap      bool
+		wantEnd        bool
+	}{
+		{"complete command-only replay", "", false, false, true},
+		{"wrapped replay", "", true, false, false},
+		{"gap in replay", "", false, true, false},
+		{"start after gap", `{"type":"agent_start"}`, true, true, false},
+		{"settlement after gap", `{"type":"agent_settled"}`, true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := piSpec(t, `{"backend":"pi"}`)
+			spec.Holder = &holderChild{id: "existing"}
+			m, r := newPiMapper(spec), &recordedReplies{}
+			p := newStreamProcess(m, piProtocol{})
+			// Even before replay loss is reported, an attached mapper does
+			// not know that a surviving command-only answer means idle.
+			line := []byte(`{"type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}`)
+			if events := m.mapLine(line, r); len(events) != 0 {
+				t.Fatalf("unknown native state must not settle: %+v", events)
+			}
+			if tc.gap {
+				m.nativeProbes = map[string]uint64{"stale": m.nativeGeneration}
+				p.deliver(Event{ReplayGap: true})
+				m.mapLine([]byte(`{"type":"response","id":"stale","command":"get_state","success":true,"data":{"isStreaming":false}}`), r)
+			}
+			if tc.boundary != "" {
+				m.mapLine([]byte(tc.boundary), r)
+			}
+			p.deliver(Event{ReplayDone: true, ReplayLost: tc.lost})
+			events := m.mapLine(line, r)
+			ended := len(events) > 0 && events[len(events)-1].TurnEnd
+			if ended != tc.wantEnd {
+				t.Fatalf("events %+v; want command-only completion %v", events, tc.wantEnd)
+			}
+		})
+	}
+}
+
+func TestPiMapperNativeProbeRespectsNewerBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, boundary, state string
+		wantEnd               bool
+	}{
+		{"lost start", "", `{"isStreaming":true,"isCompacting":false}`, false},
+		{"newer start", `{"type":"agent_start"}`, `{"isStreaming":false}`, false},
+		{"newer settlement", `{"type":"agent_settled"}`, `{"isStreaming":true}`, true},
+		{"compact only", "", `{"isStreaming":false,"isCompacting":true}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, r := newPiMapper(piSpec(t, `{"backend":"pi"}`)), &recordedReplies{}
+			m.nativeProbes = map[string]uint64{"probe": 0}
+			if tc.boundary != "" {
+				m.mapLine([]byte(tc.boundary), r)
+			}
+			m.mapLine([]byte(`{"type":"response","id":"probe","command":"get_state","success":true,"data":`+tc.state+`}`), r)
+			events := m.mapLine([]byte(`{"type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}`), r)
+			ended := len(events) > 0 && events[len(events)-1].TurnEnd
+			if ended != tc.wantEnd || len(m.nativeProbes) != 0 {
+				t.Fatalf("events %+v, pending probes %v; want end %v", events, m.nativeProbes, tc.wantEnd)
+			}
+		})
+	}
+}
+
 // TestPiMapperSteerAnswersAndTakenMessages: a non-lead process's steer
 // response is the steer's answer, a refusal named (a child's report then
 // goes as a turn), and a user message its run took is named with the text
