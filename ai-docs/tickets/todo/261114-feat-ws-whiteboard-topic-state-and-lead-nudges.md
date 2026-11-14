@@ -48,6 +48,17 @@ implementation.
 - **Crash delivery preference (731).** A possible duplicate after a crash is
   accepted rather than a missed nudge. This does not require an exactly-once
   delivery protocol.
+- **Alive-only nudge production (748).** Emit timed nudges only while the
+  owning lead is alive. The scheduler must not enqueue to process-stopped or
+  closed hosted leads: ordinary mailbox delivery can restart a stopped open
+  conversation. Preserve deadlines/checkpoints while not alive and catch up
+  when alive again. Unknown process/snapshot evidence suppresses production;
+  a key, board, mail watcher or fresh heartbeat alone does not prove life.
+- **Folder-copy source cessation (749).** Apply the existing source-cessation
+  precondition to board and nudge-scheduler writing before a folder-copy
+  takeover. The destination inherits deadlines, ignores copied notification
+  receipts scoped to the source reply-id, and sends one catch-up when alive.
+  This is not a new transfer command, lease or code-enforced authority switch.
 - **Compatibility tier: T0.** Owner 707 resolves the linked-ticket conflict by
   limiting removal to UI/playbook exposure while preserving existing
   argument/store/query behavior. MAIN's intended tier for all three phases
@@ -86,6 +97,34 @@ nudges after a crash over missing a nudge. These answers settle the Phase 3
 policy holds; they do not select public grammar, field shape, Text encoding,
 state authority, or a scheduler implementation.
 
+Owner answer relayed by MAIN at 2026-11-14 13:05:55, verbatim:
+
+> 748=a^"중지"를 말하나요, "닫기"를 말하나요? (아니면 추가할 "재움"?) 근데 생가해보니까 그냥 딱 살아있을 때에만 재촉 타이머가 도는 게 맞아 보이긴 하네요.
+
+748 confirms alive-only nudge production, not a new sleep state. MAIN confirmed
+at 13:09 that the scheduler must not enqueue to stopped or closed hosted leads;
+the existing transport does not suppress their wake. MAIN accepted the cited
+process-evidence gate: for hosted leads, require current owning open runner/row,
+HostStopped false, positive associated harness HostPID and a live process; for
+terminal Pi/Claude/Codex/manual leads, require valid own-key/session/root
+association and a positive recorded HarnessPID with live-process evidence.
+Unknown, missing or contradictory snapshot/PID evidence suppresses nudges.
+Heartbeat-only inference is excluded. Existing PID checks do not authenticate
+PID reuse, and process exit can race enqueue; document/test those limitations,
+not a stronger delivery-time guarantee. Preserve deadlines/checkpoints while
+not alive and catch up when alive again.
+
+Owner answer relayed by MAIN at 2026-11-14 13:15:09, verbatim:
+
+> 749=a
+
+749 confirms source cessation first for folder-copy takeover, applying the
+existing playbook obligation to the nudge scheduler. The destination inherits
+deadlines, ignores copied source-reply-id receipts, and sends one catch-up when
+alive. No new transfer command, lease or code-enforced switch is authorized.
+The stopped/closed-lead and copied-source policy holds are answered; exact
+command/schema and scheduler mechanisms remain technical preparation.
+
 Owner idea, approximately 2026-11-14 11:30Z, referring to stalled-triage text
 `서버가 자동으로 판정하게`:
 
@@ -101,14 +140,31 @@ new injection machinery; Phase 3 explicitly reuses mailbox push.
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
 - Keep this ticket in `todo/`. Capture runs no fact-populator, Sage review,
   promotion, independent implementation review, runtime activation, or source
   changes. Readiness and implementation belong to the lead's later steps.
 - Public grammar, exact enum strings, ETA/owner encoding and the technical
   persistence mechanism remain unselected. Timer scope, per-topic debounce,
   restart continuity and crash delivery preference are settled by 728-731;
-  do not retain them as open policy holds or infer encoding from state names
+  alive-only production and copied-source cessation are settled by 748-749.
+  Do not retain these as open policy holds or infer encoding from state names
   or illustrative log/extension text.
+- Enforce the alive-only gate before nudge enqueue, not by assuming mailbox
+  transport will suppress a wake. Process-stopped/closed hosted leads and
+  unknown/missing/contradictory process evidence are ineligible. Preserve
+  deadlines/checkpoints without advancing notification watermarks while
+  ineligible; catch up when alive. Record PID-reuse and enqueue/stop race
+  limits. Do not turn a dashboard heartbeat/stale-display heuristic into
+  process proof or introduce a new host lifecycle API.
+- Folder-copy takeover requires source board/scheduler cessation first. Keep
+  destination deadline continuity, reply-id-scoped receipt handling and one
+  catch-up; no new transfer command/lease or code-enforced switch is in scope.
+  This remains distinct from existing same-key hosted/terminal handoff.
 - The optional runtime field must accommodate existing topics without that
   field. The playbook's obligation to declare state is distinct from making
   a new field mandatory in old calls or old stores.
@@ -206,6 +262,147 @@ runtime tests. Line references below address that develop object.
   Ticket discovery returned an origin timeout/cached-ownership advisory;
   local search results do not establish origin-wide absence of related work.
 
+### Current static verification (2026-11-14)
+
+All source observations above were rechecked at `4590981bf492403a217402839522a613d91bb7f9`
+on `feat/topic-state-task5`. `git diff 9854ff350fa1b0eccfb5c71649c5190c405925b9 HEAD -- agents-plugin agents-plugin-tool agents-plugin-wsflow`
+returned no product changes. The full external technical proposal, including its
+addendum, was read as nonauthoritative preparation; its initial Text-protocol
+recommendation and its now-settled timer-policy questions are not new authority.
+No build, test, browser, probe, provider, or runtime verification was performed.
+
+- **Grammar and caller authority:** `agents-plugin-tool/internal/wswhiteboard/commands.go#L22-L40`
+  declares the existing topic group and command table, with no state or ETA
+  command. `agents-plugin-tool/internal/mcp/server.go#L752-L757` gates board
+  tools to top-level leads. `agents-plugin-tool/internal/wswhiteboard/store.go#L582-L675`
+  clones, dispatches in order, and refuses the whole batch on any problem.
+  Exact command names, enums, units/ranges, owner representation, repeated
+  declarations, extension validation, transition timestamps, and query projection
+  still need lead technical selection, not inference from the proposal's examples.
+  The related refusal-cost work is not landed in this tree: its per-command
+  mutation decision must not be assumed to be current Apply behavior.
+- **Lifecycle and provenance:** `agents-plugin-tool/internal/wswhiteboard/store.go#L679-L720`
+  withdraws open items on close and emits human-readable close events;
+  `agents-plugin-tool/internal/wswhiteboard/entries.go#L62-L85` separates
+  server events from accepted activity that reopens a topic. Adoption renames
+  logical keys (`agents-plugin-tool/internal/wswhiteboard/topics.go#L207-L233`)
+  while the folder mapping retains history identity
+  (`agents-plugin-tool/internal/wswhiteboard/folders.go#L575-L590`). Whether a
+  close ends an implementing run, what reopen restores, and how old-writer
+  close/reopen events affect new state remain technical lifecycle choices;
+  parsing the existing close Text is not already a machine-state contract.
+- **Persistence candidate, not schema approval:** committed system-log bytes
+  are retained by typed-prefix comparison followed by suffix-only publication
+  (`agents-plugin-tool/internal/wswhiteboard/folders.go#L613-L660`,
+  `agents-plugin-tool/internal/wswhiteboard/folders.go#L790-L839`). Pending
+  recovery instead carries opaque append Data through the unchanged intent
+  envelope (`agents-plugin-tool/internal/wswhiteboard/folders.go#L72-L91`,
+  `agents-plugin-tool/internal/wswhiteboard/folders.go#L280-L287`,
+  `agents-plugin-tool/internal/wswhiteboard/folders.go#L727-L737`). First legacy
+  conversion clones typed State and serializes the entire entry list
+  (`agents-plugin-tool/internal/wswhiteboard/folders.go#L309-L333`,
+  `agents-plugin-tool/internal/wswhiteboard/folders.go#L648-L655`): unknown
+  legacy members already lost in decoding are not recovered. These are three
+  distinct boundaries. New readers must also retain any selected known payload
+  through `State.clone` (`agents-plugin-tool/internal/wswhiteboard/store.go#L350-L361`).
+  Payload shape/versioning, fold authority, absent/malformed/unsupported-state
+  handling, query shape, and durable notification bookkeeping remain unselected;
+  neither optional Entry metadata nor JSON inside Text is approved here.
+- **Scheduler and delivery:** no topic ETA mechanism was found by
+  `rg -n '\b(ETA|TopicState|eta_minutes|overdue|awaiting-confirmation)\b' agents-plugin-tool/internal/{wswhiteboard,wsdashboard,mcp} --glob '*.go' --glob '!**/*_test.go'`
+  (only unrelated tracker overdue text matched). There are daemon scheduling
+  precedents, not an ETA scheduler: `agents-plugin-tool/cmd/ws-mcp/mailbox_sweep.go#L15-L39`
+  runs a queue sweep; `agents-plugin-tool/internal/wsdashboard/ack_check.go#L245-L332`
+  manages answer-check timers and writes its watermark before inbox send. That
+  answer-check ordering can lose a nudge and is not evidence for 731's preferred
+  duplicate-over-loss behavior. `agents-plugin-tool/internal/mcp/pi_tools.go#L497-L519`
+  supplies the existing PostSystem-then-Wake precedent;
+  `agents-plugin-tool/internal/mcp/lead_mail.go#L80-L183` watches and claims hosted
+  lead mail. Folder commit and reply-registry enqueue use separate locks and
+  publication paths, not one transaction. Scheduler ownership/discovery, restart
+  checkpoints, send/retry ordering, full-list debounce accounting, hourly clock
+  anchoring, and simultaneous close/extension revalidation still need technical
+  selection. Existing folder lifetime is not proof of a live recipient
+  (`ai-docs/manuals/ws-mcp.md#L57-L81`); 748-749 now settle alive-only production
+  and copied-source cessation, without selecting a new scheduler/host API.
+  Existing mailbox delivery is the required reuse boundary, not authorization
+  for a new injection protocol.
+- **Alive gate and hosted lifecycle:** source tracing distinguishes settings
+  stop from close: buttons post `/stop` and `/close`
+  (`agents-plugin-tool/internal/wsdashboard/assets/dashboard.js#L8217-L8235`,
+  `#L8268-L8283`); Stop ends only the process
+  (`internal/wsagent/runner.go#L857-L865`, `#L3038-L3050`), while an open lead's
+  mail watcher survives (`#L470-L476`, `#L1525-L1538`). PostSystem/Wake can
+  therefore reach `mailChanged -> kick -> startProcess` and restart it
+  (`#L1361-L1389`, `#L1799-L1826`). Close ends the current lifetime and its mail
+  watch, but explicit guarded hosted Reopen exists
+  (`internal/wsagent/handoff.go#L231-L285`); do not equate close with process
+  stop or claim current hosted close is irreversible. The separate UI-copy
+  discrepancy is captured by `261114-bug-ws-hosted-close-copy-conflicts-with-reopen`.
+  Hosted positive-process evidence is HostStopped false plus positive HostPID
+  and ProcessAlive (`internal/wsdashboard/pageview.go#L515-L522`), with owning
+  runner/row association. Terminal HarnessPID is launcher-derived
+  (`agents-plugin/bin/ws-mcp-launcher.py#L1864-L1866`;
+  `internal/mcp/hosted_login.go#L37-L63`) and recorded in registration
+  (`internal/mcp/dashboard_sessions.go#L332-L338`). Registration.Live is only a
+  heartbeat display rule (`internal/wsdashboard/registry.go#L202-L214`);
+  idle heartbeat cessation and MCP-loop EndedAt do not alone prove harness
+  exit (`internal/mcp/dashboard_sessions.go#L419-L475`). ProcessAlive is not
+  PID-start identity authentication (`internal/wsstate/process_alive.go#L3-L15`,
+  `process_alive_unix.go#L7-L10`). These observations support the approved
+  alive gate and its limits, not an executed end-to-end verification.
+- **Folder-copy authority:** the existing playbook requires source cessation,
+  destination backup/copy, then HTML regeneration
+  (`agents-plugin/rsrc/whiteboard/whiteboard.md#L25-L29`). Each caller still
+  resolves its board from its own root/key-derived reply-id
+  (`agents-plugin-tool/internal/mcp/whiteboard_store.go#L16-L20`), under its
+  directory's folder lock (`internal/wswhiteboard/folders.go#L167-L193`). Copy
+  does not revoke the source key or redirect later source writes. Thus 749
+  applies an existing caller obligation to scheduler cessation; it is not
+  evidence of a mechanically enforced full switch. Existing same-key handoff
+  instead changes registration ownership under lock
+  (`internal/wsagent/handoff.go#L13-L27`, `#L108-L132`, `#L180-L229`). Paths
+  abbreviated as `internal/` in these two bullets are under `agents-plugin-tool/`.
+- **Verification seams:** existing tests include `TestTopicTicketsRoundTrip`,
+  `TestTopicTicketsAreQuietMetadata`, and `TestTopicTicketsSurviveTheFolderStore`
+  in `agents-plugin-tool/internal/wswhiteboard/topic_tickets_test.go`;
+  `TestFolderImmutableVersionsAndLog`, `TestFolderRecoveryEveryBoundary`, and
+  `TestFolderRecoveryRepeatedPartialAppend` in
+  `agents-plugin-tool/internal/wswhiteboard/folders_test.go#L256-L447`;
+  and `TestLeadMailboxDeliversClaimedMailOnce` in
+  `agents-plugin-tool/internal/mcp/lead_mail_test.go#L106-L220`.
+  They provide reuse seams, not mixed-version state or overdue-delivery coverage.
+  The future matrix must distinguish old text/new daemon, new command/old daemon
+  refusal, old writer/new committed log, old recovery/new pending bytes, and
+  legacy conversion. Controlled-clock eligibility/debounce/restart/crash fixtures
+  and actual supported-host queue-to-turn checks remain unexecuted requirements.
+  Phase 1 also needs playbook reconciliation at
+  `agents-plugin/rsrc/whiteboard/whiteboard.md#L108-L116` and
+  `agents-plugin/rsrc/whiteboard/whiteboard.md#L243-L247`, plus the linked-ticket
+  UI assertions revised without weakening command/store/query assertions.
+
+## Prior Decisions
+
+- 261113-feat-ws-whiteboard-topic-panels-and-log (2026-11-13, commit 972766ab): "Commit exact bytes and append offsets under one folder lock; replay interrupted writes idempotently before any consumer reads authority." — bearing: constrains
+- 261112-feat-ws-whiteboard-topic-tickets-sticky-head (2026-11-13, commit c69946c0): "261112-feat-ws-whiteboard-topic-tickets-sticky-head: closed" — bearing: constrains
+- 261110-feat-ws-dashboard-headless-lead-sessions (2026-11-11, commit be127052): "A hosted lead has no named inbox (its spawn drops the identity), so only its reply-id queue is ever drained." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin/rsrc/whiteboard/whiteboard.md, wsflow mirror, agents-plugin-tool/internal/wswhiteboard/, internal/mcp/lead_mail.go, internal/wsmailbox/replyid.go |
+| scope.surface | cross-module | shared playbooks/UI, whiteboard command/query/store contracts, daemon scheduling and mailbox delivery |
+| scope.new_public_symbol | unknown | optional command/field is required, but no exported Go symbol or public spelling has been selected |
+| scope.new_type_contract | yes | Phase 2 optional state and Phase 3 reasoned cumulative ETA extensions require new command/data contracts; exact shape remains unselected |
+| scope.test_surface | existing | agents-plugin-tool/internal/wswhiteboard/topic_tickets_test.go, folders_test.go, entries_test.go, nudge_test.go; internal/mcp/lead_mail_test.go; new scheduler fixture location unselected |
+| complexity.reuse_points | confirmed | read EntrySystem/event/LatestAgent, FolderStore append/replay, Outcome.Info, PostSystem and LeadMailbox Watch/Drain |
+| complexity.side_effect_risk | high | durable state and timers enqueue unsolicited lead turns across restart and concurrent topic changes |
+| risk.correctness | high | transition/lifecycle authority, mixed-writer preservation, debounce accounting and crash-ordering implementation remain unselected; alive-only/source-cessation policies are settled |
+| risk.fit | high | state must fit immutable history and existing caller/mailbox boundaries without adopting a Text protocol or competing authority implicitly |
+| risk.test | high | existing fixtures do not establish new-state skew preservation or controlled-time queue-to-turn behavior across hosts |
+| risk.security_or_contract | high | new public grammar and optional persistent state need T0 proof; mailbox delivery must retain lead identity and existing authority boundaries |
+
 ## Phases
 
 ### Phase 1: Shared state and execution rules; remove the linked-ticket slot
@@ -230,7 +427,7 @@ supersedes 689's ignored-attribute instruction.
 This slice may land independently after queue coordination. These are lead
 obligations, not claims of existing runtime enforcement. Optional machine
 state, structural warnings and timed delivery belong to later phases;
-728-731 do not add timer machinery or state syntax to this slice.
+728-731 and 748-749 do not add timer machinery or state syntax to this slice.
 
 Verification expectations: inspect discussion, waiting, execution and
 live-confirm scenarios; confirm the build/change request is not downgraded,
@@ -270,7 +467,21 @@ exceeded, listing **all** overdue topics on the lead's own board/reply address
 topic triggers an immediate nudge with the full overdue list even if another
 topic was nudged recently (729). Repeat the board's global topic list hourly
 only while any implementing or waiting topic exists on that board; other
-leads' boards do not share this clock or list.
+leads' boards do not share this clock or list. Gate both overdue and hourly
+nudge production on the owning lead being alive (748), using the approved
+process-evidence boundary above. In particular, do not enqueue to a stopped
+or closed hosted lead: existing ordinary mail can restart a stopped open
+conversation. Unknown/missing/contradictory process evidence suppresses enqueue;
+heartbeat/key/board presence alone is insufficient. Preserve deadlines and
+notification checkpoints while not alive, then send one catch-up when alive.
+Document PID-reuse and enqueue/stop race limits rather than promise that
+transport enforces delivery-time liveness.
+
+For folder-copy takeover, require source board/scheduler cessation before the
+copy under the existing playbook obligation (749). The destination inherits
+deadlines, ignores copied receipts belonging to the source reply-id, and sends
+one catch-up when alive. Do not add a transfer command/lease or code-enforced
+switch; do not confuse this copy with same-key hosted/terminal handoff.
 
 Preserve deadlines and last-nudge times across daemon restarts, delivering
 one catch-up overdue list rather than replaying missed intervals (730).
@@ -286,8 +497,15 @@ isolation between lead boards/reply addresses, the hourly eligibility
 condition, no periodic list when neither implementing nor waiting topics
 remain, and reasoned cumulative extensions. Cover restart preservation of
 deadlines and last-nudge times, one catch-up list, and crash/retry behavior
-that tolerates duplicates rather than silently losing a nudge. Exercise actual
-mailbox-to-lead delivery, not only response text. The policy holds are answered;
+that tolerates duplicates rather than silently losing a nudge. Verify no
+scheduler enqueue for stopped/closed hosted leads, dead terminal harnesses,
+or unknown/missing/contradictory process evidence; live idle processes remain
+eligible without relying on heartbeat freshness. Cover automatic idle-stop,
+resume/reopen catch-up, expired-key non-resurrection, PID-reuse limitations and
+enqueue/stop races. Exercise source cessation, destination deadline continuity,
+source-reply-id receipt exclusion and one live-destination catch-up after folder
+copy, separately from same-key handoff. Exercise actual mailbox-to-lead delivery,
+not only response text. The policy holds, including 748-749, are answered;
 the persistence/scheduler mechanism and exact public command/field forms still
 require technical fact/design work before readiness. This capture implements
 no scheduler or delivery protocol.
@@ -297,7 +515,7 @@ no scheduler or delivery protocol.
 - Settle public state/extension command grammar, exact enum and ETA/owner
   encoding, transition timing and validation, and closed/reopened-topic
   lifecycle behavior. These are technical contract choices, not reopened
-  timer-scope or restart-policy questions.
+  timer-scope, restart, alive-only or copied-source policy questions.
 - Establish the eventual optional-state authority and field shape through
   fact/design work. Compare existing immutable system-Entry metadata with
   alternative preservation-safe encodings; retain human-readable history.
@@ -305,15 +523,19 @@ no scheduler or delivery protocol.
   including pending recovery and the distinct legacy-conversion boundary.
   Optional metadata is not automatically T0 merely because it is optional.
 - Design scheduler ownership, durable deadline/last-nudge bookkeeping and
-  mailbox enqueue/retry ordering to implement 728-731. Existing folder and
+  mailbox enqueue/retry ordering to implement 728-731 and 748-749. Keep the
+  approved alive gate and source-cessation obligation without selecting the
+  formed proposal's command/Entry/receipt APIs by implication. Existing folder and
   reply-registry transactions are separate (`folders.go:138-193`;
   `internal/wsmailbox/replyid.go:171-234`); source reuse alone does not establish
   crash-safe delivery or a running ETA scheduler. Use the accepted duplicate
   preference rather than seeking a new exactly-once policy decision.
 - Specify and verify per-topic eligibility/bookkeeping when a full-list nudge
   includes other overdue topics, response-only structural warnings, cumulative
-  extensions, restart catch-up, and actual existing mailbox push/wake delivery
-  across supported lead hosts. These are implementation/verification gaps,
+  extensions, restart/live-resume/copy catch-up, and actual existing mailbox
+  push/wake delivery across supported lead hosts. Verify approved process gates
+  and document PID-reuse/enqueue-stop races; ended-lead and copied-source policy
+  holds are not open. These are implementation/verification gaps,
   not evidence of new runtime enforcement or authorization for a new protocol.
 
 The formed technical proposal remains preparation, not a Decision selecting
