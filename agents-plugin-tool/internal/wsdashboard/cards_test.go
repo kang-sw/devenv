@@ -194,6 +194,9 @@ var store = {}, A, B, C;
 function served() { A = topic("a", 300); B = topic("b", 200); C = topic("c", 200); return [A, B, C, topic("x", 0, true), topic("y", 0, true), reply()]; }
 boot(store, served);
 var c = page.W.open("k", {name: "preview"}, undefined, C);
+var topicRaise = A.querySelector(".t-raise"), cardRaise = c.raiseBtn;
+check("topic and generic raise icons use the upward top-line icon", [topicRaise.html.indexOf("#l-arrow-up-to-line") >= 0, cardRaise.html.indexOf("#l-arrow-up-to-line") >= 0], [true, true]);
+check("topic and generic raise labels remain accessible", [topicRaise.getAttribute("aria-label"), cardRaise.getAttribute("aria-label")], ["js.card.raise", "js.card.raise"]);
 check("new card immediately above a tied origin", names(page.board), ["TOOLBAR", "PINS", "a", "b", "preview", "c", "x/c", "y/c", "reply"]);
 c.bump(B);
 check("reused slot moves above its new origin", names(page.board), ["TOOLBAR", "PINS", "a", "preview", "b", "c", "x/c", "y/c", "reply"]);

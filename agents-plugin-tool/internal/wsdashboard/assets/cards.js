@@ -349,7 +349,7 @@
           b = ibtn("tpin", "pin", wsT("js.card.pin"));
           bar.insertBefore(b, child(bar, "tnote-toggle"));
         }
-        [["t-fold", "chevron-down", "js.card.fold"], ["t-raise", "chevron-up", "js.card.raise"], ["d-max", "maximize-2", "js.card.max"], ["d-min", "minimize-2", "js.card.back"]].forEach(function (a) {
+        [["t-fold", "chevron-down", "js.card.fold"], ["t-raise", "arrow-up-to-line", "js.card.raise"], ["d-max", "maximize-2", "js.card.max"], ["d-min", "minimize-2", "js.card.back"]].forEach(function (a) {
           if (!child(bar, a[0])) bar.insertBefore(ibtn(a[0], a[1], wsT(a[2])), child(bar, "tnote-toggle"));
         });
         sec.setAttribute("data-size", r && r.folded ? "fold" : "base");
@@ -509,7 +509,7 @@
     c.acts = mk("span", "bc-acts");
     c.pinBtn = ibtn("bc-pin", "pin", wsT("js.card.pin"));
     c.foldBtn = ibtn("bc-fold", "chevron-down", wsT("js.card.fold"));
-    c.raiseBtn = ibtn("bc-raise", "chevron-up", wsT("js.card.raise"));
+    c.raiseBtn = ibtn("bc-raise", "arrow-up-to-line", wsT("js.card.raise"));
     c.maxBtn = ibtn("bc-max", "maximize-2", wsT("js.card.max"));
     c.minBtn = ibtn("bc-min", "minimize-2", wsT("js.card.min"));
     c.closeBtn = ibtn("bc-close", "x", wsT("js.card.close"));
