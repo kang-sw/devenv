@@ -15,44 +15,72 @@ Session removal/readdition pairs survive in the dashboard log, but their
 missing timestamps and reasons do not identify a failing record or writer.
 The later bounded registration/key snapshot was valid and matched.
 
-Source inspection establishes a concrete failure path without malformed data:
+MAIN's 2026-11-14 23:22:25 UTC investigation relay, board item (829),
+identified both the index-removal path and the terminal client behavior.
+The following source trace was independently checked at
+`07c94a0954dac86607bf20d524124b2bd4bc5c54`; paths below are relative to
+`agents-plugin-tool/`:
 
-- `internal/wswhiteboard/folders.go:101-123` reads an authoritative board
-  through `FolderStore.locked`. `:169-190` bounds acquisition of the folder
-  lock to two seconds and returns an error on timeout.
-- `FolderStore.UpdateAndPublish` holds that same lock through mutation,
-  commit and publication (`:139-164`). `internal/mcp/session_state.go:625-650`
-  wires the board-output publication callback.
-- `internal/mcp/whiteboard_tools.go:252-274` performs
-  `renderWhiteboard(..., true)` within the locked update callback;
-  `:390-407` does the same for deferred `refreshWhiteboardAfter`.
-  The board-output publisher also writes derived HTML/stamp/embed files
-  while the lock remains held.
-- `internal/mcp/session_layout.go` `loadRecordWith(partAll)` propagates a
-  board-open error. `internal/mcp/dashboard_sessions.go:879-895`
-  `lookupRecord` skips any errored candidate, retries and returns false;
-  it does not distinguish a busy board from a missing session or retain a
-  last-good whole-record fallback.
-- Failed page validity sends `gone` (`internal/wsdashboard/sse.go:468-474`),
-  and `assets/dashboard.js:6341-6345` closes that page stream permanently
-  and displays the banner. Ordinary transport loss instead reconnects.
+- `internal/wswhiteboard/folders.go:101-123` opens the authoritative board
+  under `FolderStore.locked`. The exclusive folder lock has a two-second
+  acquisition timeout (`:167-190`). `UpdateAndPublish` holds that lock through
+  mutation, commit and its publication callback (`:138-165`). The previously
+  traced board-output callback includes rendering/publication work; no lock
+  boundary change has been implemented or selected here.
+- `internal/mcp/session_layout.go:278-281` propagates an `openWhiteboard`
+  error, and `internal/mcp/whiteboard_store.go:54-57` wraps `FolderStore.Open`
+  failures. `internal/mcp/dashboard_sessions.go:879-895` `lookupRecord`
+  collapses every `loadRecordWith(partAll)` error, absent candidate and
+  identity mismatch into a false result after its two lookup attempts.
+- `DashboardSessionSource.ReadSession` returns false on that result
+  (`internal/mcp/dashboard_sessions.go:785-789`). `Index.apply` treats false
+  as removal and deletes an existing indexed session
+  (`internal/wsdashboard/index.go:381-395`). `ForgetSession` clears record,
+  board, history and snapshot caches
+  (`internal/mcp/dashboard_sessions.go:732-748`). `readLane` already retains
+  an entry on an unreadable registration unless removal was requested
+  (`internal/wsdashboard/index.go:351-366`), but this protection does not
+  extend to an unreadable session record.
+- On an already-open page stream, a not-ok re-render sends `gone`
+  (`internal/wsdashboard/sse.go:468-474`). A first-render not-ok result is
+  instead HTTP 404 (`:437-439`); MAIN also traced the other initial request
+  check at `:244-246`. Initial failure does not itself send the open-stream
+  `gone` event.
+- `internal/wsdashboard/assets/dashboard.js:6374` registers `onGone` for
+  `gone`. `onGone` closes the stream, marks it disconnected and displays
+  `js.banner.gone`, without reconnecting (`:6437-6441`). Ordinary transport
+  loss instead schedules `connect` after three seconds (`:6370-6372`).
+  These client coordinates supersede the earlier relay's pre-drift lines.
 
-This is a source-backed busy-board failure hypothesis, not a reproduced
-historical root cause. Two lookup attempts may both fail under continued
-contention; no timed incident trace establishes that they did. Normal record
-writes are per-file atomic, and authoritative folder reads/writes share their
-lock. Cross-part generations or an unlocked guard read alone are not proof of
-a partial-file or partial-board race on macOS.
+Two separate gaps follow: fixing only the stream/page check can retry against
+an index that already discarded the session, and the current client treats
+`gone` as final without re-checking. A daemon restart or swap is not required
+for this source-backed path; the reported incident retained its daemon PID.
+This is not proof that every historical banner had this cause or that a
+restart can never accompany another removal. Two lookup attempts may both fail
+under continued contention, but no timed incident trace proves that they did.
+Normal record writes are per-file atomic, and authoritative folder reads and
+writes share their lock; no partial authoritative commit is needed to explain
+the identified path.
 
 ## Decisions
 
-- MAIN relayed the approved repair direction on 2026-11-14: distinguish
-  authoritative not-found/identity mismatch from transient read failures such
-  as lock timeout or I/O error. Genuine missing/mismatched sessions may be
-  gone; a transient failure keeps the existing page and retries the stream
-  instead of permanently terminating it.
-- This owner-visible bug follows the current Important Pi startup and
-  prompt-admission pair, ahead of remaining orphan bugs and the added backlog.
+- MAIN's (829) technical investigation relay on 2026-11-14 confirms the
+  **T0 three-way read result**: found, truly absent/identity-mismatched, or
+  transient error. Carry lock/I/O error classification through the internal
+  source/index/page path instead of collapsing every error to false.
+- On a transient error, retain the indexed session and schedule a re-read;
+  page rendering keeps the last good content. Preserve genuine deletion and
+  identity-mismatch handling rather than keeping removed sessions forever.
+- The client re-checks `gone` with one reconnect after a few seconds and
+  displays the gone banner only when that reopen returns 404. Do not turn
+  transient record failures into permanent client termination or rely on a
+  stream-only fix after index removal. The exact implementation must preserve
+  the existing transport contract and is verified in isolated fixtures.
+- MAIN's 2026-11-14 23:22:25 UTC sequencing places this implementation
+  **after selection-bundle** (`261114-feat-ws-selection-bundle-comment`),
+  superseding the earlier priority after the Pi startup/prompt-admission pair.
+  This amendment is documentation only, not an implementation dispatch.
 - Moving expensive render/publication outside the folder lock is a design
   review topic, not a selected implementation. Preserve ordered publication
   and atomic authoritative state if the lock boundary changes.
@@ -69,13 +97,20 @@ this target and stops for MAIN's settlement before implementation.
 
 ## Constraints
 
-- This is still a documentation/design capture under the load throttle. No source
-  fix, new build/test, live lock hold, process action, restart or daemon swap
-  is performed or authorized by this ticket.
-- Preserve genuine missing/deleted-session handling. Retry timing, source-side
-  last-good-record caching, lock changes and any wire changes need technical
-  design review and an isolated deterministic reproduction; they are not
-  chosen by the approved retry/keep-page behavior alone.
+- This amendment remains documentation only. No source fix, build/test, live
+  lock hold, process action, restart or daemon swap is performed here.
+  Implementation is queued after selection-bundle and still needs the normal
+  actionable-ticket preparation and separate execution dispatch.
+- Preserve the approved index-retention, scheduled re-read, last-good page
+  and one delayed client re-check behavior. Ground the precise retry delay and
+  last-good-content lifetime in the implementation review and deterministic
+  tests; do not invent persistent cache fields or change the wire contract.
+- Moving rendering/publication out of the folder lock is separate design
+  work requiring ordered-publication review. It is not a prerequisite or an
+  implicitly authorized optimization in this repair.
+- `261114-chore-ws-dashboard-index-removal-diagnostics` remains diagnostics
+  only. Its missing historical timestamps/reasons are not repaired by source
+  reasoning or by this ticket amendment.
 - Investigate render frequency and contention separately from CPU attribution:
   the short OS sample showed rendering work, not its share of sustained CPU.
 - Read `ai-docs/manuals/shipped-surface-boundary.md` and
@@ -86,16 +121,26 @@ this target and stops for MAIN's settlement before implementation.
 
 ### Phase 1: Distinguish transient reads and preserve the valid reader
 
-First use isolated state and controlled contention to establish the
-timeout-to-gone path and its timing without touching the shared daemon.
-Through design review, classify currently collapsed lookup errors and define
-how transient failures preserve the page and retry while genuine absence or
-identity mismatch remains terminal. Evaluate whether expensive render and
-publication can safely leave the folder lock without allowing older output to
-overwrite newer state. Implement only after that review and the assigned heavy
-slot; return any broader behavior/compatibility decision through MAIN.
+After selection-bundle and the normal ready/execution gates, use isolated
+state and controlled contention to establish the complete record-error to
+index-removal to open-stream-gone path without touching the shared daemon.
+Implement the approved internal found/absent-or-mismatched/transient result
+through the source, index and page read paths, preserving error classes.
+Transient reads retain the index entry, schedule another read and preserve the
+last good page. Add the single delayed client reopen check before displaying
+the gone banner on a confirmed 404. Preserve true absence/mismatch behavior.
+Do not move rendering/publication outside the folder lock or introduce a new
+stream event, persisted cache shape or protocol change; return any necessary
+scope expansion to MAIN before implementing it.
 
-Verification must distinguish actual deletion, malformed records, permission
-errors and lock contention; prove no partial authoritative commit is required;
-and include subsequent reader recovery. Record historical confidence limits,
-exact commands and any acceptance gaps. No implementation Result is claimed.
+Verification must distinguish genuine deletion and identity mismatch from
+lock contention, malformed/unreadable records and permission/I/O errors.
+Exercise both registration and record unreadability, and assert that transient
+record errors do not remove the index entry or clear its valid caches. Cover
+first-render 404 separately from not-ok re-render on an open stream, the
+client's one delayed reopen, retention of last-good content during a transient
+failure, and successful recovery when the read becomes available. Confirmed
+absence must still reach the banner rather than retry forever. Prove that no
+partial authoritative commit or daemon restart is needed for the reproduced
+failure. Record exact source/fixture pins, commands, process quiescence and
+historical confidence limits; no implementation Result is claimed here.
