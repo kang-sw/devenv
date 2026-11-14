@@ -125,7 +125,7 @@
 //             --capture-dir retains measurements and responsive screenshots.
 //   history-cards  Card/paging probes without navigation/control/live checks.
 //   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
-//   history-regressions  Log chunks in renderer-produced closed logs (thirty
+//   history-regressions  Chunks through renderer-produced closed system chips (thirty
 //             short lines: the line cap binds before the 1000px budget),
 //             collapse cancellation, and real Tab into clipped summaries.
 //   history-fit  Controlled row-budget geometry (all/two-panel/one-panel/
@@ -299,12 +299,16 @@ function seedSession(tmp, bin, label, n, historyEntries, mermaid, pending, share
       `<wb:panel recap="History panel ${i + 1}"><p>History payload ${i + 1}: delayed content height fixture.</p></wb:panel>`).join("");
     run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key,
       commands: `<wb:topic name="HISTORY">${entries}</wb:topic>` })], { cwd: proj, env });
-    // Renderer-produced closed log runs exercise size-neutral page joins:
-    // newest 47 folded rows + three visible tail rows; older pages fold whole.
+    // Renderer-produced closed system-event chips exercise size-neutral page
+    // joins: newest 47 chip rows + three visible tail rows; older pages hold
+    // whole chips. Log lines stay visible rows, so the chain is alternating
+    // topic-state events (each appends one system entry) between one opening
+    // log line, which creates the topic, and the three tail lines.
     for (const [name, count] of [['LOGCHAIN', 200], ['LOGCANCEL', 600]]) {
-      const logs = Array.from({ length: count }, (_, i) => `<wb:log>Folded history line ${i + 1}</wb:log>`).join('');
+      const states = Array.from({ length: count - 4 }, (_, i) => `<wb:state value="${i % 2 ? 'discussing' : 'waiting'}"/>`).join('');
+      const tail = [1, 2, 3].map((i) => `<wb:log>Visible tail line ${i}</wb:log>`).join('');
       run(bin, ['call', 'whiteboard.update', JSON.stringify({
-        session_key: fer.session_key, commands: `<wb:topic name="${name}">${logs}</wb:topic>`
+        session_key: fer.session_key, commands: `<wb:topic name="${name}"><wb:log>Opening history line</wb:log>${states}${tail}</wb:topic>`
       })], { cwd: proj, env });
     }
     // Keep topics on both sides, so collapse compensation cannot be masked
@@ -3464,7 +3468,7 @@ async function scenarioHistoryRegressions(ctx) {
       keyboardAfter.bottom <= keyboardAfter.viewBottom + 1 && keyboardAfter.clipScrollTop === 0 && keyboardAfter.centerExposed,
       'actual Tab focused a summary outside the clip/page, under a sticky overlay, or scrolled the clip');
     await page.evaluate(() => document.activeElement.blur());
-    await clippedFoldTab('LOGCHAIN', '.run-fold');
+    await clippedFoldTab('LOGCHAIN', '.system-run');
 
     async function settledLog(name) {
       await page.evaluate((name) => {
@@ -3478,7 +3482,7 @@ async function scenarioHistoryRegressions(ctx) {
       await sleep(100);
       return page.evaluate((name) => {
         const bh = window.__bh, h = bh.history(name), live = h.querySelector('.history-live');
-        return { ...bh.historyState(name), folded: !!live.querySelector(':scope > details.run-fold:not([open])'),
+        return { ...bh.historyState(name), folded: !!live.querySelector(':scope > details.system-run:not([open])'),
           tailRows: live.querySelectorAll(':scope > .wb-entry').length,
           deliveries: bh.resizeDeliveries.filter((d) => d.after?.some((r) => r.name === name)).length };
       }, name);
@@ -3524,18 +3528,19 @@ async function scenarioHistoryRegressions(ctx) {
     await capture('after-log-thirty');
 
     const appendSwap = await page.evaluate(() => {
-      const bh = window.__bh, h = bh.history('LOGCHAIN'), opened = Array.from(h.querySelectorAll('.run-fold')).at(-1);
+      const bh = window.__bh, h = bh.history('LOGCHAIN'), opened = Array.from(h.querySelectorAll('.system-run')).at(-1);
       opened.open = true;
       const visible = Array.from(opened.querySelectorAll('.wb-entry')).map((e) => e.id);
       const snapshot = window.wbHistory.capture(document), incoming = h.cloneNode(true), live = incoming.querySelector('.history-live');
-      const runs = Array.from(live.querySelectorAll(':scope > .run-fold')), first = runs[0];
+      // Renderer pages carry unsplit chips: rejoin the client's chip cuts.
+      const runs = Array.from(live.querySelectorAll(':scope > .system-run')), first = runs[0];
       runs.slice(1).forEach((run) => { Array.from(run.children).slice(1).forEach((row) => first.appendChild(row)); run.remove(); });
       first.open = false;
       const row = live.lastElementChild.cloneNode(true); row.id = 'e999003'; row.dataset.entry = row.id; row.dataset.historyAnchor = row.id;
       live.appendChild(row); h.replaceWith(incoming);
       window.wbHistory.init(incoming); window.wbHistory.restore(document, snapshot);
       return { state: bh.historyState('LOGCHAIN'), visible,
-        restored: visible.map((id) => { const e = incoming.querySelector('#' + id); return { id, present: !!e, open: !!e?.closest('.run-fold')?.open }; }) };
+        restored: visible.map((id) => { const e = incoming.querySelector('#' + id); return { id, present: !!e, open: !!e?.closest('.system-run')?.open }; }) };
     });
     await paint();
     measure('open-log-append-swap', appendSwap);
