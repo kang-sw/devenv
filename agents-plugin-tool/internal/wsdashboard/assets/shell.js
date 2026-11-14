@@ -29,11 +29,12 @@
   //                                   spawn): the shell shows it
   //     key     {key}                 a key the shell acts on, pressed in
   //                                   the frame: "rail" (Ctrl+`), "esc"
-  //     layout  {pincol, dim}         the frame shows the pinned column
+  //     layout  {pincol, dim, popover?} the frame shows the pinned column
   //                                   (the rail then overlays below 2200px),
   //                                   and the alpha of the backdrop it shows
   //                                   over the whole window (0: none), which
-  //                                   the shell's rail and header take too
+  //                                   the shell's rail and header take too;
+  //                                   popover lifts the frame for its dropdown
   //     scroll  {y}                   the frame's page scrolled as a whole:
   //                                   the shell's header and rail move along
   //     hash    {hash}                the frame's hash route changed: the
