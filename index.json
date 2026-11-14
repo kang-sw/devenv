@@ -806,7 +806,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-14T22:59:10Z"
+        "touched_at": "2026-11-14T23:23:54Z",
+        "impl": {
+          "branch": "impl/develop/bling-fog-scorn"
+        }
       }
     },
     "261115-research-git-merge-profile-refusal-on-bound-worktree": {
