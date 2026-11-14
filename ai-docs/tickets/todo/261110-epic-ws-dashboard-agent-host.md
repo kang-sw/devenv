@@ -24,15 +24,21 @@ created. Two tracks (user, 2026-11-10 whiteboard, (01), (02)):
   dashboard, and a read-only file browser with HTML, image, and video
   preview.
 
-The browser dashboard is the primary surface. A desktop shell (Tauri,
-Electron, or similar) is only reviewed after the browser dashboard is
-complete ((18) a and note, (19)).
+The browser dashboard remains the primary surface. The original shell review
+after dashboard completion ((18) a and note, (19)) was superseded by (493)=b
+on 2026-11-13: build the thin Tauri shell in parallel. MAIN's 2026-11-14
+15:11:55 and 15:14:52 relays reaffirm start-now dogfood, superseding the
+after-release scheduling assumption (701). The independent attach-only
+macOS first window is scoped in `261113-feat-werkschaft-thin-tauri-shell`;
+it does not wait for this epic's completion.
 
 ## Non-Scope
 
 - Editing files in the dashboard, at any depth ((04) a and note).
 - Designing for Orca as a host ((24)).
-- Building a desktop shell; it is a post-completion review item ((19)).
+- Shell implementation is owned by `261113-feat-werkschaft-thin-tauri-shell`,
+  not this epic's dashboard children. Its Phase 1a is attach-only macOS
+  dogfood, not Windows, signing, updater, or new shell-only authority.
 
 ## Child Tickets
 
@@ -90,9 +96,16 @@ preview at any time. Sequence (user, 2026-11-10, (68) a; announced, (70)):
   conversations for the tracker support agent. Rejected: a narrower research
   ticket limited to headless lead sessions and the permission boundary
   ((538) a); keeping CLI-created sessions as the only kind ((538) c).
-  Revised (user, 2026-11-10, (18) note, (19)): the desktop shell is not a
-  target; the browser dashboard is primary, and a shell is only reviewed
-  once the browser side is complete.
+  Historical revision (user, 2026-11-10, (18) note, (19)): defer shell review
+  until browser completion. Superseded by (493)=b and MAIN's 2026-11-14
+  start-now relays: thin-shell work proceeds independently in parallel;
+  browser work remains shared, not reimplemented in Tauri. The first
+  attach-only window adds no credential or daemon API and cannot
+  start/stop/swap the daemon. Owner (798)=a (MAIN relay 2026-11-14 15:17:49)
+  confirms a later gated JS-memory scoped grant when new shell-only HTTP
+  authority is needed, superseding (702)=a for that need. The thin-shell
+  ticket owns its bootstrap, ACL, expiry/revocation, and exclusion controls;
+  this later authority does not gate or change the credential-free Phase 1a.
 - **Placement** (user, 2026-11-10, (547)-(549) ok): a new epic rather than
   reopening `261106-epic-ws-dashboard-serve-daemon`, whose settled Non-Scope
   excludes exactly this scope (browser terminal, browser permission approval)
@@ -122,5 +135,6 @@ preview at any time. Sequence (user, 2026-11-10, (68) a; announced, (70)):
 
 - Done: every child ticket is done or dropped and the user closes the epic.
 - Dropped: the user drops the direction.
-- Deferred: the desktop shell review ((19)), and whatever the children's
-  results defer.
+- Deferred: whatever the children's results defer. The former desktop-shell
+  review deferral ((19)) is superseded; the thin-shell ticket owns its own
+  first-window and later delivery acceptance, independently of epic closure.
