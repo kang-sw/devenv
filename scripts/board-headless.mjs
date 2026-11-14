@@ -1067,6 +1067,94 @@ async function scenarioToolbar(ctx) {
   const expected = ['board-overview', ...(first.terminal ? ['tnew'] : []), ...(first.order.some((s) => /wnew/.test(s)) ? ['wnew'] : []), 'board-search', ...(first.files ? ['board-files'] : [])];
   qa(first.order.length === expected.length && expected.every((s, i) => first.order[i].includes(s)), 'toolbar action order', first.order);
   qa(first.labels.every((x) => x.shown === (x.overview || first.width > 540)) && (first.width > 540 || first.hint === 'none'), 'label collapse keys on toolbar width, preserving Overview', first);
+  if (first.files) {
+    // File responses are browser-local fixtures; no host files or native
+    // actions are opened. Exercise the mounted explorer, not a replacement.
+    await tab.route('**/fs/**', async (route) => {
+      const u = new URL(route.request().url()), op = u.pathname.split('/').pop();
+      let body;
+      if (op === 'list') {
+        const dir = u.searchParams.get('dir') || '';
+        body = { root: '/fixture', name: 'fixture', session: true, abs: '/fixture' + (dir ? '/' + dir : ''), sep: '/',
+          entries: dir ? [{ name: 'main.go' }] : [{ name: 'src', dir: true }, ...Array.from({ length: 100 }, (_, i) => ({ name: `file-${i}.txt` }))] };
+      } else if (op === 'find') body = { items: [{ path: 'src/main.go', name: 'main.go' }] };
+      else if (op === 'preview') body = { kind: 'text', text: 'Files toolbar preview fixture' };
+      else return route.continue();
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+    });
+    await page.evaluate(() => {
+      __bh.filesNode = document.querySelector('#files');
+      __bh.filesParent = __bh.filesNode.parentNode;
+      __bh.filesTabs = ['data-tab', 'data-ctab'].map((k) => document.querySelector('#grid').getAttribute(k));
+    });
+    const opened = () => page.evaluate(() => document.querySelector('#files').hasAttribute('data-max'));
+    const restored = () => page.evaluate(() => {
+      const n = document.querySelector('#files');
+      return n === __bh.filesNode && n.parentNode === __bh.filesParent && !n.hasAttribute('data-max') &&
+        JSON.stringify(__bh.filesTabs) === JSON.stringify(['data-tab', 'data-ctab'].map((k) => document.querySelector('#grid').getAttribute(k))) &&
+        document.activeElement.matches('.board-files') && !!document.querySelector('#chead .fsum .froot');
+    });
+    await page.click('.board-files');
+    await page.waitForSelector('#files .fr[data-path="src"]');
+    qa(await page.evaluate(() => {
+      const n = document.querySelector('#files'), r = n.getBoundingClientRect();
+      return n === __bh.filesNode && n.parentNode === __bh.filesParent && getComputedStyle(n).position === 'fixed' &&
+        document.activeElement.matches('#files .fq') && document.querySelectorAll('#files').length === 1 &&
+        document.querySelector('#files .fhd .froot') && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight && r.height > 100;
+    }), 'Files toolbar opens the same explorer as a viewport-fitting floating sheet and focuses search');
+    await page.fill('#files .fq', 'main');
+    await page.waitForSelector('#files .hit');
+    await page.click('.board-files');
+    qa(await restored() && await page.inputValue('#files .fq') === 'main', 'second Files click closes, preserves query/tab/placement and returns label/focus');
+    await page.click('.board-files');
+    await page.click('#files .fhd button:last-child');
+    await tab.keyboard.press('Escape');
+    qa(await opened() && await page.evaluate(() => !document.querySelector('#files .fpop:not([hidden])')), 'dropdown consumes Escape before Files sheet');
+    await page.focus('#files .fq'); await tab.keyboard.press('Escape');
+    qa(await opened() && await page.inputValue('#files .fq') === '', 'search Escape clears query before closing Files');
+    await page.click('#files .fr[data-path="src"]');
+    await page.waitForSelector('#files .fr[data-path="src/main.go"]');
+    await page.click('#files .fr[data-path="src/main.go"]', { button: 'right' });
+    qa(await page.evaluate(() => {
+      const n = document.querySelector('.fmenu'), r = n.getBoundingClientRect();
+      return n && n.contains(document.elementFromPoint(r.left + 10, r.top + 10));
+    }), 'existing row menu remains above floating Files');
+    await tab.keyboard.press('Escape');
+    qa(await opened() && await page.evaluate(() => !document.querySelector('.fmenu') && document.activeElement.matches('#files .fr[data-path="src/main.go"]')), 'row-menu Escape consumes the event and restores its row');
+    // Let the native scroll event reach the explorer's existing scroll
+    // memory before hiding it (a synthetic assignment is not a user scroll).
+    await page.evaluate(() => new Promise((resolve) => {
+      document.querySelector('#files .ftree').scrollTop = 100;
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    await tab.keyboard.press('Escape');
+    qa(await restored(), 'unconsumed Escape dismisses Files and restores focus and original tabs');
+    await page.click('.board-files');
+    qa(await page.evaluate(() => document.querySelector('#files .fr[data-path="src"]').getAttribute('aria-expanded') === 'true' && document.querySelector('#files .ftree').scrollTop === 100), 'reopening preserves expanded folders and tree scroll');
+    await page.evaluate(() => { document.querySelector('#files .ftree').scrollTop = 0; });
+    await page.click('#files .fr[data-path="src/main.go"]');
+    await page.waitForSelector('.pv-txt');
+    qa(!await opened() && await page.textContent('.pv-txt') === 'Files toolbar preview fixture', 'file preview remains visible in the established board slot, dismissing Files');
+    await ovAt(page, 'top');
+    await page.evaluate(() => document.querySelector('#ctabs [data-ctab="files"]').click());
+    await page.evaluate(() => { __bh.filesTabs = ['data-tab', 'data-ctab'].map((k) => document.querySelector('#grid').getAttribute(k)); });
+    await page.click('.board-files'); await tab.keyboard.press('Escape');
+    qa(await restored() && await page.evaluate(() => document.querySelector('#grid').getAttribute('data-ctab') === 'files'), 'original Files-tab access and selection survive floating dismissal');
+    await page.evaluate(() => document.querySelector('#ctabs [data-ctab="convo"]').click());
+    await page.evaluate(() => { document.querySelector('#r-board section.topic .d-max').click(); document.querySelector('.board-files').click(); });
+    qa(await opened() && await page.evaluate(() => !document.querySelector('section.topic[data-max]')), 'Files uses shared maximize exclusivity');
+    await page.evaluate(() => document.querySelector('#r-board section.topic .d-max').click());
+    qa(!await opened() && await page.evaluate(() => !!document.querySelector('section.topic[data-max]')), 'another maximized sheet dismisses and restores Files');
+    await tab.keyboard.press('Escape');
+    // Board swaps run the same decorate/follow path as production.
+    await page.click('.board-files');
+    await page.evaluate(async () => { const b = await __bh.baseBoard(); __bh.ovRegion(b.html); });
+    await waitQuiet(page);
+    qa(await opened(), 'board updates do not dismiss the borrowed explorer as a missing topic');
+    await tab.keyboard.press('Escape');
+    await tab.unroute('**/fs/**');
+    await ovAt(page, 'top');
+  }
   await capture(ctx, tab, kind + '-normal');
   const top = await page.evaluate(() => __bh.ovState().toolbar.top);
   await ovAt(page, 'middle');
@@ -1128,6 +1216,23 @@ async function scenarioToolbar(ctx) {
   await frame.waitForSelector('.board-toolbar', { state: 'attached' });
   qa(await frame.evaluate(() => !document.documentElement.hasAttribute('data-term') && !document.querySelector('.tnew,#tslot,.tfix')), 'no data-term means no terminal entry (server-document fixture)');
   await noTerm.close();
+  if (first.files) {
+    for (const absent of ['pane', 'module']) {
+      const p = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height } });
+      await p.route('**/*', async (route) => {
+        if (!route.request().isNavigationRequest()) return route.continue();
+        const response = await route.fetch();
+        let body = await response.text();
+        body = absent === 'pane' ? body.replace(/<section id="files"[^>]*><\/section>/, '') : body.replace('window.WsFiles = {', 'window.__bhDisabledFiles = {');
+        await route.fulfill({ response, body });
+      });
+      await p.goto(ctx.args.url); await p.waitForTimeout(500);
+      const f = p.frames().find((f) => /[?&]frame=1/.test(f.url())) || p;
+      await f.waitForSelector('.board-toolbar', { state: 'attached' });
+      qa(await f.evaluate(() => !document.querySelector('.board-files')), `Files toolbar absent without ${absent} (server-document fixture)`);
+      await p.close();
+    }
+  }
 }
 
 async function scenarioOverview(ctx) {

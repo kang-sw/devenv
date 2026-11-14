@@ -116,7 +116,15 @@
     row.appendChild(web);
     var search = action("board-search", "search", wsT("js.board.toolbar.search"), actions.search);
     search.appendChild(mk("kbd", "", "Ctrl K"));
-    if (actions.files) action("board-files", "folder-open", wsT("js.board.toolbar.files"), actions.files);
+    if (actions.files) {
+      var files = action("board-files", "folder-open", wsT("js.board.toolbar.files"), function () {
+        var el = doc.getElementById("files");
+        if (!el) return;
+        maximize(maxed && maxed.files ? null : { files: true, el: el, back: files });
+      });
+      files.setAttribute("aria-controls", "files");
+      files.setAttribute("aria-expanded", "false");
+    }
     counts = mk("span", "board-count");
     row.appendChild(counts);
     toolbar.appendChild(row);
@@ -346,7 +354,7 @@
         if (on) sec.setAttribute("data-pinned", ""); else sec.removeAttribute("data-pinned");
       });
     });
-    if (maxed && !(maxed instanceof Card)) follow(maxed);
+    if (maxed && !maxed.files && !(maxed instanceof Card)) follow(maxed);
     countTopics();
   }
   // leaveSlot marks the place of a topic that leaves a fetched closed page
@@ -519,6 +527,8 @@
   };
   // show brings the card into view and marks it with a short flash.
   Card.prototype.show = function () {
+    // A file preview (or a row-menu terminal) must not open behind Files.
+    if (maxed && maxed.files) maximize(null);
     var el = this.el;
     if (opt && opt.reveal) opt.reveal();
     var calm = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -589,7 +599,15 @@
       var was = maxed;
       maxed = null;
       scrim.hidden = true;
-      if (was instanceof Card) {
+      if (was.files) {
+        was.el.removeAttribute("data-max");
+        was.el.style.removeProperty("--files-top");
+        toolbar.removeAttribute("data-files");
+        was.back.setAttribute("aria-expanded", "false");
+        if (was.root) was.slot.appendChild(was.root);
+        opt.toolbar.files();
+        if (was.back.isConnected) was.back.focus({ preventScroll: true });
+      } else if (was instanceof Card) {
         was.el.removeAttribute("data-max");
         was.el.style.height = "";
         was.sized();
@@ -609,6 +627,21 @@
     }
     scrim.hidden = false;
     maxed = c;
+    if (c.files) {
+      // The one explorer stays in its grid slot: no tab switch, remount or
+      // second browser. Its existing root label travels back on dismissal.
+      c.slot = doc.querySelector("#chead .fsum");
+      c.root = c.slot && c.slot.querySelector(".froot");
+      if (c.root) c.el.querySelector(".fhd").insertBefore(c.root, c.el.querySelector(".fhd").firstChild);
+      c.el.style.setProperty("--files-top", Math.max(52, toolbar.getBoundingClientRect().bottom + 8) + "px");
+      c.el.setAttribute("data-max", "");
+      toolbar.setAttribute("data-files", "");
+      c.back.setAttribute("aria-expanded", "true");
+      opt.toolbar.files();
+      var filter = c.el.querySelector(".fq");
+      if (filter) filter.focus({ preventScroll: true });
+      return;
+    }
     if (!(c instanceof Card)) {
       grow(c);
       if (!c.el) { maximize(null); return; }
@@ -995,7 +1028,8 @@
     // from and hands its root to done, or null on a failure), adopted(node)
     // (a topic node the closed route brought, now placed), and drag(on) (a
     // drag starts or ends: board updates wait meanwhile). toolbar supplies
-    // overview(), search(), and optional files() action callbacks.
+    // overview(), search(), and optional files() visibility notification
+    // for the toolbar's existing explorer sheet.
     mount: function (el, o) {
       board = el;
       opt = o;
