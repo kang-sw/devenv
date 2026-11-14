@@ -677,3 +677,94 @@
     });
   }
 })();
+
+/* Latest agent arrival: state belongs to the page, not to replaceable board
+   nodes. Initial content (including inert history) is never an arrival. */
+(function () {
+  if (!window.wbLatestLog) {
+    var started = Date.now(), topics = new Set(), seen = new Set(), watched = new Map();
+    var selector = '.trecap[data-kind="agent"], .wb-entry.agent.current';
+    function key(node) {
+      var topic = node.closest('.topic');
+      return topic && topic.getAttribute('data-topic') + '\n' + node.getAttribute('data-entry');
+    }
+    function baseline(root) {
+      root.querySelectorAll('[data-kind="agent"][data-entry]').forEach(function (node) {
+        var k = key(node);
+        if (k) seen.add(k);
+      });
+      root.querySelectorAll('template').forEach(function (t) { if (t.content) baseline(t.content); });
+    }
+    baseline(document);
+    function reduced() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+    var observer = window.IntersectionObserver && new window.IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        var node = entry.target, k = watched.get(node);
+        if (!entry.isIntersecting || !entry.intersectionRatio || !k || !node.isConnected) return;
+        // The observer accounts for viewport and history-clip intersection;
+        // closed disclosures must not consume a pending arrival either.
+        for (var p = node.parentElement; p; p = p.parentElement) {
+          if (p.tagName === 'DETAILS' && !p.open) return;
+        }
+        if (!seen.has(k)) {
+          seen.add(k);
+          if (!reduced()) {
+            node.classList.add('wb-log-blink');
+            window.setTimeout(function () { node.classList.remove('wb-log-blink'); }, 3000);
+          }
+        }
+        observer.unobserve(node);
+        watched.delete(node);
+      });
+    });
+    function init() {
+      var candidates = new Map();
+      document.querySelectorAll(selector).forEach(function (node) {
+        var k = key(node);
+        if (!k) return;
+        candidates.set(node, k);
+        var name = node.closest('.topic').getAttribute('data-topic');
+        if (!topics.has(name)) {
+          // A closed topic fetched later is old content, not a new log. New
+          // topics still qualify when their log was written since page load.
+          var time = node.querySelector('time[datetime]');
+          if (!time || !(Date.parse(time.getAttribute('datetime')) > started)) seen.add(k);
+        }
+      });
+      candidates.forEach(function (k, node) {
+        topics.add(node.closest('.topic').getAttribute('data-topic'));
+      });
+      watched.forEach(function (k, node) {
+        if (!candidates.has(node) || candidates.get(node) !== k || seen.has(k)) {
+          observer.unobserve(node);
+          watched.delete(node);
+          node.classList.remove('wb-log-blink');
+        }
+      });
+      candidates.forEach(function (k, node) {
+        if (!observer || seen.has(k) || watched.has(node)) return;
+        watched.set(node, k);
+        observer.observe(node);
+      });
+    }
+    window.wbLatestLog = { init: init };
+    // Board swaps normally bind explicitly; child-list changes also cover
+    // history admission and deferred closed-topic insertion. Do not observe
+    // classes: our own animation must not trigger another binding pass.
+    if (window.MutationObserver) new window.MutationObserver(function (changes) {
+      // Ignore unrelated host activity, such as streaming terminal output.
+      if (changes.some(function (change) {
+        if (change.target.closest && change.target.closest('.topic')) return true;
+        return Array.from(change.addedNodes).concat(Array.from(change.removedNodes)).some(function (node) {
+          return node.nodeType === 1 && (node.matches('.topic') || node.querySelector('.topic'));
+        });
+      })) init();
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+  var bind = window.wbBindBoard;
+  if (bind && !bind.wbLatestLogBound) {
+    window.wbBindBoard = function (root) { bind(root); window.wbLatestLog.init(); };
+    window.wbBindBoard.wbLatestLogBound = true;
+  }
+  window.wbLatestLog.init();
+})();

@@ -20,6 +20,7 @@
   --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
   --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
   --wb-accent-assumed: #b0245a;
+  --wb-latest-log: color-mix(in srgb, #91df9b 24%, var(--wb-card));
   --wb-ck-ok: var(--wb-announced);
   --wb-ck-no: #c0262d;
   --wb-accent-policy: #b25000;
@@ -32,6 +33,16 @@
   --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
   color-scheme: light dark;
+}
+/* Both the head recap and its history copy represent the same latest log. */
+.topic .trecap[data-kind="agent"], .wb-entry.agent.current { background: var(--wb-latest-log); }
+.wb-log-blink { animation: wb-log-arrival 1s ease-in-out 3; }
+@keyframes wb-log-arrival {
+  0%, 100% { background: var(--wb-latest-log); }
+  50% { background: var(--wb-card); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-log-blink { animation: none; }
 }
 /* Dark palette. The OS preference applies it unless the page pins light
    (data-theme="light"); data-theme="dark" applies it whatever the OS says.
