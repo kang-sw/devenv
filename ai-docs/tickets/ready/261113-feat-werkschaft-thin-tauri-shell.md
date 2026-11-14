@@ -159,6 +159,33 @@ start/stop/swap is introduced. Record the first-window evidence without
 claiming the broader webview matrix passed. No build, install, fetch, or
 implementation verification is performed by this documentation assignment.
 
+#### Source preparation checkpoint - 2026-11-14
+
+The attach-only package is prepared under `agents-plugin-tool/desktop/`, with
+pinned npm-local CLI and Cargo dependencies, a native Connection → Retry menu,
+credential-free endpoint/health discovery, exact-origin navigation policy,
+script-free local error view, zero native command permissions, and unit-test
+contracts. The temporary geometric W icon is a dogfood placeholder.
+
+Dependency preparation succeeded: npm installed the pinned local CLI; the
+single authorized repair fetch locked 429 packages and exited 0 in 12.1 seconds
+(`/tmp/werkschaft-cargo-fetch-repair-z_9t7i73.log`). The earlier fetch failed
+before downloading because the manifest preceded its Rust target; root
+explicitly authorized completing source before the one repair fetch. No build,
+check, tests, app launch, live-daemon GET, heavy child, or daemon lifecycle
+operation has run. This is not a Phase 1 Result or runnable-artifact evidence.
+
+`agents-plugin-tool/desktop/README.md` and `scripts/build-slot.py` give the exact
+one-attempt test/debug-app recipe: 1,500 cumulative seconds including at most
+15 seconds of owned-process-group termination, two compile jobs, frozen locks,
+local output paths and fresh logs. Expected artifact after successful build:
+`desktop/target/debug/bundle/macos/Werkschaft.app`; direct dogfood binary:
+`desktop/target/debug/werkschaft-desktop`. The separate bounded native capture
+recipe rediscovers the endpoint at execution time and exercises missing,
+unhealthy, retry, external-browser navigation and daemon survival. Independent
+lite review and Phase 1 acceptance remain pending MAIN's actual slot. Phases
+2–4 remain outside this invocation.
+
 ### Phase 2: Daily-use reliability (later Phase 1b cut)
 
 Add single-instance launch/focus next; it is not a Phase 1a blocker. Verify
