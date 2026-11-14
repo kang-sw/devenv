@@ -212,6 +212,19 @@ swap([topic("a", 400), B, C, reply()]);
 check("topic update retains whole fold", page.board.querySelector('section[data-topic="a"]').getAttribute("data-size"), "fold");
 boot(store, served);
 check("fold-only topic state restores", A.getAttribute("data-size"), "fold");
+c = page.W.list()[0];
+var oldA = A;
+swap([topic("a", 800), B, C, reply()]);
+c.bump(oldA);
+check("replaced same-name origin is not borrowed", names(page.board)[2], "preview");
+c.bump(mk("div", {"data-topic": "b"}));
+check("non-topic origin falls back safely", names(page.board)[2], "preview");
+check("no origin identity persists", JSON.stringify(store).indexOf("origin"), -1);
+var current = page.board.querySelector('section[data-topic="a"]');
+page.W.decorate(); page.W.decorate();
+page.board.fire("click", {target: current.querySelector(".t-fold")});
+check("redecoration adds no duplicate fold handler", current.getAttribute("data-size"), "base");
+check("topic fold is stored in f", JSON.parse(store.cards).topics.filter(function (r) { return r.n === "a"; }).map(function (r) { return !!r.f; }), []);
 process.stdout.write(bad.join("\n"));
 `)
 }
