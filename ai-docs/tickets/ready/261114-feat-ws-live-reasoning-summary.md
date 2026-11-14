@@ -1,7 +1,9 @@
 ---
 title: "Show provider-exposed reasoning summaries in live dashboard activity"
-sage-review-design: required
-sage-review-completeness: required
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 7cdd116388c6e855
+sage-review-completeness-reviewed: 7cdd116388c6e855
 ---
 
 # Show provider-exposed reasoning summaries in live dashboard activity
