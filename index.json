@@ -798,6 +798,9 @@
     "261115-research-ws-concurrent-pool-acquire-selection-race": {
       "registered_at": "2026-11-14T22:49:06Z"
     },
+    "261115-research-ws-effects-browser-unexpected-codex-child": {
+      "registered_at": "2026-11-14T23:07:59Z"
+    },
     "261115-research-ws-mcp-baseline-full-suite-timeout": {
       "registered_at": "2026-11-14T23:05:25Z"
     },
