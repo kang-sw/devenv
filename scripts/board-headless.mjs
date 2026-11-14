@@ -97,14 +97,16 @@
 // beside the old one) and exactly the added ones as new; a board that
 // differs from what the page last saw would show up as extra changes.
 //
-//   history   640px history clips, bounded paging, late-height anchoring,
+//   history   Panel-count history chunks, bounded paging, late-height anchoring,
 //             deep links and out-of-view collapse on dashboard AND standalone
 //             full file pages. Dashboard-only: expanded swaps, overlapping keep
 //             sessions and the pinned column (use --width 1800).
 //   history-cards  Card/paging probes without navigation/control/live checks.
 //   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
-//   history-regressions  Native RO delivery for renderer-produced closed log
-//             pages, collapse cancellation, and real Tab into clipped summaries.
+//   history-regressions  Exact thirty-line chunks in renderer-produced closed
+//             logs, collapse cancellation, and real Tab into clipped summaries.
+//   history-fit  Controlled 3/2/1/oversized geometry, cached/first heights,
+//             exact log boundaries and wrapping without recutting.
 //
 // History samples retain rAF geometry as diagnostic evidence and assert <=1px
 // on rAF -> zero-delay-task (post-paint) geometry, after ResizeObserver runs.
@@ -1067,6 +1069,94 @@ async function scenarioToolbar(ctx) {
   const expected = ['board-overview', ...(first.terminal ? ['tnew'] : []), ...(first.order.some((s) => /wnew/.test(s)) ? ['wnew'] : []), 'board-search', ...(first.files ? ['board-files'] : [])];
   qa(first.order.length === expected.length && expected.every((s, i) => first.order[i].includes(s)), 'toolbar action order', first.order);
   qa(first.labels.every((x) => x.shown === (x.overview || first.width > 540)) && (first.width > 540 || first.hint === 'none'), 'label collapse keys on toolbar width, preserving Overview', first);
+  if (first.files) {
+    // File responses are browser-local fixtures; no host files or native
+    // actions are opened. Exercise the mounted explorer, not a replacement.
+    await tab.route('**/fs/**', async (route) => {
+      const u = new URL(route.request().url()), op = u.pathname.split('/').pop();
+      let body;
+      if (op === 'list') {
+        const dir = u.searchParams.get('dir') || '';
+        body = { root: '/fixture', name: 'fixture', session: true, abs: '/fixture' + (dir ? '/' + dir : ''), sep: '/',
+          entries: dir ? [{ name: 'main.go' }] : [{ name: 'src', dir: true }, ...Array.from({ length: 100 }, (_, i) => ({ name: `file-${i}.txt` }))] };
+      } else if (op === 'find') body = { items: [{ path: 'src/main.go', name: 'main.go' }] };
+      else if (op === 'preview') body = { kind: 'text', text: 'Files toolbar preview fixture' };
+      else return route.continue();
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+    });
+    await page.evaluate(() => {
+      __bh.filesNode = document.querySelector('#files');
+      __bh.filesParent = __bh.filesNode.parentNode;
+      __bh.filesTabs = ['data-tab', 'data-ctab'].map((k) => document.querySelector('#grid').getAttribute(k));
+    });
+    const opened = () => page.evaluate(() => document.querySelector('#files').hasAttribute('data-max'));
+    const restored = () => page.evaluate(() => {
+      const n = document.querySelector('#files');
+      return n === __bh.filesNode && n.parentNode === __bh.filesParent && !n.hasAttribute('data-max') &&
+        JSON.stringify(__bh.filesTabs) === JSON.stringify(['data-tab', 'data-ctab'].map((k) => document.querySelector('#grid').getAttribute(k))) &&
+        document.activeElement.matches('.board-files') && !!document.querySelector('#chead .fsum .froot');
+    });
+    await page.click('.board-files');
+    await page.waitForSelector('#files .fr[data-path="src"]');
+    qa(await page.evaluate(() => {
+      const n = document.querySelector('#files'), r = n.getBoundingClientRect();
+      return n === __bh.filesNode && n.parentNode === __bh.filesParent && getComputedStyle(n).position === 'fixed' &&
+        document.activeElement.matches('#files .fq') && document.querySelectorAll('#files').length === 1 &&
+        document.querySelector('#files .fhd .froot') && r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight && r.height > 100;
+    }), 'Files toolbar opens the same explorer as a viewport-fitting floating sheet and focuses search');
+    await page.fill('#files .fq', 'main');
+    await page.waitForSelector('#files .hit');
+    await page.click('.board-files');
+    qa(await restored() && await page.inputValue('#files .fq') === 'main', 'second Files click closes, preserves query/tab/placement and returns label/focus');
+    await page.click('.board-files');
+    await page.click('#files .fhd button:last-child');
+    await tab.keyboard.press('Escape');
+    qa(await opened() && await page.evaluate(() => !document.querySelector('#files .fpop:not([hidden])')), 'dropdown consumes Escape before Files sheet');
+    await page.focus('#files .fq'); await tab.keyboard.press('Escape');
+    qa(await opened() && await page.inputValue('#files .fq') === '', 'search Escape clears query before closing Files');
+    await page.click('#files .fr[data-path="src"]');
+    await page.waitForSelector('#files .fr[data-path="src/main.go"]');
+    await page.click('#files .fr[data-path="src/main.go"]', { button: 'right' });
+    qa(await page.evaluate(() => {
+      const n = document.querySelector('.fmenu'), r = n.getBoundingClientRect();
+      return n && n.contains(document.elementFromPoint(r.left + 10, r.top + 10));
+    }), 'existing row menu remains above floating Files');
+    await tab.keyboard.press('Escape');
+    qa(await opened() && await page.evaluate(() => !document.querySelector('.fmenu') && document.activeElement.matches('#files .fr[data-path="src/main.go"]')), 'row-menu Escape consumes the event and restores its row');
+    // Let the native scroll event reach the explorer's existing scroll
+    // memory before hiding it (a synthetic assignment is not a user scroll).
+    await page.evaluate(() => new Promise((resolve) => {
+      document.querySelector('#files .ftree').scrollTop = 100;
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    }));
+    await tab.keyboard.press('Escape');
+    qa(await restored(), 'unconsumed Escape dismisses Files and restores focus and original tabs');
+    await page.click('.board-files');
+    qa(await page.evaluate(() => document.querySelector('#files .fr[data-path="src"]').getAttribute('aria-expanded') === 'true' && document.querySelector('#files .ftree').scrollTop === 100), 'reopening preserves expanded folders and tree scroll');
+    await page.evaluate(() => { document.querySelector('#files .ftree').scrollTop = 0; });
+    await page.click('#files .fr[data-path="src/main.go"]');
+    await page.waitForSelector('.pv-txt');
+    qa(!await opened() && await page.textContent('.pv-txt') === 'Files toolbar preview fixture', 'file preview remains visible in the established board slot, dismissing Files');
+    await ovAt(page, 'top');
+    await page.evaluate(() => document.querySelector('#ctabs [data-ctab="files"]').click());
+    await page.evaluate(() => { __bh.filesTabs = ['data-tab', 'data-ctab'].map((k) => document.querySelector('#grid').getAttribute(k)); });
+    await page.click('.board-files'); await tab.keyboard.press('Escape');
+    qa(await restored() && await page.evaluate(() => document.querySelector('#grid').getAttribute('data-ctab') === 'files'), 'original Files-tab access and selection survive floating dismissal');
+    await page.evaluate(() => document.querySelector('#ctabs [data-ctab="convo"]').click());
+    await page.evaluate(() => { document.querySelector('#r-board section.topic .d-max').click(); document.querySelector('.board-files').click(); });
+    qa(await opened() && await page.evaluate(() => !document.querySelector('section.topic[data-max]')), 'Files uses shared maximize exclusivity');
+    await page.evaluate(() => document.querySelector('#r-board section.topic .d-max').click());
+    qa(!await opened() && await page.evaluate(() => !!document.querySelector('section.topic[data-max]')), 'another maximized sheet dismisses and restores Files');
+    await tab.keyboard.press('Escape');
+    // Board swaps run the same decorate/follow path as production.
+    await page.click('.board-files');
+    await page.evaluate(async () => { const b = await __bh.baseBoard(); __bh.ovRegion(b.html); });
+    await waitQuiet(page);
+    qa(await opened(), 'board updates do not dismiss the borrowed explorer as a missing topic');
+    await tab.keyboard.press('Escape');
+    await tab.unroute('**/fs/**');
+    await ovAt(page, 'top');
+  }
   await capture(ctx, tab, kind + '-normal');
   const top = await page.evaluate(() => __bh.ovState().toolbar.top);
   await ovAt(page, 'middle');
@@ -1128,6 +1218,23 @@ async function scenarioToolbar(ctx) {
   await frame.waitForSelector('.board-toolbar', { state: 'attached' });
   qa(await frame.evaluate(() => !document.documentElement.hasAttribute('data-term') && !document.querySelector('.tnew,#tslot,.tfix')), 'no data-term means no terminal entry (server-document fixture)');
   await noTerm.close();
+  if (first.files) {
+    for (const absent of ['pane', 'module']) {
+      const p = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height } });
+      await p.route('**/*', async (route) => {
+        if (!route.request().isNavigationRequest()) return route.continue();
+        const response = await route.fetch();
+        let body = await response.text();
+        body = absent === 'pane' ? body.replace(/<section id="files"[^>]*><\/section>/, '') : body.replace('window.WsFiles = {', 'window.__bhDisabledFiles = {');
+        await route.fulfill({ response, body });
+      });
+      await p.goto(ctx.args.url); await p.waitForTimeout(500);
+      const f = p.frames().find((f) => /[?&]frame=1/.test(f.url())) || p;
+      await f.waitForSelector('.board-toolbar', { state: 'attached' });
+      qa(await f.evaluate(() => !document.querySelector('.board-files')), `Files toolbar absent without ${absent} (server-document fixture)`);
+      await p.close();
+    }
+  }
 }
 
 async function scenarioOverview(ctx) {
@@ -1745,7 +1852,11 @@ const HISTORY_PAGE = () => {
   bh.historyState = (name = 'HISTORY') => {
     const h = bh.history(name), live = h.querySelector('.history-live'), clip = h.querySelector('.history-clip');
     const r = clip.getBoundingClientRect();
-    return { steps: h._wbHistorySteps, pages: h.querySelectorAll('template[data-history-page]').length,
+    const panels = Array.from(live.querySelectorAll(':scope > .wb-entry.panel'));
+    const entries = Array.from(live.querySelectorAll('.wb-entry:not(.historical)'));
+    return { includedRows: entries.length - entries.findIndex((e) => e.id === h._wbHistoryChunks.at(-1)), steps: h._wbHistorySteps, chunks: h._wbHistoryChunks.slice(), pending: !!h._wbHistoryPending,
+      visiblePanels: panels.filter((p) => p.getBoundingClientRect().bottom > r.top + 1).length,
+      pages: h.querySelectorAll('template[data-history-page]').length,
       rows: live.querySelectorAll('.wb-entry').length, live: live.scrollHeight, height: r.height,
       top: r.top, bottom: r.bottom, scrollTop: clip.scrollTop,
       maxHeight: getComputedStyle(clip).maxHeight, overflow: getComputedStyle(h).overflowY,
@@ -1805,7 +1916,8 @@ async function scenarioHistory(ctx) {
     await waitQuiet(page);
     const first = await page.evaluate(() => window.__bh.historyState());
     measure('initial', first);
-    assert(first.steps === 1 && Math.abs(first.height - 640) <= 1, `initial clip is ${first.height}px at step ${first.steps}, not 640px`);
+    assert(first.steps === 1 && !first.pending && first.visiblePanels >= 1 && first.visiblePanels <= 3 &&
+      (first.height <= 1000 || first.visiblePanels === 1), `invalid first panel chunk: ${JSON.stringify(first)}`);
     assert(first.pages >= 2 && first.rows === 50, 'need 50 live entries and at least two inert older pages');
     assert(first.overflow !== 'auto' && first.overflow !== 'scroll' && first.scrollTop === 0, 'history has an inner scroll');
     await capture('before-load-more');
@@ -1826,10 +1938,11 @@ async function scenarioHistory(ctx) {
     await sleep(180);
     await capture('after-load-more');
     stable('expand-anchor', await page.evaluate(() => window.__bh.stopSampler()), ids);
-    assert(click.after.steps === 2 && Math.abs(click.after.height - 1280) <= 1, 'load-more did not raise the clip by exactly 640px');
+    assert(click.after.steps === 2 && click.after.chunks[0] === first.chunks[0] && click.after.height > first.height,
+      'load-more did not preserve the first boundary and add an older chunk');
     assert(click.before.pages - click.after.pages <= 1, 'one click synchronously loaded more than one page');
 
-    // Fill successive 640px steps until an embedded page is needed. Record
+    // Add successive panel chunks until an embedded page is needed. Record
     // the synchronous boundary separately from ResizeObserver's later work.
     const paging = [];
     for (let i = 0; i < 20; i++) {
@@ -1840,11 +1953,11 @@ async function scenarioHistory(ctx) {
       });
       paging.push(r);
       assert(r.before.pages - r.after.pages <= 1, 'one click synchronously loaded multiple pages');
-      if (r.before.live >= r.after.steps * 640) assert(r.before.pages === r.after.pages, 'loaded a page even though the clip was filled');
+      assert(r.after.chunks.slice(0, -1).join() === r.before.chunks.join(), 'expansion recut an existing chunk');
       assert(r.after.steps === r.before.steps + 1, 'clip did not step by one');
       await sleep(100);
       r.settled = await page.evaluate(() => window.__bh.historyState());
-      if (r.after.live >= r.after.steps * 640) assert(r.settled.pages === r.after.pages, 'later resize over-loaded a clip that was already filled');
+      assert(!r.settled.pending && r.settled.chunks.slice(0, -1).join() === r.before.chunks.join(), 'late layout recut a finalized chunk');
       if (r.after.pages < r.before.pages) break;
     }
     measure('paging', { clicks: paging.map((r) => ({ steps: r.after.steps, pagesBefore: r.before.pages, pagesSync: r.after.pages, pagesAfterResize: r.settled.pages, liveBefore: r.before.live })) });
@@ -1958,7 +2071,7 @@ async function scenarioHistory(ctx) {
       assert(ctx.width >= 1600, 'history dashboard pinned-column check requires --width 1800');
       await page.evaluate(() => {
         const bh = window.__bh, topic = bh.history().closest('.topic');
-        // A single 640px card may fit the column. Pin a tall peer as well,
+        // A single panel chunk may fit the column. Pin a tall peer as well,
         // so #bpins is already an overflowing scroller BEFORE keep chooses
         // the anchor's scroller (not only after the expansion).
         const peer = bh.topics().find((n) => n !== topic && n.querySelector('iframe.doc-frame'));
@@ -2095,12 +2208,12 @@ async function scenarioHistory(ctx) {
     assert(deepCollapse.preserved, 'deep-link collapse changed disclosure choices');
 
     // Deep-link materialization exhausted the embedded pages. A collapsed
-    // clip still needs its button; repeated clicks only raise the 640px clip
+    // history still needs its button; repeated clicks add older panel chunks
     // until all content fits, at which point the button must hide.
     await page.evaluate(() => window.__bh.positionHistory());
     await waitQuiet(page);
     const exhausted = await page.evaluate(() => window.__bh.historyState());
-    assert(exhausted.pages === 0 && exhausted.button && exhausted.live > 640, 'exhausted pages hid the button while clipped content remained');
+    assert(exhausted.pages === 0 && exhausted.button && exhausted.live > exhausted.height, 'exhausted pages hid the button while clipped content remained');
     let fitted = exhausted, controlClicks = 0;
     while (fitted.button && controlClicks < 100) {
       const before = fitted;
@@ -2111,7 +2224,19 @@ async function scenarioHistory(ctx) {
       controlClicks++;
     }
     measure('exhausted-controls', { clicks: controlClicks, steps: fitted.steps, live: fitted.live, button: fitted.button });
-    assert(!fitted.button && fitted.live <= fitted.steps * 640, 'button did not hide when exhausted content fitted the clip');
+    const exhaustedGeometry = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history(), live = h.querySelector('.history-live'), clip = h.querySelector('.history-clip');
+      const boundary = document.getElementById(h._wbHistoryChunks.at(-1)), cr = clip.getBoundingClientRect(), lr = live.getBoundingClientRect(), br = boundary.getBoundingClientRect();
+      return { boundary: boundary.id, first: live.querySelector('.wb-entry').id,
+        boundaryTop: br.top, boundaryBottom: br.bottom, clipTop: cr.top, clipBottom: cr.bottom,
+        liveBottom: lr.bottom, leadingMargin: br.top - lr.top, clipScrollTop: clip.scrollTop };
+    });
+    measure('exhausted-boundary', exhaustedGeometry);
+    assert(fitted.pages === 0 && !fitted.button && fitted.includedRows === fitted.rows &&
+      exhaustedGeometry.boundary === exhaustedGeometry.first && exhaustedGeometry.boundaryTop >= exhaustedGeometry.clipTop - 1 &&
+      exhaustedGeometry.boundaryBottom <= exhaustedGeometry.clipBottom + 1 &&
+      Math.abs(exhaustedGeometry.liveBottom - exhaustedGeometry.clipBottom) <= 1 && exhaustedGeometry.clipScrollTop === 0,
+      'exhausted history did not expose every entry at the exact first-entry boundary');
 
     // Return to the latest window through a real viewport exit. Then append
     // one cloned, rendered system-event chip as a faithful live-arrival HTML
@@ -2174,6 +2299,49 @@ async function scenarioHistoryRegressions(ctx) {
     assert(await page.evaluate(() => ['HISTORY', 'LOGCHAIN', 'LOGCANCEL'].every((n) => !!window.__bh.history(n))),
       'seed renderer-produced panel/log histories with serve --history-entries 180');
 
+    async function clippedFoldTab(name, selector) {
+      await page.evaluate((name) => {
+        const bh = window.__bh, s = bh.scroller(), clip = bh.history(name).querySelector('.history-clip');
+        s.scrollTop += clip.getBoundingClientRect().top - bh.viewTop(s) - 100;
+      }, name);
+      await waitQuiet(page);
+      const before = await page.evaluate(([name, selector]) => {
+        const bh = window.__bh, h = bh.history(name), clip = h.querySelector('.history-clip').getBoundingClientRect();
+        const fold = Array.from(h.querySelectorAll(selector)).find((f) => f.querySelector('summary').getBoundingClientRect().top < clip.top - 1);
+        if (!fold) throw new Error(`no clipped ${selector} in ${name}`);
+        const summary = fold.querySelector('summary'), sentinel = document.createElement('button');
+        sentinel.textContent = 'Tab starting point';
+        // Positioned inside the clip without changing the renderer's rows.
+        // Only the subsequent real Tab reaches the clipped disclosure.
+        sentinel.style.cssText = 'position:absolute;bottom:0;height:1px;width:1px;padding:0;border:0;opacity:0';
+        fold.before(sentinel); sentinel.focus({ preventScroll: true });
+        bh.foldTab = { summary, sentinel };
+        return { anchor: fold.dataset.historyAnchor, steps: h._wbHistorySteps, clipped: summary.getBoundingClientRect().top < clip.top - 1 };
+      }, [name, selector]);
+      assert(before.clipped, `${selector} summary must start above the clip`);
+      await tab.keyboard.press('Tab');
+      await paint();
+      const after = await page.evaluate((name) => {
+        const bh = window.__bh, h = bh.history(name), node = document.activeElement, r = node.getBoundingClientRect(), clip = h.querySelector('.history-clip').getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return { expected: node === bh.foldTab.summary, boundary: h._wbHistoryChunks.at(-1), steps: h._wbHistorySteps,
+          top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
+          centerExposed: !!hit && (hit === node || node.contains(hit)), clipScrollTop: h.querySelector('.history-clip').scrollTop };
+      }, name);
+      measure(`${selector}-real-tab`, { before, after });
+      assert(after.expected && after.boundary === before.anchor && after.steps === before.steps + 1 &&
+        after.top >= after.clipTop - 1 && after.bottom <= after.clipBottom + 1 && after.centerExposed && after.clipScrollTop === 0,
+        `real Tab did not reveal clipped ${selector} summary`);
+      await page.evaluate(() => { document.activeElement.blur(); window.__bh.foldTab.sentinel.remove(); });
+      await page.waitForFunction((name) => window.wbHistory.seen(window.__bh.history(name).closest('.topic'), '0px')?.visible, name, { timeout: 2000 });
+      await page.evaluate((name) => {
+        const bh = window.__bh, s = bh.scroller(), topic = bh.history(name).closest('.topic');
+        s.scrollTop += topic.getBoundingClientRect().bottom - bh.viewTop(s) + 40;
+      }, name);
+      await page.waitForFunction((name) => window.__bh.history(name)._wbHistorySteps === 1, name, { timeout: 2000 });
+    }
+    await clippedFoldTab('HISTORY', '.system-run');
+
     // The old failure was a real Tab into the first clipped summary, not an
     // explicit focus() on the desired row or a synthetic focusin callback.
     await page.evaluate(() => window.__bh.positionHistory());
@@ -2211,6 +2379,7 @@ async function scenarioHistoryRegressions(ctx) {
       keyboardAfter.bottom <= keyboardAfter.viewBottom + 1 && keyboardAfter.clipScrollTop === 0 && keyboardAfter.centerExposed,
       'actual Tab focused a summary outside the clip/page, under a sticky overlay, or scrolled the clip');
     await page.evaluate(() => document.activeElement.blur());
+    await clippedFoldTab('LOGCHAIN', '.run-fold');
 
     async function settledLog(name) {
       await page.evaluate((name) => {
@@ -2229,53 +2398,68 @@ async function scenarioHistoryRegressions(ctx) {
           deliveries: bh.resizeDeliveries.filter((d) => d.after?.some((r) => r.name === name)).length };
       }, name);
     }
-    const clickLog = (name) => page.evaluate((name) => {
-      const bh = window.__bh, before = bh.historyState(name);
-      bh.history(name).querySelector('.history-older').click();
-      return { before, after: bh.historyState(name) };
-    }, name);
+    const clickLog = async (name) => {
+      const result = await page.evaluate((name) => {
+        const bh = window.__bh, before = bh.historyState(name);
+        bh.history(name).querySelector('.history-older').click();
+        return { before, after: bh.historyState(name) };
+      }, name);
+      await page.waitForFunction((name) => !window.__bh.history(name)._wbHistoryPending, name, { timeout: 2000 });
+      result.settled = await page.evaluate((name) => window.__bh.historyState(name), name);
+      return result;
+    };
     const boundedClick = (r) => {
-      assert(r.before.pages - r.after.pages === 1 && r.after.rows === r.before.rows + 50,
-        'closed-run click must materialize exactly one 50-row page synchronously');
-      assert(r.after.steps === 2 && Math.abs(r.after.live - r.before.live) <= 1 && r.after.live < 1280,
-        'closed-run merge must be size-neutral and leave the expanded clip underfilled');
+      assert(r.before.pages - r.after.pages <= 1, 'one click materialized multiple pages');
+      const target = Math.min(200, r.before.includedRows + 30), pagesNeeded = target > r.before.rows ? 1 : 0;
+      assert(r.settled.pages === r.before.pages - pagesNeeded && r.settled.rows === r.before.rows + pagesNeeded * 50,
+        'settled log chunk loaded extra pages/rows or stopped before its exact candidate page');
+      assert(r.settled.steps === r.before.steps + 1 && r.settled.includedRows === Math.min(200, r.before.includedRows + 30),
+        'log-only click did not add exactly thirty entries (or the final remainder)');
+      assert(r.settled.chunks.slice(0, -1).join() === r.before.chunks.join(), 'log click recut prior chunks');
     };
 
-    await page.evaluate(() => { window.__bh.regressionPhase = 'neutral-chain'; });
+    await page.evaluate(() => { window.__bh.regressionPhase = 'log-thirty'; });
     const initial = await settledLog('LOGCHAIN');
-    measure('neutral-chain-initial', initial);
-    assert(initial.rows === 50 && initial.pages >= 3 && initial.folded && initial.tailRows === 3 && initial.deliveries >= 1,
-      'need settled, renderer-produced 47-folded/3-tail-row history and at least three older pages');
-    await capture('before-neutral-chain');
-    const click = await clickLog('LOGCHAIN');
-    boundedClick(click);
-    measure('neutral-chain-click', click);
-    await page.waitForFunction(() => {
-      const s = window.__bh.historyState('LOGCHAIN'); return s.pages === 0 || s.live >= s.steps * 640;
-    }, null, { timeout: 3000 });
-    await sleep(150);
-    const drained = await page.evaluate(() => window.__bh.historyState('LOGCHAIN'));
-    const chain = await page.evaluate(() => ({
-      loads: window.__bh.historyLoads.filter((r) => r.name === 'LOGCHAIN'),
-      deliveries: window.__bh.resizeDeliveries.filter((d) => d.before.some((r) => r.name === 'LOGCHAIN'))
-    }));
-    measure('neutral-chain-drained', { state: drained, ...chain });
-    assert(drained.pages === 0 && drained.rows === initial.rows + initial.pages * 50 && Math.abs(drained.live - initial.live) <= 1,
-      'size-neutral folded chain did not drain all pages without changing height');
-    assert(chain.loads.length === initial.pages && chain.loads[0].delivery === null &&
-      chain.loads.slice(1).every((l) => l.delivery !== null) && new Set(chain.loads.slice(1).map((l) => l.delivery)).size === initial.pages - 1,
-      'continuation must load one page per distinct actual native RO delivery, never a synchronous multi-page loop');
-    for (const d of chain.deliveries) {
-      const b = d.before.find((r) => r.name === 'LOGCHAIN'), a = d.after.find((r) => r.name === 'LOGCHAIN');
-      assert(b.pages - a.pages <= 1, 'one native RO callback materialized multiple pages');
+    measure('log-thirty-initial', initial);
+    assert(initial.rows === 50 && initial.pages >= 3 && initial.folded && initial.tailRows === 3 && initial.deliveries >= 1 && initial.includedRows === 30,
+      'need a renderer-produced folded history with an exact thirty-entry first chunk');
+    await capture('before-log-thirty');
+    for (let i = 0; i < 6; i++) {
+      const click = await clickLog('LOGCHAIN');
+      boundedClick(click);
+      await paint();
+      measure('log-thirty-click', click);
     }
-    await capture('after-neutral-chain');
+    const drained = await page.evaluate(() => window.__bh.historyState('LOGCHAIN'));
+    measure('log-thirty-drained', drained);
+    assert(drained.pages === 0 && drained.rows === 200 && drained.includedRows === 200 && !drained.button,
+      'log chunks did not reach the exact final remainder');
+    await capture('after-log-thirty');
 
-    // A longer real log stream leaves pages pending while native IO arms
-    // the newly expanded subscription. No callbacks are called manually.
+    const appendSwap = await page.evaluate(() => {
+      const bh = window.__bh, h = bh.history('LOGCHAIN'), opened = Array.from(h.querySelectorAll('.run-fold')).at(-1);
+      opened.open = true;
+      const visible = Array.from(opened.querySelectorAll('.wb-entry')).map((e) => e.id);
+      const snapshot = window.wbHistory.capture(document), incoming = h.cloneNode(true), live = incoming.querySelector('.history-live');
+      const runs = Array.from(live.querySelectorAll(':scope > .run-fold')), first = runs[0];
+      runs.slice(1).forEach((run) => { Array.from(run.children).slice(1).forEach((row) => first.appendChild(row)); run.remove(); });
+      first.open = false;
+      const row = live.lastElementChild.cloneNode(true); row.id = 'e999003'; row.dataset.entry = row.id; row.dataset.historyAnchor = row.id;
+      live.appendChild(row); h.replaceWith(incoming);
+      window.wbHistory.init(incoming); window.wbHistory.restore(document, snapshot);
+      return { state: bh.historyState('LOGCHAIN'), visible,
+        restored: visible.map((id) => { const e = incoming.querySelector('#' + id); return { id, present: !!e, open: !!e?.closest('.run-fold')?.open }; }) };
+    });
+    await paint();
+    measure('open-log-append-swap', appendSwap);
+    assert(appendSwap.visible.length > 0 && appendSwap.restored.every((r) => r.present && r.open),
+      'append+swap folded rows that were actually visible in a saved open log run');
+
+    // Native IO still collapses a partially loaded history without loading
+    // the rest of its pages. No observer callbacks are called manually.
     await page.evaluate(() => { window.__bh.regressionPhase = 'cancellation'; });
     const cancelInitial = await settledLog('LOGCANCEL');
-    assert(cancelInitial.pages >= 8 && cancelInitial.rows === 50, 'need enough older pages to cancel a running chain');
+    assert(cancelInitial.pages >= 8 && cancelInitial.rows === 50, 'need older pages for collapse cancellation');
     const cancelClick = await clickLog('LOGCANCEL');
     boundedClick(cancelClick);
     await page.evaluate(() => {
@@ -2297,11 +2481,11 @@ async function scenarioHistoryRegressions(ctx) {
     await sleep(350);
     const canceled = await page.evaluate(() => {
       const bh = window.__bh; bh.cancelWatch.unwatch();
-      return { ...bh.historyState('LOGCANCEL'), pending: !!bh.history('LOGCANCEL')._wbHistoryReobserve };
+      return { ...bh.historyState('LOGCANCEL'), pending: !!bh.history('LOGCANCEL')._wbHistoryPending };
     });
     measure('neutral-chain-canceled', { initial: cancelInitial, click: cancelClick, exit, collapsed, settled: canceled });
-    assert(collapsed.pages > 0 && canceled.pages === collapsed.pages && canceled.rows === collapsed.rows && canceled.steps === 1 && !canceled.pending,
-      'collapsed history continued materializing older pages or left a pending reobserve');
+    assert(collapsed.pages > 0 && canceled.pages === collapsed.pages && canceled.rows === collapsed.rows && canceled.steps === 1 && canceled.includedRows === 30 && !canceled.pending,
+      'collapsed history continued materializing older pages or lost its thirty-line boundary');
     await capture('after-cancellation');
     const observerErrors = await page.evaluate(() => window.__bh.observerErrors);
     assert(observerErrors.length === 0, `native ResizeObserver loop errors: ${observerErrors.join(' | ')}`);
@@ -2318,6 +2502,135 @@ async function scenarioHistoryRegressions(ctx) {
   }
 }
 
+// Controlled geometry in the real host, using cloned renderer rows and the
+// shipped history implementation. No substitute formatter, timer or observer.
+async function scenarioHistoryFit(ctx) {
+  const { page, kind } = await openBoard(ctx);
+  const dir = path.resolve(ctx.args.artifacts || path.join(os.tmpdir(), `board-history-fit-${Date.now()}`));
+  fs.mkdirSync(dir, { recursive: true });
+  const results = [];
+  const paint = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 0)))));
+  try {
+    await page.evaluate(HISTORY_PAGE);
+    await page.evaluate(() => {
+      const bh = window.__bh;
+      bh.fitPanel = bh.history().querySelector('.wb-entry.panel').cloneNode(true);
+      bh.fitLog = bh.history('LOGCHAIN').querySelector('.wb-entry.agent').cloneNode(true);
+      bh.fitFixture = (heights, unknown = false) => {
+        const old = bh.history(), h = old.cloneNode(false);
+        h.innerHTML = '<button class="history-older">older</button><div class="history-clip"><div class="history-live"></div></div>';
+        const live = h.querySelector('.history-live');
+        let id = 900000;
+        const row = (panel, height) => {
+          const n = (panel ? bh.fitPanel : bh.fitLog).cloneNode(true);
+          n.id = 'e' + (++id); n.dataset.entry = n.id; n.dataset.historyAnchor = n.id;
+          n.style.cssText = `height:${height}px;margin:0;padding:0;box-sizing:border-box;overflow:hidden`;
+          if (panel) {
+            n.dataset.panel = 'p' + id;
+            const d = n.querySelector('.entry-panel'); d.id = n.dataset.panel; d.open = true; d.dataset.key = 'entry:' + n.id;
+            d.querySelectorAll('.entry-body,.panel-versions').forEach((b) => b.remove());
+          }
+          live.appendChild(n); return n;
+        };
+        row(false, 20);
+        heights.forEach((height) => { row(true, height); row(false, 20); });
+        if (unknown) {
+          const f = document.createElement('div'); f.className = 'doc-frame';
+          const panel = live.querySelectorAll('.entry-panel')[2];
+          if (unknown === 'closed') {
+            // Native DETAILS with the same historical-disclosure shape as
+            // the renderer: the positive active panel is visible, its old
+            // version and unsized frame are behind a closed versions fold.
+            const versions = document.createElement('details'); versions.className = 'panel-versions';
+            versions.innerHTML = '<summary>Earlier versions</summary><article class="wb-entry panel historical"><details class="entry-panel"><summary>Old version</summary><div class="entry-body"></div></details></article>';
+            versions.querySelector('.entry-body').appendChild(f); panel.appendChild(versions);
+          } else panel.appendChild(f);
+        }
+        old.replaceWith(h); window.wbHistory.init(h);
+        return bh.historyState();
+      };
+    });
+    for (const [heights, boundary, pixels] of [
+      [[300, 300, 300], 'e900002', 960],
+      [[400, 400, 400], 'e900004', 840],
+      [[600, 600, 600], 'e900006', 620],
+      [[1500, 1500, 1500], 'e900006', 1520],
+    ]) {
+      const state = await page.evaluate((h) => window.__bh.fitFixture(h), heights);
+      await paint();
+      results.push({ heights, state });
+      assert(state.chunks[0] === boundary && Math.abs(state.height - pixels) <= 1 && !state.pending,
+        `wrong panel fit: ${JSON.stringify({ heights, state })}`);
+    }
+    const hidden = await page.evaluate(() => {
+      const bh = window.__bh, state = bh.fitFixture([400, 400, 400], 'closed');
+      const cached = bh.history()._wbHistoryHeights['e900006:true'];
+      bh.history().querySelector('.history-older').click();
+      return { state, cached, expanded: bh.historyState() };
+    });
+    assert(!hidden.state.pending && hidden.state.chunks[0] === 'e900004' && hidden.cached === 400 && hidden.expanded.steps === 2,
+      'unsized closed historical frame blocked a positive active panel or its older-page control');
+    const zero = await page.evaluate(() => {
+      const bh = window.__bh, state = bh.fitFixture([400, 400, 0]);
+      return { state, cached: bh.history()._wbHistoryHeights['e900006:true'] };
+    });
+    assert(zero.state.pending && zero.cached === undefined, 'zero active height must stay unknown, not enter the cache');
+    await page.evaluate(() => window.__bh.history().querySelector('#e900006').style.height = '400px');
+    await page.waitForFunction(() => !window.__bh.history()._wbHistoryPending, null, { timeout: 2000 });
+    const progressed = await page.evaluate(() => window.__bh.historyState());
+    assert(progressed.chunks[0] === 'e900004', 'first nonzero active layout did not progress');
+    results.push({ hidden, zero, progressed });
+    const unknown = await page.evaluate(() => window.__bh.fitFixture([400, 400, 400], true));
+    assert(unknown.pending && unknown.chunks[0] === 'e900002', 'unknown panel must wait for its first rendered height');
+    await page.evaluate(() => {
+      const h = window.__bh.history(), last = h.querySelector('#e900006');
+      last.querySelector('.doc-frame').style.height = '100px'; last.style.height = '401px';
+    });
+    await page.waitForFunction(() => !window.__bh.history()._wbHistoryPending);
+    await paint();
+    const measured = await page.evaluate(() => window.__bh.historyState());
+    assert(measured.chunks[0] === 'e900004', 'first rendered height did not settle the two-panel chunk');
+    await page.evaluate(() => window.__bh.history().querySelector('.history-older').click());
+    await paint();
+    const expanded = await page.evaluate(() => window.__bh.historyState());
+    assert(expanded.chunks.join() === 'e900004,e900002', 'expansion swallowed older logs or lost intervening logs');
+    await page.evaluate(() => {
+      const h = window.__bh.history();
+      // Keep this controlled resize probe distinct from the real off-screen
+      // folding checks in history/history-regressions. Existing focus guards
+      // hold the expanded fixture while its oversized boxes grow.
+      h.querySelector('#e900002 > .entry-panel > summary').focus({ preventScroll: true });
+      h.querySelector('#e900003').style.height = '200px';
+      h.querySelector('#e900006').style.height = '1600px';
+    });
+    await paint();
+    const wrapped = await page.evaluate(() => window.__bh.historyState());
+    results.push({ unknown, measured, expanded, wrapped });
+    assert(wrapped.chunks.join() === expanded.chunks.join() && wrapped.height > expanded.height + 1300,
+      `native resize changed finalized boundaries or failed to follow growth: ${JSON.stringify({ expanded, wrapped })}`);
+    const swapped = await page.evaluate(() => {
+      const bh = window.__bh, snapshot = window.wbHistory.capture(document);
+      bh.fitFixture([1500, 1500, 1500]); window.wbHistory.restore(document, snapshot);
+      return { state: bh.historyState(), cached: bh.history()._wbHistoryHeights['e900006:true'] };
+    });
+    await paint();
+    assert(swapped.state.chunks.join() === expanded.chunks.join() && swapped.cached === 401,
+      'swap did not restore exact expanded boundaries and first-height cache');
+    const prefix = await page.evaluate(() => {
+      const bh = window.__bh; bh.history().querySelector('.history-older').click();
+      return bh.historyState();
+    });
+    assert(prefix.chunks.at(-1) === 'e900001' && !prefix.button, 'older logs must belong to their own next chunk');
+    results.push({ swapped, prefix });
+    const errors = await page.evaluate(() => window.__bh.observerErrors);
+    assert(errors.length === 0, `native ResizeObserver loop errors: ${errors.join(' | ')}`);
+    log(`panel-fit: ${JSON.stringify(results)}`);
+  } finally {
+    fs.writeFileSync(path.join(dir, 'measurements.json'), JSON.stringify({ kind, results, errors: ctx.errors }, null, 2));
+    log(`history fit artifacts: ${dir}`);
+  }
+}
+
 const SCENARIOS = {
   toolbar: scenarioToolbar,
   overview: scenarioOverview,
@@ -2327,6 +2640,7 @@ const SCENARIOS = {
   bands: scenarioBands,
   pill: scenarioPill,
   history: scenarioHistory,
+  'history-fit': scenarioHistoryFit,
   'history-cards': (ctx) => scenarioHistory({ ...ctx, cardsOnly: true }),
   'history-paint': (ctx) => scenarioHistory({ ...ctx, navigationOnly: true }),
   'history-regressions': scenarioHistoryRegressions,

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/gitbatch"
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -140,10 +141,12 @@ type gitBadgeRunner struct {
 
 // badgeGitCommand is git in root under the C locale, run by the path
 // wsgit.Executable resolved, so a badge read does not search PATH on every
-// spawn.
+// spawn. Its timeout ends git's whole process tree (gitbatch.Bound), so a
+// timed-out read returns at its bound on Windows too.
 func badgeGitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, wsgit.Executable(), append([]string{"-C", root}, args...)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	gitbatch.Bound(cmd)
 	return cmd
 }
 

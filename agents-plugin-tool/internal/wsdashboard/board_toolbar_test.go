@@ -28,7 +28,7 @@ check("not a card or rail item", [page.W.is(bar), bar.hasAttribute("data-rail"),
 check("button order and terminal slot", bar.firstChild.children.map(function (n) { return n.className; }), ["board-action board-overview", "board-term-slot", "board-web-slot", "board-action board-search", "board-action board-files", "board-count"]);
 check("overview starts unpressed", bar.querySelector(".board-overview").getAttribute("aria-pressed"), "false");
 ["overview", "search", "files"].forEach(function (name) { bar.querySelector(".board-" + name).fire("click", {}); });
-check("actions use mount callbacks", calls, ["overview", "search", "files"]);
+check("overview and search use mount callbacks; Files without an explorer is inert", calls, ["overview", "search"]);
 check("open topics plus closed shown and remainder", count(), "open 2 · closed 8");
 var insert = page.board.insertBefore, remove = page.board.removeChild;
 page.board.insertBefore = function (n, ref) { if (n === bar) moves++; return insert.call(this, n, ref); };
@@ -168,10 +168,8 @@ func TestToolbarPageActionHooks(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	for _, want := range []string{
 		`search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } }`,
-		`files: fpane && window.WsFiles ? function ()`,
-		`if (!tabShown("convo")) setTab("convo");`,
-		`setCtab("files");`,
-		`if (filter) filter.focus();`,
+		`files: fpane && window.WsFiles ? revealPanes : null`,
+		`if (b) { setCtab(b.getAttribute("data-ctab")); return; }`,
 		`tail.setAttribute("data-closed-more", String(Math.max(0, (+more.getAttribute("data-closed-more") || 0) - count)))`,
 	} {
 		if !strings.Contains(js, want) {

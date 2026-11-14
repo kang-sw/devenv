@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
@@ -95,7 +97,10 @@ func writeSnapshot(t *testing.T, dir, id string, snap *wslive.Snapshot) {
 	if err := os.WriteFile(path+".tmp", raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(path+".tmp", path); err != nil {
+	// Replace as the ws-mcp writer does (with its Windows retry): the
+	// daemon may be reading the previous snapshot, which on Windows makes a
+	// plain rename over it fail.
+	if err := wsstate.AtomicReplaceFile(path+".tmp", path); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -115,7 +120,14 @@ func boardRegions(t *testing.T, body string) wswhiteboard.Regions {
 
 func get(t *testing.T, url string) (int, string) {
 	t.Helper()
-	resp, err := testClient().Get(url)
+	client := testClient()
+	if runtime.GOOS == "windows" {
+		// These content checks include cold and dev-asset page renders, which
+		// can exceed the health client's 500 ms budget on Windows. Keep a
+		// finite render budget without changing the health/control tests.
+		client.Timeout = 5 * time.Second
+	}
+	resp, err := client.Get(url)
 	if err != nil {
 		t.Fatal(err)
 	}

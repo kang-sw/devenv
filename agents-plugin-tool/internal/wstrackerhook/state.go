@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/wsledger"
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // stateDirName, in the state directory, holds one state file per store.
@@ -86,7 +87,7 @@ func saveState(dir, store string, st storeState) error {
 		werr = cerr
 	}
 	if werr == nil {
-		werr = os.Rename(tmp.Name(), path)
+		werr = wsstate.AtomicReplaceFile(tmp.Name(), path)
 	}
 	if werr != nil {
 		os.Remove(tmp.Name())
