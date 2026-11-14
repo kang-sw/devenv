@@ -13,9 +13,6 @@ func TestOverviewKeyboardExposedViewport(t *testing.T) {
 	var src strings.Builder
 	for _, name := range []string{"clearance", "key"} {
 		pattern := `(?s)\n  function ` + name + `\([^\n]*\) \{.*?\n  \}\n`
-		if name == "clearance" {
-			pattern = `\n  function clearance\(n\) \{[^\n]+\}\n`
-		}
 		f := regexp.MustCompile(pattern).FindString(js)
 		if f == "" {
 			t.Fatalf("missing %s", name)
@@ -25,7 +22,7 @@ func TestOverviewKeyboardExposedViewport(t *testing.T) {
 	runNode(t, "overview exposed keyboard viewport", `
 var bad = [], on = true, busy = false, pad = "76px", kept = [], viewport = {top:0,bottom:900,height:900};
 function check(name, got, want) { if (JSON.stringify(got)!==JSON.stringify(want)) bad.push(name+": "+JSON.stringify(got)); }
-function node(name, top) { return {name:name,top:top,getBoundingClientRect:function(){return {top:this.top,bottom:this.top+32,height:32};}}; }
+function node(name, top) { return {name:name,top:top,hasAttribute:function(){return false;},querySelector:function(){return null;},getBoundingClientRect:function(){return {top:this.top,bottom:this.top+32,height:32};}}; }
 var list=[node("previous",-20),node("next",200)], doc={activeElement:list[1]};
 function items(){return list;}
 function layer(){return "overview";}
