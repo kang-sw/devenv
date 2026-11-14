@@ -446,6 +446,9 @@
     "261114-bug-native-windows-core-install-blocks-acceptance": {
       "registered_at": "2026-11-14T13:39:56Z"
     },
+    "261114-bug-native-windows-lead-rejoin-holder-timeout": {
+      "registered_at": "2026-11-14T13:51:46Z"
+    },
     "261114-bug-native-windows-ticket-read-timeout-reports-unreachable": {
       "registered_at": "2026-11-14T13:51:06Z"
     },
