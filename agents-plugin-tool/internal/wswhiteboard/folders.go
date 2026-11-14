@@ -136,6 +136,17 @@ func (f FolderStore) Update(legacy *State, fn func(*State) error) error {
 // an older writer cannot publish over a later writer's output. A publication
 // failure is returned, but never rolls back the committed authoritative state.
 func (f FolderStore) UpdateAndPublish(legacy *State, fn func(*State) error, publish func() error) error {
+	return f.UpdateAndPublishObserved(legacy, fn, nil, publish)
+}
+
+// UpdateAndPublishObserved additionally observes this mutation's durable
+// decision, not successful Apply or final materialization. committed runs under
+// the folder lock after pending.json's exact intent bytes and directory entry
+// are synced, before replay or derived publication can fail. It must not reenter
+// the store. Recovery never calls it: projection is best effort, not replayable.
+// An atomic-install error does not confirm commitment (including a directory
+// sync error after rename); callers must not infer refusal from that error.
+func (f FolderStore) UpdateAndPublishObserved(legacy *State, fn func(*State) error, committed func(), publish func() error) error {
 	return f.locked(func() error {
 		before, meta, err := f.load(legacy)
 		if err != nil {
@@ -153,9 +164,12 @@ func (f FolderStore) UpdateAndPublish(legacy *State, fn func(*State) error, publ
 			if err != nil {
 				return err
 			}
-			if err := f.commit(intent); err != nil {
+			if err := f.commitObserved(intent, committed); err != nil {
 				return err
 			}
+		} else if committed != nil {
+			// The accepted state is already authoritative; no new intent.
+			committed()
 		}
 		if publish != nil {
 			return publish()
@@ -680,8 +694,17 @@ func (f FolderStore) hit(stage string) error {
 }
 
 func (f FolderStore) commit(intent *folderIntent) error {
+	return f.commitObserved(intent, nil)
+}
+
+func (f FolderStore) commitObserved(intent *folderIntent, committed func()) error {
 	if err := f.atomic("pending.json", folderJSON(intent), "intent-staged"); err != nil {
 		return err
+	}
+	// atomic has synced the exact bytes before replacement and the parent
+	// directory after it. load replays this decision before any board read.
+	if committed != nil {
+		committed()
 	}
 	if err := f.hit("intent"); err != nil {
 		return err

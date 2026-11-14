@@ -251,8 +251,9 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		problems []string
 		outcome  wswhiteboard.Outcome
 		render   whiteboardRender
+		observed boardMutationObservation
 	)
-	err = s.sessions.mutateRecordParts(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
+	err = s.sessions.mutateRecordPartsObserved(key, partAll, partWhiteboard, func(rec *sessionRecord) error {
 		if rec.Whiteboard == nil {
 			rec.Whiteboard = &wswhiteboard.State{}
 		}
@@ -271,11 +272,24 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		var renderErr error
 		render, renderErr = s.renderWhiteboard(rec, key, true)
 		return renderErr
-	})
+	}, &observed)
+	// A successful Apply is not a commit. Conversely a failed replay or
+	// derived publication does not undo a synced intent. This independent
+	// best-effort append accepts the commit-to-ring crash gap: never replay
+	// board commands or manufacture projection entries during recovery.
+	if observed.Committed {
+		s.recordWhiteboardEffects(key, outcome.Effects)
+	}
+	s.debugEvent("whiteboard.commit_outcome", map[string]any{"committed": observed.Committed, "html_published": observed.Published})
 	if errors.Is(err, errWhiteboardRefused) {
 		return toolErrorTextResponse(id, s.whiteboardRefusal(tool, problems))
 	}
 	if err != nil {
+		if observed.Committed {
+			err = fmt.Errorf("board committed; %w; do not resend accepted commands to recover missing conversation history", err)
+		} else {
+			err = fmt.Errorf("board commitment not confirmed; %w; inspect the board before retrying commands", err)
+		}
 		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
 	}
 	var sb strings.Builder

@@ -1,0 +1,224 @@
+package mcp
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/kang-sw/devenv/internal/wslive"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
+)
+
+func effectsWhiteboardFixture(f liveFixture) *whiteboardFixture {
+	return &whiteboardFixture{s: f.server, key: f.keyA, root: f.root, id: 100}
+}
+
+func effectsRecords(t *testing.T, f liveFixture, reply string) []wslive.RingRecord {
+	t.Helper()
+	var out []wslive.RingRecord
+	for _, rec := range readLiveRing(t, f.sessionDir(reply)) {
+		if rec.Kind == wslive.RingWhiteboardEffects {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func TestWhiteboardEffectsCallingSessionWithoutAdapterTerminalAndHosted(t *testing.T) {
+	for _, mode := range []string{"terminal-claude", "terminal-pi", "hosted-claude", "hosted-pi"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newLiveFixture(t, true)
+			if strings.HasPrefix(mode, "hosted-") {
+				hostedSessionEnv(t, f.keyA)
+				f.server = NewServer(f.root, "test")
+			}
+			f.server.sessionHarness = strings.Split(mode, "-")[1]
+			wb := effectsWhiteboardFixture(f)
+			wb.update(t, `<wb:floor id="40"/><wb:topic name="design" label="Design"><wb:add class="check"><wb:title>Attributable `+f.keyA+`</wb:title></wb:add><wb:panel recap="Unsafe text">&lt;script&gt;alert(1)&lt;/script&gt;</wb:panel><wb:log>Committed</wb:log></wb:topic>`)
+			records := effectsRecords(t, f, f.replyA)
+			if len(records) != 1 {
+				t.Fatalf("calling session entries: %+v", records)
+			}
+			effects, ok := wslive.DecodeWhiteboardEffects(records[0].RingEntry)
+			if !ok || !strings.Contains(records[0].Text, `"id":41`) || strings.Contains(records[0].Text, f.keyA) {
+				t.Fatalf("bad identity/scrubbing: %+v", records[0])
+			}
+			if len(effects) == 0 || len(effectsRecords(t, f, f.replyB)) != 0 {
+				t.Fatal("effects absent or delivered to another session")
+			}
+			if _, err := os.Stat(wslive.SnapshotPath(f.sessionDir(f.replyA))); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("projection invented an adapter snapshot: %v", err)
+			}
+			board, err := f.server.sessions.readWhiteboard(f.keyA)
+			if err != nil || board.Whiteboard == nil || board.Whiteboard.Items[0].ID != 41 || !strings.Contains(board.Whiteboard.Items[0].Title, f.keyA) {
+				t.Fatalf("projection mutated board data: %+v %v", board.Whiteboard, err)
+			}
+		})
+	}
+}
+
+func TestWhiteboardEffectsNoopRefusalAndAuthorization(t *testing.T) {
+	f := newLiveFixture(t, true)
+	wb := effectsWhiteboardFixture(f)
+	wb.update(t, `<wb:topic name="same"><wb:body>Same</wb:body><wb:add class="check"><wb:title>Same</wb:title></wb:add></wb:topic>`)
+	for _, commands := range []string{``, `<wb:topic name="same"><wb:body>Same</wb:body></wb:topic>`, `<wb:patch id="1"><wb:title>Same</wb:title></wb:patch>`} {
+		wb.update(t, commands)
+	}
+	refused := wb.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="same"><wb:log>Refused</wb:log></wb:topic><wb:patch id="900"/>`})
+	if !isToolError(refused) || len(effectsRecords(t, f, f.replyA)) != 1 {
+		t.Fatalf("refusal/noop appended: %s", refused)
+	}
+	for _, spec := range []struct {
+		role   toolRole
+		parent string
+	}{{roleDelegate, ""}, {roleLead, f.keyA}} {
+		key, err := f.server.sessions.mint(f.root, spec.role, spec.parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp := callToolOnce(t, f.server, 900, "whiteboard.update", map[string]any{"session_key": key, "commands": `<wb:topic name="bad"><wb:log>Forbidden</wb:log></wb:topic>`})
+		if !isToolError(resp) {
+			t.Fatalf("ordinary/child session gained board authority: %s", resp)
+		}
+		if dir, ok := f.server.liveSessionDir(key); ok {
+			t.Fatalf("unauthorized projection directory: %s", dir)
+		}
+	}
+}
+
+func TestWhiteboardEffectsDisabledDashboardWritesNoRing(t *testing.T) {
+	f := newLiveFixture(t, false)
+	effectsWhiteboardFixture(f).update(t, `<wb:topic name="off"><wb:log>Board only</wb:log></wb:topic>`)
+	if len(effectsRecords(t, f, f.replyA)) != 0 {
+		t.Fatal("disabled dashboard wrote effects")
+	}
+}
+
+func TestWhiteboardEffectsDurableIntentErrorsAndPublicationErrors(t *testing.T) {
+	for _, stage := range []string{"intent-staged", "intent", "log-partial", "complete", "html"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newLiveFixture(t, true)
+			wb := effectsWhiteboardFixture(f)
+			injected := errors.New("injected " + stage)
+			f.server.sessions.boardFault = func(at string) error {
+				if at == stage {
+					return injected
+				}
+				return nil
+			}
+			original := whiteboardMkdirAll
+			if stage == "html" {
+				whiteboardMkdirAll = func(path string, mode os.FileMode) error {
+					if path == wb.pageDir() {
+						return injected
+					}
+					return original(path, mode)
+				}
+				t.Cleanup(func() { whiteboardMkdirAll = original })
+			}
+			resp := wb.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="decision"><wb:log>Exactly once</wb:log><wb:add class="check"><wb:title>Durable</wb:title></wb:add></wb:topic>`})
+			if !isToolError(resp) || !strings.Contains(toolText(t, resp), injected.Error()) {
+				t.Fatalf("expected injected error: %s", resp)
+			}
+			committed := stage != "intent-staged"
+			if got := strings.Contains(toolText(t, resp), "board committed;"); got != committed {
+				t.Fatalf("wrong commitment report: %s", resp)
+			}
+			if got := len(effectsRecords(t, f, f.replyA)); got != map[bool]int{false: 0, true: 1}[committed] {
+				t.Fatalf("effects after %s: %d", stage, got)
+			}
+			f.server.sessions.boardFault = nil
+			whiteboardMkdirAll = original
+			board, err := f.server.sessions.readWhiteboard(f.keyA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if committed {
+				if board.Whiteboard == nil || len(board.Whiteboard.Items) != 1 || board.Whiteboard.EntrySeq != 2 {
+					t.Fatalf("committed board not recovered once: %+v", board.Whiteboard)
+				}
+				wb.update(t, ``) // repair only the HTML, never resend commands
+				if len(effectsRecords(t, f, f.replyA)) != 1 {
+					t.Fatal("recovery/render repair duplicated projection")
+				}
+			} else if board.Whiteboard != nil {
+				t.Fatalf("failed intent install committed a board: %+v", board.Whiteboard)
+			}
+		})
+	}
+}
+
+func TestWhiteboardEffectsAppendFailureDoesNotRollbackOrReplay(t *testing.T) {
+	f := newLiveFixture(t, true)
+	wb := effectsWhiteboardFixture(f)
+	attempts := 0
+	previous := setLiveSeams(func(seam *liveSeams) {
+		seam.appendRing = func(string, []wslive.RingEntry) error { attempts++; return errors.New("append denied") }
+	})
+	t.Cleanup(func() { setLiveSeams(func(seam *liveSeams) { *seam = previous }) })
+	wb.update(t, `<wb:topic name="gap"><wb:add class="check"><wb:title>Still committed</wb:title></wb:add></wb:topic>`)
+	if attempts != 1 || len(effectsRecords(t, f, f.replyA)) != 0 {
+		t.Fatal("unexpected append attempts/history")
+	}
+	setLiveSeams(func(seam *liveSeams) { *seam = previous })
+	board, err := f.server.sessions.readWhiteboard(f.keyA)
+	if err != nil || board.Whiteboard == nil || board.Whiteboard.Counter != 1 {
+		t.Fatalf("append failure rolled back board: %+v %v", board.Whiteboard, err)
+	}
+	wb.update(t, ``)
+	if len(effectsRecords(t, f, f.replyA)) != 0 {
+		t.Fatal("render-only repair promised projection replay")
+	}
+}
+
+func TestWhiteboardEffectsAcceptedCommitToRingCrashGap(t *testing.T) {
+	f := newLiveFixture(t, true)
+	var observed boardMutationObservation
+	// Model a process stopping after the synced board decision and before
+	// handleWhiteboardUpdate calls recordWhiteboardEffects. No outbox exists.
+	err := f.server.sessions.mutateRecordPartsObserved(f.keyA, partAll, partWhiteboard, func(rec *sessionRecord) error {
+		_, problems := wswhiteboard.Apply(rec.Whiteboard, `<wb:topic name="gap"><wb:log>Committed without projection</wb:log></wb:topic>`, wswhiteboard.Env{})
+		if len(problems) != 0 {
+			t.Fatalf("apply: %v", problems)
+		}
+		return nil
+	}, &observed)
+	if err != nil || !observed.Committed || observed.Published {
+		t.Fatalf("boundaries: %+v %v", observed, err)
+	}
+	// A new server and render-only call do not reconstruct historical effects.
+	f.server = NewServer(f.root, "test")
+	effectsWhiteboardFixture(f).update(t, ``)
+	if len(effectsRecords(t, f, f.replyA)) != 0 {
+		t.Fatal("accepted crash gap was silently closed by replay")
+	}
+	if _, err := os.Stat(filepath.Join(whiteboardFolder(f.root, f.keyA).Dir, "outbox.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("unexpected projection outbox")
+	}
+}
+
+func TestWhiteboardEffectsConcurrentLegacyRingWriters(t *testing.T) {
+	f := newLiveFixture(t, true)
+	var wg sync.WaitGroup
+	const n = 12
+	for i := 0; i < n; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			f.server.recordWhiteboardEffects(f.keyA, []wswhiteboard.Effect{{Kind: "log", Topic: "one", EntryID: "e1", Field: "text", After: "effect"}})
+		}()
+		go func() {
+			defer wg.Done()
+			if err := wslive.AppendRing(wslive.RingDir(f.sessionDir(f.replyA)), []wslive.RingEntry{{Kind: wslive.RingUser, Text: "legacy"}}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if all := readLiveRing(t, f.sessionDir(f.replyA)); len(all) != n*2 || len(effectsRecords(t, f, f.replyA)) != n {
+		t.Fatalf("concurrent ring entries lost: %d", len(all))
+	}
+}
