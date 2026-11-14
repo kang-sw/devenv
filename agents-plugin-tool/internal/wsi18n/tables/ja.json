@@ -150,6 +150,7 @@
   "js.card.min": "カードに戻る (Esc)",
   "js.card.back": "ボードに戻る (Esc)",
   "js.card.pin": "ピン留め",
+  "js.card.raise": "最上部へ移動",
   "js.chip.remove": "この回答を削除",
   "js.chip.tnote.open": "このトピックメモをボードで表示",
   "js.chip.tnote.remove": "このトピックメモを削除",

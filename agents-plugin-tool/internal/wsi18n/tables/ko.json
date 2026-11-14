@@ -150,6 +150,7 @@
   "js.card.min": "카드로 돌아가기 (Esc)",
   "js.card.back": "보드로 돌아가기 (Esc)",
   "js.card.pin": "고정",
+  "js.card.raise": "맨 위로 올리기",
   "js.chip.remove": "이 답변 제거",
   "js.chip.tnote.open": "보드에서 이 주제 메모 보기",
   "js.chip.tnote.remove": "이 주제 메모 제거",

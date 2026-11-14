@@ -150,6 +150,7 @@
   "js.card.min": "返回卡片 (Esc)",
   "js.card.back": "返回看板 (Esc)",
   "js.card.pin": "釘選",
+  "js.card.raise": "移至頂部",
   "js.chip.remove": "移除此回答",
   "js.chip.tnote.open": "在看板上顯示此主題備註",
   "js.chip.tnote.remove": "移除此主題備註",

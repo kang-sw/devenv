@@ -150,6 +150,7 @@
   "js.card.min": "Volver a la tarjeta (Esc)",
   "js.card.back": "Volver al tablero (Esc)",
   "js.card.pin": "Fijar",
+  "js.card.raise": "Mover al principio",
   "js.chip.remove": "quitar esta respuesta",
   "js.chip.tnote.open": "mostrar esta nota del tema en el tablero",
   "js.chip.tnote.remove": "quitar esta nota del tema",
