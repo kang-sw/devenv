@@ -33,9 +33,10 @@ MAIN's EXEC2 contract, section 675 and latest override (2026-11-14T11:41:17Z),
   the feature to the lead. Subagents are fully outside scope, not a later slice.
   IDs 713 and 714 belong to MAIN's broader answer batch; no additional meaning
   is inferred for this ticket.
-- The owner requested a conversation-view mockup. MAIN commissioned the Pi
-  designer; the forthcoming approved UI reference must be copied into this
-  ticket's tracked assets directory and linked here before UI readiness.
+- The owner approved the conversation mockup, verbatim **`717=ok`**, relayed by
+  MAIN at 2026-11-14T12:07:54Z and 12:10:16Z. The unchanged HTML and both supplied
+  screenshots are attached below as the UI basis. The approval does not settle
+  storage fields, durability or interrupted-partial treatment.
 - Intended compatibility: **T0 additive**. Preserve existing protocol/API
   semantics; a mechanism requiring T2, a protocol change, or a minor bump must
   stop and return to MAIN for explicit owner approval, not silently proceed.
@@ -46,6 +47,24 @@ MAIN's EXEC2 contract, section 675 and latest override (2026-11-14T11:41:17Z),
   ticket-to-implementation without another owner promotion wait. This capture
   does not run fact population, Sage, promotion, or implementation. Voice remains
   idea-only and is not bundled into this feature.
+
+## Approved UI Reference
+
+Owner approval: `717=ok`. Files copied unchanged from MAIN's
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/shared/mockups/live-reasoning-675/`:
+
+- [Interactive mockup](../assets/261114-feat-ws-live-reasoning-summary/mockup.html)
+- [1280-wide reference](../assets/261114-feat-ws-live-reasoning-summary/mockup-1280.png)
+- [360-wide reference](../assets/261114-feat-ws-live-reasoning-summary/mockup-360.png)
+
+The approved assets, not inferred height/layout rules, define the visual basis.
+Implementation verification must capture the actual conversation UI at both
+reference widths and compare the results side by side with these supplied
+screenshots: live summary, ordinary unsupported/no-text fallback, and retained
+completed summary in collapsed and expanded states. The HTML was read in full
+and both screenshots inspected; source/destination SHA-256 hashes and bytewise
+comparison matched for all three files. No implementation result exists yet, so
+attachment verification is not a claim of implemented visual conformance.
 
 ## Evidence and Prior Art
 
@@ -132,15 +151,19 @@ escalating an actual product choice.
   write-preservation contract. Preserve summary provenance; do not repurpose
   reply/caption semantics or settle a wire event, store/schema, SDK upgrade or
   migration by implication. Retained completed history is required, not optional.
-- **Lifecycle details pending:** distinguish completed summaries from interrupted
-  partials and specify how source facts survive end/abort/error/retry, reset,
-  reconnect and process loss. Partial-history treatment, persistence boundary,
-  retention limits and recovery guarantees need a concrete technical proposal;
-  do not invent them as approved defaults.
-- **UI basis pending:** receive the designer's mockup and owner approval, attach
-  the approved asset under `ai-docs/tickets/assets/261114-feat-ws-live-reasoning-summary/`,
-  then bind presentation/expansion/scroll behavior and visual verification to it.
-  No subagent surface or speculative fallback text is permitted.
+- **725 — Pending, unanswered: history commit boundary.** Option (a) commits
+  retained summaries at the natural turn-history boundary, explicitly allowing
+  loss before that commit; option (b) requires durable mid-turn retention.
+  MAIN's recommendation is (a), not an owner answer.
+- **726 — Pending, unanswered: interrupted partials.** Option (a) retains the
+  observed partial prefix with its actual abort/fail/incomplete label; option
+  (b) retains completed summaries only. MAIN's recommendation is (a), not an
+  owner answer.
+
+IDs 725 and 726 are minted but unanswered; keep the decision/readiness gate
+until both settle. MAIN's reported global maximum is 726; this ticket mints no
+IDs. The storage-field proposal remains technical preparation, not a Decision.
+The approved UI basis is attached, but does not waive these remaining gates.
 
 ## Constraints
 
@@ -158,8 +181,9 @@ After the decision queue and design/readiness gates clear, implement the agreed
 bounded lead-only provider-summary path into live activity and retained completed
 conversation history, preserving ordinary replies, tools, activity and turn
 accounting. Use the first verified explicit-summary modes with ordinary activity
-fallback elsewhere. Subagents are excluded entirely. Attach the approved mockup
-before UI readiness; keep unsupported summary data absent, never speculative.
+fallback elsewhere. Subagents are excluded entirely. Follow the attached
+717-approved UI basis, retain the pending 725/726 gate, and keep unsupported
+summary data absent, never speculative.
 
 Verification must cover ordered/interleaved summary parts, authoritative end,
 normal progress and reply/tool transitions, abort/error/retry, no-summary and
@@ -172,12 +196,13 @@ rules. Negative tests must prove subagent summaries, non-summary thinking,
 signatures/encrypted content and private data never enter the new
 snapshot/history/UI path. Pin exact versioned fixtures, exercise old/new
 compatibility, redaction/escaping, bounded buffering and nonblocking/debounced
-delivery. Run the
-project's applicable Pi tests (`npm test` in `agents-plugin-pi`) and Go suite
-(`go test ./...` in `agents-plugin-tool`), plus dashboard render/browser evidence
-for the approved presentation, including side-by-side result/mockup comparison;
+delivery. Run the project's applicable Pi tests (`npm test` in
+`agents-plugin-pi`) and Go suite (`go test ./...` in `agents-plugin-tool`), plus
+dashboard render/browser evidence
+for the approved presentation, including actual 1280/360-width result captures
+compared side by side with the attached 717-approved screenshots;
 perform no live/provider request merely for capture. Durability/recovery tests
-must prove the confirmed retained-history requirement and any explicitly settled
-partial-summary rules, not invented storage defaults. During this documentation
-and technical-design preparation, run no builds, code tests, browser work or
-probes while EXEC1 owns the heavy shared verification slot.
+must prove the confirmed retained-history requirement and the eventual answers
+to 725 and 726, not invented storage defaults. During this attachment/capture
+step, run no builds, code tests, browser work, provider requests, probes or daemon
+actions; EXEC2's verification slot is reserved exclusively for 649's six cases.
