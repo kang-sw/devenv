@@ -517,7 +517,7 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 	return view
 }
 
-// sortRailRows orders live sessions by registration, newest first: the
+// sortRailRows orders live sessions by registration, oldest first: the
 // order does not move with heartbeats or activity, so a row stays where the
 // user last saw it (the rail layout orders the rows after it,
 // orderRailView).
@@ -525,7 +525,7 @@ func sortRailRows(rows []RailRow, regs map[string]Registration) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		a, b := regs[rows[i].ReplyID].RegisteredAt, regs[rows[j].ReplyID].RegisteredAt
 		if a != b {
-			return a > b
+			return a < b
 		}
 		return rows[i].ReplyID < rows[j].ReplyID
 	})

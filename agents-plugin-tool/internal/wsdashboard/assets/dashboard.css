@@ -1680,7 +1680,10 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rwt { padding: 4px 0 2px; }
 .rail .rwt.empty .wthd { opacity: .6; }
 .rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
+.rail .wthd { cursor: grab; -webkit-user-select: none; user-select: none; }
 .rail .wthd .i { width: 12px; height: 12px; }
+.rail .wthd .wtroot { display: inline-flex; flex: 0 0 auto; }
+.rail .wthd .wtroot .i { width: 10px; height: 10px; }
 .rail .wthd .br { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .rail .wthd .wf { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .rail .wthd .gs { margin-left: auto; font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -1705,8 +1708,8 @@ a[data-wl="file"]:not([href]) { color: inherit; }
    drags a bar and opens a row's own menu (the rail row menu); the dragged
    one dims and a line shows where it lands */
 .rail .rs { -webkit-user-select: none; user-select: none; }
-.rail .rs, .rail .wsbar { -webkit-touch-callout: none; }
-.rail .rs.rdrag, .rail .rws.rdrag { opacity: .45; }
+.rail .rs, .rail .wsbar, .rail .wthd { -webkit-touch-callout: none; }
+.rail .rs.rdrag, .rail .rwt.rdrag, .rail .rws.rdrag { opacity: .45; }
 .rdragging, .rdragging * { cursor: grabbing !important; }
 .rdrop { position: fixed; z-index: 46; height: 2px; border-radius: 1px; background: var(--wb-primary); opacity: .7; pointer-events: none; }
 /* a live row's grip, the only part of a row that drags (the rest is its

@@ -6701,9 +6701,9 @@
   var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 48;
   var rdragged = false, rdLineEl = null, rdHintEl = null, rdKidEl = null, rdRaf = 0;
   function rdPeers(item) {
-    var ws = item.classList.contains("rws");
+    var ws = item.classList.contains("rws"), wt = item.classList.contains("rwt");
     return Array.prototype.filter.call(item.parentNode.children, function (c) {
-      return ws ? c.classList.contains("rws") : c.classList.contains("rs") && !c.classList.contains("ended") && WsRail.starred(c) === WsRail.starred(item);
+      return ws ? c.classList.contains("rws") : wt ? c.classList.contains("rwt") : c.classList.contains("rs") && !c.classList.contains("ended") && WsRail.starred(c) === WsRail.starred(item);
     });
   }
   function rdLine(box) {
@@ -6831,10 +6831,13 @@
     rdKid(null);
     if (!rdItem(d)) { rdHint(""); rdLine(null); return; }
     if (d.item.classList.contains("rs")) { rdRow(d, doc.elementFromPoint(x, y), x, y, lr); return; }
-    rdHint("");
+    var wt = d.item.classList.contains("rwt");
+    var why = wt ? WsRail.dropRefusal(d.item, doc.elementFromPoint(x, y)) : "";
+    rdHint(why, x, y);
+    if (why) { rdLine(null); return; }
     var peers = rdPeers(d.item), at = peers.length, i;
     for (i = 0; i < peers.length; i++) {
-      var r = peers[i].getBoundingClientRect();
+      var r = (wt ? peers[i].querySelector(".wthd") : peers[i]).getBoundingClientRect();
       if (y < r.top + r.height / 2) { at = i; break; }
     }
     var me = peers.indexOf(d.item);
@@ -6865,9 +6868,9 @@
       item = grip.closest(".rs");
       if (!item || !railEl.contains(item) || item.classList.contains("ended") || item.parentNode.closest(".rended")) return;
     } else {
-      var b = t.closest("button"), bar = t.closest(".wsbar");
-      if ((b && !b.classList.contains("wstog")) || !bar || !railEl.contains(bar)) return;
-      item = bar.closest(".rws");
+      var b = t.closest("button"), hd = t.closest(".wthd"), bar = hd || t.closest(".wsbar");
+      if ((b && (hd || !b.classList.contains("wstog"))) || !bar || !railEl.contains(bar)) return;
+      item = bar.closest(hd ? ".rwt" : ".rws");
       if (!item || rdPeers(item).length < 2) return;
     }
     var touch = e.pointerType === "touch";
@@ -6942,13 +6945,14 @@
     });
     layoutSave(z.op, function () { undo(); railMarks(); });
   }
-  // rdSave drops a workspace item next to ref (WsRail.drop) and posts the
-  // move (wsmove), with an undo that puts the item back where it stood.
+  // rdSave drops a workspace or complete worktree group next to ref and
+  // posts wsmove/wtmove, with an undo that restores the whole subtree.
   function rdSave(item, ref, after) {
     var box = item.parentNode, next = item.nextSibling;
     if (!WsRail.drop(item, ref, after)) return;
-    var ws = item.classList.contains("rws"), attr = ws ? "data-ws" : "data-rid";
-    var body = ws ? { op: "wsmove", path: item.getAttribute(attr) || "" } : { op: "move", rid: item.getAttribute(attr) || "" };
+    var wt = item.classList.contains("rwt"), attr = wt ? "data-g" : "data-ws";
+    var body = { op: wt ? "wtmove" : "wsmove", path: item.getAttribute(attr) || "" };
+    if (wt) body.workspace = item.closest(".rws").getAttribute("data-ws") || "";
     body[after ? "after" : "before"] = ref.getAttribute(attr) || "";
     layoutSave(body, function () {
       if (box.isConnected && item.isConnected) box.insertBefore(item, next && next.parentNode === box ? next : null);
@@ -6964,7 +6968,7 @@
     // so a release it never hears does not hold the rail's swaps.
     window.addEventListener("blur", function () { rdEnd(null); });
     railEl.addEventListener("click", function (e) { if (rdragged) { e.preventDefault(); e.stopPropagation(); } }, true);
-    railEl.addEventListener("dragstart", function (e) { if (e.target.closest && e.target.closest(".rs, .wsbar")) e.preventDefault(); });
+    railEl.addEventListener("dragstart", function (e) { if (e.target.closest && e.target.closest(".rs, .wsbar, .wthd")) e.preventDefault(); });
     // A dragged touch is a drag, not a scroll or the long-press menu.
     railEl.addEventListener("touchmove", function (e) { if (rdrag && rdrag.on) e.preventDefault(); }, { passive: false });
     railEl.addEventListener("contextmenu", function (e) { if (rdrag && rdrag.touch) e.preventDefault(); });

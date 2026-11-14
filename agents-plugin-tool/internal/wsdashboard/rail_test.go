@@ -51,7 +51,7 @@ func railWT(t *testing.T, ws RailWorkspace, path string) RailWorktree {
 // pooled worktree only while it holds a session, never a prunable one; a
 // session in a subfolder sits under its worktree, one in a worktree no list
 // names yet gets a worktree of its own; a plain folder lists its sessions
-// directly; live rows go newest registration first, ended ones fold apart,
+// directly; live rows go oldest registration first, ended ones fold apart,
 // newest first, and stay listed past the index page's ended window.
 func TestRailViewGroupsSessionsByWorkspaceAndWorktree(t *testing.T) {
 	now := time.Now()
@@ -98,8 +98,8 @@ func TestRailViewGroupsSessionsByWorkspaceAndWorktree(t *testing.T) {
 		t.Errorf("worktrees = %v, want %v (root first, the spare pooled and the prunable one hidden)", paths, want)
 	}
 	root := railWT(t, ws, repo)
-	if !root.Root || root.Branch != "develop" || strings.Join(railIDs(root.Sessions), " ") != "newroot oldroot" {
-		t.Errorf("root worktree = %+v, want develop with newroot then oldroot", root)
+	if !root.Root || root.Branch != "develop" || strings.Join(railIDs(root.Sessions), " ") != "oldroot newroot" {
+		t.Errorf("root worktree = %+v, want develop with oldroot then newroot", root)
 	}
 	feat := railWT(t, ws, "/w/feature")
 	if feat.Empty() || len(feat.Sessions) != 0 || strings.Join(railIDs(feat.Ended), " ") != "endedfeat oldended" {
@@ -200,8 +200,8 @@ func TestRailViewShowsStoredWorkspaces(t *testing.T) {
 	if got := railIDs(byPath["/w/projects"].Sessions); strings.Join(got, " ") != "loose" {
 		t.Errorf("stored folder's sessions = %v, want loose only", got)
 	}
-	if got := railIDs(byPath["/w/projects/notes"].Sessions); strings.Join(got, " ") != "deep exact" {
-		t.Errorf("nested stored folder's sessions = %v, want deep then exact", got)
+	if got := railIDs(byPath["/w/projects/notes"].Sessions); strings.Join(got, " ") != "exact deep" {
+		t.Errorf("nested stored folder's sessions = %v, want exact then deep", got)
 	}
 	if empty := byPath["/w/empty-folder"]; empty.Repo || len(empty.Sessions) != 0 || len(empty.Worktrees) != 0 {
 		t.Errorf("stored folder without a session = %+v, want an empty bar", empty)
