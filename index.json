@@ -482,6 +482,9 @@
     "261114-bug-ws-history-deep-link-capsule-offset-lag": {
       "registered_at": "2026-11-14T11:33:20Z"
     },
+    "261114-bug-ws-hosted-close-copy-conflicts-with-reopen": {
+      "registered_at": "2026-11-14T13:13:06Z"
+    },
     "261114-bug-ws-hosted-pi-default-resource-key-compat": {
       "registered_at": "2026-11-14T11:45:01Z"
     },
