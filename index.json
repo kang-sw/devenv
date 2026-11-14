@@ -524,7 +524,14 @@
       "registered_at": "2026-11-13T16:39:01Z"
     },
     "261114-feat-ws-dashboard-selection-mention-note": {
-      "registered_at": "2026-11-14T08:45:52Z"
+      "registered_at": "2026-11-14T08:45:52Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "docs/settled-common-contracts-660-665",
+        "phase": "active",
+        "touched_at": "2026-11-14T09:02:39Z"
+      }
     },
     "261114-feat-ws-dashboard-shared-card-actions": {
       "registered_at": "2026-11-14T08:45:52Z",
