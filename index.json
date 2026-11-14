@@ -530,7 +530,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "docs/settled-common-contracts-660-665",
         "phase": "active",
-        "touched_at": "2026-11-14T09:02:39Z"
+        "touched_at": "2026-11-14T09:03:43Z",
+        "impl": {
+          "branch": "impl/docs/settled-common-contracts-660-665/flap-brink-slang"
+        }
       }
     },
     "261114-feat-ws-dashboard-shared-card-actions": {
