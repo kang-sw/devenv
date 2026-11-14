@@ -30,8 +30,9 @@ notation (relative where ago.js runs, through data-at), the local date and
 time as the hover title. An agent line is marked as one, its clock before the
 relative time where that runs. An open topic's agent line rides in its head
 (plain text there); a legacy recap shows as a card under the head; once the
-topic is closed either folds inside the body's fold. */}}
-{{define "recap"}}<div class="trecap"{{with .LatestAgent}} data-entry="{{.ID}}" data-kind="agent"{{end}}>{{with .RecapAt}}<span class="rat" title="{{$.RecapStamp}}">{{if $.LatestAgent}}<span class="evi lead" title="{{t "wb.stream.agent"}}">L</span>{{if $.Page.Full}}{{$.RecapClock}} · {{end}}{{else}}{{t "wb.recap"}} {{end}}<time class="tago" datetime="{{.}}"{{if $.Page.Full}} data-at="{{$.RecapMs}}"{{end}}>{{$.RecapClock}}</time></span> — {{end}}<div class="rtext md" title="{{if .LatestAgent}}{{.LatestAgent.Text}}{{else}}{{.Recap}}{{end}}">{{.Page.RecapHTML .TopicView}}</div></div>{{end}}
+topic is closed either folds inside the body's fold. On the full page an agent
+line is a button: stream.js jumps to its log row (data-entry). */}}
+{{define "recap"}}<div class="trecap"{{with .LatestAgent}} data-entry="{{.ID}}" data-kind="agent"{{if $.Page.Full}} role="button" tabindex="0"{{end}}{{end}}>{{with .RecapAt}}<span class="rat" title="{{$.RecapStamp}}">{{if $.LatestAgent}}<span class="evi lead" title="{{t "wb.stream.agent"}}">L</span>{{if $.Page.Full}}{{$.RecapClock}} · {{end}}{{else}}{{t "wb.recap"}} {{end}}<time class="tago" datetime="{{.}}"{{if $.Page.Full}} data-at="{{$.RecapMs}}"{{end}}>{{$.RecapClock}}</time></span> — {{end}}<div class="rtext md" title="{{if .LatestAgent}}{{.LatestAgent.Text}}{{else}}{{.Recap}}{{end}}">{{.Page.RecapHTML .TopicView}}</div></div>{{end}}
 
 {{/* The dashboard's whole-card fold owns the topic body. Standalone pages
 retain their content disclosure; inner history/panel disclosures are separate. */}}

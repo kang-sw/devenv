@@ -785,6 +785,54 @@
   }
 })();
 
+/* Recap jump: a topic's recap button names the log row it summarizes
+   (data-entry, its latest agent line). A click or Enter/Space reveals that
+   row through the shared history loader (opening its disclosures, clearing
+   the sticky head) and replays the latest-log blink. A drag or multi-click
+   selects recap text instead, and controls inside the recap keep their own
+   behavior. Document-level, so board swaps need no rebinding. */
+(function () {
+  if (window.wbRecapJump) return;
+  var BUTTON = '.trecap[data-entry][role="button"]', press = null;
+  function recapOf(n) { return n && n.closest ? n.closest(BUTTON) : null; }
+  function reduced() { return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  function jump(recap) {
+    var topic = recap.closest('.topic'), history = window.wbHistory;
+    if (!topic || !history || !history.loadTarget) return null;
+    // A dashboard card fold hides the whole topic; reveal it before geometry.
+    var unfold = window.WsCards && window.WsCards.unfoldTopic;
+    var row = history.loadTarget(topic, recap.getAttribute('data-entry'), unfold);
+    if (row && !reduced()) {
+      window.clearTimeout(row._wbRecapBlink);
+      row.classList.remove('wb-log-blink'); void row.offsetWidth; row.classList.add('wb-log-blink');
+      row._wbRecapBlink = window.setTimeout(function () { row.classList.remove('wb-log-blink'); }, 3000);
+    }
+    return row;
+  }
+  document.addEventListener('pointerdown', function (e) {
+    press = recapOf(e.target) ? { x: e.clientX, y: e.clientY } : null;
+  }, true);
+  document.addEventListener('click', function (e) {
+    var recap = recapOf(e.target), at = press;
+    press = null;
+    if (!recap || e.defaultPrevented || e.button || e.detail > 1) return;
+    var inner = e.target.closest('a[href], button, input, textarea, select, summary, label, [contenteditable]');
+    if (inner && recap.contains(inner)) return;
+    if (at && Math.abs(e.clientX - at.x) + Math.abs(e.clientY - at.y) > 4) return;
+    var sel = window.getSelection && window.getSelection();
+    if (sel && !sel.isCollapsed && sel.rangeCount && sel.getRangeAt(0).intersectsNode(recap)) return;
+    jump(recap);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    if (e.isComposing || e.repeat || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!e.target || !e.target.matches || !e.target.matches(BUTTON)) return;
+    e.preventDefault();
+    jump(e.target);
+  });
+  window.wbRecapJump = { jump: jump };
+})();
+
 /* Latest agent arrival: state belongs to the page, not to replaceable board
    nodes. Initial content (including inert history) is never an arrival. */
 (function () {

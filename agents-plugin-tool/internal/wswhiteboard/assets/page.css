@@ -430,6 +430,11 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 /* Inline role/media boxes must fit the same line grid as the recap text. */
 .tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }
 .tsub > .trecap :is(img, svg) { max-height: 1em; width: auto; vertical-align: middle; }
+/* A recap naming its log row jumps there (stream.js). contain: paint clips
+   an outer outline, so the focus ring is drawn inside. */
+.trecap[role="button"] { cursor: pointer; }
+.tsub > .trecap[role="button"]:hover { color: var(--wb-fg); }
+.trecap[role="button"]:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
 .ckpill { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; min-width: 0; max-width: 100%; }
 .ckbtn { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: normal; overflow-wrap: anywhere; }
 button.ckbtn { cursor: pointer; }
