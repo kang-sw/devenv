@@ -669,6 +669,9 @@ details.entry-panel[data-max] > summary { background: var(--wb-bg); cursor: defa
 section.topic[data-max] > .tophead > .tbar > .d-max, section.topic[data-max] > .tophead > .tbar > .tpin, details.entry-panel[data-max] > summary > .d-max { display: none; }
 section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-max] > summary > .d-min { display: inline-grid; }
 @media (max-width: 640px) { section.topic[data-max], details.entry-panel[data-max] { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
+/* A board topic far from the view skips its rendering (content-visibility), from its first band report on (data-wbcv, dashboard.js's viewport bands): it has been laid out once by then, so it keeps its own last size (auto) rather than the 600px placeholder, which only a topic never laid out takes. A maximized topic, and one holding a maximized panel, is fixed to the window, which the containment would break. */
+section.topic[data-topic] { contain-intrinsic-size: auto 600px; }
+section.topic[data-topic][data-wbcv]:not([data-max]):not(:has(details.entry-panel[data-max])) { content-visibility: auto; }
 @media (prefers-reduced-motion: reduce) { .bcard.flash .bc-in { animation: none; } .bc-grip::after { transition: none; } }
 
 /* ===== overview picker (overview.js) =====
