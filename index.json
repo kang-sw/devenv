@@ -539,7 +539,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "docs/compact-floating-toolbar-652",
         "phase": "active",
-        "touched_at": "2026-11-14T08:57:12Z"
+        "touched_at": "2026-11-14T08:58:25Z",
+        "impl": {
+          "branch": "impl/docs/compact-floating-toolbar-652/shy-ovary-tarot"
+        }
       }
     },
     "261114-feat-ws-whiteboard-history-centered-header": {
