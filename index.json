@@ -553,7 +553,14 @@
       "registered_at": "2026-11-14T02:14:24Z"
     },
     "261114-feat-ws-content-change-relative-hover": {
-      "registered_at": "2026-11-14T11:47:01Z"
+      "registered_at": "2026-11-14T11:47:01Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "feat/content-change-hover-677",
+        "phase": "active",
+        "touched_at": "2026-11-14T13:30:30Z"
+      }
     },
     "261114-feat-ws-conversation-audit-event-store": {
       "registered_at": "2026-11-13T16:33:10Z"
