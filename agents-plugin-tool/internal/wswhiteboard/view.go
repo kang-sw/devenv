@@ -213,9 +213,9 @@ type TopicView struct {
 	// Tickets are the topic's linked tickets, in the order the lead wrote
 	// them, each with the status ViewInput.Tickets resolved at render time.
 	Tickets []TicketBadge
-	// Live marks a topic with live work: at least one linked ticket still
-	// idea, todo, or ready whose category is actionable (liveCategories).
-	// The page gives it a glow.
+	// Live retains the legacy ticket-derived work marker: at least one linked
+	// actionable ticket still idea, todo, or ready. The board no longer renders
+	// linked-ticket badges or their glow; this is non-visible view metadata.
 	Live bool
 }
 
@@ -230,9 +230,9 @@ const (
 	TicketUnknown = "unknown"
 )
 
-// liveCategories are the ticket categories (a stem's second segment) whose
-// open tickets light a topic's glow: work to carry out. A linked research or
-// epic ticket still shows as a badge, but never makes a topic live.
+// liveCategories are the actionable ticket categories (a stem's second
+// segment) that set the legacy Live view metadata. Research and epic tickets
+// retain resolved metadata without setting Live.
 var liveCategories = []string{"feat", "bug", "refactor", "chore"}
 
 // TicketResolver resolves a linked ticket stem to its status: the status

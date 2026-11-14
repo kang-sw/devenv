@@ -47,10 +47,24 @@ func TestTopicHashCoversTheRenderedSection(t *testing.T) {
 	if again := hash(newPageData(view, a, true), topic); again != base {
 		t.Errorf("an unchanged topic's data-th changed: %s, then %s", base, again)
 	}
-	live := topic
-	live.Live = true
-	if hash(newPageData(view, a, true), live) == base {
-		t.Errorf("data-th unchanged when only the section's class (live) changed")
+	quiet := topic
+	quiet.Quiet = !topic.Quiet
+	if hash(newPageData(view, a, true), quiet) == base {
+		t.Errorf("data-th unchanged when only the section's class (quiet) changed")
+	}
+	linked := topic
+	linked.Live = true
+	linked.Tickets = []TicketBadge{{Stem: "261112-feat-live", Name: "feat-live", Status: TicketTodo}}
+	if hash(newPageData(view, a, true), linked) != base {
+		t.Error("hidden ticket badges and live metadata changed data-th")
+	}
+	mustApply(t, st, `<wb:topic name="one" tickets="261112-feat-live"/>`)
+	linkedView := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Tickets: fakeTickets{"261112-feat-live": TicketTodo}})
+	if !linkedView.Topics[0].Live || len(linkedView.Topics[0].Tickets) != 1 {
+		t.Fatal("linked topic lost internal ticket metadata")
+	}
+	if hash(newPageData(linkedView, a, true), linkedView.Topics[0]) != base {
+		t.Error("a tickets-only update changed the rendered topic hash")
 	}
 	closed := topic
 	closed.Closed = true
