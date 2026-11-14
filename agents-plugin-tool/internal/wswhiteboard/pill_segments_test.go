@@ -74,6 +74,12 @@ check("bottom tooltips", bot.querySelectorAll(".oq-seg").map(function (b) { retu
 check("arrows", [top.children[0].textContent, bot.children[0].textContent], ["↑", "↓"]);
 press(top, "open"); press(top, "ans"); press(top, "nt"); press(bot, "open"); press(bot, "ans");
 check("jumps", jumped, ["a3", "a2", "a2", "b2", "b1"]);
+var followed = [];
+window.wbHistory = { jump: function (el, opt) { followed.push([el.attrs.id, opt.block, opt.behavior]); } };
+press(top, "open"); press(top, "ans"); press(top, "nt"); press(bot, "open"); press(bot, "ans");
+check("every badge segment shares bounded jump following", followed, [["a3", "center", "smooth"], ["a2", "center", "smooth"], ["a2", "center", "smooth"], ["b2", "center", "smooth"], ["b1", "center", "smooth"]]);
+check("delegated navigation does not scroll twice", jumped.length, 5);
+window.wbHistory = null;
 // A delayed visibility report cannot overrule the current positions.
 fire(items.map(function (el) { return { isIntersecting: true, target: el }; }));
 check("stale reports leave top counts alone", shown(top), [["open", "js.pill.open", "2"], ["ans", "js.pill.answered", "1"], ["nt", "js.pill.noted", "1"]]);

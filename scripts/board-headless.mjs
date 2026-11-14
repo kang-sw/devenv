@@ -29,13 +29,15 @@
 //             Terminal POST is browser-local; no shell process is started.
 //             --face-width 266 constrains the production face to the approved
 //             direct-fragment narrow equivalent (not reference typography).
+//   recap-jitter  Content-sized, max-four-line recap/header geometry during pinned-column scroll
+//             and browser-local region updates (serve --history-entries 60).
 //   overview  Folded picker, anchors/restores, interactions, held swaps,
 //             palette picks, storage/reload and reduced motion.
 //   overview-motion  Per-rAF height/slot/ghost traces, concurrent clock,
 //             reverse exit, exact live-rect landing and reduced motion.
 //             Use 1900px as well as 1400/420: PIN_WIDE is 1600px.
 //
-// --case NAME selects an independent overview checkpoint (anchors, picker,
+// --case NAME selects an independent overview checkpoint (recap, anchors, picker,
 // rail, actions, palette, controls, reload), or a motion checkpoint (enter-top, enter-middle,
 // enter-bottom, pins). Without it every check runs; failures stop the run.
 // Focused cases help diagnose a blocker without repeatedly hitting it.
@@ -488,7 +490,8 @@ const IN_PAGE = () => {
   bh.board_ = () => document.getElementById("r-board") || document.querySelector("body.full .grid > main");
   bh.kind = () => (document.body.classList.contains("full") ? "standalone" : document.getElementById("tabbar") ? "adapter" : "board");
   bh.scroller = () => {
-    const c = bh.focus && bh.focus.closest("#bpins") || document.getElementById("bcol");
+    const pins = bh.focus && bh.focus.closest("#bpins");
+    const c = pins && ['auto', 'scroll'].includes(getComputedStyle(pins).overflowY) ? pins : document.getElementById("bcol");
     const oy = c && getComputedStyle(c).overflowY;
     return c && (oy === "auto" || oy === "scroll") && c.scrollHeight > c.clientHeight ? c : document.scrollingElement;
   };
@@ -1061,7 +1064,7 @@ const OVERVIEW_PAGE = () => {
     const ts = bh.topics().slice(-pins);
     ts.forEach((n, i) => WsCards.move(n, { pin: true, index: i }));
     // The serving fixture has body-only topics. Add a real-shaped recap to
-    // one, so the two-line contract is exercised rather than vacuous.
+    // one, so the max-four-line clamp and content-sized header are exercised.
     const n = bh.topics().find((n) => !n.closest('#bpins'));
     if (n && !n.querySelector('.tsub')) {
       const sub = document.createElement('div'); sub.className = 'tsub';
@@ -1070,12 +1073,14 @@ const OVERVIEW_PAGE = () => {
     }
   };
   bh.ovFold = () => items().map((n) => {
-    const head = n.querySelector('.tophead, .bc-hd'), text = n.querySelector('.trecap .rtext');
+    const head = n.querySelector('.tophead, .bc-hd'), text = n.querySelector('.trecap .rtext'), slot = n.querySelector('.tsub > .trecap');
     const bodies = n.matches('.bcard') ? [...n.querySelectorAll('.bc-body, .bc-grip, .bc-folded')] : [...n.children].filter((x) => x !== head);
     return { id: id(n), h: rect(n).height, head: rect(head).height, cv: getComputedStyle(n).contentVisibility,
       hidden: bodies.every((x) => getComputedStyle(x).display === 'none'),
       recap: text && rect(text).height, line: text && parseFloat(getComputedStyle(text).lineHeight),
-      clamp: text && getComputedStyle(text).webkitLineClamp };
+      clamp: text && getComputedStyle(text).webkitLineClamp,
+      slot: slot && rect(slot).height, slotLine: slot && parseFloat(getComputedStyle(slot).lineHeight),
+      slotClamp: slot && getComputedStyle(slot).webkitLineClamp };
   });
   bh.ovRegion = (html) => {
     const hash = 'bhqa' + Date.now().toString(16), ws = bh.sockets.find((s) => s.readyState === 1 && typeof s.onmessage === 'function');
@@ -1173,7 +1178,9 @@ async function checkFold(page) {
   const rows = await page.evaluate(() => window.__bh.ovFold());
   qa(rows.length > 0 && rows.every((r) => r.hidden && r.h <= r.head + 2.01 && r.cv === 'visible'), 'all topics/cards (including offscreen) fold to their headers', rows.filter((r) => !r.hidden || r.h > r.head + 2.01 || r.cv !== 'visible'));
   const recaps = rows.filter((r) => r.recap !== null);
-  qa(recaps.length > 0 && recaps.every((r) => r.clamp === '2' && r.recap <= r.line * 2 + 1), 'existing recap is clamped to at most two lines', recaps);
+  qa(recaps.length > 0 && recaps.every((r) => r.clamp === '4' && r.recap <= r.line * 4 + 1), 'existing recap is clamped to at most four lines', recaps);
+  const slots = rows.filter((r) => r.slot !== null);
+  qa(slots.length > 0 && slots.every((r) => r.slotClamp === '4' && r.slot > 0 && r.slot <= r.slotLine * 4 + 1), 'header recap uses at most four lines', slots);
 }
 
 async function scenarioSharedControls(ctx) {
@@ -1942,6 +1949,95 @@ async function scenarioToolbar(ctx) {
   }
 }
 
+async function scenarioRecapJitter(ctx) {
+  const { page, tab, kind } = await overviewReady(ctx, { seed: false });
+  if (ctx.args.theme) await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, ctx.args.theme);
+  const key = 'LOGCHAIN';
+  // Use renderer-produced agent recap and history markup. Only the text changes
+  // in browser-local stream events; the server and disclosure logic stay intact.
+  const base = await page.evaluate(() => __bh.baseBoard());
+  await page.evaluate(({ html, key }) => {
+    const t = document.createElement('template'); t.innerHTML = html;
+    const n = t.content.querySelector(`section.topic[data-topic="${key}"]`);
+    if (!n?.querySelector('.tsub > .trecap .rtext')) throw new Error('serve --history-entries 60 is required');
+    __bh.recapLong = 'Long recap with enough wrapped text to exceed four lines, retained in the hover title. '.repeat(30);
+    const text = n.querySelector('.rtext'); text.textContent = text.title = __bh.recapLong;
+    n.dataset.th = 'recap-seed';
+    __bh.ovRegion(t.innerHTML);
+  }, { html: base.html, key });
+  await waitQuiet(page);
+  await page.evaluate((key) => {
+    const n = document.querySelector(`section.topic[data-topic="${key}"]`);
+    WsCards.move(n, { pin: true, index: 0 });
+    // The target's folded log is short; real body topics below it make the
+    // pinned column overflow so scroll/stick assertions cannot pass vacuously.
+    for (const [index, topic] of ['T18', 'T17'].entries()) {
+      const tail = document.querySelector(`section.topic[data-topic="${topic}"]`);
+      if (!tail) throw new Error('serve --topics 18 is required');
+      WsCards.move(tail, { pin: true, index: index + 1 });
+    }
+  }, key);
+  await waitQuiet(page);
+  await page.evaluate((key) => {
+    const n = document.querySelector(`section.topic[data-topic="${key}"]`);
+    __bh.focus = n;
+    __bh.scroller().scrollTop = 0;
+  }, key);
+  await waitQuiet(page);
+  await capture(ctx, tab, kind + '-recap-unstuck');
+  const result = await page.evaluate(async (key) => {
+    const bh = __bh, samples = [], updates = [], started = performance.now(), s = bh.scroller();
+    const find = () => document.querySelector(`section.topic[data-topic="${key}"]`);
+    const sample = (phase) => {
+      const n = find(), head = n.querySelector('.tophead'), slot = n.querySelector('.tsub > .trecap');
+      samples.push({ t: performance.now() - started, phase, scroll: s.scrollTop,
+        // Wide pins have CSS-only sticky heads (no rail/wb-stuck class).
+        stuck: head.getBoundingClientRect().top > n.getBoundingClientRect().top + 1,
+        slot: slot.getBoundingClientRect().height,
+        head: head.getBoundingClientRect().height, topic: n.getBoundingClientRect().height,
+        line: parseFloat(getComputedStyle(slot).lineHeight), clamp: getComputedStyle(slot).webkitLineClamp,
+        title: slot.querySelector('.rtext').title.length,
+        fill: getComputedStyle(slot).backgroundColor });
+    };
+    const update = (index) => {
+      const t = document.createElement('template'); t.innerHTML = bh.board.html;
+      const n = t.content.querySelector(`section.topic[data-topic="${key}"]`), text = n.querySelector('.rtext');
+      text.textContent = text.title = index % 2 ? bh.recapLong : 'Short recap.';
+      n.dataset.th = 'recap-update-' + index;
+      bh.ovRegion(t.innerHTML); updates.push(index);
+    };
+    sample('baseline');
+    await new Promise((resolve) => {
+      let next = 0;
+      function tick() {
+        const elapsed = performance.now() - started;
+        // Exercise both stick transitions without reaching the topic's end.
+        s.scrollTop = elapsed < 300 ? 0 : elapsed < 1500 ? 120 : elapsed < 1900 ? 0 : 120;
+        if (next < 4 && elapsed >= 550 + next * 650) update(next++);
+        sample('raf');
+        if (elapsed >= 3300) resolve(); else requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    });
+    // Content updates may change height; only equal-content sticky transitions
+    // must remain stable. Compare short and long recaps independently.
+    const groups = [...new Set(samples.map(r => r.title))].map(title => samples.filter(r => r.title === title));
+    const delta = name => Math.max(...groups.map(rows => Math.max(...rows.map(r => r[name])) - Math.min(...rows.map(r => r[name]))));
+    return { samples, updates, delta: { slot: delta('slot'), head: delta('head'), topic: delta('topic') },
+      stuck: samples.filter((r) => r.stuck).length, unstuck: samples.filter((r) => !r.stuck).length,
+      pincol: document.documentElement.hasAttribute('data-pincol'), scroller: s.id || s.tagName, viewHeight: s.clientHeight };
+  }, key);
+  await capture(ctx, tab, kind + '-recap-stuck', result);
+  qa(ctx.width >= 1600 ? result.pincol && result.scroller === 'bpins' : !result.pincol && result.scroller === 'bcol', 'uses the responsive adapter pinned layout', result.scroller);
+  qa(result.samples.every((r) => result.viewHeight >= r.head), 'pinned viewport can display the full recap/header', { viewHeight: result.viewHeight, head: result.samples[0].head });
+  qa(result.stuck > 0 && result.unstuck > 0 && result.updates.length === 4 && new Set(result.samples.map((r) => r.title)).size === 2,
+    'samples stuck/unstuck states and four live region updates with short/long recap text', { stuck: result.stuck, unstuck: result.unstuck, updates: result.updates });
+  qa(result.samples.every((r) => r.clamp === '4' && Math.abs(r.slot - (r.title === 'Short recap.'.length ? 1 : 4) * r.line) <= 1), 'short recap shrinks to one line; long recap caps at four');
+  qa(result.samples.every(r => r.fill === 'rgba(0, 0, 0, 0)'), 'header recap has no highlight background');
+  qa(Object.values(result.delta).every((d) => d <= 1), 'same-content recap/header/topic has no sticky jitter above 1px', result.delta);
+  log('recap jitter max deltas (px): ' + JSON.stringify(result.delta));
+}
+
 async function setOverviewFace(page, width) {
   if (!width) return;
   await page.evaluate((width) => {
@@ -2088,8 +2184,15 @@ async function scenarioOverview(ctx) {
   await tab.evaluate(() => { window.__ovMessages = []; addEventListener('message', (e) => { if (e.data && e.data.wsShell) __ovMessages.push(e.data); }); });
   await tab.emulateMedia({ reducedMotion: 'reduce' });
   const selected = ctx.args.case;
-  assert(!selected || ['anchors', 'rail', 'picker', 'actions', 'palette', 'controls', 'reload'].includes(selected), 'unknown overview --case');
+  assert(!selected || ['recap', 'anchors', 'rail', 'picker', 'actions', 'palette', 'controls', 'reload'].includes(selected), 'unknown overview --case');
   if (selected) log('focused overview case: ' + selected + ' (other checkpoints not run)');
+  if (selected === 'recap') {
+    await ovEnter(page);
+    await checkFold(page);
+    await capture(ctx, tab, kind + '-recap-overview', await page.evaluate(() => __bh.ovFold()));
+    await ovExit(page);
+    return;
+  }
   if (!selected || selected === 'anchors' || selected === 'rail') {
   if (selected !== 'rail') {
   await page.evaluate(() => { __bh.hints = 0; const show = WsToast.show; WsToast.show = function (text, ...args) { if (text === wsT('js.board.overview.hint')) __bh.hints++; return show.call(this, text, ...args); }; });
@@ -3581,6 +3684,7 @@ const SCENARIOS = {
   toolbar: scenarioToolbar,
   'web-containment': scenarioWebContainment,
   overview: scenarioOverview,
+  'recap-jitter': scenarioRecapJitter,
   'overview-focus': scenarioOverviewFocus,
   'overview-final': scenarioOverviewFinal,
   'overview-motion': scenarioOverviewMotion,
