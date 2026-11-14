@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // The machine session registry: one directory per registered session under
@@ -301,7 +303,7 @@ func WriteRegistration(dir string, reg Registration) error {
 		_ = os.Remove(name)
 		return err
 	}
-	if err := os.Rename(name, filepath.Join(sessionDir, registrationFileName)); err != nil {
+	if err := wsstate.AtomicReplaceFile(name, filepath.Join(sessionDir, registrationFileName)); err != nil {
 		_ = os.Remove(name)
 		return err
 	}

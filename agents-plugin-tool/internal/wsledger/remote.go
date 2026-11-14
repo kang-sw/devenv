@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // Remote sync. The store's bare repository has one remote, "origin". Three
@@ -642,7 +644,7 @@ func (l *Ledger) writePushState(st pushState) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, l.pushStatePath())
+	return wsstate.AtomicReplaceFile(tmp, l.pushStatePath())
 }
 
 // extendDeadline moves the persisted deadline to at least from+delay and

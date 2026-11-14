@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -282,7 +283,11 @@ func TestGitattributesPattern(t *testing.T) {
 	// The rendered pattern must match exactly its own path through git.
 	root := initGitRepo(t)
 	for _, name := range []string{"dir name/odd[1].go", "a*b.go", "plain.go"} {
-		writeLines(t, root, name, 1)
+		// check-attr reads only the path, so the file is optional: Windows
+		// cannot create a name with '*', and its check still runs there.
+		if runtime.GOOS != "windows" || !strings.ContainsAny(name, `*?`) {
+			writeLines(t, root, name, 1)
+		}
 		if err := os.WriteFile(filepath.Join(root, ".gitattributes"), []byte(gitattributesPattern(name)+" -ws-size-guard\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
