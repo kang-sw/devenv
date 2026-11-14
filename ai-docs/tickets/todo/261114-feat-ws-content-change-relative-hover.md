@@ -63,23 +63,79 @@ or daemon activation authority in this authoring pass.
   again, but NEVER a false actual age. This does not relax the general T0
   unknown-field preservation rule. Proof must bind the exact actual body
   mutation batch, with stale/mismatched proof failing closed. Proof loss is
-  not permission to infer trust from existing ChangedAt. Exact proof
-  representation remains an unselected technical design; no field/schema,
-  API, migration, or transient authority is chosen by this ticket.
+  not permission to infer trust from existing ChangedAt. Lead technical
+  settlement selects the portable TopicDoc-local proof contract below,
+  auto-confirming the fact-populator's one technical gap without a new owner
+  question or global ID. No schema/protocol bump, new MCP API, migration,
+  sidecar, or transient authority is selected.
 - Retain existing 617 recap/log inline-time behavior rather than implement it
   twice. Repair it only if current behavioral verification finds it missing:
   author mark and time (owner example `04:08 · 3시간 전`) lead the body inline,
   leaving multiline text the available width rather than a middle time column.
 
+### Selected portable body-time proof
+
+Add optional `TopicDoc.BodyTimeProof`, JSON `body_time_proof,omitempty`:
+
+```json
+{"v":1,"at":"2026-11-14T13:00:00Z","changed":123,"digest":"<sha256>"}
+```
+
+- Validate locally against the current TopicDoc: supported version 1, nonempty
+  body, valid UTC RFC3339 `at` equal to current `ChangedAt`, positive `changed`
+  equal to current body `Changed`, and matching digest. Missing, malformed,
+  unsupported-version or mismatched evidence yields unknown, never a guessed
+  age. Keep existing ChangedAt legacy-backfill semantics unchanged.
+- Digest is lowercase SHA256 of deterministic JSON
+  `["wb-body-time-v1", changed, at, exactBody, orderedMarkPairs]`; mark pairs
+  are `[block, kind]` in stored order, with nil/empty marks normalized to `[]`.
+  Do not normalize body bytes. Time alone permits same-second collisions;
+  body/marks alone permits separate-batch edit-away/edit-back. Validate all
+  components together, with Changed as the existing batch discriminator.
+- Mint only after the final actual net body mutation and timestamp/marks of
+  an accepted Apply batch are established. A backfill-only observation,
+  same-body/no-op/empty/unrelated update must never mint proof. Those paths
+  preserve original proof (including absence); same-batch return-to-base
+  restores original proof with original body metadata. Clear removes proof;
+  a real new nonempty-body mutation creates fresh proof, even without marks.
+- Adoption/rename, relocation, and whole-board copy/restoration preserve the
+  originating body's time/proof when the body is unchanged; they are not new
+  edits. Exclude topic name, labels and board/root paths from the digest.
+  Reject absolute-path/topic scope because it adds portability loss and
+  needless board-context plumbing; reject sidecars because old writers would
+  not erase their independent evidence with typed topic metadata.
+- Adoption plus edit-return in one batch must compare with its logical
+  batch-start body, not lose the origin on rename. Carry this comparison
+  origin only within the batch; no new persisted identity, lease or API.
+- Body-neutral mark changes must not mint age: their digest mismatch becomes
+  unknown. Unsupported proof versions stay unknown on no-op/load/render;
+  only a real new body mutation replaces proof with supported v1 evidence.
+- Body and proof enter the SAME folder intent and durable metadata publication.
+  Pending replay retains their exact committed bytes; callback success alone
+  must not publish a trusted age for an uncommitted body.
+- A TopicDoc-local validator produces ONE optional validated TopicView body
+  timestamp for the header and both framed/unframed gutter paths. Thread no
+  board identity/context for validation. Frames receive the same validated
+  timestamp/unknown state with isolated formatter/i18n support, not parent
+  access or sandbox expansion; do not expose proof as UI authority.
+- This checks accidental stale evidence under supported writers, not
+  cryptographic authenticity. Captured proof from a different batch fails
+  Changed/digest checks; deliberately recomputed self-consistent forgery or
+  full consistent rollback is not detectable or promised. Public digests
+  are not signatures. No MAC or external identity service is authorized.
+
 ## Prior Art
 
-VERIFIED at fact-population baseline: this branch `feat/content-change-hover-677`
-points to `4b88660eec6f1ca045c192116ba7f301a077a4d2`; local develop points to
-`4412b2c672e9e5df776d4573a58dc4e3bc4be783`. Their changes since the shared
-product baseline `9854ff350fa1b0eccfb5c71649c5190c405925b9` are ticket-only;
-there is no whiteboard source diff between them (`git diff --name-only
-9854ff350 HEAD` and `git diff --name-only 9854ff350 develop`; unchanged marker
-implementation: `agents-plugin-tool/internal/wswhiteboard/assets/chg.js#L8-L49`,
+VERIFIED at refreshed fact-population baseline: this branch `feat/content-change-hover-677`
+points to `74170cf6e256e5db1a1c2bdefb3ffd1210cd032f`; local develop points to
+`ec23205525e240bf3d3da2cf36ea3fd4642b2211`. Since the shared product baseline
+`9854ff350fa1b0eccfb5c71649c5190c405925b9`, this branch changes only this ticket;
+develop also changes dashboard selection-note code/tests and i18n tables, not
+whiteboard source (`git diff --name-only 9854ff350 HEAD` and
+`git diff --name-only 9854ff350 develop`). There is still no whiteboard source
+diff between them (`git diff --name-only HEAD develop --
+agents-plugin-tool/internal/wswhiteboard` returned nothing; unchanged markers:
+`agents-plugin-tool/internal/wswhiteboard/assets/chg.js#L8-L49`,
 `agents-plugin-tool/internal/wswhiteboard/assets/page.css#L553-L559`).
 
 - `agents-plugin-tool/internal/wswhiteboard/assets/chg.js`, search
@@ -90,8 +146,13 @@ implementation: `agents-plugin-tool/internal/wswhiteboard/assets/chg.js#L8-L49`,
 - `changes.go`, search `type BlockMark`: persisted markers contain only block
   index `b` and kind `k`. `store.go`, search `setTopicBody` and `TopicDoc`:
   marks represent the latest body-edit batch, with body-specific `ChangedAt`;
-  same-body/no-op edits preserve these, unrelated entry/recap changes do not
-  replace them. This is not a retained per-block history.
+  same-body/no-op and same-batch return-to-base edits preserve existing body
+  marks and time; a missing legacy time can still be backfilled by the accepted
+  update, including an empty command batch (`agents-plugin-tool/internal/wswhiteboard/store.go#L442-L466`,
+  `agents-plugin-tool/internal/wswhiteboard/store.go#L580-L593`,
+  `agents-plugin-tool/internal/wswhiteboard/nudge.go#L26-L46`). Unrelated
+  entry/recap changes do not replace body marks or a nonempty body time. This
+  is not a retained per-block history.
 - `store.go:672` calls `stampChanges(mark, env.Now)` after a successful
   mutation batch. For a body actually changed in that batch, `ChangedAt` is
   that batch's mutation time (UTC RFC3339), shared by its latest-edit marks,
@@ -124,35 +185,61 @@ response included inline recap styling, not proof that all recap entries
 visually satisfy 617. No stable live recap geometry or hover interaction was
 verified.
 
-## Remaining technical gap: batch-bound provenance
+## Remaining readiness: design review and execution evidence
 
 For a known actual mutation batch, existing `ChangedAt` is its actual edit
 time and covers all its current marks; a separate timestamp per block is not
 inherently required by that latest-batch model. However, `BlockMark` stores
 no timestamp or provenance, and `ChangedAt` alone cannot distinguish actual
 mutation from legacy backfill. The inspected representation does not prove
-actual historical body-edit times. The bounded folder-store trace found no
-general body-mutation history establishing those times. One value per topic
+actual historical body-edit times. The folder-store trace found immutable
+system entries for body operations, but no general history binding the current body batch to those times: entries
+carry text and time, not a body hash or body Changed; intermediate edits emit
+entries even when the batch restores its starting body and time
+(`agents-plugin-tool/internal/wswhiteboard/entries.go#L25-L36`,
+`agents-plugin-tool/internal/wswhiteboard/entries.go#L61-L71`,
+`agents-plugin-tool/internal/wswhiteboard/store.go#L450-L466`,
+`agents-plugin-tool/internal/wswhiteboard/store.go#L1078-L1151`). One value per topic
 removes per-mark attribution, not this origin ambiguity. Owner answer 713=b
 settles unknown display; 743=a requires the same trusted body-time value in
 both the header and latest-delta gutter.
 
 `agents-plugin-tool/internal/wswhiteboard/folders.go`, search `folderDecode`,
-`folderJSON`, and `topic.Doc = &copy`: typed old writers can discard unknown
-optional fields. Additive syntax alone does not establish general T0
+`folderJSON`, and `topic.Doc = &copy`: the schema-2 historical writers
+`972766abc` and `e30578dd4`, and this baseline, decode typed TopicDoc values,
+clone State through typed JSON, and reconstruct every topic's metadata on
+publication; an unknown optional TopicDoc proof field is lost on a subsequent
+published update, even an unrelated accepted Apply batch, not preserved stale
+(`git show 972766abc:agents-plugin-tool/internal/wswhiteboard/folders.go`,
+`git show e30578dd4:agents-plugin-tool/internal/wswhiteboard/folders.go`,
+`agents-plugin-tool/internal/wswhiteboard/store.go#L350-L360`,
+`agents-plugin-tool/internal/wswhiteboard/folders.go#L202-L214`,
+`agents-plugin-tool/internal/wswhiteboard/folders.go#L619-L664`). Read-only open
+or an unchanged folder callback need not publish, while pending-intent replay
+publishes its stored exact topic bytes rather than a new mutation
+(`agents-plugin-tool/internal/wswhiteboard/folders.go#L133-L165`,
+`agents-plugin-tool/internal/wswhiteboard/folders.go#L729-L747`). No inspected
+historical writer preserves an unknown TopicDoc proof across a different body
+batch; a sidecar or blind-preservation alternative would have a different
+stale-proof threat. Additive syntax alone does not establish general T0
 preservation; 724=a specifically permits safe loss of this UX proof. Existing
-Seq/Generation values do not prove timestamp origin. No existing persistent
-provenance path has been established, and process-only witnessing is not a
-selected authority or retention model.
+Seq/Generation values do not prove timestamp origin; Changed is nevertheless
+an existing batch discriminator, unlike RFC3339 time, which has only second
+precision (`agents-plugin-tool/internal/wswhiteboard/store.go#L450-L466`,
+`agents-plugin-tool/internal/wswhiteboard/store.go#L580-L593`,
+`agents-plugin-tool/internal/wswhiteboard/nudge.go#L31-L41`). No existing
+persistent provenance path has been established, and process-only witnessing
+is not a selected authority or retention model.
 
-Design must establish actual mutation provenance for new valid body updates,
-bind it to the exact current batch, and fail closed after proof loss or stale
-proof. An old writer dropping proof may produce unknown; an old writer
-preserving stale proof must never authenticate a different mutation. Neither
-observation time, topic-latest time, timestamp coincidence, nor an invented
-historical value is actual edit evidence. The precise proof representation
-and old/new-writer behavior need fresh fact population and design review;
-this technical gap does not defer or remove the confirmed known-age contract.
+The lead has settled the formerly open representation as the portable
+TopicDoc-local proof above. Remaining work is design/completeness review and
+implementation fixture evidence, not an unselected mechanism or owner policy
+gap. An old writer dropping proof may produce unknown under 724=a; captured
+stale proof must not authenticate a different body batch. Neither observation
+time, topic-latest time, timestamp coincidence, nor invented historical values
+are edit evidence. Static historical-writer traces are not execution evidence;
+old/new-writer fixtures and the adoption-origin integration still need to run.
+No implementation or known-age delivery is claimed by this settlement.
 
 ## Constraints
 
@@ -163,6 +250,11 @@ this technical gap does not defer or remove the confirmed known-age contract.
 - Header and gutter must share one body-specific source and value; unrelated
   item/log/recap activity must not renew body age. No per-row or per-mark
   history, and no existing ChangedAt value is trusted solely for being present.
+- Preserve portable proof on unchanged-body adoption/copy/relocation; do not
+  add absolute-path/topic scope, board-aware validation handoffs or transient
+  trust. Same-batch origin tracking for adoption is internal and batch-local.
+- Proof/body publication must be atomic under the existing folder intent;
+  validate once into TopicView and retain opaque-origin frame isolation.
 - Preserve current framed-body and unframed-body behavior and marker geometry;
   do not replace source provenance with topic recency, filesystem mtime, or
   first-observation time labeled as an edit time.
@@ -171,32 +263,30 @@ this technical gap does not defer or remove the confirmed known-age contract.
 
 ## Prior Decisions
 
-- 1ab3d5d7 (2026-11-14, commit): "Owner request (617): move avatar+time inline to body first line, drop dedicated middle column." — bearing: constrains
+- 6bf4df29 (2026-11-14, commit): "Remove the dedicated log timestamp column, keeping role badges beside the first line and placing timestamps inline before body text." — bearing: constrains
+- a18cc24a (2026-11-14, commit): "Keep the renderer as owner of DOM shape so incoming and retained frame-graft paths agree; a client-only unwrap would force mismatched element paths on every update." — bearing: constrains
+- 261113-feat-ws-whiteboard-board-frontend-performance (2026-11-14, commit): "Only the dashboard's framed render (RenderRegions, RenderClosedTopics) uses framedDoc, so no disk page needs the files written beside it." — bearing: constrains
+- 261113-feat-ws-dashboard-board-reorder-hold (2026-11-14, commit): "Nearest scroller = first ancestor with overflow-y auto/scroll/overlay whose content overflows, else document.scrollingElement" — bearing: constrains
+- 261113-feat-ws-whiteboard-topic-panels-and-log (2026-11-13, commit): "Commit exact bytes and append offsets under one folder lock; replay interrupted writes idempotently before any consumer reads authority." — bearing: constrains
+- 417596db (2026-11-12, commit): "Stale rule: any item of the topic with Item.Changed above TopicDoc.Changed; a recap change does not count. Time-based fading was rejected by the user." — bearing: constrains
 - 4a692a3f (2026-11-08, commit): "Stored the computed marks (block index + kind) rather than the previous body: no second copy of large bodies, and they ride the existing JSON state through restarts." — bearing: constrains
 - 1a7e75cf (2026-11-08, commit): "Legacy stores: entries without ChangedAt are stamped with the first update that sees them, so an upgrade does not immediately flag every old topic stale on unknown age; they nudge an hour later." — bearing: constrains
-- 261111-feat-ws-whiteboard-topic-recap (2026-11-12, commit): "Relative time: the recap's <time class="tago" data-at> was already picked up by ago.js (full/served page and the dashboard after each board swap)" — bearing: supports
 
 ## Route Facts
 
-Fresh fact population is REQUIRED before design/ready review. The following
-rows replace the superseded 713-only scope assessment; `needs-refresh` means
-no new code-level grounding or mechanism classification is claimed here.
-Prior baseline citations in Prior Art remain historical evidence, not proof
-that the revised feature is implemented.
-
 | fact | value | evidence |
 |---|---|---|
-| scope.span | needs-refresh | Revised 743=a includes topic header, latest-delta gutter, shared body-time provenance and relative formatting; prior 713-only asset scope is obsolete. |
-| scope.surface | needs-refresh | Shared-store involvement depends on unselected proof design. Do not assert asset-only scope. |
-| scope.new_public_symbol | needs-refresh | No API or public symbol selected; prior no-symbol assessment does not establish revised implementation facts. |
-| scope.new_type_contract | needs-refresh | Batch-bound proof representation remains unselected; 724=a permits safe old-writer proof loss, not false trust. |
-| scope.test_surface | existing | agents-plugin-tool/internal/wswhiteboard/changes_test.go#L79-L231 covers batch/reload/comment rendering; view_test.go#L257-L297 covers stale marks on both render paths. recap_test.go and stream_test.go cover retained 617-adjacent rendering. Hover geometry still needs the phase's browser evidence; no tests run in this pass. |
-| complexity.reuse_points | confirmed | Shared chg.js draws bars and ResizeObserver redraws them (agents-plugin-tool/internal/wswhiteboard/assets/chg.js#L8-L57). Scoped wiring: render.go#L145-L166 bundles it into frame assets; render.go#L403-L427 wires unframed bodies; assets/doc-frame.js#L37 starts framed-body bars. assets/ago.js#L9-L13 supports only now/minutes/hours/days and assets/stream.js#L639-L644 appends an absolute stamp, so neither is a complete marker-time implementation. |
-| complexity.side_effect_risk | moderate | Enabling pointer interaction on currently noninteractive absolute gutter bars can affect body interaction and frame geometry (agents-plugin-tool/internal/wswhiteboard/assets/page.css#L553-L559); the shared script reaches framed and unframed bodies. |
-| risk.correctness | needs-refresh | Existing ChangedAt includes legacy observation backfill (agents-plugin-tool/internal/wswhiteboard/nudge.go#L26-L46). Revised scope needs actual-batch proof, same header/gutter value, unknown fallback, and stale-proof fail-closed behavior. |
-| risk.fit | needs-refresh | Owner 12:28 scope reduction plus 743=a settles one latest BODY time in header and gutter; all-unknown scope-cut assessment is obsolete. Retain colors, anchors, stale dimming and 617; no per-mark history. |
-| risk.test | moderate | Existing Go checks pin marks and render structure, not hover thickness, hit testing, no-reflow or scroll offsets at 1280/800/360; browser evidence is deferred under this pass's throttle. |
-| risk.security_or_contract | needs-refresh | 713=b exact unknown text, 743=a shared actual body age, and 724=a narrow discardable-proof exception are current authority. Validate proof binding and old/new writers; no representation or global T0 rule change selected. |
+| scope.span | multi-file | agents-plugin-tool/internal/wswhiteboard/store.go, nudge.go, folders.go, view.go, render.go, assets/page.tmpl, assets/chg.js, assets/page.css and assets/ago.js are the grounded store/view/header/gutter/formatter sites; selected proof is optional TopicDoc-local v1 metadata, with batch-local adoption-origin handling in topics.go/store.go. No implementation is claimed. |
+| scope.surface | public-interface | Distinct topic-header body age and gutter hover are user-visible; selected optional persistent proof touches the shared schema-2 store (agents-plugin-tool/internal/wswhiteboard/folders.go#L27-L64). No new MCP command is selected. |
+| scope.new_public_symbol | yes | Selected optional TopicDoc.BodyTimeProof and one validated TopicView body-time value extend exported internal-package structs; no new MCP command/API or board-context handoff. |
+| scope.new_type_contract | yes | Phase 1 requires a new actual-batch proof/validation contract and one shared body-time view value; selected representation is portable body_time_proof {v,at,changed,digest}, locally validated; existing TopicDoc lacks provenance (agents-plugin-tool/internal/wswhiteboard/store.go#L208-L239). |
+| scope.test_surface | existing | agents-plugin-tool/internal/wswhiteboard/changes_test.go#L79-L235 covers no-op/batch/reload/render marks; view_test.go#L257-L297 covers both stale render paths; recap_test.go and stream_test.go cover retained 617-adjacent rendering, not hover geometry or proof. No tests run. |
+| complexity.reuse_points | confirmed | agents-plugin-tool/internal/wswhiteboard/store.go#L442-L466 already compares against batch-start body; folders.go#L133-L165 owns locked commit/publication; assets/chg.js#L8-L57 draws/redraws bars; render.go#L145-L166 and render.go#L403-L427 wire frame/unframed scripts; assets/doc-frame.js#L37 starts framed bars. assets/ago.js#L9-L13 needs longer units, not replacement with stream.js's absolute-time suffix. |
+| complexity.side_effect_risk | moderate | Shared frame/unframed gutter interaction, a new header value and selected optional persisted proof affect hit testing, frame heights and store round-trips (agents-plugin-tool/internal/wswhiteboard/assets/page.css#L553-L562, render.go#L604-L628, folders.go#L619-L664). |
+| risk.correctness | high | ChangedAt backfills observation time; same-second mutations defeat time-only binding, and separate-batch edit-away/edit-back defeats body-only binding (agents-plugin-tool/internal/wswhiteboard/nudge.go#L26-L46, store.go#L450-L466, store.go#L580-L593). Selected proof must survive no-op/return-to-base without authenticating another batch; adoption plus edit-return needs batch-local logical-origin comparison (topics.go#L201-L231, store.go#L431-L466). |
+| risk.fit | moderate | Header currently shows overall activity via stampUpdated, including items/entries; new body time must remain distinct and not become card ordering's first activity time (agents-plugin-tool/internal/wswhiteboard/view.go#L779-L820, assets/page.tmpl#L25-L48; agents-plugin-tool/internal/wsdashboard/assets/cards.js#L151-L157). Preserve 617, stale dimming and anchors. |
+| risk.test | high | Existing checks lack batch-proof old/new-writer fixtures and header/gutter equality, months/years, hover hit testing, no-reflow and scroll/focus measurements at 1280/800/360. Framed documents have their own i18n subset and no parent formatter access (agents-plugin-tool/internal/wswhiteboard/render.go#L610-L617). |
+| risk.security_or_contract | high | 724=a allows only safe proof loss, not false age or a global T0 relaxation. Typed historical writers drop the optional proof on publication. Portable local validation detects captured stale proof, not recomputed self-consistent forgery/full rollback; path scopes, sidecars and MACs are rejected. Framed payloads must retain opaque-origin isolation (agents-plugin-tool/internal/wswhiteboard/folders.go#L202-L214, folders.go#L619-L664, render.go#L631-L641). |
 
 ## Phases
 
@@ -210,8 +300,13 @@ colors, layout, anchors or scroll. Actual ages remain relative-only from
 minutes through years; unknown/backfilled/unproven times show exact
 `변경 시각 모름` in both displays. Establish prospective actual-batch provenance
 with stale-proof fail-closed behavior under 724=a's narrow safe-proof-loss
-exception. The proof representation is for technical design review, not
-selected here. Do not add per-row/per-mark history or duplicate 617's existing
+exception, using the selected optional v1 body_time_proof contract. Place
+local digest creation/validation beside TopicDoc/change logic; mint only at
+the final actual-mutation stamp, restore proof on return-to-base and clear it
+with body metadata. Preserve origin on adoption without board-context plumbing,
+and publish proof/body in the same durable intent. Feed one validated TopicView
+body-time value to the header and both gutter render paths, with frame-local
+formatter/i18n and no parent access. Do not add per-row/per-mark history or duplicate 617's existing
 inline author/time behavior; no history redesign.
 
 Verification boundary: before/after headless captures at 1280/800/360 widths,
@@ -222,7 +317,14 @@ relative ages from minutes through years for valid new mutations, exact
 unknown text plus hover thickening for missing/backfilled/lost proof, and no
 clock/date. Exercise old/new-writer proof loss and stale-proof attempts: loss
 may become unknown, never a false age. Check same-body/no-op/return-to-base
-and unrelated item/log/recap updates do not renew body age. Preserve colors,
+and unrelated item/log/recap updates do not renew body age. Include empty
+batches backfilling legacy time without proof creation, same-second distinct
+mutations and separate-batch edit-away/edit-back, clear/recreate, body-neutral
+mark changes, missing/malformed/unsupported/mismatched proof, unchanged-body
+adoption/relocation/board copy, and adoption plus edit-return in one batch.
+Assert proof/body atomic publication and replay, and rejection of captured
+stale evidence; do not demand detection of recomputed self-consistent forgery
+or full consistent rollback. Preserve colors,
 anchors, content geometry and scroll offsets on hover. Run relevant whiteboard
 Go tests and independent lite review; send evidence to the lead before MAIN's
 serialized develop merge. Live activation and fresh live verification remain
