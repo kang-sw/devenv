@@ -92,7 +92,8 @@ func TestBoardCardPlacement(t *testing.T) {
 	runNode(t, "board card placement", `
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
-`+order+settle+`
+`+order+`function rank(u) { return typeof u.rank === "number" ? u.rank : -1; }
+`+settle+`
 // A node is a name; a topic "T<time>" is open and updated then, "X..." is
 // closed or a control. A card "C..." carries its record.
 function at(n) { return n.name.charAt(0) === "T" ? +n.name.slice(1) : null; }
@@ -126,6 +127,13 @@ check("an empty board holds its cards", names(order(nodes("Xempty"), [a, p1], at
 check("a topic with no time is older than any card", names(order(nodes("T40 T0"), [card("Cz", 1)], at)), ["T40", "Cz", "T0"]);
 check("two cards opened at the same place keep newest first",
   names(order(nodes("T60 T10"), [card("C1", 30), card("C2", 40)], at)), ["T60", "C2", "C1", "T10"]);
+
+// One-time placement snapshots use a time plus an independent tie rank,
+// never a topic identity. Negative time addresses the ordinary closed tail.
+var tied = card("Ctie", 40); tied.rank = 0.5;
+check("a snapshot can sit between equal-time topics", names(order(nodes("T60 T40 T40 T10"), [tied], at)), ["T60", "T40", "Ctie", "T40", "T10"]);
+var tail = card("Ctail", -1); tail.rank = 0.5;
+check("a snapshot can sit between closed topics", names(order(nodes("T40 Xone Xtwo Xreply"), [tail], at)), ["T40", "Xone", "Ctail", "Xtwo", "Xreply"]);
 
 // settle: a board update around the cards.
 function boardOf(list) { var el = new El(); list.forEach(function (n) { el.insertBefore(n, null); }); el.moves = []; return el; }
@@ -171,6 +179,39 @@ el = boardOf([t40, t10]); el.moved = []; el.refuse = true;
 settle(el, [t10, t40], isCard);
 check("a refused moveBefore falls back to insertBefore", [names(el.kids), el.moved, el.moves], [["T10", "T40"], [], ["T10"]]);
 delete El.prototype.moveBefore;
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+func TestSharedCardActionSnapshots(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _ := json.Marshal(string(data))
+	runNode(t, "shared card action snapshots", "var CARDS = "+string(src)+";\n"+cardsDOM+`
+var store = {}, A, B, C;
+function served() { A = topic("a", 300); B = topic("b", 200); C = topic("c", 200); return [A, B, C, topic("x", 0, true), topic("y", 0, true), reply()]; }
+boot(store, served);
+var c = page.W.open("k", {name: "preview"}, undefined, C);
+check("new card immediately above a tied origin", names(page.board), ["TOOLBAR", "PINS", "a", "b", "preview", "c", "x/c", "y/c", "reply"]);
+c.bump(B);
+check("reused slot moves above its new origin", names(page.board), ["TOOLBAR", "PINS", "a", "preview", "b", "c", "x/c", "y/c", "reply"]);
+c.bump(page.board.querySelector('section[data-topic="y"]'));
+check("ordinary closed origin also has adjacency", names(page.board), ["TOOLBAR", "PINS", "a", "b", "c", "x/c", "preview", "y/c", "reply"]);
+boot(store, served);
+check("snapshot survives reload", names(page.board), ["TOOLBAR", "PINS", "a", "b", "c", "x/c", "preview", "y/c", "reply"]);
+c = page.W.list()[0]; clickPin(B); c.bump(B);
+check("pinned origin sends ordinary preview to ordinary head", names(page.board), ["TOOLBAR", "PINS", "preview", "a", "c", "x/c", "y/c", "reply"]);
+var detached = topic("a", 300); c.bump(detached);
+check("detached origin falls back to head", names(page.board)[2], "preview");
+var fold = A.querySelector(".t-fold");
+page.board.fire("click", {target: fold});
+check("topic whole fold is independent state", [A.getAttribute("data-size"), fold.getAttribute("aria-expanded")], ["fold", "false"]);
+swap([topic("a", 400), B, C, reply()]);
+check("topic update retains whole fold", page.board.querySelector('section[data-topic="a"]').getAttribute("data-size"), "fold");
+boot(store, served);
+check("fold-only topic state restores", A.getAttribute("data-size"), "fold");
 process.stdout.write(bad.join("\n"));
 `)
 }
@@ -360,7 +401,7 @@ function served1() { A = topic("a", 300); B = topic("b", 200); C = topic("c", 10
 boot(store, served1);
 check("every topic bar has a pin button, then the maximize and back buttons, before its note pen, unpressed",
   [A, B, C].map(function (t) { var b = pinBtn(t); return [!!b, b && b.parentNode.children.slice(b.parentNode.children.indexOf(b)).map(function (x) { return x.className; }), b && b.getAttribute("aria-pressed")]; }),
-  [A, B, C].map(function () { return [true, ["ibtn tpin", "ibtn d-max", "ibtn d-min", "btn mini tnote-toggle"], "false"]; }));
+  [A, B, C].map(function () { return [true, ["ibtn tpin", "ibtn t-fold", "ibtn t-raise", "ibtn d-max", "ibtn d-min", "btn mini tnote-toggle"], "false"]; }));
 check("the toolbar precedes the empty pin list", names(page.board), ["TOOLBAR", "PINS", "a", "b", "c", "x/c", "more31", "reply"]);
 
 // A pinned topic stands among pinned cards in pin order.
