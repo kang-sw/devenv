@@ -647,3 +647,53 @@ work, provider requests, probes, SSH or daemon/runtime actions;
 heavy implementation verification waits for MAIN's assigned slot, without
 waiving any verification above (current owner dispatch instruction supersedes
 the obsolete temporary 649-exclusive capture wording).
+
+## Blocked - 2026-11-15
+
+**VERIFIED:** MAIN's 23:10:43/23:12 authorization is consumed: one exact
+empty-derived key-only interpreter diagnostic and one once-only receiver-02
+follow-on invocation. Both invocation outcomes are recorded; no further execution
+is authorized by that instruction. Retained branch:
+`impl/feat/live-reasoning-summary-675/fruit-annex-hunk`, HEAD `d459a96bd`.
+Receiver binding remains `5d018785c8caddc237cf24bb5229c871aac8783b`; schema
+checkpoint remains `a5b05c09a4e41a99c50fd8055108f2df82f8947d`.
+
+- Original receiver-01 recipe/supervisor and raw failure remain preserved.
+  Exact diagnostic command/output and prior failure are in
+  `ai-docs/.plans/2026-11/14-2329-261114-live-summary-bootstrap-evidence-02.md`.
+  All five expected-key equality flags were true; the only unexpected key was
+  `__CF_USER_TEXT_ENCODING`. No unexpected value was reported.
+- New recipe:
+  `ai-docs/.plans/2026-11/14-2329-261114-live-summary-receiver-verification-batch-02.md`;
+  derivative supervisor:
+  `ai-docs/.plans/2026-11/14-2341-261114-live-summary-bounded-supervisor-02.py`,
+  Git blob `f8e09177a5e833973a0c929d45edd0df99e3c76d`. The only operational
+  deltas were discarding that unsolicited key before unchanged exact environment
+  guards and substituting exclusive output root `receiver-02`.
+- Follow-on exit: **2**, `unlisted owned descendant executable`. The first owned
+  snapshot rejected anchor PID/PGID/SID **17803**, observed as
+  `/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python`,
+  against configured interpreter admission identity
+  `/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/bin/python3.9`.
+  This occurred before metadata commands, formatting or tests: **0/23** format
+  files, **0/21** receiver tests, historical child not started. No fixture
+  listener or holder was created.
+- Complete receipts were read at
+  `/tmp/ws-live-summary-675-receiver-02/logs/supervisor.jsonl:1–15`,
+  `/tmp/ws-live-summary-675-receiver-02/logs/anchor.jsonl:1`, and
+  `/tmp/ws-live-summary-675-receiver-02/logs/anchor.stderr` (empty).
+  Both owned ps helpers exited/reaped zero. Owned TERM preceded the anchor's
+  sole reap (`-15`); the final owned snapshot contained only its zombie and no
+  descendants. Positive absence was true, detached lineage empty, pipes closed,
+  cleanup error null, and elapsed time **0.177410167 seconds**, within the
+  unchanged 630-second work plus 90-second cleanup bound.
+
+**INFERRED:** No executable equivalence or specific admission correction is
+established. MAIN disposition is pending; no fix is selected. Feature acceptance,
+full suites, Pi checks, visuals and independent lite review remain unproven.
+Idle-reconnect remains idea/out of scope; **T0 is the target, not certified**.
+Existing phases/results, source binding, recipes and evidence are unchanged by
+this status note. No phase Result or ticket-completion claim is added.
+
+omitted: Further probes, diagnostics, repairs, reruns, commits, integration,
+release and authority expansion; none is authorized by this note.
