@@ -7,8 +7,8 @@ related:
   261113-feat-ws-whiteboard-topic-history-load-more: "shares the visibility observer with Phase 2; its worker decides template- vs fetch-based older pages"
 sage-review-design: completed
 sage-review-completeness: completed
-sage-review-design-reviewed: 55c7dce0b4a4e217
-sage-review-completeness-reviewed: 55c7dce0b4a4e217
+sage-review-design-reviewed: 8016b4b29deea59c
+sage-review-completeness-reviewed: 8016b4b29deea59c
 ---
 
 # Whiteboard board frontend performance: lazy frames, cheaper swaps, measurement harness
@@ -329,6 +329,7 @@ Main findings (static, unmeasured in a browser):
   `ai-docs/manuals/release-compatibility.md`.
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin-tool/`)
 - Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
 
 ## Prior Decisions
 
@@ -345,17 +346,17 @@ Main findings (static, unmeasured in a browser):
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | wswhiteboard/render.go, wsdashboard/assets/dashboard.js, wswhiteboard/assets/form.js, pill.js, stream.js, wsdashboard/access.go, wsdashboard/pages.go, scripts/dev.py area |
-| scope.surface | cross-module | server emits data-srcdoc, data-th, hashed asset route across wswhiteboard and wsdashboard; Phase 3 adds an event type |
-| scope.new_public_symbol | yes | new immutable hashed frame-asset route, data-th attribute, opt-in board event type |
-| scope.new_type_contract | no | none; wire additions only (attributes, route, event) |
-| scope.test_surface | existing | wsdashboard/board_close_fold_test.go, cards_test.go, board_motion_test.go, mcp/dashboard_page_test.go, wswhiteboard/regions_test.go (several assert srcdoc= literally and need updating) |
-| complexity.reuse_points | confirmed | mermaid hashed route (access.go publicAsset, pages.go serveMermaid), frameGraftable, setFrameHeights, reorder-hold visibility observer (pending 261113-feat-ws-dashboard-board-reorder-hold) |
-| complexity.side_effect_risk | high | iframe mount timing, height keying, frameGraft, FLIP, mention selection and rect readers interact; moving frames reloads them today |
-| risk.correctness | high | lazy srcdoc and moveBefore frame reuse can lose heights, mermaid redraw, or scroll position |
-| risk.fit | moderate | overlaps in-flight iframe-shell and reorder-hold on dashboard.js and stream.js; rebase expected |
-| risk.test | high | headless Chromium harness and visual LOOK checks needed; existing regex tests pin srcdoc= |
-| risk.security_or_contract | moderate | new public unauthenticated asset route and CSP interplay; asset is static and content-hashed (T0) |
+| scope.span | multi-file | Remaining Phase 3 verification spans agents-plugin-tool/internal/wsdashboard/board_topics_stream_test.go, board_topics_client_test.go, wswhiteboard/assets/stream.js and scripts/board-perf.mjs; this accommodation edits only this ticket |
+| scope.surface | cross-module | Existing dashboard/whiteboard stream and frame behavior; board-topics wire shape at agents-plugin-tool/internal/wsdashboard/board_topics.go#L20-L32 |
+| scope.new_public_symbol | no | Resumption adds none; topics=1 and board-topics already exist (agents-plugin-tool/internal/wsdashboard/assets/dashboard.js#L6264-L6273) |
+| scope.new_type_contract | no | Resumption adds none; existing boardTopicsEvent is a wire contract, not an absence of one (agents-plugin-tool/internal/wsdashboard/board_topics.go#L26-L32) |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/board_topics_stream_test.go#L26-L133 and board_topics_client_test.go#L38-L98 cover existing Phase 3 contracts; phase3/README.md records the failed LOOK comparison |
+| complexity.reuse_points | confirmed | Existing per-connection diff/fallback (agents-plugin-tool/internal/wsdashboard/board_topics.go#L102-L119), shared decomposition test (board_topics_stream_test.go#L109-L126), and retained phase3/README.md reproduction procedure; independently reviewed history-fit producer 8f24cec5b9ee9e09d7c2d58e5002ddab03842152 landed in develop via 28d8576226cc62312bf2d85d9c4cb306882f3df0 |
+| complexity.side_effect_risk | high | Sequential frame delivery changes history clipping in the unchanged source (agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L53-L73); no integration/runtime action is authorized by this accommodation |
+| risk.correctness | high | Original 219px mismatch remains unresolved; current snap measures the current clip but adds to the original base (agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L55-L67) |
+| risk.fit | moderate | iframe-shell Phase 2 is landed (3310356af is an ancestor of HEAD); root verified history-fit integration 28d8576226cc62312bf2d85d9c4cb306882f3df0, but this retained worktree still has the old source and the common-history A/B stack must be prepared and verified |
+| risk.test | high | phase3/README.md records an Important LOOK gap; matched boundary IDs, settled geometry and the sequential-height replay still need independent verification on the same landed history revision |
+| risk.security_or_contract | moderate | Existing additive T0 event/fallback contract must remain unchanged (agents-plugin-tool/internal/wsdashboard/board_topics.go#L26-L32, board_topics_stream_test.go#L87-L133); this resumption approves no new API or history behavior |
 
 ## Phases
 
@@ -904,6 +905,28 @@ fan-out cache). Before starting, the worker verifies that phase has landed
 recording its Phase 2 result) and stops and reports otherwise. As in Phase 2,
 the prerequisite is prose, deliberately not a typed blocked-by.
 
+**Resumption prerequisite (Phase 3 stop, 2026-11-14).** The original LOOK
+failure below remains open. Before resuming its acceptance run, the root
+lead must confirm that the separately owner-approved history-fit correction
+(641/642; newest 3 -> 2 -> 1 panels within 1000px, minimum one panel,
+first-usable-height cache, finalized boundaries never re-cut) has passed its
+own review/native verification and landed. The correction's plan is
+`ai-docs/.plans/2026-11/14-1357-history-fit-approved-panels.md` on its producer
+branch `fix/history-fit-panels`; its Authority and Contract sections record
+the separate approval. The root verified independently reviewed producer
+`8f24cec5b9ee9e09d7c2d58e5002ddab03842152`, its final native checks, and
+develop integration `28d8576226cc62312bf2d85d9c4cb306882f3df0`; the landed
+stream SHA-256 is
+`5a7e86ab9dc8624e2296335d113d69dcd349aaa65c0e0cbb8765aa806634555a`.
+This satisfies the separate landing dependency only, not performance LOOK
+or this ticket's mandatory resumption design gate. This retained worktree
+still has the old source; the common-history A/B stack below must still be
+prepared and verified through the root-owned integration/resumption path.
+No source integration, activation or acceptance execution is authorized by
+this fact-only ticket update. This need-first gate applies to Phase 3
+resumption only, so it is prose rather than a ticket-wide typed
+`blocked-by`.
+
 - Changed-topics-only `board-topics` events with the `topics=1` opt-in and
   the full-region fallback (Decision 11).
 
@@ -914,6 +937,38 @@ and a non-topic board change each send the full region; a test that two
 connections of one session cause one per-topic render (the fan-out cache); a
 client asset test that an event the page cannot apply falls back to a full
 region; harness scenario (c) before and after.
+
+For the resumed long-board LOOK check, put the **same reviewed, landed
+history-fit revision** on both the performance baseline and candidate;
+record both exact source/commit identities and confirm the history source
+is identical. Keep the existing board, dates, styles, viewport, capture
+procedure and scroll stops unchanged apart from that common approved
+prerequisite. Before comparing captures, verify matched finalized history
+boundary IDs and settled frame geometry at corresponding stops, including
+sequential/late iframe-height delivery without boundary re-cut. If either
+side does not settle or the IDs/geometry differ, preserve the evidence and
+return the discrepancy rather than force heights or normalize captures.
+Repeat the long-board LOOK comparison and inspect the result captures
+side by side. The no-intended-visual-change constraint judges the Phase 3
+difference on this common-history baseline; it does not demand restoration
+of the 640px history contract that the separate approval replaces only upon
+landing (current source still uses STEP = 640 and cumulative snapping:
+`agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L28-L73`; approved
+replacement: producer plan
+`ai-docs/.plans/2026-11/14-1357-history-fit-approved-panels.md#L6-L7`).
+Retain the original failing captures, 219px mismatch, traces and inferred
+timing explanation as failed
+historical evidence, never relabeling them as a pass. The original tests
+cover relevant first-height/growth/restore behavior but do not explicitly
+replay the captured three-frame 219px sequence (existing restore/graft cases:
+`agents-plugin-tool/internal/wswhiteboard/stream_script_test.go#L375-L400`;
+exact failing sequence: `ai-docs/tickets/assets/261113-feat-ws-whiteboard-board-frontend-performance/phase3/README.md#L128-L154`);
+the resumed verification must account for that sequence. The Important
+LOOK finding stays open, and no Phase 3 Result or ticket closure is recorded,
+until this check and its
+independent review pass. Existing scenario (c) metrics and the disclosed
+35.5%/36.8% Nodes cost remain evidence of their tested identities, not a
+substitute for LOOK parity or measurements of the common-history stack.
 
 #### Implementation checkpoint (1341947b3) - 2026-11-14
 
