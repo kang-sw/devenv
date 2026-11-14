@@ -561,6 +561,9 @@
     "261114-feat-ws-whiteboard-history-unified-decisions": {
       "registered_at": "2026-11-14T06:03:03Z"
     },
+    "261114-refactor-ws-dashboard-large-frontend-files": {
+      "registered_at": "2026-11-14T09:32:30Z"
+    },
     "261114-refactor-ws-hosted-common-contract-pi-claude-parity": {
       "registered_at": "2026-11-14T08:45:52Z",
       "lease": {
