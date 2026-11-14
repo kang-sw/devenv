@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>781 — Conversation delivery details · static proposal</title>
+<style>
+:root{--bg:#f2f4f7;--card:#fff;--fg:#202733;--muted:#657183;--line:#dce2e9;--primary:#3267b8;--technical:#7863a7;--technical-bg:#f0ecf7;--warn:#8c6223;--warn-bg:#fff5df;--human:#e7effb;--shadow:0 2px 9px #17243b0b;--mono:ui-monospace,SFMono-Regular,Consolas,monospace;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--fg);background:var(--bg);font-size:14px;line-height:1.5}
+*{box-sizing:border-box}body{margin:0}button,summary{font:inherit}button{cursor:pointer}button:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid var(--primary);outline-offset:4px}main{max-width:1240px;margin:0 auto;padding:36px 28px 60px}.eyebrow{font-size:11px;font-weight:750;letter-spacing:.13em;text-transform:uppercase;color:var(--technical)}h1{font-size:clamp(25px,3vw,38px);line-height:1.16;letter-spacing:-.04em;margin:10px 0 12px;max-width:850px}h2{font-size:15px;letter-spacing:-.01em;margin:0}p{margin:0}.intro{max-width:820px;color:var(--muted)}.scope{display:flex;flex-wrap:wrap;gap:7px;margin:18px 0 28px}.tag,.badge{border-radius:5px;font-size:10px;line-height:1.6;font-weight:700;padding:1px 6px;white-space:nowrap}.tag{background:var(--card);border:1px solid var(--line);color:var(--muted)}.workspace{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:26px;align-items:start}.canvas{min-width:0}.controls{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:12px}.controls>span{font-size:11px;color:var(--muted);margin-right:auto}.controls button{border:1px solid var(--line);border-radius:6px;padding:5px 10px;background:var(--card);color:var(--muted);font-size:11px}.controls button[aria-pressed=true]{color:var(--primary);border-color:var(--primary);background:var(--human)}.preview{container-type:inline-size;width:100%;max-width:100%;margin:0 auto;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}.preview[data-size=narrow]{width:360px}.session-head{padding:13px 16px;border-bottom:1px solid var(--line);background:var(--card);display:flex;align-items:center;gap:8px;min-width:0}.session-head strong{font-size:12px}.session-head .minor{margin-left:auto;font-size:10px;color:var(--muted)}.dot{width:7px;height:7px;border-radius:50%;background:var(--technical);flex:none}.conv{display:flex;flex-direction:column;gap:12px;padding:17px 14px 22px;min-width:0}.case-label{display:flex;gap:8px;align-items:center;margin-top:5px;font-size:9px;font-weight:750;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}.case-label:after{content:"";height:1px;background:var(--line);flex:1}.mail-block,.notification,.report,.mixed{min-width:0}.mail>summary{list-style:none;display:flex;align-items:baseline;gap:6px;padding:4px 7px;border-radius:7px;cursor:pointer;font-size:12px;color:var(--muted)}.mail>summary::-webkit-details-marker{display:none}.mail>summary:hover{background:var(--line)}.arrow{color:var(--primary);font-weight:850;flex:none}.peer{font-weight:750;color:var(--fg);flex:none}.preview-text{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.clock{font-size:10px;font-variant-numeric:tabular-nums;flex:none;color:var(--muted)}.badge{background:var(--technical-bg);color:var(--technical);font-size:9px}.mail-body{margin:3px 7px 5px 23px;padding:9px 11px;border-radius:7px;background:var(--card);box-shadow:var(--shadow);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}.delivery{margin:1px 7px 0 23px;min-width:0;font-size:10px;color:var(--muted)}.delivery>summary{cursor:pointer;width:fit-content;max-width:100%;padding:3px 0}.delivery>summary .clock{font-size:9px;margin-left:5px}.diagnostic{margin:5px 0 1px;padding:9px 10px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--muted);font:10px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}.diagnostic-note{font-size:9px;color:var(--muted);margin:4px 0 0;overflow-wrap:anywhere}.notification{padding:7px 10px;background:var(--card);border:1px solid var(--line);border-radius:7px}.compact-head{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;font-size:11px}.compact-head strong{font-size:11px}.compact-head .clock{margin-left:auto}.warn{background:var(--warn-bg);color:var(--warn)}.notification p{font-size:11px;color:var(--muted);margin-top:4px}.notification .delivery{margin:3px 0 0}.report{background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px 10px}.report>summary{cursor:pointer;list-style:none}.report>summary::-webkit-details-marker{display:none}.report-copy{margin:7px 0 0;font-size:12px;overflow-wrap:anywhere}.report-copy ul{margin:4px 0;padding-left:17px}.human{align-self:flex-end;max-width:86%;font-size:12px}.human .meta{display:flex;justify-content:flex-end;align-items:center;gap:6px;font-size:10px;color:var(--muted);margin-bottom:3px}.human .bubble{background:var(--human);padding:9px 11px;border-radius:12px 12px 4px 12px;overflow-wrap:anywhere}.mixed{padding:8px 10px;border:1px dashed var(--line);border-radius:7px;background:var(--card)}.mixed p{margin-top:5px;font-size:11px;color:var(--muted)}.mixed .delivery{margin:3px 0 0}.footnote{font-size:10px;color:var(--muted);margin-top:11px;max-width:760px}.notes{display:grid;gap:14px;padding-top:35px}.note{border-top:2px solid var(--line);padding-top:10px}.note .num{font:11px var(--mono);color:var(--technical);display:block;margin-bottom:5px}.note h3{font-size:12px;margin:0 0 5px}.note p{font-size:11px;color:var(--muted)}.note code{font:10px var(--mono)}.limitations{margin-top:28px;padding:13px 15px;background:var(--card);border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:11px}.limitations strong{color:var(--fg)}
+@container(max-width:460px){.session-head{padding:11px 12px}.session-head .minor{display:none}.conv{padding:13px 9px 18px;gap:11px}.mail>summary{display:grid;grid-template-columns:12px auto 1fr auto;gap:4px 5px;align-items:center}.mail>summary .badge{grid-column:3;justify-self:start}.mail>summary .clock{grid-column:4;grid-row:1}.mail>summary .preview-text{grid-row:2;grid-column:2/5;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.4}.delivery{margin-left:24px}.delivery>summary .clock{display:block;margin-left:0}.human{max-width:92%}.compact-head .clock{width:100%;margin-left:0}.case-label{font-size:8px;letter-spacing:.07em}.diagnostic{font-size:9px}.mail-body{font-size:11px}}
+@media(max-width:950px){.workspace{grid-template-columns:minmax(0,1fr)}.notes{grid-template-columns:repeat(2,minmax(0,1fr));padding-top:0;gap:14px}.note{min-width:0}}@media(max-width:520px){main{padding:22px 12px 36px}.notes{grid-template-columns:1fr}.scope{margin-bottom:20px}.controls>span{width:100%;margin-bottom:3px}.preview{border-radius:9px}}
+@media(prefers-color-scheme:dark){:root{--bg:#141920;--card:#1e2631;--fg:#e2e8f1;--muted:#9daabd;--line:#354150;--primary:#8fb9ff;--technical:#baa5ea;--technical-bg:#352e47;--warn:#e3be7e;--warn-bg:#3c3321;--human:#243d60;--shadow:0 2px 9px #0002}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="eyebrow">781 · Phase 1 visual proposal · synthetic data</div>
+<h1>One mail row.<br>Delivery detail stays underneath.</h1>
+<p class="intro">A focused conversation-only mockup: reduce duplicate visual framing while retaining transport diagnostics and honest source labels. This does not change stored events, mailbox delivery, or model input.</p>
+<div class="scope"><span class="tag">Static mockup — not approved</span><span class="tag">Display-only / T0 target</span><span class="tag">No new delivery IDs</span><span class="tag">No browser verification</span></div>
+</header>
+<div class="workspace">
+<section class="canvas" aria-label="Conversation preview">
+<div class="controls" aria-label="Preview width"><span>Resize the proposal; disclosures remain keyboard-operable.</span><button type="button" id="wide" aria-controls="preview" aria-pressed="true">Wide</button><button type="button" id="narrow" aria-controls="preview" aria-pressed="false">Narrow · 360 px</button></div>
+<div class="preview" id="preview" data-size="wide">
+<div class="session-head"><span class="dot" aria-hidden="true"></span><strong>Demo lead / Conversation</strong><span class="minor">Display proposal only</span></div>
+<div class="conv">
+<div class="case-label">01 · Matched transport detail, collapsed</div>
+<article class="mail-block" aria-label="Received mail from demo-main">
+<details class="mail"><summary><span class="arrow" aria-hidden="true">↙</span><span class="peer">demo-main</span><span class="badge">Mail</span><span class="preview-text">Static review is complete; no runtime changes.</span><time class="clock">14:10</time></summary><div class="mail-body">Static review is complete; no runtime changes.
+Continue the approved ticket capture.</div></details>
+<details class="delivery"><summary>Delivery details <span class="clock">observed 14:10:03</span></summary><pre class="diagnostic">[ws mailbox] 1 message(s) arrived for session_key demo-session.
+Already received through mailbox.recv; do not receive again.
+
+mail from demo-main (14:10:00):
+Static review is complete; no runtime changes.
+Continue the approved ticket capture.</pre><p class="diagnostic-note">Transport observation shown separately from mail history. Synthetic matched example.</p></details>
+</article>
+<div class="case-label">02 · Same hierarchy, diagnostics expanded</div>
+<article class="mail-block" aria-label="Received mail from demo-exec2">
+<details class="mail" open><summary><span class="arrow" aria-hidden="true">↙</span><span class="peer">demo-exec2</span><span class="badge">Mail</span><span class="preview-text">The isolated source review passed.</span><time class="clock">14:11</time></summary><div class="mail-body">The isolated source review passed.
+Tests are still pending. Nothing was deployed.</div></details>
+<details class="delivery" open><summary>Delivery details <span class="clock">observed 14:11:02</span></summary><pre class="diagnostic">[ws mailbox] 1 message(s) arrived for session_key demo-session.
+Already received through mailbox.recv; do not receive again.
+
+mail from demo-exec2 (14:11:00):
+The isolated source review passed.
+Tests are still pending. Nothing was deployed.</pre><p class="diagnostic-note">The raw delivery text is retained, not repeated as a second timeline card.</p></details>
+</article>
+<div class="case-label">03 · No reliable matching mail row</div>
+<article class="notification" aria-label="Unmatched mailbox delivery notification">
+<div class="compact-head"><strong>Mailbox notification</strong><span class="badge warn">Unmatched</span><time class="clock">14:12</time></div>
+<p>Delivery text retained. Matching mail history is unavailable.</p>
+<details class="delivery"><summary>Delivery details</summary><pre class="diagnostic">[ws mailbox] 1 message(s) arrived for session_key demo-session.
+
+mail from demo-archived-peer (14:12:00):
+The review artifact remains available.</pre><p class="diagnostic-note">Shown independently: a paged-out or expired mail body is not grounds to discard this record.</p></details>
+</article>
+<div class="case-label">04 · Identical text, two independent messages</div>
+<article class="mail-block" aria-label="First independent received mail"><details class="mail"><summary><span class="arrow" aria-hidden="true">↙</span><span class="peer">demo-main</span><span class="badge">Mail</span><span class="preview-text">Proceed with the approved scope.</span><time class="clock">14:13</time></summary><div class="mail-body">Proceed with the approved scope.</div></details></article>
+<article class="mail-block" aria-label="Second independent received mail"><details class="mail"><summary><span class="arrow" aria-hidden="true">↙</span><span class="peer">demo-main</span><span class="badge">Mail</span><span class="preview-text">Proceed with the approved scope.</span><time class="clock">14:14</time></summary><div class="mail-body">Proceed with the approved scope.</div></details></article>
+<div class="case-label">05 · Known report is not owner input</div>
+<details class="report" open><summary><span class="compact-head"><strong>demo-reviewer</strong><span class="badge">Child report</span><time class="clock">14:15</time></span></summary><div class="report-copy">Static correctness review finished.<ul><li>No Important findings in the inspected scope.</li><li>Browser verification was not performed.</li></ul></div></details>
+<article class="human" aria-label="Actual human input"><div class="meta"><strong>You</strong><span class="badge">Whiteboard</span><time>14:16</time></div><div class="bubble">Keep the original acceptance gaps visible.</div></article>
+<div class="case-label">06 · Mixed legacy record, source not separable</div>
+<article class="mixed" aria-label="Mixed input record with uncertain source boundaries"><div class="compact-head"><strong>Input record</strong><span class="badge warn">Source unresolved</span><time class="clock">14:17</time></div><p>Owner text and a machine report may share this legacy record. No source split is asserted.</p><details class="delivery"><summary>Original recorded text</summary><pre class="diagnostic">Keep the original acceptance gaps visible.
+
+[child report]
+The focused static review finished.</pre><p class="diagnostic-note">The label avoids calling all content owner input. It does not infer provenance from the prose marker.</p></details></article>
+</div>
+</div>
+<p class="footnote">These case labels are review annotations, not proposed production timeline content. The mail examples do not imply that claim time equals model-consumption time.</p>
+</section>
+<aside class="notes" aria-label="Design boundaries">
+<section class="note"><span class="num">01 / 02</span><h3>One primary representation</h3><p>Keep the familiar arrow, peer, preview and time. A narrowly matched wake moves into a quiet native disclosure below that mail, with the raw text intact.</p></section>
+<section class="note"><span class="num">03</span><h3>Uncertainty remains visible</h3><p>If matching evidence or the mail row is missing, retain an independent compact notification. No blanket hiding of <code>wake/mail</code>.</p></section>
+<section class="note"><span class="num">04</span><h3>Repetition is not duplication</h3><p>Equal bodies and nearby timestamps do not establish identity. Two recorded messages remain two rows.</p></section>
+<section class="note"><span class="num">05 / 06</span><h3>Source labels must be earned</h3><p>A known typed report has a report row. An inseparable legacy input gets an honest neutral label, not invented ownership or a fabricated split.</p></section>
+<section class="note"><span class="num">Scope</span><h3>No broader conversation redesign</h3><p>Composer, tools, turn summaries, approval controls and assistant bubbles are outside this proposal. Optional IDs and producer changes belong to separately settled Phase 2.</p></section>
+</aside>
+</div>
+<div class="limitations"><strong>Review boundary:</strong> Self-contained HTML with synthetic English data. Native disclosures and a preview-width switch illustrate interaction only. Matching, cache reconciliation, pagination, reconnect behavior, accessibility and visual overflow are not implemented or browser-tested here. Known-report and mixed-record examples show the intended honest display; they do not claim current stored records provide new provenance.</div>
+</main>
+<script>
+(function(){
+  'use strict';
+  var preview=document.getElementById('preview');
+  var wide=document.getElementById('wide');
+  var narrow=document.getElementById('narrow');
+  function setWidth(size){
+    preview.dataset.size=size;
+    wide.setAttribute('aria-pressed',String(size==='wide'));
+    narrow.setAttribute('aria-pressed',String(size==='narrow'));
+  }
+  wide.addEventListener('click',function(){setWidth('wide');});
+  narrow.addEventListener('click',function(){setWidth('narrow');});
+})();
+</script>
+</body>
+</html>
