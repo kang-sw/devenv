@@ -309,9 +309,12 @@
   }
   // Materialize only known targets. Loading all intervening pages preserves
   // the chronological stream; unknown or malformed IDs cannot grow the DOM.
-  function materialize(root, id) {
+  // Navigation's optional callback reveals the owning live topic before
+  // admission hooks or init can measure it. It may receive the topic or a
+  // live descendant more than once. Snapshot restore has no callback.
+  function materialize(root, id, beforeGeometry) {
     var node = find(root, id);
-    if (node) return node;
+    if (node) { if (beforeGeometry) beforeGeometry(node); return node; }
     var deferred = Array.from(root.querySelectorAll('template[data-history-topic]')).find(function (t) {
       if (find(t.content, id)) return true;
       return Array.from(t.content.querySelectorAll('template[data-history-page]')).some(function (page) { return !!find(page.content, id); });
@@ -319,25 +322,27 @@
     if (deferred) {
       var fragment = deferred.content.cloneNode(true), topic = fragment.querySelector('.topic');
       deferred.parentElement.insertBefore(fragment, deferred);
+      if (beforeGeometry) beforeGeometry(topic);
       deferred.remove();
       init(topic);
       if (window.wbBindBoard) window.wbBindBoard(topic);
       topic.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: topic } }));
-      return materialize(root, id);
+      return materialize(root, id, beforeGeometry);
     }
     var list = histories(root);
     for (var i = 0; i < list.length; i++) {
       var h = list[i];
       var held = Array.from(h.querySelectorAll('template[data-history-page]')).some(function (t) { return !!find(t.content, id); });
       if (!held) continue;
+      if (beforeGeometry) beforeGeometry(h);
       while (!find(h, id) && loadOne(h)) {}
       return find(h, id);
     }
     return null;
   }
-  function loadTarget(root, id) {
+  function loadTarget(root, id, beforeGeometry) {
     if (!valid(id)) return null;
-    var node = materialize(root || document, id);
+    var node = materialize(root || document, id, beforeGeometry);
     if (!node) return null;
     for (var p = node; p; p = p.parentElement) if (p.tagName === 'DETAILS') p.open = true;
     var mark = node;
