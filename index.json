@@ -558,7 +558,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "docs/settled-common-contracts-660-665",
         "phase": "active",
-        "touched_at": "2026-11-14T09:00:14Z"
+        "touched_at": "2026-11-14T09:01:08Z",
+        "impl": {
+          "branch": "impl/docs/settled-common-contracts-660-665/grit-hefty-snare"
+        }
       }
     },
     "261114-refactor-ws-split-oversized-source-files": {
