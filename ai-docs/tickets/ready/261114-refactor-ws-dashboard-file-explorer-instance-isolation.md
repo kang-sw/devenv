@@ -108,3 +108,44 @@ of the current Files tab and toolbar presentation; mockup conformance belongs
 to the later user-facing feature slice. Product source changes, tests, and
 runtime verification belong to the later implementation run; this draft
 records no implementation or verification result.
+
+## Execution checkpoint — retained implementation, acceptance incomplete
+
+- Implementation is retained on `impl/develop/haste-serve-defy` through
+  `1f7363b4f`: per-instance factory/lifecycle and separate tab/toolbar ownership
+  (`8129e7bc6`), deterministic/browser fixtures (`1e3352b2e`), preserved sheet
+  paint and lazy toolbar construction (`dcc033133`), and the lite-review
+  root-refusal race correction (`1f7363b4f`). No backend or authority change.
+- Browser storage uses the existing root/View record shapes. The tab retains
+  legacy keys; the toolbar gets a separate guarded adapter namespace. This
+  browser-internal ownership choice does not select the later explorer's schema.
+- Independent one-pass lite review found one Important issue and no Critical or
+  Minor issues: candidate-root attempts invalidated valid pending current-root
+  work even on refusal. A separate candidate sequence and controlled HTTP-refusal
+  regressions fix it. No re-review is allocated under lite.
+- Latest bounded offline verification passed:
+  `GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOFLAGS=-p=2 GOMAXPROCS=2 go test ./internal/wsdashboard -count=1 -timeout=120s -run '^(TestFiles|TestToolbar|TestBoardToolbar|TestFS)'`
+  from `agents-plugin-tool` (5.348s, owned process group retired). Log:
+  `/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/ws-files-review-fix-fv774rao/go.log`.
+- Appearance captures use actual baseline assets at `e86f22a82` and actual result
+  initialization/assets in an offline mocked fixture, not the parent's mockup.
+  The strict comparison passed all four tree/View states for both entry points
+  before review, retained under
+  `/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/ws-files-verification-i1v5spyu/`.
+- The final pinned-commit run at `1f7363b4f` again produced four differing pixels
+  in Files-tab View (4/1296000); tab tree and both toolbar states remain exactly
+  equal. Read `comparison.html`, `results.json`, and `compare-tab-view.png` under
+  `/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/ws-files-verification-4nvxg2o1/`.
+  The side-by-side View capture was read; strict comparison is **mismatch**.
+  The earlier four-pixel signature had disappeared in the intervening passing
+  run, so its implementation-versus-browser-raster cause remains unproven.
+  The strict assertion was not weakened. Repeated appearance non-convergence
+  triggers worker stop (f); no further attempt was made.
+- Final failing command:
+  `python3 /var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/ws-files-verification-y_tgjir1/browser-wrapper.py`
+  (120s cap, exit 1; browser closed and final ps for owned group 95988 empty).
+- No Result is recorded and the ticket remains ready pending final acceptance.
+  Full-package tests/build and broader viewport/theme coverage were omitted to
+  preserve the authorized bounded offline scope. No shared daemon, endpoint
+  29417, installs/downloads, real holders/providers, merge, push, or worktree
+  release occurred. MAIN owns the next acceptance decision and integration.
