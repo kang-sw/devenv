@@ -245,9 +245,12 @@ Markdown up to the closing tag.
   The server records successful item/content/panel/close/reopen transitions
   as system events. Agent lines give a concise interpretation of current
   state; verbatim duplication of the server's event records is not required.
-- Keep asks in items: a finished-artifact confirmation is `wb:add` with
-  `class="check"` (or `policy` for a real choice), not a panel or log line.
-  Options, recommendations, `wb:why`, links, and check answers remain item
+- Keep asks in items: every question or decision request to the user is an
+  item, a new `wb:add` or a `wb:patch` re-ask of an existing one, since only
+  an item collects the user's answer. A `wb:log` line, panel, or current
+  content may cite the open item as `{{12}}` but never phrases the ask
+  itself. A finished-artifact confirmation is `class="check"` (or `policy`
+  for a real choice). Options, recommendations, `wb:why`, links, and check answers remain item
   data, not automatically created panels. `wb:recap` is removed without an
   alias, and `wb:append` is refused; the panel's `recap` attribute is not
   the retired command.
