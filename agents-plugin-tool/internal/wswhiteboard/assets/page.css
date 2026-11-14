@@ -444,7 +444,7 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 /* Topic stream: one chronological column under a thin divider, full card
    width with no side rail. A quiet header carries the counts; log rows have
    author and clock inline before their text; panels are cards
-   inside the topic card. A bottom-aligned clip grows upward in 640px steps;
+   inside the topic card. A bottom-aligned clip grows at saved entry boundaries;
    shared keep sessions, not an inner scrollbar, own scroll compensation. */
 .topic-stream { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); font-size: 13px; }
 .topic-stream > summary, .tstream > .mhead { list-style: none; display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
@@ -457,7 +457,7 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .topic-stream > summary .n, .tstream > .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .topic-stream > summary .mmeta { margin-left: auto; font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .wb-history { overflow-anchor: none; }
-.history-clip { position: relative; display: flex; flex-direction: column; justify-content: flex-end; max-height: var(--wb-history-height, 640px); overflow: hidden; }
+.history-clip { position: relative; display: flex; flex-direction: column; justify-content: flex-end; max-height: var(--wb-history-height, 1000px); overflow: hidden; }
 .history-live { display: flow-root; flex: none; width: 100%; }
 .history-more .history-clip::after { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 22px; pointer-events: none; background: linear-gradient(var(--wb-bg), transparent); }
 .history-older { display: block; margin: 2px auto 6px; border: 0; height: 22px; padding: 0 10px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 12px; font-weight: 600; cursor: pointer; }
