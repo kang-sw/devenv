@@ -12,12 +12,12 @@
 - This replaces the provisional broad-pattern command sent before MAIN's
   14:09:50 swap-window restriction. It covers receiver checks only, not the
   Pi executable leaf, full suites, independent review, or visual acceptance.
-- A later scoped START must name this artifact and an ownership/cleanup
-  supervisor. The current bash tool exposes a timeout but no descendant
-  ownership or quiescence receipts. No such supervisor is currently assigned;
-  **that unknown blocks execution, rather than authorizing an exploratory run**.
-- The swap window must first be explicitly closed by MAIN. Closing that window
-  alone is not START. No new Pi/session/child launch occurs while it is active.
+- A later scoped START must name this artifact and the statically authored
+  supervisor source `14-2341-261114-live-summary-bounded-supervisor.py` in this
+  directory. MAIN assigned its authoring; it has not been executed or accepted.
+  **Execution remains BLOCK pending lead source read and a new scoped START**.
+- MAIN reports that the swap window closed at 14:25. That closure is not START;
+  this ticket still has no executable authorization.
 - Any source/test/dependency/embed change beyond the explicit gofmt operation
   invalidates this binding. Reconcile statically and obtain a new scoped START;
   do not expand a live batch, retry it, or repair failures inside it.
@@ -38,7 +38,11 @@ Executables, inspected as installed filesystem entries without running them:
 - Go: `/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go`.
 - gofmt: `/opt/homebrew/Cellar/go/1.26.2/libexec/bin/gofmt`.
 - Git: `/Library/Developer/CommandLineTools/usr/bin/git`.
-- No Python supervisor executable is selected or authorized by this artifact.
+- Supervisor Python, selected by filesystem lookup only:
+  `/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/bin/python3.9`.
+  Its exact isolated invocation is in the supervisor source's opening docstring.
+  `/bin/ps` is the explicitly bounded ownership-diagnostic helper, not a provider
+  or installed harness probe. Neither executable has run.
 
 ### Command 1: formatting (30 seconds maximum)
 
@@ -157,7 +161,7 @@ stand-in (`plan_usage_probe_test.go:46`).
 
 | Owner | Allowed descendants/resources | Excluded |
 |---|---|---|
-| Future supervisor | The five commands above; an explicitly reviewed metadata/ownership helper, if MAIN assigns one | No supervisor is currently assigned; do not guess one |
+| Assigned supervisor source | One retained direct Python session anchor; the five commands above; bounded direct `/bin/ps` children; read-only metadata Git children (`symbolic-ref`, `rev-parse`, literal `ls-tree`) | No execution or acceptance is inferred from static authoring |
 | gofmt | No process child, listener or holder | Every unlisted executable |
 | Go 1.26.2 | Its own `pkg/tool/darwin_arm64/{asm,compile,link,preprofile}` and generated `wslive.test`, `mcp.test`, `wsagent.test`, `wsdashboard.test` binaries under the batch temporary directory | `cgo`, external C compiler/linker, vet, coverage/fix tools, downloaded toolchains, shell, Node, provider executables |
 | Outer `wslive.test` | Two read-only Git children, one nested Go invocation and its compile/link/test children; historical checkout and fixture files under `t.TempDir` | Real checkout writes; historical fixture replacement; network/download fallback |
@@ -174,7 +178,9 @@ or listener is BLOCK, even if the top-level command exits zero.
 ## Environment: construct from empty, never inherit
 
 Create exactly one new private batch root with exclusive creation and mode 0700:
-`/tmp/ws-live-summary-675-timothy-unlikable-tingle-01`. If it already exists or
+`/tmp/ws-live-summary-675-receiver-01`.
+This neutral name replaces the earlier session-key-bearing path so no capability
+key appears inside the fixture environment's HOME/TMPDIR/PATH values. If it already exists or
 ownership cannot be established, BLOCK; do not remove or reuse it.
 
 The only entries in its private `bin` directory are symlinks `go` and `git` to
@@ -227,11 +233,29 @@ injection, `PI_*`, `CLAUDE*`, `CODEX*`, `WS_HOSTED_*`, `WS_MCP_*`, mailbox/sessi
 credentials, `WSAGENT_STANDIN_OUT`, `WS_TEST_USAGE_CODEX`, or launcher variables.
 The two test-only stand-in switches are absent, not forwarded as user values.
 
-No Node or Python child belongs to the selected tests. If MAIN later assigns a
-Python ownership supervisor, its absolute executable, complete source, isolated
-`-I -S` invocation, imports, subprocess graph, environment and cleanup must be
-added to this same artifact before START. Nothing here approves an implicit
-Python wrapper or installed harness launcher.
+No Node or Python child belongs to the selected tests. The assigned supervisor
+uses the absolute Python above with `-I -S -B`. Its bootstrap is `/usr/bin/env
+-i` with exactly `HOME=/var/empty`, `PATH=/usr/bin:/bin`, `TMPDIR=/tmp`, `LANG=C`
+and `LC_ALL=C`; the source rejects a different bootstrap environment. The anchor
+and fixture children receive only the separate fixed allowlist above. The env
+bootstrap execs Python rather than creating an additional detached worker.
+It imports only Python 3.9 standard-library modules, seals a private same-source
+anchor copy beneath the batch root, and launches that one direct child with
+`start_new_session=True`. The anchor retains its session and launches commands
+with `start_new_session=False`. Its fixed metadata Git argv disables fsmonitor
+and hooks and reads literal Git blobs rather than invoking diff/textconv filters.
+The supervisor also binds the two ws config manifests the selected intake
+fixtures read. These are input/ownership checks, not added test coverage.
+
+The supervisor retains the anchor's `Popen` strongly and never polls, waits,
+communicates, context-manages or reaps it until group cleanup has finished.
+`/bin/ps` helpers have separate retained direct handles and two-second ceilings;
+their failures never transfer or discard the anchor's ownership. Source-audited
+non-detached inheritance, not a broad OS sandbox guarantee, is the scope premise.
+Unknown observed detached lineage makes the result BLOCK and is never signaled
+outside the owned anchor group. Python 3.9/macOS clock-reference differences are
+handled by relative durations over the private pipe; the parent alone owns the
+absolute 630/720-second deadlines. No installed harness launcher is admitted.
 
 ## Ownership registration and cleanup receipts
 
@@ -268,9 +292,10 @@ records and paths; do not send an unverified signal or claim cleanup success.
 
 Remove only proven-owned scratch files after descendants/listeners are proven
 quiescent. Keep complete logs and ownership/cleanup receipts as the run's
-verification evidence. There is no ownership/cleanup implementation assigned
-currently, so this prerequisite remains BLOCK; executing to discover the missing
-scope or supervisor behavior is not authorized.
+verification evidence. The assigned supervisor source now implements these checks for lead read only.
+It has no syntax, runtime, process-cleanup or test acceptance evidence. This
+prerequisite remains BLOCK until the lead reads the complete source and MAIN
+relays a new scoped START; executing to discover its behavior is not authorized.
 
 ## Still required after this batch
 
