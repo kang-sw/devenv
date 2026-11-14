@@ -771,6 +771,9 @@
     "261115-bug-pi-reviewer-write-scope-discoverability": {
       "registered_at": "2026-11-14T18:18:40Z"
     },
+    "261115-bug-ws-claude-binary-provenance-and-resume-model": {
+      "registered_at": "2026-11-14T23:28:48Z"
+    },
     "261115-bug-ws-pi-bootstrap-elides-undelivered-manual": {
       "registered_at": "2026-11-14T15:17:10Z"
     },
