@@ -162,10 +162,21 @@ this launcher mechanism and a partial bounded-wait repair. Its
 mail durability open. That repair is not evidence that automatic replacement
 has been disabled. Avoid a duplicate replacement-policy repair in this ticket.
 
-MAIN relayed the owner's confirmed answer **(703)=b**: retain automatic
-replacement with advance notice. The owner rejected option **a**, deferring
-dev-build replacement until an explicit swap. Replacement policy is settled;
-the notice contents, recipients and advance interval remain for MAIN's design
-settlement. No notice design is chosen by this evidence update, and no
-runtime implementation or daemon swap is performed. Mail durability and
-large-request handling remain outside this evidence-only change.
+MAIN subsequently relayed the owner's correction **(703)=a**, superseding
+the earlier answer **b**: replace the shared daemon only at explicitly
+coordinated, designated timing. Ordinary connection must not replace it
+because of a newer same-core development build. The advance-notice design
+from option **b** is withdrawn, not pending.
+
+The authorized repair also removes the unconditional local-dev Pi lead/fork
+startup build: reuse a binary when its source fingerprint matches. Preserve
+released-version compatibility behavior. Treat starting a dead daemon as a
+separate path; proposed last-known-good restart and rollback behavior under
+owner item **(706)** remains unapproved and outside this repair. Mail
+durability and large-request handling also remain outside this change.
+
+Compatibility tier **T0**: the authorized boundary is launcher and internal
+bootstrap policy only, with no cross-version schema, protocol, MCP, tracker
+event or manifest-field change. Stop for MAIN's approval if implementation
+would require a broader cross-version surface change. This evidence correction
+implements no runtime policy and performs no daemon operation.
