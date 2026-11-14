@@ -49,7 +49,7 @@ func TestDashboardInboxDrainDescriptionIsAdapterOnly(t *testing.T) {
 	if !strings.HasPrefix(desc, "Adapter-only:") {
 		t.Fatalf("description = %q", desc)
 	}
-	for _, want := range []string{"an agent never calls it", "atomically claims", "oldest first", "can no longer be merged into or cancelled"} {
+	for _, want := range []string{"an agent never calls it", "atomically claims", "oldest first", "promoted to steering first", "can no longer be cancelled or steered"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description lacks %q: %s", want, desc)
 		}
