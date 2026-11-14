@@ -29,7 +29,7 @@
 //             Terminal POST is browser-local; no shell process is started.
 //             --face-width 266 constrains the production face to the approved
 //             direct-fragment narrow equivalent (not reference typography).
-//   recap-jitter  Four-line recap/header geometry during pinned-column scroll
+//   recap-jitter  Content-sized, max-four-line recap/header geometry during pinned-column scroll
 //             and browser-local region updates (serve --history-entries 60).
 //   overview  Folded picker, anchors/restores, interactions, held swaps,
 //             palette picks, storage/reload and reduced motion.
@@ -490,7 +490,8 @@ const IN_PAGE = () => {
   bh.board_ = () => document.getElementById("r-board") || document.querySelector("body.full .grid > main");
   bh.kind = () => (document.body.classList.contains("full") ? "standalone" : document.getElementById("tabbar") ? "adapter" : "board");
   bh.scroller = () => {
-    const c = bh.focus && bh.focus.closest("#bpins") || document.getElementById("bcol");
+    const pins = bh.focus && bh.focus.closest("#bpins");
+    const c = pins && ['auto', 'scroll'].includes(getComputedStyle(pins).overflowY) ? pins : document.getElementById("bcol");
     const oy = c && getComputedStyle(c).overflowY;
     return c && (oy === "auto" || oy === "scroll") && c.scrollHeight > c.clientHeight ? c : document.scrollingElement;
   };
@@ -1063,7 +1064,7 @@ const OVERVIEW_PAGE = () => {
     const ts = bh.topics().slice(-pins);
     ts.forEach((n, i) => WsCards.move(n, { pin: true, index: i }));
     // The serving fixture has body-only topics. Add a real-shaped recap to
-    // one, so the four-line clamp and fixed header slot are exercised.
+    // one, so the max-four-line clamp and content-sized header are exercised.
     const n = bh.topics().find((n) => !n.closest('#bpins'));
     if (n && !n.querySelector('.tsub')) {
       const sub = document.createElement('div'); sub.className = 'tsub';
@@ -1179,7 +1180,7 @@ async function checkFold(page) {
   const recaps = rows.filter((r) => r.recap !== null);
   qa(recaps.length > 0 && recaps.every((r) => r.clamp === '4' && r.recap <= r.line * 4 + 1), 'existing recap is clamped to at most four lines', recaps);
   const slots = rows.filter((r) => r.slot !== null);
-  qa(slots.length > 0 && slots.every((r) => r.slotClamp === '4' && Math.abs(r.slot - r.slotLine * 4) <= 1), 'header recap slot reserves exactly four lines', slots);
+  qa(slots.length > 0 && slots.every((r) => r.slotClamp === '4' && r.slot > 0 && r.slot <= r.slotLine * 4 + 1), 'header recap uses at most four lines', slots);
 }
 
 async function scenarioSharedControls(ctx) {
@@ -1950,6 +1951,7 @@ async function scenarioToolbar(ctx) {
 
 async function scenarioRecapJitter(ctx) {
   const { page, tab, kind } = await overviewReady(ctx, { seed: false });
+  if (ctx.args.theme) await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, ctx.args.theme);
   const key = 'LOGCHAIN';
   // Use renderer-produced agent recap and history markup. Only the text changes
   // in browser-local stream events; the server and disclosure logic stay intact.
@@ -1994,7 +1996,8 @@ async function scenarioRecapJitter(ctx) {
         slot: slot.getBoundingClientRect().height,
         head: head.getBoundingClientRect().height, topic: n.getBoundingClientRect().height,
         line: parseFloat(getComputedStyle(slot).lineHeight), clamp: getComputedStyle(slot).webkitLineClamp,
-        title: slot.querySelector('.rtext').title.length });
+        title: slot.querySelector('.rtext').title.length,
+        fill: getComputedStyle(slot).backgroundColor });
     };
     const update = (index) => {
       const t = document.createElement('template'); t.innerHTML = bh.board.html;
@@ -2016,18 +2019,22 @@ async function scenarioRecapJitter(ctx) {
       }
       requestAnimationFrame(tick);
     });
-    const delta = (name) => Math.max(...samples.map((r) => r[name])) - Math.min(...samples.map((r) => r[name]));
+    // Content updates may change height; only equal-content sticky transitions
+    // must remain stable. Compare short and long recaps independently.
+    const groups = [...new Set(samples.map(r => r.title))].map(title => samples.filter(r => r.title === title));
+    const delta = name => Math.max(...groups.map(rows => Math.max(...rows.map(r => r[name])) - Math.min(...rows.map(r => r[name]))));
     return { samples, updates, delta: { slot: delta('slot'), head: delta('head'), topic: delta('topic') },
       stuck: samples.filter((r) => r.stuck).length, unstuck: samples.filter((r) => !r.stuck).length,
       pincol: document.documentElement.hasAttribute('data-pincol'), scroller: s.id || s.tagName, viewHeight: s.clientHeight };
   }, key);
   await capture(ctx, tab, kind + '-recap-stuck', result);
-  qa(result.pincol && result.scroller === 'bpins', 'uses the real wide pinned-column scroller', result.scroller);
+  qa(ctx.width >= 1600 ? result.pincol && result.scroller === 'bpins' : !result.pincol && result.scroller === 'bcol', 'uses the responsive adapter pinned layout', result.scroller);
   qa(result.samples.every((r) => result.viewHeight >= r.head), 'pinned viewport can display the full recap/header', { viewHeight: result.viewHeight, head: result.samples[0].head });
   qa(result.stuck > 0 && result.unstuck > 0 && result.updates.length === 4 && new Set(result.samples.map((r) => r.title)).size === 2,
     'samples stuck/unstuck states and four live region updates with short/long recap text', { stuck: result.stuck, unstuck: result.unstuck, updates: result.updates });
-  qa(result.samples.every((r) => r.clamp === '4' && Math.abs(r.slot - 4 * r.line) <= 1), 'recap always reserves exactly four lines');
-  qa(Object.values(result.delta).every((d) => d <= 1), 'no recap-slot/header/topic height jitter above 1px', result.delta);
+  qa(result.samples.every((r) => r.clamp === '4' && Math.abs(r.slot - (r.title === 'Short recap.'.length ? 1 : 4) * r.line) <= 1), 'short recap shrinks to one line; long recap caps at four');
+  qa(result.samples.every(r => r.fill === 'rgba(0, 0, 0, 0)'), 'header recap has no highlight background');
+  qa(Object.values(result.delta).every((d) => d <= 1), 'same-content recap/header/topic has no sticky jitter above 1px', result.delta);
   log('recap jitter max deltas (px): ' + JSON.stringify(result.delta));
 }
 

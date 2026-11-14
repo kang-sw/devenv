@@ -683,7 +683,8 @@
 (function () {
   if (!window.wbLatestLog) {
     var started = Date.now(), topics = new Set(), seen = new Set(), watched = new Map();
-    var selector = '.trecap[data-kind="agent"], .wb-entry.agent.current';
+    // Seeing the header recap must not consume the lower log's first sight.
+    var selector = '.wb-entry.agent.current';
     function key(node) {
       var topic = node.closest('.topic');
       return topic && topic.getAttribute('data-topic') + '\n' + node.getAttribute('data-entry');
