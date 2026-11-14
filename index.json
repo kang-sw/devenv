@@ -763,6 +763,9 @@
     "261115-feat-ws-dashboard-conversation-rendering-consolidation": {
       "registered_at": "2026-11-14T22:47:31Z"
     },
+    "261115-feat-ws-dashboard-observed-session-model": {
+      "registered_at": "2026-11-14T23:03:59Z"
+    },
     "261115-feat-ws-hosted-codex-adapter-contract": {
       "registered_at": "2026-11-14T15:20:26Z"
     },
