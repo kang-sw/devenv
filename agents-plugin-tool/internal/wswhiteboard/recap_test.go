@@ -95,7 +95,10 @@ func TestLegacyRecapReferencesAndSandbox(t *testing.T) {
 	if recap < 0 || frame < 0 || recap > frame {
 		t.Fatalf("legacy recap %d, frame %d", recap, frame)
 	}
-	wantNone(t, board[:frame], "onerror")
+	// The full source is inert, attribute-escaped hover text; it must never
+	// return as an executable image/event attribute in the rendered recap.
+	wantAll(t, board[:frame], `&lt;img src=x onerror=alert(1)&gt;`)
+	wantNone(t, board[:frame], `<img src=x onerror=alert(1)>`, ` onerror="`, ` onerror='`)
 	if got := st.TextRefs("on {{1}} and {{01}}, not {{99}} or {{x}}"); got != "on (01) and (01), not {{99}} or {{x}}" {
 		t.Errorf("TextRefs = %q", got)
 	}

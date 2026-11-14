@@ -105,7 +105,7 @@ func TestTerminalButtonLivesInBoardToolbar(t *testing.T) {
 		".r-board:not(:has(> .topic, > .bcard)) > .empty",
 		".dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)):has(> .empty) { position: absolute; inset: 0 4px 0 2px; display: flex; flex-direction: column; }",
 		".dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)) > .empty { flex: 1 1 0; }",
-		".board-toolbar { container: board-toolbar / inline-size; flex: none;",
+		".board-toolbar-face { container: board-toolbar / inline-size;",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
