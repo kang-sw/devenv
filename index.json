@@ -528,6 +528,9 @@
     "261114-bug-ws-web-toolbar-popover-viewport-coordinates": {
       "registered_at": "2026-11-14T11:25:46Z"
     },
+    "261114-bug-ws-whiteboard-fold-reopens-on-panel-republish": {
+      "registered_at": "2026-11-14T13:05:54Z"
+    },
     "261114-chore-ws-dashboard-index-removal-diagnostics": {
       "registered_at": "2026-11-14T12:12:39Z"
     },
