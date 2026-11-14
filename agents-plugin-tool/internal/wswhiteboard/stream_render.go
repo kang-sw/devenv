@@ -10,6 +10,10 @@ func (p *pageData) EntryOf(e EntryView) entryData { return entryData{EntryView: 
 
 func (d entryData) IsPanel() bool { return d.Kind == EntryPanel }
 
+func (d entryData) HistoryItem() itemData {
+	return itemData{ItemView: *d.Item, Page: d.Page, Static: true, History: &d.EntryView}
+}
+
 func (d entryData) PayloadClass() string {
 	if d.Page.DocFramed {
 		return "framed"

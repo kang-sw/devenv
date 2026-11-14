@@ -179,6 +179,9 @@
   function openKey(d) {
     // The rail's ended folds keep their state in storage (rail.js marks).
     if (d.classList.contains("rended")) return null;
+    // Whole HISTORY is no longer a disclosure. Ignore only its obsolete
+    // key; item/panel/version/system/run/topic folds keep their own owners.
+    if ((d.getAttribute("data-key") || "").indexOf("history:") === 0) return null;
     if (d.hasAttribute("data-key")) return "k:" + d.getAttribute("data-key");
     if (d.classList.contains("panel") && d.id) return "p:" + d.id;
     return null;
@@ -8664,7 +8667,7 @@
   var draftStore = WsRail && rid && !shell ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
   function readDraft() {
     var b = region("board"), open = {};
-    Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
+    Object.keys(openState).forEach(function (k) { if (openState[k] && k.indexOf("k:history:") !== 0) open[k] = true; });
     var d = {
       text: ctext ? ctext.value : "",
       cmd: cmdSel ? { name: cmdSel.name, args: cmdSel.args } : null,
@@ -8715,7 +8718,7 @@
       if (d.open && typeof d.open === "object") {
         Object.keys(d.open).forEach(function (k) {
           // A panel folded by hand outranks a draft saved while it was open.
-          if (!Object.prototype.hasOwnProperty.call(openState, k) && !(k.indexOf("k:entry:") === 0 && shutHas(rid + "/" + k.slice(2)))) openState[k] = true;
+          if (k.indexOf("k:history:") !== 0 && !Object.prototype.hasOwnProperty.call(openState, k) && !(k.indexOf("k:entry:") === 0 && shutHas(rid + "/" + k.slice(2)))) openState[k] = true;
         });
         restoreOpen(doc);
       }

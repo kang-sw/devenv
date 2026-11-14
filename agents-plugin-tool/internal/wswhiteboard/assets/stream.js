@@ -17,12 +17,13 @@
     if (root.matches && root.matches('.wb-history')) out.unshift(root);
     return out;
   }
-  function valid(id) { return /^(?:p|e)[1-9][0-9]*$/.test(id || ''); }
+  function valid(id) { return /^(?:(?:p|e)[1-9][0-9]*|item-[1-9][0-9]*)$/.test(id || ''); }
   function find(root, id) {
     if (!valid(id)) return null;
     var node = root.querySelector('[id="' + id + '"]');
     if (!node) return null;
     if (id[0] === 'e') return node.matches('.wb-entry[data-entry="' + id + '"]') ? node : null;
+    if (id.indexOf('item-') === 0) return node.closest('.wb-entry[data-history-item="' + id.slice(5) + '"]') ? node : null;
     return node.matches('.entry-panel') && node.closest('.wb-entry[data-panel="' + id + '"]') ? node : null;
   }
   var LIMIT = 1000, PANELS = 3, LINES = 30;
@@ -61,9 +62,16 @@
     var id = boundary(h), node = id && find(h, id), live = h.querySelector('.history-live');
     if (!node) return;
     node = splitAt(h, node);
-    // Only the saved boundary's geometry changes on resize, never its ID.
-    var height = Math.max(0, live.getBoundingClientRect().bottom - node.getBoundingClientRect().top);
-    h.style.setProperty('--wb-history-height', Math.ceil(height) + 'px');
+    // Membership, not pixels: hide only whole top-level rows before the
+    // saved boundary. splitAt preserves independently open log/system folds.
+    // No height, overflow clip, fade, or partially visible oldest entry.
+    var before = true;
+    Array.from(live.children).forEach(function (row) {
+      if (row === node) before = false;
+      if (before && !row.hasAttribute('data-wb-history-before')) row.setAttribute('data-wb-history-before', '');
+      if (!before && row.hasAttribute('data-wb-history-before')) row.removeAttribute('data-wb-history-before');
+    });
+    h._wbHistoryHeight = Math.ceil(live.getBoundingClientRect().height);
   }
   function later(h) {
     if (h._wbHistoryFrame) return;
@@ -97,6 +105,9 @@
     if (!h._wbHistoryPending || h._wbHistoryChoosing) return;
     h._wbHistoryChoosing = true;
     try {
+      // Measure candidates in ordinary flow, then fit hides the excluded
+      // prefix synchronously before paint. Disclosure state is not changed.
+      h.querySelectorAll('[data-wb-history-before]').forEach(function (row) { row.removeAttribute('data-wb-history-before'); });
       var all = rows(h), before = h._wbHistoryPending.before;
       var end = before ? all.findIndex(function (e) { return e.id === before; }) : all.length;
       if (end < 0) return;
@@ -239,12 +250,22 @@
     reveal(h, node);
     arm(h);
     h._wbHistoryTarget = node;
-    // Page navigation must clear the topic's sticky head AND the rail/host
-    // stack above it. A fixed page-top offset can leave keyboard focus
-    // inside the clip but hidden behind those capsules on either surface.
-    var head = h.closest('.topic').querySelector('.tophead'), offset = 12;
+    // Clear both independent obstructions: the sticky head/rail and the
+    // open-question pill below that head. Merely landing within history
+    // bounds does not expose a control's center (including a short summary).
+    var topic = h.closest('.topic'), head = topic.querySelector('.tophead'), offset = 12;
     var style = head && window.getComputedStyle(head);
-    if (style && style.position === 'sticky') offset += (parseFloat(style.top) || 0) + head.offsetHeight;
+    var sticky = style && style.position === 'sticky';
+    if (sticky) offset += (parseFloat(style.top) || 0) + head.offsetHeight;
+    var host = topic.closest('#bpins') || topic.closest('#bcol') || topic.closest('.wrap');
+    var wrap = host && host.querySelector('.oq-wrap.wb-oq-top'), pill = wrap && wrap.querySelector('.oq-pill');
+    if (pill && !pill.hidden) {
+      // The 10px gap mirrors page.css. Predict this topic's pill position
+      // as well as reading the current one: the rail changes its current
+      // head during the scroll, so the old pill's geometry alone can lie.
+      var pillTop = parseFloat(window.getComputedStyle(wrap).top) || 0;
+      offset = Math.max(offset + (sticky ? 10 + pill.offsetHeight : 0), pillTop + pill.offsetHeight + 12);
+    }
     kit.keep(node, { offset: offset, observe: [h.querySelector('.history-live')], onEnd: function () {
       if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
     } });
@@ -260,7 +281,7 @@
     var summary = fold.children[0], label = summary.querySelector('.lbl') || summary;
     label.textContent = window.wsT ? window.wsT(run ? 'js.wb.stream.run' : 'js.wb.stream.system', events.length, range) : (run ? 'log ' : 'system events ') + events.length;
   }
-  function logNode(n) { return !!n && (n.matches('details.run-fold') || n.matches('details.system-run') || n.matches('.wb-entry.agent') || n.matches('.wb-entry.system')); }
+  function logNode(n) { return !!n && !n.hasAttribute('data-history-item') && (n.matches('details.run-fold') || n.matches('details.system-run') || n.matches('.wb-entry.agent') || n.matches('.wb-entry.system')); }
   // mergeSystems moves an older chip's events to the front of the adjacent,
   // newer chip, which keeps its disclosure node and open state.
   function mergeSystems(older, newer) {
@@ -354,8 +375,7 @@
   function capture(root) {
     return histories(root).map(function (h) {
       var first = h.querySelector('.wb-entry');
-      var fold = h.closest('.topic-stream');
-      return { key: h.getAttribute('data-history'), first: first && first.id, open: !fold || fold.open, steps: h._wbHistorySteps || 1,
+      return { key: h.getAttribute('data-history'), first: first && first.id, steps: h._wbHistorySteps || 1,
         chunks: h._wbHistoryChunks.slice(), heights: Object.assign({}, h._wbHistoryHeights), pending: h._wbHistoryPending && Object.assign({}, h._wbHistoryPending),
         folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }),
         systems: Array.from(h.querySelectorAll('.system-run .wb-entry')).map(function (e) { return [e.id, e.closest('.system-run').open]; }) };
@@ -368,8 +388,8 @@
     histories(root).forEach(function (h) {
       var saved = (snapshot || []).find(function (s) { return s.key === h.getAttribute('data-history'); });
       if (!saved) return;
-      var fold = h.closest('.topic-stream');
-      if (fold && saved.open !== undefined) fold.open = saved.open;
+      // Old snapshots' whole-history open flag is obsolete. Descendant
+      // disclosures below are still independently restored.
       if (saved.first) materialize(h, saved.first);
       // Discard default cuts made by init on the incoming tail. A new log
       // shifts that cut by one, and it must not leave a closed sub-run inside
@@ -414,14 +434,15 @@
       reset(h);
       updateControl(h);
       arm(h);
-      // Hidden overflow is not keyboard navigation: a clipped summary is
-      // still tabbable. Reveal focused controls through the same page keep
-      // path as deep links, never by scrolling the clipped box.
+      // Excluded whole rows are not tab stops. For a selected control,
+      // native Tab must also clear sticky overlays, not just history bounds.
+      // Deep links reveal excluded entries through the same keep path.
       h.addEventListener('focusin', function (e) {
         var live = h.querySelector('.history-live'), node = e.target;
         if (!live.contains(node)) return;
         var r = node.getBoundingClientRect(), clip = h.querySelector('.history-clip').getBoundingClientRect();
-        if (r.top < clip.top || r.bottom > clip.bottom) navigate(h, node);
+        var hit = document.elementFromPoint && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        if (r.top < clip.top || r.bottom > clip.bottom || (hit && hit !== node && !node.contains(hit))) navigate(h, node);
       });
       // Frame grafts keep this container but replace its older-page button.
       h.addEventListener('click', function (e) {
@@ -445,8 +466,8 @@
           if (h.isConnected === false) { observer.disconnect(); return; }
           h._wbHistoryResizing = true;
           try {
-            // Changing the clip during resize can resize shallower watched
-            // ancestors. Apply it after this delivery, not inside it.
+            // Changing membership during resize can resize shallower
+            // watched ancestors. Apply it after this delivery, not inside it.
             later(h);
             updateControl(h);
           } finally { h._wbHistoryResizing = false; }

@@ -590,6 +590,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	work.Seq++
 	mark := work.Seq
 	var out Outcome
+	created := map[string]Item{} // only this Apply knows these entries' batch membership
 	var optionWarn []int
 	embedDir := false
 	// closedBy names, per item a close in this batch withdrew, that close.
@@ -618,7 +619,13 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		}
 		switch cmd.Tag {
 		case "wb:add":
+			before := len(work.Items)
 			id := applyAdd(p, work, cmd, topicOf, mark, env.Now)
+			if len(work.Items) > before {
+				item := work.Items[len(work.Items)-1]
+				entries := work.topicDoc(item.Topic).Entries
+				created[entries[len(entries)-1].ID] = item
+			}
 			out.IDs = append(out.IDs, id)
 			optionWarn = work.noteNonPolicyOptions(optionWarn, id)
 		case "wb:answer":
@@ -667,6 +674,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	if len(p.List) > 0 {
 		return Outcome{}, p.List
 	}
+	coalesceCreated(work, created)
 	work.evictArchive()
 	work.pruneLabels()
 	work.stampChanges(mark, env.Now)
