@@ -286,6 +286,59 @@ The mocked Python regression remains **NOT RUN**. All previously listed native
 acceptance gaps remain **UNVERIFIED**. Static review is not Phase 1 acceptance;
 no Result, later phase, closure or merge is authorized by this checkpoint.
 
+### Result (e7121971) - 2026-11-14
+
+**Phase 1 implementation handoff complete; native UI acceptance remains
+owner-pending.** MAIN's 16:23:19 continuation authorizes Phase 1 integration
+with the disclosed native UI gaps assigned to owner check 807. This Result
+records that authorized handoff, not invented pixel evidence or whole-ticket
+completion. The branch is retained for root integration; no merge was performed.
+
+The attach-only macOS package and preserved local `.app`/binary paths are recorded
+in the execution checkpoint above. Nine Rust tests and the frozen two-job debug
+app build passed on source `0f16157b`, with complete logs retained. Default and
+overridden cache launches logged the exact discovered origin; missing/unhealthy
+launches did not attach. Read-only baseline/final health matched the same daemon
+identity, and the recorded cleanup scan found no owned remaining processes or
+listeners. These observations retain their explicitly limited meaning.
+
+The Important runner finding is resolved in `e7121971`: a group still present
+immediately after a foreground step stops the attempt and reaches bounded
+cleanup before another build can start. A successful parent with a surviving
+group returns 125. All IDs remain in evidence and confirmed-absent groups stay
+retired. The normal absent-group two-step recipe remains unchanged.
+
+Authorized light verification ran once from `agents-plugin-tool/desktop/`:
+`python3 -m unittest discover -s scripts -p test_build_slot.py -v`.
+All three existing ownership tests and both new orchestration tests passed:
+**Ran 5 tests in 0.003s; OK; exit 0**. Complete output:
+`/tmp/werkschaft-runner-mocked-6_pke6cw.log`. This later result supersedes the
+historical Python NOT RUN status above. Product subprocess creation, group
+probes/signals and signal-handler changes were mocked; no real group was signaled.
+
+The same independent reviewer statically verified only the fix delta and
+requested regression, finding the original Important resolved and the current
+verdict **clean**, with no remaining Critical/Important or Minor findings.
+The full original report and appended fix verification are retained at:
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@e9caa154/review-paths/bc9f649f-01-261113-feat-werkschaft-thin-tauri-shell-lite-static.md`.
+The reviewer confirmed that Rust, Cargo/npm manifests and locks, Tauri config,
+embedded UI and icon inputs are unchanged since the built native source; the
+Python-only repair requires no native rebuild. No Cargo/build/check, app,
+browser, GET, permission probe or daemon operation followed slot release.
+
+**Owner-pending / UNVERIFIED under check 807:** rendered dashboard/error pixels
+and captures; successful native-menu retry; ordinary, subframe and new-window
+navigation; external-browser handoff; and normal UI-close daemon survival.
+Attach messages precede asynchronous navigation and are not proof of rendering.
+SIGTERM-cleaned native processes plus unchanged daemon health are not normal
+window-close evidence. No Screen Recording/Accessibility permission was known
+already granted, and no permission probe/prompt/workaround or browser screenshot
+substitution was used. This handoff preserves those gaps rather than claiming
+broader WKWebView acceptance.
+
+The built `.app`, target artifacts and full checkout remain preserved. Phases
+2–4 are untouched; the ticket remains in `ready/` and is not closed.
+
 ### Phase 2: Daily-use reliability (later Phase 1b cut)
 
 Add single-instance launch/focus next; it is not a Phase 1a blocker. Verify
