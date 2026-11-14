@@ -37,10 +37,19 @@ why_context는 그 사이에 세션이 압축되거나 해서, 나중에 오너�
 
 The English contract below uses the settled names `reason` and
 `recovery_context`; the original `why` names are historical provenance only.
-Decision 768 changes lifecycle framing to owner-UI-created equivalence but
-does not itself settle whether the earlier requester-child relationship is
-MCP authority lineage or display/reporting grouping. Preserve that distinction
-as an open reconciliation, not an inferred reversal of 750/752.
+MAIN relayed the owner's `(775)=a` at `2026-11-14T14:07:17Z`, resolving the
+remaining authority reconciliation: the child relationship is grouping and a
+reply path only, not requester control or MCP authority lineage. The hired
+session has owner-UI-created authority; the requester cannot stop or close it.
+While attached as a child, its root flag cannot be enabled. This clarifies
+750/752 and 768=c without silently adding lead-controls-other-session powers.
+
+MAIN later relayed (786)=ok, (788)=d, and (782)=a. The read-only roster's
+approved fields and allocation policy are recorded in Confirmed Decisions.
+Strengths remain ad hoc owner instructions recorded in the lead's own agenda,
+not a roster/configuration/dashboard field. The example tool identifier and
+remaining implementation choices stay non-authoritative; this research still
+authorizes no implementation or new storage contract.
 
 ## Authority table
 
@@ -48,7 +57,7 @@ as an open reconciliation, not an inferred reversal of 750/752.
 |---|---|---|---|
 | Existing root, flag off | Existing root identity is unchanged | Denied | Existing lead authority is unchanged |
 | Root with owner-enabled flag | Cannot become another session's child | May submit a nonblocking proposal; the server verifies eligibility | Existing lead authoring; owner decides creation and launch settings; model cannot set the flag |
-| Approved hired session | 750/752 specify requester's nonroot child; 768 requires owner-UI-created handling. Authority lineage versus display/reporting grouping remains unresolved | Earlier 752 denies chained hiring; 768 does not silently repeal that restriction | Use owner-UI-created lifecycle handling; hired-session authoring and management mapping remain open, not automatically clerk-equivalent |
+| Approved hired session | Requester's child for rail grouping and reply path only under 775=a; not MCP authority lineage; root flag cannot be enabled while attached | No chained hiring under 752; no new hiring entitlement | Same authority as an owner-UI-created session, not clerk parity or requester-bounded authority. The requesting lead cannot stop or close it; owner creation/approval notices go to that lead |
 | Clerk | Parent lineage; the settled new-fork scope applies, existing sessions are unchanged | No hiring entitlement | Own-resource and explicitly delegated parent-resource authoring under 720; no session creation, management, or global configuration under 721 |
 | Worker | Existing bounded delegation identity | No hiring entitlement | Existing tool allowlists and file grants; no automatic clerk parity or new management powers |
 
@@ -64,8 +73,10 @@ Evidence below is source-only, pinned to Git object `ec2320552`; it does not
 assert equivalence with the running daemon.
 
 - Hosted creation already accepts harness, model, effort, native integrations,
-  and trusted-owner controls, but currently creates parent-less lead keys. It
-  cannot yet create the requested parented hosted child:
+  and trusted-owner controls, and currently creates parent-less lead keys.
+  This source observation does not require changing MCP authority parentage:
+  775=a instead requires requester grouping and a reply path. Inspect the
+  actual grouping/notification seams before deriving implementation:
   `agents-plugin-tool/internal/wsagent/http.go:137–164` and
   `agents-plugin-tool/internal/wsagent/runner.go:575–638`.
 - Hosted settings controls persist through Runner records. Non-hosted CLI
@@ -102,8 +113,10 @@ assert equivalence with the running daemon.
 - **750:** The dashboard displays a hiring-proposal approval modal identifying
   the requester. The owner can adjust harness, model, and effort using the
   existing style of controls, then approve or reject with a reason.
-- **750:** Approval creates a child of the requester. Creation or rejection
-  with its reason is delivered to the requester by mailbox.
+- **750, clarified by 775=a:** Approval creates a session grouped beneath the
+  requester in the rail, with creation or rejection/reason delivered to the
+  requester by mailbox. That relationship grants no requester stop/close or
+  other session-control authority.
 - **751:** Only the owner enables the root flag through the UI, with server
   verification. The model cannot enable that flag.
 - **752:** Hired sessions are children, never roots, and cannot chain hiring.
@@ -121,12 +134,32 @@ assert equivalence with the running daemon.
   choices are final. The former `why`/`why_context` names are superseded.
 - **767:** There is no pending-request count cap. Pending requests expire
   after 30 minutes and notify the requester with an `expired` mail.
-- **768=c:** Treat an approved session as if the owner had added it through
-  the UI; the request effectively prefills the owner's modal. Do not select
-  automatic child stopping on parent close. The relationship between this
-  lifecycle choice and 750/752's nonroot-child framing remains open below.
+- **768=c, clarified by 775=a:** Treat an approved session as if the owner had
+  added it through the UI; the request effectively prefills the owner's
+  modal. Do not automatically stop the session when its requester closes.
+- **775=a:** The hired-child relation is grouping and reply routing only:
+  show it under the requester in the rail and send approval/creation notices
+  to that lead. Authority equals an owner-UI-created session; the requester
+  has no control and cannot stop or close it. While attached as a child its
+  root flag cannot be enabled. Rejected: option b's authority lineage,
+  requester stop/close powers, and requester-bounded resource authority.
+  MAIN relayed the owner's answer verbatim as `a`. This resolves the earlier
+  768 versus 750/752 authority-table question.
 - **769=a:** Allow the owner to enroll a non-hosted CLI lead through the same
   root toggle on that CLI session's rail row.
+- **786=ok:** Add a read-only child/peer roster whose rows contain only mailbox
+  address, harness, model, label, idle/busy state, running subagent count, and
+  last activity. Target **T0 additive**. This grants no session-control or
+  agent-write authority; the example identifier and exact schema remain
+  unselected.
+- **788=d:** Keep session strengths ad hoc: the owner tells the lead verbally,
+  and the lead records that context in its own session agenda. There is no
+  stored strengths field in configuration, the dashboard, or roster results.
+  This closes the former configuration-versus-dashboard placement question;
+  neither persistent authoring surface is selected.
+- **782=a:** The lead assigns new work to the least-loaded peer and rebalances
+  when one peer has more than three not-started items. This allocation policy
+  does not confer stop/close powers or change the authority table.
 - The authority table preserves clerk 720–722. Clerk authoring parity does not
   confer hiring eligibility or session-management powers.
 
@@ -139,9 +172,6 @@ These are non-authoritative candidates, not an implementation contract.
   The identifier, option types, tier/default resolution, effort argument
   representation, and exact response shape are not finalized here. Owner
   adjustment in the modal remains final regardless of request defaults.
-- Candidate hired-session authoring default: reuse ordinary owner-UI-created
-  hosted-session authoring rather than silently adopting clerk parity. This
-  is a proposal only; settle the 768 versus 750/752 authority mapping first.
 - Use one daemon-owned proposal lifecycle, owner-adjustable approval, and the
   existing Runner launch machinery plus a correlated requester mailbox
   outcome. Recheck eligibility immediately before creation. No storage
@@ -150,20 +180,24 @@ These are non-authoritative candidates, not an implementation contract.
 - Keep hiring eligibility distinct from both Runner `ParentRef` and MCP
   lineage. Reuse existing approval UI interactions rather than pretending a
   not-yet-created child has a live permission request.
+- The owner's roster example name is `ws/daemon.list_children_sessions`, not
+  a finalized identifier. The confirmed fields and allocation policy are in
+  786/788/782 above; only the remaining API mechanism is proposed here. No
+  exact tool schema, peer visibility scope, or storage representation is
+  selected by this example.
+- MAIN's (786) relay identifies partial existing coverage: `session.children`
+  exposes key lineage, `mailbox.lookup_peers` exposes address/harness/cwd,
+  and idle/subagent information is currently visible in the dashboard UI.
+  These are reported discovery seams, not a claim that a complete roster
+  tool already exists or a fresh EXEC source investigation. Reconcile
+  display-group children from 775 with authority-key lineage when deriving
+  a child; do not equate those sets merely because a tool name says child.
 
 ### Open Questions
 
 These questions are unnumbered for MAIN to classify and mint in the owner
 conversation. They are not settled defaults.
 
-- **Authority reconciliation:** after 768=c, is the requester-child relation
-  an MCP authority parent or only display/reporting grouping? Does 752's
-  nonroot/no-hiring restriction remain unchanged, or does the owner intend
-  UI-created equivalence to revise it? MAIN must settle any reversal; this
-  draft does not choose one.
-- What authoring and resource authority does an approved hired session
-  receive? The ordinary UI-created authoring candidate above is not settled
-  merely by placing the session under a requester in the rail.
 - How are unresolved proposals and their 30-minute expiry handled across
   requester closure, eligibility loss, or daemon restart? Do not infer that
   approved sessions stop with the requester.
@@ -177,11 +211,15 @@ conversation. They are not settled defaults.
 
 ### Rejected Alternatives
 
+- Persistent strengths configuration, a dashboard strengths editor, and a
+  strengths field in roster output were rejected by 788=d in favor of verbal
+  owner instructions and the lead's own agenda.
 - Model-controlled flag enablement and hiring by unflagged roots, clerks,
   workers, or hired children conflict with confirmed eligibility and 751–752.
-- Promoting hired children to roots or allowing chained hiring conflicts with
-  the earlier 752 decision. Any intended change under 768 must be explicitly
-  reconciled rather than silently implemented.
+- Promoting a session to root while it is attached as a hired child, allowing
+  chained hiring, or treating grouping as requester control conflicts with
+  confirmed 752 and 775=a. Authority-lineage option b was explicitly rejected
+  in favor of owner-UI-created authority and grouping/reply routing only.
 - The proposed maximum of two pending requests and automatic parent-close
   child stopping were not selected: 767 has no pending cap and 768=c uses
   owner-UI-created lifecycle handling.

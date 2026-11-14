@@ -44,6 +44,12 @@ capability workaround, ownership-record edit, bridge/daemon activation or
 harness repair was attempted. This confirms another failed continuation,
 not the owned home's lifetime failure mechanism.
 
+### Fourth continuation occurrence — EXEC 1, 2026-11-14
+
+After MAIN's 08:39 direction, EXEC 1's root `ws-agent-send` to settled operational executor `2dacc5af-1cc8-4739-9ce0-dcb8e390fa29` returned exactly `ws-pi-agent: owned session home is unavailable during resume`. The requested continuation was text-only transaction command preparation, not execution. No retry, probe or foreign-key bypass occurred, and no command, allocation or runtime action ran.
+
+EXEC 1 instead successfully sent command-text preparation to the same retained implementer `09ac01b1`. This is another reported continuation occurrence, not evidence of a proven common cause. Recording it adds no diagnosis or repair scope.
+
 ## Constraints
 
 - Preserve the original session and ownership records before diagnosing cleanup or lifetime behavior.
