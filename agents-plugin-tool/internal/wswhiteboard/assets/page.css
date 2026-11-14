@@ -428,7 +428,7 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .tsub > .trecap { flex: 1 1 22em; min-width: 0; max-height: 5.8em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
 .tsub > .trecap .rat { font-size: 10.5px; }
 /* Inline role/media boxes must fit the same line grid as the recap text. */
-.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: -2px; }
+.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }
 .tsub > .trecap :is(img, svg) { max-height: 1em; width: auto; vertical-align: middle; }
 .ckpill { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; min-width: 0; max-width: 100%; }
 .ckbtn { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: normal; overflow-wrap: anywhere; }

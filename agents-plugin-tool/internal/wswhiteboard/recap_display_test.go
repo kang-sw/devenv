@@ -18,6 +18,8 @@ func TestRecapDisplayClampAndContentSizedHeader(t *testing.T) {
 	if regexp.MustCompile(`(?:\{|;)\s*(?:height|min-height)\s*:`).MatchString(slot) {
 		t.Fatal("header recap reserves blank lines instead of shrinking to content")
 	}
+	// The author badge must not enlarge the first line beyond the line grid.
+	wantAll(t, css, `.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }`)
 	// Sticking must not change the shared maximum or content-driven height.
 	if regexp.MustCompile(`(?m)^[^\n{]*\.wb-stuck[^\n{]*\.trecap\s*\{`).MatchString(css) {
 		t.Fatal("stuck recap overrides the shared clamp/height")

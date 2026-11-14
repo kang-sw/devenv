@@ -11,7 +11,7 @@ const stream = fs.readFileSync(path.join(assets, 'stream.js'), 'utf8');
 const arrival = stream.slice(stream.indexOf('/* Latest agent arrival:'));
 const captures = path.resolve(process.env.WS_RECAP_CAPTURE_DIR || '.artifacts/recap-max4');
 function recap(id) {
-  return `<div class="tophead"><div class="tbar">Topic</div><div class="tsub"><div class="trecap" data-kind="agent" data-entry="${id}"><time datetime="${new Date().toISOString()}">now</time> — <div class="rtext">Log ${id}</div></div></div></div>`;
+  return `<div class="tophead"><div class="tbar">Topic</div><div class="tsub"><div class="trecap" data-kind="agent" data-entry="${id}"><span class="rat"><span class="evi lead">L</span><time datetime="${new Date().toISOString()}">now</time></span> — <div class="rtext">Log ${id}</div></div></div></div>`;
 }
 function log(id) {
   return `<article class="wb-entry agent current" data-kind="agent" data-entry="${id}"><div class="entry-line"><time datetime="${new Date().toISOString()}">now</time> — Log ${id}</div></article>`;
