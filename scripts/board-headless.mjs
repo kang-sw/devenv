@@ -125,10 +125,11 @@
 //             --capture-dir retains measurements and responsive screenshots.
 //   history-cards  Card/paging probes without navigation/control/live checks.
 //   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
-//   history-regressions  Exact thirty-line chunks in renderer-produced closed
-//             logs, collapse cancellation, and real Tab into clipped summaries.
-//   history-fit  Controlled 3/2/1/oversized geometry, cached/first heights,
-//             exact log boundaries and wrapping without recutting.
+//   history-regressions  Log chunks in renderer-produced closed logs (thirty
+//             short lines: the line cap binds before the 1000px budget),
+//             collapse cancellation, and real Tab into clipped summaries.
+//   history-fit  Controlled row-budget geometry (all/two-panel/one-panel/
+//             oversized), cached/first heights, wrapping without recutting.
 //
 // History samples retain rAF geometry as diagnostic evidence and assert <=1px
 // on rAF -> zero-delay-task (post-paint) geometry, after ResizeObserver runs.
@@ -3492,6 +3493,8 @@ async function scenarioHistoryRegressions(ctx) {
       result.settled = await page.evaluate((name) => window.__bh.historyState(name), name);
       return result;
     };
+    // A chunk stops before 30 log lines, 3 panels or 1000px, whichever binds
+    // first. These fixtures are short single-line logs, so 30 lines bind.
     const boundedClick = (r) => {
       assert(r.before.pages - r.after.pages <= 1, 'one click materialized multiple pages');
       const target = Math.min(200, r.before.includedRows + 30), pagesNeeded = target > r.before.rows ? 1 : 0;
@@ -3505,8 +3508,8 @@ async function scenarioHistoryRegressions(ctx) {
     await page.evaluate(() => { window.__bh.regressionPhase = 'log-thirty'; });
     const initial = await settledLog('LOGCHAIN');
     measure('log-thirty-initial', initial);
-    assert(initial.rows === 50 && initial.pages >= 3 && initial.folded && initial.tailRows === 3 && initial.deliveries >= 1 && initial.includedRows === 30,
-      'need a renderer-produced folded history with an exact thirty-entry first chunk');
+    assert(initial.rows === 50 && initial.pages >= 3 && initial.folded && initial.tailRows === 3 && initial.deliveries >= 1 && initial.includedRows === 30 && initial.height < 1000,
+      'need a renderer-produced folded history whose first chunk is thirty lines under the 1000px budget');
     await capture('before-log-thirty');
     for (let i = 0; i < 6; i++) {
       const click = await clickLog('LOGCHAIN');
@@ -3568,8 +3571,8 @@ async function scenarioHistoryRegressions(ctx) {
       return { ...bh.historyState('LOGCANCEL'), pending: !!bh.history('LOGCANCEL')._wbHistoryPending };
     });
     measure('neutral-chain-canceled', { initial: cancelInitial, click: cancelClick, exit, collapsed, settled: canceled });
-    assert(collapsed.pages > 0 && canceled.pages === collapsed.pages && canceled.rows === collapsed.rows && canceled.steps === 1 && canceled.includedRows === 30 && !canceled.pending,
-      'collapsed history continued materializing older pages or lost its thirty-line boundary');
+    assert(collapsed.pages > 0 && canceled.pages === collapsed.pages && canceled.rows === collapsed.rows && canceled.steps === 1 && canceled.includedRows === 30 && canceled.height < 1000 && !canceled.pending,
+      'collapsed history continued materializing older pages or lost its first-chunk boundary (thirty short lines)');
     await capture('after-cancellation');
     const observerErrors = await page.evaluate(() => window.__bh.observerErrors);
     assert(observerErrors.length === 0, `native ResizeObserver loop errors: ${observerErrors.join(' | ')}`);
@@ -3782,11 +3785,14 @@ async function scenarioHistoryFit(ctx) {
         return bh.historyState();
       };
     });
+    // Rows are L1 P2 L3 P4 L5 P6 L7 (logs 20px). A chunk walks back from L7
+    // and stops before a row would pass 30 lines, 3 panels or 1000px; the
+    // newest row always joins, so an oversized P6 leaves L7 alone.
     for (const [heights, boundary, pixels] of [
-      [[300, 300, 300], 'e900002', 960],
-      [[400, 400, 400], 'e900004', 840],
-      [[600, 600, 600], 'e900006', 620],
-      [[1500, 1500, 1500], 'e900006', 1520],
+      [[300, 300, 300], 'e900001', 980],
+      [[400, 400, 400], 'e900003', 860],
+      [[600, 600, 600], 'e900005', 640],
+      [[1500, 1500, 1500], 'e900007', 20],
     ]) {
       const state = await page.evaluate((h) => window.__bh.fitFixture(h), heights);
       await paint();
@@ -3800,7 +3806,7 @@ async function scenarioHistoryFit(ctx) {
       bh.history().querySelector('.history-older').click();
       return { state, cached, expanded: bh.historyState() };
     });
-    assert(!hidden.state.pending && hidden.state.chunks[0] === 'e900004' && hidden.cached === 400 && hidden.expanded.steps === 2,
+    assert(!hidden.state.pending && hidden.state.chunks[0] === 'e900003' && hidden.cached === 400 && hidden.expanded.steps === 2,
       'unsized closed historical frame blocked a positive active panel or its older-page control');
     const zero = await page.evaluate(() => {
       const bh = window.__bh, state = bh.fitFixture([400, 400, 0]);
@@ -3810,10 +3816,11 @@ async function scenarioHistoryFit(ctx) {
     await page.evaluate(() => window.__bh.history().querySelector('#e900006').style.height = '400px');
     await page.waitForFunction(() => !window.__bh.history()._wbHistoryPending, null, { timeout: 2000 });
     const progressed = await page.evaluate(() => window.__bh.historyState());
-    assert(progressed.chunks[0] === 'e900004', 'first nonzero active layout did not progress');
+    assert(progressed.chunks[0] === 'e900003', 'first nonzero active layout did not progress');
     results.push({ hidden, zero, progressed });
     const unknown = await page.evaluate(() => window.__bh.fitFixture([400, 400, 400], true));
-    assert(unknown.pending && unknown.chunks[0] === 'e900002', 'unknown panel must wait for its first rendered height');
+    // Counts alone admit every row provisionally until P6 renders.
+    assert(unknown.pending && unknown.chunks[0] === 'e900001', 'unknown panel must wait for its first rendered height');
     await page.evaluate(() => {
       const h = window.__bh.history(), last = h.querySelector('#e900006');
       last.querySelector('.doc-frame').style.height = '100px'; last.style.height = '401px';
@@ -3821,11 +3828,11 @@ async function scenarioHistoryFit(ctx) {
     await page.waitForFunction(() => !window.__bh.history()._wbHistoryPending);
     await paint();
     const measured = await page.evaluate(() => window.__bh.historyState());
-    assert(measured.chunks[0] === 'e900004', 'first rendered height did not settle the two-panel chunk');
+    assert(measured.chunks[0] === 'e900003', 'first rendered height did not settle the two-panel chunk');
     await page.evaluate(() => window.__bh.history().querySelector('.history-older').click());
     await paint();
     const expanded = await page.evaluate(() => window.__bh.historyState());
-    assert(expanded.chunks.join() === 'e900004,e900002', 'expansion swallowed older logs or lost intervening logs');
+    assert(expanded.chunks.join() === 'e900003,e900001' && !expanded.button, 'expansion did not take the remaining panel and logs as one chunk');
     await page.evaluate(() => {
       const h = window.__bh.history();
       // Keep this controlled resize probe distinct from the real off-screen
@@ -3848,12 +3855,7 @@ async function scenarioHistoryFit(ctx) {
     await paint();
     assert(swapped.state.chunks.join() === expanded.chunks.join() && swapped.cached === 401,
       'swap did not restore exact expanded boundaries and first-height cache');
-    const prefix = await page.evaluate(() => {
-      const bh = window.__bh; bh.history().querySelector('.history-older').click();
-      return bh.historyState();
-    });
-    assert(prefix.chunks.at(-1) === 'e900001' && !prefix.button, 'older logs must belong to their own next chunk');
-    results.push({ swapped, prefix });
+    results.push({ swapped });
     const errors = await page.evaluate(() => window.__bh.observerErrors);
     assert(errors.length === 0, `native ResizeObserver loop errors: ${errors.join(' | ')}`);
     log(`panel-fit: ${JSON.stringify(results)}`);

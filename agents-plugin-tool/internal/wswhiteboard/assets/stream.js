@@ -65,6 +65,23 @@
     while (node.parentElement !== live) node = node.parentElement;
     return node;
   }
+  // A row's measured top: a row behind a closed chip has no box of its own,
+  // so the chip's top stands in for it.
+  function topOf(h, node) {
+    var live = h.querySelector('.history-live');
+    for (var p = node.parentElement; p && p !== live; p = p.parentElement) {
+      if (p.tagName === 'DETAILS' && !p.open) return topRow(h, node).getBoundingClientRect().top;
+    }
+    return node.getBoundingClientRect().top;
+  }
+  // countsFull: no inert page is left, or the row next to the loaded rows
+  // (the newest held page's last row) is one the counts already refuse.
+  // Peeking keeps that page's payloads out of the live DOM.
+  function countsFull(h, panels, lines) {
+    var page = h.querySelector('template[data-history-page]'), kids = page && page.content.children, last = kids && kids[kids.length - 1];
+    if (!page) return true;
+    return !!last && (last.matches('.wb-entry.panel') ? panels >= PANELS : lines >= LINES);
+  }
   function boundary(h) { return h._wbHistoryChunks[h._wbHistoryChunks.length - 1]; }
   function fit(h) {
     var node = boundaryRow(h, boundary(h)), live = h.querySelector('.history-live');
@@ -116,40 +133,34 @@
         h._wbHistorySteps = h._wbHistoryChunks.length;
         return;
       }
-      var older = all.slice(0, end), panels = older.filter(function (e) { return e.classList.contains('panel'); });
-      var pages = Array.from(h.querySelectorAll('template[data-history-page]'));
-      var heldPanel = pages.some(function (p) { return !!p.content.querySelector('.wb-entry.panel'); });
-      // Materialize one page per frame, and only while the candidate needs
-      // more panels (or thirty log lines). No pixel-fill loading loop.
-      if (pages.length && ((panels.length < PANELS && heldPanel) || (!panels.length && older.length < LINES))) {
-        loadOne(h); later(h); return;
-      }
-      if (!older.length) { h._wbHistoryPending = null; return; }
-      var first;
-      if (panels.length) {
-        var candidates = panels.slice(-PANELS), heights = candidates.map(function (p) { return panelHeight(h, p); });
-        if (heights.some(function (n) { return n === null; })) {
-          // Show the provisional candidates so hidden topics can render.
-          first = candidates[0];
-        } else {
-          var count = candidates.length;
-          var tail = before ? splitAt(h, node).getBoundingClientRect().top : h.querySelector('.history-live').getBoundingClientRect().bottom;
-          while (count > 1) {
-            var start = candidates.length - count, p = candidates[start];
-            // Geometry supplies logs, gaps and system chips. Replace only
-            // panel boxes with cached heights for the one-time judgment.
-            var height = tail - p.getBoundingClientRect().top;
-            for (var i = start; i < candidates.length; i++) height += heights[i] - candidates[i].getBoundingClientRect().height;
-            if (height <= LIMIT) break;
-            count--;
-          }
-          first = candidates[candidates.length - count];
-          h._wbHistoryPending = null;
+      // Walk back from the cut one row at a time and stop just before a row
+      // would pass any budget: LINES log lines, PANELS panels, LIMIT pixels.
+      // The first row always joins, so an oversized single row still shows.
+      var older = all.slice(0, end), first = null, lines = 0, panels = 0, adjust = 0, full = false, provisional = false;
+      var tail = older.length && (before ? splitAt(h, node).getBoundingClientRect().top : h.querySelector('.history-live').getBoundingClientRect().bottom);
+      for (var i = older.length - 1; i >= 0; i--) {
+        var row = older[i], panel = row.classList.contains('panel');
+        if (first && (panel ? panels + 1 > PANELS : lines + 1 > LINES)) { full = true; break; }
+        var known = panel ? panelHeight(h, row) : 0;
+        // An unrendered panel cannot be judged yet: from there on only the
+        // counts apply, and the rows they admit show provisionally so they
+        // can render (hidden topics too) before the pixels decide.
+        if (known === null) provisional = true;
+        if (!provisional) {
+          // Geometry supplies logs, gaps and system chips. Replace only
+          // panel boxes with cached heights for the one-time judgment.
+          var next = adjust + (panel ? known - row.getBoundingClientRect().height : 0);
+          if (first && tail - topOf(h, row) + next > LIMIT) { full = true; break; }
+          adjust = next;
         }
-      } else {
-        first = older[Math.max(0, older.length - LINES)];
-        h._wbHistoryPending = null;
+        first = row;
+        if (panel) panels++; else lines++;
       }
+      // Rows ran out before a budget did: materialize one more page per
+      // frame, unless its adjacent row could not join anyway.
+      if (!full && !countsFull(h, panels, lines)) { loadOne(h); later(h); return; }
+      if (!first) { h._wbHistoryPending = null; return; }
+      if (!provisional) h._wbHistoryPending = null;
       h._wbHistoryChunks[h._wbHistoryChunks.length - 1] = first.id;
     } finally { h._wbHistoryChoosing = false; }
   }
