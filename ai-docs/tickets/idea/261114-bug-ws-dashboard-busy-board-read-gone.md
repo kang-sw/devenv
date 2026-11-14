@@ -1,11 +1,11 @@
 ---
-title: "Dashboard can treat a busy board read as a permanently gone session"
+title: "Keep dashboard streams through transient board or session read failures"
 related:
   261114-chore-ws-dashboard-index-removal-diagnostics: "missing timestamp/reason telemetry limits historical attribution"
   261114-bug-ws-shared-daemon-restarts-without-a-swap: "separate daemon-replacement investigation; the observed process did not restart"
 ---
 
-# Dashboard can treat a busy board read as a permanently gone session
+# Keep dashboard streams through transient board or session read failures
 
 ## Background
 
@@ -44,14 +44,38 @@ writes are per-file atomic, and authoritative folder reads/writes share their
 lock. Cross-part generations or an unlocked guard read alone are not proof of
 a partial-file or partial-board race on macOS.
 
+## Decisions
+
+- MAIN relayed the approved repair direction on 2026-11-14: distinguish
+  authoritative not-found/identity mismatch from transient read failures such
+  as lock timeout or I/O error. Genuine missing/mismatched sessions may be
+  gone; a transient failure keeps the existing page and retries the stream
+  instead of permanently terminating it.
+- This owner-visible bug follows the current Important Pi startup and
+  prompt-admission pair, ahead of remaining orphan bugs and the added backlog.
+- Moving expensive render/publication outside the folder lock is a design
+  review topic, not a selected implementation. Preserve ordered publication
+  and atomic authoritative state if the lock boundary changes.
+
+## Compatibility analysis
+
+Target **T0** if error classification remains internal and existing stream,
+registration and session identity contracts remain intact: `gone` continues
+meaning genuine absence/mismatch, while transient reads use the existing
+retry/keep-page path. No new wire field or event is required by the approved
+direction. A new event/field would require additive old-reader handling and
+explicit review; reinterpreting a current protocol, store or event is outside
+this target and stops for MAIN's settlement before implementation.
+
 ## Constraints
 
-- Capture only under MAIN's read-only investigation authorization. No source
+- This is still a documentation/design capture under the load throttle. No source
   fix, new build/test, live lock hold, process action, restart or daemon swap
   is performed or authorized by this ticket.
-- Preserve genuine missing/deleted-session handling. Do not silently choose a
-  retry, stale-page fallback, lock change or protocol change before design
-  settlement and an isolated deterministic reproduction.
+- Preserve genuine missing/deleted-session handling. Retry timing, source-side
+  last-good-record caching, lock changes and any wire changes need technical
+  design review and an isolated deterministic reproduction; they are not
+  chosen by the approved retry/keep-page behavior alone.
 - Investigate render frequency and contention separately from CPU attribution:
   the short OS sample showed rendering work, not its share of sustained CPU.
 - Read `ai-docs/manuals/shipped-surface-boundary.md` and
@@ -60,13 +84,16 @@ a partial-file or partial-board race on macOS.
 
 ## Phases
 
-### Phase 1: Reproduce and distinguish busy-board reads from missing sessions
+### Phase 1: Distinguish transient reads and preserve the valid reader
 
-Use isolated state and controlled contention to establish the timeout-to-gone
-path and its timing without touching the shared daemon. Identify which errors
-are currently collapsed by session lookup and whether an existing recovery
-boundary can preserve a valid reader without hiding deletion. Return the
-behavior/compatibility decision through MAIN before implementation.
+First use isolated state and controlled contention to establish the
+timeout-to-gone path and its timing without touching the shared daemon.
+Through design review, classify currently collapsed lookup errors and define
+how transient failures preserve the page and retry while genuine absence or
+identity mismatch remains terminal. Evaluate whether expensive render and
+publication can safely leave the folder lock without allowing older output to
+overwrite newer state. Implement only after that review and the assigned heavy
+slot; return any broader behavior/compatibility decision through MAIN.
 
 Verification must distinguish actual deletion, malformed records, permission
 errors and lock contention; prove no partial authoritative commit is required;
