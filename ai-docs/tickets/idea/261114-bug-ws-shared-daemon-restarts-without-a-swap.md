@@ -70,3 +70,102 @@ hypothesis 1.
   `261114-bug-ws-pi-version-probe-never-refreshes`.
 - Fixed by `python3 scripts/dev.py rerun daemon` from a clean shell (pid
   12261).
+
+## Investigation evidence - 2026-11-14 (EXEC 3)
+
+This addition records evidence only. It changes no runtime, replacement
+policy, ticket status, or implementation authority. Source coordinates below
+refer to `9854ff350fa1b0eccfb5c71649c5190c405925b9`, not an assumed live build.
+
+### Verified source mechanism
+
+- **VERIFIED:** `agents-plugin/bin/ws-mcp-launcher.py:1858-1862` resolves
+  local-devenv mode, forced installation and the source fingerprint.
+  At `:1892-1899`, the usable-daemon shortcut applies only without forced
+  installation; a current compatibility stamp can avoid rebuilding, while
+  forced local mode with a stale stamp requests a source rebuild. This is
+  not a claim that every session start unconditionally rebuilds.
+- **VERIFIED:** `needs_start` at `:1347-1371` requests replacement for an
+  older version, or for a same-core daemon with an older build timestamp
+  whose content hash differs or is unavailable. Equal known hashes suppress
+  replacement. `connect` at `:1437-1444` invokes `start_daemon` automatically
+  when `allow_start` is true and the daemon is absent or needs replacement.
+  These cited checks contain no active-turn or owner swap-approval gate.
+- **VERIFIED:** `start_daemon` at `:1394-1409` runs the staged binary's
+  `daemon-start` command with an environment copied from the launcher.
+  This supplies a source mechanism for inherited PATH; it does not alone
+  prove the environment of any historical process.
+- **VERIFIED separate Pi build path:**
+  `agents-plugin-pi/src/bridge.ts:916-932` invokes
+  `buildLocalDevenvBootstrap` for lead/fork roles at bridge startup.
+  With a valid local-devenv marker, `local-devenv.ts:153-185` runs
+  `go build` using source HEAD in the version stamp without a fingerprint
+  cache; `:207-209` returns `WS_MCP_BOOTSTRAP_BINARY`. The Python launcher's
+  bootstrap override forces installation at `:1887-1891`. Thus a local-dev
+  Pi lead or fork bridge startup can build even with unchanged source.
+- **VERIFIED worker/explore distinction:** `bridge.ts:916-924` skips that
+  TypeScript startup build for these roles. Native child launch arguments
+  load the parent's extension (`spawner.ts:2935-2939`) and clear inherited
+  bootstrap overrides (`:2929-2931`). Their Python MCP launcher still has
+  the stale-source-stamp rebuild path above. The lead's separate pre-child
+  guard rebuilds on `runtime.json` contract drift and memoizes settled
+  contracts (`local-devenv.ts:266-302`); it does not rebuild for every
+  ordinary worker/explore spawn.
+- **VERIFIED connection route:** the session bootstrap calls `startBridge`
+  (`agents-plugin-pi/src/index.ts:875-888`), which creates the client
+  (`bridge.ts:954-962`) as `python3 <launcher> serve --stdio`
+  (`mcp-stdio-client.ts:346-360`). The same route is loaded by native child
+  extension arguments above. Daemon-hosted leads load bundled extension
+  entries, with an MCP bridge fallback when unavailable
+  (`agents-plugin-tool/internal/wsagent/pi_lead.go:35-62`).
+- **INFERRED operational consequence:** a develop merge that changes
+  fingerprinted inputs can make the next MCP launcher build a fresh binary
+  and replace an older/different daemon without any manual build command.
+  No branch-name gate or background source watcher is present in the cited
+  launcher checks: a merge alone is not an immediate replacement trigger.
+  CLI-mode calls using a usable daemon bypass installation/replacement
+  (`agents-plugin/bin/ws-mcp-launcher.py:1881-1885,1924-1926`), while the
+  separate Pi lead/fork startup build has the behavior described above.
+
+### Retained incident testimony and causal limits
+
+Transcript reference R is
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/dashboard/sessions/rebelrepugnantstonewareemcee/pi/session.jsonl`;
+line numbers below are physical JSONL lines.
+
+- **VERIFIED retained report:** R:39, received at 2026-11-14 01:07:37Z,
+  records MAIN observing daemon PID 68420 without a swap notification.
+  At that point MAIN explicitly left open whether EXEC had swapped it.
+- **VERIFIED retained report:** R:59, received at 01:12:15Z, forwards EXEC's
+  01:11:59Z account of a 01:05:40Z replacement: holder 67828 -> Pi 67831 ->
+  installed launcher 67844, followed by daemon 68420 with content prefix
+  `d2c34344`. The report attributes rebuilding to `.local-devenv-runtime`
+  pointing at the primary checkout at `4804cf47f`. MAIN's appended note
+  attributes the replacement to its own session start.
+- **INFERRED historical cause:** that reported launcher/process sequence,
+  the earlier process evidence above, and the verified source replacement
+  path support automatic dev-source replacement as the cause of an
+  unannounced restart. EXEC's historical wording was "ROOT CAUSE VERIFIED";
+  this investigation verified the retained testimony and source mechanism,
+  not the historical process tree independently. No new live reproduction,
+  PID observation, environment capture or daemon operation was performed.
+- **Still unverified:** the exact initiating process for each Nov 13
+  15:04:15Z and 15:19:51Z restart, whether any test touched shared state,
+  and whether the roughly 74 KB update failures have an independent size
+  or timeout cause. Temporal proximity does not settle these questions.
+
+### Related partial repair and policy hold
+
+`261113-bug-ws-launcher-dev-rebuild-replaces-daemon-mid-work` already records
+this launcher mechanism and a partial bounded-wait repair. Its
+`## Result (partial)` explicitly leaves replacement policy and completion
+mail durability open. That repair is not evidence that automatic replacement
+has been disabled. Avoid a duplicate replacement-policy repair in this ticket.
+
+MAIN relayed the owner's confirmed answer **(703)=b**: retain automatic
+replacement with advance notice. The owner rejected option **a**, deferring
+dev-build replacement until an explicit swap. Replacement policy is settled;
+the notice contents, recipients and advance interval remain for MAIN's design
+settlement. No notice design is chosen by this evidence update, and no
+runtime implementation or daemon swap is performed. Mail durability and
+large-request handling remain outside this evidence-only change.
