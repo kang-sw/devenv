@@ -38,10 +38,13 @@ func TestBoardEntryFrameBridgeStaysNarrow(t *testing.T) {
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 var calls = [], jumps = [], reveals = [], pending = null, mpend = null, cchips = {}, handler, menus = [];
-var navigator = { userActivation: { isActive: false } };
+// node defines a getter-only global navigator that a top-level var cannot replace.
+Object.defineProperty(globalThis, "navigator", { value: { userActivation: { isActive: false } }, configurable: true, writable: true });
 function frameLink(m) { return m.href ? { href: m.href } : null; }
 function webLink() { return false; }
 function openLinkMenu(a, x, y) { menus.push({ a: a, x: x, y: y }); }
+var desktopPreviews = [];
+function desktopPreview(a) { desktopPreviews.push(a.href); return true; }
 var board = { name: "board" }, pins = { name: "pins" }, targets = {};
 function target(id, owned) { return targets[id] = { id: id, owned: owned, folded: true, tagName: "DIV", parentNode: null, closest: function () { return this.history ? board : null; }, scrollIntoView: function () { check("owner reveals before fallback scroll " + id, this.folded, false); jumps.push(id); } }; }
 var fold = { tagName: "DETAILS", owned: true, open: false, parentNode: null };
@@ -112,6 +115,14 @@ frames = [foreign]; own.owned = false;
 handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md" } });
 check("unknown, wrong-key, off-board and disappeared frames cannot open menus", menus.length, 1);
 frames = [own, foreign]; own.owned = true;
+handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md", mod: true } });
+check("a posted modified click without user activation opens the menu, never a preview", [menus.length, desktopPreviews], [2, []]);
+navigator.userActivation.isActive = true;
+handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md", mod: "yes" } });
+check("only mod === true asks for the desktop preview", [menus.length, desktopPreviews], [3, []]);
+handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md", mod: true } });
+check("an active modified click asks for the desktop preview", [menus.length, desktopPreviews], [3, ["docs/a.md"]]);
+navigator.userActivation.isActive = false;
 var posted = [];
 own.contentWindow.postMessage = function (m) { posted.push(m); };
 postDoc(own, { wbDoc: "size" });
