@@ -15,6 +15,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/kang-sw/devenv/internal/wsledger"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wstracker"
 )
 
@@ -135,7 +136,7 @@ func writeStaged(dir, oid string, data []byte) error {
 		os.Remove(tmp.Name())
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return wsstate.AtomicReplaceFile(tmp.Name(), path)
 }
 
 // readStaged returns the staged copy of oid when it exists and still hashes

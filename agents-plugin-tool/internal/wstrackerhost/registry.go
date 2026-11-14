@@ -15,6 +15,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
+	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wstracker"
 )
 
@@ -137,7 +138,7 @@ func writeJSON(path string, v any) error {
 		werr = cerr
 	}
 	if werr == nil {
-		werr = os.Rename(tmp.Name(), path)
+		werr = wsstate.AtomicReplaceFile(tmp.Name(), path)
 	}
 	if werr != nil {
 		os.Remove(tmp.Name())

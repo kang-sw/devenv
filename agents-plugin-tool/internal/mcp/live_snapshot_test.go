@@ -812,6 +812,14 @@ func TestLiveSessionSurvivesAnUnreadableRecord(t *testing.T) {
 	if _, found, transient := f.server.sessions.inspect(f.keyA); found || transient {
 		t.Fatalf("inspect of a removed record = found %v, transient %v", found, transient)
 	}
+	// Bring the next timer forward. The debounced fire the mail line armed
+	// can run before the removal above (it did on a slow Windows host), and
+	// it then arms fastLive's hour-long heartbeat as the next fire.
+	if ls := f.server.live.existing(f.keyA); ls != nil {
+		ls.mu.Lock()
+		ls.scheduleLocked(time.Millisecond)
+		ls.mu.Unlock()
+	}
 	waitFor(t, "the live session to stop", func() bool {
 		ls := f.server.live.existing(f.keyA)
 		return ls == nil || ls.isStopped()

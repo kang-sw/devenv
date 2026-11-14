@@ -113,7 +113,7 @@ func writePrivateFile(dir, name string, data []byte) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, filepath.Join(dir, name)); err != nil {
+	if err := wsstate.AtomicReplaceFile(tmpName, filepath.Join(dir, name)); err != nil {
 		_ = os.Remove(tmpName)
 		return err
 	}

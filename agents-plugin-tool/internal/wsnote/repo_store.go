@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // repoKeyFilename encodes a note key into the tracked filename that holds
@@ -171,7 +173,7 @@ func atomicWriteRepoRecordFileLocked(dir, path string, rec Record) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("close temp repo note file: %w", cerr)
 	}
-	if rerr := os.Rename(tmpName, path); rerr != nil {
+	if rerr := wsstate.AtomicReplaceFile(tmpName, path); rerr != nil {
 		os.Remove(tmpName)
 		return fmt.Errorf("atomic rename repo note file: %w", rerr)
 	}

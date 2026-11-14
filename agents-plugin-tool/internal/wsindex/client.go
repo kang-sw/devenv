@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsstate"
 )
 
 // Defaults. The read bound keeps tickets.query under roughly two seconds on
@@ -136,7 +138,7 @@ func (c *Client) saveState(st syncState) {
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := wsstate.AtomicReplaceFile(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 	}
 }

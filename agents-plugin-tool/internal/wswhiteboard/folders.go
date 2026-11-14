@@ -193,8 +193,11 @@ func (f FolderStore) locked(fn func() error) error {
 	return fn()
 }
 
+// folderDecode reads path through wsstate.ReadFile: the unlocked guard
+// reads while another process's locked commit replaces or removes the same
+// file, which on Windows fails an open for a moment.
 func folderDecode(path string, out any) (bool, error) {
-	data, err := os.ReadFile(path)
+	data, err := wsstate.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -757,7 +760,9 @@ func (f FolderStore) replay(intent *folderIntent) error {
 	if err := f.hit("cleanup"); err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(f.Dir, "pending.json")); err != nil {
+	// Another process's unlocked guard may be reading pending.json, which
+	// on Windows fails a plain removal; wsstate.RemoveFile retries it.
+	if err := wsstate.RemoveFile(filepath.Join(f.Dir, "pending.json")); err != nil {
 		return err
 	}
 	if err := folderSyncDir(f.Dir); err != nil {

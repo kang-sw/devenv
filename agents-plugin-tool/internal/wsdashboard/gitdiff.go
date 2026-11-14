@@ -19,6 +19,8 @@ import (
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
+
+	"github.com/kang-sw/devenv/internal/gitbatch"
 )
 
 // The commit window's diff side reads one file's diff at a time:
@@ -94,12 +96,16 @@ type GitPiece struct {
 var errNoPath = errors.New("path not in this diff")
 
 // runGitCapped runs git as gitBadgeRunner does, keeping at most max bytes
-// of its output; cut reports more, and git is stopped there.
+// of its output; cut reports more, and git is stopped there. The stop ends
+// git's whole process tree (gitbatch.Bound): Wait waits for the stderr copy,
+// and on Windows a plain kill ends only Git for Windows' redirector, so the
+// real git kept stderr open while it blocked writing the stdout no one read.
 func runGitCapped(ctx context.Context, root string, max int, args ...string) (out []byte, cut bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	gitbatch.Bound(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	pipe, err := cmd.StdoutPipe()

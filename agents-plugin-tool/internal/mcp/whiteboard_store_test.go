@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -42,7 +43,15 @@ func whiteboardTreeForTest(t *testing.T, dir string) map[string]string {
 			if err != nil {
 				return err
 			}
-			out[filepath.ToSlash(rel)] = string(readFileForTest(t, path))
+			rel = filepath.ToSlash(rel)
+			if rel == ".lock" && runtime.GOOS == "windows" {
+				// The flock is a LockFileEx byte-range lock on Windows, so a
+				// read of the lock file fails while a test holds it; its
+				// presence is still recorded. The product never reads it.
+				out[rel] = ""
+				return nil
+			}
+			out[rel] = string(readFileForTest(t, path))
 		}
 		return nil
 	})

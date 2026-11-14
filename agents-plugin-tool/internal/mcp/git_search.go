@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kang-sw/devenv/internal/gitbatch"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
 	"github.com/kang-sw/devenv/internal/wsgit"
@@ -761,6 +762,9 @@ func runGitSearch(ctx context.Context, environ []string, repo, root string, req 
 	}
 	cmd.Dir = repo
 	cmd.Env = gitSearchEnv(environ, root)
+	// The cap and the timeout cancel; Bound makes that end git's whole
+	// process tree, which a plain kill does not reach on Windows.
+	gitbatch.Bound(cmd)
 	stdout := &gitSearchBuffer{limit: gitSearchOutputCap, full: cancel}
 	stderr := &gitSearchBuffer{limit: gitSearchStderrCap}
 	cmd.Stdout = stdout

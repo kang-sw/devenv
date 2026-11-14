@@ -10,3 +10,15 @@ import "os"
 func AtomicReplaceFile(tmp, path string) error {
 	return os.Rename(tmp, path)
 }
+
+// ReadFile reads path. POSIX opens never meet a sharing violation, so there
+// is nothing to retry (see the Windows variant).
+func ReadFile(path string) ([]byte, error) {
+	return os.ReadFile(path)
+}
+
+// RemoveFile removes path. POSIX unlinks a file other handles hold open, so
+// there is nothing to retry (see the Windows variant).
+func RemoveFile(path string) error {
+	return os.Remove(path)
+}

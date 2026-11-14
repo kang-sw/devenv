@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -110,15 +109,16 @@ func hangingSSH(t *testing.T, c *testClone) {
 // state under dir, and registers the cleanup that ends every such transport.
 // internal/mcp's ixCheckout.hang carries a copy; keep the two in step.
 //
-// The transport blocks reading git's stdin, so on POSIX the hang lasts until
-// the timeout SIGKILLs git's process group, transport included. Windows kills
-// only the process started: when that is Git for Windows' git.exe redirector,
-// the real git.exe survives holding the pipe open, and it and the transport
-// would block forever inside the test tree, failing TempDir's cleanup ("being
-// used by another process"). So the transport also ends when the stop file
-// appears, or after a backstop well past any timeout a test uses, and the
-// cleanup raises the stop file and waits for the live markers to clear. A
-// surviving git then reads EOF and exits; TempDir's own retry covers that.
+// The transport blocks reading git's stdin, so the hang lasts until the
+// timeout kills git's whole process tree, transport included: the process
+// group on POSIX, each process of the tree on Windows, where the process
+// started is Git for Windows' git.exe redirector and the real git.exe and the
+// transport sit below it (gitbatch proc_*.go). A transport that escaped that
+// kill would keep a process inside the test tree and fail TempDir's cleanup
+// ("being used by another process" on Windows), so the cleanup is the check.
+// The transport also ends when the stop file the cleanup raises appears, or
+// after a backstop well past any timeout a test uses, so an escaped one does
+// not outlive the test run.
 //
 // cat runs in the background so the shell can poll; an async command's stdin
 // defaults to /dev/null, so git's pipe travels on fd 3. cat writes to
@@ -127,15 +127,9 @@ func hangingSSH(t *testing.T, c *testClone) {
 // shell leaves the test tree before it blocks.
 func hangTransport(t *testing.T, dir string) string {
 	t.Helper()
-	live := filepath.Join(dir, "hang-live")
 	stop := filepath.Join(dir, "hang-stop")
-	if err := os.MkdirAll(live, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { stopHangTransports(t, live, stop) })
-	return fmt.Sprintf(`live=%s
-stop=%s
-: >"$live/$$"
+	t.Cleanup(func() { stopHangTransports(t, stop) })
+	return fmt.Sprintf(`stop=%s
 exec 3<&0 </dev/null
 cd /
 cat <&3 >/dev/null 3<&- &
@@ -151,40 +145,16 @@ while kill -0 "$c" 2>/dev/null; do
 	n=$((n + 1))
 done
 wait "$c" 2>/dev/null
-rm -f "$live/$$"
-`, gitbatch.ShellQuote(filepath.ToSlash(live)), gitbatch.ShellQuote(filepath.ToSlash(stop)))
+`, gitbatch.ShellQuote(filepath.ToSlash(stop)))
 }
 
-// stopHangTransports raises the stop file and, on Windows, waits for every
-// transport to clear its live marker. POSIX has nothing to wait for: the
-// process-group kill already ended each transport (before it could clear its
-// marker, so the markers there are stale by design).
-//
-// On POSIX the stop file is therefore not waited on, and TempDir's removal
-// deletes it right after. That is safe because every remote call is
-// deadline-bound through ExecRunner, and on timeout proc_unix.go SIGKILLs
-// git's whole process group, so no transport survives to need the stop
-// file. A transport that somehow escaped that kill would miss the stop file
-// and end only at the script's 120 s backstop; the backstop is the fallback.
-func stopHangTransports(t *testing.T, live, stop string) {
+// stopHangTransports raises the stop file and does not wait on it: every
+// remote call is deadline-bound through ExecRunner, and its timeout kills
+// git's whole process tree (gitbatch.Bound), so no transport is left to need
+// it. The stop file and the script's backstop end one that escaped.
+func stopHangTransports(t *testing.T, stop string) {
 	if err := os.WriteFile(stop, nil, 0o644); err != nil {
 		t.Errorf("raise the hang stop file: %v", err)
-		return
-	}
-	if runtime.GOOS != "windows" {
-		return
-	}
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		entries, err := os.ReadDir(live)
-		if err != nil || len(entries) == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Errorf("%d hanging ssh transports still running after the stop file", len(entries))
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
 }
 

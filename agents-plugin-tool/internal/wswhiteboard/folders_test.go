@@ -728,17 +728,21 @@ func TestFolderConcurrentProcesses(t *testing.T) {
 	dir := t.TempDir()
 	folderOpen(t, dir, &State{Topics: []TopicDoc{{Name: "topic", Body: "body"}}})
 	var commands []*exec.Cmd
+	var outputs []*bytes.Buffer
 	for range 4 {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestFolderProcessWorker$")
 		cmd.Env = append(os.Environ(), "WS_WHITEBOARD_FOLDER_TEST="+dir)
+		out := &bytes.Buffer{}
+		cmd.Stdout, cmd.Stderr = out, out
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
 		commands = append(commands, cmd)
+		outputs = append(outputs, out)
 	}
-	for _, cmd := range commands {
+	for i, cmd := range commands {
 		if err := cmd.Wait(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("worker: %v\n%s", err, outputs[i])
 		}
 	}
 	got := folderOpen(t, dir, nil)
