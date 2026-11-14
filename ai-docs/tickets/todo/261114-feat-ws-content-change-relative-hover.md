@@ -25,15 +25,22 @@ or daemon activation authority in this authoring pass.
 ## Decisions
 
 - Green, red, and blue content-change bars thicken slightly on hover and show
-  the actual change's age, always relative, from minutes through years. Never
+  the actual change's age when proven, always relative, from minutes through
+  years. Never
   show a clock or calendar date in this marker hover. Exact thickness and
   tooltip mechanism are not prescribed.
 - Keep marker colors, content layout, and anchor position; hovering must cause
   neither reflow nor scrolling. Topic-latest activity is not a substitute for
   the content edit's timestamp.
-- Intended compatibility tier: T0. MAIN permits an additive optional timestamp
-  field if needed, but no field shape, historical fallback, or migration is
-  settled. Report missing provenance before choosing a schema.
+- Owner answer 713=b, relayed by MAIN at 12:00:19/12:01:14 on 2026-11-14,
+  verbatim: `711,713=b`. For unknown or legacy-backfilled actual edit time,
+  retain hover thickening and show the exact human-facing text
+  `변경 시각 모름`. Do not invent a relative age.
+- Intended compatibility tier: T0. MAIN permits prospective provenance only
+  if its design survives old writers under T0. Otherwise deliver the confirmed
+  713=b hover behavior alone and return prospective provenance as a
+  compatibility question. No optional field, process-only mapping, retention
+  policy, migration, or schema mechanism is selected.
 - Retain existing 617 recap/log inline-time behavior rather than implement it
   twice. Repair it only if current behavioral verification finds it missing:
   author mark and time (owner example `04:08 · 3시간 전`) lead the body inline,
@@ -87,24 +94,32 @@ response included inline recap styling, not proof that all recap entries
 visually satisfy 617. No stable live recap geometry or hover interaction was
 verified.
 
-## Blocked: historical timestamp provenance
+## Timestamp evidence and compatibility boundary
 
 For a known actual mutation batch, existing `ChangedAt` is its actual edit
 time and covers all its current marks; a separate timestamp per block is not
 inherently required by that latest-batch model. However, `BlockMark` stores
 no timestamp or provenance, and `ChangedAt` alone cannot distinguish actual
 mutation from legacy backfill. The inspected representation does not prove
-actual historical per-mark times; recoverability from other stored history
-has not been established. An optional additive field could preserve trusted
-provenance prospectively, but its necessity and shape are not settled, and it
-would not reconstruct unknown historical edit times.
+actual historical per-mark times. The bounded folder-store trace found no
+general body-mutation history establishing those times. Owner answer 713=b
+settles their display, so missing historical provenance is no longer a blocker
+to the confirmed unknown-time hover behavior.
 
-Historical unknown/backfilled-time display is an owner policy choice, not a
-technical fallback to decide silently. No unknown relative value, observation
-age, or topic-latest age is authorized as actual change age. No new schema or
-unknown-age UX is selected here. Lead must settle this gap before ready
-promotion; record the owner answer separately before adding an implementation
-decision.
+`agents-plugin-tool/internal/wswhiteboard/folders.go`, search `folderDecode`,
+`folderJSON`, and `topic.Doc = &copy`: typed old writers can discard unknown
+optional fields. Additive syntax alone therefore does not establish T0
+preservation. Existing Seq/Generation values do not prove timestamp origin.
+The successful mutation boundary could support new transient witnessing, but
+no such trusted mapping exists today, and process-lifetime retention is an
+unapproved product choice. Neither approach reconstructs unknown history.
+
+Prospective provenance remains conditional on lead design review demonstrating
+old-writer T0 compatibility; otherwise return that question separately and
+proceed only with 713=b. No observation age, topic-latest age, or invented
+historical value is authorized as actual change age. The known actual-age
+contract remains required wherever actual batch provenance is established;
+713=b does not authorize hiding proven ages.
 
 ## Constraints
 
@@ -120,14 +135,19 @@ decision.
 
 ### Phase 1: Relative marker hover without layout movement
 
-After timestamp provenance is settled and the lead completes the design/ready
-gate, implement the approved marker hover contract. Preserve existing 617
+After the lead completes the design/ready gate, implement the approved marker
+hover contract: slight thickening, relative age for proven actual edit times,
+and exact `변경 시각 모름` for unknown/backfilled times. Prospective provenance
+is included only if its design passes the old-writer T0 boundary above;
+otherwise deliver 713=b alone and return the compatibility question without
+selecting a persistence or process-only mechanism. Preserve existing 617
 inline author/time placement; do not broaden this into a history redesign.
 
 Verification boundary: before/after headless captures at 1280/800/360 widths,
 including green/blue/red and end-deletion marks, multiline content, stale marks,
 framed and unframed bodies, and inline recap/log placement. Exercise relative
-ages from minutes through years, and the settled missing-time policy. Assert
+ages from minutes through years wherever provenance is proven, and assert
+exact `변경 시각 모름` plus thickening for unknown/backfilled times. Assert
 that unrelated topic activity does not change marker age, that hover contains
 no clock/date, and that colors, anchors, content geometry and scroll offsets
 are unchanged. Run the project's relevant whiteboard Go tests and independent
