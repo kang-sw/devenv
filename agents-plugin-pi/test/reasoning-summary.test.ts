@@ -52,6 +52,18 @@ test("exact host and both public override checks are mandatory on every request"
   assert.deepEqual(h.text(), ["allowed"]);
 });
 
+test("model identity matches the receiver's existing 80-rune display bound without truncation", () => {
+  const ctx = context();
+  for (const name of ["x".repeat(80), "😀".repeat(80)]) {
+    ctx.model.id = name;
+    assert.equal(eligibleSummaryModel("1.5.2", ctx)?.model, name);
+  }
+  for (const name of ["x".repeat(81), "😀".repeat(81), ""]) {
+    ctx.model.id = name;
+    assert.equal(eligibleSummaryModel("1.5.2", ctx), undefined);
+  }
+});
+
 test("1.5.2 Responses SSE and Codex SSE/WS replay only explicit summaries before message_start", () => {
   for (const [provider, api, transport] of [["openai", "openai-responses", "sse"], ["openai-codex", "openai-codex-responses", "sse"], ["openai-codex", "openai-codex-responses", "websocket"]]) {
     const h = fixture(provider, api);

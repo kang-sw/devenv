@@ -94,7 +94,7 @@ export function eligibleSummaryModel(version: unknown, context: unknown): { prov
   if (version !== "1.5.2") return undefined;
   const ctx = object(context), model = object(ctx?.model), registry = object(ctx?.modelRegistry);
   const provider = model?.provider, api = model?.api, name = model?.id;
-  if (!((provider === "openai" && api === "openai-responses") || (provider === "openai-codex" && api === "openai-codex-responses")) || !display(name, 128)) return undefined;
+  if (!((provider === "openai" && api === "openai-responses") || (provider === "openai-codex" && api === "openai-codex-responses")) || !display(name, 80 * 4) || [...name].length > 80) return undefined;
   try {
     const config = registry?.getRegisteredProviderConfig, native = registry?.getRegisteredNativeProvider;
     if (typeof config !== "function" || typeof native !== "function") return undefined;
