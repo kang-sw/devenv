@@ -783,6 +783,9 @@
     "261115-bug-ws-shared-card-browser-harness-bounded-readiness": {
       "registered_at": "2026-11-14T17:50:49Z"
     },
+    "261115-bug-ws-worktree-pool-protected-deliverable-reuse": {
+      "registered_at": "2026-11-14T23:49:42Z"
+    },
     "261115-feat-ws-dashboard-conversation-rendering-consolidation": {
       "registered_at": "2026-11-14T22:47:31Z"
     },
