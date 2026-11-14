@@ -89,6 +89,21 @@ func TestWhiteboardEffectsNoopRefusalAndAuthorization(t *testing.T) {
 	}
 }
 
+func TestWhiteboardEffectsGroupReversionStillProjectsCommittedTransitions(t *testing.T) {
+	f := newLiveFixture(t, true)
+	wb := effectsWhiteboardFixture(f)
+	wb.update(t, `<wb:topic name="t" label="Original"><wb:body>Keep</wb:body></wb:topic>`)
+	wb.update(t, `<wb:topic name="t" label="Interim"/><wb:topic name="t" label="Original"/>`)
+	records := effectsRecords(t, f, f.replyA)
+	if len(records) != 2 {
+		t.Fatalf("metadata reversion was omitted as a no-op: %+v", records)
+	}
+	effects, ok := wslive.DecodeWhiteboardEffects(records[1].RingEntry)
+	if !ok || len(effects) != 2 || effects[0].Before != "Original" || effects[0].After != "Interim" || effects[1].Before != "Interim" || effects[1].After != "Original" {
+		t.Fatalf("group projection lost ordered values: %+v", effects)
+	}
+}
+
 func TestWhiteboardEffectsDisabledDashboardWritesNoRing(t *testing.T) {
 	f := newLiveFixture(t, false)
 	effectsWhiteboardFixture(f).update(t, `<wb:topic name="off"><wb:log>Board only</wb:log></wb:topic>`)

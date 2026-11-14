@@ -111,7 +111,7 @@ func TestSemanticEffectsImplicitWithdrawalReopenAdoptionAndEviction(t *testing.T
 func TestSemanticEffectsNoopsRefusalAndSettings(t *testing.T) {
 	s := &State{}
 	mustApply(t, s, `<wb:topic name="same"><wb:add class="check"><wb:title>Check</wb:title></wb:add><wb:body>Same</wb:body></wb:topic><wb:answer id="1" value="ok">Yes.</wb:answer>`)
-	for _, commands := range []string{``, `<wb:topic name="same"><wb:body>Same</wb:body></wb:topic>`, `<wb:patch id="1"><wb:title>Check</wb:title></wb:patch>`, `<wb:answer id="1" value="ok">Yes.</wb:answer>`, `<wb:floor id="1"/>`} {
+	for _, commands := range []string{``, `<wb:topic name="same"><wb:body>Same</wb:body></wb:topic>`, `<wb:patch id="1"><wb:title>Check</wb:title></wb:patch>`, `<wb:answer id="1" value="ok">Yes.</wb:answer>`, `<wb:floor id="1"/>`, `<wb:topic name="unused" label="Unused"><wb:body/></wb:topic>`} {
 		out := mustApply(t, s, commands)
 		if len(out.Effects) != 0 {
 			t.Fatalf("semantic noop %q: %+v", commands, out.Effects)
@@ -141,6 +141,24 @@ func TestSemanticEffectsNoopsRefusalAndSettings(t *testing.T) {
 	_ = json.Unmarshal(raw, &keys)
 	if _, exists := keys["effects"]; exists {
 		t.Fatalf("effects persisted: %s", raw)
+	}
+}
+
+func TestSemanticEffectsConsecutiveGroupMetadataReversions(t *testing.T) {
+	s := &State{}
+	mustApply(t, s, `<wb:topic name="t" label="Original" tickets="261115-feat-first"><wb:body>Keep</wb:body></wb:topic>`)
+	out := mustApply(t, s, `<wb:topic name="t" label="Interim"/><wb:topic name="t" label="Original"/><wb:topic name="t" tickets="261115-feat-second"/><wb:topic name="t" tickets="261115-feat-first"/>`)
+	want := []Effect{
+		{Kind: "topic", Topic: "t", Field: "label", Before: "Original", After: "Interim"},
+		{Kind: "topic", Topic: "t", Field: "label", Before: "Interim", After: "Original"},
+		{Kind: "topic", Topic: "t", Field: "tickets", Before: `["261115-feat-first"]`, After: `["261115-feat-second"]`},
+		{Kind: "topic", Topic: "t", Field: "tickets", Before: `["261115-feat-second"]`, After: `["261115-feat-first"]`},
+	}
+	if !reflect.DeepEqual(out.Effects, want) {
+		t.Fatalf("group transitions collapsed: got %+v, want %+v", out.Effects, want)
+	}
+	if got := mustApply(t, s, `<wb:topic name="t" label="Original" tickets="261115-feat-first"/>`); len(got.Effects) != 0 {
+		t.Fatalf("identical group metadata produced effects: %+v", got.Effects)
 	}
 }
 

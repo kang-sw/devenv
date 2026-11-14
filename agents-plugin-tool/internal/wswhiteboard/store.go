@@ -618,6 +618,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	for _, cmd := range cmds {
 		if cmd.IsGroup() {
 			keys[cmd.Scope] = applyGroup(p, work, cmd)
+			out.Effects = append(out.Effects, semanticEffects(previous, work)...)
+			previous = effectSnapshot(work)
 			continue
 		}
 		switch cmd.Tag {

@@ -140,8 +140,17 @@ func semanticEffects(before, after *State) []Effect {
 			}
 			return ""
 		}
+		// A group's label can precede its first content command. Until the
+		// topic exists that label is provisional (pruneLabels drops unused
+		// groups), so attribute it when the topic actually becomes present.
+		label := func(s *State) string {
+			if !s.topicKnown(topic) {
+				return topic
+			}
+			return s.TopicLabel(topic)
+		}
 		field("presence", present(before), present(after))
-		field("label", before.TopicLabel(topic), after.TopicLabel(topic))
+		field("label", label(before), label(after))
 		field("body", before.TopicBody(topic), after.TopicBody(topic))
 		a, _ := baseDoc(before, topic)
 		b, _ := baseDoc(after, topic)
