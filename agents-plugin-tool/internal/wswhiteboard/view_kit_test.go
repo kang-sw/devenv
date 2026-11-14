@@ -28,7 +28,7 @@ var all = [], writes = 0;
 function El(name) {
   all.push(this); this.name = name; this.id = name; this.children = []; this.parentElement = null; this.style = {};
   this.oy = 'visible'; this.ty = 0; this.y = 0; this.top = 0; this.height = 40; this._scroll = 0;
-  this.scrollHeight = 0; this.clientHeight = 0; this.clientTop = 0; this.connected = true; this.on = {}; this.attrs = {};
+  this.scrollHeight = 0; this.clientHeight = 0; this.clientWidth = 500; this.clientTop = 0; this.connected = true; this.on = {}; this.attrs = {};
 }
 Object.defineProperty(El.prototype, 'isConnected', { get: function () { return this.connected; } });
 Object.defineProperty(El.prototype, 'scrollTop', { get: function () { return this._scroll; }, set: function (v) { writes++; this._scroll = v; } });
@@ -37,7 +37,7 @@ El.prototype.contains = function (n) { for (; n; n = n.parentElement) if (n === 
 El.prototype.closest = function (sel) { for (var n = this; n; n = n.parentElement) if (sel === '.topic' && n.isTopic || sel === '.entry-panel' && n.panel) return n; return null; };
 El.prototype.matches = function (sel) { return sel === '.doc-frame' && !!this.frame; };
 El.prototype.getAttribute = function (name) { return this.attrs[name] || null; };
-El.prototype.querySelectorAll = function (sel) { var root = this; return all.filter(function (n) { return root !== n && root.contains(n) && n.connected && (sel === '.tophead, .bc-hd' ? n.sticky : sel === '.doc-frame[data-doc-key]' ? n.frame : n.candidate); }); };
+El.prototype.querySelectorAll = function (sel) { var root = this; return all.filter(function (n) { return root !== n && root.contains(n) && n.connected && (sel.includes('.tophead') ? n.sticky : sel === '.doc-frame[data-doc-key]' ? n.frame : n.candidate); }); };
 El.prototype.addEventListener = function (t, f) { (this.on[t] = this.on[t] || []).push(f); };
 El.prototype.removeEventListener = function (t, f) { var l = this.on[t] || [], i = l.indexOf(f); if (i >= 0) l.splice(i, 1); };
 El.prototype.fire = function (t, e) { (this.on[t] || []).slice().forEach(function (f) { f(e || {}); }); };
@@ -54,9 +54,9 @@ var document = { documentElement: html, body: body, scrollingElement: html,
   getElementById: function (id) { return all.find(function (n) { return n.id === id && n.connected; }) || null; }
 };
 var winOn = {}, ios = [], ros = [];
-function IO(cb, opt) { this.cb = cb; this.opt = opt; this.obs = []; ios.push(this); }
-IO.prototype.observe = function (n) { this.obs.push(n); };
-IO.prototype.unobserve = function (n) { this.obs = this.obs.filter(function (x) { return x !== n; }); };
+function IO(cb, opt) { this.cb = cb; this.opt = opt; this.obs = []; this.log = []; ios.push(this); }
+IO.prototype.observe = function (n) { this.obs.push(n); this.log.push('observe:' + n.name); };
+IO.prototype.unobserve = function (n) { this.obs = this.obs.filter(function (x) { return x !== n; }); this.log.push('unobserve:' + n.name); };
 IO.prototype.report = function (n, ratio) { this.cb([{ target: n, intersectionRatio: ratio, boundingClientRect: n.getBoundingClientRect() }]); };
 function RO(cb) { this.cb = cb; this.obs = []; this.off = false; ros.push(this); }
 RO.prototype.observe = function (n) { this.obs.push(n.name); };
@@ -153,6 +153,32 @@ var outs=[], w1=k.watch(a,{onOut:function(){outs.push(1);}}), io=ios[0];
 io.report(a,0); io.report(a,1); var w2=k.watch(a,{onOut:function(){outs.push(2);}}); io.report(a,1); io.report(a,0);
 check('shared visibility subscriptions',outs,[1,2]); w1.unwatch(); a.connected=false; k.sweep();
 check('sweep removes disconnected subscriptions',io.obs.length,0);
+`)
+}
+
+func TestViewKitVisibilityUnderNode(t *testing.T) {
+	runViewKit(t, `
+var k=viewKit(win), a=topic(board,'a',bcol,100), reports=[], outs=[];
+var w1=k.watch(a,{onChange:function(r){reports.push(r.ratio);},onOut:function(){outs.push(1);}}),io=ios[0];
+check('root/threshold/margin',[io.opt.root,io.opt.threshold,io.opt.rootMargin],[null,[0],'0px']);
+io.report(a,0);check('initial zero is not out',outs,[]);
+var w2=k.watch(a,{onOut:function(){outs.push(2);}});
+check('new subscription reobserves',io.log.slice(-3),['observe:a','unobserve:a','observe:a']);
+io.report(a,.5);io.report(a,0);io.report(a,0);
+check('each subscriber exits once',outs,[1,2]);check('seen report',[k.seen(a).ratio,k.seen(a).visible],[0,false]);
+k.unwatch(w1);io.report(a,1);check('unwatched hears no report',reports.length,4);
+check('other subscriber retains observation',io.obs.includes(a),true);w2.unwatch();check('last subscriber unobserves',io.obs.length,0);
+var x=topic(board,'x',bcol,100),heard=[],wy;
+k.watch(x,{onChange:function(){heard.push(1);wy.unwatch();}});wy=k.watch(x,{onChange:function(){heard.push(2);}});io.report(x,1);
+check('callback can remove another subscriber',heard,[1]);
+var gone=topic(board,'gone',bcol,200),wide=0;
+k.watch(gone);k.watch(gone,{margin:'200px',onChange:function(){wide++;}});
+check('one observer per margin',[ios.length,ios[1].opt.rootMargin],[2,'200px']);
+gone.connected=false;k.sweep();ios[1].report(gone,1);check('sweep drops all subscriptions',[ios[1].obs.length,wide],[0,0]);
+check('no scroll-margin support means no bands',k.bands,false);
+function SIO(cb,opt){IO.call(this,cb,opt);}SIO.prototype=Object.create(IO.prototype);SIO.prototype.scrollMargin='';
+win.IntersectionObserver=SIO;var kb=viewKit(win);kb.watch(a,{margin:'100% 0px'});var opt=ios.at(-1).opt;
+check('supported scroll margins reach inner clips',[kb.bands,opt.rootMargin,opt.scrollMargin],[true,'100% 0px','100% 0px']);
 `)
 }
 

@@ -12,7 +12,7 @@ func viewedHarness(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(data) + dashboardFuncs(t, "topicKey", "topicSeen", "boardExposed", "boardPanelNodes", "boardPanelKey", "boardRenderBlockers", "boardStageInput", "boardStageOrder", "boardRecordPending", "boardPendingBadge", "boardFrameExposed", "boardFlushViewed")
+	return string(data) + dashboardFuncs(t, "topicKey", "topicSeen", "boardExposed", "boardPanelNodes", "boardPanelKey", "boardRenderBlockers", "boardOwnerSnapshot", "boardStagePaged", "boardStageInput", "boardStageOrder", "boardRecordPending", "boardPendingBadge", "boardFrameExposed", "boardFlushViewed")
 }
 
 func TestBoardViewedRenderingAndRelease(t *testing.T) {
@@ -47,9 +47,21 @@ check("newly affected exposed panel becomes a blocker",staged.topics.A===nextA &
 boardRelease=true;staged=boardStageInput(input([thirdA,nextB,nextC]));boardRelease=false;
 check("explicit release admits every canonical rendering",staged.topics.A===thirdA && staged.topics.B===nextB);
 // Owner input is narrowly scoped, not a global board exemption.
+// Restore p1's exposure after the earlier offscreen-release case.
+liveA.panels[0].exposed=true;
 boardRendered=input([oldA,oldB,oldC]);boardOwn.A=true;
 staged=boardStageInput(next);
-check("own answer/memo immediate, unrelated update held",staged.topics.A===nextA && staged.topics.B===oldB && boardImmediate.A);
+check("external update cannot borrow a local send grant",staged.topics.A===oldA && !boardImmediate.A && boardOwn.A);
+var receipt=panel('e99','owner receipt');receipt.owner=true;
+var ownA=topic('A','own',[panel('p1','old1'),panel('p2','same2'),receipt]);
+staged=boardStageInput(input([ownA,nextB,nextC]));
+check("owner receipt applies immediately, unrelated topic held",staged.topics.A===ownA && staged.topics.B===oldB && boardImmediate.A);
+// A concurrent panel rewrite is retained while the owner's new receipt
+// lands from the same server snapshot, without attributing the rewrite.
+boardRendered=input([oldA,oldB,oldC]);boardOwn.A=true;
+var mixed=topic('A','mixed',[panel('p1','external rewrite'),panel('p2','same2'),receipt]);
+staged=boardStageInput(input([mixed,nextB,nextC]));
+check("mixed update admits only the owner receipt",staged.topics.A.panels[0].outerHTML==='old1' && staged.topics.A.panels.at(-1).id==='e99' && boardPending.A && boardImmediate.A);
 // One exposed pixel is enough: the owner inspection, not reading-line
 // selection or a topic size threshold, is the eligibility authority.
 check("dashboard delegates exact exposure to owner",boardExposed(liveA.panels[1]));
@@ -118,6 +130,22 @@ var history=topic("large","history",[]);history.templates=[{content:{panels:[pan
 var nextHistory=topic("large","newHistory",[]);nextHistory.templates=[{content:{panels:[panel("p9","new9")]}}];
 var liveHistory=topic("large","history",[panel("p9","live9",true)]);
 check("materialized history panel uses immutable template source",boardRenderBlockers(liveHistory,history,nextHistory).length===1);
+process.stdout.write(bad.join("\n"));`)
+}
+
+func TestBoardViewedFetchedPageTransfer(t *testing.T) {
+	runNode(t, "viewed fetched page transfer", viewedHarness(t)+`
+var old=topic('past','old',[panel('p1','old1'),panel('p2','same2')]);
+var live=topic('past','old',[panel('p1','old1',true),panel('p2','same2',true)]);live.exposed=true;
+var next=topic('past','next',[panel('p1','new1'),panel('p2','same2')]);
+setLive([]);board.pagedTopics=[live];boardPaged.past=old;boardRendered=input([]);
+var offered=input([next]);var staged=boardStageInput(offered);
+check('visible fetched card does not transfer out of its page',!staged.topics.past && staged.order.length===0 && boardPending.past && !boardPagedEdits.length);
+live.panels[0].exposed=false;staged=boardStageInput(offered);
+check('offscreen panel rendering admits in page while sibling stays exposed',boardPagedEdits.length===1 && boardPagedEdits[0].source===next && boardPaged.past===next && !staged.topics.past);
+live.exposed=false;staged=boardStageInput(offered);
+check('card transfer releases only after card fully leaves',staged.topics.past===next && !boardPending.past);
+board.pagedTopics=[];
 process.stdout.write(bad.join("\n"));`)
 }
 

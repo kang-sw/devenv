@@ -612,22 +612,25 @@
       var style = win.getComputedStyle(scroller);
       top += parseFloat(style.scrollPaddingTop) || 0;
       // The rail publishes its clearance on sticky heads, not on the host.
-      Array.from((main ? doc : scroller).querySelectorAll('.tophead, .bc-hd')).forEach(function (head) {
+      Array.from((main ? doc : scroller).querySelectorAll('.tophead, .bc-hd, .wb-rail-wrap.up .wb-rail-stack')).forEach(function (head) {
         var hs = win.getComputedStyle(head), h = head.getBoundingClientRect();
-        if (hs.position === 'sticky' && h.height && h.top <= top + (parseFloat(hs.top) || 0) + 1 && h.bottom > top)
+        if ((hs.position === 'sticky' || head.matches('.wb-rail-stack')) && h.height && h.top <= top + (parseFloat(hs.top) || 0) + 1 && h.bottom > top)
           top = Math.max(top, h.bottom);
       });
-      return { top: top, bottom: bottom };
+      return { top: top, bottom: bottom, left: main ? 0 : Math.max(0, r.left + (scroller.clientLeft || 0)),
+        right: Math.min(win.innerWidth || r.right || Infinity, main ? win.innerWidth || Infinity : r.left + (scroller.clientLeft || 0) + scroller.clientWidth) };
     }
     function exposed(node, scroller) {
       var v = viewport(scroller), r = node.getBoundingClientRect(), top = Math.max(v.top, r.top), bottom = Math.min(v.bottom, r.bottom);
+      var left = Math.max(v.left, r.left), right = Math.min(v.right, r.right);
       for (var p = node.parentElement; p && p !== scroller && p !== doc.body; p = p.parentElement) {
         if (p.tagName === 'DETAILS' && !p.open) return false;
         if (/hidden|clip|auto|scroll/.test(win.getComputedStyle(p).overflowY)) {
           var box = p.getBoundingClientRect(); top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom);
+          left = Math.max(left, box.left); right = Math.min(right, box.right);
         }
       }
-      return r.height > 0 && bottom - top >= 1;
+      return r.height > 0 && bottom - top >= 1 && right - left >= 1;
     }
     function reading(scroller) {
       var root = scroller === docScroller() ? doc : scroller, line = viewport(scroller).top + 1;
@@ -725,7 +728,7 @@
       if (o.transaction) o.transaction.cancel();
       o.state = 'explicit-jump-follow';
       var s = { ends: [], ro: null, done: false };
-      var main = scroller === docScroller(), target = main ? win : scroller;
+      var main = scroller === docScroller();
       function apply() {
         if (s.done) return;
         if (s.follow) s.follow.align();

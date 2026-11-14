@@ -604,7 +604,8 @@
     var ins = null;
     if (name === "entries") mergeEntriesRegion(el, html, pin);
     else if (board) {
-      ins = morphBoard(el, html, boardFrozen);
+      ins = morphBoard(el, html, boardFrozen, boardPagedEdits);
+      boardPagedEdits = [];
       if (window.wbHistory && window.wbHistory.sweep) { window.wbHistory.sweep(); ins.forEach(watchBoard); }
       ins.forEach(bandBoard);
       ins.forEach(function (n) {
@@ -619,7 +620,7 @@
         writeAnswers(n, answers);
         // A placeholder a swap brought (the viewport bands mount it later)
         // takes the mark too, and its frame takes it once mounted.
-        q(".doc-frame", n).forEach(function (f) { f.wbKeep = true; if (boardImmediate[topicKey(n)]) f.wbHeightRelease = true; });
+        q(".doc-frame", n).forEach(function (f) { f.wbKeep = true; });
       });
       if (before) {
         var moves = topicMotion(before, ins).map(function (m) { return growTopic(m.n, m.from); });
@@ -685,6 +686,7 @@
   var boardSeen = {}, boardRendered = null, boardLatest = null, boardPending = Object.create(null), boardFrozen = [], boardRelease = false;
   var boardOwn = Object.create(null), boardImmediate = Object.create(null), boardHeightHeld = new Map(), boardHeightChanges = new Map();
   var boardChanges = [], boardOffered = null, boardBadge = null, boardReleaseFrame = 0;
+  var boardPaged = Object.create(null), boardPagedEdits = [];
   function topicKey(n) {
     return n.nodeType === 1 && n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic") ? n.getAttribute("data-topic") : null;
   }
@@ -806,7 +808,7 @@
   }
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
-  function morphBoard(el, html, frozen) {
+  function morphBoard(el, html, frozen, pagedEdits) {
     var seen = {}, want = [], ins = [], live = {}, liveClosed = [], pages = [], more = null, grafts = [], changed = [];
     var pinBox = window.WsCards.pinList();
     Array.prototype.forEach.call(el.children, function (n) {
@@ -922,6 +924,14 @@
     });
     window.WsCards.settle(el, plan);
     frameKept(reuse);
+    (pagedEdits || []).forEach(function (edit) {
+      var old = edit.live, n = edit.source.cloneNode(true), g = frameGraftable(old, n);
+      var keptFrames = frameKeep([{ old: old, n: n, g: g }]);
+      if (g) { frameGraft(g); n = old; }
+      else old.parentNode.replaceChild(n, old);
+      frameKept(keptFrames);
+      ins.push(n);
+    });
     return ins;
   }
   // --- incremental board inputs ---------------------------------------------
@@ -1347,16 +1357,67 @@
     if (!content.length && previous && previous.order.join("\n") !== input.order.join("\n") && Object.keys(boardPending).length)
       boardChanges.push({ names: Object.keys(boardPending) });
   }
+  // A send grants no blanket exemption to its topic: a simultaneous agent
+  // rewrite is still external. Server-rendered owner receipts identify the
+  // new rows. Admit them alone when the same snapshot also changes panels.
+  function boardOwnerSnapshot(old, next) {
+    if (!old || !next) return null;
+    var known = new Set(q('.wb-entry.owner', old).map(function (n) { return n.id; }));
+    var arrivals = q('.wb-entry.owner', next).filter(function (n) { return !known.has(n.id); });
+    if (!arrivals.length) return null;
+    function external(n) { return !n.classList.contains('owner'); }
+    var before = boardPanelNodes(old).filter(external), after = boardPanelNodes(next).filter(external);
+    var changed = before.length !== after.length || before.some(function (n, i) { return boardPanelKey(n) !== boardPanelKey(after[i]) || n.outerHTML !== after[i].outerHTML; });
+    if (!changed) return { source: next, external: false };
+    var partial = old.cloneNode(true), admitted = [];
+    arrivals.forEach(function (n) {
+      var h = n.closest('.wb-history'), key = h && h.getAttribute('data-history');
+      var target = q('.wb-history', partial).find(function (p) { return p.getAttribute('data-history') === key; });
+      if (target) { target.querySelector('.history-live').appendChild(n.cloneNode(true)); admitted.push(n.id); }
+    });
+    if (!admitted.length) return null;
+    partial.setAttribute('data-th', topicSeen(old) + ':owner:' + admitted.join(','));
+    return { source: partial, external: true };
+  }
+  // Fetched closed-page topics are not canonical top-level members yet.
+  // Keep an exposed transfer in its page while admitting eligible rendering
+  // in place. The original immutable fetched bytes, not mounted frame DOM,
+  // are the diff source. Placement releases when that card fully leaves.
+  function boardStagePaged(input, topics, order) {
+    boardPagedEdits = [];
+    boardBoxes().forEach(function (box) {
+      q('.closed-page section.topic[data-topic]', box).forEach(function (live) {
+        var k = topicKey(live), next = topics[k], old = boardPaged[k];
+        if (!next || boardRelease || (boardImmediate[k] && !boardPending[k]) || !boardExposed(live)) return;
+        var blockers = old ? boardRenderBlockers(live, old, next) : [live];
+        if (!blockers.length && topicSeen(old) !== topicSeen(next)) {
+          boardPagedEdits.push({ live: live, source: next });
+          boardPaged[k] = next;
+        }
+        delete topics[k];
+        var at = order.indexOf(k); if (at >= 0) order.splice(at, 1);
+        boardPending[k] = blockers.length ? blockers : [live];
+      });
+    });
+  }
   function boardStageInput(input) {
     boardPending = Object.create(null);
     boardImmediate = Object.create(null);
     boardFrozen = [];
     if (!input || typeof input === "string") return input;
     var topics = Object.assign(Object.create(null), input.topics), order = input.order.slice();
+    Object.keys(boardOwn).forEach(function (k) {
+      var old = boardRendered && boardRendered.topics[k] || boardPaged[k];
+      var own = boardOwnerSnapshot(old, topics[k]);
+      if (!own) return;
+      topics[k] = own.source; boardImmediate[k] = true; delete boardOwn[k];
+      if (own.external) boardPending[k] = true;
+    });
     boardBoxes().forEach(function (box) {
       var nodes = Array.prototype.filter.call(box.children, function (n) {
         var k = topicKey(n);
-        return (k !== null || n.hasAttribute("data-card")) && !boardRelease && !boardOwn[k] && boardExposed(n);
+        var group = n.classList.contains('closed-page') || n.classList.contains('bpins');
+        return (k !== null || n.hasAttribute("data-card") || group) && !boardRelease && !boardImmediate[k] && boardExposed(n);
       });
       if (nodes.length) boardFrozen.push({ box: box, nodes: nodes });
       nodes.forEach(function (n) {
@@ -1369,9 +1430,20 @@
         boardPending[k] = blockers;
       });
     });
-    Object.keys(boardOwn).forEach(function (k) {
-      if (input.topics[k] && boardRendered && boardRendered.topics[k] && topicSeen(input.topics[k]) !== topicSeen(boardRendered.topics[k])) { boardImmediate[k] = true; delete boardOwn[k]; }
-    });
+    boardStagePaged(input, topics, order);
+    // Inline pins share the main scroller but still have their own placement
+    // list. Their content follows the same per-panel rendering blockers.
+    var pins = window.WsCards && window.WsCards.pinList && window.WsCards.pinList();
+    if (pins && boardBoxes().indexOf(pins) < 0 && !boardRelease) {
+      var heldPins = Array.from(pins.children).filter(function (n) { return !boardImmediate[topicKey(n)] && boardExposed(n); });
+      if (heldPins.length) boardFrozen.push({ box: pins, nodes: heldPins });
+      heldPins.forEach(function (n) {
+        var k = topicKey(n), old = boardRendered && boardRendered.topics[k];
+        if (k === null || !old || !topics[k] || topicSeen(old) === topicSeen(topics[k])) return;
+        var blockers = boardRenderBlockers(n, old, topics[k]);
+        if (blockers.length) { topics[k] = old; boardPending[k] = blockers; }
+      });
+    }
     // A partial input records only bytes actually admitted, never held hashes.
     boardRendered = { topics: topics, order: order, before: input.before, after: input.after };
     return boardRendered;
@@ -1599,13 +1671,14 @@
       // stand on the board; slots retain their place in the page count.
       q("section.topic[data-topic]", page).forEach(function (t) {
         var name = t.getAttribute("data-topic");
-        if (!boardTopicPresent(name)) return;
+        if (!boardTopicPresent(name)) { boardPaged[name] = t.cloneNode(true); return; }
         var s = doc.createElement("span");
         s.className = "closed-slot";
         s.hidden = true;
         s.setAttribute("data-slot", name);
         t.parentNode.replaceChild(s, t);
       });
+      var kept = boardKeep();
       btn.parentNode.replaceChild(page, btn);
       watchBoard(page);
       bandBoard(page);
@@ -1614,6 +1687,7 @@
       if (window.wbBindBoard) window.wbBindBoard(page);
       if (window.wbAgo) window.wbAgo(page);
       mermaid(page);
+      if (kept) kept.h.apply();
       return true;
     }, function () { btn.disabled = false; return false; });
   }

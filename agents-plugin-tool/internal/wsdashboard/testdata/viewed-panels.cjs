@@ -2,19 +2,27 @@
 var bad = [];
 function check(what, ok) { if (!ok) bad.push(what); }
 function panel(id, bytes, exposed) {
-  return {id:id, outerHTML:bytes, exposed:!!exposed, classList:{contains:function(){return false;}}, getAttribute:function(){return null;}};
+  var n = {id:id, outerHTML:bytes, exposed:!!exposed, classList:{contains:function(c){return c === 'owner' && !!n.owner;}}, getAttribute:function(){return null;}, closest:function(s){return s === '.wb-history' ? n.history : null;}, cloneNode:function(){var p=panel(id,bytes,exposed);p.owner=n.owner;return p;}};
+  return n;
 }
 function topic(key, hash, panels, height) {
-  return {
+  var n = {
     nodeType:1, tagName:"SECTION", id:"", panels:panels || [], templates:[], height:height || 100,
     classList:{contains:function(c){return c === "topic";}},
     hasAttribute:function(k){return k === "data-topic" || k === "data-th";},
     getAttribute:function(k){return k === "data-topic" ? key : k === "data-th" ? hash : null;},
-    cloneNode:function(){return topic(key,hash,this.panels.slice(),this.height);}
+    setAttribute:function(k,v){if(k === 'data-th')hash=v;},
+    cloneNode:function(){return topic(key,hash,this.panels.map(function(p){return p.cloneNode();}),this.height);}
   };
+  n.history={getAttribute:function(){return key;},querySelector:function(){return {appendChild:function(p){n.panels.push(p);}};}};
+  n.panels.forEach(function(p){p.history=n.history;});
+  return n;
 }
 function q(sel,n) {
   if (sel === "template") return n.templates || [];
+  if (sel === '.wb-entry.owner') return (n.panels || []).filter(function(p){return p.owner;});
+  if (sel === '.wb-history') return n.history ? [n.history] : [];
+  if (sel === '.closed-page section.topic[data-topic]') return n.pagedTopics || [];
   if (sel === ".entry-panel, .wb-entry:not(.panel), .doc-frame") return n.panels || [];
   throw new Error("unmodeled selector: " + sel);
 }
@@ -29,6 +37,7 @@ function boardBoxes(){return [board,pins];}
 function setLive(a,b){board.children=board.childNodes=a;pins.children=pins.childNodes=b || [];}
 function input(list){var topics=Object.create(null);list.forEach(function(n){topics[n.getAttribute("data-topic")]=n;});return {topics:topics,order:list.map(function(n){return n.getAttribute("data-topic");}),before:[],after:[]};}
 var boardPending=Object.create(null),boardFrozen=[],boardOwn=Object.create(null),boardImmediate=Object.create(null),boardRelease=false;
+var boardPaged=Object.create(null),boardPagedEdits=[];
 var boardRendered=null,boardLatest=null,boardOffered=null,boardChanges=[],boardHeightHeld=new Map(),boardHeightChanges=new Map(),boardBadge=null,boardReleaseFrame=0;
 function keys(list){return list.map(function(n){return n.getAttribute("data-topic");}).join();}
 function geometry(list,scroll){var y=0,out={};list.forEach(function(n){out[n.getAttribute("data-topic")]=y-scroll;y+=n.height;});return out;}

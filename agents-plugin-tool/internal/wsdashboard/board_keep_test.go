@@ -18,7 +18,8 @@ func TestBoardKeepWiring(t *testing.T) {
 	order := []string{
 		"html = boardStageInput(boardLatest.html || html);",
 		"var kept = board ? boardKeep() : null",
-		"ins = morphBoard(el, html, boardFrozen);",
+		"ins = morphBoard(el, html, boardFrozen, boardPagedEdits);",
+		"boardPagedEdits = [];",
 		"window.wbHistory.sweep(); ins.forEach(watchBoard);",
 		"window.wbHistory.restore(n, history);",
 		"restoreScroll(scroll);",
