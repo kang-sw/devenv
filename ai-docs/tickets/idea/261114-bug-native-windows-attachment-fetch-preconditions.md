@@ -78,6 +78,47 @@ Test roots, homes, Go caches, Git configuration, ws stores and subprocesses were
 isolated. No user checkout, installed plugin, shared daemon or host configuration
 repair was part of this command.
 
+## Additional full MCP acceptance evidence (2026-11-14 UTC)
+
+MAIN 15:00:19 expressly requested the three final MCP failing subcases be recorded
+in this SAME Windows IDEA, alongside the attachment failures, without a second
+MCP ticket or inferred common diagnosis. This section groups an acceptance run,
+not a proven common root cause. A separately drafted uncommitted route IDEA was
+removed before commit to honor the single-writer capture boundary.
+
+Actual command: `go test -count=1 -timeout 25m ./internal/mcp`, starting
+2026-11-14T14:34:44Z. It completed within budget with exit 1 after 1356.290s;
+Go reported package duration 1354.882s. Full retained output:
+`windows-696-9854ff350/native/mcp.log`, native counterpart `evidence/mcp.log`,
+under the same temporary evidence index and exact source/toolchain pins above.
+
+All three observed failing subcases:
+
+1. `TestImplIdentityResolveProvisionRouteIntegration/develop`, 1.51s, at
+   `impl_identity_integration_test.go:142`: route response JSON parsing failed
+   (`invalid character 'r' looking for beginning of value`). The returned text
+   said branch preflight failed while checking implementation ahead state:
+   `git rev-list --count <base>..impl/develop/goofy-chief-many` returned 128,
+   `fatal: failed to stat '<revision-range>': Filename too long`.
+2. `TestImplIdentityResolveProvisionRouteIntegration/nested_goal`, 1.58s, same
+   assertion: the corresponding
+   `git rev-list --count <base>..impl/goal/develop/topic/army-lanky-wipe` returned
+   128 with `Filename too long`. The two-case outer test took 3.09s. Exact object
+   IDs/ranges and refusal text remain in the raw log.
+3. `TestSeenCloneReadTimeoutIsNotRefreshed`, 3.77s, at
+   `ticket_index_view_test.go:615`: expected a 200ms read-timeout/not-refreshed
+   advisory retaining cached ownership; actual cached rows/ownership remained,
+   but the advisory said
+   `ticket-index: origin unreachable; ownership is from the cached index (age 2m0s)`.
+   This same contract already has the focused-run capture
+   `261114-bug-native-windows-ticket-read-timeout-reports-unreachable`; this is
+   additional settled full-suite evidence, not a new test retry or duplicate
+   ticket.
+
+These are observed native acceptance failures. No diagnosis, baseline comparison,
+source fix, timeout extension, host long-path/config change or rerun was
+performed. The full MCP command is NOT green.
+
 ## Decisions
 
 - Preserve the completed predecessor's results; capture fresh native evidence in
