@@ -265,6 +265,85 @@ func TestHistoryRouteReadsWithoutAnAdapter(t *testing.T) {
 	}
 }
 
+// TestWhiteboardEffectsRoutesReadSavedHistoryWithoutAnAdapter exercises the
+// actual initial/history routes and exact-session isolation, not just a view
+// built with an injected ring. All content stays in the isolated fixture.
+func TestWhiteboardEffectsRoutesReadSavedHistoryWithoutAnAdapter(t *testing.T) {
+	f := startPageFixture(t)
+	register(t, f.dir, "boardsession", f.project, time.Now().Add(-time.Hour))
+	f.d.index.Refresh()
+	writeSnapshot(t, f.dir, "livesession", liveSnap(time.Now().Add(-time.Hour), wslive.Lead{Reply: &wslive.Reply{Text: "stale streaming secret"}}))
+	for id, text := range map[string]string{"boardsession": "offline board private", "livesession": "stale lead private"} {
+		if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, id)), []wslive.RingEntry{dashboardEffect(text)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for id, text := range map[string]string{"boardsession": "offline board private", "livesession": "stale lead private"} {
+		code, page := get(t, f.base+"/s/"+id+"?frame=1")
+		if code != http.StatusOK || !strings.Contains(page, `data-mode="history"`) || !strings.Contains(page, text) || !strings.Contains(page, `data-region="entries"`) {
+			t.Fatalf("initial saved history %s: status %d, %.600s", id, code, page)
+		}
+		for _, absent := range []string{`id="composer"`, `id="ctext"`, `data-region="convlive"`, "stale streaming secret"} {
+			if strings.Contains(page, absent) {
+				t.Errorf("saved %s contains live content %q", id, absent)
+			}
+		}
+		if id == "boardsession" && !strings.Contains(page, `class="ended-chip"`) {
+			t.Error("offline registration was made live")
+		}
+		history := getHistory(t, f.base+"/s/"+id+"/history")
+		if !strings.Contains(history.HTML, text) {
+			t.Errorf("history route lost %s", text)
+		}
+		for peer, other := range map[string]string{"boardsession": "offline board private", "livesession": "stale lead private"} {
+			if peer != id && (strings.Contains(page, other) || strings.Contains(history.HTML, other)) {
+				t.Errorf("%s leaked into %s", peer, id)
+			}
+		}
+	}
+}
+
+func TestWhiteboardEffectsOlderThanLiveCapRemainReachableOffline(t *testing.T) {
+	f := startPageFixture(t)
+	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "boardsession")), []wslive.RingEntry{dashboardEffect("old saved effect")}); err != nil {
+		t.Fatal(err)
+	}
+	appendUsers(t, f, "boardsession", 0, wslive.RingCap+1)
+	_, page := get(t, f.base+"/s/boardsession?frame=1")
+	if !strings.Contains(page, `data-mode="history"`) || strings.Contains(page, "old saved effect") {
+		t.Fatal("initial cap/mode did not preserve access to older effects")
+	}
+	if history := getHistory(t, f.base+"/s/boardsession/history?n=200"); !history.End || !strings.Contains(history.HTML, "old saved effect") {
+		t.Fatalf("older effect unreachable: %+v", history)
+	}
+}
+
+func TestWhiteboardEffectsSavedRingRefreshAndAdapterArrival(t *testing.T) {
+	f := startPageFixture(t)
+	reader := f.d.pages()
+	initial, _, prev, ok := reader.readSessionWith("boardsession", nil, true)
+	if !ok || initial.Mode() != modeBoard {
+		t.Fatal("empty board fixture not board-only")
+	}
+	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "boardsession")), []wslive.RingEntry{dashboardEffect("new saved effect")}); err != nil {
+		t.Fatal(err)
+	}
+	saved, _, prev, ok := reader.readSessionWith("boardsession", prev, true)
+	if !ok || saved.Adapter || saved.Mode() != modeHistory || len(saved.Conversation.Entries) != 1 || prev.conversation {
+		t.Fatalf("ring refresh lost saved entry or read live inbox: %+v", saved)
+	}
+	writeSnapshot(t, f.dir, "boardsession", liveSnap(time.Now(), wslive.Lead{}))
+	live, _, prev, ok := reader.readSessionWith("boardsession", prev, false)
+	if !ok || !live.Adapter || !prev.conversation || len(live.Conversation.Entries) != 1 {
+		t.Fatalf("adapter arrival lost saved ring or skipped inbox: %+v", live)
+	}
+	writeSnapshot(t, f.dir, "boardsession", liveSnap(time.Now().Add(-time.Hour), wslive.Lead{Reply: &wslive.Reply{Text: "stale"}}))
+	saved, _, prev, ok = reader.readSessionWith("boardsession", prev, false)
+	if !ok || saved.Adapter || prev.conversation || saved.Conversation.Reply != nil || len(saved.Conversation.Entries) != 1 {
+		t.Fatalf("adapter departure lost saved ring or retained live state: %+v", saved)
+	}
+}
+
 // TestSessionLeavingTheIndexDropsItsCachedEntries pins the cache's lifetime:
 // entries cached by a page render are dropped when the session leaves the
 // index.
