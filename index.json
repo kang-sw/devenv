@@ -798,6 +798,9 @@
     "261115-research-ws-concurrent-pool-acquire-selection-race": {
       "registered_at": "2026-11-14T22:49:06Z"
     },
+    "261115-research-ws-mcp-baseline-full-suite-timeout": {
+      "registered_at": "2026-11-14T23:05:25Z"
+    },
     "261115-research-ws-pi-explore-pinned-git-evidence-gap": {
       "registered_at": "2026-11-14T18:03:05Z"
     },
