@@ -1,6 +1,8 @@
 package wsdashboard
 
 import (
+	"encoding/json"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -53,6 +55,18 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 			t.Errorf("the stylesheet lacks %q", want)
 		}
 	}
+}
+
+// TestFilesExplorerInstances executes the complete production explorer with
+// controlled promises; unlike helper extraction this covers closure ownership.
+func TestFilesExplorerInstances(t *testing.T) {
+	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
+	files, _ := json.Marshal(mustAsset(t, "files.js"))
+	fixture, err := os.ReadFile("testdata/files-explorer.test.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+";\n"+cardsDOM+string(fixture))
 }
 
 // TestFilesExplorerRows runs the explorer's pure parts (files.js) under
