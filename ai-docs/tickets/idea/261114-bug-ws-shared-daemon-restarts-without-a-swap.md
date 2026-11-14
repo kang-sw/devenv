@@ -168,15 +168,119 @@ coordinated, designated timing. Ordinary connection must not replace it
 because of a newer same-core development build. The advance-notice design
 from option **b** is withdrawn, not pending.
 
-The authorized repair also removes the unconditional local-dev Pi lead/fork
-startup build: reuse a binary when its source fingerprint matches. Preserve
-released-version compatibility behavior. Treat starting a dead daemon as a
-separate path; proposed last-known-good restart and rollback behavior under
-owner item **(706)** remains unapproved and outside this repair. Mail
-durability and large-request handling also remain outside this change.
+The owner subsequently confirmed **(706)=a**, **(709)=a**, and **(714)=a**.
+The accepted design below supersedes the earlier narrower fingerprint-reuse
+repair and the earlier exclusion of restart/rollback. No notice design remains.
 
-Compatibility tier **T0**: the authorized boundary is launcher and internal
-bootstrap policy only, with no cross-version schema, protocol, MCP, tracker
-event or manifest-field change. Stop for MAIN's approval if implementation
-would require a broader cross-version surface change. This evidence correction
-implements no runtime policy and performs no daemon operation.
+## Accepted repair design - 2026-11-14
+
+### Confirmed decisions
+
+- **(703)=a:** shared development-daemon replacement happens only at explicitly
+  coordinated, designated timing, not because an ordinary connection finds a
+  newer same-core development build. Preserve released-version compatibility.
+- **(714)=a:** ordinary launcher startup must not automatically build or replace
+  a development runtime because its source fingerprint changed. Surface that a
+  new build is available; build and swap only through an explicit command at
+  designated timing. This also removes the unconditional local-dev Pi lead/fork
+  startup build. Reuse the selected runtime rather than merely caching that
+  unconditional build; stale source alone is not permission to rebuild.
+- **(706)=a:** keep dead-daemon recovery separate from replacing a running
+  daemon. Automatically restart a dead daemon using the last-known-good build,
+  never an unaccepted newer candidate. Roll back a designated swap that fails
+  its health checks, and record the recovery in the board log.
+- **(709)=a:** a candidate earns last-known-good status after post-start checks
+  covering hello, session lookup, whiteboard read and mailbox receive, followed
+  by approximately 30 minutes of quiet observation before promotion. Startup
+  liveness alone does not establish session-feature correctness.
+- **(709)=a:** emergency rollback must be available through a launcher CLI
+  command even when the dashboard is broken, plus a dashboard button visible
+  only for development mode identified by `.local-devenv-runtime`.
+- Compatibility target **T0**: preserve existing release/protocol/store meanings;
+  use additive recovery state and command surfaces if needed. Do not remove or
+  reinterpret an existing protocol, manifest or tracker field. Any broader
+  cross-version change stops for MAIN's approval before implementation.
+
+### Verified development-only source-build boundary
+
+The source-fingerprint auto-build path requires a valid local development
+contract: `local_devenv_source_fingerprint` returns no fingerprint without it
+(`agents-plugin/bin/ws-mcp-launcher.py:546-561`), and
+`install_local_devenv_runtime` returns false without that same contract
+(`:648-652`). Main computes the fingerprint only when `local_enabled`
+(`:1858-1862`), and the forced source-rebuild branch requires both forced
+installation and local mode (`:1895-1899`). Non-development runtime repair
+continues to use the released download path (`:721-726`). Explicit
+`WS_MCP_BOOTSTRAP_BINARY` or `WS_MCP_BOOTSTRAP_URL` overrides can force an
+installation without that marker (`:534-541,679-720`); those overrides are not
+themselves Go source-build commands. Do not describe every runtime install or
+released-version replacement as development-only.
+
+## Constraints
+
+- This capture authorizes design text only under the current load throttle:
+  no daemon operation, new build/test, process kill or installation change.
+  Execution and shared-daemon activation remain separately coordinated.
+- Preserve first-install and released-version compatibility behavior while
+  changing development auto-build/replacement policy. A missing, dead, hung,
+  incompatible or newer running daemon must be distinguished explicitly.
+- Recovery self-checks must not consume real unread user mail or overwrite
+  user/session/board state. Specify safe probe ownership and cleanup before
+  implementing the mailbox-receive check.
+- Keep previous accepted binaries available for rollback; current staged-binary
+  pruning is not a last-known-good retention guarantee. Recovery state must
+  distinguish an accepted build from a candidate and a merely healthy process.
+- Do not claim that a quiet interval proves every session feature correct.
+  Technical design review must define failed-check handling, promotion timing,
+  concurrent launcher ownership, interrupted swaps and bounded restart behavior.
+- Mail durability and large-request failures remain separate investigations.
+- Before launcher/tooling edits read `ai-docs/manuals/shipped-surface-boundary.md`,
+  `ai-docs/manuals/release-compatibility.md`, and `ai-docs/manuals/ws-mcp.md` where
+  applicable. Keep launcher copies in ws, wsflow and Pi consistent; read
+  `ai-docs/manuals/wsflow-mirroring.md` for mirrored plugin edits. Consult Pi SDK
+  integration documentation before changing Pi bootstrap behavior.
+
+## Phases
+
+### Phase 1: Separate ordinary connection from explicit development build and swap
+
+Implement the confirmed (703)/(714) boundary across the shared launcher copies
+and native Pi bootstrap. Ordinary startup reuses the selected runtime and reports
+source drift without building or replacing a live daemon. An explicit command
+owns build and coordinated swap. Preserve normal released-runtime compatibility
+and installation. Keep dead/hung-daemon handling distinct rather than disabling
+all start or repair paths.
+
+Verify with isolated launcher/bootstrap fixtures: unchanged and stale development
+fingerprints, lead/fork/worker startup, live/dead/hung daemon distinctions, explicit
+build/swap entry, and ordinary released-plugin first install and reconnect. Assert
+that ordinary development startup executes neither Go build nor live replacement.
+
+### Phase 2: Add accepted-build recovery and guarded promotion
+
+Implement (706)/(709): retain a last-known-good runtime, check a designated
+candidate through the approved session-facing operations, observe approximately
+30 quiet minutes before promotion, recover a dead daemon with the accepted build,
+and roll back failed candidate activation. Preserve accepted binaries through
+staging/pruning and record recovery in the board log. Define internal recovery
+state, safe probes and concurrent-operation behavior through technical design
+review before promotion to ready; do not infer these mechanisms from old liveness
+checks or claim they already exist.
+
+Verify deterministically with isolated state, disposable probes and controlled
+time: successful checks, failed checks, interrupted startup, rejected promotion,
+failed candidate, retained accepted binary, dead-daemon recovery, and concurrent
+callers. No test may stop or replace the shared dogfood daemon.
+
+### Phase 3: Expose emergency rollback outside the dashboard
+
+Provide the approved launcher CLI rollback command and development-only dashboard
+button. Both target the retained accepted build through the same guarded recovery
+operation; the CLI must work while the dashboard is unavailable. Preserve a usable
+recovery path when the candidate UI or session controls regress.
+
+Verify CLI behavior with a broken/unreachable dashboard, development-marker UI
+visibility, rejected unsafe/missing rollback targets, recovery log visibility and
+consistent operation from both controls. Run independent design/completeness and
+implementation reviews before integration or activation; record exact commands,
+results, compatibility boundaries and remaining acceptance gaps.
