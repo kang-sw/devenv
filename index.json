@@ -471,6 +471,9 @@
     "261114-bug-ws-delegate-reviewer-render-lacks-trusted-provenance": {
       "registered_at": "2026-11-14T04:49:44Z"
     },
+    "261114-bug-ws-installed-plugin-missing-native-pi-payload": {
+      "registered_at": "2026-11-14T04:54:50Z"
+    },
     "261114-bug-ws-parallel-worktree-acquire-reuses-same-pool-entry": {
       "registered_at": "2026-11-14T04:44:51Z"
     },
