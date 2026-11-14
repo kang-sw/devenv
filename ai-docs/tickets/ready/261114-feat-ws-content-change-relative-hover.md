@@ -334,3 +334,43 @@ Go tests and independent lite review; send evidence to the lead before MAIN's
 serialized develop merge. Live activation and fresh live verification remain
 separate from source landing. No implementation or verification run is claimed
 by this ticket-authoring update.
+
+## Blocked — 2026-11-14 (UTC)
+
+Status recording only: Phase 1 remains incomplete. No Result, feature
+acceptance, closure or integration is recorded.
+
+- VERIFIED: The latest authorized batch passed full whiteboard (323 top-level
+  tests, 18.743s), full i18n (14 tests, 1.49s), and exactly six selected dashboard
+  tests (1.374s). The approved mock-budget test-line repair passed; the
+  production 12-second cleanup reserve and all assertions were retained.
+  These results are not full dashboard or browser acceptance.
+- VERIFIED: Browser command 7 exited 1 after a 5-second wait for a visible
+  unframed gutter tooltip. The batch stopped at that first command failure;
+  the 96-case/120-capture matrix did not complete. Only three captures exist:
+  `1280-unframed-minutes-rest.png`,
+  `1280-unframed-minutes-hover-0.png`, and
+  `1280-unframed-minutes-hover-1.png`. There is no `geometry.json`.
+- Raw evidence root: `/tmp/ws-bodytime-677-mockbudget-rerun-01/`.
+  `command-04.log` and `command-05.log` hold the Go JSON results;
+  `command-07.log` holds the browser failure; `supervisor.log`,
+  `receipts.jsonl`, `source-manifest.json`, and `captures/` retain the remaining
+  evidence. The source-manifest SHA256 is
+  `6aa049902a4ad0b30a2e5d79ed8b10cb26bde61a2578df1ccf7a2b13715b3edc`.
+  Both earlier failed-run evidence roots remain unchanged.
+- INFERRED, UNVERIFIED: Ordered captures and probe flow suggest the first red
+  deletion hover failed. Its wide hit box may extend left of the clipped
+  topic while the probe targets the outermost `x + 1` point
+  (`assets/chg.js:27–37`, `assets/page.css:141`, and
+  `testdata/bodytime-hover.cjs:189–191`, under
+  `agents-plugin-tool/internal/wswhiteboard/`). This is a static clipping
+  hypothesis, not an established implementation-versus-probe diagnosis.
+- VERIFIED: Scoped lifecycle receipts record fixture closure, browser exit,
+  Node reap, absence of all 29 observed owned identities, and eight empty
+  audited work groups. All 148 diagnostic children were reaped. No signals
+  or cleanup blocks were recorded. These receipts do not prove OS-wide
+  absence or ownership of unobserved breakaway processes.
+- No new probe, repair or rerun is authorized. No source/recipe change,
+  automatic commit, daemon action or merge follows this stop. Further work
+  requires a fresh scoped lead/MAIN continuation. Source remains uncommitted
+  on `impl/feat/content-change-hover-677/awoke-stir-icon`.
