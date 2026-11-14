@@ -262,9 +262,9 @@ func TestPanelAuthoredReferencesAcrossAllSurfaces(t *testing.T) {
 	}
 }
 
-// Segments interleaves latest panel cards with log runs: all log entries
-// are always visible (no fold). An owner answer is its own row, and other
-// system events share one chip.
+// Segments interleaves latest panel cards with log runs, every row of a run
+// shown. An owner answer is its own row, and other system events share one
+// chip.
 func TestStreamSegmentsNeverFoldRuns(t *testing.T) {
 	v := func(id, kind string) EntryView { return EntryView{Entry: Entry{ID: id, Kind: kind}} }
 	panel := v("p", EntryPanel)
@@ -285,19 +285,16 @@ func TestStreamSegmentsNeverFoldRuns(t *testing.T) {
 				out = append(out, "panel:"+s.Panel.ID)
 				continue
 			}
-			out = append(out, fmt.Sprintf("fold:%d/rows:%d", len(s.Fold), len(s.Rows)))
+			out = append(out, fmt.Sprintf("rows:%d", len(s.Rows)))
 		}
 		return out
 	}
-	tail := page.Segments(true)
-	if got := fmt.Sprint(shape(tail)); got != "[fold:0/rows:4 panel:p fold:0/rows:5]" {
-		t.Fatalf("tail segments %s", got)
-	}
-	if got := fmt.Sprint(shape(page.Segments(false))); got != "[fold:0/rows:4 panel:p fold:0/rows:5]" {
-		t.Fatalf("older-page segments %s", got)
+	segs := page.Segments()
+	if got := fmt.Sprint(shape(segs)); got != "[rows:4 panel:p rows:5]" {
+		t.Fatalf("segments %s", got)
 	}
 	// s3 | owner | s4: the owner answer splits the chips around it.
-	last := tail[2]
+	last := segs[2]
 	if len(last.Rows[0].Systems) != 1 || last.Rows[0].Systems[0].ID != "s3" || last.Rows[1].Entry.ID != "o" || !last.Rows[1].Owner() || len(last.Rows[2].Systems) != 1 || last.Rows[2].Systems[0].ID != "s4" {
 		t.Fatal("an owner answer is not its own row between system chips")
 	}

@@ -478,8 +478,8 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .topic-stream > summary { cursor: pointer; }
 .topic-stream > summary::-webkit-details-marker { display: none; }
 .topic-stream:not([open]) > summary { padding-bottom: 0; }
-.topic-stream:not([open]) > summary::before, .run-fold > summary > .lbl::before, .system-run > summary > .lbl::before, .panel-versions > summary::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
-.run-fold[open] > summary > .lbl::before, .system-run[open] > summary > .lbl::before, .panel-versions[open] > summary::before { transform: rotate(90deg); }
+.topic-stream:not([open]) > summary::before, .system-run > summary > .lbl::before, .panel-versions > summary::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.system-run[open] > summary > .lbl::before, .panel-versions[open] > summary::before { transform: rotate(90deg); }
 .topic-stream > summary .i, .tstream > .mhead .i { width: 12px; height: 12px; }
 .topic-stream > summary .n, .tstream > .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .topic-stream > summary .mmeta { margin-left: auto; font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
@@ -508,14 +508,13 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .evi.sys::before { content: ""; width: 5px; height: 5px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: .7; }
 .ptag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-policy) 18%, transparent); color: var(--wb-accent-policy); }
 .entry-imported { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); }
-/* folds: a long log run, and adjacent system events, behind one quiet row
+/* system chips: adjacent system events behind one quiet row
    led by a short dotted rule */
-.run-fold > summary, .system-run > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 1.7; color: var(--wb-muted-fg); cursor: pointer; font-variant-numeric: tabular-nums; }
-.run-fold > summary::-webkit-details-marker, .system-run > summary::-webkit-details-marker { display: none; }
-.run-fold > summary:hover, .system-run > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
-.run-fold > summary > .rl, .system-run > summary > .rl { flex: none; width: 38px; border-top: 1px dotted color-mix(in srgb, var(--wb-fg) 30%, transparent); }
-.run-fold > summary > .lbl, .system-run > summary > .lbl { min-width: 0; }
-.run-fold.owner > summary > .lbl::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; vertical-align: 1px; border-radius: 50%; background: var(--wb-accent-policy); }
+.system-run > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 1.7; color: var(--wb-muted-fg); cursor: pointer; font-variant-numeric: tabular-nums; }
+.system-run > summary::-webkit-details-marker { display: none; }
+.system-run > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.system-run > summary > .rl { flex: none; width: 38px; border-top: 1px dotted color-mix(in srgb, var(--wb-fg) 30%, transparent); }
+.system-run > summary > .lbl { min-width: 0; }
 /* panel: an unboxed recap with metadata and native actions on the right;
    only its body carries a quiet guide. A recap-only panel is a message. */
 .wb-entry.panel { margin: 6px 0; }

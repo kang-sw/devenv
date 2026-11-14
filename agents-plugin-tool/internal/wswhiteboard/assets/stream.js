@@ -26,9 +26,9 @@
     return node.matches('.entry-panel') && node.closest('.wb-entry[data-panel="' + id + '"]') ? node : null;
   }
   var LIMIT = 1000, PANELS = 3, LINES = 30;
-  // A fold (a long log run, or a system-event chip) anchors by its first
-  // entry while closed; once open, its entries anchor themselves.
-  function isFold(node) { return node.classList.contains('system-run') || node.classList.contains('run-fold'); }
+  // A fold (a system-event chip) anchors by its first entry while closed;
+  // once open, its entries anchor themselves.
+  function isFold(node) { return node.classList.contains('system-run'); }
   function rows(h) {
     return Array.from(h.querySelector('.history-live').querySelectorAll('.wb-entry')).filter(function (e) {
       return !e.closest('.panel-versions');
@@ -136,7 +136,7 @@
           var tail = before ? splitAt(h, node).getBoundingClientRect().top : h.querySelector('.history-live').getBoundingClientRect().bottom;
           while (count > 1) {
             var start = candidates.length - count, p = candidates[start];
-            // Geometry supplies logs, gaps and folded runs. Replace only
+            // Geometry supplies logs, gaps and system chips. Replace only
             // panel boxes with cached heights for the one-time judgment.
             var height = tail - p.getBoundingClientRect().top;
             for (var i = start; i < candidates.length; i++) height += heights[i] - candidates[i].getBoundingClientRect().height;
@@ -238,9 +238,9 @@
   }
   function reveal(h, node) {
     var all = rows(h), entry = node.closest('.wb-entry'), id = boundary(h);
-    // A closed log/system summary has no entry ancestor. Its existing
-    // anchor names the first entry represented by that disclosure.
-    var fold = !entry && node.closest('.run-fold, .system-run');
+    // A closed system summary has no entry ancestor. Its existing anchor
+    // names the first entry represented by that disclosure.
+    var fold = !entry && node.closest('.system-run');
     if (fold) entry = find(h, fold.getAttribute('data-history-anchor'));
     if (entry) entry = topRow(h, entry).closest('.wb-entry') || entry;
     if (entry && (!id || all.indexOf(entry) < all.indexOf(boundaryRow(h, id)))) {
@@ -265,18 +265,17 @@
       if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
     } });
   }
-  // relabel rewrites a fold's key, anchor, and "n entries · from-to" label
-  // after a merge, as the server writes them (EntryPage.Segments).
+  // relabel rewrites a chip's key, anchor, and "n entries · from-to" label
+  // after a merge or split, as the server writes them (EntryPage.Segments).
   function relabel(fold) {
-    var events = Array.from(fold.querySelectorAll('.wb-entry')), run = fold.classList.contains('run-fold');
+    var events = Array.from(fold.querySelectorAll('.wb-entry'));
     var clock = function (e) { var t = e.querySelector('time.entry-at'); return t ? t.textContent : ''; };
     var from = clock(events[0]), to = clock(events[events.length - 1]), range = from === to ? from : from + '–' + to;
-    fold.setAttribute('data-key', (run ? 'run:' : 'system:') + events[0].id);
+    fold.setAttribute('data-key', 'system:' + events[0].id);
     fold.setAttribute('data-history-anchor', events[0].id);
     var summary = fold.children[0], label = summary.querySelector('.lbl') || summary;
-    label.textContent = window.wsT ? window.wsT(run ? 'js.wb.stream.run' : 'js.wb.stream.system', events.length, range) : (run ? 'log ' : 'system events ') + events.length;
+    label.textContent = window.wsT ? window.wsT('js.wb.stream.system', events.length, range) : 'system events ' + events.length;
   }
-  function logNode(n) { return !!n && (n.matches('details.run-fold') || n.matches('details.system-run') || n.matches('.wb-entry.agent') || n.matches('.wb-entry.system')); }
   // mergeSystems moves an older chip's events to the front of the adjacent,
   // newer chip, which keeps its disclosure node and open state.
   function mergeSystems(older, newer) {
@@ -284,33 +283,11 @@
     older.remove();
     relabel(newer);
   }
-  // A page boundary is not a semantic boundary: a log run, and a system chip
-  // inside it, may continue across it. When the newer side opens with a
-  // run's fold, the older side's rows join that fold, which keeps its open
-  // state; otherwise only a system chip split by the boundary merges.
+  // A page boundary is not a semantic boundary: a system chip split by it
+  // merges into the newer side's chip.
   function joinBoundary(live, boundary) {
-    var kids = Array.from(live.children), i = kids.indexOf(boundary);
-    if (i < 1 || !logNode(boundary) || !logNode(kids[i - 1])) return;
-    var older = [];
-    for (var j = i - 1; j >= 0 && logNode(kids[j]); j--) older.unshift(kids[j]);
-    if (boundary.matches('details.run-fold')) {
-      var first = boundary.children[1] || null;
-      older.forEach(function (n) {
-        var fold = n.matches('details.run-fold');
-        (fold ? Array.from(n.children).slice(1) : [n]).forEach(function (r) { boundary.insertBefore(r, first); });
-        if (fold) n.remove();
-      });
-      var rows = Array.from(boundary.children), prev = first && rows[rows.indexOf(first) - 1];
-      if (prev && prev.matches('details.system-run') && first.matches('details.system-run')) mergeSystems(prev, first);
-      relabel(boundary);
-      return;
-    }
-    var last = older[older.length - 1], lastFold = last.matches('details.run-fold') ? last : null;
-    var end = lastFold ? lastFold.children[lastFold.children.length - 1] : last;
-    if (end.matches('details.system-run') && boundary.matches('details.system-run')) {
-      mergeSystems(end, boundary);
-      if (lastFold) relabel(lastFold);
-    }
+    var kids = Array.from(live.children), end = kids[kids.indexOf(boundary) - 1];
+    if (end && end.matches('details.system-run') && boundary.matches('details.system-run')) mergeSystems(end, boundary);
   }
   function loadOne(h) {
     var page = h.querySelector('template[data-history-page]');
@@ -406,18 +383,17 @@
         });
         if (held) materialize(h, held.id);
       });
-      // Discard default cuts made by init on the incoming tail. A new log
-      // shifts that cut by one, and it must not leave a closed sub-run inside
-      // a previously open saved run. Saved cuts/states are recreated below.
-      Array.from(h.querySelectorAll('.run-fold, .system-run')).reverse().forEach(function (run) {
+      // Discard default cuts made by init on the incoming tail. Saved
+      // cuts/states are recreated below.
+      Array.from(h.querySelectorAll('.system-run')).reverse().forEach(function (run) {
         if (!run.parentElement) return;
         var siblings = Array.from(run.parentElement.children), prev = siblings[siblings.indexOf(run) - 1];
-        if (prev && ((run.matches('.run-fold') && prev.matches('.run-fold')) || (run.matches('.system-run') && prev.matches('.system-run')))) mergeSystems(prev, run);
+        if (prev && prev.matches('.system-run')) mergeSystems(prev, run);
       });
-      // Recreate private log cuts before restoring independently toggled
-      // disclosures; renderer pages naturally contain the unsplit runs.
+      // Recreate private chip cuts before restoring independently toggled
+      // disclosures; renderer pages naturally contain the unsplit chips.
       (saved.folds || []).forEach(function (f) {
-        var match = /^(?:run|system):(e[1-9][0-9]*)$/.exec(f[0]), entry = match && find(h, match[1]);
+        var match = /^system:(e[1-9][0-9]*)$/.exec(f[0]), entry = match && find(h, match[1]);
         if (entry) splitAt(h, entry);
       });
       var folds = new Map(saved.folds || []);
