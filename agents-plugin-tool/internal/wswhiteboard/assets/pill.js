@@ -122,12 +122,26 @@
       if (g.length) target[edge][k] = edge === "top" ? g[g.length - 1] : g[0];
     });
   }
+  // Avoid reading every far item's rect: an item in a topic wholly above
+  // or below the view takes its side from the topic's rect, read once per
+  // update, unless a closed fold hides it. Only an item in a topic crossing
+  // the view reads its own rect.
+  function folded(el, topic) {
+    for (var p = el.parentElement; p && p !== topic; p = p.parentElement) if (p.tagName === "DETAILS" && !p.open) return true;
+    return false;
+  }
   function update() {
     var rt = 0, rb = window.innerHeight;
     if (root) { var rr = root.getBoundingClientRect(); rt = rr.top; rb = rr.bottom; }
-    var above = [], below = [];
+    var above = [], below = [], topics = new Map();
     items.forEach(function (el) {
       if (seen.has(el)) return;
+      var topic = el.closest("section.topic"), tr = topic && topics.get(topic);
+      if (topic && !tr) { tr = topic.getBoundingClientRect(); topics.set(topic, tr); }
+      if (tr && (tr.bottom <= rt || tr.top >= rb)) {
+        if ((tr.width || tr.height) && !folded(el, topic)) (tr.bottom <= rt ? above : below).push(el);
+        return;
+      }
       var r = el.getBoundingClientRect();
       if (!r.width && !r.height) return; // not rendered, e.g. the board tab is hidden
       (r.top < rt ? above : below).push(el);

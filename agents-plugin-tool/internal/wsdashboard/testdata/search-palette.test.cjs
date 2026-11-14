@@ -396,7 +396,7 @@ async function hostCases() {
     scrollIntoView() { events.push(['scroll', fold.open]); } };
   fold.parentElement = topic;
   const pickCtx = vm.createContext({ doc: { body: { classList: { contains: () => false } }, documentElement: {} },
-    boardQ: () => [topic], $: () => target, live: true, tabShown: () => false,
+    window: {}, boardQ: () => [topic], $: () => target, live: true, tabShown: () => false,
     setTab: tab => events.push(['tab', tab]), setTimeout: fn => fn(), location: {},
     go: href => { pickCtx.location.href = href; } });
   vm.runInContext(block(dashboard, '  function palettePick(', "  // The palette's file hooks"), pickCtx);
@@ -407,6 +407,15 @@ async function hostCases() {
   assert(!events.some(x => x[0] === 'board-focus'), 'keep leaves the focus in the palette');
   pickCtx.palettePick({ kind: 'board-item', topic: 'closed', id: '153' });
   assert(events.some(x => x[0] === 'board-focus'));
+  // Both palette gestures use overview's exit/landing path; the host must
+  // not scroll inside a folded topic, even when Ctrl+Enter keeps it open.
+  const overviewPicks = [];
+  pickCtx.window.WsOverview = { pick: (node, opt) => { overviewPicks.push([node === topic, !!(opt && opt.keep)]); return true; } };
+  events.length = 0;
+  pickCtx.palettePick({ kind: 'board-item', topic: 'closed', id: '153' }, { keep: true });
+  pickCtx.palettePick({ kind: 'board-item', topic: 'closed', id: '153' });
+  assert.deepEqual(overviewPicks, [[true, true], [true, false]]);
+  assert.equal(events.length, 0, 'overview owns all landing scrolls');
   pickCtx.palettePick({ kind: 'session', href: '/s/other' });
   assert.equal(pickCtx.location.href, '/s/other');
 

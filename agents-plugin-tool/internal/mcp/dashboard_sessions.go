@@ -181,6 +181,79 @@ func (s *Server) dashboardSessionResolve(sessionKey string) (bool, error) {
 	return on, nil
 }
 
+// dashboardReconnect restores the terminal sessions served by this launcher
+// after a daemon replacement. The launcher replays initialize, not keyed tool
+// calls, so a fresh Server otherwise never learns which rows to heartbeat.
+// Only a real proxy connection with the same launcher and harness may restore
+// a row; hosted/agent rows remain the daemon runner's responsibility.
+func (s *Server) dashboardReconnect() {
+	if s.ownerPID <= 0 || !s.dashboardDeclared() || s.hostedSessionKey() != "" {
+		return
+	}
+	d := &s.dashboard
+	dir, err := d.stateDir()
+	if err != nil {
+		return
+	}
+	regs, err := wsdashboard.ReadRegistrations(dir)
+	if err != nil {
+		return
+	}
+	wanted := map[string]wsdashboard.Registration{}
+	now, harness := d.clock(), s.harnessPID()
+	for _, reg := range regs {
+		if reg.MCPOwnerPID == s.ownerPID && reg.HarnessPID == harness && !reg.Hosted && !reg.Agent {
+			lastCall, err := time.Parse(time.RFC3339, reg.LastCallAt)
+			if err == nil && now.Sub(lastCall) < dashboardIdleCutoff {
+				wanted[reg.ReplyID] = reg
+			}
+		}
+	}
+	if len(wanted) == 0 {
+		return
+	}
+	paths, err := s.sessions.dirs()
+	if err != nil {
+		return
+	}
+	keys, err := s.sessions.listKeys(paths)
+	if err != nil {
+		return
+	}
+	for _, key := range keys {
+		reg, ok := wanted[wsmailbox.ReplyID(key)]
+		if !ok {
+			continue
+		}
+		entry, ok := s.sessions.lookup(key)
+		if !ok || !entry.isTopLevelLead() || entry.root != reg.Project {
+			continue
+		}
+		lastCall, _ := time.Parse(time.RFC3339, reg.LastCallAt)
+		d.mu.Lock()
+		if d.sessions == nil {
+			d.sessions = map[string]*dashboardSession{}
+		}
+		if _, known := d.sessions[key]; !known {
+			// Keep registration/order and activity age, clearing only the
+			// old serve loop's end mark and refreshing its heartbeat. Keep
+			// this live copy even if the first write fails, so a tick retries.
+			reg.HeartbeatAt, reg.EndedAt = dashboardStamp(now), ""
+			sess := &dashboardSession{replyID: reg.ReplyID, project: reg.Project, reg: reg, lastCall: lastCall, checkedAt: now}
+			sess.enabled = s.dashboardSessionEnabled(key)
+			d.sessions[key] = sess
+			if !sess.enabled {
+				s.dashboardUnregister(dir, sess)
+			} else {
+				if written, err := dashboardWriteRow(dir, sess, reg); err == nil && written {
+					s.queueDashboardNudge(sess)
+				}
+			}
+		}
+		d.mu.Unlock()
+	}
+}
+
 // dashboardTouch records a keyed call by a top-level lead session rooted at
 // root. With the session's dashboard key on, the first call registers the
 // session and a call after an idle stretch refreshes its heartbeat; with it
@@ -259,6 +332,8 @@ func (s *Server) dashboardTouch(sessionKey, root string, force bool) {
 	// Recorded so the daemon refuses to take the session over while its
 	// harness still runs; it never makes the session live.
 	reg.HarnessPID = s.harnessPID()
+	reg.MCPOwnerPID = s.ownerPID
+	reg.LastCallAt = dashboardStamp(sess.lastCall)
 	reg.HeartbeatAt = dashboardStamp(now)
 	reg.EndedAt = ""
 	if written, err := dashboardWriteRow(dir, sess, reg); err != nil {
@@ -360,6 +435,7 @@ func (s *Server) dashboardHeartbeat() {
 			continue
 		}
 		reg := sess.reg
+		reg.LastCallAt = dashboardStamp(sess.lastCall)
 		reg.HeartbeatAt = dashboardStamp(now)
 		if _, err := dashboardWriteRow(dir, sess, reg); err != nil {
 			s.debugEvent("dashboard.heartbeat_failed", map[string]any{"error": err.Error()})
@@ -383,6 +459,7 @@ func (s *Server) dashboardEnd() {
 			continue
 		}
 		reg := sess.reg
+		reg.LastCallAt = dashboardStamp(sess.lastCall)
 		reg.EndedAt = dashboardStamp(now)
 		if written, err := dashboardWriteRow(dir, sess, reg); err == nil && written {
 			sess.idle = true

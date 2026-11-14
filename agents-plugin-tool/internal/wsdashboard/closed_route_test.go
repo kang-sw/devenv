@@ -73,7 +73,7 @@ func TestClosedRouteServesTheTopicsPastTheCap(t *testing.T) {
 		t.Errorf("a closed topic's body is not framed:\n%.600s", rest)
 	}
 	page := getClosed(t, f.base+"/s/boardsession/closed?from=30&n=2")
-	if strings.Count(page, `<section class="topic`) != 2 || !strings.Contains(page, `<button class="btn closed-more" data-closed-next="32">`) {
+	if strings.Count(page, `<section class="topic`) != 2 || !strings.Contains(page, `<button class="btn closed-more" data-closed-next="32" data-closed-more="3">`) {
 		t.Errorf("a two-topic page:\n%s", page)
 	}
 }
