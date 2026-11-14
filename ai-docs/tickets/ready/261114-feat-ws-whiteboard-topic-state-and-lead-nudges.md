@@ -1,5 +1,9 @@
 ---
 title: "Whiteboard: explicit topic state, execution signals, and lead nudges"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: fcd1471d8572a596
+sage-review-completeness-reviewed: fcd1471d8572a596
 ---
 
 # Whiteboard: explicit topic state, execution signals, and lead nudges
