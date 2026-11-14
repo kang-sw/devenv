@@ -157,3 +157,46 @@ fold/maximum specificity, finish the browser/package/build verification, and
 run the already-allocated independent lite review. Historical logs/captures
 remain preserved. No Result or closure is authorized without full acceptance;
 P4/649/history/ResizeObserver and live/shared runtime boundaries remain frozen.
+
+### Bounded continuation outcome - 2026-11-14
+
+Owner671's additional round stopped without Phase 1 acceptance. Candidate
+`34592e8b325d690eb75bbee155475f95abd31696` is retained; no Result, closure,
+integration or live delivery is claimed.
+
+- Two read-only browser diagnostic runs at the retained implementation passed
+  the historical repeated-update assertion. Synchronous pre/post evidence was
+  `base`/expanded with one fold and one raise control, then `fold` after one
+  click (`/tmp/shared-card-671-state.log`). Detailed action/placement traces are
+  in `/tmp/shared-card-671-diagnosis.log`. The earlier failure's cause remains
+  unclassified; no timing explanation was promoted to a diagnosis, no product
+  fold code was changed, and the original postcondition was not weakened.
+- That diagnostic exposed a separate deterministic fixture defect downstream:
+  reload replaces `__bh`, but the scenario reinstalled `OVERVIEW_PAGE` without
+  `IN_PAGE`, leaving `board_` undefined. `34592e8b3` restores both helper layers,
+  adds explicit pre-toggle state assertions, and excludes `[data-max]` from
+  the terminal-specific folded-body CSS mask. Focused card/preview/frame/CSS
+  tests, JS syntax and diff checks passed.
+- The complete source-fixture adapter scenario at 1800x900 passed, including
+  real pointer drag, preview and terminal folded/maximum geometry/focus,
+  repeated-update state and unique controls, reload/manual placement, invalid
+  and disappeared origins, and empty-region raise. Evidence:
+  `/tmp/shared-card-671-adapter-1800.log`; captures:
+  `/tmp/shared-card-671-artifacts/adapter-1800/`.
+- The next command failed: `BOARD_HEADLESS_PLAYWRIGHT=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright node scripts/board-headless.mjs shared-actions --url http://127.0.0.1:64455/s/ascensioncatalogsidinghelping --width 420 --capture-dir /tmp/shared-card-671-artifacts/adapter-420`.
+  Output: `FAIL shared-actions: actual pointer drag independently reorders an
+  opened preview without pinning` (`scripts/board-headless.mjs:1187`). All
+  preceding narrow checkpoints passed. The assertion combines changed time,
+  pin state and drag-marker cleanup without recording their separate values;
+  the failure's cause is unclassified, not asserted to be product or fixture.
+  Full output: `/tmp/shared-card-671-adapter-420.log`. No retry or test/source
+  adjustment followed this failure.
+- Board-only runs, remaining narrow checkpoints, final affected-package/build
+  checks and the allocated independent lite review remain unexecuted. The
+  verification-only child made no edits or commits. Cleanup evidence in
+  `/tmp/shared-card-671-cleanup.log` records absent launcher PID90919 and daemon
+  PID91552 and removal of the private `board-headless-AZHJNs` temporary tree.
+  Retained671 evidence uses new paths and does not overwrite the earlier
+  attempt logs. No frozen-lane or shared/live runtime action occurred.
+
+Further work requires MAIN disposition; this owner-authorized round is exhausted.
