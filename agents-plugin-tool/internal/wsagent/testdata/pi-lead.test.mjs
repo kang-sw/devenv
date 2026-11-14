@@ -82,6 +82,62 @@ test("bootstrap runs original CLI in-process with unchanged argv and cwd", (t) =
   assert.deepEqual(output.paths, ["/user/extension.ts"]);
 });
 
+for (const build of ["dist", "dist/bundle"]) {
+  test(`bootstrap supports the Pi 1.0.4 path helper layout (${build})`, (t) => {
+    const root = fixture(t);
+    json(join(root, "package.json"), { type: "module" });
+    const ambient = file(join(root, "ambient.ts"), "");
+    const extra = file(join(root, "extra.ts"), "");
+    const alias = join(root, "ambient-alias.ts");
+    try { symlinkSync(ambient, alias); }
+    catch (error) { if (process.platform === "win32") return t.skip(String(error)); throw error; }
+    const sdk = file(join(root, build, "index.js"), `export class DefaultPackageManager {
+      async resolve() { return {extensions: [
+        {path: ${JSON.stringify(alias)}, enabled: true},
+        {path: ${JSON.stringify(extra)}, enabled: true, metadata: {scope: 'user'}},
+        {path: '/disabled.ts', enabled: false}
+      ]}; }
+      async resolveExtensionSources() { return {extensions: [
+        {path: ${JSON.stringify(ambient)}, enabled: true}, {path: 'builtin:mcp', enabled: true}
+      ]}; }
+    }`);
+    // Pi 1.0.4 publishes source-info, but not getResourcePathKey. Its native
+    // package manager deduplicates with canonicalizePath from utils/paths.
+    file(join(root, "dist/core/source-info.js"), "export const BUILTIN_PATH_PREFIX = 'builtin:';");
+    file(join(root, "dist/utils/paths.js"), `import {realpathSync} from 'node:fs';
+      export function canonicalizePath(path) { try { return realpathSync(path); } catch { return path; } }`);
+    const cli = file(join(root, build, "cli.js"), `import {DefaultPackageManager} from './index.js';
+      const pm = new DefaultPackageManager(); await pm.resolve();
+      console.log(JSON.stringify({argv: process.argv.slice(1), cwd: process.cwd(), resources: (await pm.resolveExtensionSources([])).extensions}));`);
+    const args = ["--mode", "rpc", "--no-extensions", "--extension", "/bundle.ts"];
+    const adapter = fileURLToPath(new URL("../pi_lead.mjs", import.meta.url));
+    const run = spawnSync(process.execPath, [adapter, sdk, cli, ...args], { cwd: root, encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    const output = JSON.parse(run.stdout);
+    assert.deepEqual(output.argv, [cli, ...args]);
+    assert.equal(realpathSync(output.cwd), realpathSync(root));
+    assert.deepEqual(output.resources.map((r) => r.path), [ambient, "builtin:mcp", extra]);
+    assert.deepEqual(output.resources[2].metadata, { scope: "user" });
+  });
+}
+
+test("bootstrap still rejects a host without a compatible native path helper", (t) => {
+  const root = fixture(t);
+  json(join(root, "package.json"), { type: "module" });
+  const sdk = file(join(root, "index.js"), `export class DefaultPackageManager {
+    async resolve() { return {extensions: []}; }
+    async resolveExtensionSources() { return {extensions: []}; }
+  }`);
+  file(join(root, "core/source-info.js"), "export const BUILTIN_PATH_PREFIX = 'builtin:';");
+  file(join(root, "utils/paths.js"), "export const canonicalizePath = undefined;");
+  const cli = file(join(root, "cli.js"), "console.log('unsupported CLI started');");
+  const adapter = fileURLToPath(new URL("../pi_lead.mjs", import.meta.url));
+  const run = spawnSync(process.execPath, [adapter, sdk, cli], { cwd: root, encoding: "utf8" });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /no compatible extension resolver/);
+  assert.equal(run.stdout, "");
+});
+
 test("adapter launched through a symlinked directory still starts the CLI", { skip: process.platform === "win32" }, (t) => {
   const root = fixture(t);
   json(join(root, "package.json"), { type: "module" });
@@ -184,7 +240,9 @@ test("native Pi discovery, trust hooks, package filtering, builtins and reload",
   const { DefaultPackageManager, DefaultResourceLoader, SettingsManager, ProjectTrustStore } = await import(sdkURL.href);
   const localCore = new URL("./core/", sdkURL);
   const core = existsSync(fileURLToPath(localCore)) ? localCore : new URL("../core/", sdkURL);
-  const { getResourcePathKey } = await import(new URL("source-info.js", core).href);
+  const sourceInfo = await import(new URL("source-info.js", core).href);
+  const { canonicalizePath } = await import(new URL("../utils/paths.js", core).href);
+  const getResourcePathKey = sourceInfo.getResourcePathKey ?? canonicalizePath;
   const { resolveProjectTrusted } = await import(new URL("project-trust.js", core).href);
   installResolver(DefaultPackageManager, getResourcePathKey);
   for (const trust of ["saved", "never", "ask", "extension"]) {
