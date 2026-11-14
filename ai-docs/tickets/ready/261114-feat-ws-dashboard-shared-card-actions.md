@@ -88,3 +88,60 @@ Verification:
 - Cover direct link, context/menu and sandbox-frame link opening plus invalid/disappeared origin fallback. Preserve URL/file sandbox boundaries.
 - Verify reload behavior using the existing placement persistence contract, and verify normal live topic updates without resetting card/inner disclosure state or duplicating event handlers.
 - Run affected existing dashboard/card/preview tests and new focused browser regressions. Do not use a frozen-lane retry or live daemon replacement as acceptance. Keep source verification separate from actual runtime delivery.
+
+## Blocked (2026-11-14): source verification stopped on non-convergence
+
+Implementation checkpoints `62455a048`, `20e647c3a`, `c7c9c0f06`,
+`760df43a2`, and `0c416f221` are retained on
+`impl/docs/settled-common-contracts-660-665/outer-buddy-hush`. Phase 1 has no
+Result and is not accepted. No shared/live runtime was changed.
+
+- Shared topic/terminal/preview fold and raise, exact-node origin propagation,
+  additive placement snapshots (including tied/zero timestamps and closed-tail
+  placement), and focused Node/browser regressions have landed. Topics retain
+  their renderer, ticket/state chrome, inner disclosures and workflow lifecycle.
+- The real-pointer browser regression exposed a pre-existing generic-card drag
+  eligibility bug; `760df43a2` limits the closed-topic rejection to topics.
+  The same commit fixes zero-time snapshot reload and removes an unnecessary
+  whiteboard-owned CSS class reference rejected by the namespace guard.
+  Focused placement/card/preview/frame/CSS tests pass after these changes.
+- An open source defect remains: maximizing a folded terminal leaves its body
+  hidden because the terminal-specific folded-body selector overrides the
+  common maximum-view rule in `assets/dashboard.css`. The proposed narrow fix
+  is to exclude `[data-max]` from that kind-specific fold selector; it was not
+  attempted before this stop.
+- `node scripts/board-headless.mjs shared-actions --url
+  http://127.0.0.1:63974/s/cauterizeprovabletrekkersway --width 1800
+  --capture-dir /tmp/shared-card-final-artifacts --case persistence` failed
+  twice at the repeated-topic-update fold/action-state assertion, after one
+  test-timing correction. Its cause remains unresolved (test pre-toggle state
+  assumption versus product behavior). The worker stopped under protocol (f)
+  rather than making another attempt or weakening the assertion. First and
+  second attempt evidence is preserved in `/tmp/shared-card-attempt-evidence.md`
+  with exact transcript line/timestamp pointers; the second attempt overwrote
+  the shared browser log. The assertion remains at
+  `scripts/board-headless.mjs:1227-1228`. No diagnosis is claimed.
+- Final wide evidence before that failure covers real direct/context/frame
+  origin dispatch, identity rejection, new/reused/replaced preview placement,
+  pin/raise boundaries, pointer drag, topic/preview maximum view, inner
+  disclosure retention and stable manually placed preview time across a changed
+  topic update. Logs: `/tmp/shared-card-final-adapter-1800.log` and
+  `/tmp/shared-card-persistence-adapter-1800.log`; captures:
+  `/tmp/shared-card-final-artifacts/`. Earlier narrow evidence is not final
+  acceptance of the expanded scenario.
+- Final narrow/board-only runs and downstream manual-order reload,
+  invalid/disappeared/empty-region browser assertions remain unexecuted.
+  Full affected-package/build verification must be rerun on the final candidate;
+  the earlier suite found the subsequently fixed CSS namespace conflict.
+  The isolated source fixtures were stopped. Their serve logs report
+  `ENOTEMPTY` cleanup errors; `/tmp/shared-card-cleanup.log` subsequently records
+  absent fixture daemon PIDs 81550/94179, no fixture processes, and removal of
+  both private temporary trees after making their read-only Go module caches
+  writable. Logs and captures were retained. The terminal maximum CSS repair
+  was not made. No live delivery, provider, installer, frozen Phase 4/649,
+  history or ResizeObserver changes were made.
+
+Resume at a higher tier: diagnose the repeated action-state failure before
+editing its expectation, repair the terminal maximum-view specificity defect,
+finish the source verification matrix, and run the allocated independent lite
+review. Review and closure have not run.
