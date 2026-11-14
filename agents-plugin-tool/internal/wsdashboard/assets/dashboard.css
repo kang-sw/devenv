@@ -468,10 +468,11 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .ccmd-name { white-space: nowrap; }
 .ccmd-args { min-width: 0; font-weight: 400; color: var(--wb-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ccmd-args[hidden] { display: none; }
-.csend { display: inline-flex; align-items: center; justify-content: center; width: 34px; padding: 0; border: 0; border-radius: 10px; cursor: pointer; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
-.csend:hover { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
-.csend:focus-visible { outline: 1.5px solid var(--wb-primary); }
-.csend .i { width: 17px; height: 17px; }
+.csend, .wbmention button { display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; cursor: pointer; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.csend { width: 34px; padding: 0; }
+.csend:hover, .wbmention button:hover { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
+.csend:focus-visible, .wbmention button:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.csend .i, .wbmention button .i { width: 17px; height: 17px; }
 .cchips { display: flex; flex-wrap: wrap; gap: 5px; }
 .cchips:empty { display: none; }
 .achip { display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; font-size: 12px; padding: 2px 4px 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 35%, transparent); }
@@ -491,9 +492,10 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 /* The selection note stays next to its attach action, within the viewport. */
 .wbmention { position: fixed; z-index: var(--z-popovers, 60); display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: 320px; max-width: calc(100vw - 8px); padding: 6px; border: 1px solid var(--wb-line); border-radius: 12px; color: var(--wb-fg); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
 .wbmention-note { flex: 1; min-width: 0; width: 0; box-sizing: border-box; resize: none; max-height: 30vh; padding: 5px 7px; border: 1px solid var(--wb-line); border-radius: 7px; font: inherit; font-size: 12px; color: var(--wb-fg); background: var(--wb-bg); }
-.wbmention button { flex: none; border: 0; border-radius: 999px; padding: 5px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--wb-primary-fg); background: var(--wb-primary); }
-.wbmention button:hover { background: color-mix(in srgb, var(--wb-primary) 85%, var(--wb-fg)); }
-.wbmention :focus-visible { outline: 1.5px solid var(--wb-fg); outline-offset: 2px; }
+.wbmention button { flex: none; align-self: stretch; gap: 5px; padding: 5px 10px; font: inherit; font-size: 12px; font-weight: 600; }
+.wbmention button .i { pointer-events: none; }
+.wbmention :focus-visible { outline-offset: 2px; }
+.wbmention-note:focus-visible { outline: 1.5px solid var(--wb-fg); }
 .wbmention[hidden] { display: none; }
 .unchip { border: 0; background: transparent; color: var(--wb-muted-fg); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 5px; border-radius: 999px; }
 .unchip:hover { background: var(--wb-muted); color: var(--wb-fg); }
@@ -690,7 +692,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 :root[data-overview] .r-board .bcard:not([data-overview-motion]) :is(.bc-body, .bc-grip, .bc-folded),
 :root[data-overview] .r-board > .reply { display: none !important; }
 :root[data-overview] .r-board .tophead, :root[data-overview] .r-board .bc-hd { position: static !important; }
-:root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+:root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 :root[data-overview] .r-board :is(.tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close),
 :root[data-overview] .r-board .tpin:not([aria-pressed="true"]),
 :root[data-overview] .r-board .bc-pin:not([aria-pressed="true"]) { opacity: 0; pointer-events: none; }
@@ -1698,6 +1700,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rforget:disabled { cursor: progress; }
 .rail .wsbody { padding-top: 2px; }
 .rail .rwt { padding: 4px 0 2px; }
+.rail .rwt.empty { border-color: transparent; }
 .rail .rwt.empty .wthd { opacity: .6; }
 .rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
 .rail .wthd { cursor: grab; -webkit-user-select: none; user-select: none; }

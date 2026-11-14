@@ -1702,7 +1702,7 @@
   "js.lead.stop.note": "Beendet den Prozess. Die nächste Nachricht oder Mail startet ihn wieder.",
   "js.lead.stopped": "Es läuft kein Prozess. Die nächste Nachricht oder Mail startet einen.",
   "js.lead.close": "Schließen",
-  "js.lead.close.note": "Beendet die Unterhaltung endgültig. Sie lässt sich nicht wieder öffnen.",
+  "js.lead.close.note": "Beendet die Unterhaltung und den Prozess und stoppt das Aufwecken per E-Mail. Sie kann über die Leiste wieder geöffnet werden.",
   "js.lead.close.confirm": "Diese Sitzung schließen? Ihr Prozess endet, und die Unterhaltung kann nicht fortgesetzt werden.",
   "js.ap.title": "Freigabeanfrage",
   "js.ap.agent": "Subagent",

@@ -29,13 +29,15 @@
 //             Terminal POST is browser-local; no shell process is started.
 //             --face-width 266 constrains the production face to the approved
 //             direct-fragment narrow equivalent (not reference typography).
+//   recap-jitter  Content-sized, max-four-line recap/header geometry during pinned-column scroll
+//             and browser-local region updates (serve --history-entries 60).
 //   overview  Folded picker, anchors/restores, interactions, held swaps,
 //             palette picks, storage/reload and reduced motion.
 //   overview-motion  Per-rAF height/slot/ghost traces, concurrent clock,
 //             reverse exit, exact live-rect landing and reduced motion.
 //             Use 1900px as well as 1400/420: PIN_WIDE is 1600px.
 //
-// --case NAME selects an independent overview checkpoint (anchors, picker,
+// --case NAME selects an independent overview checkpoint (recap, anchors, picker,
 // rail, actions, palette, controls, reload), or a motion checkpoint (enter-top, enter-middle,
 // enter-bottom, pins). Without it every check runs; failures stop the run.
 // Focused cases help diagnose a blocker without repeatedly hitting it.
@@ -115,6 +117,12 @@
 //             deep links and out-of-view collapse on dashboard AND standalone
 //             full file pages. Dashboard-only: expanded swaps, overlapping keep
 //             sessions and the pinned column (use --width 1800).
+//   panel-header  Compact panel grid at 1440/800/360/320 and 420/421px actual
+//             content in a wide host. Uses `serve --history-entries 180`;
+//             runs on both dashboard kinds and standalone. Browser-local long
+//             titles/body probes never change server data. Checks natural
+//             wrap/cache stability and native observer errors at each width;
+//             --capture-dir retains measurements and responsive screenshots.
 //   history-cards  Card/paging probes without navigation/control/live checks.
 //   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
 //   history-regressions  Exact thirty-line chunks in renderer-produced closed
@@ -139,6 +147,10 @@
 // directory). To get it:
 //
 //     npx playwright@latest install chromium
+//
+// --menu-hit-targets adds a post-scenario assertion for a bounded two-menu
+// prefix: both native clicks must hit the button itself, with no shell cover.
+// It adds no awaited inspection between the original scenario's actions.
 //
 // Adding a scenario: write `async function scenarioX(ctx)` using the shared
 // helpers below (openBoard, waitQuiet, scrollToMiddle, growFrame,
@@ -409,13 +421,13 @@ async function serve(args) {
 // WebSocket so the harness reaches the page's stream socket, records the
 // board region events the server sends, and spies on scrollTop writes from
 // script (a keep session, restoreScroll) per element.
-const INIT = () => {
+const INIT = (options = {}) => {
   // The shell's session frame is a child of the top page. Chromium may run
   // this only in the frame's initial about:blank, whose window the
   // same-origin page then reuses, so the frame's URL is not checked here.
   // The body frames are grandchildren and are skipped.
   if (window.top !== window && window.parent !== window.top) return;
-  const bh = (window.__bh = { sockets: [], board: null, writes: [], resizeDeliveries: [], historyLoads: [], observerErrors: [], observerErrorDetails: [] });
+  const bh = (window.__bh = { sockets: [], board: null, writes: [], resizeDeliveries: [], historyLoads: [], observerErrors: [], observerErrorDetails: [], menuHitTargets: [], menuHitTargetsEnabled: !!options.menuHitTargets });
   // Observe actual native deliveries; never invoke a callback or re-observe
   // on the harness's behalf. Filter to the history's own observer, excluding
   // the shared keep observer which also watches history-live.
@@ -484,11 +496,32 @@ const IN_PAGE = () => {
         rows: h.querySelectorAll('.history-live .wb-entry').length });
     });
   }
+  if (bh.menuHitTargetsEnabled && bh.menuHitDocument !== document) {
+    bh.menuHitDocument = document;
+    // Capture before the native menu handler removes the button, once for
+    // this actual Document rather than the shell's initial about:blank.
+    document.addEventListener('click', (e) => {
+      const button = e.target?.closest?.('.lmenu button');
+      if (!button) return;
+      const local = document.elementFromPoint(e.clientX, e.clientY);
+      const hit = { trusted: e.isTrusted, first: button.matches('.lmenu button:first-child'), text: button.textContent,
+        point: { x: e.clientX, y: e.clientY }, localHitIsButton: local === button, framed: window.parent !== window, parentHitIsFrame: null };
+      if (hit.framed) {
+        try {
+          const frame = window.frameElement, r = frame.getBoundingClientRect();
+          hit.parentHitIsFrame = window.parent.document.elementFromPoint(r.left + frame.clientLeft + e.clientX, r.top + frame.clientTop + e.clientY) === frame;
+        } catch (error) { hit.parentError = String(error); }
+      }
+      bh.menuHitTargets.push(hit);
+      console.debug('__bh-menu-hit-target__' + JSON.stringify(hit));
+    }, true);
+  }
   const q = (sel, root) => Array.from((root || document).querySelectorAll(sel));
   bh.board_ = () => document.getElementById("r-board") || document.querySelector("body.full .grid > main");
   bh.kind = () => (document.body.classList.contains("full") ? "standalone" : document.getElementById("tabbar") ? "adapter" : "board");
   bh.scroller = () => {
-    const c = bh.focus && bh.focus.closest("#bpins") || document.getElementById("bcol");
+    const pins = bh.focus && bh.focus.closest("#bpins");
+    const c = pins && ['auto', 'scroll'].includes(getComputedStyle(pins).overflowY) ? pins : document.getElementById("bcol");
     const oy = c && getComputedStyle(c).overflowY;
     return c && (oy === "auto" || oy === "scroll") && c.scrollHeight > c.clientHeight ? c : document.scrollingElement;
   };
@@ -652,9 +685,16 @@ async function openBoard(ctx) {
   const tab = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height }, locale: ctx.language === 'ko' ? 'ko-KR' : undefined });
   if (ctx.language) await tab.context().addCookies([{ name: 'ws_dashboard_lang', value: ctx.language, url: new URL(ctx.args.url).origin }]);
   tab.on("pageerror", (e) => ctx.errors.push(String(e)));
+  if (ctx.args['menu-hit-targets']) {
+    ctx.menuHits = [];
+    tab.on('console', (message) => {
+      const text = message.text(), marker = '__bh-menu-hit-target__';
+      if (message.type() === 'debug' && text.startsWith(marker)) ctx.menuHits.push(JSON.parse(text.slice(marker.length)));
+    });
+  }
   const consoleErrors = [];
   tab.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
-  await tab.addInitScript(INIT);
+  await tab.addInitScript(INIT, { menuHitTargets: !!ctx.args['menu-hit-targets'] });
   if (ctx.assetRef) {
     const files = ['wsdashboard/assets/cards.js', 'wsdashboard/assets/dashboard.css', 'wsdashboard/assets/overview.js', 'wsdashboard/assets/terminal.js', 'wswhiteboard/assets/rail.js'];
     ctx.assetReplacements = []; ctx.assetHashes = {};
@@ -1061,7 +1101,7 @@ const OVERVIEW_PAGE = () => {
     const ts = bh.topics().slice(-pins);
     ts.forEach((n, i) => WsCards.move(n, { pin: true, index: i }));
     // The serving fixture has body-only topics. Add a real-shaped recap to
-    // one, so the two-line contract is exercised rather than vacuous.
+    // one, so the max-four-line clamp and content-sized header are exercised.
     const n = bh.topics().find((n) => !n.closest('#bpins'));
     if (n && !n.querySelector('.tsub')) {
       const sub = document.createElement('div'); sub.className = 'tsub';
@@ -1070,12 +1110,14 @@ const OVERVIEW_PAGE = () => {
     }
   };
   bh.ovFold = () => items().map((n) => {
-    const head = n.querySelector('.tophead, .bc-hd'), text = n.querySelector('.trecap .rtext');
+    const head = n.querySelector('.tophead, .bc-hd'), text = n.querySelector('.trecap .rtext'), slot = n.querySelector('.tsub > .trecap');
     const bodies = n.matches('.bcard') ? [...n.querySelectorAll('.bc-body, .bc-grip, .bc-folded')] : [...n.children].filter((x) => x !== head);
     return { id: id(n), h: rect(n).height, head: rect(head).height, cv: getComputedStyle(n).contentVisibility,
       hidden: bodies.every((x) => getComputedStyle(x).display === 'none'),
       recap: text && rect(text).height, line: text && parseFloat(getComputedStyle(text).lineHeight),
-      clamp: text && getComputedStyle(text).webkitLineClamp };
+      clamp: text && getComputedStyle(text).webkitLineClamp,
+      slot: slot && rect(slot).height, slotLine: slot && parseFloat(getComputedStyle(slot).lineHeight),
+      slotClamp: slot && getComputedStyle(slot).webkitLineClamp };
   });
   bh.ovRegion = (html) => {
     const hash = 'bhqa' + Date.now().toString(16), ws = bh.sockets.find((s) => s.readyState === 1 && typeof s.onmessage === 'function');
@@ -1173,7 +1215,9 @@ async function checkFold(page) {
   const rows = await page.evaluate(() => window.__bh.ovFold());
   qa(rows.length > 0 && rows.every((r) => r.hidden && r.h <= r.head + 2.01 && r.cv === 'visible'), 'all topics/cards (including offscreen) fold to their headers', rows.filter((r) => !r.hidden || r.h > r.head + 2.01 || r.cv !== 'visible'));
   const recaps = rows.filter((r) => r.recap !== null);
-  qa(recaps.length > 0 && recaps.every((r) => r.clamp === '2' && r.recap <= r.line * 2 + 1), 'existing recap is clamped to at most two lines', recaps);
+  qa(recaps.length > 0 && recaps.every((r) => r.clamp === '4' && r.recap <= r.line * 4 + 1), 'existing recap is clamped to at most four lines', recaps);
+  const slots = rows.filter((r) => r.slot !== null);
+  qa(slots.length > 0 && slots.every((r) => r.slotClamp === '4' && r.slot > 0 && r.slot <= r.slotLine * 4 + 1), 'header recap uses at most four lines', slots);
 }
 
 async function scenarioSharedControls(ctx) {
@@ -1942,6 +1986,95 @@ async function scenarioToolbar(ctx) {
   }
 }
 
+async function scenarioRecapJitter(ctx) {
+  const { page, tab, kind } = await overviewReady(ctx, { seed: false });
+  if (ctx.args.theme) await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, ctx.args.theme);
+  const key = 'LOGCHAIN';
+  // Use renderer-produced agent recap and history markup. Only the text changes
+  // in browser-local stream events; the server and disclosure logic stay intact.
+  const base = await page.evaluate(() => __bh.baseBoard());
+  await page.evaluate(({ html, key }) => {
+    const t = document.createElement('template'); t.innerHTML = html;
+    const n = t.content.querySelector(`section.topic[data-topic="${key}"]`);
+    if (!n?.querySelector('.tsub > .trecap .rtext')) throw new Error('serve --history-entries 60 is required');
+    __bh.recapLong = 'Long recap with enough wrapped text to exceed four lines, retained in the hover title. '.repeat(30);
+    const text = n.querySelector('.rtext'); text.textContent = text.title = __bh.recapLong;
+    n.dataset.th = 'recap-seed';
+    __bh.ovRegion(t.innerHTML);
+  }, { html: base.html, key });
+  await waitQuiet(page);
+  await page.evaluate((key) => {
+    const n = document.querySelector(`section.topic[data-topic="${key}"]`);
+    WsCards.move(n, { pin: true, index: 0 });
+    // The target's folded log is short; real body topics below it make the
+    // pinned column overflow so scroll/stick assertions cannot pass vacuously.
+    for (const [index, topic] of ['T18', 'T17'].entries()) {
+      const tail = document.querySelector(`section.topic[data-topic="${topic}"]`);
+      if (!tail) throw new Error('serve --topics 18 is required');
+      WsCards.move(tail, { pin: true, index: index + 1 });
+    }
+  }, key);
+  await waitQuiet(page);
+  await page.evaluate((key) => {
+    const n = document.querySelector(`section.topic[data-topic="${key}"]`);
+    __bh.focus = n;
+    __bh.scroller().scrollTop = 0;
+  }, key);
+  await waitQuiet(page);
+  await capture(ctx, tab, kind + '-recap-unstuck');
+  const result = await page.evaluate(async (key) => {
+    const bh = __bh, samples = [], updates = [], started = performance.now(), s = bh.scroller();
+    const find = () => document.querySelector(`section.topic[data-topic="${key}"]`);
+    const sample = (phase) => {
+      const n = find(), head = n.querySelector('.tophead'), slot = n.querySelector('.tsub > .trecap');
+      samples.push({ t: performance.now() - started, phase, scroll: s.scrollTop,
+        // Wide pins have CSS-only sticky heads (no rail/wb-stuck class).
+        stuck: head.getBoundingClientRect().top > n.getBoundingClientRect().top + 1,
+        slot: slot.getBoundingClientRect().height,
+        head: head.getBoundingClientRect().height, topic: n.getBoundingClientRect().height,
+        line: parseFloat(getComputedStyle(slot).lineHeight), clamp: getComputedStyle(slot).webkitLineClamp,
+        title: slot.querySelector('.rtext').title.length,
+        fill: getComputedStyle(slot).backgroundColor });
+    };
+    const update = (index) => {
+      const t = document.createElement('template'); t.innerHTML = bh.board.html;
+      const n = t.content.querySelector(`section.topic[data-topic="${key}"]`), text = n.querySelector('.rtext');
+      text.textContent = text.title = index % 2 ? bh.recapLong : 'Short recap.';
+      n.dataset.th = 'recap-update-' + index;
+      bh.ovRegion(t.innerHTML); updates.push(index);
+    };
+    sample('baseline');
+    await new Promise((resolve) => {
+      let next = 0;
+      function tick() {
+        const elapsed = performance.now() - started;
+        // Exercise both stick transitions without reaching the topic's end.
+        s.scrollTop = elapsed < 300 ? 0 : elapsed < 1500 ? 120 : elapsed < 1900 ? 0 : 120;
+        if (next < 4 && elapsed >= 550 + next * 650) update(next++);
+        sample('raf');
+        if (elapsed >= 3300) resolve(); else requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    });
+    // Content updates may change height; only equal-content sticky transitions
+    // must remain stable. Compare short and long recaps independently.
+    const groups = [...new Set(samples.map(r => r.title))].map(title => samples.filter(r => r.title === title));
+    const delta = name => Math.max(...groups.map(rows => Math.max(...rows.map(r => r[name])) - Math.min(...rows.map(r => r[name]))));
+    return { samples, updates, delta: { slot: delta('slot'), head: delta('head'), topic: delta('topic') },
+      stuck: samples.filter((r) => r.stuck).length, unstuck: samples.filter((r) => !r.stuck).length,
+      pincol: document.documentElement.hasAttribute('data-pincol'), scroller: s.id || s.tagName, viewHeight: s.clientHeight };
+  }, key);
+  await capture(ctx, tab, kind + '-recap-stuck', result);
+  qa(ctx.width >= 1600 ? result.pincol && result.scroller === 'bpins' : !result.pincol && result.scroller === 'bcol', 'uses the responsive adapter pinned layout', result.scroller);
+  qa(result.samples.every((r) => result.viewHeight >= r.head), 'pinned viewport can display the full recap/header', { viewHeight: result.viewHeight, head: result.samples[0].head });
+  qa(result.stuck > 0 && result.unstuck > 0 && result.updates.length === 4 && new Set(result.samples.map((r) => r.title)).size === 2,
+    'samples stuck/unstuck states and four live region updates with short/long recap text', { stuck: result.stuck, unstuck: result.unstuck, updates: result.updates });
+  qa(result.samples.every((r) => r.clamp === '4' && Math.abs(r.slot - (r.title === 'Short recap.'.length ? 1 : 4) * r.line) <= 1), 'short recap shrinks to one line; long recap caps at four');
+  qa(result.samples.every(r => r.fill === 'rgba(0, 0, 0, 0)'), 'header recap has no highlight background');
+  qa(Object.values(result.delta).every((d) => d <= 1), 'same-content recap/header/topic has no sticky jitter above 1px', result.delta);
+  log('recap jitter max deltas (px): ' + JSON.stringify(result.delta));
+}
+
 async function setOverviewFace(page, width) {
   if (!width) return;
   await page.evaluate((width) => {
@@ -2088,8 +2221,15 @@ async function scenarioOverview(ctx) {
   await tab.evaluate(() => { window.__ovMessages = []; addEventListener('message', (e) => { if (e.data && e.data.wsShell) __ovMessages.push(e.data); }); });
   await tab.emulateMedia({ reducedMotion: 'reduce' });
   const selected = ctx.args.case;
-  assert(!selected || ['anchors', 'rail', 'picker', 'actions', 'palette', 'controls', 'reload'].includes(selected), 'unknown overview --case');
+  assert(!selected || ['recap', 'anchors', 'rail', 'picker', 'actions', 'palette', 'controls', 'reload'].includes(selected), 'unknown overview --case');
   if (selected) log('focused overview case: ' + selected + ' (other checkpoints not run)');
+  if (selected === 'recap') {
+    await ovEnter(page);
+    await checkFold(page);
+    await capture(ctx, tab, kind + '-recap-overview', await page.evaluate(() => __bh.ovFold()));
+    await ovExit(page);
+    return;
+  }
   if (!selected || selected === 'anchors' || selected === 'rail') {
   if (selected !== 'rail') {
   await page.evaluate(() => { __bh.hints = 0; const show = WsToast.show; WsToast.show = function (text, ...args) { if (text === wsT('js.board.overview.hint')) __bh.hints++; return show.call(this, text, ...args); }; });
@@ -3446,6 +3586,154 @@ async function scenarioHistoryRegressions(ctx) {
   }
 }
 
+// Real renderer markup and native controls, not the approved design mockup.
+async function scenarioPanelHeader(ctx) {
+  const { page, tab, kind } = await openBoard(ctx);
+  const target = await page.evaluate(() => {
+    const h = document.querySelector('[data-history="HISTORY"]');
+    if (!h) throw new Error('need serve --history-entries 180');
+    const panels = Array.from(h.querySelectorAll('.history-live > .wb-entry > .entry-panel'));
+    const panel = panels.at(-1), long = panels.at(-2);
+    long.querySelector('.entry-recap').textContent = 'Full naturally wrapping title ' + '아주 긴 제목 LongUnbrokenTitle0123456789'.repeat(12);
+    panel.open = true;
+    window.__bh.headerPanels = [panel, long];
+    window.__bh.headerBodies = [panel, long].map((p) => {
+      const body = p.querySelector(':scope > .entry-body'), frame = body.querySelector('iframe');
+      return { body, frame, html: frame ? frame.getAttribute('srcdoc') : body.innerHTML };
+    });
+    window.__bh.headerCache = Array.from(h.querySelectorAll('template[data-history-page]')).map((t) => t.innerHTML);
+    window.__bh.headerIDs = Array.from(h.querySelectorAll('[data-entry]')).map((e) => e.dataset.entry);
+    return panel.id;
+  });
+  const panel = page.locator(`#${target}`), summary = panel.locator(':scope > summary');
+  // Intrinsic renderer spacing is deliberately unlike the shell's 6px gap.
+  const bodyHandle = await panel.locator(':scope > .entry-body').elementHandle();
+  const frameHandle = await page.$(`#${target} iframe`);
+  const payload = frameHandle ? await frameHandle.contentFrame() : page;
+  await payload.evaluate((framed) => {
+    const body = framed ? document.querySelector('.doc-body') : window.__bh.headerBodies[0].body;
+    const probe = document.createElement('section');
+    probe.id = 'bh-panel-body';
+    probe.innerHTML = '<p style="margin:23px 0 17px">Arbitrary renderer spacing</p><pre style="max-width:100%;overflow:auto">' + 'unbroken body code '.repeat(60) + '</pre><details open><summary>Inner disclosure</summary><p>Inner body</p></details>';
+    body.append(probe);
+  }, !!frameHandle);
+  // Save after adding the inline fixture; neither layout nor actions may replace it.
+  if (!frameHandle) await page.evaluate(() => { const b = window.__bh.headerBodies[0]; b.html = b.body.innerHTML; });
+  const measurements = [];
+  async function viewport(width) {
+    await tab.setViewportSize({ width, height: ctx.height });
+    // Responsive adapter tabs may hide the board after crossing a breakpoint.
+    if (kind === 'adapter' && !await panel.isVisible()) await page.click('#tabbar [data-tab="board"]');
+  }
+  async function measure(label) {
+    await sleep(220);
+    const r = await page.evaluate(() => {
+      const bh = window.__bh, h = document.querySelector('[data-history="HISTORY"]');
+      const issues = [], rows = [];
+      for (const p of bh.headerPanels) {
+        const s = p.querySelector(':scope > summary'), title = s.querySelector('.entry-recap'), meta = s.querySelector('.pmeta');
+        const sr = s.getBoundingClientRect(), tr = title.getBoundingClientRect(), mr = meta.getBoundingClientRect();
+        const ts = getComputedStyle(title), ss = getComputedStyle(s), narrow = p.clientWidth <= 420;
+        const controls = Array.from(s.querySelectorAll('a.mref, button')).filter((n) => getComputedStyle(n).display !== 'none');
+        const boxes = [title, meta, ...controls.filter((n) => n.tagName === 'BUTTON')].map((n) => n.getBoundingClientRect());
+        for (let i = 0; i < boxes.length; i++) {
+          const a = boxes[i];
+          if (a.left < sr.left - 1 || a.right > sr.right + 1) issues.push('header overflow ' + p.id);
+          for (const b of boxes.slice(i + 1)) if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) issues.push('overlap ' + p.id);
+        }
+        if ((mr.top > tr.top + 1) !== narrow) issues.push('wrong metadata row ' + p.id);
+        if (Math.abs(Math.max(mr.right, ...controls.map((n) => n.getBoundingClientRect().right)) - sr.right) > 1) issues.push('metadata not right aligned');
+        if (ts.textOverflow === 'ellipsis' || ts.overflowY === 'hidden' || +ts.webkitLineClamp > 0 || title.scrollHeight > title.clientHeight + 1) issues.push('title clipped');
+        if (ss.padding !== '0px' || sr.height < 24 || parseFloat(ss.columnGap) !== 8 || ss.borderBottomWidth !== '0px') issues.push('header shell');
+        for (const c of controls) { const r = c.getBoundingClientRect(); if (r.width < 24 || r.height < 24) issues.push('target <24px'); }
+        if (!meta.querySelector('time[title][datetime]') || !meta.querySelector('.hint') || !meta.querySelector('a.mref')) issues.push('missing metadata');
+        const ps = getComputedStyle(p);
+        if ((!p.hasAttribute('data-max') && ps.boxShadow !== 'none') || ps.borderTopWidth !== '0px') issues.push('enclosing border');
+        if (p.hasAttribute('data-max') && (ps.backgroundColor === 'rgba(0, 0, 0, 0)' || ps.backgroundColor !== ss.backgroundColor)) issues.push('maximized sheet is not opaque like its header');
+        if (p.open) {
+          const body = p.querySelector(':scope > .entry-body'), bs = getComputedStyle(body);
+          if (bs.marginTop !== '6px' || bs.marginLeft !== '18px' || bs.paddingLeft !== '12px' || bs.borderLeftWidth !== '1px') issues.push('body shell');
+        }
+        rows.push({ id: p.id, width: p.clientWidth, height: sr.height, metaY: mr.top - sr.top, titleHeight: tr.height, open: p.open, background: ps.backgroundColor });
+      }
+      for (const b of bh.headerBodies) if (!b.body.isConnected || (b.frame ? b.frame !== b.body.querySelector('iframe') || b.html !== b.frame.getAttribute('srcdoc') : b.html !== b.body.innerHTML)) issues.push('body replaced');
+      if (JSON.stringify(bh.headerCache) !== JSON.stringify(Array.from(h.querySelectorAll('template[data-history-page]')).map((t) => t.innerHTML))) issues.push('cached pages changed');
+      if (JSON.stringify(bh.headerIDs) !== JSON.stringify(Array.from(h.querySelectorAll('[data-entry]')).map((e) => e.dataset.entry))) issues.push('history identity/order changed');
+      if (document.documentElement.scrollWidth > innerWidth + 1) issues.push('document overflow');
+      const natural = { chunks: h._wbHistoryChunks.slice(), cache: { ...h._wbHistoryHeights },
+        height: h.querySelector('.history-clip').getBoundingClientRect().height,
+        scrollTop: h.querySelector('.history-clip').scrollTop, pending: !!h._wbHistoryPending };
+      if (!bh.headerNatural) bh.headerNatural = { chunks: natural.chunks, cache: natural.cache };
+      if (JSON.stringify(natural.chunks) !== JSON.stringify(bh.headerNatural.chunks)) issues.push('finalized boundary recut');
+      if (Object.keys(bh.headerNatural.cache).some((k) => natural.cache[k] !== bh.headerNatural.cache[k])) issues.push('first-height cache rewritten');
+      if (natural.pending || natural.scrollTop !== 0) issues.push('history pending or clip scrolled');
+      if (bh.observerErrors.length) issues.push('native ResizeObserver errors: ' + bh.observerErrors.join(' | '));
+      return { issues, rows, natural, native: { observerErrors: bh.observerErrors.slice(),
+        observerErrorDetails: bh.observerErrorDetails.slice() } };
+    });
+    measurements.push({ label, ...r });
+    if (ctx.args['capture-dir']) {
+      const dir = path.resolve(ctx.args['capture-dir']); fs.mkdirSync(dir, { recursive: true });
+      // Write before asserting so a failed native delivery keeps its state.
+      fs.writeFileSync(path.join(dir, `${kind}-panel-header.json`), JSON.stringify({ kind, measurements }, null, 2));
+      await tab.screenshot({ path: path.join(dir, `${kind}-panel-header-${label}.png`) });
+    }
+    assert(!r.issues.length, `${label}: ${JSON.stringify(r)}`);
+    const intrinsic = await payload.evaluate(() => {
+      const n = document.querySelector('#bh-panel-body > p'), s = getComputedStyle(n);
+      return [s.marginTop, s.marginBottom, !!document.querySelector('#bh-panel-body > details[open]')];
+    });
+    assert(JSON.stringify(intrinsic) === JSON.stringify(['23px', '17px', true]), 'intrinsic body spacing/disclosure changed');
+  }
+  for (const width of [1440, 800, 360, 320]) {
+    await viewport(width);
+    await measure(`viewport-${width}-open`);
+    // Native keyboard disclosure, with focus in the real clipped history.
+    await summary.focus();
+    await tab.keyboard.press('Enter');
+    assert(!await panel.evaluate((n) => n.open), 'native keyboard collapse failed');
+    await page.evaluate(() => { window.__bh.headerPanels[1].open = false; });
+    await measure(`viewport-${width}-closed`);
+    await tab.keyboard.press('Enter');
+    assert(await panel.evaluate((n) => n.open), 'native keyboard expand failed');
+    await page.evaluate(() => { window.__bh.headerPanels[1].open = true; });
+  }
+  await viewport(1440);
+  for (const width of [420, 421]) {
+    await page.evaluate((w) => { document.querySelector('[data-history="HISTORY"]').style.width = w + 'px'; }, width);
+    await measure(`wide-host-content-${width}`);
+  }
+  // Existing hover formatter keeps the exact stamp alongside its relative prefix.
+  const tooltip = await panel.locator('time.entry-at').evaluate((t) => {
+    t.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    return { title: t.title, stamp: t.dataset.stamp };
+  });
+  assert(tooltip.stamp && tooltip.title.includes(tooltip.stamp), 'exact-time tooltip lost');
+  await page.evaluate(() => window.wbAgo(document));
+  await measure('existing-clock-refresh');
+  if (kind !== 'standalone') {
+    await page.evaluate(() => { document.querySelector('[data-history="HISTORY"]').style.width = '420px'; });
+    await panel.locator(':scope > summary > .d-max').click();
+    assert(await panel.evaluate((n) => n.hasAttribute('data-max')), 'native maximize failed');
+    await measure('maximized-from-narrow-history');
+    if (ctx.args['capture-dir']) {
+      const dir = path.resolve(ctx.args['capture-dir']);
+      fs.mkdirSync(dir, { recursive: true });
+      await tab.screenshot({ path: path.join(dir, `${kind}-panel-maximized.png`) });
+    }
+    assert(await panel.locator(':scope > summary > .d-min').isVisible(), 'native back action missing');
+    await tab.keyboard.press('Escape');
+    assert(!await panel.evaluate((n) => n.hasAttribute('data-max')), 'Escape failed');
+    await measure('after-Escape');
+  }
+  assert(await bodyHandle.evaluate((n) => n.isConnected), 'body identity lost');
+  log(JSON.stringify({ kind, measurements, tooltip, gaps: [
+    'Natural wrapping preserves finalized boundaries/first heights; run history/history-regressions for paging and scroll stability.',
+    'Uses current branch clock refresh only; unmerged relative-time work remains excluded.',
+    ...(kind === 'standalone' ? ['Standalone intentionally has no maximize/minimize controls or body iframe.'] : [])
+  ] }, null, 2));
+}
+
 // Controlled geometry in the real host, using cloned renderer rows and the
 // shipped history implementation. No substitute formatter, timer or observer.
 async function scenarioHistoryFit(ctx) {
@@ -3579,8 +3867,10 @@ const SCENARIOS = {
   'shared-controls': scenarioSharedControls,
   'shared-actions': scenarioSharedActions,
   toolbar: scenarioToolbar,
+  'panel-header': scenarioPanelHeader,
   'web-containment': scenarioWebContainment,
   overview: scenarioOverview,
+  'recap-jitter': scenarioRecapJitter,
   'overview-focus': scenarioOverviewFocus,
   'overview-final': scenarioOverviewFinal,
   'overview-motion': scenarioOverviewMotion,
@@ -3613,6 +3903,12 @@ async function main() {
   try {
     const t0 = Date.now();
     await SCENARIOS[name](ctx);
+    if (args['menu-hit-targets']) {
+      const hits = ctx.menuHits;
+      log('menu-hit-targets: ' + JSON.stringify(hits));
+      assert(hits.length === 2 && hits.every((h) => h.trusted && h.first && h.localHitIsButton && (!h.framed || h.parentHitIsFrame === true)),
+        'both native Preview controls must themselves own the hit point without shell interception');
+    }
     if (ctx.errors.length) ctx.failures.push(`page errors: ${ctx.errors.join(" | ")}`);
     if (ctx.failures.length) throw new Failure(`${ctx.failures.length} check(s) failed:\n  - ${ctx.failures.join("\n  - ")}`);
     log(`${ctx.knownBaselineFailures?.length ? 'REGRESSION-PASS with ' + ctx.knownBaselineFailures.length + ' known-baseline-failure(s)' : 'PASS'} ${name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);

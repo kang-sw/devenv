@@ -2391,7 +2391,8 @@
       var add = doc.createElement("button");
       add.type = "button";
       add.setAttribute("data-wbmention", "");
-      add.textContent = wsT("js.wbmention.add");
+      add.innerHTML = '<svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8.5 2.5H2.5v6l5.3 5.3a1 1 0 0 0 1.4 0l4.6-4.6a1 1 0 0 0 0-1.4Z"/><circle cx="5.5" cy="5.5" r=".8"/></svg>';
+      add.appendChild(doc.createTextNode(wsT("js.wbmention.add")));
       add.title = wsT("js.wbmention.add.title");
       mbtn.appendChild(mnote);
       mbtn.appendChild(add);
@@ -3726,9 +3727,17 @@
     window.addEventListener("resize", function () { drApply(false); });
     if (window.ResizeObserver && drheader) new ResizeObserver(function () { drApply(false); }).observe(drheader);
     // The handles' widths follow their contents; the header pads clear of
-    // them.
+    // them. Padding changes the shallower header's observed content box:
+    // write it next frame, not during this native resize delivery.
     if (window.ResizeObserver) {
-      var drRo = new ResizeObserver(drRoom);
+      var drRoomFrame = 0;
+      var drRo = new ResizeObserver(function () {
+        if (drRoomFrame) return;
+        drRoomFrame = requestAnimationFrame(function () {
+          drRoomFrame = 0;
+          if (drawer.isConnected) drRoom();
+        });
+      });
       drRo.observe(drhandle);
       if (gitRegion) drRo.observe(gitRegion);
     }
@@ -8142,7 +8151,7 @@
     var row = el.appendChild(mk("div", "sprow"));
     var status = row.appendChild(mk("span", "spnote"));
     var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
-    var go = row.appendChild(rpBtn("pbtn go", wsT("js.lead.start")));
+    var start = row.appendChild(rpBtn("pbtn go", wsT("js.lead.start")));
     function setErr(text) { err.textContent = text || ""; err.hidden = !text; }
     function off(k) { var h = supHarness(k); return !!h && h.available === false; }
     function sync() {
@@ -8154,7 +8163,7 @@
       });
       Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("aria-checked", String(P.iso === k)); });
       idesc.textContent = wsT(P.iso === "isolated" ? "js.lead.iso.isolated.hint" : "js.lead.iso.default.hint") + (P.harness === "pi" ? " " + wsT("js.lead.iso.pi") : "");
-      go.disabled = P.busy || off(P.harness);
+      start.disabled = P.busy || off(P.harness);
     }
     // edited drops an earlier spawn's error once the form changed.
     function edited() {
@@ -8171,7 +8180,7 @@
     }
     function submit() {
       sync();
-      if (go.disabled) return;
+      if (start.disabled) return;
       notifAsk();
       var gen = P.gen;
       P.busy = true;
@@ -8179,13 +8188,15 @@
       status.textContent = wsT("js.lead.starting");
       sync();
       railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value, isolation: P.iso }), function (st, v, s) {
+        P.busy = false;
+        status.textContent = "";
+        sync();
         if (st === 201 && v.id) {
+          if (rpLive(P, gen)) railPopClose(false);
           saveDraft();
           go("/s/" + encodeURIComponent(String(v.id)));
           return;
         }
-        P.busy = false;
-        status.textContent = "";
         if (!rpLive(P, gen)) { toast(leadErr(st, s)); return; }
         setErr(leadErr(st, s));
         sync();
@@ -8195,7 +8206,7 @@
     iseg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-iso]"); if (b) { P.iso = b.getAttribute("data-iso"); sync(); } });
     seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-harness]"); if (b && !b.disabled) setHarness(b.getAttribute("data-harness")); });
     cancel.addEventListener("click", function () { railPopClose(true); });
-    go.addEventListener("click", submit);
+    start.addEventListener("click", submit);
     P.open = function (key, label, btn) {
       var gen = ++P.gen, name = btn.getAttribute("data-name") || label, branch = btn.getAttribute("data-branch") || "";
       P.busy = false;
@@ -9107,8 +9118,10 @@
         pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
         top: top.offsetHeight
       });
+      // A link menu's local z-index cannot outrank the shell header either;
+      // lift its frame through the same layer as the other popovers.
       send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(),
-        popover: q(".rpop:not([hidden])").some(function (el) { return el.getClientRects().length > 0; }) });
+        popover: q(".rpop:not([hidden]), .lmenu").some(function (el) { return el.getClientRects().length > 0; }) });
     }
     function queue() { if (!queued) queued = setTimeout(post, 16); }
     doc.addEventListener("ws-overview", queue);

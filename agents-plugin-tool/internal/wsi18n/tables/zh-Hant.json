@@ -1702,7 +1702,7 @@
   "js.lead.stop.note": "結束處理程序。下一則訊息或郵件會重新啟動它。",
   "js.lead.stopped": "沒有處理程序在執行。下一則訊息或郵件會啟動一個。",
   "js.lead.close": "關閉",
-  "js.lead.close.note": "徹底結束對話。無法重新開啟。",
+  "js.lead.close.note": "結束對話和處理程序，並停止郵件喚醒。可從導軌重新開啟。",
   "js.lead.close.confirm": "關閉此工作階段？其處理程序將結束，對話無法繼續。",
   "js.ap.title": "核准請求",
   "js.ap.agent": "子代理",

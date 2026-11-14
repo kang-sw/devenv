@@ -46,6 +46,15 @@ MCP-only hosted entry; it does not repeat the completed adapter refactor.
    access with parity, without a store rewrite. The audit backend depends on
    this ticket's Phase 2; its UI keeps the backend's Phase 2 prerequisite.
    Rejected: adding a separate migration child or waiting for the whole epic.
+7. **MAIN refinement assignment, 2026-11-14:** Phase 1 includes the remaining
+   backend admission/registration descriptor, lead-profile validation,
+   dashboard harness choices and explicit unsupported-operation contract.
+   Reuse the existing backend registry and process/event boundary; preserve
+   Claude/Pi names, defaults, native integrations and controls. This is T0
+   contract refinement, not authorization to implement another harness or
+   assert that the broader foundation is already complete. MAIN described
+   (799)=a as assumed; no independently confirmed owner runtime grant is
+   inferred.
 
 ## Constraints
 
@@ -62,11 +71,20 @@ MCP-only hosted entry; it does not repeat the completed adapter refactor.
   fold peer leads into worker termination rules.
 - New authority UI, new harness adapters, voice and live reasoning are later
   consumers after this ticket's Phase 2, not its acceptance scope.
-- Before ready promotion, settle exact public signatures, context-selection
-  behavior and any new serialized fields against current source. The board's
-  proposed management checkbox, root-management powers and issuance
-  restrictions are not selected mechanisms. This todo capture supplies no
-  ready/Sage or implementation approval.
+- Before ready promotion, settle exact public signatures, descriptor fields
+  and ownership, context-selection behavior and any new serialized fields
+  against current source. Preserve current records and absence of optional
+  capabilities; no descriptor name, wire field or storage shape is selected
+  by this refinement. The board's proposed management checkbox,
+  root-management powers and issuance restrictions remain unselected.
+  This todo refinement supplies no ready/Sage or implementation approval.
+- A selectable hosted lead needs admitted/registered backend metadata,
+  compatible profile validation and accurate launch choices, not merely a
+  type implementing `Backend`. Keep unsupported controls explicit rather
+  than converting missing support into success, automatic approval or a
+  fabricated idle/subagent count. Full terminal handoff, permission-mode and
+  native-child parity are not prerequisites for describing a bounded
+  lead-only extension; retain existing supported Pi/Claude paths.
 
 ## Prior Art
 
@@ -78,6 +96,16 @@ MCP-only hosted entry; it does not repeat the completed adapter refactor.
 - `261114-bug-ws-fork-parent-identity-loss`: preserved historical key/row
   evidence; loaded/source equivalence and the historical fork-policy rationale
   require separate verification. Do not infer a completed repair.
+- MAIN's `shared/docs/harness-interface-readiness.md`, section 5, inspected
+  source at `951af006a`: `Backend.Start` / `Process` and generic registry
+  dispatch already exist; strict profile/lead admission, composition-root
+  registration and UI harness lists still name Claude/Pi. Relevant source
+  anchors are `agents-plugin-tool/cmd/ws-mcp/dashboard.go`,
+  `internal/wsagent/{backend.go,profile.go,builtin.go,runner.go,support.go}`
+  and `internal/wsdashboard/assets/{dashboard.js,rail.js}`. Package-relative
+  `internal/` paths here are under `agents-plugin-tool/`. Re-ground those
+  anchors at ready promotion; the report is static evidence, not executed
+  acceptance or approval of every proposed helper/API.
 
 ## Prior Decisions
 
@@ -101,11 +129,38 @@ consumers. Reuse current owners rather than introducing parallel stores,
 delivery queues or a new workflow interpreter. Leave the audit envelope in the
 existing audit ticket.
 
+Include a backend admission/registration descriptor contract at the current
+registry/composition boundary. It must account for backend identity and
+availability, eligible hosted-lead profiles, existing model/effort choices and
+supported optional controls without creating a second process owner. Reconcile
+profile validation and dashboard launch choices with that admitted set so a
+registered extension is not still rejected by a fixed Claude/Pi enum, and the
+UI does not offer an unavailable harness or unsupported control. Retain a
+single explicit composition-root registration; do not turn this into a
+runtime plugin loader or replace `Backend.Start` / `Process` from scratch.
+
+State unsupported-operation behavior at the existing process-control and
+product boundaries: distinguish absent optional control, unavailable backend,
+invalid profile and launch failure; preserve current error/fallback/restart
+semantics and trusted-origin approval checks. Do not map Claude permission
+strings onto another harness by assumption, equate EOF with turn completion,
+or infer known-zero subagent activity from unavailable telemetry. Exact
+signatures, descriptor fields, affected call sites and current-context/state
+selection are still refined and settled before ready promotion; no additional
+serialized surface is silently chosen here.
+
 Verification boundary: isolated fixtures for both entry modes, existing key
 adoption and parent propagation, current authority preservation, common context
-and state access, event ordering and unsupported operations. Assert that old
-entry points and historical state remain usable. Exact interfaces and affected
-project commands are settled during refinement before ready promotion.
+and state access, event ordering and unsupported operations. Cover existing
+Claude/Pi registrations and default profiles, invalid/unregistered/unavailable
+backends, profile admission and UI choice consistency, model/effort/control
+capability absence, unsupported calls and approval correlation. Use fake
+backends/fixtures to show admission extensibility without installing or
+launching a new harness. Assert that old entry points, stored identities and
+historical state remain usable. Preserve Pi/Claude native differences and one
+input/mail owner. Exact project commands and compatibility evidence are
+settled before ready promotion; these fixtures are not provider/live-delivery
+acceptance.
 
 ### Phase 2: Adopt current access with behavior and state parity
 

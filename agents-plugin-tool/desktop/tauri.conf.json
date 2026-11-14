@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Werkschaft",
+  "version": "0.1.0",
+  "identifier": "dev.werkschaft.desktop",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "windows": [],
+    "withGlobalTauri": false,
+    "security": {
+      "capabilities": [{
+        "identifier": "no-native-authority",
+        "description": "The connection view and remote dashboard have no native command permissions",
+        "local": false,
+        "windows": ["main"],
+        "permissions": []
+      }],
+      "csp": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["icons/icon.png"]
+  }
+}

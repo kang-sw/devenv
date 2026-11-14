@@ -1702,7 +1702,7 @@
   "js.lead.stop.note": "Ends the process. The next message or mail starts it again.",
   "js.lead.stopped": "No process runs. The next message or mail starts one.",
   "js.lead.close": "Close",
-  "js.lead.close.note": "Ends the conversation for good. It cannot be reopened.",
+  "js.lead.close.note": "Ends the conversation and process, and stops mail wake-ups. It can be reopened from the rail.",
   "js.lead.close.confirm": "Close this session? Its process ends and the conversation cannot be continued.",
   "js.ap.title": "Approval request",
   "js.ap.agent": "subagent",

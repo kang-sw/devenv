@@ -1702,7 +1702,7 @@
   "js.lead.stop.note": "结束进程。下一条消息或邮件会重新启动它。",
   "js.lead.stopped": "没有进程在运行。下一条消息或邮件会启动一个。",
   "js.lead.close": "关闭",
-  "js.lead.close.note": "彻底结束对话。无法重新打开。",
+  "js.lead.close.note": "结束对话和进程，并停止邮件唤醒。可从轨道重新打开。",
   "js.lead.close.confirm": "关闭此会话？其进程将结束，对话无法继续。",
   "js.ap.title": "批准请求",
   "js.ap.agent": "子代理",
