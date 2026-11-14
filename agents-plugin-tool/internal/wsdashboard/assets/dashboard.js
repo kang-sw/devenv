@@ -278,7 +278,7 @@
   // shows.
   var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board" };
   var PANE = { convo: "convo", board: "bcol" };
-  var fpane = $("files"), chead = $("chead"), filesSeen = false;
+  var fpane = $("files"), chead = $("chead"), filesSeen = false, filesTab = null, filesSheet = null;
   // syncChead moves the conversation's counts from the entries region's
   // own title bar, which a live page hides, into the panel's header; it
   // runs on load and after each entries swap.
@@ -304,9 +304,9 @@
     // The Files pane hears each time it comes into view (a tab, a layout,
     // or a resize showed it) and each time it leaves.
     var fs = visible(fpane);
-    if (fs !== filesSeen && window.WsFiles) {
-      if (fs) window.WsFiles.shown();
-      else window.WsFiles.hidden();
+    if (fs !== filesSeen && filesTab) {
+      if (fs) filesTab.shown();
+      else filesTab.hidden();
     }
     filesSeen = fs;
   }
@@ -707,6 +707,27 @@
   // below 2200px the column takes the rail's place and the rail overlays.
   // A board swap waits while a card or topic is dragged (boardDragHeld), and
   // lands at the drag's end.
+  // Two owners, not two views onto one explorer. Keep the tab's existing
+  // storage keys; the toolbar uses the same records in its own namespace.
+  if (live && fpane && window.WsFiles) {
+    function createFiles(node, rootSlot, toolbar) {
+      return window.WsFiles.create(node, {
+        rid: rid, post: post, toast: toast, copy: copyText, rootSlot: rootSlot,
+        load: toolbar ? function (k) { return load("ws.dashboard.toolbar." + k); } : load,
+        save: toolbar ? function (k, v) { save("ws.dashboard.toolbar." + k, v); } : save,
+        local: function () { return root.hasAttribute("data-sysopen"); }
+      });
+    }
+    filesTab = createFiles(fpane, chead && chead.querySelector(".fsum"), false);
+    var sheet = doc.createElement("section");
+    sheet.id = "toolbar-files";
+    sheet.className = "fpane";
+    sheet.hidden = true;
+    sheet.setAttribute("aria-label", fpane.getAttribute("aria-label"));
+    doc.body.appendChild(sheet);
+    var sheetInstance = createFiles(sheet, null, true);
+    filesSheet = { el: sheet, shown: sheetInstance.shown, hidden: sheetInstance.hidden };
+  }
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
   var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null, boardOverviewHeld = null;
   function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }
@@ -732,7 +753,7 @@
       toolbar: {
         overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
         search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
-        files: fpane && window.WsFiles ? revealPanes : null
+        files: filesSheet
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
@@ -787,14 +808,6 @@
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
   boardBoxes().forEach(watchBoard);
-  // --- the Files pane (files.js): mounted once, loaded when first shown -------
-  if (live && fpane && window.WsFiles) {
-    window.WsFiles.mount(fpane, {
-      rid: rid, load: load, save: save, post: post, toast: toast, copy: copyText,
-      rootSlot: chead && chead.querySelector(".fsum"),
-      local: function () { return root.hasAttribute("data-sysopen"); }
-    });
-  }
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {

@@ -1,12 +1,12 @@
 (function () {
-  // The file explorer (window.WsFiles): the Files tab of the session page's
+  // The file explorer (window.WsFiles): independent browsers for the session page's
   // conversation column. It browses one root read-only through the file
   // browser routes (fs_routes.go, fs_search.go): a lazy tree, one listing
   // per folder on its first expand, a name search and a content search, and
   // a row menu. A file opens in the board's preview slot (preview.js).
   //
   // The page script owns the tab switch and hands the module its pieces
-  // once (mount), then calls shown each time the pane comes into view: the
+  // once (create), then calls shown each time the pane comes into view: the
   // first time loads the root, every later time puts the tree's scroll back
   // and lists every loaded folder again, which refreshes the git marks.
   //
@@ -90,8 +90,10 @@
     return "file";
   }
 
-  // --- the module ----------------------------------------------------------
-  var el = null, h = {}, rid = "", gen = 0, started = false;
+  // Each owner gets its own DOM, requests, search token and storage adapter.
+  function create(node, options) {
+  var el = node, h = options || {}, rid = h.rid || doc.documentElement.getAttribute("data-rid") || "";
+  var gen = 0, started = false, destroyed = false, listeners = [];
   var lists = {}, open = {}, sel = null, cur = null, info = null, rootAbs = "";
   var view = { ign: false, dot: false }, rows = [], rowEls = {};
   var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null;
@@ -117,7 +119,11 @@
   function local() { return typeof h.local === "function" ? !!h.local() : !!h.local; }
   function load(k) { return h.load ? h.load(k) : null; }
   function save(k, v) { if (h.save) h.save(k, v); }
-  function toast(s) { if (h.toast) h.toast(s); }
+  function toast(s) { if (!destroyed && h.toast) h.toast(s); }
+  function listen(target, type, fn, options) {
+    target.addEventListener(type, fn, options);
+    listeners.push(function () { target.removeEventListener(type, fn, options); });
+  }
   function editable(t) {
     return !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ""));
   }
@@ -159,6 +165,8 @@
   // fresh tree.
   function useRoot(a) {
     gen++;
+    clearTimeout(timer);
+    abort();
     rootAbs = a.session ? "" : a.root;
     save(ROOT_KEY + rid, rootAbs || null);
     info = a;
@@ -192,7 +200,9 @@
   // refuses it ("" is the session root).
   function applyRoot(path) {
     ui.rErr.textContent = "";
-    listDir("", path).then(function (a) { closePop(false); useRoot(a); }, function (err) {
+    var g = ++gen;
+    listDir("", path).then(function (a) { if (g !== gen) return; closePop(false); useRoot(a); }, function (err) {
+      if (g !== gen) return;
       ui.rErr.textContent = err && err.status === 404 ? wsT("js.files.root.refused") : wsT("js.files.failed");
     });
   }
@@ -795,45 +805,35 @@
 
     // "/" focuses the search box while the pane shows; a click elsewhere,
     // a scroll, a resize, or leaving the window closes a menu or popover.
-    doc.addEventListener("keydown", function (e) {
+    listen(doc, "keydown", function (e) {
+      var pane = e.target.closest && e.target.closest(".fpane"), sheet = doc.querySelector(".fpane[data-max]");
+      if ((pane && pane !== el) || (sheet && sheet !== el)) return;
       if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || editable(e.target) || !shows(el)) return;
       e.preventDefault();
       closeMenu(false);
       ui.q.focus();
       ui.q.select();
     });
-    doc.addEventListener("mousedown", function (e) {
+    listen(doc, "mousedown", function (e) {
       var t = e.target;
       if (menu && !menu.contains(t)) closeMenu(false);
       if (pop && !pop.contains(t) && !(popFrom && popFrom.contains(t))) closePop(false);
     }, true);
-    doc.addEventListener("wheel", function (e) { if (menu && !menu.contains(e.target)) closeMenu(false); }, { capture: true, passive: true });
-    window.addEventListener("resize", function () { closeMenu(false); });
-    window.addEventListener("blur", function () { closeMenu(false); });
+    listen(doc, "wheel", function (e) { if (menu && !menu.contains(e.target)) closeMenu(false); }, { capture: true, passive: true });
+    listen(window, "resize", function () { closeMenu(false); });
+    listen(window, "blur", function () { closeMenu(false); });
   }
 
-  window.WsFiles = {
-    // mount builds the explorer in el. o: rid (the session), load and save
-    // (the page's guarded storage), post (a session write route), toast,
-    // copy (copies a text and says so), local (a function: whether this
-    // browser is on the daemon's machine), and rootSlot (optional: the
-    // element that shows the root's name, the conversation panel's header,
-    // instead of the pane's own header).
-    mount: function (node, o) {
-      if (el) return;
-      el = node;
-      h = o || {};
-      rid = h.rid || doc.documentElement.getAttribute("data-rid") || "";
-      build();
-      wire();
-      setMode("name");
-      paintHead();
-    },
+  build();
+  wire();
+  setMode("name");
+  paintHead();
+  return {
     // shown is called each time the pane comes into view: the first time
     // it loads the root (a changed root kept for the session, if this
     // browser may use one), later it restores the scroll and refreshes.
     shown: function () {
-      if (!el) return;
+      if (destroyed) return;
       paintHead();
       if (!started) {
         started = true;
@@ -848,8 +848,31 @@
     // hidden is called when the pane leaves the view: an open menu or
     // popover closes.
     hidden: function () {
+      if (destroyed) return;
       closeMenu(false);
       closePop(false);
+    },
+    // The owner calls destroy before discarding its pane. Late list/root
+    // responses are invalidated; search and global handlers are retired.
+    destroy: function () {
+      if (destroyed) return;
+      destroyed = true;
+      gen++;
+      clearTimeout(timer);
+      abort();
+      closeMenu(false);
+      closePop(false);
+      listeners.forEach(function (off) { off(); });
+      listeners = [];
+      if (ui.root.parentNode) ui.root.parentNode.removeChild(ui.root);
+      el.textContent = "";
     }
   };
+  }
+
+  // Options: rid, guarded load/save, session post, toast/copy, local
+  // (whether this browser is on the daemon's machine), optional rootSlot.
+  // Persistence isolation belongs to the owner's load/save adapter; the
+  // existing root and bounded View record shapes remain unchanged.
+  window.WsFiles = { create: create };
 })();
