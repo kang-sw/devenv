@@ -132,6 +132,10 @@
 //
 //     npx playwright@latest install chromium
 //
+// --menu-hit-targets adds a post-scenario assertion for a bounded two-menu
+// prefix: both native clicks must hit the button itself, with no shell cover.
+// It adds no awaited inspection between the original scenario's actions.
+//
 // Adding a scenario: write `async function scenarioX(ctx)` using the shared
 // helpers below (openBoard, waitQuiet, scrollToMiddle, growFrame,
 // segments / trace, assertChanged; in the page, window.__bh: update,
@@ -389,13 +393,30 @@ async function serve(args) {
 // WebSocket so the harness reaches the page's stream socket, records the
 // board region events the server sends, and spies on scrollTop writes from
 // script (a keep session, restoreScroll) per element.
-const INIT = () => {
+const INIT = (options = {}) => {
   // The shell's session frame is a child of the top page. Chromium may run
   // this only in the frame's initial about:blank, whose window the
   // same-origin page then reuses, so the frame's URL is not checked here.
   // The body frames are grandchildren and are skipped.
   if (window.top !== window && window.parent !== window.top) return;
-  const bh = (window.__bh = { sockets: [], board: null, writes: [], resizeDeliveries: [], historyLoads: [], observerErrors: [], observerErrorDetails: [] });
+  const bh = (window.__bh = { sockets: [], board: null, writes: [], resizeDeliveries: [], historyLoads: [], observerErrors: [], observerErrorDetails: [], menuHitTargets: [] });
+  // Capture the native target before the menu's handler removes it. A button
+  // may win inside the session document while the shell intercepts above it.
+  if (options.menuHitTargets) document.addEventListener('click', (e) => {
+    const button = e.target?.closest?.('.lmenu button');
+    if (!button) return;
+    const local = document.elementFromPoint(e.clientX, e.clientY);
+    const hit = { trusted: e.isTrusted, first: button.matches('.lmenu button:first-child'), text: button.textContent,
+      point: { x: e.clientX, y: e.clientY }, localHitIsButton: local === button, framed: window.parent !== window, parentHitIsFrame: null };
+    if (hit.framed) {
+      try {
+        const frame = window.frameElement, r = frame.getBoundingClientRect();
+        hit.parentHitIsFrame = window.parent.document.elementFromPoint(r.left + frame.clientLeft + e.clientX, r.top + frame.clientTop + e.clientY) === frame;
+      } catch (error) { hit.parentError = String(error); }
+    }
+    bh.menuHitTargets.push(hit);
+    console.debug('__bh-menu-hit-target__' + JSON.stringify(hit));
+  }, true);
   // Observe actual native deliveries; never invoke a callback or re-observe
   // on the harness's behalf. Filter to the history's own observer, excluding
   // the shared keep observer which also watches history-live.
@@ -629,7 +650,14 @@ async function openBoard(ctx) {
   BROWSERS.push(browser);
   const tab = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height } });
   tab.on("pageerror", (e) => ctx.errors.push(String(e)));
-  await tab.addInitScript(INIT);
+  if (ctx.args['menu-hit-targets']) {
+    ctx.menuHits = [];
+    tab.on('console', (message) => {
+      const text = message.text(), marker = '__bh-menu-hit-target__';
+      if (message.type() === 'debug' && text.startsWith(marker)) ctx.menuHits.push(JSON.parse(text.slice(marker.length)));
+    });
+  }
+  await tab.addInitScript(INIT, { menuHitTargets: !!ctx.args['menu-hit-targets'] });
   await tab.goto(ctx.args.url, { waitUntil: "load" });
   let page = tab;
   if (await tab.evaluate(() => document.documentElement.hasAttribute("data-shell"))) {
@@ -2819,6 +2847,12 @@ async function main() {
   try {
     const t0 = Date.now();
     await SCENARIOS[name](ctx);
+    if (args['menu-hit-targets']) {
+      const hits = ctx.menuHits;
+      log('menu-hit-targets: ' + JSON.stringify(hits));
+      assert(hits.length === 2 && hits.every((h) => h.trusted && h.first && h.localHitIsButton && (!h.framed || h.parentHitIsFrame === true)),
+        'both native Preview controls must themselves own the hit point without shell interception');
+    }
     if (ctx.errors.length) ctx.failures.push(`page errors: ${ctx.errors.join(" | ")}`);
     if (ctx.failures.length) throw new Failure(`${ctx.failures.length} check(s) failed:\n  - ${ctx.failures.join("\n  - ")}`);
     log(`PASS ${name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
