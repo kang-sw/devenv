@@ -641,6 +641,9 @@
     },
     "261114-ws-dashboard-file-explorer": {
       "registered_at": "2026-11-14T13:05:40Z"
+    },
+    "261114-ws-dashboard-file-explorer-instance-isolation": {
+      "registered_at": "2026-11-14T13:05:40Z"
     }
   }
 }
