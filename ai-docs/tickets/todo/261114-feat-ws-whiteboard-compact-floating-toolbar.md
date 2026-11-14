@@ -131,6 +131,14 @@ These files are local stopped-run evidence, not tracked acceptance assets. The i
 - **VERIFIED:** The test delegate stopped isolated supervisor PID 14316 and daemon PID 15913. Subsequent `ps -p 14316,15913 -o pid=,ppid=,stat=,command=` returned no rows. `/tmp/compact-toolbar-evidence/serve.log` records shutdown and preservation of `/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/board-headless-6Z0D12`. No installed/shared daemon or runtime activation was changed.
 - **Omitted due to stop:** Final full Go rerun; complete width/page matrix including normal counts wrapping; history-target arrival and complete both-scroller late-height/transition acceptance; side-by-side comparison against `approved.html` and `approved.fragment.html`; independent lite review. No phase Result, ticket closure, integration, push or production acceptance is claimed.
 
+## Continuation authority — 2026-11-14, 10:59
+
+The preceding Blocked section is retained historical evidence, not the current execution disposition. Owner-reassigned Claude MAIN `id:sweatradartakingoverwrite` explicitly assigned EXEC1 to finish this ticket end to end on the same branch from `c2c79715`, superseding the prior stop-(f) HOLD for this bounded continuation. The lead relayed this authority directly; it is not an automatic retry or a new product-design decision.
+
+- Preserve the T0 tier, original action/layout contract and full assertions. Establish equivalent `395242d80` baseline evidence at 320px as well as 800px. A proven equivalent baseline containment failure is a known baseline finding, not an acceptance blocker; capture it in an idea follow-up. Baseline equivalence does not establish absence of other regressions. Candidate-only failures require minimal fixes and verification.
+- Complete the applicable Go/browser matrix, normal wrapping, both-scroller late-height/transitions, history-target arrival, approved-reference comparison and independent lite review. Add real source-rendered before/after captures at 1280, 800 and 320px showing a Korean `응답 N` reply pill, including top/floating overlap measurements. Mockups alone are not production acceptance.
+- MAIN explicitly approves source merge after clean independent lite review and no regressions; report `merge_confirm: skip`. The lead owns merge/release. Do not change the primary checkout, push, or rebuild/swap any shared/installed daemon. Source fixture processes remain isolated. New architecture, API, deletion, T2 or irreversible work remains outside this authority.
+
 ## Phases
 
 ### Phase 1: Integrate and verify the approved compact floating toolbar
