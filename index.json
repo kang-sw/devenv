@@ -741,6 +741,9 @@
     "261115-bug-ws-pi-bootstrap-elides-undelivered-manual": {
       "registered_at": "2026-11-14T15:17:10Z"
     },
+    "261115-bug-ws-selection-note-repeated-click-chip-count": {
+      "registered_at": "2026-11-14T15:49:56Z"
+    },
     "261115-feat-ws-hosted-codex-adapter-contract": {
       "registered_at": "2026-11-14T15:20:26Z"
     },
