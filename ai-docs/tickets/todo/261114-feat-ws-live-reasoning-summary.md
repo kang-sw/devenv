@@ -35,8 +35,16 @@ MAIN's EXEC2 contract, section 675 and latest override (2026-11-14T11:41:17Z),
   is inferred for this ticket.
 - The owner approved the conversation mockup, verbatim **`717=ok`**, relayed by
   MAIN at 2026-11-14T12:07:54Z and 12:10:16Z. The unchanged HTML and both supplied
-  screenshots are attached below as the UI basis. The approval does not settle
-  storage fields, durability or interrupted-partial treatment.
+  screenshots are attached below as the UI basis. The asset approval does not
+  select storage fields or API shapes.
+- MAIN relayed the owner answer at 2026-11-14T12:25:25Z, verbatim
+  **`725,726=a`**. **725=a:** completed provider summaries persist at the existing
+  natural turn-history commit boundary. Explicit limit: process death before
+  that commit may lose that turn's summary; durable mid-turn retention is not
+  required. **726=a:** interrupted/failed turns retain the exact received
+  summary prefix, labeled with the actual aborted/failed status (or an actually
+  exposed incomplete status), never a fabricated completion. Never synthesize
+  missing summary text.
 - Intended compatibility: **T0 additive**. Preserve existing protocol/API
   semantics; a mechanism requiring T2, a protocol change, or a minor bump must
   stop and return to MAIN for explicit owner approval, not silently proceed.
@@ -139,31 +147,19 @@ Grounded at repository base `9854ff350`; these are observations, not chosen APIs
   Reasoning-token counts, effort, empty/redacted thinking, captions, and existing
   model-generated tool/display summaries are not substitute summary data.
 
-## Open Decision Queue
+## Technical Readiness
 
-The policy questions on initial verified coverage, retained history and lead-only
-scope are answered by MAIN's IDs 710–712 above. Do not re-ask them. MAIN owns any
-remaining global IDs; technical preparation must produce a formed proposal before
-escalating an actual product choice.
+No open owner questions remain: IDs 710–712, 717, 725 and 726 are answered.
+Technical readiness still requires populated facts and design/completeness review;
+this accepted todo ticket is not promoted by policy settlement alone.
 
-- **Technical design pending:** derive the exact supported provider/API and
-  terminal/hosted capability matrix, additive transport, history storage and
-  write-preservation contract. Preserve summary provenance; do not repurpose
-  reply/caption semantics or settle a wire event, store/schema, SDK upgrade or
-  migration by implication. Retained completed history is required, not optional.
-- **725 — Pending, unanswered: history commit boundary.** Option (a) commits
-  retained summaries at the natural turn-history boundary, explicitly allowing
-  loss before that commit; option (b) requires durable mid-turn retention.
-  MAIN's recommendation is (a), not an owner answer.
-- **726 — Pending, unanswered: interrupted partials.** Option (a) retains the
-  observed partial prefix with its actual abort/fail/incomplete label; option
-  (b) retains completed summaries only. MAIN's recommendation is (a), not an
-  owner answer.
-
-IDs 725 and 726 are minted but unanswered; keep the decision/readiness gate
-until both settle. MAIN's reported global maximum is 726; this ticket mints no
-IDs. The storage-field proposal remains technical preparation, not a Decision.
-The approved UI basis is attached, but does not waive these remaining gates.
+Derive the exact supported provider/API and terminal/hosted capability matrix,
+additive transport, history storage and old/new write-preservation contract.
+Preserve summary provenance and the confirmed natural-turn commit/labeled-prefix
+semantics. Exact field names, revision/freshness guards, storage API shape and any
+new mechanism remain proposals until facts/design review; they are not Decisions.
+Do not repurpose reply/caption semantics or select a wire event, store/schema,
+SDK upgrade or migration by implication.
 
 ## Constraints
 
@@ -173,27 +169,39 @@ exact supported-version official docs/examples and follow relevant event/SDK
 cross-references. Do not modify provider requests, reasoning effort, or upstream
 SDK versions merely to make data appear without an approved decision.
 
+Respect the 725=a persistence boundary: do not promise durable mid-turn retention
+or silently introduce a new checkpoint mechanism to avoid the explicitly accepted
+precommit process-loss limit. Respect 726=a: retain only the received provider
+summary prefix with its actual terminal status; do not infer or synthesize missing
+text. These lifecycle decisions do not approve a particular field/revision/store
+API shape. Keep the three 717-approved assets unchanged.
+
 ## Phases
 
 ### Phase 1: Carry supported lead summaries into live activity and history
 
-After the decision queue and design/readiness gates clear, implement the agreed
-bounded lead-only provider-summary path into live activity and retained completed
+After technical fact population and design/readiness gates clear, implement the
+agreed bounded lead-only provider-summary path into live activity and retained completed
 conversation history, preserving ordinary replies, tools, activity and turn
 accounting. Use the first verified explicit-summary modes with ordinary activity
 fallback elsewhere. Subagents are excluded entirely. Follow the attached
-717-approved UI basis, retain the pending 725/726 gate, and keep unsupported
-summary data absent, never speculative.
+717-approved UI basis and the settled 725/726 lifecycle contract: persist at the
+existing natural turn-history commit boundary, allow the explicit precommit
+process-loss limit, and retain received interrupted/failed prefixes with actual
+status labels. Keep unsupported summary data absent, never speculative.
 
 Verification must cover ordered/interleaved summary parts, authoritative end,
 normal progress and reply/tool transitions, abort/error/retry, no-summary and
 unsupported capabilities, empty/redacted blocks, reset/reload/reconnect, and
 terminal versus hosted paths in the verified scope. Verify completed summaries
 remain in conversation history after live activity clears, reload/reconnect and
-writer replacement under the agreed persistence contract. Exercise partial,
-aborted and failed summary cases against the subsequently settled lifecycle
-rules. Negative tests must prove subagent summaries, non-summary thinking,
-signatures/encrypted content and private data never enter the new
+writer replacement after the natural turn-history commit. Exercise process death
+before that commit and document the permitted loss without claiming mid-turn
+durability. Verify interrupted/failed turns retain the exact received prefix and
+actual aborted/failed/incomplete label at the natural commit; retries must not
+append a later request's text to that prefix or relabel it complete. Negative
+tests must prove missing summary text is never synthesized and subagent summaries,
+non-summary thinking, signatures/encrypted content and private data never enter the new
 snapshot/history/UI path. Pin exact versioned fixtures, exercise old/new
 compatibility, redaction/escaping, bounded buffering and nonblocking/debounced
 delivery. Run the project's applicable Pi tests (`npm test` in
@@ -202,7 +210,7 @@ dashboard render/browser evidence
 for the approved presentation, including actual 1280/360-width result captures
 compared side by side with the attached 717-approved screenshots;
 perform no live/provider request merely for capture. Durability/recovery tests
-must prove the confirmed retained-history requirement and the eventual answers
-to 725 and 726, not invented storage defaults. During this attachment/capture
+must prove the confirmed retained-history requirement and settled 725=a/726=a
+boundaries, not invented storage defaults. During this attachment/capture
 step, run no builds, code tests, browser work, provider requests, probes or daemon
 actions; EXEC2's verification slot is reserved exclusively for 649's six cases.
