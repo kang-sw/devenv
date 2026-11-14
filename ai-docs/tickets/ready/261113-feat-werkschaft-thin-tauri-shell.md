@@ -253,6 +253,39 @@ the ticket stays in `ready/`, with Phases 2–4 untouched. Independent static li
 review is being recorded separately, with no further build, test, app, browser,
 health request, permission probe, or child execution beyond that static reviewer.
 
+#### Independent static lite review checkpoint - 2026-11-14
+
+One fresh reviewer inspected the fixed source range
+`2e1d9ea88730105cdb80a182bbd9a004d25fe064..0f16157b2adaf79475ebc665cdeec141b0ee3611`
+and retained execution evidence, using read-only source/doc/git/file access.
+No additional test, check, build, app, browser, daemon GET, permission probe,
+native automation, or nested reviewer was run. Detailed artifact:
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@e9caa154/review-paths/bc9f649f-01-261113-feat-werkschaft-thin-tauri-shell-lite-static.md`.
+
+Verdict: **non-clean, one Important finding; no Critical or Minor findings**.
+The runner still carries a group that is present after a foreground step into
+the next long build. If the helper subsequently exits and its numeric PGID is
+reused, final presence probing cannot establish continued ownership. The
+reviewer recommends resolving/cleaning such a group before advancing, or
+stopping that attempt, with a present-after-step/disappear/reuse regression.
+The actual successful attempt observed both groups absent immediately, so
+this unexercised path does not invalidate its recorded cleanup evidence.
+The finding remains **unfixed** because root authorized only evidence
+recording/static review after slot release; no source remediation or rerun
+was performed in that scope.
+
+The reviewer separately assessed exact-origin/new-window/subframe navigation,
+zero native command permissions, cache overrides, endpoint-token exclusion,
+bounded health identity checks and the unchanged daemon boundary. No actionable
+finding was raised in those areas. The public WK callback lacks frame identity
+and is not a user-gesture-only detector; retained native behavior remains
+unverified. The review explicitly distinguishes the pre-navigation attach log
+from asynchronously completed navigation and rendered pixels.
+
+The mocked Python regression remains **NOT RUN**. All previously listed native
+acceptance gaps remain **UNVERIFIED**. Static review is not Phase 1 acceptance;
+no Result, later phase, closure or merge is authorized by this checkpoint.
+
 ### Phase 2: Daily-use reliability (later Phase 1b cut)
 
 Add single-instance launch/focus next; it is not a Phase 1a blocker. Verify
