@@ -20,6 +20,7 @@
 //             null, the session writes no more scrollTop).
 //   shared-actions  Whole-card actions and one-time topic-relative previews.
 //             Use serve --shared-actions, wide (1800) and narrow (420).
+//             --case persistence skips independent card maximum geometry.
 //   toolbar   Toolbar placement, counts, placeholder, terminal availability
 //             and folder popover (terminal POST is a browser-local fixture;
 //             no shell process is started).
@@ -285,11 +286,13 @@ function seedSession(tmp, bin, label, n, historyEntries, mermaid, pending, share
     run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: topicCommands(n + 1) })], { cwd: proj, env });
   }
   if (sharedActions) {
+    fs.mkdirSync(path.join(proj, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(proj, 'docs', 'a.md'), '# Shared preview fixture\n');
     const tickets = path.join(proj, 'ai-docs', 'tickets', 'ready');
     fs.mkdirSync(tickets, { recursive: true });
     fs.writeFileSync(path.join(tickets, '261114-feat-card-fixture.md'), '---\ntitle: Card fixture\n---\n\n# Card fixture\n');
     run(bin, ['call', 'whiteboard.update', JSON.stringify({ session_key: fer.session_key,
-      commands: '<wb:topic name="SHARED" tickets="261114-feat-card-fixture"><wb:body><p>Shared action fixture <a href="docs/a.md">preview A</a></p></wb:body><wb:panel recap="Expanded panel"><p>Panel payload</p></wb:panel><wb:panel recap="Closed panel"><p>Second payload</p></wb:panel><wb:log>History fixture</wb:log><wb:add class="technical"><wb:title>Open question fixture</wb:title><wb:option>Yes</wb:option><wb:option>No</wb:option></wb:add></wb:topic>'
+      commands: '<wb:topic name="SHARED" tickets="261114-feat-card-fixture"><wb:body><p>Shared action fixture <a href="docs/a.md">preview A</a></p></wb:body><wb:panel recap="Expanded panel"><p>Panel payload</p></wb:panel><wb:panel recap="Closed panel"><p>Second payload</p></wb:panel><wb:log>History fixture</wb:log><wb:add class="technical"><wb:title>Open question fixture</wb:title><wb:option>Yes</wb:option><wb:option>No</wb:option><wb:link>docs/a.md</wb:link></wb:add></wb:topic>'
     })], { cwd: proj, env });
   }
   return { rid, root: fer.root, key: fer.session_key,
@@ -1069,6 +1072,7 @@ async function scenarioSharedActions(ctx) {
   await tab.route('**/fs/preview?**', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ kind: 'text', text: 'Shared preview transport fixture' }) }));
   const topic = 'section.topic[data-topic="SHARED"]';
   await page.waitForSelector(topic);
+  await page.evaluate(async () => { __bh.sharedServerBoard = await __bh.baseBoard(); });
   await page.evaluate(() => {
     const t = document.querySelector('section.topic[data-topic="SHARED"]');
     const ds = [...t.querySelectorAll('details')];
@@ -1091,6 +1095,14 @@ async function scenarioSharedActions(ctx) {
   qa(await page.evaluate(() => JSON.stringify([...__bh.sharedTopic.querySelectorAll('details')].map((d) => [d.getAttribute('data-key'), d.open])) === JSON.stringify(__bh.sharedDisclosures)), 'expand retains every independent disclosure');
   qa(await page.locator(topic).evaluate((t) => !!t.querySelector('.ttix') && t.textContent.includes('Open question fixture') && t.textContent.includes('History fixture') && t.querySelectorAll('details.entry-panel').length >= 2), 'fixture uses renderer-owned ticket, question, history and panel regions');
   await capture(ctx, tab, kind + '-expanded');
+  const direct = page.locator(topic + ' a[data-wl="file"][data-rel="docs/a.md"]').first();
+  assert(await direct.count(), 'server renderer supplies a direct question link');
+  await direct.click();
+  qa(await page.evaluate(() => WsCards.list('preview')[0].el.nextElementSibling === __bh.sharedTopic), 'direct renderer link opens above its enclosing topic');
+  await direct.click({ button: 'right' });
+  await page.waitForSelector('.lmenu');
+  await page.click('.lmenu button:first-child');
+  qa(await page.evaluate(() => WsCards.list('preview').length === 1 && WsCards.list('preview')[0].el.nextElementSibling === __bh.sharedTopic), 'real context menu reuses ordinary preview above origin');
   const bodyFrame = await page.locator(topic + ' iframe[data-doc-key]').first().elementHandle();
   assert(bodyFrame, 'renderer supplies an identity-bound sandbox frame');
   const content = await bodyFrame.contentFrame();
@@ -1173,23 +1185,86 @@ async function scenarioSharedActions(ctx) {
   await tab.mouse.move(to.x + 20, to.y + to.height - 2, { steps: 12 });
   await tab.mouse.up();
   qa(await page.evaluate(() => __bh.sharedPreview.at !== __bh.sharedDragAt && !__bh.sharedPreview.pinned && !document.documentElement.hasAttribute('data-bdrag')), 'actual pointer drag independently reorders an opened preview without pinning');
+  // Each real kind's own content remains mounted through fold and sheet.
+  for (const cardKind of (ctx.args.case === 'persistence' ? [] : ['preview', 'terminal'])) {
+    const card = '.bcard[data-kind="' + cardKind + '"]';
+    await page.locator(card + ' .bc-fold').focus();
+    await tab.keyboard.press('Enter');
+    const expanded = await page.locator(card + ' .bc-body').boundingBox();
+    assert(expanded && expanded.height > 0, cardKind + ' body expands with real geometry');
+    await tab.keyboard.press('Enter');
+    qa(await page.locator(card).evaluate((c) => c.querySelector('.bc-body').getBoundingClientRect().height === 0 && document.activeElement === c.querySelector('.bc-fold') && document.activeElement.getAttribute('aria-expanded') === 'false'), cardKind + ' fold hides body and retains keyboard focus');
+    await page.locator(card + ' .bc-max').click();
+    const geometry = await page.locator(card + ' .bc-in').boundingBox();
+    qa(geometry.x >= 0 && geometry.y >= 0 && geometry.x + geometry.width <= ctx.width + 1 && geometry.y + geometry.height <= ctx.height + 1, cardKind + ' maximum chrome fits viewport', geometry);
+    qa(await page.locator(card + ' .bc-body').evaluate((n) => n.getBoundingClientRect().height > 0), cardKind + ' maximum view reveals folded body');
+    await capture(ctx, tab, kind + '-' + cardKind + '-maximum');
+    await tab.keyboard.press('Escape');
+    qa(await page.locator(card).evaluate((c) => !c.hasAttribute('data-max') && c.getAttribute('data-size') === 'fold' && document.activeElement === c.querySelector('.bc-max')), cardKind + ' sheet dismissal restores folded state and action focus');
+  }
   // Restore SHARED before the single-toggle duplicate-handler check.
   await page.evaluate(() => __bh.sharedTopic.querySelector('.t-fold').click());
+  // An actual timestamp-changing update uses the same production morph.
+  const disclosureBefore = await page.locator(topic).evaluate((t) => [...t.querySelectorAll('details')].map((d) => [d.getAttribute('data-key'), d.open]));
+  const previewAt = await page.evaluate(() => __bh.sharedPreview.at);
+  assertChanged(await page.evaluate(() => __bh.update(['SHARED'])), ['SHARED']);
+  await waitQuiet(page);
+  qa(JSON.stringify(await page.locator(topic).evaluate((t) => [...t.querySelectorAll('details')].map((d) => [d.getAttribute('data-key'), d.open]))) === JSON.stringify(disclosureBefore), 'changed topic source retains internal disclosure states');
+  qa(await page.evaluate((at) => __bh.sharedPreview.at === at, previewAt), 'source update never changes manually placed preview snapshot');
   // Inject the real server region through the production morph path twice.
   await page.evaluate(async () => {
-    const base = await __bh.baseBoard();
+    const base = __bh.sharedServerBoard;
     __bh.ovRegion(base.html); __bh.ovRegion(base.html);
+  });
+  // A changed frame graft settles asynchronously; act on the landed head,
+  // not the outgoing head that the region event is replacing.
+  await waitQuiet(page);
+  await page.evaluate(() => {
     WsCards.decorate(); WsCards.decorate();
     const t = document.querySelector('section.topic[data-topic="SHARED"]');
     t.querySelector('.t-fold').click();
   });
-  qa(await page.locator(topic).evaluate((t) => t.getAttribute('data-size') === 'fold' && t.querySelectorAll('.t-fold').length === 1 && t.querySelectorAll('.t-raise').length === 1), 'repeated topic updates/decorate retain one handler and one action set');
+  const updatedActions = await page.locator(topic).evaluate((t) => ({ size: t.getAttribute('data-size'), folds: t.querySelectorAll('.t-fold').length, raises: t.querySelectorAll('.t-raise').length }));
+  qa(updatedActions.size === 'fold' && updatedActions.folds === 1 && updatedActions.raises === 1, 'repeated topic updates/decorate retain one handler and one action set', updatedActions);
   await capture(ctx, tab, kind + '-folded');
+  // Exclude the transport-only terminal: daemon reconciliation correctly
+  // removes that unowned fixture on reload. Preview snapshot is persistent.
+  const snapshot = await page.evaluate(() => ({
+    at: __bh.sharedPreview.at, rank: __bh.sharedPreview.rank,
+    order: [...__bh.board_().children].filter((n) => n.matches('section.topic,.bcard[data-kind="preview"]')).map((n) => n.dataset.topic || 'preview')
+  }));
   await tab.reload();
   const reloaded = tab.frames().find((f) => f.url().includes('frame=1')) || tab;
   await reloaded.waitForSelector(topic + '[data-size="fold"]');
   qa(await reloaded.locator(topic + ' .t-fold').getAttribute('aria-expanded') === 'false', 'whole topic fold restores after reload');
   await capture(ctx, tab, kind + '-reload');
+  await reloaded.evaluate(OVERVIEW_PAGE);
+  const restored = await reloaded.evaluate(() => ({ at: WsCards.list('preview')[0].at, rank: WsCards.list('preview')[0].rank,
+    order: [...__bh.board_().children].filter((n) => n.matches('section.topic,.bcard[data-kind="preview"]')).map((n) => n.dataset.topic || 'preview') }));
+  qa(JSON.stringify(snapshot) === JSON.stringify(restored), 'manual preview snapshot and independent board order survive reload', { snapshot, restored });
+  const invalid = await reloaded.evaluate(() => {
+    const t = document.querySelector('section.topic[data-topic="SHARED"]'), p = WsCards.list('preview')[0];
+    const head = () => [...__bh.board_().children].find((n) => n.matches('section.topic,.bcard'));
+    WsPreview.open('docs/detached.md', { origin: t.cloneNode(true) });
+    const detached = head() === p.el;
+    WsPreview.open('docs/invalid.md', { origin: document.querySelector('.board-toolbar') });
+    const wrongKind = head() === p.el;
+    // Remove served topics through the production region path, not DOM surgery.
+    __bh.ovRegion('<div class="empty">No ordinary topics</div>');
+    WsPreview.open('docs/disappeared.md', { origin: t });
+    const disappeared = head() === p.el && !t.isConnected;
+    p.close();
+    const empty = !head();
+    const fresh = WsPreview.open('docs/empty.md');
+    fresh.raiseBtn.click();
+    const ordinary = head() === fresh.el && !fresh.pinned;
+    fresh.pin(true); fresh.raiseBtn.click();
+    const pinned = WsCards.pinList().firstElementChild === fresh.el && !!fresh.pinned;
+    fresh.pin(false); fresh.raiseBtn.click();
+    return { detached, wrongKind, disappeared, empty, ordinary, pinned, unpinned: head() === fresh.el && !fresh.pinned };
+  });
+  qa(Object.values(invalid).every(Boolean), 'invalid/disappeared origins fall back; empty ordinary and sole pinned raise preserve region state', invalid);
+  await capture(ctx, tab, kind + '-empty-regions');
 }
 
 async function scenarioToolbar(ctx) {
