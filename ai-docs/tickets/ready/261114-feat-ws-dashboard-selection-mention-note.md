@@ -88,6 +88,16 @@ Verification:
 - Verify old `wb:mention` payloads still parse and render, new UI output uses accepted syntax, and the delivered user message contains the note as editable ordinary user text separately from the quote. Cover multiple selection bundles/attachments in one draft, ordinary user edits, draft restore and existing message merges: human-readable note-to-quote/provenance association must remain clear without a new machine-readable field. No note may become quoted source text or silently lose its intended association.
 - Run focused parser/inbox/renderer tests and the affected dashboard selection/composer browser tests. Include wide/narrow widths and accessible labels/focus. Record actual commands, output and any untested surface; no live daemon replacement or provider invocation is required.
 
+## Blocked (2026-11-14)
+
+The xlarge worker stopped under non-convergence rule (f) after two failures of
+the keyboard/empty-note capsule-count assertion. Owner question (670) asks
+whether to authorize one additional bounded diagnosis/fix/verification round
+or retain this checkpoint without further execution. Do not automatically
+retry, weaken assertions, claim completion or merge before that answer.
+The existing implementation and failure evidence remain preserved on the
+retained implementation branch.
+
 ## Interrupted implementation - 2026-11-14
 
 - Implementation remains incomplete on `impl/docs/settled-common-contracts-660-665/flap-brink-slang`; no phase Result or closure is claimed. Worker stopped under rule (f) after the keyboard/empty-note browser case repeated its capsule-count failure.
