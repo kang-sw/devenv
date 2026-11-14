@@ -725,8 +725,15 @@
     sheet.hidden = true;
     sheet.setAttribute("aria-label", fpane.getAttribute("aria-label"));
     doc.body.appendChild(sheet);
-    var sheetInstance = createFiles(sheet, null, true);
-    filesSheet = { el: sheet, shown: sheetInstance.shown, hidden: sheetInstance.hidden };
+    var sheetInstance = null;
+    filesSheet = {
+      el: sheet,
+      shown: function () {
+        if (!sheetInstance) sheetInstance = createFiles(sheet, null, true);
+        sheetInstance.shown();
+      },
+      hidden: function () { if (sheetInstance) sheetInstance.hidden(); }
+    };
   }
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
   var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null, boardOverviewHeld = null;

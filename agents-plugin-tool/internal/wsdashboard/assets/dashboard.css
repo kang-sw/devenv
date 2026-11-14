@@ -927,6 +927,11 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 /* The independent toolbar explorer shares the card sheet's scrim.
    Keep its toggle and row menu reachable. */
 .fpane[data-max] { display: flex; position: fixed; z-index: var(--z-modal); top: var(--files-top, 52px); left: 16px; right: 16px; bottom: 12px; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
+/* The old sheet removed the tab pane and its label from their slots.
+   Conceal their paint under the scrim without disturbing the new owner's
+   layout or state; otherwise the tab shadow protrudes beside the sheet. */
+body:has(.fpane[data-max]) .dgrid.live > .fpane,
+body:has(.fpane[data-max]) .chead .fsum .froot { visibility: hidden; }
 .board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); }
 .board-toolbar[data-files] .board-toolbar-face { pointer-events: none; }
 .board-toolbar[data-files] .board-files { pointer-events: auto; }

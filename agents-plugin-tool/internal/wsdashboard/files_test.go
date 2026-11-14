@@ -50,6 +50,10 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 		`.dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .fpane { display: flex; }`,
 		// the header shows the conversation's counts or the Files pane's root
 		`.dgrid[data-ctab="files"] > .chead .csum, .dgrid:not([data-ctab="files"]) > .chead .fsum { display: none; }`,
+		// The independent tab stays mounted but must not paint a second
+		// shadow or root label behind the toolbar sheet.
+		`body:has(.fpane[data-max]) .dgrid.live > .fpane,`,
+		`body:has(.fpane[data-max]) .chead .fsum .froot { visibility: hidden; }`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("the stylesheet lacks %q", want)
