@@ -57,12 +57,12 @@
           var delta = at ? pace(w, old ? at : now) : null;
           var comparison = delta === null ? "—" : (delta > 0 ? "+" : delta < 0 ? "\u2212" : "") + Math.abs(delta) + "%";
           var column = el("span", "usage-column" + (old ? " usage-stale" : ""));
-          var current = el("span", "usage-current"), number = el("span", "usage-number", w.percent);
+          var current = el("span", "usage-current"), number = el("span", "usage-number", Math.floor(w.percent));
           number.appendChild(el("span", "usage-percent", "%"));
           current.appendChild(el("span", "usage-key", kind === "five_hour" ? "5h" : "주")); current.appendChild(number);
           column.appendChild(current);
           column.appendChild(el("span", "usage-pace" + (delta > 0 ? " over" : delta < 0 ? " under" : ""), comparison));
-          column.title = name + " " + label(kind) + ": " + w.percent + "%; " + (delta === null ? "pace unavailable" : "pace " + comparison + " (percentage points)") + "; " + age(at, now) + (old ? "; stale, pace at last observation" : "");
+          column.title = name + " " + label(kind) + ": " + Math.floor(w.percent) + "%; " + (delta === null ? "pace unavailable" : "pace " + comparison + " (percentage points)") + "; " + age(at, now) + (old ? "; stale, pace at last observation" : "");
           column.setAttribute("aria-label", column.title);
           columns.appendChild(column); hasStale = hasStale || old;
         });
@@ -87,7 +87,7 @@
         windows.sort(function (a, b) { return b.percent - a.percent; }).forEach(function (w) {
           var line = el("div", "usage-window " + level(w.percent, data.warnPercent, data.critPercent));
           line.appendChild(el("span", "", label(w.kind)));
-          line.appendChild(el("b", "", w.percent + "%"));
+          line.appendChild(el("b", "", Math.floor(w.percent) + "%"));
           row.appendChild(line);
           var reset = w.resetsAt ? new Date(w.resetsAt).toLocaleString() : "unknown";
           row.appendChild(el("div", "usage-meta", "Resets " + reset));
