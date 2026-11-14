@@ -56,6 +56,12 @@ separately. Existing session keys and historical state are preserved.
   API, including additive UTC selection (681).
 - `261114-feat-ws-dashboard-conversation-audit-view` — reuse the existing UI
   ticket, still after `261114-feat-ws-conversation-audit-event-store#phase2`.
+- `261115-feat-ws-hosted-codex-adapter-contract` — MAIN's 2026-11-14 static
+  preparation assignment: exact-version capability/protocol/fixture plan,
+  then one bounded hosted lead conversation. Documentation can be prepared
+  now; implementation retains this interface's landed Phase 2 prerequisite
+  and separate execution approval. No Codex protocol or runtime grant is
+  inferred from the capture.
 
 ### Extension dependency map
 
@@ -66,7 +72,7 @@ waits for the whole epic.
 | Follow-on | Consumer | Foundation prerequisite | Additional confirmed prerequisite |
 |---|---|---|---|
 | Authority UI | Not yet authored | `261114-refactor-ws-common-session-interface#phase2` | No additional prerequisite settled |
-| Additional harnesses | Existing `261114-feat-ws-hosted-antigravity-acp-adapter`; other consumers not yet authored | `261114-refactor-ws-common-session-interface#phase2` | Antigravity retains landed `261114-refactor-ws-hosted-common-contract-pi-claude-parity#phase1` as prior foundation; its own Phase 2 follows its Phase 1 exact-version contract and separately authorized account/access |
+| Additional harnesses | `261115-feat-ws-hosted-codex-adapter-contract` and existing `261114-feat-ws-hosted-antigravity-acp-adapter` | `261114-refactor-ws-common-session-interface#phase2` | Codex's first implementation also follows its settled exact-version contract and separate execution approval. Antigravity remains deferred, retains landed `261114-refactor-ws-hosted-common-contract-pi-claude-parity#phase1` as prior foundation, and follows its own Phase 1 exact-version contract and separately authorized account/access |
 | Voice | Not yet authored | `261114-refactor-ws-common-session-interface#phase2` | No additional prerequisite settled |
 | Live reasoning | Not yet authored | `261114-refactor-ws-common-session-interface#phase2` | No additional prerequisite settled |
 | Audit backend | Existing `261114-feat-ws-conversation-audit-event-store` | `261114-refactor-ws-common-session-interface#phase2` (682) | Backend Phase 2 follows its Phase 1 store/mapping/call IDs |
