@@ -121,10 +121,11 @@ func TestStreamHistoryWindowsAreFiftyChronologicalEntries(t *testing.T) {
 	if strings.Count(live, `class="wb-entry agent`) != 50 || !strings.Contains(live, `id="e74"`) || strings.Contains(live, `id="e73"`) {
 		t.Fatal("initial live DOM does not hold exactly the newest 50 entries")
 	}
-	// The newest run folds all but its last three lines; only e123 is current.
-	wantAll(t, live, `<details class="run-fold" data-key="run:e74" data-history-anchor="e74">`, `Log 47 · `, `class="wb-entry agent current" id="e123"`)
-	if strings.Count(live, ` current"`) != 1 || strings.Index(live, `id="e121"`) < strings.Index(live, `</details>`) || strings.Index(live, `id="e120"`) > strings.Index(live, `</details>`) {
-		t.Fatal("the newest three lines are not visible below the fold, or more than one line is current")
+	// All log entries are visible (no run-fold disclosure); only e123 is current.
+	wantAll(t, live, `class="wb-entry agent current" id="e123"`)
+	wantNone(t, live, `class="run-fold"`)
+	if strings.Count(live, ` current"`) != 1 {
+		t.Fatal("more than one line is current")
 	}
 	wantAll(t, out, `<template data-history-page data-count="50">`, `<template data-history-page data-count="23">`, ">Load older<")
 }
@@ -261,10 +262,10 @@ func TestPanelAuthoredReferencesAcrossAllSurfaces(t *testing.T) {
 	}
 }
 
-// Segments interleaves latest panel cards with log runs: a run over three
-// rows folds whole between panels, the newest run keeps three rows visible,
-// an owner answer is its own row, and other system events share one chip.
-func TestStreamSegmentsFoldRunsBetweenPanels(t *testing.T) {
+// Segments interleaves latest panel cards with log runs: all log entries
+// are always visible (no fold). An owner answer is its own row, and other
+// system events share one chip.
+func TestStreamSegmentsNeverFoldRuns(t *testing.T) {
 	v := func(id, kind string) EntryView { return EntryView{Entry: Entry{ID: id, Kind: kind}} }
 	panel := v("p", EntryPanel)
 	panel.PanelID = "p1"
@@ -289,18 +290,15 @@ func TestStreamSegmentsFoldRunsBetweenPanels(t *testing.T) {
 		return out
 	}
 	tail := page.Segments(true)
-	if got := fmt.Sprint(shape(tail)); got != "[fold:4/rows:0 panel:p fold:2/rows:3]" {
+	if got := fmt.Sprint(shape(tail)); got != "[fold:0/rows:4 panel:p fold:0/rows:5]" {
 		t.Fatalf("tail segments %s", got)
 	}
-	if got := fmt.Sprint(shape(page.Segments(false))); got != "[fold:4/rows:0 panel:p fold:5/rows:0]" {
+	if got := fmt.Sprint(shape(page.Segments(false))); got != "[fold:0/rows:4 panel:p fold:0/rows:5]" {
 		t.Fatalf("older-page segments %s", got)
-	}
-	if tail[0].FoldKey() != "a1" || tail[0].FoldCount() != 5 || tail[0].FoldOwner() || !tail[2].FoldOwner() {
-		t.Fatal("fold key, count, or owner flag")
 	}
 	// s3 | owner | s4: the owner answer splits the chips around it.
 	last := tail[2]
-	if len(last.Fold[0].Systems) != 1 || last.Fold[1].Entry.ID != "o" || !last.Fold[1].Owner() || len(last.Rows[0].Systems) != 1 || last.Rows[0].Systems[0].ID != "s4" {
+	if len(last.Rows[0].Systems) != 1 || last.Rows[0].Systems[0].ID != "s3" || last.Rows[1].Entry.ID != "o" || !last.Rows[1].Owner() || len(last.Rows[2].Systems) != 1 || last.Rows[2].Systems[0].ID != "s4" {
 		t.Fatal("an owner answer is not its own row between system chips")
 	}
 }
