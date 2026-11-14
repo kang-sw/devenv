@@ -533,7 +533,14 @@
       "registered_at": "2026-11-14T08:45:52Z"
     },
     "261114-feat-ws-whiteboard-compact-floating-toolbar": {
-      "registered_at": "2026-11-14T08:42:00Z"
+      "registered_at": "2026-11-14T08:42:00Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "docs/compact-floating-toolbar-652",
+        "phase": "active",
+        "touched_at": "2026-11-14T08:57:12Z"
+      }
     },
     "261114-feat-ws-whiteboard-history-centered-header": {
       "registered_at": "2026-11-14T06:17:54Z"
