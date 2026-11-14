@@ -66,7 +66,9 @@ func startHostedDaemon(t *testing.T) *hostedDaemon {
 	if err := os.WriteFile(filepath.Join(project, "ai-docs", "_index.md"), []byte("# Index\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("git", "init", "-q", project).CombinedOutput(); err != nil {
+	// An explicit branch: the slow git.status check expects "master", and a
+	// system gitconfig (Xcode's on macOS) may default to "main".
+	if out, err := exec.Command("git", "init", "-q", "-b", "master", project).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
 	env = append(env,

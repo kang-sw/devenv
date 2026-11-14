@@ -230,7 +230,9 @@ def write_runtime_metadata(binary: Path, identity: dict) -> None:
         raise ValueError("runtime metadata does not identify the copied binary")
     payload = dict(identity, schema_version=1, binary_sha256=digest)
     path = runtime_metadata_path(binary)
-    tmp = unique_runtime_temp_path(path.parent, path.name)
+    # A short label: deriving it from path.name nests an already-unique temp
+    # name twice and overflows Windows MAX_PATH (260) under deep temp dirs.
+    tmp = unique_runtime_temp_path(path.parent, "metadata")
     try:
         tmp.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
         os.replace(tmp, path)
@@ -481,7 +483,8 @@ def read_local_devenv_contract(plugin_dir: Path, os_name: str) -> dict | None:
     if not marker.is_file():
         return None
     try:
-        payload = json.loads(marker.read_text(encoding="utf-8"))
+        # utf-8-sig: Windows PowerShell 5.1 `Set-Content -Encoding utf8` writes a BOM.
+        payload = json.loads(marker.read_text(encoding="utf-8-sig"))
     except Exception as exc:
         note(f"local devenv runtime contract is inactive: invalid JSON in {marker}: {exc}")
         return None

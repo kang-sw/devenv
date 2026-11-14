@@ -514,6 +514,42 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
             )
             self.assertFalse(launcher.local_devenv_runtime_enabled(sibling, "linux"))
 
+    def test_a_marker_with_a_utf8_bom_is_honoured(self):
+        # Windows PowerShell 5.1 `Set-Content -Encoding utf8` writes a BOM.
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plugin_dir = root / "devenv" / "agents-plugin"
+            plugin_dir.mkdir(parents=True)
+            self.write_local_contract(plugin_dir, package_root=root)
+            marker = plugin_dir / ".local-devenv-runtime"
+            marker.write_bytes(b"\xef\xbb\xbf" + marker.read_bytes())
+            self.assertIsNotNone(launcher.read_local_devenv_contract(plugin_dir, "linux"))
+            self.assertTrue(launcher.local_devenv_runtime_enabled(plugin_dir, "linux"))
+
+    def test_metadata_temp_name_does_not_nest_the_binary_name(self):
+        # A staged candidate's name is already unique and long; nesting it
+        # again in the metadata temp name overflowed Windows MAX_PATH.
+        launcher = load_launcher()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            candidate = launcher.unique_runtime_temp_path(Path(temp_dir), "ws-mcp-0.50.0-dev-6e7cb67537e5.exe.bootstrap")
+            candidate.write_bytes(b"binary")
+            seen = []
+            real_replace = launcher.os.replace
+
+            def replace(src, dst):
+                seen.append(Path(src).name)
+                return real_replace(src, dst)
+
+            with mock.patch.object(launcher.os, "replace", replace):
+                launcher.write_runtime_metadata(candidate, {"version": "0.50.0-dev"})
+            [tmp_name] = seen
+            self.assertNotIn(candidate.name, tmp_name)
+            self.assertLessEqual(len(tmp_name), 64)
+            self.assertIsNotNone(launcher.read_runtime_metadata(candidate))
+
     def test_source_fingerprint_covers_embedded_assets_but_not_test_only_files(self):
         launcher = load_launcher()
 
@@ -661,10 +697,11 @@ class RuntimeCapabilitiesCompatibilityTest(unittest.TestCase):
     def test_local_devenv_build_env_recovers_home_when_absent(self):
         launcher = load_launcher()
 
-        with mock.patch.object(launcher.Path, "home", return_value=Path("/home/recovered")):
+        recovered = Path("/home/recovered")
+        with mock.patch.object(launcher.Path, "home", return_value=recovered):
             with mock.patch.dict(launcher.os.environ, {}, clear=True):
                 env = launcher.local_devenv_build_env("linux")
-                self.assertEqual(env["HOME"], "/home/recovered")
+                self.assertEqual(env["HOME"], str(recovered))
                 # Non-Windows must not inject Windows cache vars.
                 self.assertNotIn("USERPROFILE", env)
                 self.assertNotIn("LOCALAPPDATA", env)
