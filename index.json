@@ -517,6 +517,9 @@
     "261114-feat-ws-dashboard-conversation-audit-view": {
       "registered_at": "2026-11-13T16:39:01Z"
     },
+    "261114-feat-ws-whiteboard-history-unified-decisions": {
+      "registered_at": "2026-11-14T06:03:03Z"
+    },
     "261114-refactor-ws-split-oversized-source-files": {
       "registered_at": "2026-11-13T15:16:33Z"
     },
