@@ -1,6 +1,7 @@
 {
   "agent.context": "контекст: {0} токенов",
   "agent.done": "готово",
+  "agent.effort": "усилия: {0}",
   "agent.failed": "ошибка",
   "agent.model": "модель: {0}",
   "agent.name": "агент {0}",
