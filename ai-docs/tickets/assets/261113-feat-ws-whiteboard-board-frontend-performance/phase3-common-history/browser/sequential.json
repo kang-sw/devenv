@@ -1,0 +1,1283 @@
+{
+  "status": "matched native two-then-one 219px heights and late growth",
+  "sides": {
+    "baseline": {
+      "routeTrace": [
+        {
+          "action": "held",
+          "key": "entry:e723",
+          "url": "http://127.0.0.1:53220/s/wb-frame-e4ba8bf4bd1b.js",
+          "at": 1794637942870
+        },
+        {
+          "action": "held",
+          "key": "entry:e725",
+          "url": "http://127.0.0.1:53220/s/wb-frame-e4ba8bf4bd1b.js",
+          "at": 1794637942870
+        },
+        {
+          "action": "held",
+          "key": "entry:e727",
+          "url": "http://127.0.0.1:53220/s/wb-frame-e4ba8bf4bd1b.js",
+          "at": 1794637942870
+        },
+        {
+          "action": "released",
+          "key": "entry:e723",
+          "at": 1794637943288
+        },
+        {
+          "action": "released",
+          "key": "entry:e725",
+          "at": 1794637943288
+        },
+        {
+          "action": "released",
+          "key": "entry:e727",
+          "at": 1794637943331
+        }
+      ],
+      "states": [
+        {
+          "label": "three actual frame documents awaiting unchanged script responses",
+          "topic": {
+            "key": "T04",
+            "top": 1124,
+            "left": 2,
+            "width": 691.65625,
+            "height": 961.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": true,
+                "queued": false,
+                "style": "300px",
+                "clip": 300,
+                "live": 388.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": 1189.75,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 1744.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 1804.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 1809.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e655",
+                "tag": "DIV",
+                "style": "",
+                "top": 1876.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 1911.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 1978.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 2012.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 2080.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        },
+        {
+          "label": "first two native 219px heights applied; third response still held",
+          "topic": {
+            "key": "T04",
+            "top": 1124,
+            "left": 2,
+            "width": 691.65625,
+            "height": 1399.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": true,
+                "queued": false,
+                "style": "738px",
+                "clip": 738,
+                "live": 826.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": 1189.75,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 1744.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 1804.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 1809.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e655",
+                "tag": "DIV",
+                "style": "",
+                "top": 2095.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 2130.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 2416.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 2450.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 2518.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        },
+        {
+          "label": "third native 219px height applied; boundary finalized",
+          "topic": {
+            "key": "T04",
+            "top": 1124,
+            "left": 2,
+            "width": 691.65625,
+            "height": 1618.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": false,
+                "queued": false,
+                "style": "957px",
+                "clip": 957,
+                "live": 1045.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": 1189.75,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 1744.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 1804.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 1809.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e655",
+                "tag": "DIV",
+                "style": "",
+                "top": 2095.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 2130.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 2416.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 2450.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 2737.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        },
+        {
+          "label": "native version disclosure produced late height; finalized boundary retained",
+          "topic": {
+            "key": "T04",
+            "top": -454,
+            "left": 2,
+            "width": 691.65625,
+            "height": 1876.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": false,
+                "queued": false,
+                "style": "1215px",
+                "clip": 1215,
+                "live": 1303.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": -388.25,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 166.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 226.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 231.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e655",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 518.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 810.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 1096.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 1130.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 1417.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        }
+      ],
+      "trace": {
+        "heights": [
+          {
+            "at": 320.90000009536743,
+            "key": "topic:T00",
+            "height": 526
+          },
+          {
+            "at": 321.5,
+            "key": "entry:e1033",
+            "height": 219
+          },
+          {
+            "at": 322.2999997138977,
+            "key": "entry:e1035",
+            "height": 219
+          },
+          {
+            "at": 322.90000009536743,
+            "key": "entry:e1037",
+            "height": 219
+          },
+          {
+            "at": 323.19999980926514,
+            "key": "topic:T01",
+            "height": 526
+          },
+          {
+            "at": 323.19999980926514,
+            "key": "entry:e954",
+            "height": 219
+          },
+          {
+            "at": 323.19999980926514,
+            "key": "entry:e956",
+            "height": 219
+          },
+          {
+            "at": 326.5,
+            "key": "entry:e958",
+            "height": 219
+          },
+          {
+            "at": 326.5,
+            "key": "topic:T02",
+            "height": 526
+          },
+          {
+            "at": 326.59999990463257,
+            "key": "entry:e877",
+            "height": 219
+          },
+          {
+            "at": 326.59999990463257,
+            "key": "entry:e879",
+            "height": 219
+          },
+          {
+            "at": 326.59999990463257,
+            "key": "entry:e881",
+            "height": 219
+          },
+          {
+            "at": 326.69999980926514,
+            "key": "topic:T03",
+            "height": 526
+          },
+          {
+            "at": 326.69999980926514,
+            "key": "entry:e800",
+            "height": 219
+          },
+          {
+            "at": 326.69999980926514,
+            "key": "entry:e802",
+            "height": 219
+          },
+          {
+            "at": 326.69999980926514,
+            "key": "entry:e804",
+            "height": 219
+          },
+          {
+            "at": 4395.400000095367,
+            "key": "topic:T03",
+            "height": 526
+          },
+          {
+            "at": 4396,
+            "key": "entry:e800",
+            "height": 219
+          },
+          {
+            "at": 4396,
+            "key": "entry:e804",
+            "height": 219
+          },
+          {
+            "at": 4396.199999809265,
+            "key": "entry:e802",
+            "height": 219
+          },
+          {
+            "at": 5231.099999904633,
+            "key": "topic:T04",
+            "height": 526
+          },
+          {
+            "at": 5231.900000095367,
+            "key": "topic:T05",
+            "height": 526
+          },
+          {
+            "at": 5232.699999809265,
+            "key": "entry:e646",
+            "height": 219
+          },
+          {
+            "at": 5232.799999713898,
+            "key": "entry:e648",
+            "height": 219
+          },
+          {
+            "at": 5232.900000095367,
+            "key": "entry:e650",
+            "height": 219
+          },
+          {
+            "at": 5653.199999809265,
+            "key": "entry:e725",
+            "height": 219
+          },
+          {
+            "at": 5653.199999809265,
+            "key": "entry:e723",
+            "height": 219
+          },
+          {
+            "at": 5694.5,
+            "key": "entry:e727",
+            "height": 219
+          },
+          {
+            "at": 6732.099999904633,
+            "key": "entry:e655",
+            "height": 219
+          }
+        ],
+        "errors": []
+      },
+      "cache": {
+        "e723:true": 289.25,
+        "e725:true": 289.25,
+        "e727:true": 289.25
+      },
+      "lateCache": {
+        "e723:true": 289.25,
+        "e725:true": 289.25,
+        "e727:true": 289.25
+      }
+    },
+    "candidate": {
+      "routeTrace": [
+        {
+          "action": "held",
+          "key": "entry:e723",
+          "url": "http://127.0.0.1:53255/s/wb-frame-e4ba8bf4bd1b.js",
+          "at": 1794637954708
+        },
+        {
+          "action": "held",
+          "key": "entry:e725",
+          "url": "http://127.0.0.1:53255/s/wb-frame-e4ba8bf4bd1b.js",
+          "at": 1794637954708
+        },
+        {
+          "action": "held",
+          "key": "entry:e727",
+          "url": "http://127.0.0.1:53255/s/wb-frame-e4ba8bf4bd1b.js",
+          "at": 1794637954708
+        },
+        {
+          "action": "released",
+          "key": "entry:e723",
+          "at": 1794637955104
+        },
+        {
+          "action": "released",
+          "key": "entry:e725",
+          "at": 1794637955104
+        },
+        {
+          "action": "released",
+          "key": "entry:e727",
+          "at": 1794637955147
+        }
+      ],
+      "states": [
+        {
+          "label": "three actual frame documents awaiting unchanged script responses",
+          "topic": {
+            "key": "T04",
+            "top": 1124,
+            "left": 2,
+            "width": 691.65625,
+            "height": 961.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": true,
+                "queued": false,
+                "style": "300px",
+                "clip": 300,
+                "live": 388.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": 1189.75,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 1744.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 1804.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 1809.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e655",
+                "tag": "DIV",
+                "style": "",
+                "top": 1876.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 1911.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 1978.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 2012.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 2080.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        },
+        {
+          "label": "first two native 219px heights applied; third response still held",
+          "topic": {
+            "key": "T04",
+            "top": 1124,
+            "left": 2,
+            "width": 691.65625,
+            "height": 1399.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": true,
+                "queued": false,
+                "style": "738px",
+                "clip": 738,
+                "live": 826.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": 1189.75,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 1744.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 1804.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 1809.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e655",
+                "tag": "DIV",
+                "style": "",
+                "top": 2095.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 2130.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 2416.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "",
+                "top": 2450.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 2518.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        },
+        {
+          "label": "third native 219px height applied; boundary finalized",
+          "topic": {
+            "key": "T04",
+            "top": 1124,
+            "left": 2,
+            "width": 691.65625,
+            "height": 1618.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": false,
+                "queued": false,
+                "style": "957px",
+                "clip": 957,
+                "live": 1045.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": 1189.75,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 1744.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 1804.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 1809.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e655",
+                "tag": "DIV",
+                "style": "",
+                "top": 2095.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 2130.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 2416.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 2450.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 2737.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        },
+        {
+          "label": "native version disclosure produced late height; finalized boundary retained",
+          "topic": {
+            "key": "T04",
+            "top": -454,
+            "left": 2,
+            "width": 691.65625,
+            "height": 1876.75,
+            "near": true,
+            "histories": [
+              {
+                "key": "T04",
+                "chunks": [
+                  "e723"
+                ],
+                "pending": false,
+                "queued": false,
+                "style": "1215px",
+                "clip": 1215,
+                "live": 1303.484375,
+                "edge": 0.609375,
+                "bottomGap": 0,
+                "steps": 1
+              }
+            ],
+            "frames": [
+              {
+                "key": "topic:T04",
+                "tag": "IFRAME",
+                "style": "526px",
+                "top": -388.25,
+                "left": 2,
+                "width": 691.65625,
+                "height": 526
+              },
+              {
+                "key": "entry:e721",
+                "tag": "DIV",
+                "style": "",
+                "top": 166.8125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e653",
+                "tag": "DIV",
+                "style": "",
+                "top": 226.0625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e723",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 231.359375,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e655",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 518.609375,
+                "left": 26,
+                "width": 643.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e725",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 810.15625,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e657",
+                "tag": "DIV",
+                "style": "",
+                "top": 1096.40625,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              },
+              {
+                "key": "entry:e727",
+                "tag": "IFRAME",
+                "style": "219px",
+                "top": 1130.953125,
+                "left": 16,
+                "width": 663.65625,
+                "height": 219
+              },
+              {
+                "key": "entry:e659",
+                "tag": "DIV",
+                "style": "",
+                "top": 1417.203125,
+                "left": 26,
+                "width": 643.65625,
+                "height": 0
+              }
+            ]
+          }
+        }
+      ],
+      "trace": {
+        "heights": [
+          {
+            "at": 352.5,
+            "key": "topic:T00",
+            "height": 526
+          },
+          {
+            "at": 353.2000002861023,
+            "key": "entry:e1033",
+            "height": 219
+          },
+          {
+            "at": 353.59999990463257,
+            "key": "entry:e1037",
+            "height": 219
+          },
+          {
+            "at": 353.59999990463257,
+            "key": "topic:T01",
+            "height": 526
+          },
+          {
+            "at": 354,
+            "key": "entry:e954",
+            "height": 219
+          },
+          {
+            "at": 354.5,
+            "key": "entry:e1035",
+            "height": 219
+          },
+          {
+            "at": 354.5,
+            "key": "entry:e956",
+            "height": 219
+          },
+          {
+            "at": 354.59999990463257,
+            "key": "topic:T02",
+            "height": 526
+          },
+          {
+            "at": 354.59999990463257,
+            "key": "entry:e958",
+            "height": 219
+          },
+          {
+            "at": 354.7000002861023,
+            "key": "entry:e877",
+            "height": 219
+          },
+          {
+            "at": 354.7000002861023,
+            "key": "entry:e879",
+            "height": 219
+          },
+          {
+            "at": 354.7000002861023,
+            "key": "entry:e881",
+            "height": 219
+          },
+          {
+            "at": 354.80000019073486,
+            "key": "topic:T03",
+            "height": 526
+          },
+          {
+            "at": 354.80000019073486,
+            "key": "entry:e800",
+            "height": 219
+          },
+          {
+            "at": 354.90000009536743,
+            "key": "entry:e802",
+            "height": 219
+          },
+          {
+            "at": 354.90000009536743,
+            "key": "entry:e804",
+            "height": 219
+          },
+          {
+            "at": 4410.099999904633,
+            "key": "topic:T03",
+            "height": 526
+          },
+          {
+            "at": 4410.700000286102,
+            "key": "entry:e800",
+            "height": 219
+          },
+          {
+            "at": 4410.700000286102,
+            "key": "entry:e802",
+            "height": 219
+          },
+          {
+            "at": 4410.900000095367,
+            "key": "entry:e804",
+            "height": 219
+          },
+          {
+            "at": 5221,
+            "key": "topic:T04",
+            "height": 526
+          },
+          {
+            "at": 5221.099999904633,
+            "key": "entry:e648",
+            "height": 219
+          },
+          {
+            "at": 5221.200000286102,
+            "key": "entry:e646",
+            "height": 219
+          },
+          {
+            "at": 5221.200000286102,
+            "key": "topic:T05",
+            "height": 526
+          },
+          {
+            "at": 5221.200000286102,
+            "key": "entry:e650",
+            "height": 219
+          },
+          {
+            "at": 5617.599999904633,
+            "key": "entry:e723",
+            "height": 219
+          },
+          {
+            "at": 5617.700000286102,
+            "key": "entry:e725",
+            "height": 219
+          },
+          {
+            "at": 5658.800000190735,
+            "key": "entry:e727",
+            "height": 219
+          },
+          {
+            "at": 6692.099999904633,
+            "key": "entry:e655",
+            "height": 219
+          }
+        ],
+        "errors": []
+      },
+      "cache": {
+        "e723:true": 289.25,
+        "e725:true": 289.25,
+        "e727:true": 289.25
+      },
+      "lateCache": {
+        "e723:true": 289.25,
+        "e725:true": 289.25,
+        "e727:true": 289.25
+      }
+    }
+  }
+}
