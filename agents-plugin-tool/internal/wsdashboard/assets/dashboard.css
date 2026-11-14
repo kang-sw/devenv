@@ -925,7 +925,9 @@ body:has(> .tfix) .r-board .reply { margin-right: 44px; }
 @media (prefers-reduced-motion: reduce) { .fpane .fr .ch .li { transition: none; } }
 
 /* board-first page: no live layer; the board in one readable column that
-   the page scrolls */
+   the page scrolls. As in the live board column, topicResized owns band
+   height compensation: native document anchoring must not add it again. */
+:root[data-mode="board"] { overflow-anchor: none; }
 .dgrid.board { display: block; max-width: 900px; margin: 0 auto; }
 @media (min-width: 1600px) { .dgrid.board { margin: 0; } }
 

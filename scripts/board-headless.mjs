@@ -31,7 +31,9 @@
 //             step put it (no jump), mounts frames before they enter the view,
 //             turns frames far from the view into placeholders that keep
 //             their height, and remounts the mermaid topic with its diagram
-//             drawn again in a new frame.
+//             drawn again in a new frame. Also delays one real first-height
+//             report above the jump target until keep ends, then requires
+//             exactly one scroll compensation and <=1px post-paint drift.
 //
 //   pill      Static pending counts and frame fixed point (use `serve --topics
 //             30 --pending 11 --mermaid`). At two scroll stops, all N pending
@@ -873,15 +875,18 @@ async function scenarioObserver(ctx) {
 }
 
 // BANDS_PAGE's bandTopics reads, per open topic, where it stands against the view and
-// its body frame: mounted (iframe), or a placeholder with its height.
+// its body frame: mounted (iframe), a placeholder with its height, or none
+// for a bodyless log/history topic. shown excludes deliberately closed folds.
 const BANDS_PAGE = () => {
   const bh = window.__bh;
   bh.bandTopics = () => {
     const s = bh.scroller(), top = bh.viewTop(s), bottom = bh.viewBottom(s), h = bottom - top;
     return bh.topics().map((n) => {
       const r = n.getBoundingClientRect(), f = n.querySelector(".tdoc .doc-frame");
+      let shown = !!f;
+      for (let p = f?.parentElement; p && p !== n; p = p.parentElement) if (p.tagName === 'DETAILS' && !p.open) shown = false;
       return { name: n.getAttribute("data-topic"), top: r.top - top, bottom: r.bottom - top, view: h, win: innerHeight,
-        frame: f ? (f.tagName === "IFRAME" ? "iframe" : "placeholder") : "none", height: f ? f.style.height : "" };
+        frame: f ? (f.tagName === "IFRAME" ? "iframe" : "placeholder") : "none", shown, near: n.wbNear ?? null, height: f ? f.style.height : "" };
     });
   };
 };
@@ -905,11 +910,37 @@ async function scenarioBands(ctx) {
   const load = await page.evaluate(() => window.__bh.bandTopics());
   const mLoad = load.find((t) => t.name === M);
   ctx.check(mLoad.frame === "placeholder", `at load the far MERMAID topic's body frame is a ${mLoad.frame}, expected a placeholder`);
-  ctx.check(load.filter((t) => t.top < t.view && t.bottom > 0).every((t) => t.frame === "iframe"), "at load a topic in view holds a placeholder");
+  // History fixtures also contain bodyless topics (frame: "none"). They
+  // are not lazy placeholders; nor should a deliberately closed body mount.
+  const inViewPlaceholders = load.filter((t) => t.top < t.view && t.bottom > 0 && t.shown && t.frame === 'placeholder');
+  ctx.check(!inViewPlaceholders.length, `at load shown body placeholders remain in view: ${JSON.stringify(inViewPlaceholders)}`);
+  const anchoring = await page.evaluate(() => {
+    const s = window.__bh.scroller();
+    return getComputedStyle(s === document.scrollingElement ? document.documentElement : s).overflowAnchor;
+  });
+  ctx.check(anchoring === 'none', `native anchoring is ${anchoring} on the ${kind} scroller; it would compete with topicResized`);
   // Topics never laid out (a placeholder with no height) are what grows
   // above the view on the way back up from the jump.
   const unsized = load.filter((t) => t.frame === "placeholder" && !t.height).length;
   assert(unsized >= 4, `only ${unsized} topic(s) were never laid out at load: run \`serve --mermaid --topics 30\``);
+
+  // Hold one real first-height report above the jump target. Release it
+  // AFTER the jump's keep ends, when native anchoring would be restored.
+  // This deterministically exercises topicResized, not keep's temporary
+  // overflow-anchor:none, which can mask double document compensation.
+  const heldTopic = load.slice(0, load.findIndex((t) => t.name === M)).filter((t) => t.shown && t.frame === 'placeholder' && !t.height).at(-1)?.name;
+  assert(heldTopic, 'need an unsized body immediately above MERMAID');
+  await page.evaluate((name) => {
+    const bh = window.__bh;
+    bh.holdBandHeight = (e) => {
+      const f = bh.section(name)?.querySelector('.tdoc iframe.doc-frame');
+      if (f && e.source === f.contentWindow && e.data?.wbDoc === 'height') {
+        bh.heldBandHeight = { source: e.source, data: e.data };
+        e.stopImmediatePropagation();
+      }
+    };
+    window.addEventListener('message', bh.holdBandHeight, true);
+  }, heldTopic);
 
   // 2. A jump to the panel under MERMAID lands and holds while the frames
   // around it mount and report their heights.
@@ -933,6 +964,35 @@ async function scenarioBands(ctx) {
   ctx.check(m1.frame && m1.drawn, "after the jump the MERMAID topic's frame did not mount with its diagram drawn");
   log(`jump to ${pid}: landed ${land.toFixed(1)}px from the view top, drift ${drift.toFixed(1)}px over 2s; mermaid ${m1.drawn ? "drawn" : "not drawn"}`);
 
+  await page.waitForFunction(() => window.__bh.heldBandHeight && !window.__bh.keeping(), null, { timeout: 8000 });
+  const firstHeight = await page.evaluate(({ name, pid }) => {
+    const bh = window.__bh, s = bh.scroller(), t = bh.section(name), f = t.querySelector('.tdoc iframe.doc-frame');
+    const held = bh.heldBandHeight;
+    const before = { y: document.getElementById(pid).getBoundingClientRect().top, st: s.scrollTop,
+      above: t.getBoundingClientRect().bottom <= bh.viewTop(s), from: parseFloat(f.style.height) || 0,
+      to: Math.ceil(held.data.height), first: !!f.wbFirst, writes: bh.writesOn(s) };
+    bh.samplePostPaint = true;
+    bh.startSampler([pid]);
+    window.removeEventListener('message', bh.holdBandHeight, true);
+    window.dispatchEvent(new MessageEvent('message', held));
+    return before;
+  }, { name: heldTopic, pid });
+  assert(firstHeight.above && firstHeight.first && firstHeight.to > firstHeight.from,
+    `delayed first-height probe must grow an above-view mount: ${JSON.stringify(firstHeight)}`);
+  await sleep(800);
+  const firstAfter = await page.evaluate((pid) => {
+    const bh = window.__bh, s = bh.scroller(), samples = bh.stopSampler().filter((v) => v.phase !== 'raf');
+    bh.samplePostPaint = false;
+    return { y: document.getElementById(pid).getBoundingClientRect().top, st: s.scrollTop, writes: bh.writesOn(s), samples };
+  }, pid);
+  const delta = firstHeight.to - firstHeight.from;
+  const firstDrift = Math.max(...firstAfter.samples.map((v) => Math.abs(v.y[pid] - firstHeight.y)));
+  ctx.check(firstDrift <= 1 && Math.abs(firstAfter.y - firstHeight.y) <= 1,
+    `above-view ${heldTopic} first height moved ${pid} by ${firstDrift.toFixed(1)}px post-paint`);
+  ctx.check(Math.abs(firstAfter.st - firstHeight.st - delta) <= 1 && firstAfter.writes > firstHeight.writes,
+    `above-view first height must compensate once: height +${delta}, scrollTop +${firstAfter.st - firstHeight.st}, script writes +${firstAfter.writes - firstHeight.writes}`);
+  log(`above-view first height (${kind}): ${heldTopic} +${delta}px, scroll +${firstAfter.st - firstHeight.st}px, post-paint drift ${firstDrift.toFixed(1)}px`);
+
   // 3. Up to the top a step at a time, then back down: each step keeps the
   // topic in view where the step put it, frames mount before they enter the
   // view, and frames far from the view are placeholders with their height.
@@ -954,7 +1014,7 @@ async function scenarioBands(ctx) {
       worst = Math.max(worst, Math.abs(off));
       if (Math.abs(off) > 1) bad.push(`${before.ref} ${off.toFixed(1)}px at scrollTop ${before.st}`);
       const lay = await page.evaluate(() => window.__bh.bandTopics());
-      lay.filter((t) => t.top < t.view && t.bottom > 0 && t.frame === "placeholder").forEach((t) => late.push(`${t.name} at scrollTop ${before.st + moved}`));
+      lay.filter((t) => t.top < t.view && t.bottom > 0 && t.shown && t.frame === "placeholder").forEach((t) => late.push(`${t.name} at scrollTop ${before.st + moved}`));
     }
     return { bad, late, worst };
   };
@@ -963,7 +1023,7 @@ async function scenarioBands(ctx) {
   ctx.check(!up.late.length, `scrolling up showed placeholders in view: ${up.late.join("; ")}`);
   const top = await page.evaluate(() => window.__bh.bandTopics());
   // The far band reaches four window heights past the view's bottom.
-  const far = top.filter((t) => t.top > t.view + 4 * t.win + 50);
+  const far = top.filter((t) => t.frame !== 'none' && t.top > t.view + 4 * t.win + 50);
   const mTop = top.find((t) => t.name === M);
   ctx.check(far.length > 0 && far.every((t) => t.frame === "placeholder"), `at the top a topic beyond the far band holds a mounted frame: ${far.filter((t) => t.frame !== "placeholder").map((t) => t.name).join(", ")}`);
   ctx.check(far.every((t) => /px$/.test(t.height) && parseFloat(t.height) > 0), `a far placeholder lost its height: ${far.filter((t) => !/px$/.test(t.height)).map((t) => t.name).join(", ")}`);
