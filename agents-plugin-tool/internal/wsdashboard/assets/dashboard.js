@@ -3984,10 +3984,11 @@
   // navigated. The history loader accepts bare IDs, never selectors/URLs.
   function boardJump(id) {
     if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|p[1-9][0-9]*)$/.test(id)) return;
-    var target = null;
-    if (window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id); return !!target; });
+    var target = null, unfoldTopic = window.WsCards && window.WsCards.unfoldTopic;
+    if (window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id, unfoldTopic); return !!target; });
     if (!target) target = $(id);
     if (!target || target.id !== id || !inBoard(target)) return;
+    if (unfoldTopic) unfoldTopic(target);
     for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
     // History targets were revealed and anchored by the shared loader.
     // scrollIntoView would also scroll the overflow:hidden clip itself.
@@ -5558,6 +5559,7 @@
     var target = row.id ? $("item-" + row.id) : topic;
     if (!target || !topic) return;
     if (window.WsOverview && window.WsOverview.pick(topic, o)) return;
+    if (window.WsCards) window.WsCards.unfoldTopic(topic);
     if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
     if (live && !tabShown("board")) setTab("board");
     if (row.kind === "board-body") target = topic.querySelector(".tdoc") || topic;
