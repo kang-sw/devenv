@@ -161,9 +161,10 @@ are intentionally not among the initially opened latest panels
 The exact failing script, raw states and full failure log are preserved in
 `browser/sequential-attempt1/`. The sole correction adds a native click to
 open that existing nested disclosure. Source, dates, heights, timeouts and
-assertions are unchanged. The owner explicitly accepted that single input
-correction. The second command passed on both exact identities; this does
-not erase or relabel the failed attempt.
+assertions are unchanged. The root lead authorized that input-only correction
+within the retained verification contract; this was not a new human-owner
+approval. The second command passed on both exact identities; this does not
+erase or relabel the failed attempt.
 
 ## New scenario (c) measurements and Nodes cost
 
