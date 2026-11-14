@@ -453,6 +453,9 @@
     "261113-research-werkschaft-identity": {
       "registered_at": "2026-11-13T11:38:03Z"
     },
+    "261114-bug-design-review-requires-unavailable-researcher-spawn": {
+      "registered_at": "2026-11-14T05:41:20Z"
+    },
     "261114-bug-ws-dashboard-history-paint-resizeobserver-loop": {
       "registered_at": "2026-11-13T21:17:34Z"
     },
