@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -405,7 +406,7 @@ func TestWhiteboardGenericMutationKeepsEntryLocatorsAfterRestart(t *testing.T) {
 		t.Fatalf("panel re-post did not retain distinct durable versions: %+v", got)
 	}
 	for i, entry := range entries {
-		if got[i] != entry {
+		if !reflect.DeepEqual(got[i], entry) {
 			t.Fatalf("restart redirected locator %s: %+v, want %+v", entry.ID, got[i], entry)
 		}
 	}
