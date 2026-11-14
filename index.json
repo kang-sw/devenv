@@ -780,7 +780,14 @@
       }
     },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
-      "registered_at": "2026-11-14T15:16:05Z"
+      "registered_at": "2026-11-14T15:16:05Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-14T22:59:10Z"
+      }
     },
     "261115-research-git-merge-profile-refusal-on-bound-worktree": {
       "registered_at": "2026-11-14T16:36:20Z"
