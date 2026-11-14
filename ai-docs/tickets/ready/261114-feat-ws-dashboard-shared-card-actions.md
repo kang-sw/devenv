@@ -145,3 +145,15 @@ Resume at a higher tier: diagnose the repeated action-state failure before
 editing its expectation, repair the terminal maximum-view specificity defect,
 finish the source verification matrix, and run the allocated independent lite
 review. Review and closure have not run.
+
+### Owner-authorized resumption - 2026-11-14
+
+Owner whiteboard answer (671)=a explicitly authorizes one bounded additional
+round on the same retained worktree/branch at `7356b35ac`, at the existing xlarge
+tier. This supersedes the earlier higher-tier resume instruction, not the stop
+evidence. Diagnose the repeated-update action-state failure against actual
+behavior before changing code or expectations; then narrowly repair terminal
+fold/maximum specificity, finish the browser/package/build verification, and
+run the already-allocated independent lite review. Historical logs/captures
+remain preserved. No Result or closure is authorized without full acceptance;
+P4/649/history/ResizeObserver and live/shared runtime boundaries remain frozen.
