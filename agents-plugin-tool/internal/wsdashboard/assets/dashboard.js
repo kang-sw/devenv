@@ -257,6 +257,9 @@
   function atBottom() { return convo.scrollTop + convo.clientHeight >= convo.scrollHeight - 24; }
   function pinned() { if (visible(convo)) stick = atBottom(); return stick; }
   function pinConvo() { if (stick && visible(convo)) convo.scrollTop = convo.scrollHeight; }
+  // An accepted message starts a new reply, so sending re-arms bottom follow
+  // even when the user had scrolled up. A later user scroll still cancels it.
+  function followConvo() { stick = true; pinConvo(); }
   if (convo) {
     convo.addEventListener("scroll", function () { if (visible(convo)) stick = atBottom(); });
     // A resize (another pane grew, the window changed, the tab came back)
@@ -2232,6 +2235,7 @@
     var sel = cmdSel, fixed = typeof sel.args === "string";
     if (!fixed && imgs.length) { noteWarn(wsT("js.cmd.images")); return; }
     var raw = ctext.value, args = fixed ? sel.args : sendText().trim();
+    followConvo();
     sending = true;
     post("message", { command: sel.name, args: args }, function (ok, res) {
       sending = false;
@@ -2450,6 +2454,7 @@
       body.refs = refs.map(function (p) { return p.ref; });
       body.refNums = refs.map(function (p) { return p.n; });
     }
+    followConvo();
     sending = true;
     post("message", body, function (ok, res) {
       sending = false;
