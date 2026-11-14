@@ -23,6 +23,9 @@
     return s === doc.scrollingElement || s === root ? { top: 0, bottom: innerHeight, height: innerHeight } :
       { top: s.getBoundingClientRect().top + s.clientTop, bottom: s.getBoundingClientRect().top + s.clientTop + s.clientHeight, height: s.clientHeight };
   }
+  // Native scroll padding includes the live face and any fixed host controls.
+  // Overview uses the same exposed viewport through its existing keep writer.
+  function clearance(n) { return parseFloat(getComputedStyle(scroller(n)).scrollPaddingTop) || 0; }
   function items() { return all(ITEM, o.board); }
   function anchor(list, toolbar, bounds, floating) {
     if (!floating && toolbar.bottom > bounds.top && toolbar.top < bounds.bottom) return null;
@@ -212,6 +215,7 @@
     if (state && entry.key && !find(entry.key)) entry = { key: null, offset: 0 };
     pinTop = state ? +state.pinTop || 0 : o.pins.scrollTop;
     n = find(entry.key);
+    var shown = n ? Math.max(entry.offset, clearance(n)) : entry.offset;
     var h = o.frames ? o.frames() : null, before = !state && !calm() ? snapshot() : null;
     var flights = before && o.pins.parentNode !== o.board ? before.filter(function (a) { return o.pins.contains(a.n); }) : [];
     busy = !!before;
@@ -230,8 +234,8 @@
     o.toolbar.querySelector(".board-overview").setAttribute("aria-pressed", "true");
     save(); changed();
     var complete = function () { rove(n || items()[0]); finish(); if (!state) hint(); };
-    if (before) motion(before, flights, true, n || o.toolbar, entry.offset, entry.offset, complete);
-    else { keep(n || o.toolbar, entry.offset); complete(); }
+    if (before) motion(before, flights, true, n || o.toolbar, entry.offset, shown, complete);
+    else { keep(n || o.toolbar, shown); complete(); }
   }
   function exit(target, done, options) {
     if (!o || !on) { if (done) done(); return; }
@@ -261,7 +265,7 @@
     var landed = n && n.isConnected ? n : null;
     var boardTarget = landed && !(inColumn && o.pins.contains(landed)) ? landed : restore;
     if (boardTarget && inColumn && o.pins.contains(boardTarget)) boardTarget = null;
-    var arrival = parseFloat(getComputedStyle(scroller(boardTarget || o.toolbar)).scrollPaddingTop) || 0;
+    var arrival = clearance(boardTarget || o.toolbar);
     var offset = landed && boardTarget === landed ? arrival : boardTarget && restore === boardTarget ? entry.offset : entry.key ? arrival : entry.offset;
     if (landed && inColumn && o.pins.contains(landed) && scroller(landed) === o.pins) keep(landed, 0);
     o.toolbar.querySelector(".board-overview").setAttribute("aria-pressed", "false");
@@ -305,8 +309,8 @@
       var next = list[Math.max(0, Math.min(list.length - 1, i < 0 ? 0 : i + (e.key === "ArrowDown" ? 1 : -1)))];
       rove(next);
       if (next) {
-        var r = next.getBoundingClientRect(), v = view(scroller(next));
-        if (r.top < v.top || r.bottom > v.bottom) keep(next, r.top < v.top ? 0 : Math.max(0, v.height - r.height));
+        var r = next.getBoundingClientRect(), v = view(scroller(next)), pad = clearance(next);
+        if (r.top < v.top + pad || r.bottom > v.bottom) keep(next, r.top < v.top + pad ? pad : Math.max(pad, v.height - r.height));
       }
     } else if (e.key === "Enter" && i >= 0) { swallow(e); exit(list[i]); }
   }
