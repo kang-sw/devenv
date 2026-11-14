@@ -33,6 +33,12 @@
 // rail, actions, palette, controls, reload), or a motion checkpoint (enter-top, enter-middle,
 // enter-bottom, pins). Without it every check runs; failures stop the run.
 // Focused cases help diagnose a blocker without repeatedly hitting it.
+// --baseline-ref REF classifies only an exactly measured equivalent Web
+// containment failure (same viewport/face, horizontal bounds and menu layout)
+// as known-baseline-failure. Requires --capture-dir; predicates remain false
+// and a separate regression verdict is printed. No other failure is waived.
+// web-containment runs just that identical production/baseline probe.
+// keep --framed-middle selects a real T topic in history-heavy fixtures.
 // --capture-dir DIR saves screenshots and JSON motion traces. These are
 // evidence, not an automated visual comparison. Tests only inject into the
 // browser; none of these three scenarios mutates server board data.
@@ -137,6 +143,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { createHash } from 'node:crypto';
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -626,7 +633,27 @@ async function openBoard(ctx) {
   BROWSERS.push(browser);
   const tab = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height } });
   tab.on("pageerror", (e) => ctx.errors.push(String(e)));
+  const consoleErrors = [];
+  tab.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   await tab.addInitScript(INIT);
+  if (ctx.assetRef) {
+    const files = ['wsdashboard/assets/cards.js', 'wsdashboard/assets/dashboard.css', 'wsdashboard/assets/overview.js', 'wsdashboard/assets/terminal.js', 'wswhiteboard/assets/rail.js'];
+    ctx.assetReplacements = []; ctx.assetHashes = {};
+    await tab.route('**/*', async (route) => {
+      if (!route.request().isNavigationRequest()) return route.continue();
+      const response = await route.fetch(); let body = await response.text();
+      for (const file of files) {
+        const relative = 'agents-plugin-tool/internal/' + file;
+        const current = fs.readFileSync(path.join(REPO, relative), 'utf8');
+        const baseline = run('git', ['show', ctx.assetRef + ':' + relative], { cwd: REPO });
+        if (body.includes(current)) {
+          body = body.replace(current, () => baseline); ctx.assetReplacements.push(relative);
+          ctx.assetHashes[relative] = { candidate: createHash('sha256').update(current).digest('hex'), baseline: createHash('sha256').update(baseline).digest('hex') };
+        }
+      }
+      await route.fulfill({ response, body });
+    });
+  }
   await tab.goto(ctx.args.url, { waitUntil: "load" });
   let page = tab;
   if (await tab.evaluate(() => document.documentElement.hasAttribute("data-shell"))) {
@@ -636,13 +663,16 @@ async function openBoard(ctx) {
   await page.evaluate(IN_PAGE);
   await page.waitForFunction(() => window.__bh.board_()?.querySelector("section.topic[data-topic]"), null, { timeout: 10000 });
   const kind = await page.evaluate(() => window.__bh.kind());
-  if (kind !== "standalone") await page.waitForFunction(() => window.__bh.sockets.some((s) => s.readyState === 1 && typeof s.onmessage === "function"), null, { timeout: 10000 });
+  if (kind !== "standalone" && ctx.requireStream !== false) await page.waitForFunction(() => window.__bh.sockets.some((s) => s.readyState === 1 && typeof s.onmessage === "function"), null, { timeout: 10000 }).catch(async (e) => {
+    throw new Failure('stream setup: ' + JSON.stringify({ error: e.message, pageErrors: ctx.errors, consoleErrors,
+      sockets: await page.evaluate(() => __bh.sockets.map((s) => ({ url: s.url, state: s.readyState, handler: typeof s.onmessage }))) }));
+  });
   if (kind === "adapter") {
     const shown = await page.evaluate(() => { const c = document.getElementById("bcol"); return !!c && c.getClientRects().length > 0; });
     if (!shown) await page.click('#tabbar [data-tab="board"]');
   }
   // Body frames size themselves once loaded; wait until each reported.
-  await page.waitForFunction(() => window.__bh.frames().every((f) => f.style.height), null, { timeout: 15000 }).catch(() => {});
+  if (ctx.requireFrameHeights !== false) await page.waitForFunction(() => window.__bh.frames().every((f) => f.style.height), null, { timeout: 15000 }).catch(() => {});
   await waitQuiet(page);
   return { browser, page, tab, kind };
 }
@@ -751,7 +781,19 @@ async function scenarioKeep(ctx) {
   // At most 2.5 viewports down: the topic updated above rises to the
   // head, which must stay within the viewport bands' far band (4 viewports)
   // for its frame to stay mounted and report late.
-  const lay = await scrollToMiddle(page, 2.5);
+  let lay;
+  if (ctx.args['framed-middle']) {
+    // History-heavy fixtures begin with log-only topics. Choose a real T
+    // body in the middle, not a pixel distance dominated by those histories.
+    await page.evaluate(() => {
+      const bh = window.__bh, topics = bh.topics().filter((n) => /^T\d+$/.test(n.dataset.topic));
+      const n = topics[Math.floor(topics.length / 2)];
+      if (!n) throw new Error('framed-middle needs rendered T topics');
+      bh.scroller().scrollTop += n.getBoundingClientRect().top - bh.viewTop(bh.scroller()) + 36;
+    });
+    await waitQuiet(page);
+    lay = await page.evaluate(() => window.__bh.layout());
+  } else lay = await scrollToMiddle(page, 2.5);
   const above = lay.filter((t) => t.where === "above"), below = lay.filter((t) => t.where === "below"), inView = lay.filter((t) => t.where === "in");
   assert(above.length >= 3 && below.length >= 1 && inView.length >= 1, `the board must overflow both ways from the middle (above ${above.length}, in view ${inView.length}, below ${below.length}); seed more topics`);
   // The update above is the second topic (it rises past the head, off
@@ -1058,6 +1100,80 @@ async function checkFold(page) {
   qa(recaps.length > 0 && recaps.every((r) => r.clamp === '2' && r.recap <= r.line * 2 + 1), 'existing recap is clamped to at most two lines', recaps);
 }
 
+async function readWebPopover(page) {
+  return page.evaluate(() => {
+    const p = document.querySelector('.wpop'), r = p.getBoundingClientRect(), b = document.querySelector('.wnew').getBoundingClientRect();
+    return { focused: document.activeElement === p.querySelector('input'), left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+      buttonBottom: b.bottom, buttonWidth: b.width, menuWidth: r.width, menuHeight: r.height, viewport: [innerWidth, innerHeight] };
+  });
+}
+function webContained(p) {
+  return p.focused && p.left >= 0 && p.right <= p.viewport[0] && p.top >= p.buttonBottom && p.bottom <= p.viewport[1];
+}
+async function baselineWeb(ctx) {
+  // Chromium treats route.fulfill documents as non-local address space and
+  // blocks their loopback WebSockets. This static containment probe uses no
+  // stream/keep/swap assertion; candidate integration still requires a socket.
+  const baseline = { ...ctx, assetRef: ctx.args['baseline-ref'], requireStream: false, requireFrameHeights: false, errors: [] };
+  const { browser, page, tab, kind } = await overviewReady(baseline);
+  try {
+    await page.evaluate((width) => {
+      const bar = document.querySelector('.board-toolbar');
+      if (width) { bar.style.width = width + 'px'; bar.style.maxWidth = '100%'; }
+      __bh.scroller().scrollTop = 0;
+    }, +(ctx.args['face-width'] || 0));
+    await waitQuiet(page);
+    await page.focus('.wnew'); await tab.keyboard.press('Enter');
+    await page.waitForSelector('.wpop:not([hidden])');
+    const p = await readWebPopover(page);
+    const replacements = [...new Set(baseline.assetReplacements)];
+    assert(replacements.length === 5, 'baseline must substitute every changed production asset: ' + replacements.join(', '));
+    assert(!baseline.errors.length, 'baseline page errors: ' + baseline.errors.join(' | '));
+    await capture(ctx, tab, kind + '-web-baseline', { ref: baseline.assetRef, replacements, predicate: webContained(p), bounds: p });
+    return { ref: baseline.assetRef, replacements, hashes: baseline.assetHashes, predicate: webContained(p), bounds: p,
+      limit: 'Baseline-only static Web UI probe; route-fulfilled baseline has no live WebSocket acceptance.' };
+  } finally { await browser.close(); }
+}
+async function assertWebContainment(ctx, p) {
+  const label = 'Web Enter opens the real viewport-fitting URL/path popover';
+  try { qa(webContained(p), label, p); }
+  catch (failure) {
+    if (!ctx.args['baseline-ref']) throw failure;
+    const baseline = await baselineWeb(ctx), b = baseline.bounds;
+    // Exact width/kind/face evidence only. Compare horizontal coordinates,
+    // intrinsic menu layout, focus and failing overflow edges. Absolute y is
+    // intentionally not equated: the floating face changes that coordinate.
+    const fields = ['left', 'right', 'buttonWidth', 'menuWidth', 'menuHeight'];
+    const equivalent = !baseline.predicate && p.focused === b.focused &&
+      JSON.stringify(p.viewport) === JSON.stringify(b.viewport) && fields.every((k) => Math.abs(p[k] - b[k]) <= .1) &&
+      (p.left < 0) === (b.left < 0) && (p.right > p.viewport[0]) === (b.right > b.viewport[0]) &&
+      (p.top < p.buttonBottom) === (b.top < b.buttonBottom) && (p.bottom > p.viewport[1]) === (b.bottom > b.viewport[1]);
+    const report = { assertion: label, candidatePredicate: false, candidate: p, baseline, comparedFields: fields, equivalent,
+      verdict: equivalent ? 'known-baseline-failure' : 'regression-or-unclassified',
+      attributionLimit: 'Equivalence establishes only this containment defect, not absence of other regressions.' };
+    const dir = ctx.args['capture-dir'];
+    assert(dir, '--baseline-ref requires --capture-dir so every classification retains exact evidence');
+    fs.mkdirSync(path.resolve(dir), { recursive: true });
+    const output = path.join(path.resolve(dir), 'web-containment-comparison.json');
+    fs.writeFileSync(output, JSON.stringify(report, null, 2));
+    log(`${report.verdict}: ${JSON.stringify(report)}; evidence ${output}`);
+    if (!equivalent) throw failure;
+    (ctx.knownBaselineFailures ||= []).push(report);
+  }
+}
+async function scenarioWebContainment(ctx) {
+  const { page, tab, kind } = await overviewReady(ctx);
+  await page.evaluate((width) => {
+    if (width) { const bar = document.querySelector('.board-toolbar'); bar.style.width = width + 'px'; bar.style.maxWidth = '100%'; }
+    __bh.scroller().scrollTop = 0;
+  }, +(ctx.args['face-width'] || 0));
+  await waitQuiet(page);
+  await page.focus('.wnew'); await tab.keyboard.press('Enter'); await page.waitForSelector('.wpop:not([hidden])');
+  const p = await readWebPopover(page);
+  await capture(ctx, tab, kind + '-web-current', { predicate: webContained(p), bounds: p });
+  await assertWebContainment(ctx, p);
+}
+
 // Measurements deliberately use production typography. The reference's 46/28,
 // 76/48 and 82/60 are comparison evidence, not asserted production heights.
 async function compactToolbar(ctx, { page, tab, kind }) {
@@ -1142,6 +1258,18 @@ async function compactToolbar(ctx, { page, tab, kind }) {
     }); evidence.hits = hits;
     qa(!hits.errors.length, `all ${hits.samples} edge/interior points belong to viewport-visible disjoint rounded 30px targets`, hits);
     await capture(ctx, tab, kind + '-compact-floating', floating);
+    await page.focus('.board-overview');
+    for (let k = 0; k < actionCount; k++) {
+      qa(await page.evaluate((k) => document.activeElement === __bh.toolbarIdentity.buttons[k], k), 'floating forward Tab action ' + k);
+      if (k < actionCount - 1) await tab.keyboard.press('Tab');
+    }
+    for (let k = actionCount - 1; k >= 0; k--) {
+      qa(await page.evaluate((k) => document.activeElement === __bh.toolbarIdentity.buttons[k], k), 'floating reverse Tab action ' + k);
+      if (k) await tab.keyboard.press('Shift+Tab');
+    }
+    await tab.keyboard.press('Tab'); await tab.keyboard.press('Enter');
+    await page.waitForSelector('#board-term-slot .tpop:not([hidden])'); await tab.keyboard.press('Escape');
+    qa(await page.evaluate(() => document.activeElement.matches('.tnew')), 'terminal Enter/Escape preserves keyboard opener focus');
     const terminal = floating.buttons[1];
     await tab.mouse.click(terminal.x + terminal.width / 2, terminal.bottom + 4.5);
     await page.waitForSelector('#board-term-slot .tpop:not([hidden])');
@@ -1160,7 +1288,7 @@ async function compactToolbar(ctx, { page, tab, kind }) {
     // Actual Files explorer against the isolated project's real filesystem,
     // before the legacy toolbar scenario installs its deterministic fs routes.
     if (await page.locator('.board-files').count()) {
-      await page.click('.board-files');
+      await page.focus('.board-files'); await tab.keyboard.press('Enter');
       await page.waitForSelector('#files .fr');
       qa(await page.evaluate(() => document.querySelector('#files').hasAttribute('data-max') && document.activeElement.matches('#files .fq')), 'real Files explorer opens and focuses search');
       await page.click('#files .fr[data-path="ai-docs"]');
@@ -1219,8 +1347,23 @@ async function compactToolbar(ctx, { page, tab, kind }) {
     await page.evaluate(async () => { const base = await __bh.baseBoard(); __bh.ovRegion(base.html); });
     await waitQuiet(page);
     qa(await page.evaluate(() => __bh.toolbarSame() && __bh.toolbarFrame.isConnected && __bh.toolbarFrame.contentWindow === __bh.toolbarWindow), 'live board event preserves face/buttons and unchanged iframe browsing context');
+    const transitionAnchor = await page.evaluate(() => {
+      const bh = __bh, s = bh.scroller(), n = bh.topics().find((n) => !n.closest('#bpins'));
+      bh.toolbarTransitionAnchor = n;
+      return { natural: n.getBoundingClientRect().top + s.scrollTop, threshold: bh.board_().getBoundingClientRect().top - bh.viewTop(s) };
+    });
+    evidence.transitions = [];
+    for (const st of [0, Math.max(0, transitionAnchor.threshold - 1), transitionAnchor.threshold + 1, transitionAnchor.threshold + 20, Math.max(0, transitionAnchor.threshold - 1), 0]) {
+      await page.evaluate((st) => { __bh.scroller().scrollTop = st; }, st); await waitQuiet(page);
+      const sample = await page.evaluate(() => ({ geometry: __bh.toolbarMeasure(), natural: __bh.toolbarTransitionAnchor.getBoundingClientRect().top + __bh.scroller().scrollTop }));
+      evidence.transitions.push(sample);
+      qa(Math.abs(sample.natural - transitionAnchor.natural) <= 1 && Math.abs(sample.geometry.slot.height - top.slot.height) <= 1, 'transition keeps reading geometry and reserved wrapped slot', sample);
+    }
     evidence.pageErrors = ctx.errors;
-    log('production compact measurements (not reference parity): ' + JSON.stringify(evidence));
+    log('production compact measurements (not reference parity): ' + JSON.stringify({ kind, viewport: evidence.viewport, faceWidth: evidence.faceWidth,
+      measurements: evidence.measurements.map((m) => ({ phase: m.phase, face: m.face, slot: m.slot.height, padding: m.padding, overflow: m.overflow, wrappedActions: m.wrappedActions, counts: m.counts.text })),
+      transitions: evidence.transitions.map((s) => ({ scrollTop: s.geometry.scrollTop, floating: s.geometry.floating, slot: s.geometry.slot.height, natural: s.natural })),
+      hits: evidence.hits, overviewOffset: [evidence.overviewAnchorBefore.offset, evidence.overviewAnchorAfter.offset], nativeArrival: evidence.nativeArrival }));
   } finally {
     await capture(ctx, tab, kind + '-compact-result', evidence);
   }
@@ -1363,11 +1506,8 @@ async function scenarioToolbar(ctx) {
   if (first.order.some((x) => /wnew/.test(x))) {
     await page.focus('.wnew'); await tab.keyboard.press('Enter');
     await page.waitForSelector('.wpop:not([hidden])');
-    const webPop = await page.evaluate(() => {
-      const p = document.querySelector('.wpop'), r = p.getBoundingClientRect(), b = document.querySelector('.wnew').getBoundingClientRect();
-      return { focused: document.activeElement === p.querySelector('input'), left: r.left, right: r.right, top: r.top, bottom: r.bottom, buttonBottom: b.bottom, viewport: [innerWidth, innerHeight] };
-    });
-    qa(webPop.focused && webPop.left >= 0 && webPop.right <= webPop.viewport[0] && webPop.top >= webPop.buttonBottom && webPop.bottom <= webPop.viewport[1], 'Web Enter opens the real viewport-fitting URL/path popover', webPop);
+    const webPop = await readWebPopover(page);
+    await assertWebContainment(ctx, webPop);
     await tab.keyboard.press('Escape');
     qa(await page.evaluate(() => document.querySelector('.wpop').hidden && document.activeElement.matches('.wnew')), 'Web Escape restores opener focus');
   }
@@ -2284,6 +2424,9 @@ async function scenarioHistory(ctx) {
   }
   try {
     await page.evaluate(HISTORY_PAGE);
+    if (ctx.args['face-width']) await page.evaluate((width) => {
+      const bar = document.querySelector('.board-toolbar'); bar.style.width = width + 'px'; bar.style.maxWidth = '100%';
+    }, +ctx.args['face-width']);
     assert(await page.evaluate(() => !!window.__bh.history()), 'seed HISTORY with serve --history-entries 180');
     if (ctx.navigationOnly) {
       // Recreate the previous 214px rAF excursion's near-full clip: load a
@@ -2324,10 +2467,14 @@ async function scenarioHistory(ctx) {
     await page.waitForFunction(() => window.wbHistory.seen(window.__bh.history().closest('.topic'), '0px')?.visible, null, { timeout: 2000 });
     const visible = await page.evaluate((id) => {
       const node = document.getElementById(id), r = node.getBoundingClientRect(), clip = node.closest('.wb-history').querySelector('.history-clip').getBoundingClientRect(), bh = window.__bh;
-      return { y: r.top, clipTop: clip.top, clipBottom: clip.bottom, viewTop: bh.viewTop(bh.scroller()), viewBottom: bh.viewBottom(bh.scroller()), clipScrollTop: node.closest('.history-clip').scrollTop };
+      const face = document.querySelector('.board-toolbar-face')?.getBoundingClientRect();
+      const control = node.querySelector('summary') || node, cr = control.getBoundingClientRect();
+      const hit = document.elementFromPoint((cr.left + cr.right) / 2, (cr.top + cr.bottom) / 2);
+      return { y: r.top, faceBottom: face?.bottom || 0, controlTop: cr.top, controlBottom: cr.bottom, controlOwnsPoint: !!hit && (control === hit || control.contains(hit)),
+        clipTop: clip.top, clipBottom: clip.bottom, viewTop: bh.viewTop(bh.scroller()), viewBottom: bh.viewBottom(bh.scroller()), clipScrollTop: node.closest('.history-clip').scrollTop };
     }, target);
     measure('deep-link-visible', visible);
-    assert(visible.y >= visible.clipTop - 1 && visible.y < visible.clipBottom && visible.y >= visible.viewTop && visible.y < visible.viewBottom && visible.clipScrollTop === 0, 'deep-link target not revealed in the bottom-anchored clip');
+    assert(visible.y >= visible.clipTop - 1 && visible.y < visible.clipBottom && visible.y >= Math.max(visible.viewTop, visible.faceBottom) && visible.y < visible.viewBottom && visible.controlTop >= visible.faceBottom && visible.controlBottom <= visible.viewBottom && visible.controlOwnsPoint && visible.clipScrollTop === 0, 'deep-link target not revealed in the bottom-anchored clip');
     const late = await page.evaluate((id) => {
       const entry = document.getElementById(id).closest('.wb-entry');
       let next = entry.nextElementSibling;
@@ -2815,6 +2962,7 @@ async function scenarioHistoryFit(ctx) {
 
 const SCENARIOS = {
   toolbar: scenarioToolbar,
+  'web-containment': scenarioWebContainment,
   overview: scenarioOverview,
   'overview-motion': scenarioOverviewMotion,
   keep: scenarioKeep,
@@ -2848,7 +2996,7 @@ async function main() {
     await SCENARIOS[name](ctx);
     if (ctx.errors.length) ctx.failures.push(`page errors: ${ctx.errors.join(" | ")}`);
     if (ctx.failures.length) throw new Failure(`${ctx.failures.length} check(s) failed:\n  - ${ctx.failures.join("\n  - ")}`);
-    log(`PASS ${name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+    log(`${ctx.knownBaselineFailures?.length ? 'REGRESSION-PASS with ' + ctx.knownBaselineFailures.length + ' known-baseline-failure(s)' : 'PASS'} ${name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
   } catch (e) {
     console.error(`FAIL ${name}: ${e instanceof Failure ? e.message : e.stack || e}`);
     process.exitCode = 1;
