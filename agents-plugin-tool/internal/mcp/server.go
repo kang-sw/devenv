@@ -226,7 +226,16 @@ func NewServer(root, version string, sourceCommit ...string) *Server {
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
-	s.dashboardReconnect()
+	// Restoring the launcher's dashboard rows scans the registry and the
+	// session store; run it beside the serve loop so requests are read (and
+	// refused while draining) at once, even when a drain starts right after
+	// accept. Handlers and the end path wait for it, so no reply precedes
+	// the restore and a late restore never outlives dashboardEnd.
+	reconnectDone := make(chan struct{})
+	go func() {
+		defer close(reconnectDone)
+		s.dashboardReconnect()
+	}()
 	scanner := bufio.NewScanner(in)
 	encoder := json.NewEncoder(out)
 	var writeMu sync.Mutex
@@ -255,6 +264,7 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 	defer func() {
 		stopHeartbeat()
 		<-heartbeatDone
+		<-reconnectDone
 		s.dashboardEnd()
 	}()
 
@@ -316,6 +326,9 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 					}
 				}
 			}()
+			// Answer only once the launcher's rows are restored, so the
+			// replayed initialize's reply means the rail sees them live.
+			<-reconnectDone
 			if err := writeResponse(s.handle(reqCtx, req)); err != nil {
 				s.debugEvent("response.write_error", map[string]any{"id": id, "error": err.Error()})
 			}
