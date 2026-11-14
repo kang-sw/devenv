@@ -567,6 +567,9 @@
     "261114-feat-ws-whiteboard-history-unified-decisions": {
       "registered_at": "2026-11-14T06:03:03Z"
     },
+    "261114-refactor-ws-common-session-interface": {
+      "registered_at": "2026-11-14T11:13:55Z"
+    },
     "261114-refactor-ws-dashboard-large-frontend-files": {
       "registered_at": "2026-11-14T09:32:30Z"
     },
