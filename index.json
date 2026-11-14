@@ -449,6 +449,9 @@
     "261114-bug-pi-hosted-key-blocks-lead-worktree-context": {
       "registered_at": "2026-11-14T11:59:11Z"
     },
+    "261114-bug-pi-subagent-running-without-transcript-progress": {
+      "registered_at": "2026-11-14T12:28:26Z"
+    },
     "261114-bug-ws-dashboard-busy-board-read-gone": {
       "registered_at": "2026-11-14T12:18:46Z"
     },
