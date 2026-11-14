@@ -477,6 +477,9 @@
     "261114-bug-ws-delegate-reviewer-render-lacks-trusted-provenance": {
       "registered_at": "2026-11-14T04:49:44Z"
     },
+    "261114-bug-ws-fork-parent-identity-loss": {
+      "registered_at": "2026-11-14T05:58:11Z"
+    },
     "261114-bug-ws-installed-plugin-missing-native-pi-payload": {
       "registered_at": "2026-11-14T04:54:50Z",
       "lease": {
