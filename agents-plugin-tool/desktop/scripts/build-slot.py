@@ -114,6 +114,14 @@ def main():
                 records.append({"step": name, "exit": code, "log": str(log_path),
                                 "group": process.pid, "group_present_after_step": present})
                 result = code
+                if present:
+                    # Even a successful parent may leave helpers behind. Stop
+                    # and clean them now: carrying the numeric PGID through a
+                    # later long step would lose ownership if the group exits
+                    # and its number is reused in the meantime.
+                    result = code or 125
+                    records[-1]["stopped_for_present_group"] = True
+                    break
                 if code:
                     break
     except Exception as error:

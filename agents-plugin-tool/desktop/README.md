@@ -30,7 +30,10 @@ python3 scripts/build-slot.py --allocated
 The runner has **one cumulative 1,500-second ceiling**, including termination:
 1,485 seconds shared by the following commands, then at most 15 seconds for
 cleanup (TERM for up to 5 seconds, then KILL for the remainder). It stops at the
-first nonzero exit or timeout; source repair and rerun require a new allocation.
+first nonzero exit or timeout. If a process group is still present immediately
+after a foreground step, it also stops (exit 125 when the parent succeeded) and
+cleans up before any next step, so a live numeric PGID is never carried through
+a later build. Source repair and rerun require a new allocation.
 
 1. `$HOME/.cargo/bin/cargo test --frozen --features custom-protocol -j 2 -- --test-threads=1`
 2. `./node_modules/.bin/tauri build --debug --bundles app --ci --no-sign -- --frozen -j 2`
@@ -144,7 +147,10 @@ credential-free health requests, exact-origin navigation, blocked schemes,
 opaque frame URLs, and the no-native-authority configuration. These tests use
 only owned temporary files and loopback listeners, never the live daemon.
 `scripts/test_build_slot.py` additionally defines mocked retirement/reused-ID
-regressions; it is not run during source preparation.
+and foreground-step-boundary regressions. Run these without Cargo or the app:
+`python3 -m unittest discover -s scripts -p test_build_slot.py -v`.
+Its subprocess creation and process-group calls are mocked; no real process
+group is probed or signaled.
 
 Official exact-version API references:
 
