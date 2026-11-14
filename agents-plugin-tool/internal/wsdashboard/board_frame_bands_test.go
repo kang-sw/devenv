@@ -12,15 +12,13 @@ import (
 // (100%) and a FAR band (400%) through wbHistory.watch, once each. A
 // topic's shown frames mount, paced, when it reports NEAR, and not before
 // its first report (unless a topic of its name was last near, as a changed
-// topic's new section is) nor while it skips its rendering; they mount
-// once it renders again. Leaving FAR turns its frames back into
+// topic's new section is). Leaving FAR turns its frames back into
 // placeholders that keep their attributes and height (a pending height
 // included) and a swap's first-height marks (wbKeep, wbGrow), except the frames the page holds (a graft's pair, the focused
 // frame, a held selection, the mention button's frame); coming NEAR again
 // remounts them; a frame mounted with no height yet, or mounted again, is
-// marked for its first height (wbFirst, topicResized). A report with no box changes
-// nothing. The first report
-// marks the topic for content-visibility (data-wbcv). A frame in no topic
+// marked for its first height (wbFirst, topicResized). A report with no box
+// changes nothing. A frame in no topic
 // mounts at once, and without scroll margins everything mounts as before.
 // The cases execute under node when it is installed.
 func TestBoardFrameBands(t *testing.T) {
@@ -59,10 +57,9 @@ check("a topic not reported yet mounts nothing", [A1, A2, B1, C1].every(placehol
 check("a frame in no topic mounts at once", mounted(K1));
 
 report(B, NEAR, true, false);
-check("a report with no box mounts nothing and marks nothing", placeholder(B1) && !B.hasAttribute("data-wbcv"));
+check("a report with no box mounts nothing", placeholder(B1));
 report(A, NEAR, true);
 check("a topic coming near mounts its shown frames", mounted(A1) && mounted(A2));
-check("its first report marks it for content-visibility", A.hasAttribute("data-wbcv"));
 report(C, NEAR, true);
 check("a frame under a closed fold stays a placeholder", placeholder(C1));
 report(B, NEAR, false); report(B, FAR, true);
@@ -109,16 +106,6 @@ var gn = mountFrame(frame("topic:c")); gn.wbNext = true; C.appendChild(gn);
 report(C, FAR, false);
 check("a graft's pending frame stays mounted", gn.parentNode === C);
 
-// A skipped topic mounts nothing until it renders again.
-var D1 = frame("topic:d"), D = topic("d", [D1]);
-board.appendChild(D); bandBoard(D);
-D.dispatchEvent({ type: "contentvisibilityautostatechange", skipped: true });
-report(D, NEAR, true);
-check("a near topic skipping its rendering mounts nothing", placeholder(D1));
-D.dispatchEvent({ type: "contentvisibilityautostatechange", skipped: false });
-drain();
-check("it mounts once it renders again", mounted(D1));
-
 // A changed topic's new section takes the last report for its name.
 var A3 = frame("topic:a"), An = topic("a", [A3]), E1 = frame("topic:e"), En = topic("e", [E1]);
 board.appendChild(An); board.appendChild(En);
@@ -143,8 +130,7 @@ if (bad.length) console.log(bad.join("\n"));
 // TestBoardTopicResizeKeepsTheView pins the above-view compensation
 // (dashboard.js topicResized, topicSettling, topicScroller): a topic
 // standing wholly above its scroller's view whose size the bands changed (a
-// frame mounted with no height whose first height landed, counted once; a
-// topic skipping its rendering or just rendering again) scrolls the
+// frame mounted with no height whose first height landed, counted once) scrolls the
 // scroller by the change outside a keep session; any other change (a frame
 // already shown reporting a new height), a topic in view or below, a
 // maximized topic, a topic's first size, and any change while a keep
@@ -197,11 +183,6 @@ var pending = { wbFirst: true };
 above.frames.push(pending); resize(above, 500);
 check("a frame whose first height has not landed counts nothing", bcol.scrollTop === 1200 && pending.wbFirst && !pending.wbLanded);
 above.frames.pop();
-above.wbUnskip = true; resize(above, 300);
-check("a topic just rendering again scrolls by its change: " + bcol.scrollTop, bcol.scrollTop === 1000);
-above.wbUnskip = false; above.wbSkipped = true; resize(above, 500);
-check("a topic skipping its rendering scrolls by its change: " + bcol.scrollTop, bcol.scrollTop === 1200);
-above.wbSkipped = false;
 grow(inview, 600); grow(below, 900);
 check("a topic in view or below moves nothing", bcol.scrollTop === 1200);
 // After the compensation the above topic sits at 100 - 1200 + 50: still above.
@@ -231,25 +212,19 @@ if (bad.length) console.log(bad.join("\n"));
 `)
 }
 
-// TestBoardTopicContentVisibility pins the stylesheet side of the viewport
-// bands: every board topic remembers its laid-out size (contain-intrinsic-
-// size auto), and only a topic the bands marked (data-wbcv) skips its
-// rendering, never a maximized topic or one holding a maximized panel.
-func TestBoardTopicContentVisibility(t *testing.T) {
+// TestBoardTopicsDoNotSkipRendering pins owner (627)=a: board topics no
+// longer take content-visibility, so no stylesheet rule may skip a topic's
+// rendering. Overview's `content-visibility: visible` overrides
+// (261114-feat-ws-dashboard-board-toolbar-overview) are harmless and stay.
+func TestBoardTopicsDoNotSkipRendering(t *testing.T) {
 	css, err := os.ReadFile("assets/dashboard.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(css)
-	for _, rule := range []string{
-		"section.topic[data-topic] { contain-intrinsic-size: auto 600px; }",
-		"section.topic[data-topic][data-wbcv]:not([data-max]):not(:has(details.entry-panel[data-max])) { content-visibility: auto; }",
-	} {
-		if !strings.Contains(s, rule) {
-			t.Errorf("dashboard.css lacks %q", rule)
+	for _, banned := range []string{"content-visibility: auto", "content-visibility: hidden", "data-wbcv"} {
+		if strings.Contains(s, banned) {
+			t.Errorf("dashboard.css still holds %q; board topics must not skip rendering (627)", banned)
 		}
-	}
-	if strings.Count(s, "content-visibility:") != 1 {
-		t.Errorf("content-visibility must apply through the marked-topic rule only")
 	}
 }

@@ -63,13 +63,9 @@ func TestTerminalCardScriptMatchesTheRoutes(t *testing.T) {
 	}
 }
 
-// TestTerminalButtonEndsTheStatusLine pins where the "+ Terminal" button
-// sits: in a slot at the right end of the composer's status line, beside the
-// sline region rather than inside it, so a region swap (which replaces the
-// region's contents) keeps the button and an open popover. Only a page that
-// offers terminals has the slot; a page without a composer gets one fixed at
-// its corner from terminal.js. The board column has no header row of its own.
-func TestTerminalButtonEndsTheStatusLine(t *testing.T) {
+// The toolbar is the single new-terminal entry: no composer slot, fixed
+// corner fallback, or copy-answers clearance survives the move.
+func TestTerminalButtonLivesInBoardToolbar(t *testing.T) {
 	now := testNow
 	snap := liveSnap(now, wslive.Lead{})
 	snap.Usage = &wslive.Usage{Context: &wslive.UsageContext{Tokens: i64p(1), Window: 10}}
@@ -78,22 +74,20 @@ func TestTerminalButtonEndsTheStatusLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const slot = `<span class="tslot" id="tslot"></span></div></div>`
 	page, err := renderSessionPage(view, regions, true, "xterm.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	foot, sline, at := strings.Index(page, `<div class="cfoot">`), strings.Index(page, `data-region="sline"`), strings.Index(page, slot)
-	if foot < 0 || !(foot < sline && sline < at) || strings.Index(page, `id="composer"`) > foot {
-		t.Errorf("the terminal slot does not end the composer's status line (foot %d, sline %d, slot %d)", foot, sline, at)
+	if strings.Contains(page, `id="tslot"`) || !strings.Contains(page, `<div class="cfoot">`) {
+		t.Error("the composer must keep its status line without a terminal slot")
 	}
 	if page, err = renderSessionPage(view, regions, true, ""); err != nil || strings.Contains(page, `id="tslot"`) || !strings.Contains(page, `<div class="cfoot">`) {
 		t.Errorf("a page that offers no terminals has a terminal slot (err %v)", err)
 	}
 	js := mustAsset(t, "terminal.js")
 	for _, want := range []string{
-		`var slot = doc.getElementById("tslot");`,
-		`slot = mk("div", "tslot tfix");`,
+		`var slot = doc.getElementById("board-term-slot");`,
+		`if (!slot) return;`,
 		`ui.btn.setAttribute("aria-label", wsT("js.term.new"));`,
 		`slot.appendChild(pop);`,
 	} {
@@ -104,12 +98,22 @@ func TestTerminalButtonEndsTheStatusLine(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
 	for _, want := range []string{
 		".cfoot > .r-sline { flex: 1 1 auto; min-width: 0; }",
-		".cfoot:has(> .r-sline:empty):not(:has(> .tslot)) { display: none; }",
-		".tslot.tfix { position: fixed; right: 16px; bottom: 16px;",
-		".tpop { position: absolute; bottom: calc(100% + 8px); right: 0;",
+		".cfoot:has(> .r-sline:empty) { display: none; }",
+		".tpop { position: absolute; top: calc(100% + 8px); left: 0;",
+		"@container board-toolbar (max-width: 540px)",
+		".board-action:not(.board-overview) .board-label, .board-action kbd { display: none; }",
+		".r-board:not(:has(> .topic, > .bcard)) > .empty",
+		".dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)):has(> .empty) { position: absolute; inset: 0 4px 0 2px; display: flex; flex-direction: column; }",
+		".dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)) > .empty { flex: 1 1 0; }",
+		".board-toolbar { container: board-toolbar / inline-size; flex: none;",
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks %q", want)
+		}
+	}
+	for _, gone := range []string{"tslot", "tfix", "margin-right: 44px"} {
+		if strings.Contains(js, gone) || strings.Contains(css, gone) {
+			t.Errorf("terminal slot leftover %q", gone)
 		}
 	}
 	if strings.Contains(js, "bhead") || strings.Contains(css, ".bhead") {
