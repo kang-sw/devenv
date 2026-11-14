@@ -499,6 +499,9 @@
     "261114-bug-ws-parallel-worktree-acquire-reuses-same-pool-entry": {
       "registered_at": "2026-11-14T04:44:51Z"
     },
+    "261114-bug-ws-pi-fork-acquired-worktree-key-authority": {
+      "registered_at": "2026-11-14T08:47:17Z"
+    },
     "261114-bug-ws-pi-settled-executor-resume-home-unavailable": {
       "registered_at": "2026-11-14T06:22:54Z"
     },
