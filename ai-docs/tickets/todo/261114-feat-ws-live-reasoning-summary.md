@@ -1,5 +1,7 @@
 ---
 title: "Show provider-exposed reasoning summaries in live dashboard activity"
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # Show provider-exposed reasoning summaries in live dashboard activity
@@ -61,6 +63,12 @@ authority is MAIN's EXEC2 contract, section 675 and latest override
   projection precedes native settlement, which alone ends the turn. Existing
   natural `RingTurn` receives optional ordered `summaryHistory`; the receiver
   freezes/retries that real record in RAM and commits at file rename.
+- The lead auto-confirmed both final design-review corrections without a new
+  owner question/ID: explicit positive safe `attempt` identity within each
+  request, and a first-v1 mutation barrier over all earlier canonical intake
+  operations and their write side effects. Implicit response-ID-only attempt
+  keys cannot survive projection/history; starting FIFO only at v1 admission
+  cannot fence an earlier locally abandoned legacy handler or scheduled write.
 - Retain T0 through separately negotiated optional fields, unchanged legacy
   paths and immutable old-record preservation, not by assuming any optional
   field is automatically compatible. No new event kind, schema/protocol version
@@ -107,24 +115,42 @@ authority is MAIN's EXEC2 contract, section 675 and latest override
 A producer is a fresh UUID per extension `session_start`, retired at shutdown.
 Its increasing outer-turn counter follows the existing ws `agent_start` to final
 `agent_settled` span, not each Pi request/`turn_end`. Each main-agent
-`before_provider_request` starts a distinct request counter without inspecting
-its payload. A new raw response after an observed failed attempt starts a new
-attempt; a new response while an attempt is active is invalid overlap. Bound
-response/item IDs and actual terminal facts prevent retry concatenation. Raw
-callbacks may precede consumed `message_start`, so that event is not the request
-identity boundary. The built-in serial-stream assumption needs offline proof.
+`before_provider_request` starts a distinct positive safe request counter without
+inspecting its payload. Within that request reserve a positive safe `attempt`
+counter starting at 1. Advance it only after an observed failed attempt followed
+by a newly bound response; a repeated old response or unexplained overlap cannot
+advance it. The request counter does not advance merely because transport retries
+or a continuation response changes without another request hook. Response/item
+IDs stay internal correlation keys, never substitute for serialized counters.
+
+Only a bound response can produce an attempt record; an attempt that never binds
+a response creates no invented history. A failed reservation may advance at the
+next valid response without manufacturing a record for the response-less attempt.
+A new request-hook invocation advances request and resets its attempt counter.
+Part replacement/deduplication is scoped to `(request, attempt, output, part)`;
+raw sequence numbers order only their bound response/attempt. Reject unexplained
+overlap, retired responses/items and unsafe/wrapped counters rather than join
+attempts. Raw callbacks may precede consumed `message_start`, so that event is
+not the identity boundary. Built-in serial correlation and hook-once-before-
+transport-retry behavior need the exact offline fixtures below.
 
 The optional v1 projection has no lifecycle stages:
 
 ```text
-reasoningSummary: {v: 1, producer, turn, revision, activeRequest, truncated,
-  requests: [{request, provider, api, model, status, truncated,
+reasoningSummary: {v: 1, producer, turn, revision,
+  activeRequest: {request, attempt} | null, truncated,
+  requests: [{request, attempt, provider, api, model, status, truncated,
     parts: [{output, part, text, observedBytes, retainedBytes, truncated, status}]}]}
 ```
 
-It replaces the whole bounded current-turn collection. Omission means no update;
-`activeRequest: null` clears live selection, not collected history. Status is an
-actual `streaming`, `complete`, `aborted`, `failed` or `incomplete` fact; local
+It replaces the whole bounded current-turn collection. Omission of the entire
+optional projection means no update. Its `activeRequest` always names an included
+`{request, attempt}` pair or is `null`; omitting the referenced attempt record
+clears selection to `null`, never leaves a stale request-only reference. Clearing
+live selection does not erase collected history. Each `requests` array element
+is one bound attempt, ordered by `(request, attempt)`, not a logical request
+containing an unbounded nested retry list. Status is an actual `streaming`,
+`complete`, `aborted`, `failed` or `incomplete` fact; local
 truncation is separate. Invalid fields cannot clear unrelated activity. Store
 live data on the lead, not shared subagent Activity; reject any `agentId`.
 
@@ -139,13 +165,24 @@ source closures. A UUID or higher revision grants no session authority.
   field capability is advertised only with complete receiver ownership,
   framing/admission and commit support; unsupported standalone/file-only intake
   remains legacy. Old adapters omit fields; old daemons receive none.
-- At JSONL ingress, provisionally enqueue the first syntactically v1 projection
-  and all that opted connection's subsequent canonical intake calls, including
-  reset/start/end, before asynchronous handler execution. Authentication and
-  validation still decide acceptance. This per-connection FIFO is not a global
-  tool queue or protocol change; unrelated tools/legacy paths stay unchanged.
-  Canceled queued calls do not mutate state. Send order and mutex acquisition
-  alone are not a freshness proof under concurrent handlers.
+- From connection open, track canonical intake operations at ingress, including
+  pre-v1 legacy calls and the completion of their write side effects. This
+  lightweight tracking does not change legacy scheduling or unrelated tools.
+  At ingress enqueue the first syntactically v1 projection and every subsequent
+  canonical intake call on that connection, including reset/start/end, before
+  asynchronous handler execution; validation still decides acceptance.
+- Before the first v1 mutation, establish a barrier: all earlier canonical
+  operations and their scheduled/in-progress snapshot/ring write side effects
+  must actually quiesce. A handler response alone is insufficient if deferred
+  writes can still land. Local abandon, timeout or cancellation cannot mark
+  unfinished work quiescent or bypass the barrier. Drain/fence earlier callbacks
+  so they cannot reset/write newer state after admission. If quiescence cannot
+  be established within a bounded receiver admission budget, refuse/revoke
+  optional admission rather than mutate or wait indefinitely. Subsequent
+  canonical calls stay ingress-ordered under FIFO; cancellation skips a queued
+  mutation only when no mutation/write remains possible. This is connection-
+  scoped tracking/barrier/FIFO, not a global queue, new protocol or changed
+  unrelated-tool/legacy scheduling. Send order or mutex races are not proof.
 - Fence optional admission and real-end candidate acceptance with the daemon's
   actual connection/slot generation and current harness/session ownership,
   including terminal-to-hosted takeover. Publish suppression alone is not a
@@ -167,11 +204,13 @@ source closures. A UUID or higher revision grants no session authority.
 
 ### Actual byte bounds and prefix qualification
 
-Bound a turn to 8 KiB aggregate raw text, 16 request records, 64 parts and
-128-byte IDs, with existing provider/API/model display bounds. At flush retain
-exact UTF-8-safe prefixes and terminal facts within a 24-KiB serialized envelope;
-omitted records/text set aggregate/per-part truncation. An omitted active
-request becomes `null`, never a dangling or invented replacement. Record actual
+Bound a turn to 8 KiB aggregate raw text, **16 total bound-attempt records** in
+`requests` across all request/attempt pairs, 64 parts and 128-byte IDs, with
+existing provider/API/model display bounds. This is not 16 logical requests each
+with an additional retry allowance. At flush retain exact UTF-8-safe prefixes
+and terminal facts within a 24-KiB serialized envelope; omitted records/text set
+aggregate/per-part truncation. An omitted active attempt clears `activeRequest`
+to `null`, never a dangling or request-only replacement. Record actual
 observed/retained UTF-8 bytes with safe counters; authoritative replacement
 resets the observed text length. Do not insert ellipsis into provider text or
 reinterpret local clipping as a provider abort/incomplete status.
@@ -179,9 +218,12 @@ reinterpret local clipping as a provider abort/incomplete status.
 The hard bound is **49,152 bytes for the actual complete serialized UTF-8 JSONL
 record including LF**, not character counts or raw-text size. Terminal checks
 occur after actual RPC ID allocation/stringification and include tool name,
-session/adapter arguments and every event/envelope field; reject before writing
-any bytes and cancel the unused pending ID. Hosted checks use one projection
-line and the verified 1.5.2 UUID/widget envelope, including both JSON encoding
+session/adapter arguments, both counters, the active pair and every other
+event/envelope field; reject before writing any bytes and cancel the unused
+pending ID. Counter/attempt metadata consumes the same envelope/frame budget;
+it never adds a per-request retry allowance or raises either byte bound. Hosted
+checks use one projection line and the verified 1.5.2 UUID/widget envelope,
+including both JSON encoding
 layers. No mixed large batch or summary fragment/chunk protocol is selected.
 Rebuild a smaller explicitly truncated projection or reject fixed-overhead
 failure; never widen the scanner/protocol limit. Render local clipping as an
@@ -195,9 +237,13 @@ At the existing real natural end freeze one actual `RingTurn`, preserving its
 counts, duration, origin and reason, with optional
 `summaryHistory: {v: 1, commit, requests}`. The deterministic commit ID binds the
 receiver reply ID and real source-turn identity; hosted identity additionally
-binds holder/observed start sequence. Ordered terminal parts remain independent
-across attempts. Actual abort/error/length/incomplete facts terminalize received
-prefixes; tool failures alone do not relabel them. Earlier completed attempts
+binds holder/observed start sequence. Every `summaryHistory.requests` attempt
+record preserves both positive safe `request` and `attempt` counters, ordered by
+that pair; internal response IDs are not persisted as their replacement. The
+same aggregate 16-record limit applies to live, final and retained data. Exact
+terminal prefixes/parts remain independent across attempts, and response-less
+attempts create no invented record. Actual abort/error/length/incomplete facts
+terminalize received prefixes; tool failures alone do not relabel them. Earlier completed attempts
 remain completed. No new history kind or fake answer/turn is created; rendering
 associates the retained payload below its answer using the 717 component.
 
@@ -358,6 +404,18 @@ Grounded at repository base `9854ff350`; these are observations, not chosen APIs
   (`#L271-L334`), requiring ingress admission rather than send-order claims.
   Exact 1.5.2 `dist/core/agent-session.js#L738-L745` awaits extension settled
   handlers before public native settlement, grounding the final hosted widget.
+- **Auto-confirmed retry/admission corrections:** installed pi-ai 1.5.2
+  `dist/api/openai-codex-responses.js#L178-L339` invokes `onPayload` once before
+  the WebSocket retry/missing-continuation and SSE retry loops; `#L541-L577`
+  exposes raw failed/error events before terminal normalization. Therefore
+  one request hook is not one transport attempt: explicit serialized attempt
+  counters are needed while raw response IDs remain internal. Static source
+  evidence corroborates the lead's exploration result, not a fixture pass.
+  MCP `internal/mcp/server.go#L271-L334` launches concurrent handlers, and
+  `agents-plugin-pi/src/dashboard-feed.ts#L673-L742` can locally abandon a call
+  without undoing remote effects. Tracking only post-v1 requests misses that
+  earlier legacy work; connection-open tracking and actual pre-v1 operation/
+  write-side-effect quiescence are required before the first optional mutation.
 - **Freshness and request lifecycle facts:** terminal feed coalescing,
   resync, capability revocation on failed/off responses, and the five-second
   abandoned-call guard exist in
@@ -448,7 +506,10 @@ wait, global ID, source implementation or readiness claim is introduced.
 
 Review must check completeness/compatibility of the selected source matrix,
 raw-stream correlation, serialized bounds, ingress/owner fencing, hosted final
-ordering and receiver commit/retry semantics. Offline fixtures and actual
+ordering and receiver commit/retry semantics. Both final important review
+concerns are now auto-confirmed in the explicit attempt/aggregate-budget contract
+and first-v1 quiescence barrier; the same design/completeness delta review is
+next, not an owner approval handoff. Offline fixtures and actual
 both-width UI evidence remain future implementation verification, not facts
 already proven by static reads. Internal helper/export names may follow existing
 module conventions; they must not reintroduce the rejected persistence handshake
@@ -475,6 +536,10 @@ kind, schema/protocol version or altered legacy semantics require returning the
 actual incompatibility to the lead, not silently treating optional as T0. Keep
 the three 717-approved assets unchanged and the received-prefix status separate
 from local truncation so clipping cannot be mistaken for complete provider text.
+Preserve explicit `(request, attempt)` identity and its aggregate 16-record limit
+to prevent retry concatenation/resource bypass. Do not admit the first optional
+mutation while an earlier canonical operation or its write effects can still
+land; local timeout/cancellation is not evidence of quiescence.
 
 ## Prior Decisions
 
@@ -493,11 +558,11 @@ from local truncation so clipping cannot be mistaken for complete provider text.
 | scope.span | multi-file | agents-plugin-pi/src/dashboard-feed.ts, src/index.ts, src/hosted-dashboard-events.ts; agents-plugin-tool/internal/wslive, internal/mcp/live_snapshot.go, internal/wsagent, internal/wsdashboard/pageview.go and assets/dashboard.tmpl |
 | scope.surface | cross-module | Pi extension, adapter intake/hosted runner, shared live/history data and dashboard rendering; intended T0 only |
 | scope.new_public_symbol | yes | selected optional reasoningSummary on existing agent/real turn_end, lead live projection, optional RingTurn summaryHistory and reasoning_summary_v1 capability; no new tool/event kind; internal helper names follow module conventions |
-| scope.new_type_contract | yes | lead-selected stage-free projection, atomic terminal final collection, ordered hosted projection/native end and receiver-owned natural-turn commit; T0/legacy invariants require review |
+| scope.new_type_contract | yes | auto-confirmed request+attempt identity, active pair/null and aggregate 16-attempt budget across stage-free live/final/history data; atomic terminal end, ordered hosted end and receiver-owned commit; first-v1 quiescence barrier and T0/legacy invariants require delta review |
 | scope.test_surface | existing | agents-plugin-pi/test/dashboard-feed.test.ts, test/hosted-dashboard-events.test.ts; agents-plugin-tool/internal/wslive/ring_test.go, internal/mcp/live_snapshot_test.go, internal/wsagent/wake_test.go; new fixture-file need is unsettled |
 | complexity.reuse_points | confirmed | selected createDashboardFeed queue/capabilities, piHostedEvents widget filtering, State.Apply real turn end, immutable AppendRing/ReadRingPage, newLiveWriter and conversation; ingress FIFO, owner checks and RAM retry must be implemented |
-| complexity.side_effect_risk | high | provider callbacks, asynchronous transport and persistent ring writes cross reset, retry, failure and writer replacement |
-| risk.correctness | high | source provenance and request generations must survive ordered completion, failure-prefix commit and replay without cross-request contamination |
+| complexity.side_effect_risk | high | pre-v1 canonical handlers and deferred writes may outlive local abandon; track from connection open and establish actual bounded quiescence before optional mutation, then ingress FIFO/owner fences |
+| risk.correctness | high | onPayload once can cover transport retries/continuation recovery; explicit per-request attempt counters, bound-response-only records, aggregate caps and late-legacy mutation fencing prevent contamination |
 | risk.fit | moderate | exact 1.5.2 built-in source modes and minimal receiver-owned integration are lead-selected; design/completeness must review their T0/legacy and failure boundaries |
 | risk.test | high | 1.5.2 observer versus 0.84.4 gap, hosted/terminal skew, crash/commit boundary and actual 1280/360 UI evidence are not covered by implemented summary tests |
 | risk.security_or_contract | high | private thinking/signatures must never enter browser/history; optional shared-store data must remain T0 under old/new writers |
@@ -509,8 +574,9 @@ from local truncation so clipping cannot be mistaken for complete provider text.
 After Sage design/completeness and readiness gates clear, implement the selected
 lead-only contract in one slice: eligible raw observer; bounded stage-free live
 projection; optional final data on real terminal turn_end; ordered hosted final
-widget/native settlement; ingress/owner/revision fencing; and receiver-owned
-frozen natural RingTurn commit/retry. Preserve ordinary replies, tools, usage,
+widget/native settlement; explicit request/attempt identity with aggregate
+budgets; connection-open tracking, first-v1 quiescence and ingress/owner/revision
+fencing; and receiver-owned frozen natural RingTurn commit/retry. Preserve ordinary replies, tools, usage,
 turn accounting and old-version fallback. No subagent slice, client persistence
 handshake, new event kind/schema/protocol/tool or durable checkpoint is included.
 Follow unchanged 717-approved UI placement and settled 725/726 natural-commit,
@@ -524,20 +590,33 @@ Required verification before claiming implementation success:
   and empty/redacted/signature-only input keep ordinary activity. No SDK upgrade
   or live provider request is needed to prove this contract.
 - Exercise raw callback-before-message_start, interleaved item/part ordering,
-  duplicate sequence numbers, authoritative done replacement, separate retries,
-  overlap/unbound/late data and actual error/abort/length/incomplete facts.
+  duplicate sequence numbers and authoritative done replacement within each
+  request/attempt. Prove `onPayload` once before transport retry, including Codex
+  missing-continuation recovery: an observed failed attempt followed by a new
+  bound response advances attempt, not request. Preserve both counters and each
+  exact failed prefix in live/final/history; reject unexplained overlap and
+  retired responses; no bound response means no invented history. Exercise
+  actual error/abort/length/incomplete facts.
   Prove generic thinking, signatures, encrypted content, missing-text synthesis
   and subagent input never enter the new live/history/UI path.
 - Measure actual final JSONL UTF-8 bytes for ASCII controls, quotes/backslashes,
   non-ASCII, long fixed fields and both widget encoding layers: at most 49,152
-  bytes including all envelopes/LF. Check 8-KiB/24-KiB/metadata limits, zero-byte
-  rejection/canceled unused IDs, exact retained prefixes, observed/retained byte
-  counts and separate local truncation versus provider status. No scanner-limit
+  bytes including both counters, active-pair metadata and all envelopes/LF.
+  Check 8-KiB/24-KiB limits and **16 total attempt records**, including many
+  retries under one request and mixed requests. Bound omission clears the active
+  pair to null. Verify zero-byte rejection/canceled unused IDs, exact retained
+  prefixes, observed/retained byte counts and separate local truncation versus
+  provider status. No scanner-limit
   change, chunks, false full-summary claim or executable markup is acceptable.
-- Delay earlier concurrent handlers and run later reset/start/end/retry calls;
-  verify ingress FIFO, canceled-call behavior, producer retirement, conflicting
-  revisions, late timeout effects, replacement connection and takeover owner
-  fences without altering accounting. Terminal final data/end is atomic; hosted
+- Start a canonical legacy intake before the first v1 call, locally abandon or
+  time it out, then delay both its handler and separately its deferred write
+  effects while v1 reset/start/end/retry calls arrive. Prove ingress tracking
+  starts at connection open and the first optional mutation waits for actual
+  quiescence; cancellation/response completion alone cannot release it. Exercise
+  bounded failure to quiesce: optional admission is refused/revoked without
+  mutation. Then verify FIFO, producer retirement, conflicting revisions,
+  replacement/takeover owner fences and unchanged unrelated-tool/legacy
+  scheduling/accounting. Terminal final data/end is atomic; hosted
   final projection precedes native settlement without becoming an end command.
   Quiet/wrapped holder replay preserves existing sequence/hold boundaries.
 - Fail natural-turn append, retry its frozen candidate, lose ordinary intake
