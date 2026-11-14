@@ -775,6 +775,18 @@ function trace(samples, name) {
 
 async function scenarioKeep(ctx) {
   const { page, tab, kind } = await openBoard(ctx);
+  if (ctx.args['face-width']) await page.evaluate((width) => {
+    const bar = document.querySelector('.board-toolbar'); bar.style.width = width + 'px'; bar.style.maxWidth = '100%';
+  }, +ctx.args['face-width']);
+  await waitQuiet(page);
+  // Width changes can leave a cached quiet topic layout while the toolbar's
+  // native ResizeObserver is still pending. Establish its real top footprint
+  // before taking the reserved-slot baseline, never accept the stale slot.
+  await page.waitForFunction(() => {
+    const bar = document.querySelector('.board-toolbar');
+    return !bar.hasAttribute('data-floating') && Math.abs(bar.getBoundingClientRect().height - bar.firstElementChild.getBoundingClientRect().height) < .1;
+  }, null, { polling: 'raf' });
+  const originalSlot = await page.evaluate(() => document.querySelector('.board-toolbar').getBoundingClientRect().height);
   log(`page kind: ${kind} (scroller: ${kind === "adapter" ? "#bcol" : "document"})`);
   const scrollerName = await page.evaluate(() => { const s = window.__bh.scroller(); return s === document.scrollingElement ? "document" : "#" + s.id; });
   assert(scrollerName === (kind === "adapter" ? "#bcol" : "document"), `the board scrolls in ${scrollerName} on a ${kind} page`);
@@ -809,7 +821,17 @@ async function scenarioKeep(ctx) {
   // The framed topic above nearest the view: one far up may be unmounted,
   // and its update brings a placeholder the viewport bands mount only once
   // it comes near, not a frame that reports late.
-  const upAbove = framedAbove.at(-1), lateGrow = upAbove, upBelow = below[below.length - 1].name;
+  const upAbove = framedAbove.at(-1), lateGrow = ctx.args['framed-middle'] ? framedAbove.at(-2) : upAbove, upBelow = below[below.length - 1].name;
+  if (ctx.args['framed-middle']) {
+    // Real focus is the existing production bands-preservation contract.
+    // Grow an unchanged frame, never a replaced/grafted one moved off-band.
+    const held = await page.evaluate((name) => {
+      const f = __bh.section(name).querySelector('.tdoc iframe.doc-frame');
+      f.focus({ preventScroll: true }); __bh.keepHeldFrame = f; __bh.keepHeldWindow = f.contentWindow;
+      return { name, focused: document.activeElement === f, above: f.getBoundingClientRect().bottom <= __bh.viewTop(__bh.scroller()) };
+    }, lateGrow);
+    qa(held.focused && held.above, 'late-height fixture holds a genuinely focused unchanged iframe above the read position', held);
+  }
   const tracked = inView.map((t) => t.name);
   log(`in view: ${tracked.join(", ")}; update above: ${upAbove}; update below: ${upBelow}; late frame: ${lateGrow}`);
 
@@ -821,7 +843,11 @@ async function scenarioKeep(ctx) {
   const b = await page.evaluate((n) => window.__bh.update([n]), upBelow);
   assertChanged(b, [upBelow]);
   assert(b.order[0] === upBelow && b.order[1] === upAbove, `the board order after both updates starts ${b.order.slice(0, 3).join(", ")}`);
-  await sleep(1000);
+  await sleep(ctx.args['framed-middle'] ? 150 : 1000);
+  if (ctx.args['framed-middle']) qa(await page.evaluate((name) => {
+    const f = __bh.section(name).querySelector('.tdoc iframe.doc-frame');
+    return f === __bh.keepHeldFrame && f.contentWindow === __bh.keepHeldWindow && document.activeElement === f && !!__bh.keeping();
+  }, lateGrow), 'focused late iframe identity and real keep session survive both production swaps');
   const keepAtLate = await page.evaluate((n) => { window.__bh.mark(`late frame height (${n} +300px)`); return !!window.__bh.keeping(); }, lateGrow);
   await growFrame(page, lateGrow, 300);
   await sleep(600);
@@ -837,6 +863,10 @@ async function scenarioKeep(ctx) {
   if (failed.length || ctx.args.trace) console.error(`trace of ${tracked[0]} (screen y, transforms included):\n${trace(samples, tracked[0])}`);
   ctx.check(!failed.length, `topics in view moved more than 1px: ${failed.join("; ")}`);
   if (!failed.length) log("ok: topics in view held within 1px through both swaps and the late frame height");
+  const floatingSlot = await page.evaluate(() => {
+    const bar = document.querySelector('.board-toolbar'); return { floating: bar.hasAttribute('data-floating'), slot: bar.getBoundingClientRect().height, face: bar.firstElementChild.getBoundingClientRect().height };
+  });
+  qa(floatingSlot.floating && Math.abs(floatingSlot.slot - originalSlot) <= 1, 'late-height keep retains the original floating/wrapped toolbar slot', { originalSlot, ...floatingSlot });
 
   // 2. A user scroll during a session ends it, and the session writes no
   // more.
@@ -846,7 +876,8 @@ async function scenarioKeep(ctx) {
   assert(above2.length >= 3, "too few topics above the viewport for the user-scroll part");
   const framedAbove2 = await page.evaluate((names) => names.filter((n) => window.__bh.section(n).querySelector('.tdoc iframe.doc-frame')), above2.map((t) => t.name));
   assert(framedAbove2.length >= 1, 'need a framed topic above for the post-user-scroll height probe');
-  const up2 = above2[1].name, grow2 = framedAbove2.at(-1);
+  const up2 = ctx.args['framed-middle'] ? above2.find((n) => n.name !== lateGrow).name : above2[1].name;
+  const grow2 = ctx.args['framed-middle'] ? lateGrow : framedAbove2.at(-1);
   assertChanged(await page.evaluate((n) => window.__bh.update([n]), up2), [up2]);
   const running = await page.evaluate(() => !!window.__bh.keeping());
   assert(running, "no keep session runs right after a board swap");
@@ -883,6 +914,10 @@ async function scenarioKeep(ctx) {
     probe.anchorCss !== "none" || ctx.check(Math.abs(after.st - probe.st) <= 1 && after.y - probe.y > 100, `the scroll moved ${probe.st} -> ${after.st} (${probe.name}.y ${probe.y.toFixed(1)} -> ${after.y.toFixed(1)}) after a 250px growth above with no session running`),
   ].every(Boolean);
   if (ended && okUser) log("ok: a user scroll ended the session and the session no longer writes");
+  await page.evaluate(() => { __bh.scroller().scrollTop = 0; }); await waitQuiet(page);
+  qa(await page.evaluate((height) => {
+    const bar = document.querySelector('.board-toolbar'); return !bar.hasAttribute('data-floating') && Math.abs(bar.getBoundingClientRect().height - height) <= 1;
+  }, originalSlot), 'return from late-height keep restores the original nonfloating wrapped slot');
 }
 
 async function scenarioObserver(ctx) {
@@ -1191,7 +1226,8 @@ async function compactToolbar(ctx, { page, tab, kind }) {
         const face = bar.firstElementChild, s = __bh.scroller(), row = bar.querySelector('.board-tools');
         return { floating: bar.hasAttribute('data-floating'), wrappedActions: bar.hasAttribute('data-wrapped-actions'),
           face: r(face), slot: r(bar), scrollTop: s.scrollTop, viewTop: __bh.viewTop(s), scroller: s === document.scrollingElement ? 'document' : s.id,
-          stickyTop: __bh.viewTop(s) + (s === document.scrollingElement ? 0 : parseFloat(getComputedStyle(s).paddingTop) || 0),
+          stickyInset: parseFloat(getComputedStyle(bar).top) || 0,
+          stickyTop: __bh.viewTop(s) + (parseFloat(getComputedStyle(bar).top) || 0) + (s === document.scrollingElement ? 0 : parseFloat(getComputedStyle(s).paddingTop) || 0),
           padding: parseFloat(getComputedStyle(s).scrollPaddingTop), railInset: parseFloat(getComputedStyle(document.querySelector('#bcol')).getPropertyValue('--wb-rail-inset')),
           counts: { text: bar.querySelector('.board-count').textContent, rect: r(bar.querySelector('.board-count')), font: getComputedStyle(bar.querySelector('.board-count')).fontSize },
           buttons: [...bar.querySelectorAll('.board-action')].map((n) => {
@@ -1232,7 +1268,7 @@ async function compactToolbar(ctx, { page, tab, kind }) {
     qa(floating.floating && Math.abs(floating.face.y - floating.stickyTop) <= 1 && Math.abs(floating.slot.height - top.slot.height) <= 1, 'sticky face reserves the original wrapped slot', { top, floating });
     qa(floating.face.height < top.face.height && floating.buttons.every((b, k) => b.height === 24 && Math.abs(b.icon.height - 12) < .01 && Math.abs(b.icon.width - 12) < .01 && b.iconBox.every((x) => x === '14px') && b.font === top.buttons[k].font && JSON.stringify(b.kbd) === JSON.stringify(top.buttons[k].kbd) && b.label === top.buttons[k].label && Math.abs(b.x - top.buttons[k].x) < .1 && Math.abs(b.width - top.buttons[k].width) < .1), 'compact vertical geometry preserves horizontal boxes, typography, labels and shortcuts', { top, floating });
     qa(floating.counts.text === top.counts.text && floating.counts.font === top.counts.font && Math.abs(floating.counts.rect.x - top.counts.rect.x) <= .1 && Math.abs(floating.counts.rect.width - top.counts.rect.width) <= .1 && floating.overflow <= 1 && floating.transition.every((x) => x === '0s'), 'counts/horizontal fit preserved without geometry animations', floating);
-    qa(Math.abs(floating.padding - floating.face.height - 10) < .1 && Math.abs(floating.railInset - floating.face.height - 6) < .1, 'live face publishes navigation and rail clearances', floating);
+    qa(Math.abs(floating.padding - floating.stickyInset - floating.face.height - 10) < .1 && Math.abs(floating.railInset - floating.stickyInset - floating.face.height - 6) < .1, 'live face publishes navigation and rail clearances', floating);
     const hits = await page.evaluate(() => {
       const buttons = __bh.toolbarIdentity.buttons, errors = [], rects = [];
       buttons.forEach((b, i) => {
@@ -1254,9 +1290,18 @@ async function compactToolbar(ctx, { page, tab, kind }) {
       rects.forEach((a, i) => rects.slice(i + 1).forEach((b, k) => {
         if (Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) >= Math.max(a.top, b.top)) errors.push({ overlap: [i, k + i + 1], a, b });
       }));
-      return { errors, rects, samples: buttons.length * 17 };
+      const count = document.querySelector('.board-count'), counts = count.getBoundingClientRect().toJSON();
+      for (const x of [.25, .5, .75]) {
+        const owner = document.elementFromPoint(counts.left + counts.width * x, counts.top + counts.height / 2);
+        if (owner !== count && !count.contains(owner)) errors.push({ countsOwner: owner?.className, x });
+      }
+      const fixed = [...document.querySelectorAll('.tk-handle,.gh,.dr-handle')].filter((n) => n.getClientRects().length).map((n) => ({ cls: n.className, ...n.getBoundingClientRect().toJSON() }));
+      for (const handle of fixed) for (const r of rects.concat([counts])) {
+        if (Math.min(r.right, handle.right) > Math.max(r.left, handle.left) && Math.min(r.bottom, handle.bottom) > Math.max(r.top, handle.top)) errors.push({ fixedCollision: handle, r });
+      }
+      return { errors, rects, counts, fixed, samples: buttons.length * 17 };
     }); evidence.hits = hits;
-    qa(!hits.errors.length, `all ${hits.samples} edge/interior points belong to viewport-visible disjoint rounded 30px targets`, hits);
+    qa(!hits.errors.length, `all ${hits.samples} edge/interior points belong to viewport-visible disjoint rounded 30px targets; counts clear fixed controls`, hits);
     await capture(ctx, tab, kind + '-compact-floating', floating);
     await page.focus('.board-overview');
     for (let k = 0; k < actionCount; k++) {
@@ -1347,10 +1392,11 @@ async function compactToolbar(ctx, { page, tab, kind }) {
     await page.evaluate(async () => { const base = await __bh.baseBoard(); __bh.ovRegion(base.html); });
     await waitQuiet(page);
     qa(await page.evaluate(() => __bh.toolbarSame() && __bh.toolbarFrame.isConnected && __bh.toolbarFrame.contentWindow === __bh.toolbarWindow), 'live board event preserves face/buttons and unchanged iframe browsing context');
+    await ovAt(page, 'top');
     const transitionAnchor = await page.evaluate(() => {
       const bh = __bh, s = bh.scroller(), n = bh.topics().find((n) => !n.closest('#bpins'));
       bh.toolbarTransitionAnchor = n;
-      return { natural: n.getBoundingClientRect().top + s.scrollTop, threshold: bh.board_().getBoundingClientRect().top - bh.viewTop(s) };
+      return { natural: n.getBoundingClientRect().top + s.scrollTop, threshold: Math.max(0, bh.board_().getBoundingClientRect().top - bh.viewTop(s) - (s === document.scrollingElement ? parseFloat(getComputedStyle(document.querySelector('.board-toolbar')).top) || 0 : 0)) };
     });
     evidence.transitions = [];
     for (const st of [0, Math.max(0, transitionAnchor.threshold - 1), transitionAnchor.threshold + 1, transitionAnchor.threshold + 20, Math.max(0, transitionAnchor.threshold - 1), 0]) {
@@ -1359,6 +1405,8 @@ async function compactToolbar(ctx, { page, tab, kind }) {
       evidence.transitions.push(sample);
       qa(Math.abs(sample.natural - transitionAnchor.natural) <= 1 && Math.abs(sample.geometry.slot.height - top.slot.height) <= 1, 'transition keeps reading geometry and reserved wrapped slot', sample);
     }
+    qa(evidence.transitions[0].geometry.floating === false && evidence.transitions.some((s) => s.geometry.floating) && evidence.transitions.at(-1).geometry.floating === false,
+      'transition precondition actually traverses nonfloating/floating/nonfloating', evidence.transitions.map((s) => ({ st: s.geometry.scrollTop, floating: s.geometry.floating })));
     evidence.pageErrors = ctx.errors;
     log('production compact measurements (not reference parity): ' + JSON.stringify({ kind, viewport: evidence.viewport, faceWidth: evidence.faceWidth,
       measurements: evidence.measurements.map((m) => ({ phase: m.phase, face: m.face, slot: m.slot.height, padding: m.padding, overflow: m.overflow, wrappedActions: m.wrappedActions, counts: m.counts.text })),
@@ -2186,6 +2234,23 @@ const HISTORY_PAGE = () => {
       latest: Array.from(live.children).filter((n) => n.matches('.wb-entry')).at(-1)?.id,
       folds: Array.from(live.querySelectorAll('details[data-key]')).map((d) => [d.dataset.key, d.open]) };
   };
+  bh.arrivalProbe = (id) => {
+    const h = bh.history(), topic = h.closest('.topic'), head = topic.querySelector('.tophead'), s = bh.scroller();
+    const node = id && document.getElementById(id), control = node && (node.querySelector('summary') || node);
+    const rect = (n) => n && n.getBoundingClientRect().toJSON();
+    const cr = rect(control), x = cr && (cr.left + cr.right) / 2, y = cr && (cr.top + cr.bottom) / 2;
+    let owner = cr && document.elementFromPoint(x, y), ancestry = [];
+    for (let p = owner; p && ancestry.length < 7; p = p.parentElement) ancestry.push({ tag: p.tagName, id: p.id, cls: p.className });
+    const hs = getComputedStyle(head), keep = bh.keeping();
+    return { id, target: rect(node), control: cr, point: { x, y }, ancestry,
+      head: { rect: rect(head), position: hs.position, styleTop: hs.top, railTop: hs.getPropertyValue('--wb-rail-top'), height: head.offsetHeight },
+      computedNavigateOffset: 12 + (hs.position === 'sticky' ? (parseFloat(hs.top) || 0) + head.offsetHeight : 0),
+      face: rect(document.querySelector('.board-toolbar-face')), toolbar: rect(document.querySelector('.board-toolbar')),
+      floating: document.querySelector('.board-toolbar')?.hasAttribute('data-floating'),
+      railInset: getComputedStyle(document.querySelector('#bcol')).getPropertyValue('--wb-rail-inset'), padding: getComputedStyle(s).scrollPaddingTop,
+      capsules: [...document.querySelectorAll('.wb-cap')].filter((n) => !n.hidden && n.getClientRects().length).map((n) => ({ cls: n.className, rect: rect(n) })),
+      keeping: !!keep, targetOffsetObserved: node && node.getBoundingClientRect().top - bh.viewTop(s), scrollTop: s.scrollTop };
+  };
   bh.positionHistory = () => {
     const s = bh.scroller(), r = bh.history().querySelector('.history-clip').getBoundingClientRect();
     s.scrollTop += r.top - bh.viewTop(s) - 100;
@@ -2212,9 +2277,27 @@ async function growEntry(page, id, px) {
   assert(Math.abs(delta - px) <= 1, `${id}'s inline payload grew ${delta}px, expected ${px}px`);
 }
 
+function arrivalChecks(v) {
+  return { clip: v.y >= v.clipTop - 1 && v.y < v.clipBottom, viewport: v.y >= v.viewTop && v.y < v.viewBottom,
+    face: v.y >= v.faceBottom && v.controlTop >= v.faceBottom, control: v.controlBottom <= v.viewBottom,
+    ownership: v.controlOwnsPoint, innerScroll: v.clipScrollTop === 0 };
+}
 async function scenarioHistory(ctx) {
-  const opened = await openBoard(ctx), { page, tab, kind } = opened;
   const dir = path.resolve(ctx.args.artifacts || path.join(os.tmpdir(), `board-history-${Date.now()}`));
+  let arrivalBaseline = null;
+  if (ctx.navigationOnly && ctx.args['baseline-url']) {
+    const artifacts = path.join(dir, 'exact-baseline'); fs.mkdirSync(artifacts, { recursive: true });
+    const argv = [fileURLToPath(import.meta.url), 'history-paint', '--url', ctx.args['baseline-url'], '--width', String(ctx.width), '--height', String(ctx.height),
+      '--case', 'arrival', '--verify-ref', ctx.args['baseline-ref'], '--artifacts', artifacts];
+    assert(ctx.args['baseline-ref'], 'history --baseline-url requires an explicit --baseline-ref');
+    if (ctx.args['face-width']) argv.push('--face-width', String(ctx.args['face-width']));
+    const result = spawnSync(process.execPath, argv, { encoding: 'utf8', timeout: 60000 });
+    fs.writeFileSync(path.join(artifacts, 'command-output.log'), (result.stdout || '') + (result.stderr || ''));
+    assert(result.status === 0 || result.status === 1, 'baseline history probe failed to execute');
+    arrivalBaseline = JSON.parse(fs.readFileSync(path.join(artifacts, 'measurements.json'), 'utf8'));
+    arrivalBaseline.command = [process.execPath, ...argv]; arrivalBaseline.exitCode = result.status;
+  }
+  const opened = await openBoard(ctx), { page, tab, kind } = opened;
   fs.mkdirSync(dir, { recursive: true });
   const report = { url: ctx.args.url, kind, viewport: [ctx.width, ctx.height], measurements: [], omissions: [
     'Size-neutral log-chain and keyboard regressions run separately in history-regressions.',
@@ -2423,6 +2506,15 @@ async function scenarioHistory(ctx) {
     }
   }
   try {
+    if (ctx.args['verify-ref']) {
+      const html = await page.evaluate(async () => (await fetch(location.href)).text());
+      report.sourceCoverage = {};
+      for (const f of ['wsdashboard/assets/cards.js', 'wsdashboard/assets/dashboard.css', 'wsdashboard/assets/overview.js', 'wsdashboard/assets/terminal.js', 'wswhiteboard/assets/rail.js']) {
+        const relative = 'agents-plugin-tool/internal/' + f, source = run('git', ['show', ctx.args['verify-ref'] + ':' + relative], { cwd: REPO });
+        assert(html.includes(source), 'actual baseline daemon did not serve exact ref asset ' + relative);
+        report.sourceCoverage[relative] = createHash('sha256').update(source).digest('hex');
+      }
+    }
     await page.evaluate(HISTORY_PAGE);
     if (ctx.args['face-width']) await page.evaluate((width) => {
       const bar = document.querySelector('.board-toolbar'); bar.style.width = width + 'px'; bar.style.maxWidth = '100%';
@@ -2455,14 +2547,17 @@ async function scenarioHistory(ctx) {
       const pages = h.querySelectorAll('template[data-history-page]');
       const panel = pages[pages.length - 1]?.content.querySelector('.entry-panel[id]');
       if (!panel) throw new Error('need an older deep-link target');
+      bh.arrivalBefore = bh.arrivalProbe();
       topic.style.transform = 'translateX(10000px)';
       const a = document.createElement('a'); a.href = '#' + panel.id; a.textContent = 'history target'; topic.appendChild(a); a.click(); a.remove();
+      bh.arrivalAfterClick = bh.arrivalProbe(panel.id);
       return panel.id;
     });
     await page.waitForFunction(() => { const bh = window.__bh, r = window.wbHistory.seen(bh.history().closest('.topic'), '0px'); return r && !r.visible; }, null, { timeout: 2000 });
     const zero = await page.evaluate(() => window.__bh.historyState());
     assert(zero.steps > 1, 'first observer zero collapsed the deep-linked card');
-    measure('deep-link-initial-zero', { target, steps: zero.steps, clipScrollTop: zero.scrollTop });
+    measure('deep-link-initial-zero', { target, steps: zero.steps, clipScrollTop: zero.scrollTop,
+      diagnostics: await page.evaluate((id) => ({ before: __bh.arrivalBefore, afterClick: __bh.arrivalAfterClick, firstIOZero: __bh.arrivalProbe(id) }), target) });
     await page.evaluate(() => { window.__bh.history().closest('.topic').style.transform = ''; });
     await page.waitForFunction(() => window.wbHistory.seen(window.__bh.history().closest('.topic'), '0px')?.visible, null, { timeout: 2000 });
     const visible = await page.evaluate((id) => {
@@ -2470,11 +2565,41 @@ async function scenarioHistory(ctx) {
       const face = document.querySelector('.board-toolbar-face')?.getBoundingClientRect();
       const control = node.querySelector('summary') || node, cr = control.getBoundingClientRect();
       const hit = document.elementFromPoint((cr.left + cr.right) / 2, (cr.top + cr.bottom) / 2);
-      return { y: r.top, faceBottom: face?.bottom || 0, controlTop: cr.top, controlBottom: cr.bottom, controlOwnsPoint: !!hit && (control === hit || control.contains(hit)),
+      return { diagnostics: bh.arrivalProbe(id), y: r.top, faceBottom: face?.bottom || 0, controlTop: cr.top, controlBottom: cr.bottom, controlOwnsPoint: !!hit && (control === hit || control.contains(hit)),
         clipTop: clip.top, clipBottom: clip.bottom, viewTop: bh.viewTop(bh.scroller()), viewBottom: bh.viewBottom(bh.scroller()), clipScrollTop: node.closest('.history-clip').scrollTop };
     }, target);
     measure('deep-link-visible', visible);
-    assert(visible.y >= visible.clipTop - 1 && visible.y < visible.clipBottom && visible.y >= Math.max(visible.viewTop, visible.faceBottom) && visible.y < visible.viewBottom && visible.controlTop >= visible.faceBottom && visible.controlBottom <= visible.viewBottom && visible.controlOwnsPoint && visible.clipScrollTop === 0, 'deep-link target not revealed in the bottom-anchored clip');
+    await capture('deep-link-visible');
+    const checks = arrivalChecks(visible);
+    try { assert(Object.values(checks).every(Boolean), 'deep-link target not revealed in the bottom-anchored clip'); }
+    catch (failure) {
+      if (!arrivalBaseline) throw failure;
+      const b = arrivalBaseline.measurements.find((m) => m.label === 'deep-link-visible');
+      const initial = report.measurements.find((m) => m.label === 'deep-link-initial-zero');
+      const baseInitial = arrivalBaseline.measurements.find((m) => m.label === 'deep-link-initial-zero');
+      const failed = (v) => Object.entries(arrivalChecks(v)).filter(([, ok]) => !ok).map(([k]) => k).join();
+      const d = visible.diagnostics, bd = b?.diagnostics;
+      const lag = (m) => m.diagnostics.firstIOZero.computedNavigateOffset - m.diagnostics.afterClick.computedNavigateOffset;
+      const equivalent = b && bd && arrivalBaseline.kind === kind && JSON.stringify(arrivalBaseline.viewport) === JSON.stringify(report.viewport) &&
+        Object.keys(arrivalBaseline.sourceCoverage || {}).length === 5 && failed(visible) === 'ownership' && failed(b) === 'ownership' &&
+        JSON.stringify(d.ancestry.map((n) => [n.tag, n.cls])) === JSON.stringify(bd.ancestry.map((n) => [n.tag, n.cls])) &&
+        Math.abs(d.control.width - bd.control.width) < .1 && Math.abs(d.control.height - bd.control.height) < .1 &&
+        Math.abs((d.control.top - d.head.rect.top) - (bd.control.top - bd.head.rect.top)) < .1 &&
+        Math.abs((d.targetOffsetObserved - bd.targetOffsetObserved) - (parseFloat(d.head.styleTop) - parseFloat(bd.head.styleTop))) < .1 &&
+        Math.abs(lag(initial) - 44) < .1 && Math.abs(lag(baseInitial) - 44) < .1 &&
+        Math.abs((parseFloat(d.head.styleTop) - parseFloat(bd.head.styleTop)) - ((parseFloat(d.railInset) || 0) - (parseFloat(bd.railInset) || 0))) < .1;
+      const classification = { assertion: failure.message, candidateChecks: checks, baselineChecks: b && arrivalChecks(b), equivalent: !!equivalent,
+        verdict: equivalent ? 'known-baseline-failure' : 'regression-or-unclassified', baseline: arrivalBaseline,
+        attributionLimit: 'Only matching stale-capsule-offset ownership is classified; every other predicate remains required.' };
+      fs.writeFileSync(path.join(dir, 'history-arrival-comparison.json'), JSON.stringify(classification, null, 2));
+      measure('history-arrival-classification', { verdict: classification.verdict, candidateChecks: checks, equivalent: !!equivalent });
+      if (!equivalent) throw failure;
+      (ctx.knownBaselineFailures ||= []).push(classification);
+    }
+    if (ctx.args.case === 'arrival') {
+      report.omissions.push('Focused arrival case excludes subsequent late-height, collapse and live-arrival assertions.');
+      return;
+    }
     const late = await page.evaluate((id) => {
       const entry = document.getElementById(id).closest('.wb-entry');
       let next = entry.nextElementSibling;
@@ -2989,7 +3114,7 @@ async function main() {
   }
   // check records a failed expectation and lets the scenario go on, so one
   // run reports every part; assert stops the scenario.
-  const ctx = { args, width: +(args.width || 1440), height: +(args.height || 900), errors: [], failures: [] };
+  const ctx = { args, width: +(args.width || 1440), height: +(args.height || 900), errors: [], failures: [], knownBaselineFailures: [] };
   ctx.check = (cond, msg) => { if (!cond) { ctx.failures.push(msg); console.error(`FAILED: ${msg}`); } return !!cond; };
   try {
     const t0 = Date.now();
