@@ -3728,9 +3728,17 @@
     window.addEventListener("resize", function () { drApply(false); });
     if (window.ResizeObserver && drheader) new ResizeObserver(function () { drApply(false); }).observe(drheader);
     // The handles' widths follow their contents; the header pads clear of
-    // them.
+    // them. Padding changes the shallower header's observed content box:
+    // write it next frame, not during this native resize delivery.
     if (window.ResizeObserver) {
-      var drRo = new ResizeObserver(drRoom);
+      var drRoomFrame = 0;
+      var drRo = new ResizeObserver(function () {
+        if (drRoomFrame) return;
+        drRoomFrame = requestAnimationFrame(function () {
+          drRoomFrame = 0;
+          if (drawer.isConnected) drRoom();
+        });
+      });
       drRo.observe(drhandle);
       if (gitRegion) drRo.observe(gitRegion);
     }
@@ -9111,8 +9119,10 @@
         pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
         top: top.offsetHeight
       });
+      // A link menu's local z-index cannot outrank the shell header either;
+      // lift its frame through the same layer as the other popovers.
       send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(),
-        popover: q(".rpop:not([hidden])").some(function (el) { return el.getClientRects().length > 0; }) });
+        popover: q(".rpop:not([hidden]), .lmenu").some(function (el) { return el.getClientRects().length > 0; }) });
     }
     function queue() { if (!queued) queued = setTimeout(post, 16); }
     doc.addEventListener("ws-overview", queue);
