@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 7d5a6e0295ba02c2
 sage-review-design-reviewed: 7d5a6e0295ba02c2
+completed: 2026-11-14
 ---
 
 # Shared card actions and topic-relative preview opening
