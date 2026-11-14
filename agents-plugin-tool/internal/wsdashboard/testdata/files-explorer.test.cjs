@@ -29,6 +29,7 @@ function take(rid, route, dir) {
   r.taken = true; return r;
 }
 async function answer(r, body) { r.resolve({ ok: true, json: () => body }); await settle(); }
+async function refuse(r) { r.resolve({ ok: false, status: 404, text: () => Promise.resolve('refused') }); await settle(); }
 function listing(root, entries, session) { return { root, name: root.split('/').pop(), abs: root, sep: '/', session: !!session, entries: entries || [{ name: 'src', dir: true }, { name: 'main.go' }, { name: '.env' }, { name: 'ignored', ign: true }] }; }
 function event(n, type, extra) { var e = Object.assign({ target: n, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {} }, extra); n.fire(type, e); return e; }
 function key(n, key) { return event(n, 'keydown', { key }); }
@@ -44,6 +45,25 @@ function explorer(rid, local = true) {
 }
 function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd button')[0].click(); x.at('.fpin').value = path; x.at('.fgo .pr').click(); }
 (async function () {
+  // Candidate-root refusal must not cancel legitimate active-root work.
+  var race = explorer('race'); race.instance.shown();
+  var initial = take('race', 'list');
+  rootRequest(race, '/invalid'); await refuse(take('race', 'list'));
+  await answer(initial, listing('/race', undefined, true));
+  check('refused candidate keeps pending initial root load', [race.at('.froot').textContent, !!race.at('[data-path="src"]'), race.at('.ferr').textContent], ['race', true, 'js.files.root.refused']);
+  event(race.tree, 'click', { target: race.at('[data-path="src"]') });
+  var expansion = take('race', 'list', 'src');
+  rootRequest(race, '/invalid-again'); await refuse(take('race', 'list'));
+  await answer(expansion, listing('/race/src', [{ name: 'kept.go' }]));
+  check('refused candidate keeps pending expansion and current root', [race.at('.froot').textContent, !!race.at('[data-path="src/kept.go"]')], ['race', true]);
+  rootRequest(race, '/older-success'); var staleCandidate = take('race', 'list');
+  rootRequest(race, '/newer-refusal'); await refuse(take('race', 'list'));
+  await answer(staleCandidate, listing('/older-success'));
+  check('latest refused attempt still supersedes an older candidate', race.at('.froot').textContent, 'race');
+  rootRequest(race, '/destroyed-refusal'); var lateRefusal = take('race', 'list');
+  race.instance.destroy(); await refuse(lateRefusal);
+  check('late root refusal cannot touch a destroyed instance', race.el.children.length, 0);
+
   var a = explorer('alpha'), b = explorer('beta');
   a.instance.shown(); b.instance.shown();
   await answer(take('beta', 'list'), listing('/beta', undefined, true));

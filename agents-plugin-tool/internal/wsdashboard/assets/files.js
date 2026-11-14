@@ -93,7 +93,7 @@
   // Each owner gets its own DOM, requests, search token and storage adapter.
   function create(node, options) {
   var el = node, h = options || {}, rid = h.rid || doc.documentElement.getAttribute("data-rid") || "";
-  var gen = 0, started = false, destroyed = false, listeners = [];
+  var gen = 0, rootAttempt = 0, started = false, destroyed = false, listeners = [];
   var lists = {}, open = {}, sel = null, cur = null, info = null, rootAbs = "";
   var view = { ign: false, dot: false }, rows = [], rowEls = {};
   var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null;
@@ -200,9 +200,11 @@
   // refuses it ("" is the session root).
   function applyRoot(path) {
     ui.rErr.textContent = "";
-    var g = ++gen;
-    listDir("", path).then(function (a) { if (g !== gen) return; closePop(false); useRoot(a); }, function (err) {
-      if (g !== gen) return;
+    // A candidate must not invalidate the active tree until accepted:
+    // refusal still leaves its initial load and expansions usable.
+    var attempt = ++rootAttempt;
+    listDir("", path).then(function (a) { if (attempt !== rootAttempt) return; closePop(false); useRoot(a); }, function (err) {
+      if (attempt !== rootAttempt) return;
       ui.rErr.textContent = err && err.status === 404 ? wsT("js.files.root.refused") : wsT("js.files.failed");
     });
   }
@@ -858,6 +860,7 @@
       if (destroyed) return;
       destroyed = true;
       gen++;
+      rootAttempt++;
       clearTimeout(timer);
       abort();
       closeMenu(false);
