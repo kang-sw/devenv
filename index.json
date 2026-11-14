@@ -607,7 +607,14 @@
       "registered_at": "2026-11-14T11:39:09Z"
     },
     "261114-feat-ws-whiteboard-unified-whole-history": {
-      "registered_at": "2026-11-14T11:52:35Z"
+      "registered_at": "2026-11-14T11:52:35Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "feat/unified-history-task3",
+        "phase": "active",
+        "touched_at": "2026-11-14T12:33:32Z"
+      }
     },
     "261114-refactor-ws-common-session-interface": {
       "registered_at": "2026-11-14T11:13:55Z"
