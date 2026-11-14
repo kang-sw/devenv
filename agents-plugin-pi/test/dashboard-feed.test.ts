@@ -5,6 +5,7 @@
  */
 
 import { test, describe } from "node:test";
+import { createReasoningSummaryObserver, REASONING_SUMMARY_CAPABILITY } from "../src/reasoning-summary.ts";
 import assert from "node:assert/strict";
 import {
   AGENT_POLL_MS,
@@ -1067,6 +1068,121 @@ describe("task counts", () => {
       feed.stop();
       killAllBackgroundTasks();
     }
+  });
+});
+
+describe("reasoning-summary field negotiation", () => {
+  function source() {
+    const observer = createReasoningSummaryObserver("1.5.2", "aa2edb47-671e-4f22-a8dc-616321c24cb7");
+    let sequence = 0;
+    const ctx = { model: { provider: "openai", api: "openai-responses", id: "test" }, modelRegistry: { getRegisteredProviderConfig() {}, getRegisteredNativeProvider() {} } };
+    const start = (feed: ReturnType<typeof createDashboardFeed>) => {
+      observer.observe({ type: "agent_start" }); feed.leadEvent({ type: "agent_start" });
+      const hook = { type: "before_provider_request" };
+      observer.observe(hook, ctx); feed.leadEvent(hook);
+      emit(feed, { type: "response.created", response: { id: "r" } });
+      emit(feed, { type: "response.output_item.added", output_index: 0, item: { type: "reasoning", id: "i" } });
+    };
+    const emit = (feed: ReturnType<typeof createDashboardFeed>, data: Record<string, unknown>) => {
+      const event = { type: "provider_stream_event", provider: "openai", api: "openai-responses", model: "test", data: { sequence_number: sequence++, ...data } };
+      observer.observe(event); feed.leadEvent(event);
+    };
+    const delta = (feed: ReturnType<typeof createDashboardFeed>, text: string) => emit(feed, { type: "response.reasoning_summary_text.delta", item_id: "i", output_index: 0, summary_index: 0, delta: text });
+    const settle = (feed: ReturnType<typeof createDashboardFeed>) => { const event = { type: "agent_settled", aborted: true }; observer.observe(event); feed.leadEvent(event); };
+    return { observer, start, delta, settle };
+  }
+  const accepted = () => ({ content: [{ type: "text", text: `ok\naccepts: ${REASONING_SUMMARY_CAPABILITY}` }] });
+
+  test("no fields before successful negotiation; progress coalesces in isolated lead events; final only on real end", async () => {
+    const s = source();
+    const h = harness({ reasoningSummary: () => s.observer.projection(), answer: async () => accepted() });
+    h.feed.start(); await h.advance(0);
+    assert.ok(h.events().every((e) => e.reasoningSummary === undefined));
+    s.start(h.feed);
+    for (let i = 0; i < 100; i++) s.delta(h.feed, "x");
+    await h.advance(FLUSH_INTERVAL_MS * 3);
+    const progress = h.events().filter((e) => e.reasoningSummary !== undefined);
+    assert.equal(progress.length, 1);
+    assert.equal(progress[0].kind, "agent"); assert.equal(progress[0].agentId, undefined);
+    h.feed.leadEvent({ type: "turn_end" });
+    await h.advance(FLUSH_INTERVAL_MS);
+    assert.equal(h.events().filter((e) => e.kind === "turn_end").length, 0, "Pi request turn_end is not the outer turn end");
+    s.settle(h.feed); await h.advance(FLUSH_INTERVAL_MS * 3);
+    const end = h.events().find((e) => e.kind === "turn_end")!;
+    assert.equal(end.reason, "aborted"); assert.ok(end.reasoningSummary);
+    assert.equal((end.reasoningSummary as { activeRequest: unknown }).activeRequest, null);
+    assert.ok(h.calls.filter((c) => c.args.events.some((e) => e.reasoningSummary !== undefined)).every((c) => c.args.events.length === 1));
+    h.feed.stop();
+  });
+
+  test("old, error and dashboard-off responses never grant optional fields; off drops final without inventing a queue", async () => {
+    for (const answer of [{ content: [{ type: "text", text: "ok" }] }, { isError: true, content: accepted().content }, { content: [{ type: "text", text: "dashboard off" }] }]) {
+      const s = source(); const h = harness({ reasoningSummary: () => s.observer.projection(), answer: async () => answer });
+      h.feed.start(); await h.advance(0); s.start(h.feed); s.delta(h.feed, "prefix"); s.settle(h.feed);
+      await h.advance(FLUSH_INTERVAL_MS * 3);
+      assert.ok(h.events().every((e) => e.reasoningSummary === undefined)); h.feed.stop();
+    }
+  });
+
+  test("target replacement revokes capability and only its successful response can restore it", async () => {
+    const s = source(); let connection = {}, key = "first";
+    const sent: DashboardEvent[][] = [];
+    let result: unknown = accepted();
+    const h = harness({ reasoningSummary: () => s.observer.projection(), target: () => ({ connection, sessionKey: key, callTool: async (_name, args) => { sent.push(args.events as DashboardEvent[]); return result; } }) });
+    h.feed.start(); await h.advance(0); s.start(h.feed); s.delta(h.feed, "prefix"); await h.advance(FLUSH_INTERVAL_MS * 3);
+    const before = sent.length; connection = {}; key = "second"; result = { content: [] };
+    s.delta(h.feed, " later"); await h.advance(FLUSH_INTERVAL_MS * 3);
+    assert.ok(sent.slice(before).flat().every((e) => e.reasoningSummary === undefined));
+    h.feed.stop();
+  });
+
+  test("uncertain real final reuses ordinary requeue without reset, fake start, new revision or source receipt queue", async () => {
+    const s = source(); let endCalls = 0;
+    const h = harness({ reasoningSummary: () => s.observer.projection(), answer: async (call) => {
+      if (call.args.events.some((e) => e.kind === "turn_end") && ++endCalls === 1) return { isError: true, content: [] };
+      return accepted();
+    } });
+    h.feed.start(); await h.advance(0); s.start(h.feed); s.delta(h.feed, "prefix"); await h.advance(FLUSH_INTERVAL_MS * 3);
+    s.settle(h.feed); await h.advance(FLUSH_INTERVAL_MS * 3);
+    const before = h.calls.length;
+    await h.advance(RETRY_MS + FLUSH_INTERVAL_MS * 3);
+    const ends = h.events().filter((e) => e.kind === "turn_end");
+    assert.equal(ends.length, 2); assert.deepEqual(ends[0], ends[1]);
+    assert.ok(h.calls.slice(before).flatMap((c) => c.args.events).every((e) => e.kind !== "reset" && e.kind !== "turn_start"));
+    assert.equal(h.events().filter((e) => e.kind === "turn_start").length, 1);
+    h.feed.stop();
+  });
+
+  test("failed and timed-out calls revoke acceptance; late success cannot restore retired admission", async () => {
+    for (const timeout of [false, true]) {
+      const s = source(); let calls = 0;
+      let late: ((value: unknown) => void) | undefined;
+      const h = harness({ reasoningSummary: () => s.observer.projection(), answer: async () => {
+        calls++;
+        if (calls === 1) return accepted();
+        if (calls === 2) return timeout ? new Promise((resolve) => { late = resolve; }) : { isError: true, content: accepted().content };
+        return { content: [] };
+      } });
+      h.feed.start(); await h.advance(0); s.start(h.feed); s.delta(h.feed, "prefix");
+      await h.advance(FLUSH_INTERVAL_MS + (timeout ? INTAKE_CALL_TIMEOUT_MS : 0));
+      const boundary = h.calls.length;
+      late?.(accepted());
+      await h.advance(RETRY_MS + FLUSH_INTERVAL_MS * 3);
+      s.delta(h.feed, " after revoke"); s.settle(h.feed); await h.advance(FLUSH_INTERVAL_MS * 3);
+      assert.ok(h.calls.slice(boundary).flatMap((c) => c.args.events).every((e) => e.reasoningSummary === undefined));
+      h.feed.stop();
+    }
+  });
+
+  test("registration forwards optional 1.5.2 hooks/context without modifying payload, including on legacy hosts", () => {
+    const handlers = new Map<string, (event: unknown, context?: unknown) => void>();
+    const seen: unknown[] = [];
+    registerDashboardLeadEvents({ on: (name, handler) => { handlers.set(name, handler); } }, () => ({ leadEvent: (event) => { seen.push(event); } }), (event, ctx) => { seen.push(ctx); });
+    const payload = { private: "do not inspect" }, ctx = {};
+    const event = { type: "before_provider_request", payload };
+    assert.equal(handlers.get("before_provider_request")!(event, ctx), undefined);
+    assert.equal(event.payload, payload); assert.deepEqual(seen, [ctx, event]);
+    assert.ok(handlers.has("provider_stream_event"), "0.84.4 accepts inert event-name registration");
   });
 });
 

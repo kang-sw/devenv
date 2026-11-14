@@ -1,16 +1,19 @@
 /** Hosted leads cannot use intake: the runner owns their snapshot. Send only
- * extension-observed wakes and task counts on its reserved RPC widget instead.
+ * extension-observed wakes, task counts and eligible lead summaries on its reserved RPC widget instead.
  * Older runners ignore this widget, so no new intake kind/field reaches them.
  */
 import { onBackgroundTasksChanged } from "./background-tasks.ts";
 import { defaultSchedule, FLUSH_INTERVAL_MS, PENDING_EVENT_CAP } from "./dashboard-feed.ts";
 import { dashboardWakeMessages, type DashboardWake } from "./dashboard-wake.ts";
+import type { ReasoningSummary } from "./reasoning-summary.ts";
+import { hostedSummaryLine } from "./reasoning-summary-transport.ts";
 
 export const HOSTED_EVENTS_WIDGET_KEY = "ws-dashboard-events";
 
 export interface HostedDashboardEventsOptions {
   setWidget: (key: string, lines: string[]) => void;
   taskCounts: () => { timed: number; monitors: number };
+  reasoningSummary?: () => ReasoningSummary | undefined;
   now?: () => number;
   schedule?: (fn: () => void, ms: number) => () => void;
 }
@@ -25,25 +28,40 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
   let lastFlush: number | undefined;
   let cancel: (() => void) | undefined;
   let unsubscribe: (() => void) | undefined;
+  let summaryDirty = false;
+  let lastSummary: string | undefined;
+
+  function flush(): void {
+    if (stopped) return;
+    lastFlush = now();
+    try {
+      const counts = options.taskCounts();
+      const status = JSON.stringify({ kind: "status", background: counts.timed, monitors: counts.monitors });
+      const lines = pending.map((wake) => JSON.stringify(wake));
+      if (status !== lastCounts) lines.push(status);
+      if (lines.length) options.setWidget(HOSTED_EVENTS_WIDGET_KEY, lines);
+      pending = [];
+      lastCounts = status;
+    } catch {
+      // A stale context retains existing wake/count behavior until another mark.
+    }
+    if (!summaryDirty) return;
+    try {
+      const summary = options.reasoningSummary?.();
+      const line = summary && hostedSummaryLine(summary);
+      if (line && line !== lastSummary) options.setWidget(HOSTED_EVENTS_WIDGET_KEY, [line]);
+      lastSummary = line;
+      summaryDirty = false;
+    } catch {
+      // No source persistence queue or acknowledgement: only current-turn coalescing.
+    }
+  }
 
   function dirty(): void {
     if (stopped || cancel) return;
     cancel = schedule(() => {
       cancel = undefined;
-      if (stopped) return;
-      lastFlush = now();
-      try {
-        const counts = options.taskCounts();
-        const status = JSON.stringify({ kind: "status", background: counts.timed, monitors: counts.monitors });
-        const lines = pending.map((wake) => JSON.stringify(wake));
-        if (status !== lastCounts) lines.push(status);
-        if (lines.length) options.setWidget(HOSTED_EVENTS_WIDGET_KEY, lines);
-        pending = [];
-        lastCounts = status;
-      } catch {
-        // A stale context loses nothing: the next mark retries held wakes
-        // and counts. Do not spin a timer while the session is being replaced.
-      }
+      flush();
     }, lastFlush === undefined ? 0 : Math.max(0, lastFlush + FLUSH_INTERVAL_MS - now()));
   }
 
@@ -57,6 +75,8 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
     seen = new WeakSet();
     lastCounts = undefined;
     lastFlush = undefined;
+    summaryDirty = false;
+    lastSummary = undefined;
   }
 
   return {
@@ -70,6 +90,20 @@ export function createHostedDashboardEvents(options: HostedDashboardEventsOption
     leadEvent(event: unknown) {
       if (stopped) return;
       const e = event as { type?: unknown; message?: unknown } | undefined;
+      if (e?.type === "agent_settled") {
+        cancel?.();
+        cancel = undefined;
+        summaryDirty = true;
+        // Pi 1.5.2 awaits this handler before publishing its native settled record.
+        flush();
+        summaryDirty = false; // never retain a closed-turn source retry queue
+        return;
+      }
+      if (e?.type === "before_provider_request" || e?.type === "provider_stream_event" || e?.type === "message_end") {
+        summaryDirty = true;
+        dirty();
+        return;
+      }
       if (e?.type !== "message_start" || !e.message || typeof e.message !== "object" || seen.has(e.message)) return;
       seen.add(e.message);
       pending.push(...dashboardWakeMessages(e.message));

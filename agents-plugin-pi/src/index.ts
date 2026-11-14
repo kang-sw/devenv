@@ -183,7 +183,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { VERSION, type ExtensionAPI, type ExtensionContext, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { resolveSessionKey, startBridge, type BridgeHandle } from "./bridge.ts";
 import {
   agentCostRefreshRef,
@@ -253,6 +253,7 @@ import { MISSING_HOSTED_KEY_WARNING, hostedMode, unconfirmedHostedWarning, type 
 import { createDashboardFeed, dashboardAgentEntries, dashboardStatus, registerDashboardLeadEvents, resolveDashboardEnabled, type DashboardFeed } from "./dashboard-feed.ts";
 import { countBackgroundTasks } from "./background-tasks.ts";
 import { createHostedDashboardEvents } from "./hosted-dashboard-events.ts";
+import { createReasoningSummaryObserver } from "./reasoning-summary.ts";
 import { createHostedAgentRows, type HostedAgentRows } from "./hosted-agent-rows.ts";
 import { whiteboardSubmissionText } from "./adapter-label.ts";
 
@@ -641,7 +642,10 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   // (hosted-agent-rows.ts), with the feed's lifetime.
   let hostedAgentRows: HostedAgentRows | undefined;
   let hostedDashboardEvents: ReturnType<typeof createHostedDashboardEvents> | undefined;
-  registerDashboardLeadEvents(pi as unknown as Parameters<typeof registerDashboardLeadEvents>[0], () => dashboardFeed ?? hostedDashboardEvents);
+  let reasoningSummaryObserver: ReturnType<typeof createReasoningSummaryObserver> | undefined;
+  registerDashboardLeadEvents(pi as unknown as Parameters<typeof registerDashboardLeadEvents>[0], () => dashboardFeed ?? hostedDashboardEvents, (event, context) => {
+    reasoningSummaryObserver?.observe(event, context);
+  });
   // 260914 (pi native mailbox push): the session-bound background waiter that
   // drives `ws-mcp mailbox wait` and actively steers arriving mail into the
   // live conversation. Owner-lead only (`readSpawnRole` === undefined), started
@@ -836,6 +840,9 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     const startEpoch = ++sessionStartEpoch;
     const sessionRole = readSpawnRole(process.env);
+    reasoningSummaryObserver?.retire();
+    const sessionSummary = sessionRole === undefined ? createReasoningSummaryObserver(VERSION) : undefined;
+    reasoningSummaryObserver = sessionSummary;
     applySessionStartOwnershipDiagnostics(sessionRole, ctx);
     if (forkContextError) { ctx.ui.notify(forkContextError, "error"); return; }
     if (readSpawnRole(process.env) === "fork" && !durableForkContextRef.current) {
@@ -952,13 +959,14 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       const feed = createDashboardFeed({
         target: () => {
           const bridge = handle;
-          return bridge ? { callTool: (name, args) => bridge.client.callTool(name, args), sessionKey: bridge.defaultSessionKeyRef.current } : undefined;
+          return bridge ? { callTool: (name, args) => bridge.client.callTool(name, args), sessionKey: bridge.defaultSessionKeyRef.current, connection: bridge.client.connectionIdentity } : undefined;
         },
         enabled: () => thenOrNow(readAdapterConfig(["dashboard_enabled"]), resolveDashboardEnabled),
         agents: () => dashboardAgentEntries(feedRegistry),
         // Cost and cache rate come from the TUI footer's estimate; without a footer only context is sent.
         status: () => dashboardStatus(ctx.getContextUsage(), ctx.model?.contextWindow, agentFooterLifecycle.usage()),
         taskCounts: countBackgroundTasks,
+        reasoningSummary: () => sessionSummary?.projection(),
       });
       dashboardFeed = feed;
       agentDashboardRefreshRef.current = () => { feed.agentsChanged(); };
@@ -978,6 +986,7 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
       hostedDashboardEvents = createHostedDashboardEvents({
         setWidget: (key, lines) => { ctx.ui.setWidget(key, lines); },
         taskCounts: countBackgroundTasks,
+        reasoningSummary: () => sessionSummary?.projection(),
       });
       hostedDashboardEvents.start();
     }
@@ -1340,6 +1349,8 @@ export default async function wsPiBridgeExtension(pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async (event, _ctx) => {
     const shutdownEpoch = ++sessionStartEpoch;
+    reasoningSummaryObserver?.retire();
+    reasoningSummaryObserver = undefined;
     // Claim the published generation before ANY await. A startup resuming
     // from its final footer await sees this claim and cannot stop the registry
     // whose recovered sidecar shutdown must persist. A later startup may own

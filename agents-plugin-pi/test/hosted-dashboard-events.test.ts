@@ -2,8 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHostedDashboardEvents, HOSTED_EVENTS_WIDGET_KEY } from "../src/hosted-dashboard-events.ts";
 import { FLUSH_INTERVAL_MS } from "../src/dashboard-feed.ts";
+import { createReasoningSummaryObserver, SUMMARY_FRAME_BYTES } from "../src/reasoning-summary.ts";
+import { hostedSummaryFrame } from "../src/reasoning-summary-transport.ts";
 
-function harness() {
+function harness(reasoningSummary?: () => ReturnType<ReturnType<typeof createReasoningSummaryObserver>["projection"]>) {
   let clock = 0;
   let task: (() => void) | undefined;
   let reads = 0;
@@ -11,6 +13,7 @@ function harness() {
   const counts = { timed: 0, monitors: 0 };
   const widgets: { key: string; lines: string[] }[] = [];
   const channel = createHostedDashboardEvents({
+    reasoningSummary,
     now: () => clock,
     schedule: (fn) => { task = fn; return () => { task = undefined; }; },
     taskCounts: () => { reads++; return counts; },
@@ -45,6 +48,49 @@ test("hosted widget carries JSON wake/status event lines only, sampled at flush 
   h.flush();
   assert.equal(h.events().length, 3, "person input is not a wake; unchanged counts send nothing");
   h.channel.stop();
+});
+
+test("hosted progress is coalesced and final is synchronous before native settlement, never an end command", () => {
+  const observer = createReasoningSummaryObserver("1.5.2", "bb2edb47-671e-4f22-a8dc-616321c24cb7");
+  const h = harness(() => observer.projection());
+  const ctx = { model: { provider: "openai-codex", api: "openai-codex-responses", id: "test" }, modelRegistry: { getRegisteredProviderConfig() {}, getRegisteredNativeProvider() {} } };
+  const send = (event: unknown) => { observer.observe(event, ctx); h.channel.leadEvent(event); };
+  let sequence = 0;
+  const raw = (data: Record<string, unknown>) => send({ type: "provider_stream_event", provider: "openai-codex", api: "openai-codex-responses", model: "test", data: { sequence_number: sequence++, ...data } });
+  h.channel.start(); h.flush();
+  send({ type: "agent_start" }); send({ type: "before_provider_request" });
+  raw({ type: "response.created", response: { id: "r" } });
+  raw({ type: "response.output_item.added", output_index: 0, item: { type: "reasoning", id: "i" } });
+  for (let i = 0; i < 100; i++) raw({ type: "response.reasoning_summary_text.delta", item_id: "i", output_index: 0, summary_index: 0, delta: "\u0000\"\\한😀" });
+  assert.equal(h.events().filter((e) => e.reasoningSummary).length, 0, "provider observer does no widget IO");
+  h.flush();
+  assert.equal(h.events().filter((e) => e.reasoningSummary).length, 1);
+  send({ type: "turn_end" });
+  assert.equal(h.events().filter((e) => e.reasoningSummary).length, 1, "per-request turn end cannot flush final");
+  const before = h.widgets.length;
+  send({ type: "agent_settled", aborted: true });
+  assert.equal(h.widgets.length, before + 1, "final emitted before handler returns / native agent_settled");
+  const final = h.events().at(-1)!;
+  assert.equal(final.kind, "agent"); assert.equal(final.agentId, undefined);
+  assert.deepEqual(Object.keys(final).sort(), ["kind", "reasoningSummary"]);
+  assert.equal(final.reasoningSummary.activeRequest, null);
+  assert.equal(final.reasoningSummary.requests[0].status, "aborted");
+  assert.ok(h.widgets.filter((w) => w.lines.some((l) => JSON.parse(l).reasoningSummary)).every((w) => w.lines.length === 1 && Buffer.byteLength(hostedSummaryFrame(w.lines[0])) <= SUMMARY_FRAME_BYTES));
+  h.flush(); assert.equal(h.widgets.length, before + 1, "no pending closed-turn source queue");
+  h.channel.stop();
+});
+
+test("unsupported host/no summary/redacted thinking retains ordinary hosted wake/count fallback", () => {
+  for (const version of ["0.84.4", "unknown", "1.5.2"]) {
+    const observer = createReasoningSummaryObserver(version);
+    const h = harness(() => observer.projection());
+    h.channel.start(); h.flush();
+    const event = { type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "SECRET" } };
+    observer.observe(event); h.channel.leadEvent(event);
+    h.channel.leadEvent({ type: "agent_settled" }); h.flush();
+    assert.deepEqual(h.events(), [{ kind: "status", background: 0, monitors: 0 }]);
+    h.channel.stop(); observer.retire();
+  }
 });
 
 test("throwing widget retains wakes for the next mark; stop drops pending state", () => {
