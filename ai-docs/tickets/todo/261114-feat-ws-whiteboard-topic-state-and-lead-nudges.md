@@ -14,9 +14,11 @@ or execution time no longer matches the work.
 
 This is accepted backlog, not an implementation-ready contract. MAIN relayed
 owner approval `688,689=a` on 2026-11-14 and authorized documentation-only
-capture now. Source implementation remains queued TASK3 -> TASK4 -> TASK5 ->
-675. Phase 1 may land independently and early after queue coordination; that
-possibility does not authorize a new integration slot or implementation now.
+capture now. Owner approval 697 permits parallel implementation in separate
+worktrees, superseding the earlier serial-start restriction; integration order
+remains TASK3 -> TASK4 -> TASK5 -> 675. Phase 1 may land independently and early
+after queue coordination. This documentation-only assignment starts no source
+implementation.
 
 ## Decisions
 
@@ -29,22 +31,35 @@ possibility does not authorize a new integration slot or implementation now.
   into checks or technical items that leave the requested work unexecuted.
 - **One owner-facing ask.** Anything unfinished and not being worked keeps
   an open ask, at most one per topic. Close only on the owner's final answer.
-- **Linked-ticket slot removal (689).** Remove the slot from the board UI and
-  playbook. The server continues accepting the existing attribute and
-  silently ignores it. Preserve existing stored data; this is not authority
-  to delete store fields, reject older calls, or change the protocol.
-- **Intended compatibility tier: T0.** MAIN describes all three phases as T0:
-  shared text/UI changes plus additive optional state and existing mailbox
-  delivery. This is intent, not a verified compatibility verdict. The
-  current linked-ticket semantics and typed store round-trips below require
-  reconciliation before implementation readiness; no T2, minor/schema bump,
-  or protocol/API semantic change is authorized by this capture.
+- **Linked-ticket slot removal (707 supersedes 689).** Hide the slot from the
+  board UI and playbook only. Preserve the existing accepted attribute's
+  validation, writes, storage and query behavior, including values written
+  through older commands. Owner 707 replaces the earlier instruction to
+  silently ignore the attribute; it is not merely form acceptance. Do not
+  delete stored links or change read/write semantics.
+- **Compatibility tier: T0.** Owner 707 resolves the linked-ticket conflict by
+  limiting removal to UI/playbook exposure while preserving existing
+  argument/store/query behavior. MAIN's intended tier for all three phases
+  remains T0: shared text/UI changes plus additive optional state and existing
+  mailbox delivery. Optional-state persistence still needs the conditional
+  writer-preservation check below; this capture verifies no new runtime
+  behavior and authorizes no T2, minor/schema bump or protocol change.
 
 ## Owner Authority
 
-Exact owner approval:
+Initial owner approval (historical; the ignored-attribute interpretation of
+689 is superseded by 707 below):
 
 > 688,689=a
+
+Owner answer relayed by MAIN at 2026-11-14 12:02:04, verbatim:
+
+> 707=a
+
+707 limits linked-ticket removal to UI/playbook exposure and preserves the
+existing attribute's write/storage/query semantics. Owner approval 697 also
+permits parallel implementation in separate worktrees without changing the
+integration order. No new state or timer mechanism is settled by either update.
 
 Owner idea, approximately 2026-11-14 11:30Z, referring to stalled-triage text
 `서버가 자동으로 판정하게`:
@@ -81,8 +96,9 @@ new injection machinery; Phase 3 explicitly reuses mailbox push.
   product-mode rendering and package tests rather than hand-editing mirrors.
 - Apply `ai-docs/manuals/ws-mcp.md` and
   `ai-docs/manuals/release-compatibility.md` to future MCP/store changes.
-  Preserve old-call acceptance, authoritative topic folders and history;
-  inspect mixed-version readers/writers before claiming T0.
+  Preserve old-call validation/write/query semantics, authoritative topic
+  folders and history. Linked-ticket hiding is T0 under 707; inspect the
+  eventual optional-state storage against mixed-version writer constraints.
 
 ## Prior Art and Compatibility Evidence
 
@@ -103,16 +119,17 @@ runtime tests. Line references below address that develop object.
   accepts `tickets`; `topics.go:90-110` applies it, `116-129` validates and
   deduplicates stems, and `134-142` replaces or clears the stored list.
   A nonempty link list can make a new topic persist (`topics.go:83-104`).
-  The attribute is not already an ignored compatibility argument.
+  Owner 707 preserves these existing command effects.
 - Under that same directory, `store.go:234-238` declares persisted
   `TopicDoc.Tickets`; `query_entries.go:382-384` copies it into topic query
   output and `query.go:349-350` emits it. `view.go:630-633` derives ticket
   badges and live-work styling; `assets/page.tmpl:44,110` renders them.
   At the retained base, `topic_tickets_test.go` also pins replacement,
-  clearing, validation, query and rendering behavior. Ignoring future input
-  preserves syntax acceptance but changes established write/read effects.
-  This is unresolved compatibility evidence against an unqualified T0
-  claim, not a settled T2 classification or permission to change 689.
+  clearing, validation, query and rendering behavior. The earlier conflict
+  between ignored writes and established write/read effects is resolved by
+  707: retain command/storage/query effects and remove only UI/playbook
+  exposure. These source observations support that boundary, not removal of persisted links or
+  suppression of query output.
 - At the develop object above, `folders.go:199-210,370-374` decodes topic
   metadata into typed structs; `601-622` reconstructs a topic and copies its
   known document fields, and `660` serializes its metadata through
@@ -163,18 +180,20 @@ Keep at most one open ask per topic, close only on the owner's final answer,
 and treat concrete-deliverable approval as execution authority rather than
 another request for permission. Preserve the distinction between a real
 choice and a finished-artifact confirmation. Remove the linked-ticket slot
-from the UI and playbook while retaining accepted-but-silently-ignored input
-and existing stored data as required by 689.
+from the UI and playbook only, preserving existing attribute validation,
+write/storage/query behavior and stored values as required by 707, which
+supersedes 689's ignored-attribute instruction.
 
 This slice may land independently after queue coordination. Optional machine
 state, structural warnings and timed delivery belong to later phases.
 
 Verification expectations: inspect discussion, waiting, execution and
 live-confirm scenarios; confirm the build/change request is not downgraded,
-the final-answer closure rule is retained, and slot removal does not reject
-legacy attribute calls or delete persisted links/history. Check shared/wsflow
-rendering and mirror/package guards. Reconcile the compatibility evidence
-before treating this phase as implementation-ready.
+the final-answer closure rule is retained, and slot hiding preserves legacy
+attribute validation, replacement/clearing, persistence and query output
+without deleting links/history. Check shared/wsflow rendering and
+mirror/package guards. The linked-ticket compatibility question is answered
+by 707; readiness remains a separate lead-owned step.
 
 ### Phase 2: Optional topic state, transition history and structural warnings
 
