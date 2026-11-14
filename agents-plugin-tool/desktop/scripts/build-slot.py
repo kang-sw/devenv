@@ -12,6 +12,43 @@ import tempfile
 import time
 
 
+class OwnedGroups:
+    """Keep every ID as evidence; retire an absent group permanently."""
+
+    def __init__(self):
+        self.ids = []
+        self.active = set()
+        self.retired = []
+        self.processes = []
+
+    def track(self, process):
+        self.ids.append(process.pid)
+        self.active.add(process.pid)
+        self.processes.append(process)
+
+    def present(self, group):
+        if group not in self.active:
+            return False
+        for child in self.processes:
+            child.poll()  # Reap owned parents before checking for descendants.
+        try:
+            os.killpg(group, 0)
+            return True
+        except ProcessLookupError:
+            self.active.remove(group)
+            self.retired.append(group)
+            return False
+
+    def send(self, group, sig):
+        if not self.present(group):
+            return
+        try:
+            os.killpg(group, sig)
+        except ProcessLookupError:
+            self.active.remove(group)
+            self.retired.append(group)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allocated", action="store_true", required=True,
@@ -44,8 +81,7 @@ def main():
                        "--bundles", "app", "--ci", "--no-sign", "--", "--frozen", "-j", "2"]),
     ]
     records = []
-    groups = []
-    processes = []
+    groups = OwnedGroups()
     result = 0
     print(f"logs: {log_dir}", flush=True)
 
@@ -66,14 +102,17 @@ def main():
                 log.flush()
                 process = subprocess.Popen(command, cwd=root, env=env, stdout=log,
                                            stderr=subprocess.STDOUT, start_new_session=True)
-                processes.append(process)
-                groups.append(process.pid)
-                (log_dir / "owned-process-groups.json").write_text(json.dumps(groups))
+                groups.track(process)
+                (log_dir / "owned-process-groups.json").write_text(json.dumps(groups.ids))
                 try:
                     code = process.wait(timeout=remaining)
                 except subprocess.TimeoutExpired:
                     code = 124
-                records.append({"step": name, "exit": code, "log": str(log_path)})
+                # Check immediately after the foreground step, before another
+                # command can run long enough for this PGID to be reused.
+                present = groups.present(process.pid)
+                records.append({"step": name, "exit": code, "log": str(log_path),
+                                "group": process.pid, "group_present_after_step": present})
                 result = code
                 if code:
                     break
@@ -87,37 +126,21 @@ def main():
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         cleanup_deadline = min(time.monotonic() + 15, final_deadline)
 
-        def alive(group):
-            for child in processes:
-                child.poll()  # Reap our own exited parents before checking groups.
-            try:
-                os.killpg(group, 0)
-                return True
-            except ProcessLookupError:
-                return False
-
-        def send(group, sig):
-            try:
-                os.killpg(group, sig)
-            except ProcessLookupError:
-                pass
-
-        for group in groups:
-            send(group, signal.SIGTERM)
+        for group in tuple(groups.active):
+            groups.send(group, signal.SIGTERM)
         term_deadline = min(time.monotonic() + 5, final_deadline)
-        while time.monotonic() < term_deadline and any(alive(g) for g in groups):
+        while time.monotonic() < term_deadline and any(groups.present(g) for g in tuple(groups.active)):
             time.sleep(0.1)
-        for group in groups:
-            if alive(group):
-                send(group, signal.SIGKILL)
-        while time.monotonic() < cleanup_deadline and any(alive(g) for g in groups):
+        for group in tuple(groups.active):
+            groups.send(group, signal.SIGKILL)
+        while time.monotonic() < cleanup_deadline and any(groups.present(g) for g in tuple(groups.active)):
             time.sleep(0.1)
-        lingering = [group for group in groups if alive(group)]
+        lingering = [group for group in tuple(groups.active) if groups.present(group)]
         if lingering:
             result = result or 125
         summary = {
-            "cwd": str(root), "records": records, "owned_groups": groups,
-            "lingering_groups": lingering, "exit": result,
+            "cwd": str(root), "records": records, "owned_groups": groups.ids,
+            "retired_groups": groups.retired, "lingering_groups": lingering, "exit": result,
             "elapsed_seconds": round(time.monotonic() - started, 2),
             "artifact": str(root / "target/debug/bundle/macos/Werkschaft.app"),
         }

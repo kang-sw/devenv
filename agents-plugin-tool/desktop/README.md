@@ -48,8 +48,11 @@ Every run creates a fresh system-temporary `werkschaft-build-slot-*` directory,
 printed before commands start, with `unit-tests.log`, `debug-app.log`,
 `owned-process-groups.json` and `summary.json`. Read each executed command's
 complete log before reporting its outcome. Cleanup targets only process groups
-created by that invocation. A nonempty `lingering_groups` is an unclean stop.
-The runner neither launches the application nor contacts a daemon.
+created by that invocation. Immediately after each foreground step, confirmed
+absent groups are retired permanently before the next step. All IDs remain in
+evidence, but only active, unretired groups are eligible for cleanup; a retired
+ID is never probed or signaled again. A nonempty `lingering_groups` is an unclean
+stop. The runner neither launches the application nor contacts a daemon.
 
 Expected outputs, not build evidence until the command succeeds:
 
@@ -61,13 +64,20 @@ is not signing, notarization, or distribution acceptance.
 
 ## Allocated first-window observation
 
-Request a separate, bounded **eight-minute native observation** scope after the
-build succeeds. Use a fresh temporary evidence directory, retain only owned
-shell PIDs, and reserve its last 15 seconds for TERM (5 seconds) then KILL
-(10 seconds) of those PIDs. No polling, automatic rebuilds, or daemon lifecycle
-commands are part of this procedure. The observer must bring the window forward
-and have screen-recording permission before capture; record a missing permission
-as missing evidence rather than silently substituting a browser screenshot.
+The coordinating lead's combined allocation covers the 25-minute build attempt
+and then **eight minutes of native observation**, conditional on build success;
+there is no additional policy gate between them. Use a fresh temporary evidence
+directory, retain only owned shell PIDs, and reserve its last 15 seconds for TERM
+(5 seconds) then KILL (10 seconds) of those PIDs. No polling, automatic rebuilds,
+or daemon lifecycle commands are part of this procedure.
+
+Use only permissions already granted. Never probe, request, trigger-approve,
+bypass, or work around Screen Recording, Accessibility, or other macOS
+permissions. If a screenshot or automation action needs a permission not known
+to be already granted, record that evidence as **UNVERIFIED** and skip the
+action; continue only already-permitted bounded observations. Do not substitute
+a browser screenshot. Do not invoke permission probes, prompts, or the app
+during source preparation.
 
 1. Rediscover `WS_CACHE_HOME/dashboard/endpoint.json`, or
    `$HOME/.cache/ws@kang-sw-devenv/dashboard/endpoint.json` when the override is
@@ -133,6 +143,8 @@ health service/PID/status/redirect/size failures, missing-then-successful retry,
 credential-free health requests, exact-origin navigation, blocked schemes,
 opaque frame URLs, and the no-native-authority configuration. These tests use
 only owned temporary files and loopback listeners, never the live daemon.
+`scripts/test_build_slot.py` additionally defines mocked retirement/reused-ID
+regressions; it is not run during source preparation.
 
 Official exact-version API references:
 
