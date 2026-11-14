@@ -24,6 +24,18 @@ MAIN's EXEC2 contract, section 675 and latest override (2026-11-14T11:41:17Z),
   reasoning **summary** signals. Accessing, reconstructing, inferring, or newly
   generating private hidden chain-of-thought is outside this contract. Opaque
   signatures/encrypted replay data are not summary text.
+- MAIN relayed owner answers at 2026-11-14T12:00:19Z, verbatim:
+  `710,714=a`, `711,713=b`, and
+  `712=a^서브에이전트는 아예 scope 제외입니다. 추가로 대화창 목업도 좀 부탁해요.`
+  For this ticket, **710=a** selects the first verified explicit-summary modes,
+  with ordinary activity fallback elsewhere; **711=b** requires summaries to be
+  retained in completed conversation history, not live-only; **712=a** limits
+  the feature to the lead. Subagents are fully outside scope, not a later slice.
+  IDs 713 and 714 belong to MAIN's broader answer batch; no additional meaning
+  is inferred for this ticket.
+- The owner requested a conversation-view mockup. MAIN commissioned the Pi
+  designer; the forthcoming approved UI reference must be copied into this
+  ticket's tracked assets directory and linked here before UI readiness.
 - Intended compatibility: **T0 additive**. Preserve existing protocol/API
   semantics; a mechanism requiring T2, a protocol change, or a minor bump must
   stop and return to MAIN for explicit owner approval, not silently proceed.
@@ -110,31 +122,25 @@ Grounded at repository base `9854ff350`; these are observations, not chosen APIs
 
 ## Open Decision Queue
 
-MAIN assigns IDs and records owner answers; the recommendations below are not
-Decisions.
+The policy questions on initial verified coverage, retained history and lead-only
+scope are answered by MAIN's IDs 710–712 above. Do not re-ask them. MAIN owns any
+remaining global IDs; technical preparation must produce a formed proposal before
+escalating an actual product choice.
 
-- **technical — Initial capability/version boundary.** Which proven provider/API,
-  terminal/hosted modes, and Pi minimum version ship first? Options: (a) restrict
-  the first slice to explicitly identifiable summary events on a verified hook
-  surface; (b) require broader harness/provider parity first. Recommend (a): the
-  0.84.4/1.5.2 provenance gap prevents a safe generic-thinking implementation.
-- **technical — Additive transport and state contract.** Choose an evidenced
-  optional-field/capability design after tracing both intake and runner paths,
-  or defer until a common supported source exists. Recommend reviewing a minimal
-  additive proposal first; do not repurpose reply/caption semantics or settle a
-  new wire event/schema by implication. Require old/new adapter-daemon-reader
-  compatibility evidence and unknown-field write-preservation analysis.
-- **policy — Summary lifetime and retention.** Options: (a) live-only content;
-  (b) also retain completed/partial summaries in history. Recommend (a) for the
-  first slice to minimize persistence exposure, subject to owner confirmation.
-  Specify clear/retain behavior at summary end, reply/tool transition, turn end,
-  abort, failure/retry, reset/reload and reconnect; neither retention nor a cap
-  value is an approved default yet.
-- **policy — Activity presentation and absence.** Options: (a) lead activity first;
-  (b) lead plus subagent activity. Recommend (a) with an explicit summary label
-  and ordinary activity fallback when capability/text is absent. Confirm layout,
-  expansion/scroll behavior, partial/error indication, and unsupported-state UI;
-  do not fabricate text when a provider exposes none.
+- **Technical design pending:** derive the exact supported provider/API and
+  terminal/hosted capability matrix, additive transport, history storage and
+  write-preservation contract. Preserve summary provenance; do not repurpose
+  reply/caption semantics or settle a wire event, store/schema, SDK upgrade or
+  migration by implication. Retained completed history is required, not optional.
+- **Lifecycle details pending:** distinguish completed summaries from interrupted
+  partials and specify how source facts survive end/abort/error/retry, reset,
+  reconnect and process loss. Partial-history treatment, persistence boundary,
+  retention limits and recovery guarantees need a concrete technical proposal;
+  do not invent them as approved defaults.
+- **UI basis pending:** receive the designer's mockup and owner approval, attach
+  the approved asset under `ai-docs/tickets/assets/261114-feat-ws-live-reasoning-summary/`,
+  then bind presentation/expansion/scroll behavior and visual verification to it.
+  No subagent surface or speculative fallback text is permitted.
 
 ## Constraints
 
@@ -146,21 +152,32 @@ SDK versions merely to make data appear without an approved decision.
 
 ## Phases
 
-### Phase 1: Carry supported summary signals into live activity
+### Phase 1: Carry supported lead summaries into live activity and history
 
 After the decision queue and design/readiness gates clear, implement the agreed
-bounded provider-summary path, preserving ordinary replies, tools, activity and
-turn accounting. Keep any unsupported capability absent, never speculative.
+bounded lead-only provider-summary path into live activity and retained completed
+conversation history, preserving ordinary replies, tools, activity and turn
+accounting. Use the first verified explicit-summary modes with ordinary activity
+fallback elsewhere. Subagents are excluded entirely. Attach the approved mockup
+before UI readiness; keep unsupported summary data absent, never speculative.
 
 Verification must cover ordered/interleaved summary parts, authoritative end,
 normal progress and reply/tool transitions, abort/error/retry, no-summary and
 unsupported capabilities, empty/redacted blocks, reset/reload/reconnect, and
-terminal versus hosted paths in the agreed scope. Negative tests must prove
-non-summary thinking, signatures/encrypted content and private data never reach
-snapshot/ring/UI. Pin exact versioned fixtures, exercise old/new compatibility,
-redaction/escaping, bounded buffering and nonblocking/debounced delivery. Run the
+terminal versus hosted paths in the verified scope. Verify completed summaries
+remain in conversation history after live activity clears, reload/reconnect and
+writer replacement under the agreed persistence contract. Exercise partial,
+aborted and failed summary cases against the subsequently settled lifecycle
+rules. Negative tests must prove subagent summaries, non-summary thinking,
+signatures/encrypted content and private data never enter the new
+snapshot/history/UI path. Pin exact versioned fixtures, exercise old/new
+compatibility, redaction/escaping, bounded buffering and nonblocking/debounced
+delivery. Run the
 project's applicable Pi tests (`npm test` in `agents-plugin-pi`) and Go suite
 (`go test ./...` in `agents-plugin-tool`), plus dashboard render/browser evidence
-for the agreed presentation; perform no live/provider request merely for capture.
-Durability/recovery tests follow the confirmed retention decision, not invented
-storage defaults.
+for the approved presentation, including side-by-side result/mockup comparison;
+perform no live/provider request merely for capture. Durability/recovery tests
+must prove the confirmed retained-history requirement and any explicitly settled
+partial-summary rules, not invented storage defaults. During this documentation
+and technical-design preparation, run no builds, code tests, browser work or
+probes while EXEC1 owns the heavy shared verification slot.
