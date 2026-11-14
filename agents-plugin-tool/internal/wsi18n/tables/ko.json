@@ -1,6 +1,7 @@
 {
   "agent.context": "컨텍스트: {0} 토큰",
   "agent.done": "완료",
+  "agent.effort": "노력 수준: {0}",
   "agent.failed": "실패",
   "agent.model": "모델: {0}",
   "agent.name": "에이전트 {0}",
