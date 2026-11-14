@@ -123,6 +123,14 @@ type Registration struct {
 	// (a session a terminal harness runs), when its launcher reported one.
 	// It never makes the session live; HarnessMayRun reads it.
 	HarnessPID int `json:"harness_pid,omitempty"`
+	// MCPOwnerPID identifies the launcher whose proxy connection registered
+	// this terminal session. A successor daemon uses an actual reconnect
+	// from that launcher to resume heartbeats; the PID alone is not liveness.
+	MCPOwnerPID int `json:"mcp_owner_pid,omitempty"`
+	// LastCallAt is the latest keyed activity known to the serving ws-mcp,
+	// persisted on registration/heartbeat/end. Reconnection resumes the idle
+	// budget from this stamp rather than counting a restart as activity.
+	LastCallAt string `json:"last_call_at,omitempty"`
 }
 
 // HostMayRun reports whether a hosted row's harness process may still run,

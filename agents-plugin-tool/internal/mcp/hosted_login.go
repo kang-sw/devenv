@@ -155,9 +155,11 @@ func (s *Server) hostedLoginGuard(key, root string) error {
 	// held marks the row as this server's harness's.
 	held := func() error {
 		row.HarnessPID = harness
+		row.MCPOwnerPID = s.ownerPID
 		if name := s.currentHarness(); name != "" {
 			row.Harness = name
 		}
+		row.LastCallAt = dashboardStamp(now)
 		row.HeartbeatAt, row.EndedAt = dashboardStamp(now), ""
 		return wsdashboard.WriteRegistration(dir, row)
 	}

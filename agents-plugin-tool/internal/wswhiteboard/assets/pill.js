@@ -122,12 +122,10 @@
       if (g.length) target[edge][k] = edge === "top" ? g[g.length - 1] : g[0];
     });
   }
-  // An item's own rect, in a topic far from the view, would lay out the
-  // topic's whole skipped subtree (the dashboard's board topics skip their
-  // rendering there, content-visibility): an item in a topic wholly above
+  // Avoid reading every far item's rect: an item in a topic wholly above
   // or below the view takes its side from the topic's rect, read once per
-  // update, unless a closed fold hides it, and only an item in a topic
-  // crossing the view reads its own.
+  // update, unless a closed fold hides it. Only an item in a topic crossing
+  // the view reads its own rect.
   function folded(el, topic) {
     for (var p = el.parentElement; p && p !== topic; p = p.parentElement) if (p.tagName === "DETAILS" && !p.open) return true;
     return false;

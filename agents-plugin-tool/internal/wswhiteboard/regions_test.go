@@ -284,9 +284,10 @@ func frameDocs(t *testing.T, board string) map[string]string {
 // TestServedTopicBodyRendersInASandboxedFrame pins the served page's body
 // trust: RenderRegions puts a body's HTML, scripts included, in a srcdoc
 // frame with allow-scripts but never allow-same-origin, so none of it runs
-// in the daemon's origin, and the frame document carries the page stylesheet
-// (the theme variables), the frame script, and the body's own markup. The
-// disk page keeps rendering the body inline.
+// in the daemon's origin, and the frame document links the page stylesheet
+// (the theme variables) and the frame script as shared hashed files
+// (FrameAsset), and carries the body's own markup. The disk page keeps
+// rendering the body inline.
 func TestServedTopicBodyRendersInASandboxedFrame(t *testing.T) {
 	const doc = "**plan**\n\n<canvas id=\"c\" width=\"40\" height=\"20\"></canvas>\n<script>\nfetch('/s/r/message', {method: 'POST'});\n</script>\n\nSee {{1}}"
 	st := &State{Seq: 2, Topics: []TopicDoc{{Name: "doc", Body: doc, Changed: 2}}, Items: []Item{{ID: 1, Class: ClassPolicy, Topic: "t", Title: "x", Status: StatusOpen, Options: []string{"a", "b"}}}}
@@ -306,11 +307,22 @@ func TestServedTopicBodyRendersInASandboxedFrame(t *testing.T) {
 	wantNone(t, board, "allow-same-origin", "<script", "<canvas", " srcdoc=", "<iframe", " sandbox=")
 	assets, _ := loadAssets()
 	doc1 := frameDocs(t, board)["doc"]
-	wantAll(t, doc1, `<base target="_blank">`, "--wb-bg:", "<strong>plan</strong>", `<canvas id="c"`, "fetch('/s/r/message'", assets.docFrame, `<body class="doc-frame"><div class="doc-body md">`,
+	wantAll(t, doc1, `<base target="_blank">`, frameCSSLink(t), "<strong>plan</strong>", `<canvas id="c"`, "fetch('/s/r/message'", frameJSTag(t), `<body class="doc-frame"><div class="doc-body md">`,
 		`See <a href="#item-1">(01)</a>`)
-	if strings.Contains(doc1, "<script src=") {
+	wantNone(t, doc1, "--wb-bg:", "<style>", assets.docFrame)
+	if mermaid, _ := MermaidAsset(); strings.Contains(doc1, mermaid) {
 		t.Errorf("a body without a mermaid block loads mermaid in its frame")
 	}
+	// The shared files hold what the frame used to inline.
+	css, ctype, ok := FrameAsset(assets.frameCSSFile.name)
+	if !ok || ctype != "text/css; charset=utf-8" || string(css) != string(assets.css)+"\n"+frameCSS {
+		t.Errorf("frame stylesheet = %v, %q", ok, ctype)
+	}
+	js, ctype, ok := FrameAsset(assets.frameJSFile.name)
+	if !ok || ctype != "text/javascript; charset=utf-8" || string(js) != assets.docFrame {
+		t.Errorf("frame script = %v, %q", ok, ctype)
+	}
+	wantAll(t, string(css), "--wb-bg:", frameCSS)
 
 	page := render(t, view)
 	wantAll(t, page, `<div class="doc-body md"><p><strong>plan</strong></p>`, "fetch('/s/r/message'")
@@ -475,8 +487,10 @@ func TestImageViewerScriptHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := frameDocs(t, string(regions.Board))["doc"]
-	wantAll(t, doc, `function wbFlattenSvg(`, `wbDoc: "view"`, `wbDoc: "img"`, `span.img-text[data-relay]`)
-	wantNone(t, doc, `createObjectURL`)
+	wantAll(t, doc, frameJSTag(t))
+	assets, _ := loadAssets()
+	wantAll(t, string(assets.frameJSFile.data), `function wbFlattenSvg(`, `wbDoc: "view"`, `wbDoc: "img"`, `span.img-text[data-relay]`)
+	wantNone(t, doc+string(assets.frameJSFile.data), `createObjectURL`)
 
 	shared, err := PageAssets()
 	if err != nil {
@@ -568,4 +582,24 @@ func TestTopicFrameCarriesTheCopyStrings(t *testing.T) {
 	doc := frameDocs(t, string(regions.Board))["doc"]
 	wantAll(t, doc, `window.wsT = function`, `"js.wb.copy":"복사"`, `"js.wb.copy.done":"복사됨"`)
 	wantNone(t, doc, `"js.wb.ago.now"`, `"js.pill.open"`)
+}
+
+// frameCSSLink and frameJSTag are how a topic-body frame's document loads
+// the shared frame stylesheet and script (framedDoc, FrameAsset).
+func frameCSSLink(t *testing.T) string {
+	t.Helper()
+	a, err := loadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `<link rel="stylesheet" href="` + a.frameCSSFile.name + `">`
+}
+
+func frameJSTag(t *testing.T) string {
+	t.Helper()
+	a, err := loadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `<script src="` + a.frameJSFile.name + `"></script>`
 }
