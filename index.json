@@ -625,7 +625,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "feat/unified-history-task3",
         "phase": "active",
-        "touched_at": "2026-11-14T12:33:32Z"
+        "touched_at": "2026-11-14T12:40:29Z",
+        "impl": {
+          "branch": "impl/feat/unified-history-task3/flask-churn-crib"
+        }
       }
     },
     "261114-refactor-ws-common-session-interface": {
