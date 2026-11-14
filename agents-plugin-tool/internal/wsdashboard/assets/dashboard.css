@@ -647,9 +647,9 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .bcard.drag .bc-body { pointer-events: none; }
 .bcard.flash .bc-in { animation: bc-flash .9s ease-out; }
 @keyframes bc-flash { from { box-shadow: 0 0 0 2px var(--wb-primary), var(--wb-shadow-hi); } to { box-shadow: var(--wb-shadow); } }
-.bc-scrim { position: fixed; inset: 0; z-index: 47; background: var(--scrim); }
+.bc-scrim { position: fixed; inset: 0; z-index: calc(var(--z-modal) - 1); background: var(--scrim); }
 .bc-scrim[hidden] { display: none; }
-.bcard[data-max] .bc-in { position: fixed; z-index: 48; top: 52px; left: 16px; right: 16px; bottom: 12px; box-shadow: var(--wb-shadow-hi); }
+.bcard[data-max] .bc-in { position: fixed; z-index: var(--z-modal); top: 52px; left: 16px; right: 16px; bottom: 12px; box-shadow: var(--wb-shadow-hi); }
 .bcard[data-max] .bc-body { display: block; flex: 1 1 0; height: auto !important; }
 .bcard[data-max] .bc-folded, .bcard[data-max] .bc-grip, .bcard[data-max] .bc-pin, .bcard[data-max] .bc-fold, .bcard[data-max] .bc-max, .bcard[data-max] .bc-close { display: none; }
 .bcard[data-max] .bc-min { display: inline-grid; }
@@ -662,7 +662,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .tbar .d-max, .tbar .d-min { color: inherit; opacity: .45; }
 .tbar:hover .d-max, .tbar:hover .d-min, .tbar .d-max:focus-visible, .tbar .d-min:focus-visible { opacity: .9; }
 .tbar > .d-min, summary > .d-min { display: none; }
-section.topic[data-max], details.entry-panel[data-max] { position: fixed; z-index: 48; top: 52px; left: 16px; right: 16px; bottom: 12px; margin: 0; overflow: auto; overscroll-behavior: contain; box-shadow: var(--wb-shadow-hi); }
+section.topic[data-max], details.entry-panel[data-max] { position: fixed; z-index: var(--z-modal); top: 52px; left: 16px; right: 16px; bottom: 12px; margin: 0; overflow: auto; overscroll-behavior: contain; box-shadow: var(--wb-shadow-hi); }
 section.topic[data-max] { background: var(--wb-card); }
 section.topic[data-max] > .tophead, details.entry-panel[data-max] > summary { position: sticky; top: 0; z-index: 2; }
 details.entry-panel[data-max] > summary { background: var(--wb-bg); cursor: default; }
@@ -975,7 +975,7 @@ section.topic[data-topic][data-wbcv]:not([data-max]):not(:has(details.entry-pane
 /* A changed topic's next body frame loads over the frame it replaces,
    unseen and out of the layout, until it has loaded and drawn (the page
    script's board morph, frameGraft). */
-.doc-body.framed { position: relative; }
+.doc-body.framed { position: relative; z-index: var(--z-cards); }
 iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 0; pointer-events: none; }
 
 /* ===== drawer: the side panels pulled down from the top =====
@@ -995,7 +995,7 @@ iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 
    close, never a drag or a resize. The sheet shows every present panel as a
    card in a wrapping grid (below), or the git sheet (gitbody). */
 :root { --drhw: 0px; --dpad: 16px; }
-.drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: 40; pointer-events: none; }
+.drawer { position: fixed; top: 0; left: 0; right: 0; height: 0; z-index: var(--z-panels); pointer-events: none; }
 .dr-in { position: relative; max-width: 1680px; margin: 0; }
 .dr-clip { position: absolute; top: var(--drtop, 48px); left: var(--dpad); right: var(--dpad); height: 0; overflow: hidden; pointer-events: auto; visibility: hidden; border-radius: 0 0 var(--wb-radius) var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
 .drawer.open .dr-clip, .drawer.drag .dr-clip { visibility: visible; }
@@ -1832,7 +1832,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
    the page script outside the rail region (which every update replaces)
    and placed fixed against the + that opened them; the tracker support
    chat's selection popover look */
-.rpop { position: fixed; z-index: 55; width: 330px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px;
+.rpop { position: fixed; z-index: var(--z-popovers); width: 330px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px;
   background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 10px 12px; font-size: 12.5px; }
 .rpop[hidden] { display: none; }
 .rpop [hidden] { display: none !important; }
@@ -2061,11 +2061,16 @@ html:not([data-sysopen]) .rail .rdel { display: none; }
    but its placeholder rail button. Framed, the index lays out as a session
    page does: its list (ixmain) beside the rail's placeholder, left-aligned
    at its own width, and the tracker's drawer as a session page's. */
+/* Page layers, shared with the shell: an iframe's overlays cannot escape
+   its stacking context, so the shell lifts the whole frame while open. */
+:root { --z-cards: 1; --z-panels: 40; --z-popovers: 60; --z-modal: 70; }
 :root[data-shell], :root[data-shell] body { overflow: hidden; }
 .frames { position: fixed; inset: 0; z-index: 0; }
 .frames > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; visibility: hidden; background: var(--wb-bg); }
 .frames > iframe.on { visibility: visible; z-index: 1; }
-:root[data-shell] .dwrap { position: relative; z-index: 1; pointer-events: none; }
+:root[data-shell] .dwrap { position: relative; z-index: var(--z-cards); pointer-events: none; }
+:root[data-shell][data-fpopover] .frames { z-index: var(--z-popovers); }
+:root[data-shell][data-fdim] .frames { z-index: var(--z-modal); }
 :root[data-shell] .dwrap > .top > *, :root[data-shell] #rail { pointer-events: auto; }
 :root[data-shell][data-fdim] .dwrap > .top, :root[data-shell][data-fdim] #rail { filter: brightness(var(--fdim, 1)); }
 :root[data-shell][data-fdim] .dwrap > .top > *, :root[data-shell][data-fdim] #rail { pointer-events: none; }

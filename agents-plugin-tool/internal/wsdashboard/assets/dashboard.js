@@ -8881,6 +8881,7 @@
       if (ent.pincol) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
       railOpen(false);
     }
+    if (ent.popover) root.setAttribute("data-fpopover", ""); else root.removeAttribute("data-fpopover");
     if (ent.dim > 0) {
       root.style.setProperty("--fdim", String(Math.max(0, 1 - ent.dim)));
       root.setAttribute("data-fdim", "");
@@ -8913,7 +8914,7 @@
           if (m.key === "rail") railKey();
           else if (m.key === "esc" && railShown()) railOpen(false);
           break;
-        case "layout": ent.pincol = m.pincol; ent.dim = m.dim; if (on) shLayout(ent); break;
+        case "layout": ent.pincol = m.pincol; ent.dim = m.dim; ent.popover = m.popover === true; if (on) shLayout(ent); break;
         case "scroll": ent.y = m.y; if (on) shScroll(ent); break;
         case "hash": if (on && location.hash !== m.hash) history.replaceState(null, "", ent.f.path + m.hash); ent.f.hash = m.hash; break;
         case "theme":
@@ -8995,7 +8996,8 @@
         pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
         top: top.offsetHeight
       });
-      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim() });
+      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(),
+        popover: q(".rpop:not([hidden])").some(function (el) { return el.getClientRects().length > 0; }) });
     }
     function queue() { if (!queued) queued = setTimeout(post, 16); }
     doc.addEventListener("ws-overview", queue);
@@ -9042,8 +9044,8 @@
         if (shTrackerRev !== null) { var rev = shTrackerRev; shTrackerRev = null; trackerNudge(rev); }
         queue();
       } else if (m.wsShell === "search") {
-        var b = $("tkqs");
-        if (b) b.click();
+        // Open, do not toggle a hidden header button via a synthetic click.
+        if (tkApi) tkApi.openSearch();
       } else if (m.wsShell === "menu") {
         var h = region("head"), chip = h && h.querySelector(".host.hbtn");
         if (chip && WsRail) railPopOpen("sess", chip);

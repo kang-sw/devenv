@@ -7217,6 +7217,7 @@
     api = {
       refresh: function () { render(); },
       openStore: openStore,
+      openSearch: qOpen,
       closeStore: function () { if (ui.open) collapse(); },
       openItemWindow: openItemWindow,
       leavePage: leavePage,
