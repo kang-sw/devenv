@@ -2,8 +2,11 @@
 title: "Preserve the viewed whiteboard panel with one scroll owner"
 related:
   261114-refactor-ws-dashboard-whiteboard-asset-split: "Coordinate implementation with MAIN's cut line and use its published move map"
-sage-review-design: blocked
-sage-review-completeness: blocked
+  261113-feat-ws-dashboard-board-reorder-hold: "Owner (818)=a supersedes immediate placement of visible cards and the older ordinary anchor/session strategy; preserve unrelated behavior"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: d1800d862382a36f
+sage-review-completeness-reviewed: d1800d862382a36f
 ---
 
 # Preserve the viewed whiteboard panel with one scroll owner
@@ -61,12 +64,25 @@ closed-topic-reveal feature.
   (802); reject a one-third-viewport shift threshold or reading-line-only
   deferral as the eligibility rule. The reading line below selects the scroll
   reference, not which visible panels receive render deferral.
+- **Defer visible-card placement — owner-confirmed (818)=a.** MAIN relayed
+  the owner's verbatim answer `818,822=a` on 2026-11-14 at 23:13 UTC; only
+  item (818) belongs to this ticket. Stage reorders among visible cards as well
+  as rendering changes into the same bottom `최신 변경 N건 반영` bar. Release
+  the staged placement on bar click or when the affected card fully leaves the
+  exposed viewport. The owner's own input applies immediately. Preserve the
+  all-visible golden rule and one scroll writer; do not apply incompatible
+  relative-placement changes and then try to repair them with one scroll delta.
+  This explicitly supersedes the older board-reorder ticket's immediate-move
+  rule when the destination is visible. Server ordering remains authoritative
+  once staging releases; no server reorder policy changes. Rejected: immediate
+  visible-card reorder with a relaxed preservation guarantee (option b).
 - **Supersede the older preservation strategy, not its unrelated behavior.**
   The approved reading-line reference and short mutation transaction replace
   the topmost-survivor selection and long-lived ordinary keep sessions from
   `261113-feat-ws-dashboard-board-reorder-hold` Phase 1. The later (803)=a
   visible-render deferral supersedes that ticket's immediate visible-content
-  update expectation. Preserve unrelated placement, visibility subscriptions,
+  update expectation, and (818)=a supersedes its immediate visible-card
+  placement rule. Preserve unrelated placement rules, visibility subscriptions,
   history membership and explicit navigation semantics; do not retain the
   superseded writers alongside the new owner.
 - **One writer per actual scroller — (800)=a.** Use one owner with states
@@ -153,8 +169,9 @@ closed-topic-reveal feature.
 - Preserve existing history membership and selection policies, disclosure and
   frame identities, focus behavior, and navigation target semantics. Optional
   inner references must not require reading an opaque child frame through a
-  forbidden parent/child DOM boundary. Do not change clipping policy, reorder
-  policy or animation design as an incidental fix.
+  forbidden parent/child DOM boundary. Client-side placement staging is
+  explicitly authorized by (818)=a; do not change server ordering, clipping
+  policy, unrelated reorder behavior or animation design as an incidental fix.
 - Source claims, deterministic harness results and real browser geometry are
   different evidence. No approved screenshot/mockup is supplied for this
   behavior; later acceptance compares the actual implementation baseline and
@@ -165,7 +182,7 @@ closed-topic-reveal feature.
 ## Prior Decisions
 
 - e0ed9ff8 (2026-11-14, commit): "Reuse the existing per-scroller keep lifecycle so board-swap anchoring cannot steal or end an explicit jump" — bearing: constrains
-- 261113-feat-ws-dashboard-board-reorder-hold (2026-11-14, Result): "boardKeepSettle picks the anchor after the morph with boardAnchor (a held entry first, else the first one that is not moving)." — bearing: constrains; its anchor/session strategy is explicitly superseded above.
+- 261113-feat-ws-dashboard-board-reorder-hold (2026-11-14, Result/Decisions): "boardKeepSettle picks the anchor after the morph with boardAnchor" and a visible destination moves immediately — bearing: constrains; the ordinary anchor/session and immediate visible-card placement strategies are explicitly superseded by (800)/(818) above.
 - 5695371f (2026-11-13, commit): "Reuse board SSE regions and trusted frame metadata; materialize inert older/closed history only for known targets and preserve viewport anchors." — bearing: constrains
 - 261113-feat-ws-whiteboard-topic-history-load-more (2026-11-13, Decisions): "No inner scroll; \"load more\" above the latest window" — bearing: constrains
 - 261113-feat-ws-whiteboard-topic-panels-and-log (2026-11-13, Decisions): "Panels are append-only versions (207=b): panels are rewritten only as a full rewrite via ID override: an existing panel with the same ID folds." — bearing: constrains
@@ -202,8 +219,10 @@ jump-follow state instead of creating a second navigation authority. Apply the
 (802)=a golden rule to latest-change pull-up reorder and offscreen height
 changes, and implement the confirmed (803)=a pending-rendering and bottom-badge
 behavior for every viewport-intersecting panel, including the owner's immediate
-answer/memo exception. Coordinate badge-click and fully-offscreen application
-with the same scroll owner rather than adding another correction writer. If a
+answer/memo exception. Stage visible-card relative placement under (818)=a
+instead of applying incompatible reorders. Coordinate badge-click and
+fully-offscreen application with the same scroll owner rather than adding
+another correction writer. If a
 single compensation delta cannot preserve the affected visible panels on the
 actual tree, report the conflicting geometry before expanding the approved
 mechanism; do not silently weaken the golden rule to one reference.
@@ -225,6 +244,15 @@ execution policy (no heavy-slot wait):
   the reading reference. Distinguish external changes from the immediate
   owner-answer/memo exception and explicit badge application under (803).
   Do not infer all-visible preservation from one passing anchor sample.
+- Verify (818)=a with simultaneously visible cards A then B where an external
+  update would place B before A even though both destination slots are visible.
+  Both positions and their relative order must remain unchanged while staged.
+  Verify the same pending bar accounts for the deferred change, click applies
+  it explicitly, and automatic placement applies only once the affected card
+  fully leaves the exposed viewport while preserving the remaining visible
+  panels. Exercise multiple queued reorders, main and pinned scrollers, and the
+  immediate owner-input exception. Do not assert all-visible preservation for
+  the explicit click or owner-input exceptions as if they were external updates.
 - Verify (803)=a deferral for panels intersecting the viewport by exactly 1 px,
   for several visible panels, and for visible panels away from the reading
   line. Confirm current rendering stays unchanged while pending, and the bottom
@@ -253,7 +281,7 @@ execution policy (no heavy-slot wait):
   before execution; this capture authorizes no broad suite or live-owner probe.
   MAIN alone decides deployment and release.
 
-## Blocked (2026-11-15)
+## Sage Review Round 1 (2026-11-15)
 
 ### Design Reviewer — block
 
