@@ -12,7 +12,7 @@ func TestRecapDisplayClampAndContentSizedHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	css := string(data)
-	wantAll(t, css, `.trecap, .entry-recap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }`)
+	wantAll(t, css, `.trecap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }`)
 	slot := regexp.MustCompile(`(?m)^\.tsub > \.trecap \{[^}]+\}`).FindString(css)
 	wantAll(t, slot, `max-height: 5.8em;`, `font-size: 12.5px;`, `line-height: 1.45;`, `min-width: 0;`, `background: none;`)
 	if regexp.MustCompile(`(?:\{|;)\s*(?:height|min-height)\s*:`).MatchString(slot) {
@@ -23,6 +23,22 @@ func TestRecapDisplayClampAndContentSizedHeader(t *testing.T) {
 	// Sticking must not change the shared maximum or content-driven height.
 	if regexp.MustCompile(`(?m)^[^\n{]*\.wb-stuck[^\n{]*\.trecap\s*\{`).MatchString(css) {
 		t.Fatal("stuck recap overrides the shared clamp/height")
+	}
+}
+
+func TestRecapDisplayPanelTitleIsNotClipped(t *testing.T) {
+	data, err := embeddedAsset("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(data)
+	wantAll(t, css, `.entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; line-height: 24px; }`)
+	rules := regexp.MustCompile(`(?m)^([^{}\n]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1)
+	clipping := regexp.MustCompile(`(?:^|;)\s*(?:(?:-webkit-)?line-clamp\s*:\s*[1-9]|overflow(?:-x|-y)?\s*:\s*(?:hidden|clip)|text-overflow\s*:\s*ellipsis|(?:max-)?height\s*:)`)
+	for _, rule := range rules {
+		if strings.Contains(rule[1], ".entry-recap") && clipping.MatchString(rule[2]) {
+			t.Fatalf("panel title selector clips its full text: %s{%s}", rule[1], rule[2])
+		}
 	}
 }
 

@@ -427,24 +427,7 @@ const INIT = (options = {}) => {
   // same-origin page then reuses, so the frame's URL is not checked here.
   // The body frames are grandchildren and are skipped.
   if (window.top !== window && window.parent !== window.top) return;
-  const bh = (window.__bh = { sockets: [], board: null, writes: [], resizeDeliveries: [], historyLoads: [], observerErrors: [], observerErrorDetails: [], menuHitTargets: [] });
-  // Capture the native target before the menu's handler removes it. A button
-  // may win inside the session document while the shell intercepts above it.
-  if (options.menuHitTargets) document.addEventListener('click', (e) => {
-    const button = e.target?.closest?.('.lmenu button');
-    if (!button) return;
-    const local = document.elementFromPoint(e.clientX, e.clientY);
-    const hit = { trusted: e.isTrusted, first: button.matches('.lmenu button:first-child'), text: button.textContent,
-      point: { x: e.clientX, y: e.clientY }, localHitIsButton: local === button, framed: window.parent !== window, parentHitIsFrame: null };
-    if (hit.framed) {
-      try {
-        const frame = window.frameElement, r = frame.getBoundingClientRect();
-        hit.parentHitIsFrame = window.parent.document.elementFromPoint(r.left + frame.clientLeft + e.clientX, r.top + frame.clientTop + e.clientY) === frame;
-      } catch (error) { hit.parentError = String(error); }
-    }
-    bh.menuHitTargets.push(hit);
-    console.debug('__bh-menu-hit-target__' + JSON.stringify(hit));
-  }, true);
+  const bh = (window.__bh = { sockets: [], board: null, writes: [], resizeDeliveries: [], historyLoads: [], observerErrors: [], observerErrorDetails: [], menuHitTargets: [], menuHitTargetsEnabled: !!options.menuHitTargets });
   // Observe actual native deliveries; never invoke a callback or re-observe
   // on the harness's behalf. Filter to the history's own observer, excluding
   // the shared keep observer which also watches history-live.
@@ -512,6 +495,26 @@ const IN_PAGE = () => {
         delivery: bh.activeResize || null, pages: h.querySelectorAll('template[data-history-page]').length,
         rows: h.querySelectorAll('.history-live .wb-entry').length });
     });
+  }
+  if (bh.menuHitTargetsEnabled && bh.menuHitDocument !== document) {
+    bh.menuHitDocument = document;
+    // Capture before the native menu handler removes the button, once for
+    // this actual Document rather than the shell's initial about:blank.
+    document.addEventListener('click', (e) => {
+      const button = e.target?.closest?.('.lmenu button');
+      if (!button) return;
+      const local = document.elementFromPoint(e.clientX, e.clientY);
+      const hit = { trusted: e.isTrusted, first: button.matches('.lmenu button:first-child'), text: button.textContent,
+        point: { x: e.clientX, y: e.clientY }, localHitIsButton: local === button, framed: window.parent !== window, parentHitIsFrame: null };
+      if (hit.framed) {
+        try {
+          const frame = window.frameElement, r = frame.getBoundingClientRect();
+          hit.parentHitIsFrame = window.parent.document.elementFromPoint(r.left + frame.clientLeft + e.clientX, r.top + frame.clientTop + e.clientY) === frame;
+        } catch (error) { hit.parentError = String(error); }
+      }
+      bh.menuHitTargets.push(hit);
+      console.debug('__bh-menu-hit-target__' + JSON.stringify(hit));
+    }, true);
   }
   const q = (sel, root) => Array.from((root || document).querySelectorAll(sel));
   bh.board_ = () => document.getElementById("r-board") || document.querySelector("body.full .grid > main");

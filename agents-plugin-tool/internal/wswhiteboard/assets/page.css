@@ -412,8 +412,8 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .trecap:last-child, .trecap:has(+ details.tdoc:not([open]):last-child) { margin-bottom: 10px; }
 /* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
 .trecap { contain: paint; }
-/* Clamp the rendered recap, never its stored text; hover titles keep it all reachable. */
-.trecap, .entry-recap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+/* Clamp topic recaps, never panel-card titles or stored text. */
+.trecap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
 .trecap .rtext { display: inline; min-width: 0; overflow-wrap: anywhere; }
 .trecap .rtext > p:first-child { display: inline; }
 .trecap .rat { font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
