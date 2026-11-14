@@ -186,14 +186,14 @@
     return !!b && b.getAttribute("aria-pressed") === "true";
   }
 
-  // drop moves item (a live session row or a workspace section) next to
+  // drop moves item (a live session row, worktree group or workspace section) next to
   // ref, a sibling of its kind, before it or (after) after it, and reports
   // whether it moved. It refuses a ref in another list (a session never
   // leaves its own group), a ref of another kind or on the other side of
   // the stars, an ended row, and the item itself.
   function drop(item, ref, after) {
     if (!item || !ref || item === ref || !item.parentNode || ref.parentNode !== item.parentNode) return false;
-    var kind = hasClass(item, "rws") ? "rws" : "rs";
+    var kind = hasClass(item, "rws") ? "rws" : hasClass(item, "rwt") ? "rwt" : "rs";
     if (!hasClass(ref, kind) || hasClass(item, "ended") || hasClass(ref, "ended") || (kind === "rs" && starred(item) !== starred(ref))) return false;
     item.parentNode.insertBefore(item, after ? ref.nextSibling : ref);
     return true;
@@ -217,6 +217,7 @@
     var ws = up(over, "rws");
     if (!ws) return "";
     if (ws !== up(item, "rws")) return "workspace";
+    if (hasClass(item, "rwt")) return "";
     var wt = up(over, "rwt");
     if (wt && wt !== homeWt(item)) return "group";
     var row = up(over, "rs");
@@ -277,7 +278,7 @@
     var parentOK = !t.parent && t.live && t.ws === d.ws && !d.kids;
     var zone = parentOK ? (frac < 0.25 ? "before" : frac > 0.75 ? "after" : "child") : (frac < 0.5 ? "before" : "after");
     if (zone === "child") return { zone: zone, ref: t.rid, op: { op: "attach", rid: d.rid, parent: t.rid } };
-    if (zone === "after" && t.first) {
+    if (zone === "after" && parentOK && t.first) {
       return dropZone(d, { rid: t.first, ws: t.ws, group: "", live: true, parent: t.rid, kids: false, star: false, first: "" }, 0);
     }
     if (!t.live) return { refusal: "ended" };
@@ -445,15 +446,18 @@
   // itemKey names a dragged item, a session row by reply-id or a workspace
   // section by path, so refind can find the node a swap put in its place.
   function itemKey(el) {
-    var ws = hasClass(el, "rws"), attr = ws ? "data-ws" : "data-rid";
-    return { cls: ws ? "rws" : "rs", attr: attr, val: el.getAttribute(attr) || "" };
+    var ws = hasClass(el, "rws"), wt = hasClass(el, "rwt"), attr = ws ? "data-ws" : wt ? "data-g" : "data-rid";
+    var key = { cls: ws ? "rws" : wt ? "rwt" : "rs", attr: attr, val: el.getAttribute(attr) || "" };
+    if (wt) key.ws = (up(el, "rws") || el).getAttribute("data-ws") || "";
+    return key;
   }
   // refind is the element under box that key names, or null.
   function refind(box, key) {
     var kids = box.children || [];
     for (var i = 0; i < kids.length; i++) {
       var k = kids[i];
-      if (hasClass(k, key.cls) && k.getAttribute(key.attr) === key.val) return k;
+      if (hasClass(k, key.cls) && k.getAttribute(key.attr) === key.val &&
+          (key.ws === undefined || attr(up(k, "rws"), "data-ws") === key.ws)) return k;
       var deep = refind(k, key);
       if (deep) return deep;
     }

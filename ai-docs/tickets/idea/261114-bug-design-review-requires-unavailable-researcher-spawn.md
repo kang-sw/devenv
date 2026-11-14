@@ -14,6 +14,12 @@ Evidence: root session `subtext-pound-cytoplasm`, correction fork `448f1670-bb86
 
 This differs from the already captured trusted-shipped-provenance render rejection: rendering succeeded here, but a mandatory procedural dependency was unavailable in the resulting reviewer.
 
+## Additional observation — 2026-11-14 rail review
+
+In session `boxer-nest-joyous`, root-dispatched design reviewer `daaa90d4-09fc-418a-9db2-144dbd6d1dbf` for `261114-bug-ws-dashboard-rail-drag-regression` reported that its configured medium explorer failed to start with `child network capability exceeds parent ceiling`. The reviewer retained exact source reads and disclosed the missing exploration; the lead requested its exact failed question and kept the gate incomplete pending the required evidence. This is a reported capability-ceiling rejection, not a verified network-policy root cause. No capability relaxation, live runtime action, or substitute review approval occurred.
+
+Unlike the initial incident's absent spawn tools, this reviewer could attempt the spawn but its child's capability request was rejected. Investigate both admission-time capability compatibility and the mandatory explorer dependency without weakening either boundary.
+
 ## Constraints
 
 - Keep the mandatory design gate incomplete until an appropriately capable reviewer actually completes it.

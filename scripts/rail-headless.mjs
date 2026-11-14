@@ -141,6 +141,8 @@ function seed(root) {
     git(dirs[name], "commit", "--allow-empty", "-qm", "initial");
   }
   git(dirs.alpha, "worktree", "add", "-q", "-b", "feat/x", dirs["alpha-feat"]);
+  dirs["alpha-empty"] = path.join(work, "alpha-empty");
+  git(dirs.alpha, "worktree", "add", "-q", "-b", "empty", dirs["alpha-empty"]);
   fs.mkdirSync(path.join(dirs.alpha, "sub"), { recursive: true });
   fs.mkdirSync(dirs.notes, { recursive: true });
   const common = { alpha: path.join(dirs.alpha, ".git"), "alpha-feat": path.join(dirs.alpha, ".git"), beta: path.join(dirs.beta, ".git"), gamma: path.join(dirs.gamma, ".git"), notes: "" };
@@ -298,7 +300,8 @@ async function makeContext(browser, base, fx, o = {}) {
         const rows = document.querySelectorAll("#rlist .rs");
         const br = [...document.querySelectorAll("#rlist .wthd .br")].map((b) => b.textContent);
         return rows.length === n && document.querySelectorAll("#rlist .rs:not(.ended)").length === live && br.includes("feat/x") && !!document.querySelector("#rlist .rs.cur");
-      }, [SESSIONS.length, fx.live.length]), 15000);
+      // Registry discovery has a 30s polling backstop (Index.DefaultPollInterval).
+      }, [fx.live.length + fx.ended.length, fx.live.length]), 45000);
       await page.mouse.move(o.viewport ? o.viewport.width - 5 : 1695, 5);
     },
     railHash: () => page.evaluate(() => document.querySelector('[data-region="rail"]').getAttribute("data-h")),
@@ -451,7 +454,262 @@ function toasted(t, text) {
 }
 const RENAME = "Rename (shown on this dashboard only)", COPY = "Copy mailbox address";
 
+// All setup operations use the isolated daemon, never a caller registration.
+async function applied(t, body) {
+  const a = await layoutOp(t.base, body);
+  assert(a.status === 200 && a.reply.applied === true, `setup ${JSON.stringify(body)}: HTTP ${a.status} ${JSON.stringify(a.reply)}`);
+}
+async function swapped(t, label) {
+  const h = await t.railHash();
+  await t.relabel("rail-b-1", label);
+  await until(label, async () => (await t.railHash()) !== h && (await t.railNames()).includes(label));
+}
+async function pointerRow(t, key, onto, fraction) {
+  await t.page.locator(t.sel(onto)).scrollIntoViewIfNeeded();
+  const at = await t.press(key);
+  await t.page.mouse.move(at.x, at.y + 8, { steps: 2 });
+  assert(await t.dragging(), `${key}: grip not admitted`);
+  await t.page.locator(t.sel(onto)).scrollIntoViewIfNeeded();
+  const b = await t.box(t.sel(onto));
+  await t.page.mouse.move(at.x, b.y + b.height * fraction, { steps: 8 });
+}
+async function parentFixture(t) {
+  await t.open("rail-f-1");
+  // Three expanded parent units, in an explicit order independent of defaults.
+  for (const [parent, child] of [["01", "02"], ["03", "04"], ["05", "06"]]) {
+    await applied(t, { op: "attach", rid: t.rid(`rail-a-${child}`), parent: t.rid(`rail-a-${parent}`) });
+  }
+  for (const [a, b] of [["03", "01"], ["05", "03"]]) {
+    await applied(t, { op: "move", rid: t.rid(`rail-a-${a}`), after: t.rid(`rail-a-${b}`) });
+  }
+  await t.open("rail-f-1");
+}
+const PARENTS = ["rail-a-01", "rail-a-03", "rail-a-05"];
+async function parentOrder(t) {
+  return (await t.group("rail-a-01")).filter((r) => PARENTS.map(t.rid).includes(r));
+}
+async function parentKids(t) {
+  for (const [p, c] of [["01", "02"], ["03", "04"], ["05", "06"]]) {
+    assert(same(await kidsOf(t, `rail-a-${p}`), [t.rid(`rail-a-${c}`)]), `parent ${p} lost child ${c}`);
+  }
+}
+function parentScenario(name, from, onto, fraction, want) {
+  return { name, about: "expanded parent units: real-pointer placement, swap and reload", async run(t) {
+    await parentFixture(t);
+    await pointerRow(t, from, onto, fraction);
+    assert(await t.line(), `${name}: no drop line; hint=${JSON.stringify(await t.hint())}`);
+    await t.page.mouse.up();
+    const check = async () => same(await parentOrder(t), want.map(t.rid));
+    assert(await check(), `${name}: immediate order ${JSON.stringify(await parentOrder(t))}`);
+    await parentKids(t);
+    await swapped(t, name);
+    assert(await check(), `${name}: swap lost order`);
+    await t.open("rail-f-1");
+    assert(await check(), `${name}: reload lost order`);
+    await parentKids(t);
+  } };
+}
+const wtSel = (t, group) => `#rlist .rws[data-ws="${t.fx.dirs.alpha}"] .rwt[data-g="${group}"]`;
+const wtOrder = (t) => t.page.evaluate((ws) => [...document.querySelectorAll(`#rlist .rws[data-ws="${ws}"] .rwt`)].map((n) => n.getAttribute("data-g")), t.fx.dirs.alpha);
+async function pointerWt(t, group, target, after, heldLabel) {
+  const sel = `${wtSel(t, group)} > .wthd`;
+  await t.page.locator(sel).scrollIntoViewIfNeeded();
+  const b = await t.box(`${sel} .br`);
+  const at = { x: b.x + Math.min(10, b.width / 2), y: b.y + b.height / 2 };
+  await t.page.mouse.move(at.x, at.y);
+  await t.page.mouse.down();
+  if (heldLabel) {
+    const h = await t.railHash(), node = await t.page.$(wtSel(t, group));
+    await t.relabel("rail-b-1", heldLabel);
+    await sleep(await t.swapWait());
+    assert(await t.railHash() === h && await node.evaluate((n) => n.isConnected), "worktree press did not hold injected swap");
+  }
+  await t.page.mouse.move(at.x, at.y + 8, { steps: 2 });
+  assert(await t.dragging(), `worktree header not admitted: ${group}`);
+  const targetSel = `${wtSel(t, target)} > .wthd`;
+  await t.page.locator(targetSel).scrollIntoViewIfNeeded();
+  const to = await t.box(targetSel);
+  await t.page.mouse.move(at.x, to.y + (after ? to.height - 2 : 2), { steps: 8 });
+}
+async function wtContents(t) {
+  return t.page.evaluate((ws) => Object.fromEntries([...document.querySelectorAll(`#rlist .rws[data-ws="${ws}"] .rwt`)].sort((a, b) => a.getAttribute("data-g").localeCompare(b.getAttribute("data-g"))).map((g) => [g.getAttribute("data-g"), [...g.querySelectorAll(".rs")].map((r) => [r.getAttribute("data-rid"), r.parentNode.getAttribute("data-parent") || ""])])), t.fx.dirs.alpha);
+}
+function wtScenario(name, direction) {
+  return { name, about: "root/empty worktree units up/down: optimistic placement, held swap, persisted reload", async run(t) {
+    await t.context.addInitScript(() => {
+      const Native = window.WebSocket;
+      window.railTestSockets = [];
+      window.WebSocket = class extends Native {
+        constructor(...args) { super(...args); window.railTestSockets.push(this); }
+      };
+    });
+    await parentFixture(t);
+    await t.swapWait();
+    const staleHTML = await t.page.locator('[data-region="rail"]').innerHTML();
+    const before = await wtOrder(t), ws = await t.wsOrder(), contents = await wtContents(t);
+    assert(before.length === 3 && before[0] === t.fx.dirs.alpha, `fallback group sequence ${JSON.stringify(before)}`);
+    assert((await t.page.locator(`${wtSel(t, t.fx.dirs["alpha-empty"])} .rs`).count()) === 0, "empty linked worktree is not empty");
+    const source = direction === "up" ? before[2] : before[0], target = direction === "up" ? before[0] : before[2];
+    const want = direction === "up" ? [before[2], before[0], before[1]] : [before[1], before[2], before[0]];
+    const held = [];
+    await t.context.route("**/rail/layout", (r) => held.push(r));
+    await pointerWt(t, source, target, direction !== "up", `${name} held swap`);
+    assert(await t.line(), `${name}: no group drop line`);
+    await t.page.mouse.up();
+    await until("worktree request", () => held.length === 1);
+    assert(same(await wtOrder(t), want), `${name}: missing optimistic placement`);
+    const body = held[0].request().postDataJSON();
+    const expected = { op: "wtmove", workspace: t.fx.dirs.alpha, path: source, [direction === "up" ? "before" : "after"]: target };
+    assert(same(Object.keys(body).sort(), Object.keys(expected).sort()) && Object.keys(expected).every((k) => body[k] === expected[k]), `group request ${JSON.stringify(body)}`);
+    await held[0].continue();
+    await t.context.unroute("**/rail/layout");
+    await until("held worktree swap", async () => (await t.railNames()).includes(`${name} held swap`));
+    await swapped(t, `${name} saved`);
+    assert(same(await wtOrder(t), want), `${name}: swap lost order`);
+    const hash = await t.railHash();
+    const injected = await t.page.evaluate((html) => {
+      const ws = window.railTestSockets.find((s) => new URL(s.url).pathname === "/rail/events");
+      if (!ws) return false;
+      ws.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ event: "region", data: { name: "rail", hash: "headless-stale-generation", html } }) }));
+      return true;
+    }, staleHTML);
+    assert(injected, "no shell rail stream for stale-generation injection");
+    await sleep(150);
+    assert(await t.railHash() === hash && same(await wtOrder(t), want), `${name}: stale generation undid group order`);
+    await t.open("rail-f-1");
+    assert(same(await wtOrder(t), want), `${name}: reload lost order`);
+    const stored = JSON.parse(fs.readFileSync(path.join(t.fx.cache, "dashboard", "rail-layout.json"), "utf8"));
+    assert(same(stored.workspaces[t.fx.dirs.alpha].worktree_order, want), `${name}: stored worktree_order differs`);
+    assert(same(await wtContents(t), contents) && same(await t.wsOrder(), ws), `${name}: changed subtree or workspace order`);
+    const root = t.page.locator(`${wtSel(t, t.fx.dirs.alpha)} > .wthd .wtroot`);
+    assert(await root.count() === 1 && await root.isVisible() && !!(await root.getAttribute("title") || await root.getAttribute("aria-label")), "root header lacks a visible, accessible small root marker");
+    await t.barAt(t.fx.dirs.alpha);
+    await t.page.mouse.move(1695, 5);
+    const out = opt.shots || fs.mkdtempSync(path.join(os.tmpdir(), "rail-headless-shots-"));
+    fs.mkdirSync(out, { recursive: true });
+    const shot = path.join(out, `${name}-root-marker.png`);
+    await t.page.locator("#rail").screenshot({ path: shot, animations: "disabled" });
+    assert(fs.statSync(shot).size > 1000, `${shot} is empty`);
+    console.log(`  ${shot}`);
+  } };
+}
+// A fixture registration is admitted through the isolated source's directory scan.
+function admit(t, key, ws, sequence) {
+  const rid = replyID(key), project = t.fx.dirs[ws], now = Date.now();
+  t.fx.rid[key] = rid;
+  t.fx.project[key] = project;
+  t.fx.live.push(key);
+  writeJSON(path.join(t.fx.cache, "sessions", key, "key.json"), { schema_version: 2, root: project, scope: "lead" });
+  const reg = { schema_version: 1, reply_id: rid, project, harness: "claude", registered_at: stamp(now + sequence * 2000), heartbeat_at: stamp(now + 3600000) };
+  if (ws === "alpha") reg.git_common_dir = path.join(project, ".git");
+  const dir = path.join(t.fx.cache, "dashboard", "sessions", rid);
+  writeJSON(path.join(dir, "registration.json"), reg);
+  writeJSON(path.join(dir, "snapshot.json"), { schemaVersion: 1, replyId: rid, updatedAt: now, lead: { batches: [] } });
+}
+function admissionScenario(ws, manual) {
+  const name = `admission-${ws === "notes" ? "plain" : "worktree"}-${manual ? "saved" : "default"}`;
+  return { name, about: "sequential ordinary newcomers append after own star section; child units, swap/reload", async run(t) {
+    const added = [], add = (suffix, seq) => { const key = `${name}-${suffix}`; added.push(key); admit(t, key, ws, seq); return key; };
+    try {
+      const parent = ws === "notes" ? "rail-n-1" : "rail-a-01";
+      const child = add("child", 1), ordinary = add("ordinary", 2);
+      await t.open("rail-f-1");
+      await applied(t, { op: "attach", rid: t.rid(child), parent: t.rid(parent) });
+      await applied(t, { op: "star", rid: t.rid(parent) });
+      await t.open("rail-f-1");
+      if (manual) {
+        const peers = await t.group(parent), target = peers.find((r) => r !== t.rid(parent) && r !== t.rid(ordinary));
+        // The plain fixture needs a second ordinary peer to make a non-noop manual move.
+        const ref = target || t.rid(add("peer", 3));
+        await t.open("rail-f-1");
+        await applied(t, { op: "move", rid: t.rid(ordinary), after: ref });
+        await t.open("rail-f-1");
+      }
+      const before = await t.group(parent);
+      for (let i = 1; i <= 2; i++) {
+        const key = add(`new-${i}`, 10 + i);
+        const want = [...before, ...added.filter((k) => k.includes("-new-")).map(t.rid)];
+        await swapped(t, `${name} admission ${i}`);
+        // Writing a fixture registration sends no daemon nudge: wait for the
+        // actual registry poll, then assert order without retrying that assertion.
+        await until(`${key} registry admission`, () => t.page.locator(t.sel(key)).count(), 45000);
+        assert(same(await t.group(parent), want), `${name}: newcomer ${i} should append; got ${JSON.stringify(await t.group(parent))}, want ${JSON.stringify(want)}`);
+        assert(await t.starred(parent) && same(await kidsOf(t, parent), [t.rid(child)]), `${name}: damaged starred parent unit`);
+        await swapped(t, `${name} swap ${i}`);
+        assert(same(await t.group(parent), want), `${key}: swap lost admission order`);
+        await t.open("rail-f-1");
+        assert(same(await t.group(parent), want), `${key}: reload lost admission order`);
+      }
+    } finally {
+      for (const key of added) {
+        fs.rmSync(path.join(t.fx.cache, "dashboard", "sessions", t.rid(key)), { recursive: true, force: true });
+        fs.rmSync(path.join(t.fx.cache, "sessions", key), { recursive: true, force: true });
+        t.fx.live = t.fx.live.filter((k) => k !== key);
+        delete t.fx.rid[key];
+        delete t.fx.project[key];
+      }
+    }
+  } };
+}
+
 const SCENARIOS = [
+  parentScenario("parent-adjacent-up", "rail-a-05", "rail-a-03", 0.05, ["rail-a-01", "rail-a-05", "rail-a-03"]),
+  parentScenario("parent-adjacent-down", "rail-a-01", "rail-a-03", 0.95, ["rail-a-03", "rail-a-01", "rail-a-05"]),
+  parentScenario("parent-nonadjacent-up", "rail-a-05", "rail-a-01", 0.05, ["rail-a-05", "rail-a-01", "rail-a-03"]),
+  parentScenario("parent-nonadjacent-down", "rail-a-01", "rail-a-05", 0.95, ["rail-a-03", "rail-a-05", "rail-a-01"]),
+  {
+    name: "child-across-parents", about: "valid child moves up/down across expanded parents survive swaps and reload", async run(t) {
+      await parentFixture(t);
+      for (const [onto, wantA, wantC] of [["rail-a-03", [], ["rail-a-04", "rail-a-02"]], ["rail-a-01", ["rail-a-02"], ["rail-a-04"]]]) {
+        await pointerRow(t, "rail-a-02", onto, 0.5);
+        assert(!(await t.hint()), `valid child attach refused: ${await t.hint()}`);
+        await t.page.mouse.up();
+        const check = async () => same(await kidsOf(t, "rail-a-01"), wantA.map(t.rid)) && same(await kidsOf(t, "rail-a-03"), wantC.map(t.rid));
+        assert(await check(), "cross-parent child move missing immediately");
+        await swapped(t, `child moved to ${onto}`);
+        assert(await check(), "swap lost cross-parent child move");
+        await t.open("rail-f-1");
+        assert(await check(), "reload lost cross-parent child move");
+      }
+    },
+  },
+  wtScenario("worktree-up", "up"),
+  wtScenario("worktree-down", "down"),
+  {
+    name: "worktree-refused", about: "worktree cross-workspace refusal and refused-request optimistic undo preserve whole subtrees", async run(t) {
+      await parentFixture(t);
+      const before = await wtOrder(t), contents = await wtContents(t), ws = await t.wsOrder();
+      const posts = [];
+      await t.context.route("**/rail/layout", (r) => posts.push(r));
+      const source = before[0], sel = `${wtSel(t, source)} > .wthd .br`;
+      await t.page.locator(sel).scrollIntoViewIfNeeded();
+      const b = await t.box(sel);
+      await t.page.mouse.move(b.x + 5, b.y + b.height / 2);
+      await t.page.mouse.down();
+      await t.page.mouse.move(b.x + 5, b.y + b.height / 2 + 8, { steps: 2 });
+      assert(await t.dragging(), "worktree header not admitted for refusal test");
+      const other = `#rlist .rws[data-ws="${t.fx.dirs.beta}"] .wthd`;
+      await t.page.locator(other).scrollIntoViewIfNeeded();
+      const target = await t.box(other);
+      await t.page.mouse.move(target.x + 15, target.y + 2, { steps: 8 });
+      assert(!(await t.line()) && !!(await t.hint()), "cross-workspace group target is not refused");
+      await t.page.mouse.up();
+      assert(posts.length === 0 && same(await wtOrder(t), before) && same(await t.wsOrder(), ws), "cross-workspace group drop mutated or posted");
+      await pointerWt(t, before[2], before[0], false);
+      assert(await t.line(), "valid group target has no drop line");
+      await t.page.mouse.up();
+      await until("refused worktree request", () => posts.length === 1);
+      assert(same(await wtOrder(t), [before[2], before[0], before[1]]), "refused request never placed group optimistically");
+      await posts[0].fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ applied: false, reason: "workspace" }) });
+      await until("worktree optimistic undo", async () => same(await wtOrder(t), before));
+      assert(same(await wtContents(t), contents), "group undo changed subtree");
+      await t.context.unroute("**/rail/layout");
+      await swapped(t, "worktree refusal settled");
+      await t.open("rail-f-1");
+      assert(same(await wtOrder(t), before) && same(await wtContents(t), contents), "refused group order persisted");
+    },
+  },
+  ...["notes", "alpha"].flatMap((ws) => [false, true].map((manual) => admissionScenario(ws, manual))),
   {
     name: "offsets",
     about: "workspace / branch / harness icons at 12 / 28 / 49 px, the guide line and the grip column between them",
@@ -704,6 +962,22 @@ const SCENARIOS = [
         assert(JSON.stringify(await o.group(star)) === JSON.stringify(pinned), `a fresh load shows ${(await o.group(star)).join(" ")}`);
         assert(await o.starred(star), "a fresh load lost the star");
         assert(JSON.stringify(await o.wsOrder()) === JSON.stringify(wantWS), `a fresh load shows the workspaces ${(await o.wsOrder()).join(" ")}`);
+        // Counterpart: move that workspace down again, through the pointer
+        // path, and prove the reverse placement persists in both browsers.
+        await t.barAt(above);
+        const down = await t.pressBar(mover);
+        await page.mouse.move(down.x, down.y + 8, { steps: 2 });
+        assert(await t.dragging(), "the downward workspace press did not start a drag");
+        const section = await t.box(`#rlist .rws[data-ws="${above}"]`);
+        await page.mouse.move(down.x, section.y + section.height - 3, { steps: 10 });
+        assert(await t.line(), "no drop line below the workspace");
+        await page.mouse.up();
+        assert(same(await t.wsOrder(), ws), "downward workspace placement is not immediate");
+        await until("the downward workspace order in the other browser", async () => same(await o.wsOrder(), ws));
+        await swapped(t, "workspace down persisted");
+        assert(same(await t.wsOrder(), ws), "swap lost downward workspace placement");
+        await o.open("rail-n-1");
+        assert(same(await o.wsOrder(), ws), "reload lost downward workspace placement");
         const file = fs.readFileSync(path.join(t.fx.cache, "dashboard", "rail-layout.json"), "utf8");
         assert(file.includes(t.rid(star)) && file.includes(mover), "the layout file does not hold the star and the workspace order");
         assert((await t.legacy()).every((v) => v === null) && (await o.legacy()).every((v) => v === null), "a layout change was stored locally");
