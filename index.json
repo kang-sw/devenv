@@ -706,7 +706,17 @@
       "registered_at": "2026-11-14T09:32:30Z"
     },
     "261114-refactor-ws-dashboard-whiteboard-asset-split": {
-      "registered_at": "2026-11-14T14:27:10Z"
+      "registered_at": "2026-11-14T14:27:10Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-14T17:34:48Z",
+        "impl": {
+          "branch": "impl/develop/map-yoga-coach"
+        }
+      }
     },
     "261114-refactor-ws-split-oversized-source-files": {
       "registered_at": "2026-11-13T15:16:33Z"
