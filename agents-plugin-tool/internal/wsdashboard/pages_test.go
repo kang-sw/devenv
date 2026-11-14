@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"bufio"
 	"encoding/json"
+	"html"
 	"io"
 	"net/http"
 	"os"
@@ -504,6 +505,79 @@ func TestMermaidAssetIsServedBesideThePages(t *testing.T) {
 	_, page := get(t, f.base+"/s/livesession?frame=1")
 	if !strings.Contains(page, `window.wbMermaidFile = "`+name+`"`) {
 		t.Errorf("page does not name the mermaid file %s relatively", name)
+	}
+}
+
+// TestFrameAssetsAreServedBesideThePages pins the shared topic-body frame
+// assets (wswhiteboard.FrameAsset): a frame's document links its stylesheet
+// and script by relative, content-hashed names instead of inlining them,
+// with the copy button's string table still inline ahead of the script; the
+// daemon serves both beside the page as immutable, and in LAN mode to a
+// viewer without the token, since a frame's opaque origin sends no cookie.
+func TestFrameAssetsAreServedBesideThePages(t *testing.T) {
+	f := startPageFixture(t)
+	_, page := get(t, f.base+"/s/livesession?frame=1")
+	m := regexp.MustCompile(`<div class="doc-frame"[^>]* data-srcdoc="([^"]*)"`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("no topic-body frame in the page")
+	}
+	doc := html.UnescapeString(m[1])
+	css := regexp.MustCompile(`<link rel="stylesheet" href="(wb-frame-[0-9a-f]{12}\.css)">`).FindStringSubmatch(doc)
+	js := regexp.MustCompile(`</script><script src="(wb-frame-[0-9a-f]{12}\.js)"></script>`).FindStringSubmatch(doc)
+	if css == nil || js == nil {
+		t.Fatalf("frame document does not link the shared assets by hashed name:\n%.600s", doc)
+	}
+	if strings.Contains(doc, "<style>") || strings.Contains(doc, "wbDocMermaid = function") {
+		t.Errorf("frame document still inlines the stylesheet or the frame script")
+	}
+	if !strings.Contains(doc, "window.wsI18n") || strings.Index(doc, "window.wsI18n") > strings.Index(doc, js[1]) {
+		t.Errorf("frame document lacks its string table ahead of the frame script")
+	}
+	for _, c := range []struct{ name, ctype, holds string }{
+		{css[1], "text/css", "background: transparent"},
+		{js[1], "text/javascript", "wbDocMermaid"},
+	} {
+		data, ctype, ok := wswhiteboard.FrameAsset(c.name)
+		if !ok || !strings.HasPrefix(ctype, c.ctype) {
+			t.Fatalf("FrameAsset(%s) = %v, %q", c.name, ok, ctype)
+		}
+		resp, err := testClient().Get(f.base + "/s/" + c.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || string(body) != string(data) || !strings.Contains(string(body), c.holds) {
+			t.Fatalf("%s = %d, %d bytes", c.name, resp.StatusCode, len(body))
+		}
+		if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "immutable") || !strings.Contains(cc, "public") {
+			t.Errorf("%s Cache-Control = %q", c.name, cc)
+		}
+		if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, c.ctype) {
+			t.Errorf("%s Content-Type = %q", c.name, got)
+		}
+	}
+	if _, _, ok := wswhiteboard.FrameAsset("wb-frame-000000000000.css"); ok {
+		t.Errorf("FrameAsset answers a name no asset carries")
+	}
+
+	lan := startPageFixture(t, lanMode)
+	stranger := viewer{name: "foreign peer, no token", peer: "192.168.7.30:50000", host: "192.168.7.20:" + strconv.Itoa(lan.d.Endpoint().Port)}
+	for _, name := range []string{css[1], js[1]} {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			if rec := serve(lan.d, stranger, method, "/s/"+name, ""); rec.Code != http.StatusOK || len(rec.Result().Cookies()) != 0 {
+				t.Errorf("LAN %s %s without the token = %d", method, name, rec.Code)
+			}
+		}
+		for _, target := range []struct{ method, path string }{
+			{http.MethodPost, "/s/" + name},
+			{http.MethodGet, "/s/livesession/" + name},
+			{http.MethodGet, "/s/" + strings.Replace(name, "wb-frame-", "wb-frame-0", 1)},
+		} {
+			if rec := serve(lan.d, stranger, target.method, target.path, ""); !refusedByGuard(rec) {
+				t.Errorf("LAN %s %s without the token = %d, want the guard's 401", target.method, target.path, rec.Code)
+			}
+		}
 	}
 }
 
