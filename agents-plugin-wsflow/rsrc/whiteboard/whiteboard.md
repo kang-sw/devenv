@@ -28,6 +28,29 @@ Workers and subagents do not use the board.
 - Only after the source session stops writing, preserve your own board by renaming `ai-docs/whiteboards/<own stem>` to a backup name rather than deleting it, then copy the source session's board folder into that path. Your stem is the last path segment of the `full:` URL printed by `{{.McpNamespace}}/whiteboard.update` (the parent folder of `index.html` for a file path).
 - Call `{{.McpNamespace}}/whiteboard.update` once to regenerate the HTML. Inbox attachments, mailbox history, and agenda do not come along.
 
+## Open-topic work state
+
+Declare each open topic's work state in its current-state summary, updating
+its agent log line when the state changes:
+
+| state | lead obligation |
+|---|---|
+| Discussing | Keep one open ask for the unresolved discussion. |
+| Waiting | Keep held items visible and one open ask for the unfinished work that is not being worked. |
+| Implementing | Name the responsible executor and ETA when work starts. |
+| Awaiting confirmation | Keep one live confirmation check for the finished artifact. |
+
+Keep at most one open ask per topic, counting checks as asks; reuse or patch
+its item as the work changes. Close a topic only after the user's final
+answer, so unfinished work stays visible. These are lead obligations,
+expressed in ordinary board text.
+
+Approval of a concrete deliverable is execution authority: start the approved
+build or change rather than ask permission again. A request to build or change
+something is work to execute, not a technical item or confirmation check that
+substitutes for doing it. A real choice remains a policy ask; a finished
+artifact awaiting the user's verification gets a confirmation check.
+
 ## Commands
 
 Write authored board text in the conversation language, the `workflow.lang` value when set; IDs, class and status tags, `ok`/`no` answers, and option letters stay as written.
@@ -39,7 +62,7 @@ batch may hold several `wb:topic` groups.
 
 | command | attributes | content |
 |---|---|---|
-| `wb:topic` | `name`, `label?`, `tickets?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:close`; none with `label` or `tickets` |
+| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:close`; none with `label` |
 | `wb:body` | none | current content, replaced whole; empty clears it |
 | `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new`, editing current content only |
 | `wb:panel` | `recap`, `id?` | optional payload; `recap` must be nonempty |
@@ -87,18 +110,12 @@ Markdown up to the closing tag.
   first, then a stemless topic's name, then a stemmed topic's label, so an
   old title still reaches an adopted topic. Stems and labels are one
   namespace: a stem or label another topic already uses is refused.
-- Linked tickets: `tickets="<stem> <stem>"` on `wb:topic` links the ticket
-  stems the topic tracks, replacing its whole list; `tickets=""` clears it.
-  The topic bar shows each ticket's current status, and a linked feat, bug,
-  refactor, or chore ticket still in idea, todo, or ready marks the topic as
-  live work. Linking changes no recency, reopens no closed topic, and logs
-  nothing, so send it alone as `<wb:topic name="..." tickets="..."/>`
-  whenever the tickets a topic tracks change.
 - `class`: `policy`, `technical`, `announced`, or `check`, the kinds of ask
   in the workflow manual's `### Asking the user`. A `check` is a gate, not a
   decision class: a request that the user look at, verify, or confirm a
-  finished artifact, or an action whose choice is already settled ("OK this
-  draft and I'll proceed", "verify on your machine"). A "should we do X?" or
+  finished artifact, or an action whose choice is already settled ("Confirm
+  this finished draft", "verify on your machine"). It is not another request
+  for permission to implement an approved deliverable. A "should we do X?" or
   "which one?" ask, a yes/no one included, is a `policy` item with options,
   never a check. Write one verifiable thing per check, never several bundled.
   It renders as a checklist in the topic, and the user answers each
@@ -176,9 +193,8 @@ Markdown up to the closing tag.
   closed topic without restoring withdrawn items. Server events alone do
   not reopen it. The next close replaces the result, not the history.
 - Current content: one body per topic, holding the durable current state,
-  not the accumulating conversation. A topic can have content or entries
-  without items. `wb:body` replaces content whole; empty clears it and the
-  same content again is no change. `wb:edit` replaces one exact `wb:old`
+  not the accumulating conversation. `wb:body` replaces content whole; empty
+  clears it and the same content again is no change. `wb:edit` replaces one exact `wb:old`
   match with `wb:new` (empty deletes it), or every match with
   `replace_all="true"`; no match, or several without `replace_all`, is
   refused. To insert, quote the anchor in `wb:old` and the anchor plus the
@@ -213,8 +229,8 @@ Markdown up to the closing tag.
   The server records successful item/content/panel/close/reopen transitions
   as system events. Agent lines give a concise interpretation of current
   state; verbatim duplication of the server's event records is not required.
-- Keep asks in items: "OK this draft and I'll proceed" is `wb:add` with
-  `class="check"` (or `policy` for a choice), not a panel or log line.
+- Keep asks in items: a finished-artifact confirmation is `wb:add` with
+  `class="check"` (or `policy` for a real choice), not a panel or log line.
   Options, recommendations, `wb:why`, links, and check answers remain item
   data, not automatically created panels. `wb:recap` is removed without an
   alias, and `wb:append` is refused; the panel's `recap` attribute is not
