@@ -203,7 +203,10 @@
     return function (e) {
       var b = e.target.closest && e.target.closest(".oq-seg");
       var el = b && target[edge][b.getAttribute("data-k")];
-      if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+      if (!el) return;
+      var w = window.wbHistory;
+      if (w && w.jump) w.jump(el, { block: "center", behavior: "smooth" });
+      else el.scrollIntoView({ block: "center", behavior: window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
     };
   }
   pills.top.onclick = click("top");

@@ -1,10 +1,22 @@
 package wsdashboard
 
 import (
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestLeadPopoverLaunchBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; run testdata/lead-popover.test.cjs locally")
+	}
+	out, err := exec.Command(node, "testdata/lead-popover.test.cjs").CombinedOutput()
+	if err != nil {
+		t.Fatalf("lead popover cases failed: %v\n%s", err, out)
+	}
+}
 
 // TestLeadPopoverIsolationWiring pins the plugin-isolation control to the
 // lead spawn popover: its click handler is bound inside rpLeadMake (where

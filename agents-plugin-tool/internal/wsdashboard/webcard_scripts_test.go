@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,6 +24,48 @@ func TestWebCardScripts(t *testing.T) {
 			t.Errorf("%s failed: %v\n%s", file, err, out)
 		}
 	}
+}
+
+func TestWebCardPopoverFitsPositionedSlot(t *testing.T) {
+	js := mustAsset(t, "webcard.js")
+	place := regexp.MustCompile(`(?s)\n  function placePop\(\) \{.*?\n  \}\n`).FindString(js)
+	if place == "" {
+		t.Fatal("missing placePop")
+	}
+	runNode(t, "web popover placement", `
+var bad = [];
+function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": " + JSON.stringify(got)); }
+var window = { innerWidth: 1400, innerHeight: 900 };
+var slot = { left: 500, top: 100 }, button = { left: 500, bottom: 130 };
+var column = { left: 300, right: 700, top: 50, bottom: 800 };
+var ui = {
+  btn: { getBoundingClientRect: function () { return button; } },
+  col: { getClientRects: function () { return [1]; }, getBoundingClientRect: function () { return column; } },
+  pop: { style: {}, getBoundingClientRect: function () {
+    check("measure from slot origin", [this.style.left, this.style.top, this.style.maxHeight], ["0px", "0px", ""]);
+    return { left: slot.left, top: slot.top, width: Math.min(340, parseFloat(this.style.maxWidth)), height: 100 };
+  } }
+};
+`+place+`
+function position() {
+  placePop();
+  return [slot.left + parseFloat(ui.pop.style.left), slot.top + parseFloat(ui.pop.style.top), ui.pop.style.maxWidth, ui.pop.style.maxHeight];
+}
+check("nonzero slot origin and column right clamp", position(), [352, 134, "384px", "658px"]);
+check("local offsets do not double the slot origin", [ui.pop.style.left, ui.pop.style.top], ["-148px", "34px"]);
+column.right = 550;
+check("narrow column limits measured width", position(), [308, 134, "234px", "658px"]);
+button = { left: 280, bottom: 770 };
+check("column left and available height", position(), [308, 720, "234px", "72px"]);
+button.bottom = 20;
+check("column top bound", position(), [308, 58, "234px", "734px"]);
+ui.col = null; window.innerWidth = 420; window.innerHeight = 600;
+slot = { left: 200, top: 100 }; button = { left: 200, bottom: 130 };
+check("viewport fallback and nonzero origin", position(), [72, 134, "404px", "458px"]);
+button = { left: -20, bottom: 580 };
+check("viewport left and bottom bounds", position(), [8, 520, "404px", "72px"]);
+process.stdout.write(bad.join("\n"));
+`)
 }
 
 // TestWebCardScriptRidesOnlyALocalViewersPage pins where the web card kind

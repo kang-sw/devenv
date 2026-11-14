@@ -488,6 +488,9 @@
   // returns the session el has, which other scroll writers leave alone.
   // While a session runs its scroller takes overflow-anchor: none, so the
   // browser's own anchoring does not compensate a second time.
+  // jump(node, {block, behavior}) gives an explicit navigation priority over
+  // keeps until 150 ms / five stable frames, at most 2 s. Scroll intent wins;
+  // ordinary keep policy is unchanged once the jump session ends.
   function viewKit(win) {
     var doc = win.document, observers = {}, reports = new WeakMap(), sessions = new Map();
     var QUIET = 500, CAP = 5000, IO = win.IntersectionObserver, bands = !!(IO && IO.prototype && "scrollMargin" in IO.prototype);
@@ -574,6 +577,10 @@
     function keep(node, opt) {
       opt = opt || {};
       var scroller = scrollerOf(node), s = sessions.get(scroller);
+      if (s && s.follow) {
+        if (opt.onEnd) s.ends.push(opt.onEnd);
+        return s.handle;
+      }
       var offset = typeof opt.offset === "number" ? opt.offset : layoutTop(node, scroller) - scrollerTop(scroller);
       if (!s) s = start(scroller);
       s.node = node;
@@ -584,6 +591,11 @@
       if (typeof opt.offset === "number") s.handle.apply();
       return s.handle;
     }
+    function jump(node, opt) {
+      var scroller = scrollerOf(node), s = sessions.get(scroller) || start(scroller);
+      s.jump(node, opt || {});
+      return s.handle;
+    }
     function start(scroller) {
       var s = { node: null, offset: 0, ends: [], ro: null, quiet: 0, cap: 0, done: false, wrote: scroller.scrollTop };
       var main = scroller === docScroller(), anchorEl = main ? doc.documentElement : scroller, target = main ? win : scroller;
@@ -591,6 +603,7 @@
       anchorEl.style.overflowAnchor = "none";
       function apply() {
         if (s.done) return;
+        if (s.follow) { s.follow.align(); return; }
         if (!s.node.isConnected) { end("ended"); return; }
         var d = layoutTop(s.node, scroller) - scrollerTop(scroller) - s.offset;
         if (Math.abs(d) >= 0.5) scroller.scrollTop += d;
@@ -599,6 +612,7 @@
       function end(reason) {
         if (s.done) return;
         s.done = true;
+        if (s.follow) s.follow.off();
         sessions.delete(scroller);
         if (s.ro) s.ro.disconnect();
         win.clearTimeout(s.quiet);
@@ -608,20 +622,79 @@
         s.ends.forEach(function (fn) { fn(reason); });
       }
       function onScroll() {
-        if (s.done || Math.abs(scroller.scrollTop - s.wrote) <= 1) return;
+        if (s.done || s.follow || Math.abs(scroller.scrollTop - s.wrote) <= 1) return;
         // Content that shrank under the scroll clamps it: not the user's.
         var max = scroller.scrollHeight - scroller.clientHeight;
         if (s.wrote > max + 1 && Math.abs(scroller.scrollTop - max) <= 1) { apply(); return; }
         end("user");
       }
       s.restart = function (both) {
+        if (s.follow) return;
         win.clearTimeout(s.quiet);
         s.quiet = win.setTimeout(function () { end("quiet"); }, QUIET);
         if (!both) return;
         win.clearTimeout(s.cap);
         s.cap = win.setTimeout(function () { end("cap"); }, CAP);
       };
-      s.handle = { scroller: scroller, apply: apply, end: function () { end("ended"); } };
+      s.jump = function (node, opt) {
+        if (s.follow) s.follow.off();
+        win.clearTimeout(s.quiet);
+        win.clearTimeout(s.cap);
+        var block = opt.block || "center", raf = 0, cap = 0, stable = 0, quiet = 0, last, position;
+        var intents = ["wheel", "touchstart", "touchmove", "pointerdown"];
+        function cancel() {
+          // Stop an initial native smooth scroll too; pointer/touch intent
+          // need not itself produce a scroll event that would interrupt it.
+          scroller.scrollTo({ top: scroller.scrollTop, left: scroller.scrollLeft, behavior: "instant" });
+          end("user");
+        }
+        function key(e) { if (/^(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|PageUp|PageDown|Home|End| |Spacebar)$/.test(e.key)) cancel(); }
+        function off() {
+          win.cancelAnimationFrame(raf);
+          win.clearTimeout(cap);
+          intents.forEach(function (t) { target.removeEventListener(t, cancel, true); });
+          win.removeEventListener("keydown", key, true);
+        }
+        function measure() {
+          var r = node.getBoundingClientRect();
+          return r.top - scrollerTop(scroller) + scroller.scrollTop - (block === "center" ? (scroller.clientHeight - r.height) / 2 : 0);
+        }
+        function align() {
+          // A board morph may replace the item but retain its stable ID.
+          if (!node.isConnected && node.id) node = doc.getElementById(node.id) || node;
+          if (!node.isConnected || scrollerOf(node) !== scroller) { end("ended"); return; }
+          var next = measure();
+          // Smooth scrolling changes the viewport rect, not this content-space
+          // destination. Only layout movement interrupts it with an instant fix.
+          if (Math.abs(next - position) >= 0.5) {
+            node.scrollIntoView({ block: block, behavior: "instant" });
+            stable = 0; quiet = 0;
+            position = next;
+          }
+        }
+        function frame(t) {
+          raf = 0;
+          align();
+          if (s.done) return;
+          var current = scroller.scrollTop;
+          if (last !== undefined && Math.abs(current - last) < 0.5) {
+            if (!stable++) quiet = t;
+            if (stable >= 5 && t - quiet >= 150) { end("settled"); return; }
+          } else { stable = 0; quiet = t; }
+          last = current;
+          raf = win.requestAnimationFrame(frame);
+        }
+        s.follow = { align: align, off: off };
+        position = measure();
+        intents.forEach(function (t) { target.addEventListener(t, cancel, { passive: true, capture: true }); });
+        win.addEventListener("keydown", key, true);
+        var reduced = win.matchMedia && win.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        node.scrollIntoView({ block: block, behavior: reduced ? "instant" : opt.behavior || "instant" });
+        cap = win.setTimeout(function () { end("cap"); }, 2000);
+        raf = win.requestAnimationFrame(frame);
+      };
+      // A swap settling on another anchor must not end explicit navigation.
+      s.handle = { scroller: scroller, apply: apply, end: function () { if (!s.follow) end("ended"); } };
       if (win.ResizeObserver) {
         s.ro = new win.ResizeObserver(function () { if (s.done) return; apply(); s.restart(false); });
         (main ? [doc.body] : Array.prototype.slice.call(scroller.children)).forEach(function (el) { if (el) s.ro.observe(el); });
@@ -631,11 +704,11 @@
       return s;
     }
     function keeping(scroller) { var s = sessions.get(scroller); return s ? s.handle : null; }
-    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping, bands: bands };
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping, jump: jump, bands: bands };
   }
   var kit = viewKit(window);
   window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget,
-    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping, bands: kit.bands };
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping, jump: kit.jump, bands: kit.bands };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {
