@@ -20,6 +20,7 @@
   --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
   --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
   --wb-accent-assumed: #b0245a;
+  --wb-latest-log: color-mix(in srgb, #91df9b 24%, var(--wb-card));
   --wb-ck-ok: var(--wb-announced);
   --wb-ck-no: #c0262d;
   --wb-accent-policy: #b25000;
@@ -32,6 +33,16 @@
   --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
   color-scheme: light dark;
+}
+/* Both the head recap and its history copy represent the same latest log. */
+.topic .trecap[data-kind="agent"], .wb-entry.agent.current { background: var(--wb-latest-log); }
+.wb-log-blink { animation: wb-log-arrival 1s ease-in-out 3; }
+@keyframes wb-log-arrival {
+  0%, 100% { background: var(--wb-latest-log); }
+  50% { background: var(--wb-card); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-log-blink { animation: none; }
 }
 /* Dark palette. The OS preference applies it unless the page pins light
    (data-theme="light"); data-theme="dark" applies it whatever the OS says.
@@ -153,9 +164,11 @@ button.chip.bulk:focus-visible { outline: 2px solid var(--wb-primary); outline-o
 .tophead > .tnote { width: calc(100% - 20px); margin: 6px 10px; border: 1px solid var(--wb-line); border-radius: 10px; box-shadow: var(--wb-shadow-hi); max-height: calc(6 * 1.4em + 14px); overflow-y: auto; }
 .tophead > .tnote:focus { border-color: var(--wb-primary); }
 .topic.quiet > .tophead > .tnote { width: calc(100% - 12px); margin: 4px 6px; }
-/* The head carries the topic's own surface, so the body scrolling under a
-   stuck head does not show through it. */
-.tophead { background: inherit; }
+/* Use an opaque surface, including behind the title bar's rounded corners.
+   The upward backing also masks scroller padding above a CSS-only pinned
+   header, which never receives the rail's wb-stuck class. Neither changes
+   layout height. Keep the head unclipped: its check-list popover is intentional. */
+.tophead { background: var(--wb-card); box-shadow: 0 -12px 0 var(--wb-bg); }
 .closed-more { display: block; margin: 0 0 16px; font-size: 12.5px; color: var(--wb-muted-fg); }
 button.closed-more { display: flex; margin: 0 auto 16px; }
 .tbar .chip:not(.policy):not(.ok):not(.fresh) { background: rgb(127 127 127 / .28); color: inherit; }
@@ -408,12 +421,17 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 /* An open topic's head summary line: the latest agent line as plain muted
    text on the head's surface (no card), sharing the line with the check pill,
    which wraps under it when narrow; a hairline under the head ends it. */
-.tsub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 6px 12px; border-bottom: 1px solid var(--wb-line); }
-/* Reserve four lines before and after sticking, including for a one-line recap. */
-.tsub > .trecap { flex: 1 1 22em; min-width: 0; height: 5.8em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
+.tsub { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; padding: 6px 12px; border-bottom: 1px solid var(--wb-line); overflow: hidden; }
+/* Reserve four whole lines (4 x 1.45em = 5.8em) in both sticky states.
+   Minimum/maximum block sizes prevent an ancestor layout from squeezing the
+   clipping box into a partial line. The pill wraps in flow, outside this box. */
+.tsub > .trecap { flex: 1 1 22em; min-width: 0; height: 5.8em; min-height: 5.8em; max-height: 5.8em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
 .tsub > .trecap .rat { font-size: 10.5px; }
-.ckpill { flex: none; display: flex; align-items: center; gap: 4px; margin-left: auto; }
-.ckbtn { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+/* Inline role/media boxes must fit the same line grid as the recap text. */
+.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: -2px; }
+.tsub > .trecap :is(img, svg) { max-height: 1em; width: auto; vertical-align: middle; }
+.ckpill { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; min-width: 0; max-width: 100%; }
+.ckbtn { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: normal; overflow-wrap: anywhere; }
 button.ckbtn { cursor: pointer; }
 button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .ckbtn .i { width: 12px; height: 12px; }
