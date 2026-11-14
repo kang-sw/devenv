@@ -532,6 +532,9 @@
     "261114-feat-ws-whiteboard-history-unified-decisions": {
       "registered_at": "2026-11-14T06:03:03Z"
     },
+    "261114-refactor-ws-hosted-common-contract-pi-claude-parity": {
+      "registered_at": "2026-11-14T08:45:52Z"
+    },
     "261114-refactor-ws-split-oversized-source-files": {
       "registered_at": "2026-11-13T15:16:33Z"
     },
