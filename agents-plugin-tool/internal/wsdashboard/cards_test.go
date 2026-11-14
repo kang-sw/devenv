@@ -225,6 +225,13 @@ page.W.decorate(); page.W.decorate();
 page.board.fire("click", {target: current.querySelector(".t-fold")});
 check("redecoration adds no duplicate fold handler", current.getAttribute("data-size"), "base");
 check("topic fold is stored in f", JSON.parse(store.cards).topics.filter(function (r) { return r.n === "a"; }).map(function (r) { return !!r.f; }), []);
+store = {};
+function noTime() { return [topic("first", 300), topic("zero", 0), reply()]; }
+boot(store, noTime);
+c = page.W.open("k", {name: "zero-preview"}, undefined, page.board.querySelector('section[data-topic="zero"]'));
+check("a zero-time origin is not a default open", [c.at, names(page.board)], [0, ["TOOLBAR", "PINS", "first", "zero-preview", "zero", "reply"]]);
+boot(store, noTime);
+check("zero-time snapshot survives reload", names(page.board), ["TOOLBAR", "PINS", "first", "zero-preview", "zero", "reply"]);
 process.stdout.write(bad.join("\n"));
 `)
 }

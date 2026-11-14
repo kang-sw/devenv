@@ -647,7 +647,7 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    view reveals them temporarily and leaves the whole-card fold intact. */
 section.topic[data-size="fold"]:not([data-max]) > :not(.tophead),
 section.topic[data-size="fold"]:not([data-max]) > .tophead > :not(.tbar),
-section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar > details.settled > :not(summary) { display: none !important; }
+section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar > details > :not(summary) { display: none !important; }
 section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar { padding-right: 12px; }
 /* a frame in the body would take the pointer mid-drag */
 .bcard.drag .bc-body { pointer-events: none; }

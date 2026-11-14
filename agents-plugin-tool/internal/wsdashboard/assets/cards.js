@@ -483,7 +483,7 @@
     this.k = kinds[kind];
     this.id = rec.id || "c" + Date.now().toString(36) + (seq++).toString(36);
     this.pinned = +rec.pinned || 0;
-    this.at = +rec.at || headTime();
+    this.at = typeof rec.at === "number" && isFinite(rec.at) ? rec.at : headTime();
     if (typeof rec.rank === "number" && isFinite(rec.rank)) this.rank = rec.rank;
     this.folded = !!rec.fold;
     this.h = +rec.h || 0;
@@ -897,7 +897,7 @@
       scr = colOn ? pins : scroller(board);
     } else if (inside(rectOf(scroller(board) || board), x, y)) {
       scr = scroller(board);
-      if (topicAt(d.el) === null) to = d.unit.pinned ? { pin: false, line: null } : null;
+      if (!isCard(d.el) && topicAt(d.el) === null) to = d.unit.pinned ? { pin: false, line: null } : null;
       else {
         var flow = Array.prototype.filter.call(board.children, function (n) { return n !== d.el && (isCard(n) ? !n.hasAttribute("data-pinned") : topicAt(n) !== null); });
         var br = rectOf(board), f = slot(flow, y, br), after = flow[f.at - 1] || null, before = flow[f.at] || null;
