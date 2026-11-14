@@ -186,6 +186,73 @@ unhealthy, retry, external-browser navigation and daemon survival. Independent
 lite review and Phase 1 acceptance remain pending MAIN's actual slot. Phases
 2–4 remain outside this invocation.
 
+#### Executed evidence checkpoint - 2026-11-14
+
+Source under observation: `0f16157b2adaf79475ebc665cdeec141b0ee3611`.
+MAIN's actual 16:11:06 START allocated the existing 1,500-second build runner
+and bounded eight-minute native observation together. The literal command was
+run once from `agents-plugin-tool/desktop/`:
+`python3 scripts/build-slot.py --allocated`. No fix or rerun followed.
+
+Build evidence directory:
+`/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/werkschaft-build-slot-1tu9dugz/`.
+The complete `unit-tests.log` and `debug-app.log` were read. Nine Rust unit tests
+passed; the frozen, two-job debug build bundled `Werkschaft.app` (24.49 MiB).
+The runner exited 0 after 74.96 seconds. Both owned groups (5931 and 14566) were
+confirmed absent and retired, with no lingering groups. Signing-skip warnings
+were expected under the explicit `--no-sign` scope. The newly authored mocked
+Python runner regression was **NOT RUN**: MAIN's literal command took precedence
+and did not include it. No separate check or additional test command was run.
+
+The built local artifact and direct binary are retained, not installed into any
+owner plugin cache:
+
+- `/Users/kang-sw/.ws-worktrees/devenv/spruce-december-suave/agents-plugin-tool/desktop/target/debug/bundle/macos/Werkschaft.app`
+- `/Users/kang-sw/.ws-worktrees/devenv/spruce-december-suave/agents-plugin-tool/desktop/target/debug/werkschaft-desktop`
+
+Native observation evidence directory:
+`/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/werkschaft-native-observation-doyy5y7h/`.
+The retained `observe.py`, `summary.json`, baseline/final health records, all four
+case logs, and `post-slot-process-scan.json` describe the actual procedure.
+It ran for 20.18 seconds. Default-cache shell PID 39213 (started 16:15:46.307868Z)
+and overridden-cache shell PID 41145 both remained alive during their bounded
+observations and logged `Werkschaft attached to http://127.0.0.1:29417`.
+The isolated missing/unhealthy endpoint shells (39683 and 40405) remained alive
+without an attach log; their native logs were empty. This is process/attach-log
+evidence, not an observed error view or rendered first window. Isolated cache
+files contained only port/PID; the shared endpoint was not modified.
+
+Fresh default-cache endpoint and direct, proxy-free `/health` reads before and
+after the native cases matched service `ws-dashboard`, port 29417, PID 98532,
+and content hash
+`893e6dc87abdabf3d3f9359db9c5af315f17df50da19bba6f801045d7292ad23`.
+Those are observed identities, not source pins. Owned shells were terminated
+through their retained subprocess handles; no daemon lifecycle command,
+profiling command, or explicit daemon write request was issued. All owned shells/supervisor exited and the
+isolated caches were removed. At 16:16:42.418958Z the final read-only process
+scan found no owned build/shell/supervisor groups or transitive descendants;
+`lsof` found no owned listeners (exit 1, no matches). Root subsequently released
+the heavy slot; no further execution is authorized by this checkpoint.
+
+**UNVERIFIED acceptance:** rendered first-window pixels and captures, ordinary
+native UI navigation, native Connection → Retry interaction, external-browser
+handoff, and normal window-close behavior. Screen Recording/Accessibility
+permissions were not known already granted, so no screenshot, native UI
+automation, permission probe/prompt/approval workaround, or browser substitution
+was attempted. The unhealthy fixture was changed to a valid port/PID only in
+its owned cache, but no native menu interaction was attempted; the separate
+override launch is not a successful native retry. Native-process termination
+with unchanged daemon health is not evidence of normal UI-close behavior.
+No endpoint token appeared in the retained native logs, but live page-JavaScript
+inspection was not performed; the no-token/native-authority claims additionally
+rest on source and the executed unit-test contracts, not a visual inspection.
+
+This checkpoint deliberately adds **no Phase 1 Result** and does not declare
+Phase 1 accepted. The outstanding native acceptance boundary remains explicit;
+the ticket stays in `ready/`, with Phases 2–4 untouched. Independent static lite
+review is being recorded separately, with no further build, test, app, browser,
+health request, permission probe, or child execution beyond that static reviewer.
+
 ### Phase 2: Daily-use reliability (later Phase 1b cut)
 
 Add single-instance launch/focus next; it is not a Phase 1a blocker. Verify
