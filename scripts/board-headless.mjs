@@ -101,6 +101,10 @@
 //             deep links and out-of-view collapse on dashboard AND standalone
 //             full file pages. Dashboard-only: expanded swaps, overlapping keep
 //             sessions and the pinned column (use --width 1800).
+//   panel-header  Compact panel grid at 1440/800/360/320 and 420/421px actual
+//             content in a wide host. Uses `serve --history-entries 180`;
+//             runs on both dashboard kinds and standalone. Browser-local long
+//             titles/body probes never change server data.
 //   history-cards  Card/paging probes without navigation/control/live checks.
 //   history-paint  Targeted deep-link post-paint/keep-lifetime reproduction.
 //   history-regressions  Native RO delivery for renderer-produced closed log
@@ -2423,8 +2427,142 @@ async function scenarioHistoryRegressions(ctx) {
   }
 }
 
+// Real renderer markup and native controls, not the approved design mockup.
+async function scenarioPanelHeader(ctx) {
+  const { page, tab, kind } = await openBoard(ctx);
+  const target = await page.evaluate(() => {
+    const h = document.querySelector('[data-history="HISTORY"]');
+    if (!h) throw new Error('need serve --history-entries 180');
+    const panels = Array.from(h.querySelectorAll('.history-live > .wb-entry > .entry-panel'));
+    const panel = panels.at(-1), long = panels.at(-2);
+    long.querySelector('.entry-recap').textContent = 'Full naturally wrapping title ' + '아주 긴 제목 LongUnbrokenTitle0123456789'.repeat(12);
+    panel.open = true;
+    window.__bh.headerPanels = [panel, long];
+    window.__bh.headerBodies = [panel, long].map((p) => {
+      const body = p.querySelector(':scope > .entry-body'), frame = body.querySelector('iframe');
+      return { body, frame, html: frame ? frame.getAttribute('srcdoc') : body.innerHTML };
+    });
+    window.__bh.headerCache = Array.from(h.querySelectorAll('template[data-history-page]')).map((t) => t.innerHTML);
+    window.__bh.headerIDs = Array.from(h.querySelectorAll('[data-entry]')).map((e) => e.dataset.entry);
+    return panel.id;
+  });
+  const panel = page.locator(`#${target}`), summary = panel.locator(':scope > summary');
+  // Intrinsic renderer spacing is deliberately unlike the shell's 6px gap.
+  const bodyHandle = await panel.locator(':scope > .entry-body').elementHandle();
+  const frameHandle = await page.$(`#${target} iframe`);
+  const payload = frameHandle ? await frameHandle.contentFrame() : page;
+  await payload.evaluate((framed) => {
+    const body = framed ? document.querySelector('.doc-body') : window.__bh.headerBodies[0].body;
+    const probe = document.createElement('section');
+    probe.id = 'bh-panel-body';
+    probe.innerHTML = '<p style="margin:23px 0 17px">Arbitrary renderer spacing</p><pre style="max-width:100%;overflow:auto">' + 'unbroken body code '.repeat(60) + '</pre><details open><summary>Inner disclosure</summary><p>Inner body</p></details>';
+    body.append(probe);
+  }, !!frameHandle);
+  // Save after adding the inline fixture; neither layout nor actions may replace it.
+  if (!frameHandle) await page.evaluate(() => { const b = window.__bh.headerBodies[0]; b.html = b.body.innerHTML; });
+  const measurements = [];
+  async function viewport(width) {
+    await tab.setViewportSize({ width, height: ctx.height });
+    // Responsive adapter tabs may hide the board after crossing a breakpoint.
+    if (kind === 'adapter' && !await panel.isVisible()) await page.click('#tabbar [data-tab="board"]');
+  }
+  async function measure(label) {
+    await sleep(220);
+    const r = await page.evaluate(() => {
+      const bh = window.__bh, h = document.querySelector('[data-history="HISTORY"]');
+      const issues = [], rows = [];
+      for (const p of bh.headerPanels) {
+        const s = p.querySelector(':scope > summary'), title = s.querySelector('.entry-recap'), meta = s.querySelector('.pmeta');
+        const sr = s.getBoundingClientRect(), tr = title.getBoundingClientRect(), mr = meta.getBoundingClientRect();
+        const ts = getComputedStyle(title), ss = getComputedStyle(s), narrow = p.clientWidth <= 420;
+        const controls = Array.from(s.querySelectorAll('a.mref, button')).filter((n) => getComputedStyle(n).display !== 'none');
+        const boxes = [title, meta, ...controls.filter((n) => n.tagName === 'BUTTON')].map((n) => n.getBoundingClientRect());
+        for (let i = 0; i < boxes.length; i++) {
+          const a = boxes[i];
+          if (a.left < sr.left - 1 || a.right > sr.right + 1) issues.push('header overflow ' + p.id);
+          for (const b of boxes.slice(i + 1)) if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) issues.push('overlap ' + p.id);
+        }
+        if ((mr.top > tr.top + 1) !== narrow) issues.push('wrong metadata row ' + p.id);
+        if (Math.abs(Math.max(mr.right, ...controls.map((n) => n.getBoundingClientRect().right)) - sr.right) > 1) issues.push('metadata not right aligned');
+        if (ts.textOverflow === 'ellipsis' || ts.overflowY === 'hidden' || +ts.webkitLineClamp > 0 || title.scrollHeight > title.clientHeight + 1) issues.push('title clipped');
+        if (ss.padding !== '0px' || sr.height < 24 || parseFloat(ss.columnGap) !== 8 || ss.borderBottomWidth !== '0px') issues.push('header shell');
+        for (const c of controls) { const r = c.getBoundingClientRect(); if (r.width < 24 || r.height < 24) issues.push('target <24px'); }
+        if (!meta.querySelector('time[title][datetime]') || !meta.querySelector('.hint') || !meta.querySelector('a.mref')) issues.push('missing metadata');
+        const ps = getComputedStyle(p);
+        if ((!p.hasAttribute('data-max') && ps.boxShadow !== 'none') || ps.borderTopWidth !== '0px') issues.push('enclosing border');
+        if (p.hasAttribute('data-max') && (ps.backgroundColor === 'rgba(0, 0, 0, 0)' || ps.backgroundColor !== ss.backgroundColor)) issues.push('maximized sheet is not opaque like its header');
+        if (p.open) {
+          const body = p.querySelector(':scope > .entry-body'), bs = getComputedStyle(body);
+          if (bs.marginTop !== '6px' || bs.marginLeft !== '18px' || bs.paddingLeft !== '12px' || bs.borderLeftWidth !== '1px') issues.push('body shell');
+        }
+        rows.push({ id: p.id, width: p.clientWidth, height: sr.height, metaY: mr.top - sr.top, titleHeight: tr.height, open: p.open, background: ps.backgroundColor });
+      }
+      for (const b of bh.headerBodies) if (!b.body.isConnected || (b.frame ? b.frame !== b.body.querySelector('iframe') || b.html !== b.frame.getAttribute('srcdoc') : b.html !== b.body.innerHTML)) issues.push('body replaced');
+      if (JSON.stringify(bh.headerCache) !== JSON.stringify(Array.from(h.querySelectorAll('template[data-history-page]')).map((t) => t.innerHTML))) issues.push('cached pages changed');
+      if (JSON.stringify(bh.headerIDs) !== JSON.stringify(Array.from(h.querySelectorAll('[data-entry]')).map((e) => e.dataset.entry))) issues.push('history identity/order changed');
+      if (document.documentElement.scrollWidth > innerWidth + 1) issues.push('document overflow');
+      return { issues, rows };
+    });
+    measurements.push({ label, ...r });
+    assert(!r.issues.length, `${label}: ${JSON.stringify(r)}`);
+    const intrinsic = await payload.evaluate(() => {
+      const n = document.querySelector('#bh-panel-body > p'), s = getComputedStyle(n);
+      return [s.marginTop, s.marginBottom, !!document.querySelector('#bh-panel-body > details[open]')];
+    });
+    assert(JSON.stringify(intrinsic) === JSON.stringify(['23px', '17px', true]), 'intrinsic body spacing/disclosure changed');
+  }
+  for (const width of [1440, 800, 360, 320]) {
+    await viewport(width);
+    await measure(`viewport-${width}-open`);
+    // Native keyboard disclosure, with focus in the real clipped history.
+    await summary.focus();
+    await tab.keyboard.press('Enter');
+    assert(!await panel.evaluate((n) => n.open), 'native keyboard collapse failed');
+    await page.evaluate(() => { window.__bh.headerPanels[1].open = false; });
+    await measure(`viewport-${width}-closed`);
+    await tab.keyboard.press('Enter');
+    assert(await panel.evaluate((n) => n.open), 'native keyboard expand failed');
+    await page.evaluate(() => { window.__bh.headerPanels[1].open = true; });
+  }
+  await viewport(1440);
+  for (const width of [420, 421]) {
+    await page.evaluate((w) => { document.querySelector('[data-history="HISTORY"]').style.width = w + 'px'; }, width);
+    await measure(`wide-host-content-${width}`);
+  }
+  // Existing hover formatter keeps the exact stamp alongside its relative prefix.
+  const tooltip = await panel.locator('time.entry-at').evaluate((t) => {
+    t.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    return { title: t.title, stamp: t.dataset.stamp };
+  });
+  assert(tooltip.stamp && tooltip.title.includes(tooltip.stamp), 'exact-time tooltip lost');
+  await page.evaluate(() => window.wbAgo(document));
+  await measure('existing-clock-refresh');
+  if (kind !== 'standalone') {
+    await page.evaluate(() => { document.querySelector('[data-history="HISTORY"]').style.width = '420px'; });
+    await panel.locator(':scope > summary > .d-max').click();
+    assert(await panel.evaluate((n) => n.hasAttribute('data-max')), 'native maximize failed');
+    await measure('maximized-from-narrow-history');
+    if (ctx.args['capture-dir']) {
+      const dir = path.resolve(ctx.args['capture-dir']);
+      fs.mkdirSync(dir, { recursive: true });
+      await tab.screenshot({ path: path.join(dir, `${kind}-panel-maximized.png`) });
+    }
+    assert(await panel.locator(':scope > summary > .d-min').isVisible(), 'native back action missing');
+    await tab.keyboard.press('Escape');
+    assert(!await panel.evaluate((n) => n.hasAttribute('data-max')), 'Escape failed');
+    await measure('after-Escape');
+  }
+  assert(await bodyHandle.evaluate((n) => n.isConnected), 'body identity lost');
+  log(JSON.stringify({ kind, measurements, tooltip, gaps: [
+    'Frozen cache/id assertions do not prove history boundary or scroll stability; run history/history-regressions separately.',
+    'Uses current branch clock refresh only; unmerged relative-time and history-fit units require root integration checks.',
+    ...(kind === 'standalone' ? ['Standalone intentionally has no maximize/minimize controls or body iframe.'] : [])
+  ] }, null, 2));
+}
+
 const SCENARIOS = {
   toolbar: scenarioToolbar,
+  'panel-header': scenarioPanelHeader,
   overview: scenarioOverview,
   'overview-motion': scenarioOverviewMotion,
   keep: scenarioKeep,
