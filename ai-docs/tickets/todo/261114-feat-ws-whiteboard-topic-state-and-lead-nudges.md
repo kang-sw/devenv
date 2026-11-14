@@ -12,10 +12,11 @@ Make the lead declare the work's state, retain an actionable owner signal
 when work is not happening, and nudge the lead when the declared structure
 or execution time no longer matches the work.
 
-This is accepted backlog, not an implementation-ready contract. MAIN relayed
-owner approval `688,689=a` on 2026-11-14 and authorized documentation-only
-capture now. Owner approval 697 permits parallel implementation in separate
-worktrees, superseding the earlier serial-start restriction; integration order
+This ticket remains in `todo/` pending the lead's review/readiness steps. MAIN
+relayed owner approval `688,689=a` on 2026-11-14; the lead has now auto-confirmed
+the technical gap resolution recorded below. This settlement changes only the
+ticket, not the product. Owner approval 697 permits parallel implementation in
+separate worktrees, superseding the earlier serial-start restriction; integration order
 remains TASK3 -> TASK4 -> TASK5 -> 675. Phase 1 may land independently and early
 after queue coordination. This documentation-only assignment starts no source
 implementation.
@@ -23,9 +24,9 @@ implementation.
 ## Decisions
 
 - **Explicit work state rather than inference alone.** Every open topic has
-  an explicit state with the obligations in Phase 1. The state vocabulary
-  below describes approved behavior, not settled public command syntax or
-  persisted enum strings.
+  an explicit state with the obligations in Phase 1. Phase 2's machine-state
+  declarations are optional for legacy data/calls; the exact additive grammar
+  and encoding are settled in Technical Contract below.
 - **Execution signal.** Approval of a concrete deliverable is its execution
   signal. Owner requests to build or change something must not be downgraded
   into checks or technical items that leave the requested work unexecuted.
@@ -64,8 +65,184 @@ implementation.
   argument/store/query behavior. MAIN's intended tier for all three phases
   remains T0: shared text/UI changes plus additive optional state and existing
   mailbox delivery. Optional-state persistence still needs the conditional
-  writer-preservation check below; this capture verifies no new runtime
-  behavior and authorizes no T2, minor/schema bump or protocol change.
+  writer-preservation verification below; this settlement verifies no new
+  runtime behavior and authorizes no T2, minor/schema bump or protocol-number
+  change.
+- **Technical gap resolution: auto-confirmed by the lead.** Select the minimum
+  command/state/receipt/scheduler contract below, including numeric global-entry
+  ordering, the bounded legacy-close adapter and low-level lock discipline.
+  Existing immutable system-entry bytes preserve optional metadata across old
+  folder writers; enqueue-before-watermark implements the accepted preference
+  for duplicates over loss without another protocol. Keep ordinary human Text.
+  Reject JSON inside Text, TopicDoc/projection authority, new Entry kinds,
+  sidecars, an outbox/exactly-once protocol and transfer leases: they either
+  lose preservation, obscure the existing human history or add an unnecessary
+  competing mechanism. This is technical gap resolution under the existing
+  owner policies, not new policy approval or evidence of executed verification.
+
+## Technical Contract
+
+### Commands, state and validation
+
+- Add scoped empty `wb:state` inside `wb:topic`, with `value` and optional
+  `owner`, `eta_minutes`. Exact values: `discussing`, `waiting`, `implementing`,
+  `awaiting-confirmation`. Add scoped empty `wb:eta` with required `minutes`
+  and `reason` in Phase 3, not Phase 2. No public closed/unset state or inferred
+  default. Old calls and stores without state remain valid.
+- ETA is a positive decimal integer total wall-clock budget in minutes from
+  the original implementing start, not a duration from extension time. Range:
+  1 through `floor(MaxInt64 / time.Minute)`; reject signs, fractions, zero,
+  overflow and any start/deadline outside representable UTC RFC3339Nano
+  timestamp bounds. Check duration conversion, timestamp addition and
+  encode/parse round-trip for start/deadline. Server time supplies timestamps;
+  callers cannot set start/deadline. No pause/resume arithmetic.
+- Trim `owner` and `reason`; require valid UTF-8 and no control characters.
+  Owner is 1-256 bytes after trimming, describing the responsible executor,
+  not an account/lease/key/mailbox destination. Reason is 1-2048 bytes. Nudges
+  still target the owning lead's reply-id.
+- `wb:state` and `wb:eta` must name a known open topic in the working batch.
+  Existing accepted item/content activity can first create/reopen it; state
+  commands alone neither create empty topics nor reopen closed ones. Preserve
+  ordered, whole-batch atomic refusal until separately authorized changes land.
+- Entering implementing from absent/another state requires owner and ETA,
+  creates a run identified by its state entry ID and stamps start once.
+  Repeating the same implementing declaration with the same owner and current
+  ETA is a no-op, not a start/debounce reset. Differing owner/ETA is refused;
+  ETA changes use `wb:eta`, executor replacement requires explicit exit/re-entry.
+  Other state commands reject owner/ETA attributes and repeating their current
+  state is a no-op. Re-entry starts a fresh run, retaining old history.
+- `wb:eta` requires currently implementing, a strictly larger cumulative total
+  and nonempty reason. Retain original start, owner and initial estimate;
+  increment extension count and append an extension record. Same-total ETA is
+  refused. Leaving implementing records actual elapsed milliseconds alongside
+  original/current estimates. Preserve each extension's individual reason.
+- After an accepted batch, emit response-only structural warnings listing all
+  discussing topics with zero open items and waiting topics when no open
+  implementing topic exists on this board. Count every `StatusOpen` item,
+  including checks, as an ask. Absent state triggers neither warning. Use
+  deterministic names alongside existing Outcome.Info; do not refuse those
+  structures, create asks or replace the existing stale-topic heuristic.
+  At-most-one-ask/final-owner-answer obligations remain lead judgment rules.
+
+### Immutable history authority and lifecycle
+
+- Add optional raw JSON members `topic_state` and, in Phase 3, `board_notice`
+  on the existing immutable system Entry. Keep normal human-readable Text and
+  existing Entry.Kind. Consume machine payloads only on system Entries with
+  Imported false and ItemID zero; these are producer conventions, not
+  authenticated local-file provenance. Retain raw bytes/unknown members through
+  new readers and State.clone; parse separately. No TopicDoc/session metadata or
+  query projection becomes competing state authority; no schema/protocol bump.
+- `topic_state` v1 has `v: 1`, `op: set|extend|reset`. A set carries `value` and
+  a run snapshot when entering/leaving implementing. Snapshot keys: `id`
+  (start entry ID), `started_at`, `owner`, `initial_eta_minutes`, `eta_minutes`,
+  `extension_count`. Extend carries the updated run snapshot and `reason`;
+  leaving implementing/reset retains the completed run snapshot when known
+  and carries `elapsed_ms`; a transition records `from` when known. Entry.At is
+  event time. The extension entry ID is the ETA revision; before extension,
+  revision equals run ID. Containing topic and numeric stream order determine
+  authority, not caller-supplied names or timestamp ordering.
+- Query adds optional derived topic `state: {value, entry, run?}`, with run
+  snapshot plus derived `deadline_at`; entry identifies the latest state/ETA
+  entry. Unknown fold omits state and adds `state_diagnostic: {entry, code}`,
+  code `malformed` or `unsupported`. Print additive text metadata lines; add
+  no selector and preserve existing selectors, bodies, tickets and latest-agent
+  semantics. System state/receipt entries never replace LatestAgent.
+- Complete existing legacy-to-folder conversion before emitting new metadata.
+  Never emit it into rollback snapshots or dual-write legacy data. Legacy
+  absence remains absent, without backfill. Old typed legacy conversion cannot
+  recover unknown legacy members already dropped; committed folder prefixes
+  and pending opaque append bytes are the distinct preservation boundaries.
+- Replay all retained topic histories, including currently closed ones, sorted
+  by numeric canonical board-global `eN`, not topic order, lexical ID or time.
+  The global EntrySeq and board lock serialize allocation; adoption preserves
+  IDs/history. Equal timestamps do not tie-break authority. Pre-cutover recap
+  allocation does not establish historical chronology or machine-state epochs.
+- Close ends the run, deactivates that topic's timers and clears its declared
+  state; reopening restores neither state/run nor withdrawn asks. New close
+  attaches reset metadata to the existing close system line. For real old
+  writers, recognize only valid non-imported system entries with ItemID zero
+  whose whole Text begins exactly `Topic closed: `, after an active declared
+  baseline. Prefer structured reset when present. Existing accepted commands
+  cannot choose raw Entry kind/provenance; log/panel/item text with this phrase
+  is not a reset. Imported is an unauthenticated bool, not a signature: local
+  authoritative-file edits can forge both this literal and structured state.
+  Bound the adapter to inspected historical producers; do not parse arbitrary
+  authored/imported summaries or silently extend the proof to other writers.
+- Missing metadata is ordinary absence. Malformed known-v1 payload produces
+  diagnostic/unknown current state, never an older deadline fallback; suppress
+  that topic's state-based warnings/timers. An explicit valid state command
+  can establish a new baseline after malformed v1. Unknown version/operation
+  preserves bytes and reports unsupported state; refuse new state/ETA mutation
+  until supported code handles it, while old content/item/close commands remain
+  accepted. Close/reset ends activity without interpreting an unknown run;
+  a valid later baseline supersedes older diagnostics. Invalid outer log JSON
+  keeps the existing corruption error. Diagnostics do not fabricate asks.
+
+### Scheduler, receipts and accounting
+
+- One daemon-owned scheduler per cache root, independent of pages, dashboard
+  enablement and MCP connections. Discover parentless lead key records in both
+  existing layouts and locate existing boards by recorded root/key reply-id.
+  Do not mint/touch/resurrect keys, create absent boards, run git for discovery
+  or treat arbitrary folders/registry remnants as lead authority. Reconcile
+  at startup and every 30 seconds; successful board updates poke precise timers
+  for deadlines, debounce and hourly due times. Generation is cache invalidation,
+  not authority. Missing key association suspends discovery without data loss.
+- Apply the approved 748 process gate immediately before enqueue: owning open
+  hosted runner/row, HostStopped false, positive associated live harness HostPID;
+  or valid own terminal key/session/root association with positive live
+  HarnessPID. Suppress stopped/closed/unknown/missing/contradictory evidence,
+  not idle-but-live processes. Heartbeat/key/watcher presence alone is not
+  proof. Preserve deadlines/checkpoints while ineligible; catch up when alive.
+  Document PID-reuse and enqueue/stop races; queued mail retains existing
+  transport semantics, not a new delivery-time liveness guarantee.
+- `board_notice` v1 receipt keys: `v: 1`, `reply_id`, `sent_at`, `reasons`
+  (array of overdue and/or hourly), optional `hourly_epoch` (activation entry
+  ID), and `covered` array of `{topic_dir, run_id, eta_entry}` for all overdue
+  topics included. Use stable folder identity. Append one readable system
+  receipt in the first eligible topic in stable folder order, fold receipts
+  across all retained histories, and ignore source-reply-id receipts after
+  copy. Raw receipt data is retained, not rewritten as a metadata sidecar.
+- Under the existing FolderStore transaction lock, reload/recover authority,
+  revalidate close/extension/eligibility and form one message. Order:
+  low-level PostSystem succeeds -> nonblocking Wake -> append receipt to the
+  supplied work-State -> folder commit. Failure to enqueue writes no receipt.
+  Crash/failure after enqueue but before committed receipt retries and may
+  duplicate; uncertain folder intent recovers before eligibility is recomputed.
+  Never copy watermark-before-send ordering. This is scheduler enqueue retry,
+  not exactly-once delivery, unlimited queue retention or power-loss assurance.
+- Resolve recipient identity/mailbox path and session facts before the folder
+  transaction; bounded under-lock revalidation uses direct identity/registration
+  reads. No sessionStore.mu, key/session mutation wrapper, nested FolderStore
+  open/update, high-level session/board/mailbox API, render/refresh callback or
+  delivery wait under the folder lock. PostSystem releases the reply lock on
+  return; Wake only makes nonblocking channel sends. Mutate the supplied
+  work-State for receipts, never reenter the store to append them.
+- Overdue means open known implementing and now at/after original start plus
+  current total ETA. For each run/ETA revision, trigger immediately if never
+  covered, otherwise at least 30 minutes after last coverage. Any trigger sends
+  the full overdue list with owner, original/current estimates, elapsed duration
+  and extension count/reasons, without truncation. Stamp ALL included overdue
+  topics at enqueue time, not only triggers; do not stamp non-overdue mentions.
+  Extension retains start but changes revision: a future deadline waits; a still
+  overdue revision triggers immediately, independently of other topics.
+- Hourly eligibility is any open implementing/waiting topic. Fold numeric
+  board-global entries and bounded closes to identify maximal eligible epochs;
+  the zero-to-nonzero activation entry ID/time anchors the epoch. First due is
+  activation + one hour, then last successful hourly receipt + one hour.
+  Overdue-only sends do not move the hourly clock. Zero eligible topics ends
+  the epoch; a later one starts fresh. Hourly list includes every open topic's
+  declared/absent state and the full overdue section. If both timers are due,
+  send one combined message/receipt and account for both.
+- Restart/resume/copy recovery sends at most one combined catch-up per board
+  when alive and due, then schedules forward from committed notification time;
+  never replay missed intervals. Backward clock movement delays rather than
+  invents negative duration; clamp displayed elapsed at zero and diagnose
+  future stored timestamps. Source cessation precedes copy under 749; destination
+  inherits deadlines and ignores source-reply-id receipts. Same-key native
+  handoff changes transport ownership, not board/timer identity. No transfer
+  lease, command or code-enforced copy switch.
 
 ## Owner Authority
 
@@ -81,7 +258,8 @@ Owner answer relayed by MAIN at 2026-11-14 12:02:04, verbatim:
 707 limits linked-ticket removal to UI/playbook exposure and preserves the
 existing attribute's write/storage/query semantics. Owner approval 697 also
 permits parallel implementation in separate worktrees without changing the
-integration order. Neither update selects a state encoding or timer mechanism.
+integration order. Neither policy update itself selected a state encoding or
+timer mechanism; the later lead technical selection is recorded above.
 
 Owner answers relayed by MAIN at 2026-11-14 12:24:51, verbatim:
 
@@ -93,9 +271,9 @@ Owner answers relayed by MAIN at 2026-11-14 12:24:51, verbatim:
 per-topic 30-minute debounce: a newly overdue topic nudges immediately with the
 full overdue list. 730 preserves deadlines and last-nudge times across daemon
 restart and sends one catch-up overdue list. 731 accepts possible duplicate
-nudges after a crash over missing a nudge. These answers settle the Phase 3
-policy holds; they do not select public grammar, field shape, Text encoding,
-state authority, or a scheduler implementation.
+nudges after a crash over missing a nudge. Those policy answers themselves did
+not select grammar, field shape or a scheduler implementation; the subsequent
+lead technical settlement selects those mechanics without changing the policies.
 
 Owner answer relayed by MAIN at 2026-11-14 13:05:55, verbatim:
 
@@ -122,8 +300,9 @@ Owner answer relayed by MAIN at 2026-11-14 13:15:09, verbatim:
 existing playbook obligation to the nudge scheduler. The destination inherits
 deadlines, ignores copied source-reply-id receipts, and sends one catch-up when
 alive. No new transfer command, lease or code-enforced switch is authorized.
-The stopped/closed-lead and copied-source policy holds are answered; exact
-command/schema and scheduler mechanisms remain technical preparation.
+The stopped/closed-lead and copied-source policy holds are answered. The lead's
+subsequent technical auto-confirmation selects Technical Contract above; these
+owner answers themselves did not select a wire field or scheduler API.
 
 Owner idea, approximately 2026-11-14 11:30Z, referring to stalled-triage text
 `서버가 자동으로 판정하게`:
@@ -145,15 +324,14 @@ new injection machinery; Phase 3 explicitly reuses mailbox push.
 - Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
 - Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
 - Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
-- Keep this ticket in `todo/`. Capture runs no fact-populator, Sage review,
-  promotion, independent implementation review, runtime activation, or source
-  changes. Readiness and implementation belong to the lead's later steps.
-- Public grammar, exact enum strings, ETA/owner encoding and the technical
-  persistence mechanism remain unselected. Timer scope, per-topic debounce,
-  restart continuity and crash delivery preference are settled by 728-731;
-  alive-only production and copied-source cessation are settled by 748-749.
-  Do not retain these as open policy holds or infer encoding from state names
-  or illustrative log/extension text.
+- Keep this ticket in `todo/` for this documentation-only technical settlement.
+  This task runs no Sage/reviewer dispatch, promotion, runtime activation or
+  source changes. The lead's review/readiness steps follow this commit.
+- Technical Contract records the lead's auto-confirmed grammar, enums,
+  ETA/owner encoding, immutable Entry authority and scheduler mechanics.
+  Policies 707/728-731/748-749 and all three phases remain unchanged. Do not
+  retain answered gaps as holds or treat selected mechanisms as implemented.
+  No additional owner approval is required for this technical settlement.
 - Enforce the alive-only gate before nudge enqueue, not by assuming mailbox
   transport will suppress a wake. Process-stopped/closed hosted leads and
   unknown/missing/contradictory process evidence are ineligible. Preserve
@@ -181,7 +359,7 @@ new injection machinery; Phase 3 explicitly reuses mailbox push.
   `ai-docs/manuals/release-compatibility.md` to future MCP/store changes.
   Preserve old-call validation/write/query semantics, authoritative topic
   folders and history. Linked-ticket hiding is T0 under 707; inspect the
-  eventual optional-state storage against mixed-version writer constraints.
+  selected optional Entry storage against mixed-version writer constraints.
 
 ## Prior Art and Compatibility Evidence
 
@@ -223,10 +401,10 @@ runtime tests. Line references below address that develop object.
   This matters if an older writer opens and rewrites new same-schema topic
   metadata, not merely because old playbook text calls the newer daemon:
   the ordinary same-minor model has one newer daemon serving older clients
-  (manual lines 15-25). Exact state storage is not settled, so this is a
-  concrete persistence-path constraint to check against the eventual design,
-  not proof that every optional-state design needs a migration or cannot be
-  T0. No writer-preservation implementation is chosen here.
+  (manual lines 15-25). This excludes TopicDoc metadata authority; the selected
+  immutable Entry approach avoids rewriting committed unknown members.
+  It does not prove every optional-state design needs a migration or cannot be
+  T0; executable historical-writer verification is still required.
 - Follow-up source tracing at `fee98b018` (product paths unchanged from the
   develop object above) distinguishes immutable Entry records from rewritten
   TopicDoc metadata. `folders.go:402-444` loads typed entries, so an old reader
@@ -236,13 +414,13 @@ runtime tests. Line references below address that develop object.
   without truncating or rebuilding committed lines. Pending append Data is
   opaque bytes (`72-76,281-287,727-737`), so old recovery also retains unknown
   members in those bytes. An optional structured payload on an existing-kind
-  immutable system Entry is therefore a preservation candidate, unlike an
-  unknown TopicDoc metadata field. First legacy conversion is a separate
-  boundary: `289-333,648-655` serializes the entire typed legacy Entry list and
+  immutable system Entry therefore has a byte-preservation path supporting the
+  selected approach, unlike an unknown TopicDoc metadata field. First legacy
+  conversion is a separate boundary: `289-333,648-655` serializes the entire typed legacy Entry list and
   cannot restore unknown members already dropped during legacy decode/clone.
-  This is source evidence, not an executed mixed-version test or a selected
-  state schema/authority. MAIN prefers investigating this candidate while
-  retaining human-readable Text; no Text-embedded JSON protocol is approved.
+  This is source evidence, not an executed mixed-version test. The lead now
+  selects raw optional metadata on existing immutable system Entries, retaining
+  human-readable Text; JSON encoded inside Text is rejected.
 - `entries.go` already has `EntrySystem` and `event`; system entries do not
   replace `LatestAgent`. Reuse this history model for automatic state
   transitions without confusing system logs with the lead's summary.
@@ -258,7 +436,7 @@ runtime tests. Line references below address that develop object.
   through `internal/mcp/lead_mail.go`. These are reuse points, not proof that
   a topic ETA scheduler or its required wake behavior already exists.
 - `261112-feat-ws-mixed-version-compat-guards` tracks broader compatibility
-  enforcement. This capture neither implements it nor treats it as landed.
+  enforcement. This settlement neither implements it nor treats it as landed.
   Ticket discovery returned an origin timeout/cached-ownership advisory;
   local search results do not establish origin-wide absence of related work.
 
@@ -266,19 +444,22 @@ runtime tests. Line references below address that develop object.
 
 All source observations above were rechecked at `4590981bf492403a217402839522a613d91bb7f9`
 on `feat/topic-state-task5`. `git diff 9854ff350fa1b0eccfb5c71649c5190c405925b9 HEAD -- agents-plugin agents-plugin-tool agents-plugin-wsflow`
-returned no product changes. The full external technical proposal, including its
-addendum, was read as nonauthoritative preparation; its initial Text-protocol
-recommendation and its now-settled timer-policy questions are not new authority.
-No build, test, browser, probe, provider, or runtime verification was performed.
+returned no product changes. Later source-only tracing confirmed the global
+entry order, bounded close-producer recognition, low-level lock direction and
+alive/copy boundaries below. The lead has now selected the formed contract
+with those corrections and the settled owner policies; Technical Contract in
+this ticket is the selected record. The earlier Text-protocol and board-wide
+debounce proposals are superseded. No build, test, browser, probe, provider,
+or runtime verification was performed.
 
 - **Grammar and caller authority:** `agents-plugin-tool/internal/wswhiteboard/commands.go#L22-L40`
   declares the existing topic group and command table, with no state or ETA
   command. `agents-plugin-tool/internal/mcp/server.go#L752-L757` gates board
   tools to top-level leads. `agents-plugin-tool/internal/wswhiteboard/store.go#L582-L675`
   clones, dispatches in order, and refuses the whole batch on any problem.
-  Exact command names, enums, units/ranges, owner representation, repeated
-  declarations, extension validation, transition timestamps, and query projection
-  still need lead technical selection, not inference from the proposal's examples.
+  The selected additive grammar, bounds, owner representation, idempotence,
+  extensions, timestamps and query projection are in Technical Contract;
+  the current product does not implement them.
   The related refusal-cost work is not landed in this tree: its per-command
   mutation decision must not be assumed to be current Apply behavior.
 - **Lifecycle and provenance:** `agents-plugin-tool/internal/wswhiteboard/store.go#L679-L720`
@@ -287,11 +468,14 @@ No build, test, browser, probe, provider, or runtime verification was performed.
   server events from accepted activity that reopens a topic. Adoption renames
   logical keys (`agents-plugin-tool/internal/wswhiteboard/topics.go#L207-L233`)
   while the folder mapping retains history identity
-  (`agents-plugin-tool/internal/wswhiteboard/folders.go#L575-L590`). Whether a
-  close ends an implementing run, what reopen restores, and how old-writer
-  close/reopen events affect new state remain technical lifecycle choices;
-  parsing the existing close Text is not already a machine-state contract.
-- **Persistence candidate, not schema approval:** committed system-log bytes
+  (`agents-plugin-tool/internal/wswhiteboard/folders.go#L575-L590`). The selected
+  new lifecycle ends runs on close and does not restore state on reopen.
+  The old-close literal is a bounded compatibility adapter selected here,
+  not a previously existing general Text machine protocol. Imported is only
+  an unauthenticated bool (`entries.go#L25-L39`); accepted log/panel/item paths
+  cannot forge an actual close producer record (`entries.go#L133-L155`;
+  `store.go#L714-L719`, `#L865`, `#L916-L919`, `#L1074-L1149`).
+- **Selected persistence, source proof still needs execution:** committed system-log bytes
   are retained by typed-prefix comparison followed by suffix-only publication
   (`agents-plugin-tool/internal/wswhiteboard/folders.go#L613-L660`,
   `agents-plugin-tool/internal/wswhiteboard/folders.go#L790-L839`). Pending
@@ -305,9 +489,13 @@ No build, test, browser, probe, provider, or runtime verification was performed.
   legacy members already lost in decoding are not recovered. These are three
   distinct boundaries. New readers must also retain any selected known payload
   through `State.clone` (`agents-plugin-tool/internal/wswhiteboard/store.go#L350-L361`).
-  Payload shape/versioning, fold authority, absent/malformed/unsupported-state
-  handling, query shape, and durable notification bookkeeping remain unselected;
-  neither optional Entry metadata nor JSON inside Text is approved here.
+  Raw state/receipt payloads, fold authority, version diagnostics and query
+  shape are now selected above; this source evidence does not count as tested
+  preservation. Numeric global allocation comes from `entries.go#L62-L67`,
+  with durable EntrySeq and validation under one board lock
+  (`store.go#L250-L252`; `folders.go#L138-L193`, `#L557-L573`, `#L630-L642`).
+  Read validates global uniqueness (`folders.go#L402-L425`); replay must merge
+  all histories numerically, including closed topics, rather than rely on time.
 - **Scheduler and delivery:** no topic ETA mechanism was found by
   `rg -n '\b(ETA|TopicState|eta_minutes|overdue|awaiting-confirmation)\b' agents-plugin-tool/internal/{wswhiteboard,wsdashboard,mcp} --glob '*.go' --glob '!**/*_test.go'`
   (only unrelated tracker overdue text matched). There are daemon scheduling
@@ -319,11 +507,16 @@ No build, test, browser, probe, provider, or runtime verification was performed.
   supplies the existing PostSystem-then-Wake precedent;
   `agents-plugin-tool/internal/mcp/lead_mail.go#L80-L183` watches and claims hosted
   lead mail. Folder commit and reply-registry enqueue use separate locks and
-  publication paths, not one transaction. Scheduler ownership/discovery, restart
-  checkpoints, send/retry ordering, full-list debounce accounting, hourly clock
-  anchoring, and simultaneous close/extension revalidation still need technical
-  selection. Existing folder lifetime is not proof of a live recipient
-  (`ai-docs/manuals/ws-mcp.md#L57-L81`); 748-749 now settle alive-only production
+  publication paths, not one transaction. The selected scheduler uses existing
+  key/board discovery, persisted Entry receipts and enqueue-before-watermark
+  retry, with the accounting/epoch rules above; no implementation is present.
+  Under-lock code must stay low-level: PostSystem's closure only appends queue
+  data (`internal/wsmailbox/replyid.go#L150-L234`) and Wake only broadcasts
+  nonblocking channels (`internal/wswake/wake.go#L59-L76`). Ordinary session
+  mutation takes sessionStore.mu before the board lock
+  (`internal/mcp/session_state.go#L613-L651`), so reversing that order or nesting
+  a board open/update inside the scheduler callback is excluded. Existing folder
+  lifetime is not proof of a live recipient (`ai-docs/manuals/ws-mcp.md#L57-L81`); 748-749 now settle alive-only production
   and copied-source cessation, without selecting a new scheduler/host API.
   Existing mailbox delivery is the required reuse boundary, not authorization
   for a new injection protocol.
@@ -393,13 +586,13 @@ No build, test, browser, probe, provider, or runtime verification was performed.
 |---|---|---|
 | scope.span | multi-file | agents-plugin/rsrc/whiteboard/whiteboard.md, wsflow mirror, agents-plugin-tool/internal/wswhiteboard/, internal/mcp/lead_mail.go, internal/wsmailbox/replyid.go |
 | scope.surface | cross-module | shared playbooks/UI, whiteboard command/query/store contracts, daemon scheduling and mailbox delivery |
-| scope.new_public_symbol | unknown | optional command/field is required, but no exported Go symbol or public spelling has been selected |
-| scope.new_type_contract | yes | Phase 2 optional state and Phase 3 reasoned cumulative ETA extensions require new command/data contracts; exact shape remains unselected |
-| scope.test_surface | existing | agents-plugin-tool/internal/wswhiteboard/topic_tickets_test.go, folders_test.go, entries_test.go, nudge_test.go; internal/mcp/lead_mail_test.go; new scheduler fixture location unselected |
+| scope.new_public_symbol | yes | additive wb:state and wb:eta commands, optional raw topic_state/board_notice Entry metadata and derived query state are selected |
+| scope.new_type_contract | yes | Technical Contract defines exact state/extension grammar, raw v1 state/receipt payloads, lifecycle and diagnostics |
+| scope.test_surface | existing | agents-plugin-tool/internal/wswhiteboard/topic_tickets_test.go, folders_test.go, entries_test.go, nudge_test.go; internal/mcp/lead_mail_test.go; extend these seams and add controlled-clock scheduler fixtures |
 | complexity.reuse_points | confirmed | read EntrySystem/event/LatestAgent, FolderStore append/replay, Outcome.Info, PostSystem and LeadMailbox Watch/Drain |
 | complexity.side_effect_risk | high | durable state and timers enqueue unsolicited lead turns across restart and concurrent topic changes |
-| risk.correctness | high | transition/lifecycle authority, mixed-writer preservation, debounce accounting and crash-ordering implementation remain unselected; alive-only/source-cessation policies are settled |
-| risk.fit | high | state must fit immutable history and existing caller/mailbox boundaries without adopting a Text protocol or competing authority implicitly |
+| risk.correctness | high | selected lifecycle, mixed-writer preservation, all-topic receipt accounting, crash ordering and alive gates require implementation/fault verification |
+| risk.fit | high | selected immutable raw Entry history must retain the existing caller/mailbox boundaries without competing authority or protocol |
 | risk.test | high | existing fixtures do not establish new-state skew preservation or controlled-time queue-to-turn behavior across hosts |
 | risk.security_or_contract | high | new public grammar and optional persistent state need T0 proof; mailbox delivery must retain lead identity and existing authority boundaries |
 
@@ -439,25 +632,34 @@ by 707; readiness remains a separate lead-owned step.
 
 ### Phase 2: Optional topic state, transition history and structural warnings
 
-After Phase 1, introduce an optional topic-state field set through a wb
-command. Automatically append a board system line on a state transition,
-including estimated versus actual duration where applicable. The approved
-illustration is a transition from implementing to awaiting confirmation with
-an estimate of 40 minutes and actual duration of 55 minutes; it does not
-prescribe a wire format or a new event type.
+After Phase 1, implement the selected `wb:state` grammar, four enums,
+ETA/owner validation, idempotence, known-open-topic rules, close/reopen lifecycle
+and derived query projection in Technical Contract. Complete folder cutover
+before emitting raw optional `topic_state` v1 on existing immutable system
+Entries. Automatically append a human-readable system line for each actual
+transition, including estimate versus actual on leaving implementing; system
+history never replaces LatestAgent. Fold numeric board-global entry order over
+all retained histories, including closed topics, with the selected bounded
+old-close adapter and absence/version/diagnostic rules. Do not introduce a
+new Entry kind, TopicDoc authority or Text-encoded JSON protocol.
 
-Return structural warnings in `whiteboard.update`'s response for discussing
-with zero open asks, and waiting while no topic is implementing. These are
-response warnings, distinct from Phase 3's pushed turns.
+Return selected response-only structural warnings in `whiteboard.update` for
+discussing with zero open items and waiting with no open implementing topic.
+Do not refuse those structures or synthesize asks. Preserve the existing
+stale-topic response heuristic. Phase 3 alone adds `wb:eta`, notification
+receipts, scheduler clocks and pushed delivery.
 
-Verification expectations: cover absent optional state on existing data/calls,
-state changes and automatic history, ETA/owner requirements at implementation
-transition, both warning conditions and their non-triggering counterparts.
-Verify preservation through folder updates and mixed-version round-trips;
-keep system transitions distinct from the latest agent summary. Evaluate the
-optional immutable-system-Entry metadata candidate against old append/recovery
-and legacy-conversion boundaries without treating it as a selected schema.
-Timed nudges and restart/delivery policies remain Phase 3 implementation scope.
+Verification expectations: exercise exact grammar and duration/timestamp bounds,
+owner limits, atomic refusal, identical-declaration no-op, absent legacy state,
+close/reopen/re-entry and adoption. Verify numeric e9/e10 and equal-time order,
+closed-history epoch evidence, malformed/unsupported payloads and raw-member
+retention through clone, pending recovery and actual historical folder writers.
+Separately cover legacy conversion and unchanged rollback snapshots. Test
+prefix-looking authored log/panel/item/answer content against the bounded
+close adapter and document the unauthenticated local-file boundary. Verify
+query additions preserve existing selectors/ticket output and system events
+never replace LatestAgent. Cover both structural warnings and non-triggering
+counterparts; runtime work remains deferred until execution is authorized.
 
 ### Phase 3: All-overdue-topic mailbox nudges and cumulative ETA extensions
 
@@ -486,9 +688,14 @@ switch; do not confuse this copy with same-key hosted/terminal handoff.
 Preserve deadlines and last-nudge times across daemon restarts, delivering
 one catch-up overdue list rather than replaying missed intervals (730).
 Prefer retry with a possible duplicate after a crash over losing a nudge
-(731); exactly-once delivery is not required. ETA extension requires a reason
-and cumulative display: for example, two extensions changing the estimate
-from 40 to 90 minutes, rather than silently resetting the estimate.
+(731); exactly-once delivery is not required. Implement the selected `wb:eta`
+grammar and cumulative elapsed ETA: two extensions from 40 to 90 minutes retain
+original start/estimate, both reasons and the extension count, never silently
+resetting the estimate. Use the selected daemon discovery/30-second recovery
+scan/precise timers, raw immutable `board_notice` receipts, supplied-State
+low-level enqueue-before-watermark sequence, all-included-topic accounting,
+independent hourly epochs and combined one-catch-up behavior. No high-level
+session/board/mailbox call or sessionStore.mu acquisition under the folder lock.
 
 Verification expectations: use controlled time to cover multiple overdue
 topics in one list, independent per-topic debounce, immediate full-list
@@ -505,40 +712,46 @@ resume/reopen catch-up, expired-key non-resurrection, PID-reuse limitations and
 enqueue/stop races. Exercise source cessation, destination deadline continuity,
 source-reply-id receipt exclusion and one live-destination catch-up after folder
 copy, separately from same-key handoff. Exercise actual mailbox-to-lead delivery,
-not only response text. The policy holds, including 748-749, are answered;
-the persistence/scheduler mechanism and exact public command/field forms still
-require technical fact/design work before readiness. This capture implements
-no scheduler or delivery protocol.
+not only response text. Add concurrent normal-update/scheduler/drain/sweep
+fixtures to check the selected lock direction, no nested folder acquisition,
+mailbox timeout, enqueue failure, post-enqueue crash, receipt commit failure
+and wake-before-commit. Test full-list receipt stamps for all included topics,
+per-run/revision debounce, independent hourly anchoring and a combined message
+when both clocks are due. Verify all existing supported delivery paths without
+claiming automatic idle-turn injection on hosts/configurations that lack it.
+Policy and technical selections are complete; implementation and executable
+verification remain pending. This ticket update activates no scheduler.
 
-## Remaining Technical Preparation
+## Readiness and Verification Boundary
 
-- Settle public state/extension command grammar, exact enum and ETA/owner
-  encoding, transition timing and validation, and closed/reopened-topic
-  lifecycle behavior. These are technical contract choices, not reopened
-  timer-scope, restart, alive-only or copied-source policy questions.
-- Establish the eventual optional-state authority and field shape through
-  fact/design work. Compare existing immutable system-Entry metadata with
-  alternative preservation-safe encodings; retain human-readable history.
-  Verify absent-state compatibility and actual old/new writer round-trips,
-  including pending recovery and the distinct legacy-conversion boundary.
-  Optional metadata is not automatically T0 merely because it is optional.
-- Design scheduler ownership, durable deadline/last-nudge bookkeeping and
-  mailbox enqueue/retry ordering to implement 728-731 and 748-749. Keep the
-  approved alive gate and source-cessation obligation without selecting the
-  formed proposal's command/Entry/receipt APIs by implication. Existing folder and
-  reply-registry transactions are separate (`folders.go:138-193`;
-  `internal/wsmailbox/replyid.go:171-234`); source reuse alone does not establish
-  crash-safe delivery or a running ETA scheduler. Use the accepted duplicate
-  preference rather than seeking a new exactly-once policy decision.
-- Specify and verify per-topic eligibility/bookkeeping when a full-list nudge
-  includes other overdue topics, response-only structural warnings, cumulative
-  extensions, restart/live-resume/copy catch-up, and actual existing mailbox
-  push/wake delivery across supported lead hosts. Verify approved process gates
-  and document PID-reuse/enqueue-stop races; ended-lead and copied-source policy
-  holds are not open. These are implementation/verification gaps,
-  not evidence of new runtime enforcement or authorization for a new protocol.
+The lead auto-confirmed the technical gaps above after reading the complete
+formed contract and its order/provenance/lock corrections. No unresolved owner
+policy or public-contract choice remains in this record. The ticket stays in
+`todo/` for the lead's review/readiness steps; this update dispatches no reviewer,
+promotes nothing and implements no product behavior. All three phases, 697's
+parallel-worktree permission and the integration order remain unchanged.
 
-The formed technical proposal remains preparation, not a Decision selecting
-Text encoding, an Entry payload schema, command syntax or a new state authority.
-All three phases remain in this ticket; 697's parallel-worktree permission and
-the existing integration order remain unchanged.
+The remaining work is implementation and evidence, not another schema-choice
+hold. Preserve this minimum future matrix:
+
+| Boundary | Required evidence |
+|---|---|
+| Old text/calls on new daemon | Whole-batch semantics and absent state remain valid; 707 ticket validation/replacement/clear/store/query effects unchanged while UI/playbook exposure disappears |
+| New commands on historical daemon | Unknown commands refuse without mutation; Phase 1 text invokes no unlanded syntax |
+| Actual historical schema-2 writer | New committed log prefixes survive content/item/render/adoption/close/reopen updates byte-for-byte; new-reader fold retains structured state/receipts |
+| Historical recovery of new pending intent | Exact opaque append bytes, including partial suffix, complete once; metadata and checkpoints survive |
+| Legacy conversion | New state emitted only after cutover; rollback snapshot unchanged; no false unknown-legacy-member preservation claim |
+| New reader and lifecycle | Raw clone retention, diagnostics, bounded producer recognition, numeric/equal-time order and closed histories; no stale deadline restoration or LatestAgent replacement |
+| Scheduler time/fault/concurrency | Per-topic/revision/full-list accounting, hourly epochs, alive gate, restart/resume/copy one-catch-up, enqueue-before-receipt duplicate preference and no lock inversion |
+| Hosted Claude and Pi | Actual queue/Wake/watch/turn path while alive, busy/idle/rejoin; no enqueue to stopped/closed hosts; existing explicit reopen/handoff ownership respected |
+| Terminal Pi and Claude mod | Actual waiter/recv/push path, configured direct/notice/off behavior and PID/association gate, without silently changing config |
+| Codex/manual/no active push | Existing queue/recv/manual or already-armed wait only; unknown process evidence suppresses timers and unsupported autonomous idle injection is not claimed |
+| Shared text/package | Phase 1 scenarios, canonical resource/manifest/wsflow rendering and package guards; no repository-only authority leaks into shipped text |
+
+Existing seams are source observations, not new-feature passes. Run the
+project's relevant suites during implementation and retain actual historical
+writer fixtures rather than substituting new types in a mock. PID reuse,
+enqueue/stop races, transport queue retention and local-file forgery are explicit
+limits, not solved by the new metadata. Optional store metadata remains T0 only
+with demonstrated preservation; the selected contract authorizes no T2 or new
+cross-version protocol.
