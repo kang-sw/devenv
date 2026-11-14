@@ -33,8 +33,12 @@ become the latest entry in the top recap; the owner wants them included.
 - MAIN authorizes implementation after B and serialized integration. This
   documentation delegate stops at capture; source edits, verification and any
   ready promotion belong to the later B2 execution path.
-- Selection/storage/API mechanisms remain unchosen; (692) confirms the
-  observable projection, not a new field, command or store format.
+- **(699), MAIN technical settlement, relayed 2026-11-14 at 11:41:** when
+  the latest agent log line and panel recap have equal timestamps, the larger
+  durable entry ID (`eN`) wins. This reuses the board's existing entry-ID
+  disambiguation for equal timestamps; it adds no new field or store format.
+- Other selection/storage/API mechanisms remain unchosen; (692)/(699)
+  confirm the observable projection and tie-break, not a new command.
 
 ## Prior Decisions
 
@@ -57,6 +61,9 @@ behavior when the log is newer; no store/API mechanism is chosen here.
 Future verification boundary: compare panel-only, agent-only and mixed topics.
 Capture the same topic before and after posting a panel recap later than its
 last agent log line, then after a newer agent log line. Assert matching
-summaries on the board page, query and session-state topic list, and retain
-the T0 boundary. Merge serially after B. Product verification is deferred to
-that execution; this lane performs ticket guardrails only.
+summaries on the board page, query and session-state topic list. Include
+both equal-timestamp cases: panel recap with the larger `eN`, and agent log
+line with the larger `eN`; each must win consistently across all three
+surfaces (699). Retain the T0 boundary. Merge serially after B. Product
+verification is deferred to that execution; this lane performs ticket
+guardrails only.
