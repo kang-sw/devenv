@@ -155,7 +155,10 @@
   // it; beyond SHUT_CAP the least recently folded is dropped.
   var SHUT_KEY = "ws.dashboard.panelshut", SHUT_CAP = 200, shutSet = null;
   function isPanel(d) { return d.classList.contains("entry-panel") && d.hasAttribute("data-key"); }
-  function shutId(d) { return rid + "/" + d.getAttribute("data-key"); }
+  function shutId(d) {
+    var id = d.getAttribute("id");
+    return rid + "/" + (/^p[1-9][0-9]*$/.test(id || "") ? "panel:" + id : d.getAttribute("data-key"));
+  }
   function shutList() {
     try {
       var v = JSON.parse(load(SHUT_KEY) || "[]");
@@ -182,6 +185,9 @@
     // Whole HISTORY is no longer a disclosure. Ignore only its obsolete
     // key; item/panel/version/system/run/topic folds keep their own owners.
     if ((d.getAttribute("data-key") || "").indexOf("history:") === 0) return null;
+    // Latest panels carry pN as id; historical versions have only their
+    // independent entry key. Republish changes eN, not this fold identity.
+    if (d.classList.contains("entry-panel") && /^p[1-9][0-9]*$/.test(d.getAttribute("id") || "")) return "k:panel:" + d.getAttribute("id");
     if (d.hasAttribute("data-key")) return "k:" + d.getAttribute("data-key");
     if (d.classList.contains("panel") && d.id) return "p:" + d.id;
     return null;
@@ -191,12 +197,17 @@
     if (!d || d.tagName !== "DETAILS") return;
     if (isPeer(d)) { save(PEER_KEY + d.getAttribute("data-peer"), d.open ? "1" : null); return; }
     if (d.classList.contains("rended") && d.hasAttribute("data-key") && railSets) { railSets.ended.put(d.getAttribute("data-key"), d.open); return; }
+    // A graft's temporary open attribute is not an actual reader open.
+    // Shared panel policy accepts folds, but acknowledges updates only on
+    // explicit summary/navigation intent. Historical folds keep this path.
+    if (isPanel(d) && /^p[1-9][0-9]*$/.test(d.getAttribute("id") || "") && window.wbHistory && window.wbHistory.panelToggle && !window.wbHistory.panelToggle(d)) return;
     var k = openKey(d);
     if (k) openState[k] = d.open;
     if (isPanel(d)) shutPut(shutId(d), !d.open);
   }, true);
   function restoreOpenOne(d) {
     if (isPeer(d)) { d.open = load(PEER_KEY + d.getAttribute("data-peer")) === "1"; return; }
+    if (d.classList.contains("entry-panel") && typeof window !== "undefined" && window.wbHistory && window.wbHistory.restorePanel && window.wbHistory.restorePanel(d)) return;
     var k = openKey(d);
     if (k && Object.prototype.hasOwnProperty.call(openState, k)) d.open = openState[k];
     else if (isPanel(d) && shutHas(shutId(d))) d.open = false;
@@ -8718,7 +8729,7 @@
       if (d.open && typeof d.open === "object") {
         Object.keys(d.open).forEach(function (k) {
           // A panel folded by hand outranks a draft saved while it was open.
-          if (k.indexOf("k:history:") !== 0 && !Object.prototype.hasOwnProperty.call(openState, k) && !(k.indexOf("k:entry:") === 0 && shutHas(rid + "/" + k.slice(2)))) openState[k] = true;
+          if (k.indexOf("k:history:") !== 0 && !Object.prototype.hasOwnProperty.call(openState, k) && !((k.indexOf("k:entry:") === 0 || k.indexOf("k:panel:") === 0) && shutHas(rid + "/" + k.slice(2)))) openState[k] = true;
         });
         restoreOpen(doc);
       }

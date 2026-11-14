@@ -408,6 +408,7 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .wb-hclass { font-size: 9px; font-weight: 600; }
 .wb-hmain > b { font-weight: 500; }
 .wb-hitem.void .wb-hmain > b { text-decoration: line-through; color: var(--wb-muted-fg); }
+.wb-hstatus:has(.pick) { background: none; padding: 0; }
 .wb-hstatus { max-width: 15em; padding: 0 6px; border-radius: 5px; line-height: 20px; margin-top: 2px; font-size: 10px; font-weight: 600; overflow-wrap: anywhere; background: color-mix(in srgb, var(--wb-haccent) 13%, transparent); color: var(--wb-haccent); }
 .wb-hitem .sbody { margin-left: 68px; padding-left: 12px; border-left: 1px solid color-mix(in srgb, var(--wb-haccent) 45%, transparent); }
 .wb-hitem .quote { margin: 7px 0 0; padding-left: 9px; border-left: 2px solid var(--wb-haccent); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -531,6 +532,12 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .entry-panel { background: var(--wb-bg); border-radius: 10px; overflow: hidden; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fg) 9%, transparent); }
 .entry-panel > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 10px; cursor: pointer; }
 .entry-panel > summary::-webkit-details-marker { display: none; }
+/* Owner-requested conspicuous update mark: static, high contrast, and kept
+   until an actual open. It is not cleared by a graft's temporary toggle. */
+.wb-panel-updated { flex: none; padding: 2px 7px; border: 2px solid var(--wb-primary); border-radius: 5px; background: var(--wb-primary); color: var(--wb-primary-fg); font-size: 10px; line-height: 16px; font-weight: 850; letter-spacing: .04em; box-shadow: 0 0 0 2px var(--wb-bg); }
+.wb-panel-updated[hidden] { display: none; }
+.wb-panel-pending > .entry-panel { box-shadow: inset 0 0 0 2px var(--wb-primary); }
+.wb-panel-pending > .entry-panel > summary { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-bg)); }
 .entry-panel > summary:hover { background: var(--wb-wash); }
 .entry-panel > summary::before { content: "\25B8"; flex: none; width: 10px; font-size: 10px; color: var(--wb-muted-fg); }
 .entry-panel[open] > summary::before { content: "\25BE"; }

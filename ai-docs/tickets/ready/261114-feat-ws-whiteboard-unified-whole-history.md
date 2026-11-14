@@ -2,6 +2,7 @@
 title: "Unify rich whole-entry HISTORY with the centered header and unobstructed focus"
 related:
   261114-bug-ws-dashboard-oq-wrap-top-class-collision: regression and collision fix owned here; idea remains unchanged
+  261114-bug-ws-whiteboard-fold-reopens-on-panel-republish: EXEC3 supplied baseline cause evidence; no assumption that its unmerged ticket is present
 sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6ece1ddbc182036b
@@ -98,6 +99,18 @@ decisions; mockup-only checks are not production verification.
    `718,719=a` settles this boundary. No invented batch ID, schema field,
    historical regrouping or migration is authorized. Decisions 8 and 9 require
    no repeated owner approval; design/readiness gates remain with MAIN.
+10. **754 confirmed, relayed by MAIN at 2026-11-14T13:10:09**: a folded
+    latest panel follows its stable **pN** identity across a republish to a
+    new eN and stays folded. Its header shows a prominent, noticeable
+    **updated** badge until the panel is actually opened. Owner's exact
+    answer: `754=a^네, 다만 갱신된 건 좀 시끄러운 UI로 ... 아, 근데 지금 메시지 보드 재디자인 티켓 돌고 있지 않던가요?`.
+    This explicitly reverses the prior preserve-new-version-default-open
+    instruction for a panel the reader folded; an unrelated new pN retains
+    its default. Keep historical panel-version disclosures independent.
+    Use T0 presentation/browser state only, with legacy entry-key browser
+    state migration and reload/frame-graft coverage. A transient graft
+    `open` attribute/toggle must not acknowledge an unread update or clear
+    its badge. Do not change durable entry IDs, history or store schema.
 
 ## Constraints
 
@@ -148,6 +161,12 @@ decisions; mockup-only checks are not production verification.
   Keep unknown-time legacy items visible in their stable existing order;
   retain their per-item creation logs. Coalescing is future-only and requires
   actual batch knowledge, not a timestamp heuristic or invented batch schema.
+- 754 is a bounded owner-approved refinement of current panel identity and
+  header presentation, not a wider redesign. EXEC3's deployed-9854 trace
+  proves the old entry-key/new-version default-open mechanism, not the
+  reported incident or idle jitter. Verify stable-entry folds under frequent
+  unrelated log/panel updates separately from same-pN republish and new-pN
+  defaults; do not claim the owner incident or transient jitter resolved.
 - Shared daemon activation is separate from source integration, announced
   before/after and coordinated after or batched with EXEC1's 652+670. No source,
   runtime, build, fixture or worktree changes belong to this ticket capture.
@@ -299,5 +318,14 @@ while saved whole-history `open:false` cannot hide HISTORY. Check centered
 capsule/counts, no overlap/overflow, unchanged open-question controls and scroll
 stability. Reproduce 691 with Tab and center hit-testing: the focused control
 must remain exposed, with no `.oq-wrap`/`.oq-pill` coverage; separately confirm
-the inherited class collision is gone. Send screenshots, comparison, Go output,
-review and any unverified surface to MAIN before develop integration.
+the inherited class collision is gone.
+
+For 754, verify a user-folded pN remains folded through stable-eN unrelated
+updates and through republish to a new eN. A conspicuous updated header badge
+persists through reload and frame paths until an actual open; transient
+attribute/toggle changes during a graft do not clear it. Check legacy browser
+entry-key migration, a genuinely new pN's unchanged default, independent
+historical-version folds, and repeated updates while the badge is pending.
+Include its visual refinement in both-reference comparison without changing
+either approved asset. Send screenshots, comparison, Go output, review and any
+unverified surface to MAIN before develop integration.
