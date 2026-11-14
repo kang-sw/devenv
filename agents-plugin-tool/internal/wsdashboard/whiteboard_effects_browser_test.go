@@ -203,8 +203,27 @@ func TestWhiteboardEffectsBrowser(t *testing.T) {
 				}
 			}
 		case "append":
-			err = wslive.AppendRing(ringDir, []wslive.RingEntry{{Kind: wslive.RingReply, Text: fmt.Sprintf("refresh-marker-%d", seq)}})
-			result["marker"] = fmt.Sprintf("refresh-marker-%d", seq)
+			marker := fmt.Sprintf("refresh-marker-%d", seq)
+			payload := `<img src=x onerror="window.effectsAttack=1"><script>window.effectsAttack=1</script> ` + marker + ` **plain text**`
+			entryID := fmt.Sprintf("e%d", seq+1)
+			// Model a newly projected post-commit carrier through the real
+			// builder and ring writer; this does not simulate an MCP commit.
+			entry, _ := wslive.NewWhiteboardEffects([]wswhiteboard.Effect{
+				{Kind: "panel", Topic: "effects", EntryID: entryID, PanelID: "p1", Field: "payload", After: payload},
+				{Kind: "panel", Topic: "effects", EntryID: entryID, PanelID: "p1", Field: "recap", After: marker},
+			})
+			err = wslive.AppendRing(ringDir, []wslive.RingEntry{entry})
+			if err == nil {
+				var names []string
+				names, err = wslive.RingNames(ringDir)
+				if err == nil && len(names) == 0 {
+					err = fmt.Errorf("appended effects carrier has no ring key")
+				}
+				if err == nil {
+					result["key"] = names[len(names)-1]
+				}
+			}
+			result["marker"], result["payload"] = marker, payload
 		case "live", "stale", "absent":
 			err = setAdapter(r.URL.Query().Get("action"))
 		case "complete":

@@ -73,6 +73,23 @@ async function until(check, message) {
         assert.equal(await page.locator('html').getAttribute('data-mode'), 'history');
         assert.equal(await page.locator('#composer, #ctext, #apbox, #r-tree, #r-convlive, #r-ctx, #r-cmds, #r-sline').count(), 0, 'saved history contains no fabricated live controls/activity');
       }
+      async function effectsKeys() {
+        return page.locator('details.wbeffects[data-entry]').evaluateAll(nodes => nodes.map(e => e.getAttribute('data-entry')));
+      }
+      async function arrived(update, beforeKeys, expand) {
+        assert(update.key && !beforeKeys.includes(update.key), 'append returns a genuinely new effects ring key');
+        const fresh = page.locator(`details.wbeffects[data-entry="${update.key}"]`);
+        await fresh.waitFor({ state: 'attached' });
+        assert.equal(await fresh.count(), 1, 'new carrier renders as its own effects disclosure');
+        assert.equal(await fresh.locator('.wbeffect-values').count(), 2, 'new valid carrier is decoded, not omitted or shown as fallback');
+        assert.equal(await fresh.locator('.wbeffect-fallback, script, img, iframe, strong').count(), 0);
+        assert((await fresh.locator('pre').allTextContents()).includes(update.payload), 'newly arriving hostile payload remains exact literal text');
+        assert.equal(await page.evaluate(() => typeof window.effectsAttack), 'undefined', 'new effects payload never executes');
+        if (expand) {
+          await fresh.locator('summary').click();
+          assert.equal(await fresh.evaluate(e => e.open), true, 'new effects carrier is expandable');
+        }
+      }
       async function waitStored(draft) {
         await page.waitForFunction(text => Object.keys(localStorage).some(k => (localStorage.getItem(k) || '').includes(text)), draft);
       }
@@ -108,8 +125,10 @@ async function until(check, message) {
         assert.equal(await fallback().locator('img, script, iframe, .wbeffect-values').count(), 0, 'unsupported envelope is escaped fallback, not invented effects');
         await shot('saved-escaped-and-fallback');
 
+        const savedKeys = await effectsKeys();
         const refresh = await action('append');
         await page.getByText(refresh.marker, { exact: true }).waitFor({ state: 'attached' });
+        await arrived(refresh, savedKeys, true);
         assert.equal(await effect().evaluate(e => e.open && e.effectsBrowserIdentity === 'original-effect-node'), true, 'real stream refresh preserves expanded node');
         assert.equal(await page.getByText('old-history-marker', { exact: true }).count(), 0, 'old marker is outside initial ring window');
         const older = tab.waitForResponse(r => new URL(r.url()).pathname === '/s/effectsession/history' && r.status() === 200);
@@ -129,8 +148,10 @@ async function until(check, message) {
         const draft = `Preserve the effects draft at ${width}px`;
         await page.locator('#ctext').fill(draft);
         await waitStored(draft);
+        const liveKeys = await effectsKeys();
         const liveRefresh = await action('append');
         await page.getByText(liveRefresh.marker, { exact: true }).waitFor({ state: 'attached' });
+        await arrived(liveRefresh, liveKeys, true);
         assert.equal(await page.locator('#ctext').inputValue(), draft, 'effects refresh never changes composer input');
         await action('stale');
         await page.locator('#dash-banner').waitFor({ state: 'visible' });
@@ -171,8 +192,10 @@ async function until(check, message) {
         await target.waitFor({ state: 'visible' });
         const before = await target.boundingBox();
         assert(before && before.y >= 0 && before.y < 900, 'production jump brings target into view');
+        const jumpedKeys = await effectsKeys();
         const jumpedRefresh = await action('append');
         await page.getByText(jumpedRefresh.marker, { exact: true }).waitFor({ state: 'attached' });
+        await arrived(jumpedRefresh, jumpedKeys, false);
         await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         const after = await target.boundingBox();
         assert(after && Math.abs(after.y - before.y) <= 16, 'effects refresh preserves the followed board target');
