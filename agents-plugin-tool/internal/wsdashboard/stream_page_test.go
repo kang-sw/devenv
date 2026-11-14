@@ -76,6 +76,7 @@ func TestPageStreamsRideWebSocket(t *testing.T) {
 	runNode(t, "page stream", "(function () {\n"+streamPageHarness+`
 var mode = "session", rid = "rid1", heldNow = "board.1,head.2", hiddenRegions = {}, modeHash = "", liveMode = false;
 function held() { return heldNow; }
+function boardInputFull() { return null; }
 function pageHidden() { return doc.hidden; }
 function trackerLost() { log.push("lost"); }
 function trackerNudge(rev) { log.push("nudge:" + rev); }
@@ -86,7 +87,7 @@ function syncBadge() {}
 function banner(text) { log.push("banner:" + text); }
 `+open+connect+`
 connect();
-check("one socket with the held hashes", sockets.map(function (s) { return s.url; }), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.1,head.2")]);
+check("one socket with the held hashes", sockets.map(function (s) { return s.url; }), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.1,head.2") + "&topics=1"]);
 var s = sockets[0];
 s.onopen({});
 check("open lights the indicator", indicator.off, false);
@@ -108,7 +109,7 @@ check("a drop shows on the indicator and forgets the revision", [indicator.off, 
 advance(2999);
 check("no reconnect before 3 s", sockets.length, 1);
 advance(1);
-check("one reconnect per drop, with the hashes held now", sockets.map(function (x) { return x.url; }).slice(1), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.3,head.4")]);
+check("one reconnect per drop, with the hashes held now", sockets.map(function (x) { return x.url; }).slice(1), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.3,head.4") + "&topics=1"]);
 var r = sockets[1];
 r.onopen({});
 check("recovery shows on the indicator", indicator.off, false);

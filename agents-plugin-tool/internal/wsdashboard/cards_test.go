@@ -570,6 +570,7 @@ func TestBoardPinnedClosedPagesCount(t *testing.T) {
 var window = {}, doc = null, openState = {}, boardSeen = {};
 function q(sel, el) { try { return el.querySelectorAll(sel); } catch (e) { return []; } }
 function frag(nodes) { return { childNodes: nodes }; }
+function boardNodes(input) { return frag(input).childNodes; }
 function isPeer() { return false; }
 function isPanel() { return false; }
 `+src+`
