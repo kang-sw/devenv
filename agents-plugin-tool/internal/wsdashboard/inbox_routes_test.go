@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"bufio"
 	"encoding/json"
+	"html"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -247,6 +248,99 @@ func TestMessageEntryMentionsSurviveRouteLifecycle(t *testing.T) {
 		if code, _, raw := postJSON(t, f.base+"/s/livesession/message", f.base, `{"mentions":[{"topic":"t","entry":"`+entry+`","text":"x"}]}`); code != http.StatusBadRequest {
 			t.Errorf("entry %q accepted: %d %s", entry, code, raw)
 		}
+	}
+}
+
+// Selection notes stay ordinary editable text, with human-readable bundle
+// locators; the wire mentions retain only their exact selected source values.
+func TestMessageSelectionNoteBundlesSurviveRouteLifecycle(t *testing.T) {
+	f := startPageFixture(t)
+	firstMentions := []wsinbox.Mention{
+		{Topic: "topic", ID: "3", Entry: "e7", Text: "a < b & </wb:mention>\nsecond \"line\""},
+		{Topic: "topic", Entry: "e8", Text: "next excerpt"},
+	}
+	secondMentions := []wsinbox.Mention{{Topic: "other", ID: "4", Entry: "e9", Text: "distinct excerpt"}}
+	firstText := "Selected text:\n[topic] (3) e7\n> a < b & </wb:mention>\n> second \"line\"\n\n[topic] e8\n> next excerpt\n\nNote:\nFirst note <script>alert(1)</script> & \"quoted\"\ncontinued"
+	secondText := "Selected text:\n[other] (4) e9\n> distinct excerpt\n\nNote:\nSecond note"
+	wantMentions := append(append([]wsinbox.Mention{}, firstMentions...), secondMentions...)
+	wantText := firstText + "\n\n" + secondText
+	wantBlock := `<wb:mention topic="topic" id="3" entry="e7">a &lt; b &amp; &lt;/wb:mention&gt;` + "\nsecond \"line\"</wb:mention>\n" +
+		`<wb:mention topic="topic" entry="e8">next excerpt</wb:mention>` + "\n" +
+		`<wb:mention topic="other" id="4" entry="e9">distinct excerpt</wb:mention>`
+	wantWire := wantBlock + "\n\n" + wantText
+	type message struct {
+		Text     string            `json:"text"`
+		Mentions []wsinbox.Mention `json:"mentions"`
+	}
+	send := func(text string, mentions []wsinbox.Mention) (string, bool) {
+		t.Helper()
+		body, err := json.Marshal(message{Text: text, Mentions: mentions})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f.send(t, string(body))
+	}
+	if _, merged := send(firstText, firstMentions); merged {
+		t.Fatal("first selection bundle merged")
+	}
+	id, merged := send(secondText, secondMentions)
+	if !merged {
+		t.Fatal("second selection bundle did not merge")
+	}
+	assertHeld := func(parts []string) wsinbox.Entry {
+		t.Helper()
+		held := f.held(t)
+		if len(held) != 1 {
+			t.Fatalf("held = %+v", held)
+		}
+		entry := held[0].Entry
+		if !reflect.DeepEqual(entry.Parts, parts) || !reflect.DeepEqual(entry.Mentions, wantMentions) || entry.Text() != wantWire {
+			t.Fatalf("held parts = %#v, mentions = %#v, wire = %q; want parts = %#v, mentions = %#v, wire = %q", entry.Parts, entry.Mentions, entry.Text(), parts, wantMentions, wantWire)
+		}
+		return entry
+	}
+	assertHeld([]string{firstText, secondText})
+	parsed, rest := wsinbox.ParseMentions(wantWire)
+	if !reflect.DeepEqual(parsed, wantMentions) || rest != wantText {
+		t.Fatalf("parsed mentions = %#v, rest = %q", parsed, rest)
+	}
+	// Unknown note attributes remain invalid: this feature adds no wire field.
+	withNoteAttr := strings.Replace(wantBlock, ` entry="e7">`, ` entry="e7" note="not source">`, 1)
+	if mentions, rest := wsinbox.ParseMentions(withNoteAttr); len(mentions) != 0 || rest != withNoteAttr {
+		t.Fatalf("note attribute accepted: %#v, %q", mentions, rest)
+	}
+	_, heldPage := get(t, f.base+"/s/livesession?frame=1")
+	if want := `<div class="hpart">` + html.EscapeString(firstText) + `</div><hr class="pdiv"><div class="hpart">` + html.EscapeString(secondText) + `</div>`; !strings.Contains(heldPage, want) {
+		t.Errorf("held page lacks exact escaped selection bundles %q", want)
+	}
+	code, _, raw := postJSON(t, f.base+"/s/livesession/cancel", f.base, `{"id":"`+id+`"}`)
+	var cancelled message
+	if code != http.StatusOK || json.Unmarshal([]byte(raw), &cancelled) != nil || cancelled.Text != wantText || !reflect.DeepEqual(cancelled.Mentions, wantMentions) {
+		t.Fatalf("cancel = %d %s; want text %q and mentions %#v", code, raw, wantText, wantMentions)
+	}
+	if held := f.held(t); len(held) != 0 {
+		t.Fatalf("cancel left held records: %+v", held)
+	}
+	if _, merged := send(cancelled.Text, cancelled.Mentions); merged {
+		t.Fatal("resend merged after cancellation")
+	}
+	entry := assertHeld([]string{wantText})
+	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "livesession")), []wslive.RingEntry{
+		{Kind: wslive.RingUser, Origin: wslive.OriginWhiteboard, Text: entry.Text()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	conversation := []ConvEntry{{RingEntry: wslive.RingEntry{Kind: wslive.RingUser, Text: entry.Text()}}}
+	splitUserEntries(conversation, "", "livesession")
+	if conversation[0].Text != wantText || !reflect.DeepEqual(conversation[0].Mentions, wantMentions) {
+		t.Fatalf("delivered conversation = %+v", conversation)
+	}
+	_, page := get(t, f.base+"/s/livesession?frame=1")
+	capsules := `<span class="achip mchip" title="` + html.EscapeString(firstMentions[0].Text) + `"><b>[topic] (3)</b><span class="anote">` + html.EscapeString(firstMentions[0].Text) + `</span></span>` +
+		`<span class="achip mchip" title="next excerpt"><b>[topic]</b><span class="anote">next excerpt</span></span>` +
+		`<span class="achip mchip" title="distinct excerpt"><b>[other] (4)</b><span class="anote">distinct excerpt</span></span>`
+	if want := `<div class="bub"><div class="hchips">` + capsules + `</div>` + html.EscapeString(wantText) + `</div>`; !strings.Contains(page, want) {
+		t.Errorf("delivered page lacks exact escaped mentions and ordinary text %q", want)
 	}
 }
 
