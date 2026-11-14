@@ -10,7 +10,7 @@ import (
 // order, for a node harness.
 func dashboardFuncs(t *testing.T, names ...string) string {
 	t.Helper()
-	board, err := dashboardFS.ReadFile("assets/dashboard.js")
+	board, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ if (bad.length) console.log(bad.join("\n"));
 // puts topics under the shared visibility source puts them under the
 // viewport bands too (bandBoard).
 func TestBoardFramesMountAtEveryInsert(t *testing.T) {
-	raw, err := dashboardFS.ReadFile("assets/dashboard.js")
+	raw, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +296,7 @@ func TestBoardFramesMountAtEveryInsert(t *testing.T) {
 // node when it is installed.
 func TestBoardFrameHeightsBatch(t *testing.T) {
 	src := dashboardFuncs(t, "indexFrames", "docFrame", "queueFrameHeight", "applyFrameHeights")
-	raw, err := dashboardFS.ReadFile("assets/dashboard.js")
+	raw, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ if (bad.length) console.log(bad.join("\n"));
 // execute under node when it is installed.
 func TestTickTimesKeepsItsSetsUntilThePageChanges(t *testing.T) {
 	src := dashboardFuncs(t, "tickDirty", "tickTimes")
-	raw, err := dashboardFS.ReadFile("assets/dashboard.js")
+	raw, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

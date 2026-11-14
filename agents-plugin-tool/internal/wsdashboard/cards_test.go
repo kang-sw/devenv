@@ -29,7 +29,7 @@ func TestLucideIconsAreVendoredWithTheirLicense(t *testing.T) {
 	}
 	var scripts strings.Builder
 	for _, name := range cardScripts {
-		raw, err := dashboardFS.ReadFile(name)
+		raw, err := dashboardTestAsset(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,7 +82,7 @@ func TestBoardCardPlacement(t *testing.T) {
 	if order == "" || settle == "" {
 		t.Fatal("cards.js holds no order / settle")
 	}
-	board, err := dashboardFS.ReadFile("assets/dashboard.js")
+	board, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,7 +613,7 @@ func TestBoardPinnedClosedPagesCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

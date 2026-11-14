@@ -1087,7 +1087,7 @@ func TestRailMarkupTree(t *testing.T) {
 	if a4 := rowOf("a4"); strings.Contains(a4, "data-kids") || !strings.Contains(a4, `class="star"`) {
 		t.Errorf("a4 is marked as a parent or lost its star:\n%s", a4)
 	}
-	css, err := dashboardFS.ReadFile("assets/dashboard.css")
+	css, err := dashboardTestAsset("assets/dashboard.css")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -75,6 +75,24 @@ There is **no** `wswhiteboard/assets/page.js` in this source. The whiteboard Jav
 | risk.test | high | INFERRED: Many tests extract source spans from a single file; syntax checks cannot prove assembled behavior or visual equality. The actual d0ad8a9f1 visual baseline is still to be captured in a separately granted heavy slot, not an already-approved mockup. git show -s --format=%B cacd771c1 records owner-accepted open picker/card Important and an incomparable earlier baseline, not full 652 acceptance. |
 | risk.security_or_contract | moderate | INFERRED: T0 asset organization must retain trusted frame dispatch, sandboxed document loading and existing action availability; agents-plugin-tool/internal/wswhiteboard/render.go and agents-plugin-tool/internal/wsdashboard/pages.go are assembly boundaries, not authority to change those contracts. |
 
+## Static Preparation — Awaiting MAIN's Heavy-Slot START
+
+Static move-only T0 preparation is retained on `impl/develop/map-yoga-coach`,
+against source pin `d0ad8a9f1`. This is not a Phase 1 Result or acceptance.
+No tests, syntax/byte checks, imports, formatters, generators, builds, browsers,
+network/daemon/owner operations or process signals were run. H CRLF keeps first
+priority. MAIN already acquired the ticket lease before dispatch; the worker
+made no acquisition or origin-index call.
+
+- [Move map and peer patch landing points](../assets/261114-refactor-ws-dashboard-whiteboard-asset-split/move-map.md).
+- [One bounded offline verification/baseline recipe, not run](../assets/261114-refactor-ws-dashboard-whiteboard-asset-split/verification-recipe.md).
+- Existing whiteboard script ownership and baseline predicates remain; 777,
+  UI-C3 and UI-T5 peer fixes are not imported. Their test results are not this
+  ticket's acceptance. Source-reading tests now use assembled assets.
+- Exact source/behavior preservation is intended, not established. All executable
+  verification, before/after side-by-side comparison, independent lite review,
+  Result and closure remain deferred. The UI-start pause remains MAIN-owned.
+
 ## Phases
 
 ### Phase 1: Split the cut-line assets and publish the mechanical rebase map

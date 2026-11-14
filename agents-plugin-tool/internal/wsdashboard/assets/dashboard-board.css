@@ -1,0 +1,244 @@
+/* ===== board column ===== */
+.r-board .reply { position: sticky; bottom: 10px; z-index: 2; }
+/* a page with the agent composer sends the board's answers from there, so its copy-answers bar (and the bulk-ack checkbox in it) stays hidden; display only, because the composer reads #reply-text. A page without a composer keeps the bar, and rail.js stacks the bottom capsules above it */
+.dgrid:has(> #composer) > .bcol .reply { display: none; }
+
+/* ===== board cards (cards.js) =====
+   A card stands among the board's topics with their gap. Its inner box is
+   what draws: maximized ([data-max]) the inner box is fixed over both
+   columns, under the top bar, while the card keeps its place and height in
+   the board. .li draws a vendored Lucide icon (lucide.go). */
+.li { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ibtn { width: 24px; height: 24px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; opacity: .6; }
+.ibtn:hover { opacity: 1; background: var(--wb-muted); }
+.ibtn:focus-visible { opacity: 1; }
+.ibtn[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); }
+.ibtn .li { width: 13px; height: 13px; }
+.bcard { margin-bottom: 16px; }
+.bc-in { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; overflow: clip; display: flex; flex-direction: column; }
+/* A card in the topic rail (cards.js data-rail, wswhiteboard rail.js): its
+   header sticks under the top capsules while it is current and casts the
+   stuck shadow, as a topic's bar does; .bc-in clips rather than hides its
+   overflow, so it is no scroll container. A maximized card's header stays
+   in its sheet. Stuck, its rounded top corners are filled with the page
+   colour as a topic's bar's are (page.css), so the body scrolling under
+   it does not show through them. */
+.wb-rail .bcard:not([data-max]) .bc-hd { position: sticky; top: var(--wb-rail-top, 0px); z-index: 1; background: var(--wb-card); border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+.wb-rail .bcard:not([data-max]) .bc-hd.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
+.bc-hd { display: flex; align-items: center; gap: 7px; padding: 4px 6px 4px 12px; min-height: 32px; font-size: 12.5px; min-width: 0; }
+.bc-hd:hover .ibtn { opacity: .9; }
+.bc-ic { flex: none; color: var(--wb-muted-fg); display: inline-flex; }
+.bc-nm { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 3ch; }
+.bc-sub { font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 0; }
+.bc-kind { flex: none; font-size: 10.5px; font-weight: 800; padding: 0 6px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+.bc-acts { display: inline-flex; flex: none; }
+.bc-min { display: none; }
+.bc-folded:empty { display: none; }
+.bc-folded { display: none; font: 11.5px/1.4 var(--wb-mono); color: var(--wb-muted-fg); padding: 0 12px 6px 33px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A card's body is its own stacking context: what a kind stacks inside it
+   (xterm's helper and message layers) stays under the board column's sticky
+   row and the rail's capsules. The header stays outside it, so it stacks
+   with the column like a topic's bar. */
+.bc-body, .bc-folded { isolation: isolate; }
+.bc-body { overflow: auto; border-top: 1px solid var(--wb-muted); min-height: 0; }
+.bc-grip { height: 9px; flex: none; cursor: ns-resize; display: grid; place-items: center; touch-action: none; outline: 0; }
+.bc-grip::after { content: ""; width: 28px; height: 3px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
+.bc-grip:hover::after, .bcard.drag .bc-grip::after, .bc-grip:focus-visible::after { background: var(--wb-primary); }
+.bcard[data-size="fold"] .bc-body, .bcard[data-size="fold"] .bc-grip { display: none; }
+.bcard[data-size="fold"] .bc-folded:not(:empty) { display: block; }
+.bcard[data-size="fold"] .bc-fold .li, section.topic[data-size="fold"] > .tophead > .tbar > .t-fold .li { transform: rotate(-90deg); }
+/* Mask renderer-owned regions without mutating inner disclosures. Maximum
+   view reveals them temporarily and leaves the whole-card fold intact. */
+section.topic[data-size="fold"]:not([data-max]) > :not(.tophead),
+section.topic[data-size="fold"]:not([data-max]) > .tophead > :not(.tbar),
+section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar > details > :not(summary) { display: none !important; }
+section.topic[data-size="fold"]:not([data-max]) > .tophead > .tbar { padding-right: 12px; }
+/* a frame in the body would take the pointer mid-drag */
+.bcard.drag .bc-body { pointer-events: none; }
+.bcard.flash .bc-in { animation: bc-flash .9s ease-out; }
+@keyframes bc-flash { from { box-shadow: 0 0 0 2px var(--wb-primary), var(--wb-shadow-hi); } to { box-shadow: var(--wb-shadow); } }
+.bc-scrim { position: fixed; inset: 0; z-index: calc(var(--z-modal) - 1); background: var(--scrim); }
+.bc-scrim[hidden] { display: none; }
+.bcard[data-max] .bc-in { position: fixed; z-index: var(--z-modal); top: 52px; left: 16px; right: 16px; bottom: 12px; box-shadow: var(--wb-shadow-hi); }
+.bcard[data-max] .bc-body { display: block; flex: 1 1 0; height: auto !important; }
+.bcard[data-max] .bc-folded, .bcard[data-max] .bc-grip, .bcard[data-max] .bc-pin, .bcard[data-max] .bc-fold, .bcard[data-max] .bc-raise, .bcard[data-max] .bc-max, .bcard[data-max] .bc-close { display: none; }
+.bcard[data-max] .bc-min { display: inline-grid; }
+@media (max-width: 640px) { .bcard[data-max] .bc-in { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
+/* A large topic or topic panel (cards.js sheet): the board's own node, drawn
+   fixed where a maximized card's box stands, over the same scrim, its
+   content scrolling under its head. The maximize button (right of a topic's
+   pin, at the end of a panel's head) gives way to the back button, and a
+   large topic's pin hides as a maximized card's does. */
+.tbar :is(.d-max, .d-min, .t-fold, .t-raise) { color: inherit; opacity: .45; }
+.tbar:hover :is(.d-max, .d-min, .t-fold, .t-raise), .tbar :is(.d-max, .d-min, .t-fold, .t-raise):focus-visible { opacity: .9; }
+.tbar > .d-min, summary > .d-min { display: none; }
+section.topic[data-max], details.entry-panel[data-max] { position: fixed; z-index: var(--z-modal); top: 52px; left: 16px; right: 16px; bottom: 12px; margin: 0; overflow: auto; overscroll-behavior: contain; box-shadow: var(--wb-shadow-hi); }
+section.topic[data-max] { background: var(--wb-card); }
+section.topic[data-max] > .tophead, details.entry-panel[data-max] > summary { position: sticky; top: 0; z-index: 2; }
+details.entry-panel[data-max] > summary { background: var(--wb-bg); cursor: default; }
+section.topic[data-max] > .tophead > .tbar > .d-max, section.topic[data-max] > .tophead > .tbar > .tpin, section.topic[data-max] > .tophead > .tbar > .t-fold, section.topic[data-max] > .tophead > .tbar > .t-raise, details.entry-panel[data-max] > summary > .d-max { display: none; }
+section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-max] > summary > .d-min { display: inline-grid; }
+@media (max-width: 640px) { section.topic[data-max], details.entry-panel[data-max] { top: 46px; left: 8px; right: 8px; bottom: 8px; } }
+@media (prefers-reduced-motion: reduce) { .bcard.flash .bc-in { animation: none; } .bc-grip::after { transition: none; } }
+
+/* ===== overview picker (overview.js) =====
+   Only the view folds: no card record or disclosure is changed. Keeping
+   off-screen items renderable avoids remembered unfolded intrinsic sizes. */
+:root[data-overview] body { background: color-mix(in srgb, var(--wb-bg) 28%, #000); }
+:root[data-overview] :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { filter: brightness(.28) saturate(.4); }
+:root[data-overview] .r-board :is(section.topic, .bcard) { content-visibility: visible !important; cursor: pointer; }
+:root[data-overview] .r-board section.topic:not([data-overview-motion]) > :not(.tophead),
+:root[data-overview] .r-board .tophead > .tnote,
+:root[data-overview] .r-board .bcard:not([data-overview-motion]) :is(.bc-body, .bc-grip, .bc-folded),
+:root[data-overview] .r-board > .reply { display: none !important; }
+:root[data-overview] .r-board .tophead, :root[data-overview] .r-board .bc-hd { position: static !important; }
+:root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+:root[data-overview] .r-board :is(.tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close),
+:root[data-overview] .r-board .tpin:not([aria-pressed="true"]),
+:root[data-overview] .r-board .bc-pin:not([aria-pressed="true"]) { opacity: 0; pointer-events: none; }
+:root[data-overview] .r-board :is(.tpin, .bc-pin)[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); pointer-events: none; }
+:root[data-overview] .r-board :is(section.topic, .bcard) { position: relative; margin-bottom: 6px; }
+:root[data-overview] .r-board :is(section.topic, .bcard):is(:hover, :focus-visible) { outline: 1px solid var(--wb-primary); outline-offset: -1px; }
+.overview-here::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--wb-primary); z-index: 3; pointer-events: none; }
+:root[data-overview][data-pincol] .r-board > .bpins { border: 0; padding: 0; margin-bottom: 0; }
+:root[data-overview][data-pincol] .r-board > .bpins::before { display: none; }
+:root[data-overview]:not([data-pincol]) .r-board > .bpins::before { filter: brightness(.28) saturate(.4); }
+:root[data-overview] .r-board > .bpins:not(:empty) { display: flow-root; }
+.r-board [data-overview-motion], .bpins [data-overview-motion] { content-visibility: visible !important; position: relative; }
+:is(.r-board, .bpins) [data-overview-motion] :is(.tophead, .bc-hd) { position: static !important; }
+:is(.r-board, .bpins) [data-overview-motion] .trecap .rtext { display: block; overflow: hidden; }
+.overview-spacer, .overview-slot { flex: none; pointer-events: none; }
+.overview-ghost { position: fixed; z-index: 46; pointer-events: none; box-sizing: border-box; overflow: hidden; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
+.overview-ghost > .tophead, .overview-ghost > .bc-hd { position: static !important; }
+.overview-ghost .rtext { overflow: hidden; }
+.overview-ghost :is(.tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close) { opacity: 0; }
+.overview-ghost-body { height: 100%; background: var(--wb-card); }
+:root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { transition: filter 240ms cubic-bezier(.2,.8,.2,1); }
+.overview-spacer { flex: none; pointer-events: none; }
+.overview-flash { animation: overview-flash 1.2s ease-out; }
+@keyframes overview-flash { from { outline: 3px solid var(--wb-primary); outline-offset: 0; } to { outline: 0 solid transparent; outline-offset: 3px; } }
+@media (prefers-reduced-motion: reduce) {
+  .overview-flash { animation: none; outline: 2px solid var(--wb-primary); outline-offset: 1px; }
+  :root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { transition: none; }
+}
+
+/* ===== preview cards (preview.js) =====
+   What a preview card's body holds, one per kind the preview route
+   answers. The text view's line height is fixed (preview.js LINE), since a
+   jump to a line multiplies it. */
+.pv-img { display: grid; place-items: center; min-height: 100%; padding: 10px; background: repeating-conic-gradient(var(--wb-muted) 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+.pv-img img { max-width: 100%; height: auto; display: block; }
+.pv-vid { height: 100%; background: #0e0f12; display: grid; }
+.pv-vid video { width: 100%; height: 100%; min-height: 0; display: block; }
+.pv-sand { height: 100%; display: flex; flex-direction: column; }
+.pv-cap { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); padding: 3px 10px; border-bottom: 1px dashed color-mix(in srgb, var(--wb-fg) 22%, transparent); }
+.pv-sand iframe { flex: 1 1 0; min-height: 0; width: 100%; border: 0; background: #fff; display: block; }
+.pv-md { padding: 10px 16px 14px; overflow-wrap: anywhere; }
+.pv-md > :first-child { margin-top: 0; }
+.pv-md h1, .pv-md h2, .pv-md h3, .pv-md h4 { font-weight: 700; margin: 14px 0 6px; }
+.pv-md h1 { font-size: 1.4em; } .pv-md h2 { font-size: 1.25em; } .pv-md h3 { font-size: 1.1em; }
+.pv-md hr { border: 0; border-top: 1px solid var(--wb-muted); margin: 12px 0; }
+.pv-dfile + .pv-dfile { border-top: 1px solid var(--wb-muted); }
+.pv-dpath { position: sticky; left: 0; padding: 5px 12px; font: 700 12px var(--wb-mono); color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.pv-diff { min-width: 100%; width: max-content; }
+.pv-txtbox { min-width: 100%; width: max-content; }
+.pv-lines { position: relative; padding: 8px 0; }
+.pv-txt { margin: 0; padding: 0 12px; font: 12px/18px var(--wb-mono); white-space: pre; tab-size: 4; color: var(--wb-fg); background: transparent; }
+.pv-mark { position: absolute; left: 0; right: 0; height: 18px; margin-top: 8px; background: color-mix(in srgb, var(--wb-policy) 20%, transparent); pointer-events: none; }
+.pv-none { padding: 18px 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: var(--wb-muted-fg); font-size: 13px; }
+.pv-none p { margin: 0; }
+.pv-none .btn { color: var(--wb-fg); height: 26px; }
+
+/* ===== terminal cards (terminal.js) =====
+   The body holds the emulator and, once the shell has ended, the exit
+   line. The emulator's own padding (.tm-host .xterm) is part of the base
+   height terminal.js computes (its PAD), and the fit addon subtracts it.
+   The board column's header row holds "+ Terminal" and its folder
+   popover; it stays at the column's top while the cards scroll. */
+.bcard[data-kind="terminal"] .bc-body, .bcard[data-kind="terminal"][data-max] .bc-body { display: flex; flex-direction: column; overflow: hidden; }
+.bcard[data-kind="terminal"][data-size="fold"]:not([data-max]) .bc-body { display: none; }
+.tm-host { flex: 1 1 0; min-height: 0; overflow: hidden; background: var(--wb-card); }
+.tm-host .xterm { height: 100%; padding: 4px 0 4px 10px; }
+.tm-host .xterm-viewport { background: transparent !important; }
+.tm-gap { flex: none; display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 12px; font-size: 12px; color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); background: color-mix(in srgb, var(--wb-warn) 12%, var(--wb-card)); }
+.tm-gap[hidden] { display: none; }
+.tm-gap > span { flex: 1 1 auto; min-width: 0; }
+.tm-note { padding: 14px 16px; font-size: 13px; color: var(--wb-muted-fg); }
+.tm-end { flex: none; display: flex; align-items: center; gap: 10px; padding: 5px 8px 5px 12px; border-top: 1px solid var(--wb-muted); font-size: 12.5px; }
+.tm-end[hidden] { display: none; }
+.tm-endtx { flex: 1 1 auto; min-width: 0; font-weight: 700; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm-end .btn { flex: none; height: 24px; font-size: 12px; font-weight: 700; color: var(--wb-fg); }
+.bcard[data-exited] .bc-kind { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
+.tm-fold { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+/* Board infrastructure: the sticky slot reserves the original wrapped
+   height; the same face and controls compact without changing the flow. */
+.board-toolbar { flex: none; position: sticky; top: var(--toolbar-top, 0px); z-index: 4; min-width: 0; height: var(--toolbar-reserved, auto); margin-bottom: 10px; pointer-events: none; }
+.board-toolbar-face { container: board-toolbar / inline-size; position: relative; min-width: 0; border: 1px solid var(--wb-line); border-radius: 12px; background: var(--wb-card); pointer-events: auto; }
+.board-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 8px; }
+.board-action { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--wb-muted); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.board-action .li { width: 14px; height: 14px; flex: none; }
+.board-action:hover, .board-action:focus-visible { border-color: var(--wb-muted-fg); }
+.board-action[aria-pressed="true"], .tnew[aria-expanded="true"], .wnew[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); }
+.board-action kbd { font: 600 10.5px ui-monospace, Menlo, monospace; color: var(--wb-muted-fg); border: 1px solid var(--wb-line); border-radius: 4px; padding: 0 4px; }
+.board-count { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.board-term-slot, .board-web-slot { position: relative; display: flex; flex: none; }
+.board-term-slot:empty, .board-web-slot:empty { display: none; }
+.board-toolbar[data-floating] .board-toolbar-face { border-radius: 8px; }
+.board-toolbar[data-floating] .board-tools { padding-block: 1px; }
+.board-toolbar[data-floating] .board-action { height: 24px; border-radius: 6px; }
+/* Insets start at the button's padding edge: include its 1px border for
+   an outer 30px hit box, 1px above and 5px below the visible 24px face. */
+.board-toolbar[data-floating] .board-action::after { content: ""; position: absolute; inset: -2px -1px -6px; border-radius: inherit; }
+.board-toolbar[data-floating] .board-action :is(.li, .term-arrow) { transform: scale(.857142857143); transform-origin: center; }
+.board-toolbar[data-floating] .board-count { line-height: 14px; }
+.board-toolbar[data-floating][data-wrapped-actions] .board-tools { row-gap: 8px; }
+.board-action:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+@container board-toolbar (max-width: 540px) {
+  .board-action:not(.board-overview) .board-label, .board-action kbd { display: none; }
+  .board-action:not(.board-overview) { padding-inline: 8px; }
+}
+/* The folder popover opens below the toolbar button; terminal.js keeps it
+   inside the viewport and gives its options a scroll box when necessary. */
+.tpop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; box-sizing: border-box; width: 340px; max-width: calc(100vw - 16px); overflow: auto; background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; }
+.tpop[hidden] { display: none; }
+.tpop .lb { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); margin: 2px 4px 6px; }
+.tpop .lb + .topts { margin-bottom: 8px; }
+.topts { display: grid; gap: 2px; }
+.topt { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 10px; border: 0; background: transparent; color: inherit; text-align: left; padding: 6px 8px; border-radius: 7px; cursor: pointer; font: inherit; font-size: 13px; }
+.topt:hover, .topt:focus-visible { background: var(--wb-muted); outline: none; }
+.topt .tnm { font-weight: 700; white-space: nowrap; }
+.topt .tpath { font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tprow { display: flex; gap: 6px; }
+.tprow .fpin { flex: 1 1 auto; min-width: 0; }
+.tprow .btn { flex: none; height: 26px; font-size: 12px; font-weight: 700; }
+.tprow .btn.pr { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.tpop.busy { cursor: progress; }
+.tpop button:disabled, .tpop input:disabled { opacity: .6; }
+
+/* ===== web cards (webcard.js) =====
+   The body holds the address bar, a note (a refusal, or a page that did
+   not come up), and the frame of the card's wrapper, which fills the rest.
+   The header's pick toggle shows pressed while the page is in pick mode;
+   the attach button carries the page's error count. "+ Web" stands in the
+   status-line slot beside "+ Terminal" and shares its popover's look. */
+.bcard[data-kind="web"] .bc-body, .bcard[data-kind="web"][data-max] .bc-body { display: flex; flex-direction: column; overflow: hidden; }
+.bcard[data-kind="web"][data-size="fold"] .bc-body { display: none; }
+.wc-bar { flex: none; display: flex; padding: 5px 8px; border-bottom: 1px solid var(--wb-muted); }
+.wc-bar .fpin { flex: 1 1 auto; min-width: 0; }
+.wc-note { flex: none; padding: 6px 12px; font-size: 12.5px; color: var(--wb-fail); background: color-mix(in srgb, var(--wb-fail) 8%, var(--wb-card)); overflow-wrap: anywhere; }
+.wc-note[hidden] { display: none; }
+.wc-frame { flex: 1 1 0; min-height: 0; width: 100%; border: 0; display: block; background: #fff; }
+.wc-frame[hidden] { display: none; }
+.bc-acts .ibtn:disabled { opacity: .3; cursor: default; background: transparent; }
+.ibtn.wc-pick[aria-pressed="true"] { background: color-mix(in srgb, var(--wb-primary) 18%, transparent); }
+.ibtn.wc-att { position: relative; }
+.wc-badge { position: absolute; top: -1px; right: -3px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 999px; font-size: 9.5px; font-weight: 800; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; background: var(--wb-fail); color: var(--wb-card); pointer-events: none; }
+.wc-badge[hidden] { display: none; }
+.ibtn.wc-att:has(.wc-badge:not([hidden])) { opacity: 1; color: var(--wb-fail); }
+.tnew + .tnew { margin-left: 2px; }
+/* the holder card's terminals whose session is gone */
+.hdterms { display: grid; gap: 2px; }
+.hdsub { font-size: 11.5px; font-weight: 800; color: var(--wb-muted-fg); padding: 0 2px; }
+.hdrow > .hdbtns { grid-area: stop; display: inline-flex; gap: 4px; }
+.hdcwd { font-family: var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+

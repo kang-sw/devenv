@@ -308,7 +308,7 @@ func TestStreamSegmentsFoldRunsBetweenPanels(t *testing.T) {
 // Owner rule: a log row's role marker sits on the first line beside the clock,
 // never vertically centred against wrapped text.
 func TestStreamRoleMarkerPinsToFirstLine(t *testing.T) {
-	css, err := embeddedAsset("page.css")
+	css, err := whiteboardTestAsset("page.css")
 	if err != nil {
 		t.Fatal(err)
 	}

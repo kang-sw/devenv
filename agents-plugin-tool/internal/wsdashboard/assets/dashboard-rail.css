@@ -1,0 +1,523 @@
+/* ===== session rail: every session page's card of sessions =====
+   From 1600px (the tracker drawer's three-column threshold) the rail is a
+   340px column left of the page's grid, whatever the layout menu says, and
+   the top-left arrow hides. Below it the rail is an overlay the arrow
+   slides in from the left over a scrim (rail-open on the root). The rail
+   is one shared render; the page script marks the viewed row (.cur), pins
+   starred rows, and collapses workspaces (.col). A store page (tk-paged)
+   mounts inside .dbody and takes the hidden grid's column, one window tall. */
+:root { --scrim: rgb(0 0 0 / .28); --star: #c98a00; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --scrim: rgb(0 0 0 / .5); --star: #f2b632; } }
+:root[data-theme="dark"] { --scrim: rgb(0 0 0 / .5); --star: #f2b632; }
+.dbody { display: contents; }
+.rail { background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+.rail > .r-rail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.rscrim { display: none; }
+@media (min-width: 1600px) {
+  .dbody { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 0 16px; align-items: start; }
+  .dash.live .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
+  .dash.live .dbody > .dgrid.live { min-height: 0; }
+  body.tk-paged .dbody { flex: 1 1 0; min-height: 0; align-items: stretch; }
+  .dbody > .tk-spage { grid-column: 2; grid-row: 1; }
+  .dash:not(.live) .rail { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+  .top > .back { display: none; }
+}
+@media (max-width: 1599.98px) {
+  .rail { position: fixed; z-index: 45; top: 12px; bottom: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px); box-shadow: var(--wb-shadow-hi); transform: translateX(calc(-100% - 20px)); visibility: hidden; transition: transform .22s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .22s; }
+  .rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
+  .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
+  .rail-open .rscrim { opacity: 1; pointer-events: auto; }
+}
+/* ===== pinned column (cards.js, dashboard.js board cards) =====
+   Pinned topics and cards stand in the pin list (.bpins). It is the board
+   region's first node, a "Pinned" group, unless the pinned column shows:
+   from 1600px, while anything is pinned and the layout menu is not
+   "tabs", the page sets data-pincol on the root and the list moves into
+   the column (.bpcol), the page body's last grid column. Below 2200px the
+   column takes the session rail's place and the rail overlays as it does
+   below 1600px (the arrow and Ctrl+` open it); from 2200px both show. The
+   store page (.tk-spage) takes the hidden grid's cell in every one of
+   these grids. The board keeps its no-pin width (--pbw: the 1680px page
+   less its paddings, the rail and its gap; the board-first page's 900px
+   column), narrowed to leave the column 480px, and the column fills the
+   window's remaining width to its right, so the page fills the window. The
+   handle on the column's left edge, in the gap toward the board, drags the
+   board's width (--boardw, kept by cards.js; the column keeps 280px at
+   least: a width saved on a wider window is clamped to what this window
+   leaves, the column's 280px and the gaps). The column scrolls on its own. */
+:root { --pbw: calc(1680px - 32px - 356px); }
+.dash.board { --pbw: 900px; }
+.bpcol { display: none; }
+/* An empty board (no topic or card in it; the placeholder may follow an empty #bpins or a future toolbar card) is a quiet dashed placeholder, as the idle pin zone (.bpzone) is. In the live page it fills its column (.bcol), a scroll box with its own offsets (padding, the .top-classed pill wrapper's margin, the rail wrappers' margins), so it is pinned to the column's padding box rather than sized by height: 100%, which overflowed by those offsets. Elsewhere (no sized column) it stays a short strip. */
+.r-board:not(:has(> .topic, > .bcard)) > .empty { box-sizing: border-box; min-height: 54px; margin: 0; display: grid; place-items: center; border: 2px dashed color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); font-weight: 700; }
+.dgrid.live > .bcol:has(> .r-board > .empty) { position: relative; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)):has(> .empty) { position: absolute; inset: 0 4px 0 2px; display: flex; flex-direction: column; }
+.dgrid.live > .bcol > .r-board:not(:has(> .topic, > .bcard)) > .empty { flex: 1 1 0; }
+.bpins:empty { display: none; }
+.r-board > .bpins { margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px dashed var(--wb-line); }
+.r-board > .bpins::before { content: attr(data-label); display: block; padding: 0 2px 6px; font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); }
+.bpcol > .bpins { flex: 1 1 0; min-height: 0; overflow: auto; overflow-anchor: none; padding: 10px 4px 40px 2px; }
+/* The pinned column has no rail (cards.js), so its topics' bars and cards' headers stick to the top of this scroller by CSS alone, as the board's do. The pin list above the board sits in the rail's host (.wb-rail) and is railed with the board. */
+.bpcol > .bpins .topic { overflow: hidden; overflow: clip; }
+.bpcol > .bpins .topic > .tophead { position: sticky; top: 0; z-index: 2; }
+.bpcol > .bpins .topic:not(.quiet) > .tophead > .tbar { border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+.bpcol > .bpins .bcard:not([data-max]) .bc-hd { position: sticky; top: 0; z-index: 1; background: var(--wb-card); border-radius: var(--wb-radius) var(--wb-radius) 0 0; }
+.bp-edge { position: absolute; top: 0; bottom: 0; left: -12px; width: 9px; cursor: col-resize; touch-action: none; z-index: 2; }
+.bp-edge::after { content: ""; position: absolute; top: 50%; left: 3px; width: 3px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
+.bp-edge:hover::after, .bp-edge.drag::after { background: var(--wb-primary); }
+@media (min-width: 1600px) {
+  :root[data-pincol] .bpcol { display: flex; flex-direction: column; position: relative; min-height: 0; min-width: 0; grid-row: 1; grid-column: 2; }
+  :root[data-pincol] .dbody { grid-template-columns: minmax(0, min(var(--boardw, min(var(--pbw), 100% - 496px)), 100% - 296px)) minmax(280px, 1fr); }
+  :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 1; grid-row: 1; }
+  .dash:not(.live) .bpcol { position: sticky; top: 12px; max-height: calc(100vh - 24px); max-height: calc(100dvh - 24px); }
+  :root[data-pincol] .dwrap:not(.narrow), :root[data-pincol] .dgrid.board { max-width: none; }
+}
+@media (min-width: 1600px) and (max-width: 2199.98px) {
+  /* the column takes the rail's place, and the rail overlays */
+  :root[data-pincol] .rail { position: fixed; z-index: 45; top: 12px; bottom: 12px; left: 12px; width: 340px; max-width: calc(100vw - 24px); max-height: none; box-shadow: var(--wb-shadow-hi); transform: translateX(calc(-100% - 20px)); visibility: hidden; transition: transform .22s cubic-bezier(.2, .7, .3, 1), visibility 0s linear .22s; }
+  :root[data-pincol].rail-open .rail { transform: none; visibility: visible; transition: transform .22s cubic-bezier(.2, .7, .3, 1); }
+  :root[data-pincol] .rscrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); opacity: 0; pointer-events: none; transition: opacity .22s; }
+  :root[data-pincol].rail-open .rscrim { opacity: 1; pointer-events: auto; }
+  :root[data-pincol] .rail .rkids { margin-left: 10px; }
+  :root[data-pincol] .top > .back { display: inline-flex; }
+}
+@media (min-width: 2200px) {
+  /* rail and column both show */
+  :root[data-pincol] .dbody { grid-template-columns: 340px minmax(0, min(var(--boardw, min(var(--pbw), 100% - 852px)), 100% - 652px)) minmax(280px, 1fr); }
+  :root[data-pincol] .dbody > .rail { grid-column: 1; grid-row: 1; }
+  :root[data-pincol] .dbody > .dgrid, :root[data-pincol] .dbody > .tk-spage { grid-column: 2; }
+  :root[data-pincol] .bpcol { grid-column: 3; }
+}
+/* the pin button in a topic's title bar, and dragging a topic or card by
+   its header: the dragged one dims, a line shows where it lands, and the
+   drop zones show while a drag runs (data-bdrag on the root): the empty
+   pin group atop the board ("group"), or the zone along the right edge
+   where a first pin opens the pinned column ("edge"). The zone fills the
+   strip right of the left-aligned page (1680px wide at most while nothing
+   is pinned), and at least 48px, so it leaves the board column to its own
+   reorder drops; where the strip is narrow its label runs vertically.
+   From 1780px, where the strip is wide, the zone stands there idle while
+   nothing is pinned and the column could show (not the "tabs" layout, not
+   a store page): a quiet placeholder for the column, lit when a drag runs. */
+.tbar .tpin { color: inherit; opacity: .45; }
+.tbar:hover .tpin, .tbar .tpin:focus-visible { opacity: .9; }
+.tbar .tpin[aria-pressed="true"] { opacity: 1; color: var(--wb-primary); }
+.tbar .tpin[aria-pressed="true"] .li, .bc-pin[aria-pressed="true"] .li { fill: color-mix(in srgb, var(--wb-primary) 25%, transparent); }
+.r-board section.topic > .tophead > .tbar, .bpins section.topic > .tophead > .tbar, .bc-hd { cursor: grab; }
+:root[data-bdrag], :root[data-bdrag] * { cursor: grabbing !important; -webkit-user-select: none; user-select: none; }
+.bdrag { opacity: .4; }
+.bdrop { position: fixed; z-index: 46; height: 3px; border-radius: 2px; background: var(--wb-primary); pointer-events: none; }
+.bdrop[hidden] { display: none; }
+:root[data-bdrag="group"] .r-board > .bpins:empty { display: block; position: sticky; top: var(--wb-rail-inset, 0px); z-index: 5; min-height: 54px; padding: 0; border: 1.5px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-bg)); }
+:root[data-bdrag="group"] .r-board > .bpins:empty::before { content: attr(data-drop); padding: 18px 12px; text-align: center; color: var(--wb-primary); }
+.bpzone { position: fixed; z-index: 40; top: 50px; bottom: 12px; right: 16px; width: max(48px, calc(100vw - 1696px)); display: none; place-items: center; padding: 12px; border: 2px dashed var(--wb-primary); border-radius: var(--wb-radius); background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-bg)); color: var(--wb-primary); font-weight: 800; font-size: 13px; text-align: center; pointer-events: none; }
+:root[data-bdrag="edge"] .bpzone { display: grid; }
+.bpzone.over { background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
+@media (max-width: 1779.98px) { .bpzone { writing-mode: vertical-rl; padding: 12px 4px; } }
+@media (min-width: 1780px) {
+  :root:not([data-pincol]):not([data-bdrag]) body:not(.tk-paged):not(:has(#grid[data-layout="tabs"])) .bpzone { display: grid; z-index: 1; border-color: color-mix(in srgb, var(--wb-muted-fg) 40%, transparent); background: transparent; color: var(--wb-muted-fg); font-weight: 700; }
+}
+.rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
+.rail .rsp { flex: 1; }
+.rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }
+.rail .chip .i { width: 11px; height: 11px; }
+.rail .rref { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .rref:hover, .rail .rref:focus-visible { color: var(--wb-primary); background: var(--wb-muted); }
+.rail .rref.busy { opacity: .5; cursor: progress; }
+.rail .rlist { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 6px; }
+.rail .rlist > .empty { padding: 10px 12px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.rail .rws + .rws { margin-top: 8px; }
+.rail .wsbar { display: flex; align-items: center; gap: 8px; padding: 3px 12px; min-height: 28px; background: var(--wb-topic); color: var(--wb-on-topic); cursor: pointer; user-select: none; }
+.rail .wstog { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; padding: 0; border: 0; border-radius: 4px; font: inherit; text-align: left; background: transparent; color: inherit; cursor: pointer; }
+.rail .wstog:focus-visible { outline: 1.5px solid currentColor; outline-offset: 2px; }
+.rail .wsbar .wsi { display: inline-flex; flex: none; opacity: .8; margin-right: -2px; }
+.rail .wsbar .nm { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.rail .wsbar .pp { font-family: var(--wb-mono); font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.rail .wsbar .ct { margin-left: auto; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: rgb(127 127 127 / .28); flex: none; }
+.rail .rws.col .wsbody { display: none; }
+/* the + buttons (a worktree row's new session among them), forget, and a
+   worktree row's delete: quiet until their line is hovered or they are
+   focused (faint always on touch screens), full on hover and while their
+   popover is open */
+.rail .radd, .rail .rforget, .rail .rnew, .rail .rdel { width: 18px; height: 18px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; border-radius: 5px; background: transparent; color: inherit; opacity: 0; cursor: pointer; transition: opacity .12s; }
+.rail .radd .i, .rail .rforget .i, .rail .rnew .i, .rail .rdel .i { width: 13px; height: 13px; stroke-width: 1.8; }
+.rail .rhd:hover .radd, .rail .wsbar:hover .radd, .rail .wsbar:hover .rforget, .rail .wthd:hover .rnew, .rail .wthd:hover .rdel, .rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible, .rail .rdel:focus-visible { opacity: .7; }
+@media (hover: none) { .rail .radd, .rail .rforget, .rail .rnew, .rail .rdel { opacity: .5; } }
+.rail .rhd .radd:hover, .rail .wsbar .radd:hover, .rail .wsbar .rforget:hover, .rail .rhd .radd[aria-expanded="true"], .rail .wsbar .radd[aria-expanded="true"], .rail .rnew:hover, .rail .rnew[aria-expanded="true"], .rail .rdel:hover { opacity: 1; background: rgb(127 127 127 / .22); }
+.rail .radd:focus-visible, .rail .rforget:focus-visible, .rail .rnew:focus-visible, .rail .rdel:focus-visible { outline: 1.5px solid currentColor; outline-offset: 1px; }
+.rail .rdel:hover { color: var(--wb-fail); }
+.rail .rforget:disabled { cursor: progress; }
+.rail .wsbody { padding-top: 2px; }
+.rail .rwt { padding: 4px 0 2px; }
+.rail .rwt.empty { border-color: transparent; }
+.rail .rwt.empty .wthd { opacity: .6; }
+.rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
+.rail .wthd { cursor: grab; -webkit-user-select: none; user-select: none; }
+.rail .wthd .i { width: 12px; height: 12px; }
+.rail .wthd .wtroot { display: inline-flex; flex: 0 0 auto; }
+.rail .wthd .wtroot .i { width: 10px; height: 10px; }
+.rail .wthd .br { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .wthd .wf { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .wthd .gs { margin-left: auto; font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rail .wsbody > .rsessions { margin-top: 4px; }
+/* the hierarchy reads in three columns: the workspace icon at 12px, the
+   branch icon at 28px with the worktree's guide line under it, and the
+   harness icon at 49px; a row's grip takes the 14px between the guide line
+   and its harness icon */
+.rail .rsessions { margin: 0 8px 0 33px; padding-left: 0; border-left: 2px solid var(--wb-muted); }
+.rail .rended .rsessions { margin: 0; padding: 0; border: 0; }
+.rail .rended > summary { list-style: none; font-size: 11.5px; color: var(--wb-muted-fg); padding: 4px 8px 2px 14px; cursor: pointer; }
+.rail .rended > summary::-webkit-details-marker { display: none; }
+.rail .rended > summary::after { content: " \25b8"; }
+.rail .rended[open] > summary::after { content: " \25be"; }
+.rail .rended > summary:hover { color: var(--wb-primary); }
+.rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; padding-left: 14px; border-radius: 6px; }
+.rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.rail .rs.ended { opacity: .75; }
+/* drag to reorder (dashboard.js, rail drag): a row or a workspace bar
+   selects no text and opens no browser long-press menu, so a held press
+   drags a bar and opens a row's own menu (the rail row menu); the dragged
+   one dims and a line shows where it lands */
+.rail .rs { -webkit-user-select: none; user-select: none; }
+.rail .rs, .rail .wsbar, .rail .wthd { -webkit-touch-callout: none; }
+.rail .rs.rdrag, .rail .rwt.rdrag, .rail .rws.rdrag { opacity: .45; }
+.rdragging, .rdragging * { cursor: grabbing !important; }
+.rdrop { position: fixed; z-index: 46; height: 2px; border-radius: 1px; background: var(--wb-primary); opacity: .7; pointer-events: none; }
+/* a live row's grip, the only part of a row that drags (the rest is its
+   link): shown while the row is hovered or focused, always on a touch
+   screen, where it takes the touch from scrolling; over a place the drop is
+   refused the cursor says no and a hint beside the pointer says why */
+.rail .drgrip { position: absolute; left: 0; top: 0; bottom: 0; width: 14px; display: flex; justify-content: center; padding-top: 6px; box-sizing: border-box; color: var(--wb-muted-fg); cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; opacity: 0; transition: opacity .12s; }
+.rail .drgrip .i { width: 10px; height: 14px; stroke-width: 2.4; }
+.rail .rs:hover .drgrip, .rail .rs:focus-within .drgrip { opacity: .7; }
+.rail .drgrip:hover { opacity: 1; color: var(--wb-fg); }
+@media (pointer: coarse) { .rail .drgrip { opacity: .55; } }
+.rdragging.drno, .rdragging.drno * { cursor: not-allowed !important; }
+.drhint { position: fixed; z-index: 47; padding: 4px 8px; border-radius: 6px; background: var(--wb-fg); color: var(--wb-bg); font-size: 12px; font-weight: 600; white-space: nowrap; box-shadow: var(--wb-shadow-hi); pointer-events: none; }
+/* the star follows the name: hidden until the row is hovered or focused
+   (a starred row always shows it), keeping its width meanwhile so the name
+   never moves, and the name ellipsizes before it */
+.rail .star { width: 16px; height: 16px; margin: 0; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; transition: opacity .12s; }
+.rail .star .i { width: 13px; height: 13px; stroke-width: 1.4; }
+.rail .star:hover { background: var(--wb-muted); }
+.rail .star[aria-pressed="true"] { opacity: 1; color: var(--star); }
+.rail .star[aria-pressed="true"] .i { fill: currentColor; }
+.rail .star[aria-pressed="false"] { opacity: 0; }
+.rail .rs:hover .star[aria-pressed="false"], .rail .rs:focus-within .star[aria-pressed="false"] { opacity: .6; }
+.rail .rs .star[aria-pressed="false"]:hover, .rail .star[aria-pressed="false"]:focus-visible { opacity: 1; }
+@media (hover: none) { .rail .star[aria-pressed="false"] { opacity: .35; } }
+/* the tree: a parent's children box (.rkids) indents its rows one step
+   from the harness column (16px; 12px in the overlay rail) under a guide
+   line. The parent's toggle (chevron and child count) turns while the
+   page collapses it (kcol), which hides the box and shows the children's
+   roll-ups on the parent: the "?" approval badge and the working orb on
+   its harness icon. A child shows no star and no message line, and its
+   branch tag names its worktree when that is not its parent's. During a
+   drag the valid parent under the pointer's middle is the child zone
+   (rdkid): an accent outline and tint and a trailing arrow, no line. */
+.rail .rkids { margin-left: 14px; border-left: 2px solid var(--wb-muted); }
+/* the overlay rail's step, after the rule it overrides (the pinned
+   column's overlay, with its higher specificity, sits in its own block) */
+@media (max-width: 1599.98px) { .rail .rkids { margin-left: 10px; } }
+.rail .rs.kcol + .rkids { display: none; }
+.rail .rs:not(.kcol) .kap, .rail .rs:not(.kcol) .kidorb { display: none; }
+.rail .rkids .star, .rail .rkids .drmsg { display: none; }
+.rail .kidtog { flex: none; display: inline-flex; align-items: center; gap: 1px; height: 16px; padding: 0 4px 0 1px; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
+.rail .kidtog .i { width: 12px; height: 12px; stroke-width: 1.8; transition: transform .15s; }
+.rail .kidtog:hover, .rail .kidtog:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+.rail .rs.kcol .kidtog .i { transform: rotate(-90deg); }
+.rail .rbt { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 45%; font-family: var(--wb-mono); font-size: 10.5px; font-weight: 600; color: var(--wb-muted-fg); white-space: nowrap; }
+.rail .rbt .i { width: 10px; height: 10px; flex: none; }
+.rail .rbt span { overflow: hidden; text-overflow: ellipsis; }
+.rail .rs.rdkid { outline: 1.5px solid var(--wb-primary); outline-offset: -1.5px; background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.rail .rs.rdkid::after { content: "\21b3"; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; font-weight: 800; color: var(--wb-primary); pointer-events: none; }
+.rdragging .rail .rs .dracts { display: none; }
+.rdragging .rail .rs .drslot { visibility: visible; }
+.rail .rs.rdkid .drslot { visibility: hidden; }
+/* the revive entry of an ended row: always shown, so a touch screen reaches
+   it; a blocked one stays readable and says why on hover and to a reader */
+.rail .rrev { flex: none; align-self: center; margin: 0 6px 0 0; padding: 2px 7px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--wb-card); color: var(--wb-primary); font: inherit; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.rail .rrev:hover { background: var(--wb-muted); }
+.rail .rrev:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.rail .rrev[aria-disabled="true"] { color: var(--wb-muted-fg); border-style: dashed; cursor: not-allowed; }
+.rail .rrev[aria-disabled="true"]:hover { background: var(--wb-card); }
+.rail .rrev.busy { opacity: .55; cursor: progress; }
+/* a row's link is split around the star (no button inside a link): the
+   name part (.rl, the one tab stop), the rest of the first line (.drtail),
+   and the message line (.drmsg) all open the session */
+.rail .drbody { flex: 1 1 auto; min-width: 0; }
+.rail .rl { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; padding: 5px 0; color: inherit; text-decoration: none; border-radius: 6px; }
+.rail .rl:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1px; }
+.rail .s1 { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .s1 [hidden] { display: none; }
+.rail .drtail { flex: 1 1 0; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 5px 8px 5px 0; color: inherit; text-decoration: none; }
+.rail .drmsg { display: block; margin-top: -4px; padding: 0 8px 5px 0; color: inherit; text-decoration: none; }
+/* the time slot on the first line's right edge, wide enough for the hover
+   pencil and clipboard that take it (the time hides), so neither the name
+   nor the badges move */
+.rail .drslot { flex: none; min-width: 44px; text-align: right; }
+.rail .dracts { position: absolute; top: 0; bottom: 0; right: 8px; display: none; align-items: center; gap: 2px; }
+.rail .dracts button { display: inline-grid; place-items: center; width: 20px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .dracts .i { width: 13px; height: 13px; stroke-width: 1.6; }
+.rail .dracts button:hover, .rail .dracts button:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+@media (hover: hover) {
+  .rail .rs:hover .dracts { display: flex; }
+  .rail .rs:hover .drslot { visibility: hidden; }
+}
+.rail .rs:focus-within .dracts { display: flex; }
+.rail .rs:focus-within .drslot { visibility: hidden; }
+/* a row's rename: the input stands where the name was */
+.rail .drinp { flex: 1 1 0; min-width: 60px; margin: 3px 0; padding: 1px 4px; font: inherit; font-size: 12.5px; color: var(--wb-fg); background: var(--wb-card); border: 1px solid var(--wb-primary); border-radius: 4px; outline: none; -webkit-user-select: text; user-select: text; }
+.rail .rs .s1:has(.drinp) .drtail { flex: none; }
+.rail .rs .s1:has(.drinp) .dracts { display: none; }
+.rail .rs .s1:has(.drinp) .drslot { visibility: visible; }
+.rail .rid { font-family: var(--wb-mono); font-size: 12.5px; font-weight: 700; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .rid.lbl { font-family: var(--wb-sans); font-weight: 600; }
+.rail .rs.cur .rid { color: var(--wb-fg); }
+.rail .when { font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+.rail .s2 { display: block; margin-top: 1px; font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .s2 .who { font-weight: 700; margin-right: 4px; }
+/* status: the harness icon (a 16px letter square) stays still while the lead
+   works and a blue line travels around its border; it wobbles and hops while
+   it waits on an approval (a static ring stays) and wears a static ring when
+   it has failed; the robot blinks while level-1 subagents run, its count
+   beside it, and takes no space when none does. */
+.rail .hi { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; cursor: default; }
+.rail .hi.claude { background: #D97757; }
+.rail .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
+.rail .hi.codex { background: #10A37F; }
+/* a stopped (sleeping) session, one with no harness process: the title muted
+   and the harness icon dimmed, and no second line */
+.rail .rs.stopped .rid { color: var(--wb-muted-fg); }
+.rail .rs.stopped .hi { opacity: .55; }
+.rail .rs.stopped .s2 { display: none; }
+/* The travelling line: a wedge of a conic fill turning (transform only, so it
+   runs on the compositor) behind a mask that keeps just a thin band around
+   the icon's border. */
+.rail .hi .orb { position: absolute; inset: -2px; padding: 1.5px; border-radius: 5px; overflow: hidden; pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.rail .hi .rrun { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s linear infinite; }
+.rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s ease-in-out infinite; }
+.rail .hi.err { box-shadow: 0 0 0 2px var(--wb-fail); }
+.rail .bots { display: inline-flex; align-items: center; gap: 2px; flex: none; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--wb-fg); }
+.rail .bots .i { width: 12px; height: 12px; stroke-width: 1.4; color: var(--wb-primary); animation: rail-blink 1.4s ease-in-out infinite; }
+@keyframes rail-orbit { to { transform: rotate(360deg); } }
+@keyframes rail-nudge { 0%, 56%, 100% { transform: none; } 10% { transform: translateY(-3px) rotate(-10deg); } 22% { transform: translateY(0) rotate(10deg); } 34% { transform: translateY(-2px) rotate(-8deg); } 46% { transform: translateY(0) rotate(6deg); } }
+@keyframes rail-blink { 50% { opacity: .25; } }
+.rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; }
+.rail .rfoot a { color: var(--wb-muted-fg); text-decoration: none; }
+.rail .rfoot a:hover { color: var(--wb-primary); }
+/* the rail's popovers (add workspace, add worktree): one at a time, made by
+   the page script outside the rail region (which every update replaces)
+   and placed fixed against the + that opened them; the tracker support
+   chat's selection popover look */
+.rpop { position: fixed; z-index: var(--z-popovers); width: 330px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px;
+  background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 10px 12px; font-size: 12.5px; }
+.rpop[hidden] { display: none; }
+.rpop [hidden] { display: none !important; }
+.rpop .sphd { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; font-weight: 800; }
+.rpop .spctx { font-family: var(--wb-mono); font-size: 11.5px; font-weight: 600; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rpop .spsec { display: grid; gap: 5px; min-width: 0; }
+.rpop .splbl { display: flex; align-items: baseline; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.rpop .spreset { font: inherit; font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; border: 0; background: none; padding: 0; color: var(--wb-primary); cursor: pointer; margin-left: auto; }
+.rpop .spreset:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; border-radius: 3px; }
+.rpop .spseg { display: flex; flex-wrap: wrap; gap: 2px; width: fit-content; background: var(--wb-muted); border-radius: 999px; padding: 2px; }
+.rpop .spseg button { font: inherit; font-size: 12px; font-weight: 600; border: 0; border-radius: 999px; padding: 2px 12px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rpop .spseg button[aria-checked="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rpop .spseg button:disabled { opacity: .45; cursor: not-allowed; }
+.rpop .spseg button:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.rpop .spline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rpop .spq { font: inherit; font-size: 12.5px; width: 100%; min-width: 0; box-sizing: border-box; border: 0; border-radius: 8px; padding: 4px 8px; background: var(--wb-muted); color: inherit; }
+.rpop .spq.mono { font-family: var(--wb-mono); font-size: 12px; }
+.rpop .spq:focus-visible, .rpop .spsel:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.rpop .spfrom { font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.rpop .spsel { font: 12px var(--wb-mono); max-width: 45%; border: 0; border-radius: 8px; padding: 4px 6px; background: var(--wb-muted); color: inherit; }
+.rpop .splist { list-style: none; margin: 0; padding: 0; max-height: 110px; overflow-y: auto; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rpop .splist li { padding: 3px 8px; cursor: pointer; font-family: var(--wb-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpop .splist li:hover { background: var(--wb-muted); }
+.rpop .splist li[aria-selected="true"] { color: var(--wb-primary); font-weight: 700; }
+.rpop .splist li.spnone { cursor: default; color: var(--wb-muted-fg); font-family: inherit; }
+.rpop .splist li.spnone:hover { background: none; }
+.rpop .spnote { margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+.rpop .spnote code, .rpop .spdir code, .rpop .spres code { font-family: var(--wb-mono); font-size: 11px; }
+.rpop .spnote.err { color: var(--wb-fail); }
+.rpop .spdir { display: grid; gap: 3px; padding: 6px 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rpop .spdir > code, .rpop .spres code { font-size: 12px; overflow-wrap: anywhere; }
+.rpop .spown { display: grid; gap: 3px; }
+.rpop .spres { display: grid; gap: 2px; min-height: 34px; overflow-wrap: anywhere; box-sizing: border-box; padding: 5px 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); font-size: 12px; }
+.rpop .spres .k { font-size: 11px; color: var(--wb-muted-fg); }
+.rpop .spres.bad { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-warn-ink) 60%, transparent); }
+.rpop .spres.bad .k { color: var(--wb-warn-ink); }
+.rpop .sprow { display: flex; align-items: center; gap: 6px; }
+.rpop .sprow .spnote { margin-right: auto; min-width: 0; }
+.rpop .pbtn { white-space: nowrap; flex: none; font: inherit; font-size: 12px; font-weight: 700; border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rpop .pbtn.go { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.rpop .pbtn:disabled { opacity: .45; cursor: default; }
+.rpop .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+/* the rail's worktree delete modal: a <dialog> the page script makes once
+   outside the rail region and shows modal from a row's trash button (which,
+   like the new-session +, only a browser on the daemon's machine sees). The
+   check's facts (the changed files in a scrolling list, the holders with a
+   live one marked as blocking), the refusal note, the force notice, the
+   typed-name confirmation, and a danger-coloured Delete */
+dialog.rdeldlg { width: min(460px, calc(100vw - 24px)); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px; border: 0; border-radius: 12px;
+  background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); font-size: 12.5px; }
+dialog.rdeldlg[open] { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+dialog.rdeldlg::backdrop { background: var(--scrim, rgb(0 0 0 / .35)); }
+dialog.rdeldlg [hidden] { display: none !important; }
+.rdeldlg .rdhd { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; font-weight: 800; }
+.rdeldlg .rdhd .i { width: 15px; height: 15px; flex: none; color: var(--wb-fail); }
+.rdeldlg .rdpath { margin-top: -6px; padding: 0; background: none; font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdfacts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; padding: 8px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.rdeldlg .rdfacts:empty { display: none; }
+.rdeldlg .rdfact { display: flex; align-items: flex-start; gap: 7px; min-width: 0; overflow-wrap: anywhere; }
+.rdeldlg .rdfact .i { width: 13px; height: 13px; flex: none; margin-top: 2px; color: var(--wb-muted-fg); }
+.rdeldlg .rdfact.warn, .rdeldlg .rdfact.warn .i { color: var(--wb-warn-ink); }
+.rdeldlg .rdfact.bad, .rdeldlg .rdfact.bad .i { color: var(--wb-fail); }
+.rdeldlg .rdpaths { list-style: none; margin: 0 0 0 20px; padding: 4px 8px; max-height: 132px; overflow-y: auto; overscroll-behavior: contain; border-radius: 6px; background: var(--wb-muted); font: 11.5px/1.5 var(--wb-mono); }
+.rdeldlg .rdpaths li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rdeldlg .rdpaths li.more { font-family: var(--wb-sans); color: var(--wb-muted-fg); }
+.rdeldlg .rdsub { margin-top: 3px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); }
+.rdeldlg .rdholders { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.rdeldlg .rdholders li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.rdeldlg .rdholders .nm { font-family: var(--wb-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rdeldlg .rdholders .rdst { margin-left: auto; flex: none; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rdeldlg .rdholders li.live .rdst { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
+.rdeldlg .rdnote, .rdeldlg .rdforce { margin: 0; padding: 7px 10px; border-radius: 8px; overflow-wrap: anywhere; }
+.rdeldlg .rdnote.bad { background: color-mix(in srgb, var(--wb-fail) 12%, var(--wb-card)); color: var(--wb-fail); }
+.rdeldlg .rdnote.warn, .rdeldlg .rdforce { background: color-mix(in srgb, var(--wb-warn) 14%, var(--wb-card)); color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); /* the shared ink alone is 4.29:1 on this tint in the light theme; the text colour deepens it there and lifts it in the dark theme */ }
+.rdeldlg .rdforcehd { font-weight: 800; }
+.rdeldlg .rdforce ul { margin: 3px 0 0; padding-left: 18px; }
+.rdeldlg .rdconf { display: grid; gap: 5px; }
+.rdeldlg .rdconft { font-size: 12px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdconft code { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); background: var(--wb-muted); padding: 0 4px; border-radius: 4px; }
+.rdeldlg .rdq { width: 100%; box-sizing: border-box; font: 12.5px var(--wb-mono); border: 0; border-radius: 8px; padding: 5px 8px; background: var(--wb-muted); color: inherit; }
+.rdeldlg .rdq:focus-visible { outline: 1.5px solid var(--wb-fail); }
+.rdeldlg .rdmsg { margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
+.rdeldlg .rdmsg.err { color: var(--wb-fail); }
+.rdeldlg .rdrow { display: flex; justify-content: flex-end; gap: 6px; }
+.rdeldlg .pbtn { white-space: nowrap; flex: none; font: inherit; font-size: 12px; font-weight: 700; border: 0; border-radius: 999px; padding: 4px 14px; cursor: pointer; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.rdeldlg .pbtn.danger { background: var(--wb-fail); color: var(--wb-card); }
+.rdeldlg .pbtn:disabled { opacity: .45; cursor: default; }
+.rdeldlg .pbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+/* daemon-hosted lead sessions: the hosted mark beside a harness badge; the
+   new-session button after a worktree row's label (styled with the + buttons
+   above), which only a browser on the daemon's machine sees (the spawn route
+   refuses any other); the awaiting-approval ring, chip, and second line of
+   a rail row; the spawn popover's rows, which the header chip's session
+   menu shares; and the approval cards under the conversation */
+.hosted { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; color: var(--wb-muted-fg); }
+.hosted .i { width: 12px; height: 12px; stroke-width: 1.5; }
+.sess .hostc { display: inline-flex; align-items: center; gap: 4px; justify-self: start; min-width: 0; }
+.chip.perm { background: var(--wb-ph-perm); color: var(--wb-on-ph-perm); }
+.rail .s2.ap .who { color: var(--wb-perm-ink); }
+.rail .wsbar .chip.perm + .ct { margin-left: 0; }
+.rail .wsbar .chip.perm { margin-left: auto; }
+html:not([data-sysopen]) .rail .rnew { display: none; }
+html:not([data-sysopen]) .rail .rdel { display: none; }
+.rpop .sploc { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: -4px; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
+.rpop .sploc .i { width: 12px; height: 12px; flex: none; }
+.rpop .sploc b { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.rpop .sploc span { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rpop .sploc code { font-family: var(--wb-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 0; }
+.rpop .spopts { display: grid; gap: 3px; padding-top: 6px; border-top: 1px solid var(--wb-muted); min-width: 0; }
+.rpop .sprc { display: flex; align-items: center; gap: 8px; min-height: 26px; min-width: 0; }
+.rpop .sprc > label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--wb-muted-fg); white-space: nowrap; }
+.rpop .sprc.off > label { opacity: .55; }
+.rpop .spsm { margin-left: auto; width: 160px; max-width: 60%; box-sizing: border-box; font: inherit; font-size: 12px; border: 0; border-radius: 7px; padding: 3px 6px; background: var(--wb-muted); color: inherit; }
+.rpop .spsm.mono { font-family: var(--wb-mono); }
+.rpop .spsm:disabled { opacity: .5; }
+.rpop .spsm:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.rpop .spdesc { margin: -2px 0 2px; font-size: 11.5px; color: var(--wb-muted-fg); text-align: right; overflow-wrap: anywhere; }
+.rpop .spdesc.warn { color: var(--wb-warn-ink); }
+.rpop .spdesc:empty { display: none; }
+.rpop .spsec .spdesc { margin: 4px 0 0; text-align: left; }
+.rpop .spacts { display: grid; gap: 2px; padding-top: 6px; border-top: 1px solid var(--wb-muted); }
+.rpop .spact { display: flex; align-items: flex-start; gap: 9px; border: 0; background: transparent; border-radius: 8px; padding: 6px 8px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
+.rpop .spact:hover:not(:disabled) { background: var(--wb-muted); }
+.rpop .spact:disabled { opacity: .45; cursor: default; }
+.rpop .spact:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.rpop .spact .i { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.rpop .spact .gs { display: block; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; }
+.rpop .spact.danger { color: var(--wb-fail); }
+/* a rail row's menu (dashboard.js, rail row menu): items as the link menu's,
+   the "move under" list opening in place below its item, indented, and a
+   hosted row's session menu below them; the live line its moves (and the
+   keyboard path's) are said in is read aloud, never shown */
+.rpop.rmenu { width: auto; min-width: 220px; max-width: min(330px, calc(100vw - 16px)); gap: 4px; padding: 5px; }
+.rpop .rmlist, .rpop .rmsub { display: grid; gap: 2px; min-width: 0; }
+.rpop .rmsub { max-height: 184px; overflow-y: auto; overscroll-behavior: contain; margin: 0 0 2px 20px; padding-left: 4px; border-left: 1px solid var(--wb-muted); }
+.rpop .rmi { display: flex; align-items: center; gap: 8px; min-width: 0; border: 0; background: transparent; border-radius: 7px; padding: 6px 9px; text-align: left; cursor: pointer; color: inherit; font: inherit; font-size: 13px; }
+.rpop .rmi:hover, .rpop .rmi:focus-visible { background: var(--wb-muted); outline: none; }
+.rpop .rmi[aria-disabled="true"] { opacity: .45; cursor: default; }
+.rpop .rmi .i { width: 14px; height: 14px; flex: none; }
+.rpop .rmi .rmt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rpop .rmi .rmgo { transform: rotate(-90deg); transition: transform .12s; }
+.rpop .rmi[aria-expanded="true"] .rmgo { transform: none; }
+.rpop .rmsess { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; padding: 8px 7px 4px; border-top: 1px solid var(--wb-muted); }
+.rlive { position: fixed; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.host.hbtn { cursor: pointer; }
+.host.hbtn .i { width: 11px; height: 11px; stroke-width: 2; }
+.host.hbtn:hover, .host.hbtn[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 16%, var(--wb-muted)); color: var(--wb-fg); }
+.host.hbtn:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.apbox { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 0 12px 10px; }
+.apbox[hidden] { display: none; }
+.apbox [hidden] { display: none !important; }
+.convo.ap-on .permwait.apslot { display: none; }
+.apcard { background: var(--wb-card); border-radius: 10px; box-shadow: var(--wb-shadow), inset 0 0 0 1.5px color-mix(in srgb, var(--wb-ph-perm) 55%, transparent); overflow: hidden; font-size: 13px; }
+.apcard .aph { display: flex; align-items: center; gap: 7px; padding: 7px 11px; background: color-mix(in srgb, var(--wb-ph-perm) 16%, var(--wb-card)); min-width: 0; }
+.apcard .aph > .i { width: 14px; height: 14px; flex: none; color: var(--wb-perm-ink); }
+.apcard .aph code { font-family: var(--wb-mono); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.apcard .apn, .apcard .apsub { flex: none; font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.apcard .aph .t { margin-left: auto; flex: none; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+.apcard .apb { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 8px 11px 0; }
+.apcard .apb:empty { display: none; }
+.apcard .apdesc { color: var(--wb-muted-fg); font-size: 12.5px; overflow-wrap: anywhere; }
+.apcard .apin { margin: 0; padding: 6px 8px; border-radius: 8px; background: var(--wb-muted); font: 12px/1.45 var(--wb-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16em; overflow-y: auto; }
+.apcard .apact, .apcard .apdeny .aprow { display: flex; align-items: center; gap: 6px; padding: 8px 11px; }
+.apcard .btn { gap: 5px; font-size: 12.5px; font-weight: 700; padding: 4px 13px; color: inherit; }
+.apcard .btn .i { width: 13px; height: 13px; stroke-width: 2; }
+.apcard .btn.allow, .apcard .btn.go { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.apcard .btn.go.deny { background: var(--wb-fail); color: var(--wb-card); }
+.apcard .btn:disabled { opacity: .5; cursor: default; }
+.apcard .btn:focus-visible, .apcard .apmsg:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.apcard .apdeny { display: grid; grid-template-columns: minmax(0, 1fr); padding: 0 11px; border-top: 1px solid var(--wb-muted); }
+.apcard .apmsg { margin-top: 8px; width: 100%; box-sizing: border-box; min-height: 52px; resize: vertical; font: inherit; font-size: 13px; border: 0; border-radius: 8px; padding: 6px 8px; background: var(--wb-muted); color: inherit; }
+.apcard .apdeny .aprow { padding: 8px 0; }
+.apcard .aprow .apnote { margin-right: auto; min-width: 0; font-size: 11.5px; color: var(--wb-muted-fg); }
+.apcard .aperr { margin: 0; padding: 0 11px 8px; font-size: 11.5px; color: var(--wb-fail); overflow-wrap: anywhere; }
+.apcard .apro, .apneed { display: flex; align-items: flex-start; gap: 7px; padding: 8px 11px; font-size: 12.5px; color: var(--wb-muted-fg); }
+.apcard .apro .i, .apneed .i { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.apneed { background: color-mix(in srgb, var(--wb-ph-perm) 16%, var(--wb-card)); border-radius: 10px; color: inherit; font-size: 13px; }
+.apneed .i { color: var(--wb-perm-ink); }
+/* hosted-session recovery and failures: a typed failure's error ring on a
+   rail row's badge and on the head's harness chip, with the head's failure
+   chip; the head's MCP-broken chip; the notice and retry lines in the
+   conversation (a failed compaction's error shares the notice text); the
+   background-task count in the agents panel head and beside the composer's
+   subagent badge; and the session menu's restart, shown only while broken */
+.host.sse.err { color: var(--wb-fail); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-fail) 70%, transparent); }
+.chip.fail { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); cursor: help; }
+.chip.mcpbad { background: color-mix(in srgb, var(--wb-warn) 16%, var(--wb-card)); color: color-mix(in srgb, var(--wb-warn-ink) 80%, var(--wb-fg)); cursor: help; }
+.sysline.fail, .sysline.retry { max-width: 92%; }
+.sysline .nt { min-width: 0; overflow-wrap: anywhere; }
+.sysline .nt .t { font-size: inherit; font-weight: inherit; }
+.sysline.notice b { font-weight: 800; color: var(--wb-fail); }
+.sysline.retry .mk { color: var(--wb-warn-ink); }
+.sysline.retry .spin { width: 10px; height: 10px; }
+.thead .chip.bgt { color: var(--wb-fg); }
+.sbwrap { grid-column: 2; justify-self: end; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.bgbadge { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px 0 8px; border-radius: 999px; white-space: nowrap; flex: none; cursor: help; font-size: 11.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-muted-fg); background: var(--wb-card); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--wb-muted-fg) 35%, transparent), var(--wb-shadow-hi); animation: ibadge-rise .16s ease-out; }
+.bgbadge[hidden] { display: none; }
+.bgbadge .i { width: 13px; height: 13px; flex: none; }
+.rpop .spact[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .rail, .rail-open .rail, .rscrim { transition: none; }
+  .bgbadge { animation: none; }
+  .rail .bots .i { animation: none; }
+  .rail .hi .rrun, .rail .hi.perm { animation: none; }
+  .rail .kidtog .i { transition: none; }
+}
+

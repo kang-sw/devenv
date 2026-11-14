@@ -92,6 +92,14 @@ func TestDevAssetsShowEditsWithoutARestart(t *testing.T) {
 		t.Error("a whiteboard css edit does not show on the session page")
 	}
 
+	// Non-leading fragments follow the same next-request path.
+	editFile(t, dash("dashboard-board.js"), "function", "/*devdashfragmentjs*/function")
+	editFile(t, dash("dashboard-board.css"), "{", "{/*devdashfragmentcss*/")
+	editFile(t, wb("page-sticky.css"), "{", "{/*devwbfragmentcss*/")
+	if _, body := get(t, f.base+"/s/livesession"); !strings.Contains(body, "devdashfragmentjs") || !strings.Contains(body, "devdashfragmentcss") || !strings.Contains(body, "devwbfragmentcss") {
+		t.Error("a source fragment edit does not show on the session page")
+	}
+
 	// A further edit shows on the next request too.
 	editFile(t, dash("dashboard.css"), "devdashcss", "devdashcss2")
 	if _, body := get(t, f.base+"/s/livesession"); !strings.Contains(body, "devdashcss2") {
@@ -118,6 +126,27 @@ func TestDevAssetsReportABrokenTemplateAndRecover(t *testing.T) {
 	}
 	if code, body := get(t, f.base+"/s/livesession?frame=1"); code != http.StatusOK || !strings.Contains(body, `data-region="board"`) {
 		t.Errorf("the fixed template did not recover: %d", code)
+	}
+}
+
+func TestDevAssetsRequireSourceFragments(t *testing.T) {
+	dash, wb := devSource(t)
+	f := startPageFixture(t)
+	for _, path := range []string{dash("dashboard-board.js"), dash("dashboard-board.css"), wb("page-sticky.css")} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		code, _ := get(t, f.base+"/s/livesession")
+		if err := os.WriteFile(path, raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if code != http.StatusInternalServerError {
+			t.Errorf("missing fragment %s served status %d, want 500", path, code)
+		}
 	}
 }
 

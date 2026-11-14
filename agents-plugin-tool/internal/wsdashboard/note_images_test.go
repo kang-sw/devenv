@@ -112,7 +112,7 @@ function noteRow(n) { var r = n.nextSibling; return r && r.classList.contains("n
 // image no restored text names a composer marker. The cases execute under
 // node when it is installed.
 func TestBoardNoteImages(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

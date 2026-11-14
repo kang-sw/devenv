@@ -1,0 +1,164 @@
+/* ===== session layout =====
+   live: one grid whose children are the tab bar, the tree, the splitter, the
+   conversation, the composer, and the board column (the panels are in the
+   drawer). The base rules are the tabs view; the split view overrides them
+   for an explicit "split" on any screen wider than a phone, and for "auto"
+   (or no choice) on a wide screen. Every pane scrolls on its own inside a grid that fills the
+   viewport. The tree and the conversation share their column at a fixed
+   ratio: --sa and --sb are fr shares the page script sets from the saved
+   splitter position, so neither pane resizes with its content; the px floors
+   keep either from collapsing on a short window. */
+.dash.live .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+.dash.live .top { flex: none; }
+.dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 16px; --sa: 250fr; --sb: 750fr;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+  grid-template-areas: "tabbar" "tree" "split" "chead" "convo" "composer"; }
+.dgrid.live > * { min-width: 0; min-height: 0; }
+.dgrid.live > .tabbar { grid-area: tabbar; margin-bottom: 10px; }
+.dgrid.live > .r-tree { grid-area: tree; overflow: auto; }
+.dgrid.live > .splitter { grid-area: split; }
+.dgrid.live > .convo { grid-area: convo; overflow: auto; }
+.dgrid.live > .composer { grid-area: composer; margin-top: 10px; }
+/* A scrolling board column and the pinned column (.bpins) take no native scroll anchoring: a board swap compensates them itself (wbHistory.keep). */
+.dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
+.dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
+/* The conversation panel's header (chead) carries its own tabs (ctabs):
+   "Conversation | Files". Under the Files tab the Files pane takes the
+   conversation's place below the header, while the conversation is hidden
+   (never removed), so its scroll and pin survive; the agents tree, the
+   splitter, and the composer stay. The header shows the conversation's
+   counts under one tab and the Files pane's root under the other. In the
+   one-column view the header shows with the conversation, under its tab. */
+.dgrid.live > .chead { grid-area: chead; }
+.dgrid.live > .fpane { grid-area: convo; display: none; }
+.dgrid.live[data-tab="board"] > .chead { display: none; }
+.dgrid.live[data-ctab="files"]:not([data-tab="board"]) > .fpane { display: flex; }
+.dgrid.live[data-ctab="files"] > .convo { display: none; }
+.splitter { position: relative; cursor: row-resize; touch-action: none; outline: 0; }
+.splitter::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
+.splitter:hover::before, .splitter.drag::before, .splitter:focus-visible::before { background: var(--wb-primary); }
+@media (min-width: 760px) {
+  .dgrid.live[data-layout="split"] { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+    grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
+  .dgrid.live[data-layout="split"] > .tabbar { display: none; }
+  .dgrid.live[data-layout="split"] > .r-tree, .dgrid.live[data-layout="split"] > .splitter, .dgrid.live[data-layout="split"] > .convo, .dgrid.live[data-layout="split"] > .bcol { display: block; }
+  .dgrid.live[data-layout="split"] > .bcol { grid-area: board; }
+  .dgrid.live[data-layout="split"] > .chead { display: flex; }
+  .dgrid.live[data-layout="split"][data-ctab="files"] > .fpane { display: flex; }
+  .dgrid.live[data-layout="split"][data-ctab="files"] > .convo { display: none; }
+}
+@media (min-width: 1100px) {
+  .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+    grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
+  .dgrid.live:not([data-layout="tabs"]) > .tabbar { display: none; }
+  .dgrid.live:not([data-layout="tabs"]) > .r-tree, .dgrid.live:not([data-layout="tabs"]) > .splitter, .dgrid.live:not([data-layout="tabs"]) > .convo, .dgrid.live:not([data-layout="tabs"]) > .bcol { display: block; }
+  .dgrid.live:not([data-layout="tabs"]) > .bcol { grid-area: board; }
+  .dgrid.live:not([data-layout="tabs"]) > .chead { display: flex; }
+  .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .fpane { display: flex; }
+  .dgrid.live:not([data-layout="tabs"])[data-ctab="files"] > .convo { display: none; }
+}
+@media (max-width: 640px) {
+  .dwrap { padding: 8px 10px; }
+}
+
+/* the conversation panel's header with its tabs, and its Files pane
+   (files.js). The header is the panel's top: the conversation or the Files
+   pane below it squares its own top corners. The region's own title bar
+   (r-entries) stays hidden on a live page; its counts are moved into the
+   header (dashboard.js syncChead). */
+.chead { position: static; padding: 0 8px 0 4px; border-radius: var(--wb-radius) var(--wb-radius) 0 0; box-shadow: var(--wb-shadow); min-width: 0; }
+.dgrid.live > .convo, .dgrid.live > .fpane { border-top-left-radius: 0; border-top-right-radius: 0; }
+.dgrid.live > .convo .r-entries > .thead { display: none; }
+.chead .csum, .chead .fsum { margin-left: auto; min-width: 0; display: flex; align-items: center; justify-content: flex-end; }
+.chead .csum > .sum { margin-left: 0; }
+.dgrid[data-ctab="files"] > .chead .csum, .dgrid:not([data-ctab="files"]) > .chead .fsum { display: none; }
+.chead .fsum .froot { flex: 0 1 auto; font-size: 11.5px; color: var(--wb-muted-fg); }
+.chead .fsum .froot.alt { color: var(--wb-primary); }
+.ctabs { display: flex; gap: 2px; align-items: stretch; align-self: stretch; flex: none; }
+.ctabs button { border: 0; background: transparent; height: 30px; padding: 0 8px; font: inherit; font-size: 13px; font-weight: 700; color: var(--wb-muted-fg); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; }
+.ctabs button:hover { color: var(--wb-fg); }
+.ctabs button[aria-pressed="true"] { color: var(--wb-fg); border-bottom-color: var(--wb-primary); }
+.ctabs button:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
+.fpane { position: relative; flex-direction: column; min-height: 0; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; font-size: 12.5px; }
+/* The toolbar borrows the same explorer as the Files tab, in place, and
+   shares the card sheet's scrim. Keep its toggle and row menu reachable. */
+.dgrid.live > .fpane[data-max] { display: flex; position: fixed; z-index: var(--z-modal); top: var(--files-top, 52px); left: 16px; right: 16px; bottom: 12px; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
+.board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); }
+.board-toolbar[data-files] .board-toolbar-face { pointer-events: none; }
+.board-toolbar[data-files] .board-files { pointer-events: auto; }
+body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
+@media (max-width: 640px) { .dgrid.live > .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }
+.fpane .fi { display: inline-flex; flex: none; color: var(--wb-muted-fg); }
+.fhd { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--wb-line); min-width: 0; }
+.froot { flex: 1; min-width: 0; font: 700 12px var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.froot.alt { color: var(--wb-primary); }
+.fseg { display: flex; gap: 2px; margin: 8px 8px 0; padding: 2px; border-radius: 8px; background: var(--wb-muted); }
+.fseg button { flex: 1; font: inherit; font-size: 12px; font-weight: 700; border: 0; border-radius: 6px; padding: 3px 0; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.fseg button[aria-pressed="true"] { background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow); }
+.fsr { display: flex; align-items: center; gap: 6px; margin: 6px 8px; padding: 0 2px 0 8px; height: 28px; border-radius: 7px; background: var(--wb-muted); }
+.fsr:focus-within { outline: 1.5px solid var(--wb-primary); }
+.fq { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--wb-fg); font: 12px var(--wb-mono); outline: none; padding: 0; }
+.fopts { display: none; gap: 1px; }
+.fpane[data-fm="content"] .fopts { display: inline-flex; }
+.fopts .ibtn { width: 22px; height: 22px; }
+.flist { flex: 1; min-height: 0; overflow: auto; padding: 2px 4px 8px; outline: none; }
+.flist[hidden] { display: none; }
+.fpane .fr { display: flex; align-items: center; gap: 5px; height: 24px; padding-right: 8px; border-radius: 6px; cursor: pointer; white-space: nowrap; min-width: 0; outline: none; }
+.fpane .fr:hover { background: var(--wb-muted); }
+.fpane .fr:focus-visible { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.fpane .fr.sel { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.fpane .fr .ch { width: 12px; height: 12px; flex: none; display: inline-flex; color: var(--wb-muted-fg); }
+.fpane .fr .ch .li { width: 12px; height: 12px; transition: transform .12s; }
+.fpane .fr[aria-expanded="true"] > .ch .li { transform: rotate(90deg); }
+.fpane .fr .fn { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fpane .fr.ign { opacity: .5; font-style: italic; }
+.fpane .fr.gm .fn { color: var(--wb-warn-ink); }
+.fpane .fr.gone .fn { text-decoration: line-through; }
+.fpane .fr.gone { cursor: default; }
+.fpane .fr.fmore { cursor: default; color: var(--wb-muted-fg); font-style: italic; }
+.fpane .fr.fmore:hover { background: transparent; }
+.gmk { margin-left: auto; padding-left: 6px; flex: none; font: 800 10.5px var(--wb-mono); color: var(--wb-warn-ink); }
+.gmk.dot::before { content: ""; display: block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .8; }
+.fhits .fr .fn { font-family: var(--wb-mono); font-size: 11.5px; }
+.fnote { padding: 10px 8px; color: var(--wb-muted-fg); }
+.hf { display: flex; align-items: center; gap: 5px; height: 24px; margin-top: 4px; padding: 0 6px; border-radius: 6px; font-weight: 700; min-width: 0; cursor: pointer; outline: none; }
+.hf .fn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 11.5px var(--wb-mono); }
+.hc { flex: none; font-size: 10.5px; padding: 0 6px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); }
+.hl { display: flex; gap: 8px; padding: 1px 6px 1px 4px; border-radius: 5px; font: 11.5px/1.6 var(--wb-mono); color: var(--wb-muted-fg); cursor: pointer; min-width: 0; outline: none; }
+.hl .ln { flex: none; width: 34px; text-align: right; opacity: .7; }
+.hl .tx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.hl mark { background: color-mix(in srgb, var(--wb-warn) 28%, transparent); color: var(--wb-fg); border-radius: 2px; }
+.hf:hover, .hl:hover { background: var(--wb-muted); }
+.hf:focus-visible, .hl:focus-visible, .fhits .fr:focus-visible { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.hnote { padding: 8px 6px; font-size: 11px; color: var(--wb-muted-fg); }
+.hnote.err { color: var(--wb-fail); font-family: var(--wb-mono); white-space: pre-wrap; }
+.fpop { position: absolute; z-index: 20; top: 40px; right: 8px; width: 240px; max-width: calc(100% - 16px); background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi); padding: 8px; }
+.fpop[hidden] { display: none; }
+.froot-pop { width: 320px; }
+.fpop .lb { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); margin: 2px 4px 6px; }
+.fpop .opt { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; }
+.fpop .opt:hover { background: var(--wb-muted); }
+.fpop .opt input { margin: 0; }
+.fpin { width: 100%; font: 12px var(--wb-mono); padding: 5px 8px; border-radius: 6px; border: 0; background: var(--wb-muted); color: var(--wb-fg); outline: none; }
+.fpin:focus { outline: 1.5px solid var(--wb-primary); }
+.ferr { color: var(--wb-fail); font-size: 11.5px; margin: 6px 4px 0; }
+.ferr:empty { display: none; }
+.fgo { margin-top: 10px; display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+.fgo .btn { font-size: 12px; font-weight: 700; color: var(--wb-fg); height: 26px; }
+.fgo .btn.pr { background: var(--wb-primary); color: var(--wb-primary-fg); }
+.lmenu .msep { height: 1px; background: var(--wb-line); margin: 3px 4px; }
+@media (prefers-reduced-motion: reduce) { .fpane .fr .ch .li { transition: none; } }
+
+/* board-first page: no live layer; the board in one readable column that
+   the page scrolls. As in the live board column, topicResized owns band
+   height compensation: native document anchoring must not add it again. */
+:root[data-mode="board"] { overflow-anchor: none; }
+.dgrid.board { display: block; max-width: 900px; margin: 0 auto; }
+@media (min-width: 1600px) { .dgrid.board { margin: 0; } }
+
+/* A changed topic's next body frame loads over the frame it replaces,
+   unseen and out of the layout, until it has loaded and drawn (the page
+   script's board morph, frameGraft). */
+.doc-body.framed { position: relative; z-index: var(--z-cards); }
+iframe.doc-frame.doc-frame-next { position: absolute; top: 0; left: 0; opacity: 0; pointer-events: none; }
+
