@@ -392,15 +392,16 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .opt.static:not(.picked) { opacity: .75; }
 .srow.void .stext > b { font-weight: 400; text-decoration: line-through; color: var(--wb-muted-fg); }
 
-/* topic recap: a short status block inset at the top of the topic card, in
-   the item gutter, "recap <time>" on the right; inside a closed topic's fold it
-   sits above the body */
-.trecap { display: flex; align-items: baseline; gap: 10px; margin: 10px 10px 0; padding: 7px 10px; font-size: 13px; background: var(--wb-wash); border-left: 3px solid var(--wb-accent-policy); border-radius: 0 8px 8px 0; }
+/* topic recap: author and time lead the body's first line inline; inside a
+   closed topic's fold it sits above the body. */
+.trecap { margin: 10px 10px 0; padding: 7px 10px; font-size: 13px; background: var(--wb-wash); border-left: 3px solid var(--wb-accent-policy); border-radius: 0 8px 8px 0; }
 /* last in its box (a closed fold's summary takes no room): keep the gutter below */
 .trecap:last-child, .trecap:has(+ details.tdoc:not([open]):last-child) { margin-bottom: 10px; }
 /* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
-.trecap .rtext { flex: 1; min-width: 0; overflow-wrap: anywhere; contain: paint; }
-.trecap .rat { flex: none; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.trecap { contain: paint; }
+.trecap .rtext { display: inline; min-width: 0; overflow-wrap: anywhere; }
+.trecap .rtext > p:first-child { display: inline; }
+.trecap .rat { font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .trecap .rat .evi { display: inline-flex; vertical-align: -3px; margin-right: 5px; }
 /* An open topic's head summary line: the latest agent line as plain muted
    text on the head's surface (no card), sharing the line with the check pill,
@@ -441,8 +442,8 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 }
 
 /* Topic stream: one chronological column under a thin divider, full card
-   width with no side rail. A quiet header carries the counts; log rows are one
-   line each with the clock in a fixed column on the left; panels are cards
+   width with no side rail. A quiet header carries the counts; log rows have
+   author and clock inline before their text; panels are cards
    inside the topic card. A bottom-aligned clip grows upward in 640px steps;
    shared keep sessions, not an inner scrollbar, own scroll compensation. */
 .topic-stream { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); font-size: 13px; }
@@ -463,18 +464,17 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .history-older:hover { color: var(--wb-fg); }
 .history-older[hidden] { display: none; }
 .wb-entry { min-width: 0; overflow-wrap: anywhere; }
-/* log rows: clock column, then a small marker (L agent, O owner), then text */
+/* log rows: role badge, then body with its time inline on the first line */
 .entry-line { display: flex; align-items: baseline; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.6; color: var(--wb-muted-fg); }
 .entry-line:hover { background: var(--wb-wash); }
-.entry-line > .entry-at { flex: none; width: 38px; font: 11px/1.6 var(--wb-mono); font-variant-numeric: tabular-nums; opacity: .8; cursor: default; }
+.entry-line .entry-at { font: 11px/1.6 var(--wb-mono); font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .8; cursor: default; }
 .entry-text { flex: 1; min-width: 0; }
 .wb-entry.agent > .entry-line { color: var(--wb-fg); font-size: 12.5px; }
 .wb-entry.system .entry-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wb-entry.owner > .entry-line { background: color-mix(in srgb, var(--wb-accent-policy) 8%, transparent); }
 .wb-entry.owner .entry-text { color: color-mix(in srgb, var(--wb-accent-policy) 70%, var(--wb-fg)); }
 .evi { flex: none; width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 8.5px; font-weight: 800; line-height: 1; font-style: normal; }
-/* the marker sits on the first line beside the clock, never centred on a wrapped
-   row: the 2px drop centres the 15px badge in the ~19-20px first line box */
+/* The role badge stays beside the body's first line when the text wraps. */
 .entry-line > .evi { align-self: flex-start; margin-top: 2px; }
 .evi.lead { background: color-mix(in srgb, var(--wb-primary) 16%, transparent); color: var(--wb-primary); }
 .evi.owner { background: color-mix(in srgb, var(--wb-accent-policy) 22%, transparent); color: var(--wb-accent-policy); }
@@ -482,7 +482,7 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .ptag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-policy) 18%, transparent); color: var(--wb-accent-policy); }
 .entry-imported { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); }
 /* folds: a long log run, and adjacent system events, behind one quiet row
-   whose dotted rule stands in the clock column */
+   led by a short dotted rule */
 .run-fold > summary, .system-run > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 1.7; color: var(--wb-muted-fg); cursor: pointer; font-variant-numeric: tabular-nums; }
 .run-fold > summary::-webkit-details-marker, .system-run > summary::-webkit-details-marker { display: none; }
 .run-fold > summary:hover, .system-run > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
@@ -709,7 +709,7 @@ details.panel .body { container-type: inline-size; }
    showed through them. */
 .wb-rail .topic > .tophead.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
 /* A stuck head keeps its recap to two lines: the full recap would take most of a short viewport. */
-.wb-rail .topic > .tophead.wb-stuck .tsub > .trecap .rtext { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.wb-rail .topic > .tophead.wb-stuck .tsub > .trecap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 /* the book button stays at the card's top and scrolls away under a stuck head, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
 .wb-rail .topic.has-doc:has(> details.tdoc) > .tophead.wb-stuck > .tbar { padding-right: 12px; }
 /* The check pill of a stuck head lifts the topic's check list into the head
