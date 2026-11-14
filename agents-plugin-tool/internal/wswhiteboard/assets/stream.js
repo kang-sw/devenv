@@ -163,10 +163,10 @@
     var all = rows(h);
     var more = !!h.querySelector('template[data-history-page]') || (!!boundary(h) && all[0] && all[0] !== boundaryRow(h, boundary(h)));
     var button = h.querySelector('.history-older');
-    if ((!button || button.hidden === !more) && h.classList.contains('history-more') === more) return;
-    // Hiding the exhausted control resizes shallower ancestors watched by
-    // keep/rail. Do that outside this history's resize delivery, including
-    // reentrant init calls from loadOne -> wbBindBoard.
+    if (!button || button.hidden === !more) return;
+    // The header row keeps its height without the capsule, but toggling it
+    // still mutates watched ancestors. Do that outside this history's resize
+    // delivery, including reentrant init calls from loadOne -> wbBindBoard.
     if (h._wbHistoryResizing) {
       if (!h._wbHistoryControlFrame) {
         h._wbHistoryControlFrame = true;
@@ -177,8 +177,7 @@
       }
       return;
     }
-    if (button) button.hidden = !more;
-    h.classList.toggle('history-more', more);
+    button.hidden = !more;
   }
   function oldest(h) {
     var clip = h.querySelector('.history-clip').getBoundingClientRect();
@@ -352,8 +351,7 @@
   function capture(root) {
     return histories(root).map(function (h) {
       var first = h.querySelector('.wb-entry');
-      var fold = h.closest('.topic-stream');
-      return { key: h.getAttribute('data-history'), first: first && first.id, open: !fold || fold.open, steps: h._wbHistorySteps || 1,
+      return { key: h.getAttribute('data-history'), first: first && first.id, steps: h._wbHistorySteps || 1,
         chunks: h._wbHistoryChunks.slice(), heights: Object.assign({}, h._wbHistoryHeights), pending: h._wbHistoryPending && Object.assign({}, h._wbHistoryPending),
         folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }),
         systems: Array.from(h.querySelectorAll('.system-run .wb-entry')).map(function (e) { return [e.id, e.closest('.system-run').open]; }) };
@@ -366,8 +364,6 @@
     histories(root).forEach(function (h) {
       var saved = (snapshot || []).find(function (s) { return s.key === h.getAttribute('data-history'); });
       if (!saved) return;
-      var fold = h.closest('.topic-stream');
-      if (fold && saved.open !== undefined) fold.open = saved.open;
       if (saved.first) materialize(h, saved.first);
       if (saved.chunks && saved.chunks.length > 1) saved.chunks.forEach(function (id) {
         if (!id) return;

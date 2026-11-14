@@ -130,6 +130,35 @@ func TestStreamHistoryWindowsAreFiftyChronologicalEntries(t *testing.T) {
 	wantAll(t, out, `<template data-history-page data-count="50">`, `<template data-history-page data-count="23">`, ">Load older<")
 }
 
+// TestStreamHistoryHeaderIsOneRow pins the history header as one plain row,
+// never a disclosure: title and count, then the load-older capsule (hidden
+// when nothing older is held), then the counts meta, all inside the history
+// so its delegated click still owns the capsule. A closed topic's history is
+// shown like an open one's, and no fade covers the first visible entry.
+func TestStreamHistoryHeaderIsOneRow(t *testing.T) {
+	st := &State{Topics: []TopicDoc{{Name: "long"}}}
+	for i := 1; i <= 60; i++ {
+		st.Topics[0].Entries = append(st.Topics[0].Entries, Entry{ID: fmt.Sprintf("e%d", i), Kind: EntryAgent, Text: fmt.Sprintf("line %d", i), At: testNow.Format(time.RFC3339)})
+	}
+	mustApply(t, st, `<wb:topic name="short"><wb:log>one</wb:log></wb:topic>`+
+		`<wb:topic name="done"><wb:log>final</wb:log><wb:close result="Shipped."/></wb:topic>`)
+	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
+	head := func(name string) string {
+		return `<div class="topic-stream"><div class="wb-history" data-history="` + name + `" aria-label="History"><div class="mhead"><span class="wb-mtitle">`
+	}
+	wantAll(t, out, head("long"), head("short"), head("done"),
+		`<span class="n">60</span></span><button type="button" class="history-older">Load older</button><span class="mmeta">`,
+		`<span class="n">1</span></span><button type="button" class="history-older" hidden>Load older</button><span class="mmeta">`)
+	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:`, `<summary class="mhead">`)
+	css, err := embeddedAsset("page.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAll(t, string(css), `.wb-history > .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); min-height: 26px; }`,
+		`.wb-history > .mhead > .history-older { grid-column: 2; }`)
+	wantNone(t, string(css), `.history-clip::after`, `linear-gradient(var(--wb-bg), transparent)`, `.topic-stream > summary`)
+}
+
 func TestStreamRenderMetadataChronologyAndSandbox(t *testing.T) {
 	st := streamFixture()
 	st.Topics[0].Entries[0].ItemID = 17

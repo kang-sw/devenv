@@ -75,7 +75,7 @@ function panel(i,height,unknown){return '<article class="wb-entry panel" id="e'+
 function logs(from,to){var out='';for(var i=from;i<=to;i++)out+='<article class="wb-entry agent" id="e'+i+'" data-entry="e'+i+'" data-history-anchor="e'+i+'">line</article>';return out;}
 function chip(from,inner,open){return '<details class="system-run" data-key="system:e'+from+'" data-history-anchor="e'+from+'"'+(open?' open':'')+'><summary><span class="lbl">logs</span></summary>'+inner+'</details>';}
 function board(html,pages){
-  root=parse('<section class="topic"><details class="topic-stream" open><summary>stream</summary><div class="wb-history" data-history="t"><button class="history-older">older</button><div class="history-clip"><div class="history-live">'+html+'</div></div>'+(pages||[]).map(function(p){return '<template data-history-page>'+p+'</template>';}).join('')+'</div></details></section>');
+  root=parse('<section class="topic"><div class="topic-stream"><div class="wb-history" data-history="t"><div class="mhead"><button class="history-older">older</button></div><div class="history-clip"><div class="history-live">'+html+'</div></div>'+(pages||[]).map(function(p){return '<template data-history-page>'+p+'</template>';}).join('')+'</div></div></section>');
   root.querySelectorAll('template').reverse().forEach(function(t){t.content=new E('#fragment');t.children.slice().forEach(function(c){t.content.appendChild(c);});});
   root.querySelectorAll('[data-known]').forEach(function(f){f.style.height='100px';});
   var h=root.querySelector('.wb-history');h.style.setProperty=function(k,v){this[k]=v;};return h;
