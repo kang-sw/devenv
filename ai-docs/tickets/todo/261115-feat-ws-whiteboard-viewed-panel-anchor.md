@@ -2,6 +2,8 @@
 title: "Preserve the viewed whiteboard panel with one scroll owner"
 related:
   261114-refactor-ws-dashboard-whiteboard-asset-split: "Coordinate implementation with MAIN's cut line and use its published move map"
+sage-review-design: blocked
+sage-review-completeness: blocked
 ---
 
 # Preserve the viewed whiteboard panel with one scroll owner
@@ -10,10 +12,13 @@ related:
 
 MAIN relayed owner choice (800)=a on 2026-11-14 UTC: capture the single-rule
 viewed-panel policy from section 4 of `viewed-panel-anchor-heuristic.md` as
-accepted backlog. This ticket records that contract; it does not authorize
-implementation tonight. The existing untracked
-`261114-feat-ws-whiteboard-center-reference-scroll` draft concerns a different
-reference-centering behavior and is not changed or absorbed here.
+accepted backlog. MAIN subsequently relayed owner authorization to begin
+implementation on 2026-11-14 at 22:58 UTC, with parallel execution allowed and
+no heavy-slot wait. Complete normal readiness gates before implementation. The
+untracked root-worktree draft `261114-feat-ws-whiteboard-center-reference-scroll`
+and tracked idea `261114-feat-whiteboard-center-reference-navigation` concern
+reference-centering behavior and are not changed or absorbed here. The isolated
+implementation worktree need not contain the root's untracked draft.
 
 The supporting static report inspected develop
 `a332217477b18a721a2857adc1a53bbe020e7192`. It found that ordinary board
@@ -56,6 +61,14 @@ closed-topic-reveal feature.
   (802); reject a one-third-viewport shift threshold or reading-line-only
   deferral as the eligibility rule. The reading line below selects the scroll
   reference, not which visible panels receive render deferral.
+- **Supersede the older preservation strategy, not its unrelated behavior.**
+  The approved reading-line reference and short mutation transaction replace
+  the topmost-survivor selection and long-lived ordinary keep sessions from
+  `261113-feat-ws-dashboard-board-reorder-hold` Phase 1. The later (803)=a
+  visible-render deferral supersedes that ticket's immediate visible-content
+  update expectation. Preserve unrelated placement, visibility subscriptions,
+  history membership and explicit navigation semantics; do not retain the
+  superseded writers alongside the new owner.
 - **One writer per actual scroller — (800)=a.** Use one owner with states
   `idle`, `user-scrolling`, and `explicit-jump-follow`. Normal preservation is
   a short mutation transaction, not a competing long-lived target selector.
@@ -106,21 +119,24 @@ closed-topic-reveal feature.
 
 ## Constraints
 
-- **Ticket only for this assignment.** Remain in `todo/`. Authoring and merging
-  this ticket allocate no executable slot and authorize no source change,
-  browser/build/test run, release, or shared-daemon action. Populate facts and
-  apply the normal readiness gates before later implementation.
+- **Implementation authorization.** MAIN's 2026-11-14 22:58 UTC relay lifts
+  the earlier capture-only restriction and authorizes this implementation.
+  Populate facts and apply normal readiness gates before source changes.
+  Owner-approved parallel execution removes the heavy-slot waiting gate;
+  plan finite verification commands and process ownership before execution.
+  Shared-daemon actions, deployment and release remain MAIN-owned.
 - **Implementation requires (789) to have merged first.** This is MAIN's direct
   item, not a ticket. Its capture-time source pointer is `e0ed9ff8b` on
   `impl/develop/pending-jump-follow`, owned by MAIN. A source commit or proposed
   test slot is not proof it landed. Confirm the actual merge frontier and
   preserve the approved jump-follow contract rather than reimplementing it.
 - **Respect (793)'s cut line.** The related asset-split ticket is owned by
-  EXEC1 and starts only on MAIN's cut-line signal. Do not newly start this UI
-  implementation while that split is active. Coordinate with MAIN/EXEC1 and
-  consume the published region-to-file move map instead of pinning work to
+  EXEC1. MAIN's 2026-11-14 22:58 UTC relay explicitly lifts the scheduling
+  hold on this implementation. Confirm the actual integration baseline and
+  consume the published region-to-file move map (pending 261114-refactor-ws-dashboard-whiteboard-asset-split) instead of pinning work to
   stale monolithic-file positions or making this feature part of the mechanical
-  split. That refactor remains behavior-preserving.
+  split. Coordinate any remaining source interaction with MAIN/EXEC1; that
+  refactor remains behavior-preserving.
 - Before editing `agents-plugin-tool/internal/`, read
   `ai-docs/manuals/shipped-surface-boundary.md` and
   `ai-docs/manuals/release-compatibility.md`. Keep the change within downstream
@@ -143,6 +159,34 @@ closed-topic-reveal feature.
   different evidence. No approved screenshot/mockup is supplied for this
   behavior; later acceptance compares the actual implementation baseline and
   result, not an invented visual design.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+
+## Prior Decisions
+
+- e0ed9ff8 (2026-11-14, commit): "Reuse the existing per-scroller keep lifecycle so board-swap anchoring cannot steal or end an explicit jump" — bearing: constrains
+- 261113-feat-ws-dashboard-board-reorder-hold (2026-11-14, Result): "boardKeepSettle picks the anchor after the morph with boardAnchor (a held entry first, else the first one that is not moving)." — bearing: constrains; its anchor/session strategy is explicitly superseded above.
+- 5695371f (2026-11-13, commit): "Reuse board SSE regions and trusted frame metadata; materialize inert older/closed history only for known targets and preserve viewport anchors." — bearing: constrains
+- 261113-feat-ws-whiteboard-topic-history-load-more (2026-11-13, Decisions): "No inner scroll; \"load more\" above the latest window" — bearing: constrains
+- 261113-feat-ws-whiteboard-topic-panels-and-log (2026-11-13, Decisions): "Panels are append-only versions (207=b): panels are rewritten only as a full rewrite via ID override: an existing panel with the same ID folds." — bearing: constrains
+- 184e0755 (2026-11-15, commit): "Equal content must have equal stuck/unstuck height; actual recap changes may legitimately change header height." — bearing: constrains
+- 261114-bug-ws-whiteboard-fold-reopens-on-panel-republish (2026-11-14, Decisions): "a user fold follows stable panel identity across republishing, and the updated panel receives a conspicuous updated badge instead of reopening" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsdashboard/assets/dashboard.js and anchoring CSS; agents-plugin-tool/internal/wswhiteboard/assets/stream.js; focused tests. The asset-split ticket is ready without a Result or published move map on this tree. |
+| scope.surface | cross-module | window.wbHistory.keep/keeping/jump in agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L611-L745 are consumed by dashboard board/history/frame navigation. T0 assets only. |
+| scope.new_public_symbol | no | No exported module API or external tool/API change is authorized; reuse existing wbHistory and navigation entry points. |
+| scope.new_type_contract | yes | Phase 1 introduces per-scroller idle/user-scrolling/explicit-jump-follow states and pending-rendering/count state with an owner-input exception; these are frontend-only contracts. |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/board_keep_test.go; agents-plugin-tool/internal/wswhiteboard/view_kit_test.go (TestViewKitUnderNode, TestViewKitJumpFollowUnderNode); scripts/board-headless.mjs. |
+| complexity.reuse_points | confirmed | Read boardView/boardKeep/boardKeepSettle, restoreScroll, topicResized and applyFrameHeights in dashboard.js; history collapse/navigation and viewKit keep/jump in stream.js. git merge-base --is-ancestor 5573bce92 HEAD succeeds: (789) is merged on this tree. |
+| complexity.side_effect_risk | high | Replacing scroll writers and deferring visible rendering changes asynchronous board morph, history clipping and frame-height behavior on independent scrollers. |
+| risk.correctness | high | One delta must preserve multiple visible panels across reorder and offscreen height changes while honoring cancellation, cooldown and explicit-jump priority. |
+| risk.fit | high | The new reading-line/short-transaction policy replaces the older topmost-survivor/long-lived keep contract; the ready asset split has no landed move map here. |
+| risk.test | high | Existing fake-window/source-extraction tests do not establish real multi-panel geometry, 1 px viewport intersection, momentum or frame rendering preservation; matched browser evidence is required. |
+| risk.security_or_contract | moderate | Preserve trusted frame identity and opaque-frame boundaries while introducing visible-render deferral and immediate owner-input exceptions; dashboard.js#L4140-L4152 validates height-message identity. |
 
 ## Phases
 
@@ -164,7 +208,8 @@ single compensation delta cannot preserve the affected visible panels on the
 actual tree, report the conflicting geometry before expanding the approved
 mechanism; do not silently weaken the golden rule to one reference.
 
-Verification, in a later explicitly bounded slot:
+Verification, using planned bounded runs under the owner-approved parallel
+execution policy (no heavy-slot wait):
 
 - Extend focused deterministic regressions for reading-line selection below
   sticky clearance, a line in a gap, a sliver of the prior topic, stable identity
@@ -207,3 +252,16 @@ Verification, in a later explicitly bounded slot:
   owned-process cleanup evidence. Test caps and process ownership are planned
   before execution; this capture authorizes no broad suite or live-owner probe.
   MAIN alone decides deployment and release.
+
+## Blocked (2026-11-15)
+
+### Design Reviewer — block
+
+| # | Title | Severity | Resolution |
+|---|-------|----------|------------|
+| 1 | One delta cannot freeze panels whose relative positions change | critical | missing |
+
+### Completeness Reviewer — pass
+
+| # | Title | Severity |
+|---|-------|----------|
