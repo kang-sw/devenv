@@ -30,9 +30,9 @@ become the latest entry in the top recap; the owner wants them included.
   current summary and session-state topic list use the same projection.
   Compatibility tier: **T0**. Rejected: retaining the prior agent-log-only
   summary, which omits a later panel recap requested by the owner.
-- Execution remains queued after B through its own worker/run path, with a
-  serialized merge. This capture authorizes only the separate documentation
-  commit, not source implementation, build/test or ready promotion.
+- MAIN authorizes implementation after B and serialized integration. This
+  documentation delegate stops at capture; source edits, verification and any
+  ready promotion belong to the later B2 execution path.
 - Selection/storage/API mechanisms remain unchosen; (692) confirms the
   observable projection, not a new field, command or store format.
 
