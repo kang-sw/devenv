@@ -38,6 +38,9 @@ type QueryTopic struct {
 	Body    string
 	// Tickets are the topic's linked ticket stems, in the order written.
 	Tickets []string
+	// State and StateDiagnostic are derived from immutable system history.
+	State           *TopicState      `json:"state,omitempty"`
+	StateDiagnostic *StateDiagnostic `json:"state_diagnostic,omitempty"`
 	// LatestAgent is the current-state line, never a panel or system event.
 	LatestAgent *Entry
 	// Entries contain selected stream metadata/log text; panel Text is never
@@ -211,6 +214,7 @@ func queryItems(state *State, payload any) (QueryResult, []string) {
 	// Only a query that names items (ids or text) drops a topic none of
 	// whose items match; otherwise every topic the filters reach is listed.
 	namesItems := f.ids != nil || f.text != ""
+	states := state.TopicStates()
 	for _, name := range order {
 		if f.topics != nil && !f.topics[name] {
 			continue
@@ -246,7 +250,7 @@ func queryItems(state *State, payload any) (QueryResult, []string) {
 			r.FoldedItems += len(all)
 			continue
 		}
-		t := makeQueryTopic(state, name, all, f.body)
+		t := makeQueryTopic(state, name, all, f.body, states[name])
 		if f.depth != DepthTopics {
 			t.Items = matched
 			if f.defaultStatus {
@@ -307,6 +311,7 @@ func FormatQuery(r QueryResult) string {
 	quoted := map[[2]string]int{}
 	for _, t := range r.Topics {
 		sb.WriteString(topicLine(t) + "\n")
+		writeQueryState(&sb, t)
 		writeQueryCurrent(&sb, t.LatestAgent)
 		if t.Body != "" {
 			sb.WriteString("topic body:\n<<<\n" + t.Body + "\n>>>\n")
@@ -329,6 +334,20 @@ func FormatQuery(r QueryResult) string {
 		sb.WriteString(line + "\n")
 	}
 	return sb.String()
+}
+
+func writeQueryState(sb *strings.Builder, t QueryTopic) {
+	if t.State != nil {
+		s := t.State
+		line := fmt.Sprintf("state: %s; entry: %s", s.Value, s.Entry)
+		if run := s.Run; run != nil {
+			line += fmt.Sprintf("; run: %s; started_at: %s; owner: %q; initial_eta_minutes: %d; eta_minutes: %d; extension_count: %d; deadline_at: %s", run.ID, run.StartedAt, run.Owner, run.InitialETAMinutes, run.ETAMinutes, run.ExtensionCount, run.DeadlineAt)
+		}
+		writeIndented(sb, "  ", line)
+	}
+	if d := t.StateDiagnostic; d != nil {
+		writeIndented(sb, "  ", fmt.Sprintf("state_diagnostic: %s; entry: %s", d.Code, d.Entry))
+	}
 }
 
 func topicLine(t QueryTopic) string {

@@ -766,6 +766,121 @@ query additions preserve existing selectors/ticket output and system events
 never replace LatestAgent. Cover both structural warnings and non-triggering
 counterparts; runtime work remains deferred until execution is authorized.
 
+### Result (3210cd6c8) - 2026-11-15
+
+Phase 2 is complete on retained branch `impl/develop/swarm-easel-clay`, based
+on `3203168a5f93d83e94d0b2af39f0a33406b00b62`. MAIN explicitly authorized
+Phase 2, then authorized same-worker/tree/lease resumption at
+2026-11-14T23:20:35Z after the comparison-compile stop. This is later execution
+authority, not an alteration of the frozen Phase 1 Result. MAIN retains parent
+integration and runtime activation; no integration or runtime acceptance is
+claimed here.
+
+Landed checkpoints:
+
+- `733c75229`: optional scoped `wb:state`, strict four-state/owner/ETA bounds,
+  idempotent declarations, known-open-topic validation, immutable system
+  transition/reset history, numeric board-global replay, raw Entry member
+  retention, malformed/unsupported diagnostics and response-only structural
+  warnings. Close ends the run; reopen restores neither state nor withdrawn
+  asks. Existing stale-topic warnings remain.
+- `d76b9e071`: derived optional query state/run/deadline and diagnostics in
+  discovery, stream and explicit item/content queries, with additive text
+  metadata. Existing selectors, bodies, tickets, direct retrieval and
+  LatestAgent semantics remain.
+- `bbfa641bf`: canonical command/query guidance, generated wsflow/Pi copies
+  and manifests, plus product-mode rendering assertions. Linked-ticket UI
+  exposure stays hidden while accepted write/store/query effects remain.
+- `3210cd6c8`: historical-writer and cutover proof, MCP regression coverage,
+  exact Entry comparison repairs and the additive grammar-list expectation.
+  This checkpoint first makes the complete Phase 2 slice reviewable.
+
+Compatibility and decisions:
+
+- **T0 demonstrated for the tested persistence boundary.** A retained,
+  hash-pinned archive contains the actual unmodified schema-2 whiteboard
+  package and assets at `fee98b018ba9821b2e703ae9f674bb0cfe459841`.
+  Tests build its historical Entry/FolderStore/command implementation offline
+  against compatible current internal helpers, not mocked current types.
+  Old content/item/render/adoption/close/reopen writes preserve new committed
+  log prefixes byte-for-byte. Historical recovery completes exact opaque
+  pending append bytes after a partial suffix and does not duplicate them.
+  Source, archive and per-file hashes travel in
+  `agents-plugin-tool/internal/wswhiteboard/testdata/historical-schema2/`.
+- Typed old legacy conversion is a separate, demonstrably lossy boundary:
+  unknown legacy Entry members already discarded by that decoder are not
+  recovered. Rollback bytes stay unchanged. New state is emitted only after
+  folder cutover, without legacy backfill or dual writes. No schema, protocol
+  or version number changed.
+- Raw JSON and future Entry members are retained through new readers and
+  deep clone without byte aliasing. Adding raw JSON makes Go Entry structs
+  non-comparable; existing exact equality assertions now use DeepEqual rather
+  than weakening their expectations or changing serialized shape.
+- The old-close adapter is limited to the inspected non-imported system
+  producer with ItemID zero and the exact whole-text prefix. Authored
+  log/panel/item/answer phrases do not reset state. These producer fields are
+  unauthenticated local-file conventions, not forgery protection.
+- Phase 3 alone will produce/interpret cumulative ETA extensions and add
+  receipts, scheduler clocks, liveness gates and pushed delivery. At this
+  checkpoint the reserved `extend` operation is unsupported and suppresses
+  stale-deadline fallback; `wb:eta` remains refused. No board display,
+  ordering or grouping work was added.
+
+Executed verification and limits:
+
+- All test runs used `GOTOOLCHAIN=local`, `GOPROXY=off`, `GOSUMDB=off`,
+  isolated cache/config fixtures and bounded process groups. Full outputs and
+  receipts, including per-test durations and outer/Go timeouts, were read by
+  the worker or its serial verification leaf. Original failures remain
+  recorded, not relabelled as passes.
+- Final full whiteboard command:
+  `go -C agents-plugin-tool test -p=1 ./internal/wswhiteboard -count=1 -timeout=180s -v`.
+  Run `11-whiteboard` exited 0 in 20.575 seconds under a 240-second outer cap:
+  321 top-level tests and 267 subtests passed, no skips. This includes the
+  actual historical-writer build/recovery tests and existing Node guards.
+- `go -C agents-plugin-tool test -p=1 ./internal/mcp -count=1 -timeout=180s -v -run '^TestWhiteboard'`
+  exited 0 in 29.068 seconds under a 240-second outer cap: 55 tests and 25
+  subtests passed. One browser-fixture exporter skipped because its opt-in
+  was absent. This includes both product-mode rendering checks and new MCP
+  state/response/restart/cutover/atomic-refusal tests.
+- Both required canonical/wsflow generators passed separately with their
+  regeneration flags. Final four manifest/tree/wsflow/Pi resource guards
+  passed in 0.647 seconds (120-second outer/90-second Go caps). Twelve
+  wsflow static skill-package tests passed. Final
+  `go -C agents-plugin-tool vet -p=1 ./...` exited 0 with no diagnostics in
+  1.312 seconds under a 240-second cap. Git diff checks passed.
+- Earlier failures were: direct Entry comparisons after RawMessage was added,
+  a new answer fixture missing its required value, the repair's missing
+  reflect import, and an exact command-list expectation missing `wb:state`.
+  The comparison issue triggered the reported stop; MAIN's explicit resume
+  authorized its repair. No failing behavior was hidden by changing a test
+  to accept an incorrect implementation.
+- Every recorded runner receipt has an empty owned-PGID scan. Final readback
+  `13-final-owned-readback.json` at Unix time `1794699540.9261172` also found
+  no matching rows for all 17 recorded process groups. This establishes the
+  recorded groups' absence, not arbitrary detached-process absence or PID
+  identity authentication. No process was signaled.
+- Local raw evidence remains untracked under
+  `ai-docs/.plans/2026-11/15-0813-topic-state-phase2-evidence.logs/`, with the
+  corresponding runner and evidence summary alongside it. These local paths
+  do not claim raw logs travel with Git. No shared daemon rebuild, restart,
+  swap, smoke, provider call, download, port 29417 access, full dashboard suite
+  or supported-host delivery acceptance was performed.
+
+Independent review:
+
+- Fresh xlarge/xhigh one-pass Lite review returned **clean**, with no
+  findings, on
+  `3203168a5f93d83e94d0b2af39f0a33406b00b62..3210cd6c866a8a25992a762ca128eece13068545`.
+  The reviewer independently read the scoped diff, ticket, manuals and retained
+  verification, without new execution. Its sole write grant was the exact
+  report file:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@a9b1cb7e/review-paths/9f70c74f-01-topic-state-phase2-lite.md`.
+- Fit/style and a separate fresh-reader prose audit were not allocated. No
+  re-review is required or claimed under Lite. There are no unresolved
+  findings. Phase 3 remains unstarted in this invocation; the ticket stays
+  in `ready/` for the separately coordinated next phase.
+
 ### Phase 3: All-overdue-topic mailbox nudges and cumulative ETA extensions
 
 After Phase 2, use existing mailbox push to inject a lead turn when ETA is

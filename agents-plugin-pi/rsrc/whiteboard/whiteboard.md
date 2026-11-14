@@ -32,8 +32,8 @@ Workers and subagents do not use the board.
 
 ## Open-topic work state
 
-Declare each open topic's work state in its current-state summary, updating
-its agent log line when the state changes:
+Declare each open topic's work state with `wb:state` and update its agent
+log line when the state changes, retaining a human current-state summary:
 
 | state | lead obligation |
 |---|---|
@@ -44,8 +44,8 @@ its agent log line when the state changes:
 
 Keep at most one open ask per topic, counting checks as asks; reuse or patch
 its item as the work changes. Close a topic only after the user's final
-answer, so unfinished work stays visible. These are lead obligations,
-expressed in ordinary board text.
+answer, so unfinished work stays visible. These ask and summary obligations
+remain lead judgment alongside the machine state.
 
 Approval of a concrete deliverable is execution authority: start the approved
 build or change rather than ask permission again. A request to build or change
@@ -59,17 +59,18 @@ Write authored board text in the conversation language, the `workflow.lang` valu
 
 Every tag carries the prefix `wb:` and follows the command syntax rules.
 `wb:topic` is the group: its `name` names the topic once for the
-`wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, and `wb:close` inside it. A
+`wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, and `wb:close` inside it. A
 batch may hold several `wb:topic` groups.
 
 | command | attributes | content |
 |---|---|---|
-| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:close`; none with `label` |
+| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, `wb:close`; none with `label` |
 | `wb:body` | none | current content, replaced whole; empty clears it |
 | `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new`, editing current content only |
 | `wb:panel` | `recap`, `id?` | optional payload; `recap` must be nonempty |
 | `wb:log` | none | one nonempty agent-authored line of inline Markdown |
 | `wb:add` | `id?`, `class` | fields `wb:title`, `wb:option`..., `wb:recommend?`, `wb:why?`, `wb:link`... |
+| `wb:state` | `value`, `owner?`, `eta_minutes?` | none |
 | `wb:close` | `result` | none |
 | `wb:answer` | `id` or `ids`, `value`, `assumed?` | the user's verbatim words |
 | `wb:patch` | `id`, `status?`, `class?`, `clear?` | any `wb:add` field, each replacing that field |
@@ -112,6 +113,17 @@ Markdown up to the closing tag.
   first, then a stemless topic's name, then a stemmed topic's label, so an
   old title still reaches an adopted topic. Stems and labels are one
   namespace: a stem or label another topic already uses is refused.
+- `wb:state` is an empty command inside `wb:topic`, with `value` one of
+  `discussing`, `waiting`, `implementing`, or `awaiting-confirmation`.
+  Entering `implementing` requires `owner` (the responsible executor) and
+  `eta_minutes`, a positive decimal integer from 1 through 153722867: the
+  cumulative wall-clock budget in minutes from the original start. Other
+  states accept neither attribute. The topic must already be known and open;
+  item/content activity earlier in the batch may create or reopen it, but
+  `wb:state` alone does neither. Repeating the current declaration is a no-op;
+  for `implementing`, owner and ETA must match, so repeats do not reset the
+  start. To change executor, exit implementing and re-enter with the new
+  owner and ETA. ETA changes within a run are not available.
 - `class`: `policy`, `technical`, `announced`, or `check`, the kinds of ask
   in the workflow manual's `### Asking the user`. A `check` is a gate, not a
   decision class: a request that the user look at, verify, or confirm a
@@ -193,7 +205,9 @@ Markdown up to the closing tag.
   an answer after the close finds the item withdrawn. Adding an item,
   changing nonempty current content, or appending a panel or agent line reopens a
   closed topic without restoring withdrawn items. Server events alone do
-  not reopen it. The next close replaces the result, not the history.
+  not reopen it. Closing clears the declared state and ends its run;
+  reopening restores neither state nor run. The next close replaces the
+  result, not the history.
 - Current content: one body per topic, holding the durable current state,
   not the accumulating conversation. `wb:body` replaces content whole; empty
   clears it and the same content again is no change. `wb:edit` replaces one exact `wb:old`
@@ -231,9 +245,12 @@ Markdown up to the closing tag.
   The server records successful item/content/panel/close/reopen transitions
   as system events. Agent lines give a concise interpretation of current
   state; verbatim duplication of the server's event records is not required.
-- Keep asks in items: a finished-artifact confirmation is `wb:add` with
-  `class="check"` (or `policy` for a real choice), not a panel or log line.
-  Options, recommendations, `wb:why`, links, and check answers remain item
+- Keep asks in items: every question or decision request to the user is an
+  item, a new `wb:add` or a `wb:patch` re-ask of an existing one, since only
+  an item collects the user's answer. A `wb:log` line, panel, or current
+  content may cite the open item as `{{12}}` but never phrases the ask
+  itself. A finished-artifact confirmation is `class="check"` (or `policy`
+  for a real choice). Options, recommendations, `wb:why`, links, and check answers remain item
   data, not automatically created panels. `wb:recap` is removed without an
   alias, and `wb:append` is refused; the panel's `recap` attribute is not
   the retired command.
@@ -249,6 +266,14 @@ whiteboard.query payload: {topic?, text?, closed?, entries?, since?, last?, kind
 
 `payload` is a JSON object. Choose discovery, explicit item/content access,
 or direct retrieval; their selectors are not silently mixed.
+
+Topic metadata in discovery, stream, and explicit item/content queries adds
+optional derived `state` (`value`, latest state `entry`, and an implementing
+`run` with `deadline_at`). Legacy topics without a declaration omit it.
+Unknown state omits `state` and reports `state_diagnostic` with `entry` and
+code `malformed` or `unsupported`, rather than reusing an older deadline.
+These are metadata, not selectors; system state events do not replace the
+latest-agent summary.
 
 ### Discovery and entry filters
 
@@ -307,6 +332,11 @@ or direct retrieval; their selectors are not silently mixed.
   its owner, but no other selectors. `panel` and `entry` cannot be combined;
   missing locators, a wrong topic/kind, or incompatible filters are refused
   rather than redirected to a different entry.
+
+Updates return response-only structural warnings for discussing topics with
+zero open items and waiting topics when this board has no open implementing
+topic. Every open item, including a check, counts as an ask. These warnings
+neither refuse the update nor create asks; they are not timed notifications.
 
 ## Each turn
 
