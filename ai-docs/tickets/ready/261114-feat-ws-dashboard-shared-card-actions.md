@@ -27,6 +27,9 @@ Owner approvals on 2026-11-14: (660)=ok, (661)=a, (662)=a, (663)=ok. There is no
 4. **Topic-relative opening is one-time placement.** A preview opened from a topic is placed immediately above that topic when the topic is in the ordinary region; this applies to new cards and reuse/replacement of the existing preview slot. The preview is independently movable afterward. Rejected: a persistent follow/attachment relation. Authority: (661)=a.
 5. **Pin preservation wins at the boundary.** Opening an ordinary preview from a pinned topic places it at the ordinary-region head rather than silently pinning it. Existing matching-pinned-preview reuse remains pinned. Raise never changes pin state. Rejected: changing pin state merely to guarantee adjacency across regions. Authority: (662)=a.
 6. **Compatibility is T0.** Reuse existing card placement/pin persistence where possible; no non-additive store/protocol change or new persistent parent/follow relation is authorized.
+7. **Remove the redundant content-only header control.** After inspecting the actual isolated candidate, the owner requested removal of the upper-right content-only fold button now that whole-card fold exists. Preserve independent inner history/panel disclosures. Rejected: retaining two confusing header fold actions.
+8. **Distinguish raise visually.** Replace the inverted-fold-chevron raise icon with an upward arrow pointing toward a horizontal top line. Preserve its raise behavior and accessible action label. Rejected: using a flipped fold icon for a different action.
+9. **Owner visual acceptance permits source integration after these two fixes.** The owner reported no apparent usability problem in the interactive preview and explicitly directed fixing Decisions 7-8, then merging, with subsequent bugs addressed during use. The known 420px pointer-drag assertion failure and unexecuted remaining browser matrix must remain disclosed; do not report them as passing or keep repeating that matrix as a merge prerequisite. Focused final regression/build checks and the allocated independent lite review remain applicable. This approves source integration, not shared/live daemon replacement or push.
 
 ## Constraints
 
@@ -88,6 +91,7 @@ Verification:
 - Cover direct link, context/menu and sandbox-frame link opening plus invalid/disappeared origin fallback. Preserve URL/file sandbox boundaries.
 - Verify reload behavior using the existing placement persistence contract, and verify normal live topic updates without resetting card/inner disclosure state or duplicating event handlers.
 - Run affected existing dashboard/card/preview tests and new focused browser regressions. Do not use a frozen-lane retry or live daemon replacement as acceptance. Keep source verification separate from actual runtime delivery.
+- Verify that the redundant content-only header fold action is absent, whole-card fold and independent inner disclosures remain usable, and raise uses an upward-arrow-to-top-line icon at wide/narrow widths. Capture the updated controls for visual inspection. Under Decision 9, preserve the known narrow drag failure and remaining matrix omissions as residual evidence rather than weakening assertions or claiming full browser acceptance.
 
 ## Blocked (2026-11-14): source verification stopped on non-convergence
 
@@ -200,3 +204,17 @@ integration or live delivery is claimed.
   attempt logs. No frozen-lane or shared/live runtime action occurred.
 
 Further work requires MAIN disposition; this owner-authorized round is exhausted.
+
+### Owner visual acceptance and source-integration direction - 2026-11-14
+
+After inspecting the isolated actual candidate under the preview-first direction,
+the owner reported no apparent usability problem, requested removal of the
+redundant content-only header fold button and a distinct upward-arrow-to-line
+raise icon, then explicitly directed source merge and subsequent bug discovery
+during use. Decisions 7-9 record that direction. This supersedes the operational
+hold on those bounded fixes and source integration, not the preserved failures
+or the frozen/live boundaries. No additional blanket approval is required.
+
+The earlier 420px drag failure remains unclassified. The owner did not turn it
+into a passing test or authorize assertion weakening. Keep final verification,
+review results, residual risks and actual delivery status distinct.
