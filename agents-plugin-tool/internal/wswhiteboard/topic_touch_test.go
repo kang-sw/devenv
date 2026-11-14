@@ -53,9 +53,14 @@ func topicUpdated(t *testing.T, st *State, name string) string {
 	v := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
 	for _, tv := range append(v.Topics, v.DeferredTopics...) {
 		if tv.Name == name {
-			out := render(t, v)
-			if !strings.Contains(out, `<time class="tago" datetime="`+tv.UpdatedAt+`" title=`) {
-				t.Fatalf("topic bar does not render UpdatedAt %q", tv.UpdatedAt)
+			// Only this topic's own bar counts: another topic's bar may show
+			// the same time.
+			_, bar, ok := strings.Cut(render(t, v), `data-topic="`+name+`"><div class="tophead"><div class="tbar">`)
+			if ok {
+				bar, _, ok = strings.Cut(bar, `<textarea class="note tnote"`)
+			}
+			if !ok || !strings.Contains(bar, `<time class="tago" datetime="`+tv.UpdatedAt+`" title=`) {
+				t.Fatalf("topic %q bar does not render UpdatedAt %q", name, tv.UpdatedAt)
 			}
 			return tv.UpdatedAt
 		}
