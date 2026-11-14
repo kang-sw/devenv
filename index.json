@@ -630,6 +630,9 @@
     "261114-refactor-ws-common-session-interface": {
       "registered_at": "2026-11-14T11:13:55Z"
     },
+    "261114-refactor-ws-dashboard-file-explorer-instance-isolation": {
+      "registered_at": "2026-11-14T13:07:39Z"
+    },
     "261114-refactor-ws-dashboard-large-frontend-files": {
       "registered_at": "2026-11-14T09:32:30Z"
     },
