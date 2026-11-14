@@ -10,7 +10,7 @@ related:
 
 The native Windows 696 re-pass of source
 `9854ff350fa1b0eccfb5c71649c5190c405925b9` reproduced two historical
-`internal/wstrackerhost` acceptance failures. Matching active tickets were not
+`internal/wstrackerhost` and four `internal/wsledger` acceptance failures. Matching active tickets were not
 found by exact test-name and attachment-blob discovery.
 
 Classification: confirmed native test/acceptance failures, with an apparent
@@ -51,9 +51,24 @@ fetch, so the read must exercise the network/busy path. Actual observations fail
 that precondition or return nil instead of the intended busy result. They do not
 prove that a legitimately local cached attachment should report busy.
 
-The same failures are recorded in the prior Windows Go revalidation temporary
-report, but no active ticket owned them. This pass did not repeat the earlier
-10-minute package cutoff: it used the already-approved 25-minute package budget.
+The same command subsequently completed `internal/wsledger` after 983.554s,
+without a package timeout, and recorded four matching absent-blob/fetch-path
+precondition failures:
+
+- `TestAttachPartialCloneFetchesBlobOnRead`, 12.33s, `attach_test.go:294`:
+  `the filtered fetch brought the attachment blobs`.
+- `TestAttachRestoreWithoutBlobsRestoresEventRefAlone`, 11.58s,
+  `attach_test.go:488`: `the filtered fetch brought the blob; the test needs it absent`.
+- `TestAttachRestoreWithoutBlobsAttachmentOnly`, 11.07s,
+  `attach_test.go:532`: the same absent-blob assertion.
+- `TestAttachFetchFailureIsNotNotFound`, 11.18s, `attach_test.go:652`:
+  `read over a failing fetch = <nil>, want the fetch's error and not ErrAttachmentNotFound`.
+
+These ledger failures are grouped by the same missing-blob fetch precondition,
+not by a claimed proven common implementation cause. The same six failures are
+recorded in the prior Windows Go revalidation temporary report, but no active
+ticket owned them. This pass did not repeat the earlier 10-minute package cutoff:
+it used the already-approved 25-minute package budget.
 
 Environment: native ThinkPad P14s Gen 2a, Windows 11 Pro 10.0.26200, Go 1.26.2
 windows/amd64, Git 2.38.1.windows.1, Python 3.12.10. Source archive SHA256 was
