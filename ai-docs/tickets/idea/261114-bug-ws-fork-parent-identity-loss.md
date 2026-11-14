@@ -1,7 +1,7 @@
 ---
 title: Native fork session keys lose their parent identity
 related:
-  261114-research-ws-sub-lead-session-role: "owner 705=b selects role design instead of narrow 676 repair; no implementation authorized"
+  261114-research-ws-clerk-session-role: "owner 705=b and 720–722 select clerk design for new forks; existing sessions unchanged, no implementation authorized"
 ---
 
 # Native fork session keys lose their parent identity
@@ -42,11 +42,15 @@ Full local evidence artifact: `75748f2c-01-live-lead-and-fork-parent-incident-ca
 ## Design Disposition
 
 Owner (705)=b, relayed by MAIN on 2026-11-14 at 12:02, rejects the narrow
-(676) fix as the selected path and requests a sub-lead role design inside
-`261114-epic-ws-common-session-foundation`. The design is captured in
-`261114-research-ws-sub-lead-session-role`: retain parent-lead lineage for
-display/ownership while supplying lead-equivalent authoring without top-level
-lead identity. This is not implementation or T2 approval.
+(676) fix as the selected path and requests a role design inside
+`261114-epic-ws-common-session-foundation`. Owner (720)=c, (721)=a and
+(722)=c, relayed at 12:08, name that role **clerk**. The design is captured in
+`261114-research-ws-clerk-session-role`: retain parent-lead lineage for
+display/ownership and lead-equivalent authoring of own resources plus
+explicitly delegated parent resources, without session creation/management,
+global config or top-level lead identity. New forks become clerks; existing
+sessions remain unchanged. Conceptual naming selects no wire/store encoding;
+this is not implementation or T2 approval.
 
 The earlier simple-wiring explanation is incomplete: `5fa2e7cb8` and
 `260926-bug-pi-execute-worker-steals-mailbox-owner` explicitly exempted native
@@ -66,7 +70,7 @@ Preserve existing sessions and keys. No retroactive rewrite, deletion, restart, 
 
 Verify loaded-code identity and actual fork admission/bootstrap lineage
 against the preserved key/row evidence, and hand findings to
-`261114-research-ws-sub-lead-session-role` under owner (705)=b. Do not execute
-the rejected narrow (676) fix. Return any product/API or compatibility choice
-through MAIN before promotion or implementation; no new dependency on the
-existing common-interface implementation is introduced.
+`261114-research-ws-clerk-session-role` under owner (705)=b and (720)–(722).
+Do not execute the rejected narrow (676) fix. Return any product/API or
+compatibility choice through MAIN before promotion or implementation; no new
+dependency on the existing common-interface implementation is introduced.

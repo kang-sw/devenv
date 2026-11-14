@@ -1,5 +1,5 @@
 ---
-title: "Sub-lead session role: parent lineage with lead-equivalent authoring"
+title: "Clerk session role: parent lineage with lead-equivalent authoring"
 parent: 261114-epic-ws-common-session-foundation
 related:
   261114-bug-ws-fork-parent-identity-loss: "observed lineage gap; narrow 676 repair rejected in favor of this design"
@@ -8,7 +8,7 @@ related:
   260926-bug-pi-children-inherit-mailbox-identity: "all spawned children clear inherited mailbox identity, including forks"
 ---
 
-# Sub-lead session role
+# Clerk session role
 
 ## Background
 
@@ -21,6 +21,11 @@ Original owner wording:
 English translation: this is a gap in our roles; a kind of sub-lead role is
 needed with tool-authoring authority equivalent to a lead, including documents.
 
+Owner answers relayed by MAIN on 2026-11-14 at 12:08 settle the conceptual
+role name as **clerk**, authoring scope and new-fork mapping below. The earlier
+quoted term is historical; the creation date remains 261114 under the owner's
+explicit semantic-rename instruction.
+
 ## Design coverage
 
 Separate parent lineage for display/ownership from authoring authority and
@@ -32,9 +37,10 @@ encoding or migration is selected by this research capture.
 Trace native session/discussion forks and nested/dormant relaunches into
 server classification and each tool gate. Include context visibility, parent
 config inheritance, board/tracker enablement, mailbox startup/ownership and
-negative authorization cases. Compare existing leads, parented lead keys,
-delegates/leaves and store-scoped support conversations; equivalent authoring
-does not imply identical root/session-management powers.
+negative authorization cases. Compare clerks with existing leads, parented
+lead keys, delegates/leaves and store-scoped support conversations. Clerk
+powers are authoring only, not session creation/management or global config;
+existing sessions remain unchanged.
 
 ## Constraints
 
@@ -49,7 +55,8 @@ does not imply identical root/session-management powers.
   top-level eligibility, tool gates, root issuance, wire semantics or shared
   store interpretation may be breaking. Prefer a demonstrated T0/T1 route;
   actual T2 requires explicit owner approval, minor-release planning and the
-  affected schema/protocol guard. (705)=b is not that approval.
+  affected schema/protocol guard. The conceptual clerk name and (705)/(720)–
+  (722) intent do not select on-disk encoding or approve a T2 change.
 - Design against `ai-docs/manuals/release-compatibility.md`,
   `ai-docs/manuals/ws-mcp.md` and
   `ai-docs/manuals/shipped-surface-boundary.md`; authored workflow changes
@@ -85,9 +92,23 @@ does not imply identical root/session-management powers.
 
 ### Confirmed Decisions
 
-- Owner (705)=b requests a sub-lead design: parent-lead lineage for
-  display/ownership, lead-equivalent authoring for whiteboard read/write,
-  notes, tracker, wiki and documents, without becoming a top-level lead.
+- Owner (705)=b requests parent-lead lineage for display/ownership and
+  lead-equivalent authoring for whiteboard read/write, notes, tracker, wiki
+  and documents without becoming a top-level lead; the confirmed role name
+  is now **clerk**.
+- **(720)=c and (722)=c**, exact owner quote `720,722=c`, relayed by MAIN
+  on 2026-11-14 at 12:08: clerks author their own resources plus explicitly
+  delegated parent resources through an explicit resource matrix (720).
+  New forks become clerks; existing sessions remain unchanged (722).
+- **(721)=a**, exact owner answer relayed at the same time:
+
+  > 721=a^흠, 생각해보니까 세션 생성을 안 주고, "clerk". role로 이름을 명명하는 게 나을 수도 있겠다는 생각이 좀 드네요.
+
+  English translation of the note: on reflection, omit session creation and
+  name the role clerk. MAIN settles **clerk**, not the earlier design label.
+  Authoring parity only: no session creation, session management or global
+  configuration powers. This is a conceptual name, not a selected wire,
+  capability or stored role value.
 - Design belongs inside `261114-epic-ws-common-session-foundation`. The
   narrow (676) fix is not the selected execution path. Existing (681)/(682)
   contracts, prerequisites and queue remain unchanged.
@@ -105,15 +126,12 @@ does not imply identical root/session-management powers.
 
 ### Open Questions
 
-- Which resources does equivalent authoring cover: the sub-lead's own state,
-  parent-owned state by explicit delegation, or both? How are tracker/wiki
-  store scope and note layers constrained?
-- Which operations remain exclusive to a top-level lead, including root/key
-  issuance, global config, spawning and session lifecycle? Is creating nested
-  sub-leads within this intent or a separate decision?
-- Which existing/native/discussion forks should map to sub-lead, and how do
-  nested lineage, dormant resume and historical lateral leads retain their
-  intended behavior without an unapproved key migration?
+- What concrete resource matrix expresses own-resource access and explicit
+  parent delegation under (720), including tracker/wiki stores and note
+  layers, without broadening (721)'s authoring-only powers?
+- How should new native/discussion forks carry clerk identity and parent
+  lineage under (722), including nesting/resume, while preserving all
+  existing sessions unchanged? Wire/store/capability encoding remains open.
 - What mailbox presence, display and ownership behavior is needed beyond
   protected parent ownership and existing reply channels? No mailbox opt-in
   or parent-inbox access is implied by authoring equivalence.
@@ -126,6 +144,11 @@ does not imply identical root/session-management powers.
 - Owner (705)=b rejects the narrow (676) repair as the selected path: merely
   threading the parent does not supply the missing lead-equivalent authoring
   role and can trigger existing non-top-level gates.
-- Treating this as an already approved reversal of `5fa2e7cb8`, promoting a
-  sub-lead to top-level, or silently choosing a new protocol/store role is not
-  authorized by the design request.
+- (720)=c rejects own-only and unrestricted parent-resource access in favor
+  of own resources plus explicitly delegated parent resources.
+- (721)=a rejects session creation/management/global-config powers for clerk.
+  (722)=c rejects changing all existing forks or an opt-in-only mapping in
+  favor of new forks becoming clerks while existing sessions stay unchanged.
+- The old fork exemption remains historical compatibility evidence, not a
+  reason to ignore (722)'s new-fork intent. Promoting a clerk to top-level or
+  silently choosing a new protocol/store role is not authorized.

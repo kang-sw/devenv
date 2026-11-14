@@ -4,8 +4,8 @@ sage-review-design: required
 related:
   261110-epic-ws-dashboard-agent-host: "existing hosted-agent product scope; this epic supplies a shared foundation without replacing its child plans"
   261113-bug-ws-hosted-session-sentinel-bootstrap-mints-foreign-key: "identity-adoption regression evidence, not authority to restrict root issuance"
-  261114-bug-ws-fork-parent-identity-loss: "lineage evidence; owner 705=b selects sub-lead design rather than narrow 676 fix"
-  261114-research-ws-sub-lead-session-role: "design-only child: parent lineage with lead-equivalent authoring, not top-level lead authority"
+  261114-bug-ws-fork-parent-identity-loss: "lineage evidence; owner 705=b selects clerk design rather than narrow 676 fix"
+  261114-research-ws-clerk-session-role: "design-only child: parent lineage and own/explicitly delegated parent-resource authoring; 720–722 confirmed, no top-level powers"
   261114-feat-ws-conversation-audit-event-store: "audit backend consumes common-session-interface Phase 2 (682), not whole-epic completion"
   261114-feat-ws-dashboard-conversation-audit-view: "UI still consumes audit-event-store Phase 2"
 ---
@@ -36,12 +36,15 @@ separately. Existing session keys and historical state are preserved.
 
 ## Child Tickets
 
-- `261114-research-ws-sub-lead-session-role` — owner (705)=b, relayed
-  2026-11-14 at 12:02: design parent-lead lineage for display/ownership with
-  lead-equivalent whiteboard, notes, tracker, wiki and document authoring,
-  without top-level lead identity. Reassess the historical fork exemption and
-  tool gates; no wire/store mechanism or T2 change is chosen. This research
-  adds no prerequisite gate to the existing interface or epic implementation.
+- `261114-research-ws-clerk-session-role` — owner (705)=b, with (720)=c,
+  (721)=a and (722)=c relayed 2026-11-14 at 12:08: design clerk parent-lead
+  lineage for display/ownership and lead-equivalent whiteboard, notes,
+  tracker, wiki and document authoring for own resources plus explicitly
+  delegated parent resources. No session creation/management/global config.
+  New forks become clerks; existing sessions remain unchanged. Reassess the
+  historical fork exemption and tool gates; no wire/store encoding or T2
+  change is chosen. This research adds no prerequisite gate to the existing
+  interface or epic implementation.
 - `261114-refactor-ws-common-session-interface` — first child: Phase 1 defines
   the minimal shared access/identity/event-adapter boundary; Phase 2 adopts
   current access with state/behavior parity. Its prior art is the landed
@@ -89,11 +92,13 @@ phases above are retained without copying or rewriting those tickets here.
   ticket's Phase 2; no separate migration child is created. Audit waits for
   that phase, not for all harnesses, voice or authority UI. Its backend/API/UI
   ordering and approvals 594–611 survive.
-- Owner (705)=b selects sub-lead role design, not the narrow (676) parent
-  wiring fix. The research separates lineage/ownership, authoring and
-  top-level powers; any breaking gate/role/store/protocol change remains an
-  explicit T2 risk requiring separate owner approval. No implementation is
-  authorized by this design capture. Owner `681,682=ok` also reinforces the
+- Owner (705)=b selects clerk role design, not the narrow (676) parent
+  wiring fix. (720)–(722) settle own/explicitly delegated parent-resource
+  authoring only and new-fork mapping with existing sessions unchanged.
+  The research separates lineage/ownership, authoring and top-level powers;
+  any breaking gate/role/store/protocol change remains an explicit T2 risk
+  requiring separate owner approval. No implementation is authorized by this
+  design capture. Owner `681,682=ok` also reinforces the
   existing UTC-filter and audit/interface prerequisites; the queue is unchanged.
 - Compatibility target is additive T0 with existing entry points and stored
   state readable. Any non-additive protocol/store/MCP change requires separate
