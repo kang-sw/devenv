@@ -468,7 +468,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "fix/rail-drag-648",
         "phase": "active",
-        "touched_at": "2026-11-14T08:16:31Z"
+        "touched_at": "2026-11-14T08:17:23Z",
+        "impl": {
+          "branch": "impl/fix/rail-drag-648/yam-chaps-ion"
+        }
       }
     },
     "261114-bug-ws-dashboard-search-palette-minors": {
