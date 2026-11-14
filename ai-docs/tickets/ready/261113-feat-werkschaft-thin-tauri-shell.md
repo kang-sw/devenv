@@ -159,6 +159,186 @@ start/stop/swap is introduced. Record the first-window evidence without
 claiming the broader webview matrix passed. No build, install, fetch, or
 implementation verification is performed by this documentation assignment.
 
+#### Source preparation checkpoint - 2026-11-14
+
+The attach-only package is prepared under `agents-plugin-tool/desktop/`, with
+pinned npm-local CLI and Cargo dependencies, a native Connection → Retry menu,
+credential-free endpoint/health discovery, exact-origin navigation policy,
+script-free local error view, zero native command permissions, and unit-test
+contracts. The temporary geometric W icon is a dogfood placeholder.
+
+Dependency preparation succeeded: npm installed the pinned local CLI; the
+single authorized repair fetch locked 429 packages and exited 0 in 12.1 seconds
+(`/tmp/werkschaft-cargo-fetch-repair-z_9t7i73.log`). The earlier fetch failed
+before downloading because the manifest preceded its Rust target; root
+explicitly authorized completing source before the one repair fetch. No build,
+check, tests, app launch, live-daemon GET, heavy child, or daemon lifecycle
+operation has run. This is not a Phase 1 Result or runnable-artifact evidence.
+
+`agents-plugin-tool/desktop/README.md` and `scripts/build-slot.py` give the exact
+one-attempt test/debug-app recipe: 1,500 cumulative seconds including at most
+15 seconds of owned-process-group termination, two compile jobs, frozen locks,
+local output paths and fresh logs. Expected artifact after successful build:
+`desktop/target/debug/bundle/macos/Werkschaft.app`; direct dogfood binary:
+`desktop/target/debug/werkschaft-desktop`. The separate bounded native capture
+recipe rediscovers the endpoint at execution time and exercises missing,
+unhealthy, retry, external-browser navigation and daemon survival. Independent
+lite review and Phase 1 acceptance remain pending MAIN's actual slot. Phases
+2–4 remain outside this invocation.
+
+#### Executed evidence checkpoint - 2026-11-14
+
+Source under observation: `0f16157b2adaf79475ebc665cdeec141b0ee3611`.
+MAIN's actual 16:11:06 START allocated the existing 1,500-second build runner
+and bounded eight-minute native observation together. The literal command was
+run once from `agents-plugin-tool/desktop/`:
+`python3 scripts/build-slot.py --allocated`. No fix or rerun followed.
+
+Build evidence directory:
+`/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/werkschaft-build-slot-1tu9dugz/`.
+The complete `unit-tests.log` and `debug-app.log` were read. Nine Rust unit tests
+passed; the frozen, two-job debug build bundled `Werkschaft.app` (24.49 MiB).
+The runner exited 0 after 74.96 seconds. Both owned groups (5931 and 14566) were
+confirmed absent and retired, with no lingering groups. Signing-skip warnings
+were expected under the explicit `--no-sign` scope. The newly authored mocked
+Python runner regression was **NOT RUN**: MAIN's literal command took precedence
+and did not include it. No separate check or additional test command was run.
+
+The built local artifact and direct binary are retained, not installed into any
+owner plugin cache:
+
+- `/Users/kang-sw/.ws-worktrees/devenv/spruce-december-suave/agents-plugin-tool/desktop/target/debug/bundle/macos/Werkschaft.app`
+- `/Users/kang-sw/.ws-worktrees/devenv/spruce-december-suave/agents-plugin-tool/desktop/target/debug/werkschaft-desktop`
+
+Native observation evidence directory:
+`/var/folders/qz/mxbhy9fs5zq_ymx5vr1_ztv80000gn/T/werkschaft-native-observation-doyy5y7h/`.
+The retained `observe.py`, `summary.json`, baseline/final health records, all four
+case logs, and `post-slot-process-scan.json` describe the actual procedure.
+It ran for 20.18 seconds. Default-cache shell PID 39213 (started 16:15:46.307868Z)
+and overridden-cache shell PID 41145 both remained alive during their bounded
+observations and logged `Werkschaft attached to http://127.0.0.1:29417`.
+The isolated missing/unhealthy endpoint shells (39683 and 40405) remained alive
+without an attach log; their native logs were empty. This is process/attach-log
+evidence, not an observed error view or rendered first window. Isolated cache
+files contained only port/PID; the shared endpoint was not modified.
+
+Fresh default-cache endpoint and direct, proxy-free `/health` reads before and
+after the native cases matched service `ws-dashboard`, port 29417, PID 98532,
+and content hash
+`893e6dc87abdabf3d3f9359db9c5af315f17df50da19bba6f801045d7292ad23`.
+Those are observed identities, not source pins. Owned shells were terminated
+through their retained subprocess handles; no daemon lifecycle command,
+profiling command, or explicit daemon write request was issued. All owned shells/supervisor exited and the
+isolated caches were removed. At 16:16:42.418958Z the final read-only process
+scan found no owned build/shell/supervisor groups or transitive descendants;
+`lsof` found no owned listeners (exit 1, no matches). Root subsequently released
+the heavy slot; no further execution is authorized by this checkpoint.
+
+**UNVERIFIED acceptance:** rendered first-window pixels and captures, ordinary
+native UI navigation, native Connection → Retry interaction, external-browser
+handoff, and normal window-close behavior. Screen Recording/Accessibility
+permissions were not known already granted, so no screenshot, native UI
+automation, permission probe/prompt/approval workaround, or browser substitution
+was attempted. The unhealthy fixture was changed to a valid port/PID only in
+its owned cache, but no native menu interaction was attempted; the separate
+override launch is not a successful native retry. Native-process termination
+with unchanged daemon health is not evidence of normal UI-close behavior.
+No endpoint token appeared in the retained native logs, but live page-JavaScript
+inspection was not performed; the no-token/native-authority claims additionally
+rest on source and the executed unit-test contracts, not a visual inspection.
+
+This checkpoint deliberately adds **no Phase 1 Result** and does not declare
+Phase 1 accepted. The outstanding native acceptance boundary remains explicit;
+the ticket stays in `ready/`, with Phases 2–4 untouched. Independent static lite
+review is being recorded separately, with no further build, test, app, browser,
+health request, permission probe, or child execution beyond that static reviewer.
+
+#### Independent static lite review checkpoint - 2026-11-14
+
+One fresh reviewer inspected the fixed source range
+`2e1d9ea88730105cdb80a182bbd9a004d25fe064..0f16157b2adaf79475ebc665cdeec141b0ee3611`
+and retained execution evidence, using read-only source/doc/git/file access.
+No additional test, check, build, app, browser, daemon GET, permission probe,
+native automation, or nested reviewer was run. Detailed artifact:
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@e9caa154/review-paths/bc9f649f-01-261113-feat-werkschaft-thin-tauri-shell-lite-static.md`.
+
+Verdict: **non-clean, one Important finding; no Critical or Minor findings**.
+The runner still carries a group that is present after a foreground step into
+the next long build. If the helper subsequently exits and its numeric PGID is
+reused, final presence probing cannot establish continued ownership. The
+reviewer recommends resolving/cleaning such a group before advancing, or
+stopping that attempt, with a present-after-step/disappear/reuse regression.
+The actual successful attempt observed both groups absent immediately, so
+this unexercised path does not invalidate its recorded cleanup evidence.
+The finding remains **unfixed** because root authorized only evidence
+recording/static review after slot release; no source remediation or rerun
+was performed in that scope.
+
+The reviewer separately assessed exact-origin/new-window/subframe navigation,
+zero native command permissions, cache overrides, endpoint-token exclusion,
+bounded health identity checks and the unchanged daemon boundary. No actionable
+finding was raised in those areas. The public WK callback lacks frame identity
+and is not a user-gesture-only detector; retained native behavior remains
+unverified. The review explicitly distinguishes the pre-navigation attach log
+from asynchronously completed navigation and rendered pixels.
+
+The mocked Python regression remains **NOT RUN**. All previously listed native
+acceptance gaps remain **UNVERIFIED**. Static review is not Phase 1 acceptance;
+no Result, later phase, closure or merge is authorized by this checkpoint.
+
+### Result (e7121971) - 2026-11-14
+
+**Phase 1 implementation handoff complete; native UI acceptance remains
+owner-pending.** MAIN's 16:23:19 continuation authorizes Phase 1 integration
+with the disclosed native UI gaps assigned to owner check 807. This Result
+records that authorized handoff, not invented pixel evidence or whole-ticket
+completion. The branch is retained for root integration; no merge was performed.
+
+The attach-only macOS package and preserved local `.app`/binary paths are recorded
+in the execution checkpoint above. Nine Rust tests and the frozen two-job debug
+app build passed on source `0f16157b`, with complete logs retained. Default and
+overridden cache launches logged the exact discovered origin; missing/unhealthy
+launches did not attach. Read-only baseline/final health matched the same daemon
+identity, and the recorded cleanup scan found no owned remaining processes or
+listeners. These observations retain their explicitly limited meaning.
+
+The Important runner finding is resolved in `e7121971`: a group still present
+immediately after a foreground step stops the attempt and reaches bounded
+cleanup before another build can start. A successful parent with a surviving
+group returns 125. All IDs remain in evidence and confirmed-absent groups stay
+retired. The normal absent-group two-step recipe remains unchanged.
+
+Authorized light verification ran once from `agents-plugin-tool/desktop/`:
+`python3 -m unittest discover -s scripts -p test_build_slot.py -v`.
+All three existing ownership tests and both new orchestration tests passed:
+**Ran 5 tests in 0.003s; OK; exit 0**. Complete output:
+`/tmp/werkschaft-runner-mocked-6_pke6cw.log`. This later result supersedes the
+historical Python NOT RUN status above. Product subprocess creation, group
+probes/signals and signal-handler changes were mocked; no real group was signaled.
+
+The same independent reviewer statically verified only the fix delta and
+requested regression, finding the original Important resolved and the current
+verdict **clean**, with no remaining Critical/Important or Minor findings.
+The full original report and appended fix verification are retained at:
+`/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@e9caa154/review-paths/bc9f649f-01-261113-feat-werkschaft-thin-tauri-shell-lite-static.md`.
+The reviewer confirmed that Rust, Cargo/npm manifests and locks, Tauri config,
+embedded UI and icon inputs are unchanged since the built native source; the
+Python-only repair requires no native rebuild. No Cargo/build/check, app,
+browser, GET, permission probe or daemon operation followed slot release.
+
+**Owner-pending / UNVERIFIED under check 807:** rendered dashboard/error pixels
+and captures; successful native-menu retry; ordinary, subframe and new-window
+navigation; external-browser handoff; and normal UI-close daemon survival.
+Attach messages precede asynchronous navigation and are not proof of rendering.
+SIGTERM-cleaned native processes plus unchanged daemon health are not normal
+window-close evidence. No Screen Recording/Accessibility permission was known
+already granted, and no permission probe/prompt/workaround or browser screenshot
+substitution was used. This handoff preserves those gaps rather than claiming
+broader WKWebView acceptance.
+
+The built `.app`, target artifacts and full checkout remain preserved. Phases
+2–4 are untouched; the ticket remains in `ready/` and is not closed.
+
 ### Phase 2: Daily-use reliability (later Phase 1b cut)
 
 Add single-instance launch/focus next; it is not a Phase 1a blocker. Verify
