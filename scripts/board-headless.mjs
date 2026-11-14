@@ -1203,7 +1203,9 @@ async function scenarioSharedActions(ctx) {
     qa(await page.locator(card).evaluate((c) => !c.hasAttribute('data-max') && c.getAttribute('data-size') === 'fold' && document.activeElement === c.querySelector('.bc-max')), cardKind + ' sheet dismissal restores folded state and action focus');
   }
   // Restore SHARED before the single-toggle duplicate-handler check.
+  qa(await page.locator(topic).getAttribute('data-size') === 'fold', 'drag/maximum checkpoints leave topic fold intact');
   await page.evaluate(() => __bh.sharedTopic.querySelector('.t-fold').click());
+  qa(await page.locator(topic).getAttribute('data-size') === 'base', 'single toggle expands topic before source updates');
   // An actual timestamp-changing update uses the same production morph.
   const disclosureBefore = await page.locator(topic).evaluate((t) => [...t.querySelectorAll('details')].map((d) => [d.getAttribute('data-key'), d.open]));
   const previewAt = await page.evaluate(() => __bh.sharedPreview.at);
@@ -1219,11 +1221,13 @@ async function scenarioSharedActions(ctx) {
   // A changed frame graft settles asynchronously; act on the landed head,
   // not the outgoing head that the region event is replacing.
   await waitQuiet(page);
-  await page.evaluate(() => {
+  const actionsBefore = await page.evaluate(() => {
     WsCards.decorate(); WsCards.decorate();
     const t = document.querySelector('section.topic[data-topic="SHARED"]');
-    t.querySelector('.t-fold').click();
+    return { size: t.getAttribute('data-size'), expanded: t.querySelector('.t-fold').getAttribute('aria-expanded'), folds: t.querySelectorAll('.t-fold').length, raises: t.querySelectorAll('.t-raise').length };
   });
+  qa(actionsBefore.size === 'base' && actionsBefore.expanded === 'true' && actionsBefore.folds === 1 && actionsBefore.raises === 1, 'repeated updates retain expanded pre-toggle state and exactly one action set', actionsBefore);
+  await page.locator(topic + ' .t-fold').evaluate((b) => b.click());
   const updatedActions = await page.locator(topic).evaluate((t) => ({ size: t.getAttribute('data-size'), folds: t.querySelectorAll('.t-fold').length, raises: t.querySelectorAll('.t-raise').length }));
   qa(updatedActions.size === 'fold' && updatedActions.folds === 1 && updatedActions.raises === 1, 'repeated topic updates/decorate retain one handler and one action set', updatedActions);
   await capture(ctx, tab, kind + '-folded');
@@ -1238,6 +1242,9 @@ async function scenarioSharedActions(ctx) {
   await reloaded.waitForSelector(topic + '[data-size="fold"]');
   qa(await reloaded.locator(topic + ' .t-fold').getAttribute('aria-expanded') === 'false', 'whole topic fold restores after reload');
   await capture(ctx, tab, kind + '-reload');
+  // Reload creates a new __bh through INIT; install both helper layers on
+  // that document, as openBoard does, before reading its placement.
+  await reloaded.evaluate(IN_PAGE);
   await reloaded.evaluate(OVERVIEW_PAGE);
   const restored = await reloaded.evaluate(() => ({ at: WsCards.list('preview')[0].at, rank: WsCards.list('preview')[0].rank,
     order: [...__bh.board_().children].filter((n) => n.matches('section.topic,.bcard[data-kind="preview"]')).map((n) => n.dataset.topic || 'preview') }));

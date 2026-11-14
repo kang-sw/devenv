@@ -752,7 +752,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
    The board column's header row holds "+ Terminal" and its folder
    popover; it stays at the column's top while the cards scroll. */
 .bcard[data-kind="terminal"] .bc-body, .bcard[data-kind="terminal"][data-max] .bc-body { display: flex; flex-direction: column; overflow: hidden; }
-.bcard[data-kind="terminal"][data-size="fold"] .bc-body { display: none; }
+.bcard[data-kind="terminal"][data-size="fold"]:not([data-max]) .bc-body { display: none; }
 .tm-host { flex: 1 1 0; min-height: 0; overflow: hidden; background: var(--wb-card); }
 .tm-host .xterm { height: 100%; padding: 4px 0 4px 10px; }
 .tm-host .xterm-viewport { background: transparent !important; }
