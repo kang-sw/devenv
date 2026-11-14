@@ -12,6 +12,12 @@ The lead guide promises that settled agents park without losing their resumable 
 
 A replacement execute-worker `6851cb21-99bc-40f4-98ae-40380a288424` received the prior artifacts and the owner's requested revision. The mockup task continues; the original executor was not repaired.
 
+### Second occurrence — EXEC 1, 2026-11-14
+
+At 06:55:21Z, peer EXEC 1 reported that continuing settled read-only precheck executor `6154f4ea-cd82-4f8e-8750-31ad7f994ce4` through `ws-agent-send` returned the same exact error: `ws-pi-agent: owned session home is unavailable during resume`. This is a peer-reported second instance, not an independently reproduced cause.
+
+The continuation was intended to start immutable-source preparation for commit `28d8576226cc62312bf2d85d9c4cb306882f3df0`. It failed before any preparation command ran; the prior read-only precheck evidence remains available. EXEC 1 is using a replacement gated execute-worker, without a fork, repeated incident probes, harness repair, or daemon activation.
+
 ## Constraints
 
 - Preserve the original session and ownership records before diagnosing cleanup or lifetime behavior.
