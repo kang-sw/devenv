@@ -621,17 +621,20 @@ const BROWSERS = [];
 // Playwright Frame, which fills the window, so its coordinates are the
 // tab's), and tab is the browser tab, which owns the mouse.
 async function openBoard(ctx) {
-  const { chromium } = await loadPlaywright();
-  let browser;
-  try {
-    browser = await chromium.launch({ headless: !ctx.args.headed });
-  } catch (e) {
-    console.error(`board-headless: Chromium failed to launch: ${e.message.split("\n")[0]}`);
-    console.error("Install it with:  npx playwright@latest install chromium");
-    process.exit(2);
+  let browser = ctx.browser;
+  if (!browser) {
+    const { chromium } = await loadPlaywright();
+    try {
+      browser = await chromium.launch({ headless: !ctx.args.headed });
+    } catch (e) {
+      console.error(`board-headless: Chromium failed to launch: ${e.message.split("\n")[0]}`);
+      console.error("Install it with:  npx playwright@latest install chromium");
+      process.exit(2);
+    }
+    BROWSERS.push(browser);
   }
-  BROWSERS.push(browser);
-  const tab = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height } });
+  const tab = await browser.newPage({ viewport: { width: ctx.width, height: ctx.height }, locale: ctx.language === 'ko' ? 'ko-KR' : undefined });
+  if (ctx.language) await tab.context().addCookies([{ name: 'ws_dashboard_lang', value: ctx.language, url: new URL(ctx.args.url).origin }]);
   tab.on("pageerror", (e) => ctx.errors.push(String(e)));
   const consoleErrors = [];
   tab.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
@@ -990,6 +993,28 @@ const OVERVIEW_PAGE = () => {
   bh.ovItems = items;
   bh.ovId = id;
   bh.ovFind = (key) => items().find((n) => id(n) === key);
+  bh.ovScroller = (n) => {
+    for (let p = n.parentElement; p && p !== document.body && p !== root; p = p.parentElement) {
+      if (/auto|scroll|overlay/.test(getComputedStyle(p).overflowY) && p.scrollHeight > p.clientHeight) return p;
+    }
+    return document.scrollingElement;
+  };
+  bh.ovViewport = (s) => s === document.scrollingElement ? { top: 0, bottom: innerHeight } :
+    { top: s.getBoundingClientRect().top + s.clientTop, bottom: s.getBoundingClientRect().top + s.clientTop + s.clientHeight };
+  bh.ovLandingError = (n) => {
+    const s = bh.ovScroller(n), v = bh.ovViewport(s), pad = parseFloat(getComputedStyle(s).scrollPaddingTop) || 0;
+    return n.getBoundingClientRect().top - v.top - pad;
+  };
+  bh.ovHeadState = (n = document.activeElement) => {
+    const s = bh.ovScroller(n), v = bh.ovViewport(s), pad = parseFloat(getComputedStyle(s).scrollPaddingTop) || 0;
+    const head = n.querySelector('.tophead > .tbar, .bc-hd'), h = head.getBoundingClientRect(), face = document.querySelector('.board-toolbar-face').getBoundingClientRect();
+    const owner = document.elementFromPoint((h.left + h.right) / 2, (h.top + h.bottom) / 2);
+    const overlapsFaceX = Math.min(h.right, face.right) > Math.max(h.left, face.left);
+    return { key: id(n), focused: document.activeElement === n, scroller: s === document.scrollingElement ? 'document' : s.id, viewport: v, pad,
+      item: rect(n), head: rect(head), face: rect(document.querySelector('.board-toolbar-face')), owner: owner && { tag: owner.tagName, cls: owner.className },
+      ownsCenter: !!owner && (owner === head || head.contains(owner)),
+      exposed: h.top >= v.top + pad - 1 && h.bottom <= v.bottom + 1 && (!overlapsFaceX || h.top >= face.bottom - 1) };
+  };
   bh.ovState = () => {
     const s = bh.scroller(), t = document.querySelector('.board-toolbar'), v = bh.viewTop(s), b = bh.viewBottom(s), tr = rect(t.querySelector('.board-toolbar-face'));
     const floating = t.hasAttribute('data-floating'), line = floating ? Math.max(v, tr.bottom) : v;
@@ -1607,8 +1632,148 @@ async function scenarioToolbar(ctx) {
   }
 }
 
+async function setOverviewFace(page, width) {
+  if (!width) return;
+  await page.evaluate((width) => {
+    const bar = document.querySelector('.board-toolbar'); bar.style.width = width + 'px'; bar.style.maxWidth = '100%';
+  }, +width);
+  await page.waitForFunction(() => {
+    const bar = document.querySelector('.board-toolbar');
+    return !bar.hasAttribute('data-floating') && Math.abs(bar.getBoundingClientRect().height - bar.firstElementChild.getBoundingClientRect().height) < .1;
+  }, null, { polling: 'raf' });
+}
+
+async function scenarioOverviewFocus(ctx) {
+  const { page, tab, kind } = await overviewReady(ctx);
+  await setOverviewFace(page, ctx.args['face-width']);
+  const evidence = { kind, width: ctx.width, faceWidth: ctx.args['face-width'] || 'natural', modes: [] };
+  try {
+    for (const mode of ['reduce', 'no-preference']) {
+      await tab.emulateMedia({ reducedMotion: mode });
+      await page.focus('.board-overview');
+      await page.evaluate(() => {
+        const n = __bh.section('T18');
+        if (!n) throw new Error('focus fixture requires real T18 topic');
+        const s = __bh.ovScroller(n), v = __bh.ovViewport(s);
+        s.scrollTop += n.getBoundingClientRect().top - v.top + 36;
+      });
+      await waitQuiet(page);
+      const before = await page.evaluate(() => __bh.ovState());
+      assert(before.key === 'topic:T18', 'focus fixture must begin at the genuine T18 reading anchor');
+      const run = { mode, before, keys: [] }; evidence.modes.push(run);
+      await tab.keyboard.press('Enter'); await ovDone(page, true);
+      run.entry = await page.evaluate(() => __bh.ovHeadState());
+      qa(run.entry.key === before.key && run.entry.focused && run.entry.exposed && run.entry.ownsCenter,
+        mode + ' real Overview entry exposes the focused title head below face/host', run.entry);
+      run.saved = await page.evaluate(() => JSON.parse(sessionStorage.getItem('ws.dashboard.overview.' + document.documentElement.dataset.rid)));
+      qa(Math.abs(run.saved.offset - (before.y - before.top)) <= 1, mode + ' entry preserves the original return offset');
+      for (const key of ['ArrowUp', 'ArrowDown', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowUp']) {
+        const expected = await page.evaluate((key) => {
+          const list = __bh.ovItems().filter((n) => __bh.board_().contains(n)), i = list.indexOf(document.activeElement);
+          return __bh.ovId(list[Math.max(0, Math.min(list.length - 1, i + (key === 'ArrowDown' ? 1 : -1)))]);
+        }, key);
+        await tab.keyboard.press(key);
+        await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0))));
+        const state = await page.evaluate(() => ({ ...__bh.ovHeadState(), active: WsOverview.active(), floating: document.querySelector('.board-toolbar').hasAttribute('data-floating') }));
+        run.keys.push({ key, expected, ...state });
+        qa(state.key === expected && state.focused && state.active && state.floating && state.exposed && state.ownsCenter,
+          mode + ' ' + key + ' exposes the exact focused title head, not the full-item center', state);
+      }
+      await tab.keyboard.press('Escape'); await ovDone(page, false); await waitQuiet(page);
+      run.restored = await page.evaluate((key) => {
+        const n = __bh.ovFind(key), s = __bh.ovScroller(n), v = __bh.ovViewport(s);
+        return { key: __bh.ovId(n), offset: n.getBoundingClientRect().top - v.top, state: __bh.ovState() };
+      }, before.key);
+      qa(run.restored.key === before.key && Math.abs(run.restored.offset - (before.y - before.top)) <= 1 && run.restored.state.storage === before.storage,
+        mode + ' Escape restores original reading identity/offset and card storage', run.restored);
+      await capture(ctx, tab, kind + '-focus-' + mode, run);
+    }
+  } finally {
+    await capture(ctx, tab, kind + '-focus-result', evidence);
+    if (ctx.closeTab) await tab.close();
+  }
+}
+
+// One explicitly allocated heavy-job slot: one Node/Chromium process, serial
+// contexts only. No subprocess browser runner, build or broad suite is started.
+async function scenarioOverviewFinal(ctx) {
+  const dir = path.resolve(ctx.args['capture-dir']); fs.mkdirSync(dir, { recursive: true });
+  const sources = ['wsdashboard/assets/cards.js', 'wsdashboard/assets/dashboard.css', 'wsdashboard/assets/overview.js', 'wsdashboard/assets/terminal.js', 'wswhiteboard/assets/rail.js'];
+  const urls = { adapter: ctx.args.url, board: ctx.args['other-url'] };
+  assert(urls.board, 'overview-final requires --other-url document-scroller fixture');
+  const manifest = { candidate: '8a295b2b825cd65af372cfae004659e0aa454fbc', coverage: [], focus: [], owner: [], browserInstances: 1 };
+  const save = () => fs.writeFileSync(path.join(dir, 'FINAL8a295-manifest.json'), JSON.stringify(manifest, null, 2));
+  try {
+    // Fetch/byte-match before Chromium launch. A stale daemon fails rather
+    // than quietly rebuilding or switching any runtime under this slot.
+    for (const [kind, url] of Object.entries(urls)) {
+      const target = new URL(url); target.searchParams.set('frame', '1');
+      const html = await (await fetch(target)).text(), hashes = {};
+      for (const f of sources) {
+        const relative = 'agents-plugin-tool/internal/' + f, ref = f.endsWith('/overview.js') ? manifest.candidate : '1975e3be465d3bde667529b5bc0af497e8fdf3bf';
+        const expected = run('git', ['show', ref + ':' + relative], { cwd: REPO });
+        assert(html.includes(expected), 'served source prerequisite mismatch (no build authorized): ' + kind + ' ' + relative);
+        hashes[relative] = { ref, sha256: createHash('sha256').update(expected).digest('hex') };
+      }
+      manifest.coverage.push({ kind, url: target.href, hashes });
+    }
+    save(); log('SOURCE PREFLIGHT PASS: ' + JSON.stringify(manifest.coverage));
+    const { chromium } = await loadPlaywright(), browser = await chromium.launch({ headless: true }); BROWSERS.push(browser);
+    for (const [kind, url] of Object.entries(urls)) for (const face of [null, 330]) {
+      const name = `FINAL8a295-focus-${kind}-${face ? 'wrap330' : 'normal'}`;
+      const sub = { ...ctx, browser, closeTab: true, width: 800, errors: [], args: { ...ctx.args, _: ['FINAL8a295-focus'], url, 'face-width': face, 'capture-dir': path.join(dir, name) } };
+      manifest.phase = name; save();
+      await scenarioOverviewFocus(sub);
+      assert(!sub.errors.length, name + ' page errors: ' + sub.errors.join(' | '));
+      manifest.focus.push({ name, kind, width: 800, face, modes: ['reduce', 'no-preference'], verdict: 'pass' }); save();
+    }
+    for (const [kind, candidateURL] of Object.entries(urls)) for (const width of [1280, 800, 320]) for (const revision of ['baseline', 'candidate']) {
+      const url = revision === 'baseline' ? ctx.args['baseline-base'] + new URL(candidateURL).pathname : candidateURL;
+      const sub = { ...ctx, browser, width, language: 'ko', errors: [], args: { ...ctx.args, url } };
+      manifest.phase = `FINAL8a295-owner-${kind}-${width}-${revision}`; save();
+      const { page, tab } = await openBoard(sub);
+      try {
+        const checks = page.locator('#r-board .ckrow[data-id] label.ck > input');
+        await page.waitForFunction(() => document.querySelectorAll('#r-board .ckrow[data-id] label.ck > input').length >= 3);
+        for (let i = 0; i < 3; i++) await checks.nth(i).check();
+        const controls = await checks.evaluateAll((ns) => ns.slice(0, 3).map((n) => ({ id: n.closest('[data-id]').dataset.id, checked: n.checked, topic: n.closest('[data-topic]').dataset.topic })));
+        assert(controls.every((n) => n.checked), 'owner capture must use genuinely checked production inputs');
+        for (const state of ['top', 'floating']) {
+          await page.evaluate((state) => {
+            const bh = __bh, s = bh.scroller();
+            if (state === 'top') s.scrollTop = 0;
+            else {
+              const rows = [...document.querySelectorAll('#r-board .ckrow[data-id]')].filter((n) => n.querySelector('label.ck > input')?.checked);
+              s.scrollTop += Math.max(...rows.map((n) => n.getBoundingClientRect().bottom)) - bh.viewTop(s) + 200;
+            }
+          }, state);
+          await waitQuiet(page);
+          await page.waitForFunction(() => [...document.querySelectorAll('.oq-seg.ans')].some((n) => n.getClientRects().length && /응답/.test(n.textContent) && n.querySelector('.n')?.textContent.trim() === '3'));
+          const metrics = await page.evaluate(() => {
+            const bar = document.querySelector('.board-toolbar'), face = bar.querySelector('.board-toolbar-face') || bar, f = face.getBoundingClientRect();
+            const badges = [...document.querySelectorAll('.oq-seg.ans')].filter((n) => n.getClientRects().length && /응답/.test(n.textContent)).map((n) => {
+              const r = n.getBoundingClientRect();
+              return { text: n.textContent, edge: n.closest('.oq-wrap').className, rect: r.toJSON(), overlap: { width: Math.max(0, Math.min(f.right, r.right) - Math.max(f.left, r.left)), height: Math.max(0, Math.min(f.bottom, r.bottom) - Math.max(f.top, r.top)) },
+                owned: [.25, .5, .75].map((x) => !!document.elementFromPoint(r.left + r.width * x, (r.top + r.bottom) / 2)?.closest('.oq-seg.ans')) };
+            });
+            return { face: f.toJSON(), slot: bar.getBoundingClientRect().toJSON(), floating: bar.hasAttribute('data-floating'), badges };
+          });
+          assert(metrics.badges.length && metrics.badges.every((b) => (!b.overlap.width || !b.overlap.height) && b.owned.every(Boolean)), 'owner badge collision/ownership: ' + JSON.stringify(metrics));
+          assert(!sub.errors.length, 'owner page errors: ' + sub.errors.join(' | '));
+          const stem = `FINAL8a295-owner-${kind}-${width}-${revision}-${state}`;
+          const row = { stem, kind, width, revision, state, controls, metrics, errors: sub.errors, capture: path.join(dir, stem + '.png') };
+          await tab.screenshot({ path: row.capture }); fs.writeFileSync(path.join(dir, stem + '.json'), JSON.stringify(row, null, 2));
+          manifest.owner.push(row); save(); log('OWNER PASS: ' + JSON.stringify({ stem, face: metrics.face, badges: metrics.badges }));
+        }
+      } finally { await tab.close(); }
+    }
+    manifest.verdict = 'pass'; delete manifest.phase; save();
+  } catch (e) { manifest.verdict = 'fail'; manifest.failure = e.message; save(); throw e; }
+}
+
 async function scenarioOverview(ctx) {
   const { page, tab, kind } = await overviewReady(ctx);
+  await setOverviewFace(page, ctx.args['face-width']);
   // Capture shell bridge messages, including unexpected Esc forwarding.
   await tab.evaluate(() => { window.__ovMessages = []; addEventListener('message', (e) => { if (e.data && e.data.wsShell) __ovMessages.push(e.data); }); });
   await tab.emulateMedia({ reducedMotion: 'reduce' });
@@ -1623,7 +1788,15 @@ async function scenarioOverview(ctx) {
     qa(before.key && before.y < before.top, where + ' entry has a partly-visible negative-offset anchor', before);
     await ovEnter(page);
     const folded = await page.evaluate(() => __bh.ovState());
-    qa(folded.here === before.key && Math.abs(folded.hereY - before.y) <= 1 && Math.abs(folded.width - before.width) <= 1, where + ' anchor screen y and board width hold within 1px', { before, folded });
+    const display = await page.evaluate((key) => {
+      const n = __bh.ovFind(key), s = __bh.ovScroller(n), v = __bh.ovViewport(s);
+      return { top: v.top, pad: parseFloat(getComputedStyle(s).scrollPaddingTop) || 0, head: __bh.ovHeadState(n),
+        saved: JSON.parse(sessionStorage.getItem('ws.dashboard.overview.' + document.documentElement.dataset.rid)) };
+    }, before.key);
+    const shown = display.top + Math.max(before.y - before.top, display.pad);
+    qa(folded.here === before.key && Math.abs(folded.hereY - shown) <= 1 && Math.abs(folded.width - before.width) <= 1 &&
+      Math.abs(display.saved.offset - (before.y - before.top)) <= 1 && display.head.ownsCenter && display.head.exposed,
+      where + ' folded anchor clears the face while retaining original return offset and board width', { before, folded, display, shown });
     // Test the sibling performance rule while folded, independently of
     // scroll restoration: do not change the unfolded board's intrinsic
     // sizes between recording an anchor and entering overview.
@@ -1687,17 +1860,17 @@ async function scenarioOverview(ctx) {
   await tab.keyboard.press('ArrowDown'); qa(await page.evaluate((k) => __bh.ovId(document.activeElement) === k, roving.next), 'ArrowDown roves to next stack item');
   await tab.keyboard.press('ArrowUp'); qa(await page.evaluate((k) => __bh.ovId(document.activeElement) === k, roving.first), 'ArrowUp roves back to anchor');
   await tab.keyboard.press('ArrowDown'); await tab.keyboard.press('ArrowDown'); await tab.keyboard.press('Enter'); await ovDone(page, false);
-  qa(await page.evaluate((k) => { const n = __bh.ovFind(k); return n.classList.contains('overview-flash') && Math.abs(n.getBoundingClientRect().top - __bh.viewTop(__bh.scroller())) <= 1 && getComputedStyle(n).animationName === 'none' && parseFloat(getComputedStyle(n).outlineWidth) >= 2; }, roving.third), 'Enter on third roving item lands top with static reduced-motion flash');
+  qa(await page.evaluate((k) => { const n = __bh.ovFind(k); return n.classList.contains('overview-flash') && Math.abs(__bh.ovLandingError(n)) <= 1 && getComputedStyle(n).animationName === 'none' && parseFloat(getComputedStyle(n).outlineWidth) >= 2; }, roving.third), 'Enter on third roving item lands top with static reduced-motion flash');
   await sleep(1250); qa(await page.evaluate((k) => !__bh.ovFind(k).classList.contains('overview-flash'), roving.third), 'static landing cue removed after 1.2s');
   // Clicking a faded head control must pick, not invoke its own action.
   await ovAt(page, 'middle'); await ovEnter(page);
   const pick = await page.evaluate(() => { const n = document.querySelector('.overview-here'); const key = __bh.ovId(n); n.querySelector('.tpin').click(); return key; });
   await ovDone(page, false);
-  qa(await page.evaluate((k) => { const n = __bh.ovFind(k); return !n.hasAttribute('data-pinned') && n.classList.contains('overview-flash') && Math.abs(n.getBoundingClientRect().top - __bh.viewTop(__bh.scroller())) <= 1; }, pick), 'head-control click picks/lands/flashes topic rather than pinning it');
+  qa(await page.evaluate((k) => { const n = __bh.ovFind(k); return !n.hasAttribute('data-pinned') && n.classList.contains('overview-flash') && Math.abs(__bh.ovLandingError(n)) <= 1; }, pick), 'head-control click picks/lands/flashes topic rather than pinning it');
   // Card header-only folding and landing use a real Card with inert body.
   await ovAt(page, 'top'); await ovEnter(page);
   await page.evaluate(() => __bh.board_().querySelector('.bcard').click()); await ovDone(page, false);
-  qa(await page.evaluate(() => { const n = document.querySelector('.bcard.overview-flash'); return n && Math.abs(n.getBoundingClientRect().top - __bh.viewTop(__bh.scroller())) <= 1; }), 'card click lands top and flashes like a topic');
+  qa(await page.evaluate(() => { const n = document.querySelector('.bcard.overview-flash'); return n && Math.abs(__bh.ovLandingError(n)) <= 1; }), 'card click lands top and flashes like a topic');
   // Inject through socket onmessage, not a DOM append or direct morph call.
   await ovAt(page, 'middle'); await ovEnter(page);
   const heldBefore = await page.evaluate(() => ({ order: __bh.ovState().order, hash: __bh.board_().dataset.h, count: document.querySelector('.board-count').textContent }));
@@ -1731,8 +1904,8 @@ async function scenarioOverview(ctx) {
     await tab.keyboard.press(keep ? 'Control+Enter' : 'Enter'); await ovDone(page, false);
     // The frame reporter can deliver a restored height after exit returns.
     // Give the shared keep writer its next frame, within the flash window.
-    await page.waitForFunction(() => Math.abs(__bh.section('T09').getBoundingClientRect().top - __bh.viewTop(__bh.scroller())) <= 1, null, { polling: 'raf', timeout: 1000 }).catch(() => {});
-    const r = await page.evaluate(() => { const n = __bh.section('T09'); return { palette: document.querySelector('#tkqpop').open, flash: n.classList.contains('overview-flash'), dy: n.getBoundingClientRect().top - __bh.viewTop(__bh.scroller()) }; });
+    await page.waitForFunction(() => Math.abs(__bh.ovLandingError(__bh.section('T09'))) <= 1, null, { polling: 'raf', timeout: 1000 }).catch(() => {});
+    const r = await page.evaluate(() => { const n = __bh.section('T09'); return { palette: document.querySelector('#tkqpop').open, flash: n.classList.contains('overview-flash'), dy: __bh.ovLandingError(n) }; });
     qa(r.palette === keep && r.flash && Math.abs(r.dy) <= 1, (keep ? 'Ctrl+Enter' : 'Enter') + ' palette board pick exits/lands/flashes with correct palette lifetime', r);
     if (keep) { await page.fill('#tkqin', ''); await tab.keyboard.press('Escape'); }
   }
@@ -1852,7 +2025,10 @@ function validateMotion(run, entering, anchorY) {
       if (delta > worstSync) { worstSync = delta; worstRow = { id: r.id, t: s.t, expected, actual: r.r.height, inline: r.height }; }
       assert(r.transition.split(',').every((x) => parseFloat(x) === 0), 'row height must be driven by rAF, not CSS transitions');
     }
-    if (anchorY !== null && s.here !== null) worstAnchor = Math.max(worstAnchor, Math.abs(s.here - anchorY));
+    if (anchorY !== null && s.here !== null) {
+      const expectedAnchor = typeof anchorY === 'number' ? anchorY : anchorY.from + (anchorY.to - anchorY.from) * e;
+      worstAnchor = Math.max(worstAnchor, Math.abs(s.here - expectedAnchor));
+    }
     for (const [i, g] of s.ghosts.entries()) {
       assert(!g.unsafe && g.children.length === 2 && /tophead|bc-hd/.test(g.children[0]) && g.children[1] === 'overview-ghost-body', 'ghost must be header-only plus a plain collapsing body box');
       const from = initial.ghosts[i].r;
@@ -1862,7 +2038,7 @@ function validateMotion(run, entering, anchorY) {
   }
   qa(worstSync <= 1, 'all animated heights share one progress curve within 1px', { entering, worstSync, worstRow });
   qa(worstCurve <= 1, 'clock follows cubic-bezier(.2,.8,.2,1), reversed on exit, within 1px', { worstCurve });
-  if (entering && anchorY !== null) qa(worstAnchor <= 1, 'anchor holds within 1px on every animation frame', { worstAnchor });
+  if (entering && anchorY !== null) qa(worstAnchor <= 1, 'anchor follows its exposed-offset curve within 1px on every animation frame', { worstAnchor, anchorY });
   const outside = initial.rows.filter((r) => !r.motion);
   if (entering) assert(outside.length > 0, 'entry fixture must include far-offscreen rows');
   qa(outside.every((r) => samples.every((s) => Math.abs(s.rows.find((x) => x.id === r.id).r.height - last.rows.find((x) => x.id === r.id).r.height) <= 1)), 'offscreen rows switch instantly, with no animation');
@@ -1881,10 +2057,14 @@ async function scenarioOverviewMotion(ctx) {
   const positions = selected === 'pins' ? [] : selected ? [selected.slice(6)] : ['middle', 'bottom'];
   for (const where of positions) {
     const before = await ovAt(page, where);
+    const shown = before.key && await page.evaluate(([key, offset]) => {
+      const n = __bh.ovFind(key), s = __bh.ovScroller(n), v = __bh.ovViewport(s);
+      return v.top + Math.max(offset, parseFloat(getComputedStyle(s).scrollPaddingTop) || 0);
+    }, [before.key, before.y - before.top]);
     const enter = await page.evaluate(() => __bh.ovMotion(true));
     await capture(ctx, tab, kind + '-' + where + '-enter', enter);
     let result;
-    try { result = validateMotion(enter, true, before.y); }
+    try { result = validateMotion(enter, true, before.key ? { from: before.y, to: shown } : null); }
     catch (e) { console.error('per-frame enter trace:\n' + JSON.stringify(enter, null, 2)); throw e; }
     qa(await page.evaluate((w) => Math.abs(__bh.ovState().width - w) <= 1, before.width), 'board width unchanged while pin list is in overview');
     if (selected && selected.startsWith('enter-')) { log('SKIP exit/end-state equivalence in focused enter-only case'); return; }
@@ -3089,6 +3269,8 @@ const SCENARIOS = {
   toolbar: scenarioToolbar,
   'web-containment': scenarioWebContainment,
   overview: scenarioOverview,
+  'overview-focus': scenarioOverviewFocus,
+  'overview-final': scenarioOverviewFinal,
   'overview-motion': scenarioOverviewMotion,
   keep: scenarioKeep,
   observer: scenarioObserver,
