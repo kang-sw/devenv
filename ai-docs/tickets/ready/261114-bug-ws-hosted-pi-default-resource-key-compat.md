@@ -114,3 +114,30 @@ Verification:
   native acceptance.
 - Obtain independent review before integration. Record exact commands,
   outcomes, source commits and any remaining gaps in the Result.
+
+## Blocked verification (2026-11-14)
+
+Exact Pi 1.0.4 native acceptance is **blocked on dependency closure**, not
+established by the synthetic fixtures or current-host results. The isolated
+cached tarball confirms the missing helper and native canonicalization source,
+but both native test cases fail with `ERR_MODULE_NOT_FOUND` for `cross-spawn`
+imported by `dist/utils/child-process.js`. The authorized offline preparation
+attempt then failed with `ETARGET` because `@earendil-works/pi-client@^1.0.4`
+is absent from the local cache. No further dependency preparation or exact-host
+run is authorized until the root grants the shared heavy-work token and the
+required preparation permission.
+
+Evidence already obtained:
+
+- Before the source fix, both added legacy-layout bootstrap fixtures failed
+  with the recorded incompatible-extension-resolver error.
+- `node --test internal/wsagent/testdata/pi-lead.test.mjs`: 9 passed, 0 failed,
+  2 native cases skipped without a host override.
+- With `WS_PI_TEST_SDK` selecting the installed Pi 1.5.2 SDK,
+  `go test ./internal/wsagent -run 'TestPiLead|TestLeadIsolation|TestPi.*Isolation'
+  -count=1 -timeout 4m -v` passed. Native checks include actual npm-bin startup,
+  same-graph ambient loading, the wrong-SDK negative control, and native
+  trust/filter/builtin/reload cases. This is not Pi 1.0.4 acceptance.
+- No shared daemon, installed runtime, user configuration or model request was
+  changed or invoked by this implementation. Independent source review and
+  exact-host acceptance remain open; the ticket is not complete.
