@@ -3,7 +3,7 @@
 // dashboard board's motion and scroll behaviour. Not shipped with any plugin
 // package.
 //
-//     node scripts/board-headless.mjs serve [--topics N] [--history-entries N] [--mermaid] [--keep-tmp]
+//     node scripts/board-headless.mjs serve [--topics N] [--pending N] [--history-entries N] [--mermaid] [--keep-tmp]
 //     node scripts/board-headless.mjs <scenario> --url <session page> [--width W] [--height H] [--headed] [--trace]
 //
 // Scenarios run in headless Chromium, 1440x900 by default. Each checks every
@@ -48,7 +48,15 @@
 //             step put it (no jump), mounts frames before they enter the view,
 //             turns frames far from the view into placeholders that keep
 //             their height, and remounts the mermaid topic with its diagram
-//             drawn again in a new frame.
+//             drawn again in a new frame. Also defers one body's reporting
+//             script above the jump target until keep ends, then requires
+//             exactly one scroll compensation and <=1px post-paint drift.
+//
+//   pill      Static pending counts and frame fixed point (use `serve --topics
+//             30 --pending 11 --mermaid`). At two scroll stops, all N pending
+//             controls must be above the view. After a bounded settling window,
+//             checks every rAF for 4 seconds: count N, no scroll drift, and zero
+//             iframe mounts/unmounts. Runs on both dashboard page kinds.
 //
 // The page kind is detected, not named: a page with #tabbar is an adapter
 // page (the board column #bcol scrolls); one without is a board-only page
@@ -212,18 +220,19 @@ function run(cmd, args, opts) {
   return r.stdout;
 }
 
-function topicCommands(i) {
+function topicCommands(i, pending = 0) {
   const name = `T${String(i).padStart(2, "0")}`;
   const paras = [];
   for (let p = 0; p < 9; p++) {
     paras.push(`<p>${name} paragraph ${p + 1}: board motion fixture text that wraps over a couple of lines so the topic body frame stands well above a few hundred pixels tall, which is what makes the board overflow the viewport several times over.</p>`);
   }
-  return `<wb:topic name="${name}"><wb:body><h3>${name}</h3>${paras.join("")}</wb:body></wb:topic>`;
+  const checks = Array.from({ length: pending }, (_, j) => `<wb:add class="check"><wb:title>Pending fixture ${j + 1}</wb:title></wb:add>`).join("");
+  return `<wb:topic name="${name}"><wb:body><h3>${name}</h3>${paras.join("")}</wb:body>${checks}</wb:topic>`;
 }
 
 // seedSession makes a project with one ws session and a board of n topics,
 // and returns its reply id and canonical root.
-function seedSession(tmp, bin, label, n, historyEntries, mermaid) {
+function seedSession(tmp, bin, label, n, historyEntries, mermaid, pending) {
   const proj = path.join(tmp, `proj-${label}`);
   fs.mkdirSync(path.join(proj, "ai-docs"), { recursive: true });
   fs.writeFileSync(path.join(proj, "ai-docs", "_index.md"), `# ${label}\n`);
@@ -247,7 +256,7 @@ function seedSession(tmp, bin, label, n, historyEntries, mermaid) {
   }
   // One update per topic, so each topic has its own last-change time.
   for (let i = 1; i <= n; i++) {
-    const out = run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: topicCommands(i) })], { cwd: proj, env });
+    const out = run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: topicCommands(i, i === n ? pending : 0) })], { cwd: proj, env });
     const m = /ai-docs\/whiteboards\/([a-z0-9]+)\/index\.html/.exec(out);
     if (m) rid = m[1];
   }
@@ -311,8 +320,8 @@ async function serve(args) {
     log(`building ws-mcp from ${TOOL_DIR} ...`);
     run("go", ["build", "-o", bin, "./cmd/ws-mcp"], { cwd: TOOL_DIR, env: childEnv(tmp) });
     log(`seeding two sessions (${n} topics each) ...`);
-    const adapter = seedSession(tmp, bin, "adapter", n, +(args["history-entries"] || 0), !!args.mermaid);
-    const board = seedSession(tmp, bin, "board", n, +(args["history-entries"] || 0), !!args.mermaid);
+    const adapter = seedSession(tmp, bin, "adapter", n, +(args["history-entries"] || 0), !!args.mermaid, +(args.pending || 0));
+    const board = seedSession(tmp, bin, "board", n, +(args["history-entries"] || 0), !!args.mermaid, +(args.pending || 0));
     const dashDir = path.join(tmp, "cache", "dashboard");
     const out = fs.openSync(path.join(tmp, "daemon.log"), "a");
     daemon = spawn(bin, ["dashboard", "--port", "0"], {
@@ -1446,15 +1455,18 @@ async function scenarioOverviewMotion(ctx) {
 }
 
 // BANDS_PAGE's bandTopics reads, per open topic, where it stands against the view and
-// its body frame: mounted (iframe), or a placeholder with its height.
+// its body frame: mounted (iframe), a placeholder with its height, or none
+// for a bodyless log/history topic. shown excludes deliberately closed folds.
 const BANDS_PAGE = () => {
   const bh = window.__bh;
   bh.bandTopics = () => {
     const s = bh.scroller(), top = bh.viewTop(s), bottom = bh.viewBottom(s), h = bottom - top;
     return bh.topics().map((n) => {
       const r = n.getBoundingClientRect(), f = n.querySelector(".tdoc .doc-frame");
+      let shown = !!f;
+      for (let p = f?.parentElement; p && p !== n; p = p.parentElement) if (p.tagName === 'DETAILS' && !p.open) shown = false;
       return { name: n.getAttribute("data-topic"), top: r.top - top, bottom: r.bottom - top, view: h, win: innerHeight,
-        frame: f ? (f.tagName === "IFRAME" ? "iframe" : "placeholder") : "none", height: f ? f.style.height : "" };
+        frame: f ? (f.tagName === "IFRAME" ? "iframe" : "placeholder") : "none", shown, near: n.wbNear ?? null, height: f ? f.style.height : "" };
     });
   };
 };
@@ -1478,11 +1490,46 @@ async function scenarioBands(ctx) {
   const load = await page.evaluate(() => window.__bh.bandTopics());
   const mLoad = load.find((t) => t.name === M);
   ctx.check(mLoad.frame === "placeholder", `at load the far MERMAID topic's body frame is a ${mLoad.frame}, expected a placeholder`);
-  ctx.check(load.filter((t) => t.top < t.view && t.bottom > 0).every((t) => t.frame === "iframe"), "at load a topic in view holds a placeholder");
+  // History fixtures also contain bodyless topics (frame: "none"). They
+  // are not lazy placeholders; nor should a deliberately closed body mount.
+  const inViewPlaceholders = load.filter((t) => t.top < t.view && t.bottom > 0 && t.shown && t.frame === 'placeholder');
+  ctx.check(!inViewPlaceholders.length, `at load shown body placeholders remain in view: ${JSON.stringify(inViewPlaceholders)}`);
+  const anchoring = await page.evaluate(() => {
+    const s = window.__bh.scroller();
+    return getComputedStyle(s === document.scrollingElement ? document.documentElement : s).overflowAnchor;
+  });
+  ctx.check(anchoring === 'none', `native anchoring is ${anchoring} on the ${kind} scroller; it would compete with topicResized`);
   // Topics never laid out (a placeholder with no height) are what grows
   // above the view on the way back up from the jump.
   const unsized = load.filter((t) => t.frame === "placeholder" && !t.height).length;
   assert(unsized >= 4, `only ${unsized} topic(s) were never laid out at load: run \`serve --mermaid --topics 30\``);
+
+  // Select AND prepare a live placeholder in one browser task, before any
+  // mount can consume its first height. A late message listener is not a
+  // reliable hold: the dashboard's listener is already registered.
+  const held = await page.evaluate((name) => {
+    const bh = window.__bh, topics = bh.topics(), target = bh.section(name);
+    const topic = topics[topics.indexOf(target) - 1], p = topic?.querySelector('.tdoc .doc-frame');
+    if (!p || p.tagName !== 'DIV' || p.style.height) return { error: 'immediately preceding body must still be an unsized placeholder', topic: topic?.dataset.topic, tag: p?.tagName, height: p?.style.height };
+    const source = p.getAttribute('data-srcdoc'), parsed = new DOMParser().parseFromString(source, 'text/html');
+    const script = Array.from(parsed.querySelectorAll('script[src]')).find((s) => /(?:^|\/)wb-frame-[a-f0-9]+\.js$/.test(s.getAttribute('src')));
+    if (!script || parsed.querySelector('pre')) return { error: 'need a plain body with the shared frame script', topic: topic.dataset.topic };
+    // No synthetic height or MessageEvent: defer execution of the actual
+    // reporting script, then start that same asset in the real child frame.
+    script.type = 'application/x-board-headless-held';
+    script.setAttribute('data-bh-band-script', '');
+    p.setAttribute('data-srcdoc', '<!DOCTYPE html>\n' + parsed.documentElement.outerHTML);
+    // MERMAID is last in the seeded board. Without tail room, a fragment
+    // jump clamps near the bottom and the preceding topic stays IN view.
+    const tail = document.createElement('div');
+    tail.style.height = 3 * bh.scroller().clientHeight + 'px';
+    tail.setAttribute('aria-hidden', 'true');
+    bh.board_().appendChild(tail);
+    bh.bandProbe = { topic: topic.dataset.topic, source, tail };
+    return { topic: topic.dataset.topic };
+  }, M);
+  assert(!held.error, `cannot prepare first-height probe: ${JSON.stringify(held)}`);
+  const heldTopic = held.topic;
 
   // 2. A jump to the panel under MERMAID lands and holds while the frames
   // around it mount and report their heights.
@@ -1506,6 +1553,74 @@ async function scenarioBands(ctx) {
   ctx.check(m1.frame && m1.drawn, "after the jump the MERMAID topic's frame did not mount with its diagram drawn");
   log(`jump to ${pid}: landed ${land.toFixed(1)}px from the view top, drift ${drift.toFixed(1)}px over 2s; mermaid ${m1.drawn ? "drawn" : "not drawn"}`);
 
+  await page.waitForFunction((name) => window.__bh.section(name)?.querySelector('.tdoc iframe.doc-frame') && !window.__bh.keeping(), heldTopic, { timeout: 8000 });
+  const heldHandle = await page.$(`section.topic[data-topic="${heldTopic}"] .tdoc iframe.doc-frame`);
+  const heldFrame = await heldHandle.contentFrame();
+  assert(heldFrame, 'held placeholder did not mount a child frame');
+  await heldFrame.waitForLoadState('load');
+  // Position explicitly, outside keep, with the held topic's bottom 80px
+  // above the view. Tail space prevents clamping; verify it did not happen.
+  await page.evaluate((name) => {
+    const bh = window.__bh, s = bh.scroller();
+    s.scrollTop += bh.section(name).getBoundingClientRect().bottom - bh.viewTop(s) + 80;
+  }, heldTopic);
+  await waitQuiet(page);
+  const to = await heldFrame.evaluate(() => {
+    if (!document.querySelector('script[data-bh-band-script]')) throw new Error('held reporting script is missing');
+    return Math.ceil(document.querySelector('.doc-body').getBoundingClientRect().height);
+  });
+  const firstHeight = await page.evaluate(({ name, pid, to }) => {
+    const bh = window.__bh, s = bh.scroller(), t = bh.section(name), f = t.querySelector('.tdoc iframe.doc-frame'), r = t.getBoundingClientRect();
+    const before = { targetY: document.getElementById(pid).getBoundingClientRect().top, st: s.scrollTop,
+      topicTop: r.top, topicBottom: r.bottom, viewTop: bh.viewTop(s), viewBottom: bh.viewBottom(s), above: r.bottom <= bh.viewTop(s),
+      from: parseFloat(f.style.height) || 0, to, first: !!f.wbFirst, keeping: !!bh.keeping(), writes: bh.writesOn(s),
+      anchorInline: (s === document.scrollingElement ? document.documentElement : s).style.overflowAnchor,
+      anchoring: getComputedStyle(s === document.scrollingElement ? document.documentElement : s).overflowAnchor };
+    bh.samplePostPaint = true;
+    bh.startSampler([pid]);
+    return before;
+  }, { name: heldTopic, pid, to });
+  assert(firstHeight.above && firstHeight.first && firstHeight.from === 0 && firstHeight.to > 0 && !firstHeight.keeping &&
+    firstHeight.targetY >= firstHeight.viewTop && firstHeight.targetY < firstHeight.viewBottom,
+    `delayed first-height probe must grow an above-view mount outside keep with a visible reference: ${JSON.stringify(firstHeight)}`);
+  ctx.check(firstHeight.anchoring === 'none' && firstHeight.anchorInline === '',
+    `probe must exercise stylesheet anchoring, not keep's inline override: ${JSON.stringify(firstHeight)}`);
+  // The original doc-frame.js installs its native ResizeObserver and posts
+  // its first real height. Dashboard applyFrameHeights/topicResized handle
+  // it normally; no harness code writes frame height or scrollTop here.
+  await heldFrame.evaluate(() => new Promise((resolve, reject) => {
+    const held = document.querySelector('script[data-bh-band-script]'), live = document.createElement('script');
+    live.src = held.getAttribute('src');
+    live.onload = () => resolve();
+    live.onerror = () => reject(new Error('held frame asset failed to load'));
+    held.replaceWith(live);
+  }));
+  await sleep(800);
+  const firstAfter = await page.evaluate(({ pid, name }) => {
+    const bh = window.__bh, s = bh.scroller(), samples = bh.stopSampler().filter((v) => v.phase !== 'raf');
+    const f = bh.section(name).querySelector('.tdoc iframe.doc-frame');
+    bh.samplePostPaint = false;
+    return { y: document.getElementById(pid).getBoundingClientRect().top, st: s.scrollTop, writes: bh.writesOn(s),
+      height: parseFloat(f.style.height) || 0, first: !!f.wbFirst, keeping: !!bh.keeping(), samples };
+  }, { pid, name: heldTopic });
+  ctx.check(firstAfter.height === firstHeight.to && !firstAfter.first && !firstAfter.keeping,
+    `real first height must land and consume wbFirst outside keep: height=${firstAfter.height}, first=${firstAfter.first}, keeping=${firstAfter.keeping}`);
+  const delta = firstHeight.to - firstHeight.from;
+  const firstDrift = Math.max(...firstAfter.samples.map((v) => Math.abs(v.y[pid] - firstHeight.targetY)));
+  ctx.check(firstDrift <= 1 && Math.abs(firstAfter.y - firstHeight.targetY) <= 1,
+    `above-view ${heldTopic} first height moved ${pid} by ${firstDrift.toFixed(1)}px post-paint`);
+  ctx.check(Math.abs(firstAfter.st - firstHeight.st - delta) <= 1 && firstAfter.writes > firstHeight.writes,
+    `above-view first height must compensate once: height +${delta}, scrollTop +${firstAfter.st - firstHeight.st}, script writes +${firstAfter.writes - firstHeight.writes}`);
+  log(`above-view first height (${kind}): ${heldTopic} +${delta}px, scroll +${firstAfter.st - firstHeight.st}px, post-paint drift ${firstDrift.toFixed(1)}px; baseline ${JSON.stringify(firstHeight)}`);
+  await page.evaluate((name) => {
+    const bh = window.__bh, f = bh.section(name).querySelector('.tdoc iframe.doc-frame');
+    // Restore the original payload for subsequent real unmount/remounts.
+    f.setAttribute('data-srcdoc', bh.bandProbe.source);
+    bh.bandProbe.tail.remove();
+    delete bh.bandProbe;
+  }, heldTopic);
+  await waitQuiet(page);
+
   // 3. Up to the top a step at a time, then back down: each step keeps the
   // topic in view where the step put it, frames mount before they enter the
   // view, and frames far from the view are placeholders with their height.
@@ -1527,7 +1642,7 @@ async function scenarioBands(ctx) {
       worst = Math.max(worst, Math.abs(off));
       if (Math.abs(off) > 1) bad.push(`${before.ref} ${off.toFixed(1)}px at scrollTop ${before.st}`);
       const lay = await page.evaluate(() => window.__bh.bandTopics());
-      lay.filter((t) => t.top < t.view && t.bottom > 0 && t.frame === "placeholder").forEach((t) => late.push(`${t.name} at scrollTop ${before.st + moved}`));
+      lay.filter((t) => t.top < t.view && t.bottom > 0 && t.shown && t.frame === "placeholder").forEach((t) => late.push(`${t.name} at scrollTop ${before.st + moved}`));
     }
     return { bad, late, worst };
   };
@@ -1536,7 +1651,7 @@ async function scenarioBands(ctx) {
   ctx.check(!up.late.length, `scrolling up showed placeholders in view: ${up.late.join("; ")}`);
   const top = await page.evaluate(() => window.__bh.bandTopics());
   // The far band reaches four window heights past the view's bottom.
-  const far = top.filter((t) => t.top > t.view + 4 * t.win + 50);
+  const far = top.filter((t) => t.frame !== 'none' && t.top > t.view + 4 * t.win + 50);
   const mTop = top.find((t) => t.name === M);
   ctx.check(far.length > 0 && far.every((t) => t.frame === "placeholder"), `at the top a topic beyond the far band holds a mounted frame: ${far.filter((t) => t.frame !== "placeholder").map((t) => t.name).join(", ")}`);
   ctx.check(far.every((t) => /px$/.test(t.height) && parseFloat(t.height) > 0), `a far placeholder lost its height: ${far.filter((t) => !/px$/.test(t.height)).map((t) => t.name).join(", ")}`);
@@ -1550,6 +1665,75 @@ async function scenarioBands(ctx) {
   const fresh = m1.frame && m2.frame ? await page.evaluate(([a, b]) => a !== b && !a.isConnected, [m1.frame, m2.frame]) : false;
   ctx.check(fresh, "the MERMAID topic's frame at the bottom is not a new one: it never unmounted");
   log(`down: worst step offset ${down.worst.toFixed(2)}px; MERMAID remounted (${fresh ? "new frame" : "same frame"}), diagram ${m2.drawn ? "drawn" : "not drawn"}`);
+}
+
+async function scenarioPill(ctx) {
+  const { page, kind } = await openBoard(ctx);
+  const expected = +(ctx.args.pending || 11);
+  assert(Number.isInteger(expected) && expected > 0, "--pending must be a positive integer");
+  assert(await page.evaluate(() => !!window.wbHistory?.bands), "viewport bands must be active for the churn regression");
+  const inventory = await page.evaluate(() => {
+    const items = Array.from(document.querySelectorAll('.card.policy[id^="item-"], .arow[id^="item-"], .ckrow[data-id]:not([data-assumed])'));
+    const topics = [...new Set(items.map((el) => el.closest('section.topic')))];
+    return { count: items.length, topic: topics.length === 1 ? topics[0]?.dataset.topic : null };
+  });
+  assert(inventory.count === expected && inventory.topic,
+    `expected ${expected} pending controls in one topic, got ${JSON.stringify(inventory)}; use serve --topics 30 --pending ${expected} --mermaid`);
+
+  await page.evaluate(() => {
+    const bh = window.__bh;
+    bh.pillChurn = { mounts: 0, unmounts: 0 };
+    const frames = (n) => n.nodeType !== 1 ? 0 : (n.matches('iframe.doc-frame') ? 1 : 0) + n.querySelectorAll('iframe.doc-frame').length;
+    bh.pillMO = new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.addedNodes) bh.pillChurn.mounts += frames(n);
+        for (const n of r.removedNodes) bh.pillChurn.unmounts += frames(n);
+      }
+    });
+    bh.pillMO.observe(bh.board_(), { childList: true, subtree: true });
+  });
+  try {
+    for (const views of [2, 5]) {
+      await page.evaluate(({ name, views }) => {
+        const bh = window.__bh, s = bh.scroller();
+        s.scrollTop += bh.section(name).getBoundingClientRect().bottom - bh.viewTop(s) + views * s.clientHeight;
+      }, { name: inventory.topic, views });
+      // Fixed upper bound, not an unbounded wait-until-quiet that could hide a
+      // perpetual mount loop. No input, scroll, or data mutations follow.
+      await sleep(3000);
+      const result = await page.evaluate(async ({ name, expected }) => {
+        const bh = window.__bh, s = bh.scroller(), host = document.getElementById('bcol') || document.querySelector('.wrap');
+        const pill = host.querySelector('.oq-wrap.top .oq-pill'), seg = pill?.querySelector('.oq-seg.open');
+        const count = () => !pill || pill.hidden || !seg || seg.hidden ? 0 : Number(seg.querySelector('.n').textContent);
+        bh.pillMO.takeRecords();
+        bh.pillChurn = { mounts: 0, unmounts: 0 };
+        const start = performance.now(), st = s.scrollTop, counts = new Set(), failures = [];
+        let samples = 0, drift = 0;
+        await new Promise((resolve) => {
+          function sample() {
+            samples++;
+            counts.add(count());
+            drift = Math.max(drift, Math.abs(s.scrollTop - st));
+            if (bh.section(name).getBoundingClientRect().bottom > bh.viewTop(s)) failures.push('pending topic entered view');
+            if (performance.now() - start < 4000) requestAnimationFrame(sample); else resolve();
+          }
+          sample();
+        });
+        const frames = Array.from(bh.board_().querySelectorAll('.doc-frame'));
+        return { expected, samples, counts: [...counts], drift, failures: [...new Set(failures)], ...bh.pillChurn,
+          mounted: frames.filter((f) => f.tagName === 'IFRAME').length,
+          placeholders: frames.filter((f) => f.tagName === 'DIV').length };
+      }, { name: inventory.topic, expected });
+      log(`pill ${kind}, ${views} viewports past pending topic: ${JSON.stringify(result)}`);
+      ctx.check(result.samples > 30 && result.counts.length === 1 && result.counts[0] === expected,
+        `static pending count must stay ${expected}: ${JSON.stringify(result)}`);
+      ctx.check(result.mounts === 0 && result.unmounts === 0, `static viewport churned frames: ${JSON.stringify(result)}`);
+      ctx.check(result.drift <= 1 && !result.failures.length, `static viewport moved: ${JSON.stringify(result)}`);
+      ctx.check(result.mounted > 0 && result.placeholders > 0, 'regression must exercise mounted frames and lazy placeholders together');
+    }
+  } finally {
+    await page.evaluate(() => window.__bh.pillMO.disconnect());
+  }
 }
 
 // History probes use the real host's wbHistory, event delegation, DOM and
@@ -2141,6 +2325,7 @@ const SCENARIOS = {
   keep: scenarioKeep,
   observer: scenarioObserver,
   bands: scenarioBands,
+  pill: scenarioPill,
   history: scenarioHistory,
   'history-cards': (ctx) => scenarioHistory({ ...ctx, cardsOnly: true }),
   'history-paint': (ctx) => scenarioHistory({ ...ctx, navigationOnly: true }),
@@ -2154,7 +2339,7 @@ async function main() {
   const name = args._[0];
   if (name === "serve") return serve(args);
   if (!name || !SCENARIOS[name] || !args.url || args.url === true) {
-    console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--history-entries N] [--mermaid] [--keep-tmp]");
+    console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--pending N] [--history-entries N] [--mermaid] [--keep-tmp]");
     console.error(`       node scripts/board-headless.mjs <${Object.keys(SCENARIOS).join("|")}> --url <session or full file page> [--width W] [--height H] [--headed] [--artifacts DIR]`);
     process.exit(2);
   }

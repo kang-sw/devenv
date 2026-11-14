@@ -130,6 +130,76 @@ func TestFolderAbsentAndEmpty(t *testing.T) {
 	}
 }
 
+func TestFolderCopyToAnotherStem(t *testing.T) {
+	root := t.TempDir()
+	source := FolderStore{Dir: filepath.Join(root, "stem-a")}
+	destination := FolderStore{Dir: filepath.Join(root, "stem-b")}
+	env := Env{Now: time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)}
+	apply := func(commands string) func(*State) error {
+		return func(s *State) error {
+			if _, problems := Apply(s, commands, env); len(problems) != 0 {
+				return fmt.Errorf("apply: %v", problems)
+			}
+			return nil
+		}
+	}
+	// Use the same transaction boundary and command model as whiteboard.update.
+	if err := source.UpdateAndPublish(nil, apply(`<wb:topic name="handoff" label="Handoff">
+<wb:body>Durable current content</wb:body>
+<wb:panel recap="Design">Full panel payload</wb:panel>
+<wb:log>Ready for takeover</wb:log>
+<wb:add class="check"><wb:title>Verify the handoff</wb:title></wb:add>
+</wb:topic>
+<wb:topic name="context" label="Context"><wb:body>Keep this too</wb:body></wb:topic>`), nil); err != nil {
+		t.Fatal(err)
+	}
+	want := folderOpen(t, source.Dir, nil)
+	if len(want.Topics) != 2 || len(want.Topics[0].Entries) == 0 || len(want.Items) != 1 {
+		t.Fatalf("incomplete source fixture: %s", folderJSON(want))
+	}
+	before := folderTree(t, source.Dir)
+
+	// Plain recursive file copy: no metadata rewriting or store import API.
+	// The source is quiescent throughout the copy and destination update.
+	if err := filepath.WalkDir(source.Dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(source.Dir, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination.Dir, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := folderOpen(t, destination.Dir, nil); !reflect.DeepEqual(want, got) {
+		t.Fatalf("copy lost topics, entries, or items\nwant %s\ngot  %s", folderJSON(want), folderJSON(got))
+	}
+
+	update := apply(`<wb:topic name="handoff"><wb:log>Taken over under stem B</wb:log></wb:topic>`)
+	if err := update(want); err != nil {
+		t.Fatal(err)
+	}
+	if err := destination.UpdateAndPublish(nil, update, nil); err != nil {
+		t.Fatalf("update under destination stem: %v", err)
+	}
+	if got := folderOpen(t, destination.Dir, nil); !reflect.DeepEqual(want, got) {
+		t.Fatalf("destination update lost history\nwant %s\ngot  %s", folderJSON(want), folderJSON(got))
+	}
+	if !reflect.DeepEqual(before, folderTree(t, source.Dir)) {
+		t.Fatal("destination update changed source board")
+	}
+}
+
 func TestFolderConversionAndRestart(t *testing.T) {
 	root := t.TempDir()
 	legacy := folderFixture()

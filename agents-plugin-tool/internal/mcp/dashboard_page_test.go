@@ -769,7 +769,7 @@ func TestDashboardReadClosedTopicsPastTheCap(t *testing.T) {
 	page := readPageOK(t, src, reg)
 	board := string(page.Board.Board)
 	live := strings.SplitN(board, `<template data-history-topic=`, 2)[0]
-	if !strings.Contains(live, `<button class="btn closed-more" data-closed-next="30">`) || strings.Contains(live, `title="c2"`) || !strings.Contains(board, `<template data-history-topic="c2">`) {
+	if !strings.Contains(live, `<button class="btn closed-more" data-closed-next="30"`) || strings.Contains(live, `title="c2"`) || !strings.Contains(board, `<template data-history-topic="c2">`) {
 		t.Errorf("the served board must cap live topics and retain inert navigation targets")
 	}
 	html, ok := src.ReadClosedTopics(reg, "", 30, 30)
