@@ -594,6 +594,9 @@
     "261114-feat-ws-whiteboard-topic-state-and-lead-nudges": {
       "registered_at": "2026-11-14T11:39:09Z"
     },
+    "261114-feat-ws-whiteboard-unified-whole-history": {
+      "registered_at": "2026-11-14T11:52:35Z"
+    },
     "261114-refactor-ws-common-session-interface": {
       "registered_at": "2026-11-14T11:13:55Z"
     },
