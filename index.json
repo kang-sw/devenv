@@ -470,6 +470,9 @@
     "261114-bug-ws-fork-parent-identity-loss": {
       "registered_at": "2026-11-14T05:58:11Z"
     },
+    "261114-bug-ws-history-deep-link-capsule-offset-lag": {
+      "registered_at": "2026-11-14T11:33:20Z"
+    },
     "261114-bug-ws-installed-plugin-missing-native-pi-payload": {
       "registered_at": "2026-11-14T04:54:50Z",
       "lease": {
