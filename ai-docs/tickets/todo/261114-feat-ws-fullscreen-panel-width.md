@@ -33,15 +33,25 @@ The shared-card action implementation landed in `f227e6d9b`.
   `733,734=a` on 2026-11-14 at 12:34.
 - **(734)=a — no remembered extension.** Extended width resets on close,
   minimize and reload. Rejected: session memory or browser-persisted state.
-- **(735), announced default — centered cap.** Default visible sheet width is
-  `min(1920px, available width)`, centered horizontally. The extension control
-  explicitly changes the open sheet to the existing available full-width
-  geometry. MAIN included this settled default in the 12:34 capture directive.
+- **(735), refined by (763)=a — centered category defaults.** Normal sheet
+  width is `min(category width, 1920px, available width)`, centered. Files and
+  Terminal use their current owning-column horizontal span, measured before
+  maximizing. Files uses its conversation/grid pane; Terminal uses its board
+  or pinned-column host, not a whiteboard entry column. If that span cannot be
+  measured, Terminal falls back to **960px** and Files to **1280px**.
+  Other defaults are prose/Markdown 1280px, code 1440px, diff 1760px,
+  web/image/video 1600px, topic/topic panel 1440px, approval/system 1024px, and
+  unknown category 1920px. MAIN relayed the owner's exact answer on
+  2026-11-14 at 13:15:29Z:
+  `763=a^터미널 960, 탐색기 1280으로 정정.`
+  The owner corrected the proposed Terminal 1600px / Files 1920px fallbacks;
+  those proposals are not the contract. The explicit extension uses available
+  full width and may exceed the normal 1920px cap.
 - **(736), announced default — narrow behavior unchanged.** Preserve existing
-  narrow/mobile layout, including the existing below-640px rules. A viewport
-  whose available width is no greater than the cap is unaffected. Show the
+  narrow/mobile layout, including the existing below-640px rules. Show the
   separate extension button beside the existing fullscreen controls only on
-  wide layouts where extending can provide additional width.
+  wide layouts where extending beyond the effective normal category width
+  provides additional width. Do not show an ineffective extension button.
 - **Compatibility: T0.** This is a dashboard-asset UI addition. No protocol,
   MCP argument, daemon store, shared configuration or stored-state change is
   part of this ticket. Width extension is transient and not persisted.
@@ -67,7 +77,7 @@ The shared-card action implementation landed in `f227e6d9b`.
 
 ## Phases
 
-### Phase 1: Cap shared maximize sheets and provide explicit wide extension
+### Phase 1: Apply category widths and provide explicit wide extension
 
 After the toolbar source lands, implement the confirmed shared width behavior
 and adjacent explicit extension control across every surface listed in (733).
@@ -76,11 +86,15 @@ and on reload. Reuse the shared actions and sheet layout rather than adding
 independent per-card fullscreen lifecycles. This is the complete behavior slice;
 no implementation, fact population or ready promotion is authorized by capture.
 
-Verification must cover default centering and the 1920px cap on a wider display,
-explicit extension to available full width, and reset after minimize/close,
-reopen and reload. Check preview, terminal, web, topic, framed entry-panel and
-Files ownership paths. Check narrow/mobile and widths at or below the cap for
-unchanged geometry and absence of an ineffective extension button. Retain
+Verification must cover centered category defaults and the normal 1920px cap,
+Files/Terminal owning-column capture before maximize, and the corrected 960px
+Terminal / 1280px Files fallbacks when no usable column measurement exists.
+Check board and optional pinned-column Terminal ownership and Files' grid pane.
+Verify explicit extension to available full width, including widths above
+1920px, and reset after minimize/close, reopen and reload. Check preview,
+terminal, web, topic, framed entry-panel and Files ownership paths. Check
+narrow/mobile unchanged geometry and absence of an ineffective extension button
+when the available width does not exceed the effective category width. Retain
 focus/Escape, Overview exclusion, panel disclosure, sticky-header and scroll
 behavior. Use focused existing tests and representative browser evidence when
 this ticket is executed; no acceptance run is part of this documentation capture.
