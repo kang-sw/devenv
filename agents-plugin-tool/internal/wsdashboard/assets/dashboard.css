@@ -903,6 +903,13 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .ctabs button[aria-pressed="true"] { color: var(--wb-fg); border-bottom-color: var(--wb-primary); }
 .ctabs button:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
 .fpane { position: relative; flex-direction: column; min-height: 0; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; font-size: 12.5px; }
+/* The toolbar borrows the same explorer as the Files tab, in place, and
+   shares the card sheet's scrim. Keep its toggle and row menu reachable. */
+.dgrid.live > .fpane[data-max] { display: flex; position: fixed; z-index: var(--z-modal); top: var(--files-top, 52px); left: 16px; right: 16px; bottom: 12px; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
+.board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); pointer-events: none; }
+.board-toolbar[data-files] .board-files { pointer-events: auto; }
+body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
+@media (max-width: 640px) { .dgrid.live > .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }
 .fpane .fi { display: inline-flex; flex: none; color: var(--wb-muted-fg); }
 .fhd { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--wb-line); min-width: 0; }
 .froot { flex: 1; min-width: 0; font: 700 12px var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

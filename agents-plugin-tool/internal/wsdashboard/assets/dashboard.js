@@ -732,12 +732,7 @@
       toolbar: {
         overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
         search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
-        files: fpane && window.WsFiles ? function () { afterOverview(function () {
-          if (!tabShown("convo")) setTab("convo");
-          setCtab("files");
-          var filter = fpane.querySelector("input");
-          if (filter) filter.focus();
-        }); } : null
+        files: fpane && window.WsFiles ? revealPanes : null
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
