@@ -392,7 +392,14 @@
       "registered_at": "2026-11-13T10:25:03Z"
     },
     "261113-feat-werkschaft-thin-tauri-shell": {
-      "registered_at": "2026-11-13T14:07:32Z"
+      "registered_at": "2026-11-13T14:07:32Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-14T15:26:10Z"
+      }
     },
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
