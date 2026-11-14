@@ -3,7 +3,7 @@
 // dashboard board's motion and scroll behaviour. Not shipped with any plugin
 // package.
 //
-//     node scripts/board-headless.mjs serve [--topics N] [--history-entries N] [--mermaid] [--keep-tmp]
+//     node scripts/board-headless.mjs serve [--topics N] [--pending N] [--history-entries N] [--mermaid] [--keep-tmp]
 //     node scripts/board-headless.mjs <scenario> --url <session page> [--width W] [--height H] [--headed] [--trace]
 //
 // Scenarios run in headless Chromium, 1440x900 by default. Each checks every
@@ -32,6 +32,12 @@
 //             turns frames far from the view into placeholders that keep
 //             their height, and remounts the mermaid topic with its diagram
 //             drawn again in a new frame.
+//
+//   pill      Static pending counts and frame fixed point (use `serve --topics
+//             30 --pending 11 --mermaid`). At two scroll stops, all N pending
+//             controls must be above the view. After a bounded settling window,
+//             checks every rAF for 4 seconds: count N, no scroll drift, and zero
+//             iframe mounts/unmounts. Runs on both dashboard page kinds.
 //
 // The page kind is detected, not named: a page with #tabbar is an adapter
 // page (the board column #bcol scrolls); one without is a board-only page
@@ -194,18 +200,19 @@ function run(cmd, args, opts) {
   return r.stdout;
 }
 
-function topicCommands(i) {
+function topicCommands(i, pending = 0) {
   const name = `T${String(i).padStart(2, "0")}`;
   const paras = [];
   for (let p = 0; p < 9; p++) {
     paras.push(`<p>${name} paragraph ${p + 1}: board motion fixture text that wraps over a couple of lines so the topic body frame stands well above a few hundred pixels tall, which is what makes the board overflow the viewport several times over.</p>`);
   }
-  return `<wb:topic name="${name}"><wb:body><h3>${name}</h3>${paras.join("")}</wb:body></wb:topic>`;
+  const checks = Array.from({ length: pending }, (_, j) => `<wb:add class="check"><wb:title>Pending fixture ${j + 1}</wb:title></wb:add>`).join("");
+  return `<wb:topic name="${name}"><wb:body><h3>${name}</h3>${paras.join("")}</wb:body>${checks}</wb:topic>`;
 }
 
 // seedSession makes a project with one ws session and a board of n topics,
 // and returns its reply id and canonical root.
-function seedSession(tmp, bin, label, n, historyEntries, mermaid) {
+function seedSession(tmp, bin, label, n, historyEntries, mermaid, pending) {
   const proj = path.join(tmp, `proj-${label}`);
   fs.mkdirSync(path.join(proj, "ai-docs"), { recursive: true });
   fs.writeFileSync(path.join(proj, "ai-docs", "_index.md"), `# ${label}\n`);
@@ -229,7 +236,7 @@ function seedSession(tmp, bin, label, n, historyEntries, mermaid) {
   }
   // One update per topic, so each topic has its own last-change time.
   for (let i = 1; i <= n; i++) {
-    const out = run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: topicCommands(i) })], { cwd: proj, env });
+    const out = run(bin, ["call", "whiteboard.update", JSON.stringify({ session_key: fer.session_key, commands: topicCommands(i, i === n ? pending : 0) })], { cwd: proj, env });
     const m = /ai-docs\/whiteboards\/([a-z0-9]+)\/index\.html/.exec(out);
     if (m) rid = m[1];
   }
@@ -293,8 +300,8 @@ async function serve(args) {
     log(`building ws-mcp from ${TOOL_DIR} ...`);
     run("go", ["build", "-o", bin, "./cmd/ws-mcp"], { cwd: TOOL_DIR, env: childEnv(tmp) });
     log(`seeding two sessions (${n} topics each) ...`);
-    const adapter = seedSession(tmp, bin, "adapter", n, +(args["history-entries"] || 0), !!args.mermaid);
-    const board = seedSession(tmp, bin, "board", n, +(args["history-entries"] || 0), !!args.mermaid);
+    const adapter = seedSession(tmp, bin, "adapter", n, +(args["history-entries"] || 0), !!args.mermaid, +(args.pending || 0));
+    const board = seedSession(tmp, bin, "board", n, +(args["history-entries"] || 0), !!args.mermaid, +(args.pending || 0));
     const dashDir = path.join(tmp, "cache", "dashboard");
     const out = fs.openSync(path.join(tmp, "daemon.log"), "a");
     daemon = spawn(bin, ["dashboard", "--port", "0"], {
@@ -972,6 +979,75 @@ async function scenarioBands(ctx) {
   log(`down: worst step offset ${down.worst.toFixed(2)}px; MERMAID remounted (${fresh ? "new frame" : "same frame"}), diagram ${m2.drawn ? "drawn" : "not drawn"}`);
 }
 
+async function scenarioPill(ctx) {
+  const { page, kind } = await openBoard(ctx);
+  const expected = +(ctx.args.pending || 11);
+  assert(Number.isInteger(expected) && expected > 0, "--pending must be a positive integer");
+  assert(await page.evaluate(() => !!window.wbHistory?.bands), "viewport bands must be active for the churn regression");
+  const inventory = await page.evaluate(() => {
+    const items = Array.from(document.querySelectorAll('.card.policy[id^="item-"], .arow[id^="item-"], .ckrow[data-id]:not([data-assumed])'));
+    const topics = [...new Set(items.map((el) => el.closest('section.topic')))];
+    return { count: items.length, topic: topics.length === 1 ? topics[0]?.dataset.topic : null };
+  });
+  assert(inventory.count === expected && inventory.topic,
+    `expected ${expected} pending controls in one topic, got ${JSON.stringify(inventory)}; use serve --topics 30 --pending ${expected} --mermaid`);
+
+  await page.evaluate(() => {
+    const bh = window.__bh;
+    bh.pillChurn = { mounts: 0, unmounts: 0 };
+    const frames = (n) => n.nodeType !== 1 ? 0 : (n.matches('iframe.doc-frame') ? 1 : 0) + n.querySelectorAll('iframe.doc-frame').length;
+    bh.pillMO = new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.addedNodes) bh.pillChurn.mounts += frames(n);
+        for (const n of r.removedNodes) bh.pillChurn.unmounts += frames(n);
+      }
+    });
+    bh.pillMO.observe(bh.board_(), { childList: true, subtree: true });
+  });
+  try {
+    for (const views of [2, 5]) {
+      await page.evaluate(({ name, views }) => {
+        const bh = window.__bh, s = bh.scroller();
+        s.scrollTop += bh.section(name).getBoundingClientRect().bottom - bh.viewTop(s) + views * s.clientHeight;
+      }, { name: inventory.topic, views });
+      // Fixed upper bound, not an unbounded wait-until-quiet that could hide a
+      // perpetual mount loop. No input, scroll, or data mutations follow.
+      await sleep(3000);
+      const result = await page.evaluate(async ({ name, expected }) => {
+        const bh = window.__bh, s = bh.scroller(), host = document.getElementById('bcol') || document.querySelector('.wrap');
+        const pill = host.querySelector('.oq-wrap.top .oq-pill'), seg = pill?.querySelector('.oq-seg.open');
+        const count = () => !pill || pill.hidden || !seg || seg.hidden ? 0 : Number(seg.querySelector('.n').textContent);
+        bh.pillMO.takeRecords();
+        bh.pillChurn = { mounts: 0, unmounts: 0 };
+        const start = performance.now(), st = s.scrollTop, counts = new Set(), failures = [];
+        let samples = 0, drift = 0;
+        await new Promise((resolve) => {
+          function sample() {
+            samples++;
+            counts.add(count());
+            drift = Math.max(drift, Math.abs(s.scrollTop - st));
+            if (bh.section(name).getBoundingClientRect().bottom > bh.viewTop(s)) failures.push('pending topic entered view');
+            if (performance.now() - start < 4000) requestAnimationFrame(sample); else resolve();
+          }
+          sample();
+        });
+        const frames = Array.from(bh.board_().querySelectorAll('.doc-frame'));
+        return { expected, samples, counts: [...counts], drift, failures: [...new Set(failures)], ...bh.pillChurn,
+          mounted: frames.filter((f) => f.tagName === 'IFRAME').length,
+          placeholders: frames.filter((f) => f.tagName === 'DIV').length };
+      }, { name: inventory.topic, expected });
+      log(`pill ${kind}, ${views} viewports past pending topic: ${JSON.stringify(result)}`);
+      ctx.check(result.samples > 30 && result.counts.length === 1 && result.counts[0] === expected,
+        `static pending count must stay ${expected}: ${JSON.stringify(result)}`);
+      ctx.check(result.mounts === 0 && result.unmounts === 0, `static viewport churned frames: ${JSON.stringify(result)}`);
+      ctx.check(result.drift <= 1 && !result.failures.length, `static viewport moved: ${JSON.stringify(result)}`);
+      ctx.check(result.mounted > 0 && result.placeholders > 0, 'regression must exercise mounted frames and lazy placeholders together');
+    }
+  } finally {
+    await page.evaluate(() => window.__bh.pillMO.disconnect());
+  }
+}
+
 // History probes use the real host's wbHistory, event delegation, DOM and
 // styles. Only payload height arrival and stream updates are synthetic.
 const HISTORY_PAGE = () => {
@@ -1558,6 +1634,7 @@ const SCENARIOS = {
   keep: scenarioKeep,
   observer: scenarioObserver,
   bands: scenarioBands,
+  pill: scenarioPill,
   history: scenarioHistory,
   'history-cards': (ctx) => scenarioHistory({ ...ctx, cardsOnly: true }),
   'history-paint': (ctx) => scenarioHistory({ ...ctx, navigationOnly: true }),
@@ -1571,7 +1648,7 @@ async function main() {
   const name = args._[0];
   if (name === "serve") return serve(args);
   if (!name || !SCENARIOS[name] || !args.url || args.url === true) {
-    console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--history-entries N] [--mermaid] [--keep-tmp]");
+    console.error("usage: node scripts/board-headless.mjs serve [--topics N] [--pending N] [--history-entries N] [--mermaid] [--keep-tmp]");
     console.error(`       node scripts/board-headless.mjs <${Object.keys(SCENARIOS).join("|")}> --url <session or full file page> [--width W] [--height H] [--headed] [--artifacts DIR]`);
     process.exit(2);
   }

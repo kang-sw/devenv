@@ -14,6 +14,7 @@ var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
 function E() { this.children = []; this.style = {}; this.attrs = {}; this.cls = {}; var me = this; this.classList = { contains: function (c) { return !!me.cls[c]; } }; }
 E.prototype.querySelector = function () { return null; };
+E.prototype.closest = function () { return null; };
 E.prototype.getAttribute = function (k) { return k in this.attrs ? this.attrs[k] : null; };
 E.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
 E.prototype.hasAttribute = function (k) { return k in this.attrs; };

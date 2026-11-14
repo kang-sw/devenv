@@ -30,8 +30,8 @@ E.prototype.addEventListener = function () {};
 E.prototype.removeEventListener = function () {};
 E.prototype.getBoundingClientRect = function () { return { top: this.top, bottom: this.top + 40, width: 100, height: 40 }; };
 E.prototype.scrollIntoView = function () { jumped.push(this.attrs.id); };
-var fire = null, jumped = [];
-function IntersectionObserver(cb) { fire = cb; this.observe = function () {}; this.disconnect = function () {}; }
+var fire = null, jumped = [], observed = [];
+function IntersectionObserver(cb) { fire = cb; this.observe = function (el) { observed.push(el); }; this.disconnect = function () {}; }
 function getComputedStyle() { return { overflowY: "visible" }; }
 function wsT(k) { return k; }
 function item(id, top, state) { var e = new E("div"); e.attrs.id = id; e.top = top;
@@ -74,8 +74,12 @@ check("bottom tooltips", bot.querySelectorAll(".oq-seg").map(function (b) { retu
 check("arrows", [top.children[0].textContent, bot.children[0].textContent], ["↑", "↓"]);
 press(top, "open"); press(top, "ans"); press(top, "nt"); press(bot, "open"); press(bot, "ans");
 check("jumps", jumped, ["a3", "a2", "a2", "b2", "b1"]);
+// A delayed visibility report cannot overrule the current positions.
 fire(items.map(function (el) { return { isIntersecting: true, target: el }; }));
-check("all in view hides both pills", [top.hidden, bot.hidden], [true, true]);
+check("stale reports leave top counts alone", shown(top), [["open", "js.pill.open", "2"], ["ans", "js.pill.answered", "1"], ["nt", "js.pill.noted", "1"]]);
+items.forEach(function (el) { el.top = 100; });
+fire(items.map(function (el) { return { isIntersecting: false, target: el }; }));
+check("current positions hide both pills despite stale reports", [top.hidden, bot.hidden], [true, true]);
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
@@ -86,9 +90,38 @@ process.stdout.write(bad.join("\n"));`
 	}
 }
 
+// TestPillPendingCountIgnoresObserverDelivery reproduces the 9/11 count
+// mechanism deterministically: eleven pending controls stay above the view,
+// while delayed observer reports alternate the visibility of two of them.
+// Reports are invalidations, never an alternate pending-item inventory.
+func TestPillPendingCountIgnoresObserverDelivery(t *testing.T) {
+	data, err := assetFS.ReadFile("assets/pill.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; pill pending-count cases not executed")
+	}
+	script := pillSegPrelude + `
+items = Array.from({ length: 11 }, function (_, i) { return item("pending-" + i, -1000 + i * 50, ""); });
+` + string(data) + `
+for (var i = 0; i < 40; i++) {
+  fire(items.slice(0, 2).map(function (el) { return { isIntersecting: i % 2 === 0, target: el }; }));
+  check("static pending count after report " + i, shown(pill(0)), [["open", "js.pill.open", "11"]]);
+}
+process.stdout.write(bad.join("\n"));`
+	out, err := nodeScript(node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if s := strings.TrimSpace(string(out)); s != "" {
+		t.Errorf("pill pending-count cases failed:\n%s", s)
+	}
+}
+
 // TestPillReadsFarItemsByTheirTopic pins that the pill never reads the rect
-// of an item in a topic wholly above or below the view (where a dashboard
-// topic skips its rendering, the read would lay it out): such an item takes
+// of an item in a topic wholly above or below the view: such an item takes
 // its side from its topic's rect, read once per update, and one under a
 // closed fold, or in a topic with no box, counts nowhere; an item in a
 // topic crossing the view, or in no topic, reads its own. The cases
@@ -128,6 +161,9 @@ check("top segments", shown(top), [["open", "js.pill.open", "3"], ["ans", "js.pi
 check("bottom segments", shown(bot), [["open", "js.pill.open", "2"]]);
 check("only items in no topic or a topic crossing the view read their own rect", reads.item, ["v1", "w1"]);
 check("each topic is read once per update", reads.topic, 4);
+check("visibility watches topics once, not their far controls", [observed.length, observed.filter(function (el) { return items.indexOf(el) >= 0; }).map(function (el) { return el.attrs.id; })], [5, ["w1"]]);
+fire(items.map(function (el) { return { isIntersecting: true, target: el }; }));
+check("stale item visibility cannot remove a far topic's pending items", shown(top), [["open", "js.pill.open", "3"], ["ans", "js.pill.answered", "1"]]);
 process.stdout.write(bad.join("\n"));`
 	out, err := nodeScript(node, script).CombinedOutput()
 	if err != nil {
