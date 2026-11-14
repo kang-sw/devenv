@@ -55,10 +55,13 @@ there is no whiteboard source diff between them.
   marks represent the latest body-edit batch, with body-specific `ChangedAt`;
   same-body/no-op edits preserve these, unrelated entry/recap changes do not
   replace them. This is not a retained per-block history.
-- `nudge.go`, search `stampChanges`: current body-edit batches get a UTC
-  RFC3339 timestamp, but missing legacy times also get the first observing
-  update's time. A nonempty `ChangedAt` therefore does not alone prove an
-  historical edit time. See the provenance gap below.
+- `store.go:672` calls `stampChanges(mark, env.Now)` after a successful
+  mutation batch. For a body actually changed in that batch, `ChangedAt` is
+  that batch's mutation time (UTC RFC3339), shared by its latest-edit marks,
+  not the latest unrelated topic activity. `nudge.go:26–41` also stamps a
+  missing legacy time on the first observing update, even without a body
+  mutation. That value is observation time, not actual edit time. The stored
+  field does not distinguish these two origins. See the provenance gap below.
 - `assets/ago.js`, search `wbAgoText`: existing relative formatter supports
   now/minutes/hours/days only. `assets/stream.js`, search `mouseover`: entry
   hover appends an absolute stamp. Neither is the complete marker contract;
@@ -73,20 +76,35 @@ Live was inspected separately, read-only, on 2026-11-14: endpoint and
 `GET /health` agreed on PID 94122, port 29417, version `0.50.0-dev`, start
 `2026-11-14T10:50:02Z`, content hash
 `e45b0b035191ee5ae6a1257294677b5f96412f14f5c058316ada0acbe2292eb6`.
-The process executable carried that hash. Runtime metadata says source commit
-`dev`, not a git SHA: equivalence to develop is unproven. A successful
-`GET /s/sweatradartakingoverwrite` served inline recap CSS and the same
-noninteractive bar CSS. A subsequent GET returned 404; no stable live recap
-geometry or hover interaction was verified. INFERRED: live contained inline
-recap styling, not proof that all recap entries visually satisfy 617.
+The process executable carried that hash. Lead reports TASK1 independently
+verified its build provenance with `go version -m`: base `9854ff350`,
+`vcs.modified=true`. This identifies a modified build base, not content parity
+with develop. A successful `GET /s/sweatradartakingoverwrite` served inline
+recap CSS and the same noninteractive bar CSS at that point in time only.
+A subsequent GET returned 404; neither drift nor a daemon swap is inferred.
+Live lifecycle investigation belongs to EXEC3. INFERRED: the successful
+response included inline recap styling, not proof that all recap entries
+visually satisfy 617. No stable live recap geometry or hover interaction was
+verified.
 
 ## Blocked: historical timestamp provenance
 
-The current body-edit timestamp supplies a candidate for all markers of a
-known latest edit batch, but legacy missing/backfilled timestamps cannot be
-asserted to be actual edit times. No new timestamp schema or unknown-age UX
-is selected here. Lead must settle this evidence gap before ready promotion;
-record the owner answer separately before adding an implementation decision.
+For a known actual mutation batch, existing `ChangedAt` is its actual edit
+time and covers all its current marks; a separate timestamp per block is not
+inherently required by that latest-batch model. However, `BlockMark` stores
+no timestamp or provenance, and `ChangedAt` alone cannot distinguish actual
+mutation from legacy backfill. The inspected representation does not prove
+actual historical per-mark times; recoverability from other stored history
+has not been established. An optional additive field could preserve trusted
+provenance prospectively, but its necessity and shape are not settled, and it
+would not reconstruct unknown historical edit times.
+
+Historical unknown/backfilled-time display is an owner policy choice, not a
+technical fallback to decide silently. No unknown relative value, observation
+age, or topic-latest age is authorized as actual change age. No new schema or
+unknown-age UX is selected here. Lead must settle this gap before ready
+promotion; record the owner answer separately before adding an implementation
+decision.
 
 ## Constraints
 
