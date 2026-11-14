@@ -44,10 +44,12 @@ session has owner-UI-created authority; the requester cannot stop or close it.
 While attached as a child, its root flag cannot be enabled. This clarifies
 750/752 and 768=c without silently adding lead-controls-other-session powers.
 
-MAIN also requested capture of the owner's read-only child/peer roster idea,
-announced as (786). Its proposed tool sketch and unresolved owner-note
-placement are separated in the Outcome Ledger; no roster implementation or
-new storage contract is authorized here.
+MAIN later relayed (786)=ok, (788)=d, and (782)=a. The read-only roster's
+approved fields and allocation policy are recorded in Confirmed Decisions.
+Strengths remain ad hoc owner instructions recorded in the lead's own agenda,
+not a roster/configuration/dashboard field. The example tool identifier and
+remaining implementation choices stay non-authoritative; this research still
+authorizes no implementation or new storage contract.
 
 ## Authority table
 
@@ -145,6 +147,19 @@ assert equivalence with the running daemon.
   768 versus 750/752 authority-table question.
 - **769=a:** Allow the owner to enroll a non-hosted CLI lead through the same
   root toggle on that CLI session's rail row.
+- **786=ok:** Add a read-only child/peer roster whose rows contain only mailbox
+  address, harness, model, label, idle/busy state, running subagent count, and
+  last activity. Target **T0 additive**. This grants no session-control or
+  agent-write authority; the example identifier and exact schema remain
+  unselected.
+- **788=d:** Keep session strengths ad hoc: the owner tells the lead verbally,
+  and the lead records that context in its own session agenda. There is no
+  stored strengths field in configuration, the dashboard, or roster results.
+  This closes the former configuration-versus-dashboard placement question;
+  neither persistent authoring surface is selected.
+- **782=a:** The lead assigns new work to the least-loaded peer and rebalances
+  when one peer has more than three not-started items. This allocation policy
+  does not confer stop/close powers or change the authority table.
 - The authority table preserves clerk 720–722. Clerk authoring parity does not
   confer hiring eligibility or session-management powers.
 
@@ -165,15 +180,11 @@ These are non-authoritative candidates, not an implementation contract.
 - Keep hiring eligibility distinct from both Runner `ParentRef` and MCP
   lineage. Reuse existing approval UI interactions rather than pretending a
   not-yet-created child has a live permission request.
-- **786, announced roster idea; non-authoritative pending settlement:** add a
-  read-only roster tool for child/peer sessions. The owner's example name is
-  `ws/daemon.list_children_sessions`, not a finalized identifier. Each row
-  would expose mailbox address, harness and model, label, idle/busy state,
-  running subagent count, last activity, and an owner-written `strengths`
-  note (for example, which model is good at frontend work). Target **T0
-  additive**; no new agent write authority is implied. This supports the
-  data-driven allocation direction MAIN identifies as (782), without
-  selecting allocation policy or changing hiring/control authority.
+- The owner's roster example name is `ws/daemon.list_children_sessions`, not
+  a finalized identifier. The confirmed fields and allocation policy are in
+  786/788/782 above; only the remaining API mechanism is proposed here. No
+  exact tool schema, peer visibility scope, or storage representation is
+  selected by this example.
 - MAIN's (786) relay identifies partial existing coverage: `session.children`
   exposes key lineage, `mailbox.lookup_peers` exposes address/harness/cwd,
   and idle/subagent information is currently visible in the dashboard UI.
@@ -181,20 +192,12 @@ These are non-authoritative candidates, not an implementation contract.
   tool already exists or a fresh EXEC source investigation. Reconcile
   display-group children from 775 with authority-key lineage when deriving
   a child; do not equate those sets merely because a tool name says child.
-- Roster note storage/editing in configuration versus the dashboard remains
-  open. The agent-facing roster is read-only in the proposal; no persistence
-  field, note-edit API, peer visibility scope or exact row schema is chosen.
 
 ### Open Questions
 
 These questions are unnumbered for MAIN to classify and mint in the owner
 conversation. They are not settled defaults.
 
-- **Roster strengths note:** where should the owner-written per-session
-  strengths note be stored and edited: configuration, or the dashboard?
-  MAIN owns classification and the question ID. The proposed agent-facing
-  roster is read-only; choosing an authoring/storage surface does not grant
-  agent write authority. Neither option is selected here.
 - How are unresolved proposals and their 30-minute expiry handled across
   requester closure, eligibility loss, or daemon restart? Do not infer that
   approved sessions stop with the requester.
@@ -208,6 +211,9 @@ conversation. They are not settled defaults.
 
 ### Rejected Alternatives
 
+- Persistent strengths configuration, a dashboard strengths editor, and a
+  strengths field in roster output were rejected by 788=d in favor of verbal
+  owner instructions and the lead's own agenda.
 - Model-controlled flag enablement and hiring by unflagged roots, clerks,
   workers, or hired children conflict with confirmed eligibility and 751–752.
 - Promoting a session to root while it is attached as a hired child, allowing
