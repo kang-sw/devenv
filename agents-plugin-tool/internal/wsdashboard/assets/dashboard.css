@@ -488,10 +488,12 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    part is a selector (clipped, monospace) or the error count */
 .achip.pchip b { font-family: var(--wb-mono); font-weight: 600; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .achip.cchip { box-shadow: inset 3px 0 0 var(--wb-warn), inset 0 0 0 1px var(--wb-line); }
-/* the floating button by a board selection that adds it as a mention */
-.wbmention { position: fixed; z-index: 60; border: 0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--wb-primary-fg); background: var(--wb-primary); box-shadow: var(--wb-shadow-hi); }
-.wbmention:hover { background: color-mix(in srgb, var(--wb-primary) 85%, var(--wb-fg)); }
-.wbmention:focus-visible { outline: 1.5px solid var(--wb-fg); outline-offset: 2px; }
+/* The selection note stays next to its attach action, within the viewport. */
+.wbmention { position: fixed; z-index: var(--z-popovers, 60); display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: 320px; max-width: calc(100vw - 8px); padding: 6px; border: 1px solid var(--wb-line); border-radius: 12px; color: var(--wb-fg); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
+.wbmention-note { flex: 1; min-width: 0; width: 0; box-sizing: border-box; resize: none; max-height: 30vh; padding: 5px 7px; border: 1px solid var(--wb-line); border-radius: 7px; font: inherit; font-size: 12px; color: var(--wb-fg); background: var(--wb-bg); }
+.wbmention button { flex: none; border: 0; border-radius: 999px; padding: 5px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--wb-primary-fg); background: var(--wb-primary); }
+.wbmention button:hover { background: color-mix(in srgb, var(--wb-primary) 85%, var(--wb-fg)); }
+.wbmention :focus-visible { outline: 1.5px solid var(--wb-fg); outline-offset: 2px; }
 .wbmention[hidden] { display: none; }
 .unchip { border: 0; background: transparent; color: var(--wb-muted-fg); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 5px; border-radius: 999px; }
 .unchip:hover { background: var(--wb-muted); color: var(--wb-fg); }
@@ -688,7 +690,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 :root[data-overview] .r-board .bcard:not([data-overview-motion]) :is(.bc-body, .bc-grip, .bc-folded),
 :root[data-overview] .r-board > .reply { display: none !important; }
 :root[data-overview] .r-board .tophead, :root[data-overview] .r-board .bc-hd { position: static !important; }
-:root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+:root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 :root[data-overview] .r-board :is(.tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close),
 :root[data-overview] .r-board .tpin:not([aria-pressed="true"]),
 :root[data-overview] .r-board .bc-pin:not([aria-pressed="true"]) { opacity: 0; pointer-events: none; }
@@ -766,11 +768,12 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .tm-end .btn { flex: none; height: 24px; font-size: 12px; font-weight: 700; color: var(--wb-fg); }
 .bcard[data-exited] .bc-kind { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
 .tm-fold { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
-/* Board infrastructure, not a card: it scrolls with the board and never
-   joins the topic rail or the drag flow. Collapse by its own column width. */
-.board-toolbar { container: board-toolbar / inline-size; flex: none; position: relative; z-index: 3; min-width: 0; margin-bottom: 10px; border: 1px solid var(--wb-line); border-radius: 12px; background: var(--wb-card); }
+/* Board infrastructure: the sticky slot reserves the original wrapped
+   height; the same face and controls compact without changing the flow. */
+.board-toolbar { flex: none; position: sticky; top: var(--toolbar-top, 0px); z-index: 4; min-width: 0; height: var(--toolbar-reserved, auto); margin-bottom: 10px; pointer-events: none; }
+.board-toolbar-face { container: board-toolbar / inline-size; position: relative; min-width: 0; border: 1px solid var(--wb-line); border-radius: 12px; background: var(--wb-card); pointer-events: auto; }
 .board-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 8px; }
-.board-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--wb-muted); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.board-action { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--wb-muted); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .board-action .li { width: 14px; height: 14px; flex: none; }
 .board-action:hover, .board-action:focus-visible { border-color: var(--wb-muted-fg); }
 .board-action[aria-pressed="true"], .tnew[aria-expanded="true"], .wnew[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); }
@@ -778,6 +781,16 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .board-count { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
 .board-term-slot, .board-web-slot { position: relative; display: flex; flex: none; }
 .board-term-slot:empty, .board-web-slot:empty { display: none; }
+.board-toolbar[data-floating] .board-toolbar-face { border-radius: 8px; }
+.board-toolbar[data-floating] .board-tools { padding-block: 1px; }
+.board-toolbar[data-floating] .board-action { height: 24px; border-radius: 6px; }
+/* Insets start at the button's padding edge: include its 1px border for
+   an outer 30px hit box, 1px above and 5px below the visible 24px face. */
+.board-toolbar[data-floating] .board-action::after { content: ""; position: absolute; inset: -2px -1px -6px; border-radius: inherit; }
+.board-toolbar[data-floating] .board-action :is(.li, .term-arrow) { transform: scale(.857142857143); transform-origin: center; }
+.board-toolbar[data-floating] .board-count { line-height: 14px; }
+.board-toolbar[data-floating][data-wrapped-actions] .board-tools { row-gap: 8px; }
+.board-action:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 @container board-toolbar (max-width: 540px) {
   .board-action:not(.board-overview) .board-label, .board-action kbd { display: none; }
   .board-action:not(.board-overview) { padding-inline: 8px; }
@@ -912,7 +925,8 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 /* The toolbar borrows the same explorer as the Files tab, in place, and
    shares the card sheet's scrim. Keep its toggle and row menu reachable. */
 .dgrid.live > .fpane[data-max] { display: flex; position: fixed; z-index: var(--z-modal); top: var(--files-top, 52px); left: 16px; right: 16px; bottom: 12px; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
-.board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); pointer-events: none; }
+.board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); }
+.board-toolbar[data-files] .board-toolbar-face { pointer-events: none; }
 .board-toolbar[data-files] .board-files { pointer-events: auto; }
 body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 @media (max-width: 640px) { .dgrid.live > .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }

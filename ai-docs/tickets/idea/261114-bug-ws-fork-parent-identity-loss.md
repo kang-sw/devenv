@@ -1,5 +1,7 @@
 ---
 title: Native fork session keys lose their parent identity
+related:
+  261114-research-ws-clerk-session-role: "owner 705=b and 720–722 select clerk design for new forks; existing sessions unchanged, no implementation authorized"
 ---
 
 # Native fork session keys lose their parent identity
@@ -37,6 +39,27 @@ This plausibly explains missing lineage in current source. Loaded/source equival
 
 Full local evidence artifact: `75748f2c-01-live-lead-and-fork-parent-incident-capture.md` in generated review paths, shared with root lead and MAIN. This issue is separate from `261114-bug-ws-live-lead-state-prompt-compaction`.
 
+## Design Disposition
+
+Owner (705)=b, relayed by MAIN on 2026-11-14 at 12:02, rejects the narrow
+(676) fix as the selected path and requests a role design inside
+`261114-epic-ws-common-session-foundation`. Owner (720)=c, (721)=a and
+(722)=c, relayed at 12:08, name that role **clerk**. The design is captured in
+`261114-research-ws-clerk-session-role`: retain parent-lead lineage for
+display/ownership and lead-equivalent authoring of own resources plus
+explicitly delegated parent resources, without session creation/management,
+global config or top-level lead identity. New forks become clerks; existing
+sessions remain unchanged. Conceptual naming selects no wire/store encoding;
+this is not implementation or T2 approval.
+
+The earlier simple-wiring explanation is incomplete: `5fa2e7cb8` and
+`260926-bug-pi-execute-worker-steals-mailbox-owner` explicitly exempted native
+and discussion forks as lateral leads. The design must also preserve the
+mailbox ownership protections in that ticket and
+`260926-bug-pi-children-inherit-mailbox-identity`; merely adding a parent can
+change tool gates and board/tracker visibility. Historical evidence above is
+retained, not promoted into a claim that loaded runtime behavior is repaired.
+
 ## Constraints
 
 Preserve existing sessions and keys. No retroactive rewrite, deletion, restart, root-mint policy, protocol/API restriction or T2 compatibility change is authorized. Those policy choices remain MAIN-owned. This factual idea capture does not settle them.
@@ -45,4 +68,9 @@ Preserve existing sessions and keys. No retroactive rewrite, deletion, restart, 
 
 ### Phase 1: Establish native fork lineage handoff
 
-Verify loaded-code identity and the actual fork admission/bootstrap lineage against the preserved key and row evidence, then propose the smallest bounded correction. Return any product/API or compatibility choice through MAIN before promotion or implementation.
+Verify loaded-code identity and actual fork admission/bootstrap lineage
+against the preserved key/row evidence, and hand findings to
+`261114-research-ws-clerk-session-role` under owner (705)=b and (720)–(722).
+Do not execute the rejected narrow (676) fix. Return any product/API or
+compatibility choice through MAIN before promotion or implementation; no new
+dependency on the existing common-interface implementation is introduced.

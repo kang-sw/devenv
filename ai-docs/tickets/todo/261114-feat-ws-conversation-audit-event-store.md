@@ -1,5 +1,9 @@
 ---
 title: "Conversation audit: the daemon stores every harness stream event of a conversation and serves a read API for the audit view"
+blocked-by: 261114-refactor-ws-common-session-interface#phase2
+related:
+  261114-epic-ws-common-session-foundation: "foundation map; not a whole-epic prerequisite"
+  261114-refactor-ws-common-session-interface: "exact producer: Phase 2 current context/state parity adoption (682), no store rewrite"
 ---
 
 # Conversation audit event store
@@ -57,23 +61,26 @@ What exists today (Explore evidence, 2026-11-14, paths under
    harness-neutral event schema ((546)=a).** No API proxy to capture the
    system prompt. Future harnesses map onto the same schema.
 3. **Compatibility tier: T0.** It adds a new store beside the ring, new
-   routes and no change to existing routes, ring entries, MCP tools or
-   tracker events. The new store carries its own `schema_version` from day
-   one, so later changes have a tier to raise.
+   routes and an optional ring call id; existing routes, old ring entry
+   readability, MCP tools and tracker events keep their semantics. The new
+   store carries its own `schema_version` from day one, so later changes
+   have a tier to raise.
 
-## Open Decision Queue
+### Approved technical contracts (594–601)
 
-Last ID: (601). MAIN's board IDs are (a) = (594), (b) = (595), (c) = (596),
-(d) = (597), (e) = (598), (f) = (599), (g) = (601), and (600) is the
-owner's group-ack check, covering (594)-(599) and (601).
+Authority: owner `594..609,611=ok`, answer recorded 2026-11-14T06:10:20Z
+in MAIN's answer_quote fields; MAIN reaffirmed preservation of approvals
+594–611. (600) is the backend group acknowledgment,
+not a separate implementation choice. Canonical IDs below replace the old
+letter aliases without changing their contracts.
 
-- (a) [open] [technical] The audit store is a separate append-only
+- **(594)** The audit store is a separate append-only
   per-session log, `sessions/<replyID>/audit/`: JSONL segment files with a
   size cap per segment, plus a small sidecar index (event id -> segment,
   offset). This is chosen over widening ring entries: the ring is a capped
   UI view (2000 entries, 64 KiB text) whose trimming would discard audit
   data, and full tool outputs would bloat every history page read.
-- (b) [open] [technical] Envelope: `{v, id, seq, at, harness, kind,
+- **(595)** Envelope: `{v, id, seq, at, harness, kind,
   subkind?, turn?, call_id?, parent_id?, agent_id?, model_seen, in?, out?,
   meta?, raw?, redactions?}`.
   - `kind` is one of `user`, `assistant_text`, `thinking`, `tool_call`,
@@ -84,7 +91,7 @@ owner's group-ack check, covering (594)-(599) and (601).
   - Claude stream-json is mapped first. Pi follows, from `pi.go`'s existing
     events. Codex maps to the same kinds when a Codex mapper exists.
   - This is chosen over per-harness schemas, which (546)=a rules out.
-- (c) [open] [technical] Redaction: before writing, `wsredact` runs over
+- **(596)** Redaction: before writing, `wsredact` runs over
   `in`, `out` and `raw`. A redaction keeps the rule name and the original
   length, never the original
   (`redactions: [{field, offset, rule, length}]`). This extends `wsredact`
@@ -92,19 +99,19 @@ owner's group-ack check, covering (594)-(599) and (601).
   signature for existing callers. It is chosen over storing unredacted
   data with a separate secure store, which is a new key-management
   surface.
-- (d) [open] [technical] GC: the audit dir lives inside the session dir, so
+- **(597)** GC: the audit dir lives inside the session dir, so
   the existing 7-day `PruneRegistrations` removes it. A per-session byte cap
   (config knob, default 256 MiB) drops the oldest whole segments first. It
   is chosen over a time-only rule, because one runaway tool output could
   fill the disk within 7 days.
-- (e) [open] [technical] "Model-seen cut point": each event records
+- **(598)** "Model-seen cut point": each event records
   `model_seen` (true while it is in the model's current context). A
   compaction event marks every earlier event false and records itself as
   the cut. Claude's `compact_boundary` and Pi's
   `compaction_start`/`compaction_end` provide the boundary. Without a
   boundary, the cut is the conversation start. This is chosen over a
   token-count estimate, which the stream does not give reliably.
-- (f) [open] [technical] Read API contract (the UI ticket's dependency). All
+- **(599)** Read API contract (the UI ticket's dependency). All
   routes are under the existing session prefix, return JSON, and require the
   same auth as `/s/<id>/history`:
   - `GET /s/<id>/audit/events?before=<event id>&after=<event id>&n=<count>&kinds=<k1,k2>`
@@ -144,7 +151,7 @@ owner's group-ack check, covering (594)-(599) and (601).
       nanoseconds), so the UI can place hidden events between ring rows.
   - This is chosen over an MCP tool surface, which can come later as an
     additive T0 tool, because the UI is the consumer.
-- (g) [open] [technical] The ring's per-call record gains an optional call
+- **(601)** The ring's per-call record gains an optional call
   id, so a ring history row can open its audit events. Today no ring type
   carries one (`wslive/toolsummary.go` `ToolBatch`, `ToolCallArgs`;
   `wslive/ring.go` `RingEntry`), and the history DOM only has `data-entry`.
@@ -163,25 +170,67 @@ owner's group-ack check, covering (594)-(599) and (601).
     events, which is ambiguous for parallel calls and for calls that start
     in the same millisecond.
 
+### Additive reconciliation and foundation prerequisite
+
+- **(681), MAIN technical settlement, 2026-11-14: UTC selection, T0.**
+  `GET /s/<id>/audit/events` also accepts optional
+  `since=<RFC3339Nano UTC>` and `until=<RFC3339Nano UTC>`.
+  Select `since <= at < until`; omitted bounds are unbounded. Malformed
+  bounds or `since > until` return HTTP 400; equal bounds select an empty
+  interval. Apply UTC and kinds selection before the existing event-ID
+  cursors and `n` limit. Preserve oldest-first per-session sequence order,
+  the existing response `{events, before, after, end, cut}`, defaults and
+  maximum page size. `before`/`after` remain event IDs, never timestamps.
+  Follow returned ID cursors with unchanged filters until `end`;
+  equal-nanosecond events are distinguished by sequence/event IDs.
+  Timestamp filters select hidden-event ranges only; `?call=` and (601)
+  remain the sole history-call join.
+  - Rejected: loading the whole retained log and filtering client-side
+    (up to the 256 MiB session cap), or adding a separate ring-to-event-ID
+    resolver when optional filters suffice.
+- **(682), MAIN technical settlement, 2026-11-14: exact foundation gate.**
+  This backend depends on
+  `261114-refactor-ws-common-session-interface#phase2`: parity adoption of
+  current context/state access, without a store rewrite. The UI retains
+  `261114-feat-ws-conversation-audit-event-store#phase2`; (681) belongs to
+  that API phase. Rejected: a separate migration child or waiting for the
+  whole foundation epic, all harnesses, voice or authority UI.
+
 ## Constraints
 
 - Implementation conventions (AGENTS.md): `agents-plugin-tool/` ->
   `ai-docs/manuals/shipped-surface-boundary.md`; `agents-plugin-tool/internal/`
   -> `ai-docs/manuals/release-compatibility.md`; `internal/mcp/` ->
   `ai-docs/manuals/ws-mcp.md`.
-- The existing ring, its caps and `/history` behaviour do not change.
+- The optional call id in (601) preserves old ring entry readability, the
+  ring's caps and `/history` behaviour.
 - Writing must not block the stream mapper. Append off the hot path, and on a
   write error log it and drop the event rather than stall the session.
 - Store files use mode 0600 and dirs 0700, like the ring.
+- UTC bounds in (681) are selection filters only. Call identity and linkage
+  remain event/call IDs under (599)/(601); timestamps never guess joins.
+- The exact foundation prerequisite is interface Phase 2 (682), not an
+  alternate audit store migration or whole-epic gate.
+
+## Prior Decisions
+
+- Owner `594..609,611=ok`, answer_quote timestamp 2026-11-14T06:10:20Z,
+  confirms backend (594)–(599)/(601) via group acknowledgment (600) and
+  UI (602)–(610) via (611); MAIN reaffirmed preservation of 594–611.
+- (681) reconciles (599)'s event-ID pagination with (607)'s UTC range
+  selection additively; it does not replace the approved call-ID join (601).
+- (682) turns the common-foundation relationship into the exact interface
+  Phase 2 producer prerequisite while retaining the backend/UI API gate.
 
 ## Phases
 
 ### Phase 1: Envelope, Claude mapping, store, redaction, GC
 
-The store and writer (queue items (a), (c), (d)), the envelope (b), Claude
+After `261114-refactor-ws-common-session-interface#phase2` lands (682),
+implement the store and writer ((594), (596), (597)), the envelope (595), Claude
 stream-json mapping of every line kind including thinking, hooks,
-reminders, the compaction summary and subagent lines, and the model-seen
-cut (e), and the ring call id (g). Pi mapping too, if it fits the same
+reminders, the compaction summary and subagent lines, the model-seen
+cut (598), and the ring call id (601). Pi mapping too, if it fits the same
 pass.
 
 Verification: unit tests over recorded stream-json fixtures, one per kind;
@@ -193,6 +242,13 @@ reads.
 
 ### Phase 2: Read API
 
-The three routes of (f), with paging, kinds filter, attached links, cut, and
-search. Verification: route tests on a fixture store, including paging
-boundaries, a truncated large body, and a search hit's line number.
+Depends on this ticket's Phase 1. The three route families of (599), with
+paging, kinds filter, attached links, cut, search and the optional UTC bounds
+(681). This is the UI ticket's unchanged Phase 2 prerequisite (682).
+
+Verification: route tests on a fixture store, including paging boundaries,
+a truncated large body, and a search hit's line number. Cover inclusive
+lower/exclusive upper UTC bounds, omitted/equal/invalid/reversed bounds,
+combined kinds and event-ID cursors, and more than 500 equal-nanosecond
+events across pages without gaps or duplicates. Confirm existing requests
+without UTC bounds retain their contract and call lookup remains ID-based.
