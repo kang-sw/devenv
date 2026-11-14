@@ -760,11 +760,12 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .tm-end .btn { flex: none; height: 24px; font-size: 12px; font-weight: 700; color: var(--wb-fg); }
 .bcard[data-exited] .bc-kind { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
 .tm-fold { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
-/* Board infrastructure, not a card: it scrolls with the board and never
-   joins the topic rail or the drag flow. Collapse by its own column width. */
-.board-toolbar { container: board-toolbar / inline-size; flex: none; position: relative; z-index: 3; min-width: 0; margin-bottom: 10px; border: 1px solid var(--wb-line); border-radius: 12px; background: var(--wb-card); }
+/* Board infrastructure: the sticky slot reserves the original wrapped
+   height; the same face and controls compact without changing the flow. */
+.board-toolbar { flex: none; position: sticky; top: 0; z-index: 4; min-width: 0; height: var(--toolbar-reserved, auto); margin-bottom: 10px; pointer-events: none; }
+.board-toolbar-face { container: board-toolbar / inline-size; position: relative; min-width: 0; border: 1px solid var(--wb-line); border-radius: 12px; background: var(--wb-card); pointer-events: auto; }
 .board-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 8px; }
-.board-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--wb-muted); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.board-action { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--wb-muted); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .board-action .li { width: 14px; height: 14px; flex: none; }
 .board-action:hover, .board-action:focus-visible { border-color: var(--wb-muted-fg); }
 .board-action[aria-pressed="true"], .tnew[aria-expanded="true"], .wnew[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); }
@@ -772,6 +773,16 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .board-count { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
 .board-term-slot, .board-web-slot { position: relative; display: flex; flex: none; }
 .board-term-slot:empty, .board-web-slot:empty { display: none; }
+.board-toolbar[data-floating] .board-toolbar-face { border-radius: 8px; }
+.board-toolbar[data-floating] .board-tools { padding-block: 1px; }
+.board-toolbar[data-floating] .board-action { height: 24px; border-radius: 6px; }
+/* Insets start at the button's padding edge: include its 1px border for
+   an outer 30px hit box, 1px above and 5px below the visible 24px face. */
+.board-toolbar[data-floating] .board-action::after { content: ""; position: absolute; inset: -2px -1px -6px; border-radius: inherit; }
+.board-toolbar[data-floating] .board-action :is(.li, .term-arrow) { transform: scale(.857142857143); transform-origin: center; }
+.board-toolbar[data-floating] .board-count { line-height: 14px; }
+.board-toolbar[data-floating][data-wrapped-actions] .board-tools { row-gap: 8px; }
+.board-action:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 @container board-toolbar (max-width: 540px) {
   .board-action:not(.board-overview) .board-label, .board-action kbd { display: none; }
   .board-action:not(.board-overview) { padding-inline: 8px; }
@@ -906,7 +917,8 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 /* The toolbar borrows the same explorer as the Files tab, in place, and
    shares the card sheet's scrim. Keep its toggle and row menu reachable. */
 .dgrid.live > .fpane[data-max] { display: flex; position: fixed; z-index: var(--z-modal); top: var(--files-top, 52px); left: 16px; right: 16px; bottom: 12px; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
-.board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); pointer-events: none; }
+.board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); }
+.board-toolbar[data-files] .board-toolbar-face { pointer-events: none; }
 .board-toolbar[data-files] .board-files { pointer-events: auto; }
 body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 @media (max-width: 640px) { .dgrid.live > .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }

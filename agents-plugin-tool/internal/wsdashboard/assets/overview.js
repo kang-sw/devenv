@@ -24,9 +24,10 @@
       { top: s.getBoundingClientRect().top + s.clientTop, bottom: s.getBoundingClientRect().top + s.clientTop + s.clientHeight, height: s.clientHeight };
   }
   function items() { return all(ITEM, o.board); }
-  function anchor(list, toolbar, bounds) {
-    if (toolbar.bottom > bounds.top && toolbar.top < bounds.bottom) return null;
-    return list.filter(function (n) { var r = n.getBoundingClientRect(); return r.bottom > bounds.top && r.top < bounds.bottom; })[0] || null;
+  function anchor(list, toolbar, bounds, floating) {
+    if (!floating && toolbar.bottom > bounds.top && toolbar.top < bounds.bottom) return null;
+    var top = floating ? Math.max(bounds.top, toolbar.bottom) : bounds.top;
+    return list.filter(function (n) { var r = n.getBoundingClientRect(); return r.bottom > top && r.top < bounds.bottom; })[0] || null;
   }
   function classify(t) {
     if (!t || !t.closest) return "outside";
@@ -206,7 +207,7 @@
   // interpolates around it without inventing a second set of states.
   function enter(state) {
     if (!o || on || busy || doc.querySelector(".bcard[data-max], section.topic[data-max], details.entry-panel[data-max]")) return;
-    var s = scroller(o.toolbar), v = view(s), n = anchor(items(), o.toolbar.getBoundingClientRect(), v);
+    var s = scroller(o.toolbar), v = view(s), n = anchor(items(), o.toolbar.firstChild.getBoundingClientRect(), v, o.toolbar.hasAttribute("data-floating"));
     entry = state || { key: identity(n), offset: (n || o.toolbar).getBoundingClientRect().top - v.top };
     if (state && entry.key && !find(entry.key)) entry = { key: null, offset: 0 };
     pinTop = state ? +state.pinTop || 0 : o.pins.scrollTop;
@@ -260,7 +261,8 @@
     var landed = n && n.isConnected ? n : null;
     var boardTarget = landed && !(inColumn && o.pins.contains(landed)) ? landed : restore;
     if (boardTarget && inColumn && o.pins.contains(boardTarget)) boardTarget = null;
-    var offset = landed && boardTarget === landed ? 0 : boardTarget && restore === boardTarget ? entry.offset : entry.key ? 0 : entry.offset;
+    var arrival = parseFloat(getComputedStyle(scroller(boardTarget || o.toolbar)).scrollPaddingTop) || 0;
+    var offset = landed && boardTarget === landed ? arrival : boardTarget && restore === boardTarget ? entry.offset : entry.key ? arrival : entry.offset;
     if (landed && inColumn && o.pins.contains(landed) && scroller(landed) === o.pins) keep(landed, 0);
     o.toolbar.querySelector(".board-overview").setAttribute("aria-pressed", "false");
     save(); changed();

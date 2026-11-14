@@ -127,7 +127,50 @@
     }
     counts = mk("span", "board-count");
     row.appendChild(counts);
-    toolbar.appendChild(row);
+    var face = mk("div", "board-toolbar-face");
+    face.appendChild(row);
+    toolbar.appendChild(face);
+  }
+  // The sticky root keeps the original flex footprint. Only its face changes
+  // height: no scroll writer, replacement controls, or transient measuring DOM.
+  function floatToolbar() {
+    if (!window.ResizeObserver) return;
+    var face = toolbar.firstChild, row = face.firstChild, countHeight = counts.getBoundingClientRect().height, scrollBox = null;
+    function style(n, key, value) {
+      if (n.style.getPropertyValue(key) !== value) n.style.setProperty(key, value);
+    }
+    function update() {
+      if (!face.getClientRects().length || !face.getBoundingClientRect().width) return;
+      var s = scroller(board) || doc.scrollingElement, main = s === doc.scrollingElement;
+      var top = main ? 0 : s.getBoundingClientRect().top + s.clientTop;
+      var floating = board.getBoundingClientRect().top < top;
+      toolbar.toggleAttribute("data-floating", floating);
+      if (!floating) countHeight = counts.getBoundingClientRect().height;
+      var rows = {}, actionRows = {};
+      Array.prototype.forEach.call(row.children, function (n) {
+        var r = n.getBoundingClientRect();
+        if (!r.height) return;
+        var key = Math.round((r.top + r.bottom) * 2) / 4;
+        var action = n !== counts;
+        rows[key] = Math.max(rows[key] || 0, action ? 30 : countHeight);
+        if (action) actionRows[key] = true;
+      });
+      toolbar.toggleAttribute("data-wrapped-actions", Object.keys(actionRows).length > 1);
+      var keys = Object.keys(rows), reserved = 16 + Math.max(0, keys.length - 1) * 6;
+      keys.forEach(function (key) { reserved += rows[key]; });
+      style(toolbar, "--toolbar-reserved", (floating ? reserved : face.getBoundingClientRect().height) + "px");
+      var height = face.getBoundingClientRect().height;
+      // The rail already exposes a host inset; include the lower hit extension.
+      style(doc.getElementById("bcol") || board, "--wb-rail-inset", (height + 6) + "px");
+      if (scrollBox && scrollBox !== s) scrollBox.style.removeProperty("scroll-padding-top");
+      scrollBox = s;
+      style(s, "scroll-padding-top", (height + 10) + "px");
+      if (maxed && maxed.files) style(maxed.el, "--files-top", Math.max(52, face.getBoundingClientRect().bottom + 8) + "px");
+    }
+    doc.addEventListener("scroll", update, { capture: true, passive: true });
+    window.addEventListener("resize", update);
+    new window.ResizeObserver(update).observe(face);
+    update();
   }
   function countTopics() {
     if (!counts) return;
@@ -633,7 +676,7 @@
       c.slot = doc.querySelector("#chead .fsum");
       c.root = c.slot && c.slot.querySelector(".froot");
       if (c.root) c.el.querySelector(".fhd").insertBefore(c.root, c.el.querySelector(".fhd").firstChild);
-      c.el.style.setProperty("--files-top", Math.max(52, toolbar.getBoundingClientRect().bottom + 8) + "px");
+      c.el.style.setProperty("--files-top", Math.max(52, toolbar.firstChild.getBoundingClientRect().bottom + 8) + "px");
       c.el.setAttribute("data-max", "");
       toolbar.setAttribute("data-files", "");
       c.back.setAttribute("aria-expanded", "true");
@@ -1072,6 +1115,7 @@
       doc.addEventListener("click", function (e) { if (dragged) { e.preventDefault(); e.stopPropagation(); } }, true);
       // A held touch is a drag, not a scroll.
       doc.addEventListener("touchmove", function (e) { if (dg && dg.on) e.preventDefault(); }, { passive: false });
+      floatToolbar();
       fetchMissing();
     },
     // open adds a card of a registered kind at the head of the unpinned
