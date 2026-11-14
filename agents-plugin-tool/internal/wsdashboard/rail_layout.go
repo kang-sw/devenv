@@ -437,7 +437,7 @@ type railFact struct {
 	WS, Group string
 	Live      bool
 	// Pos is the row's place in its group as the rail lists it before the
-	// layout orders it: the live rows (newest registration first), then
+	// layout orders it: the live rows (oldest registration first), then
 	// the ended ones.
 	Pos int
 }
@@ -592,9 +592,9 @@ func (s layoutScope) starOn(id string) bool {
 	return s.w != nil && slices.Contains(s.w.Stars, id) && !s.child(id)
 }
 
-// rank is a top-level row's place in the order: its own entry, -1 for none
-// (a row the order does not hold goes first: a new session on top). An
-// orphan without an entry of its own takes its ended parent's place when
+// rank is a top-level row's place in the order: its own entry, or the
+// tail for an unlisted ordinary live row. Ended rows keep their prior rank
+// and an orphan without an entry of its own takes its ended parent's place when
 // they share a group, else -2, the head of its own group. Once a placement
 // in its group stored the orphan where it shows (place), that entry ranks
 // it, so a row placed before or after the orphan stays on that side of it;
@@ -610,6 +610,9 @@ func (s layoutScope) rank(id string) int {
 			return -2
 		}
 		return slices.Index(s.w.Order, p)
+	}
+	if own < 0 && s.f.rows[id].Live && s.parent(id) == "" {
+		return len(s.w.Order)
 	}
 	return own
 }
@@ -1001,8 +1004,9 @@ func pruneRailLayout(doc *railLayoutDoc, f railFacts) {
 
 // orderRailView orders view, as buildRailView built it, by the layout doc
 // (f read off that same view): within each worktree group the starred units
-// first, then the layout's order, a row it does not hold first, then the
-// rail's own order (newest registration first). A live child of a live
+// first, then the layout's order, unlisted ordinary live rows at the tail
+// in registration order (oldest first). Orphans retain their established
+// ranks. A live child of a live
 // top-level parent leaves its own group's list for its parent's Children,
 // in the parent's children order, whatever group either is in; an
 // orphan, an ended child, and a child whose parent shows as a child itself
