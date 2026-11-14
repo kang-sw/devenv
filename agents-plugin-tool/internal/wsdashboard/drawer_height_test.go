@@ -2,6 +2,37 @@ package wsdashboard
 
 import "testing"
 
+// The handle observer pads a shallower watched header. Coalesce native
+// deliveries outside that callback, reading current widths even if the
+// drawer closed or its regions changed before the frame runs.
+func TestDrawerRoomResizeFrame(t *testing.T) {
+	observer := dashboardJSBlock(t, "\n    if (window.ResizeObserver) {\n      var drRoomFrame = 0;", "\n    // The panels grid's column count")
+	runTrackerNode(t, "drawer room resize frame", `
+var bad = [], frames = [], deliveries, watched = [], calls = [], width = 178;
+function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ': got ' + JSON.stringify(got) + ', want ' + JSON.stringify(want)); }
+var window = { ResizeObserver: true }, drawer = { isConnected: true, open: true }, drhandle = {}, gitRegion = {};
+function ResizeObserver(fn) { deliveries = fn; this.observe = function (n) { watched.push(n); }; }
+function requestAnimationFrame(fn) { frames.push(fn); return frames.length; }
+function drRoom() { calls.push(width); }
+`+observer+`
+check('both handles are watched', watched.length, 2);
+deliveries(); deliveries(); deliveries();
+check('a resize burst queues one frame without writing the header', [frames.length, calls], [1, []]);
+width = 167; drawer.open = false;
+frames[0]();
+check('a close before delivery still reads the current handle width', calls, [167]);
+deliveries();
+check('the completed frame permits another resize', frames.length, 2);
+drawer.isConnected = false;
+frames[1]();
+check('a detached drawer makes no header write', calls, [167]);
+drawer.isConnected = true; width = 100;
+deliveries(); frames[2]();
+check('a skipped frame does not leave the queue armed', calls, [167, 100]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
 // TestDrawersShareOneHeight pins the one drawer height (dashboard.js drH,
 // drSetH, the drawer drag; tracker.js drHeight, fitDrawer, the store
 // handle drag): a height never set is DR_DEF (320px) for the session

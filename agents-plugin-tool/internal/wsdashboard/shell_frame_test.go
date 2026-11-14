@@ -34,7 +34,7 @@ func TestHiddenFrameHoldsItsUpdatesUntilShown(t *testing.T) {
 
 	runNode(t, "hidden frame", "(function () {\n"+streamPageHarness+`
 framed = true;
-var parentWin = { got: [], hashes: [], postMessage: function (m, o) { parentWin.got.push([m.wsShell, o]); if (m.wsShell === "hash") parentWin.hashes.push(m.hash); } }, otherWin = {};
+var parentWin = { got: [], hashes: [], layouts: [], postMessage: function (m, o) { parentWin.got.push([m.wsShell, o]); if (m.wsShell === "hash") parentWin.hashes.push(m.hash); if (m.wsShell === "layout") parentWin.layouts.push(m); } }, otherWin = {};
 var listeners = {};
 window.addEventListener = function (t, fn) { (listeners[t] = listeners[t] || []).push(fn); };
 window.parent = parentWin;
@@ -71,7 +71,14 @@ var times = 0, tickSets = null;
 function fmtTime() { times++; }
 function pace() {}
 Date.now = function () { return 0; };
-q = function (sel) { return /time\[data-ms\]/.test(sel) ? [{}] : sel === "#sse" ? [indicator] : []; };
+var linkMenus = [], railPops = [];
+q = function (sel) {
+  if (/time\[data-ms\]/.test(sel)) return [{}];
+  if (sel === "#sse") return [indicator];
+  if (sel === ".rpop:not([hidden])") return railPops;
+  if (sel === ".rpop:not([hidden]), .lmenu") return railPops.concat(linkMenus);
+  return [];
+};
 `+mustAsset(t, "shell.js")+hidden+open+connect+show+tick+post+frame+`
 connect();
 shFrameInit();
@@ -117,6 +124,19 @@ listeners.popstate.forEach(function (fn) { fn({}); });
 location.hash = "#/typed";
 listeners.hashchange.forEach(function (fn) { fn({}); });
 check("each way a hash route moves posts its hash", parentWin.hashes, ["#/store", "#/store/item", "#/back", "#/typed"]);
+function popover() { fromShell({ wsShell: "sync" }); return parentWin.layouts[parentWin.layouts.length - 1].popover; }
+var visible = { getClientRects: function () { return [{}]; } };
+var hidden = { getClientRects: function () { return []; } };
+linkMenus = [visible];
+check("a visible link menu lifts its frame above the shell header", popover(), true);
+linkMenus = [hidden];
+check("a menu with no layout does not lift the frame", popover(), false);
+linkMenus = [visible]; railPops = [visible];
+check("a link menu and rail popover share the frame layer", popover(), true);
+linkMenus = [];
+check("closing the link menu preserves another visible popover", popover(), true);
+railPops = [];
+check("closing the last popover restores the shell layer", popover(), false);
 process.stdout.write(bad.join("\n"));
 })();
 `)
