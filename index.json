@@ -675,11 +675,11 @@
       "lease": {
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
-        "track": "feat/topic-state-task5",
+        "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-14T13:46:37Z",
+        "touched_at": "2026-11-14T23:05:55Z",
         "impl": {
-          "branch": "impl/feat/topic-state-task5/swarm-easel-clay"
+          "branch": "impl/develop/swarm-easel-clay"
         }
       }
     },
