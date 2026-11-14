@@ -93,7 +93,56 @@ Verification:
 - Run affected existing dashboard/card/preview tests and new focused browser regressions. Do not use a frozen-lane retry or live daemon replacement as acceptance. Keep source verification separate from actual runtime delivery.
 - Verify that the redundant content-only header fold action is absent, whole-card fold and independent inner disclosures remain usable, and raise uses an upward-arrow-to-top-line icon at wide/narrow widths. Capture the updated controls for visual inspection. Under Decision 9, preserve the known narrow drag failure and remaining matrix omissions as residual evidence rather than weakening assertions or claiming full browser acceptance.
 
-## Blocked (2026-11-14): source verification stopped on non-convergence
+### Result (1ce546502) - 2026-11-14
+
+- Shared whole-card fold/expand and region-preserving raise now cover renderer-
+  owned topics, terminals and file previews. Exact live topic origins reach
+  direct/menu/validated sandbox dispatch, and one-time preview placement uses
+  independent persisted snapshots rather than a follow relation. Type-owned
+  badges, disposal, topic workflow lifecycle, sandboxing and inner disclosures
+  remain intact.
+- Owner visual acceptance and Decisions 7-9 govern completion. Final polish
+  removes the dashboard-only content disclosure (standalone retains it), keeps
+  its body under whole-card fold, and uses the exact vendored Lucide
+  `arrow-up-to-line` icon with unchanged accessible labels. Renderer-owned DOM
+  shape preserves incoming/live frame-graft agreement; no client-only unwrap
+  or frozen-lane implementation change was introduced.
+- Final affected checks passed: `GOPROXY=off go test ./internal/wsdashboard
+  ./internal/wswhiteboard ./internal/wsi18n -count=1 -timeout=15m`
+  (143.815s/19.339s/1.130s), `GOPROXY=off go build -o
+  /tmp/shared-card-polish-source ./cmd/ws-mcp`, changed JavaScript syntax and
+  `git diff --check`. Full logs: `/tmp/shared-card-polish-packages.log`,
+  `/tmp/shared-card-polish-build.log`, `/tmp/shared-card-polish-static.log`.
+- Focused `shared-controls` browser checks passed at 1800x900 and 420x900 on
+  the actual private source fixture: removed content control/padding marker,
+  title/ticket/state chrome, independent history/panel interaction and state,
+  all three icons/labels and ordinary/pinned raises, whole fold/focus, topic
+  maximum/back and production source-update retention. Logs:
+  `/tmp/shared-card-polish-adapter-1800.log` and
+  `/tmp/shared-card-polish-adapter-420.log`. Updated clear header closeups and
+  expanded/folded/maximum captures are under
+  `/tmp/shared-card-polish-artifacts/adapter-1800/` and `adapter-420/`.
+- One fresh independent lite review of
+  `ef0a5ea3718be5333ac3fb346fd5574a0f3972fb..1ce5465020acbd0c14da7ad718d92cf11bbb74f7`
+  returned clean, with no actionable Critical, Important or Minor findings.
+  Report: `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@2b250898/review-paths/3a58f150-01-shared-card-actions-lite.md`.
+- Residual evidence is not a pass: the earlier complete 420px `shared-actions`
+  pointer-drag assertion failed (`/tmp/shared-card-671-adapter-420.log`), and
+  that cause and the historical repeated-update failure remain unclassified.
+  The assertions and earlier evidence are preserved. The remaining broad
+  narrow/board-only browser matrix was not rerun under Decision 9; full
+  automated browser acceptance is not claimed. MAIN owns disposition/tracking
+  of those disclosed residuals after closure, rather than treating owner
+  acceptance as a waiver of a newly diagnosed defect.
+- Only the owned private preview was refreshed for source `e2d38b538`:
+  `http://127.0.0.1:65281/s/detestrockfishswingingacts`, launcher 57186,
+  daemon 57804; metadata/logs are `/tmp/shared-card-polish-launch.json` and
+  `/tmp/shared-card-polish-serve.log`. Earlier owner-inspected captures remain
+  preserved. No shared/live daemon, provider, installer, push or source merge
+  was performed. Owner-approved source integration remains MAIN-owned;
+  private preview delivery is distinct from actual shared runtime delivery.
+
+## Historical block (2026-11-14): source verification stopped on non-convergence
 
 Implementation checkpoints `62455a048`, `20e647c3a`, `c7c9c0f06`,
 `760df43a2`, and `0c416f221` are retained on
