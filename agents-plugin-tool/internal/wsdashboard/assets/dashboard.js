@@ -2391,7 +2391,8 @@
       var add = doc.createElement("button");
       add.type = "button";
       add.setAttribute("data-wbmention", "");
-      add.textContent = wsT("js.wbmention.add");
+      add.innerHTML = '<svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8.5 2.5H2.5v6l5.3 5.3a1 1 0 0 0 1.4 0l4.6-4.6a1 1 0 0 0 0-1.4Z"/><circle cx="5.5" cy="5.5" r=".8"/></svg>';
+      add.appendChild(doc.createTextNode(wsT("js.wbmention.add")));
       add.title = wsT("js.wbmention.add.title");
       mbtn.appendChild(mnote);
       mbtn.appendChild(add);
