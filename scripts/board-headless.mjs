@@ -31,8 +31,8 @@
 //             step put it (no jump), mounts frames before they enter the view,
 //             turns frames far from the view into placeholders that keep
 //             their height, and remounts the mermaid topic with its diagram
-//             drawn again in a new frame. Also delays one real first-height
-//             report above the jump target until keep ends, then requires
+//             drawn again in a new frame. Also defers one body's reporting
+//             script above the jump target until keep ends, then requires
 //             exactly one scroll compensation and <=1px post-paint drift.
 //
 //   pill      Static pending counts and frame fixed point (use `serve --topics
@@ -924,23 +924,32 @@ async function scenarioBands(ctx) {
   const unsized = load.filter((t) => t.frame === "placeholder" && !t.height).length;
   assert(unsized >= 4, `only ${unsized} topic(s) were never laid out at load: run \`serve --mermaid --topics 30\``);
 
-  // Hold one real first-height report above the jump target. Release it
-  // AFTER the jump's keep ends, when native anchoring would be restored.
-  // This deterministically exercises topicResized, not keep's temporary
-  // overflow-anchor:none, which can mask double document compensation.
-  const heldTopic = load.slice(0, load.findIndex((t) => t.name === M)).filter((t) => t.shown && t.frame === 'placeholder' && !t.height).at(-1)?.name;
-  assert(heldTopic, 'need an unsized body immediately above MERMAID');
-  await page.evaluate((name) => {
-    const bh = window.__bh;
-    bh.holdBandHeight = (e) => {
-      const f = bh.section(name)?.querySelector('.tdoc iframe.doc-frame');
-      if (f && e.source === f.contentWindow && e.data?.wbDoc === 'height') {
-        bh.heldBandHeight = { source: e.source, data: e.data };
-        e.stopImmediatePropagation();
-      }
-    };
-    window.addEventListener('message', bh.holdBandHeight, true);
-  }, heldTopic);
+  // Select AND prepare a live placeholder in one browser task, before any
+  // mount can consume its first height. A late message listener is not a
+  // reliable hold: the dashboard's listener is already registered.
+  const held = await page.evaluate((name) => {
+    const bh = window.__bh, topics = bh.topics(), target = bh.section(name);
+    const topic = topics[topics.indexOf(target) - 1], p = topic?.querySelector('.tdoc .doc-frame');
+    if (!p || p.tagName !== 'DIV' || p.style.height) return { error: 'immediately preceding body must still be an unsized placeholder', topic: topic?.dataset.topic, tag: p?.tagName, height: p?.style.height };
+    const source = p.getAttribute('data-srcdoc'), parsed = new DOMParser().parseFromString(source, 'text/html');
+    const script = Array.from(parsed.querySelectorAll('script[src]')).find((s) => /(?:^|\/)wb-frame-[a-f0-9]+\.js$/.test(s.getAttribute('src')));
+    if (!script || parsed.querySelector('pre')) return { error: 'need a plain body with the shared frame script', topic: topic.dataset.topic };
+    // No synthetic height or MessageEvent: defer execution of the actual
+    // reporting script, then start that same asset in the real child frame.
+    script.type = 'application/x-board-headless-held';
+    script.setAttribute('data-bh-band-script', '');
+    p.setAttribute('data-srcdoc', '<!DOCTYPE html>\n' + parsed.documentElement.outerHTML);
+    // MERMAID is last in the seeded board. Without tail room, a fragment
+    // jump clamps near the bottom and the preceding topic stays IN view.
+    const tail = document.createElement('div');
+    tail.style.height = 3 * bh.scroller().clientHeight + 'px';
+    tail.setAttribute('aria-hidden', 'true');
+    bh.board_().appendChild(tail);
+    bh.bandProbe = { topic: topic.dataset.topic, source, tail };
+    return { topic: topic.dataset.topic };
+  }, M);
+  assert(!held.error, `cannot prepare first-height probe: ${JSON.stringify(held)}`);
+  const heldTopic = held.topic;
 
   // 2. A jump to the panel under MERMAID lands and holds while the frames
   // around it mount and report their heights.
@@ -964,34 +973,73 @@ async function scenarioBands(ctx) {
   ctx.check(m1.frame && m1.drawn, "after the jump the MERMAID topic's frame did not mount with its diagram drawn");
   log(`jump to ${pid}: landed ${land.toFixed(1)}px from the view top, drift ${drift.toFixed(1)}px over 2s; mermaid ${m1.drawn ? "drawn" : "not drawn"}`);
 
-  await page.waitForFunction(() => window.__bh.heldBandHeight && !window.__bh.keeping(), null, { timeout: 8000 });
-  const firstHeight = await page.evaluate(({ name, pid }) => {
-    const bh = window.__bh, s = bh.scroller(), t = bh.section(name), f = t.querySelector('.tdoc iframe.doc-frame');
-    const held = bh.heldBandHeight;
-    const before = { y: document.getElementById(pid).getBoundingClientRect().top, st: s.scrollTop,
-      above: t.getBoundingClientRect().bottom <= bh.viewTop(s), from: parseFloat(f.style.height) || 0,
-      to: Math.ceil(held.data.height), first: !!f.wbFirst, writes: bh.writesOn(s) };
+  await page.waitForFunction((name) => window.__bh.section(name)?.querySelector('.tdoc iframe.doc-frame') && !window.__bh.keeping(), heldTopic, { timeout: 8000 });
+  const heldHandle = await page.$(`section.topic[data-topic="${heldTopic}"] .tdoc iframe.doc-frame`);
+  const heldFrame = await heldHandle.contentFrame();
+  assert(heldFrame, 'held placeholder did not mount a child frame');
+  await heldFrame.waitForLoadState('load');
+  // Position explicitly, outside keep, with the held topic's bottom 80px
+  // above the view. Tail space prevents clamping; verify it did not happen.
+  await page.evaluate((name) => {
+    const bh = window.__bh, s = bh.scroller();
+    s.scrollTop += bh.section(name).getBoundingClientRect().bottom - bh.viewTop(s) + 80;
+  }, heldTopic);
+  await waitQuiet(page);
+  const to = await heldFrame.evaluate(() => {
+    if (!document.querySelector('script[data-bh-band-script]')) throw new Error('held reporting script is missing');
+    return Math.ceil(document.querySelector('.doc-body').getBoundingClientRect().height);
+  });
+  const firstHeight = await page.evaluate(({ name, pid, to }) => {
+    const bh = window.__bh, s = bh.scroller(), t = bh.section(name), f = t.querySelector('.tdoc iframe.doc-frame'), r = t.getBoundingClientRect();
+    const before = { targetY: document.getElementById(pid).getBoundingClientRect().top, st: s.scrollTop,
+      topicTop: r.top, topicBottom: r.bottom, viewTop: bh.viewTop(s), viewBottom: bh.viewBottom(s), above: r.bottom <= bh.viewTop(s),
+      from: parseFloat(f.style.height) || 0, to, first: !!f.wbFirst, keeping: !!bh.keeping(), writes: bh.writesOn(s),
+      anchorInline: (s === document.scrollingElement ? document.documentElement : s).style.overflowAnchor,
+      anchoring: getComputedStyle(s === document.scrollingElement ? document.documentElement : s).overflowAnchor };
     bh.samplePostPaint = true;
     bh.startSampler([pid]);
-    window.removeEventListener('message', bh.holdBandHeight, true);
-    window.dispatchEvent(new MessageEvent('message', held));
     return before;
-  }, { name: heldTopic, pid });
-  assert(firstHeight.above && firstHeight.first && firstHeight.to > firstHeight.from,
-    `delayed first-height probe must grow an above-view mount: ${JSON.stringify(firstHeight)}`);
+  }, { name: heldTopic, pid, to });
+  assert(firstHeight.above && firstHeight.first && firstHeight.from === 0 && firstHeight.to > 0 && !firstHeight.keeping &&
+    firstHeight.targetY >= firstHeight.viewTop && firstHeight.targetY < firstHeight.viewBottom,
+    `delayed first-height probe must grow an above-view mount outside keep with a visible reference: ${JSON.stringify(firstHeight)}`);
+  ctx.check(firstHeight.anchoring === 'none' && firstHeight.anchorInline === '',
+    `probe must exercise stylesheet anchoring, not keep's inline override: ${JSON.stringify(firstHeight)}`);
+  // The original doc-frame.js installs its native ResizeObserver and posts
+  // its first real height. Dashboard applyFrameHeights/topicResized handle
+  // it normally; no harness code writes frame height or scrollTop here.
+  await heldFrame.evaluate(() => new Promise((resolve, reject) => {
+    const held = document.querySelector('script[data-bh-band-script]'), live = document.createElement('script');
+    live.src = held.getAttribute('src');
+    live.onload = () => resolve();
+    live.onerror = () => reject(new Error('held frame asset failed to load'));
+    held.replaceWith(live);
+  }));
   await sleep(800);
-  const firstAfter = await page.evaluate((pid) => {
+  const firstAfter = await page.evaluate(({ pid, name }) => {
     const bh = window.__bh, s = bh.scroller(), samples = bh.stopSampler().filter((v) => v.phase !== 'raf');
+    const f = bh.section(name).querySelector('.tdoc iframe.doc-frame');
     bh.samplePostPaint = false;
-    return { y: document.getElementById(pid).getBoundingClientRect().top, st: s.scrollTop, writes: bh.writesOn(s), samples };
-  }, pid);
+    return { y: document.getElementById(pid).getBoundingClientRect().top, st: s.scrollTop, writes: bh.writesOn(s),
+      height: parseFloat(f.style.height) || 0, first: !!f.wbFirst, keeping: !!bh.keeping(), samples };
+  }, { pid, name: heldTopic });
+  ctx.check(firstAfter.height === firstHeight.to && !firstAfter.first && !firstAfter.keeping,
+    `real first height must land and consume wbFirst outside keep: height=${firstAfter.height}, first=${firstAfter.first}, keeping=${firstAfter.keeping}`);
   const delta = firstHeight.to - firstHeight.from;
-  const firstDrift = Math.max(...firstAfter.samples.map((v) => Math.abs(v.y[pid] - firstHeight.y)));
-  ctx.check(firstDrift <= 1 && Math.abs(firstAfter.y - firstHeight.y) <= 1,
+  const firstDrift = Math.max(...firstAfter.samples.map((v) => Math.abs(v.y[pid] - firstHeight.targetY)));
+  ctx.check(firstDrift <= 1 && Math.abs(firstAfter.y - firstHeight.targetY) <= 1,
     `above-view ${heldTopic} first height moved ${pid} by ${firstDrift.toFixed(1)}px post-paint`);
   ctx.check(Math.abs(firstAfter.st - firstHeight.st - delta) <= 1 && firstAfter.writes > firstHeight.writes,
     `above-view first height must compensate once: height +${delta}, scrollTop +${firstAfter.st - firstHeight.st}, script writes +${firstAfter.writes - firstHeight.writes}`);
-  log(`above-view first height (${kind}): ${heldTopic} +${delta}px, scroll +${firstAfter.st - firstHeight.st}px, post-paint drift ${firstDrift.toFixed(1)}px`);
+  log(`above-view first height (${kind}): ${heldTopic} +${delta}px, scroll +${firstAfter.st - firstHeight.st}px, post-paint drift ${firstDrift.toFixed(1)}px; baseline ${JSON.stringify(firstHeight)}`);
+  await page.evaluate((name) => {
+    const bh = window.__bh, f = bh.section(name).querySelector('.tdoc iframe.doc-frame');
+    // Restore the original payload for subsequent real unmount/remounts.
+    f.setAttribute('data-srcdoc', bh.bandProbe.source);
+    bh.bandProbe.tail.remove();
+    delete bh.bandProbe;
+  }, heldTopic);
+  await waitQuiet(page);
 
   // 3. Up to the top a step at a time, then back down: each step keeps the
   // topic in view where the step put it, frames mount before they enter the
