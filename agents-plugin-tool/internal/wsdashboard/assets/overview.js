@@ -25,7 +25,16 @@
   }
   // Native scroll padding includes the live face and any fixed host controls.
   // Overview uses the same exposed viewport through its existing keep writer.
-  function clearance(n) { return parseFloat(getComputedStyle(scroller(n)).scrollPaddingTop) || 0; }
+  function clearance(n) {
+    var s = scroller(n), style = getComputedStyle(s), pad = parseFloat(style.scrollPaddingTop) || 0;
+    var head = n.querySelector(n.hasAttribute("data-topic") ? ":scope > .tophead" : "[data-rail-bar]");
+    if (!head) return pad;
+    // The rail still publishes the capsule floor when Overview makes heads static.
+    var rail = parseFloat(getComputedStyle(head).getPropertyValue("--wb-rail-top"));
+    if (!isFinite(rail)) return pad;
+    var padding = s === doc.scrollingElement || s === root ? 0 : parseFloat(style.paddingTop) || 0;
+    return Math.max(pad, rail + padding);
+  }
   function items() { return all(ITEM, o.board); }
   function anchor(list, toolbar, bounds, floating) {
     if (!floating && toolbar.bottom > bounds.top && toolbar.top < bounds.bottom) return null;
