@@ -1,0 +1,145 @@
+package wsdashboard
+
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+func viewedHarness(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile("testdata/viewed-panels.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data) + dashboardFuncs(t, "topicKey", "topicSeen", "boardExposed", "boardPanelNodes", "boardPanelKey", "boardRenderBlockers", "boardStageInput", "boardStageOrder", "boardRecordPending", "boardPendingBadge", "boardFrameExposed", "boardFlushViewed")
+}
+
+func TestBoardViewedRenderingAndRelease(t *testing.T) {
+	runNode(t, "viewed rendering release", viewedHarness(t)+`
+var oldA=topic("A","a1",[panel("p1","old1"),panel("p2","same2")]);
+var oldB=topic("B","b1",[panel("p3","old3")]);
+var oldC=topic("C","c1",[panel("p4","old4")]);
+var liveA=topic("A","a1",[panel("p1","live1",true),panel("p2","live2",true)]);liveA.exposed=true;
+var liveB=topic("B","b1",[panel("p3","live3",true)]);liveB.exposed=true;
+var liveC=topic("C","c1",[panel("p4","live4",false)]);
+setLive([liveA,liveB,liveC]);boardRendered=input([oldA,oldB,oldC]);
+var nextA=topic("A","a2",[panel("p1","new1"),panel("p2","same2")]);
+var nextB=topic("B","b2",[panel("p3","new3")]);
+var nextC=topic("C","c2",[panel("p4","new4")]);
+var next=input([nextB,nextA,nextC]);
+boardOffered={previous:boardRendered,input:next};
+var staged=boardStageInput(next);boardRecordPending();
+check("all exposed changed panels hold their canonical bytes",staged.topics.A===oldA && staged.topics.B===oldB);
+check("unrelated offscreen change is not buffered",staged.topics.C===nextC);
+check("partial input never advances held hashes",topicSeen(staged.topics.A)==="a1" && topicSeen(staged.topics.C)==="c2");
+check("incoming snapshot remains immutable",next.topics.A===nextA && next.order.join()==="B,A,C");
+// p1 leaves completely; unchanged p2 remains visible in the SAME large topic.
+liveA.panels[0].exposed=false;
+staged=boardStageInput(next);
+check("affected panel release is not topic-offscreen release",staged.topics.A===nextA && liveA.exposed && liveA.panels[1].exposed);
+check("another changed exposed panel still holds",staged.topics.B===oldB);
+// A newer snapshot changes the newly exposed p2 too: re-evaluate, do not
+// release that rendering just because the earlier p1 blocker left.
+var thirdA=topic("A","a3",[panel("p1","newer1"),panel("p2","changed2")]);
+staged=boardStageInput(input([thirdA,nextB,nextC]));
+check("newly affected exposed panel becomes a blocker",staged.topics.A===nextA && boardPending.A[0].id==="p2");
+boardRelease=true;staged=boardStageInput(input([thirdA,nextB,nextC]));boardRelease=false;
+check("explicit release admits every canonical rendering",staged.topics.A===thirdA && staged.topics.B===nextB);
+// Owner input is narrowly scoped, not a global board exemption.
+boardRendered=input([oldA,oldB,oldC]);boardOwn.A=true;
+staged=boardStageInput(next);
+check("own answer/memo immediate, unrelated update held",staged.topics.A===nextA && staged.topics.B===oldB && boardImmediate.A);
+// One exposed pixel is enough: the owner inspection, not reading-line
+// selection or a topic size threshold, is the eligibility authority.
+check("dashboard delegates exact exposure to owner",boardExposed(liveA.panels[1]));
+process.stdout.write(bad.join("\n"));`)
+}
+
+func TestBoardViewedPlacementAndQueuedCounts(t *testing.T) {
+	runNode(t, "viewed placement and counts", viewedHarness(t)+`
+var A=topic("A","a1"),B=topic("B","b1"),C=topic("C","c1"),P=topic("P","p1"),Q=topic("Q","q1"),R=topic("R","r1");
+var current=[A,B,C],pinCurrent=[P,Q,R];
+check("visible A/B relative order stays",keys(freezeCheck(current,[B,A,C],[A,B],"main reorder"))==="A,B,C");
+check("second queued reorder does not displace A/B",keys(freezeCheck(current,[C,B,A],[A,B],"queued main"))==="C,A,B");
+check("pinned owner has same interval guarantee",keys(freezeCheck(pinCurrent,[Q,P,R],[P,Q],"pin reorder"))==="P,Q,R");
+freezeCheck(pinCurrent,[R,Q,P],[P,Q],"queued pins");
+// A completely offscreen topic above the interval may grow; a single
+// owner correction then preserves EACH visible unit, not just the first.
+var bigC=topic("C","c2",[],450);
+freezeCheck([C,A,B],[bigC,A,B],[A,B],"offscreen growth above");
+freezeCheck([A,B,C],[A,B,bigC],[A,B],"offscreen growth below");
+check("only remaining visible B: canonical reorder releases",keys(project(current,[B,A,C],[B]))==="B,A,C");
+check("no blockers: latest canonical order releases",keys(project(current,[C,B,A],[]))==="C,B,A");
+// Content morphs preserve interval placement by stable topic key, not old
+// live object identity (which would falsely advance boardSeen).
+var newA=topic("A","a2");
+var mapped=project(current,[B,newA,C],[A,B]);
+check("placement staging admits an eligible new rendering",mapped[0]===newA && mapped[1]===B);
+// Two successive held revisions of one topic are two changes, not one
+// pending topic. Replaying the latest snapshot must not increment again.
+boardChanges=[];boardPending={A:true};
+var one=input([A]),two=input([newA]),newerA=topic("A","a3"),three=input([newerA]);
+boardOffered={previous:one,input:two};boardRecordPending();
+boardOffered={previous:two,input:three};boardRecordPending();
+boardRecordPending();boardPendingBadge();
+check("two revisions of same topic count as two changes",boardBadge.textContent==="최신 변경 2건 반영 · A");
+var held={isConnected:true,closest:function(){return A;}};
+boardHeightHeld.set(held,250);boardHeightChanges.set(held,2);boardPendingBadge();
+check("same badge includes queued height changes",boardBadge.textContent==="최신 변경 4건 반영 · A");
+boardPending={};boardRecordPending();boardHeightHeld.clear();boardHeightChanges.clear();boardPendingBadge();
+check("release clears pending ledger and shared control",boardChanges.length===0 && boardBadge.hidden);
+process.stdout.write(bad.join("\n"));`)
+}
+
+func TestBoardViewedInternalGeometryAndHeightRelease(t *testing.T) {
+	runNode(t, "viewed internal geometry", viewedHarness(t)+`
+var old=topic("large","old",[panel("p1","one"),panel("p2","two")]);
+var live=topic("large","old",[panel("p1","one",true),panel("p2","two",true)]);live.exposed=true;
+var next=topic("large","new",[panel("p1","one"),panel("inserted","new"),panel("p2","two")]);
+check("insertion between visible unchanged panels is incompatible",boardRenderBlockers(live,old,next).length===2);
+live.panels[0].exposed=false;
+check("after earlier panel leaves, remaining panel can be owner-compensated",boardRenderBlockers(live,old,next).length===0);
+var p1=panel("p1","one",true),f={isConnected:true,exposed:false,closest:function(sel){return sel===".entry-panel" ? p1 : live;}};
+check("opaque frame release follows its exposed host panel",boardFrameExposed(f));
+var queued=[];
+function queueFrameHeight(frame,h){queued.push([frame,h]);}
+boardHeightHeld.set(f,300);boardHeightChanges.set(f,1);boardPending={};boardLatest=null;
+boardFlushViewed(false);
+check("partly exposed panel holds height",queued.length===0 && boardHeightHeld.size===1);
+p1.exposed=false;
+boardFlushViewed(false);
+check("panel fully offscreen releases even though topic remains exposed",queued.length===1 && queued[0][1]===300 && live.exposed && boardHeightHeld.size===0);
+p1.exposed=true;boardHeightHeld.set(f,400);boardHeightChanges.set(f,1);
+boardFlushViewed(true);
+check("badge click releases visible height explicitly",queued.length===2 && f.wbHeightRelease && !boardRelease);
+// Initial inert canonical history is consulted, never sandbox child DOM.
+var history=topic("large","history",[]);history.templates=[{content:{panels:[panel("p9","old9")]}}];
+var nextHistory=topic("large","newHistory",[]);nextHistory.templates=[{content:{panels:[panel("p9","new9")]}}];
+var liveHistory=topic("large","history",[panel("p9","live9",true)]);
+check("materialized history panel uses immutable template source",boardRenderBlockers(liveHistory,history,nextHistory).length===1);
+process.stdout.write(bad.join("\n"));`)
+}
+
+func TestBoardViewedBoundaryAndBatchWiring(t *testing.T) {
+	js, err := dashboardFS.ReadFile("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{
+		`var f = docFrame(e.source), m = e.data;`,
+		`if (!f || !m || typeof m !== "object") return;`,
+		`if (!key || m.docKey !== key || f.getAttribute("data-doc") !== key) return;`,
+		`if (f.wbNext) { postTheme(f); return; }`,
+		`if (h >= 0 && h < 100000) queueFrameHeight(f, h);`,
+	} {
+		if !strings.Contains(string(js), s) {
+			t.Errorf("trusted frame boundary changed: %s", s)
+		}
+	}
+	batch := dashboardFuncs(t, "applyFrameHeights")
+	capture, write := strings.Index(batch, "boardKeep(Array.from(batch.keys()))"), strings.Index(batch, `f.style.height = to + "px";`)
+	if capture < 0 || write < capture || strings.Count(batch, "kept.h.apply()") != 1 {
+		t.Error("height batch must pre-capture all actual scrollers and apply once after all writes")
+	}
+}
