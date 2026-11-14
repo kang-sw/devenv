@@ -25,12 +25,22 @@ diagnose the owner's observed jump. Later develop changes, including 773 and
 the current tree.
 
 The approved contract is reproduced below so implementation does not depend on
-the session-local report remaining available. This is viewed-panel preservation,
-not a promise to freeze every partly visible panel or all text within a growing
-panel, and not a new reference-centering or closed-topic-reveal feature.
+the session-local report remaining available. MAIN relayed owner-confirmed
+(802)=a on 2026-11-14 UTC: topic latest-change pull-up reordering and offscreen
+panel height changes must leave already visible panels looking frozen. A change
+inside a visible panel itself is acceptable under this confirmed contract. This
+is not a new reference-centering or closed-topic-reveal feature.
 
 ## Decisions
 
+- **Golden rule — owner-confirmed (802)=a.** Compensate topic latest-change
+  pull-up reordering and offscreen panel height changes so panels already in
+  view retain their visible positions. Preserving only the selected reading
+  reference is insufficient if another visible panel moves because of those
+  external changes. A visible panel's own content change may change that panel;
+  this decision does not introduce render deferral or a pending-change badge.
+  Apply this ordinary-preservation rule within the user-input and explicit
+  jump-follow priorities below, not as another competing scroll writer.
 - **One writer per actual scroller — (800)=a.** Use one owner with states
   `idle`, `user-scrolling`, and `explicit-jump-follow`. Normal preservation is
   a short mutation transaction, not a competing long-lived target selector.
@@ -129,7 +139,11 @@ compensation callers on that tree. Implement the one per-scroller owner and
 selection rule above, with synchronous pre-mutation capture and a single delta
 per transaction. Route known board, history and frame-height mutations through
 it, fold the old fallback writers into it, and compose with the landed explicit
-jump-follow state instead of creating a second navigation authority.
+jump-follow state instead of creating a second navigation authority. Apply the
+(802)=a golden rule to latest-change pull-up reorder and offscreen height
+changes. If a single compensation delta cannot preserve the affected visible
+panels on the actual tree, report the conflicting geometry before expanding the
+approved mechanism; do not silently weaken the golden rule to one reference.
 
 Verification, in a later explicitly bounded slot:
 
@@ -141,6 +155,12 @@ Verification, in a later explicitly bounded slot:
   history clipping and delayed iframe-height changes, with no additional
   `topicResized`, numeric restoration or browser-native correction on that
   owned scroller. Test main and independently pinned scrollers separately.
+- Verify the (802)=a golden rule for topic latest-change pull-up reordering
+  and offscreen height changes above and below the viewport, including multiple
+  visible panels. Compare each visible panel's before/after position, not only
+  the reading reference. Separate movement caused by an external mutation from
+  a visible panel's own content change; the latter remains acceptable under
+  (802). Do not infer all-visible preservation from one passing anchor sample.
 - Exercise wheel/touch/pointer/scroll-key cancellation, momentum and the
   200 ms post-scroll cooldown; manager writes must not be mistaken for user
   activity, and updates during user scrolling must not fight the user.
