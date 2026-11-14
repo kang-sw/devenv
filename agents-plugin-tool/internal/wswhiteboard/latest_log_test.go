@@ -49,7 +49,7 @@ function row(topic,id,at) {
   return {isConnected:true,parentElement:parent,
     closest:function(){return parent;},getAttribute:function(){return id;},
     querySelector:function(){return {getAttribute:function(){return new Date(at||now-1000).toISOString();}};},
-    classList:{add:function(c){classes.add(c);},remove:function(c){classes.delete(c);},contains:function(c){return classes.has(c);}};
+    classList:{add:function(c){classes.add(c);},remove:function(c){classes.delete(c);},contains:function(c){return classes.has(c);}}};
 }
 function blinking(n){return n.classList.contains('wb-log-blink');}
 var first=row('t','e1');candidates=[first];all=[first];
