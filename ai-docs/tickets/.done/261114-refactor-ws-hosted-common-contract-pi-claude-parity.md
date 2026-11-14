@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 43441150447687c9
 sage-review-completeness-reviewed: 43441150447687c9
+completed: 2026-11-14
 ---
 
 # Hosted agents: common contract with Pi and Claude parity first
@@ -84,3 +85,13 @@ Verification:
 - Cover ordered event delivery, input/mail single ownership, identity/key/parent preservation, holder rejoin, wrapped replay rings, approval correlation and no duplicate queued input.
 - Assert that profile JSON shape/backend values, persisted session/holder records and externally served event meanings are unchanged. Run affected dashboard/MCP tests only where corresponding wiring is touched.
 - A passing source suite is source verification, not evidence of live delivery. Record any pre-existing failure separately; do not repair an unrelated frozen lane to make this ticket pass.
+
+### Result (44aeb62a8) - 2026-11-14
+
+- Added the internal `processControls` boundary and per-instance adapter declarations. Migrated runner, child-report and MCP-recovery control discovery to it; both launch paths and profile validation share backend selection. `Backend`, `Process` and native launch construction remain intact.
+- Kept optional-interface discovery for other process implementations. Claude advertises approval/mode/MCP controls only for lead launches. Pi model/effort controls still decide support from their arguments and retain the existing restart fallback. Worker reconciliation uses its precise existing recovery contract rather than a concrete Pi type assertion; holder transport and delivery policy remain in their existing owners.
+- Added shared real-adapter/fake-holder fixtures for fresh start, ordered replies and turn ends, exactly-once merged input/mail delivery, stable key/holder identity through rejoin, stop/resume and backend-specific settings wires. Added capability-matrix, unsupported-control and representative profile/record/holder/event JSON regression assertions. Existing specialized tests retain approval correlation, native plugin/extension inputs, isolation/defaults, parent lineage, wrapped replay and queued-report coverage.
+- VERIFIED: `cd agents-plugin-tool && go test ./internal/wsagent -run 'Test(ProcessControls|BackendSelection)' -count=1` passed. The test leaf ran `go test ./internal/wsagent -run '^TestCommonContract' -count=1` (0.965 s), `go test ./internal/wsagent -count=1` (24.497 s) and `go build ./internal/wsagent`; all passed. Full output was read. Initial leaf failures were fixture mistakes (merged inbox entries, raw JSON comparison and missing Pi RPC replies), corrected only in its new tests before these passing runs.
+- VERIFIED: One independent lite review of `51616ea76..44aeb62a8` was clean, with no findings. `git diff --check` was clean. Source inputs have not changed since the passing suite/build.
+- Decisions: T0 internal consolidation only; no serialized capability metadata, HTTP/MCP semantics, event meanings, identity authority or native integration policy changes. Holder transport remains separate from optional harness controls, avoiding a second event reader or delivery queue.
+- Omitted: Live daemon replacement/restart, installer, provider and credential-dependent acceptance were not authorized; isolated source verification does not establish actual live delivery. Dashboard/MCP tests were not run because their wiring was untouched. No unrelated frozen lane was changed.
