@@ -1,0 +1,110 @@
+{
+  "label": "after",
+  "tree": "/Users/kang-sw/.ws-worktrees/devenv/dense-hardship-outclass/agents-plugin-tool",
+  "shape": "8,6,4,2,60",
+  "rates": [
+    4,
+    6
+  ],
+  "runs": 3,
+  "idle": 60,
+  "gc": true,
+  "alternated": true,
+  "version": "148.0.7778.96",
+  "samples": {
+    "c@4": [
+      {
+        "Nodes": 63164,
+        "Frames": 17,
+        "JSHeapUsedSize": 9289184,
+        "LayoutCount": 355,
+        "LayoutDuration": 256.366,
+        "RecalcStyleCount": 421,
+        "RecalcStyleDuration": 542.559,
+        "ScriptDuration": 1346.689,
+        "TaskDuration": 3572.976,
+        "longTasks": 20,
+        "longTaskMs": 1299,
+        "framesBuilt": 20,
+        "mountedFrames": 14
+      },
+      {
+        "Nodes": 63340,
+        "Frames": 19,
+        "JSHeapUsedSize": 10063996,
+        "LayoutCount": 353,
+        "LayoutDuration": 242.46200000000005,
+        "RecalcStyleCount": 419,
+        "RecalcStyleDuration": 543.515,
+        "ScriptDuration": 1349.1670000000001,
+        "TaskDuration": 3581.615,
+        "longTasks": 20,
+        "longTaskMs": 1287,
+        "framesBuilt": 20,
+        "mountedFrames": 16
+      },
+      {
+        "Nodes": 63076,
+        "Frames": 16,
+        "JSHeapUsedSize": 8921520,
+        "LayoutCount": 349,
+        "LayoutDuration": 263.027,
+        "RecalcStyleCount": 416,
+        "RecalcStyleDuration": 559.3190000000002,
+        "ScriptDuration": 1429.4479999999999,
+        "TaskDuration": 3688.5989999999997,
+        "longTasks": 20,
+        "longTaskMs": 1345,
+        "framesBuilt": 20,
+        "mountedFrames": 13
+      }
+    ],
+    "c@6": [
+      {
+        "Nodes": 63252,
+        "Frames": 18,
+        "JSHeapUsedSize": 9685620,
+        "LayoutCount": 336,
+        "LayoutDuration": 371.64,
+        "RecalcStyleCount": 402,
+        "RecalcStyleDuration": 848.0949999999998,
+        "ScriptDuration": 2033.812,
+        "TaskDuration": 5182.652,
+        "longTasks": 20,
+        "longTaskMs": 2032,
+        "framesBuilt": 20,
+        "mountedFrames": 15
+      },
+      {
+        "Nodes": 63340,
+        "Frames": 19,
+        "JSHeapUsedSize": 10073368,
+        "LayoutCount": 335,
+        "LayoutDuration": 383.9889999999999,
+        "RecalcStyleCount": 401,
+        "RecalcStyleDuration": 898.713,
+        "ScriptDuration": 2137.5769999999998,
+        "TaskDuration": 5501.897,
+        "longTasks": 20,
+        "longTaskMs": 2144,
+        "framesBuilt": 20,
+        "mountedFrames": 16
+      },
+      {
+        "Nodes": 62989,
+        "Frames": 15,
+        "JSHeapUsedSize": 8531760,
+        "LayoutCount": 334,
+        "LayoutDuration": 406.99099999999993,
+        "RecalcStyleCount": 400,
+        "RecalcStyleDuration": 877.626,
+        "ScriptDuration": 2086.014,
+        "TaskDuration": 5394.284000000001,
+        "longTasks": 20,
+        "longTaskMs": 2126,
+        "framesBuilt": 20,
+        "mountedFrames": 12
+      }
+    ]
+  }
+}

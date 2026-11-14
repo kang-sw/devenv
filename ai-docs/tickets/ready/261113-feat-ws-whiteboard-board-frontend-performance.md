@@ -914,3 +914,53 @@ and a non-topic board change each send the full region; a test that two
 connections of one session cause one per-topic render (the fan-out cache); a
 client asset test that an event the page cannot apply falls back to a full
 region; harness scenario (c) before and after.
+
+#### Implementation checkpoint (1341947b3) - 2026-11-14
+
+Phase 3 is implemented in `3ec591d82`, with contract tests in `1341947b3`,
+but is **not complete**: the long-board LOOK constraint remains an Important
+independent review finding. No Phase 3 Result or ticket closure is recorded.
+
+- Verified iframe-shell Phase 2 commit `3310356af` is an ancestor of this
+  run's baseline `d1c3b9d6b`.
+- Added T0 `topics=1` / `board-topics` on both SSE and WebSocket, with
+  shared render decomposition, per-connection hash differences, first-send,
+  reconnect and non-topic full-region fallbacks, and client resynchronization.
+  Immutable incoming snapshots retain accumulated updates through hidden and
+  deferred application, and feed the existing morph for pins and frame reuse.
+- The dashboard/whiteboard suites pass (140.774s; whiteboard cached), as
+  does the MCP dashboard/whiteboard/board/panel/theme/closed/topic/wiki subset
+  (66.371s). The JS syntax check and focused parser test pass.
+- Three alternating scenario (c) runs per side at 4x/6x reduced median
+  ScriptDuration by 45.1%/46.2%, TaskDuration by 39.0%/38.9%, and long-task
+  time by 62.0%/60.6%. Retained canonical inputs increased Nodes by
+  **35.5%/36.8%**; that cost remains disclosed under Decision 12. The owner
+  accepted this CPU/event/identity evidence, not LOOK parity.
+- An isolated browser saw the candidate's initial full board followed by
+  20 incremental updates, each carrying only T00, while preserving T01's
+  element identity. Baseline updates were full regions.
+- Independent lite review found no Critical or additional concrete logic
+  defect, and one Important validation gap: later LOOK captures differ,
+  with T04's history clip 219px taller on the candidate. Stops 06-11 differ
+  by 15.310-52.863% of pixels. This is **not** a clock-only difference or a
+  full LOOK pass.
+- Observation-only diagnostic traces reproduced a persistent partially
+  clipped entry on the baseline and candidate. The unchanged
+  `wswhiteboard/assets/stream.js:53-67` measures extra height against the
+  current clip but adds it to the original base; sequential iframe heights
+  produce clip 640 -> 738 -> 859px with entry e723 still crossing the edge
+  by 97.390625px after three further seconds. The history-live observer
+  (`:363-378`) does not observe the clip itself. Different delivery batches
+  are a supported explanation of the original difference, not proof that
+  Phase 3 cannot influence its timing.
+- Per the owner's resumption boundary, return this pre-existing history-snap
+  blocker rather than expand the history contract or weaken source, dates,
+  or fixtures to certify parity. Proposed next step: a separately authorized,
+  regression-tested sequential-height snap repair, then repeat Phase 3 LOOK
+  validation. No live activation, integration, launchers, or shared-state
+  mutations occurred.
+
+Exact baseline/candidate captures, commands, samples, traces, complete
+measurement output, and independent review are preserved at
+`ai-docs/tickets/assets/261113-feat-ws-whiteboard-board-frontend-performance/phase3/README.md`.
+The original copies remain at `/tmp/ws-board-topics-phase3.3pBANc`.
