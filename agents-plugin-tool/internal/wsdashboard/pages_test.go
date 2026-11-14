@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,7 +120,14 @@ func boardRegions(t *testing.T, body string) wswhiteboard.Regions {
 
 func get(t *testing.T, url string) (int, string) {
 	t.Helper()
-	resp, err := testClient().Get(url)
+	client := testClient()
+	if runtime.GOOS == "windows" {
+		// These content checks include cold and dev-asset page renders, which
+		// can exceed the health client's 500 ms budget on Windows. Keep a
+		// finite render budget without changing the health/control tests.
+		client.Timeout = 5 * time.Second
+	}
+	resp, err := client.Get(url)
 	if err != nil {
 		t.Fatal(err)
 	}
