@@ -15,6 +15,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 47904150870a43e9
 sage-review-completeness-reviewed: 47904150870a43e9
+completed: 2026-11-14
 ---
 
 # Dashboard board: a toolbar card (overview, new terminal, web, search, files) and a folded single-column overview mode
@@ -902,3 +903,8 @@ Commits: `cba911ad6` (merge + 4 bugs), `420891f10` (palette close-on-outside).
 | 2 | Toolbar count (Decision 26) has no verification | minor |
 | 3 | Topic flash ownership split between Phases 2 and 3 | minor |
 | 4 | Deferred reorder-hold release has no check | minor |
+
+
+## Resolution (2026-11-14)
+
+All 3 phases complete and merged into develop (72acd0423). Phase 1: toolbar with board jump, search, overview toggle. Phase 2: overview without motion (CSS grid, scroll lock, topic badges). Phase 3: animated fold (height transition, drawer handle). QA bugs fixed: exit motion height jump, toolbar search forwarding, intermittent palette landing, drawer handles undimmed. Go tests pass.
