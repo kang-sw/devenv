@@ -176,8 +176,12 @@ type Field struct {
 
 // Scope is the group a command sits in.
 type Scope struct {
-	Tag  string // as written, prefix included
-	Line int
+	// Source is the original opening tag; Problems belong to the group,
+	// not its children. Used only by ParseOrdered's command-local caller.
+	Source   string
+	Problems []string
+	Tag      string // as written, prefix included
+	Line     int
 	// Attr is the group's attribute name; Value its value, "" when the
 	// attribute is missing or blank (a problem Parse records).
 	Attr, Value string
@@ -215,10 +219,14 @@ func (s *Scope) At() string {
 // Command: Pos 0, Tag the group's tag, Attrs the group's, and Scope the
 // group itself (IsGroup).
 type Command struct {
-	Pos   int // 1-based position in the batch; groups take none (0)
-	Line  int
-	Tag   string
-	Attrs []Attr
+	// Source retains the complete rejected payload without re-encoding bodies.
+	// Problems contains only this command's recoverable parse diagnostics.
+	Source   string
+	Problems []string
+	Pos      int // 1-based command position; groups 0; rejected stray fragments -1
+	Line     int
+	Tag      string
+	Attrs    []Attr
 	// Body is a leaf command's text.
 	Body     string
 	Fields   []Field
@@ -297,7 +305,23 @@ func (c Command) Single(p *Problems, tag string) (string, bool) {
 // still returned, so the caller's validation lists as much as it can in one
 // refusal.
 func Parse(p *Problems, g Grammar, s string) []Command {
-	r := &parser{tokenizer: tokenizer{s: s, p: p, literalCode: g.LiteralCode}, g: g}
+	r := &parser{tokenizer: tokenizer{s: s, p: p}, g: g}
+	r.read()
+	return r.out
+}
+
+// ParseOrdered also retains rejected commands and group scopes. Complete is
+// false when boundaries are uncertain: a caller must not apply even the prefix.
+// Parse keeps its existing whole-batch validation contract for other callers.
+func ParseOrdered(p *Problems, g Grammar, s string) (commands []Command, complete bool) {
+	r := &parser{tokenizer: tokenizer{s: s, p: p, ordered: true}, g: g}
+	r.read()
+	return r.out, !r.fatal
+}
+
+func (r *parser) read() {
+	g := r.g
+	r.literalCode = g.LiteralCode
 	for name := range g.Commands {
 		r.commandTags = append(r.commandTags, g.Prefix+name)
 	}
@@ -310,10 +334,11 @@ func Parse(p *Problems, g Grammar, s string) []Command {
 			break
 		}
 		if r.s[r.i] != '<' {
-			r.skipText("outside a command")
+			r.fragment(nil, func() { r.skipText("outside a command") })
 			continue
 		}
-		if r.strayClosing() {
+		if strings.HasPrefix(r.s[r.i:], "</") {
+			r.fragment(nil, func() { r.strayClosing() })
 			continue
 		}
 		tag, ok := r.readOpen()
@@ -328,7 +353,16 @@ func Parse(p *Problems, g Grammar, s string) []Command {
 			break
 		}
 	}
-	return r.out
+}
+
+// fragment retains soundly delimited non-command input as a failed payload.
+func (r *parser) fragment(scope *Scope, read func()) {
+	start, before := r.i, len(r.p.List)
+	read()
+	if r.ordered {
+		r.out = append(r.out, Command{Pos: -1, Line: r.lineAt(start), Scope: scope,
+			Source: r.s[start:r.i], Problems: append([]string(nil), r.p.List[before:]...)})
+	}
 }
 
 // parser is one Parse call: the tokenizer, the grammar, and the commands
@@ -346,6 +380,14 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 	r.pos++
 	p := r.p
 	cmd := Command{Pos: r.pos, Line: r.lineAt(tag.at), Tag: tag.name, Attrs: tag.attrs, Scope: scope}
+	before := len(p.List)
+	if r.ordered {
+		defer func() {
+			cmd.Source = r.s[tag.at:r.i]
+			cmd.Problems = append([]string(nil), p.List[before:]...)
+			r.out = append(r.out, cmd)
+		}()
+	}
 	spec, known := r.g.lookup(tag.name)
 	if !known {
 		p.Add("%s: unknown command (commands: %s)", cmd.Label(), r.g.commandNames())
@@ -368,7 +410,7 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 			if spec.Wrapper != "" {
 				wrapper = &bodyWrapper{tag: r.g.Prefix + spec.Wrapper, fields: r.g.fieldTags(spec), children: &cmd.Children, refuseOpenings: r.g.RefuseFieldOpenings, parent: cmd}
 			}
-			body, ok := r.readContent(tag.name, tag.at, spec.DecodeBody, nil, "", wrapper)
+			body, ok := r.readContent(tag.name, tag.at, spec.DecodeBody, nil, "", wrapper, nil)
 			if !ok {
 				return false
 			}
@@ -388,7 +430,9 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 			}
 		}
 	}
-	r.out = append(r.out, cmd)
+	if !r.ordered {
+		r.out = append(r.out, cmd)
+	}
 	return true
 }
 
@@ -400,6 +444,26 @@ func (r *parser) command(tag openTag, scope *Scope) bool {
 func (r *parser) group(tag openTag) {
 	g, p := r.g.Group, r.p
 	scope := &Scope{Tag: tag.name, Line: r.lineAt(tag.at), Attr: g.Attr}
+	before, groupIndex := len(p.List), len(r.out)
+	if r.ordered {
+		scope.Source = r.s[tag.at:r.i]
+		defer func() {
+			// Child diagnostics are command-local; everything else belongs to
+			// the scope and blocks its dependent children.
+			childProblems := map[string]bool{}
+			for _, child := range r.out[groupIndex+1:] {
+				for _, problem := range child.Problems {
+					childProblems[problem] = true
+				}
+			}
+			for _, problem := range p.List[before:] {
+				if !childProblems[problem] {
+					scope.Problems = append(scope.Problems, problem)
+				}
+			}
+			r.out[groupIndex].Source = r.s[tag.at:r.i]
+		}()
+	}
 	known := append([]string{g.Attr}, g.Extras...)
 	for _, name := range g.Extras {
 		if v, ok := attrOf(tag.attrs, name); ok {
@@ -415,7 +479,7 @@ func (r *parser) group(tag openTag) {
 	} else if NonEmpty(p, scope.At(), v) {
 		scope.Value = v
 	}
-	if scope.HasExtra() {
+	if scope.HasExtra() || r.ordered {
 		r.out = append(r.out, Command{Line: scope.Line, Tag: tag.name, Attrs: tag.attrs, Scope: scope})
 	}
 	hint := ""
@@ -442,6 +506,13 @@ func (r *parser) group(tag openTag) {
 			break
 		}
 		if commands == 0 && (rest[0] != '<' || !strings.HasPrefix(rest[1:], r.g.Prefix) && !strings.HasPrefix(rest, "</")) {
+			if r.ordered {
+				body, ok := r.readBodyContent(tag.name, tag.at, false, nil, scope.Label(), &r.g)
+				if ok {
+					p.Add("%s: text before its first command: %q%s", scope.Label(), excerpt(body), hint)
+				}
+				return
+			}
 			end := strings.Index(rest, closing)
 			if end < 0 {
 				r.fail(tag.at, "<%s> has no closing %s", tag.name, closing)
@@ -452,10 +523,11 @@ func (r *parser) group(tag openTag) {
 			return
 		}
 		if rest[0] != '<' {
-			r.skipText("inside " + scope.Label() + " between its commands")
+			r.fragment(scope, func() { r.skipText("inside " + scope.Label() + " between its commands") })
 			continue
 		}
-		if r.strayClosing() {
+		if strings.HasPrefix(rest, "</") {
+			r.fragment(scope, func() { r.strayClosing() })
 			if r.fatal {
 				return
 			}
@@ -466,6 +538,12 @@ func (r *parser) group(tag openTag) {
 			return
 		}
 		if r.g.isGroup(inner.name) {
+			if r.ordered {
+				// Nested groups have no grammar-defined command boundary. Do
+				// not guess which close belongs to the outer accepted scope.
+				r.fail(inner.at, "<%s> inside %s; groups do not nest", inner.name, scope.Label())
+				return
+			}
 			p.Add("line %d: <%s> inside %s; groups do not nest", r.lineAt(inner.at), inner.name, scope.Label())
 			r.skipUnknown(inner)
 			if r.fatal {
@@ -508,6 +586,7 @@ type tokenizer struct {
 	i           int
 	p           *Problems
 	fatal       bool
+	ordered     bool
 	literalCode bool
 	commandTags []string
 }
@@ -616,7 +695,7 @@ type bodySegment struct {
 // sections through, and strips the one newline at each end; with decode, it
 // then decodes the text outside CDATA.
 func (t *tokenizer) readBody(name string, from int, decode bool, fields []string, label string) (string, bool) {
-	return t.readContent(name, from, decode, fields, label, nil)
+	return t.readContent(name, from, decode, fields, label, nil, nil)
 }
 
 type bodyWrapper struct {
@@ -627,7 +706,14 @@ type bodyWrapper struct {
 	parent         Command
 }
 
-func (t *tokenizer) readContent(name string, from int, decode bool, fields []string, label string, wrapper *bodyWrapper) (string, bool) {
+// A rejected group body still needs structural boundaries: unlike a command's
+// raw body, a nested group makes its closing tag ambiguous. Quoted attributes,
+// comments, CDATA and command payloads cannot introduce a nested group.
+func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields []string, label string, group *Grammar) (string, bool) {
+	return t.readContent(name, from, decode, fields, label, nil, group)
+}
+
+func (t *tokenizer) readContent(name string, from int, decode bool, fields []string, label string, wrapper *bodyWrapper, group *Grammar) (string, bool) {
 	bodyStart := t.i
 	closing := "</" + name + ">"
 	var segs []bodySegment
@@ -686,6 +772,64 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 			}
 			*wrapper.children = append(*wrapper.children, child)
 		default:
+			if group != nil {
+				end := 1
+				var tagName string
+				if strings.HasPrefix(rest, "<!--") {
+					close := strings.Index(rest[4:], "-->")
+					if close < 0 {
+						t.fail(t.i, "<%s>: a comment has no closing -->", name)
+						return "", false
+					}
+					end = 4 + close + 3
+				} else {
+					for end < len(rest) && isNameByte(rest[end]) {
+						end++
+					}
+					tagName = rest[1:end]
+					if group.isGroup(tagName) {
+						t.fail(t.i, "<%s> inside %s; groups do not nest", name, label)
+						return "", false
+					}
+					if end > 1 {
+						var quote byte
+						for ; end < len(rest); end++ {
+							c := rest[end]
+							if quote != 0 {
+								if c == quote {
+									quote = 0
+								}
+							} else if c == '\'' || c == '"' {
+								quote = c
+							} else if c == '<' {
+								t.fail(t.i+end, "<%s>: uncertain tag boundary in rejected group body", name)
+								return "", false
+							} else if c == '>' {
+								end++
+								break
+							}
+						}
+					}
+				}
+				text.WriteString(rest[:end])
+				t.i += end
+				if strings.HasPrefix(tagName, group.Prefix) && !strings.HasSuffix(rest[:end], "/>") {
+					start := t.i
+					if spec, known := group.lookup(tagName); known && spec.Kind == Container {
+						// Use the grammar's ordinary field reader: a raw field may
+						// contain literal command/group closes as well as openings.
+						cmd := Command{Tag: tagName, Line: t.lineAt(start - end)}
+						if !t.readFields(&cmd, group.fieldTags(spec), nil, false) {
+							return "", false
+						}
+					} else if _, ok := t.readBody(tagName, start-end, false, nil, ""); !ok {
+						// Leaves and unknown commands have raw, CDATA-aware bodies.
+						return "", false
+					}
+					text.WriteString(t.s[start:t.i])
+				}
+				continue
+			}
 			for _, field := range fields {
 				if strings.HasPrefix(rest, "<"+field+">") {
 					t.p.Add("%s field <%s> (line %d): body holds an opening <%s> - missing </%s>?", label, name, t.lineAt(t.i), field, name)
@@ -946,6 +1090,12 @@ func entityRune(name string) (rune, bool) {
 // reading can continue; without one, reading ends.
 func (t *tokenizer) skipUnknown(tag openTag) {
 	if tag.selfClosing {
+		return
+	}
+	if t.ordered {
+		// Even rejected commands/fields retain raw-body CDATA boundaries.
+		// Otherwise a quoted closing tag could expose payload as commands.
+		t.readBody(tag.name, tag.at, false, nil, "")
 		return
 	}
 	closing := "</" + tag.name + ">"

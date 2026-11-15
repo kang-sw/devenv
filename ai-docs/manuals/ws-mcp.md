@@ -244,6 +244,13 @@ under `<cache root>/dashboard/`:
   allows ws tools), and for the pi backend its session file and MCP bridge.
   The daemon reads the conversation from its live stores alone, since no
   ws-mcp serves it and it has no session record.
+- `sessions/<reply-id>/permission.json` - a hosted lead's explicit common
+  permission selection, separate from `agent.json`: `{permission_level}`,
+  written atomically with mode 0600 and preserving unknown members. Absence
+  uses a legacy-derived level without writing a selection; an existing
+  unreadable or invalid selection is an error, not absence
+  (`internal/wsagent/permission_store.go:11-60`,
+  `internal/wsagent/permission.go:98-111`).
 
 After a store write the serving ws-mcp sends `POST /nudge {reply_id,
 project}`. A mailbox send by a legacy ws-mcp outside the daemon
@@ -378,7 +385,19 @@ Every session page carries the session rail (`internal/wsdashboard/rail.go`,
 folder) and worktree. It is one shared render (region `rail`, keyed by
 language and theme, no reply-id) that each session stream sends beside its
 page with a broker subscription of its own, so a session's change renders
-the rail once for all open pages and no other session's page. A session's
+the rail at most once for all open pages and no other session's page;
+unchanged visible rail inputs reuse the render
+(`internal/wsdashboard/rail.go:104-130`). Streams opt into row deltas
+with `railrows=1`: the first send on each connection is a full `region`
+(`name: "rail"`), even when `h` holds the current hash. Later `rail-rows`
+SSE events carry `{hash, order, rows: [{key, hash, html}]}`: the full row
+order and only new or changed rows, keyed by reply-id. A changed grouping
+shell or an uncertain row decomposition falls back to the full region;
+without the opt-in, every rail update stays a full region
+(`internal/wsdashboard/sse.go:459-462,628-655`,
+`internal/wsdashboard/rail_rows.go:28-32,88-106`). The page also uses these
+event names over WebSocket, reconnecting for a full rail if it cannot apply
+a row patch (`assets/dashboard-stream.js:144-175,178-191,214-224`). A session's
 repository comes from the registration's `git_common_dir` (ws-mcp's one
 `rev-parse --git-common-dir` at first registration), else from its root's
 `.git` on disk. The worktree rows come from `git worktree list --porcelain`
@@ -689,8 +708,14 @@ after daemon replacement; hosted intake remains off. Descendants nest under
 their spawner through ordinary `parentId` links. When a harness also reports the
 same conversation (its reply-id or native conversation id), the snapshot keeps
 one daemon-owned lifecycle row with the harness's activity and telemetry. An
-intake-only session whose dashboard feed is off gets no row. The agents panel
+intake-only session whose dashboard feed is off gets no row. The agents popover
 shows a running Pi row with a blinking `pi` badge in place of the pulse.
+The composer's subagent badge opens that popover over the conversation;
+it stays visible but muted with no running agents, even on a non-live
+session. Escape or a click outside closes an unpinned popover; a pin is
+browser-local and reopens it on the next load, and close unpins it
+(`assets/dashboard.tmpl:239-250`,
+`assets/dashboard-composer.js:1459-1464,1483-1489,1525-1565`).
 
 A spawned Pi worker spawns Pi subagents of its own through the daemon
 (`internal/wsagent/children.go`, `internal/mcp/pi_forward.go`); the daemon
@@ -895,8 +920,41 @@ conversation:
   `set_permission_mode`; Pi: `set_model`, `set_thinking_level`) and keeps
   the process; a restart on the same backend session is the last resort.
   The record holds the current values, and every resume launches with them.
-  Permission modes: `auto` (the default), `default`, `acceptEdits`, `plan`,
-  `dontAsk`, `bypassPermissions`; a Pi lead has none.
+  Native permission modes: `auto` (the default), `default`, `acceptEdits`,
+  `plan`, `dontAsk`, `bypassPermissions`; a Pi lead has none. The legacy
+  spawn and settings URLs reject `permission_level` or
+  `permission_full_ack` with 400, including explicit nulls. On a
+  common-aware backend a native `permission_mode` change that raises the
+  common level is 403 unless it is the local, own-Origin user's request;
+  the public `Runner.SetPermissionMode` cannot grant that authority. An
+  explicit selection cannot be raised to `full` through the native-only
+  URL, which carries no full acknowledgement
+  (`internal/wsagent/http.go:202-207,273-284`,
+  `internal/wsagent/runner.go:1000-1022`,
+  `internal/wsagent/permission.go:214-242`).
+- **Common permissions.** `POST /agents/leads/permission {root, harness,
+  permission_level, permission_full_ack?, model?, effort?}` spawns a lead
+  (201 with its state); `POST /agents/<id>/settings/permission
+  {permission_level, permission_full_ack?, model?, effort?}` changes one
+  (200 with its state). Both take the trusted gate, require a level from
+  `read-only`, `workdir-write`, `full`, and require
+  `permission_full_ack: true` for `full`. Their strict JSON objects reject
+  unknown or null fields (including `permission_mode`) with 400; unsupported
+  selections and worker selections are also 400. Only the trusted route
+  supplies user authority; an acknowledgement alone grants none
+  (`internal/wsagent/http.go:94-106,160-171,183-207,249-271,364-398`,
+  `internal/wsagent/permission.go:78-96,180-210`). These are lead-only intent,
+  not sandbox guarantees or worker capability changes: Claude maps the
+  levels to `plan`, `acceptEdits`, `bypassPermissions` respectively, while
+  Pi has no native mode mapping. Lead state includes `permission_level`,
+  `permission_source` (`explicit` from `permission.json`, else
+  `legacy-derived`), and `permission_enforcement`: `partial` only for
+  Claude `read-only` while a running harness reports `plan`, `advisory`
+  otherwise. Worker state omits these fields. Without an explicit
+  selection, Claude `plan` derives `read-only`, `bypassPermissions` derives
+  `full`, its other admitted modes derive `workdir-write`, and Pi derives
+  `workdir-write` (`internal/wsagent/permission.go:10-75,98-134`,
+  `internal/wsagent/runner.go:1173-1181`).
 - **Recovery and failures.** A Claude lead's init line lists its MCP
   servers. A server reported `failed`, a failed `mcp__*` tool call, or the
   lead's call of a `*__request_mcp_reconnect` tool makes the runner ask the
@@ -952,7 +1010,7 @@ conversation:
   that state. From the snapshot's `host` block the page draws an error ring
   on the head's harness chip and the rail row plus a failure chip while
   `failure` is set, an MCP-broken chip, a retry line in the live region,
-  and the background task count in the agents panel head and beside the
+  and the background task count in the agents popover and beside the
   composer's subagent badge; `notice` ring lines and a failed compaction's
   `text` render as failure lines in the conversation. The rail and index mark a hosted row and show its waiting approval
   from the live snapshot, which names the oldest pending prompt only. The
@@ -969,15 +1027,21 @@ mounted when `cmd/ws-mcp/dashboard.go` passes it, with store roots read from
 the daemon's own tracker host). Routes, behind the same guard and POST rule
 as `/agents`, an unknown store 404: `GET /support/choices` (`{harnesses:
 [{harness, profile, available, error?, models: [{id, thinking?}],
-efforts, lead?, permission_modes?}], last}`: optional `lead` is a bool
-marking admission as a hosted lead, and optional `permission_modes` is that
-harness's list of modes; both fields belong to each harness entry. Support
+efforts, lead?, permission_modes?, permission_levels?}], last}`: optional
+`lead` is a bool marking admission as a hosted lead, optional
+`permission_modes` is that harness's native modes, and optional
+`permission_levels` is its supported common lead spawn/settings selections,
+not worker support; these fields belong to each harness entry. Levels are
+listed in `read-only`, `workdir-write`, `full` order, restricted to the
+registration's supported choices, and omitted when none are supported
+(`internal/wsagent/support.go:216-230,422-430,449-450`). Support
 profiles' backends resolve through the global and builtin layers, with
 duplicate backends listed once; registered lead-capable backends not already
 listed are appended in backend-name order, with an empty `profile`.
 `BackendRegistration` is the runtime-only descriptor pairing a backend
-implementation with its optional `LeadProfile` and `PermissionModes`;
-process controls remain instance-owned and choice listing comes from the
+implementation with its optional `LeadProfile`, `PermissionModes`, and
+`PermissionLevels` (`internal/wsagent/registration.go:10-20`); process
+controls remain instance-owned and choice listing comes from the
 backend's `ChoiceLister` implementation. A harness is unavailable when the
 daemon lacks the backend or, for a `ChoiceLister`, its executable is not on
 PATH; Claude's models are the CLI's

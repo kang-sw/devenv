@@ -106,10 +106,16 @@ func TestTopicUpdateAtomicRefusalAndProvisionalGroups(t *testing.T) {
 		`<wb:topic name="fresh" label="Fresh"><wb:state value="waiting"/><wb:body>Too late</wb:body></wb:topic>`,
 	} {
 		s := &State{}
-		before := s.clone()
-		out, p := Apply(s, command, Env{Now: stateNow})
-		if len(p) == 0 || !reflect.DeepEqual(s, before) || !reflect.DeepEqual(out, Outcome{}) {
-			t.Fatalf("refusal leaked: %+v, %v, %+v", out, p, s)
+		accepted := logXML("fresh", "Too late")
+		if strings.Contains(command, "Rollback") {
+			accepted = logXML("fresh", "Rollback")
+		}
+		if strings.Contains(command, `label="Fresh"`) {
+			accepted = `<wb:topic name="fresh" label="Fresh"><wb:body>Too late</wb:body></wb:topic>`
+		}
+		mixedAt(t, s, command, accepted, stateNow)
+		if s.TopicStates()["fresh"].State.Value != StateDiscussing {
+			t.Fatal("failed state declaration suppressed default")
 		}
 	}
 	s := &State{}

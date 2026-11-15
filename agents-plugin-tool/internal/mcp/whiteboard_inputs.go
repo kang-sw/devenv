@@ -87,7 +87,7 @@ func (s *Server) stampBoardInputs(key string, st *wswhiteboard.State, before int
 		for _, chip := range r.Entry.Chips {
 			input.ChipIDs = append(input.ChipIDs, chip.ID)
 			id, _ := strconv.Atoi(chip.ID)
-			if chip.Answer != "" && chip.SentAt > answerTimes[id] {
+			if (chip.Answer != "" || strings.TrimSpace(chip.Note) != "") && chip.SentAt > answerTimes[id] {
 				answerTimes[id] = chip.SentAt
 			}
 		}
@@ -98,7 +98,7 @@ func (s *Server) stampBoardInputs(key string, st *wswhiteboard.State, before int
 	}
 	fresh[0].Inputs, _ = json.Marshal(inputs)
 	for _, e := range fresh {
-		if e.Kind == wswhiteboard.EntrySystem && e.ItemID > 0 && strings.HasPrefix(e.Text, "Item {{"+strconv.Itoa(e.ItemID)+"}} answered [") {
+		if (wswhiteboard.EntryView{Entry: *e}).OwnerAnswer() {
 			e.AnswerSentAt = answerTimes[e.ItemID]
 		}
 	}

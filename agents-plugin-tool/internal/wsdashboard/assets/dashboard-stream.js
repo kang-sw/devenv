@@ -86,7 +86,7 @@
     if (!TL_REGIONS[name]) return;
     var was = tlHeld[name], el = region(name);
     if (was ? was.hash === hash : !el || el.getAttribute("data-h") === hash) return;
-    tlHeld[name] = { hash: hash, root: name === "board" && typeof html !== "string" ? boardInputFragment(html) : frag(html) };
+    tlHeld[name] = { hash: hash, root: name === "board" && typeof html !== "string" ? boardInputFragment(html) : frag(name === "tree" ? treeInputHTML(html) : html) };
     tlCount();
   }
   // The tracker term and its new arrivals: each store's first loaded render
@@ -172,14 +172,101 @@
     };
     return { close: function () { over = true; try { ws.close(); } catch (x) {} } };
   }
+  // Immutable tree inputs keep each nested row independent of its children.
+  // Slots are private transport comments; materialization removes every slot
+  // before inserting server markup. Live, formatted DOM is never a baseline.
+  var TREE_SLOT = /<!--ws-tree-row-(\d+)-->/g;
+  function treeRowKey(n) {
+    if (n.matches("div.agent")) {
+      var d = n.querySelector(":scope > details[data-key]");
+      var k = d && d.getAttribute("data-key");
+      return k && k.indexOf("agent-") === 0 && k.length > 6 ? k : null;
+    }
+    return n.matches("details.peer[data-peer]") && n.getAttribute("data-peer") ? "peer-" + n.getAttribute("data-peer") : null;
+  }
+  function treeSlot(i) { return "<!--ws-tree-row-" + i + "-->"; }
+  function treeSlots(html) { return Array.from(html.matchAll(TREE_SLOT), function (m) { return +m[1]; }); }
+  function treeInputFull(html) {
+    if (typeof html !== "string" || html.indexOf("<!--ws-tree-row-") >= 0) return null;
+    var box = doc.createElement("div"), rows = Object.create(null), order = [], parents = [];
+    box.innerHTML = html;
+    var nodes = q("div.agent, details.peer[data-peer]", box);
+    if (nodes.some(function (n, i) {
+      var key = treeRowKey(n), p = n.parentElement && n.parentElement.closest("div.agent, details.peer[data-peer]");
+      if (!key || rows[key]) return true;
+      order.push(key); parents.push(p ? nodes.indexOf(p) : -1); rows[key] = {};
+      return false;
+    })) return null;
+    nodes.slice().reverse().forEach(function (n) {
+      var i = nodes.indexOf(n);
+      rows[order[i]] = { html: n.outerHTML };
+      n.replaceWith(doc.createComment("ws-tree-row-" + i));
+    });
+    return { shell: box.innerHTML, order: order, parents: parents, rows: rows };
+  }
+  function treeRowNode(html, key) {
+    if (typeof html !== "string") return null;
+    var box = doc.createElement("div"); box.innerHTML = html;
+    var n = box.firstElementChild;
+    return box.childNodes.length === 1 && n && treeRowKey(n) === key && !n.querySelector("div.agent, details.peer[data-peer]") ? n : null;
+  }
+  function treeSame(a, b) { return a.length === b.length && a.every(function (v, i) { return v === b[i]; }); }
+  function treeInputPatch(base, ev) {
+    if (!base || !ev || typeof ev.hash !== "string" || !Array.isArray(ev.order) || !treeSame(base.order, ev.order) || !Array.isArray(ev.rows)) return null;
+    var rows = Object.create(null), changed = Object.create(null);
+    Object.keys(base.rows).forEach(function (key) { rows[key] = base.rows[key]; });
+    if (ev.rows.some(function (r) {
+      if (!r || typeof r.key !== "string" || !rows[r.key] || changed[r.key] || typeof r.hash !== "string") return true;
+      var n = treeRowNode(r.html, r.key);
+      if (!n || !treeSame(treeSlots(n.outerHTML), treeSlots(base.rows[r.key].html))) return true;
+      changed[r.key] = true; rows[r.key] = { html: n.outerHTML };
+      return false;
+    })) return null;
+    return { shell: base.shell, order: base.order, parents: base.parents, rows: rows };
+  }
+  function treeInputHTML(input) {
+    if (typeof input === "string") return input;
+    function fill(html) {
+      return html.replace(TREE_SLOT, function (_, i) { return fill(input.rows[input.order[+i]].html); });
+    }
+    return fill(input.shell);
+  }
+  // Validate every replacement before touching the live tree. Moving retained
+  // children into a changed parent's slots preserves their node identities,
+  // disclosure state, spinner and focus, even across simultaneous row changes.
+  function mergeTreeRows(root, previous, next) {
+    if (!previous || !next || previous.shell !== next.shell || !treeSame(previous.order, next.order) || !treeSame(previous.parents, next.parents)) return null;
+    var nodes = q("div.agent, details.peer[data-peer]", root), live = Object.create(null), updates = Object.create(null), inserted = [];
+    if (nodes.length !== previous.order.length || nodes.some(function (n, i) {
+      var key = treeRowKey(n), p = n.parentElement && n.parentElement.closest("div.agent, details.peer[data-peer]");
+      if (key !== previous.order[i] || (p ? nodes.indexOf(p) : -1) !== previous.parents[i]) return true;
+      live[key] = n; return false;
+    })) return null;
+    if (next.order.some(function (key) {
+      if (previous.rows[key].html === next.rows[key].html) return false;
+      var n = treeRowNode(next.rows[key].html, key);
+      if (!n || !treeSame(treeSlots(n.outerHTML), treeSlots(previous.rows[key].html))) return true;
+      updates[key] = n; return false;
+    })) return null;
+    next.order.slice().reverse().forEach(function (key) {
+      var n = updates[key];
+      if (!n) return;
+      var walk = doc.createTreeWalker(n, 128), slots = [], slot;
+      while ((slot = walk.nextNode())) if (/^ws-tree-row-\d+$/.test(slot.data)) slots.push(slot);
+      slots.forEach(function (s) { s.replaceWith(live[next.order[+s.data.slice(12)]]); });
+      live[key].replaceWith(n); live[key] = n; inserted.push(n);
+    });
+    return inserted;
+  }
+
   var ASSETS_TRIED = "ws.dashboard.assetsreload";
   function connect(withoutBoard) {
     if (!window.WebSocket) return;
-    var boardInput = null, railInput = null;
+    var boardInput = null, railInput = null, treeInput = null;
     // The shell streams the rail alone; a framed session page streams its
     // session without the rail.
     var path = shell ? "/rail/events" : mode === "index" || worktree ? "/events" : "/s/" + rid + "/events";
-    var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : "") + (shell || (!framed && mode !== "index") ? "&railrows=1" : ""), {
+    var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : "") + (shell || (!framed && mode !== "index") ? "&railrows=1" : "") + (!shell && !worktree && mode !== "index" ? "&treerows=1" : ""), {
       open: function () { connected(true); },
       // Reopen with the hashes held now, so a reconnect sends only what
       // changed since.
@@ -188,7 +275,7 @@
         trackerLost();
         setTimeout(connect, 3000);
       },
-      events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, "rail-rows": onRailRows, tracker: onTracker, gone: onGone }
+      events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, "rail-rows": onRailRows, "tree-rows": onTreeRows, tracker: onTracker, gone: onGone }
     });
     function onRegion(ev) {
       if (!ev) return;
@@ -208,7 +295,21 @@
         railInput = WsRail.rowInputFull(ev.html, doc);
         if (railInput) ev = { name: "rail", hash: ev.hash, html: railInput };
       }
+      if (ev.name === "tree") {
+        treeInput = treeInputFull(ev.html);
+        if (treeInput) ev = { name: "tree", hash: ev.hash, html: treeInput };
+      }
       receiveRegion(ev);
+    }
+    function onTreeRows(ev) {
+      var next = treeInputPatch(treeInput, ev);
+      if (!next) {
+        st.close(); connected(false);
+        setTimeout(connect, 0);
+        return;
+      }
+      treeInput = next;
+      receiveRegion({ name: "tree", hash: ev.hash, html: next });
     }
     function onRailRows(ev) {
       var next = WsRail && WsRail.rowInputPatch(railInput, ev, doc);

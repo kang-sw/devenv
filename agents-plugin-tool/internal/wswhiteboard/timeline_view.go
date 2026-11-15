@@ -200,7 +200,7 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 				r.Ms, r.Stamp = e.Ms, e.Stamp
 				r.AnswerTarget = lastAnswer[e.ItemID]
 				if r.Answer {
-					currentAnswer := e.ID == lastAnswer[e.ItemID] && item.Answer != "" && item.Status != StatusAssumed
+					currentAnswer := e.ID == lastAnswer[e.ItemID] && (item.Answer != "" || item.Status == StatusCommented) && item.Status != StatusAssumed
 					at := e.At
 					if currentAnswer && item.AnsweredAt != "" {
 						at = item.AnsweredAt

@@ -19,15 +19,16 @@ import (
 // A disposable loopback daemon, never the installed runtime. Measurements
 // include the in-process SSE client and fixture driver, exclude setup/browser,
 // and report cache snapshot requests (hits + misses), not disk opens.
+// Opt in with WS_SEND_LATENCY_EVIDENCE=<output directory>.
 func TestSendLatencyEvidenceFixture(t *testing.T) {
+	out := os.Getenv("WS_SEND_LATENCY_EVIDENCE")
+	if out == "" {
+		t.Skip("set WS_SEND_LATENCY_EVIDENCE to an output directory for send-latency measurements")
+	}
 	for _, name := range []string{"HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "WS_CACHE_HOME", "WS_CONFIG_HOME"} {
 		t.Setenv(name, t.TempDir())
 	}
 	t.Logf("fixture_pid=%d", os.Getpid())
-	out := os.Getenv("WS_SEND_LATENCY_EVIDENCE")
-	if out == "" {
-		out = t.TempDir()
-	}
 	if err := os.MkdirAll(out, 0700); err != nil {
 		t.Fatal(err)
 	}

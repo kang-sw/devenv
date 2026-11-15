@@ -236,7 +236,7 @@ func TestPermissionPinnedRouter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Exact declarations are checked against the pinned Git object before compilation.
+	// Exact fixture declarations always compile; compare with Git when available.
 	source := `package permissionlegacy
 import (
  "encoding/json"
@@ -303,16 +303,10 @@ func(r *Runner) serveToken(http.ResponseWriter,*http.Request,string){panic("unex
  entries,err:=os.ReadDir(dir);if err!=nil||len(entries)!=0 {t.Fatalf("files: %v %v",entries,err)}
 }
 `
-	dir, err := os.MkdirTemp(filepath.Join("testdata", "permission-legacy"), "generated-router-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-	if err = os.WriteFile(filepath.Join(dir, "legacy_test.go"), []byte(source), 0600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("go", "test", "./"+filepath.ToSlash(dir), "-v", "-count=1", "-run", "^TestPinned$")
-	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local", "PERMISSION_PREFLIGHT="+string(preflight))
+	dir := permissionLegacyPackage(t, source)
+	cmd := exec.Command("go", "test", "-mod=readonly", ".", "-v", "-count=1", "-run", "^TestPinned$")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local", "GOWORK=off", "PERMISSION_PREFLIGHT="+string(preflight))
 	output, err := cmd.CombinedOutput()
 	t.Logf("pinned router:\n%s", output)
 	if err != nil {

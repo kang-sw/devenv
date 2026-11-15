@@ -269,7 +269,7 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		root = rec.Root
 		beforeEntry := rec.Whiteboard.EntrySeq
 		outcome, problems = wswhiteboard.Apply(rec.Whiteboard, commands, env)
-		if len(problems) > 0 {
+		if len(problems) > 0 && (outcome.Accepted == 0 || outcome.Unpartitioned) {
 			return errWhiteboardRefused
 		}
 		s.stampBoardInputs(key, rec.Whiteboard, beforeEntry)
@@ -286,7 +286,13 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	}
 	s.debugEvent("whiteboard.commit_outcome", map[string]any{"committed": observed.Committed, "html_published": observed.Published})
 	if errors.Is(err, errWhiteboardRefused) {
-		return toolErrorTextResponse(id, s.whiteboardRefusal(tool, problems))
+		text := s.whiteboardRefusal(tool, problems)
+		if outcome.Unpartitioned {
+			text += "\nWhole input refused without writes; command boundaries or rendering prerequisites are not safe for partial application.\n"
+		} else {
+			text += whiteboardFailedRetry(outcome)
+		}
+		return toolErrorTextResponse(id, text)
 	}
 	if err != nil {
 		if observed.Committed {
@@ -294,12 +300,23 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		} else {
 			err = fmt.Errorf("board commitment not confirmed; %w; inspect the board before retrying commands", err)
 		}
-		return toolTextResponse(id, "", fmt.Errorf("%s: %w", tool, err))
+		text := fmt.Sprintf("%s: %v\n", tool, err)
+		if observed.Committed {
+			text += whiteboardAcceptedResult(outcome)
+		}
+		for _, problem := range problems {
+			text += "- " + problem + "\n"
+		}
+		text += whiteboardFailedRetry(outcome)
+		return toolErrorTextResponse(id, text)
 	}
 	if s.whiteboardChanged != nil {
 		s.whiteboardChanged(s.getenv(wsstate.EnvCacheHome), root, key)
 	}
 	var sb strings.Builder
+	if len(problems) > 0 {
+		fmt.Fprintf(&sb, "applied: %d accepted commands committed; failed commands were not applied.\n", outcome.Accepted)
+	}
 	if len(outcome.IDs) > 0 {
 		labels := make([]string, len(outcome.IDs))
 		for i, itemID := range outcome.IDs {
@@ -323,10 +340,40 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 		sb.WriteString(summary + "\n")
 	}
 	sb.WriteString(whiteboardAppliedInfo + "\n")
+	if len(problems) > 0 {
+		sb.WriteString("Problems:\n")
+		for _, problem := range problems {
+			sb.WriteString("- " + problem + "\n")
+		}
+		sb.WriteString(whiteboardFailedRetry(outcome))
+		return toolErrorTextResponse(id, sb.String())
+	}
 	return toolTextResponse(id, sb.String(), nil)
 }
 
-// whiteboardAppliedInfo ends every successful whiteboard.update result.
+func whiteboardFailedRetry(out wswhiteboard.Outcome) string {
+	if out.Failed == "" {
+		return ""
+	}
+	return "\n" + out.Failed + "\nCorrect and resend only the commands inside <wb:failed>, not the wrapper or accepted commands. After an uncertain commitment, inspect the board first; never replay the whole batch.\n"
+}
+
+func whiteboardAcceptedResult(out wswhiteboard.Outcome) string {
+	text := fmt.Sprintf("applied: %d accepted commands committed.\n", out.Accepted)
+	if len(out.IDs) > 0 {
+		var ids []string
+		for _, id := range out.IDs {
+			ids = append(ids, wswhiteboard.FormatID(id))
+		}
+		text += "ids: " + strings.Join(ids, ", ") + "\n"
+	}
+	for _, summary := range out.Summaries {
+		text += summary + "\n"
+	}
+	return text
+}
+
+// whiteboardAppliedInfo accompanies committed, successfully published updates.
 const whiteboardAppliedInfo = "info: applied to the whiteboard; the user sees this content there. In whiteboard mode, do not repeat or summarize it in the conversation; write there only what the board does not carry."
 
 func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) response {
@@ -346,12 +393,9 @@ func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) 
 	return toolTextResponse(id, wswhiteboard.FormatQuery(result), nil)
 }
 
-// whiteboardRefusal lists every problem and then the tool's own input
-// grammar, read from the rsrc playbooks so the grammar has one source, so
-// that one retry can fix the call: for whiteboard.update the shared command
-// syntax and the whiteboard's "## Commands" section (commandRefusal), for
-// whiteboard.query the "## Query" section. The central precheck cannot do
-// this: it sees only the advertised argument names.
+// whiteboardRefusal lists problems with a compact playbook pointer for update,
+// or the playbook's query section for query. Command retries add their complete
+// rejected payloads separately; the central argument precheck has no such context.
 func (s *Server) whiteboardRefusal(tool string, problems []string) string {
 	if tool != "whiteboard.query" {
 		return s.commandRefusal(tool, problems, whiteboardPlaybookName)

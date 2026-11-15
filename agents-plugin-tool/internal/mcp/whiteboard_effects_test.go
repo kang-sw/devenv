@@ -69,7 +69,7 @@ func TestWhiteboardEffectsNoopRefusalAndAuthorization(t *testing.T) {
 	for _, commands := range []string{``, `<wb:topic name="same"><wb:body>Same</wb:body></wb:topic>`, `<wb:patch id="1"><wb:title>Same</wb:title></wb:patch>`} {
 		wb.update(t, commands)
 	}
-	refused := wb.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="same"><wb:log>Refused</wb:log></wb:topic><wb:patch id="900"/>`})
+	refused := wb.call(t, "whiteboard.update", map[string]any{"commands": `<wb:patch id="900"/>`})
 	if !isToolError(refused) || len(effectsRecords(t, f, f.replyA)) != 1 {
 		t.Fatalf("refusal/noop appended: %s", refused)
 	}
@@ -208,8 +208,8 @@ func TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation(t *testing.T) {
 		t.Fatalf("invalid creation batch was accepted: %s", refused)
 	}
 	afterRefusal := readBoard()
-	if !reflect.DeepEqual(beforeRefusal, afterRefusal) || len(effectsRecords(t, f, f.replyA)) != beforeRecords {
-		t.Fatalf("refused batch changed durable state or effects ring: before=%+v after=%+v records=%d", beforeRefusal, afterRefusal, len(effectsRecords(t, f, f.replyA)))
+	if afterRefusal.Counter != beforeRefusal.Counter+1 || afterRefusal.EntrySeq != beforeRefusal.EntrySeq+1 || afterRefusal.Seq != beforeRefusal.Seq+1 || len(effectsRecords(t, f, f.replyA)) != beforeRecords+1 || afterRefusal.Items[len(afterRefusal.Items)-1].Title != "Rejected" {
+		t.Fatal("mixed creation did not retain exactly its accepted add")
 	}
 
 	beforeNoop := readBoard()
@@ -308,13 +308,23 @@ func TestWhiteboardEffectsDurableIntentErrorsAndPublicationErrors(t *testing.T) 
 				}
 				t.Cleanup(func() { whiteboardMkdirAll = original })
 			}
-			resp := wb.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="decision"><wb:log>Exactly once</wb:log><wb:add class="check"><wb:title>Durable</wb:title></wb:add></wb:topic>`})
+			resp := wb.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="decision"><wb:log>Exactly once</wb:log><wb:add class="check"><wb:title>Durable</wb:title></wb:add></wb:topic><wb:answer id="999" value="ok">Rejected</wb:answer>`})
 			if !isToolError(resp) || !strings.Contains(toolText(t, resp), injected.Error()) {
 				t.Fatalf("expected injected error: %s", resp)
 			}
 			committed := stage != "intent-staged"
 			if got := strings.Contains(toolText(t, resp), "board committed;"); got != committed {
 				t.Fatalf("wrong commitment report: %s", resp)
+			}
+			text := toolText(t, resp)
+			if !strings.Contains(text, `<wb:answer id="999" value="ok">Rejected</wb:answer>`) || !strings.Contains(text, "<wb:failed>") || strings.Contains(text, "nothing was applied") {
+				t.Fatal("lost failed payload after persistence/publication error", text)
+			}
+			if committed && !strings.Contains(text, "applied: 2 accepted commands committed") {
+				t.Fatal("committed effects omitted", text)
+			}
+			if !committed && (!strings.Contains(text, "inspect the board before retrying") || strings.Contains(text, "applied:")) {
+				t.Fatal("uncertain commitment claimed application", text)
 			}
 			if got := len(effectsRecords(t, f, f.replyA)); got != map[bool]int{false: 0, true: 1}[committed] {
 				t.Fatalf("effects after %s: %d", stage, got)

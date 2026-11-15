@@ -254,7 +254,7 @@ func (u *topicUpdates) summaries(before, after *State) []string {
 }
 
 func summaryTags(t *topicUpdate, effects []Effect, before, after *State) []string {
-	added, answered, patched := map[int]bool{}, map[int]bool{}, map[int]bool{}
+	added, answered, patched, commented := map[int]bool{}, map[int]bool{}, map[int]bool{}, map[int]bool{}
 	panels, logs := map[string]bool{}, map[string]bool{}
 	body, tickets, closed, reopened, result := false, false, false, false, false
 	for _, e := range effects {
@@ -265,6 +265,9 @@ func summaryTags(t *topicUpdate, effects []Effect, before, after *State) []strin
 			}
 			kind := t.itemKinds[e.ID][e.Field]
 			if kind == "wb:answer" && (e.Field == "status" || e.Field == "answer" || e.Field == "answer-quote") {
+				if i := after.index(e.ID); i >= 0 && after.Items[i].Status == StatusCommented {
+					commented[e.ID] = true
+				}
 				if i := after.index(e.ID); i >= 0 && (after.Items[i].Status == StatusAnswered || after.Items[i].Status == StatusAssumed) {
 					answered[e.ID] = true
 				}
@@ -293,7 +296,7 @@ func summaryTags(t *topicUpdate, effects []Effect, before, after *State) []strin
 	for _, count := range []struct {
 		name string
 		n    int
-	}{{"added", len(added)}, {"answered", len(answered)}, {"patched", len(patched)}, {"panels", len(panels)}, {"logged", len(logs)}} {
+	}{{"added", len(added)}, {"answered", len(answered)}, {"commented", len(commented)}, {"patched", len(patched)}, {"panels", len(panels)}, {"logged", len(logs)}} {
 		if count.n > 0 {
 			tags = append(tags, fmt.Sprintf("%s %d", count.name, count.n))
 		}

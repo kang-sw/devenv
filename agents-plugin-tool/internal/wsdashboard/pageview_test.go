@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -151,6 +152,44 @@ func TestAgentTreeNestsAndLinksServedDelegates(t *testing.T) {
 	}
 	if v.Tree.Running != 1 || v.Tree.Finished != 1 || v.Tree.Failed != 1 {
 		t.Errorf("counts = %d/%d/%d", v.Tree.Running, v.Tree.Finished, v.Tree.Failed)
+	}
+}
+
+func TestSessionPageAgentPopoverGroupsAndTasks(t *testing.T) {
+	running := AgentNode{Agent: wslive.Agent{ID: "running", Status: wslive.StatusRunning},
+		Children: []AgentNode{{Agent: wslive.Agent{ID: "done-child", Status: wslive.StatusDone}}}}
+	ended := AgentNode{Agent: wslive.Agent{ID: "ended", Status: wslive.StatusDone},
+		Children: []AgentNode{{Agent: wslive.Agent{ID: "running-child", Status: wslive.StatusRunning}}}}
+	failed := AgentNode{Agent: wslive.Agent{ID: "failed", Status: wslive.StatusFailed}}
+	other := AgentNode{Agent: wslive.Agent{ID: "other-running", Status: wslive.StatusRunning}}
+	tree := TreeView{Agents: []AgentNode{ended, running, failed, other}}
+	// Only top-level status chooses the group; preserve tree order and
+	// children even when a child's status differs from its parent's.
+	if got, want := tree.RunningAgents(), []AgentNode{running, other}; !reflect.DeepEqual(got, want) {
+		t.Errorf("RunningAgents = %+v, want %+v", got, want)
+	}
+	if got, want := tree.EndedAgents(), []AgentNode{ended, failed}; !reflect.DeepEqual(got, want) {
+		t.Errorf("EndedAgents = %+v, want %+v", got, want)
+	}
+	if empty := (TreeView{}); len(empty.RunningAgents()) != 0 || len(empty.EndedAgents()) != 0 {
+		t.Error("an empty tree has popover agents")
+	}
+	for _, tc := range []struct {
+		name                 string
+		background, monitors int
+		want                 int
+	}{
+		{"none", 0, 0, 0},
+		{"background", 2, 0, 2},
+		{"monitors", 0, 3, 3},
+		{"both", 2, 3, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			view := SessionView{Background: tc.background, Monitors: tc.monitors}
+			if got := view.Tasks(); got != tc.want {
+				t.Errorf("Tasks = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 
