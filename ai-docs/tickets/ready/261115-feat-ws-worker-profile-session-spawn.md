@@ -374,3 +374,12 @@ T0 contracts, existing keys/lineage and single input/mail owner.
 
 | # | Title | Severity |
 |---|-------|----------|
+
+## Owner Decisions (2026-11-16)
+
+- (1177)=a: the "current parent ceiling" for a worker's permission comes from a
+  new authority-parent record. The authenticated parent session writes it at
+  spawn, and after a restart the ceiling is recomputed from that parent's
+  current permission. The existing worker key format stays unchanged. This
+  needs its own design-and-compatibility ticket first (T0 candidate) before
+  implementation. Option b (snapshot at spawn only) was rejected.

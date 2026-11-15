@@ -71,3 +71,12 @@ The visual implementer is a Claude agent working from an owner-approved mockup s
 Depends on Phases 1 and 2. Route legacy body/edit calls through the fixed per-topic Current content panel. Migrate preexisting content at its last-changed time without hiding it or deleting prior information. Preserve old playbook calls through repeated use after migration, not just a one-time conversion. Update canonical `agents-plugin/rsrc/whiteboard/whiteboard.md` to teach the panel-first stream and wrapped patch syntax, retain the aliases, and regenerate its wsflow resource mirror according to the declared manuals.
 
 Verification: existing-content migration fixtures preserve payload, recorded time and historical references; legacy body followed by edit and a second legacy update operate on the same panel without losing intervening versions or duplicating migration history. Exercise the intervening old-write/new-reopen path and record its concrete tier with source citations. Run focused command/history regressions, the shared-resource manifest/mirror drift checks and wsflow rendering/package checks required by the mirroring manual. Re-read changed shipped text for downstream dependencies and apply the skill-authoring invariant checklist. No implementation or verification pass is claimed by this todo capture.
+
+## Owner Decisions (2026-11-16)
+
+- (1181)=ok: the panel-first history mockup is approved. One line in
+  write order, older versions fold in place, v1/v2 labels, and distinct
+  links for "latest" and "this version".
+- Phase 1 parser state at handoff: branch `exec4/panel-first-literal-code`
+  at `4c875057b` (base EXEC1 `1b7e7cd65`). Round-4 independent review was in
+  flight at handoff; see the repo note `handoff`.

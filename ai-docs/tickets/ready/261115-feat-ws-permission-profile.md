@@ -918,3 +918,15 @@ fixtures or acceptance ran, and no Phase 2 Result is recorded. The ticket stays
 `ready/`; UI remains deferred to the Claude mockup pass, and Phases 3–5 remain
 outside this dispatch. Owner decisions, phase plans and existing Results are
 unchanged.
+
+## Owner Decisions (2026-11-16)
+
+- (1177)=a: the worker-side ceiling uses a separate authority-parent record,
+  recomputed from the parent's current permission after restart (see
+  261115-feat-ws-worker-profile-session-spawn).
+- (1180)=ok: the permission-picker mockup (develop `4352415f3`) is approved
+  as drawn. The new-session default is "default (existing behavior)", starting
+  in `auto`. The native permission mode stays under "Advanced". There is no
+  silent fallback when a mode is unsupported. The header permission chip
+  stays. The "full" level opens a warning that needs its checkbox before
+  start. Workers see nothing until (1177) lands.

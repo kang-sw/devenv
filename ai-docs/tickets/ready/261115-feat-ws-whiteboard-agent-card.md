@@ -519,3 +519,10 @@ approved-asset byte comparison. Capture/intent checks cover the settled owner
 and four lead technical decisions, literal contracts, dependency order,
 compatibility proof obligations and visual acceptance. No runtime/provider,
 network, auth/install, screenshot or broad test execution is authorized here.
+
+## Owner Decisions (2026-11-16)
+
+- (1178)=ok, with a follow-up from the owner, verbatim: "마우스 올리면 호버까지
+  반영해주세요." The badge popover merged at `ad9c2c79f`/`7585c1620` is
+  accepted. Next change: the popover also opens on mouse hover, not only on
+  click. Keep the click/pin behavior.

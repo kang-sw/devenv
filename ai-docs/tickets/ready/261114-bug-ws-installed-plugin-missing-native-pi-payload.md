@@ -209,3 +209,11 @@ Verification:
   installed-layout regressions; run independent review. Use isolated test
   processes only. Record exact commands, outcomes and deferred platform/live
   rollout boundaries in the Result before claiming the ticket complete.
+
+## Owner Decisions (2026-11-16)
+
+- (1183)=a: commit the trimmed native Pi payload into the public repo.
+  The reviewed head is `5372d3151` (branch pushed at handoff): closure.zip of
+  7.3 MB shared by ws and wsflow, a 0.7 MB manifest, and 1.7 MB of first-party
+  files. It keeps (647)=a: marketplace installs work offline. To land it,
+  rebase onto develop and run it through the merge flow.

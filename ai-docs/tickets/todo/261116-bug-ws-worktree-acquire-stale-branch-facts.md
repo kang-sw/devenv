@@ -219,3 +219,11 @@ stays with its same-email holder on the develop track.
 Not yet planned. Blocked on the deferred owner decision in `## Constraints`;
 a later ticket edit replaces this paragraph with the approved plan before any
 implementation.
+
+## Owner Decisions (2026-11-16)
+
+- (1184)=a: when the route resolver finds a leftover canonical branch with
+  zero commits not already on develop, it treats the branch as finished,
+  deletes it and creates the new branch. This matches the existing behavior
+  of the other path. No commits are lost, because every one is on develop.
+  Phase 2 can now be planned; move this ticket back to `ready/` once it is.
