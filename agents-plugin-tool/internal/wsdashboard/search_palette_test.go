@@ -20,7 +20,7 @@ func TestSearchPaletteAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"class: 'tk tk-palette'", "O.searchHost.setOpen(true)", "function qScore(", "function qBoard(",
+		"class: 'tk tk-palette dr-search-palette'", "O.searchHost.setOpen(true)", "function qScore(", "function qBoard(",
 		"function qShortcut(", "O.searchRows", "O.searchPick", "e.isComposing || e.keyCode === 229",
 		"O.searchState.load()", "O.searchAsk", "js.tk.qs.tracker",
 		"O.fileFind", "O.fileList", "excerpts: true",
@@ -33,7 +33,7 @@ func TestSearchPaletteAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{".dr-search-handle { right: calc(var(--dpad) + var(--shr, 0px))", ".dr-search .tk.tk-palette { position: static; width: 100%; height: 100%"} {
+	for _, want := range []string{".dr-search-handle { right: calc(var(--dpad) + var(--shr, 0px))", ".dr-search .tk.dr-search-palette { position: static; width: 100%; height: 100%"} {
 		if !strings.Contains(string(hostCSS), want) {
 			t.Errorf("host search sheet CSS lacks %q", want)
 		}

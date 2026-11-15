@@ -168,13 +168,14 @@
       // stand on the board; slots retain their place in the page count.
       q("section.topic[data-topic]", page).forEach(function (t) {
         var name = t.getAttribute("data-topic");
-        if (!boardTopicPresent(name)) return;
+        if (!boardTopicPresent(name)) { boardPaged[name] = t.cloneNode(true); return; }
         var s = doc.createElement("span");
         s.className = "closed-slot";
         s.hidden = true;
         s.setAttribute("data-slot", name);
         t.parentNode.replaceChild(s, t);
       });
+      var kept = boardKeep();
       btn.parentNode.replaceChild(page, btn);
       watchBoard(page);
       bandBoard(page);
@@ -183,6 +184,7 @@
       if (window.wbBindBoard) window.wbBindBoard(page);
       if (window.wbAgo) window.wbAgo(page);
       mermaid(page);
+      if (kept) kept.h.apply();
       return true;
     }, function () { btn.disabled = false; return false; });
   }

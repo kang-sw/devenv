@@ -243,11 +243,10 @@
     if (doc.scrollingElement) s.push([doc.scrollingElement, doc.scrollingElement.scrollTop]);
     return s;
   }
-  // A pane a keep session holds (wbHistory.keeping: a board swap's
-  // compensation, a history page loading) is the session's to scroll.
+  // Owned scrollers never take numeric restoration, even between transactions.
   function restoreScroll(s) {
     var kept = window.wbHistory && window.wbHistory.keeping;
-    s.forEach(function (p) { if (!(kept && kept(p[0])) && p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; });
+    s.forEach(function (p) { if (!p[0].wbScrollOwner && !(kept && kept(p[0])) && p[0].scrollTop !== p[1]) p[0].scrollTop = p[1]; });
   }
 
   // The conversation stays at the bottom while the user has it there. Its
