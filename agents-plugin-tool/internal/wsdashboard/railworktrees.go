@@ -91,6 +91,10 @@ type railLister struct {
 	wanted  map[string][]Registration
 	pending map[string]bool
 	repos   map[string]railRepo
+	// reading holds the repositories the goroutine is reading now: a render
+	// that lands meanwhile (a second stream opening) waits for that read
+	// rather than queuing the repository again.
+	reading map[string]bool
 	// reads counts the repository reads run (a test seam).
 	reads int
 }
@@ -107,6 +111,7 @@ func newRailLister(read func(string, []Registration) (RepoWorktrees, error), cha
 		wanted:   map[string][]Registration{},
 		pending:  map[string]bool{},
 		repos:    map[string]railRepo{},
+		reading:  map[string]bool{},
 	}
 }
 
@@ -199,7 +204,7 @@ func (l *railLister) lists(wanted map[string][]Registration) map[string]railRepo
 		next[key] = regs
 		if r, ok := l.repos[key]; ok {
 			out[key] = r
-		} else if !l.pending[key] {
+		} else if !l.pending[key] && !l.reading[key] {
 			l.pending[key] = true
 			missing = true
 		}
@@ -260,6 +265,7 @@ func (l *railLister) run() {
 		for repo, regs := range l.wanted {
 			if full || l.pending[repo] {
 				todo[repo] = regs
+				l.reading[repo] = true
 			}
 		}
 		l.pending = map[string]bool{}
@@ -272,6 +278,7 @@ func (l *railLister) run() {
 			r := l.readRepo(repo, regs)
 			l.mu.Lock()
 			l.reads++
+			delete(l.reading, repo)
 			if _, ok := l.wanted[repo]; ok {
 				if old, had := l.repos[repo]; !had || !reflect.DeepEqual(old, r) {
 					changed = true

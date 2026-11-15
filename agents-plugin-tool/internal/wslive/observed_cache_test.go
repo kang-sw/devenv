@@ -84,6 +84,23 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	if got := cache.Load(dir); opens != 2 || got != changed {
 		t.Fatalf("listing re-read a known name: opens=%d", opens)
 	}
+	// The fake clock trusts every real mtime as old, so the real writes
+	// below must move the directory mtime away from the one the cache
+	// recorded. Windows stamps file times from a coarse system tick, and the
+	// rename above and the remove below can share one; production's racy
+	// window (real clock) distrusts such a recent mtime, the fake clock
+	// cannot. settle backdates the directory before the load that records
+	// it, as the hour the clock skipped would have.
+	evidenceDir := filepath.Dir(path)
+	backdate := time.Now().Add(-time.Hour)
+	settle := func() {
+		t.Helper()
+		backdate = backdate.Add(-time.Minute)
+		if err := os.Chtimes(evidenceDir, backdate, backdate); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settle()
 	clock = clock.Add(observedResweep)
 	if got := cache.Load(dir); opens != 3 || got.models[""].Current.Model != "third-longerr" {
 		t.Fatalf("replacement missed by the forced re-sweep: opens=%d", opens)
@@ -93,6 +110,10 @@ func TestObservedCacheUnchangedOpensAndProjection(t *testing.T) {
 	}
 	if got := cache.Load(dir); len(got.models) != 0 || opens != 3 {
 		t.Fatal("deleted evidence retained or opened")
+	}
+	settle()
+	if got := cache.Load(dir); len(got.models) != 0 || opens != 3 {
+		t.Fatal("a backdated empty directory re-read records")
 	}
 	if err := AppendObserved(dir, []ObservedRecord{observedCacheRecord("two", "new")}); err != nil {
 		t.Fatal(err)
