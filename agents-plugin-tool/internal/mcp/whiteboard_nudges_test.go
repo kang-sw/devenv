@@ -412,6 +412,11 @@ func TestWhiteboardNudgePreciseTimerAndPokeWithoutPages(t *testing.T) {
 		t.Fatal("foreign cache poke accepted")
 	}
 	f.board(t, `<wb:topic name="Work"><wb:state value="waiting"/><wb:state value="implementing" owner="replacement" eta_minutes="1"/></wb:topic>`, time.Now().Add(-2*time.Minute))
+	resolvedCache, err := filepath.EvalSymlinks(f.n.cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("poke cache at construction %s; current canonical path %s", f.n.cache, resolvedCache)
 	f.n.Poke(f.n.cache, f.target.root, f.target.key)
 	select {
 	case <-sub.Hard():
@@ -442,6 +447,29 @@ func TestWhiteboardNudgeSuccessfulUpdatePokesWithoutDashboard(t *testing.T) {
 	if !isToolError(response) || called != before {
 		t.Fatal("refused batch poked")
 	}
+}
+
+func TestWhiteboardNudgePokeResolvesCreatedCacheParents(t *testing.T) {
+	parent := t.TempDir()
+	real := filepath.Join(parent, "real")
+	if err := os.Mkdir(real, 0700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(parent, "alias")
+	if err := os.Symlink(real, alias); err != nil {
+		t.Skipf("symlink fixture unavailable: %v", err)
+	}
+	n := NewWhiteboardNudges(filepath.Join(alias, "cache", "dashboard"), nil, io.Discard)
+	if err := os.Mkdir(filepath.Join(real, "cache"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	target := nudgeTarget{"new-cache-lead", t.TempDir()}
+	n.Poke(filepath.Join(real, "cache"), target.root, target.key)
+	if !n.pending[target] {
+		t.Fatal("newly-created cache canonicalization dropped update poke")
+	}
+	t.Logf("construction path %s; caller path %s", n.cache, filepath.Join(real, "cache"))
+	n.Close()
 }
 
 func TestWhiteboardNudgeSchedulerCloseBeforeStart(t *testing.T) {
