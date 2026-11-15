@@ -455,6 +455,18 @@ review of `bd316e89a..92b96d89f`:
 - This is the existing Phase 1 review-fix round, not a new phase or review
   sweep. Frozen Result text and Phase 2 remain unchanged; the previously
   recorded best-effort Claude boundary limitation is not reclassified as proof.
+- Lead review record: the independent lite delta review of
+  `92b96d89f..414f63f48` was clean (both findings addressed, no new
+  regression; race command re-run, pass). Owner MUST-check outcome, recorded
+  under (865)=a: VERIFIED that Claude launches carry scoped
+  `--allowedTools '<Tool>(//<abs>/**)'` entries for only the project root and
+  the snapshot subtree, with `--tools Read,Grep,Glob --permission-mode
+  dontAsk --setting-sources "" --strict-mcp-config` and no bare Read/Grep/Glob
+  entry, and that the repository adds no per-call containment, traversal or
+  symlink check. INFERRED, not verified: that the Claude CLI denies outside
+  paths, `..` traversal and symlink escapes, and that Grep/Glob honor
+  path-scoped entries; no real-model probe was run (MAIN, 2026-11-15). Pi
+  keeps the accepted soft path boundary.
 
 ### Phase 2: Search drawer and keyboard contract
 
