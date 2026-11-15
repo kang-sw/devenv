@@ -263,8 +263,8 @@ func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *
 	return wsagent.NewRunner(wsagent.Options{
 		Dir: dir,
 		Backends: map[string]wsagent.BackendRegistration{
-			wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes},
-			wsagent.BackendPi:     {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi},
+			wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes, PermissionLevels: wsagent.LeadPermissionLevels()},
+			wsagent.BackendPi:     {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi, PermissionLevels: wsagent.LeadPermissionLevels()},
 		},
 		Keys: keys,
 		// A lead session's process runs under a session holder with a lead

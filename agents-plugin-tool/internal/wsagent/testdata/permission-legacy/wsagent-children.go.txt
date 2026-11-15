@@ -1,0 +1,10 @@
+// Source: agents-plugin-tool/internal/wsagent/children.go
+// Commit: 90eacda7e4956aded76cfc092d20c41e76d2cc1a
+// Exact declarations; imports and unrelated declarations omitted.
+package permissionlegacy
+
+type steeredReport struct {
+	Text string `json:"text"`
+	Seq  int    `json:"seq"`
+	Mark uint64 `json:"-"`
+}

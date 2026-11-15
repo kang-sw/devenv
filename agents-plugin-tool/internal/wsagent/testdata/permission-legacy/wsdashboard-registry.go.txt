@@ -1,0 +1,224 @@
+// Source: agents-plugin-tool/internal/wsdashboard/registry.go
+// Commit: 90eacda7e4956aded76cfc092d20c41e76d2cc1a
+// Exact declarations; imports and unrelated declarations omitted.
+package permissionlegacy
+
+type Registration struct {
+	SchemaVersion int `json:"schema_version"`
+	// ReplyID is the session's reply-id, never its session key.
+	ReplyID string `json:"reply_id"`
+	// Project is the session's root path, as its session record holds it.
+	Project string `json:"project"`
+	// Harness names the host the session runs in (claude, codex, pi), when
+	// the serving ws-mcp knows it.
+	Harness string `json:"harness,omitempty"`
+	// GitCommonDir is the session root's git common directory (git
+	// rev-parse --git-common-dir, absolute), which the serving ws-mcp reads
+	// once when it registers, so the session rail groups a linked worktree
+	// under its repository without running git per session. Empty when the
+	// root is not in a repository, and from an older ws-mcp; the rail then
+	// reads the root's .git itself (railRepoRoot).
+	GitCommonDir string `json:"git_common_dir,omitempty"`
+	RegisteredAt string `json:"registered_at,omitempty"`
+	// HeartbeatAt is refreshed every HeartbeatInterval while the serving
+	// ws-mcp runs and the session made a keyed call recently.
+	HeartbeatAt string `json:"heartbeat_at,omitempty"`
+	// EndedAt is set when the serving ws-mcp exits cleanly.
+	EndedAt string `json:"ended_at,omitempty"`
+	// Agent marks a conversation the daemon's own agent runner hosts: no
+	// ws-mcp serves it and it has no session record, so the daemon reads it
+	// from its live stores alone (agentSessions).
+	Agent bool `json:"agent,omitempty"`
+	// Unlisted keeps the session out of the index page; its own page is
+	// still served.
+	Unlisted bool `json:"unlisted,omitempty"`
+	// Hosted marks a lead session the daemon's agent runner spawned and
+	// feeds (a headless harness under a session holder). The runner, not a
+	// ws-mcp, writes this row; the session keeps its session record, so the
+	// daemon reads it as any lead session.
+	Hosted bool `json:"hosted,omitempty"`
+	// HostPID is the hosted session's harness process: the one process the
+	// hosted-session flag holds for. The runner writes 0 before each spawn
+	// and the child's PID right after it, so a harness reading 0 waits
+	// briefly and one reading another PID runs as a plain session.
+	HostPID int `json:"host_pid,omitempty"`
+	// HostStopped is set by the runner on a hosted row written while the
+	// session has no harness process and none is starting. It tells a
+	// stopped session (HostPID 0, HostStopped set) from a spawn under way
+	// (HostPID 0 alone), which HostMayRun reads.
+	HostStopped bool `json:"host_stopped,omitempty"`
+	// Exit details are optional; a nil code means the runner did not record one.
+	HostExitCode   *int   `json:"host_exit_code,omitempty"`
+	HostExitSignal *int   `json:"host_exit_signal,omitempty"`
+	HostExitReason string `json:"host_exit_reason,omitempty"`
+	HostStoppedAt  string `json:"host_stopped_at,omitempty"`
+	// HarnessPID is the harness process of the ws-mcp that wrote this row
+	// (a session a terminal harness runs), when its launcher reported one.
+	// It never makes the session live; HarnessMayRun reads it.
+	HarnessPID int `json:"harness_pid,omitempty"`
+	// MCPOwnerPID identifies the launcher whose proxy connection registered
+	// this terminal session. A successor daemon uses an actual reconnect
+	// from that launcher to resume heartbeats; the PID alone is not liveness.
+	MCPOwnerPID int `json:"mcp_owner_pid,omitempty"`
+	// LastCallAt is the latest keyed activity known to the serving ws-mcp,
+	// persisted on registration/heartbeat/end. Reconnection resumes the idle
+	// budget from this stamp rather than counting a restart as activity.
+	LastCallAt string `json:"last_call_at,omitempty"`
+}
+
+func ValidReplyID(id string) bool { return replyIDPattern.MatchString(id) }
+
+func SessionDir(dir, replyID string) string {
+	return filepath.Join(dir, sessionsDirName, replyID)
+}
+
+func ReadRegistration(dir, replyID string) (Registration, error) {
+	if !ValidReplyID(replyID) {
+		return Registration{}, fmt.Errorf("invalid reply-id %q", replyID)
+	}
+	raw, err := os.ReadFile(filepath.Join(SessionDir(dir, replyID), registrationFileName))
+	if err != nil {
+		return Registration{}, err
+	}
+	var reg Registration
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &reg); err != nil {
+		return Registration{}, fmt.Errorf("parse registration %s: %w", replyID, err)
+	}
+	if reg.ReplyID == "" {
+		return Registration{}, fmt.Errorf("registration %s has no reply-id", replyID)
+	}
+	if reg.ReplyID != replyID {
+		return Registration{}, fmt.Errorf("%w: registration %s names reply-id %q", errRegistrationMismatch, replyID, reg.ReplyID)
+	}
+	return reg, nil
+}
+
+func WriteRegistration(dir string, reg Registration) error {
+	if !ValidReplyID(reg.ReplyID) {
+		return fmt.Errorf("invalid reply-id %q", reg.ReplyID)
+	}
+	if reg.SchemaVersion == 0 {
+		reg.SchemaVersion = registrationSchemaVersion
+	}
+	sessionDir := SessionDir(dir, reg.ReplyID)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(reg, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(sessionDir, registrationFileName+".*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := wsstate.AtomicReplaceFile(name, filepath.Join(sessionDir, registrationFileName)); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	return nil
+}
+
+func RemoveRegistration(dir, replyID string) error {
+	if !ValidReplyID(replyID) {
+		return fmt.Errorf("invalid reply-id %q", replyID)
+	}
+	err := os.Remove(filepath.Join(SessionDir(dir, replyID), registrationFileName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func PruneRegistrations(dir string, now time.Time, retention time.Duration) int {
+	entries, err := os.ReadDir(filepath.Join(dir, sessionsDirName))
+	if err != nil {
+		return 0
+	}
+	pruned := 0
+	for _, entry := range entries {
+		if !entry.IsDir() || !ValidReplyID(entry.Name()) {
+			continue
+		}
+		sessionDir := SessionDir(dir, entry.Name())
+		record, hosted := readAgentRecordEnd(sessionDir)
+		if hosted && (!record.retired() || record.terminalConversation(sessionDir)) {
+			continue
+		}
+		last := time.Time{}
+		if reg, err := ReadRegistration(dir, entry.Name()); err == nil {
+			if reg.Agent {
+				continue
+			}
+			last = reg.LastSeen()
+		} else if hosted {
+			// A retired lead with no readable row to age it by is left to
+			// the runner.
+			continue
+		}
+		if last.IsZero() {
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			last = info.ModTime()
+		}
+		if now.Sub(last) <= retention {
+			continue
+		}
+		if os.RemoveAll(SessionDir(dir, entry.Name())) == nil {
+			pruned++
+		}
+	}
+	return pruned
+}
+
+func (r Registration) LastSeen() time.Time {
+	var last time.Time
+	for _, stamp := range []string{r.RegisteredAt, r.HeartbeatAt, r.EndedAt} {
+		if t, err := time.Parse(time.RFC3339, stamp); err == nil && t.After(last) {
+			last = t
+		}
+	}
+	return last
+}
+
+type agentRecordEnd struct {
+	Lead        bool   `json:"lead"`
+	ClosedAt    string `json:"closed_at"`
+	HandedOffAt string `json:"handed_off_at"`
+	Backend     string `json:"backend"`
+	SessionFile string `json:"session_file"`
+}
+
+func (r agentRecordEnd) terminalConversation(sessionDir string) bool {
+	if !r.Lead || r.HandedOffAt == "" || r.Backend != "pi" {
+		return false
+	}
+	return r.SessionFile == "" || strings.HasPrefix(filepath.Clean(r.SessionFile), filepath.Clean(sessionDir)+string(filepath.Separator))
+}
+
+func (r agentRecordEnd) retired() bool {
+	return r.Lead && (r.ClosedAt != "" || r.HandedOffAt != "")
+}
+
+func readAgentRecordEnd(sessionDir string) (record agentRecordEnd, hosted bool) {
+	raw, err := os.ReadFile(filepath.Join(sessionDir, AgentRecordFileName))
+	if errors.Is(err, os.ErrNotExist) {
+		return agentRecordEnd{}, false
+	}
+	if err != nil || json.Unmarshal(raw, &record) != nil {
+		return agentRecordEnd{}, true
+	}
+	return record, true
+}

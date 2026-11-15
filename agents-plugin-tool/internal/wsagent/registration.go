@@ -15,6 +15,8 @@ type BackendRegistration struct {
 	Backend         Backend
 	LeadProfile     string
 	PermissionModes []string
+	// PermissionLevels advertises supported lead selection paths only.
+	PermissionLevels []PermissionLevel
 }
 
 // BackendRegistrations exposes the runner's admitted set to in-process config
@@ -23,6 +25,7 @@ func (r *Runner) BackendRegistrations() map[string]BackendRegistration {
 	out := make(map[string]BackendRegistration, len(r.opts.Backends))
 	for name, reg := range r.opts.Backends {
 		reg.PermissionModes = append([]string(nil), reg.PermissionModes...)
+		reg.PermissionLevels = append([]PermissionLevel(nil), reg.PermissionLevels...)
 		out[name] = reg
 	}
 	return out

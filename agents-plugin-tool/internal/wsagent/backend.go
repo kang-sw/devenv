@@ -63,6 +63,9 @@ type StartSpec struct {
 	Lead *LeadSpec
 	// Holder selects durable transport independently of lead privileges.
 	Holder *holderChild
+	// PermissionLevel is explicit lead intent for this launch only. Empty keeps
+	// legacy native settings. It does not grant tools or apply worker posture.
+	PermissionLevel PermissionLevel
 }
 
 // LeadSpec is what a lead conversation's process starts with.

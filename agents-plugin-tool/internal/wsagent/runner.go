@@ -571,6 +571,10 @@ type LeadOptions struct {
 	Effort          string
 	PermissionMode  string
 	PluginIsolation string
+	// Common intent is transient; selection is stored separately from Record.
+	PermissionLevel   PermissionLevel
+	PermissionFullAck bool
+	permissionUser    bool // set by the trusted control owner, never request JSON
 }
 
 // leadPluginIsolation supplies the additive field's legacy default.
@@ -648,6 +652,18 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 			return State{}, err
 		}
 	}
+	if lead != nil && lead.PermissionLevel != "" {
+		base := Record{Lead: true, Backend: rp.Definition.Backend, PermissionMode: rp.Definition.PermissionMode}
+		if lead.PermissionMode != "" {
+			base.PermissionMode = lead.PermissionMode
+		}
+		if !r.supportsLeadPermission(base.Backend, lead.PermissionLevel) {
+			return State{}, badRequest("permission_level %q is not supported on %s", lead.PermissionLevel, base.Backend)
+		}
+		if err := authorizePermission(legacyLeadPermission(base), lead.PermissionLevel, lead.permissionUser, lead.PermissionFullAck); err != nil {
+			return State{}, err
+		}
+	}
 	var key string
 	if lead != nil {
 		// A lead key lives at the canonical git root, which is then the
@@ -705,6 +721,14 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return State{}, err
+	}
+	if lead != nil && lead.PermissionLevel != "" {
+		if err := writePermissionSelection(dir, lead.PermissionLevel); err != nil {
+			return State{}, err
+		}
+		if mode := nativePermissionMode(rec.Backend, lead.PermissionLevel); mode != "" {
+			rec.PermissionMode = mode
+		}
 	}
 	if lead != nil && lead.HireRequestID != "" {
 		if err := wsdashboard.MarkHired(r.opts.Dir, rec.ReplyID, lead.HireRequestID, lead.HireLabel); err != nil {
@@ -982,6 +1006,10 @@ func (r *Runner) AnswerApproval(id, requestID string, allow bool, message string
 // in-stream when the harness takes it; the mode the harness then reports is
 // State.ActiveMode.
 func (r *Runner) SetPermissionMode(id, mode string) (State, error) {
+	return r.setPermissionMode(id, mode, false)
+}
+
+func (r *Runner) setPermissionMode(id, mode string, user bool) (State, error) {
 	modes := LeadPermissionModes
 	if rec, ok := r.recordOf(id); ok && rec.Backend != BackendPi {
 		modes = r.opts.Backends[rec.Backend].PermissionModes
@@ -990,18 +1018,7 @@ func (r *Runner) SetPermissionMode(id, mode string) (State, error) {
 		return State{}, categorized(ErrInvalidProfile, badRequest("permission_mode %q must be one of %s", mode, strings.Join(modes, ", ")))
 	}
 	return r.act(id, func(c *conv) error {
-		if !c.rec.Lead || len(c.r.opts.Backends[c.rec.Backend].PermissionModes) == 0 {
-			return categorized(ErrUnsupported, badRequest("the permission mode applies to a claude lead session only"))
-		}
-		if mode == c.rec.PermissionMode {
-			return nil
-		}
-		c.update(func(rec *Record) { rec.PermissionMode = mode })
-		c.dirtyMode = true
-		if !c.turn {
-			c.applySettings()
-		}
-		return nil
+		return c.setNativePermissionMode(mode, user)
 	})
 }
 
@@ -1160,10 +1177,14 @@ type State struct {
 	// PermissionMode is the mode the next process launches in, and
 	// ActiveMode the one the running harness last reported (it may fall
 	// back from the one asked for).
-	PermissionMode  string `json:"permission_mode,omitempty"`
-	ActiveMode      string `json:"active_mode,omitempty"`
-	PluginIsolation string `json:"plugin_isolation,omitempty"`
-	PluginWarning   string `json:"plugin_warning,omitempty"`
+	PermissionMode string `json:"permission_mode,omitempty"`
+	ActiveMode     string `json:"active_mode,omitempty"`
+	// Common projections are lead-only. Worker common posture is not applied.
+	PermissionLevel       PermissionLevel `json:"permission_level,omitempty"`
+	PermissionSource      string          `json:"permission_source,omitempty"`
+	PermissionEnforcement string          `json:"permission_enforcement,omitempty"`
+	PluginIsolation       string          `json:"plugin_isolation,omitempty"`
+	PluginWarning         string          `json:"plugin_warning,omitempty"`
 	// Approvals are the tool permission prompts waiting for an answer,
 	// oldest first.
 	Approvals []ApprovalRequest `json:"approvals,omitempty"`
@@ -1210,7 +1231,7 @@ type State struct {
 func (r *Runner) closedState(rec Record) State {
 	if rec.ClosedAt != "" {
 		if st, ok := r.closedRows[rec.ReplyID]; ok {
-			return st
+			return r.permissionState(st, rec, wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
 		}
 	}
 	st := closedState(rec)
@@ -1244,7 +1265,7 @@ func (r *Runner) closedState(rec Record) State {
 		}
 		r.closedRows[rec.ReplyID] = st
 	}
-	return st
+	return r.permissionState(st, rec, dir)
 }
 
 func closedState(rec Record) State {
@@ -1319,7 +1340,10 @@ type conv struct {
 	dirtyModel  bool
 	dirtyEffort bool
 	dirtyMode   bool
-	lastReg     time.Time
+	// reconcileMode marks replay-reconstructed intent, not a new user setting.
+	// Failed reconciliation is advisory; it must not kill an unenforceable lead.
+	reconcileMode bool
+	lastReg       time.Time
 
 	// A lead's own, loop-owned. mailC (one slot) tells the loop the
 	// mailbox may hold mail (signalMail); stopMail ends the watch.
@@ -1711,7 +1735,7 @@ func (c *conv) state() State {
 		}
 		st.MCPBroken = slices.Clone(c.mcpBroken)
 	}
-	return st
+	return c.r.permissionState(st, c.rec, c.dir)
 }
 
 func (c *conv) record() Record {
@@ -2157,6 +2181,10 @@ func (c *conv) startProcess() error {
 }
 
 func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
+	// No common worker selection or ceiling is applied in this slice.
+	if !attach {
+		c.permissionNudge(legacyWorkerPermission(def), true, "")
+	}
 	if rec.Backend == BackendPi && !attach {
 		if err := c.r.checkChildProfile(rec.Parent, rec.Profile, def); err != nil {
 			return err
@@ -2292,6 +2320,16 @@ func (c *conv) startWorker(rec Record, def Profile, attach bool) error {
 // holds for. The row says 0 until the process exists, so a harness that
 // reads it early waits rather than misreading an older PID.
 func (c *conv) startLead(rec Record, def Profile, attach bool) error {
+	level, source, err := c.r.leadPermission(rec, c.dir)
+	if err != nil {
+		return err
+	}
+	if attach {
+		// Root lead keys remain parentless under the existing key-store contract.
+		if err := c.r.opts.LeadKeys.EnsureLead(rec.Root, rec.WSKey); err != nil {
+			return fmt.Errorf("ws session key: %w", err)
+		}
+	}
 	host := c.r.opts.Holders
 	holder := &holderChild{host: host, table: &c.r.holders, session: holderSession{Kind: holderKindLead, ReplyID: rec.ReplyID, Cwd: rec.workDir(), Label: rec.Profile}}
 	if attach {
@@ -2366,6 +2404,15 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 			},
 		},
 	}
+	if source == "explicit" {
+		spec.PermissionLevel = level
+		if mode := nativePermissionMode(rec.Backend, level); mode != "" {
+			spec.Lead.PermissionMode = mode
+		}
+	}
+	if !attach {
+		c.permissionNudge(level, false, "")
+	}
 	proc, err := c.startBackend(spec)
 	if c.spawning {
 		c.spawning = false
@@ -2396,7 +2443,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		c.replaying, c.seq = true, rec.HolderSeq
 		return nil
 	}
-	c.dirtyModel, c.dirtyEffort, c.dirtyMode = false, false, false
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
 	c.seq, c.seqDirty, c.ringDirty = 0, false, false
 	c.update(func(rec *Record) { rec.HolderID, rec.HostPID, rec.HolderSeq = id, pid, 0 })
 	c.writeRegistration()
@@ -2546,6 +2593,7 @@ func (c *conv) replayDone(lost bool) {
 			c.probeWrapHold()
 		}
 	}
+	c.reconcileLeadPermission()
 	c.checkAction(false)
 	c.live.writeSnapshot()
 	c.r.notify(c.rec.ReplyID, c.rec.Root)
@@ -2795,6 +2843,11 @@ func (c *conv) handle(ev Event) {
 	case ev.PermissionMode != "":
 		if ev.PermissionMode != c.activeMode {
 			c.setStatus(func() { c.activeMode = ev.PermissionMode })
+			if c.rec.Lead && !quiet {
+				if level, _, err := c.r.leadPermission(c.rec, c.dir); err == nil {
+					c.permissionNudge(level, false, ev.PermissionMode)
+				}
+			}
 			c.changed(quiet)
 		}
 		// The mode the harness runs in is the session's own: its next
@@ -3321,11 +3374,11 @@ func (c *conv) setSettings(model, effort *string) error {
 // backend session. A restart ends the session's background work with the
 // process, so it is the last resort.
 func (c *conv) applySettings() {
-	model, effort, mode := c.dirtyModel, c.dirtyEffort, c.dirtyMode
+	model, effort, mode, reconcile := c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode
 	if c.replaying {
 		return
 	}
-	c.dirtyModel, c.dirtyEffort, c.dirtyMode = false, false, false
+	c.dirtyModel, c.dirtyEffort, c.dirtyMode, c.reconcileMode = false, false, false, false
 	if c.proc == nil || (!model && !effort && !mode) {
 		return
 	}
@@ -3339,8 +3392,21 @@ func (c *conv) applySettings() {
 		restart = true
 	}
 	if mode && !restart {
-		if controls.setPermissionMode(rec.PermissionMode) != nil {
-			restart = true
+		level, _, err := c.r.leadPermission(rec, c.dir)
+		if err != nil {
+			c.setStatus(func() { c.lastErr = err.Error() })
+			return
+		}
+		// The accepted native target is already in Record. Common selection
+		// writes its mapping there; a permitted native control keeps its literal
+		// mode. Only an actual new launch remaps explicit common intent.
+		if err := controls.setPermissionMode(rec.PermissionMode); err != nil {
+			if reconcile {
+				fmt.Fprintf(c.r.opts.Log, "agent %s: permission reconciliation: %v\n", rec.ReplyID, err)
+				c.permissionNudge(level, false, c.activeMode)
+			} else {
+				restart = true
+			}
 		}
 	}
 	if restart {

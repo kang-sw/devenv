@@ -1,0 +1,262 @@
+// Source: agents-plugin-tool/internal/wsagent/record.go
+// Commit: 90eacda7e4956aded76cfc092d20c41e76d2cc1a
+// Exact declarations; imports and unrelated declarations omitted.
+package permissionlegacy
+
+type Record struct {
+	SchemaVersion int    `json:"schema_version"`
+	ReplyID       string `json:"reply_id"`
+	Profile       string `json:"profile"`
+	// ResolvedDefinition is the Pi worker's last launched profile, not a
+	// re-resolution of its name. It is the capability ceiling for children
+	// and the definition used when reattaching its still-running process.
+	// Older records snapshot on their next launch.
+	ResolvedDefinition *Profile `json:"resolved_definition,omitempty"`
+	Backend            string   `json:"backend"`
+	Root               string   `json:"root"`
+	// SessionID is the backend session the next process resumes; empty
+	// until the first process reported one.
+	SessionID string `json:"backend_session_id,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Effort    string `json:"effort,omitempty"`
+	// WSKey is the conversation's ws session key; it never leaves this file,
+	// the composed instruction file, and the child processes.
+	WSKey string `json:"ws_session_key"`
+	// Listed lists the conversation in the dashboard session index (the
+	// profile's list_in_index when the conversation last started).
+	Listed    bool   `json:"listed,omitempty"`
+	CreatedAt string `json:"created_at"`
+	ClosedAt  string `json:"closed_at,omitempty"`
+
+	// HandedOffAt is when a lead session was handed to a terminal harness
+	// (conv.release): the daemon serves it no more, as it serves no closed
+	// one, until a takeover clears it.
+	HandedOffAt string `json:"handed_off_at,omitempty"`
+
+	// Lead marks a hosted lead session (Profile.Lead when it was opened):
+	// WSKey is a lead key, Root its canonical git root, and the fields
+	// below apply.
+	Lead bool `json:"lead,omitempty"`
+	// PermissionMode is the permission mode the next process launches in.
+	PermissionMode string `json:"permission_mode,omitempty"`
+	// PluginIsolation selects the lead's plugin loadout across restarts.
+	PluginIsolation string `json:"plugin_isolation,omitempty"`
+	// PluginWarning records a bundled-plugin fallback warning, if any.
+	PluginWarning string `json:"plugin_warning,omitempty"`
+	// Cwd is the directory the session's process runs in when that is not
+	// Root: a session taken over from a terminal harness keeps the
+	// directory that harness ran in, since the harness resolves its
+	// sessions by it, and a spawned conversation (Runner.Spawn) the one its
+	// spawner chose. SessionFile is the session file of a taken-over
+	// session's harness when it keeps its conversations in files of its
+	// own (pi), used in place of the conversation's own file. Both are
+	// empty for any other session the daemon started.
+	Cwd         string `json:"cwd,omitempty"`
+	SessionFile string `json:"session_file,omitempty"`
+	// HolderID is the session holder the conversation's process runs under,
+	// empty when it has none; HostPID is that process. No new process
+	// starts while this holder's child still runs.
+	HolderID string `json:"holder_id,omitempty"`
+	HostPID  int    `json:"host_pid,omitempty"`
+	// HolderSeq is the last record sequence of HolderID the runner applied
+	// whole: after a daemon restart the holder replays its ring, and
+	// records up to this one rebuild state without being written again.
+	HolderSeq uint64 `json:"holder_seq,omitempty"`
+	// Answered are the request ids of the tool permission prompts answered
+	// and not yet seen settled. The answer went to the process's input,
+	// which the holder's ring does not hold, so a replay shows such a
+	// prompt as still waiting; this list keeps it answered exactly once.
+	Answered []string `json:"answered,omitempty"`
+	// Mail holds the mailbox messages claimed for the session and not yet
+	// delivered as a turn, each as the text the model reads.
+	Mail []string `json:"mail,omitempty"`
+	// Queued holds what a drain took from the inbox and no turn has sent
+	// yet, in drain order: a slash command runs as a turn of its own, so the
+	// messages and commands drained after it wait here across turn ends,
+	// although the inbox already shows them received.
+	Queued []QueuedInput `json:"queued,omitempty"`
+
+	// Parent is the session that spawned the conversation (Runner.Spawn),
+	// to which each of its settled turns is reported (Options.Report); nil
+	// for one opened from the dashboard or the REST routes. Label is the
+	// one-line name its spawner gave it.
+	Parent *ParentRef `json:"parent,omitempty"`
+	Label  string     `json:"label,omitempty"`
+	// TurnOpen is set on a conversation with a Parent while one of its
+	// turns runs: a successor rejoins a held process, or reports interruption
+	// when that process is gone.
+	TurnOpen bool `json:"turn_open,omitempty"`
+	// Tier is the capability tier its spawner chose (small, medium, large,
+	// or xlarge); a conversation it spawns may ask for no higher one.
+	// Empty for a conversation spawned without one, which spawns none.
+	Tier string `json:"tier,omitempty"`
+	// PendingReports are the reported turns of a conversation whose parent
+	// is a conversation (ParentConversation) that the runner has not handed
+	// to that parent yet, oldest first: a report's absence is its
+	// "delivered" mark. A report whose parent is closed stays here.
+	PendingReports []PendingReport `json:"pending_reports,omitempty"`
+	// Reports are child reports and steered user messages no turn took,
+	// oldest first: they go with its next turn, as a lead's claimed Mail
+	// does. A refused or untaken steer is cleared from Pi before requeue.
+	Reports []string `json:"reports,omitempty"`
+	// LastTurn is the last reported turn of a conversation with a Parent,
+	// with the id of the pending report it made (empty when its parent's
+	// wait took it instead): the next daemon answers a wait with it at
+	// once, since the settles a wait reads are not persisted. Nil before
+	// the first report and while a done turn is held for the children.
+	LastTurn *PendingReport `json:"last_turn,omitempty"`
+	// Worker recovery fields are additive; old writers fall back to interruption.
+	ReportID         string `json:"report_id,omitempty"`
+	LastReportedTurn string `json:"last_reported_turn,omitempty"`
+	Capability       string `json:"capability_secret,omitempty"`
+	Sends            uint64 `json:"sends,omitempty"`
+	Drained          uint64 `json:"drained,omitempty"`
+	TurnMark         uint64 `json:"turn_mark,omitempty"`
+	TurnStartedAt    int64  `json:"turn_started_at,omitempty"`
+	// ActiveMs is the accumulated duration of closed child turns.
+	ActiveMs     int64           `json:"active_ms,omitempty"`
+	TurnStartSeq uint64          `json:"turn_start_seq,omitempty"`
+	Voided       uint64          `json:"voided,omitempty"`
+	HeldTurn     *TurnResult     `json:"held_turn,omitempty"`
+	Steered      []steeredReport `json:"steered_reports,omitempty"`
+	// SteerMarks holds Send coverage by steer sequence. Keep this optional
+	// metadata top-level so an older Record writer preserves it as unknown.
+	SteerMarks     map[int]uint64 `json:"steer_marks,omitempty"`
+	SteerSeq       int            `json:"steer_seq,omitempty"`
+	SteerAnswers   int            `json:"steer_answers,omitempty"`
+	SteerAnswerSeq uint64         `json:"steer_answer_seq,omitempty"`
+
+	// unknown holds newer writers' top-level members across read-modify-write.
+	// It is immutable after decoding, so value copies of Record can share it.
+	unknown map[string]json.RawMessage
+}
+
+func (rec *Record) UnmarshalJSON(data []byte) error {
+	type plain Record
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	fields := reflect.TypeOf(decoded)
+	for i := 0; i < fields.NumField(); i++ {
+		field := fields.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = field.Name
+		}
+		// encoding/json accepts case-insensitive spellings of known names.
+		for key := range members {
+			if strings.EqualFold(key, name) {
+				delete(members, key)
+			}
+		}
+	}
+	*rec = Record(decoded)
+	rec.unknown = members
+	return nil
+}
+
+func (rec Record) MarshalJSON() ([]byte, error) {
+	type plain Record
+	raw, err := json.Marshal(plain(rec))
+	if err != nil || len(rec.unknown) == 0 {
+		return raw, err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return nil, err
+	}
+	for key, value := range rec.unknown {
+		if _, known := members[key]; !known {
+			members[key] = value
+		}
+	}
+	return json.Marshal(members)
+}
+
+type PendingReport struct {
+	ID     string     `json:"id"`
+	Result TurnResult `json:"result"`
+	Mark   uint64     `json:"mark,omitempty"`
+}
+
+type ParentRef struct {
+	Kind    string `json:"kind"`
+	ReplyID string `json:"reply_id"`
+}
+
+type QueuedInput struct {
+	Text    string           `json:"text,omitempty"`
+	Command *wsinbox.Command `json:"command,omitempty"`
+	// After is the send coverage before this input's drain.
+	After uint64 `json:"after,omitempty"`
+}
+
+func recordPath(sessionDir string) string { return filepath.Join(sessionDir, recordFileName) }
+
+func readRecord(sessionDir string) (Record, error) {
+	raw, err := os.ReadFile(recordPath(sessionDir))
+	if err != nil {
+		return Record{}, err
+	}
+	var rec Record
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return Record{}, fmt.Errorf("parse %s: %w", recordPath(sessionDir), err)
+	}
+	if rec.ReplyID != filepath.Base(sessionDir) || rec.WSKey == "" || rec.Root == "" {
+		return Record{}, fmt.Errorf("%s is not a complete agent record", recordPath(sessionDir))
+	}
+	return rec, nil
+}
+
+func writeRecord(sessionDir string, rec Record) error {
+	if rec.SchemaVersion == 0 {
+		rec.SchemaVersion = recordSchemaVersion
+	}
+	raw, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(recordPath(sessionDir), append(raw, '\n'), 0o600)
+}
+
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	fail := func(err error) error {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		return fail(err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return fail(err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := replaceFile(name, path); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	return nil
+}
