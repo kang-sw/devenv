@@ -44,12 +44,13 @@ func newEntryCache() *entryCache { return &entryCache{sessions: map[string]*sess
 // label, and a user line's on which of its attachment files still exist
 // (attachmentView), so a body leaving that ring, a peer leaving the index or
 // renamed, or an attachment removed renders anew instead of freezing the old
-// line into every later render. The
-// language is an input too: viewers in two languages must not be handed each
-// other's entries.
+// line into every later render. Mail-wake association/suppression also varies
+// with the presented window. Language is an input too: viewers in two
+// languages must not be handed each other's entries.
 func entryCacheKey(e ConvEntry) string {
 	var b strings.Builder
 	b.WriteString(e.Lang + "\x00" + e.Key + "\x00" + strconv.FormatBool(e.HasBody) + "\x00" + strconv.FormatBool(e.PeerLinked) + "\x00" + e.PeerReplyID + "\x00" + e.PeerLabel)
+	b.WriteString("\x00" + strconv.FormatBool(e.MailWakeSuppressed) + "\x00" + strconv.FormatBool(e.MatchedMailWake()))
 	for _, img := range e.Images {
 		b.WriteString("\x00" + img.Src)
 	}

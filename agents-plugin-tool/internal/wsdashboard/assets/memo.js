@@ -6,6 +6,28 @@
     var title = doc.getElementById("memo-workspace"), status = doc.getElementById("memo-status");
     var undo = doc.getElementById("memo-undo"), workspace = "", session = "", items = [];
     var shown = false, writable = false, busy = false, loaded = false, generation = 0, deleted = null, timer = 0, wide = false;
+    var pickers = [], topicGeneration = 0;
+    function closePickers() {
+      ++topicGeneration;
+      pickers.forEach(function (picker) { if (picker) picker.close(); });
+    }
+    function topics(done) {
+      var rid = session, gen = topicGeneration, sourceWindow = null;
+      if (!rid) { done([]); return; }
+      try {
+        var frame = doc.querySelector(".sframe.on");
+        sourceWindow = frame ? frame.contentWindow : window;
+        if (sourceWindow.document.documentElement.getAttribute("data-rid") !== rid || !sourceWindow.wsCapsuleTopics) { done([]); return; }
+        sourceWindow.wsCapsuleTopics(function (rows) {
+          if (gen === topicGeneration && session === rid) done(rows);
+        });
+      } catch (_) { done([]); }
+    }
+    function attach(area) {
+      if (!window.WsCapsules) return;
+      window.WsCapsules.attach(area);
+      pickers.push(window.WsCapsules.topicPicker(area, topics));
+    }
     function say(text) { status.textContent = text; }
     // The server refuses trimmed text over 8000 UTF-8 bytes (a lone surrogate
     // is stored as U+FFFD, 3 bytes); maxLength counts UTF-16 units and cannot.
@@ -49,7 +71,9 @@
       box.appendChild(doc.createTextNode(text.slice(from)));
     }
     function render() {
+      closePickers(); pickers = pickers.slice(0, 1);
       list.textContent = "";
+      if (window.WsCapsules && window.WsCapsules.sweep) window.WsCapsules.sweep();
       input.hidden = !writable; input.disabled = busy;
       items.forEach(function (m) {
         var row = doc.createElement("article"), text = doc.createElement("div");
@@ -61,9 +85,9 @@
             if (busy || row.querySelector("textarea")) return;
             var area = doc.createElement("textarea"); area.value = m.text; area.maxLength = 8000;
             area.addEventListener("input", function () { fits(area.value); });
-            area.setAttribute("aria-label", "Edit memo"); text.hidden = true; row.appendChild(area); area.focus();
+            area.setAttribute("aria-label", "Edit memo"); text.hidden = true; row.appendChild(area); attach(area); area.focus();
             area.addEventListener("keydown", function (e) {
-              if (e.isComposing) return;
+              if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
               if (e.key === "Escape") {
                 // The cancelled edit's over-limit refusal no longer applies; recheck the add draft instead.
                 e.preventDefault(); e.stopPropagation(); fits(input.value); render();
@@ -129,13 +153,14 @@
       if (!ws) return;
       var next = ws.getAttribute("data-ws");
       if (workspace === next) return;
+      closePickers();
       workspace = next; title.textContent = (ws.querySelector(".nm") || {}).textContent || next;
       title.title = next; input.value = ""; deleted = null; undo.hidden = true; clearTimeout(timer);
       if (shown) reload();
     }
     function sync(rid) {
       if (session !== rid || !workspace) {
-        session = rid;
+        closePickers(); session = rid;
         var rows = rail.querySelectorAll(".rs"), ws = null;
         Array.prototype.forEach.call(rows, function (row) { if (row.getAttribute("data-rid") === rid) ws = row.closest(".rws"); });
         select(ws || rail.querySelector(".rws"));
@@ -151,11 +176,13 @@
       shown = on; wide = isWide; panel.setAttribute("aria-hidden", String(!on));
       if ("inert" in panel) panel.inert = !on;
       position();
-      if (on) reload(); else { ++generation; input.blur(); }
+      if (on) reload(); else { ++generation; closePickers(); input.blur(); }
     }
+    attach(input);
     input.addEventListener("input", function () { fits(input.value); });
     input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault(); if (input.value.trim()) change("add", "", input.value);
       }
     });
