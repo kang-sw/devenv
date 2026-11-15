@@ -145,7 +145,7 @@ func TestWorktreeCleanupHoldsOneMessageWithThePool(t *testing.T) {
 	if len(held) != 1 {
 		t.Fatalf("held after cleanup = %+v, want one message", held)
 	}
-	text := held[0].Entry.Text()
+	text := inboxBody(t, held[0].Entry)
 	for _, want := range []string{
 		"The user asks to clean up unused worktrees.\n\npool: ",
 		"worktree: " + leased.Path + "\n  profile: full\n  branch: impl/x\n  state: leased; holder id:workerrid; parent id:livesession; acquired_at 2026-11-08T12:00:00Z\n",
@@ -210,7 +210,7 @@ func TestWorktreeCleanupFollowsThePageLanguage(t *testing.T) {
 		t.Fatalf("cleanup = %d: %s", resp.StatusCode, body)
 	}
 	held := f.held(t)
-	if len(held) != 1 || !strings.HasPrefix(held[0].Entry.Text(), wsi18n.T("ko", "worktree.cleanup.ask")+"\n\n") {
+	if len(held) != 1 || !strings.HasPrefix(inboxBody(t, held[0].Entry), wsi18n.T("ko", "worktree.cleanup.ask")+"\n\n") {
 		t.Fatalf("held = %+v, want the Korean request line first", held)
 	}
 }

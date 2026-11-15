@@ -125,8 +125,8 @@ func TestDrainKeepsACommandInOrder(t *testing.T) {
 	if err != nil || len(recs) != 3 {
 		t.Fatalf("Drain = %d records, %v", len(recs), err)
 	}
-	if recs[0].Entry.Text() != "A" || recs[1].Entry.Command == nil || recs[1].Entry.Text() != "/compact" || recs[2].Entry.Text() != "B" {
-		t.Fatalf("drained order = %q %q %q", recs[0].Entry.Text(), recs[1].Entry.Text(), recs[2].Entry.Text())
+	if recs[0].Entry.testBody(t) != "A" || recs[1].Entry.Command == nil || recs[1].Entry.testBody(t) != "/compact" || recs[2].Entry.testBody(t) != "B" {
+		t.Fatalf("drained order = %q %q %q", recs[0].Entry.testBody(t), recs[1].Entry.testBody(t), recs[2].Entry.testBody(t))
 	}
 }
 
@@ -147,7 +147,7 @@ func TestSteeredTextDrainsAheadOfACommand(t *testing.T) {
 		t.Fatalf("steered name %s keeps the stamp of %s; want a fresh one", steered, a)
 	}
 	recs, err := Drain(dir)
-	if err != nil || len(recs) != 3 || recs[0].Name != steered || recs[1].Entry.Command == nil || recs[2].Entry.Text() != "B" {
+	if err != nil || len(recs) != 3 || recs[0].Name != steered || recs[1].Entry.Command == nil || recs[2].Entry.testBody(t) != "B" {
 		t.Fatalf("Drain = %+v, %v; want the steered text, the command, then B", recs, err)
 	}
 }

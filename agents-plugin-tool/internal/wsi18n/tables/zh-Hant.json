@@ -484,6 +484,7 @@
   "js.rel.d": "{0}天",
   "js.rel.h": "{0}小時",
   "js.rel.m": "{0}分",
+  "js.user.minutes": "{0}分鐘前",
   "js.rel.now": "剛剛",
   "js.rel.s": "{0}秒",
   "js.send.empty": "沒有可傳送的內容：請輸入訊息、回答白板或附加圖片。",

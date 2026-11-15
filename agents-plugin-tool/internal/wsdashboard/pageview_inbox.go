@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wsi18n"
 	"github.com/kang-sw/devenv/internal/wsinbox"
@@ -98,23 +99,55 @@ func regularFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-// splitUserEntries takes each user entry's answer block
-// (wsinbox.ParseAnswerBlock), the mentions after it (wsinbox.ParseMentions),
-// the picks and console blocks after those (wsinbox.ParseWebElements), and
-// attached images (userImages) out of its text; a malformed block or element
-// stays in the text.
+// splitUserEntries unwraps each inbox item before the leading-anchored
+// capsule parsers run. A batch retains one stream key; its bubbles keep
+// independent timestamps and attachment numbers. Malformed envelopes stay
+// wholly plain, as does report/mail text outside a valid batch's envelopes.
 func splitUserEntries(entries []ConvEntry, attachDir, replyID string) {
 	for i, e := range entries {
-		if e.Kind == wslive.RingUser {
-			text := e.Text
-			if lines, rest, ok := wsinbox.ParseAnswerBlock(text); ok {
-				entries[i].Answers, text = lines, rest
+		if e.Kind != wslive.RingUser {
+			continue
+		}
+		blocks, ok := wsinbox.ParseUserMessages(e.Text)
+		if !ok {
+			continue
+		}
+		hasEnvelope := false
+		for _, b := range blocks {
+			hasEnvelope = hasEnvelope || b.At != ""
+		}
+		if !hasEnvelope {
+			parseUserContent(&entries[i], attachDir, replyID)
+			continue
+		}
+		var views []ConvEntry
+		for _, b := range blocks {
+			v := e
+			v.Key, v.Text, v.EnvelopeAt = "", b.Text, b.At
+			if b.At != "" {
+				at, _ := time.Parse("2006-01-02T15:04-07:00", b.At)
+				v.At = at.UnixMilli()
+				parseUserContent(&v, attachDir, replyID)
 			}
-			entries[i].Mentions, text = wsinbox.ParseMentions(text)
-			entries[i].Picks, entries[i].Consoles, text = wsinbox.ParseWebElements(text)
-			entries[i].Text, entries[i].Images = userImages(text, attachDir, replyID)
+			views = append(views, v)
+		}
+		if len(views) == 1 {
+			views[0].Key = e.Key
+			entries[i] = views[0]
+		} else {
+			entries[i].UserBlocks = views
 		}
 	}
+}
+
+func parseUserContent(e *ConvEntry, attachDir, replyID string) {
+	text := e.Text
+	if lines, rest, ok := wsinbox.ParseAnswerBlock(text); ok {
+		e.Answers, text = lines, rest
+	}
+	e.Mentions, text = wsinbox.ParseMentions(text)
+	e.Picks, e.Consoles, text = wsinbox.ParseWebElements(text)
+	e.Text, e.Images = userImages(text, attachDir, replyID)
 }
 
 // userImages takes the image lines (wsinbox.ParseImageLine: the numbered

@@ -484,6 +484,7 @@
   "js.rel.d": "{0}d",
   "js.rel.h": "{0}h",
   "js.rel.m": "{0}m",
+  "js.user.minutes": "{0} min ago",
   "js.rel.now": "now",
   "js.rel.s": "{0}s",
   "js.send.empty": "Nothing to send: write a message, answer the board, or attach an image.",
