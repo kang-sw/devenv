@@ -9,7 +9,7 @@ const { spawn, execFileSync } = require('node:child_process');
 const { once } = require('node:events');
 const { _electron } = require(process.env.WS_PLAYWRIGHT);
 const root = path.resolve(__dirname, '..');
-const { builtPaths, processes } = require('./host.cjs');
+const { builtPaths, processes, launchedRoot, descendants, signalIfCurrent } = require('./host.cjs');
 const { executablePath, daemonPath } = builtPaths(root);
 const evidence = process.env.WS_ELECTRON_EVIDENCE || path.join(root, 'dist/evidence');
 fs.mkdirSync(evidence, { recursive: true });
@@ -18,21 +18,21 @@ const daemonRoot = path.join(temp, 'daemon'), shellRoot = path.join(temp, 'shell
 fs.mkdirSync(path.join(shellRoot, 'dashboard'), { recursive: true });
 const endpoint = path.join(shellRoot, 'dashboard/endpoint.json');
 const owned = new Map(), checks = [];
-let application, daemon;
+let application, daemon, applicationIdentity, daemonIdentity;
 const targetRequests = [];
 const target = http.createServer((request, response) => {
   targetRequests.push(request.url);
   response.end('<p id="remote-marker">REMOTE CONTENT MUST NOT COMMIT</p>');
 });
-function remember(pid) {
+function remember(identity, all = processes()) {
+  for (const p of descendants(identity, all)) owned.set(p.pid, p);
+}
+function recordLaunch(child, launchedAt) {
   const all = processes();
-  const family = new Set([pid]);
-  let changed;
-  do {
-    changed = false;
-    for (const p of all) if (family.has(p.ppid) && !family.has(p.pid)) { family.add(p.pid); changed = true; }
-  } while (changed);
-  for (const p of all) if (family.has(p.pid)) owned.set(p.pid, p);
+  const identity = launchedRoot(child, all, launchedAt);
+  fs.appendFileSync(path.join(evidence, 'process-scans.jsonl'), JSON.stringify({ label: 'launch identity', pid: child.pid, identity }) + '\n');
+  remember(identity, all);
+  return identity;
 }
 function scan(label) {
   const live = processes().filter(p => owned.get(p.pid)?.start === p.start);
@@ -60,9 +60,10 @@ async function titleIncludes(value) {
 }
 async function main(fn, arg) { return application.evaluate(fn, arg); }
 async function launch() {
+  const launchedAt = Date.now();
   application = await _electron.launch({ executablePath, args: [`--user-data-dir=${path.join(temp, 'profile')}`],
     env: { ...process.env, WS_CACHE_HOME: shellRoot, WS_CONFIG_HOME: path.join(temp, 'config'), ELECTRON_RUN_AS_NODE: '' }, timeout: 8000 });
-  remember(application.process().pid);
+  applicationIdentity = recordLaunch(application.process(), launchedAt);
   const page = await application.firstWindow();
   // The main process owns Electron's beforeunload decision. With no listener,
   // Playwright auto-accepts it via CDP after the native handler has already
@@ -75,11 +76,12 @@ async function run() {
   assert.notEqual(target.address().port, 29417);
   const targetOrigin = `http://127.0.0.1:${target.address().port}`;
   const log = fs.openSync(path.join(evidence, 'daemon.log'), 'w');
+  const daemonLaunchedAt = Date.now();
   daemon = spawn(daemonPath, [], {
     env: { ...process.env, WS_CACHE_HOME: daemonRoot, WS_CONFIG_HOME: path.join(temp, 'config'), GOPROXY: 'off', GOSUMDB: 'off', GOTOOLCHAIN: 'local' },
     stdio: ['ignore', log, log],
   });
-  remember(daemon.pid);
+  daemonIdentity = recordLaunch(daemon, daemonLaunchedAt);
   await waitFor(() => fs.existsSync(path.join(daemonRoot, 'dashboard/endpoint.json')), 'source daemon endpoint');
   const ep = JSON.parse(fs.readFileSync(path.join(daemonRoot, 'dashboard/endpoint.json')));
   assert.notEqual(ep.port, 29417);
@@ -266,15 +268,16 @@ async function run() {
   // Second launch shares only this test's profile, focuses the first, and exits.
   await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
   const secondLog = fs.openSync(path.join(evidence, 'second-launch.log'), 'w');
+  const secondLaunchedAt = Date.now();
   const second = spawn(executablePath, [`--user-data-dir=${path.join(temp, 'profile')}`], { env: { ...process.env, WS_CACHE_HOME: shellRoot, ELECTRON_RUN_AS_NODE: '' }, stdio: ['ignore', secondLog, secondLog] });
-  remember(second.pid);
+  recordLaunch(second, secondLaunchedAt);
   await waitFor(() => Promise.resolve(second.exitCode !== null || second.signalCode !== null), 'second launch exit');
   assert.equal(second.exitCode, 0);
   await waitFor(() => main(({ BrowserWindow }) => !BrowserWindow.getAllWindows()[0].isMinimized() && global.smokeFocus > 0), 'second-instance focus');
   assert.equal(await main(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   scan('second launch exited');
   checks.push('built second launch exits and restores/focuses the existing sole window');
-  remember(application.process().pid);
+  remember(applicationIdentity);
   const firstProcess = application.process();
   await main(({ BrowserWindow }) => { global.smokeChoice = 1; BrowserWindow.getAllWindows()[0].close(); }).catch(() => {});
   await waitFor(() => Promise.resolve(firstProcess.exitCode !== null || firstProcess.signalCode !== null), 'Leave closes the app');
@@ -287,7 +290,7 @@ async function run() {
   page = await launch();
   await page.waitForURL(origin + '/');
   assert(Math.abs(await factor() - 1) < 0.001);
-  remember(application.process().pid);
+  remember(applicationIdentity);
   const freshProcess = application.process();
   await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close()).catch(() => {});
   await waitFor(() => Promise.resolve(freshProcess.exitCode !== null || freshProcess.signalCode !== null), 'clean app close');
@@ -301,20 +304,18 @@ async function run() {
   catch (error) { failure = error; console.error(error.stack); }
   finally {
     if (application) {
-      remember(application.process().pid);
+      remember(applicationIdentity);
       await application.evaluate(({ app }) => app.exit()).catch(() => {});
       await application.close().catch(() => {});
     }
-    if (daemon && daemon.exitCode === null) {
-      const exited = once(daemon, 'exit'); daemon.kill('SIGTERM'); await exited;
+    if (daemon && daemon.exitCode === null && signalIfCurrent(daemonIdentity)) {
+      await once(daemon, 'exit');
     }
     target.closeAllConnections();
     if (target.listening) await new Promise(resolve => target.close(resolve));
-    // Signal only processes this invocation recorded, and only if their start
-    // identity still matches. Never retain a stale numerical PID as authority.
-    for (const p of scan('before cleanup')) {
-      try { process.kill(p.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-    }
+    // Every candidate was reached from a recorded launch identity in creation
+    // order. Re-query each PID immediately before its signal, not once per batch.
+    for (const p of scan('before cleanup')) signalIfCurrent(p);
     await waitFor(() => Promise.resolve(scan('final').length === 0), 'owned process exit');
     fs.writeFileSync(path.join(evidence, 'summary.json'), JSON.stringify({ platform: process.platform, checks, failure: failure?.message || null, owned: [...owned.values()], temp }, null, 2));
     fs.rmSync(temp, { recursive: true, force: true });

@@ -198,6 +198,86 @@ test('genuine Retry and popup load failures still clear the pin and show the con
     assert.deepEqual(decision, { cancel: true });
   }
 });
+test('ERR_ABORTED without this navigation choosing Stay takes the failure path', async () => {
+  for (const trigger of ['retry', 'popup']) {
+    for (const choice of ['no dialog', 'Leave']) {
+      for (const abort of [{ code: 'ERR_ABORTED' }, { errno: -3 }]) {
+        const f = await fixture(), w = f.window, originalURL = w.currentURL;
+        f.choose(1);
+        w.webContents.loadURL = async () => {
+          if (choice === 'Leave') {
+            let override = false;
+            w.webContents.emit('will-prevent-unload', { preventDefault() { override = true; } });
+            assert.equal(override, true);
+          }
+          throw Object.assign(new Error('ERR_ABORTED'), abort);
+        };
+        if (trigger === 'retry') await f.menus.retry.click();
+        else { w.popup({ url: originalURL + 's/redirect-cancelled' }); await tick(); }
+        assert.equal(w.title, 'Werkschaft — Navigation failed — ⌘R to retry');
+        assert.equal(path.basename(w.currentURL), 'connection.html');
+        let decision;
+        f.session.webRequest.handler({ url: originalURL + 's/frame', resourceType: 'subFrame' }, value => { decision = value; });
+        assert.deepEqual(decision, { cancel: true });
+      }
+    }
+  }
+});
+test('a superseded popup cannot roll back Retry after discovery pins a new origin', async () => {
+  for (const stayed of [false, true]) {
+    for (const lateError of ['ERR_ABORTED', 'ERR_CONNECTION_REFUSED']) {
+      let discovered = 'http://127.0.0.1:39418/';
+      const f = await fixture(async () => discovered), w = f.window;
+      const originalURL = w.currentURL, pending = [];
+      w.webContents.loadURL = url => {
+        w.loads.push(url);
+        return new Promise((resolve, reject) => {
+          pending.push({ resolve: () => { w.currentURL = url; resolve(); }, reject });
+        });
+      };
+      w.popup({ url: originalURL + 's/slow-popup' });
+      if (stayed) w.webContents.emit('will-prevent-unload', { preventDefault() { assert.fail('Stay must keep the veto'); } });
+      discovered = 'http://127.0.0.1:39419/';
+      const retry = f.menus.retry.click();
+      await tick();
+      assert.equal(pending.length, 2);
+      assert.equal(w.loads.at(-1), discovered);
+      pending[0].reject(Object.assign(new Error(lateError), { code: lateError, errno: lateError === 'ERR_ABORTED' ? -3 : -102 }));
+      await tick();
+      assert.equal(w.title, 'Werkschaft');
+      assert(!w.loads.some(load => path.basename(load) === 'connection.html'));
+      let decision;
+      f.session.webRequest.handler({ url: discovered + 's/frame', resourceType: 'subFrame' }, value => { decision = value; });
+      assert.deepEqual(decision, {}, 'the superseded load must not restore origin A over B');
+      let prevented = false;
+      w.webContents.emit('will-frame-navigate', { url: discovered + 's/frame', isMainFrame: false, preventDefault() { prevented = true; } });
+      assert.equal(prevented, false);
+      assert.deepEqual(f.opened, []);
+      pending[1].resolve();
+      await retry;
+      assertRetainedPage(f, discovered, 'Werkschaft');
+    }
+  }
+});
+test('an unrelated close Stay does not turn a later navigation abort into Stay', async () => {
+  const f = await fixture(), w = f.window;
+  w.webContents.emit('will-prevent-unload', { preventDefault() { assert.fail('Stay must keep the close veto'); } });
+  w.webContents.loadURL = async () => { throw Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED' }); };
+  await f.menus.retry.click();
+  assert.equal(path.basename(w.currentURL), 'connection.html');
+});
+test('X-close Stay during a pending load is not that navigation choosing Stay', async () => {
+  const f = await fixture(), w = f.window;
+  let reject;
+  w.webContents.loadURL = () => new Promise((_resolve, fail) => { reject = fail; });
+  const retry = f.menus.retry.click();
+  await tick();
+  w.emit('close');
+  w.webContents.emit('will-prevent-unload', { preventDefault() { assert.fail('Stay must keep the close veto'); } });
+  reject(Object.assign(new Error('ERR_ABORTED'), { code: 'ERR_ABORTED' }));
+  await retry;
+  assert.equal(path.basename(w.currentURL), 'connection.html');
+});
 test('losing single-instance lock quits before creating a window', () => {
   const { start } = require('../main');
   let quit = false;

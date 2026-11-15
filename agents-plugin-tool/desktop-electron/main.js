@@ -28,6 +28,14 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false },
     });
     const wc = window.webContents;
+    let navigation, closing = false;
+    window.on('close', () => { closing = true; });
+    function beginNavigation() {
+      const attempt = { previous: { pin, title }, loading: false, stayed: false };
+      navigation = attempt;
+      return attempt;
+    }
+    const isCurrent = attempt => navigation === attempt && !window.isDestroyed();
     wc.setUserAgent(`${wc.getUserAgent()} Werkschaft/${app.getVersion()}`);
     wc.on('page-title-updated', event => { event.preventDefault(); window.setTitle(title); });
     wc.on('will-attach-webview', event => event.preventDefault());
@@ -65,13 +73,18 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
       return { action: 'deny' };
     });
     wc.on('will-prevent-unload', event => {
+      // Capture the load before the synchronous native dialog: a newer attempt
+      // must never inherit an older load's Stay (or an unrelated X-close veto).
+      const attempt = !closing && navigation?.loading ? navigation : null;
       const leave = dialog.showMessageBoxSync(window, {
         type: 'question', buttons: ['Stay', 'Leave'], defaultId: 0, cancelId: 0,
         title: 'Leave Werkschaft?', message: 'Leave this page?',
         detail: 'Changes you made may not be saved.', noLink: true,
       });
+      closing = false;
       // Electron's preventDefault here means ignore the page's veto, not stay.
       if (leave === 1) event.preventDefault();
+      else if (attempt && isCurrent(attempt)) attempt.stayed = true;
     });
     function setTitle(value) { title = value; if (!window.isDestroyed()) window.setTitle(title); }
     function navigationFailed() {
@@ -79,38 +92,47 @@ function start({ app, BrowserWindow, Menu, shell, dialog, session }) {
       setTitle('Werkschaft — Navigation failed — ⌘R to retry');
       return wc.loadFile(path.join(__dirname, 'connection.html')).catch(() => {});
     }
-    async function navigate(url, previous = { pin, title }) {
+    async function navigate(url, attempt = beginNavigation()) {
+      if (!isCurrent(attempt)) return;
+      attempt.loading = true;
       try { await wc.loadURL(url); }
       catch (error) {
-        if (window.isDestroyed()) return;
-        // Stay rejects loadURL with ERR_ABORTED, not a failed attachment. Undo
-        // Retry's provisional pin/title without replacing the retained draft page.
-        if (error.code === 'ERR_ABORTED' || error.errno === -3) {
-          pin = previous.pin;
-          setTitle(previous.title);
+        if (!isCurrent(attempt)) return;
+        // ERR_ABORTED alone also means supersession or policy cancellation. Only
+        // this still-current load's observed Stay may restore its previous pin.
+        if (attempt.stayed && (error.code === 'ERR_ABORTED' || error.errno === -3)) {
+          pin = attempt.previous.pin;
+          setTitle(attempt.previous.title);
         } else await navigationFailed();
+      } finally {
+        attempt.loading = false;
+        if (navigation === attempt) navigation = null;
       }
     }
     async function connect() {
       if (connecting || window.isDestroyed()) return;
-      const previous = { pin, title };
+      const attempt = beginNavigation();
       connecting = true;
       setTitle('Werkschaft — Connecting…');
       try {
         let url;
         try { url = await discover(); }
         catch (error) {
+          if (!isCurrent(attempt)) return;
           pin = null;
           setTitle(`Werkschaft — ${error.message} — ⌘R to retry`);
           await wc.loadFile(path.join(__dirname, 'connection.html'));
           return;
         }
-        if (window.isDestroyed()) return;
+        if (!isCurrent(attempt)) return;
         pin = url;
         setTitle('Werkschaft');
-        await navigate(url, previous);
-      } catch { if (!window.isDestroyed()) await navigationFailed(); }
-      finally { connecting = false; }
+        await navigate(url, attempt);
+      } catch { if (isCurrent(attempt)) await navigationFailed(); }
+      finally {
+        connecting = false;
+        if (navigation === attempt) navigation = null;
+      }
     }
     function zoomBy(step) {
       zoom = nextZoom(zoom, step);
