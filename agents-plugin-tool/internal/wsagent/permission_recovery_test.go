@@ -47,6 +47,14 @@ func TestPermissionAttachAdmissionAdvisories(t *testing.T) {
 			if !strings.Contains(h.log.String(), wantDiagnostic) {
 				t.Fatalf("advisory missing: %s", h.log.String())
 			}
+			if failure == "corrupt-selection" {
+				var diagnostic string
+				c := h.runner.conv(st.ID)
+				c.do(func() { diagnostic = c.lastErr })
+				if !strings.Contains(diagnostic, wantDiagnostic) {
+					t.Fatalf("reconciliation did not retain the corruption diagnostic: %q", diagnostic)
+				}
+			}
 			// No selection can be safely reconstructed from corrupt bytes. Rejoin
 			// observes the existing mode, but must not deliver or repair a target.
 			h.holders.out(holder, resultLine(), stateLine(HarnessIdle))
@@ -81,10 +89,15 @@ func TestPermissionStatePreservesExistingError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "permission.json"), []byte(`{"permission_level":"broken"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, existing := range []string{"", "backend process exited unexpectedly"} {
-		got := r.permissionState(State{Error: existing}, Record{Lead: true, Backend: BackendClaude}, dir)
+	rec := Record{Lead: true, Backend: BackendClaude}
+	diagnostic := r.permissionState(State{}, rec, dir).Error
+	for _, existing := range []string{"", "backend process exited unexpectedly", diagnostic} {
+		got := r.permissionState(State{Error: existing}, rec, dir)
 		if !strings.Contains(got.Error, "invalid permission_level") || (existing != "" && !strings.Contains(got.Error, existing)) {
 			t.Fatalf("lost diagnostic with existing %q: %+v", existing, got)
+		}
+		if existing == diagnostic && got.Error != diagnostic {
+			t.Fatalf("duplicate diagnostic: %q", got.Error)
 		}
 	}
 	worker := State{Error: "worker failure"}
