@@ -843,6 +843,9 @@
     "261115-feat-ws-whiteboard-overview-stay-on-topic-click": {
       "registered_at": "2026-11-15T02:12:43Z"
     },
+    "261115-feat-ws-whiteboard-topic-close-request": {
+      "registered_at": "2026-11-15T02:43:44Z"
+    },
     "261115-feat-ws-whiteboard-topic-state-badge": {
       "registered_at": "2026-11-15T02:04:07Z",
       "lease": {
