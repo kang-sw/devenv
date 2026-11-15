@@ -620,6 +620,104 @@ Evidence: `failure-process-scan.json`, `task-status-after-cleanup.json`,
 committed after the fix commit; ignored evidence and binaries are not staged.
 The ticket remains in `ready/`; Phases 2-4 are untouched.
 
+##### Windows acceptance run (8e2870f85) - 2026-11-15
+
+The owner-authorized single diagnostic run **passed Windows unit tests and
+offline packaging, then failed immediately at the first built-app launch**.
+No source repair, second package build or launch retry followed. Windows
+smoke/visual acceptance remains incomplete; the ticket stays in `ready/` and
+Phases 2-4 are untouched.
+
+Commit `8e2870f85` changes only `test/smoke.cjs`: `_electron.launch` now has a
+**60000 ms** timeout; its app environment enables `ELECTRON_ENABLE_LOGGING=1`
+and `ELECTRON_ENABLE_STACK_DUMPING=1`; Playwright `DEBUG=pw:browser*` is enabled
+before loading Playwright and saved to `playwright-debug.log`; successful
+launches attach app stdout/stderr to `electron-app.log`. A caught launch
+rejection copies early debug output into the app log. `main.js`, product
+policy, dependency pins and all other source files are unchanged. Mac
+headless `npm test` passed **33/33**; `node --check`, `git diff --check` and
+mocked successful/rejected launch-log checks passed. No Electron, smoke, built
+app or GUI was launched on the Mac; no new Mac package build was needed.
+
+Owner rule (893)=a governed the host run. The exact branch head
+`8e2870f856218687a8e93efb2efb05c4755d5396` was bundled and cloned only into
+`C:\Users\ki608\ws-electron-verify-20261115T034921\src`.
+The pre-existing owner clone and other pre-existing host files were not
+accessed or modified. All run-created caches, temp/profile/config paths,
+Playwright copies, binaries and logs stayed under that unique folder.
+
+- Exactly one `npm ci --no-audit --no-fund` and one `node
+  node_modules/electron/install.js` succeeded. The official Electron
+  **44.11.3 win32-x64** zip SHA256 is
+  `97fca9b8e9b90cdc88c1efd44160ca4b89b15101721d93c8befcbeb35b93fb59`.
+  Subsequent npm steps were offline; there were no global installs or other
+  downloads. Playwright and playwright-core were copied from the specified
+  Mac cache. The fixture was cross-compiled offline on the Mac with
+  `GOOS=windows GOARCH=amd64 GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`.
+- The preparation script's `findstr /x` HEAD guard rejected the correct Git
+  output before any download/test/build/smoke invocation. A direct exact
+  PowerShell comparison verified the requested head, then the still-unused
+  steps continued. The clone, downloads, package build and smoke were each
+  performed once; no host source was edited. Evidence: `prepare-status.json`,
+  `head.txt`, `network-steps.txt`, `source-status.json`.
+- The isolated daemon fixture ran as PID **11456**, on free port **53744**,
+  with its endpoint and health verified before the launch attempt. No shared
+  daemon or port 29417 was used. The smoke was invoked **once**, through
+  task `ewv-20261115T034921` with interactive logon as `ki608`; it exited **1**.
+
+Windows-versus-Mac deltas (evidence paths below are relative to
+`agents-plugin-tool/desktop-electron/dist/evidence/windows/20261115T034921/`):
+
+- **W1 remains resolved — offline win32 packaging passes.** Packaged metadata
+  is CompanyName `kang-sw`, product `Werkschaft`, version `0.1.0`.
+  Evidence: `build.log`, `packaged-metadata.json`. The Mac comparison remains
+  the prior recorded darwin build, not a new build or live Mac run.
+- **W2 remains resolved — Windows and Mac both pass 33/33 tests.** Evidence:
+  `unit-tests.log`, `mac-unit-tests.log`.
+- **W3 remains unresolved, now with executable stderr.** The executable
+  rejects Playwright's arguments immediately, rather than exhausting either
+  the old 8-second or new 60-second timeout. The historical Mac live smoke
+  passed at `5beffc47a`; no live Mac comparison was repeated. Evidence:
+  `playwright-debug.log`, `launch-failure-excerpt.log`, `smoke.log`,
+  `smoke-exit.txt`, `task-status-before-cleanup.json`. The excerpt below
+  abbreviates paths only:
+
+  ```text
+  [pid=17432][err] ...\Werkschaft.exe: bad option: --remote-debugging-port=0
+  [pid=17432][err] ...\Werkschaft.exe: bad option: --user-data-dir=...\profile
+  Error: Process failed to launch!
+      at waitForLine (...\playwright-core\lib\coreBundle.js:42440:21)
+  ```
+
+  Playwright's unhandled `waitForLine` rejection terminated Node before the
+  launch catch/normal finally and before an application handle existed.
+  `electron-app.log` therefore contains only the launch header; the enabled
+  debug tee retained Electron's early stderr. No smoke `summary.json` was
+  produced; `host-summary.json` and `acceptance-summary.json` record the failure.
+  No parser/environment cause beyond the observed argument rejection was
+  established or repaired.
+
+**Unverified:** all live Windows shell/visual contracts, including attachment,
+renderer isolation, navigation/Stay rollback, dashboard file-link opening,
+X-close Stay/Leave and draft preservation, second-instance focus, daemon
+survival and fresh-process zoom reset. Native menu/dialog appearance, default
+Windows icon and the unchanged `⌘R` retry title were not observed. The cheap
+P9 physical Ctrl-key probe was enabled but never reached. No screenshot was
+acquired because launch failed before window acquisition.
+
+All **39 host evidence files** were copied back and SHA256-verified against
+`host-manifest.json` before removing the host folder. The exact task was
+deleted; folder-scoped CIM scans were empty before and after folder removal,
+and a separate check confirmed the folder absent. No operator signal was
+needed; Playwright's launch cleanup attempted only recorded launch PID 17432
+and reported it already absent, with no image-name kill. The Mac temporary
+bundle and cross-compiled fixture were deleted; its final owned-process scan
+was empty. Evidence: `transfer-verification.json`, `failure-process-scan.json`,
+`task-status-after-cleanup.json`, `cleanup.log`, `mac-final-process-scan.txt`.
+Only this ticket outcome is committed after the harness commit; evidence and
+binaries remain ignored and uncommitted. The owner's no-fix/no-retry boundary
+ends this run regardless of the now-more-specific W3 evidence.
+
 #### Edition (7525029be) - 2026-11-15
 
 Fixed the independent lite review's Critical cancelled-navigation finding.
