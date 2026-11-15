@@ -116,7 +116,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
    Only the view folds: no card record or disclosure is changed. Keeping
    off-screen items renderable avoids remembered unfolded intrinsic sizes. */
 :root[data-overview] body { background: color-mix(in srgb, var(--wb-bg) 28%, #000); }
-:root[data-overview] :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { filter: brightness(.28) saturate(.4); }
+:root[data-overview] :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .dr-handle) { filter: brightness(.28) saturate(.4); }
 :root[data-overview] .r-board :is(section.topic, .bcard) { content-visibility: visible !important; cursor: pointer; }
 :root[data-overview] .r-board section.topic:not([data-overview-motion]) > :not(.tophead),
 :root[data-overview] .r-board .tophead > .tnote,
@@ -144,13 +144,13 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .overview-ghost .rtext { overflow: hidden; }
 .overview-ghost :is(.t-close-request, .tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close) { opacity: 0; }
 .overview-ghost-body { height: 100%; background: var(--wb-card); }
-:root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { transition: filter 240ms cubic-bezier(.2,.8,.2,1); }
+:root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .dr-handle) { transition: filter 240ms cubic-bezier(.2,.8,.2,1); }
 .overview-spacer { flex: none; pointer-events: none; }
 .overview-flash { animation: overview-flash 1.2s ease-out; }
 @keyframes overview-flash { from { outline: 3px solid var(--wb-primary); outline-offset: 0; } to { outline: 0 solid transparent; outline-offset: 3px; } }
 @media (prefers-reduced-motion: reduce) {
   .overview-flash { animation: none; outline: 2px solid var(--wb-primary); outline-offset: 1px; }
-  :root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .r-tree, .splitter, .dr-handle) { transition: none; }
+  :root[data-shell] :is(.dwrap > .top, #rail), .dash :is(.dwrap > .top, #rail, .composer, .convo, .fpane, .chead, .tabbar, .dr-handle) { transition: none; }
 }
 
 /* ===== preview cards (preview.js) =====

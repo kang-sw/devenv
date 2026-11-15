@@ -9,8 +9,8 @@ import (
 )
 
 // TestFilesTabOnTheSessionPage pins where the file explorer lives: a live
-// session page's conversation panel header, between the splitter and the
-// conversation, carries the "Conversation | Files" switch, the Files pane
+// session page's conversation panel header, at the top of the conversation
+// column, carries the "Conversation | Files" switch, the Files pane
 // takes the conversation's place under its tab while the agents tree and
 // the composer stay, and the page loads the explorer script after the
 // preview kind it opens files in and before the page script that mounts
@@ -31,8 +31,8 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 	if i, j, k := strings.Index(live, "window.WsPreview = {"), strings.Index(live, "window.WsFiles = {"), strings.Index(live, "The dashboard page script"); i < 0 || j < i || k < j {
 		t.Error("the explorer script is not between the preview kind and the page script")
 	}
-	if i, j, k := strings.Index(live, `id="splitter"`), strings.Index(live, `id="ctabs"`), strings.Index(live, `<div id="convo" class="convo">`); i < 0 || j < i || k < j {
-		t.Error("the conversation panel's tabs do not head the conversation, below the splitter")
+	if j, k := strings.Index(live, `id="ctabs"`), strings.Index(live, `<div id="convo" class="convo">`); j < 0 || k < j || strings.Contains(live, `id="splitter"`) {
+		t.Error("the conversation panel's tabs do not head the conversation")
 	}
 	_, board := get(t, f.base+"/s/boardsession?frame=1")
 	if strings.Contains(board, `id="ctabs"`) || strings.Contains(board, `id="files"`) {

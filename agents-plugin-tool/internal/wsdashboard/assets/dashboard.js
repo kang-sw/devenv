@@ -307,10 +307,10 @@
   // The conversation panel's header (chead) switches "Conversation |
   // Files" (ctabs): the Files pane (files.js) stands in for the
   // conversation below the header, which is only hidden meanwhile, so its
-  // scroll and pin survive the switch; the agents tree and the composer
-  // stay. The conversation tab counts as shown while either of the two
+  // scroll and pin survive the switch; the composer, with the agents
+  // popover, stays. The conversation tab counts as shown while either of the two
   // shows.
-  var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board" };
+  var TAB = { entries: "convo", convlive: "convo", board: "board" };
   var PANE = { convo: "convo", board: "bcol" };
   var fpane = $("files"), chead = $("chead"), filesSeen = false, filesTab = null, filesSheet = null;
   // syncChead moves the conversation's counts from the entries region's
@@ -352,66 +352,6 @@
     if (live || worktree) revealPanes();
     if (cardBoard) window.WsCards.relayout();
   }
-  // The tree and the conversation share their column at a fixed ratio; the
-  // saved value is the tree's share. The grid reads it as two fr shares, so a
-  // region swap (which only rewrites a pane's contents) never moves it.
-  var SPLIT_KEY = "ws.dashboard.split", SPLIT_DEF = 0.25, SPLIT_MIN = 0.05, SPLIT_MAX = 0.95;
-  var splitter = $("splitter"), splitShare = SPLIT_DEF;
-  function clampShare(f) { return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, f)); }
-  function setSplit(f) {
-    splitShare = isFinite(f) ? clampShare(f) : SPLIT_DEF;
-    // fr shares summing below 1 would leave the column short, so scale up
-    grid.style.setProperty("--sa", (splitShare * 1000).toFixed(1) + "fr");
-    grid.style.setProperty("--sb", ((1 - splitShare) * 1000).toFixed(1) + "fr");
-  }
-  function savedSplit() { var v = parseFloat(load(SPLIT_KEY)); return isFinite(v) ? v : SPLIT_DEF; }
-  // shareAt turns a pointer's y into the tree's share of the room the two
-  // panes divide (their span less the splitter), with the same pixel floors
-  // the stylesheet sets.
-  // The conversation's header stands between the splitter and the pane
-  // below it (the conversation, or the Files pane under its tab), outside
-  // the shares.
-  function shareAt(y) {
-    var t = $("r-tree"), c = visible($("convo")) ? $("convo") : fpane;
-    if (!visible(t) || !visible(c) || !splitter) return null;
-    var top = t.getBoundingClientRect().top, room = c.getBoundingClientRect().bottom - top - splitter.offsetHeight - (visible(chead) ? chead.offsetHeight : 0);
-    if (room <= 0) return null;
-    var f = (y - top - splitter.offsetHeight / 2) / room, lo = 56 / room, hi = 1 - 96 / room;
-    if (lo < hi) f = Math.min(hi, Math.max(lo, f));
-    return f;
-  }
-  if (splitter) {
-    var dragging = false;
-    splitter.addEventListener("pointerdown", function (e) {
-      if (e.button !== undefined && e.button !== 0) return;
-      dragging = true;
-      splitter.classList.add("drag");
-      try { splitter.setPointerCapture(e.pointerId); } catch (x) { /* no capture: the move still lands */ }
-      e.preventDefault();
-    });
-    splitter.addEventListener("pointermove", function (e) {
-      if (!dragging) return;
-      var f = shareAt(e.clientY);
-      if (f !== null) setSplit(f);
-    });
-    function endDrag() {
-      if (!dragging) return;
-      dragging = false;
-      splitter.classList.remove("drag");
-      save(SPLIT_KEY, splitShare.toFixed(4));
-    }
-    splitter.addEventListener("pointerup", endDrag);
-    splitter.addEventListener("pointercancel", endDrag);
-    splitter.addEventListener("dblclick", function () { setSplit(SPLIT_DEF); save(SPLIT_KEY, null); });
-    splitter.addEventListener("keydown", function (e) {
-      var d = e.key === "ArrowUp" ? -0.03 : e.key === "ArrowDown" ? 0.03 : 0;
-      if (!d) return;
-      e.preventDefault();
-      setSplit(splitShare + d);
-      save(SPLIT_KEY, splitShare.toFixed(4));
-    });
-  }
-
   // Input mode: which key sends. "enter" (the default) sends on Enter and
   // adds a line on Shift+Enter; "mod" sends on Ctrl/Cmd+Enter and Enter adds
   // a line. The placeholder tells which one is on.

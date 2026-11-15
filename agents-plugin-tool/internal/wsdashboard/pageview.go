@@ -203,6 +203,26 @@ type TreeView struct {
 	Peers                     PeerGroup
 }
 
+// RunningAgents and EndedAgents split the top-level subagents into the
+// agents popover's groups, each in tree order; a child stays under its
+// parent whatever its own status.
+func (t TreeView) RunningAgents() []AgentNode { return t.agentsWhere(true) }
+func (t TreeView) EndedAgents() []AgentNode   { return t.agentsWhere(false) }
+
+// Tasks is the background tasks and monitors together, the agents popover's
+// background group count.
+func (v SessionView) Tasks() int { return v.Background + v.Monitors }
+
+func (t TreeView) agentsWhere(running bool) []AgentNode {
+	var out []AgentNode
+	for _, a := range t.Agents {
+		if a.IsRunning() == running {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 // AgentNode is one subagent with its children.
 type AgentNode struct {
 	wslive.Agent

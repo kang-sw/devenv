@@ -3,6 +3,7 @@ title: "Dashboard agent count badge opens a popover that replaces the top-left a
 related:
   261112-feat-ws-dashboard-agent-panel-autocollapse: "idea ticket, likely superseded: removing the top-left list makes panel auto-collapse moot; confirm and drop at pickup"
   261109-feat-ws-dashboard-subagent-badge: "done; landed the agent count badge in the strip between conversation and composer that this ticket extends"
+completed: 2026-11-16
 ---
 
 # Dashboard agent count badge opens a popover that replaces the top-left agent list
@@ -74,3 +75,40 @@ Acceptance:
   expand, and narrow-width fit.
 - i18n entries for all new strings in every shipped locale.
 - No row from the previous top-left list is missing; T0 compatibility holds.
+
+### Result
+
+The agents region (`r-tree`) moved, unchanged as a live region, into a
+`#agpop` popover inside the composer. The running-agent badge became a
+button that toggles it. The grid lost the tree panel and its splitter, so
+the conversation column now starts at the top. Because the region is
+server-rendered and only relocated, every row the old list showed stays
+reachable. The browser test checks this against the server's own row keys
+and peer count. Live swaps, keyed open state, tool-permission rows and the
+board drawer wait work as before.
+
+- Order: lead, then `Running · N`, `Ended · N` and `Background tasks · N`
+  groups, then peer leads. Child agents stay nested under their parent.
+- Close: Esc, an outside pointer-down, the badge itself, and an `×`
+  button. Esc and outside clicks are ignored while pinned. The pin is
+  stored in localStorage (`ws.dashboard.agpop.pin`) and the popover reopens
+  on reload. The `×` button unpins and closes.
+- Expansion: an open row shows its newest four batches in a tinted box,
+  with an "Open full output" action that reveals every batch. Both states
+  survive region swaps.
+- Narrow screens and the board tab: the same popover, capped at
+  `100% - 20px` of the composer width. The board tab keeps the badge and
+  the popover.
+- Badge: `N(+M) running`, the running count only. It stays visible but
+  muted at zero, so the popover is always reachable, including for ended
+  sessions.
+- Deviations:
+  - Background tasks are counts only. The snapshot carries no per-task
+    rows, and adding them would leave T0.
+  - The agents container query dropped from 559px to 439px so that rows
+    stay on one line in the 500px popover.
+- i18n: eight new keys in all 11 tables.
+- Tests: `TestAgentBadgePopoverBrowser` covers open/close, the pin across
+  reload, order, no row loss, expansion with full output, the narrow fit and
+  the board tab. Existing session-page, files, worktree and explorer tests
+  now reflect the tree living in the popover.

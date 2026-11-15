@@ -142,6 +142,7 @@
     if (live && TAB[name] === "convo" && !visible(convo) && visible(fpane) && ctabDot()) ctabDot().classList.add("on");
     if (name === "panels") drawerSwapped();
     if (name === "tree" || name === "convlive") drawerWait();
+    if (name === "tree") agSwapped();
     if (TL_REGIONS[name]) { delete tlHeld[name]; tlCount(); }
     if (name === "convlive") syncBadge();
     // A list that arrives while a / waits in the box opens the picker.
