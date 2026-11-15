@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: a565125a5d9343aa
 sage-review-completeness-reviewed: a565125a5d9343aa
+completed: 2026-11-15
 ---
 
 # Center shared fullscreen panels with an explicit full-width extension
@@ -184,6 +185,59 @@ headless screenshots at 1280px and 1900px viewport widths in both light and
 dark themes, showing normal and extended sheets, plus one at or below 640px
 showing unchanged narrow geometry. Run only isolated fixtures; never touch the
 shared daemon or port 29417.
+
+### Result (95b9246c1) - 2026-11-15
+
+- Landed the shared transient category-normal width and two-way extension
+  toggle from checkpoint `82f254274`, integrated with develop `9c34183a9`
+  by `c52d92a1d`. Semantic owner identity wins over nested content; normal
+  width is centered and capped at 1920px. Files and Terminal snapshot their
+  owning columns before maximize, with the approved 1280px/960px fallbacks.
+  Narrow geometry, the single maximize owner and no-persistence behavior remain.
+- **Retry diagnosis: fixture bug, not product bug.** Before editing, the
+  retained sequence was run against merged HEAD and separately against assets
+  read with `git show 9c34183a9:<path>` (no stash or checkout). Both produced
+  exactly the same button box `(342.328125, 236.25, 24, 24)` and center
+  `(354.328125, 248.25)` hitting `#bcol`. Button and all ancestors had
+  `pointer-events: auto` and `visibility: visible`; button opacity was `.45`,
+  ancestor opacity `1`. The missing session rail placed the main grid in the
+  340px rail track, reducing `#r-board` and the topic to zero width. Full
+  ancestor boxes/styles and before/after hit-test stacks are in
+  `/tmp/exec4/fs-shots/diagnostic-{merged,develop}.json`.
+- Corrected only the browser fixture on retry: mirror the real rail/main/
+  sibling `.bpcol` structure; drive maximize, minimize, pin and width controls
+  with Playwright locator clicks, never forced clicks or synthetic dispatch.
+  The corrected topic center receives the pointer, recorded in
+  `/tmp/exec4/fs-shots/topic-click-hit-test.json`. A distinct resize-readiness
+  assertion initially raced event delivery; the diagnostic measured the
+  correct 738.34375px width after delivery. Geometry now waits on the exact
+  observable width/centering contract rather than sleeping or weakening it.
+  No production fix or product-scope deviation was necessary on retry.
+- Browser acceptance passed: 34 geometry observations plus category,
+  Files/Terminal column, optional pin column, resize, two-way toggle, focus,
+  Escape, Overview handoff, frame identity, disclosure, sticky header,
+  scroll preservation, reopen and reload checks. Evidence:
+  `/tmp/exec4/fs-shots/browser-acceptance.log` and `browser-results.json`.
+- Captured and inspected all nine required images under
+  `/tmp/exec4/fs-shots/`: `{1280,1900}-{light,dark}-{normal,extended}.png`
+  and `640-dark-normal.png`. Normal and extended widths visibly differ;
+  640px retains 8px horizontal insets and no extension control. No approved
+  visual reference is linked by this ticket, so no reference comparison applies.
+- Focused offline verification passed with `GOPROXY=off GOSUMDB=off
+  GOTOOLCHAIN=local GOMAXPROCS=2 GOFLAGS=-p=2`:
+  `go -C agents-plugin-tool test ./internal/wsdashboard ./internal/wswhiteboard
+  -run '^(TestFullscreenPanelWidth|TestBoardSheet|TestFilesToolbarSheet|TestBoardCard|TestPreview|TestPanelMaximizeOnlyOnDashboardBoard)'
+  -count=1 -timeout=20s` — dashboard 1.539s, whiteboard 0.675s. The latter
+  includes standalone/embed maximize-control exclusion. Full output:
+  `/tmp/exec4/fs-shots/go-focused.log`. `git diff --check` passed.
+- Every diagnostic/browser/test run ended with a `ps` scan of its observed
+  owned process tree; all `*-process-scan.json` files report no remaining
+  processes. Used only isolated ephemeral-port fixtures and cached Chromium;
+  no shared daemon/29417, downloads, whole-dashboard-package tests, merge,
+  push or deployment. Independent lite review is omitted under the binding
+  print-mode adaptation: the lead runs it after the worker report.
+- Unresolved implementation or acceptance findings: none. The earlier
+  checkpoint below is retained as historical evidence, not current status.
 
 ## Implementation checkpoint - 2026-11-15
 
