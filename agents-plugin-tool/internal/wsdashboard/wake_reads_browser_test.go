@@ -2,13 +2,13 @@ package wsdashboard
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,11 +46,14 @@ func TestWakeReadsBrowser(t *testing.T) {
 	}
 	f.d.Index().Refresh()
 	f.d.Index().Settle()
+	var modelUpdates atomic.Int64
 	updates := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		marker := r.URL.Query().Get("marker")
 		if model := r.URL.Query().Get("model"); model != "" {
-			raw, _ := json.Marshal(wslive.ObservedRecord{AgentID: "child", ModelObservation: wslive.ModelObservation{ID: "response", Model: model, Source: "pi.assistant", At: 1}})
-			if err := os.WriteFile(paths[0], raw, 0600); err != nil {
+			// Evidence is write-once. Publish a new response, ordered across both viewports.
+			n := modelUpdates.Add(1) + 1
+			record := wslive.ObservedRecord{AgentID: "child", ModelObservation: wslive.ModelObservation{ID: fmt.Sprintf("response-%d", n), Model: model, Source: "pi.assistant", At: n}}
+			if err := wslive.AppendObserved(sd, []wslive.ObservedRecord{record}); err != nil {
 				t.Error(err)
 				w.WriteHeader(500)
 				return
