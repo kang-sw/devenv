@@ -270,7 +270,7 @@
   // --- layout and tabs (live or saved session conversation) ----------------
   // A saved-history page shares tab/scroll handling, not live controls.
   var grid = $("grid"), gmenu = $("gmenu"), live = !!$("tabbar");
-  var LAYOUT_KEY = "ws.dashboard.layout";
+  var LAYOUT_KEY = "ws.dashboard.layout", layoutMode = "auto";
   // TAB maps a region to the tab that shows it; PANE names the element whose
   // visibility tells whether a tab is shown in the current view. The panels
   // live in the drawer, whose handle carries their dot instead.
@@ -316,9 +316,10 @@
   }
   function setLayout(v) {
     if (v !== "split" && v !== "tabs") v = "auto";
-    grid.setAttribute("data-layout", v);
+    layoutMode = v;
+    if (grid) grid.setAttribute("data-layout", v);
     q(".gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });
-    revealPanes();
+    if (live) revealPanes();
     if (cardBoard) window.WsCards.relayout();
   }
   // The tree and the conversation share their column at a fixed ratio; the
@@ -409,12 +410,12 @@
     // "auto" crosses its breakpoint on a resize without a click.
     window.addEventListener("resize", revealPanes);
   }
-  // The settings are on every page (the index page's gear menu, a session
-  // page's drawer card; the index and board-first pages hold only the theme
-  // and language items), so the gear menu's Escape and the language setting
-  // do not wait for a live layout. The item selectors read .gmenu, which
-  // both carry.
-  if (gmenu) doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && !gmenu.hidden) gmenu.hidden = true; });
+  // Storage synchronizes other tabs. The shell also sends its in-memory
+  // choice to frames, so denied/full storage never prevents immediate use.
+  window.addEventListener("storage", function (e) {
+    if (e.key === LAYOUT_KEY) setLayout(e.newValue);
+    if (e.key === INPUT_KEY) setInput(e.newValue);
+  });
   // Language: the choice lives in a cookie the server reads, so every page,
   // its stream, and its history render in it from the first byte. An empty
   // value deletes the cookie and follows the browser again. The page shows
@@ -429,7 +430,10 @@
     doc.cookie = LANG_COOKIE + "=" + encodeURIComponent(v) + "; Path=/; SameSite=Lax; Max-Age=" + (v ? 31536000 : 0);
     root.setAttribute("data-langpref", v);
     markLang();
-    if (holdsDraft()) banner(wsT("js.banner.lang"));
+    if (holdsDraft() || (shell && shFrames.some(shHolds))) {
+      if (shell) toast(wsT("js.banner.lang"));
+      else banner(wsT("js.banner.lang"));
+    }
     else if (framed) window.parent.location.reload();
     else location.reload();
   }
@@ -451,6 +455,7 @@
   function setTheme(v, quiet) {
     if (v !== "light" && v !== "dark") v = "";
     if (framed && !quiet) shPost("theme", { theme: v });
+    if (shell && !quiet) shFrames.forEach(function (x) { shSend(x, "theme", { theme: v }); });
     doc.cookie = THEME_COOKIE + "=" + v + "; Path=/; SameSite=Lax; Max-Age=" + (v ? 31536000 : 0);
     if (v) root.setAttribute("data-theme", v);
     else root.removeAttribute("data-theme");
@@ -2954,15 +2959,14 @@
     u = t.closest("#r-convlive [data-steer]");
     if (u) { if (!u.disabled) steerHeld(u); return; }
     if (ibadge && t.closest("#ibadge")) { if (!ibadge.disabled) interruptTurn(); return; }
-    if (gmenu && t.closest("#gear")) { gmenu.hidden = !gmenu.hidden; return; }
-    if (gmenu && !gmenu.hidden && !t.closest("#gmenu")) gmenu.hidden = true;
+    if (gmenu && t.closest("#settings-close")) { railPopClose(true); return; }
     var th = t.closest(".gmenu [data-theme-set]");
     if (th) { setTheme(th.getAttribute("data-theme-set")); return; }
-    if (!live) return;
     var b = t.closest(".gmenu [data-input]");
-    if (b) { save(INPUT_KEY, b.getAttribute("data-input")); setInput(b.getAttribute("data-input")); return; }
+    if (b) { save(INPUT_KEY, b.getAttribute("data-input")); setInput(b.getAttribute("data-input")); if (shell) shFrames.forEach(shSettings); return; }
     b = t.closest(".gmenu [data-layout]");
-    if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); return; }
+    if (b) { save(LAYOUT_KEY, b.getAttribute("data-layout")); setLayout(b.getAttribute("data-layout")); if (shell) shFrames.forEach(shSettings); return; }
+    if (!live) return;
     b = t.closest("#tabbar [data-tab]");
     if (b) { setTab(b.getAttribute("data-tab")); return; }
     b = t.closest("#ctabs [data-ctab]");
@@ -3477,7 +3481,6 @@
   }
   cardTab("worktrees");
   cardTab("holders");
-  cardTab("settings");
   // The worktrees and holders cards' nodes (wtLoad, hdLoad, below): set
   // here, ahead of the drawer's first drApply, which a drawer left open
   // calls on load.
@@ -6818,6 +6821,8 @@
         if (kr) kidFold(kr, !kr.classList.contains("kcol"));
         return;
       }
+      var settings = t.closest && t.closest(".settings-toggle");
+      if (settings && gmenu) { e.preventDefault(); railPopOpen("settings", settings); return; }
       var usage = t.closest && t.closest(".usage-toggle");
       if (usage && usageGutter) { e.preventDefault(); railPopOpen("usage", usage); return; }
       var add = t.closest && t.closest(".radd");
@@ -7554,7 +7559,8 @@
     if (!rp.P) return null;
     if (rp.btn && rp.btn.isConnected) return rp.btn;
     var r = region("rail"), h = region("head"), found = null;
-    if (rp.kind === "usage") found = r && r.querySelector(".usage-toggle");
+    if (rp.kind === "settings") found = r && r.querySelector(".settings-toggle");
+    else if (rp.kind === "usage") found = r && r.querySelector(".usage-toggle");
     else if (rp.kind === "sess") found = h && h.querySelector(".host.hbtn");
     else if (rp.kind === "row") {
       var row = r && WsRail.refind(r, { cls: "rs", attr: "data-rid", val: rp.ws });
@@ -7607,7 +7613,12 @@
     var bar = btn.closest(".rws"), ws = rpKey(kind, btn);
     if (rp.P && rp.kind === kind && rp.ws === ws) { railPopClose(true); return; }
     railPopClose(false);
-    var P = kind === "usage" ? rpUsage || (rpUsage = usageGutter.makePopover(railPopPlace, function () { railPopClose(true); })) : kind === "wt" ? rpWt || (rpWt = rpWtMake()) : kind === "lead" ? rpLead || (rpLead = rpLeadMake()) : kind === "sess" ? rpSess || (rpSess = rpSessMake()) : rpWs || (rpWs = rpWsMake());
+    var P = kind === "settings" ? {
+      el: gmenu,
+      open: function () { setLayout(layoutMode); setInput(inputMode); markTheme(); markLang(); },
+      close: function () {},
+      focus: function () { gmenu.focus(); }
+    } : kind === "usage" ? rpUsage || (rpUsage = usageGutter.makePopover(railPopPlace, function () { railPopClose(true); })) : kind === "wt" ? rpWt || (rpWt = rpWtMake()) : kind === "lead" ? rpLead || (rpLead = rpLeadMake()) : kind === "sess" ? rpSess || (rpSess = rpSessMake()) : rpWs || (rpWs = rpWsMake());
     if (!P.el.parentNode) doc.body.appendChild(P.el);
     rp = { P: P, kind: kind, ws: ws, btn: btn };
     btn.setAttribute("aria-expanded", "true");
@@ -8115,7 +8126,7 @@
     doc.addEventListener("click", function (e) {
       var t = e.target;
       if (!rp.P || !t || !t.closest) return;
-      if (rp.P.el.contains(t) || t.closest(".radd, .rnew, .hbtn, .usage-toggle")) return;
+      if (rp.P.el.contains(t) || t.closest(".radd, .rnew, .hbtn, .usage-toggle, .settings-toggle")) return;
       railPopClose(false);
     }, true);
     window.addEventListener("resize", railPopPlace);
@@ -9025,6 +9036,7 @@
     var ent = { el: el, f: f, head: null, title: "", pincol: false, dim: 0, y: 0, loaded: false };
     el.addEventListener("load", function () {
       ent.loaded = true;
+      shSettings(ent);
       if (shWant === ent) shShow(ent);
       else shSend(ent, "shown", { shown: ent === shOn });
     });
@@ -9097,6 +9109,8 @@
     if (ent.title) doc.title = ent.title;
     try { ent.el.contentWindow.focus(); } catch (x) { /* unloading */ }
   }
+  // Private UI state only: no daemon protocol or persistence contract changes.
+  function shSettings(ent) { shSend(ent, "settings", { layout: layoutMode, input: inputMode }); }
   function shReload() { if (shOn) try { shOn.el.contentWindow.location.reload(); } catch (x) { /* unloading */ } }
   // shHead shows the shown frame's header: its head region (none while the
   // frame has not named one) and search button, or with the head null the
@@ -9291,7 +9305,8 @@
       } else if (m.wsShell === "menu") {
         var h = region("head"), chip = h && h.querySelector(".host.hbtn");
         if (chip && WsRail) railPopOpen("sess", chip);
-      } else if (m.wsShell === "theme") setTheme(m.theme, true);
+      } else if (m.wsShell === "settings") { setLayout(m.layout); setInput(m.input); }
+      else if (m.wsShell === "theme") setTheme(m.theme, true);
       else if (m.wsShell === "sync") { sent = {}; post(); shPost("title", { title: doc.title }); }
     });
     post();
@@ -9312,12 +9327,15 @@
     if (f.hash) { el.src = window.WsShell.src(f); return; }
     try { ent.loaded = el.contentDocument.readyState === "complete"; } catch (x) { /* not yet */ }
     shSend(ent, "sync");
+    if (ent.loaded) shSettings(ent);
   }
 
-  if (live) {
+  if (live || gmenu) {
     setLayout(load(LAYOUT_KEY));
-    setSplit(savedSplit());
     setInput(load(INPUT_KEY));
+  }
+  if (live) {
+    setSplit(savedSplit());
     setTab("convo");
     setCtab("convo");
   }
