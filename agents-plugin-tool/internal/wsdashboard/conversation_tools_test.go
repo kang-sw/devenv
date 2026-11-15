@@ -61,6 +61,22 @@ func TestToolsEntryRendersACollapsedSummaryRow(t *testing.T) {
 	}
 }
 
+func TestWhiteboardEffectsDoNotReplaceLegacyToolSummaries(t *testing.T) {
+	view := historyView([]wslive.RingRecord{
+		ringRecord(1, wslive.RingEntry{Kind: wslive.RingTools, Tools: toolsSummary()}),
+		ringRecord(2, dashboardEffect("committed payload")),
+		ringRecord(3, wslive.RingEntry{Kind: wslive.RingCommand, Command: "/legacy", Text: "old command output"}),
+	}, "", PageContent{}, sessionLookup{})
+	regions, err := renderSessionRegions(view, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(regions[regionEntries].HTML)
+	if strings.Count(html, `<details class="toolsline"`) != 1 || strings.Count(html, `<details class="wbeffects"`) != 1 || !strings.Contains(html, "whiteboard.update") || !strings.Contains(html, "committed payload") || !strings.Contains(html, "old command output") {
+		t.Fatalf("effects replaced/misclassified legacy history: %s", html)
+	}
+}
+
 // TestToolsRowWithoutNamedToolsShowsTheCallTotal pins the summary when no
 // listed name accounts for any call.
 func TestToolsRowWithoutNamedToolsShowsTheCallTotal(t *testing.T) {

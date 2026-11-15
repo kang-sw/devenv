@@ -611,6 +611,20 @@ func (s *sessionStore) mutateRecord(sessionKey string, write recordPart, fn func
 // folder transaction, never the legacy cache part. fn returning
 // errRecordUnchanged writes nothing, migration included.
 func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPart, fn func(*sessionRecord) error) error {
+	return s.mutateRecordPartsObserved(sessionKey, read, write, fn, nil)
+}
+
+// boardMutationObservation is transient evidence from the actual boundaries,
+// independent of the callback's success and the enclosing mutation's error.
+type boardMutationObservation struct {
+	Committed bool
+	Published bool
+}
+
+// mutateRecordPartsObserved observes this call's durable board decision and
+// derived publication separately. Project to another store only after return,
+// outside the session and folder locks. Recovery does not produce observations.
+func (s *sessionStore) mutateRecordPartsObserved(sessionKey string, read, write recordPart, fn func(*sessionRecord) error, observation *boardMutationObservation) error {
 	d, err := s.dirs()
 	if err != nil {
 		return err
@@ -633,7 +647,13 @@ func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPa
 		return err
 	}
 	if write&partWhiteboard != 0 {
-		err = whiteboardFolder(record.Root, sessionKey).UpdateAndPublish(record.Whiteboard, func(board *wswhiteboard.State) error {
+		folder := whiteboardFolder(record.Root, sessionKey)
+		folder.Fault = s.boardFault
+		var committed func()
+		if observation != nil {
+			committed = func() { observation.Committed = true }
+		}
+		err = folder.UpdateAndPublishObserved(record.Whiteboard, func(board *wswhiteboard.State) error {
 			record.Whiteboard = board
 			if err := fn(&record); err != nil {
 				return err
@@ -642,9 +662,14 @@ func (s *sessionStore) mutateRecordParts(sessionKey string, read, write recordPa
 				*board = *record.Whiteboard
 			}
 			return nil
-		}, func() error {
+		}, committed, func() error {
 			if record.boardOutput != nil {
-				return record.boardOutput.publish()
+				if err := record.boardOutput.publish(); err != nil {
+					return err
+				}
+				if observation != nil {
+					observation.Published = true
+				}
 			}
 			return nil
 		})
