@@ -348,6 +348,61 @@ func TestPermissionNativeModeLiteralDelivery(t *testing.T) {
 	assertPermissionSelection(t, wsdashboard.SessionDir(h.dir, st.ID), PermissionWorkdirWrite, false)
 }
 
+// A crash can persist the common selection before the native Record target.
+// Rejoin must reconstruct the lower target rather than replay the stale mode.
+func TestPermissionInconsistentRecordReattachDelivery(t *testing.T) {
+	for _, refuse := range []bool{false, true} {
+		t.Run(map[bool]string{false: "delivered", true: "unenforceable"}[refuse], func(t *testing.T) {
+			h := permissionHarness(t).start()
+			st := h.lead(BackendClaude, LeadOptions{PermissionLevel: PermissionFull, PermissionFullAck: true, permissionUser: true})
+			h.send(st.ID, "original input")
+			holder := h.holder(st.ID)
+			h.holders.out(holder, initLine("inconsistent-record", "bypassPermissions"), stateLine(HarnessRunning))
+			h.sync(st.ID, holder)
+			original := h.userInputs(holder)
+			h.runner.Close()
+			h.holders.restart()
+			dir := wsdashboard.SessionDir(h.dir, st.ID)
+			if err := writePermissionSelection(dir, PermissionReadOnly); err != nil {
+				t.Fatal(err)
+			}
+			if rec := h.record(st.ID); rec.PermissionMode != "bypassPermissions" {
+				t.Fatalf("inconsistent-record prerequisite missing: %+v", rec)
+			}
+			h.start()
+			h.sync(st.ID, holder)
+			permissionRejoined(h, st.ID)
+			if got := h.state(st.ID); !got.Process || got.PermissionLevel != PermissionReadOnly || got.PermissionMode != "plan" || got.ActiveMode != "bypassPermissions" || got.PermissionEnforcement != "advisory" {
+				t.Fatalf("reconstructed target/observation: %+v", got)
+			}
+			if modes := permissionDeliveredModes(h, holder); len(modes) != 0 {
+				t.Fatalf("control crossed active-turn boundary: %v", modes)
+			}
+			if refuse {
+				h.holders.setControl("set_permission_mode", "mode cannot be enforced", "")
+			}
+			h.holders.out(holder, resultLine(), stateLine(HarnessIdle))
+			h.idle(st.ID)
+			if modes := permissionDeliveredModes(h, holder); !slices.Equal(modes, []string{"plan"}) {
+				t.Fatalf("recovered control = %v; want plan", modes)
+			}
+			if rec := h.record(st.ID); rec.PermissionMode != "plan" {
+				t.Fatalf("stale native target retained: %+v", rec)
+			}
+			if got := h.state(st.ID); !got.Process || got.ActiveMode != "bypassPermissions" || got.PermissionEnforcement != "advisory" {
+				t.Fatalf("control fabricated observation: %+v", got)
+			}
+			if refuse && !strings.Contains(h.log.String(), "permission reconciliation: mode cannot be enforced") {
+				t.Fatalf("refusal not diagnosed: %s", h.log.String())
+			}
+			if h.holders.opCount("launch") != 1 || h.holders.opCount("stop") != 0 || h.holder(st.ID) != holder || !slices.Equal(h.userInputs(holder), original) {
+				t.Fatalf("rejoin duplicated process/input: %v; %q", h.holders.opList(), h.userInputs(holder))
+			}
+			assertPermissionSelection(t, dir, PermissionReadOnly, false)
+		})
+	}
+}
+
 func TestPermissionPendingLoweringReattachDelivery(t *testing.T) {
 	for _, refuse := range []bool{false, true} {
 		t.Run(map[bool]string{false: "delivered", true: "unenforceable"}[refuse], func(t *testing.T) {
