@@ -684,19 +684,6 @@
     "261114-feat-ws-whiteboard-history-unified-decisions": {
       "registered_at": "2026-11-14T06:03:03Z"
     },
-    "261114-feat-ws-whiteboard-topic-state-and-lead-nudges": {
-      "registered_at": "2026-11-14T11:39:09Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-14T23:55:56Z",
-        "impl": {
-          "branch": "impl/develop/swarm-easel-clay"
-        }
-      }
-    },
     "261114-feat-ws-whiteboard-unified-whole-history": {
       "registered_at": "2026-11-14T11:52:35Z",
       "lease": {
