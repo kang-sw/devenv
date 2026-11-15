@@ -110,7 +110,8 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		iv := itemView(item)
 		key := "item-" + strconv.Itoa(id)
 		rows = append(rows, timelineRow{Key: key, Item: &iv, Ask: true, AnswerTarget: lastAnswer[id]})
-		anchors[key] = true
+		// Only an open question is pulled out of the fold; closed ones fold like logs.
+		anchors[key] = item.Status == StatusOpen
 	}
 	seenBatch := map[int]bool{}
 	preceding, cluster := "", false
@@ -148,7 +149,6 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 						h.Clock = time.UnixMilli(h.SentAt).In(loc).Format("15:04")
 					}
 					r.Inputs = append(r.Inputs, h)
-					anchors[e.ID] = true
 				}
 			}
 		}
@@ -158,7 +158,6 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 			preceding, cluster = panel[e.PanelID], false
 			if len(r.Inputs) > 0 {
 				r.Key, r.Page = "input-"+e.ID, EntryPage{}
-				anchors[r.Key] = true
 				rows = append(rows, r)
 			}
 			continue
@@ -172,16 +171,22 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		if len(r.Created) > 0 && e.ItemID == 0 {
 			r.Ask = true
 			r.Clock, r.At = e.Clock, e.At
-			anchors[e.ID] = true
-			if !cluster && preceding != "" {
-				anchors[preceding], leads[preceding] = true, true
-			}
+			anyOpen := false
 			for _, row := range r.Created {
-				if row.Item.Status == StatusOpen && preceding != "" {
-					openPanels[preceding] = true
+				if row.Item.Status == StatusOpen {
+					anyOpen = true
+					if preceding != "" {
+						openPanels[preceding] = true
+					}
 				}
 			}
-			cluster = true
+			if anyOpen {
+				anchors[e.ID] = true
+				if !cluster && preceding != "" {
+					anchors[preceding], leads[preceding] = true, true
+				}
+				cluster = true
+			}
 		}
 		if firstAsk[e.ItemID] == e.ID || e.OwnerAnswer() {
 			if item, ok := byID[e.ItemID]; ok {
@@ -209,8 +214,8 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 					r.LatestAnswer = currentAnswer
 				}
 			}
-			anchors[e.ID] = true
-			if r.Ask {
+			if r.Ask && r.Item != nil && r.Item.Status == StatusOpen {
+				anchors[e.ID] = true
 				if !cluster && preceding != "" {
 					anchors[preceding] = true
 					leads[preceding] = true
@@ -226,7 +231,7 @@ func timelineView(t TopicView, items []Item, inputs map[int][]inputHeader, loc *
 		if e.Kind == EntryAgent || e.Kind == EntryPanel {
 			preceding, cluster = e.ID, false
 		}
-		if e.Current || e.Item != nil {
+		if e.Current {
 			anchors[e.ID] = true
 		}
 		if e.Kind == EntrySystem && e.Item == nil && !r.Ask && !r.Answer && !e.OwnerAnswer() {
