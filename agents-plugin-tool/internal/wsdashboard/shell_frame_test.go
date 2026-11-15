@@ -167,7 +167,7 @@ process.stdout.write(bad.join("\n"));
 // TestFramesOfOneSessionShareOneRender pins the render fan-out under the
 // shell: two frames of one session (two shells, or a shell and the page
 // standing alone) take one session render per change, and two shells' rail
-// streams one rail render.
+// streams share at most one rail render (none if its visible content is unchanged).
 func TestFramesOfOneSessionShareOneRender(t *testing.T) {
 	f := startPageFixture(t)
 	a := openStream(t, f.base+"/s/livesession/events?frame=1")
@@ -186,8 +186,8 @@ func TestFramesOfOneSessionShareOneRender(t *testing.T) {
 	if got := f.d.stats.SessionRenders.Load() - renders; got != 1 {
 		t.Errorf("the change took %d session renders for two frames, want 1", got)
 	}
-	if got := f.d.stats.RailRenders.Load() - rails; got != 1 {
-		t.Errorf("the change took %d rail renders for two shells, want 1", got)
+	if got := f.d.stats.RailRenders.Load() - rails; got > 1 {
+		t.Errorf("the change took %d rail renders for two shells, want at most 1", got)
 	}
 }
 

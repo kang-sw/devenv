@@ -160,6 +160,8 @@ check("an unknown reason's string", [R.layoutRefusal("shuffle"), R.layoutRefusal
 // staleRail: a render below the generation a change answered is stale.
 var rhtml = '<div class="rlist" id="rlist" data-max="64" data-lgen="1731500000000005">';
 check("stale renders", [R.staleRail(rhtml, 1731500000000006), R.staleRail(rhtml, 1731500000000005), R.staleRail(rhtml, 0), R.staleRail("<div></div>", 9)], [true, false, false, false]);
+var rinput = { shell: [rhtml, "</div>"], order: ["r1"], rows: { r1: { html: '<div class="rs" data-rid="r1"></div>' } } };
+check("stale object renders", [R.staleRail(rinput, 1731500000000006), R.staleRail(rinput, 1731500000000005), R.staleRail(rinput, 0), R.staleRail({ shell: ["<div>", "</div>"] }, 9), R.staleRail({}, 9), R.staleRail(null, 9)], [true, false, false, false, false, false]);
 // The press and its swaps: a rail swap offered during a press is held (the
 // latest replaces an earlier one) and handed back only once the press ends;
 // one whose hash turned current is forgotten; with no press none is held.
