@@ -296,9 +296,6 @@
     "261114-bug-ws-dashboard-search-palette-minors": {
       "registered_at": "2026-11-13T16:54:43Z"
     },
-    "261114-bug-ws-delegate-reviewer-render-lacks-trusted-provenance": {
-      "registered_at": "2026-11-14T04:49:44Z"
-    },
     "261114-bug-ws-history-deep-link-capsule-offset-lag": {
       "registered_at": "2026-11-14T11:33:20Z"
     },
@@ -583,7 +580,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-15T05:15:57Z",
         "impl": {
           "branch": "impl/develop/shove-stem-disk"
