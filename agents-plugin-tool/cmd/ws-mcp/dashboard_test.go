@@ -338,10 +338,10 @@ func TestServeReplacesAnOlderDaemonThatThenOutlivesServe(t *testing.T) {
 	}
 }
 
-// TestServeReplacesAnOlderBuildOfTheSameVersion: a daemon of the same version
-// from an older build (by executable mtime) of different content is replaced
-// by a newer build's serve, and the new daemon reports that build's time.
-func TestServeReplacesAnOlderBuildOfTheSameVersion(t *testing.T) {
+// TestServeKeepsAnOlderBuildOfTheSameVersion: ordinary serve keeps a healthy
+// same-version daemon despite a newer executable mtime and different content.
+// The original daemon and endpoint survive after the newer build's serve exits.
+func TestServeKeepsAnOlderBuildOfTheSameVersion(t *testing.T) {
 	oldBin := buildDashboardTestBinLD(t, "-X main.sourceCommit=older-build")
 	newBin := buildDashboardTestBin(t, "")
 	hourAgo := time.Now().Add(-time.Hour)
@@ -356,26 +356,34 @@ func TestServeReplacesAnOlderBuildOfTheSameVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldEp := waitForEndpoint(t, dir, version, 10*time.Second)
-	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, oldEp); err != nil || info.BuildTime != hourAgo.UnixMilli() {
-		t.Fatalf("old daemon health = %+v, %v; want build time %d from its executable", info, err, hourAgo.UnixMilli())
+	oldInfo, err := wsdashboard.Health(context.Background(), dashboardTestClient, oldEp)
+	if err != nil || oldInfo.BuildTime != hourAgo.UnixMilli() {
+		t.Fatalf("old daemon health = %+v, %v; want build time %d from its executable", oldInfo, err, hourAgo.UnixMilli())
+	}
+	if wsdashboard.ExecutableBuildTime(newBin) <= oldInfo.BuildTime || wsdashboard.ExecutableContentHash(newBin) == oldInfo.ContentHash {
+		t.Fatal("precondition: serve must use a newer build of different content")
 	}
 
 	serveEnv := append(env, "WS_MCP_CONFIG_MANIFESTS="+writeDashboardTestManifest(t, true))
 	serve, stdin := startServe(t, newBin, serveEnv)
-	if err := waitExit(t, old, 20*time.Second); err != nil {
-		t.Fatalf("older build's daemon exit: %v", err)
-	}
-	newEp := waitForEndpoint(t, dir, version, 20*time.Second)
-	if newEp.Token == oldEp.Token || newEp.PID == oldEp.PID {
-		t.Fatalf("endpoint not replaced: %+v", newEp)
-	}
-	newInfo, err := wsdashboard.Health(context.Background(), dashboardTestClient, newEp)
-	if err != nil || newInfo.BuildTime != wsdashboard.ExecutableBuildTime(newBin) || newInfo.BuildTime <= hourAgo.UnixMilli() {
-		t.Fatalf("new daemon health = %+v, %v; want the new build's time", newInfo, err)
+	if ep, err := wsdashboard.ReadEndpoint(dir); err != nil || ep.PID != oldEp.PID || ep.Token != oldEp.Token {
+		t.Fatalf("same-version daemon was replaced during serve: %+v, %v", ep, err)
 	}
 	_ = stdin.Close()
 	if err := waitExit(t, serve, 10*time.Second); err != nil {
 		t.Fatalf("serve exit: %v", err)
+	}
+	if ep, err := wsdashboard.ReadEndpoint(dir); err != nil || ep.PID != oldEp.PID || ep.Token != oldEp.Token {
+		t.Fatalf("same-version endpoint changed after serve exited: %+v, %v", ep, err)
+	}
+	if info, err := wsdashboard.Health(context.Background(), dashboardTestClient, oldEp); err != nil || info.PID != oldEp.PID || info.Version != version || info.BuildTime != oldInfo.BuildTime || info.ContentHash != oldInfo.ContentHash {
+		t.Fatalf("old daemon after serve exited = %+v, %v", info, err)
+	}
+	if err := wsdashboard.RequestShutdown(context.Background(), dashboardTestClient, oldEp); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitExit(t, old, 10*time.Second); err != nil {
+		t.Fatalf("old daemon shutdown: %v", err)
 	}
 }
 
