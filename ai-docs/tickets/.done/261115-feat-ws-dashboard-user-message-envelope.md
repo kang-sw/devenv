@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 462fc0e0aed0b002
 sage-review-completeness-reviewed: 462fc0e0aed0b002
+completed: 2026-11-15
 ---
 
 # Wrap every whiteboard-sent user message in a timestamped ws:user envelope

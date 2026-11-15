@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6d137ba89e3979fe
 sage-review-completeness-reviewed: 6d137ba89e3979fe
+completed: 2026-11-15
 ---
 
 # Electron shell on Windows: app-drawn VS Code-style title bar

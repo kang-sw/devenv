@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: 7509b4987c412d90
 sage-review-design-reviewed: 7509b4987c412d90
+completed: 2026-11-15
 ---
 
 # Whiteboard topic waiting-on dependencies with unblocked surfacing and reverse view

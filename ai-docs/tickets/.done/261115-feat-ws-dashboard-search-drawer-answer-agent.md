@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0d53b245184af115
 sage-review-completeness-reviewed: 0d53b245184af115
+completed: 2026-11-15
 ---
 
 # Dashboard search drawer with a read-only answer agent
