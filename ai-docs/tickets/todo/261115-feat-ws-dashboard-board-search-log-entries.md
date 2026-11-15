@@ -3,6 +3,8 @@ title: "Board search: index topic log entries and panels, including older histor
 related:
   261115-feat-ws-dashboard-search-drawer-answer-agent: "sequenced before this ticket (MAIN, 2026-11-15): both edit paletteRows/palettePick in dashboard.js and the drawer moves the palette; not a technical prerequisite"
   261114-feat-ws-dashboard-unified-search-palette: "predecessor: built the board slot (paletteRows, qBoard) this ticket extends"
+sage-review-design: required
+sage-review-completeness: required
 ---
 
 # Board search: index topic log entries and panels, including older history pages
@@ -54,6 +56,15 @@ at `9ea13ec19`); paths are relative to `agents-plugin-tool/internal/`.
   first panel's `.doc-body.entry-body` in the stream and lists that panel's
   text as the topic's "body" row; `palettePick` then scrolls to the topic,
   not the panel.
+
+## Open Decision Queue
+last-id: (pending MAIN mint)
+
+(pending) [open] [policy] Entry picks while Overview is active keep Overview's consuming handoff, then navigate the entry after Overview's exit completes.
+- Context: design reviewer (block, `missing`): Decisions put `WsOverview.pick` inside `loadTarget`'s `beforeGeometry` callback, but `loadTarget` (`agents-plugin-tool/internal/wswhiteboard/assets/stream.js#L345-L360`) ignores the callback's return and keeps materializing, flashing and navigating through `wbHistory.keep`, competing with Overview's exit, which is the one scroll writer during its animation (`3a13a3693`, `442cbdc9b`; `agents-plugin-tool/internal/wsdashboard/testdata/search-palette.test.cjs#L425-L436`).
+- Alternative a: gate before `loadTarget`; when `WsOverview.pick(topic, o)` consumes, return, so an entry pick under Overview lands on the owning topic only and the entry is not reached.
+- Alternative b: gate before `loadTarget`; when Overview consumes, chain `WsOverview.after(fn)` so `fn` runs `loadTarget` with the remaining preparation once Overview's exit animation has finished (immediately under reduced motion, where exit is synchronous); outside Overview the path is unchanged.
+> Recommend b: it preserves the existing handoff (Overview owns the topic landing, the fold owner is bypassed during exit) and still reaches the entry, with no competing scroll writes.
 
 ## Decisions
 
