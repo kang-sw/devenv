@@ -1932,5 +1932,21 @@
   "js.cmd.group.rest": "其他命令",
   "js.cmd.args": "/{0} 的参数（可选）",
   "js.cmd.images": "斜杠命令单独发送，不能附带图片：请移除图片，或移除命令。",
-  "js.cmd.astext": "输入框已有另一个命令，退回的斜杠命令以文本形式返回：要运行它，请从 / 重新选择。"
+  "js.cmd.astext": "输入框已有另一个命令，退回的斜杠命令以文本形式返回：要运行它，请从 / 重新选择。",
+  "js.update.title": "应用更新",
+  "js.update.check": "检查更新",
+  "js.update.restart": "立即重启",
+  "js.update.state.none": "已是最新版本",
+  "js.update.state.available": "有新版本 v{0}",
+  "js.update.state.ready": "更新已就绪 (v{0}) — 重启后生效",
+  "js.update.skipped": "(之前已跳过)",
+  "js.update.available": "新版本 v{0}",
+  "js.update.install": "更新",
+  "js.update.skip": "跳过此版本",
+  "js.update.downloading": "正在下载 v{0}…",
+  "js.update.ready": "更新已就绪 (v{0})。立即重启、完全退出应用或重启电脑后生效。",
+  "js.update.current": "已是最新版本 (v{0})",
+  "js.update.failed": "检查更新失败",
+  "js.update.downloadfailed": "下载更新失败：{0}",
+  "js.update.applyfailed": "无法应用更新：{0}"
 }

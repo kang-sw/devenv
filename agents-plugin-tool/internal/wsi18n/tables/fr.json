@@ -1932,5 +1932,21 @@
   "js.cmd.group.rest": "autres commandes",
   "js.cmd.args": "Arguments de /{0} (facultatif)",
   "js.cmd.images": "Une commande slash est envoyée seule et ne porte pas d'images : retirez les images, ou retirez la commande.",
-  "js.cmd.astext": "Une commande slash rendue est revenue sous forme de texte, car le compositeur contient déjà une autre commande : choisissez-la de nouveau depuis / pour l'exécuter."
+  "js.cmd.astext": "Une commande slash rendue est revenue sous forme de texte, car le compositeur contient déjà une autre commande : choisissez-la de nouveau depuis / pour l'exécuter.",
+  "js.update.title": "Mise à jour de l'app",
+  "js.update.check": "Rechercher des mises à jour",
+  "js.update.restart": "Redémarrer maintenant",
+  "js.update.state.none": "À jour",
+  "js.update.state.available": "Nouvelle version v{0} disponible",
+  "js.update.state.ready": "Mise à jour prête (v{0}) — redémarrez pour l'appliquer",
+  "js.update.skipped": "(ignorée auparavant)",
+  "js.update.available": "Nouvelle version v{0}",
+  "js.update.install": "Mettre à jour",
+  "js.update.skip": "Ignorer cette version",
+  "js.update.downloading": "Téléchargement de v{0}…",
+  "js.update.ready": "Mise à jour prête (v{0}). Elle s'applique au redémarrage immédiat, à la fermeture complète de l'app ou au redémarrage de l'ordinateur.",
+  "js.update.current": "Vous avez la dernière version (v{0})",
+  "js.update.failed": "Échec de la recherche de mises à jour",
+  "js.update.downloadfailed": "Échec du téléchargement de la mise à jour : {0}",
+  "js.update.applyfailed": "Impossible d'appliquer la mise à jour : {0}"
 }

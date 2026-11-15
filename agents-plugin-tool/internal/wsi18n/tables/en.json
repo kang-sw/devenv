@@ -1932,5 +1932,21 @@
   "js.cmd.group.rest": "other commands",
   "js.cmd.args": "Arguments for /{0} (optional)",
   "js.cmd.images": "A slash command is sent alone and carries no images: remove the images, or remove the command.",
-  "js.cmd.astext": "A returned slash command came back as text, since the composer holds another command: pick it again from / to run it."
+  "js.cmd.astext": "A returned slash command came back as text, since the composer holds another command: pick it again from / to run it.",
+  "js.update.title": "App update",
+  "js.update.check": "Check for updates",
+  "js.update.restart": "Restart now",
+  "js.update.state.none": "Up to date",
+  "js.update.state.available": "New version v{0} available",
+  "js.update.state.ready": "Update ready (v{0}) — restart to apply",
+  "js.update.skipped": "(skipped before)",
+  "js.update.available": "New version v{0}",
+  "js.update.install": "Update",
+  "js.update.skip": "Skip this version",
+  "js.update.downloading": "Downloading v{0}…",
+  "js.update.ready": "Update ready (v{0}). It applies when you restart now, fully quit the app, or reboot.",
+  "js.update.current": "You're on the latest version (v{0})",
+  "js.update.failed": "Update check failed",
+  "js.update.downloadfailed": "Update download failed: {0}",
+  "js.update.applyfailed": "The update cannot be applied: {0}"
 }

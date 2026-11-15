@@ -1932,5 +1932,21 @@
   "js.cmd.group.rest": "其他命令",
   "js.cmd.args": "/{0} 的引數（選填）",
   "js.cmd.images": "斜線命令單獨傳送，不能附帶圖片：請移除圖片，或移除命令。",
-  "js.cmd.astext": "輸入框已有另一個命令，退回的斜線命令以文字形式返回：要執行它，請從 / 重新選擇。"
+  "js.cmd.astext": "輸入框已有另一個命令，退回的斜線命令以文字形式返回：要執行它，請從 / 重新選擇。",
+  "js.update.title": "應用程式更新",
+  "js.update.check": "檢查更新",
+  "js.update.restart": "立即重新啟動",
+  "js.update.state.none": "已是最新版本",
+  "js.update.state.available": "有新版本 v{0}",
+  "js.update.state.ready": "更新已就緒 (v{0}) — 重新啟動後生效",
+  "js.update.skipped": "(先前已略過)",
+  "js.update.available": "新版本 v{0}",
+  "js.update.install": "更新",
+  "js.update.skip": "略過此版本",
+  "js.update.downloading": "正在下載 v{0}…",
+  "js.update.ready": "更新已就緒 (v{0})。立即重新啟動、完全結束應用程式或重新開機後生效。",
+  "js.update.current": "已是最新版本 (v{0})",
+  "js.update.failed": "檢查更新失敗",
+  "js.update.downloadfailed": "下載更新失敗：{0}",
+  "js.update.applyfailed": "無法套用更新：{0}"
 }
