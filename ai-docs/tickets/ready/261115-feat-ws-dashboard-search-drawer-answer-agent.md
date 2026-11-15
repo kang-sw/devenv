@@ -237,6 +237,41 @@ no-answer-needed, 2026-11-15; settled):
   config-family prose in `mcp/agent_profile.go:8-12` on contact (AGENTS.md
   "Update drifted docs on contact").
 
+### Confirmed Phase 2 addendum - 2026-11-15
+
+- **(926)=a: layout A.** The answer occupies the left column; the existing
+  five result cells occupy the right. The approved idle, answering and answered
+  dark mockups and answered light mockup were inspected at
+  `/tmp/mk917-build/917-search-agent-{idle,answering,answered}-dark.png` and
+  `/tmp/mk917-build/917-search-agent-answered-light.png`. Their selected layout A
+  text source is preserved at
+  [layout-a.css](../assets/261115-feat-ws-dashboard-search-drawer-answer-agent/layout-a.css),
+  extracted from that directory's `inject.css`; no screenshot matrix is tracked.
+- **(927)=a: owner refinement (verbatim owner-supplied words):**
+  > 이건 "micro compact" 같은 걸 두게 하면 어떨까 싶어요. 그러니까, 바로 앞 질문과 답변으로 계속 맥락이 유실되니까, 애초에 에이전트가 답변할 때 "맥락" + "답변"을 같이 넘기게 하는 식으로?
+- **(929)=ok: confirmed interpretation.** Every answer returns two parts:
+  a short rolling context summary of the conversation so far and the answer.
+  Cap the context at approximately 1–2k characters. Follow-ups send the latest
+  summary plus the new question, not only the immediately previous Q&A. The
+  drawer client retains the summary; resetting the drawer clears it. Cancelled,
+  superseded or still-streaming answers must not replace current context.
+  The existing last-five-answer browser history remains in force. This
+  supersedes the mockup's previous-Q&A-only follow-up wording; the one-shot
+  process lifecycle and read-only authority remain unchanged.
+- **Compatibility remains T0:** context is an optional additive request/payload
+  field. Legacy requests and payloads without it continue to work; no existing
+  process lifecycle, authorization, protocol or API meaning is changed.
+- **Confirmed UI-fast execution boundary.** Implement Phase 2, then run only
+  relevant scoped `wsdashboard -run` tests and `wsi18n`, offline with
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`. Use private fake-backend fixtures;
+  no real provider, Pi launch, shared daemon, runtime swap or port 29417.
+  This supersedes Phase 2's old screenshot/theme/width matrix and broad browser
+  verification expectations (including the corresponding Route Facts risk
+  evidence); owner on-screen feedback after lead merge/swap is acceptance.
+  One bounded logic-lite pass is allowed where the existing review allocation
+  requires it. Preserve the Phase 1 plan and Results. The lead owns the HEAD
+  handoff, integration and ticket closure; this invocation does not close it.
+
 ## Constraints
 
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
