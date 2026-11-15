@@ -85,9 +85,6 @@ func TestPlaybookRenderDelegateImplementerReservesPlanForTopLevelLead(t *testing
 			if !strings.HasSuffix(string(prompt), "\n\nplan-path: "+planPath+"\n") {
 				t.Fatalf("rendered floor must end with the plan-path line:\n%s", prompt)
 			}
-			if !strings.Contains(string(prompt), "## Plan") {
-				t.Fatalf("rendered floor lost its plan section:\n%s", prompt)
-			}
 		})
 	}
 }

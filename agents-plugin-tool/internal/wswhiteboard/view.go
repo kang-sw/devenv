@@ -233,10 +233,11 @@ type TopicView struct {
 	Fresh int
 	// Tickets are the topic's linked tickets, in the order the lead wrote
 	// them, each with the status ViewInput.Tickets resolved at render time.
+	// The bar shows them as one ticket icon whose popover lists each stem.
 	Tickets []TicketBadge
 	// Live retains the legacy ticket-derived work marker: at least one linked
-	// actionable ticket still idea, todo, or ready. The board no longer renders
-	// linked-ticket badges or their glow; this is non-visible view metadata.
+	// actionable ticket still idea, todo, or ready. The board renders no glow
+	// for it; this is non-visible view metadata.
 	Live bool
 }
 
@@ -274,12 +275,20 @@ type TicketBadge struct {
 	Status string
 }
 
+// Open reports whether the badge's ticket is still in idea, todo, or ready;
+// the ticket popover groups those statuses as open.
+func (b TicketBadge) Open() bool {
+	switch b.Status {
+	case TicketIdea, TicketTodo, TicketReady:
+		return true
+	}
+	return false
+}
+
 // live reports whether the badge's ticket is open work of an actionable
 // category.
 func (b TicketBadge) live() bool {
-	switch b.Status {
-	case TicketIdea, TicketTodo, TicketReady:
-	default:
+	if !b.Open() {
 		return false
 	}
 	parts := strings.SplitN(b.Name, "-", 2)
@@ -948,6 +957,11 @@ func itemView(item Item) ItemView {
 		AnswerQuote: item.AnswerQuote,
 		AnsweredAt:  item.AnsweredAt,
 		Links:       item.Links,
+	}
+	// Older writers may have stored choices on other classes. Hide them in
+	// every rendering without changing the authoritative item or its answer.
+	if item.Class != ClassPolicy {
+		return iv
 	}
 	count := len(item.Options)
 	if item.Recommendation != "" {

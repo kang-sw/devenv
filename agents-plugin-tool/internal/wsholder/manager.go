@@ -566,6 +566,11 @@ type LaunchSpec struct {
 	// RingBytes is the size of this holder's output ring; zero is
 	// Options.RingBytes.
 	RingBytes int
+	// RingSkip is a regular expression (the syntax Go and Python share):
+	// the pipe child's whole stdout lines it matches from their start stay
+	// out of the ring, so they take no sequence and reach no client. Empty
+	// keeps every line.
+	RingSkip string
 }
 
 // Launch starts a new holder for session (a JSON object the holder records
@@ -625,6 +630,9 @@ func (m *Manager) launch(spec LaunchSpec) (string, error) {
 	}
 	if ring > 0 {
 		args = append(args, "--ring-bytes", strconv.Itoa(ring))
+	}
+	if spec.RingSkip != "" {
+		args = append(args, "--ring-skip", spec.RingSkip)
 	}
 	args = append(args, m.opts.holderArgs...)
 	// The holder runs in the holders directory, not its own, so it can

@@ -30,7 +30,7 @@ func childHarness(t *testing.T) (*harness, *reports) {
 	})
 	got := &reports{}
 	h.config.Report = got.add
-	h.config.Backends[BackendPi] = h.backend
+	h.config.Backends[BackendPi] = BackendRegistration{Backend: h.backend}
 	h.backend.steers = true
 	h.endpoint = "http://127.0.0.1:1"
 	for tier, model := range map[string]string{"small": "prov/small-model", "medium": "prov/medium-model", "large": "prov/large-model"} {
@@ -228,7 +228,7 @@ func TestTokenSpawnRecordsTheHolderAsParent(t *testing.T) {
 	if rec := h.record(gc.ID); rec.Parent == nil || *rec.Parent != want || rec.Tier != "small" {
 		t.Fatalf("the child's record = %+v", rec)
 	}
-	if got := h.backend.waitProc(t, 1).nextSent(t); got != "sub task" {
+	if got := h.backend.waitProc(t, 1).nextSent(t); got != h.envelope("sub task") {
 		t.Fatalf("the child's first turn = %q", got)
 	}
 	if tok := h.token(1); tok == "" || tok == token {

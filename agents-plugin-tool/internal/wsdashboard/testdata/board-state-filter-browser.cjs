@@ -5,8 +5,12 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
 const [base, control, output, reference] = process.argv.slice(2);
-const values = ['all', 'discussing', 'waiting', 'implementing', 'awaiting-confirmation', 'closed'];
-const labels = ['전체', '논의 중', '대기 중', '진행 중', '확인 대기', '종료'];
+// 32dec7255 (feat(wsdashboard): filter research topics and framework cards),
+// AI Context: Researching follows All, Cards follows Closed; All stays topic-only.
+// This fixture has eight operational topics, one legacy topic and no research
+// topics or framework roots, so the two added filters both have zero counts.
+const values = ['all', 'researching', 'discussing', 'waiting', 'implementing', 'awaiting-confirmation', 'closed', 'cards'];
+const labels = ['전체', '연구 중', '논의 중', '대기 중', '진행 중', '확인 대기', '종료', '카드'];
 for (const address of [base, control]) {
   const u = new URL(address);
   assert(['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname));
@@ -57,7 +61,7 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         }
       }
     } finally { await ref.close(); }
-    for (const theme of ['light', 'dark']) {
+    for (const theme of ['dark', 'light']) {
       context = await browser.newContext({ viewport: { width: 900, height: 1000 }, locale: 'ko-KR', colorScheme: theme, reducedMotion: 'reduce', serviceWorkers: 'allow' });
       context.setDefaultTimeout(10000);
       // Match the effects fixture: Playwright's built-in blocker itself reads
@@ -113,6 +117,16 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         await settle();
         assert.equal(await page.locator('.board-state-radio[aria-checked="true"]').getAttribute('data-filter'), value);
       }
+      async function update(id, name, expected) {
+        await action(id, name);
+        // e64fcea2d AI Context intentionally latches top-origin changes until
+        // explicit apply; unexposed content can still be admitted immediately.
+        // Verify the same exact counts after either production admission path.
+        const apply = page.locator('.wb-oq-top .oq-updates');
+        await until(async () => await apply.isVisible() || JSON.stringify(await page.locator('.board-state-radio .board-state-count').allTextContents()) === JSON.stringify(expected.map(String)), 'stream update admitted or offered for explicit apply');
+        if (await apply.isVisible()) await apply.click();
+        await counts(expected);
+      }
       async function counts(expected) {
         await until(async () => JSON.stringify(await page.locator('.board-state-radio .board-state-count').allTextContents()) === JSON.stringify(expected.map(String)), 'authoritative counts ' + expected);
         assert.deepEqual(await page.locator('.board-state-option .board-state-count').allTextContents(), expected.map(String));
@@ -120,7 +134,9 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
       async function eligible(value) {
         const nodes = await page.locator('section.topic[data-topic]').evaluateAll(nodes => nodes.map(n => ({ name: n.dataset.topic, state: n.dataset.state, closed: n.classList.contains('closed'), hidden: n.hasAttribute('data-state-filtered'), display: getComputedStyle(n).display })));
         for (const n of nodes) {
-          const visible = value === 'all' || (n.closed ? value === 'closed' : value !== 'closed' && n.state === value);
+          // 32dec7255 countTopics: Cards excludes every topic, including legacy
+          // topics and topic-internal panels; only framework roots are eligible.
+          const visible = value !== 'cards' && (value === 'all' || (n.closed ? value === 'closed' : value !== 'closed' && n.state === value));
           assert.equal(n.hidden, !visible, 'eligibility ' + n.name + ' under ' + value);
           if (!visible) assert.equal(n.display, 'none');
         }
@@ -167,6 +183,28 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
           assert.equal(await page.locator('#ctext,#composer').count(), 0, 'saved history has no invented adapter');
           assert((await page.locator('#convo').textContent()).includes('Saved history entry'), 'real AppendRing conversation is present');
         }
+        if (id === 'filterlive' && theme === 'dark') {
+          for (const lang of ['ko', 'en']) {
+            await context.addCookies([{ name: 'ws_dashboard_lang', value: lang, url: base }]);
+            await tab.setViewportSize({ width: 1440, height: 1000 });
+            await load(id);
+            assert.equal(await page.locator('.board-overview .board-label').textContent(), lang === 'ko' ? '한 눈에 보기' : 'Overview');
+            const layout = await page.locator('.board-toolbar').evaluate(n => ({
+              outerWidth: n.getBoundingClientRect().width,
+              containerWidth: n.firstElementChild.clientWidth,
+              labels: [...n.querySelectorAll('.board-action .board-label')].map(n => ({ text: n.textContent, visible: !!n.getClientRects().length }))
+            }));
+            measurements.push({ name: 'default-split-1440', lang, ...layout }); write('measurements', measurements);
+            assert.equal(layout.labels.length, 5);
+            assert(layout.labels.every(n => n.visible), lang + ' default split retains every action label');
+            // The original 760px rule already wraps English at this width;
+            // preserve its labels while retaining Korean's single-row layout.
+            await geometry('default-split-1440-' + lang, lang === 'ko');
+            await capture('filterlive-dark-1440' + (lang === 'en' ? '-en' : ''));
+          }
+          await context.addCookies([{ name: 'ws_dashboard_lang', value: 'ko', url: base }]);
+          await load(id);
+        }
         await width(800);
         for (const selector of ['.board-state-radio', '.board-state-option']) {
           assert.deepEqual(await page.locator(selector).evaluateAll(nodes => nodes.map(n => n.dataset.filter)), values, selector + ' exact lifecycle order');
@@ -174,14 +212,14 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         }
         await select('discussing');
         const inlineCurrent = () => page.locator('.board-state-radio[aria-checked="true"]');
-        for (const [key, value] of [['ArrowRight', 'waiting'], ['ArrowDown', 'implementing'], ['ArrowLeft', 'waiting'], ['ArrowUp', 'discussing'], ['Home', 'all'], ['ArrowLeft', 'closed'], ['ArrowRight', 'all'], ['End', 'closed'], ['ArrowDown', 'all'], ['ArrowUp', 'closed']]) {
+        for (const [key, value] of [['ArrowRight', 'waiting'], ['ArrowDown', 'implementing'], ['ArrowLeft', 'waiting'], ['ArrowUp', 'discussing'], ['ArrowUp', 'researching'], ['ArrowLeft', 'all'], ['ArrowRight', 'researching'], ['Home', 'all'], ['ArrowLeft', 'cards'], ['ArrowUp', 'closed'], ['ArrowDown', 'cards'], ['ArrowRight', 'all'], ['End', 'cards'], ['ArrowDown', 'all'], ['ArrowUp', 'cards']]) {
           await inlineCurrent().press(key);
           assert.equal(await inlineCurrent().getAttribute('data-filter'), value);
           assert.equal(await inlineCurrent().evaluate(n => document.activeElement === n), true);
           assert.equal(await page.evaluate(id => localStorage.getItem('ws.dashboard.cards.' + id + '.state-filter'), id), value);
         }
         await select('all');
-        await counts([closed + 9, 2, 2, 2, 2, closed]);
+        await counts([closed + 9, 0, 2, 2, 2, 2, closed, 0]);
         assert.equal(await page.locator('section.topic.closed').count(), 30);
         assert.equal(await page.locator('.closed-more').getAttribute('data-closed-more'), String(closed - 30));
         await page.locator('section.topic').evaluateAll(nodes => nodes.forEach(n => { n.filterOriginalNode = n; const f = n.querySelector('iframe'); if (f) n.filterOriginalFrame = f; }));
@@ -199,7 +237,7 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         // Threshold uses the actual toolbar, not the browser viewport.
         await select('discussing');
         await page.locator('.board-state-radio[data-filter="discussing"]').focus();
-        await width(540); await counts([closed + 9, 2, 2, 2, 2, closed]);
+        await width(540); await counts([closed + 9, 0, 2, 2, 2, 2, closed, 0]);
         assert.equal(await page.locator('.board-state-inline').isVisible(), true);
         await capture(`${id}-${theme}-540-inline`);
         await width(539);
@@ -207,7 +245,7 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         assert.equal(await page.locator('.board-state-trigger').getAttribute('data-filter'), 'discussing');
         await page.locator('.board-state-trigger').click();
         const options = page.locator('.board-state-option');
-        assert.equal(await options.count(), 6);
+        assert.equal(await options.count(), 8);
         for (let i = 0; i < values.length; i++) {
           const o = options.nth(i);
           assert.equal(await o.evaluate(n => n.tagName), 'BUTTON');
@@ -220,7 +258,7 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         let shot = await capture(`${id}-${theme}-539-open`);
         await pair(`${id}-${theme}-539-open`, shot, refs[`v2-${theme}-1280`]);
         const current = () => page.locator('.board-state-option[aria-checked="true"]');
-        for (const [key, value] of [['ArrowDown', 'waiting'], ['ArrowUp', 'discussing'], ['ArrowRight', 'waiting'], ['ArrowLeft', 'discussing'], ['End', 'closed'], ['ArrowRight', 'all'], ['ArrowLeft', 'closed'], ['Home', 'all'], ['ArrowUp', 'closed'], ['ArrowDown', 'all']]) {
+        for (const [key, value] of [['ArrowDown', 'waiting'], ['ArrowUp', 'discussing'], ['ArrowRight', 'waiting'], ['ArrowLeft', 'discussing'], ['ArrowUp', 'researching'], ['ArrowLeft', 'all'], ['ArrowRight', 'researching'], ['End', 'cards'], ['ArrowUp', 'closed'], ['ArrowDown', 'cards'], ['ArrowRight', 'all'], ['ArrowLeft', 'cards'], ['Home', 'all'], ['ArrowUp', 'cards'], ['ArrowDown', 'all']]) {
           await current().press(key);
           assert.equal(await current().getAttribute('data-filter'), value);
           assert.equal(await current().evaluate(n => document.activeElement === n), true);
@@ -253,15 +291,15 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         await until(async () => await page.locator('.board-state-trigger').getAttribute('data-filter') === 'discussing', 'per-session persistence');
         await eligible('discussing');
         await width(800); await select('waiting');
-        await action(id, 'transition'); await counts([closed + 9, 4, 0, 2, 2, closed]); await eligible('waiting');
+        await update(id, 'transition', [closed + 9, 0, 4, 0, 2, 2, closed, 0]); await eligible('waiting');
         assert.equal(await page.locator('section.topic:not([data-state-filtered])').count(), 0, 'zero transition has no invented eligibility');
-        await select('discussing'); await action(id, 'close');
-        await counts([closed + 9, 3, 0, 2, 2, closed + 1]); await eligible('discussing');
+        await select('discussing'); await update(id, 'close', [closed + 9, 0, 3, 0, 2, 2, closed + 1, 0]);
+        await eligible('discussing');
         await select('closed');
         const paging = tab.waitForResponse(r => new URL(r.url()).pathname === `/s/${id}/closed` && r.status() === 200);
         await page.locator('.closed-more').click(); await paging;
         await until(async () => await page.locator('section.topic.closed').count() > 30, 'real closed history appended');
-        await counts([closed + 9, 3, 0, 2, 2, closed + 1]); await eligible('closed');
+        await counts([closed + 9, 0, 3, 0, 2, 2, closed + 1, 0]); await eligible('closed');
         await select('all');
         // Real scroll ownership differs for ordinary and saved-history boards.
         const scroll = await page.locator('#bcol').evaluate(b => {
@@ -304,7 +342,7 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         await tab.keyboard.press('Enter');
         assert.equal(await page.locator('.board-overview').getAttribute('aria-pressed'), 'false', 'topic selection still exits Overview');
         assert.equal(await page.evaluate(() => document.activeElement.dataset.topic), filteredNames[0], 'topic selection expands selected eligible row');
-        checks.push({ theme, id, matrix: '800 all six selected labels; 540 inline; 539 pop keyboard; 360 pill; reload; stream transition/close; real closed paging; floating; Overview' });
+        checks.push({ theme, id, matrix: '800 all eight selected labels; 540 inline; 539 pop keyboard; 360 pill; reload; stream transition/close; real closed paging; floating; Overview' });
       }
       // Wide pin column uses real production pin actions and keeps hidden nodes.
       await load('filterordinary'); await tab.setViewportSize({ width: 1900, height: 1000 }); await select('all');

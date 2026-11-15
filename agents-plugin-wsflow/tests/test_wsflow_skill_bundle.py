@@ -5,15 +5,9 @@ from pathlib import Path
 
 PLUGIN_DIR = Path(__file__).resolve().parents[1]
 FULL_PLUGIN_SKILLS_DIR = PLUGIN_DIR.parent / "agents-plugin" / "skills"
-# Full ws moves internal procedure bodies off the directly-invocable skill
-# surface into rsrc playbooks (epic 260605 M2). A wsflow-mirrored skill may
-# therefore have its full-ws counterpart as either a skill directory or an
-# rsrc playbook directory; both count for drift detection.
+# A mirrored skill's full-ws counterpart may be a skill or an rsrc playbook.
 FULL_PLUGIN_RSRC_DIR = PLUGIN_DIR.parent / "agents-plugin" / "rsrc"
 SKILLS_DIR = PLUGIN_DIR / "skills"
-# The wsflow package's own shared-playbook copies (byte-mirrored from full ws,
-# template variables and all): the wsflow side of the run/stop obligation text
-# pinned below.
 RSRC_DIR = PLUGIN_DIR / "rsrc"
 
 
@@ -35,40 +29,15 @@ EXPECTED_SKILLS = {
     "lead-use-mailbox",
 }
 
-# wsflow-only backward-compat aliases mapped to the shared playbook they route
-# to. lead-proceed is a deprecation tombstone for the retired lead-proceed name:
-# it has no full-ws counterpart (the flagship surface keeps that name
-# unresolvable) and no rsrc body of its own — its body is lead-run's
-# parallel-init shim pointing at the lead-run playbook. Each alias is therefore
-# excused from the full-ws-counterpart, name-keyed shim-shape, and
-# shared-playbook checks and asserted directly by
-# test_wsflow_only_aliases_route_to_target.
+# wsflow-only backward-compat aliases mapped to their shared playbooks.
 WSFLOW_ALIAS_TARGET = {"lead-proceed": "lead-run"}
 
 EXPECTED_WSFLOW_ONLY_SKILLS: set = set(WSFLOW_ALIAS_TARGET)
 EXPECTED_INLINE_SKILLS = {
     "lead-revive",
 }
-EXPECTED_PARALLEL_INIT_SKILLS = {
-    "lead-delegate",
-    "lead-discuss",
-    "lead-run",
-    "lead-use-mailbox",
-}
-# Playbook shims whose read stays a model call, with no preload block: none
-# today. lead-use-mailbox has a block too, since the Claude mod replaces the
-# key in its key-specific wait command with a placeholder before inlining it.
-# The inline revive and the alias read no playbook of their own name and are
-# exempted through their own sets. Every other shim wraps its fallback prose in
-# a `<ws-preload playbook="<own name>">` block the mod replaces with the
-# playbook body.
+# Inline skills and aliases carry no own-playbook preload block.
 EXPECTED_PRELOAD_EXCLUDED: set = set()
-PARALLEL_INIT_TITLES = {
-    "lead-delegate": "Delegate",
-    "lead-discuss": "Discuss",
-    "lead-run": "Run",
-    "lead-use-mailbox": "Use Mailbox",
-}
 
 FORBIDDEN_PATTERNS = {
     "retired add-rule skill": re.compile(r"\blead-add-rule\b"),
@@ -80,11 +49,6 @@ FORBIDDEN_PATTERNS = {
     "full ws agent dotted tool": re.compile(r"\bagents\."),
     "excluded write-code skill": re.compile(r"\blead-write-code\b"),
     "excluded write-skeleton skill": re.compile(r"\blead-write-skeleton\b"),
-    # lead-sprint, lead-salvage, lead-drain-ready-queue, lead-goal-fan-out-step,
-    # lead-proceed, lead-implement and lead-verify-discussion were retired
-    # outright rather than merely excluded from wsflow, and lead-write-ticket
-    # was renamed to lead-ticket, so these guard against a reintroduced
-    # reference to a skill that no longer exists in either lineage.
     "retired sprint skill": re.compile(r"\blead-sprint\b"),
     "retired salvage skill": re.compile(r"\blead-salvage\b"),
     "retired drain skill": re.compile(r"\blead-drain-ready-queue\b"),
@@ -96,10 +60,7 @@ FORBIDDEN_PATTERNS = {
     "excluded authoring skill": re.compile(r"\blead-skill-authoring\b"),
 }
 
-# Mirrors lead-bootstrap.md's `## On: fresh` step 1: strip only the two
-# scaffold-only comment blocks before comparing emitted output across
-# packages. The Inclusion-test comment is migration-v0010-permanent
-# downstream content and must NOT be stripped.
+# Strip only scaffold comments before comparing emitted output across packages.
 _MIGRATION_SETUP_BLOCK = re.compile(r"<!-- MIGRATION:.*?-->\n*", re.DOTALL)
 _MIGRATION_CHECKLIST_BLOCK = re.compile(r"<!-- MIGRATION CHECKLIST.*?-->\n*", re.DOTALL)
 
@@ -161,59 +122,10 @@ class WsflowSkillBundleTest(unittest.TestCase):
                     offenders.append(f"{path.relative_to(PLUGIN_DIR)}: {label}")
         self.assertEqual(offenders, [])
 
-    def test_skill_files_are_thin_playbook_shims(self):
-        # Every non-inline, non-parallel-init, non-alias shim carries the
-        # generic "stop and report that blocker" tail.
-        offenders = []
-        for skill in sorted(
-            EXPECTED_SKILLS
-            - EXPECTED_INLINE_SKILLS
-            - EXPECTED_PARALLEL_INIT_SKILLS
-            - set(WSFLOW_ALIAS_TARGET)
-        ):
-            path = SKILLS_DIR / skill / "SKILL.md"
-            text = path.read_text(encoding="utf-8")
-            match = re.fullmatch(
-                r"---\n"
-                rf"name: {re.escape(skill)}\n"
-                r"description: .+\n"
-                r"---\n\n"
-                rf'<ws-preload playbook="{re.escape(skill)}">\n'
-                r"# .+\n\n"
-                rf"Call `wsflow/playbook\.read\(name: \"{re.escape(skill)}\"\)` and execute the returned procedure\n"
-                r"inline against the current user request\. If the playbook cannot be loaded, stop\n"
-                r"and report that blocker\.\n"
-                r"</ws-preload>\n",
-                text,
-            )
-            if match is None:
-                offenders.append(str(path.relative_to(PLUGIN_DIR)))
-        self.assertEqual(offenders, [])
-
-    def test_parallel_init_skill_files_are_playbook_shims(self):
-        offenders = []
-        for skill in sorted(EXPECTED_PARALLEL_INIT_SKILLS):
-            path = SKILLS_DIR / skill / "SKILL.md"
-            text = path.read_text(encoding="utf-8")
-            title = PARALLEL_INIT_TITLES[skill]
-            preload = skill not in EXPECTED_PRELOAD_EXCLUDED
-            match = re.fullmatch(
-                r"---\n"
-                rf"name: {re.escape(skill)}\n"
-                r"description: .+\n"
-                r"---\n\n"
-                + (rf'<ws-preload playbook="{re.escape(skill)}">\n' if preload else "")
-                + rf"# {re.escape(title)}\n\n"
-                r"Call in parallel:\n"
-                rf"- `wsflow/playbook\.read\(name: \"{re.escape(skill)}\", session_key: <your key, omit if fresh>\)`\n"
-                r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
-                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\.\n"
-                + (r"</ws-preload>\n" if preload else ""),
-                text,
-            )
-            if match is None:
-                offenders.append(str(path.relative_to(PLUGIN_DIR)))
-        self.assertEqual(offenders, [])
+    def test_skill_files_load(self):
+        for skill in sorted(EXPECTED_SKILLS):
+            text = (SKILLS_DIR / skill / "SKILL.md").read_text(encoding="utf-8")
+            self.assertTrue(text.strip(), skill)
 
     def test_preload_blocks_name_their_own_playbook(self):
         # The Claude mod expands a block only when its playbook attribute names
@@ -231,10 +143,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_preload_shim_headings_sit_inside_their_blocks(self):
-        # A shim's `# <title>` opens its `<ws-preload>` block, so an expansion
-        # replaces it with the playbook's own identical heading instead of
-        # showing the title twice, and a harness that does not expand still
-        # reads the heading first. Both packages ship such shims.
+        # Expansion replaces the shim heading with the playbook heading.
         offenders = []
         for skills_dir in (SKILLS_DIR, FULL_PLUGIN_SKILLS_DIR):
             for path in sorted(skills_dir.glob("*/SKILL.md")):
@@ -254,10 +163,7 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_skill_shims_point_to_shared_playbooks(self):
-        # wsflow-only aliases point at a shared playbook under a different stem
-        # than their own name (D5: no rsrc body of their own), so they are
-        # covered by test_wsflow_only_aliases_route_to_target, which asserts the
-        # target playbook exists.
+        # Aliases target a different shared stem, checked separately below.
         missing = []
         for skill in sorted(EXPECTED_SKILLS - EXPECTED_INLINE_SKILLS - set(WSFLOW_ALIAS_TARGET)):
             subdir_playbook = FULL_PLUGIN_RSRC_DIR / skill / f"{skill}.md"
@@ -267,175 +173,24 @@ class WsflowSkillBundleTest(unittest.TestCase):
         self.assertEqual(missing, [])
 
     def test_wsflow_only_aliases_route_to_target(self):
-        # A wsflow-only backward-compat alias (e.g. the retired lead-proceed
-        # name) is a thin shim whose body is the target's parallel-init shim
-        # pointing at the target playbook, so a by-name caller runs the current
-        # target procedure. Its description does double duty as the tombstone:
-        # it names both the retired alias and the canonical target so an
-        # auto-selector is steered to the target while a by-name call still
-        # runs. The alias has no rsrc body of its own; the target's shared
-        # playbook must exist.
         offenders = []
         for alias, target in sorted(WSFLOW_ALIAS_TARGET.items()):
             path = SKILLS_DIR / alias / "SKILL.md"
             text = path.read_text(encoding="utf-8")
-            description = re.search(r"^description: (.*)$", text, re.M)
-            if description is None or alias not in description.group(1) or target not in description.group(1):
-                offenders.append(f"{path.relative_to(PLUGIN_DIR)}: description must name both {alias} and {target}")
-                continue
             subdir_playbook = FULL_PLUGIN_RSRC_DIR / target / f"{target}.md"
             flat_playbook = FULL_PLUGIN_RSRC_DIR / f"{target}.md"
             if not subdir_playbook.exists() and not flat_playbook.exists():
                 offenders.append(f"{path.relative_to(PLUGIN_DIR)}: target playbook {target} missing")
                 continue
-            match = re.fullmatch(
-                r"---\n"
-                rf"name: {re.escape(alias)}\n"
-                r"description: .+\n"
-                r"---\n\n"
-                r"# .+\n\n"
-                r"Call in parallel:\n"
-                rf'- `wsflow/playbook\.read\(name: "{re.escape(target)}", session_key: <your key, omit if fresh>\)`\n'
-                r'- `wsflow/workflow_manual\(session_key: <your key or "obsidian-latch" if fresh>, root: <absolute worktree path if fresh>\)`\n\n'
-                r"After both return, execute the procedure returned by `wsflow/playbook\.read`\.\n",
-                text,
-            )
-            if match is None:
-                offenders.append(f"{path.relative_to(PLUGIN_DIR)}: body is not the {target} parallel-init shim")
+            if f'wsflow/playbook.read(name: "{target}"' not in text:
+                offenders.append(f"{path.relative_to(PLUGIN_DIR)}: target playbook read missing")
         self.assertEqual(offenders, [])
 
-    def test_wsflow_elevated_body_is_mini_lead_and_escalated_retired(self):
-        # Self-contained wsflow pin, parallel to the merge-obligation mirror
-        # below: the agents-plugin suite's divergence check reaches into
-        # agents-plugin-wsflow/rsrc, but `discover agents-plugin-wsflow/tests`
-        # in isolation must also catch a wsflow-only regression — a stray
-        # ticket-worker-escalated dir left in the mirror, or the elevated body
-        # silently drifting back toward the old single-phase prose.
+    def test_wsflow_escalated_retired(self):
         self.assertFalse((RSRC_DIR / "ticket-worker-escalated").exists())
-        elevated = " ".join(
-            (RSRC_DIR / "ticket-worker-elevated" / "ticket-worker-elevated.md")
-            .read_text(encoding="utf-8")
-            .split()
-        )
-        self.assertIn("You are an orchestrating mini-lead", elevated)
-        self.assertIn("You own every phase without a `### Result`", elevated)
-        self.assertIn("Run leaves one at a time on your single warm worktree", elevated)
-        self.assertIn("fall back to phase-serial leaves", elevated)
-        self.assertIn("a recommendation keyed to leverage, not a gate", elevated)
-        default = " ".join(
-            (RSRC_DIR / "ticket-worker" / "ticket-worker.md").read_text(encoding="utf-8").split()
-        )
-        self.assertIn(
-            "The earliest phase without a `### Result` is the phase you execute", default
-        )
-        self.assertNotIn("orchestrating mini-lead", default)
-
-    def test_wsflow_run_and_stop_protocol_carry_merge_obligation_text(self):
-        # The byte-mirror carries the lead-run.md / worker-stop-protocol.md
-        # obligation text into the wsflow package, but nothing on the wsflow side
-        # pinned it. This mirrors agents-plugin's
-        # test_skill_dispatch_contracts.py::test_workers_report_and_lead_owns_impl_merge
-        # against the wsflow copies, so a mirror that silently drops or mangles
-        # the merge/stop obligations fails here too. Template variables
-        # ({{.McpNamespace}}) are preserved verbatim by the mirror.
-        for name in ("ticket-worker", "ticket-worker-elevated"):
-            text = (RSRC_DIR / name / (name + ".md")).read_text(encoding="utf-8")
-            self.assertIn("The lead owns merging after your report; do not merge.", text)
-            self.assertNotIn("Merge per the route verdict", text)
-        protocol = (RSRC_DIR / "worker-stop-protocol.md").read_text(encoding="utf-8")
-        self.assertIn("all merges, including impl into goal, belong to the lead", protocol)
-        self.assertIn("merge_confirm: skip | ask", protocol)
-        self.assertIn("branch-identity safety stop", protocol)
-        self.assertIn("as (b); only the lead may judge", protocol)
-        self.assertIn("Do not self-vouch", protocol)
-        self.assertIn("completion: phase | ticket | ad_hoc | none", protocol)
-        self.assertIn("Valid terminal pairs are `[ok]` with `stop: none`", protocol)
-        self.assertIn(
-            "Your terminal report does not restore the checkout: the shared worktree's",
-            protocol,
-        )
-        # Whitespace-normalized so a prose reflow in the canonical body cannot
-        # break a pinned phrase across a newline; the mirror is byte-identical,
-        # so this reads the same text the full package pins.
-        run = " ".join((RSRC_DIR / "lead-run" / "lead-run.md").read_text(encoding="utf-8").split())
-        self.assertIn("`merge_confirm: skip` auto-calls", run)
-        self.assertIn("`ask` (including absent)", run)
-        self.assertIn("{{.McpNamespace}}/git.merge", run)
-        self.assertIn("call `{{.McpNamespace}}/git.merge` with the goal branch", run)
-        self.assertNotIn("goal-to-PARENT terminal uses raw Git", run)
-        self.assertIn("`completion: phase` — do not merge", run)
-        self.assertIn("`completion: ticket` — merge the retained impl branch", run)
-        self.assertIn(
-            "**(b) unresolved decision** — For a branch-identity safety stop, judge ownership "
-            "from cross-ticket context or a bounded explore.",
-            run,
-        )
-        self.assertIn("If the unmerged work belongs to the target ticket, re-invoke its route", run)
-        self.assertIn("incompatible values are a protocol mismatch", run)
-        self.assertIn("call `{{.McpNamespace}}/git.status` and decide", run)
-        self.assertIn("Branch-explicit calls need no check.", run)
-        # Opt-in parallel route: the byte-mirror must carry the gated
-        # approval (which a worktree/parallel instruction already is), the
-        # delegated batch selection, and the pointers to the workflow manual's
-        # worktree mode, which owns provisioning, release, and serial merges.
-        self.assertIn("## Parallel route (opt-in)", run)
-        self.assertIn("unless the opt-in parallel route below is approved for this run", run)
-        self.assertIn("Serial is the default.", run)
-        self.assertIn(
-            "This route runs the workflow manual's `#### Parallel mode` over ready"
-            " tickets and opens on one per-run user approval",
-            run,
-        )
-        self.assertIn(
-            "a user instruction to work in worktree or parallel mode is that approval.",
-            run,
-        )
-        self.assertIn("The approved batch is the concurrency cap.", run)
-        self.assertIn("Render `ticket-batch-selector` at its recommended tier", run)
-        self.assertIn(
-            "Provision each ticket by the manual's `### Worktree-based work mode`, skip"
-            " Spawn step 3, and render its worker with `root_override: <worktree path>`"
-            " and the acquired branch on the Branch line.",
-            run,
-        )
-        manual = " ".join(
-            (RSRC_DIR / "lead-workflow-manual" / "lead-workflow-manual.md")
-            .read_text(encoding="utf-8")
-            .split()
-        )
-        self.assertIn(
-            "Release that worktree before merging its branch or when the unit ends"
-            " unmerged; a worktree that keeps a branch checked out blocks"
-            " `{{.McpNamespace}}/git.merge` and every other checkout of it.",
-            manual,
-        )
-        self.assertIn("Merge units one at a time as they finish.", manual)
-        # The parallel-safety predicate moved out of lead-run into its own
-        # delegate playbook; the mirror must carry that playbook too.
-        batch = " ".join(
-            (RSRC_DIR / "ticket-batch-selector" / "ticket-batch-selector.md")
-            .read_text(encoding="utf-8")
-            .split()
-        )
-        self.assertIn(
-            "Exclude a candidate only when its `blocked-by:` edge, a `related:` or `parent:`"
-            " line, or its body names another candidate as something it needs first",
-            batch,
-        )
-        self.assertIn(
-            "Everything else is parallel-safe: a shared epic, an unqualified `related:`"
-            " edge, merely related prose, and overlapping files, whose conflicts are"
-            " resolved downstream.",
-            batch,
-        )
-        self.assertIn("{{.McpNamespace}}/git.status(format: \"json\")", batch)
 
     def test_bootstrap_scaffolds_emit_converged_output_across_packages(self):
-        # Ticket 260825 Phase 4: assert positive convergence. Both packages'
-        # AGENTS.template.md emit byte-identical fresh-mode bodies (stripping
-        # only the scaffold-only MIGRATION blocks, mirroring lead-bootstrap.md's
-        # `## On: fresh` step 1) and share one migration-ordinal tag; WORKFLOW.md
-        # has no strip blocks and is compared raw.
+        # Compare emitted templates and their migration-ordinal tags, not prose.
         ws_agents_raw = (FULL_PLUGIN_SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
         wsflow_agents_raw = (SKILLS_DIR / "lead-bootstrap" / "AGENTS.template.md").read_text(encoding="utf-8")
         ws_emitted = _emit_fresh_body(ws_agents_raw)

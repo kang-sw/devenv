@@ -249,10 +249,10 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
-// TestHeldCommandBubbleHasNoSteer pins the held command bubble: its typed
-// line and the cancel control, and no steer control, which the daemon
-// refuses for a command.
-func TestHeldCommandBubbleHasNoSteer(t *testing.T) {
+// TestHeldCommandBubbleHasSteer pins the held command bubble: its typed
+// line, the cancel control, and the steer control a held text message has,
+// which sends the line as steered text (wsinbox.Steer).
+func TestHeldCommandBubbleHasSteer(t *testing.T) {
 	f := startPageFixture(t)
 	f.withCommands(t, wslive.SlashCommand{Name: "compact", Source: "builtin"})
 	text, _ := f.send(t, `{"text":"plain"}`)
@@ -265,8 +265,7 @@ func TestHeldCommandBubbleHasNoSteer(t *testing.T) {
 	if bubble == "" {
 		t.Fatalf("no held command bubble for %s:\n%s", cmd, page)
 	}
-	contains(t, "held command bubble", bubble, `<code class="cmdtyped">/compact keep &lt;the&gt; plan</code>`, `data-cancel="`+cmd+`"`)
-	lacks(t, "held command bubble", bubble, `data-steer=`)
+	contains(t, "held command bubble", bubble, `<code class="cmdtyped">/compact keep &lt;the&gt; plan</code>`, `data-cancel="`+cmd+`"`, `data-steer="`+cmd+`"`)
 	if !strings.Contains(page, `data-steer="`+text+`"`) {
 		t.Error("the held text message lost its steer control")
 	}

@@ -34,19 +34,19 @@ func (f *pageFixture) waitLabel(t *testing.T, id, label string) {
 
 // TestLabelRouteSavesShowsAndResets pins the display label: a POST stores
 // the trimmed label in the session directory and answers it; the session
-// page's head, tab title, and rail row, and the index list, then show it in
-// place of the reply-id, with the reply-id in the tooltip and the mailbox
-// address naming the label as the name's copy text. A session without a live adapter takes
-// a label too. An empty label removes the file and shows the reply-id
-// again.
+// page's head, tab title, and rail row, and the root shell's session list,
+// then show it in place of the reply-id. The head keeps the reply-id in its
+// tooltip and copies a mailbox address naming the label. A session without
+// a live adapter takes a label too. An empty label removes the file and
+// shows the reply-id again.
 func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 	f := startPageFixture(t)
 
 	// No label file: the head, title, and rail show the reply-id.
 	_, page := get(t, f.base+"/s/livesession")
 	for _, want := range []string{
-		`<title>livesession - ws dashboard</title>`,
-		`data-label="" data-max="64" data-title="livesession - ws dashboard"`,
+		`<title>livesession - Werkschaft (alpha)</title>`,
+		`data-label="" data-max="64" data-title="livesession - Werkschaft (alpha)"`,
 		`data-copy="` + html.EscapeString((SessionView{ReplyID: "livesession", Project: f.project, Harness: "claude"}).MailboxRef()) + `"`,
 		`class="sren" title="Rename (shown on this dashboard only)"`,
 		`<span class="rid">livesession</span>`,
@@ -72,10 +72,11 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 
 	_, page = get(t, f.base+"/s/livesession")
 	for _, want := range []string{
-		`<title>Build bot - ws dashboard</title>`,
-		`data-label="Build bot" data-max="64" data-title="Build bot - ws dashboard"`,
+		`<title>Build bot - Werkschaft (alpha)</title>`,
+		`data-label="Build bot" data-max="64" data-title="Build bot - Werkschaft (alpha)"`,
 		`data-copy="` + html.EscapeString((SessionView{ReplyID: "livesession", Project: f.project, Harness: "claude", Label: "Build bot"}).MailboxRef()) + `"`,
-		`<span class="rid lbl" title="livesession">Build bot</span>`,
+		`class="snm lbl"`,
+		`title="livesession&#10;click to copy">Build bot</button>`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("labelled page lacks %q", want)
@@ -85,9 +86,22 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 	if !strings.Contains(page, `data-rid="livesession"`) || !strings.Contains(page, `href="/s/livesession"`) {
 		t.Errorf("the label replaced the reply-id outside the display")
 	}
-	_, index := get(t, f.base+"/?frame=1")
-	if !strings.Contains(index, `<span class="rid lbl" title="livesession">Build bot</span>`) {
-		t.Errorf("index list lacks the label")
+	assertRailName := func(path, want string) {
+		t.Helper()
+		_, body := get(t, f.base+path)
+		rail := regexp.MustCompile(`(?s)<aside id="rail"[^>]*>(.*?)</aside>`).FindStringSubmatch(body)
+		if rail == nil {
+			t.Fatalf("%s lacks the shell's session rail", path)
+		}
+		row := regexp.MustCompile(`(?s)<a class="rl" href="/s/livesession">(.*?)</a>`).FindStringSubmatch(rail[1])
+		if row == nil || !strings.Contains(row[1], want) {
+			t.Errorf("%s: livesession rail name lacks %q", path, want)
+		}
+	}
+	// The shell owns the session list; its row's rich hover replaces the
+	// old native reply-id tooltip, not the visible display label.
+	for _, path := range []string{"/s/livesession", "/"} {
+		assertRailName(path, `<span class="rid lbl">Build bot</span>`)
 	}
 
 	// A board-first session (no live adapter) is renamed all the same.
@@ -105,8 +119,11 @@ func TestLabelRouteSavesShowsAndResets(t *testing.T) {
 	}
 	f.waitLabel(t, "livesession", "")
 	_, page = get(t, f.base+"/s/livesession")
-	if !strings.Contains(page, `<title>livesession - ws dashboard</title>`) || !strings.Contains(page, `title="livesession&#10;click to copy">livesession</button>`) {
+	if !strings.Contains(page, `<title>livesession - Werkschaft (alpha)</title>`) || !strings.Contains(page, `title="livesession&#10;click to copy">livesession</button>`) {
 		t.Errorf("reset page does not show the reply-id")
+	}
+	for _, path := range []string{"/s/livesession", "/"} {
+		assertRailName(path, `<span class="rid">livesession</span>`)
 	}
 	// Resetting again is no error.
 	if code, raw := f.labelPost(t, "livesession", `{"label":""}`); code != http.StatusOK {
@@ -235,7 +252,7 @@ El.prototype.select = function () {};
 var doc = { createElement: function (t) { return new El(t); } };
 var root = new El("html", "", { "data-rid": "sess" });
 var H = new El("span", "r-head");
-var sn = H.appendChild(new El("span", "meta sname", { "data-label": "", "data-max": "64", "data-title": "sess - ws dashboard" }));
+var sn = H.appendChild(new El("span", "meta sname", { "data-label": "", "data-max": "64", "data-title": "sess - Werkschaft (alpha)" }));
 var nm = sn.appendChild(new El("button", "snm", { "data-copy": '<mailbox id="id:sess" dir="/p"/>', "data-mailbox-open": '<mailbox id="id:sess" dir="/p"' }));
 nm.textContent = "sess";
 var pen = sn.appendChild(new El("button", "sren", { "aria-label": "Rename" }));
@@ -343,7 +360,7 @@ check("a cut never leaves a trailing space", labelClean("ab cd", 3), "ab");
 
 // A head swap retitles the tab from the head's name.
 labelSwapped();
-check("the tab title follows the head", titles, ["sess - ws dashboard"]);
+check("the tab title follows the head", titles, ["sess - Werkschaft (alpha)"]);
 process.stdout.write(bad.join("\n"));
 `
 

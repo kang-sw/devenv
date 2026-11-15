@@ -108,14 +108,14 @@ func TestLeadSpawnRunsUnderAHolder(t *testing.T) {
 	if err != nil || !reg.Hosted || reg.Agent || reg.HostPID == 0 || reg.HostPID != rec.HostPID || rec.HolderID != holder {
 		t.Fatalf("the row should name the spawned process: %+v (%v), record holder %q pid %d", reg, err, rec.HolderID, rec.HostPID)
 	}
-	if got := h.userInputs(holder); !slices.Equal(got, []string{"hello"}) {
+	if got := h.userInputs(holder); !slices.Equal(got, h.envelopes("hello")) {
 		t.Fatalf("user turns written = %q", got)
 	}
 
 	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "plan"), replyLine("u1", "hi there"), resultLine(), stateLine(HarnessIdle))
 	h.idle(st.ID)
 	ring := h.ring(st.ID)
-	if !slices.Equal(ringTexts(ring, wslive.RingUser), []string{"hello"}) || !slices.Equal(ringTexts(ring, wslive.RingReply), []string{"hi there"}) {
+	if !slices.Equal(ringTexts(ring, wslive.RingUser), h.envelopes("hello")) || !slices.Equal(ringTexts(ring, wslive.RingReply), []string{"hi there"}) {
 		t.Fatalf("ring = %+v", ring)
 	}
 	if st := h.state(st.ID); !st.Process || st.ActiveMode != "plan" || st.Error != "" || st.Held != 0 {
@@ -271,7 +271,7 @@ func TestLeadHeldSendFlushesAtIdleNotAtResult(t *testing.T) {
 		t.Fatalf("the result must not submit the held message: %+v, written %q", st, h.userInputs(holder))
 	}
 	h.holders.out(holder, stateLine(HarnessIdle))
-	eventually(t, "the held message to be submitted", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	eventually(t, "the held message to be submitted", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 	h.sync(id, holder)
 	if st := h.state(id); st.Held != 0 || st.Status != StatusRunning {
 		t.Fatalf("the submitted message's turn should run: %+v", st)
@@ -284,7 +284,7 @@ func TestLeadHeldSendFlushesAtIdleNotAtResult(t *testing.T) {
 	h.holders.out(holder, stateLine(HarnessIdle))
 	h.idle(id)
 	ring := h.ring(id)
-	if !slices.Equal(ringTexts(ring, wslive.RingUser), []string{"one", "two"}) || !slices.Equal(ringTexts(ring, wslive.RingReply), []string{"first", "second"}) {
+	if !slices.Equal(ringTexts(ring, wslive.RingUser), h.envelopes("one", "two")) || !slices.Equal(ringTexts(ring, wslive.RingReply), []string{"first", "second"}) {
 		t.Fatalf("ring = %+v", ring)
 	}
 }
@@ -305,7 +305,7 @@ func TestLeadHeldSendFlushesAtAnUnsolicitedTurnsEnd(t *testing.T) {
 		t.Fatalf("a message sent during the turn is held: %+v", st)
 	}
 	h.holders.out(holder, resultLine())
-	eventually(t, "the held message to be submitted", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	eventually(t, "the held message to be submitted", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 	if st := h.state(id); st.Status != StatusRunning || st.Held != 0 {
 		t.Fatalf("the submitted message's turn should run: %+v", st)
 	}
@@ -346,12 +346,12 @@ func TestLeadSteeredMessageReachesTheRunningTurn(t *testing.T) {
 	// The second send is what tells the runner: both are held when it looks.
 	h.steerHeld(id)
 	h.send(id, "later")
-	eventually(t, "the steered message", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "now"}) })
+	eventually(t, "the steered message", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "now")) })
 	h.runner.conv(id).do(func() {})
 	if st := h.state(id); st.Held != 1 || st.Status != StatusRunning || !st.Process {
 		t.Fatalf("the unmarked message stays held and the turn runs on: %+v", st)
 	}
-	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, []string{"one", "now"}) {
+	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, h.envelopes("one", "now")) {
 		t.Fatalf("ring user entries = %q", got)
 	}
 	// The harness takes the message up inside the turn; its one result ends
@@ -363,12 +363,12 @@ func TestLeadSteeredMessageReachesTheRunningTurn(t *testing.T) {
 	}
 	h.holders.out(holder, stateLine(HarnessIdle))
 	eventually(t, "the held message at the turn's end", func() bool {
-		return slices.Equal(h.userInputs(holder), []string{"one", "now", "later"})
+		return slices.Equal(h.userInputs(holder), h.envelopes("one", "now", "later"))
 	})
 	h.holders.out(holder, turnLines("sess-1", "u3", "done")...)
 	h.idle(id)
 	ring := h.ring(id)
-	if !slices.Equal(ringTexts(ring, wslive.RingUser), []string{"one", "now", "later"}) || !slices.Equal(ringTexts(ring, wslive.RingReply), []string{"changed course", "done"}) {
+	if !slices.Equal(ringTexts(ring, wslive.RingUser), h.envelopes("one", "now", "later")) || !slices.Equal(ringTexts(ring, wslive.RingReply), []string{"changed course", "done"}) {
 		t.Fatalf("ring = %+v", ring)
 	}
 	if h.holders.opCount("stop") != 0 || h.holders.opCount("spawn") != 1 {
@@ -392,13 +392,13 @@ func TestPiLeadSteeredMessageIsTheSteerCommand(t *testing.T) {
 	h.steerHeld(id)
 	h.runner.InboxChanged(id)
 	eventually(t, "the steer command", func() bool { return len(h.holders.inputs(holder, "steer")) == 1 })
-	if got := h.holders.inputs(holder, "steer")[0]; !sameJSON(t, json.RawMessage(got), []byte(`{"type":"steer","message":"now"}`)) || len(h.holders.inputs(holder, "prompt")) != 1 {
+	if got := h.holders.inputs(holder, "steer")[0]; !sameJSON(t, json.RawMessage(got), mustJSON(t, map[string]string{"type": "steer", "message": h.envelope("now")})) || len(h.holders.inputs(holder, "prompt")) != 1 {
 		t.Fatalf("steer line = %s, prompts %q", got, h.holders.inputs(holder, "prompt"))
 	}
 	if st := h.state(id); st.Held != 0 || st.Status != StatusRunning {
 		t.Fatalf("after the steer: %+v", st)
 	}
-	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, []string{"hello", "now"}) {
+	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, h.envelopes("hello", "now")) {
 		t.Fatalf("ring user entries = %q", got)
 	}
 	h.holders.out(holder, `{"type":"response","command":"steer","success":true,"data":{"disposition":"queued"}}`)
@@ -421,7 +421,7 @@ func TestSteeredMessageWaitsInAProfileConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := h.backend.waitProc(t, 0)
-	if got := p.nextSent(t); got != "first" {
+	if got := p.nextSent(t); got != h.envelope("first") {
 		t.Fatalf("first turn = %q", got)
 	}
 	if _, err := h.runner.Send(id, "now"); err != nil {
@@ -446,7 +446,7 @@ func TestSteeredMessageWaitsInAProfileConversation(t *testing.T) {
 		t.Fatalf("the marked message stays held: %+v", st)
 	}
 	p.reply("answer")
-	if got := p.nextSent(t); got != "now" {
+	if got := p.nextSent(t); got != h.envelope("now") {
 		t.Fatalf("the held message is the next turn, got %q", got)
 	}
 }
@@ -497,9 +497,9 @@ func TestLeadMailIsDeliveredAsATurn(t *testing.T) {
 	eventually(t, "both to be held", func() bool { return h.state(id).Held == 2 })
 	h.holders.out(holder, replyLine("u2", "answer"), resultLine(), stateLine(HarnessIdle))
 	eventually(t, "the merged turn", func() bool {
-		return slices.Equal(h.userInputs(holder), []string{"From a@x: ping", "question", "also\n\nFrom b@x: more"})
+		return slices.Equal(h.userInputs(holder), []string{"From a@x: ping", h.envelope("question"), h.envelope("also") + "\n\nFrom b@x: more"})
 	})
-	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, []string{"question", "also"}) {
+	if got := ringTexts(h.ring(id), wslive.RingUser); !slices.Equal(got, h.envelopes("question", "also")) {
 		t.Fatalf("ring user entries = %q", got)
 	}
 
@@ -535,7 +535,7 @@ func TestLeadMailClaimedDuringATurnTellsThePage(t *testing.T) {
 	h.mail.deliver(key, "From b@x: more")
 	eventually(t, "the claim to be held", func() bool { return h.state(id).Held == 1 })
 	eventually(t, "the page to be told of the claim", func() bool { return h.notes.Load() > settled })
-	if got := h.userInputs(holder); !slices.Equal(got, []string{"question"}) {
+	if got := h.userInputs(holder); !slices.Equal(got, h.envelopes("question")) {
 		t.Fatalf("mail claimed during a turn waits for its end: %q", got)
 	}
 }
@@ -561,12 +561,12 @@ func TestLeadMailWaitsForTheRejoin(t *testing.T) {
 	})
 	eventually(t, "the running turn to be back", func() bool { st := h.state(id); return st.Process && st.Status == StatusRunning })
 	h.sync(id, holder)
-	if got := h.userInputs(holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 2 {
+	if got := h.userInputs(holder); !slices.Equal(got, h.envelopes("one")) || h.state(id).Held != 2 {
 		t.Fatalf("mail waits for the turn's end: written %q, state %+v", got, h.state(id))
 	}
 	h.holders.out(holder, replyLine("u1", "first"), resultLine(), stateLine(HarnessIdle))
 	eventually(t, "the mail turn", func() bool {
-		return slices.Equal(h.userInputs(holder), []string{"one", "From a@x: ping\n\nFrom b@x: more"})
+		return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), "From a@x: ping\n\nFrom b@x: more"})
 	})
 	if h.holders.opCount("launch") != 1 || h.holders.opCount("spawn") != 1 || h.holders.opCount("stop") != 0 {
 		t.Fatalf("the session keeps its one process: %v", h.holders.opList())
@@ -789,6 +789,28 @@ func TestLeadRejoinsItsProcessAfterADaemonRestart(t *testing.T) {
 	h.send(id, "two")
 	h.holders.out(holder, stateLine(HarnessRunning), initLine("sess-1", "auto"), toolUseLine("u2", "toolu_1"), stateLine(HarnessWaiting), canUseToolLine("req-1", "toolu_1"))
 	eventually(t, "the prompt", func() bool { return len(h.state(id).Approvals) == 1 })
+	// Mapper control sends are asynchronous. The fake appends each answer
+	// under the input lock, so observe the launch's and both inits' asks
+	// before capturing the holder's final sequence, including ws-context-2.
+	eventually(t, "the automatic control answers to be queued", func() bool {
+		inputs := h.holders.inputs(holder, "control_request")
+		for _, request := range []string{"ws-commands", "ws-context-1", "ws-context-2"} {
+			if !slices.ContainsFunc(inputs, func(line string) bool {
+				return strings.Contains(line, `"request_id":"`+request+`"`)
+			}) {
+				return false
+			}
+		}
+		return true
+	})
+	// The answers can follow the prompt; wait for their LineEnds too.
+	target := uint64(h.holders.records(holder))
+	c := h.runner.conv(id)
+	eventually(t, "all holder records to be applied before shutdown", func() bool {
+		var applied bool
+		c.do(func() { applied = c.seq >= target })
+		return applied
+	})
 	ringBefore := h.ring(id)
 	inputsBefore := h.holders.inputs(holder, "")
 
@@ -837,7 +859,7 @@ func TestLeadRejoinsItsProcessAfterADaemonRestart(t *testing.T) {
 		return slices.Equal(ringTexts(h.ring(id), wslive.RingReply), []string{"first", "second"})
 	})
 	h.send(id, "three")
-	eventually(t, "the next turn after the rejoin", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two", "three"}) })
+	eventually(t, "the next turn after the rejoin", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two", "three")) })
 	if st := h.state(id); len(st.Approvals) != 0 || st.Status != StatusRunning || st.Error != "" {
 		t.Fatalf("after the second rejoin: %+v", st)
 	}
@@ -865,7 +887,7 @@ func TestLeadRejoinsItsProcessAfterADaemonRestart(t *testing.T) {
 
 	// Three daemons applied the stream; each entry is there once.
 	ring := h.ring(id)
-	if !slices.Equal(ringTexts(ring, wslive.RingUser), []string{"one", "two", "three"}) || !slices.Equal(ringTexts(ring, wslive.RingReply), []string{"first", "second", "third"}) {
+	if !slices.Equal(ringTexts(ring, wslive.RingUser), h.envelopes("one", "two", "three")) || !slices.Equal(ringTexts(ring, wslive.RingReply), []string{"first", "second", "third"}) {
 		t.Fatalf("ring = %+v", ring)
 	}
 	if h.holders.opCount("launch") != 1 || h.holders.opCount("spawn") != 1 || h.holders.opCount("stop") != 0 {
@@ -888,7 +910,7 @@ func TestLeadRejoinsItsProcessAfterADaemonRestart(t *testing.T) {
 	h.send(id, "four")
 	var second string
 	eventually(t, "a new holder", func() bool { second = h.record(id).HolderID; return second != "" && second != holder })
-	eventually(t, "the message on the new process", func() bool { return slices.Equal(h.userInputs(second), []string{"four"}) })
+	eventually(t, "the message on the new process", func() bool { return slices.Equal(h.userInputs(second), h.envelopes("four")) })
 	if session, _ := flagValue(h.holders.spawned(second).Argv, "--resume"); session != "sess-1" {
 		t.Fatalf("the new process resumes the session: %v", h.holders.spawned(second).Argv)
 	}
@@ -927,7 +949,7 @@ func TestLeadRejoinOfAWrappedRingHoldsInput(t *testing.T) {
 	h.mail.deliver(key, "From a@x: ping")
 	eventually(t, "the mail to be claimed", func() bool { return slices.Equal(h.record(id).Mail, []string{"From a@x: ping"}) })
 	h.sync(id, holder)
-	if got := h.userInputs(holder); !slices.Equal(got, []string{"one", "two"}) || h.state(id).Held != 2 {
+	if got := h.userInputs(holder); !slices.Equal(got, h.envelopes("one", "two")) || h.state(id).Held != 2 {
 		t.Fatalf("input waits for the turn's end: written %q, state %+v", got, h.state(id))
 	}
 	if n := strings.Count(h.log.String(), "with no turn boundary after them"); n != 1 {
@@ -936,7 +958,7 @@ func TestLeadRejoinOfAWrappedRingHoldsInput(t *testing.T) {
 
 	h.holders.out(holder, replyLine("u2", "second"), resultLine(), stateLine(HarnessIdle))
 	eventually(t, "the held input as the next turn", func() bool {
-		return slices.Equal(h.userInputs(holder), []string{"one", "two", "three\n\nFrom a@x: ping"})
+		return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), h.envelope("two"), h.envelope("three") + "\n\nFrom a@x: ping"})
 	})
 	h.sync(id, holder)
 	if got := h.userInputs(holder); len(got) != 3 || h.state(id).Held != 0 {
@@ -979,7 +1001,7 @@ func TestLeadRejoinOfARingThatWrappedWhileAttachedHoldsInput(t *testing.T) {
 	})
 	h.send(id, "three")
 	h.sync(id, holder)
-	if got := h.userInputs(holder); !slices.Equal(got, []string{"one", "two"}) || h.state(id).Held != 1 {
+	if got := h.userInputs(holder); !slices.Equal(got, h.envelopes("one", "two")) || h.state(id).Held != 1 {
 		t.Fatalf("the message waits for the turn's end: written %q, state %+v", got, h.state(id))
 	}
 	if n := strings.Count(h.log.String(), "with no turn boundary after them"); n != 1 {
@@ -988,7 +1010,7 @@ func TestLeadRejoinOfARingThatWrappedWhileAttachedHoldsInput(t *testing.T) {
 
 	h.holders.out(holder, replyLine("u2", "second"), resultLine(), stateLine(HarnessIdle))
 	eventually(t, "the held message as the next turn", func() bool {
-		return slices.Equal(h.userInputs(holder), []string{"one", "two", "three"})
+		return slices.Equal(h.userInputs(holder), h.envelopes("one", "two", "three"))
 	})
 	h.sync(id, holder)
 	if got := h.userInputs(holder); len(got) != 3 || h.state(id).Held != 0 {
@@ -1014,7 +1036,7 @@ func TestLeadRejoinOfAWrappedRingTrustsATurnBoundary(t *testing.T) {
 		return st.Process && st.Status == StatusIdle
 	})
 	h.send(id, "two")
-	eventually(t, "the message to go at once", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	eventually(t, "the message to go at once", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 	if log := h.log.String(); !strings.Contains(log, "the turn state is the one the records after them show") || strings.Contains(log, "with no turn boundary after them") {
 		t.Fatalf("the loss should be logged as covered by a turn boundary:\n%s", log)
 	}
@@ -1048,14 +1070,14 @@ func TestLeadRejoinGapHoldsInputAndDropsAPartialLine(t *testing.T) {
 	})
 	h.send(id, "two")
 	h.sync(id, holder)
-	if got := h.userInputs(holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 {
+	if got := h.userInputs(holder); !slices.Equal(got, h.envelopes("one")) || h.state(id).Held != 1 {
 		t.Fatalf("the message waits for the turn's end: written %q, state %+v", got, h.state(id))
 	}
 	if n := strings.Count(h.log.String(), "with no turn boundary after them"); n != 1 {
 		t.Fatalf("the loss should be logged once, logged %d times:\n%s", n, h.log.String())
 	}
 	h.holders.out(holder, replyLine("u2", "second"), resultLine(), stateLine(HarnessIdle))
-	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 }
 
 // piHeldRejoin runs a pi lead through one turn, restarts the daemon while
@@ -1091,7 +1113,7 @@ func piHeldRejoin(t *testing.T) (h *leadHarness, id, holder, ask string) {
 	if err := json.Unmarshal([]byte(h.holders.inputs(holder, "get_state")[0]), &d); err != nil || d.ID == "" {
 		t.Fatalf("get_state ask = %s", h.holders.inputs(holder, "get_state")[0])
 	}
-	if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 {
+	if got := piPrompts(h, holder); !slices.Equal(got, h.envelopes("one")) || h.state(id).Held != 1 {
 		t.Fatalf("the message waits for the answer: prompts %q, state %+v", got, h.state(id))
 	}
 	return h, id, holder, d.ID
@@ -1121,7 +1143,7 @@ func piStateAnswer(ask string, streaming bool) string {
 func TestPiLeadRejoinOfAWrappedRingAsksWhetherATurnRuns(t *testing.T) {
 	h, id, holder, ask := piHeldRejoin(t)
 	h.holders.out(holder, piStateAnswer(ask, false))
-	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(piPrompts(h, holder), []string{"one", "two"}) })
+	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(piPrompts(h, holder), h.envelopes("one", "two")) })
 	h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
 	h.idle(id)
 	if got := piPrompts(h, holder); len(got) != 2 || h.state(id).Held != 0 || len(h.holders.inputs(holder, "get_state")) != 1 {
@@ -1154,7 +1176,7 @@ func TestPiLeadRejoinProbeKeepsNativeRunAcrossCommandAnswers(t *testing.T) {
 				c.do(func() { applied = c.seq >= target })
 				return applied
 			})
-			if st := h.state(id); st.Status != StatusRunning || st.Error != tc.commandErr || st.Failure != nil || st.Held != 1 || !slices.Equal(piPrompts(h, holder), []string{"one"}) {
+			if st := h.state(id); st.Status != StatusRunning || st.Error != tc.commandErr || st.Failure != nil || st.Held != 1 || !slices.Equal(piPrompts(h, holder), h.envelopes("one")) {
 				t.Fatalf("a command answer must preserve the recovered run and held input while exposing only its command error: state %+v, prompts %q", st, piPrompts(h, holder))
 			}
 			if got := len(h.ring(id)); got != before {
@@ -1165,12 +1187,12 @@ func TestPiLeadRejoinProbeKeepsNativeRunAcrossCommandAnswers(t *testing.T) {
 			eventually(t, "continued output after the probe and command answer", func() bool {
 				return slices.Contains(ringTexts(h.ring(id), wslive.RingReply), "still running after rejoin")
 			})
-			if st := h.state(id); st.Status != StatusRunning || st.Held != 1 || !slices.Equal(piPrompts(h, holder), []string{"one"}) {
+			if st := h.state(id); st.Status != StatusRunning || st.Held != 1 || !slices.Equal(piPrompts(h, holder), h.envelopes("one")) {
 				t.Fatalf("continued output must not release input into the recovered native run: state %+v, prompts %q", st, piPrompts(h, holder))
 			}
 			h.holders.out(holder, `{"type":"agent_settled"}`)
 			eventually(t, "the held message after native settlement", func() bool {
-				return slices.Equal(piPrompts(h, holder), []string{"one", "two"})
+				return slices.Equal(piPrompts(h, holder), h.envelopes("one", "two"))
 			})
 			h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
 			h.idle(id)
@@ -1213,7 +1235,7 @@ func TestPiLeadWrappedReplayCommandAnswerStillProbesNativeRun(t *testing.T) {
 				return len(h.holders.inputs(holder, "get_state")) > 0 || len(piPrompts(h, holder)) > 1
 			})
 			asks := h.holders.inputs(holder, "get_state")
-			if st := h.state(id); len(asks) != 1 || st.Status != StatusRunning || st.Held != 1 || !slices.Equal(piPrompts(h, holder), []string{"one"}) {
+			if st := h.state(id); len(asks) != 1 || st.Status != StatusRunning || st.Held != 1 || !slices.Equal(piPrompts(h, holder), h.envelopes("one")) {
 				t.Fatalf("a surviving command answer must not establish idle: state %+v, probes %q, prompts %q", st, asks, piPrompts(h, holder))
 			}
 			var ask struct {
@@ -1230,7 +1252,7 @@ func TestPiLeadWrappedReplayCommandAnswerStillProbesNativeRun(t *testing.T) {
 				c.do(func() { applied = c.seq >= target })
 				return applied
 			})
-			if st := h.state(id); st.Status != StatusRunning || st.Held != 1 || !slices.Equal(piPrompts(h, holder), []string{"one"}) {
+			if st := h.state(id); st.Status != StatusRunning || st.Held != 1 || !slices.Equal(piPrompts(h, holder), h.envelopes("one")) {
 				t.Fatalf("a streaming recovery answer must retain input: state %+v, prompts %q", st, piPrompts(h, holder))
 			}
 			if got := len(h.ring(id)); got != before {
@@ -1238,7 +1260,7 @@ func TestPiLeadWrappedReplayCommandAnswerStillProbesNativeRun(t *testing.T) {
 			}
 			h.holders.out(holder, `{"type":"agent_settled"}`)
 			eventually(t, "held input after genuine native settlement", func() bool {
-				return slices.Equal(piPrompts(h, holder), []string{"one", "two"})
+				return slices.Equal(piPrompts(h, holder), h.envelopes("one", "two"))
 			})
 			h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
 			h.idle(id)
@@ -1292,14 +1314,14 @@ func TestPiWorkerCompleteReplaySettlesDetachedCommandAnswer(t *testing.T) {
 				c.do(func() { done = !c.replaying })
 				return done
 			})
-			if st := h.state(worker.ID); st.Status != StatusIdle || h.record(worker.ID).TurnOpen || len(got.list()) != 1 || !slices.Equal(piPrompts(h, holder), []string{"/audit"}) {
+			if st := h.state(worker.ID); st.Status != StatusIdle || h.record(worker.ID).TurnOpen || len(got.list()) != 1 || !slices.Equal(piPrompts(h, holder), h.envelopes("/audit")) {
 				t.Fatalf("replay must not duplicate the result, report, or prompt: state %+v, reports %+v, prompts %q", st, got.list(), piPrompts(h, holder))
 			}
 			// That same historical answer must not close a later persisted
 			// turn whose native start has not arrived yet.
 			h.send(worker.ID, "next task")
 			eventually(t, "the later turn's prompt", func() bool {
-				return slices.Equal(piPrompts(h, holder), []string{"/audit", "next task"})
+				return slices.Equal(piPrompts(h, holder), h.envelopes("/audit", "next task"))
 			})
 			h.restart()
 			c = h.runner.conv(worker.ID)
@@ -1308,7 +1330,7 @@ func TestPiWorkerCompleteReplaySettlesDetachedCommandAnswer(t *testing.T) {
 				c.do(func() { done = !c.replaying })
 				return done
 			})
-			if st := h.state(worker.ID); st.Status != StatusRunning || !h.record(worker.ID).TurnOpen || len(got.list()) != 1 || !slices.Equal(piPrompts(h, holder), []string{"/audit", "next task"}) {
+			if st := h.state(worker.ID); st.Status != StatusRunning || !h.record(worker.ID).TurnOpen || len(got.list()) != 1 || !slices.Equal(piPrompts(h, holder), h.envelopes("/audit", "next task")) {
 				t.Fatalf("an old command answer must not settle or resubmit the later turn: state %+v, reports %+v, prompts %q", st, got.list(), piPrompts(h, holder))
 			}
 			h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
@@ -1329,7 +1351,7 @@ func TestPiLeadCompleteCommandOnlyReplayKeepsIdleCompletion(t *testing.T) {
 	h.restart()
 	h.send(id, "/audit again")
 	eventually(t, "a command after complete replay", func() bool {
-		return slices.Equal(piPrompts(h, holder), []string{"/audit", "/audit again"})
+		return slices.Equal(piPrompts(h, holder), h.envelopes("/audit", "/audit again"))
 	})
 	h.holders.out(holder, handled)
 	h.idle(id)
@@ -1376,12 +1398,12 @@ func TestPiLeadRejoinDoesNotRestorePastCommandError(t *testing.T) {
 			}
 			h.send(id, "two")
 			eventually(t, "input held for the reconstructed run", func() bool { return h.state(id).Held == 1 })
-			if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) {
+			if got := piPrompts(h, holder); !slices.Equal(got, h.envelopes("one")) {
 				t.Fatalf("replay must not admit input into the running turn: %q", got)
 			}
 			h.holders.out(holder, `{"type":"agent_settled"}`)
 			eventually(t, "held input after native settlement", func() bool {
-				return slices.Equal(piPrompts(h, holder), []string{"one", "two"})
+				return slices.Equal(piPrompts(h, holder), h.envelopes("one", "two"))
 			})
 			h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
 			h.idle(id)
@@ -1409,11 +1431,11 @@ func TestPiLeadRejoinProbeIdleAnswerAfterATurnStartKeepsTheHold(t *testing.T) {
 	h.holders.out(holder, piStateAnswer(ask, false))
 	eventually(t, "the answer to be taken", func() bool { return strings.Contains(h.log.String(), "the harness reports") })
 	h.runner.conv(id).do(func() {})
-	if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning || !strings.Contains(h.log.String(), "but one started since") {
+	if got := piPrompts(h, holder); !slices.Equal(got, h.envelopes("one")) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning || !strings.Contains(h.log.String(), "but one started since") {
 		t.Fatalf("the message stays held: prompts %q, state %+v, log:\n%s", got, h.state(id), h.log.String())
 	}
 	h.holders.out(holder, `{"type":"agent_settled"}`)
-	eventually(t, "the held message at the turn's end", func() bool { return slices.Equal(piPrompts(h, holder), []string{"one", "two"}) })
+	eventually(t, "the held message at the turn's end", func() bool { return slices.Equal(piPrompts(h, holder), h.envelopes("one", "two")) })
 	h.holders.out(holder, `{"type":"agent_start"}`, `{"type":"agent_settled"}`)
 	h.idle(id)
 	if got := piPrompts(h, holder); len(got) != 2 || h.state(id).Held != 0 {
@@ -1428,14 +1450,14 @@ func TestPiLeadRejoinProbeAnswerForAnotherProcessIsDropped(t *testing.T) {
 	h, id, holder, ask := piHeldRejoin(t)
 	c := h.runner.conv(id)
 	c.do(func() { c.wrapProbed(&fakeProc{}, false, nil) })
-	if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning {
+	if got := piPrompts(h, holder); !slices.Equal(got, h.envelopes("one")) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning {
 		t.Fatalf("a stale answer keeps the hold: prompts %q, state %+v", got, h.state(id))
 	}
 	if strings.Contains(h.log.String(), "the harness reports") {
 		t.Fatalf("a stale answer is not taken:\n%s", h.log.String())
 	}
 	h.holders.out(holder, piStateAnswer(ask, false))
-	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(piPrompts(h, holder), []string{"one", "two"}) })
+	eventually(t, "the held message as the next turn", func() bool { return slices.Equal(piPrompts(h, holder), h.envelopes("one", "two")) })
 }
 
 // TestPiLeadRejoinProbeThatSaysRunningOrFailsKeepsTheHold: a running answer
@@ -1460,11 +1482,11 @@ func TestPiLeadRejoinProbeThatSaysRunningOrFailsKeepsTheHold(t *testing.T) {
 			// The log line comes first in the loop step that takes the
 			// answer; a round trip lets that step finish.
 			h.runner.conv(id).do(func() {})
-			if got := piPrompts(h, holder); !slices.Equal(got, []string{"one"}) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning {
+			if got := piPrompts(h, holder); !slices.Equal(got, h.envelopes("one")) || h.state(id).Held != 1 || h.state(id).Status != StatusRunning {
 				t.Fatalf("the message stays held: prompts %q, state %+v", got, h.state(id))
 			}
 			h.holders.out(holder, `{"type":"agent_settled"}`)
-			eventually(t, "the held message at the turn's end", func() bool { return slices.Equal(piPrompts(h, holder), []string{"one", "two"}) })
+			eventually(t, "the held message at the turn's end", func() bool { return slices.Equal(piPrompts(h, holder), h.envelopes("one", "two")) })
 		})
 	}
 }
@@ -1568,7 +1590,7 @@ func TestLeadRejoinDoesNotStallBehindALongReplay(t *testing.T) {
 	h.holders.out(holder, tasksLine(0))
 	h.start()
 	h.send(id, "two")
-	eventually(t, "the rejoin to end and take the message", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	eventually(t, "the rejoin to end and take the message", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 	if n := h.holders.timedOut(); n != 0 {
 		t.Fatalf("%d holder calls waited out their timeout during the rejoin", n)
 	}
@@ -1645,7 +1667,9 @@ func TestLeadStartEndsThePreviousHolderFirst(t *testing.T) {
 	if n := len(ops); n < 3 || !slices.Equal(ops[n-3:], []string{"stop " + holder, "launch h2", "spawn h2"}) {
 		t.Fatalf("the old holder ends before the new one starts: %v", ops)
 	}
-	eventually(t, "the held messages", func() bool { return slices.Equal(h.userInputs("h2"), []string{"two\n\nthree"}) })
+	eventually(t, "the held messages", func() bool {
+		return slices.Equal(h.userInputs("h2"), []string{h.envelope("two") + "\n\n" + h.envelope("three")})
+	})
 }
 
 // TestLeadOrphanHolderIsEndedAfterTheFirstScan: a lead holder no
@@ -1697,7 +1721,7 @@ func TestLeadShutdownDuringTheFirstScanEndsNoHolder(t *testing.T) {
 	h.holders.restart()
 	h.start()
 	h.send(id, "two")
-	eventually(t, "the next daemon to rejoin the process", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	eventually(t, "the next daemon to rejoin the process", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 	if h.holders.opCount("launch") != 1 || h.holders.opCount("stop") != 0 {
 		t.Fatalf("the session keeps its one process: %v", h.holders.opList())
 	}
@@ -1726,7 +1750,7 @@ func TestLeadRejoinWaitsForTheFirstScan(t *testing.T) {
 		t.Fatalf("a process started before the first scan: record holder %q, holder calls %v", rec.HolderID, h.holders.opList())
 	}
 	release()
-	eventually(t, "the rejoin to take the message", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	eventually(t, "the rejoin to take the message", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 	if h.holders.opCount("launch") != 1 || h.holders.opCount("stop") != 0 {
 		t.Fatalf("the session keeps its one process: %v", h.holders.opList())
 	}
@@ -1786,7 +1810,7 @@ func TestPiLeadTurnsAndCompact(t *testing.T) {
 		}
 	}
 	prompts := func() []string { return h.holders.inputs(holder, "prompt") }
-	if got := prompts(); len(got) != 1 || !sameJSON(t, json.RawMessage(got[0]), []byte(`{"type":"prompt","message":"hello"}`)) {
+	if got := prompts(); len(got) != 1 || !sameJSON(t, json.RawMessage(got[0]), mustJSON(t, map[string]string{"type": "prompt", "message": h.envelope("hello")})) {
 		t.Fatalf("prompt lines = %q", got)
 	}
 	// A tool loadout no profile lists is the user's own, not a refusal.
@@ -1967,7 +1991,7 @@ func TestLeadFailedSendShowsTheMessageOnce(t *testing.T) {
 	var second string
 	eventually(t, "the message on the retry's process", func() bool {
 		second = h.record(id).HolderID
-		return second != "" && slices.Equal(h.userInputs(second), []string{"one"})
+		return second != "" && slices.Equal(h.userInputs(second), h.envelopes("one"))
 	})
 	if n := h.holders.opCount("spawn"); n != 2 {
 		t.Fatalf("one failed start and one retry: %d spawns (%v)", n, h.holders.opList())
@@ -1975,7 +1999,7 @@ func TestLeadFailedSendShowsTheMessageOnce(t *testing.T) {
 	h.holders.out(second, turnLines("sess-1", "u1", "first")...)
 	h.idle(id)
 	ring := h.ring(id)
-	if got := ringTexts(ring, wslive.RingUser); !slices.Equal(got, []string{"one"}) || ringKinds(ring, wslive.RingTurn) != 1 {
+	if got := ringTexts(ring, wslive.RingUser); !slices.Equal(got, h.envelopes("one")) || ringKinds(ring, wslive.RingTurn) != 1 {
 		t.Fatalf("one user entry and one turn: users %q, ring %+v", got, ring)
 	}
 	if st := h.state(id); st.Error != "" || st.Held != 0 {
@@ -2071,7 +2095,7 @@ func TestLeadTurnEndsAtResultWhileABackgroundTaskRuns(t *testing.T) {
 	}
 
 	h.send(id, "two")
-	eventually(t, "the second message as a turn", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	eventually(t, "the second message as a turn", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 	h.holders.out(holder, initLine("sess-1", "auto"), replyLine("u2", "ok2"), resultLine())
 	h.idle(id)
 	if got := ringKinds(h.ring(id), wslive.RingTurn); got != 2 {
@@ -2091,7 +2115,7 @@ func TestLeadTurnEndsAtResultWhileABackgroundTaskRuns(t *testing.T) {
 	if got := ringKinds(ring, wslive.RingTurn); got != 3 {
 		t.Fatalf("three turns, three turn entries, got %d: %+v", got, ring)
 	}
-	if got := ringTexts(ring, wslive.RingUser); !slices.Equal(got, []string{"one", "two"}) {
+	if got := ringTexts(ring, wslive.RingUser); !slices.Equal(got, h.envelopes("one", "two")) {
 		t.Fatalf("user entries = %q", got)
 	}
 	if st := h.state(id); st.Error != "" || st.Held != 0 || st.BackgroundTasks != 0 {

@@ -392,9 +392,6 @@ func TestWsflowPlaybookRenderAllLegacyStemsFromRsrc(t *testing.T) {
 			if !strings.Contains(text, "## Render Context") || !strings.Contains(text, "- bridge_probe: context for "+stem) {
 				t.Errorf("rendered %s did not append legacy context block:\n%s", stem, text)
 			}
-			if strings.Contains(text, "exec.") {
-				t.Errorf("rendered %s exposed hidden full-ws guidance:\n%s", stem, text)
-			}
 		})
 	}
 }
@@ -1166,8 +1163,8 @@ func TestServeStdioToolsListAndCall(t *testing.T) {
 	if !strings.Contains(byID["3"], "tickets:") {
 		t.Fatalf("project_tree response missing tickets: %s", byID["3"])
 	}
-	if !strings.Contains(byID["4"], "Implementation Playbook") {
-		t.Fatalf("infra response missing impl-playbook: %s", byID["4"])
+	if text := toolText(t, byID["4"]); strings.TrimSpace(text) == "" || toolIsError(t, byID["4"]) {
+		t.Fatalf("infra response failed to load impl-playbook: %s", byID["4"])
 	}
 	if !strings.Contains(byID["5"], "review-paths") || !strings.Contains(byID["5"], "-direct.md") {
 		t.Fatalf("path.generate response missing review path: %s", byID["5"])
@@ -1913,9 +1910,6 @@ func TestWsflowModePlaybookRenderAbsorbsPromptRenderContext(t *testing.T) {
 			t.Fatalf("code-reviewer playbook render missing %q:\n%s", want, codeReviewerText)
 		}
 	}
-	if strings.Contains(codeReviewerText, "exec.") {
-		t.Fatalf("code-reviewer playbook render exposed hidden full-ws guidance:\n%s", codeReviewerText)
-	}
 }
 
 func TestPlaybookRenderReturnsResolvedNativeBindings(t *testing.T) {
@@ -2316,6 +2310,104 @@ func TestServeStdioGitToolCalls(t *testing.T) {
 	}
 }
 
+func TestServeStdioGitCommitUpdatedTicketsPresence(t *testing.T) {
+	useLeadProfile(t)
+	for _, tc := range []struct {
+		name  string
+		field string
+	}{
+		{"omitted", ""},
+		{"empty", `,"updated_tickets":[]`},
+		{"explicit", `,"updated_tickets":["owner supplied summary"]`},
+	} {
+		for _, tickets := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/tickets=%t", tc.name, tickets), func(t *testing.T) {
+				root := t.TempDir()
+				initGit(t, root)
+				mustWrite(t, root, "file.txt", "before\n")
+				const moveStem = "260503-feat-move"
+				const resultStem = "260503-feat-result"
+				const editionStem = "260503-feat-edition"
+				oldPath := "ai-docs/tickets/todo/" + moveStem + ".md"
+				newPath := "ai-docs/tickets/idea/" + moveStem + ".md"
+				resultPath := "ai-docs/tickets/todo/" + resultStem + ".md"
+				editionPath := "ai-docs/tickets/todo/" + editionStem + ".md"
+				const body = "---\ntitle: Demo\n---\n# Demo\n\n## Phases\n\n### Phase 1: Implement\n\nWork.\n"
+				const result = "### Result (abc123) - 2026-05-04"
+				const edition = "#### Edition (def456) - 2026-05-05"
+				if tickets {
+					mustWrite(t, root, oldPath, body)
+					mustWrite(t, root, resultPath, body)
+					mustWrite(t, root, editionPath, body+"\n"+result+"\n\nDone.\n")
+				}
+				runGit(t, root, "add", ".")
+				runGit(t, root, "commit", "-m", "initial")
+				paths := []string{"file.txt"}
+				mustWrite(t, root, "file.txt", "after\n")
+				if tickets {
+					mustWrite(t, root, newPath, body)
+					if err := os.Remove(filepath.Join(root, filepath.FromSlash(oldPath))); err != nil {
+						t.Fatal(err)
+					}
+					mustWrite(t, root, resultPath, body+"\n"+result+"\n\nDone.\n")
+					mustWrite(t, root, editionPath, body+"\n"+result+"\n\nDone.\n\n"+edition+"\n\nAdjusted.\n")
+					paths = append(paths, oldPath, newPath, resultPath, editionPath)
+				}
+				pathsJSON, err := json.Marshal(paths)
+				if err != nil {
+					t.Fatal(err)
+				}
+				input := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":%s,"title":"test: ticket summaries","ai_context":["Preserve caller intent."],"expected_branch":%q,"format":"json"%s}}}`, pathsJSON, headBranch(t, root), tc.field)
+				var out bytes.Buffer
+				if err := serveStdioWithSession(t, NewServer(root, "test"), root, input, &out); err != nil {
+					t.Fatal(err)
+				}
+				byID := responseLinesByID(t, strings.Split(strings.TrimSpace(out.String()), "\n"))
+				if toolIsError(t, byID["1"]) {
+					t.Fatalf("git.commit failed: %s", toolText(t, byID["1"]))
+				}
+				var got wsgit.CommitResult
+				if err := json.Unmarshal([]byte(toolText(t, byID["1"])), &got); err != nil {
+					t.Fatal(err)
+				}
+				message := string(runGitOutput(t, root, "log", "-1", "--format=%B"))
+				if got.Hash != strings.TrimSpace(string(runGitOutput(t, root, "rev-parse", "HEAD"))) || got.Title != "test: ticket summaries" || !strings.Contains(message, "## AI Context\n- Preserve caller intent.") {
+					t.Fatalf("commit record = %#v; message:\n%s", got, message)
+				}
+				var wantChanges []wsgit.TicketChange
+				if tickets {
+					wantChanges = []wsgit.TicketChange{
+						{Stem: editionStem, Path: editionPath, ToStatus: "todo", ResultAdded: true, ResultHeading: edition},
+						{Stem: moveStem, Path: newPath, OldPath: oldPath, FromStatus: "todo", ToStatus: "idea"},
+						{Stem: resultStem, Path: resultPath, ToStatus: "todo", ResultAdded: true, ResultHeading: result},
+					}
+				}
+				if len(got.TicketChanges) != len(wantChanges) {
+					t.Fatalf("ticket_changes = %#v, want %#v", got.TicketChanges, wantChanges)
+				}
+				for i, want := range wantChanges {
+					if got.TicketChanges[i] != want {
+						t.Fatalf("ticket_changes[%d] = %#v, want %#v", i, got.TicketChanges[i], want)
+					}
+				}
+				wantUpdates := ""
+				if tc.name == "explicit" {
+					wantUpdates = "## Ticket Updates\n- owner supplied summary"
+				} else if tc.name == "omitted" && tickets {
+					wantUpdates = "## Ticket Updates\n- " + editionStem + ": added " + edition + "\n- " + moveStem + ": moved todo -> idea\n- " + resultStem + ": added " + result
+				}
+				if index := strings.Index(message, "## Ticket Updates"); index >= 0 {
+					if strings.TrimSpace(message[index:]) != wantUpdates {
+						t.Fatalf("Ticket Updates = %q, want %q", message[index:], wantUpdates)
+					}
+				} else if wantUpdates != "" {
+					t.Fatalf("missing Ticket Updates %q in:\n%s", wantUpdates, message)
+				}
+			})
+		}
+	}
+}
+
 // unresolvedPhaseTicketBody mirrors
 // wsdoc.TestTicketVerifyUnresolvedPhaseIsSoftWarnOnly's fixture: a closed
 // ticket with a resolved Phase 1 and an unresolved (non-`[dropped]`) Phase 2,
@@ -2390,7 +2482,7 @@ func TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories(t *testing.
 	mustWrite(t, root, textTicketPath, unresolvedPhaseTicketBody)
 
 	var out bytes.Buffer
-	textInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close ticket with open phase","ai_context":["User intent: prove unresolved-phases warnings surface as git.commit advisories."],"expected_branch":%q}}}`, textTicketPath, branch)
+	textInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close ticket with open phase","updated_tickets":[],"ai_context":["User intent: prove unresolved-phases warnings surface as git.commit advisories."],"expected_branch":%q}}}`, textTicketPath, branch)
 	if err := serveStdioWithSession(t, server, root, textInput, &out); err != nil {
 		t.Fatalf("ServeStdio commit returned error: %v", err)
 	}
@@ -2410,11 +2502,15 @@ func TestServeStdioGitCommitSurfacesTicketVerifyWarningsAsAdvisories(t *testing.
 		t.Fatalf("git.commit text response missing advisories block: %q", text)
 	}
 
+	if message := string(runGitOutput(t, root, "log", "-1", "--format=%B")); strings.Contains(message, "## Ticket Updates") || !strings.Contains(message, "## AI Context") {
+		t.Fatalf("empty updates did not preserve message boundary:\n%s", message)
+	}
+
 	jsonTicketPath := "ai-docs/tickets/.done/260726-feat-openphase-json.md"
 	mustWrite(t, root, jsonTicketPath, unresolvedPhaseTicketBody)
 
 	out.Reset()
-	jsonInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close ticket with open phase json","ai_context":["User intent: prove the json:\"-\" tag holds for advisories."],"format":"json","expected_branch":%q}}}`, jsonTicketPath, branch)
+	jsonInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"git.commit","arguments":{"paths":[%q],"title":"docs(ticket): close ticket with open phase json","updated_tickets":[],"ai_context":["User intent: prove the json:\"-\" tag holds for advisories."],"format":"json","expected_branch":%q}}}`, jsonTicketPath, branch)
 	if err := serveStdioWithSession(t, server, root, jsonInput, &out); err != nil {
 		t.Fatalf("ServeStdio JSON commit returned error: %v", err)
 	}

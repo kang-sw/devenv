@@ -13,11 +13,13 @@
 .dash.history .top { flex: none; }
 /* Session cards and files, without the session's conversation or agents. */
 .fattachment .btn[hidden] { display: none; }
-.dgrid.worktree { flex: 1 1 0; min-width: 0; min-height: 0; display: grid; gap: 0 12px;
-  grid-template-columns: minmax(300px, 4fr) minmax(0, 7fr); grid-template-rows: auto minmax(0, 1fr); }
-.dgrid.worktree > * { min-width: 0; min-height: 0; }
-.dgrid.worktree > .chead { grid-column: 1; grid-row: 1; }
-.dgrid.worktree > .chead .fsum { display: flex; }
+/* The session page's two-column rule. The worktree page reads the same
+   variables, so its Files panel is exactly as wide as the session's left panel. */
+.dgrid { --dgrid-cols: minmax(320px, 5fr) minmax(0, 7fr); --dgrid-gap: 16px; }
+.dgrid.worktree { flex: 1 1 0; min-width: 0; min-height: 0; display: grid; gap: 0 var(--dgrid-gap);
+  grid-template-columns: var(--dgrid-cols); grid-template-rows: auto minmax(0, 1fr); }
+.dgrid.worktree > * { min-width: 0; }
+.dgrid.worktree > .thead { grid-column: 1; grid-row: 1; border-radius: var(--wb-radius) var(--wb-radius) 0 0; box-shadow: var(--wb-shadow); }
 .dgrid.worktree > .fpane { grid-column: 1; grid-row: 2; display: flex; border-top-left-radius: 0; border-top-right-radius: 0; }
 .dgrid.worktree > .bcol { grid-column: 2; grid-row: 1 / -1; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
 .worktree-branch { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
@@ -49,8 +51,48 @@
 .dash.live .dwrap { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 .dash.live .top { flex: none; }
 /* Empty selection keeps a full main panel even while the rail overlays. */
-:root[data-mode="index"] .dgrid { flex: 1 1 0; min-width: 0; min-height: 0; }
-.dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 16px; --sa: 250fr; --sb: 750fr;
+:root[data-mode="index"] .dgrid { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; }
+/* The landing (the "landing" template): the lockup over the how-to, laid
+   out like a short document page that scrolls in the main panel, with no
+   card behind it. Each step is a numbered title, a line or two, and its
+   framed screenshot at the image's own size or narrower. One lockup
+   variant and one screenshot theme show per theme: the light-ink lockup
+   and the dark captures on dark, the dark-ink lockup and the light
+   captures on light.
+   The scroll box spans the whole main area, so the wheel scrolls it
+   anywhere beside the column and its scrollbar sits at the window's edge:
+   it runs out over the page's paddings (--dl-x across, --dl-y below; the
+   rail's gap on the left while the rail stands) and, right of the 1680px
+   page, to the window's right edge (--dl-r). Its padding is even on both
+   sides, so the column centres in that whole area (on a wide window, not
+   in the 1680px page). */
+.dlanding { --dl-x: 16px; --dl-y: 12px; --dl-r: max(var(--dl-x), 100vw - 1680px + var(--dl-x));
+  flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; box-sizing: border-box;
+  margin: 0 calc(0px - var(--dl-r)) calc(0px - var(--dl-y)) calc(0px - var(--dl-x));
+  padding: 56px calc(24px + var(--dl-x)) calc(88px + var(--dl-y)); }
+@media (max-width: 640px) { .dlanding { --dl-x: 10px; --dl-y: 8px; } }
+.dlogo { flex: none; width: clamp(220px, 50%, 420px); max-width: 100%; }
+.dlogo svg { display: block; width: 100%; height: auto; }
+.dlogo-d, .dshot-d { display: none; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .dlogo-d, :root:not([data-theme="light"]) .dshot-d { display: block; } :root:not([data-theme="light"]) .dlogo-l, :root:not([data-theme="light"]) .dshot-l { display: none; } }
+:root[data-theme="dark"] .dlogo-d, :root[data-theme="dark"] .dshot-d { display: block; }
+:root[data-theme="dark"] .dlogo-l, :root[data-theme="dark"] .dshot-l { display: none; }
+.dguide { flex: none; width: min(800px, 100%); margin-top: 48px; color: var(--wb-muted-fg); font-size: 14px; line-height: 1.65; }
+/* Korean breaks between words, not inside them. */
+:root[data-lang="ko"] .dguide { word-break: keep-all; overflow-wrap: anywhere; }
+.dguide header { padding-bottom: 18px; margin-bottom: 32px; border-bottom: 1px solid color-mix(in srgb, var(--wb-fg) 12%, transparent); }
+.dguide h2 { margin: 0 0 6px; font-size: 22px; font-weight: 700; letter-spacing: -.01em; color: var(--wb-fg); }
+.dguide header p { margin: 0; }
+.dguide ol { margin: 0; padding: 0; list-style: none; counter-reset: dguide; display: grid; gap: 48px; }
+.dstep { counter-increment: dguide; display: grid; grid-template-columns: 30px minmax(0, 1fr); column-gap: 14px; }
+.dstep > * { grid-column: 2; }
+.dstep::before { content: counter(dguide); grid-row: 1; align-self: start; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; background: #e8552f; }
+.dstep h3 { margin: 2px 0 4px; font-size: 16px; font-weight: 650; line-height: 24px; color: var(--wb-fg); }
+.dstep p { margin: 0 0 14px; }
+.dshot { justify-self: start; max-width: 100%; margin: 0; overflow: hidden; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--wb-fg) 14%, transparent); box-shadow: 0 8px 28px rgba(0, 0, 0, .16); line-height: 0; }
+.dshot img { max-width: 100%; height: auto; }
+@media (max-width: 760px) { .dlanding { padding: 32px calc(16px + var(--dl-x)) calc(64px + var(--dl-y)); } .dguide { margin-top: 36px; } .dguide ol { gap: 40px; } .dstep > .dshot { grid-column: 1 / -1; } }
+.dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 var(--dgrid-gap); --sa: 250fr; --sb: 750fr;
   grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
   grid-template-areas: "tabbar" "tree" "split" "chead" "convo" "composer"; }
 .dgrid.live > * { min-width: 0; min-height: 0; }
@@ -61,9 +103,6 @@
 .dgrid.live > .composer { grid-area: composer; margin-top: 10px; }
 /* One shared release control for staged rendering, placement and heights.
    Fixed outside the board flow so the badge itself changes no reading geometry. */
-.board-viewed-pending { position: fixed; z-index: 90; bottom: max(16px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); max-width: min(680px, calc(100vw - 32px)); padding: 10px 16px; border: 1px solid var(--wb-primary); border-radius: 24px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 4px 18px #0003; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.board-viewed-pending[hidden] { display: none; }
-.board-viewed-pending:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
 /* Owned board scrollers use permanent manual anchoring (wbHistory.keep). */
 .dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
 .dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
@@ -83,7 +122,7 @@
 .splitter::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 2px; background: var(--wb-muted); transition: background .15s; }
 .splitter:hover::before, .splitter.drag::before, .splitter:focus-visible::before { background: var(--wb-primary); }
 @media (min-width: 760px) {
-  .dgrid.live[data-layout="split"] { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+  .dgrid.live[data-layout="split"] { grid-template-columns: var(--dgrid-cols); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
     grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
   .dgrid.live[data-layout="split"] > .tabbar { display: none; }
   .dgrid.live[data-layout="split"] > .r-tree, .dgrid.live[data-layout="split"] > .splitter, .dgrid.live[data-layout="split"] > .convo, .dgrid.live[data-layout="split"] > .bcol { display: block; }
@@ -93,7 +132,7 @@
   .dgrid.live[data-layout="split"][data-ctab="files"] > .convo { display: none; }
 }
 @media (min-width: 1100px) {
-  .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: minmax(320px, 5fr) minmax(0, 7fr); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
+  .dgrid.live:not([data-layout="tabs"]) { grid-template-columns: var(--dgrid-cols); grid-template-rows: minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
     grid-template-areas: "tree board" "split board" "chead board" "convo board" "composer board"; }
   .dgrid.live:not([data-layout="tabs"]) > .tabbar { display: none; }
   .dgrid.live:not([data-layout="tabs"]) > .r-tree, .dgrid.live:not([data-layout="tabs"]) > .splitter, .dgrid.live:not([data-layout="tabs"]) > .convo, .dgrid.live:not([data-layout="tabs"]) > .bcol { display: block; }
@@ -117,8 +156,8 @@
 .chead .csum, .chead .fsum { margin-left: auto; min-width: 0; display: flex; align-items: center; justify-content: flex-end; }
 .chead .csum > .sum { margin-left: 0; }
 .dgrid[data-ctab="files"] > .chead .csum, .dgrid:not([data-ctab="files"]) > .chead .fsum { display: none; }
-.chead .fsum .froot { flex: 0 1 auto; font-size: 11.5px; color: var(--wb-muted-fg); }
-.chead .fsum .froot.alt { color: var(--wb-primary); }
+.thead .fsum .froot { flex: 0 1 auto; font-size: 11.5px; color: var(--wb-muted-fg); }
+.thead .fsum .froot.alt { color: var(--wb-primary); }
 .ctabs { display: flex; gap: 2px; align-items: stretch; align-self: stretch; flex: none; }
 .ctabs button { border: 0; background: transparent; height: 30px; padding: 0 8px; font: inherit; font-size: 13px; font-weight: 700; color: var(--wb-muted-fg); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; }
 .ctabs button:hover { color: var(--wb-fg); }
@@ -140,12 +179,15 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 @media (max-width: 640px) { .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }
 @media (min-width: 641px) {
   .bcard[data-max] .bc-in, section.topic[data-max], details.entry-panel[data-max], .fpane[data-max] { left: var(--sheet-inset, 16px); right: var(--sheet-inset, 16px); }
+  /* cards.js sizeSheet: the toolbar explorer spans its column unless extended. */
+  .fpane[data-max] { left: var(--sheet-left, var(--sheet-inset, 16px)); right: var(--sheet-right, var(--sheet-inset, 16px)); }
 }
 .fpane .fi { display: inline-flex; flex: none; color: var(--wb-muted-fg); }
-.fbar { display: flex; align-items: center; gap: 4px; flex: none; min-width: 0; height: 30px; box-sizing: border-box; padding: 0 6px 0 4px; border-bottom: 1px solid var(--wb-line); background: var(--l2-side); }
+.fbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; flex: none; min-width: 0; min-height: 30px; box-sizing: border-box; padding: 0 6px 0 4px; border-bottom: 1px solid var(--wb-line); background: var(--l2-side); }
+.fbar-ctl { display: flex; align-items: center; align-self: stretch; gap: 4px; flex: 1 1 320px; min-width: 0; min-height: 29px; }
 .fbar-sep { flex: none; width: 1px; height: 16px; margin: 0 3px; background: var(--wb-line); }
 .fhd { display: inline-flex; flex: none; align-items: center; gap: 1px; }
-.fbar > .ibtn, .fhd .ibtn { width: 24px; height: 24px; }
+.fbar-ctl > .ibtn, .fhd .ibtn { width: 24px; height: 24px; }
 .froot { flex: 1; min-width: 0; font: 700 12px var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .froot.alt { color: var(--wb-primary); }
 .fseg { display: inline-flex; flex: none; gap: 1px; padding: 2px; border-radius: 5px; background: color-mix(in srgb, var(--wb-fg) 7%, transparent); }
@@ -234,9 +276,8 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 :root[data-theme="light"] .fpane { --l2-side: color-mix(in srgb, var(--wb-bg) 75%, var(--wb-card)); --l2-band: color-mix(in srgb, var(--wb-fg) 3%, var(--wb-card)); --l2-zebra: color-mix(in srgb, var(--wb-fg) 3%, transparent); }
 .fpane:focus-within { outline: 1px solid color-mix(in srgb, var(--wb-primary) 28%, var(--wb-line)); outline-offset: -1px; }
 .fcard { display: flex; height: 100%; border-radius: 0; box-shadow: none; }
-.ftabs { display: flex; align-self: stretch; align-items: flex-end; gap: 1px; flex: 0 1 auto; min-width: 0; max-width: 40%; overflow-x: auto; scrollbar-width: none; padding-top: 3px; }
-.ftabs::-webkit-scrollbar { display: none; }
-.ftab { display: inline-flex; flex: 0 0 auto; align-items: center; min-width: 0; max-width: 170px; height: 100%; box-sizing: border-box; padding: 0 2px 0 9px; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; }
+.ftabs { display: flex; align-self: stretch; align-items: flex-end; gap: 1px; flex: 0 1 auto; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.ftab { display: inline-flex; flex: 0 0 auto; align-items: center; min-width: 0; max-width: 170px; height: 26px; margin-top: 3px; box-sizing: border-box; padding: 0 2px 0 9px; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; }
 .ftab:has(.ftab-select[aria-selected="true"]) { background: var(--wb-muted); border-bottom-color: var(--wb-primary); }
 .ftab-select { display: inline-flex; align-items: center; gap: 4px; min-width: 0; border: 0; padding: 0; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11.5px; cursor: pointer; }
 .ftab-select .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -244,8 +285,16 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .ftab-select[aria-selected="true"] { color: var(--wb-fg); }
 .ftab-close.ibtn { width: 18px; height: 18px; }
 .ftab-close.ibtn .li { width: 11px; height: 11px; }
-.ftab-new.ibtn { width: 22px; height: 22px; align-self: center; }
+.ftab-new.ibtn { width: 22px; height: 22px; align-self: flex-start; margin-top: 5px; }
 .ftab-close:disabled { visibility: hidden; }
+/* files.js paintTabs: a lone tab shows no chip, so + leads a single row;
+   with two or more tabs the tab strip owns its row(s) and the address row
+   always starts below it. */
+.fbar:not(.fbar-multi) .ftab { display: none; }
+.fbar:not(.fbar-multi) > .fbar-ctl { flex-basis: 0; }
+.fbar:not(.fbar-multi) .ftab-new.ibtn { align-self: center; margin-top: 0; }
+.fbar.fbar-multi > .ftabs { flex: 1 0 100%; }
+.fbar.fbar-multi .fbar-sep { display: none; }
 .flocation, .fcrumb-trail { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); }
 .flocation { flex: 1 1 0; }
 .fcrumb-root, .fcrumb.last { flex: none; }
@@ -316,14 +365,15 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .fpicker .fdot { opacity: .5; }
 .froot-choices { min-width: 0; max-width: 65%; margin-left: auto; font: 11px var(--wb-mono); background: var(--wb-muted); color: inherit; border: 0; border-radius: 5px; padding: 3px; }
 .fattachment .pr { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
-@container (max-width: 480px) {
-  .fworkspace { grid-template-columns: 110px minmax(0, 1fr); }
-  .fentry, .fdetail-head { grid-template-columns: 18px minmax(0, 1fr); }
-  .fentry .ftype, .fdetail-head .ftype { display: none; }
-}
-@container (max-width: 340px) {
+/* Below 640px the folder tree would leave both panes truncating names, so a
+   narrow pane drops the tree and the list takes the full width. */
+@container (width < 640px) {
   .fworkspace { grid-template-columns: minmax(0, 1fr); }
   .fworkspace > .ftree { display: none; }
+}
+@container (max-width: 480px) {
+  .fentry, .fdetail-head { grid-template-columns: 18px minmax(0, 1fr); }
+  .fentry .ftype, .fdetail-head .ftype { display: none; }
 }
 /* Explorer-only compact header; other card kinds keep the shared header. */
 .bcard[data-kind="explorer"] .bc-hd { height: 28px; min-height: 28px; box-sizing: border-box; padding: 2px 6px 2px 10px; gap: 6px; }

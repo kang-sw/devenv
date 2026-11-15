@@ -79,13 +79,15 @@ type RailWorkspace struct {
 	Live, Approvals int
 	Worktrees       []RailWorktree
 	// Sessions are the live sessions, Ended the ended ones, of a plain
-	// folder.
-	Sessions, Ended []RailRow
+	// folder; Archived its archived hosted leads (splitRailArchived).
+	Sessions, Ended, Archived []RailRow
 }
 
 // RailWorktree is one worktree of a repository.
 type RailWorktree struct {
-	Path string
+	Path                                         string
+	Origin, Admission                            string
+	AdmissionRepository, AdmissionPath, Revision string
 	// Root marks the repository's root worktree; Folder is Path's last
 	// element (the page shows "root" for the root worktree instead).
 	Root   bool
@@ -105,12 +107,15 @@ type RailWorktree struct {
 	// under a ws worktree pool (worktreePoolRoots). The delete routes check
 	// again; this only places the button.
 	Deletable bool
-	// Sessions are the live sessions, Ended the ended ones.
-	Sessions, Ended []RailRow
+	// Sessions are the live sessions, Ended the ended ones, Archived the
+	// archived hosted leads (splitRailArchived).
+	Sessions, Ended, Archived []RailRow
 }
 
 // Empty reports a worktree that holds no listed session; the page dims it.
-func (w RailWorktree) Empty() bool { return len(w.Sessions) == 0 && len(w.Ended) == 0 }
+func (w RailWorktree) Empty() bool {
+	return len(w.Sessions) == 0 && len(w.Ended) == 0 && len(w.Archived) == 0
+}
 
 // RailRow is one session.
 type RailRow struct {
@@ -167,7 +172,9 @@ type RailRow struct {
 	// so the row shows none. HasChildren marks a stored parent of a live or
 	// an ended child, which can never become a child. KidApprovals and
 	// KidWorking roll the children's approval waits and work up onto the
-	// parent, shown while the page collapses it.
+	// parent, shown while the page collapses it. KidBusy counts the
+	// descendants at work (railKidBusy), shown beside the toggle whatever
+	// the collapse state.
 	Group        string
 	Children     []RailRow
 	Child        bool
@@ -176,6 +183,7 @@ type RailRow struct {
 	HasChildren  bool
 	KidApprovals int
 	KidWorking   bool
+	KidBusy      int
 	// Revive is how the dashboard brings an ended session back, on a daemon
 	// that hosts lead sessions: ReviveReopen for a closed hosted session,
 	// ReviveTakeover for a session a terminal harness ran, empty when it
@@ -183,6 +191,14 @@ type RailRow struct {
 	// daemon does not host). ReviveBlocked names why the entry is shown
 	// disabled (ReviveNoSession), empty when it is not.
 	Revive, ReviveBlocked string
+	// Archived marks an open hosted lead the user archived (the dashboard's
+	// visibility sidecar, SessionArchived): it is drawn asleep in the
+	// worktree's archived fold, never live, and offers unarchive instead of
+	// archive. DeleteAt is when the registry prune may delete an ended row's
+	// session (epoch ms; 0 when the prune exempts it): the existing
+	// RegistryRetention window measured from its last sighting, no new timer.
+	Archived bool
+	DeleteAt int64
 }
 
 const (
@@ -299,9 +315,10 @@ type railRepo struct {
 type railWorktreeEntry struct {
 	Path string
 	// Branch is the short branch name; empty with Detached, or a bare entry.
-	Branch   string
-	Detached bool
-	Prunable bool
+	Branch                                       string
+	Detached                                     bool
+	Prunable                                     bool
+	AdmissionRepository, AdmissionPath, Revision string
 }
 
 // buildRailView groups the listed sessions by workspace and worktree. An
@@ -336,8 +353,13 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 	repoOf := map[string]bool{}
 	for _, in := range sessions {
 		reg := in.Session.Registration
-		live := reg.Live(now)
+		// An archived lead is never live here, whatever its heartbeat: the
+		// layout then treats it as an ended row (no drag, no parent), and
+		// splitRailArchived moves it into its own fold after ordering.
+		archived := DeriveSessionLifecycle(reg, in.Session.Hidden, now) == SessionArchived
+		live := reg.Live(now) && !archived
 		row := railRow(in, live, now)
+		row.Archived = archived
 		key := filepath.Clean(reg.Project)
 		if in.Repo != "" {
 			key = filepath.Clean(in.Repo)
@@ -433,7 +455,7 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			if a, ok := accs[p]; ok {
 				return a
 			}
-			a := &wtAcc{wt: RailWorktree{Path: p, Root: p == key, Folder: lastElem(p), Branch: e.Branch, Detached: e.Detached}, regs: map[string]Registration{}}
+			a := &wtAcc{wt: RailWorktree{Path: p, Root: p == key, Folder: lastElem(p), Branch: e.Branch, Detached: e.Detached, AdmissionRepository: e.AdmissionRepository, AdmissionPath: e.AdmissionPath, Revision: e.Revision}, regs: map[string]Registration{}}
 			accs[p] = a
 			order = append(order, p)
 			return a
@@ -572,6 +594,14 @@ func railRow(in railInput, live bool, now time.Time) RailRow {
 	}
 	if !live {
 		row.Revive, row.ReviveBlocked = railRevive(in)
+		// PruneRegistrations exempts Agent rows and a hosted lead the runner
+		// still serves (an open record, which an ended row without EndedAt
+		// has); every other row ages from its last sighting.
+		if !reg.Agent && !(reg.Hosted && reg.EndedAt == "") {
+			if seen := reg.LastSeen(); !seen.IsZero() {
+				row.DeleteAt = seen.Add(RegistryRetention).UnixMilli()
+			}
+		}
 	}
 	snap := in.Snapshot
 	if snap == nil {
@@ -612,9 +642,34 @@ func railMailbox(rows []RailRow, root, branch string) {
 // Stopped reports a hosted session with no harness process: the rail shows
 // it asleep (a muted title and a dimmed harness icon), whatever ended the
 // process. The runner keeps heartbeating such a row, so Live alone would
-// draw it as running. An ended row sleeps only when the user stopped it.
+// draw it as running. An ended row sleeps only when the user stopped it; an
+// archived row always sleeps.
 func (r RailRow) Stopped() bool {
-	return r.Exit != nil && (r.Live || r.UserStopped())
+	return r.Archived || (r.Exit != nil && (r.Live || r.UserStopped()))
+}
+
+// splitRailArchived moves each archived row out of its group's ended list
+// into the group's Archived list, keeping the order the layout gave them.
+// It runs after orderRailView, which treats an archived row as ended.
+func splitRailArchived(view *RailView) {
+	split := func(ended, archived *[]RailRow) {
+		var keep []RailRow
+		for _, r := range *ended {
+			if r.Archived {
+				*archived = append(*archived, r)
+			} else {
+				keep = append(keep, r)
+			}
+		}
+		*ended = keep
+	}
+	for i := range view.Workspaces {
+		w := &view.Workspaces[i]
+		split(&w.Ended, &w.Archived)
+		for j := range w.Worktrees {
+			split(&w.Worktrees[j].Ended, &w.Worktrees[j].Archived)
+		}
+	}
 }
 
 // UserStopped reports a session the user stopped (the holder's "stop"

@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -72,6 +73,9 @@ func TestWorktreePageGuardsAndTemplate(t *testing.T) {
 				t.Errorf("worktree page missing %s", want)
 			}
 		}
+		if !strings.Contains(markup, `id="chead" class="thead"`) || !strings.Contains(markup, `class="sum fsum"`) {
+			t.Error("worktree files header must use the session's shared panel header, not the whiteboard chead")
+		}
 		for _, absent := range []string{`id="composer"`, `id="convo"`, `id="tabbar"`, `id="r-tree"`, `class="topic"`, `class="sname"`, `class="host `} {
 			if strings.Contains(markup, absent) {
 				t.Errorf("worktree page leaked %s", absent)
@@ -121,6 +125,90 @@ func TestWorktreePageGuardsAndTemplate(t *testing.T) {
 	}
 	if code, _ := get(t, f.base+worktreePagePath(root)+"?frame=1"); code != http.StatusOK {
 		t.Errorf("live workspace worktree = %d", code)
+	}
+}
+
+// Compare the shared header and explorer-only frame using real page consumers.
+func TestWorktreePageFileCardStyleBrowser(t *testing.T) {
+	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
+		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
+	}
+	f, root, _ := worktreePageFixture(t)
+	for i := 0; i < 55; i++ {
+		dir := filepath.Join(root, fmt.Sprintf("folder-%02d", i))
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "child.txt"), []byte("style fixture\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("file-%02d.txt", i)), []byte("style fixture\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", "testdata/worktree-filecard-style.browser.cjs", f.base, worktreePagePath(root))
+	out, err := cmd.CombinedOutput()
+	t.Log(string(out))
+	if err != nil {
+		t.Fatalf("worktree file-card style acceptance: %v", err)
+	}
+}
+
+func TestExplorerCardFramelessTabWrapBrowser(t *testing.T) {
+	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
+		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
+	}
+	f, root, _ := worktreePageFixture(t)
+	// Tabs are labelled by their folder; a long name makes 12 tabs overflow one row.
+	if err := os.Mkdir(filepath.Join(root, "devenv-explorer-workspace"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", "testdata/explorer-tab-wrap.browser.cjs", f.base, worktreePagePath(root))
+	out, err := cmd.CombinedOutput()
+	t.Log(string(out))
+	if err != nil {
+		t.Fatalf("explorer frameless tab-wrap acceptance: %v", err)
+	}
+}
+
+func TestExplorerNarrowTreeHomeAndPanelWidthBrowser(t *testing.T) {
+	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
+		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
+	}
+	f, root, _ := worktreePageFixture(t)
+	nested := filepath.Join(root, "alpha", "beta")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "deep.txt"), []byte("deep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", "testdata/explorer-narrow-home.browser.cjs", f.base, worktreePagePath(root))
+	out, err := cmd.CombinedOutput()
+	t.Log(string(out))
+	if err != nil {
+		t.Fatalf("explorer narrow tree, home and panel width acceptance: %v", err)
+	}
+}
+
+func TestExplorerTabRowAndFloatWidthBrowser(t *testing.T) {
+	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
+		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
+	}
+	f, root, _ := worktreePageFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", "testdata/explorer-tabrow-float.browser.cjs", f.base, worktreePagePath(root))
+	out, err := cmd.CombinedOutput()
+	t.Log(string(out))
+	if err != nil {
+		t.Fatalf("explorer tab row and floating width acceptance: %v", err)
 	}
 }
 

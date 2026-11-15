@@ -50,7 +50,8 @@ import (
 //
 // A message may instead be a slash command the composer picked: the body's
 // command and args fields, never text the daemon parses. It is held as its
-// own command entry (wsinbox.Command), which steer refuses, and is offered
+// own command entry (wsinbox.Command), which a steer turns into steered text
+// holding its typed line for the agent to act on, and is offered
 // only for a session whose adapter reports a command
 // list in its snapshot, so an adapter that cannot run one never drains one.
 // A cancel or interrupt answers a command entry with its command, so the
@@ -183,7 +184,9 @@ func (d *Daemon) inboxSession(w http.ResponseWriter, r *http.Request, replyID st
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return s, false
 	}
-	if !adapterPresent(d.pages().readSnapshot(replyID), now) {
+	// Freshness only: the overlay-free read skips the retained-evidence
+	// sweep, which nothing a write route answers depends on.
+	if !d.pages().adapterPresent(replyID, now) {
 		http.Error(w, "this session has no live host adapter: copy the answers into its terminal instead", http.StatusConflict)
 		return s, false
 	}
@@ -254,6 +257,14 @@ func (d *Daemon) handleInboxWrite(w http.ResponseWriter, r *http.Request, replyI
 		d.inboxMu.Lock()
 		status, answer = d.inboxWrite(dir, route, raw, now)
 		d.inboxMu.Unlock()
+	}
+	if route == "message" && status == http.StatusOK && s.Hosted {
+		if host, ok := d.agents.(AgentPageInputHost); ok {
+			if err := host.PageInput(replyID); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 	}
 	d.inboxAnswered(w, s, status, answer)
 }
@@ -532,9 +543,6 @@ func (d *Daemon) inboxWrite(dir, route string, raw []byte, now time.Time) (int, 
 		steered, err := wsinbox.Steer(dir, name)
 		if errors.Is(err, wsinbox.ErrGone) {
 			return http.StatusConflict, "the session already received this message"
-		}
-		if errors.Is(err, wsinbox.ErrCommand) {
-			return http.StatusConflict, err.Error()
 		}
 		if err != nil {
 			fmt.Fprintf(d.log, "dashboard: inbox steer: %v\n", err)

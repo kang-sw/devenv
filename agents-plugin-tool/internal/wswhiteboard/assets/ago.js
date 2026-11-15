@@ -100,6 +100,14 @@
       var held = frame && frame.wbBodyAgeHold;
       put(t, held ? held.text : bodyText(t.getAttribute("data-body-at"), now));
     });
+    // History entry times: relative within the first hour, then the server
+    // clock cached on first sight. data-at/data-stamp stay the exact time.
+    Array.prototype.forEach.call(root.querySelectorAll("time.entry-at[data-at]"), function (t) {
+      var raw = t.getAttribute("data-at"), at = +raw;
+      if (!raw || !isFinite(at)) return;
+      if (t._wbClock === undefined) t._wbClock = t.textContent;
+      put(t, now - at < 3600000 ? text(at, now) : t._wbClock);
+    });
     if (root.matches && root.matches("section.topic[data-topic]")) badge(root, now);
     Array.prototype.forEach.call(root.querySelectorAll("section.topic[data-topic]"), function (topic) { badge(topic, now); });
   }

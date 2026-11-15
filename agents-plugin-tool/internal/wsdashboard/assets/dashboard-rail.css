@@ -166,15 +166,32 @@
    and its harness icon */
 .rail .rsessions { margin: 0 8px 0 33px; padding-left: 0; border-left: 2px solid var(--wb-muted); }
 .rail .rended .rsessions { margin: 0; padding: 0; border: 0; }
-.rail .rended > summary { list-style: none; font-size: 11.5px; color: var(--wb-muted-fg); padding: 4px 8px 2px 14px; cursor: pointer; }
-.rail .rended > summary::-webkit-details-marker { display: none; }
-.rail .rended > summary::after { content: " \25b8"; }
-.rail .rended[open] > summary::after { content: " \25be"; }
-.rail .rended > summary:hover { color: var(--wb-primary); }
+/* the fold row under a group's live rows: two halves, archived and ended,
+   one tri-state radio (none, archived, or ended open; rail.js marks) */
+.rail .rfold { display: flex; align-items: stretch; padding: 4px 8px 2px 14px; font-size: 11.5px; color: var(--wb-muted-fg); }
+.rail .rfh { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; white-space: nowrap; }
+.rail .rfh + .rfh { padding-left: 10px; border-left: 1px solid var(--wb-muted); }
+.rail .rfh .i { width: 12px; height: 12px; stroke-width: 1.7; }
+.rail .rfh .d-n { font-variant-numeric: tabular-nums; }
+.rail .rfh::after { content: "\25b8"; margin-left: 1px; }
+.rail .rfh[aria-expanded="true"]::after { content: "\25be"; }
+.rail .rfh:hover:not(:disabled) { color: var(--wb-primary); }
+.rail .rfh:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; border-radius: 3px; }
+.rail .rfh[aria-expanded="true"] { color: var(--wb-fg); font-weight: 700; }
+.rail .rfh:disabled { opacity: .5; cursor: default; }
+.rail .rfh:disabled::after { content: none; }
+.rail .rfold + .rended { margin-top: 2px; }
+.rail .rended:not(.on) { display: none; }
 .rail .rs { position: relative; display: flex; align-items: flex-start; gap: 0; padding-left: 14px; border-radius: 6px; }
 .rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
 .rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
 .rail .rs.ended { opacity: .75; }
+/* an archived row is ended to the layout (no drag, no parent) but drawn
+   asleep (.stopped), at full strength */
+.rail .rs.ended.archived { opacity: 1; }
+/* a pending-deletion row's time slot: when the registry prune deletes it,
+   in the warning ink under a day */
+.rail .when.del.soon { color: var(--wb-warn-ink); font-weight: 600; }
 /* drag to reorder (dashboard.js, rail drag): a row or a workspace bar
    selects no text and opens no browser long-press menu, so a held press
    drags a bar and opens a row's own menu (the rail row menu); the dragged
@@ -183,7 +200,7 @@
 .rail .rs, .rail .wsbar, .rail .wthd { -webkit-touch-callout: none; }
 .rail .rs.rdrag, .rail .rwt.rdrag, .rail .rws.rdrag { opacity: .45; }
 .rdragging, .rdragging * { cursor: grabbing !important; }
-.rdrop { position: fixed; z-index: 46; height: 2px; border-radius: 1px; background: var(--wb-primary); opacity: .7; pointer-events: none; }
+.rdrop { position: fixed; z-index: 46; height: 2px; border-radius: 1px; background: var(--wb-primary); pointer-events: none; }
 /* a live row's grip, the only part of a row that drags (the rest is its
    link): shown while the row is hovered or focused, always on a touch
    screen, where it takes the touch from scrolling; over a place the drop is
@@ -209,10 +226,12 @@
 @media (hover: none) { .rail .star[aria-pressed="false"] { opacity: .35; } }
 /* the tree: a parent's children box (.rkids) indents its rows one step
    from the harness column (16px; 12px in the overlay rail) under a guide
-   line. The parent's toggle (chevron and child count) turns while the
-   page collapses it (kcol), which hides the box and shows the children's
-   roll-ups on the parent: the "?" approval badge and the working orb on
-   its harness icon. A child shows no star and no message line, and its
+   line. The parent's toggle (chevron, person, child count) opens its
+   second line (.drmeta), the message after it; the chevron turns while
+   the page collapses the parent (kcol), which hides the box and shows the
+   children's roll-ups on the parent: the "?" approval badge and the
+   working orb on its harness icon. A child is one line: no star, no
+   message line, no toggle (the tree is one level deep), and its
    branch tag names its worktree when that is not its parent's. During a
    drag the valid parent under the pointer's middle is the child zone
    (rdkid): an accent outline and tint and a trailing arrow, no line. */
@@ -223,10 +242,19 @@
 .rail .rs.kcol + .rkids { display: none; }
 .rail .rs:not(.kcol) .kap, .rail .rs:not(.kcol) .kidorb { display: none; }
 .rail .rkids .star, .rail .rkids .drmsg { display: none; }
-.rail .kidtog { flex: none; display: inline-flex; align-items: center; gap: 1px; height: 16px; padding: 0 4px 0 1px; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
+.rail .kidtog { flex: none; display: inline-flex; align-items: center; gap: 0; height: 16px; margin-left: -3px; padding: 0 3px 0 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); font: inherit; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
 .rail .kidtog .i { width: 12px; height: 12px; stroke-width: 1.8; transition: transform .15s; }
 .rail .kidtog:hover, .rail .kidtog:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
-.rail .rs.kcol .kidtog .i { transform: rotate(-90deg); }
+.rail .kidtog .i + .i { width: 11px; height: 11px; stroke-width: 1.7; margin: 0 1px; transition: none; }
+.rail .rs.kcol .kidtog .i:first-child { transform: rotate(-90deg); }
+/* after the toggle's count: the descendants at work, a small blue
+   subscript pulsing like the subagent count; absent while none works */
+.rail .drkwork { flex: none; align-self: flex-end; margin: 0 0 3px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s ease-in-out infinite; }
+/* a parent's second line: the toggle and working count, then its message
+   link filling the rest (empty when it has no message) */
+.rail .drmeta { display: flex; align-items: center; gap: 0; min-width: 0; margin-top: -4px; padding-bottom: 5px; }
+.rail .drmeta > .drmsg { flex: 1 1 0; min-width: 0; align-self: stretch; display: flex; align-items: center; margin: 0 0 0 8px; padding: 0 8px 0 0; }
+.rail .drmeta > .drmsg .s2 { margin-top: 0; }
 .rail .rbt { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 45%; font-family: var(--wb-mono); font-size: 10.5px; font-weight: 600; color: var(--wb-muted-fg); white-space: nowrap; }
 .rail .rbt .i { width: 10px; height: 10px; flex: none; }
 .rail .rbt span { overflow: hidden; text-overflow: ellipsis; }
@@ -261,6 +289,10 @@
 .rail .dracts button { display: inline-grid; place-items: center; width: 20px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
 .rail .dracts .i { width: 13px; height: 13px; stroke-width: 1.6; }
 .rail .dracts button:hover, .rail .dracts button:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
+/* a hosted lead's third hover button (archive, or unarchive in the archived
+   fold): the time slot widens so nothing moves when the three show */
+.rail .rs.hosted-row .drslot { min-width: 66px; }
+.rail .drarch.busy { opacity: .55; cursor: progress; }
 @media (hover: hover) {
   .rail .rs:hover .dracts { display: flex; }
   .rail .rs:hover .drslot { visibility: hidden; }
@@ -281,8 +313,13 @@
 /* status: the harness icon (a 16px letter square) stays still while the lead
    works and a blue line travels around its border; it wobbles and hops while
    it waits on an approval (a static ring stays) and wears a static ring when
-   it has failed; the robot blinks while level-1 subagents run, its count
-   beside it, and takes no space when none does. */
+   it has failed. The icon sits in a fixed-width wrap (.hiw): the 16px icon
+   and a 12px slot on its right, kept whether or not subagents run, so the
+   name never moves. The level-1 subagents running are a small blue count
+   blinking in that slot, at the icon's bottom-right just past the working
+   ring (the icon's box grown 2px); open policy items are a 7px dot in the
+   policy accent on the icon's top-left corner, ringed in the row's ground
+   so it parts from icon and ring. Both are absolute: the icon keeps its x. */
 .rail .hi { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; cursor: default; }
 .rail .hi.claude { background: #D97757; }
 .rail .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
@@ -301,8 +338,11 @@
 .rail .hi .rrun { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s linear infinite; }
 .rail .hi.perm { box-shadow: 0 0 0 2px var(--wb-perm-ink); animation: rail-nudge 1.5s ease-in-out infinite; }
 .rail .hi.err { box-shadow: 0 0 0 2px var(--wb-fail); }
-.rail .bots { display: inline-flex; align-items: center; gap: 2px; flex: none; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--wb-fg); }
-.rail .bots .i { width: 12px; height: 12px; stroke-width: 1.4; color: var(--wb-primary); animation: rail-blink 1.4s ease-in-out infinite; }
+.rail .hiw { position: relative; flex: none; display: inline-flex; width: 28px; height: 16px; }
+.rail .sbn { position: absolute; left: 18.5px; bottom: -3px; font-size: 9px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s ease-in-out infinite; }
+.rail .qdot { position: absolute; z-index: 2; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-accent-policy); box-shadow: 0 0 0 1.5px var(--wb-card); }
+.rail .rs:hover .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur .qdot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
 @keyframes rail-orbit { to { transform: rotate(360deg); } }
 @keyframes rail-nudge { 0%, 56%, 100% { transform: none; } 10% { transform: translateY(-3px) rotate(-10deg); } 22% { transform: translateY(0) rotate(10deg); } 34% { transform: translateY(-2px) rotate(-8deg); } 46% { transform: translateY(0) rotate(6deg); } }
 @keyframes rail-blink { 50% { opacity: .25; } }
@@ -353,6 +393,8 @@
 .shp-stat > span { font-size: 10.5px; line-height: 1.25; color: var(--wb-muted-fg); white-space: normal; overflow-wrap: anywhere; }
 .modelhistory { margin: 8px 12px; font-size: 12px; color: var(--wb-muted-fg); }
 .modelhistory > summary { cursor: pointer; }
+/* Observed-model rows carry no leading .mk marker, so drop .brow's 16px marker column here. */
+.modelhistory .brow { grid-template-columns: minmax(0, 1fr) auto; }
 .shp-foot { display: flex; flex-wrap: wrap; gap: 2px 0; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
 .shp-foot > span { white-space: nowrap; }
 .shp-foot > span + span::before { content: "\00b7"; margin: 0 6px; opacity: .7; }
@@ -461,6 +503,7 @@ dialog.rdeldlg [hidden] { display: none !important; }
 .rail .wsbar .chip.perm { margin-left: auto; }
 html:not([data-sysopen]) .rail .rnew { display: none; }
 html:not([data-sysopen]) .rail .rdel { display: none; }
+html:not([data-sysopen]) .rail .drarch { display: none; }
 .rpop .sploc { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: -4px; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
 .rpop .sploc .i { width: 12px; height: 12px; flex: none; }
 .rpop .sploc b { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
@@ -560,8 +603,9 @@ html:not([data-sysopen]) .rail .rdel { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .rail, .rail-open .rail, .rscrim { transition: none; }
   .bgbadge { animation: none; }
-  .rail .bots .i { animation: none; }
+  .rail .sbn { animation: none; }
   .rail .hi .rrun, .rail .hi.perm { animation: none; }
   .rail .kidtog .i { transition: none; }
+  .rail .drkwork { animation: none; }
 }
 

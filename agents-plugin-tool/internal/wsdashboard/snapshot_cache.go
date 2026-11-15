@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/kang-sw/devenv/internal/wslive"
@@ -13,12 +12,15 @@ import (
 // SnapshotCache holds the parsed live snapshots of sessions (FileCache): a
 // page render, its refresh stamp, and a session re-read (HashLiveStores)
 // each read the snapshot of every session they name, and an unchanged one
-// then costs a stat. A hosted session's in-memory copy (SetLive) is served
-// in place of its file, with no stat, until ClearLive. The zero value is
+// then costs an identity stat, even inside the recent-write window. A hosted
+// session's in-memory copy (SetLive) is served in place of its file, with no
+// stat, until ClearLive. The zero value is
 // ready; a nil cache reads every time.
 type SnapshotCache struct {
 	files    FileCache[parsedSnapshot]
-	observed FileCache[[]wslive.ObservedRecord]
+	observed wslive.ObservedCache
+	// load is an instance-local snapshot opener/decoder seam for tests.
+	load func(string) (parsedSnapshot, error)
 
 	liveMu sync.Mutex
 	live   map[string]parsedSnapshot // by snapshot path
@@ -69,7 +71,11 @@ func (c *SnapshotCache) read(path string) (parsedSnapshot, error) {
 	if ok {
 		return p, nil
 	}
-	return c.files.Load(path, loadSnapshot)
+	load := c.load
+	if load == nil {
+		load = loadSnapshot
+	}
+	return c.files.LoadIdentity(path, load)
 }
 
 // SetLive serves snap as session replyID's snapshot under stateDir in place
@@ -120,16 +126,11 @@ func (c *SnapshotCache) Snapshot(stateDir, replyID string) *wslive.Snapshot {
 		return nil
 	}
 	dir := SessionDir(stateDir, replyID)
-	load := func(string) ([]wslive.ObservedRecord, error) { return wslive.ReadObserved(dir) }
-	var records []wslive.ObservedRecord
-	if c == nil {
-		records, _ = load("")
-	} else {
-		records, _ = c.observed.Load(filepath.Join(dir, wslive.ObservedDirName), load)
+	var observed *wslive.ObservedCache
+	if c != nil {
+		observed = &c.observed
 	}
-	if len(records) > 0 {
-		wslive.OverlayObserved(&p.snap, records)
-	}
+	observed.Load(dir).Overlay(&p.snap)
 	return &p.snap
 }
 
@@ -140,7 +141,7 @@ func (c *SnapshotCache) Forget(stateDir, replyID string) {
 		return
 	}
 	c.files.ForgetUnder(SessionDir(stateDir, replyID))
-	c.observed.ForgetUnder(SessionDir(stateDir, replyID))
+	c.observed.Forget(SessionDir(stateDir, replyID))
 }
 
 // Counts reports the snapshot reads served from the cache and the ones that

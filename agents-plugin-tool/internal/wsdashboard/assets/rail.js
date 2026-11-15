@@ -32,6 +32,22 @@
   function strings(v) { return Array.isArray(v) ? v.filter(function (x) { return typeof x === "string"; }) : []; }
   function keys(o) { return o && typeof o === "object" ? Object.keys(o) : []; }
 
+  // Admission drafts keep the original observation revision until the user
+  // explicitly clears/reselects. A reload or server render is not fresh consent.
+  function admissionDrafts(store) {
+    var key = "ws.dashboard.worktree-admission.drafts";
+    return {
+      load: function () {
+        var v = parse(store.load(key), []);
+        return Array.isArray(v) ? v.filter(function (s) {
+          return s && typeof s.repository === "string" && typeof s.path === "string" && typeof s.revision === "string" &&
+            (s.action === "approve" || s.action === "reject" || s.action === "undo");
+        }) : [];
+      },
+      save: function (v) { store.save(key, v.length ? JSON.stringify(v) : null); }
+    };
+  }
+
   // A draft is one session's unsent input and view state: text and
   // mentions ({start, end, text}) of the composer, sel its selection
   // ([start, end]), cmd its slash command selection ({name, args}: args a
@@ -122,8 +138,8 @@
       put: put
     };
   }
-  // collapsed is the collapsed workspaces' paths; endedOpen the ended
-  // folds (details.rended) left open, by their data-key.
+  // collapsed is the collapsed workspaces' paths; endedOpen the fold rows'
+  // open lists, by FOLD_KEYS (marks).
   function collapsed(store) { return stringSet(store, COLLAPSED); }
   function endedOpen(store) { return stringSet(store, ENDED); }
 
@@ -273,10 +289,12 @@
   // child (its own group only; the route checks no stars for a detach).
   // The line after a parent whose children show is the line before its
   // first child. An orphan shows top-level, so it is a target as one.
-  function dropZone(d, t, frac) {
+  // With halves every row splits in halves (no child zone): the pointer
+  // drag's line, whose child zone arms only after a dwell.
+  function dropZone(d, t, frac, halves) {
     if (!d || !t || !d.rid || t.rid === d.rid || t.parent === d.rid) return null;
     var parentOK = !t.parent && t.live && t.ws === d.ws && !d.kids;
-    var zone = parentOK ? (frac < 0.25 ? "before" : frac > 0.75 ? "after" : "child") : (frac < 0.5 ? "before" : "after");
+    var zone = parentOK && !halves ? (frac < 0.25 ? "before" : frac > 0.75 ? "after" : "child") : (frac < 0.5 ? "before" : "after");
     if (zone === "child") return { zone: zone, ref: t.rid, op: { op: "attach", rid: d.rid, parent: t.rid } };
     if (zone === "after" && parentOK && t.first) {
       return dropZone(d, { rid: t.first, ws: t.ws, group: "", live: true, parent: t.rid, kids: false, star: false, first: "" }, 0);
@@ -522,10 +540,36 @@
       if (row) { if (col) row.classList.add("kcol"); else row.classList.remove("kcol"); }
       tog.setAttribute("aria-expanded", String(!col));
     });
-    all("details.rended[data-key]").forEach(function (d) {
-      var open = s.ended.has(d.getAttribute("data-key"));
-      if (d.open !== open) d.open = open;
+    all(".rfold[data-key]").forEach(function (f) {
+      var key = f.getAttribute("data-key") || "";
+      foldShow(f, s.ended.has(FOLD_KEYS.arch + key) ? "arch" : s.ended.has(FOLD_KEYS.del + key) ? "del" : "");
     });
+  }
+  // A group's fold row (.rfold, data-key its path) has two halves, archived
+  // ("arch") and ended ("del"), acting as one tri-state radio: none, one,
+  // or the other list open. The pick is kept in the ended-fold set under
+  // FOLD_KEYS' prefix and the path; "rended:" is the key the single ended
+  // fold kept before the split, so a fold left open stays open.
+  var FOLD_KEYS = { arch: "rarch:", del: "rended:" };
+  // foldShow opens the fold row f's list open ("arch", "del", or "" for
+  // none); a disabled half (no rows) never opens.
+  function foldShow(f, open) {
+    var halves = Array.prototype.slice.call(f.querySelectorAll(".rfh")), on = "";
+    halves.forEach(function (b) { if (b.getAttribute("data-k") === open && !b.disabled) on = open; });
+    halves.forEach(function (b) { b.setAttribute("aria-expanded", String(!!on && b.getAttribute("data-k") === on)); });
+    (f.parentNode ? Array.prototype.slice.call(f.parentNode.children) : []).forEach(function (l) {
+      if (!l.classList.contains("rended")) return;
+      if (on && l.getAttribute("data-k") === on) l.classList.add("on"); else l.classList.remove("on");
+    });
+  }
+  // foldPick is a click on the fold half: it opens its list and closes the
+  // other, or closes its own list when open, and keeps the pick (s, state).
+  function foldPick(s, half) {
+    var f = half.parentNode, key = f.getAttribute("data-key") || "", k = half.getAttribute("data-k") || "";
+    var on = !half.disabled && half.getAttribute("aria-expanded") !== "true";
+    s.ended.put(FOLD_KEYS.arch + key, on && k === "arch");
+    s.ended.put(FOLD_KEYS.del + key, on && k === "del");
+    foldShow(f, on ? k : "");
   }
 
   // REVIVE_MOVES are the ways an ended row brings its session back (its
@@ -608,13 +652,13 @@
 
   // leadBody is the spawn request for a hosted lead session in root from
   // the form f: the harness, the plugin isolation (always sent), and a model, effort, and permission mode only
-  // when one was picked (none leaves the harness's own). Only a Claude
-  // session takes a permission mode.
+  // when one was picked (none leaves the harness's own). The form supplies
+  // admitted permission choices; Pi keeps its existing mode-free request.
   function leadBody(root, f) {
     var body = { root: root, harness: String(f.harness || ""), plugin_isolation: f.isolation === "isolated" ? "isolated" : "default" };
     if (f.model) body.model = String(f.model);
     if (f.effort) body.effort = String(f.effort);
-    if (f.mode && body.harness === "claude") body.permission_mode = String(f.mode);
+    if (f.mode && body.harness !== "pi") body.permission_mode = String(f.mode);
     return body;
   }
 
@@ -728,7 +772,8 @@
     }
     function show(n) {
       var src = n && source(n);
-      if (!src || !n.isConnected || !n.getClientRects().length) { hide(); return; }
+      // A rail drag (rdragging) shows no hover: the rows it passes are targets.
+      if (!src || !n.isConnected || !n.getClientRects().length || hasClass(doc.documentElement, "rdragging")) { hide(); return; }
       if (!pop) {
         pop = doc.createElement("div"); pop.className = "rpop shp";
         pop.setAttribute("role", "tooltip");
@@ -777,6 +822,7 @@
   }
 
   window.WsRail = {
+    admissionDrafts: admissionDrafts,
     hoverUpdates: hoverUpdates,
     hover: hover,
     hoverPlace: hoverPlace,
@@ -793,6 +839,7 @@
     endedOpen: endedOpen,
     state: state,
     marks: marks,
+    foldPick: foldPick,
     drop: drop,
     dropRefusal: dropRefusal,
     kidsCollapsed: kidsCollapsed,

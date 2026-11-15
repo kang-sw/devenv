@@ -39,3 +39,21 @@ func isTransientReplaceError(err error) bool {
 	}
 	return errno == windows.ERROR_ACCESS_DENIED || errno == windows.ERROR_SHARING_VIOLATION
 }
+
+// readFile reads path, retrying like replaceFile while a concurrent replace
+// briefly holds it: on Windows an open racing the rename fails with
+// ERROR_SHARING_VIOLATION or ERROR_ACCESS_DENIED.
+func readFile(path string) ([]byte, error) {
+	deadline := time.Now().Add(2 * time.Second)
+	backoff := 5 * time.Millisecond
+	for {
+		raw, err := os.ReadFile(path)
+		if err == nil || !isTransientReplaceError(err) || time.Now().After(deadline) {
+			return raw, err
+		}
+		time.Sleep(backoff)
+		if backoff < 200*time.Millisecond {
+			backoff *= 2
+		}
+	}
+}

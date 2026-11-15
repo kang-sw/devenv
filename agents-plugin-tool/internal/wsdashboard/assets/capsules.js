@@ -15,9 +15,10 @@
   }
   // Stable subsequence ranking: exact, prefix, contiguous, then compact fuzzy matches.
   function rank(rows, query, label) {
-    var needle = query.toLocaleLowerCase();
+    // Composed and decomposed Hangul (NFC/NFD) must match each other.
+    var needle = query.normalize("NFC").toLocaleLowerCase();
     return rows.map(function (row, index) {
-      var text = label(row).toLocaleLowerCase(), at = -1, first = -1, gaps = 0;
+      var text = label(row).normalize("NFC").toLocaleLowerCase(), at = -1, first = -1, gaps = 0;
       for (var i = 0; i < needle.length; i++) {
         var next = text.indexOf(needle.charAt(i), at + 1);
         if (next < 0) return null;
@@ -205,6 +206,15 @@
       offsets(); notify();
     });
     editor.addEventListener("compositionstart", function () { composing = true; field.dispatchEvent(new Event("compositionstart")); });
+    // compositionupdate fires before the DOM shows the new text, and an IME
+    // may send no input event: read the live text after it, then forward.
+    editor.addEventListener("compositionupdate", function () {
+      setTimeout(function () {
+        if (!composing) return;
+        var state = read(editor); text = state.text; ranges = state.ranges; offsets();
+        field.dispatchEvent(new Event("compositionupdate"));
+      }, 0);
+    });
     editor.addEventListener("compositionend", function () { composing = false; field.dispatchEvent(new Event("compositionend")); });
     ["keydown", "keyup"].forEach(function (type) {
       editor.addEventListener(type, function (e) {

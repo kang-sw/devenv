@@ -74,6 +74,8 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('bodytime_next', 'testdata/bodytime-verify-next.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
+# The supervisor's POSIX process model is simulated even on Windows, where
+# os.killpg is absent; create only the mocked API, never a real signal path.
 root = dict(pid=12345, ppid=123, pgid=12345, start='Sat Nov 14 14:00:00 2026')
 class Child:
     pid = root['pid']
@@ -90,7 +92,7 @@ for browser, code in ((False, 0), (True, 0), (True, -9)):
         job = m.Job(1, ['mock-command'], 1, {}, receipts, time.monotonic()+30, browser)
         with patch.object(m.subprocess, 'Popen', return_value=Child(code)), \
              patch.object(m, 'snapshot', side_effect=[{12345: root}, {12345: root}, {}, {}]), \
-             patch.object(m.os, 'killpg') as group_signal, patch.object(m.os, 'kill') as pid_signal:
+             patch.object(m.os, 'killpg', create=True) as group_signal, patch.object(m.os, 'kill') as pid_signal:
             try:
                 job.run()
             except subprocess.CalledProcessError as err:
@@ -117,7 +119,7 @@ for reused in (False, True):
         job.register(root, 'fixture-owned identity')
         observed = dict(root, start='replacement identity') if reused else root
         with patch.object(m, 'snapshot', return_value={12345: observed}), \
-             patch.object(m.os, 'killpg') as group_signal:
+             patch.object(m.os, 'killpg', create=True) as group_signal:
             job.signal_groups(signal.SIGTERM, time.monotonic()+1)
             if reused: group_signal.assert_not_called()
             else: group_signal.assert_called_once_with(12345, signal.SIGTERM)
@@ -130,6 +132,7 @@ print('next supervisor receipts: launch, identity, reap, scoped absence, first f
 const bodyTimeRunnerCases = `
 import contextlib, importlib.util, io, pathlib, subprocess, tempfile
 from unittest.mock import patch
+# Simulate the POSIX runner on every host; Windows has no real os.killpg.
 spec = importlib.util.spec_from_file_location('bodytime_verify', 'testdata/bodytime-verify.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
@@ -145,7 +148,7 @@ for code in (1, -9):
             output = io.StringIO()
             with patch.object(m.subprocess, 'Popen', return_value=Child()), \
                  patch.object(m, 'identity', return_value='owned direct child'), \
-                 patch.object(m.os, 'killpg') as group_signal, \
+                 patch.object(m.os, 'killpg', create=True) as group_signal, \
                  patch.object(m.os, 'kill') as pid_signal, \
                  contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 try:

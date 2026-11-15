@@ -568,6 +568,10 @@ type CommitOptions struct {
 	Description    string   `json:"description,omitempty"`
 	AIContext      []string `json:"ai_context"`
 	UpdatedTickets []string `json:"updated_tickets,omitempty"`
+	// SuppressInferredTicketUpdates records an explicit empty MCP list without
+	// changing direct Go/CLI callers' zero-value inference. It affects only
+	// inferred message summaries, never ticket detection or verification.
+	SuppressInferredTicketUpdates bool `json:"-"`
 	// Followups are written under "## Follow-ups", one minted id each. The
 	// root-lead authorization gate is the caller's (internal/mcp owns sessions).
 	Followups []Followup `json:"followups,omitempty"`
@@ -671,8 +675,20 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 		return CommitResult{}, err
 	}
 	status := ParseStatus(statusOut)
-	if err := validateCommitStatus(status, opts.Paths); err != nil {
-		return CommitResult{}, err
+	var mergePins *commitMergePins
+	if statusErr := validateCommitStatus(status, opts.Paths); statusErr != nil {
+		if !strings.HasPrefix(statusErr.Error(), "refusing to commit unrelated staged path") {
+			return CommitResult{}, statusErr
+		}
+		admitted, pins, err := admitMergeStaging(ctx, runner, root, opts.Paths)
+		if err != nil {
+			return CommitResult{}, fmt.Errorf("%w; automatic merge admission unavailable: %v; include the intended staged paths in the existing paths grant explicitly", statusErr, err)
+		}
+		opts.Paths = append(opts.Paths, admitted...)
+		mergePins = pins
+		if err := validateCommitStatus(status, opts.Paths); err != nil {
+			return CommitResult{}, err
+		}
 	}
 	// Verify runs after staging (so a blocked commit leaves the invalid state
 	// staged for the caller to fix and re-verify, not reverted) and before the
@@ -698,14 +714,24 @@ func (c Client) Commit(ctx context.Context, root string, opts CommitOptions) (Co
 		advisories = verifyAdvisories
 	}
 	ticketChanges := detectTicketChanges(ctx, runner, root)
-	if len(opts.UpdatedTickets) == 0 {
+	if len(opts.UpdatedTickets) == 0 && !opts.SuppressInferredTicketUpdates {
 		opts.UpdatedTickets = ticketChangeSummaries(ticketChanges)
 	}
 	if err := mintFollowupIDs(opts.Followups, c.MintID); err != nil {
 		return CommitResult{}, err
 	}
 	message := CommitMessage(opts)
-	if _, err := runner.RunGit(ctx, root, "commit", "-m", message); err != nil {
+	if mergePins != nil {
+		// Verification and message generation can run caller code. Recheck the
+		// pinned heads and the whole staged index (including new outside-grant
+		// additions), not just the names that passed the equality proof.
+		if err := mergePins.recheck(ctx, runner, root, opts.ExpectedBranch); err != nil {
+			return CommitResult{}, err
+		}
+	}
+	// Match Git's non-editing whitespace cleanup while preserving Markdown
+	// headings even when the caller configured commit.cleanup=strip.
+	if _, err := runner.RunGit(ctx, root, "commit", "-m", message, "--cleanup=whitespace"); err != nil {
 		return CommitResult{}, err
 	}
 	hashOut, err := runner.RunGit(ctx, root, "rev-parse", "HEAD")

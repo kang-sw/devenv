@@ -462,7 +462,11 @@
   function split(base) {
     var flow = units().filter(function (u) { return !u.pinned; });
     var out = order(base, flow, topicAt);
-    return { pins: pinned().map(function (u) { return u.el; }), board: [toolbar].concat(colOn && !overviewOn ? out : [pins].concat(out)) };
+    // A page may give transient cards a leading seat (the worktree's narrow
+    // preview). This changes placement only, never the persisted open time.
+    var leading = flow.filter(function (u) { return opt.leading && opt.leading(u); }).map(function (u) { return u.el; });
+    out = out.filter(function (n) { return leading.indexOf(n) < 0; });
+    return { pins: pinned().map(function (u) { return u.el; }), board: [toolbar].concat(leading, colOn && !overviewOn ? out : [pins].concat(out)) };
   }
   function weave(base) {
     var rest = claim(base);
@@ -877,16 +881,23 @@
   // time: a card, or a board node (sheet: a topic, or a topic's panel).
   // Category identity belongs to the owning renderer, never to incidental
   // nested media. Capture column geometry before any node becomes fixed.
+  // The toolbar explorer floats over the board: it spans the main (board)
+  // column, or the conversation column where the board is hidden.
+  function filesColumn() {
+    return ["bcol", "convo"].map(function (id) {
+      var box = doc.getElementById(id);
+      return box ? box.getBoundingClientRect() : null;
+    }).filter(function (r) { return r && r.width > 0 && isFinite(r.width); })[0] || null;
+  }
   function sheetWidth(c) {
-    var kind = c.kind, host, n = c.el;
-    if (c.files || kind === "terminal") {
-      host = c.files ? doc.getElementById("convo") : n;
-      if (!c.files) {
-        while (host && host !== board && host !== col) host = host.parentNode;
-        if (!host) host = board;
-      }
-      var w = host && host.getBoundingClientRect().width;
-      return w > 0 && isFinite(w) ? w : c.files ? 1280 : 960;
+    var kind = c.kind, host, n = c.el, w;
+    if (c.files) return (filesColumn() || { width: 1280 }).width;
+    if (kind === "terminal") {
+      host = n;
+      while (host && host !== board && host !== col) host = host.parentNode;
+      if (!host) host = board;
+      w = host && host.getBoundingClientRect().width;
+      return w > 0 && isFinite(w) ? w : 960;
     }
     if (!(c instanceof Card)) return 1440; // a topic or its entry panel
     if (kind === "preview") kind = n.getAttribute("data-preview-kind");
@@ -897,7 +908,7 @@
   }
   function clearSheetWidth(c) {
     if (c.widthBtn && c.widthBtn.parentNode) c.widthBtn.parentNode.removeChild(c.widthBtn);
-    if (c.el) c.el.style.removeProperty("--sheet-inset");
+    if (c.el) ["--sheet-inset", "--sheet-left", "--sheet-right"].forEach(function (k) { c.el.style.removeProperty(k); });
     delete c.widthBtn;
     delete c.normalWidth;
     delete c.extended;
@@ -905,10 +916,20 @@
   function sizeSheet(c) {
     if (!c || !c.el) return;
     // Preview responses may arrive after maximize; their renderer identity
-    // can change, but Files/Terminal keep the original column snapshot.
-    if (c.kind === "preview") c.normalWidth = sheetWidth(c);
+    // can change. Files follows its column across resizes (that column is
+    // never the fixed node itself); Terminal keeps the original snapshot.
+    if (c.kind === "preview" || c.files) c.normalWidth = sheetWidth(c);
     var normal = Math.min(c.normalWidth, 1920), wide = window.innerWidth > 640 && window.innerWidth - 32 > normal;
     c.el.style.setProperty("--sheet-inset", (c.extended ? 16 : Math.max(16, (window.innerWidth - normal) / 2)) + "px");
+    var span = c.files && !c.extended && filesColumn();
+    if (span) {
+      // Sit over the column itself rather than centered in the viewport.
+      c.el.style.setProperty("--sheet-left", Math.max(16, span.left) + "px");
+      c.el.style.setProperty("--sheet-right", Math.max(16, window.innerWidth - span.right) + "px");
+    } else {
+      c.el.style.removeProperty("--sheet-left");
+      c.el.style.removeProperty("--sheet-right");
+    }
     if (!c.widthBtn) {
       c.widthBtn = ibtn("sheet-width", "maximize-2", "");
       c.widthBtn.addEventListener("click", function (e) {

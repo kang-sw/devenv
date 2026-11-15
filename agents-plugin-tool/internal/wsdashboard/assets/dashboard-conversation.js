@@ -64,15 +64,21 @@
     return true;
   }
   // mergeEntriesRegion applies an entries region event: the title bar (its
-  // counts) is replaced, and the entries are merged. A window past a gap
-  // starts the box over; a box at the bottom (pin) sheds its oldest entries
-  // past the cap. Either way the older history is loaded again from what the
-  // box then holds.
+  // counts) and model history are synced, and the entries are merged. A window
+  // past a gap starts the box over; a box at the bottom (pin) sheds its oldest
+  // entries past the cap. Either way the older history is loaded again from
+  // what the box then holds.
   function mergeEntriesRegion(el, html, pin) {
     var src = frag(html), box = entriesBox(), head = el.querySelector(".thead"), nhead = src.querySelector(".thead");
     var nbox = src.querySelector(".centries");
     if (!box || !nbox) { el.innerHTML = html; restoreOpen(el); fmtTimes(el); sweepOutImgs(el); mermaid(el); histReset(); return; }
     if (head && nhead) { head.parentNode.replaceChild(nhead, head); fmtTimes(nhead); }
+    var history = el.querySelector(".modelhistory"), nhistory = src.querySelector(".modelhistory");
+    if (history) {
+      if (nhistory) history.parentNode.replaceChild(nhistory, history);
+      else history.parentNode.removeChild(history);
+    } else if (nhistory) box.parentNode.insertBefore(nhistory, box);
+    if (nhistory) { restoreOpen(nhistory); fmtTimes(nhistory); }
     if (gapped(box, nbox)) { resetEntries(box); histReset(); }
     var added = mergeEntries(box, nbox);
     added.forEach(sweepOutImgs);
@@ -116,8 +122,8 @@
         if (effectTopic(topicID) !== topic) { step(); return; }
         var target = topic;
         if (id !== topicID) {
-          if (/^[ep]/.test(id)) target = window.wbHistory && window.wbHistory.loadTarget ? window.wbHistory.loadTarget(topic, id, unfold) : null;
-          else target = topic.querySelector('[id="' + id + '"]');
+          if (window.wbHistory && window.wbHistory.loadTarget) target = window.wbHistory.loadTarget(topic, id, unfold);
+          else target = /^item-/.test(id) ? topic.querySelector('[id="' + id + '"]') : null;
           if (!target || target.id !== id || !inBoard(target) || target.closest("section.topic[data-topic]") !== topic ||
               (/^item-/.test(id) && !target.matches(".card.policy[data-id], .arow[data-id], .ckrow[data-id], .srow"))) target = null;
         }
@@ -133,6 +139,14 @@
         if (!target.closest(".wb-history")) {
           target.scrollIntoView({ block: "start" });
           if (window.wbHistory && window.wbHistory.keep) window.wbHistory.keep(target);
+          // Entry/item flashes belong to loadTarget; topic-only navigation
+          // (including an absent element's fallback) uses the existing pulse.
+          if (target === topic || !window.wbHistory || !window.wbHistory.loadTarget) {
+            target.classList.remove("palette-flash");
+            void target.offsetWidth;
+            target.classList.add("palette-flash");
+            setTimeout(function () { target.classList.remove("palette-flash"); }, 1600);
+          }
         }
         target.setAttribute("tabindex", "-1");
         target.focus({ preventScroll: true });

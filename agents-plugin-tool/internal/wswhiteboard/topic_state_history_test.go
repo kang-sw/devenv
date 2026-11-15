@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -125,6 +126,9 @@ func buildHistoricalWriter(t *testing.T) string {
 		}
 	}
 	binary := filepath.Join(dir, "historical-writer")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "build", "-p=1", "-mod=mod", "-o", binary, ".")

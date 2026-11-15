@@ -366,18 +366,18 @@ func TestEnsureHandoffReplacesAnOlderDaemon(t *testing.T) {
 	}
 }
 
-// TestEnsureHandoffReplacesAReleaseDaemonWithADevBuild: a "-dev" build follows
-// the release of its core, so it replaces a release daemon of the same core.
-func TestEnsureHandoffReplacesAReleaseDaemonWithADevBuild(t *testing.T) {
+func TestEnsureKeepsAReleaseDaemonForAnEqualCoreDevBuild(t *testing.T) {
 	dir := t.TempDir()
 	old := startTestDaemon(t, dir, "0.48.0")
 	sp := &inProcessSpawner{t: t, dir: dir, versions: []string{"0.48.0-dev"}}
 	defer sp.closeAll()
 	outcome, err := Ensure(context.Background(), ensureOpts(dir, "0.48.0-dev", sp.spawn))
-	if err != nil || outcome != OutcomeReplaced {
-		t.Fatalf("Ensure = %s, %v", outcome, err)
+	if err != nil || outcome != OutcomeRunning || len(sp.calls) != 0 {
+		t.Fatalf("Ensure = %s, %v, %d spawns", outcome, err, len(sp.calls))
 	}
-	waitDone(t, old)
+	if _, err := Health(context.Background(), testClient(), old.Endpoint()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestEnsureFromAnOlderWsMcpLeavesANewerDaemonRunning(t *testing.T) {
@@ -470,23 +470,19 @@ func startBuiltDaemon(t *testing.T, dir, version string, buildTime int64, conten
 	return d
 }
 
-// TestEnsureHandoffOrdersSameVersionBuildsByBuildTime: at an equal version
-// the newer build replaces the daemon, and the replacement reports the
-// client's build time, so a second Ensure leaves it alone.
-func TestEnsureHandoffOrdersSameVersionBuildsByBuildTime(t *testing.T) {
+// Equal-core builds stay on ordinary connection regardless of build time.
+func TestEnsureKeepsEqualCoreBuildsByDefault(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		daemon        int64 // 0 = a daemon that omits the field
-		client        int64
-		wantReplaced  bool
-		wantSpawnArgs string
+		name   string
+		daemon int64 // 0 = a daemon that omits the field
+		client int64
 	}{
-		{"older daemon build is replaced", 1000, 2000, true, "dashboard --port 0 --build-time 2000"},
-		{"daemon without the field is replaced", 0, 2000, true, "dashboard --port 0 --build-time 2000"},
-		{"newer daemon build is left", 3000, 2000, false, ""},
-		{"equal build time is left", 2000, 2000, false, ""},
-		{"unknown client build time is left", 1000, 0, false, ""},
-		{"unknown on both sides is left", 0, 0, false, ""},
+		{"older daemon build is kept", 1000, 2000},
+		{"daemon without the field is kept", 0, 2000},
+		{"newer daemon build is left", 3000, 2000},
+		{"equal build time is left", 2000, 2000},
+		{"unknown client build time is left", 1000, 0},
+		{"unknown on both sides is left", 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -499,51 +495,32 @@ func TestEnsureHandoffOrdersSameVersionBuildsByBuildTime(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !tc.wantReplaced {
-				if outcome != OutcomeRunning || len(sp.calls) != 0 {
-					t.Fatalf("Ensure = %s, %d spawns; want the daemon left running", outcome, len(sp.calls))
-				}
-				select {
-				case <-old.Done():
-					t.Fatal("the daemon stopped")
-				default:
-				}
-				return
+			if outcome != OutcomeRunning || len(sp.calls) != 0 {
+				t.Fatalf("Ensure = %s, %d spawns; want the daemon left running", outcome, len(sp.calls))
 			}
-			if outcome != OutcomeReplaced || len(sp.calls) != 1 || strings.Join(sp.calls[0], " ") != tc.wantSpawnArgs {
-				t.Fatalf("Ensure = %s, spawn calls %v; want a replacement with %q", outcome, sp.calls, tc.wantSpawnArgs)
-			}
-			waitDone(t, old)
-			ep, _ := ReadEndpoint(dir)
-			if info, err := Health(context.Background(), testClient(), ep); err != nil || info.BuildTime != tc.client {
-				t.Fatalf("new daemon health = %+v, %v; want build time %d", info, err, tc.client)
-			}
-			if outcome, err := Ensure(context.Background(), opts); err != nil || outcome != OutcomeRunning || len(sp.calls) != 1 {
-				t.Fatalf("second Ensure = %s, %v, %d spawns; the replacement must not flap", outcome, err, len(sp.calls))
+			select {
+			case <-old.Done():
+				t.Fatal("the daemon stopped")
+			default:
 			}
 		})
 	}
 }
 
 // TestEnsureKeepsASameContentDaemonWhateverItsBuildTime: at an equal
-// version, a daemon reporting the client's own content hash stays however
-// old its build time is: the Claude, Codex, and Pi installs are separate
-// copies of one binary with their own mtimes, and a replacement drains
-// every session on the machine. The build time decides only between
-// different contents, or when either side reports no hash.
+// version, content differences and missing hashes do not authorize a swap.
 func TestEnsureKeepsASameContentDaemonWhateverItsBuildTime(t *testing.T) {
 	const same = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	const other = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 	for _, tc := range []struct {
-		name         string
-		daemonHash   string
-		clientHash   string
-		wantReplaced bool
+		name       string
+		daemonHash string
+		clientHash string
 	}{
-		{"same content, older build: kept", same, same, false},
-		{"other content, older build: replaced", other, same, true},
-		{"daemon reports no hash: the build time decides", "", same, true},
-		{"client knows no hash: the build time decides", same, "", true},
+		{"same content, older build: kept", same, same},
+		{"other content, older build: kept", other, same},
+		{"daemon reports no hash: kept", "", same},
+		{"client knows no hash: kept", same, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -557,13 +534,6 @@ func TestEnsureKeepsASameContentDaemonWhateverItsBuildTime(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tc.wantReplaced {
-				if outcome != OutcomeReplaced || len(sp.calls) != 1 {
-					t.Fatalf("Ensure = %s, %d spawns; want a replacement", outcome, len(sp.calls))
-				}
-				waitDone(t, old)
-				return
-			}
 			if outcome != OutcomeRunning || len(sp.calls) != 0 {
 				t.Fatalf("Ensure = %s, %d spawns; want the daemon left running", outcome, len(sp.calls))
 			}
@@ -572,7 +542,7 @@ func TestEnsureKeepsASameContentDaemonWhateverItsBuildTime(t *testing.T) {
 				t.Fatal("the same-content daemon stopped")
 			default:
 			}
-			if info, err := Health(context.Background(), testClient(), old.Endpoint()); err != nil || info.ContentHash != same {
+			if info, err := Health(context.Background(), testClient(), old.Endpoint()); err != nil || info.ContentHash != tc.daemonHash {
 				t.Fatalf("health = %+v, %v; want content_hash reported", info, err)
 			}
 		})
@@ -586,9 +556,76 @@ func TestEnsureKeepsASameContentDaemonWhateverItsBuildTime(t *testing.T) {
 	}
 }
 
-// TestBuildTimeNeverOutranksVersion: the build time only breaks a version
-// tie; a newer build of an older version never replaces a newer version, and
-// an older build of a newer version still replaces an older version.
+func TestKeepRunningCorePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		running, candidate string
+		lan, replace, want bool
+	}{
+		{"release to dev", "0.48.0", "0.48.0-dev", false, false, true},
+		{"dev to release", "0.48.0-dev", "0.48.0", false, false, true},
+		{"suffix variants", "0.48.0-a", "0.48.0-z", false, false, true},
+		{"older core", "0.47.9-dev", "0.48.0", false, false, false},
+		{"newer core", "0.48.1", "0.48.0-dev", false, false, true},
+		{"equal core LAN change", "0.48.0-dev", "0.48.0", true, false, false},
+		{"newer core LAN precedence", "0.48.1", "0.48.0", true, true, true},
+		{"explicit equal core", "0.48.0-dev", "0.48.0", false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, hash := range []string{"", "same", "different"} {
+				info := HealthInfo{Version: tc.running, BuildTime: 9000, ContentHash: hash}
+				opts := EnsureOptions{Version: tc.candidate, BuildTime: 1000, ContentHash: "same", LAN: tc.lan, Replace: tc.replace}
+				if got := keepRunning(info, opts); got != tc.want {
+					t.Fatalf("keepRunning(%+v, %+v) = %v, want %v", info, opts, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestEnsureExplicitReplacementIsOneShot(t *testing.T) {
+	for _, hash := range []string{"same", "different", ""} {
+		t.Run(hash, func(t *testing.T) {
+			dir := t.TempDir()
+			old := startBuiltDaemon(t, dir, "0.48.0-dev", 2000, hash)
+			sp := &inProcessSpawner{t: t, dir: dir, versions: []string{"0.48.0"}}
+			defer sp.closeAll()
+			opts := ensureOpts(dir, "0.48.0", sp.spawn)
+			opts.Replace, opts.ContentHash, opts.BuildTime = true, "same", 1000
+			outcome, err := Ensure(context.Background(), opts)
+			if err != nil || outcome != OutcomeReplaced || len(sp.calls) != 1 {
+				t.Fatalf("explicit Ensure = %s, %v, %d spawns", outcome, err, len(sp.calls))
+			}
+			waitDone(t, old)
+			opts.Replace = false
+			if outcome, err := Ensure(context.Background(), opts); err != nil || outcome != OutcomeRunning || len(sp.calls) != 1 {
+				t.Fatalf("ordinary successor Ensure = %s, %v, %d spawns", outcome, err, len(sp.calls))
+			}
+		})
+	}
+	t.Run("absent", func(t *testing.T) {
+		dir := t.TempDir()
+		sp := &inProcessSpawner{t: t, dir: dir, versions: []string{"0.48.0"}}
+		defer sp.closeAll()
+		opts := ensureOpts(dir, "0.48.0", sp.spawn)
+		opts.Replace = true
+		if outcome, err := Ensure(context.Background(), opts); err != nil || outcome != OutcomeStarted || len(sp.calls) != 1 {
+			t.Fatalf("absent explicit Ensure = %s, %v, %d spawns", outcome, err, len(sp.calls))
+		}
+	})
+	t.Run("newer core", func(t *testing.T) {
+		dir := t.TempDir()
+		startTestDaemon(t, dir, "0.48.1")
+		opts := ensureOpts(dir, "0.48.0", func([]string) error { t.Fatal("downgrade spawned"); return nil })
+		opts.Replace = true
+		if outcome, err := Ensure(context.Background(), opts); err != nil || outcome != OutcomeRunning {
+			t.Fatalf("newer explicit Ensure = %s, %v", outcome, err)
+		}
+	})
+}
+
+// Build time never outranks numeric version: an older build of a newer core
+// still replaces an older core, and a newer build cannot downgrade it.
 func TestBuildTimeNeverOutranksVersion(t *testing.T) {
 	dir := t.TempDir()
 	d := startBuiltDaemon(t, dir, "0.49.0", 1000)

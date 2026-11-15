@@ -34,7 +34,12 @@ func inboxBody(t *testing.T, e wsinbox.Entry) string {
 // returns the status, the response, and its body.
 func postJSON(t *testing.T, url, origin, body string) (int, http.Header, string) {
 	t.Helper()
-	return postJSONWith(t, testClient(), url, origin, body)
+	client := testClient()
+	// wsinbox/fileops_windows.go:retryTransient allows about two seconds for
+	// transient sharing failures. Allow that designed retry budget plus one
+	// second for HTTP and handler work, not the health client's 500 ms.
+	client.Timeout = 3 * time.Second
+	return postJSONWith(t, client, url, origin, body)
 }
 
 // postJSONWith is postJSON through client, for a route whose handler does
@@ -197,8 +202,8 @@ func TestMessageCarriesTopicNotesAndAnswersShowAsCapsules(t *testing.T) {
 	}
 	_, page := get(t, f.base+"/s/livesession?frame=1")
 	for _, want := range []string{
-		`<div class="bub"><div class="hchips"><span class="achip"><b>(03)</b> a</span><span class="achip tchip"><b>[ship-gate]</b><span class="anote" title="why?">why?</span></span></div><div class="hpart">hello</div></div>`,
-		`<div class="bub"><div class="hchips"><span class="achip"><b>(124..126)</b> ok</span><span class="achip"><b>(130)</b> b<span class="anote" title="line` + "\n" + `two">line` + "\n" + `two</span></span><span class="achip tchip"><b>[plan]</b><span class="anote" title="later">later</span></span></div>user &lt;words&gt;</div>`,
+		`<div class="bub"><div class="hchips"><span class="achip"><b>(03)</b> a</span><span class="achip tchip" title="why?"><b>[ship-gate]</b><span class="anote">why?</span></span></div><div class="hpart">hello</div></div>`,
+		`<div class="bub"><div class="hchips"><span class="achip"><b>(124..126)</b> ok</span><span class="achip" title="line` + "\n" + `two"><b>(130)</b> b<span class="anote">line` + "\n" + `two</span></span><span class="achip tchip" title="later"><b>[plan]</b><span class="anote">later</span></span></div>user &lt;words&gt;</div>`,
 		`<div class="bub">&lt;wb:answers&gt;` + "\n" + `1=a b` + "\n" + `&lt;/wb:answers&gt;` + "\n\n" + `broken</div>`,
 	} {
 		if !strings.Contains(page, want) {

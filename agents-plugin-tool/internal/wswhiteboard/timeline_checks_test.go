@@ -42,8 +42,13 @@ func TestTimelineChecksUseQuestionAnchorsAtAddPosition(t *testing.T) {
 			}
 			view := BuildView(st, ViewInput{Layout: LayoutFull})
 			live, held := timelineRows(view.Topics[0])
+			open := tc.answer == ""
+			if !open {
+				// Closed (answered/assumed) checks fold like logs.
+				live, held = nil, allTimelineRows(view.Topics[0])
+			}
 			asks := 0
-			for _, row := range live {
+			for _, row := range append(append([]timelineRow{}, live...), held...) {
 				if row.Ask {
 					asks++
 					if row.Key != added.ID || row.Item.ID != 1 || row.Page.Runs[0].Entry.ID != added.ID {
@@ -51,7 +56,7 @@ func TestTimelineChecksUseQuestionAnchorsAtAddPosition(t *testing.T) {
 					}
 				}
 			}
-			if asks != 1 || len(held) < 50 {
+			if asks != 1 || len(held) < 50 || (open && len(live) == 0) {
 				t.Fatalf("check anchor/paging: asks=%d held=%d", asks, len(held))
 			}
 			out := markup(render(t, view))

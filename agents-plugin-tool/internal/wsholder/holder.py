@@ -71,7 +71,9 @@ Attach protocol, version 1. Newline-delimited JSON objects, UTF-8, both ways.
     {"event": "exit", "seq": n, "exit_code": <int|null>, "signal": <int|null>}
 
   A pipe child's output is one record per line (the newline included); a PTY
-  child's output is one record per read.
+  child's output is one record per read. A holder started with --ring-skip
+  keeps the pipe child's whole stdout lines that the pattern matches from
+  their start out of the ring: they take no sequence and reach no client.
 
 Self-exit: once the child has exited (or none was ever spawned) and nobody
 has been attached for the idle period (24 hours), the holder exits. A live
@@ -91,6 +93,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import shutil
 import signal
@@ -223,6 +226,18 @@ class Ring:
             if total >= max_bytes:
                 break
         return out
+
+
+def unskipped(pattern, pieces, at_start: bool):
+    """The pieces of a pipe's output that pattern does not skip, and whether
+    the next piece starts a line. Only a whole line (one record that starts
+    a line and is not cut) is skipped."""
+    kept = []
+    for data, partial in pieces:
+        if not (at_start and not partial and pattern.match(data)):
+            kept.append((data, partial))
+        at_start = not partial
+    return kept, at_start
 
 
 class LineSplitter:
@@ -793,6 +808,7 @@ class Holder:
         idle_exit: float = IDLE_EXIT_SECONDS,
         descriptor_check: float = DESCRIPTOR_CHECK_SECONDS,
         ring_bytes: int = RING_BYTES,
+        ring_skip: str | None = None,
         stop_grace: float = STOP_GRACE_SECONDS,
         restart_safe: bool = True,
         script_path: str | None = None,
@@ -808,6 +824,7 @@ class Holder:
         self.script_hash = _file_sha256(script_path or __file__)
         self.max_record = max(1, min(MAX_RECORD_BYTES, ring_bytes))
         self.ring = Ring(ring_bytes)
+        self.ring_skip = re.compile(ring_skip.encode("utf-8")) if ring_skip else None
         self.cond = threading.Condition()
         self.attachment: Attachment | None = None
         self.child = None
@@ -1177,6 +1194,8 @@ class Holder:
 
     def _read_output(self, child, stream: str, source) -> None:
         splitter = LineSplitter(self.max_record) if child.mode == "pipe" else None
+        skip = self.ring_skip if splitter is not None and stream == "stdout" else None
+        at_start = True
         while True:
             chunk = child.read(source)
             if not chunk:
@@ -1185,9 +1204,14 @@ class Holder:
                 pieces = [(chunk[i : i + self.max_record], False) for i in range(0, len(chunk), self.max_record)]
             else:
                 pieces = list(splitter.feed(chunk))
+            if skip is not None:
+                pieces, at_start = unskipped(skip, pieces, at_start)
             self._append_output(stream, pieces)
         if splitter is not None:
-            self._append_output(stream, list(splitter.flush()))
+            pieces = list(splitter.flush())
+            if skip is not None:
+                pieces, at_start = unskipped(skip, pieces, at_start)
+            self._append_output(stream, pieces)
 
     def _append_output(self, stream: str, pieces) -> None:
         if not pieces:
@@ -1271,6 +1295,24 @@ def _file_sha256(path: str) -> str:
         return ""
 
 
+def lift_qos_default() -> None:
+    """On macOS, raise this thread to the DEFAULT QoS class (0x15).
+
+    A holder started under a utility-clamped ancestor would otherwise pass that
+    clamp to every child it spawns and run them on efficiency cores. Threads
+    and children created after this call inherit the class. Best effort: any
+    failure, and every other OS, is a no-op.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        import ctypes
+
+        ctypes.CDLL(None).pthread_set_qos_class_self_np(0x15, 0)
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="ws session holder")
     parser.add_argument("--dir", required=True, help="this holder's state directory")
@@ -1279,9 +1321,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--idle-exit-seconds", type=float, default=IDLE_EXIT_SECONDS)
     parser.add_argument("--descriptor-check-seconds", type=float, default=DESCRIPTOR_CHECK_SECONDS)
     parser.add_argument("--ring-bytes", type=int, default=RING_BYTES)
+    parser.add_argument("--ring-skip", default=None, help="a regular expression; the pipe child's stdout lines it matches stay out of the ring")
     parser.add_argument("--stop-grace-seconds", type=float, default=STOP_GRACE_SECONDS)
     parser.add_argument("--restart-unsafe", action="store_true", help="record that this holder may end with its starter")
     args = parser.parse_args(argv)
+    lift_qos_default()
     try:
         session = json.loads(args.session)
         if not isinstance(session, dict):
@@ -1295,6 +1339,7 @@ def main(argv: list[str] | None = None) -> int:
         idle_exit=args.idle_exit_seconds,
         descriptor_check=args.descriptor_check_seconds,
         ring_bytes=args.ring_bytes,
+        ring_skip=args.ring_skip,
         stop_grace=args.stop_grace_seconds,
         restart_safe=not args.restart_unsafe,
     )

@@ -261,9 +261,12 @@ func trackerStoreRoot(h *wstrackerhost.Host, newErr error) func(id string) (stri
 func newAgentRunner(dir string, logw io.Writer, trackerChanged func(), holders *wsholder.Manager) *wsagent.Runner {
 	keys := mcp.NewAgentKeyStore()
 	return wsagent.NewRunner(wsagent.Options{
-		Dir:      dir,
-		Backends: map[string]wsagent.Backend{wsagent.BackendClaude: wsagent.ClaudeBackend{}, wsagent.BackendPi: wsagent.PiBackend{}},
-		Keys:     keys,
+		Dir: dir,
+		Backends: map[string]wsagent.BackendRegistration{
+			wsagent.BackendClaude: {Backend: wsagent.ClaudeBackend{}, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes},
+			wsagent.BackendPi:     {Backend: wsagent.PiBackend{}, LeadProfile: wsagent.LeadProfilePi},
+		},
+		Keys: keys,
 		// A lead session's process runs under a session holder with a lead
 		// key of its own.
 		Holders:  wsagent.ManagerHost{Manager: holders},

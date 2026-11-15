@@ -99,7 +99,7 @@ func TestIndexServesTheShellAroundItsFramedPage(t *testing.T) {
 	}
 	for _, want := range []string{
 		`data-mode="index" data-rid=""`, `data-frame="1"`, `class="dwrap"`, `id="railbtn"`,
-		`class="rail rail-ph"`, `<main id="grid" class="dgrid"></main>`, "window.WsShell",
+		`class="rail rail-ph"`, `<main id="grid" class="dgrid"><div class="dlanding" id="guide">`, "window.WsShell",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the framed index lacks %q", want)
@@ -288,7 +288,13 @@ function ws(path, rids, ended) {
   rids.forEach(function (r) { var x = row(r); x.tag = "div"; box.appendChild(x); });
   s.appendChild(box);
   if (ended) {
-    var d = tagged("details", "rended", { "data-key": "rended:" + path }); d.open = false;
+    // The fold row: an archived half (no archived rows here, so disabled)
+    // and an ended half over its list.
+    var f = tagged("div", "rfold", { "data-key": path });
+    var ha = tagged("button", "rfh", { "data-k": "arch", "aria-expanded": "false" }); ha.disabled = true;
+    var hd = tagged("button", "rfh", { "data-k": "del", "aria-expanded": "false" });
+    f.appendChild(ha); f.appendChild(hd); box.appendChild(f);
+    var d = tagged("div", "rended", { "data-k": "del" });
     var eb = tagged("div", "rsessions", {});
     ended.forEach(function (r) { var x = row(r); x.tag = "div"; x.classList.add("ended"); eb.appendChild(x); });
     d.appendChild(eb); box.appendChild(d);
@@ -316,20 +322,33 @@ a2.appendChild(kt);
 var s = R.state(st);
 R.marks(r, s, "a1");
 check("the rows and workspaces keep the server's order (the retired local stars and orders move nothing); the viewed row marked", rids(abox), ["a1*", "a2", "a3"]);
-check("an ended fold keeps the server's order and stays last", [rids(ended.children[0]), ended.tag], [["a9", "a8"], "details"]);
+check("an ended fold keeps the server's order and stays last", [rids(ended.children[0]), ended.getAttribute("data-k")], [["a9", "a8"], "del"]);
 check("the workspaces in the server's order", list.children.map(function (w) { return w.getAttribute("data-ws"); }), ["/a", "/b"]);
 check("the collapsed parent", [a2.classList.contains("kcol"), kt.getAttribute("aria-expanded")], [true, "false"]);
 check("the collapsed workspace", [b.classList.contains("col"), b.children[0].getAttribute("aria-expanded"), a.classList.contains("col"), a.children[0].getAttribute("aria-expanded")], [true, "false", false, "true"]);
-check("the ended fold left open", ended.open, true);
+var fold = abox.children[abox.children.length - 2], halfA = fold.children[0], halfD = fold.children[1];
+check("the ended fold left open", [ended.classList.contains("on"), halfD.getAttribute("aria-expanded"), halfA.getAttribute("aria-expanded")], [true, "true", "false"]);
 s.ended.put("rended:/a", false);
 s.collapsed.toggle("/b");
 s.kids.toggle("a2");
 R.marks(r, R.state(st), "b1");
-check("a closed fold, an expanded workspace and parent", [ended.open, b.classList.contains("col"), rids(b.children[1]), rids(abox), a2.classList.contains("kcol"), kt.getAttribute("aria-expanded")], [false, false, ["b1*"], ["a1", "a2", "a3"], false, "true"]);
+check("a closed fold, an expanded workspace and parent", [ended.classList.contains("on"), b.classList.contains("col"), rids(b.children[1]), rids(abox), a2.classList.contains("kcol"), kt.getAttribute("aria-expanded")], [false, false, ["b1*"], ["a1", "a2", "a3"], false, "true"]);
 check("the folds are kept by key", [st.load("ws.dashboard.railended"), R.endedOpen(st).has("rended:/a")], [null, false]);
 s.ended.put("rended:/a", true);
 s.ended.put("rended:/a", true);
 check("put is idempotent", JSON.parse(st.load("ws.dashboard.railended")), ["rended:/a"]);
+var s2 = R.state(st);
+R.marks(r, s2, "b1");
+R.foldPick(s2, halfD);
+check("a pick on the open half closes it and forgets it", [ended.classList.contains("on"), halfD.getAttribute("aria-expanded"), st.load("ws.dashboard.railended")], [false, "false", null]);
+R.foldPick(s2, halfA);
+check("a disabled half never opens", [halfA.getAttribute("aria-expanded"), st.load("ws.dashboard.railended")], ["false", null]);
+halfA.disabled = false;
+st.save("ws.dashboard.railended", JSON.stringify(["rended:/a"]));
+R.foldPick(s2, halfA);
+check("the halves are one radio: archived opens, ended closes", [halfA.getAttribute("aria-expanded"), halfD.getAttribute("aria-expanded"), ended.classList.contains("on"), JSON.parse(st.load("ws.dashboard.railended"))], ["true", "false", false, ["rarch:/a"]]);
+R.marks(r, R.state(st), "b1");
+check("marks restores the archived pick", [halfA.getAttribute("aria-expanded"), halfD.getAttribute("aria-expanded")], ["true", "false"]);
 if (bad.length) console.log(bad.join("\n"));
 `
 

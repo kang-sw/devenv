@@ -1,0 +1,241 @@
+---
+title: "ws git.merge switches a root that a worker occupies on an impl/* branch"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 7c7c8708a8616e3f
+sage-review-completeness-reviewed: 7c7c8708a8616e3f
+completed: 2026-11-15
+---
+
+# ws git.merge switches a root that a worker occupies on an impl/* branch
+
+## Background (dogfood, 2026-10-08)
+
+- A Pi lead session ran a worker directly in the main checkout
+  (`/home/swkang/devenv`), which switched it to `impl/develop/catty-hertz-trout`
+  at 13:34:15 with uncommitted edits in progress.
+- A separate Claude lead session, whose last knowledge of that checkout was
+  "on develop", called `ws/git.merge(branch: impl/develop/pi-summary-title,
+  target: develop)`. The tool switched the shared checkout from the worker's
+  impl branch to `develop` (reflog 13:36:29), then the merge itself failed on
+  the overlapping dirty files. The checkout was left on `develop` with the
+  worker's uncommitted edits carried along until someone switched back at
+  13:39:27. No commit landed in the window, so no history damage occurred.
+- The workflow manual already says a root on `impl/*` is the worker's until
+  the lead restores it, but nothing enforced it at the merge call.
+
+## Original expectation and questions
+
+The original capture requested pre-switch refusal on an `impl/*` branch other
+than the merge source, or at least when another session occupied it, with a
+pooled-worktree diagnostic. It also asked for failed-merge switch rollback and
+asked whether to use branch naming, a lease/occupancy record, or a new
+`expected_branch` argument. These were questions, not confirmed mechanisms.
+The bounded approval below does not authorize general rollback or a new API.
+
+## Decisions
+
+- Owner-approved FIX 6 scope (triage 1060, relayed 2026-11-15): refuse merge
+  checkout switches against a worker-occupied root, before changing HEAD,
+  index, refs or working files. Name the observed occupying branch and the
+  housekeeping-worktree route; name an occupant only if evidence identifies
+  it.
+- (1062) Technical settlement from fact population: use symbolic HEAD's
+  `impl/` prefix, following the recorded branch-pattern choice in
+  `260918-feat-ws-sparse-housekeeping-worktree-occupied-root`. For merge,
+  refuse when that branch differs from both resolved source and target;
+  session parenthood does not exempt a merge caller. Check before status can
+  refresh the index, and recheck immediately before checkout. For the ticket
+  consumer, refuse parent-less callers on an impl checkout while retaining
+  parented callers in their session-bound checkout. This preserves current
+  worker flows; parenthood is not proof of branch ownership. Missing leases
+  remain supported. Rejected: mandatory leases or new branch-authorization
+  arguments, because current leases do not identify an occupying branch and
+  those alternatives would expand the approved call contract. External Git
+  processes are not serialized by these checks; do not promise exclusion
+  against arbitrary concurrent external checkout changes.
+- Supply the reusable occupied-root guard consumed by
+  `261030-bug-tickets-move-stages-on-occupied-root`. Land this ticket first and
+  serialize the two implementations; the consumer must reuse the landed guard
+  rather than invent a second occupancy policy.
+- Compatibility: **T0 / bug fix**, under
+  `ai-docs/manuals/release-compatibility.md`. Old plugin calls keep their
+  existing arguments; the new handler rejects the unsafe checkout operation,
+  not an old client version. Current code reads worktree/index state, switches
+  to the target and writes an ordinary Git merge
+  (`agents-plugin-tool/internal/mcp/git_merge.go:180-250,305-355`); the new
+  guard must leave refused state byte-for-byte unchanged and allowed merges
+  in the same Git format. Old Git/current ws readers and a new reopen can
+  still read those refs/index/commits; no reconstruction is needed. No hello,
+  tool-name, required-argument or lease-schema change is authorized. Any need
+  to refuse an old version or break valid legacy merge calls is a blocker,
+  not an approved T3 boundary.
+
+## Current source
+
+- VERIFIED: the occupied-root banner detects `impl/*` by branch pattern, not
+  a live-worker registry, and is advisory; top-level-lead parent gating avoids
+  warning a worker off its own branch
+  (`agents-plugin-tool/internal/mcp/occupied_root_announcement.go:10-39`).
+- VERIFIED: `mergeImplBranch` checks a target held in another worktree, but
+  does not protect a different worker branch in the caller's checkout before
+  `switch` (`git_merge.go:211-250,305-337`). The existing merge fixture starts
+  on its own source impl branch (`git_merge_test.go:27-43,65-100`); a blanket
+  ban on all impl branches would break that legitimate flow.
+- VERIFIED: `git.commit` has a remembered-branch assertion, not an unconditional
+  impl-branch ban (`agents-plugin-tool/internal/wsgit/git.go:634-657`). It is
+  evidence for no-mutation refusal and recovery wording, not a selected API
+  addition to merge.
+
+## Constraints
+
+- Preserve allowed merges from their own source branch, existing release-target
+  acknowledgement, target-held checks, dirty-index safeguards and intentional
+  conflict state on the target. Do not force, detach or restore a worker's
+  checkout as an automatic recovery.
+- General failed-merge rollback, new required arguments, new occupancy policy
+  and broader session-liveness machinery are not approved by this contract.
+- Applicable implementation conventions: read
+  `ai-docs/manuals/shipped-surface-boundary.md`,
+  `ai-docs/manuals/ws-mcp.md` and
+  `ai-docs/manuals/release-compatibility.md` before their covered source edits.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for agents-plugin/, agents-plugin-wsflow/, agents-plugin-tool/)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for agents-plugin-tool/internal/mcp/)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for agents-plugin-tool/internal/)
+
+## Prior Decisions
+
+- 261030-bug-tickets-move-stages-on-occupied-root (2026-10-30, Decisions): "Serialize implementation and reuse its guard; do not ship a separate occupancy predicate." — bearing: constrains
+- 0520bc61 (2026-10-30, commit): "Committed from a housekeeping worktree because the root checkout is occupied by another worker's impl/develop/cacti-frill-lance branch." — bearing: supports
+- 260918-feat-ws-sparse-housekeeping-worktree-occupied-root (2026-09-18, Decisions): "Branch-pattern detection was chosen over child-session liveness because it needs no liveness model" — bearing: constrains
+- 260916-feat-ws-git-merge-relax-worktree-gate (2026-09-17, commit): "Narrowed checkWorktree to block only a dirty index or unmerged paths" — bearing: constrains
+- c7c1de4d (2026-09-12, commit): "Collect all checkable safety findings, retain them as non-waivable diagnostics, and recheck candidate tips before checkout and merge to detect intervening changes." — bearing: constrains
+- 260911-feat-ws-git-merge-lead-owned-merge-authority (2026-09-11, commit): "Accept an explicit impl branch for lead calls from the base checkout; preserve conflicts for lead-delegate and use non-forced branch deletion only after success." — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/mcp/git_merge.go, occupied_root_announcement.go, git_merge_test.go; shared guard and MCP dispatch integration |
+| scope.surface | public-interface | git.merge refusal behavior changes; existing arguments remain (agents-plugin-tool/internal/mcp/server.go#L1377-L1417) |
+| scope.new_public_symbol | no | no new tool or exported symbol required by Phase 1; reusable guard stays internal |
+| scope.new_type_contract | no | existing symbolic HEAD and caller-parent context suffice; an internal reusable guard adds no wire or shared-data contract |
+| scope.test_surface | existing | agents-plugin-tool/internal/mcp/git_merge_test.go#L27-L100, #L778-L861, #L1020-L1170; reusable-guard test file placement unspecified |
+| complexity.reuse_points | confirmed | occupiedRootAnnouncement branch detection, parseImplBranchRoot, merge diagnostics and pre-switch checkTips read in agents-plugin-tool/internal/mcp/occupied_root_announcement.go#L10-L39 and git_merge.go#L305-L337 |
+| complexity.side_effect_risk | high | guard must precede checkout mutation; allowed path switches, merges and deletes source refs (agents-plugin-tool/internal/mcp/git_merge.go#L319-L399) |
+| risk.correctness | high | the pre-status and pre-switch guards must preserve another worker's checkout; arbitrary external Git races are outside the exclusion guarantee |
+| risk.fit | moderate | advisory parent gating is not branch ownership proof; shared consumer must retain worker ticket moves (agents-plugin-tool/internal/mcp/session_auth.go#L17-L32) |
+| risk.test | high | clean/dirty refusal byte preservation, stale records and interleaving require new regressions beyond own-source fixtures |
+| risk.security_or_contract | high | the settled branch/caller predicate must preserve legacy permitted merges and worker own-checkout moves without a new required argument |
+
+## Implementation Checkpoint (2026-11-15)
+
+- Shared guard and merge integration: `01f878689`. The internal
+  `guardOccupiedRoot(ctx, runner, root, allowedBranches...)` in
+  `agents-plugin-tool/internal/mcp/occupied_root.go` observes symbolic HEAD,
+  rejects other `impl/` checkouts, and fails closed on inspection errors.
+  Merge passes its resolved source and target; the follow-on ticket consumer
+  must retain its approved parented-session exception outside this guard and
+  call it with no allowed branches for parent-less callers. No ticket-write
+  dispatch behavior is changed here.
+- Regression coverage in `git_merge_occupied_root_test.go` snapshots all file
+  bytes, including Git admin files, across clean and staged/unstaged/untracked
+  refusals, rootless branches, packed refs, missing/stale leases, a checkout
+  interleaving during the final tip check, and MCP calls from parent-less and
+  parented keys. It also covers allowed source/target checkouts, inspection
+  failures, and non-waivable occupancy with release acknowledgement.
+- VERIFIED: from `agents-plugin-tool/`,
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|ImplMerge|GenericMerge|GitMerge)' -count=1 -timeout=8m`
+  passed (`ok`, 422.478s). The narrower new guard/occupancy/banner run with
+  `-run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|ImplMergeOccupiedRoot)' -count=1 -v -timeout=8m`
+  passed (`ok`, 25.555s). An earlier affected run exceeded the shell's 180s
+  budget; the same suite passed with a 600s shell budget (184.940s).
+- Independent Lite review has not run. Per MAIN coordination, pause at the
+  clean implementation commit before review so MAIN can synchronize latest
+  `develop`; do not move HEAD during that synchronization. The intended fresh
+  reviewer scope is the Git-computed ticket diff, guard ordering and exact
+  predicate, refusal byte preservation and diagnostics, allowed merge paths,
+  and regression integrity. Ticket verification passed with a Sage freshness
+  warning, accepted because this checkpoint adds evidence without changing the
+  approved decisions or phase plan. Full `go test ./...` remains pending; coordination
+  limited this checkpoint to bounded local regressions.
+- Implementer-leaf rendering was refused by the host with
+  `child capability exceeds parent ceiling (ws__session_request_hire, ws__session_roster)`.
+  The bounded regression leaf ran directly; no permissions or runtime were
+  changed, and independent review remains required rather than self-review.
+
+## Phases
+
+### Phase 1: Refuse occupied-root merge switches before mutation
+
+Implement the settled reusable guard and apply it before a merge
+can switch a checkout another worker occupies. Return an actionable refusal
+without changing the worker's branch, index, refs or dirty/untracked files.
+Do not generalize this into rollback after an allowed merge has begun.
+
+Regression verification: reproduce a caller intending to merge source A while
+HEAD is on worker branch B, with both clean and dirty B checkouts; assert no
+switch/merge/delete command, identical HEAD/index/file bytes, retained source
+and diagnostic recovery guidance. Cover the chosen predicate's missing/stale
+record cases, allowed own-source and already-on-target merges, a target held
+elsewhere, release-target acknowledgement and conflicts. Test through MCP as
+well as the reusable guard. Run affected `internal/mcp` tests and
+`cd agents-plugin-tool && go test ./...`; use local temporary repositories,
+not the shared root/pool. This draft records no implementation or test result.
+
+### Result (01f878689) - 2026-11-15
+
+- Implemented the shared symbolic-HEAD guard and merge integration in
+  `01f878689`; added byte-preservation and MCP regressions in `113714514`.
+  Merge permits the exact resolved source or target on an `impl/` checkout,
+  otherwise refuses before status and rechecks immediately before switch.
+  The banner shares the same observer. Inspection errors fail closed, missing
+  or stale leases do not change the predicate, and no occupant identity is
+  inferred from them. The follow-on ticket consumer can reuse the internal
+  guard without a second occupancy policy; its dispatch is unchanged here.
+- MAIN synchronized local `develop` at
+  `87e9d75dcac7e1fa392725fe42934fe531105734` into the implementation branch
+  with conflict-free merge `70b0bebf5427fbcebcfdd01201978ee8b95ba331`.
+  VERIFIED: the diff from `113714514` to that merge is empty across
+  `occupied_root.go`, `occupied_root_test.go`,
+  `occupied_root_announcement.go`, `git_merge.go`, and
+  `git_merge_occupied_root_test.go` under `agents-plugin-tool/internal/mcp/`.
+- VERIFIED pre-sync, with complete outputs read, from `agents-plugin-tool/`:
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|ImplMerge|GenericMerge|GitMerge)' -count=1 -timeout=8m`
+    passed (`ok`, 422.478s).
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|ImplMergeOccupiedRoot)' -count=1 -v -timeout=8m`
+    passed (`ok`, 25.555s).
+  These cover clean/dirty refusal bytes, staged/unstaged/untracked files,
+  packed refs, rootless branches, missing/stale records, the final interleaving
+  check, inspection failures, allowed checkouts, held targets, release
+  acknowledgement, conflicts, and parented MCP callers.
+- Independent one-pass Lite review of
+  `87e9d75dcac7e1fa392725fe42934fe531105734..70b0bebf5427fbcebcfdd01201978ee8b95ba331`
+  found no Critical, Important, or Minor findings. MAIN rendered and dispatched
+  the fresh reviewer directly; the worker read its complete report at
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/e1edcb22-01-fix6-occupied-lite.md`.
+  The reviewer inspected source and tests and did not execute tests. No fix
+  pass or re-review was needed.
+- The authorized post-sync attempt
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./... -p 2 -count=1 -timeout=30m`
+  ran with isolated cache/config/runtime directories under
+  `/tmp/ws-occupied-root-verify.Vn7JrY` and the checkout's shipped resource root.
+  MAIN intentionally cancelled the safely identified owned process; exit 143
+  is cancellation, not an assertion failure or test timeout. Its entire
+  299-byte log, `/tmp/ws-occupied-root-verify.Vn7JrY/go-test-all.log`, was read:
+  `cmd/ws-mcp` passed (283.339s), `internal/claudeagents` passed (1.271s),
+  `internal/execjob` passed (52.171s), `internal/gitbatch` passed (0.505s), and
+  `desktop-electron/test/daemon` had no test files. No failing name or MCP
+  package result was emitted before cancellation.
+- MAIN's amended gate (2026-11-15, 09:30:24, confirmed at closure) supersedes
+  the whole-suite expectation: it accepts the recorded focused passes on the
+  byte-identical touched files plus the synchronized independent Lite review.
+  No observed failing name requires a baseline control. No post-sync focused
+  or full-suite pass is claimed, and no retry or further test was authorized
+  or run. `git diff --check` and changed-Go-file formatting checks were clean.
+- Decisions and limits: retain the T0 call/data formats and external-Git-race
+  boundary; no rollback, new argument, lease/liveness policy, runtime change,
+  permission change, network operation, or integration into `develop` was
+  added. The implementer-leaf rendering limitation recorded above was not
+  bypassed; independent Lite still ran through MAIN. Unresolved: none under
+  the amended gate.

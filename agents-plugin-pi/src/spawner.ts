@@ -120,7 +120,7 @@ import { ownerNotifyRef } from "./owner-notify.ts";
 export { ownerNotifyRef } from "./owner-notify.ts";
 import { IncrementalSessionReader, reduceTelemetry, type AgentTelemetry, type CumulativeCost, type TelemetryOrigin } from "./agent-telemetry.ts";
 import { attachDescendantUsage, descendantUsageOf, evaluateDescendantUsage } from "./agent-usage-rollup.ts";
-import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
+import { CHILD_MANAGEMENT_TOOLS, DEFAULT_MAX_AGENT_DEPTH, DELEGATION_ENV, READ_TOOLS, NETWORK_TOOLS, childPolicy, inheritableTools, readDelegationPolicy, readOnlyWsTools, type DelegationPolicy, type PlaybookProfile, type RenderProvenance } from "./delegation-policy.ts";
 import { normalizeWriteScopes, type EffectiveWriteCapability, type WriteScope } from "./write-scopes.ts";
 import { createWebSearch } from "./web-search.ts";
 import { verifyWebReadiness, WEB_HOME_ENV, WEB_READINESS_KIND } from "./web-readiness.ts";
@@ -218,7 +218,7 @@ const EXECUTE_WORKER_WS_TOOLS: ReadonlySet<string> = new Set(["ws__git_status", 
 
 export function resolveTools(group: ToolGroup, wsToolNames: readonly string[] = []): string {
   const builtins = TOOL_GROUPS[group];
-  const extra = group === "full-worker" ? wsToolNames
+  const extra = group === "full-worker" ? inheritableTools(wsToolNames)
     : group === "execute-worker" ? readOnlyWsTools(wsToolNames).filter(name => EXECUTE_WORKER_WS_TOOLS.has(name))
     : [];
   return [...builtins, ...extra].join(",");

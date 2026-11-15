@@ -80,6 +80,7 @@ type fakeHolder struct {
 	first            int
 	lostFrom, lostTo uint64
 	ringBytes        int
+	ringSkip         string
 	inputs           []string
 	attached         bool
 	exited           bool
@@ -258,6 +259,7 @@ func (f *fakeHolders) LaunchWith(spec wsholder.LaunchSpec) (string, error) {
 	defer f.mu.Unlock()
 	h := f.newLocked(slices.Clone(spec.Session), true)
 	h.ringBytes = spec.RingBytes
+	h.ringSkip = spec.RingSkip
 	f.ops = append(f.ops, "launch "+h.id)
 	return h.id, nil
 }
@@ -433,6 +435,12 @@ func (f *fakeHolders) launchRing(id string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.holders[id].ringBytes
+}
+
+func (f *fakeHolders) launchSkip(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.holders[id].ringSkip
 }
 
 // exit ends the holder's child from its side.
@@ -721,9 +729,12 @@ func newLeadHarness(t *testing.T) *leadHarness {
 	restore := environ
 	environ = func() []string { return slices.Clone(leadDaemonEnv) }
 	t.Cleanup(func() { environ = restore })
+	// Every send and restart in this harness shares the same envelope time.
+	now := time.Now()
 	h.opts = Options{
+		Now:       func() time.Time { return now },
 		Dir:       h.dir,
-		Backends:  map[string]Backend{BackendClaude: ClaudeBackend{Command: "/opt/harness/claude"}, BackendPi: PiBackend{Command: "/opt/harness/pi"}},
+		Backends:  map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "/opt/harness/claude"}, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes}, BackendPi: {Backend: PiBackend{Command: "/opt/harness/pi"}, LeadProfile: LeadProfilePi}},
 		Keys:      &fakeKeys{},
 		Config:    testConfig(t),
 		Log:       h.log,
@@ -974,7 +985,7 @@ func (h *leadHarness) runLead(text string) (id, holder string) {
 	id = h.lead(BackendClaude, LeadOptions{}).ID
 	h.send(id, text)
 	holder = h.holder(id)
-	eventually(h.t, "the first message", func() bool { return slices.Equal(h.userInputs(holder), []string{text}) })
+	eventually(h.t, "the first message", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes(text)) })
 	return id, holder
 }
 

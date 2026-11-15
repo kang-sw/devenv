@@ -216,7 +216,7 @@ func (p Profile) MCPServerNames() []string {
 }
 
 // ParseProfile strictly decodes and validates one profile value.
-func ParseProfile(raw json.RawMessage) (Profile, error) {
+func ParseProfile(raw json.RawMessage, registries ...map[string]BackendRegistration) (Profile, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return Profile{}, fmt.Errorf("value must be a JSON object")
@@ -230,19 +230,19 @@ func ParseProfile(raw json.RawMessage) (Profile, error) {
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return Profile{}, fmt.Errorf("value must be a single JSON object")
 	}
-	if err := p.validate(); err != nil {
+	if err := p.validate(registries...); err != nil {
 		return Profile{}, err
 	}
 	return p, nil
 }
 
-func (p Profile) validate() error {
-	switch p.Backend {
-	case BackendClaude, BackendPi:
-	case "":
-		return fmt.Errorf("backend is required: %q or %q", BackendClaude, BackendPi)
-	default:
-		return fmt.Errorf("backend must be %q or %q; got %q", BackendClaude, BackendPi, p.Backend)
+func (p Profile) validate(registries ...map[string]BackendRegistration) error {
+	names := profileBackends(registries)
+	if p.Backend == "" {
+		return fmt.Errorf("backend is required: %s", backendAlternatives(names))
+	}
+	if !slices.Contains(names, p.Backend) {
+		return fmt.Errorf("backend must be %s; got %q", backendAlternatives(names), p.Backend)
 	}
 	if p.Model != "" && !modelPattern.MatchString(p.Model) {
 		return fmt.Errorf("model %q must match %s", p.Model, modelPattern.String())
@@ -294,11 +294,20 @@ func (p Profile) validate() error {
 		if !p.Lead {
 			return fmt.Errorf("permission_mode applies to a lead profile only (lead: true)")
 		}
-		if !ValidLeadPermissionMode(p.PermissionMode) {
-			return fmt.Errorf("permission_mode %q must be one of %s", p.PermissionMode, strings.Join(LeadPermissionModes, ", "))
+		// Legacy Pi profiles accepted these values and ignored them at launch.
+		// Preserve that read contract; registered extensions use their own list.
+		modes := permissionModes(p.Backend, registries)
+		if p.Backend == BackendPi {
+			modes = LeadPermissionModes
+		}
+		if !slices.Contains(modes, p.PermissionMode) {
+			return fmt.Errorf("permission_mode %q must be one of %s", p.PermissionMode, strings.Join(modes, ", "))
 		}
 	}
 	if p.Lead {
+		if len(registries) > 0 && registries[0][p.Backend].LeadProfile == "" {
+			return fmt.Errorf("backend %q cannot host a lead profile", p.Backend)
+		}
 		if len(p.Tools) > 0 || len(p.WSTools) > 0 || len(p.MCPServers) > 0 || len(p.Plugins) > 0 || p.Skills || p.Instructions != "" || p.ListInIndex {
 			return fmt.Errorf("a lead profile loads the user's own harness setup: tools, ws_tools, mcp_servers, plugins, skills, instructions, and list_in_index must be absent")
 		}
@@ -368,14 +377,14 @@ type ResolvedProfile struct {
 
 // ResolveProfiles resolves the whole family through resolver. Any invalid
 // entry fails the resolution, naming the file and key.
-func ResolveProfiles(resolver *wsconfig.Resolver) ([]ResolvedProfile, error) {
+func ResolveProfiles(resolver *wsconfig.Resolver, registries ...map[string]BackendRegistration) ([]ResolvedProfile, error) {
 	values, err := resolver.ListStructured(ProfilePrefix, BuiltinProfiles())
 	if err != nil {
 		return nil, err
 	}
 	out := make([]ResolvedProfile, 0, len(values))
 	for _, v := range values {
-		p, err := resolvedValue(v)
+		p, err := resolvedValue(v, registries...)
 		if err != nil {
 			return nil, err
 		}
@@ -388,7 +397,7 @@ func ResolveProfiles(resolver *wsconfig.Resolver) ([]ResolvedProfile, error) {
 // project and global files, and root's committed repo file). Only the named
 // profile is validated, so a broken unrelated profile never blocks a
 // launch. An unknown name fails, listing the names that resolve.
-func ResolveProfile(opts wsconfig.Options, root, name string) (ResolvedProfile, error) {
+func ResolveProfile(opts wsconfig.Options, root, name string, registries ...map[string]BackendRegistration) (ResolvedProfile, error) {
 	if err := ValidateProfileName(name); err != nil {
 		return ResolvedProfile{}, err
 	}
@@ -401,7 +410,7 @@ func ResolveProfile(opts wsconfig.Options, root, name string) (ResolvedProfile, 
 	var names []string
 	for _, v := range values {
 		if v.Key == ProfilePrefix+name {
-			return resolvedValue(v)
+			return resolvedValue(v, registries...)
 		}
 		names = append(names, strings.TrimPrefix(v.Key, ProfilePrefix))
 	}
@@ -411,7 +420,7 @@ func ResolveProfile(opts wsconfig.Options, root, name string) (ResolvedProfile, 
 	return ResolvedProfile{}, fmt.Errorf("unknown agent profile %q for %s; known: %s", name, root, strings.Join(names, ", "))
 }
 
-func resolvedValue(v wsconfig.StructuredValue) (ResolvedProfile, error) {
+func resolvedValue(v wsconfig.StructuredValue, registries ...map[string]BackendRegistration) (ResolvedProfile, error) {
 	name := strings.TrimPrefix(v.Key, ProfilePrefix)
 	where := string(v.Scope) + " scope"
 	if v.Source != "" {
@@ -420,7 +429,7 @@ func resolvedValue(v wsconfig.StructuredValue) (ResolvedProfile, error) {
 	if err := ValidateProfileName(name); err != nil {
 		return ResolvedProfile{}, fmt.Errorf("invalid agent profile key %q in %s: %w", v.Key, where, err)
 	}
-	p, err := ParseProfile(v.Value)
+	p, err := ParseProfile(v.Value, registries...)
 	if err == nil {
 		err = CheckProfileScope(p, v.Scope)
 	}
@@ -458,7 +467,7 @@ func excessProfileTools(child, parent Profile) []string {
 
 // ProfileValueSchema is the JSON Schema config.list publishes for the
 // family's value. ParseProfile enforces the same rules; keep the two in step.
-func ProfileValueSchema() map[string]any {
+func ProfileValueSchema(registries ...map[string]BackendRegistration) map[string]any {
 	stringList := func(desc string) map[string]any {
 		return map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}, "description": desc}
 	}
@@ -469,7 +478,7 @@ func ProfileValueSchema() map[string]any {
 		"required":             []string{"backend"},
 		"properties": map[string]any{
 			"description": map[string]any{"type": "string"},
-			"backend":     map[string]any{"enum": []string{BackendClaude, BackendPi}, "description": "The harness the conversation runs in."},
+			"backend":     map[string]any{"enum": profileBackends(registries), "description": "The harness the conversation runs in."},
 			"model":       map[string]any{"type": "string", "pattern": modelPattern.String(), "description": "Starting model; absent leaves the harness default."},
 			"effort":      map[string]any{"type": "string", "pattern": effortPattern.String(), "description": "Starting reasoning effort; absent leaves the harness default."},
 			"tools":       stringList("Built-in tool allowlist: tool names, or claude permission rules such as \"Bash(git status)\". Absent allows none; everything not listed is denied without a prompt."),
@@ -485,7 +494,7 @@ func ProfileValueSchema() map[string]any {
 			"idle_timeout_seconds": map[string]any{"type": "integer", "minimum": 0, "description": "End the sustained process after this many seconds with no running turn and no input (for a lead, also no background task); 0 never ends it; absent is 600, or never for a pi lead."},
 			"list_in_index":        map[string]any{"type": "boolean", "description": "List this profile's conversations in the dashboard session index; hidden by default."},
 			"lead":                 map[string]any{"type": "boolean", "description": "Host the profile's conversations as lead sessions: the harness loads the user's own settings, plugins, hooks, memory, and MCP servers, runs under a session holder with a lead ws session key, and asks the dashboard for tool permission. The capability fields (tools, ws_tools, mcp_servers, plugins, skills, instructions, list_in_index) must be absent. Not allowed in a repo-scope profile."},
-			"permission_mode":      map[string]any{"enum": LeadPermissionModes, "description": "A lead conversation's starting permission mode (claude only); absent is auto."},
+			"permission_mode":      map[string]any{"enum": profilePermissionModes(registries), "description": "A lead conversation's starting permission mode (claude only); absent is auto."},
 		},
 	}
 }

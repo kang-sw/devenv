@@ -32,6 +32,12 @@ type AgentHost interface {
 	Close()
 }
 
+// AgentPageInputHost distinguishes an explicit composer send from passive
+// inbox notifications. Archive restoration must not be inferred from a nudge.
+type AgentPageInputHost interface {
+	PageInput(replyID string) error
+}
+
 // AgentEndpointHost is an AgentHost whose conversations call back on the
 // daemon's routes: the daemon gives it its loopback base URL
 // ("http://127.0.0.1:<port>") before Start.

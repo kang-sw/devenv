@@ -56,9 +56,18 @@ agent log line, retaining a human current-state summary:
 | Awaiting confirmation | Keep one live confirmation check for the finished artifact. |
 
 Keep at most one open ask per topic, counting checks as asks; reuse or patch
-its item as the work changes. Close a topic only after the user's final
-answer, so unfinished work stays visible. These ask and summary obligations
-remain lead judgment alongside the machine state.
+its item as the work changes. Close a topic only after the user's final answer
+when an ask exists, so unfinished work stays visible; a topic whose work is
+finished and that has no open ask is closed with a one-line `wb:close result`
+instead of left open. Moving a topic from implementing to awaiting confirmation
+or waiting with no open ask returns a nudge naming the topic: close it if
+finished, or add a check or question. These ask and summary obligations remain
+lead judgment alongside the machine state.
+
+A one-off report that asks the user nothing (a status breakdown, an
+investigation summary) is created and closed in the same batch: the report is
+a panel and the `wb:close` result is its one-line conclusion. A report that
+carries an ask stays open until the answer arrives, then closes.
 
 Approval of a concrete deliverable is execution authority: start the approved
 build or change rather than ask permission again. A request to build or change
@@ -77,7 +86,7 @@ batch may hold several `wb:topic` groups.
 
 | command | attributes | content |
 |---|---|---|
-| `wb:topic` | `name`, `label?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, `wb:eta`, `wb:close`; none with `label` |
+| `wb:topic` | `name`, `label?`, `tickets?` | group of `wb:body`, `wb:edit`, `wb:panel`, `wb:log`, `wb:add`, `wb:state`, `wb:eta`, `wb:close`; none with `label` or `tickets` |
 | `wb:body` | none | current content, replaced whole; empty clears it |
 | `wb:edit` | `replace_all?` | fields `wb:old`, `wb:new`, editing current content only |
 | `wb:panel` | `recap`, `id?` | optional payload; `recap` must be nonempty |
@@ -127,6 +136,15 @@ Markdown up to the closing tag.
   first, then a stemless topic's name, then a stemmed topic's label, so an
   old title still reaches an adopted topic. Stems and labels are one
   namespace: a stem or label another topic already uses is refused.
+- Linked tickets: `tickets="<stem> <stem>"` on `wb:topic` links the
+  space-separated ticket stems the topic tracks, replacing its whole list;
+  `tickets=""` clears it. The topic bar shows one ticket icon listing each
+  stem with its current status. Linking changes no recency, reopens no
+  closed topic, and logs nothing, so it may be sent alone as
+  `<wb:topic name="..." tickets="..."/>`. When a topic defers work or
+  leaves a follow-up as a ticket, link that ticket with `tickets=` in the
+  same update, so the deferred work stays reachable from the board after
+  the topic closes.
 - `wb:state` is an empty command inside `wb:topic`, with `value` one of
   `discussing`, `waiting`, `researching`, `implementing`, or `awaiting-confirmation`.
   Entering `implementing` requires `owner` (the responsible executor) and
@@ -183,6 +201,7 @@ Markdown up to the closing tag.
 - `id` on `wb:add`: omitted, the server mints one past the highest ID it has
   minted, adopted, or been floored to; a number adopts an ID from outside the
   board, such as a ticket queue's. An ID the store holds is refused.
+- Options and recommendations are policy-only: use `class="policy"` for a choice, rather than attaching choices to a confirmation check or informational item.
 - `wb:option`: one per option, lettered a, b, c by position; a `wb:patch`
   carrying any `wb:option` replaces and re-letters the whole list, so send
   `wb:recommend` with it. `wb:recommend`: an option letter, optionally
@@ -263,9 +282,10 @@ Markdown up to the closing tag.
   exact edit anchor; a topic-only discovery query does not print it.
 - Current content and panel payloads take block Markdown with inline HTML,
   never a full HTML document: inline SVG, or canvas 2D drawn by an inline
-  script, with no external `src`, `href`, or fetch. Served payloads run in
-  isolated sandboxes. Put a standalone document in a
-  `{{.McpNamespace}}/path.generate` file and link it from the board.
+  script, with no external `src`, `href`, or fetch. An image in either is
+  written `![alt](path)`. Served payloads run in isolated sandboxes. Put a standalone document in a
+  `{{.McpNamespace}}/path.generate` file and link it from the board; mockup
+  sources use the tracked location below.
 - HTML in a body: a line that starts with a block tag such as `<div>` or
   `<details>`, or holds a lone tag such as `<svg ...>`, starts raw HTML that
   runs to the next blank line, so put a blank line between HTML and the
@@ -283,6 +303,13 @@ Markdown up to the closing tag.
   Split content-heavy material into several (sub)panels rather than one
   huge panel; payloads are capped at 2 MiB of UTF-8 bytes, with an external
   file link as the alternative.
+- Save every text mockup (HTML/SVG) under
+  `ai-docs/assets/mockups/YYMMDD/<topic name>/`, keeping its creation date
+  and using the board topic name before a ticket exists; the saving lead
+  includes the source in its next commit so it survives cleanup. Multi-state
+  HTML provides a state selector (URL hash or on-page switch) for reproducible
+  renders. PNG renders are reproduced from HTML, not stored there; panel
+  screenshots keep their existing location.
 - Agent log: `wb:log` appends one line of inline Markdown, without images,
   HTML, or block structures. Append a current-state line when the work's
   state changes, so the latest agent line remains a useful summary; put
@@ -435,7 +462,7 @@ Whiteboard: <full> - (102), (103)
 When the host's instructions give an embed syntax, emit the host's embed line
 for the returned `embed:` in place of the `Whiteboard:` line.
 
-**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block, a `<wb:selection>` block, `<wb:mention>` elements or `<wb:close-request>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.**
+**While the user is watching the board, put as much of the conversation as practical on it, and do not repeat what the update wrote there in the terminal or chat. The user is watching when their current message starts with `[user message from the {{.McpNamespace}} whiteboard]` or carries a `<ws:user>` envelope, a `<wb:answers>` block, a `<wb:selection>` block, `<wb:mention>` elements or `<wb:close-request>` elements, when the host embeds the board inline in the conversation, or when they say they are watching. Otherwise the chat carries the conversation as usual.** A successful update's result ends with an `info:` line saying the board already shows the content; its text is not repeated in the conversation.
 
 ## Host embed folder
 

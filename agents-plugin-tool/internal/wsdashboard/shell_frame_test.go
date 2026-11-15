@@ -46,7 +46,7 @@ location.hash = "";
 var history = { pushState: function (s, t, u) { location.hash = u; }, replaceState: function (s, t, u) { location.hash = u; } };
 doc.querySelector = function () { return null; };
 doc.addEventListener = function () {};
-doc.title = "sess - ws dashboard";
+doc.title = "sess - Werkschaft (alpha)";
 var rootAttrs = {}, bodyWatch = [];
 doc.body = {};
 var MutationObserver = window.MutationObserver = function () { var seen = new Map(); this.observe = function (node, opts) { if (node === doc.body) { if (seen.has(node)) bodyWatch[seen.get(node)] = opts; else { seen.set(node, bodyWatch.length); bodyWatch.push(opts); } } }; };
@@ -225,7 +225,7 @@ var first = new Frame("/s/a?frame=1");
 first.className = "sframe on";
 var top = { own: false, style: {}, offsetHeight: 40, classList: { toggle: function (c, on) { if (c === "sh-own") top.own = on; } }, addEventListener: function () {} };
 var framesBox = { kids: [first], appendChild: function (f) { this.kids.push(f); } };
-var doc = { title: "a - ws dashboard",
+var doc = { title: "a - Werkschaft (alpha)",
   querySelector: function (sel) { return sel === "#frames > iframe" ? first : sel === ".dwrap > .top" ? top : null; },
   createElement: function () { return new Frame(); },
   addEventListener: function () {} };

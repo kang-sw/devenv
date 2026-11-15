@@ -59,29 +59,34 @@ var worktreeProfileFamily = structuredFamily{
 	},
 }
 
-var agentProfileFamily = structuredFamily{
-	prefix:       wsagent.ProfilePrefix,
-	label:        "agent profiles",
-	validateName: wsagent.ValidateProfileName,
-	parse: func(raw json.RawMessage, scope wsconfig.Scope) (any, error) {
-		p, err := wsagent.ParseProfile(raw)
-		if err != nil {
-			return nil, err
-		}
-		return p, wsagent.CheckProfileScope(p, scope)
-	},
-	effective: func(resolver *wsconfig.Resolver, name string) (wsconfig.Scope, string, bool, error) {
-		profiles, err := wsagent.ResolveProfiles(resolver)
-		if err != nil {
-			return "", "", false, err
-		}
-		for _, p := range profiles {
-			if p.Name == name {
-				return p.Scope, p.Source, true, nil
+var agentProfileFamily = registeredAgentProfileFamily()
+
+func registeredAgentProfileFamily(registries ...map[string]wsagent.BackendRegistration) structuredFamily {
+	return structuredFamily{
+		prefix:       wsagent.ProfilePrefix,
+		label:        "agent profiles",
+		validateName: wsagent.ValidateProfileName,
+		parse: func(raw json.RawMessage, scope wsconfig.Scope) (any, error) {
+			p, err := wsagent.ParseProfile(raw, registries...)
+			if err != nil {
+				return nil, err
 			}
-		}
-		return "", "", false, nil
-	},
+			return p, wsagent.CheckProfileScope(p, scope)
+		},
+		effective: func(resolver *wsconfig.Resolver, name string) (wsconfig.Scope, string, bool, error) {
+			profiles, err := wsagent.ResolveProfiles(resolver, registries...)
+			if err != nil {
+				return "", "", false, err
+			}
+			for _, p := range profiles {
+				if p.Name == name {
+					return p.Scope, p.Source, true, nil
+				}
+			}
+			return "", "", false, nil
+		},
+	}
+
 }
 
 var structuredFamilies = []structuredFamily{worktreeProfileFamily, agentProfileFamily}
@@ -105,6 +110,9 @@ func (s *Server) tuneStructured(entry configKeyEntry, rawValue any, sessionKey s
 	family, ok := structuredFamilyForKey(entry.Key)
 	if !ok {
 		return "", fmt.Errorf("config.tune: %s is not a structured config key", entry.Key)
+	}
+	if family.prefix == wsagent.ProfilePrefix {
+		family = registeredAgentProfileFamily(s.agentBackends()...)
 	}
 	name := strings.TrimPrefix(entry.Key, family.prefix)
 	if err := family.validateName(name); err != nil {

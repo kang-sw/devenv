@@ -3,6 +3,23 @@
 /* a page with the agent composer sends the board's answers from there, so its copy-answers bar (and the bulk-ack checkbox in it) stays hidden; display only, because the composer reads #reply-text. A page without a composer keeps the bar, and rail.js stacks the bottom capsules above it */
 .dgrid:has(> #composer) > .bcol .reply { display: none; }
 
+/* Staged-topic indicators change no flow geometry. The scroll owner ignores
+   animation transforms when measuring its reading reference. */
+.topic[data-board-held] { box-shadow: inset 3px 0 0 var(--wb-primary); }
+.board-hold-tag { display: inline-flex; flex: none; align-items: center; height: 17px; padding: 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--wb-primary) 20%, var(--wb-card)); color: var(--wb-primary); font-size: 10.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
+.board-hold-tag:empty { display: none; }
+.topic.board-hold-nudge { animation: board-hold-nudge .3s ease-out; }
+@keyframes board-hold-nudge { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+.topic.board-fresh { outline: 0 solid transparent; outline-offset: 1px; animation: board-fresh .6s ease-out; }
+@keyframes board-fresh {
+  from { outline-width: 2px; outline-color: color-mix(in srgb, var(--wb-primary) 55%, transparent); outline-offset: 1px; }
+  to { outline-width: 0; outline-color: transparent; outline-offset: 3px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .topic.board-hold-nudge, .topic.board-fresh { animation: none; }
+  .topic.board-fresh { outline: none; }
+}
+
 /* ===== board cards (cards.js) =====
    A card stands among the board's topics with their gap. Its inner box is
    what draws: maximized ([data-max]) the inner box is fixed over both
@@ -31,6 +48,14 @@
 .bc-sub { font-family: var(--wb-mono); font-size: 11.5px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 0; }
 .bc-kind { flex: none; font-size: 10.5px; font-weight: 800; padding: 0 6px; border-radius: 4px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
 .bc-acts { display: inline-flex; flex: none; }
+/* Preview is transient; open and pinned cards retain their normal headers. */
+.bcard[data-file-state="preview"] > .bc-in { outline: 1px dashed var(--pv-line); outline-offset: -1px; }
+.bcard[data-file-state="preview"] > .bc-in > .bc-hd { background: var(--pv-bg); color: var(--pv-fg); box-shadow: inset 0 -2px 0 var(--pv-line); }
+.bcard[data-file-state="preview"] .bc-nm { font-style: italic; }
+.pv-state { flex: none; border: 1px dashed var(--pv-line); border-radius: 99px; padding: 0 7px; font-size: 10.5px; font-weight: 700; color: var(--pv-fg); }
+.pv-state[hidden], .fstate[hidden] { display: none; }
+.fstate { display: inline-block; vertical-align: middle; margin-left: 6px; border-radius: 99px; padding: 0 5px; font: 10px/1.4 var(--wb-sans); background: color-mix(in srgb, var(--wb-primary) 20%, transparent); color: var(--wb-primary); }
+.fstate[data-state="preview"] { background: var(--pv-bg); color: var(--pv-fg); }
 .bc-min { display: none; }
 .bc-folded:empty { display: none; }
 .bc-folded { display: none; font: 11.5px/1.4 var(--wb-mono); color: var(--wb-muted-fg); padding: 0 12px 6px 33px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -230,7 +255,9 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
   .board-action kbd { display: none; }
   .board-tools { gap: 5px; }
 }
-@container board-toolbar (max-width: 760px) {
+/* The eight-filter row needs compact actions at 800px outer width (798px
+   container); the default 1440px split has 804px and keeps its labels. */
+@container board-toolbar (max-width: 800px) {
   .board-action .board-label { display: none; }
 }
 @container board-toolbar (max-width: 360px) {

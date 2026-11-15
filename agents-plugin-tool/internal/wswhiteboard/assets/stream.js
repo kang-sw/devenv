@@ -41,6 +41,7 @@
   }
   function admitted(h) {
     if (panelState) h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore);
+    if (window.wbAgo) window.wbAgo(h);
     if (window.wbBindBoard) window.wbBindBoard(h);
     h.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: h } }));
   }
@@ -74,6 +75,7 @@
             if (op.fallback) { op.gap = op.fallback; op.fallback = null; op.direction = 'up'; continue; }
             break;
           }
+          if (op.loaded) loadedRows.add(op.row);
           touched.add(op.gap);
           changed = true;
         }
@@ -88,20 +90,33 @@
       touched.forEach(refresh);
       if (changed) admitted(h);
       op.busy = false; kept.apply();
+      // Owner-initiated load above: the row that sat under the gap keeps its
+      // place; the new rows land above it. Measured after keep, so a
+      // reading-line compensation is never doubled.
+      if (changed && op.pin) op.pin.apply();
     }
   }
-  function load(h, gap, direction, fallback) {
+  function load(h, gap, direction, fallback, pinned) {
     if (h._wbHistoryPending.some(function (p) { return p.gap === gap || p.fallback === gap; })) return;
-    var op = { gap: gap, direction: direction, fallback: fallback, height: 0, row: null };
+    // An owner load re-arms the fold: it runs only after the card has been
+    // in view since this load and then fully left it.
+    h._wbHistoryOut = false;
+    var op = { gap: gap, direction: direction, fallback: fallback, height: 0, row: null, loaded: true };
+    var below = pinned && direction === 'up' && gap.nextElementSibling;
+    if (below && below.matches('.timeline-row')) op.pin = kit.pin(below);
     h._wbHistoryPending.push(op);
     progress(h, op);
+  }
+  // Clone the small control shell, never the potentially huge payload.
+  function shell(gap) {
+    var copy = gap.cloneNode(false);
+    Array.from(gap.children).forEach(function (n) { copy.appendChild(n.cloneNode(!n.matches('template[data-history-gap]'))); });
+    return copy;
   }
   // Split only the inert gap containing a known target. The prefix stays
   // inert; loading starts at the target, not at a distant page boundary.
   function split(gap, row) {
-    // Clone the small control shell, never the potentially huge payload.
-    var held = payload(gap), prefix = gap.cloneNode(false);
-    Array.from(gap.children).forEach(function (n) { prefix.appendChild(n.cloneNode(!n.matches('template[data-history-gap]'))); });
+    var held = payload(gap), prefix = shell(gap);
     var before = payload(prefix);
     while (held.children[0] && held.children[0] !== row) before.appendChild(held.children[0]);
     if (before.children.length) { gap.parentElement.insertBefore(prefix, gap); refresh(prefix); }
@@ -131,7 +146,14 @@
     if (!row) return null;
     var kept = kit.keep(h);
     var prefix = split(gap, row);
-    load(h, gap, 'down', prefix);
+    // A bottom-window fill may be waiting for an offscreen frame's height
+    // in this same gap. Navigation must admit its known target immediately;
+    // the pending window still owns the remaining rows and resumes normally.
+    if (h._wbHistoryPending.some(function (p) { return p.gap === gap || p.fallback === gap; })) {
+      take(gap, 'down'); loadedRows.add(row); refresh(gap);
+      h._wbHistoryOut = false;
+      admitted(h);
+    } else load(h, gap, 'down', prefix);
     kept.apply();
     return find(h, id);
   }
@@ -175,13 +197,34 @@
         rows: Array.from(h.querySelectorAll('.timeline-row')).map(function (n) { return n.getAttribute('data-row'); }),
         entries: Array.from(h.querySelectorAll('.wb-entry')).map(function (n) { return n.id; }),
         systems: Array.from(h.querySelectorAll('.system-run .wb-entry')).map(function (n) { return [n.id, n.closest('.system-run').open]; }),
+        loaded: Array.from(h.querySelectorAll('.timeline-row')).filter(function (n) { return loadedRows.has(n); }).map(function (n) { return n.getAttribute('data-row'); }),
         pending: h._wbHistoryPending.map(function (p) {
           var list = p.gap && payload(p.gap).children, next = list && (p.direction === 'up' ? list[list.length - 1] : list[0]);
           var before = p.fallback && payload(p.fallback).children, edge = before && before[before.length - 1];
-          return { row: p.row && p.row.getAttribute('data-row'), next: next && next.getAttribute('data-row'), before: edge && edge.getAttribute('data-row'), direction: p.direction, height: p.height };
+          return { row: p.row && p.row.getAttribute('data-row'), next: next && next.getAttribute('data-row'), before: edge && edge.getAttribute('data-row'), direction: p.direction, height: p.height, loaded: !!p.loaded };
         }),
         folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }) };
     });
+  }
+  // Restore membership before a host's DOM morph, without binding, mounting
+  // frames or reading layout. A former anchor may now live in an inert gap.
+  function prepare(root, snapshot) {
+    (snapshot || []).forEach(function (saved) {
+      var h = histories(root).find(function (n) { return n.getAttribute('data-history') === saved.key; });
+      if (h) restoreRows(h, saved);
+    });
+  }
+  function restoreRows(h, saved) {
+    var wanted = new Set(saved.rows || []), entries = new Set(saved.entries || []), changed = false;
+    gaps(h).forEach(function (gap) {
+      Array.from(payload(gap).children).forEach(function (row) {
+        if (!wanted.has(row.getAttribute('data-row')) && !Array.from(row.querySelectorAll('.wb-entry')).some(function (n) { return entries.has(n.id); })) return;
+        split(gap, row);
+        take(gap, 'down'); changed = true;
+        refresh(gap);
+      });
+    });
+    return changed;
   }
   function restore(root, snapshot) {
     // Materialize exact previously admitted rows without granting another
@@ -199,15 +242,7 @@
       }
       if (!h) return;
       if (panelState) panelState.snapshot(h, saved);
-      var wanted = new Set(saved.rows || []), entries = new Set(saved.entries || []), kept = kit.keep(h), changed = false;
-      gaps(h).forEach(function (gap) {
-        Array.from(payload(gap).children).forEach(function (row) {
-          if (!wanted.has(row.getAttribute('data-row')) && !Array.from(row.querySelectorAll('.wb-entry')).some(function (n) { return entries.has(n.id); })) return;
-          split(gap, row);
-          take(gap, 'down'); changed = true;
-          refresh(gap);
-        });
-      });
+      var kept = kit.keep(h), changed = restoreRows(h, saved);
       var folds = new Map(saved.folds || []);
       h.querySelectorAll('details[data-key]').forEach(function (d) {
         if (folds.has(d.getAttribute('data-key'))) d.open = folds.get(d.getAttribute('data-key'));
@@ -220,19 +255,55 @@
         if (entry) fold.open = systems.get(entry.id);
       });
       if (changed) admitted(h);
+      // Owner-loaded rows stay foldable across a swap; rows the initial
+      // window admitted again (the new card's own fill) included.
+      var loaded = new Set(saved.loaded || []);
+      if (loaded.size) h.querySelectorAll('.history-live > .timeline-row').forEach(function (n) {
+        if (loaded.has(n.getAttribute('data-row'))) loadedRows.add(n);
+      });
       (saved.pending || []).forEach(function (p) {
         if (!valid(p.row)) return;
         var row = h.querySelector('[data-row="' + p.row + '"]');
         if (!row) return;
         var gap = gaps(h).find(function (g) { return Array.from(payload(g).children).some(function (n) { return n.getAttribute('data-row') === p.next; }); });
         var fallback = gaps(h).find(function (g) { return Array.from(payload(g).children).some(function (n) { return n.getAttribute('data-row') === p.before; }); });
-        var op = { row: row, gap: gap, fallback: fallback, direction: p.direction, height: p.height };
+        var op = { row: row, gap: gap, fallback: fallback, direction: p.direction, height: p.height, loaded: !!p.loaded };
+        if (op.loaded) loadedRows.add(row);
         h._wbHistoryPending.push(op); progress(h, op);
       });
       kept.apply();
     });
   }
+  // The initial view always holds at least the bottom WINDOW_PX of history,
+  // cut like the expand button: whole rows from the bottom up, including the
+  // row that crosses the line. Server folds mark where a gap may start; only
+  // this client-side measure decides how much below it stays visible. A host
+  // that is not laid out yet (zero heights) retries from the resize observer.
+  function fill(h) {
+    var live = h.querySelector('.history-live');
+    if (!live || h._wbHistoryPending.length) return;
+    var acc = 0, kids = Array.from(live.children);
+    for (var i = kids.length - 1; i >= 0; i--) {
+      var n = kids[i];
+      if (n.matches('.history-gap')) {
+        if (acc >= WINDOW_PX) break;
+        var op = { gap: n, direction: 'up', fallback: null, height: acc, row: null };
+        h._wbHistoryPending.push(op);
+        progress(h, op);
+        if (op.done && op.height < WINDOW_PX) fill(h); // gap exhausted; continue above it
+        return;
+      }
+      if (n.matches('.timeline-row')) {
+        var height = readyHeight(n);
+        if (height === null) return;
+        acc += height;
+        if (acc >= WINDOW_PX) break;
+      }
+    }
+    h._wbHistoryFilling = false;
+  }
   function init(root) {
+    if (window.wbAgo) window.wbAgo(root || document);
     var fresh = [];
     histories(root).forEach(function (h) {
       if (h._wbHistoryBound) {
@@ -241,6 +312,10 @@
       }
       h._wbHistoryBound = true;
       h._wbHistoryPending = [];
+      // Kept before any load can exhaust and remove the last gap, so a fold
+      // always has a shell to return rows into.
+      var first = h.querySelector('.history-live > .history-gap');
+      h._wbGapShell = first ? shell(first) : null;
       fresh.push(h);
     });
     // Anchor/gap membership is selected on the server. Batch disclosure
@@ -254,6 +329,7 @@
     if (panelState) fresh.forEach(function (h) { h.querySelectorAll('.entry-panel[data-key]').forEach(panelState.restore); });
     fresh.forEach(function (h) { h._wbHistoryHeight = Math.ceil(h.querySelector('.history-live').getBoundingClientRect().height); });
     kept.forEach(function (k) { k.apply(); });
+    fresh.forEach(function (h) { h._wbHistoryFilling = true; fill(h); });
     fresh.forEach(function (h) {
       h.addEventListener('focusin', function (e) {
         var node = e.target, live = h.querySelector('.history-live');
@@ -265,22 +341,99 @@
       h.addEventListener('click', function (e) {
         var button = e.target.closest && e.target.closest('[data-load]');
         if (!button || button.hidden || button.closest('.wb-history') !== h) return;
-        load(h, button.closest('.history-gap'), button.getAttribute('data-load'));
+        load(h, button.closest('.history-gap'), button.getAttribute('data-load'), null, true);
       });
       if (typeof ResizeObserver !== 'undefined') {
         var observer = new ResizeObserver(function () {
           if (h.isConnected === false) { observer.disconnect(); return; }
-          if (!h._wbHistoryPending.length || h._wbHistoryFrame) return;
+          if ((!h._wbHistoryPending.length && !h._wbHistoryFilling) || h._wbHistoryFrame) return;
           h._wbHistoryFrame = true;
           window.requestAnimationFrame(function () {
             h._wbHistoryFrame = false;
-            if (h.isConnected) h._wbHistoryPending.slice().forEach(function (op) { progress(h, op); });
+            if (!h.isConnected) return;
+            h._wbHistoryPending.slice().forEach(function (op) { progress(h, op); });
+            if (h._wbHistoryFilling) fill(h);
           });
         });
         observer.observe(h.querySelector('.history-live'));
         h._wbHistoryObserver = observer;
       }
+      arm(h);
     });
+  }
+  // Auto-fold: once the whole topic card has left the viewport, the rows an
+  // owner load admitted (load above/below, a deep link, their swap restore)
+  // go back into their gaps, so loaded history does not pile up on screen.
+  // The initial window and the always-live anchors stay. onOut fires only on
+  // a change from partly visible to fully out, so a card a deep link just
+  // opened is not folded by the observer's first report.
+  var loadedRows = new WeakSet(), FOLD_RETRY_MS = 250;
+  function arm(h) {
+    var topic = h.closest('.topic');
+    if (!topic || !h._wbGapShell) return;
+    h._wbHistoryOut = false;
+    kit.watch(topic, {
+      onChange: function (r) { if (r.visible) h._wbHistoryOut = false; },
+      onOut: function () { h._wbHistoryOut = true; collapse(h); }
+    });
+  }
+  function collapse(h) {
+    window.clearTimeout(h._wbHistoryFoldRetry); h._wbHistoryFoldRetry = 0;
+    if (!h._wbHistoryOut || !h.isConnected) return;
+    var live = h.querySelector('.history-live'), topic = h.closest('.topic'), a = document.activeElement;
+    if (!live || !topic || topic.hasAttribute('data-max')) return;
+    var rows = Array.from(live.children).filter(function (n) { return loadedRows.has(n); });
+    if (!rows.length) return;
+    // Focus inside a row the fold would detach, or an answer in progress,
+    // keeps the card as it is; focusout retries. The load button the owner
+    // clicked keeps focus and does not count.
+    if (a && (rows.some(function (n) { return n.contains(a); }) || ((a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.closest('.topic')))) return;
+    // An unfinished owner load ends with the fold; a pending initial window
+    // owns its gap, so the next exit retries.
+    var pending = h._wbHistoryPending.filter(function (p) { return !p.loaded; });
+    if (pending.length) return;
+    // Wait for the scroller to be idle: no owner scrolling, no navigation
+    // jump and no load-above pin (whose settle window must not be ended or
+    // fought). Board motion settles first too. keep() then compensates the
+    // fold like any other change above the reading line.
+    var scroller = kit.keep(h, { capture: false }).scroller;
+    var box = topic.closest('#bcol') || topic.closest('#bpins') || topic.closest('.wrap') || document.documentElement;
+    var motion = box && box.getAnimations && box.getAnimations({ subtree: true }).some(function (m) {
+      var n = m.effect && m.effect.target;
+      return m.playState === 'running' && n && n.matches && n.matches('.topic, [data-card], iframe.doc-frame');
+    });
+    if (motion || !kit.idle(scroller)) {
+      h._wbHistoryFoldRetry = window.setTimeout(function () { collapse(h); }, FOLD_RETRY_MS);
+      return;
+    }
+    h._wbHistoryPending = pending;
+    var kept = kit.keep(h);
+    refold(h);
+    kept.apply();
+  }
+  // Every maximal run of gaps and loaded rows becomes one gap again, in
+  // chronological order: the first gap of the run, or the kept shell when
+  // the run's own gap was exhausted.
+  function refold(h) {
+    var live = h.querySelector('.history-live'), kids = Array.from(live.children);
+    function foldable(n) { return loadedRows.has(n) || n.matches('.history-gap'); }
+    for (var i = 0; i < kids.length;) {
+      if (!foldable(kids[i])) { i++; continue; }
+      var run = [];
+      while (i < kids.length && foldable(kids[i])) run.push(kids[i++]);
+      if (!run.some(function (n) { return loadedRows.has(n); })) continue;
+      var gap = run.find(function (n) { return n.matches('.history-gap'); });
+      if (!gap) { gap = h._wbGapShell.cloneNode(true); live.insertBefore(gap, run[0]); }
+      var rows = [];
+      run.forEach(function (n) {
+        if (n.matches('.history-gap')) rows = rows.concat(Array.from(payload(n).children));
+        else rows.push(n);
+      });
+      var held = payload(gap);
+      rows.forEach(function (r) { loadedRows.delete(r); held.appendChild(r); });
+      run.forEach(function (n) { if (n !== gap && n.matches('.history-gap')) n.remove(); });
+      refresh(gap);
+    }
   }
   // viewKit holds the visibility source and the keep-in-place helper every
   // board host shares (the dashboard's board, the standalone page's
@@ -447,6 +600,7 @@
       function intent() {
         o.state = 'user-scrolling'; o.until = clock() + 200;
         if (o.transaction) o.transaction.cancel();
+        if (o.pin) o.pin.end();
         var s = sessions.get(scroller);
         if (s && s.follow) { scroller.scrollTo({ top: scroller.scrollTop, left: scroller.scrollLeft, behavior: 'instant' }); s.cancel(); }
       }
@@ -469,6 +623,46 @@
       };
       return o;
     }
+    // pin(ref) holds ref's place in its scroller for a settle window: apply()
+    // scrolls by however far ref moved since the call, and a ResizeObserver
+    // re-applies it before paint while late content (images, panel frames)
+    // sizes. The window ends at its non-renewing cap, on owner input, or when
+    // a jump takes the scroller; after that apply() is a no-op and ordinary
+    // keep() transactions own the scroller again. Writes go through the scroll
+    // owner so they are not taken for user input.
+    var pins = new Set(), PIN_MS = 1500;
+    function pin(ref) {
+      var scroller = scrollerOf(ref), o = owner(scroller), top = layoutTop(ref, scroller);
+      if (o.pin) o.pin.end();
+      var p = { done: false, ro: null, cap: 0 };
+      p.apply = function () {
+        if (p.done) return;
+        if (!ref.isConnected) { p.end(); return; }
+        var delta = layoutTop(ref, scroller) - top;
+        if (Math.abs(delta) >= 0.5) scroller.scrollTop += delta;
+        o.wrote = scroller.scrollTop;
+      };
+      p.end = function () {
+        if (p.done) return;
+        p.done = true; pins.delete(p);
+        if (o.pin === p) o.pin = null;
+        if (p.ro) p.ro.disconnect();
+        win.clearTimeout(p.cap);
+      };
+      o.pin = p; pins.add(p);
+      p.cap = win.setTimeout(p.end, PIN_MS);
+      if (win.ResizeObserver) {
+        p.ro = new win.ResizeObserver(p.apply);
+        var content = scroller === docScroller() ? [doc.body] : Array.prototype.slice.call(scroller.children);
+        content.concat([ref.parentElement]).forEach(function (el) { if (el) p.ro.observe(el); });
+      }
+      return p;
+    }
+    function pinning() { return pins.size; }
+    // idle(scroller): no owner input in the last 200 ms, no jump following
+    // and no pin holding the scroller, so a keep() transaction would write
+    // without cutting a settle window short.
+    function idle(scroller) { var o = owner(scroller); return o.ready() && !sessions.get(scroller) && !o.pin; }
     function keep(node, opt) {
       opt = opt || {};
       var scroller = scrollerOf(node), o = owner(scroller), s = sessions.get(scroller);
@@ -510,19 +704,28 @@
     }
     // Explicit Overview placement uses the navigation owner, including its
     // late-layout follow and input cancellation, never an ordinary capture.
+    // readingOffset follows the sticky reading line as a reloaded board mounts;
+    // ordinary offset stays relative to the scroller. Both use the same jump.
     function place(node, opt) {
-      return jump(node, { offset: opt && typeof opt.offset === 'number' ? opt.offset : 0, behavior: 'instant' });
+      return jump(node, { offset: opt && typeof opt.offset === 'number' ? opt.offset : 0,
+        readingOffset: opt && opt.readingOffset, behavior: 'instant' });
     }
     function jump(node, opt) {
       var scroller = scrollerOf(node), s = sessions.get(scroller);
+      if (opt && opt.prepare && s) {
+        if (s.cancel) s.cancel(); else s.handle.end();
+        s = null;
+      }
       if (!s || !s.follow) s = start(scroller);
       if (opt && opt.onEnd) s.ends.push(opt.onEnd);
+      if (opt && opt.prepare) opt.prepare();
       s.jump(node, opt || {});
       return s.handle;
     }
     function start(scroller) {
       var o = owner(scroller);
       if (o.transaction) o.transaction.cancel();
+      if (o.pin) o.pin.end();
       o.state = 'explicit-jump-follow';
       var s = { ends: [], ro: null, done: false };
       var main = scroller === docScroller();
@@ -550,8 +753,11 @@
           win.clearTimeout(cap);
         }
         function measure() {
+          if (typeof opt.top === 'number') return opt.top;
           var r = node.getBoundingClientRect();
-          return r.top - scrollerTop(scroller) + scroller.scrollTop - (typeof opt.offset === 'number' ? opt.offset : block === "center" ? (scroller.clientHeight - r.height) / 2 : 0);
+          var offset = typeof opt.readingOffset === 'number' ? viewport(scroller).top + 1 - scrollerTop(scroller) + opt.readingOffset :
+            typeof opt.offset === 'number' ? opt.offset : block === "center" ? (scroller.clientHeight - r.height) / 2 : 0;
+          return r.top - scrollerTop(scroller) + scroller.scrollTop - offset;
         }
         function align() {
           // A board morph may replace the item but retain its stable ID.
@@ -579,7 +785,7 @@
           raf = win.requestAnimationFrame(frame);
         }
         function land(behavior) {
-          if (typeof opt.offset === 'number') scroller.scrollTo({ top: measure(), behavior: behavior });
+          if (typeof opt.top === 'number' || typeof opt.offset === 'number' || typeof opt.readingOffset === 'number') scroller.scrollTo({ top: measure(), behavior: behavior });
           else node.scrollIntoView({ block: block, behavior: behavior });
           o.wrote = scroller.scrollTop;
         }
@@ -627,7 +833,7 @@
       }
       return { scroller: scroller, visible: visible };
     }
-    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, pin: pin, pinning: pinning, idle: idle, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
   }
   // Current panel folds follow pN; historical-version folds still use their
   // independent entry keys. The additive browser record is not board data.
@@ -762,10 +968,10 @@
   }
   var kit = viewKit(window);
   var panelState = panelStateKit(window);
-  window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget,
+  window.wbHistory = { init: init, capture: capture, prepare: prepare, restore: restore, loadTarget: loadTarget,
     restorePanel: function (p) { return !!panelState && panelState.restore(p); },
     panelToggle: function (p) { return !!panelState && panelState.toggle(p); },
-    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, pin: kit.pin, pinning: kit.pinning, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {
@@ -778,6 +984,11 @@
     window.wbBindBoard.wbHistoryBound = true;
   }
   init(document);
+  // A fold that focus held back runs once focus leaves (collapse returns at
+  // once for cards still in view or with nothing loaded).
+  document.addEventListener('focusout', function () {
+    window.setTimeout(function () { histories(document).forEach(collapse); }, 0);
+  });
 
   // The standalone file page navigates its own fragments. The dashboard has
   // its own allowlisted bridge, scroll policy, and region-swap lifecycle.

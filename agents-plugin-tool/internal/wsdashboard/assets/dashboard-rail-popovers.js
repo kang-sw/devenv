@@ -479,6 +479,32 @@
       toast(leadErr(status, s));
     });
   }
+  // railArchive archives ("hide") or unarchives ("unhide") the row's hosted
+  // lead through its agent route. The row moves only when the rail swap
+  // shows the new state, so a refusal leaves it where it is and says why. A
+  // 409 on archive is the runner still checking the session; the user may
+  // try again, and nothing retries here.
+  var archBusy = "";
+  function railArchive(btn) {
+    var row = btn.closest(".rs"), id = row ? row.getAttribute("data-rid") || "" : "", act = btn.getAttribute("data-act") || "";
+    if (!id || archBusy || (act !== "hide" && act !== "unhide")) return;
+    archBusy = id;
+    railMarks();
+    railPost("/agents/" + encodeURIComponent(id) + "/" + act, {}, function (status, v, s) {
+      archBusy = "";
+      railMarks();
+      if (status !== 200) toast(archErr(act, status, s));
+    });
+  }
+  // archErr is the message for a refused archive or unarchive. A 409 archive
+  // is the runner's retryable "holder scan pending"; a 500 one is a holder
+  // that refused to stop, after the runner rolled visibility back. Either
+  // way the row stays where it was, and nothing retries.
+  function archErr(act, status, text) {
+    if (act === "hide" && status === 409) return wsT("js.rail.archive.busy");
+    if (act === "hide" && status === 500) return wsT("js.rail.archive.failed");
+    return leadErr(status, text);
+  }
   // railForget takes the bar's stored workspace off the list.
   function railForget(btn) {
     var bar = btn.closest(".rws"), path = bar ? bar.getAttribute("data-ws") || "" : "", nm = bar && bar.querySelector(".nm");

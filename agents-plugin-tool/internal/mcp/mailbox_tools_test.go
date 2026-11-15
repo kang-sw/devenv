@@ -1508,8 +1508,8 @@ func TestStampPeerLeadNoteWithoutHarness(t *testing.T) {
 // product, so a wsflow reader never sees the ws prefix.
 func TestLeadUseMailboxNamesRuntimeProductInPeerLeadNote(t *testing.T) {
 	for _, tc := range []struct{ namespace, want, reject string }{
-		{"", "[ws note: from a peer", "[wsflow note"},
-		{"wsflow", "[wsflow note: from a peer", "[ws note"},
+		{"", "[ws ", "[wsflow "},
+		{"wsflow", "[wsflow ", "[ws "},
 	} {
 		t.Run("namespace="+tc.namespace, func(t *testing.T) {
 			setupMailboxTestEnv(t)

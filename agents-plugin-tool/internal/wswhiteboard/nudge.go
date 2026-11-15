@@ -106,3 +106,43 @@ func (s *State) staleNudge(now time.Time) string {
 	return fmt.Sprintf("%d of %d open topics unchanged for %d+ min (%s); if finished, close them with wb:close and a one-line result.",
 		len(stale), open, int(staleNudgeAge/time.Minute), names)
 }
+
+// transitionNudge reminds the lead, per topic, when this batch moved it out
+// of implementing into awaiting-confirmation or waiting and it is left with
+// no open ask of any class: finished work should be closed, and work that
+// needs the user should carry a check or question. before is the fold of
+// topic states ahead of the batch. The line is result text only; nothing is
+// stored.
+func (s *State) transitionNudge(before map[string]TopicStateView) string {
+	after := s.TopicStates()
+	var topics []string
+	for topic, view := range after {
+		prior := before[topic]
+		if view.State == nil || prior.State == nil || prior.State.Value != StateImplementing ||
+			view.State.Entry == prior.State.Entry || s.topicClosed(topic) {
+			continue
+		}
+		if view.State.Value != StateAwaitingConfirmation && view.State.Value != StateWaiting {
+			continue
+		}
+		if !s.topicHasOpenItem(topic) {
+			topics = append(topics, topic)
+		}
+	}
+	sort.Strings(topics)
+	lines := make([]string, len(topics))
+	for i, topic := range topics {
+		lines[i] = fmt.Sprintf("topic %s: moved to %s with no open ask — if the work is finished, close it (wb:close); if something needs the user's confirmation, add a check or question.",
+			s.TopicLabel(topic), after[topic].State.Value)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (s *State) topicHasOpenItem(topic string) bool {
+	for _, item := range s.Items {
+		if item.Topic == topic && item.Status == StatusOpen {
+			return true
+		}
+	}
+	return false
+}

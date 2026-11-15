@@ -748,6 +748,37 @@ func TestLaunchRingBytes(t *testing.T) {
 	}
 }
 
+// TestLaunchRingSkip pins the skip pattern a start passes a holder: a
+// launch's own RingSkip, and no flag without one.
+func TestLaunchRingSkip(t *testing.T) {
+	for _, want := range []string{"", `^\{"type":"x"`} {
+		var got []string
+		applies := false
+		m := New(Options{
+			Dir:       testHoldersDir(t),
+			Python:    "python3",
+			breakaway: &applies,
+			start: func(exe string, args []string, cwd string, breakaway bool) (*exec.Cmd, error) {
+				got = args
+				return nil, errors.New("not started")
+			},
+		})
+		t.Cleanup(m.Close)
+		if _, err := m.LaunchWith(LaunchSpec{RingSkip: want}); err == nil {
+			t.Fatal("LaunchWith with a failing start succeeded")
+		}
+		skip, flagged := "", false
+		for i, arg := range got {
+			if arg == "--ring-skip" && i+1 < len(got) {
+				skip, flagged = got[i+1], true
+			}
+		}
+		if skip != want || flagged != (want != "") {
+			t.Fatalf("--ring-skip = %q (flagged %v), want %q (args %q)", skip, flagged, want, got)
+		}
+	}
+}
+
 // TestAttachSpeaksTheHoldersOlderProtocol pins version tolerance from the
 // daemon's side: a daemon one version ahead still attaches to the holder,
 // speaking the holder's version.
@@ -892,15 +923,34 @@ func TestAConsumersReplayIsNoLoss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
-	spawnTicker(t, m, id)
-	// Far more than 512 bytes of ticks: the ring has dropped its first
-	// records by now, and the sink has received every one of them.
-	waitFor(t, "the ticker to outrun its ring", func() bool { return len(sink.seqs(id)) > 200 })
-	if seqs := sink.seqs(id); !contiguousFrom(seqs, 1) {
-		t.Fatalf("the sink's sequences = %v..., want 1.. without holes", seqs[:min(len(seqs), 8)])
+	// Drive output by input rather than waiting for 201 scheduled ticks.
+	// Await each record before producing the next: an unpaced burst could
+	// overrun the live reader as well as the ring and genuinely lose records.
+	child, err := m.Client(id).Spawn(SpawnSpec{Argv: []string{testPython(t), "-c", `
+import sys
+for line in sys.stdin:
+    print(line, end="", flush=True)
+`}, Mode: "pipe"})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
 	}
-	if len(given.seqs(id)) < 200 {
-		t.Errorf("the sink New was given received %d records, want what the added one received", len(given.seqs(id)))
+	if child.State != "running" || child.PID <= 0 {
+		t.Fatalf("spawned child = %+v, want it running", child)
+	}
+	const records = 201
+	for n := 1; n <= records; n++ {
+		if err := m.Client(id).Input([]byte("tick\n"), false); err != nil {
+			t.Fatalf("Input: %v", err)
+		}
+		waitFor(t, "the requested record to reach the sink", func() bool { return len(sink.seqs(id)) >= n })
+	}
+	// The payload alone exceeds 512 bytes; Replay below verifies that
+	// records really left the ring after every one reached the live sink.
+	if seqs := sink.seqs(id); len(seqs) != records || !contiguousFrom(seqs, 1) {
+		t.Fatalf("the sink's sequences = %v..., want 1..%d without holes", seqs[:min(len(seqs), 8)], records)
+	}
+	if seqs := given.seqs(id); len(seqs) != records || !contiguousFrom(seqs, 1) {
+		t.Errorf("the sink New was given received sequences %v, want 1..%d without holes", seqs, records)
 	}
 	lost := func() uint64 {
 		for _, h := range m.List().Holders {
@@ -919,7 +969,7 @@ func TestAConsumersReplayIsNoLoss(t *testing.T) {
 		t.Fatalf("Replay: %v", err)
 	}
 	if first <= 1 {
-		t.Fatalf("the ring's first sequence after 200 records in 512 bytes = %d, want the ring to have dropped records", first)
+		t.Fatalf("the ring's first sequence after %d records in 512 bytes = %d, want the ring to have dropped records", records, first)
 	}
 	waitFor(t, "the replay's gap to reach the sink", func() bool {
 		for _, ev := range sink.snapshot(id) {

@@ -133,14 +133,23 @@
     });
     // A board mention: "[topic] (id)" and the selected text, clipped.
     bmentions.forEach(function (m, i) {
-      var el = doc.createElement("span"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
+      var el = doc.createElement("span"), open = doc.createElement("button"), b = doc.createElement("b"), t = doc.createElement("span"), x = doc.createElement("button");
       el.className = "achip mchip";
       el.title = m.text;
+      open.type = "button";
+      open.className = "mchip-open";
+      open.addEventListener("click", function () {
+        // Use the same session-local navigation as the history's ID chips.
+        var topicID = "topic-" + Array.prototype.map.call(new TextEncoder().encode(m.topic), function (n) { return ("0" + n.toString(16)).slice(-2); }).join("");
+        effectJump(topicID, m.entry || (m.id ? "item-" + Number(m.id) : topicID));
+      });
       b.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "");
-      el.appendChild(b);
+      open.appendChild(b);
       t.className = "anote";
       t.textContent = m.text.replace(/\s+/g, " ");
-      el.appendChild(t);
+      open.appendChild(t);
+      el.appendChild(open);
+      x.type = "button";
       x.className = "unchip";
       x.setAttribute("data-unmchip", String(i));
       x.title = wsT("js.wbmention.remove");
@@ -218,29 +227,38 @@
   }
   function renderSelectionChips() {
     bselections.forEach(function (s, index) {
-      var group = doc.createElement("section"), sources = doc.createElement("div"), edit = doc.createElement("button"), remove = doc.createElement("button");
-      group.className = "selection-bundle";
-      sources.className = "hchips";
-      sources.setAttribute("aria-label", wsT("js.wbmention.context"));
-      s.mentions.forEach(function (m) {
-        var source = doc.createElement("span");
-        source.className = "achip mchip";
-        source.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "") + " " + m.text;
-        source.title = m.text;
-        if (m.entry) source.setAttribute("data-wb-entry", m.entry);
-        sources.appendChild(source);
-      });
-      edit.type = "button"; edit.className = "selection-edit";
+      var group = doc.createElement("span"), edit = doc.createElement("button"), note = doc.createElement("span"), remove = doc.createElement("button");
+      group.className = "selection-bundle achip mchip selection-chip";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", wsT("js.wbmention.context"));
+      edit.type = "button"; edit.className = "mchip-open selection-edit";
       edit.setAttribute("data-selection-edit", String(index));
-      edit.textContent = s.comment || wsT("js.wbmention.input");
-      edit.title = wsT("js.wbmention.note");
+      edit.title = s.mentions.map(function (m) { return m.text; }).join("\n") + (s.comment ? "\n" + s.comment : "");
+      edit.setAttribute("aria-label", wsT("js.wbmention.note") + ": " + edit.title);
+      s.mentions.forEach(function (m) {
+        var source = doc.createElement("span"), b = doc.createElement("b"), text = doc.createElement("span");
+        source.className = "selection-source";
+        b.textContent = "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "");
+        text.className = "anote"; text.textContent = m.text.replace(/\s+/g, " ");
+        source.appendChild(b); source.appendChild(text);
+        if (m.entry) source.setAttribute("data-wb-entry", m.entry);
+        edit.appendChild(source);
+      });
+      note.className = "selection-note"; note.textContent = "✎";
+      selectionNote(s, note);
+      edit.appendChild(note);
       remove.type = "button"; remove.className = "unchip";
       remove.setAttribute("data-unselection", String(index));
       remove.title = wsT("js.wbmention.remove"); remove.textContent = "×";
-      group.appendChild(sources); group.appendChild(remove); group.appendChild(edit);
+      group.appendChild(edit); group.appendChild(remove);
       s.row = doc.createElement("div"); s.row.className = "selection-images";
       group.appendChild(s.row); cchips.appendChild(group);
     });
+  }
+  function selectionNote(s, note) {
+    note.hidden = !s.comment.trim();
+    note.title = s.comment;
+    note.setAttribute("aria-label", wsT("js.wbmention.note"));
   }
   function dropSelection(index) {
     var s = bselections[index];
@@ -257,9 +275,10 @@
     var s = bselections[index];
     if (!s) return;
     hideMention();
-    var row = s.row && s.row.parentNode, rect = row ? row.getBoundingClientRect() : { right: 4, bottom: 4 };
-    placeMention({ ms: s.mentions, x: rect.right, y: rect.bottom, edit: s, comment: s.comment, images: s.images.slice() });
+    var row = s.row && s.row.parentNode, rect = row ? row.getBoundingClientRect() : { left: 4, bottom: 4 };
+    placeMention({ ms: s.mentions, x: rect.left, y: rect.bottom, edit: s, comment: s.comment, images: s.images.slice() });
     lockMention(); mnote.focus();
+    mnote.setSelectionRange(mnote.value.length, mnote.value.length);
   }
   // --- web picks: what a web card (webcard.js) attaches -------------------------
   // A picked element and a console block are chips beside the mentions,
@@ -792,10 +811,11 @@
   // markers would read as arguments). Backspace in an empty box, or the
   // capsule's x, removes the selection.
   //
-  // A cancel or interrupt that returns a command restores it as the
-  // selection (restoreHeld): its arguments go to the message box when nothing
-  // else lands there; else they stay on the capsule (cmdSel.args a string),
-  // which sends them as they are and leaves the box's text for a later send.
+  // A cancel or interrupt that returns a command restores it (restoreHeld):
+  // when nothing else lands in the message box, as a fresh pick's inline
+  // capsule at offset zero followed by its arguments; else as the separate
+  // selection holding them (cmdSel.args a string), which sends them as they
+  // are and leaves the box's text for a later send.
   var ccmd = $("ccmd"), cmdSel = null, slash = null, ctextHint = ctext ? ctext.getAttribute("placeholder") || "" : "";
   function commandList() {
     var r = region("cmds");
@@ -1014,7 +1034,7 @@
     var r = endRect(range);
     return mentions.length === 1 ? { m: mentions[0], x: r.right, y: r.bottom } : { ms: mentions, x: r.right, y: r.bottom };
   }
-  function hideMention(keep) {
+  function hideMention(keep, keepImages) {
     var p = mpend;
     mpend = null;
     if (p && !keep) (p.images || []).forEach(function (n) {
@@ -1025,7 +1045,15 @@
     mcomposing = false;
     if (mnote) mnote.value = "";
     if (mbtn) mbtn.hidden = true;
-    if (cimgs) renderImgs();
+    if (cimgs) {
+      if (keepImages && p && p.edit && p.edit.row && mimgs) {
+        // Blur can occur between pointer-down and click on any image ×.
+        // Only move this editor's thumbnails home; rebuilding other rows
+        // would detach the pressed control and lose its delegated click.
+        while (mimgs.firstChild) p.edit.row.appendChild(mimgs.firstChild);
+        imgLayout = JSON.stringify(imgHomes(boardNotes()));
+      } else renderImgs();
+    }
   }
   // Once the input takes focus, live selection reports may no longer replace
   // this bundle. The copied mentions and owning session outlive DOM updates.
@@ -1081,8 +1109,17 @@
       mbtn.addEventListener("compositionend", function () { mcomposing = false; });
       mbtn.addEventListener("keydown", function (e) {
         if (e.isComposing || e.keyCode === 229 || mcomposing) { if (e.target === add) e.preventDefault(); e.stopPropagation(); return; }
-        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideMention(); ctext.focus(); }
+        if (e.key === "Escape") {
+          e.preventDefault(); e.stopPropagation();
+          if (mpend && mpend.edit) addMention();
+          else { hideMention(); ctext.focus(); }
+        }
         // Enter edits the note; attachment always uses the explicit action.
+      });
+      // Saving on blur must not replace the chip DOM under an in-flight
+      // pointer press (notably its remove button), or steal the new focus.
+      mbtn.addEventListener("focusout", function (e) {
+        if (mpend && mpend.edit && !mbtn.contains(e.relatedTarget)) addMention(true);
       });
       doc.body.appendChild(mbtn);
     }
@@ -1095,8 +1132,9 @@
     mpend = p;
     renderImgs();
     mbtn.hidden = false;
+    mbtn.querySelector("[data-wbmention]").hidden = !!p.edit;
     var w = mbtn.offsetWidth, h = mbtn.offsetHeight;
-    mbtn.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x + 4)) + "px";
+    mbtn.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, x + (p.edit ? 0 : 4))) + "px";
     mbtn.style.top = Math.max(4, Math.min(window.innerHeight - h - 4, y + 6)) + "px";
   }
   function syncHostMention() {
@@ -1106,19 +1144,24 @@
     if (p) placeMention(p);
     else if (mpend && !mpend.frame) hideMention();
   }
-  function addMention() {
+  function addMention(keepFocus) {
     var p = mpend;
     if (!p || p.rid !== rid || mcomposing) return;
     if (!p.ms.length) return;
     var s = { mentions: validMentions(p.ms), comment: mnote.value, images: p.images.slice() }, index = bselections.indexOf(p.edit);
-    if (index >= 0) bselections[index] = s;
+    if (index >= 0) { s.row = p.edit.row; bselections[index] = s; }
     else bselections.push(s);
-    hideMention(true);
+    hideMention(true, keepFocus && index >= 0);
     if (p.frame) { if (doc.contains(p.frame)) postDoc(p.frame, { wbDoc: "unsel" }); }
     else if (window.getSelection) window.getSelection().removeAllRanges();
-    renderChips();
+    if (keepFocus && index >= 0 && s.row && s.row.parentNode) {
+      var edit = s.row.parentNode.querySelector("[data-selection-edit]");
+      edit.title = s.mentions.map(function (m) { return m.text; }).join("\n") + (s.comment ? "\n" + s.comment : "");
+      edit.setAttribute("aria-label", wsT("js.wbmention.note") + ": " + edit.title);
+      selectionNote(s, edit.querySelector(".selection-note"));
+    } else renderChips();
     queueDraft();
-    ctext.focus();
+    if (!keepFocus) ctext.focus();
   }
   // frameMention takes a body frame's selection report: its text and where
   // its end stands inside the frame.
@@ -1351,6 +1394,7 @@
     renderChips();
     if (cmd) {
       if (ctext.value.trim()) setCommand(cmd.name, cmd.args || "");
+      else if (ctext.wsc) restoreInlineCommand(cmd);
       else { ctext.value = cmd.args || ""; grow(); clearMentions(); setCommand(cmd.name); }
     }
     if (astext) noteWarn(wsT("js.cmd.astext"));
@@ -1371,6 +1415,16 @@
       n.dispatchEvent(new Event("input", { bubbles: true }));
     });
     return stray;
+  }
+  // restoreInlineCommand writes a returned command into the empty box as a
+  // fresh pick leaves it: the skill capsule at offset zero, one space, then
+  // its arguments, with the caret at the end.
+  function restoreInlineCommand(cmd) {
+    var v = cmd.name + " " + (cmd.args || "");
+    ctext.value = v;
+    ctext.wsc.restore([{ start: 0, end: cmd.name.length, kind: "skill", id: cmd.name, label: cmd.name }]);
+    ctext.setSelectionRange(v.length, v.length);
+    grow(); clearMentions();
   }
   function cancelHeld(btn) {
     btn.disabled = true;

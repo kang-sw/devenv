@@ -87,6 +87,19 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
   missing-daemon start is Decision 2's "starts only when none is" step and
   still never uses `ws-mcp daemon-start` or any path that can replace or
   stop a running daemon.
+- **(1115) owner comment + (1124)=b, 2026-11-15: Decision 2 is reversed in a
+  later release.** Owner (1115): "electron이 데몬을 띄우는 역할입니다. 정확히는,
+  클로드 코드가 띄운 데몬이 있으면 일렉트론 데몬이 내리고 자기 것을 띄우는
+  식으로, 플러그인 데몬을 오버라이드하는 식으로 갑니다." The shell owns the
+  daemon: when a plugin-started daemon is running, the shell replaces it with
+  its own beside-exe daemon. Timing (1124)=b: not in v0.50.0; it ships after
+  v0.50.0 through the auto-updater. Hard constraint, owner (1124): "데몬
+  홀더라는 건 에이전트 세션 홀딩하는 그 파이썬 프로세스들을 말합니다. 이건 절대로
+  데몬 교체 때 임의로 내리지 않습니다. (세션 종료시에만 내려가는 프로세스)" — a
+  daemon replacement never stops a session holder process; holders exit only
+  when their session ends. Until that phase is ticketed, Phases 1-3 keep
+  Decision 2 as written. This also supersedes Decision 1's "no self-update":
+  (1116)=a added the Electron auto-updater for v0.50.0.
 - **Remote-dashboard posture: no added native privilege.** The renderer runs
   with `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`,
   and no preload script, matching P21 and Decision 7. A remote or
@@ -1007,6 +1020,24 @@ found no remaining test/build/app/fixture processes in this worktree, and no
 processes were signalled. No Windows host was accessed and no Electron/GUI ran
 on the Mac. Live smoke remains deferred to the owner-authorized Windows run;
 no new phase, policy, dependency, API or independent review pass was added.
+
+#### Edition (052919e16, 21aa53f98) - 2026-11-15
+
+Owner-approved self-update for v0.50.0, superseding the carried "no
+self-update" and "no preload" decisions for this one bridge. The shell checks
+`kang-sw/werkschaft` releases/latest at launch and every 6 h (and from a
+settings "Check for updates" button), downloads
+`Werkschaft-<platform>-<arch>.zip`, verifies it against
+`Werkschaft-desktop-SHA256SUMS`, stages it under userData, and swaps the app
+folder from a detached helper after exit: a plain full quit applies without
+relaunch, "Restart now" relaunches, and a stage left by a reboot is applied
+once at the next launch. Phases none / available / ready; "Skip this version"
+persists. `dashboard-preload.js` exposes only `werkschaftDesktop.update`; main
+accepts its IPC from the pinned dashboard main frame only, and the dashboard
+keeps no permissions. The shell stays attach-only: no update path starts,
+stops or signals the daemon or any session holder. Dashboard UI is T0 both
+ways (old daemon: no toast; browser or old shell: no row). `build.cjs` now
+emits the zip and SUMS. Windows old->new smoke is still owed.
 
 ### Phase 2: Daily-use reliability
 

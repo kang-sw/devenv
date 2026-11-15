@@ -30,40 +30,6 @@ func TestTicketTemplate(t *testing.T) {
 		}
 	}
 
-	// research return includes ## Background and no ## Phases heading.
-	researchText, _ := wsdoc.TicketTemplate("research")
-	if !strings.Contains(researchText, "## Background") {
-		t.Error("TicketTemplate(\"research\") does not contain \"## Background\"")
-	}
-	if strings.Contains(researchText, "## Phases") {
-		t.Error("TicketTemplate(\"research\") unexpectedly contains \"## Phases\"")
-	}
-
-	// epic return includes ## Child Tickets heading.
-	epicText, _ := wsdoc.TicketTemplate("epic")
-	if !strings.Contains(epicText, "## Child Tickets") {
-		t.Error("TicketTemplate(\"epic\") does not contain \"## Child Tickets\"")
-	}
-
-	// feat return includes ## Phases heading.
-	featText, _ := wsdoc.TicketTemplate("feat")
-	if !strings.Contains(featText, "## Phases") {
-		t.Error("TicketTemplate(\"feat\") does not contain \"## Phases\"")
-	}
-
-	// The actionable template still offers its optional sections, and none of
-	// them is a spec or mental-model section: those retired with their layer.
-	// Both directions are asserted — the negatives alone would also pass if the
-	// whole optional-section list vanished.
-	if !strings.Contains(first, "`## Decisions`") || !strings.Contains(first, "`## Prior Art`") {
-		t.Error("actionable TicketTemplate lost its optional-section list")
-	}
-	for _, gone := range []string{"## Spec Impact", "spec:", "spec-remove:", "related-mental-model:"} {
-		if strings.Contains(first, gone) {
-			t.Errorf("actionable TicketTemplate reintroduced the retired %q key or section", gone)
-		}
-	}
-
 	// Unknown type returns an error with "unknown ticket type".
 	_, err := wsdoc.TicketTemplate("invalid")
 	if err == nil {

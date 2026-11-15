@@ -113,7 +113,28 @@ class SeedPackageTest(unittest.TestCase):
     def test_explicit_daemon_start_is_still_the_lifecycle_exception(self):
         with mock.patch.object(dev.subprocess, "run", return_value=mock.Mock(returncode=0, stdout='{"outcome":"started"}', stderr="")) as run:
             self.assertEqual(dev.run_daemon_start(self.launcher, self.built, 123), {"outcome": "started"})
-        self.assertEqual(run.call_args.args[0], [str(self.built), "daemon-start", "--build-time", "123"])
+        self.assertEqual(run.call_args.args[0], [str(self.built), "daemon-start", "--replace", "--build-time", "123"])
+
+    def test_rerun_identical_or_changed_content_uses_only_daemon_start_for_the_drain(self):
+        digest = self.launcher.sha256_file(self.built)
+        for old_hash in (digest, "other-content"):
+            with self.subTest(old_hash=old_hash), \
+                 mock.patch.dict(os.environ, {"WS_CACHE_HOME": str(self.root / "cache"), "WS_CONFIG_HOME": str(self.root / "config")}), \
+                 mock.patch.object(dev, "load_launcher", return_value=self.launcher), \
+                 mock.patch.object(dev, "build", return_value=self.built), \
+                 mock.patch.object(dev, "check_built"), \
+                 mock.patch.object(dev, "seed_packages") as seed, \
+                 mock.patch.object(self.launcher, "stage_daemon_binary", return_value=self.built) as stage, \
+                 mock.patch.object(dev, "current_health", side_effect=[({"token": "fake"}, {"pid": 10, "content_hash": old_hash}), ({"token": "new"}, {"pid": 11, "content_hash": digest})]) as health, \
+                 mock.patch.object(dev.subprocess, "run", return_value=mock.Mock(returncode=0, stdout='{"outcome":"replaced"}', stderr="")) as run, \
+                 mock.patch("urllib.request.urlopen", side_effect=AssertionError("no separate HTTP shutdown")):
+                self.assertEqual(dev.rerun_daemon(local=True), 0)
+                seed.assert_called_once()
+                stage.assert_called_once()
+                self.assertEqual(health.call_count, 2)
+                run.assert_called_once()
+                self.assertEqual(run.call_args.args[0][:3], [str(self.built), "daemon-start", "--replace"])
+                self.assertIn("--build-time", run.call_args.args[0])
 
     def test_daemon_start_points_rsrc_root_at_checkout_package(self):
         # The daemon resolves the Pi worker launcher as <dir(WS_RSRC_ROOT)>/bin/ws-mcp-launcher.py.

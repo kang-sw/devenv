@@ -152,3 +152,14 @@ Verify production interactions with all available original actions: full forward
 Verify production scroll-keep and navigation arrival in the board scroller and document-scroller fallback, including transitions into/out of floating state and wrapped heights. Confirm the reserved slot prevents content jumps and target headings/controls remain reachable below the face. Check modal/maximized-card and Files interactions, overview entry/exit, iframe identity/lifecycle, live updates and late frame-height changes without regressions to reading position or existing behavior. The report explicitly did not validate these production cases, so separate production evidence is required.
 
 Run the project's applicable tests and production interaction checks, and record the production evidence against these acceptance boundaries.
+
+## Folded (2026-11-15)
+
+- `261114-bug-ws-history-deep-link-capsule-offset-lag` is folded into this
+  ticket by the 2026-11-15 todo triage (owner (1119)=a): the history deep-link
+  arrival lands under the sticky topic bar because the navigate offset is
+  computed before the capsule stack appears (44px lag, 78->122px). Fix it with
+  this ticket's toolbar finishing work: synchronize the private navigation
+  offset with capsule geometry in `wswhiteboard/assets/stream.js` `navigate()`
+  and `assets/rail.js`, T0, no competing scroll writer. Evidence, harness
+  command and decisions stay in the folded ticket under `.dropped/`.

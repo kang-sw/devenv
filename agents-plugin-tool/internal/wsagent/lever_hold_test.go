@@ -99,7 +99,7 @@ func leverTurn(t *testing.T, h *leadHarness, ll leverLines) (id, holder, key str
 func heldThrough(t *testing.T, h *leadHarness, id, holder, what string) {
 	t.Helper()
 	h.quiesce(id)
-	if got := h.userInputs(holder); !slices.Equal(got, []string{"one"}) {
+	if got := h.userInputs(holder); !slices.Equal(got, h.envelopes("one")) {
 		t.Fatalf("%s: written %q; the follow-up must wait for the compaction", what, got)
 	}
 }
@@ -151,7 +151,7 @@ func TestLeverHoldCapReleases(t *testing.T) {
 	h.idle(id)
 	heldThrough(t, h, id, holder, "before the cap")
 	timers.fire(t, 0)
-	eventually(t, "the follow-up at the cap", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+	eventually(t, "the follow-up at the cap", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 }
 
 // TestLeverHoldNotArmed: a turn with no lever call, an interrupted lever
@@ -172,7 +172,7 @@ func TestLeverHoldNotArmed(t *testing.T) {
 		h.sync(id, holder)
 		h.send(id, "two")
 		h.holders.out(holder, resultLine())
-		eventually(t, "the follow-up at the turn end", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+		eventually(t, "the follow-up at the turn end", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 		if started, _ := timers.counts(); started != 0 {
 			t.Fatalf("no cap timer should start: %d", started)
 		}
@@ -181,7 +181,7 @@ func TestLeverHoldNotArmed(t *testing.T) {
 		h, timers := leverHarness(t)
 		id, holder, _ := leverTurn(t, h, ll)
 		h.holders.out(holder, aborted())
-		eventually(t, "the follow-up at the turn end", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "two"}) })
+		eventually(t, "the follow-up at the turn end", func() bool { return slices.Equal(h.userInputs(holder), h.envelopes("one", "two")) })
 		if started, _ := timers.counts(); started != 0 {
 			t.Fatalf("no cap timer should start: %d", started)
 		}
@@ -199,7 +199,7 @@ func TestLeverHoldNotArmed(t *testing.T) {
 		eventually(t, "the mail to be claimed", func() bool { return len(h.record(id).Mail) == 1 })
 		// A harness that reports no aborted reason for it.
 		h.holders.out(holder, resultLine())
-		eventually(t, "the mail at the turn end", func() bool { return slices.Equal(h.userInputs(holder), []string{"one", "From b@x: more"}) })
+		eventually(t, "the mail at the turn end", func() bool { return slices.Equal(h.userInputs(holder), []string{h.envelope("one"), "From b@x: more"}) })
 		if started, _ := timers.counts(); started != 0 {
 			t.Fatalf("no cap timer should start: %d", started)
 		}

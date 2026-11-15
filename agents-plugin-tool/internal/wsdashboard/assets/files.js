@@ -179,6 +179,9 @@
     var plus = iconBtn("plus", wsT("js.files.tab.new")); plus.classList.add("ftab-new");
     plus.addEventListener("click", function () { newTab({ root: rootAbs, dir: dir, view: viewMode }); });
     ui.tabs.appendChild(plus);
+    // One tab: the stylesheet hides its chip and the bar is one row led by +.
+    // Two or more: the tabs take their own row above the address row.
+    ui.bar.classList.toggle("fbar-multi", tabs.length > 1);
   }
   function switchTab(index) {
     if (destroyed || !tabs[index] || index === active) return;
@@ -472,7 +475,7 @@
       b.addEventListener("click", function () { navigate(parts.slice(0, i + 1).join("/")); });
       ui.crumbs.appendChild(b);
     });
-    ui.up.disabled = !dir;
+    ui.up.disabled = ui.home.disabled = !dir;
     var hist = history();
     ui.back.disabled = !hist || hist.index === 0;
     ui.forward.disabled = !hist || hist.index >= hist.paths.length - 1;
@@ -674,7 +677,10 @@
       var img = mk("img", "fthumb"); img.alt = e.name; img.loading = "lazy";
       img.src = routeBase + "fs/raw?path=" + encodeURIComponent(p) + (rootAbs ? "&root=" + encodeURIComponent(rootAbs) : ""); row.appendChild(img);
     } else row.appendChild(ic);
-    row.appendChild(mk("span", "fn", e.name));
+    var name = mk("span", "fn", e.name);
+    if (!e.dir && !e.link) name.appendChild(mk("span", "fstate"));
+    row.appendChild(name);
+    paintFileState(row);
     if (viewMode === "details") row.appendChild(mk("span", "ftype", e.dir ? wsT("js.files.folder") : e.name.indexOf(".") >= 0 ? e.name.split(".").pop().toUpperCase() : wsT("js.files.file")));
     if (column && opens(e)) {
       var ch = mk("span", "fcolumn-chevron"); ch.innerHTML = licon("chevron-right"); row.appendChild(ch);
@@ -693,15 +699,36 @@
       }
       selectPaths(paths, p);
     }
-    row.addEventListener("click", choose);
-    row.addEventListener("dblclick", function () { if (!column && opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p); });
+    row.addEventListener("click", function (ev) {
+      choose(ev);
+      if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey && !e.dir && !e.link && !e.gone) preview(p);
+    });
+    row.addEventListener("dblclick", function () { if (!column && opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p, 0, true); });
     row.addEventListener("keydown", function (ev) {
       if (column && columnKey(ev, row, choose)) return;
-      if (ev.key === "Enter") { ev.preventDefault(); choose(); if (!column && opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p); }
+      if (!column && !ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && /^Arrow(Up|Down|Left|Right)$/.test(ev.key)) {
+        ev.preventDefault();
+        var all = Array.prototype.slice.call(ui.directory.querySelectorAll(".fentry")), i = all.indexOf(row);
+        var next = all[Math.max(0, Math.min(all.length - 1, i + (/Up|Left/.test(ev.key) ? -1 : 1)))];
+        if (next) { next.focus({ preventScroll: true }); next.scrollIntoView({ block: "nearest" }); }
+        return;
+      }
+      if (ev.key === "Enter") { ev.preventDefault(); choose(); if (!column && opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p, 0, true); }
     });
     row.addEventListener("auxclick", function (ev) { if (ev.button === 1 && opens(e)) { ev.preventDefault(); newTab({ root: rootAbs, dir: p, view: viewMode }, true); } });
     row.addEventListener("contextmenu", function (ev) { ev.preventDefault(); if (column || sels.indexOf(p) < 0) choose(); openMenu({ e: e, path: p, dir: folder }, ev.clientX, ev.clientY); });
     return row;
+  }
+  function paintFileState(row) {
+    var mark = row.querySelector(".fstate");
+    if (!mark) return;
+    var state = !directoriesOnly && window.WsPreview && window.WsPreview.state(row.getAttribute("data-entry"), { root: rootAbs });
+    mark.hidden = !state;
+    mark.setAttribute("data-state", state || "");
+    mark.textContent = state === "preview" ? wsT("js.preview.state.preview") : state === "pinned" ? wsT("js.preview.state.pinned") : state ? wsT("js.preview.state.open") : "";
+  }
+  function paintFileStates() {
+    Array.prototype.forEach.call(ui.directory.querySelectorAll(".fentry"), paintFileState);
   }
   function columnDirs() {
     var chain = [""], path = "";
@@ -764,7 +791,7 @@
     var col = row.parentNode, all = Array.prototype.slice.call(col.querySelectorAll(".fentry")), i = all.indexOf(row), target;
     if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
       target = all[Math.max(0, Math.min(all.length - 1, i + (ev.key === "ArrowUp" ? -1 : 1)))];
-      if (target) { target.click(); focusColumn(target.getAttribute("data-entry")); }
+      if (target) focusColumn(target.getAttribute("data-entry"));
     } else {
       var cols = Array.prototype.slice.call(ui.directory.querySelectorAll(".fcolumn")), next = cols[cols.indexOf(col) + (ev.key === "ArrowLeft" ? -1 : 1)];
       if (next) {
@@ -799,10 +826,11 @@
       render();
     });
   }
-  function preview(path, line) {
+  function preview(path, line, keep) {
     if (directoriesOnly) return;
     if (!window.WsPreview) return;
     var o = {}, g = gen, navigation = navAttempt, attempt = ++previewAttempt;
+    if (keep) o.keep = true;
     if (rootAbs) o.root = rootAbs;
     if (line > 0) o.line = line;
     function rowActions(card) {
@@ -840,13 +868,13 @@
   // activate is a click or Enter on a row: a folder opens or closes, a file
   // is selected and previewed (binary files offer row actions instead);
   // a deleted entry or a symlink only takes the focus.
-  function activate(r) {
+  function activate(r, keep) {
     if (!r || r.more) return;
     if (opens(r.e)) { toggle(r.path, true); return; }
     if (r.e.dir || r.e.gone || r.e.link) return;
     resetSelection(r.path);
     render(); persistTabs(); notify("selection");
-    preview(r.path);
+    preview(r.path, 0, keep);
   }
   function collapseAll() {
     open = {};
@@ -1194,10 +1222,10 @@
     note.push(wsT("js.files.hits.ign"));
     endHits(nodes, note.join(" \u00b7 "));
   }
-  function openHit(d) {
+  function openHit(d, keep) {
     var path = d.getAttribute("data-path");
     if (d.hasAttribute("data-dir")) { revealDir(path); return; }
-    preview(path, +d.getAttribute("data-line") || 0);
+    preview(path, +d.getAttribute("data-line") || 0, keep);
   }
 
   // --- building the pane ---------------------------------------------------------
@@ -1205,17 +1233,21 @@
     el.textContent = "";
     el.setAttribute("data-fm", mode);
     el.classList.toggle("fpicker", directoriesOnly);
-    var bar = mk("div", "fbar");
+    var bar = ui.bar = mk("div", "fbar");
     ui.tabs = mk("div", "ftabs"); ui.tabs.setAttribute("role", "tablist");
     ui.tabs.setAttribute("aria-label", wsT("js.files.tabs")); bar.appendChild(ui.tabs);
-    bar.appendChild(mk("span", "fbar-sep"));
+    var ctl = mk("div", "fbar-ctl"); bar.appendChild(ctl);
+    ctl.appendChild(mk("span", "fbar-sep"));
     ui.back = iconBtn("chevron-right", wsT("js.files.back")); ui.back.classList.add("fback");
     ui.forward = iconBtn("chevron-right", wsT("js.files.forward")); ui.forward.classList.add("fforward");
     ui.back.addEventListener("click", function () { traverseHistory(-1); });
     ui.forward.addEventListener("click", function () { traverseHistory(1); });
-    bar.appendChild(ui.back); bar.appendChild(ui.forward);
+    ctl.appendChild(ui.back); ctl.appendChild(ui.forward);
     ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", function () { navigate(parentRel(dir)); });
-    bar.appendChild(ui.up);
+    ctl.appendChild(ui.up);
+    ui.home = iconBtn("house", wsT("js.files.home")); ui.home.classList.add("fhome");
+    ui.home.addEventListener("click", function () { if (dir) navigate(""); });
+    ctl.appendChild(ui.home);
     ui.location = mk("div", "flocation");
     ui.rootBtn = mk("button", "fcrumb fcrumb-root fchange-root"); ui.rootBtn.type = "button";
     ui.rootBtn.setAttribute("aria-label", wsT("js.files.root.change"));
@@ -1239,7 +1271,7 @@
       if (e.key === "Enter") navigate(path, null, null, { typed: true });
     });
     ui.path.addEventListener("blur", function () { closePath(false); });
-    ui.location.appendChild(ui.path); bar.appendChild(ui.location);
+    ui.location.appendChild(ui.path); ctl.appendChild(ui.location);
     var head = mk("div", "fhd");
     ui.collapse = iconBtn("chevrons-down-up", wsT("js.files.collapse"));
     ui.refresh = iconBtn("refresh-cw", wsT("js.files.refresh"));
@@ -1259,9 +1291,9 @@
         var option = mk("option", "", h.roots.host + " · " + path); option.value = path; ui.roots.appendChild(option);
       });
       ui.roots.addEventListener("change", function () { applyRoot(ui.roots.value); });
-      bar.appendChild(ui.roots);
+      ctl.appendChild(ui.roots);
     }
-    bar.appendChild(head); el.appendChild(bar);
+    ctl.appendChild(head); el.appendChild(bar);
 
     var searchRow = mk("div", "fsrow"), row = mk("div", "fsr");
     var seg = mk("div", "fseg");
@@ -1425,7 +1457,7 @@
         if (first) { e.preventDefault(); first.focus(); }
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (mode === "name" && !ctrl && !ui.hits.hidden && ui.hits.querySelector(".hit")) openHit(ui.hits.querySelector(".hit"));
+        if (mode === "name" && !ctrl && !ui.hits.hidden && ui.hits.querySelector(".hit")) openHit(ui.hits.querySelector(".hit"), true);
         else search(true);
       }
     });
@@ -1469,7 +1501,7 @@
         if (!to) { e.preventDefault(); return; }
       } else if (e.key === "Enter" && r) {
         e.preventDefault();
-        activate(r);
+        activate(r, true);
         return;
       } else return;
       e.preventDefault();
@@ -1503,10 +1535,14 @@
       var d = e.target.closest && e.target.closest(".hit");
       if (d) openHit(d);
     });
+    ui.hits.addEventListener("dblclick", function (e) {
+      var d = e.target.closest && e.target.closest(".hit");
+      if (d) openHit(d, true);
+    });
     ui.hits.addEventListener("keydown", function (e) {
       var all = Array.prototype.slice.call(ui.hits.querySelectorAll(".hit")), i = all.indexOf(doc.activeElement);
       if (i < 0) return;
-      if (e.key === "Enter") { e.preventDefault(); openHit(all[i]); return; }
+      if (e.key === "Enter") { e.preventDefault(); openHit(all[i], true); return; }
       if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); ui.q.focus(); return; }
       var j = e.key === "ArrowDown" ? Math.min(all.length - 1, i + 1) : e.key === "ArrowUp" ? i - 1 :
         e.key === "Home" ? 0 : e.key === "End" ? all.length - 1 : -2;
@@ -1551,6 +1587,7 @@
 
   build();
   wire();
+  listen(doc, "ws-file-cards", paintFileStates);
   setMode("name");
   paintHead();
   api = {

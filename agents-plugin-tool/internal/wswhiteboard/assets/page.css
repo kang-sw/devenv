@@ -1,4 +1,4 @@
-/* class prefix: wb (dependency mockup atoms are scoped by .dw; the sticky-head ticket badge is .wbtk) */
+/* class prefix: wb (dependency mockup atoms are scoped by .dw; the topic bar's linked-ticket icon is .dw.wbtk) */
 /* Material-style board: roles are told apart by filled header bars, not outlines.
    Surfaces follow the host theme; role fills are template-owned so the text on
    them keeps its contrast whatever the host palette is. */

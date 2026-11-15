@@ -139,13 +139,25 @@ func TestTopicFramesCarryThePinnedTheme(t *testing.T) {
 	}
 }
 
-// The gear holds the theme section on every page that has it, the list and
-// board-first pages included, in every language.
+// The shell's rail gear owns Settings for the root and both session modes.
+// Its dialog holds the theme section in every language; framed pages use
+// this shared dialog rather than carrying duplicate controls.
 func TestGearHoldsTheThemeSection(t *testing.T) {
 	f := startPageFixture(t)
-	for _, path := range []string{"/?frame=1", "/s/boardsession?frame=1", "/s/livesession?frame=1"} {
+	for _, path := range []string{"/", "/s/boardsession", "/s/livesession"} {
 		for _, l := range wsi18n.Languages() {
-			_, body := getLang(t, f.base+path, l.Code, "")
+			code, body := getLang(t, f.base+path, l.Code, "")
+			if code != http.StatusOK {
+				t.Fatalf("%s (%s): GET = %d", path, l.Code, code)
+			}
+			assertSettingsOwner(t, body, true)
+			// Inspect the actual menu, not translated words in scripts or
+			// the landing guide's description of theme settings.
+			menu := regexp.MustCompile(`(?s)<div class="gmenu gcard">(.*?)</div>`).FindStringSubmatch(body)
+			if menu == nil {
+				t.Fatalf("%s (%s): no Settings menu", path, l.Code)
+			}
+			body = menu[1]
 			for _, key := range []string{"gear.theme", "gear.theme.auto", "gear.theme.light", "gear.theme.dark"} {
 				if !strings.Contains(body, wsi18n.T(l.Code, key)) {
 					t.Errorf("%s (%s): no %s text", path, l.Code, key)

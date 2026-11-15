@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdashboard"
+	"github.com/kang-sw/devenv/internal/wsinbox"
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
@@ -621,7 +622,7 @@ func TestPiForwardDrivesTheRealTokenRoute(t *testing.T) {
 	dir := t.TempDir()
 	runner := wsagent.NewRunner(wsagent.Options{
 		Dir:      dir,
-		Backends: map[string]wsagent.Backend{wsagent.BackendPi: backend},
+		Backends: map[string]wsagent.BackendRegistration{wsagent.BackendPi: {Backend: backend}},
 		Keys:     &routeKeys{},
 		Config:   cfg,
 		WSMCP: func(root string) (wsagent.MCPCommand, error) {
@@ -677,7 +678,7 @@ func TestPiForwardDrivesTheRealTokenRoute(t *testing.T) {
 		t.Fatalf("pi.spawn = %+v", kid)
 	}
 	_, kp := backend.waitStart(t, 1)
-	if got := kp.nextSent(t); got != "sub task" {
+	if got := kp.nextSent(t); !isUserEnvelopeOf(got, "sub task") {
 		t.Fatalf("the child's first turn = %q", got)
 	}
 	if st, err := runner.Get(kid.ID); err != nil || st.Parent == nil || st.Parent.Kind != wsagent.ParentConversation || st.Parent.ReplyID != w.ID {
@@ -735,7 +736,7 @@ func TestPiForwardDrivesTheRealTokenRoute(t *testing.T) {
 	if a := log.last(t, "send"); a.code != http.StatusOK || sent.ID != kid.ID {
 		t.Fatalf("send = %d %s (%+v)", a.code, a.body, sent)
 	}
-	if got := kp.nextSent(t); got != "more" {
+	if got := kp.nextSent(t); !isUserEnvelopeOf(got, "more") {
 		t.Fatalf("the sent turn = %q", got)
 	}
 	for len(log.arrived) > 0 {
@@ -795,4 +796,11 @@ func TestPiForwardDrivesTheRealTokenRoute(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("no token = %d", resp.StatusCode)
 	}
+}
+
+// isUserEnvelopeOf reports whether text is exactly one timestamped user
+// envelope holding want, the form every inbox entry is delivered in.
+func isUserEnvelopeOf(text, want string) bool {
+	messages, ok := wsinbox.ParseUserMessages(text)
+	return ok && len(messages) == 1 && messages[0].At != "" && messages[0].Text == want
 }

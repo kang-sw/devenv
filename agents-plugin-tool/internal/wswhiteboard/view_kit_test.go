@@ -233,6 +233,39 @@ check('jumps do not add permanent input hooks',(winOn.keydown||[]).length,nHooks
 `)
 }
 
+func TestViewKitHomeReleaseUnderNode(t *testing.T) {
+	runViewKit(t, `
+var reduced=false, lands=[];
+win.matchMedia=function(){return {matches:reduced};};
+El.prototype.scrollTo=function(opt){lands.push({top:opt.top,behavior:opt.behavior});this.scrollTop=opt.top;};
+var k=viewKit(win), a=topic(board,'home',bcol,100), b=topic(board,'reading',bcol,400);
+bcol.scrollTop=200;
+var capture=k.keep(b), pin=k.pin(b), prepared=0;
+writes=0;
+k.jump(a,{top:0,behavior:'smooth',prepare:function(){
+  prepared++;
+  a.y+=300;b.y+=300;
+  capture.apply();pin.apply();k.keep(b).apply();
+  check('release morph cannot write a keep/pin correction',writes,0);
+}});
+check('one owner releases then navigates',[prepared,writes,lands],[1,1,[{top:0,behavior:'smooth'}]]);
+a.y+=800;b.y+=800;ros.forEach(function(r){r.fire();});advance(48);
+check('absolute home ignores layout during navigation',[bcol.scrollTop,writes],[0,1]);
+advance(400);check('home navigation settles',k.keeping(bcol),null);
+// Replacing an already-running explicit follow must end its observer before
+// preparing the release; the old destination cannot write during the morph.
+k.jump(b,{offset:0});
+var oldRO=ros[ros.length-1];writes=0;lands=[];reduced=true;
+k.jump(a,{top:0,behavior:'smooth',prepare:function(){b.y+=99;k.keep(b).apply();}});
+oldRO.fire();advance(48);
+check('replacement/reduced home has one instant writer',[oldRO.off,writes,lands],[true,1,[{top:0,behavior:'instant'}]]);
+advance(400);
+var d=topic(plain,'document-home',html,200);html.scrollTop=500;lands=[];
+k.jump(d,{top:0,behavior:'smooth'});d.y+=100;advance(48);
+check('document root uses the same absolute home owner',[html.scrollTop,lands],[0,[{top:0,behavior:'instant'}]]);
+`)
+}
+
 // Overview's enter, pick and exit place a card at an offset right away. The
 // click that asked for it already started the user-scroll cooldown, so place
 // must write through it (keep would only record a capture), hold the card

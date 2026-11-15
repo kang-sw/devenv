@@ -172,9 +172,9 @@ async function until(check, message) {
 
         await action('live');
         await active('live');
-        await page.locator('#ctext').waitFor();
+        await page.locator('#ctext + .wsc-editor').waitFor();
         const draft = `Preserve the effects draft at ${width}px`;
-        await page.locator('#ctext').fill(draft);
+        await page.locator('#ctext + .wsc-editor').fill(draft);
         await waitStored(draft);
         const liveKeys = await effectsKeys();
         const liveRefresh = await action('append');
@@ -193,7 +193,7 @@ async function until(check, message) {
         await savedOnly();
         await action('live');
         await active('live');
-        await page.locator('#ctext').waitFor();
+        await page.locator('#ctext + .wsc-editor').waitFor();
         assert.equal(await page.locator('#ctext').inputValue(), draft, 'saved-history reloads do not overwrite stored composer draft');
         await action('absent');
         await page.locator('#dash-banner').waitFor({ state: 'visible' });
@@ -203,7 +203,7 @@ async function until(check, message) {
         await savedOnly();
         await action('live');
         await active('live');
-        await page.locator('#ctext').waitFor();
+        await page.locator('#ctext + .wsc-editor').waitFor();
         assert.equal(await page.locator('#ctext').inputValue(), draft);
         await shot('live-restored-draft');
 

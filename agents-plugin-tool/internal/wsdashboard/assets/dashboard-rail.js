@@ -62,7 +62,12 @@
     });
     if (memoPad) memoPad.sync(rid);
     WsRail.markRevive(q(".rs", r), revBusy);
+    q(".drarch", r).forEach(function (b) {
+      var row = b.closest(".rs");
+      b.classList.toggle("busy", !!archBusy && !!row && row.getAttribute("data-rid") === archBusy);
+    });
     if (usageGutter) usageGutter.sync();
+    admissionSync();
     railPopSync();
   }
   // railFocus is what holds the focus in the rail before a swap replaces
@@ -70,7 +75,7 @@
   // railRefocus puts it back on the new row after the swap, unless the
   // focus went elsewhere meanwhile. A keyboard move (Alt and an arrow)
   // lands its swap on the row it moved, so the next key still finds it.
-  var RAIL_FOCUS = [".rl", ".star", ".kidtog", ".drren", ".drcopy", ".rrev"];
+  var RAIL_FOCUS = [".rl", ".star", ".kidtog", ".drren", ".drcopy", ".drarch", ".rrev"];
   function railFocus() {
     var a = doc.activeElement, row = a && railEl && WsRail && railEl.contains(a) && a.closest ? a.closest(".rs") : null;
     if (!row) return null;
@@ -154,6 +159,203 @@
       railRelease();
     });
   }
+  // Admission drafts are browser-local, unlike the shared persisted result.
+  // Never refresh a draft's evidence implicitly, including on a 409 or reload.
+  var admissionStore = WsRail && WsRail.admissionDrafts(railStore);
+  var admissionDraft = admissionStore ? admissionStore.load() : [];
+  var admissionMessage = "", admissionDetail = "", admissionBusy = false;
+  var ADMISSION_PROMPT = "ws.dashboard.worktree-admission.prompt";
+  var admissionPrompt = null;
+  try { admissionPrompt = JSON.parse(load(ADMISSION_PROMPT) || "null"); } catch (_) {}
+  function admissionKey(s) { return JSON.stringify([s.repository, s.path]); }
+  function admissionEvidence(row, action) {
+    return { repository: row.getAttribute("data-repository") || "", path: row.getAttribute("data-path") || "",
+      revision: row.getAttribute("data-revision") || "", action: action };
+  }
+  function admissionFind(s) { return admissionDraft.find(function (d) { return admissionKey(d) === admissionKey(s); }); }
+  function admissionSave() { if (admissionStore) admissionStore.save(admissionDraft); admissionSync(); }
+  function admissionClear(s) {
+    admissionDraft = admissionDraft.filter(function (d) { return admissionKey(d) !== admissionKey(s); });
+    admissionSave();
+  }
+  function admissionSync() {
+    var r = region("rail");
+    if (!r) return;
+    var seen = {}, correction = r.querySelector(".admission-corrections");
+    if (!correction) return;
+    correction.textContent = "";
+    q(".rwt[data-admission]", r).forEach(function (row) {
+      var s = admissionEvidence(row, ""), d = admissionFind(s), pending = row.getAttribute("data-admission") === "pending";
+      seen[admissionKey(s)] = true;
+      var stale = !!d && (d.stale || d.revision !== s.revision || (d.action === "undo" ? pending : !pending));
+      row.classList.toggle("admission-stale", stale);
+      row.classList.toggle("m-ap", !!d && d.action === "approve");
+      row.classList.toggle("m-rj", !!d && d.action === "reject");
+      q("[data-admission-action]", row).forEach(function (b) {
+        b.setAttribute("aria-pressed", String(!!d && d.action === b.getAttribute("data-admission-action")));
+        b.disabled = admissionBusy;
+      });
+      var tag = row.querySelector(".d-tag"), fix = row.querySelector(".admission-row-correction");
+      if (tag) tag.textContent = d ? (d.action === "approve" ? wsT("js.admission.will.approve") : wsT("js.admission.will.reject")) : "";
+      if (fix) fix.hidden = !stale;
+      // Rejected rows have no pending correction markup. Their draft remains
+      // visible in the correction list rather than becoming an invisible undo.
+      if (stale && !fix) correctionRow(d, wsT("js.admission.fix.changed", d.path), row);
+    });
+    function correctionRow(d, reason, row) {
+      var line = mk("div", "admission-missing", reason + " ");
+      var clear = mk("button", "", wsT("js.admission.fix.clear")); clear.type = "button";
+      clear.addEventListener("click", function () { admissionClear(d); }); line.appendChild(clear);
+      if (row) {
+        var review = mk("button", "", wsT("js.admission.fix.reselect")); review.type = "button";
+        review.addEventListener("click", function () {
+          var fresh = admissionEvidence(row, row.getAttribute("data-admission") === "rejected" ? "undo" : d.action);
+          admissionClear(d); admissionDraft.push(fresh); admissionSave();
+        }); line.appendChild(review);
+      }
+      correction.appendChild(line);
+    }
+    admissionDraft.forEach(function (d) { if (!seen[admissionKey(d)]) correctionRow(d, wsT("js.admission.fix.missing", d.path), null); });
+    var cap = r.querySelector(".rcap"), ap = admissionDraft.filter(function (d) { return d.action === "approve"; }).length;
+    var reject = admissionDraft.filter(function (d) { return d.action === "reject"; }).length;
+    cap.hidden = !admissionDraft.length; railEl.classList.toggle("capon", !!admissionDraft.length);
+    var ok = cap.querySelector(".ok"), no = cap.querySelector(".no");
+    ok.hidden = !ap; ok.textContent = wsT("js.admission.cap.approve", ap); no.hidden = !reject; no.textContent = wsT("js.admission.cap.reject", reject);
+    cap.querySelector("[data-admission-apply]").disabled = admissionBusy;
+    // A copied prompt needs no notice (Apply toasts it, and the rejected
+    // list's header copies it again); only a failed copy stays, until its
+    // close, which outlives a reload, or a later successful copy.
+    var feedback = r.querySelector(".admission-feedback"), copy = r.querySelector(".admission-copy");
+    var status = r.querySelector(".admission-status"), failed = !!(admissionPrompt && admissionPrompt.text && admissionPrompt.failed && !admissionPrompt.dismissed);
+    copy.hidden = !failed;
+    if (failed) copy.querySelector("textarea").value = admissionPrompt.text;
+    status.textContent = admissionMessage || (failed ? wsT("js.admission.copyfailed") : "");
+    status.title = admissionMessage ? admissionDetail : "";
+    status.hidden = !status.textContent;
+    r.querySelector("[data-admission-dismiss]").hidden = status.hidden;
+    feedback.hidden = status.hidden && !correction.children.length;
+  }
+  // admissionCopy copies text quietly (copyText's failure toast would show
+  // the whole prompt) and keeps it as the retained prompt: a failure shows
+  // the retry notice again, even one closed before.
+  function admissionCopy(text, done) {
+    if (!text) return;
+    var prompt = admissionPrompt = { text: text, failed: true };
+    save(ADMISSION_PROMPT, JSON.stringify(prompt));
+    return copyText(text, true).then(function (ok) {
+      if (admissionPrompt === prompt) {
+        prompt.failed = !ok;
+        save(ADMISSION_PROMPT, JSON.stringify(prompt));
+        admissionSync();
+      }
+      if (done) done(ok);
+      else if (ok) toast(wsT("js.toast.copydone"));
+    });
+  }
+  function admissionDismiss() {
+    var r = region("rail"), f = r && r.querySelector(".admission-feedback");
+    var refocus = f && f.contains(doc.activeElement);
+    admissionMessage = ""; admissionDetail = "";
+    if (admissionPrompt) { admissionPrompt.dismissed = true; save(ADMISSION_PROMPT, JSON.stringify(admissionPrompt)); }
+    admissionSync();
+    var next = refocus && r.querySelector(".rrej > summary");
+    if (next) next.focus();
+  }
+  // admissionToast says what an applied batch did, the mockup's two lines:
+  // the rejection and its copy first, the rest small beneath it. It hangs
+  // on the rail itself, outside the swapped region, so a rail render while
+  // it shows keeps it; it sits above the notice, the capsule, or the foot.
+  var rtoastEl = null, rtoastTimer = 0;
+  function admissionToast(n, copied) {
+    var lines = [];
+    if (n.reject) lines.push(wsT(copied ? "js.admission.toast.rejected" : "js.admission.toast.rejectfail", n.reject));
+    if (n.approve) lines.push(wsT("js.admission.toast.approved", n.approve));
+    if (n.undo) lines.push(wsT("js.admission.toast.undone", n.undo));
+    if (!lines.length || !railEl) return;
+    if (!rtoastEl) {
+      rtoastEl = mk("div", "rtoast");
+      rtoastEl.setAttribute("role", "status");
+      rtoastEl.setAttribute("aria-live", "polite");
+    }
+    if (rtoastEl.parentNode !== railEl) railEl.appendChild(rtoastEl);
+    rtoastEl.textContent = lines[0];
+    lines.slice(1).forEach(function (x) { rtoastEl.appendChild(mk("small", "", x)); });
+    rtoastEl.className = "rtoast" + (n.reject ? "" : " ok");
+    var r = region("rail"), anchor = null;
+    ["admission-feedback", "rcap", "rfoot"].some(function (c) {
+      var el = r && r.querySelector("." + c);
+      if (el && !el.hidden && el.offsetHeight) anchor = el;
+      return !!anchor;
+    });
+    if (anchor) rtoastEl.style.bottom = Math.round(railEl.getBoundingClientRect().bottom - anchor.getBoundingClientRect().top + 8) + "px";
+    void rtoastEl.offsetWidth;
+    rtoastEl.classList.add("on");
+    clearTimeout(rtoastTimer);
+    rtoastTimer = setTimeout(function () { rtoastEl.classList.remove("on"); }, 5000);
+  }
+  function admissionSubmit(selections) {
+    if (admissionBusy || !selections.length) return;
+    admissionBusy = true; railSaving++; admissionMessage = wsT("js.admission.applying"); admissionDetail = ""; admissionSync();
+    var ctl = window.AbortController ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, LAYOUT_WAIT);
+    fetch("/rail/worktrees/admission", { method: "POST", credentials: "same-origin", cache: "no-store",
+      signal: ctl ? ctl.signal : undefined, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selections: selections.map(function (s) {
+        return { repository: s.repository, path: s.path, revision: s.revision, action: s.action };
+      }) }) }).then(function (res) { return res.json().then(function (v) { return { status: res.status, value: v }; }); })
+      .then(function (answer) {
+        var v = answer.value;
+        if (v.applied === true && answer.status === 200) {
+          railMinGen = Math.max(railMinGen, +v.gen || 0);
+          admissionDraft = admissionDraft.filter(function (d) { return !selections.some(function (s) {
+            return admissionKey(s) === admissionKey(d) && s.revision === d.revision && s.action === d.action;
+          }); });
+          admissionStore.save(admissionDraft);
+          admissionMessage = "";
+          // Server HTML, not optimistic DOM moves, is the committed authority.
+          if (v.html) swap("rail", "admission:" + v.gen + ":" + Date.now(), v.html);
+          var n = { approve: 0, reject: 0, undo: 0 };
+          selections.forEach(function (s) { n[s.action] = (n[s.action] || 0) + 1; });
+          // The rejection is already persisted; the copy comes after it (1101).
+          if (v.prompt) admissionCopy(v.prompt, function (ok) { admissionToast(n, ok); });
+          else admissionToast(n, true);
+        } else {
+          (v.stale || selections).forEach(function (s) {
+            var d = admissionFind(s);
+            if (d) d.stale = true;
+            else admissionDraft.push({ repository: s.repository, path: s.path, revision: s.revision, action: s.action, stale: true });
+          });
+          admissionStore.save(admissionDraft);
+          // The route's message is English diagnostics: the title keeps it.
+          admissionMessage = wsT(answer.status === 409 ? "js.admission.stale" : answer.status === 400 ? "js.admission.invalid" : "js.admission.notwritten");
+          admissionDetail = v.message || "";
+        }
+      }).catch(function () { admissionMessage = wsT("js.admission.unconfirmed"); admissionDetail = ""; })
+      .then(function () { clearTimeout(timer); admissionBusy = false; railSaving--; admissionSync(); railRelease(); });
+  }
+  function admissionClick(t) {
+    var b = t.closest && t.closest("[data-admission-action], [data-admission-clear], [data-admission-apply], [data-admission-copy], [data-admission-copy-all], [data-admission-dismiss], [data-admission-clear-row], [data-admission-reselect], .admission-undo");
+    if (!b) return false;
+    if (b.hasAttribute("data-admission-dismiss")) { admissionDismiss(); return true; }
+    if (admissionBusy) return true;
+    if (b.hasAttribute("data-admission-clear")) { admissionDraft = []; admissionMessage = ""; admissionSave(); }
+    else if (b.hasAttribute("data-admission-copy")) admissionCopy(admissionPrompt && admissionPrompt.text);
+    else if (b.hasAttribute("data-admission-copy-all")) admissionCopy(b.getAttribute("data-copy"));
+    else if (b.hasAttribute("data-admission-apply")) admissionSubmit(admissionDraft.slice());
+    else {
+      var row = b.closest(".rwt"), s = admissionEvidence(row, b.getAttribute("data-admission-action") || "undo"), old = admissionFind(s);
+      if (b.hasAttribute("data-admission-clear-row")) admissionClear(s);
+      else if (b.hasAttribute("data-admission-reselect")) {
+        s.action = old ? old.action : "approve"; admissionClear(s); admissionDraft.push(s); admissionSave();
+      } else if (b.classList.contains("admission-undo")) admissionSubmit([s]);
+      else {
+        // Switching actions retains the original evidence, even if stale.
+        if (old && old.action !== s.action) { old.action = s.action; admissionSave(); }
+        else { admissionClear(s); if (!old) { admissionDraft.push(s); admissionSave(); } }
+      }
+    }
+    return true;
+  }
   // layoutImport runs once on load: a browser that kept the rail's order
   // and stars locally before the daemon kept them imports them into an
   // empty layout, and drops them once the daemon answered (rail.js
@@ -175,7 +377,7 @@
     var at = star || row.querySelector(".drtail");
     if (!id || !s1 || !nm || !pen || !at) return;
     labelStart({
-      box: s1, at: at, cls: "drinp", hide: [nm, row.querySelector(".hosted"), row.querySelector(".rbt"), star, row.querySelector(".kidtog")], route: "/s/" + encodeURIComponent(id) + "/label",
+      box: s1, at: at, cls: "drinp", hide: [nm, row.querySelector(".hosted"), row.querySelector(".rbt"), star], route: "/s/" + encodeURIComponent(id) + "/label",
       label: pen.getAttribute("data-label") || "", max: +(list && list.getAttribute("data-max")) || 64,
       ph: id, aria: pen.getAttribute("aria-label") || "",
       saved: function (label) {
@@ -230,6 +432,11 @@
       railOpen(!railShown());
     });
     if (rscrim) rscrim.addEventListener("click", function () { railOpen(false); });
+    // Esc inside the admission notice closes the notice, not the rail.
+    railEl.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !e.target.closest || !e.target.closest(".admission-feedback")) return;
+      e.preventDefault(); e.stopPropagation(); admissionDismiss();
+    });
     doc.addEventListener("keydown", function (e) { if (e.key === "Escape" && railShown()) railOpen(false); });
     // Ctrl+` (the physical key, so any layout) also opens memos beside
     // the permanent rail column.
@@ -243,6 +450,7 @@
     [RAIL_WIDE, RAIL_XWIDE].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { railOpen(false); }); });
     railEl.addEventListener("click", function (e) {
       var t = e.target;
+      if (admissionClick(t)) { e.preventDefault(); return; }
       // A star shows pressed at once; the rail swap after the op moves the
       // row.
       var star = t.closest && t.closest(".star");
@@ -297,6 +505,18 @@
         railDelete(del);
         return;
       }
+      var fold = t.closest && t.closest(".rfh");
+      if (fold) {
+        e.preventDefault();
+        if (railSets) WsRail.foldPick(railSets, fold);
+        return;
+      }
+      var arch = t.closest && t.closest(".drarch");
+      if (arch) {
+        e.preventDefault();
+        railArchive(arch);
+        return;
+      }
       var ren = t.closest && t.closest(".drren");
       if (ren) {
         e.preventDefault();
@@ -328,8 +548,20 @@
       // Picking a session navigates; the draft is saved first and the
       // overlay closes, so a back navigation finds the page as it was. The
       // shell keeps its page (and the memo pad's state) and shows the
-      // session's frame (the shell's link clicks, below).
-      if (t.closest && t.closest("a[href]")) {
+      // session's frame (the shell's link clicks, below). Picking the open
+      // session again closes its view (the session keeps running) and goes
+      // to the index, whose landing holds the how-to; a modified click
+      // keeps the link's own behaviour.
+      var pick = t.closest && t.closest("a[href]");
+      if (pick) {
+        var prow = pick.closest(".rs");
+        if (prow && rid && prow.getAttribute("data-rid") === rid && !e.button && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          if (!shell) { saveDraft(); if (memoPad) memoPad.remember(); }
+          railOpen(false);
+          go("/");
+          return;
+        }
         if (!shell) { saveDraft(); if (memoPad) memoPad.remember(); }
         railOpen(false);
       }
@@ -381,13 +613,20 @@
 
   // --- rail drag: sessions in their tree, workspaces among themselves ---
   // A live session row drags by its grip (the gutter left of its harness
-  // icon), a parent with its children; a workspace section drags by its
-  // bar among the sections. Over a live row the row's zones decide
-  // (WsRail.dropZone): the middle half of a valid parent attaches the row
-  // as its last child (the parent outlined, no line), its quarters and
-  // any other row's halves are a line before or after it at its level,
-  // which reorders, attaches among a parent's children, or detaches a
-  // child to the top level of its own group. Anywhere else in its own
+  // icon) or, with a mouse or pen, by its whole body, a parent with its
+  // children; a workspace section drags by its bar among the sections.
+  // Over a live row its halves are a line before or after it at its
+  // level (WsRail.dropZone with halves), which reorders, attaches among a
+  // parent's children, or detaches a child to the top level of its own
+  // group; a top-level row takes a parent with its shown children as one
+  // unit (rdUnit), so it lands top-level before or after that unit and
+  // joins children only by the dwell below. The pointer held still
+  // RD_NEST in a valid parent's middle half
+  // instead attaches the row as its last child (the parent outlined, no
+  // line). The child zone is never armed by a pass alone: it once took the
+  // middle half of every top-level row at once, so a drop aimed at a row
+  // nested under it, and its quarters left 7px for a reorder on a
+  // one-line row. Anywhere else in its own
   // group the drop takes the nearest place among its top-level peers on
   // its side of the stars. A line shows where it lands, clamped to the
   // list's edge when that place is scrolled out of view, and the drop
@@ -396,7 +635,8 @@
   // with the reason in a toast. Over a place it cannot land (another
   // workspace or worktree, the other side of the stars, an ended row, too
   // deep) the cursor says no and a hint says why. A press that never moves past
-  // RD_SLOP stays a click. The rest of a row is its link and never drags; a
+  // RD_SLOP stays a click (a row's link opens). A row's buttons and rename
+  // field never drag, nor does a touch on a row off its grip; a
   // touch on a grip drags with no hold, while a touch on a bar drags only
   // after holding still for RD_HOLD, so a swipe still scrolls the list. No
   // drag starts from a button in a bar (+, forget); the bar's own toggle is
@@ -404,7 +644,7 @@
   // cancelled. Every rail swap waits from the press until it ends
   // (railGate), and a node replaced anyway is found again by its reply-id
   // or path.
-  var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 48;
+  var RD_SLOP = 5, RD_HOLD = 380, RD_EDGE = 48, RD_NEST = 600;
   var rdragged = false, rdLineEl = null, rdHintEl = null, rdKidEl = null, rdRaf = 0;
   function rdPeers(item) {
     var ws = item.classList.contains("rws"), wt = item.classList.contains("rwt");
@@ -452,6 +692,17 @@
     var k = row.nextElementSibling, b = row.getBoundingClientRect().bottom;
     return k && k.classList.contains("rkids") && !row.classList.contains("kcol") ? Math.max(b, k.getBoundingClientRect().bottom) : b;
   }
+  // rdUnit is the parent whose shown children make one unit with it, for
+  // row: row itself when its children show, its parent when it is one of
+  // them; else null.
+  function rdUnit(row) {
+    var box = row.parentNode, kids = row.nextElementSibling;
+    if (box && box.classList.contains("rkids")) {
+      var p = box.previousElementSibling;
+      return p && p.classList.contains("rs") && !p.classList.contains("ended") ? p : null;
+    }
+    return kids && kids.classList.contains("rkids") && !row.classList.contains("kcol") && kids.children.length ? row : null;
+  }
   // rdHomePeers are a dragged row's top-level peers for a drop over no
   // row: the live rows of its own group's list (WsRail.homeRows), those on
   // its side of the stars for a top-level row.
@@ -474,11 +725,31 @@
     }
     if (row && (!railEl.contains(row) || row.classList.contains("ended"))) row = null;
     if (row) {
-      var rr = row.getBoundingClientRect();
-      z = WsRail.dropZone(WsRail.rowFacts(d.item), WsRail.rowFacts(row), rr.height ? (y - rr.top) / rr.height : 0.5);
+      var rr = row.getBoundingClientRect(), df = WsRail.rowFacts(d.item), tf0 = WsRail.rowFacts(row);
+      var frac = rr.height ? (y - rr.top) / rr.height : 0.5, kz = WsRail.dropZone(df, tf0, frac);
+      // The child zone (a valid parent's middle half) arms only once the
+      // pointer has dwelt there RD_NEST: a pass over a row on the way is a
+      // line at its halves, the same line the drop lands on.
+      if (kz && kz.zone === "child") rdDwell(d, tf0.rid);
+      else rdDwell(d, "");
+      var unit = !df.parent ? rdUnit(row) : null;
+      if (kz && kz.zone === "child" && d.nest === tf0.rid) z = kz;
+      else if (unit) {
+        // A top-level row lands among top-level units: over a parent whose
+        // children show, or over one of those children, the parent with
+        // its children splits in halves, before the parent or after its
+        // last child. The seam under a last child (where the line would
+        // also be the next row's top) is otherwise a child's place, and a
+        // top-level row aimed between two top-level rows nested there.
+        var ut = unit.getBoundingClientRect().top, ub = rdBottom(unit), uf = WsRail.rowFacts(unit);
+        uf.first = "";
+        z = WsRail.dropZone(df, uf, ub > ut ? (y - ut) / (ub - ut) : 0.5, true);
+        row = unit;
+      } else z = WsRail.dropZone(df, tf0, frac, true);
       ref = row;
       if (z && z.ref !== row.getAttribute("data-rid")) ref = row.nextElementSibling && row.nextElementSibling.firstElementChild;
     } else {
+      rdDwell(d, "");
       var why = WsRail.dropRefusal(d.item, over);
       if (why) z = { refusal: why };
       else {
@@ -503,6 +774,21 @@
     var box = ref.getBoundingClientRect(), top = Math.round((z.zone === "after" ? rdBottom(ref) : box.top) - 1);
     if (lr) top = Math.max(Math.round(lr.top), Math.min(Math.round(lr.bottom) - 2, top));
     rdLine({ left: box.left, width: box.width, top: top });
+  }
+  // rdDwell tracks the pointer over a valid parent's child zone (rid, ""
+  // for none): RD_NEST after it entered that zone, without leaving it,
+  // d.nest arms it and the drop is redrawn; leaving it disarms.
+  function rdDwell(d, rid) {
+    if (d.dwell === rid) return;
+    clearTimeout(d.dwellTimer);
+    d.dwell = rid;
+    d.nest = "";
+    if (!rid) return;
+    d.dwellTimer = setTimeout(function () {
+      if (rdrag !== d || !d.on || d.dwell !== rid) return;
+      d.nest = rid;
+      rdOver(d.x, d.y);
+    }, RD_NEST);
   }
   // rdItem keeps the press on its item: a node a swap replaced anyway is
   // found again (WsRail.refind) and takes the drag's marks. False when it is
@@ -570,8 +856,12 @@
     if (rdrag || !e.isPrimary || (e.button !== undefined && e.button !== 0)) return;
     var t = e.target, item, grip = t.closest && t.closest(".drgrip");
     if (!t.closest) return;
-    if (grip) {
-      item = grip.closest(".rs");
+    // A mouse or pen press drags a live row from anywhere on it but its
+    // buttons and its rename field; a touch drags by the grip alone (on
+    // the rest of the row it scrolls the list or holds for the row menu).
+    var body = !grip && e.pointerType !== "touch" && !t.closest("button, input, textarea, select, [contenteditable]") ? t.closest(".rs") : null;
+    if (grip || body) {
+      item = (grip || body).closest(".rs");
       if (!item || !railEl.contains(item) || item.classList.contains("ended") || item.parentNode.closest(".rended")) return;
     } else {
       var b = t.closest("button"), hd = t.closest(".wthd"), bar = hd || t.closest(".wsbar");
@@ -580,7 +870,7 @@
       if (!item || rdPeers(item).length < 2) return;
     }
     var touch = e.pointerType === "touch";
-    rdrag = { item: item, key: WsRail.itemKey(item), id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, touch: touch, hold: touch && !grip, timer: 0, ref: null, after: false, z: null, noop: true, edge: 0 };
+    rdrag = { item: item, key: WsRail.itemKey(item), id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, on: false, touch: touch, hold: touch && !grip, timer: 0, ref: null, after: false, z: null, noop: true, edge: 0, dwell: "", dwellTimer: 0, nest: "" };
     if (rdrag.hold) rdrag.timer = setTimeout(function () { if (rdrag && !rdrag.on) rdBegin(); }, RD_HOLD);
   }
   function rdBegin() {
@@ -623,6 +913,7 @@
     if (d.on && !d.item.isConnected) rdOver(d.x, d.y);
     rdrag = null;
     clearTimeout(d.timer);
+    clearTimeout(d.dwellTimer);
     if (d.on) {
       d.item.classList.remove("rdrag");
       root.classList.remove("rdragging");

@@ -61,12 +61,15 @@ const (
 
 // LeadProfileFor is the builtin lead profile of a harness, "" for a harness
 // that has none.
-func LeadProfileFor(backend string) string {
-	switch backend {
-	case BackendClaude:
-		return LeadProfileClaude
-	case BackendPi:
-		return LeadProfilePi
+func LeadProfileFor(backend string, registries ...map[string]BackendRegistration) string {
+	if len(registries) > 0 {
+		return registries[0][backend].LeadProfile
+	}
+	for name, raw := range BuiltinProfiles() {
+		var p Profile
+		if json.Unmarshal(raw, &p) == nil && p.Backend == backend && p.Lead {
+			return strings.TrimPrefix(name, ProfilePrefix)
+		}
 	}
 	return ""
 }

@@ -57,9 +57,10 @@ func newSupportHarness(t *testing.T) *supportHarness {
 		claude:  &fakeBackend{exe: "fake-claude"},
 		pi:      &fakeBackend{exe: "fake-pi"},
 		stores:  map[string]string{"alpha": t.TempDir(), "beta": t.TempDir()},
-		now:     time.Now(),
+		now:     time.Date(2026, 11, 15, 9, 35, 42, 0, time.UTC),
 	}
-	h.config.Backends = map[string]Backend{BackendClaude: sh.claude, BackendPi: sh.pi}
+	h.config.Now = func() time.Time { return sh.now }
+	h.config.Backends = map[string]BackendRegistration{BackendClaude: {Backend: sh.claude, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes}, BackendPi: {Backend: sh.pi, LeadProfile: LeadProfilePi}}
 	stubLookPath(t)
 	sh.restart()
 	return sh
@@ -122,7 +123,7 @@ func TestSupportKeepsOneConversationPerStore(t *testing.T) {
 		t.Fatalf("first conversation = %+v, want the claude support profile at the store root", first)
 	}
 	p := sh.claude.waitProc(t, 0)
-	if got := p.nextSent(t); got != "hello" {
+	if got := p.nextSent(t); got != expectedUserEnvelope(sh.now, "hello") {
 		t.Fatalf("first turn = %q", got)
 	}
 	p.reply("hi")
@@ -131,7 +132,7 @@ func TestSupportKeepsOneConversationPerStore(t *testing.T) {
 	if second.ID != first.ID {
 		t.Fatalf("second send opened %s, want the store's conversation %s", second.ID, first.ID)
 	}
-	if got := p.nextSent(t); got != "again" {
+	if got := p.nextSent(t); got != expectedUserEnvelope(sh.now, "again") {
 		t.Fatalf("second turn = %q", got)
 	}
 	p.reply("ok")
@@ -144,7 +145,7 @@ func TestSupportKeepsOneConversationPerStore(t *testing.T) {
 	if st := sh.send("alpha", "after restart"); st.ID != first.ID {
 		t.Fatalf("send after restart opened %s, want %s", st.ID, first.ID)
 	}
-	if got := sh.claude.waitProc(t, 1).nextSent(t); got != "after restart" {
+	if got := sh.claude.waitProc(t, 1).nextSent(t); got != expectedUserEnvelope(sh.now, "after restart") {
 		t.Fatalf("resumed turn = %q", got)
 	}
 	if c := sh.storeConv("beta"); c != nil {
@@ -408,7 +409,7 @@ func realChoices(t *testing.T, now *time.Time) *Support {
 	t.Helper()
 	r := NewRunner(Options{
 		Dir:      t.TempDir(),
-		Backends: map[string]Backend{BackendClaude: ClaudeBackend{Command: "claude-x"}, BackendPi: PiBackend{Command: "pi-x"}},
+		Backends: map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "claude-x"}}, BackendPi: {Backend: PiBackend{Command: "pi-x"}}},
 		Config:   testConfig(t),
 	})
 	return NewSupport(SupportOptions{Runner: r, Dir: t.TempDir(), StoreRoot: func(string) (string, error) { return "", errors.New("none") }, Now: func() time.Time { return *now }})
@@ -616,7 +617,7 @@ func TestSupportRoutesEndToEnd(t *testing.T) {
 	if strings.Contains(r.body, "fake-agent-key") {
 		t.Fatalf("a support route revealed the ws session key: %s", r.body)
 	}
-	if got := sh.claude.waitProc(t, 0).nextSent(t); got != "hello" {
+	if got := sh.claude.waitProc(t, 0).nextSent(t); got != expectedUserEnvelope(sh.now, "hello") {
 		t.Fatalf("turn = %q", got)
 	}
 	var store StoreAnswer

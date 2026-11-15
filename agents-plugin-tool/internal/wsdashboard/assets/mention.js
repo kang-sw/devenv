@@ -113,7 +113,7 @@
   // key(e) first after its IME guard, and stops when it returns true.
   function attach(input, opts) {
     var id = "wsm" + (++popSeq), pop = doc.createElement("ul");
-    var st = null, ask = 0, timer = 0, token = opts.token || tokenAt, max = opts.max || 50;
+    var composing = false, st = null, ask = 0, timer = 0, token = opts.token || tokenAt, max = opts.max || 50;
     pop.className = "wsm-pop";
     pop.id = id;
     pop.setAttribute("role", "listbox");
@@ -145,7 +145,9 @@
     }
     // sync follows the text and caret: opens, refilters, or closes.
     function sync() {
-      var tok = (doc.activeElement === input || input.wsc && doc.activeElement === input.wsc.editor) && input.selectionStart === input.selectionEnd && token(input.value, input.selectionStart);
+      // While an IME composes, some report the whole marked text as the
+      // selection; the caret is then its end, never a reason to close.
+      var tok = (doc.activeElement === input || input.wsc && doc.activeElement === input.wsc.editor) && (composing || input.selectionStart === input.selectionEnd) && token(input.value, input.selectionEnd);
       if (!tok) { close(); return; }
       var keep = st && st.start === tok.start;
       // The rows of the last answer stay up while the next is asked for;
@@ -266,9 +268,14 @@
       }
       return false;
     }
-    input.addEventListener("input", function (e) { if (!e.isComposing) sync(); });
-    input.addEventListener("compositionstart", close);
-    input.addEventListener("compositionend", sync);
+    // An IME keeps its last syllable uncommitted until the next key, so the
+    // popup must follow composing text too; only picking waits (key above).
+    // Not every IME emits input events while composing, so the composition
+    // events drive sync too; none of them closes the popup.
+    input.addEventListener("input", sync);
+    input.addEventListener("compositionstart", function () { composing = true; });
+    input.addEventListener("compositionupdate", function () { composing = true; sync(); });
+    input.addEventListener("compositionend", function () { composing = false; sync(); });
     input.addEventListener("blur", close);
     // A caret moved by a click or the arrow keys may leave the token.
     function follow() { if (st) sync(); }

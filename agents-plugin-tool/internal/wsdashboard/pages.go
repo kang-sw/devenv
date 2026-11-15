@@ -31,7 +31,7 @@ import (
 // (wswhiteboard.RenderRegions); the rest render from the view model
 // (pageview.go).
 
-//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js
+//go:embed assets/dashboard.tmpl assets/dashboard.css assets/dashboard-*.css assets/dashboard.js assets/dashboard-*.js assets/sprite.svg assets/tracker.css assets/tracker.js assets/mention.js assets/capsules.js assets/toast.js assets/rail.js assets/memo.js assets/memo.css assets/usage.js assets/usage.css assets/cards.js assets/preview.js assets/files.js assets/terminal.js assets/shell.js assets/webcard.js assets/webframe.js assets/webinject.js assets/overview.js assets/brand/werkschaft-dark.svg assets/brand/werkschaft-light.svg
 var dashboardFS embed.FS
 
 // These are ordered source fragments, not independently loaded scripts or
@@ -198,6 +198,10 @@ type pageAssetsData struct {
 	// page that offers terminals inlines (sessionPageData.Terminal).
 	XtermCSS     template.CSS
 	LucideSprite template.HTML
+	// Logo is the Werkschaft lockup the index page centres (the landing):
+	// both theme variants inline, the stylesheet showing the one that reads
+	// on the page's theme (dlogo-d on dark, dlogo-l on light).
+	Logo template.HTML
 	// ID is the assets' identity (assetID), which the page roots carry
 	// (data-assets) and every stream sends first (sse.go), so an open page
 	// can tell that the daemon now serves different assets than it runs.
@@ -284,6 +288,7 @@ func buildDashboardAssets(read func(name string) ([]byte, error)) (*dashboardAss
 		WebScript:        template.JS(get("webcard.js")),
 		XtermCSS:         xtermStyle(),
 		LucideSprite:     lucide,
+		Logo:             template.HTML(`<span class="dlogo-d">` + strings.TrimSpace(get("brand/werkschaft-dark.svg")) + `</span><span class="dlogo-l">` + strings.TrimSpace(get("brand/werkschaft-light.svg")) + `</span>`),
 		WhiteboardCSS:    wb.CSS,
 		WhiteboardSprite: wb.Sprite,
 		FormScript:       wb.FormScript,
@@ -330,11 +335,19 @@ func assetID(data pageAssetsData, source string) string {
 	raw, _ := json.Marshal(data)
 	h.Write(raw)
 	h.Write([]byte(source))
+	h.Write([]byte(guideAssets().id))
 	for _, l := range wsi18n.Languages() {
 		h.Write([]byte(wsi18n.Script(l.Code)))
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
+
+// releaseRepository is the GitHub owner/name the ws binary is released from,
+// the Settings footer's repository link. The plugin's runtime.json
+// release_repository says the same for the launcher's binary download, but the
+// shared daemon never reads runtime.json, so the value is restated here and a
+// test pins the two together.
+const releaseRepository = "kang-sw/devenv"
 
 // pageFuncs is the template FuncMap for one language: the page helpers and
 // the translation funcs t, tn, and tcode, with the Go-built display strings
@@ -375,6 +388,10 @@ func pageFuncs(lang string, icons map[string]bool) template.FuncMap {
 		"i18n":  func() template.JS { return wsi18n.Script(lang) },
 		// pwa is a page head's manifest link and theme-color metas (pwa.go).
 		"pwa": pwaHead,
+		// repoURL is the Settings footer's link to the ws repository.
+		"repoURL": func() string { return "https://github.com/" + releaseRepository },
+		// guideshot is a landing guide step's screenshot (landing_guide.go).
+		"guideshot": func(step, alt string) template.HTML { return guideShotHTML(lang, step, alt) },
 	}
 }
 
@@ -718,6 +735,10 @@ func renderSessionRegions(view SessionView, cache *entryCache) (regionSet, error
 	tmpl := a.templateFor(view.Lang)
 	regions := regionSet{regionMode: newRegion(view.Mode())}
 	for _, name := range sessionRegions(view.Mode()) {
+		if name == regionBoard && view.HasBoard && view.BoardUnits != nil {
+			regions[name] = view.BoardUnits.rendered(view.Theme).region
+			continue
+		}
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, "r-"+name, view); err != nil {
 			return nil, fmt.Errorf("dashboard region %s: %w", name, err)
@@ -864,6 +885,13 @@ func (r pageReader) clock() time.Time {
 // only reads it.
 func (r pageReader) readSnapshot(replyID string) *wslive.Snapshot {
 	return r.snapshots.Snapshot(r.dir, replyID)
+}
+
+// Refresh stamps need only snapshot freshness, not retained evidence overlays.
+// The parsed snapshot is stat-identity checked; expiry is still judged now.
+func (r pageReader) adapterPresent(replyID string, now time.Time) bool {
+	p, err := r.snapshots.read(wslive.SnapshotPath(SessionDir(r.dir, replyID)))
+	return err == nil && adapterPresent(&p.snap, now)
 }
 
 func (r pageReader) readPage(s Session) (PageContent, bool, error) {
@@ -1035,7 +1063,7 @@ func (r pageReader) sessionStamp(replyID string, in refreshInputs) (string, bool
 	h := newStampHash()
 	for _, id := range in.ids {
 		s, ok := r.index.Session(id)
-		present := ok && adapterPresent(r.readSnapshot(id), now)
+		present := ok && r.adapterPresent(id, now)
 		fmt.Fprintf(h, "%s\x00%t\x00%d\x00%t\x00%t\x01", id, ok, s.Rev, ok && s.Registration.Live(now), present)
 	}
 	StampWatched(h, in.watch)
@@ -1086,7 +1114,7 @@ func (r pageReader) indexStamp() (string, bool) {
 		}
 		reg := s.Registration
 		fmt.Fprintf(h, "%s\x00%d\x00%t\x00%t\x00%t\x01", reg.ReplyID, s.Rev, reg.Live(now),
-			adapterPresent(r.readSnapshot(reg.ReplyID), now), now.Sub(reg.LastSeen()) <= endedSessionWindow)
+			r.adapterPresent(reg.ReplyID, now), now.Sub(reg.LastSeen()) <= endedSessionWindow)
 	}
 	return sumHex(h), true
 }
@@ -1234,6 +1262,10 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		serveTermSymbols(w)
 		return
 	}
+	if data, ok := GuideAsset(rest); ok {
+		serveGuideAsset(w, data)
+		return
+	}
 	replyID, sub, slash := strings.Cut(rest, "/")
 	switch {
 	case !slash:
@@ -1326,14 +1358,14 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 // no view, the root has an empty header and no selected session.
 func (d *Daemon) serveShell(w http.ResponseWriter, r *http.Request, view *SessionView, src string) {
 	lang, pref := requestLang(r)
-	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), Src: src, Title: "ws dashboard", Version: d.endpoint.Version, LAN: d.lanAccessFor(r)}
+	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), Src: src, Title: "Werkschaft (alpha)", Version: d.endpoint.Version, LAN: d.lanAccessFor(r)}
 	if view != nil {
 		page.RID = view.ReplyID
 		page.Title = view.Label
 		if page.Title == "" {
 			page.Title = view.ReplyID
 		}
-		page.Title += " - ws dashboard"
+		page.Title += " - Werkschaft (alpha)"
 	}
 	rail, err := renderRailRegion(d.railView(d.pagesIn(lang)), lang)
 	if err == nil {

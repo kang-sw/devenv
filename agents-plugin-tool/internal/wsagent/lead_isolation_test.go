@@ -18,7 +18,12 @@ type isolationBackend struct {
 
 func (b *isolationBackend) Start(_ context.Context, spec StartSpec) (Process, error) {
 	spec.Lead.PluginWarning("bundled Pi extension unavailable; using ws MCP bridge")
-	b.starts <- spec
+	// Failed launches leave input held, so another wake may retry before the
+	// test consumes its observation. Keep the first without blocking the loop.
+	select {
+	case b.starts <- spec:
+	default:
+	}
 	return nil, errors.New("test launch stopped")
 }
 
@@ -39,7 +44,9 @@ func TestLeadIsolationRequestAndRelaunch(t *testing.T) {
 			t.Run(harness+"/"+isolation, func(t *testing.T) {
 				h := newLeadHarness(t)
 				backend := &isolationBackend{starts: make(chan StartSpec, 2)}
-				h.opts.Backends[harness] = backend
+				reg := h.opts.Backends[harness]
+				reg.Backend = backend
+				h.opts.Backends[harness] = reg
 				h.opts.WSMCP = func(root string) (MCPCommand, error) {
 					if root != h.root {
 						t.Errorf("MCP root = %q, want %q", root, h.root)
@@ -98,7 +105,7 @@ func TestLeadIsolationRejectsUnknownValue(t *testing.T) {
 func TestLegacyLeadIsolationDefaultsAtLaunch(t *testing.T) {
 	h := newLeadHarness(t)
 	backend := &isolationBackend{starts: make(chan StartSpec, 1)}
-	h.opts.Backends[BackendPi] = backend
+	h.opts.Backends[BackendPi] = BackendRegistration{Backend: backend, LeadProfile: LeadProfilePi}
 	h.start()
 	st := h.lead(BackendPi, LeadOptions{})
 	_, err := h.runner.act(st.ID, func(c *conv) error {
@@ -130,8 +137,39 @@ type piLaunch struct {
 
 func (b *piLaunchBackend) Start(_ context.Context, spec StartSpec) (Process, error) {
 	command, args, err := piLeadLaunch(b.command, nil, spec)
-	b.starts <- piLaunch{command, args, err}
+	// As with isolationBackend, a retry must not wait for the test to drain
+	// its first launch observation: h.send waits for this loop to quiesce.
+	select {
+	case b.starts <- piLaunch{command, args, err}:
+	default:
+	}
 	return nil, errors.New("test launch stopped")
+}
+
+func TestIsolationBackendRetriesDoNotBlock(t *testing.T) {
+	spec, root := piLeadFixture(t)
+	piLeadBundle(t, root)
+	spec.Lead.PluginIsolation = "isolated"
+	spec.Lead.PluginWarning = func(string) {}
+	isolation := &isolationBackend{starts: make(chan StartSpec, 1)}
+	pi := &piLaunchBackend{command: "fixture-pi", starts: make(chan piLaunch, 1)}
+	for name, backend := range map[string]Backend{"isolation": isolation, "pi launch": pi} {
+		t.Run(name, func(t *testing.T) {
+			returns(t, "rejected launch retries with a full observation channel", func() {
+				for range 3 {
+					if _, err := backend.Start(context.Background(), spec); err == nil {
+						t.Error("fixture launch must fail so input stays held")
+					}
+				}
+			})
+		})
+	}
+	if len(isolation.starts) != 1 || len(pi.starts) != 1 {
+		t.Fatal("retries must retain the pending launch observation")
+	}
+	if got := <-pi.starts; got.err != nil || got.command != "fixture-pi" {
+		t.Fatalf("Pi launch observation = %+v", got)
+	}
 }
 
 // A legacy lead record (no isolation field) on a Pi without its JavaScript SDK
@@ -155,7 +193,7 @@ func TestLegacyPiLeadWithoutSDKStartsIsolated(t *testing.T) {
 			}
 			piLeadFile(t, command, "")
 			backend := &piLaunchBackend{command: command, starts: make(chan piLaunch, 1)}
-			h.opts.Backends[BackendPi] = backend
+			h.opts.Backends[BackendPi] = BackendRegistration{Backend: backend, LeadProfile: LeadProfilePi}
 			h.start()
 			st := h.lead(BackendPi, LeadOptions{})
 			if _, err := h.runner.act(st.ID, func(c *conv) error {

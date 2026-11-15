@@ -322,8 +322,12 @@ func (s *Server) handleWhiteboardUpdate(id json.RawMessage, args map[string]any)
 	for _, summary := range outcome.Summaries {
 		sb.WriteString(summary + "\n")
 	}
+	sb.WriteString(whiteboardAppliedInfo + "\n")
 	return toolTextResponse(id, sb.String(), nil)
 }
+
+// whiteboardAppliedInfo ends every successful whiteboard.update result.
+const whiteboardAppliedInfo = "info: applied to the whiteboard; the user sees this content there. In whiteboard mode, do not repeat or summarize it in the conversation; write there only what the board does not carry."
 
 func (s *Server) handleWhiteboardQuery(id json.RawMessage, args map[string]any) response {
 	const tool = "whiteboard.query"

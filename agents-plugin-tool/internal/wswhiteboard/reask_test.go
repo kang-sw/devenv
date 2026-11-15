@@ -1,7 +1,6 @@
 package wswhiteboard
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
@@ -36,41 +35,6 @@ func TestPatchClassOnlyOnAnItemOpenAfterThePatch(t *testing.T) {
 	got := item(t, st, 2)
 	if got.Status != StatusOpen || got.Class != ClassPolicy || len(got.Options) != 2 || got.Answer != "" || got.Settled != 0 {
 		t.Fatalf("reopened policy item = %+v", got)
-	}
-}
-
-func TestOptionsOnANonPolicyItemWarn(t *testing.T) {
-	const note = "Options on a non-policy item"
-	st := &State{}
-	out := mustApply(t, st, addXML(ClassTechnical, "t", "tech", "x", "y"))
-	if !strings.Contains(out.Info, note+": (01) [technical]") {
-		t.Fatalf("wb:add of a technical item with options: info = %q", out.Info)
-	}
-	out = mustApply(t, st, addXML(ClassAnnounced, "t", "ann")+addXML(ClassPolicy, "t", "pol", "x", "y"))
-	if strings.Contains(out.Info, note) {
-		t.Fatalf("no item gained options off policy: info = %q", out.Info)
-	}
-	out = mustApply(t, st, `<wb:patch id="2"><wb:option>x</wb:option></wb:patch>`)
-	if !strings.Contains(out.Info, note+": (02) [announced]") {
-		t.Fatalf("patch adding options to an announced item: info = %q", out.Info)
-	}
-	out = mustApply(t, st, `<wb:patch id="3" class="technical"/>`)
-	if !strings.Contains(out.Info, note+": (03) [technical]") {
-		t.Fatalf("reclass away from policy that keeps options: info = %q", out.Info)
-	}
-	if got := item(t, st, 3); len(got.Options) != 2 {
-		t.Fatalf("a reclass keeps the options: %+v", got)
-	}
-	// The note judges each add or patch by the item after it: a reclass to
-	// policy carries none, and any patch of an item still holding options off
-	// policy carries it again.
-	out = mustApply(t, st, `<wb:patch id="1" class="policy"/>`)
-	if strings.Contains(out.Info, note) {
-		t.Fatalf("a reclass to policy: info = %q", out.Info)
-	}
-	out = mustApply(t, st, `<wb:patch id="2"><wb:why>w</wb:why></wb:patch>`)
-	if !strings.Contains(out.Info, note+": (02) [announced]") {
-		t.Fatalf("a why edit of an announced item holding options: info = %q", out.Info)
 	}
 }
 

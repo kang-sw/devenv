@@ -275,6 +275,8 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 .achip.mchip { background: var(--wb-muted); box-shadow: inset 3px 0 0 var(--wb-primary), inset 0 0 0 1px var(--wb-line); }
 .achip.mchip .anote { font-style: italic; }
 .achip.mchip .anote::before { content: none; }
+.mchip-open { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.mchip-open:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; border-radius: 999px; }
 /* a picked page element and a console block: mention capsules whose bold
    part is a selector (clipped, monospace) or the error count */
 .achip.pchip b { font-family: var(--wb-mono); font-weight: 600; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -282,14 +284,30 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 /* One captured selection keeps its sources, memo and images together. */
 .selection-bundle { position: relative; box-sizing: border-box; min-width: 0; max-width: 100%; padding: 8px; border: 1px solid var(--wb-line); border-left: 3px solid var(--wb-primary); border-radius: 9px; background: var(--wb-muted); }
 .selection-bundle + .selection-bundle { margin-top: 6px; }
-.cchips > .selection-bundle { flex: 1 1 280px; }
-.selection-bundle > .hchips { padding-right: 20px; }
-.selection-bundle .achip { border-radius: 6px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .selection-bundle .anote { max-width: none; white-space: pre-wrap; overflow-wrap: anywhere; }
 .selection-bundle > .unchip { position: absolute; top: 6px; right: 4px; }
-.selection-comment, .selection-edit { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--wb-fg); }
-.selection-edit { padding: 5px 7px; text-align: left; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-card); cursor: pointer; }
-.selection-edit:focus-visible { outline: 1.5px solid var(--wb-primary); }
+/* In the history the bundle is one capsule split top and bottom: each source
+   is a paragraph whose topic tag flows inline with its quote, and the memo,
+   when there is one, sits below a divider. */
+section.selection-bundle { padding: 0; }
+.selection-quotes { padding: 7px 10px; font-size: 12px; }
+.selection-quote { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.selection-quote + .selection-quote { margin-top: 5px; }
+.selection-topic { font-variant-numeric: tabular-nums; }
+.selection-quote .anote { font-style: italic; color: var(--wb-muted-fg); }
+.selection-comment { display: block; box-sizing: border-box; width: 100%; min-width: 0; margin: 0; padding: 7px 10px; border-top: 1px solid var(--wb-line); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--wb-fg); }
+.selection-comment:empty { display: none; }
+section.selection-bundle > .thumbs { margin: 0; padding: 0 10px 8px; }
+/* Composer bundles use the mention capsule, not the history's outer frame. */
+.cchips > .selection-chip { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; align-items: baseline; gap: 4px; margin: 0; padding: 2px 4px 2px 9px; border: 0; border-radius: 999px; }
+.selection-chip > .selection-edit { flex: 1; }
+.selection-source { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
+.selection-source b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection-chip .anote { max-width: 22ch; white-space: nowrap; overflow-wrap: normal; }
+.selection-chip > .unchip { position: static; flex: none; }
+.selection-note { flex: none; color: var(--wb-muted-fg); font-size: 11px; }
+.selection-note[hidden] { display: none; }
+.selection-chip > .selection-images { flex-basis: 100%; }
 .selection-images { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin-top: 6px; }
 .selection-images:empty { display: none; }
 /* The selection note stays next to its attach action, within the viewport. */
@@ -302,7 +320,7 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 .wbmention .unimg { padding: 0; border-radius: 999px; align-self: auto; font-size: 13px; }
 .wbmention :focus-visible { outline-offset: 2px; }
 .wbmention-note:focus-visible { outline: 1.5px solid var(--wb-fg); }
-.wbmention[hidden] { display: none; }
+.wbmention[hidden], .wbmention [data-wbmention][hidden] { display: none; }
 .unchip { border: 0; background: transparent; color: var(--wb-muted-fg); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 5px; border-radius: 999px; }
 .unchip:hover { background: var(--wb-muted); color: var(--wb-fg); }
 /* composer image chips and message thumbnails */
@@ -408,3 +426,20 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 .tdot { display: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; }
 .tdot.on { display: inline-block; }
 
+
+/* Conversation density: only lead chat, owner messages and whiteboard-update
+   cards get generous vertical room. Mail, subagent, notification, tool and
+   turn-footer rows sit close together (0.2em above and below, in em so it
+   scales with the row's font) and are dimmed; hover or opening one restores
+   full contrast. A centred pill (compaction, notice, ui line) takes a full
+   line of room above and below. */
+.conv { gap: 0; }
+.conv > * { margin-block: .2em; }
+.msg.fromlead, .msg.user, .wbeffects.wbupdate { margin-block: 8px; }
+.sysline { margin-block: 1em; }
+.mailline, .mail-notification, .toolsline, .turnline, .sysline, .wake-divider, .wake-card, .input-record { opacity: .68; transition: opacity .12s; }
+.mailline:hover, .mailline[open], .mail-notification:hover, .mail-notification[open], .toolsline:hover, .toolsline[open], .wake-card:hover, .input-record:hover { opacity: 1; }
+.mailline > summary.conv-row, .mailline > .conv-row, .mail-notification .conv-row, .toolsline > summary.conv-row { padding-block: 1px; line-height: 1.4; }
+.toolsline .tsum { row-gap: 0; line-height: 1.15; }
+.toolsline .tsl, .toolsline .tsn { line-height: 1.15; }
+.mailline .arr { color: var(--wb-primary); }

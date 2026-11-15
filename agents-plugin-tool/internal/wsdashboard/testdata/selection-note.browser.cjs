@@ -37,7 +37,7 @@ async function select(page, start, end = start) {
       const pop = view.locator('[data-wbmention-pop]'), input = view.getByRole('textbox', { name: 'Note about this selection (optional)' });
       const val = l => l.evaluate(e => ('value' in e) ? e.value : e.textContent);
       const bundles = view.locator('#cchips .selection-bundle');
-      const attach = view.locator('[data-wbmention]'), chips = view.locator('#cchips .mchip');
+      const attach = view.locator('[data-wbmention]'), chips = view.locator('#cchips .selection-source');
       const composer = view.locator('#ctext + .wsc-editor'), backing = view.locator('#ctext');
       // A native pointer selection, followed by input focus that collapses it.
       await page.locator('#quote-first').click({ clickCount: 3 });
@@ -74,8 +74,8 @@ async function select(page, start, end = start) {
       assert.equal(await chips.count(), 1);
       assert.equal(await bundles.count(), 1);
       assert.equal(await backing.inputValue(), '', 'a selection never writes into the composer text');
-      assert.equal(await bundles.nth(0).locator('.mchip').getAttribute('data-wb-entry'), 'e7', 'source update and changed selection never retarget captured quote');
-      assert.match(await bundles.nth(0).innerText(), /First immutable quote[\s\S]*first note/);
+      assert.equal(await bundles.nth(0).locator('.selection-source').getAttribute('data-wb-entry'), 'e7', 'source update and changed selection never retarget captured quote');
+      assert.match(await bundles.nth(0).locator('.selection-edit').getAttribute('title'), /First immutable quote[\s\S]*first note/);
       assert.equal(sent.length, 0, 'attachment is not send');
       // Reset the source, then capture two immutable entries in DOM order.
       await fetch(updates + '?reset=1');
@@ -84,8 +84,8 @@ async function select(page, start, end = start) {
       await input.fill('one note for both'); await attach.click();
       assert.equal(await chips.count(), 3);
       assert.equal(await bundles.count(), 2, 'one push, one bundle, even across two entries');
-      assert.equal(await bundles.nth(1).locator('.mchip').count(), 2);
-      assert.match(await bundles.nth(1).innerText(), /one note for both/);
+      assert.equal(await bundles.nth(1).locator('.selection-source').count(), 2);
+      assert.match(await bundles.nth(1).locator('.selection-note').getAttribute('title'), /one note for both/);
       assert.equal(await backing.inputValue(), '');
       // The production sandbox bridge dispatches a real selection report.
       // Its untrusted payload may not claim different topic/entry provenance.
@@ -111,7 +111,7 @@ async function select(page, start, end = start) {
       await attach.click();
       assert.equal(await chips.count(), 4);
       assert.equal(await bundles.count(), 3);
-      assert.match(await bundles.nth(2).innerText(), /Sandbox selection text[\s\S]*sandbox note/);
+      assert.match(await bundles.nth(2).locator('.selection-edit').getAttribute('title'), /Sandbox selection text[\s\S]*sandbox note/);
       assert.equal(await backing.inputValue(), '');
       let text = '';
       // Keyboard selection and the legacy empty-note attachment.
@@ -133,7 +133,7 @@ async function select(page, start, end = start) {
       // contexts as editable text and all source locators independently.
       await goSession('boardsession');
       assert.equal(await page.locator('#ctext').inputValue(), '');
-      assert.equal(await page.locator('#cchips .mchip').count(), 0);
+      assert.equal(await page.locator('#cchips .selection-source').count(), 0);
       await goSession('livesession');
       assert.equal(await backing.inputValue(), text);
       assert.equal(await chips.count(), 5);

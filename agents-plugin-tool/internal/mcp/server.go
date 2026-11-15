@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/execjob"
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
@@ -996,7 +996,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// config.tuning path: project the per-key writer schema + current values,
 		// with the no-agent full-ws-only cut applied per entry.
 		catalogResolver := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigAndPromptDefaults()))
-		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, s.currentHarness(), s.noAgentMode(), s.configOptions())
+		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, s.currentHarness(), s.noAgentMode(), s.configOptions(), s.agentBackends()...)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -1245,18 +1245,25 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		}
 
 	case "config.get":
-		// Read-only single-key read for adapters: resolves one key through the
+		// Read-only config reads for adapters: resolve each key through the
 		// session-anchored resolver (session parent chain, project, repo,
 		// global, builtin) without config.list's playbook scan. Callable by
 		// delegate and leaf keys (roleAllowsTool) so a spawned child reads the
 		// value its lead tuned at session scope.
-		key, _ := params.Arguments["key"].(string)
-		key = strings.TrimSpace(key)
-		if key == "" {
-			return toolTextResponse(req.ID, "", fmt.Errorf("config.get: key is required"))
+		keys, bulk, err := configGetKeys(params.Arguments)
+		if err != nil {
+			return toolTextResponse(req.ID, "", err)
 		}
 		sessionKey, _ := params.Arguments["session_key"].(string)
-		result, err := s.resolveConfigGet(strings.TrimSpace(sessionKey), key)
+		sessionKey = strings.TrimSpace(sessionKey)
+		if bulk {
+			result, text := s.resolveConfigGetBulk(sessionKey, keys)
+			if wantsJSON(params.Arguments) {
+				return toolJSONResponse(req.ID, result, nil)
+			}
+			return toolTextResponse(req.ID, text, nil)
+		}
+		result, err := s.resolveConfigGet(sessionKey, keys[0])
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("config.get: %w", err))
 		}
@@ -1465,35 +1472,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
 		}
-		result, err := provisionWorktree(context.Background(), s.gitRunner(), s.environ(), entry.root, base, targetBranch, profile, poolRV.Value)
+		result, err := acquireWorktree(ctx, s.gitRunner(), s.environ(), entry.root, base, targetBranch, profile, poolRV.Value, key, func(mintPath string) (string, error) {
+			return s.sessions.mint(mintPath, roleLead, key)
+		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		// Bind the worker key to the canonical worktree root so the worker's
-		// root-aware ws calls resolve against its own worktree, not the lead's.
-		mintPath := result.Path
-		if canon, cerr := canonicalGitRoot(s.gitRunner(), result.Path); cerr == nil {
-			mintPath = canon
-		}
-		workerKey, err := s.sessions.mint(mintPath, roleLead, key)
-		if err != nil {
-			// Detach the freshly provisioned worktree so a failed mint does not
-			// leave it branch-checked-out and thus ineligible for pool reuse.
-			_, _ = s.gitRunner().RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
-			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: mint worker key: %w", err))
-		}
-		// The lease is written only after a successful mint, so the failed-mint
-		// path above never leaves one behind. A failed lease write detaches the
-		// worktree like a failed mint: succeeding without a lease would list it
-		// as "no lease record", indistinguishable from a released worktree. The
-		// minted key is left unused and ages out through key pruning.
-		lease := worktreeLease{WorkerKey: workerKey, ParentKey: key, AcquiredAt: time.Now().UTC().Format(time.RFC3339)}
-		if err := writeWorktreeLease(context.Background(), s.gitRunner(), result.Path, lease); err != nil {
-			_, _ = s.gitRunner().RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
-			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: record worktree lease: %w", err))
-		}
-		result.Path = mintPath
-		result.WorkerKey = workerKey
 		staleAfter, preservedLimit := worktreeNudgeThresholds(&resolver, key)
 		if nudge, err := poolNudge(context.Background(), s.gitRunner(), entry.root, result.Pool, staleAfter, preservedLimit, time.Now()); err != nil {
 			result.Warnings = append(result.Warnings, "stale-pool check failed: "+err.Error())
@@ -1684,16 +1668,18 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			}
 			resolveWarnings = warnings
 		}
+		updatedTickets := stringList(params.Arguments["updated_tickets"])
 		result, err := wsgit.Client{Runner: s.gitRunner(), Verifier: s.verifyAdapter}.Commit(context.Background(), root, wsgit.CommitOptions{
-			Paths:             stringList(params.Arguments["paths"]),
-			Title:             title,
-			Description:       description,
-			AIContext:         aiContext,
-			UpdatedTickets:    stringList(params.Arguments["updated_tickets"]),
-			Followups:         followups,
-			Resolves:          resolves,
-			ExpectedBranch:    expectedBranch,
-			SparseScopeActive: wsdoc.SparseCheckoutActiveEnv(root, s.environ()),
+			Paths:                         stringList(params.Arguments["paths"]),
+			Title:                         title,
+			Description:                   description,
+			AIContext:                     aiContext,
+			UpdatedTickets:                updatedTickets,
+			SuppressInferredTicketUpdates: updatedTickets != nil && len(updatedTickets) == 0,
+			Followups:                     followups,
+			Resolves:                      resolves,
+			ExpectedBranch:                expectedBranch,
+			SparseScopeActive:             wsdoc.SparseCheckoutActiveEnv(root, s.environ()),
 		})
 		if err == nil {
 			result.Warnings = append(result.Warnings, resolveWarnings...)
@@ -2012,12 +1998,30 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		stem, _ := params.Arguments["stem"].(string)
 		to, _ := params.Arguments["to"].(string)
+		entry, _ := s.sessions.lookup(strings.TrimSpace(sessionKey)) // resolveToolRoot verified the key.
+		checkRoot := func() error {
+			// Parenthood preserves the existing session-bound worker flow; it
+			// is not branch-ownership proof and does not require a lease.
+			if entry.parent != "" {
+				return nil
+			}
+			return guardOccupiedRoot(context.Background(), s.gitRunner(), root)
+		}
+		// Run before ownership refresh or posture resolution can write.
+		if err := checkRoot(); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		sageReview, err := s.resolveSageReviewConfig(sessionKey)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		guard, err := s.guardMoveClose(root, "move", stem, params.Arguments)
 		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		// Re-observe HEAD at the writer boundary after the intervening gates.
+		// This detects observed changes, not arbitrary external Git races.
+		if err := checkRoot(); err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsdoc.TicketsMove(root, s.gitRunner(), wsdoc.TicketMoveOptions{
@@ -2289,15 +2293,17 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		topLevelLead := false
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 			capturedKey := strings.TrimSpace(keyStr)
-			if entry, found := s.sessions.lookup(capturedKey); found && entry.scope == roleLead {
-				// Child key binding root: root_override when set, else caller's bound root.
+			entry, err := s.resolveSession(sessionAccess{mode: "lookup", key: capturedKey})
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+			if entry.found && entry.scope == roleLead {
+				mintRoot = entry.root
 				if rootOverride != "" {
 					mintRoot = rootOverride
-				} else {
-					mintRoot = entry.root
 				}
-				parentKey = capturedKey
-				topLevelLead = entry.isTopLevelLead()
+				parentKey = entry.key
+				topLevelLead = entry.parent == ""
 			}
 		}
 		callerContext, planStem := renderPlanStem(name, callerContext, topLevelLead)
@@ -2387,34 +2393,18 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	scope := parseCapabilityScope(arguments["capability"])
 	parentKey, _ := arguments["parent_session_key"].(string)
 	parentKey = strings.TrimSpace(parentKey)
-	hosted := s.hostedSessionKey()
 	if relogin, _ := arguments["relogin_session_key"].(string); strings.TrimSpace(relogin) != "" {
-		relogin = strings.TrimSpace(relogin)
-		if hosted != "" && relogin != hosted {
-			return toolTextResponse(id, "", hostedKeyRefusal("session bootstrap", hosted, relogin))
-		}
-		return s.handleLeadRelogin(id, arguments, relogin, canonical, scope, parentKey)
+		return s.handleLeadRelogin(id, arguments, strings.TrimSpace(relogin), canonical, scope, parentKey)
 	}
-	if hosted != "" && parentKey == "" && scope == roleLead {
-		// A hosted session's top-lead bootstrap returns the daemon-minted key
-		// instead of minting, so its reply-id and registration never move.
-		// Child mints below stay as they are: a subagent on this connection
-		// never receives the lead key.
-		if reason := s.leadKeyRefusal(hosted, canonical); reason != "" {
-			return toolTextResponse(id, "", fmt.Errorf("session bootstrap: this session is hosted and its session key is fixed, but %s %q %s", envHostedSessionKey, hosted, reason))
-		}
-		s.rebindMailboxOwnerAtFerrule(hosted, "", roleLead, canonical)
-		s.recordHarnessSession(hosted, arguments)
-		return s.leadLoginResponse(id, arguments, hosted, canonical)
-	}
-	if parentKey != "" {
-		if _, ok := s.sessions.lookup(parentKey); !ok {
-			return toolTextResponse(id, "", fmt.Errorf("session bootstrap: parent_session_key %q is not a known session key", parentKey))
-		}
-	}
-	key, err := s.sessions.mint(canonical, scope, parentKey)
+	resolved, err := s.resolveSession(sessionAccess{mode: "bootstrap", root: canonical, scope: scope, parent: parentKey})
 	if err != nil {
 		return toolTextResponse(id, "", err)
+	}
+	key := resolved.key
+	if resolved.hosted {
+		s.rebindMailboxOwnerAtFerrule(key, "", roleLead, canonical)
+		s.recordHarnessSession(key, arguments)
+		return s.leadLoginResponse(id, arguments, key, canonical)
 	}
 	// Ferrule owner binding (mailbox core Decision 3): a parent-less
 	// lead-capability mint is a top-lead (re-)login, so it rebinds this
@@ -2453,16 +2443,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 // a re-login that also carries a parent or a non-lead capability, since those
 // describe a key the re-login could never return.
 func (s *Server) handleLeadRelogin(id json.RawMessage, arguments map[string]any, key, canonical string, scope toolRole, parentKey string) response {
-	if parentKey != "" {
-		return toolTextResponse(id, "", errors.New("session bootstrap: relogin_session_key cannot be combined with parent_session_key"))
-	}
-	if scope != roleLead {
-		return toolTextResponse(id, "", errors.New("session bootstrap: relogin_session_key requires lead capability"))
-	}
-	if reason := s.leadKeyRefusal(key, canonical); reason != "" {
-		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q %s", key, reason))
-	}
-	if err := s.hostedLoginGuard(key, canonical); err != nil {
+	if _, err := s.resolveSession(sessionAccess{mode: "relogin", key: key, root: canonical, scope: scope, parent: parentKey}); err != nil {
 		return toolTextResponse(id, "", err)
 	}
 	s.rebindMailboxOwnerAtFerrule(key, "", roleLead, canonical)
@@ -2874,7 +2855,7 @@ type tuningAgentTierCurrent struct {
 
 // harness selects the bucket a harness-bucketed knob's current value is
 // resolved for (the session's detected harness; empty reads only all).
-func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey, harness string, noAgentMode bool, configOpts wsconfig.Options) (tuningCatalog, error) {
+func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey, harness string, noAgentMode bool, configOpts wsconfig.Options, registries ...map[string]wsagent.BackendRegistration) (tuningCatalog, error) {
 	points, err := scanOverridePoints(rsrcRoot)
 	if err != nil {
 		return tuningCatalog{}, err
@@ -3117,7 +3098,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	}
 	appendKnob(profileEntry, profileKnob)
 
-	appendKnob(agentProfileTuningKnob(resolver))
+	appendKnob(agentProfileTuningKnob(resolver, registries...))
 
 	for _, k := range []declaredConfigKey{worktreeNudgeStaleDaysKey, worktreeNudgePreservedGBKey} {
 		entry := k.entry()
@@ -4744,15 +4725,19 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "config.get",
-			"description": "Read-only: resolve one config key and report the scope that supplied it (session, including the session's parent chain, then project, repo, global, builtin). A key declared by an adapter key manifest returns a value of its declared type (number, boolean, or string), and a stored value that fails that type returns the declared default with a warning; every other key returns its stored string, or scope unset when nothing holds or declares it. Defaults to compact text; use format=json for structured output.",
+			"description": "Read-only: resolve config keys and report the scope that supplied each (session, including the session's parent chain, then project, repo, global, builtin). Supply exactly one of key or nonempty keys (unique, nonblank strings). Bulk JSON returns mode=resolved-v1 and ordered results with ok and either value/scope/warnings or error.message; per-key errors do not fail siblings. A key declared by an adapter key manifest returns a value of its declared type (number, boolean, or string), and a stored value that fails that type returns the declared default with a warning; every other key returns its stored string, or scope unset when nothing holds or declares it. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"key":         stringProperty("Config key to read, e.g. review_phase or an adapter-declared key listed by config.list."),
+					"key":         stringProperty("Legacy single config key to read; mutually exclusive with keys."),
+					"keys":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "uniqueItems": true, "description": "Config keys to resolve independently in request order; mutually exclusive with key. Entries must be nonblank and unique."},
 					"session_key": stringProperty("Optional ws session key. When supplied, session-scope values (including those inherited from the session's parent chain) and the session's committed repo scope take part in resolution."),
 					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
-				"required": []string{"key"},
+				"oneOf": []any{
+					map[string]any{"required": []string{"key"}, "not": map[string]any{"required": []string{"keys"}}},
+					map[string]any{"required": []string{"keys"}, "not": map[string]any{"required": []string{"key"}}},
+				},
 			},
 		},
 		{

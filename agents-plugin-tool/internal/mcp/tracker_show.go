@@ -91,7 +91,7 @@ func formatTrackerCard(v *wstrackerhost.StoreView, store, id string) string {
 }
 
 // formatTrackerCardFields is the mini card's fields, one per line: the
-// item, its status, priority, and due date, and its open assignees.
+// item, its status, priority, start and due dates, and its open assignees.
 func formatTrackerCardFields(v *wstrackerhost.StoreView, id string) string {
 	it := v.Items[id]
 	var sb strings.Builder
@@ -104,6 +104,9 @@ func formatTrackerCardFields(v *wstrackerhost.StoreView, id string) string {
 		fields = append(fields, "hidden")
 	}
 	fields = append(fields, fmt.Sprintf("priority %d (%s)", it.PriorityLevel, it.PriorityName))
+	if it.Start != nil {
+		fields = append(fields, "start "+*it.Start)
+	}
 	due := "none"
 	if it.Due != nil {
 		due = *it.Due

@@ -32,7 +32,7 @@ asking, so judgment is spent here and not at run time.
   product, API, or verification decision: decisions with their rejected
   alternatives, constraints, verification expectations, and the manuals that
   apply.
-- When the user approved a visual reference for the work, store it, preferring a text form such as HTML or SVG over a binary image, in the tracked `<ticket root>/assets/<stem>/` folder, link its path in the ticket, and require a side-by-side comparison of a result capture against it in verification; do not promote to `ready/` without the link and comparison, so the approved reference is not lost.
+- When the user approved a visual reference for the work, prefer a text form such as HTML or SVG over a binary image; link text mockups at their tracked `ai-docs/assets/mockups/YYMMDD/<topic name>/` location rather than copying them, and store binary references in the tracked `<ticket root>/assets/<stem>/` folder. Keep existing ticket asset folders in place. Link the reference's path in the ticket and require a side-by-side comparison of a result capture against it in verification; do not promote to `ready/` without the link and comparison, so the approved reference is not lost.
 - Epics stay board-level; implementation detail goes into the child, as a
   separate invocation.
 - Plan text with a `### Result` is frozen; append `#### Edition (<hash>) -

@@ -39,8 +39,10 @@
 // (Command): its name and arguments, never text the inbox parses. It carries
 // nothing else, so the adapter runs it natively instead of submitting it as
 // text. It is a held message (Held, MessageNames, Cancel, Interrupt, and
-// Drain treat it as one), and Steer refuses it: a command waits for the turn
-// end, as one typed in the terminal does. A drain returns it in its place in
+// Drain treat it as one). Unsteered, it waits for the turn end, as one typed
+// in the terminal does; Steer turns it into a steered text entry holding its
+// typed line, which the agent reads and acts on itself, since an adapter
+// cannot run a command natively mid-turn. A drain returns it in its place in
 // the follow-up queue; the adapter splits its batch there, so follow-up text
 // before a command reaches the session before it runs and text after it,
 // after. Steered entries are not held back by a command: they precede the
@@ -134,9 +136,6 @@ var (
 	// ErrInvalid reports a send that breaks a limit or carries a malformed
 	// answer; its wrapped text says which.
 	ErrInvalid = errors.New("invalid message")
-	// ErrCommand reports a steer of a command entry, which only runs at the
-	// turn end.
-	ErrCommand = errors.New("a slash command runs when the turn ends; it cannot be steered")
 
 	entryNamePattern = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[0-9a-f]{8}\.json$`)
 	chipIDPattern    = regexp.MustCompile(`^[0-9]{1,6}$`)
@@ -751,9 +750,11 @@ func Send(dir string, add Entry, now time.Time) (name string, merged bool, err e
 // and writes the same entry with Steer set under a fresh name, so entry files
 // stay never rewritten. The fresh name's stamp is now, so the entry moves to
 // the end of the steer queue. It returns the steered entry's name; an entry already
-// steered is left as it is and its own name returned. It returns ErrGone
-// when the entry is no longer held, or is an interrupt entry, and
-// ErrCommand for a command entry; it leaves either in place.
+// steered is left as it is and its own name returned. A command entry is
+// steered as text: its typed line (Command.Line) becomes the entry's one
+// part and the command is dropped, so the adapter injects it mid-turn as a
+// message the agent reads. It returns ErrGone when the entry is no longer
+// held, or is an interrupt entry, which it leaves in place.
 func Steer(dir, name string) (string, error) {
 	if !entryNamePattern.MatchString(name) {
 		return "", ErrGone
@@ -767,10 +768,6 @@ func Steer(dir, name string) (string, error) {
 		_ = rename(claimed, filepath.Join(dir, name))
 		return "", ErrGone
 	}
-	if err == nil && entry.Command != nil {
-		_ = rename(claimed, filepath.Join(dir, name))
-		return "", ErrCommand
-	}
 	if err != nil || entry.Steer {
 		// Leave an unreadable or already steered entry held as it was.
 		_ = rename(claimed, filepath.Join(dir, name))
@@ -780,6 +777,10 @@ func Steer(dir, name string) (string, error) {
 		return name, nil
 	}
 	entry.Steer = true
+	if entry.Command != nil {
+		entry.Parts = []string{entry.Command.Line()}
+		entry.Command = nil
+	}
 	steered, err := writeEntry(dir, entry)
 	if err != nil {
 		// Put the claimed entry back so the message is not lost.

@@ -2,6 +2,7 @@ package wsdashboard
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -110,6 +111,18 @@ func TestDevAssetsShowEditsWithoutARestart(t *testing.T) {
 func TestDevAssetsReportABrokenTemplateAndRecover(t *testing.T) {
 	dash, _ := devSource(t)
 	f := startPageFixture(t)
+	// Run the production handler to completion before editing the template
+	// again. A successful dev render rebuilds assets for both the regions
+	// and the page; the health client's 500 ms deadline is not a render
+	// contract. The overall test timeout still catches a stalled handler.
+	handler := f.d.Handler()
+	getFrame := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, f.base+"/s/livesession?frame=1", nil)
+		req.RemoteAddr = "127.0.0.1:50000"
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
 	path := dash("dashboard.tmpl")
 	good, err := os.ReadFile(path)
 	if err != nil {
@@ -118,14 +131,14 @@ func TestDevAssetsReportABrokenTemplateAndRecover(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{{define "r-head"}}{{if}}{{end}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := get(t, f.base+"/s/livesession?frame=1"); code != http.StatusInternalServerError {
-		t.Errorf("a broken template served status %d, want 500", code)
+	if rec := getFrame(); rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "render failed") {
+		t.Errorf("a broken template served %d: %s, want 500 with render failed", rec.Code, rec.Body.String())
 	}
 	if err := os.WriteFile(path, good, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if code, body := get(t, f.base+"/s/livesession?frame=1"); code != http.StatusOK || !strings.Contains(body, `data-region="board"`) {
-		t.Errorf("the fixed template did not recover: %d", code)
+	if rec := getFrame(); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-region="board"`) {
+		t.Errorf("the fixed template did not recover: %d", rec.Code)
 	}
 }
 

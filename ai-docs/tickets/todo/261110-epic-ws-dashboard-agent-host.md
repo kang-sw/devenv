@@ -138,3 +138,11 @@ preview at any time. Sequence (user, 2026-11-10, (68) a; announced, (70)):
 - Deferred: whatever the children's results defer. The former desktop-shell
   review deferral ((19)) is superseded; the thin-shell ticket owns its own
   first-window and later delivery acceptance, independently of epic closure.
+
+## Folded (2026-11-15)
+
+- `261110-research-ws-dashboard-agent-host-foundations` (research child) is
+  folded into this epic by the 2026-11-15 todo triage (owner (1119)=a). Its
+  topics were settled by the children since landed in `.done/` (headless lead
+  sessions, desktop shell, permission boundary); the full text stays in
+  `.dropped/` for reference.

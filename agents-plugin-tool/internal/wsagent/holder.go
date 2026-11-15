@@ -136,6 +136,9 @@ type holderChild struct {
 	// skipTo is the last record sequence the runner applied under an
 	// earlier daemon: records up to it are replay.
 	skipTo uint64
+	// ringSkip is the launch's wsholder.LaunchSpec.RingSkip: output lines
+	// the backend's mapper drops, kept out of the ring.
+	ringSkip string
 
 	proc *streamProcess
 	base string
@@ -170,7 +173,7 @@ func (h *holderChild) start(p *streamProcess, cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	id, err := h.host.LaunchWith(wsholder.LaunchSpec{Session: raw, RingBytes: leadRingBytes})
+	id, err := h.host.LaunchWith(wsholder.LaunchSpec{Session: raw, RingBytes: leadRingBytes, RingSkip: h.ringSkip})
 	if err != nil {
 		return fmt.Errorf("start a session holder: %w", err)
 	}

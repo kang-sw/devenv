@@ -34,7 +34,7 @@ func agentProfileKnobEntry(name string) configKeyEntry {
 // agentProfileTuningKnob is the config.list knob for the agent.profile.<name>
 // family. A profile that fails to resolve surfaces as the knob's error rather
 // than failing the whole listing.
-func agentProfileTuningKnob(resolver *wsconfig.Resolver) (configKeyEntry, tuningKnob) {
+func agentProfileTuningKnob(resolver *wsconfig.Resolver, registries ...map[string]wsagent.BackendRegistration) (configKeyEntry, tuningKnob) {
 	entry := agentProfileKnobEntry("<name>")
 	knob := tuningKnob{
 		ID:          entry.Key,
@@ -47,10 +47,10 @@ func agentProfileTuningKnob(resolver *wsconfig.Resolver) (configKeyEntry, tuning
 		},
 		SelectorFields: entry.SelectorFields,
 		ValueFields:    entry.ValueFields,
-		ValueSchema:    wsagent.ProfileValueSchema(),
+		ValueSchema:    wsagent.ProfileValueSchema(registries...),
 		RepoMember:     "structured_overrides",
 	}
-	if profiles, err := wsagent.ResolveProfiles(resolver); err != nil {
+	if profiles, err := wsagent.ResolveProfiles(resolver, registries...); err != nil {
 		knob.Error = err.Error()
 	} else {
 		knob.Current = profiles

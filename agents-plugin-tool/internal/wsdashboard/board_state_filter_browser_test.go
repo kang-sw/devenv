@@ -35,8 +35,20 @@ func TestBoardStateFilterBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
 		t.Skip("set WS_PLAYWRIGHT_MODULE for isolated Chromium acceptance")
 	}
+	// Unset keeps the run disposable; set, it must name an absolute retained
+	// directory. The disposable default is not t.TempDir: the first TempDir
+	// call registers the removal of every test temp dir, and registering it
+	// before the census cleanup below would run it after the census, which
+	// then reports the fixture dirs as remaining.
 	artifacts := os.Getenv("WS_BOARD_STATE_FILTER_ARTIFACTS")
-	if !filepath.IsAbs(artifacts) {
+	if artifacts == "" {
+		dir, err := os.MkdirTemp("", "ws-board-state-filter-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		artifacts = dir
+	} else if !filepath.IsAbs(artifacts) {
 		t.Fatal("WS_BOARD_STATE_FILTER_ARTIFACTS must be absolute")
 	}
 	if err := os.MkdirAll(artifacts, 0o700); err != nil {
@@ -137,9 +149,10 @@ State filter frame identity sentinel.</wb:body><wb:panel recap="Panel history">P
 				}
 			}
 		}
-		if err := apply(st, `<wb:topic name="legacy"><wb:body>Legacy topic without invented state.</wb:body></wb:topic>`); err != nil {
-			t.Fatal(err)
-		}
+		// 73ef56d52 intentionally defaults newly created topics to discussing;
+		// its AI Context excludes legacy fallback. Seed pre-default data directly
+		// so this fixture still verifies a genuinely metadata-free legacy topic.
+		st.Topics = append(st.Topics, wswhiteboard.TopicDoc{Name: "legacy", Body: "Legacy topic without invented state."})
 		states[id] = st
 	}
 	initial := map[string][]byte{}

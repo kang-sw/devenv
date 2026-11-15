@@ -150,7 +150,7 @@ const devAssetDir = "internal/wswhiteboard/assets"
 
 // trackerKeyPrefix marks the client strings of the dashboard's tracker
 // renderer (tracker.js). A whiteboard page never loads that script, and
-// the strings would take a large share of the embed's size budget, so its
+// the strings would bloat every embed page, which is loaded often, so its
 // client table leaves them out.
 const trackerKeyPrefix = "js.tk."
 
@@ -159,7 +159,7 @@ const trackerKeyPrefix = "js.tk."
 const filesKeyPrefix = "js.files."
 
 // gitKeyPrefix belongs to dashboard-git.js, which static boards never load.
-// Its controls must not consume the standalone or embed translation budget.
+// Its controls must not bloat the standalone or embed translation table.
 const gitKeyPrefix = "js.git."
 
 // codeKeyPrefix is the copy button's standalone client subset (code.js).
@@ -216,6 +216,9 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 	for _, l := range wsi18n.Languages() {
 		lang := l.Code
 		funcs := template.FuncMap{
+			"clockOf": func(at string, ms int64, stamp, clock, class string) clockView {
+				return clockView{At: at, Ms: ms, Stamp: stamp, Clock: clock, Class: class}
+			},
 			"icon": func(name string) (template.HTML, error) {
 				if !a.icons[name] {
 					return "", fmt.Errorf("whiteboard page: no sprite symbol %q", name)
@@ -325,36 +328,69 @@ type Regions struct {
 	CountPolicy, CountAcks int
 }
 
+// TopicRegions is a board's ordered direct sections and non-topic bytes.
+// Board preserves their original positions; Shell collects inter-section
+// whitespace and the trailing controls/deferred history, as the stream parser does.
+type TopicRegions struct {
+	Board  template.HTML
+	Topics []TopicUnit
+	Shell  template.HTML
+}
+
+// TopicUnit is an immutable rendered topic, with the same hash as data-th.
+type TopicUnit struct {
+	ID, Hash string
+	HTML     template.HTML
+	Mermaid  bool
+	// after is template whitespace outside the section: it is reassembled
+	// in place in Board, but must never enter a single-element wire unit.
+	after template.HTML
+}
+
+// TopicReuse reuses a topic by its complete render revision. The caller owns
+// the cache and must also invalidate it when its external render inputs change.
+type TopicReuse func(id, revision string, render func() (TopicUnit, error)) (TopicUnit, error)
+
 // RenderRegions renders view's board and panels as fragments, as the full
 // page shows them, with one difference: each topic body renders inside its
 // own sandboxed frame (framedDoc), since the page that hosts the fragments is
 // served from the dashboard daemon's origin, and a body's raw HTML and
 // scripts must not run there. Build view with LayoutFull.
 func RenderRegions(view View) (Regions, error) {
+	regions, _, err := RenderRegionsWithTopics(view, nil)
+	return regions, err
+}
+
+// RenderRegionsWithTopics is RenderRegions with source-owned topic reuse.
+// Cache hits skip both body/panel markdown and the topic template.
+func RenderRegionsWithTopics(view View, reuse TopicReuse) (Regions, *TopicRegions, error) {
 	a, err := loadAssets()
 	if err != nil {
-		return Regions{}, fmt.Errorf("whiteboard page assets: %w", err)
+		return Regions{}, nil, fmt.Errorf("whiteboard page assets: %w", err)
 	}
 	view.Layout = LayoutFull
 	view.StampFile = ""
-	data := newPageData(view, a, true)
+	data := pageDataBase(view, a, true)
+	data.topicReuse = reuse
+	data.lazyAssets = a
 	var board, panels bytes.Buffer
 	tmpl := a.templateFor(view.Lang)
 	if err := tmpl.ExecuteTemplate(&board, "board", data); err != nil {
-		return Regions{}, fmt.Errorf("whiteboard board: %w", err)
+		return Regions{}, nil, fmt.Errorf("whiteboard board: %w", err)
 	}
 	for _, panel := range view.Panels {
 		if err := tmpl.ExecuteTemplate(&panels, "panel", data.PanelOf(panel)); err != nil {
-			return Regions{}, fmt.Errorf("whiteboard panel %s: %w", panel.ID, err)
+			return Regions{}, nil, fmt.Errorf("whiteboard panel %s: %w", panel.ID, err)
 		}
 	}
+	boardHTML := template.HTML(board.String())
 	return Regions{
-		Board:       template.HTML(board.String()),
+		Board:       boardHTML,
 		Panels:      template.HTML(panels.String()),
 		Mermaid:     data.Mermaid,
 		CountPolicy: data.CountPolicy,
 		CountAcks:   data.CountAcks,
-	}, nil
+	}, collectTopicRegions(boardHTML, view.Topics, data.topicUnits), nil
 }
 
 // RenderClosedTopics renders the closed topics of a view built with a
@@ -420,7 +456,11 @@ type pageData struct {
 	DocFramed bool
 	// tmpl is the template set the page renders with (templateFor), which
 	// TopicHTML executes the topic template from.
-	tmpl *template.Template
+	tmpl         *template.Template
+	lazyAssets   *pageAssets
+	topicReuse   TopicReuse
+	topicUnits   map[string]TopicUnit
+	topicContext string
 	// framing is set while a framed body renders, so its file images take
 	// DocImageSrc.
 	framing bool
@@ -489,6 +529,14 @@ func (p *pageData) MermaidFile() string {
 // newPageData builds the data a page renders from; framed renders each topic
 // body inside a sandboxed frame (framedDoc).
 func newPageData(view View, a *pageAssets, framed bool) *pageData {
+	p := pageDataBase(view, a, framed)
+	for _, t := range append(append([]TopicView(nil), view.Topics...), view.DeferredTopics...) {
+		p.prepareTopic(t, a)
+	}
+	return p
+}
+
+func pageDataBase(view View, a *pageAssets, framed bool) *pageData {
 	full := view.Layout != LayoutEmbed
 	script := a.answers + a.form + a.code + a.deps
 	if full {
@@ -511,6 +559,7 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		entries:     map[string]template.HTML{},
 		DocFramed:   framed,
 		tmpl:        a.templateFor(view.Lang),
+		topicUnits:  map[string]TopicUnit{},
 	}
 	if !full {
 		// The embed has no change-signal loader, so it carries no stamp.
@@ -535,44 +584,37 @@ func newPageData(view View, a *pageAssets, framed bool) *pageData {
 		}
 	}
 	p.CountBulk = p.CountAcks
-	// After onPage is complete, so a reference in a body links like one in
-	// an item; a mermaid block in an unframed body sets Mermaid before the
-	// template runs.
-	topics := append(append([]TopicView(nil), view.Topics...), view.DeferredTopics...)
-	for _, t := range topics {
-		if full {
-			pages := append([]EntryPage{t.Stream}, t.Older...)
-			for _, page := range pages {
-				for _, run := range page.Runs {
-					e := run.Entry
-					if e.Kind == EntryPanel && e.Text != "" {
-						p.entries[e.ID] = p.panelHTML(t.Name, e.ID, e.Text, framed, a)
-					}
+	return p
+}
+
+// prepareTopic runs only after board-wide reference targets are complete.
+func (p *pageData) prepareTopic(t TopicView, a *pageAssets) {
+	if p.Full {
+		pages := append([]EntryPage{t.Stream}, t.Older...)
+		for _, page := range pages {
+			for _, run := range page.Runs {
+				e := run.Entry
+				if e.Kind == EntryPanel && e.Text != "" {
+					p.entries[e.ID] = p.panelHTML(t.Name, e.ID, e.Text, p.DocFramed, a)
 				}
 			}
 		}
-		if t.Doc == "" || !full {
-			continue
-		}
-		page := p.Mermaid
-		p.Mermaid = false
-		p.framing, p.inDoc, p.relays = framed, true, nil
-		marks := t.DocMarks
-		if !full {
-			marks = nil // the embed has no script to draw them
-		}
-		html := p.renderDoc(t.Doc, marks)
-		p.framing, p.inDoc = false, false
-		if framed {
-			// The frame loads mermaid for its own blocks; the page loads it
-			// only for a block outside every frame.
-			html = p.framedDoc(t.Name, "", html, t.DocStale, p.Mermaid, p.relays, a, t.BodyUpdatedAt)
-			p.Mermaid = false
-		}
-		p.Mermaid = p.Mermaid || page
-		p.docs[t.Name] = html
 	}
-	return p
+	if t.Doc == "" || !p.Full {
+		return
+	}
+	page := p.Mermaid
+	p.Mermaid = false
+	p.framing, p.inDoc, p.relays = p.DocFramed, true, nil
+	html := p.renderDoc(t.Doc, t.DocMarks)
+	p.framing, p.inDoc = false, false
+	if p.DocFramed {
+		// A frame loads its own mermaid; only unframed content sets Mermaid.
+		html = p.framedDoc(t.Name, "", html, t.DocStale, p.Mermaid, p.relays, a, t.BodyUpdatedAt)
+		p.Mermaid = false
+	}
+	p.Mermaid = p.Mermaid || page
+	p.docs[t.Name] = html
 }
 
 // DocHTML is topic's rendered body (see docs).
@@ -789,6 +831,40 @@ func (p *pageData) TopicOf(t TopicView) topicData { return topicData{TopicView: 
 // the hash is theme-free. The section's opening tag holds no raw ">" (its
 // attribute values are escaped), so data-th goes before the first one.
 func (p *pageData) TopicHTML(t TopicView) (template.HTML, error) {
+	if p.lazyAssets != nil {
+		render := func() (TopicUnit, error) {
+			previous := p.Mermaid
+			p.Mermaid = false
+			p.prepareTopic(t, p.lazyAssets)
+			html, err := p.renderTopicHTML(t)
+			mermaid := p.Mermaid
+			p.Mermaid = previous || mermaid
+			if err != nil {
+				return TopicUnit{}, err
+			}
+			// The topic template ends with whitespace after </section>.
+			// Keep it in the region, not in the single-element delta unit.
+			section := strings.TrimRight(string(html), " \t\r\n\f")
+			if !strings.HasSuffix(section, "</section>") {
+				return TopicUnit{}, fmt.Errorf("topic %s: section is not the final element", t.Name)
+			}
+			return TopicUnit{ID: t.Name, Hash: topicHTMLHash(html), HTML: template.HTML(section), after: html[len(section):], Mermaid: mermaid}, nil
+		}
+		var unit TopicUnit
+		var err error
+		if p.topicReuse == nil {
+			unit, err = render()
+		} else {
+			unit, err = p.topicReuse(t.Name, p.topicRevision(t), render)
+		}
+		p.Mermaid = p.Mermaid || unit.Mermaid
+		p.topicUnits[t.Name] = unit
+		return unit.HTML + unit.after, err
+	}
+	return p.renderTopicHTML(t)
+}
+
+func (p *pageData) renderTopicHTML(t TopicView) (template.HTML, error) {
 	var buf bytes.Buffer
 	if err := p.tmpl.ExecuteTemplate(&buf, "topic", p.TopicOf(t)); err != nil {
 		return "", err
@@ -823,6 +899,13 @@ type itemData struct {
 	Static bool
 	// History is set only for the unified full-page timeline row.
 	History *EntryView
+	// AskClock/AskAt/AskReasked put an anchored question's ask time and
+	// re-ask time in its own row instead of a caption line above it.
+	AskClock, AskAt, AskReasked string
+	// AskMs/AskStamp give the ask clock the same relative-time data every
+	// other history clock carries.
+	AskMs    int64
+	AskStamp string
 }
 
 // ItemOf pairs an item with the page for the item templates.
@@ -1066,4 +1149,14 @@ func rowBox(state string) string {
 	default:
 		return "box"
 	}
+}
+
+// clockView is the "clock" template's input: one entry-at time element with
+// its datetime, exact stamp, Unix-millisecond time and any extra class.
+type clockView struct {
+	At    string
+	Ms    int64
+	Stamp string
+	Clock string
+	Class string
 }

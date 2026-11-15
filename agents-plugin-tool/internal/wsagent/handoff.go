@@ -78,7 +78,7 @@ func (r *Runner) TakeOver(id string) (State, error) {
 	if backend == "" {
 		backend = row.Harness
 	}
-	profile := LeadProfileFor(backend)
+	profile := LeadProfileFor(backend, r.opts.Backends)
 	if profile == "" {
 		return State{}, badRequest("only a claude or pi session can be taken over; this one ran under %q", backend)
 	}

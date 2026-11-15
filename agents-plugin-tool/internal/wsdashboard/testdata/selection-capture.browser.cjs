@@ -61,7 +61,7 @@ const [base] = process.argv.slice(2);
       await page.waitForTimeout(150);
       assert.equal(await composerText(), 'prior text', 'attaching a selection leaves the composer text untouched');
       assert.equal(await page.locator('#cchips .selection-bundle').count(), n, 'each push is its own bundle element');
-      assert.equal(await page.locator('#cchips .selection-bundle').nth(n - 1).locator('.selection-edit').innerText(), memo, 'the bundle holds its own memo');
+      assert.equal(await page.locator('#cchips .selection-bundle').nth(n - 1).locator('.selection-note').getAttribute('title'), memo, 'the bundle holds its own memo');
       results.push({ a, b, want, memo });
     }
     await page.locator('#csend').click();

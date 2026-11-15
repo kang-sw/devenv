@@ -26,7 +26,7 @@ func TestDependencyPopoverCSSScope(t *testing.T) {
 		t.Fatalf("popover selectors must all be scoped by .dw, got globals: %v", global)
 	}
 	all := cssClasses(rules, "")
-	for _, c := range []string{"pop", "sum", "bar", "row", "dot", "sep", "lb", "nm", "st", "ar", "bd", "dbtn"} {
+	for _, c := range []string{"pop", "sum", "bar", "row", "wb-dot", "sep", "lb", "nm", "st", "ar", "bd", "dbtn"} {
 		if !all[c] {
 			t.Errorf("missing scoped mockup class .%s", c)
 		}

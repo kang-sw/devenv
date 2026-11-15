@@ -114,7 +114,10 @@
     restoreScroll(scroll);
     if (kept) kept.h.apply();
     if (board) {
-      boardRecordPending(); boardPendingBadge();
+      // An owner correction that clamps at home is not a hand scroll and
+      // must not acknowledge the update that caused that correction.
+      scroll.forEach(function (p) { if ((p[0] === $('bcol') || p[0] === doc.scrollingElement) && p[1] > 4 && p[0].scrollTop <= 4) boardHomeWrites.add(p[0]); });
+      boardRecordPending(); boardPendingBadge(); boardHoldIndicators();
       boardExposedUnits = Object.keys(boardPending).length ? boardWithSnap(boardExposureUnits) : null;
     }
     if (pin) pinConvo();
@@ -150,8 +153,9 @@
   // bytes (TopicHTML, render.go), compared in place of the HTML (topicSeen).
   var boardSeen = {}, boardRendered = null, boardLatest = null, boardPending = Object.create(null), boardFrozen = [], boardRelease = false;
   var boardOwn = Object.create(null), boardImmediate = Object.create(null), boardSnap = null, boardExposedUnits = null;
-  var boardChanges = [], boardOffered = null, boardBadge = null, boardReleaseFrame = 0;
+  var boardChanges = [], boardOffered = null, boardReleaseFrame = 0, boardHomeWrites = new WeakSet();
   var boardPaged = Object.create(null), boardPagedEdits = [];
+  var boardTopHeld = Object.create(null), boardTopOrder = null;
   function topicKey(n) {
     return n.nodeType === 1 && n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic") ? n.getAttribute("data-topic") : null;
   }
@@ -256,6 +260,7 @@
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
+      leading: function (c) { return worktree && c.preview && !(PIN_WIDE && PIN_WIDE.matches); },
       layout: function (on) {
         if (on) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
         railOpen(false);
@@ -511,6 +516,10 @@
     if (!changed.length || !doc.body || !doc.body.moveBefore) return null;
     var pairs = [];
     changed.forEach(function (c) {
+      // Timeline anchors can become inert gaps after an append. Replay only
+      // already-admitted rows before looking for their frame placeholders;
+      // the normal post-morph restore still owns folds, mounting and layout.
+      if (window.wbHistory) window.wbHistory.prepare(c.n, window.wbHistory.capture(c.old));
       var held = c.g ? c.g.oc[0] : null, olds = {};
       q('iframe.doc-frame[data-doc-key^="entry:"]:not(.doc-frame-next)', c.old).forEach(function (f) {
         if (f === held || !f.hasAttribute("data-srcdoc")) return;
@@ -620,30 +629,33 @@
   // frameGraft moves g's new section content into its old section, level by
   // level down the frame's path: each kept element takes the new element's
   // attributes and children, except its child on the path, which stays.
-  // At the bottom the new frame goes in after the old one, pending.
+  // At the bottom an unchanged document stays live; a changed frame goes
+  // in after the old one, pending.
   function frameGraft(g) {
     var of = g.oc[0], mounted = of.tagName === "IFRAME";
+    var same = of.getAttribute("data-doc-key") === g.nc[0].getAttribute("data-doc-key") && of.getAttribute("data-srcdoc") === g.nc[0].getAttribute("data-srcdoc");
+    if (same) of.wbOut = false;
     // The next frame of a mounted frame is mounted before it goes in, and
     // before anything holds it (expandos, the load listener): a placeholder
     // would show nothing to reveal. The next frame of an unmounted one (a
     // closed fold, a topic far from the view) is a placeholder that simply
     // takes the old one's place: the topic mounts it once it comes near
     // (viewport bands).
-    if (mounted && g.nc[0].tagName !== "IFRAME") g.nc[0] = mountFrame(g.nc[0]);
+    if (!same && mounted && g.nc[0].tagName !== "IFRAME") g.nc[0] = mountFrame(g.nc[0]);
     var nf = g.nc[0];
-    if (mounted) frameNext(nf, of);
+    if (!same && mounted) frameNext(nf, of);
     for (var i = g.oc.length - 1; i > 0; i--) {
       var oa = g.oc[i], na = g.nc[i], oc = g.oc[i - 1], nc = g.nc[i - 1], before = true;
       Array.prototype.slice.call(oa.attributes).forEach(function (a) { if (!na.hasAttribute(a.name)) oa.removeAttribute(a.name); });
       Array.prototype.forEach.call(na.attributes, function (a) { if (oa.getAttribute(a.name) !== a.value) oa.setAttribute(a.name, a.value); });
       Array.prototype.slice.call(oa.childNodes).forEach(function (c) { if (c !== oc) oa.removeChild(c); });
       Array.prototype.slice.call(na.childNodes).forEach(function (c) {
-        if (c === nc) { before = false; if (c === nf) oa.appendChild(c); }
+        if (c === nc) { before = false; if (c === nf && !same) oa.appendChild(c); }
         else if (before) oa.insertBefore(c, oc);
         else oa.appendChild(c);
       });
     }
-    if (!mounted) of.parentNode.removeChild(of);
+    if (!same && !mounted) of.parentNode.removeChild(of);
   }
   // frameNext makes nf the pending next frame of mounted frame of.
   function frameNext(nf, of) {
@@ -795,6 +807,108 @@
       handles.push(w.keep(n));
     });
     return { h: { apply: function () { handles.forEach(function (h) { h.apply(); }); }, end: function () { handles.forEach(function (h) { h.end(); }); } } };
+  }
+  // Asset reloads cross a document boundary. Keep only tab-local, short-lived
+  // identities; placement and late frame layout still belong to wbHistory.
+  var BOARD_RELOAD = "ws.dashboard.board-reload." + location.pathname + location.search;
+  var boardReloadCanceled = false, boardReloadStop = null;
+  function boardReloadInput(e) {
+    // Revealing the hidden board is navigation, not a scroll override.
+    if ((e.type === "pointerdown" || e.type === "touchstart" || (e.type === "keydown" && /^( |Spacebar)$/.test(e.key))) &&
+        e.target.closest && e.target.closest('#tabbar [data-tab="board"]')) return;
+    if (e.type === "scroll" && e.target !== doc && e.target !== doc.scrollingElement && e.target.id !== "bcol" && e.target.id !== "bpins") return;
+    if (e.type === "keydown" && !/^(ArrowUp|ArrowDown|PageUp|PageDown|Home|End| |Spacebar)$/.test(e.key)) return;
+    boardReloadCanceled = true;
+    if (boardReloadStop) boardReloadStop();
+  }
+  ["wheel", "touchstart", "pointerdown", "keydown", "scroll"].forEach(function (type) {
+    doc.addEventListener(type, boardReloadInput, { capture: true, passive: true });
+  });
+  function boardSaveReload() {
+    // A shell and its frame can both receive the asset event. A second
+    // reload before placement must carry the original reference forward.
+    try {
+      var pending = JSON.parse(window.sessionStorage.getItem(BOARD_RELOAD));
+      if (!boardReloadCanceled && pending && Number.isFinite(pending.at) && pending.page === location.pathname + location.search &&
+          Date.now() >= pending.at && Date.now() - pending.at < 60000 && Array.isArray(pending.records)) return;
+    } catch (e) {}
+    var w = window.wbHistory, records = [], seen = new Set();
+    if (!w || !w.keep) return;
+    boardBoxes().forEach(function (box) {
+      var h = w.keep(box.firstElementChild || box, { capture: false }), s = h.scroller;
+      if (seen.has(s)) return;
+      seen.add(s);
+      var view = h.viewport(), line = view.top + 1;
+      var panels = boardWithSnap(function () { return boardViewedPanels(s); });
+      panels.sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
+      var n = panels.find(function (p) { var r = p.getBoundingClientRect(); return r.top <= line && r.bottom > line; }) ||
+        panels.find(function (p) { return p.getBoundingClientRect().top > line; });
+      var topic = n && n.closest(".topic");
+      records.push({ scroller: s === doc.scrollingElement ? "document" : s.id, top: s.scrollTop, key: n && boardPanelKey(n), topic: topic && topicKey(topic),
+        offset: n ? n.getBoundingClientRect().top - line : 0 });
+    });
+    try { window.sessionStorage.setItem(BOARD_RELOAD, JSON.stringify({ at: Date.now(), page: location.pathname + location.search, records: records })); } catch (e) {}
+  }
+  if (framed) window.wsSaveBoardReload = boardSaveReload;
+  function boardRestoreReload() {
+    var saved = null;
+    try {
+      saved = JSON.parse(window.sessionStorage.getItem(BOARD_RELOAD));
+    } catch (e) {}
+    var observer = null, expiry = null, done = false;
+    function stop() {
+      done = true;
+      if (observer) observer.disconnect();
+      clearTimeout(expiry);
+      boardReloadStop = null;
+      try { window.sessionStorage.removeItem(BOARD_RELOAD); } catch (e) {}
+      ["wheel", "touchstart", "pointerdown", "keydown", "scroll"].forEach(function (type) { doc.removeEventListener(type, boardReloadInput, true); });
+    }
+    function restore() {
+      if (done) return;
+      if (boardReloadCanceled || !saved || saved.page !== location.pathname + location.search || !Number.isFinite(saved.at) ||
+          Date.now() - saved.at < 0 || Date.now() - saved.at >= 60000 || !Array.isArray(saved.records)) { stop(); return; }
+      var w = window.wbHistory;
+      if (!w || !w.place) { stop(); return; }
+      saved.records = saved.records.filter(function (r) {
+        if (!r || !Number.isFinite(r.top) || !Number.isFinite(r.offset)) return false;
+        var s = r.scroller === "document" ? doc.scrollingElement : $(r.scroller);
+        // Hidden panes have no scroller geometry: handing their nodes to
+        // place now would incorrectly select the document as scroll owner.
+        if (!s || !visible(s) || !s.clientHeight || !s.clientWidth || !boardBoxes().some(function (b) {
+          return visible(b) && b.getBoundingClientRect().height > 0 && (s === doc.scrollingElement || s.contains(b));
+        })) return true;
+        var topic = boardBoxes().flatMap(function (b) { return q("section.topic[data-topic]", b); }).find(function (n) { return topicKey(n) === r.topic; });
+        var n = topic && boardLivePanels(topic).find(function (p) { return boardPanelKey(p) === r.key; });
+        if ((!n || !n.getBoundingClientRect().height) && /^(p|e)[1-9][0-9]*$/.test(r.key || "") && w.loadTarget) {
+          // The history owner also resolves topics served in inert templates.
+          (topic ? [topic] : boardBoxes()).some(function (b) {
+            n = w.loadTarget(b, r.key, window.WsCards && window.WsCards.unfoldTopic);
+            return !!n;
+          });
+        }
+        n = n || topic;
+        if (n) {
+          w.place(n, { readingOffset: r.offset });
+        } else {
+          // Missing identities fall back numerically through the SAME owner.
+          var ref = s.firstElementChild;
+          if (!ref) return false;
+          var top = s === doc.scrollingElement ? 0 : s.getBoundingClientRect().top + s.clientTop;
+          w.place(ref, { offset: ref.getBoundingClientRect().top - top + s.scrollTop - r.top });
+        }
+        return false;
+      });
+      if (!saved.records.length) { stop(); return; }
+      try { window.sessionStorage.setItem(BOARD_RELOAD, JSON.stringify(saved)); } catch (e) {}
+      if (!observer && window.ResizeObserver) {
+        observer = new ResizeObserver(restore);
+        boardBoxes().concat([$("bcol"), $("bpins")]).forEach(function (b) { if (b) observer.observe(b); });
+      }
+      if (!expiry) expiry = setTimeout(stop, 60000 - (Date.now() - saved.at));
+    }
+    boardReloadStop = stop;
+    requestAnimationFrame(restore);
   }
   // A staging pass reads exposure through one wbHistory.snapshot: nothing
   // writes the DOM inside it, so each scroller's viewport (a scan of every
@@ -949,6 +1063,47 @@
       });
     });
   }
+  // Top-origin changes are click-only, independently of ordinary viewed-panel
+  // blockers. Keep immutable old bytes/absence and their old open-flow slots;
+  // subsequent scroll releases can still admit unrelated down-origin panels.
+  function boardStageTop(input, topics, order) {
+    if (boardRelease) { boardTopHeld = Object.create(null); boardTopOrder = null; return order; }
+    var box = boardBoxes()[0], ref = box && (box.firstElementChild || box);
+    var s = ref && boardScroller(ref), offer = boardOffered, previous = offer && offer.previous;
+    if (s && s.scrollTop <= 4 && offer && previous && boardRendered) {
+      var changed = Array.from(new Set(previous.order.concat(input.order))).filter(function (k) {
+        var a = previous.topics[k], b = input.topics[k];
+        if (boardImmediate[k] || (a && b && topicSeen(a) === topicSeen(b))) return false;
+        if (!a || !b || previous.order.indexOf(k) !== input.order.indexOf(k)) return true;
+        var live = Array.prototype.find.call(box.children, function (n) { return topicKey(n) === k; });
+        return !!live && boardExposed(live);
+      });
+      if (!changed.length && previous.order.join('\n') !== input.order.join('\n'))
+        changed = input.order.filter(function (k, i) { return previous.order[i] !== k && !boardImmediate[k]; });
+      if (changed.length && !boardTopOrder) {
+        var shown = Array.prototype.map.call(box.children, topicKey).filter(function (k) { return k !== null; });
+        boardTopOrder = shown.concat(boardRendered.order.filter(function (k) { return shown.indexOf(k) < 0; }));
+      }
+      changed.forEach(function (k) {
+        if (!Object.prototype.hasOwnProperty.call(boardTopHeld, k))
+          boardTopHeld[k] = { node: boardRendered.topics[k] || null };
+      });
+    }
+    var held = Object.keys(boardTopHeld);
+    held.forEach(function (k) {
+      if (boardImmediate[k]) boardTopHeld[k].node = topics[k] || boardTopHeld[k].node;
+      var old = boardTopHeld[k].node;
+      if (old) topics[k] = old; else delete topics[k];
+      boardPending[k] = true;
+    });
+    order = order.filter(function (k) { return !Object.prototype.hasOwnProperty.call(boardTopHeld, k); });
+    (boardTopOrder || []).slice().reverse().forEach(function (k, i, reversed) {
+      if (!boardTopHeld[k] || !boardTopHeld[k].node) return;
+      var next = reversed.slice(0, i).reverse().find(function (n) { return order.indexOf(n) >= 0; });
+      order.splice(next === undefined ? order.length : order.indexOf(next), 0, k);
+    });
+    return order;
+  }
   function boardStageInput(input) { return boardWithSnap(function () { return boardStageSnap(input); }); }
   function boardStageSnap(input) {
     boardPending = Object.create(null);
@@ -963,6 +1118,7 @@
       topics[k] = own.source; boardImmediate[k] = true; delete boardOwn[k];
       if (own.external) boardPending[k] = true;
     });
+    order = boardStageTop(input, topics, order);
     boardBoxes().forEach(function (box) {
       var nodes = Array.prototype.filter.call(box.children, function (n) {
         var k = topicKey(n);
@@ -998,23 +1154,83 @@
     boardRendered = { topics: topics, order: order, before: input.before, after: input.after };
     return boardRendered;
   }
+  function boardPendingNames() {
+    var names = new Set();
+    boardChanges.forEach(function (c) { c.names.forEach(function (k) { if (boardPending[k]) names.add(k); }); });
+    return Array.from(names);
+  }
   function boardPendingBadge() {
-    var names = Object.keys(boardPending), count = boardChanges.length;
-    if (!boardBadge && names.length) {
-      boardBadge = doc.createElement("button");
-      boardBadge.type = "button";
-      boardBadge.className = "board-viewed-pending";
-      boardBadge.addEventListener("click", function () { boardFlushViewed(true); });
-      doc.body.appendChild(boardBadge);
-    }
-    if (!boardBadge) return;
-    boardBadge.hidden = !names.length;
-    boardBadge.textContent = "최신 변경 " + count + "건 반영 · " + names.join(", ");
-    boardBadge.title = names.join(", ");
+    var pill = window.wbPill || (window.wbPill = {});
+    pill.pending = boardPendingNames().length;
+    pill.home = boardHome;
+    if (pill.update) pill.update();
+  }
+  function boardFlash(names, inView) {
+    boardBoxes().forEach(function (box) {
+      q('section.topic[data-topic]', box).forEach(function (n) {
+        if (names.indexOf(topicKey(n)) < 0 || (inView && !boardExposed(n))) return;
+        n.classList.remove('board-fresh');
+        void n.offsetWidth;
+        n.classList.add('board-fresh');
+        clearTimeout(n.wbFreshTimer);
+        n.wbFreshTimer = setTimeout(function () { n.classList.remove('board-fresh'); }, 650);
+      });
+    });
+  }
+  function boardHome() {
+    var names = boardPendingNames(), host = $('bcol') || doc.querySelector('.wrap');
+    var ref = host && host.querySelector('.oq-wrap.wb-oq-top'), w = window.wbHistory;
+    if (!ref || !w || !w.jump) return;
+    // The existing navigation owner cancels captures/pins BEFORE the release
+    // morph, suppresses new captures during it, then owns the native to-top.
+    w.jump(ref, { top: 0, behavior: 'smooth', prepare: function () {
+      boardFlushViewed(true);
+      boardFlash(names, false);
+    } });
+  }
+  function boardHoldIndicators() {
+    var names = boardPendingNames(), input = boardLatest && boardLatest.html;
+    boardBoxes().forEach(function (box) {
+      q(names.length ? 'section.topic[data-topic]' : 'section.topic[data-board-held]', box).forEach(function (n) {
+        var k = topicKey(n), held = names.indexOf(k) >= 0 || !!(boardPending[k] && n.hasAttribute('data-board-held'));
+        if (!held && !n.hasAttribute('data-board-held')) return;
+        var tag = n.querySelector('.board-hold-tag');
+        if (!held) {
+          n.removeAttribute('data-board-held'); n.classList.remove('board-hold-nudge');
+          if (n.wbHoldNudge) cancelAnimationFrame(n.wbHoldNudge);
+          if (tag) tag.remove();
+          delete n.wbHoldRevision;
+          return;
+        }
+        var incoming = input && input.topics[k], closed = !incoming || incoming.classList.contains('closed');
+        n.setAttribute('data-board-held', closed ? 'closed' : 'moved');
+        if (!tag) {
+          var bar = n.querySelector('.tbar');
+          if (!bar) return;
+          tag = doc.createElement('span'); tag.className = 'board-hold-tag'; bar.appendChild(tag);
+        }
+        tag.textContent = closed ? wsT("js.board.hold.closed") : wsT("js.board.hold.moved");
+        var revision = incoming ? topicSeen(incoming) : 'closed';
+        if (n.wbHoldRevision !== revision) {
+          n.wbHoldRevision = revision;
+          n.classList.remove('board-hold-nudge');
+          if (n.wbHoldNudge) cancelAnimationFrame(n.wbHoldNudge);
+          // Restart after a painted reset, not a forced whole-board layout
+          // inside the synchronous stream admission transaction.
+          n.wbHoldNudge = requestAnimationFrame(function () {
+            n.wbHoldNudge = requestAnimationFrame(function () {
+              n.wbHoldNudge = 0;
+              if (n.isConnected && n.hasAttribute('data-board-held')) n.classList.add('board-hold-nudge');
+            });
+          });
+        }
+      });
+    });
   }
   function boardFlushViewed(explicit) {
     boardReleaseFrame = 0;
-    if (!Object.keys(boardPending).length) return;
+    var pending = Object.keys(boardPending);
+    if (!pending.length || (!explicit && pending.every(function (k) { return Object.prototype.hasOwnProperty.call(boardTopHeld, k); }))) return;
     boardRelease = !!explicit;
     try {
       if (boardLatest) swap("board", boardLatest.hash, boardLatest.html, true);
@@ -1051,7 +1267,22 @@
       return units.length !== boardExposedUnits.length || units.some(function (n, i) { return n !== boardExposedUnits[i]; });
     });
   }
-  function boardViewedScroll() {
+  function boardViewedScroll(e) {
+    if (e && e.type === 'scroll') {
+      var s = e.target === doc ? doc.scrollingElement : e.target;
+      if (s && boardHomeWrites.has(s)) {
+        boardHomeWrites.delete(s);
+        if (s.scrollTop <= 4) return;
+      }
+      if (s && s.scrollTop <= 4 && (s === $('bcol') || s === doc.scrollingElement)) {
+        // Reaching home by hand acknowledges the signal, not the staged data.
+        var names = boardPendingNames();
+        boardChanges = []; boardPendingBadge(); boardFlash(names, true);
+        if (boardReleaseFrame) cancelAnimationFrame(boardReleaseFrame);
+        boardReleaseFrame = 0;
+        return;
+      }
+    }
     if (!boardReleaseFrame && Object.keys(boardPending).length) boardReleaseFrame = requestAnimationFrame(function () {
       boardReleaseFrame = 0;
       if (Object.keys(boardPending).length && boardReleaseDue()) boardFlushViewed(false);

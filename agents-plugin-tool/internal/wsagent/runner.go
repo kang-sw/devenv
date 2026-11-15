@@ -111,7 +111,7 @@ type Options struct {
 	// Dir is the dashboard daemon's state directory; conversations live in
 	// its session registry (wsdashboard.SessionDir).
 	Dir      string
-	Backends map[string]Backend
+	Backends map[string]BackendRegistration
 	Keys     KeyStore
 	// Config is the base of each profile resolution; RepoRoot is replaced by
 	// the conversation's working root.
@@ -340,6 +340,12 @@ func (r *Runner) holdersScanned() {
 	for _, c := range convs {
 		c.do(func() {
 			c.checkReattach()
+			if c.hidden {
+				c.stopProcess("")
+				if err := c.retireHolder(); err != nil {
+					c.setStatus(func() { c.lastErr = "archive process: " + err.Error() })
+				}
+			}
 			if c.proc == nil {
 				// A start kick put off until the scan (a rejoin that failed).
 				c.kick()
@@ -440,6 +446,16 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		c.live.owner = c.lockSummaryWriter
 		c.live.wake = func() { r.notify(rec.ReplyID, rec.Root) }
 		c.live.summaryStore().SetWake(c.live.wake)
+	}
+	if rec.Lead {
+		hidden, err := wsdashboard.ReadSessionHidden(r.opts.Dir, rec.ReplyID)
+		if err != nil {
+			// Fail closed before any startup inbox/mail/replay signal can kick.
+			hidden = true
+			c.lastErr = "read session visibility: " + err.Error()
+			fmt.Fprintf(r.opts.Log, "agent %s: %s\n", rec.ReplyID, c.lastErr)
+		}
+		c.hidden = hidden
 	}
 	c.live.beforeSnapshot = c.seedSpawnRows
 	c.observations = c.live.st.ObservedResponses("")
@@ -578,22 +594,27 @@ func (r *Runner) Create(profile, root string) (State, error) {
 // the builtin lead profile of that harness (or the user's definition of the
 // same name). The caller has passed the trusted gate.
 func (r *Runner) CreateLead(backend, root string, opts LeadOptions) (State, error) {
-	profile := LeadProfileFor(strings.TrimSpace(backend))
+	profile := LeadProfileFor(strings.TrimSpace(backend), r.opts.Backends)
 	if profile == "" {
-		return State{}, badRequest("harness must be %q or %q; got %q", BackendClaude, BackendPi, backend)
+		return State{}, categorized(ErrInvalidProfile, badRequest("harness must be %q or %q; got %q", BackendClaude, BackendPi, backend))
 	}
 	if opts.Model != "" && !modelPattern.MatchString(opts.Model) {
-		return State{}, badRequest("model %q must match %s", opts.Model, modelPattern.String())
+		return State{}, categorized(ErrInvalidProfile, badRequest("model %q must match %s", opts.Model, modelPattern.String()))
 	}
 	if opts.Effort != "" && !effortPattern.MatchString(opts.Effort) {
-		return State{}, badRequest("effort %q must be a lowercase word", opts.Effort)
+		return State{}, categorized(ErrInvalidProfile, badRequest("effort %q must be a lowercase word", opts.Effort))
 	}
-	if opts.PermissionMode != "" && !ValidLeadPermissionMode(opts.PermissionMode) {
-		return State{}, badRequest("permission_mode %q must be one of %s", opts.PermissionMode, strings.Join(LeadPermissionModes, ", "))
+	modes := permissionModes(strings.TrimSpace(backend), []map[string]BackendRegistration{r.opts.Backends})
+	// Existing Pi callers may send a Claude mode; it remains ignored.
+	if strings.TrimSpace(backend) == BackendPi {
+		modes = LeadPermissionModes
+	}
+	if opts.PermissionMode != "" && !slices.Contains(modes, opts.PermissionMode) {
+		return State{}, categorized(ErrInvalidProfile, badRequest("permission_mode %q must be one of %s", opts.PermissionMode, strings.Join(modes, ", ")))
 	}
 	opts.PluginIsolation = leadPluginIsolation(opts.PluginIsolation)
 	if opts.PluginIsolation != "default" && opts.PluginIsolation != "isolated" {
-		return State{}, badRequest("plugin_isolation must be default or isolated; got %q", opts.PluginIsolation)
+		return State{}, categorized(ErrInvalidProfile, badRequest("plugin_isolation must be default or isolated; got %q", opts.PluginIsolation))
 	}
 	return r.create(profile, root, &opts, nil)
 }
@@ -671,7 +692,7 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 		if lead.PermissionMode != "" {
 			rec.PermissionMode = lead.PermissionMode
 		}
-		if rec.Backend != BackendClaude {
+		if len(r.opts.Backends[rec.Backend].PermissionModes) == 0 {
 			rec.PermissionMode = ""
 		}
 	}
@@ -753,10 +774,10 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 		}
 		rp = *r.fixedProfile
 	} else {
-		rp, err = ResolveProfile(r.opts.Config, root, strings.TrimSpace(profile))
+		rp, err = ResolveProfile(r.opts.Config, root, strings.TrimSpace(profile), r.opts.Backends)
 	}
 	if err != nil {
-		return ResolvedProfile{}, badRequest("%v", err)
+		return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("%v", err))
 	}
 	if _, err := r.backend(rp.Name, rp.Definition.Backend); err != nil {
 		return ResolvedProfile{}, err
@@ -764,14 +785,14 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 	if path := rp.Definition.InstructionsPath(root); path != "" {
 		info, err := os.Stat(path)
 		if err != nil || !info.Mode().IsRegular() {
-			return ResolvedProfile{}, badRequest("agent profile %q: instruction file %s does not exist", rp.Name, path)
+			return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("agent profile %q: instruction file %s does not exist", rp.Name, path))
 		}
 	}
 	if len(rp.Definition.WSTools) > 0 && r.opts.WSMCP == nil {
-		return ResolvedProfile{}, badRequest("agent profile %q allows ws tools, but this daemon cannot attach ws-mcp", rp.Name)
+		return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("agent profile %q allows ws tools, but this daemon cannot attach ws-mcp", rp.Name))
 	}
 	if rp.Definition.Lead && (r.opts.Holders == nil || r.opts.LeadKeys == nil) {
-		return ResolvedProfile{}, badRequest("agent profile %q is a lead profile, but this daemon runs no session holders", rp.Name)
+		return ResolvedProfile{}, categorized(ErrInvalidProfile, badRequest("agent profile %q is a lead profile, but this daemon runs no session holders", rp.Name))
 	}
 	return rp, nil
 }
@@ -779,9 +800,9 @@ func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
 // backend is shared by profile validation and both launch paths. Keep
 // unavailable backends explicit, including when rejoining a held process.
 func (r *Runner) backend(profile, name string) (Backend, error) {
-	backend := r.opts.Backends[name]
+	backend := r.opts.Backends[name].Backend
 	if backend == nil {
-		return nil, badRequest("agent profile %q: backend %q is not available in this daemon", profile, name)
+		return nil, categorized(ErrBackendUnavailable, badRequest("agent profile %q: backend %q is not available in this daemon", profile, name))
 	}
 	return backend, nil
 }
@@ -791,7 +812,8 @@ func (c *conv) startBackend(spec StartSpec) (Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	return backend.Start(context.Background(), spec)
+	proc, err := backend.Start(context.Background(), spec)
+	return proc, categorized(ErrLaunchFailed, err)
 }
 
 // Get reads one conversation's state.
@@ -955,17 +977,21 @@ func (r *Runner) AnswerApproval(id, requestID string, allow bool, message string
 	})
 }
 
-// SetPermissionMode changes a claude lead conversation's permission mode.
+// SetPermissionMode changes an admitted lead conversation's permission mode.
 // Like a model or effort change it applies at the next turn boundary,
 // in-stream when the harness takes it; the mode the harness then reports is
 // State.ActiveMode.
 func (r *Runner) SetPermissionMode(id, mode string) (State, error) {
-	if !ValidLeadPermissionMode(mode) {
-		return State{}, badRequest("permission_mode %q must be one of %s", mode, strings.Join(LeadPermissionModes, ", "))
+	modes := LeadPermissionModes
+	if rec, ok := r.recordOf(id); ok && rec.Backend != BackendPi {
+		modes = r.opts.Backends[rec.Backend].PermissionModes
+	}
+	if !slices.Contains(modes, mode) {
+		return State{}, categorized(ErrInvalidProfile, badRequest("permission_mode %q must be one of %s", mode, strings.Join(modes, ", ")))
 	}
 	return r.act(id, func(c *conv) error {
-		if !c.rec.Lead || c.rec.Backend != BackendClaude {
-			return badRequest("the permission mode applies to a claude lead session only")
+		if !c.rec.Lead || len(c.r.opts.Backends[c.rec.Backend].PermissionModes) == 0 {
+			return categorized(ErrUnsupported, badRequest("the permission mode applies to a claude lead session only"))
 		}
 		if mode == c.rec.PermissionMode {
 			return nil
@@ -1100,9 +1126,12 @@ type State struct {
 	// here, mail no longer resumes it, and its row is the terminal's).
 	Status string `json:"status"`
 	// Process reports a live backend process.
-	Process bool   `json:"process"`
-	Model   string `json:"model,omitempty"`
-	Effort  string `json:"effort,omitempty"`
+	Process bool `json:"process"`
+	// Hidden is dashboard sidecar state, never part of the runner record.
+	Hidden    bool                         `json:"hidden,omitempty"`
+	Lifecycle wsdashboard.SessionLifecycle `json:"lifecycle,omitempty"`
+	Model     string                       `json:"model,omitempty"`
+	Effort    string                       `json:"effort,omitempty"`
 	// Observed is this conversation's own response evidence, not its settings
 	// or a descendant's output. It remains available when the turn ends.
 	Observed *wslive.ModelObservation `json:"observed,omitempty"`
@@ -1221,6 +1250,7 @@ func (r *Runner) closedState(rec Record) State {
 func closedState(rec Record) State {
 	st := State{ID: rec.ReplyID, Profile: rec.Profile, Backend: rec.Backend, Root: rec.Root, Status: StatusClosed, Model: rec.Model, Effort: rec.Effort, Page: "/s/" + rec.ReplyID, CreatedAt: rec.CreatedAt, ClosedAt: rec.ClosedAt, Lead: rec.Lead, PermissionMode: rec.PermissionMode, Label: rec.Label, Tier: rec.Tier, ActiveMs: rec.ActiveMs}
 	if rec.Lead {
+		st.Lifecycle = wsdashboard.SessionPendingDeletion
 		st.PluginIsolation = leadPluginIsolation(rec.PluginIsolation)
 		st.PluginWarning = rec.PluginWarning
 	}
@@ -1263,6 +1293,7 @@ type conv struct {
 	turn          bool
 	lastErr       string
 	closed        bool
+	hidden        bool
 	contextTokens *float64
 	outputTps     *float64
 	observed      *wslive.ModelObservation
@@ -1439,7 +1470,7 @@ func (c *conv) signalMail() {
 // message taken from the mailbox survives until it is delivered, and
 // submits it with the held messages (kick). It runs in the loop.
 func (c *conv) mailChanged() {
-	if c.closed || c.r.opts.Mail == nil {
+	if c.closed || c.hidden || c.r.opts.Mail == nil {
 		return
 	}
 	// The claim and the check that the session is still the daemon's are
@@ -1483,7 +1514,7 @@ func (c *conv) inboxChanged() {
 // a backend that takes no message mid-turn, or a rejoin that cannot tell
 // whether the turn runs (wrapHold), keeps it held.
 func (c *conv) steer() {
-	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed {
+	if !c.turn || c.proc == nil || c.replaying || c.wrapHold || c.closed || c.hidden {
 		return
 	}
 	if !c.rec.Lead {
@@ -1516,6 +1547,16 @@ func (c *conv) loop() {
 	defer c.r.wg.Done()
 	defer close(c.done)
 	defer c.live.closeSlot()
+	// Before the first scan, Stop can report an existing holder unknown.
+	// Keep its rejoined transport and persisted identity until holdersScanned
+	// can establish absence or stop it; otherwise releaseHolder could forget
+	// a still-running process and a later unhide could launch a second one.
+	if c.hidden && c.r.scanDone() {
+		c.stopProcess("")
+		if err := c.retireHolder(); err != nil {
+			c.setStatus(func() { c.lastErr = "archive process: " + err.Error() })
+		}
+	}
 	beat := time.NewTicker(c.r.opts.heartbeat)
 	defer beat.Stop()
 	// Settle the predecessor before inbox signals (including nested reports)
@@ -1639,6 +1680,15 @@ func (c *conv) state() State {
 		}
 	}
 	st.Process = c.proc != nil
+	st.Hidden = c.hidden
+	if c.rec.Lead && !c.closed {
+		st.Lifecycle = wsdashboard.SessionAsleep
+		if c.hidden {
+			st.Lifecycle = wsdashboard.SessionArchived
+		} else if c.proc != nil {
+			st.Lifecycle = wsdashboard.SessionActiveOn
+		}
+	}
 	st.Held = len(held) + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
 	st.Error = c.lastErr
 	st.ContextTokens = c.contextTokens
@@ -1899,7 +1949,7 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 // it, which each turn end submits; mail waits for the next message turn, or
 // goes alone once nothing is queued.
 func (c *conv) kick() {
-	if c.closed || c.turn || c.replaying || len(c.steered) > 0 || c.leverC != nil || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
+	if c.closed || c.hidden || c.turn || c.replaying || len(c.steered) > 0 || c.leverC != nil || (c.rec.Backend == BackendPi && c.r.opts.Holders != nil && !c.r.scanDone()) {
 		return
 	}
 	held, err := wsinbox.Held(c.inbox)
@@ -2086,6 +2136,9 @@ func (c *conv) runCommand(cmd wsinbox.Command) error {
 // conversation opened) and starts the backend process, resuming the
 // recorded backend session.
 func (c *conv) startProcess() error {
+	if c.hidden {
+		return conflict("the session is archived; unhide it before starting")
+	}
 	rec := c.record()
 	rp, err := c.r.resolve(rec.Profile, rec.Root)
 	if err != nil {
@@ -3139,6 +3192,12 @@ func (c *conv) processEnded() {
 func (c *conv) releaseHolder(proc Process) {
 	hp, ok := proc.(holderProcess)
 	if !ok || c.rec.HolderID == "" {
+		return
+	}
+	if c.replaying && !c.r.scanDone() {
+		// ErrUnknownHolder is not proof of absence before the first scan.
+		// Retain the resume/start fence even if another control stops this
+		// restored transport while the archived holder is still unscanned.
 		return
 	}
 	if err := hp.StopError(); err != nil {

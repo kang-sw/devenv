@@ -49,7 +49,7 @@ func TestProcessControlsMatchTheLaunchedProcess(t *testing.T) {
 
 func TestBackendSelectionKeepsNamesAndUnavailableErrors(t *testing.T) {
 	pi, claude := &fakeBackend{}, &fakeBackend{}
-	r := NewRunner(Options{Backends: map[string]Backend{BackendPi: pi, BackendClaude: claude}})
+	r := NewRunner(Options{Backends: map[string]BackendRegistration{BackendPi: {Backend: pi}, BackendClaude: {Backend: claude}}})
 	for _, tt := range []struct {
 		name string
 		want Backend

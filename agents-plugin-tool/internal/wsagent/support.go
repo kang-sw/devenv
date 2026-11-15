@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -220,9 +221,11 @@ type SupportHarness struct {
 	Available bool   `json:"available"`
 	// Error is why the harness is unavailable, or why its model listing
 	// failed.
-	Error   string        `json:"error,omitempty"`
-	Models  []ModelChoice `json:"models"`
-	Efforts []string      `json:"efforts"`
+	Error           string        `json:"error,omitempty"`
+	Models          []ModelChoice `json:"models"`
+	Efforts         []string      `json:"efforts"`
+	Lead            bool          `json:"lead,omitempty"`
+	PermissionModes []string      `json:"permission_modes,omitempty"`
 }
 
 // harnesses resolves the support profiles into the harness list, in
@@ -234,7 +237,7 @@ func (s *Support) harnesses() []SupportHarness {
 	seen := map[string]bool{}
 	for _, sp := range supportProfiles {
 		h := SupportHarness{Harness: sp.backend, Profile: sp.name, Models: []ModelChoice{}, Efforts: []string{}}
-		rp, err := ResolveProfile(s.opts.Config, "", sp.name)
+		rp, err := ResolveProfile(s.opts.Config, "", sp.name, s.opts.Runner.opts.Backends)
 		if err == nil {
 			h.Harness = rp.Definition.Backend
 		}
@@ -242,7 +245,10 @@ func (s *Support) harnesses() []SupportHarness {
 			continue
 		}
 		seen[h.Harness] = true
-		switch backend := s.opts.Runner.opts.Backends[h.Harness]; {
+		reg := s.opts.Runner.opts.Backends[h.Harness]
+		h.Lead = reg.LeadProfile != ""
+		h.PermissionModes = append([]string(nil), reg.PermissionModes...)
+		switch backend := reg.Backend; {
 		case err != nil:
 			h.Error = err.Error()
 		case backend == nil:
@@ -273,7 +279,7 @@ func (s *Support) listChoices(ctx context.Context, hs []SupportHarness) {
 		if !h.Available {
 			continue
 		}
-		cl, ok := s.opts.Runner.opts.Backends[h.Harness].(ChoiceLister)
+		cl, ok := s.opts.Runner.opts.Backends[h.Harness].Backend.(ChoiceLister)
 		if !ok {
 			continue
 		}
@@ -321,12 +327,12 @@ func (s *Support) selection(hs []SupportHarness) Selection {
 	last := s.state.Last
 	s.mu.Unlock()
 	if last != nil {
-		if h, ok := findHarness(hs, last.Harness); ok && h.Available {
+		if h, ok := findHarness(hs, last.Harness); ok && h.Available && h.Profile != "" {
 			return *last
 		}
 	}
 	for _, h := range hs {
-		if h.Available {
+		if h.Available && h.Profile != "" {
 			return Selection{Harness: h.Harness}
 		}
 	}
@@ -408,6 +414,30 @@ type ChoicesAnswer struct {
 // selection a new conversation starts with.
 func (s *Support) Choices(ctx context.Context) ChoicesAnswer {
 	hs := s.harnesses()
+	seen := map[string]bool{}
+	for _, h := range hs {
+		seen[h.Harness] = true
+	}
+	var names []string
+	for name, reg := range s.opts.Runner.opts.Backends {
+		if !seen[name] && reg.LeadProfile != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		reg := s.opts.Runner.opts.Backends[name]
+		h := SupportHarness{Harness: name, Available: reg.Backend != nil, Lead: true, PermissionModes: append([]string(nil), reg.PermissionModes...), Models: []ModelChoice{}, Efforts: []string{}}
+		if !h.Available {
+			h.Error = fmt.Sprintf("backend %q is not available in this daemon", name)
+		}
+		if cl, ok := reg.Backend.(ChoiceLister); ok {
+			if _, err := lookPath(cl.Executable()); err != nil {
+				h.Available, h.Error = false, fmt.Sprintf("%s is not installed: %v", cl.Executable(), err)
+			}
+		}
+		hs = append(hs, h)
+	}
 	s.listChoices(ctx, hs)
 	return ChoicesAnswer{Harnesses: hs, Last: s.selection(hs)}
 }

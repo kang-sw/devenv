@@ -1106,8 +1106,24 @@ func (s layoutScope) orderTree(groups []railGroupRows) {
 				}
 				p.Children = append(p.Children, k)
 			}
+			p.KidBusy = railKidBusy(p.Children)
 		}
 	}
+}
+
+// railKidBusy counts the rows under a parent, at any depth, that are at
+// work: the lead itself working (RailRow.Working, the row's running orb)
+// or running at least one subagent (RailRow.Subagents, its robot badge).
+// A row both working and running subagents counts once.
+func railKidBusy(rows []RailRow) int {
+	n := 0
+	for _, r := range rows {
+		if r.Working || r.Subagents > 0 {
+			n++
+		}
+		n += railKidBusy(r.Children)
+	}
+	return n
 }
 
 // childIDs is id's stored children, in their order.

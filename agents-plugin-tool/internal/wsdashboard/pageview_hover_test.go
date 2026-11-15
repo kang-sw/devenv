@@ -160,7 +160,7 @@ function anchor(id, text) {
  n.getBoundingClientRect = function () { return {left:10,right:330,top:50}; };
  n.closest = function (sel) { return sel === ".rail" ? null : n; }; return n;
 }
-var doc = {body: {appendChild:function (p) { popup=p; }}, addEventListener:function (k,f) { events[k]=f; },
+var doc = {documentElement: {className: ""}, body: {appendChild:function (p) { popup=p; }}, addEventListener:function (k,f) { events[k]=f; },
  elementFromPoint:function () { return hit; }, createElement:function () { var p=new El(); p.style={}; p.offsetWidth=320;p.offsetHeight=200;p.contains=function(n){return n===p;};return p; }};
 var win = {innerWidth:1280,innerHeight:800,addEventListener:function(k,f){wins[k]=f;},MutationObserver:function(f){mutate=f;this.observe=function(){};}};
 var ctl=R.hover(doc,win), a=anchor("a","own A"), b=anchor("b","own B");

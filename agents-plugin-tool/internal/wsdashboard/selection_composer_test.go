@@ -150,6 +150,7 @@ function check(what,got,want){if(!require('util').isDeepStrictEqual(norm(got),no
 function selectionValue(s){return {mentions:s.mentions,comment:s.comment,images:s.images};}
 Object.defineProperty(El.prototype,'classList',{get:function(){var el=this;return {contains:function(c){return el.className.split(/\s+/).indexOf(c)>=0;},add:function(c){if(!this.contains(c))el.className+=' '+c;},remove:function(c){el.className=el.className.split(/\s+/).filter(function(x){return x!==c;}).join(' ');},toggle:function(c,on){if(on===undefined)on=!this.contains(c);if(on)this.add(c);else this.remove(c);return on;}};}});
 El.prototype.matches=function(selector){var el=this;return selector.split(',').some(function(s){s=s.trim();var tag=/^[a-zA-Z][a-zA-Z0-9-]*/.exec(s);if(tag&&el.tagName!==tag[0].toUpperCase())return false;var id=/#([\w-]+)/.exec(s);if(id&&(el.getAttribute('id')||el.id)!==id[1])return false;var classes=s.match(/\.([\w-]+)/g)||[];if(classes.some(function(c){return !el.classList.contains(c.slice(1));}))return false;var re=/\[([\w-]+)(?:=["']?([^\]"']*)["']?)?\]/g,m;while((m=re.exec(s))){if(!el.hasAttribute(m[1])||m[2]!==undefined&&el.getAttribute(m[1])!==m[2])return false;}return true;});};
+El.prototype.appendChild=function(n){if(n.parentNode)n.parentNode.removeChild(n);this.childNodes.push(n);n.parentNode=this;return n;};
 El.prototype.insertBefore=function(n,before){if(n.parentNode)n.parentNode.removeChild(n);var i=this.childNodes.indexOf(before);if(i<0)i=this.childNodes.length;this.childNodes.splice(i,0,n);n.parentNode=this;return n;};
 El.prototype.getClientRects=function(){return this.hidden?[]:[this.getBoundingClientRect()];};
 El.prototype.scrollIntoView=function(){};
@@ -194,7 +195,7 @@ check("thumbnail removal touches only actual ref", [mpend.images,mnote.value,mpe
 addMention();
 check("one push one group with one memo", [bselections.length,bselections[0].comment,bselections[0].images,ctext.value,doc.contains(sourceFrame)], [1,"memo [Image #1]",[2],"",false]);
 check("attached source bytes remain copied",bselections[0].mentions[0].text,"captured <source> [Image #1]");
-check("group shows source identity and editable memo", [cchips.children[0].children[0].children[0].getAttribute("data-wb-entry"),cchips.children[0].children[2].textContent,rowNums(bselections[0].row)], ["e7","memo [Image #1]",["#2"]]);
+check("group shows source identity and editable memo", [cchips.querySelector(".selection-source").getAttribute("data-wb-entry"),cchips.querySelector(".selection-note").title,rowNums(bselections[0].row)], ["e7","memo [Image #1]",["#2"]]);
 var original = bselections[0];
 editSelection(0); mnote.value = "edited"; addMention();
 check("editing replaces the group object", [bselections[0] !== original,bselections[0].comment,bselections[0].images], [true,"edited",[2]]);
@@ -215,6 +216,97 @@ for(var i=0;i<8;i++) addFiles([file("cap"+i)],mnote);
 check("shared eight-image cap includes attached group", [imgs.length,mpend.images.length,toastTexts()[0]], [8,7,"js.img.refused:js.img.max:8"]);
 hideMention();
 check("cancel cap popup releases only its images", imgs.map(function(p){return p.n;}), [4]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+func TestSelectionComposerCompactMemoEditor(t *testing.T) {
+	runSelectionRuntime(t, "compact selection memo editor", `
+ctext.value = "ordinary text stays exact";
+var first = {mentions:[{topic:"plan",entry:"e7",text:"first"},{topic:"plan",entry:"e8",text:"second"}],comment:"",images:[]};
+bselections = [first]; renderChips();
+var group = cchips.children[0], open = group.querySelector("[data-selection-edit]"), remove = group.querySelector("[data-unselection]");
+check("one compact body holds all sources with separate remove", [cchips.children.length,group.classList.contains("selection-chip"),open.querySelectorAll(".selection-source").length,remove.textContent], [1,true,2,"×"]);
+check("empty memo has no indicator or inline input", [open.querySelector(".selection-note").hidden,group.querySelectorAll("textarea").length], [true,0]);
+editSelection(0);
+check("body opens existing anchored editor, not attachment", [mpend.edit===first,mbtn.hidden,mbtn.querySelector("[data-wbmention]").hidden,mnote.value,bselections.length], [true,false,true,"",1]);
+mnote.value = "saved on Escape\n한글";
+mbtn.dispatchEvent(new Event("keydown",{key:"Escape"}));
+check("Escape saves without changing composer or source grouping", [mpend,mbtn.hidden,bselections.length,bselections[0].comment,bselections[0].mentions,ctext.value], [null,true,1,"saved on Escape\n한글",first.mentions,"ordinary text stays exact"]);
+check("memo is a subtle titled indicator", [cchips.querySelector(".selection-note").hidden,cchips.querySelector(".selection-note").title], [false,"saved on Escape\n한글"]);
+editSelection(0); mnote.value = "saved on blur";
+mbtn.dispatchEvent(new Event("focusout",{relatedTarget:mnote.wsc.editor}));
+check("internal focus does not save or dismiss", [!!mpend,mbtn.hidden], [true,false]);
+var before = bselections[0], retained = cchips.children[0], retainedRemove = retained.querySelector("[data-unselection]");
+mbtn.dispatchEvent(new Event("focusout",{relatedTarget:retainedRemove}));
+check("blur replaces snapshot but keeps pressed chip controls", [mpend,bselections[0]!==before,bselections[0].comment,cchips.children[0]===retained,cchips.querySelector("[data-unselection]")===retainedRemove,cchips.querySelector(".selection-note").title], [null,true,"saved on blur",true,true,"saved on blur"]);
+editSelection(0); mnote.value = "   ";
+mbtn.dispatchEvent(new Event("focusout",{relatedTarget:ctext.wsc.editor}));
+check("whitespace memo hides indicator without trimming saved bytes", [bselections[0].comment,cchips.querySelector(".selection-note").hidden], ["   ",true]);
+check("presentation edits do not send or write composer text", [sent,ctext.value], [0,"ordinary text stays exact"]);
+// The only deletion action remains the existing explicit remove control.
+dropSelection(0); check("explicit remove deletes bundle", bselections.length,0);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+func TestSelectionComposerMemoCaretAndAnchor(t *testing.T) {
+	runSelectionRuntime(t, "saved memo caret and chip anchor", `
+var memo = "Saved memo 한글\nSecond line 😀";
+bselections = [{mentions:[{topic:"plan",entry:"e7",text:"source"}],comment:memo,images:[]}];
+renderChips();
+var group = cchips.children[0];
+group.getBoundingClientRect = function(){return {left:140,right:390,bottom:210};};
+editSelection(0);
+check("saved memo opens focused at its exact end", [doc.activeElement===mnote.wsc.editor,mnote.value,mnote.selectionStart,mnote.selectionEnd], [true,memo,memo.length,memo.length]);
+check("editor starts below chip left edge", [mbtn.style.left,mbtn.style.top], ["140px","216px"]);
+mnote.setSelectionRange(2,2); hideMention(); editSelection(0);
+check("reopening resets an old caret to memo end", [mnote.selectionStart,mnote.selectionEnd], [memo.length,memo.length]);
+hideMention();
+group.getBoundingClientRect = function(){return {left:990,right:1100,bottom:795};};
+editSelection(0);
+check("saved editor still clamps at right and bottom viewport edges", [mbtn.style.left,mbtn.style.top], ["896px","776px"]);
+hideMention();
+group.getBoundingClientRect = function(){return {left:-20,right:80,bottom:-20};};
+editSelection(0);
+check("saved editor still clamps at left and top viewport edges", [mbtn.style.left,mbtn.style.top], ["4px","4px"]);
+hideMention();
+placeMention({ms:[{topic:"plan",text:"new selection"}],x:140,y:210});
+check("normal selection attachment keeps its position offsets", [mbtn.style.left,mbtn.style.top], ["144px","216px"]);
+check("opening editors changes no saved memo or composer bytes", [bselections[0].comment,ctext.value,sent], [memo,"",0]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+func TestSelectionComposerMemoBlurPreservesImageRemoval(t *testing.T) {
+	js := string(mustAsset(t, "dashboard.js"))
+	click := regexp.MustCompile(`(?s)  // --- clicks: delegated.*?\n  doc.addEventListener\("click", function \(e\) \{.*?\n  \}\);`).FindString(js)
+	if click == "" {
+		t.Fatal("missing delegated image removal action")
+	}
+	runSelectionRuntime(t, "memo blur image removal event order", click+`
+["composer", "other bundle"].forEach(function(home) {
+  var source = {topic:"plan",entry:"e7",text:"source literal [Image #3]"};
+  bselections = [{mentions:[source],comment:"original",images:[1]}, {mentions:[{topic:"plan",entry:"e8",text:"other source"}],comment:"other memo",images:[2]}];
+  imgs = [1,2,3].map(function(n){return {n:n,name:"image"+n,data:"QUJD",ref:"",url:"blob:"+n};});
+  imgTrash = {}; ctext.value = "ordinary [Image #3] text"; renderChips();
+  editSelection(0); mnote.value = "saved memo literal [Image #3]";
+  var own = mimgs.children[0], other = bselections[1].row.children[0], ordinary = cimgs.children[0];
+  var pressed = (home === "composer" ? ordinary : other).querySelector("[data-unimg]");
+  var index = +pressed.getAttribute("data-unimg"), image = imgs[index];
+  pressed.dispatchEvent(new Event("mousedown")); pressed.focus();
+  mbtn.dispatchEvent(new Event("focusout",{relatedTarget:pressed}));
+  check(home+" blur saves without removing pressed thumbnail", [mpend,mbtn.hidden,bselections[0].comment,doc.contains(pressed),doc.activeElement===pressed], [null,true,"saved memo literal [Image #3]",true,true]);
+  check(home+" blur moves only editor thumbnails and preserves other rows", [bselections[0].row.children[0]===own,bselections[1].row.children[0]===other,cimgs.children[0]===ordinary,imgs[index]===image,rowNums(mimgs)], [true,true,true,true,[]]);
+  // Image-home reconciliation may run before pointer release as well.
+  followImgs();
+  check(home+" reconciliation retains the pressed control", doc.contains(pressed),true);
+  pressed.dispatchEvent(new Event("mouseup"));
+  // A browser cannot deliver a delegated click from the detached old node.
+  if (doc.contains(pressed)) doc.listeners.click({target:pressed});
+  check(home+" click removes exactly its intended image", [imgs.map(function(p){return p.n;}),bselections.map(function(s){return s.images;})], home === "composer" ? [[1,2],[[1],[2]]] : [[1,3],[[1],[]]]);
+  check(home+" removal leaves literal source/memo and unrelated text exact", [bselections[0].mentions[0],bselections[0].comment,bselections[1].comment,ctext.value,sent], [source,"saved memo literal [Image #3]","other memo",home === "composer" ? "ordinary text" : "ordinary [Image #3] text",0]);
+});
 process.stdout.write(bad.join("\n"));
 `)
 }

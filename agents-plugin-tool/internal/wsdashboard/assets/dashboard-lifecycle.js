@@ -632,6 +632,7 @@
   boardBoxes().forEach(bandBoard);
   mountFramesPaced(doc);
   if (cardBoard) mountBoardOverview();
+  boardRestoreReload();
   applySent();
   restoreDraft();
   tlCount();
@@ -645,6 +646,70 @@
   nearTop();
   if (framed) shFrameInit();
   if (shell && window.WsShell) shShellInit();
+  // --- desktop app update
+  // Only the Werkschaft desktop shell's preload defines werkschaftDesktop;
+  // a browser tab (or an older shell) never shows the row or the toasts.
+  // Status: { state, version, message, skipped, phase: { phase, version,
+  // skipped } }; state drives the toast, phase (unchecked | none |
+  // available | ready) the settings line. downloadPage, when the shell sends
+  // it, adds [Open download page] (replacing [Update] on available: a shell
+  // that does not update itself); the link opens in the system browser
+  // through the shell's window-open handler.
+  function desktopUpdate() {
+    var api = window.werkschaftDesktop && window.werkschaftDesktop.update;
+    var card = gmenu && gmenu.querySelector(".gmenu");
+    if (!api || typeof api.onStatus !== "function" || !card || !window.WsToast) return;
+    var note = card.querySelector(".gn");
+    function item(id, mark, label) {
+      var b = doc.createElement("button");
+      b.type = "button";
+      b.id = id;
+      b.innerHTML = '<span class="gk"></span><span><span class="dupd-label"></span><span class="gs"></span></span>';
+      b.querySelector(".gk").textContent = mark;
+      b.querySelector(".dupd-label").textContent = label;
+      card.insertBefore(b, note);
+      return b;
+    }
+    var head = doc.createElement("span");
+    head.className = "gt gt2";
+    head.textContent = wsT("js.update.title");
+    card.insertBefore(head, note);
+    var check = item("dupd-check", "↻", wsT("js.update.check"));
+    var restart = item("dupd-restart", "⏻", wsT("js.update.restart"));
+    restart.hidden = true;
+    check.addEventListener("click", function () { api.check(); });
+    restart.addEventListener("click", function () { api.restart(); });
+    function phaseLine(p) {
+      check.querySelector(".gs").textContent = !p ? "" :
+        p.phase === "none" ? wsT("js.update.state.none") :
+        p.phase === "available" ? wsT("js.update.state.available", p.version) + (p.skipped ? " " + wsT("js.update.skipped") : "") :
+        p.phase === "ready" ? wsT("js.update.state.ready", p.version) : "";
+      restart.hidden = !p || p.phase !== "ready";
+    }
+    var open = null;
+    function toast(text, opts) { if (open) open.close(); open = WsToast.show(text, opts); }
+    var close = wsT("js.card.close");
+    api.onStatus(function (s) {
+      if (!s || typeof s.state !== "string") return;
+      if (s.phase) phaseLine(s.phase);
+      var v = String(s.version || ""), m = String(s.message || "");
+      var page = typeof s.downloadPage === "string" && /^https:\/\//.test(s.downloadPage) ? s.downloadPage : "";
+      var pageAct = page ? [{ label: wsT("js.update.downloadpage"), run: function () { window.open(page, "_blank", "noopener"); } }] : [];
+      if (s.state === "available") {
+        toast(wsT("js.update.available", v) + (s.skipped ? " " + wsT("js.update.skipped") : ""), { sticky: true, dismiss: close, actions:
+          (page ? pageAct : [{ label: wsT("js.update.install"), run: function () { api.download(); } }]).concat(
+          [{ label: wsT("js.update.skip"), run: function () { api.skip(v); } }]) });
+      } else if (s.state === "downloading") toast(wsT("js.update.downloading", v), { sticky: true });
+      else if (s.state === "ready") {
+        toast(wsT("js.update.ready", v), { sticky: true, dismiss: close, actions: [
+          { label: wsT("js.update.restart"), run: function () { api.restart(); } }] });
+      } else if (s.state === "current") toast(wsT("js.update.current", v));
+      else if (s.state === "error") toast(wsT("js.update.failed"), { kind: "warn" });
+      else if (s.state === "download-error") toast(wsT("js.update.downloadfailed", m), { kind: "warn", sticky: true, dismiss: close, actions: pageAct });
+      else if (s.state === "apply-error") toast(wsT("js.update.applyfailed", m), { kind: "warn", sticky: true, dismiss: close, actions: pageAct });
+    });
+  }
   if (!shell) trackerStart();
+  desktopUpdate();
   connect();
 })();

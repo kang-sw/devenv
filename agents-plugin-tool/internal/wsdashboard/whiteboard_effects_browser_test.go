@@ -79,9 +79,12 @@ func TestWhiteboardEffectsBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
 		t.Skip("set WS_PLAYWRIGHT_MODULE to run isolated Chromium acceptance")
 	}
+	// Unset keeps the run disposable; set, it must name an absolute retained directory.
 	artifacts := os.Getenv("WS_WHITEBOARD_EFFECTS_ARTIFACTS")
-	if !filepath.IsAbs(artifacts) {
-		t.Fatal("set WS_WHITEBOARD_EFFECTS_ARTIFACTS to an absolute retained output directory")
+	if artifacts == "" {
+		artifacts = t.TempDir()
+	} else if !filepath.IsAbs(artifacts) {
+		t.Fatal("WS_WHITEBOARD_EFFECTS_ARTIFACTS must be an absolute retained output directory")
 	}
 	if err := os.MkdirAll(artifacts, 0o700); err != nil {
 		t.Fatal(err)
