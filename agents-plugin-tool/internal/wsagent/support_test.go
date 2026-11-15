@@ -60,7 +60,7 @@ func newSupportHarness(t *testing.T) *supportHarness {
 		now:     time.Date(2026, 11, 15, 9, 35, 42, 0, time.UTC),
 	}
 	h.config.Now = func() time.Time { return sh.now }
-	h.config.Backends = map[string]Backend{BackendClaude: sh.claude, BackendPi: sh.pi}
+	h.config.Backends = map[string]BackendRegistration{BackendClaude: {Backend: sh.claude, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes}, BackendPi: {Backend: sh.pi, LeadProfile: LeadProfilePi}}
 	stubLookPath(t)
 	sh.restart()
 	return sh
@@ -409,7 +409,7 @@ func realChoices(t *testing.T, now *time.Time) *Support {
 	t.Helper()
 	r := NewRunner(Options{
 		Dir:      t.TempDir(),
-		Backends: map[string]Backend{BackendClaude: ClaudeBackend{Command: "claude-x"}, BackendPi: PiBackend{Command: "pi-x"}},
+		Backends: map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "claude-x"}}, BackendPi: {Backend: PiBackend{Command: "pi-x"}}},
 		Config:   testConfig(t),
 	})
 	return NewSupport(SupportOptions{Runner: r, Dir: t.TempDir(), StoreRoot: func(string) (string, error) { return "", errors.New("none") }, Now: func() time.Time { return *now }})

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kang-sw/devenv/internal/execjob"
+	"github.com/kang-sw/devenv/internal/wsagent"
 	"github.com/kang-sw/devenv/internal/wsconfig"
 	"github.com/kang-sw/devenv/internal/wsdoc"
 	"github.com/kang-sw/devenv/internal/wsgit"
@@ -996,7 +996,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		// config.tuning path: project the per-key writer schema + current values,
 		// with the no-agent full-ws-only cut applied per entry.
 		catalogResolver := s.sessionResolver(sessionKey, s.declared.withDefaults(builtinConfigAndPromptDefaults()))
-		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, s.currentHarness(), s.noAgentMode(), s.configOptions())
+		catalog, err := buildTuningCatalog(rsrcRoot, &catalogResolver, sessionKey, s.currentHarness(), s.noAgentMode(), s.configOptions(), s.agentBackends()...)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
@@ -2273,15 +2273,17 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		topLevelLead := false
 		if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 			capturedKey := strings.TrimSpace(keyStr)
-			if entry, found := s.sessions.lookup(capturedKey); found && entry.scope == roleLead {
-				// Child key binding root: root_override when set, else caller's bound root.
+			entry, err := s.resolveSession(sessionAccess{mode: "lookup", key: capturedKey})
+			if err != nil {
+				return toolTextResponse(req.ID, "", err)
+			}
+			if entry.found && entry.scope == roleLead {
+				mintRoot = entry.root
 				if rootOverride != "" {
 					mintRoot = rootOverride
-				} else {
-					mintRoot = entry.root
 				}
-				parentKey = capturedKey
-				topLevelLead = entry.isTopLevelLead()
+				parentKey = entry.key
+				topLevelLead = entry.parent == ""
 			}
 		}
 		callerContext, planStem := renderPlanStem(name, callerContext, topLevelLead)
@@ -2371,34 +2373,18 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 	scope := parseCapabilityScope(arguments["capability"])
 	parentKey, _ := arguments["parent_session_key"].(string)
 	parentKey = strings.TrimSpace(parentKey)
-	hosted := s.hostedSessionKey()
 	if relogin, _ := arguments["relogin_session_key"].(string); strings.TrimSpace(relogin) != "" {
-		relogin = strings.TrimSpace(relogin)
-		if hosted != "" && relogin != hosted {
-			return toolTextResponse(id, "", hostedKeyRefusal("session bootstrap", hosted, relogin))
-		}
-		return s.handleLeadRelogin(id, arguments, relogin, canonical, scope, parentKey)
+		return s.handleLeadRelogin(id, arguments, strings.TrimSpace(relogin), canonical, scope, parentKey)
 	}
-	if hosted != "" && parentKey == "" && scope == roleLead {
-		// A hosted session's top-lead bootstrap returns the daemon-minted key
-		// instead of minting, so its reply-id and registration never move.
-		// Child mints below stay as they are: a subagent on this connection
-		// never receives the lead key.
-		if reason := s.leadKeyRefusal(hosted, canonical); reason != "" {
-			return toolTextResponse(id, "", fmt.Errorf("session bootstrap: this session is hosted and its session key is fixed, but %s %q %s", envHostedSessionKey, hosted, reason))
-		}
-		s.rebindMailboxOwnerAtFerrule(hosted, "", roleLead, canonical)
-		s.recordHarnessSession(hosted, arguments)
-		return s.leadLoginResponse(id, arguments, hosted, canonical)
-	}
-	if parentKey != "" {
-		if _, ok := s.sessions.lookup(parentKey); !ok {
-			return toolTextResponse(id, "", fmt.Errorf("session bootstrap: parent_session_key %q is not a known session key", parentKey))
-		}
-	}
-	key, err := s.sessions.mint(canonical, scope, parentKey)
+	resolved, err := s.resolveSession(sessionAccess{mode: "bootstrap", root: canonical, scope: scope, parent: parentKey})
 	if err != nil {
 		return toolTextResponse(id, "", err)
+	}
+	key := resolved.key
+	if resolved.hosted {
+		s.rebindMailboxOwnerAtFerrule(key, "", roleLead, canonical)
+		s.recordHarnessSession(key, arguments)
+		return s.leadLoginResponse(id, arguments, key, canonical)
 	}
 	// Ferrule owner binding (mailbox core Decision 3): a parent-less
 	// lead-capability mint is a top-lead (re-)login, so it rebinds this
@@ -2437,16 +2423,7 @@ func (s *Server) handleLeadLogin(id json.RawMessage, arguments map[string]any) r
 // a re-login that also carries a parent or a non-lead capability, since those
 // describe a key the re-login could never return.
 func (s *Server) handleLeadRelogin(id json.RawMessage, arguments map[string]any, key, canonical string, scope toolRole, parentKey string) response {
-	if parentKey != "" {
-		return toolTextResponse(id, "", errors.New("session bootstrap: relogin_session_key cannot be combined with parent_session_key"))
-	}
-	if scope != roleLead {
-		return toolTextResponse(id, "", errors.New("session bootstrap: relogin_session_key requires lead capability"))
-	}
-	if reason := s.leadKeyRefusal(key, canonical); reason != "" {
-		return toolTextResponse(id, "", fmt.Errorf("session bootstrap: relogin_session_key %q %s", key, reason))
-	}
-	if err := s.hostedLoginGuard(key, canonical); err != nil {
+	if _, err := s.resolveSession(sessionAccess{mode: "relogin", key: key, root: canonical, scope: scope, parent: parentKey}); err != nil {
 		return toolTextResponse(id, "", err)
 	}
 	s.rebindMailboxOwnerAtFerrule(key, "", roleLead, canonical)
@@ -2858,7 +2835,7 @@ type tuningAgentTierCurrent struct {
 
 // harness selects the bucket a harness-bucketed knob's current value is
 // resolved for (the session's detected harness; empty reads only all).
-func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey, harness string, noAgentMode bool, configOpts wsconfig.Options) (tuningCatalog, error) {
+func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey, harness string, noAgentMode bool, configOpts wsconfig.Options, registries ...map[string]wsagent.BackendRegistration) (tuningCatalog, error) {
 	points, err := scanOverridePoints(rsrcRoot)
 	if err != nil {
 		return tuningCatalog{}, err
@@ -3101,7 +3078,7 @@ func buildTuningCatalog(rsrcRoot string, resolver *wsconfig.Resolver, sessionKey
 	}
 	appendKnob(profileEntry, profileKnob)
 
-	appendKnob(agentProfileTuningKnob(resolver))
+	appendKnob(agentProfileTuningKnob(resolver, registries...))
 
 	for _, k := range []declaredConfigKey{worktreeNudgeStaleDaysKey, worktreeNudgePreservedGBKey} {
 		entry := k.entry()

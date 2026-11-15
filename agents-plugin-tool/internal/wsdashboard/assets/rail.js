@@ -652,13 +652,13 @@
 
   // leadBody is the spawn request for a hosted lead session in root from
   // the form f: the harness, the plugin isolation (always sent), and a model, effort, and permission mode only
-  // when one was picked (none leaves the harness's own). Only a Claude
-  // session takes a permission mode.
+  // when one was picked (none leaves the harness's own). The form supplies
+  // admitted permission choices; Pi keeps its existing mode-free request.
   function leadBody(root, f) {
     var body = { root: root, harness: String(f.harness || ""), plugin_isolation: f.isolation === "isolated" ? "isolated" : "default" };
     if (f.model) body.model = String(f.model);
     if (f.effort) body.effort = String(f.effort);
-    if (f.mode && body.harness === "claude") body.permission_mode = String(f.mode);
+    if (f.mode && body.harness !== "pi") body.permission_mode = String(f.mode);
     return body;
   }
 

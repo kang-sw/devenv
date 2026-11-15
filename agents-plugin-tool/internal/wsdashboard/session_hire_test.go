@@ -27,7 +27,17 @@ type hireFake struct {
 	createErr error
 	requests  map[string]string
 	cancelled int
+	admitted  map[string]bool
 }
+
+func (h *hireFake) AdmitsLead(name string) bool {
+	if h.admitted != nil {
+		return h.admitted[name]
+	}
+	return name == "claude" || name == "pi"
+}
+
+func hireRegistryFixture(o *DaemonOptions) { o.Agents = &hireFake{dir: o.Dir} }
 
 func (h *hireFake) Handler() http.Handler      { return http.NotFoundHandler() }
 func (h *hireFake) Start(func(string, string)) {}
@@ -211,7 +221,7 @@ func TestHiringFlagAndTrust(t *testing.T) {
 }
 
 func TestHiringHTTPBodyBoundaries(t *testing.T) {
-	f := startPageFixture(t)
+	f := startPageFixture(t, hireRegistryFixture)
 	enableHiring(t, f.d, "livesession")
 	for _, body := range []string{`{}`, `null`, `{"enabled":"true"}`, `{"enabled":true}{"enabled":false}`} {
 		res := hirePost(f.d, "/s/livesession/hiring", body)
@@ -331,7 +341,7 @@ func TestHiringExpiryAndRestart(t *testing.T) {
 	var clock atomic.Int64
 	clock.Store(time.Now().UnixMilli())
 	now := func() time.Time { return time.UnixMilli(clock.Load()) }
-	f := startPageFixture(t, func(o *DaemonOptions) { o.hireNow = now })
+	f := startPageFixture(t, hireRegistryFixture, func(o *DaemonOptions) { o.hireNow = now })
 	enableHiring(t, f.d, "livesession")
 	p := requestHiring(t, f.d, "livesession")
 	f.d.Close()
@@ -360,7 +370,7 @@ func TestHiringPendingSurvivesRestartAndExpiryClock(t *testing.T) {
 	var clock atomic.Int64
 	clock.Store(time.Now().UnixMilli())
 	now := func() time.Time { return time.UnixMilli(clock.Load()) }
-	f := startPageFixture(t, func(o *DaemonOptions) { o.hireNow = now })
+	f := startPageFixture(t, hireRegistryFixture, func(o *DaemonOptions) { o.hireNow = now })
 	enableHiring(t, f.d, "livesession")
 	p := requestHiring(t, f.d, "livesession")
 	f.d.Close()
@@ -392,7 +402,7 @@ func TestHiringPendingSurvivesRestartAndExpiryClock(t *testing.T) {
 func TestHiringWithdrawals(t *testing.T) {
 	for _, edge := range []string{"index", "startup", "approval", "flag"} {
 		t.Run(edge, func(t *testing.T) {
-			f := startPageFixture(t)
+			f := startPageFixture(t, hireRegistryFixture)
 			enableHiring(t, f.d, "livesession")
 			p := requestHiring(t, f.d, "livesession")
 			reg, err := ReadRegistration(f.dir, p.Requester)
@@ -449,7 +459,7 @@ func TestHiringWithdrawals(t *testing.T) {
 }
 
 func TestHiringProcessStoppedKeepsRequest(t *testing.T) {
-	f := startPageFixture(t)
+	f := startPageFixture(t, hireRegistryFixture)
 	enableHiring(t, f.d, "livesession")
 	p := requestHiring(t, f.d, "livesession")
 	reg, err := ReadRegistration(f.dir, p.Requester)
@@ -597,7 +607,7 @@ func TestHiringEndedRequesterCancelsInterruptedCreation(t *testing.T) {
 }
 
 func TestHiringOutcomeWriteFailureRetriesFromDisk(t *testing.T) {
-	f := startPageFixture(t)
+	f := startPageFixture(t, hireRegistryFixture)
 	enableHiring(t, f.d, "livesession")
 	p := requestHiring(t, f.d, "livesession")
 	path, err := (wsmailbox.Paths{State: wsstate.Options{CacheHome: filepath.Dir(f.dir)}}).ReplyRegistry()
@@ -629,6 +639,39 @@ func TestHiringOutcomeWriteFailureRetriesFromDisk(t *testing.T) {
 	defer d.Close()
 	waitFor(t, "retained outcome mail", func() bool { return len(hireMails(t, d, p.Requester)) == 1 })
 	assertHireMail(t, d, p, "rejected")
+}
+
+func TestHiringRegistryAdmission(t *testing.T) {
+	for _, tt := range []struct {
+		name, harness string
+		admitted      map[string]bool
+		want          bool
+	}{
+		{"registered extension", "fixture", map[string]bool{"fixture": true}, true},
+		{"registered builtin", "claude", map[string]bool{"claude": true}, true},
+		{"unregistered builtin", "pi", map[string]bool{"fixture": true}, false},
+		{"worker only", "worker", map[string]bool{"worker": false}, false},
+		{"unknown", "unknown", map[string]bool{}, false},
+		{"unspecified", "", map[string]bool{}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			creator := &hireFake{admitted: tt.admitted}
+			f := startPageFixture(t, func(o *DaemonOptions) { creator.dir, o.Agents = o.Dir, creator })
+			enableHiring(t, f.d, "livesession")
+			p, err := f.d.RequestHire("livesession", HireRequest{Reason: "why", RecoveryContext: "recover", Harness: tt.harness})
+			if tt.want {
+				if err != nil || p.Harness != tt.harness {
+					t.Fatalf("request = %+v, %v", p, err)
+				}
+			} else if err == nil || err.Error() != "harness must be claude or pi" {
+				t.Fatalf("refusal text changed: %v", err)
+			}
+			queue, err := f.d.pendingHires()
+			if err != nil || len(queue) != map[bool]int{true: 1, false: 0}[tt.want] || creator.created != 0 {
+				t.Fatalf("admission side effects = %+v, %v; created=%d", queue, err, creator.created)
+			}
+		})
+	}
 }
 
 func TestHiringRoster(t *testing.T) {

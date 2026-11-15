@@ -54,7 +54,7 @@ func TestPiSpawnBindsKeysToCwdWorktree(t *testing.T) {
 	dir := t.TempDir()
 	keys := NewAgentKeyStore()
 	runner := wsagent.NewRunner(wsagent.Options{
-		Dir: dir, Backends: map[string]wsagent.Backend{wsagent.BackendPi: backend}, Keys: keys, Config: cfg,
+		Dir: dir, Backends: map[string]wsagent.BackendRegistration{wsagent.BackendPi: {Backend: backend}}, Keys: keys, Config: cfg,
 		WSMCP: func(root string) (wsagent.MCPCommand, error) {
 			return wsagent.MCPCommand{Command: "/bin/ws-mcp", Args: []string{"serve", "--stdio", "--root", root}}, nil
 		},

@@ -162,7 +162,7 @@ func (h *piRecoveryHarness) start() {
 	host := recoveryPythonHost{ManagerHost: ManagerHost{h.manager}, python: h.python, script: filepath.Join(h.base, "fake-pi.py")}
 	h.runner = NewRunner(Options{
 		Dir: filepath.Join(h.base, "dashboard"), Holders: host,
-		Backends: map[string]Backend{BackendPi: PiBackend{Command: h.python}},
+		Backends: map[string]BackendRegistration{BackendPi: {Backend: PiBackend{Command: h.python}}},
 		Keys:     &fakeKeys{}, Config: wsconfig.Options{CacheHome: filepath.Join(h.base, "cache"), ConfigHome: filepath.Join(h.base, "config")},
 		WSMCP: func(string) (MCPCommand, error) { return MCPCommand{Command: "unused-ws-mcp"}, nil },
 		Report: func(rep TurnReport) {

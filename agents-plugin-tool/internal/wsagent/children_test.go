@@ -30,7 +30,7 @@ func childHarness(t *testing.T) (*harness, *reports) {
 	})
 	got := &reports{}
 	h.config.Report = got.add
-	h.config.Backends[BackendPi] = h.backend
+	h.config.Backends[BackendPi] = BackendRegistration{Backend: h.backend}
 	h.backend.steers = true
 	h.endpoint = "http://127.0.0.1:1"
 	for tier, model := range map[string]string{"small": "prov/small-model", "medium": "prov/medium-model", "large": "prov/large-model"} {

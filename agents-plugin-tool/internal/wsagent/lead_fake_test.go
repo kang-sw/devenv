@@ -734,7 +734,7 @@ func newLeadHarness(t *testing.T) *leadHarness {
 	h.opts = Options{
 		Now:       func() time.Time { return now },
 		Dir:       h.dir,
-		Backends:  map[string]Backend{BackendClaude: ClaudeBackend{Command: "/opt/harness/claude"}, BackendPi: PiBackend{Command: "/opt/harness/pi"}},
+		Backends:  map[string]BackendRegistration{BackendClaude: {Backend: ClaudeBackend{Command: "/opt/harness/claude"}, LeadProfile: LeadProfileClaude, PermissionModes: LeadPermissionModes}, BackendPi: {Backend: PiBackend{Command: "/opt/harness/pi"}, LeadProfile: LeadProfilePi}},
 		Keys:      &fakeKeys{},
 		Config:    testConfig(t),
 		Log:       h.log,

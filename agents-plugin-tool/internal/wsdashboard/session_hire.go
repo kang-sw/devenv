@@ -154,8 +154,11 @@ func (d *Daemon) RequestHire(replyID string, request HireRequest) (HireProposal,
 		return HireProposal{}, err
 	}
 	request.Label = label
-	if request.Harness != "" && request.Harness != "claude" && request.Harness != "pi" {
-		return HireProposal{}, errors.New("harness must be claude or pi")
+	if request.Harness != "" {
+		admitted, ok := d.agents.(interface{ AdmitsLead(string) bool })
+		if !ok || !admitted.AdmitsLead(request.Harness) {
+			return HireProposal{}, errors.New("harness must be claude or pi")
+		}
 	}
 	d.hireMu.Lock()
 	defer d.hireMu.Unlock()

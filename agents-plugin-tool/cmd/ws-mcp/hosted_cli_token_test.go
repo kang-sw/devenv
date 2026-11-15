@@ -29,10 +29,10 @@ type cliTokenProcess struct {
 }
 
 func (p *cliTokenProcess) Events() <-chan wsagent.Event { return p.events }
-func (p *cliTokenProcess) Send(string) error             { return nil }
-func (p *cliTokenProcess) Interrupt() error              { return nil }
-func (p *cliTokenProcess) SetModel(string) error         { return nil }
-func (p *cliTokenProcess) SetEffort(string) error        { return nil }
+func (p *cliTokenProcess) Send(string) error            { return nil }
+func (p *cliTokenProcess) Interrupt() error             { return nil }
+func (p *cliTokenProcess) SetModel(string) error        { return nil }
+func (p *cliTokenProcess) SetEffort(string) error       { return nil }
 func (p *cliTokenProcess) Close() error {
 	p.once.Do(func() { close(p.events) })
 	return nil
@@ -55,7 +55,7 @@ func TestHostedCLIWorkerTokenRouting(t *testing.T) {
 	}
 	backend := &cliTokenBackend{starts: make(chan wsagent.StartSpec, 8)}
 	runner := wsagent.NewRunner(wsagent.Options{Dir: t.TempDir(), Config: config, Keys: keys,
-		Backends: map[string]wsagent.Backend{wsagent.BackendPi: backend},
+		Backends: map[string]wsagent.BackendRegistration{wsagent.BackendPi: {Backend: backend}},
 		WSMCP:    func(string) (wsagent.MCPCommand, error) { return wsagent.MCPCommand{Command: "unused"}, nil },
 	})
 	daemon := httptest.NewServer(runner.Handler())
