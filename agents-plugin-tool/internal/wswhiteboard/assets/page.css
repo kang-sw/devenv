@@ -171,9 +171,7 @@ button.chip.bulk:focus-visible { outline: 2px solid var(--wb-primary); outline-o
 .quiet .eta{color:var(--wb-fg)}
 .quiet .eta.over{color:var(--wb-ck-no)}
 @media(max-width:600px){.topic-state{order:2;flex-basis:100%}}
-.tbar .tago, .tbar .body-age { font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.tbar:has(> .body-age) { flex-wrap: wrap; }
-.tbar .body-age { max-width: 100%; white-space: normal; }
+.tbar .tago { font-size: 11.5px; opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tbar .tnote-toggle { background: transparent; color: inherit; opacity: .7; flex: none; }
 .tbar .tnote-toggle:hover { opacity: 1; }
 /* A topic's note is a floating capsule in the topic's head: rounded, on the

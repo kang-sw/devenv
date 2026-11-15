@@ -22,7 +22,7 @@
 
 {{define "closedmore"}}{{with .ClosedMore}}{{if $.DocFramed}}<button class="btn closed-more" data-closed-next="{{$.ClosedNext}}" data-closed-more="{{.}}">{{t "wb.closed.showmore" .}}</button>{{else}}<div class="closed-more">{{t "wb.closed.more" .}}</div>{{end}}{{end}}{{end}}
 
-{{define "tago"}}{{with .UpdatedAt}}<time class="tago" datetime="{{.}}" title="{{t "wb.updated"}}"{{if $.Page.Full}} data-at="{{$.UpdatedMs}}"{{end}}>{{$.UpdatedClock}}</time>{{end}}{{if and .Page.Full .Doc}}<span class="body-age" data-body-age{{with .BodyUpdatedAt}} data-body-at="{{.}}"{{end}}>{{t "js.wb.body.unknown"}}</span>{{end}}{{end}}
+{{define "tago"}}{{with .UpdatedAt}}<time class="tago" datetime="{{.}}" title="{{t "wb.updated"}}"{{if $.Page.Full}} data-at="{{$.UpdatedMs}}"{{end}}>{{$.UpdatedClock}}</time>{{end}}{{end}}
 
 {{/* recap is the topic's current-state line, the latest agent log line (a
 legacy recap until converted): its inline author and time, then text, in the topic bar's
@@ -37,7 +37,7 @@ The chip, not the recap, takes the role: the recap text may hold links. */}}
 
 {{/* The dashboard's whole-card fold owns the topic body. Standalone pages
 retain their content disclosure; inner history/panel disclosures are separate. */}}
-{{define "doc"}}{{if .HasFold}}{{if .Page.DocFramed}}<div class="tdoc">{{else}}<details class="tdoc" data-key="doc:{{.Name}}"{{if .DocOpen .Page.Embed}} open{{end}}><summary title="{{t "wb.doc"}}">{{icon "book"}}{{if and .Page.Embed .DocNew}}<span class="new" title="{{t "chip.fresh"}}"></span>{{end}}</summary>{{end}}{{if .RecapFolded}}{{template "recap" .}}{{end}}{{if .Doc}}<div class="doc-body {{.DocClass}}">{{.Page.DocHTML .Name}}</div>{{end}}{{if .Page.DocFramed}}</div>{{else}}</details>{{end}}{{end}}{{end}}
+{{define "doc"}}{{if .HasFold}}{{if .Page.DocFramed}}<div class="tdoc"{{if and .Page.Full .Doc}} data-body-at="{{.BodyUpdatedAt}}"{{end}}>{{else}}<details class="tdoc" data-key="doc:{{.Name}}"{{if and .Page.Full .Doc}} data-body-at="{{.BodyUpdatedAt}}"{{end}}{{if .DocOpen .Page.Embed}} open{{end}}><summary title="{{t "wb.doc"}}">{{icon "book"}}{{if and .Page.Embed .DocNew}}<span class="new" title="{{t "chip.fresh"}}"></span>{{end}}</summary>{{end}}{{if .RecapFolded}}{{template "recap" .}}{{end}}{{if .Doc}}<div class="doc-body {{.DocClass}}">{{.Page.DocHTML .Name}}</div>{{end}}{{if .Page.DocFramed}}</div>{{else}}</details>{{end}}{{end}}{{end}}
 
 {{define "topicstate"}}{{if and .State (not .Closed) (not .StateDiagnostic)}}<span class="topic-state">{{with .State}}{{if eq .Value "awaiting-confirmation"}}<span class="stb confirm"><span class="d" aria-hidden="true"></span>{{t "js.wb.state.awaiting-confirmation"}}</span>{{else if eq .Value "waiting"}}<span class="stb wait"><span class="d" aria-hidden="true"></span>{{t "js.wb.state.waiting"}}</span>{{else if eq .Value "discussing"}}<span class="stb discuss"><span class="d" aria-hidden="true"></span>{{t "js.wb.state.discussing"}}</span>{{else if eq .Value "implementing"}}<span class="stb impl"><span class="d" aria-hidden="true"></span>{{t "js.wb.state.implementing"}}{{with .Run}} · <span class="own">{{.Owner}}</span>{{end}}</span>{{end}}{{end}}</span>{{end}}{{end}}
 
