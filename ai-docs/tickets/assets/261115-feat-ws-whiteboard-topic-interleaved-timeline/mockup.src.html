@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>목업 · 토픽 카드 iteration interleave</title>
+<!-- Real whiteboard stylesheet, copied verbatim from
+     agents-plugin-tool/internal/wswhiteboard/assets/page.css -->
+<link rel="stylesheet" href="page.css">
+<link rel="stylesheet" href="mock-common.css">
+</head>
+<body class="full">
+<!--SPRITE-->
+<div class="mk-bar" id="mkbar">
+  <span class="grp">변형 <button data-v="A">A · 메시지 단위 블록</button><button data-v="B">B · 단일 타임라인</button><button data-v="C">C · 대화형 턴 + 지난 턴 접기</button><button data-v="NOW">현재 카드</button></span>
+  <span class="grp">시점 <button data-scene="open">11:39 (질문 2개 열림)</button><button data-scene="final">11:48 (모두 답변됨)</button></span>
+  <span class="grp">테마 <button data-theme-btn="dark">다크</button><button data-theme-btn="light">라이트</button></span>
+</div>
+<div class="mk-desc" id="mkdesc"></div>
+<div class="wrap mk"><div id="root"></div></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Data: the real topic "message-timestamp" (board sweatradartakingoverwrite,
+// t96/log.jsonl e3178..e3231, items 889/892) plus the owner messages from the
+// session's drained inbox (sentAt). Times KST.
+// ---------------------------------------------------------------------------
+const TOPIC_LABEL = "대시보드 메시지 양식 · 토픽 닫기 요청";
+const ITEMS = {
+  889: { id: 889, title: "대시보드 메시지 블록에 보낸 시각을 어떻게 보여 줄까요?",
+    options: ["오늘 보낸 것은 \"11:29\"처럼 시각만, 다른 날은 \"11/14 23:50\"처럼 날짜도 붙임. 마우스를 올리면 전체 날짜 · 시각 · 시간대를 보여 줌",
+              "항상 \"2026-11-15 11:29\"처럼 날짜와 시각을 모두 표시",
+              "\"3분 전\"처럼 상대 시간으로 표시하고, 마우스를 올리면 정확한 시각"],
+    rec: "a", recWhy: "지금 보류 표시줄의 \"11:29\"와 같은 모양이라 익숙하고, 날짜가 바뀐 메시지만 길어짐. c는 화면이 계속 바뀌고, 에이전트 기록과 맞춰 볼 때 다시 계산해야 함",
+    asked: "11:35", answered: "11:40", wait: "5분 뒤", pick: "c", reading: "60분까지는 n분 전으로, 그 외에는 a로", quote: "889=c^60분까지는 n분 전으로, 그 외에는 a로 가죠.", askedEntry: "e3180" },
+  892: { id: 892, title: "토픽 닫기 요청의 \"이유\"는 어디에 적게 할까요?",
+    options: ["토픽마다 붙은 요청 캡슐에 각자 이유 칸이 있음(노트처럼). 여러 토픽을 닫을 때 토픽별로 다른 이유를 적을 수 있음",
+              "캡슐에는 토픽 이름만 붙고, 이유는 평소처럼 입력창 본문에 한 번 적음. 여러 토픽이면 이유 하나를 함께 씀"],
+    rec: "a", recWhy: "말씀하신 \"노트처럼\"에 가깝고, 여러 토픽을 한 번에 보낼 때 어느 이유가 어느 토픽 것인지 에이전트가 헷갈리지 않음",
+    asked: "11:39", answered: "11:40", wait: "1분 뒤", pick: "a", reading: "", quote: "892=a", askedEntry: "e3196" },
+};
+// Owner inputs (inbox drained records; the T0 `inputs` stamp would carry these).
+const INPUTS = {
+  m1: { at: "11:34", kind: "text", att: "이미지 1", text: "이런 식으로 묶어서 메시지 보낼 때, 화이트보드에서 보내는 모든 메시지가 RAW에서는 <ws:user at=\"…\">로 묶여서 보내지고 대시보드에서는 파싱해서 별도 블록으로 보일 수 있게, 에이전트 입장에서도 각 메시지 전달 타이밍을 구별할 수 있게요. … 다만 메시지에 각 시간 표시하는 방식은 당신 의견이 좀 필요하긴 하네요." },
+  m2: { at: "11:38", kind: "text", att: "이미지 1", text: "이 토픽 \"논의 중\"으로 안 잡혔는데, 기본적으로 새로 추가한 토픽 전부 논의 중으로 잡히도록 하죠. … 그리고 새 아젠다 … 토픽 카드 우상단에도 \"x\" 버튼을 두고, 이건 기본적으로 \"토픽 닫기\" 요청을 노트나 멘션처럼 채팅에 첨부하는 기능으로 뒀음 해요." },
+  m3: { at: "11:40", kind: "chips", chips: [{ id: 889, k: "c", t: "\"3분 전\"처럼 상대 시간…", note: "60분까지는 n분 전으로, 그 외에는 a로 가죠." }, { id: 892, k: "a", t: "토픽마다 붙은 요청 캡슐에 각자 이유 칸", note: "" }] },
+  // delivered between 11:40:28 and 11:46:50 but about other topics' items (890/891/888, 893): filtered out here
+  mx: { at: "11:41–11:43", kind: "other", n: 2 },
+};
+// Entries in stream order. b = whiteboard.update batch (shared Entry.at today; T0 `seq` explicit).
+const E = [
+  { id: "e3178", b: 1, k: "agent", at: "11:35", t: "새 요청 접수: 화이트보드에서 보내는 메시지는 하나씩 시간 표시 태그로 감쌉니다(`ws:user at=\"…\"`). 보류됐다가 묶여서 함께 전달되는 경우도 각 메시지를 따로 감싸서, 에이전트가 메시지마다 보낸 시각을 구별할 수 있게 합니다. 대시보드는 이 태그를 읽어 메시지마다 별도 블록으로 보여 주고, 즉시 전달인지 보류였는지는 표시하지 않습니다" },
+  { id: "e3179", b: 1, k: "agent", at: "11:35", t: "MAIN 기술 판단(이의 있으시면 말씀만): ① 시각은 말씀하신 형식 그대로, 시간대를 붙인 국제 표준(ISO 8601) 형식으로 분 단위까지 기록합니다(예: `2026-11-15T11:29+09:00`). 에이전트도 이 값만 보고 한국 시간 기준으로 말할 수 있습니다 ② 시간대는 데몬 컴퓨터가 아니라 보내는 브라우저의 지역 시간을 씁니다 ③ 감싸는 범위는 화이트보드 화면에서 보내는 모든 것(답변 · 직접 쓴 글 · 첨부)입니다. 기존 답변 태그는 그 안에 그대로 둡니다. 티켓은 EXEC 4가 작성합니다. 화면에 시각을 어떻게 보여 줄지는 {{889}}로 여쭙니다" },
+  { id: "e3180", b: 1, k: "add", at: "11:35", item: 889, t: "Item {{889}} added [policy]: 대시보드 메시지 블록에 보낸 시각을 어떻게 보여 줄까요?" },
+  { id: "e3193", b: 2, k: "system", at: "11:39", t: "Topic state: discussing" },
+  { id: "e3194", b: 2, k: "agent", at: "11:39", t: "새 요청을 이 토픽에서 함께 논의합니다: 토픽 카드 오른쪽 위에 \"×\" 버튼을 둡니다. 누르면 토픽을 닫지 않고, 노트나 멘션처럼 \"이 토픽을 닫아 달라\"는 요청을 입력창에 붙입니다. 여러 토픽을 한 번에 붙일 수 있고 같은 토픽은 한 번만 붙습니다. 누르면 입력창이 열려 닫는 이유를 적을 수 있고, 적지 않아도 됩니다. EXEC 4가 메시지 양식 티켓과 함께 작성합니다" },
+  { id: "e3195", b: 2, k: "agent", at: "11:39", t: "MAIN 기술 판단(이의 있으시면 말씀만): ① 에이전트에게는 기존 멘션과 같은 모양의 태그로 전달합니다(예: `wb:close-request topic=\"…\"` 안에 이유). 작업 안내서에 \"사용자가 이 토픽을 닫아 달라고 요청함\"이라는 뜻을 적어 두어, 에이전트가 확실히 알아듣게 합니다 ② 이미 닫힌 토픽에는 × 버튼을 보이지 않습니다 ③ 붙인 요청은 입력창의 다른 첨부처럼 보내기 전에 빼낼 수 있습니다. 이유를 어디에 적을지는 {{892}}로 여쭙니다" },
+  { id: "e3196", b: 2, k: "add", at: "11:39", item: 892, t: "Item {{892}} added [policy]: 토픽 닫기 요청의 \"이유\"는 어디에 적게 할까요?" },
+  { id: "e3198", b: 3, k: "answer", at: "11:40", item: 889, t: "Item {{889}} answered [policy]: c, 60분까지는 n분 전으로, 그 외에는 a로; owner quote: \"889=c^60분까지는 n분 전으로, 그 외에는 a로 가죠.\"" },
+  { id: "e3199", b: 3, k: "answer", at: "11:40", item: 892, t: "Item {{892}} answered [policy]: a; owner quote: \"892=a\"" },
+  { id: "e3200", b: 3, k: "agent", at: "11:40", t: "{{889}} · {{892}}를 EXEC 4에 전달했습니다. 보낸 지 60분이 안 된 메시지는 \"n분 전\"으로 표시하고 1분마다 갱신합니다. 60분이 지나면 오늘 것은 \"11:29\", 다른 날 것은 \"11/14 23:50\"처럼 바뀝니다. 어느 경우든 마우스를 올리면 전체 날짜 · 시각 · 시간대가 나옵니다. 닫기 요청 캡슐에는 토픽마다 이유 칸이 따로 있습니다. 남은 질문이 없으니 티켓 정리 → 구현 준비 완료로 진행합니다" },
+  { id: "e3201", b: 4, k: "system", at: "11:40", t: "Topic state: discussing -> waiting" },
+  { id: "e3230", b: 5, k: "agent", at: "11:46", t: "메시지 묶음과 토픽 닫기 요청 티켓 2개를 develop `ca17d555d`에 병합했습니다(문서만, \"할 일\", EXEC 4). {{889}} · {{892}} 답변은 Decisions에 반영하도록 다시 전달했습니다(메일이 엇갈렸습니다)" },
+  { id: "e3231", b: 5, k: "agent", at: "11:46", t: "MAIN 기술 판단입니다(따로 답하지 않으셔도 됩니다). 메시지 묶음은 모든 전달 경로가 함께 쓰는 한 곳에서 만듭니다. 시각은 데몬이 받은 시각을 쓰고, 시간대만 브라우저가 알려 줍니다. 시간대 정보가 없는 예전 메시지는 데몬이 도는 컴퓨터의 시간대로 표시합니다. 슬래시 명령은 실행되어야 하므로 묶지 않습니다. 대화 화면은 묶음을 먼저 풀고 메시지마다 블록 하나로 보여 줍니다. 형식이 깨진 묶음은 버리지 않고 일반 글로 보여 줍니다. 닫기 버튼은 카드 머리 오른쪽 끝에 두고, 개요 줄에는 두지 않습니다. 같은 토픽을 다시 누르면 이미 있는 캡슐로 이동합니다. 보내기 전에 토픽이 이미 닫혔으면 요청은 그대로 보내고, 에이전트가 \"이미 닫힘\"으로 답합니다. 에이전트는 진행 중인 작업이 막지 않는 한 확인을 묻지 않고 닫은 뒤, 토픽 안에 이유를 남깁니다. 기존 동작은 바꾸지 않고 추가만 합니다" },
+];
+// Batches: time (precise), inputs delivered since the previous update.
+const BATCHES = {
+  1: { at: "11:35:02", inputs: ["m1"] },
+  2: { at: "11:39:02", inputs: ["m2"] },
+  3: { at: "11:40:17", inputs: ["m3"] },
+  4: { at: "11:40:28", inputs: [] },
+  5: { at: "11:46:50", inputs: ["mx"] },
+};
+const SCENE_CUT = { open: 2, final: 5 }; // last batch included
+
+// ---------------------------------------------------------------------------
+const q = new URLSearchParams(location.search);
+let V = q.get("v") || "A", SCENE = q.get("scene") || "final", THEME = q.get("theme") || "dark";
+if (q.get("shot")) document.documentElement.classList.add("shot");
+
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function inline(s) {
+  let h = esc(s);
+  h = h.replace(/`([^`]+)`/g, (_, c) => "<code>" + c + "</code>");
+  h = h.replace(/\{\{(\d+)\}\}/g, (_, n) => `<a href="#item-${n}">(${n})</a>`);
+  return h;
+}
+const icon = n => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const licon = n => `<svg class="li" aria-hidden="true"><use href="#l-${n}"/></svg>`;
+
+function visible() {
+  const cut = SCENE_CUT[SCENE];
+  return E.filter(e => e.b <= cut);
+}
+function itemState(id) {
+  const cut = SCENE_CUT[SCENE];
+  return cut >= 3 ? "answered" : "open";
+}
+function openItems() { return Object.values(ITEMS).filter(it => visible().some(e => e.item === it.id && e.k === "add") && itemState(it.id) === "open"); }
+function currentId() { const a = visible().filter(e => e.k === "agent"); return a[a.length - 1].id; }
+function nowLabel() { return SCENE === "open" ? "방금" : "2분 전"; }
+
+// --- shared pieces --------------------------------------------------------
+function tophead() {
+  const open = openItems().length;
+  const cur = visible().find(e => e.id === currentId());
+  return `<div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">${TOPIC_LABEL}</span></span>
+    <time class="tago">${nowLabel()}</time>
+    ${open ? `<button type="button" class="chip policy bulk" title="답변 필요">${icon("ask")}${open}</button>` : ""}
+    <button class="ibtn tpin" title="고정">${licon("pin")}</button>
+    <button class="ibtn t-fold" title="접기/펼치기">${licon("chevron-down")}</button>
+    <button class="ibtn t-raise" title="맨 위로 올리기">${licon("arrow-up-to-line")}</button>
+    <button class="ibtn d-max" title="크게 보기">${licon("maximize-2")}</button>
+    <button class="btn mini tnote-toggle" title="토픽 메모">${icon("pen")}</button></div>
+    <div class="tsub"><div class="trecap" data-kind="agent"><span class="rat" role="button" tabindex="0"><span class="evi lead" title="에이전트 로그">L</span>${cur.at} · <time class="tago">${nowLabel()}</time></span> — <div class="rtext md">${inline(cur.t)}</div></div></div></div>`;
+}
+function entryLine(e, extra) {
+  const cur = e.id === currentId();
+  return `<article class="wb-entry agent${cur ? " current" : ""}" id="${e.id}"><div class="entry-line"><span class="evi lead" title="에이전트 로그">L</span><span class="entry-text"><time class="entry-at">${e.at}</time> — ${inline(e.t)}${cur ? `<span class="ptag">현재 상태</span>` : ""}${extra || ""}</span></div></article>`;
+}
+function sysRun(list) {
+  if (!list.length) return "";
+  const r = list[0].at === list[list.length - 1].at ? list[0].at : list[0].at + "–" + list[list.length - 1].at;
+  return `<details class="system-run"><summary><span class="rl"></span><span class="lbl">시스템 이벤트 ${list.length}개 · ${r}</span></summary>${list.map(s => `<article class="wb-entry system"><div class="entry-line"><span class="evi sys"></span><span class="entry-text"><time class="entry-at">${s.at}</time> — ${inline(s.t)}</span></div></article>`).join("")}</details>`;
+}
+function optsHTML(it, staticPick) {
+  return `<div class="opts stack">${it.options.map((o, i) => {
+    const L = String.fromCharCode(97 + i), rec = L === it.rec;
+    if (staticPick) return `<div class="opt static${rec ? " rec" : ""}${L === it.pick ? " picked" : ""}"><span class="k">${L}${rec ? icon("star") : ""}</span><div class="md">${esc(o)}</div></div>`;
+    return `<div class="opt${rec ? " rec" : ""}" role="button" tabindex="0" data-opt="${L}" aria-pressed="false"><span class="k">${L}${rec ? icon("star") : ""}</span><div class="md">${esc(o)}</div></div>`;
+  }).join("")}</div>`;
+}
+// Inline question: open = the full answerable card; answered = one folded line.
+function question(it, opts = {}) {
+  if (itemState(it.id) === "open") {
+    return `<div class="card policy ix-q open-ask" id="item-${it.id}"><div class="cbar"><span class="head"><span class="id">(${it.id})</span><span class="cls">policy</span><span class="title">${esc(it.title)}</span></span><span class="qtime">질문 ${it.asked}<span class="wait">대기 중</span></span><button class="btn mini note-toggle" title="메모">${icon("pen")}</button></div>
+      <div class="cbody">${optsHTML(it, false)}<div class="rec-line md"><b>${icon("star")}${it.rec}</b> ${esc(it.recWhy)}</div></div></div>`;
+  }
+  const opt = it.options[it.pick.charCodeAt(0) - 97];
+  const short = opt.length > 34 ? opt.slice(0, 34) + "…" : opt;
+  return `<details class="ix-done" id="item-${it.id}"><summary><span class="ok">${icon("check")}</span><span class="id">(${it.id})</span><span class="qt">${esc(it.title)}</span>
+      <span class="ansl"><span class="pick"><span class="k">${it.pick}</span><span class="pt">${esc(short)}</span></span>${it.reading ? `<span class="ans">${esc(it.reading)}</span>` : ""}
+      <span class="qtime">질문 ${it.asked}<span class="sep">→</span>답변 ${it.answered}<span class="wait">${it.wait}</span></span>${opts.jump ? `<a class="jump" href="#${opts.jump}">↓ 답변 위치</a>` : ""}</span></summary>
+      <div class="sx">${optsHTML(it, true)}<div class="rec-line md"><b>${icon("star")}${it.rec}</b> ${esc(it.recWhy)}</div><div class="quote" style="margin-top:6px">“${esc(it.quote)}”</div></div></details>`;
+}
+function stats() {
+  const v = visible();
+  return { logs: v.filter(e => e.k === "agent").length, qs: v.filter(e => e.k === "add").length };
+}
+function shell(title, metaRight, body, foot) {
+  return `<section class="topic" data-topic="message-timestamp" data-state="${SCENE === "open" ? "discussing" : "waiting"}">${tophead()}
+   <div class="topic-stream"><div class="wb-history"><div class="mhead"><span class="wb-mtitle">${icon("list")}<span class="wb-mlabel">${title}</span></span><span></span><span class="mmeta">${metaRight}</span></div>
+   <div class="history-live">${body}</div>${foot || ""}</div></div></section>`;
+}
+
+// --- Variant A: iteration blocks keyed by owner input ----------------------
+function iterations() {
+  // A new iteration starts at a batch that had any input delivered before it;
+  // a batch with none joins the running iteration.
+  const cut = SCENE_CUT[SCENE], out = [];
+  for (let b = 1; b <= cut; b++) {
+    const bt = BATCHES[b];
+    if (!out.length || bt.inputs.length) out.push({ inputs: bt.inputs, batches: [] });
+    out[out.length - 1].batches.push(b);
+  }
+  return out;
+}
+function iterHead(it) {
+  const inp = it.inputs.map(k => INPUTS[k]);
+  const firstAt = BATCHES[it.batches[0]].at.slice(0, 5);
+  const text = inp.find(m => m.kind === "text"), chips = inp.find(m => m.kind === "chips");
+  if (text) {
+    return `<div class="ix-head"><span class="evi owner" title="오너 메시지">O</span><span class="when">${text.at}</span><span class="src">오너 메시지</span>${text.att ? `<span class="att">${text.att}</span>` : ""}<span class="lat">→ ${firstAt} 반영</span><span class="quote2">${esc(text.text)}</span></div>`;
+  }
+  if (chips) {
+    return `<div class="ix-head" id="ans-${chips.at}"><span class="evi owner" title="오너 답변">O</span><span class="when">${chips.at}</span><span class="src">오너 답변 ${chips.chips.length}개</span><span class="lat">→ ${firstAt} 반영</span><span class="chips">${chips.chips.map(c => `<span class="pick"><a href="#item-${c.id}">(${c.id})</a><span class="k">${c.k}</span><span class="pt">${esc(c.t)}${c.note ? ` <span class="note">^ ${esc(c.note)}</span>` : ""}</span></span>`).join("")}</span></div>`;
+  }
+  return `<div class="ix-head agent"><span class="evi lead">L</span><span class="when">${firstAt}</span><span class="src">에이전트 후속</span><span class="quote2" style="padding-left:23px;-webkit-line-clamp:1">이 토픽에 대한 새 오너 메시지 없음 · 그 사이 다른 토픽 메시지 ${INPUTS.mx.n}건</span></div>`;
+}
+function renderBatchEntries(list, answeredHere) {
+  let h = "", sys = [];
+  const flush = () => { h += sysRun(sys); sys = []; };
+  for (const e of list) {
+    if (e.k === "system") { sys.push(e); continue; }
+    if (e.k === "answer") continue;             // carried by the iteration header + the card
+    flush();
+    if (e.k === "agent") h += entryLine(e);
+    else if (e.k === "add") h += question(ITEMS[e.item]);
+  }
+  flush();
+  return h;
+}
+function variantA() {
+  const its = iterations(), v = visible();
+  const blocks = its.map((it, i) => {
+    const list = v.filter(e => it.batches.includes(e.b));
+    const hasOpen = list.some(e => e.k === "add" && itemState(e.item) === "open");
+    const now = i === its.length - 1;
+    return `<div class="ix-iter${hasOpen ? " has-open" : ""}${now ? " now" : ""}">${iterHead(it)}<div class="ix-body">${renderBatchEntries(list)}</div></div>`;
+  }).join("");
+  const s = stats();
+  return shell(`기록 <span class="n">${its.length}회 주고받음</span>`, `질문 ${s.qs} · 로그 ${s.logs}줄 · 패널 0`, blocks);
+}
+
+// --- Variant B: flat timeline, owner rows, sticky open-question index ------
+function variantB() {
+  const v = visible(), cut = SCENE_CUT[SCENE];
+  let h = "", sys = [];
+  const flush = () => { h += sysRun(sys); sys = []; };
+  for (let b = 1; b <= cut; b++) {
+    for (const k of BATCHES[b].inputs) {
+      const m = INPUTS[k];
+      if (m.kind === "text") { flush(); h += `<article class="wb-entry owner msg"><div class="entry-line"><span class="evi owner" title="오너 메시지">O</span><span class="entry-text"><time class="entry-at">${m.at}</time> — <span class="clamp">${esc(m.text)}</span></span></div></article>`; }
+    }
+    for (const e of v.filter(x => x.b === b)) {
+      if (e.k === "system") { sys.push(e); continue; }
+      flush();
+      if (e.k === "agent") h += entryLine(e);
+      else if (e.k === "add") h += question(ITEMS[e.item], { jump: "row-" + e.item });
+      else if (e.k === "answer") {
+        const it = ITEMS[e.item];
+        h += `<article class="wb-entry owner" id="row-${it.id}"><div class="entry-line"><span class="evi owner" title="오너 답변">O</span><span class="entry-text"><time class="entry-at">${e.at}</time> — <a href="#item-${it.id}">(${it.id})</a> 답변 <b>${it.pick}</b>${it.reading ? ", " + esc(it.reading) : ""} · “${esc(it.quote)}”<a class="back" href="#item-${it.id}">↑ ${it.asked} 질문</a></span></div></article>`;
+      }
+    }
+  }
+  flush();
+  const open = openItems();
+  const foot = `<div class="ix-index">${open.length
+    ? `<span class="lbl">${icon("ask")}열린 질문 ${open.length}</span>${open.map(it => `<a class="qchip" href="#item-${it.id}"><span class="id">(${it.id})</span><span class="t">${esc(it.title)}</span><span class="ago">${it.asked}</span></a>`).join("")}`
+    : `<span class="done">열린 질문 없음 · 답변 2개 (마지막 11:40)</span>`}</div>`;
+  const s = stats();
+  return shell(`기록 <span class="n">${v.length + (SCENE === "open" ? 2 : 3)}</span>`, `질문 ${s.qs} · 로그 ${s.logs}줄 · 패널 0`, h, foot);
+}
+
+// --- Variant C: conversation turns; a settled past turn folds to one line --
+function variantC() {
+  const its = iterations(), v = visible();
+  const body = its.map((it, i) => {
+    const list = v.filter(e => it.batches.includes(e.b));
+    const hasOpen = list.some(e => e.k === "add" && itemState(e.item) === "open");
+    const now = i === its.length - 1;
+    const inp = it.inputs.map(k => INPUTS[k]);
+    const text = inp.find(m => m.kind === "text"), chips = inp.find(m => m.kind === "chips");
+    const firstAt = BATCHES[it.batches[0]].at.slice(0, 5);
+    let bubble;
+    if (text) bubble = `<div class="ix-bubble-row"><div class="ix-bubble"><div class="bh"><span>${text.at}</span><span>오너</span>${text.att ? `<span>· ${text.att}</span>` : ""}</div><div class="bt">${esc(text.text)}</div></div></div>`;
+    else if (chips) bubble = `<div class="ix-bubble-row"><div class="ix-bubble"><div class="bh"><span>${chips.at}</span><span>오너 답변</span></div><div class="chips">${chips.chips.map(c => `<span class="pick"><a href="#item-${c.id}">(${c.id})</a><span class="k">${c.k}</span><span class="pt">${c.note ? esc(c.note) : esc(c.t)}</span></span>`).join("")}</div></div></div>`;
+    else bubble = `<div class="ix-sysline">${firstAt} · 에이전트 후속 (이 토픽에 새 메시지 없음)</div>`;
+    const inner = bubble + `<div class="ix-turn-body">${renderBatchEntries(list)}</div>`;
+    if (now || hasOpen) return `<div class="ix-turn${now ? " now" : ""}">${inner}</div>`;
+    // folded summary: who spoke, what came back
+    const logs = list.filter(e => e.k === "agent").length;
+    const asks = list.filter(e => e.k === "add").map(e => ITEMS[e.item]);
+    const qtext = text ? esc(text.text) : chips ? chips.chips.map(c => `(${c.id})=${c.k}`).join(" · ") : "에이전트 후속";
+    const sum = asks.map(a => `<span class="pick"><span class="k">${a.id}</span><span class="pt">→ ${a.pick} · ${a.answered}</span></span>`).join("") + `<span class="n">로그 ${logs}</span>`;
+    return `<details class="ix-fold"><summary><span class="when">${text ? text.at : chips ? chips.at : firstAt}</span><span class="q">${text || chips ? "오너 · " : ""}${qtext}</span><span class="sum">${sum}</span></summary><div class="ix-turn">${inner}</div></details>`;
+  }).join("");
+  const s = stats();
+  return shell(`기록 <span class="n">${its.length}턴</span>`, `질문 ${s.qs} · 로그 ${s.logs}줄 · 패널 0`, body);
+}
+
+// --- Current card (baseline): stream, then the settled list at the bottom ---
+function variantNow() {
+  const v = visible();
+  let h = "", sys = [];
+  const flush = () => { h += sysRun(sys); sys = []; };
+  for (const e of v) {
+    if (e.k === "system" || e.k === "add") { sys.push(e); continue; }
+    flush();
+    if (e.k === "agent") h += entryLine(e);
+    else if (e.k === "answer") h += `<article class="wb-entry system owner"><div class="entry-line"><span class="evi owner">O</span><span class="entry-text"><time class="entry-at">${e.at}</time> — ${inline(e.t)}</span></div></article>`;
+  }
+  flush();
+  const items = [892, 889].map(id => ITEMS[id]).filter(it => v.some(e => e.item === it.id));
+  let tail;
+  if (SCENE === "open") {
+    tail = `<div class="tbody">${items.slice().reverse().map(it => `<div class="card policy" id="item-${it.id}"><div class="cbar"><span class="head"><span class="id">(${it.id})</span><span class="cls">policy</span><span class="title">${esc(it.title)}</span></span><button class="btn mini note-toggle">${icon("pen")}</button></div><div class="cbody">${optsHTML(it, false)}<div class="rec-line md"><b>${icon("star")}${it.rec}</b> ${esc(it.recWhy)}</div></div></div>`).join("")}</div>`;
+  } else {
+    tail = `<div class="tbody"><details class="settled" open><summary title="완료됨">${icon("list")}${items.length}</summary>${items.map(it => { const o = it.options[it.pick.charCodeAt(0) - 97]; return `<div class="srow" id="item-${it.id}"><details class="sx"><summary><span class="stext"><span class="id">(${it.id})</span><b>${esc(it.title)}</b> <span class="pick"><span class="k">${it.pick}</span><span class="pt">${esc(o)}</span></span>${it.reading ? ` <span class="ans">${esc(it.reading)}</span>` : ""} <span class="quote">“${esc(it.quote)}”</span></span></summary></details></div>`; }).join("")}</details></div>`;
+  }
+  return `<section class="topic" data-topic="message-timestamp">${tophead()}<div class="topic-stream"><div class="wb-history"><div class="mhead"><span class="wb-mtitle">${icon("list")}<span class="wb-mlabel">기록</span><span class="n">${v.length}</span></span><span></span><span class="mmeta">패널 0 · 로그 ${v.length}줄</span></div><div class="history-live">${h}</div></div></div>${tail}</section>`;
+}
+
+const DESC = {
+  A: "<b>A · 메시지 단위 블록</b> — 오너 입력 1건(이후 첫 whiteboard.update부터 다음 입력 전까지)이 한 블록. 머리는 오너 메시지 인용 또는 답변 칩, 몸통은 그 턴의 로그 · 시스템 이벤트 · 질문 카드를 실제 위치에. 답변된 질문은 한 줄로 접히고 \"질문 11:35 → 답변 11:40 (5분 뒤)\"를 표시.",
+  B: "<b>B · 단일 타임라인</b> — 블록 머리 없이 오너 메시지도 O 줄로 끼워 넣음. 질문은 제자리, 답변 줄은 질문으로 되돌아가는 링크. 카드 하단에 고정된 \"열린 질문 N\" 색인이 해당 카드로 점프.",
+  C: "<b>C · 대화형 턴 + 지난 턴 접기</b> — 오너 말풍선(오른쪽) · 에이전트 응답(왼쪽). 열린 질문이 없는 지난 턴은 한 줄 요약(\"(889) → c · 11:40 · 로그 2\")으로 접혀, 카드가 길어지지 않고 열린 질문이 있는 턴과 현재 턴만 펼쳐짐.",
+  NOW: "<b>현재 카드</b> — 비교용 기준선: 기록 스트림(항목 추가 이벤트는 시스템 칩에 접힘) 아래에 질문 목록이 따로 붙음.",
+};
+function render() {
+  document.documentElement.setAttribute("data-theme", THEME);
+  const f = { A: variantA, B: variantB, C: variantC, NOW: variantNow }[V];
+  document.getElementById("root").innerHTML = `<div class="mk-label">${V === "NOW" ? "CURRENT" : "VARIANT " + V} · ${SCENE === "open" ? "11:39 시점" : "11:48 시점"} · ${THEME}</div>` + f();
+  document.getElementById("mkdesc").innerHTML = DESC[V];
+  document.querySelectorAll("[data-v]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === V)));
+  document.querySelectorAll("[data-scene]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.scene === SCENE)));
+  document.querySelectorAll("[data-theme-btn]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themeBtn === THEME)));
+}
+document.getElementById("mkbar").addEventListener("click", ev => {
+  const b = ev.target.closest("button"); if (!b) return;
+  if (b.dataset.v) V = b.dataset.v;
+  if (b.dataset.scene) SCENE = b.dataset.scene;
+  if (b.dataset.themeBtn) THEME = b.dataset.themeBtn;
+  render();
+});
+// option buttons: pick toggles like form.js (visual only)
+document.addEventListener("click", ev => {
+  const o = ev.target.closest(".opt[data-opt]"); if (!o) return;
+  const on = o.getAttribute("aria-pressed") !== "true";
+  o.parentNode.querySelectorAll(".opt").forEach(x => x.setAttribute("aria-pressed", "false"));
+  o.setAttribute("aria-pressed", String(on));
+});
+render();
+</script>
+</body>
+</html>
