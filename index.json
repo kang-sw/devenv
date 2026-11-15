@@ -560,7 +560,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec4/config-bulk-impl",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-15T09:23:06Z",
         "impl": {
           "branch": "impl/exec4/config-bulk-impl/trade-fetal-cozy"
