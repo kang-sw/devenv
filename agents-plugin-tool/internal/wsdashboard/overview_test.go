@@ -157,7 +157,7 @@ process.stdout.write(bad.join("\n"));
 
 func TestOverviewPageIntegration(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
-	for _, want := range []string{"window.WsOverview.holding()", "boardOverviewHeld = { hash: hash, html: html }", "window.WsOverview.mount({", "keep: window.wbHistory.keep", "window.WsOverview.pick(topic, o)", "doc.addEventListener(\"ws-overview\", queue)", "window.WsOverview.active() ? 0.72 : 0", "if (cardBoard) mountBoardOverview();", "filter: function (run) { if (window.WsOverview) window.WsOverview.filter(run); else run(); }", "function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }"} {
+	for _, want := range []string{"window.WsOverview.holding()", "boardOverviewHeld = { hash: hash, html: html }", "window.WsOverview.mount({", "keep: window.wbHistory.place", "window.WsOverview.pick(topic, o)", "doc.addEventListener(\"ws-overview\", queue)", "window.WsOverview.active() ? 0.72 : 0", "if (cardBoard) mountBoardOverview();", "filter: function (run) { if (window.WsOverview) window.WsOverview.filter(run); else run(); }", "function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }"} {
 		if !strings.Contains(js, want) {
 			t.Errorf("missing overview integration %q", want)
 		}

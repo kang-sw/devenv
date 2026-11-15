@@ -713,6 +713,15 @@
       inspect.end = function () { if (!used) { used = true; if (!t.done && --t.depth === 0) t.cancel(); } };
       return inspect;
     }
+    // place puts node at opt.offset below its scroller's top now and holds it
+    // there while late layout (unfolding cards, lazy bodies) settles: an
+    // instant offset jump. It is navigation the user asked for (Overview's
+    // enter, pick and exit), so, like any jump, the cooldown that same click
+    // started does not hold it back, and the user's next scroll ends it.
+    // keep with an offset only records a capture for a later apply.
+    function place(node, opt) {
+      return jump(node, { offset: opt && typeof opt.offset === 'number' ? opt.offset : 0, behavior: 'instant' });
+    }
     function jump(node, opt) {
       var scroller = scrollerOf(node), s = sessions.get(scroller);
       if (!s || !s.follow) s = start(scroller);
@@ -827,11 +836,11 @@
       }
       return { scroller: scroller, visible: visible };
     }
-    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
+    return { watch: watch, unwatch: unwatch, sweep: sweep, seen: seen, keep: keep, place: place, keeping: keeping, jump: jump, bands: bands, snapshot: snapshot };
   }
   var kit = viewKit(window);
   window.wbHistory = { init: init, capture: capture, restore: restore, loadTarget: loadTarget,
-    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
+    watch: kit.watch, unwatch: kit.unwatch, sweep: kit.sweep, seen: kit.seen, keep: kit.keep, place: kit.place, keeping: kit.keeping, jump: kit.jump, bands: kit.bands, snapshot: kit.snapshot };
   // An entry's clock shows its relative time on hover, computed when shown
   // so it never goes stale (ago.js's wording), then the local date and time.
   document.addEventListener('mouseover', function (e) {
