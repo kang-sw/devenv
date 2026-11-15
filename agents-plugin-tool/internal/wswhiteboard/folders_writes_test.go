@@ -20,9 +20,19 @@ func folderMetaIdentities(t *testing.T, dir string) map[string]os.FileInfo {
 	out := map[string]os.FileInfo{}
 	for _, ref := range meta.Topics {
 		path := ref.Dir + "/meta.json"
-		info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path)))
+		file, err := os.Open(filepath.Join(dir, filepath.FromSlash(path)))
 		if err != nil {
 			t.Fatal(err)
+		}
+		// File.Stat captures the identity now; Windows os.Stat defers its
+		// file-ID lookup until SameFile, after the path may be replaced.
+		info, err := file.Stat()
+		closeErr := file.Close() // Release the Windows reader hold before writes.
+		if err != nil {
+			t.Fatal(err)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
 		}
 		out[path] = info
 	}
