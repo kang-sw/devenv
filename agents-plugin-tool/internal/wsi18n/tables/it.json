@@ -1711,6 +1711,7 @@
   "js.rail.layout.unknown": "La barra non mostra più questo elemento",
   "js.rail.layout.ended": "Non possibile con una sessione terminata",
   "js.rail.layout.self": "Non si può spostare su se stessa",
+  "js.rail.layout.hiring": "Una sessione con reclutamento attivo non può essere annidata",
   "js.rail.layout.depth": "Le sessioni si annidano di un solo livello",
   "js.rail.layout.level": "Si può spostare solo tra sessioni dello stesso livello",
   "js.rail.layout.child": "Una sessione sotto un'altra non può avere la stella",

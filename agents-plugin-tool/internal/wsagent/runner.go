@@ -186,6 +186,8 @@ type Runner struct {
 	// resumeMu serializes Pi child revival with close cascades without
 	// holding mu over store writes or conversation startup.
 	resumeMu sync.Mutex
+	// hireMu serializes idempotent owner-approved creation retries.
+	hireMu sync.Mutex
 	// scanned is closed once the holder manager's first scan returned, or
 	// at Start when there is no manager (scanDone); scanOnce closes it.
 	scanned  chan struct{}
@@ -520,6 +522,9 @@ func endedError(rec Record) error {
 // LeadOptions are a lead conversation's spawn choices; an empty one takes
 // the profile's value (the harness default when it has none).
 type LeadOptions struct {
+	// HireRequestID and HireLabel are set only by CreateHireLead, never HTTP.
+	HireRequestID   string
+	HireLabel       string
 	Model           string
 	Effort          string
 	PermissionMode  string
@@ -653,6 +658,11 @@ func (r *Runner) create(profile, root string, lead *LeadOptions, spawn *SpawnSpe
 	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return State{}, err
+	}
+	if lead != nil && lead.HireRequestID != "" {
+		if err := wsdashboard.MarkHired(r.opts.Dir, rec.ReplyID, lead.HireRequestID, lead.HireLabel); err != nil {
+			return State{}, err
+		}
 	}
 	if err := writeRecord(dir, rec); err != nil {
 		return State{}, err

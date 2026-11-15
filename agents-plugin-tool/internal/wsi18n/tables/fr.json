@@ -1711,6 +1711,7 @@
   "js.rail.layout.unknown": "Le panneau n'affiche plus cet élément",
   "js.rail.layout.ended": "Impossible avec une session terminée",
   "js.rail.layout.self": "Impossible de déplacer sur elle-même",
+  "js.rail.layout.hiring": "Une session autorisée à recruter ne peut pas être imbriquée",
   "js.rail.layout.depth": "Les sessions ne s'imbriquent que sur un niveau",
   "js.rail.layout.level": "Déplacement possible uniquement entre sessions du même niveau",
   "js.rail.layout.child": "Une session placée sous une autre ne peut pas être étoilée",

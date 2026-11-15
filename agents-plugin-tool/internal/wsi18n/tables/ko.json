@@ -1711,6 +1711,7 @@
   "js.rail.layout.unknown": "더 이상 목록에 없는 항목입니다",
   "js.rail.layout.ended": "종료된 세션으로는 할 수 없음",
   "js.rail.layout.self": "자기 자신 위로는 옮길 수 없음",
+  "js.rail.layout.hiring": "세션 고용이 활성화된 세션은 다른 세션 아래에 둘 수 없습니다",
   "js.rail.layout.depth": "세션은 한 단계까지만 중첩됩니다",
   "js.rail.layout.level": "같은 단계의 세션 사이에서만 옮길 수 있음",
   "js.rail.layout.child": "다른 세션 아래에 있는 세션에는 별표할 수 없음",

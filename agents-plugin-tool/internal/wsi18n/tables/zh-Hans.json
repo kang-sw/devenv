@@ -1711,6 +1711,7 @@
   "js.rail.layout.unknown": "侧栏已不再显示此项",
   "js.rail.layout.ended": "已结束的会话无法执行此操作",
   "js.rail.layout.self": "无法移到自身上",
+  "js.rail.layout.hiring": "已启用雇用的会话不能嵌套在其他会话下",
   "js.rail.layout.depth": "会话只能嵌套一层",
   "js.rail.layout.level": "只能在同一层级的会话之间移动",
   "js.rail.layout.child": "位于其他会话之下的会话无法加星标",
