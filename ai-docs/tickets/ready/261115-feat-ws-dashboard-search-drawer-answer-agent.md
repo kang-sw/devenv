@@ -3,6 +3,10 @@ title: "Dashboard search drawer with a read-only answer agent"
 related:
   261114-feat-ws-dashboard-unified-search-palette: "the Ctrl+K palette this ticket moves into a drawer; its decisions stand unless superseded below"
   261114-bug-ws-dashboard-search-palette-minors: "open palette minors; two are stacking issues the drawer may change"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 0d53b245184af115
+sage-review-completeness-reviewed: 0d53b245184af115
 ---
 
 # Dashboard search drawer with a read-only answer agent
@@ -18,7 +22,11 @@ agent about the current session's whiteboard and project files, with the
 answer streamed into the drawer.
 
 Evidence below was taken read-only on 2026-11-15 at develop `1b815bf67`;
-paths are relative to `agents-plugin-tool/internal/`.
+paths are relative to `agents-plugin-tool/internal/`, except
+`cmd/ws-mcp/dashboard.go` (relative to `agents-plugin-tool/`),
+`scripts/palette-headless.mjs` (relative to the repository root), and
+explicitly rooted paths (`agents-plugin-tool/cmd/ws-mcp/dashboard.go`,
+`scripts/palette-headless.mjs`).
 
 ### Current state
 
@@ -32,11 +40,13 @@ paths are relative to `agents-plugin-tool/internal/`.
   and hover moves the selection (`tracker.js:6220-6227,6472-6481,7123-7126`).
   The query lives only in the in-page `qs` object (`tracker.js:6126`). The
   button `#tkqs` sits in `.top #qsslot` (`tracker.js:6736-6738`,
-  `wsdashboard/assets/dashboard.tmpl:10,110-112`). `dashboard.js` mounts it
+  `agents-plugin-tool/internal/wsdashboard/assets/dashboard.tmpl#L10-L10`,
+  `agents-plugin-tool/internal/wsdashboard/assets/dashboard.tmpl#L106-L108`). `dashboard.js` mounts it
   through `tkMount` (`dashboard.js:5688-5695`) with the host hooks
   `paletteRows` (5580), `palettePick` (5633) and `paletteFiles` (5673);
   `tracker.js` stays host-agnostic (prior ticket, U:357-369).
-- **Drawer frame.** One frame (`#drawer`, template `dashboard.tmpl:122-129`,
+- **Drawer frame.** One frame (`#drawer`, template
+  `agents-plugin-tool/internal/wsdashboard/assets/dashboard.tmpl#L124-L131`,
   handle `#drhandle`) shows one sheet at a time: `drMode` is `"panels"` or
   `"git"` (`dashboard.js:3374-3457`). The hamburger handle is rightmost
   (`right: var(--dpad)`), the git handle immediately left of it
@@ -104,7 +114,8 @@ Owner decisions (relayed by MAIN, 2026-11-15):
   per browser like `ws.dashboard.drawer*` (localStorage), together with the
   last query and the selected slot. Rejected: keeping the centered modal.
   This supersedes the prior ticket's rejection of localStorage query
-  persistence (U:159-164).
+  persistence
+  (`ai-docs/tickets/.done/261114-feat-ws-dashboard-unified-search-palette.md#L287-L295`).
 - **(851)=a: keyboard contract.** No row is highlighted until the user moves
   with the arrow keys. Plain Enter asks the answer agent; Enter after an
   arrow selection opens that result; Cmd/Ctrl+Enter keep-open behavior for
@@ -228,6 +239,9 @@ no-answer-needed, 2026-11-15; settled):
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
 - `tracker.js` stays host-agnostic: drawer hosting, filesystem, preview,
   agent and citation integration live in `dashboard.js` mount hooks
   (prior ticket, U:357-369).
@@ -254,6 +268,33 @@ no-answer-needed, 2026-11-15; settled):
 - Out of scope: a new MCP tool or a change to `whiteboard.query`
   authorization; a Codex backend; the "ws-mcp provides the whole agent
   toolset" direction.
+
+## Prior Decisions
+
+- 261114-feat-ws-dashboard-unified-search-palette (2026-11-14, commit): "the owner's standing rule forbids touching the shared daemon, so the script serves its own isolated daemon instead" — bearing: supports
+- 4e1e5d9c (2026-11-13, commit): "Enforce subsets against persisted launched definitions, including MCP server configuration, at creation and restart; use the same checked definition to launch and reattach." — bearing: constrains
+- 261113-feat-ws-dashboard-iframe-shell (2026-11-13, Decisions): "Shell contents: sidebar plus top header (global search, notifications, session title/badges); the agent panel stays in the frame." — bearing: constrains
+- 2390a0f7 (2026-11-12, commit): "drApply drives visibility (drFoldShow(drOpen ? drMode : "")), so every path that ends in drApply follows" — bearing: constrains
+- 88c5ea70 (2026-11-12, commit): "tracker.js stays host-neutral: a new opts.drawerHeight {get, set} pair carries the host's height; the dashboard passes drH / drSetH." — bearing: constrains
+- 261110-feat-ws-dashboard-file-preview (2026-11-11, Result): "The search stops when its request ends, so a search-as-you-type client's abort frees the daemon; a 10-second deadline also ends it with `more`." — bearing: supports
+- 261108-feat-ws-tracker-support-agent-chat (2026-11-08, Result): "a user definition of the same name replaces one whole" — bearing: supports
+- 134c1565 (2026-11-08, commit): "The git drawer reuses the panels drawer's frame with a mode switch (drMode "panels" | "git") instead of a second drawer" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wsagent/{builtin.go,profile.go,runner.go}, agents-plugin-tool/internal/wsdashboard/assets/{tracker.js,tracker.css,dashboard.js,dashboard.css,dashboard.tmpl}, agents-plugin-tool/internal/mcp/agent_profile.go; scripts/palette-headless.mjs |
+| scope.surface | cross-module | Phase 1 joins wsagent profiles/lifecycle and the authoritative wswhiteboard store to new dashboard HTTP routes; Phase 2 adds host integration through dashboard.js mount hooks |
+| scope.new_public_symbol | yes | New agent.profile.search-answer-claude and agent.profile.search-answer-pi builtin keys and loopback-only answer HTTP routes; route names are not specified |
+| scope.new_type_contract | yes | New answer-start/stream HTTP contract, capped profile validation, board/file citation markers and host mount hooks; no existing MCP signature changes |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsdashboard/search_palette_test.go, testdata/search-palette.test.cjs, drawer_height_test.go; scripts/palette-headless.mjs; existing wsagent backend tests |
+| complexity.reuse_points | confirmed | Read Runner.Spawn and CloseConversation, Profile/BuiltinProfiles, support harness selection, FolderStore.Open/readState, TrustedWrite, supOpen region streaming, drRoom/drSetH and WsPreview.open |
+| complexity.side_effect_risk | high | Spawns and terminates harness processes, reads retained board history and project files, and changes shared drawer geometry, keyboard handling and browser persistence |
+| risk.correctness | high | First-turn settlement, supersede/cancel/timeout cleanup, daemon-wide admission, snapshot consistency and async keyboard selection must agree across service and UI |
+| risk.fit | high | Generic runner routes are not local-only and shared page caches have no viewer class; the answer service must preserve local-only visibility and tracker host neutrality (wsagent/http.go#L120-L148; wsdashboard/stream_cache.go#L33-L41) |
+| risk.test | high | Fake backends and source-extraction node tests cannot establish actual Claude Grep/Glob path-rule enforcement or browser stacking/focus; Phase 2 also requires isolated theme/width captures |
+| risk.security_or_contract | high | Overrides must not widen the read-only tool ceiling; board/file answers and generic runner records must not leak through remote-readable routes, while root confinement is explicitly best effort |
 
 ## Phases
 
