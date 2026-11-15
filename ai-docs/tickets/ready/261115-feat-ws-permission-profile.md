@@ -364,6 +364,26 @@ Verification: capture and intent review against confirmed (998)–(1004)/(1050)
 and the lead's technical settlements; check all new fields/paths in the
 compatibility matrix, all five phases and source-backed fixture selectors.
 
+### Result (5b066c229) - 2026-11-15
+
+- Completed the documentation contract for owner (998)–(1004)/(1050): literal
+  intent/quality enums, admission requirements, current-selection sidecar,
+  request/State/support fields, Claude/Pi mappings and five bounded phases.
+- Added exact pinned writer/router and existing fixture provenance, byte-retention
+  and new-reader recovery assertions, lifecycle boundaries and zero-write refusal
+  prerequisites. Corrected two old-router source ranges after inspection.
+- Verification: `git diff --check` passed. Focused Python assertions passed for
+  all five phases, contract fields/routes, the execution boundary and every added
+  fixture anchor in both the pinned Git object and current source.
+  `tickets.verify` passed; its sage-freshness advisory is accepted for this
+  documentation-only elaboration and scope restriction, with no policy change.
+- Independent lite review of `59fe9b82d..5b066c229` found no correctness or
+  test-integrity findings. No runtime compatibility or confinement is claimed.
+- Deferred: Phase 2, admission edits and Decision 14 settlement await the lead's
+  check with EXEC4 against CSI Phase 1's merged admission sites. Runtime tests,
+  live launches, providers, network/install, shared-runtime operations and broad
+  tests were outside this authorized documentation slice. The ticket stays ready.
+
 ### Phase 2: Implement and verify Claude/Pi permission controls
 
 Depends on this ticket's landed Phase 1, not the future foundation or adapter
