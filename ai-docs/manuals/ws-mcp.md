@@ -394,7 +394,7 @@ SSE events carry `{hash, order, rows: [{key, hash, html}]}`: the full row
 order and only new or changed rows, keyed by reply-id. A changed grouping
 shell or an uncertain row decomposition falls back to the full region;
 without the opt-in, every rail update stays a full region
-(`internal/wsdashboard/sse.go:459-462,628-655`,
+(`internal/wsdashboard/sse.go`, `Daemon.stream`,
 `internal/wsdashboard/rail_rows.go:28-32,88-106`). The page also uses these
 event names over WebSocket, reconnecting for a full rail if it cannot apply
 a row patch (`assets/dashboard-stream.js:144-175,178-191,214-224`). A session's
