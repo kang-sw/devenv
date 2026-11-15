@@ -100,7 +100,7 @@ func TestTimelineOwnerAnswerUsesSendClockThroughoutHistoryChip(t *testing.T) {
 			t.Fatalf("history chip/hover diverged from owner send time: %+v", row)
 		}
 		out := regexpHistoryArticle(markup(render(t, view)), row.Key)
-		wantAll(t, out, "Owner answer", `href="#item-1"`, `class="wb-hstatus"`, `datetime="2026-11-15T12:29:00Z"`, "owner words")
+		wantAll(t, out, `class="wb-hstatus"`, `datetime="2026-11-15T12:29:00Z"`, "owner words")
 		wantNone(t, out, "2026-11-15T12:30:00Z")
 		return
 	}

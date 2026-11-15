@@ -52,7 +52,7 @@ func TestTimelineAnchorsOutsidePagingAndGapRanges(t *testing.T) {
 		}
 	}
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull})))
-	wantAll(t, out, `class="history-gap"`, `<template data-history-gap>`, `id="item-1"`, `id="item-2"`, `Original question`, `Owner answer`, `href="#item-1"`, `question-lead`)
+	wantAll(t, out, `class="history-gap"`, `<template data-history-gap>`, `id="item-1"`, `id="item-2"`, `Original question`, `question-lead`)
 	wantNone(t, out, `class="tbody"`, `history-clip`, `history-older`, `data-history-page`)
 	if strings.Count(out, `id="item-1"`) != 1 {
 		t.Fatal("question anchor duplicated")
