@@ -18,14 +18,14 @@
   // place and returns inserted/replaced nodes, in order. Existing entries
   // stay put unless their mail-wake presentation changes: a hidden mail
   // marker must replace its row (and restore it when the association expires).
-  function mergeEntries(box, src) {
+  function mergeEntries(box, src, changed) {
     var have = entryKeys(box), added = [];
     Array.prototype.slice.call(src.children).forEach(function (n) {
       var k = n.getAttribute("data-entry");
       if (!k) return;
       var old = have[k];
       if (old) {
-        if (old.getAttribute("data-mail-wake") === n.getAttribute("data-mail-wake")) return;
+        if (!(changed && changed[k]) && old.getAttribute("data-mail-wake") === n.getAttribute("data-mail-wake")) return;
         box.replaceChild(n, old);
       } else {
         // New entries are usually the newest (live) or the oldest (history),
@@ -63,13 +63,71 @@
     }
     return true;
   }
+  // Canonical transport inputs never come from the formatted, history-extended
+  // live DOM. A full event establishes the shell and newest window; a delta
+  // must prove the same order and replace only complete single keyed rows.
+  var ENTRY_SLOT = /<!--ws-entry-row-(\d+)-->/g;
+  function entrySame(a, b) { return a.length === b.length && a.every(function (v, i) { return v === b[i]; }); }
+  function entryInputFull(html) {
+    if (typeof html !== "string" || html.indexOf("<!--ws-entry-row-") >= 0) return null;
+    var src = frag(html), boxes = src.querySelectorAll(".centries");
+    if (boxes.length !== 1) return null;
+    var box = boxes[0], rows = Object.create(null), order = [];
+    if (Array.from(box.childNodes).some(function (n) { return n.nodeType !== 1 && (n.nodeType !== 3 || n.textContent.trim()); })) return null;
+    if (Array.from(box.children).some(function (n) {
+      var key = n.getAttribute("data-entry");
+      if (!key || rows[key]) return true;
+      rows[key] = { html: n.outerHTML }; order.push(key);
+      n.replaceWith(doc.createComment("ws-entry-row-" + (order.length - 1)));
+      return false;
+    })) return null;
+    var holder = doc.createElement("div"); holder.appendChild(src);
+    return { shell: holder.innerHTML, order: order, rows: rows };
+  }
+  function entryRowNode(html, key) {
+    if (typeof html !== "string" || html.indexOf("<!--ws-entry-row-") >= 0) return null;
+    var src = frag(html), n = src.firstElementChild;
+    return src.childNodes.length === 1 && n && n.getAttribute("data-entry") === key && !n.matches(".centries") && !n.querySelector(".centries") ? n : null;
+  }
+  function entryInputPatch(base, ev) {
+    if (!base || !ev || typeof ev.hash !== "string" || !Array.isArray(ev.order) || !entrySame(base.order, ev.order) || !Array.isArray(ev.rows)) return null;
+    var rows = Object.create(null), changed = Object.create(null);
+    Object.keys(base.rows).forEach(function (key) { rows[key] = base.rows[key]; });
+    if (ev.rows.some(function (r) {
+      if (!r || typeof r.key !== "string" || !rows[r.key] || changed[r.key] || typeof r.hash !== "string") return true;
+      var n = entryRowNode(r.html, r.key);
+      if (!n) return true;
+      changed[r.key] = true; rows[r.key] = { html: n.outerHTML };
+      return false;
+    })) return null;
+    return { shell: base.shell, order: base.order, rows: rows };
+  }
+  function entryInputHTML(input) {
+    return typeof input === "string" ? input : input.shell.replace(ENTRY_SLOT, function (_, i) { return input.rows[input.order[+i]].html; });
+  }
+
   // mergeEntriesRegion applies an entries region event: the title bar (its
   // counts) and model history are synced, and the entries are merged. A window
   // past a gap starts the box over; a box at the bottom (pin) sheds its oldest
   // entries past the cap. Either way the older history is loaded again from
   // what the box then holds.
-  function mergeEntriesRegion(el, html, pin) {
-    var src = frag(html), box = entriesBox(), head = el.querySelector(".thead"), nhead = src.querySelector(".thead");
+  function mergeEntriesRegion(el, html, pin, previous) {
+    var next = typeof html === "string" ? null : html, box = entriesBox(), changed = Object.create(null);
+    if (next && previous) next.order.forEach(function (key) {
+      if (previous.rows[key] && previous.rows[key].html !== next.rows[key].html) changed[key] = true;
+    });
+    if (box && next && previous && next.shell === previous.shell && entrySame(next.order, previous.order)) {
+      var incoming = doc.createElement("div"), have = entryKeys(box);
+      next.order.forEach(function (key) {
+        if (!have[key] || changed[key]) incoming.appendChild(entryRowNode(next.rows[key].html, key));
+      });
+      var inserted = mergeEntries(box, incoming, changed);
+      inserted.forEach(sweepOutImgs); mermaid(inserted);
+      if (pin && evictEntries(box)) histReset();
+      return;
+    }
+    html = next ? entryInputHTML(next) : html;
+    var src = frag(html), head = el.querySelector(".thead"), nhead = src.querySelector(".thead");
     var nbox = src.querySelector(".centries");
     if (!box || !nbox) { el.innerHTML = html; restoreOpen(el); fmtTimes(el); sweepOutImgs(el); mermaid(el); histReset(); return; }
     if (head && nhead) { head.parentNode.replaceChild(nhead, head); fmtTimes(nhead); }
@@ -80,7 +138,7 @@
     } else if (nhistory) box.parentNode.insertBefore(nhistory, box);
     if (nhistory) { restoreOpen(nhistory); fmtTimes(nhistory); }
     if (gapped(box, nbox)) { resetEntries(box); histReset(); }
-    var added = mergeEntries(box, nbox);
+    var added = mergeEntries(box, nbox, changed);
     added.forEach(sweepOutImgs);
     mermaid(added);
     if (pin && evictEntries(box)) histReset();
