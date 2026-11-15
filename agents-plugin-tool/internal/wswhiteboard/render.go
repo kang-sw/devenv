@@ -22,7 +22,8 @@ import (
 )
 
 // The page assets: one template set, the shared stylesheet, the answer-form
-// script both layouts run, the change-signal script only the full page runs,
+// and dependency-popover scripts both layouts run, the change-signal script
+// only the full page runs,
 // the mermaid theme script a page with a mermaid block runs, the script a
 // served page's topic-body frames run, the image viewer script the full page
 // runs (with the SVG helpers it shares with those frames), and the icon
@@ -30,8 +31,33 @@ import (
 // full page's stamp script and, when it holds a mermaid block, the shared
 // mermaid script (MermaidAsset).
 //
-//go:embed assets/page.tmpl assets/page.css assets/stream.js assets/chg.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
+//go:embed assets/page.tmpl assets/page.css assets/page-*.css assets/stream.js assets/chg.js assets/answers.js assets/form.js assets/code.js assets/live.js assets/pill.js assets/rail.js assets/ago.js assets/deps.js assets/mermaid-init.js assets/doc-frame.js assets/viewer.js assets/svg-view.js assets/sprite.svg
 var assetFS embed.FS
+
+// All consumers (standalone, dashboard and topic-body frames) use this same
+// byte-for-byte stylesheet assembly, preserving its cascade and frame hashes.
+var pageStyleFiles = []string{
+	"page.css",
+	"page-items.css",
+	"page-stream.css",
+	"page-panels.css",
+	"page-sticky.css",
+}
+
+func readPageSource(read func(string) ([]byte, error), name string) ([]byte, error) {
+	if name != "page.css" {
+		return read(name)
+	}
+	var source bytes.Buffer
+	for _, file := range pageStyleFiles {
+		raw, err := read(file)
+		if err != nil {
+			return nil, err
+		}
+		source.Write(raw)
+	}
+	return source.Bytes(), nil
+}
 
 type pageAssets struct {
 	// tmpl is the English template set; tmpls holds one per language, each
@@ -56,6 +82,8 @@ type pageAssets struct {
 	rail string
 	// ago keeps the topic bars' updated-ago times current, on the same two.
 	ago string
+	// deps drives dependency popovers in the standalone page and dashboard.
+	deps string
 	// mermaidInit themes and runs mermaid after the shared script loads.
 	mermaidInit template.JS
 	// chg draws a topic body's change marks (wbChangeBars, wbWatchChanges).
@@ -126,8 +154,13 @@ const devAssetDir = "internal/wswhiteboard/assets"
 // client table leaves them out.
 const trackerKeyPrefix = "js.tk."
 
-// File-explorer controls also belong only to the dashboard, not static boards.
+// filesKeyPrefix belongs to the dashboard's file explorer (files.js), which
+// standalone and embed boards never load. Keep its growing table off both.
 const filesKeyPrefix = "js.files."
+
+// gitKeyPrefix belongs to dashboard-git.js, which static boards never load.
+// Its controls must not consume the standalone or embed translation budget.
+const gitKeyPrefix = "js.git."
 
 // codeKeyPrefix is the copy button's standalone client subset (code.js).
 const codeKeyPrefix = "js.wb.copy"
@@ -145,7 +178,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 			return ""
 		}
 		var data []byte
-		data, err = read(name)
+		data, err = readPageSource(read, name)
 		return string(data)
 	}
 	svgView := get("svg-view.js")
@@ -162,6 +195,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 		pill:        get("pill.js"),
 		rail:        get("rail.js"),
 		ago:         ago,
+		deps:        get("deps.js"),
 		mermaidInit: template.JS(get("mermaid-init.js")),
 		docFrame:    svgView + "\n" + ago + "\n" + chg + "\n" + code + "\n" + get("doc-frame.js"),
 		chg:         chg,
@@ -188,12 +222,31 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 				}
 				return template.HTML(`<svg class="i" aria-hidden="true"><use href="#i-` + name + `"/></svg>`), nil
 			},
+			"waitingSummary": func(deps []DependencyView, ready bool, waiters int) string {
+				if len(deps) == 0 {
+					return wsi18n.T(lang, "wb.waiting.reverse", waiters)
+				}
+				if ready {
+					return wsi18n.T(lang, "wb.waiting.ready") + " · " + wsi18n.T(lang, "wb.waiting.allResolved")
+				}
+				n := resolvedTargets(deps)
+				return wsi18n.T(lang, "wb.waiting.progress", len(deps), n, len(deps)-n)
+			},
+			"waitingPercent": func(deps []DependencyView) int {
+				if len(deps) == 0 {
+					return 0
+				}
+				return resolvedTargets(deps) * 100 / len(deps)
+			},
+			"manualRelease": func(dep DependencyView) bool {
+				return dep.Derived || strings.HasPrefix(dep.Token, "exec:")
+			},
 			"lines":       rationaleLines,
 			"box":         rowBox,
 			"href":        rowHref,
 			"actionAttrs": panelActionAttrs,
 			"t":           func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
-			"i18n":        func() template.JS { return wsi18n.ScriptExcept(lang, trackerKeyPrefix, filesKeyPrefix) },
+			"i18n":        func() template.JS { return wsi18n.ScriptExcept(lang, trackerKeyPrefix, filesKeyPrefix, gitKeyPrefix) },
 		}
 		// The file's template is "page.tmpl" under the root "page", as
 		// ParseFS names it.
@@ -205,6 +258,16 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 	}
 	a.tmpl = a.tmpls[wsi18n.Default]
 	return a, nil
+}
+
+func resolvedTargets(deps []DependencyView) int {
+	n := 0
+	for _, dep := range deps {
+		if dep.Resolved {
+			n++
+		}
+	}
+	return n
 }
 
 // templateFor is the template set that renders in lang; an unsupported or
@@ -337,7 +400,7 @@ func PageAssets() (SharedAssets, error) {
 	if err != nil {
 		return SharedAssets{}, fmt.Errorf("whiteboard page assets: %w", err)
 	}
-	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago + "\n" + a.stream), AnswersScript: template.JS(a.answers), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
+	return SharedAssets{CSS: a.css, Sprite: a.sprite, FormScript: template.JS(a.form + "\n" + a.code + "\n" + a.pill + "\n" + a.rail + "\n" + a.ago + "\n" + a.deps + "\n" + a.stream), AnswersScript: template.JS(a.answers), MermaidInit: a.mermaidInit, ViewerScript: template.JS(a.viewer)}, nil
 }
 
 // pageData is what the page template executes on: the view plus the inlined
@@ -427,10 +490,10 @@ func (p *pageData) MermaidFile() string {
 // body inside a sandboxed frame (framedDoc).
 func newPageData(view View, a *pageAssets, framed bool) *pageData {
 	full := view.Layout != LayoutEmbed
-	script := a.answers + a.form + a.code
+	script := a.answers + a.form + a.code + a.deps
 	if full {
 		// The viewer is for the standalone page; the embed is a chat
-		// snapshot with a size budget and runs only the answer form.
+		// snapshot with a size budget; it runs the form and dependency popovers.
 		script = a.viewer + script + a.pill + a.rail + a.ago + a.stream + a.live + a.chg + chgWire
 	}
 	p := &pageData{

@@ -318,6 +318,22 @@ describe("McpStdioClient reasoning-summary zero-write framing", () => {
   });
 });
 
+test("McpStdioClient generic dispatch preserves appended whiteboard summaries and the result envelope", async () => {
+  const { proc, writes, client } = fakeChild();
+  const prefix = "ids: (01)\nfull: /workspace/board/index.html\nembed: board-01.html\n";
+  const text = prefix + "topic added: rollout (state: discussing, default)\n";
+  const envelope = { isError: false, content: [{ type: "text", text }], _meta: { fixture: "whiteboard" } };
+  const call = client.callTool("whiteboard.update", { commands: "<wb:topic name=\"rollout\"><wb:log>Ready</wb:log></wb:topic>" });
+  assert.equal(writes.length, 1);
+  writes[0]();
+  const wire = Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 1, result: envelope }) + "\n");
+  for (const byte of wire) proc.stdout.emit("data", Buffer.from([byte]));
+  const result = await call;
+  assert.deepEqual(result, envelope);
+  assert.deepEqual(Buffer.from(result.content[0].text!), Buffer.from(text));
+  assert.deepEqual(Buffer.from(result.content[0].text!.slice(0, prefix.length)), Buffer.from(prefix));
+});
+
 describe("McpStdioClient write-error ownership", () => {
   const EXIT_MESSAGE = "ws-mcp process exited unexpectedly (code=1, signal=null)";
 

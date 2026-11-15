@@ -1,11 +1,12 @@
 package wsdashboard
 
 import (
-	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // The dashboard page inlines several module stylesheets into one document, so
@@ -15,7 +16,7 @@ import (
 // ("class prefix: ..."); a NEW class takes its module's prefix. Existing
 // classes are not renamed, so intentional overlaps are allowlisted below.
 
-// root, when set, is the module's scope class: a selector that starts with it
+// root, when set, is a module-local scope class: a selector that starts with it
 // only matches inside the module's own subtree, so only the first compound
 // (the root and its variants) is a page-global name.
 var cssModules = []struct {
@@ -24,7 +25,7 @@ var cssModules = []struct {
 	{"dashboard", "assets/dashboard.css", "d", ""},
 	{"memo", "assets/memo.css", "memo", ""},
 	{"tracker", "assets/tracker.css", "tk", "tk"},
-	{"whiteboard", "../wswhiteboard/assets/page.css", "wb", ""},
+	{"whiteboard", "../wswhiteboard/assets/page.css", "wb", "dw"},
 }
 
 // allowedCSSOverlaps maps "class module,module" (modules sorted) to the reason
@@ -182,7 +183,15 @@ func cssClasses(css, root string) map[string]bool {
 func TestCSSClassesDoNotCollideAcrossModules(t *testing.T) {
 	owners := map[string][]string{}
 	for _, m := range cssModules {
-		b, err := os.ReadFile(m.path)
+		var b []byte
+		var err error
+		if m.name == "whiteboard" {
+			var assets wswhiteboard.SharedAssets
+			assets, err = wswhiteboard.PageAssets()
+			b = []byte(assets.CSS)
+		} else {
+			b, err = dashboardTestAsset(m.path)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

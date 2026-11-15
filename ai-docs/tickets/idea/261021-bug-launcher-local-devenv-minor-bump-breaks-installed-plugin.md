@@ -31,6 +31,32 @@ that the fix is to refresh the install (`./install.sh update`). The
 source-tree launcher (`python3 agents-plugin/bin/ws-mcp-launcher.py`)
 worked as a stopgap, since its contract matches the source.
 
+## Decisions
+
+### Compatibility addendum - 2026-11-15
+
+- Under `AGENTS.md` and `ai-docs/manuals/release-compatibility.md` as landed in
+  `c0ec803cb`, the reported old-plugin startup lockout is a **T3 old-version
+  boundary**, not the former “T2 breaking” category. T3 requires a minor bump
+  and explicit owner approval; prefer transparent T0 behavior where feasible.
+  This grades the refusal, not an unchosen repair, and does not authorize
+  relaxing a runtime or shared-data safety check.
+- Current-source analogue, not a re-test of the historical 0.47 launcher:
+  the new runtime producer supplies version metadata; the installed-style
+  launcher reads it against its plugin contract. `version_compatible` permits
+  local drift only within the same minor
+  (`agents-plugin/bin/ws-mcp-launcher.py:134-149`), and
+  `runtime_capabilities_compatible` rejects a mismatch (`:731-739`). Forced
+  local-runtime failure terminates instead of downloading a fallback (`:723-726`).
+  This is runtime admission, not a shared-session/store writer; reopening data
+  cannot make the rejected runtime acceptable. The historical observation above
+  remains the incident evidence; these source lines describe this checkout.
+- T0–T2 now permit patches, but T2 specifically requires an old write followed
+  by demonstrated reconstruction on new-version reopen. No overwrite/recovery
+  path is claimed here. T4 (a new binary unable to read old data) never ships;
+  migration must lower it to T3 or below. The fallback-versus-message question
+  below remains open; this addendum chooses neither architecture nor behavior.
+
 ## Open Questions
 
 - Should a version-incompatible local build fall back to a compatible cached

@@ -148,7 +148,7 @@ func TestQueryStemmedTopics(t *testing.T) {
 	mustApply(t, st, addXML(ClassTechnical, "Plain title", "two"))
 	header := `topic ship-gate "Ship ` + "`gate`" + `" [open] items: open 1; ` + changedAt + "\n"
 	for _, name := range []string{"ship-gate", "Ship <code>gate</code>"} {
-		if text := queryText(t, st, `{"topic":"`+strings.ReplaceAll(name, `"`, `\"`)+`","depth":"items"}`); text != header+"  (01) [open] [technical] one\n" {
+		if text := queryText(t, st, `{"topic":"`+strings.ReplaceAll(name, `"`, `\"`)+`","depth":"items"}`); text != header+"  state: discussing; entry: e2\n  (01) [open] [technical] one\n" {
 			t.Fatalf("topic %q:\n%s", name, text)
 		}
 	}

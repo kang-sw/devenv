@@ -126,10 +126,13 @@ type Event struct {
 	// present and keeps it when absent. A blank text or a negative or
 	// out-of-range number is ignored. Numbers are floats so a fractional
 	// count never fails the whole event.
-	Model         string   `json:"model,omitempty"`
-	Effort        string   `json:"effort,omitempty"`
-	ContextTokens *float64 `json:"contextTokens,omitempty"`
-	OutputTps     *float64 `json:"outputTps,omitempty"`
+	// Observed is optional response evidence on status (lead) or agent (child).
+	// It never changes the meaning of Model/Effort or permits lead telemetry.
+	Observed      *ModelObservation `json:"observed,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	Effort        string            `json:"effort,omitempty"`
+	ContextTokens *float64          `json:"contextTokens,omitempty"`
+	OutputTps     *float64          `json:"outputTps,omitempty"`
 	// Commands is a commands event's list. Command is a command event's
 	// typed line ("/name args"), its output in Text.
 	Commands []SlashCommand `json:"commands,omitempty"`
@@ -153,6 +156,8 @@ type Result struct {
 	Urgent  bool
 	// Ring holds the conversation entries the event finished.
 	Ring []RingEntry
+	// Observed contains newly accepted response evidence for durable storage.
+	Observed []ObservedRecord
 }
 
 type activityState struct {
@@ -182,9 +187,11 @@ type agentState struct {
 // State is one session's live state: the reducer from adapter events to a
 // snapshot. It is not safe for concurrent use.
 type State struct {
-	replyID string
-	adapter string
-	scrub   scrubber
+	observations map[string]ObservedRecord
+	observed     map[string]*ObservedModel
+	replyID      string
+	adapter      string
+	scrub        scrubber
 
 	lead           activityState
 	turnStartedAt  int64
@@ -193,6 +200,7 @@ type State struct {
 	turnWake       bool
 	previousTurnMs int64
 	summary        summaryState
+	lastTurnOutput *ModelObservation
 	reply          *Reply
 	// compactStartedAt is the running compaction's start, 0 when none runs;
 	// compactTrigger is its trigger, which an end without one inherits.
@@ -279,7 +287,7 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 	switch ev.Kind {
 	case KindReset:
 		st.summary.resync = st.turnStartedAt > 0
-		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded, host: st.host, summary: st.summary}
+		*st = State{replyID: st.replyID, adapter: st.adapter, scrub: st.scrub, agents: map[string]*agentState{}, batchesEnded: st.batchesEnded, host: st.host, summary: st.summary, observations: st.observations, observed: st.observed, lastTurnOutput: st.lastTurnOutput}
 		st.lead.phase = PhaseIdle
 		res.Changed = true
 	case KindTurnStart:
@@ -321,6 +329,11 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 			truncated := st.summary.current != nil && st.summary.current.Truncated
 			res.Ring = append(res.Ring, RingEntry{Kind: RingTurn, Origin: st.turnOrigin, WakeTurn: st.turnWake, Done: done, Failed: failed, DurationMs: duration, Reason: ev.Reason, Truncated: truncated, SummaryHistory: st.finishSummary(ev.Reason)})
 			st.previousTurnMs = duration
+			st.lastTurnOutput = nil
+			if o := st.observed[""]; o != nil && o.Current.At >= st.turnStartedAt {
+				copy := o.Current
+				st.lastTurnOutput = &copy
+			}
 		}
 		st.turnStartedAt, st.turnOrigin = 0, ""
 		res.Changed = true
@@ -453,6 +466,15 @@ func (st *State) Apply(ev Event, now int64) (Result, error) {
 	default:
 		return Result{}, fmt.Errorf("unknown event kind %q", ev.Kind)
 	}
+	if (ev.Kind == KindStatus || (ev.Kind == KindAgent && ev.AgentID != "")) && ev.Observed != nil {
+		if o := st.cleanObservation(ev.Observed); o != nil {
+			r := ObservedRecord{AgentID: ev.AgentID, ModelObservation: *o}
+			if st.addObserved(r) {
+				res.Observed = append(res.Observed, r)
+				res.Changed = true
+			}
+		}
+	}
 	st.refreshPhases(at)
 	st.retain()
 	if st.lead.phase != leadPhase || st.reply != leadReply {
@@ -580,7 +602,7 @@ func (st *State) applyAgent(ev Event, at int64) error {
 		batches = st.normalizeBatches(ev.Batches)
 	}
 	if ev.AgentID == "" {
-		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || hasTelemetry(ev) {
+		if ev.Status != "" || ev.ParentID != "" || ev.Label != "" || ev.SessionKey != "" || ev.AgentKind != "" || ev.ActiveMs != 0 || ev.TurnStartedAt != 0 || hasTelemetry(ev) || ev.Observed != nil {
 			return fmt.Errorf("the lead takes only batches and caption; set agentId for a subagent")
 		}
 		st.setActivity(&st.lead, ev, batches)
@@ -993,6 +1015,8 @@ func (st *State) Snapshot(now int64) Snapshot {
 		UpdatedAt:     now,
 		HeartbeatMs:   HeartbeatInterval.Milliseconds(),
 		Lead: Lead{
+			Observed:         st.observed[""].clone(),
+			LastTurnOutput:   cloneObservation(st.lastTurnOutput),
 			Activity:         st.lead.view(),
 			TurnStartedAt:    st.turnStartedAt,
 			TurnOrigin:       st.turnOrigin,
@@ -1022,6 +1046,7 @@ func (st *State) Snapshot(now int64) Snapshot {
 			TurnStartedAt: a.turnStartedAt,
 			AgentKind:     a.kind,
 
+			Observed:      st.observed[a.id].clone(),
 			Model:         a.model,
 			Effort:        a.effort,
 			ContextTokens: a.contextTokens,
@@ -1035,6 +1060,15 @@ func (st *State) Snapshot(now int64) Snapshot {
 		return snap.Agents[i].ID < snap.Agents[j].ID
 	})
 	snap.Agents = mergeSpawnAgents(snap.Agents, st.spawnAliases)
+	for id, o := range st.observed {
+		if id == "" {
+			continue
+		}
+		if snap.ObservedAgents == nil {
+			snap.ObservedAgents = map[string]*ObservedModel{}
+		}
+		snap.ObservedAgents[id] = o.clone()
+	}
 	return snap
 }
 

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kang-sw/devenv/internal/wslive"
 )
@@ -55,7 +56,7 @@ func (m *claudeMapper) subagentReply(l claudeLine, now int64) []Event {
 	if json.Unmarshal(l.Message, &msg) != nil {
 		return nil
 	}
-	ev := wslive.Event{Kind: wslive.KindAgent, AgentID: sub.task, Model: msg.Model}
+	ev := wslive.Event{Kind: wslive.KindAgent, AgentID: sub.task, Model: msg.Model, Observed: m.observation(l, msg)}
 	if u := msg.Usage; u != nil {
 		tokens := float64(u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens)
 		ev.ContextTokens = &tokens
@@ -64,6 +65,34 @@ func (m *claudeMapper) subagentReply(l claudeLine, now int64) []Event {
 		return nil
 	}
 	return []Event{{Live: &ev}}
+}
+
+// observation uses response identity and the stream's original evidence time,
+// never the init model, spawn effort, or receipt clock. Blocks of one response
+// share the message id even when their line UUIDs and timestamps differ.
+func (m *claudeMapper) observation(l claudeLine, msg claudeMessage) *wslive.ModelObservation {
+	id := msg.ID
+	if id == "" {
+		id = l.UUID
+	}
+	if id == "" || strings.TrimSpace(msg.Model) == "" || msg.Model == "<synthetic>" || l.IsSynthetic || (len(l.LocalCommandSource) > 0 && string(l.LocalCommandSource) != "null") || rawString(l.Error) != "" || rawString(l.APIError) != "" {
+		return nil
+	}
+	for _, observed := range m.evidence {
+		if observed.ID == id {
+			return &observed
+		}
+	}
+	at, err := time.Parse(time.RFC3339Nano, l.Timestamp)
+	if err != nil || at.UnixMilli() <= 0 {
+		return nil
+	}
+	observed := wslive.ModelObservation{ID: id, Model: msg.Model, Source: "claude.assistant", At: at.UnixMilli()}
+	m.evidence = append(m.evidence, observed)
+	if len(m.evidence) > claudeSeenUUIDs {
+		m.evidence = m.evidence[len(m.evidence)-claudeSeenUUIDs:]
+	}
+	return &observed
 }
 
 // alert reads the typed failure a lead's assistant line carries: a login

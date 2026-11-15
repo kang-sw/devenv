@@ -33,13 +33,68 @@ negotiation:
   config manifest and rsrc manifest check `schema_version` on read; sqlite
   has no guard against an older binary opening a newer schema.
 
-The tier taxonomy (T0 transparent, T1 reconnect-recoverable, T2 breaking),
-the scenario sheet, and the release rules live in
+The exploration above is historical, not a description of the current
+launcher: minor skew now refuses connection rather than falling back to direct
+execution (`agents-plugin/bin/ws-mcp-launcher.py:1457-1460`).
+
+The directional T0–T4 taxonomy, scenario sheet, and release rules live in
 `ai-docs/manuals/release-compatibility.md`, with the discussion-time rule in
 `AGENTS.md` `### Compatibility Tiers`. This ticket builds the enforcement
 those rules name.
 
 ## Decisions
+
+### Current compatibility assessment - 2026-11-15
+
+The policy landed in `c0ec803cb` supersedes the old tier names and approval
+thresholds below, not the confirmed three-phase feature scope. T0 is transparent;
+T1 is display-only degradation with no data change; T2 requires actual recovery
+on new-version reopen after an old write. T0–T2 permit patches. T3 blocks the old
+side's running, connection, read or write and requires a minor bump plus explicit
+owner approval. T4 means the new side cannot read old data and must never ship;
+migration must lower it to T3 or below.
+
+- **Calls:** the old “T2 breaking” removal/protocol boundary is now **T3**.
+  A behavior-preserving alias is normally **T0**, not reconnect-recoverable T1.
+  The old caller supplies legacy names; the new dispatcher refuses unknown
+  tools (`agents-plugin-tool/internal/mcp/server.go:2315-2316`) and undeclared
+  arguments before the handler (`agents-plugin-tool/internal/mcp/tool_arguments.go:65-128`).
+  These refusal paths write no handler data; reopening cannot restore a removed
+  call. Refresh is not an alias. Preserve the existing alias commitment; removal
+  at a minor still requires approval. A tracker event or store change is not
+  automatically breaking: grade its actual readers and writers.
+- **Connection:** an older plugin writes its hello version and the newer daemon
+  reads and rejects a different minor before session acceptance
+  (`agents-plugin-tool/internal/wsdashboard/proxy.go:232-254`): **T3**, not T2.
+  No session/store write occurs on this refusal path; reopening data cannot fix
+  connection refusal. The strong notice and quiet badge remain planned features,
+  not permission to bypass this boundary. A cross-minor notice alone cannot
+  waive a T3 data-safety refusal. Inspection uses existing hello or `/health`
+  information without direct execution or daemon startup just to get a version.
+- **Stores:** Phase 3 is an audit and guard target, not implemented proof of T0.
+  For example, if a newer writer adds a registration field unknown to a
+  current-style older binary, struct decode loses it and whole-file replacement
+  removes it (`agents-plugin-tool/internal/wsdashboard/registry.go:75-140,236-254,280-316`).
+  New reopen reads that replacement; this path retains no raw-field recovery.
+  That is **not T2** and is not patch-safe as-is. Acceptance must demonstrate
+  preservation, or an effective **T3** refusal before the older writer damages
+  data, with the required minor and owner approval. A schema field alone does
+  not protect against an already-installed writer that ignores it.
+- **Planned additive paths:** optional hello fields, notices/badges and refresh
+  target **T0** only when old peers continue normally and writes preserve new
+  fields. A display-only unknown/default with no data change can be **T1**.
+  Any claimed **T2** must cite the particular new writer/value, intervening old
+  write, retained raw/append-only bytes, and the new reader's reopen
+  reconstruction. No such T2 trace is established here. No blanket patch grade
+  is settled for the complete ticket; the highest affected path controls release.
+
+### Historical decisions (prior taxonomy)
+
+These retain the original board record. The current assessment above supersedes
+its old T0/T1-only patch rule, T2 label, unconditional “keeps working” wording,
+and direct-execution fallback requirement. It does not select a new connection
+architecture or authorize a refusal bypass; any design needed beyond the landed
+policy must return to the owner before implementation.
 
 - **Breaking boundary.** A patch release carries only T0/T1 changes; T2
   (removal without an alias, non-additive store change, protocol or tracker
@@ -95,11 +150,11 @@ those rules name.
 
 ## Constraints
 
-- Cross-version surfaces touched here (hello, store writers, tool surface)
-  are themselves subject to `AGENTS.md` `### Compatibility Tiers`: every
-  addition in this ticket must be T0 (optional hello fields, optional store
-  fields, additive notices), so it ships in a patch and an older peer ignores
-  it.
+- Cross-version surfaces here follow the current assessment in `## Decisions`
+  and `ai-docs/manuals/release-compatibility.md`. Prefer T0 additions, but do not
+  label newer-schema read/write refusal T0: an effective old-side refusal is
+  T3. Settle each writer/reader/reopen trace and approval before release; the
+  store audit may expose a boundary that cannot ship in a patch.
 - Out of scope: the dev-only stale binary (scenario 6,
   `261112-bug-ws-launcher-fingerprint-skips-embedded-assets`) and
   cross-machine tracker ledger skew (scenario 7), which daemon rules cannot
@@ -115,21 +170,25 @@ those rules name.
   against the daemon's own version.
 - Minor skew: inject the strong agent notice (a leading line on every ws tool result) and show a
   dashboard badge on the session. Patch skew: quiet badge only.
-- Direct-execution fallback sessions query the daemon's `/health` version and
-  apply the same judgment.
+- Use existing hello information or read-only `/health` inspection for version
+  evidence; do not restore the historical direct-execution fallback or start a
+  daemon solely for inspection. Preserve required T3 refusals rather than treating
+  the notice as authorization for unsafe cross-minor operation.
 - On daemon replacement, send `tools/list_changed`; probe whether Claude Code,
   Codex, and Pi honor it, and widen the Claude mod reconnect watchdog to a
   daemon version or content-hash change where they do not.
 - Verification: unit tests for the skew classification (same, patch, minor)
-  and notice injection; a test that a fallback session reads `/health`; the
-  probe result recorded in the phase Result.
+  and notice injection; a test that version inspection reads existing hello or
+  `/health` information without starting a daemon; the probe result recorded
+  in the phase Result.
 
 ### Phase 2: Tool-surface monotonicity test
 
 - Snapshot the tool surface (tool names, argument names) as a committed snapshot file and add a
   test that fails when the current surface removes a tool or argument present
   in the snapshot while the minor is unchanged. A minor bump resets the
-  baseline.
+  baseline, but does not substitute for explicit owner approval of T3 removal;
+  refresh must never be treated as preserving removed calls.
 - Verification: the test passes on the current tree and fails on a synthetic
   removal.
 
@@ -138,9 +197,15 @@ those rules name.
 - Audit each shared-store writer (session parts, mailbox, inbox, sqlite,
   tracker, config) for read-modify-write round-trips that drop unknown
   fields; record the audit in the phase Result.
-- Give each store that lacks one a `schema_version` (additively), and make
-  writers refuse to write, failing loud, when the stored version is newer
-  than their own. sqlite: refuse to open a newer `user_version` for writing.
+- Give each store that lacks one a `schema_version` and make writers refuse
+  to write, failing loud, when the stored version is newer than their own.
+  sqlite: refuse to open a newer `user_version` for writing. These are planned
+  T3 write boundaries, not T0 merely because the version field is additive.
+  Establish how each older writer actually refuses before damaging writes;
+  do not infer protection for installed binaries that ignore the field. If the
+  audit needs an unchosen migration or guard architecture, stop for owner
+  direction rather than widening this plan.
 - Verification: per-store tests that an older writer refuses a newer
   schema and that a same-version round-trip preserves unknown fields where the
-  audit says it must.
+  audit says it must. Include old-data reads by the new binary (T4 is forbidden),
+  and cite actual new reopen recovery before claiming any T2 overwrite.

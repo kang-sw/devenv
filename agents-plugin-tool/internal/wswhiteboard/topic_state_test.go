@@ -172,9 +172,10 @@ func TestTopicStateDiagnosticsAndRawRetention(t *testing.T) {
 		t.Run(tc.raw, func(t *testing.T) {
 			s := stateBoard(t)
 			stateApply(t, s, stateCommand("implementing", `owner="executor" eta_minutes="1"`), stateNow)
-			stateRaw(s, "Work", "e3", tc.raw)
+			entryID := fmt.Sprintf("e%d", s.EntrySeq+1)
+			stateRaw(s, "Work", entryID, tc.raw)
 			view := s.TopicStates()["Work"]
-			if view.State != nil || view.Diagnostic == nil || view.Diagnostic.Code != tc.code || view.Diagnostic.Entry != "e3" {
+			if view.State != nil || view.Diagnostic == nil || view.Diagnostic.Code != tc.code || view.Diagnostic.Entry != entryID {
 				t.Fatalf("view: %+v", view)
 			}
 			before := s.clone()
@@ -241,7 +242,7 @@ func TestTopicStateNumericOrderAndBoundedOldClose(t *testing.T) {
 		t.Run(tc.text, func(t *testing.T) {
 			s := stateBoard(t)
 			stateApply(t, s, stateCommand("waiting", ""), stateNow)
-			s.Topics[0].Entries = append(s.Topics[0].Entries, Entry{ID: "e3", Kind: tc.kind, Imported: tc.imported, ItemID: tc.item, Text: tc.text, At: stateNow.Format(time.RFC3339Nano)})
+			s.Topics[0].Entries = append(s.Topics[0].Entries, Entry{ID: fmt.Sprintf("e%d", s.EntrySeq+1), Kind: tc.kind, Imported: tc.imported, ItemID: tc.item, Text: tc.text, At: stateNow.Format(time.RFC3339Nano)})
 			if (s.TopicStates()["Work"].State == nil) != tc.reset {
 				t.Fatal("close producer boundary")
 			}
@@ -276,7 +277,7 @@ func TestTopicStateStructuralWarnings(t *testing.T) {
 	if !strings.Contains(out.Info, "waiting_without_implementing") {
 		t.Fatal("closed implementation suppressed warning")
 	}
-	legacy := stateBoard(t)
+	legacy := &State{Topics: []TopicDoc{{Name: "Work", Entries: []Entry{{ID: "e1", Kind: EntryAgent, Text: "Legacy summary", At: stateNow.Format(time.RFC3339Nano)}}}}, EntrySeq: 1}
 	if out := stateApply(t, legacy, "", stateNow); strings.Contains(out.Info, "without_") {
 		t.Fatal("absent legacy state warned")
 	}

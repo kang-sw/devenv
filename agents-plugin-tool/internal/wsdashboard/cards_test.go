@@ -29,7 +29,7 @@ func TestLucideIconsAreVendoredWithTheirLicense(t *testing.T) {
 	}
 	var scripts strings.Builder
 	for _, name := range cardScripts {
-		raw, err := dashboardFS.ReadFile(name)
+		raw, err := dashboardTestAsset(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,11 +82,13 @@ func TestBoardCardPlacement(t *testing.T) {
 	if order == "" || settle == "" {
 		t.Fatal("cards.js holds no order / settle")
 	}
-	board, err := dashboardFS.ReadFile("assets/dashboard.js")
+	board, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(board), "var plan = window.WsCards.weave(want), woven = plan.board;") || !strings.Contains(string(board), "window.WsCards.settle(el, plan);") {
+	// Frozen viewed staging may reorder plan lists between the weave and the
+	// read of the woven board order, so the two are separate statements.
+	if !strings.Contains(string(board), "var plan = window.WsCards.weave(want);") || !strings.Contains(string(board), "var woven = plan.board;") || !strings.Contains(string(board), "window.WsCards.settle(el, plan);") {
 		t.Error("the board morph does not weave the cards in and settle around them")
 	}
 	runNode(t, "board card placement", `
@@ -670,7 +672,7 @@ func TestBoardPinnedClosedPagesCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

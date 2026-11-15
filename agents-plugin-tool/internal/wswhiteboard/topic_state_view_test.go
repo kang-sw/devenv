@@ -99,7 +99,7 @@ func TestTopicStateViewAbsenceAndDiagnostics(t *testing.T) {
 		{name: "unsupported", raw: `{"v":2,"op":"set","value":"waiting"}`, code: "unsupported"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := stateBoard(t)
+			s := &State{Topics: []TopicDoc{{Name: "Work", Entries: []Entry{{ID: "e1", Kind: EntryAgent, Text: "Latest human summary", At: stateNow.Format(time.RFC3339Nano)}}}}, EntrySeq: 1}
 			// Conversation text cannot supply an operational state.
 			stateApply(t, s, `<wb:topic name="Work"><wb:log>implementing; owner executor; ETA 7 minutes</wb:log></wb:topic>`, stateNow)
 			if tc.raw != "" {

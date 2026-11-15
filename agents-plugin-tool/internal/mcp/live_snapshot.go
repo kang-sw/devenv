@@ -218,6 +218,12 @@ func (h *liveHub) session(key, dir, root string, nudge func(), active func() boo
 		ls.stop()
 	}
 	state := wslive.NewState(key)
+	if records, err := wslive.ReadObserved(dir); err == nil {
+		state.SeedObserved(records)
+	}
+	if prev, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
+		state.SeedLastTurn(prev)
+	}
 	ls = &liveSession{dir: dir, root: root, replyID: state.ReplyID(), nudge: nudge, active: active, debug: debug, state: state}
 	if h.host != nil && !h.closed {
 		if slot, ok := h.host.OpenHostedSlot(dir); ok {
@@ -515,6 +521,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	now := currentLiveSeams().now().UnixMilli()
 	var (
 		ring     []wslive.RingEntry
+		observed []wslive.ObservedRecord
 		problems []string
 		applied  int
 		changed  bool
@@ -544,6 +551,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 					ls.flushNow = true
 				}
 				reset = reset || ev.Kind == wslive.KindReset
+				observed = append(observed, res.Observed...)
 				for _, entry := range res.Ring {
 					if entry.SummaryHistory != nil {
 						wslive.PrepareSummaryRing(res.Ring)
@@ -582,6 +590,9 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	ls.mu.Unlock()
 	if release != nil {
 		release()
+	}
+	if err := wslive.AppendObserved(ls.dir, observed); err != nil {
+		s.debugEvent("dashboard.model_evidence_write_error", map[string]any{"error": err.Error()})
 	}
 	if len(ring) > 0 {
 		s.appendLiveRing(key, ls.dir, ls.slot, ring)

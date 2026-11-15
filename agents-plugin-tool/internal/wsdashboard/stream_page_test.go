@@ -52,7 +52,7 @@ function shDrafts() { return false; }
 // as history and acts on the ui lines of later ones, a hidden tab included, retries a drop,
 // and closes on "gone". The cases execute under node when it is installed.
 func TestPageStreamsRideWebSocket(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ process.stdout.write(bad.join("\n"));
 // tab banners instead, so a page never reloads in a loop. The cases execute
 // under node when it is installed.
 func TestPageReloadsOnOtherAssets(t *testing.T) {
-	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	data, err := dashboardTestAsset("assets/dashboard.js")
 	if err != nil {
 		t.Fatal(err)
 	}

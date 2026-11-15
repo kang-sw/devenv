@@ -149,7 +149,7 @@ func TestBandLimitAndCostChips(t *testing.T) {
 
 func mustAsset(t *testing.T, name string) string {
 	t.Helper()
-	raw, err := dashboardFS.ReadFile("assets/" + name)
+	raw, err := dashboardTestAsset(name)
 	if err != nil {
 		t.Fatal(err)
 	}

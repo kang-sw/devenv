@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: f7c577b0ad26f917
 sage-review-completeness-reviewed: f7c577b0ad26f917
+completed: 2026-11-15
 ---
 
 # New whiteboard topics default to discussing and updates summarize applied operations
@@ -256,3 +257,41 @@ capture):
   Preserve existing query/view absence and diagnostic coverage and playbook
   downstream neutrality. Record actual commands, full output and exits before
   claiming a pass; build/runtime/release checks remain outside this capture.
+
+### Result (a0f89577d) - 2026-11-15
+
+- Implemented authoritative creation defaults through existing version-1 state
+  records, explicit same-batch suppression, and additive net-topic summaries.
+  Existing topics, diagnostics, adoption/reopen, run/ETA authority, ordered
+  refusal, committed effects, and publication-only recovery remain intact.
+- MAIN's 04:16:28 implementation grant superseded the earlier DOCS-worker-only
+  preparation constraint and full-suite wording: scoped offline verification
+  only, no runtime actions or branch synchronization. The phase plan is unchanged.
+- Defaults are planned against an ordinary ordered transaction and replayed on
+  a fresh copy only when needed, preserving default-before-close history without
+  an intermediate default for explicit creation. Summaries align resolved
+  identities once, retain first-touch order, and attribute compact item kinds to
+  surviving semantic field writers. Creation followed by close reports effective
+  state `none`, provenance, and `closed`; in-place adoption uses `adopted`.
+- Updated canonical guidance, regenerated ws/wsflow/Pi resources through existing
+  pipelines, and added offline Pi/launcher forwarding regressions preserving the
+  old prefix lines. Migrated default-aware entry fixtures; literal legacy
+  fixtures retain absence/removal coverage rather than weakening assertions.
+- Verification passed with `GOPROXY=off`, `GOSUMDB=off`, local toolchain, isolated
+  cache/config, and package offline mode: 91 exact-name model tests from eleven
+  relevant files (historical writer excluded); `go test -p=1 ./internal/mcp
+  -run '^TestWhiteboard' -count=1 -timeout=180s`; Pi stdio-client tests (20);
+  socket-free launcher regression (1); resource guards (4); wsflow package
+  checks (24, two platform skips); manifest/mirror generation and byte equality.
+  Final model/MCP outputs and exact selections are in
+  `/tmp/ws-topic-default-summary-261115/`; support evidence is in
+  `/tmp/ws-whiteboard-support.vEOywL/`.
+- One independent Lite found one Important converged-adoption comparison bug,
+  fixed in `a0f89577d` with model/MCP regressions; no Critical or Minor findings.
+  No re-review. Earlier failures were diagnosed as stale event/legacy fixtures,
+  an obsolete playbook assertion, and nudge assertions conflating structural
+  warnings with nudges; exact contracts were retained in their corrections.
+- Omitted by authorization: full repository/Pi/browser suites, historical-writer
+  subprocess execution, live/provider/runtime checks, unrelated markup/waiting-on
+  repairs, and synchronization. The lead owns the single subsequent sync and
+  integration; no T1/T2 surface or unresolved finding remains.

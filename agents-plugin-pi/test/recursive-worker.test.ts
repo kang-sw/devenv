@@ -120,6 +120,20 @@ function pushHarness(sent: unknown[]) {
 const drain = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const assistantEnd = (text: string) => ({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }] } });
 
+test("RPC completed responses retain independent observed identity across state refresh and replay", async () => {
+  const h = pushHarness([]);
+  const child = record("observed-output", { client: h.client, running: true, workGeneration: 1, observedModel: "state-only", observedEffort: "max" });
+  const registry = new Map([[child.agentId, child]]);
+  attachEventListener(h.pi, registry, child, h.client);
+  const output = { type: "message_end", message: { role: "assistant", model: "physical-one", responseId: "response-one", timestamp: 1000, stopReason: "stop", content: [] } };
+  h.emit(output); h.emit(output);
+  h.emit({ type: "message_end", message: { ...output.message, model: "physical-two", responseId: "response-two", timestamp: 2000, thinkingLevel: "low" } });
+  await drain();
+  assert.deepEqual(child.modelObservations?.map((o) => [o.model, o.at, o.effort]), [["physical-one", 1000, undefined], ["physical-two", 2000, "low"]]);
+  assert.equal(child.modelObservations?.[0]?.outputTps, undefined);
+  child.unsubscribe?.();
+});
+
 test("delegation policy preserves execution at the terminal depth without child-management tools", () => {
   const parent = worker();
   const leaf = childPolicy(parent, full, "lead");

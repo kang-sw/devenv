@@ -440,7 +440,13 @@ func (r *Runner) startConv(rec Record, seed []wslive.SlashCommand) *conv {
 		c.live.summaryStore().SetWake(c.live.wake)
 	}
 	c.live.beforeSnapshot = c.seedSpawnRows
-	if usage := c.live.st.Snapshot(r.opts.Now().UnixMilli()).Usage; usage != nil && usage.Context != nil && usage.Context.Tokens != nil {
+	c.observations = c.live.st.ObservedResponses("")
+	own := c.live.st.Snapshot(r.opts.Now().UnixMilli())
+	if own.Lead.Observed != nil {
+		observed := own.Lead.Observed.Current
+		c.observed = &observed
+	}
+	if usage := own.Usage; usage != nil && usage.Context != nil && usage.Context.Tokens != nil {
 		tokens := float64(*usage.Context.Tokens)
 		c.contextTokens = &tokens
 	}
@@ -1087,6 +1093,12 @@ type State struct {
 	Process bool   `json:"process"`
 	Model   string `json:"model,omitempty"`
 	Effort  string `json:"effort,omitempty"`
+	// Observed is this conversation's own response evidence, not its settings
+	// or a descendant's output. It remains available when the turn ends.
+	Observed *wslive.ModelObservation `json:"observed,omitempty"`
+	// Observations is an internal reconciliation window, not a REST payload.
+	// Parent refresh notifications coalesce; latest-only state would lose changes.
+	Observations []wslive.ModelObservation `json:"-"`
 	// ContextTokens and OutputTps are the child's own latest usage; the
 	// approximate streaming rate is absent when no turn runs.
 	ContextTokens *float64           `json:"contextTokens,omitempty"`
@@ -1166,9 +1178,24 @@ func (r *Runner) closedState(rec Record) State {
 	if r.opts.closedSnapshotRead != nil {
 		r.opts.closedSnapshotRead(rec.ReplyID)
 	}
-	if snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))); err == nil && snap.Usage != nil && snap.Usage.Context != nil && snap.Usage.Context.Tokens != nil {
-		tokens := float64(*snap.Usage.Context.Tokens)
-		st.ContextTokens = &tokens
+	dir := wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID)
+	if snap, err := wslive.ReadSnapshot(wslive.SnapshotPath(dir)); err == nil {
+		if records, err := wslive.ReadObserved(dir); err == nil {
+			wslive.OverlayObserved(&snap, records)
+			for _, rec := range records {
+				if rec.AgentID == "" {
+					st.Observations = append(st.Observations, rec.ModelObservation)
+				}
+			}
+		}
+		if snap.Lead.Observed != nil {
+			observed := snap.Lead.Observed.Current
+			st.Observed = &observed
+		}
+		if snap.Usage != nil && snap.Usage.Context != nil && snap.Usage.Context.Tokens != nil {
+			tokens := float64(*snap.Usage.Context.Tokens)
+			st.ContextTokens = &tokens
+		}
 	}
 	if st.Status == StatusHandedOff {
 		st.ResumeCommand = resumeCommand(rec, wsdashboard.SessionDir(r.opts.Dir, rec.ReplyID))
@@ -1228,6 +1255,8 @@ type conv struct {
 	closed        bool
 	contextTokens *float64
 	outputTps     *float64
+	observed      *wslive.ModelObservation
+	observations  []wslive.ModelObservation
 	batches       []wslive.BatchView
 	// approvals are a lead's waiting tool permission prompts, oldest first;
 	// activeMode and bgTasks are what its harness last reported.
@@ -1603,6 +1632,11 @@ func (c *conv) state() State {
 	st.Held = len(held) + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
 	st.Error = c.lastErr
 	st.ContextTokens = c.contextTokens
+	if c.observed != nil {
+		observed := *c.observed
+		st.Observed = &observed
+	}
+	st.Observations = append([]wslive.ModelObservation(nil), c.observations...)
 	st.Batches = c.batches
 	if c.turn && !c.closed {
 		st.OutputTps = c.outputTps
@@ -1813,6 +1847,22 @@ func (c *conv) apply(ev wslive.Event, quiet ...bool) {
 	} else if c.live.apply(ev) {
 		c.ringDirty = true
 		c.r.notify(c.rec.ReplyID, c.rec.Root)
+	}
+	if ev.Kind == wslive.KindStatus && ev.Observed != nil {
+		observations := c.live.st.ObservedResponses("")
+		c.setStatus(func() {
+			if !reflect.DeepEqual(c.observations, observations) {
+				c.observations, usageChanged = observations, true
+			}
+		})
+		if own := c.live.st.Snapshot(c.r.opts.Now().UnixMilli()).Lead.Observed; own != nil {
+			c.setStatus(func() {
+				if c.observed == nil || !reflect.DeepEqual(*c.observed, own.Current) {
+					observed := own.Current
+					c.observed, usageChanged = &observed, true
+				}
+			})
+		}
 	}
 	activityChanged := false
 	if (ev.Kind == wslive.KindAgent && ev.AgentID == "" && ev.Batches != nil) || ev.Kind == wslive.KindReset || ev.Kind == wslive.KindTurnEnd || ev.Kind == wslive.KindReply {

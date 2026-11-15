@@ -13,6 +13,7 @@ El.prototype.insertBefore = function (n, ref) {
 Doc.prototype.createDocumentFragment = function () { return new El('fragment', this); };
 Doc.prototype.createTextNode = function (s) { var n = new El('text', this); n.textContent = s; return n; };
 Doc.prototype.removeEventListener = El.prototype.removeEventListener;
+Doc.prototype.fire = El.prototype.fire;
 Doc.prototype.querySelector = function (s) { return this.documentElement.querySelector(s); };
 El.prototype.click = function () { this.fire('click', { target: this, stopPropagation: function () {} }); };
 var requests = [], pendingTimers = new Map(), nextTimer = 0;
@@ -35,7 +36,7 @@ function event(n, type, extra) { var e = Object.assign({ target: n, preventDefau
 function key(n, key) { return event(n, 'keydown', { key }); }
 function slash(n) { var e = { target: n, key: '/', preventDefault() { this.defaultPrevented = true; } }; doc.listeners.keydown.slice().forEach(f => f(e)); }
 var doc = new Doc(), win = { WsCards: { icon: name => '<svg><use href="#l-' + name + '"/></svg>' }, AbortController, innerWidth: 1200, innerHeight: 900, listeners: {}, addEventListener: El.prototype.addEventListener, removeEventListener: El.prototype.removeEventListener };
-new Function('document', 'window', 'wsT', 'wsTn', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', FILES)(doc, win, k => k, (k, n) => k === 'js.files.count' ? n + (n === 1 ? ' item' : ' items') : k, fetchControlled, AbortController, later, cancel);
+new Function('document', 'window', 'wsT', 'wsTn', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', FILES)(doc, win, (k, n) => k === 'js.files.selected.count' ? n + ' selected' : k, (k, n) => k === 'js.files.count' ? n + (n === 1 ? ' item' : ' items') : k, fetchControlled, AbortController, later, cancel);
 function explorer(rid, local = true, options = {}) {
   var el = doc.body.appendChild(new El('section', doc)); el.className = 'fpane';
   var store = options.store || {}, previews = [];
@@ -44,6 +45,67 @@ function explorer(rid, local = true, options = {}) {
   return { el, instance, store, previews, q: el.querySelector('.fq'), tree: el.querySelector('.ftree'), hits: el.querySelector('.fhits'), at: s => el.querySelector(s), all: s => el.querySelectorAll(s) };
 }
 function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.at('.fchange-root').click(); x.at('.froot-pop .fpin').value = path; x.at('.fgo .pr').click(); }
+async function rootFilterChecks() {
+  var x = explorer('root-filter'), peer = explorer('root-filter-peer');
+  x.instance.shown(); peer.instance.shown();
+  await answer(take('root-filter', 'list'), listing('/project', undefined, true));
+  await answer(take('root-filter-peer', 'list'), listing('/peer', undefined, true));
+  var offered = { roots: [
+    { path: '/project', branch: 'main', pooled: true },
+    { path: '/pool/ab-build', branch: 'impl/a-very-long-branch/topic', pooled: true },
+    { path: '/other-a', branch: 'xaxb' },
+    { path: '/ab-first', branch: 'other' },
+    { path: '/nonpool-detached', detached: true },
+    { path: '/cab', branch: 'topic' },
+    { path: '/ab-second', branch: 'other' },
+    { path: '/pool/beta', branch: 'lab', pooled: true },
+    { path: '/pool/detached', detached: true, pooled: true }
+  ] };
+  x.at('.fchange-root').click(); await answer(take('root-filter', 'worktrees'), offered);
+  peer.at('.fchange-root').click(); await answer(take('root-filter-peer', 'worktrees'), { roots: [{ path: '/peer' }, { path: '/untouched', branch: 'keep' }] });
+  var pop = x.at('.froot-pop'), filter = x.at('.froot-filter');
+  function paths() { return x.all('.froot-list button').map(n => n.title); }
+  function search(q) { filter.value = q; event(filter, 'input'); }
+  function press(k, target = filter) { return event(pop, 'keydown', { key: k, target }); }
+  check('current pooled root is pinned with a check above filter and scroll list', [x.at('.froot-current button').title, x.at('.froot-check').textContent, pop.children.indexOf(x.at('.froot-current')) < pop.children.indexOf(filter), pop.children.indexOf(filter) < pop.children.indexOf(x.at('.froot-list'))], ['/project', '✓', true, true]);
+  check('only pool membership groups rows, preserving base order including detached', paths(), ['/other-a', '/ab-first', '/nonpool-detached', '/cab', '/ab-second', '/pool/ab-build', '/pool/beta', '/pool/detached']);
+  var sep = x.at('.froot-separator');
+  check('exactly one separator separates non-pooled from pooled', [x.all('.froot-separator').length, sep.getAttribute('role'), sep.previousElementSibling.title, sep.nextElementSibling.title], [1, 'separator', '/ab-second', '/pool/ab-build']);
+  check('branch markup isolates LTR text inside the front-trimmed branch column', [x.at('.froot-list .froot-branch bdi').tagName, x.all('.froot-branch bdi').map(n => n.textContent).includes('impl/a-very-long-branch/topic')], ['BDI', true]);
+  search('AB');
+  check('fuzzy matches name and branch, ranks prefix contiguous before scattered with stable ties and non-pooled first', paths(), ['/ab-first', '/ab-second', '/cab', '/other-a', '/pool/ab-build', '/pool/beta']);
+  check('filter never removes the pinned current row', x.at('.froot-current button').title, '/project');
+  search('tpc');
+  check('subsequence branch filtering ranks earlier matches first inside each group', paths(), ['/cab', '/pool/ab-build']);
+  search('npdt');
+  check('subsequence folder filtering works without a matching branch', paths(), ['/nonpool-detached']);
+  check('one remaining group has no orphan separator', x.all('.froot-separator').length, 0);
+  search('no-such-worktree');
+  check('empty filter results retain pinned row and manual path input', [paths(), x.all('.froot-separator').length, x.at('.froot-pop .fpin').value], [[], 0, '/project']);
+  check('Enter with no matches does not reselect current', [press('Enter').defaultPrevented, pop.hidden], [true, false]);
+  search('ab');
+  press('ArrowUp'); check('ArrowUp from filter reaches last visible row', doc.activeElement.title, '/pool/beta');
+  press('ArrowDown', doc.activeElement); check('ArrowDown wraps to pinned row', doc.activeElement.title, '/project');
+  press('ArrowDown', doc.activeElement); check('ArrowDown reaches first ranked row', doc.activeElement.title, '/ab-first');
+  press('Enter', doc.activeElement); var picked = take('root-filter', 'list');
+  check('keyboard Enter uses existing guarded root navigation', picked.url.searchParams.get('root'), '/ab-first');
+  await answer(picked, listing('/ab-first'));
+  check('filter and root selection stay isolated from another card', [peer.at('.froot-filter').value, peer.at('.froot-pop .fpin').value, peer.all('.froot-row').map(n => n.title), peer.instance.location().root], ['', '/peer', ['/peer', '/untouched'], '']);
+  x.at('.fchange-root').click(); await answer(take('root-filter', 'worktrees'), offered);
+  check('reopen clears filter and focuses it', [filter.value, doc.activeElement === filter], ['', true]);
+  search('tpc'); press('Enter'); var filteredPick = take('root-filter', 'list');
+  check('Enter directly from filter picks first ranked match rather than pinned root', filteredPick.url.searchParams.get('root'), '/cab');
+  await answer(filteredPick, listing('/cab'));
+  x.at('.fchange-root').click(); await answer(take('root-filter', 'worktrees'), offered);
+  press('Escape'); check('Escape closes and restores root-switcher focus', [pop.hidden, doc.activeElement === x.at('.fchange-root')], [true, true]);
+  x.at('.fchange-root').click(); await answer(take('root-filter', 'worktrees'), offered);
+  x.at('.froot-pop .fpin').value = '/manual'; key(x.at('.froot-pop .fpin'), 'Enter');
+  await refuse(take('root-filter', 'list'));
+  check('manual path Enter still validates and displays refusal per card', [x.at('.ferr').textContent, pop.hidden, peer.at('.ferr').textContent], ['js.files.root.refused', false, '']);
+  key(x.at('.froot-pop .fpin'), 'Enter'); await answer(take('root-filter', 'list'), listing('/manual'));
+  check('manual path Enter still accepts an arbitrary folder', x.instance.location().root, '/manual');
+  x.instance.destroy(); peer.instance.destroy();
+}
 async function sidebarToneChecks() {
   var x = explorer('sidebar-tone'); x.instance.shown();
   check('folder header is present while loading without a fabricated item count', [x.at('.ftree-head').textContent, x.all('.fcount').length], ['js.files.folders', 0]);
@@ -200,7 +262,106 @@ async function pathBarChecks() {
   check('storage restores directory but starts fresh history', [p.instance.location().dir, p.at('.fback').disabled, p.at('.fforward').disabled], ['folder', true, true]);
   p.instance.destroy(); peer.instance.destroy();
 }
+async function multiSelectChecks() {
+  var sent = [], copied = [], primary = [], actions = [];
+  var p = explorer('multi', true, { send: path => sent.push(path), copy: text => copied.push(text), post: (...args) => actions.push(args), onSelection: s => primary.push(s.path) });
+  var peer = explorer('multi-peer');
+  p.instance.shown(); peer.instance.shown();
+  var entries = [{ name: 'folder', dir: true }, { name: 'a.txt' }, { name: 'b.txt' }, { name: 'c.txt' }, { name: 'd.txt' }, { name: '.hidden' }, { name: 'ignored', ign: true }];
+  await answer(take('multi', 'list'), listing('/multi', entries, true));
+  await answer(take('multi-peer', 'list'), listing('/peer', entries, true));
+  var selected = () => p.all('.fentry').filter(row => row.classList.contains('sel')).map(row => row.getAttribute('data-entry'));
+  function click(path, modifiers = {}) { var row = p.at('[data-entry="' + path + '"]'); row.focus(); event(row, 'click', modifiers); }
+  function shortcut(target, key, modifiers = {}) {
+    target.focus(); var e = Object.assign({ target, key, preventDefault() { this.defaultPrevented = true; } }, modifiers);
+    doc.listeners.keydown.slice().forEach(fn => fn(e)); return !!e.defaultPrevented;
+  }
+  click('a.txt'); check('plain click selects one', selected(), ['a.txt']);
+  click('c.txt', { ctrlKey: true }); check('Ctrl click adds and retains primary compatibility', [selected(), p.instance.selection().path, primary.slice(-1)[0]], [['a.txt', 'c.txt'], 'c.txt', 'c.txt']);
+  click('a.txt', { metaKey: true }); check('Cmd click toggles off while keeping last clicked primary', [selected(), p.instance.selection().path], [['c.txt'], 'a.txt']);
+  click('d.txt', { shiftKey: true }); check('Shift range uses last toggled anchor', selected(), ['a.txt', 'b.txt', 'c.txt', 'd.txt']);
+  click('b.txt', { shiftKey: true }); check('repeated Shift keeps anchor and replaces range', selected(), ['a.txt', 'b.txt']);
+  click('d.txt', { metaKey: true }); click('c.txt', { shiftKey: true, ctrlKey: true });
+  check('Shift Ctrl adds range to existing selection', selected(), ['a.txt', 'b.txt', 'c.txt', 'd.txt']);
+  click('c.txt'); check('plain click replaces multi-selection', selected(), ['c.txt']);
+  click('c.txt', { ctrlKey: true });
+  check('toggling the final row off clears membership and disables batch actions', [selected(), p.all('.fattachment button').map(b => b.disabled)], [[], [true, true]]);
+  check('Ctrl A outside explorers stays native', shortcut(doc.body, 'a', { ctrlKey: true }), false);
+  var unfocused = { target: p.tree, key: 'a', ctrlKey: true, preventDefault() { this.defaultPrevented = true; } };
+  doc.listeners.keydown.slice().forEach(fn => fn(unfocused));
+  check('select all requires actual focus inside the instance', [!!unfocused.defaultPrevented, selected()], [false, []]);
+  peer.el.setAttribute('data-max', '');
+  check('Cmd A selects focused explorer even with peer maximized', shortcut(p.tree, 'a', { metaKey: true }), true);
+  var visible = entries.filter(e => !e.ign).map(e => e.name);
+  check('select all selects visible rows and only its own instance', [selected(), peer.all('.fentry.sel').length, p.at('.fdirectory').getAttribute('aria-multiselectable')], [visible, 0, 'true']);
+  check('footer localizes the selection count', p.at('.fselection').textContent, '6 selected');
+  var savedTab = JSON.parse(p.store['ws.dashboard.files.tabs.multi']).tabs[0];
+  check('persisted selection stays a primary path without a selection set', [typeof savedTab.selection, Object.keys(savedTab).some(k => /sels|anchor|selections/.test(k))], ['string', false]);
+  for (var tag of ['input', 'textarea', 'div']) {
+    var input = p.el.appendChild(new El(tag, doc)); if (tag === 'div') input.isContentEditable = true;
+    check(tag + ' keeps native select-all and Escape', [shortcut(input, 'a', { ctrlKey: true }), shortcut(input, 'Escape'), selected()], [false, false, visible]);
+    p.el.removeChild(input);
+  }
+  check('peer focus does not select this explorer', shortcut(peer.tree, 'a', { ctrlKey: true }), true);
+  check('Escape clears only focused instance', [shortcut(p.tree, 'Escape'), selected(), peer.all('.fentry.sel').length], [true, [], 6]);
+  peer.el.removeAttribute('data-max');
+  click('c.txt'); click('a.txt', { ctrlKey: true }); click('folder', { ctrlKey: true });
+  var batch = ['folder', 'a.txt', 'c.txt'];
+  win.WsTerm = { create: (...args) => actions.push(args) };
+  function menu(path = 'a.txt') { event(p.at('[data-entry="' + path + '"]'), 'contextmenu', { clientX: 10, clientY: 20 }); return doc.querySelector('.fmenu'); }
+  function menuItem(label) { return doc.querySelector('.fmenu').querySelectorAll('button').find(b => b.textContent === label); }
+  menu();
+  check('context click inside selection preserves the set', selected(), batch);
+  check('single-only menu actions are present and disabled', ['js.menu.preview', 'js.preview.openext', 'js.files.menu.reveal', 'js.files.menu.terminal'].map(k => menuItem(k).disabled), [true, true, true, true]);
+  menuItem('js.menu.preview').click(); check('disabled menu action cannot run', [actions.length, !!doc.querySelector('.fmenu')], [0, true]);
+  check('open menu consumes Escape rather than clearing selection', shortcut(doc.querySelector('.fmenu'), 'Escape'), false);
+  key(doc.querySelector('.fmenu'), 'Escape'); check('closing menu keeps selected rows', selected(), batch);
+  menu(); menuItem('js.menu.copyrel').click();
+  menu(); menuItem('js.menu.copyabs').click();
+  menu(); menuItem('js.files.send').click();
+  check('menu copies newline paths and sends each path in visible order', [copied, sent], [[batch.join('\n'), batch.map(path => '/multi/' + path).join('\n')], batch]);
+  p.all('.fattachment button')[0].click(); p.all('.fattachment button')[1].click();
+  check('footer batch actions keep host signatures', [sent.slice(3), copied.slice(-1)[0]], [batch, batch.join('\n')]);
+  menu('d.txt'); check('context click outside set replaces selection', selected(), ['d.txt']); key(doc.querySelector('.fmenu'), 'Escape');
+  p.all('.fhd button')[2].click();
+  check('open popover prevents global Escape clearing selection', [shortcut(p.tree, 'Escape'), selected()], [false, ['d.txt']]);
+  key(p.at('.fpop'), 'Escape');
+  p.at('.fcrumb-trail').click(); check('path editor keeps native select-all', shortcut(p.at('.fpath'), 'a', { metaKey: true }), false); key(p.at('.fpath'), 'Escape');
+  delete win.WsTerm;
+
+  for (var i = 0; i < 4; i++) {
+    p.all('.fview-modes button')[i].click(); click('a.txt'); click('c.txt', { ctrlKey: true });
+    check('multi-select in directory view ' + i, selected(), ['a.txt', 'c.txt']);
+    var box = p.at('.fdirectory'); box.getBoundingClientRect = () => ({ left: 10, top: 10, right: 300, bottom: 300 });
+    p.all('.fentry').forEach((row, index) => row.getBoundingClientRect = () => ({ left: 20, right: 200, top: 20 + index * 30, bottom: 40 + index * 30 }));
+    function pointer(type, target, x, y, modifiers = {}) { return event(target, type, Object.assign({ button: 0, pointerId: 1, clientX: x, clientY: y }, modifiers)); }
+    pointer('pointerdown', box, 250, 45); pointer('pointermove', doc, 15, 108);
+    check('marquee intersects rows in view ' + i, [selected(), !!doc.querySelector('.fmarquee')], [['a.txt', 'b.txt'], true]);
+    pointer('pointerup', doc, 15, 108); event(box, 'click');
+    check('marquee survives release click and removes rectangle ' + i, [selected(), !!doc.querySelector('.fmarquee')], [['a.txt', 'b.txt'], false]);
+    pointer('pointerdown', box, 250, 135, { metaKey: true }); pointer('pointermove', doc, 15, 165); pointer('pointerup', doc, 15, 165); event(box, 'click');
+    check('Cmd marquee adds to existing selection ' + i, selected(), ['a.txt', 'b.txt', 'd.txt']);
+    var row = p.at('[data-entry="c.txt"]'); pointer('pointerdown', box, 40, 115, { target: row }); pointer('pointermove', doc, 100, 220); pointer('pointerup', doc, 100, 220);
+    check('row drag never starts marquee ' + i, [selected(), !!doc.querySelector('.fmarquee')], [['a.txt', 'b.txt', 'd.txt'], false]);
+    event(box, 'click'); check('plain whitespace click clears ' + i, selected(), []);
+  }
+  p.all('.fview-modes button')[4].click(); click('a.txt'); click('c.txt', { ctrlKey: true, shiftKey: true });
+  check('column modifiers remain plain single selection', [selected(), p.at('.fdirectory').getAttribute('aria-multiselectable'), shortcut(p.tree, 'a', { ctrlKey: true })], [['c.txt'], 'false', false]);
+  p.all('.fview-modes button')[0].click(); click('a.txt'); click('c.txt', { ctrlKey: true });
+  p.instance.navigate('folder'); await answer(take('multi', 'list', 'folder'), listing('/multi/folder', [{ name: 'inside.txt' }], true));
+  check('directory navigation clears full selection', [selected(), p.instance.selection().path], [[], 'folder']);
+  p.instance.navigate(''); click('a.txt'); click('c.txt', { ctrlKey: true });
+  p.instance.newTab({ dir: '' }); await answer(take('multi', 'list'), listing('/multi', entries, true));
+  p.all('.ftab-select')[0].click(); check('live tabs retain the full set without persisting it', selected(), ['a.txt', 'c.txt']);
+  var directory = p.at('.fdirectory');
+  event(directory, 'pointerdown', { button: 0, pointerId: 7, clientX: 250, clientY: 45 });
+  event(doc, 'pointermove', { pointerId: 7, clientX: 15, clientY: 108 });
+  shortcut(directory, 'Escape'); check('Escape cancels a live marquee', [selected(), !!doc.querySelector('.fmarquee')], [[], false]);
+  p.instance.destroy(); peer.instance.destroy();
+  check('marquee document listeners are retired', ['pointermove', 'pointerup', 'pointercancel'].map(k => doc.listeners[k].length), [0, 0, 0]);
+}
 (async function () {
+  await multiSelectChecks();
   // Candidate-root refusal must not cancel legitimate active-root work.
   var race = explorer('race'); race.instance.shown();
   var initial = take('race', 'list');
@@ -556,22 +717,22 @@ async function pathBarChecks() {
   check('root list request is session scoped', firstChoices.url.searchParams.has('root'), false);
   var offered = { roots: [{ path: '/project', branch: 'main', detached: false }, { path: '/linked', branch: 'topic', detached: false }, { path: '/detached', branch: '', detached: true }] };
   await answer(firstChoices, offered);
-  check('root choices can precede the initial listing and still mark the session root', choices.all('.froot-list button')[0].getAttribute('aria-pressed'), 'true');
+  check('root choices can precede the initial listing and still mark the session root', choices.at('.froot-current button').getAttribute('aria-pressed'), 'true');
   await answer(initialChoiceRoot, listing('/project', undefined, true));
-  check('root rows show folder branch detached and current root', choices.all('.froot-list button').map(n => [n.textContent, n.title, n.getAttribute('aria-pressed')]), [['✓ project · main', '/project', 'true'], ['linked · topic', '/linked', 'false'], ['detached · js.wt.detached', '/detached', 'false']]);
+  check('root rows show folder branch detached and current root', choices.all('.froot-row').map(n => [n.querySelector('.froot-name').textContent, n.querySelector('.froot-branch').textContent, n.title, n.getAttribute('aria-pressed')]), [['project', 'main', '/project', 'true'], ['linked', 'topic', '/linked', 'false'], ['detached', 'js.wt.detached', '/detached', 'false']]);
   check('root suggestions precede the retained free-text input', choices.at('.froot-pop').children.indexOf(choices.at('.froot-list')) < choices.at('.froot-pop').children.indexOf(choices.at('.froot-pop .fpin')), true);
-  choices.all('.froot-list button')[1].click(); var linkedChoice = take('root-choices', 'list');
+  choices.all('.froot-list button')[0].click(); var linkedChoice = take('root-choices', 'list');
   check('suggestion switches through the existing root parameter', linkedChoice.url.searchParams.get('root'), '/linked');
   await answer(linkedChoice, listing('/linked'));
   choices.at('.fchange-root').click(); await answer(take('root-choices', 'worktrees'), offered);
-  check('reopening marks the accepted root', choices.all('.froot-list button').map(n => n.getAttribute('aria-pressed')), ['false', 'true', 'false']);
+  check('reopening pins the accepted root above remaining suggestions', choices.all('.froot-row').map(n => [n.title, n.getAttribute('aria-pressed')]), [['/linked', 'true'], ['/project', 'false'], ['/detached', 'false']]);
   choices.all('.froot-list button')[0].click(); var homeChoice = take('root-choices', 'list');
   check('session suggestion restores implicit session routing', homeChoice.url.searchParams.has('root'), false);
   await answer(homeChoice, listing('/project', undefined, true));
   choices.at('.fchange-root').click(); var staleChoices = take('root-choices', 'worktrees');
   key(choices.at('.froot-pop'), 'Escape'); choices.at('.fchange-root').click(); var freshChoices = take('root-choices', 'worktrees');
   await answer(freshChoices, offered); await answer(staleChoices, { roots: [{ path: '/stale' }] });
-  check('late roots cannot overwrite a reopened popover', choices.all('.froot-list button').length, 3);
+  check('late roots cannot overwrite a reopened popover', choices.all('.froot-row').length, 3);
   key(choices.at('.froot-pop'), 'Escape'); choices.at('.fchange-root').click(); var tabChoices = take('root-choices', 'worktrees');
   choices.instance.newTab({ root: '/linked' }); await answer(take('root-choices', 'list'), listing('/linked'));
   await answer(tabChoices, offered);
@@ -586,7 +747,7 @@ async function pathBarChecks() {
   restoredGone.instance.shown(); var removedListing = take('gone-root', 'list');
   restoredGone.at('.fchange-root').click(); await answer(take('gone-root', 'worktrees'), offered);
   await refuse(removedListing); await answer(take('gone-root', 'list'), listing('/project', undefined, true));
-  check('fallback updates the current marker in an already-open root popover', restoredGone.all('.froot-list button')[0].getAttribute('aria-pressed'), 'true');
+  check('fallback updates the current marker in an already-open root popover', [restoredGone.at('.froot-current button').title, restoredGone.at('.froot-current button').getAttribute('aria-pressed')], ['/project', 'true']);
   check('refused persisted worktree falls back and notifies', [restoredGone.instance.location(), notices, JSON.parse(restoredGone.store['ws.dashboard.files.tabs.gone-root']).tabs[0].root], [{ root: '', dir: '' }, ['js.files.root.dropped'], '']);
   restoredGone.instance.destroy();
   var remoteChoices = explorer('remote-choices', false); remoteChoices.instance.shown(); await answer(take('remote-choices', 'list'), listing('/project', undefined, true));
@@ -594,6 +755,7 @@ async function pathBarChecks() {
   remoteChoices.at('.fchange-root').click();
   check('remote viewer has disabled root control and no suggestions or enumeration', [remoteChoices.at('.fchange-root').disabled, remoteChoices.at('.froot-list').hidden, requests.some(r => r.url.pathname === '/s/remote-choices/fs/worktrees')], [true, true, false]);
   remoteChoices.instance.destroy();
+  await rootFilterChecks();
   await workspacePickerChecks();
   check('extended core leaves no global handlers or timers', [doc.listeners.keydown.length, win.listeners.resize.length, pendingTimers.size], [0, 0, 0]);
   // Run both production modules together: activation preflights before card

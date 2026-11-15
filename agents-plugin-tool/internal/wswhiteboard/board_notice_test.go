@@ -127,9 +127,10 @@ func TestBoardNoticeAllReasonsWithoutTruncation(t *testing.T) {
 }
 
 func TestBoardNoticeHourlyIndependentAndCombinedCatchup(t *testing.T) {
-	s := &State{}
+	// New topics default to discussing, so an absent state exists only on a
+	// topic written before that default: seed one as a literal legacy topic.
+	s := &State{EntrySeq: 1, Topics: []TopicDoc{{Name: "absent", Entries: []Entry{{ID: "e1", Kind: EntryAgent, Text: "absent summary", At: stateNow.Format(time.RFC3339Nano)}}}}}
 	noticeTopic(t, s, "wait", StateWaiting, 0, stateNow)
-	noticeTopic(t, s, "absent", "", 0, stateNow)
 	noticeTopic(t, s, "discussion", StateDiscussing, 0, stateNow)
 	dirs := map[string]string{"wait": "t1", "absent": "t2", "discussion": "t3", "run": "t4"}
 	noticeReasons(t, s.planNotice("lead", dirs, stateNow.Add(time.Hour-time.Nanosecond)))

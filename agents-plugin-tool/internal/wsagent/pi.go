@@ -1,7 +1,9 @@
 package wsagent
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -689,6 +691,9 @@ type piMapper struct {
 	// missing/burst-flushed stream has no usable rate.
 	outputStartedAt int64
 	outputTps       *float64
+	// Status replaces usage as a whole; evidence-only updates retain the
+	// last reported figures rather than clearing them between stats replies.
+	lastStatus wslive.Event
 }
 
 func newPiMapper(spec StartSpec) *piMapper {
@@ -753,9 +758,13 @@ type piLine struct {
 }
 
 type piMessage struct {
-	Role       string          `json:"role"`
-	Content    json.RawMessage `json:"content"`
-	ToolsAdded []struct {
+	Model         string          `json:"model"`
+	ResponseModel string          `json:"responseModel"`
+	ResponseID    string          `json:"responseId"`
+	ThinkingLevel string          `json:"thinkingLevel"`
+	Role          string          `json:"role"`
+	Content       json.RawMessage `json:"content"`
+	ToolsAdded    []struct {
 		Name string `json:"name"`
 	} `json:"toolsAdded"`
 	StopReason   string             `json:"stopReason"`
@@ -1150,6 +1159,11 @@ func (m *piMapper) message(raw json.RawMessage, now int64) []Event {
 			return nil
 		}
 		var out []Event
+		if observed := piObservation(msg, raw); observed != nil {
+			status := m.lastStatus
+			status.Kind, status.Observed = wslive.KindStatus, observed
+			out = append(out, Event{Live: &status})
+		}
 		for _, b := range blocks {
 			switch b.Type {
 			case "text":
@@ -1164,6 +1178,40 @@ func (m *piMapper) message(raw json.RawMessage, now int64) []Event {
 		return out
 	}
 	return nil
+}
+
+// piObservation reads only a completed response. Pi's message model names
+// physical output; responseModel is the provider's more specific identity when
+// supplied. Without responseId, a digest of the canonical completed message
+// plus its original timestamp identifies replay without persisting content.
+// The legacy first-update rate is ineligible.
+func piObservation(msg piMessage, raw json.RawMessage) *wslive.ModelObservation {
+	model := strings.TrimSpace(msg.ResponseModel)
+	if model == "" {
+		model = strings.TrimSpace(msg.Model)
+	}
+	if msg.Role != "assistant" || (msg.StopReason == "pending" || msg.StopReason == "error" || msg.StopReason == "aborted") || model == "" || msg.Timestamp <= 0 {
+		return nil
+	}
+	id := msg.ResponseID
+	if id == "" {
+		var message any
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if decoder.Decode(&message) != nil {
+			return nil
+		}
+		canonical, err := json.Marshal(message)
+		if err != nil {
+			return nil
+		}
+		id = fmt.Sprintf("message:%d:%x", msg.Timestamp, sha256.Sum256(canonical))
+	}
+	observed := &wslive.ModelObservation{ID: id, Model: model, Source: "pi.assistant", At: msg.Timestamp}
+	if msg.ThinkingLevel != "" {
+		observed.Effort, observed.EffortSource = msg.ThinkingLevel, "message"
+	}
+	return observed
 }
 
 func (m *piMapper) stats(raw json.RawMessage) []Event {
@@ -1185,6 +1233,7 @@ func (m *piMapper) stats(raw json.RawMessage) []Event {
 	if ev.Cost == nil && ev.Context == nil {
 		return out
 	}
+	m.lastStatus = ev
 	return append(out, Event{Live: &ev})
 }
 

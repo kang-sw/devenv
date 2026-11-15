@@ -142,6 +142,9 @@ type Snapshot struct {
 	HeartbeatMs int64   `json:"heartbeatMs,omitempty"`
 	Lead        Lead    `json:"lead"`
 	Agents      []Agent `json:"agents,omitempty"`
+	// ObservedAgents retains evidence-only histories after live-tree eviction.
+	// It never recreates activity or implies that a child is running.
+	ObservedAgents map[string]*ObservedModel `json:"observedAgents,omitempty"`
 	// Usage is the session's usage figures as its adapter last reported them
 	// (a status event); absent before the first one.
 	Usage *Usage `json:"usage,omitempty"`
@@ -280,6 +283,10 @@ type Lead struct {
 	Activity
 	// ReasoningSummary is lead-only; never part of shared subagent Activity.
 	ReasoningSummary *ReasoningSummary `json:"reasoningSummary,omitempty"`
+	Observed         *ObservedModel    `json:"observed,omitempty"`
+	// LastTurnOutput is the last completed turn's own response evidence;
+	// absent if that turn supplied none. It is not a heartbeat-derived rate.
+	LastTurnOutput *ModelObservation `json:"lastTurnOutput,omitempty"`
 	// TurnStartedAt is the current turn's start; absent while idle.
 	TurnStartedAt int64 `json:"turnStartedAt,omitempty"`
 	// TurnOrigin is what started the current turn (terminal, whiteboard,
@@ -299,9 +306,10 @@ type Lead struct {
 // Agent is one subagent in the tree, keyed by the host's native agent id.
 type Agent struct {
 	Activity
-	ID       string `json:"id"`
-	ParentID string `json:"parentId,omitempty"`
-	Label    string `json:"label,omitempty"`
+	Observed *ObservedModel `json:"observed,omitempty"`
+	ID       string         `json:"id"`
+	ParentID string         `json:"parentId,omitempty"`
+	Label    string         `json:"label,omitempty"`
 	// ReplyID labels a delegate that holds a ws session key.
 	ReplyID string `json:"replyId,omitempty"`
 	// AgentKind marks a subagent the host does not run itself
