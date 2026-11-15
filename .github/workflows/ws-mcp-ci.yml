@@ -1,6 +1,6 @@
 name: ws-mcp CI
 
-# Runs `go test ./...` on both Linux and Windows for pull requests that touch
+# Runs the default Go test group on Linux and Windows for pull requests that touch
 # the Go tree and on manual dispatch (`gh workflow run ws-mcp-ci.yml --ref
 # develop`). A develop push starts no run; the ship flow dispatches this
 # workflow on the exact commit it is about to tag, so a Windows-specific failure
@@ -15,6 +15,11 @@ on:
       - ".github/workflows/ws-mcp-ci.yml"
       - "agents-plugin-tool/**"
   workflow_dispatch:
+    inputs:
+      long_tests:
+        description: "Also run the long test group"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -30,11 +35,11 @@ jobs:
       # run, which is the one this workflow exists to catch early.
       fail-fast: false
       matrix:
-        # ubuntu runs the whole suite in ~3 min. On Windows internal/mcp alone
+        # ubuntu runs the default group. On Windows internal/mcp alone
         # took ~15 min serially (864 s, run 36662026067; git-process heavy), so
         # the Windows leg splits it across parallel jobs; `rest` plus every
-        # `mcp I 4` covers exactly the tests of `all`
-        # (agents-plugin-tool/scripts/ci-test-shard.sh).
+        # `mcp I 4` covers exactly the tests of `all`. Add the opt-in long job
+        # for full coverage (agents-plugin-tool/scripts/ci-test-shard.sh).
         include:
           - { os: ubuntu-latest, shard: all, args: "all" }
           - { os: windows-latest, shard: rest, args: "rest" }
@@ -74,3 +79,63 @@ jobs:
 
       - name: Run tests
         run: bash scripts/ci-test-shard.sh ${{ matrix.args }}
+
+  # Explicit job names stay stable even when skipped before matrix expansion,
+  # so the release gate can allow exactly these two skips.
+  long-ubuntu:
+    name: go test (ubuntu-latest, long)
+    if: github.event_name == 'workflow_dispatch' && inputs.long_tests == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: agents-plugin-tool
+        shell: bash
+    steps:
+      - name: Disable Defender real-time scanning (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        continue-on-error: true
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: agents-plugin-tool/go.mod
+          cache-dependency-path: agents-plugin-tool/go.sum
+
+      - name: Run long tests
+        run: bash scripts/ci-test-shard.sh long
+
+  long-windows:
+    name: go test (windows-latest, long)
+    if: github.event_name == 'workflow_dispatch' && inputs.long_tests == true
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: agents-plugin-tool
+        shell: bash
+    steps:
+      - name: Disable Defender real-time scanning (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        continue-on-error: true
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: agents-plugin-tool/go.mod
+          cache-dependency-path: agents-plugin-tool/go.sum
+
+      - name: Run long tests
+        run: bash scripts/ci-test-shard.sh long

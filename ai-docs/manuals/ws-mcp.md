@@ -1497,10 +1497,22 @@ The local build script is:
 agents-plugin-tool/scripts/build-release-assets.sh [version]
 ```
 
-GitHub Actions workflow `.github/workflows/ws-mcp-release.yml` runs tests,
-cross-compiles assets, uploads workflow artifacts, and publishes GitHub release
-assets for pushed `v*` tags. Pull requests touching workflow or plugin/runtime
-paths run checks without publishing.
+GitHub Actions workflow `.github/workflows/ws-mcp-ci.yml` runs the regular Go
+test group on Ubuntu and sharded Windows jobs for pull requests and manual
+dispatch. The boolean dispatch input `long_tests` defaults to false; true adds
+long-group jobs on both platforms. `scripts/ci-test-shard.sh` owns group
+membership: `all` excludes long tests, `rest` also excludes `internal/mcp`, and
+`rest` + every MCP shard + `long` covers the full suite. Locally, run the script
+from `agents-plugin-tool` with `bash scripts/ci-test-shard.sh all`, adding a
+separate `long` invocation when explicitly requested.
+
+Workflow `.github/workflows/ws-mcp-release.yml` requires a successful CI run
+on the tagged commit, allowing only the two named long jobs to be skipped.
+It cross-compiles assets, uploads workflow artifacts, and publishes GitHub
+release assets for pushed `v*` tags. Pull requests touching workflow or
+plugin/runtime paths run checks without publishing. This project's
+`ai-docs/ship/ws.md` records the owner's long-test choice and requires those
+jobs to succeed when requested.
 
 ## Local Devenv Repair
 
@@ -1608,7 +1620,9 @@ Level 1 validates the Go runtime and host-independent MCP server:
 
 ```bash
 cd agents-plugin-tool
-go test ./...
+bash scripts/ci-test-shard.sh all
+# Only when explicitly requested:
+# bash scripts/ci-test-shard.sh long
 scripts/smoke-ws-mcp.sh ..
 ```
 
