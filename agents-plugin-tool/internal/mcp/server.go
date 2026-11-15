@@ -1473,7 +1473,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
 		}
 		result, err := acquireWorktree(ctx, s.gitRunner(), s.environ(), entry.root, base, targetBranch, profile, poolRV.Value, key, func(mintPath string) (string, error) {
-			resolved, err := s.resolveSession(sessionAccess{mode: "mint", root: mintPath, scope: roleLead, parent: key})
+			resolved, err := s.resolveSession(sessionAccess{mode: "mint-identity", root: mintPath, scope: roleLead, parent: key})
 			return resolved.key, err
 		})
 		if err != nil {

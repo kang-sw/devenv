@@ -24,7 +24,7 @@ type sessionContext struct {
 }
 
 type sessionAccess struct {
-	mode   string // identity, intake, active, lookup, bootstrap, relogin, manual, or mint
+	mode   string // identity, intake, active, mint-identity, lookup, bootstrap, relogin, manual, or mint
 	key    string
 	root   string // already canonicalized by the caller, preserving its error order
 	scope  toolRole
@@ -40,6 +40,15 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 	// Unlike adoption, they neither normalize the key nor inspect hosted entry
 	// or harness metadata. In particular, a missing key never adopts the host.
 	switch in.mode {
+	case "mint-identity":
+		// Existing identity-only mint consumers already supply the root and
+		// lineage. Preserve the store-only operation: no hosted probe, extra
+		// record read, or adoption normalization belongs to this path.
+		key, err := s.sessions.mint(in.root, in.scope, in.parent)
+		if err != nil {
+			return sessionContext{}, err
+		}
+		return contextForEntry(key, sessionEntry{root: in.root, scope: in.scope, parent: in.parent}, true), nil
 	case "identity":
 		entry, found := s.sessions.lookup(in.key)
 		return contextForEntry(in.key, entry, found), nil
