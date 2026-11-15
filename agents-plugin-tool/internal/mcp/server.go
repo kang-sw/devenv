@@ -752,12 +752,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 	// spawned key can neither write nor read it.
 	//
 	// dashboard.intake alone resolves its key from the intake cache
-	// (intakeLookup), so its call rate reads no key.json; a removed key
+	// (intakeSession), so its call rate reads no key.json; a removed key
 	// still passes here for up to intakeRecheck, for that tool only.
 	if keyStr, ok := params.Arguments["session_key"].(string); ok && strings.TrimSpace(keyStr) != "" {
 		lookup := s.lookupSession
 		if params.Name == dashboardIntakeTool {
-			lookup = s.sessions.intakeLookup
+			lookup = s.intakeSession
 		}
 		if entry, found := lookup(keyStr); found {
 			// pi.* on a Pi subagent's server is authorized by the runner's

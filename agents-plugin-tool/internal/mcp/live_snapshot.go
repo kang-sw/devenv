@@ -337,7 +337,7 @@ func (ls *liveSession) finish() {
 // it: not a top-level lead session, its dashboard.enabled off, or no daemon
 // state directory.
 func (s *Server) liveSessionDir(sessionKey string) (string, bool) {
-	entry, found := s.sessions.lookup(sessionKey)
+	entry, found := s.lookupSession(sessionKey)
 	if !found {
 		return "", false
 	}
@@ -367,7 +367,7 @@ func (s *Server) liveSessionDirOf(sessionKey string, entry sessionEntry) (string
 // until the next intake, and a mail line sent meanwhile finds no tool row to
 // flush.
 func (s *Server) liveSessionActive(sessionKey, dir string) bool {
-	entry, found, transient := s.sessions.intakeInspect(sessionKey)
+	entry, found, transient := s.activeSession(sessionKey)
 	if transient {
 		return true
 	}
@@ -431,7 +431,7 @@ func (s *Server) handleDashboardIntake(id json.RawMessage, args map[string]any) 
 	// The intake cache, not key.json: this runs about ten times a second
 	// while a reply streams, and a removed key stops it within
 	// intakeRecheck.
-	entry, found := s.sessions.intakeLookup(key)
+	entry, found := s.intakeSession(key)
 	if !found {
 		return toolTextResponse(id, "", fmt.Errorf("%s: unknown_session: session key not found", tool))
 	}

@@ -227,7 +227,7 @@ func (s *Server) dashboardReconnect() {
 		if !ok {
 			continue
 		}
-		entry, ok := s.sessions.lookup(key)
+		entry, ok := s.lookupSession(key)
 		if !ok || !entry.isTopLevelLead() || entry.root != reg.Project {
 			continue
 		}

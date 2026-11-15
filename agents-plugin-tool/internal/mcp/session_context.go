@@ -20,10 +20,11 @@ type sessionContext struct {
 	harnessSession string
 	harnessCwd     string
 	found          bool
+	transient      bool // cached activity inspection could not read the record
 }
 
 type sessionAccess struct {
-	mode   string // identity, lookup, bootstrap, relogin, manual, or mint
+	mode   string // identity, intake, active, lookup, bootstrap, relogin, manual, or mint
 	key    string
 	root   string // already canonicalized by the caller, preserving its error order
 	scope  toolRole
@@ -38,9 +39,18 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 	// Already-keyed consumers retain exact matching and lookup's activity touch.
 	// Unlike adoption, they neither normalize the key nor inspect hosted entry
 	// or harness metadata. In particular, a missing key never adopts the host.
-	if in.mode == "identity" {
+	switch in.mode {
+	case "identity":
 		entry, found := s.sessions.lookup(in.key)
 		return contextForEntry(in.key, entry, found), nil
+	case "intake":
+		entry, found := s.sessions.intakeLookup(in.key)
+		return contextForEntry(in.key, entry, found), nil
+	case "active":
+		entry, found, transient := s.sessions.intakeInspect(in.key)
+		out := contextForEntry(in.key, entry, found)
+		out.transient = transient
+		return out, nil
 	}
 	in.key, in.parent = strings.TrimSpace(in.key), strings.TrimSpace(in.parent)
 	hosted := s.hostedSessionKey() // validates registration.host_pid once
@@ -111,5 +121,22 @@ func contextForEntry(key string, entry sessionEntry, found bool) sessionContext 
 // without widening their reads or changing their refusal and error ordering.
 func (s *Server) lookupSession(key string) (sessionEntry, bool) {
 	resolved, _ := s.resolveSession(sessionAccess{mode: "identity", key: key})
-	return sessionEntry{root: resolved.root, scope: resolved.scope, parent: resolved.parent}, resolved.found
+	return resolved.entry(), resolved.found
+}
+
+func (c sessionContext) entry() sessionEntry {
+	return sessionEntry{root: c.root, scope: c.scope, parent: c.parent}
+}
+
+// intakeSession preserves the adapter-only cache and its bounded revocation.
+func (s *Server) intakeSession(key string) (sessionEntry, bool) {
+	resolved, _ := s.resolveSession(sessionAccess{mode: "intake", key: key})
+	return resolved.entry(), resolved.found
+}
+
+// activeSession is the timer's non-touching view of the same cache. A transient
+// read is distinct from revocation so it cannot discard an in-flight turn.
+func (s *Server) activeSession(key string) (sessionEntry, bool, bool) {
+	resolved, _ := s.resolveSession(sessionAccess{mode: "active", key: key})
+	return resolved.entry(), resolved.found, resolved.transient
 }
