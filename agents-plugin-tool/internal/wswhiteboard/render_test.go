@@ -619,16 +619,21 @@ func TestRenderPageSettledRowExpands(t *testing.T) {
 			`<span class="opt static"><span class="k">a</span><span>x</span></span><span class="opt static"><span class="k">b</span><span>y</span></span>`)
 		wantNone(t, void, "picked", "rec-line")
 
-		wantAll(t, row(3), `<details class="sx" data-key="item:3">`, `<div class="sbody"><div class="ctx md">because <code>x</code></div></div></details>`)
+		wantAll(t, row(3), `<details class="sx" data-key="item:3">`, `<div class="sbody"><div class="ctx md">because <code>x</code></div>`)
+		if layout == LayoutFull {
+			wantAll(t, row(3), `class="ans"`, `>ok</div>`)
+		}
 
 		bare := row(4)
 		if layout == LayoutEmbed {
 			wantAll(t, bare, `<div class="srow" id="item-4"><span class="stext">`)
 		} else {
-			wantAll(t, bare, `data-history-item="4"`)
+			wantAll(t, bare, `data-history-item="4"`, `data-key="item:4"`, `class="sbody"`, `>ok</div>`)
 		}
 		wantAll(t, bare, "only a link")
-		wantNone(t, bare, "<details", "sbody")
+		if layout == LayoutEmbed {
+			wantNone(t, bare, "<details", "sbody")
+		}
 	}
 }
 

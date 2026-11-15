@@ -115,20 +115,23 @@ func TestHistoryRichDetailIsContentDrivenAndStatic(t *testing.T) {
 		row := func(id int) string {
 			return regexpHistoryArticle(out, fmt.Sprintf("item-%d", id))
 		}
-		wantNone(t, row(1), `<details`, `sbody`, `class="quote"`)
+		wantAll(t, row(1), `data-key="item:1"`, `class="ans"`, `>ok</div>`)
+		wantNone(t, row(1), `class="quote"`)
 		wantAll(t, row(2), `<table`, `<pre`, `<strong>Useful HTML</strong>`, "keep details", "The second option preserves every useful detail.", `data-key="item:2"`)
 		wantNone(t, row(2), `data-opt=`, `aria-pressed=`, `role="button"`)
 		wantAll(t, row(3), `data-key="item:3"`, `class="ctx md">title-like`)
-		wantNone(t, row(4), `<details`, `sbody`, `ctx md`)
+		wantAll(t, row(4), `data-key="item:4"`, `class="ans"`, `>ok</div>`)
+		wantNone(t, row(4), `ctx md`)
 	}
 }
 
-func TestHistoryLongAnswersShareTitleWidth(t *testing.T) {
+func TestHistoryAnswersUseSingleLineChipsAndCompleteDisclosure(t *testing.T) {
 	long := strings.TrimSpace(strings.Repeat("Preserve the complete policy explanation and natural wrapping. ", 12))
 	st := &State{Items: []Item{
 		{ID: 1, Topic: "t", Class: ClassPolicy, Title: "Long picked policy", Status: StatusAnswered, Answer: "a", Options: []string{long, "Other option"}, Rationale: "Keep the rationale", AnswerQuote: "Keep the owner quote"},
 		{ID: 2, Topic: "t", Class: ClassTechnical, Title: "Long free answer", Status: StatusAnswered, Answer: long},
 		{ID: 3, Topic: "t", Class: ClassTechnical, Title: "Correctable assumption", Status: StatusAssumed, Answer: long},
+		{ID: 4, Topic: "t", Class: ClassPolicy, Title: "Picked answer only", Status: StatusAnswered, Answer: "a", Options: []string{"First line\n\nComplete picked option remainder", "Other"}},
 	}}
 	view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})
 	regions, err := RenderRegions(view)
@@ -140,14 +143,21 @@ func TestHistoryLongAnswersShareTitleWidth(t *testing.T) {
 			for _, id := range []string{"item-1", "item-2", "item-3"} {
 				row := regexpHistoryArticle(out, id)
 				wantAll(t, row, long, `class="wb-hmain"`, `class="wb-hstatus"`)
-				// The answer is inline inside the title column, not a fourth grid child.
-				wantAll(t, row, `</b> <span class="wb-hstatus"`)
-				wantNone(t, row, `</b></span><span class="wb-hstatus"`)
+				// The summary chip is separate from the title; full answers fold below.
+				wantAll(t, row, `</b></span><span class="wb-hstatus"`, `data-key="item:`)
+				wantNone(t, row, `</b> <span class="wb-hstatus"`)
+				body := row[strings.Index(row, `<div class="sbody">`):]
+				wantAll(t, body, long)
 			}
 			picked := regexpHistoryArticle(out, "item-1")
 			wantAll(t, picked, `data-key="item:1"`, `class="pick"`, "Other option", "Keep the rationale", "Keep the owner quote")
 			wantNone(t, picked, `data-opt=`, `aria-pressed=`, `role="button"`)
 			wantAll(t, regexpHistoryArticle(out, "item-3"), `note-toggle`, `title="correction"`)
+			pickedOnly := regexpHistoryArticle(out, "item-4")
+			wantAll(t, pickedOnly, `data-key="item:4"`)
+			summaryEnd := strings.Index(pickedOnly, `</summary>`)
+			wantNone(t, pickedOnly[:summaryEnd], "Complete picked option remainder")
+			wantAll(t, pickedOnly[summaryEnd:], "Complete picked option remainder")
 		})
 	}
 	css, err := whiteboardTestAsset("page.css")
@@ -155,13 +165,13 @@ func TestHistoryLongAnswersShareTitleWidth(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantAll(t, string(css),
-		`grid-template-columns: auto 20px minmax(0, 1fr);`,
-		`.wb-hstatus { display: inline;`,
-		`.wb-hstatus .pick { display: inline; box-decoration-break: clone; }`,
+		`grid-template-columns: auto 20px minmax(0, 1fr) minmax(0, auto);`,
+		`.wb-hstatus { display: block; min-width: 0; max-width: min(24em, 35vw); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`,
+		`.wb-hstatus .pick { display: inline; white-space: nowrap; }`,
 		`.wb-hitem details.sx > summary::before { align-self: flex-start; margin-top: 8px; }`,
 		`.pick { display: inline-flex;`,
-		`.wb-hitem .wb-htext { display: block; position: relative; padding-left: 26px;`)
-	wantNone(t, string(css), `grid-template-columns: auto 20px minmax(0, 1fr) auto;`, `.wb-hstatus { max-width: 15em;`)
+		`.wb-hitem .wb-htext { grid-template-columns: minmax(0, 1fr) minmax(0, auto); position: relative; padding-left: 26px;`)
+	wantNone(t, string(css), `.wb-hstatus { display: inline;`, `.wb-hstatus { max-width: 15em;`)
 }
 
 func TestHistoryAllAnsweredCheckKeepsVisibilityToggle(t *testing.T) {

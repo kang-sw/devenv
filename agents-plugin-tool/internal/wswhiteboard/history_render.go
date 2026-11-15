@@ -81,10 +81,10 @@ func (d itemData) HistoryAnswerTime() string {
 	return d.AnsweredAt
 }
 
-// A picked option's remainder is interpretation, not another answer badge.
-// Free-text answers already occupy the single badge and use TextInline there.
+// Keep the complete free answer in the disclosure, since its summary chip
+// is single-line and may be clipped. Picked options render fully via opts.
 func (d itemData) HistoryReading() string {
-	if !d.Void() && d.PickedOption() != nil {
+	if !d.Void() {
 		return d.Reading()
 	}
 	return ""
@@ -105,5 +105,5 @@ func (d itemData) HistoryRationaleHTML() template.HTML {
 }
 
 func (d itemData) HistoryExpandable() bool {
-	return len(d.Options) > 0 || d.RecLetter != "" || d.HistoryQuote() != "" || d.HistoryAnswerTime() != "" || d.HistoryPastAnswer() != "" || strings.TrimSpace(string(d.HistoryRationaleHTML())) != ""
+	return d.HistoryReading() != "" || len(d.Options) > 0 || d.RecLetter != "" || d.HistoryQuote() != "" || d.HistoryAnswerTime() != "" || d.HistoryPastAnswer() != "" || strings.TrimSpace(string(d.HistoryRationaleHTML())) != ""
 }
