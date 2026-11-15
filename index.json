@@ -722,6 +722,9 @@
     "261115-bug-pi-reviewer-write-scope-discoverability": {
       "registered_at": "2026-11-14T18:18:40Z"
     },
+    "261115-bug-worktree-acquire-concurrent-pool-selection": {
+      "registered_at": "2026-11-15T07:37:25Z"
+    },
     "261115-bug-ws-claude-binary-provenance-and-resume-model": {
       "registered_at": "2026-11-14T23:28:48Z"
     },
