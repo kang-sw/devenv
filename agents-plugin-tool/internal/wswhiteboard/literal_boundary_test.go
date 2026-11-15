@@ -39,6 +39,70 @@ func literalBoundaryRepros() map[string]string {
 	return out
 }
 
+type literalAmbiguityCase struct {
+	name, input string
+	bodies      []string
+}
+
+func literalAmbiguityTransitions() []literalAmbiguityCase {
+	prefix := `<wb:topic name="t"><wb:panel recap="r">`
+	next := `</wb:panel><wb:panel recap="s">`
+	suffix := `</wb:panel></wb:topic>`
+	return []literalAmbiguityCase{
+		{"two-to-one-before", prefix + "``" + next + "`</wb:panel>`" + suffix, []string{"``", "`</wb:panel>`"}},
+		{"two-to-one-after", prefix + "``" + next + "`</wb:panel>``" + suffix, []string{"``" + next + "`</wb:panel>``"}},
+		{"one-to-two-before", prefix + "```a" + next + "``b</wb:panel>```c" + suffix, []string{"```a" + next + "``b</wb:panel>```c"}},
+		{"one-to-two-after", prefix + "```a" + next + "``b</wb:panel>```c``" + suffix, []string{"```a", "``b</wb:panel>```c``"}},
+	}
+}
+
+func TestLiteralCodeActiveSpanMutationChangesCleanReading(t *testing.T) {
+	// These bodies already contain active delimiters, so I2r does not apply.
+	// Appending a tick destroys the second body's single-run span in the
+	// two-to-one case; only the enclosing literal reading remains clean.
+	// A non-adjacent double run instead creates ambiguity and forces a split.
+	for _, tc := range literalAmbiguityTransitions() {
+		t.Run(tc.name, func(t *testing.T) {
+			g0 := grammar
+			g0.LiteralCode = false
+			p0 := &problems{}
+			wsxmlcmd.Parse(p0, g0, tc.input)
+			if len(p0.List) == 0 {
+				t.Fatal("fixture unexpectedly has a clean structural split")
+			}
+			for _, ordered := range []bool{false, true} {
+				p := &problems{}
+				var cmds []command
+				complete := true
+				if ordered {
+					cmds, complete = wsxmlcmd.ParseOrdered(p, grammar, tc.input)
+					cmds = cmds[1:]
+				} else {
+					cmds = wsxmlcmd.Parse(p, grammar, tc.input)
+				}
+				if len(p.List) != 0 || !complete || len(cmds) != len(tc.bodies) {
+					t.Fatalf("commands=%+v problems=%v complete=%v", cmds, p.List, complete)
+				}
+				for i, want := range tc.bodies {
+					if cmds[i].Body != want {
+						t.Fatalf("body %d=%q want %q", i, cmds[i].Body, want)
+					}
+				}
+			}
+			st := &State{}
+			out, p := Apply(st, tc.input, testEnv())
+			if out.Accepted != len(tc.bodies) || st.PanelCounter != len(tc.bodies) || len(p) != 0 || out.Failed != "" || out.Unpartitioned {
+				t.Fatalf("Apply=%+v panels=%d problems=%v", out, st.PanelCounter, p)
+			}
+			for i, want := range tc.bodies {
+				if got := queryResult(t, st, fmt.Sprintf(`{"panel":"p%d"}`, i+1)).Direct.Entry.Text; got != want {
+					t.Fatalf("stored body %d=%q want %q", i, got, want)
+				}
+			}
+		})
+	}
+}
+
 // Compare semantic parse output, not ordered-mode rejection/source metadata.
 // Empty ordered group sentinels are not commands in Parse's public contract.
 func canonicalCommands(cmds []command) []map[string]any {
