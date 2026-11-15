@@ -16,64 +16,14 @@
     "260728-bug-chmod-based-tests-skip-silently": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260831-research-ai-phase-over-granularity-review-load": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:52:47Z"
-      }
-    },
     "260901-bug-ticket-scanner-silently-skips-noncanonical-status-dir": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260908-epic-ws-pi-subagent-conversation-view": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:52:54Z"
-      }
-    },
-    "260908-feat-ws-pi-claude-code-lead-provider": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:53:01Z"
-      }
-    },
-    "260908-research-ws-pi-lifecycle-race-monitoring": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:53:08Z"
-      }
     },
     "260909-research-ws-refoundation-evidence-audit": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260910-feat-ws-agent-list-bounded-output": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260911-research-impl-lifecycle-merge-authority-goal-loop-rehoming": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:53:14Z"
-      }
     },
     "260913-bug-ticket-guardrails-dont-enforce-category-enum": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -99,31 +49,11 @@
     "260921-bug-pi-parallel-worktree-workers-inherit-lead-cwd": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
-    "260921-bug-pi-subagent-registry-checkpoint": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:53:21Z"
-      }
-    },
     "260921-chore-pi-mirror-doc-completeness": {
       "registered_at": "2026-09-24T10:38:33Z"
     },
     "260921-chore-pi-stabilize-flaky-lifecycle-websearch-tests": {
       "registered_at": "2026-09-24T10:38:33Z"
-    },
-    "260923-research-pi-parent-child-loopback-control-channel": {
-      "registered_at": "2026-09-24T10:38:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:53:28Z"
-      }
     },
     "260925-bug-windows-remote-timeout-leaves-child-processes": {
       "registered_at": "2026-09-25T02:03:47Z"
@@ -136,16 +66,6 @@
     },
     "260930-bug-wsconfig-writer-replaces-symlinked-config": {
       "registered_at": "2026-09-30T02:49:06Z"
-    },
-    "260930-feat-git-exec-audit-log": {
-      "registered_at": "2026-09-30T02:03:00Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:53:40Z"
-      }
     },
     "261002-bug-lead-run-effort-agent-type-missing-fallback": {
       "registered_at": "2026-10-02T13:27:17Z"
@@ -564,7 +484,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-15T10:40:10Z",
         "impl": {
           "branch": "impl/develop/gush-wince-guru"
