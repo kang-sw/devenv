@@ -889,6 +889,34 @@ acceptance, landing/closure and any later fresh sync if this exact merge becomes
 stale. The existing workflow-commit imported-stage limitation used its already
 approved native current-merge fallback; no new idea ticket was created.
 
+## Lead-owned cf6d129b9 post-sync verification - 2026-11-15
+
+EXEC2 lead merged exact `cf6d129b9ebc96af2ab904cd6314f2c60ec04163` into
+`34dfc0e1f` at `58eb9d7296675766b46dc1301092a939ace82918`, conflict-free.
+The worker inspected only the actual changed premises. Mail/nudge batch folding,
+child-report mailbox rows, cache tokens and locale additions affect conversation
+presentation; 675's user/live-summary/natural-turn insertion code is unchanged.
+`collapseBoardNudges` resets at every non-mail-wake entry, including RingTurn;
+`entryCacheKey` adds only the nudge state token. Neither absorbs a summary turn
+or changes immutable records. The separate folder topic-meta write elision in
+`wswhiteboard/folders.go` does not change 675's snapshot or ring writer boundary.
+
+Exact offline Go 1.26.2 commands, using the prior private environment and
+`-count=1 -vet=off -p=1 -parallel=1 -timeout=120s -v`, passed **43 top-level tests,
+zero skipped**; all full output was read:
+
+```text
+wsdashboard (28 passed): ^Test(ReasoningSummary(LivePlacementPlainTextAndStableKey|FallbackExactLegacyAndInvalidHistory|HistoryImmutableTurnAssociationAndAttempts|PreservesUserRolesAndUnifiedHistoryKeys)|Conversation(MailWake|BoardNudge|Presentation).*|ChildReportFoldedMailboxRow|ConversationMailboxIconOnlyOnInboundRows|EntryRendersOnceThroughTheCache|DashboardSourceAssembly)$
+wsi18n (15 passed): ^Test(LanguagesAreDiscoveredFromTables|TFallsBackToEnglishForAMissingKey|PluralAndFill|Resolve|ClientTableHoldsOnlyClientKeysWithEnglishFallback|ScriptEscapesAndDefaults|SubsetScriptHoldsOnlyThePrefixKeys|ScriptExceptMultiplePrefixes|ScriptExceptLeavesOutOnlyThePrefixKeys|EveryUsedKeyIsInTheEnglishTable|EveryEnglishKeyIsUsed|OtherTablesHoldOnlyEnglishKeysAndNames|OtherTablesHoldEveryEnglishKey|PlaceholdersMatchEnglish|PluralKeysComeInPairs)$
+```
+
+No source or test adjustment was needed. Only this ticket evidence is newly
+worker-authored after the sync. Retain the earlier 57-pass/1-skip integration
+result, other unaffected evidence and the clean 967 Lite at its recorded scope;
+no extra review, full-suite restart, new integration or runtime operation ran.
+The seven protected untracked artifacts and three approved, explicitly linked
+mockups remain untouched. MAIN retains acceptance, landing and closure.
+
 ## Historical receiver checkpoint - 2026-11-15
 
 **VERIFIED:** MAIN's 23:10:43/23:12 authorization is consumed: one exact
