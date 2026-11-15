@@ -273,3 +273,25 @@ replaced or launched; no new owner-copy head or executable exists from this
 rerun. The existing owner-copy head/exe and desktop shortcut target were not
 inspected or changed. `C:\Users\ki608\devenv` was untouched. Independent
 review remains omitted under the lead's override; EXEC4 owns the lite review.
+
+##### Review fix (aa5643fca) - 2026-11-15
+
+- VERIFIED (source and mocks): Windows now uses BaseWindow with only the
+  dashboard and bar renderers, removing the inert owner/about:blank workaround.
+  The contained `main.js` delta is 33 added/24 removed lines; pinned Electron
+  types support the owner methods, dialog parent and menu popup parent used.
+  macOS/Linux retain BrowserWindow and their original construction options.
+- VERIFIED (unit tests): first dashboard/connection-page load and window
+  activation establish dashboard focus; bare Alt routes through focused
+  contents without a prior click. Menu/dialog completion restores dashboard
+  focus, while active native interactions and bar keyboard navigation retain
+  focus. Close veto, child cleanup, title, theme and zoom remain covered.
+- VERIFIED (Mac headless): offline `npm test` passed 44/44; offline
+  `npm run build` packaged darwin-arm64 with the existing optional `.icon`
+  warning; syntax checks and `git diff --check` passed. The Windows smoke now
+  checks launch-then-Alt before any click and uses BaseWindow owner lookups.
+  No Electron, built app, GUI or smoke ran, and the Windows host was not accessed.
+- INFERRED: the focus fix addresses the critical review finding; real Windows
+  startup Alt, activation/menu/dialog focus, native controls/snap/drag, theme,
+  X-close veto and pasted-image draft preservation still require authorized
+  Windows acceptance. This update does not close Phase 1 or change its status.
