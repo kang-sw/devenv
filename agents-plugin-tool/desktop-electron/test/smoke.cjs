@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
+const http = require('node:http');
 const path = require('node:path');
 const { spawn, execFileSync } = require('node:child_process');
 const { once } = require('node:events');
@@ -17,6 +18,11 @@ fs.mkdirSync(path.join(shellRoot, 'dashboard'), { recursive: true });
 const endpoint = path.join(shellRoot, 'dashboard/endpoint.json');
 const owned = new Map(), checks = [];
 let application, daemon;
+const targetRequests = [];
+const target = http.createServer((request, response) => {
+  targetRequests.push(request.url);
+  response.end('<p id="remote-marker">REMOTE CONTENT MUST NOT COMMIT</p>');
+});
 function processes() {
   return execFileSync('ps', ['-axo', 'pid=,ppid=,lstart=,command='], { encoding: 'utf8' }).split('\n').map(line => {
     const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.{24})\s+(.*)$/);
@@ -62,9 +68,17 @@ async function launch() {
   application = await _electron.launch({ executablePath, args: [`--user-data-dir=${path.join(temp, 'profile')}`],
     env: { ...process.env, WS_CACHE_HOME: shellRoot, WS_CONFIG_HOME: path.join(temp, 'config'), ELECTRON_RUN_AS_NODE: '' }, timeout: 8000 });
   remember(application.process().pid);
-  return application.firstWindow();
+  const page = await application.firstWindow();
+  // The main process owns Electron's beforeunload decision. With no listener,
+  // Playwright auto-accepts it via CDP after the native handler has already
+  // answered, racing the close and producing "No dialog is showing".
+  page.on('dialog', () => {});
+  return page;
 }
 async function run() {
+  await new Promise(resolve => target.listen(0, '127.0.0.1', resolve));
+  assert.notEqual(target.address().port, 29417);
+  const targetOrigin = `http://127.0.0.1:${target.address().port}`;
   const log = fs.openSync(path.join(evidence, 'daemon.log'), 'w');
   daemon = spawn(path.join(root, 'dist/smoke-daemon'), [], {
     env: { ...process.env, WS_CACHE_HOME: daemonRoot, WS_CONFIG_HOME: path.join(temp, 'config'), GOPROXY: 'off', GOSUMDB: 'off', GOTOOLCHAIN: 'local' },
@@ -81,10 +95,11 @@ async function run() {
   fs.writeFileSync(path.join(evidence, 'fixture.json'), JSON.stringify({ pid: ep.pid, port: ep.port, cache: daemonRoot, executablePath }, null, 2));
   let page = await launch();
   page.setDefaultTimeout(4000);
+  await application.context().addCookies([{ name: 'ws_dashboard_lang', value: 'en', url: origin }]);
   const unexpectedNetwork = [];
   await application.context().route('**/*', route => {
     const url = route.request().url();
-    if (url.startsWith(origin + '/') || url.startsWith('file:')) return route.continue();
+    if (url.startsWith(origin + '/') || url.startsWith(targetOrigin + '/') || url.startsWith('file:')) return route.continue();
     unexpectedNetwork.push(url);
     return route.abort();
   });
@@ -112,6 +127,10 @@ async function run() {
   checks.push('zero renderer authority, no preload, UA, dimensions and credential exclusion');
   await main(({ shell, dialog, BrowserWindow }) => {
     global.smokeExternal = []; global.smokeDialogs = []; global.smokeChoice = 0; global.smokeFocus = 0;
+    global.smokeFailures = [];
+    BrowserWindow.getAllWindows()[0].webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+      global.smokeFailures.push({ code, description, url, isMainFrame });
+    });
     shell.openExternal = async url => { global.smokeExternal.push(url); };
     dialog.showMessageBoxSync = (_window, options) => { global.smokeDialogs.push(options); return global.smokeChoice; };
     BrowserWindow.getAllWindows()[0].on('focus', () => global.smokeFocus++);
@@ -152,44 +171,76 @@ async function run() {
   // denied too, not just target=_blank links.
   await page.evaluate(() => { const a = document.createElement('a'); a.href = 'https://example.com/main'; document.body.append(a); a.click(); });
   await waitFor(() => main(() => global.smokeExternal.includes('https://example.com/main')), 'external main navigation');
-  await page.evaluate(() => { const f = document.createElement('iframe'); f.sandbox = 'allow-scripts'; f.srcdoc = '<p>opaque fixture</p>'; document.body.append(f); });
+  await page.evaluate(() => { const f = document.createElement('iframe'); f.name = 'smoke-opaque'; f.sandbox = 'allow-scripts'; f.srcdoc = '<p>opaque fixture</p>'; document.body.append(f); });
   await waitFor(() => main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.mainFrame.frames.some(f => f.url === 'about:srcdoc')), 'opaque sandbox frame');
-  await page.evaluate(() => { const f = document.createElement('iframe'); f.src = 'https://example.com/frame'; document.body.append(f); });
-  // The dashboard CSP rejects this initial remote frame before a navigation
-  // event. Native frame state is authoritative: Playwright's OOPIF URLs can
-  // be empty even when Electron reports about:srcdoc.
-  assert.equal(await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.mainFrame.frames.some(f => f.url.startsWith('https://example.com/'))), false);
+  const documents = [];
+  async function frameDocument(name) {
+    const result = await main(async ({ BrowserWindow }, name) => {
+      const frame = BrowserWindow.getAllWindows()[0].webContents.mainFrame.frames.find(f => f.name === name);
+      return { requestedURL: frame.url, document: await frame.executeJavaScript('({url:location.href,text:document.body.innerText})') };
+    }, name);
+    documents.push({ name, ...result });
+    return result.document;
+  }
+  assert.equal((await frameDocument('smoke-opaque')).text, 'opaque fixture');
+  async function deniedFrame(name, csp = false) {
+    const url = targetOrigin + '/' + name;
+    await page.evaluate(({ name, url }) => { const f = document.createElement('iframe'); f.name = name; f.src = url; document.body.append(f); }, { name, url });
+    if (csp) {
+      await waitFor(() => main((_electron, url) => global.smokeFailures.some(f => f.url === url && f.code === -30 && !f.isMainFrame), url), name + ' CSP failure');
+    } else {
+      await waitFor(() => main((_electron, url) => global.smokeExternal.includes(url), url), name + ' native browser handoff');
+    }
+    // CSP commits an error document; preventing will-frame-navigate instead
+    // retains about:blank and emits no did-fail-load. Neither commits the target.
+    assert.equal((await frameDocument(name)).url, csp ? 'chrome-error://chromewebdata/' : 'about:blank');
+    assert.deepEqual(targetRequests, []);
+  }
+  await deniedFrame('smoke-csp-denied', true);
   assert.equal(page.url(), origin + '/');
-  assert.deepEqual(unexpectedNetwork, []);
-  checks.push('main/popup origin policy and browser handoff; opaque frame allowed, remote frame blocked by dashboard CSP; blocked schemes/userinfo; no second window');
+  checks.push('dashboard CSP rejects remote frame: error document, did-fail-load and zero target requests (attempted URL metadata is not committed content)');
 
-  await page.evaluate(origin => window.open(origin + '/s/electronfixture?frame=1'), origin);
-  await page.waitForURL(origin + '/s/electronfixture?frame=1');
-  await page.locator('#ctext').waitFor();
+  // Exercise the native boundary independently of the real dashboard's CSP.
+  // This same-origin fixture is test-only and changes no shipped dashboard asset.
+  await page.route(origin + '/electron-policy-fixture', route => route.fulfill({ contentType: 'text/html', body: '<h1>Native navigation policy fixture</h1>' }));
+  await page.goto(origin + '/electron-policy-fixture');
+  await deniedFrame('smoke-native-denied');
+  await waitFor(() => main((_electron, url) => global.smokeExternal.includes(url), targetOrigin + '/smoke-native-denied'), 'native subframe browser handoff');
+  assert.equal(page.url(), origin + '/electron-policy-fixture');
+  assert.deepEqual(unexpectedNetwork, []);
+  fs.writeFileSync(path.join(evidence, 'frame-documents.json'), JSON.stringify({ documents, failures: await main(() => global.smokeFailures), targetRequests }, null, 2));
+  checks.push('native initial-frame policy rejects remote content without CSP; main/popup browser handoff; opaque frame allowed; blocked schemes/userinfo; no second window');
+
+  await page.evaluate(origin => window.open(origin + '/s/electronfixture'), origin);
+  await page.waitForURL(origin + '/s/electronfixture');
+  const dashboardURL = origin + '/s/electronfixture?frame=1';
+  await waitFor(() => Promise.resolve(page.frames().some(frame => frame.url() === dashboardURL)), 'real session frame');
+  const dashboard = page.frame({ url: dashboardURL });
+  await dashboard.locator('#ctext').waitFor();
   const requests = [];
   // Assert the real dashboard link-menu's HTTP request, not an OS app launch.
   await page.route('**/s/electronfixture/fs/act', async route => { requests.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.fulfill({ status: 204 }); });
-  await page.evaluate(project => {
+  await dashboard.evaluate(project => {
     const a = document.createElement('a'); a.id = 'smoke-file'; a.textContent = 'fixture.md';
     a.href = '/s/electronfixture/file?path=fixture.md'; a.dataset.wl = 'file'; a.dataset.rel = 'fixture.md'; a.dataset.abs = project + '/fixture.md'; document.body.append(a);
   }, path.join(daemonRoot, 'project'));
-  await page.locator('#smoke-file').click();
-  await page.locator('.lmenu button').filter({ hasText: /Open with system/i }).click();
+  await dashboard.locator('#smoke-file').click();
+  await dashboard.locator('.lmenu button').filter({ hasText: /Open with system/i }).click();
   await waitFor(() => Promise.resolve(requests.length === 1), 'open with system fs/act request');
-  assert.equal(requests[0].body.action, 'open');
+  assert.deepEqual(requests[0].body, { action: 'open', root: path.join(daemonRoot, 'project'), path: 'fixture.md' });
   checks.push('real dashboard desktop file-link menu sends fs/act open (request intercepted before OS launch)');
-  await page.locator('#ctext').fill('preserve this draft');
-  await page.locator('#ctext').click();
-  await page.evaluate(() => {
+  await dashboard.locator('#ctext').fill('preserve this draft');
+  await dashboard.locator('#ctext').click();
+  await dashboard.evaluate(() => {
     const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ9kAAAAASUVORK5CYII='), c => c.charCodeAt(0));
     const transfer = new DataTransfer(); transfer.items.add(new File([png], 'draft.png', { type: 'image/png' }));
     document.getElementById('ctext').dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
   });
-  await waitFor(() => page.locator('#ctext').inputValue().then(value => value.includes('[Image #1]')), 'unreferenced pasted image marker');
+  await waitFor(() => dashboard.locator('#ctext').inputValue().then(value => value.includes('[Image #1]')), 'unreferenced pasted image marker');
   await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
   await waitFor(() => main(() => global.smokeDialogs.length === 1), 'X-close leave/stay dialog');
   assert.equal(await main(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
-  assert.match(await page.locator('#ctext').inputValue(), /preserve this draft.*\[Image #1\]/s);
+  assert.match(await dashboard.locator('#ctext').inputValue(), /preserve this draft.*\[Image #1\]/s);
   await page.screenshot({ path: path.join(evidence, 'electron-dashboard-draft.png') });
   checks.push('real dashboard image guard: X-close Stay keeps window and draft');
 
@@ -198,16 +249,16 @@ async function run() {
   const secondLog = fs.openSync(path.join(evidence, 'second-launch.log'), 'w');
   const second = spawn(executablePath, [`--user-data-dir=${path.join(temp, 'profile')}`], { env: { ...process.env, WS_CACHE_HOME: shellRoot, ELECTRON_RUN_AS_NODE: '' }, stdio: ['ignore', secondLog, secondLog] });
   remember(second.pid);
-  const [code] = await once(second, 'exit');
-  assert.equal(code, 0);
+  await waitFor(() => Promise.resolve(second.exitCode !== null || second.signalCode !== null), 'second launch exit');
+  assert.equal(second.exitCode, 0);
   await waitFor(() => main(({ BrowserWindow }) => !BrowserWindow.getAllWindows()[0].isMinimized() && global.smokeFocus > 0), 'second-instance focus');
   assert.equal(await main(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   scan('second launch exited');
   checks.push('built second launch exits and restores/focuses the existing sole window');
   remember(application.process().pid);
-  const appExit = once(application.process(), 'exit');
+  const firstProcess = application.process();
   await main(({ BrowserWindow }) => { global.smokeChoice = 1; BrowserWindow.getAllWindows()[0].close(); }).catch(() => {});
-  await appExit;
+  await waitFor(() => Promise.resolve(firstProcess.exitCode !== null || firstProcess.signalCode !== null), 'Leave closes the app');
   application = null;
   assert.equal((await (await fetch(origin + '/health')).json()).pid, ep.pid);
   assert.deepEqual(fs.readFileSync(endpoint), endpointBefore);
@@ -218,9 +269,9 @@ async function run() {
   await page.waitForURL(origin + '/');
   assert(Math.abs(await factor() - 1) < 0.001);
   remember(application.process().pid);
-  const cleanExit = once(application.process(), 'exit');
+  const freshProcess = application.process();
   await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close()).catch(() => {});
-  await cleanExit;
+  await waitFor(() => Promise.resolve(freshProcess.exitCode !== null || freshProcess.signalCode !== null), 'clean app close');
   application = null;
   assert.equal((await (await fetch(origin + '/health')).json()).pid, ep.pid);
   checks.push('no image draft: immediate X-close; fresh process zoom resets; daemon survives');
@@ -238,6 +289,8 @@ async function run() {
     if (daemon && daemon.exitCode === null) {
       const exited = once(daemon, 'exit'); daemon.kill('SIGTERM'); await exited;
     }
+    target.closeAllConnections();
+    if (target.listening) await new Promise(resolve => target.close(resolve));
     // Signal only processes this invocation recorded, and only if their start
     // identity still matches. Never retain a stale numerical PID as authority.
     for (const p of scan('before cleanup')) {
