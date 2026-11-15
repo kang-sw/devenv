@@ -13,6 +13,10 @@ func TestSessionOverlayLayerScale(t *testing.T) {
 		".doc-body.framed { position: relative; z-index: var(--z-cards); }",
 		":root[data-shell][data-fpopover] .frames { z-index: var(--z-popovers); }",
 		":root[data-shell][data-fdim] .frames { z-index: var(--z-modal); }",
+		// A popover-lifted frame stays see-through so the shell header and rail
+		// beneath it never vanish (the hover card and harness menu regression).
+		":root[data-shell][data-fpopover]:not([data-fdim]) .frames > iframe.on { background: transparent; }",
+		":root[data-frame][data-lifted], :root[data-frame][data-lifted] body, :root[data-frame][data-lifted] .dash { background: transparent; }",
 	} {
 		if !strings.Contains(css, rule) {
 			t.Errorf("missing overlay layer rule: %s", rule)

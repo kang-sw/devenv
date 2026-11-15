@@ -16,9 +16,9 @@ sage-review-completeness-reviewed: 5a87a5b89f65d3b3
 Research in progress is neither unresolved discussion nor implementation. Give
 leads a truthful declared work state without manufacturing an open discussion
 ask. This ticket captures owner decision 947, explicitly settled by MAIN at
-05:50:31 on 2026-11-15. It remains accepted backlog in `todo/`; fact population,
-design/completeness review, promotion and implementation dispatch remain
-lead-owned.
+05:50:31 on 2026-11-15. It is now in `ready/`, with Phase 1 recorded below;
+this handoff populates Phase 2 facts only (this ticket's path and Phase 1 Result).
+Implementation dispatch remains lead-owned.
 
 ## Decisions
 
@@ -93,9 +93,24 @@ lead-owned.
   required; MAIN owns deployment. The split landed at develop `81382b093` and
   its move maps are in
   `ai-docs/tickets/assets/261114-refactor-ws-dashboard-whiteboard-asset-split/`.
+- **Phase 2 filter expansion — MAIN 06:29:45, owner request.** Put researching
+  immediately after All, before the other state filters. Selecting any state
+  filter, including Closed, hides framework card roots as well as nonmatching
+  topics. Add an exclusive hammer radio after Closed, labeled `Cards` / `카드`,
+  that shows only framework cards and hides topics and closed-history paging.
+  Framework scope is preview, terminal, web and explorer card roots; panels,
+  logs and history inside a topic follow that topic and are not separate cards.
+  The Cards count includes framework cards across normal and pinned regions;
+  All retains its existing topic-only count. Preserve the other topic counts,
+  deduplication, state/closed matching and unloaded closed remainder semantics.
+- **Phase 2 compatibility: T0, client-side view filtering.** Reuse existing
+  local per-session filter selection storage and view-only visibility. Older
+  clients fall back to All for an unknown filter value; no shared store, API,
+  history event, card lifecycle or ownership change is required.
 - UI-fast verification has no approved screenshot reference and no screenshot
-  or viewport/theme matrix requirement. Do not import the asset-split ticket's
-  screenshot acceptance into this feature.
+  or viewport/theme matrix requirement. The owner explicitly permits this radio
+  in the existing row without a mockup. Use focused tests plus wsi18n; do not
+  import the asset-split ticket's screenshot acceptance into this feature.
 
 ## Constraints
 
@@ -120,57 +135,71 @@ lead-owned.
   inference or changes to general stale policy are included.
 - MAIN owns develop integration and runtime activation. Implementation uses
   offline, scoped checks only: no provider calls, downloads, credentials,
-  shared-daemon changes, plugin install/reload or push. Execute Phase 1 only
-  in this invocation; retain Phase 2 for the next handoff. Lead reads diffs,
+  shared-daemon changes, plugin install/reload or push. Phase 1 is recorded
+  below; the next invocation executes Phase 2 only. Lead reads diffs,
   not repeated raw logs; keep worker reports short and in plain English.
 
 ## Current-source grounding
 
-Pointers below describe the capture baseline, not implementation results or
-ready-route facts. Search by the named symbols after 793 moves assets.
+Phase 2 pointers below describe the current checkout at `310581f7c` (including
+asset split `81382b093` and Phase 1), not later develop or runtime acceptance.
+Backend-only rows retain capture context; Phase 1's plan and Result are frozen.
+All checks in this population were static reads; no tests, builds, browser,
+network probes or runtime operations were run.
 
 | Surface | Current evidence and relevance |
 |---|---|
-| `internal/wswhiteboard/topic_state.go` | `topicStateValues` contains four states; `applyTopicState` requires owner/ETA for implementing and rejects them otherwise. `parseTopicState`, `validRun`, `foldStateEvent` and close/reset history assume only implementing has a run; unknown enum values are malformed. `structuralWarnings` scopes the no-open-items warning to discussing. |
+| `internal/wswhiteboard/topic_state.go` | Phase 1 already supplies five states, including `StateResearching`, and top-level informational `TopicState.Owner`/`ETAMinutes` distinct from `Run`; Phase 2 consumes this model rather than adding another enum or clock (`agents-plugin-tool/internal/wswhiteboard/topic_state.go#L18-L48`). |
 | `internal/wswhiteboard/topic_eta.go` | `validExtension` and `applyTopicETA` accept only implementing runs, with cumulative budget and strict extension history. Research attributes are informational and must not reuse implementing runs or extensions. |
 | `internal/wswhiteboard/query.go` | Topic metadata's `State *TopicState` carries value, entry and optional run. Query tests pin state/diagnostic output; extend the existing projection rather than inventing a separate marker. |
 | `internal/wswhiteboard/board_notice.go` | `eligibleState` admits implementing/waiting for hourly epochs; `planNotice` computes overdue only for implementing, but its hourly body lists every open topic, including each declared state. Trigger eligibility and body inclusion are distinct (`agents-plugin-tool/internal/wswhiteboard/board_notice.go#L37-L39`, `#L141-L161`, `#L197-L209`). |
 | `internal/wswhiteboard/nudge.go` | `staleNudge` uses open-topic count, open-item absence and activity age, not declared state. Its local `waiting` map means open asks, not `StateWaiting`. Preserve that distinction. |
 | `internal/wswhiteboard/update_summaries.go` | New-topic default producer writes `StateDiscussing`; `summaryState` and net-change summaries project state. Preserve default behavior and cover explicit researching in the same creation batch. |
-| `agents-plugin/rsrc/whiteboard/whiteboard.md` | Work-state obligations, `wb:state`/`wb:eta` grammar, query metadata and timed-nudge sections currently describe four states and implementing-only runs. Update together to describe informational research attributes and unchanged implementing-only clocks. Mirror is `agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md`; both rsrc manifests participate. |
+| `agents-plugin/rsrc/whiteboard/whiteboard.md` | Phase 1 already documents researching and independently optional informational owner/ETA without a run/deadline; no new playbook or mirror change is requested in Phase 2 (`agents-plugin/rsrc/whiteboard/whiteboard.md#L129-L140`, `#L395-L398`). |
 | `internal/wsi18n/tables/*.json` | All 11 tables: `en`, `ko`, `ja`, `zh-Hans`, `zh-Hant`, `de`, `es`, `fr`, `it`, `pt-BR`, `ru`. Existing state keys use `js.wb.state.*`, filter labels use `js.board.filter.*`. Supply research state/filter translations in Phase 1; Korean state label is fixed above. |
-| `internal/wswhiteboard/assets/page.tmpl`, `ago.js`, `page.css` | `topicstate` renders a four-way badge; `ago.js` maps those states and currently shows owner only for implementing with run identity. Extend server rendering and live reconciliation consistently in Phase 2; use post-split stylesheet/script locations. |
-| `internal/wsdashboard/assets/cards.js` and rendering assembly | `filterValues` enumerates four states plus all/closed. Phase 2 includes research filtering, card state propagation, overview/render consumers and any required dashboard styling. `internal/wsdashboard/pages.go`, `internal/wswhiteboard/render.go` embed/assemble the assets; follow the 793 move map rather than assuming old paths survive. |
+| `internal/wswhiteboard/assets/page.tmpl`, `ago.js`, `page-items.css` | `topicstate` still renders four states; topic attributes expose owner/ETA only through `.Run`, not researching's top-level metadata. `ago.js` recognizes the same four and requires implementing/run for owner and clock. Badge styling moved to `page-items.css`, not the base `page.css` (`agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl#L42-L50`, `agents-plugin-tool/internal/wswhiteboard/assets/ago.js#L31-L75`, `agents-plugin-tool/internal/wswhiteboard/assets/page-items.css#L7-L23`). |
+| `internal/wsdashboard/assets/cards.js` and rendering assembly | `filterValues` still enumerates four states plus all/closed. `buildStateFilter` generates both radio groups and keyboard order; unknown stored values fall back to All, and `selectFilter` saves through `opt.key + ".state-filter"` after Overview's callback. `countTopics` currently filters only topics/paging, deduplicates topics across board/pins, and adds unloaded closed remainder; it does not count or filter framework cards (`agents-plugin-tool/internal/wsdashboard/assets/cards.js#L75-L78`, `#L183-L260`, `#L288-L330`). Dashboard styling is in `agents-plugin-tool/internal/wsdashboard/assets/dashboard-board.css`; assembly remains `agents-plugin-tool/internal/wsdashboard/pages.go` and `agents-plugin-tool/internal/wswhiteboard/render.go`. |
 | Daemon compatibility | `internal/wsdashboard/ensure.go:keepRunning`, `version.go:CompareVersions`/`SameMinor`, `proxy.go` hello validation, and the embed declarations in `pages.go`/`render.go` ground the supported T0 assumptions. `internal/mcp/whiteboard_store.go:whiteboardFolder` locates the repository-local authoritative folder store; legacy cache parts are rollback snapshots. `internal/mcp/whiteboard_tools.go:renderWhiteboard`/`registerWhiteboardExclude` auto-register the local exclusion, which does not untrack boards. This clone has zero tracked whiteboard files; downstream git usage can differ. |
 
 All `internal/` paths above are under `agents-plugin-tool/`.
 
+Phase 2 framework/filter reuse seams (current checkout):
+
+| Claim | Evidence |
+|---|---|
+| Framework roots have stable card identity and kind; normal/pinned placement shares one registry. Panels/logs/history within topics are not framework roots. | `agents-plugin-tool/internal/wsdashboard/assets/cards.js#L1-L10`, `#L39-L65`, `#L680-L697`; preview, terminal and web register in `assets/preview.js`, `assets/terminal.js`, `assets/webcard.js`; explorer registers in `agents-plugin-tool/internal/wsdashboard/assets/files.js#L1556-L1581`. |
+| Existing visibility is an attribute, not DOM destruction or the HTML hidden attribute. | `filtered` writes `data-state-filtered` (`agents-plugin-tool/internal/wsdashboard/assets/cards.js#L288-L290`); `[data-state-filtered] { display: none !important; }` is in `agents-plugin-tool/internal/wsdashboard/assets/dashboard-board.css#L195-L196`. |
+| Opening/rearranging reaches recounting, but closing an unpinned card currently does not. Phase 2 needs that close seam. | `agents-plugin-tool/internal/wsdashboard/assets/cards.js#L524-L546`, `#L804-L813`, `#L1425-L1433`; close only calls `arrange` when pinned. |
+| Hammer is the existing dashboard sprite symbol, not a Lucide name accepted by `licon`. | `agents-plugin-tool/internal/wsdashboard/assets/sprite.svg#L14`; `licon` prefixes `#l-` (`agents-plugin-tool/internal/wsdashboard/assets/cards.js#L80`); scoped search `rg -n hammer agents-plugin-tool/internal/wsdashboard/assets/lucide` returned no matches. |
+| Existing focused tests cover the actual extension seams, without requiring a new test file or a browser launch during population. | `TestBoardStateFilter` in `agents-plugin-tool/internal/wsdashboard/board_state_filter_test.go#L8-L83`; `TestBoardToolbarPlacementAndCounts` in `agents-plugin-tool/internal/wsdashboard/board_toolbar_test.go#L32-L75`; placement/pin/close fixtures in `agents-plugin-tool/internal/wsdashboard/cards_test.go`; `TestOverviewFilterContracts` and `TestOverviewStateFilterLifecycle` in `agents-plugin-tool/internal/wsdashboard/overview_test.go#L53-L156`; `TestTopicStateBadgeClockAndReconciliation` in `agents-plugin-tool/internal/wswhiteboard/topic_state_badge_test.go`. |
+| Overview already excludes filtered nodes and defers filter changes through its existing barrier; preserve that behavior. | `agents-plugin-tool/internal/wsdashboard/assets/overview.js#L38`, `agents-plugin-tool/internal/wsdashboard/assets/dashboard-board.js#L229`; `agents-plugin-tool/internal/wsdashboard/overview_test.go#L94-L156`. |
+| All 11 research state/filter translations already landed, but real consumers and the Cards labels remain Phase 2 work. Remove only the two-key staging exemption. | `agents-plugin-tool/internal/wsi18n/tables/{en,ko,ja,zh-Hans,zh-Hant,de,es,fr,it,pt-BR,ru}.json`; English/Korean research keys at lines 375/382; `agents-plugin-tool/internal/wsi18n/keys_test.go#L103-L124`. |
+
 ## Prior Decisions
 
-- 261115-feat-ws-whiteboard-topic-default-and-update-summaries (2026-11-15, commit 218176cc): "The playbook describes authoritative creation defaults, same-batch explicit override without intermediate default, no legacy/reopen backfill" — bearing: constrains
 - 261115-feat-ws-whiteboard-topic-state-badge (2026-11-15, Decisions): "Preserve closed-topic lifecycle and existing toolbar filtering. A closed topic is not a new operational state, and closing/resetting must not retain a stale implementing owner/timer." — bearing: constrains
-- 261115-feat-ws-whiteboard-toolbar-state-filter (2026-11-15, Result (01a121f70)): "Counts deduplicate board/pin topics and retain loaded closed history plus data-closed-more." — bearing: constrains
-- 261114-feat-ws-whiteboard-topic-state-and-lead-nudges (2026-11-15, Result (0203cff95)): "Scoped cumulative wb:eta preserves original start, run identity, owner and initial estimate" — bearing: constrains
-- 733c7522 (2026-11-15, commit): "Fold all retained histories in numeric board-global order; recognize only the inspected non-imported unattributed historical system close producer, not authored text." — bearing: constrains
-- dd03b1d0 (2026-11-15, commit): "Phase 3 uses immutable existing-kind system metadata for cumulative ETA revisions and reply-id-scoped notice receipts; retain original start/initial estimate/owner and every reason." — bearing: constrains
-- 77229e91 (2026-11-15, commit): "Keep render-only calls on a cheap summary path; do not clone or compare the board again when no topic was touched." — bearing: constrains
+- 261115-feat-ws-whiteboard-toolbar-state-filter (2026-11-15, commit d95fde3d): "Filtering marks nodes without removing or moving them. Overview completes its existing restoration before a user changes the filter; its picker/motion snapshots exclude filtered topics." — bearing: constrains
+- 3b775bca (2026-11-15, commit): "Mechanical T0 toolbar seam only: reorder existing values and label keys together, preserving state identities and handlers rather than changing filtering, badge behavior or storage." — bearing: constrains
+- 3fadb536 (2026-11-15, commit): "Encode topic keys as hex fragment IDs and let the card owner clear a hiding state filter before scrolling, including asynchronous Overview restoration." — bearing: constrains
+- f5b6b502 (2026-11-15, commit): "Reuse the existing wbAgo initializer/refresh/adoption hook and its document-owned timer rather than introduce another asset or mutate dashboard refresh interfaces." — bearing: constrains
+- 261114-feat-ws-whiteboard-topic-state-and-lead-nudges (2026-11-15, Decisions): "Explicit work state rather than inference alone." — bearing: supports
 - 02a2e572 (2026-11-15, commit): "Trimmed acceptance per (899)=a and the owner UI-fast principle: scoped tests, wsi18n, one lite (clean); owner on-screen check is acceptance." — bearing: supports
 
 ## Route Facts
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin-tool/internal/wswhiteboard/{topic_state.go,topic_eta.go,query.go,board_notice.go,update_summaries.go}, internal/wsi18n/tables/*.json, shared playbook/mirrors; Phase 2 rendering/assets and dashboard consumers. |
-| scope.surface | public-interface | wb:state accepts a new value; derived query state and immutable history gain researching semantics (agents-plugin-tool/internal/wswhiteboard/topic_state.go#L18-L44, #L177-L259; query.go#L41-L43). |
-| scope.new_public_symbol | yes | New public wb:state value researching; existing exported state constants are in agents-plugin-tool/internal/wswhiteboard/topic_state.go#L18-L25. Exact Go constant name remains implementation-owned. |
-| scope.new_type_contract | yes | Fifth enum value plus optional informational research owner/eta_minutes; MAIN963 settles no research run, implementing-only wb:eta and a fresh implementing clock. Existing TopicState/TopicRun carry only implementing run metadata (agents-plugin-tool/internal/wswhiteboard/topic_state.go#L27-L44). |
-| scope.test_surface | existing | Named topic_state*_test.go, topic_eta_test.go, board_notice_test.go, nudge_test.go, update_summaries_test.go exist under agents-plugin-tool/internal/wswhiteboard/; internal/wsdashboard/board_state_filter_test.go and internal/wsrsrc/wsflow_mirror_test.go exist. No tests executed during population. |
-| complexity.reuse_points | confirmed | Read TopicStates/parseTopicState/applyTopicState, applyTopicETA, summaryState, eligibleState/planNotice, staleNudge, query projection, topicstate, ago.js badge and cards.js filterValues. Canonical playbook and wsflow/Pi mirror guards are existing reuse seams. |
-| complexity.side_effect_risk | high | Persisted enum and metadata affect replay, summaries, warnings and notice epochs; phased rendering deliberately leaves a backend/UI gap. agents-plugin-tool/internal/wswhiteboard/topic_state.go#L104-L132; board_notice.go#L37-L67. |
-| risk.correctness | high | Optional research metadata must survive folding/queries without becoming an implementing run; preserve repeat/transition/close/default semantics and distinguish hourly trigger from all-open-topic body (agents-plugin-tool/internal/wswhiteboard/board_notice.go#L141-L209). |
-| risk.fit | moderate | Reuse immutable Entry authority and existing state consumers; current non-implementing fold drops Run and summaryState compares only Value/Run/Diagnostic, so informational metadata needs coordinated projection rather than a second flag (agents-plugin-tool/internal/wswhiteboard/topic_state.go#L127-L132; update_summaries.go#L160-L172). Pi resource byte identity also applies (internal/wsrsrc/pi_mirror_test.go#L20-L80). |
-| risk.test | high | Existing four-state coverage must expand across optional metadata, raw-history retention, clocks/notices, locale key-use guards and server/live/filter parity; Phase 2 follows the move map landed at develop 81382b093, under ai-docs/tickets/assets/261114-refactor-ws-dashboard-whiteboard-asset-split/. No screenshot/matrix requirement is authorized. |
-| risk.security_or_contract | moderate | Public enum/metadata and T0 accepted skew residual must preserve raw history and escaped owner rendering; no wider data loss is accepted. Current parser rejects unknown values as malformed and permits a later valid baseline (agents-plugin-tool/internal/wswhiteboard/topic_state.go#L242-L259, #L286-L300); server/client owner rendering is text (assets/page.tmpl#L42-L50; assets/ago.js#L50-L64). |
+| scope.span | multi-file | Phase 2 only: agents-plugin-tool/internal/wswhiteboard/assets/{page.tmpl,ago.js,page-items.css}, internal/wsdashboard/assets/{cards.js,dashboard-board.css}, internal/wsi18n/{keys_test.go,tables/*.json}, affected existing tests. |
+| scope.surface | cross-module | Whiteboard server/live badges and dashboard filters consume the landed state; no wb:state, store, API or lifecycle change (agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl#L42-L50; agents-plugin-tool/internal/wsdashboard/assets/cards.js#L183-L330). |
+| scope.new_public_symbol | no | StateResearching already exists; Phase 2 adds presentation/filter values only, not exported commands or model symbols (agents-plugin-tool/internal/wswhiteboard/topic_state.go#L18-L48). |
+| scope.new_type_contract | yes | Additive page-data projection of existing informational research owner/ETA is needed: page.tmpl currently emits these only from Run; no shared-store or API contract change (agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl#L50; topic_state.go#L41-L48). |
+| scope.test_surface | existing | agents-plugin-tool/internal/wswhiteboard/topic_state_badge_test.go, topic_state_view_test.go; internal/wsdashboard/{board_state_filter_test.go,board_toolbar_test.go,cards_test.go,overview_test.go}; internal/wsi18n/keys_test.go. Read only, not executed. |
+| complexity.reuse_points | confirmed | Read topicstate, ago.js badge, page-items.css, buildStateFilter/selectFilter/countTopics, Card roots/close, explorer registration and Overview filter fixtures; reuse data-state-filtered and existing per-session opt.load/save. |
+| complexity.side_effect_risk | moderate | Visibility affects retained frame/card roots, pinned placement, keyboard targets and Overview geometry; local filter persistence changes but card lifecycle must not (agents-plugin-tool/internal/wsdashboard/assets/cards.js#L288-L330, #L680-L697, #L804-L813). |
+| risk.correctness | high | Preserve topic deduplication and unloaded closed remainder while counting framework identities separately; unpinned close currently bypasses arrange/recount (agents-plugin-tool/internal/wsdashboard/assets/cards.js#L291-L311, #L804-L813). |
+| risk.fit | moderate | Extend both generated radio groups and existing filter callback, not a second selector or root re-creation; distinguish framework roots from topic internals (agents-plugin-tool/internal/wsdashboard/assets/cards.js#L183-L260, #L680-L697). |
+| risk.test | high | Existing fixtures assume six filter options and four badges; extend identity/count/open-close/pin-refresh and server/live parity coverage. Tests have not run; browser/runtime and screenshots are not authorized for this invocation (agents-plugin-tool/internal/wsdashboard/board_state_filter_test.go#L8-L83; internal/wswhiteboard/topic_state_badge_test.go). |
+| risk.security_or_contract | moderate | Informational owner text must remain escaped, never become a run/clock, and unknown stored filters must retain All fallback; T0 local selection only (agents-plugin-tool/internal/wswhiteboard/assets/ago.js#L50-L75; assets/page.tmpl#L42-L50; internal/wsdashboard/assets/cards.js#L188-L189). |
 
 ## Phases
 
@@ -291,8 +320,14 @@ that would incorrectly block the unfrozen Phase 1.
 Extend the server `topicstate` template, live badge reconciliation (`ago.js`
 responsibility), badge styling (`page.css` responsibility), dashboard cards,
 state filter labels/selection and affected rendering/overview surfaces for
-researching. Use actual post-split asset/assembly locations, including dashboard
-CSS/JS responsibilities only as needed. Render `Researching` / `연구 중` as the
+researching. Add the confirmed Cards radio and framework-card visibility/count
+behavior in the same filter row, with researching immediately after All and
+Cards after Closed. Reuse the existing filter generator, visibility attribute,
+card registry and topic/pinned projection rather than inventing a second filter
+or changing card lifecycle. Recount when cards close as well as when they open
+or move. Supply the Cards label in all 11 locales. Use actual post-split
+asset/assembly locations, including dashboard CSS/JS responsibilities only as
+needed. Render `Researching` / `연구 중` as the
 fifth peer state with the existing localized badge/filter pattern; owner/ETA
 presentation follows the separately confirmed metadata contract. Remove the
 Phase 1 unused-translation-key staging allowance when those real consumers
@@ -303,8 +338,18 @@ Verification boundary: extend `topic_state_badge_test.go` and
 `internal/wsdashboard/board_state_filter_test.go`, plus existing affected
 render/view tests, to cover initial/server rendering and live state changes,
 research filter inclusion, transition away, close/reset, localized labels and
-owner/ETA projection. Run the focused whiteboard/dashboard Go tests and syntax
-checks for changed scripts using the post-split paths. UI-fast has no approved
-screenshot and requires no screenshot/matrix. The existing browser filter test
+owner/ETA projection. Extend the existing filter fixtures with actual framework
+card roots in normal and pinned regions: state filters hide them, Cards hides
+all topics and closed paging, All restores the current view without changing
+its topic-only count. Cover card open/close, pin/unpin, refresh, retained card
+identity and contents, inline/compact radio parity, keyboard navigation,
+persisted selection and unknown-value fallback. Filtering must not destroy or
+recreate cards or deduplicate them by path/content. Preserve Overview's existing
+filter callback/deferred work behavior.
+
+Run focused whiteboard/dashboard Go tests, full wsi18n and syntax checks for
+changed post-split scripts. Verify the hammer references the existing
+`#i-hammer` sprite, not a nonexistent `#l-hammer` icon. UI-fast requires no
+mockup, screenshot or viewport/theme matrix. The existing browser filter test
 and `scripts/board-headless.mjs` may ground a later bounded check only if
-separately authorized; this capture grants no browser, runtime or harness run.
+separately authorized; this invocation grants no browser, runtime or harness run.
