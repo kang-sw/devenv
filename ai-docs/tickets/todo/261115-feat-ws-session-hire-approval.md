@@ -75,96 +75,105 @@ Carried from the research's Confirmed Decisions (IDs are the owner's):
   rebalances when a peer has more than three unstarted items. This is lead
   behavior guidance; it confers no stop/close powers.
 
+Settled 2026-11-15 by MAIN (board IDs; MAIN relay 05:43Z):
+
+- **(952) technical, MAIN - tool exposure.** The request tool is listed in
+  every lead-scope session's tool list. The server refuses callers without the
+  hiring flag ("hiring is not enabled for this session"). This keeps the tool
+  list static and T0. Rejected: listing it only for flagged roots, which needs
+  a tools/list refresh on every flag change (T1).
+- **(952) technical, MAIN - roster callers.** Any lead-scope session may call
+  the roster. Its rows are read-only and already visible in the dashboard.
+  Rejected: flagged roots only.
+- **(952) technical, MAIN - names.** `session.request_hire` and
+  `session.roster`, next to the existing `session.children`. Rejected:
+  `daemon.request_hosted_session` / `daemon.list_children_sessions` (the
+  research examples; "children" misdescribes a roster that includes peers),
+  `daemon.request_session` / `daemon.list_sessions`.
+- **(952) technical, MAIN - restart.** Pending proposals persist in a new
+  file in the daemon state directory (T0). After a restart they reappear and
+  keep their 30-minute wall-clock expiry. Any that expired while the daemon
+  was down send their `expired` mail. Rejected: memory only, which drops
+  requests silently and breaks the 750/767 mail promise.
+- **(952) technical, MAIN - recheck.** Eligibility is checked again at
+  approval. If the requester has lost the hiring flag, the request cannot be
+  approved; it is closed with a `withdrawn` mail. A closed requester does not
+  block approval: the outcome mail waits on its reply-id (768=c). Rejected:
+  withdrawing on any requester change; no recheck.
+- **(952) technical, MAIN - recovery_context size.** At most 16 KiB. It is
+  stored with the proposal, shown collapsed in the modal with a character
+  count, and echoed in full in every outcome mail. Rejected: 4 KiB;
+  unlimited.
+- **(952) technical, MAIN - no tier.** The request carries optional
+  `harness`, `model` and `effort`. Missing values fall back to the
+  new-session popover's defaults. Rejected: a tier word resolved through
+  agent bindings, which would be a second resolution path to explain.
+- **(952) technical, MAIN - grouping field.** Display grouping uses a new
+  optional record field holding the requester's reply-id (for example
+  `hired_by`). Runner `ParentRef` (`agents-plugin-tool/internal/wsagent/record.go`)
+  and MCP `sessionEntry.parent` are not reused: they carry turn-report routing
+  and authority lineage, which 775 excludes.
+- **(952) technical, MAIN - trusted gate.** The approve, reject and
+  flag-toggle endpoints use the existing trusted gate in
+  `agents-plugin-tool/internal/wsagent/http.go` (`opts.Trusted`: local plus
+  own-origin), which is 765's boundary. Rejected: a new auth path.
+- **(952) technical, MAIN - outcome mail.** Outcomes use the existing reply-id
+  system mail (`agents-plugin-tool/internal/wsmailbox/replyid.go`), which
+  already wakes a requester before any child exists. Rejected: a new
+  notification channel.
+- **(952) technical, MAIN - creation path.** Approval calls the existing
+  hosted-lead creation (`Runner.CreateLead`) with the owner's final values,
+  so the result matches a rail-created session (768=c). CreateLead mints a
+  parent-less lead key, so the hired session is a top-level lead in MCP
+  terms. 775 wants exactly that; the session still never gets the hiring
+  flag (752). Rejected: a separate creation path.
+- **(952) technical, MAIN - CLI flag storage.** The CLI-lead flag (769=a) is
+  an optional field next to the dashboard's existing per-session record for
+  that lead, not in the lead-key registry. The registry is authority state,
+  and a flag change must not touch it. The exact store is grounded by fact
+  population.
+- **(952) technical, MAIN - phase split.** Phase 1 covers the server
+  lifecycle and tools, Phase 2 the dashboard UI, Phase 3 shipped guidance.
+  Phase 2 edits files under the split freeze, so Phase 1 can land first.
+  Rejected: one phase.
+- **(953) announced - no active limit.** There is no limit on active hired
+  sessions; owner approval already gates each creation (767 removed only the
+  pending cap). Rejected: a per-requester cap.
+- **(953) announced - no turn reports.** The hired session's turn reports do
+  not go to the requester. The requester gets only creation, rejection,
+  expiry and withdrawal mail; otherwise the two talk through normal mailbox.
+  This follows 775's "approval/creation notices". Rejected: routing every turn
+  report to the requester like a spawned child, which would make it a
+  supervisor.
+
 ## Open Decision Queue
 
-Last ID: (956)
+Last ID: (953)
 
-(938) [open] [policy] Expose the request tool in every lead's tool list and refuse unflagged callers in the server
-- Context: a per-session tool list would have to change when the owner flips the flag, so clients need a refresh or reconnect.
-- Alternative a: always listed for lead-scope sessions; the server refuses with "hiring is not enabled for this session" (T0, static tool list).
-- Alternative b: listed only for flagged roots; a flag change needs a tools/list refresh (T1 reconnect-recoverable).
-> Recommend a: the tool list stays static and T0; the server check is the authority either way.
+Local IDs from the first draft were re-minted on the board: (939) -> (948), (947) -> (949), (948) -> (950), (956) -> (951).
 
-(939) [open] [policy] Roster scope: the caller's hired sessions plus the other top-level leads of the same project
+(948) [open] [policy] Roster scope: the caller's hired sessions plus the other top-level leads of the same project
 - Context: 782 assigns work to "the least-loaded peer", so the roster must include peers, not only hired children.
 - Alternative a: only sessions grouped under the caller (hired children).
 - Alternative b: hired children plus top-level leads of the same project (same canonical git root).
 - Alternative c: every session on the daemon, across projects.
 > Recommend b: it is what 782 needs without exposing other projects' sessions.
 
-(940) [open] [policy] Any lead-scope session may call the roster, not only flagged roots
-- Alternative a: any lead-scope session (read-only data, 786 grants no control).
-- Alternative b: flagged roots only.
-> Recommend a: 782 balancing is useful to every lead, and the rows are already visible in the dashboard.
-
-(941) [open] [policy] Tool identifiers
-- Alternative a: the research examples, `daemon.request_hosted_session` and `daemon.list_children_sessions`.
-- Alternative b: `session.request_hire` and `session.roster`, next to the existing `session.children`.
-- Alternative c: `daemon.request_session` and `daemon.list_sessions`.
-> Recommend b: `session.*` already holds the session tools, and "children" would wrongly suggest the roster lists only hired sessions, which conflicts with (939)b.
-
-(942) [open] [policy] Pending requests survive a daemon restart and keep their 30-minute wall-clock expiry
-- Alternative a: persist pending proposals in the daemon state directory (a new file, T0); after a restart they reappear, and any that expired meanwhile send `expired` mail.
-- Alternative b: in memory only; a restart drops them, and the requester learns nothing.
-> Recommend a: under b a request can vanish silently, which breaks the mailbox outcome promise of 750/767.
-
-(943) [open] [policy] Eligibility is checked again at approval; a request whose requester lost the flag cannot be approved and is closed with a `withdrawn` mail, while a closed requester does not block approval
-- Context: the research leaves requester closure and eligibility loss open; 768=c says hired sessions are independent of the requester's lifetime.
-- Alternative a: as stated (flag off -> auto-withdraw with mail; requester closed -> still approvable, mail waits on its reply-id).
-- Alternative b: any requester change (closed or flag off) withdraws the request.
-- Alternative c: no recheck; the owner decides regardless.
-> Recommend a: the flag is the owner's own revocation signal, while closing a session is routine and 768=c keeps the hire independent of it.
-
-(944) [open] [policy] No limit on active hired sessions
-- Context: 767 removed only the pending cap; the research leaves an active limit open.
-- Alternative a: no limit; every hire is owner-approved anyway.
-- Alternative b: a per-requester cap (for example 3), refused at request time.
-> Recommend a: owner approval already gates each creation.
-
-(945) [open] [policy] `recovery_context` is limited to 16 KiB, stored with the proposal, shown collapsed in the modal with a character count, and echoed in full in outcome mail
-- Alternative a: 16 KiB.
-- Alternative b: 4 KiB.
-- Alternative c: no limit.
-> Recommend a: enough for a real compaction-recovery brief while keeping mail and proposal files small.
-
-(946) [open] [policy] Drop `tier`: the request carries optional harness, model and effort, and missing values fall back to the new-session popover defaults
-- Alternative a: no tier; raw optional harness/model/effort.
-- Alternative b: a tier word (medium/large/xlarge) resolved through the configured agent bindings into model and effort before the modal opens.
-> Recommend a: the owner adjusts the values in the modal anyway, and a tier mapping adds a second resolution path to explain.
-
-(947) [open] [policy] The hired session's root defaults to the requester's canonical git root and is editable in the modal; the request cannot name a root
+(949) [open] [policy] The hired session's root defaults to the requester's canonical git root and is editable in the modal; the request cannot name a root
 - Alternative a: as stated.
 - Alternative b: the request may name an absolute root (the owner sees and can edit it).
 > Recommend a: smaller request surface, and the owner can still change it.
 
-(948) [open] [policy] A new request does not interrupt: it adds a rail chip and a toast, and the modal opens on click; several pending requests queue
-- Alternative a: as stated (mockup shows the chip and the pending ghost row).
+(950) [open] [policy] A new request does not interrupt: it adds a rail chip and a toast, and the modal opens on click; several pending requests queue
+- Alternative a: as stated (the mockup shows the chip and the pending ghost row).
 - Alternative b: the modal pops up immediately when a request arrives.
 > Recommend a: requests are nonblocking, so a modal stealing focus mid-typing is the wrong cost.
 
-(949) [open] [policy] The hired session's turn reports do not go to the requester; only the creation, rejection and expiry outcomes do
-- Context: Runner `ParentRef` (`agents-plugin-tool/internal/wsagent/record.go` ParentRef) routes a child's turn reports to its parent as mail. 775 grants only "approval/creation notices", so reusing ParentRef would add per-turn mail.
-- Alternative a: outcome mail only; the requester talks to the hired session through normal mailbox.
-- Alternative b: route every turn report to the requester, like a spawned child.
-> Recommend a: it matches 775's "notices", and b would make the requester a de facto supervisor.
-
-(950) [open] [technical] Display grouping uses a new optional record field (for example `hired_by`, the requester's reply-id) instead of Runner `ParentRef` or MCP `sessionEntry.parent` - those carry report routing and authority lineage, which 775 excludes.
-
-(951) [open] [technical] The approval, rejection and flag-toggle endpoints sit behind the existing trusted gate in `wsagent/http.go` (`opts.Trusted`, local plus own-origin) rather than a new auth path - this is 765's boundary, and one gate keeps one failure mode.
-
-(952) [open] [technical] Outcome mail goes through the existing reply-id system mail (`wsmailbox/replyid.go`) rather than a new notification channel - it already wakes a requester before any child exists.
-
-(953) [open] [technical] Approval calls the existing hosted-lead creation (`Runner.CreateLead`) with the owner's final values, so the result is the same as a rail-created session rather than a separate creation path - this is 768=c. Uncertainty: CreateLead mints a parent-less lead key, so the hired session is itself a top-level lead in MCP terms; 775 needs exactly that, but it must not get the hiring flag (752).
-
-(954) [open] [technical] The CLI-lead flag (769=a) is stored as an optional field next to the dashboard's existing per-session record for that lead rather than in the lead-key registry - the registry is authority state, and a flag change must not touch it. Uncertainty: exact store to be grounded by fact population.
-
-(955) [open] [technical] The phases split server lifecycle and tools (Phase 1), dashboard UI (Phase 2), and shipped guidance (Phase 3) rather than one phase - Phase 2 edits `dashboard.js`/`dashboard.css`, which are under a split freeze, so Phase 1 can land first.
-
-(956) [open] [policy] Accept the approval modal mockup as the visual reference
+(951) [open] [policy] Accept the approval modal mockup as the visual reference
 - Mockup: `ai-docs/ref/brand/mockup/session-hire/approval-modal.png` (source `approval-modal.html`). It shows the requester row with a hire chip, the pending ghost row, the modal (reason, collapsed recovery context, harness/label/model/effort/root, the authority note, the reject reason, Reject, Approve & create) and the root toggle in session settings, including its disabled state for grouped sessions.
 - Alternative a: accept as is.
 - Alternative b: accept with changes the owner names.
-> Recommend a once (947) and (948) are answered, since the mockup assumes their recommendations.
+> Recommend a once (949) and (950) are answered, since the mockup assumes their recommendations.
 
 ## Constraints
 
@@ -191,57 +200,75 @@ Last ID: (956)
 ### Phase 1: Daemon proposal lifecycle, hiring flag, and the request and roster tools
 
 - Hiring flag: an optional field on hosted session records and on the CLI-lead
-  record (954). It is set only through a trusted dashboard endpoint (951). It
-  cannot be set while the session is grouped under a requester (775), and
-  never for a hired session (752).
-- Request tool (name per (941)): takes `reason` and `recovery_context`
-  (both required; size per (945)), an optional label, and optional
-  harness/model/effort per (946). It refuses callers without the flag
-  (750/751), hired sessions (752), and non-lead scopes. It returns at once
-  with a request id and a line saying the outcome will arrive by mail (750).
-- Proposal lifecycle: pending -> approved | rejected | expired (30 min, 767)
-  | withdrawn (943). Persistence per (942). Re-check eligibility at approval
-  (943).
-- Approval creates the session through hosted-lead creation (953) with the
-  owner's final values and root (947), records the display grouping (950),
-  and sends the outcome mail (952). Every outcome mail echoes
-  `recovery_context` (766/770). Turn reports per (949).
-- Roster tool (name per (941)): read-only rows with exactly the 786 fields;
-  scope per (939), callers per (940).
-- Verification: Go tests for flag gating (unflagged, hired, worker and clerk
-  callers refused; the model cannot set the flag), each lifecycle edge with
-  its mail (including the recovery_context echo and expiry on a fake clock),
-  restart behavior per (942), the recheck per (943), the requester's inability
-  to stop or close the hired session, the roster's fields and scope, and
-  compatibility (existing tool list and records unchanged apart from the
-  additions). Use focused `-run` selections; a full `./internal/mcp` run needs
-  `-timeout 20m` or more.
+  record (CLI flag storage). It is set only through a trusted dashboard
+  endpoint (trusted gate). It cannot be set while the session is grouped under
+  a requester (775), and never for a hired session (752).
+- `session.request_hire`: takes `reason` and `recovery_context` (both
+  required; `recovery_context` at most 16 KiB), an optional label, and
+  optional `harness`/`model`/`effort` (no tier). The tool is listed for
+  every lead-scope session. It refuses callers without the flag (750/751),
+  hired sessions (752), and non-lead scopes. It returns at once with a request
+  id and a line saying the outcome will arrive by mail (750).
+- Proposal lifecycle: pending -> approved | rejected | expired (30 min,
+  767) | withdrawn (recheck). Pending proposals persist across a daemon
+  restart (restart). Eligibility is checked again at approval (recheck).
+- Approval creates the session through `Runner.CreateLead` (creation path)
+  with the owner's final values and root ((949)). It records the display
+  grouping (grouping field) and sends the outcome by reply-id system mail
+  (outcome mail). Every outcome mail echoes `recovery_context` (766/770). No
+  turn reports go to the requester (no turn reports).
+- `session.roster`: read-only rows with exactly the 786 fields. Scope per
+  (948); any lead-scope caller (roster callers).
+- Verification: Go tests for:
+  - flag gating: unflagged, hired, worker and clerk callers are refused, and
+    the model cannot set the flag;
+  - each lifecycle edge with its mail, including the `recovery_context` echo
+    and expiry on a fake clock;
+  - restart persistence and expiry-while-down mail;
+  - the approval recheck (flag lost -> `withdrawn`; requester closed ->
+    still approvable);
+  - the requester's inability to stop or close the hired session;
+  - the roster's fields and scope;
+  - compatibility: the existing tool list and records are unchanged apart
+    from the additions.
+
+  Use focused `-run` selections. A full `./internal/mcp` run needs
+  `-timeout 30m`.
 
 ### Phase 2: Dashboard approval modal, rail cues, and the root toggle
 
-- Build to the accepted mockup (956):
+- Build to the accepted mockup ((951)):
   `ai-docs/ref/brand/mockup/session-hire/approval-modal.png`.
 - The root toggle goes in hosted-session settings and on CLI lead rail rows
-  (769=a). Disabled, with a reason, for a grouped session (775).
-- Rail: a hire chip on the requester and a pending row while requests are open.
-  The hired session is grouped under the requester (775). Arrival behavior per
-  (948).
-- Modal: requester identity, reason, collapsed recovery context with a
-  character count, harness/model/effort controls reusing the new-session
-  popover's controls, label and root (947), expiry countdown, reject reason,
-  Reject, and Approve & create. Approve and reject go through the trusted
-  endpoints (951).
+  (769=a). It is disabled, with a reason, for a grouped session (775).
+- Rail: a hire chip on the requester and a pending row while requests are
+  open. The hired session is grouped under the requester (775). Arrival
+  behavior per (950).
+- Modal contents:
+  - requester identity and reason;
+  - recovery context, collapsed, with a character count;
+  - harness/model/effort controls reusing the new-session popover's controls;
+  - label and root ((949));
+  - expiry countdown;
+  - reject reason, Reject, and Approve & create.
+
+  Approve and reject go through the trusted endpoints (trusted gate).
 - Strings in all 11 locales.
-- Verification: node harness tests for the modal (prefill, owner edits win,
-  reject needs no reason or carries it, countdown, disabled toggle), the
-  focused wsdashboard Go tests, wsi18n, and a side-by-side comparison of a
-  headless capture against the mockup PNG.
+- Verification:
+  - node harness tests for the modal: prefill, owner edits win, reject with
+    or without a reason, countdown, disabled toggle;
+  - the focused wsdashboard Go tests and wsi18n;
+  - a side-by-side comparison of a headless capture against the mockup PNG.
 
 ### Phase 3: Shipped lead guidance
 
-- Lead-facing guidance in the workflow manual or playbook: when to hire, that
-  the request is nonblocking and the outcome arrives by mail, that
-  `recovery_context` must be enough to resume after compaction, the roster,
-  782 allocation, and keeping strengths in the agenda (788=d). Downstream-
-  neutral wording, mirrored to wsflow and Pi through the existing pipelines.
+- Lead-facing guidance in the workflow manual or playbook covers:
+  - when to hire;
+  - that the request is nonblocking and the outcome arrives by mail;
+  - that `recovery_context` must be enough to resume after compaction;
+  - the roster and 782 allocation;
+  - keeping strengths in the agenda (788=d).
+
+  Wording stays downstream-neutral and is mirrored to wsflow and Pi through
+  the existing pipelines.
 - Verification: manifest/mirror tests and product-mode playbook checks.
