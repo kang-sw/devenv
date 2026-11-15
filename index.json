@@ -542,7 +542,17 @@
       "registered_at": "2026-11-15T07:34:47Z"
     },
     "261115-bug-ws-worktree-acquire-concurrent-pool-claim": {
-      "registered_at": "2026-11-15T06:02:35Z"
+      "registered_at": "2026-11-15T06:02:35Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T09:01:46Z",
+        "impl": {
+          "branch": "impl/develop/herbs-scant-yarn"
+        }
+      }
     },
     "261115-chore-settings-hidden-theme-and-rail-swap-tests": {
       "registered_at": "2026-11-15T04:00:54Z"
