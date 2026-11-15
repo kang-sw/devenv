@@ -118,14 +118,22 @@ func writePiLeadBridge(spec StartSpec, servers map[string]any) (string, error) {
 	return path, writeFileAtomic(path, []byte(source), 0o600)
 }
 
-// piBundledEntries deliberately reads the sibling manifest, not the installed
-// Pi package or an entry name baked into the runner.
+// piBundledEntries prefers the owning workflow package's prepared payload.
+// Source checkouts without one retain the repository-sibling route. A broken
+// local payload is an error, not permission to load a different product copy.
 func piBundledEntries() ([]string, error) {
 	root, err := piBundledPluginRoot()
 	if err != nil {
 		return nil, err
 	}
-	root = filepath.Join(filepath.Dir(root), "agents-plugin-pi")
+	if _, localErr := os.Stat(filepath.Join(root, "native-pi")); !os.IsNotExist(localErr) {
+		root, err = piPreparedPayload(root)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		root = filepath.Join(filepath.Dir(root), "agents-plugin-pi")
+	}
 	raw, err := os.ReadFile(filepath.Join(root, "package.json"))
 	if err != nil {
 		return nil, err

@@ -457,6 +457,54 @@ fi
 # Defined early so settings.json and known_marketplaces.json can reference it.
 PLUGIN_CACHE="$HOME/.claude/plugins/ws-plugin"
 
+# Validate producer-owned inputs before touching a usable snapshot or registering it.
+info "Syncing ws plugin snapshot to $PLUGIN_CACHE/ws/..."
+python3 - "$REPO_DIR" "$PLUGIN_CACHE" <<'SNAPSHOTEOF'
+import json, os, shutil, subprocess, sys, tempfile
+from pathlib import Path
+
+repo, cache = map(Path, sys.argv[1:])
+source = repo / "agents-plugin"
+helper = source / "bin/ws-pi-payload.py"
+subprocess.run([sys.executable, str(helper), "--plugin", str(source), "--check-source", str(repo)], check=True)
+cache.parent.mkdir(parents=True, exist_ok=True)
+stage = Path(tempfile.mkdtemp(prefix=".ws-snapshot-", dir=cache.parent))
+backup = stage / "previous"
+try:
+    shutil.copytree(source, stage / "ws")
+    subprocess.run([sys.executable, str(stage / "ws/bin/ws-pi-payload.py"), "--plugin", str(stage / "ws")], check=True)
+    plugin = json.loads((stage / "ws/.claude-plugin/plugin.json").read_text())
+    marketplace = {
+        "name": "kang-sw-devenv",
+        "description": "kang-sw personal devenv plugin marketplace",
+        "owner": {"name": "kang-sw"},
+        "plugins": [{"name": plugin["name"], "version": plugin.get("version"),
+                     "description": plugin.get("description", ""),
+                     "author": plugin.get("author", {"name": "kang-sw"}), "source": "./ws"}],
+    }
+    (stage / ".claude-plugin").mkdir()
+    (stage / ".claude-plugin/marketplace.json").write_text(json.dumps(marketplace, indent=2) + "\n")
+    # Keep the previous tree until the complete new snapshot is in place.
+    ready = stage / "ready"
+    ready.mkdir()
+    for name in ("ws", ".claude-plugin"):
+        (stage / name).rename(ready / name)
+    if cache.exists():
+        cache.rename(backup)
+    try:
+        ready.rename(cache)
+    except BaseException:
+        if backup.exists():
+            backup.rename(cache)
+        raise
+finally:
+    if backup.exists() and not cache.exists():
+        print(f"Snapshot rollback needs recovery from {backup}", file=sys.stderr)
+    else:
+        shutil.rmtree(stage)
+SNAPSHOTEOF
+success "ws plugin snapshot synced"
+
 # Claude Code settings — ensure required config is set
 info "Ensuring Claude Code settings..."
 mkdir -p "$HOME/.claude"
@@ -576,38 +624,6 @@ if changed:
 else:
     print("  \033[90m  ✔ Claude Code claude.json already current\033[0m")
 PYEOF
-
-# ── ws plugin snapshot copy ───────────────────────────────────────────────────
-# Copy agents-plugin/ to a stable cache; Claude Code reads from the cache, not the live repo.
-# Re-run install.sh update after changes.
-info "Syncing ws plugin snapshot to $PLUGIN_CACHE/ws/..."
-mkdir -p "$PLUGIN_CACHE/ws"
-# Remove stale subdirs from earlier layouts (claude/, claude-plugin/)
-rm -rf "$PLUGIN_CACHE/claude" "$PLUGIN_CACHE/claude-plugin" "$PLUGIN_CACHE/wsflow"
-rsync -a --delete "$REPO_DIR/agents-plugin/" "$PLUGIN_CACHE/ws/"
-# Generate marketplace.json that registers ws as a plugin at ./ws
-mkdir -p "$PLUGIN_CACHE/.claude-plugin"
-python3 - "$PLUGIN_CACHE/.claude-plugin/marketplace.json" "$PLUGIN_CACHE/ws/.claude-plugin/plugin.json" <<'MKTEOF'
-import json, sys, os
-mkt_path, plugin_json_path = sys.argv[1], sys.argv[2]
-plugin = json.load(open(plugin_json_path))
-marketplace = {
-    "name": "kang-sw-devenv",
-    "description": "kang-sw personal devenv plugin marketplace",
-    "owner": {"name": "kang-sw"},
-    "plugins": [{
-        "name": plugin["name"],
-        "version": plugin.get("version"),
-        "description": plugin.get("description", ""),
-        "author": plugin.get("author", {"name": "kang-sw"}),
-        "source": "./ws",
-    }],
-}
-with open(mkt_path, "w") as f:
-    json.dump(marketplace, f, indent=2)
-    f.write("\n")
-MKTEOF
-success "ws plugin snapshot synced"
 
 # Pre-register marketplace in known_marketplaces.json so `claude plugin install` can resolve it
 # before Claude Code has had a chance to process extraKnownMarketplaces itself.

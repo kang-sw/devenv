@@ -10,3 +10,9 @@
 
 # Generated single-file Pi extension bundle (scripts/bundle.mjs); review src/ instead.
 agents-plugin-pi/dist/** linguist-generated=true -diff
+
+# Producer-built native Pi closures; review the canonical Pi sources instead.
+agents-plugin/native-pi/manifest.json linguist-generated=true -diff
+agents-plugin-wsflow/native-pi/manifest.json linguist-generated=true -diff
+agents-plugin/native-pi/payload.zip binary linguist-generated=true
+agents-plugin-wsflow/native-pi/payload.zip binary linguist-generated=true

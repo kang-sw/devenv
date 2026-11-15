@@ -15,6 +15,16 @@ fi
 version=${version#v}
 source_commit=$(git -C "$tool_dir" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')
 
+# Node-less consumer gate: prepared closures must match each other and source.
+repo_dir=$(CDPATH= cd -- "$tool_dir/.." && pwd -P)
+for product in agents-plugin agents-plugin-wsflow; do
+  python3 "$repo_dir/$product/bin/ws-pi-payload.py" \
+    --plugin "$repo_dir/$product" --check-source "$repo_dir"
+done
+for artifact in native-pi/manifest.json native-pi/payload.zip bin/ws-pi-payload.py; do
+  cmp "$repo_dir/agents-plugin/$artifact" "$repo_dir/agents-plugin-wsflow/$artifact"
+done
+
 dist_dir=$tool_dir/dist
 rm -rf "$dist_dir"
 mkdir -p "$dist_dir"
