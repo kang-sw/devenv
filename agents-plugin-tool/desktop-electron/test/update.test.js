@@ -207,7 +207,8 @@ test('download verifies the checksum, stages the extracted app, and the quit pat
   } finally { await server.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('the sh helper waits for the app to exit, and restores the old app when the swap fails', async () => {
+// POSIX-only: it runs the /bin/sh helper and waits on /bin/sleep.
+test('the sh helper waits for the app to exit, and restores the old app when the swap fails', { skip: process.platform === 'win32' }, async () => {
   const root = tmp('helper');
   try {
     const script = path.join(root, 'apply.sh');
@@ -254,7 +255,11 @@ test('helper and extraction commands for both platforms', () => {
   assert.deepEqual(u.extractCommand('darwin', '/z.zip', '/d'), ['/usr/bin/ditto', ['-x', '-k', '/z.zip', '/d']]);
   assert.deepEqual(u.extractCommand('win32', 'C:\\z.zip', 'C:\\d', { SystemRoot: 'C:\\Windows' }),
     [path.join('C:\\Windows', 'System32', 'tar.exe'), ['-x', '-f', 'C:\\z.zip', '-C', 'C:\\d']]);
-  assert.equal(u.installLocation('darwin', '/Applications/Werkschaft.app/Contents/MacOS/Werkschaft', true), '/Applications/Werkschaft.app');
+  // The darwin branch resolves with the host's path module, POSIX on a real Mac;
+  // a Windows host would resolve the POSIX fixture to a drive path.
+  if (process.platform !== 'win32') {
+    assert.equal(u.installLocation('darwin', '/Applications/Werkschaft.app/Contents/MacOS/Werkschaft', true), '/Applications/Werkschaft.app');
+  }
   assert.equal(u.installLocation('darwin', '/x/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron', false), null);
   assert.equal(u.installLocation('win32', path.join('C:', 'Apps', 'W', 'Werkschaft.exe'), true), path.join('C:', 'Apps', 'W'));
   assert.match(u.applyProblem('darwin', '/private/var/folders/x/AppTranslocation/y/d/Werkschaft.app', '/u'), /Applications/);
