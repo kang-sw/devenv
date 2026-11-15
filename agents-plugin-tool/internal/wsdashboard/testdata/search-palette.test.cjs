@@ -78,14 +78,10 @@ assert.deepEqual(plain(ctx.qTracker('palette').map(x => x.item)), ['a']);
 assert.deepEqual(plain(ctx.qTracker('').map(x => x.item)), ['c']);
 assert.deepEqual(plain(ctx.qTracker('status:doing').map(x => x.item)), [], 'the tracker slot sends no grammar');
 
-// The strip: sessions, stores, actions; filtered by the query.
-const rows = [{ group: 0, kind: 'session', title: 'other session', href: '/s/other' }, ...ids,
-  { group: 1, kind: 'board-topic', topic: 'pal', title: 'Palette topic', at: 5 }];
-ctx.X.qsActions = () => [{ key: 'support', title: 'Support bundle' }];
-ctx.X.dialogs = { support: {} };
+// Session switching remains in the existing rail, not in the search sheet.
+const rows = [...ids, { group: 1, kind: 'board-topic', topic: 'pal', title: 'Palette topic', at: 5 }];
 qs.rows = rows;
-assert.deepEqual(plain(ctx.qStrip('').map(x => x.kind + ':' + x.title)), ['session:other session', 'store:store', 'store:cold', 'action:Support bundle']);
-assert.deepEqual(plain(ctx.qStrip('suppo').map(x => x.title)), ['Support bundle']);
+assert.equal(ctx.qStrip, undefined, 'the deleted command-strip path is absent');
 
 // Shortcuts: / and the release-gate guard (editors keep Ctrl+K / Ctrl+Space).
 function key(key, extra = {}) { return { key, target: { closest: () => null }, ...extra }; }
@@ -124,8 +120,6 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert(!events.some(x => x[0] === 'modal'), 'search opens without a modal');
   assert.equal(ctx.qIdx(qs.cur), -1, 'opening never arms Enter');
   assert.equal(node('tkqin').value, '');
-  assert.equal(node('tkqscope').hidden, false, 'the scope chip names the root');
-  assert(node('tkqscope').textContent.includes('repo'));
   assert.equal(S().files.state, 'idle', 'no query: async slots idle');
   assert.equal(timers.length, 0);
 
@@ -222,7 +216,7 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   searches.splice(0);
   pend.splice(0);
 
-  // Keys: Tab skips empty slots, Alt+digit by e.code, Alt+0 and Up from the top enter the strip.
+  // Keys: Tab skips empty slots, Alt+1–5 use e.code; deleted strip shortcuts stay absent.
   type('palette'); flush();
   settle('find', { items: [] }); settle('search', { files: [] });
   searches.splice(0).forEach(s => s.done({ ok: true, ids: [], hits: [] }));
@@ -238,15 +232,14 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   const altGr = press('²', { altKey: true, ctrlKey: true, code: 'Digit2' });
   assert.equal(qs.cur, 'tracker', 'AltGr+2 (Ctrl+Alt) types instead of jumping');
   assert(!altGr.prevented);
-  press('º', { altKey: true, code: 'Digit0' });
-  assert.equal(qs.cur, 'jump');
-  press('ArrowDown');
-  assert.equal(qs.cur, 'tracker', 'Down leaves the strip for the view it came from');
+  const altZero = press('º', { altKey: true, code: 'Digit0' });
+  assert.equal(qs.cur, 'tracker');
+  assert(!altZero.prevented, 'Alt+0 no longer routes to a deleted strip');
   press('ArrowUp');
   assert.equal(ctx.qIdx('tracker'), 0, 'the first arrow selects the first row');
   press('ArrowUp');
-  assert.equal(qs.cur, 'jump', 'Up from the first row enters the strip');
-  press('ArrowDown');
+  assert.equal(qs.cur, 'tracker', 'Up at the first row stays in its result slot');
+  assert.equal(ctx.qIdx('tracker'), 0);
   qs.cur = 'board';
 
   // Plain Enter asks only with a nonempty query and an answer hook.
@@ -275,9 +268,6 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert.deepEqual(events.filter(x => x[0] === 'board').pop()[2], { keep: true });
   assert.equal(qs.open, true);
   assert.deepEqual(events[events.length - 1], ['focus', 'tkqin']);
-  ctx.qPickEntry({ slot: 'jump', row: { kind: 'session', title: 'other session', href: '/s/other', row: rows[0] } }, true);
-  assert(events.some(x => x[0] === 'window' && x[1] === '/s/other' && x[2] === '_blank'), 'Ctrl+Enter on a session opens a tab');
-  assert.equal(qs.open, true);
   press('Enter');
   assert.equal(qs.open, false);
   assert.deepEqual(events.filter(x => x[0] === 'board').pop()[2], { keep: false });
@@ -323,7 +313,6 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert.deepEqual(plain(qs.path), { dir: '/tmp/', leaf: 'fo', sep: '/' });
   assert.equal(S().content.state, 'idle', 'path mode pauses content');
   assert.equal(ctx.qState('content'), wsT('js.tk.qs.st.path'));
-  assert(node('tkqscope').textContent.includes(wsT('js.tk.qs.scopepath', '/tmp/')));
   flush();
   assert.deepEqual(plain(calls.filter(c => c[0] !== 'search')), [['list', '/tmp/']]);
   settle('list', { entries: [{ name: 'bar', dir: false }, { name: 'xfoy' }, { name: 'food', dir: true }, { name: 'fo.txt' }, { name: 'fold', link: true }, { name: 'fogone', gone: true }] }); await tick();
@@ -391,13 +380,6 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   ctx.qOpen(); type('');
   ctx.qPickEntry({ slot: 'tracker', row: { store: 'store', item: 'b' } });
   assert(events.some(x => x[0] === 'toast'));
-  ctx.qOpen();
-  ctx.qPickEntry({ slot: 'jump', row: { kind: 'action', key: 'support' } }, true);
-  assert(events.some(x => x[0] === 'dialog' && x[1] === 'support'));
-  assert.equal(qs.open, false, 'strip actions always close');
-  ctx.qOpen();
-  ctx.qPickEntry({ slot: 'jump', row: { kind: 'store', store: 'cold' } });
-  assert.equal(ctx.location.hash, '#/cold');
 
   // The production keyboard handler rejects IME confirmation before qKey.
   const inputKey = block(tracker, "    $('tkqin').addEventListener('keydown'", '    // the caret moved without an edit');

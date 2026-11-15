@@ -22,7 +22,7 @@ func TestSearchPaletteAssets(t *testing.T) {
 	for _, want := range []string{
 		"class: 'tk tk-palette'", "O.searchHost.setOpen(true)", "function qScore(", "function qBoard(",
 		"function qShortcut(", "O.searchRows", "O.searchPick", "e.isComposing || e.keyCode === 229",
-		"O.searchState.load()", "O.searchAsk", "js.tk.qs.sessions", "js.tk.qs.tracker",
+		"O.searchState.load()", "O.searchAsk", "js.tk.qs.tracker",
 		"O.fileFind", "O.fileList", "excerpts: true",
 	} {
 		if !strings.Contains(string(tracker), want) {
@@ -62,6 +62,25 @@ func TestSearchPaletteAssets(t *testing.T) {
 		if !strings.Contains(string(css), want) {
 			t.Errorf("palette CSS lacks %q", want)
 		}
+	}
+}
+
+func TestSearchPaletteChromeDeletions(t *testing.T) {
+	tracker, err := dashboardFS.ReadFile("assets/tracker.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css, err := dashboardFS.ReadFile("assets/tracker.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, removed := range []string{"tkqscope", "tkqjump", "function qStrip(", "function qEnterJump("} {
+		if strings.Contains(string(tracker), removed) {
+			t.Errorf("deleted search chrome/routing remains: %s", removed)
+		}
+	}
+	if !strings.Contains(string(css), "font-size: 13px; height: 26px; padding: 3px 8px;") {
+		t.Error("search input must retain the approved short row")
 	}
 }
 

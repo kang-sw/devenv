@@ -89,18 +89,8 @@
 .tk-palette .tk-qlabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .tk-palette kbd { font-size: 10px; color: var(--wb-muted-fg); font-weight: normal; font-family: var(--wb-mono); padding: 0 4px; border: 1px solid var(--wb-line); border-radius: 4px; }
 .tk .tk-qrow { display: flex; gap: 8px; align-items: center; flex: none; }
-.tk.tk-palette input { box-sizing: border-box; flex: 1 1 auto; min-width: 0; width: 100%; font: inherit; font-size: 13.5px; padding: 6px 9px; border-radius: 9px; border: 1px solid var(--wb-line); background: var(--wb-bg); color: var(--wb-fg); }
+.tk.tk-palette input { box-sizing: border-box; flex: 1 1 auto; min-width: 0; width: 100%; font: inherit; font-size: 13px; height: 26px; padding: 3px 8px; border-radius: 9px; border: 1px solid var(--wb-line); background: var(--wb-bg); color: var(--wb-fg); }
 .tk.tk-palette input:focus { outline: 2px solid var(--wb-primary); outline-offset: 1px; }
-.tk .tk-qscope { flex: 0 1 auto; max-width: 45%; font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--wb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tk .tk-qscope[hidden] { display: none; }
-.tk .tk-qjump { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: none; max-height: 62px; overflow: auto; }
-.tk .tk-qjump[hidden] { display: none; }
-.tk .tk-qjump > kbd { margin-left: auto; }
-.tk .tk-qjl { font-size: 11px; font-weight: 800; color: var(--wb-muted-fg); margin-right: 2px; }
-.tk .tk-qchip { display: inline-flex; align-items: center; gap: 5px; max-width: 280px; font-size: 12px; padding: 2px 9px 2px 3px; border-radius: 999px; border: 1px solid var(--wb-line); background: var(--wb-bg); cursor: pointer; white-space: nowrap; }
-.tk .tk-qchip b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.tk .tk-qchip .muted { font-size: 11px; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.tk .tk-qchip.on { border-color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 18%, var(--wb-bg)); }
 .tk .tk-qtabs { display: flex; gap: 2px; flex: none; border-bottom: 1px solid var(--wb-line); overflow-x: auto; scrollbar-width: none; }
 .tk .tk-qtabs[hidden] { display: none; }
 .tk .tk-qtab { display: flex; align-items: center; gap: 4px; padding: 5px 6px; font-size: 12px; color: var(--wb-muted-fg); border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; user-select: none; }
@@ -148,11 +138,11 @@
 @keyframes palette-flash { from { background-color: color-mix(in srgb, var(--wb-primary) 25%, transparent); } to { background-color: transparent; } }
 @media (prefers-reduced-motion: reduce) { .palette-flash { animation: none; } }
 .tk .qopt { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; min-width: 0; }
-.tk .qopt:hover, .tk .tk-qchip:hover { background: color-mix(in srgb, var(--wb-fg) 6%, transparent); }
+.tk .qopt:hover { background: color-mix(in srgb, var(--wb-fg) 6%, transparent); }
 .tk .qopt.on { background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
 .tk .qopt .qt { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tk .qopt .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-size: 12px; }
-.tk .qopt .qk, .tk .tk-qchip .qk { flex: none; font-size: 11px; font-weight: 700; color: var(--wb-muted-fg); padding: 0 6px; border-radius: 4px; background: var(--wb-muted); }
+.tk .qopt .qk { flex: none; font-size: 11px; font-weight: 700; color: var(--wb-muted-fg); padding: 0 6px; border-radius: 4px; background: var(--wb-muted); }
 .tk .qnone { padding: 10px 8px; font-size: 12.5px; color: var(--wb-muted-fg); }
 .tk .tk-qhint { font-size: 11px; color: var(--wb-muted-fg); padding: 0 2px; flex: none; }
 .tk .tk-qanswer-head, .tk .tk-qanswer-foot { display: flex; align-items: center; gap: 6px; flex: none; padding: 5px 7px; }
