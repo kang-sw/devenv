@@ -718,6 +718,10 @@ func renderSessionRegions(view SessionView, cache *entryCache) (regionSet, error
 	tmpl := a.templateFor(view.Lang)
 	regions := regionSet{regionMode: newRegion(view.Mode())}
 	for _, name := range sessionRegions(view.Mode()) {
+		if name == regionBoard && view.HasBoard && view.BoardUnits != nil {
+			regions[name] = view.BoardUnits.rendered(view.Theme).region
+			continue
+		}
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, "r-"+name, view); err != nil {
 			return nil, fmt.Errorf("dashboard region %s: %w", name, err)

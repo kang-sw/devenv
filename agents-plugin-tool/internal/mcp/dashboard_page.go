@@ -73,6 +73,7 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 		return wsdashboard.PageContent{}, false, fmt.Errorf("render session board failed")
 	}
 	page.Board = board.regions
+	page.BoardUnits = board.units
 	page.Watch = slices.Clone(board.watch)
 	page.WatchPIDs = slices.Clone(board.pids)
 	return page, true, nil
@@ -83,9 +84,11 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 // (PageContent.Watch) and the processes whose liveness it showed
 // (PageContent.WatchPIDs).
 type boardRender struct {
-	regions wswhiteboard.Regions
-	watch   []string
-	pids    []int
+	regions       wswhiteboard.Regions
+	units         *wsdashboard.BoardUnits
+	watch         []string
+	externalWatch []string
+	pids          []int
 }
 
 // boardMemo holds each session's latest board render per language, so a
@@ -99,6 +102,8 @@ type boardMemo struct {
 	entries map[string]boardMemoEntry
 	// renders counts the board renders run (a test probe).
 	renders int
+	// topicRenders is an opt-in test probe; production retains no per-ID counters.
+	topicRenders map[string]int
 }
 
 type boardMemoEntry struct {
@@ -108,6 +113,14 @@ type boardMemoEntry struct {
 	// than this render's: the next read renders again.
 	stampOK bool
 	board   boardRender
+	shared  string
+	topics  map[string]boardTopicMemo
+}
+
+type boardTopicMemo struct {
+	revision string
+	unit     wswhiteboard.TopicUnit
+	watch    []string
 }
 
 // forget drops the renders of session replyID, in every language.
@@ -150,7 +163,32 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 			return prev.board, true
 		}
 	}
-	board, ok := src.renderBoardNow(key, record, replyID, lang)
+	shared := boardMemoSharedBase(key, record, lang, reasked, replyPrint(replies, repliesOK, replyID))
+	if had {
+		shared += boardWatchStamp(prev.board.externalWatch)
+	}
+	topics := map[string]boardTopicMemo{}
+	board, ok := src.renderBoardTopics(key, record, replyID, lang, func(out *boardRender) wswhiteboard.TopicReuse {
+		return func(id, revision string, render func() (wswhiteboard.TopicUnit, error)) (wswhiteboard.TopicUnit, error) {
+			if old, found := prev.topics[id]; found && prev.shared == shared && old.revision == revision {
+				topics[id] = old
+				out.watch = append(out.watch, old.watch...)
+				out.externalWatch = append(out.externalWatch, old.watch...)
+				return old.unit, nil
+			}
+			start := len(out.externalWatch)
+			src.boards.mu.Lock()
+			if src.boards.topicRenders != nil {
+				src.boards.topicRenders[id]++
+			}
+			src.boards.mu.Unlock()
+			unit, err := render()
+			if err == nil {
+				topics[id] = boardTopicMemo{revision: revision, unit: unit, watch: slices.Clone(out.externalWatch[start:])}
+			}
+			return unit, err
+		}
+	})
 	if !ok {
 		return board, false
 	}
@@ -158,7 +196,7 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 	// watch list, so a file changed during the render still misses next
 	// time; it is this render's stamp only when the list did not change.
 	// A first render has none, and the next read renders once more.
-	entry := boardMemoEntry{base: base, board: board, stamp: stamp, stampOK: had && slices.Equal(prev.board.watch, board.watch)}
+	entry := boardMemoEntry{base: base, board: board, stamp: stamp, stampOK: had && slices.Equal(prev.board.watch, board.watch), shared: shared, topics: topics}
 	m.mu.Lock()
 	if _, replaces := m.entries[memoKey]; m.entries == nil || !replaces && len(m.entries) >= boardMemoMax {
 		m.entries = map[string]boardMemoEntry{}
@@ -179,11 +217,20 @@ func (src *DashboardSessionSource) renderBoard(key string, record sessionRecord,
 // page never sets them (servedWhiteboardPanels).
 func boardMemoBase(key string, record sessionRecord, lang string, reasked map[int]int64, replies string) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "seq\x00%d\x00lang\x00%s\x00replies\x00%s\x00", record.Whiteboard.Seq, lang, replies)
+	fmt.Fprint(h, boardMemoSharedBase(key, record, lang, reasked, replies))
+	fmt.Fprintf(h, "seq\x00%d\x00", record.Whiteboard.Seq)
 	// Folder metadata, logs, and panel versions are authoritative inputs too;
 	// equal render sequences must not hide changed on-disk content.
 	board, _ := json.Marshal(record.Whiteboard)
 	h.Write(board)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Shared inputs deliberately exclude the board sequence and folder identities:
+// a commit can rewrite every topic's metadata without changing its view.
+func boardMemoSharedBase(key string, record sessionRecord, lang string, reasked map[int]int64, replies string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "lang\x00%s\x00replies\x00%s\x00", lang, replies)
 	todos, _ := json.Marshal(record.Todos)
 	agenda, _ := json.Marshal(record.Agenda)
 	asked, _ := json.Marshal(reasked)
@@ -210,6 +257,10 @@ func boardWatchStamp(watch []string) string {
 // renderBoardNow renders the board and panels of record under the served
 // page's link rule.
 func (src *DashboardSessionSource) renderBoardNow(key string, record sessionRecord, replyID, lang string) (boardRender, bool) {
+	return src.renderBoardTopics(key, record, replyID, lang, nil)
+}
+
+func (src *DashboardSessionSource) renderBoardTopics(key string, record sessionRecord, replyID, lang string, reuse func(*boardRender) wswhiteboard.TopicReuse) (boardRender, bool) {
 	src.boards.mu.Lock()
 	src.boards.renders++
 	src.boards.mu.Unlock()
@@ -219,9 +270,12 @@ func (src *DashboardSessionSource) renderBoardNow(key string, record sessionReco
 	// The ticket files the panels list, the ticket status directories the
 	// topic badges resolve against, and the images a topic body inlines
 	// change without a nudge, so the page names them (PageContent.Watch).
-	watch := func(path string) { out.watch = append(out.watch, path) }
+	watch := func(path string) {
+		out.watch = append(out.watch, path)
+		out.externalWatch = append(out.externalWatch, path)
+	}
 	folder := whiteboardFolder(record.Root, key).Dir
-	watchWhiteboardFiles(folder, watch)
+	watchWhiteboardFiles(folder, func(path string) { out.watch = append(out.watch, path) })
 	in := servedViewInput(record, replyID)
 	in.Tickets = &whiteboardTickets{root: record.Root, watch: watch}
 	inline := in.DocImageSrc
@@ -240,12 +294,17 @@ func (src *DashboardSessionSource) renderBoardNow(key string, record sessionReco
 	}
 	view := wswhiteboard.BuildView(record.Whiteboard, in)
 	view.Lang = lang
-	regions, err := wswhiteboard.RenderRegions(view)
+	var topicReuse wswhiteboard.TopicReuse
+	if reuse != nil {
+		topicReuse = reuse(&out)
+	}
+	regions, units, err := wswhiteboard.RenderRegionsWithTopics(view, topicReuse)
 	if err != nil {
 		appendDebugEvent("dashboard.page_render_failed", map[string]any{"error": err.Error()})
 		return boardRender{}, false
 	}
 	out.regions = regions
+	out.units = wsdashboard.NewBoardUnits(units)
 	return out, true
 }
 
