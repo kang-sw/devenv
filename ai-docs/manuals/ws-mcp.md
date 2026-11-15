@@ -87,9 +87,9 @@ an unwritten legacy file ages out through the same prune.
 
 Restart every ws process after updating ws, as an install update already
 expects: the session MCP servers (a host restart or MCP reconnect) and the
-dashboard daemon (the next launcher start of a newer build replaces it, or
-`POST /shutdown`). An older ws-mcp knows only `keys/`, so once a newer one has
-moved a session, the older one reports that key unknown. Downgrading loses
+dashboard daemon (a newer numeric core replaces it; an equal-core build
+requires explicit `daemon-start --replace`, or `POST /shutdown` then startup).
+An older ws-mcp knows only `keys/`, so once a newer one has moved a session, the older one reports that key unknown. Downgrading loses
 sight of moved sessions the same way; session keys are cache state, so a
 fresh key is the recovery.
 
@@ -1043,16 +1043,14 @@ then carry, so no rendered URL holds it. `/health` reports the mode as `lan`,
 and the daemon re-reads the global value when a session connects: a value
 that differs from its own mode replaces it through the drain path below.
 
-At an equal version the newer build wins: `/health` reports `build_time` (the
-plugin's runtime binary's mtime in Unix milliseconds, which the launcher
-passes to `daemon-start --build-time` and the daemon receives as `dashboard
---build-time`), and a launcher whose build time is newer than the daemon's
-(a daemon that omits it counts as older) replaces it; an older or unknown
-build time never does, so builds of one version side by side leave each
-other's newer daemon alone. A rebuilt dev binary therefore replaces the
-running daemon at the next session start. To force a restart anyway, `POST
-/shutdown` with `Authorization: Bearer <token from endpoint.json>`; the next
-session start brings a new one.
+At an equal numeric core, ordinary connection keeps the healthy daemon
+regardless of version suffix, build time or content hash. `/health` retains
+`build_time` and `content_hash` as identity, not automatic swap authority.
+`daemon-start --replace` explicitly drains an equal-core daemon once, including
+identical content; a newer numeric core stays protected against downgrade.
+The existing LAN-mode change still drains an equal-core daemon. In local
+development, `python3 scripts/dev.py rerun daemon` owns explicit build+swap
+and passes `--replace` with `--build-time` to its newly built staged binary.
 
 A daemon asked to stop (a replacement, or `/shutdown`) drains: it closes its
 listener at once, so the successor can take the lock and the port, refuses
@@ -1223,14 +1221,12 @@ Finding and starting the daemon (`DaemonLink` in the launcher):
    answers is diagnosed as hung without starting a second server. A missing
    health route or version field falls back to the existing `/mcp` hello's
    returned version, not to executable inspection.
-3. The daemon is started, or replaced, only when none answers, the running
-   one's version is older than the plugin's (`runtime.json`
-   `plugin_version`), or equal with an older `build_time` than the runtime
-   binary's mtime *and* a different `content_hash`: the same bytes never
-   replace a daemon whatever their mtime (Claude, Codex, and Pi each
-   install their own copy of one binary, and a replacement drains every
-   session on the machine), so build time breaks the tie only between
-   different builds (`keepRunning` in Go, `needs_start` in the launcher).
+3. Ordinary startup starts an absent daemon or replaces an older numeric
+   core using the selected runtime. Equal cores keep the healthy daemon,
+   regardless of suffix, timestamp or hash (`keepRunning` in Go,
+   `needs_start` in Python). Explicit `daemon-start --replace` bypasses the
+   launcher's lifecycle keep shortcut and requests one equal-core swap;
+   Go consumes that request before checking the successor.
    The launcher copies the runtime binary to
    `<daemon dir>/bin/ws-mcp-dashboard-<sha256[:16]><ext>` (the name
    `StageExecutable` produces) and runs `<staged> daemon-start --build-time
@@ -1511,9 +1507,8 @@ paths run checks without publishing.
 Local development has one repository-specific repair exception. The
 gitignored `.local-devenv-runtime` marker in the plugin directory is the only
 opt-in: with no marker the launcher takes the normal release path whatever the
-plugin's location. With a valid contract, the launcher forces local runtime
-repair before accepting an already compatible cache-local binary when the
-plugin runs from a per-user host plugin tree (`~/.codex/plugins/cache/kang-sw-devenv/<ws|wsflow>/`,
+plugin's location. A valid contract selects source repair for a missing or
+incompatible runtime when the plugin runs from a per-user host plugin tree (`~/.codex/plugins/cache/kang-sw-devenv/<ws|wsflow>/`,
 `~/.claude/plugins/cache/kang-sw-devenv/<ws|wsflow>/`, or the install.sh
 snapshot under `~/.claude/plugins/ws-plugin/<ws|wsflow>/`), or straight from
 its source checkout, i.e. when the plugin directory lies inside the marker's own
@@ -1543,10 +1538,13 @@ environment with `HOME` recovered on POSIX and `USERPROFILE`/`LOCALAPPDATA`
 recovered on Windows so `go build` resolves its module/build caches under a
 sanitized launch env.
 
-When the contract is valid, the forced local path builds
-`<tool_dir>/cmd/ws-mcp` with the declared Go executable first so pre-release
-dogfood exercises the current checkout. Non-forced repair may copy a local
-runtime binary from `<tool_dir>/dist/` or the contract-addressed
+When the contract is valid, ordinary startup reuses a hash-bound compatible
+runtime even when its source fingerprint is stale. A stale or missing source
+stamp emits one stderr advisory pointing at `python3 scripts/dev.py rerun daemon`;
+reuse leaves the old fingerprint intact. Missing or incompatible runtimes still
+build `<tool_dir>/cmd/ws-mcp` with the declared Go executable. Explicit bootstrap
+binary/URL overrides retain their installation semantics. Non-forced repair may
+copy a local runtime binary from `<tool_dir>/dist/` or the contract-addressed
 `<source_root>/agents-plugin/.runtime/<os>-<arch>/ws-mcp-<plugin-version>-<runtime-json-sha12>`
 path before building. Legacy fixed-name source-cache binaries such as
 `agents-plugin/.runtime/darwin-arm64/ws-mcp` are not local repair candidates.
@@ -1587,11 +1585,15 @@ copy it into the plugin cache:
 
 2. Run `./install.sh update`. The `rsync` step copies the marker into the
    plugin snapshot and `claude plugin install` carries it into the versioned
-   cache, so the next MCP launch source-builds the current checkout.
+   cache, so the next MCP launch can build when no compatible runtime exists.
 
-After setup, editing the Go source and reconnecting the MCP server is enough to
-pick up changes — no rebuild-and-stage step. To disable, delete the marker and
-re-run `install.sh update` (the launcher reverts to the cache/release path).
+After setup, edit source and run `python3 scripts/dev.py rerun daemon` at the
+coordinated swap time to build, stage and seed the selected runtime. Reconnecting
+alone reuses it and reports source drift. Pi lead/fork startup follows the same
+reuse policy; its separate child contract-drift guard still rebuilds on a changed
+`runtime.json`. Worker/explore startup remains build-free. To disable local
+mode, delete the marker and re-run `install.sh update` (the launcher reverts to
+the cache/release path).
 
 This path exists only for the repository-local Codex or Claude plugin
 development loop. The marker file is gitignored and should not exist in normal

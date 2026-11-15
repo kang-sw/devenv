@@ -544,9 +544,8 @@ def runtime_install_forced(plugin_dir: Path, os_name: str, *, local_enabled: boo
 
 
 def local_devenv_source_fingerprint(plugin_dir: Path, os_name: str) -> str | None:
-    # Fingerprint the local ws-mcp source tree so an unchanged tree can reuse the
-    # cached runtime binary instead of forcing a `go build` on every launch (the
-    # forced rebuild blew past the MCP startup timeout on cold caches). Uses stat
+    # Fingerprint source drift for an advisory, not permission to rebuild a
+    # usable selected runtime. Uses stat
     # metadata only (no file reads) to stay cheap on the startup path. Every
     # regular file under tool_dir counts, so //go:embed inputs (assets, i18n
     # tables, embedded rsrc) are covered without parsing embed patterns; test
@@ -1347,30 +1346,13 @@ class DaemonLink:
             time.sleep(0.2)
 
     def needs_start(self, health: dict) -> bool:
-        """Older daemon, or the same version from an older build of other content.
+        """Only an older numeric core authorizes ordinary replacement.
 
-        Same version and same content hash never replace: Claude, Codex, and
-        Pi each install their own copy of one binary, whose mtimes differ,
-        and a replacement drains every session on the machine. The build time
-        breaks the tie only when the hashes differ (or the daemon reports
-        none).
-
-        An equal numeric core counts as the same version whatever the
-        suffixes: runtime_version is the contract's plugin_version
-        ("0.48.17"), while a local-devenv build reports "0.48.17-dev", so
-        the suffix order would hide every rebuild at that core.
+        Equal cores stay regardless of suffix, timestamp or content hash.
+        Explicit replacement is handled by daemon-start, not this shortcut.
         """
         version = str(health.get("version", ""))
-        order = compare_daemon_versions(version, self.binary_version)
-        if order != 0 and not same_core(version, self.binary_version):
-            return order < 0
-        build_time = health.get("build_time")
-        if not (isinstance(build_time, int) and 0 < self.build_time and build_time < self.build_time):
-            return False
-        content_hash = health.get("content_hash")
-        if isinstance(content_hash, str) and content_hash and content_hash == self.content_hash():
-            return False
-        return True
+        return not same_core(version, self.binary_version) and compare_daemon_versions(version, self.binary_version) < 0
 
     def start_daemon(self) -> bool:
         """Run the staged binary's daemon-start entry; True when it reports a daemon."""
@@ -1447,10 +1429,8 @@ class DaemonLink:
             if self.needs_start(health) and compare_daemon_versions(str(health.get("version", "")), self.binary_version) <= 0:
                 # daemon-start reported a daemon, but the one answering is
                 # still the older one (it refused to stop, or won the lock
-                # race): never settle on it. A same-core daemon whose suffix
-                # sorts after runtime_version is one daemon-start keeps by
-                # design (wsdashboard.keepRunning: a release binary never
-                # replaces a "-dev" daemon of its core), so it is used.
+                # race): never settle on an older numeric core. Equal-core
+                # successors are deliberately retained regardless of build.
                 raise DaemonUnavailable(f"daemon {health.get('version', '')} (build {health.get('build_time', 0)}) is older than this plugin's runtime and was not replaced")
         version = str(health.get("version", ""))
         if not same_minor(version, self.runtime_version):
@@ -1896,11 +1876,13 @@ def main() -> int:
         pass
     elif compatibility_stamp_current(binary, contract, contract_path, runtime_dir, source_fingerprint):
         pass
-    elif install_forced and local_enabled:
-        note("local devenv source changed or runtime missing; rebuilding from source")
-        need_install = True
     elif runtime_fully_compatible(binary, contract, runtime_dir, allow_same_minor=local_enabled):
-        write_compatibility_stamp(binary, contract, contract_path, runtime_dir, source_fingerprint)
+        if local_enabled:
+            # A compatibility check is not a source build. Keep the old stamp's
+            # fingerprint so stale bytes are never recorded as current source.
+            print("ws-mcp-launcher: reusing compatible local runtime; a newer source build is available via python3 scripts/dev.py rerun daemon", file=sys.stderr, flush=True)
+        else:
+            write_compatibility_stamp(binary, contract, contract_path, runtime_dir)
     else:
         need_install = True
 
@@ -1930,7 +1912,8 @@ def main() -> int:
         # An explicit bootstrap+version repairs a child runtime but never starts it.
         return inspect_runtime(link, argv, None)
     if mode == "lifecycle":
-        if health is not None and not link.needs_start(health):
+        explicit_replace = any(arg in {"--replace", "-replace", "--replace=true", "-replace=true"} for arg in argv[1:])
+        if health is not None and not explicit_replace and not link.needs_start(health):
             print(json.dumps(dict(health, outcome="kept")))
             return 0
         if read_runtime_metadata(binary) is None:

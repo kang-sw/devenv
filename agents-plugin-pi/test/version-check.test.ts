@@ -160,6 +160,13 @@ describe("agents-plugin-pi hand-synced mirror (260906)", () => {
     );
   });
 
+  test("wsflow launcher is byte-identical to the shared ws/Pi launcher", () => {
+    assert.equal(
+      readFileSync(join(testDir, "..", "..", "agents-plugin-wsflow", "bin", "ws-mcp-launcher.py"), "utf8"),
+      readFileSync(sourceLauncher, "utf8"),
+    );
+  });
+
   test("compareTrees names a drifted file", () => {
     const base = mkdtempSync(join(tmpdir(), "ws-mirror-"));
     try {

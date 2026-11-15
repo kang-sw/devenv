@@ -351,17 +351,22 @@ func daemonStartLAN(applies, settingsLAN bool, running func() (lan, ok bool), gl
 // daemonStart is the entry the launcher runs from the staged daemon binary
 // when no daemon answers, or the running one is older: it resolves the
 // dashboard settings from the launcher's environment and configuration as
-// serve does, and runs the Ensure handoff (a daemon as new or newer stays;
-// an older one, or one in the other LAN mode, is replaced). The dashboard
+// serve does, and runs the Ensure handoff (equal cores stay unless --replace
+// or a LAN change requests a swap; newer cores stay protected). The dashboard
 // key's own value does not gate it: the daemon always hosts the MCP
 // sessions, and only each session's listing follows the key. A starter the
 // dashboard does not apply to does not decide the LAN mode
 // (daemonStartLAN). It prints the
 // outcome as one JSON line and exits non-zero only when no daemon came up.
 func daemonStart(args []string) {
+	daemonStartWithEnsure(args, wsdashboard.Ensure)
+}
+
+func daemonStartWithEnsure(args []string, ensure func(context.Context, wsdashboard.EnsureOptions) (wsdashboard.Outcome, error)) {
 	fs := flag.NewFlagSet("daemon-start", flag.ExitOnError)
 	buildTime := fs.Int64("build-time", 0, "the build time of the ws-mcp this daemon stands for, in Unix milliseconds; 0 reads this executable's modification time")
 	startWait := fs.Duration("start-wait", 0, "how long to wait for a started daemon; 0 means the default")
+	replace := fs.Bool("replace", false, "explicitly replace an equal-core daemon once, even with identical content; never downgrade a newer core")
 	_ = fs.Parse(args)
 
 	server := mcp.NewServer(defaultRoot("."), version, sourceCommit)
@@ -396,11 +401,12 @@ func daemonStart(args []string) {
 		*buildTime = wsdashboard.ExecutableBuildTime(exe)
 	}
 	spawn := func(args []string) error { return wsdashboard.SpawnDetached(exe, args, dir) }
-	outcome, err := wsdashboard.Ensure(ctx, wsdashboard.EnsureOptions{
+	outcome, err := ensure(ctx, wsdashboard.EnsureOptions{
 		Dir:         dir,
 		Version:     version,
 		BuildTime:   *buildTime,
 		ContentHash: wsdashboard.ExecutableContentHash(exe),
+		Replace:     *replace,
 		Port:        settings.Port,
 		LAN:         lan,
 		Spawn:       spawn,
