@@ -61,7 +61,14 @@ func (s *Server) resolveSession(in sessionAccess) (sessionContext, error) {
 		out.transient = transient
 		return out, nil
 	}
-	in.key, in.parent = strings.TrimSpace(in.key), strings.TrimSpace(in.parent)
+	// Preserve each adoption caller's normalization. Mint used the store
+	// directly, which keeps the caller-selected parent byte-for-byte.
+	switch in.mode {
+	case "bootstrap", "relogin":
+		in.key, in.parent = strings.TrimSpace(in.key), strings.TrimSpace(in.parent)
+	case "manual", "lookup":
+		in.key = strings.TrimSpace(in.key)
+	}
 	hosted := s.hostedSessionKey() // validates registration.host_pid once
 	switch in.mode {
 	case "bootstrap":
