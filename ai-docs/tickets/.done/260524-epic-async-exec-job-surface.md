@@ -6,6 +6,7 @@ related-mental-model:
   - mcp-runtime
   - named-agent-runtime
   - plugin-runtime
+completed: 2026-11-15
 ---
 
 # Async exec job surface
@@ -90,3 +91,8 @@ The epic owns decomposition for:
 - Dropped: the repo chooses not to expose arbitrary execution through ws MCP.
 - Deferred: dashboard or harness integrations may remain outside this epic when
   they only consume the exec job surface.
+
+
+## Resolution (2026-11-15)
+
+Closed in the 2026-11-15 todo triage (owner approved (1119)=a): every child ticket is in .done or .dropped.

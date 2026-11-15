@@ -2,6 +2,7 @@
 title: "Dashboard visibility of a session's background tasks (background shells, monitors): what Claude Code and Pi expose, and how to show 'N background tasks'"
 related:
   261110-epic-ws-dashboard-agent-host: "daemon-hosted sessions would own their background tasks directly"
+completed: 2026-11-15
 ---
 
 # Dashboard visibility of background tasks
@@ -79,3 +80,8 @@ them.
 
 ### Rejected Alternatives
 - None yet.
+
+
+## Resolution (2026-11-15)
+
+Closed in the 2026-11-15 todo triage (owner approved (1119)=a): implemented by 261112-feat-ws-dashboard-lead-wake-events (fd75fe2f9 adds background and monitor counts).

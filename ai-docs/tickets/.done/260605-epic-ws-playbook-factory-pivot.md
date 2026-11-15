@@ -6,6 +6,7 @@ related:
   260521-research-libws-harness-agent-substrate: deprioritized by this pivot (dropped .dropped)
   260523-bug-ws-mcp-launcher-runtime-repair-race: prerequisite — binary/text swap race for rsrc distribution
   260524-bug-codex-plugin-cache-refresh-mcp-startup-race: prerequisite — plugin cache refresh race for rsrc distribution
+completed: 2026-11-15
 ---
 
 # ws playbook-factory pivot — spawn removal and native-subagent convergence
@@ -263,3 +264,8 @@ subagents. Direction, decisions, and evidence live in
   convergence is no longer an open-ended non-scope item; it is deferred
   specifically to the post-M4 child
   `260616-refactor-wsflow-product-mode-convergence`.
+
+
+## Resolution (2026-11-15)
+
+Closed in the 2026-11-15 todo triage (owner approved (1119)=a): every child ticket is in .done or .dropped; follow-up carried by 260909-research-ws-refoundation-evidence-audit.

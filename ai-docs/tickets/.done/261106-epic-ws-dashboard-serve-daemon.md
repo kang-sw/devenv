@@ -7,6 +7,7 @@ related:
   260513-research-streamable-http-mcp-transport: context; that idea replaces the MCP transport, which this epic leaves on stdio (168)
   260514-epic-ws-web-dashboard-mvp: history; dropped IDE-scale web dashboard (terminal, file explorer) whose daemon lifecycle bugs (f55de2d62, bff07cafb, e6caac0dc) inform this epic's lifecycle decisions
 sage-review-design-reviewed: 38252f25fce83e80
+completed: 2026-11-15
 ---
 
 # ws dashboard serve daemon - live multi-session dashboard and subagent monitoring
@@ -489,3 +490,8 @@ with browser interaction folded into the core.
 | 4 | Daemon exit, replacement handoff, and cross-version tolerance are unstated | minor | autonomous |
 | 5 | No join key from a conversation mail line to its mailbox history entry | minor | autonomous |
 | 6 | Peer rows need dedupe and handling of rebinding | minor | autonomous |
+
+
+## Resolution (2026-11-15)
+
+Closed in the 2026-11-15 todo triage (owner approved (1119)=a): children daemon-core, claude-adapter, live-snapshot-pi and browser-interaction are all in .done.
