@@ -310,3 +310,39 @@ Verification:
   `W-step0-expanded-dark.png`, `W-step0-light.png`; header style
   `A-final-dark.png`). W is the reference for the look, not a pixel gate; no
   screenshot matrix or capture-comparison round is required of the worker.
+
+### Result (15e44e235) - 2026-11-15
+
+- VERIFIED: Phase 1 now renders a single event-ordered timeline with permanent
+  question/answer anchors, preceding reports, re-ask clocks, converted-item
+  controls, current state and latest-batch visibility. Other entries remain in
+  inert gaps; directional loading includes the item crossing 1000px and never
+  evicts admitted rows. Panel versions and the dependency clock remain intact.
+- VERIFIED: Commit-time attribution writes only optional Entry metadata (T0),
+  including activation/floor persistence, id-set exclusion, parser-cleaned
+  excerpts and newest matching answer-chip times. Existing folder schema and
+  MCP/HTTP surfaces are unchanged; archived schema-2 append and pending-recovery
+  regressions retain the added metadata.
+- Decisions: retain the existing complete EntryPage projection for panel/frame
+  preparation and derive the anchor/gap projection over all its chunks. A gap
+  target loads forward from itself, then backward from its nearest prefix if
+  needed to fill the window. Check-pill folding/lifting retains the real controls
+  at individual timeline positions with spacers. All insertion/navigation uses
+  the landed per-scroller owner; its implementation remains unchanged.
+- VERIFIED verification: full `go test ./internal/wswhiteboard -count=1` has
+  exactly the six pre-edit baseline failures and no additional failing tests.
+  Focused `TestTimeline.*` and `TestHistoryScript.*` pass. Full `wsinbox` and
+  `wsi18n` packages pass. Named MCP input/stream/publication/conversion tests and
+  dashboard board-frame/history/bridge/nudge-predicate tests pass. The named CSS
+  collision test retains its four existing collisions. JavaScript syntax checks
+  pass; the Node asset-split suite passes four tests and skips the opt-in pin.
+- VERIFIED: populated embed size is 256,914 bytes versus 255,787 before the
+  change (+1,127 bytes); its existing budget failure remains unresolved.
+- Unresolved: the baseline failures/collisions remain outside this feature;
+  independent lite review is lead-owned, and visual fit is INFERRED pending the
+  owner's post-merge W/A reference check. The informational lease acquisition was
+  refused because the existing develop track holds it; no override was used.
+- Omitted by owner override: child agents, worker independent review, browsers,
+  screenshots, daemon launches, full-dashboard testing, merge and push. Work
+  remains on `exec4/timeline-impl`; the ticket is deliberately left in `ready/`
+  without closure or movement.
