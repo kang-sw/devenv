@@ -506,17 +506,7 @@
       "registered_at": "2026-11-14T13:05:40Z"
     },
     "261115-bug-launcher-proxy-tests-read-root-devenv-marker": {
-      "registered_at": "2026-11-15T05:28:26Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T08:53:01Z",
-        "impl": {
-          "branch": "impl/develop/rely-amiss-next"
-        }
-      }
+      "registered_at": "2026-11-15T05:28:26Z"
     },
     "261115-bug-live-summary-registration-fixture-init": {
       "registered_at": "2026-11-15T02:41:33Z"
