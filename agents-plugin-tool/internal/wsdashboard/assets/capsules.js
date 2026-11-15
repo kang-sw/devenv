@@ -206,6 +206,15 @@
       offsets(); notify();
     });
     editor.addEventListener("compositionstart", function () { composing = true; field.dispatchEvent(new Event("compositionstart")); });
+    // compositionupdate fires before the DOM shows the new text, and an IME
+    // may send no input event: read the live text after it, then forward.
+    editor.addEventListener("compositionupdate", function () {
+      setTimeout(function () {
+        if (!composing) return;
+        var state = read(editor); text = state.text; ranges = state.ranges; offsets();
+        field.dispatchEvent(new Event("compositionupdate"));
+      }, 0);
+    });
     editor.addEventListener("compositionend", function () { composing = false; field.dispatchEvent(new Event("compositionend")); });
     ["keydown", "keyup"].forEach(function (type) {
       editor.addEventListener(type, function (e) {

@@ -68,6 +68,31 @@ const assets = path.join(__dirname, '../assets');
     await cdp.send('Input.insertText', { text: '오버뷰' });
     await ime.keyboard.press('Tab');
     assert.deepEqual(await ime.evaluate(() => document.getElementById('text').wsc.snapshot().map(r => r.id)), ['current-work-overview']);
+    // An IME that sends no input events and marks the whole composition as
+    // selected: only composition events plus DOM mutation arrive.
+    const raw = await browser.newPage();
+    await raw.route('**/*', route => route.abort());
+    await raw.setContent('<div class="composer"><textarea id="text"></textarea></div>');
+    await raw.evaluate(() => { window.wsT = key => key; });
+    await raw.addScriptTag({ content: fs.readFileSync(path.join(assets, 'mention.js'), 'utf8') });
+    await raw.addScriptTag({ content: fs.readFileSync(path.join(assets, 'capsules.js'), 'utf8') });
+    await raw.evaluate(() => {
+      const field = document.getElementById('text');
+      WsCapsules.topicPicker(field, done => done([{ id: 'ov', label: '현재 작업 상태 오버뷰' }, { id: 'ot', label: 'Other' }]));
+      field.focus();
+    });
+    await raw.keyboard.type('#');
+    await raw.evaluate(() => {
+      const ed = document.getElementById('text').wsc.editor;
+      ed.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      ed.firstChild.nodeValue = '#오버';
+      const r = document.createRange(); r.setStart(ed.firstChild, 1); r.setEnd(ed.firstChild, 3);
+      getSelection().removeAllRanges(); getSelection().addRange(r);
+      ed.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data: '오버' }));
+    });
+    await raw.waitForFunction(() => document.querySelectorAll('.wsm-pop:not([hidden]) .wsm-opt').length === 1, null, { timeout: 3000 });
+    assert.deepEqual(await raw.locator('.wsm-pop:not([hidden]) .wsm-opt .wsm-name').allTextContents(), ['현재 작업 상태 오버뷰']);
+    console.log('capsules: topic popup follows composition events without input events or a collapsed caret');
     console.log('capsules: topic popup opens while a Hangul syllable is still composing, NFC/NFD-insensitive');
   } finally {
     await browser.close();
