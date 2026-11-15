@@ -10,6 +10,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 9ab4663e26f2a0ce
 sage-review-completeness-reviewed: 9ab4663e26f2a0ce
+completed: 2026-11-15
 ---
 
 # Pi non-main processes mint top-level lead keys and appear as dashboard root rows
