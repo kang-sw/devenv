@@ -471,3 +471,78 @@ manifests and immutable local archives remain, as do all ten original untracked
 artifacts and approved-001 evidence. Preserve the dirty worktree/artifacts before
 release. Further execution requires MAIN disposition; final lead-owned sync of
 `1612e099c` is still pending. Phase 1 has no Result and the ticket remains ready.
+
+## Owner Disposition (887)=a — 2026-11-15 (incomplete)
+
+MAIN relayed owner authorization (887)=a at 02:36:53. It supersedes the earlier
+004 stop only for this bounded landing path; it does not change the product
+contract or authorize a browser-fixture repair. Historical checkpoints and the
+Phase 1 plan above remain unchanged.
+
+**Browser geometry:** not run (setup positioning precondition failed at 004, 32px residual; not a product finding)
+
+**VERIFIED evidence:** The retained baseline-558/result-d040 batch
+`ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/approved-004/`
+records five passing setup checks followed by the failed baseline positioning
+check: target offset 66 px versus actual 34 px, a -32 px residual
+(`results.json:345-382`; `driver.cjs:138-150`; raw failure in `browser.txt`).
+`observations` is empty and result scenarios were not reached. Its
+`manifest.json`, `cleanup.json` and `browser-cleanup.json` record browser exit 1,
+both fixture final exits 0, empty scoped final process/error lists and no outer
+cleanup signals. These observations establish neither a product regression nor
+its root cause. The matching four-step compile/vet preflight passed, as recorded
+in `browser-approved/preflight-004/manifest.json` and `freeze-004.json`; it was
+not a focused-test execution or a browser-geometry result.
+
+**Authorized landing conditions:** Focused unit and integration tests must pass,
+followed by fresh independent lite review. The lead then merges the new gate
+`55b50bd53` into retained `impl/develop/bling-fog-scorn`, followed by the focused
+re-run before handing the resulting head to MAIN. This gate replaces earlier
+final-sync advisories; the worker does not self-merge or repin historical browser
+evidence. The owner verifies on screen after MAIN's merge and runtime swap.
+This replaces the earlier pending browser-repair and matching automated-capture
+landing requirement only; do not report automated browser acceptance.
+
+**Current scope:** First resume is static/document-only: append this disposition
+and submit exact focused selectors, commands, private offline environment, caps,
+owned-cleanup and evidence/commit plan for the lead's batch gate. No test, build,
+vet execution or commit is authorized at this stage. No 005 or other browser run,
+product/harness repair, shared-daemon/provider/real-holder action, dependency
+installation, retry, self-merge or closure is authorized. Preserve all 61 existing
+untracked evidence entries, including every prior, preflight-004 and approved-004
+artifact. Phase 1 remains incomplete without a Result.
+
+## Focused Pre-sync Checkpoint — 2026-11-15 (incomplete)
+
+MAIN's subsequent batch gate authorized one pre-sync focused run at
+`d040b74164bebc463d9d473ee5f78230fc6535c5`, then documentation/evidence commit
+and fresh independent one-pass lite review only if green. This lifts the
+static-only restriction above for those steps, not for sync or browser work.
+
+**VERIFIED current focused evidence:** The exact approved selectors ran four
+whiteboard unit/history tests and seventeen dashboard tests, including the
+private SSE/WebSocket integration; all 21 actually ran and passed, with no skips.
+Both commands exited 0. Their complete raw outputs were read: whiteboard reported
+1.084 seconds and dashboard 11.502 seconds. The batch completed in 27.748 seconds
+including cleanup, within 120 seconds per command, 90-second Go test timeouts,
+and 300 seconds overall including a 30-second cleanup reserve. No separate build
+or vet command ran beyond Go's normal work inside the two approved test commands.
+
+Exact commands, complete isolated/offline environment, raw logs, source/tool
+hashes, expected/actual pass sets and full owned-cleanup evidence are retained at
+`ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/`:
+`README.md`, `manifest.json`, `whiteboard.txt`, `dashboard.txt`,
+`source-hashes.json` and `cleanup.json`. The complete cleanup receipt was read;
+per-command and final scoped process lists, errors and cleanup actions are empty.
+No unexpected provider process was detected in the scoped observations; complete
+runtime isolation or a global negative audit is not claimed. Source bytes stayed
+unchanged and all 61 previously protected untracked status entries remained
+present. Binaries, private caches and protected prior evidence are not staged.
+
+**Browser geometry:** not run (setup positioning precondition failed at 004, 32px residual; not a product finding)
+
+Fresh independent lite review remains pending at this checkpoint. The lead alone
+merges `55b50bd53` into the retained impl branch and issues the next focused
+re-run gate before MAIN handoff. No product/harness repair, retry, 005 or other
+browser, shared-runtime action, sync, post-sync test, Phase Result or closure
+is claimed or authorized by this checkpoint.
