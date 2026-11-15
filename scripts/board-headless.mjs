@@ -1237,18 +1237,22 @@ async function scenarioSharedControls(ctx) {
   });
   const shape = await bodyShape();
   qa(shape.div && !shape.summary && !shape.paddingMarker && shape.visible && shape.title && !shape.tickets && shape.state, 'dashboard body is visible div.tdoc without content-only disclosure or reserved padding; title/state remain without ticket slot', shape);
-  const history = page.locator(topic + ' details.topic-stream');
-  assert(await history.count() === 1, 'renderer supplies independent history disclosure');
-  if (!await history.evaluate((d) => d.open)) await history.locator(':scope > summary').click();
+  // History is always shown: a plain container, never a disclosure.
+  const stream = await page.locator(topic).evaluate((t) => {
+    const s = [...t.querySelectorAll('.topic-stream')];
+    return { count: s.length, tag: s[0]?.tagName, summary: !!s[0]?.querySelector(':scope > summary, :scope > .wb-history > summary'),
+      history: !!s[0]?.querySelector(':scope > .wb-history'), visible: !!s[0] && s[0].getBoundingClientRect().height > 0 };
+  });
+  qa(stream.count === 1 && stream.tag !== 'DETAILS' && !stream.summary && stream.history && stream.visible, 'history is one always-shown non-details .topic-stream without a summary', stream);
   const panels = page.locator(topic + ' details.entry-panel');
   assert(await panels.count() >= 2, 'renderer supplies independent panels');
   if (!await panels.nth(0).evaluate((d) => d.open)) await panels.nth(0).locator(':scope > summary').click();
   if (await panels.nth(1).evaluate((d) => d.open)) await panels.nth(1).locator(':scope > summary').click();
-  await history.locator(':scope > summary').click();
-  qa(!await history.evaluate((d) => d.open), 'history summary remains independently usable');
-  await history.locator(':scope > summary').click();
-  qa(await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'history toggle preserves independently open/closed panels');
-  const disclosures = () => page.locator(topic).evaluate((t) => [...t.querySelectorAll('details.topic-stream,details.entry-panel')].map((d) => [d.getAttribute('data-key'), d.open]));
+  await panels.nth(0).locator(':scope > summary').click();
+  qa(!await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'panel summary remains independently usable');
+  await panels.nth(0).locator(':scope > summary').click();
+  qa(await panels.nth(0).evaluate((d) => d.open) && !await panels.nth(1).evaluate((d) => d.open), 'panel toggle preserves independently open/closed panels');
+  const disclosures = () => page.locator(topic).evaluate((t) => [...t.querySelectorAll('details.entry-panel')].map((d) => [d.getAttribute('data-key'), d.open]));
   const inner = await disclosures();
   await page.locator(topic + ' a[data-wl="file"][data-rel="docs/a.md"]').first().click();
   await page.waitForSelector('.bcard[data-kind="preview"] .pv-md');
@@ -2886,9 +2890,14 @@ const HISTORY_PAGE = () => {
       capsules: [...document.querySelectorAll('.wb-cap')].filter((n) => !n.hidden && n.getClientRects().length).map((n) => ({ cls: n.className, rect: rect(n) })),
       keeping: !!keep, targetOffsetObserved: node && node.getBoundingClientRect().top - bh.viewTop(s), scrollTop: s.scrollTop };
   };
+  // The clip lands 100px below the view top, but never so low that HISTORY's
+  // own top drops into view: a sliver of the preceding topic left in view
+  // would anchor the view, so its growth (and HISTORY's) could push HISTORY
+  // out. The clip's offset within its topic follows the history header.
   bh.positionHistory = () => {
-    const s = bh.scroller(), r = bh.history().querySelector('.history-clip').getBoundingClientRect();
-    s.scrollTop += r.top - bh.viewTop(s) - 100;
+    const s = bh.scroller(), h = bh.history(), r = h.querySelector('.history-clip').getBoundingClientRect();
+    const head = r.top - h.closest('.topic').getBoundingClientRect().top;
+    s.scrollTop += r.top - bh.viewTop(s) - Math.min(100, head);
   };
 };
 
@@ -3098,6 +3107,7 @@ async function scenarioHistory(ctx) {
       bh.startSampler([name]);
       return { below: topic.getBoundingClientRect().top >= bh.viewBottom(s), before };
     }, prior);
+    measure('below-collapse-start', belowCollapse);
     assert(belowCollapse.below && belowCollapse.before.steps === 2, 'below-collapse fixture was not expanded below the viewport');
     await page.waitForFunction(() => window.__bh.history()._wbHistorySteps === 1, null, { timeout: 3000 });
     await sleep(160);
@@ -3415,7 +3425,8 @@ async function scenarioHistoryRegressions(ctx) {
         const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
         return { expected: node === bh.foldTab.summary, boundary: h._wbHistoryChunks.at(-1), steps: h._wbHistorySteps,
           top: r.top, bottom: r.bottom, clipTop: clip.top, clipBottom: clip.bottom,
-          centerExposed: !!hit && (hit === node || node.contains(hit)), clipScrollTop: h.querySelector('.history-clip').scrollTop };
+          centerExposed: !!hit && (hit === node || node.contains(hit)), clipScrollTop: h.querySelector('.history-clip').scrollTop,
+          hit: hit && `${hit.tagName.toLowerCase()}.${hit.className}`, hitParent: hit?.parentElement && `${hit.parentElement.tagName.toLowerCase()}.${hit.parentElement.className}` };
       }, name);
       measure(`${selector}-real-tab`, { before, after });
       assert(after.expected && after.boundary === before.anchor && after.steps === before.steps + 1 &&
@@ -3435,7 +3446,7 @@ async function scenarioHistoryRegressions(ctx) {
     // explicit focus() on the desired row or a synthetic focusin callback.
     await page.evaluate(() => window.__bh.positionHistory());
     await waitQuiet(page);
-    await page.locator('.wb-history[data-history="HISTORY"] > .history-older').focus();
+    await page.locator('.wb-history[data-history="HISTORY"] > .mhead > .history-older').focus();
     const keyboardBefore = await page.evaluate(() => {
       const bh = window.__bh, h = bh.history(), clip = h.querySelector('.history-clip').getBoundingClientRect();
       const node = h.querySelector('.history-live .entry-panel > summary'), r = node.getBoundingClientRect();
@@ -3758,7 +3769,7 @@ async function scenarioHistoryFit(ctx) {
       bh.fitLog = bh.history('LOGCHAIN').querySelector('.wb-entry.agent').cloneNode(true);
       bh.fitFixture = (heights, unknown = false) => {
         const old = bh.history(), h = old.cloneNode(false);
-        h.innerHTML = '<button class="history-older">older</button><div class="history-clip"><div class="history-live"></div></div>';
+        h.innerHTML = '<div class="mhead"><button type="button" class="history-older">older</button></div><div class="history-clip"><div class="history-live"></div></div>';
         const live = h.querySelector('.history-live');
         let id = 900000;
         const row = (panel, height) => {
