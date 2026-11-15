@@ -57,7 +57,7 @@ func TestWorktreeReleaseRefusesAnotherHoldersLease(t *testing.T) {
 			t.Fatalf("a stale release %v must be refused: %s", args, rel)
 		}
 		text := toolText(t, rel)
-		for _, want := range []string{second.WorkerKey, leadB, "Nothing was changed", "force: true"} {
+		for _, want := range []string{second.WorkerKey, leadB, "Nothing was changed", "Cleaning up a worktree whose owner is gone: pass force: true"} {
 			if !strings.Contains(text, want) {
 				t.Fatalf("refusal lacks %q: %s", want, text)
 			}
@@ -126,7 +126,7 @@ func TestWorktreeReleaseWithoutALeaseRefusesOnlyADirtyTree(t *testing.T) {
 	if !toolIsError(t, rel) {
 		t.Fatalf("release of a dirty unleased worktree must be refused: %s", rel)
 	}
-	if text := toolText(t, rel); !strings.Contains(text, "no worktree lease") || !strings.Contains(text, "draft.md") || !strings.Contains(text, "force: true") {
+	if text := toolText(t, rel); !strings.Contains(text, "no worktree lease") || !strings.Contains(text, "draft.md") || !strings.Contains(text, "Cleaning up a worktree whose owner is gone: pass force: true") {
 		t.Fatalf("refusal must name the missing lease, the dirty path, and force: %s", text)
 	}
 	if _, err := os.Stat(draft); err != nil {

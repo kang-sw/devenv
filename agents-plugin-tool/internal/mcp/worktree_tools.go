@@ -777,7 +777,7 @@ func releaseHolderCheck(ctx context.Context, runner wsgit.Runner, target string,
 		if (lease.ParentKey != "" && lease.ParentKey == caller.LeadKey) || (lease.WorkerKey != "" && lease.WorkerKey == caller.WorkerKey) {
 			return nil
 		}
-		return fmt.Errorf("worktree.release refuses %s: it is leased to worker %s under lead %s (acquired %s), not to this caller; another session may have acquired it since you last held it. Nothing was changed. Re-check worktree.list against your own state; pass force: true only once you have confirmed that leaseholder is gone or agreed", target, lease.WorkerKey, lease.ParentKey, lease.AcquiredAt)
+		return fmt.Errorf("worktree.release refuses %s: it is leased to worker %s under lead %s (acquired %s), not to this caller; another session may have acquired it since you last held it. Nothing was changed. Re-check worktree.list against your own state. Cleaning up a worktree whose owner is gone: pass force: true, once you have confirmed that leaseholder is gone or agreed", target, lease.WorkerKey, lease.ParentKey, lease.AcquiredAt)
 	}
 	dirty, err := wsgit.PorcelainPaths(ctx, runner, target)
 	if err != nil {
@@ -787,7 +787,7 @@ func releaseHolderCheck(ctx context.Context, runner wsgit.Runner, target string,
 		if len(dirty) > 5 {
 			dirty = append(dirty[:5], "...")
 		}
-		return fmt.Errorf("worktree.release refuses %s: it has no worktree lease, so its holder is unknown, and it has uncommitted changes or untracked files (%s) the release would discard. Nothing was changed. Commit or discard them, or pass force: true only once you have confirmed their holder is gone or agreed", target, strings.Join(dirty, ", "))
+		return fmt.Errorf("worktree.release refuses %s: it has no worktree lease, so its holder is unknown, and it has uncommitted changes or untracked files (%s) the release would discard. Nothing was changed. Commit or discard them. Cleaning up a worktree whose owner is gone: pass force: true, once you have confirmed that owner is gone or agreed", target, strings.Join(dirty, ", "))
 	}
 	return nil
 }
