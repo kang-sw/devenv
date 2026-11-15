@@ -135,7 +135,7 @@ const route = p => '/w/' + p.replace(/\\/g, '/').replace(/^\//, '').split('/').m
     // Session consumer remains separate from both worktrees.
     await revisit.goto(base + '/s/livesession');
     const session = await (await revisit.locator('iframe.sframe.on').elementHandle()).contentFrame();
-    await session.locator('#ctext').waitFor();
+    await session.locator('#ctext').waitFor({ state: 'attached' });
     assert.equal(await session.getAttribute('html', 'data-worktree'), null);
     await session.waitForFunction(() => !!window.WsCards);
     assert.equal(await session.evaluate(() => window.WsCards.list('terminal').length), 0);
