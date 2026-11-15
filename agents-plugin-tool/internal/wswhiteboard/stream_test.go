@@ -147,7 +147,7 @@ func TestStreamHistoryHeaderIsOneRow(t *testing.T) {
 		return `<div class="topic-stream"><div class="wb-history" data-history="` + name + `" aria-label="History"><div class="mhead"><span class="wb-mtitle">`
 	}
 	wantAll(t, out, head("long"), head("short"), head("done"),
-		`<span class="n">60</span></span><button type="button" class="history-older">Load older</button><span class="mmeta">`,
+		`<span class="wb-mlabel">History</span><span class="n">60</span></span><button type="button" class="history-older">Load older</button><span class="mmeta">`,
 		`<span class="n">1</span></span><button type="button" class="history-older" hidden>Load older</button><span class="mmeta">`)
 	wantNone(t, out, `<details class="topic-stream"`, `data-key="history:`, `<summary class="mhead">`)
 	css, err := embeddedAsset("page.css")
@@ -155,7 +155,10 @@ func TestStreamHistoryHeaderIsOneRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantAll(t, string(css), `.wb-history > .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); min-height: 26px; }`,
-		`.wb-history > .mhead > .history-older { grid-column: 2; }`)
+		`.wb-history > .mhead > .history-older { grid-column: 2; }`,
+		`min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }`,
+		`.wb-mtitle > .wb-mlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }`,
+		`.wb-mtitle > svg, .wb-mtitle > .n { flex: none; }`)
 	wantNone(t, string(css), `.history-clip::after`, `linear-gradient(var(--wb-bg), transparent)`, `.topic-stream > summary`)
 }
 
