@@ -356,3 +356,23 @@ row in the question-row form (ID, title, status chip; for example the owner's
 "(964) held · ok" row), not only as a list lifted under the sticky check pill.
 The pill's fold/lift of the real controls stays. Scope and contracts are
 otherwise unchanged: no schema, MCP, or HTTP change.
+
+#### Edition (3f4844582) - 2026-11-15
+
+Result: check-interleave amendment implemented.
+
+- VERIFIED: the prior implementation already anchored check add events
+  (`timeline_view.go:80-81,141-179`) but rendered only check lists
+  (`assets/page.tmpl:65` in `15e44e235`). Checks now reuse the question
+  `srow`/`stext` summary and `pick` chip, with existing check verdict/reading
+  and status tokens; no new CSS or i18n keys. Embeds are unchanged.
+- VERIFIED: permanent `item-N` anchors stay at the add position while the pill
+  folds/lifts the real `check-N` controls. Assumed notes remain owned by those
+  controls; dashboard selection retains item identity even while lifted.
+- VERIFIED: offline full whiteboard tests retain exactly the same six baseline
+  failures, with no new failure. Focused timeline/check tests, full i18n, named
+  dashboard selection/check/bridge/history tests and JavaScript syntax pass.
+  Embed size remains 256,914 bytes (delta 0).
+- Unresolved: the six baseline failures, including the embed budget, remain;
+  visual acceptance is INFERRED pending the owner's post-merge check. No child
+  agent, browser, daemon, merge, push or ticket closure was performed.
