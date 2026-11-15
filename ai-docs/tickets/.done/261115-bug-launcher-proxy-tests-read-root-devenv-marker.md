@@ -6,6 +6,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 0b0745dfa5e1c050
 sage-review-completeness-reviewed: 0b0745dfa5e1c050
+completed: 2026-11-15
 ---
 
 # Launcher proxy tests read the checkout's local-devenv marker and fail only in the dogfood root
@@ -73,3 +74,12 @@ completion under 2.0s wall time. That bound is outside this fix.
 ### Phase 1: Isolate proxy tests from the checkout marker
 
 Patch the local-devenv predicate in the existing `run_main` test helper and add a focused regression that proves the on-disk marker cannot trigger an unexpected repair. Use existing mock and test patterns, preserve proxy framing and argument assertions, and run the launcher proxy test module offline. Do not change production launcher behavior, perform installs or downloads, or alter the separate timing bound.
+
+### Result (af48a5d8) - 2026-11-15
+
+The existing `run_main` helper now scopes a default-False local-devenv predicate, while explicit forced-local `True` overrides remain covered for the CLI and interactive repair contracts. A focused regression creates a valid marker only in a temporary source tree, verifies the real predicate before and after the helper, and points the launcher at that temporary plugin without installing. The isolated offline launcher proxy module passed all 55 tests. Existing `ResourceWarning` output came from untouched fake-subprocess recovery tests. No Lite run was performed under MAIN's explicit pure-test exception. Production launcher behavior, framing/root assertions, the actual checkout marker, and the separate timing bound remain unchanged.
+
+
+## Resolution (2026-11-15)
+
+Phase 1 completed at af48a5d8. The scoped default-False test helper, explicit forced-local True overrides, and temporary valid-marker regression isolate proxy tests from the checkout marker; the isolated offline launcher proxy module passed all 55 tests. Existing ResourceWarnings came from untouched fake-subprocess recovery tests. No Lite run was performed under MAIN's explicit pure-test exception; production launcher behavior, framing/root assertions, the actual checkout marker, and the separate timing bound remain unchanged.
