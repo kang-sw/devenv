@@ -1537,12 +1537,14 @@ func (c *conv) loop() {
 	defer c.r.wg.Done()
 	defer close(c.done)
 	defer c.live.closeSlot()
-	if c.hidden {
+	// Before the first scan, Stop can report an existing holder unknown.
+	// Keep its rejoined transport and persisted identity until holdersScanned
+	// can establish absence or stop it; otherwise releaseHolder could forget
+	// a still-running process and a later unhide could launch a second one.
+	if c.hidden && c.r.scanDone() {
 		c.stopProcess("")
-		if c.r.scanDone() {
-			if err := c.retireHolder(); err != nil {
-				c.setStatus(func() { c.lastErr = "archive process: " + err.Error() })
-			}
+		if err := c.retireHolder(); err != nil {
+			c.setStatus(func() { c.lastErr = "archive process: " + err.Error() })
 		}
 	}
 	beat := time.NewTicker(c.r.opts.heartbeat)
@@ -3180,6 +3182,12 @@ func (c *conv) processEnded() {
 func (c *conv) releaseHolder(proc Process) {
 	hp, ok := proc.(holderProcess)
 	if !ok || c.rec.HolderID == "" {
+		return
+	}
+	if c.replaying && !c.r.scanDone() {
+		// ErrUnknownHolder is not proof of absence before the first scan.
+		// Retain the resume/start fence even if another control stops this
+		// restored transport while the archived holder is still unscanned.
 		return
 	}
 	if err := hp.StopError(); err != nil {
