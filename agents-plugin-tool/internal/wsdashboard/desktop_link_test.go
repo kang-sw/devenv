@@ -64,7 +64,7 @@ check("browser plain click previews", run(inside, 1), [[["docs/a.md"]], null, tr
 check("browser Cmd+click is the new tab", run(inside, 1, { meta: true }), [[], null, false]);
 
 // The desktop app.
-window.navigator = { userAgent: "` + desktopUA + `" };
+window.navigator = { userAgent: "`+desktopUA+`" };
 check("desktop plain click opens the menu", run(inside, 1), [[], insideMenu, true]);
 check("desktop Cmd+click previews", run(inside, 1, { meta: true }), [[["docs/a.md"]], null, true]);
 check("desktop Ctrl+click previews", run(inside, 1, { ctrl: true }), [[["docs/a.md"]], null, true]);
@@ -118,7 +118,7 @@ function frame(ua) {
 }
 var file = { "data-wl": "file", href: "/s/rid1/file?path=docs%2Fa.md", "data-rel": "docs/a.md" };
 var url = { "data-wl": "url", href: "https://example.com/" };
-var browser = frame("Mozilla/5.0 Safari"), desktop = frame("` + desktopUA + `");
+var browser = frame("Mozilla/5.0 Safari"), desktop = frame("`+desktopUA+`");
 check("browser plain click", browser(file, {}), [true, [["link", "file", false]]]);
 check("browser Cmd+click is the new tab", browser(file, { meta: true }), [false, []]);
 check("desktop plain click", desktop(file, {}), [true, [["link", "file", false]]]);
