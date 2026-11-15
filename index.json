@@ -514,7 +514,17 @@
       "registered_at": "2026-11-15T02:27:24Z"
     },
     "261116-bug-ws-worktree-acquire-stale-branch-facts": {
-      "registered_at": "2026-11-15T19:26:39Z"
+      "registered_at": "2026-11-15T19:26:39Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T19:34:58Z",
+        "impl": {
+          "branch": "impl/develop/theft-civil-cushy"
+        }
+      }
     },
     "261116-refactor-ws-model-evidence-bounded-retention": {
       "registered_at": "2026-11-15T16:42:54Z",
