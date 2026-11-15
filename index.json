@@ -5,7 +5,14 @@
   },
   "registrations": {
     "260524-epic-async-exec-job-surface": {
-      "registered_at": "2026-09-24T10:38:33Z"
+      "registered_at": "2026-09-24T10:38:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-15T10:49:32Z"
+      }
     },
     "260605-epic-ws-playbook-factory-pivot": {
       "registered_at": "2026-09-24T10:38:33Z"
@@ -225,16 +232,6 @@
     },
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
-    },
-    "261113-feat-ws-dashboard-board-reorder-hold": {
-      "registered_at": "2026-11-13T14:16:02Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "exec5/reorder-hold",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:16:43Z"
-      }
     },
     "261113-feat-ws-dashboard-frontend-performance-profile-and-optimize": {
       "registered_at": "2026-11-13T10:51:55Z"
