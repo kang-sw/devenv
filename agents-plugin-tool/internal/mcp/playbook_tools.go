@@ -370,7 +370,7 @@ func mailboxWaitCommandVar(s *Server, sessionKey string) string {
 	if sessionKey == "" {
 		return mailboxWaitCommandGeneric
 	}
-	entry, found := s.sessions.lookup(sessionKey)
+	entry, found := s.lookupSession(sessionKey)
 	if !found {
 		return mailboxWaitCommandGeneric
 	}

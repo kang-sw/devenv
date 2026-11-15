@@ -154,7 +154,7 @@ func (m *LeadMailbox) watch(w *leadMailWatch, root string, changed func()) {
 // oldest first, which joined by blank lines read as the one prompt a
 // session's own mailbox wait submits for the batch (formatMailBatch).
 func (m *LeadMailbox) Drain(root, key string) ([]string, error) {
-	entry, found := m.server.sessions.lookup(key)
+	entry, found := m.server.lookupSession(key)
 	if !found {
 		return nil, fmt.Errorf("mailbox: unknown session key")
 	}
@@ -197,7 +197,7 @@ func (m *LeadMailbox) Return(root, key string, texts []string) error {
 	if len(texts) == 0 {
 		return nil
 	}
-	if _, found := m.server.sessions.lookup(key); !found {
+	if _, found := m.server.lookupSession(key); !found {
 		return fmt.Errorf("mailbox: unknown session key")
 	}
 	path, err := m.server.mailboxPaths().ReplyRegistry()

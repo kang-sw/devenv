@@ -30,7 +30,7 @@ func (s *Server) handleMailboxSend(id json.RawMessage, args map[string]any) resp
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	entry, found := s.sessions.lookup(sessionKey)
+	entry, found := s.lookupSession(sessionKey)
 	if !found {
 		return toolTextResponse(id, "", mailboxUnknownSessionError(tool))
 	}
@@ -149,7 +149,7 @@ func (s *Server) handleMailboxRecv(id json.RawMessage, args map[string]any) resp
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	entry, found := s.sessions.lookup(sessionKey)
+	entry, found := s.lookupSession(sessionKey)
 	if !found {
 		return toolTextResponse(id, "", mailboxUnknownSessionError(tool))
 	}
@@ -332,7 +332,7 @@ func (s *Server) handleMailboxLookupPeers(id json.RawMessage, args map[string]an
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	entry, found := s.sessions.lookup(sessionKey)
+	entry, found := s.lookupSession(sessionKey)
 	if !found {
 		return toolTextResponse(id, "", mailboxUnknownSessionError(tool))
 	}

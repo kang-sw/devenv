@@ -304,7 +304,7 @@ func (s *Server) handleMailboxHistory(id json.RawMessage, args map[string]any) r
 	if err != nil {
 		return toolTextResponse(id, "", err)
 	}
-	if _, found := s.sessions.lookup(sessionKey); !found {
+	if _, found := s.lookupSession(sessionKey); !found {
 		return toolTextResponse(id, "", mailboxUnknownSessionError(tool))
 	}
 	limit := intFromArgument(args["limit"], mailboxHistoryCap)
