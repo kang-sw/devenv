@@ -684,7 +684,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec4/waiting-on",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-15T03:55:35Z",
         "impl": {
           "branch": "impl/exec4/waiting-on/area-drift-dwarf"
