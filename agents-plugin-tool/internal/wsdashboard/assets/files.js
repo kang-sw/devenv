@@ -281,6 +281,7 @@
     detachAttachment = null; ui.attachment.textContent = ""; ui.send = ui.copy = null;
     if (mount) { detachAttachment = mount(ui.attachment, api) || null; return; }
     ui.send = mk("button", "btn pr");
+    ui.send.hidden = !h.send;
     ui.copy = mk("button", "btn");
     ui.send.innerHTML = licon("paperclip"); ui.send.appendChild(mk("span", "", wsT("js.files.send")));
     ui.copy.innerHTML = licon("copy"); ui.copy.appendChild(mk("span", "", wsT("js.files.copy")));

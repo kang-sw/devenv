@@ -21,7 +21,8 @@
   // (at the terminal's start time, so it stands where it stood), and drops
   // the cards whose terminal is gone.
   var doc = document, root = doc.documentElement, cards = window.WsCards;
-  var script = root.getAttribute("data-term"), rid = root.getAttribute("data-rid");
+  var script = root.getAttribute("data-term"), worktree = root.getAttribute("data-worktree") || "";
+  var rid = worktree ? "host0" : root.getAttribute("data-rid");
   if (!cards || !script || !rid) return;
   var KIND = "terminal";
   // ROWS is the base height in rows; SCROLLBACK the lines the emulator
@@ -437,7 +438,7 @@
   // --- the daemon's list -------------------------------------------------------
   function cardFor(tid) { return cards.list(KIND).filter(function (c) { return c.data.tid === tid; })[0] || null; }
   function list(done) {
-    fetch(route(""), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+    fetch(route(worktree ? "?folder=" + encodeURIComponent(worktree) : ""), { credentials: "same-origin", cache: "no-store" }).then(function (r) {
       if (!r.ok) return r.text().then(function (t) { throw (t || "").trim() || "HTTP " + r.status; });
       return r.json();
     }).then(function (v) {
@@ -473,7 +474,7 @@
   // shows its card; done(err) gets the refusal's text, or null.
   function create(body, done) {
     if (!hooks.post) { done(wsT("js.post.nobrowser")); return; }
-    var req = { folder: body.folder || "worktree", path: body.path || "", rows: ROWS, cols: guessCols() };
+    var req = { folder: worktree ? "path" : body.folder || "worktree", path: worktree || body.path || "", rows: ROWS, cols: guessCols() };
     hooks.post("terminals", req, function (ok, v) {
       if (!ok) { done(REFUSAL[v] ? wsT(REFUSAL[v]) : wsT("js.term.err.failed", v)); return; }
       show(v);
@@ -575,12 +576,19 @@
     ui.btn.appendChild(mk("span", "board-label", wsT("js.term.new")));
     var arrow = mk("span", "term-arrow", "▾");
     arrow.setAttribute("aria-hidden", "true");
-    ui.btn.appendChild(arrow);
+    if (!worktree) ui.btn.appendChild(arrow);
     ui.btn.title = wsT("js.term.new.title");
     ui.btn.setAttribute("aria-label", wsT("js.term.new"));
+    slot.appendChild(ui.btn);
+    if (worktree) {
+      ui.btn.addEventListener("click", function () {
+        ui.btn.disabled = true;
+        create({ folder: "path", path: worktree }, function (err) { ui.btn.disabled = false; if (err) toast(err); });
+      });
+      return;
+    }
     ui.btn.setAttribute("aria-haspopup", "dialog");
     ui.btn.setAttribute("aria-expanded", "false");
-    slot.appendChild(ui.btn);
     var pop = ui.pop = mk("div", "tpop");
     pop.setAttribute("role", "dialog");
     pop.setAttribute("aria-label", wsT("js.term.pop.label"));

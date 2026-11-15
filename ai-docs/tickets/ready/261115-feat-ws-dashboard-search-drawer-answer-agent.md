@@ -675,3 +675,23 @@ exact develop head; the merge state is cleared.
   additive context fields; existing read-only, Origin, remote and process
   semantics are unchanged. The worktree was clean after the merge. The lead
   retains final integration/runtime swap and owner on-screen acceptance.
+
+## Resolution (owner-dropped answer agent) - 2026-11-15
+
+MAIN relayed explicit owner deletion at 07:07:43Z and authorized parallel
+execution at 07:36:05Z, superseding the cancelled answer-pane restyle. Removed
+the search answer pane, exclusive transport/citations/browser context and answer
+history, Enter-to-ask hint, thirteen exclusive keys in all eleven locales, and
+the one-shot answer service and route. The search drawer, shortcuts and five
+search sources remain; conversation templates, composer and conversation history
+are untouched. The follow-up authority includes only the dead constructor and
+corresponding daemon option/lifecycle wiring needed to compile the deletion.
+
+Scoped dashboard/search/tracker/daemon, backend profile and command-startup tests,
+full wsi18n (including TestEveryEnglishKeyIsUsed), and the command build passed
+offline with isolated homes and warm caches. Compatibility is T0: the removed
+browser route ships with its assets; no MCP or stored-data surface changed.
+Existing public profile definitions and the snapshot helper remain outside this
+bounded deletion. No independent review was needed for deletion/expectation-only
+changes. Integration sync, runtime swap and owner acceptance remain lead-owned;
+this note does not close the ticket or revise its frozen phases and Results.

@@ -25,7 +25,7 @@
   // is no longer available.
   var doc = document, root = doc.documentElement, cards = window.WsCards;
   if (!cards) return;
-  var rid = root.getAttribute("data-rid"), KIND = "preview", hooks = {};
+  var rid = root.hasAttribute("data-worktree") ? "host0" : root.getAttribute("data-rid"), KIND = "preview", hooks = {};
   // Explorer preflight answers are one-shot, never part of a saved card record.
   var answers = new WeakMap();
   // LINE is the text view's line height in px (the stylesheet's .pv-txt), which
