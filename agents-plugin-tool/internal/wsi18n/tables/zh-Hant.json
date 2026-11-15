@@ -1494,6 +1494,7 @@
   "js.tk.wk.unsaved": "未儲存",
   "js.tk.wk.yours": "你的版本",
   "js.toast.copied": "已複製 {0}",
+  "js.toast.copydone": "已複製",
   "js.toast.copyfail": "無法複製：{0}",
   "js.toast.newnotes.one": "1 則新通知",
   "js.toast.newnotes.other": "{0} 則新通知",

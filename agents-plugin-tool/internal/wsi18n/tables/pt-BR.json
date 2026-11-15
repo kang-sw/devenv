@@ -1494,6 +1494,7 @@
   "js.tk.wk.unsaved": "não salvo",
   "js.tk.wk.yours": "O seu",
   "js.toast.copied": "Copiado {0}",
+  "js.toast.copydone": "Copiado.",
   "js.toast.copyfail": "Não foi possível copiar: {0}",
   "js.toast.newnotes.one": "1 nova notificação",
   "js.toast.newnotes.other": "{0} novas notificações",
