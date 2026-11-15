@@ -1711,6 +1711,7 @@
   "js.rail.layout.unknown": "O painel não mostra mais isso",
   "js.rail.layout.ended": "Não é possível com uma sessão encerrada",
   "js.rail.layout.self": "Não é possível mover sobre ela mesma",
+  "js.rail.layout.hiring": "Uma sessão com contratação ativada não pode ser aninhada",
   "js.rail.layout.depth": "As sessões se aninham em apenas um nível",
   "js.rail.layout.level": "Só é possível mover entre sessões do mesmo nível",
   "js.rail.layout.child": "Uma sessão sob outra não pode receber estrela",

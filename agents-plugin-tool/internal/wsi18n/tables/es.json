@@ -1711,6 +1711,7 @@
   "js.rail.layout.unknown": "El panel ya no muestra eso",
   "js.rail.layout.ended": "No es posible con una sesión finalizada",
   "js.rail.layout.self": "No se puede mover sobre sí misma",
+  "js.rail.layout.hiring": "Una sesión con contratación activada no se puede anidar",
   "js.rail.layout.depth": "Las sesiones solo se anidan un nivel",
   "js.rail.layout.level": "Solo se puede mover entre sesiones del mismo nivel",
   "js.rail.layout.child": "Una sesión bajo otra no puede llevar estrella",
