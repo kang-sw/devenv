@@ -242,12 +242,25 @@ test("24-KiB projection and actual terminal/hosted JSONL frames include escaping
   assert.equal(omitted.activeRequest, null); assert.equal(omitted.truncated, true);
 });
 
-test("source registration uses host VERSION without SDK upgrade or private thinking fallback", () => {
+test("source and shipped bundle preserve the explicit-summary gate and capability declaration", () => {
   const source = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
   assert.match(source, /import \{ VERSION, type ExtensionAPI/);
   assert.match(source, /sessionRole === undefined \? createReasoningSummaryObserver\(VERSION\)/);
   assert.match(source, /reasoningSummaryObserver\?\.retire\(\)/);
   assert.match(source, /reasoningSummaryCapable: VERSION === "1\.5\.2"/);
+  const bundle = readFileSync(new URL("../dist/index.js", import.meta.url), "utf8");
+  for (const pattern of [
+    /response\.reasoning_summary_part\.added/,
+    /response\.reasoning_summary_part\.done/,
+    /response\.reasoning_summary_text\.delta/,
+    /version !== "1\.5\.2"/,
+    /provider === "openai" && api === "openai-responses"/,
+    /provider === "openai-codex" && api === "openai-codex-responses"/,
+    /getRegisteredProviderConfig/,
+    /getRegisteredNativeProvider/,
+    /reasoning_summary_v1/,
+    /reasoningSummaryCapable: VERSION === "1\.5\.2"/,
+  ]) assert.match(bundle, pattern);
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.devDependencies["@earendil-works/pi-coding-agent"], "0.84.4");
 });
