@@ -253,22 +253,15 @@ Object.assign(ctx.O, { searchRows: u => { updateRows = u; return qs.rows.length 
   assert.equal(ctx.qIdx('tracker'), 0);
   qs.cur = 'board';
 
-  // Plain Enter asks only with a nonempty query and an answer hook.
-  const asks = [];
-  ctx.O.searchAsk = text => asks.push(text);
-  press('Enter');
-  assert.deepEqual(asks, ['palette']);
-  press('Enter', { ctrlKey: true });
-  press('Enter', { metaKey: true });
-  assert.equal(asks.length, 1, 'modified Enter without selection does nothing');
-  delete ctx.O.searchAsk;
+  // Enter without an arrow selection does nothing.
   const before = events.length;
   press('Enter');
-  assert.equal(events.length, before, 'remote/non-agent Enter does nothing');
+  press('Enter', { ctrlKey: true });
+  press('Enter', { metaKey: true });
+  assert.equal(events.length, before, 'Enter without selection does nothing');
   assert.equal(qs.open, true);
-  ctx.O.searchAsk = text => asks.push(text);
   type('  '); press('Enter');
-  assert.equal(asks.length, 1, 'empty Enter never asks');
+  assert.equal(events.length, before, 'empty Enter does nothing');
   type('palette');
   assert.equal(ctx.qIdx('board'), -1, 'query edits clear selection');
   press('ArrowDown');
@@ -507,7 +500,7 @@ async function hostCases() {
     window: { fetch: true, WsPreview: { open: (p, o) => posts.push(['preview', p, o]) } }, wsT, toast: t => posts.push(['toast', t]),
     post: (r, b, done) => { posts.push(['post', r, b]); done(false, 'denied'); },
     fetch: (url, o) => { fetched.push([url, !!o.signal]); return Promise.resolve(url.includes('nope') ? { ok: false, status: 400, text: () => Promise.resolve('bad root\n') } : { ok: true, json: () => Promise.resolve({ items: [] }) }); } });
-  vm.runInContext(block(dashboard, '  function paletteFs(', '\n  // Browser-owned rolling context.'), fsCtx);
+  vm.runInContext(block(dashboard, '  function paletteFs(', '\n  function paletteSearch('), fsCtx);
   const hooks = fsCtx.paletteFiles({});
   assert.equal(hooks.fileLocal(), true);
   assert.equal(hooks.fileScope(), '~/repo');
@@ -521,21 +514,18 @@ async function hostCases() {
   fsCtx.rid = '';
   assert.deepEqual(Object.keys(fsCtx.paletteFiles({ a: 1 })), ['a'], 'a page without a session has no file hooks');
 
-  // Remote/non-session hosts retain persistence and shared-sheet hooks only.
+  // Hosts retain persistence and shared-sheet hooks.
   const storage = {}, sheetCalls = [];
   const searchCtx = vm.createContext({ rid: '', root: { hasAttribute: () => false }, window: {}, sbody: {},
     drOpen: false, drMode: 'panels', load: k => storage[k], save: (k, v) => { storage[k] = v; },
     drSetOpen: (open, mode) => { sheetCalls.push([open, mode]); searchCtx.drOpen = open; if (mode) searchCtx.drMode = mode; } });
   vm.runInContext(block(dashboard, '  function paletteSearch(', '\n  function tkMount('), searchCtx);
   const remote = searchCtx.paletteSearch({});
-  assert.equal(remote.searchAsk, undefined);
   remote.searchState.save({ query: 'remember', slot: 'content' });
   const reloaded = searchCtx.paletteSearch({});
   assert.deepEqual(plain(reloaded.searchState.load()), { query: 'remember', slot: 'content' });
   reloaded.searchHost.setOpen(true); reloaded.searchHost.setOpen(true); reloaded.searchHost.setOpen(false);
   assert.deepEqual(sheetCalls, [[true, 'search'], [false, undefined]], 'sheet hooks are idempotent');
-  searchCtx.rid = 'session';
-  assert.equal(searchCtx.paletteSearch({}).searchAsk, undefined, 'remote session has no agent hook');
   storage['ws.dashboard.drawer.search.state'] = 'invalid JSON';
   assert.equal(searchCtx.paletteSearch({}).searchState.load(), null);
   assert(dashboard.includes('if (load(DR_SEARCH) === "1" || tkWantSearch) tkApi.openSearch();'), 'reload restores the open search sheet');

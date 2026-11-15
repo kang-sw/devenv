@@ -39,6 +39,8 @@ func (gitWorktreeSource) ReadRepoWorktrees(repo string, _ []Registration) (RepoW
 			list.Worktrees = append(list.Worktrees, RepoWorktree{Path: p})
 		} else if b, ok := strings.CutPrefix(line, "branch refs/heads/"); ok && len(list.Worktrees) > 0 {
 			list.Worktrees[len(list.Worktrees)-1].Branch = b
+		} else if line == "detached" && len(list.Worktrees) > 0 {
+			list.Worktrees[len(list.Worktrees)-1].Detached = true
 		}
 	}
 	return list, nil

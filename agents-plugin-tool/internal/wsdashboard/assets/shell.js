@@ -96,6 +96,7 @@
     var search = u.search || "";
     if (search && search !== "?" && search !== "?frame=1") return null;
     if (u.pathname === "/") return { path: "/", hash: u.hash || "", rid: "" };
+    if (u.pathname.indexOf("/w/") === 0 && u.pathname.length > 3) return { path: u.pathname, hash: u.hash || "", rid: "" };
     var m = SESSION.exec(u.pathname);
     if (m) return { path: u.pathname, hash: u.hash || "", rid: m[1] };
     return null;

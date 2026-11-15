@@ -84,8 +84,8 @@ func TestSelectionTextTransportLifecycle(t *testing.T) {
 			}
 			lines = append(lines, wsinbox.ImageLine(nums[i], path))
 		}
-		if e.Text() != text+"\n\n"+strings.Join(lines, "\n") {
-			t.Fatalf("delivery changed grouping: %q", e.Text())
+		if inboxBody(t, e) != text+"\n\n"+strings.Join(lines, "\n") {
+			t.Fatalf("delivery changed grouping: %q", inboxBody(t, e))
 		}
 	}
 	check(held[0].Entry, one, []int{1}, now.UnixMilli())
@@ -201,7 +201,7 @@ func TestSelectionTextMalformedEnvelopeWithoutImages(t *testing.T) {
 		t.Fatalf("zero-image submit rejected malformed ordinary text: %d: %v", code, answer)
 	}
 	held, err := wsinbox.Held(dir)
-	if err != nil || len(held) != 1 || held[0].Entry.Text() != text || len(held[0].Entry.Images) != 0 {
+	if err != nil || len(held) != 1 || inboxBody(t, held[0].Entry) != text || len(held[0].Entry.Images) != 0 {
 		t.Fatalf("zero-image submit changed malformed ordinary text: %+v, %v", held, err)
 	}
 }
