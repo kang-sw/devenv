@@ -48,7 +48,27 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
    rejected:n=>`거부 ${n}개 — 확인 요청 프롬프트를 복사했습니다`, rejectFail:n=>`거부 ${n}개 — 클립보드에 쓰지 못했습니다`,
    approved:n=>`승인 ${n}개 반영`, undone:n=>`${n}개를 대기로 되돌렸습니다`};
   const feedback = () => page.locator('.admission-feedback');
-  async function clearToasts() { await page.evaluate(()=>document.querySelectorAll('#wstoasts .wstoast').forEach(x=>x.remove())); }
+  async function clearToasts() { await page.evaluate(()=>{document.querySelectorAll('#wstoasts .wstoast').forEach(x=>x.remove()); document.querySelector('#rail .rtoast')?.classList.remove('on');}); }
+  // Apply's result toast sits in the rail (847 mockup): above the foot, the
+  // capsule or the notice, inside the rail's width.
+  async function assertRailToast(label, text) {
+   await page.waitForFunction(t => { const e = document.querySelector('#rail > .rtoast.on'); return e && e.textContent === t; }, text);
+   await page.waitForTimeout(250);
+   const g = await page.evaluate(() => {
+    const rect = e => { if (!e || e.hidden || !e.offsetHeight) return null; const r = e.getBoundingClientRect(); return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height}; };
+    return {toast:rect(document.querySelector('#rail > .rtoast')), rail:rect(document.querySelector('#rail')), foot:rect(document.querySelector('#rail .rfoot')),
+     cap:rect(document.querySelector('#rail .rcap')), notice:rect(document.querySelector('#rail .admission-feedback'))};
+   });
+   const {toast, rail} = g;
+   assert.ok(toast.left >= rail.left && toast.right <= rail.right && toast.top >= rail.top, label + ': toast stays inside the rail');
+   for (const k of ['foot','cap','notice']) if (g[k]) assert.ok(toast.bottom <= g[k].top + 0.5, label + ': toast sits above the ' + k);
+   assert.ok(toast.height <= 60, label + ': toast stays compact ('+toast.height+'px)');
+   toastGeometry.push({label, ...g});
+  }
+  async function fullShot(path) {
+   // The fixture's memo pane opens with the slide-over rail; hide it here.
+   await page.addStyleTag({content:'.memo-pad{display:none!important}'}).then(async h => { await page.screenshot({path}); await h.evaluate(e=>e.remove()); });
+  }
   async function assertCopyToast(label, text=T.copied, maxHeight=40) {
    await page.waitForFunction(t => [...document.querySelectorAll('#wstoasts .wstoast .wst-body')].some(x=>x.textContent === t), text);
    const geometry = await page.evaluate(() => {
@@ -93,7 +113,7 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
    console.log('CLIPBOARD DIAGNOSTIC', await page.evaluate(k=>({prompt:localStorage.getItem(k), feedback:document.querySelector('.admission-feedback').outerHTML, rail:document.querySelector('#r-rail').innerHTML, errors:window.copied} ),promptKey), errors);
    throw e;
   });
-  await page.waitForFunction(t => [...document.querySelectorAll('#wstoasts .wst-body')].some(x=>x.textContent===t), T.rejectFail(1));
+  await assertRailToast('failed copy', T.rejectFail(1));
   assert.equal((await control('state')).filter(x=>x.state==='rejected').length,1);
   assert.equal(await page.locator('.rrej').getAttribute('open'),null,'rejected list collapsed by default');
   assert.equal(await page.locator('.admission-copy details').getAttribute('open'),null,'retained prompt collapsed by default');
@@ -149,7 +169,7 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
   results.push('Localization: pending heading, toggles, capsule, tag, rejected heading and copy label render in Korean');
   await clearToasts();
   const second = await apply();
-  await assertCopyToast('second apply', T.rejected(1));
+  await assertRailToast('second apply', T.rejected(1));
   assert.ok(second.prompt.includes(paths['agent-a82f81f3']) && second.prompt.includes(paths['tmp.Xk2']));
   assert.equal((await control('state')).filter(x=>x.state==='rejected').length,2);
   results.push('1102: cumulative server prompt matches both persisted rejected rows');
@@ -162,7 +182,8 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
   await row('agent-a82f81f3').locator('.admission-undo').click();
   assert.equal((await undoResponse).status(),200);
   await toggle('agent-a82f81f3','approve').waitFor();
-  await assertCopyToast('undo', T.undone(1));
+  await assertRailToast('undo', T.undone(1));
+  assert.ok(await page.locator('#rail > .rtoast.ok').count() === 1, 'a batch without rejection uses the ok accent');
   assert.equal((await control('state')).filter(x=>x.state==='rejected').length,1);
   results.push('1099: rejected-list undo persists pending without deleting files');
 
@@ -189,7 +210,12 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
   // Screenshots use real production DOM at both responsive widths and themes.
   // A reference page is captured independently; comparison images put rails side by side.
   const ref = await browser.newPage({viewport:{width:1440,height:1000}});
+  await ref.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:()=>Promise.resolve()}});});
   const compare = await browser.newPage({viewport:{width:780,height:1020}});
+  async function sideBySide(prodRail, refRail, out, label) {
+   await compare.setContent(`<style>body{margin:0;background:#888;font:14px system-ui}main{display:flex;gap:12px}img{max-width:396px;object-fit:contain;object-position:top}section{display:flex;flex-direction:column}</style><main><section>Production ${label}<img src="data:image/png;base64,${prodRail.toString('base64')}"></section><section>Approved mockup ${label}<img src="data:image/png;base64,${refRail.toString('base64')}"></section></main>`);
+   await compare.screenshot({path:out,fullPage:true});
+  }
   async function capture(width,theme,state,referenceState) {
    const stem = `${width}-${theme}-${state}`;
    await page.screenshot({path:`${artifacts}/production-${stem}.png`});
@@ -224,15 +250,33 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
    await page.evaluate(()=>window.copyFail=false);
    await clearToasts();
    const applied = await apply(); assert.equal(applied.applied,true);
-   await page.waitForFunction(t => [...document.querySelectorAll('#wstoasts .wst-body')].some(x=>x.textContent.startsWith(t)), T.rejected(1));
-   assert.equal(await page.locator('#wstoasts .wst-body small').innerText(), T.approved(1));
-   await assertCopyToast(`${width}-${theme}-applied`, T.rejected(1)+T.approved(1), 60);
-   if (width===1440 && theme==='dark') await page.screenshot({path:`${shots}/success-toast-dark-1440.png`});
+   await assertRailToast(`${width}-${theme}-applied`, T.rejected(1)+T.approved(1));
+   assert.equal(await page.locator('#rail > .rtoast small').innerText(), T.approved(1));
+   assert.equal(await page.locator('#wstoasts .wstoast').count(), 0, 'Apply uses the rail toast only');
+   await page.mouse.move(width-10, 990);
+   if (width===1440) {
+    await fullShot(`${shots}/success-toast-${theme}-1440.png`);
+    const prodRail = await page.locator('#rail').screenshot();
+    await ref.setViewportSize({width,height:1000});
+    await ref.goto(pathToFileURL(reference).href+'?theme='+theme);
+    await ref.evaluate(()=>{window.__mk.mark('a82','ap');window.__mk.mark('xk2','rj');});
+    await ref.locator('#capgo').click(); await ref.locator('.wstoast.on').waitFor(); await ref.waitForTimeout(300);
+    await sideBySide(prodRail, await ref.locator('#rail').screenshot(), `${shots}/success-toast-${theme}-1440-vs-mockup.png`, `success toast ${theme} 1440`);
+   }
    await clearToasts();
    await page.locator('.rrej > summary').click();
    await page.mouse.move(width-10, 990);
+   assert.equal((await row('tmp.Xk2').locator('.gs').innerText()).trim(), '±0', 'a rejected row shows its change count, zero included');
    await capture(width,theme,'rejected-list-with-undo','applied');
    await page.locator('#rail').screenshot({path:`${shots}/rejected-list-${theme}-${width}.png`});
+   if (width===1440) {
+    const prodRail = await page.locator('#rail').screenshot();
+    await ref.goto(pathToFileURL(reference).href+'?theme='+theme);
+    await ref.evaluate(()=>{window.__mk.mark('a82','ap');window.__mk.mark('xk2','rj');});
+    await ref.locator('#capgo').click(); await ref.locator('.rfold > summary').click();
+    await ref.evaluate(()=>document.querySelector('.wstoast').classList.remove('on')); await ref.mouse.move(1430,990); await ref.waitForTimeout(300);
+    await sideBySide(prodRail, await ref.locator('#rail').screenshot(), `${shots}/rejected-list-${theme}-1440-vs-mockup.png`, `rejected list ${theme} 1440`);
+   }
    if (width===700 && theme==='dark') fs.copyFileSync(`${artifacts}/comparison-700-dark-rejected-list-with-undo.png`, `${shots}/rejected-list-700-dark-vs-mockup.png`);
    await page.screenshot({path:`${artifacts}/production-${width}-${theme}-applied.png`});
    // The failure notice: a header copy whose clipboard write fails.
@@ -243,7 +287,7 @@ const promptKey = 'ws.dashboard.worktree-admission.prompt';
    const box = await feedback().boundingBox(), railBox = await page.locator('#rail').boundingBox();
    assert.ok(box.x >= railBox.x && box.x+box.width <= railBox.x+railBox.width+0.5, `${width}-${theme}: notice stays inside the rail`);
    assert.equal(await page.evaluate(()=>{const f=document.querySelector('.admission-feedback');return f.scrollWidth<=f.clientWidth;}),true,'notice has no horizontal overflow');
-   await page.screenshot({path:`${shots}/after-${theme}-${width}.png`});
+   await fullShot(`${shots}/after-${theme}-${width}.png`);
    if (width===1440 && theme==='dark') {
     await page.locator('#rail').screenshot({path:`${shots}/clipboard-failure-block-dark-1440.png`});
     await page.locator('.admission-copy summary').click();

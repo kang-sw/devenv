@@ -51,7 +51,6 @@ a[data-wl="file"]:not([href]) { color: inherit; }
    left, the hidden-time summary a primary dot before its text */
 .wstoasts { position: fixed; z-index: 91; right: 16px; bottom: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: min(420px, calc(100vw - 32px)); pointer-events: none; }
 .wstoast { pointer-events: auto; position: relative; background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px; font-size: 12.5px; line-height: 1.4; box-shadow: var(--wb-shadow-hi); overflow-wrap: anywhere; }
-.wstoast .wst-body small { display: block; margin-top: 1px; font-size: 11px; opacity: .7; }
 .wstoast.click { cursor: pointer; }
 .wstoast.click:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 .wstoast.notice { padding-left: 15px; overflow: hidden; }

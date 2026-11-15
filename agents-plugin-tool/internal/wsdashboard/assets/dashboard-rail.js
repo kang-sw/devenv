@@ -262,16 +262,36 @@
     if (next) next.focus();
   }
   // admissionToast says what an applied batch did, the mockup's two lines:
-  // the rejection and its copy first, the rest small beneath it.
+  // the rejection and its copy first, the rest small beneath it. It hangs
+  // on the rail itself, outside the swapped region, so a rail render while
+  // it shows keeps it; it sits above the notice, the capsule, or the foot.
+  var rtoastEl = null, rtoastTimer = 0;
   function admissionToast(n, copied) {
     var lines = [];
     if (n.reject) lines.push(wsT(copied ? "js.admission.toast.rejected" : "js.admission.toast.rejectfail", n.reject));
     if (n.approve) lines.push(wsT("js.admission.toast.approved", n.approve));
     if (n.undo) lines.push(wsT("js.admission.toast.undone", n.undo));
-    if (!lines.length || !window.WsToast) return;
-    var esc = function (x) { return String(x).replace(/[&<>"]/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); };
-    window.WsToast.show(esc(lines[0]) + lines.slice(1).map(function (x) { return "<small>" + esc(x) + "</small>"; }).join(""),
-      { html: true, kind: copied ? "info" : "warn" });
+    if (!lines.length || !railEl) return;
+    if (!rtoastEl) {
+      rtoastEl = mk("div", "rtoast");
+      rtoastEl.setAttribute("role", "status");
+      rtoastEl.setAttribute("aria-live", "polite");
+    }
+    if (rtoastEl.parentNode !== railEl) railEl.appendChild(rtoastEl);
+    rtoastEl.textContent = lines[0];
+    lines.slice(1).forEach(function (x) { rtoastEl.appendChild(mk("small", "", x)); });
+    rtoastEl.className = "rtoast" + (n.reject ? "" : " ok");
+    var r = region("rail"), anchor = null;
+    ["admission-feedback", "rcap", "rfoot"].some(function (c) {
+      var el = r && r.querySelector("." + c);
+      if (el && !el.hidden && el.offsetHeight) anchor = el;
+      return !!anchor;
+    });
+    if (anchor) rtoastEl.style.bottom = Math.round(railEl.getBoundingClientRect().bottom - anchor.getBoundingClientRect().top + 8) + "px";
+    void rtoastEl.offsetWidth;
+    rtoastEl.classList.add("on");
+    clearTimeout(rtoastTimer);
+    rtoastTimer = setTimeout(function () { rtoastEl.classList.remove("on"); }, 5000);
   }
   function admissionSubmit(selections) {
     if (admissionBusy || !selections.length) return;

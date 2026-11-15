@@ -377,6 +377,17 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .rail .admission-feedback textarea { display: block; box-sizing: border-box; width: 100%; height: 112px; margin-top: 4px; padding: 6px 8px; resize: vertical; border: 1px solid var(--wb-line); border-radius: 6px; color: var(--wb-fg); background: var(--wb-bg); font: 11px/1.45 var(--wb-mono); }
 .rail .admission-feedback .admission-corrections button, .rail .admission-row-correction button { font: inherit; color: var(--wb-primary); background: var(--wb-card); border: 1px solid var(--wb-line); border-radius: 6px; padding: 1px 6px; margin-left: 4px; cursor: pointer; }
 .rail.capon .admission-feedback:not([hidden]) { margin-bottom: 50px; }
+/* Apply's result toast (the 847 mockup): the shared toast surface, anchored
+   in the rail above its foot, the capsule or the notice (admissionToast sets
+   bottom), with an amber bar, green when nothing was rejected. A zero-
+   specificity position keeps every breakpoint's own rail position and only
+   gives the static column a containing block. */
+:where(.rail) { position: relative; }
+.rail .rtoast { position: absolute; z-index: 4; left: 12px; right: 12px; bottom: 56px; background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px 7px 15px; font-size: 12.5px; line-height: 1.4; box-shadow: var(--wb-shadow-hi); overflow: hidden; overflow-wrap: anywhere; opacity: 0; transform: translateY(8px); transition: opacity .18s, transform .18s; pointer-events: none; }
+.rail .rtoast::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--wb-toast-warn); }
+.rail .rtoast.ok::before { background: var(--wb-ok); }
+.rail .rtoast.on { opacity: 1; transform: none; pointer-events: auto; }
+.rail .rtoast small { display: block; margin-top: 1px; font-size: 11px; opacity: .7; }
 .rail .admission-row-correction { margin: 3px 12px 3px 28px; color: var(--wb-fail); font-size: 11px; }
 .rail .admission-stale { outline: 1px dashed var(--wb-fail); outline-offset: -1px; }
 .rail .admission-missing { overflow-wrap: anywhere; margin: 5px 0; color: var(--wb-fail); }
