@@ -410,3 +410,17 @@ summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summ
 .tdot { display: none; width: 7px; height: 7px; border-radius: 50%; background: var(--wb-primary); flex: none; }
 .tdot.on { display: inline-block; }
 
+
+/* Conversation density: only lead chat, owner messages and whiteboard-update
+   cards get generous vertical room. Mail, subagent, notification, tool and
+   turn-footer rows sit tight together and are dimmed; hover or opening one
+   restores full contrast. */
+.conv { gap: 2px; }
+.msg.fromlead, .msg.user, .wbeffects.wbupdate { margin-block: 8px; }
+.mailline, .mail-notification, .toolsline, .turnline, .sysline, .wake-divider, .wake-card, .input-record { opacity: .68; transition: opacity .12s; }
+.mailline:hover, .mailline[open], .mail-notification:hover, .mail-notification[open], .toolsline:hover, .toolsline[open], .wake-card:hover, .input-record:hover { opacity: 1; }
+.mailline > summary.conv-row, .mailline > .conv-row, .mail-notification .conv-row, .toolsline > summary.conv-row { padding-block: 1px; line-height: 1.4; }
+.toolsline .tsum { row-gap: 0; line-height: 1.15; }
+.toolsline .tsl, .toolsline .tsn { line-height: 1.15; }
+.mailline .arr { color: var(--wb-primary); }
+.turnline { margin-top: 0; }
