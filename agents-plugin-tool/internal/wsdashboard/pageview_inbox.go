@@ -23,9 +23,10 @@ type HeldView struct {
 	// Steer is set once the user promoted the message to steering; the
 	// bubble then shows a steer marker instead of the steer control.
 	Steer bool
-	// At is the first send's time (epoch ms).
+	// At is the send's time (epoch ms), kept by a steer.
 	At int64
-	// Parts are the merged sends' texts; the bubble divides them.
+	// Parts are the send's text; an entry merged before sends stopped
+	// merging holds one per send, and the bubble divides them.
 	Parts  []string
 	Chips  []wsinbox.Chip
 	Topics []wsinbox.TopicNote

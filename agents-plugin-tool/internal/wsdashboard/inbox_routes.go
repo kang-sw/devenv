@@ -22,15 +22,15 @@ import (
 )
 
 // The browser write routes: POST /s/<reply-id>/message holds a message the
-// user sent from the composer in the session's board-answer inbox (merged
-// into the held one when there is one), and POST /s/<reply-id>/cancel takes a
-// held message back. POST /s/<reply-id>/steer promotes a held message to
-// steering: the adapter injects it at the session's next tool boundary
-// instead of at the turn end. POST /s/<reply-id>/interrupt asks the adapter
+// user sent from the composer in the session's board-answer inbox, each send
+// its own held message, and POST /s/<reply-id>/cancel takes a held message
+// back. POST /s/<reply-id>/steer promotes a held message to steering, at the
+// end of the steer queue: the adapter injects it at the session's next tool
+// boundary instead of at the turn end. POST /s/<reply-id>/interrupt asks the adapter
 // to stop the session's running turn: in one step under d.inboxMu it takes
 // back every held message, steered or not, and writes an interrupt entry
-// (wsinbox.Interrupt), answering the taken messages oldest first, each as a
-// cancel answers one, so the page puts them back in its composer; its body is
+// (wsinbox.Interrupt), answering the taken messages in queue order (steered
+// first, then the rest, oldest first), each as a cancel answers one, so the page puts them back in its composer; its body is
 // ignored. The inbox is the daemon's one write target; the
 // session's host adapter drains it and injects the message as the user's own.
 // The routes are offered only for a session with a live host adapter, require
