@@ -137,11 +137,18 @@ func TestSubsetScriptHoldsOnlyThePrefixKeys(t *testing.T) {
 }
 
 func TestScriptExceptLeavesOutOnlyThePrefixKeys(t *testing.T) {
-	js := string(ScriptExcept("en", "js.img."))
-	if !strings.Contains(js, `"js.ago`) || !strings.Contains(js, "window.wsTn") {
-		t.Fatalf("ScriptExcept(en, js.img.) = %.200s", js)
-	}
-	if strings.Contains(js, `"js.img.`) {
-		t.Fatal("ScriptExcept must leave out the keys under its prefix")
+	for _, prefixes := range [][]string{{"js.img."}, {"js.img.", "js.files."}} {
+		js := string(ScriptExcept("en", prefixes...))
+		if !strings.Contains(js, `"js.ago`) || !strings.Contains(js, "window.wsTn") {
+			t.Fatalf("ScriptExcept(en, %v) = %.200s", prefixes, js)
+		}
+		for _, prefix := range prefixes {
+			if strings.Contains(js, `"`+prefix) {
+				t.Errorf("ScriptExcept must leave out the keys under %q", prefix)
+			}
+		}
+		if len(prefixes) == 1 && !strings.Contains(js, `"js.files.`) {
+			t.Error("ScriptExcept must retain keys outside its prefixes")
+		}
 	}
 }
