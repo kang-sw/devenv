@@ -8,6 +8,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 5c8465ab3d5a9240
 sage-review-completeness-reviewed: 5c8465ab3d5a9240
+completed: 2026-11-16
 ---
 
 # Honor explicit empty ticket updates in git.commit
@@ -151,3 +152,47 @@ null, wrong-type or CLI behavior. Run affected `internal/mcp` and
 `internal/wsgit` tests and the project Go suite
 (`cd agents-plugin-tool && go test ./...`) using local temporary repositories.
 This drafting pass records no implementation or runtime-test result.
+
+### Result (e9793acc) - 2026-11-15
+
+- VERIFIED: Implemented decision (1065) in `645c2756`, with MCP boundary
+  regressions in `e9793acc`. MCP dispatch sets the JSON-excluded internal
+  `SuppressInferredTicketUpdates` boolean only for an existing converted
+  non-nil, zero-length list (`internal/mcp/server.go:1671-1680`). Normalization
+  preserves it, and only the inference gate consumes it
+  (`internal/wsgit/git.go:571-574,717,772-779`). Nonempty explicit summaries,
+  detection, validation, advisories and result metadata remain independent.
+- VERIFIED: Actual MCP JSON omitted/empty/nonempty calls cover ticket changes
+  and no-ticket changes, literal move/Result/Edition summaries, exact
+  `TicketChanges`, stored hash/title and AI Context
+  (`internal/mcp/server_test.go:2313-2408`). Explicit empty calls retain the
+  invalid-ticket veto and advisories (`tickets_verify_test.go:14-62`;
+  `server_test.go:2470-2538`). Client tests cover normalization, JSON exclusion,
+  direct nil/allocated-empty slices and authoritative nonempty summaries
+  (`internal/wsgit/git_test.go:294-373`). Paths here are under
+  `agents-plugin-tool/`.
+- VERIFIED: Focused offline commands passed; full output was read:
+  - `cd agents-plugin-tool && GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsgit -run 'Test(Commit|NormalizeCommitOptions|DetectTicketChanges|StagingCommandsForCommit|ParseTicket)' -count=1 -v`
+    — 14.254s; `/tmp/261115-empty-ticket-updates-wsgit-green.log`.
+  - `cd agents-plugin-tool && GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run "^(TestServeStdioGitToolCalls|TestServeStdioGitCommit.*|TestTicketsVerifyGitCommit.*|TestGitCommit.*)$" -count=1 -v`
+    — 12.801s; `/tmp/empty-ticket-mcp-leaf-attempt1.log`, exact command also
+    retained in `/tmp/empty-ticket-mcp-leaf-attempt1.command`.
+  - The first client command failed only because a new test expected an
+    abbreviated Result summary rather than the existing full heading. Blame:
+    test expectation, not implementation. Corrected the expectation without
+    changing the formatter; original full output is retained in
+    `/tmp/261115-empty-ticket-updates-wsgit.log`. No second same-root failure.
+- VERIFIED: Independent one-pass Lite review of
+  `76d8f797..e9793acc` returned clean, with no remaining findings. Artifact:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@a93cfe66/review-paths/6e9f0e7f-01-261115-empty-ticket-updates-lite.md`.
+- INFERRED: Final compatibility is T0 bug fix. Old omission/nonempty calls
+  still use the unchanged message writer; the new flag never crosses JSON.
+  Both versions write ordinary Git history and the same result shape
+  (`internal/wsgit/git.go:739-747,1024-1042`), so old readers and a new reopen
+  need no reconstruction. Explicit-empty suppression on unfixed old servers
+  is not promised. Direct CLI construction leaves the flag at zero
+  (`cmd/ws-mcp/hosted_cli.go:365-387`); null/wrong-type behavior, trailer
+  ordering and wire schema are untouched.
+- Decisions: No scope deviation. MAIN's binding run constraint replaces the
+  older full-suite wording with focused `-run` verification only. No full
+  suite, network, shared-runtime operation, push or merge was performed.
