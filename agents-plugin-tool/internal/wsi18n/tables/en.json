@@ -216,6 +216,7 @@
   "js.files.count.other": "{0} items",
   "js.files.open.card": "Open as card",
   "js.files.selected": "Selected",
+  "js.files.selected.count": "{0} selected",
   "js.files.send": "Attach to session",
   "js.files.tab.close": "Close tab",
   "js.files.tab.new": "New tab",

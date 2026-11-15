@@ -13,6 +13,7 @@ El.prototype.insertBefore = function (n, ref) {
 Doc.prototype.createDocumentFragment = function () { return new El('fragment', this); };
 Doc.prototype.createTextNode = function (s) { var n = new El('text', this); n.textContent = s; return n; };
 Doc.prototype.removeEventListener = El.prototype.removeEventListener;
+Doc.prototype.fire = El.prototype.fire;
 Doc.prototype.querySelector = function (s) { return this.documentElement.querySelector(s); };
 El.prototype.click = function () { this.fire('click', { target: this, stopPropagation: function () {} }); };
 var requests = [], pendingTimers = new Map(), nextTimer = 0;
@@ -35,7 +36,7 @@ function event(n, type, extra) { var e = Object.assign({ target: n, preventDefau
 function key(n, key) { return event(n, 'keydown', { key }); }
 function slash(n) { var e = { target: n, key: '/', preventDefault() { this.defaultPrevented = true; } }; doc.listeners.keydown.slice().forEach(f => f(e)); }
 var doc = new Doc(), win = { WsCards: { icon: name => '<svg><use href="#l-' + name + '"/></svg>' }, AbortController, innerWidth: 1200, innerHeight: 900, listeners: {}, addEventListener: El.prototype.addEventListener, removeEventListener: El.prototype.removeEventListener };
-new Function('document', 'window', 'wsT', 'wsTn', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', FILES)(doc, win, k => k, (k, n) => k === 'js.files.count' ? n + (n === 1 ? ' item' : ' items') : k, fetchControlled, AbortController, later, cancel);
+new Function('document', 'window', 'wsT', 'wsTn', 'fetch', 'AbortController', 'setTimeout', 'clearTimeout', FILES)(doc, win, (k, n) => k === 'js.files.selected.count' ? n + ' selected' : k, (k, n) => k === 'js.files.count' ? n + (n === 1 ? ' item' : ' items') : k, fetchControlled, AbortController, later, cancel);
 function explorer(rid, local = true, options = {}) {
   var el = doc.body.appendChild(new El('section', doc)); el.className = 'fpane';
   var store = options.store || {}, previews = [];
@@ -200,7 +201,106 @@ async function pathBarChecks() {
   check('storage restores directory but starts fresh history', [p.instance.location().dir, p.at('.fback').disabled, p.at('.fforward').disabled], ['folder', true, true]);
   p.instance.destroy(); peer.instance.destroy();
 }
+async function multiSelectChecks() {
+  var sent = [], copied = [], primary = [], actions = [];
+  var p = explorer('multi', true, { send: path => sent.push(path), copy: text => copied.push(text), post: (...args) => actions.push(args), onSelection: s => primary.push(s.path) });
+  var peer = explorer('multi-peer');
+  p.instance.shown(); peer.instance.shown();
+  var entries = [{ name: 'folder', dir: true }, { name: 'a.txt' }, { name: 'b.txt' }, { name: 'c.txt' }, { name: 'd.txt' }, { name: '.hidden' }, { name: 'ignored', ign: true }];
+  await answer(take('multi', 'list'), listing('/multi', entries, true));
+  await answer(take('multi-peer', 'list'), listing('/peer', entries, true));
+  var selected = () => p.all('.fentry').filter(row => row.classList.contains('sel')).map(row => row.getAttribute('data-entry'));
+  function click(path, modifiers = {}) { var row = p.at('[data-entry="' + path + '"]'); row.focus(); event(row, 'click', modifiers); }
+  function shortcut(target, key, modifiers = {}) {
+    target.focus(); var e = Object.assign({ target, key, preventDefault() { this.defaultPrevented = true; } }, modifiers);
+    doc.listeners.keydown.slice().forEach(fn => fn(e)); return !!e.defaultPrevented;
+  }
+  click('a.txt'); check('plain click selects one', selected(), ['a.txt']);
+  click('c.txt', { ctrlKey: true }); check('Ctrl click adds and retains primary compatibility', [selected(), p.instance.selection().path, primary.slice(-1)[0]], [['a.txt', 'c.txt'], 'c.txt', 'c.txt']);
+  click('a.txt', { metaKey: true }); check('Cmd click toggles off while keeping last clicked primary', [selected(), p.instance.selection().path], [['c.txt'], 'a.txt']);
+  click('d.txt', { shiftKey: true }); check('Shift range uses last toggled anchor', selected(), ['a.txt', 'b.txt', 'c.txt', 'd.txt']);
+  click('b.txt', { shiftKey: true }); check('repeated Shift keeps anchor and replaces range', selected(), ['a.txt', 'b.txt']);
+  click('d.txt', { metaKey: true }); click('c.txt', { shiftKey: true, ctrlKey: true });
+  check('Shift Ctrl adds range to existing selection', selected(), ['a.txt', 'b.txt', 'c.txt', 'd.txt']);
+  click('c.txt'); check('plain click replaces multi-selection', selected(), ['c.txt']);
+  click('c.txt', { ctrlKey: true });
+  check('toggling the final row off clears membership and disables batch actions', [selected(), p.all('.fattachment button').map(b => b.disabled)], [[], [true, true]]);
+  check('Ctrl A outside explorers stays native', shortcut(doc.body, 'a', { ctrlKey: true }), false);
+  var unfocused = { target: p.tree, key: 'a', ctrlKey: true, preventDefault() { this.defaultPrevented = true; } };
+  doc.listeners.keydown.slice().forEach(fn => fn(unfocused));
+  check('select all requires actual focus inside the instance', [!!unfocused.defaultPrevented, selected()], [false, []]);
+  peer.el.setAttribute('data-max', '');
+  check('Cmd A selects focused explorer even with peer maximized', shortcut(p.tree, 'a', { metaKey: true }), true);
+  var visible = entries.filter(e => !e.ign).map(e => e.name);
+  check('select all selects visible rows and only its own instance', [selected(), peer.all('.fentry.sel').length, p.at('.fdirectory').getAttribute('aria-multiselectable')], [visible, 0, 'true']);
+  check('footer localizes the selection count', p.at('.fselection').textContent, '6 selected');
+  var savedTab = JSON.parse(p.store['ws.dashboard.files.tabs.multi']).tabs[0];
+  check('persisted selection stays a primary path without a selection set', [typeof savedTab.selection, Object.keys(savedTab).some(k => /sels|anchor|selections/.test(k))], ['string', false]);
+  for (var tag of ['input', 'textarea', 'div']) {
+    var input = p.el.appendChild(new El(tag, doc)); if (tag === 'div') input.isContentEditable = true;
+    check(tag + ' keeps native select-all and Escape', [shortcut(input, 'a', { ctrlKey: true }), shortcut(input, 'Escape'), selected()], [false, false, visible]);
+    p.el.removeChild(input);
+  }
+  check('peer focus does not select this explorer', shortcut(peer.tree, 'a', { ctrlKey: true }), true);
+  check('Escape clears only focused instance', [shortcut(p.tree, 'Escape'), selected(), peer.all('.fentry.sel').length], [true, [], 6]);
+  peer.el.removeAttribute('data-max');
+  click('c.txt'); click('a.txt', { ctrlKey: true }); click('folder', { ctrlKey: true });
+  var batch = ['folder', 'a.txt', 'c.txt'];
+  win.WsTerm = { create: (...args) => actions.push(args) };
+  function menu(path = 'a.txt') { event(p.at('[data-entry="' + path + '"]'), 'contextmenu', { clientX: 10, clientY: 20 }); return doc.querySelector('.fmenu'); }
+  function menuItem(label) { return doc.querySelector('.fmenu').querySelectorAll('button').find(b => b.textContent === label); }
+  menu();
+  check('context click inside selection preserves the set', selected(), batch);
+  check('single-only menu actions are present and disabled', ['js.menu.preview', 'js.preview.openext', 'js.files.menu.reveal', 'js.files.menu.terminal'].map(k => menuItem(k).disabled), [true, true, true, true]);
+  menuItem('js.menu.preview').click(); check('disabled menu action cannot run', [actions.length, !!doc.querySelector('.fmenu')], [0, true]);
+  check('open menu consumes Escape rather than clearing selection', shortcut(doc.querySelector('.fmenu'), 'Escape'), false);
+  key(doc.querySelector('.fmenu'), 'Escape'); check('closing menu keeps selected rows', selected(), batch);
+  menu(); menuItem('js.menu.copyrel').click();
+  menu(); menuItem('js.menu.copyabs').click();
+  menu(); menuItem('js.files.send').click();
+  check('menu copies newline paths and sends each path in visible order', [copied, sent], [[batch.join('\n'), batch.map(path => '/multi/' + path).join('\n')], batch]);
+  p.all('.fattachment button')[0].click(); p.all('.fattachment button')[1].click();
+  check('footer batch actions keep host signatures', [sent.slice(3), copied.slice(-1)[0]], [batch, batch.join('\n')]);
+  menu('d.txt'); check('context click outside set replaces selection', selected(), ['d.txt']); key(doc.querySelector('.fmenu'), 'Escape');
+  p.all('.fhd button')[2].click();
+  check('open popover prevents global Escape clearing selection', [shortcut(p.tree, 'Escape'), selected()], [false, ['d.txt']]);
+  key(p.at('.fpop'), 'Escape');
+  p.at('.fcrumb-trail').click(); check('path editor keeps native select-all', shortcut(p.at('.fpath'), 'a', { metaKey: true }), false); key(p.at('.fpath'), 'Escape');
+  delete win.WsTerm;
+
+  for (var i = 0; i < 4; i++) {
+    p.all('.fview-modes button')[i].click(); click('a.txt'); click('c.txt', { ctrlKey: true });
+    check('multi-select in directory view ' + i, selected(), ['a.txt', 'c.txt']);
+    var box = p.at('.fdirectory'); box.getBoundingClientRect = () => ({ left: 10, top: 10, right: 300, bottom: 300 });
+    p.all('.fentry').forEach((row, index) => row.getBoundingClientRect = () => ({ left: 20, right: 200, top: 20 + index * 30, bottom: 40 + index * 30 }));
+    function pointer(type, target, x, y, modifiers = {}) { return event(target, type, Object.assign({ button: 0, pointerId: 1, clientX: x, clientY: y }, modifiers)); }
+    pointer('pointerdown', box, 250, 45); pointer('pointermove', doc, 15, 108);
+    check('marquee intersects rows in view ' + i, [selected(), !!doc.querySelector('.fmarquee')], [['a.txt', 'b.txt'], true]);
+    pointer('pointerup', doc, 15, 108); event(box, 'click');
+    check('marquee survives release click and removes rectangle ' + i, [selected(), !!doc.querySelector('.fmarquee')], [['a.txt', 'b.txt'], false]);
+    pointer('pointerdown', box, 250, 135, { metaKey: true }); pointer('pointermove', doc, 15, 165); pointer('pointerup', doc, 15, 165); event(box, 'click');
+    check('Cmd marquee adds to existing selection ' + i, selected(), ['a.txt', 'b.txt', 'd.txt']);
+    var row = p.at('[data-entry="c.txt"]'); pointer('pointerdown', box, 40, 115, { target: row }); pointer('pointermove', doc, 100, 220); pointer('pointerup', doc, 100, 220);
+    check('row drag never starts marquee ' + i, [selected(), !!doc.querySelector('.fmarquee')], [['a.txt', 'b.txt', 'd.txt'], false]);
+    event(box, 'click'); check('plain whitespace click clears ' + i, selected(), []);
+  }
+  p.all('.fview-modes button')[4].click(); click('a.txt'); click('c.txt', { ctrlKey: true, shiftKey: true });
+  check('column modifiers remain plain single selection', [selected(), p.at('.fdirectory').getAttribute('aria-multiselectable'), shortcut(p.tree, 'a', { ctrlKey: true })], [['c.txt'], 'false', false]);
+  p.all('.fview-modes button')[0].click(); click('a.txt'); click('c.txt', { ctrlKey: true });
+  p.instance.navigate('folder'); await answer(take('multi', 'list', 'folder'), listing('/multi/folder', [{ name: 'inside.txt' }], true));
+  check('directory navigation clears full selection', [selected(), p.instance.selection().path], [[], 'folder']);
+  p.instance.navigate(''); click('a.txt'); click('c.txt', { ctrlKey: true });
+  p.instance.newTab({ dir: '' }); await answer(take('multi', 'list'), listing('/multi', entries, true));
+  p.all('.ftab-select')[0].click(); check('live tabs retain the full set without persisting it', selected(), ['a.txt', 'c.txt']);
+  var directory = p.at('.fdirectory');
+  event(directory, 'pointerdown', { button: 0, pointerId: 7, clientX: 250, clientY: 45 });
+  event(doc, 'pointermove', { pointerId: 7, clientX: 15, clientY: 108 });
+  shortcut(directory, 'Escape'); check('Escape cancels a live marquee', [selected(), !!doc.querySelector('.fmarquee')], [[], false]);
+  p.instance.destroy(); peer.instance.destroy();
+  check('marquee document listeners are retired', ['pointermove', 'pointerup', 'pointercancel'].map(k => doc.listeners[k].length), [0, 0, 0]);
+}
 (async function () {
+  await multiSelectChecks();
   // Candidate-root refusal must not cancel legitimate active-root work.
   var race = explorer('race'); race.instance.shown();
   var initial = take('race', 'list');
