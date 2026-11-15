@@ -810,7 +810,17 @@
       "registered_at": "2026-11-15T02:02:38Z"
     },
     "261115-feat-ws-dashboard-observed-session-model": {
-      "registered_at": "2026-11-14T23:03:59Z"
+      "registered_at": "2026-11-14T23:03:59Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T05:14:53Z",
+        "impl": {
+          "branch": "impl/develop/shove-stem-disk"
+        }
+      }
     },
     "261115-feat-ws-dashboard-search-drawer-answer-agent": {
       "registered_at": "2026-11-15T01:15:10Z",
