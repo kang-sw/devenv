@@ -1160,7 +1160,8 @@ type State struct {
 	Held int `json:"held"`
 	// Page is the conversation's dashboard page path.
 	Page string `json:"page"`
-	// Error is the last launch, turn, or command error; cleared when a turn starts.
+	// Error combines the last launch, turn, or command error (cleared when a
+	// turn starts) with current lead advisories, which clear on recovery.
 	Error     string `json:"error,omitempty"`
 	CreatedAt string `json:"created_at"`
 	ClosedAt  string `json:"closed_at,omitempty"`
@@ -1316,6 +1317,9 @@ type conv struct {
 	observed      *wslive.ModelObservation
 	observations  []wslive.ModelObservation
 	batches       []wslive.BatchView
+	// rejoinKeyPending retries a failed attach's key check on State reads
+	// until it succeeds; healthy reads never touch the key store.
+	rejoinKeyPending bool
 	// approvals are a lead's waiting tool permission prompts, oldest first;
 	// activeMode and bgTasks are what its harness last reported.
 	approvals  []ApprovalRequest
@@ -1711,6 +1715,13 @@ func (c *conv) state() State {
 	}
 	st.Held = len(held) + len(c.rec.Mail) + len(c.rec.Queued) + len(c.rec.Reports)
 	st.Error = c.lastErr
+	if c.rejoinKeyPending {
+		if err := c.r.opts.LeadKeys.EnsureLead(c.rec.Root, c.rec.WSKey); err != nil {
+			st.Error = appendDiagnostic(st.Error, "rejoin ws session key (advisory): "+err.Error())
+		} else {
+			c.rejoinKeyPending = false
+		}
+	}
 	st.ContextTokens = c.contextTokens
 	if c.observed != nil {
 		observed := *c.observed
@@ -2327,9 +2338,10 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 	}
 	if attach {
 		// Root lead keys remain parentless under the existing key-store contract.
-		if err := c.r.opts.LeadKeys.EnsureLead(rec.Root, rec.WSKey); err != nil {
+		err := c.r.opts.LeadKeys.EnsureLead(rec.Root, rec.WSKey)
+		c.setStatus(func() { c.rejoinKeyPending = err != nil })
+		if err != nil {
 			diagnostic := "rejoin ws session key (advisory): " + err.Error()
-			c.setStatus(func() { c.lastErr = appendDiagnostic(c.lastErr, diagnostic) })
 			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", rec.ReplyID, diagnostic)
 		}
 	}
@@ -2346,6 +2358,7 @@ func (c *conv) startLead(rec Record, def Profile, attach bool) error {
 		if err := c.r.opts.LeadKeys.EnsureLead(rec.Root, rec.WSKey); err != nil {
 			return fmt.Errorf("ws session key: %w", err)
 		}
+		c.setStatus(func() { c.rejoinKeyPending = false })
 		// One step with the check that the session is still the daemon's:
 		// the row written here names no process and is not stopped, so a
 		// terminal login is refused from now until the process it gets has

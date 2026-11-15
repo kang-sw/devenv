@@ -133,7 +133,7 @@ func appendDiagnostic(existing, diagnostic string) string {
 	if existing == "" {
 		return diagnostic
 	}
-	if strings.Contains(existing, diagnostic) {
+	if existing == diagnostic || slices.Contains(strings.Split(existing, "; "), diagnostic) {
 		return existing
 	}
 	return existing + "; " + diagnostic
@@ -264,7 +264,8 @@ func (c *conv) reconcileLeadPermission() {
 	}
 	level, source, err := c.r.leadPermission(c.rec, c.dir)
 	if err != nil {
-		c.setStatus(func() { c.lastErr = appendDiagnostic(c.lastErr, err.Error()) })
+		// State projects the current selection error without retaining history
+		// in the terminal error slot or letting it suppress a process exit.
 		return
 	}
 	if source != "explicit" {
