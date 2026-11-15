@@ -310,3 +310,45 @@ checks; approved A references and requested source-fragment provenance remain
 preserved, not a raw hash-catalog readiness gate. Builds, suites, browser captures,
 providers, live probes and daemon/session changes are deferred to separately
 authorized implementation verification; none is evidence supplied by this revision.
+
+### Result (14468d0e0) - 2026-11-15
+
+Implemented Phase 2 first under MAIN's explicit 03:33:37Z grant. Phase 1 has no
+Result and remains unfinished for its own subsequent telemetry head; this ticket
+stays ready. Commits `86da6dc70` and `14468d0e0` add compact A session hovers and
+current-agent model/name hovers without changing intake, storage, adapters,
+protocol, model controls, row/header height or last-message presentation.
+
+The popup reuses snapshot context/cost/turn figures and existing per-agent
+model/effort stats. Lead output model and eligible last-turn t/s remain unknown;
+agent adapter-reported model is explicitly distinct from verified output
+identity. Missing effort/history stays omitted. Snapshot time is labelled last
+snapshot, not a model observation. No parent inheritance or configured alias
+substitution was introduced. Only the rail reply-ID title was removed.
+
+Verification:
+- Isolated offline `go test ./internal/wsdashboard -run
+  'Test(SessionHover|AgentModelHover|AgentRowStats|AgentActiveTime|RailScript|RailView|RailMarks)'
+  -count=1 -timeout=3m`: passed (1.083s). Coverage includes escaped evidence,
+  unavailable/stale/idle states, independent agents, tooltip scope and SSE hover
+  replacement. Initial fixture failures were missing adapter metadata and the
+  escaped plus-sign expectation, corrected without changing implementation.
+- Isolated offline `go test ./internal/wsi18n -count=1 -timeout=2m`: passed
+  (1.109s); all 11 locale tables include the new labels. Node syntax and
+  `git diff --check`: passed.
+- One independent logic/state lite review of `9c795e410..14468d0e0`: clean,
+  no Critical, Important or Minor findings; no re-review.
+- Compared `/tmp/ws-model-hover.oA4BBg/sanity-dark.png` vs
+  `ai-docs/tickets/assets/261115-feat-ws-dashboard-observed-session-model/824-session-hover-varA-1280-dark.png`:
+  mismatch. The single static sanity capture retains A's compact 320px surface,
+  placement, context and three stats; unlike the populated reference it shows
+  honest unknown identity/rate, additional snapshot provenance, English labels
+  and fallback clocks (the fixture omits the page ticker). Owner-visible visual
+  acceptance remains after MAIN's merge and authorized swap, not a head gate.
+  The first capture command needed the fixture's rail-open class; no capture
+  was taken by that failed attempt.
+
+Omitted: Phase 1 collection/history, full suites, browser/viewport matrix,
+additional screenshots, and all shared-daemon/runtime/build/swap operations.
+No sync/rebase or moving-target retest gate was added; MAIN accepts this base
+and owns integration/runtime acceptance.
