@@ -758,6 +758,9 @@
     "261115-bug-ws-whiteboard-viewed-first-update-longtask": {
       "registered_at": "2026-11-15T05:02:08Z"
     },
+    "261115-bug-ws-worktree-acquire-concurrent-pool-claim": {
+      "registered_at": "2026-11-15T06:02:35Z"
+    },
     "261115-bug-ws-worktree-pool-protected-deliverable-reuse": {
       "registered_at": "2026-11-14T23:49:42Z"
     },
