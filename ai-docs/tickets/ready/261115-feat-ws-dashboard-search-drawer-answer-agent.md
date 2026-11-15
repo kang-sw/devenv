@@ -548,3 +548,83 @@ Enter does nothing and the arrow-key hint shows; light and dark
 screenshots at 1280 and ≤640 px. Recheck the two stacking minors of
 `261114-bug-ws-dashboard-search-palette-minors` (toast behind the modal,
 shell search-button overlap) and record whether the drawer changed them.
+
+### Result (96c4dd788) - 2026-11-15
+
+Phase 2 implementation and scoped verification are delivered on the retained
+implementation branch. Lead-owned integration onto the pending large-file split
+and owner on-screen acceptance remain pending; this records no visual match,
+runtime swap, ticket closure or merge.
+
+- `54fc4a629` first recorded confirmed layout A, the verbatim owner refinement
+  and rolling-context interpretation, with the tracked selected CSS reference.
+  `82e4e540f` recorded the later owner chrome deletions before their source edit.
+  The Phase 1 plan and Results remain unchanged.
+- `47e35e870` adds optional request/response/SSE context, capped at 1600 Unicode
+  code points. The prompt requests a cited answer plus a cumulative summary;
+  partial summary tags and summary text stay out of displayed answer text.
+  Only successful terminal answers publish context. Legacy requests and
+  plain-text payloads without context retain their previous behavior.
+- `40ea004f5` hosts the search sheet in the shared drawer, with the handle
+  between git and panels, shared height, persisted open state/query/slot, and
+  layout A's answer-left/five-results-right body. Tracker rendering receives
+  host-neutral sheet/state/answer hooks; dashboard.js owns transport, browser
+  history, citations, filesystem and preview integration.
+- The client serializes answer creation and generation-guards streams, stale
+  POST responses, cancellation and reset. Follow-ups send the latest cumulative
+  summary, not the previous Q&A alone. Per-session browser context survives
+  reload; reset clears it without deleting the five successful answer records.
+  Selecting old history does not roll the current context backward.
+- `96c4dd788` completes the confirmed chrome refinement: a 26px main input with
+  3px vertical padding; no scope capsule or command/session strip in DOM,
+  rerendering, CSS or keyboard routing. Alt+0 and Up-to-strip are removed.
+  Session switching stays in the existing rail. Arrow selection alone arms
+  result Enter; query edits, slot changes and local reranks clear selection,
+  while async batches preserve explicit row keys. Modified result Enter and
+  IME/editor guards remain. Non-agent pages show the arrow-only hint.
+- Citation markers are escaped text until validated. Board IDs resolve against
+  session rows; file paths and positive line numbers are checked through the
+  existing contained preview route without alternate roots. Valid links dispatch
+  through palettePick/WsPreview; invalid or unavailable targets remain literal.
+  Citation validation is cached within an answer, with stale DOM updates guarded.
+- Fake state/transport tests cover multiple cumulative turns, Unicode caps,
+  reset/history, legacy optional fields, serialized POST races, stale/cancelled
+  summaries, local/non-session gates, streaming, citation dispatch and fallback.
+  Existing renderer/drawer tests now cover no initial selection, keyboard picks,
+  persistence, shared search height/fold/drag and handle offsets. A narrow
+  chrome-deletion regression rejects the removed DOM/routing paths and pins the
+  short input. All eleven language tables carry the new answer controls and
+  revised hints; six deleted-chrome keys were removed consistently.
+- Passing offline verification from `agents-plugin-tool/`:
+  `go test ./internal/wsagent -run '^TestSearchAnswer' -count=1 -timeout=90s`
+  (context leaf, 6.647s at integrated `b2a202e164`);
+  `go test ./internal/wsdashboard -run
+  '^Test(SearchAnswerDrawerBehavior|SearchPalette|DrawerRoomResizeFrame|DrawersShareOneHeight|DrawerFoldButtons)'
+  -count=1 -timeout=90s` (1.591s after the chrome deletion);
+  `go test ./internal/wsi18n -count=1` (1.106s after the chrome deletion).
+  Every Go invocation used `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`.
+  JS syntax and diff-whitespace checks passed. Raw logs stay under
+  `/tmp/search-drawer-phase2/`, outside the commit.
+- The single independent logic-lite pass found no actionable correctness or
+  test-integrity findings over `09998d579..40ea004f5`. The later approved chrome
+  deletion is covered by scoped tests, not a second review pass. The earlier
+  contract leaf corrected one fixture-only assumption about qBatch appending
+  rows; no product contract was weakened.
+- Final verification after the comment/Result update repeated only the same
+  scoped dashboard selector (1.212s) and wsi18n (0.941s), both passing. Ticket
+  guardrails, JS syntax and diff-whitespace checks passed; the owned test/Node
+  process scan was empty. The ticket freshness advisory is accepted: the owner
+  explicitly settled these refinements and the confirmed UI-fast boundary adds
+  no new design-review pass.
+- Compatibility is **T0**: optional additive context fields and dashboard assets.
+  Read-only profile ceilings, loopback/Origin gates, private service routes and
+  one-shot process semantics are unchanged. No real Pi/model/provider/network
+  probe, shared daemon, port 29417, install or runtime action was used.
+- Omitted by the confirmed UI-fast boundary: the old screenshot/theme/width
+  matrix, broad suites/builds/audits and the headless script extension. Approved
+  references and the feedback screenshot were inspected, but no new capture or
+  side-by-side visual match is claimed. Removing the modal eliminates its
+  top-layer toast obstruction structurally; actual toast/shell overlap and
+  visual acceptance remain for the owner's on-screen check after lead integration.
+  The branch touches frozen `wsdashboard/assets/dashboard.js` and `dashboard.css`;
+  the lead coordinates its split re-sync and integration. No self-sync occurred.

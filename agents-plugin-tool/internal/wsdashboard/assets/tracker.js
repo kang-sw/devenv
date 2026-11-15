@@ -155,9 +155,9 @@
 //   searchState      optional {load(), save({query, slot})} browser persistence
 //   searchAsk(text)  optional answer action for Enter without an arrow selection
 //   searchAnswerMount(element) optional host-owned answer pane and transport
-//   searchRows(update) optional host rows: {group (0..4), kind, title, text?,
-//                    hint?, id?, topic?, href?, at?}; session labels (the palette's
-//                    strip), then topics, bodies, items, answers (its board slot).
+//   searchRows(update) optional host rows: {group (1..4), kind, title, text?,
+//                    hint?, id?, topic?, at?}: topics, bodies, items and answers.
+//                    Legacy group-0 session rows are ignored.
 //                    Read on open; update(rows) may replace them as older board
 //                    pages load.
 //   searchPick(row, o) opens a selected host row; o.keep (Ctrl+Enter) leaves the
@@ -173,7 +173,6 @@
 //   fileOpen(name, dir)   opens file name of absolute directory dir in the host's
 //                    default app
 //   fileLocal()      -> whether the browser is on the host's machine (path mode)
-//   fileScope()      -> the name of the folder the file slots search, for its label
 //   pageParent       where the store page node goes; while a store page shows, the
 //                    body carries the class tk-paged and the host's CSS hides its
 //                    own conversation column and session drawer
@@ -6110,7 +6109,7 @@
   function leavePage() { history.pushState(null, '', location.pathname + location.search); applyRoute(); }
 
   // One palette: five result slots (board, files, content, tracker, tracker
-  // content) and a jump/command strip (sessions, stores, actions). The host
+  // content), with an optional host-owned answer column. The host
   // supplies the board rows and their picker (O.searchRows, O.searchPick) and
   // the file hooks (O.fileFind, O.fileSearch, O.fileList, O.filePreview,
   // O.fileOpen), so the renderer never reaches a page's file routes itself.
@@ -6265,7 +6264,7 @@
     clearTimeout(qs.timer); qs.timer = 0;
   }
   function qDone(rows) { var s = qSlot0(); s.rows = rows; s.state = 'done'; return s; }
-  // qRun starts a generation for the input's text: the local slots and the strip answer at
+  // qRun starts a generation for the input's text: the local slots answer at
   // once, the async slots after QDEBOUNCE.
   function qRun() {
     var q = $('tkqin').value, t = q.trim(), gen = ++qs.gen, now = Date.now();
@@ -6286,7 +6285,7 @@
     qRender();
     if (on.files || on.content || on.tnote) qs.timer = setTimeout(function () { qs.timer = 0; if (gen === qs.gen) qFetch(gen, t, on); }, QDEBOUNCE);
   }
-  // qLocal re-ranks the local slots and the strip for the same query, after the host's rows
+  // qLocal re-ranks the local slots for the same query, after the host's rows
   // changed (an older board page loaded); the async slots are left as they are.
   function qLocal() {
     var t = $('tkqin').value.trim();
