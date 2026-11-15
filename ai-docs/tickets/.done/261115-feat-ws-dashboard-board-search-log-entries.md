@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: d0ac60f68b97fff6
 sage-review-completeness-reviewed: d0ac60f68b97fff6
+completed: 2026-11-15
 ---
 
 # Board search: index topic log entries and panels, including older history pages
@@ -238,3 +239,62 @@ Verification:
   Cmd/Ctrl+Enter keeps focus in the palette.
 - Focused Go tests with `-run` for the touched tests, then an owned
   process scan.
+
+### Result (670be1772) - 2026-11-15
+
+Implemented and independently reviewed the board-entry search contract on
+`impl/develop/expel-rural-nail`.
+
+- Added one group-5 row per live or inert history-page article. Log/system
+  text excludes its time; panels combine their own recap and body, including
+  inert framed sources. Nested versions retain separate text and identity.
+  Entry rows use prose scoring and excerpts, sort after earlier groups at
+  equal score, stay out of empty-query recents and have topic-plus-entry keys.
+- Topic body rows now require the topic-owned `.tdoc > .doc-body`, so a
+  recap-only/bodyless topic cannot inherit a stream panel's body.
+- Entry picks hand off to Overview first, wait through its entering/exit
+  ownership, re-resolve the owning live topic and call existing
+  `wbHistory.loadTarget`. The preparation callback unfolds/leaves a tracker
+  page/shows the board once, even when history invokes it repeatedly.
+  History retains disclosure, flash and navigation ownership. Entry focus
+  uses `preventScroll`, is skipped for modified Enter and never calls
+  `scrollIntoView` or the generic palette flash. Missing entries fall back
+  to topic navigation.
+- Cosmetic adaptation: the landed asset split moved paletteRows/palettePick
+  into `assets/dashboard-tracker.js`, not the old monolithic dashboard.js.
+  Consumed the existing history API without editing stream.js/page.tmpl,
+  composer, selection or history-content implementation. No visible label,
+  i18n key or cross-version surface changed (no compatibility tier).
+- Extended the existing Node host/scorer cases for ownership, inert pages,
+  selection keys, focus, missing targets and Overview's asynchronous,
+  entering and synchronous reduced-motion handoffs. Added
+  `TestSearchPaletteRenderedEntries`: production templates rendered in Go,
+  parsed with the existing HTML dependency and exercised through a bounded
+  Node DOM adapter. It verifies live logs, folded system rows, older pages,
+  panel versions/frame sources, body isolation and unchanged indexing input.
+  This is not native browser layout or execution evidence.
+- Passing offline verification from `agents-plugin-tool/`, with
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+  `go test ./internal/wsdashboard -run
+  '^Test(SearchPalette|SearchDrawerSplitOwnership|SearchAnswerDrawerBehavior|DashboardSourceAssembly)'
+  -count=1 -timeout=90s` (1.053s), and
+  `go test ./internal/wsi18n -count=1` (1.739s).
+  Direct Node palette cases, tracker/test syntax, assembled dashboard syntax
+  and `git diff --check` also passed. Logs are in
+  `/tmp/board-search-entries/`, outside the commit. The first rendered fixture
+  run failed because its document adapter lacked querySelectorAll; fixed the
+  fixture root, without changing implementation or behavioral assertions.
+- The one required independent logic-lite review of
+  `891231c3d..670be1772` was clean, with no findings. It was static only;
+  no second review or extra scouting/implementation worker ran.
+- MAIN's 07:41:03 UI-fast clarification supersedes the old browser/visual
+  verification recipe for this invocation. Omitted: native DOM/clip geometry,
+  daemon-backed older-page/system-run navigation, screenshots/visual matrices,
+  and the headless script extension. These are not claimed as verified;
+  on-screen acceptance belongs to the lead/owner after integration. No broad
+  dashboard package test, provider/network/download, shared daemon/29417,
+  install/reload, self-sync/merge, unknown signal or push was used. The final
+  process scan found no remaining owned test/Node processes. Ticket guardrails
+  passed; the sage freshness advisory is accepted because the ticket diff only
+  records completed work and the caller's verification boundary, not a new
+  design decision or phase-plan change.
