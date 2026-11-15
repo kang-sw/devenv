@@ -1065,8 +1065,12 @@ func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) 
 	if f.title != nil && wsxmlcmd.NonEmpty(p, cmd.At("<wb:title>"), *f.title) {
 		next.Title = *f.title
 	}
+	// Clearing a non-policy item's options repairs legacy residue (an older
+	// daemon stored them; checkPolicyShape refuses new ones and the view hides
+	// them), so it needs no re-ask: its answer was never an option pick.
+	repair := !f.hasOptions && prev.Class != ClassPolicy && class != ClassPolicy
 	if f.hasOptions || clear["options"] {
-		if after != StatusOpen {
+		if after != StatusOpen && !repair {
 			p.Add("%s: %s is %s; options change only on an open item, since its answer is stored as an option letter (send status=\"open\" in the same patch to re-ask it)", cmd.At("<wb:option>"), FormatID(next.ID), after)
 		} else {
 			next.Options = f.options
@@ -1088,7 +1092,15 @@ func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) 
 	if f.hasLinks || clear["links"] {
 		next.Links = f.links
 	}
-	checkPolicyShape(p, cmd.Label(), next)
+	// An open item that still holds legacy options must be repaired before
+	// other edits. A closed one cannot change class or gain options, so a
+	// patch that keeps it closed and leaves its shape alone (status, why,
+	// title, links) is not held to the shape it was stored with.
+	closedShapeKept := prev.Status != StatusOpen && after != StatusOpen &&
+		!f.hasOptions && !clear["options"] && class == "" && f.recommend == nil
+	if !closedShapeKept {
+		checkPolicyShape(p, cmd.Label(), next)
+	}
 	if len(p.List) > before {
 		return id
 	}

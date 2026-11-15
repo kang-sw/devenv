@@ -85,6 +85,43 @@ func TestNonPolicyOptionsRepairPatches(t *testing.T) {
 	// The same patch may remove choices while reclassing away from policy.
 	mustApply(t, st, addXML(ClassPolicy, "t", "choice", "x", "y"))
 	mustApply(t, st, `<wb:patch id="2" class="check" clear="options"/>`)
+
+	// A legacy non-policy item that is no longer open keeps accepting edits
+	// that leave its shape alone, and clear="options" repairs it without a
+	// re-ask; new choices on it are still refused.
+	for _, status := range []string{StatusAnswered, StatusAssumed, StatusWithdrawn, StatusSuperseded} {
+		t.Run("closed/"+status, func(t *testing.T) {
+			legacy := func() *State {
+				st := &State{}
+				mustApply(t, st, addXML(ClassCheck, "t", "legacy"))
+				st.Items[0].Options = []string{"x", "y"}
+				st.Items[0].Recommendation = "b: safer"
+				st.Items[0].Status = status
+				st.Items[0].Answer = "ok"
+				return st
+			}
+			for _, patch := range []string{
+				`<wb:patch id="1" status="superseded"/>`,
+				`<wb:patch id="1"><wb:why>Context changed</wb:why></wb:patch>`,
+				`<wb:patch id="1"><wb:title>Renamed</wb:title></wb:patch>`,
+				`<wb:patch id="1"><wb:link>docs/new.md</wb:link></wb:patch>`,
+			} {
+				st := legacy()
+				mustApply(t, st, patch)
+				if got := item(t, st, 1); got.Class != ClassCheck || !reflect.DeepEqual(got.Options, []string{"x", "y"}) || got.Recommendation != "b: safer" || got.Answer != "ok" {
+					t.Fatalf("%s changed the legacy shape or answer: %+v", patch, got)
+				}
+			}
+			st := legacy()
+			wantProblems(t, refused(t, st, `<wb:patch id="1" clear="options"/>`), `use class="policy" for a pick`)
+			mustApply(t, st, `<wb:patch id="1" clear="options"><wb:recommend></wb:recommend></wb:patch>`)
+			if got := item(t, st, 1); got.Status != status || got.Answer != "ok" || len(got.Options) != 0 || got.Recommendation != "" {
+				t.Fatalf("clear did not repair the closed item in place: %+v", got)
+			}
+			wantProblems(t, refused(t, legacy(), `<wb:patch id="1"><wb:option>z</wb:option></wb:patch>`), "options change only on an open item")
+			wantProblems(t, refused(t, legacy(), `<wb:patch id="1" status="open"><wb:option>z</wb:option></wb:patch>`), "only for policy items")
+		})
+	}
 }
 
 func TestStoredNonPolicyOptionsRenderHiddenWithoutWrites(t *testing.T) {
