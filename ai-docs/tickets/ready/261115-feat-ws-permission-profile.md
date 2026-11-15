@@ -663,6 +663,77 @@ provider/harness launch, UI acceptance, network, SSH, daemon operation, push or
 merge ran. The existing phase plans, owner decisions and prior Results remain
 unchanged.
 
+#### Edition (c5f54ed4b) - 2026-11-15
+
+**Phase 2a delivery and independent fix verification — UI deferred to Claude mockup pass.**
+
+The root-lead/backend slice is delivered through `c5f54ed4b`; this is not a
+whole-Phase 2 Result. **worker current-parent ceiling deferred pending (1177)**
+remains unchanged, and the ticket stays `ready/` for its remaining scope.
+No worker permission application, new lineage, UI or later-adapter work landed.
+
+The first independent full-scope lite review of
+`4f78654d6..97faaedd55` found two Critical defects and one Important test-oracle
+issue. The single correction pass in `c5f54ed4b` addressed all three:
+
+- Permitted native controls now deliver their literal accepted mode through
+  the existing process control; common intent is mapped only when selection
+  establishes a target or an actual process launches. The regression requires
+  literal `auto` delivery for a trusted native request on an explicit
+  workdir-write lead, separately checks requested versus observed mode, and
+  retains the same holder across reattach.
+- Replay completion reconstructs pending explicit selection delivery from the
+  current sidecar and native target, then uses the existing safe-boundary
+  control owner. The regression lowers full to read-only during an active
+  turn, replaces the daemon before any plan observation, replays the old
+  bypass observation, and requires literal `plan` delivery to the same holder
+  with one launch and no duplicate input. Stop/resume/reopen retain the lower
+  selection. A refused replay reconciliation keeps the holder and conservative
+  advisory evidence, with diagnostics rather than a kill solely for mismatch.
+- Launch expectations independently pin literal `plan`, `acceptEdits` and
+  `bypassPermissions`, rather than deriving expected flags from the mapping
+  implementation. Pi still has no fabricated native mode.
+
+MAIN's **2026-11-15 17:58:19Z** disposition explicitly required one additional
+fresh read-only review after the correction pass, overriding the original lite
+no-re-review allocation only for the fixes against `97faaedd55` and the original
+three findings. That reviewer inspected
+`97faaedd55..c5f54ed4b` and returned **clean: all three fixed, zero remaining
+Critical, Important or Minor findings**. Both reviewers used source/test
+inspection, not independent test execution; no broader second sweep ran.
+
+Review artifacts:
+
+- Initial findings:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@97ab43fd/review-paths/f43f06f5-01-permission-phase2a-lite.md`.
+- Fresh bounded fix verification:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@97ab43fd/review-paths/2aea2386-01-permission-phase2a-fix-verification.md`.
+
+Final verification from `agents-plugin-tool/`, with complete output read:
+
+```sh
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -race -v -count=1 -run '^TestPermission'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsagent -v -count=1 -run '^(TestClaudeArgsAllOffByDefault|TestPiArgsAllOffByDefault|TestLeadControlRoutesTakeTheTrustedGate|TestLeadControlRoutesThroughTheDaemonsGate|TestLeadResumesInTheModeTheHarnessReports|TestPiHeldParentSnapshotNeverInventedOnReattach|TestRecordUnknownMembersRoundTrip|TestRegisteredPermissionModeCreateLeadAdmission|TestRegisteredPermissionModeSetAdmission)$'
+GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./cmd/ws-mcp -v -count=1 -run '^(TestAgentMCPCommandUsesTheStartingPackagesLauncher|TestAgentMCPCommandFailsWithoutALauncher)$'
+```
+
+All three nonempty selectors passed (14.531 s, 2.452 s and 0.907 s respectively).
+The last selector compiles the production registration composition and checks
+launcher construction using temporary inert files; it executes no launcher or
+harness. `git diff --check` passed. The first correction-test run passed both
+actual-control assertions but failed a supplemental post-Stop history check:
+`fakeHolders.Stop` deletes that holder and its stored history. The test now
+checks original-input duplication before deliberate Stop and exact new inputs
+on each later holder; no implementation behavior was weakened for the fixture.
+
+The preceding server/JSON contract and bounded T0 evidence remain applicable.
+The correction adds only transient reconciliation state, not a stored field,
+protocol/schema change, second process/input owner or permission source.
+Diagnostics still go to Runner.Log only. Actual warning dialogs, production
+client preflight/reconnect behavior, worker admission, live confinement, Windows
+execution and all deferred phases remain unimplemented or unverified as already
+recorded. No acceptance beyond Phase 2a is claimed.
+
 ### Phase 3: Add the Codex per-run permission launch path
 
 Deferred until the Codex adapter provides its settled exact-version launch
