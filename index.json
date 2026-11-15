@@ -912,7 +912,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec4/waiting-on",
         "phase": "active",
-        "touched_at": "2026-11-15T03:54:29Z"
+        "touched_at": "2026-11-15T03:55:35Z",
+        "impl": {
+          "branch": "impl/exec4/waiting-on/area-drift-dwarf"
+        }
       }
     },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
