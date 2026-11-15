@@ -797,8 +797,10 @@ that loads the user's own harness setup (no profile allowlist, plugins, or
 system prompt of the runner's), started from the built-in `lead-claude` or
 `lead-pi` profile. `POST /agents` refuses a lead profile; a lead is spawned
 by `POST /agents/leads {root, harness: "claude"|"pi", model?, effort?,
-permission_mode?}` (201 with the state; `root` must be inside git, since the
-session key is minted at the canonical root). Differences from a support
+permission_mode?, plugin_isolation?}` (201 with the state; `root` must be
+inside git, since the session key is minted at the canonical root).
+`plugin_isolation` accepts `default` (the default, replace ws only) or
+`isolated` (bundled plugins only). Differences from a support
 conversation:
 
 - **Process.** The harness runs under a session holder (`internal/wsholder`,
@@ -933,8 +935,9 @@ conversation:
   `internal/wsagent/runner.go:1000-1022`,
   `internal/wsagent/permission.go:214-242`).
 - **Common permissions.** `POST /agents/leads/permission {root, harness,
-  permission_level, permission_full_ack?, model?, effort?}` spawns a lead
-  (201 with its state); `POST /agents/<id>/settings/permission
+  permission_level, permission_full_ack?, model?, effort?, plugin_isolation?}`
+  spawns a lead (201 with its state; `plugin_isolation` has the same choices
+  and default as `/agents/leads`); `POST /agents/<id>/settings/permission
   {permission_level, permission_full_ack?, model?, effort?}` changes one
   (200 with its state). Both take the trusted gate, require a level from
   `read-only`, `workdir-write`, `full`, and require
@@ -942,7 +945,7 @@ conversation:
   unknown or null fields (including `permission_mode`) with 400; unsupported
   selections and worker selections are also 400. Only the trusted route
   supplies user authority; an acknowledgement alone grants none
-  (`internal/wsagent/http.go:94-106,160-171,183-207,249-271,364-398`,
+  (`internal/wsagent/http.go:94-106,158-177,183-207,249-271,364-398`,
   `internal/wsagent/permission.go:78-96,180-210`). These are lead-only intent,
   not sandbox guarantees or worker capability changes: Claude maps the
   levels to `plan`, `acceptEdits`, `bypassPermissions` respectively, while
