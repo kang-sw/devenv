@@ -807,9 +807,14 @@ historical, superseded by MAIN's later bounded implementation authority.
   treatment matched at component level; extra truthful metadata height and
   missing whole-page session/composer chrome prevent pixel-identical/full-host
   acceptance. No new screenshot or runtime claim is made by backend checks.
-- The single newly authorized 967-delta compatibility Lite remains pending at
-  this checkpoint. No broad re-sweep, extra review round or later gate chase is
-  authorized. MAIN owns the one final fresh develop sync and landing.
+- The single newly authorized 967-delta compatibility Lite completed at
+  `76dff56c2` with **0 Critical / 0 Important / 0 Minor** findings. The fresh
+  independent reviewer read the actual allocated deltas and current merge seams;
+  it did not rerun tests or claim runtime acceptance. Findings:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@721a59b4/review-paths/9749f456-01-261114-live-summary-967-compat-lite.md`.
+  No broad re-sweep or additional review round was run. MAIN owns the one final
+  fresh develop sync, after which only affected verification remains before the
+  retained implementation head is handed back; landing is still lead-owned.
 
 omitted: Full-suite/runtime/provider/Windows/whole-page visual acceptance; new
 procedures or raw evidence packets; ticket closure; self-initiated integration
