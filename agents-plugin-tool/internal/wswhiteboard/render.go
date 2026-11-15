@@ -155,6 +155,10 @@ const trackerKeyPrefix = "js.tk."
 // standalone and embed boards never load. Keep its growing table off both.
 const filesKeyPrefix = "js.files."
 
+// gitKeyPrefix belongs to dashboard-git.js, which static boards never load.
+// Its controls must not consume the standalone or embed translation budget.
+const gitKeyPrefix = "js.git."
+
 // codeKeyPrefix is the copy button's standalone client subset (code.js).
 const codeKeyPrefix = "js.wb.copy"
 
@@ -219,7 +223,7 @@ func buildAssets(read func(name string) ([]byte, error)) (*pageAssets, error) {
 			"href":        rowHref,
 			"actionAttrs": panelActionAttrs,
 			"t":           func(key string, args ...any) string { return wsi18n.T(lang, key, args...) },
-			"i18n":        func() template.JS { return wsi18n.ScriptExcept(lang, trackerKeyPrefix, filesKeyPrefix) },
+			"i18n":        func() template.JS { return wsi18n.ScriptExcept(lang, trackerKeyPrefix, filesKeyPrefix, gitKeyPrefix) },
 		}
 		// The file's template is "page.tmpl" under the root "page", as
 		// ParseFS names it.

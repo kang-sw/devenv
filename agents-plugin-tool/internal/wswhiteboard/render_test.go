@@ -247,7 +247,7 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic has-doc" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
+	wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("notes")+`" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
 		`<details class="tdoc" data-key="doc:notes" data-body-at="`+testNow.Format(time.RFC3339)+`" open>`, "<h1>Plan</h1>", "<li>one</li>")
 	wantNone(t, out, `class="tbody"`)
 	// Nothing to answer: the reply bar waits hidden for a topic note.
@@ -255,7 +255,7 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 
 	mustApply(t, st, `<wb:topic name="notes"><wb:close result="done"/></wb:topic>`)
 	out = render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic quiet closed has-doc" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
+	wantAll(t, out, `<section class="topic quiet closed has-doc" id="`+topicAnchor("notes")+`" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname" title="closed">notes</span><span class="tresult" title="how the topic ended">done</span></span>`,
 		`<details class="tdoc" data-key="doc:notes" data-body-at="`+testNow.Format(time.RFC3339)+`"><summary`, "<h1>Plan</h1>")
 	wantNone(t, out, `<details class="tdoc" data-key="doc:notes" data-body-at="`+testNow.Format(time.RFC3339)+`" open>`)
 }
@@ -833,7 +833,7 @@ func TestRenderPageItemReferenceKeepsEscaping(t *testing.T) {
 	}
 }
 
-// Standalone and embed boards load neither the tracker nor file explorer.
+// Standalone and embed boards load no tracker, file explorer, or Git controls.
 // Every other client key stays available, including body/gutter timestamps,
 // state clocks, forms, pills, code controls, and the standalone viewer.
 func TestPagesLeaveOutDashboardOnlyStrings(t *testing.T) {
@@ -849,7 +849,7 @@ func TestPagesLeaveOutDashboardOnlyStrings(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, prefix := range []string{trackerKeyPrefix, filesKeyPrefix} {
+		for _, prefix := range []string{trackerKeyPrefix, filesKeyPrefix, gitKeyPrefix} {
 			if strings.Contains(string(source), prefix) {
 				t.Errorf("%s consumes excluded prefix %q", asset.Name(), prefix)
 			}
@@ -859,7 +859,7 @@ func TestPagesLeaveOutDashboardOnlyStrings(t *testing.T) {
 	for _, layout := range []Layout{LayoutFull, LayoutEmbed} {
 		out := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r"}))
 		for key := range wsi18n.ClientTable("en") {
-			want := !strings.HasPrefix(key, trackerKeyPrefix) && !strings.HasPrefix(key, filesKeyPrefix)
+			want := !strings.HasPrefix(key, trackerKeyPrefix) && !strings.HasPrefix(key, filesKeyPrefix) && !strings.HasPrefix(key, gitKeyPrefix)
 			if got := strings.Contains(out, `"`+key+`":`); got != want {
 				t.Errorf("layout %v: client key %q present = %v, want %v", layout, key, got, want)
 			}
