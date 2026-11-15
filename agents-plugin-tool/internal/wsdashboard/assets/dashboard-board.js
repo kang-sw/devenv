@@ -256,6 +256,7 @@
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
+      leading: function (c) { return worktree && c.preview && !(PIN_WIDE && PIN_WIDE.matches); },
       layout: function (on) {
         if (on) root.setAttribute("data-pincol", ""); else root.removeAttribute("data-pincol");
         railOpen(false);
