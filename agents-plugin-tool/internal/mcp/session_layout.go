@@ -228,7 +228,13 @@ func readRecordFile(path string, newValue func() any) ([]byte, any, error) {
 // hand out values it shares with other callers (the dashboard source's
 // cache), so the record's slices, maps, and whiteboard may be shared: a
 // caller of such a reader only reads them.
-func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, read recordFileReader) (record sessionRecord, legacy bool, err error) {
+func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, read recordFileReader) (sessionRecord, bool, error) {
+	return loadRecordWithBoard(d, key, parts, raw, read, openWhiteboard)
+}
+
+// loadRecordWithBoard lets the dashboard reuse its in-process folder reads;
+// every other caller retains the uncached writer/read boundary.
+func loadRecordWithBoard(d sessionDirs, key string, parts recordPart, raw io.Writer, read recordFileReader, openBoard func(*sessionRecord, string, io.Writer) error) (record sessionRecord, legacy bool, err error) {
 	if !sessionKeyFilenamePattern.MatchString(key) {
 		return sessionRecord{}, false, errSessionNotFound
 	}
@@ -246,7 +252,7 @@ func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, 
 			raw.Write(data)
 		}
 		if parts&partWhiteboard != 0 {
-			if err := openWhiteboard(&record, key, raw); err != nil {
+			if err := openBoard(&record, key, raw); err != nil {
 				return sessionRecord{}, true, err
 			}
 		}
@@ -275,7 +281,7 @@ func loadRecordWith(d sessionDirs, key string, parts recordPart, raw io.Writer, 
 		writeRawPart(raw, part, data)
 	}
 	if parts&partWhiteboard != 0 {
-		if err := openWhiteboard(&record, key, raw); err != nil {
+		if err := openBoard(&record, key, raw); err != nil {
 			return sessionRecord{}, false, err
 		}
 	}

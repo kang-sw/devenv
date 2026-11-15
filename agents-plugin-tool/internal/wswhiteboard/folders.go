@@ -181,12 +181,16 @@ func (f FolderStore) UpdateAndPublishObserved(legacy *State, fn func(*State) err
 func (f FolderStore) locked(fn func() error) error { return f.withLock(true, fn) }
 
 func (f FolderStore) withLock(create bool, fn func() error) error {
+	return f.withGuard(create, f.guard, fn)
+}
+
+func (f FolderStore) withGuard(create bool, guard func() error, fn func() error) error {
 	if f.Dir == "" {
 		return fmt.Errorf("whiteboard folder: empty directory")
 	}
 	// Check before even creating a lock file; check again under the lock to
 	// cover another writer publishing between this check and acquisition.
-	if err := f.guard(); err != nil {
+	if err := guard(); err != nil {
 		return err
 	}
 	if create {
@@ -205,17 +209,20 @@ func (f FolderStore) withLock(create bool, fn func() error) error {
 		return fmt.Errorf("timed out locking whiteboard folder")
 	}
 	defer lock.Unlock() //nolint:errcheck
-	if err := f.guard(); err != nil {
+	if err := guard(); err != nil {
 		return err
 	}
 	return fn()
 }
 
+// folderReadFile is the read seam for guard and state-load I/O counters.
+var folderReadFile = wsstate.ReadFile
+
 // folderDecode reads path through wsstate.ReadFile: the unlocked guard
 // reads while another process's locked commit replaces or removes the same
 // file, which on Windows fails an open for a moment.
 func folderDecode(path string, out any) (bool, error) {
-	data, err := wsstate.ReadFile(path)
+	data, err := folderReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
@@ -417,7 +424,7 @@ func (f FolderStore) readState(meta *folderSession) (*State, error) {
 		if topic.Closed != slices.Contains(out.ClosedTopics, ref.Key) {
 			return nil, fmt.Errorf("whiteboard topic %s: close state mismatch", ref.Dir)
 		}
-		log, err := os.ReadFile(filepath.Join(f.Dir, ref.Dir, "log.jsonl"))
+		log, err := folderReadFile(filepath.Join(f.Dir, ref.Dir, "log.jsonl"))
 		if err != nil {
 			return nil, err
 		}
