@@ -1,0 +1,9 @@
+# Remove the content-changed-time indicator from topic headers
+
+MAIN 2026-11-15T03:52:51Z relays an owner-approved header-only display deletion. Base a21b115ce. Remove the content-changed-time indicator, including the Korean unknown wording, from whiteboard topic card headers. Retain the separate relative recent time (for example one minute ago) and the state-elapsed chip (for example 111 minutes elapsed).
+
+Scope: the topic-header template/rendering and focused tests in agents-plugin-tool/internal/wswhiteboard; optional locale edits only if required by tests. Start at assets/page.tmpl and the header/view tests, locating actual symbols in source. Do not remove the underlying field, store/protocol meaning, gutter/body tooltip use or any use outside the topic header. Do not remove or alter the recent-time clock, topic state timer, toolbar behavior or model/settings work.
+
+Use the smallest complete implementation, following matching manuals. Run only relevant -run rendering/header tests plus wsi18n. Remove now-unused translation keys only if tests require it; preserve keys still used elsewhere. No screenshot rounds, visual matrices, full suite or Lite for this pure presentation deletion. The owner checks the screen after MAIN merges and swaps. Up to two bounded UI/test fix rounds are pre-granted.
+
+Tests use cached dependencies and isolated temporary WS cache/config. No providers, downloads, port29417, shared-daemon build/restart/swap/smoke, owner installation or outer Go-process kill. No forks or unrelated changes. Keep raw evidence in /tmp/cache, not ai-docs. Commit implementation, focused tests and this write-once plan with AI Context, then return the head, actual test exits and any blocker promptly. Lead skims the diff without repeating raw evidence checks. MAIN owns develop integration and runtime actions.

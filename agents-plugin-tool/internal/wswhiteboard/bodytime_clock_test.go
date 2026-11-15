@@ -59,7 +59,7 @@ function make(framed) {
   }
   const env = { timers: [], listeners: {}, frames: [] };
   const topic = { querySelector: sel => sel === '.tdoc iframe.doc-frame' ? env.frames[0] || null : env.header };
-  env.replaceHeader = () => { env.header = new E('body-age'); env.header.topic = topic; env.header.setAttribute('data-body-at', stamp); };
+  env.replaceHeader = () => { env.header = new E('tdoc'); env.header.topic = topic; env.header.setAttribute('data-body-at', stamp); };
   env.replaceHeader();
   const key = new E(), meta = new E(); key.setAttribute('content', 'topic:body'); meta.setAttribute('data-body-at', stamp);
   const body = new E('doc-body'), parent = new E(), block = new E();
@@ -68,7 +68,7 @@ function make(framed) {
     body: new E(),
     querySelector: sel => sel === 'meta[name="wb-doc-key"]' ? (framed ? key : null) : meta,
     querySelectorAll: sel => sel === '.tdoc iframe.doc-frame' ? env.frames : sel === '[data-body-age]' ?
-      [...(framed ? [] : [env.header]), ...doc.body.children.filter(e => e.attrs['data-body-age'] !== undefined)] : [],
+      doc.body.children.filter(e => e.attrs['data-body-age'] !== undefined) : [],
     createElement: () => new E(),
     createTreeWalker: () => { let used = false; return { nextNode: () => used ? null : (used = true, { data: 'wbchg:new', nextElementSibling: block }) }; }
   };
@@ -89,18 +89,18 @@ function make(framed) {
   return env;
 }
 const host = make(false); host.load();
-assert.equal(host.header.textContent, '본문 5분 전 갱신');
+assert.equal(host.header.textContent, '', 'body age is not rendered in the topic header');
 now += 2000; // 5m59s -> 6m01s, without the header's periodic timer.
 host.enter();
-assert.equal(host.header.textContent, '본문 6분 전 갱신');
+assert.equal(host.header.textContent, '', 'body age metadata remains non-visual');
 assert.equal(host.tip().textContent, '본문 6분 전 갱신');
 assert.equal(host.tip().hidden, false);
 now += 60000; host.timers[0]();
-assert.equal(host.header.textContent, '본문 7분 전 갱신');
+assert.equal(host.header.textContent, '', 'body age metadata remains non-visual');
 assert.equal(host.tip().textContent, '본문 7분 전 갱신', 'continued visible hover follows the same tick');
 // A tick itself may straddle a boundary: all labels must use one sample.
 now = at + 480000 - 1; readStep = 2; reads = 0; host.timers[0]();
-assert.equal(host.header.textContent, '본문 7분 전 갱신');
+assert.equal(host.header.textContent, '', 'host header stays free of body age');
 assert.equal(host.tip().textContent, '본문 7분 전 갱신');
 readStep = 0; host.leave();
 
@@ -116,7 +116,7 @@ const frame = host.frameElement(); frame.contentWindow = childWire; host.frames 
 child.load();
 function deliver() { const m = queue.shift(); assert.ok(m, 'expected queued message'); m.dest.dispatch('message', { source: m.source, data: m.data }); }
 function flush() { let left = 30; while (queue.length) { assert.ok(left-- > 0, 'bounded message exchange'); deliver(); } }
-function both(want) { assert.equal(host.header.textContent, want); assert.equal(child.tip().textContent, want); assert.equal(child.tip().hidden, false); }
+function both(want) { assert.equal(host.header.textContent, '', 'host header stays free of body age'); assert.equal(child.tip().textContent, want); assert.equal(child.tip().hidden, false); }
 now += 2000; child.enter();
 assert.equal(child.tip().hidden, true, 'wait hidden for the host display sample');
 const request = queue[0].data;
@@ -124,19 +124,19 @@ host.dispatch('message', { source: { postMessage() { throw Error('unowned sender
 host.dispatch('message', { source: childWire, data: { ...request, docKey: 'wrong' } });
 assert.equal(frame.wbBodyAgeHold, undefined, 'source and document key both bind a request');
 deliver(); // The host pins six minutes, but the response is still queued.
-assert.equal(host.header.textContent, '본문 6분 전 갱신');
+assert.equal(host.header.textContent, '', 'host header stays free of body age');
 child.dispatch('message', { source: {}, data: queue[0].data });
 child.dispatch('message', { source: parentWire, data: { ...queue[0].data, docKey: 'wrong' } });
 assert.equal(child.tip().hidden, true, 'untrusted replies cannot reveal the tooltip');
 now += 60000; child.timers[0](); host.timers[0]();
 deliver(); both('본문 6분 전 갱신');
 now += 60000; host.timers[0](); child.timers[0](); both('본문 6분 전 갱신');
-// A frame graft keeps the iframe but replaces its surrounding header.
+// A frame graft keeps the iframe but replaces its surrounding body metadata.
 host.replaceHeader(); host.timers[0](); both('본문 6분 전 갱신');
 child.leave();
 assert.equal(child.tip().hidden, true, 'hide before the host is allowed to advance');
-host.timers[0](); assert.equal(host.header.textContent, '본문 6분 전 갱신');
-flush(); assert.equal(host.header.textContent, '본문 8분 전 갱신');
+host.timers[0](); assert.equal(host.header.textContent, '', 'host header stays free of body age');
+flush(); assert.equal(host.header.textContent, '', 'host header stays free of body age');
 assert.equal(frame.wbBodyAgeHold, undefined);
 // A delayed response must not resurrect a cancelled hover.
 child.enter(); deliver(); child.leave(); flush(); assert.equal(child.tip().hidden, true);
@@ -144,7 +144,7 @@ child.enter(); deliver(); child.leave(); flush(); assert.equal(child.tip().hidde
 child.enter(); flush(); both('본문 8분 전 갱신');
 now += 60000; child.s.wbChangeBars(child.body);
 assert.equal(child.tip().hidden, true); flush();
-assert.equal(host.header.textContent, '본문 9분 전 갱신');
+assert.equal(host.header.textContent, '', 'host header stays free of body age');
 assert.equal(frame.wbBodyAgeHold, undefined);
 // Unknown remains exact through the same exchange and independent timers.
 host.header.setAttribute('data-body-at', ''); child.meta.setAttribute('data-body-at', '');
