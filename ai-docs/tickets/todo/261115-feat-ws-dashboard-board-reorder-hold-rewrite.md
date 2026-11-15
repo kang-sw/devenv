@@ -43,7 +43,8 @@ Owner decision (1100)=a (2026-11-15), settling the former O1/O2. Verbatim option
 위에서도 "보드 업데이트됨 · N" 배지를 띄웁니다. 누를 때 반영합니다((593)/(694) 유지)".
 Owner's reason (verbatim, on the current bottom badge): "지금 거 솔직히 애니메이션도 없고,
 디자인도 별로고, 눈에도 잘 안 띄고".
-- One pending/apply surface: the v2 top-center badge (`board-totop-badge-mockup-v2.html`).
+- One pending/apply surface: the v2 top-center badge (`board-totop-badge-mockup-v2.html`);
+  its form is superseded by Decision 11 (merged into the nav pill), the one-surface rule stands.
   develop's bottom "최신 변경 N건 반영" bar is removed; everything it counted/applied (viewed-panel
   content changes and visible reorders from 803/818) is counted and applied by the top badge.
 - At the top (`scrollTop <= 4`) the visible layout stays stable ((593)/(694)); pending changes
@@ -82,10 +83,10 @@ Binding decisions:
    release, smooth-scroll to `top: 0`, flash counted topics once ~0.6 s, clear N; instant under
    reduced motion; no keep session during the to-top scroll). A hand scroll to top clears N and
    flashes topics in view but releases nothing. Hidden in overview.
-7. i18n: `js.board.hold.pill` "Board updated" (ko 보드 업데이트됨), `js.board.hold.pill.title`
-   "Back to top" (ko 맨 위로), `js.board.hold.moved` "moved ↑", `js.board.hold.closed` "closed",
+7. i18n: `js.board.hold.pill` "Board updates" (ko 보드 업데이트; Decision 11 form "보드 업데이트 N"),
+   `js.board.hold.pill.title` "Back to top" (ko 맨 위로), `js.board.hold.moved` "moved ↑", `js.board.hold.closed` "closed",
    in every `wsi18n/tables/*.json`; non-English entries flagged unchecked.
-   The " · N" suffix composed in JS. Develop's hard-coded Korean bottom-bar string is removed
+   The " N" count suffix is composed in JS (always shown while pending, N>=1). Develop's hard-coded Korean bottom-bar string is removed
    with the bar ((1100)=a).
 8. Hidden tab/iframe-shell frame: `pageHidden()` gates swaps, holds, sessions and release.
 9. (621)/(632) dropped: new topics land at the head above the view; no insertion hold for them.
@@ -98,16 +99,27 @@ Binding decisions:
    `agents-plugin-tool/internal/wswhiteboard/assets/pill.js`, which already shows an up arrow and
    the open/answered/noted chips (미결/응답/노트). The up arrow is always present as a home button.
    When chips appear, the pill grows smoothly to their size, like a droplet. While board updates are
-   pending, the "Board updated · N" state takes priority over the answered/open chips.
+   pending, the "보드 업데이트 N" state takes priority over the answered/open chips.
    This supersedes the form and visibility clauses of Decision 6 that describe a standalone v2
    badge: "32x32 round ↑ when scrolled down", "hidden at the top only when nothing is pending", and
    the capsule as its own element. Decision 6's behaviour stays binding: N counted from data, click
    releases everything in one settle and scrolls to top, counted topics flash, a hand scroll to top
-   clears N, hidden in overview, reduced motion. The exact merged geometry, motion and priority
-   rendering are fixed by the v3 mockup that MAIN is preparing for owner sign-off. That confirmed
-   mockup is Phase 1's acceptance reference. This ticket stays in `todo/` until the mockup is
-   stored under `ai-docs/tickets/assets/261115-feat-ws-dashboard-board-reorder-hold-rewrite/` and
-   linked here, with a side-by-side capture comparison against it required in Phase 1.
+   clears N, hidden in overview, reduced motion.
+   Form, fixed by the owner-confirmed v4 mockup plus one restoration (owner (1108), 2026-11-15:
+   v3's double capsule rejected, "보드 업데이트됨 텍스트 캡슐은 빼죠. 이중 캡슐은 보기 좀
+   별로에요."; then on v4, verbatim: "네 확인. "보드 업데이트 N" 텍스트는 복원해주세요. (캡슐만
+   빼란 말이었어요) 추가 목업은 없이 이대로 구현 진행 바랍니다."):
+   - ONE capsule (the nav pill). No inner capsule for the board-updated state.
+   - Pending board updates: the capsule gets an amber border and sways; inside it the ↑ and the
+     plain text "보드 업데이트 N" (i18n `js.board.hold.pill` + " N") are amber, with no own
+     background or border. The answered/open chips shrink to small count bubbles at the end.
+   - Click on ↑ or on the text = release all + scroll to top (Decision 6 behaviour).
+   Acceptance reference (side-by-side comparison required in Phase 1):
+   `ai-docs/tickets/assets/261115-feat-ws-dashboard-board-reorder-hold-rewrite/nav-capsule-accepted.html`
+   (v4 with the restored text; states via `tt.set({ans,open,upd})`, light/dark, 420/1240 widths).
+   The unmodified owner-reviewed v4 is kept beside it as `nav-capsule-mockup-v4.html`.
+   Rejected: v3's separate amber inner capsule "보드 업데이트됨 · N" (owner (1108)); v4's bare
+   count without text (owner (1108) restored the text); the standalone v2 top-center badge.
 
 ## Constraints
 
@@ -169,7 +181,7 @@ batching, and at-top freeze (Decision (1100)=a: visible layout unchanged at `scr
 No product code changes in this phase; scratch harness files are deleted or kept out of the commit.
 Verification: a short table recorded in the Phase 0 Result (behaviour, covered by develop yes/no,
 evidence screenshot path and scenario steps), screenshots at 1440 px. The run stops after Phase 0
-and reports; Phase 1 waits for the confirmed v3 mockup (Decision 11).
+and reports; Phase 1 waits for the confirmed mockup (Decision 11).
 
 ### Result (5314fb8e7) - 2026-11-15
 
@@ -234,19 +246,25 @@ Surprises and limits:
   not evidence for this result; final fixtures use normal server commands.
 
 No new owner decision is needed for Phase 0. Phase 1 still waits for Decision 11's
-confirmed v3 merged-pill mockup; this survey does not authorize implementation.
+confirmed merged-pill mockup; this survey does not authorize implementation.
 
 ### Phase 1: indicator and badge, visible first
-Accent, tags, nudge, badge (idle, pending 1, pending N, sway) wired to develop's `boardPending`
-counts from data; i18n keys; reuse `ca025566b`. Click = existing `boardFlushViewed(true)` path
-plus scroll to top per Decision 6.
-Bottom "최신 변경 N건 반영" bar removed; its pending set feeds the top badge.
-Verification: `go test ./internal/wsi18n/...`; headless: badge hidden at top with nothing pending,
-"Board updated · N" shown at top with pending changes and the visible layout unchanged until click,
-bottom bar absent, idle after scroll,
-pending form and "Board updated · 2", click releases in one settle and lands at `scrollTop` 0, no
-keep session during the to-top scroll, reduced motion has no animation and instant scroll, zero
-mount churn on a static viewport. Owner looks at 1440/700 px, light/dark captures compared side by side with the confirmed v3 mockup
+Accent, tags, nudge, and the merged nav-pill board-updated state (Decision 11) wired to develop's
+`boardPending` from data; i18n keys; reuse `ca025566b` for the accent/tag CSS and strings. Click on
+the ↑ or the text = existing `boardFlushViewed(true)` path plus scroll to top per Decision 6.
+Bottom "최신 변경 N건 반영" bar removed; its pending set feeds the pill.
+N counts distinct pending topics (Decision 6). Phase 0 found develop's bar counts ledger entries
+(`boardChanges.length`: T04 updated twice = 2); the pill must show 1 for that case.
+Verification: `go test ./internal/wsi18n/...`; browser tests (Go-driven .cjs, like
+`board_viewed_live_browser_test.go`): ↑ present with nothing pending (home button) after scrolling
+down; "보드 업데이트 N" state shown at the top with pending changes and the visible layout
+unchanged until click; bottom bar absent; same topic updated twice shows N=1, two topics N=2;
+answered/open chips present together with board updates render as small count bubbles after the
+text; click releases in one settle and lands at `scrollTop` 0, no keep session during the to-top
+scroll; reduced motion has no sway/nudge and instant scroll; zero mount churn on a static viewport;
+hidden in overview. Owner looks at captures at 1440/700 px, light/dark, reduced motion, each
+compared side by side with the matching state of
+`ai-docs/tickets/assets/261115-feat-ws-dashboard-board-reorder-hold-rewrite/nav-capsule-accepted.html`
 (Decision 11; replaces the v2 mockups as the badge reference).
 
 ### Phase 2: rise hold gaps
