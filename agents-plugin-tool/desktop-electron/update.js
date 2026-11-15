@@ -159,11 +159,13 @@ function applyProblem(platform, install, staging) {
   return null;
 }
 
-// Arguments: pid target staged backup staging relaunch(0|1). It waits for the
-// app to exit, moves the old folder aside, moves the staged one in, restores
-// the backup on failure, and touches nothing but those paths.
+// Arguments: pid target staged backup staging relaunch(0|1) [app args...]. It
+// waits for the app to exit, moves the old folder aside, moves the staged one
+// in, restores the backup on failure, and touches nothing but those paths. A
+// relaunch passes the original app arguments through "$@" unchanged.
 const SH_HELPER = `#!/bin/sh
 pid="$1"; target="$2"; staged="$3"; backup="$4"; staging="$5"; relaunch="$6"
+shift 6
 i=0
 while kill -0 "$pid" 2>/dev/null; do
   i=$((i + 1)); if [ "$i" -gt 600 ]; then echo "app did not exit"; exit 1; fi
@@ -179,10 +181,14 @@ else
   mv "$backup" "$target"
   code=1; echo "update failed; restored the previous app"
 fi
-if [ "$relaunch" = 1 ]; then /usr/bin/open "$target"; fi
+# -n: open hands --args only to a newly launched instance.
+if [ "$relaunch" = 1 ]; then /usr/bin/open -n "$target" --args "$@"; fi
 exit $code
 `;
-const PS_HELPER = `param([int]$AppPid, [string]$Target, [string]$Staged, [string]$Backup, [string]$Staging, [int]$Relaunch)
+// RelaunchArgs is base64 (UTF-8) of the app's command line, already quoted
+// for Windows by windowsCommandLine, or "-" for none: one opaque token, so no
+// argument text is ever parsed by PowerShell.
+const PS_HELPER = `param([int]$AppPid, [string]$Target, [string]$Staged, [string]$Backup, [string]$Staging, [int]$Relaunch, [string]$RelaunchArgs = '-')
 $ErrorActionPreference = 'Stop'
 try { Wait-Process -Id $AppPid -Timeout 120 -ErrorAction SilentlyContinue } catch {}
 if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { 'app did not exit'; exit 1 }
@@ -206,18 +212,47 @@ try {
   Move-Item -LiteralPath $Backup -Destination $Target
   $code = 1; "update failed; restored the previous app: $_"
 }
-if ($Relaunch -eq 1) { Start-Process -FilePath (Join-Path $Target 'Werkschaft.exe') }
+if ($Relaunch -eq 1) {
+  $exe = Join-Path $Target 'Werkschaft.exe'
+  if ($RelaunchArgs -and $RelaunchArgs -ne '-') {
+    # A single string goes to the new process verbatim as its command line tail.
+    $argLine = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RelaunchArgs))
+    Start-Process -FilePath $exe -ArgumentList $argLine
+  } else { Start-Process -FilePath $exe }
+}
 exit $code
 `;
 function helperScript(platform) { return platform === 'win32' ? PS_HELPER : SH_HELPER; }
-function helperCommand(platform, script, { pid, target, staged, backup, staging, relaunch }, env = process.env) {
+// The arguments a relaunch repeats: the original ones (process.argv.slice(1)
+// in a packaged app) minus -psn_* (the process serial number older macOS
+// Launch Services adds; the new launch gets its own).
+function relaunchArgs(argv) {
+  return argv.filter(arg => typeof arg === 'string' && !arg.startsWith('-psn_'));
+}
+// Quotes args into one command line that CommandLineToArgvW (and the CRT,
+// which Electron uses) splits back into exactly those args.
+function windowsCommandLine(args) {
+  return args.map(arg => {
+    if (arg && !/[\s"]/.test(arg)) return arg;
+    let out = '"', slashes = 0;
+    for (const ch of arg) {
+      if (ch === '\\') { slashes++; continue; }
+      out += '\\'.repeat(ch === '"' ? slashes * 2 + 1 : slashes) + ch;
+      slashes = 0;
+    }
+    return out + '\\'.repeat(slashes * 2) + '"';
+  }).join(' ');
+}
+function helperCommand(platform, script, { pid, target, staged, backup, staging, relaunch, args = [] }, env = process.env) {
   const flag = relaunch ? '1' : '0';
   if (platform === 'win32') {
+    const line = windowsCommandLine(args);
     return [path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script,
-        '-AppPid', String(pid), '-Target', target, '-Staged', staged, '-Backup', backup, '-Staging', staging, '-Relaunch', flag]];
+        '-AppPid', String(pid), '-Target', target, '-Staged', staged, '-Backup', backup, '-Staging', staging, '-Relaunch', flag,
+        '-RelaunchArgs', line ? Buffer.from(line, 'utf8').toString('base64') : '-']];
   }
-  return ['/bin/sh', [script, String(pid), target, staged, backup, staging, flag]];
+  return ['/bin/sh', [script, String(pid), target, staged, backup, staging, flag, ...args]];
 }
 
 function runFile(command, args) {
@@ -235,7 +270,7 @@ function spawnDetached(command, args, logFile) {
 // download-error | apply-error), the settings line on phase, the updater's
 // standing state: unchecked | none | available | ready ({ phase, version, skipped }).
 function createUpdater({ version, userData, packaged, platform = process.platform, arch = process.arch,
-  execPath = process.execPath, pid = process.pid, feed = process.env.WERKSCHAFT_UPDATE_FEED || FEED,
+  execPath = process.execPath, argv = process.argv.slice(1), pid = process.pid, feed = process.env.WERKSCHAFT_UPDATE_FEED || FEED,
   send = () => {}, log = message => console.error(message), run = runFile, detach = spawnDetached } = {}) {
   const staging = path.join(userData, 'update');
   const stateFile = path.join(userData, 'update-state.json');
@@ -338,6 +373,7 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
     fs.writeFileSync(script, helperScript(platform));
     const [command, args] = helperCommand(platform, script, {
       pid, target: install, staged: stage.app, backup: `${install}-update-backup`, staging, relaunch,
+      args: relaunch ? relaunchArgs(argv) : [],
     });
     detach(command, args, path.join(userData, 'update-apply.log'));
     return true;
@@ -389,4 +425,4 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
 
 module.exports = { REPO, FEED, SUMS, USER_AGENT, INTERVAL, parseVersion, isNewer, assetName, parseSums,
   selectRelease, allowedURL, readText, downloadTo, installLocation, extractCommand, stagedApp, applyProblem,
-  helperScript, helperCommand, createUpdater };
+  helperScript, helperCommand, relaunchArgs, windowsCommandLine, createUpdater };

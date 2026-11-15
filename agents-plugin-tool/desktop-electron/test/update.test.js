@@ -167,7 +167,7 @@ test('download verifies the checksum, stages the extracted app, and the quit pat
   try {
     const sent = [], detached = [];
     const updater = u.createUpdater({ version: '0.50.0', userData, packaged: true, platform: 'darwin', arch: 'arm64',
-      execPath: path.join(installed, 'Contents/MacOS/Werkschaft'), pid: 999999, feed: server.base,
+      execPath: path.join(installed, 'Contents/MacOS/Werkschaft'), argv: [], pid: 999999, feed: server.base,
       send: s => sent.push(s), log: () => {}, detach: (command, args, log) => detached.push({ command, args, log }) });
     // Checksum mismatch: rejected, nothing staged, nothing to apply.
     assert.equal(await updater.check(false), 'available');
@@ -240,15 +240,15 @@ test('helper and extraction commands for both platforms', () => {
   const [ps, psArgs] = u.helperCommand('win32', 'C:\\s\\apply.ps1', opts, { SystemRoot: 'C:\\Windows' });
   assert.equal(ps, path.join('C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
   assert.deepEqual(psArgs, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', 'C:\\s\\apply.ps1',
-    '-AppPid', '42', '-Target', opts.target, '-Staged', opts.staged, '-Backup', opts.backup, '-Staging', opts.staging, '-Relaunch', '1']);
+    '-AppPid', '42', '-Target', opts.target, '-Staged', opts.staged, '-Backup', opts.backup, '-Staging', opts.staging, '-Relaunch', '1', '-RelaunchArgs', '-']);
   const ps1 = u.helperScript('win32');
-  assert.match(ps1, /^param\(\[int\]\$AppPid, \[string\]\$Target, \[string\]\$Staged, \[string\]\$Backup, \[string\]\$Staging, \[int\]\$Relaunch\)/);
+  assert.match(ps1, /^param\(\[int\]\$AppPid, \[string\]\$Target, \[string\]\$Staged, \[string\]\$Backup, \[string\]\$Staging, \[int\]\$Relaunch, \[string\]\$RelaunchArgs = '-'\)/);
   for (const needle of ['Wait-Process -Id $AppPid', 'Move-Item -LiteralPath $Target -Destination $Backup',
     'Move-Item -LiteralPath $Staged -Destination $Target', 'Move-Item -LiteralPath $Backup -Destination $Target',
     "Join-Path $Target 'Werkschaft.exe'"]) assert.ok(ps1.includes(needle), needle);
   const sh = u.helperScript('darwin');
   assert.match(sh, /^#!\/bin\/sh\n/);
-  for (const needle of ['kill -0 "$pid"', 'mv "$target" "$backup"', 'mv "$staged" "$target"', 'mv "$backup" "$target"', '/usr/bin/open "$target"']) {
+  for (const needle of ['kill -0 "$pid"', 'mv "$target" "$backup"', 'mv "$staged" "$target"', 'mv "$backup" "$target"', '/usr/bin/open -n "$target" --args "$@"']) {
     assert.ok(sh.includes(needle), needle);
   }
   assert.deepEqual(u.helperCommand('darwin', '/s/apply.sh', { ...opts, relaunch: false })[1].at(-1), '0');
@@ -289,7 +289,7 @@ test('an unwritable install keeps the stage and reports; a launch apply runs onc
     fs.writeFileSync(path.join(userData, 'update', 'staged.json'), JSON.stringify({ version: '0.51.0', app: stage }));
     const sent = [], detached = [];
     const make = () => u.createUpdater({ version: '0.50.0', userData, packaged: true, platform: 'darwin', arch: 'arm64',
-      execPath: path.join(installed, 'Contents/MacOS/Werkschaft'), send: s => sent.push(s), log: () => {},
+      execPath: path.join(installed, 'Contents/MacOS/Werkschaft'), argv: [], send: s => sent.push(s), log: () => {},
       detach: (command, args) => detached.push(args) });
     fs.chmodSync(apps, 0o555);
     try {
@@ -311,5 +311,92 @@ test('an unwritable install keeps the stage and reports; a launch apply runs onc
     assert.equal(detached.length, 1);
     assert.equal(make().applyOnLaunch(), false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(userData, 'update-state.json'))).launchAttempt, null);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// CommandLineToArgvW's split (the rules the CRT and Electron also use), to
+// prove windowsCommandLine round-trips.
+function splitWindows(line) {
+  const args = [];
+  let i = 0;
+  while (i < line.length) {
+    while (line[i] === ' ' || line[i] === '\t') i++;
+    if (i >= line.length) break;
+    let arg = '', quoted = false;
+    while (i < line.length && (quoted || (line[i] !== ' ' && line[i] !== '\t'))) {
+      if (line[i] === '\\') {
+        let n = 0;
+        while (line[i] === '\\') { n++; i++; }
+        if (line[i] === '"') { arg += '\\'.repeat(n >> 1); if (n % 2) { arg += '"'; i++; } }
+        else arg += '\\'.repeat(n);
+        continue;
+      }
+      if (line[i] === '"') { quoted = !quoted; i++; continue; }
+      arg += line[i++];
+    }
+    args.push(arg);
+  }
+  return args;
+}
+const ORIGINAL = ['--user-data-dir=C:\\x y\\z', '--lang=ko'];
+
+test('relaunch arguments: Windows quoting round-trips and -psn_ is dropped', () => {
+  assert.equal(u.windowsCommandLine(ORIGINAL), '"--user-data-dir=C:\\x y\\z" --lang=ko');
+  const hard = [...ORIGINAL, '', 'a"b', 'tail\\ x\\', 'C:\\plain\\', '日本 語'];
+  assert.deepEqual(splitWindows(u.windowsCommandLine(hard)), hard);
+  assert.deepEqual(u.relaunchArgs(['-psn_0_12345', ...ORIGINAL]), ORIGINAL);
+});
+
+test('both helper kinds receive the original arguments for a relaunch', () => {
+  const opts = { pid: 42, target: 'C:\\Apps\\W', staged: 'C:\\s\\W', backup: 'C:\\Apps\\W-update-backup', staging: 'C:\\s', relaunch: true, args: ORIGINAL };
+  const [, ps] = u.helperCommand('win32', 'C:\\s\\apply.ps1', opts, { SystemRoot: 'C:\\Windows' });
+  const token = ps[ps.indexOf('-RelaunchArgs') + 1];
+  assert.match(token, /^[A-Za-z0-9+/=]+$/, 'one opaque base64 token, nothing for PowerShell to parse');
+  assert.deepEqual(splitWindows(Buffer.from(token, 'base64').toString('utf8')), ORIGINAL);
+  const [, none] = u.helperCommand('win32', 'C:\\s\\apply.ps1', { ...opts, args: [] }, { SystemRoot: 'C:\\Windows' });
+  assert.equal(none.at(-1), '-');
+  const ps1 = u.helperScript('win32');
+  assert.ok(ps1.includes("[string]$RelaunchArgs = '-')"));
+  assert.ok(ps1.includes('[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($RelaunchArgs))'));
+  assert.ok(ps1.includes('Start-Process -FilePath $exe -ArgumentList $argLine'));
+  const [, sh] = u.helperCommand('darwin', '/s/apply.sh', { ...opts, target: '/A/W.app' });
+  assert.deepEqual(sh.slice(6), ['1', ...ORIGINAL]);
+  assert.ok(u.helperScript('darwin').includes('/usr/bin/open -n "$target" --args "$@"'));
+});
+
+test('the sh helper relaunches with exactly the original arguments', { skip: process.platform === 'win32' }, async () => {
+  const root = tmp('relaunch');
+  try {
+    // Record what open receives instead of opening anything.
+    const record = path.join(root, 'open.txt'), fakeOpen = path.join(root, 'open');
+    fs.writeFileSync(fakeOpen, `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done > ${JSON.stringify(record)}\n`, { mode: 0o755 });
+    const script = path.join(root, 'apply.sh');
+    fs.writeFileSync(script, u.helperScript('darwin').replace('/usr/bin/open', fakeOpen));
+    const installed = fakeApp(path.join(root, 'apps'), 'old');
+    const stagedApp = fakeApp(path.join(root, 'staging', 'extract'), 'new');
+    const [command, args] = u.helperCommand('darwin', script, { pid: 999999, target: installed, staged: stagedApp,
+      backup: `${installed}-update-backup`, staging: path.join(root, 'staging'), relaunch: true, args: ORIGINAL });
+    const result = spawnSync(command, args, { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.deepEqual(fs.readFileSync(record, 'utf8').split('\n').slice(0, -1), ['-n', installed, '--args', ...ORIGINAL]);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the updater passes its launch arguments only when relaunching', { skip: process.platform === 'win32' }, () => {
+  const root = tmp('argv');
+  try {
+    const installed = fakeApp(path.join(root, 'apps'), 'old'), userData = path.join(root, 'userData');
+    const stage = fakeApp(path.join(userData, 'update', 'extract'), 'new');
+    fs.writeFileSync(path.join(userData, 'update', 'staged.json'), JSON.stringify({ version: '0.51.0', app: stage }));
+    const detached = [];
+    const updater = u.createUpdater({ version: '0.50.0', userData, packaged: true, platform: 'darwin', arch: 'arm64',
+      execPath: path.join(installed, 'Contents/MacOS/Werkschaft'), argv: ['-psn_0_1', ...ORIGINAL], log: () => {},
+      detach: (command, args) => detached.push(args) });
+    assert.equal(updater.applyOnQuit(true), true);
+    assert.deepEqual(detached.pop().slice(6), ['1', ...ORIGINAL]);
+    assert.equal(updater.applyOnQuit(false), true);
+    assert.deepEqual(detached.pop().slice(6), ['0']);
+    assert.equal(updater.applyOnLaunch(), true);
+    assert.deepEqual(detached.pop().slice(6), ['1', ...ORIGINAL]);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
