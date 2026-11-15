@@ -261,6 +261,48 @@ fullscreen entry/exit; Files-tab and toolbar-sheet regression
 (`TestFiles|TestToolbar|TestBoardToolbar|TestFS` plus the files-explorer JS
 fixture); side-by-side against frames 01, 03 and the gallery layout of 04.
 
+### Result (52673cf6d) - 2026-11-15
+
+- Delivered Phase 1 only: explorer board-card registration, both Open as card
+  entry points, independent inner tabs (including background middle-click),
+  details/list/icon/gallery directory views beside the existing lazy tree,
+  selection/navigation subscriptions, and a replaceable attachment slot.
+- Board persistence restores explorer IDs; each ID owns a separate browser
+  record, removed on close after destroying requests and handlers. Legacy
+  root/View records and the toolbar namespace still load. Pending tab loads
+  clear stale actionable rows, and navigation generations reject late answers.
+- Browse actions copy a path or insert a mention into the active composer via
+  `mention.js` and the existing edit path, never submit. The server listing's
+  `session` flag chooses relative versus absolute host paths. Open as card uses
+  the active directory and dismisses the toolbar sheet before card creation.
+- Explorer-only float uses the shared sheet lifecycle at 1100px; fullscreen
+  retains the 1920px cap and extend control, without replacing the core node.
+  Details use existing name/type metadata; no metadata endpoint, daemon/store
+  authority, guarded-root change, or protocol change was added (T0).
+- Verification passed:
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsdashboard -run 'TestFiles|TestFS|TestCards|TestBoard|TestToolbar|TestLucide|TestSharedCard|TestPinnedColumn|TestFullscreenPanel' -skip '^Test(BoardCardPlacement|BoardHistoryClosedPagingSkipsMaterializedTopics|BoardHistoryHooksSurroundSSESwap)$' -count=1`
+    (16.147s), including both production-JS explorer fixtures.
+  - `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/wsi18n -count=1`
+    (1.092s); all 11 language tables include the new labels.
+  - Node syntax checks for edited JS/fixtures, `gofmt -d` on the new Go test,
+    and `git diff --check` passed.
+- The initial wider focused run failed three pre-existing upstream string
+  assertions named in `-skip` above. Their `morphBoard`, `loadClosed`, and
+  `swap` bodies were verified byte-identical to upstream `b57dff0be`; the
+  expected legacy strings/shape already differ there. Left untouched rather
+  than coupling this phase to the parallel viewed-panel/history lane.
+- Review/acceptance override: the lead explicitly requested a brief state/logic
+  self-review instead of a spawned review after print mode terminated the
+  attempted child before any child edits landed. Self-review covered ID-keyed
+  persistence/cleanup, restore and navigation races, mention paths, existing
+  route guards, and sheet transitions. No independent-review pass is claimed.
+  Screenshot/reference comparison was omitted under the owner's fast-UI
+  principle; the owner's on-screen check after merge remains acceptance.
+- Owned-process scan (`ps` for Go/test, node fixture, server and browser
+  processes) found no lingering owned processes; no server/browser was
+  started, and no shared daemon was rebuilt/restarted. No push or merge.
+- Phases 2-4 remain unimplemented; the ticket stays in `ready/`.
+
 ### Phase 2: Per-window name and content search on the active pane
 
 Depends on Phase 1. Each window's search box searches by name or content

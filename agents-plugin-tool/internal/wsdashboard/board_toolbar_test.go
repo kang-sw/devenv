@@ -9,11 +9,20 @@ import (
 
 func TestBoardToolbarBackdrop(t *testing.T) {
 	css := mustAsset(t, "dashboard.css")
-	rule := regexp.MustCompile(`(?s)\.board-toolbar\[data-floating\]::before\s*\{([^}]+)\}`).FindStringSubmatch(css)
+	rule := regexp.MustCompile(`(?s)\.board-toolbar\[data-floating\] \.board-toolbar-face::before\s*\{([^}]+)\}`).FindStringSubmatch(css)
 	if len(rule) != 2 {
-		t.Fatal("floating toolbar needs an opaque top-gap backing")
+		t.Fatal("floating toolbar needs an opaque top-gap backing attached to its compact face")
 	}
-	for _, want := range []string{"position: absolute", "inset: calc(-12px - var(--toolbar-top, 0px)) 0 0", "background: var(--wb-bg)", "z-index: -1"} {
+	// The positioned face, not the taller reserved slot, bounds the backing's
+	// zero bottom inset. Keep the upward mask without intercepting pointers.
+	face := regexp.MustCompile(`(?s)\.board-toolbar-face\s*\{([^}]+)\}`).FindStringSubmatch(css)
+	if len(face) != 2 || !strings.Contains(face[1], "position: relative") {
+		t.Fatal("backing must be positioned relative to the compact face")
+	}
+	if regexp.MustCompile(`\.board-toolbar\[data-floating\]::before\s*\{`).MatchString(css) {
+		t.Error("reserved toolbar slot must not paint a backing below the face")
+	}
+	for _, want := range []string{"position: absolute", "inset: calc(-12px - var(--toolbar-top, 0px)) 0 0", "background: var(--wb-bg)", "z-index: -1", "pointer-events: none"} {
 		if !strings.Contains(rule[1], want) {
 			t.Errorf("backdrop missing %q", want)
 		}
