@@ -111,7 +111,17 @@
       "registered_at": "2026-10-29T00:09:05Z"
     },
     "261030-bug-tickets-move-stages-on-occupied-root": {
-      "registered_at": "2026-10-30T06:10:05Z"
+      "registered_at": "2026-10-30T06:10:05Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T16:26:05Z",
+        "impl": {
+          "branch": "impl/develop/flame-maybe-ninja"
+        }
+      }
     },
     "261030-bug-workflow-manual-sentinel-mints-lead-key-for-subagents": {
       "registered_at": "2026-10-30T14:07:33Z"
