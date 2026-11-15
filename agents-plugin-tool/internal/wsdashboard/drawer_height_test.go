@@ -43,7 +43,7 @@ process.stdout.write(bad.join("\n"));
 // option; without that option the renderer keeps one height for all its
 // stores, not one per store.
 func TestDrawersShareOneHeight(t *testing.T) {
-	vars := dashboardJSBlock(t, "\n  var DR_OPEN = \"ws.dashboard.drawer\"", "\n  // ghandle is the git handle now")
+	vars := dashboardJSBlock(t, "\n  var DR_OPEN = \"ws.dashboard.drawer\"", "\n  var sbody = null, shandle = null;")
 	clamp := dashboardJSBlock(t, "\n  function drClamp(h) {", "\n  // drApply lays the drawer out")
 	drag := dashboardJSBlock(t, "\n    var drDrag = null, drDragged = false;\n    function drDragStart(e) {", "\n    drhandle.addEventListener(\"click\"")
 	tk := trackerJSBlock(t, "\n  var DR_MIN = 160, DR_DEF = 320, DR_SHUT = 80;", "\n  // One handle per store")
@@ -88,7 +88,7 @@ check('never-set dashboard height', drH, 320);
 `+clamp+`
 function drMax() { return 600; }
 var drawer = el('drawer'), drsheet = el('drsheet'), drclip = el('drclip'), drhandle = el('drhandle'), gitRegion = el('r-git');
-var ghandleEl = el('ghandle'), applied = [], announced = 0, closed = 0;
+var ghandleEl = el('ghandle'), shandle = el('shandle'), applied = [], announced = 0, closed = 0;
 function drMeasure() { drTop = 40; }
 function drAnnounce() { announced++; }
 function drApply() { applied.push(drMode + ':' + drOpen + ':' + drH); }
@@ -97,6 +97,15 @@ function drDot() {}
 function drFoldShow() {}
 var doc = { addEventListener: function () {} };
 `+drag+`
+
+// Search shares the frame, height key and drag mechanics with panels/git.
+drOpen = false;
+drDragStart(press(shandle, 0)); drDragMove({ clientY: 360 }); drEnd();
+check('search drag opens its own sheet', [drMode, drOpen, drWant], ['search', true, false]);
+check('search uses the shared height', [drH, stored['ws.dashboard.drawer.h']], [320, '320']);
+check('search open is persisted independently', stored['ws.dashboard.drawer.search'], '1');
+check('search handle rides the sheet', shandle.style.top, '360px');
+applied = [];
 
 // A never-set height is DR_DEF in every store, host option or not.
 var host = tracker({ drawerHeight: { get: function () { return 0; }, set: function () { bad.push('set on a show'); } } });
@@ -211,18 +220,20 @@ function press(target, y) { return { target: { closest: function () { return tar
 
 // The dashboard's drawer, the frame stubbed.
 var doc = { activeElement: null, addEventListener: function () {} };
-var drawer = el('drawer'), drbody = el('drbody'), gbody = el('gbody'), drsheet = el('drsheet'), drclip = el('drclip');
+var drawer = el('drawer'), drbody = el('drbody'), gbody = el('gbody'), sbody = el('sbody'), shandle = el('shandle'), drsheet = el('drsheet'), drclip = el('drclip');
 var drhandle = el('drhandle'), gitRegion = el('r-git'), ghandleEl = el('ghandle'), drfold = el('drfold');
-var drOpen = false, drMode = 'panels', drWant = false, drH = 320, drTop = 40, drShown = '', drHas = true, drSwap = false, DR_MIN = 160, DR_SHUT = 80, DR_OPEN = 'k';
+var drOpen = false, drMode = 'panels', drWant = false, drH = 320, drTop = 40, drShown = '', drHas = true, drSwap = false, DR_MIN = 160, DR_SHUT = 80, DR_OPEN = 'k', DR_SEARCH = 'search', tkApi = null;
 function ghandle() { return ghandleEl; }
 function drMeasure() {}
 function drMax() { return 600; }
 function drClamp(h) { return h; }
 function drSetH(h) { drH = h; }
 function ghSync() {} function drTitle() {} function drFill() {} function wtLoad() {} function hdLoad() {} function gitOpened() {} function drDot() {} function drAnnounce() {}
-function save() {}
+var stored = {};
+function save(k, v) { stored[k] = v; }
+function wsT(k) { return k; }
 `+fold+apply+setOpen+drag+`
-function shown() { return drfold.hidden ? '' : drfold.classList.contains('git') ? 'git' : 'panels'; }
+function shown() { return drfold.hidden ? '' : drfold.classList.contains('git') ? 'git' : drfold.classList.contains('search') ? 'search' : 'panels'; }
 
 drApply(false);
 check('a closed drawer has no fold button', shown(), '');
@@ -230,6 +241,14 @@ drSetOpen(true, 'panels');
 check('the panels sheet: the fold button in the panels slot', shown(), 'panels');
 drSetOpen(true, 'git');
 check('the git sheet: the fold button in the git slot', shown(), 'git');
+
+drSetOpen(true, 'search');
+check('search shows only its sheet and fold slot', [shown(), drbody.hidden, gbody.hidden, sbody.hidden], ['search', true, true, false]);
+check('search persists independently', [stored[DR_OPEN], stored[DR_SEARCH]], [null, '1']);
+doc.activeElement = drfold;
+drFold();
+check('search fold closes and restores focus', [drOpen, shown(), doc.activeElement.id, stored[DR_SEARCH]], [false, '', 'shandle', null]);
+drSetOpen(true, 'git');
 
 // A click on the fold button closes as the handle's click does, animated,
 // and keyboard focus goes to the shown sheet's handle.
@@ -257,6 +276,12 @@ drDragStart(press(ghandleEl, 0));
 drDragMove({ clientY: 300 });
 drEnd();
 check('a git drag-open keeps it in the git slot', [drOpen, drMode, shown()], [true, 'git', 'git']);
+
+drDragStart(press(shandle, 0));
+drDragMove({ clientY: 360 });
+check('search drag shows its fold slot immediately', shown(), 'search');
+drEnd();
+check('search drag persists shared height and open state', [drH, drMode, drOpen, stored[DR_SEARCH]], [320, 'search', true, '1']);
 
 // The tracker's store handles: each in a slot with its fold button.
 (function () {

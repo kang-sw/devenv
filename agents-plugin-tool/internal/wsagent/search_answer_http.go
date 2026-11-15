@@ -17,7 +17,7 @@ import (
 // part of the shared page-region cache or the generic /agents surface.
 const SearchAnswerRoutePrefix = "/search-answers/"
 
-// ServeHTTP serves POST /search-answers/<session> {question}, GET
+// ServeHTTP serves POST /search-answers/<session> {question,context?}, GET
 // /search-answers/<session>/<answer> (current state), GET .../events (SSE
 // region {name,hash,html}), and POST .../cancel. A new POST supersedes the
 // session's current question. History is the browser's, not this service's.
@@ -47,12 +47,13 @@ func (s *SearchAnswers) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 		var body struct {
 			Question string `json:"question"`
+			Context  string `json:"context"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, req.Body, 32<<10)).Decode(&body); err != nil {
 			http.Error(w, "invalid question body", 400)
 			return
 		}
-		a, err := s.start(parts[0], body.Question)
+		a, err := s.start(parts[0], body.Question, body.Context)
 		if err != nil {
 			writeAnswer(w, 0, nil, err)
 			return
@@ -92,8 +93,17 @@ func answerRegion(v answerView) map[string]string {
 		markup += `<p role="alert">` + html.EscapeString(v.Error) + `</p>`
 	}
 	markup += `</section>`
-	h := sha256.Sum256([]byte(markup))
-	return map[string]string{"name": "answer", "hash": hex.EncodeToString(h[:16]), "html": markup}
+	region := map[string]string{"name": "answer", "html": markup}
+	if v.Status == TurnDone && v.Error == "" && v.Context != "" {
+		region["context"] = capSearchContext(v.Context)
+	}
+	hashInput := markup
+	if region["context"] != "" {
+		hashInput += "\x00" + region["context"]
+	}
+	h := sha256.Sum256([]byte(hashInput))
+	region["hash"] = hex.EncodeToString(h[:16])
+	return region
 }
 
 func (s *SearchAnswers) stream(w http.ResponseWriter, req *http.Request, a *searchAnswer) {
