@@ -218,13 +218,25 @@ func TestTicketsMoveOccupiedRootInspectionFailsClosed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("local POSIX Git shim")
 	}
+	for _, failAt := range []int{1, 2} {
+		t.Run(fmt.Sprintf("inspection=%d", failAt), func(t *testing.T) {
+			testOccupiedMoveInspectionFailure(t, failAt)
+		})
+	}
+}
+
+func testOccupiedMoveInspectionFailure(t *testing.T, failAt int) {
+	t.Helper()
 	root, _, _ := occupiedMoveFixture(t, "todo", true)
 	realGit, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatal(err)
 	}
 	shim := t.TempDir()
-	mustWrite(t, shim, "git", "#!/bin/sh\nif [ \"$3\" = symbolic-ref ] && [ \"$4\" = --quiet ] && [ \"$5\" = HEAD ]; then\n echo 'synthetic HEAD inspection failure' >&2\n exit 2\nfi\nexec "+gitbatch.ShellQuote(filepath.ToSlash(realGit))+" \"$@\"\n")
+	counter := filepath.Join(shim, "head-reads")
+	quotedCounter := gitbatch.ShellQuote(filepath.ToSlash(counter))
+	// Fail either the initial observation or the writer-boundary recheck.
+	mustWrite(t, shim, "git", fmt.Sprintf("#!/bin/sh\nif [ \"$3\" = symbolic-ref ] && [ \"$4\" = --quiet ] && [ \"$5\" = HEAD ]; then\n count=0\n if [ -f %s ]; then read count < %s; fi\n count=$((count + 1))\n printf '%%s\\n' \"$count\" > %s\n if [ \"$count\" = %d ]; then\n  echo 'synthetic HEAD inspection failure' >&2\n  exit 2\n fi\nfi\nexec %s \"$@\"\n", quotedCounter, quotedCounter, quotedCounter, failAt, gitbatch.ShellQuote(filepath.ToSlash(realGit))))
 	if err := os.Chmod(filepath.Join(shim, "git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -247,5 +259,9 @@ func TestTicketsMoveOccupiedRootInspectionFailsClosed(t *testing.T) {
 	requireOccupiedMoveAbsent(t, root, "ready")
 	if !isToolError(resp) || !strings.Contains(toolText(t, resp), "synthetic HEAD inspection failure") {
 		t.Fatalf("missing HEAD inspection refusal: %s", resp)
+	}
+	reads, err := os.ReadFile(counter)
+	if err != nil || strings.TrimSpace(string(reads)) != fmt.Sprint(failAt) {
+		t.Fatalf("HEAD inspections=%q err=%v, want %d", reads, err, failAt)
 	}
 }

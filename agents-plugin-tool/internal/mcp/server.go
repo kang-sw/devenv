@@ -1996,12 +1996,30 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		sessionKey, _ := params.Arguments["session_key"].(string)
 		stem, _ := params.Arguments["stem"].(string)
 		to, _ := params.Arguments["to"].(string)
+		entry, _ := s.sessions.lookup(strings.TrimSpace(sessionKey)) // resolveToolRoot verified the key.
+		checkRoot := func() error {
+			// Parenthood preserves the existing session-bound worker flow; it
+			// is not branch-ownership proof and does not require a lease.
+			if entry.parent != "" {
+				return nil
+			}
+			return guardOccupiedRoot(context.Background(), s.gitRunner(), root)
+		}
+		// Run before ownership refresh or posture resolution can write.
+		if err := checkRoot(); err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
 		sageReview, err := s.resolveSageReviewConfig(sessionKey)
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		guard, err := s.guardMoveClose(root, "move", stem, params.Arguments)
 		if err != nil {
+			return toolTextResponse(req.ID, "", err)
+		}
+		// Re-observe HEAD at the writer boundary after the intervening gates.
+		// This detects observed changes, not arbitrary external Git races.
+		if err := checkRoot(); err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
 		result, err := wsdoc.TicketsMove(root, s.gitRunner(), wsdoc.TicketMoveOptions{
