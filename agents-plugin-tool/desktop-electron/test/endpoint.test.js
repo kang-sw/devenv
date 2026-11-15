@@ -20,8 +20,8 @@ async function fixture(t, handle) {
   return { root, ep, file, write };
 }
 test('cache override, relative root, symlink, default and missing home', t => {
-  assert.equal(cacheRoot({ HOME: '/home/user' }, '/'), '/home/user/.cache/ws@kang-sw-devenv');
-  assert.equal(cacheRoot({ WS_CACHE_HOME: 'cache' }, '/work'), '/work/cache');
+  assert.equal(cacheRoot({ HOME: '/home/user' }, '/'), path.resolve('/home/user', '.cache', 'ws@kang-sw-devenv'));
+  assert.equal(cacheRoot({ WS_CACHE_HOME: 'cache' }, '/work'), path.resolve('/work', 'cache'));
   assert.throws(() => cacheRoot({}, '/'), /Home directory/);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-cache-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

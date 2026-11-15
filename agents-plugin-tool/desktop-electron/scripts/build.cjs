@@ -27,7 +27,7 @@ async function build({ platform = process.platform, arch = process.arch, cache, 
       fs.copyFileSync(path.join(root, file), path.join(source, file));
     }
     fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({
-      name: pkg.name, productName: 'Werkschaft', version: pkg.version, main: pkg.main,
+      name: pkg.name, productName: 'Werkschaft', version: pkg.version, main: pkg.main, author: pkg.author,
     }));
     let icon;
     // Windows acceptance uses Electron's default icon; custom delivery is Phase 3.

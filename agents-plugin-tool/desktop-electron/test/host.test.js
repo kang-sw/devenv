@@ -106,7 +106,9 @@ test('Windows packaging consumes only the pinned cached x64 zip and runtime allo
       assert.equal(options.appBundleId, 'dev.werkschaft.desktop');
       staged = options.dir;
       assert.deepEqual(fs.readdirSync(staged).sort(), ['connection.html', 'endpoint.js', 'main.js', 'package.json', 'policy.js']);
-      assert.equal(JSON.parse(fs.readFileSync(path.join(staged, 'package.json'))).version, pkg.version);
+      const stagedPackage = JSON.parse(fs.readFileSync(path.join(staged, 'package.json')));
+      assert.equal(stagedPackage.version, pkg.version);
+      assert.equal(stagedPackage.author, 'kang-sw');
       return ['test-only packager output'];
     } });
     assert.equal(fs.existsSync(staged), false);
