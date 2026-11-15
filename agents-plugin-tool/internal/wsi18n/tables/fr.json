@@ -213,6 +213,7 @@
   "js.files.folder": "Dossier",
   "js.files.open.card": "Ouvrir en carte",
   "js.files.selected": "Sélection",
+  "js.files.selected.count": "{0} sélectionnés",
   "js.files.send": "Joindre à la session",
   "js.files.tab.close": "Fermer l’onglet",
   "js.files.tab.new": "Nouvel onglet",

@@ -213,6 +213,7 @@
   "js.files.folder": "文件夹",
   "js.files.open.card": "作为卡片打开",
   "js.files.selected": "已选择",
+  "js.files.selected.count": "已选择 {0} 项",
   "js.files.send": "附加到会话",
   "js.files.tab.close": "关闭标签页",
   "js.files.tab.new": "新标签页",

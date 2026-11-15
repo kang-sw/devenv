@@ -213,6 +213,7 @@
   "js.files.folder": "Carpeta",
   "js.files.open.card": "Abrir como tarjeta",
   "js.files.selected": "Seleccionado",
+  "js.files.selected.count": "{0} seleccionados",
   "js.files.send": "Adjuntar a la sesión",
   "js.files.tab.close": "Cerrar pestaña",
   "js.files.tab.new": "Nueva pestaña",

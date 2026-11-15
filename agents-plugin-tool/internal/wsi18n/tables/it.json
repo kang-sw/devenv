@@ -213,6 +213,7 @@
   "js.files.folder": "Cartella",
   "js.files.open.card": "Apri come scheda",
   "js.files.selected": "Selezionato",
+  "js.files.selected.count": "{0} selezionati",
   "js.files.send": "Allega alla sessione",
   "js.files.tab.close": "Chiudi scheda",
   "js.files.tab.new": "Nuova scheda",

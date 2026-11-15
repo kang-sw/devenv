@@ -213,6 +213,7 @@
   "js.files.folder": "폴더",
   "js.files.open.card": "카드로 열기",
   "js.files.selected": "선택",
+  "js.files.selected.count": "{0}개 선택",
   "js.files.send": "세션에 첨부",
   "js.files.tab.close": "탭 닫기",
   "js.files.tab.new": "새 탭",

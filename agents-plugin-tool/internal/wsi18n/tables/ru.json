@@ -213,6 +213,7 @@
   "js.files.folder": "Папка",
   "js.files.open.card": "Открыть как карточку",
   "js.files.selected": "Выбрано",
+  "js.files.selected.count": "Выбрано: {0}",
   "js.files.send": "Прикрепить к сеансу",
   "js.files.tab.close": "Закрыть вкладку",
   "js.files.tab.new": "Новая вкладка",
