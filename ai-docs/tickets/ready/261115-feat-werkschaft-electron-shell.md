@@ -317,6 +317,81 @@ but have not yet been reached. Native physical keyboard delivery also remains
 unverified. Independent review was explicitly deferred to the lead because
 child-agent tools are disabled for this run. Phases 2-4 are untouched.
 
+### Result (5beffc47a) - 2026-11-15
+
+Phase 1's attach-only macOS shell and built-app acceptance landed. The shell
+implementation is checkpoint `4592f07d1`; `5beffc47a` completes its smoke
+contracts without changing the runtime policy. Phases 2-4 remain unimplemented;
+the ticket stays in `ready/`. Tauri and dashboard/daemon sources are unchanged.
+Independent review is deferred to the lead under this run's explicit
+no-child-agent adaptation.
+
+Verification (Go commands use `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`):
+
+- In `agents-plugin-tool/desktop-electron/`, `npm ci --offline --no-audit
+  --no-fund && node node_modules/electron/install.js` succeeded from cache;
+  `node_modules/.bin/electron --version` reports `v44.11.3`. `npm test`
+  passed all 14 tests. `npm run build` produced the unsigned local
+  `dist/Werkschaft-darwin-arm64/Werkschaft.app` using the pinned cached zip,
+  with no download path. The existing optional `.icon` format warning remains;
+  the packaged `electron.icns` exists. Plist checks confirm `Werkschaft`,
+  `dev.werkschaft.desktop`, `0.1.0`; the source PNG matches the retained
+  Tauri icon byte-for-byte (P19-P20).
+- In `agents-plugin-tool/`, `go build -o desktop-electron/dist/smoke-daemon
+  ./desktop-electron/test/daemon` succeeded. The fixture runs real dashboard
+  code/assets on an OS-assigned port with a disposable `WS_CACHE_HOME`,
+  without Ensure or shared-daemon access.
+- `WS_PLAYWRIGHT=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright
+  npm run smoke` passed against the newly built app. It verifies missing and
+  mismatched endpoint errors, Retry attachment, title, dimensions, UA and
+  renderer credential/authority exclusion; actual dashboard file-link menu
+  `fs/act` opening (request intercepted before OS launch); pasted-image
+  X-close Stay preserving the draft, Leave closing, and normal close without
+  a draft; second built launch exiting and restoring/focusing the sole
+  window; unchanged endpoint bytes, daemon survival and fresh-process zoom
+  reset. Unit tests additionally cover discovery bounds, total deadline,
+  endpoint reread, navigation failure, retry overlap and permission denial
+  (P1-P8, P15-P18, P21).
+- Navigation smoke verifies same-origin popup navigation, denied native
+  popups, external HTTPS/other-port/localhost/remote-board handoff, blocked
+  schemes and userinfo, real opaque srcdoc content, and remote-frame denial
+  both under dashboard CSP and on a test-only same-origin page without CSP
+  (P10-P14). A separate listening local target received zero requests.
+  Evidence: `dist/evidence/frame-documents.json`.
+- Zoom accelerators and actual native menu callbacks, ladder traversal and
+  50%/300% clamps pass (P9). **Physical Cmd shortcut delivery remains
+  unverified:** `osascript -l JavaScript -e 'ObjC.import("ApplicationServices");
+  $.AXIsProcessTrusted()'` returns `false`. No accessibility permission was
+  requested; no renderer keyboard polyfill was introduced.
+- Whole `go test ./internal/wsi18n` reproduces only the declared base failure:
+  `js.card.width.extend` and `js.card.width.normal` missing in de, es, fr, it,
+  ja, pt-BR, ru, zh-Hans and zh-Hant. Selected dashboard acceptance via
+  `go test ./internal/wsdashboard -run
+  'TestDesktopPathClickOpensMenuAndModifiedClickPreviews|TestDocFrameDesktopModifiedClickGoesToHost|TestOutsidePreview|TestSessionPageFramesOnlyItsOwnOrigin|TestSessionWithoutAdapterHasNoComposerAndItsMessageRouteRefuses'
+  -count=1` reproduces only the declared base
+  `TestOutsidePreviewCardRemintsOnEveryLoad` `removeAttribute` TypeError.
+  Neither base defect was changed or worked around.
+- Logs, fixture metadata, draft capture and process scans are in ignored
+  `agents-plugin-tool/desktop-electron/dist/evidence/` (`acceptance.log`,
+  `summary.json`, `wsi18n.log`, `dashboard-neighbours.log`,
+  `electron-dashboard-draft.png`, `process-scans.jsonl`). Successful smoke
+  cleanup ends with zero live owned processes. One earlier Playwright CDP
+  dialog race crashed the runner; its sole remaining isolated daemon was
+  identified by recorded PID/start time, stopped, and scanned absent.
+
+Decisions from verification:
+
+- Assert committed document and target-request outcomes, not
+  `WebFrameMain.url`: CSP denial leaves attempted URL metadata but commits
+  `chrome-error://chromewebdata/`; native navigation prevention retains
+  `about:blank` without a `did-fail-load` event. No security rule was relaxed.
+- Exercise the real session iframe because a top-level `?frame=1` page
+  deliberately redirects to the dashboard shell. Use the normal English
+  preference cookie to make menu locators independent of the machine locale.
+- Let Electron's main process own beforeunload. A Playwright dialog listener
+  suppresses its default CDP auto-accept, which otherwise races the already
+  resolved native Stay/Leave decision. App-exit assertions are bounded.
+
 ### Phase 2: Daily-use reliability
 
 Re-homed from `261113-feat-werkschaft-thin-tauri-shell` Phase 2 ((859)=a).
