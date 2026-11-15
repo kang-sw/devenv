@@ -831,6 +831,16 @@
     "261115-feat-ws-whiteboard-overview-stay-on-topic-click": {
       "registered_at": "2026-11-15T02:12:43Z"
     },
+    "261115-feat-ws-whiteboard-overview-survives-state-filter": {
+      "registered_at": "2026-11-15T02:28:18Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "exec4/overview-state-filter",
+        "phase": "closed",
+        "touched_at": "2026-11-15T02:28:18Z"
+      }
+    },
     "261115-feat-ws-whiteboard-topic-state-badge": {
       "registered_at": "2026-11-15T02:04:07Z",
       "lease": {
