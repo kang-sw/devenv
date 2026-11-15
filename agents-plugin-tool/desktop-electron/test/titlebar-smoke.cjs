@@ -14,7 +14,7 @@ const evidence = path.join(root, 'evidence');
 fs.mkdirSync(evidence, { recursive: true });
 const fixture = path.join(root, 'fixture');
 const cache = path.join(fixture, 'cache');
-const checks = [], unverified = [], owned = new Map();
+const checks = [], unverified = [], failures = [], owned = new Map();
 let application, daemon, failure;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn, label, timeout = 15000) {
@@ -30,13 +30,19 @@ function remember(child, time) {
   return identity;
 }
 function family(identity) { for (const p of descendants(identity, processes())) owned.set(p.pid, p); }
+async function checkpoint(label, run) {
+  try { await run(); }
+  catch (error) { failures.push(label + ': ' + error.message); console.error(label, error.stack); }
+}
 async function physical(action, args = []) {
   if (args[0] === '-X') {
     const point = await main(({ screen }, point) => screen.dipToScreenPoint(point), { x: args[1], y: args[3] });
     args = ['-X', point.x, '-Y', point.y];
   }
-  return execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'physical.ps1'),
+  const output = execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'physical.ps1'),
     '-Action', action, '-OwnedPid', String(await main(() => process.pid)), ...args.map(String)], { encoding: 'utf8' });
+  fs.appendFileSync(path.join(evidence, 'physical.jsonl'), JSON.stringify({ action, args, output }) + '\n');
+  return output;
 }
 const main = (fn, value) => application.evaluate(fn, value);
 const state = () => main(({ BaseWindow }) => {
@@ -94,15 +100,21 @@ async function capture(name) {
       if (webContents.getFocusedWebContents() !== w.contentView.children[0].webContents) throw new Error('Dashboard must have initial focus');
       const menu = Menu.getApplicationMenu(), original = menu.popup.bind(menu);
       global.tbMenuOpens = 0;
+      global.tbInputs = [];
+      for (const [view, child] of w.contentView.children.entries()) child.webContents.on('before-input-event', (_event, input) => {
+        global.tbInputs.push({ view, ...input });
+      });
       menu.popup = options => { global.tbMenuOpens++; original(options); };
     });
     await capture('initial');
-    await physical('keys', ['-Keys', '%']);
-    await until(() => main(() => global.tbMenuOpens === 1), 'launch, then Alt without clicking');
-    await capture('startup-alt-menu'); await physical('keys', ['-Keys', '{ESC}']);
-    await until(() => main(({ BaseWindow, webContents }) => webContents.getFocusedWebContents() ===
-      BaseWindow.getAllWindows()[0].contentView.children[0].webContents), 'dashboard focus after startup Alt menu');
-    checks.push('launch, then physical Alt opens the menu without clicking; dismissal returns focus to dashboard');
+    await checkpoint('startup Alt', async () => {
+      await physical('keys', ['-Keys', '%']);
+      await until(() => main(() => global.tbMenuOpens === 1), 'launch, then Alt without clicking');
+      await capture('startup-alt-menu'); await physical('keys', ['-Keys', '{ESC}']);
+      await until(() => main(({ BaseWindow, webContents }) => webContents.getFocusedWebContents() ===
+        BaseWindow.getAllWindows()[0].contentView.children[0].webContents), 'dashboard focus after startup Alt menu');
+      checks.push('launch, then physical Alt opens the menu without clicking; dismissal returns focus to dashboard');
+    });
     await dashboard.evaluate(() => { document.title = 'Titlebar acceptance — Board'; });
     await until(async () => (await state()).title === 'Titlebar acceptance — Board', 'native title');
     await until(async () => await bar.locator('#title').textContent() === 'Titlebar acceptance — Board', 'bar title');
@@ -110,12 +122,21 @@ async function capture(name) {
 
     // Native menu reachability and OS-injected Alt. The popup is Windows-owned,
     // so capture it on screen, not through a renderer screenshot.
-    await bar.locator('#menu').click();
-    await until(() => main(() => global.tbMenuOpens === 2), 'hamburger popup');
-    await capture('hamburger-menu'); await physical('keys', ['-Keys', '{ESC}']);
-    await physical('keys', ['-Keys', '%']);
-    await until(() => main(() => global.tbMenuOpens >= 3), 'Alt popup');
-    await capture('alt-menu'); await physical('keys', ['-Keys', '{ESC}']);
+    await checkpoint('hamburger menu', async () => {
+      const before = await main(() => global.tbMenuOpens);
+      await bar.locator('#menu').click();
+      await until(async () => await main(() => global.tbMenuOpens) > before, 'hamburger popup');
+      await capture('hamburger-menu'); await physical('keys', ['-Keys', '{ESC}']);
+      checks.push('hamburger opens the native P8 menu');
+    });
+    // Startup already exercised bare Alt once; do not repeat a failed gesture.
+    if (!failures.some(value => value.startsWith('startup Alt:'))) await checkpoint('Alt menu', async () => {
+      const before = await main(() => global.tbMenuOpens);
+      await physical('keys', ['-Keys', '%']);
+      await until(async () => await main(() => global.tbMenuOpens) > before, 'Alt popup');
+      await capture('alt-menu'); await physical('keys', ['-Keys', '{ESC}']);
+      checks.push('physical Alt reopens the same P8 menu');
+    });
     const menu = await main(({ Menu }) => {
       const items = menu => menu.items.map(i => ({ label: i.label, role: i.role, id: i.id, accelerator: i.accelerator, enabled: i.enabled,
         submenu: i.submenu ? items(i.submenu) : undefined }));
@@ -124,11 +145,13 @@ async function capture(name) {
     fs.writeFileSync(path.join(evidence, 'menu.json'), JSON.stringify(menu, null, 2));
     for (const label of ['File', 'Edit', 'View', 'Window', 'Help', 'Connection']) assert(menu.some(i => i.label.replaceAll('&', '') === label));
     const zoom = () => main(({ BaseWindow }) => BaseWindow.getAllWindows()[0].contentView.children[0].webContents.getZoomFactor());
-    await physical('keys', ['-Keys', '^=']);
-    await until(async () => Math.abs(await zoom() - 1.1) < 0.001, 'physical zoom accelerator');
-    await physical('keys', ['-Keys', '^0']);
-    await until(async () => Math.abs(await zoom() - 1) < 0.001, 'physical zoom reset');
-    checks.push('hamburger and physical Alt open the same full P8 menu; Ctrl+= and Ctrl+0 reach dashboard zoom');
+    await checkpoint('zoom accelerators', async () => {
+      await physical('keys', ['-Keys', '^=']);
+      await until(async () => Math.abs(await zoom() - 1.1) < 0.001, 'physical zoom accelerator');
+      await physical('keys', ['-Keys', '^0']);
+      await until(async () => Math.abs(await zoom() - 1) < 0.001, 'physical zoom reset');
+      checks.push('Ctrl+= and Ctrl+0 reach dashboard zoom');
+    });
     unverified.push('Individual destructive/edit/fullscreen menu actions were not all invoked; full menu tree recorded.');
 
     let before, after;
@@ -164,6 +187,7 @@ async function capture(name) {
     unverified.push('Windows 11 snap-layout hover flyout not asserted.');
 
     // Exercise the real dashboard theme setting, without editing assets.
+    await checkpoint('theme propagation', async () => {
     const themes = [];
     for (const theme of ['light', 'dark']) {
       await dashboard.locator(`[data-theme-set="${theme}"]`).first().evaluate(button => button.click());
@@ -176,7 +200,9 @@ async function capture(name) {
     assert.notEqual(themes[0].color, themes[1].color);
     fs.writeFileSync(path.join(evidence, 'themes.json'), JSON.stringify(themes, null, 2));
     checks.push('dashboard light/dark theme-color recolors bar and Windows overlay');
+    });
 
+    await checkpoint('X-close confirmation', async () => {
     await main(({ dialog }) => { global.tbDialogs = []; dialog.showMessageBoxSync = (_w, options) => { global.tbDialogs.push(options); return 0; }; });
     // Use a dashboard-owned beforeunload guard and physical X, not window.destroy.
     await dashboard.evaluate(() => { window.addEventListener('beforeunload', event => { event.preventDefault(); event.returnValue = ''; }); });
@@ -188,11 +214,17 @@ async function capture(name) {
     await capture('close-stay');
     checks.push('physical Windows X reaches dashboard beforeunload confirmation; Stay retains window');
     unverified.push('Close guard is a test-injected dashboard listener; real pasted-image guard was not armed in this focused run.');
+    });
+    if (failures.length) failure = failures.join('\n');
   } catch (error) { failure = error.stack; console.error(failure); }
   finally {
     if (appIdentity) family(appIdentity);
     if (daemonIdentity) family(daemonIdentity);
-    if (application) { await application.evaluate(({ app }) => app.exit()).catch(() => {}); await application.close().catch(() => {}); }
+    if (application) {
+      const inputs = await main(() => global.tbInputs || []).catch(() => []);
+      fs.writeFileSync(path.join(evidence, 'inputs.json'), JSON.stringify(inputs, null, 2));
+      await application.evaluate(({ app }) => app.exit()).catch(() => {}); await application.close().catch(() => {});
+    }
     if (daemonIdentity) signalIfCurrent(daemonIdentity);
     for (const identity of owned.values()) signalIfCurrent(identity);
     await until(() => !processes().some(p => owned.get(p.pid)?.start === p.start), 'owned processes exited');
