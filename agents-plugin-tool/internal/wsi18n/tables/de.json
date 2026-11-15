@@ -1766,6 +1766,8 @@
   "hover.lastrate": "Ausgaberate des letzten Durchgangs",
   "hover.turn": "Aktueller Durchgang",
   "hover.lastturn": "Letzter Durchgang",
+  "hover.lastobserved": "Zuletzt beobachtet",
+  "hover.history": "Verlauf beobachteter Modelle",
   "hover.children": "Laufende Subagenten",
   "hover.cost": "Kosten",
   "hover.registered": "Registriert",

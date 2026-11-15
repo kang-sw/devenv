@@ -550,6 +550,8 @@ type claudeMapper struct {
 	// message after an automatic compaction mid-turn is kept.
 	compacted bool
 	uuids     []string
+	// evidence keeps the first original timestamp across split message blocks.
+	evidence []wslive.ModelObservation
 	// states is set once the stream carried a session_state_changed line
 	// (a harness that emits them): from then on the idle state ends a
 	// lead's turn, not the result, which an idle follows and whose error
@@ -611,11 +613,14 @@ func newClaudeMapper(spec StartSpec) *claudeMapper {
 func (m *claudeMapper) lead() bool { return m.spec.Lead != nil }
 
 type claudeLine struct {
-	Type    string          `json:"type"`
-	Subtype string          `json:"subtype"`
-	Message json.RawMessage `json:"message"`
+	LocalCommandSource json.RawMessage `json:"local_command_source"`
+	IsSynthetic        bool            `json:"isSynthetic"`
+	Type               string          `json:"type"`
+	Subtype            string          `json:"subtype"`
+	Message            json.RawMessage `json:"message"`
 	// UUID is the line's own id; a re-emitted line keeps it.
-	UUID string `json:"uuid"`
+	UUID      string `json:"uuid"`
+	Timestamp string `json:"timestamp"`
 	// RequestID and Request are a control_request's (can_use_tool) and a
 	// control_cancel_request's.
 	RequestID string          `json:"request_id"`
@@ -667,12 +672,12 @@ type claudeLine struct {
 		Error     string          `json:"error"`
 		Response  json.RawMessage `json:"response"`
 	} `json:"response"`
-	RateLimit *claudeRateLimit `json:"rate_limit_info"`
-	IsError       bool     `json:"is_error"`
-	Result        string   `json:"result"`
-	Errors        []string `json:"errors"`
-	TerminalState string   `json:"terminal_reason"`
-	TotalCostUSD  *float64 `json:"total_cost_usd"`
+	RateLimit     *claudeRateLimit `json:"rate_limit_info"`
+	IsError       bool             `json:"is_error"`
+	Result        string           `json:"result"`
+	Errors        []string         `json:"errors"`
+	TerminalState string           `json:"terminal_reason"`
+	TotalCostUSD  *float64         `json:"total_cost_usd"`
 	ModelUsage    map[string]struct {
 		ContextWindow int64 `json:"contextWindow"`
 	} `json:"modelUsage"`
@@ -916,6 +921,14 @@ func (m *claudeMapper) mapEvents(line []byte, replies lineReplies) []Event {
 		}
 		alert := m.alert(l)
 		out := m.assistant(l.Message, now, alert != nil)
+		var msg claudeMessage
+		if json.Unmarshal(l.Message, &msg) == nil {
+			if observed := m.observation(l, msg); observed != nil {
+				status := m.status()
+				status.Live.Observed = observed
+				out = append(out, status)
+			}
+		}
 		if alert != nil {
 			out = append(out, Event{Alert: alert})
 		}
