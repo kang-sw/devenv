@@ -1,6 +1,7 @@
 package wsxmlcmd
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -134,6 +135,54 @@ func TestLiteralCodeDoesNotPairAcrossStructuralBodies(t *testing.T) {
 	cmds, problems = parse(g, "<x:text>"+body+"</x:text>")
 	if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != body {
 		t.Fatalf("balanced literal example: %+v, %q", cmds, problems)
+	}
+}
+
+func literalLookaheadFixture(kind string, size int) string {
+	switch kind {
+	case "tildes":
+		return strings.Repeat("~a", size/2)
+	case "unmatched-fences":
+		return "```\n" + strings.Repeat("```x\n", (size-4)/5)
+	default:
+		return "Status `ready` with **next** action."
+	}
+}
+
+func TestLiteralCodeLookaheadLargeLegalInputs(t *testing.T) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, Commands: map[string]Spec{"text": {Kind: Leaf}}}
+	for _, kind := range []string{"tildes", "unmatched-fences"} {
+		body := literalLookaheadFixture(kind, 200000)
+		start := time.Now()
+		cmds, problems := parse(g, "<x:text>"+body+"</x:text>")
+		elapsed := time.Since(start)
+		if len(problems) != 0 || len(cmds) != 1 || cmds[0].Body != stripTrailingNewline(body) {
+			t.Fatalf("large legal %s changed bytes: %q", kind, problems)
+		}
+		t.Logf("%s: %d bytes in %s", kind, len(body), elapsed)
+	}
+}
+
+func BenchmarkLiteralCodeLookahead(b *testing.B) {
+	g := Grammar{Prefix: "x:", LiteralCode: true, Commands: map[string]Spec{"text": {Kind: Leaf}}}
+	for _, kind := range []string{"typical", "tildes", "unmatched-fences"} {
+		for _, size := range []int{100000, 200000} {
+			if kind == "typical" && size != 100000 {
+				continue
+			}
+			body := literalLookaheadFixture(kind, size)
+			input := "<x:text>" + body + "</x:text>"
+			b.Run(fmt.Sprintf("%s/%d", kind, len(body)), func(b *testing.B) {
+				b.SetBytes(int64(len(body)))
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					cmds, problems := parse(g, input)
+					if len(problems) != 0 || len(cmds) != 1 {
+						b.Fatal(problems)
+					}
+				}
+			})
+		}
 	}
 }
 

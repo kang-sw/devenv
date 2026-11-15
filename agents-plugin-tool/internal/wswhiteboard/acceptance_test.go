@@ -37,6 +37,62 @@ func mixedAt(t *testing.T, s *State, input, accepted string, now time.Time) []st
 	return p
 }
 
+func TestCommandAcceptanceNamedPanelPatchAndFailedRetry(t *testing.T) {
+	s := &State{}
+	mustApply(t, s, panelCommandXML("t", `name="work" recap="Status"`, "Pending"))
+	original := queryResult(t, s, `{"panel":"p1"}`).Direct.Entry
+	good := `<wb:panel name="work">` + panelChangeXML("Pending", "Complete") + `</wb:panel>`
+	bad := `<wb:panel id="p1" recap="Retry">` + panelChangeXML("Complete", "Resolved") + `</wb:panel>`
+	skippedPatch := `<wb:panel name="work">` + panelChangeXML("Resolved", "Final") + `</wb:panel>`
+	skipped := `<wb:topic name="t" tickets="bad">` + skippedPatch + `</wb:topic>`
+	out, problems := Apply(s, `<wb:topic name="t">`+good+bad+`<wb:log>accepted once</wb:log></wb:topic>`+skipped, testEnv())
+	if len(problems) < 2 || out.Unpartitioned || out.Accepted != 2 || !strings.Contains(strings.Join(problems, " "), "patches require name") {
+		t.Fatalf("mixed named patch result: %+v %v", out, problems)
+	}
+	if latest := queryResult(t, s, `{"panel":"p1"}`).Direct.Entry; latest.Text != "Complete" || latest.Recap != "Status" || s.PanelCounter != 1 {
+		t.Fatalf("accepted patch lost: %+v", latest)
+	}
+	if !reflect.DeepEqual(queryResult(t, s, fmt.Sprintf(`{"panel":%q}`, original.ID)).Direct.Entry, original) {
+		t.Fatal("mixed acceptance mutated immutable version")
+	}
+	if !strings.Contains(out.Failed, bad) || !strings.Contains(out.Failed, skippedPatch) || !strings.Contains(out.Failed, `tickets="bad"`) || strings.Contains(out.Failed, good) || strings.Contains(out.Failed, "accepted once") {
+		t.Fatalf("retry membership: %s", out.Failed)
+	}
+	retry := strings.TrimSuffix(strings.TrimPrefix(out.Failed, "<wb:failed>\n"), "\n</wb:failed>")
+	retry = strings.Replace(retry, `id="p1" recap="Retry"`, `id="p1" name="work" recap="Retry"`, 1)
+	retry = strings.Replace(retry, `tickets="bad"`, `tickets="261115-feat-example"`, 1)
+	accepted := mustApply(t, s, retry)
+	panels, logs := 0, 0
+	for _, entry := range entries(t, s, "t") {
+		if entry.Kind == EntryPanel {
+			panels++
+		}
+		if entry.Kind == EntryAgent {
+			logs++
+		}
+	}
+	// The corrected tickets declaration is one accepted metadata command,
+	// in addition to the two retried panel commands (store.go's contract).
+	if accepted.Accepted != 3 || panels != 4 || logs != 1 || s.PanelCounter != 1 || queryResult(t, s, `{"panel":"p1"}`).Direct.Entry.Text != "Final" {
+		t.Fatalf("retry duplicated accepted commands: %+v, panels=%d logs=%d", accepted, panels, logs)
+	}
+}
+
+func TestCommandAcceptanceRejectedNamedPatchKeepsOperandBoundaries(t *testing.T) {
+	s := &State{}
+	mustApply(t, s, panelCommandXML("t", `name="work" recap="Status"`, "Pending"))
+	good := panelCommandXML("t", `name="work"`, panelChangeXML("Pending", "Complete"))
+	operand := `</wb:panel></wb:topic><wb:topic name="literal"><wb:floor id="999"/>`
+	rejected := `<wb:topic name="t">junk<wb:panel name="work">` + panelChangeXML(operand, "unused") + `</wb:panel></wb:topic>`
+	out, p := Apply(s, good+rejected, testEnv())
+	if len(p) == 0 || out.Unpartitioned || out.Accepted != 1 || out.Failed != "<wb:failed>\n"+rejected+"\n</wb:failed>" {
+		t.Fatalf("rejected wrapped operand boundary: %+v %v", out, p)
+	}
+	if s.Counter != 0 || s.topicKnown("literal") || queryResult(t, s, `{"panel":"p1"}`).Direct.Entry.Text != "Complete" {
+		t.Fatal("rejected operand exposed commands or lost accepted patch")
+	}
+}
+
 func TestCommandAcceptanceRollbackOrderAndCompleteRetry(t *testing.T) {
 	s := &State{}
 	mustApply(t, s, addXML(ClassPolicy, "a", "Pick", "One", "Two")+addXML(ClassPolicy, "b", "Pick", "One", "Two")+topicXML("a", "old\n\nkeep\n\ntail"))

@@ -131,8 +131,8 @@ func buildHistoricalWriter(t *testing.T) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "build", "-p=1", "-mod=mod", "-o", binary, ".")
-	cmd.Dir = dir
+	cmd := exec.CommandContext(ctx, "go", "-C", dir, "build", "-p=1", "-mod=mod", "-o", binary, ".")
+	cmd.Dir = module
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off")
 	start := time.Now()
 	output, err := cmd.CombinedOutput()

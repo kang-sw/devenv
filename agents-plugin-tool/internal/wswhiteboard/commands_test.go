@@ -188,6 +188,89 @@ func TestUnmatchedCodeInSeparateLegacyBodiesStaysSeparate(t *testing.T) {
 	}
 }
 
+func TestLiteralNestedOpenersCannotSwallowFollowingCommands(t *testing.T) {
+	for _, leaf := range []string{"panel", "body", "answer"} {
+		t.Run(leaf, func(t *testing.T) {
+			st := &State{}
+			attrs := ` recap="r"`
+			if leaf == "body" {
+				attrs = ""
+			}
+			if leaf == "answer" {
+				mustApply(t, st, addXML(ClassTechnical, "t", "answer me"))
+				attrs = ` id="1" value="ok"`
+			}
+			payload := "Writing ` <wb:" + leaf + ` id="p2"> is how`
+			first := "<wb:" + leaf + attrs + ">" + payload + "</wb:" + leaf + ">"
+			tail := "<wb:log>done ` ok</wb:log><wb:panel recap=\"s\">two</wb:panel>"
+			input := `<wb:topic name="t">` + first + tail + `</wb:topic>`
+			if leaf == "answer" {
+				input = first + `<wb:topic name="t">` + tail + `</wb:topic>`
+			}
+			if cmds := mustParse(t, input); len(cmds) != 3 || cmds[0].Body != payload {
+				t.Fatalf("merged commands: %+v", cmds)
+			}
+			mustApply(t, st, input)
+			if log, _ := st.LatestAgent("t"); log.Text != "done ` ok" {
+				t.Fatal("following log was swallowed")
+			}
+			if leaf == "panel" && st.PanelCounter != 2 || leaf != "panel" && st.PanelCounter != 1 {
+				t.Fatal("following panel was swallowed")
+			}
+			if leaf == "body" && st.TopicBody("t") != payload {
+				t.Fatal("body payload changed")
+			}
+			if leaf == "answer" && item(t, st, 1).AnswerQuote != payload {
+				t.Fatal("answer payload changed")
+			}
+		})
+	}
+}
+
+func TestLastFieldCodeCannotPairWithFollowingCommands(t *testing.T) {
+	for _, field := range []string{"why", "recommend", "link"} {
+		for _, next := range []string{"<wb:log>c `d</wb:log>", "<wb:panel recap=\"c `\">end</wb:panel>"} {
+			input := `<wb:topic name="t"><wb:add class="technical"><wb:title>x</wb:title><wb:` + field + ">a `b</wb:" + field + `></wb:add>` + next + `</wb:topic>`
+			cmds := mustParse(t, input)
+			if len(cmds) != 2 || cmds[0].FieldsOf("wb:" + field)[0] != "a `b" {
+				t.Fatalf("field crossed command boundary: %+v", cmds)
+			}
+		}
+	}
+	for _, patch := range []bool{false, true} {
+		st := &State{}
+		mustApply(t, st, topicXML("t", "original")+panelCommandXML("t", `name="work" recap="first"`, "original"))
+		change := "<wb:old>original</wb:old><wb:new>c `d</wb:new>"
+		edit := "<wb:edit>" + change + "</wb:edit>"
+		if patch {
+			edit = `<wb:panel name="work"><wb:change>` + change + `</wb:change></wb:panel>`
+		}
+		mustApply(t, st, `<wb:topic name="t">`+edit+"<wb:log>e `f</wb:log></wb:topic>")
+		if log, _ := st.LatestAgent("t"); log.Text != "e `f" {
+			t.Fatal("following log was swallowed")
+		}
+		if !patch && st.TopicBody("t") != "c `d" || patch && queryResult(t, st, `{"panel":"p1"}`).Direct.Entry.Text != "c `d" {
+			t.Fatal("last new operand changed")
+		}
+	}
+}
+
+func TestCDATAStillUnwrapsInsideLiteralCode(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, logXML("t", "close with `<![CDATA[</wb:log>]]>` tag"))
+	if log, _ := st.LatestAgent("t"); log.Text != "close with `</wb:log>` tag" {
+		t.Fatalf("CDATA markers stored in log: %+v", log)
+	}
+	for _, fence := range []string{"```", "~~~"} {
+		payload := fence + "xml\n<![CDATA[<wb:panel id=\"p1\">x</wb:panel> &amp;]]>\n" + fence
+		mustApply(t, st, panelXML("t", "code", payload))
+		want := fence + "xml\n<wb:panel id=\"p1\">x</wb:panel> &amp;\n" + fence
+		if latest := entries(t, st, "t")[len(entries(t, st, "t"))-2]; latest.Text != want {
+			t.Fatalf("CDATA markers stored in fence: %q", latest.Text)
+		}
+	}
+}
+
 func TestCDATAHoldsALiteralClosingTag(t *testing.T) {
 	cmds := mustParse(t, `<wb:topic name="t"><wb:body>use <![CDATA[</wb:body> and <b> & ]]> here</wb:body></wb:topic>`)
 	if want := "use </wb:body> and <b> & " + " here"; cmds[0].Body != want {

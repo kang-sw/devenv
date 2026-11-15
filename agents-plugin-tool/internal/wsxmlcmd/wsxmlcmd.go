@@ -322,8 +322,11 @@ func ParseOrdered(p *Problems, g Grammar, s string) (commands []Command, complet
 func (r *parser) read() {
 	g := r.g
 	r.literalCode = g.LiteralCode
-	for name := range g.Commands {
+	for name, spec := range g.Commands {
 		r.commandTags = append(r.commandTags, g.Prefix+name)
+		if spec.Wrapper != "" {
+			r.commandTags = append(r.commandTags, g.Prefix+spec.Wrapper)
+		}
 	}
 	if g.Group != nil {
 		r.commandTags = append(r.commandTags, g.Prefix+g.Group.Name)
@@ -589,6 +592,7 @@ type tokenizer struct {
 	ordered     bool
 	literalCode bool
 	commandTags []string
+	literals    *literalIndex
 }
 
 func (t *tokenizer) lineAt(i int) int {
@@ -714,8 +718,16 @@ func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields [
 }
 
 func (t *tokenizer) readContent(name string, from int, decode bool, fields []string, label string, wrapper *bodyWrapper, group *Grammar) (string, bool) {
-	bodyStart := t.i
+	bodyStart, lineStart := t.i, t.i
+	literalUntil, literalLimit := t.i, len(t.s)
 	closing := "</" + name + ">"
+	// Only inspect newly consumed bytes, never the whole body prefix.
+	advance := func(end int) {
+		if newline := strings.LastIndexByte(t.s[t.i:end], '\n'); newline >= 0 {
+			lineStart = t.i + newline + 1
+		}
+		t.i = end
+	}
 	var segs []bodySegment
 	var text strings.Builder
 	flush := func() {
@@ -729,28 +741,26 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 			t.fail(from, "<%s> has no closing %s", name, closing)
 			return "", false
 		}
-		if t.literalCode {
-			siblings := fields
-			if siblings == nil {
-				siblings = t.commandTags
-			}
-			if end := codeLiteralEnd(t.s, t.i, bodyStart, closing, siblings); end > t.i {
-				text.WriteString(t.s[t.i:end])
-				t.i = end
+		if t.literalCode && t.i >= literalUntil {
+			literalUntil = t.codeLiteralEnd(t.i, bodyStart, lineStart, closing, fields, &literalLimit)
+			if literalUntil > t.i && !strings.Contains(t.s[t.i:literalUntil], "<![CDATA[") {
+				text.WriteString(t.s[t.i:literalUntil])
+				advance(literalUntil)
 				continue
 			}
 		}
 		if t.s[t.i] != '<' {
 			text.WriteByte(t.s[t.i])
+			if t.s[t.i] == '\n' {
+				lineStart = t.i + 1
+			}
 			t.i++
 			continue
 		}
 		rest := t.s[t.i:]
 		switch {
-		case strings.HasPrefix(rest, closing):
-			t.i += len(closing)
-			flush()
-			return joinBody(segs, decode), true
+		// CDATA always unwraps, including inside code. Keep its segment raw
+		// for DecodeBody callers and retain source offsets for retry trees.
 		case strings.HasPrefix(rest, "<![CDATA["):
 			end := strings.Index(rest[9:], "]]>")
 			if end < 0 {
@@ -759,8 +769,16 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 			}
 			flush()
 			segs = append(segs, bodySegment{text: rest[9 : 9+end], cdata: true})
-			t.i += 9 + end + 3
+			advance(t.i + 9 + end + 3)
+		case t.i < literalUntil:
+			text.WriteByte('<')
+			t.i++
+		case strings.HasPrefix(rest, closing):
+			t.i += len(closing)
+			flush()
+			return joinBody(segs, decode), true
 		case wrapper != nil && openingTagPrefix(rest, wrapper.tag):
+			start := t.i
 			tag, ok := t.readOpen()
 			if !ok {
 				return "", false
@@ -771,6 +789,9 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 				return "", false
 			}
 			*wrapper.children = append(*wrapper.children, child)
+			end := t.i
+			t.i = start
+			advance(end)
 		default:
 			if group != nil {
 				end := 1
@@ -812,14 +833,22 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 					}
 				}
 				text.WriteString(rest[:end])
-				t.i += end
+				advance(t.i + end)
 				if strings.HasPrefix(tagName, group.Prefix) && !strings.HasSuffix(rest[:end], "/>") {
 					start := t.i
-					if spec, known := group.lookup(tagName); known && spec.Kind == Container {
+					spec, known := group.lookup(tagName)
+					cmd := Command{Tag: tagName, Line: t.lineAt(start - end)}
+					if known && spec.Kind == Container {
 						// Use the grammar's ordinary field reader: a raw field may
 						// contain literal command/group closes as well as openings.
-						cmd := Command{Tag: tagName, Line: t.lineAt(start - end)}
 						if !t.readFields(&cmd, group.fieldTags(spec), nil, false) {
+							return "", false
+						}
+					} else if known && spec.Wrapper != "" {
+						// Wrapped operands have the same boundary authority while
+						// skipping a rejected group as in an accepted command.
+						wrapped := &bodyWrapper{tag: group.Prefix + spec.Wrapper, fields: group.fieldTags(spec), children: &cmd.Children, parent: cmd}
+						if _, ok := t.readContent(tagName, start-end, false, nil, "", wrapped, nil); !ok {
 							return "", false
 						}
 					} else if _, ok := t.readBody(tagName, start-end, false, nil, ""); !ok {
@@ -827,6 +856,9 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 						return "", false
 					}
 					text.WriteString(t.s[start:t.i])
+					end := t.i
+					t.i = start
+					advance(end)
 				}
 				continue
 			}
@@ -845,131 +877,6 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields []str
 func openingTagPrefix(s, tag string) bool {
 	prefix := "<" + tag
 	return strings.HasPrefix(s, prefix) && len(s) > len(prefix) && (isSpace(s[len(prefix)]) || s[len(prefix)] == '>' || s[len(prefix)] == '/')
-}
-
-// codeLiteralEnd recognizes matched Markdown code without changing its bytes.
-// Unmatched delimiters remain ordinary text, so they cannot hide a command's
-// real closing tag. Fences take precedence over spans and may contain backticks.
-func codeLiteralEnd(s string, at, bodyStart int, closing string, siblings []string) int {
-	withinBody := func(end int) int {
-		if crossesBodyBoundary(s[at:end], closing, siblings) {
-			return at
-		}
-		return end
-	}
-	mark := s[at]
-	if mark != '`' && mark != '~' || at > bodyStart && s[at-1] == mark {
-		return at
-	}
-	run := 1
-	for at+run < len(s) && s[at+run] == mark {
-		run++
-	}
-	lineStart := strings.LastIndexByte(s[bodyStart:at], '\n') + bodyStart + 1
-	indent := s[lineStart:at]
-	if run >= 3 && len(indent) <= 3 && strings.Trim(indent, " ") == "" {
-		if newline := strings.IndexByte(s[at+run:], '\n'); newline >= 0 {
-			infoEnd := at + run + newline
-			if mark != '`' || !strings.ContainsRune(s[at+run:infoEnd], '`') {
-				for start := infoEnd + 1; start < len(s); {
-					end := strings.IndexByte(s[start:], '\n')
-					if end < 0 {
-						end = len(s)
-					} else {
-						end += start
-					}
-					pos := start
-					for pos < end && pos-start < 3 && s[pos] == ' ' {
-						pos++
-					}
-					closeStart := pos
-					for pos < end && s[pos] == mark {
-						pos++
-					}
-					if pos-closeStart >= run {
-						tail := strings.TrimSpace(s[pos:end])
-						if tail == "" {
-							return withinBody(end)
-						}
-						// The enclosing command tag is not Markdown payload, so a
-						// fence at the very end of that payload still closes.
-						if strings.HasPrefix(tail, closing) {
-							return withinBody(pos)
-						}
-					}
-					if end == len(s) {
-						break
-					}
-					start = end + 1
-				}
-			}
-		}
-	}
-	if mark != '`' {
-		return at
-	}
-	slashes := 0
-	for pos := at - 1; pos >= bodyStart && s[pos] == '\\'; pos-- {
-		slashes++
-	}
-	if slashes%2 != 0 {
-		return at
-	}
-	for pos := at + run; pos < len(s); {
-		next := strings.IndexByte(s[pos:], '`')
-		if next < 0 {
-			break
-		}
-		pos += next
-		end := pos + 1
-		for end < len(s) && s[end] == '`' {
-			end++
-		}
-		if end-pos == run {
-			return withinBody(end)
-		}
-		pos = end
-	}
-	return at
-}
-
-// A closing tag followed by another command/operand opening is a structural
-// boundary, even when unmatched code delimiters in separate bodies would pair.
-// Balanced examples of the enclosing element remain literal code; a bare
-// closing-tag example alone also stays inert. Prefer the existing structure in
-// the ambiguous close-then-sibling case rather than merge immutable writes.
-func crossesBodyBoundary(code, closing string, siblings []string) bool {
-	name := closing[2 : len(closing)-1]
-	depth, closed := 0, false
-	for pos := 0; pos < len(code); {
-		next := strings.IndexByte(code[pos:], '<')
-		if next < 0 {
-			break
-		}
-		pos += next
-		rest := code[pos:]
-		if closed {
-			for _, sibling := range siblings {
-				if openingTagPrefix(rest, sibling) {
-					return true
-				}
-			}
-		}
-		if strings.HasPrefix(rest, closing) {
-			if depth > 0 {
-				depth--
-			} else {
-				closed = true
-			}
-		} else if openingTagPrefix(rest, name) {
-			probe := tokenizer{s: code, i: pos, p: &Problems{}}
-			if tag, ok := probe.readOpen(); ok && !tag.selfClosing {
-				depth++
-			}
-		}
-		pos++
-	}
-	return false
 }
 
 // joinBody strips the body's one newline at each end before decoding, so a
