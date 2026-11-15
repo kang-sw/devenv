@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 955956e06d13ddee
 sage-review-completeness-reviewed: 955956e06d13ddee
+completed: 2026-11-16
 ---
 
 # Dashboard conversation send follows the incoming reply at the bottom
@@ -75,3 +76,62 @@ Verification — **VERIFIED requirements confirmed by MAIN 2026-11-15 18:16:30Z 
 - Independent review must have no Critical/Important findings. If proof exposes a real behavior gap, stop and return captures before any product fix; otherwise deliver tests and ticket closure/evidence only. Record any missing proof explicitly.
 
 The explicit MAIN11:37 relay `693=ok` confirms the behavioral scope, not permission to rerun or duplicate the already-landed fix. MAIN's 2026-11-15 18:18:48Z disposition narrows remaining delivery to proof/evidence as above; landing is confirmed by MAIN18:19:35, and final source commit/tests still require the root-sequenced rebase to `ea80c8103`.
+
+### Result (528b6f9ba) - 2026-11-15
+
+**VERIFIED:** Added `conversation_follow_browser_test.go` and
+`testdata/conversation-follow.browser.cjs`; no production files changed and no
+behavioral gap was found. Actual Enter and `#csend` clicks start with a native
+wheel-scrolled, overflowing `#convo`. The real message request is held before
+transport until measured bottom geometry and the after-send capture prove the
+intent-owned jump. It then reaches the disposable daemon and returns HTTP 200.
+Two real live-region reply growth stages retain a visible reply tail at the
+bottom. Later upward wheel input cancels follow: further growth increases
+height without moving the user's scrollTop. Empty/composing Enter is guarded;
+existing invalid-image, picker, draft and send-outcome tests remain unchanged.
+
+**Decisions:** Browser proof only (T0), as authorized; keep the interaction and
+isolated fixture together because their timing contract is non-decomposable.
+No helper invocation, geometry stubbing, layout/style change or asset-owner
+change was needed. The fixture creates fresh HOME/provider/config/cache/XDG
+directories per invocation and explicitly passes daemon Home; only ephemeral
+fixture origins are admitted in Chromium.
+
+**Verification:**
+
+- Before source/tests, clean `impl/develop/stomp-stunt-fox` was rebased from
+  `f46aa9b96` onto exact local `ea80c8103`, yielding preparation `9acaab0d7`.
+  Both `dd5bb3d26` and `ad9c2c79f` were verified ancestors afterward.
+- From `agents-plugin-tool/`, with `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`,
+  cached Playwright/Chromium and isolated environment roots:
+  `go test ./internal/wsdashboard -run '^(TestConversationSendFollowBrowser|TestConversationSendRearmsBottomFollow|TestComposerOutcomesToast|TestSlashPickerListsAndPicks|TestRailDraftRestore)$' -count=10 -v`
+  passed all 50 executions in 33.252s; zero failures or skips. Full output:
+  `/tmp/send-follow-count10.jESYXZ/test.log`. The initial two-selector smoke
+  also passed: `/tmp/send-follow-smoke.9tvJbY/test.log`.
+- Captures and measured geometry: `/tmp/send-follow-shots/`. Representative
+  Enter pair: `before-enter-27742.png` / `after-enter-27742.png`; button pair:
+  `before-button-42373.png` / `after-button-42373.png`. Inspected pairs show
+  the expected scrolled-up-to-bottom transition, not a product-change baseline.
+  `reply-enter-42373.png` shows the growing reply tail visible;
+  `cancelled-enter-42373.png` shows the reader remaining above the tail.
+  Count-10 geometry is retained in `evidence-42373.json` (plus nine other runs).
+- Owned Go launcher/test, browser-driver Node and Chromium root PIDs were
+  recorded at startup; all 22 count-10 PIDs were checked absent after exit in
+  `/tmp/send-follow-count10.jESYXZ/processes.log`. Smoke launcher/test/Node/
+  Chromium PIDs 26816/27636/27742/27762 were also checked absent. The daemon
+  was in-process and closed by fixture cleanup; no unrelated process was
+  signaled and no shared runtime was changed. Absence claims cover these
+  recorded root PIDs, not an unrecorded process inventory.
+- Independent one-pass lite review: no Critical/Important findings. Artifact:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@c4d08aee/review-paths/953632c0-01-send-follow-lite.md`.
+
+Ticket guardrails passed. The stale sage-review digest advisory is accepted:
+the approved phase plan and decisions are unchanged; only completion evidence
+was appended after independent implementation review.
+
+**Omitted:** Full dashboard/MCP/project suites, other browser engines and
+exhaustive browser guard/failure matrices were outside the authorized focused
+verification. The existing focused Node contracts supply invalid-image,
+picker, draft and outcome coverage. No approved visual reference was linked;
+paired captures are supplied for MAIN's comparison. MAIN alone integrates the
+retained branch; the lease remains held until its merge acknowledgment.
