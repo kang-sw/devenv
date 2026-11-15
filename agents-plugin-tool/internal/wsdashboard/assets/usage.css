@@ -37,6 +37,7 @@
 .usage-chart { display: block; width: 100%; height: auto; margin-top: 3px; }
 .usage-chart text { font: 9px var(--wb-sans, sans-serif); fill: var(--wb-muted-fg); }
 .usage-grid { stroke: var(--wb-line); stroke-width: .7; }
+.usage-day-grid { stroke: var(--wb-line); stroke-width: .5; opacity: .35; }
 .usage-ideal { stroke: var(--wb-muted-fg); stroke-width: 1.2; fill: none; opacity: .75; }
 .usage-now { stroke: var(--wb-line); stroke-width: 1; }
 .usage-help { position: relative; display: inline-flex; }
