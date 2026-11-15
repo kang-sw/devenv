@@ -103,7 +103,7 @@
   var treeTop = 0, hitsTop = 0, pop = null, popFrom = null, menu = null, menuFrom = null;
   var ui = {}, api, tabs = [], active = -1, tabSeq = 0, dir = "", viewMode = "details", contentTop = 0, navAttempt = 0;
   var subscribers = { selection: [], navigation: [] }, detachAttachment = null;
-  var columnLeft = 0, columnScroll = {}, columnLoads = {};
+  var columnLeft = 0, columnScroll = {}, ancestorLoads = {};
 
   function licon(name) { return cards.icon(name); }
   function mk(tag, cls, text) {
@@ -194,7 +194,7 @@
     columnLeft = s.columnLeft; columnScroll = Object.assign({}, s.columnScroll);
     ui.tree.scrollTop = treeTop;
     lists = live ? live.lists : {}; open = live ? live.open : {}; info = live ? live.info : null;
-    if (live && info) { readView(); paintHead(); render(); notify("navigation"); }
+    if (live && info) { readView(); paintHead(); expandAncestors(); render(); notify("navigation"); }
     else {
       // Never leave another tab's actionable rows under this tab's root.
       rows = []; rowEls = {}; ui.tree.textContent = "";
@@ -329,7 +329,7 @@
         }
       }
       lists[path] = a; dir = path; resetSelection(selected); cur = sel; contentTop = 0;
-      render();
+      expandAncestors(); render();
       if (viewMode === "column" && focusPath != null) {
         focusColumn(focusPath);
         if (selected === path) {
@@ -450,7 +450,7 @@
     resetSelection(null); cur = null;
     treeTop = 0; dir = ""; contentTop = 0;
     if (!restore) resetHistory();
-    columnLeft = saved ? saved.columnLeft : 0; columnScroll = saved ? saved.columnScroll : {}; columnLoads = {};
+    columnLeft = saved ? saved.columnLeft : 0; columnScroll = saved ? saved.columnScroll : {}; ancestorLoads = {};
     readView();
     paintHead();
     render();
@@ -466,7 +466,7 @@
       listDir(saved.dir).then(function (listing) {
         if (g !== gen || attempt !== navAttempt) return;
         lists[saved.dir] = listing; dir = saved.dir; resetSelection(saved.selection); contentTop = saved.scroll; treeTop = saved.treeScroll;
-        ui.tree.scrollTop = treeTop; render(); complete();
+        ui.tree.scrollTop = treeTop; expandAncestors(); render(); complete();
       }, function () { if (g === gen && attempt === navAttempt) { dir = ""; resetSelection(null); render(); complete(); } });
     } else {
       if (saved) { resetSelection(saved.selection); contentTop = saved.scroll; treeTop = saved.treeScroll; ui.tree.scrollTop = treeTop; render(); }
@@ -511,6 +511,7 @@
   // --- the tree --------------------------------------------------------------
   function status(text) {
     ui.tree.textContent = "";
+    ui.tree.appendChild(ui.treeHead);
     ui.tree.appendChild(mk("div", "fnote", text));
   }
   function rowEl(r) {
@@ -573,6 +574,7 @@
     if (sel !== null && sel !== dir && !rowOf(sel) && !(lists[dir] && (lists[dir].entries || []).some(function (e) { return joinRel(dir, e.name) === sel; }))) resetSelection(null);
     if (cur === null || !rowOf(cur)) cur = sel !== null && rowOf(sel) ? sel : nav.length ? nav[0].path : null;
     var frag = doc.createDocumentFragment();
+    frag.appendChild(ui.treeHead);
     rowEls = {};
     rows.forEach(function (r) {
       var d = rowEl(r);
@@ -612,6 +614,7 @@
     entries.forEach(function (e) { box.appendChild(directoryEntry(e, dir)); });
     if (listing && !entries.length) box.appendChild(mk("div", "fnote", wsT("js.files.empty")));
     if (listing && listing.more) box.appendChild(mk("div", "fnote", wsT("js.files.more")));
+    if (listing) box.appendChild(mk("div", "fcount", wsTn("js.files.count", entries.length)));
     box.scrollLeft = 0; box.scrollTop = top;
   }
   function directoryEntry(e, folder, column) {
@@ -658,6 +661,27 @@
     dir.split("/").forEach(function (part) { if (part) { path = joinRel(path, part); chain.push(path); } });
     return chain;
   }
+  // Only ancestor listings are needed to reveal the current folder in the
+  // lazy sidebar. Column mode shares these in-flight reads rather than
+  // requesting the same ancestor again.
+  function loadAncestor(folder) {
+    var pending = ancestorLoads[folder];
+    if (!info || lists[folder] || (pending && pending.gen === gen)) return;
+    var request = { gen: gen }; ancestorLoads[folder] = request;
+    listDir(folder).then(function (a) {
+      if (request.gen !== gen) return;
+      lists[folder] = a; render();
+    }, function () {
+      if (request.gen !== gen) return;
+      request.error = true; render();
+    });
+  }
+  function expandAncestors() {
+    for (var folder = parentRel(dir); folder; folder = parentRel(folder)) {
+      open[folder] = true;
+      loadAncestor(folder);
+    }
+  }
   function focusColumn(path) {
     var all = ui.directory.querySelectorAll(".fentry");
     Array.prototype.some.call(all, function (row) {
@@ -668,28 +692,18 @@
   function renderColumns(focused) {
     var box = ui.directory;
     columnDirs().forEach(function (folder) {
-      var col = mk("div", "fcolumn"), listing = lists[folder], pending = columnLoads[folder];
+      var col = mk("div", "fcolumn"), listing = lists[folder], pending = ancestorLoads[folder];
       col.setAttribute("data-column", folder); col.setAttribute("role", "listbox");
       col.setAttribute("aria-label", folder || (info && (info.name || info.root)) || wsT("js.files.root.session"));
       var entries = listing ? (listing.entries || []).filter(function (e) { return showsEntry(e, view); }) : [];
       entries.forEach(function (e) { col.appendChild(directoryEntry(e, folder, true)); });
       if (!listing) {
         col.appendChild(mk("div", "fnote", wsT(pending && pending.gen === gen && pending.error ? "js.files.failed" : "js.files.loading")));
-        if (info && (!pending || pending.gen !== gen)) {
-          var request = { gen: gen }; columnLoads[folder] = request;
-          listDir(folder).then(function (a) {
-            if (request.gen !== gen) return;
-            lists[folder] = a;
-            if (viewMode === "column") renderDirectory();
-          }, function () {
-            if (request.gen !== gen) return;
-            request.error = true;
-            if (viewMode === "column") renderDirectory();
-          });
-        }
+        loadAncestor(folder);
       } else {
         if (!entries.length) col.appendChild(mk("div", "fnote", wsT("js.files.empty")));
         if (listing.more) col.appendChild(mk("div", "fnote", wsT("js.files.more")));
+        col.appendChild(mk("div", "fcount", wsTn("js.files.count", entries.length)));
       }
       box.appendChild(col); col.scrollTop = +columnScroll[folder] || 0;
       col.addEventListener("scroll", function () { if (shows(col)) { columnScroll[folder] = col.scrollTop; persistTabs(); } });
@@ -804,7 +818,7 @@
   // listed afresh when it opens next.
   function refresh() {
     if (!lists[""]) { loadRoot(); return; }
-    columnLoads = {};
+    ancestorLoads = {};
     var chain = viewMode === "column" ? columnDirs() : [];
     var g = gen, dirs = Object.keys(lists).filter(function (d) { return d === "" || d === dir || open[d] || chain.indexOf(d) >= 0; });
     Object.keys(lists).forEach(function (d) { if (dirs.indexOf(d) < 0) delete lists[d]; });
@@ -1228,6 +1242,9 @@
     searchRow.appendChild(row);
 
     ui.tree = mk("div", "flist ftree");
+    ui.treeHead = mk("div", "ftree-head", wsT("js.files.folders"));
+    ui.treeHead.setAttribute("role", "presentation");
+    ui.tree.appendChild(ui.treeHead);
     ui.tree.setAttribute("role", "tree");
     ui.tree.setAttribute("aria-label", wsT("js.files.tree"));
     ui.hits = mk("div", "flist fhits");
