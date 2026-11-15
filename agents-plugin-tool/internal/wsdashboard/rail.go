@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strconv"
 
 	"github.com/kang-sw/devenv/internal/wslive"
@@ -101,22 +102,31 @@ func renderRailRegion(view RailView, lang string) (renderedRegion, error) {
 }
 
 // railPageSource is the rail's shared render in lang and theme: one for
-// every session page's stream, keyed without a reply-id. Like the index it
-// depends on every wake (a session's change, the worktree lister's, and a
-// layout write's), and its refresh stamp covers what follows the clock and
-// the layout's generation.
+// every session page's stream, keyed without a reply-id. Every wake re-reads
+// its view inputs, including clock liveness, worktrees, hover evidence and
+// layout, but only a changed view runs the template and row decomposition.
 func (d *Daemon) railPageSource(lang, theme string) pageSource {
-	pages := d.pagesIn(lang)
+	return d.railSource(d.pagesIn(lang), lang, theme)
+}
+
+func (d *Daemon) railSource(pages pageReader, lang, theme string) pageSource {
 	return pageSource{
-		key: pageKey{kind: regionRail, lang: lang, theme: theme},
-		render: func(*liveRender) pageRender {
+		key:          pageKey{kind: regionRail, lang: lang, theme: theme},
+		compareReads: true,
+		render: func(previous *liveRender) pageRender {
+			view := d.railView(pages)
+			if previous != nil {
+				if prior, ok := previous.prev.reads.(RailView); ok && reflect.DeepEqual(prior, view) {
+					return previous.prev
+				}
+			}
 			d.stats.RailRenders.Add(1)
-			region, err := renderRailRegion(d.railView(pages), lang)
+			region, err := renderRailRegion(view, lang)
 			if err != nil {
 				fmt.Fprintf(d.log, "dashboard: render rail: %v\n", err)
 				return pageRender{ok: true}
 			}
-			return pageRender{regions: regionSet{regionRail: region}, rail: splitRailRows(string(region.HTML)), ok: true}
+			return pageRender{regions: regionSet{regionRail: region}, rail: splitRailRows(string(region.HTML)), reads: view, ok: true}
 		},
 		// The index's stamp covers every listed session's revision (its
 		// snapshot and ring among what raises it), liveness, adapter

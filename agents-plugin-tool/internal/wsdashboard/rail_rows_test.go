@@ -93,17 +93,64 @@ func TestRailRowsClockOnlyLiveness(t *testing.T) {
 	}
 }
 
-func TestRailRowsEveryWakeRenders(t *testing.T) {
+// Phase 2 rendered every wake to avoid revision-only clock caching. The
+// narrower trigger compares freshly read view inputs instead, never revisions.
+func TestRailRowsInvisibleWakesReuseRender(t *testing.T) {
 	f := startPageFixture(t)
 	src := f.d.railPageSource("en", "")
 	page := f.d.cache.acquire(src.key)
 	defer f.d.cache.release(src.key, page)
 	first, _ := f.d.cache.get(page, src, false)
 	renders := f.d.stats.RailRenders.Load()
-	f.d.broker.wake("unrelated-session") // no session revision or refresh stamp changes
-	second, _ := f.d.cache.get(page, src, false)
-	if f.d.stats.RailRenders.Load() != renders+1 || first.rail == second.rail || first.regions[regionRail].Hash != second.regions[regionRail].Hash {
-		t.Fatal("rail wake must render rows even with identical session revisions")
+	for _, token := range []string{"unrelated-session", inboxDep("livesession"), gitDep(f.project), "livesession", ""} {
+		f.d.broker.wake(token)
+		second, _ := f.d.cache.get(page, src, false)
+		if f.d.stats.RailRenders.Load() != renders || first.rail != second.rail || first.regions[regionRail].Hash != second.regions[regionRail].Hash {
+			t.Fatalf("rail-invisible %q wake rendered unchanged inputs", token)
+		}
+	}
+	// An indexed board-only change raises Rev but has no rail-visible data.
+	f.change(t, "livesession", f.project, "board-only change", 8)
+	f.d.cache.get(page, src, false)
+	if f.d.stats.RailRenders.Load() != renders {
+		t.Fatal("a revision-only change rendered the rail")
+	}
+}
+
+func TestRailRowsSourceRechecksClockAndHover(t *testing.T) {
+	f := startPageFixture(t)
+	now := time.Now()
+	pages := f.d.pagesIn("en")
+	pages.now = func() time.Time { return now }
+	src := f.d.railSource(pages, "en", "")
+	page := f.d.cache.acquire(src.key)
+	defer f.d.cache.release(src.key, page)
+	first, _ := f.d.cache.get(page, src, false)
+	renders := f.d.stats.RailRenders.Load()
+	// Only the clock moves, not a session revision. A normally invisible wake
+	// still rechecks adapter liveness before it can reuse an existing render.
+	now = now.Add(91 * time.Second)
+	f.d.broker.wake(inboxDep("livesession"))
+	stale, _ := f.d.cache.get(page, src, false)
+	if f.d.stats.RailRenders.Load() != renders+1 || stale.regions[regionRail].Hash == first.regions[regionRail].Hash {
+		t.Fatal("clock-only liveness was cached by revision")
+	}
+	// Evidence changes only the inert hover source; it still invalidates rows.
+	snap := f.d.snapshots.snapshotWithoutObserved(f.dir, "livesession")
+	snap.UpdatedAt = now.UnixMilli()
+	f.d.snapshots.SetLive(f.dir, "livesession", *snap)
+	f.d.broker.wake(liveDep("livesession"))
+	before, _ := f.d.cache.get(page, src, false)
+	if err := wslive.AppendObserved(SessionDir(f.dir, "livesession"), []wslive.ObservedRecord{
+		{ModelObservation: wslive.ModelObservation{ID: "a", Model: "first", Source: "pi.assistant", At: 1000}},
+		{ModelObservation: wslive.ModelObservation{ID: "b", Model: "second", Source: "pi.assistant", At: 2000}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.d.broker.wake("livesession")
+	after, _ := f.d.cache.get(page, src, false)
+	if before.rail == after.rail || !strings.Contains(string(after.regions[regionRail].HTML), "first → second") {
+		t.Fatal("inert model-change hover did not invalidate the rail")
 	}
 }
 

@@ -971,7 +971,7 @@ func (r pageReader) session(replyID string) (SessionView, bool) {
 // source named and the attachments directory its conversation reads, and
 // whether it shows contacts (live or saved conversation history).
 func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, bool) {
-	view, inputs, _, ok, err := r.readSessionWith(replyID, nil, true)
+	view, inputs, _, ok, err := r.readSessionWith(replyID, nil, true, true)
 	return view, inputs, ok && err == nil
 }
 
@@ -989,10 +989,10 @@ type sessionReads struct {
 // readSessionWith is readSession for a render that may reuse prev, the
 // reads of the page's previous render (nil reads everything): the index
 // entry and the snapshots are read again, every other store is taken from
-// prev, the ring included unless ringChanged. An inbox prev did not read
-// (no adapter showed then) is read when an adapter arrives. It returns the
-// reads it used.
-func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChanged bool) (SessionView, refreshInputs, *sessionReads, bool, error) {
+// prev, the ring included unless ringChanged, and held/drained unless
+// inboxChanged. An inbox prev did not read (no adapter showed then) is read
+// when an adapter arrives. It returns the reads it used.
+func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChanged, inboxChanged bool) (SessionView, refreshInputs, *sessionReads, bool, error) {
 	var s Session
 	var page PageContent
 	var err error
@@ -1027,7 +1027,7 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 		}
 		if present {
 			reads.conversation = true
-			if prev != nil && prev.conversation {
+			if prev != nil && prev.conversation && !inboxChanged {
 				reads.held, reads.drained = prev.held, prev.drained
 			} else {
 				reads.held, _ = r.entries.readHeld(inbox)
@@ -1329,7 +1329,7 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, replyID string) {
 	frame := framedRequest(r)
 	lang, pref := requestLang(r)
-	view, _, _, ok, readErr := d.pagesIn(lang).readSessionWith(replyID, nil, true)
+	view, _, _, ok, readErr := d.pagesIn(lang).readSessionWith(replyID, nil, true, true)
 	if readErr != nil {
 		http.Error(w, "session temporarily unavailable", http.StatusServiceUnavailable)
 		return

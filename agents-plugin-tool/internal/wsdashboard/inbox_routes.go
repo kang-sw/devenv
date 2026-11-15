@@ -213,7 +213,7 @@ func (d *Daemon) inboxAnswered(w http.ResponseWriter, s Session, status int, ans
 func (d *Daemon) inboxChanged(s Session) {
 	d.index.Reread(s.ReplyID)
 	d.stats.WakeInbox.Add(1)
-	d.broker.wake(s.ReplyID)
+	d.broker.wake(inboxDep(s.ReplyID))
 	if d.mailWake != nil {
 		d.mailWake.Wake()
 	}
