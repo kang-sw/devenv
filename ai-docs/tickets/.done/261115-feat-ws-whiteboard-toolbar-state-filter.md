@@ -9,6 +9,7 @@ sage-review: required
 sage-review-completeness: completed
 sage-review-completeness-reviewed: b81f7d56a8d82743
 sage-review-design-reviewed: b81f7d56a8d82743
+completed: 2026-11-15
 ---
 
 # Whiteboard toolbar state filter with preserved closed-topic counts
@@ -86,3 +87,124 @@ Verification:
 - Verify the narrow V2 fallback immediately below 540px and V1 at/above the boundary, including a smaller mobile width. Compare result captures side by side with the preserved V1/V2 reference and record approved differences rather than claiming the old mockup already meets the corrected contract.
 - Run relevant focused Go/JavaScript regressions plus existing affected toolbar, closed-history, overview and source-assembly contracts without weakening assertions. Preserve exact commands, complete logs, actual exit codes and any explicit omissions. Record an owned-process census and fixture cleanup outcome; a started process or controller exit is not acceptance proof.
 - Obtain independent implementation review, record the actual result and retained evidence, then hand the branch to MAIN. Do not activate the shared runtime or claim installed/live acceptance.
+
+### Result (01a121f70) - 2026-11-15
+
+Implemented and independently reviewed on `impl/develop/ankle-blush-ashen`.
+Code/test head: `01a121f707d52fe316b1b0ff2b31404b13d986be`. MAIN integrated
+777 (`1b815bf673d98c32877d729896afcd23808dc25a`) through `f5c57b1ef`, then
+the approved docs-equivalent rail sync through `17014f672ef2b3131b9e5fc2660b9f5a9e830512`.
+No asset-split source, rail fixture fix, shared-runtime activation or parent merge
+was performed by this worker.
+
+Delivered:
+
+- Authoritative optional `TopicView.State`/`StateDiagnostic` and escaped topic
+  data attributes for state, run owner, cumulative ETA, start/deadline and run ID.
+  Legacy absence and diagnostic authority remain distinct; closed reset is
+  unchanged. This is T0 page metadata/assets, with no state/store/protocol change.
+- Six persistent radios: All, the four existing operational states, and the
+  independent closed lifecycle. Counts deduplicate board/pin topics and retain
+  loaded closed history plus `data-closed-more`. Visibility marks preserve topic
+  nodes, frames, pin order and lifecycle; stateless topics match only All (or
+  Closed when lifecycle-closed). The duplicate right count is gone.
+- Inline V1 at actual toolbar width >=540px, V2 trigger/radio-popover below it,
+  list-filter icon, complete labels/counts, roving radio keys and responsive focus
+  transfer. Eleven locale tables are complete. Overview restores before filter
+  changes and excludes filtered topics from keyboard/motion lists.
+
+Implementation decisions:
+
+- All's count is the lifecycle total (loaded open + loaded closed + closed
+  remainder), because All restores the existing unfiltered board, not an
+  invented open-only state. Counts are independent of current visibility.
+- The narrow control remains one accessible trigger with list-filter/chevron;
+  choosing All clears it rather than introducing the mockup's inline decorative
+  clear subcontrol. The popover retains every option, including Closed.
+- Existing capability gates are preserved. Baseline `1b815bf67` readbacks verify
+  `dashboard.js:716,767` Files live/fpane gating and `pages.go:1235` plus
+  `terminal.js:24-25` terminal `data-term` gating. The isolated no-ring and real
+  AppendRing saved-history fixtures exercise their actual modes. A refusing,
+  provider-free synthetic TerminalHost advertises terminal capability (four
+  inherited controls there); a separately labeled synthetic live snapshot covers
+  all five controls. No terminal shell or provider action was executed.
+
+Verification and exact receipts:
+
+- `GOPROXY=off GOSUMDB=off go test ./internal/wswhiteboard -timeout 120s`:
+  exit 0; `/tmp/whiteboard-page-data-legwarmer/go-test.{log,exit}`. The initial
+  failure used an additive instead of cumulative ETA fixture; corrected fixture
+  provenance remains in `go-test-first.{log,exit}`.
+- `GOPROXY=off GOSUMDB=off go test ./internal/wsdashboard -run '^TestBoardStateFilter$' -count=1 -timeout 120s`:
+  exit 0; `/tmp/toolbar-state-ankle/filter-unit-rerun.{log,exit}`. The first
+  minimal-DOM test used unsupported unquoted selector syntax; its separate
+  `filter-unit.{log,exit}` is retained.
+- `GOPROXY=off GOSUMDB=off go test ./internal/wsdashboard ./internal/wswhiteboard ./internal/wsi18n -timeout 180s`:
+  exit 1, solely pre-existing 777 `TestRailDraftRestore` undefined `mode` in an
+  extracted fixture. Whiteboard/i18n passed. Full raw receipt:
+  `/tmp/ws-toolbar-leaf-logs/test-1.{log,exit}`. MAIN explicitly excluded its fix;
+  follow-up `261115-bug-ws-rail-draft-restore-undefined-mode` owns it. No
+  package-wide clean claim is made.
+- `GOPROXY=off GOSUMDB=off go test ./internal/wsdashboard -run 'Test(Board|Toolbar|Overview|Cards)' -timeout 180s`:
+  exit 0; `/tmp/ws-toolbar-leaf-logs/focused.{log,exit}`. Original literal
+  pin/count/history, floating/scroller, keyboard and motion expectations remain
+  meaningful through the replacement segments, not deleted coverage.
+- `GOPROXY=off GOSUMDB=off go test ./internal/wsdashboard -run '^(TestTerminalCardScript|TestTerminalButtonLivesInBoardToolbar|TestBoardCardsJoinTheTopicRail|TestCSSClassesDoNotCollideAcrossModules|TestAssetIDFollowsAssetContent|TestPagesAndStreamsCarryTheAssetID|TestClosedRoute)' -count=1 -v -timeout 180s`:
+  exit 0; `/tmp/toolbar-state-ankle/final-source-assembly.{log,exit}`.
+- Isolated Chromium: exact command in
+  `/tmp/ws-board-state-filter-17014f672-LoQOPv/command.txt` (cached Playwright,
+  `go test ./internal/wsdashboard -run '^TestBoardStateFilterBrowser$' -count=1 -v -timeout=5m`):
+  exit 0; complete `go-test.log`, `go-test.exit`, `browser-process.log` and
+  `browser-exit.json` in that directory. Korean light/dark: ordinary, 777 bounded
+  saved-history, 135-closed and synthetic-live modes; all six selected labels at
+  actual 800px; 540 inline / 539 popover / 360 mobile; keyboard/focus round trip,
+  reload, real streamed zero/state/close changes, actual closed route, document
+  versus bounded scrolling, floating, non-vacuous Overview traversal and two-pin
+  node/frame/order preservation. `measurements.json` and capability JSONs retain
+  actual geometry; 1,750 owned-origin requests, no external requests/page errors.
+- Browser correction history is explicit in `correction-provenance.json`.
+  Earlier directories `/tmp/ws-board-state-filter-17014f672-{GJEj1Y,tmPkN6,br7Iea,s3jhG5,ovH8fo}/`
+  retain their raw failures/exit/cleanup receipts: reference relative path,
+  overstrict five-action mode assumption, Page/Frame API, hidden initial saved
+  board tab, and mistaken fixture text expectation respectively. Later
+  `1ysiGh`, `4w4BxW`, and final `LoQOPv` are separate passing strengthened runs;
+  none overwrites the failure records.
+- Owned cleanup: final `controller-owned-after.json` records Go PID 51656,
+  Node 51863 and Chromium 51866 gone; all four owned fixture directories gone;
+  `127.0.0.1:62314` and `:62315` listeners closed. `owned-before.json`,
+  `owned-after.json` and browser receipts retain the before/after census.
+
+Visual comparison (worker and independent reviewer inspected paired images):
+
+- Compared `/tmp/ws-board-state-filter-17014f672-LoQOPv/filterlive-light-800-discussing-contact.png`
+  vs `ai-docs/tickets/assets/261115-feat-ws-whiteboard-toolbar-state-filter/834b-state-filter-toolbar.html#v1-light-900`: match.
+- Compared `/tmp/ws-board-state-filter-17014f672-LoQOPv/filterordinary-dark-800-discussing-contact.png`
+  vs the same reference `#v1-dark-900`: match.
+- Compared `/tmp/ws-board-state-filter-17014f672-LoQOPv/filtersaved-dark-539-open-contact.png`
+  vs the same reference `#v2-dark-1280`: match.
+- Compared `/tmp/ws-board-state-filter-17014f672-LoQOPv/filterordinary-light-360-pill-contact.png`
+  vs the same reference `#v2-light-900`: match.
+- The original crops (`reference-v1-{light,dark}-900.png` and
+  `reference-v2-{light,dark}-{1280,900}.png`), 120 captures including 32 paired
+  contact sheets, and closed-135 selected-label captures are retained beside
+  those contacts. Match is for the corrected toolbar treatment, not identical
+  demonstration content: the added Closed segment, removed duplicate counts,
+  lifecycle-total All, list-filter/chevron control, responsive action labels and
+  actual widths/data differ as described above. No topic badges were added;
+  the mockup's topic bodies/badges are not this display scope. Reference unchanged.
+
+Independent lite review:
+
+- Fresh reviewer `8b61b485-aed4-4a2f-99b4-94304fbd4c61` reviewed exact
+  `9c34183a95c6ecef3eb5930ac8aaf3f0d3ba1df2..01a121f707d52fe316b1b0ff2b31404b13d986be`:
+  no Critical, Important or Minor findings. Report retained at
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@32b93426/review-paths/8b529efa-01-toolbar-state-filter-lite.md`.
+  It directly inspected source/tests, execution receipts, baseline capability
+  readbacks, cleanup and relevant V1/V2 contact sheets. Per lite allocation no
+  second review ran. The closure commit changes ticket documentation only;
+  reviewed source/test inputs remain unchanged.
+
+Unresolved: the explicitly out-of-scope pre-existing rail fixture failure above.
+Omitted: shared/installed runtime acceptance, provider/shell execution, unrelated
+full-repository suite and redundant full-package rerun; MAIN owns activation
+and integration. No source assertion was weakened to hide a production defect.
