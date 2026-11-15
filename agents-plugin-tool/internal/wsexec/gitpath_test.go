@@ -1,10 +1,12 @@
 package wsexec
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sync"
 	"testing"
@@ -214,6 +216,40 @@ func TestGitPathCacheBypassesCwdSensitiveSearch(t *testing.T) {
 		if _, ok := gitSearchContext([]string{"PATH=" + string(os.PathListSeparator) + root}); !ok {
 			t.Fatal("explicit empty entries are not searched")
 		}
+	}
+}
+
+func TestGitCommandUsesSharedResolver(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Setenv("NoDefaultCurrentDirectoryInExePath", "")
+		t.Setenv("PATHEXT", ".EXE")
+	}
+	a, b := fakeProgram(t, "git"), fakeProgram(t, "git")
+	path := a + string(os.PathListSeparator) + b
+	t.Setenv("PATH", path)
+	for _, env := range [][]string{nil, {"PATH=" + path, "PATHEXT=.EXE", "CUSTOM=caller"}} {
+		want := filepath.Join(a, gitName())
+		cmd := Command(env, "git", "arg with spaces")
+		if cmd.Path != want || !reflect.DeepEqual(cmd.Env, env) || !reflect.DeepEqual(cmd.Args, []string{want, "arg with spaces"}) {
+			t.Fatalf("command changed path/args/env: %+v", cmd)
+		}
+		if err := os.Remove(want); err != nil {
+			t.Fatal(err)
+		}
+		cmd = CommandContext(context.Background(), env, "git", "arg with spaces")
+		if cmd.Path != want {
+			t.Fatalf("command did not share cached success: %q", cmd.Path)
+		}
+		if err := cmd.Run(); err == nil {
+			t.Fatal("stale launch must fail without resolving the fallback Git")
+		}
+		if err := os.WriteFile(want, []byte("fake"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := Command([]string{}, "git")
+	if cmd.Env == nil || !errors.Is(cmd.Err, exec.ErrNotFound) {
+		t.Fatalf("explicit empty command changed mode: env=%v, err=%v", cmd.Env, cmd.Err)
 	}
 }
 

@@ -86,9 +86,10 @@ func searchPath(environ []string) (path, pathext string) {
 	return path, pathext
 }
 
-// Command is exec.Command for env: with a nil env it is exec.Command itself
-// (the process's own PATH and environment); otherwise name resolves against
-// env's PATH and the command runs with env as its environment. A name env's
+// Command is exec.Command for env: a nil env uses the process's own PATH
+// and environment; otherwise name resolves against env's PATH and the command
+// runs with env as its environment. Literal "git" uses GitPath's cache; other
+// names are resolved afresh. A name env's
 // PATH does not hold leaves the command unstartable (cmd.Err, as
 // exec.Command does for its own lookup failure), so Start and Run report
 // the missing program rather than run this process's.

@@ -1,12 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kang-sw/devenv/internal/wsconfig"
@@ -66,6 +68,52 @@ func hostedServerEnv(t *testing.T, name string, set map[string]string) []string 
 		base[k] = v
 	}
 	return hostedEnv(base)
+}
+
+// Alternating and concurrent hosted connections must never reuse another
+// caller's Git, even though the daemon has one shared resolver cache.
+func TestHostedGitLookupKeepsCallerExecutables(t *testing.T) {
+	processEnvFixture(t)
+	root := t.TempDir()
+	initGit(t, root)
+	type caller struct {
+		server *Server
+		log    string
+	}
+	callers := make([]caller, 2)
+	for i, name := range []string{"alpha", "beta"} {
+		log := filepath.Join(t.TempDir(), "git.log")
+		dir := loggingGitDir(t, log)
+		env := hostedServerEnv(t, name, map[string]string{"PATH": dir, "WS_TEST_GIT_LOG": log})
+		callers[i] = caller{NewServerWithOptions(ServerOptions{Root: root, Version: "test", Env: env}), log}
+	}
+	for _, side := range []int{0, 0, 1, 1, 0, 1} {
+		before := strings.Count(readGitLog(t, callers[1-side].log), "\n")
+		out, err := callers[side].server.gitRunner().RunGit(context.Background(), root, "rev-parse", "--is-inside-work-tree")
+		if err != nil || strings.TrimSpace(string(out)) != "true" {
+			t.Fatalf("caller %d: %q, %v", side, out, err)
+		}
+		if after := strings.Count(readGitLog(t, callers[1-side].log), "\n"); after != before {
+			t.Fatalf("caller %d ran the other caller's Git", side)
+		}
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		side := i % 2
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := callers[side].server.gitRunner().RunGit(context.Background(), root, "rev-parse", "--is-inside-work-tree"); err != nil {
+				t.Errorf("caller %d: %v", side, err)
+			}
+		}()
+	}
+	wg.Wait()
+	for i, caller := range callers {
+		if got := strings.Count(readGitLog(t, caller.log), "rev-parse --is-inside-work-tree\n"); got != 13 {
+			t.Fatalf("caller %d ran its Git %d times, want 13", i, got)
+		}
+	}
 }
 
 // TestHostedServerEnvAgentMode permits agent-backed tools by default,
