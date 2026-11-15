@@ -118,6 +118,7 @@ func TestWhiteboardEffectsBrowser(t *testing.T) {
 	f.d = startIndexedDaemon(t, f.dir, f.src, time.Hour, func(o *DaemonOptions) {
 		o.noGitBadge = true
 		o.Agents = agents
+		o.Tracker = &fakeTracker{}
 		o.Support = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/support/choices" {
 				http.NotFound(w, r)

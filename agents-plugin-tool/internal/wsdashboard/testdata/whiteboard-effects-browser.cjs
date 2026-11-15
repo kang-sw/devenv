@@ -32,9 +32,25 @@ async function until(check, message) {
   const browser = await chromium.launch({ headless: true });
   try {
     for (const width of [1280, 360]) {
-      const context = await browser.newContext({ viewport: { width, height: 900 }, locale: 'en-US', serviceWorkers: 'block', reducedMotion: 'reduce' });
+      const context = await browser.newContext({ viewport: { width, height: 900 }, locale: 'en-US', serviceWorkers: 'allow', reducedMotion: 'reduce' });
       context.setDefaultTimeout(10000);
       const errors = [], consoleErrors = [], unexpected = [], history = [], requests = [];
+      const serviceWorkerAttempts = [], serviceWorkerEvents = [];
+      await context.exposeBinding('__wsEffectsServiceWorkerAttempt', ({ frame }, scriptURL) => {
+        serviceWorkerAttempts.push({ frame: frame.url(), scriptURL });
+      });
+      context.on('serviceworker', worker => serviceWorkerEvents.push(worker.url()));
+      // Playwright's blocker reads Navigator even in opaque sandboxed frames.
+      // Keep their native restriction and block registrations in other frames.
+      await context.addInitScript(() => {
+        if (self.origin === 'null') return;
+        const serviceWorkers = navigator.serviceWorker;
+        if (!serviceWorkers) return;
+        Object.getPrototypeOf(serviceWorkers).register = async function(scriptURL) {
+          await globalThis.__wsEffectsServiceWorkerAttempt(typeof scriptURL === 'string' ? scriptURL : { type: typeof scriptURL });
+          throw new Error('Service worker registration is forbidden in the effects fixture');
+        };
+      });
       const tab = await context.newPage();
       tab.on('pageerror', e => errors.push(e.message));
       tab.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
@@ -264,6 +280,9 @@ async function until(check, message) {
         assert.equal(await modal.getByRole('button', { name: 'Start', exact: true }).isDisabled(), false);
         await modal.getByRole('button', { name: 'Cancel', exact: true }).click();
         await shot('modal-generation-completed');
+        assert.deepEqual(serviceWorkerAttempts, [], 'no service worker registration attempts');
+        assert.deepEqual(serviceWorkerEvents, [], 'no service worker creations');
+        assert.deepEqual(context.serviceWorkers(), [], 'no remaining service workers');
         assert.deepEqual(errors, [], 'no production page errors');
         assert.deepEqual(consoleErrors, [], 'no browser console errors');
         assert.deepEqual(unexpected, [], 'no external network access');
@@ -272,6 +291,7 @@ async function until(check, message) {
         try { await shot('failure'); } catch (_) {}
         throw e;
       } finally {
+        fs.writeFileSync(path.join(output, `${width}-service-workers.json`), JSON.stringify({ attempts: serviceWorkerAttempts, events: serviceWorkerEvents, remaining: context.serviceWorkers().map(worker => worker.url()) }, null, 2));
         fs.writeFileSync(path.join(output, `${width}-console-and-requests.json`), JSON.stringify({ errors, consoleErrors, unexpected, history, requests }, null, 2));
         await context.close();
       }
