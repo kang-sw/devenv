@@ -67,7 +67,7 @@ func TestTimelineEventlessItemsRetainStoredNineTwoOrder(t *testing.T) {
 		{ID: 2, Topic: "legacy", Class: ClassCheck, Title: "second", Status: StatusAssumed, Answer: "ok"},
 	}}
 	topic := topicView(t, st, LayoutFull, "legacy")
-	live, _ := timelineRows(topic)
+	live := allTimelineRows(topic)
 	if len(live) != 2 || live[0].Item.ID != 9 || live[1].Item.ID != 2 || live[0].Clock != "" || live[1].Clock != "" {
 		t.Fatalf("eventless timeline must keep undated stored order: %+v", live)
 	}
@@ -115,7 +115,7 @@ func TestTimelineRepublishedPanelRetainsOriginalInputIteration(t *testing.T) {
 		{ID: "e3", Kind: EntryPanel, PanelID: "p1", Recap: "latest", Text: "latest body", At: "2026-11-15T12:02:00Z", Seq: 3},
 	}}}}
 	view := BuildView(st, ViewInput{Layout: LayoutFull})
-	live, _ := timelineRows(view.Topics[0])
+	live := allTimelineRows(view.Topics[0])
 	if len(live) < 2 || len(live[0].Inputs) != 1 || live[0].Inputs[0].Excerpt != "Original owner request" {
 		t.Fatal("republishing erased the original owner iteration", live)
 	}
