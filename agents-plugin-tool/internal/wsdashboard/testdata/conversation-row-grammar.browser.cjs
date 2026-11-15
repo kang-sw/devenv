@@ -26,7 +26,18 @@ const [file, shots] = process.argv.slice(2);
         const report = frame(document.querySelector('.child-report > summary'));
         const note = frame(document.querySelector('.agent-note > .conv-row'));
         const tools = document.querySelector('.toolsline > summary');
+        // vertical margins in em of the row's own font size
+        const em = (sel) => {
+          const cs = getComputedStyle(document.querySelector(sel));
+          const f = parseFloat(cs.fontSize);
+          return [parseFloat(cs.marginTop) / f, parseFloat(cs.marginBottom) / f];
+        };
+        const spacing = {
+          pill: em('.sysline.compaction'), notice: em('.sysline.notice'),
+          tools: em('.toolsline'), turn: em('.turnline'), report: em('.mailline.child-report'),
+        };
         return {
+          spacing,
           mail, report, note, toolsH: tools.getBoundingClientRect().height,
           toolIcon: tools.querySelector('.row-icon use').getAttribute('href'),
           wbDetails: document.querySelectorAll('.wbeffects details, details.wbeffects').length,
@@ -44,6 +55,9 @@ const [file, shots] = process.argv.slice(2);
       assert(m.report.chev, 'child report keeps the chevron');
       assert.equal(m.toolIcon, '#i-hammer');
       assert(m.toolsH <= 44, 'tool summary is compact: ' + m.toolsH);
+      for (const [k, want] of [['pill', 1], ['notice', 1], ['tools', 0.2], ['turn', 0.2], ['report', 0.2]]) {
+        for (const got of m.spacing[k]) assert(Math.abs(got - want) < 0.01, `${theme}: ${k} vertical margin is ${want}em, got ${got}em`);
+      }
       assert.equal(m.wbDetails, 0, 'whiteboard updates are never folded');
       assert(m.wbArticles >= 1 && m.wbBody > 0, 'whiteboard update card is expanded');
       assert.deepEqual(errors, []);
