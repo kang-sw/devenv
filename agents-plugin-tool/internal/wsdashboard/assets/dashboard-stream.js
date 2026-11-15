@@ -250,6 +250,11 @@
       try { tried = window.sessionStorage.getItem(ASSETS_TRIED); } catch (x) {}
       if (holdsDraft() || shDrafts() || tried === ev.id) { banner(wsT("js.banner.updated")); return; }
       try { window.sessionStorage.setItem(ASSETS_TRIED, ev.id); } catch (x) {}
+      boardSaveReload();
+      // A shell reload also replaces its same-origin session documents.
+      if (shell) shFrames.forEach(function (x) {
+        try { if (x.el.contentWindow.wsSaveBoardReload) x.el.contentWindow.wsSaveBoardReload(); } catch (e) {}
+      });
       location.reload();
     }
     // A WebSocket handshake hides HTTP status. Recheck the stream once after

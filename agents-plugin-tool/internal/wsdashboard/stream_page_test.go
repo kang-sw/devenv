@@ -201,6 +201,7 @@ var mode = "session", rid = "rid1", worktree = "", hiddenRegions = {}, modeHash 
 function held() { return ""; }
 function trackerLost() {}
 function trackerNudge() {}
+function boardSaveReload() { log.push("save-board"); }
 function swap() {}
 function tlHold() {}
 function modeChanged() {}
@@ -224,13 +225,13 @@ check("the same assets do nothing", log, []);
 s.msg("assets", {});
 check("a daemon naming none does nothing", log, []);
 s.msg("assets", { id: "bbb" });
-check("other assets reload", log, ["reload"]);
+check("other assets save before reloading", log, ["save-board", "reload"]);
 log = [];
 s.msg("assets", { id: "bbb" });
 check("a second reload for the same assets banners instead", log, ["banner:js.banner.updated"]);
 log = [];
 s.msg("assets", { id: "ccc" });
-check("newer assets reload again", log, ["reload"]);
+check("newer assets reload again", log, ["save-board", "reload"]);
 log = [];
 draft = true;
 s.msg("assets", { id: "ddd" });
@@ -240,6 +241,12 @@ draft = false;
 mine = null;
 s.msg("assets", { id: "eee" });
 check("a page rendered without an identity does nothing", log, []);
+log = [];
+mine = "aaa";
+shell = true;
+var shFrames = [{ el: { contentWindow: { wsSaveBoardReload: function () { log.push("save-frame"); } } } }, { el: {} }];
+s.msg("assets", { id: "fff" });
+check("shell saves its session frames before reload, tolerating unavailable frames", log, ["save-board", "save-frame", "reload"]);
 process.stdout.write(bad.join("\n"));
 })();
 `)

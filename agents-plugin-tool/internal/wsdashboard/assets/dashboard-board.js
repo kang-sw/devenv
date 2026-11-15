@@ -793,6 +793,75 @@
     });
     return { h: { apply: function () { handles.forEach(function (h) { h.apply(); }); }, end: function () { handles.forEach(function (h) { h.end(); }); } } };
   }
+  // Asset reloads cross a document boundary. Keep only tab-local, short-lived
+  // identities; placement and late frame layout still belong to wbHistory.
+  var BOARD_RELOAD = "ws.dashboard.board-reload." + location.pathname + location.search;
+  var boardReloadCanceled = false;
+  function boardReloadInput(e) {
+    if (e.type === "scroll" && e.target !== doc && e.target !== doc.scrollingElement && e.target.id !== "bcol" && e.target.id !== "bpins") return;
+    if (e.type === "keydown" && !/^(ArrowUp|ArrowDown|PageUp|PageDown|Home|End| |Spacebar)$/.test(e.key)) return;
+    boardReloadCanceled = true;
+  }
+  ["wheel", "touchstart", "pointerdown", "keydown", "scroll"].forEach(function (type) {
+    doc.addEventListener(type, boardReloadInput, { capture: true, passive: true });
+  });
+  function boardSaveReload() {
+    // A shell and its frame can both receive the asset event. A second
+    // reload before placement must carry the original reference forward.
+    try {
+      var pending = JSON.parse(window.sessionStorage.getItem(BOARD_RELOAD));
+      if (!boardReloadCanceled && pending && Number.isFinite(pending.at) && pending.page === location.pathname + location.search &&
+          Date.now() >= pending.at && Date.now() - pending.at < 60000 && Array.isArray(pending.records)) return;
+    } catch (e) {}
+    var w = window.wbHistory, records = [], seen = new Set();
+    if (!w || !w.keep) return;
+    boardBoxes().forEach(function (box) {
+      var h = w.keep(box.firstElementChild || box, { capture: false }), s = h.scroller;
+      if (seen.has(s)) return;
+      seen.add(s);
+      var view = h.viewport(), line = view.top + 1;
+      var panels = boardWithSnap(function () { return boardViewedPanels(s); });
+      panels.sort(function (a, b) { return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
+      var n = panels.find(function (p) { var r = p.getBoundingClientRect(); return r.top <= line && r.bottom > line; }) ||
+        panels.find(function (p) { return p.getBoundingClientRect().top > line; });
+      var topic = n && n.closest(".topic");
+      records.push({ scroller: s === doc.scrollingElement ? "document" : s.id, top: s.scrollTop, key: n && boardPanelKey(n), topic: topic && topicKey(topic),
+        offset: n ? n.getBoundingClientRect().top - line : 0 });
+    });
+    try { window.sessionStorage.setItem(BOARD_RELOAD, JSON.stringify({ at: Date.now(), page: location.pathname + location.search, records: records })); } catch (e) {}
+  }
+  if (framed) window.wsSaveBoardReload = boardSaveReload;
+  function boardRestoreReload() {
+    var saved = null;
+    try {
+      saved = JSON.parse(window.sessionStorage.getItem(BOARD_RELOAD));
+    } catch (e) {}
+    requestAnimationFrame(function () {
+      try { window.sessionStorage.removeItem(BOARD_RELOAD); } catch (e) {}
+      var canceled = boardReloadCanceled;
+      ["wheel", "touchstart", "pointerdown", "keydown", "scroll"].forEach(function (type) { doc.removeEventListener(type, boardReloadInput, true); });
+      if (canceled || !saved || saved.page !== location.pathname + location.search || !Number.isFinite(saved.at) ||
+          Date.now() - saved.at < 0 || Date.now() - saved.at > 60000 || !Array.isArray(saved.records)) return;
+      var w = window.wbHistory;
+      if (!w || !w.place) return;
+      saved.records.forEach(function (r) {
+        if (!r || !Number.isFinite(r.top) || !Number.isFinite(r.offset)) return;
+        var topic = boardBoxes().flatMap(function (b) { return q("section.topic[data-topic]", b); }).find(function (n) { return topicKey(n) === r.topic; });
+        var n = topic && boardLivePanels(topic).find(function (p) { return boardPanelKey(p) === r.key; });
+        if ((!n || !n.getBoundingClientRect().height) && topic && /^(p|e)[1-9][0-9]*$/.test(r.key || "") && w.loadTarget) n = w.loadTarget(topic, r.key, window.WsCards && window.WsCards.unfoldTopic);
+        n = n || topic;
+        if (n) {
+          w.place(n, { readingOffset: r.offset });
+        } else {
+          // Missing identities fall back numerically through the SAME owner.
+          var s = r.scroller === "document" ? doc.scrollingElement : $(r.scroller), ref = s && s.firstElementChild;
+          if (!ref) return;
+          var top = s === doc.scrollingElement ? 0 : s.getBoundingClientRect().top + s.clientTop;
+          w.place(ref, { offset: ref.getBoundingClientRect().top - top + s.scrollTop - r.top });
+        }
+      });
+    });
+  }
   // A staging pass reads exposure through one wbHistory.snapshot: nothing
   // writes the DOM inside it, so each scroller's viewport (a scan of every
   // sticky head) is measured once rather than once per node checked.

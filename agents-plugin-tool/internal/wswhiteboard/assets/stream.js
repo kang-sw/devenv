@@ -783,9 +783,12 @@
     // instant offset jump. It is navigation the user asked for (Overview's
     // enter, pick and exit), so, like any jump, the cooldown that same click
     // started does not hold it back, and the user's next scroll ends it.
+    // readingOffset follows the sticky reading line as a reloaded board mounts;
+    // ordinary offset stays relative to the scroller. Both use the same jump.
     // keep with an offset only records a capture for a later apply.
     function place(node, opt) {
-      return jump(node, { offset: opt && typeof opt.offset === 'number' ? opt.offset : 0, behavior: 'instant' });
+      return jump(node, { offset: opt && typeof opt.offset === 'number' ? opt.offset : 0,
+        readingOffset: opt && opt.readingOffset, behavior: 'instant' });
     }
     function jump(node, opt) {
       var scroller = scrollerOf(node), s = sessions.get(scroller);
@@ -825,7 +828,9 @@
         }
         function measure() {
           var r = node.getBoundingClientRect();
-          return r.top - scrollerTop(scroller) + scroller.scrollTop - (typeof opt.offset === 'number' ? opt.offset : block === "center" ? (scroller.clientHeight - r.height) / 2 : 0);
+          var offset = typeof opt.readingOffset === 'number' ? viewport(scroller).top + 1 - scrollerTop(scroller) + opt.readingOffset :
+            typeof opt.offset === 'number' ? opt.offset : block === "center" ? (scroller.clientHeight - r.height) / 2 : 0;
+          return r.top - scrollerTop(scroller) + scroller.scrollTop - offset;
         }
         function align() {
           // A board morph may replace the item but retain its stable ID.
@@ -853,7 +858,7 @@
           raf = win.requestAnimationFrame(frame);
         }
         function land(behavior) {
-          if (typeof opt.offset === 'number') scroller.scrollTo({ top: measure(), behavior: behavior });
+          if (typeof opt.offset === 'number' || typeof opt.readingOffset === 'number') scroller.scrollTo({ top: measure(), behavior: behavior });
           else node.scrollIntoView({ block: block, behavior: behavior });
           o.wrote = scroller.scrollTop;
         }
