@@ -63,6 +63,17 @@
     var ms = +t.getAttribute("data-ms");
     if (!ms) return;
     var f = t.getAttribute("data-f"), rel = f === "since" || f === "ago" || f === "rel";
+    if (f === "user") {
+      var at = t.getAttribute("datetime"), minutes = Math.max(0, Math.floor((now - ms) / 60000));
+      // Absolute clocks and "today" use the envelope's sender offset, not
+      // the viewer's zone. The full original date/time/offset stays on hover.
+      var zone = at.slice(-6), offset = (+zone.slice(1, 3) * 60 + +zone.slice(4)) * (zone[0] === "-" ? -1 : 1);
+      var today = new Date(now + offset * 60000).toISOString().slice(0, 10);
+      var label = minutes < 60 ? wsT("js.user.minutes", minutes) : (at.slice(0, 10) === today ? "" : at.slice(5, 7) + "/" + at.slice(8, 10) + " ") + at.slice(11, 16);
+      if (t.textContent !== label) t.textContent = label;
+      t.title = at;
+      return;
+    }
     if (rel) {
       var s = f === "since" ? dur(now - ms) : f === "rel" ? relAge(now - ms) : wsT("js.ago", dur(now - ms));
       if (t.textContent !== s) t.textContent = s;
@@ -117,7 +128,7 @@
     if (doc.hidden || shHidden) return;
     var now = Date.now();
     if (!tickSets || !window.MutationObserver) tickSets = {
-      times: q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"]'),
+      times: q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"], time[data-ms][data-f="user"]'),
       paces: q("em.u-pace[data-reset]")
     };
     tickSets.times.forEach(function (t) { fmtTime(t, now); });

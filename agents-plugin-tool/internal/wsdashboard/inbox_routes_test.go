@@ -16,6 +16,20 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
+// inboxBody checks the new outer transport while keeping the existing
+// inner-content assertions readable. Commands intentionally have no envelope.
+func inboxBody(t *testing.T, e wsinbox.Entry) string {
+	t.Helper()
+	if e.Command != nil {
+		return e.Text()
+	}
+	blocks, ok := wsinbox.ParseUserMessages(e.Text())
+	if !ok || len(blocks) != 1 || blocks[0].At == "" {
+		t.Fatalf("invalid inbox envelope: %q", e.Text())
+	}
+	return blocks[0].Text
+}
+
 // postJSON posts body to url with the given Origin ("" sends none) and
 // returns the status, the response, and its body.
 func postJSON(t *testing.T, url, origin, body string) (int, http.Header, string) {
@@ -81,7 +95,7 @@ func TestMessageRouteHoldsEachSendAsItsOwnEntry(t *testing.T) {
 	if merged {
 		t.Fatal("first send merged")
 	}
-	if held := f.held(t); len(held) != 1 || held[0].ID() != first || held[0].Entry.Text() != "<wb:answers>\n03=a\n04=ok\n</wb:answers>\n\nfirst send" {
+	if held := f.held(t); len(held) != 1 || held[0].ID() != first || inboxBody(t, held[0].Entry) != "<wb:answers>\n03=a\n04=ok\n</wb:answers>\n\nfirst send" {
 		t.Fatalf("held after one send = %+v", held)
 	}
 	second, merged := f.send(t, `{"text":"second send","chips":[{"id":"03","answer":"b","note":"changed my mind"}]}`)
@@ -92,7 +106,7 @@ func TestMessageRouteHoldsEachSendAsItsOwnEntry(t *testing.T) {
 	if len(held) != 2 || held[0].ID() != first || held[1].ID() != second {
 		t.Fatalf("held after two sends = %+v", held)
 	}
-	if got, want := held[1].Entry.Text(), "<wb:answers>\n03=b^changed my mind\n</wb:answers>\n\nsecond send"; got != want {
+	if got, want := inboxBody(t, held[1].Entry), "<wb:answers>\n03=b^changed my mind\n</wb:answers>\n\nsecond send"; got != want {
 		t.Fatalf("second message = %q, want %q", got, want)
 	}
 
@@ -168,7 +182,7 @@ func TestMessageCarriesTopicNotesAndAnswersShowAsCapsules(t *testing.T) {
 	f := startPageFixture(t)
 	id, _ := f.send(t, `{"text":"hello","chips":[{"id":"03","answer":"a"}],"topics":[{"topic":"ship-gate","note":"why?"}]}`)
 	held := f.held(t)
-	if len(held) != 1 || held[0].Entry.Text() != "<wb:answers>\n03=a\n[ship-gate]^why?\n</wb:answers>\n\nhello" {
+	if len(held) != 1 || inboxBody(t, held[0].Entry) != "<wb:answers>\n03=a\n[ship-gate]^why?\n</wb:answers>\n\nhello" {
 		t.Fatalf("held = %+v", held)
 	}
 	delivered := wsinbox.Entry{Parts: []string{"user <words>"}, Chips: []wsinbox.Chip{
@@ -220,7 +234,7 @@ func TestMessageCarriesMentionsAsCapsules(t *testing.T) {
 	held := f.held(t)
 	want := "<wb:answers>\n03=a\n</wb:answers>\n\n" + `<wb:mention topic="ship-gate" id="03">a &lt; b</wb:mention>` + "\n" +
 		`<wb:mention topic="plan">whole topic</wb:mention>` + "\n\nsee these"
-	if len(held) != 1 || held[0].Entry.Text() != want {
+	if len(held) != 1 || inboxBody(t, held[0].Entry) != want {
 		t.Fatalf("held = %+v", held)
 	}
 	delivered := wsinbox.Entry{Parts: []string{"user words"}, Mentions: []wsinbox.Mention{{Topic: "plan", ID: "7", Text: "x & <y>"}}}.Text()
@@ -338,8 +352,8 @@ func TestMessageSelectionNoteBundlesSurviveRouteLifecycle(t *testing.T) {
 			t.Fatalf("held = %+v", held)
 		}
 		entry := held[0].Entry
-		if !reflect.DeepEqual(entry.Parts, parts) || !reflect.DeepEqual(entry.Mentions, wantMentions) || entry.Text() != wantWire {
-			t.Fatalf("held parts = %#v, mentions = %#v, wire = %q; want parts = %#v, mentions = %#v, wire = %q", entry.Parts, entry.Mentions, entry.Text(), parts, wantMentions, wantWire)
+		if !reflect.DeepEqual(entry.Parts, parts) || !reflect.DeepEqual(entry.Mentions, wantMentions) || inboxBody(t, entry) != wantWire {
+			t.Fatalf("held parts = %#v, mentions = %#v, wire = %q; want parts = %#v, mentions = %#v, wire = %q", entry.Parts, entry.Mentions, inboxBody(t, entry), parts, wantMentions, wantWire)
 		}
 		return entry
 	}
@@ -450,7 +464,7 @@ func TestCancelRefusedOnAClaimedEntryAndASendAfterADrainStartsANewOne(t *testing
 	if merged || next == id {
 		t.Fatalf("send after drain merged=%v id=%s", merged, next)
 	}
-	if held := f.held(t); len(held) != 1 || held[0].Entry.Text() != "<wb:answers>\n03=b\n</wb:answers>\n\ntwo" {
+	if held := f.held(t); len(held) != 1 || inboxBody(t, held[0].Entry) != "<wb:answers>\n03=b\n</wb:answers>\n\ntwo" {
 		t.Fatalf("held = %+v", held)
 	}
 	// Sent marks: the held answer shows over the delivered one; once drained
@@ -483,7 +497,7 @@ func TestSteerRouteRewritesTheHeldEntryMarkedAndAcceptsNoMerge(t *testing.T) {
 	}
 	// The entry is rewritten under a fresh name with the steer flag.
 	held := f.held(t)
-	if len(held) != 1 || held[0].ID() != ans.ID || !held[0].Entry.Steer || held[0].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\npromote me" {
+	if len(held) != 1 || held[0].ID() != ans.ID || !held[0].Entry.Steer || inboxBody(t, held[0].Entry) != "<wb:answers>\n03=a\n</wb:answers>\n\npromote me" {
 		t.Fatalf("held after steer = %+v", held)
 	}
 	// The page shows the steer marker and no steer control for it.
@@ -496,7 +510,7 @@ func TestSteerRouteRewritesTheHeldEntryMarkedAndAcceptsNoMerge(t *testing.T) {
 	if merged || next == ans.ID {
 		t.Fatalf("send after steer merged=%v id=%s", merged, next)
 	}
-	if held := f.held(t); len(held) != 2 || held[0].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\npromote me" || held[1].Entry.Steer {
+	if held := f.held(t); len(held) != 2 || inboxBody(t, held[0].Entry) != "<wb:answers>\n03=a\n</wb:answers>\n\npromote me" || held[1].Entry.Steer {
 		t.Fatalf("held = %+v", held)
 	}
 	_, page = get(t, f.base+"/s/livesession?frame=1")

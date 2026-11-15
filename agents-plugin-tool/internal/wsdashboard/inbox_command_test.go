@@ -57,7 +57,7 @@ func TestCommandEntryStandsAloneAndRefusesSteer(t *testing.T) {
 	if merged || after == text || after == cmd {
 		t.Fatalf("text after a command merged=%v id=%s", merged, after)
 	}
-	if held := f.held(t); len(held) != 3 || held[0].Entry.Text() != "before" || held[1].Entry.Text() != "/compact" || held[2].Entry.Text() != "after" {
+	if held := f.held(t); len(held) != 3 || inboxBody(t, held[0].Entry) != "before" || inboxBody(t, held[1].Entry) != "/compact" || inboxBody(t, held[2].Entry) != "after" {
 		t.Fatalf("held = %+v", held)
 	}
 	code, _, raw := postJSON(t, f.base+"/s/livesession/steer", f.base, `{"id":"`+cmd+`"}`)
@@ -142,7 +142,7 @@ func TestCommandIsHeldOnlyFromThisMachineAndOnlyWhenListed(t *testing.T) {
 			t.Fatalf("LAN %s = %d: %s", body, rec.Code, rec.Body.String())
 		}
 	}
-	if held := f.held(t); len(held) != 2 || held[1].Entry.Text() != "from the phone" {
+	if held := f.held(t); len(held) != 2 || inboxBody(t, held[1].Entry) != "from the phone" {
 		t.Fatalf("held after the LAN slash refusals = %+v", held)
 	}
 	if rec = serve(f.d, lan, http.MethodPost, "/s/livesession/message", `{"text":"see a/b or /tmp"}`); rec.Code != http.StatusOK {
@@ -151,7 +151,7 @@ func TestCommandIsHeldOnlyFromThisMachineAndOnlyWhenListed(t *testing.T) {
 	if rec = serve(f.d, local, http.MethodPost, "/s/livesession/message", `{"text":"/compact"}`); rec.Code != http.StatusOK {
 		t.Fatalf("local /compact text = %d: %s", rec.Code, rec.Body.String())
 	}
-	if held := f.held(t); !strings.Contains(held[len(held)-1].Entry.Text(), "/compact") {
+	if held := f.held(t); !strings.Contains(inboxBody(t, held[len(held)-1].Entry), "/compact") {
 		t.Fatalf("local /compact text not held: %+v", held)
 	}
 

@@ -400,7 +400,7 @@ func TestAnswerCheckWaitsOutHeldInput(t *testing.T) {
 	through, _ := f.batch(ackID, 7, "")
 	f.sendHeld(ackID, time.Now(), wsinbox.Entry{Parts: []string{"one more thing"}})
 	f.d.checkAnswers(ackID)
-	if held := f.held(ackID); len(held) != 1 || held[0].Entry.Text() != "one more thing" {
+	if held := f.held(ackID); len(held) != 1 || inboxBody(t, held[0].Entry) != "one more thing" {
 		t.Fatalf("held = %+v, want the user's message alone", held)
 	}
 	f.wantThrough(ackID, through)

@@ -61,7 +61,7 @@ func opaqueSelectionQueueFixture(t *testing.T, text string) string {
 	if err != nil || len(drained) != 1 || drained[0].Entry.SentAt != e.SentAt {
 		t.Fatalf("opaque drain = %+v, %v", drained, err)
 	}
-	return drained[0].Entry.Text()
+	return drained[0].Entry.testBody(t)
 }
 
 func TestSelectionBlockRoundTrip(t *testing.T) {
@@ -185,7 +185,7 @@ func TestSelectionEnvelopeContextOpacity(t *testing.T) {
 			dir := Dir(t.TempDir())
 			if _, _, err := Send(dir, Entry{Parts: []string{text}}, time.Now()); err != nil {
 				t.Errorf("zero-image send rejected ordinary failed envelope: %v", err)
-			} else if held, err := Held(dir); err != nil || len(held) != 1 || held[0].Entry.Text() != text {
+			} else if held, err := Held(dir); err != nil || len(held) != 1 || held[0].Entry.testBody(t) != text {
 				t.Errorf("zero-image send changed text: %+v, %v", held, err)
 			}
 			if name != "unterminated quote" {
@@ -346,7 +346,7 @@ func TestSelectionsSurviveIndependentMessageQueues(t *testing.T) {
 	}
 	check := func(e Entry, want Entry) {
 		t.Helper()
-		if !reflect.DeepEqual(e.Parts, want.Parts) || e.Mentions != nil || !reflect.DeepEqual(e.Images, want.Images) || !reflect.DeepEqual(e.ImageNums, want.ImageNums) || e.SentAt != want.SentAt || e.Text() != want.Text() {
+		if !reflect.DeepEqual(e.Parts, want.Parts) || e.Mentions != nil || !reflect.DeepEqual(e.Images, want.Images) || !reflect.DeepEqual(e.ImageNums, want.ImageNums) || e.SentAt != want.SentAt || e.testBody(t) != want.testBody(t) {
 			t.Fatalf("message ownership changed: %+v, want %+v", e, want)
 		}
 	}
@@ -520,7 +520,7 @@ func TestSelectionLegacyTextFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	var restored Entry
-	if err := json.Unmarshal(raw, &restored); err != nil || restored.Text() != block {
-		t.Fatalf("old-shape text round trip = %q, %v", restored.Text(), err)
+	if err := json.Unmarshal(raw, &restored); err != nil || restored.testBody(t) != block {
+		t.Fatalf("old-shape text round trip = %q, %v", restored.testBody(t), err)
 	}
 }
