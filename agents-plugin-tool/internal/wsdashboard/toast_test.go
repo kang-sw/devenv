@@ -198,7 +198,7 @@ func TestTabLabelCount(t *testing.T) {
 		t.Fatal("dashboard.js holds no tab label ... sseOn block")
 	}
 	block = strings.TrimSuffix(block, "var sseOn = true;")
-	runNode(t, "session tab label", tlAskSrc(t, string(data))+tabLabelPrelude+boardBoxSrc(t, string(data))+`
+	runNode(t, "session tab label", tlAskSrc(t, string(data))+tabLabelPrelude+boardBoxSrc(t, string(data))+dashboardFuncs(t, "treeInputHTML")+`
 var mode = "session";
 var R = new N(), A = new N(), B = new N();
 var treeSel = {}; treeSel[PERM] = [new N({ up: A }), new N({ up: A }), new N({ up: B })]; treeSel[".agent.root"] = [R];
