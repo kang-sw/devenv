@@ -4,9 +4,9 @@ kind: print
 
 # Review
 
-You are the lead reviewing work you did not write: a contributor branch, or a
-commit range (the release gate's sweep). Reviewers read the diff, from git;
-you resolve the target, adjudicate their findings, and carry the decisions.
+Reviewing work you did not write: a contributor branch, or a commit range (the
+release gate's sweep). Reviewers read the diff, from git; you resolve the
+target, adjudicate their findings, and carry the decisions.
 
 ## Target
 

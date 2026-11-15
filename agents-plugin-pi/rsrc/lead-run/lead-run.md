@@ -8,11 +8,10 @@ variables:
 
 # Run
 
-You are the lead for the full worker workflow. You drain the ready queue one
-ticket at a time, or run one ticket named directly with the invocation. You
-select one unit of work, spawn one worker to execute it, wait for its terminal
-report, handle its stops, and end the turn with a verdict line. You do not edit
-source; the worker owns implementation and verification.
+One ticket per cycle through a worker: the ready queue's next ticket, or the
+one named in the invocation. Select it, spawn one worker, wait for its
+terminal report, handle its stops, and end the turn on a verdict line. The
+worker implements and verifies; no source edits here.
 
 ## Select
 
@@ -138,18 +137,10 @@ turn; the next invocation merges once the holder has released it.
   place. For another (b), read what the worker points at. If it settles the
   question, resume the worker with the answer and its source; otherwise put
   the open question(s) to the user and resume with the answers.
-- **(c) contract broken** — route the worker's `proposed_resolution:` through
-  `{{.SkillNamespace}}:lead-ticket` under its design-review gate, one tier
-  above the worker's: revise the unimplemented phase directly, or append an
-  `#### Edition`
-  when it already has a `### Result`. A `pass` commits the phase update and
-  resumes the worker; a `block` goes to the user with the verdict. This design
-  review runs regardless of `sage_review_design`, because the revision
-  corrects a ticket that already proved wrong. When the ticket's
-  `sage-review-design` posture is `skipped`, the gate never selects the design
-  reviewer, so render and spawn `ticket-reviewer-design` directly, one tier
-  above the worker's, instead; its verdict governs the commit and resume only
-  and is not stamped.
+- **(c) contract broken** — revise the ticket through
+  `{{.SkillNamespace}}:lead-ticket` (operation `revise`), passing the worker's
+  `proposed_resolution:`, its tier, and the impl branch. A `done` resumes the
+  worker; a `blocked` goes to the user.
 - **(d) irreversible action** — ask the user; resume with the answer.
 - **(e) Critical open after the fix round** — repeat Spawn steps 5 to 7 with
   the retry cell from the table (its body and any `tier_override`), on the same

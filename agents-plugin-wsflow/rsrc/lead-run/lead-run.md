@@ -8,11 +8,10 @@ variables:
 
 # Run
 
-You are the lead for the full worker workflow. You drain the ready queue one
-ticket at a time, or run one ticket named directly with the invocation. You
-select one unit of work, spawn one worker to execute it, wait for its terminal
-report, handle its stops, and end the turn with a verdict line. You do not edit
-source; the worker owns implementation and verification.
+One ticket per cycle through a worker: the ready queue's next ticket, or the
+one named in the invocation. Select it, spawn one worker, wait for its
+terminal report, handle its stops, and end the turn on a verdict line. The
+worker implements and verifies; no source edits here.
 
 ## Select
 

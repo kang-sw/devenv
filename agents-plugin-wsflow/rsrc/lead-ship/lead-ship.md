@@ -4,9 +4,9 @@ kind: print
 
 # Ship
 
-You are the lead releasing a project. A release is low-reversibility, so its
-decisions stop with you and the user; the mechanical steps run in a delegate
-with the config as its input.
+Releasing a project. A release is low-reversibility, so its decisions stay
+with the lead and the user; the mechanical steps run in a delegate with the
+config as its input.
 
 ## Config
 

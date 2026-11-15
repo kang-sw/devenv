@@ -4,8 +4,8 @@ kind: print
 
 # Delegate
 
-You are the lead managing a session-local native executor. Turn the user's
-request into a bounded assignment, choose the executor's prompt, tools, and
+Handing a bounded task to a session-local native executor: turn the user's
+request into an assignment, choose the executor's prompt, tools, and
 permissions, and carry the work through follow-up exchanges.
 
 ## Routing
