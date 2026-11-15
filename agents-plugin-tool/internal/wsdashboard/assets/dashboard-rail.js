@@ -618,7 +618,10 @@
   // Over a live row its halves are a line before or after it at its
   // level (WsRail.dropZone with halves), which reorders, attaches among a
   // parent's children, or detaches a child to the top level of its own
-  // group; the pointer held still RD_NEST in a valid parent's middle half
+  // group; a top-level row takes a parent with its shown children as one
+  // unit (rdUnit), so it lands top-level before or after that unit and
+  // joins children only by the dwell below. The pointer held still
+  // RD_NEST in a valid parent's middle half
   // instead attaches the row as its last child (the parent outlined, no
   // line). The child zone is never armed by a pass alone: it once took the
   // middle half of every top-level row at once, so a drop aimed at a row
@@ -689,6 +692,17 @@
     var k = row.nextElementSibling, b = row.getBoundingClientRect().bottom;
     return k && k.classList.contains("rkids") && !row.classList.contains("kcol") ? Math.max(b, k.getBoundingClientRect().bottom) : b;
   }
+  // rdUnit is the parent whose shown children make one unit with it, for
+  // row: row itself when its children show, its parent when it is one of
+  // them; else null.
+  function rdUnit(row) {
+    var box = row.parentNode, kids = row.nextElementSibling;
+    if (box && box.classList.contains("rkids")) {
+      var p = box.previousElementSibling;
+      return p && p.classList.contains("rs") && !p.classList.contains("ended") ? p : null;
+    }
+    return kids && kids.classList.contains("rkids") && !row.classList.contains("kcol") && kids.children.length ? row : null;
+  }
   // rdHomePeers are a dragged row's top-level peers for a drop over no
   // row: the live rows of its own group's list (WsRail.homeRows), those on
   // its side of the stars for a top-level row.
@@ -718,7 +732,20 @@
       // line at its halves, the same line the drop lands on.
       if (kz && kz.zone === "child") rdDwell(d, tf0.rid);
       else rdDwell(d, "");
-      z = kz && kz.zone === "child" && d.nest === tf0.rid ? kz : WsRail.dropZone(df, tf0, frac, true);
+      var unit = !df.parent ? rdUnit(row) : null;
+      if (kz && kz.zone === "child" && d.nest === tf0.rid) z = kz;
+      else if (unit) {
+        // A top-level row lands among top-level units: over a parent whose
+        // children show, or over one of those children, the parent with
+        // its children splits in halves, before the parent or after its
+        // last child. The seam under a last child (where the line would
+        // also be the next row's top) is otherwise a child's place, and a
+        // top-level row aimed between two top-level rows nested there.
+        var ut = unit.getBoundingClientRect().top, ub = rdBottom(unit), uf = WsRail.rowFacts(unit);
+        uf.first = "";
+        z = WsRail.dropZone(df, uf, ub > ut ? (y - ut) / (ub - ut) : 0.5, true);
+        row = unit;
+      } else z = WsRail.dropZone(df, tf0, frac, true);
       ref = row;
       if (z && z.ref !== row.getAttribute("data-rid")) ref = row.nextElementSibling && row.nextElementSibling.firstElementChild;
     } else {
