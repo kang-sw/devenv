@@ -376,3 +376,14 @@ Result: check-interleave amendment implemented.
 - Unresolved: the six baseline failures, including the embed budget, remain;
   visual acceptance is INFERRED pending the owner's post-merge check. No child
   agent, browser, daemon, merge, push or ticket closure was performed.
+
+#### Edition (04cbdde8d) - 2026-11-15
+
+Lead amendment at the develop sync (technical; landed behavior wins): items
+without timeline events render at the head in the topic's existing stored
+item order, not item-number order. TASK3's unified whole-history panel
+(46af75a71) landed that order with a regression (`[9, 2]` stays `[9, 2]`).
+The timeline adopts it instead of reordering a landed, owner-checked view.
+The rest of the "Items without timeline events" decision is unchanged.
+Rejected: item-number order (would break the landed TASK3 regression and
+reorder what owners already see).
