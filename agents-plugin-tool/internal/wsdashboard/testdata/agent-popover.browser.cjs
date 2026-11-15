@@ -1,6 +1,6 @@
 // The session's agents popover (agpop) in Chromium, through the shell page.
 // env: AGPOP_BASE (daemon), AGPOP_UPDATES (swaps the agents region with a new
-// caption), AGPOP_ROWS ({keys, peers}: every row the agents region renders),
+// caption or state=zero/nonlive fixture), AGPOP_ROWS ({keys, peers}: every row the agents region renders),
 // AGPOP_SHOTS (optional screenshot directory).
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
@@ -161,6 +161,48 @@ const fits = (s, what) => {
       }
       out[width + scheme] = { width: Math.round(s.rect.width), vw: s.vw };
       await ctx.close();
+    }
+    // No running subagents: the badge remains a muted, usable popover
+    // trigger. A draft retains the same DOM when the adapter goes away,
+    // exercising syncBadge with liveMode=false rather than reloading it.
+    {
+      const { ctx, tab, frame, errors } = await open(b, { width: 1440 });
+      const draft = 'keep this draft while the adapter goes away';
+      await frame.locator('#ctext + .wsc-editor').fill(draft);
+      assert.equal((await fetch(process.env.AGPOP_UPDATES + '?state=zero')).status, 204);
+      await frame.waitForFunction(() => document.querySelector('#sbadge .slabel').textContent === '0');
+      await frame.locator('#ibadge:not([hidden])').waitFor();
+      const checkIdle = async (what) => {
+        const idle = await frame.evaluate(() => {
+          const badge = document.getElementById('sbadge'), probe = document.createElement('span');
+          probe.style.color = 'var(--wb-muted-fg)'; badge.appendChild(probe);
+          const muted = getComputedStyle(probe).color; probe.remove();
+          return { visible: !badge.hidden && badge.getClientRects().length > 0, idle: badge.classList.contains('idle'),
+            count: badge.querySelector('.slabel').textContent, spinner: getComputedStyle(badge.querySelector('.spin')).display,
+            color: getComputedStyle(badge).color, muted };
+        });
+        assert.deepEqual([idle.visible, idle.idle, idle.count, idle.spinner], [true, true, '0', 'none'], `${what}: zero badge stays visible and quiet`);
+        assert.equal(idle.color, idle.muted, `${what}: badge uses the muted color`);
+        assert.equal((await state(frame)).open, false, `${what}: starts closed`);
+        await frame.click('#sbadge');
+        const s = await state(frame);
+        assert(s.open && s.expanded === 'true', `${what}: zero badge opens the popover`);
+        assert(await frame.isVisible('#agpop details[data-key="agent-ended"]'), `${what}: ended agent is accessible`);
+        fits(s, what);
+        await shot(tab, `${what}-1440`);
+        await frame.click('#agclose');
+      };
+      await checkIdle('zero-running');
+      assert.equal((await fetch(process.env.AGPOP_UPDATES + '?state=nonlive')).status, 204);
+      await frame.locator('#dash-banner:not([hidden])').waitFor();
+      // The lead was working in the zero-running fixture. Its interrupt
+      // control now hides, proving the mode event made the page non-live.
+      await frame.waitForFunction(() => document.getElementById('ibadge').hidden);
+      assert.equal(await frame.inputValue('#ctext'), draft, 'non-live transition retains the draft');
+      await checkIdle('non-live');
+      assert.deepEqual(errors, [], 'idle and non-live fixtures have no page errors');
+      await ctx.close();
+      out.idle = 'zero-running and non-live ok';
     }
     console.log(JSON.stringify(out));
   } finally { await b.close(); }
