@@ -41,6 +41,14 @@ Change only what the assignment requires, and follow the style and conventions o
 the files you edit rather than importing your own. Resolve any warning your change
 introduces; a pre-existing warning in a file you did not touch is out of scope.
 
+## Review dispatch
+
+Only when the assignment requires independent review, render `reviewer` for a
+single full-scope reviewer, or `code-review-correctness`, `code-review-fit`, and
+`code-review-test` for the selected partitions. Do not render `code-reviewer` as
+a delegated role: it is a shared include, so delegated provenance admission
+rejects it. Otherwise this floor adds no independent review.
+
 ## Commit
 
 Commit your work on the current branch before you report — an uncommitted change

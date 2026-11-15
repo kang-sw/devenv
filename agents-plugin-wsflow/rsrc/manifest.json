@@ -6,7 +6,7 @@
     "code-review-lite/code-review-lite.md": "94f66f6240dabdcf3b8b1bff86ef6427f498cd8eb9c8f4e2ce5caa6f11c9a2f4",
     "code-review-test/code-review-test.md": "97d1527dec453c47106297d8f4fd9516ce65f61abeb68949607a31c25dab5bce",
     "code-reviewer.md": "4e4054ea13e239cbd62ba4203129b7cf38aff6184edd17a738f6ae2784f3c028",
-    "delegate-implementer/delegate-implementer.md": "09c34782bde70c6aa8f0dc0507e09681e3ae9c0a63d71a61ff28b10480aa6622",
+    "delegate-implementer/delegate-implementer.md": "883a676f8d3c20dabe1df247981cdafe93e66a59eef337f6377df99513275c3a",
     "delegate-sample/delegate-sample.md": "b727304ac2039a36ed742d9867de4885602abdc2014a2732e25ede64d3c14b9d",
     "executor-wrapup.md": "c4e5a8db074933e89bbdff8fd1162bd45c9650dbe075f7b602189ab7ec1342d5",
     "explore/explore.md": "9b732d81f459802f64346c7b1de2d0ca4ac971d931d9994a5131046e7dd9397d",
@@ -49,7 +49,7 @@
     "ticket-worker-elevated/ticket-worker-elevated.md": "8f5b8c4c1d3c7305b507d61f5d01431080df7108379dc673e1f883bc307b26d3",
     "ticket-worker/ticket-worker.md": "8764420ae7acc6e1fa2cee1e385a1493225207d68179ca1fa9ee6332a4c4ff44",
     "tracker/tracker.md": "5bcd627f9630252ba25e5b6c3a604490db2bc92c97eb9d93bb997ec9b12bad4f",
-    "whiteboard/whiteboard.md": "33f5615a833d9790732b998910c69a4d320b7e527943dc4d397f1538e97c78b1",
+    "whiteboard/whiteboard.md": "7e06b8c3a28bd8d3bd7c6649f84297dca096b6181cb722b13e7f364603d4f980",
     "worker-stop-protocol.md": "a41c2a5d3ea2f4e310213e32821ac289ca51471139fb617ebd06fd27e55582a3"
   }
 }
