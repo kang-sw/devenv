@@ -82,12 +82,14 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .wb-history { overflow-anchor: none; }
 .history-live { display: flow-root; width: 100%; }
 .timeline-row { display: flow-root; min-width: 0; }
-.history-gap { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 2px 0; padding: 0 0 0 calc(var(--h-av) + var(--h-gap)); font-size: 11.5px; line-height: 20px; color: var(--wb-muted-fg); opacity: .8; }
-.gap-label { font-weight: 500; }
-.gap-range { font: 11px var(--wb-mono); }
+.history-gap { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin: 2px 0; padding: 0 0 0 calc(var(--h-av) + var(--h-gap)); font-size: 11.5px; line-height: 20px; color: var(--wb-muted-fg); }
+.gap-label { font-weight: 500; opacity: .8; }
+.gap-range { font: 11px var(--wb-mono); opacity: .8; }
 .gap-actions { display: inline-flex; gap: 4px; margin-left: auto; }
-.gap-actions button { border: 0; border-radius: 4px; padding: 0 6px; background: transparent; color: var(--wb-muted-fg); font-size: 11.5px; line-height: 20px; cursor: pointer; }
-.gap-actions button:hover { color: var(--wb-fg); background: var(--wb-wash); }
+/* Load controls are filled capsules without an outline, so they read as
+   buttons beside the dimmed gap label. */
+.gap-actions button { border: 0; border-radius: 999px; padding: 0 10px; background: var(--wb-muted); color: var(--wb-fg); font-size: 11.5px; font-weight: 500; line-height: 20px; cursor: pointer; }
+.gap-actions button:hover { background: color-mix(in srgb, var(--wb-fg) 14%, var(--wb-muted)); }
 .gap-actions button:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 .gap-actions button[hidden] { display: none; }
 .wb-entry { min-width: 0; overflow-wrap: anywhere; }
