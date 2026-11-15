@@ -4,6 +4,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: b9e69134e4ba8119
 sage-review-completeness-reviewed: b9e69134e4ba8119
+completed: 2026-11-15
 ---
 
 # Committed whiteboard effects in the session conversation
@@ -90,3 +91,66 @@ The source citations above are pinned to `2e1d9ea88730105cdb80a182bbd9a004d25fe0
 Implement the confirmed session-scoped effects path at the authoritative whiteboard mutation boundary and the dashboard view that displays its persisted entries. Carry typed actual effects through the existing session identity path; do not reconstruct them from truncated previews, parse human-readable system events, or run updates again for display. Preserve hosted/terminal coverage and show the saved entries without requiring a live adapter. Keep expandable display bounded and safely escaped, separate from model input, and compatible with legacy records and existing authorization. Use the selected best-effort post-commit append without an outbox or store-shape change; do not turn a missing projection into board-command replay. Use decision 11's existing-field carrier and safe fallback without expanding outer persisted fields. Record actual T0 evidence, the accepted crash gap and the distinct board-commit, HTML-publication and conversation-projection outcomes.
 
 Verification: use isolated fixtures for accepted changes, validation refusal, resolved/minted identities, multiple commands and topics, semantic no-change and render-only cases that omit effects entries under MAIN-assumed (805)=a while preserving tool summaries, publication failure after commitment, append failure without board rollback/retry, the accepted commit-to-ring crash gap without guaranteed replay, unchanged store shape, and concurrent ring writers. Pin unchanged outer stored keys/types and old-reader acceptance/old-renderer omission of the additive kind. Cover valid UTF-8 and size boundaries, malformed/unsupported-version/unknown-variant visible fallback, and complete typed semantic-effect coverage. Check correct-session delivery for hosted Claude/Pi and terminal leads, including no-adapter and stale-adapter views, disabled-dashboard/unauthorized cases, old ring records and existing tool-summary behavior. Exercise expandable display in narrow and wide layouts with hostile content. Record exact commands, candidate/served pins, outputs and limitations; distinguish source evidence, executed acceptance and durability guarantees. After eventual develop integration, mail MAIN the merge hash; MAIN alone owns subsequent runtime replacement.
+
+### Result (1b815bf67) - 2026-11-15
+
+- Implemented typed actual committed effects, best-effort session-ring projection,
+  bounded existing-field decoding/fallback, and expandable dashboard display for
+  persisted/live history, including eligible absent/stale-adapter sessions.
+  Compatibility remains T0; the board is authoritative and the accepted
+  commit-to-ring crash gap is not guaranteed delivery or command replay.
+- MAIN explicitly accepted the feature on 2026-11-15 at 01:15:31 UTC and
+  reported develop integration `1b815bf67`: candidate
+  `79249318ef81ead00915c9a95edebeeedadca856`, synchronized at `2af7759c5`,
+  plus ten-locale labels `9e1a67e6b` and formatting `724c4f831`. MAIN reported
+  runtime PID 17250, hash `8faacee9a411`, seven holders and smoke HTTP 200.
+  These final activation facts are MAIN-reported, not a separate EXEC runtime
+  verification. This closeout changes documentation only and needs no swap.
+- EXEC independently consumed the clean correction/integration review:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc/review-paths/8de30624-01-777-integrated-harness-and-geometry.md`
+  (zero Critical, Important or Minor findings). The sole final offline browser
+  invocation tested clean exact candidate `79249318ef81ead00915c9a95edebeeedadca856`:
+  `/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go test -p=1 -parallel=1 -exec /tmp/ws-777-integrated-run.rbdE6n/gate.py ./internal/wsdashboard -run ^TestWhiteboardEffectsBrowser$ -count=1 -timeout=4m -v`
+  from `agents-plugin-tool/`. Exit 0; original PASS lines at 1280 and 360px;
+  fixture 7.29 seconds, package 8.750 seconds, outer invocation 16.182 seconds.
+- Both widths completed hostile literal/fallback display, new saved/live
+  carriers, older-history expansion and identity, absent/stale/live adapter
+  transitions, draft retention, real sandboxed board jump/follow-up, and modal
+  completion/duplicate/generation checks. The already-open target started
+  genuinely offscreen and became fully contained at both widths. Twelve
+  screenshots and original geometry/request/error arrays are retained.
+  All 130 recorded browser requests used isolated port 54453; all twenty
+  tracker responses were real HTTP 200. Page errors, console errors, failed
+  requests, non-success responses, external attempts, service-worker attempts,
+  creation events and remaining workers were zero. The origin-safe test-owned
+  registration blocker preserves the sandbox and original guards; this is not
+  evidence from a deliberately attempted forbidden registration.
+- Frozen evidence: `/tmp/ws-777-integrated-run.rbdE6n/HANDOFF.md`, exact command
+  and environment in `run.metadata.json`, complete `stdout.log`, 329 raw
+  observations in `observation.jsonl`, geometry/screenshots under `artifacts/`,
+  and `sha256-manifest.txt` (85 files; manifest SHA-256
+  `2f326c71efe8b19b64699d2fe06a174058e5b6cf5043a23026165c59cf938dd2`).
+  Root verified those hashes, exact sources, unchanged monitoring core and
+  prior 55 failed, 14 attribution and 21 correction artifacts. Seventeen
+  owned identities were observed; four principal launches had pre-exec
+  PID/PGID/start admission. Owned groups 18799 and 20078 were absent in final,
+  subsequent quiescent and root scans; no owned listeners or signals remained.
+  Both completed implementation/evidence checkouts were released cleanly;
+  branches, stashes and external evidence remain preserved.
+- Limits remain explicit: this is synthetic isolated browser/ring-boundary
+  acceptance, not a provider/native-lead creation or full MCP acceptance run,
+  OS egress audit, arbitrary hostile API-bypass test, recap-chip/multi-chunk/
+  republish test, or exact attribution of the earlier failed browser script.
+  The original exact-C run remains FAILED with 36 service-worker attempts,
+  ten tracker 404s and 360px unreached; later success does not rewrite it.
+  Preserve `/tmp/ws-777-jump-fix.8eI30G/`, earlier verification
+  `/tmp/ws-777-verification.aMhgUO/`, original C
+  `e124d76e932a015470a20e6f6f5339459beca700`, and stash
+  `8afafa80e691fd993f43c6bc73fb256993d8467d` without applying or dropping it.
+  The earlier full-MCP timeout remains unclassified and is not a passing suite.
+  No additional workload or runtime operation was performed for closure.
+
+
+## Resolution (2026-11-15)
+
+MAIN explicitly accepted develop 1b815bf67 and authorized this docs-only Result/closure on 2026-11-15 at 01:15:31 UTC. The final candidate browser packet and independent review are recorded above with preserved failures, limitations and ownership evidence. No new test, source change or runtime operation accompanies closure.

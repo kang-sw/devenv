@@ -431,7 +431,7 @@ func TestWorktreeHolders(t *testing.T) {
 // TestRailRowsOfferDeleteOnLinkedWorktrees pins the deletable flag and its
 // button: a linked worktree git lists, not the primary, not prunable, not
 // under any pool root (the rail's, the default, the legacy in-tree one;
-// pooled rows show while they hold a session) and not a session root the
+// pooled rows never show, even holding a session) and not a session root the
 // list does not name; the button shows only on such rows of a daemon that
 // keeps stored workspaces.
 func TestRailRowsOfferDeleteOnLinkedWorktrees(t *testing.T) {
@@ -465,12 +465,16 @@ func TestRailRowsOfferDeleteOnLinkedWorktrees(t *testing.T) {
 	}
 	want := map[string]bool{
 		repo: false, "/w/feature": true, "/w/idle": true,
-		"/w/custom/a": false, "/w/.ws-worktrees/repo/b": false, "/w/repo/.ws-worktrees/c": false,
 		"/w/fresh": false,
 	}
 	for p, d := range want {
 		if g, ok := got[p]; !ok || g != d {
 			t.Errorf("%s: deletable = %v (shown %v), want %v", p, g, ok, d)
+		}
+	}
+	for _, p := range []string{"/w/custom/a", "/w/.ws-worktrees/repo/b", "/w/repo/.ws-worktrees/c"} {
+		if _, ok := got[p]; ok {
+			t.Errorf("pooled worktree %s shows", p)
 		}
 	}
 	if _, ok := got["/w/gone"]; ok {
