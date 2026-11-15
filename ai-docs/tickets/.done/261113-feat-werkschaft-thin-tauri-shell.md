@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-completeness-reviewed: e69b5db20e428804
 sage-review-design-reviewed: e69b5db20e428804
+completed: 2026-11-15
 ---
 
 # Werkschaft thin Tauri shell around the local dashboard daemon
@@ -378,3 +379,8 @@ existing browser guards, sanitizer and capability roots still hold. Document
 reload/re-bootstrap and any fetch/stream transport implications explicitly;
 no assumption that browser WebSocket or EventSource accepts bearer headers.
 These are future acceptance requirements, not implementation evidence.
+
+
+## Resolution (2026-11-15)
+
+Closed per owner decision (859)=a after the Electron shell's Phase 1 verified parity and merged (develop d28b45728). This ticket's unimplemented Phases 2-4 were re-homed to 261115-feat-werkschaft-electron-shell as its Phases 2-4, rewritten for Electron; single-instance launch/focus moved into that ticket's Phase 1 per (858)=a. The Phase 1 Result (e7121971) above stays as history. The Tauri crate in agents-plugin-tool/desktop/ is untouched here; its removal is separate later work.
