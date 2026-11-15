@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -138,23 +139,28 @@ func TestSearchAnswerOverrideCeiling(t *testing.T) {
 
 func TestSearchAnswerOverrideLaunchFrozen(t *testing.T) {
 	h := newAnswerHarness(t)
-	path := filepath.Join(h.runner.opts.Config.ConfigHome, "config.json")
+	path := filepath.Join(h.root, ".ws-workflow", "config.json")
 	// Whole-value repo override may select Pi even under the Claude key.
-	writeStructured(t, filepath.Join(h.root, ".ws-workflow", "config.json"), map[string]string{ProfilePrefix + SearchAnswerProfileClaude: `{"backend":"pi","model":"custom","effort":"low","tools":["read"],"instructions":"custom.md"}`})
+	writeStructured(t, path, map[string]string{ProfilePrefix + SearchAnswerProfileClaude: `{"backend":"pi","model":"custom","effort":"low","tools":["read"],"instructions":"custom.md"}`})
 	if err := os.WriteFile(filepath.Join(h.root, "custom.md"), []byte("Use precise evidence."), 0600); err != nil {
 		t.Fatal(err)
 	}
+	g := newGate(t, func() {})
+	h.s.opts.beforeSpawn = g.wait
 	a, err := h.s.start("session", "question")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A widening global change cannot affect this private runner's launch.
-	writeStructured(t, path, map[string]string{ProfilePrefix + SearchAnswerProfileClaude: `{"backend":"claude","tools":["Bash"]}`})
+	g.awaitEntered(t)
+	// Replace the winning definition while the service has checked its
+	// ceiling but neither create nor startProcess has resolved it yet.
+	writeStructured(t, path, map[string]string{ProfilePrefix + SearchAnswerProfileClaude: `{"backend":"pi","model":"custom","effort":"low","tools":["read","bash"],"instructions":"custom.md"}`})
+	g.release()
 	p := h.pi.waitProc(t, 0)
 	p.nextSent(t)
 	spec := h.pi.start(0)
 	if spec.Profile.Backend != BackendPi || !reflect.DeepEqual(spec.Profile.Tools, []string{"read"}) || spec.Model != "custom" || spec.Effort != "low" {
-		t.Fatalf("not the checked override: %+v", spec)
+		t.Fatalf("not the checked override: tools=%v backend=%s model=%s effort=%s", spec.Profile.Tools, spec.Profile.Backend, spec.Model, spec.Effort)
 	}
 	data, err := os.ReadFile(spec.Instructions)
 	if err != nil || !strings.Contains(string(data), "Use precise evidence.") {
@@ -166,6 +172,73 @@ func TestSearchAnswerOverrideLaunchFrozen(t *testing.T) {
 	writeStructured(t, filepath.Join(h.root, ".ws-workflow", "config.json"), map[string]string{ProfilePrefix + SearchAnswerProfileClaude: `{"backend":"pi","tools":["bash"]}`})
 	if _, err := h.s.start("session", "again"); err == nil || !strings.Contains(err.Error(), ProfilePrefix+SearchAnswerProfileClaude) {
 		t.Fatalf("unsafe override: %v", err)
+	}
+}
+
+func TestSearchAnswerReadableGrantExcludesRunnerCredentials(t *testing.T) {
+	h := newAnswerHarness(t)
+	a, err := h.s.start("session", "inspect the board")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := h.claude.waitProc(t, 0)
+	prompt := p.nextSent(t)
+	spec := h.claude.start(0)
+	boardPath := strings.Split(strings.Split(prompt, "Whiteboard snapshot: ")[1], "\n")[0]
+	snapshotDir := filepath.Dir(boardPath)
+	questionDir := filepath.Dir(snapshotDir)
+	if filepath.Base(snapshotDir) != "snapshot" {
+		t.Fatalf("snapshot is not in its dedicated readable subtree: %s", snapshotDir)
+	}
+
+	var wantRules []string
+	for _, tool := range []string{"Read", "Grep", "Glob"} {
+		for _, dir := range []string{h.root, snapshotDir} {
+			wantRules = append(wantRules, tool+"(//"+strings.TrimPrefix(filepath.ToSlash(dir), "/")+"/**)")
+		}
+	}
+	if !reflect.DeepEqual(spec.Profile.Tools, wantRules) {
+		t.Fatalf("read grants must name only the project and snapshot subtree: got %v, want %v", spec.Profile.Tools, wantRules)
+	}
+	if !strings.HasPrefix(spec.Dir, filepath.Join(questionDir, "runner")+string(filepath.Separator)) {
+		t.Fatalf("runner is not a sibling of the readable snapshot subtree: %s", spec.Dir)
+	}
+	rec, err := readRecord(spec.Dir)
+	if err != nil || rec.WSKey == "" {
+		t.Fatalf("fixture has no credential-bearing runner record: %v", err)
+	}
+	for _, readable := range []string{h.root, snapshotDir} {
+		err := filepath.WalkDir(readable, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if entry.Name() == "agent.json" {
+				t.Errorf("credential-bearing artifact is inside a read grant: %s", path)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if strings.Contains(string(data), rec.WSKey) {
+				t.Errorf("minted session credential is inside a read grant: %s", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, err := os.ReadDir(snapshotDir)
+	if err != nil || len(files) != 1 || files[0].Name() != "board.json" {
+		t.Fatalf("readable subtree must contain only the board snapshot: %v, %v", files, err)
+	}
+	p.reply("done")
+	awaitAnswer(t, a)
+	if _, err := os.Stat(questionDir); !os.IsNotExist(err) {
+		t.Fatalf("question cleanup did not remove both sibling trees: %v", err)
 	}
 }
 

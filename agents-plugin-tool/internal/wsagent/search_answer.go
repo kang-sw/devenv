@@ -27,6 +27,9 @@ type SearchAnswerOptions struct {
 	Session func(replyID string) (root string, board []byte, err error)
 	// timeout is shortened only by tests; production always uses five minutes.
 	timeout time.Duration
+	// beforeSpawn gates tests after the ceiling check but before the private
+	// runner resolves the profile at creation and process start.
+	beforeSpawn func()
 }
 
 // SearchAnswers hosts one-shot, read-only answers. Only the current answer
@@ -176,7 +179,14 @@ func (s *SearchAnswers) start(session, question string) (*searchAnswer, error) {
 	if err != nil {
 		return nil, err
 	}
-	boardPath := filepath.Join(dir, "board.json")
+	// Only snapshot material belongs in the extra readable tree. Runner
+	// records contain a live session key and must remain in a sibling tree.
+	snapshotDir := filepath.Join(dir, "snapshot")
+	if err := os.Mkdir(snapshotDir, 0o700); err != nil {
+		os.RemoveAll(dir)
+		return nil, err
+	}
+	boardPath := filepath.Join(snapshotDir, "board.json")
 	if err := os.WriteFile(boardPath, board, 0o400); err != nil {
 		os.RemoveAll(dir)
 		return nil, err
@@ -188,7 +198,7 @@ func (s *SearchAnswers) start(session, question string) (*searchAnswer, error) {
 	if def.Backend == BackendClaude {
 		def.Tools = nil
 		for _, tool := range rp.Definition.Tools {
-			for _, path := range []string{root, dir} {
+			for _, path := range []string{root, snapshotDir} {
 				// Claude's // prefix names an absolute path (including drives).
 				def.Tools = append(def.Tools, tool+"(//"+strings.TrimPrefix(filepath.ToSlash(path), "/")+"/**)")
 			}
@@ -242,6 +252,9 @@ func (s *SearchAnswers) run(ctx context.Context, a *searchAnswer, r *Runner, pro
 		a.mu.Unlock()
 		close(a.done)
 	}()
+	if s.opts.beforeSpawn != nil {
+		s.opts.beforeSpawn()
+	}
 	st, err := r.Spawn(SpawnSpec{Profile: profile, Root: root, Cwd: root, Prompt: fmt.Sprintf(searchAnswerPrompt, root, boardPath, a.snapshot().Question)})
 	if err != nil {
 		failure = err.Error()
