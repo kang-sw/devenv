@@ -3,6 +3,10 @@ title: "Owner-approved nonblocking hosted-session hiring"
 related:
   261114-research-ws-session-hire-approval: "source research; its Confirmed Decisions are this ticket's contract"
   261114-research-ws-clerk-session-role: "clerk decisions 720-722 stay unchanged"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: ec7138fd30ded2a9
+sage-review-design-reviewed: ec7138fd30ded2a9
 ---
 
 # Owner-approved nonblocking hosted-session hiring
@@ -22,8 +26,8 @@ The research ticket `261114-research-ws-session-hire-approval` settled the
 contract. The owner moved it to implementation on 2026-11-15 ("구현으로
 올리죠", relayed by MAIN). Only that research's Outcome Ledger
 `Confirmed Decisions` are carried here as contract. Its Proposals and Open
-Questions are not contract; each one this ticket needs is in the Open
-Decision Queue below.
+Questions are not contract; each one this ticket needs was settled and is
+recorded under `## Decisions`.
 
 ## Decisions
 
@@ -105,9 +109,34 @@ Settled 2026-11-15 by MAIN (board IDs; MAIN relay 05:43Z):
   requests silently and breaks the 750/767 mail promise.
 - **(952) technical, MAIN - recheck.** Eligibility is checked again at
   approval. If the requester has lost the hiring flag, the request cannot be
-  approved; it is closed with a `withdrawn` mail. A closed requester does not
-  block approval: the outcome mail waits on its reply-id (768=c). Rejected:
-  withdrawing on any requester change; no recheck.
+  approved; it is closed with a `withdrawn` mail. Its closed-requester half
+  is superseded by (994) below. Rejected: withdrawing on any requester
+  change; no recheck.
+- **(994) owner via MAIN 06:41Z - an ended requester cancels its pending
+  requests (supersedes (952)'s "a closed requester does not block
+  approval").** When the requester session is *ended* - its row has moved to
+  the rail's ended sessions (`Registration.Live` false,
+  `wsdashboard/registry.go#L205-L214`; split in
+  `wsdashboard/pageview_rail.go#L401-L406`) - every pending request it sent
+  is cancelled automatically: it leaves the owner's approval queue and is
+  closed with a `withdrawn` mail to the requester's reply-id, like the
+  recheck's `withdrawn`. A requester that is only process-stopped and
+  revivable while its row stays live (a hosted `Runner.Stop`,
+  `wsagent/runner.go#L876-L878`, shown with its exit on a live row) keeps its
+  requests. The daemon applies the rule whenever it sees the requester's row
+  ended: on each index refresh, at startup over the restored proposals, and in
+  the approval recheck, so an approval that races the requester's end is
+  refused as `withdrawn`. A cancelled request does not come back if the
+  requester is later revived. Owner words: "요청한 세션 닫히면(그러니까,
+  프로세스만 멈춘 게 아니라 아예 '종료된 세션'으로 보내버린 상황 말하는
+  거죠?) 그쪽 세션이 보낸 요청은 취소되게 뒤집죠." Consequence: approval
+  always meets a live requester, so (954)'s attach op never meets the ended
+  parent it refuses (`wsdashboard/rail_layout.go#L804-L809`). Tier: T0 -
+  `withdrawn` is an existing outcome in the new proposals file this ticket
+  introduces; no older binary reads that file, and no tracker event or other
+  store changes. Rejected (board (994)): approving into an ungrouped
+  session, a dormant link under the ended parent, and nested rendering under
+  a closed requester.
 - **(952) technical, MAIN - recovery_context size.** At most 16 KiB. It is
   stored with the proposal, shown collapsed in the modal with a character
   count, and echoed in full in every outcome mail. Rejected: 4 KiB;
@@ -205,15 +234,15 @@ raised:
   recommendation), the whole daemon.
 - **(949)=c, owner - same worktree.** "리드와 같은 워크트리로 둡니다." The
   hired session runs in the requester's worktree. Whether the owner may still
-  change it in the modal is not decided; the arrival-flow mockup shows it
-  read-only and the owner judges it under (951). Rejected: the requester's
+  change it in the modal is not decided; it ships read-only as mocked and the
+  owner judges it live ((951)). Rejected: the requester's
   canonical git root as an editable default; a request-named root.
 - **(950)=a, owner - nonblocking arrival.** "이건 목업 좀 하죠." A request
   does not steal focus. It shows a chip on the requester's rail row, a
   top-bar badge and a short toast; the badge or a chip opens one queue of
   pending requests (oldest first), and the modal opens from the queue with a
   pager. Mockup: `ai-docs/ref/brand/mockup/session-hire/arrival-flow.png`
-  (source `arrival-flow.html`), judged under (951). Rejected: a modal that
+  (source `ai-docs/tickets/assets/261115-feat-ws-session-hire-approval/arrival-flow.html`), built as mocked ((951)). Rejected: a modal that
   pops up on arrival.
 - **(952)=ok, (953)=ok, owner.**
 - **(954) technical, MAIN-accepted 05:50Z - grouping = the rail hierarchy.**
@@ -258,18 +287,14 @@ raised:
   `session.roster` proxies (T0). Rejected: the index view's projection, which
   counts permission waits as busy and recurses into subagents, so it would
   disagree with the rail the owner sees.
-
-## Open Decision Queue
-
-Last ID: (958)
-
-Local IDs from the first draft were re-minted on the board: (939) -> (948), (947) -> (949), (948) -> (950), (956) -> (951).
-
-(951) [open] [policy] Accept the mockups as the Phase 2 visual reference, including whether the worktree field stays read-only
-- Mockups: `ai-docs/ref/brand/mockup/session-hire/approval-modal.png` (modal fields, the authority note, the root toggle and its disabled state) and `ai-docs/ref/brand/mockup/session-hire/arrival-flow.png` (chip, badge, toast, queue of three, modal with pager and a read-only worktree). The arrival-flow frame C supersedes the first mockup's editable root.
-- Alternative a: accept both as is (worktree read-only).
-- Alternative b: accept with changes the owner names (for example an editable worktree).
-> Recommend a: (949)=c already fixes the worktree, and a read-only field keeps the modal honest about it.
+- **(951), owner via MAIN board (955) - judged live.** "이건 함 띄워줘봐야
+  알듯". The two mockups are the build reference for Phase 2:
+  `ai-docs/tickets/assets/261115-feat-ws-session-hire-approval/approval-modal.html` and `ai-docs/tickets/assets/261115-feat-ws-session-hire-approval/arrival-flow.html`
+  (renders: `ai-docs/ref/brand/mockup/session-hire/*.png`). The arrival flow
+  is built as mocked. The worktree field keeps the mockup default,
+  read-only; the owner decides its editability on the live screen after
+  Phase 2 lands, so making it editable later is a follow-up, not a Phase 2
+  requirement. Rejected: settling editability from the static mockup.
 
 ## Constraints
 
@@ -285,11 +310,13 @@ Local IDs from the first draft were re-minted on the board: (939) -> (948), (947
   Both apply to any playbook or skill text (Phase 3).
 - Clerk decisions 720-722 and existing worker delegation are unchanged.
 - Dashboard strings go through the i18n tables for all 11 locales.
-- `dashboard.js` and `dashboard.css` are under a split freeze until the split
-  ticket lands. Phase 2 targets the post-split files (pending
-  `261114-refactor-ws-dashboard-whiteboard-asset-split`, currently ready
-  without a Result or published move map in this checkout); existing reuse
-  symbols below are pre-split anchors, not settled post-split filenames.
+- The asset split has landed (`261114-refactor-ws-dashboard-whiteboard-asset-split`,
+  81382b093): Phase 2 edits the `dashboard-*.js`/`dashboard-*.css` fragments
+  (move map in `ai-docs/tickets/assets/261114-refactor-ws-dashboard-whiteboard-asset-split/`),
+  never a re-merged `dashboard.js`/`dashboard.css`.
+- Compatibility follows the owner's T0-T4 tiers: everything here stays T0.
+  A store rewrite that drops unknown fields is not even T2-safe, which is why
+  (957) keeps the flag in a sidecar.
 
 ## Prior Decisions
 
@@ -313,8 +340,8 @@ Local IDs from the first draft were re-minted on the board: (939) -> (948), (947
 | complexity.reuse_points | confirmed | Read Runner.CreateLead, TrustedWrite, ParentRef/sessionEntry.parent, PostSystem plus PiTurnReporter wake, CLI registration/label sidecar, rail/index telemetry, leadRows/leadChoices/rpLeadMake and WsRail.leadBody. Current anchors are pre-split; no complete hiring lifecycle or shared harness-selector component exists. |
 | complexity.side_effect_risk | high | Approval launches a real hosted lead; trusted flag writes, durable restart/expiry handling and asynchronous mailbox outcomes must remain correlated without granting requester control. |
 | risk.correctness | high | Eligibility rechecks, exactly-once creation/outcomes under repeated approval or restart, stale CLI writers and differing telemetry definitions can violate explicit no-chaining/mail/roster guarantees. |
-| risk.fit | moderate | Existing launch/control/mail/UI seams fit the approved reuse direction, but CLI metadata ownership and post-split UI targets still need settlement; reuse must not turn display grouping into authority lineage. |
-| risk.test | high | New asynchronous persistence/expiry/recheck coverage is not supplied by existing fixtures; clerk encoding is unselected, telemetry absence varies by harness and the split move map is not landed. |
+| risk.fit | moderate | Existing launch/control/mail/UI seams fit the reuse direction; CLI metadata ownership ((952)) and the post-split UI targets (81382b093) are settled. Reuse must not turn display grouping into authority lineage. |
+| risk.test | high | New asynchronous persistence/expiry/recheck coverage is not supplied by existing fixtures and must be written; telemetry absence varies by harness and is rendered as the decided absent state. |
 | risk.security_or_contract | high | Owner-only flag/approval, lead versus non-lead gates and no requester stop/close authority cross trust boundaries; T0 requires flag persistence survive older/stale writers without a key-registry or schema reinterpretation. |
 
 ## Phases
@@ -333,8 +360,11 @@ Local IDs from the first draft were re-minted on the board: (939) -> (948), (947
   hired sessions (752), and non-lead scopes. It returns at once with a request
   id and a line saying the outcome will arrive by mail (750).
 - Proposal lifecycle: pending -> approved | rejected | expired (30 min,
-  767) | withdrawn (recheck). Pending proposals persist across a daemon
-  restart (restart). Eligibility is checked again at approval (recheck).
+  767) | withdrawn (recheck; requester ended, (994)). Pending proposals
+  persist across a daemon restart (restart). Eligibility is checked again at
+  approval (recheck). A pending proposal whose requester's row is ended is
+  cancelled as `withdrawn` on index refresh, at startup and in the recheck
+  ((994)); a live but process-stopped requester keeps it.
 - Approval creates the session through `Runner.CreateLead` (creation path)
   with the owner's final values, in the requester's worktree ((949)). It
   attaches the new session under the requester in the rail hierarchy
@@ -371,8 +401,11 @@ Local IDs from the first draft were re-minted on the board: (939) -> (948), (947
   - each lifecycle edge with its mail, including the `recovery_context` echo
     and expiry on a fake clock;
   - restart persistence and expiry-while-down mail;
-  - the approval recheck (flag lost -> `withdrawn`; requester closed ->
-    still approvable);
+  - the approval recheck (flag lost -> `withdrawn`);
+  - (994): a requester whose row ends cancels its pending requests with a
+    `withdrawn` mail (index refresh, startup over restored proposals, and an
+    approval racing the end); a live, process-stopped requester keeps them;
+    a revived requester does not get a cancelled request back;
   - the requester's inability to stop or close the hired session;
   - the roster's fields and scope;
   - compatibility: the existing tool list and records are unchanged apart
@@ -386,9 +419,9 @@ Local IDs from the first draft were re-minted on the board: (939) -> (948), (947
 
 ### Phase 2: Dashboard approval modal, rail cues, and the root toggle
 
-- Build to the accepted mockups ((951)):
-  `ai-docs/ref/brand/mockup/session-hire/approval-modal.png` and
-  `ai-docs/ref/brand/mockup/session-hire/arrival-flow.png`.
+- Build to the mockups ((951)): `ai-docs/tickets/assets/261115-feat-ws-session-hire-approval/approval-modal.html` and
+  `ai-docs/tickets/assets/261115-feat-ws-session-hire-approval/arrival-flow.html` (PNG renders beside the originals in
+  `ai-docs/ref/brand/mockup/session-hire/`).
 - The root toggle goes in hosted-session settings and on CLI lead rail rows
   (769=a). It is disabled, with a reason, for a grouped session (775).
 - Rail and arrival ((950)): a hire chip on the requester's row, a top-bar
@@ -402,7 +435,7 @@ Local IDs from the first draft were re-minted on the board: (939) -> (948), (947
   - harness/model/effort controls reusing the new-session popover's controls;
     current reuse seams are `leadChoices`, `leadOptions`, `leadRows` and
     `rpLeadMake` in
-    `agents-plugin-tool/internal/wsdashboard/assets/dashboard.js#L8243-L8433`.
+    `agents-plugin-tool/internal/wsdashboard/assets/dashboard-leads.js#L42-L200`.
     `leadRows` already shares model/permission/effort rows with hosted settings;
     the harness segment is inline in `rpLeadMake`, not a standalone control.
     Defaults are Claude (Pi if Claude unavailable), empty model/effort,
@@ -410,8 +443,7 @@ Local IDs from the first draft were re-minted on the board: (939) -> (948), (947
     helper is `WsRail.leadBody`
     (`agents-plugin-tool/internal/wsdashboard/assets/rail.js#L609-L619`).
     These establish reusable controls/choices, not an existing hiring modal;
-  - label, and the requester's worktree ((949); read-only unless (951) says
-    otherwise);
+  - label, and the requester's worktree ((949); read-only as mocked, (951));
   - expiry countdown;
   - reject reason, Reject, and Approve & create.
 
@@ -421,7 +453,9 @@ Local IDs from the first draft were re-minted on the board: (939) -> (948), (947
   - node harness tests for the modal: prefill, owner edits win, reject with
     or without a reason, countdown, disabled toggle;
   - the focused wsdashboard Go tests and wsi18n;
-  - a side-by-side comparison of a headless capture against the mockup PNG.
+  - a side-by-side comparison of a headless capture of the modal and of the
+    arrival flow (chip, badge, toast, queue) against the two mockups in
+    `ai-docs/tickets/assets/261115-feat-ws-session-hire-approval/`, rendered the same way.
 
 ### Phase 3: Shipped lead guidance
 
