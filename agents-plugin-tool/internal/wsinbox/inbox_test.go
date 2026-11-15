@@ -69,26 +69,32 @@ func TestNormalizeRejectsEmptyAndMalformed(t *testing.T) {
 	}
 }
 
-func TestSendWritesThenMergesIntoTheHeldEntry(t *testing.T) {
+// TestEachSendIsItsOwnHeldEntry: a send never joins a held entry; two
+// follow-ups are two entries, held in send order, each with its own text and
+// answers.
+func TestEachSendIsItsOwnHeldEntry(t *testing.T) {
 	dir := Dir(t.TempDir())
 	first, merged := send(t, dir, "hello", Chip{ID: "03", Answer: "a"}, Chip{ID: "04", Answer: "ok"})
 	if merged {
 		t.Fatal("first send merged")
 	}
 	second, merged := send(t, dir, "and more", Chip{ID: "03", Answer: "b", Note: "changed"})
-	if !merged || second == first {
+	if merged || second == first {
 		t.Fatalf("second send: merged=%v name=%s (first %s)", merged, second, first)
 	}
 	held, err := Held(dir)
-	if err != nil || len(held) != 1 || held[0].Name != second {
+	if err != nil || len(held) != 2 || held[0].Name != first || held[1].Name != second {
 		t.Fatalf("held = %+v, %v", held, err)
 	}
-	e := held[0].Entry
-	if got, want := e.Text(), "<wb:answers>\n03=b^changed\n04=ok\n</wb:answers>\n\nhello\n\nand more"; got != want {
-		t.Fatalf("merged text = %q, want %q", got, want)
+	if got, want := held[0].Entry.Text(), "<wb:answers>\n03=a\n04=ok\n</wb:answers>\n\nhello"; got != want {
+		t.Fatalf("first text = %q, want %q", got, want)
 	}
-	if len(e.Parts) != 2 {
-		t.Fatalf("parts = %q", e.Parts)
+	if got, want := held[1].Entry.Text(), "<wb:answers>\n03=b^changed\n</wb:answers>\n\nand more"; got != want {
+		t.Fatalf("second text = %q, want %q", got, want)
+	}
+	recs, err := Drain(dir)
+	if err != nil || len(recs) != 2 || recs[0].Name != first || recs[1].Name != second {
+		t.Fatalf("Drain = %+v, %v; want both in send order", recs, err)
 	}
 }
 
@@ -157,9 +163,9 @@ func TestDrainClaimsOnceAndKeepsRecords(t *testing.T) {
 	if rec, _ := Drained(dir); len(rec) != 1 || rec[0].Name != name {
 		t.Fatalf("drained records = %+v", rec)
 	}
-	// A send after the drain starts a new entry instead of merging.
-	if _, merged := send(t, dir, "next"); merged {
-		t.Fatal("send after drain merged into a drained entry")
+	// A send after the drain starts a new entry.
+	if next, _ := send(t, dir, "next"); next == name {
+		t.Fatal("send after drain reused the drained entry's name")
 	}
 }
 
@@ -276,10 +282,10 @@ func TestDrainAndCancelRaceHasOneWinner(t *testing.T) {
 	}
 }
 
-// TestDrainAndMergeRaceLosesNothing runs a drain against a merging send many
-// times: the first send's text is delivered or held exactly once, and so is
-// the second's; a drained entry never comes back.
-func TestDrainAndMergeRaceLosesNothing(t *testing.T) {
+// TestDrainAndSendRaceLosesNothing runs a drain against a send many times:
+// the first send's text is delivered exactly once, the second's is delivered
+// or held exactly once, and a drained entry never comes back.
+func TestDrainAndSendRaceLosesNothing(t *testing.T) {
 	for i := 0; i < 300; i++ {
 		dir := Dir(t.TempDir())
 		send(t, dir, "one", Chip{ID: "03", Answer: "a"})
@@ -309,14 +315,10 @@ func TestDrainAndMergeRaceLosesNothing(t *testing.T) {
 			t.Fatalf("run %d: delivered+held = %q", i, texts)
 		}
 		if merged {
-			// The merge won: nothing of the first send was drained on its own.
-			for _, r := range drained {
-				if r.Entry.Text() == "<wb:answers>\n03=a\n</wb:answers>\n\none" {
-					t.Fatalf("run %d: merged entry also drained alone", i)
-				}
-			}
-		} else if len(drained) != 1 || drained[0].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\none" {
-			t.Fatalf("run %d: send did not merge, but the drain got %+v", i, drained)
+			t.Fatalf("run %d: send merged", i)
+		}
+		if len(drained) == 0 || drained[0].Entry.Text() != "<wb:answers>\n03=a\n</wb:answers>\n\none" {
+			t.Fatalf("run %d: the drain got %+v, want the first send first", i, drained)
 		}
 	}
 }
@@ -375,39 +377,89 @@ func TestSteerRewritesTheEntryMarkedUnderAFreshName(t *testing.T) {
 	}
 }
 
-func TestSendNeverMergesIntoASteeredEntry(t *testing.T) {
+// texts is each record's text, in order.
+func texts(recs []Record) []string {
+	out := make([]string, len(recs))
+	for i, r := range recs {
+		out[i] = r.Entry.Text()
+	}
+	return out
+}
+
+// TestSteerMovesTheEntryToTheEndOfTheSteerQueue: the held messages are two
+// queues, steered then follow-ups, each in order; promoting a follow-up
+// moves it to the end of the steer queue, behind messages steered before
+// it even when it was sent first. Held and a full drain agree on that order.
+func TestSteerMovesTheEntryToTheEndOfTheSteerQueue(t *testing.T) {
 	dir := Dir(t.TempDir())
-	name, _ := send(t, dir, "promoted")
-	steered, err := Steer(dir, name)
+	f1, _ := send(t, dir, "f1")
+	f2, _ := send(t, dir, "f2")
+	s1, _, err := Send(dir, Entry{Parts: []string{"s1"}, Steer: true}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if target, ok, err := MergeTarget(dir); err != nil || ok {
-		t.Fatalf("merge target with only a steered entry = %+v, %v", target, err)
-	}
-	next, merged := send(t, dir, "later")
-	if merged {
-		t.Fatal("send merged into a steered entry")
-	}
-	// The next send merges into the unsteered entry, not the steered one.
-	third, merged := send(t, dir, "and more")
-	if !merged {
-		t.Fatal("send did not merge into the unsteered held entry")
-	}
+	f3, _ := send(t, dir, "f3")
 	held, _ := Held(dir)
-	if len(held) != 2 || held[0].Name != steered || held[1].Name != third || held[1].Name == next {
-		t.Fatalf("held = %+v", held)
+	if got, want := strings.Join(texts(held), " "), "s1 f1 f2 f3"; got != want {
+		t.Fatalf("held order = %q, want %q", got, want)
 	}
-	if held[0].Entry.Text() != "promoted" || held[1].Entry.Text() != "later\n\nand more" || held[1].Entry.Steer {
-		t.Fatalf("held texts = %q / %q", held[0].Entry.Text(), held[1].Entry.Text())
-	}
-	// A steered entry newer than the unsteered one is skipped as merge target.
-	if _, err := Steer(dir, third); err != nil {
+	// Promote the oldest follow-up: it goes behind s1, not ahead of it.
+	p1, err := Steer(dir, f1)
+	if err != nil {
 		t.Fatal(err)
 	}
-	fourth, _ := send(t, dir, "fourth")
-	if target, ok, _ := MergeTarget(dir); !ok || target.Name != fourth || target.Entry.Text() != "fourth" {
-		t.Fatalf("merge target = %+v, want the newest unsteered %q", target, fourth)
+	if p1 <= s1 {
+		t.Fatalf("promoted name %s does not sort after the earlier steer %s", p1, s1)
+	}
+	held, _ = Held(dir)
+	if got, want := strings.Join(texts(held), " "), "s1 f1 f2 f3"; got != want {
+		t.Fatalf("held order after promoting f1 = %q, want %q", got, want)
+	}
+	// Promote the newest follow-up, then an older one: steer order is the
+	// order they were promoted in.
+	if _, err := Steer(dir, f3); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Steer(dir, f2); err != nil {
+		t.Fatal(err)
+	}
+	f4, _ := send(t, dir, "f4")
+	held, _ = Held(dir)
+	if got, want := strings.Join(texts(held), " "), "s1 f1 f3 f2 f4"; got != want {
+		t.Fatalf("held order = %q, want %q", got, want)
+	}
+	for i, r := range held {
+		if r.Entry.Steer != (i < 4) {
+			t.Fatalf("held[%d] %s steer = %v", i, r.Entry.Text(), r.Entry.Steer)
+		}
+	}
+	if held[len(held)-1].Name != f4 {
+		t.Fatalf("follow-up %s not last: %+v", f4, held)
+	}
+	recs, err := Drain(dir)
+	if err != nil || strings.Join(texts(recs), " ") != "s1 f1 f3 f2 f4" {
+		t.Fatalf("Drain = %q, %v; want the held order", texts(recs), err)
+	}
+	if rec, _ := Drained(dir); len(rec) != 5 {
+		t.Fatalf("drained records = %d, want 5", len(rec))
+	}
+}
+
+// TestDrainTakesTheSteerQueueBeforeTheFollowUps: a full drain returns every
+// steered entry, in steer order, ahead of every follow-up, in send order.
+func TestDrainTakesTheSteerQueueBeforeTheFollowUps(t *testing.T) {
+	dir := Dir(t.TempDir())
+	send(t, dir, "f1")
+	if _, _, err := Send(dir, Entry{Parts: []string{"s1"}, Steer: true}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	send(t, dir, "f2")
+	if _, _, err := Send(dir, Entry{Parts: []string{"s2"}, Steer: true}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := Drain(dir)
+	if err != nil || strings.Join(texts(recs), " ") != "s1 s2 f1 f2" {
+		t.Fatalf("Drain = %q, %v", texts(recs), err)
 	}
 }
 
@@ -555,16 +607,9 @@ func TestInterruptEntryIsNeverAMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Never a merge target, so the attachment cap never counts it.
-	if target, ok, err := MergeTarget(dir); err != nil || ok {
-		t.Fatalf("merge target with only an interrupt entry = %+v, %v", target, err)
-	}
 	msg, merged := send(t, dir, "after")
 	if merged || msg == name {
 		t.Fatalf("send after an interrupt merged=%v name=%s", merged, msg)
-	}
-	if target, ok, _ := MergeTarget(dir); !ok || target.Name != msg {
-		t.Fatalf("merge target = %+v, want the message %q", target, msg)
 	}
 	// Held and MessageNames leave it out; Names and InterruptNames list it.
 	if held, _ := Held(dir); len(held) != 1 || held[0].Name != msg {

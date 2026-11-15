@@ -161,7 +161,7 @@ export function commandLine(name: string, args: string): string {
 }
 
 /**
- * The messages an inbox drain's `format: "json"` text claimed, oldest first:
+ * The messages an inbox drain's `format: "json"` text claimed, in its queue order:
  * each text message's `text`, and each command entry (a record with a
  * `command: {name, args}` field) as an InboxCommand in its place. The drain
  * has already claimed whatever it returned, so text that is not that shape

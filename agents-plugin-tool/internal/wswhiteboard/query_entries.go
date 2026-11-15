@@ -286,6 +286,7 @@ func queryDiscovery(state *State, obj map[string]any) (QueryResult, []string) {
 	for _, name := range state.ClosedTopics {
 		add(name)
 	}
+	states := state.TopicStates()
 	for _, name := range order {
 		if f.topics != nil && !f.topics[name] {
 			continue
@@ -321,7 +322,7 @@ func queryDiscovery(state *State, obj map[string]any) (QueryResult, []string) {
 			r.FoldedItems += len(all)
 			continue
 		}
-		topic := makeQueryTopic(state, name, all, false)
+		topic := makeQueryTopic(state, name, all, false, states[name])
 		if r.Mode == "discovery" {
 			// Discovery folds panel versions by stable pN after filtering, so a
 			// text match in an older version still exposes its exact eN locator.
@@ -360,8 +361,8 @@ func queryDiscovery(state *State, obj map[string]any) (QueryResult, []string) {
 	return r, nil
 }
 
-func makeQueryTopic(state *State, name string, items []Item, body bool) QueryTopic {
-	t := QueryTopic{Name: name, Label: state.TopicLabel(name), Closed: state.topicClosed(name), Counts: map[string]int{}}
+func makeQueryTopic(state *State, name string, items []Item, body bool, view TopicStateView) QueryTopic {
+	t := QueryTopic{Name: name, Label: state.TopicLabel(name), Closed: state.topicClosed(name), Counts: map[string]int{}, State: view.State, StateDiagnostic: view.Diagnostic}
 	if state.stemmed(name) {
 		t.Stem = name
 	}
@@ -435,6 +436,7 @@ func formatEntryQuery(r QueryResult) string {
 	}
 	for _, topic := range r.Topics {
 		sb.WriteString(topicLine(topic) + "\n")
+		writeQueryState(&sb, topic)
 		writeQueryCurrent(&sb, topic.LatestAgent)
 		for _, e := range topic.Entries {
 			kind, text := e.Kind, e.Text

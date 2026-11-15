@@ -33,7 +33,7 @@ Object.defineProperty(El.prototype, "isConnected", { get: function () { return t
 El.prototype.add = function (c) { c.parentElement = this; this.children.push(c); return c; };
 El.prototype.addEventListener = function (t, f) { (this.on[t] = this.on[t] || []).push(f); };
 El.prototype.removeEventListener = function (t, f) { var l = this.on[t] || [], i = l.indexOf(f); if (i >= 0) l.splice(i, 1); };
-El.prototype.fire = function (t) { (this.on[t] || []).slice().forEach(function (f) { f(); }); };
+El.prototype.fire = function (t, e) { (this.on[t] || []).slice().forEach(function (f) { f(e || {}); }); };
 // A scroller's rect top is its own top (0 for the document's); any other
 // element's is its scroller's content top plus its y, less the scroll,
 // plus every transform from it up to the scroller.
@@ -62,7 +62,7 @@ var win = {
   addEventListener: function (t, f) { (winOn[t] = winOn[t] || []).push(f); },
   removeEventListener: function (t, f) { var l = winOn[t] || [], i = l.indexOf(f); if (i >= 0) l.splice(i, 1); }
 };
-function winFire(t) { (winOn[t] || []).slice().forEach(function (f) { f(); }); }
+function winFire(t, e) { (winOn[t] || []).slice().forEach(function (f) { f(e || {}); }); }
 // The board column scrolls (overflow auto, content taller than it); the
 // pinned column scrolls on its own; a plain column and a column whose
 // content fits leave the scroll to the document.
@@ -242,5 +242,129 @@ process.stdout.write(bad.join("\n"));`
 	}
 	if s := strings.TrimSpace(string(out)); s != "" {
 		t.Errorf("view kit cases failed:\n%s", s)
+	}
+}
+
+// TestViewKitJumpFollowUnderNode drives the real jump helper with layout
+// shifts, a smooth-scroll double and virtual animation frames. It authors
+// the bounded follow contract without requiring a browser or live daemon.
+func TestViewKitJumpFollowUnderNode(t *testing.T) {
+	data, err := embeddedAsset("stream.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kit := regexp.MustCompile(`(?s)\n  function viewKit\(win\) \{.*?\n  \}\n`).FindString(string(data))
+	if kit == "" || !strings.Contains(string(data), "jump: kit.jump") {
+		t.Fatal("stream.js does not expose the jump helper")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed; jump follow cases not executed")
+	}
+	script := viewKitPrelude + kit + `
+win.requestAnimationFrame = function (fn) { return setTimeout(function () { fn(now); }, 16); };
+win.cancelAnimationFrame = clearTimeout;
+var reduced = false, animate = false, jumps = [], stopped = 0;
+win.matchMedia = function () { return { matches: reduced }; };
+var rect = El.prototype.getBoundingClientRect;
+El.prototype.getBoundingClientRect = function () { var r = rect.call(this); r.height = this.height || 40; return r; };
+El.prototype.scrollIntoView = function (opt) {
+  jumps.push([this.name, opt.block, opt.behavior]);
+  if (animate && opt.behavior === "smooth") return;
+  var s = this.sc, offset = opt.block === "center" ? (s.clientHeight - (this.height || 40)) / 2 : 0;
+  var top = this.getBoundingClientRect().top - (s === html ? 0 : s.top) + s.scrollTop;
+  s.scrollTop = Math.max(0, Math.min(s.scrollHeight - s.clientHeight, top - offset));
+};
+El.prototype.scrollTo = function (opt) { stopped++; this.scrollTop = opt.top; };
+var k = viewKit(win), a = topic(board, "a", bcol, 1000), b = topic(board, "b", bcol, 2200), ends = [];
+var h = k.keep(a, { onEnd: function (r) { ends.push(r); } });
+k.jump(a, { block: "center", behavior: "smooth" });
+check("initial jump retains smooth", jumps, [["a", "center", "smooth"]]);
+check("jump centers in the column", bcol.scrollTop, 770);
+check("a swap cannot re-anchor the active jump", k.keep(b, { offset: 12 }) === h, true);
+h.end(); // A board swap finding no surviving viewed panel must not end it.
+advance(80); a.y += 200; ros[ros.length - 1].fire();
+check("late layout is corrected instantly, not by the old viewed panel", [bcol.scrollTop, jumps[jumps.length - 1]], [970, ["a", "center", "instant"]]);
+advance(149);
+check("no early settlement before 150ms quiet", k.keeping(bcol) === h, true);
+advance(100);
+check("settled jump restores anchoring and stops its work", [k.keeping(bcol), bcol.style.overflowAnchor, ends, timers.length, (winOn.keydown || []).length], [null, undefined, ["settled"], 0, 0]);
+a.y += 100; advance(300);
+check("layout after settlement is not followed", bcol.scrollTop, 970);
+h = k.keep(b, { offset: 20 }); b.y += 30; h.apply();
+check("ordinary viewed-panel anchoring resumes unchanged", bcol.scrollTop, 2210);
+h.end();
+
+// Smooth motion alone must not look like layout movement or settle early.
+animate = true; jumps = [];
+k.jump(a, { behavior: "smooth" });
+for (var i = 0; i < 8; i++) { bcol.scrollTop -= 20; bcol.fire("scroll"); advance(16); }
+check("native smooth motion is neither corrected nor cancelled", [jumps.length, !!k.keeping(bcol)], [1, true]);
+a.y += 60; advance(16);
+check("layout during smooth motion gets an instant correction", jumps[jumps.length - 1], ["a", "center", "instant"]);
+advance(250); animate = false;
+check("smooth jump also settles", k.keeping(bcol), null);
+
+// Continuous movement cannot extend the cap, even without ResizeObserver.
+win.ResizeObserver = null;
+k.jump(a);
+for (var i = 0; i < 24; i++) { a.y += 10; advance(80); }
+a.y += 10; advance(79);
+check("still following just before 2s", !!k.keeping(bcol), true);
+advance(1);
+check("hard 2s cap and cleanup", [k.keeping(bcol), timers.length, (bcol.on.wheel || []).length], [null, 0, 0]);
+
+// Every intent cancels before a scroll event; a non-scrolling key does not.
+["wheel", "touchstart", "touchmove", "pointerdown"].forEach(function (type) {
+  k.jump(a, { behavior: "smooth" });
+  bcol.fire(type);
+  var before = bcol.scrollTop;
+  a.y += 100; advance(250);
+  check(type + " wins immediately", [k.keeping(bcol), bcol.scrollTop, timers.length], [null, before, 0]);
+});
+["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End", " ", "Spacebar"].forEach(function (key) {
+  k.jump(a); winFire("keydown", { key: "x" });
+  check("non-scroll key leaves navigation alone", !!k.keeping(bcol), true);
+  winFire("keydown", { key: key });
+  check(key + " cancels", [k.keeping(bcol), timers.length], [null, 0]);
+});
+check("intent also interrupts native smooth scrolling", stopped, 14);
+
+// Reduced motion, boundary clamping, replacement/removal, document root,
+// pinned root and a second jump all use the same bounded lifecycle.
+reduced = true; k.jump(a, { behavior: "smooth" });
+check("reduced motion starts instantly", jumps[jumps.length - 1][2], "instant");
+bcol.fire("wheel"); reduced = false;
+a.y = 10; k.jump(a); advance(250);
+check("a clamped edge settles instead of fighting", [bcol.scrollTop, k.keeping(bcol)], [0, null]);
+a.y = 1000; a.ty = -40; k.jump(a); a.ty = 0; advance(16);
+check("a rearrangement slide is followed in visible, not just layout, coordinates", bcol.scrollTop, 770);
+bcol.fire("wheel");
+k.jump(a); advance(80);
+var replacement = topic(board, "replacement", bcol, 1300);
+a.id = "item-1"; a.connected = false;
+document.getElementById = function (id) { return id === "item-1" ? replacement : null; };
+advance(16);
+check("a morph's same-ID replacement is followed", bcol.scrollTop, 1070);
+replacement.connected = false; advance(16);
+check("a removed target ends cleanly", [k.keeping(bcol), timers.length], [null, 0]);
+var d = topic(plain, "document", html, 900), p = topic(bpins, "pin", bpins, 700);
+k.jump(d); d.y += 100; advance(16);
+check("document scroller correction", html.scrollTop, 620);
+winFire("touchstart");
+k.jump(p, { block: "start" }); p.y += 80; advance(16);
+check("pinned start alignment", bpins.scrollTop, 780);
+bpins.fire("pointerdown");
+a.connected = true; k.jump(a); advance(80); k.jump(b); advance(150);
+check("a second jump owns a fresh settle window", !!k.keeping(bcol), true);
+advance(100);
+check("second jump leaves no timers or input hooks", [k.keeping(bcol), timers.length, (winOn.keydown || []).length], [null, 0, 0]);
+process.stdout.write(bad.join("\n"));`
+	out, err := nodeScript(node, script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	if s := strings.TrimSpace(string(out)); s != "" {
+		t.Errorf("jump follow cases failed:\n%s", s)
 	}
 }

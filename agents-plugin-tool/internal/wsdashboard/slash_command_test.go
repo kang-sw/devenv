@@ -86,6 +86,7 @@ function post(route, body, done) { posted.push([route, body]); done(answer[0], a
 function editText(a, b, s) { ctext.setRangeText(s, a, b); ctext.dispatchEvent(new Event("input")); }
 function sendText() { return ctext.value; }
 function grow() {} function clearMentions() {} function queueDraft() {} function clearDraft() {}
+function followConvo() {}
 `
 
 // slashSection is dashboard.js's slash command section, from its banner to

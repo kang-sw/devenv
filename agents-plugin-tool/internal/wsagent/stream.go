@@ -178,6 +178,9 @@ func (p *streamProcess) feed(line []byte, seq uint64, replay bool) {
 		replies = silentReplies{}
 	}
 	evs := p.mapper.mapLine(line, replies)
+	if m, ok := p.mapper.(*piMapper); ok && m.pendingCommand != nil && m.pendingCommand.Seq == 0 {
+		m.pendingCommand.Seq, m.pendingCommand.Replay = seq, replay
+	}
 	for _, ev := range evs {
 		if ev.Fatal != nil && !replay {
 			p.child.kill()
@@ -203,6 +206,13 @@ func (p *streamProcess) deliver(ev Event) {
 	p.feedMu.Lock()
 	defer p.feedMu.Unlock()
 	if !p.finished {
+		if m, ok := p.mapper.(*piMapper); ok {
+			// Reconcile Pi's native-state certainty in the same order as
+			// output lines, before the runner can act on the replay marker.
+			for _, mapped := range m.replayState(ev) {
+				p.emit(mapped)
+			}
+		}
 		p.emit(ev)
 	}
 }
@@ -300,7 +310,11 @@ func (p *streamProcess) request(name string, req map[string]any) error {
 // requestBody is request that also returns a success answer's response
 // payload, waiting at most timeout.
 func (p *streamProcess) requestBody(name string, req map[string]any, timeout time.Duration) (json.RawMessage, error) {
-	id := p.nextID()
+	return p.requestBodyID(p.nextID(), name, req, timeout)
+}
+
+// requestBodyID lets a mapper register a probe before its response can arrive.
+func (p *streamProcess) requestBodyID(id, name string, req map[string]any, timeout time.Duration) (json.RawMessage, error) {
 	ch := make(chan controlAnswer, 1)
 	p.ctlMu.Lock()
 	p.waiters[id] = ch

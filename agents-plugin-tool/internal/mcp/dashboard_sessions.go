@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -769,8 +770,9 @@ func NewDashboardSessionSource() *DashboardSessionSource {
 // modification times look unchanged.
 const dashboardRescanAfter = 5 * time.Second
 
-// ReadSession reads the session record behind reg. It reports false when no
-// top-level lead record rooted at reg.Project maps to reg.ReplyID.
+// ReadSession reads the session record behind reg. With no error it reports
+// false only when no top-level lead identity at reg.Project maps to reg.ReplyID.
+// Lock, I/O and decode errors leave the last valid index entry intact.
 //
 // The fingerprint covers everything the session page shows: the record
 // (the board, todos, and agenda), the live stores (snapshot, ring, and the
@@ -782,10 +784,10 @@ const dashboardRescanAfter = 5 * time.Second
 // read a changed fingerprint wakes renders them. A contact's liveness is
 // left out: it is derived from the clock, and a re-read that differs only
 // by the time is no change.
-func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (wsdashboard.SessionData, bool) {
-	key, raw, record, ok := src.lookupRecord(reg)
-	if !ok {
-		return wsdashboard.SessionData{}, false
+func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (wsdashboard.SessionData, bool, error) {
+	key, raw, record, ok, err := src.lookupRecord(reg)
+	if !ok || err != nil {
+		return wsdashboard.SessionData{}, false, err
 	}
 	h := sha256.New()
 	h.Write(raw)
@@ -826,7 +828,7 @@ func (src *DashboardSessionSource) ReadSession(reg wsdashboard.Registration) (ws
 		Resumable:         record.HarnessSession != "" && record.HarnessCwd != "",
 		Fingerprint:       fp,
 		SnapshotUpdatedAt: updatedAt,
-	}, true
+	}, true, nil
 }
 
 // boardPrint folds into h the inputs of the served board's panels that
@@ -875,23 +877,41 @@ func ticketBoardPrint(h io.Writer, root string) {
 // lookupRecord finds the session record behind reg: the top-level lead
 // record rooted at reg.Project whose key maps to reg.ReplyID. It returns the
 // key (which never leaves this process), the raw bytes of the record's files,
-// and the decoded record with every part.
-func (src *DashboardSessionSource) lookupRecord(reg wsdashboard.Registration) (key string, raw []byte, record sessionRecord, ok bool) {
+// and the decoded record with every part. readErr preserves transient
+// failures separately from a genuinely absent or mismatched identity.
+func (src *DashboardSessionSource) lookupRecord(reg wsdashboard.Registration) (key string, raw []byte, record sessionRecord, ok bool, readErr error) {
 	d, err := src.store.dirs()
 	if err != nil {
-		return "", nil, sessionRecord{}, false
+		return "", nil, sessionRecord{}, false, err
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		for _, key := range src.keysFor(d, reg.ReplyID, attempt > 0) {
+		keys, err := src.keysFor(d, reg.ReplyID, attempt > 0)
+		if err != nil {
+			readErr = err
+			continue
+		}
+		for _, key := range keys {
+			// Validate identity before reading board/content: an old page
+			// must not survive a genuine mismatch behind a busy board lock.
+			identity, _, identityErr := loadRecordWith(d, key, partKey, nil, src.readRecordFile)
+			if identityErr == nil && (identity.Root != reg.Project || identity.Scope != string(roleLead) || identity.Parent != "") {
+				return "", nil, sessionRecord{}, false, nil
+			}
 			var buf bytes.Buffer
 			record, _, err := loadRecordWith(d, key, partAll, &buf, src.readRecordFile)
-			if err != nil || record.Root != reg.Project || record.Scope != string(roleLead) || record.Parent != "" {
+			if err != nil {
+				if errors.Is(err, errSessionUnreadable) || !errors.Is(err, errSessionNotFound) {
+					readErr = err
+				}
 				continue
 			}
-			return key, buf.Bytes(), record, true
+			if record.Root != reg.Project || record.Scope != string(roleLead) || record.Parent != "" {
+				return "", nil, sessionRecord{}, false, nil
+			}
+			return key, buf.Bytes(), record, true, nil
 		}
 	}
-	return "", nil, sessionRecord{}, false
+	return "", nil, sessionRecord{}, false, readErr
 }
 
 // readRecordFile is the source's recordFileReader: readRecordFile through
@@ -934,6 +954,7 @@ func (src *DashboardSessionSource) resolveStateDir() (string, error) {
 // keyScan is one rescan of the key store; done is closed when it landed.
 type keyScan struct {
 	done chan struct{}
+	err  error // published before done closes
 }
 
 // keysFor returns the session keys whose reply-id is replyID. A miss, or
@@ -941,29 +962,29 @@ type keyScan struct {
 // than dashboardRescanAfter. The rebuild lists the key directories without
 // holding mu, so a lookup of a known reply-id never waits on it; a miss
 // while a rebuild runs waits for that one instead of starting another.
-func (src *DashboardSessionSource) keysFor(d sessionDirs, replyID string, rescan bool) []string {
+func (src *DashboardSessionSource) keysFor(d sessionDirs, replyID string, rescan bool) ([]string, error) {
 	src.mu.Lock()
 	keys, known := src.byReply[replyID]
 	src.mu.Unlock()
 	if known && !rescan {
-		return keys
+		return keys, nil
 	}
-	mods, ok := keyStoreMods(d)
-	if !ok {
-		return nil
+	mods, err := keyStoreMods(d)
+	if err != nil {
+		return nil, err
 	}
 	src.mu.Lock()
 	if src.byReply != nil && mods == src.dirMods && time.Since(src.scanned) < dashboardRescanAfter {
 		keys := src.byReply[replyID]
 		src.mu.Unlock()
-		return keys
+		return keys, nil
 	}
 	if scan := src.scan; scan != nil {
 		src.mu.Unlock()
 		<-scan.done
 		src.mu.Lock()
 		defer src.mu.Unlock()
-		return src.byReply[replyID]
+		return src.byReply[replyID], scan.err
 	}
 	scan := &keyScan{done: make(chan struct{})}
 	src.scan = scan
@@ -979,7 +1000,8 @@ func (src *DashboardSessionSource) keysFor(d sessionDirs, replyID string, rescan
 	defer src.mu.Unlock()
 	src.scan = nil
 	if err != nil {
-		return nil
+		scan.err = err
+		return nil, err
 	}
 	byReply := map[string][]string{}
 	for _, key := range listed {
@@ -987,20 +1009,22 @@ func (src *DashboardSessionSource) keysFor(d sessionDirs, replyID string, rescan
 		byReply[id] = append(byReply[id], key)
 	}
 	src.byReply, src.scanned, src.dirMods = byReply, time.Now(), mods
-	return byReply[replyID]
+	return byReply[replyID], nil
 }
 
 // keyStoreMods returns the modification times of the key store's two roots,
 // zero for a missing legacy root: a key added to or removed from either
-// changes one. ok is false when the split root cannot be read.
-func keyStoreMods(d sessionDirs) ([2]time.Time, bool) {
+// changes one. Other stat errors must not masquerade as an absent identity.
+func keyStoreMods(d sessionDirs) ([2]time.Time, error) {
 	info, err := os.Stat(d.sessions)
 	if err != nil {
-		return [2]time.Time{}, false
+		return [2]time.Time{}, err
 	}
 	mods := [2]time.Time{info.ModTime()}
 	if info, err := os.Stat(d.legacy); err == nil {
 		mods[1] = info.ModTime()
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return [2]time.Time{}, err
 	}
-	return mods, true
+	return mods, nil
 }

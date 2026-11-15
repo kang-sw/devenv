@@ -228,6 +228,7 @@ details[open] > .ahead .am > .i { transform: rotate(180deg); }
 .aline { display: contents; }
 .ahead .astat { flex: none; display: inline-flex; gap: 7px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ahead .astat .amodel { font-family: var(--wb-mono); font-size: 10.5px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.ahead .astat .aeff { font-weight: 600; }
 .ahead .astat .atps { color: var(--wb-primary); font-weight: 700; }
 @container atree (max-width: 559px) {
   .ahead:has(> .aline) { flex-wrap: wrap; row-gap: 0; }
@@ -235,7 +236,7 @@ details[open] > .ahead .am > .i { transform: rotate(180deg); }
   .ahead > .astat { order: 1; flex: 0 0 100%; min-width: 0; padding: 0 0 2px 22px; gap: 0; overflow: hidden; }
   .ahead > .astat > span + span::before { content: "\00b7"; margin: 0 6px; opacity: .7; }
   .ahead > .astat .amodel { flex: 0 1 auto; min-width: 0; max-width: none; }
-  .ahead > .astat .actx, .ahead > .astat .atps { flex: none; }
+  .ahead > .astat .aeff, .ahead > .astat .actx, .ahead > .astat .atps { flex: none; }
 }
 .ahead .ldet { flex: 1 1 0; min-width: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ahead .ldet .tn { font-family: var(--wb-mono); font-weight: 700; font-size: 11.5px; }
@@ -468,10 +469,11 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
 .ccmd-name { white-space: nowrap; }
 .ccmd-args { min-width: 0; font-weight: 400; color: var(--wb-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ccmd-args[hidden] { display: none; }
-.csend { display: inline-flex; align-items: center; justify-content: center; width: 34px; padding: 0; border: 0; border-radius: 10px; cursor: pointer; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
-.csend:hover { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
-.csend:focus-visible { outline: 1.5px solid var(--wb-primary); }
-.csend .i { width: 17px; height: 17px; }
+.csend, .wbmention button { display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 10px; cursor: pointer; color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); }
+.csend { width: 34px; padding: 0; }
+.csend:hover, .wbmention button:hover { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); }
+.csend:focus-visible, .wbmention button:focus-visible { outline: 1.5px solid var(--wb-primary); }
+.csend .i, .wbmention button .i { width: 17px; height: 17px; }
 .cchips { display: flex; flex-wrap: wrap; gap: 5px; }
 .cchips:empty { display: none; }
 .achip { display: inline-flex; align-items: baseline; gap: 4px; max-width: 100%; font-size: 12px; padding: 2px 4px 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--wb-primary) 14%, var(--wb-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-primary) 35%, transparent); }
@@ -488,10 +490,13 @@ details.peer > summary:hover { background: color-mix(in srgb, var(--wb-muted) 60
    part is a selector (clipped, monospace) or the error count */
 .achip.pchip b { font-family: var(--wb-mono); font-weight: 600; min-width: 0; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .achip.cchip { box-shadow: inset 3px 0 0 var(--wb-warn), inset 0 0 0 1px var(--wb-line); }
-/* the floating button by a board selection that adds it as a mention */
-.wbmention { position: fixed; z-index: 60; border: 0; border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--wb-primary-fg); background: var(--wb-primary); box-shadow: var(--wb-shadow-hi); }
-.wbmention:hover { background: color-mix(in srgb, var(--wb-primary) 85%, var(--wb-fg)); }
-.wbmention:focus-visible { outline: 1.5px solid var(--wb-fg); outline-offset: 2px; }
+/* The selection note stays next to its attach action, within the viewport. */
+.wbmention { position: fixed; z-index: var(--z-popovers, 60); display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: 320px; max-width: calc(100vw - 8px); padding: 6px; border: 1px solid var(--wb-line); border-radius: 12px; color: var(--wb-fg); background: var(--wb-card); box-shadow: var(--wb-shadow-hi); }
+.wbmention-note { flex: 1; min-width: 0; width: 0; box-sizing: border-box; resize: none; max-height: 30vh; padding: 5px 7px; border: 1px solid var(--wb-line); border-radius: 7px; font: inherit; font-size: 12px; color: var(--wb-fg); background: var(--wb-bg); }
+.wbmention button { flex: none; align-self: stretch; gap: 5px; padding: 5px 10px; font: inherit; font-size: 12px; font-weight: 600; }
+.wbmention button .i { pointer-events: none; }
+.wbmention :focus-visible { outline-offset: 2px; }
+.wbmention-note:focus-visible { outline: 1.5px solid var(--wb-fg); }
 .wbmention[hidden] { display: none; }
 .unchip { border: 0; background: transparent; color: var(--wb-muted-fg); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 5px; border-radius: 999px; }
 .unchip:hover { background: var(--wb-muted); color: var(--wb-fg); }
@@ -688,7 +693,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 :root[data-overview] .r-board .bcard:not([data-overview-motion]) :is(.bc-body, .bc-grip, .bc-folded),
 :root[data-overview] .r-board > .reply { display: none !important; }
 :root[data-overview] .r-board .tophead, :root[data-overview] .r-board .bc-hd { position: static !important; }
-:root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+:root[data-overview] .r-board .trecap .rtext { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 :root[data-overview] .r-board :is(.tnote-toggle, .d-max, .d-min, .t-fold, .t-raise, .bc-acts, .bc-fold, .bc-raise, .bc-max, .bc-close),
 :root[data-overview] .r-board .tpin:not([aria-pressed="true"]),
 :root[data-overview] .r-board .bc-pin:not([aria-pressed="true"]) { opacity: 0; pointer-events: none; }
@@ -766,11 +771,12 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .tm-end .btn { flex: none; height: 24px; font-size: 12px; font-weight: 700; color: var(--wb-fg); }
 .bcard[data-exited] .bc-kind { background: color-mix(in srgb, var(--wb-fail) 14%, var(--wb-card)); color: var(--wb-fail); }
 .tm-fold { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
-/* Board infrastructure, not a card: it scrolls with the board and never
-   joins the topic rail or the drag flow. Collapse by its own column width. */
-.board-toolbar { container: board-toolbar / inline-size; flex: none; position: relative; z-index: 3; min-width: 0; margin-bottom: 10px; border: 1px solid var(--wb-line); border-radius: 12px; background: var(--wb-card); }
+/* Board infrastructure: the sticky slot reserves the original wrapped
+   height; the same face and controls compact without changing the flow. */
+.board-toolbar { flex: none; position: sticky; top: var(--toolbar-top, 0px); z-index: 4; min-width: 0; height: var(--toolbar-reserved, auto); margin-bottom: 10px; pointer-events: none; }
+.board-toolbar-face { container: board-toolbar / inline-size; position: relative; min-width: 0; border: 1px solid var(--wb-line); border-radius: 12px; background: var(--wb-card); pointer-events: auto; }
 .board-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 8px; }
-.board-action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--wb-muted); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.board-action { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--wb-muted); color: var(--wb-fg); font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .board-action .li { width: 14px; height: 14px; flex: none; }
 .board-action:hover, .board-action:focus-visible { border-color: var(--wb-muted-fg); }
 .board-action[aria-pressed="true"], .tnew[aria-expanded="true"], .wnew[aria-expanded="true"] { background: color-mix(in srgb, var(--wb-primary) 24%, var(--wb-card)); color: var(--wb-primary); border-color: color-mix(in srgb, var(--wb-primary) 45%, transparent); }
@@ -778,6 +784,16 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .board-count { margin-left: auto; font-size: 11.5px; color: var(--wb-muted-fg); white-space: nowrap; }
 .board-term-slot, .board-web-slot { position: relative; display: flex; flex: none; }
 .board-term-slot:empty, .board-web-slot:empty { display: none; }
+.board-toolbar[data-floating] .board-toolbar-face { border-radius: 8px; }
+.board-toolbar[data-floating] .board-tools { padding-block: 1px; }
+.board-toolbar[data-floating] .board-action { height: 24px; border-radius: 6px; }
+/* Insets start at the button's padding edge: include its 1px border for
+   an outer 30px hit box, 1px above and 5px below the visible 24px face. */
+.board-toolbar[data-floating] .board-action::after { content: ""; position: absolute; inset: -2px -1px -6px; border-radius: inherit; }
+.board-toolbar[data-floating] .board-action :is(.li, .term-arrow) { transform: scale(.857142857143); transform-origin: center; }
+.board-toolbar[data-floating] .board-count { line-height: 14px; }
+.board-toolbar[data-floating][data-wrapped-actions] .board-tools { row-gap: 8px; }
+.board-action:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
 @container board-toolbar (max-width: 540px) {
   .board-action:not(.board-overview) .board-label, .board-action kbd { display: none; }
   .board-action:not(.board-overview) { padding-inline: 8px; }
@@ -909,13 +925,19 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .ctabs button[aria-pressed="true"] { color: var(--wb-fg); border-bottom-color: var(--wb-primary); }
 .ctabs button:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
 .fpane { position: relative; flex-direction: column; min-height: 0; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; font-size: 12.5px; }
-/* The toolbar borrows the same explorer as the Files tab, in place, and
-   shares the card sheet's scrim. Keep its toggle and row menu reachable. */
-.dgrid.live > .fpane[data-max] { display: flex; position: fixed; z-index: var(--z-modal); top: var(--files-top, 52px); left: 16px; right: 16px; bottom: 12px; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
-.board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); pointer-events: none; }
+/* The independent toolbar explorer shares the card sheet's scrim.
+   Keep its toggle and row menu reachable. */
+.fpane[data-max] { display: flex; position: fixed; z-index: var(--z-modal); top: var(--files-top, 52px); left: 16px; right: 16px; bottom: 12px; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
+/* The old sheet removed the tab pane and its label from their slots.
+   Conceal their paint under the scrim without disturbing the new owner's
+   layout or state; otherwise the tab shadow protrudes beside the sheet. */
+body:has(.fpane[data-max]) .dgrid.live > .fpane,
+body:has(.fpane[data-max]) .chead .fsum .froot { visibility: hidden; }
+.board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); }
+.board-toolbar[data-files] .board-toolbar-face { pointer-events: none; }
 .board-toolbar[data-files] .board-files { pointer-events: auto; }
 body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
-@media (max-width: 640px) { .dgrid.live > .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }
+@media (max-width: 640px) { .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }
 .fpane .fi { display: inline-flex; flex: none; color: var(--wb-muted-fg); }
 .fhd { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--wb-line); min-width: 0; }
 .froot { flex: 1; min-width: 0; font: 700 12px var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1684,6 +1706,7 @@ a[data-wl="file"]:not([href]) { color: inherit; }
 .rail .rforget:disabled { cursor: progress; }
 .rail .wsbody { padding-top: 2px; }
 .rail .rwt { padding: 4px 0 2px; }
+.rail .rwt.empty { border-color: transparent; }
 .rail .rwt.empty .wthd { opacity: .6; }
 .rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
 .rail .wthd { cursor: grab; -webkit-user-select: none; user-select: none; }

@@ -30,6 +30,10 @@ var a=node(-40,20),b=node(20,80),v={top:10,bottom:100};
 check("first visible",anchor([a,b],{top:-80,bottom:0},v)===a,true);
 check("toolbar visible means no anchor",anchor([a,b],{top:0,bottom:40},v),null);
 check("below viewport is not visible",anchor([node(101,150)],{top:-80,bottom:0},v),null);
+check("floating face does not suppress reading anchor",anchor([a,b],{top:10,bottom:38},v,true)===b,true);
+check("item entirely behind face is not an anchor",anchor([node(10,38)],{top:10,bottom:38},v,true),null);
+check("partially exposed item remains anchor",anchor([node(20,39),b],{top:10,bottom:38},v,true).getBoundingClientRect().bottom,39);
+check("face below viewport has no reading anchor",anchor([a,b],{top:10,bottom:110},v,true),null);
 function target(kind) { return {inBoard:kind==='items',closest:function(sel){return sel.indexOf(kind)>=0?{}:null;}}; }
 check("toolbar click",classify(target('.board-toolbar')),"toolbar");
 check("popover click",classify(target('.tpop')),"popover");

@@ -48,7 +48,7 @@ import type { InboxCommand, InboxItem } from './dashboard'
  * each message is submitted once. A wake while idle drains and submits at
  * once, as the user's own message. A wake while a main-thread turn runs, or
  * while the main conversation compacts, drains nothing: the message stays
- * held, so the page can still merge into it or cancel it, and the wait
+ * held, so the page can still cancel or steer it, and the wait
  * re-arms without the flag, since it only peeks and would wake again at once.
  * Every main-thread turn end drains whatever is held, submits it, and re-arms
  * the wait with the flag; a tool boundary never does. What is held when a
@@ -176,7 +176,7 @@ export type DrainResult =
 export interface BoardEdges {
   /** Whether board submission is on now (the dashboard knob); read at every wait arm and turn end. */
   enabled: () => boolean
-  /** Claim every held message of `key`'s inbox, oldest first: their texts, a command entry in its place. Rejects when the drain failed. */
+  /** Claim every held message of `key`'s inbox, in queue order (steered first, in the order promoted, then the rest, oldest first): their texts, a command entry in its place. Rejects when the drain failed. */
   drain: (key: string) => Promise<InboxItem[]>
   /**
    * Run a claimed slash command entry as if typed (the host queues it until
@@ -193,7 +193,7 @@ export interface BoardEdges {
   submit: (texts: readonly string[], shown: number) => Promise<void>
   /** Append the same prompt as a user row instead, and record it as the user's; rejects when refused. */
   append: (texts: readonly string[]) => Promise<void>
-  /** Claim only the held messages of `key`'s inbox promoted to steering, oldest first: their texts. Rejects when the drain failed. */
+  /** Claim only the held messages of `key`'s inbox promoted to steering, in steer order (the order promoted): their texts. Rejects when the drain failed. */
   drainSteer: (key: string) => Promise<string[]>
   /**
    * Append steered messages into the running turn as one user row, the
@@ -579,7 +579,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
   /** Whether a steered drain that outlasted its boundary's wait is still out. */
   let steerDraining = false
   /**
-   * Claimed board items behind a slash command entry, oldest first: what a
+   * Claimed board items behind a slash command entry, in drain order: what a
    * flush could not submit yet because a command goes first. Session-wide
    * like the queue: a rebind keeps them, a stop records them.
    */
@@ -1213,7 +1213,7 @@ export function createWatcher(edges: WatcherEdges): Watcher {
       }
       if (outcome === 'board' || outcome === 'both') {
         if (boardBusy()) {
-          // Held for the turn end (or the compaction's release), where the page can still merge or cancel it.
+          // Held for the turn end (or the compaction's release), where the page can still cancel or steer it.
           boardHeld = true
           edges.log(`${edges.label}: a dashboard message for ${myKey} is held until the ${holder()}`)
         } else {

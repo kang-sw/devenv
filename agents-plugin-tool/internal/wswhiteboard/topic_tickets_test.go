@@ -69,6 +69,15 @@ func TestTopicWithOnlyTicketsPersists(t *testing.T) {
 	if len(view.Topics) != 1 || len(view.Topics[0].Tickets) != 1 {
 		t.Fatalf("view lacks the tickets-only topic: %+v", view.Topics)
 	}
+	if line := queryText(t, st, `{"depth":"topics"}`); !strings.Contains(line, "tickets: 261112-feat-a") {
+		t.Fatalf("query lacks the tickets-only topic's links:\n%s", line)
+	}
+	for name, layout := range layouts() {
+		page := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Tickets: fakeTickets{"261112-feat-a": TicketReady}}))
+		if !strings.Contains(page, `data-topic="links"`) || strings.Contains(page, `class="ttix"`) || strings.Contains(page, `class="wbtk `) {
+			t.Errorf("%s: tickets-only topic missing or ticket slot rendered", name)
+		}
+	}
 	mustApply(t, st, `<wb:topic name="links" tickets=""/>`)
 	if st.topicKnown("links") {
 		t.Fatal("a topic left with nothing persisted")
@@ -111,12 +120,10 @@ func TestTopicTicketsAreQuietMetadata(t *testing.T) {
 	}
 }
 
-// TestTopicTicketBadgesAndGlow pins the badges and the glow: each stem's
-// resolved status (unknown when the resolver lacks it), the stem without its
-// date as the text, and a topic live while a linked feat, bug, refactor, or
-// chore ticket is still idea, todo, or ready; never for another category,
-// nor once all are done.
-func TestTopicTicketBadgesAndGlow(t *testing.T) {
+// TestTopicTicketsStayHidden pins UI-only hiding: internal ticket resolution
+// remains intact, but pages and served fragments show neither the ticket slot
+// nor ticket-derived glow. Authored content and items remain visible.
+func TestTopicTicketsStayHidden(t *testing.T) {
 	resolve := fakeTickets{
 		"261112-feat-live":     TicketTodo,
 		"261112-bug-shipped":   TicketDone,
@@ -141,9 +148,8 @@ func TestTopicTicketBadgesAndGlow(t *testing.T) {
 		if got := view.Topics[0].Live; got != c.live {
 			t.Errorf("%s: live = %v, want %v", c.tickets, got, c.live)
 		}
-		page := render(t, view)
-		if regexp.MustCompile(`<section class="topic[^"]*\blive\b`).MatchString(page) != c.live {
-			t.Errorf("%s: page live class mismatch", c.tickets)
+		if got := topicTickets(st, "t"); !slices.Equal(got, strings.Fields(c.tickets)) {
+			t.Errorf("%s: stored tickets = %v", c.tickets, got)
 		}
 	}
 
@@ -159,26 +165,73 @@ func TestTopicTicketBadgesAndGlow(t *testing.T) {
 	if !slices.Equal(badges, want) {
 		t.Fatalf("badges = %+v", badges)
 	}
-	for name, layout := range layouts() {
-		page := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Tickets: resolve}))
-		for _, frag := range []string{
-			`<span class="wbtk todo" title="261112-feat-live · todo"><span class="st"></span><span class="nm">feat-live</span></span>`,
-			`<span class="wbtk done" title="261112-bug-shipped · done"><svg`,
-			`<span class="wbtk dropped" title="261112-refactor-gone · dropped"><svg`,
-			`<span class="wbtk unknown" title="261112-feat-missing · unknown"><span class="st"></span><span class="nm">feat-missing</span>`,
-		} {
-			if !strings.Contains(page, frag) {
-				t.Errorf("%s: page lacks %q", name, frag)
-			}
-		}
-		// The badges sit in the bar, before its time.
-		bar := regexp.MustCompile(`<div class="tbar">.*?</div>`).FindString(page)
-		if i, j := strings.Index(bar, `class="ttix"`), strings.Index(bar, `class="tago"`); i < 0 || (j >= 0 && j < i) {
-			t.Errorf("%s: badges not in the bar before its time: %s", name, bar)
+	unknown := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}).Topics[0]
+	if len(unknown.Tickets) != len(want) || unknown.Live {
+		t.Fatalf("no-resolver metadata = %+v", unknown)
+	}
+	for i, badge := range unknown.Tickets {
+		if badge.Stem != want[i].Stem || badge.Name != want[i].Name || badge.Status != TicketUnknown {
+			t.Errorf("no-resolver badge %d = %+v", i, badge)
 		}
 	}
-	if page := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})); strings.Count(page, `class="wbtk unknown"`) != 4 {
-		t.Error("a view with no resolver does not show every ticket as unknown")
+
+	slot := regexp.MustCompile(`class="[^"]*\b(?:ttix|wbtk)\b`)
+	glow := regexp.MustCompile(`<section class="topic[^"]*\blive\b`)
+	check := func(t *testing.T, page string, body bool) {
+		t.Helper()
+		if slot.MatchString(page) || glow.MatchString(page) {
+			t.Error("rendered a ticket slot or ticket-derived topic glow")
+		}
+		fragments := []string{`data-topic="t"`, "Authored 261112-feat-live content", "Review 261112-feat-live item"}
+		if body {
+			fragments = append(fragments, "Authored 261112-feat-live body")
+		}
+		for _, frag := range fragments {
+			if !strings.Contains(page, frag) {
+				t.Errorf("topic content missing %q", frag)
+			}
+		}
+	}
+	for _, c := range []struct {
+		name    string
+		tickets string
+		resolve fakeTickets
+	}{
+		{"resolved", "261112-feat-live 261112-bug-shipped 261112-refactor-gone", resolve},
+		{"missing", "261112-feat-missing", resolve},
+		{"no-resolver", "261112-feat-live", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			st := &State{}
+			mustApply(t, st, `<wb:topic name="t" tickets="`+c.tickets+`"><wb:log>Authored 261112-feat-live content</wb:log></wb:topic>`+topicXML("t", "Authored 261112-feat-live body")+addXML(ClassTechnical, "t", "Review 261112-feat-live item"))
+			for _, closed := range []bool{false, true} {
+				if closed {
+					mustApply(t, st, `<wb:topic name="t"><wb:close result="finished"/></wb:topic>`)
+				}
+				state := "/open"
+				if closed {
+					state = "/closed"
+				}
+				for name, layout := range layouts() {
+					t.Run(name+state, func(t *testing.T) {
+						check(t, render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Tickets: c.resolve})), layout == LayoutFull)
+					})
+				}
+				view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Tickets: c.resolve})
+				regions, err := RenderRegions(view)
+				if err != nil {
+					t.Fatal(err)
+				}
+				check(t, string(regions.Board), true)
+				if closed {
+					page, err := RenderClosedTopics(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Tickets: c.resolve, Closed: &ClosedWindow{From: 0, N: 30}}))
+					if err != nil {
+						t.Fatal(err)
+					}
+					check(t, string(page), true)
+				}
+			}
+		})
 	}
 }
 

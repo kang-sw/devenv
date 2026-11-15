@@ -20,6 +20,7 @@
   --wb-technical: #2457c5;   --wb-on-technical: #ffffff;
   --wb-announced: #1d7348;   --wb-on-announced: #ffffff;
   --wb-accent-assumed: #b0245a;
+  --wb-latest-log: rgb(110 200 130 / .08);
   --wb-ck-ok: var(--wb-announced);
   --wb-ck-no: #c0262d;
   --wb-accent-policy: #b25000;
@@ -32,6 +33,16 @@
   --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
   color-scheme: light dark;
+}
+/* Only the lower log history is highlighted, never the topic's recap. */
+.wb-entry.agent.current { background: var(--wb-latest-log); }
+.wb-entry.agent.current.wb-log-blink { animation: wb-log-arrival 1s ease-in-out 3; }
+@keyframes wb-log-arrival {
+  0%, 100% { background: var(--wb-latest-log); }
+  50% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-entry.agent.current.wb-log-blink { animation: none; }
 }
 /* Dark palette. The OS preference applies it unless the page pins light
    (data-theme="light"); data-theme="dark" applies it whatever the OS says.
@@ -155,9 +166,11 @@ button.chip.bulk:focus-visible { outline: 2px solid var(--wb-primary); outline-o
 .tophead > .tnote { width: calc(100% - 20px); margin: 6px 10px; border: 1px solid var(--wb-line); border-radius: 10px; box-shadow: var(--wb-shadow-hi); max-height: calc(6 * 1.4em + 14px); overflow-y: auto; }
 .tophead > .tnote:focus { border-color: var(--wb-primary); }
 .topic.quiet > .tophead > .tnote { width: calc(100% - 12px); margin: 4px 6px; }
-/* The head carries the topic's own surface, so the body scrolling under a
-   stuck head does not show through it. */
-.tophead { background: inherit; }
+/* Use an opaque surface, including behind the title bar's rounded corners.
+   The upward backing also masks scroller padding above a CSS-only pinned
+   header, which never receives the rail's wb-stuck class. Neither changes
+   layout height. Keep the head unclipped: its check-list popover is intentional. */
+.tophead { background: var(--wb-card); box-shadow: 0 -12px 0 var(--wb-bg); }
 .closed-more { display: block; margin: 0 0 16px; font-size: 12.5px; color: var(--wb-muted-fg); }
 button.closed-more { display: flex; margin: 0 auto 16px; }
 .tbar .chip:not(.policy):not(.ok):not(.fresh) { background: rgb(127 127 127 / .28); color: inherit; }
@@ -401,6 +414,8 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 .trecap:last-child, .trecap:has(+ details.tdoc:not([open]):last-child) { margin-bottom: 10px; }
 /* the recap is an item block field: clipped like .opt, .ctx, and .rec-line */
 .trecap { contain: paint; }
+/* Clamp topic recaps, never panel-card titles or stored text. */
+.trecap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
 .trecap .rtext { display: inline; min-width: 0; overflow-wrap: anywhere; }
 .trecap .rtext > p:first-child { display: inline; }
 .trecap .rat { font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -408,11 +423,23 @@ details.sx > summary > .stext { flex: 1; min-width: 0; }
 /* An open topic's head summary line: the latest agent line as plain muted
    text on the head's surface (no card), sharing the line with the check pill,
    which wraps under it when narrow; a hairline under the head ends it. */
-.tsub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 6px 12px; border-bottom: 1px solid var(--wb-line); }
-.tsub > .trecap { flex: 1 1 22em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
+.tsub { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; padding: 6px 12px; border-bottom: 1px solid var(--wb-line); overflow: hidden; }
+/* Content chooses the height, capped at four whole lines (4 x 1.45em).
+   Use the same clamp in both sticky states: sticking itself must not reflow
+   the recap. A changed recap may legitimately grow or shrink the header. */
+.tsub > .trecap { flex: 1 1 22em; min-width: 0; max-height: 5.8em; gap: 8px; margin: 0; padding: 0; background: none; border: 0; border-radius: 0; font-size: 12.5px; line-height: 1.45; color: color-mix(in srgb, var(--wb-fg) 80%, transparent); }
 .tsub > .trecap .rat { font-size: 10.5px; }
-.ckpill { flex: none; display: flex; align-items: center; gap: 4px; margin-left: auto; }
-.ckbtn { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+/* Inline role/media boxes must fit the same line grid as the recap text. */
+.tsub > .trecap .rat .evi { width: 14px; height: 14px; vertical-align: text-bottom; }
+.tsub > .trecap :is(img, svg) { max-height: 1em; width: auto; vertical-align: middle; }
+/* A recap whose clock chip is a button jumps to its log row (stream.js); the
+   text is a pointer shortcut. contain: paint clips an outer outline, so the
+   chip's focus ring is drawn inside. */
+.trecap:has(> .rat[role="button"]) { cursor: pointer; }
+.tsub > .trecap:has(> .rat[role="button"]):hover { color: var(--wb-fg); }
+.trecap > .rat[role="button"]:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; border-radius: 3px; }
+.ckpill { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; min-width: 0; max-width: 100%; }
+.ckbtn { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; min-height: 22px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--wb-bg); color: var(--wb-muted-fg); font: 800 10.5px var(--wb-sans); letter-spacing: .06em; text-transform: uppercase; white-space: normal; overflow-wrap: anywhere; }
 button.ckbtn { cursor: pointer; }
 button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .ckbtn .i { width: 12px; height: 12px; }
@@ -444,25 +471,31 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 }
 
 /* Topic stream: one chronological column under a thin divider, full card
-   width with no side rail. A quiet header carries the counts; log rows have
-   author and clock inline before their text; panels are cards
-   inside the topic card. A bottom-aligned clip grows at saved entry boundaries;
-   shared keep sessions, not an inner scrollbar, own scroll compensation. */
+   width with no side rail, always shown. One quiet header row carries the
+   title and count (left), the counts meta (right), and while older entries
+   remain the load-older capsule floating at its center; the row keeps its
+   height without the capsule. Log rows have author and clock inline before
+   their text; panels are cards inside the topic card. A bottom-aligned clip
+   grows at saved entry boundaries; shared keep sessions, not an inner
+   scrollbar, own scroll compensation. */
 .topic-stream { margin: 0 14px; padding: 7px 0 10px; border-top: 1px solid var(--wb-line); font-size: 13px; }
-.topic-stream > summary, .tstream > .mhead { list-style: none; display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
-.topic-stream > summary { cursor: pointer; }
-.topic-stream > summary::-webkit-details-marker { display: none; }
-.topic-stream:not([open]) > summary { padding-bottom: 0; }
-.topic-stream:not([open]) > summary::before, .run-fold > summary > .lbl::before, .system-run > summary > .lbl::before, .panel-versions > summary::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
-.run-fold[open] > summary > .lbl::before, .system-run[open] > summary > .lbl::before, .panel-versions[open] > summary::before { transform: rotate(90deg); }
-.topic-stream > summary .i, .tstream > .mhead .i { width: 12px; height: 12px; }
-.topic-stream > summary .n, .tstream > .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.topic-stream > summary .mmeta { margin-left: auto; font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.topic-stream .mhead, .tstream > .mhead { display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 0 4px 4px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; color: var(--wb-muted-fg); }
+.wb-history > .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); min-height: 26px; }
+.wb-history > .mhead > .wb-mtitle { grid-column: 1; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A long localized label shortens first; the icon and the count stay whole. */
+.wb-mtitle > .wb-mlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wb-mtitle > svg, .wb-mtitle > .n { flex: none; }
+.wb-history > .mhead > .history-older { grid-column: 2; }
+.wb-history > .mhead > .mmeta { grid-column: 3; justify-self: end; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.system-run > summary > .lbl::before, .panel-versions > summary::before { content: ""; flex: none; display: inline-block; width: 0; height: 0; margin-right: 6px; vertical-align: 1px; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; }
+.system-run[open] > summary > .lbl::before, .panel-versions[open] > summary::before { transform: rotate(90deg); }
+.topic-stream .mhead .i, .tstream > .mhead .i { width: 12px; height: 12px; }
+.topic-stream .mhead .n, .tstream > .mhead .n { letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.topic-stream .mhead .mmeta { font-weight: 600; letter-spacing: 0; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .wb-history { overflow-anchor: none; }
 .history-clip { position: relative; display: flex; flex-direction: column; justify-content: flex-end; max-height: var(--wb-history-height, 1000px); overflow: hidden; }
 .history-live { display: flow-root; flex: none; width: 100%; }
-.history-more .history-clip::after { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 22px; pointer-events: none; background: linear-gradient(var(--wb-bg), transparent); }
-.history-older { display: block; margin: 2px auto 6px; border: 0; height: 22px; padding: 0 10px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 12px; font-weight: 600; cursor: pointer; }
+.history-older { display: block; margin: 0; border: 0; height: 22px; padding: 0 10px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); font-size: 12px; font-weight: 600; letter-spacing: 0; white-space: nowrap; cursor: pointer; }
 .history-older:hover { color: var(--wb-fg); }
 .history-older[hidden] { display: none; }
 .wb-entry { min-width: 0; overflow-wrap: anywhere; }
@@ -483,47 +516,56 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .evi.sys::before { content: ""; width: 5px; height: 5px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: .7; }
 .ptag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px; white-space: nowrap; background: color-mix(in srgb, var(--wb-accent-policy) 18%, transparent); color: var(--wb-accent-policy); }
 .entry-imported { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); }
-/* folds: a long log run, and adjacent system events, behind one quiet row
+/* system chips: adjacent system events behind one quiet row
    led by a short dotted rule */
-.run-fold > summary, .system-run > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 1.7; color: var(--wb-muted-fg); cursor: pointer; font-variant-numeric: tabular-nums; }
-.run-fold > summary::-webkit-details-marker, .system-run > summary::-webkit-details-marker { display: none; }
-.run-fold > summary:hover, .system-run > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
-.run-fold > summary > .rl, .system-run > summary > .rl { flex: none; width: 38px; border-top: 1px dotted color-mix(in srgb, var(--wb-fg) 30%, transparent); }
-.run-fold > summary > .lbl, .system-run > summary > .lbl { min-width: 0; }
-.run-fold.owner > summary > .lbl::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; vertical-align: 1px; border-radius: 50%; background: var(--wb-accent-policy); }
-/* panel: a card inside the topic card; its recap is the title, with the time,
-   a size hint, and its #pN target on the right. A recap-only panel is a
-   message card. */
+.system-run > summary { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0 6px; border-radius: 6px; font-size: 11.5px; line-height: 1.7; color: var(--wb-muted-fg); cursor: pointer; font-variant-numeric: tabular-nums; }
+.system-run > summary::-webkit-details-marker { display: none; }
+.system-run > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
+.system-run > summary > .rl { flex: none; width: 38px; border-top: 1px dotted color-mix(in srgb, var(--wb-fg) 30%, transparent); }
+.system-run > summary > .lbl { min-width: 0; }
+/* panel: an unboxed recap with metadata and native actions on the right;
+   only its body carries a quiet guide. A recap-only panel is a message. */
 .wb-entry.panel { margin: 6px 0; }
-.entry-panel { background: var(--wb-bg); border-radius: 10px; overflow: hidden; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-fg) 9%, transparent); }
-.entry-panel > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 10px; cursor: pointer; }
+.entry-panel { container-type: inline-size; background: transparent; min-width: 0; }
+/* Native maximize reuses this shell; transparent renderer bodies need a sheet. */
+.entry-panel[data-max] { background: var(--wb-bg); }
+.entry-panel > summary { list-style: none; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; row-gap: 0; align-items: start; min-height: 24px; padding: 0; cursor: pointer; }
+/* Dashboard actions are siblings of .pmeta, not children of it. Both share
+   one slot; dashboard.css switches which action is displayed when large. */
+.entry-panel > summary:has(> button) { grid-template-columns: 10px minmax(0, 1fr) auto auto; }
+.entry-panel > summary > button { grid-column: 4; grid-row: 1; min-width: 24px; min-height: 24px; margin: 0; }
 .entry-panel > summary::-webkit-details-marker { display: none; }
 .entry-panel > summary:hover { background: var(--wb-wash); }
-.entry-panel > summary::before { content: "\25B8"; flex: none; width: 10px; font-size: 10px; color: var(--wb-muted-fg); }
+.entry-panel > summary::before { content: "\25B8"; grid-column: 1; grid-row: 1; width: 10px; font-size: 10px; line-height: 24px; color: var(--wb-muted-fg); }
 .entry-panel[open] > summary::before { content: "\25BE"; }
-.entry-panel[open]:not(.msg) > summary { border-bottom: 1px solid var(--wb-line); }
 .entry-panel > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
 .entry-panel.msg > summary { cursor: default; }
 .entry-panel.msg > summary:hover { background: transparent; }
 .entry-panel.msg > summary::before { content: ""; width: 3px; align-self: stretch; margin: 2px 4px 2px 0; border-radius: 2px; background: var(--wb-accent-policy); }
 .entry-recap { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; overflow-wrap: anywhere; }
+.entry-panel > summary > .entry-recap { grid-column: 2; grid-row: 1; line-height: 24px; }
 .entry-panel:not([open]):not(.msg) > summary .entry-recap { font-size: 13px; font-weight: 600; }
-.pmeta { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pmeta { grid-column: 3; grid-row: 1; justify-self: end; display: inline-flex; align-items: center; gap: 8px; height: 24px; font-size: 11px; color: var(--wb-muted-fg); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pmeta .entry-at { font: 11px var(--wb-mono); }
 .pmeta .hint { padding: 0 6px; border-radius: 999px; background: var(--wb-muted); line-height: 16px; }
-.pmeta a.mref { font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
+.pmeta a.mref { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; font: 600 11px var(--wb-mono); color: inherit; text-decoration: none; }
 .pmeta a.mref:hover { color: var(--wb-primary); }
 .entry-body.doc-body { font-size: 13.5px; }
+.entry-panel > .entry-body.doc-body { margin: 6px 0 0 18px; padding: 0 0 1px 12px; border-left: 1px solid var(--wb-line); }
 .panel-versions { margin: 0 10px 8px; }
 .entry-panel[open]:not(.msg) > .panel-versions { margin-top: 8px; }
 .panel-versions > summary { list-style: none; display: flex; align-items: center; width: fit-content; padding: 2px 6px; border-radius: 6px; font-size: 11.5px; color: var(--wb-muted-fg); cursor: pointer; }
 .panel-versions > summary::-webkit-details-marker { display: none; }
 .panel-versions > summary:hover { background: var(--wb-wash); color: var(--wb-fg); }
-.historical .entry-panel { background: transparent; box-shadow: inset 0 0 0 1px var(--wb-line); }
 .historical .entry-recap { font-weight: 400; }
-@media (max-width: 560px) {
-  .entry-panel > summary { flex-wrap: wrap; }
-  .entry-panel > summary > .pmeta { margin-left: auto; }
+/* Query the actual panel width, including inside a wide host or maximized. */
+@container (max-width: 420px) {
+  .entry-panel > summary { grid-template-columns: 10px minmax(0, 1fr); }
+  .entry-panel > summary > .pmeta { grid-column: 2; grid-row: 2; }
+  .entry-panel > summary:has(> button) { grid-template-columns: 10px minmax(0, 1fr) auto auto; }
+  .entry-panel > summary:has(> button) > .entry-recap { grid-column: 2 / 5; }
+  .entry-panel > summary:has(> button) > .pmeta { grid-column: 3; }
+  .entry-panel > summary > button { grid-row: 2; }
 }
 /* the embed: the latest panel recaps under the same quiet header */
 .tstream { margin: 0 14px; padding: 7px 0 8px; border-top: 1px solid var(--wb-line); }
@@ -715,8 +757,6 @@ details.panel .body { container-type: inline-size; }
    bar; the topic clips its sides): the card scrolling under a stuck bar
    showed through them. */
 .wb-rail .topic > .tophead.wb-stuck { box-shadow: var(--wb-shadow), 0 -6px 0 6px var(--wb-bg); }
-/* A stuck head keeps its recap to two lines: the full recap would take most of a short viewport. */
-.wb-rail .topic > .tophead.wb-stuck .tsub > .trecap { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 /* the book button stays at the card's top and scrolls away under a stuck head, so the bar gives back the room it reserved for it (the :has() outweighs the has-doc padding rules) */
 .wb-rail .topic.has-doc:has(> details.tdoc) > .tophead.wb-stuck > .tbar { padding-right: 12px; }
 /* The check pill of a stuck head lifts the topic's check list into the head
