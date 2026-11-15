@@ -91,6 +91,9 @@ func TestLeadHandedToATerminalIsLetGo(t *testing.T) {
 
 	taken := h.terminalTakes(id)
 	eventually(t, "the session to be let go", func() bool { return h.state(id).Status == StatusHandedOff })
+	// The state changes before the record write; wait for the hand-off step
+	// to finish before checking its durable record and returned mail.
+	h.quiesce(id)
 	rec := h.record(id)
 	if rec.HandedOffAt == "" || rec.ClosedAt != "" || len(rec.Mail) != 0 {
 		t.Fatalf("the record of a handed-off session: %+v", rec)
