@@ -666,6 +666,40 @@
     return text.length > APPROVAL_CAP ? text.slice(0, APPROVAL_CAP) + "\u2026" : text;
   }
 
+  // Remember server markup before client marks/time formatting touch it.
+  // A hover-only render replaces inert sources, not rows or their running
+  // animations. Any other change uses the existing full rail swap.
+  function hoverUpdates(root) {
+    function read(box) {
+      var sources = [];
+      Array.prototype.forEach.call(box.querySelectorAll(".rs > template.shp-source"), function (src) {
+        sources.push({ rid: src.parentNode.getAttribute("data-rid"), node: src });
+        src.parentNode.removeChild(src);
+      });
+      return { markup: box.innerHTML, sources: sources };
+    }
+    var seen = read(root.cloneNode(true)).markup;
+    return function (html) {
+      var box = root.ownerDocument.createElement("div");
+      box.innerHTML = html;
+      var next = read(box), same = next.markup === seen;
+      seen = next.markup;
+      if (!same) return false;
+      var sources = Object.create(null);
+      Array.prototype.forEach.call(root.querySelectorAll(".rs > template.shp-source"), function (src) {
+        sources[src.parentNode.getAttribute("data-rid")] = src;
+      });
+      // Validate all keys before changing anything; a locally missing source
+      // falls back to the normal swap rather than leaving stale evidence.
+      if (Object.keys(sources).length !== next.sources.length || next.sources.some(function (s) { return !sources[s.rid]; })) return false;
+      next.sources.forEach(function (s) {
+        var old = sources[s.rid];
+        if (old.outerHTML !== s.node.outerHTML) old.parentNode.replaceChild(s.node, old);
+      });
+      return true;
+    };
+  }
+
   // Keep a read-only hover outside replaced rail/tree regions. The source
   // belongs directly to its row/agent: a parent's model is never a fallback.
   function hoverPlace(anchor, edge, width, height, viewport) {
@@ -743,6 +777,7 @@
   }
 
   window.WsRail = {
+    hoverUpdates: hoverUpdates,
     hover: hover,
     hoverPlace: hoverPlace,
     DRAFT_CAP: DRAFT_CAP,

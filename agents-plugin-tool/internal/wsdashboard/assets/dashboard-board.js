@@ -33,6 +33,10 @@
     // a row's rename is open, and while a layout change posts (railGate),
     // and lands when that ends (railRelease).
     if (name === "rail" && railGate && railGate.offer({ hash: hash, html: html })) return;
+    if (name === "rail" && railHoverUpdates && railHoverUpdates(html)) {
+      el.setAttribute("data-h", hash);
+      return;
+    }
     if (name === "head") {
       if (labelEditing()) { headHeld = { hash: hash, html: html }; return; }
       headHeld = null;
