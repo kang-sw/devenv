@@ -393,10 +393,11 @@
   // had the focus, the focus on the current row.
   function render() {
     var t = ui.tree, had = t.contains(doc.activeElement), top = shows(t) ? t.scrollTop : treeTop;
-    rows = info ? flatRows(lists, open, view) : [];
+    // The side tree navigates folders; files belong to the directory pane.
+    rows = info ? flatRows(lists, open, view).filter(function (r) { return r.more || r.e.dir; }) : [];
     var nav = navRows();
     if (sel !== null && !rowOf(sel) && !(lists[dir] && (lists[dir].entries || []).some(function (e) { return joinRel(dir, e.name) === sel; }))) sel = null;
-    if (cur === null || !rowOf(cur)) cur = sel !== null ? sel : nav.length ? nav[0].path : null;
+    if (cur === null || !rowOf(cur)) cur = sel !== null && rowOf(sel) ? sel : nav.length ? nav[0].path : null;
     var frag = doc.createDocumentFragment();
     rowEls = {};
     rows.forEach(function (r) {
