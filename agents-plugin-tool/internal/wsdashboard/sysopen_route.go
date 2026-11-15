@@ -11,10 +11,11 @@ import (
 )
 
 // The system-open route: POST /s/<reply-id>/open {"target": <url>} opens
-// target in the host machine's default browser, for the link menu's "open in
-// system browser" item, and POST /s/<reply-id>/open {"native": <path>} opens
-// an image file in the host's default app for it, for the "open in native
-// app" item. It runs a command on the host, so the server enforces what the
+// target in the host machine's default browser, for the link menu's "open
+// with system" item on a url link (a file link's item goes to fs/act), and
+// POST /s/<reply-id>/open {"native": <path>} opens an image file in the
+// host's default app (once the link menu's "open in native app" item; no
+// page script sends it now, and it stays for an older page). It runs a command on the host, so the server enforces what the
 // page only reflects by showing the items to a loopback viewer:
 //
 //   - the request comes from a browser on this machine (localViewer); a LAN

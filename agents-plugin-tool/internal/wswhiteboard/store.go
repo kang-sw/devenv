@@ -648,6 +648,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 			applyLog(p, work, cmd, topicOf, env.Now)
 		case "wb:state":
 			applyTopicState(p, work, cmd, topicOf, env.Now)
+		case "wb:eta":
+			applyTopicETA(p, work, cmd, topicOf, env.Now)
 		case "wb:close":
 			withdrawn := applyClose(p, work, cmd, topicOf, mark, env.Now)
 			for _, id := range withdrawn {

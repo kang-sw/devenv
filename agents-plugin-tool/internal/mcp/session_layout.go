@@ -112,15 +112,13 @@ func (e sessionUnreadableError) Is(target error) bool {
 	return target == errSessionNotFound || target == errSessionUnreadable
 }
 
-// recordNotFound classifies a record file's read error: a path error other
-// than absence is a transient unreadable record; anything else (absent,
-// malformed) is not found.
+// recordNotFound preserves every read/decode failure except true absence.
+// A malformed identity file is unreadable, not evidence that its owner left.
 func recordNotFound(err error) error {
-	var pathErr *fs.PathError
-	if errors.As(err, &pathErr) && !errors.Is(err, fs.ErrNotExist) {
-		return sessionUnreadableError{err: err}
+	if errors.Is(err, fs.ErrNotExist) {
+		return errSessionNotFound
 	}
-	return errSessionNotFound
+	return sessionUnreadableError{err: err}
 }
 
 // errRecordUnchanged, returned by a mutateRecord fn, ends the mutation with
@@ -195,8 +193,9 @@ func (d sessionDirs) legacyPath(key string) string { return filepath.Join(d.lega
 // loadRecord reads key's record: key.json and the parts in parts from the
 // split layout, or, when key.json does not exist, the whole legacy file (every
 // part, whatever parts asks for); legacy reports the second case. A path-unsafe
-// key, a missing record, and an unparsable key.json or legacy file are
-// errSessionNotFound; an unparsable part file is its own error. raw, when not
+// key and a missing record are errSessionNotFound; an unparsable key.json or
+// legacy file is errSessionUnreadable (also matching errSessionNotFound for
+// legacy callers), and an unparsable part file is its own error. raw, when not
 // nil, receives every file read, for a change fingerprint.
 func (s *sessionStore) loadRecord(d sessionDirs, key string, parts recordPart, raw io.Writer) (record sessionRecord, legacy bool, err error) {
 	read := s.readFile

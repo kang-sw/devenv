@@ -582,7 +582,7 @@ func renderRegionElement(host regionHost, name string) template.HTML {
 type sessionPageData struct {
 	SessionView
 	Assets pageAssetsData
-	// SysOpen offers the link menu's "open in system browser" item: the
+	// SysOpen offers the link menu's "open with system" item: the
 	// page was asked for by a browser on this machine. It is outside every
 	// region, since regions are shared by every viewer's stream.
 	SysOpen bool
@@ -798,31 +798,33 @@ func (r pageReader) readSnapshot(replyID string) *wslive.Snapshot {
 	return r.snapshots.Snapshot(r.dir, replyID)
 }
 
-func (r pageReader) readPage(s Session) (PageContent, bool) {
+func (r pageReader) readPage(s Session) (PageContent, bool, error) {
 	if ls, ok := r.source.(LangPageSource); ok {
 		return ls.ReadPageLang(s.Registration, r.lang)
 	}
 	if ps, ok := r.source.(PageSource); ok {
 		return ps.ReadPage(s.Registration)
 	}
-	return PageContent{HasBoard: s.HasBoard}, true
+	return PageContent{HasBoard: s.HasBoard}, true, nil
 }
 
 // served reads a session this daemon serves and its page content; false
 // when it does not serve that reply-id.
 func (r pageReader) served(replyID string) (Session, PageContent, bool) {
+	s, page, ok, err := r.servedWithError(replyID)
+	return s, page, ok && err == nil
+}
+
+func (r pageReader) servedWithError(replyID string) (Session, PageContent, bool, error) {
 	if r.index == nil || !ValidReplyID(replyID) {
-		return Session{}, PageContent{}, false
+		return Session{}, PageContent{}, false, nil
 	}
 	s, ok := r.index.Session(replyID)
 	if !ok {
-		return Session{}, PageContent{}, false
+		return Session{}, PageContent{}, false, r.index.readError(replyID)
 	}
-	page, ok := r.readPage(s)
-	if !ok {
-		return Session{}, PageContent{}, false
-	}
-	return s, page, true
+	page, ok, err := r.readPage(s)
+	return s, page, ok, err
 }
 
 // lookup resolves served sessions, reading a session's snapshot only when
@@ -859,8 +861,8 @@ func (r pageReader) session(replyID string) (SessionView, bool) {
 // source named and the attachments directory its conversation reads, and
 // whether it shows contacts (live or saved conversation history).
 func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, bool) {
-	view, inputs, _, ok := r.readSessionWith(replyID, nil, true)
-	return view, inputs, ok
+	view, inputs, _, ok, err := r.readSessionWith(replyID, nil, true)
+	return view, inputs, ok && err == nil
 }
 
 // sessionReads are the store reads one session page read made, which a
@@ -880,18 +882,19 @@ type sessionReads struct {
 // prev, the ring included unless ringChanged. An inbox prev did not read
 // (no adapter showed then) is read when an adapter arrives. It returns the
 // reads it used.
-func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChanged bool) (SessionView, refreshInputs, *sessionReads, bool) {
+func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChanged bool) (SessionView, refreshInputs, *sessionReads, bool, error) {
 	var s Session
 	var page PageContent
+	var err error
 	ok := false
 	if prev != nil && r.index != nil && ValidReplyID(replyID) {
 		s, ok = r.index.Session(replyID)
 		page = prev.page
 	} else {
-		s, page, ok = r.served(replyID)
+		s, page, ok, err = r.servedWithError(replyID)
 	}
-	if !ok {
-		return SessionView{}, refreshInputs{}, nil, false
+	if !ok || err != nil {
+		return SessionView{}, refreshInputs{}, nil, false, err
 	}
 	reads := &sessionReads{page: page}
 	in := pageInputs{Session: s, Page: page, Snapshot: r.readSnapshot(replyID), Now: r.clock(), Version: r.version}
@@ -946,7 +949,7 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 	inputs.watch = slices.Compact(inputs.watch)
 	slices.Sort(inputs.pids)
 	inputs.pids = slices.Compact(inputs.pids)
-	return view, inputs, reads, true
+	return view, inputs, reads, true, nil
 }
 
 // sessionStamp is the refresh stamp of replyID's session page over the
@@ -1204,7 +1207,11 @@ func (d *Daemon) handleSessionRoutes(w http.ResponseWriter, r *http.Request) {
 func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, replyID string) {
 	frame := framedRequest(r)
 	lang, pref := requestLang(r)
-	view, ok := d.pagesIn(lang).session(replyID)
+	view, _, _, ok, readErr := d.pagesIn(lang).readSessionWith(replyID, nil, true)
+	if readErr != nil {
+		http.Error(w, "session temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if !ok {
 		if ValidReplyID(replyID) {
 			d.serveFindingSession(w, r, replyID, lang)

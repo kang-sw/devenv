@@ -598,11 +598,17 @@ func TestDashboardSourceSeesBothLayouts(t *testing.T) {
 		seq int
 	}{{splitKey, 2}, {legacyKey, legacy.Whiteboard.Seq}} {
 		reg := wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(tc.key), Project: project}
-		data, ok := src.ReadSession(reg)
+		data, ok, err := src.ReadSession(reg)
+		if err != nil {
+			t.Fatalf("ReadSession(%s) error: %v", tc.key, err)
+		}
 		if !ok || !data.HasBoard || data.Fingerprint == "" {
 			t.Fatalf("ReadSession(%s) = %+v, %v", tc.key, data, ok)
 		}
-		page, ok := src.ReadPage(reg)
+		page, ok, err := src.ReadPage(reg)
+		if err != nil {
+			t.Fatalf("ReadPage(%s) error: %v", tc.key, err)
+		}
 		if !ok || !page.HasBoard || page.Seq != tc.seq {
 			t.Fatalf("ReadPage(%s) = board %v seq %d, %v; want seq %d", tc.key, page.HasBoard, page.Seq, ok, tc.seq)
 		}
@@ -610,14 +616,21 @@ func TestDashboardSourceSeesBothLayouts(t *testing.T) {
 
 	// A whiteboard write changes the split session's fingerprint.
 	reg := wsdashboard.Registration{ReplyID: wsmailbox.ReplyID(splitKey), Project: project}
-	before, _ := src.ReadSession(reg)
+	before, _, err := src.ReadSession(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.mutateRecordParts(splitKey, partAll, partWhiteboard, func(r *sessionRecord) error {
 		r.Whiteboard.Seq++
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if after, _ := src.ReadSession(reg); after.Fingerprint == before.Fingerprint {
+	after, _, err := src.ReadSession(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Fingerprint == before.Fingerprint {
 		t.Fatal("a whiteboard write must change the session fingerprint")
 	}
 

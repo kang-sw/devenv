@@ -2956,8 +2956,8 @@
   // preview card can show (previews), the preview slot, with the menu on
   // the right click and the keyboard activation instead; Cmd/Ctrl+click on a link
   // the page can open is left to the browser, which opens a new tab, and
-  // opens the menu otherwise. The system-browser and native-app items show
-  // only on a page the server marked data-sysopen (a browser on the daemon's
+  // opens the menu otherwise. The open-with-system item shows only on a
+  // page the server marked data-sysopen (a browser on the daemon's
   // machine), and a data-out link opens at all only there; the daemon checks
   // both again. The markup is the same for every viewer: entries render once
   // for all of them.
@@ -3204,6 +3204,20 @@
     if (origin) o.origin = origin;
     if (out || origin) window.WsPreview.open(path, o); else window.WsPreview.open(path);
   }
+  // hostPath splits abs, an absolute path as the daemon's host spells it
+  // (data-abs), into its parent folder and its name, the root and path
+  // fs/act takes; null for anything else. A backslash separates only in a
+  // drive-letter path, since a POSIX name may hold one.
+  function hostPath(abs) {
+    if (!abs) return null;
+    var win = /^[A-Za-z]:[\\\/]/.test(abs);
+    if (!win && abs.charAt(0) !== "/") return null;
+    var i = win ? Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\")) : abs.lastIndexOf("/");
+    var dir = abs.slice(0, i), name = abs.slice(i + 1);
+    if (!win && !dir) dir = "/";
+    if (win && dir.length === 2) dir += "\\";
+    return { dir: dir, name: name };
+  }
   function openLinkMenu(a, x, y) {
     closeLinkMenu(false);
     var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
@@ -3218,16 +3232,17 @@
     }
     if (webFile(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ path: rel }); }]);
     if (linkOpens(a)) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
-    if (href && sys && !out) {
+    // "Open with system" hands the target to the host's default handler: a
+    // url link to the system-open route (the default browser), a file or
+    // folder (an .app bundle included) to fs/act's open, by its own path.
+    var hostAt = kind === "file" && sys ? hostPath(abs) : null;
+    if (kind === "url" && href && sys) {
       items.push([wsT("js.menu.sysopen"), function () {
-        // A file link sends its file view path; the daemon opens it on the
-        // address this page was loaded from.
-        post("open", { target: kind === "url" ? url : href }, function (ok, v) { toast(ok ? wsT("js.toast.opened") : wsT("js.toast.openfail", v)); });
+        post("open", { target: url }, function (ok, v) { toast(ok ? wsT("js.toast.opened") : wsT("js.toast.openfail", v)); });
       }]);
-    }
-    if (kind === "file" && abs && sys && a.hasAttribute("data-img")) {
-      items.push([wsT("js.menu.native"), function () {
-        post("open", { native: abs }, function (ok, v) { toast(ok ? wsT("js.toast.openednative") : wsT("js.toast.openfail", v)); });
+    } else if (hostAt) {
+      items.push([wsT("js.menu.sysopen"), function () {
+        post("fs/act", { path: hostAt.name, action: "open", root: hostAt.dir }, function (ok, v) { toast(ok ? wsT("js.toast.openednative") : wsT("js.toast.openfail", v)); });
       }]);
     }
     if (kind === "url") items.push([wsT("js.menu.copyurl"), function () { copyText(url); }]);
@@ -6466,11 +6481,25 @@
       try { window.sessionStorage.setItem(ASSETS_TRIED, ev.id); } catch (x) {}
       location.reload();
     }
-    // The session left: the close that follows is final.
+    // A WebSocket handshake hides HTTP status. Recheck the stream once after
+    // the usual retry delay before calling the session gone; never replace
+    // the held DOM (or its drafts) with the probe's response. Transient probe
+    // failures keep retrying at that cadence until absence is confirmed or
+    // the stream can reopen with the hashes held then.
     function onGone() {
       st.close();
       connected(false);
-      banner(wsT("js.banner.gone"));
+      trackerLost();
+      setTimeout(recheckGone, 3000);
+    }
+    function recheckGone() {
+      fetch(path + (framed && mode !== "index" ? "?frame=1" : ""), { cache: "no-store" }).then(function (res) {
+        // The GET is only a status probe, not another long-lived SSE stream.
+        if (res.body) res.body.cancel().catch(function () {});
+        if (res.status === 404) { banner(wsT("js.banner.gone")); return; }
+        if (res.ok) { connect(); return; }
+        setTimeout(recheckGone, 3000);
+      }).catch(function () { setTimeout(recheckGone, 3000); });
     }
   }
   // showRegions applies, once each and in arrival order, the region updates

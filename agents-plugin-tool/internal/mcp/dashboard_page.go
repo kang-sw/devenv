@@ -37,10 +37,10 @@ var (
 )
 
 // ReadPage reads the page parts of the session reg names, in English. It
-// reports false exactly when ReadSession does. A session without a board
+// follows ReadSession's found/absent/transient result. A session without a board
 // still reads, with HasBoard false, since the dashboard lists it for its live
 // snapshot.
-func (src *DashboardSessionSource) ReadPage(reg wsdashboard.Registration) (wsdashboard.PageContent, bool) {
+func (src *DashboardSessionSource) ReadPage(reg wsdashboard.Registration) (wsdashboard.PageContent, bool, error) {
 	return src.ReadPageLang(reg, "")
 }
 
@@ -48,10 +48,10 @@ func (src *DashboardSessionSource) ReadPage(reg wsdashboard.Registration) (wsdas
 // titles, counts, tooltips) in lang, a wsi18n code. The text of the board's
 // items, the panel rows' own titles, and everything else the session wrote
 // stays as written.
-func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, lang string) (wsdashboard.PageContent, bool) {
-	key, _, record, ok := src.lookupRecord(reg)
-	if !ok {
-		return wsdashboard.PageContent{}, false
+func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, lang string) (wsdashboard.PageContent, bool, error) {
+	key, _, record, ok, err := src.lookupRecord(reg)
+	if !ok || err != nil {
+		return wsdashboard.PageContent{}, false, err
 	}
 	page := wsdashboard.PageContent{
 		Contacts:   src.readContacts(reg),
@@ -63,18 +63,19 @@ func (src *DashboardSessionSource) ReadPageLang(reg wsdashboard.Registration, la
 		}
 	}
 	if record.Whiteboard == nil {
-		return page, true
+		return page, true, nil
 	}
 	page.HasBoard = true
 	page.Seq = record.Whiteboard.Seq
 	page.Reasked = record.Whiteboard.ReaskTimes()
 	board, ok := src.renderBoard(key, record, reg.ReplyID, lang, page.Reasked)
-	if ok {
-		page.Board = board.regions
-		page.Watch = slices.Clone(board.watch)
-		page.WatchPIDs = slices.Clone(board.pids)
+	if !ok {
+		return wsdashboard.PageContent{}, false, fmt.Errorf("render session board failed")
 	}
-	return page, true
+	page.Board = board.regions
+	page.Watch = slices.Clone(board.watch)
+	page.WatchPIDs = slices.Clone(board.pids)
+	return page, true, nil
 }
 
 // boardRender is one render of a session's board and panels, with what the
@@ -254,8 +255,8 @@ func (src *DashboardSessionSource) renderBoardNow(key string, record sessionReco
 // renders nothing. A session without a board answers an empty value and
 // true; false when the session is gone.
 func (src *DashboardSessionSource) BoardItems(reg wsdashboard.Registration) (wsdashboard.BoardItems, bool) {
-	_, _, record, ok := src.lookupRecord(reg)
-	if !ok {
+	_, _, record, ok, err := src.lookupRecord(reg)
+	if !ok || err != nil {
 		return wsdashboard.BoardItems{}, false
 	}
 	if record.Whiteboard == nil {
@@ -276,8 +277,8 @@ var _ wsdashboard.ClosedTopicsSource = (*DashboardSessionSource)(nil)
 // past its cap, from index from, under the served page's link rule; false
 // when the session is gone or has no board.
 func (src *DashboardSessionSource) ReadClosedTopics(reg wsdashboard.Registration, lang string, from, n int) (template.HTML, bool) {
-	_, _, record, ok := src.lookupRecord(reg)
-	if !ok || record.Whiteboard == nil {
+	_, _, record, ok, err := src.lookupRecord(reg)
+	if !ok || err != nil || record.Whiteboard == nil {
 		return "", false
 	}
 	in := servedViewInput(record, reg.ReplyID)
@@ -301,8 +302,8 @@ var _ wsdashboard.OutsideLinkSource = (*DashboardSessionSource)(nil)
 // the page's own links carry. It runs on a click, not on a page render, and
 // inlines no image. false when the session is gone.
 func (src *DashboardSessionSource) ReadOutsideLinks(reg wsdashboard.Registration) ([]string, bool) {
-	_, _, record, ok := src.lookupRecord(reg)
-	if !ok {
+	_, _, record, ok, err := src.lookupRecord(reg)
+	if !ok || err != nil {
 		return nil, false
 	}
 	if record.Whiteboard == nil {
