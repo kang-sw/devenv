@@ -156,7 +156,10 @@ func (d *Daemon) RequestHire(replyID string, request HireRequest) (HireProposal,
 	request.Label = label
 	if request.Harness != "" {
 		admitted, ok := d.agents.(interface{ AdmitsLead(string) bool })
-		if !ok || !admitted.AdmitsLead(request.Harness) {
+		if !ok {
+			return HireProposal{}, errors.New("this daemon's agent host cannot admit a lead harness")
+		}
+		if !admitted.AdmitsLead(request.Harness) {
 			return HireProposal{}, errors.New("harness must be claude or pi")
 		}
 	}
