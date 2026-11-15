@@ -270,7 +270,7 @@ function removeEvictionRecord(ctx: AgentStorageContext, agentId: string): boolea
 }
 
 export function ownershipPath(home: string): string { return join(home, "ownership.json"); }
-export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, role: AgentOwnership["role"], exploreMode?: ExploreMode): AgentOwnership {
+export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, role: AgentOwnership["role"], exploreMode?: ExploreMode, delegation?: DelegationPolicy): AgentOwnership {
   safe(agentId, "agent id");
   const namespace = checkedDirectory(join(ctx.root, "ws-agents"), ctx.root);
   const ownerRoot = checkedDirectory(join(namespace, safe(ctx.ownerSessionId, "Pi session id")), ctx.root);
@@ -279,7 +279,7 @@ export function allocateAgentHome(ctx: AgentStorageContext, agentId: string, rol
   checkedDirectory(home, ownerRoot);
   const sessionPath = join(home, "session.jsonl");
   const now = Date.now();
-  const ownership: AgentOwnership = { version: OWNERSHIP_VERSION, ownerSessionId: ctx.ownerSessionId, agentId, home, role, ...(exploreMode ? { exploreMode } : {}), ...(sessionPath ? { sessionPath } : {}) };
+  const ownership: AgentOwnership = { version: OWNERSHIP_VERSION, ownerSessionId: ctx.ownerSessionId, agentId, home, role, ...(exploreMode ? { exploreMode } : {}), ...(delegation ? { delegation } : {}), ...(sessionPath ? { sessionPath } : {}) };
   writeOwnership({ ...ownership, createdAt: now, lastActivityAt: now, updatedAt: now, liveness: { lifecycle: "starting", observedAt: now, instanceNonce: randomUUID(), recovery: "none" } });
   return ownership;
 }

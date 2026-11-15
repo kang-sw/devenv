@@ -148,15 +148,16 @@ import { classifyRegistryRowState } from "../src/agent-widget.ts";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpStdioClient, McpToolCallResult } from "../src/mcp-stdio-client.ts";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import fs, { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DELEGATION_ENV } from "../src/delegation-policy.ts";
 import { closeFakeChildren, connectFakeChild } from "./fixtures/channel-child.ts";
-import { allocateAgentHome, createAgentStorageContext, readOwnership, updateOwnership } from "../src/agent-storage.ts";
+import { allocateAgentHome, createAgentStorageContext, readOwnership, updateOwnership, type OwnershipMetadata } from "../src/agent-storage.ts";
 import { approvalConsumedMessage } from "../src/approval-protocol.ts";
-import type { ChannelConnection, ChannelHello } from "../src/agent-channel.ts";
+import { ParentChannel, type ChannelConnection, type ChannelHello } from "../src/agent-channel.ts";
 import { PUSH_BATCH_CUSTOM_TYPE } from "../src/push-protocol.ts";
 import { installSubtreePublisher, SubtreeUpstream } from "../src/subtree-lifecycle.ts";
 import { agentViewUpstreamRef, type AgentViewModel } from "../src/agent-view.ts";
@@ -874,6 +875,98 @@ describe("spawnAgent (ws-agent-spawn tool level): ordinary rejection refuses ins
       assert.deepEqual(scopedResult.write_scopes, { status: "bound", count: 1 });
       await scoped.handle.stopAll();
     } finally { rpc.restore(); }
+  });
+
+  test("spawn persists delegation once before registration and start, retaining later lifecycle writes", async t => {
+    let starts = 0;
+    let checkBeforeStart = () => {};
+    const rpc = installRpcHarness(undefined, () => { checkBeforeStart(); starts++; });
+    const rename = fs.renameSync;
+    const writes: OwnershipMetadata[] = [];
+    t.mock.method(fs, "renameSync", (from, to) => {
+      if (String(to).endsWith("ownership.json")) writes.push(JSON.parse(readFileSync(from, "utf8")));
+      return rename(from, to);
+    });
+    syncBuiltinESMExports();
+    let registered: ReturnType<typeof harness> | undefined;
+    try {
+      for (const scoped of [false, true]) {
+        writes.length = 0;
+        registered = harness(async () => jsonResult({}), undefined, scoped ? { class: "reviewer", authority: "delegate", readOnly: true, requiresChildren: false } : undefined);
+        const { tool, handle, ctx } = registered;
+        const target = join(realpathSync(ctx.agentStorageRoot), "result.md");
+        const expectedWrite = scoped ? { mode: "scoped", scopes: [{ path: target, kind: "file" }] } : { mode: "unrestricted" };
+        const startsBefore = starts;
+        const set = handle.rpcRegistry.set.bind(handle.rpcRegistry);
+        const registration = t.mock.method(handle.rpcRegistry, "set", (id, record) => {
+          assert.equal(starts, startsBefore, "persistence and registration precede child start");
+          assert.equal(writes.length, 1, "there is no immediate delegation-only update before registration");
+          assert.deepEqual(writes[0]!.delegation, record.delegation);
+          assert.deepEqual(record.ownership!.delegation, record.delegation);
+          assert.deepEqual(writes[0]!.delegation!.write, expectedWrite);
+          assert.deepEqual(readOwnership(record.ownership!.home)?.delegation, record.delegation);
+          return set(id, record);
+        });
+        checkBeforeStart = () => {
+          assert.equal(writes.length, 1, "start observes the complete initial write, not a patched descriptor");
+          assert.equal(handle.rpcRegistry.size, 1);
+        };
+        const result = JSON.parse((await tool.execute("first-write", {
+          system_prompt_path: "/tmp/p.md", prompt: "bounded",
+          ...(scoped ? { write_scopes: [{ path: target, kind: "file" }] } : {}),
+        }, undefined, undefined, ctx)).content[0]!.text);
+        assert.equal(registration.mock.callCount(), 1);
+        assert.equal(starts, startsBefore + 1);
+        const record = handle.rpcRegistry.get(result.agent_id)!;
+        assert.ok(writes.slice(1).some(metadata => metadata.liveness.lifecycle === "live" && metadata.liveness.running), "the legitimate later prompt lifecycle update remains");
+        for (const metadata of writes) assert.deepEqual(metadata.delegation, record.delegation, "later updates preserve the original authority");
+        await handle.stopAll();
+        registered = undefined;
+      }
+    } finally {
+      await registered?.handle.stopAll();
+      rpc.restore(); t.mock.restoreAll(); syncBuiltinESMExports();
+    }
+  });
+
+  test("initial ownership persistence failure rejects before registration or child start and closes the channel", async t => {
+    let starts = 0;
+    const rpc = installRpcHarness(undefined, () => { starts++; });
+    const registered = harness(async () => jsonResult({}), undefined, { class: "reviewer", authority: "delegate", readOnly: true, requiresChildren: false });
+    const { tool, handle, ctx } = registered;
+    const registration = t.mock.method(handle.rpcRegistry, "set");
+    const close = t.mock.method(ParentChannel.prototype, "close");
+    const rename = fs.renameSync;
+    const failure = Object.assign(new Error("fixture initial ownership write failure"), { code: "EIO" });
+    let rejected: OwnershipMetadata | undefined;
+    let attempts = 0;
+    t.mock.method(fs, "renameSync", (from, to) => {
+      if (String(to).endsWith("ownership.json")) {
+        attempts++;
+        rejected = JSON.parse(readFileSync(from, "utf8"));
+        throw failure;
+      }
+      return rename(from, to);
+    });
+    syncBuiltinESMExports();
+    try {
+      const target = join(realpathSync(ctx.agentStorageRoot), "result.md");
+      await assert.rejects(() => tool.execute("failed-first-write", {
+        system_prompt_path: "/tmp/p.md", prompt: "must not launch",
+        write_scopes: [{ path: target, kind: "file" }],
+      }, undefined, undefined, ctx), error => error === failure);
+      assert.equal(attempts, 1, "an initial EIO rejects allocation instead of becoming a later best-effort update");
+      assert.deepEqual(rejected?.delegation?.write, { mode: "scoped", scopes: [{ path: target, kind: "file" }] });
+      assert.equal(starts, 0);
+      assert.equal(registration.mock.callCount(), 0);
+      assert.equal(handle.rpcRegistry.size, 0);
+      assert.equal(close.mock.callCount(), 1, "the already-bound channel is closed on synchronous allocation failure");
+      assert.deepEqual(readdirSync(rejected!.home), [], "the failed atomic replacement leaves no descriptor or temp file");
+      assert.equal(existsSync(join(rejected!.home, "..", `.${rejected!.agentId}.ownership-lock`)), false, "the write lock is released");
+    } finally {
+      await handle.stopAll();
+      rpc.restore(); t.mock.restoreAll(); syncBuiltinESMExports();
+    }
   });
 
   test("an unrestricted child reports redundant scopes as ignored rather than implying confinement", async () => {
