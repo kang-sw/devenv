@@ -15,6 +15,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsmailbox"
 	"github.com/kang-sw/devenv/internal/wsstate"
 	"github.com/kang-sw/devenv/internal/wswake"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 const whiteboardReconcileInterval = 30 * time.Second
@@ -33,6 +34,7 @@ type WhiteboardNudges struct {
 	log          io.Writer
 	now          func() time.Time
 	alive        func(int) bool
+	tickets      func(root string) wswhiteboard.TicketResolver
 	interval     time.Duration
 	start, close sync.Once
 	stop, exited chan struct{}
@@ -45,7 +47,7 @@ func NewWhiteboardNudges(dir string, agents WhiteboardNudgeAgents, log io.Writer
 	if log == nil {
 		log = io.Discard
 	}
-	return &WhiteboardNudges{cache: filepath.Dir(dir), dir: dir, agents: agents, log: log, now: time.Now, alive: wsstate.ProcessAlive, interval: whiteboardReconcileInterval, stop: make(chan struct{}), exited: make(chan struct{}), changed: make(chan struct{}, 1), pending: map[nudgeTarget]bool{}}
+	return &WhiteboardNudges{cache: filepath.Dir(dir), dir: dir, agents: agents, log: log, now: time.Now, alive: wsstate.ProcessAlive, tickets: func(root string) wswhiteboard.TicketResolver { return &whiteboardTickets{root: root} }, interval: whiteboardReconcileInterval, stop: make(chan struct{}), exited: make(chan struct{}), changed: make(chan struct{}, 1), pending: map[nudgeTarget]bool{}}
 }
 
 // Poke is called only after a successful board transaction. A caller attached
@@ -191,9 +193,13 @@ func (n *WhiteboardNudges) process(t nudgeTarget, now time.Time) time.Time {
 		fmt.Fprintf(n.log, "whiteboard nudges: mailbox path: %v\n", err)
 		return now.Add(n.interval)
 	}
+	var tickets wswhiteboard.TicketResolver
+	if n.tickets != nil {
+		tickets = n.tickets(t.root)
+	}
 	next, err := whiteboardFolder(t.root, t.key).Notify(wsmailbox.ReplyID(t.key), now, gate, func(message string) error {
 		return wsmailbox.PostSystem(path, wsmailbox.ReplyID(t.key), "", message, now)
-	}, wswake.Mailbox.Wake)
+	}, wswake.Mailbox.Wake, tickets)
 	if err != nil {
 		fmt.Fprintf(n.log, "whiteboard nudges: %s: %v\n", wsmailbox.ReplyID(t.key), err)
 	}

@@ -235,17 +235,18 @@ func TestByteSize(t *testing.T) {
 }
 
 // TestWorktreesCardInTheDrawer pins the drawer's pooled-worktree card: on a
-// session page of a daemon that reads pools, after the panels and before
-// the settings card, its cleanup button live with an adapter and disabled
+// session page of a daemon that reads pools, after the panels inside the
+// drawer, its cleanup button live with an adapter and disabled
 // with the reason without one; a daemon without a worktree source has no
 // card.
 func TestWorktreesCardInTheDrawer(t *testing.T) {
 	f, _, _, _ := worktreeFixture(t)
 	_, live := get(t, f.base+"/s/livesession?frame=1")
-	panels, card, settings := strings.Index(live, `data-region="panels"`), strings.Index(live, `id="p-worktrees"`), strings.Index(live, `id="p-settings"`)
-	if panels < 0 || card < panels || settings < card {
-		t.Fatalf("drawer order: panels %d, worktrees %d, settings %d", panels, card, settings)
+	panels, card, end := strings.Index(live, `data-region="panels"`), strings.Index(live, `id="p-worktrees"`), strings.Index(live, `<button type="button" class="dr-handle"`)
+	if panels < 0 || card < panels || end < card {
+		t.Fatalf("drawer order: panels %d, worktrees %d, handle %d", panels, card, end)
 	}
+	assertSettingsOwner(t, live, false)
 	for _, want := range []string{`id="wtlist"`, `id="wtcount"`, `<button type="button" class="btn wtclean" id="wtclean" title="ask the session to clean up unused worktrees">Request cleanup</button>`} {
 		if !strings.Contains(live, want) {
 			t.Errorf("live page lacks %q", want)
@@ -257,7 +258,7 @@ func TestWorktreesCardInTheDrawer(t *testing.T) {
 	}
 
 	bare := startPageFixture(t)
-	if _, page := get(t, bare.base+"/s/livesession?frame=1"); strings.Contains(page, `id="p-worktrees"`) || !strings.Contains(page, `id="p-settings"`) {
-		t.Errorf("a daemon without a worktree source: worktrees card present or settings card missing")
+	if _, page := get(t, bare.base+"/s/livesession?frame=1"); strings.Contains(page, `id="p-worktrees"`) {
+		t.Errorf("a daemon without a worktree source: worktrees card present")
 	}
 }

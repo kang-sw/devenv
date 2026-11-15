@@ -36,6 +36,7 @@ function fixture(store) {
   function save(k, v) { if (v === null) delete store[k]; else store[k] = v; }
   function fetchFS(url) {
     requests.push(url); var u = new URL(url, 'http://fixture.invalid'), root = u.searchParams.get('root') || '/session', dir = u.searchParams.get('dir') || '';
+    if (u.pathname.endsWith('/fs/worktrees')) return Promise.resolve({ ok: true, json: () => ({ roots: [{ path: '/session', branch: 'main', detached: false }, { path: '/other', branch: 'work', detached: false }] }) });
     return Promise.resolve({ ok: true, json: () => ({ root, abs: root + (dir ? '/' + dir : ''), name: root.split('/').pop(), session: root === '/session', sep: '/', entries: dir ? [{ name: 'child.go' }] : [{ name: 'src', dir: true }, { name: 'main.go' }, { name: 'space name.png' }] }) });
   }
   new Function('document', 'window', 'wsT', 'getComputedStyle', 'requestAnimationFrame', CARDS)(doc, win, wsT, () => ({ overflowY: 'visible' }), () => {});
@@ -58,6 +59,8 @@ function send(c) { c.body.querySelectorAll('.fattachment button')[0].click(); }
 function copy(c) { c.body.querySelectorAll('.fattachment button')[1].click(); }
 (async function () {
   var p = fixture({}); p.owners.tab.shown(); await settle();
+  var tabPane = p.doc.getElementById('files');
+  check('Files tab keeps compact breadcrumb and external root summary in sync', [tabPane.querySelector('.fcrumb-root .froot').textContent, p.doc.querySelector('.fsum .froot').textContent, tabPane.querySelector('.ftab-select .fn').textContent], ['session', 'session', 'session']);
   p.owners.tab.navigate('src'); await settle();
   p.doc.getElementById('files').querySelector('.fopen-card').click(); await settle();
   var a = p.W.list('explorer')[0];
@@ -68,6 +71,13 @@ function copy(c) { c.body.querySelectorAll('.fattachment button')[1].click(); }
   check('outside-root mention uses mention.js quoting and never sends', [p.ctext.value, p.posts.length, p.submits(), p.inputs(), p.copies], ['Inspect @`/other/space name.png` ', 0, 0, 1, ['/other/space name.png']]);
   check('gallery raw URL keeps the card root', a.body.querySelector('.fthumb').src, '/s/session/fs/raw?path=space%20name.png&root=%2Fother');
   var b = p.win.WsFiles.open({ root: '', dir: '' }); await settle(); mode(b, 2); clickEntry(b, 'main.go');
+  check('explorer card root tabs retain folder names for session and alternate roots', [a.body.querySelectorAll('.ftab-select .fn').map(n => n.textContent), b.body.querySelector('.ftab-select .fn').textContent], [['src', 'other'], 'session']);
+  check('explorer card footer exposes selected path, attach, and copy', [b.body.querySelector('.fselection b').textContent, b.body.querySelectorAll('.ffooter .fattachment button').map(n => n.textContent)], ['main.go', ['js.files.send', 'js.files.copy']]);
+  check('five view icons use the embedded Lucide sprite and accessible names', b.body.querySelectorAll('.fview-modes button').map(n => [n.html.includes('#l-'), !!n.getAttribute('aria-label')]), Array(5).fill([true, true]));
+  b.body.querySelectorAll('.fseg button')[1].click();
+  check('content-only toggles are isolated between Files tab and explorer cards', [tabPane.querySelector('.fopts').hidden, a.body.querySelector('.fopts').hidden, b.body.querySelector('.fopts').hidden], [true, true, false]);
+  b.body.querySelectorAll('.fseg button')[0].click();
+  check('returning explorer card to name mode hides content-only toggles', b.body.querySelector('.fopts').hidden, true);
   draft(p, ''); send(b);
   check('session-root mention stays relative and does not mutate another owner', [p.ctext.value, selected(a).absolute, selected(b).path, p.owners.tab.location().dir], ['@main.go ', '/other/space name.png', 'main.go', 'src']);
   check('two cards have isolated ID-keyed records', [a.id !== b.id, a.explorerKey !== b.explorerKey, !!p.store[a.explorerKey], !!p.store[b.explorerKey]], [true, true, true, true]);
@@ -87,6 +97,7 @@ function copy(c) { c.body.querySelectorAll('.fattachment button')[1].click(); }
 
   // The existing toolbar toggle still opens its own persistent sheet.
   var toggle = p.W.toolbar().querySelector('.board-files'); toggle.click(); await settle();
+  check('toolbar sheet shares compact rows and footer without losing actions', [!!p.owners.sheet.el.querySelector('.fbar .ftabs'), !!p.owners.sheet.el.querySelector('.fsr .fseg'), p.owners.sheet.el.querySelector('.fopts').hidden, p.owners.sheet.el.querySelectorAll('.ffooter .fattachment button').length], [true, true, true, 2]);
   check('toolbar toggle keeps sheet behavior', [p.owners.sheet.el.hidden, p.owners.sheet.el.hasAttribute('data-max')], [false, true]);
   fire(p.owners.sheet.el.querySelector('.fentry'), 'dblclick'); await settle();
   // Wrap open only to observe order, leaving the actual registered implementation in use.
@@ -112,6 +123,18 @@ function copy(c) { c.body.querySelectorAll('.fattachment button')[1].click(); }
   var loadingCard = reload2.win.WsFiles.open({ root: '/pending', dir: 'src' }), loadingKey = loadingCard.explorerKey;
   loadingCard.close(); await settle();
   check('late root response cannot recreate a closed card storage record', loadingKey in reload2.store, false);
-  for (var f of [p, reload, reload2]) { f.W.list().slice().forEach(c => c.close()); f.owners.tab.destroy(); }
+  var rootsPage = fixture({}); rootsPage.owners.tab.shown(); await settle();
+  var rootCard = rootsPage.win.WsFiles.open({ root: '', dir: '' }), peerCard = rootsPage.win.WsFiles.open({ root: '', dir: '' }); await settle();
+  rootCard.explorer.newTab({ root: '', dir: '' }); await settle();
+  var untouchedPeer = rootsPage.store[peerCard.explorerKey], untouchedFiles = rootsPage.store['ws.dashboard.files.tabs.session'];
+  rootCard.body.querySelector('.fchange-root').click(); await settle();
+  rootCard.body.querySelectorAll('.froot-list button')[1].click(); await settle();
+  check('allowed root changes only the active tab of its own card', [rootCard.explorer.location(), peerCard.explorer.location(), rootsPage.owners.tab.location(), rootsPage.store[peerCard.explorerKey] === untouchedPeer, rootsPage.store['ws.dashboard.files.tabs.session'] === untouchedFiles], [{ root: '/other', dir: '' }, { root: '', dir: '' }, { root: '', dir: '' }, true, true]);
+  var rootSaved = JSON.parse(JSON.stringify(rootsPage.store)), rootReload = fixture(rootSaved); await settle();
+  var restoredCard = rootReload.W.list('explorer').find(c => c.id === rootCard.id);
+  check('allowed root and untouched sibling tab persist per card', [restoredCard.explorer.location(), restoredCard.body.querySelectorAll('.ftab-select').length], [{ root: '/other', dir: '' }, 2]);
+  restoredCard.body.querySelectorAll('.ftab-select')[0].click();
+  check('switching back retains the original tab root', restoredCard.explorer.location(), { root: '', dir: '' });
+  for (var f of [p, reload, reload2, rootsPage, rootReload]) { f.W.list().slice().forEach(c => c.close()); f.owners.tab.destroy(); }
   process.stdout.write(bad.join('\n'));
 })().catch(e => { console.error(e); process.exitCode = 1; });

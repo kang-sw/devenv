@@ -255,16 +255,17 @@ func TestDaemonRunsAndReleasesItsHolderHost(t *testing.T) {
 }
 
 // TestHoldersCardInTheDrawer pins the drawer's holders card: on a session
-// page of a daemon that runs a holder host, after the worktrees card and
-// before the settings card, with its list, count chip, and note line; a
+// page of a daemon that runs a holder host, after the panels and worktrees
+// card, with its list, count chip, and note line; a
 // daemon without a holder host has no card.
 func TestHoldersCardInTheDrawer(t *testing.T) {
 	f := startPageFixture(t, func(o *DaemonOptions) { o.Worktrees = &fakeWorktrees{} }, withHolders(newFakeHolders()))
 	_, page := get(t, f.base+"/s/livesession?frame=1")
-	worktrees, card, settings := strings.Index(page, `id="p-worktrees"`), strings.Index(page, `id="p-holders"`), strings.Index(page, `id="p-settings"`)
-	if worktrees < 0 || card < worktrees || settings < card {
-		t.Fatalf("drawer order: worktrees %d, holders %d, settings %d", worktrees, card, settings)
+	panels, worktrees, card, end := strings.Index(page, `data-region="panels"`), strings.Index(page, `id="p-worktrees"`), strings.Index(page, `id="p-holders"`), strings.Index(page, `<button type="button" class="dr-handle"`)
+	if panels < 0 || worktrees < panels || card < worktrees || end < card {
+		t.Fatalf("drawer order: panels %d, worktrees %d, holders %d, handle %d", panels, worktrees, card, end)
 	}
+	assertSettingsOwner(t, page, false)
 	for _, want := range []string{`id="hdlist" aria-live="polite"`, `id="hdcount" hidden`, `id="hdnote" role="status"`, `Session holders`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("session page lacks %q", want)
@@ -272,7 +273,7 @@ func TestHoldersCardInTheDrawer(t *testing.T) {
 	}
 
 	bare := startPageFixture(t)
-	if _, page := get(t, bare.base+"/s/livesession?frame=1"); strings.Contains(page, `id="p-holders"`) || !strings.Contains(page, `id="p-settings"`) {
-		t.Errorf("a daemon without a holder host: holders card present or settings card missing")
+	if _, page := get(t, bare.base+"/s/livesession?frame=1"); strings.Contains(page, `id="p-holders"`) {
+		t.Errorf("a daemon without a holder host: holders card present")
 	}
 }

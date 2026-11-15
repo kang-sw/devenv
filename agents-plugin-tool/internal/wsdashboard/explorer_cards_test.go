@@ -8,6 +8,39 @@ import (
 	"testing"
 )
 
+// Compact dimensions belong to the explorer, not the shared toolbar or cards.
+func TestExplorerCompactLayout(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	for selector, want := range map[string][]string{
+		`.fbar`:                               {"height: 30px", "box-sizing: border-box"},
+		`.fsrow`:                              {"height: 34px", "box-sizing: border-box"},
+		`.ffooter`:                            {"height: 30px", "box-sizing: border-box"},
+		`.fentry, .fdetail-head`:              {"height: 22px", "padding: 0 6px"},
+		`.fpane .fr.cur`:                      {"background:"},
+		`.fpane[data-fm="content"] .fopts`:    {"display: inline-flex"},
+		`.fopts[hidden]`:                      {"display: none"},
+		`.bcard[data-kind="explorer"] .bc-hd`: {"height: 28px", "min-height: 28px", "box-sizing: border-box"},
+		`.bcard[data-kind="explorer"] .bc-hd .ibtn`: {"width: 22px", "height: 22px"},
+		`.bc-hd`: {"min-height: 32px", "padding: 4px 6px 4px 12px"},
+	} {
+		rule := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(selector) + ` \{[^}]+\}`).FindString(css)
+		for _, value := range want {
+			if !strings.Contains(rule, value) {
+				t.Errorf("%s lacks %q", selector, value)
+			}
+		}
+	}
+	sprite, err := lucideSprite()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, icon := range []string{"rows-3", "list", "layout-grid", "images", "columns-3", "paperclip", "copy", "plus"} {
+		if !strings.Contains(string(sprite), `id="l-`+icon+`"`) {
+			t.Errorf("compact explorer icon %s is not embedded", icon)
+		}
+	}
+}
+
 // Exercise the production registration, page adapters, composer edits, and
 // shared sheet together; no daemon/browser process is needed for this contract.
 func TestFilesExplorerCards(t *testing.T) {

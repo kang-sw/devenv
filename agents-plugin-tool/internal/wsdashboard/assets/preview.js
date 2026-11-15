@@ -2,7 +2,7 @@
   // The file preview card (window.WsPreview), a kind on the board card
   // framework (cards.js). A card shows one file under the session's browsing
   // root, as the preview route (fs_routes.go) describes it: an image or a
-  // video from the raw route, an HTML or SVG file in a sandboxed frame from
+  // video/audio from the raw route, an HTML or SVG file in a sandboxed frame from
   // the capability route, rendered markdown, a .diff or .patch through the
   // commit window's diff renderer, other text as plain text, or a "not
   // viewable" note.
@@ -26,6 +26,8 @@
   var doc = document, root = doc.documentElement, cards = window.WsCards;
   if (!cards) return;
   var rid = root.getAttribute("data-rid"), KIND = "preview", hooks = {};
+  // Explorer preflight answers are one-shot, never part of a saved card record.
+  var answers = new WeakMap();
   // LINE is the text view's line height in px (the stylesheet's .pv-txt), which
   // a jump to a line multiplies.
   var LINE = 18;
@@ -49,18 +51,20 @@
     return "?path=" + encodeURIComponent(d.path) + (d.root ? "&root=" + encodeURIComponent(d.root) : "") + (d.line ? "&text=1" : "");
   }
 
-  // OPAQUE are the extensions no preview shows: a link to such a file keeps
-  // the link menu on a plain click, and the explorer still opens the card,
-  // in its "not viewable" state. Every other file is asked of the server.
+  // OPAQUE keeps link handling unchanged, including outside-root PDFs. An
+  // explorer explicitly asks the guarded preview route, whose pdf answer
+  // alone opts a card into the native viewer.
   var OPAQUE = {};
   ("zip gz tgz bz2 xz zst 7z rar tar jar war pdf doc docx xls xlsx ppt pptx odt ods odp exe dll so dylib a o obj bin dat db sqlite class pyc wasm iso dmg img deb rpm msi apk " +
     "ttf otf woff woff2 eot mp3 wav flac aac m4a mov avi mkv wmv psd heic tif tiff").split(" ").forEach(function (x) { OPAQUE[x] = true; });
   function takes(path) { return !OPAQUE[ext(path)]; }
 
-  var ICON = { image: "image", video: "film", frame: "file-code", markdown: "file-text", diff: "file-diff", text: "file-text", none: "file" };
+  var ICON = { image: "image", video: "film", audio: "file", pdf: "file-text", frame: "file-code", markdown: "file-text", diff: "file-diff", text: "file-text", none: "file" };
   function badge(v) {
     if (v.kind === "image") return wsT("js.preview.kind.image");
     if (v.kind === "video") return wsT("js.preview.kind.video");
+    if (v.kind === "audio") return wsT("js.preview.kind.audio");
+    if (v.kind === "pdf") return wsT("js.preview.kind.pdf");
     if (v.kind === "frame") return wsT("js.preview.kind.frame");
     if (v.kind === "markdown") return wsT("js.preview.kind.markdown");
     if (v.kind === "diff") return wsT("js.preview.kind.diff");
@@ -71,7 +75,8 @@
   function guess(path) {
     var x = ext(path);
     if (/^(png|jpe?g|gif|webp|avif|bmp|ico)$/.test(x)) return "image";
-    if (/^(mp4|webm|ogg|ogv)$/.test(x)) return "film";
+    if (/^(mp4|webm|mov|ogv|m4v)$/.test(x)) return "film";
+    if (/^(mp3|wav|ogg|oga|flac|m4a|aac|opus)$/.test(x)) return "file";
     if (/^(html?|svg)$/.test(x)) return "file-code";
     if (/^(diff|patch)$/.test(x)) return "file-diff";
     return "file-text";
@@ -136,6 +141,43 @@
     box.appendChild(mark);
     card.body.scrollTop = Math.max(0, (line - 1) * LINE - Math.round(card.body.clientHeight / 3));
   }
+  // Token text is never HTML. Reject a lexer-normalized/mismatched answer
+  // rather than changing the source (and content-search line offsets).
+  function codeText(v) {
+    var pre = mk("pre", "pv-txt"), lines = v.highlighted_lines, text = v.text || "";
+    if (!Array.isArray(lines) || lines.map(function (line) { return (line || []).map(function (p) { return p.s; }).join(""); }).join("\n") !== text) {
+      pre.textContent = text;
+      return pre;
+    }
+    pre.className += " chroma";
+    lines.forEach(function (line, i) {
+      if (i) pre.appendChild(mk("span", "", "\n"));
+      (line || []).forEach(function (p) { pre.appendChild(mk("span", p.c ? "t-" + p.c : "", p.s)); });
+    });
+    return pre;
+  }
+  function pdfView(card, v) {
+    var box = mk("div", "pv-pdf"), link = mk("a", "btn pv-pdf-open", wsT("js.preview.pdf.open"));
+    link.href = v.src;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    // Keep an unobtrusive escape hatch inside the preview even when the
+    // browser advertises a viewer but a policy/plugin failure leaves it blank.
+    box.appendChild(link);
+    if (window.navigator && window.navigator.pdfViewerEnabled === true) {
+      var frame = mk("iframe");
+      frame.title = card.data.path;
+      frame.setAttribute("referrerpolicy", "no-referrer");
+      frame.addEventListener("error", function () {
+        if (frame.parentNode === box) box.removeChild(frame);
+        box.removeAttribute("data-viewer");
+      });
+      frame.src = v.src;
+      box.setAttribute("data-viewer", "");
+      box.appendChild(frame);
+    }
+    return box;
+  }
   function draw(card, v) {
     var d = card.data, box;
     // Monospace text views are code, regardless of the HTML/SVG source flag;
@@ -149,13 +191,22 @@
       img.alt = baseName(d.path);
       img.src = v.src;
       box.appendChild(img);
-    } else if (v.kind === "video") {
-      box = mk("div", "pv-vid");
-      var vid = mk("video");
-      vid.controls = true;
-      vid.preload = "metadata";
-      vid.src = v.src;
-      box.appendChild(vid);
+    } else if (v.kind === "video" || v.kind === "audio") {
+      box = mk("div", v.kind === "video" ? "pv-vid" : "pv-audio");
+      var media = mk(v.kind), turn = card.turn;
+      media.controls = true;
+      media.preload = "metadata";
+      media.addEventListener("error", function () {
+        // Ignore a late event from a replaced player or a pending reload.
+        if (card.turn === turn && card.body.firstChild === box) {
+          if (card.mediaError && card.mediaError(card)) return;
+          draw(card, { kind: "none", reason: wsT("js.preview.media.unsupported") });
+        }
+      });
+      media.src = v.src;
+      box.appendChild(media);
+    } else if (v.kind === "pdf") {
+      box = pdfView(card, v);
     } else if (v.kind === "frame") {
       // allow-scripts without allow-same-origin: the document runs in an
       // opaque origin, apart from the dashboard page, its cookie, and its
@@ -183,7 +234,7 @@
       box = mk("div", "pv-txtbox");
       if (v.source) box.appendChild(mk("div", "pv-cap", wsT("js.preview.source.note")));
       var wrap = mk("div", "pv-lines");
-      wrap.appendChild(mk("pre", "pv-txt", v.text));
+      wrap.appendChild(codeText(v));
       box.appendChild(wrap);
       fill(card, box);
       if (d.line) jump(card, wrap, d.line);
@@ -212,10 +263,13 @@
     card.el.removeAttribute("data-preview-kind");
     card.paint();
     head(card, guess(d.path), "");
-    ask(d).then(function (r) {
+    var answer = answers.get(d);
+    answers.delete(d);
+    var request = answer ? Promise.resolve(answer) : ask(d).then(function (r) {
       if (!r.ok) throw r.status;
       return r.json();
-    }).then(function (v) {
+    });
+    request.then(function (v) {
       if (card.turn === turn) draw(card, v);
     }, function (status) {
       if (card.turn !== turn) return;
@@ -227,7 +281,7 @@
 
   cards.register(KIND, {
     open: load,
-    close: function (card) { card.turn = -1; },
+    close: function (card) { card.turn = -1; card.mediaError = null; },
     // Unpinning a card makes it the slot again: the slot it replaces goes.
     pinned: function (card) {
       if (card.pinned) return;
@@ -246,6 +300,8 @@
     // as the absolute path of a linked file outside the session root.
     // o.origin is the exact validated topic node for one-time placement;
     // it is never part of the kind's persisted data or sandbox capability.
+    // o.answer reuses explorer preflight; o.mediaError offers its row menu.
+    // Neither is persisted: restored cards request fresh content as usual.
     open: function (path, o) {
       o = o || {};
       var data = { path: path };
@@ -254,6 +310,7 @@
         if (o.root) data.root = o.root;
         if (o.line > 0) data.line = o.line;
       }
+      if (o.answer) answers.set(data, o.answer);
       var card = cards.list(KIND).filter(function (c) {
         return c.pinned && c.data.path === path && !c.data.out === !data.out && (c.data.root || "") === (data.root || "");
       })[0];
@@ -267,6 +324,7 @@
         load(card);
       } else card = cards.open(KIND, data, undefined, o.origin);
       if (!card) return null;
+      card.mediaError = o.mediaError || null;
       card.fold(false);
       card.show();
       return card;

@@ -1,16 +1,17 @@
 /* The footer gutter and details are deliberately separate from rail styling. */
-.rail .usage-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; min-height: 25px; width: 100%; padding: 2px 0; border: 0; background: none; color: var(--wb-fg); cursor: pointer; font: inherit; text-align: left; }
+.rail .rfoot { flex-wrap: wrap; }
+.rail .usage-toggle { display: flex; flex: 1 1 180px; min-width: 0; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 10px; margin-left: auto; min-height: 20px; padding: 2px 0; border: 0; background: none; color: var(--wb-fg); cursor: pointer; font: inherit; text-align: left; }
 .rail .usage-toggle:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; border-radius: 3px; }
-.usage-harness { display: inline-flex; align-items: center; gap: 8px; }
+.usage-harness { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 6px; max-width: 100%; }
 .usage-mark { position: relative; display: inline-flex; width: 16px; height: 16px; flex: none; }
 .usage-clock { position: absolute; width: 9px; height: 9px; right: -4px; bottom: -3px; border-radius: 50%; background: var(--wb-card); color: var(--wb-warn-ink); box-shadow: 0 0 0 1px var(--wb-card); fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.usage-columns { display: flex; align-items: center; gap: 12px; }
-.usage-column { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; white-space: nowrap; font-family: var(--wb-mono, monospace); font-variant-numeric: tabular-nums; }
+.usage-columns { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 8px; }
+.usage-column { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; font-family: var(--wb-mono, monospace); font-variant-numeric: tabular-nums; }
 .usage-current { display: flex; align-items: baseline; gap: 3px; }
-.usage-number { font: 700 15px/1.2 var(--wb-mono, monospace); letter-spacing: -.035em; }
+.usage-number { font: 700 11px/1.2 var(--wb-mono, monospace); letter-spacing: -.035em; }
 .usage-key { color: var(--wb-muted-fg); font: 500 9px/1.2 var(--wb-sans, sans-serif); }
-.usage-percent { font-size: 10px; font-weight: 500; }
-.usage-pace { font: 600 10.5px/1.2 var(--wb-mono, monospace); letter-spacing: -.025em; }
+.usage-percent { font-size: 9px; font-weight: 500; }
+.usage-pace { font: 600 10px/1.2 var(--wb-mono, monospace); letter-spacing: -.025em; }
 .usage-pace.under { color: var(--wb-ok); }
 .usage-pace.over { color: var(--wb-fail); }
 .usage-stale, .usage-stale .usage-pace { color: var(--wb-muted-fg); }
@@ -19,14 +20,38 @@
 .usage-harness .claude, .usage-pop .claude { background: #D97757; color: #fff; }
 .usage-harness .codex, .usage-pop .codex { background: #10A37F; color: #fff; }
 .usage-empty, .usage-meta, .usage-plan, .usage-status { color: var(--wb-muted-fg); }
-.usage-pop { width: 310px; }
+.usage-pop { width: 340px; max-width: 100%; font-size: 12.5px; }
 .usage-pop:focus { outline: none; }
 .usage-heading { display: flex; align-items: center; gap: 7px; }
 .usage-plan { margin-left: auto; font-size: 11px; }
 .usage-close { margin-left: auto; padding: 0 3px; border: 0; background: none; color: var(--wb-muted-fg); font: inherit; cursor: pointer; }
-.usage-account { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--wb-line); }
-.usage-window { display: flex; justify-content: space-between; margin-top: 4px; font-variant-numeric: tabular-nums; }
-.usage-window.warning b { color: var(--wb-warn-ink, #d49d38); }
-.usage-window.critical b { color: var(--wb-fail, #d95f68); }
+.usage-account { display: grid; gap: 7px; padding: 10px 0; border-top: 1px solid var(--wb-line); }
+.usage-window-card { min-width: 0; padding: 8px; border-radius: 8px; background: color-mix(in srgb, var(--wb-bg) 50%, var(--wb-card)); }
+.usage-window { display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.usage-window-name { margin-right: auto; font-size: 12px; font-weight: 700; }
+.usage-window .usage-number { font-size: 20px; }
+.usage-window .usage-pace { padding: 2px 4px; border-radius: 4px; }
+.usage-window .usage-clock { position: static; flex: none; }
+.usage-window-card > .usage-meta { margin-top: 4px; font-size: 10px; }
+.usage-observed { border-top: 1px solid var(--wb-line); padding-top: 5px; }
+.usage-chart { display: block; width: 100%; height: auto; margin-top: 3px; }
+.usage-chart text { font: 9px var(--wb-sans, sans-serif); fill: var(--wb-muted-fg); }
+.usage-grid { stroke: var(--wb-line); stroke-width: .7; }
+.usage-ideal { stroke: var(--wb-muted-fg); stroke-width: 1.2; fill: none; opacity: .75; }
+.usage-now { stroke: var(--wb-line); stroke-width: 1; }
+.usage-help { position: relative; display: inline-flex; }
+.usage-help-button { width: 17px; height: 17px; padding: 0; border: 1px solid var(--wb-line); border-radius: 50%; background: none; color: var(--wb-muted-fg); font: inherit; cursor: help; }
+.usage-help-button:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+.usage-chart-legend { position: absolute; z-index: 1; top: 100%; left: -100px; display: none; width: 240px; box-sizing: border-box; gap: 6px; padding: 10px; border: 1px solid var(--wb-line); border-radius: 8px; background: var(--wb-card); color: var(--wb-muted-fg); font-size: 10px; box-shadow: 0 4px 12px #0003; }
+.usage-help:hover .usage-chart-legend, .usage-help:focus-within .usage-chart-legend { display: grid; }
+.usage-chart-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.usage-swatch { display: inline-block; flex: none; width: 15px; border-top: 2px solid var(--wb-muted-fg); }
+.usage-swatch-actual { height: 2px; border: 0; background: linear-gradient(to right, var(--wb-ok), var(--wb-muted-fg), var(--wb-fail)); }
+.usage-swatch-ideal { border-top: 1px dashed var(--wb-muted-fg); }
+.usage-swatch-estimated { border-top-style: dashed; }
+.usage-swatch-point { width: 6px; height: 6px; border: 0; border-radius: 50%; background: var(--wb-muted-fg); }
+.usage-actual { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.usage-point { stroke: var(--wb-card); stroke-width: 1; }
+.usage-point-current { stroke-width: 2; }
 .usage-meta { font-size: 11px; }
 .usage-status { margin: 3px 0; font-size: 12px; }

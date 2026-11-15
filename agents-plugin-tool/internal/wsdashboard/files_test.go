@@ -66,11 +66,76 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 func TestFilesExplorerInstances(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	files, _ := json.Marshal(mustAsset(t, "files.js"))
+	preview, _ := json.Marshal(mustAsset(t, "preview.js"))
+	var picker strings.Builder
+	for _, name := range []string{"rpWsBrowse", "rpWsMake"} {
+		fn := regexp.MustCompile(`(?s)\n  function ` + name + `\(.*?\n  \}\n`).FindString(mustAsset(t, "dashboard.js"))
+		if fn == "" {
+			t.Fatalf("dashboard.js holds no %s", name)
+		}
+		picker.WriteString(fn)
+	}
+	pickerJSON, _ := json.Marshal(picker.String())
+	pickerFixture, err := os.ReadFile("testdata/files-workspace-picker.test.cjs")
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixture, err := os.ReadFile("testdata/files-explorer.test.cjs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+";\n"+cardsDOM+string(fixture))
+	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+", PREVIEW = "+string(preview)+", PICKER = "+string(pickerJSON)+";\n"+cardsDOM+string(pickerFixture)+string(fixture))
+}
+
+func TestFilesWorkspacePickerShellAssets(t *testing.T) {
+	for _, local := range []bool{false, true} {
+		page, err := renderShellPage(shellPageData{Lang: "en", SysOpen: local, Src: "/?frame=1"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(page, "window.WsFiles = {"); got != local {
+			t.Errorf("local=%v explorer loaded=%v", local, got)
+		}
+		if local {
+			cards := strings.Index(page, "window.WsCards = {")
+			files := strings.Index(page, "window.WsFiles = {")
+			script := strings.Index(page, "The dashboard page script")
+			if cards < 0 || files < cards || script < files {
+				t.Error("shell must load card helpers, explorer, then the popover consumer")
+			}
+		}
+	}
+	css := mustAsset(t, "dashboard.css")
+	if !strings.Contains(css, ".fpicker .fdot { opacity: .5; }") || !strings.Contains(css, ".fworkspace-picker > .fpane { display: flex; height: 100%; }") {
+		t.Error("picker requires translucent hidden directories and a bounded shared pane")
+	}
+}
+
+func TestFilesExplorerPathBarLayout(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{
+		`.fcrumb-trail[hidden], .fpath[hidden] { display: none; }`,
+		`.fpath { flex: 1 1 auto; min-width: 0; width: 0; height: 24px; box-sizing: border-box;`,
+		`.fback .li { transform: rotate(180deg); }`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("path bar stylesheet lacks %q", want)
+		}
+	}
+}
+
+func TestFilesExplorerColumnLayout(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	for _, want := range []string{
+		`.fworkspace[data-view="column"] { grid-template-columns: minmax(0, 1fr); }`,
+		`.fworkspace[data-view="column"] > .ftree { display: none; }`,
+		`.fdirectory[data-view="column"] { display: flex; padding: 0; overflow-x: auto; overflow-y: hidden; }`,
+		`.fcolumn { flex: 0 0 224px; box-sizing: border-box; min-width: 0; overflow-y: auto;`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("column view stylesheet lacks %q", want)
+		}
+	}
 }
 
 // TestFilesExplorerRows runs the explorer's pure parts (files.js) under

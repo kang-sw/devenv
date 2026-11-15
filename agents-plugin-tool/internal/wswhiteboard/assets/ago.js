@@ -75,7 +75,7 @@
     timer.classList.toggle("wb-state-over", over);
   }
   // BodyUpdatedAt is already validated by BuildView. No activity/clock
-  // fallback: an absent body time stays unknown in the header and gutter.
+  // fallback: an absent body time stays unknown in the gutter.
   function bodyText(at, now) {
     var ms = at ? Date.parse(at) : NaN;
     if (!isFinite(ms)) return wsT("js.wb.body.unknown");
@@ -143,21 +143,20 @@
       var frames = document.querySelectorAll(".tdoc iframe.doc-frame"), f = null;
       for (var i = 0; i < frames.length; i++) if (frames[i].contentWindow === e.source) { f = frames[i]; break; }
       if (!f || !m.docKey || m.docKey !== f.getAttribute("data-doc-key") || m.docKey !== f.getAttribute("data-doc")) return;
-      var topic = f.closest(".topic"), header = topic && topic.querySelector(".body-age");
-      if (!header) return;
+      var topic = f.closest(".topic"), source = topic && topic.querySelector(".tdoc[data-body-at]");
+      if (!source) return;
       if (m.op === "hide") {
         if (!f.wbBodyAgeHold || f.wbBodyAgeHold.id !== m.id) return;
         delete f.wbBodyAgeHold;
         window.wbAgo(document);
         return;
       }
-      if (m.at !== (header.getAttribute("data-body-at") || "")) return;
+      if (m.at !== (source.getAttribute("data-body-at") || "")) return;
       var value = window.wbBodyTimeText(m.at);
       // Two opaque documents cannot paint an atomic clock tick. Hold this one
       // displayed value until the child has hidden its tooltip, not on a timer.
       // Keeping the hold on the iframe also survives a board's frame graft.
       f.wbBodyAgeHold = { id: m.id, text: value };
-      header.textContent = value;
       e.source.postMessage({ wbDoc: "body-age", docKey: m.docKey, op: "value", id: m.id, at: m.at, text: value }, "*");
     });
   }
