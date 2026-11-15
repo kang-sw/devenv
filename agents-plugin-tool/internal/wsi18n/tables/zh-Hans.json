@@ -1604,6 +1604,8 @@
   "rail.kids.approval.other": "此会话下有 {0} 个会话等待批准",
   "rail.kids.busy.one": "此会话下有 {0} 个会话正在工作",
   "rail.kids.busy.other": "此会话下有 {0} 个会话正在工作",
+  "rail.questions.one": "{0} 个待回答项目",
+  "rail.questions.other": "{0} 个待回答项目",
   "rail.title": "会话",
   "rail.waiting": "主代理等待中",
   "rail.working": "主代理工作中",

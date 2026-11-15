@@ -41,7 +41,7 @@ const [base, updates, shots] = process.argv.slice(2);
 
     // Three of five children work: thinking; idle with a subagent; replying
     // with a subagent (counted once).
-    await expect('(3)');
+    await expect('3');
     for (const { scheme, page } of pages) {
       assert.equal(await row(page).locator('.kidtog .kn').textContent(), '5', scheme + ': fold count');
       assert.equal(await busy(page).getAttribute('title'), '3 sessions under this one at work', scheme + ': title');
@@ -54,18 +54,18 @@ const [base, updates, shots] = process.argv.slice(2);
 
     // An idle child starts thinking: the count follows over the stream.
     await set('kidfour=think');
-    await expect('(4)');
+    await expect('4');
     // Subagents end on one child, it stays idle: one fewer.
     await set('kidtwo=idle');
-    await expect('(3)');
-    // Every child idle: no parentheses at all, the fold count stays.
+    await expect('3');
+    // Every child idle: no working count at all, the fold count stays.
     await set('kidone=idle&kidthree=idle&kidfour=idle');
     await expect('');
     for (const { scheme, page } of pages) assert.equal(await row(page).locator('.kidtog .kn').textContent(), '5', scheme + ': fold count when idle');
     await shoot('rail-busy-0');
 
     assert.deepEqual(errors, []);
-    console.log('PASS: parent row shows "(N)" working descendants beside its fold count and follows live state');
+    console.log('PASS: parent row shows its working descendants as a subscript after its fold count and follows live state');
   } finally {
     await browser.close();
   }

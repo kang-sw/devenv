@@ -1604,6 +1604,8 @@
   "rail.kids.approval.other": "{0} sesiones bajo esta esperan aprobación",
   "rail.kids.busy.one": "{0} sesión bajo esta está trabajando",
   "rail.kids.busy.other": "{0} sesiones bajo esta están trabajando",
+  "rail.questions.one": "{0} elemento por responder",
+  "rail.questions.other": "{0} elementos por responder",
   "rail.title": "Sesiones",
   "rail.waiting": "líder esperando",
   "rail.working": "líder trabajando",

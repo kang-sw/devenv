@@ -14,7 +14,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wslive"
 )
 
-// TestRailKidBusyBrowser drives the parent row's "(N)" in Chromium over
+// TestRailKidBusyBrowser drives the parent row's working count in Chromium over
 // disposable fixture sessions, never an installed/shared daemon: five
 // children under livesession, three at work (thinking; idle with a
 // subagent; replying with a subagent), then live state changes through the

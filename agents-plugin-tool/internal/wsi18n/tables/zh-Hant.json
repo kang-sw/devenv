@@ -1604,6 +1604,8 @@
   "rail.kids.approval.other": "此工作階段下有 {0} 個工作階段等待核准",
   "rail.kids.busy.one": "此工作階段下有 {0} 個工作階段正在工作",
   "rail.kids.busy.other": "此工作階段下有 {0} 個工作階段正在工作",
+  "rail.questions.one": "{0} 個待回答項目",
+  "rail.questions.other": "{0} 個待回答項目",
   "rail.title": "工作階段",
   "rail.waiting": "主代理等待中",
   "rail.working": "主代理工作中",
