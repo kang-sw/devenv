@@ -13,8 +13,8 @@ const state = (p) => p.evaluate(() => {
   return { rows: a.querySelectorAll('.history-live > .timeline-row').length, gaps: a.querySelectorAll('.history-live > .history-gap').length, count: gap && +gap.getAttribute('data-count') };
 });
 
-async function open(b, nested, scheme) {
-  const p = await b.newPage({ viewport: { width: 1280, height: 800 }, colorScheme: scheme || 'dark' });
+async function open(b, nested, scheme, width) {
+  const p = await b.newPage({ viewport: { width: width || 1280, height: 800 }, colorScheme: scheme || 'dark' });
   await p.goto('file://' + file); await p.waitForTimeout(600);
   if (nested) await p.evaluate(() => {
     const box = document.createElement('div');
@@ -93,6 +93,27 @@ async function run(b, nested) {
   return fail;
 }
 
+// The load pill sits right after the gap label/time, not at the far right
+// edge, and never overflows the gap row when it wraps at narrow widths.
+async function inline(b, scheme, width) {
+  const p = await open(b, false, scheme, width);
+  const gap = p.locator('.topic[data-topic="a"] .history-gap').first();
+  await gap.scrollIntoViewIfNeeded();
+  const m = await gap.evaluate((g) => {
+    const range = g.querySelector('.gap-range').getBoundingClientRect(), pill = g.querySelector('[data-load="up"]').getBoundingClientRect(), row = g.getBoundingClientRect();
+    const em = parseFloat(getComputedStyle(g).fontSize);
+    return { em, rangeRight: range.right, pillLeft: pill.left, pillRight: pill.right, rowRight: row.right, sameLine: Math.abs(pill.top - range.top) < 12 };
+  });
+  const r = await gap.boundingBox();
+  await p.screenshot({ path: `${shots}/loadmore-inline-${scheme}-${width}.png`, clip: { x: Math.max(0, r.x - 40), y: Math.max(0, r.y - 60), width: Math.min(width, r.width + 80), height: r.height + 120 } });
+  await p.close();
+  const fail = [];
+  if (m.pillRight > m.rowRight + 0.5) fail.push(`${scheme} ${width}: pill overflows row ${JSON.stringify(m)}`);
+  if (width >= 1000 && !(m.sameLine && m.pillLeft - m.rangeRight >= 0 && m.pillLeft - m.rangeRight <= 1.5 * m.em)) fail.push(`${scheme} ${width}: pill not inline after label ${JSON.stringify(m)}`);
+  console.log(`inline ${scheme} ${width} ${JSON.stringify(m)}`);
+  return fail;
+}
+
 async function capsule(b, scheme) {
   const p = await open(b, false, scheme);
   const up = p.locator('.topic[data-topic="a"] .history-gap [data-load="up"]').first();
@@ -125,6 +146,7 @@ async function capsule(b, scheme) {
     fail = fail.concat(await run(b, true));
     fail = fail.concat(await capsule(b, 'dark'));
     fail = fail.concat(await capsule(b, 'light'));
+    for (const scheme of ['dark', 'light']) for (const width of [1440, 700, 480]) fail = fail.concat(await inline(b, scheme, width));
   } finally { await b.close(); }
   if (fail.length) { console.error(fail.join('\n')); process.exit(1); }
 })().catch(e => { console.error(e); process.exit(1); });

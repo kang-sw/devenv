@@ -156,7 +156,7 @@ func TestStreamHistoryHeaderIsOneRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantAll(t, string(css), `.wb-history > .mhead { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); min-height: 26px; }`,
-		`.gap-actions { display: inline-flex; gap: 4px; margin-left: auto; }`,
+		`.gap-actions { display: inline-flex; gap: 4px; }`,
 		`min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }`,
 		`.wb-mtitle > .wb-mlabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }`,
 		`.wb-mtitle > svg, .wb-mtitle > .n { flex: none; }`)
