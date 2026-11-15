@@ -72,7 +72,7 @@
     if (!timer) { timer = span("eta"); box.appendChild(timer); }
     var elapsed = Math.max(0, Math.floor((now - start) / 60000)), over = elapsed > eta;
     put(timer, wsT("js.wb.state.eta", eta, elapsed) + (over ? " (+" + (elapsed - eta) + ")" : ""));
-    timer.classList.toggle("over", over);
+    timer.classList.toggle("wb-state-over", over);
   }
   // BodyUpdatedAt is already validated by BuildView. No activity/clock
   // fallback: an absent body time stays unknown in the header and gutter.

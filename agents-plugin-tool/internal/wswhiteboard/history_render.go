@@ -5,22 +5,24 @@ import (
 	"html/template"
 	"strings"
 	"time"
+
+	"github.com/kang-sw/devenv/internal/wsi18n"
 )
 
 func (d itemData) HistoryAnchor() bool {
 	return d.History == nil || d.History.ID != fmt.Sprintf("item-%d", d.ID)
 }
 
-func (d itemData) HistoryClassKey() string {
+func (d itemData) HistoryClassLabel() string {
 	switch d.Class {
 	case ClassPolicy:
-		return "wb.history.policy"
+		return wsi18n.T(d.Page.Lang, "wb.history.policy")
 	case ClassTechnical:
-		return "wb.history.technical"
+		return wsi18n.T(d.Page.Lang, "wb.history.technical")
 	case ClassAnnounced:
-		return "wb.history.announced"
+		return wsi18n.T(d.Page.Lang, "wb.history.announced")
 	default:
-		return "wb.history.check"
+		return wsi18n.T(d.Page.Lang, "wb.history.check")
 	}
 }
 
@@ -37,16 +39,16 @@ func (d itemData) HistoryMark() string {
 	}
 }
 
-func (d itemData) HistoryStatusKey() string {
+func (d itemData) HistoryStatusLabel() string {
 	switch d.Status {
 	case StatusAssumed:
-		return "wb.history.assumed"
+		return wsi18n.T(d.Page.Lang, "wb.history.assumed")
 	case StatusWithdrawn:
-		return "wb.history.withdrawn"
+		return wsi18n.T(d.Page.Lang, "wb.history.withdrawn")
 	case StatusSuperseded:
-		return "wb.history.superseded"
+		return wsi18n.T(d.Page.Lang, "wb.history.superseded")
 	default:
-		return "wb.history.answered"
+		return wsi18n.T(d.Page.Lang, "wb.history.answered")
 	}
 }
 

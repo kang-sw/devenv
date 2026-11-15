@@ -68,8 +68,8 @@ func TestTopicStateViewOperationalStates(t *testing.T) {
 								StateImplementing:         "구현 중",
 							}
 						}
-						classes := map[string]string{StateAwaitingConfirmation: "confirm", StateWaiting: "wait", StateDiscussing: "discuss", StateImplementing: "impl"}
-						badge := `<span class="topic-state"><span class="stb ` + classes[value] + `"><span class="d" aria-hidden="true"></span>` + labels[value]
+						classes := map[string]string{StateAwaitingConfirmation: "confirm", StateWaiting: "wb-state-wait", StateDiscussing: "discuss", StateImplementing: "impl"}
+						badge := `<span class="topic-state"><span class="stb ` + classes[value] + `"><span class="wb-state-dot" aria-hidden="true"></span>` + labels[value]
 						if value == StateImplementing {
 							badge += ` · <span class="own">executor &#34;&lt;&amp;&gt;&#39;</span>`
 						}
