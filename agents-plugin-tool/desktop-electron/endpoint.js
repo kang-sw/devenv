@@ -2,13 +2,17 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
+const os = require('node:os');
 
 const MAX_JSON = 64 * 1024;
-function cacheRoot(env = process.env, cwd = process.cwd()) {
+// Windows sets no HOME; os.homedir() (USERPROFILE there) is where the Go
+// daemon's os.UserHomeDir puts the same cache root.
+function cacheRoot(env = process.env, cwd = process.cwd(), homedir = os.homedir) {
   let root = env.WS_CACHE_HOME;
   if (!root) {
-    if (!env.HOME) throw new Error('Home directory is unavailable');
-    root = path.join(env.HOME, '.cache/ws@kang-sw-devenv');
+    const home = env.HOME || homedir();
+    if (!home) throw new Error('Home directory is unavailable');
+    root = path.join(home, '.cache/ws@kang-sw-devenv');
   }
   root = path.resolve(cwd, root);
   try { return fs.realpathSync(root); } catch { return root; }

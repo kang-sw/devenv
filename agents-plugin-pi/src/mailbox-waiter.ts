@@ -176,7 +176,7 @@ export function shouldArmMailboxWaiter(role: SpawnRole | undefined, sessionKey: 
 /**
  * Submission of messages the user sent from the dashboard page. They wait
  * in the session's board-answer inbox until drained; a drained message is
- * claimed, so the dashboard can no longer merge into or cancel it.
+ * claimed, so the dashboard can no longer cancel or steer it.
  */
 export interface BoardInboxDeps {
   /** The adapter knob; must not throw. `false` arms the wait without `--board-inbox` and drains nothing. */
@@ -313,7 +313,7 @@ function defaultSleep(ms: number): Promise<void> {
  * With `board` deps and the knob on, the wait also watches the dashboard
  * inbox. A board wake while the lead is idle drains and injects at once. A
  * board wake during a turn leaves the message held in the inbox, so the
- * dashboard can still merge into or cancel it, and re-arms without
+ * dashboard can still cancel or steer it, and re-arms without
  * `--board-inbox`: the wait only peeks, so a held entry would wake it at
  * once. `leadSettled()` then ends that wait; the loop drains, injects, and
  * re-arms with the flag.
