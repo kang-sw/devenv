@@ -501,7 +501,14 @@
       "registered_at": "2026-11-15T03:57:52Z"
     },
     "261115-bug-ws-git-commit-cannot-conclude-merge": {
-      "registered_at": "2026-11-15T09:10:29Z"
+      "registered_at": "2026-11-15T09:10:29Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T09:56:45Z"
+      }
     },
     "261115-bug-ws-git-commit-empty-ticket-updates": {
       "registered_at": "2026-11-15T08:45:02Z"
