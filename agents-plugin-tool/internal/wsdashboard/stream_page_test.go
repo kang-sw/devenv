@@ -195,6 +195,8 @@ func TestPageReloadsOnOtherAssets(t *testing.T) {
 	}
 	open := block("openStream", `(?s)\n  function openStream\(path, on\) \{.*?\n  \}\n`)
 	connect := block("connected ... connect", `(?s)\n  var sseOn = true;\n.*?\n  // showRegions applies`)
+	draft := block("holdsDraft", `\n  function holdsDraft\(\) \{[^\n]+\n`)
+	modeChanged := block("modeChanged", `(?s)\n  function modeChanged\(next\) \{.*?\n  \}\n`)
 
 	runNode(t, "assets identity", "(function () {\n"+streamPageHarness+`
 var mode = "session", rid = "rid1", worktree = "", hiddenRegions = {}, modeHash = "", liveMode = false;
@@ -203,11 +205,11 @@ function trackerLost() {}
 function trackerNudge() {}
 function swap() {}
 function tlHold() {}
-function modeChanged() {}
 function syncBadge() {}
 function banner(text) { log.push("banner:" + text); }
-var draft = false;
-function holdsDraft() { return draft; }
+var ctext = { value: "" }, cmdSel = null, imgs = [], closeRequests = [];
+function boardAnswers() { return false; }
+function topicNotes() { return []; }
 var mine = "aaa";
 var root = { getAttribute: function (k) { return k === "data-assets" ? mine : null; } };
 var stored = {};
@@ -216,7 +218,7 @@ window.sessionStorage = {
   setItem: function (k, v) { stored[k] = String(v); }
 };
 location.reload = function () { log.push("reload"); };
-`+open+connect+`
+`+open+draft+modeChanged+connect+`
 connect();
 var s = sockets[0];
 s.msg("assets", { id: "aaa" });
@@ -232,11 +234,26 @@ log = [];
 s.msg("assets", { id: "ccc" });
 check("newer assets reload again", log, ["reload"]);
 log = [];
-draft = true;
+ctext.value = "draft";
 s.msg("assets", { id: "ddd" });
 check("a held draft banners", log, ["banner:js.banner.updated"]);
 log = [];
-draft = false;
+ctext.value = "";
+closeRequests = [{ topic: "close-only", reason: "" }];
+check("an empty-reason close-only draft is held", holdsDraft(), true);
+s.msg("assets", { id: "close-assets" });
+check("a close-only draft prevents an assets reload", log, ["banner:js.banner.updated"]);
+log = [];
+modeChanged("live");
+modeChanged("session");
+check("a close-only draft prevents mode reloads", log, ["banner:js.banner.appeared", "banner:js.banner.wentaway"]);
+log = [];
+closeRequests = [];
+check("removing the last close request releases the draft guard", holdsDraft(), false);
+s.msg("assets", { id: "close-assets" });
+modeChanged("live");
+check("assets and modes can reload after removing the request", log, ["reload", "reload"]);
+log = [];
 mine = null;
 s.msg("assets", { id: "eee" });
 check("a page rendered without an identity does nothing", log, []);

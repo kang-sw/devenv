@@ -1251,7 +1251,13 @@
     bmentions = held.concat(bmentions);
     var requests = [];
     list.slice().sort(function (a, b) { return (+a.sentAt || 0) - (+b.sentAt || 0); }).forEach(function (res) { requests = requests.concat(validCloseRequests(res.closeRequests)); });
-    closeRequests = validCloseRequests(requests.concat(closeRequests));
+    requests = validCloseRequests(requests);
+    // Keep current capsules intact: an in-flight send compares their identity.
+    closeRequests.forEach(function (r) {
+      var i = requests.findIndex(function (v) { return v.topic === r.topic; });
+      if (i < 0) requests.push(r); else requests[i] = r;
+    });
+    closeRequests = requests;
     // So do their picked elements and console blocks.
     var hp = [], hc = [];
     list.forEach(function (res) { hp = hp.concat(validPicks(res.picks)); hc = hc.concat(validConsoles(res.consoles)); });

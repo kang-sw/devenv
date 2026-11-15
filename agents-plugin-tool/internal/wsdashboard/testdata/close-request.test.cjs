@@ -90,6 +90,24 @@ context.done(true, {}); assert.deepEqual(Array.from(context.closeRequests, r => 
 context.sendMessage(); context.removeCloseRequest('b'); context.addCloseRequest('b'); context.done(true, {});
 assert.deepEqual(Array.from(context.closeRequests, r => r.topic), ['b'], 'remove/re-add is a new intent, not a sent reference');
 context.sendMessage(); context.done(true, {}); assert.equal(context.closeRequests.length, 0);
+// Restoring an unrelated held message during a send must not change capsule identity.
+context.addCloseRequest('in-flight'); context.sendMessage();
+context.restoreHeld([{ text: 'unrelated held message' }]);
+context.done(true, {});
+assert.equal(context.closeRequests.length, 0, 'unrelated restore must not retain a successfully sent request');
+ctext.value = '';
+// Restored requests stay; current requests dedupe by stem without being cloned.
+context.addCloseRequest('sent'); context.addCloseRequest('edited'); context.addCloseRequest('readded');
+context.sendMessage();
+context.restoreHeld([{ closeRequests: [{ topic: 'restored', reason: 'held' }, { topic: 'sent', reason: 'older' }] }]);
+context.closeRequests.find(r => r.topic === 'edited').reason = 'changed during restore';
+context.removeCloseRequest('readded'); context.addCloseRequest('readded');
+context.done(true, {});
+assert.deepEqual(Array.from(context.closeRequests, r => r.topic), ['restored', 'edited', 'readded'], 'restore retains only restored, edited and remove/re-added requests');
+context.sendMessage();
+assert.deepEqual(Array.from(context.posted.at(-1).body.closeRequests, r => r.topic), ['restored', 'edited', 'readded'], 'the next send must not repeat the successful request');
+context.done(true, {});
+assert.equal(context.closeRequests.length, 0);
 // Cancel/interrupt restore dedupes held topics, newest held reason wins, draft wins over held.
 context.addCloseRequest('draft'); context.closeRequests[0].reason = 'mine';
 context.restoreHeld([{ sentAt: 2, closeRequests: [{ topic: 'held', reason: 'newest' }, { topic: 'draft', reason: 'old' }] }, { sentAt: 1, closeRequests: [{ topic: 'held', reason: 'older' }] }]);
