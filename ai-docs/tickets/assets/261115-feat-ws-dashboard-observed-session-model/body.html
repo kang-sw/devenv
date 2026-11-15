@@ -1,0 +1,95 @@
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-chev" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+<symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.5"/><circle cx="4.5" cy="12.4" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M4.5 5.1v5.8M11.5 7.5c0 2.6-3.2 2.4-7 3.4"/></symbol>
+<symbol id="i-repo" viewBox="0 0 16 16"><path d="M3.5 2.5h8.5v9H5a1.5 1.5 0 0 0-1.5 1.5z"/><path d="M3.5 13a1.5 1.5 0 0 0 1.5 1.5h7v-3"/><path d="M6 5h4"/></symbol>
+<symbol id="i-pin" viewBox="0 0 16 16"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></symbol>
+<symbol id="i-grip" viewBox="0 0 16 16"><circle cx="5.8" cy="3.6" r=".5"/><circle cx="10.2" cy="3.6" r=".5"/><circle cx="5.8" cy="8" r=".5"/><circle cx="10.2" cy="8" r=".5"/><circle cx="5.8" cy="12.4" r=".5"/><circle cx="10.2" cy="12.4" r=".5"/></symbol>
+<symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 16 16"><path d="M10.9 2.7a1.4 1.4 0 0 1 2 2L5.4 12.2l-2.9.8.8-2.9z"/><path d="M9.6 4l2 2"/></symbol>
+<symbol id="i-reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v2.4h-2.4"/></symbol>
+<symbol id="i-agents" viewBox="0 0 16 16"><rect x="3" y="5.6" width="10" height="7.4" rx="2"/><path d="M8 5.6V3.4M1.6 8.6v2M14.4 8.6v2M6.2 11h3.6"/><circle cx="8" cy="2.6" r="0.8"/><circle cx="6" cy="8.6" r="0.7"/><circle cx="10" cy="8.6" r="0.7"/></symbol>
+<symbol id="i-robot" viewBox="0 0 16 16"><rect x="3" y="5.6" width="10" height="7.4" rx="2"/><path d="M8 5.6V3.4"/><circle cx="8" cy="2.6" r="0.8"/><circle cx="6" cy="8.6" r="0.7"/><circle cx="10" cy="8.6" r="0.7"/></symbol>
+<symbol id="i-model" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.6"/><path d="M6.5 1.8v2.2M9.5 1.8v2.2M6.5 12v2.2M9.5 12v2.2M1.8 6.5H4M1.8 9.5H4M12 6.5h2.2M12 9.5h2.2"/></symbol>
+</svg>
+
+<div class="mk-wrap">
+  <div class="mk-top">
+    <h1>세션 레일 호버 팝업 목업</h1><span class="meta">824 — 디자인 시안, 제품 코드 아님</span>
+    <div class="mk-seg" id="seg-v" role="group" aria-label="안"><button type="button" data-v="a">안 A · 컴팩트</button><button type="button" data-v="b">안 B · 섹션</button></div>
+    <div class="mk-seg" id="seg-src" role="group" aria-label="데이터 출처"><button type="button" data-src="0">출처 숨김</button><button type="button" data-src="1">출처 표시</button></div>
+    <div class="mk-seg" id="seg-t" role="group" aria-label="테마"><button type="button" data-t="light">라이트</button><button type="button" data-t="dark">다크</button></div>
+  </div>
+  <p class="mk-lead">세션 레일의 행은 오늘 그대로 두고(2행에 모델 줄을 넣지 않음), 행에 마우스를 올리면 레일 오른쪽에 그 세션의 정보를 모은 팝업이 뜹니다. 왼쪽 위 에이전트 패널은 변경 없음. 아래 화면은 1280px 대시보드 한 장면이며, 행에 직접 마우스를 올리거나 Tab으로 이름에 포커스해도 같은 팝업이 열립니다.</p>
+
+  <div class="mk-stage" id="stage">
+    <aside class="rail" id="rail"></aside>
+    <div class="mk-main">
+      <div class="r-tree" id="tree"></div>
+      <div class="convo mk-convo" aria-hidden="true"><div class="ln" style="width:72%"></div><div class="ln" style="width:58%"></div><div class="bub"></div><div class="ln" style="width:80%"></div><div class="ln" style="width:64%"></div><div class="ln" style="width:40%"></div><div class="bub" style="width:30%"></div><div class="ln" style="width:76%"></div><div class="ln" style="width:52%"></div></div>
+    </div>
+    <div class="rpop shp" id="pop" role="tooltip"></div>
+  </div>
+  <div class="mk-meta" id="check"></div>
+
+  <h2 class="mk-h2">1. 다섯 가지 상태 — 안 A · 컴팩트 카드 <span class="mk-tag rec">추천</span> <small>폭 320px. 모델 → 컨텍스트 → 숫자 3칸 → 한 줄 꼬리. 출처 점: <span class="mk-legend"><span data-pv="have">오늘 행에 있음</span><span data-pv="plumb">데몬이 이미 가짐 · 행에 필드만 추가</span><span data-pv="new">새 데이터 필요</span></span></small></h2>
+  <div class="mk-gal mk-src" id="gal-a"></div>
+
+  <h2 class="mk-h2">2. 다섯 가지 상태 — 안 B · 섹션 카드 <span class="mk-tag">대안</span> <small>폭 340px. 모델 / 사용량 / 활동 / 위치 네 섹션, 항목을 더 많이 담는 대신 키가 큼(약 430–470px; 화면 아래쪽 행에서는 위로 밀려 올라감).</small></h2>
+  <div class="mk-gal mk-src" id="gal-b"></div>
+
+  <h2 class="mk-h2">3. 필드 출처 — 오늘 있는 것 / 새로 필요한 것</h2>
+  <div class="mk-notes">
+    <table class="mk-tbl">
+      <thead><tr><th>팝업 항목</th><th>상태</th><th>출처 (file:line)</th><th>메모</th></tr></thead>
+      <tbody>
+        <tr><td>하네스 · 이름 · reply id</td><td class="st" data-pv="have">행에 있음</td><td><code>wsdashboard/pageview_rail.go:115-119</code> (<code>ReplyID</code>, <code>Harness</code>, <code>Label</code>)</td><td>팝업 머리에 reply id를 보이면 오늘 <code>.rid</code>의 title(=reply id)은 필요 없어짐.</td></tr>
+        <tr><td>작업 중 / 대기 / 승인 대기 / 실패</td><td class="st" data-pv="have">행에 있음</td><td><code>pageview_rail.go:129</code> <code>Working</code>, <code>:148</code> <code>Approval</code>, <code>:152</code> <code>Failure</code></td><td>오늘 하네스 아이콘 title(<code>hitip</code>, <code>dashboard.tmpl:360</code>)과 같은 정보.</td></tr>
+        <tr><td>세부 단계(생각 중/답변 중/도구/압축 중) + 경과</td><td class="st" data-pv="plumb">필드만 추가</td><td><code>wslive/snapshot.go:265-266</code> <code>Phase</code>, <code>PhaseStartedAt</code> (railRow가 이미 snapshot을 읽음: <code>pageview_rail.go:566-577</code>)</td><td>행은 오늘 <code>Working</code> bool로만 접어 씀.</td></tr>
+        <tr><td>하위 에이전트 수 · 하위 세션 수</td><td class="st" data-pv="have">행에 있음</td><td><code>pageview_rail.go:132</code> <code>Subagents</code>, <code>:168</code> <code>Children</code></td><td></td></tr>
+        <tr><td>마지막 도구 호출</td><td class="st" data-pv="have">행에 있음</td><td><code>pageview_rail.go:137</code> <code>LastTool</code></td><td>종료된 세션도 오래된 snapshot에서 공급됨.</td></tr>
+        <tr><td>워크트리 · 브랜치</td><td class="st" data-pv="have">행에 있음</td><td><code>pageview_rail.go:167-170</code> <code>Group</code>, <code>BranchTag</code>; 브랜치 이름은 행이 속한 <code>RailWorktree</code> (<code>:85</code>)</td><td></td></tr>
+        <tr><td>앞섬/뒤짐 · 변경 파일 수</td><td class="st" data-pv="plumb">필드만 추가</td><td><code>wslive/snapshot.go:150</code> <code>Repo</code>, <code>:247-258</code></td><td>워크트리 헤더 <code>.gs</code>(±3)와 겹침 — 팝업에 둘지는 질문 4.</td></tr>
+        <tr><td>컨텍스트 토큰 / 창 / % · 캐시 적중</td><td class="st" data-pv="plumb">필드만 추가</td><td><code>wslive/snapshot.go:147</code> <code>Usage</code>, <code>:209-221</code> <code>UsageContext</code>; 표기 형식은 <code>pageview_band.go:47-60</code> <code>ContextBar</code> 재사용</td><td>리드(세션) 컨텍스트. Claude·Pi 어댑터가 status 이벤트로 보냄.</td></tr>
+        <tr><td>세션 비용</td><td class="st" data-pv="plumb">필드만 추가</td><td><code>wslive/snapshot.go:233-240</code> <code>UsageCost</code> (<code>Estimate</code> → “≈”)</td><td></td></tr>
+        <tr><td>현재 턴 경과 · 이전 턴 길이 · 턴 출처</td><td class="st" data-pv="plumb">필드만 추가</td><td><code>wslive/snapshot.go:282-288</code> <code>TurnStartedAt</code>, <code>TurnOrigin</code>, <code>PreviousTurnMs</code></td><td></td></tr>
+        <tr><td>백그라운드 작업 · 끊긴 MCP · API 재시도</td><td class="st" data-pv="plumb">필드만 추가</td><td><code>wslive/host.go:55-75</code> (호스팅 세션만)</td><td>안 B에만 넣음.</td></tr>
+        <tr><td>세션 시작 시각 · 값의 신선도</td><td class="st" data-pv="plumb">필드만 추가</td><td><code>registry.go:91</code> <code>RegisteredAt</code>; <code>wslive/snapshot.go:140</code> <code>UpdatedAt</code></td><td>“마지막 확인 3시간 전”의 근거는 <code>UpdatedAt</code>.</td></tr>
+        <tr><td>중지 · 종료 코드 · 중지 시각</td><td class="st" data-pv="have">행에 있음</td><td><code>pageview_rail.go:145</code> <code>Exit</code> (<code>HostExit</code> <code>:195-199</code>), <code>Stopped()</code> <code>:603</code></td><td>오늘 중지된 행은 2행이 숨겨짐(<code>.rs.stopped .s2</code>) — 팝업이 그 정보를 보여 줄 자리.</td></tr>
+        <tr><td><b>리드 모델 ID</b></td><td class="st" data-pv="new">새 데이터</td><td>리드에는 필드 없음: <code>wslive/snapshot.go:279-296</code> <code>Lead</code>. 하위 에이전트만 있음: <code>:320-323</code>, intake <code>wslive/state.go:124-132</code> (agent 이벤트 전용)</td><td>Claude mod는 응답 모델을 이미 관측함(<code>agents-plugin/hooks/claude-mod/dashboard.ts:565-594</code>, tps 창이 모델 변경 시 초기화) — 리드에도 같은 텔레메트리를 보내면 됨. 선택 필드 추가라 T0로 보임.</td></tr>
+        <tr><td><b>리드 노력 수준(effort)</b></td><td class="st" data-pv="new">새 데이터</td><td>위와 같음 (<code>Agent.Effort</code>만 존재)</td><td>config 별칭이 아니라 관측값만.</td></tr>
+        <tr><td><b>리드 출력 속도(t/s)</b></td><td class="st" data-pv="new">새 데이터</td><td><code>Agent.OutputTps</code> (<code>snapshot.go:323</code>)만 존재; 배치별 토큰은 snapshot에서 제외(<code>snapshot.go</code> <code>BatchView.Usage json:"-"</code>)</td><td>Claude mod <code>outputRate()</code> (<code>dashboard.ts:1076</code>)를 리드에도.</td></tr>
+        <tr><td><b>모델 변경 이력(이전 → 현재, 시각)</b></td><td class="st" data-pv="new">새 데이터</td><td>어디에도 없음</td><td>최소: 직전 모델 1개 + 변경 시각. 데몬이 lead telemetry를 받으면서 바뀔 때 기록.</td></tr>
+        <tr><td><b>리드 누적 작업 시간</b></td><td class="st" data-pv="new">새 데이터</td><td>하위 에이전트만 <code>ActiveMs</code> (<code>snapshot.go:313</code>)</td><td>시안에는 넣지 않음(“현재 턴”으로 대체).</td></tr>
+        <tr><td>Codex 세션의 위 항목 전부</td><td class="st" data-pv="new">새 데이터</td><td>Codex는 대시보드 어댑터가 없어 snapshot·메시지 링이 없음 (<code>railmessages.go:44-61</code>, 데몬 호스팅은 claude/pi만 <code>pageview_rail.go:232-235</code>)</td><td>팝업은 “관측 안 됨” 상태를 정직하게 표시.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="mk-h2">4. 동작 규칙과 메모</h2>
+  <div class="mk-notes">
+    <h4>위치 · 동작</h4>
+    <ul>
+      <li>팝업은 레일 영역 바깥(오늘 <code>.rpop</code>처럼 페이지 스크립트가 body에 하나 만들어 둠)에 두어, 레일이 SSE로 통째로 교체돼도 사라지지 않고 내용만 갱신.</li>
+      <li>위치: 왼쪽 = 레일 오른쪽 끝 + 8px, 위 = 행의 위 − 4px, 화면 위·아래 8px 안으로 끌어올림. 1600px 미만의 오버레이 레일(<code>dashboard.css:1578</code>, 폭 340px)에서도 같은 규칙 — 레일이 왼쪽에 붙어 있으니 오른쪽으로만 열면 잘리지 않음. z-index는 <code>--z-popovers</code>(60) &gt; 오버레이 레일 45.</li>
+      <li>열기: 행 위에 250ms 머무르면 열림, 열린 상태에서 다른 행으로 옮기면 즉시 교체. 닫기: 레일을 벗어나면 120ms 뒤. 드래그 중(<code>.rdragging</code>)·이름 바꾸기 입력 중·행 메뉴가 열린 동안은 열지 않음. 읽기 전용이라 포인터를 받지 않음(<code>.gltip</code>과 같은 방식).</li>
+      <li>키보드(있으면 좋은 정도): 행의 이름 링크 <code>.rl</code>(행의 유일한 탭 정지점)에 포커스가 오면 같은 팝업을 열고, 링크에 <code>aria-describedby</code>로 연결. Esc로 닫기. 그 이상은 만들지 않음.</li>
+      <li>터치 기기: 대상 아님. <code>@media (hover: hover)</code>에서만 활성화.</li>
+      <li>네이티브 title 겹침: 오늘 행에 title이 4곳(하네스 아이콘 <code>hitip</code>, <code>.rid</code>의 reply id, 시간의 <code>data-tl</code>, 하위 행의 메시지) 있음 — 팝업이 켜지면 지우거나 팝업이 대신함(질문 2).</li>
+    </ul>
+    <h4>상태별 표기</h4>
+    <ul>
+      <li>정상: 관측된 모델 ID 그대로, 별칭(<code>opus</code>) 금지. 긴 ID는 줄임표 대신 슬래시에서 먼저 줄바꿈해 전부 보임(팝업은 공간이 있으니 전체가 목적).</li>
+      <li>변경됨: 현재 모델이 크게, 그 아래 <code>이전 → 현재 · 14:32 변경</code>. 경고색 없음.</li>
+      <li>미관측(Codex): 모델 “관측 안 됨”, 숫자 칸은 “—”, 이유 한 줄. 추측값 없음.</li>
+      <li>중지/오래됨: 마지막으로 본 값을 흐리게 + “마지막 확인 3시간 전”, 컨텍스트 막대는 회색, t/s는 실행 중이 아니라 “—”. 종료 코드/사유 한 줄.</li>
+      <li>대기 중 세션의 t/s: 마지막 턴의 값을 보일지(“51 · 지난 턴”) 비울지는 질문 3. 시안은 “지난 턴” 꼬리표로 보임.</li>
+    </ul>
+    <h4>추천</h4>
+    <ul>
+      <li><b>안 A(컴팩트)</b>를 추천합니다. 마우스를 올려 1초 안에 읽는 용도에 맞게 모델·컨텍스트·t/s가 맨 위 세 덩어리에 들어가고, 높이가 약 205–260px(실측)로 레일 아래쪽 행에서도 대개 행 옆에 그대로 붙습니다. 안 B는 항목이 많아 높이가 약 430–470px(실측)라 화면 아래 절반의 행에서는 행보다 위로 밀려 올라가 어느 행의 팝업인지 덜 분명해지며, 그 상세는 세션 페이지(밴드·에이전트 패널)에 이미 있습니다.</li>
+    </ul>
+  </div>
+</div>

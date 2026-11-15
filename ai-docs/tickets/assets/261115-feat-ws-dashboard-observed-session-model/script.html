@@ -1,0 +1,222 @@
+
+<script>
+(function () {
+  var Q = new URLSearchParams(location.search);
+  var I = function (id, cls) { return '<svg class="i' + (cls ? " " + cls : "") + '"><use href="#i-' + id + '"/></svg>'; };
+  var esc = function (s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); };
+  // a model ID breaks at a slash first, then anywhere (overflow-wrap)
+  var mid = function (s) { return esc(s).replace(/\//g, "/<wbr>"); };
+  var pv = function (k) { return ' data-pv="' + k + '"'; };
+  var letter = { claude: "C", pi: "P", codex: "X" };
+
+  // One data set for the rail, the stage popup, and both galleries.
+  // st: state pill; m: model; ctx: [tokens, window, pct, cache]; the rest are
+  // the popup's figures (null = not observed).
+  var S = [
+    { key: "ok", cap: "Claude · 정상", h: "claude", rid: "c-7d21e0", label: "대시보드 호버 팝업", hosted: true,
+      row: { run: true, slot: "지금", bots: 2, msg: "팝업 위치를 레일 오른쪽 끝 기준으로 고정했습니다" },
+      st: { ph: "tool", txt: "도구", since: "6초" },
+      m: { s: "ok", id: "claude-opus-5-5", eff: "high" },
+      ctx: { tok: "123.4k", win: "200k", pct: 62, cache: "94%" },
+      tps: "38", tpsNote: "", turn: "2:14", turnK: "현재 턴", prevTurn: "1m 48s", origin: "터미널",
+      agents: 2, bg: 1, last: "지금", cost: "$1.84", started: "14:02 (39분 전)", br: "develop", repo: "↑2 · 변경 3", wt: "devenv" },
+    { key: "pi", cap: "Pi · 긴 모델 ID", h: "pi", rid: "p-41b9c2", label: "Pi 리뷰어",
+      row: { slot: "4분", user: true, msg: "diff 범위를 develop 기준으로 다시 확인해줘" },
+      st: { ph: "idle", txt: "대기", since: "4분" },
+      m: { s: "ok", id: "openrouter/qwen/qwen3-coder-480b-a35b-instruct", eff: "medium" },
+      ctx: { tok: "64.2k", win: "262k", pct: 24, cache: "71%" },
+      tps: "51", tpsNote: "지난 턴", turn: "48s", turnK: "지난 턴", prevTurn: "48s", origin: "메일",
+      agents: 0, bg: 0, last: "4분 전", cost: "≈$0.31", started: "13:20 (1시간 전)", br: "develop", repo: "변경 없음", wt: "devenv" },
+    { key: "chg", cap: "Claude · 모델 변경됨", h: "claude", rid: "c-0f8a33", label: "ticket 814 정리",
+      row: { slot: "12분", msg: "Phase 2 결과를 티켓에 기록했습니다" },
+      st: { ph: "idle", txt: "대기", since: "12분" },
+      m: { s: "chg", prev: "claude-opus-5-5", id: "claude-opus-4-6", eff: "high", at: "14:32" },
+      ctx: { tok: "41.8k", win: "200k", pct: 21, cache: "88%" },
+      tps: "44", tpsNote: "지난 턴", turn: "3m 05s", turnK: "지난 턴", prevTurn: "3m 05s", origin: "대시보드",
+      agents: 0, bg: 0, last: "12분 전", cost: "$2.10", started: "11:47 (2시간 전)", br: "develop", repo: "↑1", wt: "devenv" },
+    { key: "unk", cap: "Codex · 모델 미관측", h: "codex", rid: "x-20c1f9", label: "",
+      row: { slot: "", msg: "" },
+      st: null,
+      m: { s: "unk" },
+      ctx: null, tps: null, turn: null, turnK: "현재 턴", agents: null, bg: null, last: null, cost: null,
+      started: "14:29 (12분 전)", br: "develop", repo: null, wt: "devenv" },
+    { key: "stale", cap: "중지됨 · 마지막 값", h: "claude", rid: "c-9e3b57", label: "릴리스 노트 초안", hosted: true, stopped: true,
+      row: { slot: "3시간", msg: "" },
+      st: { stop: true, txt: "중지됨", since: "3시간" },
+      m: { s: "stale", id: "claude-opus-5-5", eff: "high", at: "3시간 전" },
+      ctx: { tok: "88.0k", win: "200k", pct: 44, cache: "" },
+      tps: null, turn: "6m 20s", turnK: "마지막 턴", prevTurn: "6m 20s", origin: "터미널",
+      agents: 0, bg: 0, last: "3시간 전", cost: "$3.92", started: "어제 18:10", br: "develop", repo: "변경 없음", wt: "devenv",
+      exit: "사용자가 중지 · 종료 코드 0 · 11:38" }
+  ];
+
+  // ---- the rail: today's row markup (dashboard.tmpl rrow, :362) ----------
+  function row(s, i) {
+    var r = s.row, tip = s.h + " · " + (r.run ? "리드 작업 중" : "리드 대기");
+    return '<div class="rs' + (s.stopped ? " stopped" : "") + '" data-i="' + i + '" data-rid="' + s.rid + '">' +
+      '<span class="drgrip" aria-hidden="true">' + I("grip") + "</span>" +
+      '<div class="drbody"><div class="s1"><a class="rl" href="#" aria-describedby="pop"><span class="hi ' + s.h + (r.run ? " run" : "") + '" role="img" aria-label="' + tip + '">' + letter[s.h] +
+      (r.run ? '<span class="orb"><span class="rrun"></span></span>' : "") + "</span>" +
+      (r.bots ? '<span class="bots">' + I("robot") + r.bots + "</span>" : "") +
+      '<span class="rid' + (s.label ? " lbl" : "") + '">' + esc(s.label || s.rid) + "</span></a>" +
+      '<button type="button" class="star" aria-pressed="false" aria-label="별표">' + I("pin") + "</button>" +
+      '<a class="drtail" href="#" tabindex="-1"><span class="drslot">' + (r.slot ? '<time class="when t">' + r.slot + "</time>" : "") + "</span></a>" +
+      '<span class="dracts"><button type="button" class="drren" aria-label="이름 바꾸기">' + I("pencil") + '</button><button type="button" class="drcopy" aria-label="메일함 주소 복사">' + I("copy") + "</button></span></div>" +
+      (r.msg ? '<a class="drmsg" href="#" tabindex="-1"><span class="s2">' + (r.user ? '<b class="who">나</b>' : "") + esc(r.msg) + "</span></a>" : "") + "</div></div>";
+  }
+  document.getElementById("rail").innerHTML = '<div class="r-rail"><div class="rhd"><b class="rtitle">세션</b><span class="rsp"></span><span class="chip">실시간 5</span><button type="button" class="rref" aria-label="워크트리 목록 다시 읽기">' + I("reload") + "</button></div>" +
+    '<div class="rlist"><section class="rws"><div class="wsbar"><button type="button" class="wstog" aria-expanded="true"><span class="wsi">' + I("repo") + '</span><span class="nm">devenv</span><span class="pp">~/devenv</span></button><span class="ct">5</span></div>' +
+    '<div class="wsbody"><div class="rwt"><div class="wthd">' + I("branch") + '<span class="br">develop</span><span class="wf">· 루트</span><span class="gs">±3</span></div>' +
+    '<div class="rsessions">' + S.map(row).join("") + '</div></div><details class="rended"><summary>종료된 세션 2개</summary></details></div></section></div></div>';
+
+  // ---- the top-left agent panel: today's markup, unchanged ---------------
+  document.getElementById("tree").innerHTML = '<div class="thead">' + I("agents") + '에이전트<span class="mk-same">변경 없음</span><span class="sum"><span class="chip">실행 중 2</span><span class="chip">완료 1</span><span class="chip">실패 0</span></span></div>' +
+    '<div class="tree"><div class="agent root tool"><details><summary class="ahead"><span class="amk"><span class="pulse"></span></span><span class="aname">리드</span><span class="phase tool">도구</span>' +
+    '<span class="ldet"><span class="tn">Edit</span> <span class="args">assets/rail.js</span></span><span class="am"><time class="t">6s</time><span>배치 12개</span>' + I("chev") + "</span></summary></details>" +
+    '<div class="kids">' +
+    '<div class="agent running"><details><summary class="ahead"><span class="aline"><span class="amk"><span class="pulse"></span></span><span class="aname">reviewer: 824 목업 검토</span><a class="arid" href="#">a1b2c3</a><span class="phase tool">도구</span></span><span class="astat"><span class="amodel">claude-opus-5-5</span><span class="aeff">high</span><span class="actx">123k</span><span class="atps">38 t/s</span></span><span class="am"><span class="ok">✓ 14</span><span>✗ 0</span><span>2m 4s</span>' + I("chev") + "</span></summary></details></div>" +
+    '<div class="agent running"><details><summary class="ahead"><span class="aline"><span class="amk"><span class="pibadge">pi</span></span><span class="aname">worker (Pi)</span><a class="arid" href="#">p41b9c</a><span class="phase thinking">생각 중</span></span><span class="astat"><span class="amodel">openrouter/qwen/qwen3-coder-480b-a35b-instruct</span><span class="aeff">medium</span><span class="actx">64k</span><span class="atps">51 t/s</span></span><span class="am"><span class="ok">✓ 6</span><span>✗ 0</span><span>48s</span>' + I("chev") + "</span></summary></details></div>" +
+    "</div></div></div>";
+
+  // ---- the popup ---------------------------------------------------------
+  function head(s) {
+    var pill = !s.st ? '<span class="phase none"' + pv("have") + ">상태 알 수 없음</span>"
+      : s.st.stop ? '<span class="phase idle"' + pv("have") + ">중지됨 · " + s.st.since + " 전</span>"
+      : '<span class="phase ' + s.st.ph + '"' + pv(s.st.ph === "idle" ? "have" : "plumb") + ">" + (s.st.ph === "tool" ? '<span class="spin"></span>' : s.st.ph === "idle" ? '<span class="idle-dot"></span>' : "") + s.st.txt + " · " + s.st.since + "</span>";
+    return '<div class="shp-hd"><span class="hi ' + s.h + (s.stopped ? " dim" : "") + '">' + letter[s.h] + '</span><span class="shp-nm"' + pv("have") + ">" + esc(s.label || s.rid) + "</span>" + pill + "</div>" +
+      '<div class="shp-sub"><span>' + s.rid + "</span>" + '<span class="wsn">' + s.h + (s.hosted ? " · 대시보드 실행" : "") + "</span><span>" + esc(s.br) + "</span></div>";
+  }
+  function model(s) {
+    var m = s.m;
+    if (m.s === "unk") return '<div class="shp-model">' + I("model", "mi") + '<div class="shp-mtx"><span class="shp-unk"' + pv("new") + '>모델 관측 안 됨</span><span class="shp-last">이 하네스는 대시보드 어댑터가 없어 모델·토큰을 보내지 않습니다</span></div></div>';
+    var eff = m.eff ? '<span class="shp-eff" title="노력 수준: ' + m.eff + '"' + pv("new") + ">" + m.eff + "</span>" : "";
+    var extra = m.s === "chg" ? '<span class="shp-chg"><span class="id pv0">' + mid(m.prev) + '</span><span class="arr">→</span><span class="id">' + mid(m.id) + '</span> <span class="at">· ' + m.at + " 변경</span></span>"
+      : m.s === "stale" ? '<span class="shp-last">마지막 확인 ' + m.at + "</span>" : "";
+    return '<div class="shp-model">' + I("model", "mi") + '<div class="shp-mtx"><span class="shp-mid"' + pv("new") + ">" + mid(m.id) + "</span>" + extra + "</div>" + eff + "</div>";
+  }
+  function ctxbar(s) {
+    if (!s.ctx) return '<div class="sb-ctx"><span class="sb-pct" style="color:var(--wb-muted-fg)">—</span><span class="sb-bar"></span><span class="sb-tok"' + pv("new") + ">? / ?</span></div>";
+    var c = s.ctx;
+    return '<div class="sb-ctx" role="meter" aria-label="컨텍스트 사용량" aria-valuenow="' + c.pct + '"><span class="sb-pct">' + c.pct + '%</span><span class="sb-bar"><i style="width:' + c.pct + '%"></i><u class="t80"></u><u class="t95"></u></span><span class="sb-tok"' + pv("plumb") + ">" + c.tok + " / " + c.win + "</span>" + (c.cache ? '<span class="sb-cache" title="마지막 응답의 프롬프트 캐시 적중률">CH ' + c.cache + "</span>" : "") + "</div>";
+  }
+  function tile(val, key, prov, cls) {
+    return '<div class="shp-stat">' + (val == null ? '<b class="na">—</b>' : "<b" + (cls ? ' class="' + cls + '"' : "") + ">" + val + "</b>") + "<span" + pv(prov) + ">" + key + "</span></div>";
+  }
+  function popA(s) {
+    var foot = [];
+    if (s.last) foot.push('<span data-pv="have">마지막 도구 <b>' + s.last + "</b></span>");
+    if (s.cost) foot.push('<span data-pv="plumb">비용 <b>' + s.cost + "</b></span>");
+    foot.push('<span data-pv="plumb">시작 ' + s.started + "</span>");
+    return head(s) + model(s) + ctxbar(s) +
+      '<div class="shp-stats">' +
+        tile(s.tps == null ? null : s.tps + "<small>t/s</small>", s.tpsNote ? "출력 · " + s.tpsNote : "출력 속도", "new", "tps") +
+        tile(s.turn, s.turnK, "plumb") +
+        tile(s.agents == null ? null : String(s.agents), "하위 에이전트", "have") +
+      "</div>" +
+      (s.exit ? '<p class="shp-note exit"' + pv("have") + "><b>" + s.exit + "</b></p>" : "") +
+      '<div class="shp-foot">' + foot.join("") + "</div>";
+  }
+  function kv(k, v, prov, mono) { return "<dt" + pv(prov) + ">" + k + "</dt><dd" + (mono ? ' class="mono"' : "") + ">" + (v == null ? '<span class="na">—</span>' : v) + "</dd>"; }
+  function popB(s) {
+    var m = s.m, model;
+    if (m.s === "unk") model = kv("모델", '<span class="na">관측 안 됨 (어댑터 없음)</span>', "new") + kv("노력 수준", null, "new");
+    else {
+      model = kv("모델", mid(m.id), "new", true) + kv("노력 수준", m.eff, "new");
+      if (m.s === "chg") model += kv("변경", '<span class="id pv0">' + mid(m.prev) + '</span> → <span class="id">' + mid(m.id) + "</span> · " + m.at, "new", true);
+    }
+    var ago = m.s === "stale" ? '<span class="ago">마지막 확인 ' + m.at + "</span>" : "";
+    return head(s) +
+      '<div class="spsec shp-sec"><div class="splbl">모델' + ago + '</div><dl class="shp-kv">' + model + "</dl></div>" +
+      '<div class="spsec shp-sec"><div class="splbl">사용량' + ago + "</div>" + ctxbar(s) + '<dl class="shp-kv">' +
+        kv("출력 속도", s.tps == null ? null : s.tps + " t/s" + (s.tpsNote ? ' <span class="na">· ' + s.tpsNote + "</span>" : ""), "new") +
+        kv("세션 비용", s.cost, "plumb") + "</dl></div>" +
+      '<div class="spsec shp-sec"><div class="splbl">활동</div><dl class="shp-kv">' +
+        kv(s.turnK, s.turn == null ? null : s.turn + (s.origin ? ' <span class="na">· ' + s.origin + "에서</span>" : ""), "plumb") +
+        kv("하위 에이전트", s.agents == null ? null : s.agents + (s.bg ? " · 백그라운드 " + s.bg : ""), "have") +
+        kv("마지막 도구", s.last, "have") +
+        (s.exit ? kv("종료", s.exit, "have") : "") + "</dl></div>" +
+      '<div class="spsec shp-sec"><div class="splbl">위치</div><dl class="shp-kv">' +
+        kv("워크트리", esc(s.wt) + " · " + esc(s.br), "have", true) +
+        kv("작업 트리", s.repo, "plumb") +
+        kv("세션 시작", s.started, "plumb") + "</dl></div>";
+  }
+  var render = { a: popA, b: popB };
+
+  // ---- galleries ---------------------------------------------------------
+  ["a", "b"].forEach(function (v) {
+    document.getElementById("gal-" + v).innerHTML = S.map(function (s) {
+      return '<figure><figcaption>' + s.cap + ' <span class="tag">' + s.rid + '</span></figcaption><div class="rpop shp ' + v + (s.m.s === "stale" ? " stale" : "") + '">' + render[v](s) + "</div></figure>";
+    }).join("");
+  });
+
+  // ---- the stage: pinned row + live hover/focus -------------------------
+  var V = Q.get("v") === "b" ? "b" : "a";
+  var PIN = Math.min(Math.max(parseInt(Q.get("row") || "0", 10) || 0, 0), S.length - 1);
+  var stage = document.getElementById("stage"), rail = document.getElementById("rail"), pop = document.getElementById("pop");
+  var rows = Array.prototype.slice.call(rail.querySelectorAll(".rs"));
+  var GAP = 8, EDGE = 8;
+  function place(i) {
+    var s = S[i], st = stage.getBoundingClientRect(), rr = rail.getBoundingClientRect(), rw = rows[i].getBoundingClientRect();
+    pop.className = "rpop shp " + V + (s.m.s === "stale" ? " stale" : "");
+    pop.innerHTML = render[V](s);
+    var h = pop.offsetHeight, w = pop.offsetWidth;
+    var left = rr.right - st.left + GAP;
+    left = Math.min(left, st.width - w - EDGE);
+    var top = rw.top - st.top - 4;
+    top = Math.max(EDGE, Math.min(top, st.height - h - EDGE));
+    pop.style.left = left + "px"; pop.style.top = top + "px";
+    rows.forEach(function (r, k) { r.classList.toggle("mk-hover", k === i); });
+  }
+  var timer = 0, shown = PIN;
+  rows.forEach(function (r, i) {
+    r.addEventListener("mouseenter", function () { clearTimeout(timer); timer = setTimeout(function () { shown = i; place(i); }, shown === i ? 0 : 250); });
+    r.querySelector(".rl").addEventListener("focus", function () { clearTimeout(timer); shown = i; place(i); });
+  });
+  rail.addEventListener("mouseleave", function () { clearTimeout(timer); timer = setTimeout(function () { shown = PIN; place(PIN); }, 120); });
+
+  // ---- checks: every row's popup inside the stage and the window; no
+  // horizontal page overflow; nothing in a popup overflows its box --------
+  function check() {
+    var bad = [], st = stage.getBoundingClientRect(), V0 = V;
+    ["a", "b"].forEach(function (v) {
+      V = v;
+      rows.forEach(function (r, i) {
+        place(i);
+        var p = pop.getBoundingClientRect();
+        if (p.left < st.left || p.right > st.right || p.top < st.top || p.bottom > st.bottom || p.right > document.documentElement.clientWidth) bad.push(v + i + ":clip");
+        if (p.left < rail.getBoundingClientRect().right) bad.push(v + i + ":over-rail");
+        Array.prototype.forEach.call(pop.querySelectorAll("*"), function (e) { if (e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflow === "visible" && e.clientWidth > 0 && !e.matches("svg, use, .sb-bar *")) bad.push(v + i + ":ovf:" + e.className); });
+        r.dataset["h" + v] = Math.round(p.height);
+      });
+    });
+    V = V0; place(PIN);
+    var gal = document.querySelectorAll(".mk-gal .rpop.shp");
+    Array.prototype.forEach.call(gal, function (g, k) { if (g.scrollWidth > g.clientWidth + 1) bad.push("gal" + k + ":ovf"); });
+    var hx = document.documentElement.scrollWidth > document.documentElement.clientWidth;
+    if (hx) bad.push("page:hscroll");
+    var ha = rows.map(function (r) { return r.dataset.ha; }).join("/"), hb = rows.map(function (r) { return r.dataset.hb; }).join("/");
+    document.documentElement.setAttribute("data-bad", String(bad.length));
+    document.getElementById("check").innerHTML = "검사: 행 5개 × 안 2개 팝업 — 화면 가장자리 잘림·레일 겹침·내용 넘침·가로 스크롤 " +
+      (bad.length ? '<b class="bad">' + bad.length + "건: " + esc(bad.join(", ")) + "</b>" : '<b class="ok">0건</b>') +
+      " · 팝업 높이 A " + ha + " px, B " + hb + " px";
+  }
+
+  // ---- toggles -----------------------------------------------------------
+  var root = document.documentElement;
+  if (Q.get("shot") === "1") root.classList.add("shot");
+  function setSrc(on) { stage.classList.toggle("mk-src", on); sync(); }
+  function sync() {
+    document.querySelectorAll("#seg-t button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.t === root.getAttribute("data-theme"))); });
+    document.querySelectorAll("#seg-v button").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.v === V)); });
+    document.querySelectorAll("#seg-src button").forEach(function (b) { b.setAttribute("aria-pressed", String((b.dataset.src === "1") === stage.classList.contains("mk-src"))); });
+  }
+  document.getElementById("seg-t").addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { root.setAttribute("data-theme", b.dataset.t); sync(); } });
+  document.getElementById("seg-v").addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { V = b.dataset.v; place(shown); sync(); } });
+  document.getElementById("seg-src").addEventListener("click", function (e) { var b = e.target.closest("button"); if (b) { setSrc(b.dataset.src === "1"); place(shown); } });
+  setSrc(Q.get("src") === "1");
+  check(); sync();
+  window.addEventListener("resize", function () { place(shown); });
+})();
+</script>
+</body>
+</html>
