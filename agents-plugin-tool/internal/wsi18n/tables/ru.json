@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "Темы",
+  "worktree.page": "рабочее дерево",
+  "worktree.local": "только локально",
+  "js.worktree.explorer": "Новый проводник",
   "js.usage.heading": "Использование тарифа",
   "js.usage.close": "Закрыть использование тарифа",
   "js.usage.legend": "Легенда графика использования",

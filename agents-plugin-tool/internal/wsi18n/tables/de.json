@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "Themen",
+  "worktree.page": "Worktree",
+  "worktree.local": "nur lokal",
+  "js.worktree.explorer": "Neuer Explorer",
   "js.usage.heading": "Tarifnutzung",
   "js.usage.close": "Tarifnutzung schließen",
   "js.usage.legend": "Legende zum Nutzungsdiagramm",

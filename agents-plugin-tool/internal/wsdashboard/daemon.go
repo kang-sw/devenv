@@ -695,6 +695,7 @@ func (d *Daemon) Handler() http.Handler {
 	mux.HandleFunc("/events", d.handleIndexEvents)
 	mux.HandleFunc(pwaPrefix, handlePWA)
 	mux.HandleFunc("/s/", d.handleSessionRoutes)
+	mux.HandleFunc("/w/", d.handleWorktreePage)
 	mux.HandleFunc(railRoute, d.handleRailRefresh)
 	mux.HandleFunc(railLayoutRoute, d.handleRailLayout)
 	mux.HandleFunc(railEventsRoute, d.handleRailEvents)

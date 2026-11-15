@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "Tópicos",
+  "worktree.page": "árvore de trabalho",
+  "worktree.local": "somente local",
+  "js.worktree.explorer": "Novo explorador",
   "js.usage.heading": "Uso do plano",
   "js.usage.close": "Fechar uso do plano",
   "js.usage.legend": "Legenda do gráfico de uso",

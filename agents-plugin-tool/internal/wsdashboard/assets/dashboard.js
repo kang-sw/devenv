@@ -14,6 +14,9 @@
   // load (luIcon, below).
   var SVGNS = "http://www.w3.org/2000/svg";
   var rid = root.getAttribute("data-rid");
+  var worktree = root.getAttribute("data-worktree") || "", cardIdentity = worktree ? "wt:" + worktree : rid;
+  // Browser identity and transport authority are deliberately separate.
+  function browsePost(route, body, done) { post("/s/host0/" + route, body, done); }
   // The iframe shell (shell.js, the shell block below): shell marks the
   // shell page, which holds the rail and the top header and no page's own
   // content; framed marks a page the shell frames (?frame=1), which leaves
@@ -332,7 +335,7 @@
     layoutMode = v;
     if (grid) grid.setAttribute("data-layout", v);
     q(".gmenu [data-layout]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-layout") === v)); });
-    if (live) revealPanes();
+    if (live || worktree) revealPanes();
     if (cardBoard) window.WsCards.relayout();
   }
   // The tree and the conversation share their column at a fixed ratio; the
@@ -419,7 +422,7 @@
     q("#ctabs [data-ctab]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-ctab") === t)); });
     revealPanes();
   }
-  if (live) {
+  if (live || worktree) {
     // "auto" crosses its breakpoint on a resize without a click.
     window.addEventListener("resize", revealPanes);
   }

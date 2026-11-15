@@ -645,6 +645,9 @@ type sessionPageData struct {
 	// the page (XtermAsset) when the daemon runs terminals and the page
 	// was asked for by a browser on this machine, and empty otherwise.
 	Terminal string
+	// Worktree selects the session-less consumer of the files and card columns.
+	Worktree                  string
+	Workspace, WorktreeBranch string
 	// Frame renders the session page as the iframe shell frames it
 	// (?frame=1, shellPageData): the shell's rail and header stand over
 	// it, so the page keeps both only as invisible placeholders that lay
@@ -655,6 +658,13 @@ type sessionPageData struct {
 }
 
 func (p sessionPageData) regionByName(name string) renderedRegion { return p.regions[name] }
+
+func (p sessionPageData) Mode() string {
+	if p.Worktree != "" {
+		return "worktree"
+	}
+	return p.SessionView.Mode()
+}
 
 // shellPageData is the iframe shell (the "shell" template): the session
 // rail and the top header, which stay across navigations, over the frames

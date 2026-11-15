@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "主题",
+  "worktree.page": "工作树",
+  "worktree.local": "仅限本机",
+  "js.worktree.explorer": "新建文件浏览器",
   "js.usage.heading": "套餐用量",
   "js.usage.close": "关闭套餐用量",
   "js.usage.legend": "用量图表图例",

@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "Topics",
+  "worktree.page": "worktree",
+  "worktree.local": "local only",
+  "js.worktree.explorer": "New explorer",
   "js.usage.heading": "Plan usage",
   "js.usage.close": "Close plan usage",
   "js.usage.legend": "Usage chart legend",

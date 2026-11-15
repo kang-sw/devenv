@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "Sujets",
+  "worktree.page": "arbre de travail",
+  "worktree.local": "local uniquement",
+  "js.worktree.explorer": "Nouvel explorateur",
   "js.usage.heading": "Utilisation du forfait",
   "js.usage.close": "Fermer l’utilisation du forfait",
   "js.usage.legend": "Légende du graphique d’utilisation",

@@ -1,5 +1,8 @@
 {
   "js.capsule.topics": "주제",
+  "worktree.page": "워크트리",
+  "worktree.local": "이 PC에서만",
+  "js.worktree.explorer": "새 탐색기",
   "js.usage.heading": "플랜 사용량",
   "js.usage.close": "플랜 사용량 닫기",
   "js.usage.legend": "사용량 차트 범례",
