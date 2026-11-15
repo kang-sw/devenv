@@ -1,0 +1,24 @@
+diff --git a/agents-plugin-tool/internal/wsdashboard/board_viewed_browser_test.go b/agents-plugin-tool/internal/wsdashboard/board_viewed_browser_test.go
+index c073da3b0..bff43320c 100644
+--- a/agents-plugin-tool/internal/wsdashboard/board_viewed_browser_test.go
++++ b/agents-plugin-tool/internal/wsdashboard/board_viewed_browser_test.go
+@@ -6,7 +6,7 @@ import (
+ 	"net/http"
+ 	"net/http/httptest"
+ 	"os"
+-	"os/signal"
++	ossignal "os/signal"
+ 	"path/filepath"
+ 	"regexp"
+ 	"strconv"
+@@ -97,8 +97,8 @@ func TestBoardViewedFixture(t *testing.T) {
+ 		t.Fatal(err)
+ 	}
+ 	interrupt := make(chan os.Signal, 1)
+-	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
+-	defer signal.Stop(interrupt)
++	ossignal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
++	defer ossignal.Stop(interrupt)
+ 	lifetime := time.NewTimer(240 * time.Second)
+ 	defer lifetime.Stop()
+ 	tick := time.NewTicker(50 * time.Millisecond)

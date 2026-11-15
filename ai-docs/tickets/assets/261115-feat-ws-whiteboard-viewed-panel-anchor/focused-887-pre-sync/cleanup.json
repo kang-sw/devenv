@@ -1,0 +1,1135 @@
+{
+  "tracked": [
+    {
+      "pid": 72089,
+      "ppid": 72075,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "<defunct>"
+    },
+    {
+      "pid": 72241,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72255,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72261,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b005/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b005=> -p internal/abi -lang=go1.26 -std -buildid ePERbHufwvZBzZtZt7Y0/ePERbHufwvZBzZtZt7Y0 -goversion go1.26.2 -symabis /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b005/symabis -c=4 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b005/importcfg -pack -asmhdr /Users/kan"
+    },
+    {
+      "pid": 72263,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72265,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(asm)"
+    },
+    {
+      "pid": 72266,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72268,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72269,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72272,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72273,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72274,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(asm)"
+    },
+    {
+      "pid": 72275,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72276,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72278,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72417,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72443,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72444,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72467,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:54 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b009/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b009=> -p runtime -lang=go1.26 -std -buildid FCN1ABAFlbHYulmpYSRh/FCN1ABAFlbHYulmpYSRh -goversion go1.26.2 -symabis /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b009/symabis -c=16 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b009/importcfg -pack -asmhdr /Users/kang-sw"
+    },
+    {
+      "pid": 72615,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72616,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b038/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b038=> -p sync -lang=go1.26 -std -buildid Uo04zzFBDsYH8JPFGt-C/Uo04zzFBDsYH8JPFGt-C -goversion go1.26.2 -c=8 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b038/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/sync/cond.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/sync/map.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/sync/mutex.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/sync/once."
+    },
+    {
+      "pid": 72617,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(asm)"
+    },
+    {
+      "pid": 72618,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72619,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -unsafeptr=false -unreachable=false /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b009/vet.cfg"
+    },
+    {
+      "pid": 72640,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b050/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b050=> -p syscall -lang=go1.26 -std -buildid IcSt-TuDXxueU-qB5E2b/IcSt-TuDXxueU-qB5E2b -goversion go1.26.2 -symabis /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b050/symabis -c=11 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b050/importcfg -pack -asmhdr /Users/kang-sw"
+    },
+    {
+      "pid": 72641,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b135/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b135=> -p net/netip -lang=go1.26 -std -complete -buildid 42QpQXlajDjKu97wlVIq/42QpQXlajDjKu97wlVIq -goversion go1.26.2 -c=14 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b135/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/net/netip/netip.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/net/netip/uint128.go"
+    },
+    {
+      "pid": 72644,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72645,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72646,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72648,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b055/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b055=> -p reflect -lang=go1.26 -std -buildid JfiLFuPE4JATsXT0rQu6/JfiLFuPE4JATsXT0rQu6 -goversion go1.26.2 -symabis /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b055/symabis -c=4 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b055/importcfg -pack -asmhdr /Users/kang-sw/"
+    },
+    {
+      "pid": 72649,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72650,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72651,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72652,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(asm)"
+    },
+    {
+      "pid": 72653,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:55 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72671,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72699,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72700,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72707,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72711,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72712,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72713,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72715,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72716,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72753,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72756,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b002/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b002=> -p os -lang=go1.26 -std -buildid -LCOG6dPYgoY7rIUnNRA/-LCOG6dPYgoY7rIUnNRA -goversion go1.26.2 -c=14 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b002/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/os/dir.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/os/dir_darwin.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/os/eloop_other.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/os/en"
+    },
+    {
+      "pid": 72764,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72774,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72786,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b104/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b104=> -p encoding/json -lang=go1.26 -std -complete -buildid AyWBrvKbPlTqt0GErn29/AyWBrvKbPlTqt0GErn29 -goversion go1.26.2 -c=4 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b104/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/encoding/json/decode.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/encoding/json/encode.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/encoding/json/fold.go /op"
+    },
+    {
+      "pid": 72791,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72796,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b159/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b159=> -p golang.org/x/net/html -lang=go1.18 -complete -buildid W03WprGVmDjB9tH2roVo/W03WprGVmDjB9tH2roVo -goversion go1.26.2 -c=9 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b159/importcfg -pack /Users/kang-sw/go/pkg/mod/golang.org/x/net@v0.35.0/html/const.go /Users/kang-sw/go/pkg/mod/golang.org/x/net@v0.35.0/html/doc.go /Users/kang-sw/go/pkg/mod/golang.org/x/net@v0.35.0/html/doctype.go /Use"
+    },
+    {
+      "pid": 72799,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72801,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72802,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72815,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b059/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b059=> -p testing -lang=go1.26 -std -complete -buildid hvCv2lY4INl5Rs5hT8gY/hvCv2lY4INl5Rs5hT8gY -goversion go1.26.2 -c=4 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b059/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/testing/allocs.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/testing/benchmark.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/testing/cover.go /opt/homebrew/Cellar/go"
+    },
+    {
+      "pid": 72829,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b107/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b107=> -p go/ast -lang=go1.26 -std -complete -buildid aKl2eHsmYqyG-uh8sUeI/aKl2eHsmYqyG-uh8sUeI -goversion go1.26.2 -c=6 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b107/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/go/ast/ast.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/go/ast/commentmap.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/go/ast/directive.go /opt/homebrew/Cellar/go/1"
+    },
+    {
+      "pid": 72831,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72832,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72833,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72838,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72841,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:56 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72854,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72855,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72859,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b131/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b131=> -p html/template -lang=go1.26 -std -complete -buildid wTSB8CcpfCWlU3jnnbXw/wTSB8CcpfCWlU3jnnbXw -goversion go1.26.2 -c=14 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b131/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/html/template/attr.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/html/template/attr_string.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/html/template/content"
+    },
+    {
+      "pid": 72861,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72862,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72864,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72865,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72866,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -unsafeptr=false -unreachable=false /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b144/vet.cfg"
+    },
+    {
+      "pid": 72868,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b156/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b156=> -p github.com/yuin/goldmark/renderer/html -lang=go1.22 -complete -buildid zweOZQFgRFAMO-6u8oSr/zweOZQFgRFAMO-6u8oSr -goversion go1.26.2 -c=6 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b156/importcfg -pack /Users/kang-sw/go/pkg/mod/github.com/yuin/goldmark@v1.8.7/renderer/html/html.go"
+    },
+    {
+      "pid": 72869,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72886,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72889,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 72891,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 72924,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73061,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73063,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73071,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:57 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b123/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b123=> -p github.com/kang-sw/devenv/internal/wswhiteboard -lang=go1.23 -complete -buildid eskNVYB0hx5CAAvblWqb/eskNVYB0hx5CAAvblWqb -goversion go1.26.2 -c=12 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3338615182/b123/importcfg -embedcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build333861"
+    },
+    {
+      "pid": 73272,
+      "ppid": 72089,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:58 2026",
+      "command": "(wswhiteboard.tes)"
+    },
+    {
+      "pid": 73283,
+      "ppid": 73272,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:59 2026",
+      "command": "(node)"
+    },
+    {
+      "pid": 73329,
+      "ppid": 73272,
+      "pgid": 72089,
+      "started": "Sun Nov 15 11:46:59 2026",
+      "command": "(node)"
+    },
+    {
+      "pid": 73345,
+      "ppid": 72075,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "(go)"
+    },
+    {
+      "pid": 73555,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73575,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "<defunct>"
+    },
+    {
+      "pid": 73579,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b246/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b246=> -p image -lang=go1.26 -std -complete -buildid KjJL8oZzym65ChpfwlOx/KjJL8oZzym65ChpfwlOx -goversion go1.26.2 -c=4 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b246/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/image/format.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/image/geom.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/image/image.go /opt/homebrew/Cellar/go/1.26.2/libex"
+    },
+    {
+      "pid": 73587,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b184/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b184=> -p crypto/internal/fips140/nistec/fiat -lang=go1.26 -std -complete -buildid DGoYCnYZDjE3yAruzwyy/DGoYCnYZDjE3yAruzwyy -goversion go1.26.2 -c=12 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b184/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/internal/fips140/nistec/fiat/cast.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/internal/fips140/nistec/fiat/p224.go /opt/"
+    },
+    {
+      "pid": 73589,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73592,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "(asm)"
+    },
+    {
+      "pid": 73605,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b196/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b196=> -p encoding/asn1 -lang=go1.26 -std -complete -buildid gvJN1G1TVsP9vD2jb_1w/gvJN1G1TVsP9vD2jb_1w -goversion go1.26.2 -c=4 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b196/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/encoding/asn1/asn1.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/encoding/asn1/common.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/encoding/asn1/marshal.go"
+    },
+    {
+      "pid": 73620,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73627,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b161/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b161=> -p github.com/kang-sw/devenv/internal/wswhiteboard -lang=go1.23 -complete -buildid hLTCXVMKlN8ZkcFIcwmQ/hLTCXVMKlN8ZkcFIcwmQ -goversion go1.26.2 -c=6 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b161/importcfg -embedcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745"
+    },
+    {
+      "pid": 73645,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73650,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b128/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b128=> -p github.com/kang-sw/devenv/internal/wsgit -lang=go1.23 -complete -buildid lBw9-sW0gRMtvwM2r6Im/lBw9-sW0gRMtvwM2r6Im -goversion go1.26.2 -c=4 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b128/importcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/agents-plugin-tool/internal/wsgit/executable.go /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/agents-plugin-tool"
+    },
+    {
+      "pid": 73672,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b232/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b232=> -p vendor/golang.org/x/text/unicode/norm -lang=go1.26 -std -complete -buildid k5YenZvc07Fm8UN4B_uZ/k5YenZvc07Fm8UN4B_uZ -goversion go1.26.2 -c=5 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b232/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/vendor/golang.org/x/text/unicode/norm/composition.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/vendor/golang.org/x/text/unicode/norm/f"
+    },
+    {
+      "pid": 73678,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b217/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b217=> -p crypto/internal/fips140/rsa -lang=go1.26 -std -complete -buildid b9QLFd7IM_-GsQpz85bI/b9QLFd7IM_-GsQpz85bI -goversion go1.26.2 -c=4 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b217/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/internal/fips140/rsa/cast.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/internal/fips140/rsa/keygen.go /opt/homebrew/Cellar/go/1.26"
+    },
+    {
+      "pid": 73682,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b236/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b236=> -p mime -lang=go1.26 -std -complete -buildid _oH1cbw9CjDex4OYZnHU/_oH1cbw9CjDex4OYZnHU -goversion go1.26.2 -c=5 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b236/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/mime/encodedword.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/mime/grammar.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/mime/mediatype.go /opt/homebrew/Cellar/go/1.26"
+    },
+    {
+      "pid": 73698,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73699,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b229/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b229=> -p vendor/golang.org/x/text/unicode/bidi -lang=go1.26 -std -complete -buildid DoHADw1X0QMXobC7G8zu/DoHADw1X0QMXobC7G8zu -goversion go1.26.2 -c=5 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b229/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/vendor/golang.org/x/text/unicode/bidi/bidi.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/vendor/golang.org/x/text/unicode/bidi/bracket."
+    },
+    {
+      "pid": 73702,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b251/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b251=> -p encoding/xml -lang=go1.26 -std -complete -buildid 4xa6OK02zM45d5OXF31o/4xa6OK02zM45d5OXF31o -goversion go1.26.2 -c=5 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b251/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/encoding/xml/marshal.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/encoding/xml/read.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/encoding/xml/typeinfo.go /opt"
+    },
+    {
+      "pid": 73704,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b253/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b253=> -p github.com/dlclark/regexp2/syntax -lang=go1.13 -complete -buildid QEF7UcMpY_WJaFVnM2Ax/QEF7UcMpY_WJaFVnM2Ax -goversion go1.26.2 -c=4 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b253/importcfg -pack /Users/kang-sw/go/pkg/mod/github.com/dlclark/regexp2@v1.12.0/syntax/charclass.go /Users/kang-sw/go/pkg/mod/github.com/dlclark/regexp2@v1.12.0/syntax/code.go /Users/kang-sw/go/pkg/mod/gith"
+    },
+    {
+      "pid": 73706,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:00 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73738,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73765,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73823,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73831,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b298/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b298=> -p internal/profile -lang=go1.26 -std -complete -buildid jvd0ndLzAIx340qiWNOD/jvd0ndLzAIx340qiWNOD -goversion go1.26.2 -c=10 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b298/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/internal/profile/encode.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/internal/profile/filter.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/internal/profil"
+    },
+    {
+      "pid": 73833,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73834,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73836,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73837,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73838,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b154/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b154=> -p github.com/kang-sw/devenv/internal/wslive -lang=go1.23 -complete -buildid Asx5QK2SsxNyJ45i619A/Asx5QK2SsxNyJ45i619A -goversion go1.26.2 -c=9 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b154/importcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/agents-plugin-tool/internal/wslive/host.go /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/agents-plugin-tool/int"
+    },
+    {
+      "pid": 73843,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b291/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b291=> -p modernc.org/mathutil -lang=go1.18 -complete -buildid IgZHHwNHO0oOyc6eVXTf/IgZHHwNHO0oOyc6eVXTf -goversion go1.26.2 -c=9 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b291/importcfg -pack /Users/kang-sw/go/pkg/mod/modernc.org/mathutil@v1.6.0/binarylog.go /Users/kang-sw/go/pkg/mod/modernc.org/mathutil@v1.6.0/bits.go /Users/kang-sw/go/pkg/mod/modernc.org/mathutil@v1.6.0/envelope.go /User"
+    },
+    {
+      "pid": 73871,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73872,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b226/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b226=> -p vendor/golang.org/x/net/idna -lang=go1.26 -std -complete -buildid THUJMSbqEmXH8nc92_od/THUJMSbqEmXH8nc92_od -goversion go1.26.2 -c=6 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b226/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/vendor/golang.org/x/net/idna/go118.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/vendor/golang.org/x/net/idna/idna10.0.0.go /opt/homebrew/Cellar"
+    },
+    {
+      "pid": 73889,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73891,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73893,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73894,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73895,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73896,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73900,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73916,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73919,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73922,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73923,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73925,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73926,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73927,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73930,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73931,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73968,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73970,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b250/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b250=> -p github.com/alecthomas/chroma/v2 -lang=go1.22 -complete -buildid 5d3EgzKS7FdqqSiOK7oB/5d3EgzKS7FdqqSiOK7oB -goversion go1.26.2 -c=16 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b250/importcfg -pack /Users/kang-sw/go/pkg/mod/github.com/alecthomas/chroma/v2@v2.24.1/coalesce.go /Users/kang-sw/go/pkg/mod/github.com/alecthomas/chroma/v2@v2.24.1/colour.go /Users/kang-sw/go/pkg/mod/github.c"
+    },
+    {
+      "pid": 73974,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:01 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -unsafeptr=false -unreachable=false /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b183/vet.cfg"
+    },
+    {
+      "pid": 73976,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b205/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b205=> -p crypto/hpke -lang=go1.26 -std -complete -buildid u2JqaBzUIdsPJG4ko4Sk/u2JqaBzUIdsPJG4ko4Sk -goversion go1.26.2 -c=10 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b205/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/hpke/aead.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/hpke/aead_fips140v1.26.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/hpke/hpke.go /"
+    },
+    {
+      "pid": 73977,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b186/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b186=> -p crypto/ecdsa -lang=go1.26 -std -complete -buildid d4SjAn957nyVOXo3OQlT/d4SjAn957nyVOXo3OQlT -goversion go1.26.2 -c=7 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b186/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/ecdsa/ecdsa.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/ecdsa/ecdsa_legacy.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/ecdsa/notboring."
+    },
+    {
+      "pid": 73983,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b254/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b254=> -p github.com/alecthomas/chroma/v2/lexers -lang=go1.22 -complete -buildid 9qnvTgEUxEANfxFNA7sC/9qnvTgEUxEANfxFNA7sC -goversion go1.26.2 -c=15 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b254/importcfg -embedcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b254"
+    },
+    {
+      "pid": 73991,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 73994,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73996,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b219/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b219=> -p crypto/x509 -lang=go1.26 -std -complete -buildid GarvNlVK45x0Rq-oVFLl/GarvNlVK45x0Rq-oVFLl -goversion go1.26.2 -c=5 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b219/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/x509/cert_pool.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/x509/constraints.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/x509/oid.go /opt"
+    },
+    {
+      "pid": 73998,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 73999,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 74002,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b261/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b261=> -p modernc.org/libc -lang=go1.20 -complete -buildid NjceNRMn2uStrzXheH9w/NjceNRMn2uStrzXheH9w -goversion go1.26.2 -c=9 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b261/importcfg -pack /Users/kang-sw/go/pkg/mod/modernc.org/libc@v1.52.1/capi_darwin_arm64.go /Users/kang-sw/go/pkg/mod/modernc.org/libc@v1.52.1/ccgo.go /Users/kang-sw/go/pkg/mod/modernc.org/libc@v1.52.1/etc.go /Users/kang-sw/"
+    },
+    {
+      "pid": 74012,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 74013,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -unsafeptr=false -unreachable=false /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b219/vet.cfg"
+    },
+    {
+      "pid": 74014,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:02 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b177/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b177=> -p crypto/tls -lang=go1.26 -std -complete -buildid 2Xeg3eh2Mop68LDrhPz8/2Xeg3eh2Mop68LDrhPz8 -goversion go1.26.2 -c=15 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b177/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/tls/alert.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/tls/auth.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/crypto/tls/cache.go /opt/homebrew/Ce"
+    },
+    {
+      "pid": 74029,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:03 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -atomic -bool -buildtags -directive -errorsas -ifaceassert -nilfunc -printf -slog -stringintconv -tests /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b261/vet.cfg"
+    },
+    {
+      "pid": 74030,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:03 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 74083,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:03 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 74095,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:03 2026",
+      "command": "(compile)"
+    },
+    {
+      "pid": 74129,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:03 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b224/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b224=> -p net/http -lang=go1.26 -std -complete -buildid MmoSAx5NhyCW_NeBE_d5/MmoSAx5NhyCW_NeBE_d5 -goversion go1.26.2 -c=14 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b224/importcfg -pack /opt/homebrew/Cellar/go/1.26.2/libexec/src/net/http/client.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/net/http/clientconn.go /opt/homebrew/Cellar/go/1.26.2/libexec/src/net/http/clone.go /opt/homebrew/Cel"
+    },
+    {
+      "pid": 74395,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:04 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -unsafeptr=false -unreachable=false /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b224/vet.cfg"
+    },
+    {
+      "pid": 74551,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:06 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -atomic -bool -buildtags -directive -errorsas -ifaceassert -nilfunc -printf -slog -stringintconv -tests /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b294/vet.cfg"
+    },
+    {
+      "pid": 74586,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:06 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b257/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b257=> -p github.com/kang-sw/devenv/internal/wsstore -lang=go1.23 -complete -buildid SjPPpw6fSTDVp8potiLq/SjPPpw6fSTDVp8potiLq -goversion go1.26.2 -c=16 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b257/importcfg -pack /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/agents-plugin-tool/internal/wsstore/metadata_inventory.go /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/agent"
+    },
+    {
+      "pid": 74654,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:06 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/compile -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b123/_pkg_.a -trimpath /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b123=> -p github.com/kang-sw/devenv/internal/wsdashboard -lang=go1.23 -complete -buildid _fusX7LFjEEFycj2NH7V/_fusX7LFjEEFycj2NH7V -goversion go1.26.2 -c=16 -shared -nolocalimports -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b123/importcfg -embedcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745"
+    },
+    {
+      "pid": 74838,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:07 2026",
+      "command": "(vet)"
+    },
+    {
+      "pid": 74858,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:09 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/vet -atomic -bool -buildtags -directive -errorsas -ifaceassert -nilfunc -printf -slog -stringintconv -tests /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b123/vet.cfg"
+    },
+    {
+      "pid": 74861,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:09 2026",
+      "command": "/opt/homebrew/Cellar/go/1.26.2/libexec/pkg/tool/darwin_arm64/link -o /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b001/wsdashboard.test -importcfg /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b001/importcfg.link -s -w -X=runtime.godebugDefault=containermaxprocs=0,cryptocustomrand=1,decoratemappings=0,gotestjsonbuildtext=1,httpcookiemaxnum=0,multipathtcp=0,randseednop=0,rsa1024min=0,tlsmlkem=0,tlssecpmlkem=0,tlssha1=1,updatemaxprocs=0,urlmaxqueryparams=0,urlstrictcolons=0,x509rsacrt=0,x509sha256skid=0,x509usepolicies=0 -buildmode=pie -buildid=DXCwuasiyf4lI8rMHffZ/NnjU1WYsfMqMuTSMPn0X/0d1dz6aGIVz1RGXgvPPK/DXCwuasiyf4lI8rMHffZ -X testing.testBinary=1 -extld=cc /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/asset"
+    },
+    {
+      "pid": 75029,
+      "ppid": 73345,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:09 2026",
+      "command": "/Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/focused-887-pre-sync/go-tmp/go-build3052745420/b001/wsdashboard.test -test.paniconexit0 -test.count=1 -test.timeout=1m30s -test.run=^(TestBoardKeep(Wiring|UnderNode)|TestBoardFrameHeightsBatch|TestBoardFramesMountLazily|TestBoardTopic(Motion|RevealUsesFoldOwner|Pins|ResizeKeepsTheView)|TestBoardTopics(DoNotSkipRendering|ClientSnapshots|ClientHiddenAndRecovery|Streams)|TestBoardViewed(RenderingAndRelease|PlacementAndQueuedCounts|InternalGeometryAndHeightRelease|FetchedPageTransfer|BoundaryAndBatchWiring))$ -test.v=true"
+    },
+    {
+      "pid": 75225,
+      "ppid": 75029,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:10 2026",
+      "command": "(node)"
+    },
+    {
+      "pid": 75232,
+      "ppid": 75029,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:10 2026",
+      "command": "(node)"
+    },
+    {
+      "pid": 76417,
+      "ppid": 75029,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:20 2026",
+      "command": "/opt/homebrew/bin/node -"
+    },
+    {
+      "pid": 76426,
+      "ppid": 75029,
+      "pgid": 73345,
+      "started": "Sun Nov 15 11:47:21 2026",
+      "command": "/opt/homebrew/bin/node -"
+    }
+  ],
+  "actions": [],
+  "errors": [],
+  "final_ps": [],
+  "elapsed_seconds": 27.748
+}

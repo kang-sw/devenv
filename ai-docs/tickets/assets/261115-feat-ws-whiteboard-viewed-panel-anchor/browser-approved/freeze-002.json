@@ -1,0 +1,38 @@
+{
+  "authority": "MAIN01:01:56: minimal alias only; green compile/vet gate then ONE approved-002",
+  "baseline": "5585844a794a031a770ce4171c5e05daf1bd3353",
+  "result": "a57290575bf57b506e05f6b8180c67cf56c87f65",
+  "preserved_checkpoints": ["b0af755624cc13929f4a384145d5787d76e3dbdb", "daf94061ec1c34437c1cf03c2e377cc115b5f07e"],
+  "fixture_only_diff": ["ossignal import alias", "ossignal.Notify reference", "ossignal.Stop reference"],
+  "preflight": {
+    "manifest": "preflight-002/manifest.json",
+    "completed": true,
+    "elapsed_seconds_including_cleanup": 19.115,
+    "absolute_go": "/opt/homebrew/Cellar/go/1.26.2/libexec/bin/go",
+    "toolchain_authority": "approved-001/cleanup.json retained compiler command",
+    "go_sha256": "912f19a1a95ffe44a9e349d8283c74eb1d2eace37aad3ca6ef7b9ae321eb709f",
+    "compile_sha256": "f4236db18fb2f793985a459463f2b73a6deac71782ff4ac9a5e1cba30f191562",
+    "vet_sha256": "6e0b73a9e1fd5a53f46391383ebdf33b23fa52b48f53c63b8293f4e030431fb8",
+    "baseline_compile_exit": 0,
+    "result_compile_exit": 0,
+    "baseline_vet_exit": 0,
+    "result_vet_exit": 0,
+    "servers_or_browser_launched": false,
+    "final_ps": []
+  },
+  "source_asset_bindings_sha256": {
+    "fixture": "96f6db43bf361dc4dfbf1424629ac6028e175f7ef688ef596b34863d6df560d4",
+    "unchanged_driver": "c109f426e58e7e97a65aa9ce84e9bff6c34f8f92f41bd87cb9645b713aed92e9",
+    "runner": "a8bbff6671d772886840457cc7c9f0f62a1643b03c965507e8ceb91b3741d598",
+    "baseline_sources_manifest": "79f7c888813d19e642387a1ebad31454a0be013454f6dcab0f41906432e02f88",
+    "result_sources_manifest": "3af34d1936259aa26c1acb0ea0fe4d52527a3e0e28fa7e3e685d91cd0abdbfc6"
+  },
+  "retained_preflight_binaries_sha256": {
+    "preflight-002/baseline.test": "199c9da99de71aa40cbdbfa519dcee8f389c6dd4019a288b6380fbb8a4ccda80",
+    "preflight-002/result.test": "558551093e7a8f6e94ce6580cc04bd7ef7b15bcb8dcbf74936fc1745897b38a6"
+  },
+  "bounds_seconds": {"each_build": 180, "browser": 180, "browser_action": 8, "overall_including_cleanup": 600, "cleanup_reserved": 30},
+  "command": "python3 ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/run.py --result a57290575bf57b506e05f6b8180c67cf56c87f65 --batch approved-002 --preflight-receipt /Users/kang-sw/.ws-worktrees/devenv/symptom-sandbox-swan/ai-docs/tickets/assets/261115-feat-ws-whiteboard-viewed-panel-anchor/browser-approved/preflight-002/manifest.json",
+  "policy": "no driver/geometry/assertion/timing changes; first failure stops without repair/retry; no shared runtime/provider/holder/download; prior artifacts and dirty tree retained",
+  "final_integration_gate": "lead-owned sync1612e099c after green browser batch and fresh lite review; no worker self-merge"
+}
