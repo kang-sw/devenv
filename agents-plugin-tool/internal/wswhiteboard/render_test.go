@@ -247,7 +247,7 @@ func TestRenderPageContentOnlyTopic(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, topicXML("notes", "# Plan\n\n- one"))
 	out := render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"}))
-	wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("notes")+`" data-topic="notes"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
+	wantAll(t, out, `<section class="topic has-doc" id="`+topicAnchor("notes")+`" data-topic="notes" data-state="discussing"><div class="tophead"><div class="tbar"><span class="tlead"><span class="tname">notes</span></span>`,
 		`<details class="tdoc" data-key="doc:notes" data-body-at="`+testNow.Format(time.RFC3339)+`" open>`, "<h1>Plan</h1>", "<li>one</li>")
 	wantNone(t, out, `class="tbody"`)
 	// Nothing to answer: the reply bar waits hidden for a topic note.
