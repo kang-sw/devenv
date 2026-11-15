@@ -222,10 +222,9 @@ func TestToolbarFloatingGeometry(t *testing.T) {
 var bad=[];
 function check(name,got,want){if(JSON.stringify(got)!==JSON.stringify(want))bad.push(name+": "+JSON.stringify(got));}
 function styles(){var p={};return {getPropertyValue:function(k){return p[k]||"";},setProperty:function(k,v){p[k]=v;},removeProperty:function(k){delete p[k];}};}
-var listeners={}, observed, resize, boardTop=44, compact=false, faceHeight=46, handles=[];
-function getComputedStyle(){return {getPropertyValue:function(k){return k==='--wb-nav-height'?'44px':'';}};}
+var listeners={}, observed, resize, boardTop=0, compact=false, faceHeight=46, handles=[];
 function action(y){return {getBoundingClientRect:function(){var h=compact?24:30;return {top:y-h/2,bottom:y+h/2,height:h};}};}
-var row={children:[action(23),action(23),action(23)]}, face={firstChild:row,getClientRects:function(){return [1];},getBoundingClientRect:function(){return {width:700,height:faceHeight,bottom:faceHeight+(parseFloat(toolbar.style.getPropertyValue('--toolbar-top'))||0)};}};
+var row={children:[action(23),action(23),action(23)]}, face={firstChild:row,getClientRects:function(){return [1];},getBoundingClientRect:function(){return {width:700,height:faceHeight,bottom:faceHeight};}};
 var toolbar={firstChild:face,style:styles(),attrs:{},toggleAttribute:function(k,on){this.attrs[k]=on;}};
 var board={getBoundingClientRect:function(){return {top:boardTop};}}, col={style:styles(),clientTop:0,getBoundingClientRect:function(){return {top:0};}}, documentScroller={style:styles()}, active=col;
 var doc={scrollingElement:documentScroller,querySelectorAll:function(){return handles;},getElementById:function(){return col;},addEventListener:function(k,fn){listeners[k]=fn;}}, window={addEventListener:function(k,fn){listeners[k]=fn;},ResizeObserver:function(fn){resize=fn;this.observe=function(n){observed=n;};}};
@@ -237,25 +236,25 @@ check("observe the one face",observed===face,true);
 check("top reserves original",[toolbar.attrs["data-floating"],toolbar.style.getPropertyValue("--toolbar-reserved")],[false,"46px"]);
 boardTop=-100;compact=true;faceHeight=28;row.children=[action(14),action(14),action(14)];listeners.scroll();
 check("compact keeps original slot",[toolbar.attrs["data-floating"],toolbar.style.getPropertyValue("--toolbar-reserved")],[true,"46px"]);
-check("face drives rail and arrivals",[col.style.getPropertyValue("--wb-rail-inset"),col.style.getPropertyValue("scroll-padding-top")],["78px","82px"]);
+check("face drives rail and arrivals",[col.style.getPropertyValue("--wb-rail-inset"),col.style.getPropertyValue("scroll-padding-top")],["34px","38px"]);
 // The filter is a direct row child just like an action. A filter-only wrap
 // reserves a second full original row even while the live face is compact.
 row.children=[action(14),action(14),action(46)];faceHeight=60;resize();
 check("filter-only wrap",[toolbar.attrs["data-wrapped-actions"],toolbar.style.getPropertyValue("--toolbar-reserved")],[true,"82px"]);
-boardTop=44;compact=false;faceHeight=82;resize();
+boardTop=0;compact=false;faceHeight=82;resize();
 boardTop=-200;compact=true;faceHeight=60;resize();
 check("original filter row survives floating",toolbar.style.getPropertyValue("--toolbar-reserved"),"82px");
 row.children=[action(14),action(46),action(46)];resize();
 check("wrapped actions reserve two original action rows",[toolbar.attrs["data-wrapped-actions"],toolbar.style.getPropertyValue("--toolbar-reserved")],[true,"82px"]);
 active=documentScroller;resize();
-check("scroller handoff clears old padding",[col.style.getPropertyValue("scroll-padding-top"),documentScroller.style.getPropertyValue("scroll-padding-top")],["","114px"]);
+check("scroller handoff clears old padding",[col.style.getPropertyValue("scroll-padding-top"),documentScroller.style.getPropertyValue("scroll-padding-top")],["","70px"]);
 maxed={files:true,el:{style:styles()}};resize();
-check("Files clears the live face",maxed.el.style.getPropertyValue("--files-top"),"112px");
+check("Files clears the live face",maxed.el.style.getPropertyValue("--files-top"),"68px");
 handles=[{getClientRects:function(){return [1];},getBoundingClientRect:function(){return {top:0,bottom:34};}}];resize();
-check("document face clears fixed handles",toolbar.style.getPropertyValue("--toolbar-top"),"44px");
-check("document rail and arrivals include handle clearance",[col.style.getPropertyValue("--wb-rail-inset"),documentScroller.style.getPropertyValue("scroll-padding-top")],["110px","114px"]);
+check("document face clears fixed handles",toolbar.style.getPropertyValue("--toolbar-top"),"38px");
+check("document rail and arrivals include handle clearance",[col.style.getPropertyValue("--wb-rail-inset"),documentScroller.style.getPropertyValue("scroll-padding-top")],["104px","108px"]);
 handles=[];
-boardTop=44;compact=false;faceHeight=82;resize();
+boardTop=0;compact=false;faceHeight=82;resize();
 check("return restores original slot",[toolbar.attrs["data-floating"],toolbar.style.getPropertyValue("--toolbar-reserved")],[false,"82px"]);
 process.stdout.write(bad.join("\n"));
 `)

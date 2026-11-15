@@ -1,16 +1,12 @@
-/* The always-present home capsule owns a fixed-height sticky band above the
-   toolbar/rail/heads. Counts change only its width, never the board's layout.
-   The bottom question pill keeps its zero-height wrapper above the reply bar. */
-:root { --wb-nav-height: 44px; }
-.wb-rail { --wb-rail-inset: var(--wb-nav-height); }
+/* open-question pill: a zero-height sticky wrapper at each end of the board's scroll area carries the pill, so showing it moves nothing; the bottom offset is set by pill.js to clear the reply bar; rail.js sets --wb-rail-h and --wb-rail-bot on the wrappers themselves */
 .oq-wrap { position: sticky; height: 0; z-index: 4; pointer-events: none; text-align: center; }
-.oq-wrap.wb-oq-top { top: 0; height: var(--wb-nav-height); flex: none; z-index: 5; background: var(--wb-bg); }
+.oq-wrap.wb-oq-top { top: calc(10px + var(--wb-rail-h, 0px)); }
 .oq-wrap.wb-oq-bot { bottom: 10px; }
 .oq-pill { --board-amber: #9a5b00; position: absolute; left: 50%; translate: -50% 0; pointer-events: auto; display: inline-flex; align-items: center; gap: 3px; box-sizing: border-box; height: 28px; padding: 3px; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; transition: background-color .3s, box-shadow .3s; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .oq-pill { --board-amber: #f2b632; } }
 :root[data-theme="dark"] .oq-pill { --board-amber: #f2b632; }
 .oq-pill[hidden], .oq-seg[hidden], .oq-updates[hidden] { display: none; }
-.oq-wrap.wb-oq-top .oq-pill { top: 8px; }
+.oq-wrap.wb-oq-top .oq-pill { top: 0; }
 .oq-wrap.wb-oq-bot .oq-pill { bottom: 0; }
 /* one inset capsule per state (pill.js): open, answered, answered with a note */
 .oq-arr { color: var(--wb-muted-fg); }
