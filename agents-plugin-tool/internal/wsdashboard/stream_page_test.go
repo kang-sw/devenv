@@ -88,7 +88,7 @@ function syncBadge() {}
 function banner(text) { log.push("banner:" + text); }
 `+open+connect+`
 connect();
-check("one socket with the held hashes", sockets.map(function (s) { return s.url; }), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.1,head.2") + "&topics=1&railrows=1&treerows=1"]);
+check("one socket with the held hashes", sockets.map(function (s) { return s.url; }), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.1,head.2") + "&topics=1&railrows=1&treerows=1&entryrows=1"]);
 var s = sockets[0];
 s.onopen({});
 check("open lights the indicator", indicator.off, false);
@@ -110,7 +110,7 @@ check("a drop shows on the indicator and forgets the revision", [indicator.off, 
 advance(2999);
 check("no reconnect before 3 s", sockets.length, 1);
 advance(1);
-check("one reconnect per drop, with the hashes held now", sockets.map(function (x) { return x.url; }).slice(1), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.3,head.4") + "&topics=1&railrows=1&treerows=1"]);
+check("one reconnect per drop, with the hashes held now", sockets.map(function (x) { return x.url; }).slice(1), ["ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.3,head.4") + "&topics=1&railrows=1&treerows=1&entryrows=1"]);
 var r = sockets[1];
 r.onopen({});
 check("recovery shows on the indicator", indicator.off, false);
@@ -132,7 +132,7 @@ connect();
 check("the shell opts into rail rows", sockets[3].url, "ws://localhost:1234/rail/events?h=" + encodeURIComponent("board.3,head.4") + "&railrows=1");
 shell = false; framed = true; mode = "session";
 connect();
-check("the frame requests tree but not absent rail rows", sockets[4].url, "ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.3,head.4") + "&frame=1&topics=1&treerows=1");
+check("the frame requests tree but not absent rail rows", sockets[4].url, "ws://localhost:1234/s/rid1/events?h=" + encodeURIComponent("board.3,head.4") + "&frame=1&topics=1&treerows=1&entryrows=1");
 worktree = "/fixture";
 connect();
 check("worktree excludes tree rows", sockets[5].url, "ws://localhost:1234/events?h=" + encodeURIComponent("board.3,head.4") + "&frame=1&topics=1");

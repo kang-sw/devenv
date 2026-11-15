@@ -4,7 +4,7 @@
   // update held back while the tab is hidden (hiddenRegions, see connect)
   // counts as held: a reconnect meanwhile names its hash, and the update
   // still lands when the tab shows.
-  var modeHash = "", hiddenRegions = {}, treeRendered = null;
+  var modeHash = "", hiddenRegions = {}, treeRendered = null, entryRendered = null;
   // pageHidden tells whether nobody sees the page (a hidden tab, or a frame
   // the shell hides): region updates are held (hiddenRegions) while it
   // holds, and land when it ends (showRegions).
@@ -21,7 +21,7 @@
     var el = region(name);
     if (!el) return;
     var board = name === "board";
-    if (el.getAttribute("data-h") === hash && !(board && Object.keys(boardPending).length)) { if (board) deferred = null; if (name === "rail") { if (railGate) railGate.forget(); if (typeof html !== "string") railRendered = html; } if (name === "tree" && typeof html !== "string") treeRendered = html; return; }
+    if (el.getAttribute("data-h") === hash && !(board && Object.keys(boardPending).length)) { if (board) deferred = null; if (name === "rail") { if (railGate) railGate.forget(); if (typeof html !== "string") railRendered = html; } if (name === "tree" && typeof html !== "string") treeRendered = html; if (name === "entries" && typeof html !== "string") entryRendered = html; return; }
     if (board && window.WsOverview && window.WsOverview.holding()) { boardOverviewHeld = { hash: hash, html: html }; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board && window.WsCards && window.WsCards.dragging && window.WsCards.dragging()) { boardDragHeld = { hash: hash, html: html }; return; }
@@ -77,7 +77,11 @@
     // fences draw once merged; the streaming reply (convlive) keeps them
     // code blocks.
     var ins = null;
-    if (name === "entries") mergeEntriesRegion(el, html, pin);
+    if (name === "entries") {
+      var entryNext = typeof html === "string" ? entryInputFull(html) : html;
+      mergeEntriesRegion(el, entryNext || html, pin, entryRendered);
+      entryRendered = entryNext;
+    }
     else if (name === "tree") {
       var treeNext = typeof html === "string" ? treeInputFull(html) : html;
       ins = treeNext && mergeTreeRows(el, treeRendered, treeNext);

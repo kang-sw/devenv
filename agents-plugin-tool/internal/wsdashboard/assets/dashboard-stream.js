@@ -262,11 +262,11 @@
   var ASSETS_TRIED = "ws.dashboard.assetsreload";
   function connect(withoutBoard) {
     if (!window.WebSocket) return;
-    var boardInput = null, railInput = null, treeInput = null;
+    var boardInput = null, railInput = null, treeInput = null, entryInput = null;
     // The shell streams the rail alone; a framed session page streams its
     // session without the rail.
     var path = shell ? "/rail/events" : mode === "index" || worktree ? "/events" : "/s/" + rid + "/events";
-    var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : "") + (shell || (!framed && mode !== "index") ? "&railrows=1" : "") + (!shell && !worktree && mode !== "index" ? "&treerows=1" : ""), {
+    var st = openStream(path + "?h=" + encodeURIComponent(held(withoutBoard)) + (framed && mode !== "index" ? "&frame=1" : "") + (!shell && mode !== "index" ? "&topics=1" : "") + (shell || (!framed && mode !== "index") ? "&railrows=1" : "") + (!shell && !worktree && mode !== "index" ? "&treerows=1&entryrows=1" : ""), {
       open: function () { connected(true); },
       // Reopen with the hashes held now, so a reconnect sends only what
       // changed since.
@@ -275,7 +275,7 @@
         trackerLost();
         setTimeout(connect, 3000);
       },
-      events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, "rail-rows": onRailRows, "tree-rows": onTreeRows, tracker: onTracker, gone: onGone }
+      events: { assets: onAssets, region: onRegion, "board-topics": onBoardTopics, "rail-rows": onRailRows, "tree-rows": onTreeRows, "entry-rows": onEntryRows, tracker: onTracker, gone: onGone }
     });
     function onRegion(ev) {
       if (!ev) return;
@@ -299,7 +299,21 @@
         treeInput = treeInputFull(ev.html);
         if (treeInput) ev = { name: "tree", hash: ev.hash, html: treeInput };
       }
+      if (ev.name === "entries") {
+        entryInput = entryInputFull(ev.html);
+        if (entryInput) ev = { name: "entries", hash: ev.hash, html: entryInput };
+      }
       receiveRegion(ev);
+    }
+    function onEntryRows(ev) {
+      var next = entryInputPatch(entryInput, ev);
+      if (!next) {
+        st.close(); connected(false);
+        setTimeout(connect, 0);
+        return;
+      }
+      entryInput = next;
+      receiveRegion({ name: "entries", hash: ev.hash, html: next });
     }
     function onTreeRows(ev) {
       var next = treeInputPatch(treeInput, ev);
