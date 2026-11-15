@@ -527,17 +527,7 @@
       }
     },
     "261116-refactor-ws-model-evidence-bounded-retention": {
-      "registered_at": "2026-11-15T16:42:54Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T18:50:23Z",
-        "impl": {
-          "branch": "impl/develop/zesty-aloha-silly"
-        }
-      }
+      "registered_at": "2026-11-15T16:42:54Z"
     }
   }
 }
