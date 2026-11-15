@@ -4,6 +4,10 @@ related:
   261114-feat-ws-live-reasoning-summary: "reuse the existing lead-only projection, immutable natural-turn history and display contract; its Pi-only admission is not Claude support"
   261115-feat-ws-permission-profile: "MAIN queue ordering only; no permission implementation contract is consumed by this ticket"
   261115-feat-ws-worker-profile-session-spawn: "MAIN queue ordering only; no worker-profile implementation prerequisite is invented"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 4fbfddb5c738fb49
+sage-review-completeness-reviewed: 4fbfddb5c738fb49
 ---
 
 # Show public Claude reasoning summaries through interactive and hosted producers
@@ -31,10 +35,13 @@ External TUI/mod delivery comes first; a later useful hosted producer and its
 auto-enable wiring belong to this same ticket. Hosted/headless delivery is not
 out of scope.
 
-This ticket captures that confirmed outcome. It does not run Claude, change a
-setting, implement a producer, or promote itself. MAIN queues its eventual
-execution behind the permission P2/D14 hold and worker-profile Phase 1; that is
-operational ordering, not a new source-code dependency or `blocked-by` claim.
+This ticket captures that confirmed outcome. Fact population does not run
+Claude, change a setting, implement a producer, or promote itself. MAIN
+10:07:22 assigns ready promotion followed by Phases 1+2 as one implementation
+head; hosted Phases 3+4 remain in this ticket but are not this run. Permission
+P2/D14 and worker-profile Phase 1 links are queue ordering only, not
+prerequisites or `blocked-by` claims (current MAIN assignment supplied with
+this fact-population request).
 
 ## Decisions
 
@@ -76,9 +83,12 @@ operational ordering, not a new source-code dependency or `blocked-by` claim.
    before enabling its producer; verify the hosted stream path before enabling
    its producer. A successful headless experiment is not interactive TUI
    verification. Authoring and ready review authorize none of those live checks
-   now. A later Phase 1 or Phase 3 dispatch must explicitly delimit its bounded
-   interactive/hosted verification and session-local changes; no implicit
-   provider/account/global-setting access follows from this ticket's existence.
+   during fact population. MAIN 10:07:22 explicitly authorizes bounded external
+   interactive TUI/mod verification in Phase 1 and the selected session-local
+   `--thinking-display summarized` launch; hosted Phase 3 still needs a later
+   bounded dispatch. No existing/global changes, installs/downloads, shared
+   daemon swap or unrelated runtime operation are authorized (current MAIN
+   assignment supplied with this fact-population request).
 7. **Directional compatibility — design grades, not completed acceptance.**
    MAIN 09:44:13 accepted **T0** for unchanged legacy calls/ordinary display,
    gated optional calls and summary-free mutable snapshots, and **T1
@@ -123,6 +133,20 @@ operational ordering, not a new source-code dependency or `blocked-by` claim.
     summary projections. Rejected: faster timers or artificial delta pacing;
     the short Opus burst does not establish incremental generation throughout
     the thinking interval.
+12. **MAIN 10:07:22 — current acceptance and run scope.** Ready promotion and
+    implementation cover Phases 1+2 as one head only; hosted Phases 3+4 stay
+    deferred in this ticket. A summarized Claude lead must show each observed
+    public summary paragraph in existing live activity and retained history
+    after reload, within the retained bounds. Omitted summary option and
+    empty/redacted/signature-only thinking must show no summary row, only
+    ordinary activity, with tests. Preserve MCP tool/schema/stored-format
+    semantics; Decision 7's directional T0/T1 targets remain binding, and stop
+    if delivery would exceed T0/T1. Attach 1440-wide light and dark screenshots
+    of positive live, positive reload and negative ordinary-only states for
+    MAIN's pre-merge review. This supersedes the old no-screenshot constraint,
+    not the existing display design. If interactive source lacks public
+    summaries, stop at Phase 1 with redacted evidence; never fabricate text
+    (current MAIN assignment supplied with this fact-population request).
 
 The technical settlement IDs above were remapped from the draft's conflicting
 (1094)–(1097) to (1201)–(1204). They do not reinterpret the owner-board answers
@@ -159,8 +183,10 @@ using the old numbers.
   SDK upgrade or unapproved host launch. Read-only source inspection and fake
   protocol fixtures are not evidence of real interactive delivery.
 - No new visual design/reference was approved. Reuse the existing text-only
-  summary display and user-fold state. No screenshot/theme/width matrix is
-  required; owner live-screen acceptance follows MAIN's eventual merge/swap.
+  summary display and user-fold state. MAIN 10:07:22 now requires 1440-wide
+  light and dark screenshots of positive live, positive reload and negative
+  ordinary-only states for pre-merge review; no new visual reference is
+  approved (current MAIN assignment, Decision 12).
 - All retained test material is synthetic or explicitly redacted structure and
   aggregates. Do not commit raw thinking, signatures, account data, prompts,
   private transcript paths, full provider events or request/error bodies.
@@ -170,7 +196,8 @@ using the old numbers.
 
 ## Prior Art and Source Evidence
 
-Repository source inspected at assigned checkout `87e9d75dc`; `G/` below is
+Repository source rechecked at `67571a86bb4ab290aa91f5b689a5cb54ab3db268`
+(previous inspection: `87e9d75dc`); `G/` below is
 `agents-plugin-tool/internal/`, `M/` is `agents-plugin/hooks/claude-mod/`.
 Evidence is not a completed acceptance run.
 
@@ -186,7 +213,7 @@ Evidence is not a completed acceptance run.
   zero. These aggregates are captured here so the ticket does not depend on
   retaining that temporary file. They prove neither interactive TUI delivery,
   per-request mode observability nor an arbitrary model/provider contract.
-- `M/register.ts:1670–1690` taps `turn.step` using `${e.turnId}/${e.index}`;
+- `M/register.ts#L1687-L1707` taps `turn.step` using `${e.turnId}/${e.index}`;
   `tapStep` at `195–225` forwards chunks/results and isolates observer errors.
   `M/dashboard.ts:374–395,1579–1590` uses thinking chunks for phase/rate, while
   only text chunks become replies. The prior installed-source inspection found
@@ -194,7 +221,7 @@ Evidence is not a completed acceptance run.
   event; public retry-attempt attribution is also unverified.
 - `M/dashboard.ts:94–118,1245–1362` has `dashboard_intake`, adapter `claude`,
   one-/two-second cadence and response-driven `accepts:` recovery. Do not assume
-  existing status negotiation enables summaries. `M/register.ts:1208–1219`
+  existing status negotiation enables summaries. `M/register.ts#L1218-L1221`
   keeps that mod feed off for hosted sessions to avoid duplicate observation.
 - `G/wsagent/claude.go:102–130` builds hosted print/stream-json arguments,
   currently without partial-message output; `1226–1277` maps assistant text and
@@ -217,10 +244,11 @@ Evidence is not a completed acceptance run.
 
 ### Directional compatibility source trace
 
-The exact current old-side pin for the future Claude addition is
-`87e9d75dcac7e1fa392725fe42934fe531105734`, not the pre-Pi fixture pin
+The selected old-side pin for the future Claude addition is
+`87e9d75dcac7e1fa392725fe42934fe531105734` (prior inspected checkout), not the pre-Pi fixture pin
 `9854ff350fa1b0eccfb5c71649c5190c405925b9`. References in this trace describe
-the current old side; the Claude-capable new side and its directional fixtures
+the pre-Claude mechanisms, rechecked in the current source; the Claude-capable
+new side and its directional fixtures
 remain delivery targets, not completed acceptance tests. The design grades are
 settled in Decision 7; their runtime acceptance remains required.
 
@@ -298,33 +326,35 @@ settled in Decision 7; their runtime acceptance remains required.
 - 83ba68d5 (2026-11-15, commit): "Decision967 requires RAM-only live reasoning summaries until immutable natural-turn history commits." — bearing: constrains
 - 39052e47 (2026-11-15, commit): "The new 1.5.2 native bundle explicitly opts in via capabilities on the existing status widget; summary payload presence is never capability evidence." — bearing: constrains
 - 5d018785 (2026-11-14, commit): "Fence optional mutation and candidate registration with the actual daemon slot generation plus the same registration lock used by terminal/hosted takeover." — bearing: constrains
-- 261113-feat-ws-compaction-before-queued-followup (2026-11-14, commit): "The hold gates mail and child reports too: a mail-only turn would push the compaction back the same way (Decision 3, hold scope)." — bearing: constrains
-- 261110-feat-ws-dashboard-headless-lead-sessions (2026-11-11, commit): "Enabling partial messages would flood the holder ring; left for the lead" — bearing: constrains
-- 261110-feat-ws-dashboard-agent-panel-telemetry (2026-11-10, commit): "Chunks count only while the record's buffer streams that step, and begin() drops spans of a request that never finished" — bearing: constrains
-- 261106-feat-ws-dashboard-claude-adapter (2026-11-06, commit): "The feed is observe-only: every handler is guarded, turn.step is tapped only while the feed runs" — bearing: constrains
+- a5b05c09 (2026-11-14, commit): "Freeze accepted natural-turn candidates in receiver-owned session RAM and serialize immutable temp+rename retries independently of client slots." — bearing: constrains
+- 72c9d851 (2026-11-11, commit): "An idle after a result is that turn's own and is ignored (mapper `open`), so it cannot close the next turn a flushed send already began." — bearing: constrains
+- c2fd2c99 (2026-11-10, commit): "Chunks count only while the record's buffer streams that step, and begin() drops spans of a request that never finished" — bearing: constrains
+- e4a68658 (2026-11-06, commit): "The feed is observe-only: every handler is guarded, turn.step is tapped only while the feed runs" — bearing: constrains
 
 ## Route Facts
 
 | fact | value | evidence |
 |---|---|---|
-| scope.span | multi-file | agents-plugin/hooks/claude-mod/register.ts and dashboard.ts; agents-plugin-tool/internal/mcp/live_snapshot.go, internal/wslive/reasoning_summary.go, internal/wsagent/claude.go and runner_summary.go; mirrored wsflow surfaces |
-| scope.surface | cross-module | External mod, MCP intake, hosted mapper/holder, shared live/history validation and dashboard rendering |
-| scope.new_public_symbol | yes | Decision 9 settles the separately negotiated Claude capability and source pairs as future wire additions; they are not implemented API |
-| scope.new_type_contract | yes | Claude-specific eligibility/provenance/request-attempt mapping and capability semantics extend the existing v1 projection/history contract; exact evidence is still required |
-| scope.test_surface | existing | agents-plugin/hooks/claude-mod/dashboard.test.ts and dashboard-engine.test.ts; agents-plugin-tool/internal/mcp/summary_intake_test.go, summary_snapshot_test.go, intake_order_test.go; internal/wslive/summary_compat_test.go; internal/wsdashboard/reasoning_summary_test.go; new selector names are proposed |
-| complexity.reuse_points | confirmed | tapStep, createDashboardFeed intake negotiation, summaryCapable/lockSummaryOwner, SummaryCommits, AppendRing/ReadRing, hosted summary owner fences and ConvEntry.Summary were read; Claude admission/producer remains absent |
-| complexity.side_effect_risk | high | Automatic hosted launch changes and partial streams can affect holder volume, ordinary text/tool duplication and native lifecycle ordering |
-| risk.correctness | high | Neither external nor hosted effective-mode and attempt mapping is established; stale ownership or duplicate partial/final events can contaminate retained history |
-| risk.fit | moderate | Existing owners and text-only display are reusable, but Pi-only gates cannot be widened into Claude support without the separate verified source contract |
-| risk.test | high | Existing fixtures cover Pi/history mechanisms; real interactive and hosted source evidence plus current-old Claude byte-retention/new-reopen fixtures remain outstanding |
-| risk.security_or_contract | high | Generic thinking is not public-summary provenance; private text must never enter RAM/browser/history, and new capability/store behavior needs directional compatibility proof |
+| scope.span | multi-file | This run: agents-plugin/hooks/claude-mod/register.ts and dashboard.ts, wsflow mirrors, agents-plugin-tool/internal/mcp/live_snapshot.go and summary_owner.go, internal/wslive/reasoning_summary.go and existing tests; internal/wsagent/claude.go and runner_summary.go belong to deferred Phases 3+4 |
+| scope.surface | cross-module | External mod, MCP adapter intake, shared live/history validation and dashboard display; no MCP tool/schema/stored-format semantic change authorized |
+| scope.new_public_symbol | yes | Decision 9's future reasoning_summary_claude_v1 capability and claude-code/claude-code-mod-summarized source pair; not currently implemented |
+| scope.new_type_contract | yes | Claude-specific provenance, eligibility and request/attempt attribution extend source admission within existing bounded v1 types; Phase 1 evidence gates Phase 2 |
+| scope.test_surface | existing | agents-plugin/hooks/claude-mod/dashboard.test.ts and dashboard-engine.test.ts; agents-plugin-tool/internal/mcp/summary_intake_test.go, summary_snapshot_test.go and intake_order_test.go; internal/wslive/summary_compat_test.go; internal/wsdashboard/reasoning_summary_test.go |
+| complexity.reuse_points | confirmed | Read tapStep, createDashboardFeed negotiation, summaryCapable/lockSummaryOwner, SummaryCommits, AppendRing/ReadRing, ForDisk and ConvEntry.Summary; current Claude producer/admission absent |
+| complexity.side_effect_risk | high | External stream observation and intake ordering affect ordinary activity, natural-turn settlement and retained history; hosted launch changes are deferred |
+| risk.correctness | high | External effective mode and attempt mapping remain unverified; stale ownership or misattributed chunks could contaminate immutable history |
+| risk.fit | moderate | Existing observer and display are reusable, but Pi-only gates require separately verified Claude source/ownership admission, not blanket widening |
+| risk.test | high | Claude interactive provenance, explicit negative-row tests, old/new directional fixtures and six 1440-wide acceptance screenshots remain outstanding |
+| risk.security_or_contract | high | Generic thinking is not public-summary evidence; privacy gate and T0/T1 directional proof must hold without MCP tool/schema/stored-format semantic changes |
 
 ## Phases
 
 ### Phase 1: Verify the external interactive public-summary source contract
 
-This is the first later worker-dispatched slice, not an experiment performed
-by ticket capture. Use a bounded, explicitly dispatched interactive Claude
+This is the first worker-dispatched slice, explicitly authorized by MAIN
+10:07:22 for bounded external interactive TUI/mod verification and the selected
+session-local `--thinking-display summarized` launch, not an experiment
+performed by fact population. Use that bounded interactive Claude
 TUI/mod verification to establish effective session activation, public-summary
 provenance, actual chunk timing, outer turn/request/block identity and supported
 attempt boundaries. Observe the existing stream without altering its chunks,
@@ -379,6 +409,16 @@ cover actual owner/slot/turn fencing, single-event admission, legacy in-flight
 write barriers, no replay/recount, RAM-only live data, immutable natural history,
 old-source history readers/appenders and new reopen. Extend existing display
 fallback tests; existing Pi source admission and display must remain unchanged.
+Show each observed public summary paragraph in existing live activity and
+retained history after reload, within the retained bounds. Explicit tests must
+assert no summary row and unchanged ordinary activity for omitted summary
+option and empty/redacted/signature-only thinking. Attach 1440-wide light and
+dark screenshots of positive live, positive reload and negative ordinary-only
+states for MAIN pre-merge review (MAIN 10:07:22, Decision 12). Preserve MCP
+tool/schema/stored-format semantics and stop if directional compatibility
+exceeds T0/T1. This run ends after Phases 1+2 as one head; do not execute hosted
+Phases 3+4. If Phase 1 finds no supported public summaries, stop there with
+redacted evidence instead of implementing a fabricated producer.
 
 ### Phase 3: Verify the hosted partial-stream public-summary source contract
 
@@ -434,6 +474,30 @@ commit, reopen and old/new source compatibility. Re-run the relevant external
 and Pi regression selectors. MAIN owns final merge/swap and owner live-screen
 acceptance; the worker neither swaps a shared daemon nor calls the flag alone
 acceptance.
+
+## Blocked (2026-11-15)
+
+Phase 1 stopped with worker stop (f) after two bounded interactive PTY-driver
+attempts timed out (220 seconds and 40 seconds). Neither produced a
+`session.start` observer aggregate; the second reached native interactive UI
+but sent no input. No third launch or automatic retry was made. Interactive
+public-summary provenance, effective mode and request/attempt mapping remain
+unverified, so Phase 2 is not executable. This is a verification-driver failure,
+not proof that every supported public surface lacks summaries or provenance.
+
+Installed-source inspection of Claude Code 2.1.325 found `turn.step` thinking
+chunks shaped as `{kind, index, text, ref}`, while internal stream envelopes
+carry `thinkingDisplay`. No Phase 1 Result, runtime edits, settings mutation,
+acceptance screenshots, tests, independent implementation review or Phase 2
+implementation was completed. The settings before/after comparison also did
+not complete; unchanged settings are not certified by this attempt.
+
+The worker found no matching probe processes, and the second probe PID was
+absent; no cleanup signals were needed. The first probe PID was not captured,
+so complete descendant cleanup is not independently certified. Scratch evidence
+is temporary and is not an implementation dependency. MAIN received the stop;
+a new bounded verification approach or explicit re-dispatch is needed before
+continuation. Hosted Phases 3+4 remain outside this assignment.
 
 ## Focused Verification Contract
 
