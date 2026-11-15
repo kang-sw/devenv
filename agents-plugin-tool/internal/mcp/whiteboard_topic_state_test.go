@@ -110,3 +110,21 @@ func TestWhiteboardTopicStateCutoverAndAtomicRefusal(t *testing.T) {
 	}
 	assertWhiteboardTreeForTest(t, f.pageDir(), before)
 }
+
+func TestWhiteboardCreateAndCloseInOneBatch(t *testing.T) {
+	f := newWhiteboardFixture(t)
+	out := f.update(t, `<wb:topic name="report" label="Report"><wb:panel recap="Status breakdown">Three tickets done.</wb:panel><wb:close result="All done."/></wb:topic>`)
+	if strings.Contains(strings.ToLower(out), "error") {
+		t.Fatalf("create+close refused: %s", out)
+	}
+	text := toolText(t, f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"topic": "report"}}))
+	for _, want := range []string{"panel p1", "Status breakdown", "[closed]", "All done."} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("query lacks %q: %s", want, text)
+		}
+	}
+	resp := f.call(t, "whiteboard.update", map[string]any{"commands": `<wb:topic name="ghost"><wb:close result="x"/></wb:topic>`})
+	if !isToolError(resp) {
+		t.Fatalf("closing unknown topic accepted: %s", resp)
+	}
+}
