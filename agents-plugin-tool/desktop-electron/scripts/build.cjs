@@ -23,9 +23,12 @@ async function build({ platform = process.platform, arch = process.arch, cache, 
   try {
     const source = path.join(stage, 'app');
     fs.mkdirSync(source);
-    for (const file of ['main.js', 'endpoint.js', 'policy.js', 'connection.html']) {
+    for (const file of ['main.js', 'endpoint.js', 'policy.js', 'connection.html',
+      'titlebar.js', 'titlebar.html', 'titlebar-preload.js', 'titlebar-renderer.js']) {
       fs.copyFileSync(path.join(root, file), path.join(source, file));
     }
+    fs.mkdirSync(path.join(source, 'icons'));
+    fs.copyFileSync(path.join(root, 'icons/icon.png'), path.join(source, 'icons/icon.png'));
     fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({
       name: pkg.name, productName: 'Werkschaft', version: pkg.version, main: pkg.main, author: pkg.author,
     }));
