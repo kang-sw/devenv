@@ -23,6 +23,15 @@ Workers and subagents do not use the board.
   statuses are available for reuse or patching. Default discovery is compact
   topic metadata; neither form implicitly retrieves bodies.
 
+Successful updates retain the existing conditional `ids:`, `full:` and
+`embed:` lines and append one summary per net-changed resolved topic in
+first-touch order: `topic added: rollout (state: discussing, default)` or
+`topic updated: rollout`, with compact change tags when applicable. Explicit
+creation reports the effective state and `explicit` instead of `default`;
+added takes precedence over updated within a batch. Root `wb:answer` changes
+belong to each affected item's resolved topic. No-ops and render-only calls
+have no topic summaries.
+
 ## Taking over another session's board
 
 - Use this recipe only for a fully committed folder board: the source folder's root `meta.json` and `committed.json` must both have `schema_version: 2` and matching `generation` values, with no `pending.json`. Otherwise stop; `pending.json` is a durable commit intent that normal store recovery must finish, not a file to edit or delete for takeover.
@@ -32,8 +41,11 @@ Workers and subagents do not use the board.
 
 ## Open-topic work state
 
-Declare each open topic's work state with `wb:state` and update its agent
-log line when the state changes, retaining a human current-state summary:
+New topics receive authoritative `discussing` state. An explicit `wb:state`
+after creation in the same batch overrides it without an intermediate default
+record. Existing topics, including reopened or adopted topics, are not
+backfilled. Declare later work-state changes with `wb:state` and update the
+agent log line, retaining a human current-state summary:
 
 | state | lead obligation |
 |---|---|
