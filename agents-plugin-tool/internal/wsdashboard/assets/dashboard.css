@@ -941,12 +941,7 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .dgrid.live > .splitter { grid-area: split; }
 .dgrid.live > .convo { grid-area: convo; overflow: auto; }
 .dgrid.live > .composer { grid-area: composer; margin-top: 10px; }
-/* One shared release control for staged rendering, placement and heights.
-   Fixed outside the board flow so the badge itself changes no reading geometry. */
-.board-viewed-pending { position: fixed; z-index: 90; bottom: max(16px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); max-width: min(680px, calc(100vw - 32px)); padding: 10px 16px; border: 1px solid var(--wb-primary); border-radius: 24px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 4px 18px #0003; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.board-viewed-pending[hidden] { display: none; }
-.board-viewed-pending:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
-/* Owned board scrollers use permanent manual anchoring (wbHistory.keep). */
+/* A scrolling board column and the pinned column (.bpins) take no native scroll anchoring: a board swap compensates them itself (wbHistory.keep). */
 .dgrid.live > .bcol { grid-column: 1; grid-row: tree-start / convo-end; overflow: auto; overflow-anchor: none; padding: 2px 4px 0 2px; }
 .dgrid.live[data-tab="board"] > .r-tree, .dgrid.live[data-tab="board"] > .splitter, .dgrid.live[data-tab="board"] > .convo, .dgrid.live:not([data-tab="board"]) > .bcol { display: none; }
 /* The conversation panel's header (chead) carries its own tabs (ctabs):
@@ -2023,6 +2018,48 @@ a[data-wl="file"]:not([href]) { color: inherit; }
   background: var(--wb-card); color: var(--wb-fg); border-radius: 10px; box-shadow: var(--wb-shadow-hi), inset 0 0 0 1px var(--wb-line); padding: 10px 12px; font-size: 12.5px; }
 .rpop[hidden] { display: none; }
 .rpop [hidden] { display: none !important; }
+/* Compact read-only hover cards share the rail popover surface, outside SSE regions. */
+.rpop.shp { position: fixed; z-index: calc(var(--z-popovers, 60) + 1); width: 320px; box-sizing: border-box; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); overflow: auto; gap: 9px; pointer-events: none; }
+.rpop.shp * { pointer-events: none; }
+.rpop.shp[hidden] { display: none; }
+.shp .hi { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 4px; font: 800 11px/1 var(--wb-mono, monospace); color: #fff; }
+.shp .hi.claude { background: #D97757; }
+.shp .hi.codex { background: #10A37F; }
+.shp .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
+.shp-hd { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.shp-nm { font-size: 13px; font-weight: 800; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shp-hd .phase, .shp-hd .chip { margin-left: auto; height: 18px; font-size: 11px; padding: 0 7px 0 6px; gap: 5px; flex: none; }
+.shp-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; margin-top: -6px; padding-left: 23px; font: 11px/1.5 var(--wb-mono); color: var(--wb-muted-fg); min-width: 0; overflow-wrap: anywhere; }
+.shp-sub > span + span::before { content: "\00b7"; margin-right: 6px; opacity: .7; font-family: var(--wb-sans); }
+.shp-model { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 7px 9px; border-radius: 8px; background: var(--wb-wash); }
+.shp-mtx { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.shp-mid { font: 700 12.5px/1.4 var(--wb-mono); overflow-wrap: anywhere; }
+.shp-eff { flex: none; align-self: center; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--wb-card); box-shadow: inset 0 0 0 1px var(--wb-line); white-space: nowrap; }
+.shp-unk { font-size: 12.5px; font-weight: 600; color: var(--wb-muted-fg); }
+.shp-last { font-size: 10.5px; color: var(--wb-muted-fg); font-family: var(--wb-sans); overflow-wrap: anywhere; }
+.shp.stale .shp-mid, .shp.stale .shp-eff { opacity: .72; }
+/* r-ctx renders the existing status-band markup directly into the popup. */
+.shp .sb-top { padding: 0; }
+.shp .sb-ctx { gap: 7px; min-width: 0; }
+.shp .sb-pct { font-size: 15px; }
+.shp .sb-bar { height: 8px; min-width: 60px; }
+.shp .sb-tok { font-size: 11px; }
+.shp.stale .sb-ctx { --c: var(--wb-muted-fg); }
+.shp-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.shp-stat { min-width: 0; display: grid; gap: 1px; padding: 5px 8px 6px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); }
+.shp-stat b { font: 700 14px/1.25 var(--wb-mono); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shp-stat b small { font-size: 10.5px; font-weight: 600; margin-left: 2px; }
+.shp-stat b.tps { color: var(--wb-primary); }
+.shp-stat b.na { color: var(--wb-muted-fg); font-weight: 500; }
+.shp-stat > span { font-size: 10.5px; color: var(--wb-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shp-foot { display: flex; flex-wrap: wrap; gap: 2px 0; font-size: 11.5px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; }
+.shp-foot > span { white-space: nowrap; }
+.shp-foot > span + span::before { content: "\00b7"; margin: 0 6px; opacity: .7; }
+.shp-foot b { color: var(--wb-fg); font-weight: 600; }
+.shp-note { margin: 0; font-size: 11.5px; color: var(--wb-muted-fg); padding: 6px 8px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--wb-line); overflow-wrap: anywhere; }
+.shp-note.exit { color: var(--wb-fg); }
+.shp-note.exit b { font-weight: 700; }
+
 .rpop .sphd { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 13px; font-weight: 800; }
 .rpop .spctx { font-family: var(--wb-mono); font-size: 11.5px; font-weight: 600; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .rpop .spsec { display: grid; gap: 5px; min-width: 0; }

@@ -30,7 +30,7 @@ function take(rid, route, dir) {
 }
 async function answer(r, body) { r.resolve({ ok: true, json: () => body }); await settle(); }
 async function refuse(r) { r.resolve({ ok: false, status: 404, text: () => Promise.resolve('refused') }); await settle(); }
-function listing(root, entries, session) { return { root, name: root.split('/').pop(), abs: root, sep: '/', session: !!session, entries: entries || [{ name: 'src', dir: true }, { name: 'main.go' }, { name: '.env' }, { name: 'ignored', ign: true }] }; }
+function listing(root, entries, session) { return { root, name: root.split('/').pop(), abs: root, sep: '/', session: !!session, entries: entries || [{ name: 'src', dir: true }, { name: 'main.go' }, { name: '.env' }, { name: 'ignored', dir: true, ign: true }] }; }
 function event(n, type, extra) { var e = Object.assign({ target: n, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {} }, extra); n.fire(type, e); return e; }
 function key(n, key) { return event(n, 'keydown', { key }); }
 function slash(n) { var e = { target: n, key: '/', preventDefault() { this.defaultPrevented = true; } }; doc.listeners.keydown.slice().forEach(f => f(e)); }
@@ -55,7 +55,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   var expansion = take('race', 'list', 'src');
   rootRequest(race, '/invalid-again'); await refuse(take('race', 'list'));
   await answer(expansion, listing('/race/src', [{ name: 'kept.go' }]));
-  check('refused candidate keeps pending expansion and current root', [race.at('.froot').textContent, !!race.at('[data-path="src/kept.go"]')], ['race', true]);
+  check('refused candidate keeps pending expansion and current root', [race.at('.froot').textContent, !!race.at('[data-entry="src/kept.go"]')], ['race', true]);
   rootRequest(race, '/older-success'); var staleCandidate = take('race', 'list');
   rootRequest(race, '/newer-refusal'); await refuse(take('race', 'list'));
   await answer(staleCandidate, listing('/older-success'));
@@ -72,24 +72,24 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   event(a.at('[data-path="src"]'), 'unused');
   event(a.tree, 'click', { target: a.at('[data-path="src"]') });
   await answer(take('alpha', 'list', 'src'), listing('/alpha/src', [{ name: 'a.go' }]));
-  event(a.tree, 'click', { target: a.at('[data-path="src/a.go"]') });
-  check('expansion and selection stay local', [!!a.at('.fr[aria-selected="true"]'), !!b.at('.fr[aria-selected="true"]'), b.at('[data-path="src"]').getAttribute('aria-expanded')], [true, false, 'false']);
+  event(a.at('[data-entry="src/a.go"]'), 'click');
+  check('expansion and selection stay local', [a.instance.selection().path, b.instance.selection().path, b.at('[data-path="src"]').getAttribute('aria-expanded')], ['src/a.go', '.', 'false']);
   a.all('.fhd button')[3].click();
   var ign = a.all('.fpop input')[0]; ign.checked = true; event(ign, 'change');
   check('view and storage isolated', [!!a.at('[data-path="ignored"]'), !!b.at('[data-path="ignored"]'), Object.keys(a.store).length > 0, Object.keys(b.store).some(k => k.includes('.view'))], [true, false, true, false]);
   key(a.at('.fpop'), 'Escape');
   check('popover Escape returns owner focus', doc.activeElement === a.all('.fhd button')[3], true);
-  event(a.tree, 'contextmenu', { target: a.at('[data-path="main.go"]'), clientX: 20, clientY: 30 });
+  event(a.tree, 'contextmenu', { target: a.at('[data-path="src"]'), clientX: 20, clientY: 30 });
   check('row menu opens', !!doc.querySelector('.fmenu'), true);
   key(doc.querySelector('.fmenu'), 'Escape');
-  check('menu Escape returns row focus', doc.activeElement === a.at('[data-path="main.go"]'), true);
+  check('menu Escape returns row focus', doc.activeElement === a.at('[data-path="src"]'), true);
   slash(a.tree); check('target pane owns slash', doc.activeElement === a.q, true);
   b.el.setAttribute('data-max', ''); slash(doc.body); check('active sheet owns slash', doc.activeElement === b.q, true); b.el.removeAttribute('data-max');
   a.tree.scrollTop = 73; event(a.tree, 'scroll'); b.tree.scrollTop = 19; event(b.tree, 'scroll');
   a.instance.hidden(); a.instance.shown();
   await answer(take('alpha', 'list', 'src'), listing('/alpha/src', [{ name: 'a.go' }]));
   await answer(take('alpha', 'list', ''), listing('/alpha', undefined, true));
-  check('reopen refresh preserves expansion selection and scroll', [a.tree.scrollTop, b.tree.scrollTop, !!a.at('[data-path="src/a.go"]'), !!a.at('.fr[aria-selected="true"]')], [73, 19, true, true]);
+  check('reopen refresh preserves expansion selection and scroll', [a.tree.scrollTop, b.tree.scrollTop, !!a.at('[data-entry="src/a.go"]'), a.instance.selection().path], [73, 19, true, 'src/a.go']);
   a.all('.fseg button')[1].click(); a.all('.fopts button').forEach(n => n.click());
   a.q.value = 'needle'; event(a.q, 'input'); await timers(); var old = take('alpha', 'search');
   b.q.value = 'beta'; event(b.q, 'input'); await timers(); var br = take('beta', 'find');
@@ -135,6 +135,12 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   core.instance.on('selection', p => events.push(['sel', p.path]));
   core.instance.shown();
   await answer(take('core', 'list', ''), listing('/core', [{ name: 'src', dir: true }, { name: 'photo space.png' }, { name: 'report.pdf' }, { name: 'unsafe.svg' }, { name: 'linked.png', link: true }] , true));
+  check('side tree lists only folders while the directory pane keeps files', [core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), core.all('.fentry').map(n => n.getAttribute('data-entry'))], [['src'], ['src', 'photo space.png', 'report.pdf', 'unsafe.svg', 'linked.png']]);
+  core.all('.fview-modes button').forEach((button, i) => {
+    button.click();
+    check('side tree stays folders-only in view ' + i, core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), ['src']);
+  });
+  core.all('.fview-modes button')[0].click();
   event(core.at('[data-entry="src"]'), 'auxclick', { button: 1 });
   check('directory grid middle-click also opens a background tab', [core.all('.ftab-select').length, core.instance.location().dir], [2, '']);
   core.all('.ftab-close')[1].click();
@@ -144,6 +150,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   core.all('.fattachment button')[0].click(); core.all('.fattachment button')[1].click();
   check('browse actions emit session-relative path and selection event', [sent, copied, events.some(e => e[0] === 'sel' && e[1] === 'photo space.png')], [['photo space.png'], ['photo space.png'], true]);
   core.all('.fview-modes button')[3].click();
+  check('gallery side tree still lists only folders', core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), ['src']);
   check('gallery uses guarded raw route only for supported unlinked image', core.all('.fthumb').map(n => n.src), ['/s/core/fs/raw?path=photo%20space.png']);
   core.at('.fdirectory').scrollTop = 41; event(core.at('.fdirectory'), 'scroll');
   core.tree.scrollTop = 17; event(core.tree, 'scroll');
@@ -152,6 +159,7 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   await answer(take('core', 'list', ''), listing('/core', undefined, true));
   await answer(take('core', 'list', 'src'), listing('/core/src', [{ name: 'child.go' }], true));
   check('background tab activates at its folder', core.instance.location(), { root: '', dir: 'src' });
+  check('expanded side tree omits nested files but the directory pane keeps them', [core.all('.fr[data-path]').map(n => n.getAttribute('data-path')), !!core.at('[data-entry="src/child.go"]')], [['src'], true]);
   core.all('.fview-modes button')[1].click(); core.at('.fopen-card').click();
   check('open-as-card forwards active directory', opened, [{ root: '', dir: 'src' }]);
   core.all('.ftab-select')[0].click();
@@ -277,6 +285,89 @@ function rootRequest(x, path) { if (x.at('.froot-pop').hidden) x.all('.fhd butto
   navRace.instance.navigate(''); await answer(pendingFolder, listing('/nav-race/src', [{ name: 'late.go' }], true));
   check('late sidebar expansion cannot undo a later directory navigation', navRace.instance.location().dir, '');
   navRace.instance.destroy();
+  // Phase 2: same-session windows and their inner tabs own search independently.
+  var left = explorer('search-tabs'), right = explorer('search-tabs', true, { location: { root: '/right' } });
+  var searchPreviews = []; win.WsPreview = { open: (path, options) => searchPreviews.push([path, options]) };
+  left.instance.shown(); await answer(take('search-tabs', 'list'), listing('/project', undefined, true));
+  right.instance.shown(); await answer(take('search-tabs', 'list'), listing('/right'));
+  left.q.value = 'original'; event(left.q, 'input'); await timers(); var originalSearch = take('search-tabs', 'find');
+  right.q.value = 'parallel'; event(right.q, 'input'); await timers(); var parallelSearch = take('search-tabs', 'find');
+  left.instance.newTab({ root: '/alternate', dir: '' }); var alternateRoot = take('search-tabs', 'list');
+  check('tab switch aborts only its own window request and resets search controls', [originalSearch.options.signal.aborted, parallelSearch.options.signal.aborted, left.q.value, left.el.getAttribute('data-fm')], [true, false, '', 'name']);
+  await answer(originalSearch, { items: [{ path: 'late-original.go' }] });
+  check('switched tab drops late search before new root loads', !!left.at('[data-path="late-original.go"]'), false);
+  await answer(alternateRoot, listing('/alternate'));
+  left.all('.fseg button')[1].click(); left.all('.fopts button').forEach(n => n.click());
+  left.q.value = 'needle.*'; event(left.q, 'input'); await timers(); var alternateSearch = take('search-tabs', 'search');
+  check('active tab root scopes content search with its own options', [alternateSearch.url.searchParams.get('root'), alternateSearch.url.searchParams.get('case'), alternateSearch.url.searchParams.get('regex')], ['/alternate', '1', '1']);
+  left.all('.ftab-select')[0].click(); await timers(); var resumedOriginal = take('search-tabs', 'find');
+  check('returning tab restores its query mode and options, not another tab or window', [left.q.value, left.el.getAttribute('data-fm'), left.all('.fopts button').map(n => n.getAttribute('aria-pressed')), resumedOriginal.url.searchParams.has('root'), alternateSearch.options.signal.aborted, parallelSearch.options.signal.aborted], ['original', 'name', ['false', 'false'], false, true, false]);
+  await answer(alternateSearch, { files: [{ path: 'late-alternate.go', matches: [{ line: 3, hit: 'needle' }] }] });
+  await answer(resumedOriginal, { items: [{ path: 'original.go' }] });
+  await answer(parallelSearch, { items: [{ path: 'parallel.go' }] });
+  check('two windows and tabs reject cross-root results', [!!left.at('.fhits [data-path="original.go"]'), !!left.at('[data-path="late-alternate.go"]'), !!right.at('.fhits [data-path="parallel.go"]')], [true, false, true]);
+  event(left.hits, 'click', { target: left.at('.hit') }); event(right.hits, 'click', { target: right.at('.hit') });
+  check('name hits use existing preview with the originating root', searchPreviews, [['original.go', {}], ['parallel.go', { root: '/right' }]]);
+  left.hits.scrollTop = 57; event(left.hits, 'scroll');
+  left.all('.ftab-select')[1].click(); await timers(); var resumedAlternate = take('search-tabs', 'search');
+  check('unfinished content tab restarts with restored options', [left.q.value, left.el.getAttribute('data-fm'), resumedAlternate.url.searchParams.get('root'), resumedAlternate.url.searchParams.get('regex')], ['needle.*', 'content', '/alternate', '1']);
+  await answer(resumedAlternate, { files: [{ path: 'match.go', matches: [{ line: 19, pre: '<tag>', hit: 'needle', post: '</tag>' }] }] });
+  event(left.hits, 'click', { target: left.at('.hl') });
+  check('content hit previews its matching line and tab root', searchPreviews.slice(-1), [['match.go', { root: '/alternate', line: 19 }]]);
+  check('content excerpts render as text rather than HTML', [left.at('.tx').children[0].textContent, left.at('.tx mark').textContent], ['<tag>', 'needle']);
+  left.all('.ftab-select')[0].click();
+  check('completed results and scroll restore only on their tab without a request', [left.q.value, !!left.at('.fhits [data-path="original.go"]'), left.hits.scrollTop, pendingTimers.size], ['original', true, 57, 0]);
+  left.all('.ftab-select')[0].click();
+  check('selecting the already-active tab keeps search intact', [left.q.value, !!left.at('.hit'), pendingTimers.size], ['original', true, 0]);
+  left.all('.fseg button')[1].click();
+  check('mode change immediately removes obsolete actionable hits', [left.all('.hit').length, left.el.getAttribute('data-fm')], [0, 'content']);
+  await timers(); var superseded = take('search-tabs', 'search');
+  left.q.value = 'newer'; event(left.q, 'input');
+  check('query invalidates in-flight request before debounce expires', superseded.options.signal.aborted, true);
+  await answer(superseded, { files: [{ path: 'debounce-stale.go' }] });
+  check('late answer cannot repaint during debounce', left.all('.hit').length, 0);
+  await timers(); var newerSearch = take('search-tabs', 'search');
+  left.all('.fseg button')[0].click();
+  check('mode invalidates in-flight content request immediately', newerSearch.options.signal.aborted, true);
+  await refuse(newerSearch);
+  check('superseded failure cannot show an error on the new mode', left.all('.fhits .err').length, 0);
+  await timers(); var modeSearch = take('search-tabs', 'find');
+  key(left.q, 'Escape'); await answer(modeSearch, { items: [{ path: 'escaped.go' }] });
+  check('Escape cancels query and restores browsing without touching other window', [modeSearch.options.signal.aborted, left.q.value, left.hits.hidden, left.at('.fworkspace').hidden, !!right.at('.hit')], [true, '', true, false, true]);
+
+  left.q.value = 'hidden'; event(left.q, 'input'); await timers(); var hiddenSearch = take('search-tabs', 'find');
+  right.q.value = 'still-running'; event(right.q, 'input'); await timers(); var survivingSearch = take('search-tabs', 'find');
+  left.instance.hidden();
+  check('hiding one window cancels only its unfinished search', [hiddenSearch.options.signal.aborted, survivingSearch.options.signal.aborted], [true, false]);
+  await answer(hiddenSearch, { items: [{ path: 'hidden-stale.go' }] });
+  check('hidden window drops in-flight answer and keeps its query', [!!left.at('.hit'), left.q.value], [false, 'hidden']);
+  left.instance.shown(); var refreshSearchRoot = take('search-tabs', 'list'); await timers(); var shownSearch = take('search-tabs', 'find');
+  await answer(refreshSearchRoot, listing('/project', undefined, true));
+  await answer(shownSearch, { items: [{ path: 'shown.go' }] });
+  await answer(survivingSearch, { items: [{ path: 'surviving.go' }] });
+  check('returning window restarts unfinished query independently', [shownSearch.url.searchParams.get('q'), !!left.at('[data-path="shown.go"]'), !!right.at('[data-path="surviving.go"]')], ['hidden', true, true]);
+  left.q.value = 'background-close'; event(left.q, 'input'); await timers(); var backgroundClose = take('search-tabs', 'find');
+  left.all('.ftab-close')[1].click();
+  check('closing background tab does not cancel active search', backgroundClose.options.signal.aborted, false);
+  await answer(backgroundClose, { items: [{ path: 'kept.go' }] });
+
+  left.instance.newTab({ root: '/closing' }); await answer(take('search-tabs', 'list'), listing('/closing'));
+  // Fetch implementations without AbortController still need token isolation.
+  win.AbortController = null;
+  left.q.value = 'closing'; event(left.q, 'input'); await timers(); var closingSearch = take('search-tabs', 'find');
+  left.all('.ftab-close')[1].click(); await answer(closingSearch, { items: [{ path: 'closed-stale.go' }] });
+  check('closed active tab drops results even without AbortController', [closingSearch.options.signal, left.q.value, !!left.at('.fhits [data-path="kept.go"]'), !!left.at('[data-path="closed-stale.go"]')], [null, 'background-close', true, false]);
+  left.q.value = 'no-controller'; event(left.q, 'input'); await timers(); var noController = take('search-tabs', 'find');
+  left.q.value = 'replacement'; event(left.q, 'input'); await refuse(noController);
+  check('query token rejects stale failures without AbortController', left.all('.fhits .err').length, 0);
+  left.instance.hidden(); await timers();
+  check('hidden window cancels pending debounce without issuing fetch', requests.filter(r => !r.taken && r.url.pathname === '/s/search-tabs/fs/find').length, 0);
+  win.AbortController = AbortController;
+  left.instance.shown(); await answer(take('search-tabs', 'list'), listing('/project', undefined, true)); await timers(); var closingWindow = take('search-tabs', 'find');
+  left.instance.destroy(); await answer(closingWindow, { items: [{ path: 'destroyed-search.go' }] });
+  check('closed window aborts request and drops late answer without affecting peer', [closingWindow.options.signal.aborted, left.el.children.length, !!right.at('[data-path="surviving.go"]')], [true, 0, true]);
+  right.q.value = 'cancel-before-start'; event(right.q, 'input'); right.instance.destroy(); await timers();
+  check('destroy cancels pending debounce', requests.filter(r => !r.taken && r.url.pathname === '/s/search-tabs/fs/find').length, 0);
   check('extended core leaves no global handlers or timers', [doc.listeners.keydown.length, win.listeners.resize.length, pendingTimers.size], [0, 0, 0]);
   process.stdout.write(bad.join('\n'));
 })().catch(e => { console.error(e); process.exitCode = 1; });
