@@ -491,7 +491,7 @@
         "email": "ki6080@gmail.com",
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec5/model-history-sse",
-        "phase": "active",
+        "phase": "closed",
         "touched_at": "2026-11-15T10:02:03Z",
         "impl": {
           "branch": "impl/exec5/model-history-sse/dusk-evoke-geek"
