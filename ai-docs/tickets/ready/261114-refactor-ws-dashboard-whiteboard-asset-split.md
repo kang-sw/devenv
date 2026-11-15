@@ -123,3 +123,58 @@ Verification:
 - Exercise affected initialization, controls, scroll/focus preservation and frame/card identity paths using the existing harness. Keep all assertions and report any known baseline failure distinctly from a new failure.
 - Verify the published move map covers every moved region and all registration changes, so ongoing TASK3/TASK5/723/675 and other branches can rebase mechanically.
 - Report the pause boundary and hand control back to MAIN before new UI starts resume. MAIN alone chooses and performs any daemon deployment; a worker does not infer deployment authority from this ticket.
+
+## Integration Result (0c46ba103) - 2026-11-15
+
+This records MAIN's bounded exact-099 rework/handoff, not a completed Phase 1 or
+full browser acceptance. The ticket remains ready; fresh whiteboard verification
+is explicitly pending and MAIN owns the next disposition.
+
+- **Integration:** `0c46ba103ccab58f8c432dbe7f0a2f998e879d91` concludes MAIN's
+  pending merge, parents `922a2d81abbbd7c6351f6a782c38c0db533f58a8` and exact
+  `09998d57986f9d0f716036115452e1cb912d1f28`. All four originals were rebuilt
+  from 099 before re-extraction. The [current map](../assets/261114-refactor-ws-dashboard-whiteboard-asset-split/move-map-09998d579.md)
+  records every range; no newer develop head or old split side was substituted.
+- **Verified source contract:** the three separator-free assembled assets equal
+  exact 099 byte-for-byte; the entire upstream harness is reconstructed by
+  inversing only the explicit factory/source-reader adapters. Single-IIFE scope,
+  evaluation order, CSS cascade and upstream fixture/history edits are retained.
+- **Seven Node commands, all exit 0 at tested head 0c46ba103:**
+  `node --test scripts/board-headless/split.test.mjs` (5 tests, none skipped),
+  `node --check scripts/board-headless.mjs`,
+  `node --check scripts/board-headless/toolbar-overview.mjs`,
+  `node --check scripts/board-headless/shared-actions.mjs`,
+  `node agents-plugin-tool/internal/wsdashboard/testdata/lead-popover.test.cjs`,
+  `node agents-plugin-tool/internal/wsdashboard/testdata/search-palette.test.cjs`,
+  `node --test agents-plugin-tool/internal/wsdashboard/testdata/task_badges.test.cjs`.
+  `BOARD_SPLIT_BASELINE` was the full exact-099 hash.
+- **Full dashboard:** `go test ./internal/wsdashboard -count=1 -timeout=5m`
+  exited 1 (172.457s). Failing tests: `TestCSSClassesDoNotCollideAcrossModules`
+  (.d/.over/.wait), `TestLabelRouteSavesShowsAndResets`,
+  `TestOverviewPageIntegration`, `TestGearHoldsTheThemeSection`. This is not PASS.
+- **Required attribution:** on MAIN's clean exact-099 checkout and candidate
+  0c46ba103, `go test ./internal/wsdashboard -run
+  '^Test(LabelRouteSavesShowsAndResets|OverviewPageIntegration|GearHoldsTheThemeSection)$'
+  -count=1 -timeout=60s` exited 1 on both. All three fail with the same 213
+  assertion lines; no candidate-only failure or repair. MAIN's 05:45:57 relay
+  independently classifies the CSS failure as pre-split baseline/nonblocking;
+  this worker did not rerun or repair CSS.
+- **Whiteboard remains unrun:** the continuation refused whole-operation
+  admission at 05:52:06Z. No fresh `go test ./internal/wswhiteboard -count=1
+  -timeout=5m` package exit exists; its controller's exit 1 is not a test result.
+  MAIN accepted the honest pending-verification handoff and forbade more launches.
+- **Environment/evidence:** all execution was offline (`GOPROXY=off`,
+  `GOSUMDB=off`, `GOTOOLCHAIN=local`). The first launch stopped before its Node
+  suite because the private recorder still guarded the old pin pair. Only those
+  two private constants were rebound for the fresh run; original failed evidence
+  and product/tests were not repaired. Raw records remain private under cache
+  roots `3e3bef94`, `d3e55baa` and `615b494e`, not committed log bundles. Complete
+  stdout/stderr was read. Every executed controller has complete owned cleanup,
+  I/O, external exit and post-scan evidence; retained-identity matches/unknowns
+  are empty, not an exhaustive global-process absence claim.
+- **Omitted:** whiteboard execution after admission refusal; new browsers,
+  screenshots/visual comparison, Lite, resync, runtime actions, phase closure and
+  ticket closure. Old Lite proves only its old head; original browser failures
+  remain in `261115-bug-ws-dashboard-remaining-browser-harness-gaps`, unchanged.
+  MAIN retains merging, UI-start pause, baseline follow-ups and worktree release.
+
