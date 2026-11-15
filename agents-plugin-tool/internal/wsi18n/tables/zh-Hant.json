@@ -1982,5 +1982,6 @@
   "js.update.current": "已是最新版本 (v{0})",
   "js.update.failed": "檢查更新失敗",
   "js.update.downloadfailed": "下載更新失敗：{0}",
-  "js.update.applyfailed": "無法套用更新：{0}"
+  "js.update.applyfailed": "無法套用更新：{0}",
+  "js.update.downloadpage": "開啟下載頁面"
 }

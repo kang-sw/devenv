@@ -651,7 +651,10 @@
   // a browser tab (or an older shell) never shows the row or the toasts.
   // Status: { state, version, message, skipped, phase: { phase, version,
   // skipped } }; state drives the toast, phase (unchecked | none |
-  // available | ready) the settings line.
+  // available | ready) the settings line. downloadPage, when the shell sends
+  // it, adds [Open download page] (replacing [Update] on available: a shell
+  // that does not update itself); the link opens in the system browser
+  // through the shell's window-open handler.
   function desktopUpdate() {
     var api = window.werkschaftDesktop && window.werkschaftDesktop.update;
     var card = gmenu && gmenu.querySelector(".gmenu");
@@ -690,18 +693,20 @@
       if (!s || typeof s.state !== "string") return;
       if (s.phase) phaseLine(s.phase);
       var v = String(s.version || ""), m = String(s.message || "");
+      var page = typeof s.downloadPage === "string" && /^https:\/\//.test(s.downloadPage) ? s.downloadPage : "";
+      var pageAct = page ? [{ label: wsT("js.update.downloadpage"), run: function () { window.open(page, "_blank", "noopener"); } }] : [];
       if (s.state === "available") {
-        toast(wsT("js.update.available", v) + (s.skipped ? " " + wsT("js.update.skipped") : ""), { sticky: true, dismiss: close, actions: [
-          { label: wsT("js.update.install"), run: function () { api.download(); } },
-          { label: wsT("js.update.skip"), run: function () { api.skip(v); } }] });
+        toast(wsT("js.update.available", v) + (s.skipped ? " " + wsT("js.update.skipped") : ""), { sticky: true, dismiss: close, actions:
+          (page ? pageAct : [{ label: wsT("js.update.install"), run: function () { api.download(); } }]).concat(
+          [{ label: wsT("js.update.skip"), run: function () { api.skip(v); } }]) });
       } else if (s.state === "downloading") toast(wsT("js.update.downloading", v), { sticky: true });
       else if (s.state === "ready") {
         toast(wsT("js.update.ready", v), { sticky: true, dismiss: close, actions: [
           { label: wsT("js.update.restart"), run: function () { api.restart(); } }] });
       } else if (s.state === "current") toast(wsT("js.update.current", v));
       else if (s.state === "error") toast(wsT("js.update.failed"), { kind: "warn" });
-      else if (s.state === "download-error") toast(wsT("js.update.downloadfailed", m), { kind: "warn", sticky: true, dismiss: close });
-      else if (s.state === "apply-error") toast(wsT("js.update.applyfailed", m), { kind: "warn", sticky: true, dismiss: close });
+      else if (s.state === "download-error") toast(wsT("js.update.downloadfailed", m), { kind: "warn", sticky: true, dismiss: close, actions: pageAct });
+      else if (s.state === "apply-error") toast(wsT("js.update.applyfailed", m), { kind: "warn", sticky: true, dismiss: close, actions: pageAct });
     });
   }
   if (!shell) trackerStart();

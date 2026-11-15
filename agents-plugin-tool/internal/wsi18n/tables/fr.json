@@ -1982,5 +1982,6 @@
   "js.update.current": "Vous avez la dernière version (v{0})",
   "js.update.failed": "Échec de la recherche de mises à jour",
   "js.update.downloadfailed": "Échec du téléchargement de la mise à jour : {0}",
-  "js.update.applyfailed": "Impossible d'appliquer la mise à jour : {0}"
+  "js.update.applyfailed": "Impossible d'appliquer la mise à jour : {0}",
+  "js.update.downloadpage": "Ouvrir la page de téléchargement"
 }

@@ -1982,5 +1982,6 @@
   "js.update.current": "최신 버전입니다 (v{0})",
   "js.update.failed": "업데이트 확인 실패",
   "js.update.downloadfailed": "업데이트 다운로드 실패: {0}",
-  "js.update.applyfailed": "업데이트를 적용할 수 없습니다: {0}"
+  "js.update.applyfailed": "업데이트를 적용할 수 없습니다: {0}",
+  "js.update.downloadpage": "다운로드 페이지 열기"
 }

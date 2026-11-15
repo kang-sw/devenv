@@ -1982,5 +1982,6 @@
   "js.update.current": "最新バージョンです (v{0})",
   "js.update.failed": "更新の確認に失敗しました",
   "js.update.downloadfailed": "更新のダウンロードに失敗しました: {0}",
-  "js.update.applyfailed": "更新を適用できません: {0}"
+  "js.update.applyfailed": "更新を適用できません: {0}",
+  "js.update.downloadpage": "ダウンロードページを開く"
 }

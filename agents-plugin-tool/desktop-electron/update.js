@@ -13,6 +13,8 @@ const { execFile, spawn } = require('node:child_process');
 const REPO = 'kang-sw/werkschaft';
 const FEED = 'https://api.github.com';
 const SUMS = 'Werkschaft-desktop-SHA256SUMS';
+// Where a user installs a release by hand: the same release the feed reads.
+const DOWNLOAD_PAGE = `https://github.com/${REPO}/releases/latest`;
 const USER_AGENT = 'werkschaft-desktop';
 const INTERVAL = 6 * 60 * 60 * 1000;
 const FIRST_CHECK = 8000;
@@ -276,10 +278,17 @@ function spawnDetached(command, args, logFile) {
 // toast keys on state (available | downloading | ready | current | error |
 // download-error | apply-error), the settings line on phase, the updater's
 // standing state: unchecked | none | available | ready ({ phase, version, skipped }).
+// downloadPage, when present, asks the toast for an [Open download page]
+// action: on every download-error / apply-error, and on available where the
+// app does not update itself (it then replaces [Update]).
 function createUpdater({ version, userData, packaged, platform = process.platform, arch = process.arch,
   execPath = process.execPath, argv = process.argv.slice(1), pid = process.pid, feed = process.env.WERKSCHAFT_UPDATE_FEED || FEED,
   send = () => {}, log = message => console.error(message), run = runFile, detach = spawnDetached } = {}) {
   const staging = path.join(userData, 'update');
+  // Windows never updates itself: the detached PowerShell swap helper fails
+  // silently once the app exits, so a Windows user installs by hand from
+  // DOWNLOAD_PAGE and nothing here downloads, stages, or spawns the helper.
+  const selfUpdate = platform !== 'win32';
   const stateFile = path.join(userData, 'update-state.json');
   const stagedFile = path.join(staging, 'staged.json');
   let available = null, busy = false, phase = { phase: 'unchecked', version: null, skipped: false };
@@ -293,6 +302,7 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
   }
   // A staged update newer than this app whose folder is still there.
   function staged() {
+    if (!selfUpdate) return null;
     const value = readJSON(stagedFile);
     return isNewer(value.version, version) && typeof value.app === 'string' && fs.existsSync(value.app) ? value : null;
   }
@@ -324,7 +334,8 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
     const skipped = readState().skipped === found.version;
     setPhase('available', found.version, skipped);
     if (skipped && !manual) return 'skipped';
-    emit({ state: 'available', version: found.version, current: version, skipped, manual });
+    emit({ state: 'available', version: found.version, current: version, skipped, manual,
+      ...(selfUpdate ? {} : { downloadPage: DOWNLOAD_PAGE }) });
     return 'available';
   }
 
@@ -337,6 +348,12 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
 
   async function download() {
     if (busy || !available) return null;
+    if (!selfUpdate) {
+      // Only an older dashboard still offers [Update] here; it shows this message.
+      emit({ state: 'download-error', version: available.version, downloadPage: DOWNLOAD_PAGE,
+        message: `this app does not update itself on Windows; download v${available.version} from ${DOWNLOAD_PAGE}` });
+      return 'download-error';
+    }
     busy = true;
     const target = available;
     emit({ state: 'downloading', version: target.version });
@@ -358,19 +375,20 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       const problem = applyProblem(platform, install, staging);
       // Keep the verified stage either way: fixing the folder lets a later quit apply it.
       if (!problem) setPhase('ready', target.version);
-      emit(problem ? { state: 'apply-error', version: target.version, message: problem }
+      emit(problem ? { state: 'apply-error', version: target.version, message: problem, downloadPage: DOWNLOAD_PAGE }
         : { state: 'ready', version: target.version });
       return problem ? 'apply-error' : 'ready';
     } catch (error) {
       log(`Update download failed: ${error.message}`);
       fs.rmSync(staging, { recursive: true, force: true });
-      emit({ state: 'download-error', version: target.version, message: error.message });
+      emit({ state: 'download-error', version: target.version, message: error.message, downloadPage: DOWNLOAD_PAGE });
       return 'download-error';
     } finally { busy = false; }
   }
 
   // Starts the detached swap helper for a verified stage; true when started.
   function apply(relaunch) {
+    if (!selfUpdate) return false;
     const stage = staged();
     if (!stage) return false;
     const install = installLocation(platform, execPath, packaged);
@@ -405,13 +423,13 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
       log(`Update v${stage.version} failed to apply; discarding it`);
       fs.rmSync(staging, { recursive: true, force: true });
       writeState({ launchAttempt: null });
-      emit({ state: 'apply-error', version: stage.version, message: 'the previous attempt failed; see update-apply.log' });
+      emit({ state: 'apply-error', version: stage.version, message: 'the previous attempt failed; see update-apply.log', downloadPage: DOWNLOAD_PAGE });
       return false;
     }
     // An unwritable folder keeps the stage (and no attempt is spent) and says so.
     const problem = applyProblem(platform, installLocation(platform, execPath, packaged), staging);
     if (problem) {
-      emit({ state: 'apply-error', version: stage.version, message: problem });
+      emit({ state: 'apply-error', version: stage.version, message: problem, downloadPage: DOWNLOAD_PAGE });
       return false;
     }
     writeState({ launchAttempt: stage.version });
@@ -430,6 +448,6 @@ function createUpdater({ version, userData, packaged, platform = process.platfor
     schedule, stop, paths: { staging, stateFile } };
 }
 
-module.exports = { REPO, FEED, SUMS, USER_AGENT, INTERVAL, parseVersion, isNewer, assetName, parseSums,
+module.exports = { REPO, FEED, SUMS, DOWNLOAD_PAGE, USER_AGENT, INTERVAL, parseVersion, isNewer, assetName, parseSums,
   selectRelease, allowedURL, readText, downloadTo, installLocation, extractCommand, stagedApp, applyProblem,
   helperScript, helperCommand, relaunchArgs, windowsCommandLine, createUpdater };
