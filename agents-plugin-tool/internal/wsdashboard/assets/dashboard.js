@@ -429,7 +429,10 @@
     doc.cookie = LANG_COOKIE + "=" + encodeURIComponent(v) + "; Path=/; SameSite=Lax; Max-Age=" + (v ? 31536000 : 0);
     root.setAttribute("data-langpref", v);
     markLang();
-    if (holdsDraft() || (shell && shFrames.some(shHolds))) banner(wsT("js.banner.lang"));
+    if (holdsDraft() || (shell && shFrames.some(shHolds))) {
+      if (shell) toast(wsT("js.banner.lang"));
+      else banner(wsT("js.banner.lang"));
+    }
     else if (framed) window.parent.location.reload();
     else location.reload();
   }

@@ -408,15 +408,24 @@ func TestBoardFirstPageHasNoLayoutControl(t *testing.T) {
 	}
 }
 
-func TestIndexPageListsSessions(t *testing.T) {
+func TestRootKeepsSessionsInTheRailOnly(t *testing.T) {
 	f := startPageFixture(t)
 	code, body := get(t, f.base+"/?frame=1")
 	if code != http.StatusOK {
 		t.Fatalf("GET /?frame=1 = %d", code)
 	}
-	for _, want := range []string{`href="/s/livesession"`, `href="/s/boardsession"`, filepath.Base(f.project), `class="phase replying"`, "no live state"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("index lacks %q", want)
+	for _, absent := range []string{`data-region="sessions"`, `href="/s/livesession"`, `id="finding"`, `class="lanbox"`} {
+		if strings.Contains(body, absent) {
+			t.Errorf("empty root frame carries %q", absent)
+		}
+	}
+	if !strings.Contains(body, `<main id="grid" class="dgrid"></main>`) {
+		t.Error("root main panel is not empty")
+	}
+	_, shell := get(t, f.base+"/")
+	for _, want := range []string{`data-rid=""`, `href="/s/livesession"`, `href="/s/boardsession"`, filepath.Base(f.project), `id="gear"`, `class="meta settings-version"`} {
+		if !strings.Contains(shell, want) {
+			t.Errorf("root shell lacks %q", want)
 		}
 	}
 }

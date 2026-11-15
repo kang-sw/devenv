@@ -118,7 +118,7 @@ dot inside the badge instead (r-head), and the stylesheet hides this one. */}}
 The footer button survives usage redraws; the existing rail popover controller
 keeps the card positioned and returns focus even after a rail replacement.
 Layout/input preferences also remain available before a session is selected. */}}
-{{define "settings"}}<div class="rpop settings-pop" id="gmenu" role="dialog" aria-label="{{t "drawer.settings"}}" tabindex="-1" hidden><div class="sphd">{{t "drawer.settings"}}<button type="button" class="usage-close" id="settings-close" aria-label="{{t "js.card.close"}}">×</button></div><div class="gmenu gcard">{{template "gearitems" true}}</div></div>{{end}}
+{{define "settings"}}<div class="rpop settings-pop" id="gmenu" role="dialog" aria-label="{{t "drawer.settings"}}" tabindex="-1" hidden><div class="sphd">{{t "drawer.settings"}}<button type="button" class="usage-close" id="settings-close" aria-label="{{t "js.card.close"}}">×</button></div><div class="gmenu gcard">{{template "gearitems" true}}</div><span class="meta settings-version">v{{.Version}}</span>{{with .LAN}}<div class="lanbox"><b>{{t "lan.on"}}</b> {{t "lan.open"}}{{range .URLs}}<code class="lanurl">{{.}}</code>{{end}}<span class="lannote">{{tcode "lan.note" .TokenFile}}</span></div>{{end}}</div>{{end}}
 
 {{define "gearitems"}}{{if .}}<span class="gt">{{t "gear.layout"}}</span><button data-layout="auto" aria-pressed="false"><span class="gk">-</span><span>{{t "gear.layout.auto"}}<span class="gs">{{t "gear.layout.auto.sub"}}</span></span></button><button data-layout="split" aria-pressed="false"><span class="gk">A</span><span>{{t "gear.layout.split"}}<span class="gs">{{t "gear.layout.split.sub"}}</span></span></button><button data-layout="tabs" aria-pressed="false"><span class="gk">B</span><span>{{t "gear.layout.tabs"}}<span class="gs">{{t "gear.layout.tabs.sub"}}</span></span></button><span class="gt gt2">{{t "gear.input"}}</span><button data-input="enter" aria-pressed="false"><span class="gk">&crarr;</span><span>{{t "gear.input.enter"}}<span class="gs">{{t "gear.input.enter.sub"}}</span></span></button><button data-input="mod" aria-pressed="false"><span class="gk">^&crarr;</span><span>{{t "gear.input.mod"}}<span class="gs">{{t "gear.input.mod.sub"}}</span></span></button>{{end}}<span class="gt{{if .}} gt2{{end}}">{{t "gear.theme"}}</span><button data-theme-set="" aria-pressed="false"><span class="gk">&#9680;</span><span>{{t "gear.theme.auto"}}<span class="gs">{{t "gear.theme.auto.sub"}}</span></span></button><button data-theme-set="light" aria-pressed="false"><span class="gk">&#9675;</span><span>{{t "gear.theme.light"}}</span></button><button data-theme-set="dark" aria-pressed="false"><span class="gk">&#9679;</span><span>{{t "gear.theme.dark"}}</span></button><span class="gt gt2">{{t "gear.language"}}</span><select id="glang" aria-label="{{t "gear.language"}}"><option value="">{{t "gear.lang.auto"}}</option>{{range langs}}<option value="{{.Code}}">{{.Name}}</option>{{end}}</select><span class="gs gh">{{t "gear.lang.auto.sub"}}</span><span class="gn">{{t "gear.saved"}}</span>{{end}}
 
@@ -311,22 +311,23 @@ line, the head's failure chip, and a rail row's error ring title. */}}
 {{define "mailhead"}}<span class="arr">{{if eq .Direction "sent"}}→{{else}}←{{end}}</span>{{if .PeerLinked}}<a class="mpeer" href="/s/{{.PeerReplyID}}"{{if .PeerLabel}} title="{{.Peer}}"{{end}}>{{or .PeerLabel .Peer}}</a>{{else}}<span class="mpeer">{{.Peer}}</span>{{end}}<span class="mfirst">: {{.Title}}</span>{{template "clock" .At}}{{end}}
 
 {{define "index"}}<!DOCTYPE html>
-<html data-mode="index" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .Local}} data-sysopen="1"{{end}}{{if .Frame}} data-frame="1"{{end}}>
+<html data-mode="index" data-rid="" data-assets="{{.Assets.ID}}" data-wb-titlehost data-lang="{{lang}}" data-langpref="{{.LangPref}}"{{with .Theme}} data-theme="{{.}}"{{end}}{{if .Local}} data-sysopen="1"{{end}}{{if .Frame}} data-frame="1"{{end}}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{pwa .Theme}}
 <title>ws dashboard</title>
 <style>{{.Assets.WhiteboardCSS}}</style>
 <style>{{.Assets.CSS}}</style>
 <style>{{.Assets.TrackerCSS}}</style></head>
-<body class="dash index">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap{{if not .Frame}} narrow{{end}}">
-<div class="top">{{if .Frame}}{{template "railbtn"}}{{end}}<h1>ws dashboard</h1><span class="meta">v{{.Version}}</span>{{template "sse"}}{{template "qsslot"}}</div>
-{{if .Frame}}<div class="dbody">{{template "railph"}}<main class="ixmain">{{end}}
-{{with .LAN}}<div class="lanbox"><b>{{t "lan.on"}}</b> {{t "lan.open"}}{{range .URLs}}<code class="lanurl">{{.}}</code>{{end}}<span class="lannote">{{tcode "lan.note" .TokenFile}}</span></div>{{end}}
-{{region . "sessions"}}
-{{if .Frame}}</main></div>{{end}}
+<body class="dash live">{{.Assets.WhiteboardSprite}}{{.Assets.Sprite}}<div class="dwrap">
+<div class="top">{{template "railbtn"}}{{region . "head"}}{{template "sse"}}{{template "qsslot"}}</div>
+<div class="dbody">{{if .Frame}}{{template "railph"}}{{else}}<aside id="rail" class="rail" aria-label="{{t "rail.title"}}">{{region . "rail"}}</aside><div class="rscrim" id="rscrim"></div>{{template "memopad"}}{{end}}<main id="grid" class="dgrid"></main></div>
 </div>
+{{if not .Frame}}{{template "settings" .}}{{end}}
 <script>{{i18n}}</script>
 <script>{{.Assets.ToastScript}}</script>
 <script>{{.Assets.TrackerScript}}</script>
+<script>{{.Assets.RailScript}}</script>
+<script>{{.Assets.MemoScript}}</script>
+<script>{{.Assets.UsageScript}}</script>
 <script>{{.Assets.ShellScript}}</script>
 <script>{{.Assets.Script}}</script>
 </body></html>
