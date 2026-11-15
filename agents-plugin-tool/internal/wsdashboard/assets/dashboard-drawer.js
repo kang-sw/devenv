@@ -437,7 +437,7 @@
     doc.addEventListener("keydown", function (e) {
       if (e.key !== "Escape" || !drOpen || e.defaultPrevented) return;
       if (lmenu || (gmenu && !gmenu.hidden)) return;
-      if (ctext && doc.activeElement === ctext) return;
+      if (ctext && (doc.activeElement === ctext || ctext.wsc && doc.activeElement === ctext.wsc.editor)) return;
       if (drMode === "search" && sbody.contains(doc.activeElement)) return;
       drSetOpen(false);
     }, true);

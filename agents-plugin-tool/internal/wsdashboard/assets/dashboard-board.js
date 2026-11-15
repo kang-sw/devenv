@@ -98,6 +98,7 @@
     if (board) {
       indexFrames();
       if (window.wbForm) window.wbForm();
+      bindCapsuleNotes();
       mermaid(ins);
       syncChips();
       // The notes came back with their markers (writeAnswers); their image
