@@ -244,6 +244,9 @@
 .rail .kidtog .i { width: 12px; height: 12px; stroke-width: 1.8; transition: transform .15s; }
 .rail .kidtog:hover, .rail .kidtog:focus-visible { color: var(--wb-primary); background: var(--wb-muted); outline: none; }
 .rail .rs.kcol .kidtog .i { transform: rotate(-90deg); }
+/* beside the toggle's count: the descendants at work, "(N)", pulsing
+   like the robot badge; absent while none works */
+.rail .drkwork { flex: none; margin-left: -2px; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--wb-primary); cursor: default; animation: rail-blink 1.4s ease-in-out infinite; }
 .rail .rbt { display: inline-flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 45%; font-family: var(--wb-mono); font-size: 10.5px; font-weight: 600; color: var(--wb-muted-fg); white-space: nowrap; }
 .rail .rbt .i { width: 10px; height: 10px; flex: none; }
 .rail .rbt span { overflow: hidden; text-overflow: ellipsis; }
@@ -587,5 +590,6 @@ html:not([data-sysopen]) .rail .drarch { display: none; }
   .rail .bots .i { animation: none; }
   .rail .hi .rrun, .rail .hi.perm { animation: none; }
   .rail .kidtog .i { transition: none; }
+  .rail .drkwork { animation: none; }
 }
 

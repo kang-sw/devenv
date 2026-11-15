@@ -1602,6 +1602,8 @@
   "rail.kids.other": "сессий под этой: {0} — показать или скрыть",
   "rail.kids.approval.one": "сессий под этой ждут подтверждения: {0}",
   "rail.kids.approval.other": "сессий под этой ждут подтверждения: {0}",
+  "rail.kids.busy.one": "сессий под этой работают: {0}",
+  "rail.kids.busy.other": "сессий под этой работают: {0}",
   "rail.title": "Сессии",
   "rail.waiting": "лид ждёт",
   "rail.working": "лид работает",

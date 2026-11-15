@@ -1602,6 +1602,8 @@
   "rail.kids.other": "{0} Sitzungen unter dieser: ein- oder ausblenden",
   "rail.kids.approval.one": "{0} Sitzung unter dieser wartet auf Freigabe",
   "rail.kids.approval.other": "{0} Sitzungen unter dieser warten auf Freigabe",
+  "rail.kids.busy.one": "{0} Sitzung unter dieser arbeitet",
+  "rail.kids.busy.other": "{0} Sitzungen unter dieser arbeiten",
   "rail.title": "Sitzungen",
   "rail.waiting": "Lead wartet",
   "rail.working": "Lead arbeitet",
