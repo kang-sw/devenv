@@ -180,6 +180,7 @@
   "js.files.float": "エクスプローラーを浮動表示",
   "js.files.folder": "フォルダー",
   "js.files.open.card": "カードとして開く",
+  "js.files.selected": "選択",
   "js.files.send": "セッションに添付",
   "js.files.tab.close": "タブを閉じる",
   "js.files.tab.new": "新しいタブ",
