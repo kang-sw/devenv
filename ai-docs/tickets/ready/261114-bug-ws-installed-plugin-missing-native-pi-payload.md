@@ -408,6 +408,160 @@ DryRun), independent review, real marketplace activation and live rollout
 remain unrun. EXEC5 owns independent review; live snapshot/cache/daemon/session
 replacement remains separately owner-gated. The ticket stays in `ready/`.
 
+#### Edition (5a2f1e305) - 2026-11-16
+
+EXEC5 review round 1 on the rebased branch (`ea80c8103`; original implementation
+and Result are now `d7e3ab812` and `d45b057fd`). Source fixes:
+`fc5686f98c203c9610465116db38fe7d0aaa1901`. Last product commit, containing the
+round's **single** bundle/payload regeneration:
+`5a2f1e305d2c56f30a8cda96fc82b9f18698526f`. The preceding Result is unchanged.
+
+- **I1 VERIFIED.** `StalePayload` separates source drift from archive invalidity.
+  With an existing source sibling, `--prefer-source` validates first, keeps a
+  current local payload, and selects the sibling only on source drift while
+  logging the stale input and regeneration command to stderr. Invalid local
+  archives still take the visible bridge, never a sibling substitute.
+  `pi_payload_review_test.go:15,51` proves current source -> local, changed source
+  -> sibling with no bridge warning, and an internally stale package-only
+  bundle -> bridge warning; `pi_payload_test.go:65` retains package-only and
+  corrupt-local-with-sibling coverage. The verbose selection test printed
+  `using repository sibling: ... stale: agents-plugin-pi/src/index.ts` and the
+  regeneration command, and passed.
+- **I2 VERIFIED.** `agents-plugin/bin/ws-pi-payload.py:161-226` checks every
+  expected file byte and all other files/directories, allowing only a real
+  top-level `.runtime/` state directory. A failed hit re-extracts into a private
+  stage, verifies it, and publishes by directory rename with rollback. A healthy
+  hit preserves launcher state; repair replaces the damaged closure (including
+  its disposable runtime downloads). `test_native_pi_payload.py:65` adds
+  `.runtime/test-platform/last-launch-error` and proves reuse, then independently
+  mutates an expected file, adds an unauthorized file and adds an empty
+  directory; all three are repaired without manual deletion.
+- **I3 VERIFIED.** `drift_input` (`ws-pi-payload.py:34`) and producer copying
+  exclude owner-overlaid skills/rsrc, runtime, dashboard defaults and launcher
+  from source drift inputs. All native sources, bundle script, lock, package
+  manifest, dist/wordlist, generator, native guides and non-overlaid config
+  remain covered. The freshness algorithm is unchanged from
+  `agents-plugin-tool/internal/wsagent/pi_bundle.go:35-66`.
+  `.DS_Store`/`Thumbs.db` are omitted from producer and source/overlay inventories.
+  Whole-tree owner replacement removes obsolete archive resources too.
+  `test_native_pi_payload.py:112` proves bundle-input edits still fail while
+  either package's skills and owner resources/junk do not cause source drift;
+  materialized owner resources are exact, including deletions.
+  Tests at `:186,226` prove stale source is a loud installer warning naming the
+  input/regeneration command, while invalid archives remain fatal. Bare
+  `--check-source` still exits 2 on stale input, so release gates remain fatal.
+  Native bundle freshness passed in Go; both actual SDK fixtures loaded the
+  complete carried owner skill inventory with zero diagnostics
+  (`pi-native-payload-identity.test.mjs:300-307`).
+- **I4 VERIFIED.** `agents-plugin-pi/test/web-package.test.ts:48` restores
+  `npm pack --dry-run --json --ignore-scripts --offline`, with isolated HOME and
+  an empty npm cache. It requires both helpers and bundled pi-web-access
+  README/LICENSE, pins bundledDependencies/peerDependencies, and excludes all
+  three host cores from the pack inventory. Prepared copies assert all three
+  absent cores and run helper probes by default using the local development
+  host when `WS_PI_TEST_CLI` is unset. The exact final Node run unset that
+  variable and passed. The real tarball install/update and tracked-lock
+  Git-install checks remain at `:118`, explicitly gated by
+  `WS_PI_TEST_NETWORK=1`; that lane was **not run** under the ticket's offline
+  rule. No packing assertion was discarded to obtain a pass.
+- **I5 VERIFIED.** `pi_payload.go:37-40` allows 300s, based on the review's
+  approximately 28s cold macOS extraction of 9,680 files/~70MB. A fresh isolated
+  extraction here measured **1.61s real** (`/usr/bin/time -p`, exit 0); the
+  larger bound allows slower disks/antivirus. `cleanup_stages` (`:147` in the
+  Python helper) removes only owned UUID stages or legacy mkdtemp stage names
+  older than one hour, never recent stages or completed cache entries.
+  `test_native_pi_payload.py:166` proves abandoned-stage cleanup and preservation
+  of a recent stage and an unrelated directory. This is not cache GC.
+- **M1 VERIFIED.** `pi_payload.go:43-55` separates stdout/stderr; selection
+  diagnostics are logged without entering the returned path and failure errors
+  include stderr. `TestPiPreparedPayloadSeparatesDiagnostics` at
+  `pi_payload_review_test.go:92` passed both success and failure assertions.
+- **M3 VERIFIED.** `MATERIALIZER_SCHEMA = 2` participates in the cache key
+  (`ws-pi-payload.py:19,183`); `test_native_pi_payload.py:156` proves schema
+  changes choose a different entry while leaving the previous entry intact.
+- **M5 VERIFIED.** `workflow-owner.ts:13` sets wsflow's existing `setup` value,
+  retaining `ws.setup` for ws. The owner unit test compares against the actual
+  package `.mcp.json`, and both real-host identity fixtures assert the resulting
+  child environment. No manifest/API tool name changed. M2/M4/M6 were not done.
+
+**Exact final verification commands.** Commands below used the isolated test
+HOME/USERPROFILE and WS/npm cache/config paths, with no external network:
+
+```sh
+export HOME=/tmp/exec5/native-pi/round1/home USERPROFILE=/tmp/exec5/native-pi/round1/home
+export WS_CACHE_HOME=/tmp/exec5/native-pi/round1/cache
+export WS_CONFIG_HOME=/tmp/exec5/native-pi/round1/config
+export npm_config_cache=/tmp/exec5/native-pi/round1/npm-cache
+python3 -B -m unittest discover -s agents-plugin/tests
+python3 -B -m unittest discover -s agents-plugin-wsflow/tests
+env -u WS_PI_TEST_CLI -u WS_PI_TEST_NETWORK -u WS_PI_SPAWN_ROLE -u WS_PI_EXPLORE_MODE \
+  -u WS_PI_DELEGATION_POLICY -u WS_PI_LEAD_MEMORY_LOG node --test \
+  agents-plugin-pi/test/helper-host.test.mjs agents-plugin-pi/test/workflow-owner.test.ts \
+  agents-plugin-pi/test/web-package.test.ts agents-plugin-pi/test/child-launch-guard.test.ts \
+  agents-plugin-pi/test/native-tool-registration.test.ts agents-plugin-pi/test/skills-dir.test.ts
+(
+  cd agents-plugin-tool
+  export GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local
+  export GOPATH=/Users/kang-sw/go GOCACHE=/Users/kang-sw/Library/Caches/go-build
+  export WS_CACHE_HOME=/tmp/exec5/native-pi/round1/go-cache
+  export WS_CONFIG_HOME=/tmp/exec5/native-pi/round1/go-config
+  go test ./internal/wsagent ./internal/wsrsrc -count=1
+  go test ./internal/wsagent -count=1 -v \
+    -run 'TestPiPrepared(SourceDriftUsesSiblingWithoutBridge|PayloadSeparatesDiagnostics)'
+  go build ./...
+  go vet ./...
+)
+for product in agents-plugin agents-plugin-wsflow; do
+  env PATH=/usr/bin:/bin HOME=/tmp/exec5/native-pi/round1/home \
+    WS_CACHE_HOME=/tmp/exec5/native-pi/round1/cache \
+    WS_CONFIG_HOME=/tmp/exec5/native-pi/round1/config \
+    /opt/homebrew/bin/python3 -I -B "$product/bin/ws-pi-payload.py" \
+    --plugin "$product" --check-source "$PWD"
+done
+for artifact in native-pi/manifest.json native-pi/payload.zip bin/ws-pi-payload.py; do
+  cmp "agents-plugin/$artifact" "agents-plugin-wsflow/$artifact"
+done
+```
+
+Outcomes: Go wsagent **ok (80.872s)**, wsrsrc **ok (1.583s)**; verbose selection
+and stderr tests **PASS (4.008s)**; build/vet and Node-less gates **exit 0**.
+Python **151 tests OK (2 existing Windows skips)** and **22 tests OK (2 existing
+Windows skips)**; Node **44 passed, 1 intentional network-lane skip, 0 failed**.
+The existing Python unclosed-stream ResourceWarnings remain non-failing.
+
+Both actual Pi **1.5.2 CLI-adjacent SDK** identity tests also passed (one test per
+product, no skips), using the preceding Result's identity loop with every
+`current` scratch-path component changed to `round1` and canonical
+`/private/tmp/exec5/native-pi/round1/identity-final-<product>.XXXXXX` fixture paths.
+The new entry SHA-256 is
+`af1e77fb4a83b50be87da5e518f1509c5b2787bcadd43a8fd9b375a245b732fd`
+in both packages. Physical host classes/registry, exact child CLI/extension,
+owner setup environment, full carried skills and unchanged-payload teardown
+assertions all passed. Logs: `/tmp/exec5/native-pi/round1/identity-{ws,wsflow}.log`.
+MCP/socket/child-start boundaries remained mocked; no live daemon or provider ran.
+
+The only producer regeneration command was
+`python3 -B agents-plugin-pi/scripts/prepare-native-payload.py --offline --npm-cache /tmp/exec5/native-pi/current/producer/npm-cache`,
+after `npm run bundle` under the original isolated producer environment. Both
+exited 0. Both archives contain **9,680 files / 138 production dependencies** and
+**95 drift inputs**; byte inspection found **zero host cores, producer paths or
+OS junk**. All three mirrored distribution files compare byte-identically.
+
+**New payload size per package:** ZIP **19,074,902 bytes**, manifest **1,275,049
+bytes**, total **20,349,951 bytes** (**-11,108 bytes** versus the pre-review
+payload; **+20,349,951 bytes** versus develop's absent payload). Bundle:
+**1,620,395 bytes** (+25). Generated artifacts were committed once in this round,
+in the last product commit.
+
+**Compatibility/boundaries:** T0. The producer writes additive package assets
+(`prepare-native-payload.py:126-153`); the new reader retains sibling/bridge
+behavior (`pi_lead.go:125-137`). The pre-ticket `ea80c8103` reader at
+`pi_lead.go:121-129` ignores these assets and keeps its prior sibling/bridge path
+(`:41-59`); neither reader rewrites them, and no migration is needed on reopen.
+No hard boundary was hit. Native Windows/PowerShell, the opt-in real npm install
+lane, live marketplace activation and rollout remain unrun. Re-review is handed
+to EXEC5; the ticket remains `ready/` and the original live-rollout gate remains.
+
 ## Owner Decisions (2026-11-16)
 
 - (1183)=a: commit the trimmed native Pi payload into the public repo.
