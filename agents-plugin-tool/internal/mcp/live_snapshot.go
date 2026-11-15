@@ -321,7 +321,7 @@ func (ls *liveSession) finish() {
 	snap := ls.state.Snapshot(currentLiveSeams().now().UnixMilli())
 	ls.mu.Unlock()
 	snap.Repo = repo
-	data, err := json.Marshal(snap)
+	data, err := json.Marshal(snap.ForDisk())
 	if err == nil {
 		err = ls.withSlotOwner(func() error { return writeLiveSnapshot(ls.dir, data) })
 	}
@@ -733,7 +733,7 @@ func (ls *liveSession) fire() {
 	var err error
 	if write {
 		var data []byte
-		data, err = json.Marshal(snap)
+		data, err = json.Marshal(snap.ForDisk())
 		if err == nil {
 			err = ls.withSlotOwner(func() error { return writeLiveSnapshot(ls.dir, data) })
 		}
