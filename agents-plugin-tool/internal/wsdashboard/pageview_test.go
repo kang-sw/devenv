@@ -670,13 +670,19 @@ func TestConversationMailLinesAndLiveState(t *testing.T) {
 	}
 }
 
-func TestBoardFirstPageCarriesNoLiveState(t *testing.T) {
+func TestSavedConversationCarriesNoLiveState(t *testing.T) {
 	now := testNow
-	v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Now: now,
-		Ring: []wslive.RingRecord{{Name: "n", At: now, RingEntry: wslive.RingEntry{Kind: wslive.RingUser, Text: "x"}}},
-		Page: PageContent{HasBoard: true, Contacts: []Contact{{Address: "id:peer", ReplyID: "peer", LastExchange: now}}}})
-	if v.Adapter || len(v.Conversation.Entries) != 0 || len(v.Tree.Peers.Rows()) != 0 {
-		t.Fatalf("board-first view carries live state: %+v", v)
+	stale := liveSnap(now.Add(-time.Hour), wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseReplying}, Reply: &wslive.Reply{Text: "stale reply"}})
+	for _, snap := range []*wslive.Snapshot{nil, stale} {
+		v := buildSessionView(pageInputs{Session: liveSession("self", "/p", now), Snapshot: snap, Now: now,
+			Ring: []wslive.RingRecord{{Name: "n", At: now, RingEntry: wslive.RingEntry{Kind: wslive.RingUser, Text: "x"}}},
+			Page: PageContent{HasBoard: true, Contacts: []Contact{{Address: "id:peer", ReplyID: "peer", LastExchange: now}}}})
+		if v.Adapter || v.Mode() != modeHistory || len(v.Tree.Peers.Rows()) != 0 || len(v.Tree.Agents) != 0 || v.Conversation.Reply != nil || v.Conversation.Phase != "" || v.Conversation.Permission != nil || v.Conversation.ToolGap != nil || v.Host != nil || len(v.Commands) != 0 {
+			t.Fatalf("saved history carries live state: %+v", v)
+		}
+		if !v.Live || len(v.Conversation.Entries) != 1 || v.Conversation.Entries[0].Text != "x" {
+			t.Fatalf("saved history changed registration liveness or lost persisted text: %+v", v)
+		}
 	}
 }
 

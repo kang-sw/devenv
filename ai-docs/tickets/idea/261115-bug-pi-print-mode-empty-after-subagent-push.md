@@ -48,3 +48,19 @@ caller therefore cannot rely on a worker that waits on children
 asynchronously. Workaround in use: instruct the worker to block on
 `pi.wait` before ending a turn, and keep a session file (no `--no-session`)
 so the run can be resumed.
+
+## Addendum - 2026-11-15: print mode blocks forever on a never-closing stdin
+
+Two `pi -p --mode json` ticket workers launched from a Claude lead's
+background Bash call produced a 0-byte log and no session file for 12 and
+34 minutes, idling at 0% CPU. `lsof` on the live process showed fd 0 as a
+unix socket the harness keeps open: print mode reads piped stdin when stdin
+is not a TTY and waits for an EOF that never comes, before it creates the
+session. Relaunching with `< /dev/null` started the session immediately.
+Foreground runs (where stdin reached EOF) were unaffected, which is why
+read-only investigations worked and long background workers did not.
+
+- Open question: should print mode skip reading stdin when a message
+  argument is given, or time out with a diagnostic instead of hanging
+  silently? Whatever guidance tells a non-Pi lead how to spawn a Pi worker
+  should close stdin either way.

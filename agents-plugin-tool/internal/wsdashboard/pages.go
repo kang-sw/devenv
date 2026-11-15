@@ -66,6 +66,9 @@ func sessionRegions(mode string) []string {
 	if mode == modeLive {
 		return []string{regionHead, regionGit, regionTree, regionEntries, regionConvLive, regionCtx, regionCmds, regionSLine, regionBoard, regionPanels}
 	}
+	if mode == modeHistory {
+		return []string{regionHead, regionGit, regionEntries, regionBoard, regionPanels}
+	}
 	return []string{regionHead, regionGit, regionBoard, regionPanels}
 }
 
@@ -856,7 +859,7 @@ func (r pageReader) session(replyID string) (SessionView, bool) {
 // readSession is session with the page's refresh inputs: every session the
 // view looked up (replyID first among them, sorted), the files its page
 // source named and the attachments directory its conversation reads, and
-// whether it shows contacts (only a live page does).
+// whether it shows contacts (live or saved conversation history).
 func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, bool) {
 	view, inputs, _, ok, err := r.readSessionWith(replyID, nil, true)
 	return view, inputs, ok && err == nil
@@ -864,8 +867,8 @@ func (r pageReader) readSession(replyID string) (SessionView, refreshInputs, boo
 
 // sessionReads are the store reads one session page read made, which a
 // live render reuses (liveRender): the page source's content (the board
-// panels, the contacts) and, once an adapter showed, the conversation's
-// ring and the board-answer inbox's held and drained entries.
+// panels, the contacts), the saved ring, and (only with an adapter) the
+// board-answer inbox's held and drained entries.
 type sessionReads struct {
 	page          PageContent
 	conversation  bool
@@ -876,8 +879,9 @@ type sessionReads struct {
 // readSessionWith is readSession for a render that may reuse prev, the
 // reads of the page's previous render (nil reads everything): the index
 // entry and the snapshots are read again, every other store is taken from
-// prev, the ring included unless ringChanged. A conversation prev did not
-// read (no adapter showed then) is read now. It returns the reads it used.
+// prev, the ring included unless ringChanged. An inbox prev did not read
+// (no adapter showed then) is read when an adapter arrives. It returns the
+// reads it used.
 func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChanged bool) (SessionView, refreshInputs, *sessionReads, bool, error) {
 	var s Session
 	var page PageContent
@@ -903,18 +907,22 @@ func (r pageReader) readSessionWith(replyID string, prev *sessionReads, ringChan
 	if s.Registration.Hosted && s.Registration.HostPID > 0 {
 		inputs.pids = append(inputs.pids, s.Registration.HostPID)
 	}
-	if adapterPresent(in.Snapshot, in.Now) {
+	present := adapterPresent(in.Snapshot, in.Now)
+	if present || !s.Agent {
 		inbox := sessionInbox(r.dir, replyID)
-		reads.conversation = true
-		if prev != nil && prev.conversation {
-			reads.held, reads.drained, reads.ring = prev.held, prev.drained, prev.ring
-			if ringChanged {
-				reads.ring, _ = r.entries.readRing(replyID, wslive.RingDir(SessionDir(r.dir, replyID)))
-			}
+		if prev != nil && !ringChanged && (prev.conversation || !s.Agent) {
+			reads.ring = prev.ring
 		} else {
 			reads.ring, _ = r.entries.readRing(replyID, wslive.RingDir(SessionDir(r.dir, replyID)))
-			reads.held, _ = r.entries.readHeld(inbox)
-			reads.drained, _ = r.entries.readDrained(replyID, inbox)
+		}
+		if present {
+			reads.conversation = true
+			if prev != nil && prev.conversation {
+				reads.held, reads.drained = prev.held, prev.drained
+			} else {
+				reads.held, _ = r.entries.readHeld(inbox)
+				reads.drained, _ = r.entries.readDrained(replyID, inbox)
+			}
 		}
 		in.Ring, in.Held, in.Drained = reads.ring, reads.held, reads.drained
 		in.AttachDir = wsinbox.AttachmentsDir(inbox)
