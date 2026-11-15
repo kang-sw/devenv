@@ -551,6 +551,9 @@
         "touched_at": "2026-11-15T05:23:26Z"
       }
     },
+    "261115-feat-ws-claude-reasoning-summary-producer": {
+      "registered_at": "2026-11-15T09:31:58Z"
+    },
     "261115-feat-ws-config-get-bulk-keys": {
       "registered_at": "2026-11-15T09:10:04Z",
       "lease": {
