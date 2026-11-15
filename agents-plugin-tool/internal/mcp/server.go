@@ -5461,11 +5461,12 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "tickets.release",
-			"description": "Remove the caller's own lease on a ticket from the origin ticket ownership index. Releasing a lease held by another owner (email, clone, or track) is refused; taking it over is an acquire. Offline on a clone that has used the index, the release is recorded as pending. In a project without the index this returns a plain ok and validates nothing. Defaults to compact text; use format=json for structured output.",
+			"description": "Remove the caller's own lease on a ticket from the origin ticket ownership index. The owner is (git user.email, this clone's id, track); the track is the current branch's merge root unless track is given, which releases this email and clone's lease on that track from any checkout. Releasing a lease held by another owner (email, clone, or track) is refused; taking it over is an acquire. Offline on a clone that has used the index, the release is recorded as pending. In a project without the index this returns a plain ok and validates nothing. Defaults to compact text; use format=json for structured output.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"ticket_stem": stringProperty("Ticket stem (YYMMDD-category-name)."),
+					"track":       stringProperty("Optional track (work line) the caller's own lease is recorded on, when it differs from the current branch's merge root."),
 					"format":      stringProperty(`Optional output format. Use "json" for structured output.`),
 				},
 				"required": []string{"ticket_stem"},

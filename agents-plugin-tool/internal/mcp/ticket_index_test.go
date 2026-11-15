@@ -803,6 +803,37 @@ func TestAcquireTrackResolution(t *testing.T) {
 	x.mustRefuse("tickets.acquire", ixArgs("260101-feat-no-such"), "does not exist")
 }
 
+// An explicit track lets a release drop this email and clone's lease on a
+// track the caller no longer has checked out; the owner match still refuses
+// another email, another clone, or a track that does not hold the lease.
+func TestReleaseExplicitTrack(t *testing.T) {
+	e := newIxEnv(t)
+	x := e.clone("x", "a@example.com")
+	y := e.clone("y", "b@example.com")
+	x2 := e.clone("x2", "a@example.com")
+	x.init()
+
+	old := x.worktree("x-old", "track/old", "develop")
+	old.acquire(stemAlpha)
+	if got := e.lease(stemAlpha).Track; got != "track/old" {
+		t.Fatalf("lease track = %q", got)
+	}
+	// Omitted track keeps today's behavior: the current branch's merge root.
+	x.mustRefuse("tickets.release", ixArgs(stemAlpha), "track track/old", "not by this track")
+	x.mustRefuse("tickets.release", ixArgs(stemAlpha, "track", "track/other"), "track track/old")
+	y.mustRefuse("tickets.release", ixArgs(stemAlpha, "track", "track/old"), "a@example.com")
+	x2.mustRefuse("tickets.release", ixArgs(stemAlpha, "track", "track/old"), "a@example.com")
+	if e.lease(stemAlpha) == nil {
+		t.Fatal("a refused release dropped the lease")
+	}
+	if out := x.mustCall("tickets.release", ixArgs(stemAlpha, "track", "track/old")); !strings.Contains(out, "status: released") {
+		t.Fatalf("explicit-track release = %s", out)
+	}
+	if l := e.lease(stemAlpha); l != nil {
+		t.Fatalf("lease after explicit-track release = %+v", l)
+	}
+}
+
 // ---- E: origin-closed refusal, close, landing -----------------------------------
 
 // E4, E5 (acquire refusal) and I17 (offline hint).
