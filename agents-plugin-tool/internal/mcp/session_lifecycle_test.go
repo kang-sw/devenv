@@ -123,7 +123,7 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 	keys := NewAgentKeyStore()
 	backend := &lifecycleBackend{}
 	mail := &lifecycleObservedMail{LeadMailbox: NewLeadMailbox(dir), signals: map[string]int{}}
-	runner := wsagent.NewRunner(wsagent.Options{Dir: dir, Keys: keys, LeadKeys: keys, Holders: lifecycleHolders{}, Mail: mail, Backends: map[string]wsagent.Backend{wsagent.BackendClaude: backend}})
+	runner := wsagent.NewRunner(wsagent.Options{Dir: dir, Keys: keys, LeadKeys: keys, Holders: lifecycleHolders{}, Mail: mail, Backends: map[string]wsagent.BackendRegistration{wsagent.BackendClaude: {Backend: backend, LeadProfile: wsagent.LeadProfileClaude, PermissionModes: wsagent.LeadPermissionModes}}})
 	daemon, err := wsdashboard.StartDaemon(wsdashboard.DaemonOptions{Dir: dir, Agents: runner, Sessions: NewDashboardSessionSource(), PollInterval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
