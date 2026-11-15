@@ -179,3 +179,39 @@ Verification (to be finalized at promotion):
 - Isolated Chromium check: the x sits at the header's right end without
   overlapping the document disclosure or the badge row; screenshot kept.
 - i18n completeness tests; playbook mirror tests.
+
+### Result (8c3a5e3f7) - 2026-11-15
+
+Implemented the dashboard-only rightmost x after existing badges/actions,
+per-topic editable and removable reason capsules, topic dedupe with reason
+focus, draft persistence, and structured `closeRequests` delivery. Requests
+survive failed sends and topic disappearance; send completion retains edits,
+new attachments, and remove/re-add races. Held-message restoration dedupes by
+topic, taking the newest held reason unless the current draft already has one.
+The server validates and preserves requests through inbox rewrites and emits
+the escaped tag after mentions inside each user envelope. Held and delivered
+user bubbles share the existing capsule template, parsed per envelope. All
+three whiteboard playbooks and resource manifests are synchronized.
+
+Decisions: consume the landed asset split by current symbols and owning
+fragments; retain the state-badge lane unchanged. Restore a fullscreen topic
+through its existing back action before focusing the composer, since its
+scrim otherwise covers the reason field; no tab switch or client-side close
+is introduced. Pages without a composer show no inert request action. The
+optional HTTP/inbox field retains the settled T0/minor-mismatch posture and
+adds no MCP argument, route, or schema boundary.
+
+Verification (VERIFIED): full `wsinbox`, `wsi18n`, and `wsrsrc` pass; 89 named
+dashboard tests pass, including the new Node lifecycle/HTTP/envelope contracts
+and adjacent card, draft, command and conversation cases. MCP
+`DashboardInbox|Inbox` tests pass, including delivery and both playbook product
+modes. The wsflow package tests pass with their two platform skips; all three
+resource trees are byte-identical. Full `wswhiteboard` has only the known
+`TestRenderPageEmbedSizeBudget` failure, reproduced on the unchanged base;
+all remaining whiteboard tests pass with that test skipped.
+
+Omitted by owner instruction: child agents and independent review (the lead
+runs one lite review afterwards); browser/Chromium checks, screenshots and
+visual comparison (the owner's post-merge visual check is acceptance under
+UI-fast policy). Responsive visual fit remains INFERRED, not browser-verified.
+The ticket remains in `ready/` for the lead; it was not closed or moved.
