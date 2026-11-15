@@ -1,8 +1,9 @@
 package wsdashboard
 
 import (
+	"context"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -111,17 +112,37 @@ func TestDevAssetsShowEditsWithoutARestart(t *testing.T) {
 func TestDevAssetsReportABrokenTemplateAndRecover(t *testing.T) {
 	dash, _ := devSource(t)
 	f := startPageFixture(t)
-	// Run the production handler to completion before editing the template
-	// again. A successful dev render rebuilds assets for both the regions
-	// and the page; the health client's 500 ms deadline is not a render
-	// contract. The overall test timeout still catches a stalled handler.
-	handler := f.d.Handler()
-	getFrame := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, f.base+"/s/livesession?frame=1", nil)
-		req.RemoteAddr = "127.0.0.1:50000"
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		return rec
+	// Race measurements put recovery at 645–673 ms: both the regions and
+	// the page rebuild dev assets (278–291 ms per build). This is rendering,
+	// not a health probe. Bound the real loopback requests by the test's
+	// deadline, not the health client's unrelated 500 ms performance budget.
+	client := testClient()
+	client.Timeout = 0
+	t.Cleanup(client.CloseIdleConnections)
+	ctx := context.Background()
+	if deadline, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+	requestFrame := func(method, host string) (*http.Response, string) {
+		req, err := http.NewRequestWithContext(ctx, method, f.base+"/s/livesession?frame=1", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if host != "" {
+			req.Host = host
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp, string(body)
 	}
 	path := dash("dashboard.tmpl")
 	good, err := os.ReadFile(path)
@@ -131,14 +152,29 @@ func TestDevAssetsReportABrokenTemplateAndRecover(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{{define "r-head"}}{{if}}{{end}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if rec := getFrame(); rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "render failed") {
-		t.Errorf("a broken template served %d: %s, want 500 with render failed", rec.Code, rec.Body.String())
+	// Even with broken dev assets, the real server must reject an untrusted
+	// Host and route a disallowed method before attempting to render.
+	if resp, body := requestFrame(http.MethodGet, "untrusted.example"); resp.StatusCode != http.StatusForbidden || !strings.Contains(body, "forbidden host") {
+		t.Errorf("an untrusted host served %d: %s, want 403 with forbidden host", resp.StatusCode, body)
+	}
+	if resp, _ := requestFrame(http.MethodPost, ""); resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("a framed POST served %d, want 405", resp.StatusCode)
+	}
+	if resp, body := requestFrame(http.MethodGet, ""); resp.StatusCode != http.StatusInternalServerError || !strings.Contains(body, "render failed") {
+		t.Errorf("a broken template served %d: %s, want 500 with render failed", resp.StatusCode, body)
 	}
 	if err := os.WriteFile(path, good, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if rec := getFrame(); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-region="board"`) {
-		t.Errorf("the fixed template did not recover: %d", rec.Code)
+	resp, body := requestFrame(http.MethodGet, "")
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `data-region="board"`) {
+		t.Errorf("the fixed template did not recover: %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Security-Policy"); got != sessionPageCSP(true) {
+		t.Errorf("recovered frame CSP = %q, want %q", got, sessionPageCSP(true))
+	}
+	if got := resp.Header.Get("X-Frame-Options"); got != "SAMEORIGIN" {
+		t.Errorf("recovered frame X-Frame-Options = %q, want SAMEORIGIN", got)
 	}
 }
 
