@@ -65,8 +65,8 @@ opens an inner background tab), and 761=`a` (split search targets the active
 pane). At 13:23:42, the owner approved the control-attachment design: the
 reusable explorer core exposes selection/navigation events and a swappable
 bottom attachment slot; browse cards offer `Send to session` and `Copy path`,
-and the workspace picker uses that same core with directories only, hidden
-files omitted, and a Select/Cancel row. There is no separate picker UI. These
+and the workspace picker uses that same core with directories only (files
+omitted, hidden entries translucent per 757=`b`), and a Select/Cancel row. There is no separate picker UI. These
 IDs record provenance only and do not settle technical event names, renderer
 libraries, or store fields.
 
@@ -82,12 +82,13 @@ libraries, or store fields.
 - Approved scope to be represented by a child: add the agent change-tracking
   view.
 - Approved scope to be represented by a child: add Git badges and a diff tab.
-- Approved scope to be represented by a child: add worktree/root switching
+- `261115-feat-ws-dashboard-explorer-root-switcher` - worktree/root switching
   without widening guarded roots.
 - Approved scope to be represented by a child: support drag-to-chat path
   references.
 - Approved scope to be represented by a child: add ticket and board links.
-- Approved scope to be represented by a child: add a path bar.
+- `261115-feat-ws-dashboard-explorer-path-bar` - path bar with back, forward
+  and up.
 - Approved scope to be represented by a child: add tree and column views.
 - Approved scope to be represented by a child: add space quick-look.
 - Approved scope to be represented by a child: add bookmarks/recent entries
@@ -95,6 +96,10 @@ libraries, or store fields.
 - Approved scope to be represented by a child: add split dual-pane browsing.
 - Approved scope to be represented by a child: add keyboard navigation.
 - Approved scope to be represented by a child: virtualize large directories.
+
+- `261115-feat-ws-dashboard-local-browse-anchor` - session-less,
+  local-viewer-only browsing anchor shared by the workspace-picker consumer
+  and the worktree page.
 
 These approved scope items are not ordered here; their grouping and
 mechanisms are not settled. The approved workspace-picker consumer depends on

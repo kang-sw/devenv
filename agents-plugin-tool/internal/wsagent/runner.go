@@ -169,6 +169,10 @@ type Options struct {
 type Runner struct {
 	opts   Options
 	notify func(replyID, project string)
+	// fixedProfile belongs only to a private one-shot answer runner. Freeze
+	// the checked ceiling so config edits cannot widen it between create
+	// and process start. Ordinary conversations still resolve on every start.
+	fixedProfile *ResolvedProfile
 
 	mu     sync.Mutex
 	convs  map[string]*conv
@@ -699,7 +703,16 @@ func (r *Runner) lastCommands(rec Record) []wslive.SlashCommand {
 // needs: a backend this daemon has, an existing instruction file, and a
 // ws-mcp command when the profile allows ws tools.
 func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
-	rp, err := ResolveProfile(r.opts.Config, root, strings.TrimSpace(profile))
+	var rp ResolvedProfile
+	var err error
+	if r.fixedProfile != nil {
+		if profile != r.fixedProfile.Name {
+			return ResolvedProfile{}, badRequest("private answer runner profile mismatch")
+		}
+		rp = *r.fixedProfile
+	} else {
+		rp, err = ResolveProfile(r.opts.Config, root, strings.TrimSpace(profile))
+	}
 	if err != nil {
 		return ResolvedProfile{}, badRequest("%v", err)
 	}

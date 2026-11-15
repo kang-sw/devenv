@@ -5,7 +5,8 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require(process.env.WS_PLAYWRIGHT_MODULE);
 const [base, control, output, reference] = process.argv.slice(2);
-const values = ['all', 'awaiting-confirmation', 'discussing', 'implementing', 'waiting', 'closed'];
+const values = ['all', 'discussing', 'waiting', 'implementing', 'awaiting-confirmation', 'closed'];
+const labels = ['전체', '논의 중', '대기 중', '진행 중', '확인 대기', '종료'];
 for (const address of [base, control]) {
   const u = new URL(address);
   assert(['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname));
@@ -167,6 +168,19 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
           assert((await page.locator('#convo').textContent()).includes('Saved history entry'), 'real AppendRing conversation is present');
         }
         await width(800);
+        for (const selector of ['.board-state-radio', '.board-state-option']) {
+          assert.deepEqual(await page.locator(selector).evaluateAll(nodes => nodes.map(n => n.dataset.filter)), values, selector + ' exact lifecycle order');
+          assert.deepEqual(await page.locator(selector + ' .board-state-label').allTextContents(), labels, selector + ' Korean labels follow values');
+        }
+        await select('discussing');
+        const inlineCurrent = () => page.locator('.board-state-radio[aria-checked="true"]');
+        for (const [key, value] of [['ArrowRight', 'waiting'], ['ArrowDown', 'implementing'], ['ArrowLeft', 'waiting'], ['ArrowUp', 'discussing'], ['Home', 'all'], ['ArrowLeft', 'closed'], ['ArrowRight', 'all'], ['End', 'closed'], ['ArrowDown', 'all'], ['ArrowUp', 'closed']]) {
+          await inlineCurrent().press(key);
+          assert.equal(await inlineCurrent().getAttribute('data-filter'), value);
+          assert.equal(await inlineCurrent().evaluate(n => document.activeElement === n), true);
+          assert.equal(await page.evaluate(id => localStorage.getItem('ws.dashboard.cards.' + id + '.state-filter'), id), value);
+        }
+        await select('all');
         await counts([closed + 9, 2, 2, 2, 2, closed]);
         assert.equal(await page.locator('section.topic.closed').count(), 30);
         assert.equal(await page.locator('.closed-more').getAttribute('data-closed-more'), String(closed - 30));
@@ -198,16 +212,19 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
           const o = options.nth(i);
           assert.equal(await o.evaluate(n => n.tagName), 'BUTTON');
           assert.equal(await o.getAttribute('role'), 'radio');
-          assert.equal(await o.getAttribute('aria-checked'), String(i === 2));
-          assert.equal(await o.getAttribute('tabindex'), i === 2 ? '0' : '-1');
+          assert.equal(await o.getAttribute('data-filter'), values[i]);
+          const selected = values[i] === 'discussing';
+          assert.equal(await o.getAttribute('aria-checked'), String(selected));
+          assert.equal(await o.getAttribute('tabindex'), selected ? '0' : '-1');
         }
         let shot = await capture(`${id}-${theme}-539-open`);
         await pair(`${id}-${theme}-539-open`, shot, refs[`v2-${theme}-1280`]);
         const current = () => page.locator('.board-state-option[aria-checked="true"]');
-        for (const [key, value] of [['ArrowDown', 'implementing'], ['ArrowUp', 'discussing'], ['ArrowRight', 'implementing'], ['ArrowLeft', 'discussing'], ['End', 'closed'], ['Home', 'all']]) {
+        for (const [key, value] of [['ArrowDown', 'waiting'], ['ArrowUp', 'discussing'], ['ArrowRight', 'waiting'], ['ArrowLeft', 'discussing'], ['End', 'closed'], ['ArrowRight', 'all'], ['ArrowLeft', 'closed'], ['Home', 'all'], ['ArrowUp', 'closed'], ['ArrowDown', 'all']]) {
           await current().press(key);
           assert.equal(await current().getAttribute('data-filter'), value);
           assert.equal(await current().evaluate(n => document.activeElement === n), true);
+          assert.equal(await page.evaluate(id => localStorage.getItem('ws.dashboard.cards.' + id + '.state-filter'), id), value);
         }
         await current().press('Enter');
         assert.equal(await page.locator('.board-state-pop').isVisible(), false);
@@ -236,15 +253,15 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         await until(async () => await page.locator('.board-state-trigger').getAttribute('data-filter') === 'discussing', 'per-session persistence');
         await eligible('discussing');
         await width(800); await select('waiting');
-        await action(id, 'transition'); await counts([closed + 9, 2, 4, 2, 0, closed]); await eligible('waiting');
+        await action(id, 'transition'); await counts([closed + 9, 4, 0, 2, 2, closed]); await eligible('waiting');
         assert.equal(await page.locator('section.topic:not([data-state-filtered])').count(), 0, 'zero transition has no invented eligibility');
         await select('discussing'); await action(id, 'close');
-        await counts([closed + 9, 2, 3, 2, 0, closed + 1]); await eligible('discussing');
+        await counts([closed + 9, 3, 0, 2, 2, closed + 1]); await eligible('discussing');
         await select('closed');
         const paging = tab.waitForResponse(r => new URL(r.url()).pathname === `/s/${id}/closed` && r.status() === 200);
         await page.locator('.closed-more').click(); await paging;
         await until(async () => await page.locator('section.topic.closed').count() > 30, 'real closed history appended');
-        await counts([closed + 9, 2, 3, 2, 0, closed + 1]); await eligible('closed');
+        await counts([closed + 9, 3, 0, 2, 2, closed + 1]); await eligible('closed');
         await select('all');
         // Real scroll ownership differs for ordinary and saved-history boards.
         const scroll = await page.locator('#bcol').evaluate(b => {
@@ -271,8 +288,22 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
         const overview = await page.evaluate(() => ({ pressed: document.querySelector('.board-overview').getAttribute('aria-pressed'), hiddenFocus: !!document.activeElement.closest('[data-state-filtered]') }));
         assert.equal(overview.pressed, 'true'); assert.equal(overview.hiddenFocus, false, 'Overview keyboard excludes hidden topics');
         await select('awaiting-confirmation');
-        await until(async () => await page.locator('.board-overview').getAttribute('aria-pressed') === 'false', 'filter safely exits Overview');
+        assert.equal(await page.locator('.board-overview').getAttribute('aria-pressed'), 'true', 'filter keeps Overview pressed');
+        assert.equal(await page.locator('html').evaluate(n => n.hasAttribute('data-overview')), true, 'filter keeps one-line view');
         await eligible('awaiting-confirmation');
+        assert.equal(await page.locator('.board-state-radio[data-filter="awaiting-confirmation"]').evaluate(n => document.activeElement === n), true, 'filter retains control focus');
+        const filteredNames = await page.locator('section.topic:not([data-state-filtered])').evaluateAll(nodes => nodes.map(n => n.dataset.topic));
+        const roved = page.locator('section.topic[tabindex="0"]');
+        assert.equal(await roved.count(), 1, 'one eligible roving target after filter');
+        assert.equal(await roved.getAttribute('data-topic'), filteredNames[0]);
+        await roved.focus();
+        await tab.keyboard.press('ArrowDown');
+        assert.equal(await page.evaluate(() => document.activeElement.dataset.topic), filteredNames[1], 'filtered Overview ArrowDown skips hidden rows');
+        await tab.keyboard.press('ArrowUp');
+        assert.equal(await page.evaluate(() => document.activeElement.dataset.topic), filteredNames[0], 'filtered Overview ArrowUp skips hidden rows');
+        await tab.keyboard.press('Enter');
+        assert.equal(await page.locator('.board-overview').getAttribute('aria-pressed'), 'false', 'topic selection still exits Overview');
+        assert.equal(await page.evaluate(() => document.activeElement.dataset.topic), filteredNames[0], 'topic selection expands selected eligible row');
         checks.push({ theme, id, matrix: '800 all six selected labels; 540 inline; 539 pop keyboard; 360 pill; reload; stream transition/close; real closed paging; floating; Overview' });
       }
       // Wide pin column uses real production pin actions and keeps hidden nodes.

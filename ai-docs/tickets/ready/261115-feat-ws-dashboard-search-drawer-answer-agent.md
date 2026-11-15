@@ -321,6 +321,153 @@ timeout and cancel with no surviving process; per-session supersede and the
 daemon-wide cap; remote viewer 404 and bad Origin 403 on creation and on the
 stream.
 
+#### Checkpoint - 2026-11-15 (unfinished)
+
+Phase 1 source and fake-backend tests are checkpointed on
+`impl/exec4/search-drawer-impl/boil-rants-plant`; this is not a Result and
+Phase 1 remains unfinished. Phase 2 has not started.
+
+- Added both builtin profiles, capped project-root profile resolution,
+  private per-question Runner instances with frozen checked definitions,
+  read-only board snapshot files, supersede/cancel/timeout cleanup, the
+  two-process admission cap, and `/search-answers/<session>` routes.
+  Private runner records live outside the public session registry so generic
+  agent reads and shared page streams cannot reveal answer content. The
+  current answer alone stays in memory; browser history belongs to Phase 2.
+- The creation and cancel routes require TrustedWrite. State and SSE reads
+  require loopback and reject a supplied bad Origin; absent Origin is allowed
+  for same-origin EventSource compatibility. SSE emits the existing
+  `region {name,hash,html}` shape with escaped answer text and status metadata,
+  outside the shared region cache.
+- Offline targeted wsagent answer/builtin tests passed in the final invocation
+  (`go test ./internal/wsagent ./internal/mcp -run
+  '^(TestSearchAnswer|TestDashboardSearchAnswer|TestBuiltin|TestAgentProfile)'
+  -count=1 -timeout=90s`), but the combined invocation failed in
+  `TestDashboardSearchAnswerSnapshotRetainedHistory`: its assertion expects
+  exactly three topic entries, incorrectly excluding generated system entries
+  that the snapshot correctly retains. The earlier invocation included this
+  same assertion but its output was truncated at a separate builtin-count
+  failure. Re-running it before diagnosing the snapshot assertion constitutes
+  non-convergence, stop (f); no further fix or retry was attempted.
+- Initial test-only compile mismatches (Config.Path and Event.Error), a fake
+  crash-liveness assertion (fake exit closes Events without setting the Close
+  flag), and the additive builtin count assertion were corrected. No failing
+  implementation contract was weakened.
+- Required baselines were run and match only the owner-declared failures:
+  `go test ./internal/wsi18n -count=1` lacks js.card.width.extend/normal in
+  the nine non-English tables; `go test ./internal/wsdashboard -run
+  '^TestOutsidePreview' -count=1 -timeout=60s` fails only the known
+  TestOutsidePreviewCardRemintsOnEveryLoad removeAttribute TypeError.
+  Neither baseline was modified. All Go commands used GOPROXY=off,
+  GOSUMDB=off, GOTOOLCHAIN=local.
+- Logs: `/tmp/equity-tableful-absinthe-tests/{service,i18n,outside-preview}.log`.
+  No i18n keys were added. The isolated daemon test bound an OS-selected port;
+  no shared daemon, port 29417, or real model was used.
+- Remaining acceptance: correct the snapshot test to count/filter authored
+  entries while also checking retained system history; run broader neighbour
+  and race tests and the command build; investigate actual Claude Grep/Glob
+  path-rule enforcement (only supplied launch flags are established so far).
+  The launch comment and builtin descriptions state best effort, not a
+  sandbox. Independent review is deferred to the lead under the run's explicit
+  adaptation; no review verdict is claimed.
+
+### Result (5f281584a) - 2026-11-15
+
+Phase 1 landed in `87f953e9c` with the owner-approved test correction
+`5f281584a` ((882)=a). The snapshot test now counts three non-system entries
+(the agent log and both panel versions); all snapshot content assertions are
+unchanged. The four generated system entries remain in the snapshot. No
+product-code change was needed on resume.
+
+- Delivered both builtin profiles, root-layer resolution and the read-only
+  override ceiling; private per-question Runner instances freeze the checked
+  profile and keep their records out of generic agent/session routes and
+  shared region caches. Board snapshots include retained open/closed topics,
+  logs and panel history under the authoritative store's lock.
+- Local-only `/search-answers/<session>` creation returns the current answer;
+  `/<answer>` reads it, `/<answer>/events` streams escaped `answer` regions,
+  and `/<answer>/cancel` cancels it. Creation/cancel require TrustedWrite;
+  reads/streams reject remote viewers and a supplied bad Origin, while absent
+  Origin is permitted for same-origin EventSource. Process cleanup precedes
+  terminal status on settle, failure, cancel, timeout and supersede. At most
+  two questions run daemon-wide, with one current question per session.
+- Passing acceptance (all offline): targeted answer/builtin/snapshot tests;
+  the same targeted contracts with `-race`; neighbouring runner lifecycle,
+  profile parsing/resolution and Claude/Pi subprocess stand-ins; race-enabled
+  MCP profile catalog, session source, transient-read and lock contracts;
+  command startup and isolated daemon lock/shutdown tests; and
+  `go build -o /tmp/scouts-sandbag-viselike-phase1/ws-mcp ./cmd/ws-mcp`.
+  `git diff --check` and the repaired test's gofmt check were clean.
+- `go test -race ./internal/wsdashboard -run
+  '^Test(SecondDaemonIsRefused|EndpointFileRoundTrip|HealthAnswers|ShutdownRequires|NonLoopbackHost|CloseReleases|TakenPortFalls|AgentHostStarts|SupportHandlerMounted|LANModeGuardsEveryRoute|OutsidePreview)'
+  -count=1 -timeout=90s` failed only the declared base
+  `TestOutsidePreviewCardRemintsOnEveryLoad` removeAttribute TypeError.
+  `go test ./internal/wsi18n -count=1` failed only the declared
+  js.card.width.extend/normal omissions in the nine non-English tables.
+  These failures remain untouched; no new i18n keys were added.
+- Full logs are under `/tmp/scouts-sandbag-viselike-phase1/`:
+  `race.log`, `agent-neighbours.log`, `mcp-neighbours.log`,
+  `dashboard-neighbours.log`, `command-neighbours.log`, `i18n.log`,
+  and `build.log`. Commands used GOPROXY=off, GOSUMDB=off,
+  GOTOOLCHAIN=local; runtime fixtures used private cache/config homes and
+  OS-selected ports. No shared daemon, port 29417, real model, merge or push
+  was used. The owned-process scan found no matching processes remaining.
+- Boundary observation: tests establish scoped Claude Read/Grep/Glob launch
+  rules and Pi read-only tools at project cwd, not actual Claude Grep/Glob
+  permission enforcement. That runtime property remains unverified; the
+  launch comment and builtin descriptions explicitly say best effort, not a
+  sandbox. No stronger confinement claim is made.
+- Independent review is deferred to the lead by the explicit run adaptation;
+  this Result claims no review verdict. Phase 2 remains unfinished, so the
+  ticket stays in ready/.
+
+#### Edition (54260ec29) - 2026-11-15
+
+Fixed exactly the Critical and Important findings from the independent lite
+review of `bd316e89a..92b96d89f`:
+
+- **Critical — readable credentials:** `question/snapshot/board.json` is now
+  the only material in the extra read grant. Read/Grep/Glob permission entries
+  name only the project root and that snapshot subtree, while credential-bearing
+  runner state stays in the sibling `question/runner/` tree. Terminal cleanup
+  still removes their common question directory. The regression launches a
+  question, checks exact permission entries, scans both granted trees for
+  `agent.json` and the minted session key, and checks deletion of both siblings.
+- **Important — ineffective freeze test:** an internal test-only hook gates
+  execution after the ceiling check but before the private runner resolves.
+  While gated, the test replaces the winning repo override with a same-backend
+  `read,bash` definition, releases the gate, and requires the checked `read`
+  definition at launch. The previous lower-priority global edit is gone.
+- Negative control: temporarily omitting the fixed-profile assignment made
+  `TestSearchAnswerOverrideLaunchFrozen` fail with
+  `tools=[read bash] backend=pi model=custom effort=low`. Freezing was restored
+  before final acceptance; no mutation probe remains in the committed source.
+- Passing final verification from `agents-plugin-tool/`:
+  `go test -race ./internal/wsagent ./internal/mcp -run
+  '^(TestSearchAnswer|TestDashboardSearchAnswer|TestBuiltin|TestAgentProfile|TestClaudeArgs|TestPiArgs|TestClaudeBackendStart$|TestPiBackendStart$|TestCloseEscalates$|TestFatalKillsTheChild$|TestExitedChildIsNotHeldByAGrandchildsStderr$)'
+  -count=1`. This includes both new/revised regressions. Focused regression
+  checks, `git diff --check`, and gofmt checks also passed.
+- Full output: `/tmp/scouts-sandbag-viselike-reviewfix/{regressions,freeze-disabled,acceptance}.log`.
+  All Go commands used GOPROXY=off, GOSUMDB=off, GOTOOLCHAIN=local and isolated
+  cache/config homes. The owned-process scan found no matching test/answer
+  processes. No shared daemon, port 29417, real model, full dashboard package,
+  child agent, merge or push was used. No i18n keys changed.
+- This is the existing Phase 1 review-fix round, not a new phase or review
+  sweep. Frozen Result text and Phase 2 remain unchanged; the previously
+  recorded best-effort Claude boundary limitation is not reclassified as proof.
+- Lead review record: the independent lite delta review of
+  `92b96d89f..414f63f48` was clean (both findings addressed, no new
+  regression; race command re-run, pass). Owner MUST-check outcome, recorded
+  under (865)=a: VERIFIED that Claude launches carry scoped
+  `--allowedTools '<Tool>(//<abs>/**)'` entries for only the project root and
+  the snapshot subtree, with `--tools Read,Grep,Glob --permission-mode
+  dontAsk --setting-sources "" --strict-mcp-config` and no bare Read/Grep/Glob
+  entry, and that the repository adds no per-call containment, traversal or
+  symlink check. INFERRED, not verified: that the Claude CLI denies outside
+  paths, `..` traversal and symlink escapes, and that Grep/Glob honor
+  path-scoped entries; no real-model probe was run (MAIN, 2026-11-15). Pi
+  keeps the accepted soft path boundary.
+
 ### Phase 2: Search drawer and keyboard contract
 
 Move the palette from the modal `<dialog>` into the search sheet of the
