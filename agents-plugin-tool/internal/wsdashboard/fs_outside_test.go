@@ -290,7 +290,7 @@ func TestFSOutsideGrantsTheLinkedFilesFolder(t *testing.T) {
 	if diff.Kind != "diff" || len(diff.Diff) != 1 || diff.Diff[0].Path != "x.txt" {
 		t.Errorf("mint of a patch = %+v", diff)
 	}
-	if bin := o.linked(t, o.write(t, o.away, "blob.dat", "a\x00b")); bin.Kind != "none" || bin.Reason == "" || bin.Text != "" {
+	if bin := o.linked(t, o.write(t, o.away, "blob.dat", "a\x00b")); bin.Kind != "none" || bin.Reason == "" || bin.ReasonCode != "binary" || bin.Text != "" {
 		t.Errorf("mint of a binary file = %+v, want the not-viewable note", bin)
 	}
 

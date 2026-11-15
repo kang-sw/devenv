@@ -718,6 +718,205 @@ Only this ticket outcome is committed after the harness commit; evidence and
 binaries remain ignored and uncommitted. The owner's no-fix/no-retry boundary
 ends this run regardless of the now-more-specific W3 evidence.
 
+##### Windows acceptance run (b80fb45c2) - 2026-11-15
+
+The owner-authorized single Windows run **launched the built app and attached
+to the dashboard, then failed the window-size assertion**. Windows acceptance
+remains **unverified overall**. No source repair, additional build or smoke
+retry followed. Phase 1 is already merged into develop; this run leaves the
+ticket in `ready/` and Phases 2-4 untouched.
+
+Commit `b80fb45c2` changes only `test/smoke.cjs`: both Playwright and
+second-instance launch environments are copies of `process.env` with
+`ELECTRON_RUN_AS_NODE` deleted, rather than set to an empty string. Runtime
+policy, dependencies and all other source files are unchanged. Mac headless
+`npm test` passed **33/33**; syntax and diff checks passed. No Electron, smoke,
+built app or GUI was launched on the Mac.
+
+Owner rule (893)=a governed the run. A full bundle of `exec4/electron-w3` at
+`b80fb45c20a8d8dc10b7e8f99e996716ad938d49` was cloned only into
+`C:\Users\ki608\ws-electron-verify-20261115T040424\src`. The owner's
+pre-existing clone was never accessed or modified. Run-controlled npm/Electron
+caches, temporary/profile/config paths, Playwright copies and logs stayed
+under that unique folder.
+
+- Exactly one `npm ci --no-audit --no-fund` and one `node
+  node_modules/electron/install.js` succeeded. The official Electron
+  **44.11.3 win32-x64** zip SHA256 is
+  `97fca9b8e9b90cdc88c1efd44160ca4b89b15101721d93c8befcbeb35b93fb59`.
+  Subsequent npm steps were offline; no global installs or other downloads
+  occurred. Cached Mac Playwright and playwright-core were copied, not installed.
+- The fixture was cross-compiled on the Mac with `GOOS=windows GOARCH=amd64
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go build`. On Windows it ran as
+  PID **18228**, on free port **62696**, with its own `WS_CACHE_HOME` under
+  the run folder. No shared daemon or port 29417 was accessed.
+- Windows `npm test` passed **33/33** and the single offline `npm run build`
+  passed. Task `ewv-20261115T040424` invoked the smoke **once**, with
+  interactive logon as `ki608` in the logged-in console session. The smoke
+  exited **1**; its normal summary records the initial endpoint/Retry/attach
+  check and the failure. The host source checkout remained clean.
+
+Windows-versus-Mac deltas (evidence paths below are relative to
+`agents-plugin-tool/desktop-electron/dist/evidence/windows/20261115T040424/`):
+
+- **W1 remains resolved — offline win32 packaging passes.** Packaged metadata
+  is CompanyName `kang-sw`, product `Werkschaft`, version `0.1.0`. Evidence:
+  `build.log`, `packaged-metadata.json`. The Mac comparison remains the prior
+  recorded darwin build; no new Mac build or live run was performed.
+- **W2 remains resolved — Mac and Windows both pass 33/33 tests.** Evidence:
+  `mac-unit-tests.log`, `unit-tests.log`.
+- **W3 first-launch blocker resolved — the app now launches and attaches.**
+  Node inspector and Chromium DevTools connections succeeded; missing endpoint,
+  mismatched PID, Retry, real dashboard attachment and title assertions passed,
+  matching the historical Mac smoke at `5beffc47a`. Evidence:
+  `playwright-debug.log`, `smoke.log`, `summary.json`. The second-instance
+  environment correction was not reached, so second-launch focus remains
+  unverified.
+- **W4 unresolved — Windows reports a shorter native window.**
+  `BrowserWindow.getSize()` returned **`[1280, 816]`**, whereas the unchanged
+  smoke expects **`[1280, 860]`**, which the historical Mac smoke passed.
+  The failure is at `test/smoke.cjs:145`; its cause was not investigated or
+  worked around. Evidence: `smoke.log`, `failure-excerpt.log`, `summary.json`.
+  Decisive excerpt (paths omitted):
+
+  ```text
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  ...
+        1280,
+  +     816
+  -     860
+  ...
+      at run (...\test\smoke.cjs:145:10)
+  ```
+
+**Unverified:** full renderer isolation/UA/credential checks, zoom callbacks
+and clamps, P9 physical Ctrl delivery, navigation/Stay rollback, dashboard
+file-link opening, X-close Stay/Leave and draft preservation, second-instance
+focus, daemon survival and fresh-process zoom reset. Native menu/dialog
+appearance, default Windows icon and the unchanged `⌘R` retry title were not
+visually reviewed. The cheap P9 probe was enabled but never reached. No
+screenshot was produced because the smoke failed before its existing capture
+step; no extra launch or visual probe was attempted.
+
+All **41 host evidence files** were copied back and SHA256-verified against
+`host-manifest.json` before removing the host folder. The exact scheduled task
+was deleted. Folder-scoped CIM scans were empty before and after deleting the
+entire unique host folder, which was confirmed absent. No operator signal was
+needed; smoke cleanup used its recorded process identities and ended with no
+live owned processes. The Mac temporary bundle and cross-compiled fixture were
+deleted; its final owned-app/fixture scan was empty. Evidence:
+`process-scans.jsonl`, `final-host-process-scan.json`,
+`task-status-after-cleanup.json`, `transfer-verification.json`, `cleanup.json`,
+`mac-final-process-scan.txt`, `acceptance-summary.json`. Raw evidence and binaries
+remain ignored and uncommitted; only this outcome appendix is committed after
+the harness fix. Any further repair or Windows run requires a new lead grant.
+
+##### Windows acceptance run (5174c8251) - 2026-11-15
+
+The lead-authorized single Windows smoke **passed (exit 0)**, including the
+previously unreached dashboard screenshot, second-instance restore/focus,
+image-draft Stay/Leave, clean close and daemon-survival checks. **P9 physical
+shortcut delivery remains unverified**; its optional probe could not activate
+the recorded launch PID. No further source fix, build or acceptance retry
+followed. The ticket remains in `ready/`; Phases 2-4 are untouched.
+
+Commit `5174c8251` changes only `test/smoke.cjs`: read the matching display's
+`workArea` in the main process, assert width **1280** and height
+**`Math.min(860, workArea.height)`**, and log actual size/work area in the
+smoke output and summary. Minimum **760×520** and all security assertions
+are unchanged. Mac headless `npm test` passed **33/33**; syntax and diff
+checks passed. No Electron, smoke, built app or GUI ran on the Mac.
+The lead's preceding ticket-close commit `61fc5411a` was left unchanged.
+
+Owner rule (893)=a superseded the Edition's old host-clone wording. A full
+bundle of **`exec4/electron-w4`**, exact head
+`5174c8251f0b905659c9be1e855711b0acf56b14`, was cloned only into
+`C:\Users\ki608\ws-electron-verify-20261115T041539\src`.
+The owner's existing clone and other pre-existing host files were not read or
+modified. All run-created modules, binaries, npm/Electron caches,
+temp/profile/config paths and logs stayed under that unique folder.
+
+- Exactly one `npm ci --no-audit --no-fund` and one `node
+  node_modules/electron/install.js` succeeded. Official Electron
+  **44.11.3 win32-x64** zip SHA256:
+  `97fca9b8e9b90cdc88c1efd44160ca4b89b15101721d93c8befcbeb35b93fb59`.
+  Packager is **20.3.0**. Subsequent npm steps were offline; no global
+  installs or other downloads occurred. The specified cached Mac Playwright
+  and playwright-core modules were copied, not installed.
+- The fixture was cross-compiled on the Mac with `GOOS=windows GOARCH=amd64
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go build` and copied into the
+  isolated folder. It ran as PID **12824** on free port **57294**, using its
+  own `WS_CACHE_HOME`; no shared daemon or port 29417 was accessed.
+- Windows `npm test` passed **33/33** and the single offline `npm run build`
+  passed. Task **`ewv-20261115T041539`** invoked the smoke once with
+  interactive-token logon as `ki608` (console session **1**). Host source
+  status remained clean. The smoke's second launch and fresh-process launch
+  are acceptance steps within this one invocation, not retries.
+
+Windows-versus-Mac deltas (evidence below is relative to
+`agents-plugin-tool/desktop-electron/dist/evidence/windows/20261115T041539/`;
+live Mac comparisons remain the historical `5beffc47a` acceptance, not a new
+Mac GUI run):
+
+- **W1/W2 remain resolved:** offline Windows packaging passes and Windows
+  and Mac unit tests both pass **33/33**. Packaged CompanyName is `kang-sw`,
+  product `Werkschaft`, version `0.1.0`. Evidence: `build.log`,
+  `packaged-metadata.json`, `unit-tests.log`, `mac-unit-tests.log`; Mac
+  packaging comparison: the previously recorded darwin build.
+- **W3 resolved for both launch paths:** initial endpoint errors, Retry,
+  attachment/title, renderer isolation, UA/credential exclusion, navigation
+  policy and real dashboard `fs/act` request checks pass. The built second
+  launch exits **0**, restores/focuses the sole window and creates no second
+  window, matching historical Mac acceptance. Stay preserves the pasted-image
+  draft; Leave and clean X-close exit while the daemon survives, endpoint
+  bytes remain unchanged, and fresh-process zoom resets. Evidence:
+  `smoke.log`, `summary.json`, `frame-documents.json`, `second-launch.log`,
+  `process-scans.jsonl`, `close-dialog.json`.
+- **W4 resolved; display clamping is now measured, not inferred:** actual
+  window **1280×816**, matching display work area
+  **`{x:0,y:0,width:1536,height:816}`**. Width and the exact clamped-height
+  assertion pass; the historical Mac window was 1280×860. Evidence:
+  `summary.json` (`dimensions`) and the dimensions line in `smoke.log`.
+- **Windows presentation/accelerators:** `platform.json` records a visible
+  native window menu bar and the standard menu roles; Windows registers
+  **Ctrl** zoom accelerators versus Mac **Cmd**. Actual menu callbacks and
+  50%/300% clamps pass. The interactive renderer screenshot
+  `electron-dashboard-draft.png` (**1583×943 pixels**) was read back: the
+  dashboard renders and `preserve this draft [Image #1]` remains after Stay,
+  matching the historical Mac draft-preservation outcome. It captures page
+  content, not native title/menu/dialog chrome. Windows still uses the
+  configured default Electron icon versus the historical custom Mac icon;
+  that configuration difference was not visually assessed in native chrome.
+- **P9 remains unverified on both platforms, for different probe limits:**
+  Mac previously lacked accessibility permission. Here all five optional
+  OS-key probe entries report **`Could not activate owned Electron window`**
+  and zoom stays **1.0**; no shortcut delivery is established. The targeted
+  PID **17540** is recorded as a `cmd.exe` launch wrapper, with Electron
+  child PID **8464**. This is activation-probe evidence, not proof that the
+  product's Ctrl shortcuts fail. Evidence: `physical-keys.json`,
+  `process-scans.jsonl`, `summary.json`. No probe repair or retry was made.
+
+**Still unverified:** physical P9 delivery, native dialog rendering (dialog
+responses were stubbed; options and Stay/Leave effects were asserted), native
+icon/title/menu appearance and the existing cross-platform `⌘R` retry hint's
+visual presentation. The separate navigation-cancellation rollback regressions
+remain unit-tested, not newly exercised as live Stay-during-navigation cases
+by this smoke. Later-phase Windows delivery/startup contracts are not claimed.
+
+All **46 host evidence files** were copied back and SHA256-verified against
+`host-manifest.json` before host removal. The exact task was deleted, scoped
+CIM scans were empty before and after removing the entire unique host folder,
+and the folder was confirmed absent. No operator process signal was needed;
+the smoke's identity-validated cleanup ended with zero live owned processes.
+The Mac temporary bundle and cross-compiled fixture were deleted; its scoped
+app/fixture/test/build scan was empty. Evidence: `transfer-verification.json`,
+`final-host-process-scan.json`, `task-status-after-cleanup.json`, `cleanup.log`,
+`mac-final-process-scan.txt`, `acceptance-summary.json`. A cleanup-only shell
+quoting error was resolved by the guarded cleanup script, without rerunning
+acceptance. Raw evidence and binaries remain ignored and uncommitted; only
+this outcome appendix is committed after the harness fix.
+
 #### Edition (7525029be) - 2026-11-15
 
 Fixed the independent lite review's Critical cancelled-navigation finding.

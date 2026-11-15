@@ -135,8 +135,8 @@ const (
 	fsViewAssetMax = 64 << 20
 )
 
-// capTypes are the content types the capability route serves by extension;
-// any other file is application/octet-stream. The table is the route's own,
+// capTypes supplement the shared video/audio types for the capability route;
+// any other file is application/octet-stream. The tables are the routes' own,
 // so the answer does not depend on the host's MIME registry.
 var capTypes = map[string]string{
 	".html":  "text/html; charset=utf-8",
@@ -163,12 +163,6 @@ var capTypes = map[string]string{
 	".woff2": "font/woff2",
 	".ttf":   "font/ttf",
 	".otf":   "font/otf",
-	".mp4":   "video/mp4",
-	".webm":  "video/webm",
-	".ogg":   "video/ogg",
-	".ogv":   "video/ogg",
-	".mp3":   "audio/mpeg",
-	".wav":   "audio/wav",
 	".wasm":  "application/wasm",
 }
 
@@ -392,7 +386,11 @@ func (d *Daemon) serveCapabilityFile(w http.ResponseWriter, r *http.Request, f i
 	ext := strings.ToLower(filepath.Ext(rel))
 	ctype, ok := capTypes[ext]
 	if !ok {
-		ctype = "application/octet-stream"
+		if ctype, ok = videoType(rel); !ok {
+			if ctype, ok = audioType(rel); !ok {
+				ctype = "application/octet-stream"
+			}
+		}
 	}
 	csp := fsCapabilityCSP(prefix)
 	content := f
