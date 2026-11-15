@@ -9,6 +9,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: be692a153711367b
 sage-review-completeness-reviewed: be692a153711367b
+completed: 2026-11-15
 ---
 
 # Dashboard model history stays stale after an entries region update
@@ -131,3 +132,33 @@ before the change:
 Chromium: `WS_PLAYWRIGHT_MODULE=/Users/kang-sw/.npm/_npx/705bc6b22212b352/node_modules/playwright`,
 `PLAYWRIGHT_BROWSERS_PATH=/Users/kang-sw/Library/Caches/ms-playwright`
 (machine-local; skip with a recorded reason when unavailable).
+
+### Result (80ca8fd13) - 2026-11-15
+
+- Synced the optional model-history sibling on entries region updates: insert
+  before `.centries`, replace existing history, or remove absent history.
+  Reused `restoreOpen` and `fmtTimes`; entry merging, gap reset, pin eviction,
+  history loading and retained entry nodes remain unchanged. T0 browser-only:
+  no template, producer, store, protocol/API, or version changes.
+- Added `TestModelHistoryEntriesBrowser` and its Chromium driver. Normal fixture
+  region delivery covers changed rows, initially absent history, removal,
+  open/closed disclosure state, sibling order, formatted timestamps, retained
+  container/entry identity, and no page errors at 1440px and 420px.
+- Verified the new test fails before the production fix (zero history blocks
+  after an entries update), then passes after it, including three consecutive
+  runs at both widths. The fixture initially assumed unchanged entries would
+  arrive on connect; source inspection confirmed held hashes suppress them,
+  so it now waits for the initial mode region before applying updates.
+- Focused offline dashboard verification passed 34 tests, including every test
+  in `conversation_history_test.go`, the non-capture reasoning-summary tests,
+  keyed-entry merge coverage, `BoardKeeps|FrameReuse|BoardTopic`, and
+  `TestSelectionNoteBrowser`. The optional `TestReasoningSummaryVisualFixture`
+  skipped because no offline capture output was requested. The selection-note
+  visible-editor wait was already correct; no change was needed.
+- Read the lite correctness/test-integrity checklist and performed its one-pass
+  review directly; no findings remain. Independent review/exploration was
+  omitted because the caller prohibited subagents. Only disposable test
+  fixtures ran; the shared daemon and installed binaries were untouched.
+- Evidence: `/tmp/exec5/mh/baseline-red.txt`, `browser-green.txt`,
+  `browser-repeat.txt`, `focused-tests.txt`, `review.md`, and the 1440px/420px
+  `model-history-*.png` captures. No approved visual reference was linked.
