@@ -264,7 +264,7 @@ func permissionLegacyPackage(t *testing.T, source string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mod = bytes.Replace(mod, []byte("module github.com/kang-sw/devenv\n"), []byte("module github.com/kang-sw/devenv/permissionlegacy\n"), 1)
+	mod = bytes.Replace(mod, []byte("module github.com/kang-sw/devenv"), []byte("module github.com/kang-sw/devenv/permissionlegacy"), 1)
 	mod = append(mod, []byte(fmt.Sprintf("\nrequire github.com/kang-sw/devenv v0.0.0\nreplace github.com/kang-sw/devenv => %q\n", root))...)
 	sum, err := os.ReadFile(filepath.Join(root, "go.sum"))
 	if err != nil {
