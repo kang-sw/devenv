@@ -31,6 +31,7 @@ func TestHiddenFrameHoldsItsUpdatesUntilShown(t *testing.T) {
 	tick := block("tickTimes", `(?s)\n  function tickTimes\(\) \{.*?\n  \}\n`)
 	frame := block("shFrameInit", `(?s)\n  function shFrameInit\(\) \{.*?\n  \}\n  // shShellInit`)
 	post := block("shPost", `(?s)\n  function shPost\(kind, m\) \{.*?\n  \}\n`)
+	search := block("tkSearch", `(?s)\n  var tkWantSearch = false;\n  function tkSearch\(\) \{.*?\n  \}\n`)
 
 	runNode(t, "hidden frame", "(function () {\n"+streamPageHarness+`
 framed = true;
@@ -82,7 +83,7 @@ q = function (sel) {
   if (sel === ".rpop:not([hidden]), .lmenu") return railPops.concat(linkMenus);
   return [];
 };
-`+mustAsset(t, "shell.js")+hidden+open+connect+show+tick+post+frame+`
+`+mustAsset(t, "shell.js")+hidden+open+connect+show+tick+post+search+frame+`
 connect();
 shFrameInit();
 var s = sockets[0];
@@ -144,6 +145,12 @@ linkMenus = [];
 check("closing the link menu preserves another visible popover", popover(), true);
 railPops = [];
 check("closing the last popover restores the shell layer", popover(), false);
+var hoverCard = { classList: { contains: function (c) { return c === "shp"; } }, getClientRects: function () { return [{}]; } };
+railPops = [hoverCard];
+check("a visible read-only hover card does not lift the frame over the shell header and rail", popover(), false);
+railPops = [hoverCard, visible];
+check("an interactive popover beside a hover card still lifts the frame", popover(), true);
+railPops = [];
 process.stdout.write(bad.join("\n"));
 })();
 `)

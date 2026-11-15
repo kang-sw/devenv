@@ -205,7 +205,9 @@ func TestBoardHistoryClosedPagingSkipsMaterializedTopics(t *testing.T) {
 	js := string(data)
 	src := whiteboardBridgeFunctions(t, js, "boardTopicPresent")
 	loader := whiteboardBridgeFunctions(t, js, "loadClosed")
-	if !strings.Contains(loader, "if (!boardTopicPresent(name)) return;") || !strings.Contains(loader, `s.setAttribute("data-slot", name)`) {
+	// A topic not yet on the board stays in the page (its clone also feeds the
+	// viewed staging cache); a materialized one becomes a count-preserving slot.
+	if !regexp.MustCompile(`if \(!boardTopicPresent\(name\)\) \{[^\n}]*return; \}`).MatchString(loader) || !strings.Contains(loader, `s.setAttribute("data-slot", name)`) {
 		t.Fatal("closed paging does not replace already materialized topics with count-preserving slots")
 	}
 	runNode(t, "closed topic deduplication", `
@@ -223,7 +225,7 @@ func TestBoardHistoryHooksSurroundSSESwap(t *testing.T) {
 		t.Fatal(err)
 	}
 	js := whiteboardBridgeFunctions(t, string(data), "swap")
-	capture, morph := strings.Index(js, "captureBoardHistory()"), strings.Index(js, "morphBoard(el, html)")
+	capture, morph := strings.Index(js, "captureBoardHistory()"), strings.Index(js, "morphBoard(el, html")
 	materialize, disclosure := strings.Index(js, "window.wbHistory.restore(n, history)"), strings.Index(js, "restoreOpen(n)")
 	outerScroll := strings.Index(js, "restoreScroll(scroll)")
 	if capture < 0 || capture >= morph || materialize < morph || materialize >= disclosure || outerScroll <= disclosure || strings.Count(js, "window.wbHistory.restore(") != 1 {

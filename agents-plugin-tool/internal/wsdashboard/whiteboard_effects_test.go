@@ -16,11 +16,12 @@ import (
 func dashboardEffect(value string) wslive.RingEntry {
 	entry, _ := wslive.NewWhiteboardEffects([]wswhiteboard.Effect{
 		{Kind: "panel", Topic: "plan", EntryID: "e1", PanelID: "p1", Field: "payload", Before: "old <b>value</b>", After: value},
+		{Kind: "panel", Topic: "plan", EntryID: "e1", PanelID: "p1", Field: "recap", After: "Saved panel summary"},
 	})
 	return entry
 }
 
-func TestWhiteboardEffectsEscapedExpandableAndStable(t *testing.T) {
+func TestWhiteboardEffectsPanelRecapOnlyAndStable(t *testing.T) {
 	entry := dashboardEffect(`<script>alert(1)</script><img src=x onerror="attack()"> **not markdown**`)
 	entry.Truncated = true
 	ring := []wslive.RingRecord{ringRecord(1, entry)}
@@ -29,12 +30,12 @@ func TestWhiteboardEffectsEscapedExpandableAndStable(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := string(set[regionEntries].HTML)
-	for _, want := range []string{`<details class="wbeffects" data-entry="` + ring[0].Name + `" data-key="whiteboard-` + ring[0].Name + `">`, "Committed whiteboard update", "Before", "After", "old &lt;b&gt;value&lt;/b&gt;", "&lt;script&gt;alert(1)&lt;/script&gt;", "**not markdown**", "Some changes or values were omitted", "panel [plan] e1 p1 · payload"} {
+	for _, want := range []string{`<article class="wbeffects wbupdate" data-entry="` + ring[0].Name + `">`, "Committed whiteboard update", "Saved panel summary", "Some changes or values were omitted", `data-wb-jump="p1"`, `data-wb-topic="topic-706c616e"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q: %s", want, html)
 		}
 	}
-	for _, bad := range []string{"<script", "<img", "<iframe", "<strong>not markdown", `class="wbeffects" open`} {
+	for _, bad := range []string{"<script", "<img", "<iframe", "alert(1)", "old &lt;b&gt;value&lt;/b&gt;", "**not markdown**", `class="wbeffects" open`} {
 		if strings.Contains(html, bad) {
 			t.Errorf("executable/expanded effects %q: %s", bad, html)
 		}
@@ -87,7 +88,7 @@ func TestWhiteboardEffectsSavedLeadModeWithoutLiveState(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, want := range []string{`data-mode="history"`, `id="tabbar"`, `id="convo"`, "saved only"} {
+		for _, want := range []string{`data-mode="history"`, `id="tabbar"`, `id="convo"`, "Saved panel summary"} {
 			if !strings.Contains(page, want) {
 				t.Errorf("saved page lacks %q", want)
 			}

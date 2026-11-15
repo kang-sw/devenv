@@ -494,9 +494,11 @@
         top: top.offsetHeight
       });
       // A link menu's local z-index cannot outrank the shell header either;
-      // lift its frame through the same layer as the other popovers.
+      // lift its frame through the same layer as the other popovers. The
+      // read-only hover card (rail.js, .shp) never lifts: the lifted frame's
+      // opaque layer would cover the shell's header and rail while it shows.
       send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(),
-        popover: q(".rpop:not([hidden]), .lmenu").some(function (el) { return el.getClientRects().length > 0; }) });
+        popover: q(".rpop:not([hidden]), .lmenu").some(function (el) { return !(el.classList && el.classList.contains("shp")) && el.getClientRects().length > 0; }) });
     }
     function queue() { if (!queued) queued = setTimeout(post, 16); }
     doc.addEventListener("ws-overview", queue);
@@ -544,7 +546,7 @@
         queue();
       } else if (m.wsShell === "search") {
         // Open, do not toggle a hidden header button via a synthetic click.
-        if (tkApi) tkApi.openSearch();
+        tkSearch();
       } else if (m.wsShell === "menu") {
         var h = region("head"), chip = h && h.querySelector(".host.hbtn");
         if (chip && WsRail) railPopOpen("sess", chip);

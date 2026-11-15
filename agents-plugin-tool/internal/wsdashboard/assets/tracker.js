@@ -6690,7 +6690,7 @@
     b.appendChild(el('button', { type: 'button', class: 'tk tk-mcap', id: 'tkcap', hidden: '' }, '<svg class="i"><use href="#tki-trash"/></svg><span>' + wsT("js.tk.menu.discard") + '</span>'));
     O.qsSlot.appendChild(el('span', { class: 'tk tk-qswrap' },
       '<button class="btn tk-qsbtn" id="tkqs" title="' + wsT("js.tk.qs.tip") + ' (Ctrl+K / Ctrl+Space / /)" aria-label="' + wsT("js.tk.qs.tip") + '" aria-controls="tkqpop" aria-expanded="false"><svg class="i"><use href="#tki-search"/></svg></button>'));
-    (O.searchHost ? O.searchHost.parent : b).appendChild(el('section', { class: 'tk tk-palette', id: 'tkqpop', role: 'region', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
+    (O.searchHost ? O.searchHost.parent : b).appendChild(el('section', { class: 'tk tk-palette dr-search-palette', id: 'tkqpop', role: 'region', 'aria-label': wsT("js.tk.qs.tip"), hidden: '' },
       '<label class="tk-qlabel" for="tkqin">' + wsT("js.tk.qs.tip") + '</label>' +
       '<div class="tk-qrow"><input id="tkqin" type="text" role="combobox" aria-controls="tkqlist" aria-expanded="true" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="' + wsT("js.tk.qs.placeholder") + '">' +
       '</div>' +
@@ -7212,4 +7212,7 @@
   }
 
   window.WsTracker = { mount: mount };
+  // searchKey is the palette's shortcut test (qShortcut), for a host that
+  // must recognize the key before mount installs the palette's listener.
+  window.WsTracker.searchKey = qShortcut;
 })();

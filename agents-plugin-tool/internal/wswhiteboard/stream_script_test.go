@@ -57,7 +57,7 @@ E.prototype.getBoundingClientRect=function(){
   for(var p=this;p&&p!==live;p=p.parentElement)if(p.hasAttribute('data-wb-history-before'))return {top:0,bottom:0,height:0};
   var top=offset(this,live),s=size(this);return {top:top,bottom:top+s,height:s};
 };
-var keeps=[],loads=0,frames=[],timers=[],motions=[];
+var keeps=[],loads=0,frames=[],timers=[],motions=[],keepVisible=false;
 window.requestAnimationFrame=function(fn){frames.push(fn);};
 function frame(){var batch=frames.splice(0);batch.forEach(function(fn){fn();});}
 function flush(){for(var i=0;frames.length&&i<20;i++)frame();if(frames.length)throw Error('frame loop');}
@@ -67,7 +67,8 @@ document.on={};document.addEventListener=function(type,fn){(document.on[type]||(
 function CustomEvent(type,init){this.type=type;Object.assign(this,init||{});}
 E.prototype.dispatchEvent=function(e){if(e.type==='wbhistoryload')navigationGeometry(this,'load');e.target=this;for(var p=this;p;p=e.bubbles?p.parent:null){(p.on[e.type]||[]).slice().forEach(function(fn){fn(e);});}if(e.type==='wbhistoryload'){loads++;check('load root',e.detail.root===this,true);}return true;};
 fire=function(e,type){e.dispatchEvent(new CustomEvent(type,{bubbles:true}));};
-window.historyKit={watch:function(n,opt){return {node:n,opt:opt};},unwatch:function(w){if(w)w.gone=true;},keep:function(n,opt){navigationGeometry(n,'keep');var k={node:n,opt:opt,applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;}};
+function keepDouble(n,opt,phase){navigationGeometry(n,phase);var k={node:n,opt:opt,phase:phase,applied:0,apply:function(){this.applied++;}};keeps.push(k);return k;}
+window.historyKit={watch:function(n,opt){return {node:n,opt:opt};},unwatch:function(w){if(w)w.gone=true;},keep:function(n,opt){if(opt&&opt.capture===false)return {visible:function(){return keepVisible;}};return keepDouble(n,opt,'keep');},jump:function(n,opt){return keepDouble(n,opt,'jump');},snapshot:function(){}};
 function visible(h,ratio){var w=h._wbHistoryWatch,was=w.ratio;w.ratio=ratio;w.opt.onChange({visible:ratio>0});if(was>0&&!ratio)w.opt.onOut();}
 function ResizeObserver(fn){this.fn=fn;}
 ResizeObserver.prototype.observe=function(){};ResizeObserver.prototype.disconnect=function(){};
@@ -89,6 +90,7 @@ function first(h){return h._wbHistoryChunks.at(-1);}
 var bound=0;window.wbBindBoard=function(node){if(node)navigationGeometry(node,'bind');bound++;};
 var h=board(panel(1,300)+logs(2,3)+panel(4,300)+logs(5,6)+panel(7,300));
 ` + string(asset) + `
+check('history exposes owner snapshot alongside panel hooks',window.wbHistory.snapshot===window.historyKit.snapshot && typeof window.wbHistory.restorePanel==='function' && typeof window.wbHistory.panelToggle==='function',true);
 check('three panels fit including intervening logs',first(h),'e1');
 check('three whole panels natural height',h._wbHistoryHeight,980);
 h.querySelector('[id="e2"]').setAttribute('data-height','140');resize(h);
@@ -175,6 +177,15 @@ check('append swap preserves actually open rows',[71,72,97].map(function(i){retu
 h=appendedHistory;
 click(h.querySelector('.history-older'));flush();check('third log chunk is thirty',first(h),'e11');
 click(h.querySelector('.history-older'));flush();check('last log chunk is remainder',[first(h),h.querySelector('.history-older').hidden],['e1',true]);
+// A settled default cut in view survives an append swap, so visible rows
+// keep their place in the flex-end clip; out of view the tail is re-chosen.
+h=start(logs(1,40));check('default log cut',first(h),'e11');
+keepVisible=true;var heldSnapshot=window.wbHistory.capture(document);h=board(logs(1,41));window.wbHistory.restore(document,heldSnapshot);flush();
+check('in-view append keeps the default cut',[h._wbHistoryChunks,h._wbHistoryPending],[['e11'],null]);
+visible(h,1);visible(h,0);flush();
+check('leaving the view returns a held cut to the tail',h._wbHistoryChunks,['e12']);
+keepVisible=false;var tailSnapshot=window.wbHistory.capture(document);h=board(logs(1,42));window.wbHistory.restore(document,tailSnapshot);flush();
+check('out-of-view append re-chooses the tail',h._wbHistoryChunks,['e13']);
 h=start(logs(51,100),[logs(1,50)]);
 check('initial thirty needs no page',[first(h),loads],['e71',0]);
 click(h.querySelector('.history-older'));flush();check('cross-page log chunk',[first(h),h.querySelectorAll('.wb-entry').length],['e41',100]);
@@ -266,13 +277,13 @@ check('Older reveals undated prefix in stored nonnumeric order',legacyOrder(),[[
 var legacyVisibleSnapshot=window.wbHistory.capture(document),legacyCuts=h._wbHistoryChunks.slice();
 h=legacyRepost();window.wbHistory.restore(document,legacyVisibleSnapshot);flush();
 check('reload preserves exact legacy cuts and visible order',[h._wbHistoryChunks,legacyOrder()],[legacyCuts,[['item-9',true,true,false],['item-2',true,true,false]]]);
-// Navigation keeps its original allowlist, fold opening and keep lifetime.
+// Navigation keeps its allowlist/fold opening and uses the explicit owner.
 h=start(logs(51,100),[panel(1,200)+logs(2,50)]);
 check('unknown target refused',window.wbHistory.loadTarget(document,'p999'),null);
 check('selector injection refused',window.wbHistory.loadTarget(document,'p1"] script'),null);
 var target=window.wbHistory.loadTarget(document,'p1');flush();
 check('known panel opens and becomes visible',[target.id,target.open,first(h)],['p1',true,'e1']);
-check('navigation uses shared keep offset',keeps.at(-1).opt.offset,12);
+check('navigation uses explicit jump offset',keeps.at(-1).opt.offset,12);
 keeps.at(-1).opt.onEnd();check('keep end clears target',h._wbHistoryTarget,null);
 // A host reveals through its fold owner before the loader's first layout,
 // including reentrant admission hooks and inert closed-topic initialization.
@@ -297,7 +308,7 @@ function guardTopic(h){
   check(kind+' rejected IDs never reveal, load or bind',[navigationOrder,loads,bound,h.querySelectorAll('template[data-history-page]').length],[[],loadCount,bindCount,pages]);
   var target=window.wbHistory.loadTarget(document,'p1',unfoldForNavigation);flush();
   check(kind+' reveals through callback before first geometry',navigationOrder[0],'owner');
-  ['rect','flash','keep'].forEach(function(phase){check(kind+' exercises '+phase,navigationOrder.includes(phase),true);});
+  ['rect','flash','jump'].forEach(function(phase){check(kind+' exercises '+phase,navigationOrder.includes(phase),true);});
   if(kind==='page')['bind','load'].forEach(function(phase){check('page exercises admission '+phase,navigationOrder.includes(phase),true);});
   check(kind+' opens the known target without unrelated fold changes',[target.id,target.open,topic.querySelector('.unrelated').open,sibling.getAttribute('data-size')],['p1',true,false,'fold']);
   navigationGuard=false;keeps.at(-1).opt.onEnd();
@@ -313,7 +324,7 @@ check('unknown inert target cannot reveal or admit',window.wbHistory.loadTarget(
 check('unknown inert topic stays inert',[navigationOrder,!!root.querySelector('template[data-history-topic]')],[[],true]);
 var deferredTarget=window.wbHistory.loadTarget(document,'p1',unfoldForNavigation);flush();
 check('inert topic owner runs before init geometry',navigationOrder[0],'owner');
-['rect','bind','load','flash','keep'].forEach(function(phase){check('inert topic exercises '+phase,navigationOrder.includes(phase),true);});
+['rect','bind','load','flash','jump'].forEach(function(phase){check('inert topic exercises '+phase,navigationOrder.includes(phase),true);});
 check('inert target becomes live and opens without unrelated disclosure',[deferredTarget.isConnected,deferredTarget.open,deferredTarget.closest('.topic').querySelector('.unrelated').open,!!root.querySelector('template[data-history-topic]')],[true,true,false,false]);
 navigationGuard=false;keeps.at(-1).opt.onEnd();
 var revealedSnapshot=window.wbHistory.capture(document),ownerCalls=navigationOrder.filter(function(p){return p==='owner';}).length;
@@ -327,7 +338,7 @@ var folds=h.querySelectorAll('.system-run'),summary=folds[1].querySelector('summ
 check('excluded chip prefix has no rendered box',folds[0].getBoundingClientRect().height,0);
 document.elementFromPoint=function(){return new E('div',{'class':'oq-pill'});};
 fire(summary,'focusin');flush();
-check('selected but occluded summary uses keep',[first(h),keeps.at(-1).node===summary],['e71',true]);
+check('selected but occluded summary uses explicit jump',[first(h),keeps.at(-1).node===summary,keeps.at(-1).phase],['e71',true,'jump']);
 keeps.at(-1).opt.onEnd();
 document.elementFromPoint=null;
 var oldestTarget=window.wbHistory.loadTarget(document,'e1');flush();
@@ -347,6 +358,7 @@ visible(h,1);visible(h,0);check('editing defers collapse',h._wbHistorySteps,2);
 document.activeElement=null;document.on.focusout[0]();timers.splice(0).forEach(function(fn){fn();});flush();check('focusout retries collapse',h._wbHistorySteps,1);
 click(h.querySelector('.history-older'));flush();h.closest('.topic').setAttribute('data-max','');visible(h,1);visible(h,0);check('maximized topic does not collapse',h._wbHistorySteps,2);
 var before=bound;window.wbBindBoard(root);check('host hook retained',bound,before+1);
+check('every ordinary history capture applies exactly once',keeps.filter(function(k){return k.phase==='keep';}).every(function(k){return k.applied===1;}),true);
 if(bad.length)throw Error(bad.join('\n'));
 `
 	if out, err := nodeScript(node, script).CombinedOutput(); err != nil {

@@ -184,7 +184,11 @@ func TestWhiteboardEffectsBrowser(t *testing.T) {
 			if err == nil {
 				err = setAdapter("absent")
 			}
-			valid, _ := wslive.NewWhiteboardEffects([]wswhiteboard.Effect{{Kind: "panel", Topic: "effects", EntryID: "e1", PanelID: "p1", Field: "payload", After: `<img src=x onerror="window.effectsAttack=1"><script>window.effectsAttack=1</script> hostile-effect-marker **plain text**`}})
+			valid, _ := wslive.NewWhiteboardEffects([]wswhiteboard.Effect{
+				{Kind: "panel", Topic: "effects", EntryID: "e1", PanelID: "p1", Field: "payload", After: `PANEL-PAYLOAD-ONLY <script>window.effectsAttack=1</script>`},
+				{Kind: "panel", Topic: "effects", EntryID: "e1", PanelID: "p1", Field: "recap", After: "Panel recap only"},
+				{Kind: "log", Topic: "effects", EntryID: "e2", Field: "text", After: `<img src=x onerror="window.effectsAttack=1"><script>window.effectsAttack=1</script> hostile-effect-marker **plain text**`},
+			})
 			entries := []wslive.RingEntry{{Kind: wslive.RingUser, Text: "old-history-marker"}}
 			for i := 0; i < 64; i++ {
 				entries = append(entries, wslive.RingEntry{Kind: wslive.RingReply, Text: strings.Repeat(fmt.Sprintf("History %02d has enough text to create real scroll height. ", i), 8)})
@@ -210,8 +214,9 @@ func TestWhiteboardEffectsBrowser(t *testing.T) {
 			// Model a newly projected post-commit carrier through the real
 			// builder and ring writer; this does not simulate an MCP commit.
 			entry, _ := wslive.NewWhiteboardEffects([]wswhiteboard.Effect{
-				{Kind: "panel", Topic: "effects", EntryID: entryID, PanelID: "p1", Field: "payload", After: payload},
+				{Kind: "panel", Topic: "effects", EntryID: entryID, PanelID: "p1", Field: "payload", After: "PANEL-PAYLOAD-ONLY " + payload},
 				{Kind: "panel", Topic: "effects", EntryID: entryID, PanelID: "p1", Field: "recap", After: marker},
+				{Kind: "log", Topic: "effects", EntryID: fmt.Sprintf("e%d", seq+1000), Field: "text", After: payload},
 			})
 			err = wslive.AppendRing(ringDir, []wslive.RingEntry{entry})
 			if err == nil {

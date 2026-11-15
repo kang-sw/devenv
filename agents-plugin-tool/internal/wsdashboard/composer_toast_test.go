@@ -35,7 +35,7 @@ function topicNotes() { return []; }
 function grow() {} function clearMentions() {} function dropImg() {} function release() {} function clearTrash() {}
 function renderImgs() {} function dropChip() {} function setItem() {} function closeTopicNotes() {} function renderChips() {}
 function clearDraft() {} function restoreHeld() {} function syncBadge() {} function leadTurn() { return 1; }
-function followConvo() {}
+function followConvo() {} function boardFlushViewed() {}
 function btn() { return { disabled: false, getAttribute: function () { return "h1"; } }; }
 `
 

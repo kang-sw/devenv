@@ -58,6 +58,29 @@ func staleBoard(t *testing.T) *State {
 
 const wantStaleInfo = "5 of 7 open topics unchanged for 60+ min (S, A, B, D, E); if finished, close them with wb:close and a one-line result."
 
+func TestStaleNudgeResearchingUsesUnchangedGeneralPolicy(t *testing.T) {
+	st := &State{}
+	for _, name := range []string{"A", "B", "C", "D", "E"} {
+		applyAt(t, st, `<wb:topic name="`+name+`"><wb:log>Investigating</wb:log><wb:state value="researching" eta_minutes="1"/></wb:topic>`, testNow)
+	}
+	if out := applyAt(t, st, "", testNow.Add(59*time.Minute)); out.Info != "" {
+		t.Fatalf("research warned before stale threshold: %s", out.Info)
+	}
+	out := applyAt(t, st, "", testNow.Add(time.Hour))
+	if want := "5 of 5 open topics unchanged for 60+ min (A, B, C, D, E); if finished, close them with wb:close and a one-line result."; out.Info != want {
+		t.Fatalf("research exemption or threshold change: %q", out.Info)
+	}
+	if out := applyAt(t, st, "", testNow.Add(119*time.Minute)); out.Info != "" {
+		t.Fatalf("research stale debounce changed: %s", out.Info)
+	}
+	// Open asks, not StateWaiting, exclude a topic; agent activity refreshes age.
+	applyAt(t, st, `<wb:topic name="A"><wb:add class="check"><wb:title>Question</wb:title></wb:add></wb:topic><wb:topic name="B"><wb:log>Fresh evidence</wb:log></wb:topic>`, testNow.Add(119*time.Minute))
+	out = applyAt(t, st, "", testNow.Add(120*time.Minute))
+	if want := "3 of 5 open topics unchanged for 60+ min (C, D, E); if finished, close them with wb:close and a one-line result."; out.Info != want {
+		t.Fatalf("research altered open-item/activity criteria: %q", out.Info)
+	}
+}
+
 func TestStaleNudgeNamesStaleTopicsOnly(t *testing.T) {
 	st := staleBoard(t)
 	if out := applyAt(t, st, ``, testNow.Add(59*time.Minute)); nudgeOf(out) != "" {
