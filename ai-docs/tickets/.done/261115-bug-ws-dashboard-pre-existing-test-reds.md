@@ -3,6 +3,7 @@ title: "Green the known pre-existing dashboard and whiteboard test reds"
 related:
   261115-feat-ws-whiteboard-viewed-panel-anchor: "introduced TestViewedPerformanceBrowser (4afc78add)"
   261113-feat-ws-dashboard-session-four-state-lifecycle: "Phase 2 Result records TestRootKeepsSessionsInTheRailOnly red after the landing logo (d2921cf02)"
+completed: 2026-11-16
 ---
 
 # Green the known pre-existing dashboard and whiteboard test reds
@@ -120,3 +121,8 @@ Triaged on develop `cd477b5a8` (macOS, cached Chromium 1223, `-run` only).
     run passed. `TestBoardViewedReloadBrowser`, `TestBoardViewedLiveBrowser`
     and `TestBoardStateFilterBrowser` passed, and
     `TestBoardViewedUpdatePerfBrowser` passed 3 of 3 runs.
+
+
+## Resolution (2026-11-16)
+
+Merged as develop 28cf9c7bc (head 75990f973). Gear/RootKeepsSessions were already green (234cef037, c918577da). TestViewedPerformanceBrowser fixed by moving the init 1000px fill inside the shared capture (102 -> 2 captures; before/after screenshots byte-identical) plus fixture markup update. The CI red TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation was already fixed by 0500a7690. TestHistoryLoadAnchorBrowser was not reproduced (5 sequential, 16 parallel, CDP 4x/8x/16x throttle); lead decision: carried as known-unreproduced, inferred candidate the fixed 1500ms PIN_MS cap; a future CI failure line routes a fix task.
