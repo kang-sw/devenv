@@ -138,7 +138,14 @@
       "registered_at": "2026-09-30T02:49:06Z"
     },
     "260930-feat-git-exec-audit-log": {
-      "registered_at": "2026-09-30T02:03:00Z"
+      "registered_at": "2026-09-30T02:03:00Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-15T10:53:40Z"
+      }
     },
     "261002-bug-lead-run-effort-agent-type-missing-fallback": {
       "registered_at": "2026-10-02T13:27:17Z"
