@@ -621,7 +621,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec4/fullscreen-panel-width",
         "phase": "active",
-        "touched_at": "2026-11-15T01:14:30Z",
+        "touched_at": "2026-11-15T01:30:21Z",
         "impl": {
           "branch": "impl/exec4/fullscreen-panel-width/chug-diner-dill"
         }
@@ -790,19 +790,6 @@
     },
     "261115-feat-ws-hosted-codex-adapter-contract": {
       "registered_at": "2026-11-14T15:20:26Z"
-    },
-    "261115-feat-ws-whiteboard-committed-effects-in-conversation": {
-      "registered_at": "2026-11-14T15:10:41Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-14T15:49:01Z",
-        "impl": {
-          "branch": "impl/develop/fetal-olive-colt"
-        }
-      }
     },
     "261115-feat-ws-whiteboard-toolbar-state-filter": {
       "registered_at": "2026-11-15T00:54:28Z",
