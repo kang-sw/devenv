@@ -30,7 +30,14 @@ lead-owned.
   exclusive transition graph. New topics still default to `discussing`.
 - `owner` and `eta_minutes` are optional for researching. Do not impose the
   implementing state's mandatory executor/estimate requirement on research.
-  Their run/ETA consequences are not yet specified; see the Open Decision Queue.
+  Both attributes are informational, not a timed research run (MAIN decision
+  963). `wb:eta`, run identity and extensions stay implementing-only; entering
+  implementing starts a fresh implementing clock rather than carrying research
+  time. Reject timed research runs and research ETA extensions.
+- Preserve hourly-notice activation for implementing/waiting only. The hourly
+  body continues to list every open topic, including researching. Researching
+  gets no ETA-overdue notice, even with an informational estimate. General
+  stale behavior remains state-independent (MAIN decision 963).
 - The `discussing_without_open_items` warning does not apply to researching.
   Keep the general stale-topic nudge state-independent; do not exempt research,
   change thresholds, or reinterpret open-item/activity criteria. Researching
@@ -68,7 +75,7 @@ lead-owned.
   supported-authority contradiction or data-loss behavior to the lead.
 - **Shipped documentation audit flag.** The bounded audit found no explicit
   recommendation to Git-track whiteboards. `executor-wrapup.md`'s Doc Commit
-  Gate (`agents-plugin/rsrc/`, lines 17–25; wsflow/Pi copies, lines 21–24)
+  Gate (`agents-plugin/rsrc/executor-wrapup.md#L17-L25`; wsflow/Pi copies also at lines 17–25)
   says to commit all `ai-docs/` changes: that implicitly includes already-tracked
   or unignored boards, not force-adding excluded files. The whiteboard playbook's
   takeover recipe uses “committed folder” for a durable store transaction, not
@@ -78,13 +85,21 @@ lead-owned.
   mirror and all 11 locale tables; Phase 2 completes rendering after 793.
   Phase 1 is a partial delivery with a render gap, not completed UI support.
   Embedded assets belonging to one daemon does not eliminate this deliberately
-  staged source-level gap. Exact exposure/rollout behavior is unresolved below.
+  staged source-level gap. No additional rollout gate or fallback mechanism is
+  required; MAIN owns deployment. The split landed at develop `81382b093` and
+  its move maps are in
+  `ai-docs/tickets/assets/261114-refactor-ws-dashboard-whiteboard-asset-split/`.
 - UI-fast verification has no approved screenshot reference and no screenshot
   or viewport/theme matrix requirement. Do not import the asset-split ticket's
   screenshot acceptance into this feature.
 
 ## Constraints
 
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/skill-authoring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin-wsflow/rsrc/`, `agents-plugin-wsflow/skills/`, `agents-plugin-tool/internal/wsdoc/conventions/`)
+- Convention: ai-docs/manuals/wsflow-mirroring.md (declared for `agents-plugin/rsrc/`, `agents-plugin/skills/`, `agents-plugin/hooks/`, `agents-plugin-wsflow/`)
+- Convention: ai-docs/manuals/ws-mcp.md (declared for `agents-plugin-tool/internal/mcp/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
 - Apply `ai-docs/manuals/shipped-surface-boundary.md` to all shipped changes:
   the eventual playbook explains generic behavior, not this repository's owner
   numbers, tickets or scheduling rules.
@@ -92,11 +107,11 @@ lead-owned.
   using the explicitly settled T0 deployment assumptions above.
 - Apply `ai-docs/manuals/skill-authoring.md` to the whiteboard playbook and
   `ai-docs/manuals/wsflow-mirroring.md` to its generated mirror and manifests.
-- Phase 1 leaves `agents-plugin-tool/internal/wsdashboard/assets/dashboard.css`,
-  `dashboard.js`, `agents-plugin-tool/internal/wswhiteboard/assets/page.css`,
-  all whiteboard scripts (including `ago.js`), and `scripts/board-headless.mjs`
-  untouched. Renderer work is Phase 2 after the asset split's landed result/move
-  map. `page.tmpl` badge changes also belong to Phase 2.
+- Phase 1 leaves rendering assets and scripts untouched, including the
+  post-split `dashboard-*.css/js`, `page-*.css`, `ago.js`, and
+  `scripts/board-headless/*.mjs` responsibilities. Renderer and `page.tmpl`
+  badge changes belong to Phase 2. The asset freeze itself was lifted when
+  the split landed; this remains the ticket's phase boundary.
 - No new research provider, research execution machinery, automatic state
   inference or changes to general stale policy are included.
 
@@ -108,12 +123,12 @@ ready-route facts. Search by the named symbols after 793 moves assets.
 | Surface | Current evidence and relevance |
 |---|---|
 | `internal/wswhiteboard/topic_state.go` | `topicStateValues` contains four states; `applyTopicState` requires owner/ETA for implementing and rejects them otherwise. `parseTopicState`, `validRun`, `foldStateEvent` and close/reset history assume only implementing has a run; unknown enum values are malformed. `structuralWarnings` scopes the no-open-items warning to discussing. |
-| `internal/wswhiteboard/topic_eta.go` | `validExtension` and `applyTopicETA` accept only implementing runs, with cumulative budget and strict extension history. Optional research attributes cannot simply reuse this without a decision. |
+| `internal/wswhiteboard/topic_eta.go` | `validExtension` and `applyTopicETA` accept only implementing runs, with cumulative budget and strict extension history. Research attributes are informational and must not reuse implementing runs or extensions. |
 | `internal/wswhiteboard/query.go` | Topic metadata's `State *TopicState` carries value, entry and optional run. Query tests pin state/diagnostic output; extend the existing projection rather than inventing a separate marker. |
-| `internal/wswhiteboard/board_notice.go` | `eligibleState` admits implementing/waiting for hourly epochs; `planNotice` computes overdue only for implementing. Research timed eligibility is a decision gap, separate from general stale behavior. |
+| `internal/wswhiteboard/board_notice.go` | `eligibleState` admits implementing/waiting for hourly epochs; `planNotice` computes overdue only for implementing, but its hourly body lists every open topic, including each declared state. Trigger eligibility and body inclusion are distinct (`agents-plugin-tool/internal/wswhiteboard/board_notice.go#L37-L39`, `#L141-L161`, `#L197-L209`). |
 | `internal/wswhiteboard/nudge.go` | `staleNudge` uses open-topic count, open-item absence and activity age, not declared state. Its local `waiting` map means open asks, not `StateWaiting`. Preserve that distinction. |
 | `internal/wswhiteboard/update_summaries.go` | New-topic default producer writes `StateDiscussing`; `summaryState` and net-change summaries project state. Preserve default behavior and cover explicit researching in the same creation batch. |
-| `agents-plugin/rsrc/whiteboard/whiteboard.md` | Work-state obligations, `wb:state`/`wb:eta` grammar, query metadata and timed-nudge sections currently describe four states and implementing-only runs. Update together once missing policy is settled. Mirror is `agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md`; both rsrc manifests participate. |
+| `agents-plugin/rsrc/whiteboard/whiteboard.md` | Work-state obligations, `wb:state`/`wb:eta` grammar, query metadata and timed-nudge sections currently describe four states and implementing-only runs. Update together to describe informational research attributes and unchanged implementing-only clocks. Mirror is `agents-plugin-wsflow/rsrc/whiteboard/whiteboard.md`; both rsrc manifests participate. |
 | `internal/wsi18n/tables/*.json` | All 11 tables: `en`, `ko`, `ja`, `zh-Hans`, `zh-Hant`, `de`, `es`, `fr`, `it`, `pt-BR`, `ru`. Existing state keys use `js.wb.state.*`, filter labels use `js.board.filter.*`. Supply research state/filter translations in Phase 1; Korean state label is fixed above. |
 | `internal/wswhiteboard/assets/page.tmpl`, `ago.js`, `page.css` | `topicstate` renders a four-way badge; `ago.js` maps those states and currently shows owner only for implementing with run identity. Extend server rendering and live reconciliation consistently in Phase 2; use post-split stylesheet/script locations. |
 | `internal/wsdashboard/assets/cards.js` and rendering assembly | `filterValues` enumerates four states plus all/closed. Phase 2 includes research filtering, card state propagation, overview/render consumers and any required dashboard styling. `internal/wsdashboard/pages.go`, `internal/wswhiteboard/render.go` embed/assemble the assets; follow the 793 move map rather than assuming old paths survive. |
@@ -121,35 +136,32 @@ ready-route facts. Search by the named symbols after 793 moves assets.
 
 All `internal/` paths above are under `agents-plugin-tool/`.
 
-## Open Decision Queue
+## Prior Decisions
 
-These observable policy boundaries remain for the lead/MAIN, not objections to
-researching or T0 or additional ready gates. Optional owner/ETA and unchanged
-general stale behavior are settled and are not re-asked. No unconfirmed mechanism
-or behavioral recommendation is implementation authority.
+- 261115-feat-ws-whiteboard-topic-default-and-update-summaries (2026-11-15, commit 218176cc): "The playbook describes authoritative creation defaults, same-batch explicit override without intermediate default, no legacy/reopen backfill" — bearing: constrains
+- 261115-feat-ws-whiteboard-topic-state-badge (2026-11-15, Decisions): "Preserve closed-topic lifecycle and existing toolbar filtering. A closed topic is not a new operational state, and closing/resetting must not retain a stale implementing owner/timer." — bearing: constrains
+- 261115-feat-ws-whiteboard-toolbar-state-filter (2026-11-15, Result (01a121f70)): "Counts deduplicate board/pin topics and retain loaded closed history plus data-closed-more." — bearing: constrains
+- 261114-feat-ws-whiteboard-topic-state-and-lead-nudges (2026-11-15, Result (0203cff95)): "Scoped cumulative wb:eta preserves original start, run identity, owner and initial estimate" — bearing: constrains
+- 733c7522 (2026-11-15, commit): "Fold all retained histories in numeric board-global order; recognize only the inspected non-imported unattributed historical system close producer, not authored text." — bearing: constrains
+- dd03b1d0 (2026-11-15, commit): "Phase 3 uses immutable existing-kind system metadata for cumulative ETA revisions and reply-id-scoped notice receipts; retain original start/initial estimate/owner and every reason." — bearing: constrains
+- 77229e91 (2026-11-15, commit): "Keep render-only calls on a cheap summary path; do not clone or compare the board again when no topic was touched." — bearing: constrains
+- 02a2e572 (2026-11-15, commit): "Trimmed acceptance per (899)=a and the owner UI-fast principle: scoped tests, wsi18n, one lite (clean); owner on-screen check is acceptance." — bearing: supports
 
-1. **Research ETA clock behavior.** Choose whether a supplied research estimate
-   is informational only, or starts a timed research run with elapsed history and
-   extension behavior. If timed, choose whether `wb:eta` applies and whether the
-   transition to implementing starts a fresh clock or carries the research clock.
-   Source: `topic_state.go` (`validRun`, `foldStateEvent`,
-   `applyTopicState`) requires complete implementing runs and drops current runs
-   for other states; `topic_eta.go` is implementing-only. Storage fields and
-   parser/fold organization are technical implementation details once observable
-   clock/projection behavior is settled; no new persisted mechanism is chosen here.
-2. **Timed research notices.** Choose existing eligibility unchanged, research
-   included in hourly notices only, or research included in hourly and overdue
-   notices when it has an ETA. Source:
-   `board_notice.go:eligibleState` and `planNotice` currently exclude research.
-   This is separate from the already-settled state-independent general stale
-   nudge in `nudge.go`.
-3. **Partial-delivery exposure.** Choose whether the Phase 1 backend/text slice
-   is user-exposed with the known missing badge/filter, or user-facing rollout
-   waits for Phase 2. No gate, negotiation or renderer fallback is chosen.
-   Source: `page.tmpl:topicstate`,
-   `ago.js`'s state map and `cards.js:filterValues` recognize four states and
-   remain frozen for Phase 1; the two-phase delivery is already authorized.
-   Deployment operations themselves are not authorized by this ticket.
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | agents-plugin-tool/internal/wswhiteboard/{topic_state.go,topic_eta.go,query.go,board_notice.go,update_summaries.go}, internal/wsi18n/tables/*.json, shared playbook/mirrors; Phase 2 rendering/assets and dashboard consumers. |
+| scope.surface | public-interface | wb:state accepts a new value; derived query state and immutable history gain researching semantics (agents-plugin-tool/internal/wswhiteboard/topic_state.go#L18-L44, #L177-L259; query.go#L41-L43). |
+| scope.new_public_symbol | yes | New public wb:state value researching; existing exported state constants are in agents-plugin-tool/internal/wswhiteboard/topic_state.go#L18-L25. Exact Go constant name remains implementation-owned. |
+| scope.new_type_contract | yes | Fifth enum value plus optional informational research owner/eta_minutes; MAIN963 settles no research run, implementing-only wb:eta and a fresh implementing clock. Existing TopicState/TopicRun carry only implementing run metadata (agents-plugin-tool/internal/wswhiteboard/topic_state.go#L27-L44). |
+| scope.test_surface | existing | Named topic_state*_test.go, topic_eta_test.go, board_notice_test.go, nudge_test.go, update_summaries_test.go exist under agents-plugin-tool/internal/wswhiteboard/; internal/wsdashboard/board_state_filter_test.go and internal/wsrsrc/wsflow_mirror_test.go exist. No tests executed during population. |
+| complexity.reuse_points | confirmed | Read TopicStates/parseTopicState/applyTopicState, applyTopicETA, summaryState, eligibleState/planNotice, staleNudge, query projection, topicstate, ago.js badge and cards.js filterValues. Canonical playbook and wsflow/Pi mirror guards are existing reuse seams. |
+| complexity.side_effect_risk | high | Persisted enum and metadata affect replay, summaries, warnings and notice epochs; phased rendering deliberately leaves a backend/UI gap. agents-plugin-tool/internal/wswhiteboard/topic_state.go#L104-L132; board_notice.go#L37-L67. |
+| risk.correctness | high | Optional research metadata must survive folding/queries without becoming an implementing run; preserve repeat/transition/close/default semantics and distinguish hourly trigger from all-open-topic body (agents-plugin-tool/internal/wswhiteboard/board_notice.go#L141-L209). |
+| risk.fit | moderate | Reuse immutable Entry authority and existing state consumers; current non-implementing fold drops Run and summaryState compares only Value/Run/Diagnostic, so informational metadata needs coordinated projection rather than a second flag (agents-plugin-tool/internal/wswhiteboard/topic_state.go#L127-L132; update_summaries.go#L160-L172). Pi resource byte identity also applies (internal/wsrsrc/pi_mirror_test.go#L20-L80). |
+| risk.test | high | Existing four-state coverage must expand across optional metadata, raw-history retention, clocks/notices, locale key-use guards and server/live/filter parity; Phase 2 follows the move map landed at develop 81382b093, under ai-docs/tickets/assets/261114-refactor-ws-dashboard-whiteboard-asset-split/. No screenshot/matrix requirement is authorized. |
+| risk.security_or_contract | moderate | Public enum/metadata and T0 accepted skew residual must preserve raw history and escaped owner rendering; no wider data loss is accepted. Current parser rejects unknown values as malformed and permits a later valid baseline (agents-plugin-tool/internal/wswhiteboard/topic_state.go#L242-L259, #L286-L300); server/client owner rendering is text (assets/page.tmpl#L42-L50; assets/ago.js#L50-L64). |
 
 ## Phases
 
@@ -166,7 +178,11 @@ Update the canonical whiteboard playbook's work-state obligation, grammar,
 query and notification explanations; regenerate the wsflow rsrc copy and both
 manifests through the documented mirroring procedure. Add the state and filter
 translations in all 11 locales. Honor the frozen rendering boundary above;
-report the partial delivery and remaining UI gap explicitly.
+report the partial delivery and remaining UI gap explicitly. Optional research
+owner/ETA must survive replay, queries and net-change summaries without a run;
+`wb:eta` remains invalid for researching, transitioning to implementing starts
+a new clock, and hourly bodies include researching without new trigger or
+overdue eligibility.
 
 Verification boundary for the future worker (not run during ticket capture):
 
