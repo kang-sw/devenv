@@ -906,7 +906,14 @@
       "registered_at": "2026-11-15T03:11:31Z"
     },
     "261115-feat-ws-whiteboard-topic-waiting-on": {
-      "registered_at": "2026-11-15T03:33:00Z"
+      "registered_at": "2026-11-15T03:33:00Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "exec4/waiting-on",
+        "phase": "active",
+        "touched_at": "2026-11-15T03:54:29Z"
+      }
     },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
       "registered_at": "2026-11-14T15:16:05Z",
