@@ -78,6 +78,12 @@ type DaemonOptions struct {
 	// Agents is the agent runner the daemon hosts; nil serves no agent
 	// routes.
 	Agents AgentHost
+	// LeadNudges starts after runner recovery and stops before the daemon
+	// releases its cache-root lock. It runs without pages or an index.
+	LeadNudges interface {
+		Start()
+		Close()
+	}
 	// Tracker is the tracker host the tracker routes serve (tracker_routes.go);
 	// nil serves no tracker route and sends no tracker stream event.
 	Tracker TrackerHost
@@ -156,16 +162,20 @@ type NudgeBody struct {
 // port (loopback, or every interface in LAN mode), and has written its
 // endpoint file.
 type Daemon struct {
-	dir      string
-	lock     *flock.Flock
-	server   *http.Server
-	listener net.Listener
-	endpoint Endpoint
-	log      io.Writer
-	index    *Index
-	source   SessionSource
-	agents   AgentHost
-	broker   *broker
+	dir        string
+	lock       *flock.Flock
+	server     *http.Server
+	listener   net.Listener
+	endpoint   Endpoint
+	log        io.Writer
+	index      *Index
+	source     SessionSource
+	agents     AgentHost
+	leadNudges interface {
+		Start()
+		Close()
+	}
+	broker *broker
 	// mailWake is DaemonOptions.MailWake, nil without one.
 	mailWake MailWaker
 	// stats counts the live-update work (stream_stats.go).
@@ -346,6 +356,7 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		listener:        listener,
 		log:             logw,
 		agents:          opts.Agents,
+		leadNudges:      opts.LeadNudges,
 		mailWake:        opts.MailWake,
 		tracker:         opts.Tracker,
 		broker:          newBroker(stats),
@@ -457,6 +468,9 @@ func StartDaemon(opts DaemonOptions) (*Daemon, error) {
 		_ = listener.Close()
 		_ = lock.Unlock()
 		return nil, fmt.Errorf("write endpoint file: %w", err)
+	}
+	if d.leadNudges != nil {
+		d.leadNudges.Start()
 	}
 	go func() {
 		if err := d.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -608,6 +622,9 @@ func (d *Daemon) Done() <-chan struct{} { return d.done }
 func (d *Daemon) Close() {
 	d.closeOnce.Do(func() {
 		close(d.stop)
+		if d.leadNudges != nil {
+			d.leadNudges.Close()
+		}
 		d.acks.close()
 		// Shutdown closes the listener at once, so no new session or page
 		// connects, and the hosted sessions drain meanwhile (proxy.go):

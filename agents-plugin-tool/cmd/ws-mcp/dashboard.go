@@ -90,7 +90,8 @@ func dashboardCommand(args []string) {
 		OnExit: persistHolderExit(dir),
 	})
 	agents := newAgentRunner(dir, logw, trackerChanged.call, holders)
-	host := &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath), agents: agents}
+	nudges := mcp.NewWhiteboardNudges(dir, agents, logw)
+	host := &proxyHost{dir: dir, port: *port, lan: *lan, buildTime: *buildTime, contentHash: contentHash, logw: logw, configPath: filepath.Clean(configPath), agents: agents, nudges: nudges}
 	// A store's support conversation runs in the store's clone, so an
 	// unregister ends it: right after the dashboard's own, and on the store
 	// watch's change for one another process ran (tk:unregister).
@@ -116,6 +117,7 @@ func dashboardCommand(args []string) {
 		Worktrees:      sessions,
 		MailWake:       wswake.Mailbox,
 		Agents:         agents,
+		LeadNudges:     nudges,
 		Tracker:        &dashboardTracker{h: tracker, err: trackerErr, unregistered: func() { support.CloseUnregistered() }},
 		Holders:        holders,
 		Support:        support,

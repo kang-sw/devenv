@@ -30,13 +30,14 @@ import (
 )
 
 type Server struct {
-	root           string
-	version        string
-	sourceCommit   string
-	rootMu         sync.RWMutex
-	sessionHarness string
-	sessions       *sessionStore
-	mailbox        mailboxRuntimeState
+	root              string
+	version           string
+	sourceCommit      string
+	whiteboardChanged func(cacheHome, root, key string)
+	rootMu            sync.RWMutex
+	sessionHarness    string
+	sessions          *sessionStore
+	mailbox           mailboxRuntimeState
 	// indexOpts configures the ticket ownership index client; zero values
 	// take the library defaults. Tests inject clocks and timeouts here.
 	indexOpts wsindex.Options
