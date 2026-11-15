@@ -101,7 +101,7 @@
   var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
   function readDraft() {
     var b = region("board"), open = {};
-    Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
+    Object.keys(openState).forEach(function (k) { if (openState[k] && k.indexOf("k:history:") !== 0) open[k] = true; });
     var d = {
       text: ctext ? ctext.value : "",
       cmd: cmdSel ? { name: cmdSel.name, args: cmdSel.args } : null,
@@ -152,7 +152,7 @@
       if (d.open && typeof d.open === "object") {
         Object.keys(d.open).forEach(function (k) {
           // A panel folded by hand outranks a draft saved while it was open.
-          if (!Object.prototype.hasOwnProperty.call(openState, k) && !(k.indexOf("k:entry:") === 0 && shutHas(rid + "/" + k.slice(2)))) openState[k] = true;
+          if (k.indexOf("k:history:") !== 0 && !Object.prototype.hasOwnProperty.call(openState, k) && !((k.indexOf("k:entry:") === 0 || k.indexOf("k:panel:") === 0) && shutHas(rid + "/" + k.slice(2)))) openState[k] = true;
         });
         restoreOpen(doc);
       }
@@ -422,13 +422,13 @@
     });
     window.addEventListener("popstate", function () { shOpen(location.pathname + location.hash, false); });
     // The shell's hotkeys besides the rail's: the search palette's keys
-    // (tracker.js qShortcut) open the shown frame's palette; Ctrl+K and
-    // Ctrl+Space stay with editors by qShortcut's target rule.
+    // (tracker.js qShortcut) open the shown frame's palette; Ctrl+K,
+    // Ctrl+Space and Cmd+K stay with a terminal by qShortcut's target rule.
     doc.addEventListener("keydown", function (e) {
-      if (e.isComposing || e.keyCode === 229 || e.altKey || e.metaKey || e.defaultPrevented) return;
+      if (e.isComposing || e.keyCode === 229 || e.altKey || e.defaultPrevented) return;
       var t = e.target, typing = !!(t && t.closest && t.closest("input, textarea, select, [contenteditable]:not([contenteditable=\"false\"])"));
-      var editor = !!(t && t.closest && t.closest(".xterm, textarea, [contenteditable]:not([contenteditable=\"false\"])"));
-      if (e.ctrlKey ? !editor && !e.shiftKey && (e.code === "Space" || e.key === " " || (e.key || "").toLowerCase() === "k") : e.key === "/" && !typing) {
+      var term = !!(t && t.closest && t.closest(".xterm")), k = (e.key || "").toLowerCase() === "k";
+      if (e.ctrlKey || e.metaKey ? !term && !e.shiftKey && (e.metaKey ? !e.ctrlKey && k : k || e.code === "Space" || e.key === " ") : e.key === "/" && !typing) {
         e.preventDefault();
         shSearch();
       }
@@ -495,10 +495,13 @@
       });
       // A link menu's local z-index cannot outrank the shell header either;
       // lift its frame through the same layer as the other popovers. The
-      // read-only hover card (rail.js, .shp) never lifts: the lifted frame's
-      // opaque layer would cover the shell's header and rail while it shows.
-      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(),
-        popover: q(".rpop:not([hidden]), .lmenu").some(function (el) { return !(el.classList && el.classList.contains("shp")) && el.getClientRects().length > 0; }) });
+      // read-only hover card (rail.js, .shp) is a tooltip and never lifts.
+      // While lifted for a popover the page drops its own background
+      // (data-lifted, dashboard-shell.css), so the shell's header and rail
+      // stay visible under the raised frame instead of going blank.
+      var popover = q(".rpop:not([hidden]), .lmenu").some(function (el) { return !(el.classList && el.classList.contains("shp")) && el.getClientRects().length > 0; });
+      if (popover) root.setAttribute("data-lifted", ""); else root.removeAttribute("data-lifted");
+      send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(), popover: popover });
     }
     function queue() { if (!queued) queued = setTimeout(post, 16); }
     doc.addEventListener("ws-overview", queue);
@@ -507,8 +510,11 @@
       var mo = new MutationObserver(queue);
       if (top) mo.observe(top, { subtree: true, childList: true, attributes: true, characterData: true });
       mo.observe(root, { attributes: true, attributeFilter: ["style", "data-pincol"] });
-      mo.observe(doc.body, { childList: true });
       mo.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ["open", "hidden"] });
+      // A second observe() of the same node on one observer replaces its
+      // options, so the body's direct children (a popover appended already
+      // shown) need their own observer.
+      new MutationObserver(queue).observe(doc.body, { childList: true });
     }
     window.addEventListener("resize", queue);
     window.addEventListener("scroll", function () { send("scroll", { y: Math.round(window.scrollY) }); });
