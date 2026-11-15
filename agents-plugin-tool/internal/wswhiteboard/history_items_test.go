@@ -182,14 +182,24 @@ func TestHistoryCompletedCheckFilterPreservesUndatedAndAssumedRows(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantAll(t, string(css), `html[data-ck-hide="1"] .topic:not(.closed) .wb-hitem.check:not([data-id]):not(:has(.wb-hunknown)) { display: none; }`)
+	wantAll(t, string(css), `html[data-ck-hide="1"] .topic:not(.closed) .wb-hitem.check:not([data-id]):not(.void):not(:has(.wb-hunknown)) { display: none; }`)
 	st := &State{Items: []Item{
 		{ID: 1, Topic: "legacy", Class: ClassCheck, Title: "undated completed check", Status: StatusAnswered, Answer: "ok"},
 		{ID: 2, Topic: "legacy", Class: ClassCheck, Title: "undated assumed check", Status: StatusAssumed, Answer: "ok", AnswerQuote: "probably"},
-	}}
+		{ID: 3, Topic: "legacy", Class: ClassCheck, Title: "withdrawn check", Status: StatusWithdrawn},
+		{ID: 4, Topic: "legacy", Class: ClassCheck, Title: "superseded check", Status: StatusSuperseded},
+	}, Topics: []TopicDoc{{Name: "legacy", Entries: []Entry{
+		{ID: "e1", Kind: EntrySystem, ItemID: 3, At: "2021-01-01T00:00:00Z", Text: "Item {{3}} patched [check] (open -> withdrawn): withdrawn check"},
+		{ID: "e2", Kind: EntrySystem, ItemID: 4, At: "2022-01-01T00:00:00Z", Text: "Item {{4}} patched [check] (open -> superseded): superseded check"},
+	}}}}
 	out := markup(render(t, BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r"})))
 	wantAll(t, regexpHistoryArticle(out, "item-1"), `wb-hitem check`, `wb-hunknown`)
 	wantAll(t, regexpHistoryArticle(out, "item-2"), `wb-hitem check wb-hassumed`, `data-id="02"`, `wb-hunknown`, `title="correction"`)
+	for _, id := range []string{"item-3", "item-4"} {
+		row := regexpHistoryArticle(out, id)
+		wantAll(t, row, `class="srow wb-hitem check void"`, `datetime=`)
+		wantNone(t, row, `wb-hunknown`)
+	}
 }
 
 func TestHistoryRetirementRetainsRecordedPriorAnswer(t *testing.T) {

@@ -159,8 +159,12 @@ func TestRenderPageChangeSignalOnlyOnFull(t *testing.T) {
 	full := render(t, sampleView(LayoutFull))
 	// The page carries its own seq so the poller compares every stamp, the
 	// first included, against the version it was rendered at.
-	if !strings.Contains(full, `<html data-stamp="barrette-regain-lumpiness.stamp.js" data-seq="12">`) {
+	root := regexp.MustCompile(`<html\b[^>]*>`).FindString(full)
+	if !strings.Contains(root, `data-stamp="barrette-regain-lumpiness.stamp.js"`) || !strings.Contains(root, `data-seq="12"`) {
 		t.Errorf("full page lacks the data-stamp and data-seq attributes")
+	}
+	if !strings.Contains(root, `data-wb-reply="barrette-regain-lumpiness"`) {
+		t.Errorf("full page lacks its reply-scoped reader-state identity")
 	}
 	for _, want := range []string{"window.wbStamp", `getAttribute("data-seq")`, "v !== ownSeq", "setInterval(poll, 1500)", `id="wb-banner"`, `"wb-scroll"`, `"wb-open-"`} {
 		if !strings.Contains(full, want) {

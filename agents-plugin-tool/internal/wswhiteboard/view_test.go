@@ -135,6 +135,8 @@ func TestTopicWithABodyIsNotQuiet(t *testing.T) {
 	if quiet := topicView(t, st, LayoutFull, "quiet"); quiet.Quiet || quiet.Doc != "" || quiet.Stream.Count == 0 {
 		t.Fatalf("full-page settled history must stay visible: %+v", quiet)
 	}
+	// The embed is unchanged only after its current snapshot was acknowledged.
+	st.LastEmbedSeq = st.Seq
 	if quiet := topicView(t, st, LayoutEmbed, "quiet"); !quiet.Quiet || quiet.Doc != "" {
 		t.Fatalf("unchanged embed topic must remain quiet: %+v", quiet)
 	}
