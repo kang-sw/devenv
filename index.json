@@ -478,19 +478,6 @@
     "261115-feat-ws-dashboard-external-stt-voice-typing": {
       "registered_at": "2026-11-15T02:02:38Z"
     },
-    "261115-feat-ws-dashboard-worktree-detection-approval": {
-      "registered_at": "2026-11-15T02:27:46Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T10:40:10Z",
-        "impl": {
-          "branch": "impl/develop/gush-wince-guru"
-        }
-      }
-    },
     "261115-feat-ws-hosted-codex-adapter-contract": {
       "registered_at": "2026-11-14T15:20:26Z"
     },
@@ -528,6 +515,9 @@
     },
     "261115-feat-ws-whiteboard-overview-stay-on-topic-click": {
       "registered_at": "2026-11-15T02:12:43Z"
+    },
+    "261115-feat-ws-whiteboard-panel-first-stream": {
+      "registered_at": "2026-11-15T12:16:10Z"
     },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
       "registered_at": "2026-11-14T15:16:05Z",
