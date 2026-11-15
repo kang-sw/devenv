@@ -169,6 +169,10 @@ type Options struct {
 type Runner struct {
 	opts   Options
 	notify func(replyID, project string)
+	// fixedProfile belongs only to a private one-shot answer runner. Freeze
+	// the checked ceiling so config edits cannot widen it between create
+	// and process start. Ordinary conversations still resolve on every start.
+	fixedProfile *ResolvedProfile
 
 	mu     sync.Mutex
 	convs  map[string]*conv
@@ -714,7 +718,16 @@ func (r *Runner) lastCommands(rec Record) []wslive.SlashCommand {
 // needs: a backend this daemon has, an existing instruction file, and a
 // ws-mcp command when the profile allows ws tools.
 func (r *Runner) resolve(profile, root string) (ResolvedProfile, error) {
-	rp, err := ResolveProfile(r.opts.Config, root, strings.TrimSpace(profile))
+	var rp ResolvedProfile
+	var err error
+	if r.fixedProfile != nil {
+		if profile != r.fixedProfile.Name {
+			return ResolvedProfile{}, badRequest("private answer runner profile mismatch")
+		}
+		rp = *r.fixedProfile
+	} else {
+		rp, err = ResolveProfile(r.opts.Config, root, strings.TrimSpace(profile))
+	}
 	if err != nil {
 		return ResolvedProfile{}, badRequest("%v", err)
 	}
@@ -1072,7 +1085,7 @@ type State struct {
 	Held int `json:"held"`
 	// Page is the conversation's dashboard page path.
 	Page string `json:"page"`
-	// Error is the last launch or turn failure; cleared when a turn starts.
+	// Error is the last launch, turn, or command error; cleared when a turn starts.
 	Error     string `json:"error,omitempty"`
 	CreatedAt string `json:"created_at"`
 	ClosedAt  string `json:"closed_at,omitempty"`
@@ -2677,6 +2690,12 @@ func (c *conv) handle(ev Event) {
 		c.update(func(rec *Record) { rec.SteerAnswers, rec.SteerAnswerSeq = c.steerAnswers, ev.Seq })
 	case ev.UserTaken != "":
 		c.steerTaken(ev.UserTaken)
+	case ev.CommandError != "":
+		// Replay rebuilds lifecycle state, not transient command diagnostics.
+		if !quiet {
+			c.setStatus(func() { c.lastErr = ev.CommandError })
+			c.changed(false)
+		}
 	case ev.Notice != "":
 		if !quiet {
 			fmt.Fprintf(c.r.opts.Log, "agent %s: %s\n", c.rec.ReplyID, ev.Notice)

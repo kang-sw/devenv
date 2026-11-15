@@ -20,6 +20,18 @@ In session `boxer-nest-joyous`, root-dispatched design reviewer `daaa90d4-09fc-4
 
 Unlike the initial incident's absent spawn tools, this reviewer could attempt the spawn but its child's capability request was rejected. Investigate both admission-time capability compatibility and the mandatory explorer dependency without weakening either boundary.
 
+## Additional observation — 2026-11-14 unified-history review
+
+In session `boxer-nest-joyous`, root-dispatched medium design reviewer
+`25767c57-d3d3-4351-ac5b-82c2e07fc7a0` for
+`261114-feat-ws-whiteboard-unified-whole-history` reported the same
+`child network capability exceeds parent ceiling` explorer rejection.
+It returned `pass` with the missing explorer binding disclosed in `omitted`,
+and reported direct source inspection as its substitute. The lead requested
+the exact failed question and completed checks before worker handoff; the
+rejection's policy root cause is not independently established. No capability
+relaxation or successful explorer dispatch is claimed.
+
 ## Constraints
 
 - Keep the mandatory design gate incomplete until an appropriately capable reviewer actually completes it.

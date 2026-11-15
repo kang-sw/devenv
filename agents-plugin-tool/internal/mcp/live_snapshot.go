@@ -808,15 +808,16 @@ func writeLiveSnapshot(dir string, data []byte) error {
 // appendLiveRing writes entries to the conversation ring in the session
 // directory dir and tells the daemon: through slot, the session's hosted
 // hand-off, or with a nudge when it is nil. A failed write is logged, never
-// surfaced.
-func (s *Server) appendLiveRing(sessionKey, dir string, slot wsdashboard.HostedSlot, entries []wslive.RingEntry) {
+// surfaced. Its return value records projection success for callers that
+// report it separately from their authoritative mutation.
+func (s *Server) appendLiveRing(sessionKey, dir string, slot wsdashboard.HostedSlot, entries []wslive.RingEntry) bool {
 	write := func() error { return currentLiveSeams().appendRing(wslive.RingDir(dir), entries) }
 	var err error
 	if owner, ok := slot.(wsdashboard.LiveSlotOwner); ok {
 		if s.ownerPID > 0 && s.intake != nil {
 			release, ownedErr := s.lockSummaryOwner(&liveSession{dir: dir, replyID: wsmailbox.ReplyID(sessionKey), slot: slot})
 			if ownedErr != nil {
-				return
+				return false
 			}
 			err = write()
 			release()
@@ -824,20 +825,21 @@ func (s *Server) appendLiveRing(sessionKey, dir string, slot wsdashboard.HostedS
 			err = write()
 			release()
 		} else {
-			return
+			return false
 		}
 	} else {
 		err = write()
 	}
 	if err != nil {
 		s.debugEvent("dashboard.ring_write_error", map[string]any{"error": err.Error()})
-		return
+		return false
 	}
 	if slot != nil {
 		slot.RingAppended()
-		return
+		return true
 	}
 	s.dashboardNudge(sessionKey)
+	return true
 }
 
 // recordLiveMail adds a mail line to the session's conversation ring for

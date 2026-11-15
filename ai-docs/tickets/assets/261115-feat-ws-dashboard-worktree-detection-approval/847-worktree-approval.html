@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#847 대기 워크트리 승인 — 세션 레일 목업</title>
+<style>
+/* ---- theme variables: copied from wswhiteboard/assets/page.css + wsdashboard/assets/dashboard.css ---- */
+:root {
+  --wb-bg: #f3f3f0; --wb-fg: #1b1d21; --wb-card: #ffffff; --wb-muted: #e9e8e3; --wb-muted-fg: #5f646b;
+  --wb-primary: #2b62d9; --wb-primary-fg: #ffffff; --wb-topic: #2c3038; --wb-on-topic: #ffffff;
+  --wb-line: color-mix(in srgb, var(--wb-fg) 16%, transparent);
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .14), 0 2px 6px rgb(0 0 0 / .06);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .16), 0 6px 18px rgb(0 0 0 / .10);
+  --wb-radius: 12px;
+  --wb-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --wb-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans KR", sans-serif;
+  --wb-ph-perm: #a35f00; --wb-on-ph-perm: #ffffff;
+  --wb-ok: #1d7348; --wb-fail: #c0262d; --wb-warn: #c27a00; --wb-warn-ink: #a35f00;
+  --wb-toast-warn: #f2c06b;
+  --star: #e0a400;
+}
+:root[data-theme="dark"] {
+  --wb-bg: #141518; --wb-fg: #e7e7e4; --wb-card: #1e2024; --wb-muted: #2b2d32; --wb-muted-fg: #a2a6ad;
+  --wb-primary: #7aa2ff; --wb-primary-fg: #0c1424; --wb-topic: #2a2d33; --wb-on-topic: #e4e5e8;
+  --wb-shadow: 0 1px 2px rgb(0 0 0 / .5), 0 2px 8px rgb(0 0 0 / .3);
+  --wb-shadow-hi: 0 2px 4px rgb(0 0 0 / .55), 0 8px 22px rgb(0 0 0 / .4);
+  --wb-ph-perm: #55400f; --wb-on-ph-perm: #f6dfae;
+  --wb-ok: #6cc39a; --wb-fail: #f0797e; --wb-warn: #e0a36c; --wb-warn-ink: #e0a36c;
+  --wb-toast-warn: #9a5a00;
+  --star: #f2b632;
+}
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--wb-fg) 24%, transparent) transparent; }
+html, body { margin: 0; background: var(--wb-bg); color: var(--wb-fg); }
+body { font: 14px/1.5 var(--wb-sans); padding: 12px; }
+button { font: inherit; color: inherit; }
+.i { width: 14px; height: 14px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.chip { display: inline-flex; align-items: center; gap: 3px; height: 20px; font-size: 12px; font-weight: 700; line-height: 1; padding: 0 9px; border-radius: 999px; background: var(--wb-muted); color: var(--wb-muted-fg); white-space: nowrap; }
+
+/* ---- session rail: dashboard.css "session rail" block (subset) ---- */
+.rail { position: relative; width: 396px; height: 876px; box-sizing: border-box; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); display: flex; flex-direction: column; overflow: hidden; }
+.rail .rhd { flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); }
+.rail .rsp { flex: 1; }
+.rail .chip { height: 18px; font-size: 11px; padding: 0 7px; flex: none; }
+.rail .rref { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .rref:hover { color: var(--wb-primary); background: var(--wb-muted); }
+.rail .rlist { flex: 1 1 auto; min-height: 0; overflow: auto; padding-bottom: 6px; transition: padding-bottom .22s; }
+.rail.capon .rlist { padding-bottom: 60px; }
+.rail .wsbar { display: flex; align-items: center; gap: 8px; padding: 3px 12px; min-height: 28px; background: var(--wb-topic); color: var(--wb-on-topic); cursor: pointer; user-select: none; }
+.rail .wstog { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.rail .wsbar .wsi { display: inline-flex; flex: none; opacity: .8; margin-right: -2px; }
+.rail .wsbar .nm { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.rail .wsbar .pp { font-family: var(--wb-mono); font-size: 11px; opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.rail .wsbar .ct { margin-left: auto; font-size: 11px; font-weight: 700; padding: 0 7px; border-radius: 999px; background: rgb(127 127 127 / .28); flex: none; }
+.rail .memo-count { flex: none; white-space: nowrap; border: 0; border-radius: 999px; background: rgb(127 127 127 / .18); color: inherit; font-size: 11px; padding: 2px 6px; cursor: pointer; }
+.rail .wsbody { padding-top: 2px; }
+.rail .rwt { padding: 4px 0 2px; }
+.rail .rwt.empty .wthd { opacity: .6; }
+.rail .wthd { display: flex; align-items: center; gap: 6px; padding: 2px 12px 2px 28px; font-size: 12px; font-weight: 800; color: var(--wb-muted-fg); min-width: 0; }
+.rail .wthd .i { width: 12px; height: 12px; }
+.rail .wthd .wtroot { display: inline-flex; flex: 0 0 auto; }
+.rail .wthd .wtroot .i { width: 10px; height: 10px; }
+.rail .wthd .br { font-family: var(--wb-mono); font-weight: 700; color: var(--wb-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .wthd .wf { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .wthd .gs { margin-left: auto; font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rail .rsessions { margin: 0 8px 0 33px; padding-left: 0; border-left: 2px solid var(--wb-muted); }
+.rail .rended .rsessions { margin: 0; padding: 0; border: 0; }
+.rail details > summary { list-style: none; cursor: pointer; }
+.rail details > summary::-webkit-details-marker { display: none; }
+.rail .rended > summary { font-size: 11.5px; color: var(--wb-muted-fg); padding: 4px 8px 2px 14px; }
+.rail .rended > summary::after, .rail .rfold > summary .fl::after { content: " \25b8"; }
+.rail .rended[open] > summary::after, .rail .rfold[open] > summary .fl::after { content: " \25be"; }
+.rail .rended > summary:hover { color: var(--wb-primary); }
+.rail .rs { position: relative; display: flex; align-items: flex-start; padding-left: 14px; border-radius: 6px; user-select: none; }
+.rail .rs:hover { background: color-mix(in srgb, var(--wb-primary) 6%, var(--wb-card)); }
+.rail .rs.cur { background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card)); }
+.rail .rs.ended { opacity: .75; }
+.rail .drgrip { position: absolute; left: 0; top: 0; bottom: 0; width: 14px; display: flex; justify-content: center; padding-top: 6px; box-sizing: border-box; color: var(--wb-muted-fg); opacity: 0; }
+.rail .drgrip .i { width: 10px; height: 14px; stroke-width: 2.4; }
+.rail .rs:hover .drgrip { opacity: .7; }
+.rail .star { width: 16px; height: 16px; flex: none; display: inline-grid; place-items: center; border: 0; padding: 0; background: transparent; border-radius: 4px; color: var(--wb-muted-fg); cursor: pointer; }
+.rail .star .i { width: 13px; height: 13px; stroke-width: 1.4; }
+.rail .star[aria-pressed="true"] { color: var(--star); }
+.rail .star[aria-pressed="true"] .i { fill: currentColor; }
+.rail .star[aria-pressed="false"] { opacity: 0; }
+.rail .rs:hover .star[aria-pressed="false"] { opacity: .6; }
+.rail .drbody { flex: 1 1 auto; min-width: 0; }
+.rail .s1 { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail .rl { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; padding: 5px 0; color: inherit; text-decoration: none; }
+.rail .drtail { flex: 1 1 0; align-self: stretch; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 5px 8px 5px 0; }
+.rail .drslot { flex: none; min-width: 44px; text-align: right; }
+.rail .drmsg { display: block; margin-top: -4px; padding: 0 8px 5px 0; }
+.rail .rid { font-family: var(--wb-mono); font-size: 12.5px; font-weight: 700; color: var(--wb-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.rail .rid.lbl { font-family: var(--wb-sans); font-weight: 600; }
+.rail .rs.cur .rid { color: var(--wb-fg); }
+.rail .when { font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rail .s2 { display: block; margin-top: 1px; font-size: 12px; color: var(--wb-muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rail .s2 .who { font-weight: 700; margin-right: 4px; }
+.rail .hi { position: relative; flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; box-sizing: border-box; border-radius: 3px; font-size: 10px; font-weight: 800; line-height: 1; color: #fff; background: #8a8f98; }
+.rail .hi.claude { background: #D97757; }
+.rail .hi.pi { background: #000; box-shadow: inset 0 0 0 1px #666; }
+.rail .hi.codex { background: #10A37F; }
+.rail .rs.stopped .rid { color: var(--wb-muted-fg); }
+.rail .rs.stopped .hi { opacity: .55; }
+.rail .hi .orb { position: absolute; inset: -2px; padding: 1.5px; border-radius: 5px; overflow: hidden; pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+.rail .hi .rrun { position: absolute; left: 50%; top: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px; background: conic-gradient(var(--wb-primary) 0 24%, transparent 0); animation: rail-orbit 1.3s linear infinite; }
+.rail .bots { display: inline-flex; align-items: center; gap: 2px; flex: none; font-size: 11px; font-weight: 700; color: var(--wb-fg); }
+.rail .bots .i { width: 12px; height: 12px; stroke-width: 1.4; color: var(--wb-primary); animation: rail-blink 1.4s ease-in-out infinite; }
+@keyframes rail-orbit { to { transform: rotate(360deg); } }
+@keyframes rail-blink { 50% { opacity: .25; } }
+.rail .rfoot { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-top: 1px solid var(--wb-muted); font-size: 12px; position: relative; z-index: 3; background: var(--wb-card); }
+.rail .rfoot .usage-empty { color: var(--wb-muted-fg); min-height: 25px; display: flex; align-items: center; }
+.rail .rrev { flex: none; align-self: center; margin: 0 6px 0 0; padding: 2px 7px; border: 1px solid var(--wb-line); border-radius: 999px; background: var(--wb-card); color: var(--wb-primary); font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; }
+.rail .rrev .i { width: 11px; height: 11px; stroke-width: 1.8; }
+.rail .rrev:hover { background: var(--wb-muted); }
+
+/* ============ NEW (#847): pending worktrees, toggles, apply capsule, folds ============ */
+/* pending block: an amber edge at the group's left and a faint amber wash, at the top of the group */
+.rail .rpend { position: relative; margin: 2px 0 6px; padding-bottom: 2px; background: color-mix(in srgb, var(--wb-warn) 6%, var(--wb-card)); box-shadow: inset 3px 0 0 var(--wb-warn); }
+.rail .rpend[hidden] { display: none; }
+.rail .pendhd { display: flex; align-items: center; gap: 6px; padding: 6px 12px 2px 12px; font-size: 11px; font-weight: 800; letter-spacing: .04em; color: var(--wb-warn-ink); }
+.rail .pendhd .pdot { width: 6px; height: 6px; border-radius: 50%; background: var(--wb-warn); flex: none; margin: 0 4px 0 4px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-warn) 22%, transparent); }
+.rail .pendhd .pn { font-variant-numeric: tabular-nums; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--wb-warn) 20%, transparent); }
+.rail .pendhd .phint { margin-left: auto; font-weight: 500; letter-spacing: 0; color: var(--wb-muted-fg); font-size: 10.5px; }
+.rail .rwt.pend .wthd > .i { color: var(--wb-warn); }
+.rail .wtpath { display: flex; align-items: center; gap: 6px; padding: 0 12px 2px 46px; font-family: var(--wb-mono); font-size: 10.5px; color: var(--wb-muted-fg); min-width: 0; }
+.rail .wtpath .pt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; opacity: .85; }
+.rail .wtpath .tag { flex: none; margin-left: auto; font-family: var(--wb-sans); font-size: 10.5px; font-weight: 700; padding: 0 7px; border-radius: 999px; line-height: 16px; }
+.rail .wtpath .tag.ok { color: var(--wb-ok); background: color-mix(in srgb, var(--wb-ok) 16%, transparent); }
+.rail .wtpath .tag.no { color: var(--wb-fail); background: color-mix(in srgb, var(--wb-fail) 16%, transparent); }
+/* the two toggles: always shown (not hover-only), so a touch screen reaches them */
+.rail .tgs { display: inline-flex; gap: 3px; flex: none; margin-left: 4px; }
+.rail .tg { width: 22px; height: 20px; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-card); color: var(--wb-muted-fg); cursor: pointer; transition: background .12s, color .12s, border-color .12s; }
+.rail .tg .i { width: 12px; height: 12px; stroke-width: 2; }
+.rail .tg.ap:hover { color: var(--wb-ok); border-color: color-mix(in srgb, var(--wb-ok) 60%, transparent); }
+.rail .tg.rj:hover { color: var(--wb-fail); border-color: color-mix(in srgb, var(--wb-fail) 60%, transparent); }
+.rail .tg.ap[aria-pressed="true"] { color: var(--wb-card); background: var(--wb-ok); border-color: var(--wb-ok); }
+.rail .tg.rj[aria-pressed="true"] { color: var(--wb-card); background: var(--wb-fail); border-color: var(--wb-fail); }
+.rail .tg:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: 1px; }
+.rail .rwt.pend.m-ap .wthd > .i { color: var(--wb-ok); }
+.rail .rwt.pend.m-rj .wthd > .i { color: var(--wb-fail); }
+.rail .rwt.pend.m-rj .wthd .br, .rail .rwt.pend.m-rj .wthd .wf { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--wb-fail) 70%, transparent); opacity: .7; }
+.rail .rwt.pend.m-rj .rsessions { opacity: .55; }
+/* a just-approved row flashes once as it joins the accepted list */
+.rail .rwt.just { animation: wt-just 2.4s ease-out; }
+@keyframes wt-just { 0%, 35% { background: color-mix(in srgb, var(--wb-ok) 16%, var(--wb-card)); } 100% { background: transparent; } }
+/* the folded line at the group's foot: rejected worktrees */
+.rail .rfold { margin-top: 4px; }
+.rail .rfold[hidden] { display: none; }
+.rail .rfold > summary { display: flex; align-items: center; gap: 6px; padding: 3px 12px 3px 28px; font-size: 11.5px; color: var(--wb-muted-fg); }
+.rail .rfold > summary:hover { color: var(--wb-primary); }
+.rail .rfold > summary .i { width: 12px; height: 12px; opacity: .8; }
+.rail .rfold > summary .n { font-weight: 700; font-variant-numeric: tabular-nums; }
+.rail .rfold.rej > summary .i { color: var(--wb-fail); }
+.rail .rfold .rwt { padding: 2px 0; }
+.rail .rfold .rwt .wthd { opacity: .65; }
+.rail .rfold.rej .rwt .wthd { padding-left: 40px; }
+.rail .rfold.rej .wtpath { padding-left: 58px; }
+
+/* the apply capsule: rises from the rail's foot once any toggle is set (the oq-pill look) */
+.rcap { position: absolute; z-index: 2; left: 50%; bottom: 52px; transform: translate(-50%, 18px); opacity: 0; pointer-events: none; transition: transform .22s cubic-bezier(.2, .7, .3, 1), opacity .18s; display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 4px 0 6px; border-radius: 999px; background: var(--wb-card); color: var(--wb-fg); box-shadow: 0 0 0 2px var(--wb-bg), var(--wb-shadow-hi); font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; }
+.rail.capon .rcap { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+.rcap .seg { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.rcap .seg .i { width: 11px; height: 11px; stroke-width: 2.2; }
+.rcap .seg.ok { background: color-mix(in srgb, var(--wb-ok) 18%, var(--wb-card)); color: var(--wb-ok); }
+.rcap .seg.no { background: color-mix(in srgb, var(--wb-fail) 18%, var(--wb-card)); color: var(--wb-fail); }
+.rcap .seg[hidden] { display: none; }
+.rcap .clr { width: 22px; height: 22px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--wb-muted-fg); cursor: pointer; }
+.rcap .clr:hover { background: var(--wb-muted); color: var(--wb-fg); }
+.rcap .clr .i { width: 12px; height: 12px; }
+.rcap .go { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 13px 0 10px; border: 0; border-radius: 999px; background: var(--wb-primary); color: var(--wb-primary-fg); font-size: 12.5px; font-weight: 800; cursor: pointer; }
+.rcap .go .i { width: 13px; height: 13px; stroke-width: 2.2; }
+.rcap .go:hover { filter: brightness(1.1); }
+.rcap .go:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 2px; }
+
+/* toast: the shared .wstoast look (inverted surface), placed in the rail for this mockup */
+.wstoast { position: absolute; z-index: 4; left: 12px; right: 12px; bottom: 52px; background: var(--wb-fg); color: var(--wb-card); border-radius: 8px; padding: 7px 12px 7px 15px; font-size: 12.5px; line-height: 1.4; box-shadow: var(--wb-shadow-hi); overflow: hidden; opacity: 0; transform: translateY(8px); transition: opacity .18s, transform .18s; pointer-events: none; }
+.wstoast::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--wb-toast-warn); }
+.wstoast.ok::before { background: var(--wb-ok); }
+.wstoast.on { opacity: 1; transform: none; pointer-events: auto; }
+.wstoast small { display: block; opacity: .7; font-size: 11px; margin-top: 1px; }
+
+/* ---- mockup chrome outside the rail (not part of the design) ---- */
+.mk { width: 396px; margin-top: 14px; font-size: 11.5px; line-height: 1.55; color: var(--wb-muted-fg); }
+.mk .ctl { display: flex; gap: 6px; margin-bottom: 10px; }
+.mk .ctl button { border: 1px solid var(--wb-line); background: var(--wb-card); border-radius: 999px; padding: 2px 10px; font-size: 11.5px; cursor: pointer; }
+.mk h2 { font-size: 11px; font-weight: 800; letter-spacing: .04em; margin: 0 0 4px; }
+.mk ol { margin: 0; padding-left: 18px; }
+.mk code { font-family: var(--wb-mono); font-size: 10.5px; }
+.mk pre { white-space: pre-wrap; font: 10.5px/1.5 var(--wb-mono); background: var(--wb-muted); border-radius: 8px; padding: 6px 8px; margin: 6px 0 0; max-height: 160px; overflow: auto; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-branch" viewBox="0 0 16 16"><circle cx="4.5" cy="3.6" r="1.5"/><circle cx="4.5" cy="12.4" r="1.5"/><circle cx="11.5" cy="6" r="1.5"/><path d="M4.5 5.1v5.8M11.5 7.5c0 2.6-3.2 2.4-7 3.4"/></symbol>
+<symbol id="i-repo" viewBox="0 0 16 16"><path d="M3.5 2.5h8.5v9H5a1.5 1.5 0 0 0-1.5 1.5z"/><path d="M3.5 13a1.5 1.5 0 0 0 1.5 1.5h7v-3"/><path d="M6 5h4"/></symbol>
+<symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></symbol>
+<symbol id="i-reload" viewBox="0 0 16 16"><path d="M14.3 2.8v3.9h-3.9"/><path d="M13 10.2a5.4 5.4 0 1 1-1.3-5.6l2.6 2.1"/></symbol>
+<symbol id="i-pin" viewBox="0 0 16 16"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></symbol>
+<symbol id="i-grip" viewBox="0 0 16 16"><circle cx="5.8" cy="3.6" r=".5"/><circle cx="10.2" cy="3.6" r=".5"/><circle cx="5.8" cy="8" r=".5"/><circle cx="10.2" cy="8" r=".5"/><circle cx="5.8" cy="12.4" r=".5"/><circle cx="10.2" cy="12.4" r=".5"/></symbol>
+<symbol id="i-robot" viewBox="0 0 16 16"><path d="M8 2.2v2"/><circle cx="8" cy="1.8" r=".9" fill="currentColor" stroke="none"/><rect x="2.8" y="4.6" width="10.4" height="8.4" rx="2.4"/><circle cx="6" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><circle cx="10" cy="8.6" r="1.05" fill="currentColor" stroke="none"/><path d="M1.2 8v2.2M14.8 8v2.2"/></symbol>
+<symbol id="i-check" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.1L13 4.6"/></symbol>
+<symbol id="i-x" viewBox="0 0 16 16"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"/></symbol>
+<symbol id="i-undo" viewBox="0 0 16 16"><path d="M5.5 3.5L2.8 6.2l2.7 2.7"/><path d="M2.8 6.2h6.7a3.6 3.6 0 0 1 0 7.2H6.5"/></symbol>
+</svg>
+
+<aside class="rail" id="rail" aria-label="세션">
+  <div class="rhd"><b class="rtitle">세션</b><span class="rsp"></span><span class="chip" title="실시간 세션">실시간 3</span><button type="button" class="rref" title="워크트리 목록 다시 읽기"><svg class="i"><use href="#i-reload"/></svg></button></div>
+  <div class="rlist" id="rlist">
+    <section class="rws">
+      <div class="wsbar"><button type="button" class="wstog" title="/Users/kang-sw/devenv"><span class="wsi"><svg class="i"><use href="#i-repo"/></svg></span><span class="nm">devenv</span><span class="pp">/Users/kang-sw/devenv</span></button><button type="button" class="memo-count" title="워크스페이스 메모">▤ <span>2</span></button><span class="ct" title="실시간 세션">3</span></div>
+      <div class="wsbody" id="wsbody"></div>
+    </section>
+  </div>
+  <div class="rcap" id="rcap" role="toolbar" aria-label="워크트리 승인 반영">
+    <button type="button" class="clr" id="capclr" title="모든 토글 해제" aria-label="모든 토글 해제"><svg class="i"><use href="#i-x"/></svg></button>
+    <span class="seg ok" id="segok"><svg class="i"><use href="#i-check"/></svg>승인 <b id="nok">0</b></span>
+    <span class="seg no" id="segno"><svg class="i"><use href="#i-x"/></svg>거부 <b id="nno">0</b></span>
+    <button type="button" class="go" id="capgo" title="승인은 정식 포함, 거부는 확인 요청 프롬프트 복사 후 거부 목록으로"><svg class="i"><use href="#i-check"/></svg>반영</button>
+  </div>
+  <div class="wstoast" id="toast" role="status" aria-live="polite"></div>
+  <div class="rfoot"><span class="usage-empty">플랜 사용량</span></div>
+</aside>
+
+<div class="mk" id="mk">
+  <div class="ctl"><button type="button" id="thm">테마 전환</button><button type="button" id="rst">초기화</button></div>
+  <h2>리드 해석 (목업 범례 — 레일 UI 아님)</h2>
+  <ol>
+    <li>풀에서 만든 워크트리는 원래 목록에 표시되지 않음(변경 없음).</li>
+    <li>거부는 디스크에서 아무것도 지우지 않습니다. 거부된 워크트리 목록에서 되돌릴 수 있습니다.</li>
+    <li>승인/거부 상태는 데몬이 프로젝트별로 저장합니다(브라우저 간 공유, 브라우저별 아님).</li>
+    <li>반영 전까지 토글은 되돌릴 수 있습니다. 설정된 토글을 다시 누르면 해제되고, 한 행에서 승인과 거부는 서로 배타적입니다.</li>
+  </ol>
+  <h2 style="margin-top:10px">마지막으로 복사한 프롬프트</h2>
+  <pre id="lastprompt">(아직 없음)</pre>
+</div>
+
+<script>
+(function () {
+  var REPO = { name: "devenv", path: "/Users/kang-sw/devenv" };
+  var HOME = "/Users/kang-sw";
+  function tilde(p) { return p.indexOf(HOME) === 0 ? "~" + p.slice(HOME.length) : p; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function ic(n) { return '<svg class="i" aria-hidden="true"><use href="#i-' + n + '"/></svg>'; }
+
+  // ---- sample data ----
+  var ROOT = { branch: "develop", folder: "devenv", path: REPO.path, root: true, changes: 2,
+    sessions: [
+      { h: "claude", lbl: "대기 워크트리 승인 목업", working: true, cur: true, bots: 1, when: "10:12", who: "나", msg: "대기 워크트리 승인 UI 목업 만들어줘" },
+      { h: "codex", rid: "quiet-heron-ledger", when: "09:47", msg: "1612e09..develop 리뷰 범위 정리 완료, 다음 지시 대기" }
+    ], ended: 3 };
+  // user-added (already accepted) worktrees; ws-pool worktrees never appear in this list by design
+  var ACCEPTED = [
+    { branch: "feature/manual-check", folder: "devenv-manual", path: HOME + "/work/devenv-manual", changes: 1,
+      sessions: [{ h: "pi", rid: "manualcheck-rail-sweep-followup", working: true, when: "10:09", msg: "수동 점검 체크리스트를 레일 동작과 대조하는 중" }], ended: 1 }
+  ];
+  var PENDING0 = [
+    { id: "a82", branch: "fix/open-in-system", folder: "agent-a82f81f3", path: REPO.path + "/.claude/worktrees/agent-a82f81f3", changes: 3, sessions: [], ended: 2 },
+    { id: "xk2", branch: "scratch/tmp-idea", folder: "tmp.Xk2", path: "/var/folders/7q/k3v9x0_n2bq5g1c8w4l6r0000gn/T/tmp.Xk2", shortPath: "/var/folders/…/tmp.Xk2", changes: 0, sessions: [], ended: 0 }
+  ];
+
+  var S;
+  function reset() {
+    S = { pending: PENDING0.map(function (w) { return Object.assign({ mark: null }, w); }), approved: [], rejected: [], just: {} };
+    render();
+  }
+
+  // ---- markup builders (mirroring dashboard.tmpl r-rail / rsessions / rrow) ----
+  function rrow(s) {
+    var hl = s.h === "claude" ? "C" : s.h === "pi" ? "P" : s.h === "codex" ? "X" : "?";
+    return '<div class="rs' + (s.cur ? " cur" : "") + (s.ended ? " ended stopped" : "") + '">' +
+      (s.ended ? "" : '<span class="drgrip" aria-hidden="true">' + ic("grip") + "</span>") +
+      '<div class="drbody"><div class="s1"><a class="rl"><span class="hi ' + s.h + '" role="img" title="' + s.h + (s.working ? " · 리드 작업 중" : " · 리드 대기") + '">' + hl +
+      (s.working ? '<span class="orb"><span class="rrun"></span></span>' : "") + "</span>" +
+      (s.bots ? '<span class="bots" title="실행 중인 에이전트 ' + s.bots + '개">' + ic("robot") + s.bots + "</span>" : "") +
+      '<span class="rid' + (s.lbl ? " lbl" : "") + '">' + esc(s.lbl || s.rid) + "</span></a>" +
+      '<button type="button" class="star" aria-pressed="false" title="별표: 이 세션을 워크트리 맨 위에 고정">' + ic("pin") + "</button>" +
+      '<a class="drtail"><span class="drslot"><time class="when">' + esc(s.when || "") + "</time></span></a></div>" +
+      (s.msg && !s.ended ? '<a class="drmsg"><span class="s2">' + (s.who ? '<b class="who">' + esc(s.who) + "</b>" : "") + esc(s.msg) + "</span></a>" : "") +
+      "</div></div>";
+  }
+  function rsessions(w) {
+    var live = w.sessions || [], n = w.ended || 0;
+    if (!live.length && !n) return "";
+    var h = '<div class="rsessions">' + live.map(rrow).join("");
+    if (n) {
+      var ended = [];
+      for (var i = 0; i < n; i++) ended.push({ h: i % 2 ? "codex" : "claude", rid: ["lucid-pine-ferry", "amber-quill-orbit", "steady-moth-canal", "brisk-yarn-harbor"][i % 4], ended: true, when: ["어제", "11-13", "11-12", "11-10"][i % 4] });
+      h += '<details class="rended"><summary>종료된 세션 ' + n + "개</summary><div class=\"rsessions\">" + ended.map(rrow).join("") + "</div></details>";
+    }
+    return h + "</div>";
+  }
+  function wthd(w, extra) {
+    var br = w.detached ? "분리된 HEAD" : w.branch;
+    return '<div class="wthd" title="' + esc(w.path) + '">' + ic("branch") + '<span class="br">' + esc(br) + "</span>" +
+      (w.root ? '<span class="wtroot" role="img" title="루트">' + ic("repo") + "</span>" : "") +
+      '<span class="wf">· ' + esc(w.root ? "루트" : w.folder) + "</span>" +
+      (w.changes != null ? '<span class="gs" title="변경된 파일 (이 워크트리 세션의 최신 스냅샷 기준)">±' + w.changes + "</span>" : "") +
+      (extra || "") + "</div>";
+  }
+  function normalRow(w) {
+    var empty = !(w.sessions && w.sessions.length);
+    return '<div class="rwt' + (empty ? " empty" : "") + (S.just[w.id] ? " just" : "") + '">' + wthd(w) + rsessions(w) + "</div>";
+  }
+  function pendRow(w) {
+    var ap = w.mark === "ap", rj = w.mark === "rj";
+    var tgs = '<span class="tgs">' +
+      '<button type="button" class="tg ap" data-id="' + w.id + '" data-m="ap" aria-pressed="' + ap + '" title="승인: 반영하면 이 프로젝트의 워크트리로 정식 포함" aria-label="승인">' + ic("check") + "</button>" +
+      '<button type="button" class="tg rj" data-id="' + w.id + '" data-m="rj" aria-pressed="' + rj + '" title="거부: 반영하면 확인 요청 프롬프트를 복사하고 거부 목록으로 옮김 (디스크는 그대로)" aria-label="거부">' + ic("x") + "</button></span>";
+    var tag = ap ? '<span class="tag ok">승인 예정</span>' : rj ? '<span class="tag no">거부 예정</span>' : "";
+    return '<div class="rwt pend' + (ap ? " m-ap" : rj ? " m-rj" : "") + '">' + wthd(w, tgs) +
+      '<div class="wtpath" title="' + esc(w.path) + '"><span class="pt">' + esc(w.shortPath || tilde(w.path)) + "</span>" + tag + "</div>" +
+      rsessions(w) + "</div>";
+  }
+  function rejRow(w) {
+    return '<div class="rwt">' + wthd(w, '<button type="button" class="rrev" data-back="' + w.id + '" title="대기로 되돌리기: 다시 승인하거나 거부할 수 있습니다">' + ic("undo") + "되돌리기</button>") +
+      '<div class="wtpath" title="' + esc(w.path) + '"><span class="pt">' + esc(w.shortPath || tilde(w.path)) + "</span></div></div>";
+  }
+
+  function render() {
+    var body = document.getElementById("wsbody");
+    var keepOpen = {};
+    body.querySelectorAll("details[data-k]").forEach(function (d) { keepOpen[d.dataset.k] = d.open; });
+    var h = "";
+    if (S.pending.length) {
+      h += '<div class="rpend"><div class="pendhd"><span class="pdot"></span>대기 중인 워크트리 <span class="pn">' + S.pending.length + '</span><span class="phint">풀 밖에서 감지됨</span></div>' +
+        S.pending.map(pendRow).join("") + "</div>";
+    }
+    h += normalRow(ROOT);
+    h += ACCEPTED.map(normalRow).join("");
+    h += S.approved.map(normalRow).join("");
+    if (S.rejected.length) {
+      h += '<details class="rfold rej" data-k="rej"' + (keepOpen.rej ? " open" : "") + '><summary>' + ic("x") + '<span class="fl">거부된 워크트리 <span class="n">' + S.rejected.length + "</span></span></summary>" +
+        S.rejected.map(rejRow).join("") + "</details>";
+    }
+    body.innerHTML = h;
+    var nok = S.pending.filter(function (w) { return w.mark === "ap"; }).length;
+    var nno = S.pending.filter(function (w) { return w.mark === "rj"; }).length;
+    document.getElementById("nok").textContent = nok;
+    document.getElementById("nno").textContent = nno;
+    document.getElementById("segok").hidden = !nok;
+    document.getElementById("segno").hidden = !nno;
+    document.getElementById("rail").classList.toggle("capon", nok + nno > 0);
+  }
+
+  function find(id) { for (var i = 0; i < S.pending.length; i++) if (S.pending[i].id === id) return S.pending[i]; }
+
+  document.getElementById("wsbody").addEventListener("click", function (e) {
+    var t = e.target.closest(".tg");
+    if (t) { var w = find(t.dataset.id); w.mark = w.mark === t.dataset.m ? null : t.dataset.m; render(); return; }
+    var b = e.target.closest("[data-back]");
+    if (b) {
+      var i = S.rejected.findIndex(function (w) { return w.id === b.dataset.back; });
+      var w2 = S.rejected.splice(i, 1)[0]; w2.mark = null; S.pending.push(w2); render();
+    }
+  });
+  document.getElementById("capclr").addEventListener("click", function () { S.pending.forEach(function (w) { w.mark = null; }); render(); });
+
+  function promptFor(list) {
+    return "다음 워크트리는 ws 워크트리 풀 밖에서 감지되었고, 사용자가 대시보드에서 거부했습니다.\n" +
+      "각 워크트리가 승인 없이 풀 밖에서 생성된 것인지 확인하고(누가·언제·어떤 세션이 만들었는지, 남은 변경과 커밋이 있는지), 결과를 사용자에게 보고하세요. 아무것도 삭제하거나 정리하지 마세요.\n\n" +
+      "프로젝트: " + REPO.name + " (" + REPO.path + ")\n" +
+      list.map(function (w) { return "- 경로: " + w.path + "\n  브랜치: " + w.branch; }).join("\n");
+  }
+  function copyText(text) {
+    function fallback() {
+      var ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select(); var ok = false;
+      try { ok = document.execCommand("copy"); } catch (_) {}
+      ta.remove(); return Promise.resolve(ok);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { return true; }, fallback);
+    return fallback();
+  }
+  var toastTimer;
+  function toast(html, cls) {
+    var t = document.getElementById("toast");
+    t.className = "wstoast " + (cls || ""); t.innerHTML = html;
+    void t.offsetWidth; t.classList.add("on");
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.remove("on"); }, 5000);
+  }
+
+  document.getElementById("capgo").addEventListener("click", function () {
+    var ap = S.pending.filter(function (w) { return w.mark === "ap"; });
+    var rj = S.pending.filter(function (w) { return w.mark === "rj"; });
+    S.pending = S.pending.filter(function (w) { return !w.mark; });
+    S.just = {};
+    ap.forEach(function (w) { w.mark = null; S.just[w.id] = 1; S.approved.push(w); });
+    rj.forEach(function (w) { w.mark = null; S.rejected.push(w); });
+    render();
+    var apMsg = ap.length ? "승인 " + ap.length + "개 반영" : "";
+    if (rj.length) {
+      var p = promptFor(rj);
+      document.getElementById("lastprompt").textContent = p;
+      copyText(p).then(function (ok) {
+        toast(ok ? "거부 " + rj.length + "개 — 확인 요청 프롬프트를 복사했습니다" + (apMsg ? "<small>" + apMsg + "</small>" : "")
+                 : "거부 " + rj.length + "개 — 클립보드에 쓰지 못했습니다<small>아래 범례의 프롬프트를 직접 복사하세요</small>", ok ? "" : "");
+      });
+    } else if (ap.length) {
+      toast(apMsg + "했습니다", "ok");
+    }
+  });
+
+  document.getElementById("thm").addEventListener("click", function () {
+    var r = document.documentElement; r.dataset.theme = r.dataset.theme === "dark" ? "light" : "dark";
+  });
+  document.getElementById("rst").addEventListener("click", reset);
+  var q = new URLSearchParams(location.search);
+  if (q.get("theme")) document.documentElement.dataset.theme = q.get("theme");
+  reset();
+  // hook for the screenshot script
+  window.__mk = { mark: function (id, m) { find(id).mark = m; render(); }, state: function () { return S; } };
+})();
+</script>
+</body>
+</html>

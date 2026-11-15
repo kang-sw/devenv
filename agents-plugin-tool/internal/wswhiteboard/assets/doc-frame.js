@@ -132,6 +132,11 @@
   size();
   askRelays();
 
+  // The Werkschaft desktop app names itself in its user agent. Its webview
+  // has no tabs, so there a modified click on a marked file link is handed
+  // to the host too, as a pointer Cmd/Ctrl+click (mod), which the host
+  // previews; a browser keeps its new tab.
+  var desktop = /\bWerkschaft\//.test(navigator.userAgent || "");
   function link(a, e) {
     var r = a.getBoundingClientRect(), key = e.type === "keydown" || e.detail === 0;
     post({
@@ -141,6 +146,7 @@
       rel: a.getAttribute("data-rel") || "",
       abs: a.getAttribute("data-abs") || "",
       img: a.hasAttribute("data-img"),
+      mod: !key && !!(e.metaKey || e.ctrlKey),
       x: key ? r.left : e.clientX,
       y: key ? r.bottom : e.clientY
     });
@@ -179,8 +185,8 @@
     }
     if (!a.hasAttribute("data-wl")) return;
     // As on the host: a modified click on a link with an href is the
-    // browser's new tab.
-    if (href && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
+    // browser's new tab, except on a file link in the desktop app.
+    if (href && !(desktop && a.getAttribute("data-wl") === "file") && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
     e.preventDefault();
     link(a, e);
   }, true);

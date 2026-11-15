@@ -1,6 +1,7 @@
 package wswhiteboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -36,6 +37,10 @@ type Entry struct {
 	Text     string `json:"text,omitempty"`
 	At       string `json:"at"`
 	Imported bool   `json:"imported,omitempty"`
+	// TopicState is immutable machine metadata, parsed separately from Text.
+	TopicState  json.RawMessage `json:"topic_state,omitempty"`
+	BoardNotice json.RawMessage `json:"board_notice,omitempty"`
+	unknown     map[string]json.RawMessage
 }
 
 // LatestAgent returns the last agent-authored log entry, never a panel or

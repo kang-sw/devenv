@@ -39,12 +39,12 @@ func newPageFake() *pageFake {
 	return &pageFake{fakeSource: newFakeSource(), pages: map[string]PageContent{}, boards: map[string]*wswhiteboard.State{}, pageReads: map[string]int{}}
 }
 
-func (p *pageFake) ReadPage(reg Registration) (PageContent, bool) {
+func (p *pageFake) ReadPage(reg Registration) (PageContent, bool, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.pageReads[reg.ReplyID]++
 	page, ok := p.pages[reg.ReplyID]
-	return page, ok
+	return page, ok, nil
 }
 
 // ReadContacts re-reads a page's contacts, as a ContactSource.

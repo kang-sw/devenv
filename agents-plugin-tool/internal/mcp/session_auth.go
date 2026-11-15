@@ -176,6 +176,8 @@ type sessionStore struct {
 	// nil means wsstate.AtomicReplaceFile. Both are test seams.
 	lockTimeout time.Duration
 	replace     func(tmp, path string) error
+	// boardFault injects folder transaction failures in isolated tests.
+	boardFault func(stage string) error
 	// cacheHome is the caller process's WS_CACHE_HOME; empty means this
 	// process's.
 	cacheHome string

@@ -412,6 +412,60 @@ func TestPiLeadCommands(t *testing.T) {
 	}
 }
 
+func TestPiLeadCommandAnswerKeepsActiveRunAndSteering(t *testing.T) {
+	for _, tc := range []struct{ name, response, commandErr string }{
+		{"handled prompt", `{"type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}`, ""},
+		{"refused prompt", `{"type":"response","command":"prompt","success":false,"error":"Agent is already processing"}`, "prompt refused: Agent is already processing"},
+		{"completed compact", `{"type":"response","command":"compact","success":true}`, ""},
+		{"refused compact", `{"type":"response","command":"compact","success":false,"error":"busy"}`, "compact refused: busy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newLeadHarness(t).start()
+			id := h.lead(BackendPi, LeadOptions{}).ID
+			h.send(id, "hello")
+			holder := h.holder(id)
+			h.holders.out(holder, `{"type":"agent_start"}`)
+			h.send(id, "next owner message")
+			eventually(t, "the message held for the running turn", func() bool { return h.state(id).Held == 1 })
+			before := len(h.ring(id))
+			h.holders.out(holder, tc.response)
+			// Wait for the command's LineEnd before inspecting its error,
+			// without sending assistant output as a synchronization marker.
+			target := uint64(h.holders.records(holder))
+			c := h.runner.conv(id)
+			eventually(t, "the command answer to be applied", func() bool {
+				var applied bool
+				c.do(func() { applied = c.seq >= target })
+				return applied
+			})
+			if st := h.state(id); st.Status != StatusRunning || st.Error != tc.commandErr || st.Failure != nil || st.Held != 1 {
+				t.Fatalf("a command answer must preserve the run and held input while exposing only its command error: %+v", st)
+			}
+			if got := len(h.ring(id)); got != before {
+				t.Fatalf("a command answer must add no conversation entry: got %d, want %d", got, before)
+			}
+			if prompts := h.holders.inputs(holder, "prompt"); len(prompts) != 1 {
+				t.Fatalf("a command answer must not release held input: %q", prompts)
+			}
+			h.holders.out(holder,
+				`{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"still running"}]}}`)
+			eventually(t, "continued output after the command answer", func() bool {
+				return slices.Contains(ringTexts(h.ring(id), wslive.RingReply), "still running")
+			})
+			h.steerHeld(id)
+			h.runner.InboxChanged(id)
+			eventually(t, "the message steered into the existing run", func() bool {
+				return len(h.holders.inputs(holder, "steer")) == 1
+			})
+			if prompts := h.holders.inputs(holder, "prompt"); len(prompts) != 1 {
+				t.Fatalf("an active run must not receive another plain prompt: %q", prompts)
+			}
+			h.holders.out(holder, `{"type":"agent_settled"}`)
+			h.idle(id)
+		})
+	}
+}
+
 // TestPiCommandsMapping pins the get_commands answer's mapping: pi's own
 // compact entry is kept rather than added twice, and a profile
 // conversation's settled turn asks for no command list.

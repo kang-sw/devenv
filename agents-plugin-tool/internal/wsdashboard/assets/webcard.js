@@ -428,13 +428,16 @@
       bounds.top = Math.max(bounds.top, col.top + 8);
       bounds.bottom = Math.min(bounds.bottom, col.bottom - 8);
     }
-    pop.style.right = ""; pop.style.left = ""; pop.style.top = ""; pop.style.maxHeight = "";
+    pop.style.right = ""; pop.style.left = "0px"; pop.style.top = "0px"; pop.style.maxHeight = "";
+    pop.style.maxWidth = Math.max(0, bounds.right - bounds.left) + "px";
     var pb = pop.getBoundingClientRect(), bb = ui.btn.getBoundingClientRect();
-    var left = bb.left, right = left + pb.width, top = bb.bottom + 4;
+    var left = bb.left, right = left + pb.width;
+    var top = Math.max(bounds.top, Math.min(bb.bottom + 4, bounds.bottom - 72));
     if (right > bounds.right) left -= right - bounds.right;
     if (left < bounds.left) left = bounds.left;
-    if (top + pb.height > bounds.bottom) pop.style.maxHeight = Math.max(120, bounds.bottom - top) + "px";
-    pop.style.left = left + "px"; pop.style.top = top + "px";
+    // The zero-offset rectangle gives the positioned toolbar slot's origin.
+    pop.style.left = (left - pb.left) + "px"; pop.style.top = (top - pb.top) + "px";
+    pop.style.maxHeight = Math.max(0, bounds.bottom - top) + "px";
   }
   function openPop() {
     ui.in.value = "";

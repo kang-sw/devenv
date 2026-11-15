@@ -3,6 +3,7 @@ title: "Dashboard daemon drops LAN serving (T1: accept-and-warn for one minor, t
 related:
   261112-research-ws-ade-desktop-shell-and-rename: "Werkschaft concept: local-only product, (490)-(492)"
   261113-feat-ws-dashboard-browser-pane: "its LAN-token cookie strip (decision 17) ends with the cookie"
+  261115-feat-ws-dashboard-settings-in-usage-strip: "interim LAN-box relocation only while LAN exists; removal remains authoritative in either landing order"
 ---
 
 # Dashboard daemon drops LAN serving (T1: accept-and-warn for one minor, then delete)
@@ -38,6 +39,7 @@ exhaustive): the `dashboard.lan_enabled` key in the three
 3. **Other-local-OS-user protections stay** ((492)=a, owner 2026-11-13): the
    endpoint token file at 0600, and the bearer on `/shutdown` and the proxy.
 4. **Compatibility tier: T1** per Decision 1.
+5. **Settings relocation is interim** (MAIN technical call, 2026-11-15 at 02:34:12 UTC): owner decision (879) in `261115-feat-ws-dashboard-settings-in-usage-strip` does not supersede this removal. If this ticket lands first, Settings shows the version only and must never revive LAN. If Settings lands first, it moves the existing LAN box as-is with authentication/URL semantics unchanged, and this ticket removes that relocated box alongside the LAN token/cookie/access branch later. Neither ticket is a hard prerequisite of the other; the version and unrelated settings remain.
 
 ## Constraints
 
@@ -61,7 +63,9 @@ exhaustive): the `dashboard.lan_enabled` key in the three
   about (Decision 1); the manifest entries say so.
 - Update `ai-docs/manuals/ws-mcp.md`.
 
-Verification: Go tests that the daemon binds loopback only with
+Verification: cover removal both before and after the interim Settings
+relocation: no LAN block remains or is revived, while Settings and its version
+remain available. Go tests that the daemon binds loopback only with
 `lan_enabled` true and with `--lan`, and that each logs the removal warning;
 the browser-threat guard tests (hostGuard, sameOrigin, Sec-Fetch, CSP) and
 the endpoint-token / bearer tests still pass unchanged; manifest drift tests

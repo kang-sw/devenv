@@ -37,13 +37,16 @@ func TestBoardEntryFrameBridgeStaysNarrow(t *testing.T) {
 	runNode(t, "entry frame bridge", `
 var bad = [];
 function check(what, got, want) { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(what + ": got " + JSON.stringify(got) + ", want " + JSON.stringify(want)); }
-var calls = [], jumps = [], pending = null, mpend = null, cchips = {}, handler, menus = [];
-var navigator = { userActivation: { isActive: false } };
+var calls = [], jumps = [], reveals = [], pending = null, mpend = null, cchips = {}, handler, menus = [];
+// node defines a getter-only global navigator that a top-level var cannot replace.
+Object.defineProperty(globalThis, "navigator", { value: { userActivation: { isActive: false } }, configurable: true, writable: true });
 function frameLink(m) { return m.href ? { href: m.href } : null; }
 function webLink() { return false; }
 function openLinkMenu(a, x, y) { menus.push({ a: a, x: x, y: y }); }
+var desktopPreviews = [];
+function desktopPreview(a) { desktopPreviews.push(a.href); return true; }
 var board = { name: "board" }, pins = { name: "pins" }, targets = {};
-function target(id, owned) { return targets[id] = { id: id, owned: owned, tagName: "DIV", parentNode: null, closest: function () { return this.history ? board : null; }, scrollIntoView: function () { jumps.push(id); } }; }
+function target(id, owned) { return targets[id] = { id: id, owned: owned, folded: true, tagName: "DIV", parentNode: null, closest: function () { return this.history ? board : null; }, scrollIntoView: function () { check("owner reveals before fallback scroll " + id, this.folded, false); jumps.push(id); } }; }
 var fold = { tagName: "DETAILS", owned: true, open: false, parentNode: null };
 target("item-3", true).parentNode = fold;
 target("p1", true).parentNode = fold;
@@ -51,10 +54,16 @@ target("item-4", false); target("p404", false);
 function boardBoxes() { return [board, pins]; }
 function inBoard(n) { return !!n && n.owned === true; }
 function $(id) { return targets[id] || null; }
-var window = { wbHistory: { loadTarget: function (root, id) {
+var window = { WsCards: { unfoldTopic: function (n) { if (n.owned) { n.folded = false; reveals.push(n.id); } } }, wbHistory: { loadTarget: function (root, id, beforeGeometry) {
   calls.push(root.name + ":" + id);
-  if (id === "p9" && root === pins) return targets.p9 || target("p9", true);
-  return root === board && targets[id] || null;
+  if (id.indexOf("item-") === 0) return null;
+  var n = id === "p9" && root === pins ? targets.p9 || target("p9", true) : root === board && targets[id] || null;
+  if (n && n.owned) {
+    check("history receives the named owner", beforeGeometry === window.WsCards.unfoldTopic, true);
+    if (beforeGeometry) beforeGeometry(n);
+    check("owner reveals before loader geometry " + id, n.folded, false);
+  }
+  return n;
 } }, addEventListener: function (kind, fn) { if (kind === "message") handler = fn; } };
 var topic = { getAttribute: function (k) { return k === "data-topic" ? "trusted-topic" : null; } };
 var wrapper = { nodeType: 1, getAttribute: function (k) { return k === "data-entry" ? "e7" : k === "data-entry-item" ? "3" : null; }, closest: function (s) { return s === "[data-entry]" ? this : topic; } };
@@ -73,14 +82,16 @@ function hideMention() { pending = null; mpend = null; }
 `+src+listener+`
 boardJump("p1"); boardJump("p9"); boardJump("item-3");
 check("existing panel/item targets scroll, including deferred pinned history", jumps, ["p1", "p9", "item-3"]);
-targets.p9.history = true; boardJump("p9");
+targets.p9.history = true; targets.p9.folded = true; boardJump("p9");
 check("history navigation delegates positioning to shared keep", jumps, ["p1", "p9", "item-3"]);
 check("containing disclosures open before navigation", fold.open, true);
-var count = calls.length;
+var count = calls.length, revealCount = reveals.length;
 ["#p1", "e7", "p0", "p01", "p1 div", "item-3,body", "item-3[x]", "https://evil/p1", "../p1", "__proto__", null, 7].forEach(boardJump);
 check("non-allowlisted IDs never enter the history loader", calls.length, count);
+check("non-allowlisted IDs never unfold a topic", reveals.length, revealCount);
 boardJump("item-4"); boardJump("p404"); boardJump("p777");
 check("off-board and missing targets never scroll", jumps, ["p1", "p9", "item-3"]);
+check("off-board and missing targets never unfold a topic", reveals.length, revealCount);
 handler({ source: own.contentWindow, data: { wbDoc: "sel", docKey: "entry:e7", text: "selected HTML", entry: "e999", id: "99", topic: "forged", x: 4, y: 5 } });
 check("claimed locator/topic/id are ignored", pending.m, { topic: "trusted-topic", text: "selected HTML", id: "3", entry: "e7" });
 check("selection coordinates remain data", [pending.x, pending.y], [4, 5]);
@@ -104,6 +115,14 @@ frames = [foreign]; own.owned = false;
 handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md" } });
 check("unknown, wrong-key, off-board and disappeared frames cannot open menus", menus.length, 1);
 frames = [own, foreign]; own.owned = true;
+handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md", mod: true } });
+check("a posted modified click without user activation opens the menu, never a preview", [menus.length, desktopPreviews], [2, []]);
+navigator.userActivation.isActive = true;
+handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md", mod: "yes" } });
+check("only mod === true asks for the desktop preview", [menus.length, desktopPreviews], [3, []]);
+handler({ source: own.contentWindow, data: { wbDoc: "link", docKey: "entry:e7", href: "docs/a.md", mod: true } });
+check("an active modified click asks for the desktop preview", [menus.length, desktopPreviews], [3, ["docs/a.md"]]);
+navigator.userActivation.isActive = false;
 var posted = [];
 own.contentWindow.postMessage = function (m) { posted.push(m); };
 postDoc(own, { wbDoc: "size" });

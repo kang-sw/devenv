@@ -242,6 +242,10 @@ func (d *Daemon) handleSessionEvents(w http.ResponseWriter, r *http.Request, rep
 		s, ok = d.index.Session(replyID)
 	}
 	if !ok {
+		if d.index != nil && ValidReplyID(replyID) && d.index.readError(replyID) != nil {
+			http.Error(w, "session temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
 	}
@@ -294,9 +298,9 @@ func (d *Daemon) sessionPageSource(replyID, lang, theme string) pageSource {
 				prev, _ = live.prev.reads.(*sessionReads)
 				ringChanged = live.changed(ringDep(replyID))
 			}
-			view, inputs, reads, ok := pages.readSessionWith(replyID, prev, ringChanged)
-			if !ok {
-				return pageRender{deps: []string{replyID}}
+			view, inputs, reads, ok, err := pages.readSessionWith(replyID, prev, ringChanged)
+			if err != nil || !ok {
+				return pageRender{deps: []string{replyID}, err: err}
 			}
 			d.stats.SessionRenders.Add(1)
 			if prev != nil {
@@ -434,6 +438,10 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 	sub, cancel := d.broker.subscribe()
 	defer cancel()
 	first, at := d.cache.get(page, src, false)
+	if first.err != nil {
+		http.Error(w, "session temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if !first.ok {
 		http.Error(w, "unknown session", http.StatusNotFound)
 		return
@@ -467,6 +475,9 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 		}
 		send := func(pr pageRender, at uint64) bool {
 			d.broker.follow(sub, pr.deps, at)
+			if pr.err != nil {
+				return true // keep the page and retry on the existing refresh tick
+			}
 			if !pr.ok {
 				_ = sink.event("gone", []byte("{}"))
 				_ = sink.flush()

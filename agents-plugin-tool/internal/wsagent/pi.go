@@ -626,7 +626,19 @@ func (p *piProcess) SetEffort(effort string) error {
 // answer ends the runner's turn. An answer without isStreaming is an
 // error, not an idle harness.
 func (p *piProcess) TurnRunning() (bool, error) {
-	body, err := p.requestBody("get_state", map[string]any{"type": "get_state"}, controlTimeout)
+	id := p.nextID()
+	p.feedMu.Lock()
+	if p.mapper.nativeProbes == nil {
+		p.mapper.nativeProbes = make(map[string]uint64)
+	}
+	p.mapper.nativeProbes[id] = p.mapper.nativeGeneration
+	p.feedMu.Unlock()
+	defer func() {
+		p.feedMu.Lock()
+		delete(p.mapper.nativeProbes, id)
+		p.feedMu.Unlock()
+	}()
+	body, err := p.requestBodyID(id, "get_state", map[string]any{"type": "get_state"}, controlTimeout)
 	if err != nil {
 		return false, err
 	}
@@ -655,10 +667,21 @@ type piMapper struct {
 	// asked for, not a failure.
 	aborted atomic.Bool
 
-	messages    int
-	turnErr     string
-	turnReason  string
-	lastStatsAt int64
+	// nativeRun is bounded by Pi's agent_start/agent_settled, not the
+	// completion of a prompt or compact RPC command. The owning stream's
+	// feedMu also serializes probe registration/cleanup with mapLine.
+	nativeRun        bool
+	nativeKnown      bool
+	nativeReplayGap  bool
+	nativeGeneration uint64
+	nativeProbes     map[string]uint64
+	// A command answer seen before replay establishes native state is
+	// retained with its source sequence, not yet a lifecycle boundary.
+	pendingCommand *Event
+	messages       int
+	turnErr        string
+	turnReason     string
+	lastStatsAt    int64
 	// Receipt-time streaming span, excluding request and tool latency. A
 	// missing/burst-flushed stream has no usable rate.
 	outputStartedAt int64
@@ -666,7 +689,41 @@ type piMapper struct {
 }
 
 func newPiMapper(spec StartSpec) *piMapper {
-	return &piMapper{spec: spec, surface: piToolSurface(spec), now: time.Now, batches: newBatchTracker("p")}
+	return &piMapper{spec: spec, surface: piToolSurface(spec), now: time.Now, batches: newBatchTracker("p"),
+		nativeKnown: spec.Holder == nil || spec.Holder.id == ""}
+}
+
+// replayState runs under feedMu with the existing holder replay markers.
+// An attached mapper has not seen the missing prefix: a command answer
+// cannot establish idle until the whole history, a native boundary, or a
+// recovery answer establishes the native state.
+func (m *piMapper) replayState(ev Event) []Event {
+	if ev.ReplayGap {
+		m.nativeKnown, m.nativeReplayGap = false, true
+		m.nativeGeneration++
+		m.pendingCommand = nil
+	}
+	var out []Event
+	if ev.ReplayDone {
+		if !ev.ReplayLost && !m.nativeReplayGap {
+			m.nativeKnown = true
+			if done := m.pendingCommand; done != nil && !m.nativeRun {
+				// Complete history confirms command-only completion. Keep
+				// its sequence/replay identity so an old answer cannot close
+				// a later persisted worker turn.
+				out = m.endTurn(m.now().UnixMilli(), done.TurnError)
+				for i := range out {
+					out[i].Seq, out[i].Replay = done.Seq, done.Replay
+				}
+				if done.Seq > 0 {
+					out = append(out, Event{Seq: done.Seq, Replay: done.Replay, LineEnd: true})
+				}
+			}
+		}
+		m.pendingCommand = nil
+		m.nativeReplayGap = false
+	}
+	return out
 }
 
 type piLine struct {
@@ -730,21 +787,34 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 	now := m.now().UnixMilli()
 	switch l.Type {
 	case "response":
+		if l.Command == "get_state" {
+			// A replay may have lost agent_start. Reconcile in stream order,
+			// before another command answer can consult the native state.
+			generation, probed := m.nativeProbes[l.ID]
+			if probed && l.Success && generation == m.nativeGeneration {
+				var d struct {
+					IsStreaming *bool `json:"isStreaming"`
+				}
+				if json.Unmarshal(l.Data, &d) == nil && d.IsStreaming != nil {
+					m.nativeRun, m.nativeKnown = *d.IsStreaming, true
+					m.pendingCommand = nil
+				}
+			}
+			delete(m.nativeProbes, l.ID)
+		}
 		if l.ID != "" {
 			replies.answer(l.ID, controlAnswer{ok: l.Success, err: l.Error, body: l.Data})
 		}
 		switch l.Command {
 		case "prompt":
-			// A refused or handled prompt starts no run, so no
-			// agent_settled will end the turn.
 			if !l.Success {
-				return m.endTurn(now, "prompt refused: "+l.Error)
+				return m.commandDone(now, "prompt refused: "+l.Error)
 			}
 			var d struct {
 				Disposition string `json:"disposition"`
 			}
 			if json.Unmarshal(l.Data, &d) == nil && d.Disposition == "handled" {
-				return m.endTurn(now, "")
+				return m.commandDone(now, "")
 			}
 		case "get_session_stats":
 			if l.Success {
@@ -755,14 +825,14 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 				return piCommands(l.Data)
 			}
 		case "compact":
-			// A lead's typed /compact ran as this command: its answer ends
-			// the turn the send began.
+			// A typed /compact completes the command-only turn, unless a
+			// native run started before its answer arrived.
 			if m.spec.Lead != nil {
 				errText := ""
 				if !l.Success {
 					errText = "compact refused: " + l.Error
 				}
-				return m.endTurn(now, errText)
+				return m.commandDone(now, errText)
 			}
 		case "steer":
 			// A non-lead process steers a child's report, which the runner
@@ -785,6 +855,9 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		}
 	case "agent_start":
 		// Workers need the same boundary when rebuilding a held RPC stream.
+		m.nativeRun, m.nativeKnown = true, true
+		m.nativeGeneration++
+		m.pendingCommand = nil
 		return []Event{{TurnStart: true}}
 	case "message_start":
 		var msg piMessage
@@ -838,6 +911,9 @@ func (m *piMapper) mapLine(line []byte, replies lineReplies) []Event {
 		}
 		return []Event{{Live: &wslive.Event{Kind: wslive.KindCompact, Phase: phase, Trigger: trigger}}}
 	case "agent_settled":
+		m.nativeRun, m.nativeKnown = false, true
+		m.nativeGeneration++
+		m.pendingCommand = nil
 		m.askStats(replies, now, true)
 		if m.spec.Lead != nil {
 			replies.send(piGetCommands)
@@ -984,6 +1060,23 @@ func piAgentEvents(raw json.RawMessage) []Event {
 		}
 	}
 	return out
+}
+
+// commandDone completes a command-only turn. Extension commands can run
+// during streaming or start a native run before their handled response;
+// that response (or a refused concurrent command) must not settle the run.
+// An attached stream whose prefix was lost is unknown, not confirmed idle.
+func (m *piMapper) commandDone(now int64, errText string) []Event {
+	if !m.nativeKnown {
+		m.pendingCommand = &Event{TurnEnd: true, TurnError: errText}
+	}
+	if !m.nativeKnown || m.nativeRun {
+		if errText != "" {
+			return []Event{{CommandError: errText}}
+		}
+		return nil
+	}
+	return m.endTurn(now, errText)
 }
 
 func (m *piMapper) endTurn(now int64, turnErr string) []Event {

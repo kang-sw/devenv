@@ -221,6 +221,9 @@ type TopicDoc struct {
 	// a body edit replaces them: the first body has none, the same body again
 	// keeps them, and no other write touches them.
 	Marks []BlockMark `json:"marks,omitempty"`
+	// BodyTimeProof authenticates ChangedAt as an actual body mutation for
+	// relative-age UX. Missing or invalid evidence means unknown, not legacy age.
+	BodyTimeProof *BodyTimeProof `json:"body_time_proof,omitempty"`
 	// Recap is the topic's recap, rendered by the item block-field rule
 	// (itemField); "" when it has none.
 	Recap string `json:"recap,omitempty"`
@@ -302,6 +305,9 @@ type Env struct {
 
 // Outcome is what an accepted update did.
 type Outcome struct {
+	// Effects holds typed semantic transitions, in command order. It is
+	// meaningful only after the enclosing store commits, never on refusal.
+	Effects []Effect
 	// IDs holds the ID of every wb:add command, in command order.
 	IDs []int
 	// Withdrawn holds the ID of every item a wb:close withdrew, in command
@@ -355,6 +361,13 @@ func (s *State) clone() *State {
 	var out State
 	if err := json.Unmarshal(data, &out); err != nil {
 		panic(err)
+	}
+	// JSON round-trips compact RawMessage bytes. Clone immutable payloads
+	// directly instead, including unknown members, without aliasing the source.
+	for i := range s.Topics {
+		for j, entry := range s.Topics[i].Entries {
+			out.Topics[i].Entries[j] = entry.clone()
+		}
 	}
 	return &out
 }
@@ -447,17 +460,18 @@ func baseDoc(base *State, topic string) (TopicDoc, bool) {
 // the body back to the one the batch began with change nothing: the body
 // keeps that body's marks, Changed, and ChangedAt. Entries and legacy recap
 // fields are never touched.
-func (s *State) setTopicBody(topic, body string, mark int, base *State) {
+func (s *State) setTopicBody(topic, body string, mark int, base bodyOrigins) {
 	if i := s.topicDocIndex(topic); i >= 0 && s.Topics[i].Body == body {
 		return
 	}
 	d := s.topicDoc(topic)
-	if b, ok := baseDoc(base, topic); ok && b.Body == body {
+	if b, ok := base[topic]; ok && b.Body == body {
 		d.Body, d.Marks, d.Changed, d.ChangedAt = b.Body, b.Marks, b.Changed, b.ChangedAt
+		d.BodyTimeProof = b.BodyTimeProof
 		return
 	}
 	d.Marks = nil
-	if prev := base.TopicBody(topic); prev != "" {
+	if prev := base[topic].Body; prev != "" {
 		d.Marks = diffBodies(prev, body)
 	}
 	d.Body = body
@@ -473,6 +487,7 @@ func (s *State) clearTopicBody(topic string) {
 	}
 	d := &s.Topics[i]
 	d.Body, d.Marks, d.Changed, d.ChangedAt = "", nil, 0, ""
+	d.BodyTimeProof = nil
 	s.dropTopicDoc(topic)
 }
 
@@ -587,9 +602,14 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	cmds := parseCommands(p, commands)
 
 	work := state.clone()
+	origins := bodyOrigins{}
+	for _, doc := range state.Topics {
+		origins[doc.Name] = doc
+	}
 	work.Seq++
 	mark := work.Seq
 	var out Outcome
+	previous := effectSnapshot(work)
 	var optionWarn []int
 	embedDir := false
 	// closedBy names, per item a close in this batch withdrew, that close.
@@ -613,7 +633,9 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 
 	for _, cmd := range cmds {
 		if cmd.IsGroup() {
-			keys[cmd.Scope] = applyGroup(p, work, cmd)
+			keys[cmd.Scope] = applyGroup(p, work, origins, cmd)
+			out.Effects = append(out.Effects, semanticEffects(previous, work)...)
+			previous = effectSnapshot(work)
 			continue
 		}
 		switch cmd.Tag {
@@ -626,13 +648,17 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 		case "wb:patch":
 			optionWarn = work.noteNonPolicyOptions(optionWarn, applyPatch(p, work, cmd, mark, env.Now))
 		case "wb:body":
-			applyBody(p, work, state, cmd, topicOf, mark, env.Now)
+			applyBody(p, work, origins, cmd, topicOf, mark, env.Now)
 		case "wb:edit":
-			applyEdit(p, work, state, cmd, topicOf, mark, env.Now)
+			applyEdit(p, work, origins, cmd, topicOf, mark, env.Now)
 		case "wb:panel":
 			applyPanel(p, work, cmd, topicOf, env.Now)
 		case "wb:log":
 			applyLog(p, work, cmd, topicOf, env.Now)
+		case "wb:state":
+			applyTopicState(p, work, cmd, topicOf, env.Now)
+		case "wb:eta":
+			applyTopicETA(p, work, cmd, topicOf, env.Now)
 		case "wb:close":
 			withdrawn := applyClose(p, work, cmd, topicOf, mark, env.Now)
 			for _, id := range withdrawn {
@@ -659,6 +685,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 				work.EmbedDir = dir
 			}
 		}
+		out.Effects = append(out.Effects, semanticEffects(previous, work)...)
+		previous = effectSnapshot(work)
 	}
 	if !embedDir && work.EmbedDir != "" && !env.IsDir(work.EmbedDir) {
 		p.Add("embed_dir %s (stored for this session) is no longer an existing directory; send <wb:embed-dir path=\"...\"/> with the host's current folder, or path=\"\" to clear it", work.EmbedDir)
@@ -669,8 +697,10 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	}
 	work.evictArchive()
 	work.pruneLabels()
+	out.Effects = append(out.Effects, semanticEffects(previous, work)...)
 	work.stampChanges(mark, env.Now)
-	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now))
+	work.stampBodyTimeProofs(origins)
+	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now), work.structuralWarnings())
 	*state = *work
 	return out, nil
 }
@@ -714,7 +744,7 @@ func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, ma
 		work.eventItem(topic, item.ID, now, "Item {{%d}} withdrawn [%s] by topic close: %s", item.ID, item.Class, item.Title)
 	}
 	if !closed {
-		work.event(topic, now, "Topic closed: %s", result)
+		work.closeStateEvent(topic, result, now)
 	} else if resultChanged {
 		work.event(topic, now, "Topic close result updated: %s", result)
 	}
@@ -1077,7 +1107,7 @@ func applyPatch(p *problems, work *State, cmd command, mark int, now time.Time) 
 
 // applyBody replaces a topic's body whole; an empty (or blank) body clears
 // it. The same body again is no change.
-func applyBody(p *problems, work, base *State, cmd command, topicOf topicResolver, mark int, now time.Time) {
+func applyBody(p *problems, work *State, base bodyOrigins, cmd command, topicOf topicResolver, mark int, now time.Time) {
 	name, ok := topicOf(cmd)
 	if !ok {
 		return
@@ -1103,7 +1133,7 @@ func applyBody(p *problems, work, base *State, cmd command, topicOf topicResolve
 
 // applyEdit replaces one exact match of old in a topic's body with new, or
 // every match with replace_all="true".
-func applyEdit(p *problems, work, base *State, cmd command, topicOf topicResolver, mark int, now time.Time) {
+func applyEdit(p *problems, work *State, base bodyOrigins, cmd command, topicOf topicResolver, mark int, now time.Time) {
 	name, nameOK := topicOf(cmd)
 	all, _ := wsxmlcmd.BoolAttr(p, cmd, "replace_all")
 	old, hasOld := cmd.Single(p, "wb:old")

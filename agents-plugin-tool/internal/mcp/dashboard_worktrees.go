@@ -24,7 +24,10 @@ const dashboardPoolTimeout = 10 * time.Second
 // roots worktree.list owns. A lease's keys go out as their reply-ids, since
 // the answer reaches a browser.
 func (src *DashboardSessionSource) ReadWorktrees(reg wsdashboard.Registration) (wsdashboard.WorktreePool, error) {
-	key, _, record, ok := src.lookupRecord(reg)
+	key, _, record, ok, err := src.lookupRecord(reg)
+	if err != nil {
+		return wsdashboard.WorktreePool{}, err
+	}
 	if !ok {
 		return wsdashboard.WorktreePool{}, errors.New("no session record")
 	}
@@ -48,8 +51,8 @@ func (src *DashboardSessionSource) ReadWorktrees(reg wsdashboard.Registration) (
 func (src *DashboardSessionSource) ReadRepoWorktrees(repo string, regs []wsdashboard.Registration) (wsdashboard.RepoWorktrees, error) {
 	poolValue := ""
 	for _, reg := range regs {
-		key, _, record, ok := src.lookupRecord(reg)
-		if !ok {
+		key, _, record, ok, err := src.lookupRecord(reg)
+		if !ok || err != nil {
 			continue
 		}
 		adapter := sessionConfigAdapter{s: src.store}

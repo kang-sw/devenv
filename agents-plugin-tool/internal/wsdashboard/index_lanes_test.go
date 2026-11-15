@@ -24,7 +24,7 @@ func newBlockingSource() *blockingSource {
 	return &blockingSource{fakeSource: newFakeSource(), entered: make(chan string, 64), blocked: map[string]chan struct{}{}}
 }
 
-func (b *blockingSource) ReadSession(reg Registration) (SessionData, bool) {
+func (b *blockingSource) ReadSession(reg Registration) (SessionData, bool, error) {
 	b.mu.Lock()
 	release := b.blocked[reg.ReplyID]
 	b.mu.Unlock()

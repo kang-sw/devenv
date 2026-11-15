@@ -439,7 +439,10 @@ func TestDashboardSessionSourceTracksLiveStores(t *testing.T) {
 	}
 	read := func() wsdashboard.SessionData {
 		t.Helper()
-		data, ok := src.ReadSession(reg)
+		data, ok, err := src.ReadSession(reg)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !ok {
 			t.Fatal("ReadSession found no session")
 		}

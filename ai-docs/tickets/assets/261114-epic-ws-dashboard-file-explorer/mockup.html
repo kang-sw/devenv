@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:">
+<title>파일 탐색기 · 상태를 가진 카드 / 742</title>
+<style>
+/* Read-only design references:
+ internal/wsdashboard/assets/files.js: tree, name/content search, guarded roots,
+ git marks, copy/open/reveal actions; cards.js: common card header/maximize.
+ dashboard.css: .bc-in/.bc-hd/.ibtn, .fpane/.fseg/.fsr/.fr/.gmk, .ctabs.
+ Dark shared tokens and font stacks from internal/wswhiteboard/assets/page.css.
+ Everything below is a local visual fixture, not connected to a filesystem.
+ 1920px cap + extend and floating state are proposed additions, not claims
+ that the current checkout already implements those controls. */
+:root {
+ --wb-bg:#141518; --wb-fg:#e7e7e4; --wb-card:#1e2024;
+ --wb-muted:#2b2d32; --wb-muted-fg:#a2a6ad; --wb-primary:#7aa2ff;
+ --wb-primary-fg:#0c1424; --wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent);
+ --wb-wash:color-mix(in srgb,var(--wb-fg) 6%,transparent);
+ --wb-ok:#6cc39a; --wb-fail:#f0797e; --wb-warn-ink:#e0a36c;
+ --wb-radius:12px; --wb-shadow:0 1px 2px rgb(0 0 0 / .5),0 2px 8px rgb(0 0 0 / .3);
+ --wb-shadow-hi:0 2px 4px rgb(0 0 0 / .55),0 8px 22px rgb(0 0 0 / .4);
+ --wb-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+ --wb-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
+ color-scheme:dark;
+}
+* { box-sizing:border-box; min-width:0; }
+html,body { margin:0; background:var(--wb-bg); color:var(--wb-fg); }
+body { font:14px/1.5 var(--wb-sans); }
+button,input,textarea,select { font:inherit; color:inherit; }
+button { cursor:pointer; }
+button:focus-visible,summary:focus-visible,input:focus-visible { outline:1.5px solid var(--wb-primary); outline-offset:1px; }
+.li { width:14px; height:14px; flex:none; display:inline-block; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; vertical-align:-2px; }
+.ibtn { width:24px; height:24px; flex:none; display:inline-grid; place-items:center; border:0; padding:0; border-radius:6px; background:transparent; color:var(--wb-muted-fg); opacity:.8; }
+.ibtn:hover { opacity:1; background:var(--wb-muted); }
+.ibtn .li { width:13px; height:13px; }
+.bcard { margin:0; }
+.bc-in { background:var(--wb-card); border-radius:var(--wb-radius); box-shadow:var(--wb-shadow); overflow:hidden; display:flex; flex-direction:column; }
+.bc-hd { display:flex; align-items:center; gap:7px; padding:4px 6px 4px 12px; min-height:32px; font-size:12.5px; }
+.bc-ic { flex:none; color:var(--wb-muted-fg); }
+.bc-nm { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:3ch; }
+.bc-sub { font:11px var(--wb-mono); color:var(--wb-muted-fg); white-space:nowrap; }
+.bc-kind { font-size:10px; font-weight:800; padding:0 6px; border-radius:4px; background:var(--wb-muted); color:var(--wb-muted-fg); white-space:nowrap; }
+.bc-acts { display:inline-flex; flex:none; }
+.bc-body { border-top:1px solid var(--wb-muted); }
+.bc-grip { height:9px; display:grid; place-items:center; }
+.bc-grip::after { content:""; width:28px; height:3px; border-radius:2px; background:var(--wb-muted); }
+.explorer { container-type:inline-size; font-size:12px; }
+.ex-tabs { display:flex; align-items:center; gap:3px; padding:4px 8px 0; border-bottom:1px solid var(--wb-line); background:color-mix(in srgb,var(--wb-bg) 35%,transparent); }
+.ex-tabs button { border:0; background:none; color:var(--wb-muted-fg); border-bottom:2px solid transparent; padding:5px 9px; font-size:11.5px; white-space:nowrap; }
+.ex-tabs button.active { color:var(--wb-fg); border-bottom-color:var(--wb-primary); background:var(--wb-wash); border-radius:5px 5px 0 0; }
+.ex-tabs .ex-saved { margin-left:auto; color:var(--wb-muted-fg); font-size:9px; white-space:nowrap; }
+.ex-nav { display:flex; align-items:center; gap:3px; padding:6px 8px 3px; flex-wrap:wrap; }
+.ex-root { border:1px solid var(--wb-line); background:var(--wb-card); border-radius:6px; padding:3px 6px; font-size:10.5px; max-width:100%; }
+.ex-root option { background:var(--wb-card); }
+.ex-guard { color:var(--wb-ok); display:inline-flex; align-items:center; gap:3px; font-size:9px; white-space:nowrap; margin-right:3px; }
+.ex-pathbox { display:flex; align-items:center; gap:2px; flex:1 1 190px; background:var(--wb-bg); border-radius:6px; padding:2px 6px; }
+.ex-path { font:10.5px var(--wb-mono); background:none; border:0; outline:0; width:100%; padding:2px 0; }
+.ex-controls { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:3px 8px 6px; }
+.ex-search { display:flex; align-items:center; gap:5px; flex:1 1 210px; border-radius:7px; background:var(--wb-muted); height:28px; padding:0 6px; }
+.ex-search input { width:100%; border:0; outline:none; background:none; font:11px var(--wb-mono); }
+.ex-search .ex-search-scope { font-size:9px; color:var(--wb-muted-fg); white-space:nowrap; }
+.fseg { display:flex; gap:2px; border-radius:6px; padding:2px; background:var(--wb-bg); flex:none; }
+.fseg button { font-size:10px; background:none; color:var(--wb-muted-fg); border:0; border-radius:4px; padding:2px 5px; }
+.fseg button.active { background:var(--wb-card); color:var(--wb-fg); }
+.ex-modebar { display:flex; align-items:center; flex-wrap:wrap; gap:3px; padding:4px 8px; border-top:1px solid var(--wb-line); border-bottom:1px solid var(--wb-line); }
+.ex-modebar button { display:inline-flex; align-items:center; gap:4px; border:0; border-radius:5px; padding:4px 6px; background:none; color:var(--wb-muted-fg); font-size:10.5px; white-space:nowrap; }
+.ex-modebar button.active { color:var(--wb-primary); background:color-mix(in srgb,var(--wb-primary) 13%,transparent); }
+.ex-modebar .li { width:12px; height:12px; }
+.ex-mode-extra { display:flex; gap:3px; margin-left:auto; }
+.ex-body { display:grid; grid-template-columns:145px minmax(0,1fr); min-height:240px; }
+.ex-tree { padding:8px 6px; border-right:1px solid var(--wb-line); color:var(--wb-muted-fg); font-size:10.5px; }
+.ex-tree h4 { margin:6px 5px 4px; font-size:9px; font-weight:600; letter-spacing:.03em; color:var(--wb-muted-fg); }
+.ex-tree div { padding:4px 5px; border-radius:5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ex-tree .chosen { background:var(--wb-muted); color:var(--wb-fg); }
+.ex-tree .indent { padding-left:16px; }
+.ex-tree .li { width:12px; height:12px; margin-right:3px; }
+.ex-content { padding:7px 8px; min-width:0; }
+.ex-list { width:100%; border-collapse:collapse; font-size:10.5px; table-layout:fixed; }
+.ex-list th { font-size:9px; color:var(--wb-muted-fg); text-align:left; font-weight:500; padding:4px 5px; border-bottom:1px solid var(--wb-line); }
+.ex-list td { padding:6px 5px; border-bottom:1px solid color-mix(in srgb,var(--wb-line) 38%,transparent); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ex-list .name { width:48%; }
+.ex-list .git { width:36px; }
+.ex-list .perms { width:86px; }
+.ex-list .size { width:50px; }
+.ex-list .time { width:58px; }
+.ex-list .filename { font:10.5px var(--wb-mono); }
+.ex-list tr.selected { background:color-mix(in srgb,var(--wb-primary) 14%,transparent); }
+.ex-list .li { color:var(--wb-muted-fg); margin-right:4px; width:12px; height:12px; }
+.ex-list .perms,.ex-list .size,.ex-list .time { color:var(--wb-muted-fg); font:9px var(--wb-mono); }
+.gmk { font:800 9px var(--wb-mono); color:var(--wb-warn-ink); display:inline-block; padding:0 3px; border-radius:3px; background:color-mix(in srgb,var(--wb-warn-ink) 10%,transparent); }
+.gmk.add { color:var(--wb-ok); background:color-mix(in srgb,var(--wb-ok) 10%,transparent); }
+.ex-status { display:flex; flex-wrap:wrap; gap:3px 9px; padding:5px 10px; border-top:1px solid var(--wb-line); color:var(--wb-muted-fg); font-size:9px; }
+.ex-status .push { margin-left:auto; }
+.ex-toggles { display:flex; flex-wrap:wrap; gap:5px 10px; padding:5px 9px; border-top:1px solid var(--wb-line); color:var(--wb-muted-fg); font-size:9px; }
+.ex-toggles label { display:inline-flex; align-items:center; gap:3px; }
+.ex-toggles input { width:10px; height:10px; margin:0; accent-color:var(--wb-primary); }
+.ex-label-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px 10px; }
+.ex-label-grid .file { padding:5px 6px; display:flex; align-items:center; gap:5px; border-radius:5px; overflow:hidden; }
+.ex-label-grid .file span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ex-label-grid .selected { background:color-mix(in srgb,var(--wb-primary) 14%,transparent); }
+.ex-icons { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px 6px; padding:6px 0; }
+.ex-icon-item { text-align:center; font-size:10px; overflow-wrap:anywhere; padding:7px 3px; border-radius:7px; }
+.ex-icon-item > .li { width:32px; height:32px; color:var(--wb-muted-fg); margin-bottom:5px; }
+.ex-icon-item.selected { background:color-mix(in srgb,var(--wb-primary) 13%,transparent); }
+.ex-ticket { display:inline-block; font:700 8px var(--wb-mono); padding:1px 5px; border-radius:999px; margin:3px 0 0; }
+.ex-ticket.idea { color:#c9a7ff; background:#c9a7ff1a; }
+.ex-ticket.todo { color:#8db8ff; background:#8db8ff1a; }
+.ex-ticket.ready { color:#7fd6a8; background:#7fd6a81a; }
+.ex-gallery { padding:0; }
+.ex-gallery-stage { display:grid; place-items:center; min-height:232px; padding:14px; background:var(--wb-bg); }
+.ex-pdf { width:176px; height:218px; background:#f7f7f3; color:#24282e; padding:17px 15px; box-shadow:0 3px 14px #0005; font-size:8px; }
+.ex-pdf h4 { font-size:15px; line-height:1.2; margin:4px 0 10px; color:#24282e; }
+.ex-pdf p { margin:8px 0; color:#5f646b; }
+.ex-pdf .pdf-bar { height:5px; width:85%; background:#dddeda; margin:6px 0; border-radius:2px; }
+.ex-pdf .pdf-diagram { display:flex; gap:4px; height:55px; margin:12px 0; }
+.pdf-diagram span { border:1px solid #bdc6d6; background:#e8edf7; border-radius:3px; flex:1; padding:5px 2px; text-align:center; }
+.ex-pdf-tools { display:flex; align-items:center; justify-content:center; gap:12px; padding:5px 8px; color:var(--wb-muted-fg); font-size:10px; }
+.ex-thumbs { display:flex; gap:7px; padding:7px 9px; overflow:hidden; border-top:1px solid var(--wb-line); }
+.ex-thumb { display:grid; place-items:center; width:62px; height:48px; flex:none; border-radius:5px; background:var(--wb-muted); font:9px var(--wb-mono); color:var(--wb-muted-fg); }
+.ex-thumb.selected { outline:1.5px solid var(--wb-primary); color:var(--wb-primary); background:color-mix(in srgb,var(--wb-primary) 8%,var(--wb-card)); }
+.ex-thumb .li { width:23px; height:23px; }
+.ex-actionrow { display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding:7px 9px; border-top:1px solid var(--wb-line); }
+.ex-actionrow button,.ex-btn { display:inline-flex; align-items:center; gap:4px; padding:4px 7px; border:0; border-radius:5px; font-size:10px; color:var(--wb-muted-fg); background:var(--wb-muted); }
+.ex-actionrow button.primary,.ex-btn.primary { color:var(--wb-primary); background:color-mix(in srgb,var(--wb-primary) 15%,transparent); }
+.ex-code { margin:0; padding:12px; background:var(--wb-bg); color:var(--wb-fg); font:10.5px/1.9 var(--wb-mono); overflow:auto; white-space:pre; }
+.ex-code .ln { color:#69717e; display:inline-block; width:24px; user-select:none; }
+.syn-key { color:#c9a7ff; } .syn-fn { color:#8db8ff; } .syn-str { color:#8bd5b5; } .syn-comment { color:#89919c; }
+.ex-diff { padding:8px 0; font:10px/1.9 var(--wb-mono); background:var(--wb-bg); overflow:hidden; }
+.ex-diff div { padding:0 9px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ex-diff .minus { color:#f3a1a4; background:#f0797e10; }
+.ex-diff .plus { color:#8fd5b4; background:#6cc39a12; }
+.ex-diff .context { color:var(--wb-muted-fg); }
+.ex-subtabs { display:flex; gap:4px; padding:6px 8px; border-bottom:1px solid var(--wb-line); }
+.ex-subtabs button { border:0; border-radius:5px; padding:4px 8px; color:var(--wb-muted-fg); background:none; font-size:11px; }
+.ex-subtabs button.active { color:var(--wb-primary); background:color-mix(in srgb,var(--wb-primary) 13%,transparent); }
+.ex-search-results { padding:8px 10px; font-size:11px; }
+.ex-hit { padding:7px 0; border-bottom:1px solid var(--wb-line); }
+.ex-hit b { font:600 10.5px var(--wb-mono); overflow-wrap:anywhere; }
+.ex-hit pre { font:10px/1.7 var(--wb-mono); margin:5px 0 0; color:var(--wb-muted-fg); white-space:pre-wrap; overflow-wrap:anywhere; }
+mark { color:var(--wb-fg); background:#e0a36c35; border-radius:2px; }
+.ex-timeline { padding:8px 10px; }
+.ex-change { display:grid; grid-template-columns:34px minmax(0,1fr) 36px; gap:7px; align-items:baseline; padding:8px 0; border-bottom:1px solid var(--wb-line); font-size:10px; }
+.ex-change time { font:9px var(--wb-mono); color:var(--wb-muted-fg); }
+.ex-change b { font:10.5px var(--wb-mono); overflow-wrap:anywhere; }
+.ex-change small { display:block; font-size:9px; color:var(--wb-muted-fg); margin-top:3px; }
+.ex-live { color:var(--wb-ok); font-size:9px; white-space:nowrap; }
+.ex-live::before { content:""; display:inline-block; width:5px; height:5px; border-radius:50%; background:currentColor; margin-right:4px; }
+.ex-dual { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+.ex-dual > :first-child { border-right:1px solid var(--wb-line); }
+.ex-pane-title { padding:5px 8px; font-size:10px; color:var(--wb-muted-fg); border-bottom:1px solid var(--wb-line); display:flex; align-items:center; justify-content:space-between; }
+.ex-columns { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); min-height:168px; font-size:10px; }
+.ex-column { padding:6px 4px; border-right:1px solid var(--wb-line); }
+.ex-column div { padding:5px 4px; border-radius:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ex-column .selected { background:color-mix(in srgb,var(--wb-primary) 16%,transparent); color:var(--wb-primary); }
+.ex-roots { display:flex; flex-wrap:wrap; align-items:center; gap:5px; padding:6px 8px; background:var(--wb-bg); font-size:10px; border-top:1px solid var(--wb-line); }
+.ex-root-choice { padding:4px 7px; border:1px solid var(--wb-line); border-radius:5px; background:var(--wb-card); font:10px var(--wb-mono); }
+.ex-root-choice.active { border-color:var(--wb-primary); color:var(--wb-primary); }
+.ex-narrow .ex-body { grid-template-columns:minmax(0,1fr); min-height:208px; }
+.ex-narrow .ex-tree { display:none; }
+.ex-narrow .ex-label-grid { grid-template-columns:minmax(0,1fr); }
+.ex-narrow .ex-content { padding:9px; }
+.ex-narrow .ex-mode-extra { display:none; }
+.ex-narrow .ex-tabs .ex-saved { display:none; }
+.ex-narrow .ex-nav .ex-guard { display:none; }
+.ex-narrow .ex-modebar button { font-size:9.5px; padding:4px; }
+.ex-narrow .ex-modebar { gap:0; }
+.ex-narrow .ex-search-scope { display:none; }
+.ex-narrow .ex-mob-tree { display:inline-flex; }
+.ex-mob-tree { display:none; }
+.chead { display:flex; padding:0 8px 0 4px; background:var(--wb-muted); border-radius:12px 12px 0 0; min-height:30px; }
+.ctabs { display:flex; gap:2px; }
+.ctabs button { border:0; background:none; height:30px; padding:0 8px; font-size:13px; font-weight:700; color:var(--wb-muted-fg); border-bottom:2px solid transparent; }
+.ctabs button.active { color:var(--wb-fg); border-bottom-color:var(--wb-primary); }
+.composer { margin-top:10px; background:var(--wb-card); border-radius:12px; box-shadow:var(--wb-shadow-hi); padding:8px 10px; }
+.ex-drop { padding:8px; border:1px dashed var(--wb-primary); border-radius:8px; color:var(--wb-muted-fg); font-size:10px; }
+.achip { display:block; margin:5px 0; border-radius:6px; padding:4px 6px; background:color-mix(in srgb,var(--wb-primary) 14%,var(--wb-card)); color:var(--wb-fg); font:9px/1.5 var(--wb-mono); overflow-wrap:anywhere; }
+.ex-composer-line { display:flex; gap:5px; margin-top:6px; }
+.ex-composer-line input { min-width:0; width:100%; background:var(--wb-muted); border:0; padding:6px; border-radius:6px; font-size:11px; }
+.ex-composer-line button { border:0; background:#7aa2ff20; color:var(--wb-primary); border-radius:6px; padding:0 8px; }
+.ex-sheetbar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:7px 10px; background:var(--wb-bg); border-bottom:1px solid var(--wb-line); color:var(--wb-muted-fg); font-size:10px; }
+.ex-sheetbar strong { color:var(--wb-fg); margin-right:auto; font-size:11px; }
+.ex-extend { padding:3px 7px; border:1px solid var(--wb-line); background:var(--wb-card); border-radius:5px; color:var(--wb-primary); font-size:10px; }
+.ex-quick-stage { position:relative; min-height:265px; border-radius:12px; background:var(--wb-muted); padding:16px; }
+.ex-quick-under { font:11px/2.6 var(--wb-mono); opacity:.25; filter:blur(1px); }
+.ex-quick { position:absolute; inset:12px; border-radius:10px; box-shadow:0 10px 30px #0008; background:var(--wb-card); border:1px solid var(--wb-line); overflow:hidden; }
+.ex-quick .ex-code { max-height:158px; }
+.ex-quick-head { display:flex; align-items:center; gap:6px; padding:7px 10px; border-bottom:1px solid var(--wb-line); font-size:11px; }
+.ex-quick-head strong { flex:1; }
+.ex-quick-head kbd { font-size:9px; color:var(--wb-muted-fg); }
+.ex-picker { border:1px dashed #e0a36c80; border-radius:12px; background:var(--wb-card); padding:10px; }
+.ex-tentative { color:var(--wb-warn-ink); background:#e0a36c12; font-size:9px; display:inline-block; border-radius:4px; padding:2px 5px; }
+.ex-folder-row { padding:8px 6px; font-size:11px; border-radius:5px; display:flex; align-items:center; gap:6px; }
+.ex-folder-row.selected { background:color-mix(in srgb,var(--wb-primary) 13%,transparent); }
+/* Review sheet: explanatory labels sit outside the proposed component. */
+.mock-sheet { max-width:1920px; padding:22px 20px; margin:0 auto; }
+.mock-head { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.mock-head h1 { font-size:22px; margin:0; letter-spacing:-.035em; }
+.mock-pill { border-radius:999px; background:var(--wb-muted); color:var(--wb-muted-fg); padding:3px 8px; font-size:10px; }
+.mock-intro { margin:7px 0 18px; color:var(--wb-muted-fg); font-size:12px; max-width:1050px; }
+.mock-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; align-items:start; }
+.mock-wide { grid-column:1/-1; }
+.mock-frame { min-width:0; }
+.mock-caption { color:var(--wb-muted-fg); font-size:11px; margin:0 0 8px; }
+.mock-caption b { color:var(--wb-fg); font-size:12px; }
+.mock-hero { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:18px; align-items:start; }
+.mock-hero .ex-body { min-height:282px; }
+.mock-hero .ex-list td { padding-top:8px; padding-bottom:8px; }
+.mock-hero-aside { min-width:0; }
+.mock-pair { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
+.mock-note { font-size:10px; color:var(--wb-muted-fg); margin:7px 2px 0; }
+.mock-keyboard { padding:9px 12px; color:var(--wb-muted-fg); border-top:1px solid var(--wb-line); font-size:10px; line-height:1.8; }
+kbd { font:9px var(--wb-mono); border-radius:3px; padding:1px 4px; background:var(--wb-muted); }
+.mock-end { margin-top:22px; padding-top:12px; border-top:1px solid var(--wb-line); color:var(--wb-muted-fg); font-size:11px; }
+.mock-end p { margin:4px 0; }
+/* Optional local fullscreen interaction for a real width-cap inspection. */
+#mock-modal[hidden] { display:none; }
+#mock-modal { position:fixed; inset:0; z-index:100; background:#08090be0; padding:16px; overflow:auto; }
+.mock-modal-sheet { max-width:1920px; margin:0 auto; }
+.mock-modal-sheet.extended { max-width:none; }
+.mock-modal-sheet .ex-body { min-height:calc(100vh - 265px); }
+@container (max-width:520px) {
+ .ex-body { grid-template-columns:minmax(0,1fr); min-height:180px; }
+ .ex-tree { display:none; }
+ .ex-mob-tree { display:inline-flex; }
+ .ex-tabs .ex-saved { display:none; }
+ .ex-nav .ex-guard { display:none; }
+ .ex-list .perms,.ex-list .size,.ex-list .time { display:none; }
+ .ex-list .name { width:auto; }
+ .ex-list .git { width:36px; }
+ .ex-label-grid { grid-template-columns:minmax(0,1fr); }
+ .ex-modebar button { padding:4px; font-size:10px; }
+ .ex-mode-extra { margin-left:0; }
+ .ex-dual { grid-template-columns:minmax(0,1fr); }
+ .ex-dual > :first-child { border-right:0; border-bottom:1px solid var(--wb-line); }
+ .ex-columns { font-size:9px; min-height:140px; }
+ .ex-search-scope { display:none; }
+}
+@media(max-width:960px) {
+ .mock-hero { grid-template-columns:minmax(0,1fr); }
+ .mock-hero-aside { max-width:360px; }
+ .mock-pair { grid-template-columns:minmax(0,1fr); }
+}
+@media(max-width:700px) {
+ .mock-sheet { padding:16px 10px; }
+ .mock-head h1 { font-size:19px; }
+ .mock-grid { grid-template-columns:minmax(0,1fr); gap:20px; }
+ .mock-caption { font-size:10.5px; }
+ .bc-sub,.bc-kind { display:none; }
+ .bc-hd { gap:4px; padding-left:8px; }
+ .ex-gallery-stage { min-height:228px; }
+ .ex-quick-stage { min-height:300px; padding:12px; }
+ .ex-quick { inset:8px; }
+ .ex-quick .ex-code { max-height:162px; }
+ #mock-modal { padding:8px; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" id="symbols">
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h6"/></symbol>
+<symbol id="i-code" viewBox="0 0 24 24"><path d="m8 8-4 4 4 4m8-8 4 4-4 4m-3-11-2 14"/></symbol>
+<symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="m16 3 5 5-4 1-3 6-5-5 6-3zM9 15l-6 6"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol>
+<symbol id="i-raise" viewBox="0 0 24 24"><path d="M4 3h16M12 21V7m-5 5 5-5 5 5"/></symbol>
+<symbol id="i-max" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></symbol>
+<symbol id="i-float" viewBox="0 0 24 24"><path d="M15 3h6v6m0-6L11 13M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="i-next" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="7"/><path d="m16 16 5 5"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+<symbol id="i-gallery" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="13" rx="2"/><path d="M3 21h4m3 0h4m3 0h4"/></symbol>
+<symbol id="i-split" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-5 5V5a2 2 0 0 1 2-2h15a2 2 0 0 1 2 2z"/></symbol>
+</svg>
+<div class="mock-sheet">
+<header class="mock-head"><h1>파일 목록에서, 작업 공간으로.</h1></header>
+<div class="mock-head" style="margin-top:7px"><span class="mock-pill">file-explorer · 742</span><span class="mock-pill">읽기 전용</span><span class="mock-pill">허용 루트: 프로젝트 / 워크트리</span><span class="mock-pill">카드별 브라우저 상태</span></div>
+<p class="mock-intro">현재 대시보드의 카드·파일 UI를 바탕으로 한 디자인 시안입니다. 파일 클릭 → 새 미리보기 카드, 가운데 클릭 → 배경 탭, Space → 빠른 보기. 파일명·검색·변경 이력·문서 내용은 모두 예시입니다.</p>
+<main class="mock-grid">
+<section class="mock-frame mock-wide"><p class="mock-caption"><b>01 · 상태를 가진 탐색기 카드 + 대화의 파일 탭</b>　같은 컴포넌트, 다른 루트·탭·검색·선택 상태</p><div class="mock-hero"><div id="hero"></div><aside class="mock-hero-aside"><div class="chead"><nav class="ctabs"><button>대화</button><button class="active">파일</button></nav></div><div id="narrow"></div><div class="composer"><div class="ex-drop">파일을 여기로 드래그 → 경로 참조로 첨부<span class="achip">@internal/wsdashboard/assets/files.js</span><span>대상: 현재 리드 세션 · 아직 전송하지 않음</span></div><div class="ex-composer-line"><input readonly aria-label="대화 입력 예시" placeholder="이 파일을 확인해 주세요."><button disabled aria-label="전송 예시">↑</button></div></div><p class="mock-note">경로만 첨부합니다. 파일 내용 업로드·자동 전송은 하지 않습니다.</p></aside></div></section>
+<section class="mock-frame"><p class="mock-caption"><b>02 · 파일 클릭 → 독립 카드</b>　변경 파일은 미리보기 옆에 Diff 탭</p><div id="file-card"></div></section>
+<section class="mock-frame"><p class="mock-caption"><b>03 · 아이콘 보기 / 티켓과 산출물</b>　상태 배지 + 허용 루트 안의 바로가기</p><div id="icon-card"></div></section>
+<section class="mock-frame"><p class="mock-caption"><b>04 · 갤러리 / PDF</b>　큰 미리보기와 하단 썸네일 · 전체화면 헤더 예시</p><div id="gallery-card"></div></section>
+<section class="mock-frame"><p class="mock-caption"><b>05 · 라이브 변경 추적 + 내용 검색</b>　최근 생성·수정 파일을 시간순으로 추적</p><div id="changes-card"></div></section>
+<section class="mock-frame mock-wide"><p class="mock-caption"><b>06 · 워크트리 전환 / 이중 패널 / Finder식 열 탐색</b>　허용된 두 루트만 제공 · 이 예시는 양쪽이 같은 워크트리</p><div id="split-card"></div></section>
+<section class="mock-frame"><p class="mock-caption"><b>07 · Space 빠른 보기 오버레이</b>　코드 구문 강조 · 원래 탐색 위치 유지 · Esc로 닫기</p><div class="ex-quick-stage"><div class="ex-quick-under">files.js　M<br>cards.js<br>dashboard.css　M<br>dashboard.tmpl<br>preview.js</div><div class="ex-quick"><div class="ex-quick-head"><span class="ex-live">빠른 보기</span><strong>files.js</strong><kbd>Space / Esc</kbd><button class="ibtn" aria-label="빠른 보기 닫기 예시">×</button></div><div id="quick-code"></div><div class="ex-actionrow"><button class="primary">카드로 열기 ↗</button><button>경로 복사</button><button>세션에 보내기</button></div></div></div><p class="mock-note">일회성 미리보기는 카드 탭을 늘리지 않습니다. 파일 편집 기능은 없습니다.</p></section>
+<section class="mock-frame"><p class="mock-caption"><b>08 · 워크스페이스 폴더 선택기</b>　세션 작업 폴더 추가용 별도 모드</p><div class="ex-picker"><span class="ex-tentative">잠정안 · 포함 범위 미정</span><div class="usage-heading" style="display:flex;align-items:center;gap:7px;margin:7px 0"><strong style="font-size:13px">워크스페이스 폴더 선택</strong><span class="mock-pill" style="margin-left:auto">폴더만</span></div><div class="ex-pathbox"><span>‹</span><input class="ex-path" readonly value="프로젝트 / devenv" aria-label="선택기 경로"></div><div class="ex-folder-row selected">▸ <span>agents-plugin-tool</span></div><div class="ex-folder-row">▸ <span>.worktrees/explorer-ui</span></div><div class="ex-folder-row">▸ <span>ai-docs</span></div><div class="ex-actionrow" style="padding-left:0"><button>취소</button><button class="primary" disabled>이 폴더 선택 (예시)</button></div><p class="mock-note">폴더 목록만 표시 · 파일 내용 조회 없음 · 기본 탐색기와 선택 모드 분리</p></div></section>
+</main>
+<footer class="mock-end"><p><b>상태 단위:</b> 카드 ID별 루트·내부 탭·보기·검색·선택·분할·스크롤을 브라우저에 보관하는 제안입니다. 대량 폴더는 가상화 목록을 사용합니다.</p><p><b>조작:</b> ↑↓ / ←→ 이동 · Enter 열기 · Space 빠른 보기 · 타이핑으로 이름 찾기 · 가운데 클릭으로 배경 탭 · Ctrl/Cmd+L 경로 입력.</p><p><b>확인할 점:</b> 가운데 클릭은 탐색기 내부 탭으로 열까요? 분할 검색은 활성 패널만 대상으로 할까요? 루트 밖 산출물 바로가기는 별도 허용이 필요합니다. 폴더 선택기의 포함 범위는 미정입니다.</p><p>외부 요청·실제 파일 읽기·쓰기 없음. 이름 변경·삭제 없음. 호스트 앱 열기/위치 표시는 로컬 권한이 있을 때만 제공하는 제안입니다.</p></footer>
+</div>
+<div id="mock-modal" hidden role="dialog" aria-modal="true" aria-label="파일 탐색기 전체 화면"><div class="mock-modal-sheet"><div class="ex-sheetbar"><strong id="modal-title">파일 탐색기 · 전체 화면</strong><span id="width-label">최대 1920px</span><button class="ex-extend" id="extend-width" aria-pressed="false">가로 확장</button><button class="ex-extend" id="close-modal">돌아가기 · Esc</button></div><div id="modal-body"></div></div></div>
+<script>
+(function () {
+ 'use strict';
+ const ic = n => `<svg class="li" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+ const btn = (n,t,cls='',data='') => `<button class="ibtn ${cls}" title="${t}" aria-label="${t}" ${data}>${ic(n)}</button>`;
+ const card = (title,body,opt={}) => `<article class="bcard" data-fixture-card><div class="bc-in"><div class="bc-hd"><span class="bc-ic">${ic(opt.icon || 'folder')}</span><span class="bc-nm">${title}</span><span class="bc-sub">${opt.sub || ''}</span><span class="bc-kind">읽기 전용</span><span class="bc-acts">${btn('pin','고정','bc-pin')}${btn('down','접기','bc-fold')}${btn('raise','맨 위로','bc-raise')}${btn('float','띄우기','bc-float','data-open-float')}${btn('max','전체 화면','bc-max','data-open-max')}${btn('x','닫기','bc-close')}</span></div><div class="bc-body">${body}</div><div class="bc-grip"></div></div></article>`;
+ const tree = () => `<aside class="ex-tree"><h4>즐겨찾기</h4><div>${ic('folder')}프로젝트 루트</div><div>${ic('image')}목업 / 742 ↗</div><div>${ic('file')}리뷰 / 742 ↗</div><div>◷ 최근 파일</div><h4>폴더</h4><div>⌄ internal</div><div class="indent">⌄ wsdashboard</div><div class="chosen indent">${ic('folder')}assets</div><div>▸ ai-docs</div><div>▸ .worktrees</div></aside>`;
+ const nav = (path,worktree=false) => `<div class="ex-nav"><select class="ex-root" aria-label="허용 루트 전환"><option ${!worktree?'selected':''}>프로젝트 · agents-plugin-tool</option><option ${worktree?'selected':''}>워크트리 · explorer-ui</option></select><span class="ex-guard">${ic('lock')}허용 루트</span>${btn('back','뒤로')}${btn('next','앞으로')}${btn('up','상위 폴더')}<label class="ex-pathbox" title="클릭 또는 Ctrl/Cmd+L로 경로 입력"><input class="ex-path" aria-label="루트 안의 경로" value="${path}"><span style="font-size:10px;color:var(--wb-muted-fg)">⌘L</span></label></div>`;
+ const search = (query='',content=false,scope='이 창') => `<div class="ex-controls"><div class="ex-search">${ic('search')}<input value="${query}" aria-label="${scope} 검색" placeholder="이 창에서 검색"><span class="ex-search-scope">${scope}</span><span class="fseg"><button class="${!content?'active':''}" data-search-mode="name">이름</button><button class="${content?'active':''}" data-search-mode="content">내용</button></span></div></div>`;
+ const modebar = (mode,split=false,columns=false) => `<div class="ex-modebar"><span class="ex-mob-tree"><button>${ic('folder')}폴더</button></span>${[['details','list','자세히'],['simple','list','간단히'],['icons','grid','아이콘'],['gallery','gallery','갤러리']].map(([key,icon,label])=>`<button class="${mode===key?'active':''}" data-view="${key}">${ic(icon)}${label}</button>`).join('')}<span class="ex-mode-extra"><button class="${columns?'active':''}">${ic('split')}열 보기</button><button class="${split?'active':''}">${ic('split')}분할</button></span></div>`;
+ const table = (short=false) => `<table class="ex-list"><thead><tr><th class="name">이름 ↑</th><th class="git">Git</th><th class="perms">모드</th><th class="size">크기</th><th class="time">수정</th></tr></thead><tbody>${[
+ ['files.js','M','-rw-r--r--','28 KB','14:42','code'],['cards.js','','-rw-r--r--','42 KB','14:30','code'],['dashboard.css','M','-rw-r--r--','102 KB','14:41','code'],['dashboard.tmpl','','-rw-r--r--','56 KB','13:20','file'],['explorer_test.go','A','-rw-r--r--','4 KB','14:40','code'],['lucide/','','drwxr-xr-x','—','11:00','folder'],['preview.js','','-rw-r--r--','31 KB','12:58','code'],['usage.js','','-rw-r--r--','7 KB','12:30','code']
+ ].slice(0,short?4:8).map(([n,g,p,s,t,k],i)=>`<tr class="${i===0?'selected':''}" ${k!=='folder'?'data-open-file tabindex="0"':''}><td class="filename" title="${n}">${ic(k)}${n}</td><td>${g?`<span class="gmk ${g==='A'?'add':''}">${g}</span>`:''}</td><td class="perms">${p}</td><td class="size">${s}</td><td class="time">${t}</td></tr>`).join('')}</tbody></table>`;
+ const simple = () => `<div class="ex-label-grid">${['dashboard.tmpl','page.tmpl','dashboard.css','files.js','cards.js','preview.js'].map((n,i)=>`<div class="file ${i===0?'selected':''}" data-open-file tabindex="0">${ic(n.endsWith('tmpl')?'file':'code')}<span>${n}</span>${n==='files.js'?'<span class="gmk">M</span>':''}</div>`).join('')}</div>`;
+ const icons = () => `<div class="ex-icons">${[
+ ['file','261115-file-explorer.md','ready'],['file','261115-keyboard-nav.md','todo'],['file','261115-workspace-picker.md','idea'],['folder','mockups / 742',''],['folder','reviews / 742',''],['image','mockup-1280.png','']
+ ].map(([kind,n,status],i)=>`<div class="ex-icon-item ${i===0?'selected':''}" data-open-file tabindex="0">${ic(kind)}<div>${n}</div>${status?`<span class="ex-ticket ${status}">${status}</span>`:''}</div>`).join('')}</div>`;
+ const pdf = () => `<div class="ex-pdf"><span>WS / DESIGN NOTES</span><h4>File explorer<br>as a workspace</h4><p>읽기 전용 · 카드별 상태 · 재사용</p><div class="pdf-diagram"><span>폴더<br>트리</span><span>파일<br>목록</span><span>미리<br>보기</span></div><div class="pdf-bar"></div><div class="pdf-bar" style="width:100%"></div><div class="pdf-bar" style="width:65%"></div><p>742 · 탐색기 설계 가이드</p></div>`;
+ const gallery = () => `<div class="ex-gallery"><div class="ex-gallery-stage">${pdf()}</div><div class="ex-pdf-tools"><span>explorer-guide.pdf</span><span>1 / 6</span><span>−　100%　+</span></div><div class="ex-thumbs"><div class="ex-thumb selected">PDF · 1</div><div class="ex-thumb">${ic('image')}</div><div class="ex-thumb">${ic('image')}</div><div class="ex-thumb">${ic('code')}</div></div></div>`;
+ const views = {details:table,simple,icons,gallery};
+ const explorer = (o={}) => `<div class="explorer ${o.narrow?'ex-narrow':''}" data-explorer="${o.id || 'example'}"><div class="ex-tabs"><button class="active">${ic('folder')}소스 ×</button><button>${ic('image')}산출물 ×</button><span class="ex-saved">카드별 상태 · 브라우저 보관</span></div>${nav(o.path || 'internal / wsdashboard / assets',o.worktree)}${search(o.query || '',false,o.narrow?'대화 열':'이 카드')}${modebar(o.mode || 'details')}<div class="ex-body">${tree()}<div class="ex-content" data-view-content>${o.body || views[o.mode || 'details']()}</div></div><div class="ex-toggles"><label><input type="checkbox">숨김 파일</label><label><input type="checkbox">.gitignore 항목 포함</label><span style="margin-left:auto">선택: ${o.narrow?'dashboard.tmpl':'files.js'}</span></div><div class="ex-status"><span>${o.query?'이름 검색 · 2개 결과':'8개 항목'}</span><span>읽기 전용</span><span class="push">Space 빠른 보기</span></div></div>`;
+ const actions = () => `<div class="ex-actionrow"><button class="primary">${ic('chat')}세션에 보내기</button><button>경로 복사</button><button>호스트 앱에서 열기 ↗</button><button>호스트에서 위치 표시</button></div>`;
+ document.getElementById('hero').innerHTML = card('파일 탐색기',explorer({id:'board-A'}),{sub:'탐색기 A'});
+ document.getElementById('narrow').innerHTML = `<div class="bc-in" style="border-radius:0 0 12px 12px">${explorer({id:'conversation',narrow:true,worktree:true,mode:'simple',query:'.tmpl',body:`<div style="font-size:10px;color:var(--wb-muted-fg);margin-bottom:7px">이름 검색 · 이 창의 루트 · 2개 결과</div><div class="ex-label-grid"><div class="file selected" data-open-file>${ic('file')}dashboard.tmpl</div><div class="file" data-open-file>${ic('file')}page.tmpl</div></div>`})}</div>`;
+ const diff = `<div class="ex-subtabs"><button data-preview-tab="code">미리보기</button><button class="active" data-preview-tab="diff">Diff <span class="gmk">M</span></button><span style="margin-left:auto;font-size:9px;color:var(--wb-muted-fg);align-self:center">작업 트리 ↔ HEAD</span></div><div data-preview-content><div class="ex-diff"><div class="context">@@ -14,4 +14,7 @@</div><div class="context">  function openFile(path) {</div><div class="minus">−   previewSlot.open(path);</div><div class="plus">+   cards.open('file-preview', {</div><div class="plus">+     root: explorer.root, path</div><div class="plus">+   });</div><div class="context">  }</div><div class="context">  // 변경 예시 · 실제 패치 아님</div></div></div>${actions()}<div class="ex-status"><span>internal/wsdashboard/assets/files.js</span><span>JavaScript · UTF-8 · 읽기 전용</span></div>`;
+ document.getElementById('file-card').innerHTML = card('files.js',diff,{icon:'code',sub:'파일 미리보기'});
+ document.getElementById('icon-card').innerHTML = card('티켓 · 산출물',explorer({id:'artifacts',path:'ai-docs / tickets',mode:'icons'}));
+ const galleryHeader = `<div class="ex-sheetbar"><strong>전체 화면 상태 · 축소 예시</strong><span>너비 상한 1920px</span><button class="ex-extend" data-open-max>가로 확장 ↔</button><span>Esc 돌아가기</span></div>`;
+ document.getElementById('gallery-card').innerHTML = card('갤러리 · explorer-guide.pdf',`${galleryHeader}<div class="explorer">${nav('ai-docs / mockups / 742')}${search('',false)}${modebar('gallery')}<div data-view-content>${gallery()}</div>${actions()}</div>`,{icon:'gallery'});
+ const timeline = `<div class="ex-timeline"><div class="ex-pane-title" style="padding:0 0 5px"><b>최근 변경 · 최신순</b><span class="ex-live">라이브</span></div>${[
+ ['14:42','files.js','MAIN · 수정','M'],['14:41','dashboard.css','MAIN · 수정','M'],['14:40','explorer_test.go','EXEC 1 · 생성','A'],['14:38','742-preview.md','MAIN · 생성','A']
+ ].map(([t,n,s,g])=>`<div class="ex-change"><time>${t}</time><div><b>${n}</b><small>${s}</small></div><span class="gmk ${g==='A'?'add':''}">${g}</span></div>`).join('')}</div>`;
+ const results = `<div class="ex-search-results"><div class="ex-pane-title" style="padding:0 0 6px">내용 검색 · 2개 파일 / 3개 일치</div><div class="ex-hit"><b>assets/files.js <span class="gmk">M</span></b><pre>  2 // window.<mark>WsFiles</mark>
+825 window.<mark>WsFiles</mark> = { mount, shown };</pre></div><div class="ex-hit"><b>assets/dashboard.js</b><pre>291 window.<mark>WsFiles</mark>.shown();</pre></div><p class="mock-note">결과 클릭 → 해당 줄의 파일 카드</p></div>`;
+ document.getElementById('changes-card').innerHTML = card('변경 추적',`<div class="explorer">${nav('internal / wsdashboard')}${search('WsFiles',true)}<div class="ex-dual"><div>${timeline}</div><div>${results}</div></div><div class="ex-status"><span>세션 필터: 전체 ▾</span><span>변경 파일과 관측 시각 표시</span></div></div>`);
+ const columns = `<div class="ex-columns"><div class="ex-column"><div class="selected">internal ›</div><div>ai-docs ›</div><div>assets ›</div></div><div class="ex-column"><div class="selected">wsdashboard ›</div><div>wswhiteboard</div><div>wslive</div></div><div class="ex-column"><div class="selected">assets ›</div><div>files.go</div><div>render.go</div></div></div>`;
+ document.getElementById('split-card').innerHTML = card('파일 탐색기 · 분할',`<div class="explorer"><div class="ex-tabs"><button class="active">소스 ×</button><button>산출물 ×</button><span class="ex-saved">같은 카드 · 패널별 위치 유지</span></div>${nav('internal / wsdashboard / assets',true)}${search('',false,'활성 패널')}${modebar('simple',true,true)}<div class="ex-roots"><span>루트 선택:</span><button class="ex-root-choice">프로젝트 · agents-plugin-tool</button><button class="ex-root-choice active">✓ 워크트리 · explorer-ui</button><span class="ex-guard">${ic('lock')}그 외 경로 접근 불가</span></div><div class="ex-dual"><div><div class="ex-pane-title"><b>왼쪽 · 열 탐색</b><span>internal / wsdashboard</span></div>${columns}</div><div><div class="ex-pane-title"><b>오른쪽 · 산출물</b><span>ai-docs / mockups / 742</span></div><div class="ex-content"><div class="ex-label-grid"><div class="file selected">${ic('code')}mockup.html</div><div class="file">${ic('image')}mockup-1280.png</div><div class="file">${ic('image')}mockup-360.png</div><div class="file">${ic('file')}review.md</div></div></div></div></div><div class="mock-keyboard"><kbd>↑↓</kbd> 선택　<kbd>←→</kbd> 열 이동　<kbd>Enter</kbd> 카드로 열기　<kbd>Space</kbd> 빠른 보기　<kbd>f i l</kbd> 이름 바로 찾기　·　대량 폴더: 가상화 목록</div><div class="ex-status"><span>분할 검색: 활성 패널 (제안)</span><span>편집·이동·삭제 없음</span></div></div>`);
+ const code = `<pre class="ex-code"><span class="ln">12</span><span class="syn-comment">// 읽기 전용 카드로 열기 (예시)</span>
+<span class="ln">13</span><span class="syn-key">function</span> <span class="syn-fn">openFile</span>(path) {
+<span class="ln">14</span>  <span class="syn-key">return</span> cards.<span class="syn-fn">open</span>(<span class="syn-str">'file-preview'</span>, {
+<span class="ln">15</span>    root: explorer.root,
+<span class="ln">16</span>    path,
+<span class="ln">17</span>    readOnly: <span class="syn-key">true</span>
+<span class="ln">18</span>  });
+<span class="ln">19</span>}</pre>`;
+ document.getElementById('quick-code').innerHTML = code;
+ const modal = document.getElementById('mock-modal'), sheet=modal.querySelector('.mock-modal-sheet');
+ let origin=null;
+ function openModal(target,floating=false) {
+  origin=target;
+  const cardEl=target.closest('[data-fixture-card]');
+  document.getElementById('modal-body').innerHTML=cardEl ? cardEl.outerHTML : card('파일 탐색기',explorer({id:'fullscreen'}));
+  document.getElementById('modal-title').textContent=floating ? '파일 탐색기 · 띄운 카드 (시안)' : '파일 탐색기 · 전체 화면';
+  sheet.classList.remove('extended');
+  sheet.style.maxWidth=floating ? '1100px' : '';
+  document.getElementById('width-label').textContent=floating ? '띄운 창 · 카드 상태 유지' : '최대 1920px';
+  document.getElementById('extend-width').setAttribute('aria-pressed','false');
+  document.getElementById('extend-width').textContent='가로 확장';
+  modal.hidden=false;
+  document.getElementById('close-modal').focus();
+ }
+ function closeModal() { modal.hidden=true; if(origin) origin.focus({preventScroll:true}); }
+ document.getElementById('close-modal').onclick=closeModal;
+ document.getElementById('extend-width').onclick=function(){ const on=sheet.classList.toggle('extended'); sheet.style.maxWidth=''; this.setAttribute('aria-pressed',String(on)); this.textContent=on?'1920px로 제한':'가로 확장'; document.getElementById('width-label').textContent=on?'현재 화면 너비 전체':'최대 1920px'; };
+ document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!modal.hidden) closeModal(); });
+ document.addEventListener('click',e=>{
+  const m=e.target.closest('[data-open-max],[data-open-float]');
+  if(m&&!m.closest('#mock-modal')) { openModal(m,m.hasAttribute('data-open-float')); return; }
+  const b=e.target.closest('[data-view]');
+  if(b){const exp=b.closest('.explorer');const content=exp&&exp.querySelector('[data-view-content]');if(content){content.innerHTML=views[b.dataset.view]();b.closest('.ex-modebar').querySelectorAll('[data-view]').forEach(x=>x.classList.toggle('active',x===b));}return;}
+  const st=e.target.closest('[data-search-mode]');
+  if(st){st.parentElement.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===st));return;}
+  const pt=e.target.closest('[data-preview-tab]');
+  if(pt){const parent=pt.closest('.bc-body');parent.querySelector('[data-preview-content]').innerHTML=pt.dataset.previewTab==='code'?code:diff.match(/<div data-preview-content>([\s\S]*?)<\/div>\s*<div class="ex-actionrow">/)[1];parent.querySelectorAll('[data-preview-tab]').forEach(x=>x.classList.toggle('active',x===pt));return;}
+  const file=e.target.closest('[data-open-file]');
+  if(file){document.getElementById('file-card').scrollIntoView({behavior:'smooth',block:'center'});}
+ });
+})();
+</script>
+</body>
+</html>

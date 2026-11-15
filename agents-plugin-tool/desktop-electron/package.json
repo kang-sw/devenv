@@ -1,0 +1,1 @@
+{"name":"werkschaft-desktop-electron","version":"0.1.0","private":true,"main":"main.js","devDependencies":{"@electron/packager":"20.3.0","electron":"44.11.3"}}

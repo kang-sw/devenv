@@ -16,8 +16,8 @@ import (
 // leadSessions is a session source with no lead sessions.
 type leadSessions struct{}
 
-func (leadSessions) ReadSession(wsdashboard.Registration) (wsdashboard.SessionData, bool) {
-	return wsdashboard.SessionData{}, false
+func (leadSessions) ReadSession(wsdashboard.Registration) (wsdashboard.SessionData, bool, error) {
+	return wsdashboard.SessionData{}, false, nil
 }
 
 // daemonHarness serves a fresh runner from a real dashboard daemon.

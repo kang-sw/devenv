@@ -98,8 +98,25 @@ To investigate:
 
 ## Topic 5: desktop shell
 
-Deferred (user, 2026-11-10, (18) note, (19)): not a target of this epic;
-reviewed only after the browser dashboard is complete.
+Historical direction (user, 2026-11-10, (18) note, (19)): defer shell review
+until browser completion. Superseded by (493)=b on 2026-11-13 and MAIN's
+2026-11-14 15:11:55 and 15:14:52 start-now relays, which also supersede the
+after-release scheduling assumption (701). Build and dogfood the thin Tauri
+shell in parallel under `261113-feat-werkschaft-thin-tauri-shell`.
+
+Its independent Phase 1a is a macOS window loading the existing exact
+`http://127.0.0.1:<port>/` URL after endpoint discovery (including cache
+override) and `/health`, with retry/error UI, external browser links, and
+close leaving the daemon running. It adds no credential or daemon API and
+performs no daemon start/stop/swap. Single-instance focus follows the first
+window; broader WKWebView acceptance, safe missing-daemon start, Windows,
+zip, signing, and updater are later slices, not first-window blockers.
+Owner (798)=a (MAIN relay 2026-11-14 15:17:49) confirms a later gated
+JS-memory scoped grant when actual new shell-only HTTP authority is needed,
+superseding (702)=a for that need. The thin-shell ticket records the exact
+trusted-origin/window bootstrap ACL, short life and exit/crash revocation,
+credential/authority exclusions, and retained browser/content guards. This
+does not authorize a credential or daemon route change in Phase 1a.
 
 To investigate:
 - Tauri against Electron, or another option, for wrapping the existing web
@@ -243,8 +260,14 @@ To investigate:
 - File browsing is read-only with HTML, image, and video preview; editing is
   out of scope; HTML and SVG render isolated ((04) a, (07)); child
   `261110-feat-ws-dashboard-file-preview`.
-- The desktop shell is only reviewed after the browser dashboard is complete
-  ((18), (19)). Orca is not a design target ((24)).
+- Historical: review the desktop shell after browser completion ((18),
+  (19)). Superseded by (493)=b and MAIN's 2026-11-14 start-now direction:
+  `261113-feat-werkschaft-thin-tauri-shell` owns the independent attach-only
+  macOS first window now; Windows, packaging, signing, and updater do not
+  gate it. Owner (798)=a confirms the later scoped grant only for an actual
+  new shell-only authority need, superseding (702)=a then; its controls and
+  future verification belong to the thin-shell ticket, not Phase 1a.
+  Orca is not a design target ((24)).
 
 ### Proposals
 - Keep CLI-created terminal sessions first-class next to daemon-hosted ones,

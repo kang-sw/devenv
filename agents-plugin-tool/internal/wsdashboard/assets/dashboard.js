@@ -257,6 +257,9 @@
   function atBottom() { return convo.scrollTop + convo.clientHeight >= convo.scrollHeight - 24; }
   function pinned() { if (visible(convo)) stick = atBottom(); return stick; }
   function pinConvo() { if (stick && visible(convo)) convo.scrollTop = convo.scrollHeight; }
+  // An accepted message starts a new reply, so sending re-arms bottom follow
+  // even when the user had scrolled up. A later user scroll still cancels it.
+  function followConvo() { stick = true; pinConvo(); }
   if (convo) {
     convo.addEventListener("scroll", function () { if (visible(convo)) stick = atBottom(); });
     // A resize (another pane grew, the window changed, the tab came back)
@@ -264,7 +267,8 @@
     if (window.ResizeObserver) new ResizeObserver(pinConvo).observe(convo);
   }
 
-  // --- layout and tabs (session page with a live adapter only) -------------
+  // --- layout and tabs (live or saved session conversation) ----------------
+  // A saved-history page shares tab/scroll handling, not live controls.
   var grid = $("grid"), gmenu = $("gmenu"), live = !!$("tabbar");
   var LAYOUT_KEY = "ws.dashboard.layout";
   // TAB maps a region to the tab that shows it; PANE names the element whose
@@ -278,7 +282,7 @@
   // shows.
   var TAB = { tree: "convo", entries: "convo", convlive: "convo", board: "board" };
   var PANE = { convo: "convo", board: "bcol" };
-  var fpane = $("files"), chead = $("chead"), filesSeen = false;
+  var fpane = $("files"), chead = $("chead"), filesSeen = false, filesTab = null, filesSheet = null;
   // syncChead moves the conversation's counts from the entries region's
   // own title bar, which a live page hides, into the panel's header; it
   // runs on load and after each entries swap.
@@ -304,9 +308,9 @@
     // The Files pane hears each time it comes into view (a tab, a layout,
     // or a resize showed it) and each time it leaves.
     var fs = visible(fpane);
-    if (fs !== filesSeen && window.WsFiles) {
-      if (fs) window.WsFiles.shown();
-      else window.WsFiles.hidden();
+    if (fs !== filesSeen && filesTab) {
+      if (fs) filesTab.shown();
+      else filesTab.hidden();
     }
     filesSeen = fs;
   }
@@ -638,9 +642,9 @@
       // The notes came back with their markers (writeAnswers); their image
       // rows go back after them, and a note the swap took drops its images.
       if (ctext) { syncMarkers(); renderImgs(); }
-      // A mention button over a body frame the swap removed has nothing left
-      // to add.
-      if (mpend && mpend.frame && !doc.contains(mpend.frame)) hideMention();
+      // An input-held selection is already a value snapshot, even when its
+      // source frame leaves the board during an update.
+      if (mpend && !mpend.locked && mpend.frame && !doc.contains(mpend.frame)) hideMention();
     }
     if (board || name === "convlive") applySent(board);
     if (name === "panels") drawerSync();
@@ -707,6 +711,34 @@
   // below 2200px the column takes the rail's place and the rail overlays.
   // A board swap waits while a card or topic is dragged (boardDragHeld), and
   // lands at the drag's end.
+  // Two owners, not two views onto one explorer. Keep the tab's existing
+  // storage keys; the toolbar uses the same records in its own namespace.
+  if (live && fpane && window.WsFiles) {
+    function createFiles(node, rootSlot, toolbar) {
+      return window.WsFiles.create(node, {
+        rid: rid, post: post, toast: toast, copy: copyText, rootSlot: rootSlot,
+        load: toolbar ? function (k) { return load("ws.dashboard.toolbar." + k); } : load,
+        save: toolbar ? function (k, v) { save("ws.dashboard.toolbar." + k, v); } : save,
+        local: function () { return root.hasAttribute("data-sysopen"); }
+      });
+    }
+    filesTab = createFiles(fpane, chead && chead.querySelector(".fsum"), false);
+    var sheet = doc.createElement("section");
+    sheet.id = "toolbar-files";
+    sheet.className = "fpane";
+    sheet.hidden = true;
+    sheet.setAttribute("aria-label", fpane.getAttribute("aria-label"));
+    doc.body.appendChild(sheet);
+    var sheetInstance = null;
+    filesSheet = {
+      el: sheet,
+      shown: function () {
+        if (!sheetInstance) sheetInstance = createFiles(sheet, null, true);
+        sheetInstance.shown();
+      },
+      hidden: function () { if (sheetInstance) sheetInstance.hidden(); }
+    };
+  }
   var cardBoard = mode !== "index" && window.WsCards ? region("board") : null;
   var PIN_WIDE = window.matchMedia ? window.matchMedia("(min-width: 1600px)") : null, boardDragHeld = null, boardOverviewHeld = null;
   function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }
@@ -731,8 +763,9 @@
       key: "ws.dashboard.cards." + rid, load: load, save: save,
       toolbar: {
         overview: function () { if (window.WsOverview) window.WsOverview.toggle(); },
+        filter: function (run) { if (window.WsOverview) window.WsOverview.filter(run); else run(); },
         search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } },
-        files: fpane && window.WsFiles ? revealPanes : null
+        files: filesSheet
       },
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       column: bpcol, shows: pinColumnFits,
@@ -787,14 +820,6 @@
     if (PIN_WIDE && PIN_WIDE.addEventListener) PIN_WIDE.addEventListener("change", function () { window.WsCards.relayout(); });
   }
   boardBoxes().forEach(watchBoard);
-  // --- the Files pane (files.js): mounted once, loaded when first shown -------
-  if (live && fpane && window.WsFiles) {
-    window.WsFiles.mount(fpane, {
-      rid: rid, load: load, save: save, post: post, toast: toast, copy: copyText,
-      rootSlot: chead && chead.querySelector(".fsum"),
-      local: function () { return root.hasAttribute("data-sysopen"); }
-    });
-  }
   // morphBoard applies a board region event to el and returns the element
   // nodes it inserted, in order, for the caller to prepare.
   function morphBoard(el, html) {
@@ -1803,9 +1828,9 @@
   // marker drops the chip, removing the chip deletes the marker. A dropped
   // image waits in imgTrash, so an undo that brings its marker back brings
   // the chip back too. Numbers are never reused or rewritten within a draft
-  // (rewriting text the user is editing shakes it); the server renumbers a
-  // send that merges into a held message, so the page never numbers across
-  // sends.
+  // (rewriting text the user is editing shakes it). Each send is its own
+  // held message, numbered as the draft numbered it; a fresh draft numbers
+  // from 1 again.
   //
   // The board's note pens (item notes and topic notes) take pasted images
   // too: one image list and one number sequence span the composer text and
@@ -2232,6 +2257,7 @@
     var sel = cmdSel, fixed = typeof sel.args === "string";
     if (!fixed && imgs.length) { noteWarn(wsT("js.cmd.images")); return; }
     var raw = ctext.value, args = fixed ? sel.args : sendText().trim();
+    followConvo();
     sending = true;
     post("message", { command: sel.name, args: args }, function (ok, res) {
       sending = false;
@@ -2263,7 +2289,7 @@
   // lists after its answer block (wsinbox mentions). A topic body is a
   // sandboxed frame whose selection this page cannot read, so the frame
   // reports it ({wbDoc: "sel"}, doc-frame.js) and the button stands over it.
-  var mbtn = null, mpend = null, mraf = 0;
+  var mbtn = null, mnote = null, mpend = null, mraf = 0, mcomposing = false;
   // mentionOf is the mention a selection makes: the topic card's key, the
   // item ID when both ends lie in one item (or trusted system-event
   // provenance), the optional immutable entry locator, and selected text.
@@ -2348,28 +2374,72 @@
   }
   function hideMention() {
     mpend = null;
+    mcomposing = false;
+    if (mnote) mnote.value = "";
     if (mbtn) mbtn.hidden = true;
   }
-  // placeMention shows the button for p by its selection's end, kept on
-  // screen; a frame's selection stands where its frame stands now.
+  // Once the input takes focus, live selection reports may no longer replace
+  // this bundle. The copied mentions and owning session outlive DOM updates.
+  function lockMention() { if (mpend) mpend.locked = true; }
+  // This context is ordinary, editable user text, not wire metadata. Include
+  // the excerpts as well as their locators: ordinal references become wrong
+  // after chip removal, another attachment, or an inbox merge.
+  function selectionNote(ms, note) {
+    note = (note || "").trim();
+    if (!note) return "";
+    return wsT("js.wbmention.context") + "\n" + ms.map(function (m) {
+      return "[" + m.topic + "]" + (m.id ? " (" + m.id + ")" : "") + (m.entry ? " " + m.entry : "") + "\n> " + m.text.replace(/\r?\n/g, "\n> ");
+    }).join("\n\n") + "\n\n" + wsT("js.wbmention.note") + "\n" + note;
+  }
+  // placeMention shows a snapshot beside its selection. An input-held bundle
+  // keeps its last screen position if its source disappears.
   function placeMention(p) {
+    if (mpend && mpend.locked && p !== mpend) return;
     var x = p.x, y = p.y;
     if (p.frame) {
-      if (!doc.contains(p.frame)) { hideMention(); return; }
-      var fr = p.frame.getBoundingClientRect();
-      x += fr.left; y += fr.top;
+      if (doc.contains(p.frame)) {
+        var fr = p.frame.getBoundingClientRect();
+        x += fr.left; y += fr.top;
+      } else if (p.locked) { x = p.screenX; y = p.screenY; }
+      else { hideMention(); return; }
     }
     if (!mbtn) {
-      mbtn = doc.createElement("button");
-      mbtn.type = "button";
+      mbtn = doc.createElement("div");
       mbtn.className = "wbmention";
-      mbtn.setAttribute("data-wbmention", "");
-      mbtn.textContent = wsT("js.wbmention.add");
-      mbtn.title = wsT("js.wbmention.add.title");
-      // Pressing the button must not move the selection it adds.
-      mbtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+      mbtn.setAttribute("data-wbmention-pop", "");
+      mbtn.setAttribute("role", "group");
+      mbtn.setAttribute("aria-label", wsT("js.wbmention.add.title"));
+      mnote = doc.createElement("textarea");
+      mnote.rows = 2;
+      mnote.className = "wbmention-note";
+      mnote.placeholder = wsT("js.wbmention.input");
+      mnote.setAttribute("aria-label", wsT("js.wbmention.input"));
+      var add = doc.createElement("button");
+      add.type = "button";
+      add.setAttribute("data-wbmention", "");
+      add.innerHTML = '<svg class="i" viewBox="0 0 16 16" aria-hidden="true"><path d="M8.5 2.5H2.5v6l5.3 5.3a1 1 0 0 0 1.4 0l4.6-4.6a1 1 0 0 0 0-1.4Z"/><circle cx="5.5" cy="5.5" r=".8"/></svg>';
+      add.appendChild(doc.createTextNode(wsT("js.wbmention.add")));
+      add.title = wsT("js.wbmention.add.title");
+      mbtn.appendChild(mnote);
+      mbtn.appendChild(add);
+      // Capture before focus collapses the host or sandbox selection. Only
+      // the action prevents focus; the input must remain normally editable.
+      mbtn.addEventListener("mousedown", function (e) { lockMention(); if (e.target === add) e.preventDefault(); });
+      mbtn.addEventListener("focusin", lockMention);
+      mnote.addEventListener("compositionstart", function () { mcomposing = true; });
+      mnote.addEventListener("compositionend", function () { mcomposing = false; });
+      mbtn.addEventListener("keydown", function (e) {
+        if (e.isComposing || e.keyCode === 229 || mcomposing) { if (e.target === add) e.preventDefault(); e.stopPropagation(); return; }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideMention(); ctext.focus(); }
+        // Enter edits the note; attachment always uses the explicit action.
+      });
       doc.body.appendChild(mbtn);
     }
+    if (p !== mpend) {
+      p = Object.assign({}, p, { ms: validMentions(p.ms || [p.m]), rid: rid });
+      mnote.value = "";
+    }
+    p.screenX = x; p.screenY = y;
     mpend = p;
     mbtn.hidden = false;
     var w = mbtn.offsetWidth, h = mbtn.offsetHeight;
@@ -2378,22 +2448,30 @@
   }
   function syncHostMention() {
     mraf = 0;
+    if (mpend && mpend.locked) return;
     var p = hostMention();
     if (p) placeMention(p);
     else if (mpend && !mpend.frame) hideMention();
   }
   function addMention() {
     var p = mpend;
+    if (!p || p.rid !== rid || mcomposing) return;
+    var text = selectionNote(p.ms, mnote.value);
     hideMention();
-    if (!p) return;
-    bmentions = bmentions.concat(p.ms || [p.m]);
-    if (p.frame) postDoc(p.frame, { wbDoc: "unsel" });
+    bmentions = bmentions.concat(p.ms);
+    if (p.frame) { if (doc.contains(p.frame)) postDoc(p.frame, { wbDoc: "unsel" }); }
     else if (window.getSelection) window.getSelection().removeAllRanges();
+    // Append rather than replace the composer's selected text. The context
+    // stays readable after ordinary edits, restoration, and merged sends.
+    if (text) editText(ctext.value.length, ctext.value.length, (ctext.value ? "\n\n" : "") + text);
     renderChips();
+    queueDraft();
+    ctext.focus();
   }
   // frameMention takes a body frame's selection report: its text and where
   // its end stands inside the frame.
   function frameMention(f, text, x, y) {
+    if (mpend && mpend.locked) return;
     var t = f.closest("section.topic[data-topic]"), entry = f.getAttribute("data-entry") || "";
     var item = f.getAttribute("data-entry-item") || "", parentEntry = entryAt(f.parentNode);
     if (!item && parentEntry) item = parentEntry.getAttribute("data-entry-item") || "";
@@ -2411,13 +2489,16 @@
     });
     // A press anywhere on this page leaves a frame's selection behind.
     doc.addEventListener("mousedown", function (e) {
-      if (mpend && mpend.frame && !(e.target.closest && e.target.closest("[data-wbmention]"))) hideMention();
+      if (mpend && !mpend.locked && mpend.frame && !(e.target.closest && e.target.closest("[data-wbmention-pop]"))) hideMention();
     }, true);
+    doc.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229 && !mcomposing && mpend) hideMention();
+    });
     // The button follows its selection when the board scrolls or the
     // window resizes.
     var follow = function () {
       if (!mpend) return;
-      if (mpend.frame) { placeMention(mpend); return; }
+      if (mpend.locked || mpend.frame) { placeMention(mpend); return; }
       var p = hostMention();
       if (p) placeMention(p); else hideMention();
     };
@@ -2450,6 +2531,7 @@
       body.refs = refs.map(function (p) { return p.ref; });
       body.refNums = refs.map(function (p) { return p.n; });
     }
+    followConvo();
     sending = true;
     post("message", body, function (ok, res) {
       sending = false;
@@ -2501,13 +2583,15 @@
     });
   }
   // restoreHeld puts held messages a cancel or an interrupt took back into
-  // the composer, oldest first, ahead of the draft: their texts joined as
+  // the composer, in the order given (an interrupt's queue order: steered
+  // first, then the rest, oldest first), ahead of the draft: their texts joined as
   // paragraphs, their answer chips, their mentions and web picks, their topic notes back
   // on the board's topics (restoreTopics), and their images as chips that
   // reference the written files, with their markers in the returned text
   // and notes. Each message's numbers move above the highest the draft and
   // the messages before it use, the markers in its text, chip notes, and
-  // topic notes with them, as the server numbers a merge. An image no
+  // topic notes with them, so the restored draft never names a number
+  // twice. An image no
   // restored text names (a message held before images were numbered, or a
   // note a newer one replaced) gets a marker in the composer, so the next
   // edit does not drop it.
@@ -2535,10 +2619,12 @@
     var lead = ctext.value.length - ctext.value.replace(/^\s+/, "").length;
     Object.keys(allNums()).forEach(function (k) { top = Math.max(top, +k); });
     imgs.forEach(function (p) { top = Math.max(top, p.n); });
-    // A later message's answer replaces an earlier one's, and a chip
-    // attached since keeps its newer answer.
-    var got = {}, order = [];
+    // The newest send's answer wins (its sentAt; a later message on a tie),
+    // whatever the list's queue order, and a chip attached since keeps its
+    // newer answer.
+    var got = {}, gotAt = {}, order = [];
     list.forEach(function (res) {
+      var at = +res.sentAt || 0;
       var names = res.images || [], nums = res.nums || [], renum = {}, offset = top;
       names.forEach(function (name, i) {
         var n = nums[i] || i + 1, have = imgs.filter(function (p) { return p.ref === name; })[0];
@@ -2553,7 +2639,9 @@
         Object.keys(c).forEach(function (k) { o[k] = c[k]; });
         if (c.note) o.note = rn(c.note);
         if (!got[c.id]) order.push(c.id);
+        else if (at < gotAt[c.id]) return;
         got[c.id] = o;
+        gotAt[c.id] = at;
       });
       var stray = restoreTopics((res.topics || []).map(function (tn) { return { topic: tn.topic, note: rn(tn.note) }; }));
       if (stray.length) text += (text ? "\n\n" : "") + stray.join("\n");
@@ -2569,7 +2657,7 @@
     grow();
     shiftMentions(back.length + (back && cur ? 2 : 0) - lead);
     imgs.sort(function (a, b) { return a.n - b.n; });
-    // Their mentions go back ahead of the draft's, oldest message first.
+    // Their mentions go back ahead of the draft's, in the order given.
     var held = [];
     list.forEach(function (res) { held = held.concat(validMentions(res.mentions)); });
     bmentions = held.concat(bmentions);
@@ -2869,8 +2957,8 @@
   // preview card can show (previews), the preview slot, with the menu on
   // the right click and the keyboard activation instead; Cmd/Ctrl+click on a link
   // the page can open is left to the browser, which opens a new tab, and
-  // opens the menu otherwise. The system-browser and native-app items show
-  // only on a page the server marked data-sysopen (a browser on the daemon's
+  // opens the menu otherwise. The open-with-system item shows only on a
+  // page the server marked data-sysopen (a browser on the daemon's
   // machine), and a data-out link opens at all only there; the daemon checks
   // both again. The markup is the same for every viewer: entries render once
   // for all of them.
@@ -3038,6 +3126,26 @@
   function linkOpens(a) {
     return !!a.getAttribute("href") && (!a.hasAttribute("data-out") || root.hasAttribute("data-sysopen"));
   }
+  // desktopShell reports the Werkschaft desktop app, which names itself in
+  // its user agent ("Werkschaft/<version>"). Its webview has no tabs, so a
+  // modified click on a file link cannot be the browser's new tab there:
+  // left to the webview it navigates the clicked frame in place, onto a
+  // file view that refuses to be framed. In the app a plain click on a file
+  // link opens its menu and a Cmd/Ctrl+click previews (desktopPreview); a
+  // browser keeps the behavior below.
+  function desktopShell() {
+    var n = window.navigator;
+    return !!n && /\bWerkschaft\//.test(n.userAgent || "");
+  }
+  // desktopPreview previews a file link the preview card can show, in the
+  // desktop app only, and reports whether it did.
+  function desktopPreview(a) {
+    if (!desktopShell()) return false;
+    if (previews(a)) previewOpen(a, a.getAttribute("data-rel"), false);
+    else if (outsideOpens(a)) previewOpen(a, a.getAttribute("data-abs"), true);
+    else return false;
+    return true;
+  }
   // previews reports a file link the preview card (preview.js) can show,
   // decided from what the page already knows: a file inside the session
   // root whose extension is not one no preview shows. What the server then
@@ -3097,6 +3205,20 @@
     if (origin) o.origin = origin;
     if (out || origin) window.WsPreview.open(path, o); else window.WsPreview.open(path);
   }
+  // hostPath splits abs, an absolute path as the daemon's host spells it
+  // (data-abs), into its parent folder and its name, the root and path
+  // fs/act takes; null for anything else. A backslash separates only in a
+  // drive-letter path, since a POSIX name may hold one.
+  function hostPath(abs) {
+    if (!abs) return null;
+    var win = /^[A-Za-z]:[\\\/]/.test(abs);
+    if (!win && abs.charAt(0) !== "/") return null;
+    var i = win ? Math.max(abs.lastIndexOf("/"), abs.lastIndexOf("\\")) : abs.lastIndexOf("/");
+    var dir = abs.slice(0, i), name = abs.slice(i + 1);
+    if (!win && !dir) dir = "/";
+    if (win && dir.length === 2) dir += "\\";
+    return { dir: dir, name: name };
+  }
   function openLinkMenu(a, x, y) {
     closeLinkMenu(false);
     var kind = a.getAttribute("data-wl"), href = a.getAttribute("href");
@@ -3111,16 +3233,17 @@
     }
     if (webFile(a)) items.push([wsT("js.web.menu.open"), function () { window.WsWeb.open({ path: rel }); }]);
     if (linkOpens(a)) items.push([wsT("js.menu.newtab"), function () { window.open(url, "_blank", "noopener"); }]);
-    if (href && sys && !out) {
+    // "Open with system" hands the target to the host's default handler: a
+    // url link to the system-open route (the default browser), a file or
+    // folder (an .app bundle included) to fs/act's open, by its own path.
+    var hostAt = kind === "file" && sys ? hostPath(abs) : null;
+    if (kind === "url" && href && sys) {
       items.push([wsT("js.menu.sysopen"), function () {
-        // A file link sends its file view path; the daemon opens it on the
-        // address this page was loaded from.
-        post("open", { target: kind === "url" ? url : href }, function (ok, v) { toast(ok ? wsT("js.toast.opened") : wsT("js.toast.openfail", v)); });
+        post("open", { target: url }, function (ok, v) { toast(ok ? wsT("js.toast.opened") : wsT("js.toast.openfail", v)); });
       }]);
-    }
-    if (kind === "file" && abs && sys && a.hasAttribute("data-img")) {
-      items.push([wsT("js.menu.native"), function () {
-        post("open", { native: abs }, function (ok, v) { toast(ok ? wsT("js.toast.openednative") : wsT("js.toast.openfail", v)); });
+    } else if (hostAt) {
+      items.push([wsT("js.menu.sysopen"), function () {
+        post("fs/act", { path: hostAt.name, action: "open", root: hostAt.dir }, function (ok, v) { toast(ok ? wsT("js.toast.openednative") : wsT("js.toast.openfail", v)); });
       }]);
     }
     if (kind === "url") items.push([wsT("js.menu.copyurl"), function () { copyText(url); }]);
@@ -3161,6 +3284,15 @@
     if (e.button !== 0 || !t || !t.closest) return;
     var a = t.closest("a[data-wl]");
     if (!a) return;
+    // The desktop app: every click on a file link stays on the page; a
+    // pointer Cmd/Ctrl+click previews what the card can show, and any other
+    // click, or a file the card cannot show, opens the menu.
+    if (a.getAttribute("data-wl") === "file" && desktopShell()) {
+      e.preventDefault();
+      if (e.detail !== 0 && (e.metaKey || e.ctrlKey) && desktopPreview(a)) return;
+      linkAt(a, e);
+      return;
+    }
     if (linkOpens(a) && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
     e.preventDefault();
     // A pointer click on a link the preview can show opens the preview
@@ -3672,9 +3804,17 @@
     window.addEventListener("resize", function () { drApply(false); });
     if (window.ResizeObserver && drheader) new ResizeObserver(function () { drApply(false); }).observe(drheader);
     // The handles' widths follow their contents; the header pads clear of
-    // them.
+    // them. Padding changes the shallower header's observed content box:
+    // write it next frame, not during this native resize delivery.
     if (window.ResizeObserver) {
-      var drRo = new ResizeObserver(drRoom);
+      var drRoomFrame = 0;
+      var drRo = new ResizeObserver(function () {
+        if (drRoomFrame) return;
+        drRoomFrame = requestAnimationFrame(function () {
+          drRoomFrame = 0;
+          if (drawer.isConnected) drRoom();
+        });
+      });
       drRo.observe(drhandle);
       if (gitRegion) drRo.observe(gitRegion);
     }
@@ -3921,10 +4061,11 @@
   // navigated. The history loader accepts bare IDs, never selectors/URLs.
   function boardJump(id) {
     if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|p[1-9][0-9]*)$/.test(id)) return;
-    var target = null;
-    if (window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id); return !!target; });
+    var target = null, unfoldTopic = window.WsCards && window.WsCards.unfoldTopic;
+    if (window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id, unfoldTopic); return !!target; });
     if (!target) target = $(id);
     if (!target || target.id !== id || !inBoard(target)) return;
+    if (unfoldTopic) unfoldTopic(target);
     for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
     // History targets were revealed and anchored by the shared loader.
     // scrollIntoView would also scroll the overflow:hidden clip itself.
@@ -4096,6 +4237,9 @@
       // offers the card.
       var act = navigator.userActivation;
       if (webLink(a) && act && act.isActive) { window.WsWeb.open({ url: a.href }); return; }
+      // In the desktop app a frame's Cmd/Ctrl+click on a file link (mod)
+      // previews it, under the same user-activation gate.
+      if (m.mod === true && act && act.isActive && desktopPreview(a)) return;
       var r = f.getBoundingClientRect();
       openLinkMenu(a, r.left + num(m.x), r.top + num(m.y));
     } else if (m.wbDoc === "img") {
@@ -5495,6 +5639,7 @@
     var target = row.id ? $("item-" + row.id) : topic;
     if (!target || !topic) return;
     if (window.WsOverview && window.WsOverview.pick(topic, o)) return;
+    if (window.WsCards) window.WsCards.unfoldTopic(topic);
     if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
     if (live && !tabShown("board")) setTab("board");
     if (row.kind === "board-body") target = topic.querySelector(".tdoc") || topic;
@@ -6337,11 +6482,25 @@
       try { window.sessionStorage.setItem(ASSETS_TRIED, ev.id); } catch (x) {}
       location.reload();
     }
-    // The session left: the close that follows is final.
+    // A WebSocket handshake hides HTTP status. Recheck the stream once after
+    // the usual retry delay before calling the session gone; never replace
+    // the held DOM (or its drafts) with the probe's response. Transient probe
+    // failures keep retrying at that cadence until absence is confirmed or
+    // the stream can reopen with the hashes held then.
     function onGone() {
       st.close();
       connected(false);
-      banner(wsT("js.banner.gone"));
+      trackerLost();
+      setTimeout(recheckGone, 3000);
+    }
+    function recheckGone() {
+      fetch(path + (framed && mode !== "index" ? "?frame=1" : ""), { cache: "no-store" }).then(function (res) {
+        // The GET is only a status probe, not another long-lived SSE stream.
+        if (res.body) res.body.cancel().catch(function () {});
+        if (res.status === 404) { banner(wsT("js.banner.gone")); return; }
+        if (res.ok) { connect(); return; }
+        setTimeout(recheckGone, 3000);
+      }).catch(function () { setTimeout(recheckGone, 3000); });
     }
   }
   // showRegions applies, once each and in arrival order, the region updates
@@ -8088,7 +8247,7 @@
     var row = el.appendChild(mk("div", "sprow"));
     var status = row.appendChild(mk("span", "spnote"));
     var cancel = row.appendChild(rpBtn("pbtn", wsT("js.rail.cancel")));
-    var go = row.appendChild(rpBtn("pbtn go", wsT("js.lead.start")));
+    var start = row.appendChild(rpBtn("pbtn go", wsT("js.lead.start")));
     function setErr(text) { err.textContent = text || ""; err.hidden = !text; }
     function off(k) { var h = supHarness(k); return !!h && h.available === false; }
     function sync() {
@@ -8100,7 +8259,7 @@
       });
       Object.keys(ibtn).forEach(function (k) { ibtn[k].setAttribute("aria-checked", String(P.iso === k)); });
       idesc.textContent = wsT(P.iso === "isolated" ? "js.lead.iso.isolated.hint" : "js.lead.iso.default.hint") + (P.harness === "pi" ? " " + wsT("js.lead.iso.pi") : "");
-      go.disabled = P.busy || off(P.harness);
+      start.disabled = P.busy || off(P.harness);
     }
     // edited drops an earlier spawn's error once the form changed.
     function edited() {
@@ -8117,7 +8276,7 @@
     }
     function submit() {
       sync();
-      if (go.disabled) return;
+      if (start.disabled) return;
       notifAsk();
       var gen = P.gen;
       P.busy = true;
@@ -8125,13 +8284,15 @@
       status.textContent = wsT("js.lead.starting");
       sync();
       railPost("/agents/leads", WsRail.leadBody(P.root, { harness: P.harness, model: rows.model.value, effort: rows.effort.value, mode: rows.mode.value, isolation: P.iso }), function (st, v, s) {
+        P.busy = false;
+        status.textContent = "";
+        sync();
         if (st === 201 && v.id) {
+          if (rpLive(P, gen)) railPopClose(false);
           saveDraft();
           go("/s/" + encodeURIComponent(String(v.id)));
           return;
         }
-        P.busy = false;
-        status.textContent = "";
         if (!rpLive(P, gen)) { toast(leadErr(st, s)); return; }
         setErr(leadErr(st, s));
         sync();
@@ -8141,7 +8302,7 @@
     iseg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-iso]"); if (b) { P.iso = b.getAttribute("data-iso"); sync(); } });
     seg.addEventListener("click", function (e) { var b = e.target.closest && e.target.closest("[data-harness]"); if (b && !b.disabled) setHarness(b.getAttribute("data-harness")); });
     cancel.addEventListener("click", function () { railPopClose(true); });
-    go.addEventListener("click", submit);
+    start.addEventListener("click", submit);
     P.open = function (key, label, btn) {
       var gen = ++P.gen, name = btn.getAttribute("data-name") || label, branch = btn.getAttribute("data-branch") || "";
       P.busy = false;
@@ -8661,7 +8822,7 @@
   // restored draft says so, and while the page holds one, leaving it asks
   // first (the browser's leave-page confirmation).
   // The shell holds no draft: its frames keep their own.
-  var draftStore = WsRail && rid && !shell ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
+  var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
@@ -9053,8 +9214,10 @@
         pad: (parseFloat(getComputedStyle(top).paddingRight) || 0) + Math.max(0, window.innerWidth - root.clientWidth),
         top: top.offsetHeight
       });
+      // A link menu's local z-index cannot outrank the shell header either;
+      // lift its frame through the same layer as the other popovers.
       send("layout", { pincol: root.hasAttribute("data-pincol"), dim: dim(),
-        popover: q(".rpop:not([hidden])").some(function (el) { return el.getClientRects().length > 0; }) });
+        popover: q(".rpop:not([hidden]), .lmenu").some(function (el) { return el.getClientRects().length > 0; }) });
     }
     function queue() { if (!queued) queued = setTimeout(post, 16); }
     doc.addEventListener("ws-overview", queue);

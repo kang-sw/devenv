@@ -48,6 +48,9 @@ const (
 	// is its typed line and Text the output it showed as text, empty when it
 	// showed none (a terminal panel).
 	RingCommand = "command"
+	// RingWhiteboardEffects carries a versioned plain-text effects envelope
+	// in Text, using only existing outer fields (Caption and Truncated).
+	RingWhiteboardEffects = "whiteboard-effects"
 )
 
 // Mail directions.
@@ -64,8 +67,8 @@ type RingEntry struct {
 	// Reserved only by the optional receiver path, so freezing a natural
 	// turn before writing its preceding reply/tools cannot reorder the ring.
 	ringStamp time.Time
-	// Kind is user, reply, turn, mail, compact, tools, card, ui, command, or
-	// notice.
+	// Kind is user, reply, turn, mail, compact, tools, card, ui, command,
+	// notice, or whiteboard-effects.
 	Kind string `json:"kind"`
 	// Origin tags a user message (terminal, whiteboard) or a turn summary
 	// (terminal, whiteboard, mail; empty when unknown).
