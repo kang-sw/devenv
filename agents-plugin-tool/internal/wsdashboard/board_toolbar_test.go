@@ -168,7 +168,16 @@ func TestToolbarPageActionHooks(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
 	for _, want := range []string{
 		`search: function (e) { var b = $("tkqs"); if (b) { e.stopPropagation(); b.click(); } }`,
-		`files: fpane && window.WsFiles ? revealPanes : null`,
+		`files: filesSheet`,
+		`filesTab = createFiles(fpane, chead && chead.querySelector(".fsum"), false)`,
+		`var sheetInstance = null`,
+		`if (!sheetInstance) sheetInstance = createFiles(sheet, null, true)`,
+		`hidden: function () { if (sheetInstance) sheetInstance.hidden(); }`,
+		`load("ws.dashboard.toolbar." + k)`,
+		`save("ws.dashboard.toolbar." + k, v)`,
+		`if (fs) filesTab.shown()`,
+		`else filesTab.hidden()`,
+		`local: function () { return root.hasAttribute("data-sysopen"); }`,
 		`if (b) { setCtab(b.getAttribute("data-ctab")); return; }`,
 		`tail.setAttribute("data-closed-more", String(Math.max(0, (+more.getAttribute("data-closed-more") || 0) - count)))`,
 	} {
