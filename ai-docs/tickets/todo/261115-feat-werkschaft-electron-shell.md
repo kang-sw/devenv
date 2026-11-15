@@ -3,6 +3,10 @@ title: "Migrate the Werkschaft desktop shell from Tauri to Electron"
 related:
   261113-feat-werkschaft-thin-tauri-shell: "current Tauri shell (Phase 1 Result e7121971); parity source; its binding decisions carry over except the webview technology"
   261112-research-ws-ade-desktop-shell-and-rename: "Werkschaft concept; Electron was the recorded fallback if the webview matrix proved painful"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 1c15439c2a1a2b7d
+sage-review-completeness-reviewed: 1c15439c2a1a2b7d
 ---
 
 # Migrate the Werkschaft desktop shell from Tauri to Electron
@@ -14,11 +18,16 @@ the Werkschaft desktop shell from Tauri to Electron.
 
 Owner-approved rationale: Tauri on macOS renders through WKWebView, so every
 browser default the dashboard relies on has to be re-implemented natively:
-zoom keys, `beforeunload` close confirmation, and link/file opening. The
-dashboard is built and Playwright-tested on Chromium. Electron embeds
-Chromium, which removes the "works in the browser, not in the app" class of
-defects. The Tauri ticket recorded Electron as the fallback if the webview
-matrix proved painful (`261113-feat-werkschaft-thin-tauri-shell` Decision 1).
+this shell already re-implements zoom keys and external link opening, and it
+has no close-request handler, so the dashboard's `beforeunload` guard never
+runs on X-close (`agents-plugin-tool/desktop/src/main.rs:38-45,96-202`). The
+dashboard is built and browser-tested on Chromium (Playwright harnesses such
+as `agents-plugin-tool/internal/wsdashboard/testdata/files-explorer.browser.cjs`).
+Electron embeds Chromium, which is expected to remove the "works in the
+browser, not in the app" class of defects; Phase 1 verification, not this
+expectation, establishes parity. The Tauri ticket recorded Electron as the
+fallback if the webview matrix proved painful
+(`261113-feat-werkschaft-thin-tauri-shell` Decision 1).
 
 The current shell lives in `agents-plugin-tool/desktop/` (Rust:
 `src/main.rs`, `src/zoom.rs`, `src/navigation.rs`, `src/endpoint.rs`;
@@ -33,8 +42,8 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
 | P1 | macOS-only; one window navigated to the daemon-served dashboard; bundled HTML is only the connection page | `desktop/src/main.rs:3-4,158-162`, `desktop/ui/index.html` | Same: one `BrowserWindow`, no second frontend; a bundled connection page only |
 | P2 | Endpoint discovery: `WS_CACHE_HOME` override, else `$HOME/.cache/ws@kang-sw-devenv`; reads `dashboard/endpoint.json` | `desktop/src/endpoint.rs:28-49,103-110` | Same resolution order and file |
 | P3 | Attach validation: 64 KiB cap; only `port`/`pid` read, both nonzero; GET `http://127.0.0.1:<port>/health`, no proxy, no redirects, 2 s timeout; `ws-dashboard` service and matching PID; reread endpoint after health and reject a change | `desktop/src/endpoint.rs:12-25,47-100` | Same checks in the main process |
-| P4 | Credential-free attach: endpoint token never read into the shell or page; no daemon start/lifecycle call; endpoint file never written | `desktop/src/endpoint.rs:14-19,47-100`, `desktop/README.md:123-130` | Same |
-| P5 | Titles: `Werkschaft — Connecting…`, `Werkschaft` on attach, connection page with the error and `⌘R to retry` on failure, `Navigation failed` on immediate navigation error | `desktop/src/main.rs:48-85,158-159` | Same strings and states |
+| P4 | Credential-free attach: endpoint bytes are read into native memory, but the token is discarded during deserialization and never exposed to the page; no daemon start/lifecycle call; endpoint file never written (`agents-plugin-tool/desktop/src/endpoint.rs#L47-L60`) | `desktop/src/endpoint.rs:14-19,47-100`, `desktop/README.md:123-130` | Same |
+| P5 | Titles: `Werkschaft — Connecting…`, `Werkschaft` on attach; on discovery failure the static connection page is shown and the window title is `Werkschaft — <message> — ⌘R to retry`; immediate navigation error sets `Werkschaft — Navigation failed — ⌘R to retry` (`agents-plugin-tool/desktop/src/main.rs#L48-L85`, `agents-plugin-tool/desktop/ui/index.html`) | `desktop/src/main.rs:48-85,158-159` | Same strings and states |
 | P6 | Connection → Retry (`CmdOrCtrl+R`) reruns discovery/health/attach, not a page reload; overlapping attempts ignored; no periodic reconnect | `desktop/src/main.rs:48-61,87-93,102-104,115-118` | Same menu item and semantics |
 | P7 | Window 1280×860, minimum 760×520; no geometry, URL or zoom persistence; zoom resets to 100% per process | `desktop/src/main.rs:96-101,158-162` | Same (no persistence) |
 | P8 | Default macOS menus (App, File, Edit, View Fullscreen, Window, Help) plus Connection and View additions | `desktop/src/main.rs:115-153` | Equivalent standard roles plus the same additions |
@@ -61,16 +70,23 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
 - **Binding Tauri decisions carry over unchanged** except the webview
   technology (Decision 1's choice of Tauri). From
   `261113-feat-werkschaft-thin-tauri-shell`: Decision 1 (thin shell loading
-  exactly `http://127.0.0.1:<port>/`, external links to the system browser,
-  closing leaves the daemon running, no self-update); Decision 2 (the
-  launcher's SHA256-pinned daemon stays the authority; the shell never
-  replaces or stops a running daemon); Decision 3 (attach only: read the
-  endpoint, respect the cache override, check health, never invoke
-  `ws-mcp daemon-start`, never hand the endpoint token to page JavaScript);
-  Decision 4 (unsigned local dogfood `.app`; signing and notarization are
-  separate work); Decision 7 (no new UI credential or daemon API merely to
-  render); Decision 8 (a scoped grant only for a later, justified authority
-  need, under that ticket's constraints).
+  exactly `http://127.0.0.1:<port>/`, a single instance, external links to
+  the system browser, closing leaves the daemon running, no self-update);
+  Decision 2 (daemon ownership: the shell attaches to whatever daemon is
+  running, starts its beside-exe daemon only when none is, and never
+  replaces or stops a running daemon); Decision 3 (attach contract: read
+  `<cache root>/dashboard/endpoint.json` respecting the cache-root override,
+  check `GET /health`, never hand the endpoint token to page JavaScript; the
+  first slice only attaches and never invokes `ws-mcp daemon-start`, because
+  that command runs `Ensure` and can replace a daemon, and a missing or
+  unhealthy daemon shows the retry view); Decision 4 (unsigned local dogfood
+  `.app`; signing and notarization are separate work); Decision 7 (no new UI
+  credential or daemon API merely to render); Decision 8 (a scoped grant
+  only for a later, justified authority need, under that ticket's
+  constraints). Here Phase 1 is that attach-only slice; Phase 2's safe
+  missing-daemon start is Decision 2's "starts only when none is" step and
+  still never uses `ws-mcp daemon-start` or any path that can replace or
+  stop a running daemon.
 - **Remote-dashboard posture: no added native privilege.** The renderer runs
   with `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`,
   and no preload script, matching P21 and Decision 7. A remote or
@@ -124,8 +140,13 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
   dependency for no runtime benefit. Rejected: a TypeScript build step.
 - **Compatibility: not a cross-version surface.** The desktop shell adds no
   MCP tool or argument, `/mcp` hello change, shared store shape, tracker
-  event or config/rsrc manifest field; it consumes the existing endpoint file
-  and HTTP routes read-only. No tier applies (T0 if one must be named).
+  event or config/rsrc manifest field; it reads the existing endpoint file
+  and reuses existing HTTP routes, including the state-changing POST `open`
+  and `fs/act` routes (`agents-plugin-tool/internal/wsdashboard/sysopen_route.go#L12-L23`,
+  `agents-plugin-tool/internal/wsdashboard/fs_act_route.go#L17-L34`).
+  No tier applies to Phases 1-3 (T0 if one must be named). Phase 4 would add
+  a scoped-grant contract; its compatibility tier is settled when that phase
+  activates, before implementation.
 
 ## Constraints
 
@@ -168,8 +189,34 @@ summary, with evidence paths relative to `agents-plugin-tool/`.
   change returns to the lead first.
 - Architecture Rule 2: the Electron sources stay inside `agents-plugin-tool/`
   (`agents-plugin-tool/desktop-electron/`, see Decisions).
-- Before editing under `agents-plugin-tool/`, read
-  `ai-docs/manuals/shipped-surface-boundary.md`.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+
+## Prior Decisions
+
+- 261113-feat-werkschaft-thin-tauri-shell (2026-11-15, commit 78bbc60e): "Both need a native new-window/subframe policy decision." — bearing: constrains
+- 44edb6f0 (2026-11-15, commit): "The remote dashboard deliberately holds no native permissions (a test pins this)" — bearing: constrains
+- 1612e099 (2026-11-15, commit): "Owner request: generalize 'open in system browser' to the OS opener after a .app path failed (old item opened the file-viewer URL, which 404s for dirs)." — bearing: supports
+- 0f16157b (2026-11-15, commit): "The runner now probes immediately after each foreground step, permanently retires confirmed-absent groups, and cleans up only active unretired groups" — bearing: constrains
+- f88b60bf (2026-11-15, commit): "Existing wsstate CacheRoot and wsdashboard Health are the contract: respect WS_CACHE_HOME, read only endpoint port/PID, validate ws-dashboard plus matching PID" — bearing: constrains
+- 261112-research-ws-ade-desktop-shell-and-rename (2026-11-12, Confirmed Decisions): "(496) announced, owner ok 2026-11-13: the product name is Werkschaft, superseding `ws-ade`." — bearing: constrains
+- 261110-research-ws-dashboard-agent-host-foundations (2026-11-10, Confirmed Decisions): "Superseded by (493)=b and MAIN's 2026-11-14 start-now direction" — bearing: supports
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | New agents-plugin-tool/desktop-electron/ package, package.json, package-lock.json, main.js and packaging/smoke inputs; existing agents-plugin-tool/desktop/ retained. |
+| scope.surface | public-interface | User-facing desktop window, menus, close confirmation and packaged macOS/Windows delivery; Phase 4 conditionally adds shell-only HTTP authority. |
+| scope.new_public_symbol | unknown | Phase 1 names no exported daemon/tool symbol; gated Phase 4 has no concrete registration/bootstrap API or symbol names yet. |
+| scope.new_type_contract | yes | Phase 4 explicitly requires a new scoped-grant registration/bootstrap contract when activated; Phase 1 reuses endpoint port/PID and health service/PID (agents-plugin-tool/desktop/src/endpoint.rs#L14-L25). |
+| scope.test_surface | new-files | Phase 1 requires a new Playwright _electron smoke; agents-plugin-tool/desktop-electron/ is absent. Existing UA coupling tests: agents-plugin-tool/internal/wsdashboard/desktop_link_test.go. |
+| complexity.reuse_points | confirmed | Read agents-plugin-tool/desktop/src/endpoint.rs, src/navigation.rs, src/zoom.rs and src/main.rs; dashboard.js desktopShell/openLinkMenu, doc-frame.js, and fs_act_route.go implement the carried attach, navigation, zoom and HTTP opening behavior. |
+| complexity.side_effect_risk | high | Phase 1 opens native windows/external URLs; Phase 2 adds daemon startup and Phase 4 conditionally issues native-scoped authority, with non-replacement and revocation obligations. |
+| risk.correctness | high | Close cancellation must preserve image drafts; attach must reject stale endpoints; later startup must not replace a live daemon (Phases 1-2). |
+| risk.fit | moderate | Independent Electron package must preserve the existing daemon-served frontend, UA coupling and zero-native-authority Phase 1 while retaining Tauri sources (Decisions, P15-P21). |
+| risk.test | high | No Electron package, lockfile or smoke exists yet; offline reinstall/build and actual macOS/Windows window behavior remain to be demonstrated (Prerequisite, Phases 1 and 3). |
+| risk.security_or_contract | high | Untrusted frame/navigation isolation, OS opening, credential exclusion and the later scoped grant are explicit boundaries (P10-P14, P21, Phase 4; agents-plugin-tool/desktop/src/navigation.rs#L16-L38). |
 
 ## Phases
 
@@ -243,7 +290,10 @@ Re-homed unchanged in substance from the Tauri ticket's Phase 4
 authority need; no ceremonial bootstrap key for today's browser surface.
 Apply the carried Decision 8 and that ticket's grant constraints before any
 daemon registration or bootstrap contract, and keep the endpoint credential
-native and separate from the grant. Verification when activated: daemon
+native and separate from the grant. The Electron equivalents of the Tauri
+bootstrap command and trusted-window ACL are designed when the phase
+activates and recorded as an edition of this phase before implementation.
+Verification when activated: daemon
 recognition of only the scoped authority, authenticated bootstrap and
 rediscovery after restart, bounded expiry and exit/crash revocation, an
 exact trusted-window ACL, rejection of external and preview/opaque-frame
