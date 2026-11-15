@@ -607,7 +607,7 @@ func buildSessionView(in pageInputs) SessionView {
 		if !reg.Agent && (len(in.Ring) > 0 || len(v.ModelHistory) > 0) {
 			v.SavedConversation = true
 			contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
-			v.Conversation = conversation(wslive.Lead{}, in.Ring, in.Page.MailBodies, contacts, in.Lookup, replyMarkdown(reg.Project, reg.ReplyID))
+			v.Conversation = conversation(wslive.Lead{}, in.Ring, in.Page.MailBodies, contacts, in.Lookup, replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 			splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 		}
 		return v
@@ -631,7 +631,7 @@ func buildSessionView(in pageInputs) SessionView {
 	}
 	contacts := resolvedContacts(in.Page.Contacts, reg.ReplyID)
 	v.Tree.Peers = peerGroup(contacts, reg.Project, lookup, in.Now)
-	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID))
+	v.Conversation = conversation(in.Snapshot.Lead, in.Ring, in.Page.MailBodies, contacts, lookup, replyMarkdown(reg.Project, reg.ReplyID), reg.ReplyID)
 	splitUserEntries(v.Conversation.Entries, in.AttachDir, reg.ReplyID)
 	v.Conversation.Held = heldViews(in.Held, in.AttachDir, reg.ReplyID)
 	v.Conversation.Sent = sentMarks(in.Drained, in.Held, in.Page.Reasked, settledTurnStart(in.Ring))
@@ -950,7 +950,7 @@ func replyRenderUnder(targets wswhiteboard.TextTargets) replyRender {
 // its body while the mailbox history still holds it and a link to its peer's
 // page when this daemon serves the peer. A lead reply's markdown is left to
 // the entry render (renderEntries), which caches it.
-func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup sessionLookup, render replyRender) ConversationView {
+func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]string, contacts []Contact, lookup sessionLookup, render replyRender, self string) ConversationView {
 	byAddress := map[string]string{}
 	for _, c := range contacts {
 		if c.ReplyID != "" {
@@ -988,6 +988,7 @@ func conversation(lead wslive.Lead, ring []wslive.RingRecord, bodies map[string]
 		}
 		cv.Entries = append(cv.Entries, e)
 	}
+	linkMailWakes(cv.Entries, self)
 	return cv
 }
 
