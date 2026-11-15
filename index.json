@@ -167,7 +167,14 @@
       "registered_at": "2026-11-06T07:33:45Z"
     },
     "261106-epic-ws-dashboard-serve-daemon": {
-      "registered_at": "2026-11-06T04:24:28Z"
+      "registered_at": "2026-11-06T04:24:28Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "closed",
+        "touched_at": "2026-11-15T10:49:53Z"
+      }
     },
     "261106-feat-whiteboard-policy-answer-user-alternative": {
       "registered_at": "2026-11-06T04:42:55Z"
