@@ -317,7 +317,7 @@
       }
       q(".topic-stream", topic).forEach(function (stream) {
         entries(stream);
-        q("template[data-history-page]", stream).forEach(function (page) { entries(page.content); });
+        q("template[data-history-page], template[data-history-gap]", stream).forEach(function (page) { entries(page.content); });
       });
       q('[id^="item-"]', topic).forEach(function (item) {
         var id = /^item-(\d+)$/.exec(item.id);

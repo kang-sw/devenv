@@ -1,4 +1,11 @@
 {
+  "js.wb.timeline.gap": "⋯ {0} Verlaufseinträge",
+  "wb.timeline.up": "▲ Oberhalb laden",
+  "wb.timeline.down": "▼ Unterhalb laden",
+  "wb.timeline.asked": "Gefragt",
+  "wb.timeline.reasked": "Erneut gefragt",
+  "wb.timeline.answer": "Antwort des Eigentümers",
+  "wb.timeline.original": "Ursprüngliche Frage",
   "js.capsule.topics": "Themen",
   "worktree.page": "Worktree",
   "worktree.local": "nur lokal",

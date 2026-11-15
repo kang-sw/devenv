@@ -70,6 +70,33 @@ const (
 // item IDs (ackNudgeText).
 const ackNudgeFormat = "Dashboard answer check: the owner's answers to %s reached you, but those board items are still open. Record each answer you acted on with wb:answer (the owner's words as its body); if an item should stay open, say why. This check runs once per answer batch."
 
+// IsAnswerCheckNudge recognizes only a plain generated check, never an
+// owner message carrying other content. Keep recognition beside its format.
+func IsAnswerCheckNudge(e wsinbox.Entry) bool {
+	if len(e.Parts) != 1 || len(e.Chips)+len(e.Topics)+len(e.Mentions)+len(e.Images)+len(e.Picks)+len(e.Consoles) != 0 || e.Command != nil || e.Interrupt {
+		return false
+	}
+	prefix, suffix, _ := strings.Cut(ackNudgeFormat, "%s")
+	text := e.Parts[0]
+	if !strings.HasPrefix(text, prefix) || !strings.HasSuffix(text, suffix) {
+		return false
+	}
+	ids := strings.TrimSuffix(strings.TrimPrefix(text, prefix), suffix)
+	for i, id := range strings.Split(ids, ", ") {
+		if id == "..." && i == ackNudgeCap {
+			continue
+		}
+		if !strings.HasPrefix(id, "(") || !strings.HasSuffix(id, ")") {
+			return false
+		}
+		n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(id, "("), ")"))
+		if err != nil || n <= 0 {
+			return false
+		}
+	}
+	return ids != ""
+}
+
 // ackCheckRecord is ackCheckFileName's content. Readers ignore unknown
 // fields.
 type ackCheckRecord struct {

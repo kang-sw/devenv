@@ -1,4 +1,11 @@
 {
+  "js.wb.timeline.gap": "⋯ 履歴 {0} 件",
+  "wb.timeline.up": "▲ 上を読み込む",
+  "wb.timeline.down": "▼ 下を読み込む",
+  "wb.timeline.asked": "質問",
+  "wb.timeline.reasked": "再質問",
+  "wb.timeline.answer": "ユーザーの回答",
+  "wb.timeline.original": "元の質問",
   "js.capsule.topics": "トピック",
   "worktree.page": "ワークツリー",
   "worktree.local": "ローカルのみ",

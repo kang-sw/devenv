@@ -1,7 +1,6 @@
 package wswhiteboard
 
 import (
-	"fmt"
 	"html/template"
 	"strings"
 	"time"
@@ -10,7 +9,7 @@ import (
 )
 
 func (d itemData) HistoryAnchor() bool {
-	return d.History == nil || d.History.ID != fmt.Sprintf("item-%d", d.ID)
+	return d.History == nil || d.History.ID == ""
 }
 
 func (d itemData) HistoryClassLabel() string {
@@ -41,6 +40,8 @@ func (d itemData) HistoryMark() string {
 
 func (d itemData) HistoryStatusLabel() string {
 	switch d.Status {
+	case StatusOpen:
+		return StatusOpen
 	case StatusAssumed:
 		return wsi18n.T(d.Page.Lang, "wb.history.assumed")
 	case StatusWithdrawn:
@@ -69,6 +70,11 @@ func (d itemData) HistoryQuote() string {
 // A withdrawal/supersession can retain an earlier answer; show that distinct
 // answer time explicitly without calling either timestamp an archive time.
 func (d itemData) HistoryAnswerTime() string {
+	// A stamped owner-answer row already shows the actual send time;
+	// the mutable item's agent-apply clock is not another owner answer.
+	if d.History != nil && d.History.OwnerAnswer() && d.History.AnswerSentAt > 0 {
+		return ""
+	}
 	at, err := time.Parse(time.RFC3339Nano, d.AnsweredAt)
 	if err != nil {
 		return ""
@@ -108,5 +114,5 @@ func (d itemData) HistoryRationaleHTML() template.HTML {
 }
 
 func (d itemData) HistoryExpandable() bool {
-	return d.HistoryReading() != "" || len(d.Options) > 0 || d.RecLetter != "" || d.HistoryQuote() != "" || d.HistoryAnswerTime() != "" || d.HistoryPastAnswer() != "" || strings.TrimSpace(string(d.HistoryRationaleHTML())) != ""
+	return d.TimelineCheck() || d.HistoryReading() != "" || len(d.Options) > 0 || d.RecLetter != "" || d.HistoryQuote() != "" || d.HistoryAnswerTime() != "" || d.HistoryPastAnswer() != "" || strings.TrimSpace(string(d.HistoryRationaleHTML())) != ""
 }

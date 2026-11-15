@@ -1,4 +1,11 @@
 {
+  "js.wb.timeline.gap": "⋯ {0} history entries",
+  "wb.timeline.up": "▲ Load above",
+  "wb.timeline.down": "▼ Load below",
+  "wb.timeline.asked": "Asked",
+  "wb.timeline.reasked": "Asked again",
+  "wb.timeline.answer": "Owner answer",
+  "wb.timeline.original": "Original question",
   "js.capsule.topics": "Topics",
   "worktree.page": "worktree",
   "worktree.local": "local only",
