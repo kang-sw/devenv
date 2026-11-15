@@ -754,10 +754,16 @@ func (t *tokenizer) readBodyContent(name string, from int, decode bool, fields [
 				text.WriteString(rest[:end])
 				t.i += end
 				if strings.HasPrefix(tagName, group.Prefix) && !strings.HasSuffix(rest[:end], "/>") {
-					// A command's raw payload may literally contain group tags.
-					// Skip it using the ordinary CDATA-aware body boundary.
 					start := t.i
-					if _, ok := t.readBody(tagName, start-end, false, nil, ""); !ok {
+					if spec, known := group.lookup(tagName); known && spec.Kind == Container {
+						// Use the grammar's ordinary field reader: a raw field may
+						// contain literal command/group closes as well as openings.
+						cmd := Command{Tag: tagName, Line: t.lineAt(start - end)}
+						if !t.readFields(&cmd, group.fieldTags(spec), nil, false) {
+							return "", false
+						}
+					} else if _, ok := t.readBody(tagName, start-end, false, nil, ""); !ok {
+						// Leaves and unknown commands have raw, CDATA-aware bodies.
 						return "", false
 					}
 					text.WriteString(t.s[start:t.i])

@@ -150,6 +150,41 @@ func TestCommandAcceptanceRejectedCDATABoundaries(t *testing.T) {
 	}
 }
 
+func TestCommandAcceptanceRejectedGroupFieldBoundaries(t *testing.T) {
+	for name, payload := range map[string]string{
+		"review-repro":       `<wb:add class="technical"><wb:title></wb:add><wb:topic name="literal"></wb:title></wb:add>`,
+		"title":              `<wb:add class="technical"><wb:title></wb:add></wb:topic><wb:topic name="literal"><wb:floor id="999"/></wb:title></wb:add>`,
+		"patch-title":        `<wb:patch id="1"><wb:title></wb:patch></wb:topic><wb:topic name="literal"></wb:title><wb:why>kept</wb:why></wb:patch>`,
+		"body":               `<wb:body></wb:topic><wb:topic name="literal"><wb:floor id="999"/></wb:body>`,
+		"unknown-body-field": `<wb:add class="technical"><wb:body></wb:add></wb:topic><wb:topic name="literal"></wb:body></wb:add>`,
+		"old":                `<wb:edit><wb:old></wb:edit></wb:topic><wb:topic name="literal"></wb:old><wb:new>replacement</wb:new></wb:edit>`,
+		"new":                `<wb:edit><wb:old>original</wb:old><wb:new></wb:edit></wb:topic><wb:topic name="literal"></wb:new></wb:edit>`,
+		"answer":             `<wb:answer id="1" value="a"></wb:topic><wb:topic name="literal"><wb:floor id="999"/></wb:answer>`,
+		"title-cdata":        `<wb:add class="technical"><wb:title><![CDATA[</wb:title></wb:add></wb:topic><wb:topic name="literal">]]></wb:add><wb:topic name="also-literal"></wb:title></wb:add>`,
+		"old-new-cdata":      `<wb:edit><wb:old><![CDATA[</wb:old></wb:edit></wb:topic><wb:topic name="literal">]]></wb:edit><wb:topic name="also-literal"></wb:old><wb:new><![CDATA[</wb:new></wb:edit><wb:topic name="literal">]]></wb:edit><wb:topic name="also-literal"></wb:new></wb:edit>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			prefix := topicXML("prefix", "keep")
+			rejected := `<wb:topic name="outer">junk` + payload + `</wb:topic>`
+			expected := &State{}
+			want := mustApply(t, expected, prefix)
+			s := &State{}
+			out, p := Apply(s, prefix+rejected, testEnv())
+			if len(p) == 0 || !strings.Contains(strings.Join(p, " "), "text before its first command") || out.Unpartitioned || out.Accepted != want.Accepted {
+				t.Fatalf("rejected group discarded prefix: %+v %v", out, p)
+			}
+			gotState, _ := json.Marshal(s)
+			wantState, _ := json.Marshal(expected)
+			if string(gotState) != string(wantState) || !reflect.DeepEqual(out.Effects, want.Effects) {
+				t.Fatalf("rejected payload changed accepted state/effects: %s / %s; %+v / %+v", gotState, wantState, out.Effects, want.Effects)
+			}
+			if want := "<wb:failed>\n" + rejected + "\n</wb:failed>"; out.Failed != want {
+				t.Fatalf("incomplete failed tree:\n got %s\nwant %s", out.Failed, want)
+			}
+		})
+	}
+}
+
 func TestCommandAcceptanceUnsplittableNeverAppliesPrefix(t *testing.T) {
 	for _, suffix := range []string{`<wb:topic name="t"><wb:body>unterminated`, `<wb:topic name="t"><wb:body>closed</wb:body>`, `<wb:answer id="1" value="broken>`, `<wb:topic name="t"><wb:edit><wb:old>no end`, `<wb:topic name="a"><wb:topic name="b"><wb:topic name="c"/></wb:topic><wb:floor id="999"/></wb:topic>`} {
 		s := &State{}
