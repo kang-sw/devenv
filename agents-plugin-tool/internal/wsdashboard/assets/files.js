@@ -401,7 +401,7 @@
     ui.rCurrent.textContent = ""; ui.rChoices.textContent = ""; rootRows = [];
     var query = ui.rFilter.value.trim().toLowerCase(), groups = [[], []], pinned;
     function row(item, parent) {
-      var b = mk("button", "froot-row" + (item.current ? " current" : ""));
+      var b = mk("button", "froot-row" + (item.current ? " froot-row-current" : ""));
       b.type = "button"; b.title = item.root.path;
       b.setAttribute("aria-pressed", String(item.current));
       b.appendChild(mk("span", "froot-check", item.current ? "✓" : ""));

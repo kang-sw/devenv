@@ -190,7 +190,7 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .froot-pop .froot-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 26px; box-sizing: border-box; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--wb-fg); font: 12px var(--wb-sans); text-align: left; cursor: pointer; }
 .froot-pop .froot-row:hover, .froot-pop .froot-row:focus-visible { background: var(--wb-muted); }
 .froot-pop .froot-row:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -1.5px; }
-.froot-pop .froot-row.current { background: color-mix(in srgb, var(--wb-primary) 14%, transparent); font-weight: 700; }
+.froot-pop .froot-row.froot-row-current { background: color-mix(in srgb, var(--wb-primary) 14%, transparent); font-weight: 700; }
 .froot-pop .froot-check { width: 14px; flex: none; color: var(--wb-primary); }
 .froot-pop .froot-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .froot-pop .froot-branch { flex: 0 1 46%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; direction: rtl; color: var(--wb-muted-fg); font: 11px var(--wb-mono); }
