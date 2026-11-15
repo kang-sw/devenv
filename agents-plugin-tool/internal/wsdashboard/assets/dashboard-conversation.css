@@ -39,7 +39,8 @@
 .wake-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; margin: 8px 0 0; }
 /* Live and finished tools share the mail/lead row frame; token counts stay visible. */
 .toolsline { align-self: stretch; min-width: 0; max-width: 100%; color: var(--wb-muted-fg); }
-.toolsline .tsum { flex-wrap: wrap; gap: 0 8px; }
+.toolsline .tsum { flex-wrap: wrap; gap: 0 8px; line-height: 1.3; }
+.toolsline > summary.conv-row { padding-top: 2px; padding-bottom: 2px; }
 .toolsline .tsl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toolsline .tsn { min-width: 0; font-size: 12px; }
 .toolsline .tsl > span, .toolsline .tool { font-family: var(--wb-mono); }
@@ -113,7 +114,7 @@
 .mailline { min-width: 0; }
 .mailline .arr { font-weight: 800; flex: none; }
 .mailline.recv .arr { color: var(--wb-primary); }
-.mailline .mail-icon { width: 13px; height: 13px; flex: none; align-self: center; color: var(--wb-primary); }
+.mailline .row-icon > .i, .mailline .mail-icon { width: 13px; height: 13px; flex: none; align-self: center; color: var(--wb-primary); }
 .mailline .mpeer { font-weight: 700; color: var(--wb-fg); text-decoration: none; flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .mailline a.mpeer { color: var(--wb-primary); }
 .mailline a.mpeer:hover { text-decoration: underline; }
@@ -147,13 +148,15 @@ details[open] > summary.conv-row > .row-chevron { transform: rotate(0deg); }
 .input-record .wake-head .t { margin-left: auto; }
 .mailline.child-report { min-width: 0; }
 .mailline.child-report .mfirst { margin-left: 0; }
+.mailline.agent-note.fail .mpeer, .mailline.agent-note.fail .mfirst { color: var(--wb-fail); }
+.mailline .row-details .mbody { margin: 0; padding: 0; background: none; box-shadow: none; }
 .child-report .wake-caption { white-space: normal; overflow-wrap: anywhere; }
 .src.peer-lead { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 14%, transparent); }
 .mail-block { min-width: 0; }
 .wbupdate-topic[data-wb-topic] { cursor: pointer; }
 /* Higher specificity keeps the legacy effects frame from nesting full topic cards in a summary. */
 .wbeffects.wbupdate { align-self: stretch; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; }
-.wbupdate-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 0 4px 5px; font-size: 11px; color: var(--wb-muted-fg); }
+.wbupdate-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 0 26px 5px 8px; font-size: 11px; color: var(--wb-muted-fg); }
 .wbupdate-head .t { margin-left: auto; }
 .wbupdate-topic { min-width: 0; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); }
 .wbupdate-topic + .wbupdate-topic { margin-top: 6px; }
@@ -175,13 +178,6 @@ details[open] > summary.conv-row > .row-chevron { transform: rotate(0deg); }
 .wbupdate-panel a { flex: none; }
 .wbupdate-status { display: block; padding: 0 12px; font-size: 11px; color: var(--wb-muted-fg); overflow-wrap: anywhere; }
 .wbupdate-status:empty { display: none; }
-.wbeffects.wbupdate-line > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; padding: 4px 7px; border-radius: 7px; list-style: none; font-size: 12px; color: var(--wb-muted-fg); }
-.wbupdate-line > summary::-webkit-details-marker { display: none; }
-.wbupdate-line > summary:hover { background: var(--wb-muted); }
-.wbupdate-line > summary .i { flex: none; width: 10px; height: 10px; }
-.wbupdate-line[open] > summary .i { transform: rotate(180deg); }
-.wbupdate-preview { flex: 1 1 12em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wbupdate-line > .wbupdate-topic { margin: 3px 7px 5px 22px; }
 summary.conv-row:focus-visible, .conv-row a:focus-visible, .wbupdate :is(a, summary):focus-visible, .child-report > summary:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: 3px; }
 .wbupdate-bar a:focus-visible { outline-color: var(--wb-on-topic); }
 
