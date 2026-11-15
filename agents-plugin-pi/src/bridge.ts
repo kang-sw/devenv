@@ -1112,9 +1112,6 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
           const normalized = normalizeSessionKey(rawParams, {
             ownKey: defaultKeyRef.current,
             sentinel: FRESH_BOOTSTRAP_SENTINEL,
-            // WS_PI_PARENT_SESSION_KEY_ENV is unset until a future
-            // fork-spawning ticket sets it (out of scope here — this phase
-            // only reserves the env var name via process-role.ts).
             parentLeadKey: process.env[WS_PI_PARENT_SESSION_KEY_ENV],
           });
           const args = resolveSessionKey(normalized, defaultKeyRef);
@@ -1231,12 +1228,32 @@ export async function startBridge(pi: ExtensionAPI, opts: BridgeOptions): Promis
     // Default-fill key bootstrap: mint a session_key via ferrule so that
     // omitted-session_key calls resolve instead of failing outright.
     try {
+      // A role-only launch (including a headless pi -p worker) needs the
+      // launching lead's key before the first turn; a prompt key arrives too late.
+      const roleOnlyChild = Boolean(readSpawnRole(process.env)) && !policy;
+      const parentKey = roleOnlyChild ? process.env[WS_PI_PARENT_SESSION_KEY_ENV]?.trim() : undefined;
+      const warnMissingParent = () => notify(opts.ui,
+        "ws-pi-bridge: non-main Pi process has no known parent; set WS_PI_PARENT_SESSION_KEY to the launching lead's session key. Falling back to a top-level lead key.", "warning");
+      const mintKey = async (): Promise<McpToolCallResult> => {
+        const legacyArgs = { root: opts.cwd, format: "json", ...harnessReport };
+        if (!roleOnlyChild) return client.callTool("ferrule", policy
+          ? { root: opts.cwd, format: "json", capability: policy.authority, ...(policy.parentSessionKey ? { parent_session_key: policy.parentSessionKey } : {}) }
+          : legacyArgs);
+        if (parentKey) {
+          // Retry only the server's unknown-parent refusal, not transport or
+          // other failures whose mint outcome may be unknown.
+          const result = await client.callTool("ferrule", { ...legacyArgs, parent_session_key: parentKey });
+          if (!result.isError || !/session bootstrap: parent_session_key .+ is not a known session key/.test(firstText(result) ?? "")) return result;
+        }
+        warnMissingParent();
+        return client.callTool("ferrule", legacyArgs);
+      };
       const ferruleResult = policy?.sessionKey
         ? { content: [{ type: "text", text: JSON.stringify({ session_key: policy.sessionKey }) }] }
         : hostedKey
           ? await reloginHostedKey(hostedKey)
           : (await reuseRecordedLeadKey())
-          ?? await client.callTool("ferrule", { root: opts.cwd, format: "json", ...(policy ? { capability: policy.authority, ...(policy.parentSessionKey ? { parent_session_key: policy.parentSessionKey } : {}) } : harnessReport) });
+          ?? await mintKey();
       if (ferruleResult.isError) {
         notify(opts.ui, `ws-pi-bridge: ferrule bootstrap failed: ${firstText(ferruleResult)}`, "warning");
       } else {

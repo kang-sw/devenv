@@ -1589,6 +1589,7 @@ export interface ForkFinishOperation {
   token: string;
   cwd: string;
   extensionPath: string;
+  leadSessionKey?: string;
   generation: number | undefined;
   phase: "waiting" | "evaluating" | "closeout" | "parking" | "complete";
   settled: boolean;
@@ -2043,7 +2044,7 @@ export function startForkFinish(
   record: RpcAgentRecord,
   registry: RpcAgentRegistry,
   pi: ExtensionAPI,
-  resumeCtx: Pick<RpcResumeCtx, "cwd" | "extensionPath">,
+  resumeCtx: Pick<RpcResumeCtx, "cwd" | "extensionPath" | "leadSessionKey">,
 ): ForkFinishOperation {
   if (record.forkFinish) return record.forkFinish;
   claimLeadOwnership(record);
@@ -2051,6 +2052,7 @@ export function startForkFinish(
     token: randomUUID(),
     cwd: resumeCtx.cwd,
     extensionPath: resumeCtx.extensionPath,
+    leadSessionKey: resumeCtx.leadSessionKey,
     generation: record.launchGeneration,
     phase: "closeout",
     settled: false,
@@ -2125,8 +2127,8 @@ function advanceForkFinish(
   return operation.advancing;
 }
 
-function finishResumeCtx(operation: ForkFinishOperation): Pick<RpcResumeCtx, "cwd" | "extensionPath"> {
-  return { cwd: operation.cwd, extensionPath: operation.extensionPath };
+function finishResumeCtx(operation: ForkFinishOperation): Pick<RpcResumeCtx, "cwd" | "extensionPath" | "leadSessionKey"> {
+  return { cwd: operation.cwd, extensionPath: operation.extensionPath, leadSessionKey: operation.leadSessionKey };
 }
 
 async function parkForkFinish(record: RpcAgentRecord, registry: RpcAgentRegistry, pi: ExtensionAPI, operation: ForkFinishOperation, failure?: string): Promise<void> {
@@ -2665,12 +2667,9 @@ export interface RpcSpawnCtx {
    */
   explicitTools?: string;
   /**
-   * 260904 Phase 1 (side-thread fork): the lead's own default-filled
-   * session key (`BridgeHandle.defaultSessionKeyRef.current`), forwarded to
-   * `buildRpcClientOptions` so it can set `WS_PI_PARENT_SESSION_KEY_ENV` on
-   * the fork child's env — the marker `normalizeSessionKey` (bridge.ts)
-   * already rewrites an explicit sentinel `session_key` from. Only
-   * meaningful alongside `forkFrom`; ignored otherwise.
+   * Immediate launching lead's default key, forwarded to the child's
+   * WS_PI_PARENT_SESSION_KEY when its policy carries no parent. Forks also
+   * use the env marker to refuse accidental use of the parent's key.
    */
   parentSessionKey?: string;
   /**
@@ -2915,10 +2914,11 @@ export function buildRpcClientOptions(
   // RpcClient merges this object over process.env. An explicit empty marker
   // therefore clears an inherited deep mode for every non-research launch.
   env[WS_PI_EXPLORE_MODE_ENV] = role === "explore" && exploreMode ? exploreMode : "";
-  // Explicitly clear every fork-only marker for worker/explore descendants.
+  // Explicitly clear fork context markers for worker/explore descendants.
   env[WS_PI_FORK_CONTEXT_ENV] = forkLaunch?.contextPath ?? "";
   env[WS_PI_FORK_AFFINITY_ENV] = forkLaunch?.affinityId ?? "";
-  env[WS_PI_PARENT_SESSION_KEY_ENV] = role === "fork" ? parentSessionKey ?? "" : "";
+  // Every child launch carries its immediate parent, never an inherited ancestor.
+  env[WS_PI_PARENT_SESSION_KEY_ENV] = delegation?.parentSessionKey ?? parentSessionKey ?? "";
   env[DELEGATION_ENV] = delegation ? JSON.stringify(delegation) : "";
   env[WEB_HOME_ENV] = role === "explore" ? dirname(sessionPath) : "";
   // The control-channel bootstrap: the child reads and deletes these before it
@@ -3980,17 +3980,17 @@ export async function spawnAgent(
 }
 
 /**
- * The delegation policy a dormant relaunch hands its child. A non-fork record
+ * The delegation policy a dormant relaunch hands its child. A record
  * whose stored policy carries no pre-minted `sessionKey` bootstraps with a
  * fresh `ferrule`, so its `parentSessionKey` is re-stamped with the
  * dispatching session's current key: the stored one may be missing (a child
  * spawned without it), pruned by key retention (which fails `ferrule` as an
- * unknown parent), or superseded by a lead re-login. A fork stays a lateral
- * lead with no policy parent; a pre-minted key needs no parent at all.
+ * unknown parent), or superseded by a lead re-login. Forks keep lead authority
+ * with this lineage; a pre-minted key needs no parent at all.
  */
 export function relaunchDelegation(record: Pick<RpcAgentRecord, "delegation" | "spawnRole">, currentKey: string | undefined): DelegationPolicy | undefined {
   const stored = record.delegation;
-  if (!stored || record.spawnRole === "fork" || stored.sessionKey || !currentKey) return stored;
+  if (!stored || stored.sessionKey || !currentKey) return stored;
   return { ...stored, parentSessionKey: currentKey };
 }
 
@@ -4132,7 +4132,7 @@ export async function sendToAgent(
         record.systemPromptPath,
         record.explicitTools ?? record.delegation?.tools.join(",") ?? resolveTools(record.toolGroup, record.wsToolNames),
         undefined,
-        record.forkContext?.parentSessionKey,
+        ctx.leadSessionKey ?? record.forkContext?.parentSessionKey,
         record.spawnRole === "fork" ? "fork" : record.spawnRole === "explore" ? "explore" : "worker",
         record.exploreMode,
         forkLaunch,
