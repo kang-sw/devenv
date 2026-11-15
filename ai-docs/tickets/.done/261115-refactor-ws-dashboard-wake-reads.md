@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 57d0789d11fbfff3
 sage-review-completeness-reviewed: 57d0789d11fbfff3
+completed: 2026-11-15
 ---
 
 # Dashboard wakes reuse unchanged reads instead of reopening files
@@ -165,3 +166,153 @@ W2-W4 and record the after numbers on the same fixture in the Result
   'Refresh|Stream|Snapshot|Rail|Stamp'`, `mcp -run 'Whiteboard|Dashboard'`
   (known red `TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation`
   excluded).
+
+### Result (82245d9fa) - 2026-11-15
+
+Implemented W2-W4 in `82245d9fa`; the isolated test-cleanup repair is
+`e9036098e`. No shared daemon operation, installation, plugin-runtime build,
+version bump, merge, or push was performed.
+
+#### Read and mutation contracts
+
+- `wslive.ObservedCache` lists each evidence directory, checks each record's
+  same-file identity/size/mode/mtime, and reuses unchanged decoded records and
+  their derived model-history projection. Changed records alone are opened;
+  deletion, recreation, malformed records, atomic same-stamp replacement,
+  concurrent readers, and `Forget` have regressions. Snapshot overlays retain
+  newer live evidence and never mutate a previously published projection.
+- Folder-cache hits no longer deep-clone. They return a small, caller-owned
+  `State` header sharing frozen backing data, with the unexported shared flag.
+  A literal shared pointer would race at `Apply`'s final `*state = *work`;
+  separate headers allow its existing private work copy to detach safely.
+  `BeginRender` clones shared backing before changing it. Other in-package
+  mutators operate on Apply's private work or a fresh folder transaction.
+- External field-writer audit: `mcp/whiteboard_tools.go`'s `renderWhiteboard`
+  (`Embeds`, `LastEmbedSeq`) and `evictWhiteboardEmbeds` already receive the
+  explicit private clone from `wswhiteboard/folders.go:151-159`. They do not
+  receive cached read generations, so no caller migration was needed.
+  `DashboardSessionSource`'s cached consumers only query/build/render views.
+  Both package-level and actual MCP update/implicit-render race tests retain
+  a cached generation during mutations and assert its serialized digest is
+  unchanged afterwards.
+- Session/index stamps read only cached snapshot freshness, not observed-model
+  overlays. Snapshot, reply-registry and contact-scope reads use
+  `FileCache.LoadIdentity`, including recently written files; other
+  `FileCache.Load` consumers keep their old recent-write behavior. Clock-based
+  adapter/session/contact expiry, watched PID checks, mail prints and watched
+  child-directory listings remain live inputs. Only two cache-load lines below
+  the render code changed in `mcp/dashboard_page.go`; no render/transport
+  restructuring overlaps the sibling ticket.
+
+#### Same-fixture before/after evidence
+
+Machine-local raw profiles, binaries, output, cumulative tops and methodology:
+`/tmp/exec5/wakereads/{before,after}.{cpu,test,txt,top.txt}` and `README.md`.
+The retained `BenchmarkWakeReads112` uses a disposable 112-topic folder board
+(one history entry each), four synthetic index/rail sessions with 32 observed
+records each, hosted snapshots, and 2,000 repeated read-side wakes. A wake
+opens the unchanged board, reads the four snapshots, and computes session and
+index stamps; rendering/transport is deliberately excluded.
+
+The baseline uses the same fixture/wake body on `c2c18c07b`, with its old
+observed-directory `FileCache` clock frozen at fixture creation. This holds the
+recent-write window active throughout the run instead of mixing fresh and
+aged cache behavior after two seconds. It measures the active/recent-write
+case, not every aged/static workload.
+
+| Per wake | Before | After |
+| --- | ---: | ---: |
+| Wall time | 22.005 ms | 8.783 ms |
+| Approximate sampled CPU | 14.37 ms | 2.95 ms |
+| Observed-record opens | 384 | 0 |
+| Snapshot-file opens (hosted fixture) | 0 | 0 |
+| Allocated bytes | 2,158,238 | 285,815 |
+| Allocations | 20,779 | 1,829 |
+
+Baseline record opens are inferred from the counted directory-cache misses
+multiplied by 32 valid fixture files; after opens are counted at the record
+opener. Separate injected-opener regressions check unchanged record/snapshot
+opens and exact changed-file rereads. Directory listings are excluded from
+record opens: evidence listings fall from 12 to four per wake; the board still
+opens its flock once and validates its authoritative files.
+
+CPU/wake divides the wake closure's cumulative CPU samples (28.74 s before,
+5.89 s after) by the 2,000 timed wakes, including a small warmup contribution.
+The profiles also include fixture construction, so their total sampled CPU is
+not used as CPU/wake. Wall time falls about 60%; sampled wake CPU about 79%.
+Cumulative pprof tops (percentages overlap, not additive):
+
+| Site | Before | After |
+| --- | ---: | ---: |
+| `SnapshotCache.Snapshot` | 80.03% | 45.11% |
+| `ReadObserved` / `ObservedCache.Load` | 76.09% | 45.11% |
+| `FolderCache.Open` | 11.10% | 39.08% |
+| `sessionStamp` | 26.65% | below retained top threshold |
+| `indexStamp` | 25.85% | below retained top threshold |
+| `os.Open` | 65.63% | 1.58% |
+| `os.Stat` | see raw top | 75.14% |
+
+The remaining profile is chiefly identity stats, which the chosen contract
+requires. The host terminated the first after-profile command at its background
+session limit; the resumed command produced the complete after profile.
+
+Reproduction (inside `agents-plugin-tool`, with the environment below):
+
+```sh
+go test ./internal/wsdashboard -run '^$' -bench '^BenchmarkWakeReads112$' \
+  -benchtime=2000x -count=1 -benchmem \
+  -cpuprofile=/tmp/exec5/wakereads/after.cpu -o /tmp/exec5/wakereads/after.test
+go tool pprof -top -cum /tmp/exec5/wakereads/after.test /tmp/exec5/wakereads/after.cpu
+```
+
+#### Verification and review
+
+Every Go command used `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`.
+All of the following passed; full output is under `/tmp/exec5/wakereads/`:
+
+- `go test -race ./internal/wswhiteboard -run 'Folder|Open|Store' -count=1`
+  (`whiteboard-race.txt`), including unchanged-digest readers concurrent with
+  Apply, BeginRender and folder update/commit.
+- `go test -race ./internal/wslive -run Observed -count=1`
+  (`observed-race.txt`).
+- `go test ./internal/wsdashboard -run 'Refresh|Stream|Snapshot|Rail|Stamp' -count=1`
+  (`dashboard-focused.txt`); the whole package was never run.
+- `go test ./internal/mcp -run 'Whiteboard|Dashboard' -skip '^TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation$' -count=1`
+  (`mcp-focused-after.txt`). Its first run exposed an existing timer/TempDir
+  teardown race in `TestDashboardRepoReadOncePerHeartbeat`; `e9036098e` stops
+  and drains that test's own server before cleanup, and the rerun passes.
+- `go test -race ./internal/mcp -run '^TestDashboard(StampReads|FolderShared|RepoReadOncePerHeartbeat)' -count=1`
+  (`mcp-new-race.txt`), covering real MCP update/commit and implicit rendering
+  against concurrent dashboard readers.
+- `go test -race ./internal/wsdashboard -run 'FileCache|WakeStamp|ObservedSnapshot' -count=1`
+  (`cache-stamp-race-final.txt`), including zero unchanged opens, same-size/time
+  atomic replacement, expiry and cache forgetting.
+- `go test ./internal/wsdashboard -run '^TestWakeReadsBrowser$' -count=1 -v`
+  with the assigned `WS_PLAYWRIGHT_MODULE` and `PLAYWRIGHT_BROWSERS_PATH`
+  (`wake-chromium-after.txt`): disposable Chromium at 1440px and 420px, 112
+  topics, three live-only wakes, changed child evidence visible in the tree,
+  unchanged board DOM identity, and no page errors.
+- Lite correctness/test-integrity review was performed by the worker itself
+  because the task prohibits subagents; no introduced Critical/Important
+  findings remain. Details: `/tmp/exec5/wakereads/self-review.md`.
+
+Pre-existing browser findings reported to the lead, outside this read-path
+scope: (Important) `dashboard-conversation.js:71`'s entries merge ignores
+sibling `.modelhistory`, leaving its history stale after SSE; (Minor)
+`selection-note.browser.cjs:27` waits for visible `#ctext`, now a hidden
+`.wsc-backing` textarea. The existing selection-note browser check failed on
+that stale selector. The first read/wake smoke exposed the history merge
+omission; the retained regression checks changed child models through the
+correctly refreshed tree region. Neither JavaScript/render issue was changed.
+
+#### T0 confirmation
+
+No disk/wire shape changed. Old/new writers retain `AppendObserved`'s immutable
+JSON publication (`wslive/observed.go:254-298`) and the same folder intent and
+publication bytes (`wswhiteboard/folders.go:711-807`, unchanged). Old readers
+continue reading those bytes through `ReadObserved` and `FolderStore.load`;
+new empty caches reconstruct via the same bounded record decoder
+(`observed.go:304-341`, `observed_cache.go:50-126`) and folder reader
+(`folders_cache.go:110-128`). The State marker is unexported and never JSON.
+No data is overwritten or lost when old/new versions alternate, and reopening
+requires no migration or recovery beyond loading those unchanged stores.
