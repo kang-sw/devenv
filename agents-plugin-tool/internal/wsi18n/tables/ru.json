@@ -391,6 +391,8 @@
   "js.post.unreachable": "панель недоступна",
   "js.preview.failed": "Не удалось загрузить предпросмотр",
   "js.preview.gone": "Этот файл больше недоступен. Откройте его снова с доски.",
+  "js.preview.kind.pdf": "PDF",
+  "js.preview.pdf.open": "Открыть / скачать PDF",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · песочница",
   "js.preview.kind.image": "Изображение",

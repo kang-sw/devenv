@@ -391,6 +391,8 @@
   "js.post.unreachable": "das Dashboard ist nicht erreichbar",
   "js.preview.failed": "Die Vorschau konnte nicht geladen werden",
   "js.preview.gone": "Diese Datei ist nicht mehr verfügbar. Öffne sie erneut vom Board aus.",
+  "js.preview.kind.pdf": "PDF",
+  "js.preview.pdf.open": "PDF öffnen / herunterladen",
   "js.preview.kind.diff": "diff",
   "js.preview.kind.frame": "HTML · Sandbox",
   "js.preview.kind.image": "Bild",

@@ -738,6 +738,10 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .pv-img img { max-width: 100%; height: auto; display: block; }
 .pv-vid { height: 100%; background: #0e0f12; display: grid; }
 .pv-vid video { width: 100%; height: 100%; min-height: 0; display: block; }
+.pv-pdf { position: relative; height: 100%; min-height: 240px; display: grid; place-items: center; background: var(--wb-muted); }
+.pv-pdf iframe { width: 100%; height: 100%; min-height: 240px; border: 0; display: block; }
+.pv-pdf-open { color: var(--wb-fg); background: var(--wb-bg); padding: 5px 10px; }
+.pv-pdf[data-viewer] .pv-pdf-open { position: absolute; right: 12px; bottom: 12px; z-index: 1; }
 .pv-sand { height: 100%; display: flex; flex-direction: column; }
 .pv-cap { flex: none; font-size: 10.5px; color: var(--wb-muted-fg); padding: 3px 10px; border-bottom: 1px dashed color-mix(in srgb, var(--wb-fg) 22%, transparent); }
 .pv-sand iframe { flex: 1 1 0; min-height: 0; width: 100%; border: 0; background: #fff; display: block; }
