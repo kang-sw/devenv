@@ -3,7 +3,7 @@
   // and toolbar-sheet browsers over the guarded read-only fs routes. Each
   // inner tab owns its root/directory, selection, view mode and scroll.
   // The lazy tree stays beside non-column directory views; files open in the
-  // board's preview slot (preview.js).
+  // board's preview slot (preview.js), or their row actions for binary files.
   //
   // The page script owns the tab switch and hands the module its pieces
   // once (create), then calls shown each time the pane comes into view: the
@@ -94,7 +94,7 @@
   // Each owner gets its own DOM, requests, search token and storage adapter.
   function create(node, options) {
   var el = node, h = options || {}, rid = h.rid || doc.documentElement.getAttribute("data-rid") || "";
-  var gen = 0, rootAttempt = 0, started = false, destroyed = false, listeners = [];
+  var gen = 0, rootAttempt = 0, previewAttempt = 0, started = false, destroyed = false, listeners = [];
   var lists = {}, open = {}, sel = null, cur = null, info = null, rootAbs = "";
   var view = { ign: false, dot: false }, rows = [], rowEls = {};
   var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null, searchResult = null, searchPaused = false;
@@ -605,14 +605,44 @@
   }
   function preview(path, line) {
     if (!window.WsPreview) return;
-    var o = {};
+    var o = {}, g = gen, navigation = navAttempt, attempt = ++previewAttempt;
     if (rootAbs) o.root = rootAbs;
     if (line > 0) o.line = line;
-    window.WsPreview.open(path, o);
+    function rowActions(card) {
+      if (destroyed || g !== gen) return false;
+      var container = ui.directory;
+      var row = Array.prototype.find.call(container.querySelectorAll(".fentry"), function (n) { return n.getAttribute("data-entry") === path; });
+      if (!shows(row)) {
+        container = ui.hits;
+        row = Array.prototype.find.call(container.querySelectorAll("[data-path]"), function (n) { return n.getAttribute("data-path") === path; });
+      }
+      if (!shows(row)) return false;
+      var b = row.getBoundingClientRect(), area = container.getBoundingClientRect();
+      if (b.bottom <= Math.max(0, area.top) || b.top >= Math.min(window.innerHeight, area.bottom) ||
+          b.right <= Math.max(0, area.left) || b.left >= Math.min(window.innerWidth, area.right)) return false;
+      var folder = parentRel(path), listing = lists[folder];
+      var entry = listing && (listing.entries || []).filter(function (e) { return joinRel(folder, e.name) === path; })[0];
+      if (!entry && container === ui.hits) entry = { name: path.slice(folder ? folder.length + 1 : 0) };
+      if (!entry) return false;
+      if (card) card.close();
+      openMenu({ e: entry, path: path, dir: folder }, b.left, b.bottom);
+      return true;
+    }
+    o.mediaError = rowActions;
+    // Ask before creating a card: binary files use the row's existing actions,
+    // while size-limit notes and every supported renderer keep their previews.
+    fsGet("preview", { path: path, root: rootAbs, text: line > 0 ? "1" : "" }).then(function (answer) {
+      if (destroyed || g !== gen || navigation !== navAttempt || attempt !== previewAttempt) return;
+      if (answer.kind === "none" && answer.reason_code === "binary") { rowActions(); return; }
+      o.answer = answer;
+      window.WsPreview.open(path, o);
+    }, function () {
+      if (!destroyed && g === gen && navigation === navAttempt && attempt === previewAttempt) window.WsPreview.open(path, o);
+    });
   }
   // activate is a click or Enter on a row: a folder opens or closes, a file
-  // is selected and previewed; a deleted entry or a symlink only takes the
-  // focus.
+  // is selected and previewed (binary files offer row actions instead);
+  // a deleted entry or a symlink only takes the focus.
   function activate(r) {
     if (!r || r.more) return;
     if (opens(r.e)) { toggle(r.path, true); return; }

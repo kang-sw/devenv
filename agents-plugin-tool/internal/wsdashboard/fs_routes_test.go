@@ -224,10 +224,10 @@ func TestFSPreviewKinds(t *testing.T) {
 	if code, a = fsPreview(t, f, local, "path=main.go"); code != http.StatusOK || a.Kind != "text" || a.Text != "package main\n" || a.Source {
 		t.Errorf("text preview = %d %+v", code, a)
 	}
-	if code, a = fsPreview(t, f, local, "path=blob.bin"); code != http.StatusOK || a.Kind != "none" || a.Reason == "" || a.Text != "" {
+	if code, a = fsPreview(t, f, local, "path=blob.bin"); code != http.StatusOK || a.Kind != "none" || a.Reason == "" || a.ReasonCode != "binary" || a.Text != "" {
 		t.Errorf("binary preview = %d %+v", code, a)
 	}
-	if code, a = fsPreview(t, f, local, "path=big.txt"); code != http.StatusOK || a.Kind != "none" || a.Reason == "" || a.Text != "" {
+	if code, a = fsPreview(t, f, local, "path=big.txt"); code != http.StatusOK || a.Kind != "none" || a.Reason == "" || a.ReasonCode != "" || a.Text != "" {
 		t.Errorf("oversize preview = %d kind %q reason %q", code, a.Kind, a.Reason)
 	}
 	code, a = fsPreview(t, f, local, "path=fix.patch")

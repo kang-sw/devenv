@@ -66,11 +66,12 @@ func TestFilesTabOnTheSessionPage(t *testing.T) {
 func TestFilesExplorerInstances(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	files, _ := json.Marshal(mustAsset(t, "files.js"))
+	preview, _ := json.Marshal(mustAsset(t, "preview.js"))
 	fixture, err := os.ReadFile("testdata/files-explorer.test.cjs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+";\n"+cardsDOM+string(fixture))
+	runNode(t, "file explorer instances", "var CARDS = "+string(cards)+", FILES = "+string(files)+", PREVIEW = "+string(preview)+";\n"+cardsDOM+string(fixture))
 }
 
 func TestFilesExplorerColumnLayout(t *testing.T) {

@@ -481,7 +481,7 @@ func (d *Daemon) handleFSOutside(w http.ResponseWriter, r *http.Request, replyID
 		case len(data) > fileViewMax:
 			a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 		case !viewableText(data):
-			a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.binary")
+			a.Kind, a.Reason, a.ReasonCode = "none", wsi18n.T(lang, "file.reason.binary"), "binary"
 		case ext == ".md" || ext == ".markdown":
 			// No link rule: a relative link or image stays path text.
 			a.Kind, a.HTML = "markdown", string(wswhiteboard.RenderText(string(data), wswhiteboard.TextTargets{}))

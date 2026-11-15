@@ -123,6 +123,8 @@ type fsPreviewAnswer struct {
 	Text   string        `json:"text,omitempty"`
 	Source bool          `json:"source,omitempty"`
 	Reason string        `json:"reason,omitempty"`
+	// ReasonCode lets clients distinguish binary fallback from size limits.
+	ReasonCode string `json:"reason_code,omitempty"`
 	// HighlightedLines is optional, bounded by highlightLines' 256 KiB cap.
 	HighlightedLines [][]GitPiece `json:"highlighted_lines,omitempty"`
 }
@@ -652,7 +654,7 @@ func (d *Daemon) handleFSPreview(w http.ResponseWriter, r *http.Request, replyID
 		case len(data) > fileViewMax:
 			a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.large", fileViewMax>>20)
 		case !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0:
-			a.Kind, a.Reason = "none", wsi18n.T(lang, "file.reason.binary")
+			a.Kind, a.Reason, a.ReasonCode = "none", wsi18n.T(lang, "file.reason.binary"), "binary"
 		default:
 			switch ext := strings.ToLower(filepath.Ext(rel)); {
 			case plain:

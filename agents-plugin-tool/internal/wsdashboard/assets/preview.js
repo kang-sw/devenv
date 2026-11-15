@@ -26,6 +26,8 @@
   var doc = document, root = doc.documentElement, cards = window.WsCards;
   if (!cards) return;
   var rid = root.getAttribute("data-rid"), KIND = "preview", hooks = {};
+  // Explorer preflight answers are one-shot, never part of a saved card record.
+  var answers = new WeakMap();
   // LINE is the text view's line height in px (the stylesheet's .pv-txt), which
   // a jump to a line multiplies.
   var LINE = 18;
@@ -197,6 +199,7 @@
       media.addEventListener("error", function () {
         // Ignore a late event from a replaced player or a pending reload.
         if (card.turn === turn && card.body.firstChild === box) {
+          if (card.mediaError && card.mediaError(card)) return;
           draw(card, { kind: "none", reason: wsT("js.preview.media.unsupported") });
         }
       });
@@ -260,10 +263,13 @@
     card.el.removeAttribute("data-preview-kind");
     card.paint();
     head(card, guess(d.path), "");
-    ask(d).then(function (r) {
+    var answer = answers.get(d);
+    answers.delete(d);
+    var request = answer ? Promise.resolve(answer) : ask(d).then(function (r) {
       if (!r.ok) throw r.status;
       return r.json();
-    }).then(function (v) {
+    });
+    request.then(function (v) {
       if (card.turn === turn) draw(card, v);
     }, function (status) {
       if (card.turn !== turn) return;
@@ -275,7 +281,7 @@
 
   cards.register(KIND, {
     open: load,
-    close: function (card) { card.turn = -1; },
+    close: function (card) { card.turn = -1; card.mediaError = null; },
     // Unpinning a card makes it the slot again: the slot it replaces goes.
     pinned: function (card) {
       if (card.pinned) return;
@@ -294,6 +300,8 @@
     // as the absolute path of a linked file outside the session root.
     // o.origin is the exact validated topic node for one-time placement;
     // it is never part of the kind's persisted data or sandbox capability.
+    // o.answer reuses explorer preflight; o.mediaError offers its row menu.
+    // Neither is persisted: restored cards request fresh content as usual.
     open: function (path, o) {
       o = o || {};
       var data = { path: path };
@@ -302,6 +310,7 @@
         if (o.root) data.root = o.root;
         if (o.line > 0) data.line = o.line;
       }
+      if (o.answer) answers.set(data, o.answer);
       var card = cards.list(KIND).filter(function (c) {
         return c.pinned && c.data.path === path && !c.data.out === !data.out && (c.data.root || "") === (data.root || "");
       })[0];
@@ -315,6 +324,7 @@
         load(card);
       } else card = cards.open(KIND, data, undefined, o.origin);
       if (!card) return null;
+      card.mediaError = o.mediaError || null;
       card.fold(false);
       card.show();
       return card;
