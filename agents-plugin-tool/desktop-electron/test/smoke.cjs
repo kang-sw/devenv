@@ -73,10 +73,12 @@ async function main(fn, arg) { return application.evaluate(fn, arg); }
 async function launch() {
   const launchedAt = Date.now();
   fs.appendFileSync(electronAppLog, `\nLaunch at ${new Date(launchedAt).toISOString()}\n`);
+  const env = { ...process.env, WS_CACHE_HOME: shellRoot, WS_CONFIG_HOME: path.join(temp, 'config'),
+    ELECTRON_ENABLE_LOGGING: '1', ELECTRON_ENABLE_STACK_DUMPING: '1' };
+  delete env.ELECTRON_RUN_AS_NODE;
   try {
     application = await _electron.launch({ executablePath, args: [`--user-data-dir=${path.join(temp, 'profile')}`],
-      env: { ...process.env, WS_CACHE_HOME: shellRoot, WS_CONFIG_HOME: path.join(temp, 'config'), ELECTRON_RUN_AS_NODE: '',
-        ELECTRON_ENABLE_LOGGING: '1', ELECTRON_ENABLE_STACK_DUMPING: '1' }, timeout: 60000 });
+      env, timeout: 60000 });
   } catch (error) {
     fs.appendFileSync(electronAppLog, `Launch failed: ${error.message}\nPlaywright-captured app output (also in playwright-debug.log):\n`);
     fs.appendFileSync(electronAppLog, fs.readFileSync(playwrightDebugLog));
@@ -292,7 +294,9 @@ async function run() {
   await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
   const secondLog = fs.openSync(path.join(evidence, 'second-launch.log'), 'w');
   const secondLaunchedAt = Date.now();
-  const second = spawn(executablePath, [`--user-data-dir=${path.join(temp, 'profile')}`], { env: { ...process.env, WS_CACHE_HOME: shellRoot, ELECTRON_RUN_AS_NODE: '' }, stdio: ['ignore', secondLog, secondLog] });
+  const secondEnv = { ...process.env, WS_CACHE_HOME: shellRoot };
+  delete secondEnv.ELECTRON_RUN_AS_NODE;
+  const second = spawn(executablePath, [`--user-data-dir=${path.join(temp, 'profile')}`], { env: secondEnv, stdio: ['ignore', secondLog, secondLog] });
   recordLaunch(second, secondLaunchedAt);
   await waitFor(() => Promise.resolve(second.exitCode !== null || second.signalCode !== null), 'second launch exit');
   assert.equal(second.exitCode, 0);

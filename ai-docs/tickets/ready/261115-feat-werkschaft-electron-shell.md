@@ -718,6 +718,100 @@ Only this ticket outcome is committed after the harness commit; evidence and
 binaries remain ignored and uncommitted. The owner's no-fix/no-retry boundary
 ends this run regardless of the now-more-specific W3 evidence.
 
+##### Windows acceptance run (b80fb45c2) - 2026-11-15
+
+The owner-authorized single Windows run **launched the built app and attached
+to the dashboard, then failed the window-size assertion**. Windows acceptance
+remains **unverified overall**. No source repair, additional build or smoke
+retry followed. Phase 1 is already merged into develop; this run leaves the
+ticket in `ready/` and Phases 2-4 untouched.
+
+Commit `b80fb45c2` changes only `test/smoke.cjs`: both Playwright and
+second-instance launch environments are copies of `process.env` with
+`ELECTRON_RUN_AS_NODE` deleted, rather than set to an empty string. Runtime
+policy, dependencies and all other source files are unchanged. Mac headless
+`npm test` passed **33/33**; syntax and diff checks passed. No Electron, smoke,
+built app or GUI was launched on the Mac.
+
+Owner rule (893)=a governed the run. A full bundle of `exec4/electron-w3` at
+`b80fb45c20a8d8dc10b7e8f99e996716ad938d49` was cloned only into
+`C:\Users\ki608\ws-electron-verify-20261115T040424\src`. The owner's
+pre-existing clone was never accessed or modified. Run-controlled npm/Electron
+caches, temporary/profile/config paths, Playwright copies and logs stayed
+under that unique folder.
+
+- Exactly one `npm ci --no-audit --no-fund` and one `node
+  node_modules/electron/install.js` succeeded. The official Electron
+  **44.11.3 win32-x64** zip SHA256 is
+  `97fca9b8e9b90cdc88c1efd44160ca4b89b15101721d93c8befcbeb35b93fb59`.
+  Subsequent npm steps were offline; no global installs or other downloads
+  occurred. Cached Mac Playwright and playwright-core were copied, not installed.
+- The fixture was cross-compiled on the Mac with `GOOS=windows GOARCH=amd64
+  GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go build`. On Windows it ran as
+  PID **18228**, on free port **62696**, with its own `WS_CACHE_HOME` under
+  the run folder. No shared daemon or port 29417 was accessed.
+- Windows `npm test` passed **33/33** and the single offline `npm run build`
+  passed. Task `ewv-20261115T040424` invoked the smoke **once**, with
+  interactive logon as `ki608` in the logged-in console session. The smoke
+  exited **1**; its normal summary records the initial endpoint/Retry/attach
+  check and the failure. The host source checkout remained clean.
+
+Windows-versus-Mac deltas (evidence paths below are relative to
+`agents-plugin-tool/desktop-electron/dist/evidence/windows/20261115T040424/`):
+
+- **W1 remains resolved — offline win32 packaging passes.** Packaged metadata
+  is CompanyName `kang-sw`, product `Werkschaft`, version `0.1.0`. Evidence:
+  `build.log`, `packaged-metadata.json`. The Mac comparison remains the prior
+  recorded darwin build; no new Mac build or live run was performed.
+- **W2 remains resolved — Mac and Windows both pass 33/33 tests.** Evidence:
+  `mac-unit-tests.log`, `unit-tests.log`.
+- **W3 first-launch blocker resolved — the app now launches and attaches.**
+  Node inspector and Chromium DevTools connections succeeded; missing endpoint,
+  mismatched PID, Retry, real dashboard attachment and title assertions passed,
+  matching the historical Mac smoke at `5beffc47a`. Evidence:
+  `playwright-debug.log`, `smoke.log`, `summary.json`. The second-instance
+  environment correction was not reached, so second-launch focus remains
+  unverified.
+- **W4 unresolved — Windows reports a shorter native window.**
+  `BrowserWindow.getSize()` returned **`[1280, 816]`**, whereas the unchanged
+  smoke expects **`[1280, 860]`**, which the historical Mac smoke passed.
+  The failure is at `test/smoke.cjs:145`; its cause was not investigated or
+  worked around. Evidence: `smoke.log`, `failure-excerpt.log`, `summary.json`.
+  Decisive excerpt (paths omitted):
+
+  ```text
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  ...
+        1280,
+  +     816
+  -     860
+  ...
+      at run (...\test\smoke.cjs:145:10)
+  ```
+
+**Unverified:** full renderer isolation/UA/credential checks, zoom callbacks
+and clamps, P9 physical Ctrl delivery, navigation/Stay rollback, dashboard
+file-link opening, X-close Stay/Leave and draft preservation, second-instance
+focus, daemon survival and fresh-process zoom reset. Native menu/dialog
+appearance, default Windows icon and the unchanged `⌘R` retry title were not
+visually reviewed. The cheap P9 probe was enabled but never reached. No
+screenshot was produced because the smoke failed before its existing capture
+step; no extra launch or visual probe was attempted.
+
+All **41 host evidence files** were copied back and SHA256-verified against
+`host-manifest.json` before removing the host folder. The exact scheduled task
+was deleted. Folder-scoped CIM scans were empty before and after deleting the
+entire unique host folder, which was confirmed absent. No operator signal was
+needed; smoke cleanup used its recorded process identities and ended with no
+live owned processes. The Mac temporary bundle and cross-compiled fixture were
+deleted; its final owned-app/fixture scan was empty. Evidence:
+`process-scans.jsonl`, `final-host-process-scan.json`,
+`task-status-after-cleanup.json`, `transfer-verification.json`, `cleanup.json`,
+`mac-final-process-scan.txt`, `acceptance-summary.json`. Raw evidence and binaries
+remain ignored and uncommitted; only this outcome appendix is committed after
+the harness fix. Any further repair or Windows run requires a new lead grant.
+
 #### Edition (7525029be) - 2026-11-15
 
 Fixed the independent lite review's Critical cancelled-navigation finding.
