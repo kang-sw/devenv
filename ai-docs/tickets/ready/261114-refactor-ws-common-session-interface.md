@@ -7,6 +7,10 @@ related:
   261113-bug-ws-hosted-session-sentinel-bootstrap-mints-foreign-key: "hosted identity adoption evidence; no root-issuance policy choice"
   261114-bug-ws-fork-parent-identity-loss: "lineage evidence, not authorization to alter fork authority"
   261114-feat-ws-conversation-audit-event-store: "downstream consumer after this ticket's Phase 2 (682); existing audit envelope stays audit-owned"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 0c3b54a649adcc6d
+sage-review-completeness-reviewed: 0c3b54a649adcc6d
 ---
 
 # Common session interface and parity adoption
@@ -56,6 +60,78 @@ MCP-only hosted entry; it does not repeat the completed adapter refactor.
    (799)=a as assumed; no independently confirmed owner runtime grant is
    inferred.
 
+8. **Backend registration (ODQ 01, MAIN ack 2026-11-15):** one
+   `BackendRegistration` value per backend name in `wsagent.Options.Backends`
+   (replacing the bare `Backend` value) carries `Backend`, `LeadProfile`
+   (builtin lead profile name; empty means it cannot host a lead) and
+   `PermissionModes` (nil means the control is absent). `ChoiceLister` stays a
+   type assertion on `Backend` (496d8de1). The single composition root stays
+   `cmd/ws-mcp/dashboard.go`. Rejected: a second descriptor map or a runtime
+   loader, which would split ownership.
+9. **Registry-driven admission (ODQ 02):** `Profile.validate`,
+   `ProfileValueSchema`'s backend enum, `LeadProfileFor`/`CreateLead` and
+   `Daemon.RequestHire`'s harness check consult the registered set instead of
+   fixed Claude/Pi checks. Production registers only Claude and Pi, so accepted
+   and rejected inputs stay identical. Rejected: fixed enums, which reject a
+   registered extension.
+10. **No new stored name or field (ODQ 03):** this ticket writes no new backend
+    name into stored profiles and adds no `Profile` field; extensibility is
+    proven with fake registrations in tests only. Strict `ParseProfile` on
+    older binaries refuses unknown fields and backend names
+    (`internal/wsagent/profile.go:219-246`), so either would be a T3 read
+    boundary. A future adapter grades its own tier.
+11. **Choices payload (ODQ 04):** `GET /support/choices` `SupportHarness`
+    gains optional `lead` (bool) and `permission_modes` (string list, omitted
+    when absent). The dashboard's lead launch buttons and permission-mode
+    selector render from them and fall back to today's fixed Claude/Pi buttons
+    when no entry carries `lead`. T0: old readers ignore unknown fields.
+    Rejected: a new route.
+12. **Unsupported-operation contract (ODQ 05):** typed errors at the Runner
+    boundary - existing `ErrUnsupported`, plus `ErrBackendUnavailable`,
+    `ErrInvalidProfile`, `ErrLaunchFailed` - wrap today's errors so error
+    text, HTTP statuses, stop/restart fallbacks, held-message behavior and
+    trusted-origin checks stay identical. Rejected: new HTTP codes or body
+    fields without a consumer.
+13. **Roster unchanged (ODQ 06):** `session.roster` keeps its seven-field
+    projection, including idle/zero for unavailable telemetry, as approved in
+    session-hire Phase 1 (`5c06ac1ea`). The no-fabrication rule binds surfaces
+    this ticket adds; roster exposure of telemetry absence is a later
+    consumer's.
+14. **One MCP adoption core (ODQ 07):** one internal resolver,
+    `resolveSession`, returns the session context (key, scope, parent,
+    canonical root, root, hosted flag, harness session). Phase 1 routes hosted
+    `ferrule` adoption, re-login, `workflow_manual` adoption with sentinel
+    refusal, and `playbook.render` child-key minting through it, preserving
+    every result and refusal; Phase 2 moves the remaining consumers. A
+    card-scoped bootstrap (owner 1072, EXEC2's lane) wraps this core rather
+    than adding a fourth adoption body. Rejected: per-tool adoption bodies.
+15. **Context selection codifies current behavior (ODQ 08):** an explicit
+    `session_key` wins; hosted entry adopts `WS_HOSTED_SESSION_KEY` only when
+    `registration.host_pid` validates; the root comes from the key record's
+    canonical root; the parent comes only from `key.json.parent`, never from
+    rail nesting or conversation `ParentRef`; an unhosted sentinel with a root
+    still mints. Rejected: redesigning selection in a T0 extraction.
+16. **No MCP or stored-shape change (ODQ 09, hard stop):** Phase 1 changes no
+    MCP tool, argument, response field, `/mcp` hello or stored record shape.
+    A need found during implementation is a stop (c) to the lead, never an
+    in-place change.
+17. **Dispatch (ODQ 10):** the worker runs at xlarge with one independent
+    review; correctness, fit, test and contract all read high on identity and
+    authority paths. Rejected: large.
+18. **Verification (ODQ 11):** fixture contracts, not live-harness
+    acceptance; the exact list is in Phase 1.
+
+19. **Owner (1050)=a ordering, MAIN ack 2026-11-15 (ODQ 12):** the bounded T0
+    permission-level and worker/lead controls of
+    `261115-feat-ws-permission-profile` (Decision 13) and
+    `261115-feat-ws-worker-profile-session-spawn` (Decision 8) may land before
+    this ticket's Phase 2, which absorbs them. Neither was dispatched when
+    Phase 1 was promoted, so Phase 1's registry admission (Decision 9) lands
+    first; permission-profile Decision 14 and worker-profile rebase onto its
+    admission sites rather than adding a parallel admission path. Rejected:
+    holding Phase 1 behind them, or leaving the earlier ordering constraint
+    unreconciled.
+
 ## Constraints
 
 - Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
@@ -73,17 +149,19 @@ MCP-only hosted entry; it does not repeat the completed adapter refactor.
 - Preserve existing keys/state; do not retroactively rewrite fork lineage or
   fold peer leads into worker termination rules.
 - New authority UI, new harness adapters and voice remain later consumers
-  after this ticket's Phase 2, not its acceptance scope; live reasoning summary
+  after this ticket's Phase 2, not its acceptance scope, except the bounded
+  owner (1050)=a exception: `261115-feat-ws-permission-profile` (Decision 13)
+  and `261115-feat-ws-worker-profile-session-spawn` (Decision 8) may land
+  permission-level and worker/lead controls first on current Runner seams, T0,
+  with keys, lineage and input ownership unchanged (Decision 19). Phase 2
+  absorbs those controls; live reasoning summary
   transport/rendering has already landed independently in `7b047f682` and is
   outside this ticket's acceptance scope (agents-plugin-tool/internal/wsagent/backend.go#L337-L342;
   agents-plugin-tool/internal/wsagent/runner_summary.go#L32-L44).
-- Before ready promotion, settle exact public signatures, descriptor fields
-  and ownership, context-selection behavior and any new serialized fields
-  against current source. Preserve current records and absence of optional
-  capabilities; no descriptor name, wire field or storage shape is selected
-  by this refinement. The board's proposed management checkbox,
-  root-management powers and issuance restrictions remain unselected.
-  This todo refinement supplies no ready/Sage or implementation approval.
+- Public signatures, descriptor fields, context selection and the absence of
+  new serialized fields are settled in Decisions 8-16. The board's proposed
+  management checkbox, root-management powers and issuance restrictions
+  remain unselected.
 - A selectable hosted lead needs admitted/registered backend metadata,
   compatible profile validation and accurate launch choices, not merely a
   type implementing `Backend`. Keep unsupported controls explicit rather
@@ -121,56 +199,6 @@ MCP-only hosted entry; it does not repeat the completed adapter refactor.
   anchors at ready promotion; the report is static evidence, not executed
   acceptance or approval of every proposed helper/API.
 
-## Open Decision Queue
-
-last-id: 11
-
-(01) [open] [technical] One `BackendRegistration` value per backend name in `wsagent.Options.Backends` (replacing the bare `Backend` value) carries `Backend`, `LeadProfile` (builtin lead profile name; empty means it cannot host a lead) and `PermissionModes` (nil means the control is absent); `ChoiceLister` stays a type assertion on `Backend` (496d8de1).
-Registration fields over a second descriptor map or a runtime loader - one composition root (`cmd/ws-mcp/dashboard.go:261-284`) and one map keep a single owner.
-
-(02) [open] [technical] Admission reads the registered set: `Profile.validate`, `ProfileValueSchema`'s backend enum, `LeadProfileFor`/`CreateLead`, and `Daemon.RequestHire`'s harness check all consult the registry instead of fixed Claude/Pi checks; production registers only Claude and Pi, so accepted and rejected inputs stay identical.
-Registry lookup over fixed enums - fixed enums reject a registered extension, which is the defect Phase 1 names.
-
-(03) [open] [announced] This ticket writes no new backend name into stored profiles and adds no Profile field; extensibility is proven with fake registrations in tests only. Citation: strict `ParseProfile` on older binaries refuses unknown fields and backend names (`profile.go:219-246`), which would be a T3 read boundary (AGENTS.md Compatibility Tiers; MAIN 08:21 stop rule). A future adapter grades its own tier.
-
-(04) [open] [technical] `GET /support/choices` `SupportHarness` gains optional `lead` (bool) and `permission_modes` (string list, omitted when absent). The dashboard's lead launch buttons and permission-mode selector render from them and fall back to today's fixed Claude/Pi buttons when no entry carries `lead`.
-Additive fields on the existing choices payload over a new route - the UI already loads it; old readers ignore unknown fields (T0).
-
-(05) [open] [technical] Unsupported-operation contract: typed errors at the Runner boundary - existing `ErrUnsupported`, plus `ErrBackendUnavailable`, `ErrInvalidProfile`, `ErrLaunchFailed` - wrap today's errors so error text, HTTP statuses, stop/restart fallbacks, held-message behavior and trusted-origin checks stay identical; fixtures pin each path from the populator's table.
-Internal typed classification over new HTTP codes or body fields - those change caller-visible behavior without a consumer that needs them yet.
-
-(06) [open] [announced] `session.roster` keeps its seven-field projection, including idle/zero for unavailable telemetry. Citation: that contract was approved in session-hire Phase 1 (`5c06ac1ea`, `session_hire_routes.go:207-252`); the no-fabrication constraint binds surfaces this ticket adds, and roster exposure of telemetry absence is left to a later consumer.
-
-(07) [open] [technical] One internal MCP resolver, `resolveSession`, returns the session context (key, scope, parent, canonical root, root, hosted flag, harness session). Phase 1 routes these through it, preserving every result and refusal:
-- hosted `ferrule` adoption (`server.go:2388-2430`);
-- re-login (`server.go:2433-2490`);
-- `workflow_manual` adoption and sentinel refusal (`workflow_manual.go:323-439`);
-- `playbook.render` child-key minting (`playbook_tools.go:978-1026`).
-Phase 2 moves the remaining consumers.
-One adoption core over per-tool bodies - three bodies exist today and EXEC2's `card.bootstrap` would add a fourth; it is advised to wrap this core.
-
-(08) [open] [technical] Context selection codifies current behavior:
-- an explicit `session_key` wins;
-- hosted entry adopts `WS_HOSTED_SESSION_KEY` only when `registration.host_pid` validates (`process_env.go:266-320`);
-- the root comes from the key record's canonical root;
-- the parent comes only from `key.json.parent`, never from rail nesting or conversation `ParentRef` (`record.go:100-104`);
-- an unhosted sentinel with a root still mints.
-Fixtures pin each rule.
-Codifying today's rules over redesigning selection - Phase 1 is a contract extraction, and Decision 5 is additive T0.
-
-(09) [open] [announced] Phase 1 changes no MCP tool, argument, response field, `/mcp` hello or stored record shape. Citation: MAIN 08:21 requires a stop before any MCP/protocol semantic change, and fact population found none required (`tool_arguments.go:70-127`). A need found during implementation is a stop (c).
-
-(10) [open] [technical] The worker runs at xlarge with one independent review. Correctness, fit, test and contract all read high in Route Facts, and the change crosses Runner, MCP identity and dashboard choices.
-xlarge over large - several axes read high together on identity and authority paths.
-
-(11) [open] [technical] Verification:
-- existing fixtures stay green: `TestCommonContract*`, `TestProcessControlsMatchTheLaunchedProcess`, `TestBackendSelectionKeepsNamesAndUnavailableErrors`, `TestLeadPopoverLaunchBehavior`;
-- new fake-registration fixtures cover admission, profile schema, `RequestHire`, choices `lead`/`permission_modes` and the UI fallback;
-- table tests pin each unsupported-operation path's error, status and fallback;
-- `resolveSession` fixtures cover both entry modes (CLI-plugin and hosted), sentinel refusal, re-login mismatch, child minting with parent, and historical key records;
-- package runs: full `wsagent` and `mcp` with `-run` on the touched areas; `wsdashboard` only with `-run`.
-Fixture contracts over live-harness acceptance - Phase 1 is source-level; live acceptance is not authorized.
-
 ## Prior Decisions
 
 - Owner (674)=a and (676)–(680)=ok: capture the interface -> parity -> extension
@@ -180,7 +208,7 @@ Fixture contracts over live-harness acceptance - Phase 1 is source-level; live a
   and delivery policy stay in their existing owners — bearing: constrains.
 - MAIN (682): audit's exact foundation producer is this ticket's Phase 2;
   current-state adoption is not a new store format — bearing: constrains.
-- 1087e32b (2026-11-15, commit): "Owner1050 explicitly permits these bounded T0 current-Runner controls before common-session-interface Phase2, with keys, lineage and input ownership unchanged; the foundation later absorbs them." — bearing: contradiction-candidate
+- 1087e32b (2026-11-15, commit): "Owner1050 explicitly permits these bounded T0 current-Runner controls before common-session-interface Phase2, with keys, lineage and input ownership unchanged; the foundation later absorbs them." — bearing: constrains (reconciled in Constraints)
 - 261114-refactor-ws-dashboard-whiteboard-asset-split (2026-11-15, Decisions): "Mechanical split only — (793)=a. Move existing behavior into responsibility-sized files and update its loading/embedding and tests." — bearing: constrains
 - 261114-epic-ws-common-session-foundation (2026-11-14, Cross-Child Decisions): "CLI-plugin and MCP-only hosted entry remain distinct. Common access does not make MCP attachment a substitute for harness-native integration or process control." — bearing: supports
 - 261114-feat-ws-conversation-audit-event-store (2026-11-14, Decisions): "This backend depends on 261114-refactor-ws-common-session-interface#phase2: parity adoption of current context/state access, without a store rewrite." — bearing: constrains
@@ -195,13 +223,13 @@ Fixture contracts over live-harness acceptance - Phase 1 is source-level; live a
 |---|---|---|
 | scope.span | multi-file | agents-plugin-tool/cmd/ws-mcp/dashboard.go; agents-plugin-tool/internal/wsagent/{backend,profile,builtin,runner,support}.go; agents-plugin-tool/internal/wsdashboard/assets/{dashboard-leads,dashboard-selection,dashboard-composer,rail}.js; identity access also reaches agents-plugin-tool/internal/mcp. |
 | scope.surface | cross-module | Shared CLI/hosted access and admission cross MCP, Runner, profiles and dashboard HTTP choices; existing Backend.Start and Process are agents-plugin-tool/internal/wsagent/backend.go#L24-L28,#L92-L110. |
-| scope.new_public_symbol | unknown | A descriptor/shared-access contract is required, but its exported names and any caller-visible metadata remain explicitly unselected before readiness. |
+| scope.new_public_symbol | yes | `wsagent.BackendRegistration`, typed Runner errors and optional `SupportHarness` `lead`/`permission_modes` (Decisions 8, 11, 12); `resolveSession` is MCP-internal (Decision 14). |
 | scope.new_type_contract | yes | Phase 1 requires backend admission/registration metadata and shared identity/context/state access; existing processControls is per launched instance, not backend-wide metadata (agents-plugin-tool/internal/wsagent/backend.go#L182-L220). |
-| scope.test_surface | existing | agents-plugin-tool/internal/wsagent/common_contract_test.go#L57-L132,#L206-L272 and controls_test.go#L14-L99; agents-plugin-tool/internal/wsdashboard/lead_isolation_test.go#L10-L39. Phase-specific fixtures/selectors remain to be settled; no tests were run during population. |
+| scope.test_surface | existing | agents-plugin-tool/internal/wsagent/common_contract_test.go#L57-L132,#L206-L272 and controls_test.go#L14-L99; agents-plugin-tool/internal/wsdashboard/lead_isolation_test.go#L10-L39. Phase 1 fixtures are listed in its verification boundary; no tests were run during population. |
 | complexity.reuse_points | confirmed | Read Options.Backends and generic backend/startBackend dispatch (agents-plugin-tool/internal/wsagent/runner.go#L109-L115,#L779-L795), controlsFor, ChoiceLister/SupportHarness, Profile and leadRows/leadBody. |
 | complexity.side_effect_risk | high | Admission and access changes intersect process launch, stable keys, held mail/input, approval correlation and holder recovery (agents-plugin-tool/internal/wsagent/runner.go#L603-L711,#L1443-L1513,#L2241-L2350). |
 | risk.correctness | high | Capability absence, argument-dependent restart fallback and replay holds must remain distinct; absent turn probes retain the hold (agents-plugin-tool/internal/wsagent/runner.go#L2566-L2610,#L3262-L3290). |
-| risk.fit | high | Existing generic execution fits reuse, but backend admission, shared-access signatures and context selection remain unsettled across strict profiles, fixed lead defaults and HTTP/UI choices (agents-plugin-tool/internal/wsagent/profile.go#L219-L246; builtin.go#L64-L72; runner.go#L580-L599). |
+| risk.fit | high | Existing generic execution fits reuse, with admission, signatures and context selection settled in Decisions 8-15 across strict profiles, fixed lead defaults and HTTP/UI choices (agents-plugin-tool/internal/wsagent/profile.go#L219-L246; builtin.go#L64-L72; runner.go#L580-L599). |
 | risk.test | high | Existing Pi/Claude fixtures do not establish the planned extensible admission or CLI/hosted shared-access migration; unsupported telemetry, mixed-version writes and current-context selection need explicit fixture contracts. |
 | risk.security_or_contract | high | Preserve hosted key adoption and parent authority separately from display grouping; strict Profile and MCP argument readers plus trusted-origin approval writes constrain T0 (agents-plugin-tool/internal/mcp/workflow_manual.go#L323-L332; agents-plugin-tool/internal/wsagent/http.go#L127-L146,#L217-L226). |
 
@@ -232,23 +260,26 @@ product boundaries: distinguish absent optional control, unavailable backend,
 invalid profile and launch failure; preserve current error/fallback/restart
 semantics and trusted-origin approval checks. Do not map Claude permission
 strings onto another harness by assumption, equate EOF with turn completion,
-or infer known-zero subagent activity from unavailable telemetry. Exact
-signatures, descriptor fields, affected call sites and current-context/state
-selection are still refined and settled before ready promotion; no additional
-serialized surface is silently chosen here.
+or infer known-zero subagent activity from unavailable telemetry. The
+registration value, admission sites, choices fields, typed errors, adoption
+core and selection rules are Decisions 8-16.
 
-Verification boundary: isolated fixtures for both entry modes, existing key
-adoption and parent propagation, current authority preservation, common context
-and state access, event ordering and unsupported operations. Cover existing
-Claude/Pi registrations and default profiles, invalid/unregistered/unavailable
-backends, profile admission and UI choice consistency, model/effort/control
-capability absence, unsupported calls and approval correlation. Use fake
-backends/fixtures to show admission extensibility without installing or
-launching a new harness. Assert that old entry points, stored identities and
-historical state remain usable. Preserve Pi/Claude native differences and one
-input/mail owner. Exact project commands and compatibility evidence are
-settled before ready promotion; these fixtures are not provider/live-delivery
-acceptance.
+Verification boundary (fixture contracts; not provider/live-delivery acceptance):
+
+- existing fixtures stay green: `TestCommonContract*`,
+  `TestProcessControlsMatchTheLaunchedProcess`,
+  `TestBackendSelectionKeepsNamesAndUnavailableErrors`,
+  `TestLeadPopoverLaunchBehavior`;
+- new fake-registration fixtures cover admission, profile schema,
+  `RequestHire`, choices `lead`/`permission_modes` and the UI fallback,
+  without installing or launching a new harness;
+- table tests pin each unsupported-operation path's error, status and
+  fallback, including approval correlation and capability absence;
+- `resolveSession` fixtures cover both entry modes (CLI-plugin and hosted),
+  sentinel refusal, re-login mismatch, child minting with parent, and
+  historical key records;
+- runs: `go test ./internal/wsagent` in full; `./internal/mcp` and
+  `./internal/wsdashboard` only with `-run` on the touched areas.
 
 ### Phase 2: Adopt current access with behavior and state parity
 
