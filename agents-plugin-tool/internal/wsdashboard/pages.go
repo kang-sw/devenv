@@ -579,7 +579,7 @@ func renderRegionElement(host regionHost, name string) template.HTML {
 type sessionPageData struct {
 	SessionView
 	Assets pageAssetsData
-	// SysOpen offers the link menu's "open in system browser" item: the
+	// SysOpen offers the link menu's "open with system" item: the
 	// page was asked for by a browser on this machine. It is outside every
 	// region, since regions are shared by every viewer's stream.
 	SysOpen bool

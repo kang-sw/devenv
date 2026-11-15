@@ -72,7 +72,7 @@ check("desktop Shift+click stays on the page", run(inside, 1, { shift: true }), 
 check("desktop keyboard activation opens the menu", run(inside, 0, { meta: true }), [[], insideMenu, true]);
 check("desktop Cmd+click on a file the card cannot show opens the menu", run(pdf, 1, { meta: true })[2], true);
 check("desktop Cmd+click on a file the card cannot show lists no preview", run(pdf, 1, { meta: true })[1].indexOf("js.menu.preview"), -1);
-check("desktop plain click on an outside file opens the menu", run(away, 1), [[], ["js.menu.preview", "js.menu.newtab", "js.menu.copyabs"], true]);
+check("desktop plain click on an outside file opens the menu", run(away, 1), [[], ["js.menu.preview", "js.menu.newtab", "js.menu.sysopen", "js.menu.copyabs"], true]);
 check("desktop Cmd+click on an outside file previews it", run(away, 1, { meta: true }), [[["/away/site/page.html", { out: true }]], null, true]);
 check("desktop Cmd+click on a url link stays native", run(url, 1, { meta: true }), [[], null, false]);
 check("no preview without a card board", (function () { cardBoard = null; var r = run(inside, 1, { meta: true }); cardBoard = {}; return [r[0], r[2]]; })(), [[], true]);

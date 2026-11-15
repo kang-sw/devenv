@@ -204,6 +204,28 @@ func TestFSActRoute(t *testing.T) {
 	rec.take()
 }
 
+// TestFSActOpensAFolderByItsParent pins the request the link menu's "open
+// with system" item sends for a folder such as a macOS .app bundle (the
+// entry's parent folder as root, its name as path): the host's open command
+// gets the bundle's resolved path as its one argument.
+func TestFSActOpensAFolderByItsParent(t *testing.T) {
+	rec := &hostRecorder{}
+	f := startPageFixture(t, func(o *DaemonOptions) { o.hostFiles = rec.host("darwin", false) })
+	local := "127.0.0.1:" + strconv.Itoa(f.d.Endpoint().Port)
+	parent := filepath.Join(t.TempDir(), "build")
+	if err := os.MkdirAll(filepath.Join(parent, "Tool.app", "Contents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(filepath.Join(parent, "Tool.app"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := actRequestAs(f.d, http.MethodPost, "127.0.0.1:50000", local, "http://"+local, "", actBody("Tool.app", "open", parent))
+	if got := rec.take(); r.Code != http.StatusNoContent || len(got) != 1 || !reflect.DeepEqual(got[0], []string{"open", real}) {
+		t.Errorf("open Tool.app = %d %q, ran %q, want 204 and %q", r.Code, strings.TrimSpace(r.Body.String()), got, []string{"open", real})
+	}
+}
+
 // TestFSActRouteUnderWSL pins the WSL path: the entry's path is converted
 // to its Windows spelling and handed to explorer.exe, and a failed
 // conversion runs nothing.
