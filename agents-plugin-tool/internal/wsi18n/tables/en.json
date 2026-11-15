@@ -118,6 +118,7 @@
   "file.outside.gone": "This file is no longer available here. Reopen it from the board.",
   "file.reason.binary": "it is not text",
   "file.reason.large": "it is larger than {0} MiB",
+  "gear.github": "GitHub repository",
   "gear.input": "Input mode",
   "gear.input.enter": "Enter sends",
   "gear.input.enter.sub": "Shift+Enter adds a new line",

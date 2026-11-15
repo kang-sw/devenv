@@ -118,6 +118,7 @@
   "file.outside.gone": "이 파일은 여기서 더 이상 열 수 없습니다. 보드에서 다시 여세요.",
   "file.reason.binary": "텍스트가 아닙니다",
   "file.reason.large": "{0} MiB보다 큽니다",
+  "gear.github": "GitHub 저장소",
   "gear.input": "입력 방식",
   "gear.input.enter": "Enter로 전송",
   "gear.input.enter.sub": "Shift+Enter로 줄 바꿈",

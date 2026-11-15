@@ -1,9 +1,11 @@
 package wsdashboard
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,8 +19,8 @@ func TestRootWithoutSessionsKeepsEmptySelectionAndSettings(t *testing.T) {
 		t.Fatalf("empty root = %d, not an empty selection", code)
 	}
 	assertSettingsOwner(t, shell, true)
-	if !strings.Contains(shell, `<span class="gn">Saved in this browser.<span class="meta settings-version">v`+d.Endpoint().Version+`</span></span>`) {
-		t.Error("Settings version is not at the right end of the saved notice row")
+	if !strings.Contains(shell, `<span class="gn">Saved in this browser.<span class="meta settings-version">v`+d.Endpoint().Version+`</span><a class="d-settings-github" href="https://github.com/`+releaseRepository+`" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository" title="GitHub repository"><svg `) {
+		t.Error("Settings footer lacks the version followed by the GitHub repository link at the right end of the saved notice row")
 	}
 	code, frame := get(t, base+"/?frame=1")
 	if code != http.StatusOK || mainPanel(frame) == "" || strings.Contains(mainPanel(frame), `data-region="sessions"`) || strings.Contains(mainPanel(frame), `href="/s/`) || strings.Contains(mainPanel(frame), `data-rid="`) || strings.Contains(frame, `data-region="sessions"`) {
@@ -37,10 +39,30 @@ func TestSettingsVersionFooterStyleKeepsNoticeAndVersionInline(t *testing.T) {
 		`.gmenu .gn { display: flex;`,
 		`white-space: nowrap;`,
 		`.gmenu .gn .settings-version { margin-left: auto; flex: none; }`,
+		`.gmenu .gn .d-settings-github { flex: none;`,
+		`.gmenu .gn .d-settings-github:hover, .gmenu .gn .d-settings-github:focus-visible { color: var(--wb-fg); }`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Errorf("dashboard.css lacks Settings footer rule %q", want)
 		}
+	}
+}
+
+// The footer link and the launcher's binary download name one repository: the
+// daemon restates runtime.json's release_repository (see releaseRepository).
+func TestSettingsGitHubLinkMatchesPluginReleaseRepository(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "agents-plugin", "runtime.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		ReleaseRepository string `json:"release_repository"`
+	}
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		t.Fatal(err)
+	}
+	if contract.ReleaseRepository != releaseRepository {
+		t.Fatalf("releaseRepository = %q, agents-plugin/runtime.json release_repository = %q", releaseRepository, contract.ReleaseRepository)
 	}
 }
 
