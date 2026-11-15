@@ -306,6 +306,48 @@ Decisions and unresolved:
   needed for the isolated usage paths.
 
 
+#### Edition (69ee53c33) - 2026-11-15
+
+Completed MAIN's pre-granted footer sync in the replacement worker's checkout
+`dense-hardship-outclass`, preserving both the settings gear and usage history.
+The existing lead-started merge of exact gate
+`1ecde93d4274b4d5917897d388ed546c0976975b` into `6e2a5beed` is now merge
+`69ee53c33`. No new branch merge or develop integration was started.
+
+- Kept both additive test blocks in the remaining `usage.test.js` conflict:
+  history request coalescing plus sibling-settings preservation and compact
+  wrapping. The automatic CSS merge already kept the settings footer and
+  history-card styles; no runtime conflict-resolution logic changed.
+- Added the previously missing chart legend and current-time guide in
+  `assets/usage.js` and `assets/usage.css`. The guide is wall-clock context,
+  only inside a known reset window, explicitly not an observation. Its label
+  sits above the plot to avoid endpoint labels. Stale observations and strokes
+  stay at their real timestamps; no history or future usage is synthesized.
+- No storage, latest-cache, default/optional API, sample acceptance, request
+  cadence or T0 compatibility contract changed. No new review was run because
+  resolution was additive test composition and the follow-up is visual-only.
+- From `agents-plugin-tool`, `GOPROXY=off GOTOOLCHAIN=local go test
+  ./internal/wsdashboard -run
+  'TestPlanUsage|TestAssetIDFollowsAssetContent|TestRootWithoutSessionsKeepsEmptySelectionAndSettings|TestSessionURLServesTheShellAroundItsFramedPage|TestIndexServesTheShellAroundItsFramedPage'
+  -count=1` passed (6.845s), covering usage/storage/compatibility/assets and
+  settings ownership in the shell.
+- `node --test agents-plugin-tool/internal/wsdashboard/usage.test.js
+  agents-plugin-tool/internal/wsdashboard/usage-trend.test.js` passed all
+  23 tests. The new case checks legend keys, wall-clock guide placement,
+  unchanged stale points/segment endpoints and unknown-reset omission.
+  Working-tree and staged `git diff --check` both passed.
+- The write-once footer-sync plan was committed unchanged with the merge.
+  Incoming merge content outside usage was retained without authored edits.
+  The commit tool reported freshness advisories on incoming explorer,
+  Electron-shell and observed-model tickets; those are outside this usage
+  follow-up, not a new usage finding.
+- The missing legend/guide differences are addressed. Rendered visual
+  acceptance still belongs to owner on-screen feedback; no screenshot or
+  visual-matrix pass is claimed. Full suites, live providers/credentials,
+  external network/downloads, shared daemon actions, slot waits, pushes,
+  develop integration and MAIN progress mail were omitted as directed.
+  Root lead only skims the final diff; MAIN owns integration/runtime swapping.
+
 ## Resolution (2026-11-15)
 
 Implemented bounded private observation history, the additive opt-in projection, and observation-only popover trends. Scoped storage/compatibility/logic tests passed and one independent lite logic review was clean. MAIN retains develop integration and runtime swapping; owner on-screen feedback is visual acceptance under the UI-fast directive.
