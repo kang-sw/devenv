@@ -1021,6 +1021,24 @@ processes were signalled. No Windows host was accessed and no Electron/GUI ran
 on the Mac. Live smoke remains deferred to the owner-authorized Windows run;
 no new phase, policy, dependency, API or independent review pass was added.
 
+#### Edition (052919e16, 21aa53f98) - 2026-11-15
+
+Owner-approved self-update for v0.50.0, superseding the carried "no
+self-update" and "no preload" decisions for this one bridge. The shell checks
+`kang-sw/werkschaft` releases/latest at launch and every 6 h (and from a
+settings "Check for updates" button), downloads
+`Werkschaft-<platform>-<arch>.zip`, verifies it against
+`Werkschaft-desktop-SHA256SUMS`, stages it under userData, and swaps the app
+folder from a detached helper after exit: a plain full quit applies without
+relaunch, "Restart now" relaunches, and a stage left by a reboot is applied
+once at the next launch. Phases none / available / ready; "Skip this version"
+persists. `dashboard-preload.js` exposes only `werkschaftDesktop.update`; main
+accepts its IPC from the pinned dashboard main frame only, and the dashboard
+keeps no permissions. The shell stays attach-only: no update path starts,
+stops or signals the daemon or any session holder. Dashboard UI is T0 both
+ways (old daemon: no toast; browser or old shell: no row). `build.cjs` now
+emits the zip and SUMS. Windows old->new smoke is still owed.
+
 ### Phase 2: Daily-use reliability
 
 Re-homed from `261113-feat-werkschaft-thin-tauri-shell` Phase 2 ((859)=a).

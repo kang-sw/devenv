@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { build } = require('../scripts/build.cjs');
+const { build, archive, SUMS } = require('../scripts/build.cjs');
 const { builtPaths, processes, launchedRoot, descendants, signalIfCurrent } = require('./host.cjs');
 const pkg = require('../package.json');
 
@@ -93,11 +93,14 @@ test('cleanup revalidates each PID/creation identity immediately before its sign
 test('Windows packaging consumes only the pinned cached x64 zip and ships the approved brand icons', async () => {
   const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-cache-test-'));
   let staged;
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-out-test-'));
+  const runs = [];
+  const run = (command, args) => { runs.push([command, args]); fs.writeFileSync(args.find(a => a.endsWith('.zip')), 'zip bytes'); };
   try {
     const nested = path.join(cache, 'checksum');
     fs.mkdirSync(nested);
     fs.writeFileSync(path.join(nested, `electron-v${pkg.devDependencies.electron}-win32-x64.zip`), 'test double');
-    await build({ platform: 'win32', arch: 'arm64', cache, packageApp: async options => {
+    await build({ platform: 'win32', arch: 'arm64', cache, out, run, packageApp: async options => {
       assert.equal(options.platform, 'win32');
       assert.equal(options.arch, 'x64');
       assert.equal(options.electronVersion, pkg.devDependencies.electron);
@@ -105,7 +108,7 @@ test('Windows packaging consumes only the pinned cached x64 zip and ships the ap
       assert.equal(options.icon, path.join(options.dir, 'icons/icon.ico'));
       assert.equal(options.appBundleId, 'dev.werkschaft.desktop');
       staged = options.dir;
-      assert.deepEqual(fs.readdirSync(staged).sort(), ['connection.html', 'endpoint.js', 'icons', 'main.js', 'package.json', 'policy.js', 'titlebar-preload.js', 'titlebar-renderer.js', 'titlebar.html', 'titlebar.js']);
+      assert.deepEqual(fs.readdirSync(staged).sort(), ['connection.html', 'dashboard-preload.js', 'endpoint.js', 'icons', 'main.js', 'package.json', 'policy.js', 'titlebar-preload.js', 'titlebar-renderer.js', 'titlebar.html', 'titlebar.js', 'update.js']);
       assert.deepEqual(fs.readdirSync(path.join(staged, 'icons')).sort(), ['icon.ico', 'icon.png']);
       for (const file of ['icon.png', 'icon.ico']) {
         assert.deepEqual(fs.readFileSync(path.join(staged, 'icons', file)), fs.readFileSync(path.resolve(__dirname, '../icons', file)));
@@ -118,7 +121,26 @@ test('Windows packaging consumes only the pinned cached x64 zip and ships the ap
       return ['test-only packager output'];
     } });
     assert.equal(fs.existsSync(staged), false);
+    const zip = path.join(out, 'Werkschaft-win32-x64.zip');
+    assert.equal(runs.length, 1);
+    assert.deepEqual(runs[0][1].slice(0, 4), process.platform === 'win32' ? ['-a', '-c', '-f', zip] : ['-c', '-k', '--keepParent', path.join(out, 'Werkschaft-win32-x64')]);
+    assert.equal(fs.readFileSync(path.join(out, SUMS), 'utf8'),
+      `${require('node:crypto').createHash('sha256').update('zip bytes').digest('hex')}  Werkschaft-win32-x64.zip\n`);
     await assert.rejects(build({ platform: 'win32', cache: path.join(cache, 'absent'), packageApp: () => assert.fail('must never package/download') }), /Offline prerequisite missing.*win32-x64.zip; no download attempted/);
     await assert.rejects(build({ platform: 'linux', cache }), /darwin and win32 only/);
-  } finally { fs.rmSync(cache, { recursive: true, force: true }); }
+  } finally { fs.rmSync(cache, { recursive: true, force: true }); fs.rmSync(out, { recursive: true, force: true }); }
+});
+test('release archive: macOS ditto keeps the .app parent, Windows bsdtar, and SUMS replaces only its own line', () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'werkschaft-archive-test-'));
+  try {
+    const runs = [];
+    const run = (command, args) => { runs.push([command, args]); fs.writeFileSync(args.find(a => a.endsWith('.zip')), command); };
+    fs.writeFileSync(path.join(out, SUMS), `${'f'.repeat(64)}  Werkschaft-win32-x64.zip\n${'e'.repeat(64)}  Werkschaft-darwin-arm64.zip\n`);
+    const mac = archive({ out, platform: 'darwin', arch: 'arm64', host: 'darwin', run });
+    assert.deepEqual(runs[0], ['/usr/bin/ditto', ['-c', '-k', '--keepParent', path.join(out, 'Werkschaft-darwin-arm64', 'Werkschaft.app'), mac.zip]]);
+    const win = archive({ out, platform: 'win32', arch: 'x64', host: 'win32', run, env: { SystemRoot: 'C:\\Windows' } });
+    assert.deepEqual(runs[1], [path.join('C:\\Windows', 'System32', 'tar.exe'), ['-a', '-c', '-f', win.zip, '-C', out, 'Werkschaft-win32-x64']]);
+    assert.equal(fs.readFileSync(path.join(out, SUMS), 'utf8'),
+      `${mac.hash}  Werkschaft-darwin-arm64.zip\n${win.hash}  Werkschaft-win32-x64.zip\n`);
+  } finally { fs.rmSync(out, { recursive: true, force: true }); }
 });
