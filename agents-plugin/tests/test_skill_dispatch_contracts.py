@@ -119,16 +119,21 @@ class SkillDispatchContractsTest(unittest.TestCase):
             self.assertIn("Each plan file the range adds\n   under `ai-docs/.plans/` is the contract", steps)
             self.assertIn("a missing\n   plan never blocks the review", steps)
 
-    def test_delegate_implementer_is_a_tier_unaware_reviewer_free_floor(self):
+    def test_delegate_implementer_is_tier_unaware_with_assignment_owned_review(self):
         # The delegate-side implementer floor is a render-only rsrc playbook with
         # no lead-skill entry; lead-delegate renders it when the assignment writes
         # code (260911). It must stay tier-unaware (delegate resolves the tier via
-        # config.resolve_agent) and reviewer-free (that is the delegate/worker line).
+        # config.resolve_agent); review dispatch applies only when assigned.
         for package in (RSRC_DIR, SKILLS_DIR.parent.parent / "agents-plugin-wsflow" / "rsrc"):
             body = (package / "delegate-implementer" / "delegate-implementer.md").read_text(encoding="utf-8")
             head = body.split("---", 2)[1]
             self.assertNotIn("tier:", head)
-            self.assertNotRegex(body, r"(?i)\breview(er)?\b")
+            dispatch = " ".join(body.split("## Review dispatch")[1].split("## Commit")[0].split())
+            self.assertIn("Only when the assignment requires independent review", dispatch)
+            self.assertIn("render `reviewer` for a single full-scope reviewer", dispatch)
+            self.assertIn("`code-review-correctness`, `code-review-fit`, and `code-review-test` for the selected partitions", dispatch)
+            self.assertIn("Do not render `code-reviewer` as a delegated role: it is a shared include", dispatch)
+            self.assertIn("Otherwise this floor adds no independent review", dispatch)
             # The plan section is conditional on the render-appended plan-path
             # line, and the plan is write-once and committed with the change.
             plan = body.split("## Plan")[1].split("## Verify")[0]
