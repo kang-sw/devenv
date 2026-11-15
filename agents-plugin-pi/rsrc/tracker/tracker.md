@@ -99,8 +99,8 @@ cannot be rolled back, so each stands alone in its batch, outside any group.
 | command | attributes | content |
 |---|---|---|
 | `tk:store` | `name` | group of every command below but the store commands |
-| `tk:item.create` | `kind`, `title`, `project?`, `labels?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
-| `tk:item.edit` | `item`, `title?`, `project?`, `labels?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?`, `base?` | a new body |
+| `tk:item.create` | `kind`, `title`, `project?`, `labels?`, `start?`, `due?`, `priority?`, `parent?`, `after?`, `mentions?`, `refs?` | the body |
+| `tk:item.edit` | `item`, `title?`, `project?`, `labels?`, `start?`, `due?`, `priority?`, `mentions?`, `refs?`, `clear?`, `base?` | a new body |
 | `tk:item.hide` | `item` | none |
 | `tk:item.move` | `item`, `parent`, `after?` | none |
 | `tk:item.assign` | `item`, `people?` and `rules?` (one or both), or `levels`; `completion?` | none |
@@ -161,7 +161,11 @@ Body text, markdown, written as is.
   edit that keeps them repeats them.
 - `kind`: `task` (work to assign and track) or `topic` (a discussion with
   no status, held by one member who looks after it).
-  `due`: `YYYY-MM-DD`. `priority`: a level number from the store view's
+  `start` and `due`: optional `YYYY-MM-DD` dates (month 1–12, day 1–31).
+  A create or edit with both dates present refuses a start after due; a
+  one-sided edit checks the unchanged date too. Clearing either date is allowed.
+  Concurrent edits may fold into an inverted pair without a flag.
+  `priority`: a level number from the store view's
   priority line, larger is more urgent; without one an item gets the store
   default. A note is optional.
 - `labels`: the item's labels, label IDs from the store view's labels line
@@ -262,8 +266,8 @@ Body text, markdown, written as is.
   scope, and the dashboard notifies them of its status changes, closes, and
   comments) but gets no assignment, status, or completion; assigning stays
   the creator's. The item view prints its `cc:` line.
-- `clear` on `tk:item.edit`: `body`, `due`, or both
-  (`clear="body due"`); an absent body leaves the body as it is.
+- `clear` on `tk:item.edit`: `body`, `start`, `due`, or a space-separated
+  combination (`clear="body start due"`); an absent body leaves the body as it is.
 - `tk:item.edit` (the item's creator or a live assignee) writes the whole
   new body. Set `base` to the item's `body revision` line from the query
   you edited from, and the store merges it line by line with the edits
@@ -360,6 +364,6 @@ The event:
   the holder asked, or the requester denied), when there is one.
 - `detail`: `status` (for `status` and `closed`: the status written, so
   `in-review` for a close the assigner confirms and `dropped` for a drop),
-  `comment` (its first 500 characters), `due` (RFC 3339, when the item has
-  a due date); absent fields are omitted.
+  `comment` (its first 500 characters), `start` and `due` (RFC 3339, each
+  present when the item has that date); absent fields are omitted.
 - `url`: opens the item in this machine's dashboard.
