@@ -1,48 +1,25 @@
 package wsgit
 
-import (
-	"os"
-	"os/exec"
-	"sync"
+import "github.com/kang-sw/devenv/internal/wsexec"
 
-	"github.com/kang-sw/devenv/internal/wsexec"
-)
-
-// lookPath resolves the git executable (a test seam).
-var lookPath = exec.LookPath
-
-// resolved is the git executable Executable resolved and the search path it
-// was resolved under; path is empty until a resolution succeeds.
-var resolved struct {
-	sync.Mutex
-	path, under string
-}
-
-// Executable is the git executable's path, resolved once per search path: a
-// bare "git" makes every command search each PATH entry (and, on Windows,
-// each PATHEXT extension), and a dashboard reload spawns several. A changed
-// PATH or PATHEXT resolves again (a process-wide cache pinned the first git
-// in fake-git PATH tests). A failed resolution is not kept: it returns
-// "git", so the command resolves it itself as before and a later PATH fix
-// still takes.
+// Executable resolves process Git through wsexec's shared successful-entry
+// cache. A failed resolution returns bare "git" so the command resolves it
+// itself as before; failures are not cached. See wsexec.GitPath for reuse
+// eligibility and the unchanged-key stale-success window.
 func Executable() string {
-	under := os.Getenv("PATH") + "\x00" + os.Getenv("PATHEXT")
-	resolved.Lock()
-	defer resolved.Unlock()
-	if resolved.path == "" || resolved.under != under {
-		path, err := lookPath("git")
-		if err != nil {
-			resolved.path = ""
-			return "git"
-		}
-		resolved.path, resolved.under = path, under
+	path, err := wsexec.GitPath(nil)
+	if err != nil {
+		return "git"
 	}
-	return resolved.path
+	return path
 }
 
 // LookPathEnv resolves name against the PATH (and, on Windows, PATHEXT) of
 // environ rather than this process's; see wsexec.LookPath. A name environ's
 // PATH does not hold is an error, never this process's copy of it.
 func LookPathEnv(name string, environ []string) (string, error) {
+	if name == "git" {
+		return wsexec.GitPath(environ)
+	}
 	return wsexec.LookPath(name, environ)
 }

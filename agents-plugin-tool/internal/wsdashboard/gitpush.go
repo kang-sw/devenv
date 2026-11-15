@@ -205,7 +205,7 @@ func gitActionCommand(ctx context.Context, root string, args ...string) *exec.Cm
 
 // gitActionGit is git in root, bounded by ctx (gitbatch.Bound).
 func gitActionGit(ctx context.Context, root string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	cmd := exec.CommandContext(ctx, wsgit.Executable(), append([]string{"-C", root}, args...)...)
 	gitbatch.Bound(cmd)
 	return cmd
 }
