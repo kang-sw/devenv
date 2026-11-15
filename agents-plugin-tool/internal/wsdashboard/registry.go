@@ -230,6 +230,8 @@ func SessionDir(dir, replyID string) string {
 	return filepath.Join(dir, sessionsDirName, replyID)
 }
 
+var errRegistrationMismatch = errors.New("registration identity mismatch")
+
 // ReadRegistration reads one session's registration.
 func ReadRegistration(dir, replyID string) (Registration, error) {
 	if !ValidReplyID(replyID) {
@@ -243,8 +245,11 @@ func ReadRegistration(dir, replyID string) (Registration, error) {
 	if err := json.Unmarshal(bytes.TrimSpace(raw), &reg); err != nil {
 		return Registration{}, fmt.Errorf("parse registration %s: %w", replyID, err)
 	}
+	if reg.ReplyID == "" {
+		return Registration{}, fmt.Errorf("registration %s has no reply-id", replyID)
+	}
 	if reg.ReplyID != replyID {
-		return Registration{}, fmt.Errorf("registration %s names reply-id %q", replyID, reg.ReplyID)
+		return Registration{}, fmt.Errorf("%w: registration %s names reply-id %q", errRegistrationMismatch, replyID, reg.ReplyID)
 	}
 	return reg, nil
 }

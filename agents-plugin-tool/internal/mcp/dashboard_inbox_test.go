@@ -357,7 +357,10 @@ func TestDashboardSessionFingerprintTracksTheInbox(t *testing.T) {
 	src := &DashboardSessionSource{store: newSessionStore(), stateDir: func() (string, error) { return f.stateDir, nil }, now: time.Now}
 	read := func() string {
 		t.Helper()
-		data, ok := src.ReadSession(reg)
+		data, ok, err := src.ReadSession(reg)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !ok {
 			t.Fatal("ReadSession found no session")
 		}

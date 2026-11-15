@@ -3,6 +3,7 @@ package wsdashboard
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -53,25 +54,28 @@ type agentSessions struct {
 	snaps *SnapshotCache
 }
 
-func (s agentSessions) ReadSession(reg Registration) (SessionData, bool) {
+func (s agentSessions) ReadSession(reg Registration) (SessionData, bool, error) {
 	if !reg.Agent {
 		return s.inner.ReadSession(reg)
 	}
 	if _, err := os.Stat(SessionDir(s.dir, reg.ReplyID)); err != nil {
-		return SessionData{}, false
+		if errors.Is(err, os.ErrNotExist) {
+			return SessionData{}, false, nil
+		}
+		return SessionData{}, false, err
 	}
 	h := sha256.New()
 	updatedAt := s.snaps.HashLiveStores(h, s.dir, reg.ReplyID, s.now())
-	return SessionData{Fingerprint: hex.EncodeToString(h.Sum(nil)[:16]), SnapshotUpdatedAt: updatedAt}, true
+	return SessionData{Fingerprint: hex.EncodeToString(h.Sum(nil)[:16]), SnapshotUpdatedAt: updatedAt}, true, nil
 }
 
-func (s agentSessions) ReadPage(reg Registration) (PageContent, bool) {
+func (s agentSessions) ReadPage(reg Registration) (PageContent, bool, error) {
 	return s.ReadPageLang(reg, "")
 }
 
-func (s agentSessions) ReadPageLang(reg Registration, lang string) (PageContent, bool) {
+func (s agentSessions) ReadPageLang(reg Registration, lang string) (PageContent, bool, error) {
 	if reg.Agent {
-		return PageContent{}, true
+		return PageContent{}, true, nil
 	}
 	if ls, ok := s.inner.(LangPageSource); ok {
 		return ls.ReadPageLang(reg, lang)
@@ -79,7 +83,7 @@ func (s agentSessions) ReadPageLang(reg Registration, lang string) (PageContent,
 	if ps, ok := s.inner.(PageSource); ok {
 		return ps.ReadPage(reg)
 	}
-	return PageContent{}, true
+	return PageContent{}, true, nil
 }
 
 // ReadContacts forwards to the configured source; an agent conversation

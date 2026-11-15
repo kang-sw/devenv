@@ -66,8 +66,10 @@ type pageRender struct {
 	// board is the topic decomposition of regions[board], computed once in
 	// the shared session render, never per connection.
 	board *boardTopics
-	// ok is false once the page is gone.
-	ok bool
+	// ok is false once the page is gone. err instead denotes a transient
+	// read failure: retain the last good render and retry on a refresh tick.
+	ok  bool
+	err error
 	// deps are the wake tokens the render depends on; nil depends on every
 	// wake (the sessions index).
 	deps []string
@@ -174,12 +176,12 @@ func (c *pageCache) release(key pageKey, p *sharedPage) {
 func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender, uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	current := p.rendered && c.broker.unchangedSince(p.r.deps, p.at)
+	current := p.rendered && p.r.err == nil && c.broker.unchangedSince(p.r.deps, p.at)
 	if current && !refresh {
 		c.stats.Shared.Add(1)
 		return p.r, p.at
 	}
-	liveOnly := !current && p.rendered && p.r.ok && p.r.reads != nil && c.broker.liveOnlySince(p.r.deps, p.at)
+	liveOnly := !current && p.rendered && p.r.err == nil && p.r.ok && p.r.reads != nil && c.broker.liveOnlySince(p.r.deps, p.at)
 	if liveOnly && !refresh {
 		return c.renderLive(p, src)
 	}
@@ -201,11 +203,18 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 	at := c.broker.current()
 	prev := p.r.inputs
 	r := src.render(nil)
+	if r.err != nil && p.rendered && p.r.ok {
+		// Keep the shared last-good reads and regions for the lifetime of
+		// its open streams; no stale content survives confirmed invalidity.
+		err := r.err
+		r = p.r
+		r.err = err
+	}
 	p.r, p.at, p.rendered = r, at, true
 	// The stamp was taken before this read, from the previous render's
 	// inputs: it is this render's only when the inputs did not change. A
 	// failed render (no regions) keeps none, so the next tick retries it.
-	p.stamp, p.stampOK = stamp, stampOK && r.inputs.equal(prev) && (r.regions != nil || !r.ok)
+	p.stamp, p.stampOK = stamp, r.err == nil && stampOK && r.inputs.equal(prev) && (r.regions != nil || !r.ok)
 	return r, at
 }
 
@@ -219,7 +228,7 @@ func (c *pageCache) renderLive(p *sharedPage, src pageSource) (pageRender, uint6
 		return !c.broker.unchangedSince([]string{token}, since)
 	}})
 	p.r, p.at = r, at
-	p.stampOK = p.stampOK && r.inputs.equal(prev.inputs) && (r.regions != nil || !r.ok)
+	p.stampOK = p.stampOK && r.err == nil && r.inputs.equal(prev.inputs) && (r.regions != nil || !r.ok)
 	return r, at
 }
 

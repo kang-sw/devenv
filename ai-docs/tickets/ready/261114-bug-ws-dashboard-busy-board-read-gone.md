@@ -180,3 +180,58 @@ absence must still reach the banner rather than retry forever. Prove that no
 partial authoritative commit or daemon restart is needed for the reproduced
 failure. Record exact source/fixture pins, commands, process quiescence and
 historical confidence limits; no implementation Result is claimed here.
+
+#### Implementation checkpoint - 2026-11-15 (review pending)
+
+- Recovered the interrupted server implementation on
+  `impl/exec4/busy-board-read-gone/wrist-snuff-visor`, keeping the client
+  leaf at `5015e6747`. Finished the Go source/test caller migration to the
+  internal `(value, found, error)` contract. No wire event or persisted field
+  changed (T0).
+- Record and key-scan failures preserve their I/O, permission, decode or
+  lock-timeout causes. Readable identity mismatches remain terminal even
+  behind a held board lock. Index failures retain existing entries and
+  caches, including ended entries, and retry on the existing 30-second
+  polling backstop. Open streams keep their shared last-good render until
+  recovery, confirmed invalidity or the last subscriber disconnects; failed
+  renders retry on the existing 15-second refresh tick. Initial transient
+  requests return 503 instead of 404. The committed client leaf waits three
+  seconds, probes the stream route, and banners only on confirmed 404;
+  unsuccessful non-404 probes keep the same delayed retry cadence.
+- Fixture pins: `internal/mcp/dashboard_transient_read_test.go` uses a
+  temporary authoritative folder `.lock`, compares committed `meta.json`
+  bytes before/after contention, verifies valid source caches survive, and
+  exercises successful recovery and identity mismatch. It starts no daemon
+  and performs no partial authoritative write. Classification cases include
+  malformed key/part, directory-read I/O failure, actual mode-000 permission
+  denial, absence and scan failure; all ran without skips on this host.
+  `internal/wsdashboard/transient_read_test.go` covers registration decode
+  and I/O failures, genuine removal/mismatch, ended-session retries, shared
+  last-good renders, open-stream recovery/gone and initial 503 versus 404.
+- Verification from `agents-plugin-tool/`, with
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local` for every Go invocation:
+  - `go test ./internal/wsdashboard ./internal/mcp -run
+    '^(TestTransientRead|TestDashboardTransient)' -count=1 -timeout=20s -v`:
+    passed both packages; complete final output read, no skips.
+  - `go test ./internal/wsdashboard -run
+    '^(TestIndexRefreshTracksTheRegistry|TestRegistrationRoundTripIgnoresUnknownFields|TestSessionLeavingTheIndexDropsItsCachedEntries|TestSessionSourceForgetsARemovedSession|TestStreamsOfOnePageShareOneRender|TestStreamSendsOnlyTheLiveRegionForAStreamingTick|TestSessionPageFindingSpinnerUntilRegistered)$'
+    -count=1 -timeout=20s`: passed.
+  - `go test ./internal/mcp -run
+    '^(TestDashboardSourceSeesBothLayouts|TestDashboardSourceRescanBlocksNoKnownLookup|TestDashboardReadPageServesTheBoard|TestDashboardReadPageLangTranslatesBoardAndPanelText|TestDashboardReadSessionCountsOpenAskItems|TestDashboardSessionFingerprintTracksTheInbox|TestAgentKeyStoreFindsTheLeadSessionBehindARow)$'
+    -count=1 -timeout=20s`: passed.
+  - `go test ./internal/wsagent -run '^$' -count=1 -timeout=20s`:
+    compilation passed; no agent/daemon tests executed.
+  - `node --test internal/wsdashboard/testdata/stream-gone.test.cjs`:
+    all eight cases passed.
+  - `git diff --check` and `gofmt -l` over changed/new Go files: clean.
+  Every test command ended with a process scan; no started test, compiler
+  or Node processes remained. Shared daemon/port 29417 were not touched;
+  no process was signalled. Historical attribution remains unproven: these
+  isolated fixtures establish the failure mechanism, not its incident rate.
+- Pending: route-allocated independent lite review and final action gate.
+  This print-mode invocation exposes asynchronous Pi spawn/send tools but no
+  synchronous `pi.wait` or equivalent blocking agent tool. No child was
+  spawned, because ending this turn with a child outstanding would repeat
+  the reported interrupted-run failure. The lead must provide a blocking Pi
+  review path or resume under a persistent harness; the phase has no Result
+  and the ticket remains ready until independent review is resolved.
