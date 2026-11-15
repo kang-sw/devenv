@@ -267,7 +267,8 @@
     if (window.ResizeObserver) new ResizeObserver(pinConvo).observe(convo);
   }
 
-  // --- layout and tabs (session page with a live adapter only) -------------
+  // --- layout and tabs (live or saved session conversation) ----------------
+  // A saved-history page shares tab/scroll handling, not live controls.
   var grid = $("grid"), gmenu = $("gmenu"), live = !!$("tabbar");
   var LAYOUT_KEY = "ws.dashboard.layout";
   // TAB maps a region to the tab that shows it; PANE names the element whose
@@ -8821,7 +8822,7 @@
   // restored draft says so, and while the page holds one, leaving it asks
   // first (the browser's leave-page confirmation).
   // The shell holds no draft: its frames keep their own.
-  var draftStore = WsRail && rid && !shell ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
+  var draftStore = WsRail && rid && !shell && mode !== "history" ? WsRail.drafts(railStore) : null, draftTimer = null, restoring = false;
   function readDraft() {
     var b = region("board"), open = {};
     Object.keys(openState).forEach(function (k) { if (openState[k]) open[k] = true; });
