@@ -98,10 +98,12 @@
       try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
       doc.body.removeChild(t);
       toast(wsT(ok ? "js.toast.copied" : "js.toast.copyfail", s));
+      return ok;
     }
     if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(s).then(function () { toast(wsT("js.toast.copied", s)); }, fallback);
-    } else fallback();
+      return navigator.clipboard.writeText(s).then(function () { toast(wsT("js.toast.copied", s)); return true; }, fallback);
+    }
+    return Promise.resolve(fallback());
   }
   // --- session label: the head's name -----------------------------------------
   // The head's name (sname, dashboard.tmpl) shows the session's display
