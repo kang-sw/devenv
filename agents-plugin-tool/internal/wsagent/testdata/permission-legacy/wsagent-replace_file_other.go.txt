@@ -1,0 +1,8 @@
+// Source: agents-plugin-tool/internal/wsagent/replace_file_other.go
+// Commit: 90eacda7e4956aded76cfc092d20c41e76d2cc1a
+// Exact declarations; imports and unrelated declarations omitted.
+package permissionlegacy
+
+func replaceFile(tmp, path string) error {
+	return os.Rename(tmp, path)
+}
