@@ -15,9 +15,10 @@
   }
   // Stable subsequence ranking: exact, prefix, contiguous, then compact fuzzy matches.
   function rank(rows, query, label) {
-    var needle = query.toLocaleLowerCase();
+    // Composed and decomposed Hangul (NFC/NFD) must match each other.
+    var needle = query.normalize("NFC").toLocaleLowerCase();
     return rows.map(function (row, index) {
-      var text = label(row).toLocaleLowerCase(), at = -1, first = -1, gaps = 0;
+      var text = label(row).normalize("NFC").toLocaleLowerCase(), at = -1, first = -1, gaps = 0;
       for (var i = 0; i < needle.length; i++) {
         var next = text.indexOf(needle.charAt(i), at + 1);
         if (next < 0) return null;
