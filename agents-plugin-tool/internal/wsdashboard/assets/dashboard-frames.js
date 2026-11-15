@@ -411,6 +411,11 @@
       if (cchips) frameMention(f, str(m.text), num(m.x), num(m.y));
     } else if (m.wbDoc === "rail") {
       railKey();
+    } else if (m.wbDoc === "search") {
+      // The palette shortcut pressed in the frame; a body's script posting
+      // it alone, with no user key press, opens nothing.
+      var sa = navigator.userActivation;
+      if (!sa || sa.isActive) tkSearch();
     }
   });
   // A swap re-creates a changed topic's frame (or loads its next one beside
