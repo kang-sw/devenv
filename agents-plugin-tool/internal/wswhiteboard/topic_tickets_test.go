@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -77,8 +78,8 @@ func TestTopicWithOnlyTicketsPersists(t *testing.T) {
 	}
 	for name, layout := range layouts() {
 		page := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Tickets: fakeTickets{"261112-feat-a": TicketReady}}))
-		if !strings.Contains(page, `data-topic="links"`) || strings.Contains(page, `class="ttix"`) || strings.Contains(page, `class="wbtk `) {
-			t.Errorf("%s: tickets-only topic missing or ticket slot rendered", name)
+		if !strings.Contains(page, `data-topic="links"`) || strings.Count(page, `class="dw wbtk"`) != 1 || !strings.Contains(page, `data-ticket="261112-feat-a" data-status="ready"`) {
+			t.Errorf("%s: tickets-only topic missing or its ticket icon absent", name)
 		}
 	}
 	want := []Entry{{ID: "e1", Kind: EntrySystem, Text: "Topic state: discussing", At: testNow.Format(time.RFC3339), TopicState: json.RawMessage(`{"v":1,"op":"set","value":"discussing"}`)}}
@@ -134,10 +135,12 @@ func TestTopicTicketsAreQuietMetadata(t *testing.T) {
 	}
 }
 
-// TestTopicTicketsStayHidden pins UI-only hiding: internal ticket resolution
-// remains intact, but pages and served fragments show neither the ticket slot
-// nor ticket-derived glow. Authored content and items remain visible.
-func TestTopicTicketsStayHidden(t *testing.T) {
+// TestTopicTicketIcon pins the linked-ticket icon: one ticket icon at the
+// end of the bar's lead (right after the waiting clock when there is one), a
+// count only from two tickets, and a popover listing each stem with its
+// status grouped open/done/dropped/unknown. A topic without tickets renders
+// no icon, and ticket-derived Live metadata never becomes a topic glow.
+func TestTopicTicketIcon(t *testing.T) {
 	resolve := fakeTickets{
 		"261112-feat-live":     TicketTodo,
 		"261112-bug-shipped":   TicketDone,
@@ -189,31 +192,53 @@ func TestTopicTicketsStayHidden(t *testing.T) {
 		}
 	}
 
-	slot := regexp.MustCompile(`class="[^"]*\b(?:ttix|wbtk)\b`)
 	glow := regexp.MustCompile(`<section class="topic[^"]*\blive\b`)
-	check := func(t *testing.T, page string, body bool) {
+	// The icon block closes, then the lead closes, then the bar's own
+	// elements follow (state badge, time, chips, or the note button).
+	tail := regexp.MustCompile(`<span class="dw wbtk">.*?</span></span></span></span>(?:<span class="topic-state">|<time class="tago"|<span class="chip|<button)`)
+	type row struct{ stem, status, group, text string }
+	check := func(t *testing.T, page string, rows []row, body bool) {
 		t.Helper()
-		if slot.MatchString(page) || glow.MatchString(page) {
-			t.Error("rendered a ticket slot or ticket-derived topic glow")
+		if glow.MatchString(page) {
+			t.Error("rendered a ticket-derived topic glow")
+		}
+		if n := strings.Count(page, `class="dw wbtk"`); n != 1 {
+			t.Fatalf("ticket icon count = %d, want 1", n)
+		}
+		lead, icon, tago := strings.Index(page, `<span class="tlead">`), strings.Index(page, `<span class="dw wbtk">`), strings.Index(page, `<time class="tago"`)
+		if loc := tail.FindStringIndex(page); lead < 0 || icon < lead || tago < icon || loc == nil || loc[0] != icon || strings.Contains(page[lead:icon], "tnote-toggle") {
+			t.Error("the ticket icon is not the last element of the bar's lead, before its time")
+		}
+		wantAll(t, page, `href="#i-ticket"`, `aria-label="Linked tickets: `+strconv.Itoa(len(rows))+`"`, `<span class="lb">Linked tickets: `+strconv.Itoa(len(rows))+`</span>`)
+		if badge := `<span class="bd">` + strconv.Itoa(len(rows)) + `</span>`; (len(rows) > 1) != strings.Contains(page, badge) {
+			t.Errorf("count badge for %d tickets: present = %v", len(rows), !(len(rows) > 1))
+		}
+		if len(rows) == 1 {
+			wantNone(t, page, `<span class="bd">`)
+		}
+		for _, r := range rows {
+			wantAll(t, page, `<span class="row `+r.group+`" data-ticket="`+r.stem+`" data-status="`+r.status+`">`, `title="`+r.stem+`">`+r.stem+`</span><span class="st">`+r.text+`</span>`)
 		}
 		fragments := []string{`data-topic="t"`, "Authored 261112-feat-live content", "Review 261112-feat-live item"}
 		if body {
 			fragments = append(fragments, "Authored 261112-feat-live body")
 		}
-		for _, frag := range fragments {
-			if !strings.Contains(page, frag) {
-				t.Errorf("topic content missing %q", frag)
-			}
-		}
+		wantAll(t, page, fragments...)
 	}
 	for _, c := range []struct {
 		name    string
 		tickets string
 		resolve fakeTickets
+		rows    []row
 	}{
-		{"resolved", "261112-feat-live 261112-bug-shipped 261112-refactor-gone", resolve},
-		{"missing", "261112-feat-missing", resolve},
-		{"no-resolver", "261112-feat-live", nil},
+		{"resolved", "261112-feat-live 261112-bug-shipped 261112-refactor-gone 261112-chore-idea", resolve, []row{
+			{"261112-feat-live", "todo", "open", "Open · todo"},
+			{"261112-bug-shipped", "done", "done", "Done"},
+			{"261112-refactor-gone", "dropped", "dropped", "Dropped"},
+			{"261112-chore-idea", "idea", "open", "Open · idea"},
+		}},
+		{"missing", "261112-feat-missing", resolve, []row{{"261112-feat-missing", "unknown", "unknown", "Unknown"}}},
+		{"no-resolver", "261112-feat-live", nil, []row{{"261112-feat-live", "unknown", "unknown", "Unknown"}}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			st := &State{}
@@ -228,7 +253,7 @@ func TestTopicTicketsStayHidden(t *testing.T) {
 				}
 				for name, layout := range layouts() {
 					t.Run(name+state, func(t *testing.T) {
-						check(t, render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Tickets: c.resolve})), layout == LayoutFull)
+						check(t, render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Tickets: c.resolve})), c.rows, layout == LayoutFull)
 					})
 				}
 				view := BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Tickets: c.resolve})
@@ -236,16 +261,36 @@ func TestTopicTicketsStayHidden(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				check(t, string(regions.Board), true)
+				check(t, string(regions.Board), c.rows, true)
 				if closed {
 					page, err := RenderClosedTopics(BuildView(st, ViewInput{Layout: LayoutFull, ReplyID: "r", Tickets: c.resolve, Closed: &ClosedWindow{From: 0, N: 30}}))
 					if err != nil {
 						t.Fatal(err)
 					}
-					check(t, string(page), true)
+					check(t, string(page), c.rows, true)
+				}
+			}
+			// Clearing the links removes the icon.
+			mustApply(t, st, `<wb:topic name="t" tickets=""/>`)
+			for name, layout := range layouts() {
+				if page := render(t, BuildView(st, ViewInput{Layout: layout, ReplyID: "r", Tickets: c.resolve})); strings.Contains(page, `class="dw wbtk"`) || strings.Contains(page, `href="#i-ticket"`) || strings.Contains(page, `data-ticket=`) {
+					t.Errorf("%s: a topic without tickets renders the ticket icon", name)
 				}
 			}
 		})
+	}
+
+	// Beside the waiting clock: the ticket icon follows the dependency button.
+	topic := TopicView{Name: "work", Label: "Work", Anchor: "topic-work", UpdatedAt: "2026-11-15T00:00:00Z", UpdatedClock: "00:00", State: &TopicState{Value: StateWaiting}, Dependencies: []DependencyView{{Token: "owner", Label: "owner"}}, Tickets: want[:1]}
+	for _, layout := range layouts() {
+		for _, out := range stateViewOutputs(t, View{Layout: layout, ReplyID: "r", Topics: []TopicView{topic}}) {
+			bar := out[strings.Index(out, `<span class="tlead">`):]
+			clock, icon := strings.Index(bar, `href="#i-clock"`), strings.Index(bar, `<span class="dw wbtk">`)
+			state, tago := strings.Index(bar, `<span class="topic-state">`), strings.Index(bar, `<time class="tago"`)
+			if clock < 0 || icon < clock || strings.Count(bar[:icon], `<span class="dw">`) != 1 || state < icon || tago < state {
+				t.Errorf("ticket icon not right after the waiting clock: %.600s", bar)
+			}
+		}
 	}
 }
 
@@ -346,6 +391,10 @@ func TestPageCSSLeavesTrackerTkAlone(t *testing.T) {
 		t.Fatalf("page.css has a bare .tk selector that matches the tracker: %q", m)
 	}
 	if !strings.Contains(string(css), ".wbtk ") {
-		t.Fatal("page.css lost the .wbtk badge rule")
+		t.Fatal("page.css lost the .wbtk ticket icon rule")
+	}
+	// No ticket-derived glow: neither a .topic.live rule nor a live class.
+	if regexp.MustCompile(`\.topic\.live\b`).Match(css) {
+		t.Fatal("page.css styles ticket-derived .topic.live glow")
 	}
 }

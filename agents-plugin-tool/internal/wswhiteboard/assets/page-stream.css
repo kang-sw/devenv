@@ -36,30 +36,23 @@ button.ckbtn:hover, button.ckbtn[aria-expanded="false"] { color: var(--wb-fg); }
 .ckbtn .i { width: 12px; height: 12px; }
 .ckbtn .prog { font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none; font-size: 11.5px; font-weight: 700; }
 
-/* Linked tickets: badges at the bar's right, before its time; status is a
-   colour and a mark's shape (idea hollow, todo half, ready filled, done a
-   check, dropped a cross and struck through). The bar is dark in both
-   themes, so the hues are fixed; a quiet topic's muted bar keeps the shapes. */
-.ttix { flex: 0 1 auto; min-width: 0; max-width: min(52%, 360px); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px 4px; }
-.wbtk { --c: #c9a7ff; display: inline-flex; align-items: center; gap: 5px; height: 17px; max-width: 100%; padding: 0 8px 0 6px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1; color: var(--c); background: color-mix(in srgb, var(--c) 20%, transparent); }
-.wbtk .st { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; }
-.wbtk .i { flex: none; width: 9px; height: 9px; margin: 0 -1px; stroke-width: 2.4; }
-.wbtk .nm { min-width: 0; max-width: 17ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wbtk.todo { --c: #8db8ff; }
-.wbtk.todo .st { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
-.wbtk.ready { --c: #7fd6a8; }
-.wbtk.ready .st { background: currentColor; }
-.wbtk.done, .wbtk.dropped, .wbtk.unknown { --c: var(--wb-on-topic); opacity: .6; background: rgb(127 127 127 / .22); }
-.wbtk.dropped .nm { text-decoration: line-through; }
-.wbtk.unknown .st { border-style: dashed; }
-.topic.quiet .wbtk { color: var(--wb-muted-fg); background: rgb(127 127 127 / .18); }
-/* a topic with live work (a linked open ticket to carry out) glows in the
-   board's primary: a 1px ring and a soft halo */
-.topic.live { box-shadow: var(--wb-shadow), 0 0 0 1px color-mix(in srgb, var(--wb-primary) 38%, transparent), 0 0 18px 2px color-mix(in srgb, var(--wb-primary) 22%, transparent); }
-@media (max-width: 600px) {
-  .tbar:has(> .ttix) { flex-wrap: wrap; row-gap: 4px; }
-  .tbar > .ttix { order: 9; flex: 1 1 100%; max-width: none; }
-}
+/* Linked tickets: one ticket icon right after the waiting clock, reusing the
+   .dw button and popover (page-items.css). Neutral at rest and never a topic
+   glow; the count badge appears only from two tickets. In the popover an open
+   row leads with a ring, done a green check, dropped a cross over a struck
+   stem, unknown a dashed ring; settled and unknown stems dim. */
+.dw.wbtk .dbtn { opacity: .72; }
+.dw.wbtk .dbtn:hover, .dw.wbtk .dbtn[aria-expanded="true"] { opacity: 1; }
+.dw.wbtk .bd { top: -2px; right: -5px; background: rgb(127 127 127 / .6); color: #fff; }
+.dw.wbtk .pop { width: 400px; }
+.wbtk .row > .i { width: 10px; height: 10px; stroke-width: 2.4; }
+.wbtk .row.open .dot { box-shadow: inset 0 0 0 1.5px var(--wb-primary); }
+.wbtk .row.unknown .dot { box-shadow: none; border: 1.5px dashed var(--wb-muted-fg); box-sizing: border-box; }
+.wbtk .row.done > .i, .wbtk .row.done .st { color: var(--wb-ck-ok); }
+.wbtk .row.dropped > .i { color: var(--wb-muted-fg); }
+.wbtk .row.done .nm, .wbtk .row.dropped .nm, .wbtk .row.unknown .nm { opacity: .6; }
+.wbtk .row.dropped .nm { text-decoration: line-through; }
+.wbtk .row.unknown .st { font-style: italic; }
 
 /* Topic stream: one chronological column under a thin divider, full card
    width with no side rail, always shown. One quiet header row carries the

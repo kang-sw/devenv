@@ -208,8 +208,9 @@ func TestDashboardHistoryCacheReadsEachEntryOnce(t *testing.T) {
 // TestDashboardTopicTicketMoveInvalidatesTheBoard pins the preserved resolver
 // watch: every status directory stays watched, so moving a linked ticket
 // between directories the ticket panel never lists (idea/ to .done/) still
-// renders the board again. Ticket slots and glow stay hidden on both renders;
-// topic content remains visible and stored links remain queryable.
+// renders the board again, its ticket icon's row now carrying the moved
+// status. Neither render gives the topic a ticket-derived glow, and stored
+// links remain queryable.
 func TestDashboardTopicTicketMoveInvalidatesTheBoard(t *testing.T) {
 	f := newWhiteboardFixture(t)
 	src := dashboardPageSource(t, nil)
@@ -217,21 +218,19 @@ func TestDashboardTopicTicketMoveInvalidatesTheBoard(t *testing.T) {
 	writeTicket(t, f.root, "idea", "261101-feat-linked", "Linked")
 	f.update(t, `<wb:topic name="t" tickets="261101-feat-linked"><wb:log>working</wb:log></wb:topic>`)
 
-	checkBoard := func(board string) {
+	checkBoard := func(board, status string) {
 		t.Helper()
-		for _, want := range []string{`data-topic="t"`, `<span class="tname">t</span>`, `data-kind="agent"`, "working"} {
+		for _, want := range []string{`data-topic="t"`, `<span class="tname">t</span>`, `<span class="dw wbtk">`, `data-ticket="261101-feat-linked" data-status="` + status + `"`, `data-kind="agent"`, "working"} {
 			if !strings.Contains(board, want) {
 				t.Errorf("the board lacks %q", want)
 			}
 		}
-		for _, pattern := range []string{`class="[^"]*\b(?:ttix|wbtk)\b`, `<section class="topic[^"]*\blive\b`} {
-			if regexp.MustCompile(pattern).MatchString(board) {
-				t.Errorf("the board renders a ticket slot or ticket-derived glow matching %q", pattern)
-			}
+		if regexp.MustCompile(`<section class="topic[^"]*\blive\b`).MatchString(board) {
+			t.Error("the board renders a ticket-derived topic glow")
 		}
 	}
 	page := readPageOK(t, src, reg)
-	checkBoard(string(page.Board.Board))
+	checkBoard(string(page.Board.Board), "idea")
 	for _, dir := range wsdoc.TicketStatusDirs {
 		want := filepath.Join(f.root, "ai-docs", "tickets", dir)
 		if !slices.Contains(page.Watch, want) {
@@ -255,7 +254,7 @@ func TestDashboardTopicTicketMoveInvalidatesTheBoard(t *testing.T) {
 	if boardRenders(src) == before {
 		t.Fatal("a linked ticket's move reused the memoized board")
 	}
-	checkBoard(string(page.Board.Board))
+	checkBoard(string(page.Board.Board), "done")
 	resp := f.call(t, "whiteboard.query", map[string]any{"payload": map[string]any{"topic": "t", "depth": "topics"}})
 	if text := toolText(t, resp); isToolError(resp) || !strings.Contains(text, "tickets: 261101-feat-linked") {
 		t.Fatalf("stored links missing from query after ticket move:\n%s", text)
