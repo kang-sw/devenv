@@ -1032,7 +1032,7 @@
     var r = endRect(range);
     return mentions.length === 1 ? { m: mentions[0], x: r.right, y: r.bottom } : { ms: mentions, x: r.right, y: r.bottom };
   }
-  function hideMention(keep) {
+  function hideMention(keep, keepImages) {
     var p = mpend;
     mpend = null;
     if (p && !keep) (p.images || []).forEach(function (n) {
@@ -1043,7 +1043,15 @@
     mcomposing = false;
     if (mnote) mnote.value = "";
     if (mbtn) mbtn.hidden = true;
-    if (cimgs) renderImgs();
+    if (cimgs) {
+      if (keepImages && p && p.edit && p.edit.row && mimgs) {
+        // Blur can occur between pointer-down and click on any image ×.
+        // Only move this editor's thumbnails home; rebuilding other rows
+        // would detach the pressed control and lose its delegated click.
+        while (mimgs.firstChild) p.edit.row.appendChild(mimgs.firstChild);
+        imgLayout = JSON.stringify(imgHomes(boardNotes()));
+      } else renderImgs();
+    }
   }
   // Once the input takes focus, live selection reports may no longer replace
   // this bundle. The copied mentions and owning session outlive DOM updates.
@@ -1141,7 +1149,7 @@
     var s = { mentions: validMentions(p.ms), comment: mnote.value, images: p.images.slice() }, index = bselections.indexOf(p.edit);
     if (index >= 0) { s.row = p.edit.row; bselections[index] = s; }
     else bselections.push(s);
-    hideMention(true);
+    hideMention(true, keepFocus && index >= 0);
     if (p.frame) { if (doc.contains(p.frame)) postDoc(p.frame, { wbDoc: "unsel" }); }
     else if (window.getSelection) window.getSelection().removeAllRanges();
     if (keepFocus && index >= 0 && s.row && s.row.parentNode) {

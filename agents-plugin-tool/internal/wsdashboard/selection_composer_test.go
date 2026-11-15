@@ -150,6 +150,7 @@ function check(what,got,want){if(!require('util').isDeepStrictEqual(norm(got),no
 function selectionValue(s){return {mentions:s.mentions,comment:s.comment,images:s.images};}
 Object.defineProperty(El.prototype,'classList',{get:function(){var el=this;return {contains:function(c){return el.className.split(/\s+/).indexOf(c)>=0;},add:function(c){if(!this.contains(c))el.className+=' '+c;},remove:function(c){el.className=el.className.split(/\s+/).filter(function(x){return x!==c;}).join(' ');},toggle:function(c,on){if(on===undefined)on=!this.contains(c);if(on)this.add(c);else this.remove(c);return on;}};}});
 El.prototype.matches=function(selector){var el=this;return selector.split(',').some(function(s){s=s.trim();var tag=/^[a-zA-Z][a-zA-Z0-9-]*/.exec(s);if(tag&&el.tagName!==tag[0].toUpperCase())return false;var id=/#([\w-]+)/.exec(s);if(id&&(el.getAttribute('id')||el.id)!==id[1])return false;var classes=s.match(/\.([\w-]+)/g)||[];if(classes.some(function(c){return !el.classList.contains(c.slice(1));}))return false;var re=/\[([\w-]+)(?:=["']?([^\]"']*)["']?)?\]/g,m;while((m=re.exec(s))){if(!el.hasAttribute(m[1])||m[2]!==undefined&&el.getAttribute(m[1])!==m[2])return false;}return true;});};
+El.prototype.appendChild=function(n){if(n.parentNode)n.parentNode.removeChild(n);this.childNodes.push(n);n.parentNode=this;return n;};
 El.prototype.insertBefore=function(n,before){if(n.parentNode)n.parentNode.removeChild(n);var i=this.childNodes.indexOf(before);if(i<0)i=this.childNodes.length;this.childNodes.splice(i,0,n);n.parentNode=this;return n;};
 El.prototype.getClientRects=function(){return this.hidden?[]:[this.getBoundingClientRect()];};
 El.prototype.scrollIntoView=function(){};
@@ -245,6 +246,39 @@ check("whitespace memo hides indicator without trimming saved bytes", [bselectio
 check("presentation edits do not send or write composer text", [sent,ctext.value], [0,"ordinary text stays exact"]);
 // The only deletion action remains the existing explicit remove control.
 dropSelection(0); check("explicit remove deletes bundle", bselections.length,0);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
+func TestSelectionComposerMemoBlurPreservesImageRemoval(t *testing.T) {
+	js := string(mustAsset(t, "dashboard.js"))
+	click := regexp.MustCompile(`(?s)  // --- clicks: delegated.*?\n  doc.addEventListener\("click", function \(e\) \{.*?\n  \}\);`).FindString(js)
+	if click == "" {
+		t.Fatal("missing delegated image removal action")
+	}
+	runSelectionRuntime(t, "memo blur image removal event order", click+`
+["composer", "other bundle"].forEach(function(home) {
+  var source = {topic:"plan",entry:"e7",text:"source literal [Image #3]"};
+  bselections = [{mentions:[source],comment:"original",images:[1]}, {mentions:[{topic:"plan",entry:"e8",text:"other source"}],comment:"other memo",images:[2]}];
+  imgs = [1,2,3].map(function(n){return {n:n,name:"image"+n,data:"QUJD",ref:"",url:"blob:"+n};});
+  imgTrash = {}; ctext.value = "ordinary [Image #3] text"; renderChips();
+  editSelection(0); mnote.value = "saved memo literal [Image #3]";
+  var own = mimgs.children[0], other = bselections[1].row.children[0], ordinary = cimgs.children[0];
+  var pressed = (home === "composer" ? ordinary : other).querySelector("[data-unimg]");
+  var index = +pressed.getAttribute("data-unimg"), image = imgs[index];
+  pressed.dispatchEvent(new Event("mousedown")); pressed.focus();
+  mbtn.dispatchEvent(new Event("focusout",{relatedTarget:pressed}));
+  check(home+" blur saves without removing pressed thumbnail", [mpend,mbtn.hidden,bselections[0].comment,doc.contains(pressed),doc.activeElement===pressed], [null,true,"saved memo literal [Image #3]",true,true]);
+  check(home+" blur moves only editor thumbnails and preserves other rows", [bselections[0].row.children[0]===own,bselections[1].row.children[0]===other,cimgs.children[0]===ordinary,imgs[index]===image,rowNums(mimgs)], [true,true,true,true,[]]);
+  // Image-home reconciliation may run before pointer release as well.
+  followImgs();
+  check(home+" reconciliation retains the pressed control", doc.contains(pressed),true);
+  pressed.dispatchEvent(new Event("mouseup"));
+  // A browser cannot deliver a delegated click from the detached old node.
+  if (doc.contains(pressed)) doc.listeners.click({target:pressed});
+  check(home+" click removes exactly its intended image", [imgs.map(function(p){return p.n;}),bselections.map(function(s){return s.images;})], home === "composer" ? [[1,2],[[1],[2]]] : [[1,3],[[1],[]]]);
+  check(home+" removal leaves literal source/memo and unrelated text exact", [bselections[0].mentions[0],bselections[0].comment,bselections[1].comment,ctext.value,sent], [source,"saved memo literal [Image #3]","other memo",home === "composer" ? "ordinary text" : "ordinary [Image #3] text",0]);
+});
 process.stdout.write(bad.join("\n"));
 `)
 }
