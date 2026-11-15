@@ -276,7 +276,7 @@ func TestCommitStagesExplicitPathsAndBuildsMessage(t *testing.T) {
 		t.Fatalf("add args = %#v, want %#v", runner.calls[2].args, wantFirst)
 	}
 	commitArgs := runner.calls[6].args
-	if len(commitArgs) != 3 || commitArgs[0] != "commit" || commitArgs[1] != "-m" {
+	if len(commitArgs) != 4 || commitArgs[0] != "commit" || commitArgs[1] != "-m" || commitArgs[3] != "--cleanup=verbatim" {
 		t.Fatalf("commit args = %#v", commitArgs)
 	}
 	message := commitArgs[2]
@@ -318,7 +318,7 @@ func TestCommitAcceptsLargeAIContextArray(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 	commitArgs := runner.calls[6].args
-	if len(commitArgs) != 3 || commitArgs[0] != "commit" || commitArgs[1] != "-m" {
+	if len(commitArgs) != 4 || commitArgs[0] != "commit" || commitArgs[1] != "-m" || commitArgs[3] != "--cleanup=verbatim" {
 		t.Fatalf("commit args = %#v", commitArgs)
 	}
 	message := commitArgs[2]
