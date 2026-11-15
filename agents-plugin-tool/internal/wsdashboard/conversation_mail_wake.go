@@ -74,6 +74,76 @@ func linkMailWakes(entries []ConvEntry, self string) {
 	}
 }
 
+// Board nudges have no peer or retained ring mail. Read only their known
+// single-message envelope; unfamiliar or incomplete diagnostics stay unmatched.
+func (e ConvEntry) boardNudge() (reasons, topics []string) {
+	if !e.MailWake() || e.Truncated || e.Peer != "" {
+		return nil, nil
+	}
+	head, envelope, ok := strings.Cut(e.Text, "\n\n")
+	if !ok || !mailBatchHead.MatchString(head) {
+		return nil, nil
+	}
+	from, body, ok := strings.Cut(envelope, ":\n")
+	if !ok {
+		return nil, nil
+	}
+	if from != "mail from unknown" {
+		stamp, ok := strings.CutPrefix(from, "mail from unknown (")
+		if !ok || !strings.HasSuffix(stamp, ")") {
+			return nil, nil
+		}
+		if _, err := time.Parse(time.RFC3339, strings.TrimSuffix(stamp, ")")); err != nil {
+			return nil, nil
+		}
+	}
+	line, rest, ok := strings.Cut(body, "\n")
+	reasonText, prefix := strings.CutPrefix(line, "Whiteboard lead nudge (")
+	reasonText, suffix := strings.CutSuffix(reasonText, ").")
+	if !ok || !prefix || !suffix {
+		return nil, nil
+	}
+	seenReasons := map[string]bool{}
+	for _, reason := range strings.Split(reasonText, ", ") {
+		switch reason {
+		case "overdue", "unblocked", "hourly":
+			if !seenReasons[reason] {
+				reasons = append(reasons, reason)
+				seenReasons[reason] = true
+			}
+		default:
+			return nil, nil
+		}
+	}
+	seenTopics := map[string]bool{}
+	for _, line := range strings.Split(rest, "\n") {
+		bullet, ok := strings.CutPrefix(line, "- ")
+		if !ok || bullet == "none" {
+			continue
+		}
+		label := ""
+		if i := strings.Index(bullet, "; owner "); i >= 0 && seenReasons["overdue"] {
+			label = bullet[:i]
+		} else if i := strings.Index(bullet, ": ready to proceed; "); i >= 0 && seenReasons["unblocked"] {
+			label = bullet[:i]
+		} else if i := strings.LastIndex(bullet, ": "); i >= 0 && seenReasons["hourly"] {
+			label = bullet[:i]
+		}
+		label = strings.TrimSpace(label)
+		if label == "" {
+			return nil, nil
+		}
+		if !seenTopics[label] {
+			topics = append(topics, label)
+			seenTopics[label] = true
+		}
+	}
+	if len(topics) == 0 {
+		return nil, nil
+	}
+	return reasons, topics
+}
+
 func (e ConvEntry) MatchedMailWake() bool { return e.Kind == wslive.RingMail && e.Cause == "mail" }
 
 func (e ConvEntry) MailDeliveryText() string {
