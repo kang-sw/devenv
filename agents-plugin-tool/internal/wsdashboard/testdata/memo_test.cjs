@@ -11,7 +11,7 @@ class El {
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return this.attrs[k]; }
   addEventListener(type, fn) { (this.on[type] ||= []).push(fn); }
-  fire(type, props = {}) { const e = { target: this, preventDefault() {}, stopPropagation() {}, ...props }; (this.on[type] || []).forEach(fn => fn(e)); }
+  fire(type, props = {}) { const e = { target: this, preventDefault() { this.defaultPrevented = true; }, stopPropagation() {}, ...props }; (this.on[type] || []).forEach(fn => fn(e)); }
   focus() { focused = this; } blur() { if (focused === this) focused = null; }
   matches(sel) { return sel.startsWith('.') ? this.className.split(' ').includes(sel.slice(1)) : this.tagName === sel; }
   closest(sel) { return this.matches(sel) ? this : this.parentNode?.closest(sel); }
@@ -31,10 +31,22 @@ const rail = new El(), ws = rail.appendChild(new El('section', 'rws'));
 ws.setAttribute('data-ws', '/repo'); ws.appendChild(new El('span', 'nm')).textContent = 'repo';
 const row = ws.appendChild(new El('div', 'rs')); row.setAttribute('data-rid', 'session');
 const badge = ws.appendChild(new El('button', 'memo-count')); badge.appendChild(new El('span'));
-const doc = { getElementById: id => ids[id], createElement: tag => new El(tag), createTextNode: text => { const e = new El('#text'); e.textContent = text; return e; } };
+let activeFrame = null;
+const doc = { querySelector: sel => sel === '.sframe.on' ? activeFrame : null, getElementById: id => ids[id], createElement: tag => new El(tag), createTextNode: text => { const e = new El('#text'); e.textContent = text; return e; } };
 let remote = [], nextID = 0, calls = [], local = true, pendingRead = null, failWrite = false;
-const storage = new Map();
-const window = { addEventListener() {}, sessionStorage: { setItem: (k,v) => storage.set(k,v), getItem: k => storage.get(k), removeItem: k => storage.delete(k) }, fetch: async (url, opts) => {
+const storage = new Map(), pickers = [];
+const capsuleStub = {
+  attach(field) { field.wsc = { editor: {} }; },
+  topicPicker(field, source) {
+    assert.ok(field.wsc, 'capsules attach before picker');
+    assert.equal((field.on.keydown || []).length, 0, 'picker attaches before save key handler');
+    const picker = { field, source, closed: 0, close() { this.closed++; } };
+    pickers.push(picker);
+    field.addEventListener('keydown', e => { if (e.pickerEnter) e.preventDefault(); });
+    return picker;
+  }
+};
+const window = { WsCapsules: capsuleStub, document: { documentElement: { getAttribute: () => 'standalone' } }, addEventListener() {}, sessionStorage: { setItem: (k,v) => storage.set(k,v), getItem: k => storage.get(k), removeItem: k => storage.delete(k) }, fetch: async (url, opts) => {
   calls.push([url, opts]);
   if (opts.method === 'POST') {
     if (failWrite) { failWrite = false; return { ok: false, text: async () => 'save failed' }; }
@@ -53,6 +65,32 @@ function advance(ms) { now += ms; for (const t of timers.filter(t => t.at <= now
   const panel = new El(), memo = window.WsMemo.mount(doc, rail, panel, () => {});
   memo.sync('session'); memo.open(true, false); await flush();
   assert.equal(focused, ids['memo-input']);
+  const source = pickers[0].source;
+  const candidates = [{ id: 'active-topic', label: 'Active topic' }];
+  let received, delayed;
+  activeFrame = { contentWindow: { document: { documentElement: { getAttribute: () => 'session' } }, wsCapsuleTopics(done) { done(candidates); } } };
+  source(rows => { received = rows; });
+  assert.equal(received, candidates, 'memo reads selected active frame topics');
+  memo.sync(''); received = null; source(rows => { received = rows; });
+  assert.equal(received.length, 0, 'no selected session has no candidates');
+  memo.sync('session');
+  activeFrame.contentWindow.wsCapsuleTopics = done => { delayed = done; };
+  let delivered = false; source(() => { delivered = true; });
+  const closed = pickers[0].closed;
+  memo.sync('other-session'); delayed(candidates);
+  assert.equal(delivered, false, 'delayed old-session topics are dropped');
+  assert.ok(pickers[0].closed > closed, 'session change closes popup');
+  received = null; source(rows => { received = rows; });
+  assert.equal(received.length, 0, 'active frame with wrong rid is excluded');
+  activeFrame = null; window.wsCapsuleTopics = done => done(candidates);
+  memo.sync('standalone'); source(rows => { received = rows; });
+  assert.equal(received, candidates, 'matching standalone session uses same-window source');
+  memo.sync('session');
+  ids['memo-input'].value = 'picker draft';
+  for (const props of [{ keyCode: 229 }, { defaultPrevented: true }, { pickerEnter: true }]) {
+    ids['memo-input'].fire('keydown', { key: 'Enter', ...props }); await flush();
+    assert.equal(remote.length, 0, 'IME and picker-owned Enter do not save add draft');
+  }
   ids['memo-input'].value = '<b>plain</b> https://example.com\nsecond line';
   ids['memo-input'].fire('keydown', { key: 'Enter', shiftKey: true }); await flush();
   assert.equal(remote.length, 0, 'Shift+Enter stays a newline');
@@ -69,7 +107,13 @@ function advance(ms) { now += ms; for (const t of timers.filter(t => t.at <= now
   let area = ids['memo-list'].querySelector('textarea'); area.value = 'cancelled'; area.fire('keydown', { key: 'Escape' });
   assert.equal(remote[0].text, 'newest'); assert.equal(ids['memo-list'].querySelector('textarea'), null);
   ids['memo-list'].querySelector('.memo-text').fire('click');
-  area = ids['memo-list'].querySelector('textarea'); area.value = 'edited'; area.fire('keydown', { key: 'Enter' }); await flush();
+  area = ids['memo-list'].querySelector('textarea'); area.value = 'edited';
+  assert.equal(pickers.at(-1).field, area, 'edit field has topic picker');
+  for (const props of [{ keyCode: 229 }, { isComposing: true }, { defaultPrevented: true }, { pickerEnter: true }]) {
+    area.fire('keydown', { key: 'Enter', ...props }); await flush();
+    assert.equal(remote[0].text, 'newest', 'IME and picker-owned Enter do not save edit');
+  }
+  area.fire('keydown', { key: 'Enter' }); await flush();
   assert.equal(remote[0].text, 'edited');
   ids['memo-list'].querySelector('.memo-text').fire('click');
   area = ids['memo-list'].querySelector('textarea'); area.value = 'unsaved'; failWrite = true;
