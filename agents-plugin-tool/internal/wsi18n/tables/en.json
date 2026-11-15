@@ -431,6 +431,7 @@
   "js.pins.width": "Drag to resize; double-click to reset",
   "js.post.nobrowser": "this browser cannot send",
   "js.post.unreachable": "the dashboard is not reachable",
+  "js.post.timeout": "no response; check the rail for the session before trying again",
   "js.preview.failed": "The preview could not be loaded",
   "js.preview.gone": "This file is no longer available. Reopen it from the board.",
   "js.preview.kind.pdf": "PDF",

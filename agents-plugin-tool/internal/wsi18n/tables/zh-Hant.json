@@ -431,6 +431,7 @@
   "js.pins.width": "拖曳調整寬度，按兩下重設",
   "js.post.nobrowser": "此瀏覽器無法傳送",
   "js.post.unreachable": "無法連線至儀表板",
+  "js.post.timeout": "沒有回應；重試前請在側欄確認工作階段是否已建立",
   "js.preview.failed": "無法載入預覽",
   "js.preview.gone": "此檔案已無法使用。請從看板重新開啟。",
   "js.preview.kind.pdf": "PDF",

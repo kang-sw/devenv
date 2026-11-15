@@ -431,6 +431,7 @@
   "js.pins.width": "Ziehen, um die Breite zu ändern; Doppelklick setzt zurück",
   "js.post.nobrowser": "dieser Browser kann nicht senden",
   "js.post.unreachable": "das Dashboard ist nicht erreichbar",
+  "js.post.timeout": "keine Antwort; prüfen Sie in der Leiste, ob die Sitzung angelegt wurde, bevor Sie es erneut versuchen",
   "js.preview.failed": "Die Vorschau konnte nicht geladen werden",
   "js.preview.gone": "Diese Datei ist nicht mehr verfügbar. Öffne sie erneut vom Board aus.",
   "js.preview.kind.pdf": "PDF",
