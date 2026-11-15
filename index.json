@@ -147,7 +147,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T09:58:28Z"
+        "touched_at": "2026-11-15T09:59:24Z",
+        "impl": {
+          "branch": "impl/develop/thaw-doily-plus"
+        }
       }
     },
     "261029-chore-wsflow-no-agent-env-rename-and-setup-tool-removal": {
