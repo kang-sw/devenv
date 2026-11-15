@@ -738,6 +738,8 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .pv-img img { max-width: 100%; height: auto; display: block; }
 .pv-vid { height: 100%; background: #0e0f12; display: grid; }
 .pv-vid video { width: 100%; height: 100%; min-height: 0; display: block; }
+.pv-audio { padding: 18px 16px; display: grid; place-items: center; }
+.pv-audio audio { width: 100%; max-width: 528px; }
 .pv-pdf { position: relative; height: 100%; min-height: 240px; display: grid; place-items: center; background: var(--wb-muted); }
 .pv-pdf iframe { width: 100%; height: 100%; min-height: 240px; border: 0; display: block; }
 .pv-pdf-open { color: var(--wb-fg); background: var(--wb-bg); padding: 5px 10px; }

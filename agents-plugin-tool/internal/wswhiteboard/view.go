@@ -138,7 +138,11 @@ type TopicView struct {
 	// Name is the topic's key (its stem, else its label), which page-to-lead
 	// lines carry (data-topic) so the lead can address the topic with it;
 	// Label is the name the page shows.
-	Name, Label string
+	Name, Label  string
+	Anchor       string
+	Dependencies []DependencyView
+	WaitingReady bool
+	Waiters      []DependencyView
 	// Doc is the topic's body, markdown with inline HTML written as is; empty
 	// when it has none. It renders above the items: open unless the topic is
 	// closed on the full page, and open on the embed only when it changed
@@ -738,6 +742,34 @@ func BuildView(state *State, in ViewInput) View {
 	end := min(from+n, len(capped))
 	shown = append(shown, capped[from:end]...)
 	view.ClosedNext, view.ClosedMore = end, len(capped)-end
+	waiting := state.WaitingTopics(in.Tickets)
+	loaded := map[string]bool{}
+	for _, name := range shown {
+		loaded[name] = true
+	}
+	for _, name := range order {
+		block := blocks[name]
+		block.Anchor = topicAnchor(name)
+		w := waiting[name]
+		block.WaitingReady = w.Ready
+		block.Dependencies = w.Targets
+		for i := range block.Dependencies {
+			dep := &block.Dependencies[i]
+			if dep.Topic == "" {
+				continue
+			}
+			if loaded[dep.Topic] {
+				dep.Anchor = topicAnchor(dep.Topic)
+			}
+			if target := blocks[dep.Topic]; target != nil {
+				waiter := DependencyView{Label: block.Label}
+				if loaded[name] || in.Closed != nil && !block.Closed {
+					waiter.Anchor = topicAnchor(name)
+				}
+				target.Waiters = append(target.Waiters, waiter)
+			}
+		}
+	}
 	for _, name := range shown {
 		view.Topics = append(view.Topics, *blocks[name])
 	}

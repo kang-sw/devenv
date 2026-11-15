@@ -39,7 +39,7 @@ new Function('document', 'window', 'wsT', 'wsTn', 'fetch', 'AbortController', 's
 function explorer(rid, local = true, options = {}) {
   var el = doc.body.appendChild(new El('section', doc)); el.className = 'fpane';
   var store = options.store || {}, previews = [];
-  win.WsPreview = { open: (path, o) => previews.push([path, o]) };
+  win.WsPreview = { open: (path, o) => { var record = {}; if (o.root) record.root = o.root; if (o.line) record.line = o.line; previews.push([path, record]); } };
   var instance = win.WsFiles.create(el, Object.assign({ rid, local, load: k => store[k], save: (k, v) => store[k] = v }, options));
   return { el, instance, store, previews, q: el.querySelector('.fq'), tree: el.querySelector('.ftree'), hits: el.querySelector('.fhits'), at: s => el.querySelector(s), all: s => el.querySelectorAll(s) };
 }
@@ -302,6 +302,7 @@ async function pathBarChecks() {
   entry('src/pkg').click(); await answer(take('columns', 'list', 'src/pkg'), columnPkg);
   check('nested folder levels retain highlighted ancestor and files in every level', [columnPaths(), entry('src').getAttribute('aria-selected'), entry('src/pkg').getAttribute('aria-selected'), !!entry('README.md'), !!entry('src/main.go'), !!entry('src/pkg/first.go'), columns.all('.fcolumn')[0].scrollTop], [['', 'src', 'src/pkg'], 'true', 'true', true, true, true, 23]);
   entry('src/pkg/first.go').click(); event(entry('src/pkg/first.go'), 'dblclick');
+  await answer(take('columns', 'preview'), { kind: 'text', text: 'package main' });
   check('column files select and reuse existing preview path', [columns.instance.selection().path, entry('src/pkg/first.go').getAttribute('aria-selected'), columns.previews], ['src/pkg/first.go', 'true', [['src/pkg/first.go', {}]]]);
   key(entry('src/pkg/first.go'), 'ArrowDown');
   check('down selects next entry without changing folder', [columns.instance.selection().path, doc.activeElement.getAttribute('data-entry'), columns.instance.location().dir], ['src/pkg/last.go', 'src/pkg/last.go', 'src/pkg']);
@@ -310,6 +311,7 @@ async function pathBarChecks() {
   key(entry('src/pkg'), 'ArrowRight');
   check('right focuses the selected child column entry', doc.activeElement.getAttribute('data-entry'), 'src/pkg/first.go');
   key(entry('src/pkg/first.go'), 'Enter');
+  await answer(take('columns', 'preview'), { kind: 'text', text: 'package main' });
   check('Enter previews selected file', columns.previews.length, 2);
   columns.all('.fcolumn')[2].scrollTop = 67; event(columns.all('.fcolumn')[2], 'scroll');
   columns.at('.fdirectory').scrollLeft = 178; event(columns.at('.fdirectory'), 'scroll');
@@ -398,7 +400,7 @@ async function pathBarChecks() {
   navRace.instance.destroy();
   // Phase 2: same-session windows and their inner tabs own search independently.
   var left = explorer('search-tabs'), right = explorer('search-tabs', true, { location: { root: '/right' } });
-  var searchPreviews = []; win.WsPreview = { open: (path, options) => searchPreviews.push([path, options]) };
+  var searchPreviews = []; win.WsPreview = { open: (path, o) => { var record = {}; if (o.root) record.root = o.root; if (o.line) record.line = o.line; searchPreviews.push([path, record]); } };
   left.instance.shown(); await answer(take('search-tabs', 'list'), listing('/project', undefined, true));
   right.instance.shown(); await answer(take('search-tabs', 'list'), listing('/right'));
   left.q.value = 'original'; event(left.q, 'input'); await timers(); var originalSearch = take('search-tabs', 'find');
@@ -419,12 +421,17 @@ async function pathBarChecks() {
   await answer(parallelSearch, { items: [{ path: 'parallel.go' }] });
   check('two windows and tabs reject cross-root results', [!!left.at('.fhits [data-path="original.go"]'), !!left.at('[data-path="late-alternate.go"]'), !!right.at('.fhits [data-path="parallel.go"]')], [true, false, true]);
   event(left.hits, 'click', { target: left.at('.hit') }); event(right.hits, 'click', { target: right.at('.hit') });
+  await answer(take('search-tabs', 'preview'), { kind: 'text', text: 'original' });
+  await answer(take('search-tabs', 'preview'), { kind: 'text', text: 'parallel' });
   check('name hits use existing preview with the originating root', searchPreviews, [['original.go', {}], ['parallel.go', { root: '/right' }]]);
   left.hits.scrollTop = 57; event(left.hits, 'scroll');
   left.all('.ftab-select')[1].click(); await timers(); var resumedAlternate = take('search-tabs', 'search');
   check('unfinished content tab restarts with restored options', [left.q.value, left.el.getAttribute('data-fm'), resumedAlternate.url.searchParams.get('root'), resumedAlternate.url.searchParams.get('regex')], ['needle.*', 'content', '/alternate', '1']);
   await answer(resumedAlternate, { files: [{ path: 'match.go', matches: [{ line: 19, pre: '<tag>', hit: 'needle', post: '</tag>' }] }] });
   event(left.hits, 'click', { target: left.at('.hl') });
+  var textPreview = take('search-tabs', 'preview');
+  check('content preflight retains root and text query', [textPreview.url.searchParams.get('root'), textPreview.url.searchParams.get('text')], ['/alternate', '1']);
+  await answer(textPreview, { kind: 'text', text: 'needle' });
   check('content hit previews its matching line and tab root', searchPreviews.slice(-1), [['match.go', { root: '/alternate', line: 19 }]]);
   check('content excerpts render as text rather than HTML', [left.at('.tx').children[0].textContent, left.at('.tx mark').textContent], ['<tag>', 'needle']);
   left.all('.ftab-select')[0].click();
@@ -483,5 +490,107 @@ async function pathBarChecks() {
   await pathBarChecks();
   await workspacePickerChecks();
   check('extended core leaves no global handlers or timers', [doc.listeners.keydown.length, win.listeners.resize.length, pendingTimers.size], [0, 0, 0]);
+  // Run both production modules together: activation preflights before card
+  // creation, and a failing player reuses the originating explorer's row menu.
+  El.prototype.offsetWidth = 120; El.prototype.offsetHeight = 120;
+  var media = explorer('media'), previewCards = [], previewKind, openedCards = 0;
+  media.instance.shown();
+  var playable = [['mp4', 'video'], ['webm', 'video'], ['mov', 'video'], ['ogv', 'video'], ['m4v', 'video'],
+    ['mp3', 'audio'], ['wav', 'audio'], ['ogg', 'audio'], ['oga', 'audio'], ['flac', 'audio'], ['m4a', 'audio'], ['aac', 'audio'], ['opus', 'audio'],
+    ['png', 'image'], ['jpg', 'image'], ['jpeg', 'image'], ['gif', 'image'], ['webp', 'image'], ['avif', 'image'], ['bmp', 'image'], ['ico', 'image']];
+  var binaries = ['file.mkv', 'file.avi', 'file.zip', 'file.exe', 'unknown.custom'];
+  var otherPreviews = [['report.pdf', { kind: 'pdf', src: '/report.pdf' }], ['main.go', { kind: 'text', text: 'package main' }],
+    ['readme.md', { kind: 'markdown', html: '<p>readme</p>' }], ['change.diff', { kind: 'diff', diff: [] }], ['page.html', { kind: 'frame', frame: '/cap/page.html' }]];
+  var mediaEntries = playable.map(([ext]) => ({ name: 'play.' + ext })).concat(binaries.map(name => ({ name })), otherPreviews.map(([name]) => ({ name })), [{ name: 'large.txt' }]);
+  await answer(take('media', 'list'), listing('/media', mediaEntries, true));
+  Object.assign(win.WsCards, {
+    register(name, kind) { previewKind = kind; }, list() { return previewCards; },
+    open(kind, data) {
+      openedCards++;
+      var card = { data, el: doc.body.appendChild(new El('section', doc)), body: new El('div', doc),
+        title(v) { this.head = v; }, actions() {}, paint() {}, bump() {}, fold() {}, show() {}, save() {},
+        close() { previewKind.close(this); previewCards.splice(previewCards.indexOf(this), 1); this.el.parentNode.removeChild(this.el); } };
+      card.el.appendChild(card.body); previewCards.push(card); previewKind.open(card); return card;
+    }
+  });
+  doc.documentElement.setAttribute('data-rid', 'media');
+  doc.documentElement.setAttribute('data-sysopen', '');
+  new Function('document', 'window', 'wsT', 'fetch', PREVIEW)(doc, win, k => k, fetchControlled);
+  function visibleMediaRows() {
+    media.at('.fdirectory').getBoundingClientRect = () => ({ left: 10, right: 510, top: 10, bottom: 600 });
+    media.all('.fentry').forEach(row => row.getBoundingClientRect = () => ({ left: 20, right: 490, top: 30, bottom: 50 }));
+  }
+  function activateMedia(path, keyboard) {
+    visibleMediaRows();
+    var row = media.at('[data-entry="' + path + '"]');
+    if (keyboard) key(row, 'Enter'); else { row.click(); event(row, 'dblclick'); }
+  }
+  for (var path of binaries) {
+    activateMedia(path, path === 'file.exe');
+    await answer(take('media', 'preview'), { kind: 'none', reason: 'localized binary reason', reason_code: 'binary' });
+    var menu = doc.querySelector('.fmenu');
+    check(path + ' activates row menu without ever creating a preview', [openedCards, previewCards.length, !!menu, menu.style.left, menu.style.top], [0, 0, true, '20px', '54px']);
+    check(path + ' retains existing system and copy actions', menu.querySelectorAll('button').map(n => n.textContent), ['js.menu.preview', 'js.preview.openext', 'js.files.menu.reveal', 'js.menu.copyrel', 'js.menu.copyabs']);
+    key(menu, 'Escape');
+  }
+  for (var [ext, kind] of playable) {
+    activateMedia('play.' + ext);
+    var request = take('media', 'preview');
+    await answer(request, { kind, src: '/s/media/fs/raw?path=play.' + ext });
+    var card = previewCards[0], player = card.body.querySelector(kind === 'image' ? 'img' : kind);
+    check(ext + ' opens native preview from preflight with no duplicate fetch', [!!player, requests.filter(r => !r.taken && r.url.pathname === '/s/media/fs/preview').length, !!doc.querySelector('.fmenu')], [true, 0, false]);
+    if (kind !== 'image') {
+      event(player, 'error');
+      check(ext + ' playback error closes preview and opens row menu', [previewCards.length, !!doc.querySelector('.fmenu'), card.turn], [0, true, -1]);
+      key(doc.querySelector('.fmenu'), 'Escape');
+    } else card.close();
+  }
+  for (var [name, previewAnswer] of otherPreviews) {
+    activateMedia(name);
+    await answer(take('media', 'preview'), previewAnswer);
+    check(name + ' retains existing preview kind', [previewCards[0].el.getAttribute('data-preview-kind'), !!doc.querySelector('.fmenu')], [previewAnswer.kind === 'text' ? 'code' : previewAnswer.kind, false]);
+    previewCards[0].close();
+  }
+  activateMedia('large.txt');
+  await answer(take('media', 'preview'), { kind: 'none', reason: 'too large' });
+  check('too-large text retains its existing fallback preview', [previewCards[0].body.querySelector('.pv-none') !== null, !!doc.querySelector('.fmenu')], [true, false]);
+  previewCards[0].close();
+  activateMedia('play.mp3');
+  await answer(take('media', 'preview'), { kind: 'audio', src: '/s/media/fs/raw?path=play.mp3' });
+  var offscreen = previewCards[0];
+  check('preflight answer and menu callback never enter saved data', offscreen.data, { path: 'play.mp3' });
+  previewKind.open(offscreen);
+  await answer(take('media', 'preview'), { kind: 'audio', src: '/s/media/fs/raw?path=play.mp3' });
+  var oldPlayer = offscreen.body.querySelector('audio');
+  media.at('[data-entry="play.mp3"]').getBoundingClientRect = () => ({ left: 20, right: 490, top: -100, bottom: -80 });
+  event(oldPlayer, 'error');
+  check('offscreen row keeps localized fallback instead of a misplaced menu', [previewCards.length, offscreen.body.querySelector('.pv-none') !== null, !!doc.querySelector('.fmenu')], [1, true, false]);
+  offscreen.close();
+  activateMedia('play.mov');
+  await answer(take('media', 'preview'), { kind: 'video', src: '/s/media/fs/raw?path=play.mov' });
+  var removed = previewCards[0], removedPlayer = removed.body.querySelector('video');
+  var removedRow = media.at('[data-entry="play.mov"]');
+  removedRow.parentNode.removeChild(removedRow);
+  event(removedPlayer, 'error');
+  check('removed row keeps fallback without closing preview', [previewCards.length, removed.body.querySelector('.pv-none') !== null, !!doc.querySelector('.fmenu')], [1, true, false]);
+  removed.close();
+  activateMedia('file.zip'); var supersededPreview = take('media', 'preview');
+  activateMedia('play.mp4'); var currentPreview = take('media', 'preview');
+  await answer(currentPreview, { kind: 'video', src: '/current.mp4' });
+  await answer(supersededPreview, { kind: 'none', reason_code: 'binary' });
+  check('late binary preflight cannot replace a newer preview with a menu', [previewCards.length, !!doc.querySelector('.fmenu')], [1, false]);
+  previewCards[0].close();
+  media.q.value = 'unknown'; event(media.q, 'input'); await timers();
+  await answer(take('media', 'find'), { items: [{ path: 'deep/unknown.custom' }] });
+  media.hits.getBoundingClientRect = () => ({ left: 10, right: 510, top: 10, bottom: 600 });
+  media.at('.hit').getBoundingClientRect = () => ({ left: 20, right: 490, top: 30, bottom: 50 });
+  event(media.hits, 'click', { target: media.at('.hit') });
+  await answer(take('media', 'preview'), { kind: 'none', reason_code: 'binary' });
+  check('binary search hit uses its visible row menu, not a preview', [previewCards.length, !!doc.querySelector('.fmenu')], [0, true]);
+  key(doc.querySelector('.fmenu'), 'Escape'); key(media.q, 'Escape');
+  activateMedia('file.zip'); var destroyedPreview = take('media', 'preview');
+  media.instance.destroy();
+  await answer(destroyedPreview, { kind: 'none', reason_code: 'binary' });
+  check('destroyed explorer cannot open a late preview or menu', [previewCards.length, !!doc.querySelector('.fmenu')], [0, false]);
   process.stdout.write(bad.join('\n'));
 })().catch(e => { console.error(e); process.exitCode = 1; });

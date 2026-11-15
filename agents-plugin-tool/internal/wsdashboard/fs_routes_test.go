@@ -195,7 +195,7 @@ func TestFSPreviewAndRawStayInsideTheRoot(t *testing.T) {
 		if rec := serve(f.d, v, http.MethodGet, "/s/livesession/fs/raw?path=shot.png", ""); rec.Code != http.StatusOK || rec.Body.String() != "PNG-INSIDE" {
 			t.Errorf("%s: raw shot.png = %d %q", v.name, rec.Code, rec.Body.String())
 		}
-		// The raw route serves images and video only: a text file is not its.
+		// The raw route serves images, media, and PDF only: not a text file.
 		if rec := serve(f.d, v, http.MethodGet, "/s/livesession/fs/raw?path=notes.txt", ""); rec.Code != http.StatusNotFound {
 			t.Errorf("%s: raw notes.txt = %d, want 404", v.name, rec.Code)
 		}
@@ -260,10 +260,10 @@ func TestFSPreviewKinds(t *testing.T) {
 	if code, a = fsPreview(t, f, local, "path=main.go"); code != http.StatusOK || a.Kind != "text" || a.Text != "package main\n" || a.Source {
 		t.Errorf("text preview = %d %+v", code, a)
 	}
-	if code, a = fsPreview(t, f, local, "path=blob.bin"); code != http.StatusOK || a.Kind != "none" || a.Reason == "" || a.Text != "" {
+	if code, a = fsPreview(t, f, local, "path=blob.bin"); code != http.StatusOK || a.Kind != "none" || a.Reason == "" || a.ReasonCode != "binary" || a.Text != "" {
 		t.Errorf("binary preview = %d %+v", code, a)
 	}
-	if code, a = fsPreview(t, f, local, "path=big.txt"); code != http.StatusOK || a.Kind != "none" || a.Reason == "" || a.Text != "" {
+	if code, a = fsPreview(t, f, local, "path=big.txt"); code != http.StatusOK || a.Kind != "none" || a.Reason == "" || a.ReasonCode != "" || a.Text != "" {
 		t.Errorf("oversize preview = %d kind %q reason %q", code, a.Kind, a.Reason)
 	}
 	code, a = fsPreview(t, f, local, "path=fix.patch")
@@ -289,7 +289,7 @@ func TestFSRawStreamsVideoWithRange(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(f.project, "clip.mp4"), body, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for name, ctype := range map[string]string{"clip.mp4": "video/mp4", "c.webm": "video/webm", "c.ogg": "video/ogg"} {
+	for name, ctype := range map[string]string{"clip.mp4": "video/mp4", "c.webm": "video/webm", "c.ogv": "video/ogg"} {
 		if name != "clip.mp4" {
 			writeFile(t, filepath.Join(f.project, name), "video")
 		}

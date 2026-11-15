@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -969,7 +970,8 @@ func TestRailMarkupRevive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	html := string(region.HTML)
+	// Ignore inert hover content when checking visible row boundaries.
+	html := regexp.MustCompile(`(?s)<template class="shp-source"[^>]*>.*?</template>`).ReplaceAllString(string(region.HTML), "")
 	rowOf := func(id string) string {
 		_, rest, ok := strings.Cut(html, `<div class="rs ended" data-rid="`+id+`">`)
 		if !ok {
@@ -1096,7 +1098,8 @@ func TestRailMarkupTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	html := string(region.HTML)
+	// Ignore inert hover content when checking visible row boundaries.
+	html := regexp.MustCompile(`(?s)<template class="shp-source"[^>]*>.*?</template>`).ReplaceAllString(string(region.HTML), "")
 	rowOf := func(id string) string {
 		_, rest, ok := strings.Cut(html, `data-rid="`+id+`"`)
 		if !ok {

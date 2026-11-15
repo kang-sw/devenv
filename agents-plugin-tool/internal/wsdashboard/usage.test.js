@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function environment(now = Date.UTC(2026, 10, 15)) {
+function environment(now = Date.UTC(2026, 10, 15), locale = 'en') {
   class Element {
     constructor(tag) { this.tagName = tag; this.children = []; this.style = {}; this.attributes = {}; this.events = {}; this._text = ''; }
     set textContent(value) { this._text = value; this.children = []; }
@@ -28,6 +28,11 @@ function environment(now = Date.UTC(2026, 10, 15)) {
   const calls = [], ticks = [];
   let payload = { entries: [], warnPercent: 80, critPercent: 95 }, fail = false;
   const window = { setInterval(fn, ms) { ticks.push({ fn, ms }); }, fetch(url, options) { calls.push({ url, options }); return fail ? Promise.reject(new Error('fake failure')) : Promise.resolve({ ok: true, json: () => Promise.resolve(payload) }); } };
+  window.wsI18n = { lang: locale, t: JSON.parse(fs.readFileSync(__dirname + '/../wsi18n/tables/' + locale + '.json', 'utf8')) };
+  window.wsT = function (key, ...args) {
+    assert.ok(Object.hasOwn(window.wsI18n.t, key), key);
+    return window.wsI18n.t[key].replace(/\{(\d+)\}/g, (match, i) => i < args.length ? String(args[i]) : match);
+  };
   class Clock extends Date { static now() { return now; } }
   vm.runInNewContext(fs.readFileSync(__dirname + '/assets/usage.js', 'utf8'), { window, Date: Clock });
   return { window, rail, doc, button, gear, footer, calls, ticks, now(value) { now = value; }, set(value) { payload = value; }, fail() { fail = true; } };
@@ -39,9 +44,9 @@ function nodes(root, tagOrClass) {
     ...nodes(child, tagOrClass)
   ]);
 }
-async function chartFixture({ history = 'ok', resetKnown = true, stale = false, percents = [10, 60], weekly = false } = {}) {
+async function chartFixture({ history = 'ok', resetKnown = true, stale = false, percents = [10, 60], weekly = false, locale = 'en' } = {}) {
   const start = Date.UTC(2026, 10, 15), duration = 5 * 3600000, asOf = start + .4 * duration;
-  const env = environment(asOf + (stale ? 42 * 60000 : 0)), resetsAt = resetKnown ? start + duration : 0;
+  const env = environment(asOf + (stale ? 42 * 60000 : 0), locale), resetsAt = resetKnown ? start + duration : 0;
   const samples = percents.map((percent, i) => ({ harness: 'claude', kind: 'five_hour', source: '<safe-source>', resetsAt, asOf: start + (i ? .4 : .2) * duration, percent }));
   const entry = { harness: 'claude', source: '<safe-source>', asOf, windows: [samples.at(-1)] };
   if (weekly) entry.windows.unshift({ kind: 'seven_day', percent: 99, asOf, resetsAt: asOf + 86400000 });
@@ -87,7 +92,7 @@ test('compact cards reuse crossing geometry, continuous endpoint gradients and e
   assert.notEqual(vertices[2][1], 88); // closes against ideal, never the zero axis
   assert.equal(nodes(chart, '.usage-point').length, 2); // crossing is not a real dot
   assert.equal(nodes(chart, '.usage-point-current')[0].attributes.r, '4');
-  assert.ok(pop.el.textContent.includes('<safe-source>'));
+  assert.ok(!pop.el.textContent.includes('<safe-source>'));
 });
 
 test('legend and current-time guide explain the chart without advancing stale observations', async () => {
@@ -118,6 +123,43 @@ test('legend and current-time guide explain the chart without advancing stale ob
   }
 });
 
+test('all eleven locales localize popup labels, chart titles, accessible text and weekday dates', async () => {
+  const locales = fs.readdirSync(__dirname + '/../wsi18n/tables').map(name => name.replace('.json', ''));
+  assert.equal(locales.length, 11);
+  for (const locale of locales) {
+    const { env, pop, payload } = await chartFixture({ weekly: true, stale: true, locale });
+    const t = key => env.window.wsT('js.usage.' + key.toLowerCase());
+    assert.equal(pop.el.attributes['aria-label'], t('heading'));
+    assert.equal(pop.el.querySelector('.usage-close').attributes['aria-label'], t('close'));
+    const help = pop.el.querySelector('.usage-help');
+    assert.equal(help.children[0].tagName, 'button');
+    assert.equal(help.children[0].type, 'button');
+    assert.equal(help.children[0].textContent, '?');
+    assert.equal(help.children[0].attributes['aria-label'], t('legend'));
+    assert.equal(help.children[0].attributes['aria-describedby'], help.children[1].attributes.id);
+    assert.equal(help.children[1].attributes.role, 'tooltip');
+    assert.equal(pop.el.children[0].children[1], help); // immediately after heading, before close
+    for (const key of ['observed', 'ideal', 'latest', 'estimated']) assert.ok(help.textContent.includes(t(key)), locale + ': ' + key);
+    const cards = nodes(pop.el, '.usage-window-card');
+    assert.ok(cards[0].textContent.includes(t('fiveHour')));
+    assert.ok(cards[0].attributes['aria-label'].includes(t('stalePace')));
+    assert.ok(cards[0].title.includes(t('historyRecorded')));
+    const titles = nodes(cards[0], 'title').map(n => n.textContent);
+    for (const key of ['idealTitle', 'nowTitle', 'estimatedTitle']) assert.ok(titles.includes(t(key)), locale + ': ' + key);
+    assert.ok(titles.some(text => text.includes(t('current')) && text.includes(t('stale'))));
+    const weekly = cards[1].querySelector('.usage-chart');
+    const reset = payload.entries[0].windows[0].resetsAt;
+    const formatter = new Intl.DateTimeFormat(locale, { weekday: 'short' });
+    const labels = nodes(weekly, 'text').map(n => n.textContent);
+    assert.ok(labels.includes(formatter.format(new Date(reset - 7 * 86400000))), locale);
+    assert.ok(labels.includes(formatter.format(new Date(reset))), locale);
+    assert.doesNotMatch(pop.el.textContent, /js\.usage\.|<safe-source>/);
+  }
+  const css = fs.readFileSync(__dirname + '/assets/usage.css', 'utf8');
+  assert.match(css, /\.usage-chart-legend \{[^}]*display: none/);
+  assert.match(css, /\.usage-help:hover \.usage-chart-legend, \.usage-help:focus-within \.usage-chart-legend \{ display: grid; \}/);
+});
+
 test('baseline equality is muted, below-baseline charts have no excess fill, and short intervals are solid', async () => {
   for (const percents of [[20, 40], [10, 20], [40, 60]]) {
     const { env, pop, payload } = await chartFixture({ percents });
@@ -137,8 +179,11 @@ test('missing, empty and unavailable history are truthful current-only fallbacks
     assert.equal(nodes(pop.el, '.usage-actual').length, 0);
     assert.equal(nodes(pop.el, 'polygon').length, 0);
     assert.equal(nodes(pop.el, '.usage-ideal').length, 1);
-    assert.match(pop.el.querySelector('.usage-history-state').textContent, /current observation only/);
-    assert.match(pop.el.textContent, history === 'empty' ? /No history recorded/ : /History unavailable/);
+    assert.equal(pop.el.querySelector('.usage-history-state'), null);
+    const card = pop.el.querySelector('.usage-window-card');
+    assert.match(card.title, /current observation only/);
+    assert.match(card.title, history === 'empty' ? /No history recorded/ : /History unavailable/);
+    assert.doesNotMatch(pop.el.textContent, /History unavailable|No history recorded|current observation only/);
   }
 });
 
@@ -147,7 +192,7 @@ test('unknown resets have isolated real dots without baseline, gradients or conn
   assert.equal(nodes(pop.el, '.usage-point').length, 2);
   for (const selector of ['.usage-ideal', '.usage-actual', '.usage-now', '.usage-now-label', 'linearGradient', 'polygon']) assert.equal(nodes(pop.el, selector).length, 0);
   assert.match(pop.el.textContent, /Resets unknown/);
-  assert.match(pop.el.textContent, /reset unknown, isolated observations only/);
+  assert.match(pop.el.querySelector('.usage-window-card').title, /reset unknown, isolated observations only/);
 });
 
 test('gradient ids remain unique across cards, redraws and repeated mounts', async () => {
@@ -192,7 +237,7 @@ test('usage ordering, expired windows, thresholds and ages', () => {
   assert.equal(u.age(0, 180000), 'usage unavailable');
 });
 
-test('footer and popover show only detected harnesses, source, age, reset and safe text', async () => {
+test('footer and popover show detected harnesses, age, reset and safe text but hide source', async () => {
   const at = Date.UTC(2026, 10, 15), env = environment(at), reset = at + 3600000;
   env.set({ warnPercent: 80, critPercent: 95, entries: [
     { harness: 'claude', plan: 'max', source: 'Claude push', asOf: at, windows: [{ kind: 'five_hour', percent: 35, resetsAt: reset, asOf: at }, { kind: 'seven_day', percent: 82, resetsAt: reset, asOf: at }] },
@@ -207,7 +252,8 @@ test('footer and popover show only detected harnesses, source, age, reset and sa
   const pop = mounted.makePopover(() => {}, () => {}); pop.open(); pop.focus(); await flush();
   const text = pop.el.textContent;
   assert.ok(text.indexOf('Codex / GPT') < text.indexOf('Claude'));
-  for (const s of ['96%', 'Weekly', '5-hour', 'via Pi', 'Claude push', 'value from 0 min ago', 'Resets ', '<fake-plan>', 'Pi token expired']) assert.ok(text.includes(s), s);
+  for (const s of ['96%', 'Weekly', '5-hour', 'value from 0 min ago', 'Resets ', '<fake-plan>', 'Pi token expired']) assert.ok(text.includes(s), s);
+  for (const source of ['via Pi', 'Claude push']) assert.ok(!text.includes(source), source);
   assert.equal(pop.el.attributes.role, 'dialog');
   assert.equal(pop.el.focused, true);
   assert.equal(env.calls[1].url, '/rail/usage?history=1&refresh=1');

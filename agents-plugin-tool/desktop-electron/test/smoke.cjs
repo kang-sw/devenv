@@ -29,7 +29,7 @@ const daemonRoot = path.join(temp, 'daemon'), shellRoot = path.join(temp, 'shell
 fs.mkdirSync(path.join(shellRoot, 'dashboard'), { recursive: true });
 const endpoint = path.join(shellRoot, 'dashboard/endpoint.json');
 const owned = new Map(), checks = [];
-let application, daemon, applicationIdentity, daemonIdentity;
+let application, daemon, applicationIdentity, daemonIdentity, dimensions;
 const targetRequests = [];
 const target = http.createServer((request, response) => {
   targetRequests.push(request.url);
@@ -138,11 +138,15 @@ async function run() {
   await titleIncludes('Werkschaft');
   assert.equal(await main(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getTitle()), 'Werkschaft');
   checks.push('built app: missing endpoint, mismatched PID, retry, real dashboard attach and title');
-  const security = await main(({ BrowserWindow }) => {
+  const { size, workArea, ...security } = await main(({ BrowserWindow, screen }) => {
     const w = BrowserWindow.getAllWindows()[0], p = w.webContents.getLastWebPreferences();
-    return { isolation: p.contextIsolation, sandbox: p.sandbox, node: p.nodeIntegration, preload: p.preload || '', webview: p.webviewTag, min: w.getMinimumSize(), size: w.getSize() };
+    return { isolation: p.contextIsolation, sandbox: p.sandbox, node: p.nodeIntegration, preload: p.preload || '', webview: p.webviewTag, min: w.getMinimumSize(), size: w.getSize(), workArea: screen.getDisplayMatching(w.getBounds()).workArea };
   });
-  assert.deepEqual(security, { isolation: true, sandbox: true, node: false, preload: '', webview: false, min: [760, 520], size: [1280, 860] });
+  dimensions = { size, workArea };
+  console.log(JSON.stringify({ dimensions }));
+  assert.deepEqual(security, { isolation: true, sandbox: true, node: false, preload: '', webview: false, min: [760, 520] });
+  assert.equal(size[0], 1280);
+  assert.equal(size[1], Math.min(860, workArea.height));
   assert.deepEqual(await page.evaluate(() => [typeof window.require, typeof window.process]), ['undefined', 'undefined']);
   assert.match(await page.evaluate(() => navigator.userAgent), / Werkschaft\/0\.1\.0$/);
   assert(!JSON.stringify(await page.evaluate(() => ({ url: location.href, local: { ...localStorage }, session: { ...sessionStorage }, html: document.documentElement.outerHTML }))).includes('SHELL-TOKEN'));
@@ -344,9 +348,9 @@ async function run() {
     // order. Re-query each PID immediately before its signal, not once per batch.
     for (const p of scan('before cleanup')) signalIfCurrent(p);
     await waitFor(() => Promise.resolve(scan('final').length === 0), 'owned process exit');
-    fs.writeFileSync(path.join(evidence, 'summary.json'), JSON.stringify({ platform: process.platform, checks, failure: failure?.message || null, owned: [...owned.values()], temp }, null, 2));
+    fs.writeFileSync(path.join(evidence, 'summary.json'), JSON.stringify({ platform: process.platform, checks, dimensions, failure: failure?.message || null, owned: [...owned.values()], temp }, null, 2));
     fs.rmSync(temp, { recursive: true, force: true });
   }
-  console.log(JSON.stringify({ checks, failure: failure?.message || null, evidence }, null, 2));
+  console.log(JSON.stringify({ checks, dimensions, failure: failure?.message || null, evidence }, null, 2));
   if (failure) process.exitCode = 1;
 })();
