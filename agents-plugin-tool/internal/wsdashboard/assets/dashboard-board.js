@@ -282,7 +282,7 @@
       if (!window.WsOverview || !window.wbHistory) return;
       window.WsOverview.mount({
       rid: rid, board: cardBoard, toolbar: window.WsCards.toolbar(), pins: window.WsCards.pinList(),
-      keep: window.wbHistory.keep, place: window.WsCards.overview, toast: toast, rail: railKey,
+      keep: window.wbHistory.place, place: window.WsCards.overview, toast: toast, rail: railKey,
       reveal: function () { if (live && !tabShown("board")) setTab("board"); },
       frames: function () { return boardRead(frameHeights); },
       restoreFrames: function (h) { var kept = boardKeep(); boardBoxes().forEach(function (b) { setFrameHeights(b, h); }); if (kept) kept.h.apply(); },

@@ -1,7 +1,7 @@
 (function () {
   // Overview is a view, never a card fold or a saved card arrangement. The
   // page owns swaps and the shell bridge; this module owns the picker and
-  // its one scroll writer, wbHistory.keep.
+  // its one scroll writer, wbHistory.place (passed as o.keep).
   var doc = document, root = doc.documentElement, o = null, on = false, busy = false;
   var entry = null, spacer = null, pinTop = 0, tabs = new Map(), callbacks = [];
   var ITEM = "section.topic[data-topic], .bcard[data-card]";
