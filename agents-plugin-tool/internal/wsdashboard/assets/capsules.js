@@ -94,38 +94,47 @@
     new MutationObserver(attrs).observe(field, { attributes: true }); attrs();
     // Reading the editable DOM emits canonical text, never the displayed label.
     // Block boundaries also handle native IME/undo mutations without rewriting them.
-    function read(root) {
-      var out = "", marks = [], units = [];
+    function read(root, endpoint) {
+      var out = "", marks = [], units = [], position = 0;
       function walk(n) {
         var start = out.length;
-        if (n.nodeType === 3) { out += n.nodeValue; units.push({ node: n, start: start, end: out.length }); return; }
+        if (n.nodeType === 3) {
+          out += n.nodeValue;
+          if (endpoint && endpoint.node === n) position = start + Math.min(endpoint.offset, n.nodeValue.length);
+          units.push({ node: n, start: start, end: out.length }); return;
+        }
         if (n.nodeType !== 1 && n !== root) return;
         if (n.nodeType === 1 && n.hasAttribute("data-wsc-kind")) {
           var kind = n.getAttribute("data-wsc-kind"), id = n.getAttribute("data-wsc-id"), label = n.getAttribute("data-wsc-label");
           out += kind === "skill" ? id : "[" + id + "]";
           marks.push({ start: start, end: out.length, kind: kind, id: id, label: label });
+          if (endpoint && n.contains(endpoint.node)) position = endpoint.offset ? out.length : start;
           units.push({ node: n, start: start, end: out.length, atomic: true }); return;
         }
         if (n.nodeName === "BR") {
-          // Native editors leave a filler break in an otherwise empty line.
-          if (n.parentNode.childNodes.length === 1 && (n.parentNode === root || /^(DIV|P)$/.test(n.parentNode.nodeName))) return;
+          // A final BR is the native caret filler, not another blank line.
+          if (!n.nextSibling && (n.parentNode === root || /^(DIV|P)$/.test(n.parentNode.nodeName))) return;
           out += "\n"; units.push({ node: n, start: start, end: out.length, atomic: true }); return;
         }
         var block = n !== root && /^(DIV|P)$/.test(n.nodeName);
-        if (block && n.previousSibling && (!out || out.slice(-1) !== "\n")) out += "\n";
-        Array.prototype.forEach.call(n.childNodes, walk);
+        if (block && n.previousSibling && (/^(DIV|P)$/.test(n.previousSibling.nodeName) || !out || out.slice(-1) !== "\n")) {
+          var boundary = out.length; out += "\n";
+          units.push({ node: n, start: boundary, end: out.length, atomic: true, boundary: true });
+        }
+        Array.prototype.forEach.call(n.childNodes, function (child, index) {
+          if (endpoint && endpoint.node === n && endpoint.offset === index) position = out.length;
+          walk(child);
+        });
+        if (endpoint && endpoint.node === n && endpoint.offset === n.childNodes.length) position = out.length;
         if (block && n.nextSibling && !/^(DIV|P)$/.test(n.nextSibling.nodeName) && out.slice(-1) !== "\n") out += "\n";
       }
-      walk(root); return { text: out, ranges: valid(out, marks), units: units };
+      walk(root); return { text: out, ranges: valid(out, marks), units: units, position: position };
     }
     function offsets() {
       var sel = window.getSelection();
       if (!sel || !sel.rangeCount || !editor.contains(sel.anchorNode) || !editor.contains(sel.focusNode)) return selection;
       var r = sel.getRangeAt(0);
-      function offset(node, at) {
-        var before = doc.createRange(); before.selectNodeContents(editor); before.setEnd(node, at);
-        return read(before.cloneContents()).text.length;
-      }
+      function offset(node, at) { return read(editor, { node: node, offset: at }).position; }
       selection = [offset(r.startContainer, r.startOffset), offset(r.endContainer, r.endOffset)];
       return selection;
     }
@@ -135,6 +144,7 @@
         var u = units[i];
         if (at > u.end) continue;
         if (!u.atomic) return [u.node, Math.max(0, at - u.start)];
+        if (u.boundary && at > u.start) return [u.node, 0];
         var index = Array.prototype.indexOf.call(u.node.parentNode.childNodes, u.node);
         return [u.node.parentNode, index + (at > u.start ? 1 : 0)];
       }

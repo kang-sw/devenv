@@ -130,6 +130,25 @@ const b = f.wsc.editor.appendChild(new El('div')); b.appendChild(new El('br'));
 f.wsc.editor.dispatchEvent(new Evt('input')); assert.equal(f.value, 'first\n');
 f.wsc.editor.textContent = ''; f.wsc.editor.appendChild(new El('br'));
 f.wsc.editor.dispatchEvent(new Evt('input')); assert.equal(f.value, '');
+function lines(values, tag = 'div') {
+  f.wsc.editor.textContent = '';
+  for (const value of values) {
+    const line = f.wsc.editor.appendChild(new El(tag));
+    line.appendChild(value ? textNode(value) : new El('br'));
+  }
+  f.wsc.editor.dispatchEvent(new Evt('input'));
+}
+lines(['first', '', 'last']); assert.equal(f.value, 'first\n\nlast', 'an interior blank block is never collapsed');
+f.setSelectionRange(7, 7); assert.equal(f.selectionStart, 7, 'caret offsets include the blank block boundary');
+f.wsc.editor.dispatchEvent(new Evt('paste', { clipboardData: { getData: () => 'X' } }));
+assert.equal(f.value, 'first\n\nXlast', 'editing after an interior blank line preserves its position');
+lines(['first', '', '', 'last']); assert.equal(f.value, 'first\n\n\nlast', 'consecutive blank blocks each retain a line boundary');
+lines(['', '', 'last'], 'p'); assert.equal(f.value, '\n\nlast', 'leading blank paragraph lines are preserved');
+lines(['first', 'last']); f.wsc.editor.firstChild.appendChild(new El('br'));
+f.wsc.editor.dispatchEvent(new Evt('input')); assert.equal(f.value, 'first\nlast', 'a trailing caret filler does not add a phantom blank line');
+f.wsc.editor.textContent = 'first'; f.wsc.editor.appendChild(new El('br')); f.wsc.editor.appendChild(new El('br'));
+f.wsc.editor.dispatchEvent(new Evt('input')); assert.equal(f.value, 'first\n');
+f.setSelectionRange(6, 6); assert.equal(f.selectionStart, 6, 'caret offsets use the original DOM, not a truncated filler-break clone');
 
 // Topics and image-marker removal retain surrounding references and identities.
 const imgText = '[Image #1] [a] [Image #2] [b]';
