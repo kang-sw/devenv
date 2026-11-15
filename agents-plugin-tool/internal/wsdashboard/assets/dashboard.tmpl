@@ -197,8 +197,8 @@ variable list (the expanded peer tree); slots a running agent's fixed rows
 
 {{define "slots"}}{{range .}}{{if .Permission}}{{template "permrow" .Permission}}{{else if .Finished}}{{template "batch" .Finished}}{{else if .Running}}{{template "runrow" .Running}}{{else if .Generating}}{{template "genrow" .Generating}}{{else}}<li class="brow ph"><span class="mk">-</span></li>{{end}}{{end}}{{end}}
 
-{{/* tphase is the agents panel's phase pill: phase without the spinner, since
-in the panel only a live tool row spins and an agent's mark is a pulsing dot.
+{{/* tphase is the agents popover's phase pill: phase without the spinner, since
+in the popover only a live tool row spins and an agent's mark is a pulsing dot.
 The session index row keeps phase. */}}
 {{define "tphase"}}{{if or (eq . "thinking") (eq . "replying") (eq . "tool") (eq . "compacting")}}<span class="phase {{.}}">{{t (printf "phase.%s" .)}}</span>{{else}}{{template "phase" .}}{{end}}{{end}}
 
@@ -211,7 +211,7 @@ The session index row keeps phase. */}}
 {{/* astat is a subagent row's telemetry: model, effort, context size, and
 (while it runs) output rate, each its own stat and left out while unknown;
 effort stays out of the model's ellipsis so a long model ID cannot cut it. On a narrow
-agents panel a container query moves it to a second line under the row
+agents popover a container query moves it to a second line under the row
 name; aline wraps the leading items so that line can sit below them. */}}
 {{define "astat"}}{{if .HasStats}}<span class="astat">{{with .DisplayModel}}<span class="amodel" title="{{if $.Observed}}{{t "hover.observed"}}{{else}}{{t "agent.model" .}}{{end}}">{{.}}</span>{{end}}{{with .Effort}}<span class="aeff" title="{{t "agent.effort" .}}">{{.}}</span>{{end}}{{with .ContextText}}<span class="actx" title="{{t "agent.context" $.ContextTokens}}">{{.}}</span>{{end}}{{with .Rate}}<span class="atps" title="{{t "agent.rate" .}}">{{.}} t/s</span>{{end}}{{if not .IsRunning}}{{with .EndedAt}}<span>{{template "ago" .}}</span>{{end}}{{end}}</span>{{end}}{{end}}
 
