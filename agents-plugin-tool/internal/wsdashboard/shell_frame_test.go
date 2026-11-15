@@ -94,7 +94,7 @@ shFrameInit();
 var s = sockets[0];
 check("the body is watched for appended popovers and for hidden/open toggles, neither observe() overwriting the other",
   [bodyWatch.some(function (o) { return o.childList && !o.subtree; }), bodyWatch.some(function (o) { return o.subtree && o.attributes && o.attributeFilter.indexOf("hidden") >= 0; })], [true, true]);
-check("a framed session page opts into topic and tree rows without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1&topics=1&treerows=1&entryrows=1");
+check("a framed session page opts into topic and tree rows without the rail", s.url, "ws://localhost:1234/s/rid1/events?h=&frame=1&topics=1&treerows=1&entryrows=1&panelrows=1");
 s.onopen({});
 function fromShell(m, src) { m.wsShell = m.wsShell || "shown"; listeners.message.forEach(function (fn) { fn({ source: src || parentWin, origin: location.origin, data: m }); }); }
 fromShell({ wsShell: "settings", layout: "tabs", input: "mod" }, otherWin);

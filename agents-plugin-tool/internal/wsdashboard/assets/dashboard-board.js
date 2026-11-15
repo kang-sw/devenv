@@ -4,7 +4,7 @@
   // update held back while the tab is hidden (hiddenRegions, see connect)
   // counts as held: a reconnect meanwhile names its hash, and the update
   // still lands when the tab shows.
-  var modeHash = "", hiddenRegions = {}, treeRendered = null, entryRendered = null;
+  var modeHash = "", hiddenRegions = {}, treeRendered = null, entryRendered = null, panelRendered = null;
   // pageHidden tells whether nobody sees the page (a hidden tab, or a frame
   // the shell hides): region updates are held (hiddenRegions) while it
   // holds, and land when it ends (showRegions).
@@ -21,7 +21,7 @@
     var el = region(name);
     if (!el) return;
     var board = name === "board";
-    if (el.getAttribute("data-h") === hash && !(board && Object.keys(boardPending).length)) { if (board) deferred = null; if (name === "rail") { if (railGate) railGate.forget(); if (typeof html !== "string") railRendered = html; } if (name === "tree" && typeof html !== "string") treeRendered = html; if (name === "entries" && typeof html !== "string") entryRendered = html; return; }
+    if (el.getAttribute("data-h") === hash && !(board && Object.keys(boardPending).length)) { if (board) deferred = null; if (name === "rail") { if (railGate) railGate.forget(); if (typeof html !== "string") railRendered = html; } if (name === "tree" && typeof html !== "string") treeRendered = html; if (name === "entries" && typeof html !== "string") entryRendered = html; if (name === "panels" && typeof html !== "string") panelRendered = html; return; }
     if (board && window.WsOverview && window.WsOverview.holding()) { boardOverviewHeld = { hash: hash, html: html }; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board && window.WsCards && window.WsCards.dragging && window.WsCards.dragging()) { boardDragHeld = { hash: hash, html: html }; return; }
@@ -64,6 +64,7 @@
     var pin = (name === "entries" || name === "convlive") && pinned();
     var scroll = scrollState();
     var treeFocus = name === "tree" ? doc.activeElement : null;
+    var panelReader = name === "panels" ? panelReaderState(el) : null;
     var answers = board ? boardRead(readAnswers) : null;
     var railTop = name === "rail" ? railScrollTop() : null, railFoc = name === "rail" ? railFocus() : null;
     var frameH = board ? boardRead(frameHeights) : null;
@@ -73,7 +74,8 @@
     var before = board && !boardFrozen.length && !still && !reducedMotion() ? boardSpots(el) : null;
     var kept = board ? boardKeep() : null, boardTop = before && kept ? el.getBoundingClientRect().top : null;
     // The entries merge and the board morph prepare only the nodes they
-    // insert; any other region is replaced whole. A finished reply's mermaid
+    // insert; tree and panel row merges prepare only changed units too.
+    // A finished reply's mermaid
     // fences draw once merged; the streaming reply (convlive) keeps them
     // code blocks.
     var ins = null;
@@ -88,6 +90,15 @@
       treeRendered = treeNext;
       if (!ins) {
         el.innerHTML = treeNext ? treeInputHTML(treeNext) : html;
+        restoreOpen(el); fmtTimes(el); sweepOutImgs(el);
+      } else ins.forEach(function (n) { restoreOpen(n); fmtTimes(n); sweepOutImgs(n); });
+    }
+    else if (name === "panels") {
+      var panelNext = typeof html === "string" ? panelInputFull(html) : html;
+      ins = panelNext && mergePanelRows(el, panelRendered, panelNext);
+      panelRendered = panelNext;
+      if (!ins) {
+        el.innerHTML = panelNext ? panelInputHTML(panelNext) : html;
         restoreOpen(el); fmtTimes(el); sweepOutImgs(el);
       } else ins.forEach(function (n) { restoreOpen(n); fmtTimes(n); sweepOutImgs(n); });
     }
@@ -137,7 +148,7 @@
       if (mpend && !mpend.locked && mpend.frame && !doc.contains(mpend.frame)) hideMention();
     }
     if (board || name === "convlive") applySent(board);
-    if (name === "panels") drawerSync();
+    if (name === "panels") { drawerSync(); restorePanelReader(el, panelReader); }
     if (name === "git") gitSwapped();
     if (treeFocus && treeFocus.isConnected && doc.activeElement !== treeFocus) treeFocus.focus({ preventScroll: true });
     restoreScroll(scroll);

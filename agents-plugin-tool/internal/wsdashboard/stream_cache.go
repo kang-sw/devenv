@@ -72,6 +72,8 @@ type pageRender struct {
 	tree *treeRows
 	// entries holds complete rendered conversation rows, outside their title bar.
 	entries *entryRows
+	// panels holds native panel cards independently of their nested disclosures.
+	panels *panelRows
 	// ok is false once the page is gone. err instead denotes a transient
 	// read failure: retain the last good render and retry on a refresh tick.
 	ok  bool
