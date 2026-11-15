@@ -800,7 +800,17 @@
       "registered_at": "2026-11-15T01:40:22Z"
     },
     "261115-feat-ws-dashboard-board-search-log-entries": {
-      "registered_at": "2026-11-15T01:54:37Z"
+      "registered_at": "2026-11-15T01:54:37Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T07:40:46Z",
+        "impl": {
+          "branch": "impl/develop/expel-rural-nail"
+        }
+      }
     },
     "261115-feat-ws-dashboard-board-topic-transport": {
       "registered_at": "2026-11-15T07:28:41Z"
