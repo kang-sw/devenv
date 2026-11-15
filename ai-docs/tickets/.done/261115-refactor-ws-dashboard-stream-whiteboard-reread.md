@@ -1,5 +1,6 @@
 ---
 title: Dashboard non-board wakes reload unchanged whiteboard folders
+completed: 2026-11-15
 ---
 
 # Dashboard non-board wakes reload unchanged whiteboard folders
