@@ -307,7 +307,11 @@ async function pathBarChecks() {
   core.all('.ftab-close')[1].click();
   event(core.tree, 'auxclick', { target: core.at('[data-path="src"]'), button: 1 });
   check('middle-click folder opens background tab without request or navigation', [core.all('.ftab-select').length, core.all('.ftab-select')[0].getAttribute('aria-selected'), core.instance.location().dir, requests.filter(r => !r.taken && r.url.pathname === '/s/core/fs/list').length], [2, 'true', '', 0]);
+  var selectedRows = () => core.all('.fentry').filter(n => n.classList.contains('sel') || n.getAttribute('aria-selected') !== 'false').map(n => n.getAttribute('data-entry'));
+  event(core.all('.fentry').find(n => n.getAttribute('data-entry') === 'report.pdf'), 'click');
+  check('clicking one directory row selects only that row', selectedRows(), ['report.pdf']);
   event(core.all('.fentry').find(n => n.getAttribute('data-entry') === 'photo space.png'), 'click');
+  check('clicking another directory row moves the single selection', selectedRows(), ['photo space.png']);
   core.all('.fattachment button')[0].click(); core.all('.fattachment button')[1].click();
   check('footer follows the selected path and retains both labeled actions', [core.at('.fselection b').textContent, core.at('.fselection').title, core.all('.fattachment button').map(n => n.textContent)], ['photo space.png', '/core/photo space.png', ['js.files.send', 'js.files.copy']]);
   check('browse actions emit session-relative path and selection event', [sent, copied, events.some(e => e[0] === 'sel' && e[1] === 'photo space.png')], [['photo space.png'], ['photo space.png'], true]);
