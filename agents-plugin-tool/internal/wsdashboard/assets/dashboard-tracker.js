@@ -269,6 +269,27 @@
     q("script, style, template, noscript", copy).forEach(function (n) { n.remove(); });
     return copy.textContent.replace(/\s+/g, " ").trim();
   }
+  function paletteBodyText(body) {
+    var frame = body && body.querySelector(".doc-frame");
+    if (!frame) return paletteText(body);
+    // Both mounted frames and inert placeholders retain the source document.
+    // A template reads its text without executing scripts or fetching images.
+    var parsed = doc.createElement("template");
+    parsed.innerHTML = frame.getAttribute("data-srcdoc") || frame.getAttribute("srcdoc") || "";
+    return paletteText(parsed.content.querySelector(".doc-body"));
+  }
+  function paletteEntryText(entry) {
+    function own(selector) {
+      return q(selector, entry).filter(function (n) { return n.closest(".wb-entry") === entry; })[0];
+    }
+    var recap = own(".entry-recap"), body = own(".entry-body");
+    if (recap || body) return (paletteText(recap) + " " + paletteBodyText(body)).trim();
+    var line = own(".entry-text");
+    if (!line) return "";
+    var copy = line.cloneNode(true);
+    q("time", copy).forEach(function (n) { n.remove(); });
+    return paletteText(copy).replace(/^—\s*/, "");
+  }
   function paletteRows(update) {
     // The board caps its initially rendered closed topics. Reuse its existing
     // show-more path so older hits are searchable and already mounted to jump to.
@@ -282,20 +303,22 @@
       var name = topic.getAttribute("data-topic"), label = paletteText(topic.querySelector(".tname")) || name;
       var time = topic.querySelector(".tbar time"), at = time ? Number(time.getAttribute("data-at")) || Date.parse(time.getAttribute("datetime")) || 0 : 0;
       rows.push({ group: 1, kind: "board-topic", topic: name, title: label, at: at });
-      // A board frame is an iframe or, before it mounts, an inert div.doc-frame placeholder.
-      var body = topic.querySelector(".doc-body"), frame = body && body.querySelector(".doc-frame"), text;
-      if (frame) {
-        // The frame's document text (data-srcdoc, wswhiteboard framedDoc) is
-        // there even for an unmounted or opaque-origin frame. A template
-        // parses it inertly: never execute a body's scripts or fetch its images.
-        var parsed = doc.createElement("template");
-        // An unmounted frame holds its document in data-srcdoc until it mounts.
-        parsed.innerHTML = frame.getAttribute("data-srcdoc") || frame.getAttribute("srcdoc") || "";
-        text = paletteText(parsed.content.querySelector(".doc-body"));
-      } else text = paletteText(body);
+      // Only the topic-owned fold can supply a body, never a stream panel.
+      var body = topic.querySelector(":scope > .tdoc > .doc-body"), text = paletteBodyText(body);
       var recap = paletteText(topic.querySelector(".rtext"));
       text = (recap + " " + text).trim();
-      if (text) rows.push({ group: 2, kind: "board-body", topic: name, title: text, hint: label });
+      if (body && text) rows.push({ group: 2, kind: "board-body", topic: name, title: text, hint: label });
+      function entries(root) {
+        q("article.wb-entry", root).forEach(function (entry) {
+          var clock = q("time.entry-at", entry).filter(function (n) { return n.closest(".wb-entry") === entry; })[0];
+          rows.push({ group: 5, kind: "board-entry", topic: name, entry: entry.id,
+            title: paletteEntryText(entry), hint: label + (clock ? " · " + paletteText(clock) : "") });
+        });
+      }
+      q(".topic-stream", topic).forEach(function (stream) {
+        entries(stream);
+        q("template[data-history-page]", stream).forEach(function (page) { entries(page.content); });
+      });
       q('[id^="item-"]', topic).forEach(function (item) {
         var id = /^item-(\d+)$/.exec(item.id);
         if (!id) return;
@@ -367,10 +390,41 @@
     var topic = boardQ("section.topic[data-topic]").filter(function (n) { return n.getAttribute("data-topic") === row.topic; })[0];
     var target = row.id ? $("item-" + row.id) : topic;
     if (!target || !topic) return;
-    if (window.WsOverview && window.WsOverview.pick(topic, o)) return;
-    if (window.WsCards) window.WsCards.unfoldTopic(topic);
-    if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
-    if (live && !tabShown("board")) setTab("board");
+    function prepare(owner) {
+      if (window.WsCards) window.WsCards.unfoldTopic(owner);
+      if (doc.body.classList.contains("tk-paged") && tkApi) tkApi.leavePage();
+      if (live && !tabShown("board")) setTab("board");
+    }
+    function entryPick() {
+      // Overview releases held board swaps before after callbacks; look up
+      // the live topic again rather than navigating a detached history tree.
+      var owner = boardQ("section.topic[data-topic]").filter(function (n) { return n.getAttribute("data-topic") === row.topic; })[0];
+      if (!owner) return;
+      var prepared = false;
+      var entry = window.wbHistory && window.wbHistory.loadTarget(owner, row.entry, function () {
+        if (prepared) return;
+        prepared = true;
+        prepare(owner);
+      });
+      if (!entry) { palettePick({ kind: "board-topic", topic: row.topic }, o); return; }
+      // History owns disclosure, flash and viewport landing. In particular,
+      // scrollIntoView would scroll its clipped box and break bottom anchoring.
+      if (!(o && o.keep)) {
+        entry.setAttribute("tabindex", "-1");
+        entry.focus({ preventScroll: true });
+      }
+    }
+    if (window.WsOverview && window.WsOverview.pick(topic, o)) {
+      if (row.kind === "board-entry") window.WsOverview.after(function () {
+        // During entry animation, after is not an exit barrier: hand off
+        // again until Overview has finished its queued exit.
+        if (window.WsOverview.holding()) palettePick(row, o);
+        else entryPick();
+      });
+      return;
+    }
+    if (row.kind === "board-entry") { entryPick(); return; }
+    prepare(topic);
     if (row.kind === "board-body") target = topic.querySelector(".tdoc") || topic;
     for (var p = target.parentElement; p && p !== topic.parentElement; p = p.parentElement) {
       if (p.tagName === "DETAILS") p.open = true;

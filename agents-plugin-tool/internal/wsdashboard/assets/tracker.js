@@ -155,8 +155,9 @@
 //   searchState      optional {load(), save({query, slot})} browser persistence
 //   searchAsk(text)  optional answer action for Enter without an arrow selection
 //   searchAnswerMount(element) optional host-owned answer pane and transport
-//   searchRows(update) optional host rows: {group (1..4), kind, title, text?,
-//                    hint?, id?, topic?, at?}: topics, bodies, items and answers.
+//   searchRows(update) optional host rows: {group (1..5), kind, title, text?,
+//                    hint?, id?, topic?, entry?, at?}: topics, bodies, items,
+//                    answers and entries (group 5, kind board-entry, entry id).
 //                    Legacy group-0 session rows are ignored.
 //                    Read on open; update(rows) may replace them as older board
 //                    pages load.
@@ -6148,7 +6149,7 @@
   // The layout step follows the palette's own width, not the viewport's.
   function qStepOf(w) { return w < 600 ? 'narrow' : w < 1000 ? 'medium' : 'wide'; }
   // The board slot: (n) is exactly item n, one hit; a bare number matches item ids, prefix
-  // matches first; other text matches topics, bodies, items, and answers. With no query it
+  // matches first; other text matches topics, bodies, items, answers and entries. With no query it
   // lists topics, then items, newest first.
   function qBoard(rows, t) {
     var ex = /^\((\d+)\)$/.exec(t), hits = [];
@@ -6161,7 +6162,7 @@
     }
     rows.forEach(function (x, i) {
       if (!x.group || (!t && x.group !== 1 && x.group !== 3)) return;
-      var m = qScore(x.text || x.title, t, x.group === 2 || x.group === 4);
+      var m = qScore(x.text || x.title, t, x.group === 2 || x.group === 4 || x.group === 5);
       if (m) hits.push({ row: x, score: m.score, order: i });
     });
     hits.sort(function (a, b) {
@@ -6189,7 +6190,7 @@
     return hits.map(function (x) { return x.row; });
   }
   function qKeyOf(k, r) {
-    if (k === 'board') return r.kind + ':' + (r.id || r.topic || r.title);
+    if (k === 'board') return r.kind + ':' + (r.entry ? r.topic + ':' + r.entry : r.id || r.topic || r.title);
     return r.key;
   }
   // qView lists one slot's rows or each slot's top three in the 'all' tab.
@@ -6367,7 +6368,7 @@
   function qSplit(p) { var i = p.lastIndexOf('/'); return { dir: p.slice(0, i + 1), name: p.slice(i + 1) }; }
   function qRowHtml(k, r) {
     var q = qs.q.trim();
-    if (k === 'board') return '<span class="tk-qid">' + esc(r.id ? '(' + r.id + ')' : '#') + '</span><span class="qboard"><b>' + esc(r.group === 2 || r.group === 4 ? qExcerpt(r.title, q) : r.title) + '</b><span class="muted">' + esc(r.hint || '') + '</span></span><span class="grow"></span>' +
+    if (k === 'board') return '<span class="tk-qid">' + esc(r.id ? '(' + r.id + ')' : '#') + '</span><span class="qboard"><b>' + esc(r.group === 2 || r.group === 4 || r.group === 5 ? qExcerpt(r.title, q) : r.title) + '</b><span class="muted">' + esc(r.hint || '') + '</span></span><span class="grow"></span>' +
       (/^\(\d+\)$/.test(q) ? '<span class="qk tk-qexact">' + wsT("js.tk.qs.exact") + '</span>' : '');
     if (k === 'tracker') return '<span class="sti">' + SI.svg(r.st) + '</span><span class="qt">' + esc(r.title) + '</span><span class="grow"></span><code class="al">' + esc(r.alias) + '</code><span class="qk">' + esc(r.store) + '</span>';
     if (k === 'files' && qs.path) return '<svg class="i"><use href="#tki-' + (r.dir ? 'folder' : 'doc') + '"/></svg><span class="qt">' + esc(r.name + (r.dir ? qs.path.sep : '')) + '</span>';

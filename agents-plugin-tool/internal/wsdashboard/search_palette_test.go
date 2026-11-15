@@ -1,9 +1,16 @@
 package wsdashboard
 
 import (
+	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
+	"golang.org/x/net/html"
 )
 
 func TestSearchPaletteAssets(t *testing.T) {
@@ -148,6 +155,92 @@ func TestSearchAnswerDrawerBehavior(t *testing.T) {
 	out, err := exec.Command(node, "testdata/search-answer.test.cjs").CombinedOutput()
 	if err != nil {
 		t.Fatalf("answer drawer cases failed: %v\n%s", err, out)
+	}
+}
+
+// This adapter fixture parses production templates without starting a browser or
+// daemon. Native disclosure/scroll geometry remains a separate acceptance check.
+func TestSearchPaletteRenderedEntries(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	state := &wswhiteboard.State{}
+	apply := func(commands string) {
+		t.Helper()
+		_, problems := wswhiteboard.Apply(state, commands, wswhiteboard.Env{Now: time.Date(2026, 11, 15, 10, 0, 0, 0, time.UTC)})
+		if len(problems) != 0 {
+			t.Fatal(problems)
+		}
+	}
+	apply(`<wb:topic name="stream"><wb:log>Older-page needle</wb:log><wb:state value="waiting"/><wb:state value="discussing"/></wb:topic>`)
+	for i := 0; i < wswhiteboard.HistoryWindow+8; i++ {
+		apply(`<wb:topic name="stream"><wb:log>Padding log line</wb:log></wb:topic>`)
+	}
+	apply(`<wb:topic name="stream"><wb:panel recap="Earlier panel recap"><p>Historical payload needle</p></wb:panel><wb:panel id="p1" recap="Latest panel recap"><p>Latest payload needle</p><script>forbiddenScriptNeedle()</script></wb:panel><wb:log>Live log needle</wb:log></wb:topic>`)
+	apply(`<wb:topic name="body"><wb:body><p>Topic-owned body needle</p></wb:body></wb:topic>`)
+	regions, err := wswhiteboard.RenderRegions(wswhiteboard.BuildView(state, wswhiteboard.ViewInput{Layout: wswhiteboard.LayoutFull, Location: time.UTC}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type domNode struct {
+		Tag      string            `json:"tag,omitempty"`
+		Text     string            `json:"text,omitempty"`
+		Attrs    map[string]string `json:"attrs,omitempty"`
+		Children []*domNode        `json:"children,omitempty"`
+		Content  []*domNode        `json:"content,omitempty"`
+	}
+	frames := map[string]*domNode{}
+	var convert func(*html.Node) *domNode
+	var parse func(string) *domNode
+	parse = func(source string) *domNode {
+		n, err := html.Parse(strings.NewReader(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return convert(n)
+	}
+	convert = func(n *html.Node) *domNode {
+		out := &domNode{}
+		if n.Type == html.TextNode {
+			out.Text = n.Data
+		} else if n.Type == html.ElementNode {
+			out.Tag, out.Attrs = n.Data, map[string]string{}
+			for _, a := range n.Attr {
+				out.Attrs[a.Key] = a.Val
+				if (a.Key == "data-srcdoc" || a.Key == "srcdoc") && frames[a.Val] == nil {
+					frames[a.Val] = &domNode{}
+					frames[a.Val] = parse(a.Val)
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if c.Type == html.CommentNode || c.Type == html.DoctypeNode {
+				continue
+			}
+			if n.Data == "template" {
+				out.Content = append(out.Content, convert(c))
+			} else {
+				out.Children = append(out.Children, convert(c))
+			}
+		}
+		return out
+	}
+	fixture := struct {
+		Root   *domNode            `json:"root"`
+		Frames map[string]*domNode `json:"frames"`
+	}{parse(string(regions.Board)), frames}
+	data, err := json.Marshal(fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "board-dom.json")
+	if err := os.WriteFile(file, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(node, "testdata/search-palette.test.cjs", file).CombinedOutput()
+	if err != nil {
+		t.Fatalf("rendered entry cases failed: %v\n%s", err, out)
 	}
 }
 
