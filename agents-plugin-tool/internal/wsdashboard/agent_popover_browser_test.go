@@ -19,8 +19,9 @@ import (
 // The script checks open and close (badge, Esc, outside click, the close
 // button), the pin and its reload persistence, the group order (lead,
 // running, ended, background, peers), a row's recent output and its full
-// output action, the narrow fit, the board tab, and that every row the agents
-// region renders is inside the popover. WS_AGPOP_SHOTS=<dir> saves
+// output action, the narrow fit, the board tab, the muted zero-running badge
+// (including a non-live page retained for a draft), and that every row the
+// agents region renders is inside the popover. WS_AGPOP_SHOTS=<dir> saves
 // screenshots. Needs WS_PLAYWRIGHT_MODULE.
 func TestAgentBadgePopoverBrowser(t *testing.T) {
 	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
@@ -68,11 +69,25 @@ func TestAgentBadgePopoverBrowser(t *testing.T) {
 		}}
 	f.d.snapshots.SetLive(f.dir, "livesession", snap)
 	f.d.broker.wake(liveDep("livesession"))
-	// Each request swaps the agents region with a new caption on explore-ui.
+	// The zero-running fixture keeps a working lead and one ended agent;
+	// removing its adapter then exercises the non-live draft-retained page.
+	zero := wslive.Snapshot{SchemaVersion: 1, Adapter: "pi", HeartbeatMs: 30000,
+		Lead:   wslive.Lead{Activity: wslive.Activity{Phase: wslive.PhaseThinking}},
+		Agents: []wslive.Agent{agent("ended", "finished-worker", wslive.StatusDone, "sonnet-5.5", 12000, nil, 1, 0, 60000)}}
+	// Each request swaps the agents region with a new caption or fixture state.
 	updates := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		snap.Agents[0].Caption = r.URL.Query().Get("caption")
-		snap.UpdatedAt = time.Now().UnixMilli()
-		f.d.snapshots.SetLive(f.dir, "livesession", snap)
+		next := snap
+		switch r.URL.Query().Get("state") {
+		case "zero":
+			next = zero
+		case "nonlive":
+			next = zero
+			next.Adapter = ""
+		default:
+			next.Agents[0].Caption = r.URL.Query().Get("caption")
+		}
+		next.UpdatedAt = time.Now().UnixMilli()
+		f.d.snapshots.SetLive(f.dir, "livesession", next)
 		f.d.broker.wake(liveDep("livesession"))
 		w.WriteHeader(http.StatusNoContent)
 	}))

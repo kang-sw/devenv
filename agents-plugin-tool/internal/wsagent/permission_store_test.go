@@ -43,22 +43,55 @@ func TestPermissionStoreRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected stored fields: %s (%v)", raw, err)
 	}
 	path := filepath.Join(dir, "permission.json")
-	before, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := os.Chmod(path, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writePermissionSelection(dir, PermissionFull); err != nil {
-		t.Fatal(err)
+	// File identity is not a portable replacement oracle. Readers must see a
+	// complete old or new document, and the last successful write must win.
+	full := []byte("{\n  \"permission_level\": \"full\"\n}\n")
+	stop := make(chan struct{})
+	ready := make(chan struct{})
+	observed := make(chan error, 1)
+	go func() {
+		first := true
+		for {
+			got, err := readFile(path) // Includes Windows sharing-violation retries.
+			if err == nil && !bytes.Equal(got, raw) && !bytes.Equal(got, full) {
+				err = fmt.Errorf("partial or unexpected selection visible: %q", got)
+			}
+			if first {
+				close(ready)
+				first = false
+			}
+			if err != nil {
+				observed <- err
+				return
+			}
+			select {
+			case <-stop:
+				observed <- nil
+				return
+			default:
+			}
+		}
+	}()
+	<-ready
+	defer func() {
+		close(stop)
+		if err := <-observed; err != nil {
+			t.Error(err)
+		}
+	}()
+	for i := 0; i < 64; i++ {
+		for _, level := range []PermissionLevel{PermissionReadOnly, PermissionFull} {
+			if err := writePermissionSelection(dir, level); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	after, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if os.SameFile(before, after) {
-		t.Fatal("selection was modified in place rather than replaced")
+	got, err := readFile(path)
+	if err != nil || !bytes.Equal(got, full) {
+		t.Fatalf("last write did not win: %q (%v)", got, err)
 	}
 	assertPermissionSelection(t, dir, PermissionFull, false)
 }
@@ -163,18 +196,13 @@ func assertPermissionSelection(t *testing.T, dir string, want PermissionLevel, u
 
 const permissionLegacyCommit = "90eacda7e4956aded76cfc092d20c41e76d2cc1a"
 
-// Pinned source files remain inert testdata. Extracted declarations below are
-// compared byte-for-byte with the Git object before being compiled and executed.
+// Pinned source files remain inert testdata. Extracted declarations are always
+// compiled and executed; byte comparison requires the historical Git object.
 func permissionLegacyDeclarations(t *testing.T, path string, names ...string) string {
 	t.Helper()
 	fixture, err := os.ReadFile(filepath.Join("testdata", "permission-legacy", strings.ReplaceAll(path, "/", "-")+".txt"))
 	if err != nil {
 		t.Fatal(err)
-	}
-	cmd := exec.Command("git", "show", permissionLegacyCommit+":agents-plugin-tool/internal/"+path)
-	original, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("pinned Git object unavailable: %v\n%s", err, original)
 	}
 	extract := func(raw []byte) map[string]string {
 		fs := token.NewFileSet()
@@ -201,16 +229,53 @@ func permissionLegacyDeclarations(t *testing.T, path string, names ...string) st
 		}
 		return out
 	}
-	copied, pinned := extract(fixture), extract(original)
+	copied := extract(fixture)
+	var pinned map[string]string
+	if output, err := exec.Command("git", "cat-file", "-e", permissionLegacyCommit+"^{commit}").CombinedOutput(); err != nil {
+		t.Logf("pinned Git object unavailable; skipping byte comparison only: %v\n%s", err, output)
+	} else {
+		original, err := exec.Command("git", "show", permissionLegacyCommit+":agents-plugin-tool/internal/"+path).CombinedOutput()
+		if err != nil {
+			t.Fatalf("read pinned source: %v\n%s", err, original)
+		}
+		pinned = extract(original)
+	}
 	var result strings.Builder
 	for _, name := range names {
 		body := copied[name]
-		if body == "" || body != pinned[name] {
+		if body == "" || (pinned != nil && body != pinned[name]) {
 			t.Fatalf("fixture %s %s differs from %s", path, name, permissionLegacyCommit)
 		}
 		fmt.Fprintf(&result, "\n// Source: agents-plugin-tool/internal/%s @ %s\n%s\n", path, permissionLegacyCommit, body)
 	}
 	return result.String()
+}
+
+// Give generated packages their own module outside the checkout, retaining the
+// module-path prefix needed for internal imports and the current dependency pins.
+func permissionLegacyPackage(t *testing.T, source string) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	mod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod = bytes.Replace(mod, []byte("module github.com/kang-sw/devenv"), []byte("module github.com/kang-sw/devenv/permissionlegacy"), 1)
+	mod = append(mod, []byte(fmt.Sprintf("\nrequire github.com/kang-sw/devenv v0.0.0\nreplace github.com/kang-sw/devenv => %q\n", root))...)
+	sum, err := os.ReadFile(filepath.Join(root, "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string][]byte{"go.mod": mod, "go.sum": sum, "legacy_test.go": []byte(source)} {
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
 }
 
 func TestPermissionSidecarOldWriteNewReopen(t *testing.T) {
@@ -259,16 +324,9 @@ var wsstate = struct { AtomicReplaceFile func(string,string) error }{AtomicRepla
 	source += permissionLegacyDeclarations(t, "wsdashboard/label_route.go", "labelRecord", "writeSessionLabel")
 	source += permissionLegacyDeclarations(t, "wsdashboard/endpoint.go", "writePrivateFile")
 	source += permissionLegacyHarness
-	// A package under testdata is compiled only through this focused invocation;
-	// no dashboard test package, provider, server or harness is started.
-	harness, err := os.MkdirTemp(filepath.Join("testdata", "permission-legacy"), "generated-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(harness)
-	if err := os.WriteFile(filepath.Join(harness, "legacy_test.go"), []byte(source), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// Only the isolated fixture package is compiled; no dashboard test package,
+	// provider, server or harness is started.
+	harness := permissionLegacyPackage(t, source)
 	root := t.TempDir()
 	cases := []string{"record", "registration", "remove", "labelset", "labelclear", "hosted", "expired", "deleted"}
 	seed := []byte("{\n  \"permission_level\": \"read-only\", \"future\": {\"keep\":[1,true,\"x\"]}\n}\n")
@@ -292,8 +350,9 @@ var wsstate = struct { AtomicReplaceFile func(string,string) error }{AtomicRepla
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("go", "test", "-v", "./"+filepath.ToSlash(harness), "-count=1", "-run", "^TestPermissionPinnedWriters$")
-	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local", "PERMISSION_FIXTURE_ROOT="+absRoot)
+	cmd := exec.Command("go", "test", "-mod=readonly", "-v", ".", "-count=1", "-run", "^TestPermissionPinnedWriters$")
+	cmd.Dir = harness
+	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local", "GOWORK=off", "PERMISSION_FIXTURE_ROOT="+absRoot)
 	output, err := cmd.CombinedOutput()
 	t.Logf("pinned writer fixture output:\n%s", output)
 	if err != nil || !bytes.Contains(output, []byte("--- PASS: TestPermissionPinnedWriters")) {
