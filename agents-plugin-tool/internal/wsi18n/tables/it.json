@@ -148,6 +148,8 @@
   "js.card.fold": "Comprimi o espandi",
   "js.card.grip": "Trascina per ridimensionare; doppio clic per ripristinare",
   "js.card.max": "Ingrandisci",
+  "js.card.width.extend": "Estendi a tutta larghezza",
+  "js.card.width.normal": "Ripristina la larghezza normale",
   "js.card.min": "Torna alla scheda (Esc)",
   "js.card.back": "Torna alla bacheca (Esc)",
   "js.card.pin": "Fissa",

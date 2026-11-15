@@ -148,6 +148,8 @@
   "js.card.fold": "Replier ou déplier",
   "js.card.grip": "Faire glisser pour redimensionner ; double-clic pour réinitialiser",
   "js.card.max": "Agrandir",
+  "js.card.width.extend": "Étendre à toute la largeur",
+  "js.card.width.normal": "Rétablir la largeur normale",
   "js.card.min": "Revenir à la carte (Échap)",
   "js.card.back": "Revenir au tableau (Échap)",
   "js.card.pin": "Épingler",
