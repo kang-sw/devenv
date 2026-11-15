@@ -687,3 +687,41 @@ The performance-repair work unit is complete; Phase 1 remains open under the
 owner's explicit no-closure instruction. MAIN's latest `bffec047c` gate accepts
 this older head for lead-owned three-way integration. No Phase Result, closure,
 self-sync, integration or owner on-screen acceptance is claimed.
+
+## Viewed Refix — 2026-11-15 (lead-owned diagnosis, owner (916)=c)
+
+Branch `exec4/viewed-refix`: `33b271eef` + review round `6f8dac15a`, synced
+to gate `1d07c1308`. Four root causes, each with a focused regression:
+
+1. **Per-update freeze.** Staging exposure tests rescanned every sticky
+   head per node through `viewport()`. `viewKit.snapshot()` now caches one
+   viewport per scroller for a synchronous staging pass (`boardWithSnap`).
+2. **Scroll lock.** The scroll listener re-ran a full board swap on every
+   frame while anything was pending. `boardReleaseDue` re-stages only when
+   a pending panel left the view, or when the exposed unit or panel set
+   changed.
+3. **Blank card / held late growth.** `applyFrameHeights` held a visible
+   swapped-in frame at its first (0 px) height. The hold is removed: a
+   frame's srcdoc never changes, so its height reports are already-admitted
+   content. This changes the approach from the Phase 1 text.
+4. **Visible rows sliding on log append.** `restore()` re-chose the
+   single-chunk tail on every swap, and the flex-end clip slid visible rows
+   up. An in-view settled default cut is now held (`_wbHistoryHeld`) and
+   collapses to the tail when the topic leaves view.
+
+Gate evidence comes from opt-in browser fixtures (skipped without the
+cached Playwright env), lead-run at load average 7-10:
+
+| Scenario | Before | After |
+|---|---|---|
+| Log-append updates (pi harness) | 95-132 ms sync, plus a 105-122 ms long task | 25-38 ms sync, no long task in steady state |
+| Swap (100-topic live WS fixture) | 71-86 ms | 30-40 ms |
+
+- Scroll with a staged revision is monotonic and has no long task.
+- Late image growth is delivered: 254->534 px and 222->622 px.
+- There are no exposed-row moves and no blank clip.
+
+**Open:** a single 50-57 ms post-dispatch long task appears in about one
+of twelve updates (the first update or a panel-frame insert near the view).
+Cold first load is deferred per the owner gate. Phase 1 stays open pending
+the owner's on-screen acceptance.
