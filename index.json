@@ -735,7 +735,14 @@
       "registered_at": "2026-11-15T00:41:34Z"
     },
     "261115-bug-pi-reviewer-write-scope-discoverability": {
-      "registered_at": "2026-11-14T18:18:40Z"
+      "registered_at": "2026-11-14T18:18:40Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "docs/exec3-dedupe-1051",
+        "phase": "closed",
+        "touched_at": "2026-11-15T08:06:37Z"
+      }
     },
     "261115-bug-worktree-acquire-concurrent-pool-selection": {
       "registered_at": "2026-11-15T07:37:25Z"
