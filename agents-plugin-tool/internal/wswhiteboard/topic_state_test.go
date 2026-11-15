@@ -79,11 +79,7 @@ func TestTopicStateResearchingInvalidAtomicity(t *testing.T) {
 	}
 	for _, attrs := range invalid {
 		s := stateBoard(t)
-		before := s.clone()
-		_, p := Apply(s, `<wb:topic name="Work"><wb:log>roll back</wb:log></wb:topic>`+stateCommand(StateResearching, attrs), Env{Now: stateNow})
-		if len(p) == 0 || !reflect.DeepEqual(before, s) {
-			t.Fatalf("non-atomic research refusal %q: %v", attrs, p)
-		}
+		mixedAt(t, s, `<wb:topic name="Work"><wb:log>accepted</wb:log></wb:topic>`+stateCommand(StateResearching, attrs), `<wb:topic name="Work"><wb:log>accepted</wb:log></wb:topic>`, stateNow)
 	}
 	for _, closed := range []bool{false, true} {
 		s := &State{}
@@ -132,11 +128,7 @@ func TestTopicStateGrammarAtomicityAndBounds(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("invalid-%q", command), func(t *testing.T) {
 			s := stateBoard(t)
-			before := s.clone()
-			_, problems := Apply(s, `<wb:topic name="Work"><wb:log>must roll back</wb:log></wb:topic>`+command, Env{Now: stateNow})
-			if len(problems) == 0 || !reflect.DeepEqual(s, before) {
-				t.Fatalf("non-atomic refusal: %v", problems)
-			}
+			mixedAt(t, s, `<wb:topic name="Work"><wb:log>accepted</wb:log></wb:topic>`+command, `<wb:topic name="Work"><wb:log>accepted</wb:log></wb:topic>`, stateNow)
 		})
 	}
 	for _, eta := range []string{"", "0", "-1", "+1", "1.5", " 1", "1 ", "1e2", "١", "9223372036854775808", fmt.Sprint(maxETAMinutes + 1)} {

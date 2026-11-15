@@ -93,7 +93,12 @@ func TestStemRefusals(t *testing.T) {
 		"stem equal to another label":    {`<wb:topic name="gamma" label="delta-x"><wb:body>b</wb:body></wb:topic><wb:topic name="delta-x" label="D"><wb:body>b</wb:body></wb:topic>`, `<wb:topic> (line 1) name: "delta-x" is topic gamma's label`},
 		"label adopting a stemmed topic": {`<wb:topic name="gamma" label="Beta"/>`, `"Beta" is already another topic's name`},
 	} {
-		problems := refused(t, st, tc.in)
+		var problems []string
+		if name == "stem equal to another label" {
+			problems = mixed(t, st, tc.in, `<wb:topic name="gamma" label="delta-x"><wb:body>b</wb:body></wb:topic>`)
+		} else {
+			problems = refused(t, st, tc.in)
+		}
 		if !hasProblem(problems, tc.want) {
 			t.Errorf("%s: problems %q, want %q", name, problems, tc.want)
 		}

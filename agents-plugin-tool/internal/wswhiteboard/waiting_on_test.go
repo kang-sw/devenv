@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -53,11 +52,7 @@ func TestWaitingOnDeclarationsAndAtomicRefusal(t *testing.T) {
 		t.Fatal("empty repeat appended")
 	}
 	for _, bad := range []string{`value="discussing" on="owner"`, `value="waiting" on="topic:missing"`, `value="waiting" on="topic:Work"`, `value="waiting" on="ticket:261115-feat"`, `value="waiting" on="ticket:../bad"`, `value="waiting" on="exec:bad/label"`, `value="waiting" on="exec:` + strings.Repeat("a", 33) + `"`, `value="waiting" on="mystery"`, `value="waiting" on="exec:1 exec:2 exec:3 exec:4 exec:5 exec:6 exec:7 exec:8 exec:9"`} {
-		before := s.clone()
-		_, p := Apply(s, `<wb:topic name="Work"><wb:log>must roll back</wb:log><wb:state `+bad+`/></wb:topic>`, Env{Now: stateNow})
-		if len(p) == 0 || !reflect.DeepEqual(before, s) {
-			t.Fatalf("not atomically refused %s: %v", bad, p)
-		}
+		mixedAt(t, s, `<wb:topic name="Work"><wb:log>accepted</wb:log><wb:state `+bad+`/></wb:topic>`, `<wb:topic name="Work"><wb:log>accepted</wb:log></wb:topic>`, stateNow)
 	}
 	_, badTime := Apply(s, stateCommand("waiting", `on="owner"`), Env{Now: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)})
 	if len(badTime) == 0 {

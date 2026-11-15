@@ -29,10 +29,11 @@ type EntryView struct {
 	Item *ItemView
 }
 
-// OwnerAnswer reports a system event that records the owner's answer. The
-// prefix is the one applyAnswer writes; an assumed answer is not the owner's.
+// OwnerAnswer includes actual owner input (a choice or a comment), never
+// the lead's assumption. Both reuse attributed system entries.
 func (e EntryView) OwnerAnswer() bool {
-	return e.Kind == EntrySystem && e.ItemID > 0 && strings.HasPrefix(e.Text, fmt.Sprintf("Item {{%d}} answered [", e.ItemID))
+	prefix := fmt.Sprintf("Item {{%d}} ", e.ItemID)
+	return e.Kind == EntrySystem && e.ItemID > 0 && (strings.HasPrefix(e.Text, prefix+"answered [") || strings.HasPrefix(e.Text, prefix+"user commented ["))
 }
 
 var panelImagePattern = regexp.MustCompile(`!\[[^\]]*\]\(|<img\b`)

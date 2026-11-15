@@ -42,6 +42,8 @@ func (d itemData) HistoryStatusLabel() string {
 	switch d.Status {
 	case StatusOpen:
 		return StatusOpen
+	case StatusCommented:
+		return "user commented, lead's move"
 	case StatusAssumed:
 		return wsi18n.T(d.Page.Lang, "wb.history.assumed")
 	case StatusWithdrawn:

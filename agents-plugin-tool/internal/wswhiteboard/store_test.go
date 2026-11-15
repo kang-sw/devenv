@@ -127,9 +127,10 @@ func TestApplyBatchInOrderReturnsIDsInAddOrder(t *testing.T) {
 func TestApplyCommandsRunInTheOrderWritten(t *testing.T) {
 	st := &State{}
 	// An answer ahead of the add it targets names an item that does not exist yet.
-	problems := refused(t, st, `<wb:answer id="1" value="ok">q</wb:answer>`+addXML(ClassTechnical, "t", "x"))
+	problems := mixed(t, st, `<wb:answer id="1" value="ok">q</wb:answer>`+addXML(ClassTechnical, "t", "x"), addXML(ClassTechnical, "t", "x"))
 	wantProblems(t, problems, "command 1 <wb:answer> (line 1) (01): not in the store")
 
+	st = &State{}
 	// Close then add: the add reopens the topic. Add then close: it stays closed.
 	mustApply(t, st, addXML(ClassTechnical, "t", "x"))
 	mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/></wb:topic>`+addXML(ClassTechnical, "t", "y"))
@@ -165,7 +166,7 @@ func TestApplyExplicitIDAdoptsAndRaisesCounter(t *testing.T) {
 	problems := refused(t, st, `<wb:topic name="q"><wb:add id="40" class="policy"><wb:title>dup</wb:title></wb:add></wb:topic>`)
 	wantProblems(t, problems, "id: (40) is already in the store")
 	// Within one batch an adopted ID is taken for the commands after it.
-	problems = refused(t, st, `<wb:topic name="q"><wb:add id="50" class="policy"><wb:title>a</wb:title></wb:add></wb:topic><wb:topic name="q"><wb:add id="50" class="policy"><wb:title>b</wb:title></wb:add></wb:topic>`)
+	problems = mixed(t, st, `<wb:topic name="q"><wb:add id="50" class="policy"><wb:title>a</wb:title></wb:add></wb:topic><wb:topic name="q"><wb:add id="50" class="policy"><wb:title>b</wb:title></wb:add></wb:topic>`, `<wb:topic name="q"><wb:add id="50" class="policy"><wb:title>a</wb:title></wb:add></wb:topic>`)
 	wantProblems(t, problems, "command 2 <wb:add> (line 1) id: (50) is already in the store")
 	for _, bad := range []string{"(43)", "0", "-3", "1.5", ""} {
 		problems = refused(t, st, fmt.Sprintf(`<wb:topic name="q"><wb:add id=%q class="policy"><wb:title>x</wb:title></wb:add></wb:topic>`, bad))
@@ -173,7 +174,7 @@ func TestApplyExplicitIDAdoptsAndRaisesCounter(t *testing.T) {
 	}
 }
 
-func TestApplyRefusedBatchAppliesNothingAndReportsEveryProblem(t *testing.T) {
+func TestApplyFailedCommandsApplyNothingAndReportEveryProblem(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassPolicy, "t", "one"))
 	problems := refused(t, st, `<wb:topic name="t"><wb:add class="wrong"><wb:title>x</wb:title></wb:add></wb:topic>
@@ -191,8 +192,8 @@ func TestApplyRefusedBatchAppliesNothingAndReportsEveryProblem(t *testing.T) {
 	if st.Counter != 1 || len(st.Items) != 1 {
 		t.Fatalf("refused batch changed the store: %+v", st)
 	}
-	// A valid command ahead of a bad one is not applied either.
-	problems = refused(t, st, addXML(ClassTechnical, "t", "fine")+"\n"+`<wb:topic name="nowhere"><wb:close result="done"/></wb:topic>`)
+	// A valid command ahead of a bad one remains applied.
+	problems = mixed(t, st, addXML(ClassTechnical, "t", "fine")+"\n"+`<wb:topic name="nowhere"><wb:close result="done"/></wb:topic>`, addXML(ClassTechnical, "t", "fine"))
 	wantProblems(t, problems, `command 2 <wb:close> (line 2): no items, content, or entries for topic "nowhere"`)
 }
 
@@ -555,8 +556,8 @@ func TestCloseWithdrawsTheTopicsOpenItems(t *testing.T) {
 		addXML(ClassTechnical, "a", "answered")+addXML(ClassTechnical, "a", "superseded")+addXML(ClassTechnical, "b", "elsewhere"))
 	mustApply(t, st, `<wb:answer id="2" value="guess" assumed="true">maybe</wb:answer><wb:answer id="3" value="ok">ok</wb:answer><wb:patch id="4" status="superseded"/>`)
 
-	// A refused batch carrying the close changes no item and closes nothing.
-	refused(t, st, `<wb:topic name="a"><wb:close result="done"/></wb:topic><wb:patch id="99" status="open"/>`)
+	// A failed command on this topic blocks a later close without withdrawal.
+	refused(t, st, `<wb:patch id="1" status="wrong"/><wb:topic name="a"><wb:close result="done"/></wb:topic><wb:patch id="99" status="open"/>`)
 
 	prevSeq := st.SettleSeq
 	assumed := item(t, st, 2)
@@ -600,11 +601,13 @@ func TestCloseWithdrawsTheTopicsOpenItems(t *testing.T) {
 func TestAnswerAfterCloseInOneBatchNamesTheClose(t *testing.T) {
 	st := &State{}
 	mustApply(t, st, addXML(ClassTechnical, "a", "open"))
-	problems := refused(t, st, `<wb:topic name="a"><wb:close result="Done."/></wb:topic><wb:answer id="1" value="ok">ok</wb:answer>`)
+	problems := mixed(t, st, `<wb:topic name="a"><wb:close result="Done."/></wb:topic><wb:answer id="1" value="ok">ok</wb:answer>`, `<wb:topic name="a"><wb:close result="Done."/></wb:topic>`)
 	wantProblems(t, problems, `command 2 <wb:answer> (line 1) (01): command 1 <wb:close> (line 1) earlier in this batch withdrew it; put the answers before the close`)
 	if hasProblem(problems, "patch its status to open") {
 		t.Fatalf("problems = %q, want no reopen advice for an item this batch withdrew", problems)
 	}
+	st = &State{}
+	mustApply(t, st, addXML(ClassTechnical, "a", "open"))
 	out := mustApply(t, st, `<wb:answer id="1" value="ok">ok</wb:answer><wb:topic name="a"><wb:close result="Done."/></wb:topic>`)
 	if got := item(t, st, 1).Status; got != StatusAnswered || len(out.Withdrawn) != 0 {
 		t.Fatalf("item 1 = %s, withdrawn %v; want answered and nothing withdrawn", got, out.Withdrawn)
@@ -998,7 +1001,7 @@ func TestApplyEditRefusals(t *testing.T) {
 		t.Fatalf("body = %q", st.TopicBody("t"))
 	}
 	// An edit inside a batch sees the bodies the commands ahead of it wrote.
-	wantProblems(t, refused(t, st, `<wb:topic name="new"><wb:edit><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit></wb:topic>`+topicXML("new", "a")), `topic "new" has no body`)
+	wantProblems(t, mixed(t, st, `<wb:topic name="new"><wb:edit><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit></wb:topic>`+topicXML("new", "a"), topicXML("new", "a")), `topic "new" has no body`)
 	mustApply(t, st, topicXML("new", "a")+`<wb:topic name="new"><wb:edit><wb:old>a</wb:old><wb:new>b</wb:new></wb:edit></wb:topic>`)
 	if st.TopicBody("new") != "b" {
 		t.Fatalf("body = %q", st.TopicBody("new"))

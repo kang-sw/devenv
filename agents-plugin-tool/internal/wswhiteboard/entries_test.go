@@ -87,14 +87,11 @@ func TestEntryCommandRefusalsAreAtomic(t *testing.T) {
 		"full doc":          {panelXML("a", "x", "<!DOCTYPE html><html><body>x</body></html>"), "not a full document"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			wantProblems(t, refused(t, st, panelXML("a", "not committed", "")+tc.command), tc.problem)
+			wantProblems(t, mixed(t, st, panelXML("a", "accepted", "")+tc.command, panelXML("a", "accepted", "")), tc.problem)
 		})
 	}
-	// Even an event from an otherwise successful earlier command is refused.
-	refused(t, st, addXML(ClassTechnical, "a", "not committed")+logXML("a", "not committed")+`<wb:nope/>`)
-	if st.EntrySeq != 3 || st.PanelCounter != 1 || len(st.Items) != 0 {
-		t.Fatalf("refused batch consumed IDs or emitted events: %+v", st)
-	}
+	// Only the unknown command fails; prior events are retained exactly once.
+	mixed(t, st, addXML(ClassTechnical, "a", "accepted")+logXML("a", "accepted")+`<wb:nope/>`, addXML(ClassTechnical, "a", "accepted")+logXML("a", "accepted"))
 }
 
 func TestAgentLogIsInlineOnly(t *testing.T) {
@@ -254,9 +251,9 @@ func TestCreationBatchStopsAtUpdatesAndInterveningEvents(t *testing.T) {
 			t.Fatalf("recorded creation clock changed: %+v", e)
 		}
 	}
-	refused(t, st, addXML(ClassTechnical, "t", "not accepted")+`<wb:nope/>`)
-	if !reflect.DeepEqual(entries(t, st, "t"), got) {
-		t.Fatal("refused creation changed retained history")
+	mixed(t, st, addXML(ClassTechnical, "t", "accepted")+`<wb:nope/>`, addXML(ClassTechnical, "t", "accepted"))
+	if !reflect.DeepEqual(entries(t, st, "t")[:len(got)], got) {
+		t.Fatal("mixed creation changed earlier retained history")
 	}
 }
 

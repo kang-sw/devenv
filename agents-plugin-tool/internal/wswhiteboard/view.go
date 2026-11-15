@@ -917,7 +917,7 @@ func recentSettled(state *State) []int {
 	type entry struct{ id, order int }
 	var settled []entry
 	for _, item := range state.Items {
-		if (IsSettled(item.Status) || item.Status == StatusAssumed) && !inCheckList(item) && !state.topicClosed(item.Topic) {
+		if (IsSettled(item.Status) || item.Status == StatusAssumed || item.Status == StatusCommented) && !inCheckList(item) && !state.topicClosed(item.Topic) {
 			settled = append(settled, entry{item.ID, state.settleOrder(item)})
 		}
 	}
