@@ -4343,26 +4343,28 @@
     f = frameWins.get(win);
     return f && inBoard(f) ? f : undefined;
   }
-  // Only an existing board item or latest stable panel target may be
-  // navigated. The history loader accepts bare IDs, never selectors/URLs.
+  // Only existing board items, latest stable panels and encoded topic anchors
+  // may be navigated. Topic chips never materialize unloaded closed topics.
   function boardJump(id) {
-    if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|p[1-9][0-9]*)$/.test(id)) return;
+    if (typeof id !== "string" || !/^(?:item-[0-9]{1,6}|p[1-9][0-9]*|topic-(?:[0-9a-f]{2})+)$/.test(id)) return;
+    var isTopic = id.indexOf("topic-") === 0;
     var target = null, unfoldTopic = window.WsCards && window.WsCards.unfoldTopic;
-    if (window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id, unfoldTopic); return !!target; });
+    if (!isTopic && window.wbHistory) boardBoxes().some(function (b) { target = window.wbHistory.loadTarget(b, id, unfoldTopic); return !!target; });
     if (!target) target = $(id);
     if (!target || target.id !== id || !inBoard(target)) return;
-    if (unfoldTopic) unfoldTopic(target);
-    for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
-    // History targets were revealed and anchored by the shared loader.
-    // scrollIntoView would also scroll the overflow:hidden clip itself.
-    // Under the viewport bands the frames around the target mount and
-    // report their heights after the jump: a keep session holds the target
-    // where it landed meanwhile.
-    if (!target.closest(".wb-history")) {
-      target.scrollIntoView({ block: "start" });
-      var w = window.wbHistory;
-      if (w && w.bands && w.keep) w.keep(target);
+    if (isTopic && (target.tagName !== "SECTION" || !target.hasAttribute("data-topic"))) return;
+    function reveal() {
+      if (unfoldTopic) unfoldTopic(target);
+      for (var p = target; p && inBoard(p); p = p.parentNode) if (p.tagName === "DETAILS") p.open = true;
+      // History targets were anchored by the loader; never scroll their clip.
+      if (!target.closest(".wb-history")) {
+        target.scrollIntoView({ block: "start" });
+        var w = window.wbHistory;
+        if (w && w.bands && w.keep) w.keep(target);
+      }
     }
+    if (isTopic && window.WsCards && window.WsCards.revealTopic) window.WsCards.revealTopic(target, reveal);
+    else reveal();
     return target;
   }
   function captureBoardHistory() {
@@ -7569,6 +7571,55 @@
   // preview while the user types (debounced; a stale answer is dropped).
   // "Add" is off while the input is empty or the latest preview refuses it;
   // a preview still on its way leaves it on, as the add reads the path again.
+  function rpWsBrowse(P, inp, preview, from) {
+    if (P.picker || P.busy || !root.hasAttribute("data-sysopen") || !window.WsFiles) return;
+    var D = P.picker = { instance: null }, gen = P.gen;
+    var dl = D.el = mk("dialog", "fworkspace-picker");
+    dl.setAttribute("aria-label", wsT("js.rail.ws.browse"));
+    var pane = dl.appendChild(mk("section", "fpane"));
+    var note = pane.appendChild(mk("div", "fnote", wsT("js.files.loading")));
+    var row = pane.appendChild(mk("div", "fattachment"));
+    row.appendChild(rpBtn("btn", wsT("js.rail.cancel"))).addEventListener("click", function () { D.close(true); });
+    D.close = function (focus) {
+      if (P.picker !== D) return;
+      P.picker = null;
+      if (D.instance) D.instance.destroy();
+      dl.close(); dl.remove();
+      if (focus) from.focus();
+    };
+    dl.addEventListener("cancel", function (e) { e.preventDefault(); D.close(true); });
+    P.el.appendChild(dl);
+    dl.showModal();
+    fetch("/s/host0/fs/roots", { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("roots refused");
+      return r.json();
+    }).then(function (roots) {
+      if (P.picker !== D || P.gen !== gen) return;
+      var start = roots.home || (roots.volumes || [])[0];
+      if (!start) throw new Error("no browse roots");
+      D.instance = window.WsFiles.create(pane, {
+        rid: "host0", routeBase: "/s/host0/", local: true, directoriesOnly: true,
+        roots: roots, location: { root: start, dir: "" }, toast: toast,
+        attachment: function (slot, api) {
+          var select = slot.appendChild(rpBtn("btn pr", wsT("js.rail.ws.select")));
+          select.disabled = true;
+          var cancel = slot.appendChild(rpBtn("btn", wsT("js.rail.cancel")));
+          function sync() { select.disabled = !api.selection(); }
+          var offNav = api.on("navigation", sync), offSel = api.on("selection", sync);
+          select.addEventListener("click", function () {
+            var chosen = api.selection();
+            if (!chosen || !rpLive(P, gen) || P.busy) return;
+            inp.value = chosen.absolute;
+            D.close(false); preview(); inp.focus();
+          });
+          cancel.addEventListener("click", function () { D.close(true); });
+          return function () { offNav(); offSel(); };
+        }
+      });
+      D.instance.shown();
+    }).catch(function () { if (P.picker === D && P.gen === gen) note.textContent = wsT("js.files.failed"); });
+  }
+
   function rpWsMake() {
     var P = { seq: 0, gen: 0, timer: 0, ok: null, busy: false };
     var el = P.el = rpPop(wsT("js.rail.ws.title"));
@@ -7577,6 +7628,8 @@
     var lbl = sec.appendChild(mk("label", "splbl", wsT("js.rail.ws.label")));
     var line = sec.appendChild(mk("div", "spline"));
     var inp = line.appendChild(rpInput("spq mono"));
+    var browse = root.hasAttribute("data-sysopen") && window.WsFiles ? line.appendChild(rpBtn("pbtn", wsT("js.rail.ws.browse"))) : null;
+    if (browse) browse.addEventListener("click", function () { rpWsBrowse(P, inp, preview, browse); });
     var go = line.appendChild(rpBtn("pbtn go", wsT("js.rail.ws.add")));
     var res = sec.appendChild(mk("div", "spres"));
     inp.id = rpId();
@@ -7592,7 +7645,10 @@
     }
     function hint() { show("", [mk("span", "spnote", wsT("js.rail.ws.hint"))]); }
     function bad(text) { show("bad", [mk("span", "k", text)]); }
-    function sync() { go.disabled = P.busy || !inp.value.trim() || P.ok === false; }
+    function sync() {
+      go.disabled = P.busy || !inp.value.trim() || P.ok === false;
+      if (browse) browse.disabled = P.busy;
+    }
     function preview() {
       var text = inp.value, n = ++P.seq;
       clearTimeout(P.timer);
@@ -7639,7 +7695,8 @@
     go.addEventListener("click", submit);
     P.open = function () { P.gen++; inp.value = ""; P.ok = null; P.busy = false; hint(); sync(); };
     P.focus = function () { inp.focus(); };
-    P.close = function () { P.seq++; clearTimeout(P.timer); };
+    P.back = function () { if (!P.picker) return false; P.picker.close(true); return true; };
+    P.close = function () { P.seq++; clearTimeout(P.timer); if (P.picker) P.picker.close(false); };
     return P;
   }
 

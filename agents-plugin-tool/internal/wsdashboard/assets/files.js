@@ -3,7 +3,7 @@
   // and toolbar-sheet browsers over the guarded read-only fs routes. Each
   // inner tab owns its root/directory, selection, view mode and scroll.
   // The lazy tree stays beside non-column directory views; files open in the
-  // board's preview slot (preview.js).
+  // board's preview slot (preview.js), or their row actions for binary files.
   //
   // The page script owns the tab switch and hands the module its pieces
   // once (create), then calls shown each time the pane comes into view: the
@@ -94,7 +94,8 @@
   // Each owner gets its own DOM, requests, search token and storage adapter.
   function create(node, options) {
   var el = node, h = options || {}, rid = h.rid || doc.documentElement.getAttribute("data-rid") || "";
-  var gen = 0, rootAttempt = 0, started = false, destroyed = false, listeners = [];
+  var directoriesOnly = !!h.directoriesOnly, routeBase = h.routeBase || "/s/" + rid + "/", rootPending = false;
+  var gen = 0, rootAttempt = 0, previewAttempt = 0, started = false, destroyed = false, listeners = [];
   var lists = {}, open = {}, sel = null, cur = null, info = null, rootAbs = "";
   var view = { ign: false, dot: false }, rows = [], rowEls = {};
   var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null, searchResult = null, searchPaused = false;
@@ -151,7 +152,7 @@
     if (destroyed) return;
     snapshot();
     var state = location || { root: rootAbs, dir: dir, view: viewMode };
-    tabs.push({ id: ++tabSeq, state: { root: local() && typeof state.root === "string" ? state.root : "", dir: cleanLocation(state.dir),
+    tabs.push({ id: ++tabSeq, history: { paths: [cleanLocation(state.dir)], index: 0 }, state: { root: local() && typeof state.root === "string" ? state.root : "", dir: cleanLocation(state.dir),
       selection: state.selection == null ? null : cleanLocation(state.selection), scroll: +state.scroll || 0, treeScroll: +state.treeScroll || 0,
       view: viewModes.indexOf(state.view) >= 0 ? state.view : "details", columnLeft: +state.columnLeft || 0,
       columnScroll: state.columnScroll && typeof state.columnScroll === "object" ? Object.assign({}, state.columnScroll) : {} } });
@@ -181,7 +182,8 @@
   function switchTab(index) {
     if (destroyed || !tabs[index] || index === active) return;
     snapshot();
-    gen++; rootAttempt++; navAttempt++;
+    closePath(false);
+    gen++; rootAttempt++; navAttempt++; rootPending = false;
     clearSearch(); closeMenu(false); closePop(false);
     active = index;
     var t = tabs[active], s = t.state, live = t.live;
@@ -211,8 +213,12 @@
   }
   function location() { return { root: rootAbs, dir: dir }; }
   function selection() {
-    if (!info) return null;
+    if (!info || (directoriesOnly && rootPending)) return null;
     var p = sel === null ? dir : sel, sep = info.sep || "/";
+    if (directoriesOnly) {
+      var parent = lists[parentRel(p)];
+      if (!lists[dir] || (p !== dir && !(parent && parent.entries.some(function (e) { return joinRel(parentRel(p), e.name) === p && opens(e); })))) return null;
+    }
     return { root: info.root, session: !!info.session, path: p || ".", absolute: p ? absPath(info.abs || info.root, sep, p.split("/").join(sep)) : info.abs || info.root };
   }
   function notify(type) {
@@ -226,7 +232,7 @@
       ui.selected.appendChild(mk("b", "", value.path.split("/").pop()));
       ui.selected.appendChild(mk("span", "", "  " + value.path));
     }
-    if (!value) return;
+    if (!value && !directoriesOnly) return;
     subscribers[type].slice().forEach(function (fn) { fn(value, api); });
     if (h[type === "selection" ? "onSelection" : "onNavigate"]) h[type === "selection" ? "onSelection" : "onNavigate"](value, api);
   }
@@ -243,13 +249,45 @@
     ui.copy.addEventListener("click", function () { var s = selection(); if (s && h.copy) h.copy(s.session ? s.path : s.absolute); });
     notify("selection");
   }
-  function navigate(path, selected, focusPath) {
+  function history() { return tabs[active] && tabs[active].history; }
+  function resetHistory() {
+    if (tabs[active]) tabs[active].history = { paths: [dir], index: 0 };
+  }
+  function traverseHistory(delta) {
+    var hist = history(), index = hist ? hist.index + delta : -1;
+    if (!hist || index < 0 || index >= hist.paths.length) return;
+    navigate(hist.paths[index], null, null, { index: index });
+  }
+  function editPath() {
+    if (destroyed || !info || !lists[dir]) return;
+    ui.crumbs.hidden = true; ui.path.hidden = false; ui.path.value = dir;
+    ui.path.focus(); ui.path.select();
+  }
+  function closePath(focus) {
+    if (!ui.path || ui.path.hidden) return;
+    ui.path.hidden = true; ui.crumbs.hidden = false;
+    if (focus) ui.crumbs.focus();
+  }
+  function navigate(path, selected, focusPath, navigation) {
     if (destroyed) return;
-    path = cleanLocation(path);
+    navigation = navigation || {};
+    // Typed paths bypass storage sanitization and the listing cache: only
+    // /fs/list may authorize them and return their canonical relative dir.
+    path = navigation.typed ? path : cleanLocation(path);
+    closePath(false);
     clearSearch();
     var g = gen, attempt = ++navAttempt;
     function accept(a) {
       if (g !== gen || attempt !== navAttempt) return;
+      path = typeof a.dir === "string" ? a.dir : path;
+      var hist = history();
+      if (hist) {
+        if (navigation.index != null) hist.index = navigation.index;
+        else if (hist.paths[hist.index] !== path) {
+          hist.paths = hist.paths.slice(0, hist.index + 1);
+          hist.paths.push(path); hist.index++;
+        }
+      }
       lists[path] = a; dir = path; sel = cur = selected == null ? null : selected; contentTop = 0;
       render();
       if (viewMode === "column" && focusPath != null) {
@@ -263,8 +301,10 @@
       persistTabs(); paintTabs(); notify("navigation");
       if (selected != null) notify("selection");
     }
-    if (lists[path]) accept(lists[path]);
-    else listDir(path).then(accept, function () { if (g === gen && attempt === navAttempt) toast(wsT("js.files.failed")); });
+    if (!navigation.typed && navigation.index == null && lists[path]) accept(lists[path]);
+    else listDir(path).then(accept, function (err) {
+      if (g === gen && attempt === navAttempt) toast(wsT(err && err.status === 404 ? "js.files.root.refused" : "js.files.failed"));
+    });
   }
 
   // fsGet asks a file browser route; it rejects with {status, text} on a
@@ -272,12 +312,17 @@
   function fsGet(route, params, signal) {
     var qs = Object.keys(params).filter(function (k) { return params[k] !== "" && params[k] != null; })
       .map(function (k) { return k + "=" + encodeURIComponent(params[k]); }).join("&");
-    return fetch("/s/" + rid + "/fs/" + route + "?" + qs, { credentials: "same-origin", cache: "no-store", signal: signal }).then(function (r) {
+    return fetch(routeBase + "fs/" + route + "?" + qs, { credentials: "same-origin", cache: "no-store", signal: signal }).then(function (r) {
       if (r.ok) return r.json();
       return r.text().then(function (t) { throw { status: r.status, text: (t || "").trim() }; });
     });
   }
-  function listDir(dir, root) { return fsGet("list", { dir: dir, root: root === undefined ? rootAbs : root }); }
+  function listDir(dir, root) {
+    return fsGet("list", { dir: dir, root: root === undefined ? rootAbs : root }).then(function (a) {
+      // The picker never puts files, symlinks or vanished folders into any view.
+      return directoriesOnly ? Object.assign({}, a, { entries: (a.entries || []).filter(opens) }) : a;
+    });
+  }
 
   // --- View toggles, per root ------------------------------------------------
   function viewMap() {
@@ -285,7 +330,7 @@
   }
   function readView() {
     var v = info ? viewMap()[info.root] : null;
-    view = { ign: !!(v && v.ign), dot: !!(v && v.dot) };
+    view = directoriesOnly ? { ign: true, dot: false } : { ign: !!(v && v.ign), dot: !!(v && v.dot) };
     ui.vIgn.checked = view.ign;
     ui.vDot.checked = view.dot;
   }
@@ -294,8 +339,36 @@
   }
 
   // --- the root --------------------------------------------------------------
+  var rootsAttempt = 0, rootChoices = [];
+  function paintRootChoices() {
+    ui.rChoices.textContent = "";
+    if (local() && !directoriesOnly) rootChoices.forEach(function (root, index) {
+      if (!root || typeof root.path !== "string") return;
+      var current = info ? info.root === root.path : rootAbs ? rootAbs === root.path : index === 0;
+      var name = root.path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || root.path;
+      var branch = root.detached ? wsT("js.wt.detached") : root.branch;
+      var b = mk("button", "btn opt", (current ? "✓ " : "") + name + (branch ? " · " + branch : ""));
+      b.type = "button"; b.title = root.path;
+      b.setAttribute("aria-pressed", String(current));
+      b.addEventListener("click", function () { if (local() && pop === ui.rootPop) applyRoot(index === 0 ? "" : root.path); });
+      ui.rChoices.appendChild(b);
+    });
+    ui.rChoices.hidden = !ui.rChoices.children.length;
+  }
+  function loadRootChoices() {
+    var attempt = ++rootsAttempt;
+    rootChoices = []; paintRootChoices();
+    if (!local() || directoriesOnly) return;
+    // Suggestions are session-scoped, never scoped to the active alternate root.
+    fsGet("worktrees", {}).then(function (a) {
+      if (destroyed || attempt !== rootsAttempt || pop !== ui.rootPop || !local()) return;
+      rootChoices = Array.isArray(a.roots) ? a.roots : [];
+      paintRootChoices();
+    }, function () { /* Older daemons or a failed read leave the free-text path usable. */ });
+  }
   function paintHead() {
-    ui.rootBtn.disabled = !local();
+    ui.rootBtn.disabled = directoriesOnly || !local();
+    if (ui.roots && info) ui.roots.value = rootAbs;
     var name = info ? info.name || info.root : "";
     ui.root.textContent = name;
     ui.root.title = info ? info.root : "";
@@ -313,12 +386,16 @@
       ui.crumbs.appendChild(b);
     });
     ui.up.disabled = !dir;
+    var hist = history();
+    ui.back.disabled = !hist || hist.index === 0;
+    ui.forward.disabled = !hist || hist.index >= hist.paths.length - 1;
   }
   // useRoot makes a listing of a root's top folder the tree's root, with a
   // fresh tree.
   function useRoot(a, restore) {
     var saved = restore ? { dir: dir, selection: sel, scroll: contentTop, treeScroll: treeTop, columnLeft: columnLeft, columnScroll: columnScroll } : null;
     gen++; navAttempt++;
+    closePath(false);
     clearTimeout(timer);
     abort();
     searchResult = null;
@@ -327,15 +404,21 @@
     rootAbs = a.session ? "" : a.root;
     save(ROOT_KEY + rid, rootAbs || null);
     info = a;
+    if (pop === ui.rootPop) paintRootChoices();
     lists = { "": a };
     open = {};
     sel = cur = null;
     treeTop = 0; dir = ""; contentTop = 0;
+    if (!restore) resetHistory();
     columnLeft = saved ? saved.columnLeft : 0; columnScroll = saved ? saved.columnScroll : {}; columnLoads = {};
     readView();
     paintHead();
     render();
-    function complete() { persistTabs(); paintTabs(); notify("navigation"); }
+    function complete() {
+      var hist = history();
+      if (!hist || hist.paths[hist.index] !== dir) resetHistory();
+      paintHead(); persistTabs(); paintTabs(); notify("navigation");
+    }
     if (saved && saved.dir) {
       var g = gen, attempt = navAttempt;
       dir = saved.dir; sel = saved.selection; contentTop = saved.scroll; treeTop = saved.treeScroll;
@@ -358,7 +441,7 @@
     status(wsT("js.files.loading"));
     listDir("").then(function (a) { if (g === gen) useRoot(a, restore); }, function (err) {
       if (g !== gen) return;
-      if (rootAbs) {
+      if (rootAbs && !directoriesOnly) {
         rootAbs = "";
         save(ROOT_KEY + rid, null);
         toast(wsT("js.files.root.dropped"));
@@ -376,9 +459,12 @@
     // A candidate must not invalidate the active tree until accepted:
     // refusal still leaves its initial load and expansions usable.
     var attempt = ++rootAttempt;
-    listDir("", path).then(function (a) { if (attempt !== rootAttempt) return; closePop(false); useRoot(a); }, function (err) {
+    if (directoriesOnly) { rootPending = true; notify("navigation"); }
+    listDir("", path).then(function (a) { if (attempt !== rootAttempt) return; rootPending = false; closePop(false); useRoot(a); }, function (err) {
       if (attempt !== rootAttempt) return;
+      rootPending = false;
       ui.rErr.textContent = err && err.status === 404 ? wsT("js.files.root.refused") : wsT("js.files.failed");
+      if (directoriesOnly) { paintHead(); notify("navigation"); toast(ui.rErr.textContent); }
     });
   }
 
@@ -408,6 +494,7 @@
     d.title = r.path;
     if (opens(e)) d.setAttribute("aria-expanded", String(r.open));
     if (e.ign) d.classList.add("ign");
+    if (directoriesOnly && e.name.charAt(0) === ".") d.classList.add("fdot");
     if (e.st) d.classList.add("gm");
     if (e.gone) d.classList.add("gone");
     if (sel === r.path) d.classList.add("sel");
@@ -481,14 +568,14 @@
     box.scrollLeft = 0; box.scrollTop = top;
   }
   function directoryEntry(e, folder, column) {
-    var p = joinRel(folder, e.name), selected = sel === p || (column && opens(e) && (dir === p || dir.indexOf(p + "/") === 0));
-    var row = mk("div", "fentry" + (selected ? " sel" : "") + (e.ign ? " ign" : ""));
+    var p = joinRel(folder, e.name), selected = sel === p || !!(column && opens(e) && (dir === p || dir.indexOf(p + "/") === 0));
+    var row = mk("div", "fentry" + (selected ? " sel" : "") + (e.ign ? " ign" : "") + (directoriesOnly && e.name.charAt(0) === "." ? " fdot" : ""));
     row.setAttribute("data-entry", p); row.setAttribute("role", "option"); row.setAttribute("aria-selected", String(selected)); row.tabIndex = 0;
     var ic = mk("span", "fi");
     ic.innerHTML = licon(e.dir ? "folder" : e.link ? "file-symlink" : kindIcon(e.name));
     if (viewMode === "gallery" && !e.dir && !e.link && !e.gone && kindIcon(e.name) === "image") {
       var img = mk("img", "fthumb"); img.alt = e.name; img.loading = "lazy";
-      img.src = "/s/" + rid + "/fs/raw?path=" + encodeURIComponent(p) + (rootAbs ? "&root=" + encodeURIComponent(rootAbs) : ""); row.appendChild(img);
+      img.src = routeBase + "fs/raw?path=" + encodeURIComponent(p) + (rootAbs ? "&root=" + encodeURIComponent(rootAbs) : ""); row.appendChild(img);
     } else row.appendChild(ic);
     row.appendChild(mk("span", "fn", e.name));
     if (viewMode === "details") row.appendChild(mk("span", "ftype", e.dir ? wsT("js.files.folder") : e.name.indexOf(".") >= 0 ? e.name.split(".").pop().toUpperCase() : wsT("js.files.file")));
@@ -500,7 +587,7 @@
       if (column && (opens(e) || folder !== dir)) { navigate(opens(e) ? p : folder, p, p); return; }
       sel = p;
       Array.prototype.forEach.call(ui.directory.querySelectorAll(".fentry"), function (n) {
-        var path = n.getAttribute("data-entry"), on = path === sel || (column && (dir === path || dir.indexOf(path + "/") === 0));
+        var path = n.getAttribute("data-entry"), on = path === sel || !!(column && (dir === path || dir.indexOf(path + "/") === 0));
         n.classList.toggle("sel", on); n.setAttribute("aria-selected", String(on));
       });
       Object.keys(rowEls).forEach(function (path) {
@@ -604,15 +691,46 @@
     });
   }
   function preview(path, line) {
+    if (directoriesOnly) return;
     if (!window.WsPreview) return;
-    var o = {};
+    var o = {}, g = gen, navigation = navAttempt, attempt = ++previewAttempt;
     if (rootAbs) o.root = rootAbs;
     if (line > 0) o.line = line;
-    window.WsPreview.open(path, o);
+    function rowActions(card) {
+      if (destroyed || g !== gen) return false;
+      var container = ui.directory;
+      var row = Array.prototype.find.call(container.querySelectorAll(".fentry"), function (n) { return n.getAttribute("data-entry") === path; });
+      if (!shows(row)) {
+        container = ui.hits;
+        row = Array.prototype.find.call(container.querySelectorAll("[data-path]"), function (n) { return n.getAttribute("data-path") === path; });
+      }
+      if (!shows(row)) return false;
+      var b = row.getBoundingClientRect(), area = container.getBoundingClientRect();
+      if (b.bottom <= Math.max(0, area.top) || b.top >= Math.min(window.innerHeight, area.bottom) ||
+          b.right <= Math.max(0, area.left) || b.left >= Math.min(window.innerWidth, area.right)) return false;
+      var folder = parentRel(path), listing = lists[folder];
+      var entry = listing && (listing.entries || []).filter(function (e) { return joinRel(folder, e.name) === path; })[0];
+      if (!entry && container === ui.hits) entry = { name: path.slice(folder ? folder.length + 1 : 0) };
+      if (!entry) return false;
+      if (card) card.close();
+      openMenu({ e: entry, path: path, dir: folder }, b.left, b.bottom);
+      return true;
+    }
+    o.mediaError = rowActions;
+    // Ask before creating a card: binary files use the row's existing actions,
+    // while size-limit notes and every supported renderer keep their previews.
+    fsGet("preview", { path: path, root: rootAbs, text: line > 0 ? "1" : "" }).then(function (answer) {
+      if (destroyed || g !== gen || navigation !== navAttempt || attempt !== previewAttempt) return;
+      if (answer.kind === "none" && answer.reason_code === "binary") { rowActions(); return; }
+      o.answer = answer;
+      window.WsPreview.open(path, o);
+    }, function () {
+      if (!destroyed && g === gen && navigation === navAttempt && attempt === previewAttempt) window.WsPreview.open(path, o);
+    });
   }
   // activate is a click or Enter on a row: a folder opens or closes, a file
-  // is selected and previewed; a deleted entry or a symlink only takes the
-  // focus.
+  // is selected and previewed (binary files offer row actions instead);
+  // a deleted entry or a symlink only takes the focus.
   function activate(r) {
     if (!r || r.more) return;
     if (opens(r.e)) { toggle(r.path, true); return; }
@@ -703,6 +821,7 @@
   // terminal.js), and the two copy entries. A deleted entry offers only the
   // copy entries.
   function openMenu(r, x, y) {
+    if (directoriesOnly) return;
     closeMenu(false);
     closePop(false);
     var e = r.e, path = r.path, l = lists[r.dir], items = [];
@@ -772,6 +891,7 @@
     pop = p;
     popFrom = btn;
     if (p === ui.rootPop) {
+      loadRootChoices();
       ui.rErr.textContent = "";
       ui.rIn.value = info ? info.root : "";
       ui.rIn.focus();
@@ -840,6 +960,7 @@
   // Invalidate immediately, before debounce: even a fetch that ignores abort
   // cannot repaint or leave actionable results for a superseded query/mode.
   function search(now) {
+    if (directoriesOnly) return;
     clearTimeout(timer);
     abort();
     searchResult = null;
@@ -938,10 +1059,16 @@
   function build() {
     el.textContent = "";
     el.setAttribute("data-fm", mode);
+    el.classList.toggle("fpicker", directoriesOnly);
     var bar = mk("div", "fbar");
     ui.tabs = mk("div", "ftabs"); ui.tabs.setAttribute("role", "tablist");
     ui.tabs.setAttribute("aria-label", wsT("js.files.tabs")); bar.appendChild(ui.tabs);
     bar.appendChild(mk("span", "fbar-sep"));
+    ui.back = iconBtn("chevron-right", wsT("js.files.back")); ui.back.classList.add("fback");
+    ui.forward = iconBtn("chevron-right", wsT("js.files.forward")); ui.forward.classList.add("fforward");
+    ui.back.addEventListener("click", function () { traverseHistory(-1); });
+    ui.forward.addEventListener("click", function () { traverseHistory(1); });
+    bar.appendChild(ui.back); bar.appendChild(ui.forward);
     ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", function () { navigate(parentRel(dir)); });
     bar.appendChild(ui.up);
     ui.location = mk("div", "flocation");
@@ -952,7 +1079,22 @@
     ui.root = ui.crumbRoot;
     if (h.rootSlot) { ui.root = mk("span", "froot"); h.rootSlot.appendChild(ui.root); }
     ui.location.appendChild(ui.rootBtn);
-    ui.crumbs = mk("span", "fcrumb-trail"); ui.location.appendChild(ui.crumbs); bar.appendChild(ui.location);
+    ui.crumbs = mk("span", "fcrumb-trail"); ui.crumbs.tabIndex = 0;
+    ui.crumbs.title = wsT("js.files.path"); ui.crumbs.setAttribute("aria-label", wsT("js.files.path"));
+    ui.crumbs.addEventListener("click", function (e) { if (!e.target.closest(".fcrumb")) editPath(); });
+    ui.crumbs.addEventListener("keydown", function (e) { if (e.target === ui.crumbs && e.key === "Enter") { e.preventDefault(); editPath(); } });
+    ui.location.appendChild(ui.crumbs);
+    ui.path = mk("input", "fpin fpath"); ui.path.type = "text"; ui.path.hidden = true; ui.path.spellcheck = false;
+    ui.path.setAttribute("aria-label", wsT("js.files.path")); ui.path.setAttribute("autocomplete", "off");
+    ui.path.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== "Escape") return;
+      e.preventDefault(); e.stopPropagation();
+      var path = ui.path.value;
+      closePath(true);
+      if (e.key === "Enter") navigate(path, null, null, { typed: true });
+    });
+    ui.path.addEventListener("blur", function () { closePath(false); });
+    ui.location.appendChild(ui.path); bar.appendChild(ui.location);
     var head = mk("div", "fhd");
     ui.collapse = iconBtn("chevrons-down-up", wsT("js.files.collapse"));
     ui.refresh = iconBtn("refresh-cw", wsT("js.files.refresh"));
@@ -961,8 +1103,19 @@
     [ui.collapse, ui.refresh, ui.viewBtn].forEach(function (b) { head.appendChild(b); });
     ui.openCard = iconBtn("external-link", wsT("js.files.open.card"));
     ui.openCard.classList.add("fopen-card");
+    ui.openCard.hidden = directoriesOnly;
+    ui.viewBtn.hidden = directoriesOnly;
     ui.openCard.addEventListener("click", function () { if (h.openCard) h.openCard(location()); else openCard(location()); });
     head.appendChild(ui.openCard);
+    if (directoriesOnly && h.roots) {
+      ui.roots = mk("select", "froot-choices");
+      ui.roots.setAttribute("aria-label", wsT("js.files.root.label"));
+      [h.roots.home].concat(h.roots.volumes || []).filter(function (p, i, all) { return p && all.indexOf(p) === i; }).forEach(function (path) {
+        var option = mk("option", "", h.roots.host + " · " + path); option.value = path; ui.roots.appendChild(option);
+      });
+      ui.roots.addEventListener("change", function () { applyRoot(ui.roots.value); });
+      bar.appendChild(ui.roots);
+    }
     bar.appendChild(head); el.appendChild(bar);
 
     var searchRow = mk("div", "fsrow"), row = mk("div", "fsr");
@@ -974,6 +1127,7 @@
     [ui.mName, ui.mText].forEach(function (b) { b.type = "button"; seg.appendChild(b); });
     row.appendChild(seg);
 
+    row.hidden = directoriesOnly;
     var si = mk("span", "fi");
     si.innerHTML = licon("search");
     row.appendChild(si);
@@ -1037,6 +1191,11 @@
     ui.rootPop.hidden = true;
     var rootLabel = mk("div", "lb"); rootLabel.innerHTML = licon("folder-input");
     rootLabel.appendChild(mk("span", "", wsT("js.files.root.label"))); ui.rootPop.appendChild(rootLabel);
+    ui.rChoices = mk("div", "froot-list");
+    ui.rChoices.hidden = true;
+    ui.rChoices.setAttribute("role", "group");
+    ui.rChoices.setAttribute("aria-label", wsT("js.files.root.label"));
+    ui.rootPop.appendChild(ui.rChoices);
     ui.rIn = mk("input", "fpin");
     ui.rIn.type = "text";
     ui.rIn.spellcheck = false;
@@ -1178,9 +1337,12 @@
     // "/" focuses the search box while the pane shows; a click elsewhere,
     // a scroll, a resize, or leaving the window closes a menu or popover.
     listen(doc, "keydown", function (e) {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l" && !e.defaultPrevented && shows(el) && el.contains(e.target)) {
+        e.preventDefault(); editPath(); return;
+      }
       var pane = e.target.closest && e.target.closest(".fpane"), sheet = doc.querySelector(".bcard[data-max] .fpane, .fpane[data-max]");
       if ((pane && pane !== el) || (sheet && sheet !== el) || (!pane && !sheet)) return;
-      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || editable(e.target) || !shows(el)) return;
+      if (directoriesOnly || e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || editable(e.target) || !shows(el)) return;
       e.preventDefault();
       closeMenu(false);
       ui.q.focus();
@@ -1238,6 +1400,7 @@
     hidden: function () {
       if (destroyed) return;
       searchPaused = true;
+      closePath(false);
       clearTimeout(timer);
       abort();
       closeMenu(false);
@@ -1297,6 +1460,9 @@
   // Each owner's load/save adapter isolates root, View and tabs records.
   // Options also include location {root,dir}, send(path), openCard(location),
   // onSelection/onNavigate(payload, api), and attachment(slot, api) -> disposer.
+  // A directoriesOnly consumer supplies roots {host,home,volumes}, an initial
+  // location and an absolute routeBase (e.g. /s/host0/) when outside a session.
+  // It has no file search/preview/actions and may notify null while loading.
   // on(type, listener) returns an unsubscribe; selection/navigation carry
   // {root,session,path,absolute}. setAttachment replaces/disposes the slot.
   // Existing root and bounded View records remain readable.

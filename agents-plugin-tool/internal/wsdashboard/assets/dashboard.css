@@ -106,7 +106,8 @@
 .gmenu .gs { display: block; font-size: 11.5px; color: var(--wb-muted-fg); font-weight: 400; }
 .gmenu select { width: 100%; box-sizing: border-box; border: 1px solid var(--wb-muted); background: var(--wb-card); color: inherit; font: inherit; font-size: 13px; border-radius: 8px; padding: 6px 8px; cursor: pointer; }
 .gmenu .gh { padding: 0 4px; }
-.gmenu .gn { font-size: 11px; color: var(--wb-muted-fg); padding: 5px 4px 0; border-top: 1px solid var(--wb-muted); margin-top: 3px; line-height: 1.4; }
+.gmenu .gn { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--wb-muted-fg); padding: 5px 4px 0; border-top: 1px solid var(--wb-muted); margin-top: 3px; line-height: 1.4; white-space: nowrap; }
+.gmenu .gn .settings-version { margin-left: auto; flex: none; }
 
 /* LAN access block: Settings shows it to this machine only. */
 .lanbox { min-width: 0; overflow-wrap: anywhere; margin: 0 0 12px; padding: 8px 14px; border-radius: var(--wb-radius); background: var(--wb-card); box-shadow: var(--wb-shadow); font-size: 13px; line-height: 1.5; }
@@ -737,6 +738,8 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .pv-img img { max-width: 100%; height: auto; display: block; }
 .pv-vid { height: 100%; background: #0e0f12; display: grid; }
 .pv-vid video { width: 100%; height: 100%; min-height: 0; display: block; }
+.pv-audio { padding: 18px 16px; display: grid; place-items: center; }
+.pv-audio audio { width: 100%; max-width: 528px; }
 .pv-pdf { position: relative; height: 100%; min-height: 240px; display: grid; place-items: center; background: var(--wb-muted); }
 .pv-pdf iframe { width: 100%; height: 100%; min-height: 240px; border: 0; display: block; }
 .pv-pdf-open { color: var(--wb-fg); background: var(--wb-bg); padding: 5px 10px; }
@@ -1116,6 +1119,9 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .ftab-new.ibtn { width: 22px; height: 22px; align-self: center; }
 .ftab-close:disabled { visibility: hidden; }
 .flocation, .fcrumb-trail { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; font: 11.5px var(--wb-mono); color: var(--wb-muted-fg); }
+.fcrumb-trail[hidden], .fpath[hidden] { display: none; }
+.fpath { flex: 1 1 auto; min-width: 0; width: 0; height: 24px; box-sizing: border-box; padding: 2px 6px; font: inherit; }
+.fback .li { transform: rotate(180deg); }
 .fcrumb { flex: 0 1 auto; min-width: 2ch; border: 0; padding: 2px 4px; border-radius: 5px; background: transparent; color: inherit; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fcrumb:hover { background: var(--wb-muted); color: var(--wb-fg); }
 .fcrumb-root { display: inline-flex; align-items: center; gap: 3px; max-width: 160px; font-weight: 700; color: var(--wb-fg); }
@@ -1168,6 +1174,12 @@ body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
 .fattachment { display: inline-flex; flex: none; align-items: center; gap: 6px; }
 .fattachment .btn { display: inline-flex; align-items: center; gap: 5px; flex: none; height: 22px; padding: 0 9px; border: 0; border-radius: 999px; background: var(--wb-muted); color: var(--wb-fg); font: 600 11px var(--wb-sans); white-space: nowrap; }
 .fattachment .btn .li { width: 12px; height: 12px; }
+.fworkspace-picker { width: min(900px, calc(100vw - 32px)); height: min(640px, calc(100dvh - 48px)); padding: 0; border: 1px solid var(--wb-line); border-radius: var(--wb-radius); background: var(--wb-card); color: var(--wb-fg); box-shadow: var(--wb-shadow-hi); }
+.fworkspace-picker::backdrop { background: #0006; }
+.fworkspace-picker > .fpane { display: flex; height: 100%; }
+.fpicker [hidden] { display: none !important; }
+.fpicker .fdot { opacity: .5; }
+.froot-choices { min-width: 0; max-width: 65%; margin-left: auto; font: 11px var(--wb-mono); background: var(--wb-muted); color: inherit; border: 0; border-radius: 5px; padding: 3px; }
 .fattachment .pr { color: var(--wb-primary); background: color-mix(in srgb, var(--wb-primary) 13%, transparent); }
 @container (max-width: 480px) {
   .fworkspace { grid-template-columns: 110px minmax(0, 1fr); }
