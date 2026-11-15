@@ -35,7 +35,7 @@
     var padding = s === doc.scrollingElement || s === root ? 0 : parseFloat(style.paddingTop) || 0;
     return Math.max(pad, rail + padding);
   }
-  function items() { return all(ITEM, o.board); }
+  function items() { return all(ITEM, o.board).filter(function (n) { return !n.hasAttribute("data-state-filtered"); }); }
   function anchor(list, toolbar, bounds, floating) {
     if (!floating && toolbar.bottom > bounds.top && toolbar.top < bounds.bottom) return null;
     var top = floating ? Math.max(bounds.top, toolbar.bottom) : bounds.top;
@@ -115,7 +115,7 @@
   }
   function snapshot() {
     var list = items().concat(all(ITEM, o.pins)), seen = new Set();
-    return list.filter(function (n) { if (seen.has(n)) return false; seen.add(n); return true; }).map(function (n) {
+    return list.filter(function (n) { if (seen.has(n) || n.hasAttribute("data-state-filtered")) return false; seen.add(n); return true; }).map(function (n) {
       var r = n.getBoundingClientRect(), text = n.querySelector(".trecap .rtext");
       return { n: n, r: r, height: r.height, margin: parseFloat(getComputedStyle(n).marginBottom) || 0,
         text: text, recap: text ? text.getBoundingClientRect().height : 0 };

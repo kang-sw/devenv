@@ -387,7 +387,13 @@ Doc.prototype = {
   getElementById: function (id) { return this.documentElement.querySelector('[id="' + id + '"]'); }
 };
 var page = null;
-function wsT(k, a, b) { return k === "js.board.toolbar.count" ? "open " + a + " · closed " + b : k; }
+function wsT(k) { return k; }
+function toolbarCounts() {
+  var inline = page.W.toolbar().querySelector(".board-state-inline");
+  function count(value) { return +inline.querySelector('[data-filter="' + value + '"] .board-state-count').textContent; }
+  var closed = count("closed");
+  return "open " + (count("all") - closed) + " · closed " + closed;
+}
 // mk builds an element: tag.class.class with attributes and children.
 function mk(spec, attrs, kids) {
   var p = spec.split("."), e = new El(p[0], page.doc);
@@ -707,7 +713,7 @@ function tail() { var b = page.board.querySelectorAll("button.closed-more"); ret
 var p = start();
 morphBoard(page.board, served(["X"]));
 check("with nothing pinned the pages count on from the board's control", tail(), "3");
-check("landed morph maintains remainder and total", [page.board.querySelector("button.closed-more").getAttribute("data-closed-more"), page.W.toolbar().querySelector(".board-count").textContent], ["3", "open 1 · closed 6"]);
+check("landed morph maintains remainder and total", [page.board.querySelector("button.closed-more").getAttribute("data-closed-more"), toolbarCounts()], ["3", "open 1 · closed 6"]);
 clickPin(p.querySelector('section.topic[data-topic="Y"]'));
 check("a topic pinned out of a page leaves a slot there", [pinsOf(), p.querySelectorAll(".closed-slot").map(function (s) { return s.getAttribute("data-slot"); })], [["Y/c"], ["Y"]]);
 morphBoard(page.board, served(["X"]));
@@ -720,7 +726,7 @@ check("a pinned closed topic pushed past the cap stays pinned", pinsOf(), ["X/c"
 check("and a slot at the pages' head counts it", [p.firstChild.getAttribute("data-slot"), tail()], ["X", "4"]);
 morphBoard(page.board, served(["W"]));
 check("a later swap counts it once", [p.querySelectorAll(".closed-slot").length, tail()], [1, "4"]);
-check("pinned slots consume remainder without counting as shown topics", [page.board.querySelector("button.closed-more").getAttribute("data-closed-more"), page.W.toolbar().querySelector(".board-count").textContent], ["2", "open 1 · closed 6"]);
+check("pinned slots consume remainder without counting as shown topics", [page.board.querySelector("button.closed-more").getAttribute("data-closed-more"), toolbarCounts()], ["2", "open 1 · closed 6"]);
 process.stdout.write(bad.join("\n"));
 `)
 }

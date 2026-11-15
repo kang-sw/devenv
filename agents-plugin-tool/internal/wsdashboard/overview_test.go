@@ -49,9 +49,48 @@ process.stdout.write(bad.join('\n'));
 `)
 }
 
+func TestOverviewFilterContracts(t *testing.T) {
+	js := mustAsset(t, "overview.js")
+	var src strings.Builder
+	for _, name := range []string{"all", "items", "rove", "snapshot", "key"} {
+		pattern := `(?s)\n  function ` + name + `\([^\n]*\) \{.*?\n  \}\n`
+		if name == "all" || name == "items" {
+			pattern = `(?m)^  function ` + name + `\([^\n]*\) \{[^\n]*\}$`
+		}
+		f := regexp.MustCompile(pattern).FindString(js)
+		if f == "" {
+			t.Fatalf("missing %s", name)
+		}
+		src.WriteString(f + "\n")
+	}
+	runNode(t, "overview filter contracts", `
+var bad=[], ITEM="items", tabs=new Map(), on=true, busy=false, swallowed=0;
+function check(name,got,want){if(JSON.stringify(got)!==JSON.stringify(want))bad.push(name+": "+JSON.stringify(got));}
+var doc={activeElement:null};
+function node(name,filtered){return {name:name,attrs:filtered?{"data-state-filtered":""}:{},
+  hasAttribute:function(k){return k in this.attrs;},getAttribute:function(k){return this.hasAttribute(k)?this.attrs[k]:null;},
+  setAttribute:function(k,v){this.attrs[k]=v;},focus:function(){doc.activeElement=this;},
+  getBoundingClientRect:function(){return {top:20,bottom:60,height:40};},querySelector:function(){return null;}};}
+var a=node("a",false),hidden=node("hidden",true),b=node("b",false),pin=node("pin",false),hiddenPin=node("hiddenPin",true);
+var o={board:{querySelectorAll:function(){return [a,hidden,b];}},pins:{querySelectorAll:function(){return [pin,hiddenPin,a];}}};
+function getComputedStyle(){return {marginBottom:"6px"};}
+function layer(){return "overview";} function classify(){return "item";}
+function swallow(){swallowed++;} function scroller(){return {};}
+function view(){return {top:0,bottom:100,height:100};} function clearance(){return 0;}
+`+src.String()+`
+check("keyboard item list excludes filtered topics",items().map(function(n){return n.name;}),["a","b"]);
+rove(a); key({key:"ArrowDown",target:a});
+check("arrow skips filtered topic",[doc.activeElement.name,hidden.getAttribute("tabindex"),swallowed],["b",null,1]);
+key({key:"ArrowUp",target:b});
+check("reverse arrow also skips filtered topic",doc.activeElement.name,"a");
+check("motion snapshot excludes filtered board and pinned topics and deduplicates",snapshot().map(function(s){return [s.n.name,s.height,s.margin];}),[["a",40,6],["b",40,6],["pin",40,6]]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
 func TestOverviewPageIntegration(t *testing.T) {
 	js := mustAsset(t, "dashboard.js")
-	for _, want := range []string{"window.WsOverview.holding()", "boardOverviewHeld = { hash: hash, html: html }", "window.WsOverview.mount({", "keep: window.wbHistory.keep", "window.WsOverview.pick(topic, o)", "doc.addEventListener(\"ws-overview\", queue)", "window.WsOverview.active() ? 0.72 : 0", "if (cardBoard) mountBoardOverview();"} {
+	for _, want := range []string{"window.WsOverview.holding()", "boardOverviewHeld = { hash: hash, html: html }", "window.WsOverview.mount({", "keep: window.wbHistory.keep", "window.WsOverview.pick(topic, o)", "doc.addEventListener(\"ws-overview\", queue)", "window.WsOverview.active() ? 0.72 : 0", "if (cardBoard) mountBoardOverview();", "filter: function (run) { afterOverview(run); }", "function afterOverview(fn) { if (window.WsOverview) window.WsOverview.after(fn); else fn(); }"} {
 		if !strings.Contains(js, want) {
 			t.Errorf("missing overview integration %q", want)
 		}
@@ -66,7 +105,7 @@ func TestOverviewPageIntegration(t *testing.T) {
 		}
 	}
 	cards := mustAsset(t, "cards.js")
-	for _, want := range []string{"if (overviewOn || dg", "window.WsOverview.after(function () { maximize(c); })"} {
+	for _, want := range []string{"if (overviewOn || dg", "window.WsOverview.after(function () { maximize(c); })", "if (opt.toolbar && opt.toolbar.filter) opt.toolbar.filter(run); else run();"} {
 		if !strings.Contains(cards, want) {
 			t.Errorf("missing card guard %q", want)
 		}
