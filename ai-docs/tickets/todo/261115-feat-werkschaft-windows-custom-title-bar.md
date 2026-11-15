@@ -35,25 +35,34 @@ Useful existing pieces:
   narrow preload for its toast (T3), the precedent for shell-drawn UI beside
   the remote dashboard.
 
-## Open Decision Queue
-last-id: (pending MAIN mint)
+## Decisions
 
-(pending) [open] [announced] Captured as a separate follow-on ticket after the Electron ticket's Phase 3 (Windows packaged delivery), not as a new phase inside it - its Phase 1 worker is running on that ticket and the custom bar needs a Windows build to exist.
-
-(pending) [open] [announced] macOS and Linux keep the native title bar - owner's words scope the change to Windows.
-
-(pending) [open] [announced] Window controls stay Windows-drawn through `titleBarStyle: 'hidden'` + `titleBarOverlay`, which keeps the Windows 11 snap-layout flyout on maximize hover - the owner asked for the VS Code style, and VS Code uses the same overlay on Windows.
-
-(pending) [open] [technical] The bar is shell-owned: a bundled bar page in its own view above the dashboard view, with a narrow preload (title updates in, menu/command calls out), rather than the dashboard drawing it through Window Controls Overlay CSS - this needs no dashboard change, keeps shell UI outside the remote content's trust boundary, and follows the auto-update toast precedent.
-
-(pending) [open] [technical] The bar's colors follow the dashboard's own `theme-color` (via `did-change-theme-color`, also applied to `setTitleBarOverlay`), falling back to the OS scheme (`nativeTheme`) before the page reports one, rather than following the OS scheme only - the dashboard has its own light/dark setting, and an OS-only bar would mismatch it.
-
-(pending) [open] [policy] What the bar shows.
-- Context: VS Code's bar carries an app icon, a menu, a centered title and a command center (search). Hiding the native bar on Windows also hides the native menu bar.
-- Alternative a: icon + compact menu (the P8 menus, opened from a hamburger button and by Alt, as VS Code does in compact mode) + centered window title (the page's `document.title`, i.e. the session/board name). No search.
-- Alternative b: as a, with the full menu-bar labels inline (File / Edit / View / ...) instead of a hamburger.
-- Alternative c: as a, plus a centered search box that opens the dashboard's existing search palette.
-> Recommend a: it keeps every P8 menu reachable with the smallest new UI. c adds a second entry point to a palette the page already opens by keyboard and toolbar, and needs a shell-to-page command channel.
+- **(883)=a, owner: the bar shows the app icon, a compact menu and a
+  centered title, with no search box.** The compact menu is the P8 menus
+  opened from a hamburger button and by Alt (VS Code compact mode); the
+  title is the page's `document.title` (session/board name). Rejected:
+  full inline menu labels (b); a centered search box opening the dashboard
+  palette (c), which duplicates existing palette entry points and needs a
+  shell-to-page command channel.
+- **Separate follow-on ticket after the Electron ticket's Phase 3**
+  (announced, accepted by MAIN): the Phase 1 worker was running on that
+  ticket, and the bar needs a Windows build. Rejected: a new phase inside
+  `261115-feat-werkschaft-electron-shell`.
+- **macOS and Linux keep the native title bar** (announced, accepted): the
+  owner's words scope the change to Windows.
+- **Window controls stay Windows-drawn** through `titleBarStyle: 'hidden'`
+  + `titleBarOverlay` (announced, accepted), keeping the Windows 11
+  snap-layout flyout on maximize hover, as VS Code does.
+- **The bar is shell-owned** (technical, accepted): a bundled bar page in
+  its own view above the dashboard view, with a narrow preload (title
+  updates in, menu commands out). Rejected: the dashboard drawing it through
+  Window Controls Overlay CSS (needs a dashboard change and puts shell UI
+  inside remote content). Follows the auto-update toast precedent.
+- **Colors follow the dashboard's `theme-color`** (technical, accepted) via
+  `did-change-theme-color`, also applied to `setTitleBarOverlay`, falling
+  back to the OS scheme (`nativeTheme`) until the page reports one.
+  Rejected: OS scheme only (mismatches the dashboard's own light/dark
+  setting).
 
 ## Constraints
 
@@ -63,11 +72,15 @@ last-id: (pending MAIN mint)
 - The drag region covers the empty bar area only; menu, title and buttons
   are not draggable. The window stays resizable from its edges, and the
   maximize/restore double-click on the bar keeps working.
-- Real Windows verification uses the machine's Windows smoke host
-  (`ssh ki608@192.168.33.6`, recorded as a machine note) with read-only or
-  smoke intent only: copy the built zip over, run it, observe, and clean up
-  only what the run placed. No system settings changes, installs or other
-  persistent changes on that host.
+- Every Electron run and visual check runs on the Windows host
+  (`ssh ki608@192.168.33.6`, recorded as a clone note), never on the
+  owner's Mac (owner directive, 2026-11-15: Electron windows steal focus
+  there). Launch GUI runs in the logged-in console session through
+  `schtasks ... /it /ru ki608` (a GUI started straight from SSH lands in
+  session 0 and shows nothing) and take screenshots from that session.
+  Sync source by git into the host clone; no edits outside that tree, no
+  global installs or system settings changes, and clean up only what the
+  run placed.
 - Owner run rules apply (offline env, isolated daemons with their own
   `WS_CACHE_HOME` on free ports, never the shared dashboard daemon or port
   29417, owned process scan at the end).
