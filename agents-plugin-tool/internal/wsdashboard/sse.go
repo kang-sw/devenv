@@ -455,6 +455,10 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 	if r.URL.Query().Get("topics") == "1" && only.has(regionBoard) && src.key.replyID != "" {
 		topics = &boardTopicState{}
 	}
+	var rail *railRowState
+	if r.URL.Query().Get("railrows") == "1" && only.has(regionRail) {
+		rail = &railRowState{}
+	}
 	var parts []sidePart
 	if side != nil {
 		part := sidePart{src: *side, page: d.cache.acquire(side.key)}
@@ -489,7 +493,7 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 			}
 			regions := only.apply(pr.regions)
 			sent := false
-			sent, ok := d.sendRegions(sink, regions, held, topics, pr.board)
+			sent, ok := d.sendRowRegions(sink, regions, held, topics, pr.board, rail, pr.rail)
 			if !ok {
 				return false
 			}
@@ -510,7 +514,7 @@ func (d *Daemon) stream(w http.ResponseWriter, r *http.Request, src pageSource, 
 			if !pr.ok {
 				return true
 			}
-			sent, ok := d.sendRegions(sink, only.apply(pr.regions), held, nil, nil)
+			sent, ok := d.sendRowRegions(sink, only.apply(pr.regions), held, nil, nil, rail, pr.rail)
 			return ok && (!sent || sink.flush() == nil)
 		}
 		if !send(first, at) {
@@ -617,15 +621,23 @@ type sidePart struct {
 // holds, recording each sent hash in held; sent reports that one was
 // written, ok false that the connection failed.
 func (d *Daemon) sendRegions(sink streamSink, regions regionSet, held map[string]string, topics *boardTopicState, board *boardTopics) (sent, ok bool) {
+	return d.sendRowRegions(sink, regions, held, topics, board, nil, nil)
+}
+
+func (d *Daemon) sendRowRegions(sink streamSink, regions regionSet, held map[string]string, topics *boardTopicState, board *boardTopics, rail *railRowState, rows *railRows) (sent, ok bool) {
 	for _, name := range sortedRegionNames(regions) {
 		region := regions[name]
 		isBoard := name == regionBoard && topics != nil
-		if held[name] == region.Hash && !(isBoard && topics.previous == nil) {
+		isRail := name == regionRail && rail != nil
+		if held[name] == region.Hash && !(isBoard && topics.previous == nil) && !(isRail && !rail.initialized) {
 			continue
 		}
 		event, data := "region", any(regionEvent{Name: name, Hash: region.Hash, HTML: string(region.HTML)})
 		if isBoard {
 			event, data = topics.event(region, board)
+		}
+		if isRail {
+			event, data = rail.event(region, rows)
 		}
 		payload, _ := json.Marshal(data)
 		if sink.event(event, payload) != nil {
@@ -633,6 +645,9 @@ func (d *Daemon) sendRegions(sink streamSink, regions regionSet, held map[string
 		}
 		if isBoard {
 			topics.previous = board
+		}
+		if isRail {
+			rail.previous, rail.initialized = rows, true
 		}
 		d.stats.Sends.Add(1)
 		held[name] = region.Hash

@@ -21,7 +21,7 @@
     var el = region(name);
     if (!el) return;
     var board = name === "board";
-    if (el.getAttribute("data-h") === hash && !(board && Object.keys(boardPending).length)) { if (board) deferred = null; if (name === "rail" && railGate) railGate.forget(); return; }
+    if (el.getAttribute("data-h") === hash && !(board && Object.keys(boardPending).length)) { if (board) deferred = null; if (name === "rail") { if (railGate) railGate.forget(); if (typeof html !== "string") railRendered = html; } return; }
     if (board && window.WsOverview && window.WsOverview.holding()) { boardOverviewHeld = { hash: hash, html: html }; return; }
     if (board && editing()) { deferred = { hash: hash, html: html }; return; }
     if (board && window.WsCards && window.WsCards.dragging && window.WsCards.dragging()) { boardDragHeld = { hash: hash, html: html }; return; }
@@ -33,6 +33,19 @@
     // a row's rename is open, and while a layout change posts (railGate),
     // and lands when that ends (railRelease).
     if (name === "rail" && railGate && railGate.offer({ hash: hash, html: html })) return;
+    if (name === "rail" && WsRail && typeof html !== "string") {
+      var rowTop = railScrollTop(), rowFocus = railFocus();
+      var railMerged = WsRail.mergeRows(el, railRendered, html);
+      railRendered = html;
+      if (railMerged !== null) {
+        railHoverUpdates = null;
+        el.setAttribute("data-h", hash);
+        if (railMerged) { fmtTimes(el); railMarks(); railScrollTo(rowTop); railRefocus(rowFocus); apScan(el); }
+        return;
+      }
+      html = WsRail.rowInputHTML(html);
+      railHoverUpdates = null;
+    }
     if (name === "rail" && railHoverUpdates && railHoverUpdates(html)) {
       el.setAttribute("data-h", hash);
       return;
@@ -90,6 +103,7 @@
       }
     } else {
       el.innerHTML = html;
+      if (name === "rail" && WsRail) railHoverUpdates = WsRail.hoverUpdates(el);
       restoreOpen(el);
       fmtTimes(el);
       sweepOutImgs(el);

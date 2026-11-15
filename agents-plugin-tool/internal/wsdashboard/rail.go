@@ -116,7 +116,7 @@ func (d *Daemon) railPageSource(lang, theme string) pageSource {
 				fmt.Fprintf(d.log, "dashboard: render rail: %v\n", err)
 				return pageRender{ok: true}
 			}
-			return pageRender{regions: regionSet{regionRail: region}, ok: true}
+			return pageRender{regions: regionSet{regionRail: region}, rail: splitRailRows(string(region.HTML)), ok: true}
 		},
 		// The index's stamp covers every listed session's revision (its
 		// snapshot and ring among what raises it), liveness, adapter
