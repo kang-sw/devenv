@@ -99,16 +99,24 @@ func (f *piRecordFixture) spawnedKey(t *testing.T, def *wsagent.Profile) string 
 	return key
 }
 
-// renderedBody renders name through the playbook.render tool, preceded by
-// the initialize lines given, and returns the rendered file's text.
+// renderedBody renders name through the playbook.render tool after completing
+// the initialize requests given, and returns the rendered file's text.
 func renderedBody(t *testing.T, s *Server, key, name string, initialize ...string) string {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{"name": name, "session_key": key})
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := strings.Join(append(initialize, fmt.Sprintf(`{"jsonrpc":"2.0","id":99,"method":"tools/call","params":{"name":"playbook.render","arguments":%s}}`, raw)), "\n") + "\n"
 	var out bytes.Buffer
+	// ServeStdio dispatches requests concurrently. Complete the MCP handshake
+	// before rendering so the tool cannot race harness detection.
+	for _, input := range initialize {
+		if err := s.ServeStdio(context.Background(), strings.NewReader(input+"\n"), &out); err != nil {
+			t.Fatalf("ServeStdio initialize: %v", err)
+		}
+		out.Reset()
+	}
+	input := fmt.Sprintf(`{"jsonrpc":"2.0","id":99,"method":"tools/call","params":{"name":"playbook.render","arguments":%s}}`+"\n", raw)
 	if err := s.ServeStdio(context.Background(), strings.NewReader(input), &out); err != nil {
 		t.Fatalf("ServeStdio: %v", err)
 	}
