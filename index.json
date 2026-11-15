@@ -827,7 +827,17 @@
       "registered_at": "2026-11-14T22:47:31Z"
     },
     "261115-feat-ws-dashboard-explorer-path-bar": {
-      "registered_at": "2026-11-15T02:43:33Z"
+      "registered_at": "2026-11-15T02:43:33Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T04:23:58Z",
+        "impl": {
+          "branch": "impl/develop/sank-blade-equal"
+        }
+      }
     },
     "261115-feat-ws-dashboard-explorer-root-switcher": {
       "registered_at": "2026-11-15T02:43:28Z",
