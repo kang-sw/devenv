@@ -80,7 +80,7 @@ func TestSendRunsTurnAndHeldSendsGoAsOneTurn(t *testing.T) {
 	}
 	eventually(t, "process start", func() bool { return h.backend.startCount() == 1 })
 	p := h.backend.waitProc(t, 0)
-	if got := p.nextSent(t); got != "first" {
+	if got := p.nextSent(t); got != h.envelope("first") {
 		t.Fatalf("first turn = %q", got)
 	}
 	spec := h.backend.start(0)
@@ -111,7 +111,7 @@ func TestSendRunsTurnAndHeldSendsGoAsOneTurn(t *testing.T) {
 	// message, so it waits for the turn end, ahead of the follow-ups.
 	inbox := wsinbox.Dir(wsdashboard.SessionDir(h.dir, id))
 	held, _ := wsinbox.Held(inbox)
-	if len(held) != 3 || held[2].Entry.Text() != "fourth" {
+	if len(held) != 3 || held[2].Entry.Text() != h.envelope("fourth") {
 		t.Fatalf("held = %+v", held)
 	}
 	if _, err := wsinbox.Steer(inbox, held[2].Name); err != nil {
@@ -119,7 +119,7 @@ func TestSendRunsTurnAndHeldSendsGoAsOneTurn(t *testing.T) {
 	}
 	p.events <- Event{SessionID: "backend-1"}
 	p.reply("answer one")
-	if got := p.nextSent(t); got != "fourth\n\nsecond\n\nthird" {
+	if got := p.nextSent(t); got != h.envelope("fourth")+"\n\n"+h.envelope("second")+"\n\n"+h.envelope("third") {
 		t.Fatalf("the held sends should be the next turn as one message, steered first, got %q", got)
 	}
 	p.reply("answer two")
@@ -135,7 +135,7 @@ func TestSendRunsTurnAndHeldSendsGoAsOneTurn(t *testing.T) {
 			texts = append(texts, r.Kind+":"+r.Text)
 		}
 	}
-	want := "user:first reply:answer one user:fourth\n\nsecond\n\nthird reply:answer two"
+	want := "user:" + h.envelope("first") + " reply:answer one user:" + h.envelope("fourth") + "\n\n" + h.envelope("second") + "\n\n" + h.envelope("third") + " reply:answer two"
 	if strings.Join(texts, " ") != want {
 		t.Fatalf("ring = %q, want %q", strings.Join(texts, " "), want)
 	}
@@ -161,7 +161,7 @@ func TestIdleTimerEndsProcessAndNextSendResumes(t *testing.T) {
 	if got := h.backend.start(1).SessionID; got != "backend-1" {
 		t.Fatalf("the next send should resume the backend session, got %q", got)
 	}
-	if got := h.backend.waitProc(t, 1).nextSent(t); got != "again" {
+	if got := h.backend.waitProc(t, 1).nextSent(t); got != h.envelope("again") {
 		t.Fatalf("resumed turn = %q", got)
 	}
 }
@@ -214,7 +214,7 @@ func TestRecordSurvivesDaemonRestart(t *testing.T) {
 	if spec.SessionID != "backend-7" || spec.Model != "sonnet" {
 		t.Fatalf("the resumed process should carry the recorded session and model: %+v", spec)
 	}
-	if got := h.backend.waitProc(t, 1).nextSent(t); got != "held over\n\nnew" {
+	if got := h.backend.waitProc(t, 1).nextSent(t); got != h.envelope("held over")+"\n\n"+h.envelope("new") {
 		t.Fatalf("the held send should merge with the next one, got %q", got)
 	}
 	rec := readEventually(t, "read the record", func() (Record, error) { return readRecord(wsdashboard.SessionDir(h.dir, id)) })
@@ -289,7 +289,7 @@ func TestPiWorkerResumeAcceptsLegacyRootKeyAndRefusesForeignKey(t *testing.T) {
 					}
 					return
 				}
-				if got := h.backend.waitProc(t, 1).nextSent(t); got != "continue" {
+				if got := h.backend.waitProc(t, 1).nextSent(t); got != h.envelope("continue") {
 					t.Fatalf("resumed prompt = %q", got)
 				}
 				if spec := h.backend.start(1); spec.Cwd != rec.Cwd || spec.Root != rec.Root {
@@ -386,7 +386,7 @@ func TestStopKeepsHeldAndResumes(t *testing.T) {
 	if h.backend.start(1).SessionID != "s1" {
 		t.Fatalf("after stop the next send resumes the session")
 	}
-	if got := h.backend.waitProc(t, 1).nextSent(t); got != "two\n\nthree" {
+	if got := h.backend.waitProc(t, 1).nextSent(t); got != h.envelope("two")+"\n\n"+h.envelope("three") {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -445,7 +445,7 @@ func TestInterruptTakesBackHeldAndStopsTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(returned) != 1 || returned[0] != "held" || st.Held != 0 {
+	if len(returned) != 1 || returned[0] != h.envelope("held") || st.Held != 0 {
 		t.Fatalf("interrupt returns the held text: %v %+v", returned, st)
 	}
 	p.mu.Lock()
@@ -523,7 +523,7 @@ func TestFailuresSurfaceInState(t *testing.T) {
 	h.runner.Send(id, "two")
 	eventually(t, "start", func() bool { return h.backend.startCount() == 1 })
 	p := h.backend.waitProc(t, 0)
-	if got := p.nextSent(t); got != "one\n\ntwo" {
+	if got := p.nextSent(t); got != h.envelope("one")+"\n\n"+h.envelope("two") {
 		t.Fatalf("got %q", got)
 	}
 	p.events <- Event{Fatal: errors.New("launch refused: claude reports tools outside the profile: Write")}
@@ -551,7 +551,7 @@ func TestFailedSendRetriesOnceOnANewProcess(t *testing.T) {
 	h.backend.setFailSends(1)
 	h.runner.Send(id, "one")
 	first := h.backend.waitProc(t, 0)
-	if got := h.backend.waitProc(t, 1).nextSent(t); got != "one" {
+	if got := h.backend.waitProc(t, 1).nextSent(t); got != h.envelope("one") {
 		t.Fatalf("the retried turn = %q", got)
 	}
 	if !first.isClosed() || h.backend.startCount() != 2 {
@@ -595,7 +595,7 @@ func TestFailingSendRestartsOnceAndStops(t *testing.T) {
 
 	h.backend.setFailSends(0)
 	h.runner.Send(id, "three")
-	if got := h.backend.waitProc(t, 3).nextSent(t); got != "one\n\ntwo\n\nthree" {
+	if got := h.backend.waitProc(t, 3).nextSent(t); got != h.envelope("one")+"\n\n"+h.envelope("two")+"\n\n"+h.envelope("three") {
 		t.Fatalf("the queued turn = %q", got)
 	}
 	h.backend.proc(3).reply("done")
@@ -604,7 +604,7 @@ func TestFailingSendRestartsOnceAndStops(t *testing.T) {
 	// The send that went through armed the retry again.
 	h.backend.setFailSends(1)
 	h.runner.Send(id, "four")
-	if got := h.backend.waitProc(t, 4).nextSent(t); got != "four" {
+	if got := h.backend.waitProc(t, 4).nextSent(t); got != h.envelope("four") {
 		t.Fatalf("the retried turn = %q", got)
 	}
 }

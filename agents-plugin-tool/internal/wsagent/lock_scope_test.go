@@ -100,7 +100,7 @@ func TestSendReturnsWhileTheProcessStarts(t *testing.T) {
 	})
 	returns(t, "Get while the process starts", func() { h.state(id) })
 	gate.release()
-	if got := h.backend.waitProc(t, 0).nextSent(t); got != "one\n\ntwo" {
+	if got := h.backend.waitProc(t, 0).nextSent(t); got != h.envelope("one")+"\n\n"+h.envelope("two") {
 		t.Fatalf("first turn = %q, want both held messages", got)
 	}
 }
@@ -145,7 +145,7 @@ func TestSupportSendWaitsOnNoLoopAndNoOtherStore(t *testing.T) {
 	gate.awaitEntered(t)
 	returns(t, "a send while the process starts", func() { sh.send("alpha", "two") })
 	gate.release()
-	if got := sh.claude.waitProc(t, 0).nextSent(t); got != "one\n\ntwo" {
+	if got := sh.claude.waitProc(t, 0).nextSent(t); got != expectedUserEnvelope(sh.now, "one")+"\n\n"+expectedUserEnvelope(sh.now, "two") {
 		t.Fatalf("first turn = %q", got)
 	}
 

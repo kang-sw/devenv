@@ -29,12 +29,12 @@ func TestPiSendSteersTheRunningTurnAndReportsItOnce(t *testing.T) {
 		if _, err := h.runner.Send(w.ID, text); err != nil {
 			t.Fatal(err)
 		}
-		if steer := waitSteer(t, p, i+1); steer != text {
+		if steer := waitSteer(t, p, i+1); steer != h.envelope(text) {
 			t.Fatalf("steer = %q, want %q", steer, text)
 		}
 		noSend(t, p, "a running-turn send must not prompt")
 		p.events <- Event{SteerAnswer: &SteerAnswer{}}
-		p.events <- Event{UserTaken: text}
+		p.events <- Event{UserTaken: h.envelope(text)}
 	}
 	if res, err := h.runner.Wait(context.Background(), w.ID, 20*time.Millisecond); err != nil || res.Status != TurnRunning {
 		t.Fatalf("a wait before settlement = %+v, %v", res, err)
@@ -56,7 +56,7 @@ func TestPiSendSteersTheRunningTurnAndReportsItOnce(t *testing.T) {
 	if _, err := h.runner.Send(w.ID, "next task"); err != nil {
 		t.Fatal(err)
 	}
-	if text := p.nextSent(t); text != "next task" {
+	if text := p.nextSent(t); text != h.envelope("next task") {
 		t.Fatalf("idle send = %q", text)
 	}
 	p.reply("next result")
@@ -89,7 +89,7 @@ func TestPiSendSteerTheTurnMissesIsDeliveredOnceAsANewTurn(t *testing.T) {
 				noSend(t, p, "wait for the steer acknowledgement before a new prompt")
 				p.events <- Event{SteerAnswer: answer}
 			}
-			if text := p.nextSent(t); text != "redirect" {
+			if text := p.nextSent(t); text != h.envelope("redirect") {
 				t.Fatalf("fallback prompt = %q", text)
 			}
 			if res, _ := h.runner.Wait(context.Background(), w.ID, 20*time.Millisecond); res.Status != TurnRunning {
@@ -133,7 +133,7 @@ func TestPiSendSteerCoverageSurvivesDaemonRestart(t *testing.T) {
 			take := func() {
 				h.holders.out(holder,
 					`{"type":"response","command":"steer","success":true}`,
-					`{"type":"message_end","message":{"role":"user","content":"redirect across restart"}}`)
+					jsonLine(map[string]any{"type": "message_end", "message": map[string]any{"role": "user", "content": h.envelope("redirect across restart")}}))
 				eventually(t, "the turn covers the steer", func() bool { return h.record(worker.ID).TurnMark == 2 })
 			}
 			if takenBeforeRestart {
@@ -170,20 +170,20 @@ func TestPiTokenSendSteersAChildWithoutPromotingHeldDashboardText(t *testing.T) 
 	h, _ := childHarness(t)
 	_, _, token, gc, p := workerWithChild(t, h)
 	c := h.runner.conv(gc.ID)
-	if _, _, err := wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{"hold until done"}}, time.Now()); err != nil {
+	if _, _, err := wsinbox.Send(c.inbox, wsinbox.Entry{Parts: []string{"hold until done"}}, h.config.Now()); err != nil {
 		t.Fatal(err)
 	}
 	code, body := h.tokenCall(token, "send", map[string]any{"id": gc.ID, "message": "steer now"})
 	if code != http.StatusOK {
 		t.Fatalf("token send = %d %s", code, body)
 	}
-	if text := waitSteer(t, p, 1); text != "steer now" {
+	if text := waitSteer(t, p, 1); text != h.envelope("steer now") {
 		t.Fatalf("token steer = %q", text)
 	}
 	p.events <- Event{SteerAnswer: &SteerAnswer{}}
-	p.events <- Event{UserTaken: "steer now"}
+	p.events <- Event{UserTaken: h.envelope("steer now")}
 	p.reply("steered result")
-	if text := p.nextSent(t); text != "hold until done" {
+	if text := p.nextSent(t); text != h.envelope("hold until done") {
 		t.Fatalf("only the dashboard text remains for the next turn: %q", text)
 	}
 	if texts, _ := p.steered(); len(texts) != 1 || strings.Contains(texts[0], "hold until done") {

@@ -25,6 +25,38 @@ func piSpec(t *testing.T, raw string) StartSpec {
 	return spec
 }
 
+func TestPiCompactCommand(t *testing.T) {
+	envelope := func(body string) string {
+		return "<ws:user at=\"2026-11-15T12:34+00:00\">\n" + body + "\n</ws:user>"
+	}
+	for _, tt := range []struct {
+		name, text, want string
+		ok               bool
+	}{
+		{name: "bare", text: "/compact", ok: true},
+		{name: "bare instructions", text: " /compact keep the names ", want: "keep the names", ok: true},
+		{name: "bare closing delimiter", text: "/compact preserve </ws:user>", want: "preserve </ws:user>", ok: true},
+		{name: "bare incomplete delimiter", text: "/compact explain <ws:user", want: "explain <ws:user", ok: true},
+		{name: "enveloped", text: envelope("/compact"), ok: true},
+		{name: "enveloped instructions", text: envelope("/compact keep the names"), want: "keep the names", ok: true},
+		{name: "decoded instructions", text: envelope("/compact keep &lt;/ws:user>"), want: "keep </ws:user>", ok: true},
+		{name: "multiline body", text: envelope("/compact keep names\nand details")},
+		{name: "two envelopes", text: envelope("/compact") + "\n" + envelope("/compact keep names")},
+		{name: "outside prefix", text: "please\n" + envelope("/compact")},
+		{name: "outside suffix", text: envelope("/compact") + "\nplease"},
+		{name: "outside compact", text: "/compact " + "<ws:user at=\"2026-11-15T12:34+00:00\">/compact</ws:user>", want: "<ws:user at=\"2026-11-15T12:34+00:00\">/compact</ws:user>", ok: true},
+		{name: "invalid envelope", text: "<ws:user at=\"invalid\">\n/compact\n</ws:user>"},
+		{name: "not compact", text: envelope("/compacted")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := piCompactCommand(tt.text)
+			if got != tt.want || ok != tt.ok {
+				t.Fatalf("piCompactCommand(%q) = %q, %v; want %q, %v", tt.text, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
 func TestPiArgsAllOffByDefault(t *testing.T) {
 	args := piArgs(piSpec(t, `{"backend":"pi"}`), "")
 	for _, banned := range []string{"--system-prompt", "--extension", "-e", "--tools", "--model", "--thinking"} {
