@@ -1472,35 +1472,12 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 		if err != nil {
 			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: %w", err))
 		}
-		result, err := provisionWorktree(context.Background(), s.gitRunner(), s.environ(), entry.root, base, targetBranch, profile, poolRV.Value)
+		result, err := acquireWorktree(ctx, s.gitRunner(), s.environ(), entry.root, base, targetBranch, profile, poolRV.Value, key, func(mintPath string) (string, error) {
+			return s.sessions.mint(mintPath, roleLead, key)
+		})
 		if err != nil {
 			return toolTextResponse(req.ID, "", err)
 		}
-		// Bind the worker key to the canonical worktree root so the worker's
-		// root-aware ws calls resolve against its own worktree, not the lead's.
-		mintPath := result.Path
-		if canon, cerr := canonicalGitRoot(s.gitRunner(), result.Path); cerr == nil {
-			mintPath = canon
-		}
-		workerKey, err := s.sessions.mint(mintPath, roleLead, key)
-		if err != nil {
-			// Detach the freshly provisioned worktree so a failed mint does not
-			// leave it branch-checked-out and thus ineligible for pool reuse.
-			_, _ = s.gitRunner().RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
-			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: mint worker key: %w", err))
-		}
-		// The lease is written only after a successful mint, so the failed-mint
-		// path above never leaves one behind. A failed lease write detaches the
-		// worktree like a failed mint: succeeding without a lease would list it
-		// as "no lease record", indistinguishable from a released worktree. The
-		// minted key is left unused and ages out through key pruning.
-		lease := worktreeLease{WorkerKey: workerKey, ParentKey: key, AcquiredAt: time.Now().UTC().Format(time.RFC3339)}
-		if err := writeWorktreeLease(context.Background(), s.gitRunner(), result.Path, lease); err != nil {
-			_, _ = s.gitRunner().RunGit(context.Background(), result.Path, noSubmoduleRecurse("checkout", "--detach")...)
-			return toolTextResponse(req.ID, "", fmt.Errorf("worktree.acquire: record worktree lease: %w", err))
-		}
-		result.Path = mintPath
-		result.WorkerKey = workerKey
 		staleAfter, preservedLimit := worktreeNudgeThresholds(&resolver, key)
 		if nudge, err := poolNudge(context.Background(), s.gitRunner(), entry.root, result.Pool, staleAfter, preservedLimit, time.Now()); err != nil {
 			result.Warnings = append(result.Warnings, "stale-pool check failed: "+err.Error())
