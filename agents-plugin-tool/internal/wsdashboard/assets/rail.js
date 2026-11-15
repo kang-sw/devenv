@@ -32,6 +32,22 @@
   function strings(v) { return Array.isArray(v) ? v.filter(function (x) { return typeof x === "string"; }) : []; }
   function keys(o) { return o && typeof o === "object" ? Object.keys(o) : []; }
 
+  // Admission drafts keep the original observation revision until the user
+  // explicitly clears/reselects. A reload or server render is not fresh consent.
+  function admissionDrafts(store) {
+    var key = "ws.dashboard.worktree-admission.drafts";
+    return {
+      load: function () {
+        var v = parse(store.load(key), []);
+        return Array.isArray(v) ? v.filter(function (s) {
+          return s && typeof s.repository === "string" && typeof s.path === "string" && typeof s.revision === "string" &&
+            (s.action === "approve" || s.action === "reject" || s.action === "undo");
+        }) : [];
+      },
+      save: function (v) { store.save(key, v.length ? JSON.stringify(v) : null); }
+    };
+  }
+
   // A draft is one session's unsent input and view state: text and
   // mentions ({start, end, text}) of the composer, sel its selection
   // ([start, end]), cmd its slash command selection ({name, args}: args a
@@ -803,6 +819,7 @@
   }
 
   window.WsRail = {
+    admissionDrafts: admissionDrafts,
     hoverUpdates: hoverUpdates,
     hover: hover,
     hoverPlace: hoverPlace,

@@ -67,6 +67,7 @@
       b.classList.toggle("busy", !!archBusy && !!row && row.getAttribute("data-rid") === archBusy);
     });
     if (usageGutter) usageGutter.sync();
+    admissionSync();
     railPopSync();
   }
   // railFocus is what holds the focus in the rail before a swap replaces
@@ -158,6 +159,148 @@
       railRelease();
     });
   }
+  // Admission drafts are browser-local, unlike the shared persisted result.
+  // Never refresh a draft's evidence implicitly, including on a 409 or reload.
+  var admissionStore = WsRail && WsRail.admissionDrafts(railStore);
+  var admissionDraft = admissionStore ? admissionStore.load() : [];
+  var admissionMessage = "", admissionBusy = false;
+  var ADMISSION_PROMPT = "ws.dashboard.worktree-admission.prompt";
+  var admissionPrompt = null;
+  try { admissionPrompt = JSON.parse(load(ADMISSION_PROMPT) || "null"); } catch (_) {}
+  function admissionKey(s) { return JSON.stringify([s.repository, s.path]); }
+  function admissionEvidence(row, action) {
+    return { repository: row.getAttribute("data-repository") || "", path: row.getAttribute("data-path") || "",
+      revision: row.getAttribute("data-revision") || "", action: action };
+  }
+  function admissionFind(s) { return admissionDraft.find(function (d) { return admissionKey(d) === admissionKey(s); }); }
+  function admissionSave() { if (admissionStore) admissionStore.save(admissionDraft); admissionSync(); }
+  function admissionClear(s) {
+    admissionDraft = admissionDraft.filter(function (d) { return admissionKey(d) !== admissionKey(s); });
+    admissionSave();
+  }
+  function admissionSync() {
+    var r = region("rail");
+    if (!r) return;
+    var seen = {}, correction = r.querySelector(".admission-corrections");
+    if (!correction) return;
+    correction.textContent = "";
+    q(".rwt[data-admission]", r).forEach(function (row) {
+      var s = admissionEvidence(row, ""), d = admissionFind(s), pending = row.getAttribute("data-admission") === "pending";
+      seen[admissionKey(s)] = true;
+      var stale = !!d && (d.stale || d.revision !== s.revision || (d.action === "undo" ? pending : !pending));
+      row.classList.toggle("admission-stale", stale);
+      row.classList.toggle("m-ap", !!d && d.action === "approve");
+      row.classList.toggle("m-rj", !!d && d.action === "reject");
+      q("[data-admission-action]", row).forEach(function (b) {
+        b.setAttribute("aria-pressed", String(!!d && d.action === b.getAttribute("data-admission-action")));
+        b.disabled = admissionBusy;
+      });
+      var tag = row.querySelector(".tag"), fix = row.querySelector(".admission-row-correction");
+      if (tag) tag.textContent = d ? (d.action === "approve" ? "Will approve" : "Will reject") : "";
+      if (fix) fix.hidden = !stale;
+      // Rejected rows have no pending correction markup. Their draft remains
+      // visible in the correction list rather than becoming an invisible undo.
+      if (stale && !fix) correctionRow(d, "Evidence changed", row);
+    });
+    function correctionRow(d, reason, row) {
+      var line = mk("div", "admission-missing", reason + ": " + d.path + " ");
+      var clear = mk("button", "", "Clear selection"); clear.type = "button";
+      clear.addEventListener("click", function () { admissionClear(d); }); line.appendChild(clear);
+      if (row) {
+        var review = mk("button", "", "Use current evidence"); review.type = "button";
+        review.addEventListener("click", function () {
+          var fresh = admissionEvidence(row, row.getAttribute("data-admission") === "rejected" ? "undo" : d.action);
+          admissionClear(d); admissionDraft.push(fresh); admissionSave();
+        }); line.appendChild(review);
+      }
+      correction.appendChild(line);
+    }
+    admissionDraft.forEach(function (d) { if (!seen[admissionKey(d)]) correctionRow(d, "No longer pending or missing from rail", null); });
+    var cap = r.querySelector(".rcap"), ap = admissionDraft.filter(function (d) { return d.action === "approve"; }).length;
+    var reject = admissionDraft.filter(function (d) { return d.action === "reject"; }).length;
+    cap.hidden = !admissionDraft.length; railEl.classList.toggle("capon", !!admissionDraft.length);
+    var ok = cap.querySelector(".ok"), no = cap.querySelector(".no");
+    ok.hidden = !ap; ok.textContent = "Approve " + ap; no.hidden = !reject; no.textContent = "Reject " + reject;
+    cap.querySelector("[data-admission-apply]").disabled = admissionBusy;
+    var feedback = r.querySelector(".admission-feedback"), copy = r.querySelector(".admission-copy");
+    r.querySelector(".admission-status").textContent = admissionMessage;
+    copy.hidden = !(admissionPrompt && admissionPrompt.text);
+    if (!copy.hidden) {
+      copy.querySelector("textarea").value = admissionPrompt.text;
+      copy.querySelector(".admission-copy-status").textContent = admissionPrompt.failed ? "Rejection saved. Clipboard failed; retry copy or copy the retained prompt below. " : "Investigation prompt retained. ";
+      copy.querySelector("button").textContent = admissionPrompt.failed ? "Retry copy" : "Copy prompt";
+    }
+    feedback.hidden = !admissionMessage && !correction.children.length && copy.hidden;
+  }
+  function admissionCopy() {
+    if (!admissionPrompt || !admissionPrompt.text) return;
+    var prompt = admissionPrompt;
+    return copyText(prompt.text).then(function (ok) {
+      if (admissionPrompt !== prompt) return;
+      admissionPrompt.failed = !ok;
+      save(ADMISSION_PROMPT, JSON.stringify(admissionPrompt));
+      admissionSync();
+    });
+  }
+  function admissionSubmit(selections) {
+    if (admissionBusy || !selections.length) return;
+    admissionBusy = true; railSaving++; admissionMessage = "Applying worktree selections…"; admissionSync();
+    var ctl = window.AbortController ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, LAYOUT_WAIT);
+    fetch("/rail/worktrees/admission", { method: "POST", credentials: "same-origin", cache: "no-store",
+      signal: ctl ? ctl.signal : undefined, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selections: selections.map(function (s) {
+        return { repository: s.repository, path: s.path, revision: s.revision, action: s.action };
+      }) }) }).then(function (res) { return res.json().then(function (v) { return { status: res.status, value: v }; }); })
+      .then(function (answer) {
+        var v = answer.value;
+        if (v.applied === true && answer.status === 200) {
+          railMinGen = Math.max(railMinGen, +v.gen || 0);
+          admissionDraft = admissionDraft.filter(function (d) { return !selections.some(function (s) {
+            return admissionKey(s) === admissionKey(d) && s.revision === d.revision && s.action === d.action;
+          }); });
+          admissionStore.save(admissionDraft);
+          admissionMessage = "Worktree selections saved. No worktree files were changed.";
+          // Server HTML, not optimistic DOM moves, is the committed authority.
+          if (v.html) swap("rail", "admission:" + v.gen + ":" + Date.now(), v.html);
+          if (v.prompt) {
+            admissionPrompt = { text: v.prompt, failed: true };
+            save(ADMISSION_PROMPT, JSON.stringify(admissionPrompt));
+            admissionCopy();
+          }
+        } else {
+          (v.stale || selections).forEach(function (s) {
+            var d = admissionFind(s);
+            if (d) d.stale = true;
+            else admissionDraft.push({ repository: s.repository, path: s.path, revision: s.revision, action: s.action, stale: true });
+          });
+          admissionStore.save(admissionDraft);
+          admissionMessage = v.message || "Nothing applied. Refresh, clear marked selections and select again.";
+        }
+      }).catch(function () { admissionMessage = "Apply could not be confirmed. Drafts retained; refresh before retrying."; })
+      .then(function () { clearTimeout(timer); admissionBusy = false; railSaving--; admissionSync(); railRelease(); });
+  }
+  function admissionClick(t) {
+    var b = t.closest && t.closest("[data-admission-action], [data-admission-clear], [data-admission-apply], [data-admission-copy], [data-admission-clear-row], [data-admission-reselect], .admission-undo");
+    if (!b) return false;
+    if (admissionBusy) return true;
+    if (b.hasAttribute("data-admission-clear")) { admissionDraft = []; admissionMessage = ""; admissionSave(); }
+    else if (b.hasAttribute("data-admission-copy")) admissionCopy();
+    else if (b.hasAttribute("data-admission-apply")) admissionSubmit(admissionDraft.slice());
+    else {
+      var row = b.closest(".rwt"), s = admissionEvidence(row, b.getAttribute("data-admission-action") || "undo"), old = admissionFind(s);
+      if (b.hasAttribute("data-admission-clear-row")) admissionClear(s);
+      else if (b.hasAttribute("data-admission-reselect")) {
+        s.action = old ? old.action : "approve"; admissionClear(s); admissionDraft.push(s); admissionSave();
+      } else if (b.classList.contains("admission-undo")) admissionSubmit([s]);
+      else {
+        // Switching actions retains the original evidence, even if stale.
+        if (old && old.action !== s.action) { old.action = s.action; admissionSave(); }
+        else { admissionClear(s); if (!old) { admissionDraft.push(s); admissionSave(); } }
+      }
+    }
+    return true;
+  }
   // layoutImport runs once on load: a browser that kept the rail's order
   // and stars locally before the daemon kept them imports them into an
   // empty layout, and drops them once the daemon answered (rail.js
@@ -247,6 +390,7 @@
     [RAIL_WIDE, RAIL_XWIDE].forEach(function (m) { if (m && m.addEventListener) m.addEventListener("change", function () { railOpen(false); }); });
     railEl.addEventListener("click", function (e) {
       var t = e.target;
+      if (admissionClick(t)) { e.preventDefault(); return; }
       // A star shows pressed at once; the rail swap after the op moves the
       // row.
       var star = t.closest && t.closest(".star");

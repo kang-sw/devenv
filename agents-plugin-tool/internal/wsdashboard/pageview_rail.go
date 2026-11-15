@@ -85,7 +85,9 @@ type RailWorkspace struct {
 
 // RailWorktree is one worktree of a repository.
 type RailWorktree struct {
-	Path string
+	Path                                         string
+	Origin, Admission                            string
+	AdmissionRepository, AdmissionPath, Revision string
 	// Root marks the repository's root worktree; Folder is Path's last
 	// element (the page shows "root" for the root worktree instead).
 	Root   bool
@@ -310,9 +312,10 @@ type railRepo struct {
 type railWorktreeEntry struct {
 	Path string
 	// Branch is the short branch name; empty with Detached, or a bare entry.
-	Branch   string
-	Detached bool
-	Prunable bool
+	Branch                                       string
+	Detached                                     bool
+	Prunable                                     bool
+	AdmissionRepository, AdmissionPath, Revision string
 }
 
 // buildRailView groups the listed sessions by workspace and worktree. An
@@ -449,7 +452,7 @@ func buildRailView(sessions []railInput, repos map[string]railRepo, stored []sto
 			if a, ok := accs[p]; ok {
 				return a
 			}
-			a := &wtAcc{wt: RailWorktree{Path: p, Root: p == key, Folder: lastElem(p), Branch: e.Branch, Detached: e.Detached}, regs: map[string]Registration{}}
+			a := &wtAcc{wt: RailWorktree{Path: p, Root: p == key, Folder: lastElem(p), Branch: e.Branch, Detached: e.Detached, AdmissionRepository: e.AdmissionRepository, AdmissionPath: e.AdmissionPath, Revision: e.Revision}, regs: map[string]Registration{}}
 			accs[p] = a
 			order = append(order, p)
 			return a
