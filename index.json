@@ -770,7 +770,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "exec4/electron-phase1",
         "phase": "active",
-        "touched_at": "2026-11-15T01:59:33Z"
+        "touched_at": "2026-11-15T02:01:49Z",
+        "impl": {
+          "branch": "impl/exec4/electron-phase1/cake-ember-ramp"
+        }
       }
     },
     "261115-feat-ws-daemon-release-auto-update": {
