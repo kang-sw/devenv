@@ -69,9 +69,13 @@ type LiveSnapshotHolder interface {
 func liveDep(replyID string) string { return "live:" + replyID }
 func ringDep(replyID string) string { return "ring:" + replyID }
 
+// inboxDep permits a session live render, but unlike a snapshot-only wake it
+// must refresh held and drained inbox reads (readSessionWith).
+func inboxDep(replyID string) string { return "inbox:" + replyID }
+
 // liveToken reports a live-only wake token.
 func liveToken(token string) bool {
-	return strings.HasPrefix(token, "live:") || strings.HasPrefix(token, "ring:")
+	return strings.HasPrefix(token, "live:") || strings.HasPrefix(token, "ring:") || strings.HasPrefix(token, "inbox:")
 }
 
 // hostedSlots is the daemon's slot ownership: the slot that currently owns

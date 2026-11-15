@@ -83,9 +83,10 @@ type pageRender struct {
 }
 
 // liveRender is what a render may reuse when every wake since the
-// previous render was live-only (broker.liveOnlySince): a hosted session's
-// snapshot hand-off or ring append, after which no store but the snapshot
-// (and the ring, after an append) needs reading again.
+// previous render was live-only (broker.liveOnlySince): a hosted snapshot,
+// ring append, or inbox change. Only the named ring/inbox reads refresh;
+// the other session stores can be reused. A compareReads source instead
+// uses prev only to compare a completely fresh view.
 type liveRender struct {
 	// prev is the previous render, whose reads the render may reuse.
 	prev pageRender
@@ -99,6 +100,10 @@ type pageSource struct {
 	// render renders the page; live is nil for a full render (every read
 	// afresh).
 	render func(live *liveRender) pageRender
+	// compareReads offers the previous render even on a full read. Such a
+	// source must freshly read all inputs before comparing; unlike a session
+	// live render it may not reuse stale store reads (the rail does this).
+	compareReads bool
 	// stamp hashes, at call time, what in may have changed with no wake;
 	// ok false means the page has inputs the stamp cannot cover, so every
 	// refresh tick re-renders it.
@@ -204,7 +209,11 @@ func (c *pageCache) get(p *sharedPage, src pageSource, refresh bool) (pageRender
 	}
 	at := c.broker.current()
 	prev := p.r.inputs
-	r := src.render(nil)
+	var previous *liveRender
+	if src.compareReads && p.rendered && p.r.err == nil {
+		previous = &liveRender{prev: p.r}
+	}
+	r := src.render(previous)
 	if r.err != nil && p.rendered && p.r.ok {
 		// Keep the shared last-good reads and regions for the lifetime of
 		// its open streams; no stale content survives confirmed invalidity.

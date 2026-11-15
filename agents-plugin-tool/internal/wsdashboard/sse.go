@@ -293,12 +293,13 @@ func (d *Daemon) sessionPageSource(replyID, lang, theme string) pageSource {
 		key: pageKey{replyID: replyID, lang: lang, theme: theme},
 		render: func(live *liveRender) pageRender {
 			var prev *sessionReads
-			ringChanged := true
+			ringChanged, inboxChanged := true, true
 			if live != nil {
 				prev, _ = live.prev.reads.(*sessionReads)
 				ringChanged = live.changed(ringDep(replyID))
+				inboxChanged = live.changed(inboxDep(replyID))
 			}
-			view, inputs, reads, ok, err := pages.readSessionWith(replyID, prev, ringChanged)
+			view, inputs, reads, ok, err := pages.readSessionWith(replyID, prev, ringChanged, inboxChanged)
 			if err != nil || !ok {
 				return pageRender{deps: []string{replyID}, err: err}
 			}
@@ -313,7 +314,7 @@ func (d *Daemon) sessionPageSource(replyID, lang, theme string) pageSource {
 			for _, id := range inputs.ids {
 				deps = append(deps, id, liveDep(id))
 			}
-			deps = append(deps, ringDep(replyID))
+			deps = append(deps, ringDep(replyID), inboxDep(replyID))
 			if d.git != nil && view.Project != "" {
 				deps = append(deps, gitDep(view.Project))
 			}

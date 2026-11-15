@@ -213,7 +213,7 @@ func (d *Daemon) inboxAnswered(w http.ResponseWriter, s Session, status int, ans
 func (d *Daemon) inboxChanged(s Session) {
 	d.index.Reread(s.ReplyID)
 	d.stats.WakeInbox.Add(1)
-	d.broker.wake(s.ReplyID)
+	d.broker.wake(inboxDep(s.ReplyID))
 	if d.mailWake != nil {
 		d.mailWake.Wake()
 	}
@@ -326,7 +326,7 @@ func (d *Daemon) sendCommand(dir, replyID string, req messageRequest, local bool
 	if len(req.Images) > 0 || len(req.Refs) > 0 {
 		return http.StatusBadRequest, "a slash command carries no images"
 	}
-	snap := d.pages().readSnapshot(replyID)
+	snap := d.pages().readSnapshotWithoutObserved(replyID)
 	if snap == nil || len(snap.Commands) == 0 {
 		return http.StatusConflict, "this session's host adapter runs no slash commands from the dashboard"
 	}

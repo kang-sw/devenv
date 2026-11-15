@@ -321,24 +321,24 @@ func TestWhiteboardEffectsOlderThanLiveCapRemainReachableOffline(t *testing.T) {
 func TestWhiteboardEffectsSavedRingRefreshAndAdapterArrival(t *testing.T) {
 	f := startPageFixture(t)
 	reader := f.d.pages()
-	initial, _, prev, ok, err := reader.readSessionWith("boardsession", nil, true)
+	initial, _, prev, ok, err := reader.readSessionWith("boardsession", nil, true, true)
 	if err != nil || !ok || initial.Mode() != modeBoard {
 		t.Fatal("empty board fixture not board-only")
 	}
 	if err := wslive.AppendRing(wslive.RingDir(SessionDir(f.dir, "boardsession")), []wslive.RingEntry{dashboardEffect("new saved effect")}); err != nil {
 		t.Fatal(err)
 	}
-	saved, _, prev, ok, err := reader.readSessionWith("boardsession", prev, true)
+	saved, _, prev, ok, err := reader.readSessionWith("boardsession", prev, true, false)
 	if err != nil || !ok || saved.Adapter || saved.Mode() != modeHistory || len(saved.Conversation.Entries) != 1 || prev.conversation {
 		t.Fatalf("ring refresh lost saved entry or read live inbox: %+v", saved)
 	}
 	writeSnapshot(t, f.dir, "boardsession", liveSnap(time.Now(), wslive.Lead{}))
-	live, _, prev, ok, err := reader.readSessionWith("boardsession", prev, false)
+	live, _, prev, ok, err := reader.readSessionWith("boardsession", prev, false, false)
 	if err != nil || !ok || !live.Adapter || !prev.conversation || len(live.Conversation.Entries) != 1 {
 		t.Fatalf("adapter arrival lost saved ring or skipped inbox: %+v", live)
 	}
 	writeSnapshot(t, f.dir, "boardsession", liveSnap(time.Now().Add(-time.Hour), wslive.Lead{Reply: &wslive.Reply{Text: "stale"}}))
-	saved, _, prev, ok, err = reader.readSessionWith("boardsession", prev, false)
+	saved, _, prev, ok, err = reader.readSessionWith("boardsession", prev, false, false)
 	if err != nil || !ok || saved.Adapter || prev.conversation || saved.Conversation.Reply != nil || len(saved.Conversation.Entries) != 1 {
 		t.Fatalf("adapter departure lost saved ring or retained live state: %+v", saved)
 	}

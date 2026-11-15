@@ -756,8 +756,8 @@ func (f *railFakeSource) ReadRepoWorktrees(repo string, regs []Registration) (Re
 
 // TestSessionPagesShareOneRailRender pins the rail on the session pages:
 // the page and its stream carry the rail with every listed session; a
-// session's change re-renders the rail once for every open session page,
-// and no session page that does not show the session; the worktree list
+// rail-visible session change re-renders the shared rail once for all open
+// session pages, and no session page that does not show it; the worktree list
 // is read once a stream opens and lands on the rail; the refresh route
 // needs an open page.
 func TestSessionPagesShareOneRailRender(t *testing.T) {
@@ -796,6 +796,11 @@ func TestSessionPagesShareOneRailRender(t *testing.T) {
 	}
 
 	rails, liveReads := f.d.stats.RailRenders.Load(), f.src.readCount("livesession")
+	// Board-only revisions now intentionally skip the rail template. Rename
+	// the row too, so this still proves one actual render shared by both tabs.
+	if err := writeSessionLabel(SessionDir(f.dir, "lonersession"), "renamed loner"); err != nil {
+		t.Fatal(err)
+	}
 	f.change(t, "lonersession", other, "loner changed", 2)
 	time.Sleep(settle)
 	if got := f.d.stats.RailRenders.Load() - rails; got != 1 {

@@ -220,7 +220,7 @@ func (d *Daemon) handlePlanUsage(w http.ResponseWriter, r *http.Request) {
 	if d.index != nil {
 		for _, session := range d.index.Sessions() {
 			if session.Harness == "claude" {
-				d.planUsage.pushClaude(d.snapshots.Snapshot(d.dir, session.ReplyID))
+				d.planUsage.pushClaude(d.snapshots.snapshotWithoutObserved(d.dir, session.ReplyID))
 			}
 		}
 	}

@@ -3,6 +3,7 @@ package wslive
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +50,9 @@ type observedSlot struct {
 	mu       sync.Mutex
 	files    map[string]observedFile
 	evidence *ObservedEvidence
+	// winners records lexical first-write precedence for normalized producer
+	// identities. It is private to the slot, never part of a published view.
+	winners map[string]string
 	// dirInfo is the evidence directory's stat taken before the last listing,
 	// dirAt the clock reading before that stat, and sweptAt the clock reading
 	// before the last full sweep.
@@ -93,8 +97,10 @@ func (e *ObservedEvidence) Overlay(snap *Snapshot) {
 	}
 }
 
-// Load reuses each unchanged record and rebuilds histories only when the set
-// or identity of its files changes. Failure to list is retried on the next load.
+// Load reuses each unchanged record and extends immutable histories for new,
+// chronologically trailing evidence. Deletions, replacements, earlier duplicate
+// winners and late arrivals rebuild from retained records. Failure to list is
+// retried on the next load.
 func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 	if c == nil {
 		records, _ := ReadObserved(dir)
@@ -132,6 +138,7 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 	if err != nil {
 		slot.files = nil
 		slot.evidence = nil
+		slot.winners = nil
 		slot.dirInfo = nil
 		return nil
 	}
@@ -146,6 +153,9 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 	}
 	files := make(map[string]observedFile, len(entries))
 	changed := slot.evidence == nil
+	appendOnly := slot.evidence != nil
+	var added []string
+	cleaner := NewState("")
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -158,6 +168,7 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 		info, err := stat(path)
 		if err != nil {
 			changed = true
+			appendOnly = false
 			continue
 		}
 		prev, ok := slot.files[entry.Name()]
@@ -166,6 +177,11 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 			continue
 		}
 		changed = true
+		if ok {
+			appendOnly = false
+		} else {
+			added = append(added, entry.Name())
+		}
 		open := c.open
 		if open == nil {
 			open = os.Open
@@ -173,27 +189,115 @@ func (c *ObservedCache) Load(dir string) *ObservedEvidence {
 		c.opens.Add(1)
 		r, valid, err := readObservedRecord(path, open)
 		if err == nil {
+			if valid {
+				o := cleaner.cleanObservation(&r.ModelObservation)
+				valid = o != nil && (r.AgentID == "" || agentIDPattern.MatchString(r.AgentID))
+				if valid {
+					r.ModelObservation = *o
+				}
+			}
 			files[entry.Name()] = observedFile{info: info, record: r, valid: valid}
 		}
 	}
 	if len(files) != len(slot.files) {
 		changed = true
 	}
-	if changed {
-		// ReadObserved consumes files in lexical order, so duplicate producer IDs
-		// retain the same first-write-wins precedence here as on an uncached read.
-		records := make([]ObservedRecord, 0, len(files))
-		for _, entry := range entries {
-			if f, ok := files[entry.Name()]; ok && f.valid {
-				records = append(records, f.record)
+	// A deletion can accompany additions without changing the file count.
+	if appendOnly {
+		for name := range slot.files {
+			if _, ok := files[name]; !ok {
+				appendOnly = false
+				break
 			}
 		}
-		st := NewState("")
-		st.SeedObserved(records)
-		slot.evidence = &ObservedEvidence{models: st.observed}
+	}
+	if changed {
+		if !appendOnly || !slot.extend(files, added) {
+			// ReadObserved consumes files in lexical order. Normalize only on
+			// file intake, but retain its first-write-wins duplicate precedence.
+			records := make(map[string]ObservedRecord, len(files))
+			slot.winners = make(map[string]string, len(files))
+			for _, entry := range entries {
+				if f, ok := files[entry.Name()]; ok && f.valid {
+					key := observationKey(f.record)
+					if _, exists := records[key]; !exists {
+						records[key], slot.winners[key] = f.record, entry.Name()
+					}
+				}
+			}
+			slot.evidence = &ObservedEvidence{models: summarizeObserved(records)}
+		}
 		slot.files = files
 	}
 	return slot.evidence
+}
+
+// extend handles the ordinary append path without revalidating or sorting the
+// retained records. Nothing published is modified: touched models own new
+// histories, and untouched producers keep their existing immutable projections.
+// Less common changes fall back to the canonical retained-record rebuild.
+func (s *observedSlot) extend(files map[string]observedFile, names []string) bool {
+	var additions []ObservedRecord
+	winners := make(map[string]string, len(names))
+	for _, name := range names { // ReadDir's lexical order
+		f := files[name]
+		if !f.valid {
+			continue
+		}
+		r := f.record
+		key := observationKey(r)
+		if prev, ok := s.winners[key]; ok {
+			if name < prev {
+				return false
+			}
+			continue
+		}
+		if _, ok := winners[key]; ok {
+			continue
+		}
+		if model := s.evidence.models[r.AgentID]; model != nil {
+			last := ObservedRecord{AgentID: r.AgentID, ModelObservation: model.Current}
+			if r.At < last.At || (r.At == last.At && key < observationKey(last)) {
+				return false
+			}
+		}
+		winners[key] = name
+		additions = append(additions, r)
+	}
+	if len(additions) == 0 {
+		return true
+	}
+	sort.Slice(additions, func(i, j int) bool {
+		if additions[i].At != additions[j].At {
+			return additions[i].At < additions[j].At
+		}
+		return observationKey(additions[i]) < observationKey(additions[j])
+	})
+	models := make(map[string]*ObservedModel, len(s.evidence.models)+1)
+	for id, model := range s.evidence.models {
+		models[id] = model
+	}
+	touched := map[string]bool{}
+	for _, r := range additions {
+		model := models[r.AgentID]
+		if !touched[r.AgentID] {
+			if model == nil {
+				model = &ObservedModel{}
+			} else {
+				model = model.clone()
+			}
+			models[r.AgentID], touched[r.AgentID] = model, true
+		}
+		if model.Current.Model != r.Model {
+			model.History = append(model.History, ModelChange{Previous: model.Current.Model, Model: r.Model, At: r.At, Source: r.Source})
+		}
+		model.Current = r.ModelObservation
+	}
+	for key, name := range winners {
+		s.winners[key] = name
+	}
+	s.evidence = &ObservedEvidence{models: models}
+	return true
 }
 
 // Forget drops session-local evidence when it leaves the dashboard index.

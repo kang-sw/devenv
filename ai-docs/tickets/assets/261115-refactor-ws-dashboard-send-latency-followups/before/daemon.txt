@@ -1,0 +1,15 @@
+isolation=/tmp/ws-send-isolated.spxk37 cwd=/tmp/send-latency-cde/baseline-source/agents-plugin-tool wrapper_pid=99243 command=go test -exec /tmp/send-latency-cde/record-test-pid.sh ./internal/wsdashboard -run \^TestSendLatencyEvidenceFixture\$ -count=1 -v
+go_driver_pid=99256
+test_pid=99703
+=== RUN   TestSendLatencyEvidenceFixture
+    send_latency_measure_test.go:26: fixture_pid=99703
+    send_latency_measure_test.go:87: fixture_node_pid=613 chromium_pid=618
+        capture /tmp/send-latency-cde/before-isolated/index-dark.png
+        capture /tmp/send-latency-cde/before-isolated/session-dark.png
+        capture /tmp/send-latency-cde/before-isolated/index-light.png
+        capture /tmp/send-latency-cde/before-isolated/session-light.png
+
+    send_latency_measure_test.go:133: MEASURE sessions=7 records_per_session=4000 streams=3 ticks=24 interval_ms=300 inbox_wakes=24 git_wakes=24 new_evidence=6 wall_seconds=7.201 process_cpu_seconds=0.661841 core_percent=9.191 snapshot_requests=864 snapshot_requests_per_second=119.986 rail_renders=27 session_renders=27 live_renders=0
+--- PASS: TestSendLatencyEvidenceFixture (14.73s)
+PASS
+ok  	github.com/kang-sw/devenv/internal/wsdashboard	15.633s

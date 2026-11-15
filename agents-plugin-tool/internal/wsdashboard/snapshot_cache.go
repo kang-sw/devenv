@@ -118,6 +118,16 @@ func (c *SnapshotCache) ClearLive(stateDir, replyID string) {
 	c.files.forget(path)
 }
 
+// snapshotWithoutObserved reads the shared live snapshot without loading
+// retained history. Use Snapshot only when rendered output consumes history.
+func (c *SnapshotCache) snapshotWithoutObserved(stateDir, replyID string) *wslive.Snapshot {
+	p, err := c.read(wslive.SnapshotPath(SessionDir(stateDir, replyID)))
+	if err != nil {
+		return nil
+	}
+	return &p.snap
+}
+
 // Snapshot reads the live snapshot of session replyID under stateDir; nil
 // when it has none. The snapshot is shared: the caller only reads it.
 func (c *SnapshotCache) Snapshot(stateDir, replyID string) *wslive.Snapshot {
