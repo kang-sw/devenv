@@ -261,6 +261,62 @@ daemon):
 - Record commands, fixture setup, process scans and any parity row that
   could not be verified.
 
+#### Incomplete implementation checkpoint - 2026-11-15
+
+Phase 1 is **not complete** and has no Result. Sources, behavioral unit tests,
+an offline packaging script and a built-app smoke now live in
+`agents-plugin-tool/desktop-electron/`; Tauri and dashboard sources are unchanged.
+The source-built test daemon is `test/daemon/main.go`, using the real dashboard
+assets and daemon implementation, an OS-assigned port and its own disposable
+`WS_CACHE_HOME`. It never invokes Ensure or a shared daemon.
+
+Verification recorded on the implementation branch:
+
+- `npm ci --offline --no-audit --no-fund`, then
+  `node node_modules/electron/install.js`: succeeded using the prepared cache;
+  `electron --version`: `v44.11.3`.
+- `npm test`: 14 tests passed, including endpoint bounds/identity/deadline,
+  native navigation and redirect hooks, initial-frame request filtering,
+  renderer preferences, leave/stay semantics, retry overlap and single instance.
+- `npm run build`: succeeded from `electronZipDir` (download code bypassed),
+  producing `dist/Werkschaft-darwin-arm64/Werkschaft.app`. Identity is
+  `dev.werkschaft.desktop`; the copied temporary icon is packaged as `electron.icns`.
+  Packager warns only that the optional newer `.icon` format is absent.
+- `WS_PLAYWRIGHT=<cached-playwright> npm run smoke`: incomplete. The built app
+  verified missing/mismatched endpoint states, successful retry to the isolated
+  source-built daemon, title, dimensions, UA, renderer isolation, credential
+  exclusion, menu callbacks and zoom clamps. It stops at `test/smoke.cjs`'s
+  remote-frame assertion (`true !== false`): native frame URL metadata is not
+  yet a demonstrated assertion of committed remote content. No security-policy
+  relaxation was made to get past the assertion. Earlier opaque-frame probing
+  established that Playwright reports an empty URL for a real native
+  `about:srcdoc` frame. The subsequent diagnostic probe itself failed because
+  `require` is unavailable inside Playwright's serialized main-process evaluate;
+  no further repair was attempted under the non-convergence stop rule (f).
+- Earlier smoke-only fixes: wait for `did-finish-load` before the next Retry
+  (overlapping requests are intentionally ignored); pass the popup URL as an
+  explicit serialized evaluate argument, not a closure variable.
+- Physical Cmd zoom shortcut delivery is unverified. CDP keyboard events did
+  not reach Electron's native before-input/menu dispatch; `sendInputEvent`
+  reached before-input but not AppKit menus. Tests assert actual accelerator
+  registrations and menu callbacks instead, without adding a keyboard polyfill.
+- Offline `go test ./internal/wsi18n` and selected dashboard tests
+  `-run 'TestDesktopPathClickOpensMenuAndModifiedClickPreviews|TestDocFrameDesktopModifiedClickGoesToHost|TestOutsidePreview'`
+  reproduced only the lead-declared base failures: the two fullscreen-width
+  keys missing in nine language tables and
+  `TestOutsidePreviewCardRemintsOnEveryLoad`'s `removeAttribute` TypeError.
+  They were left unchanged.
+- Each app/daemon probe stopped only its own children. Smoke evidence and final
+  empty owned-process scans are retained under ignored `dist/evidence/`.
+
+Remaining acceptance: resolve the remote-frame assertion against actual
+committed content/request cancellation, then complete the real dashboard
+open-with-system, pasted-image X-close stay/leave, built second-launch focus,
+normal close and daemon-survival smoke sections. Those assertions are authored
+but have not yet been reached. Native physical keyboard delivery also remains
+unverified. Independent review was explicitly deferred to the lead because
+child-agent tools are disabled for this run. Phases 2-4 are untouched.
+
 ### Phase 2: Daily-use reliability
 
 Re-homed from `261113-feat-werkschaft-thin-tauri-shell` Phase 2 ((859)=a).
