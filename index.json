@@ -793,7 +793,17 @@
       }
     },
     "261115-feat-ws-whiteboard-toolbar-state-filter": {
-      "registered_at": "2026-11-15T00:54:28Z"
+      "registered_at": "2026-11-15T00:54:28Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "develop",
+        "phase": "active",
+        "touched_at": "2026-11-15T01:05:43Z",
+        "impl": {
+          "branch": "impl/develop/ankle-blush-ashen"
+        }
+      }
     },
     "261115-feat-ws-whiteboard-viewed-panel-anchor": {
       "registered_at": "2026-11-14T15:16:05Z",
