@@ -1,14 +1,14 @@
 (function () {
-  // The file explorer (window.WsFiles): independent browsers for the session page's
-  // conversation column. It browses one root read-only through the file
-  // browser routes (fs_routes.go, fs_search.go): a lazy tree, one listing
-  // per folder on its first expand, a name search and a content search, and
-  // a row menu. A file opens in the board's preview slot (preview.js).
+  // The file explorer (window.WsFiles): independent card, conversation-tab
+  // and toolbar-sheet browsers over the guarded read-only fs routes. Each
+  // inner tab owns its root/directory, selection, view mode and scroll.
+  // The lazy tree stays beside non-column directory views; files open in the
+  // board's preview slot (preview.js).
   //
   // The page script owns the tab switch and hands the module its pieces
   // once (create), then calls shown each time the pane comes into view: the
   // first time loads the root, every later time puts the tree's scroll back
-  // and lists every loaded folder again, which refreshes the git marks.
+  // and refreshes the current directory and expanded folders' git marks.
   //
   // The browsing root is the session's project root unless a browser on the
   // daemon's machine changed it (the header's change root); the changed
@@ -18,6 +18,7 @@
   var doc = document, cards = window.WsCards;
   if (!cards) return;
   var VIEW_KEY = "ws.dashboard.files.view", ROOT_KEY = "ws.dashboard.files.root.", VIEW_MAX = 24;
+  var TABS_KEY = "ws.dashboard.files.tabs.", viewModes = ["details", "list", "icon", "gallery", "column"], cardHooks = {};
   // NAME_WAIT and TEXT_WAIT are the search debounces in ms; INDENT a tree
   // level's indent in px.
   var NAME_WAIT = 120, TEXT_WAIT = 300, INDENT = 14;
@@ -96,9 +97,11 @@
   var gen = 0, rootAttempt = 0, started = false, destroyed = false, listeners = [];
   var lists = {}, open = {}, sel = null, cur = null, info = null, rootAbs = "";
   var view = { ign: false, dot: false }, rows = [], rowEls = {};
-  var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null;
+  var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null, searchResult = null, searchPaused = false;
   var treeTop = 0, hitsTop = 0, pop = null, popFrom = null, menu = null, menuFrom = null;
-  var ui = {};
+  var ui = {}, api, tabs = [], active = -1, tabSeq = 0, dir = "", viewMode = "details", contentTop = 0, navAttempt = 0;
+  var subscribers = { selection: [], navigation: [] }, detachAttachment = null;
+  var columnLeft = 0, columnScroll = {}, columnLoads = {};
 
   function licon(name) { return cards.icon(name); }
   function mk(tag, cls, text) {
@@ -126,6 +129,128 @@
   }
   function editable(t) {
     return !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ""));
+  }
+
+  // Tabs retain live trees separately; only the small browser record is persisted.
+  function snapshot() {
+    if (!tabs[active]) return;
+    tabs[active].state = { root: rootAbs, dir: dir, selection: sel, scroll: contentTop, treeScroll: treeTop, view: viewMode,
+      columnLeft: columnLeft, columnScroll: Object.assign({}, columnScroll) };
+    tabs[active].live = { lists: lists, open: open, cur: cur, info: info,
+      search: { q: ui.q.value, mode: mode, caseOn: caseOn, regexOn: regexOn, result: searchResult, scroll: hitsTop } };
+  }
+  function persistTabs() {
+    if (destroyed || !started) return;
+    snapshot();
+    save(TABS_KEY + rid, JSON.stringify({ active: active, tabs: tabs.map(function (t) { return t.state; }) }));
+  }
+  function cleanLocation(p) {
+    return typeof p === "string" && !/(^|\/)\.\.(\/|$)|^\/|^[a-z]:|\\|\u0000/i.test(p) ? p : "";
+  }
+  function newTab(location, background) {
+    if (destroyed) return;
+    snapshot();
+    var state = location || { root: rootAbs, dir: dir, view: viewMode };
+    tabs.push({ id: ++tabSeq, state: { root: local() && typeof state.root === "string" ? state.root : "", dir: cleanLocation(state.dir),
+      selection: state.selection == null ? null : cleanLocation(state.selection), scroll: +state.scroll || 0, treeScroll: +state.treeScroll || 0,
+      view: viewModes.indexOf(state.view) >= 0 ? state.view : "details", columnLeft: +state.columnLeft || 0,
+      columnScroll: state.columnScroll && typeof state.columnScroll === "object" ? Object.assign({}, state.columnScroll) : {} } });
+    if (!background) switchTab(tabs.length - 1);
+    else { paintTabs(); persistTabs(); }
+  }
+  function paintTabs() {
+    ui.tabs.textContent = "";
+    tabs.forEach(function (t, i) {
+      var wrap = mk("span", "ftab"), b = mk("button", "ftab-select", t.state.dir.split("/").pop() || t.state.root.split(/[\\/]/).pop() || wsT("js.files.root.session"));
+      b.type = "button"; b.setAttribute("role", "tab"); b.setAttribute("aria-selected", String(i === active));
+      b.addEventListener("click", function () { switchTab(i); });
+      var x = iconBtn("x", wsT("js.files.tab.close")); x.classList.add("ftab-close");
+      x.disabled = tabs.length === 1;
+      x.addEventListener("click", function () { closeTab(i); });
+      wrap.appendChild(b); wrap.appendChild(x); ui.tabs.appendChild(wrap);
+    });
+    var plus = mk("button", "ibtn ftab-new", "+"); plus.type = "button"; plus.title = wsT("js.files.tab.new"); plus.setAttribute("aria-label", plus.title);
+    plus.addEventListener("click", function () { newTab({ root: rootAbs, dir: dir, view: viewMode }); });
+    ui.tabs.appendChild(plus);
+  }
+  function switchTab(index) {
+    if (destroyed || !tabs[index] || index === active) return;
+    snapshot();
+    gen++; rootAttempt++; navAttempt++;
+    clearSearch(); closeMenu(false); closePop(false);
+    active = index;
+    var t = tabs[active], s = t.state, live = t.live;
+    rootAbs = s.root; dir = s.dir; sel = s.selection; cur = sel;
+    contentTop = s.scroll; treeTop = s.treeScroll; viewMode = s.view;
+    columnLeft = s.columnLeft; columnScroll = Object.assign({}, s.columnScroll);
+    ui.tree.scrollTop = treeTop;
+    lists = live ? live.lists : {}; open = live ? live.open : {}; info = live ? live.info : null;
+    if (live && info) { readView(); paintHead(); render(); notify("navigation"); }
+    else {
+      // Never leave another tab's actionable rows under this tab's root.
+      rows = []; rowEls = {}; ui.tree.textContent = "";
+      paintHead(); renderDirectory(); notify("navigation");
+      loadRoot(true);
+    }
+    restoreSearch(live && live.search);
+    paintTabs(); persistTabs();
+  }
+  function closeTab(index) {
+    if (tabs.length < 2 || !tabs[index]) return;
+    snapshot();
+    var was = active;
+    tabs.splice(index, 1);
+    active = index < was ? was - 1 : was;
+    if (index === was) { active = -1; switchTab(Math.min(index, tabs.length - 1)); }
+    else { paintTabs(); persistTabs(); }
+  }
+  function location() { return { root: rootAbs, dir: dir }; }
+  function selection() {
+    if (!info) return null;
+    var p = sel === null ? dir : sel, sep = info.sep || "/";
+    return { root: info.root, session: !!info.session, path: p || ".", absolute: p ? absPath(info.abs || info.root, sep, p.split("/").join(sep)) : info.abs || info.root };
+  }
+  function notify(type) {
+    var value = selection();
+    if (ui.send) ui.send.disabled = !value || !h.send;
+    if (ui.copy) ui.copy.disabled = !value || !h.copy;
+    if (!value) return;
+    subscribers[type].slice().forEach(function (fn) { fn(value, api); });
+    if (h[type === "selection" ? "onSelection" : "onNavigate"]) h[type === "selection" ? "onSelection" : "onNavigate"](value, api);
+  }
+  function setAttachment(mount) {
+    if (detachAttachment) detachAttachment();
+    detachAttachment = null; ui.attachment.textContent = ""; ui.send = ui.copy = null;
+    if (mount) { detachAttachment = mount(ui.attachment, api) || null; return; }
+    ui.send = mk("button", "btn pr", wsT("js.files.send"));
+    ui.copy = mk("button", "btn", wsT("js.files.copy"));
+    [ui.send, ui.copy].forEach(function (b) { b.type = "button"; ui.attachment.appendChild(b); });
+    ui.send.addEventListener("click", function () { var s = selection(); if (s && h.send) h.send(s.session ? s.path : s.absolute); });
+    ui.copy.addEventListener("click", function () { var s = selection(); if (s && h.copy) h.copy(s.session ? s.path : s.absolute); });
+    notify("selection");
+  }
+  function navigate(path, selected, focusPath) {
+    if (destroyed) return;
+    path = cleanLocation(path);
+    clearSearch();
+    var g = gen, attempt = ++navAttempt;
+    function accept(a) {
+      if (g !== gen || attempt !== navAttempt) return;
+      lists[path] = a; dir = path; sel = cur = selected == null ? null : selected; contentTop = 0;
+      render();
+      if (viewMode === "column" && focusPath != null) {
+        focusColumn(focusPath);
+        if (selected === path) {
+          var columns = ui.directory.querySelectorAll(".fcolumn");
+          if (columns.length) columns[columns.length - 1].scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
+        columnLeft = ui.directory.scrollLeft;
+      }
+      persistTabs(); paintTabs(); notify("navigation");
+      if (selected != null) notify("selection");
+    }
+    if (lists[path]) accept(lists[path]);
+    else listDir(path).then(accept, function () { if (g === gen && attempt === navAttempt) toast(wsT("js.files.failed")); });
   }
 
   // fsGet asks a file browser route; it rejects with {status, text} on a
@@ -160,36 +285,58 @@
     ui.root.textContent = info ? info.name || info.root : "";
     ui.root.title = info ? info.root : "";
     ui.root.classList.toggle("alt", !!rootAbs);
+    ui.location.textContent = dir ? "/" + dir : "/";
+    ui.up.disabled = !dir;
   }
   // useRoot makes a listing of a root's top folder the tree's root, with a
   // fresh tree.
-  function useRoot(a) {
-    gen++;
+  function useRoot(a, restore) {
+    var saved = restore ? { dir: dir, selection: sel, scroll: contentTop, treeScroll: treeTop, columnLeft: columnLeft, columnScroll: columnScroll } : null;
+    gen++; navAttempt++;
     clearTimeout(timer);
     abort();
+    searchResult = null;
+    ui.hits.textContent = "";
+    hitsTop = 0;
     rootAbs = a.session ? "" : a.root;
     save(ROOT_KEY + rid, rootAbs || null);
     info = a;
     lists = { "": a };
     open = {};
     sel = cur = null;
-    treeTop = 0;
+    treeTop = 0; dir = ""; contentTop = 0;
+    columnLeft = saved ? saved.columnLeft : 0; columnScroll = saved ? saved.columnScroll : {}; columnLoads = {};
     readView();
     paintHead();
     render();
+    function complete() { persistTabs(); paintTabs(); notify("navigation"); }
+    if (saved && saved.dir) {
+      var g = gen, attempt = navAttempt;
+      dir = saved.dir; sel = saved.selection; contentTop = saved.scroll; treeTop = saved.treeScroll;
+      paintHead();
+      listDir(saved.dir).then(function (listing) {
+        if (g !== gen || attempt !== navAttempt) return;
+        lists[saved.dir] = listing; dir = saved.dir; sel = saved.selection; contentTop = saved.scroll; treeTop = saved.treeScroll;
+        ui.tree.scrollTop = treeTop; render(); complete();
+      }, function () { if (g === gen && attempt === navAttempt) { dir = ""; sel = null; render(); complete(); } });
+    } else {
+      if (saved) { sel = saved.selection; contentTop = saved.scroll; treeTop = saved.treeScroll; ui.tree.scrollTop = treeTop; render(); }
+      complete();
+    }
     if (input().value) search(true);
   }
   // loadRoot lists the current root. A changed root the server refuses is
   // dropped for the session root.
-  function loadRoot() {
+  function loadRoot(restore) {
     var g = ++gen;
     status(wsT("js.files.loading"));
-    listDir("").then(function (a) { if (g === gen) useRoot(a); }, function (err) {
+    listDir("").then(function (a) { if (g === gen) useRoot(a, restore); }, function (err) {
       if (g !== gen) return;
       if (rootAbs) {
         rootAbs = "";
         save(ROOT_KEY + rid, null);
         toast(wsT("js.files.root.dropped"));
+        dir = ""; sel = null;
         loadRoot();
         return;
       }
@@ -266,10 +413,11 @@
   // had the focus, the focus on the current row.
   function render() {
     var t = ui.tree, had = t.contains(doc.activeElement), top = shows(t) ? t.scrollTop : treeTop;
-    rows = info ? flatRows(lists, open, view) : [];
+    // The side tree navigates folders; files belong to the directory pane.
+    rows = info ? flatRows(lists, open, view).filter(function (r) { return r.more || r.e.dir; }) : [];
     var nav = navRows();
-    if (sel !== null && !rowOf(sel)) sel = null;
-    if (cur === null || !rowOf(cur)) cur = sel !== null ? sel : nav.length ? nav[0].path : null;
+    if (sel !== null && sel !== dir && !rowOf(sel) && !(lists[dir] && (lists[dir].entries || []).some(function (e) { return joinRel(dir, e.name) === sel; }))) sel = null;
+    if (cur === null || !rowOf(cur)) cur = sel !== null && rowOf(sel) ? sel : nav.length ? nav[0].path : null;
     var frag = doc.createDocumentFragment();
     rowEls = {};
     rows.forEach(function (r) {
@@ -282,6 +430,126 @@
     t.appendChild(frag);
     if (shows(t)) t.scrollTop = top;
     if (had && cur !== null && rowEls[cur]) rowEls[cur].focus({ preventScroll: true });
+    paintHead(); renderDirectory();
+  }
+  function renderDirectory() {
+    var top = contentTop, listing = lists[dir], box = ui.directory;
+    var focused = box.contains(doc.activeElement) ? doc.activeElement.getAttribute("data-entry") : null;
+    box.textContent = ""; box.setAttribute("data-view", viewMode);
+    ui.modes.forEach(function (b, i) { b.setAttribute("aria-pressed", String(viewMode === viewModes[i])); });
+    ui.workspace.setAttribute("data-view", viewMode);
+    // Layout hides the sidebar independently of search's tree/hits visibility.
+    ui.tree.inert = viewMode === "column";
+    box.setAttribute("role", viewMode === "column" ? "group" : "listbox");
+    if (viewMode === "column") { renderColumns(focused); return; }
+    if (viewMode === "details") {
+      var hd = mk("div", "fdetail-head");
+      hd.appendChild(mk("span", "fn", wsT("js.files.column.name")));
+      hd.appendChild(mk("span", "ftype", wsT("js.files.column.type"))); box.appendChild(hd);
+    }
+    var entries = listing ? (listing.entries || []).filter(function (e) { return showsEntry(e, view); }) : [];
+    entries.forEach(function (e) { box.appendChild(directoryEntry(e, dir)); });
+    if (listing && !entries.length) box.appendChild(mk("div", "fnote", wsT("js.files.empty")));
+    if (listing && listing.more) box.appendChild(mk("div", "fnote", wsT("js.files.more")));
+    box.scrollLeft = 0; box.scrollTop = top;
+  }
+  function directoryEntry(e, folder, column) {
+    var p = joinRel(folder, e.name), selected = sel === p || (column && opens(e) && (dir === p || dir.indexOf(p + "/") === 0));
+    var row = mk("div", "fentry" + (selected ? " sel" : "") + (e.ign ? " ign" : ""));
+    row.setAttribute("data-entry", p); row.setAttribute("role", "option"); row.setAttribute("aria-selected", String(selected)); row.tabIndex = 0;
+    var ic = mk("span", "fi");
+    ic.innerHTML = licon(e.dir ? "folder" : e.link ? "file-symlink" : kindIcon(e.name));
+    if (viewMode === "gallery" && !e.dir && !e.link && !e.gone && kindIcon(e.name) === "image") {
+      var img = mk("img", "fthumb"); img.alt = e.name; img.loading = "lazy";
+      img.src = "/s/" + rid + "/fs/raw?path=" + encodeURIComponent(p) + (rootAbs ? "&root=" + encodeURIComponent(rootAbs) : ""); row.appendChild(img);
+    } else row.appendChild(ic);
+    row.appendChild(mk("span", "fn", e.name));
+    if (viewMode === "details") row.appendChild(mk("span", "ftype", e.dir ? wsT("js.files.folder") : e.name.indexOf(".") >= 0 ? e.name.split(".").pop().toUpperCase() : wsT("js.files.file")));
+    if (column && opens(e)) {
+      var ch = mk("span", "fcolumn-chevron"); ch.innerHTML = licon("chevron-right"); row.appendChild(ch);
+    }
+    row.title = p;
+    function choose() {
+      if (column && (opens(e) || folder !== dir)) { navigate(opens(e) ? p : folder, p, p); return; }
+      sel = p;
+      Array.prototype.forEach.call(ui.directory.querySelectorAll(".fentry"), function (n) {
+        var path = n.getAttribute("data-entry"), on = path === sel || (column && (dir === path || dir.indexOf(path + "/") === 0));
+        n.classList.toggle("sel", on); n.setAttribute("aria-selected", String(on));
+      });
+      Object.keys(rowEls).forEach(function (path) {
+        rowEls[path].classList.toggle("sel", path === sel); rowEls[path].setAttribute("aria-selected", String(path === sel));
+      });
+      persistTabs(); notify("selection");
+    }
+    row.addEventListener("click", choose);
+    row.addEventListener("dblclick", function () { if (!column && opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p); });
+    row.addEventListener("keydown", function (ev) {
+      if (column && columnKey(ev, row, choose)) return;
+      if (ev.key === "Enter") { ev.preventDefault(); choose(); if (!column && opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p); }
+    });
+    row.addEventListener("auxclick", function (ev) { if (ev.button === 1 && opens(e)) { ev.preventDefault(); newTab({ root: rootAbs, dir: p, view: viewMode }, true); } });
+    row.addEventListener("contextmenu", function (ev) { ev.preventDefault(); choose(); openMenu({ e: e, path: p, dir: folder }, ev.clientX, ev.clientY); });
+    return row;
+  }
+  function columnDirs() {
+    var chain = [""], path = "";
+    dir.split("/").forEach(function (part) { if (part) { path = joinRel(path, part); chain.push(path); } });
+    return chain;
+  }
+  function focusColumn(path) {
+    var all = ui.directory.querySelectorAll(".fentry");
+    Array.prototype.some.call(all, function (row) {
+      if (row.getAttribute("data-entry") !== path) return false;
+      row.focus({ preventScroll: true }); row.scrollIntoView({ block: "nearest", inline: "nearest" }); return true;
+    });
+  }
+  function renderColumns(focused) {
+    var box = ui.directory;
+    columnDirs().forEach(function (folder) {
+      var col = mk("div", "fcolumn"), listing = lists[folder], pending = columnLoads[folder];
+      col.setAttribute("data-column", folder); col.setAttribute("role", "listbox");
+      col.setAttribute("aria-label", folder || (info && (info.name || info.root)) || wsT("js.files.root.session"));
+      var entries = listing ? (listing.entries || []).filter(function (e) { return showsEntry(e, view); }) : [];
+      entries.forEach(function (e) { col.appendChild(directoryEntry(e, folder, true)); });
+      if (!listing) {
+        col.appendChild(mk("div", "fnote", wsT(pending && pending.gen === gen && pending.error ? "js.files.failed" : "js.files.loading")));
+        if (info && (!pending || pending.gen !== gen)) {
+          var request = { gen: gen }; columnLoads[folder] = request;
+          listDir(folder).then(function (a) {
+            if (request.gen !== gen) return;
+            lists[folder] = a;
+            if (viewMode === "column") renderDirectory();
+          }, function () {
+            if (request.gen !== gen) return;
+            request.error = true;
+            if (viewMode === "column") renderDirectory();
+          });
+        }
+      } else {
+        if (!entries.length) col.appendChild(mk("div", "fnote", wsT("js.files.empty")));
+        if (listing.more) col.appendChild(mk("div", "fnote", wsT("js.files.more")));
+      }
+      box.appendChild(col); col.scrollTop = +columnScroll[folder] || 0;
+      col.addEventListener("scroll", function () { if (shows(col)) { columnScroll[folder] = col.scrollTop; persistTabs(); } });
+    });
+    box.scrollTop = 0; box.scrollLeft = columnLeft;
+    if (focused != null) focusColumn(focused);
+  }
+  function columnKey(ev, row, choose) {
+    if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey || !/^Arrow(Up|Down|Left|Right)$/.test(ev.key)) return false;
+    ev.preventDefault();
+    var col = row.parentNode, all = Array.prototype.slice.call(col.querySelectorAll(".fentry")), i = all.indexOf(row), target;
+    if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
+      target = all[Math.max(0, Math.min(all.length - 1, i + (ev.key === "ArrowUp" ? -1 : 1)))];
+      if (target) { target.click(); focusColumn(target.getAttribute("data-entry")); }
+    } else {
+      var cols = Array.prototype.slice.call(ui.directory.querySelectorAll(".fcolumn")), next = cols[cols.indexOf(col) + (ev.key === "ArrowLeft" ? -1 : 1)];
+      if (next) {
+        target = next.querySelector('.fentry[aria-selected="true"]') || next.querySelector(".fentry");
+        if (target) focusColumn(target.getAttribute("data-entry"));
+      } else if (ev.key === "ArrowRight") choose();
+    }
+    return true;
   }
   function moveTo(path) {
     if (!rowEls[path]) return;
@@ -290,16 +558,17 @@
     rowEls[path].tabIndex = 0;
     rowEls[path].focus();
   }
-  function toggle(path) {
-    var g = gen;
-    if (open[path]) { delete open[path]; render(); return; }
+  function toggle(path, browse) {
+    var g = gen, navigation = browse ? ++navAttempt : navAttempt;
+    if (open[path]) { delete open[path]; render(); if (browse) navigate(path); return; }
     open[path] = true;
     render();
-    if (lists[path]) return;
+    if (lists[path]) { if (browse) navigate(path); return; }
     listDir(path).then(function (a) {
       if (g !== gen) return;
       lists[path] = a;
       render();
+      if (browse && navigation === navAttempt) navigate(path);
     }, function () {
       if (g !== gen) return;
       delete open[path];
@@ -319,10 +588,10 @@
   // focus.
   function activate(r) {
     if (!r || r.more) return;
-    if (opens(r.e)) { toggle(r.path); return; }
+    if (opens(r.e)) { toggle(r.path, true); return; }
     if (r.e.dir || r.e.gone || r.e.link) return;
     sel = r.path;
-    render();
+    render(); persistTabs(); notify("selection");
     preview(r.path);
   }
   function collapseAll() {
@@ -342,7 +611,9 @@
   // listed afresh when it opens next.
   function refresh() {
     if (!lists[""]) { loadRoot(); return; }
-    var g = gen, dirs = Object.keys(lists).filter(function (d) { return d === "" || open[d]; });
+    columnLoads = {};
+    var chain = viewMode === "column" ? columnDirs() : [];
+    var g = gen, dirs = Object.keys(lists).filter(function (d) { return d === "" || d === dir || open[d] || chain.indexOf(d) >= 0; });
     Object.keys(lists).forEach(function (d) { if (dirs.indexOf(d) < 0) delete lists[d]; });
     Promise.all(dirs.map(function (d) {
       return listDir(d).then(function (a) { return [d, a, null]; }, function (err) { return [d, null, err || {}]; });
@@ -353,11 +624,11 @@
         if (x[1]) { lists[x[0]] = x[1]; if (x[0] === "") info = x[1]; return; }
         if (x[2].status !== 404) return;
         if (x[0] === "") lost = true;
-        else { delete lists[x[0]]; delete open[x[0]]; }
+        else { delete lists[x[0]]; delete open[x[0]]; if (dir === x[0]) { dir = ""; sel = null; contentTop = 0; } }
       });
       if (lost) { lists = {}; loadRoot(); return; }
       Object.keys(open).forEach(function (p) { if (!present(p)) delete open[p]; });
-      Object.keys(lists).forEach(function (p) { if (!present(p)) delete lists[p]; });
+      Object.keys(lists).forEach(function (p) { if (p !== dir && !present(p)) delete lists[p]; });
       render();
     });
   }
@@ -371,6 +642,7 @@
       if (g !== gen) return;
       if (i >= chain.length) {
         sel = cur = path;
+        navigate(path);
         render();
         if (rowEls[path]) { rowEls[path].scrollIntoView({ block: "nearest" }); moveTo(path); }
         return;
@@ -491,6 +763,23 @@
     ui.q.setAttribute("aria-label", ui.q.placeholder);
     if (ui.q.value) search(true);
   }
+  // Search state stays live on its inner tab, never in another owner's
+  // browser record. Pending work is restarted on return, not reused across tabs.
+  function restoreSearch(s) {
+    caseOn = !!(s && s.caseOn); regexOn = !!(s && s.regexOn);
+    ui.caseBtn.setAttribute("aria-pressed", String(caseOn));
+    ui.regexBtn.setAttribute("aria-pressed", String(regexOn));
+    setMode(s && s.mode);
+    ui.q.value = s ? s.q : "";
+    searchResult = s && s.result;
+    if (!query().trim()) return;
+    if (!searchResult) { search(true); return; }
+    showHits();
+    if (mode === "name") drawNames(searchResult.items || []);
+    else drawMatches(searchResult);
+    hitsTop = s.scroll || 0;
+    ui.hits.scrollTop = hitsTop;
+  }
   function abort() {
     if (ctrl && ctrl.c) ctrl.c.abort();
     ctrl = null;
@@ -501,27 +790,36 @@
     if (shows(ui.hits)) hitsTop = ui.hits.scrollTop;
     ui.hits.hidden = true;
     ui.tree.hidden = false;
+    ui.workspace.hidden = false;
     ui.tree.scrollTop = treeTop;
   }
   function showHits() {
     if (!ui.hits.hidden) return;
     if (shows(ui.tree)) treeTop = ui.tree.scrollTop;
     ui.tree.hidden = true;
+    ui.workspace.hidden = true;
     ui.hits.hidden = false;
   }
   function clearSearch() {
     clearTimeout(timer);
     abort();
     ui.q.value = "";
+    searchResult = null;
     ui.hits.textContent = "";
     showTree();
+    hitsTop = 0;
   }
-  // search runs the search box's query after its debounce (now: at once).
-  // A newer query aborts the request of an older one; the results shown
-  // stay until the new ones are here. An empty query shows the tree again.
+  // Invalidate immediately, before debounce: even a fetch that ignores abort
+  // cannot repaint or leave actionable results for a superseded query/mode.
   function search(now) {
     clearTimeout(timer);
-    if (!query().trim()) { abort(); ui.hits.textContent = ""; showTree(); return; }
+    abort();
+    searchResult = null;
+    ui.hits.textContent = "";
+    hitsTop = 0;
+    if (!query().trim()) { showTree(); return; }
+    if (searchPaused) return;
+    showHits();
     timer = setTimeout(runSearch, now ? 0 : mode === "name" ? NAME_WAIT : TEXT_WAIT);
   }
   function runSearch() {
@@ -534,6 +832,7 @@
     p.then(function (a) {
       if (ctrl !== tok) return;
       ctrl = null;
+      searchResult = a;
       if (m === "name") drawNames(a.items || []);
       else drawMatches(a);
     }, function (err) {
@@ -559,6 +858,7 @@
     ui.hits.appendChild(frag);
     var first = ui.hits.querySelector(".hit");
     if (first) first.tabIndex = 0;
+    hitsTop = 0;
     ui.hits.scrollTop = 0;
   }
   function drawNames(items) {
@@ -619,7 +919,16 @@
     ui.viewBtn = iconBtn("sliders-horizontal", wsT("js.files.view"));
     [ui.rootBtn, ui.viewBtn].forEach(function (b) { b.setAttribute("aria-haspopup", "dialog"); b.setAttribute("aria-expanded", "false"); });
     [ui.rootBtn, ui.collapse, ui.refresh, ui.viewBtn].forEach(function (b) { head.appendChild(b); });
+    ui.openCard = iconBtn("external-link", wsT("js.files.open.card"));
+    ui.openCard.classList.add("fopen-card");
+    ui.openCard.addEventListener("click", function () { if (h.openCard) h.openCard(location()); else openCard(location()); });
+    head.appendChild(ui.openCard);
     el.appendChild(head);
+    ui.tabs = mk("div", "ftabs"); ui.tabs.setAttribute("role", "tablist");
+    ui.tabs.setAttribute("aria-label", wsT("js.files.tabs")); el.appendChild(ui.tabs);
+    var nav = mk("div", "fnav");
+    ui.up = iconBtn("chevron-up", wsT("js.files.up")); ui.up.addEventListener("click", function () { navigate(parentRel(dir)); });
+    ui.location = mk("span", "flocation"); nav.appendChild(ui.up); nav.appendChild(ui.location); el.appendChild(nav);
 
     var seg = mk("div", "fseg");
     seg.setAttribute("role", "group");
@@ -652,8 +961,20 @@
     ui.hits.setAttribute("role", "listbox");
     ui.hits.setAttribute("aria-label", wsT("js.files.results"));
     ui.hits.hidden = true;
-    el.appendChild(ui.tree);
-    el.appendChild(ui.hits);
+    var modes = mk("div", "fview-modes"); ui.modes = [];
+    viewModes.forEach(function (value) {
+      var labels = [wsT("js.files.view.details"), wsT("js.files.view.list"), wsT("js.files.view.icon"), wsT("js.files.view.gallery"), wsT("js.files.view.column")];
+      var label = labels[viewModes.indexOf(value)], b = mk("button", value === "column" ? "fview-column" : "", value === "column" ? "\u25a5" : label); b.type = "button";
+      if (value === "column") { b.title = label; b.setAttribute("aria-label", label); }
+      b.addEventListener("click", function () { viewMode = value; renderDirectory(); persistTabs(); });
+      modes.appendChild(b); ui.modes.push(b);
+    }); el.appendChild(modes);
+    ui.workspace = mk("div", "fworkspace");
+    ui.directory = mk("div", "fdirectory"); ui.directory.setAttribute("role", "listbox");
+    ui.directory.setAttribute("aria-label", wsT("js.files.directory"));
+    ui.workspace.appendChild(ui.tree); ui.workspace.appendChild(ui.directory);
+    el.appendChild(ui.workspace); el.appendChild(ui.hits);
+    ui.attachment = mk("div", "fattachment"); el.appendChild(ui.attachment);
 
     ui.viewPop = mk("div", "fpop");
     ui.viewPop.setAttribute("role", "dialog");
@@ -784,7 +1105,17 @@
       e.preventDefault();
       if (to) moveTo(to.path);
     });
-    ui.tree.addEventListener("scroll", function () { if (shows(ui.tree)) treeTop = ui.tree.scrollTop; });
+    ui.tree.addEventListener("scroll", function () { if (info && shows(ui.tree)) { treeTop = ui.tree.scrollTop; persistTabs(); } });
+    ui.directory.addEventListener("scroll", function () {
+      if (!info || !lists[dir] || !shows(ui.directory)) return;
+      if (viewMode === "column") columnLeft = ui.directory.scrollLeft;
+      else contentTop = ui.directory.scrollTop;
+      persistTabs();
+    });
+    ui.tree.addEventListener("auxclick", function (e) {
+      var d = e.target.closest && e.target.closest(".fr[data-path]"), r = d && rowOf(d.getAttribute("data-path"));
+      if (e.button === 1 && r && opens(r.e)) { e.preventDefault(); newTab({ root: rootAbs, dir: r.path, view: viewMode }, true); }
+    });
 
     // the results: a click, and the keys
     ui.hits.addEventListener("click", function (e) {
@@ -808,8 +1139,8 @@
     // "/" focuses the search box while the pane shows; a click elsewhere,
     // a scroll, a resize, or leaving the window closes a menu or popover.
     listen(doc, "keydown", function (e) {
-      var pane = e.target.closest && e.target.closest(".fpane"), sheet = doc.querySelector(".fpane[data-max]");
-      if ((pane && pane !== el) || (sheet && sheet !== el)) return;
+      var pane = e.target.closest && e.target.closest(".fpane"), sheet = doc.querySelector(".bcard[data-max] .fpane, .fpane[data-max]");
+      if ((pane && pane !== el) || (sheet && sheet !== el) || (!pane && !sheet)) return;
       if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || editable(e.target) || !shows(el)) return;
       e.preventDefault();
       closeMenu(false);
@@ -830,35 +1161,58 @@
   wire();
   setMode("name");
   paintHead();
-  return {
+  api = {
+    location: location,
+    selection: selection,
+    navigate: navigate,
+    newTab: newTab,
+    setAttachment: setAttachment,
+    on: function (type, fn) {
+      if (!subscribers[type]) return function () {};
+      subscribers[type].push(fn);
+      return function () { subscribers[type] = subscribers[type].filter(function (f) { return f !== fn; }); };
+    },
     // shown is called each time the pane comes into view: the first time
     // it loads the root (a changed root kept for the session, if this
     // browser may use one), later it restores the scroll and refreshes.
     shown: function () {
       if (destroyed) return;
+      searchPaused = false;
       paintHead();
       if (!started) {
         started = true;
-        rootAbs = local() ? load(ROOT_KEY + rid) || "" : "";
-        loadRoot();
+        var stored = null;
+        try { stored = JSON.parse(load(TABS_KEY + rid) || "null"); } catch (e) { /* legacy root/View records still load */ }
+        if (stored && Array.isArray(stored.tabs) && stored.tabs.length) {
+          stored.tabs.forEach(function (s) { newTab(s || {}, true); });
+          switchTab(Math.max(0, Math.min(tabs.length - 1, Math.floor(+stored.active) || 0)));
+        } else newTab(h.location || { root: local() ? load(ROOT_KEY + rid) || "" : "", dir: "" });
         return;
       }
       if (!ui.tree.hidden) ui.tree.scrollTop = treeTop;
       else ui.hits.scrollTop = hitsTop;
+      if (query().trim() && !searchResult) search(true);
       refresh();
     },
-    // hidden is called when the pane leaves the view: an open menu or
-    // popover closes.
+    // Leaving a window pauses only its own search; returning restarts any
+    // unfinished query. Other visible explorers keep their requests.
     hidden: function () {
       if (destroyed) return;
+      searchPaused = true;
+      clearTimeout(timer);
+      abort();
       closeMenu(false);
       closePop(false);
+      persistTabs();
     },
     // The owner calls destroy before discarding its pane. Late list/root
     // responses are invalidated; search and global handlers are retired.
     destroy: function () {
       if (destroyed) return;
+      persistTabs();
       destroyed = true;
+      if (detachAttachment) detachAttachment();
+      subscribers = { selection: [], navigation: [] };
       gen++;
       rootAttempt++;
       clearTimeout(timer);
@@ -871,11 +1225,41 @@
       el.textContent = "";
     }
   };
+  setAttachment(h.attachment);
+  return api;
   }
 
-  // Options: rid, guarded load/save, session post, toast/copy, local
-  // (whether this browser is on the daemon's machine), optional rootSlot.
-  // Persistence isolation belongs to the owner's load/save adapter; the
-  // existing root and bounded View record shapes remain unchanged.
-  window.WsFiles = { create: create };
+  function openCard(location) {
+    var c = cards.open("explorer", location || {});
+    if (c) c.show();
+    return c;
+  }
+  if (cards.register) cards.register("explorer", {
+    base: 480,
+    open: function (c) {
+      var hooks = cardHooks, key = "ws.dashboard.explorer." + (hooks.rid || "") + "." + c.id, record = {};
+      try { record = JSON.parse(hooks.load && hooks.load(key) || "{}"); } catch (e) { /* a bad browser record starts clean */ }
+      if (!record || typeof record !== "object") record = {};
+      var pane = doc.createElement("section"); pane.className = "fpane fcard"; c.body.appendChild(pane);
+      c.title({ icon: "folder-open", name: wsT("js.board.toolbar.files") });
+      c.explorerKey = key;
+      c.clearExplorerState = function () { if (hooks.save) hooks.save(key, null); };
+      c.explorer = create(pane, Object.assign({}, hooks, { location: c.data,
+        load: function (k) { return record[k]; },
+        save: function (k, v) { if (v == null) delete record[k]; else record[k] = v; if (hooks.save) hooks.save(key, JSON.stringify(record)); },
+        onNavigate: function (s) { if (s) c.title({ icon: "folder-open", name: wsT("js.board.toolbar.files"), sub: c.explorer.location().dir || s.root }); }
+      }));
+      c.actions([{ icon: "external-link", cls: "bc-float", title: wsT("js.files.float"), run: function () { cards.float(c); } }]);
+      c.explorer.shown();
+    },
+    close: function (c) { c.explorer.destroy(); c.clearExplorerState(); }
+  });
+
+  // Each owner's load/save adapter isolates root, View and tabs records.
+  // Options also include location {root,dir}, send(path), openCard(location),
+  // onSelection/onNavigate(payload, api), and attachment(slot, api) -> disposer.
+  // on(type, listener) returns an unsubscribe; selection/navigation carry
+  // {root,session,path,absolute}. setAttachment replaces/disposes the slot.
+  // Existing root and bounded View records remain readable.
+  window.WsFiles = { create: create, setup: function (hooks) { cardHooks = hooks || {}; }, open: openCard };
 })();

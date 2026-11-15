@@ -420,32 +420,42 @@ func TestLANTokenSurvivesARestartAndRotatesWhenDeleted(t *testing.T) {
 	}
 }
 
-// TestIndexShowsTheLANTokenToALocalViewerOnly: the index page shows the
-// LAN addresses with the token to a browser on this machine, never to a LAN
-// browser, and not at all in localhost mode.
-func TestIndexShowsTheLANTokenToALocalViewerOnly(t *testing.T) {
+// Settings discloses the existing LAN addresses only in a local shell,
+// outside shared regions. Framed pages and every stream carry no token.
+func TestSettingsShowsTheLANTokenToALocalViewerOnly(t *testing.T) {
 	f := startPageFixture(t, lanMode)
 	token := readLANToken(t, f.dir)
 	port := strconv.Itoa(f.d.Endpoint().Port)
-	local := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "localhost:" + port}, http.MethodGet, "/?frame=1", "")
-	if local.Code != http.StatusOK || !strings.Contains(local.Body.String(), `class="lanbox"`) || !strings.Contains(local.Body.String(), ":"+port+"/?token="+token) {
-		t.Fatalf("local viewer's index (%d) lacks the token address:\n%.2000s", local.Code, local.Body.String())
+	for _, path := range []string{"/", "/s/livesession", "/s/boardsession"} {
+		local := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "localhost:" + port}, http.MethodGet, path, "")
+		body := local.Body.String()
+		if local.Code != http.StatusOK || !strings.Contains(body, `class="lanbox"`) || !strings.Contains(body, ":"+port+"/?token="+token) {
+			t.Fatalf("local Settings at %s (%d) lacks the token address", path, local.Code)
+		}
+		assertSettingsOwner(t, body, true)
+		if strings.Index(body, `class="lanbox"`) < strings.Index(body, `id="gmenu"`) {
+			t.Error("LAN block is not in Settings")
+		}
+		remote := serve(f.d, viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: token}, http.MethodGet, path, "")
+		if remote.Code != http.StatusOK || strings.Contains(remote.Body.String(), token) || strings.Contains(remote.Body.String(), `class="lanbox"`) {
+			t.Fatalf("LAN viewer's Settings at %s (%d) discloses the token", path, remote.Code)
+		}
 	}
-	remote := serve(f.d, viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port, cookie: token}, http.MethodGet, "/?frame=1", "")
-	if remote.Code != http.StatusOK || strings.Contains(remote.Body.String(), token) || strings.Contains(remote.Body.String(), `class="lanbox"`) {
-		t.Fatalf("LAN viewer's index (%d) shows the token", remote.Code)
-	}
-	// The shell, the session page, and the index stream show no token
-	// either.
-	for _, path := range []string{"/", "/s/livesession", "/events"} {
+	for _, path := range []string{"/?frame=1", "/s/livesession?frame=1", "/events", railEventsRoute, "/s/livesession/events", "/s/livesession/events?frame=1"} {
 		if rec := serve(f.d, viewer{peer: "127.0.0.1:50000", host: "localhost:" + port}, http.MethodGet, path, ""); strings.Contains(rec.Body.String(), token) {
 			t.Errorf("%s carries the token", path)
 		}
 	}
 
 	off := startPageFixture(t)
-	if _, page := get(t, off.base+"/?frame=1"); strings.Contains(page, `class="lanbox"`) {
-		t.Fatal("localhost mode shows a LAN block")
+	for _, path := range []string{"/", "/?frame=1", "/s/livesession"} {
+		if _, page := get(t, off.base+path); strings.Contains(page, `class="lanbox"`) {
+			t.Fatal("localhost mode shows a LAN block")
+		}
+	}
+	unauthorized := serve(f.d, viewer{peer: "192.168.7.30:50000", host: "192.168.7.20:" + port}, http.MethodGet, "/", "")
+	if !refusedByGuard(unauthorized) || !strings.Contains(unauthorized.Body.String(), "open Settings") || strings.Contains(unauthorized.Body.String(), token) {
+		t.Fatal("unauthorized guidance must point to Settings without disclosing a token")
 	}
 	if _, err := os.Stat(filepath.Join(off.dir, LANTokenFileName)); !os.IsNotExist(err) {
 		t.Fatalf("localhost mode wrote a LAN token: %v", err)

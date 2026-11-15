@@ -94,6 +94,9 @@ func TestBoardStateFilterBrowser(t *testing.T) {
 	temp := func() string { dir := t.TempDir(); dirs = append(dirs, dir); return dir }
 	t.Setenv("WS_CACHE_HOME", temp())
 	t.Setenv("WS_CONFIG_HOME", temp())
+	// The production usage store consults HOME; an empty owned home prevents
+	// browser /rail/usage requests from probing installed provider credentials.
+	t.Setenv("HOME", temp())
 	t.Setenv("WS_MCP_DASHBOARD_DEV_SOURCE", "")
 	f := &pageFixture{dir: temp(), project: temp(), src: newPageFake()}
 	if err := os.Mkdir(filepath.Join(f.project, ".git"), 0o700); err != nil {
