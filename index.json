@@ -770,6 +770,9 @@
     "261115-bug-ws-worktree-pool-protected-deliverable-reuse": {
       "registered_at": "2026-11-14T23:49:42Z"
     },
+    "261115-feat-werkschaft-electron-shell": {
+      "registered_at": "2026-11-15T01:09:25Z"
+    },
     "261115-feat-ws-dashboard-conversation-rendering-consolidation": {
       "registered_at": "2026-11-14T22:47:31Z"
     },
