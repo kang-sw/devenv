@@ -85,16 +85,3 @@ func TestParseAnswerBlockFallsBackOnMalformed(t *testing.T) {
 		}
 	}
 }
-
-func TestMergeLaysTopicNotesOver(t *testing.T) {
-	base := Entry{Topics: []TopicNote{{Topic: "a", Note: "1"}, {Topic: "b", Note: "2"}}}
-	add := Entry{Topics: []TopicNote{{Topic: "b", Note: "3"}, {Topic: "c", Note: "4"}}}
-	got := Merge(base, add).Topics
-	want := []TopicNote{{Topic: "a", Note: "1"}, {Topic: "b", Note: "3"}, {Topic: "c", Note: "4"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("merged topics = %+v, want %+v", got, want)
-	}
-	if got := Merge(Entry{Parts: []string{"x"}}, Entry{Parts: []string{"y"}}).Topics; got != nil {
-		t.Fatalf("no topic notes merged to %+v", got)
-	}
-}

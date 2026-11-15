@@ -228,6 +228,7 @@ details[open] > .ahead .am > .i { transform: rotate(180deg); }
 .aline { display: contents; }
 .ahead .astat { flex: none; display: inline-flex; gap: 7px; align-items: center; font-size: 11px; color: var(--wb-muted-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ahead .astat .amodel { font-family: var(--wb-mono); font-size: 10.5px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.ahead .astat .aeff { font-weight: 600; }
 .ahead .astat .atps { color: var(--wb-primary); font-weight: 700; }
 @container atree (max-width: 559px) {
   .ahead:has(> .aline) { flex-wrap: wrap; row-gap: 0; }
@@ -235,7 +236,7 @@ details[open] > .ahead .am > .i { transform: rotate(180deg); }
   .ahead > .astat { order: 1; flex: 0 0 100%; min-width: 0; padding: 0 0 2px 22px; gap: 0; overflow: hidden; }
   .ahead > .astat > span + span::before { content: "\00b7"; margin: 0 6px; opacity: .7; }
   .ahead > .astat .amodel { flex: 0 1 auto; min-width: 0; max-width: none; }
-  .ahead > .astat .actx, .ahead > .astat .atps { flex: none; }
+  .ahead > .astat .aeff, .ahead > .astat .actx, .ahead > .astat .atps { flex: none; }
 }
 .ahead .ldet { flex: 1 1 0; min-width: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ahead .ldet .tn { font-family: var(--wb-mono); font-weight: 700; font-size: 11.5px; }
@@ -929,14 +930,19 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
 .ctabs button[aria-pressed="true"] { color: var(--wb-fg); border-bottom-color: var(--wb-primary); }
 .ctabs button:focus-visible { outline: 1.5px solid var(--wb-primary); outline-offset: -2px; }
 .fpane { position: relative; flex-direction: column; min-height: 0; background: var(--wb-card); border-radius: var(--wb-radius); box-shadow: var(--wb-shadow); overflow: hidden; font-size: 12.5px; }
-/* The toolbar borrows the same explorer as the Files tab, in place, and
-   shares the card sheet's scrim. Keep its toggle and row menu reachable. */
-.dgrid.live > .fpane[data-max] { display: flex; position: fixed; z-index: var(--z-modal); top: var(--files-top, 52px); left: 16px; right: 16px; bottom: 12px; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
+/* The independent toolbar explorer shares the card sheet's scrim.
+   Keep its toggle and row menu reachable. */
+.fpane[data-max] { display: flex; position: fixed; z-index: var(--z-modal); top: var(--files-top, 52px); left: 16px; right: 16px; bottom: 12px; border-radius: var(--wb-radius); box-shadow: var(--wb-shadow-hi); }
+/* The old sheet removed the tab pane and its label from their slots.
+   Conceal their paint under the scrim without disturbing the new owner's
+   layout or state; otherwise the tab shadow protrudes beside the sheet. */
+body:has(.fpane[data-max]) .dgrid.live > .fpane,
+body:has(.fpane[data-max]) .chead .fsum .froot { visibility: hidden; }
 .board-toolbar[data-files] { z-index: calc(var(--z-modal) + 1); }
 .board-toolbar[data-files] .board-toolbar-face { pointer-events: none; }
 .board-toolbar[data-files] .board-files { pointer-events: auto; }
 body:has(.fpane[data-max]) > .fmenu { z-index: calc(var(--z-modal) + 2); }
-@media (max-width: 640px) { .dgrid.live > .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }
+@media (max-width: 640px) { .fpane[data-max] { left: 8px; right: 8px; bottom: 8px; } }
 .fpane .fi { display: inline-flex; flex: none; color: var(--wb-muted-fg); }
 .fhd { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--wb-line); min-width: 0; }
 .froot { flex: 1; min-width: 0; font: 700 12px var(--wb-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

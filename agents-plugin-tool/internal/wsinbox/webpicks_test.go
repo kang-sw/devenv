@@ -239,23 +239,8 @@ func TestWebElementsOnlyMessagesAndCommands(t *testing.T) {
 	}
 }
 
-// TestMergeAppendsWebElements: a later send's picks and console blocks follow
-// the held ones, in order.
-func TestMergeAppendsWebElements(t *testing.T) {
-	a, b := Pick{URL: "u", Selector: "#a"}, Pick{URL: "u", Selector: "#b"}
-	x, y := Console{URL: "u", Lines: []string{"x"}}, Console{URL: "v", Lines: []string{"y"}}
-	got := Merge(Entry{Picks: []Pick{a}, Consoles: []Console{x}}, Entry{Picks: []Pick{a, b}, Consoles: []Console{y}})
-	if !reflect.DeepEqual(got.Picks, []Pick{a, a, b}) || !reflect.DeepEqual(got.Consoles, []Console{x, y}) {
-		t.Fatalf("merged = %+v, %+v", got.Picks, got.Consoles)
-	}
-	got = Merge(Entry{Parts: []string{"x"}}, Entry{Parts: []string{"y"}})
-	if got.Picks != nil || got.Consoles != nil {
-		t.Fatalf("none merged to %+v, %+v", got.Picks, got.Consoles)
-	}
-}
-
 // TestWebElementsSurviveInboxLifecycle: picks and console blocks persist on
-// disk through a send, a merge, a read, a cancel, and a drain, and the
+// disk through a send, a read, a cancel, and a drain, and the
 // delivered text parses back to them.
 func TestWebElementsSurviveInboxLifecycle(t *testing.T) {
 	dir := Dir(t.TempDir())
@@ -264,12 +249,9 @@ func TestWebElementsSurviveInboxLifecycle(t *testing.T) {
 	c1 := Console{URL: "http://localhost:1/", Lines: []string{"e1", "e2"}}
 	c2 := Console{URL: "http://localhost:2/", Lines: []string{"e3"}}
 	now := time.Now()
-	if _, _, err := Send(dir, Entry{Picks: []Pick{p1}, Consoles: []Console{c1}}, now); err != nil {
+	name, _, err := Send(dir, Entry{Parts: []string{"look"}, Picks: []Pick{p1, p2}, Consoles: []Console{c1, c2}}, now)
+	if err != nil {
 		t.Fatal(err)
-	}
-	name, merged, err := Send(dir, Entry{Parts: []string{"look"}, Picks: []Pick{p2}, Consoles: []Console{c2}}, now.Add(time.Millisecond))
-	if err != nil || !merged {
-		t.Fatalf("merge = %v, %v", merged, err)
 	}
 	wantP, wantC := []Pick{p1, p2}, []Console{c1, c2}
 	held, err := Held(dir)

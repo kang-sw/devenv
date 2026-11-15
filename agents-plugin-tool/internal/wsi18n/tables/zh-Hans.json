@@ -1,6 +1,7 @@
 {
   "agent.context": "上下文：{0} token",
   "agent.done": "已完成",
+  "agent.effort": "推理力度：{0}",
   "agent.failed": "失败",
   "agent.model": "模型：{0}",
   "agent.name": "智能体 {0}",
@@ -1387,7 +1388,6 @@
   "js.wb.copy": "复制",
   "js.wb.copy.done": "已复制",
   "js.wb.copy.wrap": "自动换行",
-  "js.wb.stream.run": "日志 {0} 行 · {1}",
   "js.wb.stream.system": "系统事件 {0} 个 · {1}",
   "js.wb.tag.announced": "默认值告知 — 答案唯一，由现有约束、先前决定或项目惯例决定；确认即可。",
   "js.wb.tag.policy": "方针问题 — 取决于你的偏好、优先级或产品方向；请选择一个选项。",

@@ -196,3 +196,31 @@ check("a replaced note's image is named in the composer", [ctext.value, note5.va
 process.stdout.write(bad.join("\n"));
 `)
 }
+
+// TestRestoreHeldKeepsTheNewestSendsAnswer: an interrupt answers its held
+// messages in queue order, a promoted older send first; when two of them
+// answer one board item, the restore keeps the newest send's answer (by
+// sentAt), a later message winning a tie, while the texts keep queue order.
+func TestRestoreHeldKeepsTheNewestSendsAnswer(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/dashboard.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(data)
+	section := regexp.MustCompile(`(?s)\n  // --- composer images -.*?\n  // --- composer file mentions`).FindString(js)
+	if section == "" {
+		t.Fatal("dashboard.js holds no composer images section before the file mentions one")
+	}
+	restore := composerFunc(t, js, "restoreHeld") + composerFunc(t, js, "restoreHeldNow")
+	runNode(t, "restore keeps the newest answer", noteImagesDOM+section+restore+`
+restoreHeld([
+  { text: "promoted", sentAt: 100, chips: [{ id: "7", answer: "a" }, { id: "8", answer: "x" }] },
+  { text: "newer", sentAt: 200, chips: [{ id: "7", answer: "b" }] },
+  { text: "tie", sentAt: 200, chips: [{ id: "8", answer: "y" }] },
+  { text: "oldest", sentAt: 50, chips: [{ id: "8", answer: "z" }] }
+]);
+check("texts in queue order", ctext.value, "promoted\n\nnewer\n\ntie\n\noldest");
+check("newest answers", [chips["7"].answer, chips["8"].answer], ["b", "y"]);
+process.stdout.write(bad.join("\n"));
+`)
+}

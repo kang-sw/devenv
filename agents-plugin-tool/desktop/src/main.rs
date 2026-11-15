@@ -18,6 +18,16 @@ use tauri::{
 };
 use url::Url;
 
+// The dashboard keys its desktop-only link behavior (a plain click on a file
+// link opens its menu, Cmd/Ctrl+click previews) on the "Werkschaft/" token.
+// A custom agent replaces WKWebView's default rather than extending it, so
+// the macOS default (frozen by WebKit at 10_15_7) stays ahead of the token.
+// Only a name, never a credential or native capability.
+const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Werkschaft/",
+    env!("CARGO_PKG_VERSION")
+);
+
 #[derive(Default)]
 struct Connection {
     dashboard: Mutex<Option<Url>>,
@@ -103,6 +113,7 @@ fn main() {
             let popup_app = app.handle().clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Werkschaft — Connecting…")
+                .user_agent(USER_AGENT)
                 .inner_size(1280.0, 860.0)
                 .min_inner_size(760.0, 520.0)
                 .on_navigation(move |url| {
@@ -149,6 +160,15 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn user_agent_carries_the_dashboard_desktop_token() {
+        // The dashboard tests /\bWerkschaft\// against navigator.userAgent.
+        let token = format!(" Werkschaft/{}", env!("CARGO_PKG_VERSION"));
+        assert!(super::USER_AGENT.ends_with(&token));
+        assert!(super::USER_AGENT.starts_with("Mozilla/5.0 (Macintosh;"));
+        assert!(super::USER_AGENT.contains("AppleWebKit/"));
+    }
+
     #[test]
     fn configuration_grants_no_local_or_remote_native_permissions() {
         let config: serde_json::Value =

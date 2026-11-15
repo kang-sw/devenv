@@ -1,6 +1,7 @@
 {
   "agent.context": "上下文：{0} token",
   "agent.done": "已完成",
+  "agent.effort": "推理力度：{0}",
   "agent.failed": "失敗",
   "agent.model": "模型：{0}",
   "agent.name": "代理程式 {0}",
@@ -1387,7 +1388,6 @@
   "js.wb.copy": "複製",
   "js.wb.copy.done": "已複製",
   "js.wb.copy.wrap": "自動換行",
-  "js.wb.stream.run": "日誌 {0} 行 · {1}",
   "js.wb.stream.system": "系統事件 {0} 個 · {1}",
   "js.wb.tag.announced": "預設值告知 — 答案唯一，由既有限制、先前決定或專案慣例決定；確認即可。",
   "js.wb.tag.policy": "方針問題 — 取決於你的偏好、優先順序或產品方向；請選擇一個選項。",
