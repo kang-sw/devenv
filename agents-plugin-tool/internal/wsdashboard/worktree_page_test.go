@@ -197,6 +197,21 @@ func TestExplorerNarrowTreeHomeAndPanelWidthBrowser(t *testing.T) {
 	}
 }
 
+func TestExplorerTabRowAndFloatWidthBrowser(t *testing.T) {
+	if os.Getenv("WS_PLAYWRIGHT_MODULE") == "" {
+		t.Skip("set WS_PLAYWRIGHT_MODULE to run Chromium acceptance")
+	}
+	f, root, _ := worktreePageFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", "testdata/explorer-tabrow-float.browser.cjs", f.base, worktreePagePath(root))
+	out, err := cmd.CombinedOutput()
+	t.Log(string(out))
+	if err != nil {
+		t.Fatalf("explorer tab row and floating width acceptance: %v", err)
+	}
+}
+
 // This is also the visual acceptance fixture: only disposable directories,
 // holder processes and ports are used. Screenshots stay outside the repository.
 func TestWorktreePageBrowser(t *testing.T) {
