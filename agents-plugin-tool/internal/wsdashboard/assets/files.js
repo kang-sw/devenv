@@ -96,7 +96,8 @@
   var el = node, h = options || {}, rid = h.rid || doc.documentElement.getAttribute("data-rid") || "";
   var directoriesOnly = !!h.directoriesOnly, routeBase = h.routeBase || "/s/" + rid + "/", rootPending = false;
   var gen = 0, rootAttempt = 0, previewAttempt = 0, started = false, destroyed = false, listeners = [];
-  var lists = {}, open = {}, sel = null, cur = null, info = null, rootAbs = "";
+  var lists = {}, open = {}, sel = null, sels = [], anchor = null, cur = null, info = null, rootAbs = "";
+  var marquee = null, skipEmptyClick = false;
   var view = { ign: false, dot: false }, rows = [], rowEls = {};
   var mode = "name", caseOn = false, regexOn = false, timer = null, ctrl = null, searchResult = null, searchPaused = false;
   var treeTop = 0, hitsTop = 0, pop = null, popFrom = null, menu = null, menuFrom = null;
@@ -137,7 +138,7 @@
     if (!tabs[active]) return;
     tabs[active].state = { root: rootAbs, dir: dir, selection: sel, scroll: contentTop, treeScroll: treeTop, view: viewMode,
       columnLeft: columnLeft, columnScroll: Object.assign({}, columnScroll) };
-    tabs[active].live = { lists: lists, open: open, cur: cur, info: info,
+    tabs[active].live = { lists: lists, open: open, cur: cur, info: info, sels: sels.slice(), anchor: anchor,
       search: { q: ui.q.value, mode: mode, caseOn: caseOn, regexOn: regexOn, result: searchResult, scroll: hitsTop } };
   }
   function persistTabs() {
@@ -187,7 +188,8 @@
     clearSearch(); closeMenu(false); closePop(false);
     active = index;
     var t = tabs[active], s = t.state, live = t.live;
-    rootAbs = s.root; dir = s.dir; sel = s.selection; cur = sel;
+    rootAbs = s.root; dir = s.dir; resetSelection(s.selection); cur = sel;
+    if (live && live.sels) { sels = live.sels.slice(); anchor = live.anchor; }
     contentTop = s.scroll; treeTop = s.treeScroll; viewMode = s.view;
     columnLeft = s.columnLeft; columnScroll = Object.assign({}, s.columnScroll);
     ui.tree.scrollTop = treeTop;
@@ -214,23 +216,61 @@
   function location() { return { root: rootAbs, dir: dir }; }
   function selection() {
     if (!info || (directoriesOnly && rootPending)) return null;
-    var p = sel === null ? dir : sel, sep = info.sep || "/";
+    var p = sel === null ? dir : sel;
     if (directoriesOnly) {
       var parent = lists[parentRel(p)];
       if (!lists[dir] || (p !== dir && !(parent && parent.entries.some(function (e) { return joinRel(parentRel(p), e.name) === p && opens(e); })))) return null;
     }
+    return entrySelection(p);
+  }
+  function entrySelection(p) {
+    var sep = info.sep || "/";
     return { root: info.root, session: !!info.session, path: p || ".", absolute: p ? absPath(info.abs || info.root, sep, p.split("/").join(sep)) : info.abs || info.root };
   }
+  function resetSelection(path) {
+    sel = path == null ? null : path;
+    sels = sel === null ? [] : [sel]; anchor = sel;
+  }
+  function visiblePaths() {
+    return ((lists[dir] && lists[dir].entries) || []).filter(function (e) { return showsEntry(e, view); })
+      .map(function (e) { return joinRel(dir, e.name); });
+  }
+  // Batch actions follow displayed order; the public selection stays primary.
+  function selections() {
+    if (!info) return [];
+    if (viewMode === "column" || directoriesOnly) return selection() ? [selection()] : [];
+    var paths = visiblePaths().filter(function (p) { return sels.indexOf(p) >= 0; });
+    return paths.length ? paths.map(entrySelection) : sel === null && selection() ? [selection()] : [];
+  }
+  function sendSelections(values) {
+    if (h.send) values.forEach(function (s) { h.send(s.session ? s.path : s.absolute); });
+  }
+  function paintSelection() {
+    Array.prototype.forEach.call(ui.directory.querySelectorAll(".fentry"), function (n) {
+      var path = n.getAttribute("data-entry"), on = sels.indexOf(path) >= 0 || !!(viewMode === "column" && (dir === path || dir.indexOf(path + "/") === 0));
+      n.classList.toggle("sel", on); n.setAttribute("aria-selected", String(on));
+    });
+    Object.keys(rowEls).forEach(function (path) {
+      rowEls[path].classList.toggle("sel", path === sel); rowEls[path].setAttribute("aria-selected", String(path === sel));
+    });
+  }
+  function selectPaths(paths, primary) {
+    sels = paths;
+    sel = primary != null ? primary : paths.length ? paths[paths.length - 1] : null;
+    paintSelection(); persistTabs(); notify("selection");
+  }
+  function clearSelection() { anchor = null; selectPaths([], null); }
   function notify(type) {
-    var value = selection();
-    if (ui.send) ui.send.disabled = !value || !h.send;
-    if (ui.copy) ui.copy.disabled = !value || !h.copy;
+    var value = selection(), values = selections();
+    if (ui.send) ui.send.disabled = !values.length || !h.send;
+    if (ui.copy) ui.copy.disabled = !values.length || !h.copy;
     ui.selected.textContent = "";
-    ui.selected.title = value ? value.absolute : "";
-    if (value) {
+    ui.selected.title = values.map(function (s) { return s.absolute; }).join("\n");
+    if (values.length > 1) ui.selected.textContent = wsT("js.files.selected.count", values.length);
+    else if (values.length) {
       ui.selected.appendChild(mk("span", "", wsT("js.files.selected") + " "));
-      ui.selected.appendChild(mk("b", "", value.path.split("/").pop()));
-      ui.selected.appendChild(mk("span", "", "  " + value.path));
+      ui.selected.appendChild(mk("b", "", values[0].path.split("/").pop()));
+      ui.selected.appendChild(mk("span", "", "  " + values[0].path));
     }
     if (!value && !directoriesOnly) return;
     subscribers[type].slice().forEach(function (fn) { fn(value, api); });
@@ -245,8 +285,8 @@
     ui.send.innerHTML = licon("paperclip"); ui.send.appendChild(mk("span", "", wsT("js.files.send")));
     ui.copy.innerHTML = licon("copy"); ui.copy.appendChild(mk("span", "", wsT("js.files.copy")));
     [ui.send, ui.copy].forEach(function (b) { b.type = "button"; ui.attachment.appendChild(b); });
-    ui.send.addEventListener("click", function () { var s = selection(); if (s && h.send) h.send(s.session ? s.path : s.absolute); });
-    ui.copy.addEventListener("click", function () { var s = selection(); if (s && h.copy) h.copy(s.session ? s.path : s.absolute); });
+    ui.send.addEventListener("click", function () { sendSelections(selections()); });
+    ui.copy.addEventListener("click", function () { if (h.copy) h.copy(selections().map(function (s) { return s.session ? s.path : s.absolute; }).join("\n")); });
     notify("selection");
   }
   function history() { return tabs[active] && tabs[active].history; }
@@ -288,7 +328,7 @@
           hist.paths.push(path); hist.index++;
         }
       }
-      lists[path] = a; dir = path; sel = cur = selected == null ? null : selected; contentTop = 0;
+      lists[path] = a; dir = path; resetSelection(selected); cur = sel; contentTop = 0;
       expandAncestors(); render();
       if (viewMode === "column" && focusPath != null) {
         focusColumn(focusPath);
@@ -407,7 +447,7 @@
     if (pop === ui.rootPop) paintRootChoices();
     lists = { "": a };
     open = {};
-    sel = cur = null;
+    resetSelection(null); cur = null;
     treeTop = 0; dir = ""; contentTop = 0;
     if (!restore) resetHistory();
     columnLeft = saved ? saved.columnLeft : 0; columnScroll = saved ? saved.columnScroll : {}; ancestorLoads = {};
@@ -421,15 +461,15 @@
     }
     if (saved && saved.dir) {
       var g = gen, attempt = navAttempt;
-      dir = saved.dir; sel = saved.selection; contentTop = saved.scroll; treeTop = saved.treeScroll;
+      dir = saved.dir; resetSelection(saved.selection); contentTop = saved.scroll; treeTop = saved.treeScroll;
       paintHead();
       listDir(saved.dir).then(function (listing) {
         if (g !== gen || attempt !== navAttempt) return;
-        lists[saved.dir] = listing; dir = saved.dir; sel = saved.selection; contentTop = saved.scroll; treeTop = saved.treeScroll;
+        lists[saved.dir] = listing; dir = saved.dir; resetSelection(saved.selection); contentTop = saved.scroll; treeTop = saved.treeScroll;
         ui.tree.scrollTop = treeTop; expandAncestors(); render(); complete();
-      }, function () { if (g === gen && attempt === navAttempt) { dir = ""; sel = null; render(); complete(); } });
+      }, function () { if (g === gen && attempt === navAttempt) { dir = ""; resetSelection(null); render(); complete(); } });
     } else {
-      if (saved) { sel = saved.selection; contentTop = saved.scroll; treeTop = saved.treeScroll; ui.tree.scrollTop = treeTop; render(); }
+      if (saved) { resetSelection(saved.selection); contentTop = saved.scroll; treeTop = saved.treeScroll; ui.tree.scrollTop = treeTop; render(); }
       complete();
     }
     if (input().value) search(true);
@@ -445,7 +485,7 @@
         rootAbs = "";
         save(ROOT_KEY + rid, null);
         toast(wsT("js.files.root.dropped"));
-        dir = ""; sel = null;
+        dir = ""; resetSelection(null);
         loadRoot();
         return;
       }
@@ -531,7 +571,7 @@
     // The side tree navigates folders; files belong to the directory pane.
     rows = info ? flatRows(lists, open, view).filter(function (r) { return r.more || r.e.dir; }) : [];
     var nav = navRows();
-    if (sel !== null && sel !== dir && !rowOf(sel) && !(lists[dir] && (lists[dir].entries || []).some(function (e) { return joinRel(dir, e.name) === sel; }))) sel = null;
+    if (sel !== null && sel !== dir && !rowOf(sel) && !(lists[dir] && (lists[dir].entries || []).some(function (e) { return joinRel(dir, e.name) === sel; }))) resetSelection(null);
     if (cur === null || !rowOf(cur)) cur = sel !== null && rowOf(sel) ? sel : nav.length ? nav[0].path : null;
     var frag = doc.createDocumentFragment();
     frag.appendChild(ui.treeHead);
@@ -551,12 +591,19 @@
   function renderDirectory() {
     var top = contentTop, listing = lists[dir], box = ui.directory;
     var focused = box.contains(doc.activeElement) ? doc.activeElement.getAttribute("data-entry") : null;
+    endMarquee();
+    if (viewMode !== "column" && lists[dir]) {
+      var visible = visiblePaths();
+      sels = sels.filter(function (p) { return visible.indexOf(p) >= 0; });
+      if (sel !== null && visible.indexOf(sel) < 0) sel = sels.length ? sels[sels.length - 1] : null;
+    }
     box.textContent = ""; box.setAttribute("data-view", viewMode);
     ui.modes.forEach(function (b, i) { b.setAttribute("aria-pressed", String(viewMode === viewModes[i])); });
     ui.workspace.setAttribute("data-view", viewMode);
     // Layout hides the sidebar independently of search's tree/hits visibility.
     ui.tree.inert = viewMode === "column";
     box.setAttribute("role", viewMode === "column" ? "group" : "listbox");
+    box.setAttribute("aria-multiselectable", String(viewMode !== "column" && !directoriesOnly));
     if (viewMode === "column") { renderColumns(focused); return; }
     if (viewMode === "details") {
       var hd = mk("div", "fdetail-head");
@@ -571,7 +618,7 @@
     box.scrollLeft = 0; box.scrollTop = top;
   }
   function directoryEntry(e, folder, column) {
-    var p = joinRel(folder, e.name), selected = sel === p || !!(column && opens(e) && (dir === p || dir.indexOf(p + "/") === 0));
+    var p = joinRel(folder, e.name), selected = (column ? sel === p : sels.indexOf(p) >= 0) || !!(column && opens(e) && (dir === p || dir.indexOf(p + "/") === 0));
     var row = mk("div", "fentry" + (selected ? " sel" : "") + (e.ign ? " ign" : "") + (directoriesOnly && e.name.charAt(0) === "." ? " fdot" : ""));
     row.setAttribute("data-entry", p); row.setAttribute("role", "option"); row.setAttribute("aria-selected", String(selected)); row.tabIndex = 0;
     var ic = mk("span", "fi");
@@ -586,17 +633,18 @@
       var ch = mk("span", "fcolumn-chevron"); ch.innerHTML = licon("chevron-right"); row.appendChild(ch);
     }
     row.title = p;
-    function choose() {
+    function choose(ev) {
       if (column && (opens(e) || folder !== dir)) { navigate(opens(e) ? p : folder, p, p); return; }
-      sel = p;
-      Array.prototype.forEach.call(ui.directory.querySelectorAll(".fentry"), function (n) {
-        var path = n.getAttribute("data-entry"), on = path === sel || !!(column && (dir === path || dir.indexOf(path + "/") === 0));
-        n.classList.toggle("sel", on); n.setAttribute("aria-selected", String(on));
-      });
-      Object.keys(rowEls).forEach(function (path) {
-        rowEls[path].classList.toggle("sel", path === sel); rowEls[path].setAttribute("aria-selected", String(path === sel));
-      });
-      persistTabs(); notify("selection");
+      var add = !column && !directoriesOnly && ev && (ev.ctrlKey || ev.metaKey), paths = add ? sels.slice() : [];
+      if (!column && !directoriesOnly && ev && ev.shiftKey && visiblePaths().indexOf(anchor) >= 0) {
+        var visible = visiblePaths(), a = visible.indexOf(anchor), b = visible.indexOf(p);
+        visible.slice(Math.min(a, b), Math.max(a, b) + 1).forEach(function (path) { if (paths.indexOf(path) < 0) paths.push(path); });
+      } else {
+        anchor = p;
+        if (add && paths.indexOf(p) >= 0) paths.splice(paths.indexOf(p), 1);
+        else paths.push(p);
+      }
+      selectPaths(paths, p);
     }
     row.addEventListener("click", choose);
     row.addEventListener("dblclick", function () { if (!column && opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p); });
@@ -605,7 +653,7 @@
       if (ev.key === "Enter") { ev.preventDefault(); choose(); if (!column && opens(e)) navigate(p); else if (!e.dir && !e.link && !e.gone) preview(p); }
     });
     row.addEventListener("auxclick", function (ev) { if (ev.button === 1 && opens(e)) { ev.preventDefault(); newTab({ root: rootAbs, dir: p, view: viewMode }, true); } });
-    row.addEventListener("contextmenu", function (ev) { ev.preventDefault(); choose(); openMenu({ e: e, path: p, dir: folder }, ev.clientX, ev.clientY); });
+    row.addEventListener("contextmenu", function (ev) { ev.preventDefault(); if (column || sels.indexOf(p) < 0) choose(); openMenu({ e: e, path: p, dir: folder }, ev.clientX, ev.clientY); });
     return row;
   }
   function columnDirs() {
@@ -749,7 +797,7 @@
     if (!r || r.more) return;
     if (opens(r.e)) { toggle(r.path, true); return; }
     if (r.e.dir || r.e.gone || r.e.link) return;
-    sel = r.path;
+    resetSelection(r.path);
     render(); persistTabs(); notify("selection");
     preview(r.path);
   }
@@ -783,7 +831,7 @@
         if (x[1]) { lists[x[0]] = x[1]; if (x[0] === "") info = x[1]; return; }
         if (x[2].status !== 404) return;
         if (x[0] === "") lost = true;
-        else { delete lists[x[0]]; delete open[x[0]]; if (dir === x[0]) { dir = ""; sel = null; contentTop = 0; } }
+        else { delete lists[x[0]]; delete open[x[0]]; if (dir === x[0]) { dir = ""; resetSelection(null); contentTop = 0; } }
       });
       if (lost) { lists = {}; loadRoot(); return; }
       Object.keys(open).forEach(function (p) { if (!present(p)) delete open[p]; });
@@ -800,7 +848,7 @@
     (function step(i) {
       if (g !== gen) return;
       if (i >= chain.length) {
-        sel = cur = path;
+        resetSelection(path); cur = path;
         navigate(path);
         render();
         if (rowEls[path]) { rowEls[path].scrollIntoView({ block: "nearest" }); moveTo(path); }
@@ -815,12 +863,46 @@
     })(0);
   }
 
+  // A marquee starts only on pane whitespace, never interfering with row drags.
+  function endMarquee() {
+    if (marquee && marquee.box) marquee.box.parentNode.removeChild(marquee.box);
+    marquee = null;
+  }
+  function startMarquee(ev) {
+    if (viewMode === "column" || directoriesOnly || ev.button !== 0 || ev.target.closest(".fentry, .fdetail-head")) return;
+    endMarquee(); closeMenu(false); closePop(false); skipEmptyClick = false;
+    marquee = { x: ev.clientX, y: ev.clientY, pointer: ev.pointerId, base: ev.ctrlKey || ev.metaKey ? sels.slice() : [], primary: sel };
+    if (!ev.ctrlKey && !ev.metaKey) clearSelection();
+    ui.directory.focus({ preventScroll: true }); ev.preventDefault();
+  }
+  function moveMarquee(ev) {
+    if (!marquee || ev.pointerId !== marquee.pointer) return;
+    var m = marquee, area = ui.directory.getBoundingClientRect();
+    if (!m.box && Math.abs(ev.clientX - m.x) + Math.abs(ev.clientY - m.y) < 4) return;
+    if (!m.box) { m.box = mk("div", "fmarquee"); doc.body.appendChild(m.box); }
+    skipEmptyClick = true;
+    var left = Math.max(area.left, Math.min(m.x, ev.clientX)), right = Math.min(area.right, Math.max(m.x, ev.clientX));
+    var top = Math.max(area.top, Math.min(m.y, ev.clientY)), bottom = Math.min(area.bottom, Math.max(m.y, ev.clientY));
+    m.box.style.left = left + "px"; m.box.style.top = top + "px";
+    m.box.style.width = Math.max(0, right - left) + "px"; m.box.style.height = Math.max(0, bottom - top) + "px";
+    var paths = m.base.slice();
+    Array.prototype.forEach.call(ui.directory.querySelectorAll(".fentry"), function (row) {
+      var b = row.getBoundingClientRect(), path = row.getAttribute("data-entry");
+      if (right > left && bottom > top && b.right > left && b.left < right && b.bottom > top && b.top < bottom && paths.indexOf(path) < 0) paths.push(path);
+    });
+    selectPaths(paths, m.primary); ev.preventDefault();
+  }
+
   // --- the row menu ----------------------------------------------------------
   function closeMenu(refocus) {
     if (!menu) return;
     menu.parentNode.removeChild(menu);
     menu = null;
-    if (refocus && menuFrom && rowEls[menuFrom]) rowEls[menuFrom].focus();
+    if (refocus && menuFrom) {
+      var row = Array.prototype.find.call(ui.directory.querySelectorAll(".fentry"), function (n) { return n.getAttribute("data-entry") === menuFrom; });
+      if (row) row.focus();
+      else if (rowEls[menuFrom]) rowEls[menuFrom].focus();
+    }
     menuFrom = null;
   }
   function act(path, action) {
@@ -839,34 +921,36 @@
     closeMenu(false);
     closePop(false);
     var e = r.e, path = r.path, l = lists[r.dir], items = [];
-    if (!e.gone) {
-      if (!e.dir && !e.link) items.push([wsT("js.menu.preview"), function () { sel = path; render(); preview(path); }]);
+    var values = viewMode !== "column" && sels.indexOf(path) >= 0 ? selections() : [entrySelection(path)], multi = values.length > 1;
+    if (!e.gone || multi) {
+      if ((!e.dir && !e.link) || multi) items.push([wsT("js.menu.preview"), function () { resetSelection(path); render(); preview(path); }, multi]);
       if (local()) {
-        items.push([wsT("js.preview.openext"), function () { act(path, "open"); }]);
-        items.push([wsT("js.files.menu.reveal"), function () { act(path, "reveal"); }]);
+        items.push([wsT("js.preview.openext"), function () { act(path, "open"); }, multi]);
+        items.push([wsT("js.files.menu.reveal"), function () { act(path, "reveal"); }, multi]);
       }
-      if (e.dir && l && l.abs && window.WsTerm) {
+      if (((e.dir && l && l.abs) || multi) && window.WsTerm) {
         var dirAbs = absPath(l.abs, l.sep || "/", e.name);
         items.push([wsT("js.files.menu.terminal"), function () {
           window.WsTerm.create({ folder: "path", path: dirAbs }, function (err) { if (err) toast(err); });
-        }]);
+        }, multi]);
       }
     }
     if (items.length) items.push(null);
-    items.push([wsT("js.menu.copyrel"), function () { if (h.copy) h.copy(path); }]);
-    if (l && l.abs) items.push([wsT("js.menu.copyabs"), function () { if (h.copy) h.copy(absPath(l.abs, l.sep || "/", e.name)); }]);
+    if (h.send) items.push([wsT("js.files.send"), function () { sendSelections(values); }]);
+    items.push([wsT("js.menu.copyrel"), function () { if (h.copy) h.copy(values.map(function (s) { return s.path; }).join("\n")); }]);
+    if (l && l.abs) items.push([wsT("js.menu.copyabs"), function () { if (h.copy) h.copy(values.map(function (s) { return s.absolute; }).join("\n")); }]);
     var m = mk("div", "lmenu fmenu");
     m.setAttribute("role", "menu");
     items.forEach(function (it) {
       if (!it) { var s = mk("div", "msep"); s.setAttribute("role", "separator"); m.appendChild(s); return; }
       var b = mk("button", "", it[0]);
       b.type = "button";
-      b.setAttribute("role", "menuitem");
-      b.addEventListener("click", function (ev) { ev.stopPropagation(); closeMenu(true); it[1](); });
+      b.setAttribute("role", "menuitem"); b.disabled = !!it[2];
+      b.addEventListener("click", function (ev) { if (b.disabled) return; ev.stopPropagation(); closeMenu(true); it[1](); });
       m.appendChild(b);
     });
     m.addEventListener("keydown", function (ev) {
-      var bs = Array.prototype.slice.call(m.querySelectorAll("button")), i = bs.indexOf(doc.activeElement);
+      var bs = Array.prototype.slice.call(m.querySelectorAll("button")).filter(function (b) { return !b.disabled; }), i = bs.indexOf(doc.activeElement);
       if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); closeMenu(true); return; }
       if (ev.key === "Tab") { ev.preventDefault(); closeMenu(true); return; }
       var j = ev.key === "ArrowDown" ? (i + 1) % bs.length : ev.key === "ArrowUp" ? (i + bs.length - 1) % bs.length :
@@ -881,7 +965,7 @@
     m.style.top = Math.max(4, y + ht + 4 > window.innerHeight ? y - ht - 4 : y + 4) + "px";
     menu = m;
     menuFrom = path;
-    m.querySelector("button").focus();
+    Array.prototype.find.call(m.querySelectorAll("button"), function (b) { return !b.disabled; }).focus();
   }
   function menuAtRow(r) {
     var d = rowEls[r.path], b = d.getBoundingClientRect(), n = d.querySelector(".fn").getBoundingClientRect();
@@ -1173,11 +1257,11 @@
     viewModes.forEach(function (value) {
       var labels = [wsT("js.files.view.details"), wsT("js.files.view.list"), wsT("js.files.view.icon"), wsT("js.files.view.gallery"), wsT("js.files.view.column")];
       var label = labels[viewModes.indexOf(value)], b = iconBtn(modeIcons[viewModes.indexOf(value)], label);
-      b.addEventListener("click", function () { viewMode = value; renderDirectory(); persistTabs(); });
+      b.addEventListener("click", function () { viewMode = value; if (value === "column") resetSelection(sel); renderDirectory(); persistTabs(); notify("selection"); });
       modes.appendChild(b); ui.modes.push(b);
     }); searchRow.appendChild(modes); el.appendChild(searchRow);
     ui.workspace = mk("div", "fworkspace");
-    ui.directory = mk("div", "fdirectory"); ui.directory.setAttribute("role", "listbox");
+    ui.directory = mk("div", "fdirectory"); ui.directory.setAttribute("role", "listbox"); ui.directory.tabIndex = 0;
     ui.directory.setAttribute("aria-label", wsT("js.files.directory"));
     ui.workspace.appendChild(ui.tree); ui.workspace.appendChild(ui.directory);
     el.appendChild(ui.workspace); el.appendChild(ui.hits);
@@ -1236,8 +1320,8 @@
     ui.viewBtn.addEventListener("click", function () { togglePop(ui.viewPop, ui.viewBtn); });
     ui.collapse.addEventListener("click", collapseAll);
     ui.refresh.addEventListener("click", refresh);
-    ui.vIgn.addEventListener("change", function () { view.ign = ui.vIgn.checked; saveView(); render(); });
-    ui.vDot.addEventListener("change", function () { view.dot = ui.vDot.checked; saveView(); render(); });
+    ui.vIgn.addEventListener("change", function () { view.ign = ui.vIgn.checked; saveView(); render(); notify("selection"); });
+    ui.vDot.addEventListener("change", function () { view.dot = ui.vDot.checked; saveView(); render(); notify("selection"); });
     ui.rApply.addEventListener("click", function () { if (ui.rIn.value.trim()) applyRoot(ui.rIn.value.trim()); });
     ui.rHome.addEventListener("click", function () { applyRoot(""); });
     ui.rIn.addEventListener("keydown", function (e) {
@@ -1321,6 +1405,17 @@
       if (to) moveTo(to.path);
     });
     ui.tree.addEventListener("scroll", function () { if (info && shows(ui.tree)) { treeTop = ui.tree.scrollTop; persistTabs(); } });
+    ui.directory.addEventListener("pointerdown", startMarquee);
+    listen(doc, "pointermove", moveMarquee);
+    ["pointerup", "pointercancel"].forEach(function (type) {
+      listen(doc, type, function (e) { if (marquee && e.pointerId === marquee.pointer) endMarquee(); });
+    });
+    ui.directory.addEventListener("click", function (e) {
+      if (e.target.closest(".fentry, .fdetail-head") || viewMode === "column" || directoriesOnly) return;
+      if (skipEmptyClick) { skipEmptyClick = false; return; }
+      if (!e.ctrlKey && !e.metaKey) clearSelection();
+      ui.directory.focus({ preventScroll: true });
+    });
     ui.directory.addEventListener("scroll", function () {
       if (!info || !lists[dir] || !shows(ui.directory)) return;
       if (viewMode === "column") columnLeft = ui.directory.scrollLeft;
@@ -1354,6 +1449,14 @@
     // "/" focuses the search box while the pane shows; a click elsewhere,
     // a scroll, a resize, or leaving the window closes a menu or popover.
     listen(doc, "keydown", function (e) {
+      if (!e.defaultPrevented && shows(el) && el.contains(e.target) && el.contains(doc.activeElement) && !editable(e.target) && !menu && !pop && ui.path.hidden && !directoriesOnly) {
+        if (viewMode !== "column" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "a") {
+          e.preventDefault(); selectPaths(visiblePaths(), sel); return;
+        }
+        if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+          e.preventDefault(); endMarquee(); clearSelection(); return;
+        }
+      }
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l" && !e.defaultPrevented && shows(el) && el.contains(e.target)) {
         e.preventDefault(); editPath(); return;
       }
@@ -1372,7 +1475,7 @@
     }, true);
     listen(doc, "wheel", function (e) { if (menu && !menu.contains(e.target)) closeMenu(false); }, { capture: true, passive: true });
     listen(window, "resize", function () { closeMenu(false); });
-    listen(window, "blur", function () { closeMenu(false); });
+    listen(window, "blur", function () { closeMenu(false); endMarquee(); });
   }
 
   build();
@@ -1418,6 +1521,7 @@
       if (destroyed) return;
       searchPaused = true;
       closePath(false);
+      endMarquee();
       clearTimeout(timer);
       abort();
       closeMenu(false);
@@ -1430,6 +1534,7 @@
       if (destroyed) return;
       persistTabs();
       destroyed = true;
+      endMarquee();
       if (detachAttachment) detachAttachment();
       subscribers = { selection: [], navigation: [] };
       gen++;

@@ -216,6 +216,7 @@
   "js.files.count.other": "{0} 項目",
   "js.files.open.card": "カードとして開く",
   "js.files.selected": "選択",
+  "js.files.selected.count": "{0}個選択",
   "js.files.send": "セッションに添付",
   "js.files.tab.close": "タブを閉じる",
   "js.files.tab.new": "新しいタブ",
