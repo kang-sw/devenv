@@ -9,7 +9,7 @@ const [base, updates] = process.argv.slice(2);
 (async () => {
   const browser = await chromium.launch({ headless: true });
   try {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'en-US' });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'en-US', reducedMotion: 'reduce' });
     const tab = await context.newPage(), events = [], errors = [];
     tab.on('pageerror', e => errors.push(e.message));
     tab.on('websocket', ws => ws.on('framereceived', f => {

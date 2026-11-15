@@ -155,6 +155,7 @@
   var boardOwn = Object.create(null), boardImmediate = Object.create(null), boardSnap = null, boardExposedUnits = null;
   var boardChanges = [], boardOffered = null, boardReleaseFrame = 0, boardHomeWrites = new WeakSet();
   var boardPaged = Object.create(null), boardPagedEdits = [];
+  var boardTopHeld = Object.create(null), boardTopOrder = null;
   function topicKey(n) {
     return n.nodeType === 1 && n.tagName === "SECTION" && n.classList.contains("topic") && n.hasAttribute("data-topic") ? n.getAttribute("data-topic") : null;
   }
@@ -1062,6 +1063,47 @@
       });
     });
   }
+  // Top-origin changes are click-only, independently of ordinary viewed-panel
+  // blockers. Keep immutable old bytes/absence and their old open-flow slots;
+  // subsequent scroll releases can still admit unrelated down-origin panels.
+  function boardStageTop(input, topics, order) {
+    if (boardRelease) { boardTopHeld = Object.create(null); boardTopOrder = null; return order; }
+    var box = boardBoxes()[0], ref = box && (box.firstElementChild || box);
+    var s = ref && boardScroller(ref), offer = boardOffered, previous = offer && offer.previous;
+    if (s && s.scrollTop <= 4 && offer && previous && boardRendered) {
+      var changed = Array.from(new Set(previous.order.concat(input.order))).filter(function (k) {
+        var a = previous.topics[k], b = input.topics[k];
+        if (boardImmediate[k] || (a && b && topicSeen(a) === topicSeen(b))) return false;
+        if (!a || !b || previous.order.indexOf(k) !== input.order.indexOf(k)) return true;
+        var live = Array.prototype.find.call(box.children, function (n) { return topicKey(n) === k; });
+        return !!live && boardExposed(live);
+      });
+      if (!changed.length && previous.order.join('\n') !== input.order.join('\n'))
+        changed = input.order.filter(function (k, i) { return previous.order[i] !== k && !boardImmediate[k]; });
+      if (changed.length && !boardTopOrder) {
+        var shown = Array.prototype.map.call(box.children, topicKey).filter(function (k) { return k !== null; });
+        boardTopOrder = shown.concat(boardRendered.order.filter(function (k) { return shown.indexOf(k) < 0; }));
+      }
+      changed.forEach(function (k) {
+        if (!Object.prototype.hasOwnProperty.call(boardTopHeld, k))
+          boardTopHeld[k] = { node: boardRendered.topics[k] || null };
+      });
+    }
+    var held = Object.keys(boardTopHeld);
+    held.forEach(function (k) {
+      if (boardImmediate[k]) boardTopHeld[k].node = topics[k] || boardTopHeld[k].node;
+      var old = boardTopHeld[k].node;
+      if (old) topics[k] = old; else delete topics[k];
+      boardPending[k] = true;
+    });
+    order = order.filter(function (k) { return !Object.prototype.hasOwnProperty.call(boardTopHeld, k); });
+    (boardTopOrder || []).slice().reverse().forEach(function (k, i, reversed) {
+      if (!boardTopHeld[k] || !boardTopHeld[k].node) return;
+      var next = reversed.slice(0, i).reverse().find(function (n) { return order.indexOf(n) >= 0; });
+      order.splice(next === undefined ? order.length : order.indexOf(next), 0, k);
+    });
+    return order;
+  }
   function boardStageInput(input) { return boardWithSnap(function () { return boardStageSnap(input); }); }
   function boardStageSnap(input) {
     boardPending = Object.create(null);
@@ -1076,6 +1118,7 @@
       topics[k] = own.source; boardImmediate[k] = true; delete boardOwn[k];
       if (own.external) boardPending[k] = true;
     });
+    order = boardStageTop(input, topics, order);
     boardBoxes().forEach(function (box) {
       var nodes = Array.prototype.filter.call(box.children, function (n) {
         var k = topicKey(n);
@@ -1186,7 +1229,8 @@
   }
   function boardFlushViewed(explicit) {
     boardReleaseFrame = 0;
-    if (!Object.keys(boardPending).length) return;
+    var pending = Object.keys(boardPending);
+    if (!pending.length || (!explicit && pending.every(function (k) { return Object.prototype.hasOwnProperty.call(boardTopHeld, k); }))) return;
     boardRelease = !!explicit;
     try {
       if (boardLatest) swap("board", boardLatest.hash, boardLatest.html, true);

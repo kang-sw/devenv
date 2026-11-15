@@ -101,12 +101,19 @@ function gate(name, ok) {
     for (const name of variants.order.filter(n => /^u\d+$/.test(n))) {
       const syncMs = await emit(prev, name);
       await settle();
+      // Top-origin updates are intentionally click-only. Keep the original
+      // admission gate separate from the newly explicit user apply action.
+      const admissionLongTasks = await frame.evaluate(() => window.longTasks());
+      const pending = frame.locator('.wb-oq-top .oq-updates:visible');
+      if (await pending.count()) { await pending.click(); await settle(); }
       const observed = await frame.evaluate(k => ({
         longTasks: window.longTasks(),
         firstTopic: document.querySelector('#r-board > section.topic')?.dataset.topic,
         appendedLogApplied: document.querySelector('#r-board section[data-topic="T' + String(k * 7 % 100).padStart(3, '0') + '"]')
           ?.textContent.includes('Agent update ' + k) || false
       }), Number(name.slice(1)));
+      observed.applyLongTasks = observed.longTasks;
+      observed.longTasks = admissionLongTasks;
       const expectedFirst = 'T' + String(Number(name.slice(1)) * 7 % 100).padStart(3, '0');
       summary.updates.push({ name, syncMs, ...observed, expectedFirst });
       assert(observed.appendedLogApplied, name + ': appended agent log must reach the live board');

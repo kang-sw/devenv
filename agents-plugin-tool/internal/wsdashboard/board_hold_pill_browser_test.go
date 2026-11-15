@@ -166,7 +166,7 @@ func TestBoardHoldPillBrowser(t *testing.T) {
 			if st.Topics[i].Name == name {
 				st.Topics[i].Changed = changed
 				if r.URL.Query().Get("rise") == "1" {
-					st.Topics[i].Changed = 2000
+					st.Topics[i].Changed = 2000 + st.Seq
 				}
 			}
 		}
