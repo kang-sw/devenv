@@ -97,6 +97,138 @@ func TestEntryCommandRefusalsAreAtomic(t *testing.T) {
 	}
 }
 
+func panelCommandXML(topic, attrs, body string) string {
+	return fmt.Sprintf(`<wb:topic name=%q><wb:panel %s>%s</wb:panel></wb:topic>`, topic, attrs, body)
+}
+
+func panelChangeXML(old, next string) string {
+	return `<wb:change><wb:old>` + old + `</wb:old><wb:new>` + next + `</wb:new></wb:change>`
+}
+
+func TestPanelNamedVersionsAndSelectors(t *testing.T) {
+	st := &State{}
+	mustApply(t, st, panelCommandXML("a", `name="status" recap="First"`, "alpha"))
+	before := st.clone()
+	later := testNow.Add(time.Hour)
+	applyAt(t, st, panelCommandXML("a", `name="status" recap="Second"`, "beta"), later)
+	mustApply(t, st, panelCommandXML("a", `id="p1" recap="Legacy"`, "legacy"))
+	// Reconstruct the binding from retained entries, past an unnamed id repost.
+	var loaded State
+	if err := json.Unmarshal(mustMarshal(t, st), &loaded); err != nil {
+		t.Fatal(err)
+	}
+	mustApply(t, &loaded, panelCommandXML("a", `name="status"`, panelChangeXML("legacy", "patched")))
+	mustApply(t, &loaded, panelCommandXML("a", `id="p1" name="status" recap="Agreed"`, "full replacement"))
+	mustApply(t, &loaded, panelCommandXML("b", `name="status" recap="Other topic"`, "independent"))
+	got := entries(t, &loaded, "a")
+	if !reflect.DeepEqual(got[:3], before.Topics[0].Entries) || !reflect.DeepEqual(got[:7], entries(t, st, "a")) {
+		t.Fatal("reposts mutated retained versions")
+	}
+	for i, want := range []struct{ id, name, recap, text, at string }{
+		{"e1", "status", "First", "alpha", testNow.Format(time.RFC3339)},
+		{"e4", "status", "Second", "beta", later.Format(time.RFC3339)},
+		{"e6", "", "Legacy", "legacy", testNow.Format(time.RFC3339)},
+		{"e8", "status", "Legacy", "patched", testNow.Format(time.RFC3339)},
+		{"e10", "status", "Agreed", "full replacement", testNow.Format(time.RFC3339)},
+	} {
+		index := 0
+		if i > 0 {
+			index = 2*i + 1
+		}
+		e := got[index]
+		if e.Kind != EntryPanel || e.ID != want.id || e.PanelID != "p1" || e.PanelName != want.name || e.Recap != want.recap || e.Text != want.text || e.At != want.at {
+			t.Fatalf("version %d = %+v, want %+v with stable p1", i, e, want)
+		}
+	}
+	if loaded.PanelCounter != 2 || entries(t, &loaded, "b")[0].PanelID != "p2" {
+		t.Fatal("equal topic-local names must bind different board-wide panel IDs")
+	}
+	mustApply(t, &loaded, panelCommandXML("b", `name="status"`, panelChangeXML("independent", "only b")))
+	if !reflect.DeepEqual(entries(t, &loaded, "a"), got) {
+		t.Fatal("topic-local patch changed the other topic")
+	}
+	mustApply(t, &loaded, panelCommandXML("a", `name="status" id="p1"`, panelChangeXML("full replacement", "agreed patch")))
+}
+
+func TestPanelChangesUseSequentialWorkingPayload(t *testing.T) {
+	for _, tc := range []struct{ name, initial, changes, want string }{
+		{"preceding result overlaps", "abcd", panelChangeXML("ab", "XY") + panelChangeXML("Yc", "Z"), "XZd"},
+		{"delete and anchored insert", "start remove anchor", panelChangeXML("remove ", "") + panelChangeXML("anchor", "anchor plus inserted"), "start anchor plus inserted"},
+		{"raw operands", "A &amp; B <b>raw</b>", panelChangeXML("&amp;", "&lt;") + panelChangeXML("<b>raw</b>", "<i>new</i>"), "A &lt; B <i>new</i>"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &State{}
+			mustApply(t, st, panelCommandXML("t", `name="work" recap="Inherited"`, tc.initial))
+			before := st.clone()
+			applyAt(t, st, panelCommandXML("t", `name="work"`, "\n"+tc.changes+"\n"), testNow.Add(time.Minute))
+			got := entries(t, st, "t")
+			if !reflect.DeepEqual(got[:3], entries(t, before, "t")) || len(got) != 5 || got[3].ID != "e4" || got[3].PanelID != "p1" || got[3].At != testNow.Add(time.Minute).Format(time.RFC3339) || got[3].Text != tc.want || got[3].Recap != "Inherited" || st.PanelCounter != 1 {
+				t.Fatalf("patch must append one dated immutable result: %+v", got)
+			}
+			mustApply(t, st, panelCommandXML("t", `name="work" recap="Explicit"`, panelChangeXML(tc.want, "replacement")))
+			if got := entries(t, st, "t")[5]; got.Text != "replacement" || got.Recap != "Explicit" {
+				t.Fatalf("explicit patch recap = %+v", got)
+			}
+		})
+	}
+}
+
+func TestPanelChangeRefusalsLeaveStateUntouched(t *testing.T) {
+	change := panelChangeXML("abc", "new")
+	for _, tc := range []struct{ name, attrs, body, problem string }{
+		{"zero matches", `name="work"`, panelChangeXML("absent", "x"), "matches nothing"},
+		{"ambiguous", `name="work"`, panelChangeXML("a", "x"), "matches multiple"},
+		{"overlapping ambiguity", `name="work"`, panelChangeXML("aa", "x"), "matches multiple"},
+		{"later failure", `name="work"`, change + panelChangeXML("absent", "x"), "matches nothing"},
+		{"introduced ambiguity", `name="work"`, panelChangeXML("abc", "xyxy") + panelChangeXML("xy", "x"), "matches multiple"},
+		{"missing old", `name="work"`, `<wb:change><wb:new>x</wb:new></wb:change>`, "<wb:old> required"},
+		{"missing new", `name="work"`, `<wb:change><wb:old>abc</wb:old></wb:change>`, "<wb:new> required"},
+		{"duplicate old", `name="work"`, `<wb:change><wb:old>abc</wb:old><wb:old>aaa</wb:old><wb:new>x</wb:new></wb:change>`, "more than one <wb:old>"},
+		{"duplicate new", `name="work"`, `<wb:change><wb:old>abc</wb:old><wb:new>x</wb:new><wb:new>y</wb:new></wb:change>`, "more than one <wb:new>"},
+		{"empty old", `name="work"`, panelChangeXML("", "x"), "<wb:old> must be non-empty"},
+		{"empty wrapper", `name="work"`, `<wb:change/>`, "<wb:old> required"},
+		{"wrapper attribute", `name="work"`, `<wb:change replace_all="true"><wb:old>abc</wb:old><wb:new>x</wb:new></wb:change>`, "unknown attribute replace_all"},
+		{"stray prefix", `name="work"`, "stray" + change, "only change wrappers"},
+		{"stray suffix", `name="work"`, change + "stray", "only change wrappers"},
+		{"mixed HTML", `name="work"`, change + "<b>full payload</b>", "only change wrappers"},
+		{"stray inside wrapper", `name="work"`, `<wb:change>stray<wb:old>abc</wb:old><wb:new>x</wb:new></wb:change>`, "outside its field tags"},
+		{"id only patch", `id="p1" recap="Unsafe"`, change, "patches require name"},
+		{"unknown name patch", `name="unknown"`, change, "post a full payload first"},
+		{"empty name", `name=" " recap="x"`, "full", "must be non-empty"},
+		{"unknown id and name", `name="work" id="p99" recap="x"`, "full", "same existing panel"},
+		{"unknown name with id", `name="unknown" id="p1" recap="x"`, "full", "same existing panel"},
+		{"disagreeing selectors", `name="other" id="p1" recap="x"`, "full", "same existing panel"},
+		{"disagreeing patch selectors", `name="other" id="p1"`, change, "same existing panel"},
+		{"full missing recap", `name="work"`, "full", "recap: required"},
+		{"patch blank recap", `name="work" recap=" "`, change, "recap: must be non-empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &State{}
+			mustApply(t, st, panelCommandXML("t", `name="work" recap="Original"`, "abc aaa")+panelCommandXML("t", `name="other" recap="Other"`, "other"))
+			mustApply(t, st, `<wb:topic name="t"><wb:close result="done"/></wb:topic>`)
+			// Only the failing panel is submitted; this does not specify partial-batch policy.
+			wantProblems(t, refused(t, st, panelCommandXML("t", tc.attrs, tc.body)), tc.problem)
+		})
+	}
+	for _, attrs := range []string{`name="new"`, `name="new" id="p1" recap="x"`} {
+		wantProblems(t, refused(t, &State{}, panelCommandXML("new-topic", attrs, change)), "post a full payload first")
+	}
+}
+
+func TestPanelPatchValidatesFinalPayload(t *testing.T) {
+	for _, tc := range []struct{ name, replacement, problem string }{
+		{"UTF8", string([]byte{0xff}), "valid UTF-8"},
+		{"byte cap", strings.Repeat("가", MaxPanelBytes/3+1), "exceeds 2 MiB of UTF-8"},
+		{"full document", "<!DOCTYPE html><html><body>x</body></html>", "not a full document"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &State{}
+			mustApply(t, st, panelCommandXML("t", `name="work" recap="Original"`, "anchor"))
+			wantProblems(t, refused(t, st, panelCommandXML("t", `name="work"`, panelChangeXML("anchor", tc.replacement))), tc.problem)
+		})
+	}
+}
+
 func TestAgentLogIsInlineOnly(t *testing.T) {
 	for _, line := range []string{
 		"", "  ", "first\nsecond", "# heading", "> quote", "- list", "1. list", "---", "    indented code",
