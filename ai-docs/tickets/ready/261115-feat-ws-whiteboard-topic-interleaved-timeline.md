@@ -387,3 +387,31 @@ The timeline adopts it instead of reordering a landed, owner-checked view.
 The rest of the "Items without timeline events" decision is unchanged.
 Rejected: item-number order (would break the landed TASK3 regression and
 reorder what owners already see).
+
+#### Edition (e36b9f5b9) - 2026-11-15
+
+Develop sync: `63dd7e46a` integrates TASK3's whole-history frame; `e36b9f5b9`
+syncs the later develop tip `aa07206c0` (including its folder cache).
+
+- VERIFIED: permanent ask/check anchors and inert directional gaps now layer
+  over TASK3's complete transition projection, single-line answer chips,
+  complete disclosures, retirement evidence and unknown-time rows. Coalesced
+  creation events stay unchanged on disk; their members retain their ask
+  positions even after class patches. Eventless items keep stored order,
+  including the landed `[9, 2]` regression.
+- VERIFIED: open/assumed checks keep one real control/correction owner at their
+  permanent ask positions for pill folding/lifting; completed checks retain
+  the history visibility toggle. Ask and settlement disclosures have distinct
+  keys. Initial layout shares one capture per scroller, and all navigation
+  retains the landed keep/jump/place owner and pN panel-fold/update policy.
+  Owner headers survive panel republishing; answer-chip clocks and hover
+  metadata use owner send time. The T0 stamp contract is unchanged.
+- VERIFIED: refreshed develop baseline and merged full whiteboard runs fail
+  only `TestRenderPageEmbedSizeBudget`: 256,534 -> 257,941 bytes (+1,407).
+  No additional failure remains from the branch's six-failure baseline. Full
+  i18n, named board-frame/whiteboard-bridge/wbmention/timeline-bridge and MCP
+  input-attribution tests, four Node asset-split tests (one opt-in skip), and
+  assembled/standalone JavaScript syntax checks pass.
+- Unresolved: the existing embed-budget failure; visual fit remains INFERRED
+  pending the owner's check. No browser, daemon, child agent, push, merge into
+  develop, ticket-plan edit, or ticket closure was performed.
