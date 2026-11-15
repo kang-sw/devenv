@@ -400,6 +400,143 @@ Apply the Phase 2 unit-and-delta pattern to `tree`. Verify bytes per tree
 change against the baseline rows (32 tree pushes of ~97KB in 34s) and the
 existing tree/region tests.
 
+### Result (075441210) - 2026-11-15
+
+Implemented **Phase 3 only**, on the MAIN-corrected base
+`4352415f3694b92d57b35dc594a51ca3e4c4f8b6`, which contains the agent-popover
+merge `ad9c2c79f`. The initially acquired retained branch lacked that merge;
+work stopped before edits or captures, and MAIN corrected the clean branch
+and explicitly authorized continuation. No obsolete-layout baseline was used.
+
+Each shared session render now decomposes the unchanged tree HTML into
+independent agent and expandable-peer units keyed by existing `data-key` and
+`data-peer` identities. Nested children are separate units: private numbered
+child slots in immutable transport inputs exclude descendant HTML from a
+parent's hash, so a child edit ships only that child. Slots are removed before
+DOM insertion. Full tree template rendering remains in place, following the
+Phase 2 transport pattern rather than introducing revision-based render caching.
+No template, CSS, visible markup or UI design was changed.
+
+Connections opting in with `treerows=1` receive `tree-rows` containing changed
+complete rendered-row hashes/HTML plus order. Changed shell, order or hierarchy,
+unfamiliar markup and uncertain baselines use full regions. The client keeps
+canonical inputs apart from formatted DOM, accumulates hidden updates and
+replaces only changed rows. A changed parent grafts unchanged descendant nodes;
+simultaneous parent/child changes materialize both. Existing open/full disclosure,
+focus, pane scroll, popover pin/close lifecycle and permission-title counting
+remain on their existing owners.
+
+**Compatibility, directional T0.** New daemon -> old page: only the explicit
+flag allocates tree-row state (`agents-plugin-tool/internal/wsdashboard/sse.go:464-467`);
+legacy connections keep full regions. New page -> old daemon: the added query
+flag is ignored and the page still accepts full tree regions. First sends are
+full even with `h=current`; failed writes do not advance hashes or baselines
+(`sse.go:643-675`). Invalid client deltas close and reconnect for a mandatory
+full baseline (`assets/dashboard-stream.js`, `onTreeRows`). No store, MCP tool,
+hello, manifest or cross-version persisted shape changed; no recovery or
+migration is needed. Old tabs that banner rather than reload remain usable.
+
+**Measurements.** Baseline `4352415f3`; candidate production `075441210`
+with test-only `3608e0970`. The same saved, disposable in-process daemon fixture
+ran before source edits and after: 112 flat agent rows plus the lead, one SSE
+subscriber, separate cache/config directories and an ephemeral loopback port.
+After a two-second idle sample, 32 caption-only edits change one row at 1 Hz.
+These are synthetic fixture measurements, not a new live-daemon measurement.
+
+| Measure | Before -> after |
+|---|---:|
+| Initial tree HTML bytes | 136,072 -> 136,074 |
+| Initial tree SSE event bytes | 215,705 -> 215,707 |
+| Change events | 32 full regions -> 32 tree-row deltas |
+| Change SSE bytes, including event framing | 6,905,088 -> 125,376 (**98.18% less**) |
+| Bytes per change | 215,784 -> 3,918 |
+| Idle process CPU seconds / wall seconds | 0.000440 / 2.005 -> 0.000654 / 2.002 |
+| Change process CPU seconds / wall seconds | 0.693660 / 32.647 -> 0.681745 / 32.615 |
+| Mean mutation-to-received-event wall latency | 18.783ms -> 17.662ms |
+| Sampled cumulative session-render CPU | 0.29s -> 0.29s |
+| Sampled cumulative stream CPU | 0.37s -> 0.39s |
+
+VERIFIED: wire volume falls sharply; process CPU is essentially flat in these
+single samples (about 2.12% -> 2.09% of one core during changes), while row
+decomposition adds 0.06s sampled CPU. No CPU improvement is established. Process
+CPU includes fixture driving, reads, rendering, runtime/GC and profiling.
+Mutation-to-event latency is not pure render wall time, which was not separately
+instrumented. The two-byte initial difference was not isolated; fresh fixtures
+have different temporary identities and clock metadata. Identical-state en/ko
+regressions separately reconstruct full tree HTML and hashes byte-for-byte.
+
+The historical live baseline was 32 pushes of about 97KB in 34s. This fixture
+has a similar count/cadence but a larger tree, about 136KB HTML / 216KB escaped
+SSE per full event. INFERRED: it removes the same whole-tree wire waste; absolute
+bytes and the historical 70-106% daemon CPU are different workloads and were
+not remeasured live. Initial payload remains full.
+
+Evidence: `/tmp/tree-phase3-evidence/summary.md`; unchanged harness
+`measure-scratch.go` and `measure-overlay.json`; raw `{before,after}/measure.json`,
+`measure.log`, `change.pprof` and `change-top.txt`. Scratch tests were supplied
+through Go overlays from `/tmp`, not left in the repository.
+
+**Verification.** Every Go test used `GOPROXY=off GOSUMDB=off
+GOTOOLCHAIN=local`, `-count=1` and focused `-run` filters. Exact commands are in
+`/tmp/tree-phase3-evidence/tests/verification.md`; complete successful outputs
+are `tests/focused-green.log` (112.897s) and `tests/race.log` (20.231s).
+
+- Existing tree, region, stream, shared-render, transient-read, topic and rail
+  regressions passed, including exact `TestAgentBadgePopoverBrowser`,
+  `TestRailHoverUpdatesBrowser` and `TestRailDragLiveBrowser` (20/20 drops).
+- New tests cover en/ko HTML/hash parity, shared immutable decompositions,
+  nested-child-only and simultaneous parent/child deltas, SSE/WebSocket parity,
+  first-full reconnect with current hashes, legacy regions, shell/topology
+  fallback, failed writes and uncertain-baseline reset. Focused server race
+  tests passed.
+- Chromium exercised the production validator/merger against 24 malformed
+  payloads and real streamed updates: retained sibling/descendant identity,
+  canonical-input isolation, complete slot removal, open/full disclosure,
+  focus, tree-pane scroll, popover lifecycle, closed/hidden updates, accumulated
+  parent/child changes and permission counts. No page errors.
+- Two initial test-fixture failures were diagnosed before correction: an
+  embedded `Activity` struct literal and a missing extracted `treeInputHTML`
+  dependency in `TestTabLabelCount`. No behavioral assertion was weakened;
+  neither failure recurred. Failed logs and diagnosis are retained in `tests/`.
+- Ticket verification passed with the non-blocking Sage freshness advisory
+  explicitly accepted: this append records implementation evidence only; the
+  settled design, constraints and phase plans are unchanged. No new Sage
+  allocation or design review was introduced.
+- Independent one-pass lite review: **clean**, no findings. Report:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@97ab43fd/review-paths/5c879b06-01-tree-phase3-lite.md`.
+  The reviewer independently read the Git range, source/tests and evidence;
+  it did not rerun tests or recompute pixels.
+
+**Visual evidence.** Baseline captures preceded every source edit. Before and
+after full 1440x900 dark/light views preserve `#agpop` open with one row expanded;
+fixture clock labels differ outside the tree. Compared
+`/tmp/tree-phase3-evidence/after/expanded-dark-row.png` vs
+`/tmp/tree-phase3-evidence/before/expanded-dark-row.png`: **match**. Compared
+`/tmp/tree-phase3-evidence/after/expanded-light-row.png` vs
+`/tmp/tree-phase3-evidence/before/expanded-light-row.png`: **match**. Both 476x143
+row crops have **0 / 68,068 differing decoded pixels** and byte-identical PNGs.
+`pixel-comparison.json` and `visual-sha256.txt` retain the comparison and hashes;
+full views are `{before,after}/expanded-{dark,light}-1440.png` for MAIN inspection.
+
+**Read-only acquisition provenance requested by MAIN.** VERIFIED:
+`agents-plugin-tool/internal/mcp/worktree_tools.go:467-493` documents and executes
+existing-target reuse: `:482-486` switches to local
+`refs/heads/impl/develop/copy-equal-wound` when it exists; only the absent-target
+path at `:490` creates it from `base`. `reused:true` at `:429` describes the pooled
+worktree path, not a verified base OID. Hygiene at `:598-599` resets without a
+commit argument and keeps the selected branch tip. The return shape at `:21-41`
+contains no OID. Thus the observed old target HEAD is consistent with documented
+branch reuse, not a cached pool/origin ref replacing base resolution. The tool
+never claimed that SHA was current develop; that label came from the lead.
+Available evidence does not independently prove invocation-time local develop
+OID. No tooling fix, extra ticket or implementation expansion was made.
+
+Phase 1/2 Results and all phase plan text are unchanged. Phases 4-5 remain
+unimplemented; the ticket stays in `ready/`. No unresolved implementation or
+review finding. No full package/module suites, installation/download, external
+network, provider/harness launch, shared-daemon/board mutation, process signal,
+push, merge or CI was performed. MAIN owns integration.
+
 ### Phase 4: Entries row deltas
 
 Apply the same pattern to `entries`, keeping its title bar outside the
