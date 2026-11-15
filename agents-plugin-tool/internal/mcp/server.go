@@ -2304,7 +2304,7 @@ func (s *Server) callTool(ctx context.Context, req request) (resp response) {
 					mintRoot = rootOverride
 				}
 				parentKey = entry.key
-				topLevelLead = entry.parent == ""
+				topLevelLead = entry.entry().isTopLevelLead()
 			}
 		}
 		callerContext, planStem := renderPlanStem(name, callerContext, topLevelLead)
