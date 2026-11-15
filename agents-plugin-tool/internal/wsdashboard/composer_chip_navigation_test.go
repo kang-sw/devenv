@@ -27,10 +27,11 @@ El.prototype.closest=function(s){var m=/^\[([^\]]+)\]$/.exec(s);for(var n=this;n
 El.prototype.click=function(){if(this.events.click)this.events.click();handler({target:this});};
 Object.defineProperty(El.prototype,'textContent',{get:function(){return this._text||'';},set:function(v){this._text=v;this.children=[];}});
 var doc={createElement:function(t){return new El(t);},createTextNode:function(t){var n=new El('#text');n.textContent=t;return n;},addEventListener:function(k,fn){handler=fn;}};
+var cimgs=null,closeRequests=[],bselections=[];
 var cchips=new El('div'),bmentions=[{topic:'plan',id:'07',text:'one\n two'},{topic:'계획 "<&',id:'3',entry:'e8',text:'old version'},{topic:'plan',text:'topic only'}],wpicks=[],wconsoles=[];
 function chipList(){return [];}function topicNotes(){return [];}function inBoard(){return false;}function wsT(k){return k;}
 function effectJump(topic,id){jumps.push([topic,id]);}
-`+dashboardFuncs(t, "renderChips")+click+`
+`+dashboardFuncs(t, "renderChips", "renderSelectionChips")+click+`
 var original=JSON.stringify(bmentions);renderChips();
 var chip=cchips.children[0],open=chip.children[0],remove=chip.children[1];
 check('separate native buttons preserve keyboard activation',[open.tagName,open.type,remove.tagName,remove.type],['BUTTON','button','BUTTON','button']);
