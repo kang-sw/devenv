@@ -28,6 +28,14 @@ corrects the literal enum, launch admission, legacy defaults, storage and five-p
 scope below. The research ticket's Confirmed Decisions supply research-capture
 authority only; its narrative and the permission brief supply supporting evidence.
 
+## Execution Boundary (2026-11-15)
+
+MAIN authorizes Phase 1 documentation only in this invocation. Phase 2 and
+Decision 14's delivery boundary await the lead's check with EXEC4 against CSI
+(`261114-refactor-ws-common-session-interface`) Phase 1's merged admission
+sites. The contract below records intent and acceptance requirements; completing
+Phase 1 neither settles that coordination nor authorizes admission edits.
+
 ## Decisions
 
 1. **(998), corrected by MAIN 07:45:14 — common intent.** The literal enum is
@@ -114,8 +122,8 @@ authority only; its narrative and the permission brief supply supporting evidenc
     `POST /agents/workers/permission` for explicit `permission_level` and,
     for user full selection, `permission_full_ack`. These delegate to existing
     Runner owners; legacy URLs remain intact. On the inspected old router,
-    lead creation's nonempty action gives 405 (`http.go:150–154`), default
-    worker creation's nonempty id/empty action gives 405 (`http.go:175–180`),
+    lead creation's nonempty action gives 405 (`http.go:154–157`), default
+    worker creation's nonempty id/empty action gives 405 (`http.go:175–176`),
     and worker explicit selection plus `settings/permission` fall to 404
     (`http.go:229–230`). None reaches a creation/settings write. An intermediate
     server supporting default workers but not explicit selection must reject
@@ -165,7 +173,7 @@ behavior from a future implementation target, not completed compatibility tests.
 |---|---|---|
 | Existing `permission_mode`; old caller → new handler, old record → new reader | Creation, settings and accepted native reports write it (`internal/wsagent/runner.go#L630-L645,#L926-L944,#L2695-L2705`); launch reads it (`claude.go:108–119`); Record read/write is `record.go:278–301`. New reopen reads the same field. | **T0 target:** preserve omission/defaults and native calls; no rename or migration. |
 | New `permission.json` / `permission_level`; new selection writer → pinned old session writers → new reopen | New code writes only this sidecar. Current Record writes only `agent.json` (`internal/wsagent/record.go:277–303`); registration writes/removes only `registration.json` (`internal/wsdashboard/registry.go:282–328`). Label updates touch only `label.json` (`label_route.go:91–105`). Those writers leave the new bytes intact; new code must read them on reopen. Whole-directory pruning remains the existing lifetime (`registry.go:331–385`), not a permission-store migration. | **T0 storage candidate**, subject to pinned old-write/new-reopen and lifecycle fixtures. No overwrite/reconstruction or T2 claim. Missing sidecar preserves old sessions. Old launch enforcement is not implied by byte retention. |
-| New HTTP `permission_level` / `permission_full_ack` and distinct paths; old caller → new handler, new caller → old handler | Current typed request decode ignores unknown members (`internal/wsagent/http.go:268–286`), so explicit fields on default URLs alone are unsafe. On the pinned old router, `POST /agents/leads/permission` returns 405 (`http.go:150–154`), sibling default `POST /agents/workers` returns 405 (`http.go:175–180`), and sibling explicit `POST /agents/workers/permission` plus `POST /agents/<id>/settings/permission` return 404 (`http.go:229–230`). None reaches `CreateLead`, `Create` or `SetSettings`. New handlers reuse existing Runner/write gates. No old-server write; reopen does not replay requests. | **T0 extension target** with old/default calls unchanged and positive preflight. Explicit worker intent uses only `/agents/workers/permission`; refusal never retries on `/agents/workers` or another legacy URL. |
+| New HTTP `permission_level` / `permission_full_ack` and distinct paths; old caller → new handler, new caller → old handler | Current typed request decode ignores unknown members (`internal/wsagent/http.go:268–286`), so explicit fields on default URLs alone are unsafe. On the pinned old router, `POST /agents/leads/permission` returns 405 (`http.go:154–157`), sibling default `POST /agents/workers` returns 405 (`http.go:175–176`), and sibling explicit `POST /agents/workers/permission` plus `POST /agents/<id>/settings/permission` return 404 (`http.go:229–230`). None reaches `CreateLead`, `Create` or `SetSettings`. New handlers reuse existing Runner/write gates. No old-server write; reopen does not replay requests. | **T0 extension target** with old/default calls unchanged and positive preflight. Explicit worker intent uses only `/agents/workers/permission`; refusal never retries on `/agents/workers` or another legacy URL. |
 | New explicit worker client → intermediate default-worker-only server | The sibling's default route may exist before explicit selection support. Its handler must reject `/agents/workers/permission` before creating any session, rather than decode/discard selection on `/agents/workers`. This is a required intermediate-server fixture, not a claim about an uninspected released version. No creation/write on refusal, and no request replay on reopen. | **T0 target** only with zero creations on unsupported selection and no client fallback. Permission Phase 2 supplies the reusable contract; worker-profile Phase 1 owns both worker routes and these integration assertions. |
 | New `permission_levels` support member; new producer → old UI / new client → old choices | Existing `SupportHarness` is a response projection (`internal/wsagent/support.go:215–225`), serialized by choices (`support.go:400–413,619–622`); UI reads named harness/model/effort members (`internal/wsdashboard/assets/dashboard-leads.js:43–59`). Old UI ignores the additive member without writing it. New client treats absent member as unsupported; reopen reads it afresh from the current server. | **T0 target** for additive discovery and gated use, not inferred from availability/model support. No new manifest or stored support bit. |
 | Computed State `permission_level`, `permission_source`, `permission_enforcement`; new producer → old display | State is separate from Record (`internal/wsagent/runner.go:1053–1146`); JSON output is `http.go:288–304`. Old UI reads the same named native fields (`internal/wsdashboard/assets/dashboard-leads.js:22–26,92–110`), ignores new members and writes none. New reopen recomputes projections from selection and launch evidence. | **T0 target**: old native controls/display stay unchanged, not relabeled as common enforcement. No persisted snapshot/registration projection. A display regression is not accepted under owner 1050. |
@@ -457,14 +465,37 @@ coverage. Read complete output and reject empty selector runs.
   `permission_level` plus required full acknowledgement goes only to
   `/agents/workers/permission`.
 
+### Pinned fixture construction
+
 Pin the old writer/router to **90eacda7e4956aded76cfc092d20c41e76d2cc1a**.
-Retain exact old function/fixture provenance: registration replace/remove,
-Record round-trip and label update must not touch `permission.json`; then new
-reopen must recover identical current selection, including agent lowering.
-Cover hosted and CLI session-directory homes, missing sidecar/legacy no-writeback,
-unknown sidecar member preservation, corrupt/unreadable selection errors,
-stop/revive/restart, retained active hosted records and ordinary expired-directory
-pruning. Do not claim indefinite selection retention after session deletion.
+The following provenance was inspected in that Git object; paths are relative to
+`agents-plugin-tool/`. These are fixture definitions, not executed test results.
+
+| Planned fixture / assertion | Pinned implementation | Existing fixture anchor |
+|---|---|---|
+| `SidecarOldWriteNewReopen`: Record read/modify/write preserves the separate selection bytes. | `internal/wsagent/record.go`, `readRecord` / `writeRecord` (279–302), writing only `agent.json`. | `internal/wsagent/record_test.go`, `TestRecordUnknownMembersRoundTrip`. Its unknown-Record-member assertion is an anchor, not sidecar coverage. |
+| `SidecarOldWriteNewReopen`: registration replacement and removal leave selection intact, including a CLI home with no agent Record. | `internal/wsdashboard/registry.go`, `WriteRegistration` / `RemoveRegistration` (282–328), touching only `registration.json`. | `internal/wsdashboard/index_test.go`, `TestRegistrationRoundTripIgnoresUnknownFields`; add the removal case. |
+| `SidecarOldWriteNewReopen`: setting and clearing a label leave selection intact. | `internal/wsdashboard/label_route.go`, `writeSessionLabel` (93–105), touching only `label.json`. | `internal/wsdashboard/label_route_test.go`, `TestLabelRouteSavesShowsAndResets`. |
+| `SidecarLifecycle`: live hosted records retain selection; ordinary expired session-directory pruning removes it with the session. | `internal/wsdashboard/registry.go`, `PruneRegistrations` (347–385). | `internal/wsdashboard/index_test.go`, `TestPruneRegistrationsDropsOnlyExpiredSessions`, `TestPruneRegistrationsAgesRetiredLeadsByTheirRow`, `TestPruneRegistrationsSparesAgentConversations`. |
+| `RouteSupportAndSwap`: unsupported selection paths never reach creation/settings, with the status outcomes below. | `internal/wsagent/http.go`, `(*Runner).serve` dispatch (112–231) and permissive typed `decode` (268–286). | `internal/wsagent/lead_http_test.go`, `TestLeadControlRoutesTakeTheTrustedGate`; retain its local/own-Origin gate setup. |
+
+For the later implementation, retain exact pinned function bodies and required
+helpers in isolated test fixtures with their source path and full commit ID;
+compare them to the Git object rather than substituting the new writer/router.
+Use temporary session directories and fake backends/holders. No old executable,
+provider, installed harness or shared daemon is needed. Preserve the old route's
+JSON-body and trusted-gate prerequisites so a 403 does not masquerade as the
+expected unsupported-path refusal. Assert zero creation/settings calls and no
+new session/selection writes, not merely the response status.
+
+For each old-writer case, seed a current explicit selection (including a durably
+lowered value) and an unknown sidecar member, save the exact bytes, perform the
+pinned old write, and compare bytes before the new reader reopens. Assert that
+reopen reads the same current selection and that the unknown member survives a
+subsequent authorized update by the new writer. Separately cover missing sidecar
+with no legacy writeback, malformed/invalid and unreadable existing selections,
+stop/revive/restart, and hosted and CLI session homes. Selection retention ends
+with ordinary session deletion; old-binary enforcement is not established.
 
 Pin old HTTP route dispatch in a fixture and assert these decisions with
 **zero creation/settings calls**, not just status checks:
