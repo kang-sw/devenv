@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "ws dashboard",
-  "short_name": "ws dashboard",
+  "name": "Werkschaft (alpha)",
+  "short_name": "Werkschaft (alpha)",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

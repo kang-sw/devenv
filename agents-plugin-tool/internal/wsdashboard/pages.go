@@ -1349,14 +1349,14 @@ func (d *Daemon) handleSessionPage(w http.ResponseWriter, r *http.Request, reply
 // no view, the root has an empty header and no selected session.
 func (d *Daemon) serveShell(w http.ResponseWriter, r *http.Request, view *SessionView, src string) {
 	lang, pref := requestLang(r)
-	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), Src: src, Title: "ws dashboard", Version: d.endpoint.Version, LAN: d.lanAccessFor(r)}
+	page := shellPageData{Lang: lang, LangPref: pref, Theme: requestTheme(r), SysOpen: localViewer(r), Src: src, Title: "Werkschaft (alpha)", Version: d.endpoint.Version, LAN: d.lanAccessFor(r)}
 	if view != nil {
 		page.RID = view.ReplyID
 		page.Title = view.Label
 		if page.Title == "" {
 			page.Title = view.ReplyID
 		}
-		page.Title += " - ws dashboard"
+		page.Title += " - Werkschaft (alpha)"
 	}
 	rail, err := renderRailRegion(d.railView(d.pagesIn(lang)), lang)
 	if err == nil {
