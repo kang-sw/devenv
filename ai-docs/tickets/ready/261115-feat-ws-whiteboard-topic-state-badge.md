@@ -78,13 +78,19 @@ Verification must capture the result and compare it side by side with the releva
 - MAIN's 02:30:39/02:32:55 gate supersedes the initial base: the lead must integrate `55b50bd53` (or its permitted docs/desktop-only equivalent) before final affected checks/review. Asset-split 793 retains first integration priority; do not import its unmerged branch or pins/cache. At this committed/quiescent boundary the lead owns synchronization; the worker performs no merge.
 - Pending: actual integrated-head affected Go/JavaScript/whole-i18n checks; live badge/toolbar-gap browser tests and light/dark responsive captures compared side by side with both tracked references; independent lite implementation review; phase Result and closure. Existing pre-checkpoint success is historical, not evidence for those pending integrated inputs.
 
+## Execution Update - 2026-11-15
+
+MAIN03:08:28 explicitly removed the failed 793 integration hold. MAIN then authorized surgical completion of its existing merge: `e78b12711` has exact parents `f5b6b5022` and `ddf95a78e42108133d48056534375752f83a98b9`. Only `ago.js` and `page.css` conflicted; both incoming body-age/opaque-frame synchronization and badge behavior were retained, with one clock sample per refresh. Incoming overview-active filtering/search semantics remain intact. No unmerged793 material was imported.
+
+MAIN03:15:41 trimmed acceptance to relevant badge/toolbar checks, whole i18n, one sanity capture and lite review. MAIN03:17:55 superseded the visual proof gate: relevant checks then head; owner on-screen acceptance follows MAIN's merge/swap, without further screenshot retries or viewport matrices. The completed sanity capture remains historical evidence, not an owner acceptance claim. MAIN03:23:55 explicitly prohibited another sync for `b57dff0be`; MAIN owns its subsequent three-way merge and scoped checks. Raw evidence stays under `/tmp`, not in this ticket's asset directory.
+
 ## Phases
 
 ### Phase 1: Render authoritative topic state and live ETA badges
 
 Implement the approved state and implementing-owner/ETA badges in the topic header using the existing page metadata. Initialize elapsed/overdue presentation immediately, update it with one document-owned timer, and reconcile it with refreshed state/run/ETA metadata without resetting elapsed time or retaining stale badges after transitions/close. Reorder both toolbar presentations to the lifecycle order confirmed by (874), retaining existing filter identity and behavior. Also fix the MAIN02:20:27 owner-reported sticky-toolbar top-gap leak with a minimal opaque backdrop covering the offset and rounded top corners, without changing toolbar/control/filter semantics.
 
-Verification:
+Verification (the execution update above supersedes the broader capture/matrix gate; remaining owner visual acceptance is MAIN-owned after merge/swap):
 
 - Cover all four state labels, implementing owner escaping, legacy absence, diagnostics, malformed/missing timestamp metadata, state transitions and close/reset. Include the run identity and start remaining unchanged across total-ETA extension, with the displayed ETA/deadline updating.
 - Use controlled time to verify initialization, elapsed progression and the confirmed floor/clamp rule: before start displays zero for otherwise valid metadata; at start displays zero; at deadline minus 1ms, exactly deadline and deadline plus 59,999ms there is no overdue treatment or suffix; at deadline plus 60,000ms the display gains `(+1)` and overdue treatment. Check subsequent minute increments and ETA extensions that clear overdue presentation without resetting elapsed/start. Verify removal/reinitialization after replacement or run change. Verify that repeated mount/refresh does not multiply timers or retain detached topic nodes; no scheduler/nudge mutation may result.

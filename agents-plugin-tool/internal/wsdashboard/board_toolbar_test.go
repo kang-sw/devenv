@@ -7,6 +7,19 @@ import (
 	"testing"
 )
 
+func TestBoardToolbarBackdrop(t *testing.T) {
+	css := mustAsset(t, "dashboard.css")
+	rule := regexp.MustCompile(`(?s)\.board-toolbar\[data-floating\]::before\s*\{([^}]+)\}`).FindStringSubmatch(css)
+	if len(rule) != 2 {
+		t.Fatal("floating toolbar needs an opaque top-gap backing")
+	}
+	for _, want := range []string{"position: absolute", "inset: calc(-12px - var(--toolbar-top, 0px)) 0 0", "background: var(--wb-bg)", "z-index: -1"} {
+		if !strings.Contains(rule[1], want) {
+			t.Errorf("backdrop missing %q", want)
+		}
+	}
+}
+
 func TestBoardToolbarPlacementAndCounts(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	runNode(t, "board toolbar", "var CARDS = "+string(cards)+";\n"+cardsDOM+`

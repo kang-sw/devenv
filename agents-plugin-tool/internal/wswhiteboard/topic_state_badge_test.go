@@ -25,7 +25,7 @@ class E {
  querySelectorAll(s){return this.children.flatMap(n=>(n.matches(s)?[n]:[]).concat(n.querySelectorAll(s)));}
  querySelector(s){return this.querySelectorAll(s)[0]||null;}
 }
-var document=new E(),window={wsT:true},now=Date.parse('2026-11-15T00:00:00Z'),timers=[];
+var document=new E(),window={wsT:true,addEventListener:()=>{}},now=Date.parse('2026-11-15T00:00:00Z'),timers=[];
 document.createElement=()=>new E();
 Date.now=()=>now;
 function setInterval(fn,ms){timers.push({fn,ms});return timers.length;}
