@@ -812,13 +812,43 @@ historical, superseded by MAIN's later bounded implementation authority.
   independent reviewer read the actual allocated deltas and current merge seams;
   it did not rerun tests or claim runtime acceptance. Findings:
   `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@721a59b4/review-paths/9749f456-01-261114-live-summary-967-compat-lite.md`.
-  No broad re-sweep or additional review round was run. MAIN owns the one final
-  fresh develop sync, after which only affected verification remains before the
-  retained implementation head is handed back; landing is still lead-owned.
+  No broad re-sweep or additional review round was run. MAIN completed the one
+  final fresh develop sync at `9320cd230`; affected verification below completed
+  afterward. Implementation handoff is complete; acceptance, landing and ticket
+  closure remain lead-owned.
 
 omitted: Full-suite/runtime/provider/Windows/whole-page visual acceptance; new
 procedures or raw evidence packets; ticket closure; self-initiated integration
 or a parent-branch merge.
+
+## Final pre-head verification - 2026-11-15
+
+MAIN merged exact `f4de6df7702e5ce1c626d2a0002bb750f443129e` into `e7a15cf056`
+at `9320cd2300afab9240e1d5051621911564cfcd30`, conflict-free. Inspecting only that
+actual delta established the affected seams: shared session/wake templates,
+board-nudge presentation, composer/board assets, daemon wiring, locales and board
+badge markup. Search-answer code removal required native package recompilation;
+675's observer, reducer, immutable store, MCP filters and native writer were not
+changed. The normal summary insertion/turn wrapper remains intact, and the daemon
+still binds AgentLiveHost before runner start.
+
+All four commands passed under exact offline Go 1.26.2 with
+`go test ./internal/<package> -run '<selector>' -count=1 -vet=off -p=1 -parallel=1 -timeout=120s -v`.
+Complete stdout/stderr was read; **44 top-level passes, zero skips**:
+
+```text
+wsdashboard (23): ^Test(ReasoningSummary(LivePlacementPlainTextAndStableKey|FallbackExactLegacyAndInvalidHistory|HistoryImmutableTurnAssociationAndAttempts|PreservesUserRolesAndUnifiedHistoryKeys)|AgentLiveHostIsBoundBeforeRunnerStarts|Conversation(MailWake|BoardNudge).*|ConversationPresentation(MailKeepsAmbiguousAndRepeatedRecords|PeerNoteIsDisplayOnly|SourceLabelsRequireTypedCause|InboxUserKeepsAnswersTextAndImage|WhiteboardFoldAndTargets)|EntryRendersOnceThroughTheCache|StreamingTickChangesOnlyTheLiveRegion|DashboardSourceAssembly|InlineCapsules.*|OverviewPageIntegration|BoardHistoryHooksSurroundSSESwap)$
+wsagent (2): ^TestSummary(RunnerSnapshotIsRAMOnlyUntilNaturalCommit|RecordWriterReopenBlanksLiveUntilNextEvent)$
+wsi18n (15): ^Test(LanguagesAreDiscoveredFromTables|TFallsBackToEnglishForAMissingKey|PluralAndFill|Resolve|ClientTableHoldsOnlyClientKeysWithEnglishFallback|ScriptEscapesAndDefaults|SubsetScriptHoldsOnlyThePrefixKeys|ScriptExceptMultiplePrefixes|ScriptExceptLeavesOutOnlyThePrefixKeys|EveryUsedKeyIsInTheEnglishTable|EveryEnglishKeyIsUsed|OtherTablesHoldOnlyEnglishKeysAndNames|OtherTablesHoldEveryEnglishKey|PlaceholdersMatchEnglish|PluralKeysComeInPairs)$
+wswhiteboard (4): ^Test(TopicStateViewResearchingBadgeMetadata|TopicStateBadgeResearchingMetadata|TopicStateBadgeClockAndReconciliation|HistoryAnswersUseSingleLineChipsAndCompleteDisclosure)$
+```
+
+No production or test adjustment was necessary after this sync. The worker's
+post-sync diff is this ticket evidence only; all imported source/test changes
+remain untouched. Reuse earlier unaffected scoped results and the sole clean
+967 Lite at `76dff56c2` (allocated parent-relative deltas recorded above); do not
+claim a post-sync independent re-review. No broader restart, another sync,
+additional Lite, runtime operation or raw evidence packet occurred.
 
 ## Historical receiver checkpoint - 2026-11-15
 
