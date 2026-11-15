@@ -6,22 +6,21 @@ import (
 	"testing"
 )
 
-func TestSelectionNoteIsEditableTextWithSelfContainedContext(t *testing.T) {
-	src := dashboardFuncs(t, "selectionNote")
-	runNode(t, "selection note context", `
-var bad = [];
-function wsT(k) { return { "js.wbmention.context": "Selected text:", "js.wbmention.note": "Note:" }[k]; }
-function check(what, got, want) { if (got !== want) bad.push(what + ": " + JSON.stringify(got)); }
-`+src+`
-var ms = [{ topic: "plan", id: "3", entry: "e7", text: "first <quote>\nsecond line" }, { topic: "plan", entry: "e8", text: "other excerpt" }];
+func TestSelectionNoteStaysInsideItsGroup(t *testing.T) {
+	runNode(t, "selection grouped context", selectionCodecSource(t)+`
+var assert = require('assert');
+var ms = [{topic:"plan",id:"3",entry:"e7",text:"first <quote>\nsecond line"},{topic:"plan",entry:"e8",text:"other excerpt"}];
 var before = JSON.stringify(ms);
-check("empty note keeps plain mention behavior", selectionNote(ms, "  \n "), "");
-var want = "Selected text:\n[plan] (3) e7\n> first <quote>\n> second line\n\n[plan] e8\n> other excerpt\n\nNote:\nreview both";
-check("one note follows the whole ordered bundle", selectionNote(ms, " review both "), want);
-check("source objects unchanged", JSON.stringify(ms), before);
-check("identical excerpts from different entries remain distinguishable", selectionNote([{topic:"plan",entry:"e9",text:"other excerpt"}], "another note"), "Selected text:\n[plan] e9\n> other excerpt\n\nNote:\nanother note");
-check("note markup is ordinary text after context, never mention syntax", selectionNote([{topic:"t",text:"x"}], "<wb:mention note=\"no\">"), "Selected text:\n[t]\n> x\n\nNote:\n<wb:mention note=\"no\">");
-process.stdout.write(bad.join("\n"));
+["", " review both ", '<wb:mention note="no">'].forEach(function (comment) {
+  var group = {mentions:ms,comment:comment,images:[]};
+  var text = selectionPrefix([group]);
+  assert.strictEqual((text.match(/<wb:comment>/g)||[]).length, 1);
+  assert.deepStrictEqual(splitSelectionText(text).groups, [group]);
+  assert.strictEqual(splitSelectionText(text).text, "");
+});
+assert.strictEqual(JSON.stringify(ms), before);
+var other = {mentions:[{topic:"plan",entry:"e9",text:"other excerpt"}],comment:"another note",images:[]};
+assert.deepStrictEqual(splitSelectionText(selectionPrefix([{mentions:ms,comment:"one",images:[]},other])).groups.map(function(s){return s.comment;}), ["one","another note"]);
 `)
 }
 
@@ -40,7 +39,7 @@ func TestBoardMentionFromSelection(t *testing.T) {
 	}
 	js := string(data)
 	var src strings.Builder
-	for _, name := range []string{"mentionOf", "selEl", "entryAt", "itemIdAt", "endRect", "selectionMentions", "hostMention", "frameMention", "validMentions"} {
+	for _, name := range []string{"mentionOf", "selEl", "entryAt", "itemIdAt", "endRect", "selectionMentions", "hostMention", "frameMention", "validMentions", "addMention"} {
 		// A one-line function first, so the multi-line pattern never runs on
 		// into the next function.
 		block := regexp.MustCompile(`\n  function ` + name + `\([^)]*\) \{[^\n]*\}\n`).FindString(js)
@@ -184,6 +183,36 @@ check("entry spans across topics retain each topic", hostMention().ms, [
   { topic: "ship-gate", text: "version", entry: "e9" }, { topic: "plan", text: "other", entry: "e10" }
 ]);
 
+// Synthetic ranges, not a reconstruction of the historical keyboard gesture.
+var quoteEntry = t1.add(new El("div", "entry", {"data-entry":"e30"}));
+var quoteText = new Text(quoteEntry, "xxSecond immutable quote");
+var planEntry = t1.add(new El("div", "entry", {"data-entry":"e31"}));
+var planText = new Text(planEntry.add(new El("h2")), "Plan heading tail");
+var bmentions = [1,2,3,4], bselections = [], rid = "session", mcomposing = false;
+var mnote = {value:""}, ctext = {focus:function(){}}, mpend = null;
+function renderChips() {} function queueDraft() {}
+window.getSelection = function() { return {removeAllRanges:function(){}}; };
+function sourceCount() { return bmentions.length + bselections.reduce(function(n,s){return n+s.mentions.length;},0); }
+var single = selectionMentions(new Range(quoteText,2,quoteText,24),t1,t1,"ignored");
+check("precise single-entry clipped source", single, [{topic:"ship-gate",text:"Second immutable quote",entry:"e30"}]);
+check("before push retains four existing source chips", sourceCount(), 4);
+mpend = {rid:rid,ms:single,images:[]}; addMention();
+check("initial push retains expected five source chips", [sourceCount(),bselections.length,bselections[0].comment], [5,1,""]);
+addMention();
+check("repeat without a new push stays five", [sourceCount(),bselections.length], [5,1]);
+var cross = selectionMentions(new Range(quoteText,2,planText,4),t1,t1,"ignored");
+check("separate cross-entry range pins quote AND Plan", cross, [{topic:"ship-gate",text:"Second immutable quote",entry:"e30"},{topic:"ship-gate",text:"Plan",entry:"e31"}]);
+check("separate cross-entry range has two sources", cross.length, 2);
+// Text-endpoint bounds exclude both an earlier sentence prefix and an
+// adjacent text element in the same immutable entry. This pins the supplied
+// range, not the owner's unrecorded native gesture or reported corruption.
+var boundedEntry = t1.add(new El("div", "entry", {"data-entry":"e40"}));
+var boundedText = new Text(boundedEntry.add(new El("p")), "prefix Complete sentence ending.");
+new Text(boundedEntry.add(new El("span")), " STRAY next element");
+var bounded = selectionMentions(new Range(boundedText,7,boundedText,boundedText.nodeValue.length),t1,t1,"ignored");
+check("complete sentence keeps exact endpoints without adjacent word", bounded, [{topic:"ship-gate",text:"Complete sentence ending.",entry:"e40"}]);
+window.getSelection = function() { return sel; };
+
 var collapsed = t1.add(new El("details", "system-run")); collapsed.open = false;
 var summaryText = new Text(collapsed.add(new El("summary")), "system events 1");
 var invisible = collapsed.add(new El("div", "entry", { "data-entry": "e20" }));
@@ -193,7 +222,7 @@ var controlText = new Text(t1.add(new El("button")), "Load older");
 sel = nativeSelection(summaryText, 0, controlText, controlText.nodeValue.length);
 check("collapsed entries and script text between visible nodes never leak", hostMention().m, { topic: "ship-gate", text: "system events 1\nLoad older" });
 
-var pending = null, mpend = null;
+var pending = null; mpend = null;
 function placeMention(p) { pending = p; mpend = p; }
 function hideMention() { pending = null; mpend = null; }
 var frame = oldPanel.add(new El("iframe", "doc-frame", { "data-entry": "e7", "data-topic": "ship-gate" }));

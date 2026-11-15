@@ -127,7 +127,7 @@ func TestSlashPickerListsAndPicks(t *testing.T) {
 	if !strings.Contains(dash, "(mention && mention.key(e)) || (slash && slash.key(e))") {
 		t.Error("the composer's keydown does not hand keys to the slash picker")
 	}
-	runNode(t, "slash picker", slashDOM+mention+slashPrelude+slashSection(t, dash)+composerFunc(t, dash, "sendMessage")+`
+	runNode(t, "slash picker", selectionCodecSource(t)+slashDOM+mention+slashPrelude+`var bselections = [], mpend = null;`+slashSection(t, dash)+composerFunc(t, dash, "sendMessage")+`
 var pop = pops()[0];
 check("the picker is attached", !!slash, true);
 
@@ -208,7 +208,7 @@ func TestSlashCommandRestoresAsSelection(t *testing.T) {
 	mention, dash := pageScripts(t)
 	restore := composerFunc(t, dash, "restoreHeld") + composerFunc(t, dash, "restoreHeldNow") + composerFunc(t, dash, "validCloseRequests") + composerFunc(t, dash, "validPicks") + composerFunc(t, dash, "validConsoles")
 	send := composerFunc(t, dash, "sendMessage")
-	runNode(t, "slash restore", slashDOM+mention+slashPrelude+`
+	runNode(t, "slash restore", selectionCodecSource(t)+`var bselections = [], mpend = null;`+slashDOM+mention+slashPrelude+`
 var imgSeq = 0, chips = {}, bmentions = [], closeRequests = [], wpicks = [], wconsoles = [], holdSync = false, MARKER = "\\[Image #([1-9][0-9]{0,5})\\]";
 function allNums() { return markerNums(ctext.value); } function syncMarkers() {}
 function markerNums(text) { var out = {}, re = new RegExp(MARKER, "g"), m; while ((m = re.exec(text))) out[+m[1]] = true; return out; }
