@@ -127,6 +127,42 @@ The bounded approval below does not authorize general rollback or a new API.
 | risk.test | high | clean/dirty refusal byte preservation, stale records and interleaving require new regressions beyond own-source fixtures |
 | risk.security_or_contract | high | the settled branch/caller predicate must preserve legacy permitted merges and worker own-checkout moves without a new required argument |
 
+## Implementation Checkpoint (2026-11-15)
+
+- Shared guard and merge integration: `01f878689`. The internal
+  `guardOccupiedRoot(ctx, runner, root, allowedBranches...)` in
+  `agents-plugin-tool/internal/mcp/occupied_root.go` observes symbolic HEAD,
+  rejects other `impl/` checkouts, and fails closed on inspection errors.
+  Merge passes its resolved source and target; the follow-on ticket consumer
+  must retain its approved parented-session exception outside this guard and
+  call it with no allowed branches for parent-less callers. No ticket-write
+  dispatch behavior is changed here.
+- Regression coverage in `git_merge_occupied_root_test.go` snapshots all file
+  bytes, including Git admin files, across clean and staged/unstaged/untracked
+  refusals, rootless branches, packed refs, missing/stale leases, a checkout
+  interleaving during the final tip check, and MCP calls from parent-less and
+  parented keys. It also covers allowed source/target checkouts, inspection
+  failures, and non-waivable occupancy with release acknowledgement.
+- VERIFIED: from `agents-plugin-tool/`,
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local go test ./internal/mcp -run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|ImplMerge|GenericMerge|GitMerge)' -count=1 -timeout=8m`
+  passed (`ok`, 422.478s). The narrower new guard/occupancy/banner run with
+  `-run '^Test(GuardOccupiedRoot|OccupiedRootAnnouncement|ImplMergeOccupiedRoot)' -count=1 -v -timeout=8m`
+  passed (`ok`, 25.555s). An earlier affected run exceeded the shell's 180s
+  budget; the same suite passed with a 600s shell budget (184.940s).
+- Independent Lite review has not run. Per MAIN coordination, pause at the
+  clean implementation commit before review so MAIN can synchronize latest
+  `develop`; do not move HEAD during that synchronization. The intended fresh
+  reviewer scope is the Git-computed ticket diff, guard ordering and exact
+  predicate, refusal byte preservation and diagnostics, allowed merge paths,
+  and regression integrity. Ticket verification passed with a Sage freshness
+  warning, accepted because this checkpoint adds evidence without changing the
+  approved decisions or phase plan. Full `go test ./...` remains pending; coordination
+  limited this checkpoint to bounded local regressions.
+- Implementer-leaf rendering was refused by the host with
+  `child capability exceeds parent ceiling (ws__session_request_hire, ws__session_roster)`.
+  The bounded regression leaf ran directly; no permissions or runtime were
+  changed, and independent review remains required rather than self-review.
+
 ## Phases
 
 ### Phase 1: Refuse occupied-root merge switches before mutation
