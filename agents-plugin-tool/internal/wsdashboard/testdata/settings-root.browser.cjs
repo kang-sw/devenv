@@ -33,6 +33,7 @@ const [base, emptyBase] = process.argv.slice(2);
     page.on('pageerror', e => errors.push(e.message));
     const current = () => page.frameLocator('iframe.sframe.on');
     const gear = page.locator('.settings-toggle');
+    const editor = '#ctext + .wsc-editor';
     const dialog = page.locator('#gmenu');
     async function openSettings() {
       if (!await gear.isVisible()) await page.locator('#railbtn').click();
@@ -43,7 +44,9 @@ const [base, emptyBase] = process.argv.slice(2);
       await current().locator('#grid').waitFor();
       assert.equal(await page.locator('html').getAttribute('data-rid'), '');
       assert.equal(await page.locator('.rs.cur').count(), 0);
-      assert.equal(await current().locator('#grid').evaluate(e => e.children.length), 0);
+      // The empty main panel holds only the landing lockup (d2921cf02 puts
+      // the landing inside #grid); no session card is mounted.
+      assert.deepEqual(await current().locator('#grid').evaluate(e => [...e.children].map(c => c.className)), ['dlanding']);
       assert.equal(await current().locator('[data-region="sessions"], #finding, #composer').count(), 0);
     }
     await page.goto(base + '/');
@@ -64,7 +67,10 @@ const [base, emptyBase] = process.argv.slice(2);
     assert.equal(await gear.getAttribute('aria-expanded'), 'false');
 
     await page.locator('.rl[href="/s/livesession"]').click();
-    await current().locator('#ctext').waitFor();
+    // #ctext stays the composer's value owner but is a hidden backing field
+    // under its rich editor sibling (44d01be77): wait for and type into the
+    // visible editor, and read the canonical value from the backing field.
+    await current().locator(editor).waitFor();
     assert.equal(await page.locator('html').getAttribute('data-rid'), 'livesession');
     const oldHint = await current().locator('#ctext').getAttribute('placeholder');
     await openSettings();
@@ -78,7 +84,7 @@ const [base, emptyBase] = process.argv.slice(2);
     assert.equal(await page.locator('#gmenu [data-layout="tabs"]').getAttribute('aria-pressed'), 'true');
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
     await page.keyboard.press('Escape');
-    await current().locator('#ctext').fill('Preserve this cached draft');
+    await current().locator(editor).fill('Preserve this cached draft');
     await page.goBack();
     await page.waitForURL(base + '/');
     await rootIsEmpty();
@@ -89,9 +95,9 @@ const [base, emptyBase] = process.argv.slice(2);
     assert.equal(await page.locator('html').getAttribute('data-lang'), 'en');
     await page.keyboard.press('Escape');
     await page.locator('.rl[href="/s/livesession"]').click();
-    await current().locator('#ctext').waitFor();
+    await current().locator(editor).waitFor();
     assert.equal(await current().locator('#ctext').inputValue(), 'Preserve this cached draft');
-    await current().locator('#ctext').fill('');
+    await current().locator(editor).fill('');
     await page.reload();
     await current().locator('#grid[data-layout="tabs"]').waitFor();
     assert.equal(await page.locator('html').getAttribute('data-lang'), 'ko');
@@ -113,7 +119,9 @@ const [base, emptyBase] = process.argv.slice(2);
     assert.ok(gearBox.x >= footer.x && gearBox.x < meterBox.x, 'gear is left of usage');
     await page.locator('#settings-close').click();
     await page.locator('.usage-toggle').click();
-    await page.getByRole('dialog', { name: 'Plan usage', exact: true }).waitFor({ state: 'visible' });
+    // The page is Korean by now (#glang above); the popup's label is
+    // localized (5fb017bc9), so it is js.usage.heading in ko.
+    await page.getByRole('dialog', { name: '플랜 사용량', exact: true }).waitFor({ state: 'visible' });
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('.usage-toggle').getAttribute('aria-expanded'), 'false');
 
@@ -157,7 +165,7 @@ const [base, emptyBase] = process.argv.slice(2);
       tab.on('pageerror', e => lockedErrors.push(e.message));
       await tab.goto(base + '/');
       await tab.locator('.rl[href="/s/livesession"]').click();
-      await tab.frameLocator('.sframe.on').locator('#ctext').waitFor();
+      await tab.frameLocator('.sframe.on').locator(editor).waitFor();
       const cached = tab.frame({ url: base + '/s/livesession?frame=1' });
       await tab.goBack();
       await tab.frameLocator('.sframe.on').locator('#grid').waitFor();
@@ -173,14 +181,16 @@ const [base, emptyBase] = process.argv.slice(2);
       await tab.goForward();
       await cached.goto(base + '/s/livesession?frame=1');
       await cached.locator('#grid[data-layout="tabs"]').waitFor();
-      const textarea = cached.locator('#ctext');
-      await textarea.waitFor();
-      await textarea.fill('Actual send-key mode');
-      await textarea.press('Enter');
+      // Keys go to the visible rich editor; the hidden #ctext backing field
+      // keeps the canonical value (44d01be77).
+      const textarea = cached.locator('#ctext'), box = cached.locator(editor);
+      await box.waitFor();
+      await box.fill('Actual send-key mode');
+      await box.press('Enter');
       assert.equal(await textarea.inputValue(), 'Actual send-key mode\n');
       assert.equal(sends.length, 0, failure + ': plain Enter must not send in modifier mode');
       const sent = tab.waitForResponse(r => new URL(r.url()).pathname === '/s/livesession/message');
-      await textarea.press('Control+Enter'); await sent;
+      await box.press('Control+Enter'); await sent;
       await cached.waitForFunction(() => document.getElementById('ctext').value === '');
       assert.equal(sends.length, 1, failure + ': modifier Enter sends despite failed persistence');
       await tab.locator('#gear').click();
@@ -188,9 +198,9 @@ const [base, emptyBase] = process.argv.slice(2);
       await tab.locator('#gmenu [data-input="enter"]').click();
       await cached.locator('#grid[data-layout="split"]').waitFor();
       await tab.keyboard.press('Escape');
-      await textarea.fill('Enter sends again');
+      await box.fill('Enter sends again');
       const sentAgain = tab.waitForResponse(r => new URL(r.url()).pathname === '/s/livesession/message');
-      await textarea.press('Enter'); await sentAgain;
+      await box.press('Enter'); await sentAgain;
       assert.equal(sends.length, 2, failure + ': active-frame mode changes immediately');
       assert.deepEqual(lockedErrors, []);
       assert.deepEqual(locked.serviceWorkers(), []);
