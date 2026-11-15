@@ -836,7 +836,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T04:23:07Z",
+        "touched_at": "2026-11-15T04:23:56Z",
         "impl": {
           "branch": "impl/develop/crier-scoop-panic"
         }
