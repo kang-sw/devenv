@@ -213,3 +213,60 @@ publication, adoption/rename/close/label paths, and scoped folder/race/MCP tests
 with offline Go flags. Capture before/after atomic replacement counts and raw
 evidence in `/tmp/exec5/perfD/`. Do not touch the shared daemon, run a daemon on
 real state, kill processes, push, or run the full dashboard package.
+
+### Result (123594fae) - 2026-11-15
+
+- **VERIFIED:** implemented Phase 2 in `123594fae`. Exact serialized topic
+  metadata is compared with the current file under flock; only unchanged,
+  stable mappings are omitted from pending intent/publication
+  (`wswhiteboard/folders.go:685-702`). The Decisions section records the
+  comparison-source trade-off, recovery argument and directional T0 verdict.
+  Phase 1's plan and Result are byte-for-byte unchanged.
+- **VERIFIED:** the same single-document mutation on a 112-topic fixture
+  performs **112 -> 1 topic metadata replacements**, **115 -> 4 total atomic
+  replacements**, and carries **112 -> 1 pending topic writes**. Pending intent
+  size is **24,374 -> 7,164 bytes**; neither arm appends a log. The other three
+  replacements are pending.json, session meta.json and committed.json. Counts
+  use existing post-replacement Fault boundaries, inspect the durable intent,
+  and check file identities, not merely final byte equality
+  (`wswhiteboard/folders_writes_test.go:34-117`; `folders.go:927`). Initial
+  fixture creation, lock opens, pending removal and append fsyncs are excluded.
+- **VERIFIED:** document/item changes each replace only their topic metadata;
+  session-only and log-only updates replace no topic metadata (three atomic
+  replacements total). New topics, adoption, label changes, close/reopen, and
+  rename to a new directory still publish metadata. An identical orphan at a
+  newly assigned path does not suppress publication, and equivalent but
+  byte-different committed JSON is rewritten to the planned exact bytes
+  (`wswhiteboard/folders_writes_test.go:87-117,172-239`). The log-selection
+  condition, including zero-length initialization, remains unchanged
+  (`folders.go:681-684`).
+- **VERIFIED:** crashes at intent installation, partial log append, topic
+  metadata publication, session metadata publication and receipt/cleanup
+  recover the exact 112-topic state on two consecutive opens while retaining
+  the other 111 metadata file identities. Pending retains all 112 refs and
+  just one topic write; the durable-decision observer runs exactly once
+  (`wswhiteboard/folders_writes_test.go:120-170`). Existing exhaustive folder
+  recovery/observation tests also pass. Replay still precedes readState and
+  publishes changed topic bytes before session metadata/receipt
+  (`folders.go:306-324,727-820`).
+- **VERIFIED:** from `agents-plugin-tool`, every Go command prefixed with
+  `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`:
+  - `go test ./internal/wswhiteboard/ -run 'Folder|Open|Store|Recover|Replay|Pending|Crash' -count=1 -v`:
+    PASS (128.006 s).
+  - `go test -race ./internal/wswhiteboard/ -run 'Folder|Open|Store|Recover|Replay|Pending|Crash' -count=1 -v`:
+    PASS (136.809 s; concurrent with the preceding run).
+  - `go test ./internal/wswhiteboard/ -run '^TestFolderChangedTopicMeta' -count=1 -v`:
+    PASS (46.988 s).
+  - `go test ./internal/mcp/ -run 'Whiteboard' -count=1 -v`:
+    only the owner-declared pre-existing
+    `TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation` failure
+    (`mcp/whiteboard_effects_test.go:154`, extra topic-state event; 91.921 s).
+  - The same MCP selection with
+    `-skip '^TestWhiteboardEffectsKnownCreationBatchAndLegacySeparation$'`:
+    PASS (85.939 s). No assertion was weakened.
+- Raw source snapshots, commands, counting methodology, before/after output
+  and test logs are in `/tmp/exec5/perfD/` (machine-local evidence). No dashboard
+  package tests or daemon lifecycle operations were run, and nothing was
+  pushed. Phase 2 has no unresolved implementation issue; the known MCP red
+  remains outside scope. Live fseventsd/daemon CPU improvement is **INFERRED**,
+  not measured: the shared runtime was not rebuilt or replaced.
