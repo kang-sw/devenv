@@ -96,6 +96,18 @@ h=board(row(10,50)+gap(row(11,600)+row(12,500,panel)+row(13,100),false)+row(14,5
 check('pending window survives a swap',h._wbHistoryPending.length,1);
 h.querySelector('.doc-frame').style.height='500px';h._wbHistoryObserver.fn();flush();check('straddling rendered panel completes',[h._wbHistoryPending.length,liveIDs(h)],[0,['e10','e11','e12','e14']]);
 h.querySelector('.doc-frame').style.height='1800px';h._wbHistoryObserver.fn();flush();check('late height never evicts or adds',liveIDs(h),['e10','e11','e12','e14']);
+// An offscreen frame can stall the initial bottom window in the same gap
+// as a navigation/reload target. Admit that target without canceling fill.
+h=board(gap(rows(1,10,400)+row(12,500,panel),true)+row(14,50));window.wbHistory.init(document);
+h._wbHistoryFilling=true;h._wbHistoryObserver.fn();flush();
+check('initial fill waits for admitted frame',[h._wbHistoryPending.length,liveIDs(h)],[1,['e12','e14']]);
+var initialWindow=h._wbHistoryPending[0];
+var immediate=window.wbHistory.loadTarget(document,'e10');
+check('navigation admits target despite pending initial fill',[immediate&&immediate.id,liveIDs(h)],['e10',['e10','e12','e14']]);
+check('navigation retains unfinished initial window',h._wbHistoryPending[0]===initialWindow,true);
+h.querySelector('.doc-frame').style.height='500px';h._wbHistoryObserver.fn();flush();
+h._wbHistoryObserver.fn();flush();
+check('initial fill still reaches bottom 1000px after navigation',[h._wbHistoryPending.length,h._wbHistoryFilling,liveIDs(h)],[0,false,['e9','e10','e12','e14']]);
 // Panel IDs and item anchors share validation and unfolding before geometry.
 h=board(gap(row(12,1400,panel),true)+row(14,50));window.wbHistory.init(document);var p=window.wbHistory.loadTarget(document,'p1');check('oversized panel is one whole window',[p.id,p.open,liveIDs(h)],['p1',true,['e12','e14']]);
 h=board(row(1,20,'<article class="wb-entry system" id="e1" data-entry="e1"><div class="card" id="item-3"></div></article>'));window.wbHistory.init(document);check('question target uses same owner',window.wbHistory.loadTarget(document,'item-3').id,'item-3');check('question owner jump',jumps.at(-1),['item-3',12]);

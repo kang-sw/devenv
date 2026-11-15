@@ -255,7 +255,9 @@ section.topic[data-max] > .tophead > .tbar > .d-min, details.entry-panel[data-ma
   .board-action kbd { display: none; }
   .board-tools { gap: 5px; }
 }
-@container board-toolbar (max-width: 760px) {
+/* The eight-filter row needs compact actions at 800px outer width (798px
+   container); the default 1440px split has 804px and keeps its labels. */
+@container board-toolbar (max-width: 800px) {
   .board-action .board-label { display: none; }
 }
 @container board-toolbar (max-width: 360px) {
