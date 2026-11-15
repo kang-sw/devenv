@@ -545,7 +545,10 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T10:20:39Z"
+        "touched_at": "2026-11-15T10:39:31Z",
+        "impl": {
+          "branch": "impl/develop/gush-wince-guru"
+        }
       }
     },
     "261115-feat-ws-hosted-codex-adapter-contract": {
