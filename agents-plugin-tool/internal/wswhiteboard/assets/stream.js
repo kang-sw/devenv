@@ -26,13 +26,22 @@
     return node.matches('.entry-panel') && node.closest('.wb-entry[data-panel="' + id + '"]') ? node : null;
   }
   var LIMIT = 1000, PANELS = 3, LINES = 30;
-  // A fold (a long log run, or a system-event chip) anchors by its first
-  // entry while closed; once open, its entries anchor themselves.
-  function isFold(node) { return node.classList.contains('system-run') || node.classList.contains('run-fold'); }
+  // A fold (a system-event chip) anchors by its first entry while closed;
+  // once open, its entries anchor themselves.
+  function isFold(node) { return node.classList.contains('system-run'); }
   function rows(h) {
     return Array.from(h.querySelector('.history-live').querySelectorAll('.wb-entry')).filter(function (e) {
       return !e.closest('.panel-versions');
     });
+  }
+  // Republishing moves an immutable boundary into Versions. Its eN still
+  // defines the chronological cut, not the newer card that now contains it.
+  // Entry IDs increase at append; compare decimal lengths before digits.
+  function newer(id, before) { return id.length > before.length || (id.length === before.length && id > before); }
+  function boundaryRow(h, id) {
+    var node = id && find(h, id);
+    if (!node || !node.closest('.panel-versions')) return node;
+    return rows(h).find(function (e) { return newer(e.id, id); }) || null;
   }
   // Log-only cuts can fall inside a disclosure. Split just that ancestry,
   // keeping its open state and chronological rows on both sides of the cut.
@@ -56,9 +65,26 @@
     while (node.parentElement !== live) node = node.parentElement;
     return node;
   }
+  // A row's measured top: a row behind a closed chip has no box of its own,
+  // so the chip's top stands in for it.
+  function topOf(h, node) {
+    var live = h.querySelector('.history-live');
+    for (var p = node.parentElement; p && p !== live; p = p.parentElement) {
+      if (p.tagName === 'DETAILS' && !p.open) return topRow(h, node).getBoundingClientRect().top;
+    }
+    return node.getBoundingClientRect().top;
+  }
+  // countsFull: no inert page is left, or the row next to the loaded rows
+  // (the newest held page's last row) is one the counts already refuse.
+  // Peeking keeps that page's payloads out of the live DOM.
+  function countsFull(h, panels, lines) {
+    var page = h.querySelector('template[data-history-page]'), kids = page && page.content.children, last = kids && kids[kids.length - 1];
+    if (!page) return true;
+    return !!last && (last.matches('.wb-entry.panel') ? panels >= PANELS : lines >= LINES);
+  }
   function boundary(h) { return h._wbHistoryChunks[h._wbHistoryChunks.length - 1]; }
   function fit(h) {
-    var id = boundary(h), node = id && find(h, id), live = h.querySelector('.history-live');
+    var node = boundaryRow(h, boundary(h)), live = h.querySelector('.history-live');
     if (!node) return;
     node = splitAt(h, node);
     // Only the saved boundary's geometry changes on resize, never its ID.
@@ -97,43 +123,44 @@
     if (!h._wbHistoryPending || h._wbHistoryChoosing) return;
     h._wbHistoryChoosing = true;
     try {
-      var all = rows(h), before = h._wbHistoryPending.before;
-      var end = before ? all.findIndex(function (e) { return e.id === before; }) : all.length;
-      if (end < 0) return;
-      var older = all.slice(0, end), panels = older.filter(function (e) { return e.classList.contains('panel'); });
-      var pages = Array.from(h.querySelectorAll('template[data-history-page]'));
-      var heldPanel = pages.some(function (p) { return !!p.content.querySelector('.wb-entry.panel'); });
-      // Materialize one page per frame, and only while the candidate needs
-      // more panels (or thirty log lines). No pixel-fill loading loop.
-      if (pages.length && ((panels.length < PANELS && heldPanel) || (!panels.length && older.length < LINES))) {
-        loadOne(h); later(h); return;
-      }
-      if (!older.length) { h._wbHistoryPending = null; return; }
-      var first;
-      if (panels.length) {
-        var candidates = panels.slice(-PANELS), heights = candidates.map(function (p) { return panelHeight(h, p); });
-        if (heights.some(function (n) { return n === null; })) {
-          // Show the provisional candidates so hidden topics can render.
-          first = candidates[0];
-        } else {
-          var count = candidates.length;
-          var tail = before ? topRow(h, find(h, before)).getBoundingClientRect().top : h.querySelector('.history-live').getBoundingClientRect().bottom;
-          while (count > 1) {
-            var start = candidates.length - count, p = candidates[start];
-            // Geometry supplies logs, gaps and folded runs. Replace only
-            // panel boxes with cached heights for the one-time judgment.
-            var height = tail - p.getBoundingClientRect().top;
-            for (var i = start; i < candidates.length; i++) height += heights[i] - candidates[i].getBoundingClientRect().height;
-            if (height <= LIMIT) break;
-            count--;
-          }
-          first = candidates[candidates.length - count];
-          h._wbHistoryPending = null;
-        }
-      } else {
-        first = older[Math.max(0, older.length - LINES)];
+      var all = rows(h), before = h._wbHistoryPending.before, node = before && boundaryRow(h, before);
+      var end = before ? all.indexOf(node) : all.length;
+      if (end < 0) {
+        // Abandon only the unfinished Older chunk; keep finalized cuts so a
+        // missing entry cannot lock out later clicks or resize retries.
         h._wbHistoryPending = null;
+        if (h._wbHistoryChunks.length > 1) h._wbHistoryChunks.pop();
+        h._wbHistorySteps = h._wbHistoryChunks.length;
+        return;
       }
+      // Walk back from the cut one row at a time and stop just before a row
+      // would pass any budget: LINES log lines, PANELS panels, LIMIT pixels.
+      // The first row always joins, so an oversized single row still shows.
+      var older = all.slice(0, end), first = null, lines = 0, panels = 0, adjust = 0, full = false, provisional = false;
+      var tail = older.length && (before ? splitAt(h, node).getBoundingClientRect().top : h.querySelector('.history-live').getBoundingClientRect().bottom);
+      for (var i = older.length - 1; i >= 0; i--) {
+        var row = older[i], panel = row.classList.contains('panel');
+        if (first && (panel ? panels + 1 > PANELS : lines + 1 > LINES)) { full = true; break; }
+        var known = panel ? panelHeight(h, row) : 0;
+        // An unrendered panel cannot be judged yet: from there on only the
+        // counts apply, and the rows they admit show provisionally so they
+        // can render (hidden topics too) before the pixels decide.
+        if (known === null) provisional = true;
+        if (!provisional) {
+          // Geometry supplies logs, gaps and system chips. Replace only
+          // panel boxes with cached heights for the one-time judgment.
+          var next = adjust + (panel ? known - row.getBoundingClientRect().height : 0);
+          if (first && tail - topOf(h, row) + next > LIMIT) { full = true; break; }
+          adjust = next;
+        }
+        first = row;
+        if (panel) panels++; else lines++;
+      }
+      // Rows ran out before a budget did: materialize one more page per
+      // frame, unless its adjacent row could not join anyway.
+      if (!full && !countsFull(h, panels, lines)) { loadOne(h); later(h); return; }
+      if (!first) { h._wbHistoryPending = null; return; }
+      if (!provisional) h._wbHistoryPending = null;
       h._wbHistoryChunks[h._wbHistoryChunks.length - 1] = first.id;
     } finally { h._wbHistoryChoosing = false; }
   }
@@ -145,12 +172,12 @@
   }
   function updateControl(h) {
     var all = rows(h);
-    var more = !!h.querySelector('template[data-history-page]') || (!!boundary(h) && all[0] && all[0].id !== boundary(h));
+    var more = !!h.querySelector('template[data-history-page]') || (!!boundary(h) && all[0] && all[0] !== boundaryRow(h, boundary(h)));
     var button = h.querySelector('.history-older');
-    if ((!button || button.hidden === !more) && h.classList.contains('history-more') === more) return;
-    // Hiding the exhausted control resizes shallower ancestors watched by
-    // keep/rail. Do that outside this history's resize delivery, including
-    // reentrant init calls from loadOne -> wbBindBoard.
+    if (!button || button.hidden === !more) return;
+    // The header row keeps its height without the capsule, but toggling it
+    // still mutates watched ancestors. Do that outside this history's resize
+    // delivery, including reentrant init calls from loadOne -> wbBindBoard.
     if (h._wbHistoryResizing) {
       if (!h._wbHistoryControlFrame) {
         h._wbHistoryControlFrame = true;
@@ -161,8 +188,7 @@
       }
       return;
     }
-    if (button) button.hidden = !more;
-    h.classList.toggle('history-more', more);
+    button.hidden = !more;
   }
   function oldest(h) {
     var clip = h.querySelector('.history-clip').getBoundingClientRect();
@@ -222,12 +248,12 @@
   }
   function reveal(h, node) {
     var all = rows(h), entry = node.closest('.wb-entry'), id = boundary(h);
-    // A closed log/system summary has no entry ancestor. Its existing
-    // anchor names the first entry represented by that disclosure.
-    var fold = !entry && node.closest('.run-fold, .system-run');
+    // A closed system summary has no entry ancestor. Its existing anchor
+    // names the first entry represented by that disclosure.
+    var fold = !entry && node.closest('.system-run');
     if (fold) entry = find(h, fold.getAttribute('data-history-anchor'));
     if (entry) entry = topRow(h, entry).closest('.wb-entry') || entry;
-    if (entry && (!id || all.indexOf(entry) < all.findIndex(function (e) { return e.id === id; }))) {
+    if (entry && (!id || all.indexOf(entry) < all.indexOf(boundaryRow(h, id)))) {
       h._wbHistoryPending = null;
       h._wbHistoryChunks.push(entry.id);
       h._wbHistorySteps = h._wbHistoryChunks.length;
@@ -249,18 +275,17 @@
       if (h._wbHistoryTarget === node) h._wbHistoryTarget = null;
     } });
   }
-  // relabel rewrites a fold's key, anchor, and "n entries · from-to" label
-  // after a merge, as the server writes them (EntryPage.Segments).
+  // relabel rewrites a chip's key, anchor, and "n entries · from-to" label
+  // after a merge or split, as the server writes them (EntryPage.Segments).
   function relabel(fold) {
-    var events = Array.from(fold.querySelectorAll('.wb-entry')), run = fold.classList.contains('run-fold');
+    var events = Array.from(fold.querySelectorAll('.wb-entry'));
     var clock = function (e) { var t = e.querySelector('time.entry-at'); return t ? t.textContent : ''; };
     var from = clock(events[0]), to = clock(events[events.length - 1]), range = from === to ? from : from + '–' + to;
-    fold.setAttribute('data-key', (run ? 'run:' : 'system:') + events[0].id);
+    fold.setAttribute('data-key', 'system:' + events[0].id);
     fold.setAttribute('data-history-anchor', events[0].id);
     var summary = fold.children[0], label = summary.querySelector('.lbl') || summary;
-    label.textContent = window.wsT ? window.wsT(run ? 'js.wb.stream.run' : 'js.wb.stream.system', events.length, range) : (run ? 'log ' : 'system events ') + events.length;
+    label.textContent = window.wsT ? window.wsT('js.wb.stream.system', events.length, range) : 'system events ' + events.length;
   }
-  function logNode(n) { return !!n && (n.matches('details.run-fold') || n.matches('details.system-run') || n.matches('.wb-entry.agent') || n.matches('.wb-entry.system')); }
   // mergeSystems moves an older chip's events to the front of the adjacent,
   // newer chip, which keeps its disclosure node and open state.
   function mergeSystems(older, newer) {
@@ -268,33 +293,11 @@
     older.remove();
     relabel(newer);
   }
-  // A page boundary is not a semantic boundary: a log run, and a system chip
-  // inside it, may continue across it. When the newer side opens with a
-  // run's fold, the older side's rows join that fold, which keeps its open
-  // state; otherwise only a system chip split by the boundary merges.
+  // A page boundary is not a semantic boundary: a system chip split by it
+  // merges into the newer side's chip.
   function joinBoundary(live, boundary) {
-    var kids = Array.from(live.children), i = kids.indexOf(boundary);
-    if (i < 1 || !logNode(boundary) || !logNode(kids[i - 1])) return;
-    var older = [];
-    for (var j = i - 1; j >= 0 && logNode(kids[j]); j--) older.unshift(kids[j]);
-    if (boundary.matches('details.run-fold')) {
-      var first = boundary.children[1] || null;
-      older.forEach(function (n) {
-        var fold = n.matches('details.run-fold');
-        (fold ? Array.from(n.children).slice(1) : [n]).forEach(function (r) { boundary.insertBefore(r, first); });
-        if (fold) n.remove();
-      });
-      var rows = Array.from(boundary.children), prev = first && rows[rows.indexOf(first) - 1];
-      if (prev && prev.matches('details.system-run') && first.matches('details.system-run')) mergeSystems(prev, first);
-      relabel(boundary);
-      return;
-    }
-    var last = older[older.length - 1], lastFold = last.matches('details.run-fold') ? last : null;
-    var end = lastFold ? lastFold.children[lastFold.children.length - 1] : last;
-    if (end.matches('details.system-run') && boundary.matches('details.system-run')) {
-      mergeSystems(end, boundary);
-      if (lastFold) relabel(lastFold);
-    }
+    var kids = Array.from(live.children), end = kids[kids.indexOf(boundary) - 1];
+    if (end && end.matches('details.system-run') && boundary.matches('details.system-run')) mergeSystems(end, boundary);
   }
   function loadOne(h) {
     var page = h.querySelector('template[data-history-page]');
@@ -309,9 +312,12 @@
   }
   // Materialize only known targets. Loading all intervening pages preserves
   // the chronological stream; unknown or malformed IDs cannot grow the DOM.
-  function materialize(root, id) {
+  // Navigation's optional callback reveals the owning live topic before
+  // admission hooks or init can measure it. It may receive the topic or a
+  // live descendant more than once. Snapshot restore has no callback.
+  function materialize(root, id, beforeGeometry) {
     var node = find(root, id);
-    if (node) return node;
+    if (node) { if (beforeGeometry) beforeGeometry(node); return node; }
     var deferred = Array.from(root.querySelectorAll('template[data-history-topic]')).find(function (t) {
       if (find(t.content, id)) return true;
       return Array.from(t.content.querySelectorAll('template[data-history-page]')).some(function (page) { return !!find(page.content, id); });
@@ -319,25 +325,27 @@
     if (deferred) {
       var fragment = deferred.content.cloneNode(true), topic = fragment.querySelector('.topic');
       deferred.parentElement.insertBefore(fragment, deferred);
+      if (beforeGeometry) beforeGeometry(topic);
       deferred.remove();
       init(topic);
       if (window.wbBindBoard) window.wbBindBoard(topic);
       topic.dispatchEvent(new CustomEvent('wbhistoryload', { bubbles: true, detail: { root: topic } }));
-      return materialize(root, id);
+      return materialize(root, id, beforeGeometry);
     }
     var list = histories(root);
     for (var i = 0; i < list.length; i++) {
       var h = list[i];
       var held = Array.from(h.querySelectorAll('template[data-history-page]')).some(function (t) { return !!find(t.content, id); });
       if (!held) continue;
+      if (beforeGeometry) beforeGeometry(h);
       while (!find(h, id) && loadOne(h)) {}
       return find(h, id);
     }
     return null;
   }
-  function loadTarget(root, id) {
+  function loadTarget(root, id, beforeGeometry) {
     if (!valid(id)) return null;
-    var node = materialize(root || document, id);
+    var node = materialize(root || document, id, beforeGeometry);
     if (!node) return null;
     for (var p = node; p; p = p.parentElement) if (p.tagName === 'DETAILS') p.open = true;
     var mark = node;
@@ -354,8 +362,7 @@
   function capture(root) {
     return histories(root).map(function (h) {
       var first = h.querySelector('.wb-entry');
-      var fold = h.closest('.topic-stream');
-      return { key: h.getAttribute('data-history'), first: first && first.id, open: !fold || fold.open, steps: h._wbHistorySteps || 1,
+      return { key: h.getAttribute('data-history'), first: first && first.id, steps: h._wbHistorySteps || 1,
         chunks: h._wbHistoryChunks.slice(), heights: Object.assign({}, h._wbHistoryHeights), pending: h._wbHistoryPending && Object.assign({}, h._wbHistoryPending),
         folds: Array.from(h.querySelectorAll('details[data-key]')).map(function (d) { return [d.getAttribute('data-key'), d.open]; }),
         systems: Array.from(h.querySelectorAll('.system-run .wb-entry')).map(function (e) { return [e.id, e.closest('.system-run').open]; }) };
@@ -368,21 +375,32 @@
     histories(root).forEach(function (h) {
       var saved = (snapshot || []).find(function (s) { return s.key === h.getAttribute('data-history'); });
       if (!saved) return;
-      var fold = h.closest('.topic-stream');
-      if (fold && saved.open !== undefined) fold.open = saved.open;
       if (saved.first) materialize(h, saved.first);
-      // Discard default cuts made by init on the incoming tail. A new log
-      // shifts that cut by one, and it must not leave a closed sub-run inside
-      // a previously open saved run. Saved cuts/states are recreated below.
-      Array.from(h.querySelectorAll('.run-fold, .system-run')).reverse().forEach(function (run) {
+      if (saved.chunks && saved.chunks.length > 1) saved.chunks.forEach(function (id) {
+        if (!id) return;
+        var node = materialize(h, id), held = null;
+        if (!node || !node.closest('.panel-versions')) return;
+        // Finding the nested version need not load its old chronological
+        // page. Restore every surviving row from that cut, even if the
+        // saved first entry also moved into the newer card's Versions.
+        h.querySelectorAll('template[data-history-page]').forEach(function (page) {
+          page.content.querySelectorAll('.wb-entry').forEach(function (e) {
+            if (!e.closest('.panel-versions') && newer(e.id, id) && (!held || newer(held.id, e.id))) held = e;
+          });
+        });
+        if (held) materialize(h, held.id);
+      });
+      // Discard default cuts made by init on the incoming tail. Saved
+      // cuts/states are recreated below.
+      Array.from(h.querySelectorAll('.system-run')).reverse().forEach(function (run) {
         if (!run.parentElement) return;
         var siblings = Array.from(run.parentElement.children), prev = siblings[siblings.indexOf(run) - 1];
-        if (prev && ((run.matches('.run-fold') && prev.matches('.run-fold')) || (run.matches('.system-run') && prev.matches('.system-run')))) mergeSystems(prev, run);
+        if (prev && prev.matches('.system-run')) mergeSystems(prev, run);
       });
-      // Recreate private log cuts before restoring independently toggled
-      // disclosures; renderer pages naturally contain the unsplit runs.
+      // Recreate private chip cuts before restoring independently toggled
+      // disclosures; renderer pages naturally contain the unsplit chips.
       (saved.folds || []).forEach(function (f) {
-        var match = /^(?:run|system):(e[1-9][0-9]*)$/.exec(f[0]), entry = match && find(h, match[1]);
+        var match = /^system:(e[1-9][0-9]*)$/.exec(f[0]), entry = match && find(h, match[1]);
         if (entry) splitAt(h, entry);
       });
       var folds = new Map(saved.folds || []);
@@ -399,7 +417,6 @@
         h._wbHistoryChunks = saved.chunks.slice();
         h._wbHistorySteps = saved.chunks.length;
         h._wbHistoryPending = saved.pending || null;
-        saved.chunks.forEach(function (id) { if (id) materialize(h, id); });
         fit(h);
       } else reset(h);
       updateControl(h);
@@ -749,6 +766,77 @@
       try { sessionStorage.setItem(storageKey, JSON.stringify(capture(document))); } catch (_) {}
     });
   }
+})();
+
+/* Recap jump: a topic recap's clock chip (.rat, a keyboard button) names the
+   log row the recap summarizes (the recap's data-entry, its latest agent
+   line). Activating the chip, or a plain click on the recap text, reveals
+   that row through the shared history loader (opening its disclosures,
+   clearing the sticky head), whose flash is the one highlight. A text click
+   waits out a double-click so selecting a word never jumps; a drag, a
+   selection, or a modified click is left alone, and controls inside the
+   recap keep their own behavior. Document-level, so board swaps need no
+   rebinding. */
+(function () {
+  if (window.wbRecapJump) return;
+  // DOUBLE stands in for the platform double-click interval, which a page
+  // cannot read; FLASH outlasts page.css .flash (1.6s).
+  var CHIP = '.trecap[data-entry] > .rat[role="button"]', DOUBLE = 500, FLASH = 2000, press = null, pending = 0;
+  function recapOf(n) {
+    var recap = n && n.closest ? n.closest('.trecap[data-entry]') : null;
+    return recap && recap.querySelector(':scope > .rat[role="button"]') ? recap : null;
+  }
+  function cancel() { window.clearTimeout(pending); pending = 0; }
+  function selecting(recap) {
+    var sel = window.getSelection && window.getSelection();
+    return !!(sel && !sel.isCollapsed && sel.rangeCount && sel.getRangeAt(0).intersectsNode(recap));
+  }
+  function jump(recap) {
+    cancel();
+    var topic = recap.closest('.topic'), history = window.wbHistory;
+    if (!topic || !history || !history.loadTarget) return null;
+    // A dashboard card fold hides the whole topic; reveal it before geometry.
+    var unfold = window.WsCards && window.WsCards.unfoldTopic;
+    var row = history.loadTarget(topic, recap.getAttribute('data-entry'), unfold);
+    if (row) {
+      // The arrival blink's more specific animation would mask the flash and
+      // replay it when the blink ends, so neither may outlive this one.
+      row.classList.remove('wb-log-blink');
+      window.clearTimeout(row._wbRecapFlash);
+      row._wbRecapFlash = window.setTimeout(function () { row.classList.remove('flash'); }, FLASH);
+    }
+    return row;
+  }
+  // Every press cancels a pending text jump: it may be a double-click's
+  // second press, and its own click decides again.
+  document.addEventListener('pointerdown', function (e) {
+    cancel();
+    press = recapOf(e.target) ? { x: e.clientX, y: e.clientY } : null;
+  }, true);
+  document.addEventListener('click', function (e) {
+    var recap = recapOf(e.target), at = press;
+    press = null;
+    if (!recap || e.defaultPrevented || e.button || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (e.detail > 1) { cancel(); return; }
+    var inner = e.target.closest('a[href], button, input, textarea, select, summary, label, [contenteditable]');
+    if (inner && recap.contains(inner)) return;
+    if (at && Math.abs(e.clientX - at.x) + Math.abs(e.clientY - at.y) > 4) return;
+    if (selecting(recap)) return;
+    var chip = e.target.closest('.rat[role="button"]');
+    if (chip && recap.contains(chip)) { jump(recap); return; }
+    pending = window.setTimeout(function () {
+      pending = 0;
+      if (recap.isConnected && !selecting(recap)) jump(recap);
+    }, DOUBLE);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.defaultPrevented || (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar')) return;
+    if (e.isComposing || e.repeat || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!e.target || !e.target.matches || !e.target.matches(CHIP)) return;
+    e.preventDefault();
+    jump(e.target.parentElement);
+  });
+  window.wbRecapJump = { jump: jump };
 })();
 
 /* Latest agent arrival: state belongs to the page, not to replaceable board

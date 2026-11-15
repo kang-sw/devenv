@@ -359,6 +359,13 @@ func (s *State) clone() *State {
 	if err := json.Unmarshal(data, &out); err != nil {
 		panic(err)
 	}
+	// JSON round-trips compact RawMessage bytes. Clone immutable payloads
+	// directly instead, including unknown members, without aliasing the source.
+	for i := range s.Topics {
+		for j, entry := range s.Topics[i].Entries {
+			out.Topics[i].Entries[j] = entry.clone()
+		}
+	}
 	return &out
 }
 
@@ -639,6 +646,8 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 			applyPanel(p, work, cmd, topicOf, env.Now)
 		case "wb:log":
 			applyLog(p, work, cmd, topicOf, env.Now)
+		case "wb:state":
+			applyTopicState(p, work, cmd, topicOf, env.Now)
 		case "wb:close":
 			withdrawn := applyClose(p, work, cmd, topicOf, mark, env.Now)
 			for _, id := range withdrawn {
@@ -679,7 +688,7 @@ func Apply(state *State, commands string, env Env) (Outcome, []string) {
 	work.pruneLabels()
 	out.Effects = append(out.Effects, semanticEffects(previous, work)...)
 	work.stampChanges(mark, env.Now)
-	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now))
+	out.Info = joinInfo(withdrawnInfo(out.Withdrawn), nonPolicyOptionsInfo(work, optionWarn), work.staleNudge(env.Now), work.structuralWarnings())
 	*state = *work
 	return out, nil
 }
@@ -723,7 +732,7 @@ func applyClose(p *problems, work *State, cmd command, topicOf topicResolver, ma
 		work.eventItem(topic, item.ID, now, "Item {{%d}} withdrawn [%s] by topic close: %s", item.ID, item.Class, item.Title)
 	}
 	if !closed {
-		work.event(topic, now, "Topic closed: %s", result)
+		work.closeStateEvent(topic, result, now)
 	} else if resultChanged {
 		work.event(topic, now, "Topic close result updated: %s", result)
 	}

@@ -2,13 +2,17 @@
 title: "Mechanically split dashboard and whiteboard assets at the UI cut line"
 related:
   261114-feat-ws-whiteboard-compact-floating-toolbar: "Landed 652 source and oversized-file advisories; preserve its visual behavior"
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 6e9424ad230fd815
+sage-review-completeness-reviewed: 6e9424ad230fd815
 ---
 
 # Mechanically split dashboard and whiteboard assets at the UI cut line
 
 ## Background
 
-Owner decision (793)=a authorizes a behavior-preserving split of oversized dashboard and whiteboard assets. Large files make concurrent UI changes and mechanical rebases expensive. This ticket captures accepted backlog only; MAIN supplies the start signal and assigns the implementer at the cut line.
+Owner decision (793)=a authorizes a behavior-preserving split of oversized dashboard and whiteboard assets. Large files make concurrent UI changes and mechanical rebases expensive. MAIN supplied the explicit cut-line start signal on 2026-11-14 at 17:27:36Z: 649, MAIN's test batch and 789 are integrated in baseline `d0ad8a9f1`. Promote through design/completeness review, then use a parallel worker for the mechanical split. H CRLF repair retains first priority; tests require a separately allocated heavy slot and a bounded recipe.
 
 The source inventory at develop `cacd771c1ab69c01fbc33ffb1db74df0bb6dc3d9` is:
 
@@ -33,7 +37,7 @@ There is **no** `wswhiteboard/assets/page.js` in this source. The whiteboard Jav
 
 ## Constraints
 
-- This ticket remains `todo/` until the normal implementation-readiness procedure and MAIN's cut-line start signal. Authoring it does not allocate a heavy slot or authorize implementation, release, a daemon rebuild/restart/swap, profiling or an installed-owner test.
+- MAIN's cut-line start signal is satisfied at baseline `d0ad8a9f1`; complete the normal fact-population and design/completeness gates before promotion and worker implementation. The start signal authorizes move-only T0 implementation in a parallel worktree, not test execution, release, a daemon rebuild/restart/swap, profiling or an installed-owner test. Send the bounded test recipe for a heavy-slot allocation.
 - Read `ai-docs/manuals/shipped-surface-boundary.md` and `ai-docs/manuals/release-compatibility.md` before editing `agents-plugin-tool/internal/`; the split must preserve their downstream and compatibility contracts. If a planned edit reaches a skill, playbook, prompt or convention, read `ai-docs/manuals/skill-authoring.md` and stop before expanding this asset-only scope.
 - Update the actual `//go:embed` declarations and rendering/template registration sites: dashboard assets are registered in `agents-plugin-tool/internal/wsdashboard/pages.go`; whiteboard assets in `agents-plugin-tool/internal/wswhiteboard/render.go`. Preserve their emitted asset order and the current whiteboard-before-dashboard CSS order.
 - Keep existing JavaScript state ownership, closures, event-handler registration, delegated events, frame identities and browser storage semantics. Extraction must not create duplicate handlers, implicit new globals, asynchronous loading races or a new shared API.
@@ -41,6 +45,35 @@ There is **no** `wswhiteboard/assets/page.js` in this source. The whiteboard Jav
 - Tests currently reading a single embedded file must continue to verify the assembled behavior after extraction; do not remove assertions because their old source-file locations moved.
 - Preserve all shared-controls/shared-actions and 652 compact-toolbar/overview harness scenarios and command syntax. Known acceptance limitations in the cut-line source stay explicit; they are not silently fixed, erased or converted to passes by this refactor.
 - Choose final extraction filenames from the existing responsibilities at the cut line and record them in the move map; this ticket does not introduce a new exported module or caller-visible interface.
+- Convention: ai-docs/manuals/shipped-surface-boundary.md (declared for `agents-plugin/`, `agents-plugin-wsflow/`, `agents-plugin-tool/`)
+- Convention: ai-docs/manuals/release-compatibility.md (declared for `agents-plugin-tool/internal/`)
+
+## Prior Decisions
+
+- 184e0755 (2026-11-15, commit): "Remove fixed/minimum recap height but retain the shared four-line ellipsis clamp and matching maximum height in both sticky states." — bearing: constrains
+- 261114-feat-ws-whiteboard-topic-state-and-lead-nudges (2026-11-15, Result): "Linked-ticket badges and ticket-derived live styling are hidden, not the accepted attribute or its validation" — bearing: constrains
+- 3a13a369 (2026-11-14, commit): "Mount after wbForm creates wbHistory, rather than the earlier card setup." — bearing: constrains
+- 0a438cdb (2026-11-14, commit): "load UsageScript in the shell owning the rail, as the iframe-shell ticket explicitly requires." — bearing: constrains
+- 261114-feat-ws-dashboard-worktree-view (2026-11-14, Decisions): "Capturing the idea does not bypass MAIN's cut-line scheduling or start signal." — bearing: supports
+- 5695371f (2026-11-13, commit): "Reuse board SSE regions and trusted frame metadata; materialize inert older/closed history only for known targets and preserve viewport anchors." — bearing: constrains
+- 562bfeb9 (2026-11-12, commit): "One JS builder instead of two: answers.js is a self-contained asset" — bearing: constrains
+- 261108-feat-ws-dashboard-disk-assets-dev-mode (2026-11-08, Decisions): "Daemon-served pages only" — bearing: constrains
+
+## Route Facts
+
+| fact | value | evidence |
+|---|---|---|
+| scope.span | multi-file | VERIFIED: agents-plugin-tool/internal/wsdashboard/assets/dashboard.js, dashboard.css, pages.go; agents-plugin-tool/internal/wswhiteboard/assets/page.css, existing scripts, render.go; scripts/board-headless.mjs and affected source-reading tests. The historical inventory counts match git show cacd771c1:<path> piped to wc -l. At d0ad8a9f1, wc -l returns 9234, 2116, 805 and 3923 respectively for the four counted files. git merge-base --is-ancestor <ref> d0ad8a9f1 returns 0 for cacd771c1 (652), a33221747 (758), 1771e2140 (773), c4e033c5f, 2fa254b, 292e20895, 989fdd169, 76f32c0e6 and 5573bce92 (789); d0ad8a9f1 itself merges 649. |
+| scope.surface | cross-module | VERIFIED: Dashboard assembly consumes wswhiteboard.PageAssets in agents-plugin-tool/internal/wsdashboard/pages.go#L191-L237; whiteboard also emits standalone and frame assets through agents-plugin-tool/internal/wswhiteboard/render.go#L135-L167. No external interface change is approved. |
+| scope.new_public_symbol | no | VERIFIED: Decisions and Phase 1 exclude renamed public interfaces, a new shared API and module-system migration; extraction filenames are implementation details. |
+| scope.new_type_contract | no | VERIFIED: Phase 1 preserves closure/state ownership and existing loading contracts; no new signature, wire type or persisted shape is requested. |
+| scope.test_surface | existing | VERIFIED: agents-plugin-tool/internal/wsdashboard/board_keep_test.go#L15-L38 and #L77-L91 read dashboard.js and extract functions; stream_script_test.go#L192-L215 under agents-plugin-tool/internal/wswhiteboard checks assembled scripts/CSS. Additional readers are found by rg -n -e 'dashboard[.]js' -e 'dashboard[.]css' agents-plugin-tool/internal/wsdashboard --glob '*test.go'. scripts/board-headless.mjs#L3866-L3886 registers shared-controls, shared-actions, toolbar, overview and motion/history scenarios. |
+| complexity.reuse_points | confirmed | VERIFIED: Read existing get-based builders, embed lists, assetID, and template order: agents-plugin-tool/internal/wsdashboard/pages.go#L34-L35, #L191-L278; agents-plugin-tool/internal/wswhiteboard/render.go#L33-L34, #L135-L167; agents-plugin-tool/internal/wsdashboard/assets/dashboard.tmpl#L5-L46. These are reuse boundaries, not a new extraction mechanism. |
+| complexity.side_effect_risk | high | INFERRED: Moving initialization and shared closure regions can reorder handlers, break storage ownership or change CSS cascade across standalone, dashboard and frame consumers. |
+| risk.correctness | high | INFERRED: Phase 1 must preserve scroll/focus, frame identity and asynchronous live updates; existing board_keep_test.go#L15-L65 pins ordering across morph, history restore and late frame height compensation. |
+| risk.fit | moderate | INFERRED: Existing builders and responsibility sections support mechanical extraction, but closure boundaries must be retained rather than replaced with a new exported API. |
+| risk.test | high | INFERRED: Many tests extract source spans from a single file; syntax checks cannot prove assembled behavior or visual equality. The actual d0ad8a9f1 visual baseline is still to be captured in a separately granted heavy slot, not an already-approved mockup. git show -s --format=%B cacd771c1 records owner-accepted open picker/card Important and an incomparable earlier baseline, not full 652 acceptance. |
+| risk.security_or_contract | moderate | INFERRED: T0 asset organization must retain trusted frame dispatch, sandboxed document loading and existing action availability; agents-plugin-tool/internal/wswhiteboard/render.go and agents-plugin-tool/internal/wsdashboard/pages.go are assembly boundaries, not authority to change those contracts. |
 
 ## Phases
 

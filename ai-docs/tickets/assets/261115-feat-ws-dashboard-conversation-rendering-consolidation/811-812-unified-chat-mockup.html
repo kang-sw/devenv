@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>811·812 — 대화·메일·화이트보드 통합 대화 화면 · 정적 목업</title>
+<style>
+/* ---- Base palette: the approved 781 mockup's tokens, unchanged ---- */
+:root{--bg:#f2f4f7;--card:#fff;--fg:#202733;--muted:#657183;--line:#dce2e9;--primary:#3267b8;--technical:#7863a7;--technical-bg:#f0ecf7;--warn:#8c6223;--warn-bg:#fff5df;--human:#e7effb;--shadow:0 2px 9px #17243b0b;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+/* whiteboard tokens: host-themed ones follow the host palette exactly as page.css does
+   (var(--background, …)); role fills are the board's own template-owned values */
+--wb-bg:var(--bg);--wb-fg:var(--fg);--wb-card:var(--card);--wb-muted:#e9e8e3;--wb-muted-fg:var(--muted);--wb-primary:#2b62d9;--wb-topic:#2c3038;--wb-on-topic:#fff;--wb-now:#2b62d9;--wb-on-now:#fff;--wb-policy:#b25000;--wb-on-policy:#fff;--wb-technical:#2457c5;--wb-on-technical:#fff;--wb-announced:#1d7348;--wb-accent-policy:#b25000;--wb-ck-ok:#1d7348;--wb-latest-log:rgb(110 200 130 / .10);--wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent);--wb-wash:color-mix(in srgb,var(--wb-fg) 6%,transparent);--wb-shadow:0 1px 2px rgb(0 0 0 / .14),0 2px 6px rgb(0 0 0 / .06);--wb-radius:12px;
+font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",sans-serif;color:var(--fg);background:var(--bg);font-size:14px;line-height:1.5;color-scheme:light}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#141920;--card:#1e2631;--fg:#e2e8f1;--muted:#9daabd;--line:#354150;--primary:#8fb9ff;--technical:#baa5ea;--technical-bg:#352e47;--warn:#e3be7e;--warn-bg:#3c3321;--human:#243d60;--shadow:0 2px 9px #0002;--wb-muted:#2b2d32;--wb-primary:#7aa2ff;--wb-topic:#2a2d33;--wb-on-topic:#e4e5e8;--wb-now:#243457;--wb-on-now:#d3defb;--wb-policy:#5b3a1c;--wb-on-policy:#f6d9bd;--wb-technical:#26385e;--wb-on-technical:#d2dcf6;--wb-announced:#1f4433;--wb-accent-policy:#e0a36c;--wb-ck-ok:#6cc39a;--wb-shadow:0 1px 2px rgb(0 0 0 / .5),0 2px 8px rgb(0 0 0 / .3);color-scheme:dark}}
+:root[data-theme=dark]{--bg:#141920;--card:#1e2631;--fg:#e2e8f1;--muted:#9daabd;--line:#354150;--primary:#8fb9ff;--technical:#baa5ea;--technical-bg:#352e47;--warn:#e3be7e;--warn-bg:#3c3321;--human:#243d60;--shadow:0 2px 9px #0002;--wb-muted:#2b2d32;--wb-primary:#7aa2ff;--wb-topic:#2a2d33;--wb-on-topic:#e4e5e8;--wb-now:#243457;--wb-on-now:#d3defb;--wb-policy:#5b3a1c;--wb-on-policy:#f6d9bd;--wb-technical:#26385e;--wb-on-technical:#d2dcf6;--wb-announced:#1f4433;--wb-accent-policy:#e0a36c;--wb-ck-ok:#6cc39a;--wb-shadow:0 1px 2px rgb(0 0 0 / .5),0 2px 8px rgb(0 0 0 / .3);color-scheme:dark}
+
+/* ---- Page frame (781) ---- */
+*{box-sizing:border-box}body{margin:0;background:var(--bg)}button,summary{font:inherit}button{cursor:pointer}a{color:var(--primary)}
+button:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid var(--primary);outline-offset:3px}
+main{max-width:1240px;margin:0 auto;padding:36px 28px 60px}
+.eyebrow{font-size:11px;font-weight:750;letter-spacing:.13em;text-transform:uppercase;color:var(--technical)}
+h1{font-size:clamp(24px,3vw,36px);line-height:1.2;letter-spacing:-.03em;margin:10px 0 12px;max-width:880px;word-break:keep-all}
+h2{font-size:15px;letter-spacing:-.01em;margin:0}p{margin:0}
+.intro{max-width:840px;color:var(--muted);word-break:keep-all}
+.scope{display:flex;flex-wrap:wrap;gap:7px;margin:18px 0 28px}
+.tag,.badge{border-radius:5px;font-size:10px;line-height:1.6;font-weight:700;padding:1px 6px;white-space:nowrap}
+.tag{background:var(--card);border:1px solid var(--line);color:var(--muted)}
+.workspace{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:26px;align-items:start}
+.canvas{min-width:0}
+.controls{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.controls>span{font-size:11px;color:var(--muted);margin-right:auto}
+.controls button{border:1px solid var(--line);border-radius:6px;padding:5px 10px;background:var(--card);color:var(--muted);font-size:11px}
+.controls button[aria-pressed=true]{color:var(--primary);border-color:var(--primary);background:var(--human)}
+.controls .sep{width:1px;height:18px;background:var(--line);margin:0 2px}
+.preview{container-type:inline-size;width:100%;max-width:100%;margin:0 auto;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+.preview[data-size=narrow]{width:min(360px,100%)}
+.session-head{padding:13px 16px;border-bottom:1px solid var(--line);background:var(--card);display:flex;align-items:center;gap:8px;min-width:0}
+.session-head strong{font-size:12px;white-space:nowrap}.session-head .minor{margin-left:auto;font-size:10px;color:var(--muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--wb-announced);flex:none}
+.conv{display:flex;flex-direction:column;gap:12px;padding:17px 14px 22px;min-width:0}
+.case-label{display:flex;gap:8px;align-items:center;margin-top:5px;font-size:9px;font-weight:750;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.case-label:after{content:"";height:1px;background:var(--line);flex:1}
+.clock{font-size:10px;font-variant-numeric:tabular-nums;flex:none;color:var(--muted)}
+.badge{background:var(--technical-bg);color:var(--technical);font-size:9px}
+.badge.peer{background:color-mix(in srgb,var(--wb-announced) 14%,transparent);color:var(--wb-announced)}
+:root[data-theme=dark] .badge.peer{color:var(--wb-ck-ok)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]) .badge.peer{color:var(--wb-ck-ok)}}
+
+/* ---- Human / lead turns (781 bubbles + dashboard .msg/.src/.turnline/.toolsline) ---- */
+.human{align-self:flex-end;max-width:86%;font-size:12.5px;min-width:0}
+.human .meta,.lead .meta{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);margin-bottom:3px}
+.human .meta{justify-content:flex-end}
+.human .bubble{background:var(--human);padding:9px 11px;border-radius:12px 12px 4px 12px;overflow-wrap:anywhere}
+.lead{align-self:flex-start;max-width:94%;font-size:12.5px;min-width:0}
+.lead .meta b{color:var(--fg)}
+.lead .bubble{background:var(--card);padding:9px 12px;border-radius:12px 12px 12px 4px;box-shadow:var(--shadow);overflow-wrap:anywhere}
+.lead .bubble p+p,.lead .bubble p+ul{margin-top:6px}.lead .bubble ul{margin:4px 0 0;padding-left:18px}
+.bubble code,.mail-body code{font:11px var(--mono);background:var(--wb-wash);padding:0 4px;border-radius:4px}
+.src{font-size:9px;font-weight:800;letter-spacing:.04em;padding:0 6px;border-radius:4px;background:var(--line);color:var(--muted);white-space:nowrap}
+.src.wb{background:var(--wb-now);color:var(--wb-on-now)}
+.turnline{align-self:center;display:inline-flex;gap:6px;align-items:center;font-size:10.5px;color:var(--muted);box-shadow:inset 0 0 0 1px var(--line);border-radius:999px;padding:0 10px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.turnline.wake{align-self:flex-start;box-shadow:none;padding-left:8px}
+.tools{align-self:flex-start;max-width:100%;font-size:10.5px;color:var(--muted);min-width:0}
+.tools>summary{list-style:none;cursor:pointer;display:inline-flex;gap:5px;align-items:center;max-width:100%;box-shadow:inset 0 0 0 1px var(--line);border-radius:999px;padding:0 10px;min-height:20px}
+.tools>summary::-webkit-details-marker{display:none}
+.tools>summary .chev{flex:none;font-size:8px;transition:transform .15s}.tools[open]>summary .chev{transform:rotate(180deg)}
+.tools .tsl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tools .brows{margin:4px 0 0;padding:6px 10px;max-width:100%;background:var(--card);border-radius:8px;box-shadow:var(--shadow);list-style:none;font:10.5px/1.7 var(--mono)}
+.tools .brows li{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tools .ok{color:var(--wb-announced)}
+
+/* ---- Mail (781 rows, extended with sender id + peer-lead note) ---- */
+.mail-block{min-width:0}
+.mail>summary{list-style:none;display:flex;align-items:baseline;gap:6px;padding:4px 7px;border-radius:7px;cursor:pointer;font-size:12px;color:var(--muted);min-width:0}
+.mail>summary::-webkit-details-marker{display:none}.mail>summary:hover{background:var(--line)}
+.arrow{color:var(--primary);font-weight:850;flex:none}.sent .arrow{color:var(--muted)}
+.peer{font-weight:750;color:var(--fg);flex:none}
+.addr{font:10px var(--mono);color:var(--muted);flex:none}
+.preview-text{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mail-body{margin:3px 7px 5px 23px;padding:9px 11px;border-radius:7px;background:var(--card);box-shadow:var(--shadow);font-size:12px;overflow-wrap:anywhere}
+.mail-body .from{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:10px;color:var(--muted);padding-bottom:7px;margin-bottom:7px;border-bottom:1px solid var(--line)}
+.mail-body .from code{font-size:10px}
+.peer-note{display:inline-flex;align-items:center;gap:5px;color:var(--muted)}
+.peer-note:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--wb-announced);flex:none}
+.mail-body .text{white-space:pre-wrap}
+.delivery{margin:1px 7px 0 23px;min-width:0;font-size:10px;color:var(--muted)}
+.delivery>summary{cursor:pointer;width:fit-content;max-width:100%;padding:3px 0}
+.delivery>summary .clock{font-size:9px;margin-left:5px}
+.diagnostic{margin:5px 0 1px;padding:9px 10px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--muted);font:10px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%}
+.diagnostic-note{font-size:9px;color:var(--muted);margin:4px 0 0;overflow-wrap:anywhere}
+
+/* ---- Whiteboard: real board component rules (page.css), copied as-is ---- */
+.wbx .topic{background:var(--wb-card);border-radius:var(--wb-radius);box-shadow:var(--wb-shadow);overflow:hidden;min-width:0}
+.tbar{display:flex;align-items:center;gap:6px;padding:4px 12px;min-height:30px;background:var(--wb-topic);color:var(--wb-on-topic);min-width:0}
+.tbar .tlead{margin-right:auto;min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
+.tbar .tname{font-size:14px;font-weight:700;overflow-wrap:anywhere}
+.tbar .tago{font-size:11.5px;opacity:.7;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbar .btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;opacity:.7;font-size:12px}
+.tbar .btn.box{background:rgb(255 255 255 / .9);color:#2c3038;opacity:1}
+.tsub{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 12px;padding:6px 12px;border-bottom:1px solid var(--wb-line);overflow:hidden}
+.trecap{flex:1 1 22em;min-width:0;font-size:12.5px;line-height:1.45;color:color-mix(in srgb,var(--wb-fg) 80%,transparent)}
+.trecap .rat{font-size:10.5px;color:var(--wb-muted-fg);white-space:nowrap;font-variant-numeric:tabular-nums}
+.trecap .rat .evi{width:14px;height:14px;vertical-align:text-bottom;margin-right:5px;display:inline-flex}
+.ckpill{flex:none;display:flex;align-items:center;gap:4px;margin-left:auto;max-width:100%}
+.ckbtn{display:inline-flex;align-items:center;gap:6px;min-height:22px;padding:0 9px;border:0;border-radius:8px;background:var(--wb-bg);color:var(--wb-muted-fg);font:800 10.5px var(--wb-sans,inherit);letter-spacing:.06em;text-transform:uppercase}
+.ckbtn .prog{font-variant-numeric:tabular-nums;letter-spacing:0;text-transform:none;font-size:11.5px;font-weight:700}
+.checks{margin:8px 10px 0;border-radius:10px;overflow:hidden;background:var(--wb-bg)}
+.ckrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 10px;font-size:12.5px}
+.ckrow+.ckrow{border-top:1px solid var(--wb-muted)}
+.ckrow .id,.wbx .id{font:700 12px var(--mono);color:var(--wb-muted-fg)}
+.ckrow.done .title{color:var(--wb-muted-fg);font-weight:500}
+.ckrow .stamp{font-size:10.5px;font-weight:800;letter-spacing:.05em;padding:0 7px;border-radius:999px;line-height:16px;color:var(--wb-ck-ok);background:color-mix(in srgb,var(--wb-ck-ok) 16%,transparent)}
+.tdoc{margin:10px 14px 0;padding:0 0 4px 10px;border-left:3px solid color-mix(in srgb,var(--wb-announced) 45%,transparent);font-size:13px}
+.tdoc h4{margin:0 0 3px;font-size:13px}.tdoc p{margin:0 0 6px;color:var(--wb-fg)}
+.topic-stream{margin:10px 14px 0;padding:7px 0 10px;border-top:1px solid var(--wb-line);font-size:13px}
+.mhead{display:flex;align-items:center;gap:6px;min-height:22px;padding:0 4px 4px;font-size:10.5px;font-weight:800;letter-spacing:.06em;color:var(--wb-muted-fg)}
+.mhead .n{letter-spacing:0;font-size:11.5px}.mhead .mmeta{margin-left:auto;font-weight:600;letter-spacing:0;font-size:11.5px}
+.fold{display:flex;align-items:center;gap:6px;padding:0 6px;font-size:12px;line-height:1.6;color:var(--wb-muted-fg)}
+.fold .rl{width:40px;border-top:1px dotted var(--wb-line);flex:none}
+.fold .lbl:before{content:"";display:inline-block;margin-right:6px;vertical-align:1px;border-left:5px solid currentColor;border-top:4px solid transparent;border-bottom:4px solid transparent}
+.entry-line{display:flex;align-items:baseline;gap:8px;padding:0 6px;border-radius:6px;font-size:12px;line-height:1.6;color:var(--wb-muted-fg);min-width:0}
+.entry-line .entry-at{font:11px/1.6 var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.8}
+.entry-text{flex:1;min-width:0;overflow-wrap:anywhere}
+.wb-entry.agent>.entry-line{color:var(--wb-fg);font-size:12.5px}
+.wb-entry.agent.current{background:var(--wb-latest-log);border-radius:6px}
+.wb-entry.owner>.entry-line{background:color-mix(in srgb,var(--wb-accent-policy) 8%,transparent)}
+.wb-entry.owner .entry-text{color:color-mix(in srgb,var(--wb-accent-policy) 70%,var(--wb-fg))}
+.evi{flex:none;width:15px;height:15px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-size:8.5px;font-weight:800;line-height:1;font-style:normal}
+.entry-line>.evi{align-self:flex-start;margin-top:2px}
+.evi.lead{background:color-mix(in srgb,var(--wb-primary) 16%,transparent);color:var(--wb-primary)}
+.evi.owner{background:color-mix(in srgb,var(--wb-accent-policy) 22%,transparent);color:var(--wb-accent-policy)}
+.evi.sys{color:var(--wb-muted-fg)}.evi.sys:before{content:"";width:5px;height:5px;border-radius:50%;box-shadow:inset 0 0 0 1.5px currentColor;opacity:.7}
+.curtag{font-size:10px;font-weight:700;padding:0 6px;border-radius:5px;margin-left:4px;color:var(--wb-accent-policy);background:color-mix(in srgb,var(--wb-accent-policy) 14%,transparent)}
+.entry-panel{display:grid;grid-template-columns:10px minmax(0,1fr) auto;column-gap:8px;align-items:start;min-height:24px;padding:0 6px;border-radius:6px}
+.entry-panel:before{content:"\25B8";width:10px;font-size:10px;line-height:24px;color:var(--wb-muted-fg)}
+.entry-recap{min-width:0;font-size:13px;font-weight:600;line-height:24px;overflow-wrap:anywhere;color:var(--wb-fg)}
+.pmeta{display:inline-flex;align-items:center;gap:8px;height:24px;font-size:11px;color:var(--wb-muted-fg);white-space:nowrap;font-variant-numeric:tabular-nums}
+.pmeta .entry-at{font:11px var(--mono)}
+.pmeta .hint{padding:0 6px;border-radius:999px;background:var(--wb-muted);line-height:16px}
+.pmeta a.mref{font:600 11px var(--mono);color:inherit;text-decoration:none}.pmeta a.mref:hover{color:var(--wb-primary)}
+.chip{display:inline-flex;align-items:center;height:18px;font-size:11px;font-weight:700;line-height:1;padding:0 8px;border-radius:999px;background:var(--wb-muted);color:var(--wb-muted-fg);white-space:nowrap}
+.chip.policy{background:var(--wb-policy);color:var(--wb-on-policy)}
+.chip.ok{background:var(--wb-technical);color:var(--wb-on-technical)}
+.wbtk{display:inline-flex;align-items:center;gap:4px;font:600 10.5px var(--mono);padding:0 6px;border-radius:999px;background:rgb(127 127 127 / .28);color:inherit;white-space:nowrap;line-height:17px}
+
+/* ---- New: whiteboard update entry in the conversation ---- */
+.wbx{min-width:0;align-self:stretch}
+.wbx-head{display:flex;align-items:center;gap:6px;padding:0 4px 5px;font-size:11px;color:var(--muted);min-width:0}
+.wbx-head b{color:var(--fg);font-size:11.5px;white-space:nowrap}
+.wbx-glyph{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;background:var(--wb-topic);color:var(--wb-on-topic)}
+.wbx-glyph svg{width:10px;height:10px}
+.wbx-sum{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wbx-head .clock{margin-left:auto}
+.wbx-open{flex:none;font-size:10.5px;font-weight:700;text-decoration:none;white-space:nowrap}
+.wbx-open:hover{text-decoration:underline}
+.wbx .topic+.topic{margin-top:6px}
+.wbx .tbar{min-height:28px}
+.wbx .tbar .tname{font-size:13px}
+.wbx .tkey{font:10.5px var(--mono);opacity:.65;overflow-wrap:anywhere}
+.wbx .tbar a{color:inherit;text-decoration:none;font-size:11px;font-weight:700;opacity:.8;white-space:nowrap}
+.wbx .tbar a:hover{opacity:1;text-decoration:underline}
+.fx{padding:6px 6px 7px;display:flex;flex-direction:column;gap:1px}
+.fx .entry-panel{grid-template-columns:auto minmax(0,1fr) auto}
+.fx .entry-panel:before{content:none}
+.fx .pk{font-size:9.5px;font-weight:800;letter-spacing:.04em;line-height:24px;color:var(--wb-muted-fg);text-transform:uppercase}
+.fx .item{display:flex;flex-wrap:wrap;align-items:center;gap:4px 7px;padding:2px 6px;font-size:12.5px;min-width:0}
+.fx .item .evi{align-self:center}
+.fx .item .title{min-width:0;flex:1 1 14em;overflow-wrap:anywhere}
+.fx .item .act{font-size:11px;font-weight:700;white-space:nowrap;text-decoration:none}
+.fx .item .act:hover{text-decoration:underline}
+.fx .opts-mini{flex-basis:100%;display:flex;flex-wrap:wrap;gap:4px;padding-left:22px}
+.fx .opts-mini span{font-size:11px;padding:1px 8px;border-radius:7px;background:color-mix(in srgb,var(--wb-policy) 8%,var(--wb-card));box-shadow:var(--wb-shadow);color:var(--wb-fg)}
+.fx .opts-mini b{font-family:var(--mono);color:var(--wb-accent-policy);margin-right:4px}
+.fx-more{font-size:10.5px;color:var(--muted);padding:3px 6px 0 28px}
+/* collapsed one-line form, same row grammar as a mail row */
+.wbx-line>summary{list-style:none;display:flex;align-items:baseline;gap:6px;padding:4px 7px;border-radius:7px;cursor:pointer;font-size:12px;color:var(--muted);min-width:0}
+.wbx-line>summary::-webkit-details-marker{display:none}.wbx-line>summary:hover{background:var(--line)}
+.wbx-line>summary .wbx-glyph{align-self:center}
+.wbx-line>summary .tn{font-weight:750;color:var(--fg);flex:none;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wbx-line[open]>summary{color:var(--fg)}
+.wbx-line>.topic{margin:3px 7px 5px 29px}
+
+.footnote{font-size:10px;color:var(--muted);margin-top:11px;max-width:760px}
+.notes{display:grid;gap:14px;padding-top:35px}
+.note{border-top:2px solid var(--line);padding-top:10px}
+.note .num{font:11px var(--mono);color:var(--technical);display:block;margin-bottom:5px}
+.note h3{font-size:12px;margin:0 0 5px}.note p{font-size:11px;color:var(--muted);word-break:keep-all}.note p+p{margin-top:5px}
+.note code{font:10px var(--mono)}
+
+/* ---- Reference: today's board topic ---- */
+.ref{margin-top:44px}
+.ref h2{font-size:18px;letter-spacing:-.02em;margin:6px 0 6px}
+.ref .intro{margin-bottom:16px;font-size:13px}
+.ref-grid{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:26px;align-items:start}
+.ref-board{background:var(--wb-bg);border:1px solid var(--line);border-radius:12px;padding:14px;min-width:0;box-shadow:var(--shadow)}
+.ref-board .wbx{display:block}
+.ref-board .topic{background:var(--wb-card);border-radius:var(--wb-radius);box-shadow:var(--wb-shadow);overflow:hidden;padding-bottom:4px}
+.pin{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--technical);color:#fff;font:700 9px var(--mono);flex:none;vertical-align:1px}
+.tbar .pin{background:#fff;color:#2c3038}
+.legend{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.legend li{display:grid;grid-template-columns:18px 1fr;gap:6px;font-size:11px;color:var(--muted)}
+.legend b{color:var(--fg);display:block;font-size:11.5px}
+.legend code{font:10px var(--mono)}
+.limitations{margin-top:28px;padding:13px 15px;background:var(--card);border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:11px}
+.limitations strong{color:var(--fg)}
+
+/* ---- Narrow conversation (container query, 781 rules + new entries) ---- */
+@container(max-width:460px){
+ .session-head{padding:11px 12px}.session-head .minor{display:none}
+ .conv{padding:13px 9px 18px;gap:11px}
+ .mail>summary{display:grid;grid-template-columns:12px auto 1fr auto;gap:2px 5px;align-items:center}
+ .mail>summary .addr{display:none}
+ .mail>summary .badge{grid-column:3;justify-self:start}
+ .mail>summary .clock{grid-column:4;grid-row:1}
+ .mail>summary .preview-text{grid-row:2;grid-column:2/5;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.4}
+ .mail-body{margin-left:12px;margin-right:0;font-size:11.5px}
+ .delivery{margin-left:12px}.delivery>summary .clock{display:block;margin-left:0}
+ .human{max-width:92%}.lead{max-width:100%}
+ .case-label{font-size:8px;letter-spacing:.07em}.diagnostic{font-size:9px}
+ .wbx-head{flex-wrap:wrap}.wbx-sum{order:5;flex-basis:100%;padding-left:22px;white-space:normal}
+ .wbx .tbar{padding:4px 9px}.wbx .tkey{display:none}
+ .fx .entry-panel{grid-template-columns:auto minmax(0,1fr)}
+ .fx .entry-panel .pmeta{grid-column:2;grid-row:2;height:18px}
+ .fx .entry-recap{line-height:1.45;padding-top:3px}
+ .fx .opts-mini{padding-left:0}
+ .wbx-line>summary{display:grid;grid-template-columns:16px auto 1fr auto;gap:2px 6px;align-items:center}
+ .wbx-line>summary .tn{max-width:none;grid-column:2/4}
+ .wbx-line>summary .clock{grid-column:4;grid-row:1}
+ .wbx-line>summary .preview-text{grid-row:2;grid-column:2/5;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.4}
+ .wbx-line>.topic{margin-left:0;margin-right:0}
+}
+@media(max-width:950px){.workspace,.ref-grid{grid-template-columns:minmax(0,1fr)}.notes{grid-template-columns:repeat(2,minmax(0,1fr));padding-top:0}.note{min-width:0}}
+@media(max-width:520px){main{padding:22px 12px 36px}.notes{grid-template-columns:1fr}.controls>span{width:100%;margin-bottom:3px}.preview{border-radius:9px}.ref-board{padding:8px}
+ .ref-board .tsub{padding:6px 9px}.ref-board .tbar{flex-wrap:wrap}.ref-board .entry-panel{grid-template-columns:10px minmax(0,1fr)}.ref-board .entry-panel .pmeta{grid-column:2}
+ .ref-board .topic-stream,.ref-board .tdoc{margin-left:8px;margin-right:8px}.ref-board .fold .rl{width:16px}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="board" viewBox="0 0 16 16"><rect x="1.5" y="2" width="13" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5 14l3-3 3 3M4.5 5.5h4M4.5 8h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol></svg>
+<main>
+<header>
+<div class="eyebrow">811 · 812 · 781 1단계 목업 확장 · 예시 데이터</div>
+<h1>대화, 메일, 화이트보드 갱신을<br>한 줄기 대화 안에서 봅니다.</h1>
+<p class="intro">승인된 781 목업(804=ok)의 구조와 색을 그대로 두고, 같은 대화 화면에 세 가지를 함께 올린 통합안입니다: ① 사람 입력·리드 답변·도구 요약(781 방향) ② 메일박스 메일(보낸 쪽 주소·시각·본문·피어 리드 표시) ③ 화이트보드 갱신 카드(777 티켓의 "커밋된 변경" 기록을 실제 보드 부품으로 표시). 아래쪽에는 지금 보드가 실제로 어떻게 보이는지를 처음으로 목업으로 남겼습니다.</p>
+<div class="scope"><span class="tag">정적 목업 · 승인 전</span><span class="tag">화면만 · T0 목표</span><span class="tag">781 색·구조 유지</span><span class="tag">보드 부품은 page.css 규칙 그대로</span><span class="tag">패널 본문은 대화에 넣지 않음</span></div>
+</header>
+
+<div class="workspace">
+<section class="canvas" aria-label="대화 미리보기">
+<div class="controls" aria-label="미리보기 설정"><span>폭과 테마를 바꿔 볼 수 있습니다. 접기는 모두 키보드로 열립니다.</span><button type="button" id="wide" aria-controls="preview" aria-pressed="true">넓게</button><button type="button" id="narrow" aria-controls="preview" aria-pressed="false">좁게 · 360px</button><span class="sep" aria-hidden="true"></span><button type="button" id="theme" aria-pressed="false">다크 테마</button></div>
+
+<div class="preview" id="preview" data-size="wide">
+<div class="session-head"><span class="dot" aria-hidden="true"></span><strong>MAIN · 리드 대화</strong><span class="minor">sweatradar…overwrite · claude</span></div>
+<div class="conv">
+
+<div class="case-label">01 · 사람 입력 → 리드 답변 → 도구 요약 → 턴</div>
+<article class="human" aria-label="오너 입력"><div class="meta"><strong>나</strong><time>14:02</time></div><div class="bubble">EXEC 3한테 777 구현 어디까지 됐는지 물어봐 주세요. 답 오면 보드에 정리해 주시고요.</div></article>
+<details class="tools"><summary><span class="chev" aria-hidden="true">▾</span><span class="tsl">mailbox_send 1 · whiteboard_query 1 · 1.8초</span></summary><ul class="brows"><li><span class="ok">✓</span> whiteboard_query <span>{"topic":"wb-update-in-chat"}</span></li><li><span class="ok">✓</span> mailbox_send <span>to exec3@worktree · "777 진행 상황 공유 부탁…"</span></li></ul></details>
+<article class="mail-block sent" aria-label="EXEC 3에게 보낸 메일"><details class="mail"><summary><span class="arrow" aria-hidden="true">↗</span><span class="peer">EXEC 3</span><span class="addr">exec3@worktree</span><span class="badge">메일</span><span class="preview-text">777 진행 상황 공유 부탁합니다. 어디까지 됐고 남은 결정이 있는지요.</span><time class="clock">14:02</time></summary><div class="mail-body"><div class="text">777 진행 상황 공유 부탁합니다. 어디까지 됐고 남은 결정이 있는지요.
+답 받으면 wb-update-in-chat 토픽에 정리하겠습니다.</div></div></details></article>
+<article class="lead" aria-label="리드 답변"><div class="meta"><b>리드</b><time>14:02</time></div><div class="bubble"><p>EXEC 3에 진행 상황을 물어봤습니다. 답이 오면 <code>wb-update-in-chat</code> 토픽에 정리하고, 결정이 필요하면 항목으로 올리겠습니다.</p></div></article>
+<div class="turnline">턴 · 도구 호출 2회 · 6초</div>
+
+<div class="case-label">02 · 메일 받음: 보낸 쪽 · 피어 리드 표시 · 전달 세부</div>
+<article class="mail-block" aria-label="EXEC 3에게서 받은 메일"><details class="mail" open><summary><span class="arrow" aria-hidden="true">↙</span><span class="peer">EXEC 3</span><span class="addr">exec3@worktree</span><span class="badge peer" title="[ws note: from a peer lead session (claude, not a worker), with the same authority as yours]">피어 리드</span><span class="preview-text">777 1단계 정적 구현 끝났습니다 (a41c9e2).</span><time class="clock">14:19</time></summary><div class="mail-body"><div class="from"><span>보낸 쪽 <code>exec3@worktree</code></span><span>14:19:42 받음</span><span class="peer-note">피어 리드 세션 · claude · 작업자가 아니라 같은 권한</span></div><div class="text">777 1단계 정적 구현 끝났습니다 (a41c9e2).
+- 보드에 실제로 커밋된 변경만 대화 기록에 붙임, 화면만 다시 그린 호출은 생략 (805=a)
+- 터미널 리드도 어댑터 없이 기록이 보이는 것 확인
+남은 것: 브라우저 확인은 무거운 작업 차례 대기. 대화 카드의 보드 링크 문구 하나 정해 주세요.</div></div></details>
+<details class="delivery"><summary>전달 세부 <span class="clock">관측 14:19:45</span></summary><pre class="diagnostic">[ws mailbox] 1 message(s) arrived for session_key k-7f3a…c21. They were already received through mailbox.recv; do not call it again for these.
+
+mail from exec3@worktree (14:19:42):
+[ws note: from a peer lead session (claude, not a worker), with the same authority as yours]
+777 1단계 정적 구현 끝났습니다 (a41c9e2).
+…</pre><p class="diagnostic-note">깨우기 원문은 메일 줄 아래에 그대로 보존(781 01/02). 피어 리드 노트 줄도 원문에는 남아 있습니다.</p></details>
+</article>
+
+<div class="case-label">03 · 화이트보드 갱신: 커밋된 변경 · 토픽 2개</div>
+<article class="wbx" aria-label="화이트보드 갱신">
+<div class="wbx-head"><span class="wbx-glyph" aria-hidden="true"><svg><use href="#board"/></svg></span><b>화이트보드 갱신</b><span class="wbx-sum">토픽 2 · 로그 2 · 패널 1 · 항목 1</span><time class="clock">14:20</time><a class="wbx-open" href="#">보드 열기 ↗</a></div>
+<section class="topic" aria-label="토픽 wb-update-in-chat">
+<div class="tbar"><span class="tlead"><span class="tname">대화 창에 보드 갱신 내용 펼쳐 보기</span><span class="tkey">wb-update-in-chat</span></span><a href="#">토픽 ↗</a></div>
+<div class="fx">
+<div class="wb-entry agent"><div class="entry-line"><span class="evi lead" title="리드 로그">L</span><span class="entry-text"><time class="entry-at">14:20</time> — <a href="#">(777)</a> EXEC 3 보고: 1단계 정적 구현 완료(a41c9e2). 커밋된 변경만 기록, 렌더만 한 호출은 생략. 브라우저 확인은 무거운 작업 차례 대기</span></div></div>
+<div class="entry-panel"><span class="pk">패널</span><span class="entry-recap">777 1단계 결과: 무엇이 대화에 남고 무엇이 생략되는지</span><span class="pmeta"><span class="hint">14줄</span><a class="mref" href="#">#p151</a></span></div>
+<div class="item"><span class="evi sys" aria-hidden="true"></span><span class="id">(815)</span><span class="chip policy">policy</span><span class="title">대화 카드의 보드 링크 문구를 어떻게 할까요?</span><a class="act" href="#">보드에서 답하기 ↗</a><div class="opts-mini"><span><b>a</b>보드 열기 ↗</span><span><b>b</b>토픽으로 이동</span></div></div>
+</div>
+</section>
+<section class="topic" aria-label="토픽 status-board">
+<div class="tbar"><span class="tlead"><span class="tname">현재 작업 상태 오버뷰</span><span class="tkey">status-board</span></span><a href="#">토픽 ↗</a></div>
+<div class="fx">
+<div class="wb-entry agent"><div class="entry-line"><span class="evi lead" title="리드 로그">L</span><span class="entry-text"><time class="entry-at">14:20</time> — EXEC 3: 777 1단계 정적 완료 → 브라우저 확인 대기열 2번</span></div></div>
+<div class="fx-more">본문 갱신 1 · 표 한 줄 바뀜</div>
+</div>
+</section>
+</article>
+<details class="tools"><summary><span class="chev" aria-hidden="true">▾</span><span class="tsl">mailbox_recv 1 · git_log 1 · whiteboard_update 1 · 4.2초</span></summary><ul class="brows"><li><span class="ok">✓</span> mailbox_recv</li><li><span class="ok">✓</span> git_log <span>a41c9e2 -3</span></li><li><span class="ok">✓</span> whiteboard_update <span>&lt;wb:topic name="wb-update-in-chat"&gt;&lt;wb:log&gt;(777) EXEC 3 보고…</span></li></ul></details>
+<article class="lead" aria-label="리드 답변"><div class="meta"><b>리드</b><time>14:20</time></div><div class="bubble"><p>EXEC 3 보고를 보드에 정리했습니다. 777 1단계 정적 구현은 끝났고, 브라우저 확인만 남았습니다.</p><p>결정 하나가 필요합니다: <a href="#">(815)</a> 대화 카드의 보드 링크 문구.</p></div></article>
+<div class="turnline wake">↳ 리드 턴 · 도구 호출 3회 · 18초</div>
+
+<div class="case-label">04 · 보드 답변 → 짧은 갱신은 한 줄로 접힘</div>
+<article class="human" aria-label="오너 화이트보드 답변"><div class="meta"><strong>나</strong><span class="src wb">화이트보드</span><time>14:31</time></div><div class="bubble">815=a</div></article>
+<details class="wbx wbx-line" aria-label="화이트보드 갱신, 접힘"><summary><span class="wbx-glyph" aria-hidden="true"><svg><use href="#board"/></svg></span><span class="tn">대화 창에 보드 갱신 내용 펼쳐 보기</span><span class="preview-text">(815)=a: 링크 문구는 "보드 열기 ↗"로 확정. EXEC 3에 전달</span><time class="clock">14:31</time></summary>
+<section class="topic" aria-label="토픽 wb-update-in-chat">
+<div class="tbar"><span class="tlead"><span class="tname">대화 창에 보드 갱신 내용 펼쳐 보기</span><span class="tkey">wb-update-in-chat</span></span><a href="#">토픽 ↗</a></div>
+<div class="fx"><div class="wb-entry agent"><div class="entry-line"><span class="evi lead">L</span><span class="entry-text"><time class="entry-at">14:31</time> — <a href="#">(815)</a>=a: 링크 문구는 "보드 열기 ↗"로 확정. EXEC 3에 전달</span></div></div></div>
+</section>
+</details>
+<article class="mail-block sent" aria-label="EXEC 3에게 보낸 메일"><details class="mail"><summary><span class="arrow" aria-hidden="true">↗</span><span class="peer">EXEC 3</span><span class="addr">exec3@worktree</span><span class="badge">메일</span><span class="preview-text">(815)=a 확정: 링크 문구 "보드 열기 ↗". 그대로 진행해 주세요.</span><time class="clock">14:31</time></summary><div class="mail-body"><div class="text">(815)=a 확정: 링크 문구 "보드 열기 ↗". 그대로 진행해 주세요.</div></div></details></article>
+<div class="turnline">화이트보드 · 턴 · 도구 호출 2회 · 5초</div>
+
+</div>
+</div>
+<p class="footnote">회색 구분줄(01–04)은 검토용 주석이며 실제 대화에는 나오지 않습니다. 781 목업의 나머지 경우(짝 없는 깨우기, 같은 내용 두 통, 작업자 보고, 출처 미확정)는 승인된 그대로이며 여기서는 반복하지 않았습니다.</p>
+</section>
+
+<aside class="notes" aria-label="설계 메모">
+<section class="note"><span class="num">01</span><h3>사람·리드: 781 그대로</h3><p>오른쪽 말풍선(출처 칩: 화이트보드·메일·터미널), 왼쪽 리드 카드, 도구 요약 알약, 턴 알약. 색과 간격은 승인본에서 바꾸지 않았습니다.</p></section>
+<section class="note"><span class="num">02</span><h3>메일: 한 줄이 기준</h3><p>화살표 · 보낸 쪽 이름 · 주소(<code>exec3@worktree</code>) · 첫 줄 · 시각. 피어 리드 노트 줄은 본문 첫 줄에서 빼서 초록 <b>피어 리드</b> 배지로 올리고, 펼친 본문 머리에 한 번 더 풀어 씁니다. 원문 줄은 "전달 세부"에 그대로 남습니다.</p><p>배지가 없는 메일은 작업자 보고 등 일반 메일입니다.</p></section>
+<section class="note"><span class="num">03</span><h3>화이트보드: 실제 보드 부품</h3><p>토픽마다 보드와 같은 진회색 띠(<code>.tbar</code>), 리드 로그의 <b>L</b> 배지와 시각(<code>.entry-line</code>), 패널은 요약 한 줄 + 줄 수 + <code>#p151</code>(<code>.pmeta</code>), 항목은 <code>(815)</code> + policy 칩. 패널 본문은 대화에 넣지 않고 보드로 연결합니다.</p></section>
+<section class="note"><span class="num">03 · 순서</span><h3>커밋 순간에 붙음</h3><p>카드는 보드 저장이 끝난 순간 기록되므로, 같은 턴의 도구 요약 알약보다 <b>먼저</b> 나올 수 있습니다(777 결정 5). 변경이 없는 호출은 카드를 만들지 않습니다(805=a).</p></section>
+<section class="note"><span class="num">04</span><h3>짧으면 한 줄</h3><p>토픽 1개 · 로그 1줄뿐이면 메일 줄과 같은 문법의 한 줄로 접고, 펼치면 같은 토픽 카드가 나옵니다. 패널·항목·여러 토픽이 있으면 펼친 카드로 보입니다. (제안 — 아래 질문 참고)</p></section>
+</aside>
+</div>
+
+<section class="ref" aria-label="현재 화이트보드 참고">
+<div class="eyebrow">812 · 현재 화이트보드 · 오늘 구현 그대로 (첫 목업 기록)</div>
+<h2>지금 보드의 토픽 한 개</h2>
+<p class="intro">목업 없이 바로 구현된 현재 모습을 page.css 규칙 그대로 옮겼습니다(내용은 예시). 위 대화 카드가 빌려 쓰는 부품에 번호를 붙였습니다. 실제 보드의 고정 문구(History, Load older, check 등)는 지금도 영어입니다.</p>
+<div class="ref-grid">
+<div class="ref-board wbx">
+<section class="topic" aria-label="보드 토픽 예시">
+<div class="tbar"><span class="tlead"><span class="tname"><span class="pin">1</span> 대화 창에 보드 갱신 내용 펼쳐 보기</span></span><time class="tago">3 min ago</time><span class="btn" aria-hidden="true">✎</span><span class="btn box" aria-hidden="true">▯</span></div>
+<div class="tsub"><div class="trecap"><span class="rat"><span class="evi lead">L</span>14:31 · <time>3 min ago</time></span> — <span class="pin">2</span> (815)=a: 링크 문구는 "보드 열기 ↗"로 확정. EXEC 3에 전달</div><div class="ckpill"><span class="pin">3</span><span class="ckbtn">☑ check <span class="prog">answered 1 / 1</span></span></div></div>
+<div class="checks"><div class="ckrow done"><span>☑</span><span class="id">(816)</span><span class="title">777 1단계 결과 패널 내용이 맞나요?</span><span class="stamp">ok</span></div></div>
+<div class="tdoc"><h4>요청</h4><p>오너: 대화 창에서 보드 갱신을 항목별로 펼쳐 보고 싶음. 리드 응답을 쫓아다닐 필요가 없도록.</p><h4>결론</h4><p>보드 저장이 성공한 순간 실제로 바뀐 것만 그 세션의 대화 기록에 붙임. 방식은 (777).</p></div>
+<div class="topic-stream"><div class="mhead">≡ History <span class="n">33</span><span class="mmeta">panels 1 · log 31</span></div>
+<div class="fold"><span class="rl"></span><span class="lbl">Log 27 · 22:43–13:58</span></div>
+<div class="fold"><span class="rl"></span><span class="lbl">System events 1 · 14:20</span></div>
+<div class="wb-entry agent"><div class="entry-line"><span class="pin">4</span><span class="evi lead">L</span><span class="entry-text"><time class="entry-at">14:20</time> — (777) EXEC 3 보고: 1단계 정적 구현 완료(a41c9e2). 커밋된 변경만 기록, 렌더만 한 호출은 생략</span></div></div>
+<div class="entry-panel"><span class="entry-recap"><span class="pin">5</span> 777 1단계 결과: 무엇이 대화에 남고 무엇이 생략되는지</span><span class="pmeta"><time class="entry-at">14:20</time><span class="hint">14 lines</span><a class="mref" href="#">#p151</a></span></div>
+<div class="wb-entry system"><div class="entry-line"><span class="evi sys"></span><span class="entry-text"><time class="entry-at">14:20</time> — Item (815) added [policy]: 대화 카드의 보드 링크 문구를 어떻게 할까요?</span></div></div>
+<div class="wb-entry system owner"><div class="entry-line"><span class="evi owner">O</span><span class="entry-text"><time class="entry-at">14:31</time> — Item (815) answered [policy]: a; owner quote: "815=a"</span></div></div>
+<div class="wb-entry agent current"><div class="entry-line"><span class="evi lead">L</span><span class="entry-text"><time class="entry-at">14:31</time> — (815)=a: 링크 문구는 "보드 열기 ↗"로 확정. EXEC 3에 전달 <span class="curtag">current</span></span></div></div>
+</div>
+</section>
+</div>
+<ol class="legend" aria-label="부품 설명">
+<li><span class="pin">1</span><span><b>토픽 띠 <code>.tbar</code></b>진회색 채움 + 흰 글씨(다크에서도 템플릿 고정색). 대화 카드의 토픽 머리로 그대로 사용.</span></li>
+<li><span class="pin">2</span><span><b>최신 로그 요약줄 <code>.tsub .trecap</code></b>L 배지 + 시각 + 상대 시간. 대화에서는 시각만 남깁니다.</span></li>
+<li><span class="pin">3</span><span><b>확인 요청 알약 <code>.ckbtn</code></b>대화 카드에는 넣지 않고 항목 줄의 "보드에서 답하기"로 대신합니다.</span></li>
+<li><span class="pin">4</span><span><b>로그 줄 <code>.entry-line</code></b>L(리드) · O(오너 답) · 점(시스템). 최신 로그는 초록 바탕 + current. 대화 카드의 로그 줄과 같은 규칙.</span></li>
+<li><span class="pin">5</span><span><b>패널 줄 <code>.entry-panel</code></b>▸ 요약 · 시각 · 줄 수 · #pN. 보드에서는 펼치면 본문, 대화에서는 "패널" 라벨 + 보드 링크만.</span></li>
+</ol>
+</div>
+</section>
+
+<div class="limitations"><strong>검토 범위:</strong> 하나로 된 정적 HTML, 예시 데이터. 접기·폭·테마 전환만 동작합니다. 보드 카드의 내용은 777 티켓의 "커밋된 변경" 기록(<code>whiteboard-effects</code>, 요약 200자 + 효과 목록)에서 그릴 수 있는 것만 썼고, 패널 HTML이나 원래 명령 문자열은 쓰지 않았습니다. 메일 줄과 깨우기 원문의 짝 맞추기, 페이지 넘김, 재연결 동작은 구현되지 않았습니다. 360px·1280px, 라이트·다크에서 가로 넘침만 확인했습니다.</div>
+</main>
+<script>
+(function(){
+  'use strict';
+  var root=document.documentElement,preview=document.getElementById('preview');
+  var wide=document.getElementById('wide'),narrow=document.getElementById('narrow'),theme=document.getElementById('theme');
+  function setWidth(size){preview.dataset.size=size;wide.setAttribute('aria-pressed',String(size==='wide'));narrow.setAttribute('aria-pressed',String(size==='narrow'));}
+  function isDark(){return root.dataset.theme?root.dataset.theme==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;}
+  function syncTheme(){var d=isDark();theme.setAttribute('aria-pressed',String(d));theme.textContent=d?'라이트 테마':'다크 테마';}
+  wide.addEventListener('click',function(){setWidth('wide');});
+  narrow.addEventListener('click',function(){setWidth('narrow');});
+  theme.addEventListener('click',function(){root.dataset.theme=isDark()?'light':'dark';syncTheme();});
+  var q=new URLSearchParams(location.search);if(q.get('theme'))root.dataset.theme=q.get('theme');if(q.get('size'))setWidth(q.get('size'));
+  syncTheme();
+})();
+</script>
+</body>
+</html>

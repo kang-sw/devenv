@@ -230,8 +230,9 @@ type LiveSlot struct {
 // IsRunning reports a running agent.
 func (a AgentNode) IsRunning() bool { return a.Status == wslive.StatusRunning }
 
-// ModelText is the agent's model and reasoning effort as one stat ("<model>
-// <effort>"), either alone when only one is known; empty when neither is.
+// ModelText is the agent's model and reasoning effort joined by a space
+// ("<model> <effort>"), either alone when only one is known; empty when
+// neither is. The row renders them as separate stats (template astat).
 func (a AgentNode) ModelText() string { return strings.TrimSpace(a.Model + " " + a.Effort) }
 
 // ContextText is the agent's context size in compact form; empty while

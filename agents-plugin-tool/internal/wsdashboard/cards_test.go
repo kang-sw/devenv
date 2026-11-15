@@ -239,6 +239,57 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
+func TestBoardTopicRevealUsesFoldOwner(t *testing.T) {
+	data, err := dashboardFS.ReadFile("assets/cards.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, _ := json.Marshal(string(data))
+	runNode(t, "topic navigation fold owner", "var CARDS = "+string(src)+";\n"+cardsDOM+`
+var store = {}, A, B;
+function withDisclosures(name, at) {
+  var t = topic(name, at), body = t.appendChild(mk("details.tdoc")), versions = t.appendChild(mk("details.panel-versions"));
+  body.open = true; versions.open = false;
+  return t;
+}
+function served() { A = withDisclosures("a", 300); B = withDisclosures("b", 200); return [A, B]; }
+function records() { return store.cards ? JSON.parse(store.cards).topics : []; }
+function fold(t) { page.board.fire("click", {target: t.querySelector(".t-fold")}); }
+boot(store, served, {wide: true});
+page.W.unfoldTopic(A);
+check("an unfolded no-op creates no topic record", records(), []);
+fold(A); fold(B);
+var oldA = A;
+A = withDisclosures("a", 400);
+swap([A, B]);
+var saved = store.cards, outside = withDisclosures("a", 500);
+page.doc.body.appendChild(outside);
+[oldA, topic("a", 600), outside, mk("div", {"data-topic": "a"}), null].forEach(page.W.unfoldTopic);
+check("detached, replaced, off-board and non-topic nodes cannot borrow the live record", [store.cards, A.getAttribute("data-size")], [saved, "fold"]);
+var body = A.querySelector(".tdoc"), versions = A.querySelector(".panel-versions"), focused = body.appendChild(mk("input")), focusMoves = 0;
+El.prototype.focus = function () { focusMoves++; this.ownerDocument.activeElement = this; };
+page.doc.activeElement = focused;
+page.W.unfoldTopic(focused);
+check("reveal decorates through the fold owner", [A.getAttribute("data-size"), A.querySelector(".t-fold").getAttribute("aria-expanded")], ["base", "true"]);
+check("reveal removes a fold-only record, not another topic's fold", records().map(function (r) { return [r.n, r.f]; }), [["b", true]]);
+check("reveal preserves independent disclosures and focus", [body.open, versions.open, B.getAttribute("data-size"), page.doc.activeElement === focused, focusMoves], [true, false, "fold", true, 0]);
+saved = store.cards;
+page.W.unfoldTopic(A); page.W.decorate();
+check("reveal is idempotent and later decoration does not refold", [store.cards, A.getAttribute("data-size")], [saved, "base"]);
+boot(store, served, {wide: true});
+check("reveal persists across reload without clearing unrelated folds", [A.getAttribute("data-size"), B.getAttribute("data-size")], ["base", "fold"]);
+clickPin(A); fold(A);
+var pinned = records().filter(function (r) { return r.n === "a"; })[0];
+page.W.unfoldTopic(A.querySelector(".tdoc"));
+var revealed = records().filter(function (r) { return r.n === "a"; })[0];
+check("pinned-column reveal preserves placement and its record", [A.parentNode === page.W.pinList(), revealed.p, revealed.a, revealed.b, revealed.f], [true, pinned.p, pinned.a, pinned.b, false]);
+check("pinned reveal still leaves inner disclosures alone", [A.querySelector(".tdoc").open, A.querySelector(".panel-versions").open], [true, false]);
+boot(store, served, {wide: true});
+check("pinned unfolded state survives reload", [A.parentNode === page.W.pinList(), A.getAttribute("data-size"), B.getAttribute("data-size")], [true, "base", "fold"]);
+process.stdout.write(bad.join("\n"));
+`)
+}
+
 // boardBoxSrc is dashboard.js's board-box helpers (boardBoxes, boardQ,
 // inBoard, boardRead), for a node harness that runs a function reading the
 // board's topics wherever they stand: the board region or the pin list.
@@ -674,17 +725,19 @@ process.stdout.write(bad.join("\n"));
 `)
 }
 
-// TestFilesToolbarSheet keeps the existing explorer in place through the
-// shared sheet lifecycle, including board swaps and card/preview reveal.
+// TestFilesToolbarSheet keeps the page-owned explorer separate from the tab
+// through the shared sheet lifecycle, board swaps and card/preview reveal.
 func TestFilesToolbarSheet(t *testing.T) {
 	cards, _ := json.Marshal(mustAsset(t, "cards.js"))
 	runNode(t, "Files toolbar sheet", "var CARDS = "+string(cards)+";\n"+cardsDOM+`
 El.prototype.focus = function () { this.ownerDocument.activeElement = this; };
-var notices = 0, A;
-boot({}, function () { A = topic("a", 300); return [A]; }, { toolbar: { files: function () { notices++; } } });
+var notices = 0, A, owner = { el: null, shown: function () { notices++; }, hidden: function () { notices++; } };
+boot({}, function () { A = topic("a", 300); return [A]; }, { toolbar: { files: owner } });
 var grid = page.doc.body.appendChild(mk("div", { "data-tab": "board", "data-ctab": "convo" }));
 var slot = grid.appendChild(mk("span.fsum")), root = slot.appendChild(mk("span.froot"));
-var pane = grid.appendChild(mk("section.fpane", { id: "files" }, [mk("div.fhd"), mk("input.fq"), mk("div.ftree")]));
+var tab = grid.appendChild(mk("section.fpane", { id: "files" }));
+var pane = owner.el = page.doc.body.appendChild(mk("section.fpane", { id: "toolbar-files" }, [mk("div.fhd"), mk("input.fq"), mk("div.ftree")]));
+pane.hidden = true;
 page.doc.querySelector = function (s) { return s === "#chead .fsum" ? slot : null; };
 var filter = pane.querySelector(".fq"), tree = pane.querySelector(".ftree"), bar = page.W.toolbar(), btn = bar.querySelector(".board-files");
 filter.value = "keep query"; tree.scrollTop = 73;
@@ -696,8 +749,8 @@ function esc(consumed) {
 }
 function state() { return [pane.hasAttribute("data-max"), btn.getAttribute("aria-expanded"), !!bar.hasAttribute("data-files")]; }
 toggle();
-check("Files toggles the one explorer into the shared sheet", state(), [true, "true", true]);
-check("opening focuses search and borrows the existing root label", [page.doc.activeElement === filter, root.parentNode === pane.querySelector(".fhd"), pane.parentNode === grid], [true, true, true]);
+check("Files toggles its owned explorer into the shared sheet", [state(), pane.hidden], [[true, "true", true], false]);
+check("opening focuses search without borrowing the tab or root label", [page.doc.activeElement === filter, root.parentNode === slot, tab.parentNode === grid, pane.parentNode === page.doc.body], [true, true, true, true]);
 check("no tab switch", [grid.getAttribute("data-tab"), grid.getAttribute("data-ctab")], ["board", "convo"]);
 swap([A, topic("b", 400)]);
 check("a board swap does not mistake Files for a removed topic", state(), [true, "true", true]);
@@ -705,19 +758,19 @@ esc(true);
 check("consumed Escape does not close the sheet", state(), [true, "true", true]);
 toggle();
 check("second click closes", state(), [false, "false", false]);
-check("dismissal returns label and focus without rebuilding explorer state", [root.parentNode === slot, page.doc.activeElement === btn, pane.querySelector(".fq") === filter, filter.value, tree.scrollTop, notices], [true, true, true, "keep query", 73, 2]);
+check("dismissal hides its owner and returns focus without rebuilding state", [root.parentNode === slot, pane.hidden, page.doc.activeElement === btn, pane.querySelector(".fq") === filter, filter.value, tree.scrollTop, notices], [true, true, true, true, "keep query", 73, 2]);
 toggle(); esc(false);
 check("unconsumed Escape dismisses and returns focus", [state(), page.doc.activeElement === btn], [[false, "false", false], true]);
 page.board.fire("click", { target: A.querySelector(".d-max"), preventDefault: function () {} });
 toggle();
 check("Files replaces another maximized sheet", [pane.hasAttribute("data-max"), A.hasAttribute("data-max")], [true, false]);
 page.board.fire("click", { target: A.querySelector(".d-max"), preventDefault: function () {} });
-check("another sheet replaces Files and restores its label", [pane.hasAttribute("data-max"), A.hasAttribute("data-max"), root.parentNode === slot], [false, true, true]);
+check("another sheet replaces Files without moving its label", [pane.hasAttribute("data-max"), A.hasAttribute("data-max"), root.parentNode === slot, pane.hidden], [false, true, true, true]);
 toggle();
 var c = page.W.open("k", { name: "preview" }); c.show();
 check("preview reveal dismisses Files instead of hiding the preview behind it", state(), [false, "false", false]);
 grid.setAttribute("data-ctab", "files"); toggle(); esc(false);
-check("existing Files-tab access remains selected on dismissal", [grid.getAttribute("data-ctab"), pane.parentNode === grid], ["files", true]);
+check("existing Files-tab access remains selected on dismissal", [grid.getAttribute("data-ctab"), tab.parentNode === grid, root.parentNode === slot], ["files", true, true]);
 process.stdout.write(bad.join("\n"));
 `)
 }

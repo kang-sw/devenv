@@ -118,11 +118,11 @@
     search.appendChild(mk("kbd", "", "Ctrl K"));
     if (actions.files) {
       var files = action("board-files", "folder-open", wsT("js.board.toolbar.files"), function () {
-        var el = doc.getElementById("files");
-        if (!el) return;
-        maximize(maxed && maxed.files ? null : { files: true, el: el, back: files });
+        var owner = actions.files;
+        if (!owner.el) return;
+        maximize(maxed && maxed.files ? null : { files: true, el: owner.el, owner: owner, back: files });
       });
-      files.setAttribute("aria-controls", "files");
+      if (actions.files.el) files.setAttribute("aria-controls", actions.files.el.id);
       files.setAttribute("aria-expanded", "false");
     }
     counts = mk("span", "board-count");
@@ -477,6 +477,13 @@
     for (var p = n.parentNode; p; p = p.parentNode) if (p === board || p === pins) return n;
     return null;
   }
+  // Navigation reveals only the owning whole-topic fold. Inner disclosures
+  // and focus belong to the caller; storage and decoration stay with foldUnit.
+  function unfoldTopic(node) {
+    var sec = originTopic(node && node.closest && node.closest("section.topic[data-topic]"));
+    var r = sec && topics[topicName(sec)];
+    if (r && r.folded) foldUnit(topicUnit(sec), false);
+  }
   function openBefore(c, origin) {
     var n = originTopic(origin), u = n && unitOf(n);
     delete c.rank;
@@ -720,8 +727,8 @@
         was.el.style.removeProperty("--files-top");
         toolbar.removeAttribute("data-files");
         was.back.setAttribute("aria-expanded", "false");
-        if (was.root) was.slot.appendChild(was.root);
-        opt.toolbar.files();
+        was.el.hidden = true;
+        was.owner.hidden();
         if (was.back.isConnected) was.back.focus({ preventScroll: true });
       } else if (was instanceof Card) {
         was.el.removeAttribute("data-max");
@@ -744,16 +751,13 @@
     scrim.hidden = false;
     maxed = c;
     if (c.files) {
-      // The one explorer stays in its grid slot: no tab switch, remount or
-      // second browser. Its existing root label travels back on dismissal.
-      c.slot = doc.querySelector("#chead .fsum");
-      c.root = c.slot && c.slot.querySelector(".froot");
-      if (c.root) c.el.querySelector(".fhd").insertBefore(c.root, c.el.querySelector(".fhd").firstChild);
+      // The page owns this explorer independently of the conversation tab.
+      c.el.hidden = false;
       c.el.style.setProperty("--files-top", Math.max(52, toolbar.firstChild.getBoundingClientRect().bottom + 8) + "px");
       c.el.setAttribute("data-max", "");
       toolbar.setAttribute("data-files", "");
       c.back.setAttribute("aria-expanded", "true");
-      opt.toolbar.files();
+      c.owner.shown();
       var filter = c.el.querySelector(".fq");
       if (filter) filter.focus({ preventScroll: true });
       return;
@@ -1145,8 +1149,8 @@
     // from and hands its root to done, or null on a failure), adopted(node)
     // (a topic node the closed route brought, now placed), and drag(on) (a
     // drag starts or ends: board updates wait meanwhile). toolbar supplies
-    // overview(), search(), and optional files() visibility notification
-    // for the toolbar's existing explorer sheet.
+    // overview(), search(), and optional files: {el, shown(), hidden()}
+    // for the page-owned, independent toolbar explorer sheet.
     mount: function (el, o) {
       board = el;
       opt = o;
@@ -1234,6 +1238,7 @@
     // decorate gives topics the page added outside a board update (a
     // fetched closed page) their pin buttons.
     decorate: function () { if (board) decorate(); },
+    unfoldTopic: unfoldTopic,
     is: isCard
   };
 })();

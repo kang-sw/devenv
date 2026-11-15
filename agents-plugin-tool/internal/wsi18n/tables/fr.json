@@ -1,6 +1,7 @@
 {
   "agent.context": "contexte : {0} tokens",
   "agent.done": "terminé",
+  "agent.effort": "effort : {0}",
   "agent.failed": "échoué",
   "agent.model": "modèle : {0}",
   "agent.name": "agent {0}",
@@ -1387,7 +1388,6 @@
   "js.wb.copy": "Copier",
   "js.wb.copy.done": "Copié",
   "js.wb.copy.wrap": "Renvoyer les longues lignes",
-  "js.wb.stream.run": "Journal {0} · {1}",
   "js.wb.stream.system": "Événements système {0} · {1}",
   "js.wb.tag.announced": "Choix par défaut annoncé — n'a qu'une réponse, qui découle des contraintes existantes, de décisions antérieures ou des conventions du projet ; il suffit d'en prendre acte.",
   "js.wb.tag.policy": "Question de principe — dépend de vos préférences, priorités ou de l'orientation du produit ; choisissez une option.",

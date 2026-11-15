@@ -304,6 +304,9 @@ type Event struct {
 	// Notice is a line for the daemon's log: something the harness did
 	// that the conversation does not show.
 	Notice string
+	// CommandError reports a refused command without settling the active
+	// run. It updates State.Error, not the conversation or typed failure.
+	CommandError string
 	// BackgroundTasks is the harness's aggregate background task count. A
 	// whole-list update also replaces the optional split counts: nil means
 	// the stream could not classify every task. The aggregate still includes

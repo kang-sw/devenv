@@ -1,6 +1,7 @@
 {
   "agent.context": "contesto: {0} token",
   "agent.done": "completato",
+  "agent.effort": "sforzo: {0}",
   "agent.failed": "fallito",
   "agent.model": "modello: {0}",
   "agent.name": "agente {0}",
@@ -1387,7 +1388,6 @@
   "js.wb.copy": "Copia",
   "js.wb.copy.done": "Copiato",
   "js.wb.copy.wrap": "A capo automatico",
-  "js.wb.stream.run": "Log {0} · {1}",
   "js.wb.stream.system": "Eventi di sistema {0} · {1}",
   "js.wb.tag.announced": "Default annunciato — ha un'unica risposta che deriva da vincoli esistenti, decisioni precedenti o convenzioni del progetto; basta una conferma.",
   "js.wb.tag.policy": "Questione di indirizzo — dipende dalle tue preferenze, priorità o dalla direzione del prodotto; scegli un'opzione.",
