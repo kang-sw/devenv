@@ -178,7 +178,7 @@
     var wrap = host && host.querySelector('.oq-wrap.wb-oq-top'), pill = wrap && wrap.querySelector('.oq-pill');
     if (pill && !pill.hidden) {
       var pillTop = parseFloat(window.getComputedStyle(wrap).top) || 0;
-      offset = Math.max(offset + (sticky ? 10 + pill.offsetHeight : 0), pillTop + pill.offsetHeight + 12);
+      offset = Math.max(offset, pillTop + wrap.offsetHeight + 12);
     }
     kit.jump(node, { offset: offset });
     return node;
@@ -546,7 +546,7 @@
       var style = win.getComputedStyle(scroller);
       top += parseFloat(style.scrollPaddingTop) || 0;
       // The rail publishes its clearance on sticky heads, not on the host.
-      Array.from((main ? doc : scroller).querySelectorAll('.tophead, .bc-hd, .wb-rail-wrap.up .wb-rail-stack')).forEach(function (head) {
+      Array.from((main ? doc : scroller).querySelectorAll('.oq-wrap.wb-oq-top, .tophead, .bc-hd, .wb-rail-wrap.up .wb-rail-stack')).forEach(function (head) {
         var hs = win.getComputedStyle(head), h = head.getBoundingClientRect();
         if ((hs.position === 'sticky' || head.matches('.wb-rail-stack')) && h.height && h.top <= top + (parseFloat(hs.top) || 0) + 1 && h.bottom > top)
           top = Math.max(top, h.bottom);

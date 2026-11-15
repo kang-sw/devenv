@@ -105,7 +105,9 @@ function gate(name, ok) {
       // admission gate separate from the newly explicit user apply action.
       const admissionLongTasks = await frame.evaluate(() => window.longTasks());
       const pending = frame.locator('.wb-oq-top .oq-updates:visible');
-      if (await pending.count()) { await pending.click(); await settle(); }
+      // Use the permanent apply target: a refresh/acknowledgement may clear
+      // the pending label while Playwright is still locating the control.
+      if (await pending.count()) { await frame.locator('.wb-oq-top .oq-arr').click(); await settle(); }
       const observed = await frame.evaluate(k => ({
         longTasks: window.longTasks(),
         firstTopic: document.querySelector('#r-board > section.topic')?.dataset.topic,
