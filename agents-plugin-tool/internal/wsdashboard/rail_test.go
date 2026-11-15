@@ -1063,10 +1063,10 @@ func TestRailStoppedRowSleeps(t *testing.T) {
 		row, _, _ := strings.Cut(rest, `</a></div>`)
 		return row
 	}
-	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped" data-rid="stopped"`) || !strings.Contains(row, `">C</span><span class="rid">stopped</span>`) {
+	if row := rowOf("stopped"); !strings.Contains(html, `class="rs stopped hosted-row" data-rid="stopped"`) || !strings.Contains(row, `">C</span><span class="rid">stopped</span>`) {
 		t.Errorf("the stopped row lacks its stopped class, or something sits between its icon and title:\n%s", row)
 	}
-	if row := rowOf("crashed"); !strings.Contains(html, `class="rs stopped" data-rid="crashed"`) || !strings.Contains(row, "exit code 1") {
+	if row := rowOf("crashed"); !strings.Contains(html, `class="rs stopped hosted-row" data-rid="crashed"`) || !strings.Contains(row, "exit code 1") {
 		t.Errorf("a processless row whose child exited must sleep (the stopped rule hides its reason line):\n%s", row)
 	}
 	if row := rowOf("live"); !strings.Contains(html, `class="rs" data-rid="live"`) || !strings.Contains(row, `<span class="hi unk" role="img" aria-label="? · lead waiting" title="? · lead waiting">?</span>`) {
@@ -1106,7 +1106,7 @@ func TestRailMarkupTree(t *testing.T) {
 			t.Fatalf("no row %s:\n%s", id, html)
 		}
 		end := len(rest)
-		for _, m := range []string{`<div class="rs`, `<div class="rkids"`, `<details`, `</details>`} {
+		for _, m := range []string{`<div class="rs`, `<div class="rkids"`, `<div class="rfold"`, `<div class="rended"`, `<div class="rwt"`, `</section>`} {
 			if i := strings.Index(rest, m); i >= 0 && i < end {
 				end = i
 			}

@@ -62,7 +62,7 @@
   function fmtTime(t, now) {
     var ms = +t.getAttribute("data-ms");
     if (!ms) return;
-    var f = t.getAttribute("data-f"), rel = f === "since" || f === "ago" || f === "rel";
+    var f = t.getAttribute("data-f"), rel = f === "since" || f === "ago" || f === "rel" || f === "del";
     if (f === "user") {
       var at = t.getAttribute("datetime"), minutes = Math.max(0, Math.floor((now - ms) / 60000));
       // Absolute clocks and "today" use the envelope's sender offset, not
@@ -75,8 +75,11 @@
       return;
     }
     if (rel) {
-      var s = f === "since" ? dur(now - ms) : f === "rel" ? relAge(now - ms) : wsT("js.ago", dur(now - ms));
+      // "del" is a pending-deletion row's prune time, ahead of now; under
+      // a day it takes the warning ink.
+      var s = f === "since" ? dur(now - ms) : f === "rel" ? relAge(now - ms) : f === "del" ? (ms > now ? wsT("js.rail.deletes", relAge(ms - now)) : wsT("js.rail.deletes.due")) : wsT("js.ago", dur(now - ms));
       if (t.textContent !== s) t.textContent = s;
+      if (f === "del") t.classList.toggle("soon", ms - now < 86400000);
     }
     if (t.wsFmt === wsI18n.lang) return;
     t.wsFmt = wsI18n.lang;
@@ -128,7 +131,7 @@
     if (doc.hidden || shHidden) return;
     var now = Date.now();
     if (!tickSets || !window.MutationObserver) tickSets = {
-      times: q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"], time[data-ms][data-f="user"]'),
+      times: q('time[data-ms][data-f="since"], time[data-ms][data-f="ago"], time[data-ms][data-f="rel"], time[data-ms][data-f="del"], time[data-ms][data-f="user"]'),
       paces: q("em.u-pace[data-reset]")
     };
     tickSets.times.forEach(function (t) { fmtTime(t, now); });

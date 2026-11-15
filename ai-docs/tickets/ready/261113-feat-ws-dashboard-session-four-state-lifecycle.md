@@ -121,3 +121,10 @@ Under owner (1125)=b, implement the atomic dashboard-owned T1 hidden sidecar and
 ### Phase 2: Mockup-approved four-state session list
 
 Deferred by owner (1125)=b to MAIN's Claude agent. The mockup is approved under (1127)=ok; implement the distinct indicators, hosted hide/unhide controls and split 보관/종료됨 tri-state disclosure under (402) on `ui/four-state-rail`. Then verify the original browser acceptance matrix and supply separate hidden-expanded/stopped-expanded captures at 1440px and 700px in light/dark. Phase 1 backend completion does not satisfy these visual acceptance criteria.
+
+### Result (33d872de9) - 2026-11-15
+
+- VERIFIED: The rail renders the four states from the approved (1127)=ok mockup on `ui/four-state-rail`. Archived hosted leads move out of the live rows into a fold row. Its halves, 보관 and 종료됨, act as one tri-state radio, and a half with no rows is disabled. Ended rows show the existing 7-day prune time, in warning ink when less than a day is left. Hosted rows get a hover archive button, archived rows an unarchive button, and the hosted session menu gains an archive/unarchive entry. Every control posts to the existing runner `/agents/<id>/hide|unhide` route. No new route, stored shape, MCP or protocol change, so the change is T0.
+- A 409 archive (holder scan pending) and a 500 archive (holder refused to stop; the runner rolled back) both leave the row where it was. Each shows a short toast and never retries.
+- Tests: `TestRailFourStateLifecycle` and `TestRailFourStateBrowser`. The browser test uses a fake agent host that writes the real visibility sidecar and returns 409/500 for named ids. Screenshots at 1440px and 700px, dark and light, are in `/tmp/four-state-impl/`. The scoped rail, shell and browser tests plus wsi18n pass after merging `a623176ed`. The merged-in develop change `d2921cf02` (landing logo at `/`) leaves `TestRootKeepsSessionsInTheRailOnly` red; this phase does not touch it.
+- Not shown: the mockup's queued-mail chip, because the index has no per-session queued-mail count. The prune time also does not model the handed-off pi in-directory exemption.
