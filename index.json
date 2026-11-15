@@ -391,19 +391,6 @@
     "261113-bug-ws-pi-explore-local-query-fails-on-web-search-provider": {
       "registered_at": "2026-11-13T10:25:03Z"
     },
-    "261113-feat-werkschaft-thin-tauri-shell": {
-      "registered_at": "2026-11-13T14:07:32Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-14T15:26:57Z",
-        "impl": {
-          "branch": "impl/develop/shed-alarm-chomp"
-        }
-      }
-    },
     "261113-feat-ws-configurable-per-turn-lead-reminder": {
       "registered_at": "2026-11-13T04:59:31Z"
     },
@@ -589,19 +576,6 @@
     "261114-feat-ws-dashboard-conversation-audit-view": {
       "registered_at": "2026-11-13T16:39:01Z"
     },
-    "261114-feat-ws-dashboard-reusable-file-explorer-card": {
-      "registered_at": "2026-11-14T13:07:39Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T04:08:14Z",
-        "impl": {
-          "branch": "impl/develop/robin-caddy-aroma-p4"
-        }
-      }
-    },
     "261114-feat-ws-dashboard-selection-mention-note": {
       "registered_at": "2026-11-14T08:45:52Z",
       "lease": {
@@ -612,19 +586,6 @@
         "touched_at": "2026-11-14T09:03:43Z",
         "impl": {
           "branch": "impl/docs/settled-common-contracts-660-665/flap-brink-slang"
-        }
-      }
-    },
-    "261114-feat-ws-dashboard-usage-history-trend": {
-      "registered_at": "2026-11-14T12:55:40Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T03:51:33Z",
-        "impl": {
-          "branch": "impl/develop/abide-zesty-bring"
         }
       }
     },
@@ -758,6 +719,9 @@
     },
     "261115-bug-pi-lead-local-devenv-swaps-shared-daemon": {
       "registered_at": "2026-11-15T02:07:48Z"
+    },
+    "261115-bug-pi-nonmain-process-mints-top-level-lead-key": {
+      "registered_at": "2026-11-15T04:30:02Z"
     },
     "261115-bug-pi-print-mode-empty-after-subagent-push": {
       "registered_at": "2026-11-14T23:55:38Z"
