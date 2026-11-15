@@ -543,6 +543,154 @@ Apply the same pattern to `entries`, keeping its title bar outside the
 keyed container (`b150fe83`). Verify bytes per entries change against the
 baseline rows and the existing entries/region tests.
 
+### Result (7282fd548) - 2026-11-15
+
+Implemented **Phase 4 only**. Each shared session render decomposes the
+existing entries HTML once into complete rendered-HTML-hashed units keyed by
+`data-entry`, only among direct children of `.centries`. The title bar
+(user/mail counts) and model history remain outside that keyed container.
+Connections opting in with `entryrows=1` receive `entry-rows` containing changed
+rows plus order. Changed shell, window/order or uncertain markup conservatively
+uses a full region, including ordinary append/window changes; this is not a
+revision-only shortcut or a claim that every new message uses a row delta.
+No template, CSS, visible markup or other row surface changed.
+
+The client keeps immutable canonical input separate from formatted and
+history-extended DOM. Stable-shell/order deltas parse and replace only affected
+rows, retaining unchanged and reader-loaded older-history nodes. Complete
+canonical HTML differences update same-key mail availability/peer presentation
+even without a `data-mail-wake` transition. Hidden updates accumulate all changes;
+existing disclosure, history Older/gap reset, focus, reader scroll and effect
+navigation owners remain in place.
+
+**Compatibility, directional T0.** New daemon -> old page: row state is
+allocated only for the explicit session-stream flag
+(`agents-plugin-tool/internal/wsdashboard/sse.go:469-472`); legacy connections
+retain full regions. New page -> old daemon: the additive query option is
+ignored, while the page still consumes full entries events
+(`assets/dashboard-stream.js:269,302-306`, under the same package). First opted-in
+sends are full even with `h=current`; failed event writes do not advance held
+hashes or baselines (`sse.go:646-688`). Invalid client input closes/reconnects for
+the mandatory full baseline (`assets/dashboard-stream.js:308-318`). No store,
+MCP tool, hello, manifest or API semantics changed; no migration/recovery is
+needed, and old tabs that banner rather than reload keep full delivery.
+
+**Base and integration.** Original parity base:
+`f0dec0c364c8d8977a54ee213a2802e01d62cc11`; production spine:
+`f954067bb2df30f7201a6e60153c1b4ccf2595a2`; initial test/measurement head:
+`5d47bce9eeb8a6c9e1a4989240f4987167d509e2`. Work paused for MAIN's separate
+Phase 3 CI repair. The lead then merged exact develop
+`e7908adc14ab2685f9757aecb191ebf4a08dd812` into this assigned branch at
+`5a47eba6bbdc7a010f7f7504152ddb5b0b70df24`. Verified ancestry exits 0.
+The integrated dashboard range changed only three CI test files, not production
+render inputs. Two exact declaration/URL contracts were adapted for Phase 4
+without dropping assertions; `whiteboard_bridge_test.go` passed untouched.
+Updated verification/review head: `7282fd548a415a04c322990d5cf4edfea5625f3e`.
+The worker performed no branch integration or autonomous develop following.
+
+**Measurements.** The same saved disposable in-process daemon fixture ran before
+source edits and after: 112 retained entries, newest 50 rendered, twelve entry
+kinds, one SSE subscriber, separate cache/config/session directories and ephemeral
+loopback. After two seconds idle, 32 one-row mail-body availability toggles run
+at 1 Hz. No shared daemon or board was contacted. The nine missing kinds were
+added only to the `/tmp` fixture before rerunning the authoritative BEFORE;
+its obsolete original-workload measurement is retained separately, not compared.
+
+| Measure | Before -> after |
+|---|---:|
+| Initial entries HTML bytes | 33,718 -> 33,718 |
+| Initial SSE event bytes | 45,675 -> 45,675 |
+| Change events | 32 full regions -> 32 entry-row deltas |
+| Change SSE bytes including framing | 1,457,664 -> 98,720 (**93.23% less**) |
+| Bytes per change, alternating availability | 45,429 / 45,675 -> 2,962 / 3,208 |
+| Idle process CPU seconds / wall seconds | 0.000662 / 2.001456 -> 0.000304 / 2.002064 |
+| Change process CPU seconds / wall seconds | 0.139728 / 32.323941 -> 0.179795 / 32.350056 |
+| Mean mutation-to-received-event wall latency | 8.334ms -> 9.212ms |
+| Sampled session-render / stream CPU | 0.03s / 0.05s -> 0.05s / 0.09s |
+
+VERIFIED: change wire volume falls; CPU/latency increase slightly in these
+low-total-CPU single samples. No CPU improvement is established. Templates still
+render, and row decomposition adds work (0.01s sampled). Process CPU includes
+fixture driving, reads, runtime/GC and profiling; mutation-to-event latency is
+not pure render wall time, which was not separately instrumented. The historical
+live entries rows (1x149KB/34s and 5x621KB/45s) are different workloads, not fresh
+live measurements or evidence about the historical 70-106% daemon CPU.
+Initial payload remains full. Evidence: `/tmp/entries-phase4-evidence/summary.md`,
+`fixture-scratch.go`, `overlay.json`, `{before,after}/measure.json`,
+`change.pprof`, `change-top.txt`, `before/final-baseline.log` and
+`after/initial-head.log`. Integration changed no production measurement input.
+
+**Visual/structural gate (1170).** Fresh uncontaminated BEFORE captures preceded
+every source edit. Fresh updated-head AFTER captures use identical production
+assets/fixture, 1440x900, en-US/UTC/fixed clock, no capture interaction or element
+screenshots. Initial pre-integration AFTER evidence remains at `after/`; updated
+AFTER is under `after/integrated/`. Fixed image-only crops use the same rectangle
+`x=16,y=50,width=580,height=650`, not a scrolled element's bounding box.
+
+- Compared `/tmp/entries-phase4-evidence/after/integrated/viewport-dark-entries.png`
+  vs `/tmp/entries-phase4-evidence/before/viewport-dark-entries.png`: **match**.
+- Compared `/tmp/entries-phase4-evidence/after/integrated/viewport-light-entries.png`
+  vs `/tmp/entries-phase4-evidence/before/viewport-light-entries.png`: **match**.
+- Each pair is byte-identical, **0 / 377,000 differing pixels**. Full views are
+  corresponding `viewport-{dark,light}-1440.png`; hashes/coordinates are retained
+  in `after/integrated/{parity.json,comparison.log}` and reproducible `compare.py`.
+- `before/structure-{dark,light}.json` equals its `after/integrated/` counterpart:
+  identical order of all 50 stable keys, identical twelve-kind set and exact
+  outerHTML/data attributes. Normalization rules: **none**; no attributes,
+  timestamps, content or behavioral markup were stripped. No intended difference
+  or page error. Coverage: user, reply, ordinary mail, turn, tools, compact,
+  card, notice, command, UI, whiteboard effects and unmatched mail wake.
+
+Earlier guessed-locator captures failed, and element/tall captures were later
+rejected as parity evidence: screenshot scrolling triggered production
+`nearTop` history prepends (`assets/dashboard-conversation.js:188-225` in the
+pre-change source), making indexed row selection/coordinates unstable and tall
+`.centries` images overflow-clipped. Explicitly authorized recoveries and the
+revised A+B gate superseded those stops. All failed/defective files and diagnoses
+remain in the evidence directory; none was overwritten or used for final parity.
+Future-harness trap: use page screenshots/fixed image crops and exact read-only
+structure, not element screenshots of scroll-container children. EXEC2, not MAIN,
+performed the guarded old canonical branch cleanup before the accepted route.
+
+**Verification.** Every Go invocation used `GOPROXY=off GOSUMDB=off
+GOTOOLCHAIN=local`, `-count=1` and scoped `-run`; no full dashboard/MCP/module
+suite ran. Updated-head exact commands/full inspected outputs are under
+`/tmp/entries-phase4-evidence/tests/integrated/`.
+
+- `focused.log`: entries/history/model-history, stream/cache/region, tree/rail/
+  topic/client and cached Chromium cases passed (**121.752s**), including exact
+  `TestBoardKeepWiring`, `TestHiddenFrameHoldsItsUpdatesUntilShown` and
+  `TestBoardHistoryHooksSurroundSSESwap` from the urgent CI repair.
+- `race.log`: focused entries parser/shared-render/SSE/WebSocket/failed-write
+  race cases passed (**20.164s**). Earlier checkpoint outputs remain separate.
+- New tests cover en/ko full HTML/hash parity, shared immutable units,
+  complete changed-row hashes, empty/nested/hidden-marker boundaries, legacy
+  and first-full delivery, shell/order/window fallback and failed writes.
+- Chromium ran the production validator/merger against **22 malformed payloads**
+  and real streams/history: changed-row-only parsing, canonical isolation,
+  retained siblings/older history/disclosure/focus/reader geometry, same-key mail
+  availability/peer changes, hidden accumulation, effect deep links, full model
+  history, gap paging and invalid-event reconnect. No page errors.
+- One initial test-leaf fixture failure tried changing immutable history text
+  instead of availability; the existing cache contract explained the unchanged
+  render. The fixture was corrected without production edits or weakened
+  assertions; diagnosis is retained in `tests/diagnosis.md`. It did not recur.
+- Independent one-pass lite review: **clean**, no findings. The fresh reviewer
+  independently read the Git range/source/tests and full integrated test logs;
+  it did not rerun tests or independently recompute images/structures. Report:
+  `/Users/kang-sw/.cache/ws@kang-sw-devenv/proj/17da6bdc@97ab43fd/review-paths/57fd95fb-01-entries-phase4-lite.md`.
+- Ticket verification passed. The non-blocking Sage freshness advisory is
+  explicitly accepted: this append records implementation evidence, not a change
+  to the settled design, constraints or phase plans.
+
+All prior Results and phase plan text are unchanged. **Phase 5 remains
+unimplemented; the ticket stays in `ready/`.** No unresolved implementation or
+review finding. Optional 1440x3000 visual gate C, pure-render wall instrumentation
+and live-daemon claims were omitted; mandatory A+B passed. No template/CSS,
+other-package, parka-wording, shared-runtime, installation/download, external
+network, provider/harness launch, Windows SSH, process signal, push, merge or CI
+operation was performed by this worker. MAIN owns integration/delivery.
+
 ### Phase 5: Panels row deltas
 
 Apply the same pattern to `panels`, keeping panel disclosure state.
