@@ -205,6 +205,15 @@ Verification (source fixtures; GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local,
 - Phase 2 remains open and unplanned pending the owner's decision. The ticket
   stays in `ready/`.
 
+#### Edition (ad205513e) - 2026-11-16
+
+VERIFIED: E3 moves this ticket from `ready/` to `todo/` through
+`ws/tickets.move`. This queue correction supersedes the historical Result's
+ready-status sentence without changing Phase 1 or its Result. The only
+remaining phase is unplanned and gated on owner decision (1184); no approval,
+ready promotion or resolver implementation is implied. The existing lease
+stays with its same-email holder on the develop track.
+
 ### Phase 2: Resolver handling of a fully landed canonical impl ref
 
 Not yet planned. Blocked on the deferred owner decision in `## Constraints`;
