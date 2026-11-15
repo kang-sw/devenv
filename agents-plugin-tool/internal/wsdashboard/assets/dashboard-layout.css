@@ -52,27 +52,35 @@
 .dash.live .top { flex: none; }
 /* Empty selection keeps a full main panel even while the rail overlays. */
 :root[data-mode="index"] .dgrid { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; }
-/* The landing (the "landing" template): the lockup over the how-to, one
-   block with no card behind it, centred across and a little above the
-   middle (the outer rows split the free height 2:3, the optical centre),
-   scrolling when it does not fit. One lockup variant shows per theme: the
-   light-ink one on dark, the dark-ink one on light. */
-.dlanding { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; display: grid; grid-template-rows: 2fr auto auto 3fr; justify-items: center; padding: 16px 20px; box-sizing: border-box; }
-.dlogo { grid-row: 2; width: clamp(220px, 50%, 420px); max-width: 100%; }
+/* The landing (the "landing" template): the lockup over the how-to, laid
+   out like a short document page that scrolls in the main panel, with no
+   card behind it. Each step is a numbered title, a line or two, and its
+   framed screenshot at the image's own size or narrower. One lockup
+   variant and one screenshot theme show per theme: the light-ink lockup
+   and the dark captures on dark, the dark-ink lockup and the light
+   captures on light. */
+.dlanding { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; padding: 56px 24px 88px; box-sizing: border-box; }
+.dlogo { flex: none; width: clamp(220px, 50%, 420px); max-width: 100%; }
 .dlogo svg { display: block; width: 100%; height: auto; }
-.dlogo-d { display: none; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .dlogo-d { display: block; } :root:not([data-theme="light"]) .dlogo-l { display: none; } }
-:root[data-theme="dark"] .dlogo-d { display: block; }
-:root[data-theme="dark"] .dlogo-l { display: none; }
-.dguide { grid-row: 3; width: min(520px, 100%); margin-top: 40px; color: var(--wb-muted-fg); font-size: 13px; line-height: 1.5; }
+.dlogo-d, .dshot-d { display: none; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .dlogo-d, :root:not([data-theme="light"]) .dshot-d { display: block; } :root:not([data-theme="light"]) .dlogo-l, :root:not([data-theme="light"]) .dshot-l { display: none; } }
+:root[data-theme="dark"] .dlogo-d, :root[data-theme="dark"] .dshot-d { display: block; }
+:root[data-theme="dark"] .dlogo-l, :root[data-theme="dark"] .dshot-l { display: none; }
+.dguide { flex: none; width: min(800px, 100%); margin-top: 48px; color: var(--wb-muted-fg); font-size: 14px; line-height: 1.65; }
 /* Korean breaks between words, not inside them. */
 :root[data-lang="ko"] .dguide { word-break: keep-all; overflow-wrap: anywhere; }
-.dguide h2 { margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--wb-muted-fg); }
-.dguide ol { margin: 0; padding: 0; list-style: none; counter-reset: dguide; display: grid; gap: 10px; }
-.dguide li { counter-increment: dguide; display: grid; grid-template-columns: 22px minmax(0, 1fr); column-gap: 8px; }
-.dguide li > * { grid-column: 2; }
-.dguide li::before { content: counter(dguide); grid-row: 1 / span 2; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 600; color: var(--wb-fg); background: color-mix(in srgb, var(--wb-fg) 9%, transparent); }
-.dguide b { color: var(--wb-fg); font-weight: 600; }
+.dguide header { padding-bottom: 18px; margin-bottom: 32px; border-bottom: 1px solid color-mix(in srgb, var(--wb-fg) 12%, transparent); }
+.dguide h2 { margin: 0 0 6px; font-size: 22px; font-weight: 700; letter-spacing: -.01em; color: var(--wb-fg); }
+.dguide header p { margin: 0; }
+.dguide ol { margin: 0; padding: 0; list-style: none; counter-reset: dguide; display: grid; gap: 48px; }
+.dstep { counter-increment: dguide; display: grid; grid-template-columns: 30px minmax(0, 1fr); column-gap: 14px; }
+.dstep > * { grid-column: 2; }
+.dstep::before { content: counter(dguide); grid-row: 1; align-self: start; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; background: #e8552f; }
+.dstep h3 { margin: 2px 0 4px; font-size: 16px; font-weight: 650; line-height: 24px; color: var(--wb-fg); }
+.dstep p { margin: 0 0 14px; }
+.dshot { justify-self: start; max-width: 100%; margin: 0; overflow: hidden; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--wb-fg) 14%, transparent); box-shadow: 0 8px 28px rgba(0, 0, 0, .16); line-height: 0; }
+.dshot img { max-width: 100%; height: auto; }
+@media (max-width: 760px) { .dlanding { padding: 32px 16px 64px; } .dguide { margin-top: 36px; } .dguide ol { gap: 40px; } .dstep > .dshot { grid-column: 1 / -1; } }
 .dgrid.live { flex: 1 1 0; min-height: 0; display: grid; gap: 0 var(--dgrid-gap); --sa: 250fr; --sb: 750fr;
   grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(56px, var(--sa)) 10px auto minmax(96px, var(--sb)) auto;
   grid-template-areas: "tabbar" "tree" "split" "chead" "convo" "composer"; }
