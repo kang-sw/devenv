@@ -793,32 +793,6 @@
     "261115-feat-ws-dashboard-conversation-rendering-consolidation": {
       "registered_at": "2026-11-14T22:47:31Z"
     },
-    "261115-feat-ws-dashboard-explorer-path-bar": {
-      "registered_at": "2026-11-15T02:43:33Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T04:24:54Z",
-        "impl": {
-          "branch": "impl/develop/sank-blade-equal"
-        }
-      }
-    },
-    "261115-feat-ws-dashboard-explorer-root-switcher": {
-      "registered_at": "2026-11-15T02:43:28Z",
-      "lease": {
-        "email": "ki6080@gmail.com",
-        "clone_id": "6b8c3f740994ed3b",
-        "track": "develop",
-        "phase": "closed",
-        "touched_at": "2026-11-15T04:23:56Z",
-        "impl": {
-          "branch": "impl/develop/crier-scoop-panic"
-        }
-      }
-    },
     "261115-feat-ws-dashboard-external-stt-voice-typing": {
       "registered_at": "2026-11-15T02:02:38Z"
     },
@@ -842,7 +816,7 @@
         "clone_id": "6b8c3f740994ed3b",
         "track": "develop",
         "phase": "active",
-        "touched_at": "2026-11-15T04:48:55Z",
+        "touched_at": "2026-11-15T04:50:17Z",
         "impl": {
           "branch": "impl/develop/boil-rants-plant"
         }
