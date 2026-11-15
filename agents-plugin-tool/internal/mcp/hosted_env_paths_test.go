@@ -17,7 +17,9 @@ import (
 )
 
 // loggingGitDir writes a POSIX git shim into a fresh directory: it appends
-// its arguments to logPath, then runs the real git. A hosted server whose
+// its arguments to an embedded logPath, then runs the real git. The log must
+// identify the executable, not whichever caller environment it runs under.
+// A hosted server whose
 // environment PATH names the directory runs git through it, so the log
 // says which git commands ran on the connection's environment.
 func loggingGitDir(t *testing.T, logPath string) string {
@@ -30,7 +32,7 @@ func loggingGitDir(t *testing.T, logPath string) string {
 		t.Skip("git not on PATH")
 	}
 	dir := t.TempDir()
-	script := "#!/bin/sh\necho \"$*\" >> \"$WS_TEST_GIT_LOG\"\nexec \"" + real + "\" \"$@\"\n"
+	script := "#!/bin/sh\necho \"$*\" >> '" + strings.ReplaceAll(logPath, "'", "'\\''") + "'\nexec \"" + real + "\" \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -77,16 +79,27 @@ func TestHostedGitLookupKeepsCallerExecutables(t *testing.T) {
 	root := t.TempDir()
 	initGit(t, root)
 	type caller struct {
-		server *Server
-		log    string
+		server      *Server
+		log, gitDir string
 	}
 	callers := make([]caller, 2)
 	for i, name := range []string{"alpha", "beta"} {
 		log := filepath.Join(t.TempDir(), "git.log")
 		dir := loggingGitDir(t, log)
 		env := hostedServerEnv(t, name, map[string]string{"PATH": dir, "WS_TEST_GIT_LOG": log})
-		callers[i] = caller{NewServerWithOptions(ServerOptions{Root: root, Version: "test", Env: env}), log}
+		callers[i] = caller{NewServerWithOptions(ServerOptions{Root: root, Version: "test", Env: env}), log, dir}
 	}
+	// Negative control: alpha's executable under beta's environment must still
+	// identify alpha. Otherwise a wrong-binary cache could pass this test.
+	cmd := exec.Command(filepath.Join(callers[0].gitDir, "git"), "-C", root, "rev-parse", "--is-inside-work-tree")
+	cmd.Env = callers[1].server.environ()
+	if out, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "true" {
+		t.Fatalf("fixture control: %q, %v", out, err)
+	}
+	if strings.Count(readGitLog(t, callers[0].log), "\n") != 1 || readGitLog(t, callers[1].log) != "" {
+		t.Fatal("fixture identifies caller environment instead of selected executable")
+	}
+	truncateFile(t, callers[0].log)
 	for _, side := range []int{0, 0, 1, 1, 0, 1} {
 		before := strings.Count(readGitLog(t, callers[1-side].log), "\n")
 		out, err := callers[side].server.gitRunner().RunGit(context.Background(), root, "rev-parse", "--is-inside-work-tree")
