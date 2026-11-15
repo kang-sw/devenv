@@ -297,8 +297,8 @@
     b.hidden = false;
   }
   // holdsDraft reports unsent work a reload would drop: composer text,
-  // answers picked on the board, or an attached image.
-  function holdsDraft() { return !!((ctext && ctext.value) || cmdSel || boardAnswers() || imgs.length || topicNotes().length); }
+  // answers picked on the board, an attached image, or a topic close request.
+  function holdsDraft() { return !!((ctext && ctext.value) || cmdSel || boardAnswers() || imgs.length || topicNotes().length || closeRequests.length); }
   // The shell asks its frames before an assets reload, which reloads them
   // too (shDrafts).
   if (framed) window.wsHoldsDraft = holdsDraft;

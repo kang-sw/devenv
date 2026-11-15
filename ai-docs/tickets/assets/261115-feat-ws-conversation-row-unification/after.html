@@ -1,0 +1,35 @@
+<style>
+:root{--wb-bg:#141518;--wb-fg:#e7e7e4;--wb-card:#1e2024;--wb-muted:#2b2d32;--wb-muted-fg:#a2a6ad;--wb-primary:#7aa2ff;--wb-ok:#6cc39a;--wb-line:color-mix(in srgb,var(--wb-fg) 16%,transparent);--wb-shadow:0 1px 2px rgb(0 0 0/.5),0 2px 8px rgb(0 0 0/.3);--wb-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--wb-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--wb-bg);color:var(--wb-fg);font:14px/1.5 var(--wb-sans);width:1100px}
+.col{display:flex;flex-direction:column;gap:10px;padding:16px}
+.t{font-size:11px;font-variant-numeric:tabular-nums;color:var(--wb-muted-fg)}
+.src{font-size:10px;font-weight:800;letter-spacing:.04em;padding:0 6px;border-radius:4px;background:var(--wb-muted);color:var(--wb-muted-fg);white-space:nowrap}
+.src.peer{color:var(--wb-ok);background:color-mix(in srgb,var(--wb-ok) 14%,transparent)}
+svg.i{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+.r{display:grid;grid-template-columns:28px 1fr 44px 18px;column-gap:8px;align-items:baseline;padding:5px 0;font-size:13px;line-height:1.5;color:var(--wb-muted-fg)}
+.r>.g{display:flex;justify-content:center;align-self:center;color:var(--wb-muted-fg)}
+.r .c{min-width:0;display:flex;gap:8px;align-items:baseline}
+.r .t{text-align:right}.r .d{align-self:center;display:flex;justify-content:center;opacity:.7;transition:transform .15s}
+.x{cursor:pointer;border-radius:8px}.x:hover{background:color-mix(in srgb,var(--wb-muted) 70%,transparent)}.x:hover .d{opacity:1}
+.x.open .d{transform:rotate(90deg)}.x.open{color:var(--wb-fg)}
+.nm{font-weight:700;color:var(--wb-fg)}.nm.p{color:var(--wb-primary)}
+.pv{min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tk{font-size:12px;color:var(--wb-muted-fg);font-variant-numeric:tabular-nums}.tk .tn{font-family:var(--wb-mono);font-size:12px;color:var(--wb-fg);opacity:.85}
+.det{margin:0 62px 4px 36px;padding:8px 10px;background:var(--wb-card);border-radius:8px;box-shadow:var(--wb-shadow);font:12px/1.55 var(--wb-mono);color:var(--wb-muted-fg);white-space:pre-wrap}
+.av{width:18px;height:18px;border-radius:50%;background:var(--wb-primary);color:#141518;font:800 10px/18px var(--wb-sans);text-align:center}
+.lead .nm{color:var(--wb-fg)}
+.rep{margin:0 62px 0 36px;font-size:14px}
+.bub{display:inline-block;background:var(--wb-card);border-radius:4px 12px 12px 12px;padding:8px 12px;box-shadow:var(--wb-shadow);color:var(--wb-fg)}
+.alt .bub{background:none;box-shadow:none;padding:0 0 0 12px;border-radius:0;border-left:2px solid var(--wb-muted)}
+.ft{margin:4px 62px 0 36px;font-size:12px;color:var(--wb-muted-fg)}
+</style>
+<div class="col " style="gap:2px">
+<div class="r x"><span class="g"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span><span class="c"><span class="nm" style="color:var(--wb-muted-fg)">메일 알림</span><span class="src">연결된 메일 없음</span></span><span class="t">16:13</span><span class="d"><svg class="i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></span></div>
+<div class="r x "><span class="g" style="color:var(--wb-primary)"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span><span class="c"><span class="nm p">EXEC 3</span><span class="src peer">피어 리드</span><span class="pv">Thanks. Since it is already red at 3d7b962b9, treat T…</span></span><span class="t">16:14</span><span class="d"><svg class="i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></span></div>
+
+<div class="r x"><span class="g"><svg class="i" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.2-.6-.6-2.2z"/></svg></span><span class="c"><span class="tk"><span class="tn">Edit 1 · agenda_set 1 · mailbox_send 1</span> &nbsp;·&nbsp; 호출 2 · 프롬프트 355k +1.4k · 출력 43</span></span><span class="t">17s</span><span class="d"><svg class="i" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></span></div>
+<div class="r lead" style="margin-top:6px"><span class="g"><span class="av">리</span></span><span class="c"><span class="nm">리드</span></span><span class="t">16:14</span><span class="d"></span></div>
+<div class="rep"><span class="bub">Whiteboard: <a href="#" style="color:var(--wb-primary)">http://127.0.0.1:29417/s/sweatradartakingoverwrite</a> - (새 ID 없음)</span></div>
+<div class="ft">↳ 리드 턴 · 도구 호출 3회 · 26s</div>
+</div>

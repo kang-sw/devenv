@@ -204,7 +204,7 @@ func TestRenderPageTopicBodyPlacement(t *testing.T) {
 		start := strings.Index(out, `<span class="tname">embed layout</span>`)
 		block := out[start:]
 		block = block[:strings.Index(block, "</section>")]
-		doc, items := strings.Index(block, `<details class="tdoc"`), strings.Index(block, `class="tbody"`)
+		doc, items := strings.Index(block, `<details class="tdoc"`), strings.Index(block, `class="topic-stream"`)
 		if doc < 0 || items < 0 || doc > items {
 			t.Errorf("%s: the body (%d) is not above the items (%d)", name, doc, items)
 		}
@@ -457,12 +457,12 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 	}
 	block := out[start:]
 	block = block[:strings.Index(block, "</section>")]
-	// Undated legacy rows retain item order inside always-open history,
-	// before the still-answerable policy card.
+	// Eventless items, including open controls, retain stored item order
+	// together at the head of the always-open timeline.
 	policy, list, assumed, settled := strings.Index(block, `id="item-73"`), strings.Index(block, `<div class="topic-stream">`), strings.Index(block, `id="item-76"`), strings.Index(block, `id="item-72"`)
 	wantAll(t, block, `data-history-item="76"`, `data-history-item="72"`, "Time unknown")
 	wantNone(t, block, `<details class="settled"`, `<details class="topic-stream"`)
-	if !(list >= 0 && list < assumed && assumed < settled && settled < policy) {
+	if !(list >= 0 && list < policy && policy < assumed && assumed < settled) {
 		t.Errorf("block order policy %d, settled list %d, assumed %d, settled %d", policy, list, assumed, settled)
 	}
 	if !strings.Contains(block, `<span class="chip policy" title="to answer">`) || strings.Contains(block, "chip assumed") {
@@ -473,7 +473,7 @@ func TestRenderPageTopicBlockOrder(t *testing.T) {
 	block = out[start:]
 	block = block[:strings.Index(block, "</section>")]
 	policy, ack, settled := strings.Index(block, `id="item-77"`), strings.Index(block, `id="item-78"`), strings.Index(block, `id="item-69"`)
-	if !(settled >= 0 && settled < policy && policy < ack) {
+	if !(policy >= 0 && policy < ack && ack < settled) {
 		t.Errorf("block order policy %d, ack %d, settled %d", policy, ack, settled)
 	}
 }

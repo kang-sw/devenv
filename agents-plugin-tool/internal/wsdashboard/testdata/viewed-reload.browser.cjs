@@ -27,7 +27,7 @@ const origin = process.argv[2];
    for(let i=0;i<4;i++) {await page.evaluate(()=>{const n=document.getElementById('p10'),h=wbHistory.keep(n,{capture:false});h.scroller.scrollTop+=n.getBoundingClientRect().top-h.viewport().top-85;});await settle();}
    return geometry();
   }
-  async function geometry(){return page.evaluate(()=>{const n=document.getElementById('p10'),h=wbHistory.keep(n,{capture:false}),s=h.scroller;return {top:n.getBoundingClientRect().top,line:h.viewport().top+1,scroll:s.scrollTop,above:document.querySelector('[data-topic="Topic00"]').getBoundingClientRect().height,entry:window.__reloadEntry,keeping:!!wbHistory.keeping(s)};});}
+  async function geometry(){return page.evaluate(()=>{const n=document.getElementById('p10'),h=wbHistory.keep(n||document.querySelector('[data-topic="Topic09"]'),{capture:false}),s=h.scroller;return {top:n?n.getBoundingClientRect().top:null,line:h.viewport().top+1,scroll:s.scrollTop,above:document.querySelector('[data-topic="Topic00"]').getBoundingClientRect().height,entry:window.__reloadEntry,keeping:!!wbHistory.keeping(s)};});}
   async function reloadAsset(){
    await Promise.all([page.waitForEvent('domcontentloaded'),page.evaluate(()=>{const s=window.__sockets.find(s=>s.url.includes('/s/reloadtest/events'));s.onmessage({data:JSON.stringify({event:'assets',data:{id:'test-'+Date.now()}})});})]);
    await page.waitForFunction(()=>window.wbHistory && window.__sockets.length);await settle();
@@ -36,6 +36,7 @@ const origin = process.argv[2];
   await page.evaluate(()=>wbHistory.loadTarget(document.getElementById('r-board'),'p10',window.WsCards.unfoldTopic));await settle();
   const before=await position();assert(before.scroll>2000,JSON.stringify(before));
   await reloadAsset();const after=await geometry();
+  assert(before.top!==null && after.top!==null,'viewed panel restored from history');
   assert(Math.abs((after.top-after.line)-(before.top-before.line))<=3,JSON.stringify({before,after}));
   assert.equal(await page.evaluate(k=>sessionStorage.getItem(k),key),null,'entry consumed');
   console.log('PASS asset-triggered reload preserves viewed panel',JSON.stringify({before,after}));

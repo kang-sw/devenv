@@ -88,7 +88,8 @@ function restoreTopics(list) {
   list.forEach(function (tn) { if (tn.topic !== "plan") { stray.push("[" + tn.topic + "] " + tn.note); return; } tnote.value = tn.note; tnote.dispatchEvent(new Event("input")); });
   return stray;
 }
-var cmdSel = null, bmentions = [], wpicks = [], wconsoles = [];
+var cmdSel = null, bmentions = [], closeRequests = [], wpicks = [], wconsoles = [];
+function validCloseRequests(list) { return Array.isArray(list) ? list : []; }
 function grow() {} function shiftMentions() {} function clearMentions() {} function setCommand() {}
 function validMentions() { return []; }
 function validPicks() { return []; } function validConsoles() { return []; }

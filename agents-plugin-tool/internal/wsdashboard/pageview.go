@@ -464,7 +464,8 @@ type ConvEntry struct {
 	// Mentions are the mention elements after that block (or opening the
 	// message), taken out of its text and shown as capsules after the
 	// answer capsules.
-	Mentions []wsinbox.Mention
+	Mentions      []wsinbox.Mention
+	CloseRequests []wsinbox.CloseRequest
 	// Picks and Consoles are the web card's pick and console elements after
 	// the mentions, taken out of its text and shown as capsules after them.
 	Picks    []wsinbox.Pick
