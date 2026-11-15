@@ -4,6 +4,10 @@ related:
   261114-refactor-ws-dashboard-whiteboard-asset-split: prerequisite; consume its landed move map before touching dashboard assets
   261115-feat-ws-dashboard-conversation-rendering-consolidation: coordinate; both change the user-bubble renderer, whichever lands second carries the envelope split into the other's renderer
   261115-feat-ws-whiteboard-topic-close-request: sibling; its close requests are delivered inside this envelope
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-design-reviewed: 462fc0e0aed0b002
+sage-review-completeness-reviewed: 462fc0e0aed0b002
 ---
 
 # Wrap every whiteboard-sent user message in a timestamped ws:user envelope
@@ -158,7 +162,7 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
 | scope.span | multi-file | agents-plugin-tool/internal/wsinbox/inbox.go; wsdashboard/inbox_routes.go, pageview_inbox.go and assets/dashboard.js, dashboard.tmpl under the same internal root; agents-plugin/rsrc/whiteboard/whiteboard.md and wsflow/Pi mirrors; wsi18n tables. |
 | scope.surface | public-interface | Phase 1 changes model-facing delivered text via Entry.Text() and the dashboard message request; agents-plugin-tool/internal/mcp/dashboard_inbox.go#L93-L119 exposes that text to adapters. |
 | scope.new_public_symbol | yes | New model-facing ws:user token and at attribute; no new MCP tool is proposed. |
-| scope.new_type_contract | yes | Proposed optional browser offset request/inbox field plus one minute-precision, offset-bearing envelope per item; field spelling and final grammar remain open in u4/u6/u7/u9. |
+| scope.new_type_contract | yes | Proposed optional browser offset request/inbox field plus one minute-precision, offset-bearing envelope per item; field spelling is the implementer's; grammar per the Decisions (offset field, reversible escaping, envelope-first split, T0). |
 | scope.test_surface | existing | agents-plugin-tool/internal/wsinbox/inbox_test.go, command_test.go, answers_test.go; internal/mcp/dashboard_inbox_test.go; internal/wsdashboard/inbox_routes_test.go and conversation_markdown_test.go; internal/wsi18n/keys_test.go; internal/wsrsrc/pi_mirror_test.go and wsflow_mirror_test.go. No tests run for fact population. |
 | complexity.reuse_points | confirmed | Read Entry.Text/Normalize/Send/Steer in agents-plugin-tool/internal/wsinbox/inbox.go#L331-L382 and #L688-L751; leading parsers in pageview_inbox.go#L101-L118; existing fmtTime/tickTimes in assets/dashboard.js#L35-L124 under internal/wsdashboard; mirror guards read. |
 | complexity.side_effect_risk | high | One shared serializer feeds Claude, Pi, MCP and hosted delivery; hosted batches may also contain unenveloped reports/mail (agents-plugin-tool/internal/wsagent/runner.go#L1880-L1884). |
@@ -171,7 +175,7 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
 
 ### Phase 1: Envelope, offset capture, block parsing and playbook
 
-Pending the queue above. Expected scope: browser offset field in
+Implement the Decisions above. Scope: browser offset field in
 `sendMessage()`; optional inbox field; envelope in `Entry.Text()`;
 envelope-first split in `pageview_inbox.go` and the `entry` template;
 playbook wording in the three copies; per-block time display per (889)

@@ -5,6 +5,10 @@ related:
   261115-feat-ws-whiteboard-topic-state-badge: coordinate; both edit the topic header action row (page.tmpl, page.css, cards.js decorate order)
   261114-refactor-ws-dashboard-whiteboard-asset-split: prerequisite; consume its landed move map before touching dashboard assets (pending 261114-refactor-ws-dashboard-whiteboard-asset-split)
   261115-feat-ws-dashboard-conversation-rendering-consolidation: coordinate; the delivered close-request capsule renders in the user bubble it rewrites (pending 261115-feat-ws-dashboard-conversation-rendering-consolidation)
+sage-review-design: completed
+sage-review-completeness: completed
+sage-review-completeness-reviewed: 74261bee3882af99
+sage-review-design-reviewed: 74261bee3882af99
 ---
 
 # Topic card x button attaches a close-topic request to the composer
@@ -144,21 +148,21 @@ Today (develop `883762d19`, paths under `agents-plugin-tool/internal/`):
 |---|---|---|
 | scope.span | multi-file | Phase 1 spans agents-plugin-tool/internal/wsdashboard/assets/cards.js and dashboard.js, wsinbox/inbox.go, conversation rendering, wsi18n/tables/*.json and agents-plugin/rsrc/whiteboard/whiteboard.md plus wsflow/Pi mirrors. Consume the pending asset-split move map before editing. |
 | scope.surface | public-interface | Proposed optional closeRequests HTTP/inbox field and delivered wb:close-request tag cross the browser, daemon, conversation view and agent/playbook boundary; current request is agents-plugin-tool/internal/wsdashboard/inbox_routes.go#L82-L104. |
-| scope.new_public_symbol | unknown | An optional exported Entry field is expected, but c1 is open and no Go field/type or new exported helper name is settled. |
-| scope.new_type_contract | yes | Proposed closeRequests: [{topic, reason}] and wb:close-request tag body carrying each capsule's reason; owner (892)=a is recorded in c896bd117, while c1/c8 remain open. |
+| scope.new_public_symbol | unknown | An optional exported Entry field is expected, but the Go field/type name is the implementer's. |
+| scope.new_type_contract | yes | Proposed closeRequests: [{topic, reason}] and wb:close-request tag body carrying each capsule's reason; owner (892)=a and the settled Decisions fix the shape. |
 | scope.test_surface | existing | agents-plugin-tool/internal/wsinbox/mentions_test.go, wsdashboard/cards_test.go, topicnote_chip_test.go, inbox_routes_test.go, pageview_inbox_test.go, wsi18n/keys_test.go and wsrsrc/{wsflow_mirror,pi_mirror}_test.go provide adjacent tests; no new test file is mandated. Static inspection only; no tests run. |
 | complexity.reuse_points | confirmed | Read decorate/ibtn (agents-plugin-tool/internal/wsdashboard/assets/cards.js#L85-L92, #L523-L548), renderChips/sendMessage and draft read/restore (assets/dashboard.js#L1581-L1640, #L2518-L2559, #L8826-L8900), Entry.Text/MentionBlock and achips/splitUserEntries. Both whiteboard playbook mirrors compare byte-identical. |
 | complexity.side_effect_risk | moderate | Header reconciliation, focus, async send completion and persisted drafts share existing state owners; serialization and steering rewrite persistent inbox entries (agents-plugin-tool/internal/wsinbox/inbox.go#L380-L382, #L692-L749). No browser-side workflow close is authorized. |
 | risk.correctness | high | Empty-reason attachment-only sends must count as content, dedupe must survive draft/send/refresh races, and all normalize/cancel/steer/drain paths must preserve requests; existing Normalize constructs a fresh Entry (agents-plugin-tool/internal/wsinbox/inbox.go#L378-L382). Envelope Phase 1 is unlanded. |
 | risk.fit | moderate | Reuse renderer-owned topic nodes, dashboard-only decorate and the shared server serializer; c3 assumes a neighboring document disclosure absent from the dashboard (agents-plugin-tool/internal/wswhiteboard/assets/page.tmpl#L40-L46). Header-badge and asset-split coordination remains outstanding. |
 | risk.test | high | Adjacent Node/Go fixtures do not prove the new attachment lifecycle, capsule reason focus or responsive header geometry; Phase 1 leaves exact focused commands and browser fixtures to promotion, and the envelope/split/conversation consumers are still pending. |
-| risk.security_or_contract | high | New user-request markup can prompt workflow closure: preserve topic/reason escaping, session-bound attachments, no-op/open-work semantics and inbox rewrite fields; T0 is proposed in c8, not yet settled. Existing escaping is agents-plugin-tool/internal/wsinbox/mentions.go#L43-L63. |
+| risk.security_or_contract | high | New user-request markup can prompt workflow closure: preserve topic/reason escaping, session-bound attachments, no-op/open-work semantics and inbox rewrite fields; T0 is settled in Decisions. Existing escaping is agents-plugin-tool/internal/wsinbox/mentions.go#L43-L63. |
 
 ## Phases
 
 ### Phase 1: Header x, close-request capsule, delivery and playbook
 
-Pending the queue above and the envelope ticket's Phase 1. Expected scope:
+Implement the Decisions above after the envelope ticket's Phase 1 lands. Scope:
 `decorate()` button and i18n keys; capsule state with its own reason
 field ((892)=a), dedupe, removal, draft
 persistence and send field in `dashboard.js`; optional inbox field and
