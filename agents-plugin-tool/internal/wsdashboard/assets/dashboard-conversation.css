@@ -113,6 +113,7 @@
 /* Display-only conversation projections; board/composer component rules stay with their owners. */
 .mail-notification, .input-record, .wake-card.child-report { align-self: stretch; min-width: 0; padding: 7px 10px; border: 1px solid var(--wb-line); border-radius: 7px; background: var(--wb-card); }
 .input-record { border-style: dashed; }
+.input-record .bub { white-space: pre-wrap; overflow-wrap: anywhere; }
 .mail-notification .wake-head, .input-record .wake-head, .child-report .wake-head { flex-wrap: wrap; overflow-wrap: anywhere; }
 .mail-notification .wake-head .t, .input-record .wake-head .t, .child-report .wake-head .t { margin-left: auto; }
 .child-report .wake-caption { white-space: normal; overflow-wrap: anywhere; }
@@ -121,6 +122,12 @@
 .delivery-details .wake-body { max-width: 100%; padding: 8px 10px; border: 1px solid var(--wb-line); border-radius: 6px; color: var(--wb-muted-fg); background: var(--wb-bg); font: 11px/1.5 var(--wb-mono); }
 .delivery-meta { margin-top: 4px; overflow-wrap: anywhere; }
 .src.peer-lead { color: var(--wb-ck-ok); background: color-mix(in srgb, var(--wb-ck-ok) 14%, transparent); }
+.mail-block { min-width: 0; }
+.mail-delivery { margin: 1px 8px 0 22px; }
+.mailline:has(.peer-lead) > summary { flex-wrap: wrap; }
+.mailline:has(.peer-lead) .mpeer { max-width: 100%; overflow-wrap: anywhere; }
+.mailline:has(.peer-lead) .mfirst { flex-basis: 12em; }
+.wbupdate-topic[data-wb-topic] { cursor: pointer; }
 /* Higher specificity keeps the legacy effects frame from nesting full topic cards in a summary. */
 .wbeffects.wbupdate { align-self: stretch; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; }
 .wbupdate-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 0 4px 5px; font-size: 11px; color: var(--wb-muted-fg); }
