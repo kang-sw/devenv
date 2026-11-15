@@ -7,6 +7,7 @@ sage-review-design: completed
 sage-review-completeness: completed
 sage-review-design-reviewed: 6067d356afc40d52
 sage-review-completeness-reviewed: 6067d356afc40d52
+completed: 2026-11-15
 ---
 
 # Teach supported reviewer wrappers to bounded delegates
@@ -78,3 +79,12 @@ Grounded implementation paths and reuse points:
 ### Phase 1: Name the supported reviewer dispatch in bounded-delegate guidance
 
 Add the existing full-scope and partition wrapper mapping to the bounded delegate floor and Pi Lead Guide, conditional on an assignment requiring independent review. State the flat include is not a delegated target. Reuse the existing exact findings-file grant guidance rather than changing admission or adding a new review policy. Regenerate the normal wsflow/Pi mirrors and resource manifests. Add focused regression coverage for the mapping, include exclusion, unchanged review-allocation boundary and mirror alignment; preserve existing admission tests without changing their expectations. Record the guidance delta and focused verification.
+
+### Result (887ec1022) - 2026-11-15
+
+- Added assignment-conditional dispatch to the canonical delegate floor and Pi Lead Guide: `reviewer` for one full-scope reviewer, or the existing correctness/fit/test wrappers for selected partitions. Both identify `code-reviewer` as a shared include rather than a delegated role. Review allocation remains assignment-owned; the Pi guide points to existing findings-file grant guidance without duplicating it.
+- Regenerated the canonical resource manifest and wsflow mirror, and synchronized the Pi floor and manifest. Added rendered ws/wsflow assertions and a dependency-free Pi guide test. Replaced the source guard forbidding all review vocabulary with assertions for conditional dispatch; adapter admission and grant tests and their expectations remain unchanged.
+- Verification at implementation checkpoint: focused MCP delegate-plan, lead-delegate and ticket-worker render tests passed; shipped manifest and wsflow/Pi mirror guards passed; Python dispatch-contract tests passed (18); Pi Lead Guide test passed (1). Go checks used isolated HOME/config/cache/runtime fixtures, warm build/module caches, and `GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local`.
+- The lead integrated current develop `ec869a2fc704862c883a2045b37041dbee5b2d89` conflict-free at `a95dcc1484fdd383a8d24ce53f86aa7069d783df`. An empty integration diff for the guidance, focused regressions, resource trees, mirror guards and Go dependency declarations preserves the earlier non-MCP evidence. Shared MCP implementation changed, so reran only `go test ./internal/mcp -count=1 -run '^(TestPlaybookRenderDelegateImplementer.*|TestLeadDelegateReadContract|TestPlaybookRenderGoldenTicketWorker)$'` after integration: passed.
+- Automatic routing allocated `lite` (`need_review=true`, `review-override=auto`, `review-phase=lite`) despite the approved guidance-only posture. After stop (b), the lead authorized the same-agent bounded continuation without review, rerouting, configuration changes or route-policy edits, accepted the implementation, and completed a documentation self-skim. No runtime/API/admission/grant changes, broad tests or live/provider/network checks were made for this ticket.
+- Unresolved: none. Omitted: independent implementation review per the approved assignment; unchanged-input checks were not repeated after integration.
