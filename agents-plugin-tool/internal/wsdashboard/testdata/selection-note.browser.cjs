@@ -112,7 +112,7 @@ async function select(page, start, end = start) {
       // Establish a native document selection before extending it with keys;
       // programmatic collapse on a non-editable paragraph is not a caret.
       await page.locator('#quote-next').click({ clickCount: 2, position: { x: 10, y: 10 } });
-      await tab.keyboard.press('Shift+End');
+      for (let i = 0; i < ' immutable quote'.length; i++) await tab.keyboard.press('Shift+ArrowRight');
       await input.waitFor({ state: 'visible' });
       assert.equal(await input.inputValue(), '');
       await attach.click();

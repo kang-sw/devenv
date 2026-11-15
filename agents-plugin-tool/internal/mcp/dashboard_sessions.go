@@ -21,6 +21,7 @@ import (
 	"github.com/kang-sw/devenv/internal/wsgit"
 	"github.com/kang-sw/devenv/internal/wslive"
 	"github.com/kang-sw/devenv/internal/wsmailbox"
+	"github.com/kang-sw/devenv/internal/wswhiteboard"
 )
 
 // The ws-mcp side of the dashboard session index: registering the top-level
@@ -678,6 +679,8 @@ type DashboardSessionSource struct {
 
 	// boards memoizes each session's board render (dashboard_page.go).
 	boards boardMemo
+	// folders reuses unchanged authoritative boards on non-board wakes.
+	folders wswhiteboard.FolderCache
 	// records, replies, scopes, and snapshots serve the unchanged files a
 	// re-read and a page read read again and again, each costing a stat
 	// (wsdashboard.FileCache): the session record's part files (with their
@@ -739,6 +742,9 @@ func (src *DashboardSessionSource) ForgetSession(replyID string) {
 	src.boards.forget(replyID)
 	if d, err := src.store.dirs(); err == nil {
 		for _, key := range keys {
+			if identity, _, err := loadRecordWith(d, key, partKey, nil, src.readRecordFile); err == nil {
+				src.folders.Forget(whiteboardFolder(identity.Root, key).Dir)
+			}
 			src.records.ForgetUnder(d.keyDir(key))
 			src.records.ForgetUnder(d.legacyPath(key))
 		}
@@ -898,7 +904,7 @@ func (src *DashboardSessionSource) lookupRecord(reg wsdashboard.Registration) (k
 				return "", nil, sessionRecord{}, false, nil
 			}
 			var buf bytes.Buffer
-			record, _, err := loadRecordWith(d, key, partAll, &buf, src.readRecordFile)
+			record, _, err := loadRecordWithBoard(d, key, partAll, &buf, src.readRecordFile, src.openWhiteboard)
 			if err != nil {
 				if errors.Is(err, errSessionUnreadable) || !errors.Is(err, errSessionNotFound) {
 					readErr = err

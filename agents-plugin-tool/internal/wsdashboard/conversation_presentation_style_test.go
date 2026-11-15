@@ -24,7 +24,8 @@ func TestConversationPresentationStyleContract(t *testing.T) {
 	section := css[start:end]
 	for _, want := range []string{
 		".mail-notification", ".input-record { border-style: dashed; }",
-		".wake-card.child-report", "summary.conv-row::-webkit-details-marker { display: none; }",
+		".mailline.child-report", ".mailline.child-report .mfirst { margin-left: 0; }",
+		"summary.conv-row::-webkit-details-marker { display: none; }",
 		"grid-template-columns: 28px minmax(0, 1fr) 44px 18px; column-gap: 8px;",
 		"font: 13px/1.5 system-ui", ".conv-row > .row-content",
 		".conv-row > .row-time { text-align: right;", "font-variant-numeric: tabular-nums;",

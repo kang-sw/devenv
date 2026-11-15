@@ -1879,6 +1879,7 @@
   "composer.cmd.remove": "remover o comando",
   "entry.command.terminal": "sem saída de texto: abre no terminal",
   "entry.board.nudge": "Lembrete do quadro · {0}: {1}",
+  "entry.board.nudge.batch": "Lembrete do quadro · {0} · {1} mensagens: {2}",
   "entry.board.nudge.overdue": "Prazo vencido",
   "entry.board.nudge.unblocked": "Desbloqueado",
   "entry.board.nudge.hourly": "Verificação por hora",
