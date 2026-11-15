@@ -179,7 +179,14 @@
       "registered_at": "2026-11-13T08:05:31Z"
     },
     "261113-feat-ws-dashboard-hosted-claude-stream-agent-messages": {
-      "registered_at": "2026-11-13T10:22:34Z"
+      "registered_at": "2026-11-13T10:22:34Z",
+      "lease": {
+        "email": "ki6080@gmail.com",
+        "clone_id": "6b8c3f740994ed3b",
+        "track": "exec4/hosted-claude-stream",
+        "phase": "closed",
+        "touched_at": "2026-11-15T14:19:44Z"
+      }
     },
     "261113-feat-ws-dashboard-session-four-state-lifecycle": {
       "registered_at": "2026-11-13T10:12:43Z",
