@@ -17,8 +17,9 @@ type fenceClose struct{ start, end, run int }
 // candidates never rescan every remaining line, and span lookup never rescans
 // unmatched backtick runs. The max tree finds the next long-enough fence.
 type literalIndex struct {
-	spans  map[int][]codeRun
-	fences map[fenceKey]*fenceIndex
+	spans    map[int][]codeRun
+	fences   map[fenceKey]*fenceIndex
+	newlines []int
 }
 type fenceIndex struct {
 	closes []fenceClose
@@ -79,6 +80,7 @@ func indexLiterals(s string) *literalIndex {
 		if end == len(s) {
 			break
 		}
+		out.newlines = append(out.newlines, end)
 		start = end + 1
 	}
 	for _, f := range out.fences {
@@ -122,61 +124,111 @@ func (f *fenceIndex) next(after, run int) int {
 	return 0
 }
 
-// A candidate may quote enclosing closing tags, but cannot end partway through
-// a following command/group/operand. Complete balanced examples remain inert.
-// Return the first enclosing close on rejection, so subsequent candidates in
-// this body can be bounded without rescanning the same following commands.
-func codeBodyBoundary(code, closing string, grammar *Grammar, fields []string) int {
-	first := -1
-	var pending []literalFrame
-	for pos := 0; pos < len(code); {
-		next := strings.IndexByte(code[pos:], '<')
+// firstBodyClose does no tag or quote lexing: only CDATA can hide the exact
+// close of a raw body. In particular, an HTML quote cannot cross that close.
+func firstBodyClose(s string, at, end int, closing string) int {
+	for at < end {
+		next := strings.IndexByte(s[at:end], '<')
 		if next < 0 {
 			break
 		}
-		pos += next
-		rest := code[pos:]
-		if strings.HasPrefix(rest, "<![CDATA[") {
-			if end := strings.Index(rest[9:], "]]>"); end >= 0 {
-				pos += 9 + end + 3
-				continue
-			}
+		at += next
+		if strings.HasPrefix(s[at:], closing) {
+			return at
 		}
-		if first < 0 && strings.HasPrefix(rest, closing) {
-			first = pos
-			pos += len(closing)
+		if strings.HasPrefix(s[at:], "<![CDATA[") {
+			stop := strings.Index(s[at+9:], "]]>")
+			if stop < 0 {
+				return -1
+			}
+			at += 9 + stop + 3
+		} else {
+			at++
+		}
+	}
+	return -1
+}
+
+// Walk the fallback interpretation (the enclosing body ended at first).
+// Accept only an end in enclosing-level text. Raw frames share readContent's
+// matcher: if a frame's candidate crosses its own close, reject immediately
+// rather than assuming that close ends the frame, or recursively walking it.
+// Thus a long walk stops at the next body that could originate a long walk.
+func (t *tokenizer) codeBodyBoundary(first, end int, closing string, fields []string) bool {
+	var pending []literalFrame
+	for pos := first + len(closing); pos < end; {
+		rest := t.s[pos:]
+		if strings.HasPrefix(rest, "<![CDATA[") {
+			stop := strings.Index(rest[9:], "]]>")
+			if stop < 0 || pos+9+stop+3 > end {
+				return false
+			}
+			next := pos + 9 + stop + 3
+			if len(pending) > 0 && pending[len(pending)-1].raw {
+				if nl := strings.LastIndexByte(t.s[pos:next], '\n'); nl >= 0 {
+					pending[len(pending)-1].lineStart = pos + nl + 1
+				}
+			}
+			pos = next
 			continue
 		}
 		if len(pending) > 0 {
-			top := pending[len(pending)-1]
+			top := &pending[len(pending)-1]
 			endTag := "</" + top.tag + ">"
 			if strings.HasPrefix(rest, endTag) {
-				pending = pending[:len(pending)-1]
 				pos += len(endTag)
+				pending = pending[:len(pending)-1]
 				continue
 			}
-			// A field/leaf body ends only at its own close. In particular,
-			// literal parent closes in raw fields cannot pop a container.
-			if top.raw && (top.wrapper == "" || !openingTagPrefix(rest, top.wrapper)) {
-				pos++
-				continue
+			if top.raw {
+				if rest[0] == '`' || rest[0] == '~' {
+					candidate := t.matchCodeLiteral(pos, top.bodyStart, top.lineStart, endTag, len(t.s))
+					if candidate > pos {
+						if top.ownClose == 0 {
+							top.ownClose = firstBodyClose(t.s, pos, len(t.s), endTag)
+						}
+						if top.ownClose < 0 || candidate > top.ownClose {
+							return false
+						}
+						// Only scan non-crossing candidates. Expanding CDATA
+						// before this check would rescan entire later-body chains.
+						candidate = literalConsumedEnd(t.s, pos, candidate)
+						if candidate > top.ownClose || candidate > end {
+							return false
+						}
+						if nl := strings.LastIndexByte(t.s[pos:candidate], '\n'); nl >= 0 {
+							top.lineStart = pos + nl + 1
+						}
+						pos = candidate
+						continue
+					}
+				}
+				if top.wrapper == "" || !openingTagPrefix(rest, top.wrapper) {
+					if rest[0] == '\n' {
+						top.lineStart = pos + 1
+					}
+					pos++
+					continue
+				}
 			}
 		}
+		if rest[0] != '<' {
+			pos++
+			continue
+		}
 		nameEnd := pos + 1
-		for nameEnd < len(code) && isNameByte(code[nameEnd]) {
+		for nameEnd < len(t.s) && isNameByte(t.s[nameEnd]) {
 			nameEnd++
 		}
 		if nameEnd == pos+1 {
 			pos++
 			continue
 		}
-		name := code[pos+1 : nameEnd]
-		frame, known := literalCommand(grammar, name)
+		name := t.s[pos+1 : nameEnd]
+		frame, known := literalCommand(t.grammar, name)
 		if len(pending) > 0 {
 			top := pending[len(pending)-1]
 			if !top.group {
-				// Container children (including rejected unknown fields) are
-				// raw fields. A wrapper itself is the one nested container.
 				frame, known = literalFrame{tag: name, raw: !top.raw}, true
 			} else if !known {
 				frame, known = literalFrame{tag: name, raw: true}, true
@@ -184,35 +236,51 @@ func codeBodyBoundary(code, closing string, grammar *Grammar, fields []string) i
 		} else if slices.Contains(fields, name) {
 			frame, known = literalFrame{tag: name, raw: true}, true
 		}
-		limit := len(code)
+		limit := end
 		if !known {
 			limit = min(limit, pos+256)
 		}
-		end, selfClosing, complete := literalTagEnd(code, nameEnd, limit)
-		if first >= 0 && known {
-			if !complete {
-				return first
+		stop, selfClosing, complete := literalTagEnd(t.s, nameEnd, limit)
+		if !complete {
+			if known {
+				return false
 			}
-			if !selfClosing {
-				pending = append(pending, frame)
-			}
-		}
-		if complete {
-			pos = end
-		} else {
 			pos = nameEnd
+			continue
 		}
+		if !selfClosing {
+			frame.bodyStart, frame.lineStart = stop, stop
+			pending = append(pending, frame)
+		}
+		pos = stop
 	}
-	if len(pending) > 0 {
-		return first
+	return len(pending) == 0
+}
+
+// Match the body reader's CDATA-before-literal dispatch, including a span
+// whose closing delimiter is inside a CDATA section. Never resume inside it.
+func literalConsumedEnd(s string, at, end int) int {
+	for at < end {
+		next := strings.Index(s[at:end], "<![CDATA[")
+		if next < 0 {
+			break
+		}
+		at += next + 9
+		stop := strings.Index(s[at:], "]]>")
+		if stop < 0 {
+			return len(s)
+		}
+		at += stop + 3
+		end = max(end, at)
 	}
-	return -1
+	return end
 }
 
 type literalFrame struct {
-	tag        string
-	raw, group bool
-	wrapper    string
+	tag                            string
+	raw, group                     bool
+	wrapper                        string
+	bodyStart, lineStart, ownClose int
 }
 
 func literalCommand(g *Grammar, name string) (literalFrame, bool) {
@@ -234,28 +302,70 @@ func literalTagEnd(s string, afterName, limit int) (end int, selfClosing, comple
 	if afterName >= limit || !isSpace(s[afterName]) && s[afterName] != '>' && s[afterName] != '/' {
 		return afterName, false, false
 	}
-	var quote byte
-	for pos := afterName; pos < limit; pos++ {
-		c := s[pos]
-		if quote != 0 {
-			if c == quote {
-				quote = 0
-			}
-		} else {
-			switch c {
-			case '\'', '"':
-				quote = c
-			case '<':
-				return pos, false, false
-			case '>':
-				return pos + 1, pos > afterName && s[pos-1] == '/', true
-			}
+	// readOpen's syntax without attribute allocation or diagnostic line scans.
+	pos := afterName
+	for pos < limit {
+		for pos < limit && isSpace(s[pos]) {
+			pos++
 		}
+		if pos == limit {
+			break
+		}
+		if s[pos] == '>' {
+			return pos + 1, false, true
+		}
+		if s[pos] == '/' {
+			if pos+1 < limit && s[pos+1] == '>' {
+				return pos + 2, true, true
+			}
+			break
+		}
+		start := pos
+		for pos < limit && isNameByte(s[pos]) {
+			pos++
+		}
+		if pos == start {
+			break
+		}
+		for pos < limit && isSpace(s[pos]) {
+			pos++
+		}
+		if pos == limit || s[pos] != '=' {
+			break
+		}
+		pos++
+		for pos < limit && isSpace(s[pos]) {
+			pos++
+		}
+		if pos == limit || s[pos] != '\'' && s[pos] != '"' {
+			break
+		}
+		quote := s[pos]
+		stop := strings.IndexByte(s[pos+1:limit], quote)
+		if stop < 0 {
+			break
+		}
+		pos += stop + 2
 	}
-	return limit, false, false
+	return pos, false, false
 }
 
 func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string, fields []string, limit *int) int {
+	end := t.matchCodeLiteral(at, bodyStart, lineStart, closing, *limit)
+	if end <= at || end > *limit {
+		return at
+	}
+	first := firstBodyClose(t.s, at, end, closing)
+	if first >= 0 && !t.codeBodyBoundary(first, end, closing, fields) {
+		*limit = min(*limit, first)
+		return at
+	}
+	return end
+}
+
+// Candidate matching is shared by the body reader and fallback walk. The
+// lazily built index contains positions only, never boundary-policy decisions.
+func (t *tokenizer) matchCodeLiteral(at, bodyStart, lineStart int, closing string, limit int) int {
 	mark := t.s[at]
 	if mark != '`' && mark != '~' || at > bodyStart && t.s[at-1] == mark {
 		return at
@@ -264,31 +374,22 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 	for at+run < len(t.s) && t.s[at+run] == mark {
 		run++
 	}
-	withinBody := func(end int) int {
-		if end <= at || end > *limit {
-			return at
-		}
-		if boundary := codeBodyBoundary(t.s[at:end], closing, t.grammar, fields); boundary >= 0 {
-			*limit = min(*limit, at+boundary)
-			return at
-		}
-		return end
-	}
 	indent := t.s[lineStart:at]
 	if run >= 3 && len(indent) <= 3 && strings.Trim(indent, " ") == "" {
-		if newline := strings.IndexByte(t.s[at+run:], '\n'); newline >= 0 {
-			infoEnd := at + run + newline
+		if t.literals == nil {
+			t.literals = indexLiterals(t.s)
+		}
+		nextLine := sort.SearchInts(t.literals.newlines, at+run)
+		if nextLine < len(t.literals.newlines) {
+			infoEnd := t.literals.newlines[nextLine]
 			if mark != '`' || !strings.ContainsRune(t.s[at+run:infoEnd], '`') {
-				if t.literals == nil {
-					t.literals = indexLiterals(t.s)
-				}
 				end := t.literals.fences[fenceKey{mark, ""}].next(infoEnd+1, run)
 				framed := t.literals.fences[fenceKey{mark, closing}].next(infoEnd+1, run)
 				if end == 0 || framed != 0 && framed < end {
 					end = framed
 				}
 				if end != 0 {
-					return withinBody(end)
+					return end
 				}
 			}
 		}
@@ -306,7 +407,7 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 	// Short, ordinary code spans need no input-wide index or allocations.
 	// Cap this direct probe so many unmatched runs still have bounded cost.
 	if t.literals == nil {
-		window := min(len(t.s), at+run+256, *limit)
+		window := min(len(t.s), at+run+256, limit)
 		for pos := at + run; pos < window; {
 			next := strings.IndexByte(t.s[pos:window], '`')
 			if next < 0 {
@@ -318,11 +419,11 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 				end++
 			}
 			if end-pos == run {
-				return withinBody(end)
+				return end
 			}
 			pos = end
 		}
-		if window == len(t.s) || window == *limit {
+		if window == len(t.s) || window == limit {
 			return at
 		}
 		t.literals = indexLiterals(t.s)
@@ -330,7 +431,7 @@ func (t *tokenizer) codeLiteralEnd(at, bodyStart, lineStart int, closing string,
 	runs := t.literals.spans[run]
 	i := sort.Search(len(runs), func(i int) bool { return runs[i].start > at })
 	if i < len(runs) {
-		return withinBody(runs[i].end)
+		return runs[i].end
 	}
 	return at
 }

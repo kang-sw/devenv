@@ -595,9 +595,18 @@ type tokenizer struct {
 	literalCode bool
 	grammar     *Grammar
 	literals    *literalIndex
+	linePos     int
+	lineCount   int
 }
 
 func (t *tokenizer) lineAt(i int) int {
+	// Normal reading asks about monotonically increasing source positions.
+	// Count each intervening byte once, not the entire command prefix per body.
+	if i >= t.linePos {
+		t.lineCount += strings.Count(t.s[t.linePos:i], "\n")
+		t.linePos = i
+		return t.lineCount + 1
+	}
 	return strings.Count(t.s[:i], "\n") + 1
 }
 
@@ -828,7 +837,10 @@ func (t *tokenizer) readContent(name string, from int, decode bool, fields bodyF
 					}
 					if end > 1 {
 						var quote byte
-						for ; end < len(rest); end++ {
+						// A rejected literal candidate established the fallback
+						// close. Rejected-group tag probes cannot quote past it.
+						probeLimit := min(len(rest), literalLimit-t.i)
+						for ; end < probeLimit; end++ {
 							c := rest[end]
 							if quote != 0 {
 								if c == quote {
