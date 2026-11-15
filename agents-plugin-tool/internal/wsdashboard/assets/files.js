@@ -325,7 +325,7 @@
     rootChoices = []; paintRootChoices();
     if (!local() || directoriesOnly) return;
     // Suggestions are session-scoped, never scoped to the active alternate root.
-    fsGet("roots", {}).then(function (a) {
+    fsGet("worktrees", {}).then(function (a) {
       if (destroyed || attempt !== rootsAttempt || pop !== ui.rootPop || !local()) return;
       rootChoices = Array.isArray(a.roots) ? a.roots : [];
       paintRootChoices();

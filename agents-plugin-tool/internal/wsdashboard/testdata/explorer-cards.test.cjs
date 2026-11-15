@@ -36,7 +36,7 @@ function fixture(store) {
   function save(k, v) { if (v === null) delete store[k]; else store[k] = v; }
   function fetchFS(url) {
     requests.push(url); var u = new URL(url, 'http://fixture.invalid'), root = u.searchParams.get('root') || '/session', dir = u.searchParams.get('dir') || '';
-    if (u.pathname.endsWith('/fs/roots')) return Promise.resolve({ ok: true, json: () => ({ roots: [{ path: '/session', branch: 'main', detached: false }, { path: '/other', branch: 'work', detached: false }] }) });
+    if (u.pathname.endsWith('/fs/worktrees')) return Promise.resolve({ ok: true, json: () => ({ roots: [{ path: '/session', branch: 'main', detached: false }, { path: '/other', branch: 'work', detached: false }] }) });
     return Promise.resolve({ ok: true, json: () => ({ root, abs: root + (dir ? '/' + dir : ''), name: root.split('/').pop(), session: root === '/session', sep: '/', entries: dir ? [{ name: 'child.go' }] : [{ name: 'src', dir: true }, { name: 'main.go' }, { name: 'space name.png' }] }) });
   }
   new Function('document', 'window', 'wsT', 'getComputedStyle', 'requestAnimationFrame', CARDS)(doc, win, wsT, () => ({ overflowY: 'visible' }), () => {});

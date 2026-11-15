@@ -17,7 +17,7 @@ type fsRootsAnswer struct {
 	Roots []fsRootChoice `json:"roots"`
 }
 
-// GET /s/<reply-id>/fs/roots lists the session root followed by its repository's
+// GET /s/<reply-id>/fs/worktrees lists the session root followed by its repository's
 // other worktrees. Read the source directly: the rail's cache is populated only
 // while a rail stream is open, whereas an explorer can be used independently.
 func (d *Daemon) handleFSRoots(w http.ResponseWriter, r *http.Request, replyID string) {

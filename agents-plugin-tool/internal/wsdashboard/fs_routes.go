@@ -22,7 +22,7 @@ import (
 // The file browser routes: the session page's Files tab lists a folder and
 // its preview cards show a file, read-only.
 //
-//	GET  /s/<reply-id>/fs/roots                          session/worktree root suggestions (local only)
+//	GET  /s/<reply-id>/fs/worktrees                      session/worktree root suggestions (local only)
 //	GET  /s/<reply-id>/fs/list?dir=<dir>[&root=<abs>]     one directory's entries
 //	GET  /s/<reply-id>/fs/preview?path=<p>[&root=<abs>]   what a preview card shows (text=1: as plain text)
 //	GET  /s/<reply-id>/fs/raw?path=<p>[&root=<abs>]       image, video, or PDF bytes
@@ -454,7 +454,7 @@ func (d *Daemon) handleFSRoutes(w http.ResponseWriter, r *http.Request, replyID,
 		return
 	}
 	switch {
-	case sub == "roots":
+	case sub == "worktrees":
 		d.handleFSRoots(w, r, replyID)
 	case sub == "list":
 		d.handleFSList(w, r, replyID)

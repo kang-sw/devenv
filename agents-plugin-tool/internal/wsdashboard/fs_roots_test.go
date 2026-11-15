@@ -48,7 +48,7 @@ func TestFSRootsSessionFirstAndWorktreeFields(t *testing.T) {
 	}
 	// No rail stream has ever opened. An alternate root parameter must not
 	// change which session repository supplies the suggestions.
-	rec := serve(f.d, local, http.MethodGet, "/s/livesession/fs/roots?root="+url.QueryEscape(detached), "")
+	rec := serve(f.d, local, http.MethodGet, "/s/livesession/fs/worktrees?root="+url.QueryEscape(detached), "")
 	var a fsRootsAnswer
 	if err := json.Unmarshal(rec.Body.Bytes(), &a); rec.Code != http.StatusOK || err != nil {
 		t.Fatalf("roots = %d %s (%v)", rec.Code, rec.Body.String(), err)
@@ -77,12 +77,12 @@ func TestFSRootsRefuseBeforeEnumeration(t *testing.T) {
 		name, peer, host, site, path string
 		cookie                       string
 	}{
-		{"LAN token", lan.peer, lan.host, "", "/s/livesession/fs/roots", lan.cookie},
-		{"loopback peer with LAN host", local.peer, lan.host, "", "/s/livesession/fs/roots", lan.cookie},
-		{"LAN peer with loopback host", lan.peer, local.host, "", "/s/livesession/fs/roots", lan.cookie},
-		{"cross-site", local.peer, local.host, "cross-site", "/s/livesession/fs/roots", ""},
-		{"same-site", local.peer, local.host, "same-site", "/s/livesession/fs/roots", ""},
-		{"unknown session", local.peer, local.host, "", "/s/nosuchsession/fs/roots", ""},
+		{"LAN token", lan.peer, lan.host, "", "/s/livesession/fs/worktrees", lan.cookie},
+		{"loopback peer with LAN host", local.peer, lan.host, "", "/s/livesession/fs/worktrees", lan.cookie},
+		{"LAN peer with loopback host", lan.peer, local.host, "", "/s/livesession/fs/worktrees", lan.cookie},
+		{"cross-site", local.peer, local.host, "cross-site", "/s/livesession/fs/worktrees", ""},
+		{"same-site", local.peer, local.host, "same-site", "/s/livesession/fs/worktrees", ""},
+		{"unknown session", local.peer, local.host, "", "/s/nosuchsession/fs/worktrees", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
@@ -112,7 +112,7 @@ func TestFSRootsFallbackAndDirectoryValidity(t *testing.T) {
 				}
 			})
 			local, _ := fsViewers(t, f)
-			rec := serve(f.d, local, http.MethodGet, "/s/livesession/fs/roots", "")
+			rec := serve(f.d, local, http.MethodGet, "/s/livesession/fs/worktrees", "")
 			var a fsRootsAnswer
 			if err := json.Unmarshal(rec.Body.Bytes(), &a); rec.Code != http.StatusOK || err != nil ||
 				!reflect.DeepEqual(a.Roots, []fsRootChoice{{Path: filepath.ToSlash(f.project)}}) {
